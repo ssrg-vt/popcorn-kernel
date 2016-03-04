@@ -21,3 +21,5 @@ obj-$(CONFIG_PCIE_IPROC_BCMA) += pcie-iproc-bcma.o
 obj-$(CONFIG_PCIE_ALTERA) += pcie-altera.o
 obj-$(CONFIG_PCIE_ALTERA_MSI) += pcie-altera-msi.o
 obj-$(CONFIG_PCI_HISI) += pcie-hisi.o
+obj-$(CONFIG_PCIE_QCOM) += pcie-qcom.o
+obj-$(CONFIG_PCI_HOST_THUNDER_PEM) += pci-thunder-pem.o
