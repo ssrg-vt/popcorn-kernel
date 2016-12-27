@@ -1,0 +1,102 @@
+/*
+ * process_server_macro.h
+ *
+ *  Created on: Jun 13, 2014
+ *      Author: marina
+ */
+
+#ifndef PROCESS_SERVER_MACRO_H_
+#define PROCESS_SERVER_MACRO_H_
+
+#if 0
+#define PROCESS_SERVER_CLONE_SUCCESS 0
+#define PROCESS_SERVER_CLONE_FAIL 1
+
+#define REPLICATION_STATUS_VALID 3
+#define REPLICATION_STATUS_WRITTEN 1
+#define REPLICATION_STATUS_INVALID 2
+#define REPLICATION_STATUS_NOT_REPLICATED 0
+
+#define VMA_OP_NOP 0
+#define VMA_OP_UNMAP 1
+#define VMA_OP_PROTECT 2
+#define VMA_OP_REMAP 3
+#define VMA_OP_MAP 4
+#define VMA_OP_BRK 5
+
+#define VMA_OP_SAVE -70
+#define VMA_OP_NOT_SAVE -71
+
+#define EXIT_ALIVE 0
+#define EXIT_THREAD 1
+#define EXIT_PROCESS 2
+#define EXIT_FLUSHING 3
+#define EXIT_NOT_ACTIVE 4
+
+#define NOT_REPLICATED_VMA_MANAGEMENT 1
+
+#define FOR_2_KERNELS 1
+#define DIFF_PAGE 0
+
+#if !FOR_2_KERNELS
+#undef DIFF_PAGE
+#define DIFF_PAGE 0
+#endif
+
+#define SUPPORT_FOR_CLUSTERING
+
+#define MIGRATE_FPU 0
+
+#endif
+//#define MAX_KERNEL_IDS NR_CPUS
+#define MAX_KERNEL_IDS 2
+
+/**
+ * Use the preprocessor to turn off printk.
+ */
+#define MIGRATION_PROFILE	1
+#define PROCESS_SERVER_VERBOSE  0
+#define PROCESS_SERVER_VMA_VERBOSE 0
+#define PROCESS_SERVER_NEW_THREAD_VERBOSE 0
+#define PROCESS_SERVER_MINIMAL_PGF_VERBOSE 0
+
+#define READ_PAGE 0
+#define PAGE_ADDR 0
+
+#define CHECKSUM 0
+#define STATISTICS 0
+
+#if PROCESS_SERVER_VERBOSE
+#define PSPRINTK(...) printk(__VA_ARGS__)
+#undef STATISTICS
+#define STATISTICS 1
+#else
+#define PSPRINTK(...) ;
+#endif
+
+#if PROCESS_SERVER_VMA_VERBOSE
+#define PSVMAPRINTK(...) printk(__VA_ARGS__)
+#else
+#define PSVMAPRINTK(...) ;
+#endif
+
+#if PROCESS_SERVER_NEW_THREAD_VERBOSE
+#define PSNEWTHREADPRINTK(...) printk(__VA_ARGS__)
+#else
+#define PSNEWTHREADPRINTK(...) ;
+#endif
+
+#if PROCESS_SERVER_MINIMAL_PGF_VERBOSE
+#define PSMINPRINTK(...) printk(__VA_ARGS__)
+#else
+#define PSMINPRINTK(...) ;
+#endif
+
+
+#define PAD_LONG_MESSAGE(x) (((x-(x%PCN_KMSG_PAYLOAD_SIZE))/PCN_KMSG_PAYLOAD_SIZE)*PCN_KMSG_PAYLOAD_SIZE)+PCN_KMSG_PAYLOAD_SIZE
+
+#define NR_THREAD_PULL 32
+#define THREAD_POOL_SIZE 64
+#define RATE_DO_REMOTE_OPERATION 5000000
+
+#endif /* PROCESS_SERVER_MACRO_H_ */

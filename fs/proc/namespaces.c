@@ -8,6 +8,7 @@
 #include <linux/ipc_namespace.h>
 #include <linux/pid_namespace.h>
 #include <linux/user_namespace.h>
+#include <linux/cpu_namespace.h>
 #include "internal.h"
 
 

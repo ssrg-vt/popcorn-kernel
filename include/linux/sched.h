@@ -1415,6 +1415,7 @@ struct task_struct {
 	unsigned int policy;
 	int nr_cpus_allowed;
 	cpumask_t cpus_allowed;
+	struct cpubitmap *cpus_allowed_map; // SHOULD BE struct list_head cpus_allowed_map
 
 #ifdef CONFIG_PREEMPT_RCU
 	int rcu_read_lock_nesting;
@@ -1813,6 +1814,47 @@ struct task_struct {
 	unsigned long	task_state_change;
 #endif
 	int pagefault_disabled;
+
+#ifdef CONFIG_POPCORN
+/* Popcorn */
+	int tgroup_distributed;
+	int tgroup_home_cpu;     /* cpu where the thread group was first migrated */
+	int tgroup_home_id;         /* home thread group id */
+
+	int represents_remote;      /* Is this a shadow process? */
+	pid_t next_pid;             /* What is the pid on the remote cpu? */
+	int next_cpu;
+
+	int executing_for_remote;   /* Is this executing on behalf of another cpu? */
+	pid_t prev_pid;				/* What is the pid on the remote cpu? */
+	int prev_cpu;
+
+	int main;					/* kernel thread that manages the process*/
+
+	int distributed_exit_code;
+	int group_exit;
+	int distributed_exit;
+
+	/*akshay*/
+	int return_disposition;
+	int origin_pid;
+	pid_t surrogate;
+	unsigned long uaddr;
+
+	/*Ajith - for het migration */
+	unsigned long migration_pc;
+	unsigned long saved_old_rsp;
+	unsigned long return_addr;
+
+	// scheduling -- antoniob
+	unsigned long lutime, lstime, llasttimestamp; /* in jiffies for load accounting */
+
+#if 0 // beowulf
+	//let's remove this?!
+	remote_file_info_t *fake_file_table[16];
+#endif
+#endif
+
 /* CPU-specific state of this task */
 	struct thread_struct thread;
 /*
@@ -2631,6 +2673,16 @@ extern long _do_fork(unsigned long, unsigned long, unsigned long, int __user *, 
 extern long do_fork(unsigned long, unsigned long, unsigned long, int __user *, int __user *);
 struct task_struct *fork_idle(int);
 extern pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags);
+
+#ifdef CONFIG_POPCORN
+extern struct task_struct* do_fork_for_main_kernel_thread(unsigned long clone_flags,
+							  unsigned long stack_start, struct pt_regs *regs,
+							  unsigned long stack_size, int __user *parent_tidptr,
+							  int __user *child_tidptr);
+extern pid_t kernel_thread_popcorn(int (*fn)(void *), void *arg, unsigned long flags);
+
+#endif
+extern int exec_mmap(struct mm_struct *mm);
 
 extern void __set_task_comm(struct task_struct *tsk, const char *from, bool exec);
 static inline void set_task_comm(struct task_struct *tsk, const char *from)

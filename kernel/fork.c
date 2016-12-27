@@ -88,6 +88,11 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/task.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
+#endif
+
+
 /*
  * Minimum number of threads to boot the kernel
  */
@@ -1684,6 +1689,83 @@ struct task_struct *fork_idle(int cpu)
 	return task;
 }
 
+
+struct task_struct* do_fork_for_main_kernel_thread(
+		unsigned long clone_flags,
+		unsigned long stack_start,
+		struct pt_regs *regs,
+		unsigned long stack_size,
+		int __user *parent_tidptr,
+		int __user *child_tidptr)
+{
+	struct task_struct *p;
+	int trace = 0;
+	long nr;
+
+	/*
+	 * Determine whether and which event to report to ptracer.  When
+	 * called from kernel_thread or CLONE_UNTRACED is explicitly
+	 * requested, no event is reported; otherwise, report if the event
+	 * for the type of forking is enabled.
+	 */
+	if (!(clone_flags & CLONE_UNTRACED)) {
+		if (clone_flags & CLONE_VFORK)
+			trace = PTRACE_EVENT_VFORK;
+		else if ((clone_flags & CSIGNAL) != SIGCHLD)
+			trace = PTRACE_EVENT_CLONE;
+		else
+			trace = PTRACE_EVENT_FORK;
+
+		if (likely(!ptrace_event_enabled(current, trace)))
+			trace = 0;
+	}
+
+	/* printk("%s: pid current %d\n", __func__, current->pid); */
+
+	p = copy_process(clone_flags, stack_start, stack_size,
+			child_tidptr, NULL, trace, 0);
+	/*
+	 * Do this prior waking up the new thread - the thread pointer
+	 * might get invalid after that point, if the thread exits quickly.
+	 */
+	if (!IS_ERR(p)) {
+		struct completion vfork;
+
+		trace_sched_process_fork(current, p);
+
+		nr = task_pid_vnr(p);
+
+		if (clone_flags & CLONE_PARENT_SETTID)
+			put_user(nr, parent_tidptr);
+
+		if (clone_flags & CLONE_VFORK) {
+			p->vfork_done = &vfork;
+			init_completion(&vfork);
+			get_task_struct(p);
+		}
+
+		process_server_dup_task(current, p);
+
+		p->represents_remote= 1;
+		p->distributed_exit= EXIT_NOT_ACTIVE;
+		wake_up_new_task(p);
+
+		/* forking complete and child started to run, tell ptracer */
+		if (unlikely(trace))
+			ptrace_event(trace, nr);
+
+		if (clone_flags & CLONE_VFORK) {
+			if (!wait_for_vfork_done(p, &vfork))
+				ptrace_event(PTRACE_EVENT_VFORK_DONE, nr);
+		}
+	} else {
+		nr = PTR_ERR(p);
+		printk(KERN_ALERT"%s: Failed to fork kernel thread : %ld %ld\n", __func__, nr, -nr);
+		//p = NULL;
+	}
+	return p;
+}
+
 /*
  *  Ok, this is the main fork-routine.
  *
@@ -1721,6 +1803,11 @@ long _do_fork(unsigned long clone_flags,
 
 	p = copy_process(clone_flags, stack_start, stack_size,
 			 child_tidptr, NULL, trace, tls);
+
+	if (current->tgroup_distributed == 1) {
+		PSPRINTK("%s: current=%d, new=%d\n", __func__, current->pid, p->pid);
+	}
+
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
@@ -1742,6 +1829,10 @@ long _do_fork(unsigned long clone_flags,
 			init_completion(&vfork);
 			get_task_struct(p);
 		}
+
+#ifdef CONFIG_POPCORN
+		process_server_dup_task(current, p);
+#endif
 
 		wake_up_new_task(p);
 
@@ -1783,6 +1874,19 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 	return _do_fork(flags|CLONE_VM|CLONE_UNTRACED, (unsigned long)fn,
 		(unsigned long)arg, NULL, NULL, 0);
 }
+
+
+#ifdef CONFIG_POPCORN
+/*
+ * Create a kernel thread -  required for process server to create a 
+ * kernel thread from user context.
+ */
+pid_t kernel_thread_popcorn(int (*fn)(void *), void *arg, unsigned long flags)
+{
+	return kernel_thread(fn, arg, current->flags|PF_KTHREAD);
+}
+#endif
+
 
 #ifdef __ARCH_WANT_SYS_FORK
 SYSCALL_DEFINE0(fork)

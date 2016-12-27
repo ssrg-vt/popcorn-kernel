@@ -410,6 +410,10 @@ struct thread_struct {
 	/* Max allowed port in the bitmap, in bytes: */
 	unsigned		io_bitmap_max;
 
+#ifdef CONFIG_POPCORN
+	unsigned long		usersp;
+#endif
+
 	/* Floating point and extended processor state */
 	struct fpu		fpu;
 	/*

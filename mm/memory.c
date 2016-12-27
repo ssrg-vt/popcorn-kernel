@@ -106,7 +106,11 @@ int randomize_va_space __read_mostly =
 #ifdef CONFIG_COMPAT_BRK
 					1;
 #else
+#ifdef CONFIG_POPCORN
+					0;	/* Popcorn needs address space randomization to be turned off for the time being */
+#else
 					2;
+#endif
 #endif
 
 static int __init disable_randmaps(char *s)

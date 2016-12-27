@@ -138,6 +138,7 @@ config X86
 	select HAVE_UID16			if X86_32 || IA32_EMULATION
 	select HAVE_UNSTABLE_SCHED_CLOCK
 	select HAVE_USER_RETURN_NOTIFIER
+	select HAVE_POPCORN_ARCH_SUPPORT
 	select IRQ_FORCED_THREADING
 	select MODULES_USE_ELF_RELA		if X86_64
 	select MODULES_USE_ELF_REL		if X86_32
@@ -295,8 +296,13 @@ config PGTABLE_LEVELS
 	default 3 if X86_PAE
 	default 2
 
+config HAVE_POPCORN_ARCH_SUPPORT
+	def_bool y
+	depends on X86_64_SMP
+
 source "init/Kconfig"
 source "kernel/Kconfig.freezer"
+source "kernel/Kconfig.popcorn"
 
 menu "Processor type and features"
 

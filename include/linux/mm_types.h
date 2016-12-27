@@ -15,6 +15,10 @@
 #include <asm/page.h>
 #include <asm/mmu.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
+#endif
+
 #ifndef AT_VECTOR_SIZE_ARCH
 #define AT_VECTOR_SIZE_ARCH 0
 #endif
@@ -217,6 +221,19 @@ struct page {
 
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
 	int _last_cpupid;
+#endif
+
+#ifdef CONFIG_POPCORN
+	//Multikernel
+	int replicated;
+	int status;
+	int owner;
+	long last_write;
+	int other_owners[MAX_KERNEL_IDS];
+	int writing;
+	int reading;
+	//Futex
+	int futex_owner;
 #endif
 }
 /*
@@ -510,6 +527,15 @@ struct mm_struct {
 #endif
 #ifdef CONFIG_HUGETLB_PAGE
 	atomic_long_t hugetlb_usage;
+#endif
+
+#ifdef CONFIG_POPCORN
+	struct rw_semaphore distribute_sem;
+	int distr_vma_op_counter;
+	int was_not_pushed;
+	struct task_struct* thread_op;
+	int vma_operation_index;
+	int distribute_unmap;
 #endif
 };
 

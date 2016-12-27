@@ -1943,6 +1943,7 @@ extern int vm_munmap(unsigned long, size_t);
 extern unsigned long vm_mmap(struct file *, unsigned long,
         unsigned long, unsigned long,
         unsigned long, unsigned long);
+extern unsigned long do_brk(unsigned long addr, unsigned long len);
 
 struct vm_unmapped_area_info {
 #define VM_UNMAPPED_AREA_TOPDOWN 1

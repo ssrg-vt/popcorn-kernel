@@ -97,6 +97,10 @@ extern void radix_tree_init(void);
 static inline void mark_rodata_ro(void) { }
 #endif
 
+#ifdef CONFIG_POPCORN
+extern void popcorn_init(void);
+#endif
+
 /*
  * Debug helper: via this flag we know that we are in 'early bootup code'
  * where only the boot processor is running with IRQ disabled.  This means
@@ -678,6 +682,11 @@ asmlinkage __visible void __init start_kernel(void)
 	}
 
 	ftrace_init();
+
+
+#ifdef CONFIG_POPCORN
+	popcorn_init();
+#endif
 
 	/* Do the rest non-__init'ed, we're now alive */
 	rest_init();
