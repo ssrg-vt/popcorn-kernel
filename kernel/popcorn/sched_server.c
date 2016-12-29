@@ -14,33 +14,19 @@
  * @author Vincent Legout, Antonio Barbalace, SSRG Virginia Tech 2016
  */
 
-#include <linux/smp.h>
-#include <linux/sched.h>
 #include <linux/delay.h>
-#include <linux/threads.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>
-
-#include <linux/fs.h>
-#include <linux/file.h>
 #include <linux/proc_fs.h>
-
 #include <asm/uaccess.h>
  
-//#include <popcorn/init.h>
-//#include <popcorn/cpuinfo.h>
 #include <linux/cpu_namespace.h>
 
-//#include <process_server_arch.h>
-//#include "page_server.h"
-//#include <popcorn/page_server.h>
-//#include "vma_server.h"
-//#include <popcorn/vma_server.h>
-//#include <popcorn/sched_server.h>
-#include "internal.h"
 #include <linux/pcn_kmsg.h>
 #include <linux/process_server.h>
 #include <popcorn/process_server.h>
+
+#include "internal.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Vincent's scheduling infrasrtucture based on Antonio's power/pmu readings
@@ -103,7 +89,6 @@ static int popcorn_sched_sync(void *_param)
 	return 0;
 }
 
-#if 0 // beowulf
 static int handle_sched_periodic(struct pcn_kmsg_message *inc_msg)
 {
 	sched_periodic_req *req = (sched_periodic_req *)inc_msg;
@@ -122,10 +107,9 @@ static int handle_sched_periodic(struct pcn_kmsg_message *inc_msg)
 	pcn_kmsg_free_msg(inc_msg);
 	return 0;
 }
-#endif
 
 
-static ssize_t power_read (struct file *file, char __user *buf, size_t count, loff_t *ppos)
+static ssize_t power_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
 	int ret, len = 0;
 	char buffer[256] = {0};
@@ -159,7 +143,6 @@ static const struct file_operations power_fops = {
 ///////////////////////////////////////////////////////////////////////////////
 // Global VDSO Support (to be removed)
 ///////////////////////////////////////////////////////////////////////////////
-/*
 long tell_migration = 0;
 static ssize_t mtrig_write (struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
@@ -177,7 +160,7 @@ static ssize_t mtrig_write (struct file *file, const char __user *buf, size_t co
 	return len;
 }
 
-static ssize_t mtrig_read (struct file *file, char __user *buf, size_t count, loff_t *ppos)
+static ssize_t mtrig_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
 	int ret, len;
 	char buffer[8];
@@ -200,24 +183,23 @@ static const struct file_operations mtrig_fops = {
 	.read = mtrig_read,
 	.write = mtrig_write,
 };
-*/
 
-#if 0 // beowulf
+
 ///////////////////////////////////////////////////////////////////////////////
 // List of Popcorn processes
 ///////////////////////////////////////////////////////////////////////////////
 
 // CPU load per thread
-static void popcorn_ps_load (struct task_struct * t, unsigned int *puload, unsigned int *psload)
+static void popcorn_ps_load(struct task_struct * t, unsigned int *puload, unsigned int *psload)
 {
 	unsigned long delta, now;
-	delta = now = get_jiffies_64();
 	unsigned long utime = cputime_to_jiffies(t->utime);
 	unsigned long stime = cputime_to_jiffies(t->stime);
 	unsigned int uload, sload;
+	delta = now = get_jiffies_64();
 
 	if (!t->llasttimestamp)
-		delta -= timespec_to_jiffies( &(t->real_start_time) );
+		delta -= nsecs_to_jiffies(t->real_start_time);
 	else
 		delta -= t->llasttimestamp;
 
@@ -244,13 +226,13 @@ static void popcorn_ps_load (struct task_struct * t, unsigned int *puload, unsig
 
 
 #define PROC_BUFFER_PS 8192
-static ssize_t popcorn_ps_read (struct file *file, char __user *buf, size_t count, loff_t *ppos)
+static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
 	int ret, len = 0, written = 0, i;
 	char * buffer;
 	memory_t ** lista;
 
-	lista = (memory_t **) kmalloc(sizeof(memory_t*) * 1024, GFP_KERNEL);
+	lista = (memory_t **)kmalloc(sizeof(memory_t*) * 1024, GFP_KERNEL);
 	if (!lista)
 		return 0; // error
 	memset(lista, 0, (sizeof(memory_t*) * 1024));
@@ -270,8 +252,8 @@ static ssize_t popcorn_ps_read (struct file *file, char __user *buf, size_t coun
 		struct task_struct * t;
 		struct task_struct * ppp = lista[i]->main;
 
-		len += snprintf((buffer +len), PROC_BUFFER_PS -len,
-				"%s %d:%d:%d:%d", ppp->comm,
+		len += snprintf((buffer +len), PROC_BUFFER_PS - len,
+				"%s %d:%d:%d:%lu", ppp->comm,
 				ppp->tgroup_home_cpu, ppp->tgroup_home_id, ppp->tgroup_distributed,
 				ppp->mm->total_vm); // this is in number of pages
 
@@ -280,12 +262,10 @@ static ssize_t popcorn_ps_read (struct file *file, char __user *buf, size_t coun
 			// here I want to list only user/kernel threads
 			if (t->main) {
 				// this is the main thread (kernel space only) nothing to do
-			}
-			else {
+			} else {
 				if (t->executing_for_remote == 0 && t->distributed_exit== EXIT_NOT_ACTIVE) {
 					// this is the nothing to fo
-				}
-				else {
+				} else {
 					// TODO print only the one that are currently running (not migrated!)
 
 					// CPU load per thread
@@ -300,7 +280,7 @@ static ssize_t popcorn_ps_read (struct file *file, char __user *buf, size_t coun
 			}
 		} while_each_thread(ppp, t);
 
-		len += snprintf((buffer +len), PROC_BUFFER_PS -len, "\n");
+		len += snprintf((buffer +len), PROC_BUFFER_PS - len, "\n");
 	}
 	if (written == 0)
 		len += snprintf(buffer, PROC_BUFFER_PS, "none\n");
@@ -320,7 +300,7 @@ static const struct file_operations popcorn_ps_fops = {
 
 static ssize_t popcorn_ps_read1 (struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
-	int ret, len = 0, i=0;
+	int ret, len = 0;
 	char * buffer;
 	struct task_struct * ppp;
 
@@ -347,8 +327,8 @@ static ssize_t popcorn_ps_read1 (struct file *file, char __user *buf, size_t cou
 		if ( ppp && (ppp->nsproxy) && (ppp->nsproxy->cpu_ns == popcorn_ns) ) {
 			struct task_struct * t;
 
-			len += snprintf((buffer +len), PROC_BUFFER_PS -len,
-					"%s %d:%d:%d:%d", ppp->comm,
+			len += snprintf((buffer +len), PROC_BUFFER_PS - len,
+					"%s %d:%d:%d:%lu", ppp->comm,
 					ppp->tgroup_home_cpu, ppp->tgroup_home_id, ppp->tgroup_distributed,
 					ppp->mm ? ppp->mm->total_vm : -1); // this is in number of pages
 
@@ -382,7 +362,7 @@ static ssize_t popcorn_ps_read1 (struct file *file, char __user *buf, size_t cou
 				}
 			} while_each_thread(ppp, t);
 
-			len += snprintf((buffer +len), PROC_BUFFER_PS -len, "\n");
+			len += snprintf((buffer +len), PROC_BUFFER_PS - len, "\n");
 		}
 	}
 
@@ -399,20 +379,15 @@ static const struct file_operations popcorn_ps_fops1 = {
 	.read = popcorn_ps_read1,
 };
 
-#endif
 
 int __init sched_server_init(void)
 {
 	struct task_struct *kt_sched;
 	struct proc_dir_entry *res;
 	int i;
-
-#if 0 // beowulf
 	int ret;
-	if (ret = pcn_kmsg_register_callback(PCN_KMSG_TYPE_SCHED_PERIODIC,
-				handle_sched_periodic) )
+	if ((ret = pcn_kmsg_register_callback(PCN_KMSG_TYPE_SCHED_PERIODIC, handle_sched_periodic)))
 		return ret;
-#endif
 
 	popcorn_power_x86_1 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
 	popcorn_power_x86_2 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
@@ -441,7 +416,6 @@ int __init sched_server_init(void)
 	if (!res)
 		printk("%s: WARNING: failed to create proc entry for power\n", __func__);
 
-	/*
 	res = proc_create("mtrig", S_IRUGO, NULL, &mtrig_fops);
 	if (!res)
 		printk("%s: WARNING: failed to create proc entry for triggering migrations\n", __func__);
@@ -453,7 +427,6 @@ int __init sched_server_init(void)
 	res = proc_create("popcorn_ps1", S_IRUGO, NULL, &popcorn_ps_fops1);
 	if (!res)
 		printk("%s: WARNING: failed to create proc entry for Popcorn process list 1\n", __func__);
-	*/
 
 	printk(KERN_INFO"%s: done\n", __func__);
 	return 0;

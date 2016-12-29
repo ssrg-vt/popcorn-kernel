@@ -583,7 +583,7 @@ int dump_processor_regs(struct pt_regs* regs)
 	return 0;
 }
 
-void suggest_migration (int suggestion)
+void suggest_migration(int suggestion)
 {
 	BUG();
 #if 0 // beowulf

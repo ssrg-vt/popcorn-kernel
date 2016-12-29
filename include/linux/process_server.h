@@ -119,7 +119,7 @@ typedef struct _memory_struct {
 	int exp_answ;
 	int answers;
 	int setting_up;
-	raw_spinlock_t lock_for_answer;
+	spinlock_t lock_for_answer;
 	struct rw_semaphore kernel_set_sem;
 	vma_operation_t* message_push_operation;
 	thread_pull_t* thread_pull;
@@ -128,8 +128,7 @@ typedef struct _memory_struct {
 } memory_t;
 
 typedef struct count_answers {
-	struct count_answers* next;
-	struct count_answers* prev;
+	struct list_head list;
 
 	int tgroup_home_cpu;
 	int tgroup_home_id;
@@ -655,8 +654,7 @@ typedef struct {
 } vma_lock_t;
 
 typedef struct vma_op_answers {
-	struct vma_op_answers* next;
-	struct vma_op_answers* prev;
+	struct list_head list;
 
 	//data_header_t header;
 	int tgroup_home_cpu;

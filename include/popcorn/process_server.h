@@ -3,6 +3,7 @@
 #define __POPCORN_PROCESS_SERVER_H
 
 #include <process_server_arch_macros.h>
+#include <process_server_arch.h>
 #include <popcorn/process_server_macro.h>
 
 /**
