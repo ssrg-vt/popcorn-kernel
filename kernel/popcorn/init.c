@@ -290,10 +290,13 @@ static int __init cpu_info_handler_init(void)
 extern int sched_server_init(void);
 extern int pcn_kmsg_init(void);
 extern int process_server_init(void);
+extern int setup_bundle_node(void);
 
 static int __init popcorn_initialize(void)
 {
 	printk(KERN_INFO"Initialize Popcorn subsystems...\n");
+
+	setup_bundle_node();
 
 	pcn_kmsg_init();
 

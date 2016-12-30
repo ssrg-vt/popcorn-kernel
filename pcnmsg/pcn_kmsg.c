@@ -46,7 +46,7 @@ int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback)
 	if (type >= PCN_KMSG_TYPE_MAX)
 		return -ENODEV; /* invalid type */
 
-	printk("%s: registering %d \n",__func__, type);
+	printk("%s: %d \n", __func__, type);
 	callbacks[type] = callback;
 	return 0;
 }
@@ -56,7 +56,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 	if (type >= PCN_KMSG_TYPE_MAX)
 		return -ENODEV;
 
-	printk("Unregistering callback %d\n", type);
+	printk("%s: %d\n", __func__, type);
 	callbacks[type] = NULL;
 	return 0;
 }

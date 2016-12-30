@@ -19,7 +19,7 @@
 #include <linux/slab.h>
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
- 
+
 #include <linux/cpu_namespace.h>
 
 #include <linux/pcn_kmsg.h>
@@ -232,21 +232,20 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 	char * buffer;
 	memory_t ** lista;
 
-	lista = (memory_t **)kmalloc(sizeof(memory_t*) * 1024, GFP_KERNEL);
-	if (!lista)
-		return 0; // error
-	memset(lista, 0, (sizeof(memory_t*) * 1024));
-	ret = dump_memory_entries(lista, 1024, &written);
+	if (*ppos > 0)
+		return 0; //EOF
+
+
+	lista; = (memory_t **)kzalloc(sizeof(memory_t*) * 1024, GFP_KERNEL);
+	BUG_ON(!lista);
+
+	ret = dump_memory_entries(lista, sizeof(lista) / sizeof(memory_t *), &written);
+
 	//if (!ret)
 	//printk("%s: WARN: there are more memory_t entries than %d\n", __func__, written);
 
-	buffer = kmalloc(PROC_BUFFER_PS, GFP_KERNEL);
-	if (!buffer)
-		return 0; // error
-	memset(buffer, 0, PROC_BUFFER_PS);
-
-	if (*ppos > 0)
-		return 0; //EOF
+	buffer = kzalloc(PROC_BUFFER_PS, GFP_KERNEL);
+	BUG_ON(!buffer);
 
 	for (i = 0; i < written; i++) {
 		struct task_struct * t;
