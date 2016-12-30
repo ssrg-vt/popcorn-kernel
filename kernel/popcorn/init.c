@@ -25,8 +25,6 @@
 #define PRINTK(...) ;
 #endif
 
-extern unsigned int my_cpu;
-
 /*
  *  Variables
  */
@@ -85,29 +83,20 @@ int find_and_delete(int cpuno, struct list_head *head)
 	return 0;
 }
 
-#if 0 // beowulf
 /*
  * Constant macros
  */
-#define DISPLAY_BUFFER 128
-static void display(struct list_head *head)
+static void display_rlist_head(void)
 {
-	struct list_head *iter;
-	_remote_cpu_info_list_t *objPtr;
-	char buffer[DISPLAY_BUFFER];
+	_remote_cpu_info_list_t *r;
 
-	list_for_each(iter, head) {
-		objPtr = list_entry(iter, _remote_cpu_info_list_t, cpu_list_member);
-
-		memset(buffer, 0, DISPLAY_BUFFER);
-		//	cpumask_scnprintf(buffer, (DISPLAY_BUFFER -1), &(objPtr->_data._cpumask));
-		bitmap_scnprintf(buffer, (DISPLAY_BUFFER -1), &(objPtr->_data.cpumask), pOPCORN_CPUMASK_BITS);
-		printk("%s: cpu:%d %s off:%d\n", __func__,
-				objPtr->_data._processor,
-				buffer, objPtr->_data.cpumask_offset);
+	list_for_each_entry(r, &rlist_head, cpu_list_member) {
+		printk("%s: cpu=%d mask=%*pbl offset=%d\n", __func__,
+				r->_data._processor,
+				POPCORN_CPUMASK_SIZE, r->_data.cpumask,
+				r->_data.cpumask_offset);
 	}
 }
-#endif
 
 
 static int handle_remote_proc_cpu_info_response(struct pcn_kmsg_message* inc_msg)
@@ -154,15 +143,13 @@ static int handle_remote_proc_cpu_info_request(struct pcn_kmsg_message* inc_msg)
 #endif
 #if 0 // beowulf
 	response->_data.cpumask_offset = offset_cpus;
-#endif
 	response->_data.cpumask_size = cpumask_size();
 	response->_data._processor = my_cpu;
+#endif
 
 	// Adding the new cpuset to the list
 	add_node(&msg->_data, &rlist_head); //add_node copies the content
-#if 0 // beowulf
-	display(&rlist_head);
-#endif
+	display_rlist_head();
 
 	// Send response
 	printk("Kerenel %d: handle_remote_proc_cpu_info_request\n", Kernel_Id);
@@ -240,7 +227,7 @@ int _init_RemoteCPUMask(void)
 			wait_cpu_list = -1;
 
 			add_node(&(cpu_result._data), &rlist_head);
-			display(&rlist_head);
+			display_rlist_head();
 		}
 	 }
 	return 0;

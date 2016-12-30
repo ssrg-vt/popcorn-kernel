@@ -2223,6 +2223,33 @@ static int handle_clone_request(struct pcn_kmsg_message* inc_msg)
 // init functions
 ///////////////////////////////////////////////////////////////////////////////
 
+static void __init file_handler_init(void)
+{
+#if 0 // beowulf
+	/*
+	 * Register handlers for remote file
+	 */
+	file_wait_q();
+
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OPEN_REQUEST,
+					handle_file_open_request);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OPEN_REPLY,
+					handle_file_open_reply);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_STATUS_REQUEST,
+					handle_file_status_request);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_STATUS_REPLY,
+					handle_file_status_reply);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OFFSET_REQUEST,
+					handle_file_offset_request);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OFFSET_REPLY,
+					handle_file_offset_reply);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OFFSET_UPDATE,
+					handle_file_pos_update);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OFFSET_CONFIRM,
+					handle_file_pos_confirm);
+#endif
+}
+
 /**
  * process_server_init
  * Start the process loop in a new kthread. (?)
@@ -2312,30 +2339,7 @@ int __init process_server_init(void)
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_NEW_KERNEL_ANSWER,
 				   handle_new_kernel_answer);
 
-#if 0 // beowulf
-	/*
-	 * Register handlers for remote file
-	 */
-	file_wait_q();
-
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OPEN_REQUEST,
-					handle_file_open_request);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OPEN_REPLY,
-					handle_file_open_reply);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_STATUS_REQUEST,
-					handle_file_status_request);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_STATUS_REPLY,
-					handle_file_status_reply);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OFFSET_REQUEST,
-					handle_file_offset_request);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OFFSET_REPLY,
-					handle_file_offset_reply);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OFFSET_UPDATE,
-					handle_file_pos_update);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_FILE_OFFSET_CONFIRM,
-					handle_file_pos_confirm);
-
-#endif
+	file_handler_init();
 
 	return 0;
 }

@@ -4583,6 +4583,13 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 	return ret;
 }
 
+
+SYSCALL_DEFINE2(sched_migrate, pid_t, pid, unsigned int, nid)
+{
+	printk("%s: %u, %u\n", __func__, pid, nid);
+	return 0;
+}
+
 /**
  * sys_sched_yield - yield the current processor to other threads.
  *

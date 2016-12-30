@@ -583,10 +583,9 @@ int dump_processor_regs(struct pt_regs* regs)
 	return 0;
 }
 
+#if 0 // beowulf. removed
 void suggest_migration(int suggestion)
 {
-	BUG();
-#if 0 // beowulf
 	vpopcorn_migrate = suggestion;
-#endif
 }
+#endif

@@ -15,27 +15,10 @@ EXPORT_SYMBOL(callbacks);
 send_cbftn send_callback;
 EXPORT_SYMBOL(send_callback);
 
-unsigned int my_cpu = 0;
-enum my_cpu_enum {
-	MY_CPU_ARM,
-	MY_CPU_X86,
-	MY_CPU_UNKNOWN,
-};
-
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {
 	send_callback = NULL;
-
-#if defined(CONFIG_ARM64)
-	my_cpu = MY_CPU_ARM;
-#elif defined(CONFIG_X86_64)
-	my_cpu = MY_CPU_X86;
-#else
-	my_cpu = MY_CPU_UNKNOWN;
-	printk(KERN_ERR"%s: unkown architecture detected\n", __func__);
-	return -EINVAL;
-#endif
 
 	printk("%s: done\n", __func__);
 	return 0;
@@ -69,17 +52,17 @@ int pcn_kmsg_send(unsigned int dest_cpu, struct pcn_kmsg_message *msg)
 
 int pcn_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg, unsigned int payload_size)
 {
-	int ret = 0;
-
 	if (send_callback == NULL) {
-		msleep(100);
+		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
+
+		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, size=%u\n",
+					__func__, hdr->from_cpu, hdr->type, hdr->size);
+		// msleep(100);
 		//printk("Waiting for call back function to be registered\n");
 		return 0;
 	}
 
-	ret = send_callback(dest_cpu, (struct pcn_kmsg_message *)lmsg, payload_size);
-
-	return ret;
+	return send_callback(dest_cpu, (struct pcn_kmsg_message *)lmsg, payload_size);
 }
 
 void pcn_kmsg_free_msg(void *msg)

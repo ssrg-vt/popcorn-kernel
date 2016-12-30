@@ -174,18 +174,18 @@ int ps_read_thread(void *arg)
 		while(atomic_read(&stop_sampling) == 0) {
 			pout = read_inst_power(MSR_PP0_ENERGY_STATUS, &pp0_prev, &pp0_tprev);
 			pout = read_inst_power(MSR_PKG_ENERGY_STATUS, &pkg_prev, &pkg_tprev);
-			// this is always ZERO  pout = read_inst_power(MSR_DRAM_ENERGY_STATUS, &dram_prev, &dram_tprev);
-			//pout = read_int_power(MSR_PKG_ENERGY_STATUS, 0, 0); //current processor don't have this power domain
+
+			// pout = read_inst_power(MSR_DRAM_ENERGY_STATUS, &dram_prev, &dram_tprev); // this is always ZERO 
+			// pout = read_inst_power(MSR_PKG_ENERGY_STATUS, 0, 0); //current processor don't have this power domain
 
 			/*
-			   if(pout <= 0) {
-			   printk(KERN_ERR "%s: rdmsr read failed [%d]\n",
-			   __func__, ret);
-			   } else {
+			if(pout <= 0) {
+				printk(KERN_ERR "%s: rdmsr read failed [%d]\n", __func__, ret);
+			} else {
 			// Accumulate the value
-			local_power += pout;
-			count++;
-			//printk(KERN_ERR "%s: current reading %d\n", __func__, pout);
+				local_power += pout;
+				count++;
+				//printk(KERN_ERR "%s: current reading %d\n", __func__, pout);
 			}
 			*/
 			msleep(sampling_interval);

@@ -149,8 +149,9 @@ static inline int vma_send_long_all( memory_t * entry, void * message, int size,
 			if ( task && (task->mm->distr_vma_op_counter > max_distr_vma_op)
 					&& (i == entry->message_push_operation->from_cpu))
 				continue;
-			error = pcn_kmsg_send_long(i, (struct pcn_kmsg_long_message*) message,
-									(size - sizeof(struct pcn_kmsg_hdr)) );
+			error = pcn_kmsg_send_long(i,
+					(struct pcn_kmsg_long_message*) message,
+					(size - sizeof(struct pcn_kmsg_hdr)) );
 			if (error != -1)
 				acks++;
 		}
