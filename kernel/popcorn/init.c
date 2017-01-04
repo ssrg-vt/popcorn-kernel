@@ -28,22 +28,52 @@
 /*
  *  Variables
  */
-unsigned int Kernel_Id = 0;
-EXPORT_SYMBOL(Kernel_Id);
-
 // TODO this must be refactored
-static int wait_cpu_list = -1;
 static DECLARE_WAIT_QUEUE_HEAD(wq_cpu);
+
 LIST_HEAD(rlist_head); // TODO sanghoon: lock? 
-static _remote_cpu_info_response_t cpu_result;
-extern unsigned int offset_cpus; //from kernel/smp.c
-//struct cpumask cpu_global_online_mask;
-#define for_each_global_online_cpu(cpu)   for_each_cpu((cpu), cpu_global_online_mask)
 
 /*
  * Function definitions
  */
+void add_node(_remote_cpu_info_data_t *arg, struct list_head *head)
+{
+	_remote_cpu_info_list_t *r = kmalloc(sizeof(*r), GFP_KERNEL);
+
+	if (!r) {
+		printk(KERN_ALERT"%s: can not allocate memory for kernel node descriptor\n", __func__);
+		return;
+	}
+
+	INIT_LIST_HEAD(&r->cpu_list_member);
+	memcpy(&r->_data, arg, sizeof(*arg)); //r->_data = *arg;
+	list_add(&r->cpu_list_member, head);
+}
+
+int find_and_delete(int cpuno, struct list_head *head)
+{
+	_remote_cpu_info_list_t *r;
+
+	list_for_each_entry(r, head, cpu_list_member) {
+		if (r->_data._processor == cpuno) {
+			list_del(&r->cpu_list_member);
+			kfree(r);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+
+#if 0 // beowulf
 // TODO rewrite with a list
+static _remote_cpu_info_response_t cpu_result;
+static int wait_cpu_list = -1;
+extern unsigned int offset_cpus; //from kernel/smp.c
+//struct cpumask cpu_global_online_mask;
+#define for_each_global_online_cpu(cpu)   for_each_cpu((cpu), cpu_global_online_mask)
+
+
 int flush_cpu_info_var(void)
 {
 	memset(&cpu_result, 0, sizeof(cpu_result)); //cpu_result = NULL;
@@ -51,41 +81,6 @@ int flush_cpu_info_var(void)
 	return 0;
 }
 
-void add_node(_remote_cpu_info_data_t *arg, struct list_head *head)
-{
-	_remote_cpu_info_list_t *Ptr = (_remote_cpu_info_list_t *)
-			kmalloc(sizeof(_remote_cpu_info_list_t), GFP_KERNEL);
-	if (!Ptr) {
-		printk(KERN_ALERT"%s: can not allocate memory for kernel node descriptor\n", __func__);
-		return;
-	}
-	printk("%s: _remote_cpu_info_list_t %ld, _remote_cpu_info_data_t %ld\n",
-			__func__, sizeof(_remote_cpu_info_list_t), sizeof(_remote_cpu_info_data_t) );
-
-	INIT_LIST_HEAD(&(Ptr->cpu_list_member));
-	memcpy(&(Ptr->_data), arg, sizeof(_remote_cpu_info_data_t)); //Ptr->_data = *arg;
-	list_add(&Ptr->cpu_list_member, head);
-}
-
-int find_and_delete(int cpuno, struct list_head *head)
-{
-	struct list_head *iter;
-	_remote_cpu_info_list_t *objPtr;
-
-	list_for_each(iter, head) {
-		objPtr = list_entry(iter, _remote_cpu_info_list_t, cpu_list_member);
-		if(objPtr->_data._processor == cpuno) {
-			list_del(&objPtr->cpu_list_member);
-			kfree(objPtr);
-			return 1;
-		}
-	}
-	return 0;
-}
-
-/*
- * Constant macros
- */
 static void display_rlist_head(void)
 {
 	_remote_cpu_info_list_t *r;
@@ -97,7 +92,6 @@ static void display_rlist_head(void)
 				r->_data.cpumask_offset);
 	}
 }
-
 
 static int handle_remote_proc_cpu_info_response(struct pcn_kmsg_message* inc_msg)
 {
@@ -152,7 +146,6 @@ static int handle_remote_proc_cpu_info_request(struct pcn_kmsg_message* inc_msg)
 	display_rlist_head();
 
 	// Send response
-	printk("Kerenel %d: handle_remote_proc_cpu_info_request\n", Kernel_Id);
 	pcn_kmsg_send_long(msg->header.from_cpu,
 			(struct pcn_kmsg_long_message*)response,
 			sizeof(_remote_cpu_info_response_t));
@@ -163,7 +156,6 @@ static int handle_remote_proc_cpu_info_request(struct pcn_kmsg_message* inc_msg)
 	return 0;
 }
 
-#if 0 // beowulf
 int send_cpu_info_request(int KernelId)
 {
 	int res = 0;
@@ -233,38 +225,12 @@ int _init_RemoteCPUMask(void)
 	return 0;
 }
 EXPORT_SYMBOL(_init_RemoteCPUMask);
-#endif
-
-/*
- * Called from init/main.c
- */
-void popcorn_init(void)
-{
-	unsigned int self = 0;
-
-	printk(KERN_INFO"%s: first_online_node=%d, cpumask_first=%d\n",
-			__func__, first_online_node, cpumask_first(cpu_present_mask));
-
-	//Kernel_Id = get_proccessor_id();//cpumask_first(cpu_present_mask);
-	//Sharath: Below modifications to test using msg layer with socket
-	self = cpumask_first(cpu_present_mask);
-#if 0 // beowulf
-	pcn_kmsg_get_node_ids(NULL, 0, &self);
-#endif
-	Kernel_Id = self;
-
-	printk(KERN_INFO"%s: Kernel id=%d\n", __func__, Kernel_Id);
-	printk(KERN_INFO"%s: max_low_pfn=0x%llx\n", __func__, PFN_PHYS(max_low_pfn));
-	printk(KERN_INFO"%s: min_low_pfn=0x%llx\n", __func__, PFN_PHYS(min_low_pfn));
-}
 
 static int __init cpu_info_handler_init(void)
 {
-#if 0 // beowulf
 	_cpu = my_cpu;
 	offset_cpus = Kernel_Id;
 	printk("%s: inside, offsetcpus %d \n", __func__, offset_cpus);
-#endif
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
 			handle_remote_proc_cpu_info_request);
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
@@ -273,23 +239,28 @@ static int __init cpu_info_handler_init(void)
 	printk(KERN_INFO"%s: done\n", __func__);
 	return 0;
 }
+#endif
 
 extern int sched_server_init(void);
 extern int pcn_kmsg_init(void);
 extern int process_server_init(void);
 extern int setup_bundle_node(void);
+extern int popcorn_ns_init(int);
 
-static int __init popcorn_initialize(void)
+static int __init popcorn_init(void)
 {
 	printk(KERN_INFO"Initialize Popcorn subsystems...\n");
 
-	setup_bundle_node();
+	popcorn_ns_init(false);
 
 	pcn_kmsg_init();
 
-	cpu_info_handler_init();
+	setup_bundle_node();
+
 	sched_server_init();
+
 #if 0 // beowulf
+	cpu_info_handler_init();
 	page_server_init();
 	vma_server_init();
 #endif
@@ -297,9 +268,4 @@ static int __init popcorn_initialize(void)
 
 	return 0;
 }
-
-/**
- * Register remote pid init function as
- * module initialization function.
- */
-late_initcall(popcorn_initialize);
+late_initcall(popcorn_init);

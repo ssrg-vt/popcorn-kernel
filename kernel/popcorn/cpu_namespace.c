@@ -33,7 +33,7 @@ struct cpu_namespace init_cpu_ns = {
 		.ops = &cpuns_operations,
 	},
 	.nr_cpus = NR_CPUS,
-	.cpumask_size = (BITS_TO_LONGS(NR_CPUS) * sizeof(long)),
+	//.cpumask_size = (BITS_TO_LONGS(NR_CPUS) * sizeof(long)),
 	//.cpu_online_mask = cpu_online_mask,
 	//.get_online_cpus = get_online_cpus;
 	//.get_offline_cpus = get_offline_cpus,
@@ -54,12 +54,11 @@ static struct cpu_namespace *create_cpu_namespace(struct cpu_namespace *parent_c
 	ns->parent = get_cpu_ns(parent_cpu_ns);
 	ns->level = ns->parent->level + 1;
 	ns->ns = ns->parent->ns;
-	ns->nr_cpu_ids = ns->parent->nr_cpu_ids;
-	ns->nr_cpus = ns->parent->nr_cpus;
-	ns->cpumask_size = ns->parent->cpumask_size;
+	// ns->nr_cpu_ids = ns->parent->nr_cpu_ids;
+	// ns->nr_cpus = ns->parent->nr_cpus;
+	// ns->cpumask_size = ns->parent->cpumask_size;
 	// _nr_cpumask_bits ?
-	ns->cpu_online_mask = ns->parent->cpu_online_mask;
-	// cpumap ?
+	// ns->cpu_online_mask = ns->parent->cpu_online_mask;
 
 	return ns;
 }
@@ -76,8 +75,8 @@ struct cpu_namespace *copy_cpu_ns(unsigned long flags, struct cpu_namespace *old
 		return get_cpu_ns(old_ns);
 	}
 	if (flags & (CLONE_THREAD|CLONE_PARENT)) {
-		return ERR_PTR(-EINVAL);
 		printk("%s: grande cacca\n", __func__);
+		return ERR_PTR(-EINVAL);
 	}
 	return create_cpu_namespace(old_ns);
 }
@@ -161,53 +160,40 @@ const struct proc_ns_operations cpuns_operations = {
 // Il seguente codice va probabilmente spostato in popcorn
 // -> The following code should probably be moved to popcorn
 
-int read_notify_cpu_ns(struct seq_file *file, void *ptr)
+
+static int read_notify_cpu_ns(struct seq_file *file, void *ptr)
 {
 	struct cpu_namespace *ns = current->nsproxy->cpu_ns;
-	static char cpumask_buffer[1024];
 
-	memset(cpumask_buffer, 0, sizeof(cpumask_buffer));
-
-	if (ns->cpu_online_mask) {
-		// TODO change with ns->nr_cpu_ids
-		scnprintf(cpumask_buffer, sizeof(cpumask_buffer) - 1, "%*pb[l]\n",
-				cpumask_pr_args(ns->cpu_online_mask));
-	} else {
-		printk("cpu_online_mask is zero!?\n");
-	}
-
-	seq_printf(file, "task: %s(%p)\n"
-			"cpu_ns %p level %d parent %p\n"
-			"nr_cpus %d nr_cpu_ids %d nr_cpumask_bits %d cpumask_size %d\n"
-			"cpumask %s\n"
-			"popcorn ns %p\n",
+	seq_printf(file, "cpu_ns for task %s(0x%p)\n"
+			"popcorn_ns 0x%p, ns 0x%p, level %d, parent 0x%p\n",
 			current->comm, current,
-			ns, ns->level, ns->parent,
-			ns->nr_cpus, ns->nr_cpu_ids, ns->_nr_cpumask_bits, ns->cpumask_size,
-			cpumask_buffer,
-			popcorn_ns);
+			popcorn_ns, ns, ns->level, ns->parent);
 	return 0;
 }
 
 // TODO move to popcorn.c/mklinux.c/kinit.c
 // the following is temporary and should be updated in a final version, this should be known in the process_server.c --- this shuold be moved in something like kinit.c
-#if 0 // beowulf
+#if 0 // beowulf: cpumask is removed for rack-popcorn
 extern unsigned int offset_cpus; //from kernel/smp.c
 #endif
 
 /*
  * This function should be called every time a new kernel will join the popcorn
  * namespace. Note that if there are applications using the popcorn namespace
- * it is not possible to modify the namespace. force will force to update the
- * namespace data (not currently implemented).
+ * it is not possible to modify the namespace. 
+ * TODO: "force" updates the * namespace data forcefully.
  */
 // NOTE this will modify the global variable popcorn_ns (so, no need to pass in anything)
-int build_popcorn_ns(int force)
+int __init popcorn_ns_init(int force)
 {
+	if (popcorn_ns) return -EEXIST;
+
+#if 0 // beowulf
 	int cnr_cpu_ids = 0;
 
 	_remote_cpu_info_list_t *r;
-	struct cpumask *pcpum = 0;
+	// struct cpumask *pcpum = 0;
 	unsigned long *summary, *tmp;
 	int size, offset;
 	int cpuid;
@@ -247,9 +233,7 @@ int build_popcorn_ns(int force)
 	// current kernel
 	bitmap_zero(summary, size * BITS_PER_BYTE);
 	bitmap_copy(summary, cpumask_bits(cpu_online_mask), nr_cpu_ids); // NOTE that the current cpumask is not included in the remote list
-#if 0 // beowulf
 	bitmap_shift_left(summary, summary, offset_cpus, cnr_cpu_ids);
-#endif
 	// other kernels
 	cpuid = -1;
 	list_for_each_entry(r, &rlist_head, cpu_list_member) {
@@ -265,21 +249,24 @@ int build_popcorn_ns(int force)
 		bitmap_shift_left(tmp, tmp, offset, cnr_cpu_ids);
 		bitmap_or(summary, summary, tmp, cnr_cpu_ids);
 	}
+#endif
 
 	//------------------------ GENERATE the namespace ------------------------
-	if (!popcorn_ns) {
-		struct cpu_namespace *tmp_ns = create_cpu_namespace(&init_cpu_ns);
-		if (IS_ERR(tmp_ns)) {
-			kfree(summary);
-			kfree(tmp);
-			return -ENODEV;
-			//TODO release list lock
-		}
-		tmp_ns->cpu_online_mask = 0;
 
-		//TODO lock the namespace
-		popcorn_ns = tmp_ns;
+	//TODO lock the namespace
+	popcorn_ns = create_cpu_namespace(&init_cpu_ns);
+	if (IS_ERR(popcorn_ns)) {
+		/*
+		kfree(summary);
+		kfree(tmp);
+		*/
+		return -ENODEV;
+		//TODO release list lock
 	}
+	// tmp_ns->cpu_online_mask = 0;
+
+
+	/*
 	if (popcorn_ns->cpu_online_mask) {
 		if (popcorn_ns->cpu_online_mask != cpu_online_mask)
 			kfree(popcorn_ns->cpu_online_mask);
@@ -287,84 +274,32 @@ int build_popcorn_ns(int force)
 			printk(KERN_ERR"%s: there is something weird, popcorn was associated with cpu_online_mask\n", __func__);
 	}
 	popcorn_ns->cpu_online_mask = to_cpumask(summary);
+	*/
 
+	/*
 	popcorn_ns->nr_cpus = cnr_cpu_ids; // the followings are intentional
 	popcorn_ns->nr_cpu_ids = cnr_cpu_ids;
 	popcorn_ns->_nr_cpumask_bits = cnr_cpu_ids;
 	popcorn_ns->cpumask_size = BITS_TO_LONGS(cnr_cpu_ids) * sizeof(long);
+	*/
 
 	// TODO maybe the following should be different
 	// the idea is that if does not have parent, parent should be init_cpu_ns)
+	/*
 	if (!popcorn_ns->parent) {
 		popcorn_ns->parent = &init_cpu_ns;
 		popcorn_ns->level = 1;
 	}
+	*/
 
 	//TODO unlock popcorn namespace
 	//TODO unlock kernel list
-	create_thread_pull();
-	return 0;
-}
-
-/*
- * this function allow to
- */
-int associate_to_popcorn_ns(struct task_struct * tsk)
-{
-
-	//printk("%s entered pid %d \n",__func__,tsk->pid);
-	if (tsk->nsproxy->cpu_ns != popcorn_ns) {
-		printk("%s assumes the namespace is popcorn but is not\n", __func__);
-		return -ENODEV;
-	}
-
-	if (tsk->cpus_allowed_map && (tsk->cpus_allowed_map->ns != tsk->nsproxy->cpu_ns)) {
-		printk(KERN_ERR"%s: WARN tsk->cpus_allowed_map->ns (%p) != tsk->nsproxy->cpu_ns (%p)\n",
-				__func__, tsk->cpus_allowed_map->ns, tsk->nsproxy->cpu_ns);
-
-		// TODO recover from this situation
-	}
-
-	if (tsk->cpus_allowed_map == NULL) {
-		//printk("%s, in task->cpus_allowed_map null\n",__func__);
-		// in this case I have to convert allowed to global mask
-		int size = CPUBITMAP_SIZE(popcorn_ns->nr_cpu_ids);
-		struct cpubitmap * cbitm = kmalloc(size, GFP_ATOMIC);// here we should use  a cache instead of mkalloc
-		if (!cbitm) {
-			printk(KERN_ERR"%s: kmalloc allocation failed\n", __func__);
-			return -ENOMEM;
-		}
-		cbitm->size = size-sizeof(struct cpubitmap);
-		//printk("%s, cbitm->size %lu \n",__func__,cbitm->size);
-		cbitm->ns = popcorn_ns; // add reference to it?! --> actually the task already did it!!! so not necessary
-
-		// TODO we are always assuming that the previous namespace was init_cpu_ns but maybe is not correct
-		//bitmap_fill(cbitm->bitmap, popcorn_ns->nr_cpu_ids);
-		//bitmap_complement (cbitm->bitmap,  cpumask_bits(cpu_online_mask),nr_cpu_ids);
-		//bitmap_or(cbitm->bitmap,cbitm->bitmap, cpumask_bits(&current->cpus_allowed), nr_cpu_ids);
-		//printk("%s, cbitm->bitmap %lu, cbitm->bitmap %lu, offset_cpus %d, popcorn_ns->nr_cpu_ids %lu\n",__func__,cbitm->bitmap, cbitm->bitmap, offset_cpus, popcorn_ns->nr_cpu_ids);
-		//bitmap_shift_left(cbitm->bitmap, cbitm->bitmap, offset_cpus, popcorn_ns->nr_cpu_ids);
-		//if(!(offset_cpus==0))
-		//bitmap_fill(cbitm->bitmap, offset_cpus);
-		//bitmap_or(cbitm->bitmap, cbitm->bitmap, tsk->nsproxy->cpu_ns->cpu_online_mask, popcorn_ns->nr_cpu_ids);
-		//bitmap_complement(cbitm->bitmap, cbitm->bitmap, popcorn_ns->nr_cpu_ids);
-		//bitmap_xor(cbitm->bitmap, cbitm->bitmap, tsk->nsproxy->cpu_ns->cpu_online_mask, popcorn_ns->nr_cpu_ids);
-		//bitmap_and(cbitm->bitmap, cbitm->bitmap, tsk->nsproxy->cpu_ns->cpu_online_mask, popcorn_ns->nr_cpu_ids);
-		//bitmap_complement(cbitm->bitmap, cbitm->bitmap, popcorn_ns->nr_cpu_ids);
-		bitmap_copy(
-				cbitm->bitmap, 
-				cpumask_bits(tsk->nsproxy->cpu_ns->cpu_online_mask),
-				popcorn_ns->nr_cpu_ids);
-
-		tsk->cpus_allowed_map = cbitm;
-		//printk("%s, cbitm->size %lu \n",__func__,cbitm->size);
-	}
-	// NOTE the else case do not need to be handled, i.e. we are already linked and updated to popcorn
-
+	//create_thread_pull();
 	return 0;
 }
 
 
+#if 0 // beowulf: actually does not used because proc entry is readonly.
 /* despite this is not the correct way to go, this is working in this way
  * every time we are writing something on this file (even NULL)
  * we are rebuilding a new popcorn namespace merging all the available kernels
@@ -416,7 +351,7 @@ static ssize_t write_notify_cpu_ns(struct file *file, const char __user *buffer,
 	/* if the namespace does not exist, create it */
 	if (!popcorn_ns) {
 		printk(KERN_ERR"%s: popcorn is null now!\n", __func__);
-		if ((ret = build_popcorn_ns(0))) {
+		if ((ret = popcorn_ns_init(0))) {
 			printk(KERN_ERR"%s: build_popcorn returned: %d\n", __func__, ret);
 			return count;
 		}
@@ -431,7 +366,6 @@ static ssize_t write_notify_cpu_ns(struct file *file, const char __user *buffer,
 		printk(KERN_ERR"%s: already attached to popcorn(%p)\n",
 				__func__, popcorn_ns);
 	}
-
 #endif
 
 	// -------------- UPDATE cpus_allowed map -----------------
@@ -445,9 +379,7 @@ static ssize_t write_notify_cpu_ns(struct file *file, const char __user *buffer,
 		cbitm->ns = ns;
 		bitmap_zero(cbitm->bitmap, ns->nr_cpu_ids);
 		bitmap_copy(cbitm->bitmap, cpumask_bits(&current->cpus_allowed), cpumask_size());
-#if 0 // beowulf
 		bitmap_shift_left(cbitm->bitmap, cbitm->bitmap, offset_cpus, ns->nr_cpu_ids);
-#endif
 		current->cpus_allowed_map = cbitm;
 	}
 	// TODO support the else case
@@ -465,6 +397,7 @@ static ssize_t write_notify_cpu_ns(struct file *file, const char __user *buffer,
 	printk("%s, after put_task_struct\n",__func__);
 	return count;
 }
+#endif
 
 int popcorn_ns_proc_open(struct inode *inode, struct file *file)
 {
@@ -474,7 +407,7 @@ int popcorn_ns_proc_open(struct inode *inode, struct file *file)
 static struct file_operations fops = {
 	.open = popcorn_ns_proc_open,
 	.read = seq_read,
-	.write = write_notify_cpu_ns,
+//	.write = write_notify_cpu_ns,
 	.release = single_release,
 };
 
@@ -590,7 +523,7 @@ static __init int cpu_namespaces_init(void)
 {
 	printk("Initializing cpu_namespace\n");
 
-	init_cpu_ns.cpu_online_mask = (struct cpumask *)cpu_online_mask;
+	// init_cpu_ns.cpu_online_mask = (struct cpumask *)cpu_online_mask;
 
 	cpu_ns_cachep = KMEM_CACHE(cpu_namespace, SLAB_PANIC);
 	if (!cpu_ns_cachep)

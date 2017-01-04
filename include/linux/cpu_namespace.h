@@ -23,53 +23,21 @@ but than refer to a descriptor of that kernel (that will describe the connection
 //NOOOOOOOOOOOOOOOOOOOOOOOO big error!!!
 /* init one deve puntare alle 4 cpumask del sistema!!! present, possible, online, offline */ 
 // PROBLEMA some fare con allowed_cpus mask?! (come fanno con i pid?! -> hash mask?!)
-struct cpumap {
-	atomic_t nr_free; // ?
-	void *page; // must be a pointer to cpumask (the local one?!)
-	//_remote_cpu_info_response_t * cpus;
-
-	int start;
-	int end;
-	//holes are accepted
-};
 #define CPUMAP_ENTRIES    8
 //((PID_MAX_LIMIT + 8*PAGE_SIZE - 1)/PAGE_SIZE/8)
 
 struct cpu_namespace;
 
-struct cpubitmap {
-  struct list_head next_task;	// linked list of cpubitmaps of the same task
-  struct task_struct *task;	// sched set affinity is per task
-  struct list_head next_ns;	// linked list of cpubitmaps of the same namespace
-  struct cpu_namespace *ns;	// ref namespace
-  int size;					// size of bitmap in bytes
-  unsigned long bitmap[];	// bitmap (not included here)
-};
 #define CPUBITMAP_SIZE(cpus) (sizeof(struct cpubitmap) + (BITS_TO_LONGS(cpus) * sizeof(long)))
 
 struct cpu_namespace {
     struct kref kref;  
 	struct ns_common ns;
+
 /* WHAT WE NEED, FROM sched_getaffinity/sched_setaffinity */
     int nr_cpu_ids;
     int nr_cpus;
-    int cpumask_size; //in bytes
-    int _nr_cpumask_bits; //either nr_cpu_ids or nr_cpus
-  
-    struct cpumask *cpu_online_mask;
-			// for init, it is a copy of cpu_online_mask
-			// otherwise it is variable length
 
-//  void (*get_online_cpus)(void); // kernel/cpu.c
-//  void (*put_online_cpus)(void); // kernel/cpu.c
-  
-//TODO
-//here is the list of cpumask that merge into cpu_online_mask, basically is a list/array of all connected kernels with their starting id
-    struct cpumap cpumap[CPUMAP_ENTRIES]; //<-- or a list?! the one of Akshay ?!
-
-//    int last_pid; // we do not need this !!!
-//    struct task_struct *child_reaper; //?!?! what is this?!?!
-    
     unsigned int level; // level considering to what?! in the pid namespace ?! ok so in this case it is ok!
     struct cpu_namespace *parent; // ok to keep it the ROOT namespace will be cpu_allowed or a copy of it
     

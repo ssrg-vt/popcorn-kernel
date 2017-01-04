@@ -3,7 +3,7 @@
 #include <linux/errno.h>
 #include <linux/init.h>
 
-#include "bundle.h"
+#include <popcorn/bundle.h>
 
 struct bundle bundle = {
 	.id = -1,
@@ -46,6 +46,11 @@ static bool __init __connect_to(unsigned long bid)
 {
 	/* TODO connect to peer bundles */
 	return true;
+}
+
+bool is_bundle_online(unsigned int bid)
+{
+	return test_bit(bid, bundle.bundles_online);
 }
 
 static int __init __connect_to_other_bundles(void)

@@ -268,15 +268,15 @@ static vma_op_answers_t * vma_op_answer_alloc(struct task_struct * task, int ind
 	acks->waiting = task;
 	acks->responses = 0;
 	acks->expected_responses = 0;
-	raw_spin_lock_init(&(acks->lock));
+	spin_lock_init(&(acks->lock));
 	add_vma_ack_entry(acks);
 	return acks;
 }
 
 /* THIS CAN BE DESTROY EQUIVALENT OF THE ABOVE
  unsigned long flags;
-			raw_spin_lock_irqsave(&(acks->lock), flags);
-			raw_spin_unlock_irqrestore(&(acks->lock), flags);
+			spin_lock_irqsave(&(acks->lock), flags);
+			spin_unlock_irqrestore(&(acks->lock), flags);
 			remove_vma_ack_entry(acks);
  */
 
@@ -1051,7 +1051,7 @@ static int handle_vma_ack(struct pcn_kmsg_message* inc_msg)
 	PSVMAPRINTK("Vma ack received from cpu %d\n", ack->header.from_cpu);
 	ack_holder = find_vma_ack_entry(ack->tgroup_home_cpu, ack->tgroup_home_id);
 	if (ack_holder) {
-		raw_spin_lock_irqsave(&(ack_holder->lock), flags);
+		spin_lock_irqsave(&(ack_holder->lock), flags);
 
 		ack_holder->responses++;
 		ack_holder->address = ack->addr;
@@ -1064,7 +1064,7 @@ static int handle_vma_ack(struct pcn_kmsg_message* inc_msg)
 		if (ack_holder->responses >= ack_holder->expected_responses)
 			task_to_wake_up = ack_holder->waiting;
 
-		raw_spin_unlock_irqrestore(&(ack_holder->lock), flags);
+		spin_unlock_irqrestore(&(ack_holder->lock), flags);
 
 		if (task_to_wake_up)
 			wake_up_process(task_to_wake_up);
@@ -1469,8 +1469,8 @@ start:
 			}
 			PSPRINTK("SERVER MAIN: Received all ack to lock\n");
 
-			raw_spin_lock_irqsave(&(acks->lock), flags);
-			raw_spin_unlock_irqrestore(&(acks->lock), flags);
+			spin_lock_irqsave(&(acks->lock), flags);
+			spin_unlock_irqrestore(&(acks->lock), flags);
 			remove_vma_ack_entry(acks);
 			kfree(acks);
 			kfree(lock_message);
@@ -1597,8 +1597,8 @@ start:
 			}
 			PSPRINTK("SERVER NOT MAIN: Received all ack to lock\n");
 
-			raw_spin_lock_irqsave(&(acks->lock), flags);
-			raw_spin_unlock_irqrestore(&(acks->lock), flags);
+			spin_lock_irqsave(&(acks->lock), flags);
+			spin_unlock_irqrestore(&(acks->lock), flags);
 			remove_vma_ack_entry(acks);
 			kfree(acks);
 			kfree(lock_message);

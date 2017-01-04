@@ -13,7 +13,6 @@ pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 EXPORT_SYMBOL(callbacks);
 
 send_cbftn send_callback;
-EXPORT_SYMBOL(send_callback);
 
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
@@ -44,13 +43,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 	return 0;
 }
 
-int pcn_kmsg_send(unsigned int dest_cpu, struct pcn_kmsg_message *msg)
-{
-	return pcn_kmsg_send_long(dest_cpu, (struct pcn_kmsg_long_message *)msg,
-				  sizeof(struct pcn_kmsg_message)-sizeof(struct pcn_kmsg_hdr));
-}
-
-int pcn_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg, unsigned int payload_size)
+int pcn_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg, unsigned int message_size)
 {
 	if (send_callback == NULL) {
 		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
@@ -63,7 +56,13 @@ int pcn_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 	}
 
 	return send_callback(dest_cpu, (struct pcn_kmsg_message *)lmsg,
-			payload_size - sizeof(pcn_kmsg_hdr));
+			message_size - sizeof(struct pcn_kmsg_hdr)); // adjust payload size
+}
+
+int pcn_kmsg_send(unsigned int dest_cpu, struct pcn_kmsg_message *msg)
+{
+	return pcn_kmsg_send_long(dest_cpu, (struct pcn_kmsg_long_message *)msg,
+				  sizeof(*msg));
 }
 
 void pcn_kmsg_free_msg(void *msg)
@@ -71,24 +70,9 @@ void pcn_kmsg_free_msg(void *msg)
 	vfree(msg);
 }
 
-/* TODO */
-inline int pcn_kmsg_get_node_ids(uint16_t *nodes, int len, uint16_t *self)
-{
-#if defined(CONFIG_ARM64)
-	*self = 0;
-#elif defined(CONFIG_X86_64)
-	*self = 1;
-#else
-	printk(" Unkown architecture detected\n");
-	*self = 0;
-#endif
-
-	return 0;
-}
 
 EXPORT_SYMBOL(pcn_kmsg_free_msg);
 EXPORT_SYMBOL(pcn_kmsg_send_long);
 EXPORT_SYMBOL(pcn_kmsg_send);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 EXPORT_SYMBOL(pcn_kmsg_register_callback);
-EXPORT_SYMBOL(pcn_kmsg_get_node_ids);

@@ -1351,6 +1351,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	p->utime = p->stime = p->gtime = 0;
 	p->utimescaled = p->stimescaled = 0;
+	p->lutime = p->lstime = 0;
+	p->llasttimestamp = get_jiffies_64();
 	prev_cputime_init(&p->prev_cputime);
 
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
@@ -1746,8 +1748,8 @@ struct task_struct* do_fork_for_main_kernel_thread(
 
 		process_server_dup_task(current, p);
 
-		p->represents_remote= 1;
-		p->distributed_exit= EXIT_NOT_ACTIVE;
+		p->represents_remote = 1;
+		p->distributed_exit = EXIT_NOT_ACTIVE;
 		wake_up_new_task(p);
 
 		/* forking complete and child started to run, tell ptracer */
@@ -1760,8 +1762,8 @@ struct task_struct* do_fork_for_main_kernel_thread(
 		}
 	} else {
 		nr = PTR_ERR(p);
-		printk(KERN_ALERT"%s: Failed to fork kernel thread : %ld %ld\n", __func__, nr, -nr);
-		//p = NULL;
+		printk(KERN_ALERT"%s: Failed to fork kernel thread : %ld %ld\n",
+				__func__, nr, -nr);
 	}
 	return p;
 }
@@ -1833,7 +1835,6 @@ long _do_fork(unsigned long clone_flags,
 #ifdef CONFIG_POPCORN
 		process_server_dup_task(current, p);
 #endif
-
 		wake_up_new_task(p);
 
 		/* forking complete and child started to run, tell ptracer */
@@ -1874,18 +1875,6 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 	return _do_fork(flags|CLONE_VM|CLONE_UNTRACED, (unsigned long)fn,
 		(unsigned long)arg, NULL, NULL, 0);
 }
-
-
-#ifdef CONFIG_POPCORN
-/*
- * Create a kernel thread -  required for process server to create a 
- * kernel thread from user context.
- */
-pid_t kernel_thread_popcorn(int (*fn)(void *), void *arg, unsigned long flags)
-{
-	return kernel_thread(fn, arg, current->flags|PF_KTHREAD);
-}
-#endif
 
 
 #ifdef __ARCH_WANT_SYS_FORK

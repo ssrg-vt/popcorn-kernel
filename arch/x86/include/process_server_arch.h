@@ -24,7 +24,7 @@ extern int save_thread_info(struct task_struct *task, struct pt_regs *regs, fiel
 extern int restore_thread_info(struct task_struct *task, field_arch *arch);
 extern int update_thread_info(struct task_struct *task);
 extern int initialize_thread_retval(struct task_struct *task, int val);
-extern struct task_struct* create_thread(int flags);
+//extern struct task_struct* create_thread(int flags);
 extern int dump_processor_regs(struct pt_regs* regs);
 // extern void suggest_migration(int suggestion);
 

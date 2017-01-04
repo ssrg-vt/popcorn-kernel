@@ -13,12 +13,12 @@
 #include <linux/spinlock.h>
 #include <linux/process_server.h>
 
-/* TODO use general spinlock_t instead of raw_spinlock_t */
+/* TODO use general spinlock_t instead of spinlock_t */
 extern mapping_answers_for_2_kernels_t* _mapping_head;
-extern raw_spinlock_t _mapping_head_lock;
+extern spinlock_t _mapping_head_lock;
 
 extern ack_answers_for_2_kernels_t* _ack_head;
-extern raw_spinlock_t _ack_head_lock;
+extern spinlock_t _ack_head_lock;
 
 extern struct list_head _count_head;
 extern spinlock_t _count_head_lock;
@@ -29,7 +29,7 @@ extern spinlock_t _memory_head_lock;
 extern struct list_head _vma_ack_head;
 extern spinlock_t _vma_ack_head_lock;
 
-static inline void push_data(data_header_t** phead, raw_spinlock_t* spinlock,
+static inline void push_data(data_header_t** phead, spinlock_t* spinlock,
 		data_header_t* entry)
 {
 	data_header_t* head;
@@ -39,28 +39,27 @@ static inline void push_data(data_header_t** phead, raw_spinlock_t* spinlock,
 		return;
 	entry->prev = NULL;
 
-	raw_spin_lock_irqsave(spinlock, flags);
+	spin_lock_irqsave(spinlock, flags);
 	head = *phead;
 
 	if (!head) {
 		entry->next = NULL;
 		*phead = entry;
-	}
-	else {
+	} else {
 		entry->next = head;
 		head->prev = entry;
 		*phead = entry;
 	}
-	raw_spin_unlock_irqrestore(spinlock, flags);
+	spin_unlock_irqrestore(spinlock, flags);
 }
 
-static inline data_header_t* pop_data(data_header_t** phead, raw_spinlock_t* spinlock)
+static inline data_header_t* pop_data(data_header_t** phead, spinlock_t* spinlock)
 {
 	data_header_t* ret = NULL;
 	data_header_t* head;
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(spinlock, flags);
+	spin_lock_irqsave(spinlock, flags);
 	head = *phead;
 
 	if (head) {
@@ -72,27 +71,27 @@ static inline data_header_t* pop_data(data_header_t** phead, raw_spinlock_t* spi
 		ret->next = NULL;
 		ret->prev = NULL;
 	}
-	raw_spin_unlock_irqrestore(spinlock, flags);
+	spin_unlock_irqrestore(spinlock, flags);
 
 	return ret;
 }
 
-static inline int count_data(data_header_t** phead, raw_spinlock_t* spinlock)
+static inline int count_data(data_header_t** phead, spinlock_t* spinlock)
 {
 	int ret = 0;
 	unsigned long flags;
 	data_header_t* head;
 	data_header_t* curr;
 
-	raw_spin_lock_irqsave(spinlock, flags);
-	head= *phead;
+	spin_lock_irqsave(spinlock, flags);
+	head = *phead;
 
-	curr = head;
+	curr = *phead;
 	while (curr) {
 		ret++;
 		curr = curr->next;
 	}
-	raw_spin_unlock_irqrestore(spinlock, flags);
+	spin_unlock_irqrestore(spinlock, flags);
 
 	return ret;
 }
@@ -118,7 +117,7 @@ static inline void add_mapping_entry(mapping_answers_for_2_kernels_t* entry)
 	if (!entry)
 		return;
 
-	raw_spin_lock_irqsave(&_mapping_head_lock, flags);
+	spin_lock_irqsave(&_mapping_head_lock, flags);
 
 	if (!_mapping_head) {
 		_mapping_head = entry;
@@ -137,7 +136,7 @@ static inline void add_mapping_entry(mapping_answers_for_2_kernels_t* entry)
 		entry->prev = curr;
 	}
 
-	raw_spin_unlock_irqrestore(&_mapping_head_lock, flags);
+	spin_unlock_irqrestore(&_mapping_head_lock, flags);
 #ifdef USE_DEBUG_MAPPINGS
 	{
 		data_response_for_2_kernels_t *	response = (data_response_for_2_kernels_t*) entry->data;
@@ -156,7 +155,7 @@ static inline mapping_answers_for_2_kernels_t* find_mapping_entry(int cpu, int i
 	mapping_answers_for_2_kernels_t* ret = NULL;
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&_mapping_head_lock, flags);
+	spin_lock_irqsave(&_mapping_head_lock, flags);
 
 	curr = _mapping_head;
 	while (curr) {
@@ -179,7 +178,7 @@ static inline mapping_answers_for_2_kernels_t* find_mapping_entry(int cpu, int i
 		curr = curr->next;
 	}
 
-	raw_spin_unlock_irqrestore(&_mapping_head_lock, flags);
+	spin_unlock_irqrestore(&_mapping_head_lock, flags);
 
 	return ret;
 }
@@ -191,7 +190,7 @@ static inline void remove_mapping_entry(mapping_answers_for_2_kernels_t* entry)
 	if (!entry)
 		return;
 
-	raw_spin_lock_irqsave(&_mapping_head_lock, flags);
+	spin_lock_irqsave(&_mapping_head_lock, flags);
 
 	if (_mapping_head == entry) {
 		_mapping_head = entry->next;
@@ -208,7 +207,7 @@ static inline void remove_mapping_entry(mapping_answers_for_2_kernels_t* entry)
 	entry->prev = NULL;
 	entry->next = NULL;
 
-	raw_spin_unlock_irqrestore(&_mapping_head_lock, flags);
+	spin_unlock_irqrestore(&_mapping_head_lock, flags);
 
 #ifdef USE_DEBUG_MAPPPINGS
 	{
@@ -232,7 +231,7 @@ static inline void add_ack_entry(ack_answers_for_2_kernels_t* entry)
 	if (!entry)
 		return;
 
-	raw_spin_lock_irqsave(&_ack_head_lock, flags);
+	spin_lock_irqsave(&_ack_head_lock, flags);
 
 	if (!_ack_head) {
 		_ack_head = entry;
@@ -251,7 +250,7 @@ static inline void add_ack_entry(ack_answers_for_2_kernels_t* entry)
 		entry->prev = curr;
 	}
 
-	raw_spin_unlock_irqrestore(&_ack_head_lock, flags);
+	spin_unlock_irqrestore(&_ack_head_lock, flags);
 }
 
 static inline ack_answers_for_2_kernels_t* find_ack_entry(int cpu, int id, unsigned long address)
@@ -260,7 +259,7 @@ static inline ack_answers_for_2_kernels_t* find_ack_entry(int cpu, int id, unsig
 	ack_answers_for_2_kernels_t* ret = NULL;
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&_ack_head_lock, flags);
+	spin_lock_irqsave(&_ack_head_lock, flags);
 
 	curr = _ack_head;
 	while (curr) {
@@ -283,7 +282,7 @@ static inline ack_answers_for_2_kernels_t* find_ack_entry(int cpu, int id, unsig
 		curr = curr->next;
 	}
 
-	raw_spin_unlock_irqrestore(&_ack_head_lock, flags);
+	spin_unlock_irqrestore(&_ack_head_lock, flags);
 	return ret;
 }
 
@@ -295,7 +294,7 @@ static inline void remove_ack_entry(ack_answers_for_2_kernels_t* entry)
 		return;
 	}
 
-	raw_spin_lock_irqsave(&_ack_head_lock, flags);
+	spin_lock_irqsave(&_ack_head_lock, flags);
 
 	if (_ack_head == entry) {
 		_ack_head = entry->next;
@@ -312,7 +311,7 @@ static inline void remove_ack_entry(ack_answers_for_2_kernels_t* entry)
 	entry->prev = NULL;
 	entry->next = NULL;
 
-	raw_spin_unlock_irqrestore(&_ack_head_lock, flags);
+	spin_unlock_irqrestore(&_ack_head_lock, flags);
 }
 #endif
 

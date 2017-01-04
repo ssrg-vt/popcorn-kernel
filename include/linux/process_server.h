@@ -79,18 +79,20 @@ typedef struct _data_header {
 
 typedef struct {
 	data_header_t head;
-	struct task_struct * thread;
+	//struct list_head list;
+	struct task_struct *thread;
 } shadow_thread_t;
 
 struct _memory_struct;
 
 typedef struct {
 	data_header_t head;
-	struct task_struct * main;
+	struct list_head list;
+	spinlock_t spinlock;
+	struct task_struct *main;
 	shadow_thread_t* threads;
-	raw_spinlock_t spinlock;
 	struct _memory_struct* memory;
-} thread_pull_t;
+} remote_thread_t;
 
 typedef struct _memory_struct {
 	struct list_head list;
@@ -99,7 +101,7 @@ typedef struct _memory_struct {
 	int tgroup_home_id;
 	struct mm_struct* mm;
 	int alive;
-	struct task_struct * main;
+	struct task_struct *main;
 
 	int operation;
 	unsigned long addr;
@@ -122,7 +124,7 @@ typedef struct _memory_struct {
 	spinlock_t lock_for_answer;
 	struct rw_semaphore kernel_set_sem;
 	vma_operation_t* message_push_operation;
-	thread_pull_t* thread_pull;
+	remote_thread_t* thread_pool;
 	atomic_t pending_migration;
 	atomic_t pending_back_migration;
 } memory_t;
@@ -135,7 +137,7 @@ typedef struct count_answers {
 	int responses;
 	int expected_responses;
 	int count;
-	raw_spinlock_t lock;
+	spinlock_t lock;
 	struct task_struct * waiting;
 } count_answers_t;
 
@@ -398,11 +400,6 @@ typedef struct {
 
 }__attribute__((packed)) thread_group_exited_notification_t;
 
-typedef struct{
-	struct pcn_kmsg_hdr header;
-	char pad[PCN_KMSG_PAYLOAD_SIZE];
-
-}__attribute__((packed)) create_thread_pull_t;
 /**
  * Inform remote cpu of a vma to process mapping.
  */
@@ -664,7 +661,7 @@ typedef struct vma_op_answers {
 	int vma_operation_index;
 	unsigned long address;
 	struct task_struct *waiting;
-	raw_spinlock_t lock;
+	spinlock_t lock;
 
 } vma_op_answers_t;
 

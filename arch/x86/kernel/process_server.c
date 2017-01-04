@@ -25,10 +25,12 @@
 #include <asm/uaccess.h>
 #include <process_server_arch.h>
 
+/*
 #ifdef PSPRINTK
 #undef PSPRINTK
 #define PSPRINTK(...)
 #endif
+*/
 
 /* External function declarations */
 extern void __show_regs(struct pt_regs *regs, int all);
@@ -134,7 +136,8 @@ int save_thread_info(struct task_struct *task, struct pt_regs *regs,
 		arch->thread_gs = gs;
 	}
 
-	PSPRINTK("%s: pc %lx sp %lx bp %lx ra %lx\n", __func__, arch->migration_pc, arch->old_rsp, arch->bp, arch->ra);
+	PSPRINTK("%s: pc %lx sp %lx bp %lx ra %lx\n", __func__,
+			arch->migration_pc, arch->old_rsp, arch->bp, arch->ra);
 
 	PSPRINTK("%s: fs task %lx[%lx] saved %lx[%lx] current %lx[%lx]\n", __func__,
 	      (unsigned long)task->thread.fs, (unsigned long)task->thread.fsindex,
@@ -324,46 +327,8 @@ int initialize_thread_retval(struct task_struct *task, int val)
 	return 0;
 }
 
-/*
- * Function:
- *		create_thread
- *
- * Description:
- *		this function creates an empty thread and returns its task
- *		structure
- *
- * Input:
- * 	flags,	the clone flags to be used to create the new thread
- *
- * Output:
- * 	none
- *
- * Return value:
- * 	on success,	returns pointer to newly created task's structure,
- *	on failure, returns NULL
- */
-struct task_struct* create_thread(int flags)
-{
-	struct task_struct *task = NULL;
-	struct pt_regs regs;
-
-	memset(&regs, 0, sizeof(struct pt_regs));
-
-	current->flags &= ~PF_KTHREAD;
-	task = do_fork_for_main_kernel_thread(flags, 0, &regs, 0, NULL, NULL);
-	current->flags |= PF_KTHREAD;
-
-	if (task != NULL) {
-		PSPRINTK("%s [-]: task = %p\n", __func__, task);
-	} else {
-		printk("%s [-]: do_fork failed, task = %p at %p\n", __func__, task, &task);
-	}
-
-	return task;
-}
 
 #if MIGRATE_FPU
-
 /*/
  * Function:
  *		save_fpu_info

@@ -1415,7 +1415,6 @@ struct task_struct {
 	unsigned int policy;
 	int nr_cpus_allowed;
 	cpumask_t cpus_allowed;
-	struct cpubitmap *cpus_allowed_map; // SHOULD BE struct list_head cpus_allowed_map
 
 #ifdef CONFIG_PREEMPT_RCU
 	int rcu_read_lock_nesting;

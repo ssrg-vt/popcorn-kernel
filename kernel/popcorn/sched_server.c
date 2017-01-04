@@ -58,7 +58,6 @@ struct popcorn_sched {
 ///////////////////////////////////////////////////////////////////////////////
 static int popcorn_sched_sync(void *_param)
 {
-	int other = 0;
 	sched_periodic_req req;
 
 	while (!kthread_should_stop()) {

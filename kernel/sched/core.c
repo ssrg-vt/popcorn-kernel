@@ -2657,6 +2657,11 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 
 	if (current->set_child_tid)
 		put_user(task_pid_vnr(current), current->set_child_tid);
+
+#ifdef CONFIG_POPCORN
+	if (current->represents_remote == 1)
+		sleep_shadow();
+#endif
 }
 
 /*
@@ -4583,12 +4588,62 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 	return ret;
 }
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/bundle.h>
+static int __do_migrate(struct task_struct *p, unsigned int nid,
+		unsigned long pc, unsigned long ret_addr)
+{
+	struct pt_regs *regs = current_pt_regs();
+	int retval;
+
+	get_task_struct(p);
+
+	/* sanghoon: take pc and ret_addr from syscall for het migration */
+	p->migration_pc = pc;
+	p->return_addr = ret_addr;
+
+	retval = process_server_do_migration(p, nid, regs, NULL);
+
+	put_task_struct(p);
+	return retval;
+}
+
 
 SYSCALL_DEFINE2(sched_migrate, pid_t, pid, unsigned int, nid)
 {
-	printk("%s: %u, %u\n", __func__, pid, nid);
-	return 0;
+	struct task_struct *p;
+	int retval;
+
+	printk(KERN_INFO"%s: %u, %u\n", __func__, pid, nid);
+
+	rcu_read_lock();
+	p = find_process_by_pid(pid);
+	if (!p) {
+		retval = -ESRCH;
+		goto out_unlock;
+	}
+
+	printk(KERN_INFO"%s: task at %p\n", __func__, p);
+	if (!is_bundle_online(nid)) {
+		retval = -EAGAIN;
+		goto out_unlock;
+	}
+
+	printk(KERN_INFO"%s: bundle %d is online\n", __func__, nid);
+	retval = __do_migrate(p, nid, 0, 0);
+
+out_unlock:
+	rcu_read_unlock();
+	return retval;
 }
+
+#else // CONFIG_POPCORN
+
+SYSCALL_DEFINE2(sched_migrate, pid_t, pid, unsigned int, nid)
+{
+	return -EINVAL;
+}
+#endif
 
 /**
  * sys_sched_yield - yield the current processor to other threads.

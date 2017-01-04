@@ -9,7 +9,6 @@ enum {
 	BUNDLE_NODE_UNKNOWN = 2,
 };
 
-int setup_bundle_node(void);
 
 struct bundle {
 	unsigned int id;
@@ -18,6 +17,9 @@ struct bundle {
 	unsigned long bundles_online[BITS_TO_LONGS(MAX_BUNDLE_ID)];
 };
 
-struct bundle bundle;
+extern struct bundle bundle;
+
+int setup_bundle_node(void);
+bool is_bundle_online(unsigned int bid);
 
 #endif
