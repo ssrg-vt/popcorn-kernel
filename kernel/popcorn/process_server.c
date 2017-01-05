@@ -146,7 +146,8 @@ static int count_remote_thread_members(int tgroup_home_cpu, int tgroup_home_id, 
 		if (mm_data->kernel_set[i]==1){
 			// Send the request to this cpu.
 			//s = pcn_kmsg_send(i, (struct pcn_kmsg_message*) (&request));
-			s = pcn_kmsg_send_long(i, (struct pcn_kmsg_long_message*) (request),sizeof(remote_thread_count_request_t)- sizeof(struct pcn_kmsg_hdr));
+			s = pcn_kmsg_send_long(i, (struct pcn_kmsg_long_message*)(request),
+					sizeof(remote_thread_count_request_t));
 			if (s!=-1) {
 				// A successful send operation, increase the number
 				// of expected responses.
@@ -283,7 +284,7 @@ static void process_new_kernel(struct work_struct* work)
 		//printk("just before send %s answer->vma_operation_index %d NR_CPU %d\n",__func__,answer->vma_operation_index,MAX_KERNEL_IDS);
 		pcn_kmsg_send_long(new_kernel_work->request->header.from_cpu,
 				   (struct pcn_kmsg_long_message*) answer,
-				   sizeof(new_kernel_answer_t) - sizeof(struct pcn_kmsg_hdr));
+				   sizeof(new_kernel_answer_t));
 		//int ret=pcn_kmsg_send(new_kernel_work->request->header.from_cpu, (struct pcn_kmsg_long_message*) answer);
 		//printk("%s send long ret is %d sizeof new_kernel_answer_t is %d size of header is %d\n",__func__,ret,sizeof(new_kernel_answer_t),sizeof(struct pcn_kmsg_hdr));
 		kfree(answer);
@@ -506,7 +507,7 @@ find:
 				// the list does not include the current processor group descirptor (TODO)
 				list_for_each_entry_safe(objPtr, tmpPtr, &rlist_head, cpu_list_member) {
 					i = objPtr->_data._processor;
-					pcn_kmsg_send_long(i,(struct pcn_kmsg_long_message*)(exit_notification),sizeof(thread_group_exited_notification_t)- sizeof(struct pcn_kmsg_hdr));
+					pcn_kmsg_send_long(i,(struct pcn_kmsg_long_message*)(exit_notification),sizeof(thread_group_exited_notification_t));
 
 				}
 				kfree(exit_notification);
@@ -540,7 +541,45 @@ find:
 	return 0;
 }
 
-static void create_new_threads(thread_pull_t * my_thread_pull, int *spare_threads)
+/*
+ * Function:
+ *		create_thread
+ *
+ * Description:
+ *		this function creates an empty thread and returns its task
+ *		structure
+ *
+ * Input:
+ * 	flags,	the clone flags to be used to create the new thread
+ *
+ * Output:
+ * 	none
+ *
+ * Return value:
+ * 	on success,	returns pointer to newly created task's structure,
+ *	on failure, returns NULL
+ */
+struct task_struct* create_thread(int flags)
+{
+	struct task_struct *task = NULL;
+	struct pt_regs regs;
+
+	memset(&regs, 0, sizeof(regs));
+
+	current->flags &= ~PF_KTHREAD;
+	task = do_fork_for_main_kernel_thread(flags, 0, &regs, 0, NULL, NULL);
+	current->flags |= PF_KTHREAD;
+
+	if (task != NULL) {
+		PSPRINTK("%s [-]: task = %p\n", __func__, task);
+	} else {
+		printk("%s [-]: do_fork failed, task = %p at %p\n", __func__, task, &task);
+	}
+
+	return task;
+}
+
+static void __spawn_shadow_threads(remote_thread_t *pool, int *spare_threads)
 {
 	int count;
     //printk("%s\n", __func__);
@@ -1027,7 +1066,7 @@ static void process_count_request(struct work_struct* _work)
 	// Send response
 	pcn_kmsg_send_long(request->header.from_cpu,
 			(struct pcn_kmsg_long_message*)response,
-			sizeof(*response) - sizeof(struct pcn_kmsg_hdr));
+			sizeof(*response));
 
 	pcn_kmsg_free_msg(request);
 	kfree(response);
@@ -1214,7 +1253,8 @@ int process_server_task_exit_notification(struct task_struct *tsk, long code)
 	memory_t* entry = NULL;
 	unsigned long flags;
 	
-	PSPRINTK("MORTEEEEEE-Process_server_task_exit_notification - pid{%d}\n", tsk->pid);
+	PSPRINTK("MORTEEEEEE-Process_server_task_exit_notification - pid{%d}\n",
+			tsk->pid);
 
 	if (tsk->distributed_exit==EXIT_ALIVE) {
 		entry = find_memory_entry(tsk->tgroup_home_cpu, tsk->tgroup_home_id);
@@ -1263,7 +1303,7 @@ int process_server_task_exit_notification(struct task_struct *tsk, long code)
 				//printk("message exit to shadow sent\n");
 				tx_ret = pcn_kmsg_send_long(tsk->prev_cpu,
 							    (struct pcn_kmsg_long_message*) msg,
-							    sizeof(exiting_process_t) - sizeof(struct pcn_kmsg_hdr));
+							    sizeof(exiting_process_t));
 				kfree(msg);
 			}
 		}
@@ -1295,7 +1335,7 @@ static int process_server_notify_delegated_subprocess_starting(pid_t pid,
 	msg->my_pid = pid;
 
 	tx_ret = pcn_kmsg_send_long(remote_cpu, (struct pcn_kmsg_long_message *) msg,
-				    sizeof(create_process_pairing_t)-sizeof(struct pcn_kmsg_hdr));
+				    sizeof(create_process_pairing_t));
 	kfree(msg);
 
 	return tx_ret;
@@ -1417,7 +1457,7 @@ static int do_back_migration(struct task_struct *task, int dst_cpu,
 
 	ret = pcn_kmsg_send_long(dst_cpu,
 				 (struct pcn_kmsg_long_message *)request,
-				 sizeof(clone_request_t) - sizeof(struct pcn_kmsg_hdr));
+				 sizeof(clone_request_t));
 
 	kfree(request);
 	return ret;
@@ -1498,7 +1538,10 @@ int do_migration(struct task_struct* task, int dst_cpu,
 	request->personality = task->personality;
 
 	// TODO: Handle return value
-	save_thread_info(task, regs, &request->arch, uregs);
+	if (save_thread_info(task, regs, &request->arch, uregs) != 0) {
+		kfree(request);
+		return -EINVAL;
+	}
 
 #if MIGRATE_FPU
 	save_fpu_info(task, &request->arch);
@@ -1576,8 +1619,16 @@ int do_migration(struct task_struct* task, int dst_cpu,
         printk(KERN_ERR "Time for x86->arm migration - x86 side: %ld ns\n", (unsigned long)ktime_to_ns(ktime_sub(migration_end,migration_start)));
 #endif
 	tx_ret = pcn_kmsg_send_long(dst_cpu,
-				    (struct pcn_kmsg_long_message*) request,
-				    sizeof(clone_request_t) - sizeof(struct pcn_kmsg_hdr));
+				    (struct pcn_kmsg_long_message *)request,
+				    sizeof(clone_request_t));
+#else
+	tx_ret = handle_clone_request((void *)request);
+#endif
+
+	if (create_kernel_proxy) {
+		pid_t pid = kernel_thread_popcorn(
+				create_kernel_thread_for_distributed_process_from_user_one,
+				entry, CLONE_THREAD | CLONE_SIGHAND | CLONE_VM | SIGCHLD);
 
 	if (first) {
 		PSPRINTK(KERN_EMERG"%s: Creating kernel thread\n", __func__);
@@ -1917,7 +1968,7 @@ static int create_kernel_thread_for_distributed_process(void *data)
 
 		if (pcn_kmsg_send_long(i,
 			   (struct pcn_kmsg_long_message*)(new_kernel_msg),
-			   sizeof(new_kernel_t) - sizeof(struct pcn_kmsg_hdr)) != -1) {
+			   sizeof(new_kernel_t)) != -1) {
 			// Message delivered
 			entry->exp_answ++;
 		}

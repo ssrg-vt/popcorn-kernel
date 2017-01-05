@@ -2679,8 +2679,6 @@ extern struct task_struct* do_fork_for_main_kernel_thread(unsigned long clone_fl
 							  unsigned long stack_start, struct pt_regs *regs,
 							  unsigned long stack_size, int __user *parent_tidptr,
 							  int __user *child_tidptr);
-extern pid_t kernel_thread_popcorn(int (*fn)(void *), void *arg, unsigned long flags);
-
 #endif
 extern int exec_mmap(struct mm_struct *mm);
 

@@ -155,7 +155,7 @@ static int handle_remote_proc_cpu_info_request(struct pcn_kmsg_message* inc_msg)
 	printk("Kerenel %d: handle_remote_proc_cpu_info_request\n", Kernel_Id);
 	pcn_kmsg_send_long(msg->header.from_cpu,
 			(struct pcn_kmsg_long_message*)response,
-			sizeof(_remote_cpu_info_response_t) - sizeof(struct pcn_kmsg_hdr));
+			sizeof(_remote_cpu_info_response_t));
 	// Delete received message
 	pcn_kmsg_free_msg(inc_msg);
 	kfree(response);
@@ -190,7 +190,7 @@ int send_cpu_info_request(int KernelId)
 	// Send response
 	printk("Kerenel %d: send_cpu_info_request\n", Kernel_Id);
 	res = pcn_kmsg_send_long(KernelId, (struct pcn_kmsg_long_message*) (request),
-			sizeof(_remote_cpu_info_request_t) - sizeof(struct pcn_kmsg_hdr));
+			sizeof(_remote_cpu_info_request_t)));
 	return res;
 }
 

@@ -62,7 +62,8 @@ int pcn_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 		return 0;
 	}
 
-	return send_callback(dest_cpu, (struct pcn_kmsg_message *)lmsg, payload_size);
+	return send_callback(dest_cpu, (struct pcn_kmsg_message *)lmsg,
+			payload_size - sizeof(pcn_kmsg_hdr));
 }
 
 void pcn_kmsg_free_msg(void *msg)

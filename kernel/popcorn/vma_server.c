@@ -150,8 +150,7 @@ static inline int vma_send_long_all( memory_t * entry, void * message, int size,
 					&& (i == entry->message_push_operation->from_cpu))
 				continue;
 			error = pcn_kmsg_send_long(i,
-					(struct pcn_kmsg_long_message*) message,
-					(size - sizeof(struct pcn_kmsg_hdr)) );
+					(struct pcn_kmsg_long_message*) message, size);
 			if (error != -1)
 				acks++;
 		}
@@ -1016,8 +1015,7 @@ static void process_vma_lock(struct work_struct* work)
 	ack_to_server->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	pcn_kmsg_send_long(lock->tgroup_home_cpu,
-			   (struct pcn_kmsg_long_message*) (ack_to_server),
-			   sizeof(vma_ack_t) - sizeof(struct pcn_kmsg_hdr));
+			   (struct pcn_kmsg_long_message*)ack_to_server, sizeof(vma_ack_t));
 
 	kfree(ack_to_server);
 	pcn_kmsg_free_msg(lock);
@@ -1174,7 +1172,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 			case VMA_OP_BRK:
 				err = pcn_kmsg_send_long(entry->message_push_operation->from_cpu,
 										       (struct pcn_kmsg_long_message*) (entry->message_push_operation),
-										       sizeof(vma_operation_t) - sizeof(struct pcn_kmsg_hdr));
+										       sizeof(vma_operation_t));
 				if (err == -1)
 					printk("%s: ERROR: impossible to send operation %d to client in cpu %d\n",
 							__func__, operation, entry->message_push_operation->from_cpu);
@@ -1453,7 +1451,7 @@ start:
 			if (operation == VMA_OP_MAP || operation == VMA_OP_BRK) {
 				error = pcn_kmsg_send_long(entry->message_push_operation->from_cpu,
 								(struct pcn_kmsg_long_message*) (lock_message),
-								sizeof(vma_lock_t) - sizeof(struct pcn_kmsg_hdr));
+								sizeof(vma_lock_t));
 				if (error != -1)
 					acks->expected_responses++;
 			}
@@ -1706,7 +1704,7 @@ start:
 		//send the operation to the server
 		error = pcn_kmsg_send_long(current->tgroup_home_cpu,
 					   (struct pcn_kmsg_long_message*) (operation_to_send),
-					   sizeof(vma_operation_t) - sizeof(struct pcn_kmsg_hdr));
+					   sizeof(vma_operation_t));
 		if (error == -1) {
 			printk("%s: ERROR: Impossible to contact the server", __func__);
 			kfree(operation_to_send);

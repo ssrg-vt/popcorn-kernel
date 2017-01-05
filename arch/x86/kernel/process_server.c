@@ -63,7 +63,6 @@ extern struct task_struct* do_fork_for_main_kernel_thread(unsigned long clone_fl
 int save_thread_info(struct task_struct *task, struct pt_regs *regs,
                      field_arch *arch, void __user *uregs)
 {
-	int ret;
 	unsigned short fsindex, gsindex;
 	unsigned short es, ds;
 	unsigned long fs, gs;
@@ -81,16 +80,17 @@ int save_thread_info(struct task_struct *task, struct pt_regs *regs,
 	}
 
 	if (uregs != NULL) {
-		// TODO beowulf: aarch / x86
-		ret = copy_from_user(&arch->regs_aarch, uregs, sizeof(struct popcorn_regset_aarch64));
-		if (ret != 0) {
-			printk(KERN_ERR"%s: ERROR: while copying registers (%d)\n", __func__, ret);
+		int remain = copy_from_user(&arch->regs_aarch, uregs,
+				sizeof(struct popcorn_regset_aarch64));
+		if (remain != 0) {
+			printk(KERN_ERR"%s: ERROR: while copying registers (%d)\n",
+					__func__, remain);
+			return -EINVAL;
 		}
 	}
+	memcpy(&arch->regs, regs, sizeof(struct pt_regs));
 
 	arch->migration_pc = task->migration_pc;
-
-	memcpy(&arch->regs, regs, sizeof(struct pt_regs));
 
 	arch->thread_usersp = task->thread.usersp;
 	task->saved_old_rsp = read_old_rsp();
