@@ -402,7 +402,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->main = 0;
 	tsk->surrogate = -1; // this is for futex
 	tsk->group_exit = -1;
-	tsk->uaddr = 0;
 
 	/* If the new tsk is not in the same thread group as the parent,
 	 * then we do not need to propagate the old thread info.

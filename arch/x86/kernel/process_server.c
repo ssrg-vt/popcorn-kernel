@@ -538,8 +538,6 @@ void dump_processor_regs(struct pt_regs* regs)
 	printk(KERN_ALERT"fsindex{%lx} - %x\n",fsindex, current->thread.fsindex);
 	printk(KERN_ALERT"gsindex{%lx} - %x\n",gsindex, current->thread.gsindex);
 	printk(KERN_ALERT"REGS DUMP COMPLETE\n");
-
-	return 0;
 }
 
 #if 0 // beowulf. removed

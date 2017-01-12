@@ -24,6 +24,8 @@ const unsigned long __node_addrs[] = {
 	0x000002ul,
 };
 
+struct bundle bundles[MAX_BUNDLE_ID];
+
 static int __init parse_bundle_id_opt(char *str)
 {
 	unsigned int ids[3] = {-1};

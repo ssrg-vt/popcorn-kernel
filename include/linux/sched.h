@@ -1839,7 +1839,6 @@ struct task_struct {
 	int return_disposition;
 	int origin_pid;
 	pid_t surrogate;
-	unsigned long uaddr;
 
 	/*Ajith - for het migration */
 	unsigned long migration_pc;

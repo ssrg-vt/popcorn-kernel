@@ -29,7 +29,6 @@ extern spinlock_t _memory_head_lock;
 extern struct list_head _vma_ack_head;
 extern spinlock_t _vma_ack_head_lock;
 
-#if 0 // beowulf
 ///////////////////////////////////////////////////////////////////////////////
 // Specialized functions (TODO need massive refactoring)
 ///////////////////////////////////////////////////////////////////////////////
@@ -243,7 +242,6 @@ static inline void remove_ack_entry(ack_answers_for_2_kernels_t* entry)
 
 	spin_unlock_irqrestore(&_ack_head_lock, flags);
 }
-#endif
 
 
 /*

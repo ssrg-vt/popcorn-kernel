@@ -9,7 +9,6 @@ enum {
 	BUNDLE_NODE_UNKNOWN = 2,
 };
 
-
 struct bundle {
 	unsigned int id;
 	unsigned int subid;
@@ -21,5 +20,8 @@ extern struct bundle bundle;
 
 int setup_bundle_node(void);
 bool is_bundle_online(unsigned int bid);
+
+struct popcorn_node {
+};
 
 #endif
