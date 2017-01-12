@@ -104,6 +104,6 @@ static inline void put_cpu_ns(struct cpu_namespace *ns)
 #endif /* CONFIG_CPU_NS */
 
 int build_popcorn_ns(int force);
-int associate_to_popcorn_ns(struct task_struct * tsk);
+int associate_to_popcorn_ns(struct task_struct *tsk);
 
 #endif /* _LINUX_CPU_NS_H */

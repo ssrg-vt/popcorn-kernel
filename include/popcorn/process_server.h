@@ -25,8 +25,10 @@ int page_server_try_handle_mm_fault(
 		unsigned long page_fault_flags,
 		unsigned long error_code);
 int process_server_task_exit_notification(struct task_struct *tsk, long code);
-void sleep_shadow(void);
 
 void synchronize_migrations(int tgroup_home_cpu,int tgroup_home_id);
+int shadow_main(void *_args);
+
+int popcorn_process_exit(long code);
 
 #endif /* __POPCORN_PROCESS_SERVER_H */

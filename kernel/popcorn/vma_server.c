@@ -488,44 +488,132 @@ int vma_server_do_mapping_for_distributed_process(mapping_answers_for_2_kernels_
 	prot |= (fetching_page->vm_flags & VM_WRITE) ? PROT_WRITE : 0;
 	prot |= (fetching_page->vm_flags & VM_EXEC) ? PROT_EXEC : 0;
 
-	if (fetching_page->vma_present == 1) {
-		if (fetching_page->path[0] == '\0') { // anonymous page mapping
+	if (fetching_page->vma_present != 1) {
+		// NOTE this case is not handled and returns 0! (vma_present == 0)
+		return 0;
+	}
 
+	if (fetching_page->path[0] == '\0') { // anonymous page mapping
+		vma = find_vma(mm, address);
+		if (!vma || address >= vma->vm_end || address < vma->vm_start) {
+			vma = NULL;
+		}
+
+		if (!vma
+			|| (vma->vm_start != fetching_page->vaddr_start)
+			|| (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size))) {
+
+			spin_unlock(ptl);
+			/*PTE UNLOCKED*/
+
+			/* Note: during a page fault the distribute lock is held in read =>
+			 * distributed vma operations cannot happen in the same time
+			 */
+			up_read(&mm->mmap_sem);
+			down_write(&mm->mmap_sem);
+
+			/* when I release the down write on mmap_sem, another thread of my process
+			 * could install the same vma that I am trying to install
+			 * (only fetch of same addresses are prevent, not fetch of different addresses on the same vma)
+			 * take the newest vma.
+			 * */
 			vma = find_vma(mm, address);
 			if (!vma || address >= vma->vm_end || address < vma->vm_start) {
 				vma = NULL;
 			}
 
-			if (!vma
+			/* All vma operations are distributed, except for mmap =>
+			 * When I receive a vma, the only difference can be on the size (start, end) of the vma.
+			 */
+			if ( !vma
 				|| (vma->vm_start != fetching_page->vaddr_start)
-			    || (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size))) {
+				|| (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size)) ) {
+				PSPRINTK("Mapping anonymous vma start %lx end %lx\n", fetching_page->vaddr_start, (fetching_page->vaddr_start + fetching_page->vaddr_size));
 
-				spin_unlock(ptl);
-				/*PTE UNLOCKED*/
-
-				/* Note: during a page fault the distribute lock is held in read =>
-				 * distributed vma operations cannot happen in the same time
-				 */
-				up_read(&mm->mmap_sem);
-				down_write(&mm->mmap_sem);
-
-				/* when I release the down write on mmap_sem, another thread of my process
-				 * could install the same vma that I am trying to install
-				 * (only fetch of same addresses are prevent, not fetch of different addresses on the same vma)
-				 * take the newest vma.
+				/*Note:
+				 * This mapping is caused because when a thread migrates it does not have any vma
+				 * so during fetch vma can be pushed.
+				 * This mapping has the precedence over "normal" vma operations because is a page fault
 				 * */
+				if (tsk->mm->distribute_unmap == 0)
+					printk(KERN_ALERT"%s: ERROR: anon value was already 0, check who is the older.\n", __func__);
+				tsk->mm->distribute_unmap = 0;
+
+				/*map_difference should map in such a way that no unmap operations (the only nested operation that mmap can call) are nested called.
+				 * This is important both to not unmap pages that should not be unmapped
+				 * but also because otherwise the vma protocol will deadlock!
+				 */
+				err = map_difference(NULL, fetching_page->vaddr_start,
+							 fetching_page->vaddr_size, prot,
+							 MAP_FIXED | MAP_ANONYMOUS
+							 | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
+							 | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0)
+							 | ((fetching_page->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0), 0);
+
+				if (tsk->mm->distribute_unmap == 1)
+					printk(KERN_ALERT"%s: ERROR: anon value was already 1, check who is the older.\n", __func__);
+				tsk->mm->distribute_unmap = 1;
+
+				if (err != fetching_page->vaddr_start) {
+					up_write(&mm->mmap_sem);
+					down_read(&mm->mmap_sem);
+					spin_lock(ptl);
+					/*PTE LOCKED*/
+					printk(
+						"%s: ERROR: error mapping anonymous vma while fetching address %lx\n",
+						__func__, address);
+					ret = VM_FAULT_VMA;
+					return ret;
+				}
+			}
+
+			up_write(&mm->mmap_sem);
+			down_read(&mm->mmap_sem);
+			spin_lock(ptl);
+			/*PTE LOCKED*/
+		}
+	} else { //not anonymous page
+		vma = find_vma(mm, address);
+		if (!vma || address >= vma->vm_end || address < vma->vm_start) {
+			vma = NULL;
+		}
+
+		if (!vma
+			|| (vma->vm_start != fetching_page->vaddr_start)
+			|| (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size))) {
+			struct file* f;
+
+			spin_unlock(ptl);
+			/*PTE UNLOCKED*/
+
+			up_read(&mm->mmap_sem);
+
+			f = filp_open(fetching_page->path, O_RDONLY | O_LARGEFILE, 0);
+
+			if (IS_ERR(f)) {
+					down_read(&mm->mmap_sem);
+					spin_lock(ptl);
+					/*PTE LOCKED*/
+					printk("%s: ERROR: error while opening file %s\n",
+						   __func__, fetching_page->path);
+					ret = VM_FAULT_VMA;
+					return ret;
+			}
+
+			down_write(&mm->mmap_sem);
+
+				//check if other threads already installed the vma
 				vma = find_vma(mm, address);
 				if (!vma || address >= vma->vm_end || address < vma->vm_start) {
 					vma = NULL;
 				}
 
-				/* All vma operations are distributed, except for mmap =>
-				 * When I receive a vma, the only difference can be on the size (start, end) of the vma.
-				 */
 				if ( !vma
 					|| (vma->vm_start != fetching_page->vaddr_start)
-				    || (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size)) ) {
-					PSPRINTK("Mapping anonymous vma start %lx end %lx\n", fetching_page->vaddr_start, (fetching_page->vaddr_start + fetching_page->vaddr_size));
+					|| (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size)) ) {
+
+					PSPRINTK("%s: Mapping file vma start %lx end %lx\n",
+							__func__, fetching_page->vaddr_start, (fetching_page->vaddr_start + fetching_page->vaddr_size));
 
 					/*Note:
 					 * This mapping is caused because when a thread migrates it does not have any vma
@@ -533,149 +621,64 @@ int vma_server_do_mapping_for_distributed_process(mapping_answers_for_2_kernels_
 					 * This mapping has the precedence over "normal" vma operations because is a page fault
 					 * */
 					if (tsk->mm->distribute_unmap == 0)
-						printk(KERN_ALERT"%s: ERROR: anon value was already 0, check who is the older.\n", __func__);
+						printk(KERN_ALERT"%s: ERROR: file backed value was already 0, check who is the older.\n", __func__);
 					tsk->mm->distribute_unmap = 0;
+
+					PSPRINTK("%s:%d page offset = %lu 0x%p\n", __func__,__LINE__,
+							fetching_page->pgoff, mm->exe_file);
+					fetching_page->pgoff = get_file_offset(mm->exe_file, fetching_page->vaddr_start);
+					PSPRINTK("%s:%d page offset = %lu\n", __func__, __LINE__,
+							fetching_page->pgoff);
 
 					/*map_difference should map in such a way that no unmap operations (the only nested operation that mmap can call) are nested called.
 					 * This is important both to not unmap pages that should not be unmapped
 					 * but also because otherwise the vma protocol will deadlock!
 					 */
-					err = map_difference(NULL, fetching_page->vaddr_start,
-							     fetching_page->vaddr_size, prot,
-							     MAP_FIXED | MAP_ANONYMOUS
-							     | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
-							     | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0)
-							     | ((fetching_page->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0), 0);
-
+					err = map_difference(f, fetching_page->vaddr_start,
+								   fetching_page->vaddr_size, prot,
+								   MAP_FIXED
+								   | ((fetching_page->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
+								   /* Ported to Linux 3.12
+								  | ((fetching_page->vm_flags & VM_EXECUTABLE) ? MAP_EXECUTABLE : 0) */
+								   | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
+								   | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0),
+								   fetching_page->pgoff << PAGE_SHIFT);
 					if (tsk->mm->distribute_unmap == 1)
-						printk(KERN_ALERT"%s: ERROR: anon value was already 1, check who is the older.\n", __func__);
+						printk(KERN_ALERT"%s: ERROR: file backed value was already 1, check who is the older.\n", __func__);
 					tsk->mm->distribute_unmap = 1;
 
+					PSPRINTK("Map difference ended\n");
 					if (err != fetching_page->vaddr_start) {
 						up_write(&mm->mmap_sem);
 						down_read(&mm->mmap_sem);
 						spin_lock(ptl);
 						/*PTE LOCKED*/
-						printk(
-							"%s: ERROR: error mapping anonymous vma while fetching address %lx\n",
+						printk("%s: ERROR: error mapping file vma while fetching address %lx\n",
 							__func__, address);
 						ret = VM_FAULT_VMA;
 						return ret;
 					}
 				}
 
-				up_write(&mm->mmap_sem);
-				down_read(&mm->mmap_sem);
-				spin_lock(ptl);
-				/*PTE LOCKED*/
-			}
+
+			up_write(&mm->mmap_sem);
+			PSPRINTK("releasing lock write\n");
+			filp_close(f, NULL);
+
+			down_read(&mm->mmap_sem);
+			PSPRINTK("lock read taken\n");
+			spin_lock(ptl);
+			/*PTE LOCKED*/
 		}
-		else { //not anonymous page
-			vma = find_vma(mm, address);
-			if (!vma || address >= vma->vm_end || address < vma->vm_start) {
-				vma = NULL;
-			}
-
-			if (!vma
-				|| (vma->vm_start != fetching_page->vaddr_start)
-			    || (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size))) {
-				struct file* f;
-
-				spin_unlock(ptl);
-				/*PTE UNLOCKED*/
-
-				up_read(&mm->mmap_sem);
-
-				f = filp_open(fetching_page->path, O_RDONLY | O_LARGEFILE, 0);
-
-				if (IS_ERR(f)) {
-						down_read(&mm->mmap_sem);
-						spin_lock(ptl);
-						/*PTE LOCKED*/
-						printk("%s: ERROR: error while opening file %s\n",
-						       __func__, fetching_page->path);
-						ret = VM_FAULT_VMA;
-						return ret;
-				}
-
-				down_write(&mm->mmap_sem);
-
-					//check if other threads already installed the vma
-					vma = find_vma(mm, address);
-					if (!vma || address >= vma->vm_end || address < vma->vm_start) {
-						vma = NULL;
-					}
-
-					if ( !vma
-						|| (vma->vm_start != fetching_page->vaddr_start)
-					    || (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size)) ) {
-
-						PSPRINTK("%s: Mapping file vma start %lx end %lx\n",
-								__func__, fetching_page->vaddr_start, (fetching_page->vaddr_start + fetching_page->vaddr_size));
-
-						/*Note:
-						 * This mapping is caused because when a thread migrates it does not have any vma
-						 * so during fetch vma can be pushed.
-						 * This mapping has the precedence over "normal" vma operations because is a page fault
-						 * */
-						if (tsk->mm->distribute_unmap == 0)
-							printk(KERN_ALERT"%s: ERROR: file backed value was already 0, check who is the older.\n", __func__);
-						tsk->mm->distribute_unmap = 0;
-
-						PSPRINTK("%s:%d page offset = %d %lx\n", __func__, __LINE__, fetching_page->pgoff, mm->exe_file);
-						fetching_page->pgoff = get_file_offset(mm->exe_file, fetching_page->vaddr_start);
-						PSPRINTK("%s:%d page offset = %d\n", __func__, __LINE__, fetching_page->pgoff);
-
-						/*map_difference should map in such a way that no unmap operations (the only nested operation that mmap can call) are nested called.
-						 * This is important both to not unmap pages that should not be unmapped
-						 * but also because otherwise the vma protocol will deadlock!
-						 */
-						err = map_difference(f, fetching_page->vaddr_start,
-								       fetching_page->vaddr_size, prot,
-								       MAP_FIXED
-								       | ((fetching_page->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
-								       /* Ported to Linux 3.12
-									  | ((fetching_page->vm_flags & VM_EXECUTABLE) ? MAP_EXECUTABLE : 0) */
-								       | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
-								       | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0),
-								       fetching_page->pgoff << PAGE_SHIFT);
-						if (tsk->mm->distribute_unmap == 1)
-							printk(KERN_ALERT"%s: ERROR: file backed value was already 1, check who is the older.\n", __func__);
-						tsk->mm->distribute_unmap = 1;
-
-						PSPRINTK("Map difference ended\n");
-						if (err != fetching_page->vaddr_start) {
-							up_write(&mm->mmap_sem);
-							down_read(&mm->mmap_sem);
-							spin_lock(ptl);
-							/*PTE LOCKED*/
-							printk("%s: ERROR: error mapping file vma while fetching address %lx\n",
-								__func__, address);
-							ret = VM_FAULT_VMA;
-							return ret;
-						}
-					}
-
-
-				up_write(&mm->mmap_sem);
-				PSPRINTK("releasing lock write\n");
-				filp_close(f, NULL);
-
-				down_read(&mm->mmap_sem);
-				PSPRINTK("lock read taken\n");
-				spin_lock(ptl);
-				/*PTE LOCKED*/
-			}
-		} //end not anonymous case
-		return 0;
-	} //end vma_present == 1 (this means that if vma_present == 0 there is no valid data?!)
-
-//NOTE this case is not handled and returns 0! (vma_present == 0)
+	} //end not anonymous case
 	return 0;
 }
 
-// THIS IS THE SERVER CODE (not about server/client as Marina wrote that is home/not home kernel)
-// currently a workqueue
+/*
+ * THIS IS THE SERVER CODE
+ * (not about server/client as Marina wrote that is home/not home kernel)
+ * currently a workqueue
+ */
 static void vma_server_process_vma_op(struct work_struct* work)
 {
 	vma_op_work_t* vma_work = (vma_op_work_t*) work;
@@ -687,10 +690,10 @@ static void vma_server_process_vma_op(struct work_struct* work)
 	if (vma_work->fake == 1) {
 		unsigned long flags;
 		memory->arrived_op = 1;
-		lock_task_sighand(memory->main, &flags);
-		memory->main->distributed_exit = EXIT_FLUSHING;
-		unlock_task_sighand(memory->main, &flags);
-		wake_up_process(memory->main);
+		lock_task_sighand(memory->helper, &flags);
+		memory->helper->distributed_exit = EXIT_FLUSHING;
+		unlock_task_sighand(memory->helper, &flags);
+		wake_up_process(memory->helper);
 		kfree(work);
 		return;
 	}
@@ -710,7 +713,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			operation->header.from_cpu, operation->tgroup_home_cpu, operation->tgroup_home_id, operation->operation);
 
 	down_write(&mm->mmap_sem);
-	if (_cpu == operation->tgroup_home_cpu) {//SERVER
+	if (_cpu == operation->tgroup_home_cpu) { //SERVER
 		//if another operation is on going, it will be serialized after.
 #if 0
 		while (mm->distr_vma_op_counter > 0) {
@@ -769,10 +772,10 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			return ;
 		}
 #endif
-		while(memory->main==NULL)
+		while(memory->helper==NULL)
 			schedule();
 
-		mm->thread_op = memory->main;
+		mm->thread_op = memory->helper;
 
 		if (operation->operation == VMA_OP_MAP
 		    || operation->operation == VMA_OP_BRK) {
@@ -794,7 +797,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		//This is the field check by the main thread
 		//so it is the last one to be populated
 		memory->operation = operation->operation;
-		wake_up_process(memory->main);
+		wake_up_process(memory->helper);
 		PSPRINTK("%s,SERVER: woke up the main\n",__func__);
 
 		while (memory->operation != VMA_OP_NOP) {
@@ -834,8 +837,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		PSPRINTK("SERVER: vma_operation_index is %d\n",mm->vma_operation_index);
 		PSPRINTK("%s, SERVER: end requested operation\n",__func__);
 		return ;
-	}
-	else {
+	} else {
 		struct task_struct *prev;
 		PSPRINTK("%s, CLIENT: Starting operation %i of index %i\n ",__func__, operation->operation, operation->vma_operation_index);
 		//CLIENT
@@ -930,10 +932,10 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		mm->distr_vma_op_counter++;
 		prev = mm->thread_op;
 
-		while(memory->main==NULL) // waiting for main to be allocated (?)
+		while(memory->helper==NULL) // waiting for main to be allocated (?)
 			schedule();
 
-		mm->thread_op = memory->main;
+		mm->thread_op = memory->helper;
 		up_write(&mm->mmap_sem);
 
 		//wake up the main thread to execute the operation locally
@@ -951,7 +953,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		memory->waiting_for_main = current;
 		memory->operation = operation->operation;
 
-		wake_up_process(memory->main);
+		wake_up_process(memory->helper);
 
 		PSPRINTK("%s,CLIENT: woke up the main5\n",__func__);
 
@@ -1004,8 +1006,7 @@ static void process_vma_lock(struct work_struct* work)
 			entry->my_lock = 1;
 	}
 
-	ack_to_server = (vma_ack_t*) kmalloc(sizeof(vma_ack_t),
-							GFP_ATOMIC);
+	ack_to_server = (vma_ack_t*) kmalloc(sizeof(vma_ack_t), GFP_ATOMIC);
 	BUG_ON(!ack_to_server);
 
 	ack_to_server->tgroup_home_cpu = lock->tgroup_home_cpu;
@@ -1014,8 +1015,7 @@ static void process_vma_lock(struct work_struct* work)
 	ack_to_server->header.type = PCN_KMSG_TYPE_PROC_SRV_VMA_ACK;
 	ack_to_server->header.prio = PCN_KMSG_PRIO_NORMAL;
 
-	pcn_kmsg_send_long(lock->tgroup_home_cpu,
-			   (struct pcn_kmsg_long_message*)ack_to_server, sizeof(vma_ack_t));
+	pcn_kmsg_send_long(lock->tgroup_home_cpu, ack_to_server, sizeof(*ack_to_server));
 
 	kfree(ack_to_server);
 	pcn_kmsg_free_msg(lock);
@@ -1764,29 +1764,27 @@ out:
 	return ret;
 }
 
+
+/**
+ * This function registers the vma server with the messaging layer.
+ *
+ * @return Returns 0 on success, an error code otherwise.
+ */
 int vma_server_init(void)
 {
-	int ret;
 	/*
 	 * These two workqueues are singlethread because we ran into
 	 * synchronization issues using multithread workqueues.
 	 */
 	vma_op_wq = create_singlethread_workqueue("vma_op_wq");
-	if (!vma_op_wq)
-		return -ENOMEM;
-	vma_lock_wq = create_singlethread_workqueue("vma_lock_wq");
-	if (!vma_lock_wq)
-		return -ENOMEM;
+	if (!vma_op_wq) return -ENOMEM;
 
-	if ((ret = pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_VMA_OP,
-				   handle_vma_op)))
-		return ret;
-	if ((ret = pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_VMA_ACK,
-				    handle_vma_ack)))
-		return ret;
-	if ((ret = pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK,
-				   handle_vma_lock)))
-		return ret;
+	vma_lock_wq = create_singlethread_workqueue("vma_lock_wq");
+	if (!vma_lock_wq) return -ENOMEM;
+
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_VMA_OP, handle_vma_op);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_VMA_ACK, handle_vma_ack);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK, handle_vma_lock);
  
 	return 0;
 }

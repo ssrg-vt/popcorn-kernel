@@ -246,6 +246,7 @@ extern int pcn_kmsg_init(void);
 extern int process_server_init(void);
 extern int setup_bundle_node(void);
 extern int popcorn_ns_init(int);
+extern int vma_server_init(void);
 
 static int __init popcorn_init(void)
 {
@@ -262,8 +263,8 @@ static int __init popcorn_init(void)
 #if 0 // beowulf
 	cpu_info_handler_init();
 	page_server_init();
-	vma_server_init();
 #endif
+	vma_server_init();
 	process_server_init();
 
 	return 0;

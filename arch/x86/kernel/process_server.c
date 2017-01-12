@@ -35,9 +35,6 @@
 /* External function declarations */
 extern void __show_regs(struct pt_regs *regs, int all);
 extern unsigned long read_old_rsp(void);
-extern struct task_struct* do_fork_for_main_kernel_thread(unsigned long clone_flags,
-		unsigned long stack_start, struct pt_regs *regs, unsigned long stack_size,
-		int __user *parent_tidptr, int __user *child_tidptr);
 
 /*
  * Function:
@@ -139,7 +136,7 @@ int save_thread_info(struct task_struct *task, struct pt_regs *regs,
 	PSPRINTK("%s: pc %lx sp %lx bp %lx ra %lx\n", __func__,
 			arch->migration_pc, arch->old_rsp, arch->bp, arch->ra);
 
-	PSPRINTK("%s: fs task %lx[%lx] saved %lx[%lx] current %lx[%lx]\n", __func__,
+	PSPRINTK("%s: fs task %lx[%lx], saved %lx[%lx], current %lx[%lx]\n", __func__,
 	      (unsigned long)task->thread.fs, (unsigned long)task->thread.fsindex,
 	      (unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex,
 	      (unsigned long)fs, (unsigned long)fsindex);
@@ -175,41 +172,41 @@ int restore_thread_info(struct task_struct *task, field_arch *arch)
 	int passed;
 	unsigned long fsindex, fs_val;
 
-	if ((task == NULL)  || (arch == NULL)) {
-		printk(KERN_ERR"process_server: invalid params to %s", __func__);
-		return -EINVAL;
-	}
+	BUG_ON(!task || !arch);
 
 	/* For het migration */
 	if (arch->migration_pc != 0) {
-		task_pt_regs(task)->ip = arch->migration_pc;
-		task_pt_regs(task)->bp = arch->bp;
+		struct pt_regs *pt_regs = task_pt_regs(task);
 
-		/* task_pt_regs(task)->sp = task->saved_old_rsp; */
-		task_pt_regs(task)->sp = arch->old_rsp;
+		pt_regs->ip = arch->migration_pc;
+		pt_regs->bp = arch->bp;
+		/* pt_regs->sp = task->saved_old_rsp; */
+		pt_regs->sp = arch->old_rsp;
 		task->thread.usersp = arch->old_rsp;
 
-		/* task_pt_regs(task)->cs = __KERNEL_CS | get_kernel_rpl(); */
-		//task_pt_regs(task)->cs = __USER_CS;
-		//task_pt_regs(task)->ds = __USER_DS;
-		//task_pt_regs(task)->es = __USER_ES;
+		/* pt_regs->cs = __KERNEL_CS | get_kernel_rpl(); */
+		/*
+		pt_regs->cs = __USER_CS;
+		pt_regs->ds = __USER_DS;
+		pt_regs->es = __USER_ES;
+		printk("%s: cs=0x%x, KERNEL_CS=0x%lx\n", __func__,
+				pt_regs->cs, __KERNEL_CS);
+		*/
 
-		//printk("%s cs %lx KERNEL_CS %lx\n", __func__, task_pt_regs(task)->cs, __KERNEL_CS);
-
-		task_pt_regs(task)->r15 = arch->regs_x86.r15;
-		task_pt_regs(task)->r14 = arch->regs_x86.r14;
-		task_pt_regs(task)->r13 = arch->regs_x86.r13;
-		task_pt_regs(task)->r12 = arch->regs_x86.r12;
-		task_pt_regs(task)->r11 = arch->regs_x86.r11;
-		task_pt_regs(task)->r10 = arch->regs_x86.r10;
-		task_pt_regs(task)->r9 = arch->regs_x86.r9;
-		task_pt_regs(task)->r8 = arch->regs_x86.r8;
-		task_pt_regs(task)->ax = arch->regs_x86.rax;
-		task_pt_regs(task)->dx = arch->regs_x86.rdx;
-		task_pt_regs(task)->cx = arch->regs_x86.rcx;
-		task_pt_regs(task)->bx = arch->regs_x86.rbx;
-		task_pt_regs(task)->si = arch->regs_x86.rsi;
-		task_pt_regs(task)->di = arch->regs_x86.rdi;
+		pt_regs->r15 = arch->regs_x86.r15;
+		pt_regs->r14 = arch->regs_x86.r14;
+		pt_regs->r13 = arch->regs_x86.r13;
+		pt_regs->r12 = arch->regs_x86.r12;
+		pt_regs->r11 = arch->regs_x86.r11;
+		pt_regs->r10 = arch->regs_x86.r10;
+		pt_regs->r9 = arch->regs_x86.r9;
+		pt_regs->r8 = arch->regs_x86.r8;
+		pt_regs->ax = arch->regs_x86.rax;
+		pt_regs->dx = arch->regs_x86.rdx;
+		pt_regs->cx = arch->regs_x86.rcx;
+		pt_regs->bx = arch->regs_x86.rbx;
+		pt_regs->si = arch->regs_x86.rsi;
+		pt_regs->di = arch->regs_x86.rdi;
 	}
 
 	task->thread.fs = arch->thread_fs;
@@ -228,9 +225,10 @@ int restore_thread_info(struct task_struct *task, field_arch *arch)
 	savesegment(fs, fsindex);
 	rdmsrl(MSR_FS_BASE, fs_val);
 
-	PSPRINTK("%s: ip %lx sp %lx bp %lx\n", __func__, arch->migration_pc, arch->old_rsp, arch->bp);
+	PSPRINTK("%s: ip=0x%lx, sp=0x%lx, bp=0x%lx\n", __func__,
+			arch->migration_pc, arch->old_rsp, arch->bp);
 
-	PSPRINTK(KERN_EMERG"%s: task=%s current=%s (%d) FS saved %lx[%lx] curr %lx[%lx]\n",
+	PSPRINTK("%s: task=%s, current=%s (%d), FS saved=0x%lx[0x%lx], curr=0x%lx[0x%lx]\n",
 	       __func__, task->comm, current->comm, passed,
 	       (unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex,
 	       (unsigned long)fs_val, (unsigned long)fsindex);
@@ -497,19 +495,15 @@ int update_fpu_info(struct task_struct *task)
  * 	none
  *
  * Return value:
- *	on success, returns 0
- * 	on failure, returns negative integer
+ *	void
  */
-int dump_processor_regs(struct pt_regs* regs)
+void dump_processor_regs(struct pt_regs* regs)
 {
 	unsigned long fs, gs;
 	unsigned long fsindex, gsindex;
 
-	if (regs == NULL) {
-		printk(KERN_ERR"process_server: invalid params to %s", __func__);
-		return -EINVAL;
-	}
 	dump_stack();
+	if (!regs) return;
 	printk(KERN_ALERT"DUMP REGS %s\n", __func__);
 
 	if (NULL != regs) {

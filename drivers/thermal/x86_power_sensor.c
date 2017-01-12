@@ -204,14 +204,11 @@ static int __init pwr_sensor_init(void)
 {
 	int i;
 	int ret = 0;
-//	unsigned long freq= 0;
 
-	printk(KERN_ALERT "\nps_sensor: Power sensor driver - Initializing...\n");
+	printk(KERN_INFO"ps_sensor: start initializing...\n");
 
 	if (rapl_init_hw_unit()) {
-		printk(KERN_ALERT"%s:"
-				"initialization error on rapl_hw_unit initialization\n",
-				__func__);
+		printk(KERN_ERR"ps_sensor: error on rapl_hw_unit initialization\n");
 		return -1;
 	}
 
@@ -219,7 +216,7 @@ static int __init pwr_sensor_init(void)
 	ps_thread = kthread_run(&ps_read_thread, NULL, "Power Sensor Read Thread");
 
 	if(!ps_thread) {
-		printk(KERN_ERR "ps_sensor: Failed to create kthread\n");
+		printk(KERN_ERR"ps_sensor: Failed to create kthread\n");
 		ret = -1;
 	}
 
@@ -234,7 +231,7 @@ static int __init pwr_sensor_init(void)
 	atomic_set(&stop_sampling, 0);
 	atomic_set(&power_value, 0);
 	atomic_set(&exit_ps_read_thread, 0);
-	printk(KERN_ALERT"ps_sensor: Power sensor driver - Initializing...[Done]\n");
+	printk(KERN_INFO"ps_sensor: Initializing finished\n");
 	return ret;
 }
 //module_init(pwr_sensor_init);
@@ -242,21 +239,21 @@ late_initcall(pwr_sensor_init);
 
 static void __exit pwr_sensor_exit(void)
 {
-	printk(KERN_INFO "\nps_sensor: Power sensor driver - Exiting...\n");
-	printk(KERN_INFO "ps_sensor: signaling the read thread to exit\n");
+	printk(KERN_INFO"ps_sensor: Exiting...\n");
+	printk(KERN_INFO"ps_sensor: signaling the read thread to exit\n");
 	atomic_set(&exit_ps_read_thread, 1);
 
 	/* if free running we are not using the completion */
 	if (!free_running) {
-		printk(KERN_ALERT "%s: now waiting for completion", __func__);
+		printk(KERN_ALERT"%s: now waiting for completion", __func__);
 		complete(&start);
-		printk(KERN_ALERT "%s: done waiting for completion", __func__);
+		printk(KERN_ALERT"%s: done waiting for completion", __func__);
 	}
 
 	atomic_set(&stop_sampling, 1);
 
 	kthread_stop(ps_thread);
-	printk(KERN_INFO "ps_sensor: Power sensor driver - Exiting...[Done]\n");
+	printk(KERN_INFO"ps_sensor: Exited\n");
 }
 module_exit(pwr_sensor_exit);
 

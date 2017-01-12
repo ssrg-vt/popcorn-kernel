@@ -2657,11 +2657,6 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 
 	if (current->set_child_tid)
 		put_user(task_pid_vnr(current), current->set_child_tid);
-
-#ifdef CONFIG_POPCORN
-	if (current->represents_remote == 1)
-		sleep_shadow();
-#endif
 }
 
 /*
@@ -4594,7 +4589,7 @@ static int __do_migrate(struct task_struct *p, unsigned int nid,
 		unsigned long pc, unsigned long ret_addr)
 {
 	struct pt_regs *regs = current_pt_regs();
-	int retval;
+	int retval = 0;
 
 	get_task_struct(p);
 
@@ -4616,6 +4611,10 @@ SYSCALL_DEFINE2(sched_migrate, pid_t, pid, unsigned int, nid)
 
 	printk(KERN_INFO"%s: %u, %u\n", __func__, pid, nid);
 
+#if MIGRATION_PROFILE
+	migration_start = ktime_get();
+#endif
+
 	rcu_read_lock();
 	p = find_process_by_pid(pid);
 	if (!p) {
@@ -4623,14 +4622,15 @@ SYSCALL_DEFINE2(sched_migrate, pid_t, pid, unsigned int, nid)
 		goto out_unlock;
 	}
 
-	printk(KERN_INFO"%s: task at %p\n", __func__, p);
 	if (!is_bundle_online(nid)) {
 		retval = -EAGAIN;
 		goto out_unlock;
 	}
 
 	printk(KERN_INFO"%s: bundle %d is online\n", __func__, nid);
-	retval = __do_migrate(p, nid, 0, 0);
+	retval = __do_migrate(p, nid, 
+			current_pt_regs()->ip,			/* some ip */
+			current_pt_regs()->ip + 16);	/* some ret addr */
 
 out_unlock:
 	rcu_read_unlock();

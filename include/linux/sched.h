@@ -1816,6 +1816,7 @@ struct task_struct {
 
 #ifdef CONFIG_POPCORN
 /* Popcorn */
+	void *memory;
 	int tgroup_distributed;
 	int tgroup_home_cpu;     /* cpu where the thread group was first migrated */
 	int tgroup_home_id;         /* home thread group id */
@@ -2673,12 +2674,6 @@ extern long do_fork(unsigned long, unsigned long, unsigned long, int __user *, i
 struct task_struct *fork_idle(int);
 extern pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags);
 
-#ifdef CONFIG_POPCORN
-extern struct task_struct* do_fork_for_main_kernel_thread(unsigned long clone_flags,
-							  unsigned long stack_start, struct pt_regs *regs,
-							  unsigned long stack_size, int __user *parent_tidptr,
-							  int __user *child_tidptr);
-#endif
 extern int exec_mmap(struct mm_struct *mm);
 
 extern void __set_task_comm(struct task_struct *tsk, const char *from, bool exec);

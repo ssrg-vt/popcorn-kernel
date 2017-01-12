@@ -81,16 +81,21 @@ typedef struct {
 	data_header_t head;
 	//struct list_head list;
 	struct task_struct *thread;
+	struct list_head list;
+	struct completion start;
+	struct completion end;
 } shadow_thread_t;
 
 struct _memory_struct;
 
 typedef struct {
 	data_header_t head;
-	struct list_head list;
-	spinlock_t spinlock;
 	struct task_struct *main;
+
+	spinlock_t spinlock;
 	shadow_thread_t* threads;
+	struct list_head threadpool;
+
 	struct _memory_struct* memory;
 } remote_thread_t;
 
@@ -101,7 +106,8 @@ typedef struct _memory_struct {
 	int tgroup_home_id;
 	struct mm_struct* mm;
 	int alive;
-	struct task_struct *main;
+	struct task_struct *helper;
+	bool helper_stop;
 
 	int operation;
 	unsigned long addr;
@@ -118,13 +124,9 @@ typedef struct _memory_struct {
 	int arrived_op;
 	int my_lock;
 	int kernel_set[MAX_KERNEL_IDS];
-	int exp_answ;
-	int answers;
-	int setting_up;
-	spinlock_t lock_for_answer;
+	atomic_t answers_remain;
 	struct rw_semaphore kernel_set_sem;
 	vma_operation_t* message_push_operation;
-	remote_thread_t* thread_pool;
 	atomic_t pending_migration;
 	atomic_t pending_back_migration;
 } memory_t;
@@ -193,7 +195,6 @@ typedef struct {
 		unsigned long def_flags;\
 		pid_t placeholder_pid;\
 		pid_t placeholder_tgid;\
-		int back;\
 		int prev_pid;\
 		int tgroup_home_cpu;\
 		int tgroup_home_id;\
@@ -240,7 +241,6 @@ typedef struct {
 		char exe_path[512];\
 		pid_t placeholder_pid;\
 		pid_t placeholder_tgid;\
-		int back;\
 		int prev_pid;\
 		int tgroup_home_cpu;\
 		int tgroup_home_id;\

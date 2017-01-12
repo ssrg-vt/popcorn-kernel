@@ -389,6 +389,33 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 
 	account_kernel_stack(ti, 1);
 
+#ifdef CONFIG_POPCORN
+	/*
+	 * Reset variables for tracking remote execution
+	 */
+	tsk->executing_for_remote = 0;
+	tsk->represents_remote = 0;
+	tsk->distributed_exit = EXIT_ALIVE;
+	tsk->prev_cpu = tsk->next_cpu = -1;
+	tsk->prev_pid = tsk->next_pid = -1;
+	tsk->prev_pid = tsk->next_pid = -1;
+	tsk->main = 0;
+	tsk->surrogate = -1; // this is for futex
+	tsk->group_exit = -1;
+	tsk->uaddr = 0;
+
+	/* If the new tsk is not in the same thread group as the parent,
+	 * then we do not need to propagate the old thread info.
+	 * Otherwise, make sure to keep an accurate record
+	 * of which cpu and thread group the new thread is a part of.
+	 */
+	if (orig->tgid != tsk->tgid || !orig->tgroup_distributed) {
+		tsk->tgroup_distributed = false;
+		tsk->tgroup_home_cpu = -1;
+		tsk->tgroup_home_id = -1;
+	}
+#endif
+
 	return tsk;
 
 free_ti:
@@ -1692,10 +1719,13 @@ struct task_struct *fork_idle(int cpu)
 }
 
 
-struct task_struct* do_fork_for_main_kernel_thread(
+#ifdef CONFIG_POPCORN
+/**
+ * Identical to _do_fork except putting the thread to shadow_main
+ */
+struct task_struct* do_fork_shadow_thread(
 		unsigned long clone_flags,
 		unsigned long stack_start,
-		struct pt_regs *regs,
 		unsigned long stack_size,
 		int __user *parent_tidptr,
 		int __user *child_tidptr)
@@ -1732,10 +1762,12 @@ struct task_struct* do_fork_for_main_kernel_thread(
 	 */
 	if (!IS_ERR(p)) {
 		struct completion vfork;
+		struct pid *pid;
 
 		trace_sched_process_fork(current, p);
 
-		nr = task_pid_vnr(p);
+		pid = get_task_pid(p, PIDTYPE_PID);
+		nr = pid_vnr(pid);
 
 		if (clone_flags & CLONE_PARENT_SETTID)
 			put_user(nr, parent_tidptr);
@@ -1746,27 +1778,28 @@ struct task_struct* do_fork_for_main_kernel_thread(
 			get_task_struct(p);
 		}
 
-		process_server_dup_task(current, p);
-
+		/* Let the thread to jump to shadow_main (see schedule_tail) */
 		p->represents_remote = 1;
 		p->distributed_exit = EXIT_NOT_ACTIVE;
 		wake_up_new_task(p);
 
 		/* forking complete and child started to run, tell ptracer */
 		if (unlikely(trace))
-			ptrace_event(trace, nr);
+			ptrace_event_pid(trace, pid);
 
 		if (clone_flags & CLONE_VFORK) {
 			if (!wait_for_vfork_done(p, &vfork))
-				ptrace_event(PTRACE_EVENT_VFORK_DONE, nr);
+				ptrace_event_pid(PTRACE_EVENT_VFORK_DONE, pid);
 		}
+
+		put_pid(pid);
 	} else {
 		nr = PTR_ERR(p);
-		printk(KERN_ALERT"%s: Failed to fork kernel thread : %ld %ld\n",
-				__func__, nr, -nr);
+		printk(KERN_ERR"%s: Failed to fork kernel thread: %ld\n", __func__, nr);
 	}
 	return p;
 }
+#endif
 
 /*
  *  Ok, this is the main fork-routine.
@@ -1806,9 +1839,11 @@ long _do_fork(unsigned long clone_flags,
 	p = copy_process(clone_flags, stack_start, stack_size,
 			 child_tidptr, NULL, trace, tls);
 
+	/*
 	if (current->tgroup_distributed == 1) {
 		PSPRINTK("%s: current=%d, new=%d\n", __func__, current->pid, p->pid);
 	}
+	*/
 
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
@@ -1832,9 +1867,6 @@ long _do_fork(unsigned long clone_flags,
 			get_task_struct(p);
 		}
 
-#ifdef CONFIG_POPCORN
-		process_server_dup_task(current, p);
-#endif
 		wake_up_new_task(p);
 
 		/* forking complete and child started to run, tell ptracer */

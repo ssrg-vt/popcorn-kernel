@@ -190,7 +190,6 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 	if (*ppos > 0)
 		return 0; //EOF
 
-
 	lista = (memory_t **)kzalloc(sizeof(memory_t*) * 1024, GFP_KERNEL);
 	BUG_ON(!lista);
 
@@ -204,7 +203,7 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 
 	for (i = 0; i < written; i++) {
 		struct task_struct * t;
-		struct task_struct * ppp = lista[i]->main;
+		struct task_struct * ppp = lista[i]->helper;
 
 		len += snprintf((buffer +len), PROC_BUFFER_PS - len,
 				"%s %d:%d:%d:%lu", ppp->comm,

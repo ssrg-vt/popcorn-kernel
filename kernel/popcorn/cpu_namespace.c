@@ -70,12 +70,12 @@ static void destroy_cpu_namespace(struct cpu_namespace *ns)
 
 struct cpu_namespace *copy_cpu_ns(unsigned long flags, struct cpu_namespace *old_ns)
 {
-	if (!(flags & CLONE_NEWCPU)) {
-		printk("%s: cacca\n", __func__);
+	if (!(flags & CLONE_NEWCPU))
 		return get_cpu_ns(old_ns);
-	}
+
 	if (flags & (CLONE_THREAD|CLONE_PARENT)) {
 		printk("%s: grande cacca\n", __func__);
+		dump_stack();
 		return ERR_PTR(-EINVAL);
 	}
 	return create_cpu_namespace(old_ns);

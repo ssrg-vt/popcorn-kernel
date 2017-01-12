@@ -6,6 +6,7 @@
 #include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/vmalloc.h>
+#include <linux/slab.h>
 
 #include <linux/pcn_kmsg.h>
 
@@ -43,7 +44,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 	return 0;
 }
 
-int pcn_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg, unsigned int message_size)
+int pcn_kmsg_send_long(unsigned int dest_cpu, void *lmsg, unsigned int message_size)
 {
 	if (send_callback == NULL) {
 		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
@@ -59,15 +60,15 @@ int pcn_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 			message_size - sizeof(struct pcn_kmsg_hdr)); // adjust payload size
 }
 
-int pcn_kmsg_send(unsigned int dest_cpu, struct pcn_kmsg_message *msg)
+int pcn_kmsg_send(unsigned int dest_cpu, void *msg)
 {
-	return pcn_kmsg_send_long(dest_cpu, (struct pcn_kmsg_long_message *)msg,
-				  sizeof(*msg));
+	return pcn_kmsg_send_long(dest_cpu, msg, sizeof(*msg));
 }
 
 void pcn_kmsg_free_msg(void *msg)
 {
-	vfree(msg);
+	// vfree(msg);
+	kfree(msg);
 }
 
 

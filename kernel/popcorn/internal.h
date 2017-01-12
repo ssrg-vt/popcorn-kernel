@@ -9,11 +9,11 @@
 #define KERNEL_POPCORN_INTERNAL_H_
 
 #undef USE_DEBUG_MAPPINGS
+#define CHECK_FOR_DUPLICATES
 
 #include <linux/spinlock.h>
 #include <linux/process_server.h>
 
-/* TODO use general spinlock_t instead of spinlock_t */
 extern mapping_answers_for_2_kernels_t* _mapping_head;
 extern spinlock_t _mapping_head_lock;
 
@@ -28,76 +28,6 @@ extern spinlock_t _memory_head_lock;
 
 extern struct list_head _vma_ack_head;
 extern spinlock_t _vma_ack_head_lock;
-
-static inline void push_data(data_header_t** phead, spinlock_t* spinlock,
-		data_header_t* entry)
-{
-	data_header_t* head;
-	unsigned long flags;
-
-	if (!entry)
-		return;
-	entry->prev = NULL;
-
-	spin_lock_irqsave(spinlock, flags);
-	head = *phead;
-
-	if (!head) {
-		entry->next = NULL;
-		*phead = entry;
-	} else {
-		entry->next = head;
-		head->prev = entry;
-		*phead = entry;
-	}
-	spin_unlock_irqrestore(spinlock, flags);
-}
-
-static inline data_header_t* pop_data(data_header_t** phead, spinlock_t* spinlock)
-{
-	data_header_t* ret = NULL;
-	data_header_t* head;
-	unsigned long flags;
-
-	spin_lock_irqsave(spinlock, flags);
-	head = *phead;
-
-	if (head) {
-		ret = head;
-		if (head->next) {
-			head->next->prev = NULL;
-		}
-		*phead = head->next;
-		ret->next = NULL;
-		ret->prev = NULL;
-	}
-	spin_unlock_irqrestore(spinlock, flags);
-
-	return ret;
-}
-
-static inline int count_data(data_header_t** phead, spinlock_t* spinlock)
-{
-	int ret = 0;
-	unsigned long flags;
-	data_header_t* head;
-	data_header_t* curr;
-
-	spin_lock_irqsave(spinlock, flags);
-	head = *phead;
-
-	curr = *phead;
-	while (curr) {
-		ret++;
-		curr = curr->next;
-	}
-	spin_unlock_irqrestore(spinlock, flags);
-
-	return ret;
-}
-
-
-#define CHECK_FOR_DUPLICATES
 
 #if 0 // beowulf
 ///////////////////////////////////////////////////////////////////////////////
@@ -526,45 +456,5 @@ static inline void remove_vma_ack_entry(vma_op_answers_t* entry)
 	list_del_init(&entry->list);
 	spin_unlock_irqrestore(&_vma_ack_head_lock, flags);
 }
-
-
-/*
- KMEM CACHES TO USE
- data = (count_answers_t*) kmalloc(sizeof(count_answers_t), GFP_ATOMIC);
- request= (remote_thread_count_request_t*) kmalloc(sizeof(remote_thread_count_request_t),GFP_ATOMIC);
- new_kernel_work_answer_t* work= (new_kernel_work_answer_t*)kmalloc(sizeof(new_kernel_work_answer_t), GFP_ATOMIC);
- new_kernel_answer_t* answer= (new_kernel_answer_t*) kmalloc(sizeof(new_kernel_answer_t), GFP_ATOMIC);
- request_work = (new_kernel_work_t*) kmalloc(sizeof(new_kernel_work_t), GFP_ATOMIC);
- create_thread_pull_t* msg= (create_thread_pull_t*) kmalloc(sizeof(create_thread_pull_t),GFP_ATOMIC);
- my_thread_pull = (thread_pull_t*) kmalloc(sizeof(thread_pull_t), GFP_ATOMIC);
- shadow_thread_t* shadow = (shadow_thread_t*) kmalloc(sizeof(shadow_thread_t), GFP_ATOMIC);
- struct work_struct* work = kmalloc(sizeof(struct work_struct), GFP_ATOMIC);
- vma_op_work_t* work = kmalloc(sizeof(vma_op_work_t), GFP_ATOMIC);
- response= (ack_t*) kmalloc(sizeof(ack_t), GFP_ATOMIC);
- delay = (invalid_work_t*) kmalloc(sizeof(invalid_work_t), GFP_ATOMIC);
- delay = (request_work_t*)kmalloc(sizeof(request_work_t), GFP_ATOMIC);
- response = (data_response_for_2_kernels_t*) kmalloc(sizeof(data_response_for_2_kernels_t)+PAGE_SIZE, GFP_ATOMIC);
- request_work = kmalloc(sizeof(exit_group_work_t), GFP_ATOMIC);
- request_work = kmalloc(sizeof(exit_work_t), GFP_ATOMIC);
- response= (remote_thread_count_response_t*) kmalloc(sizeof(remote_thread_count_response_t),GFP_ATOMIC);
- request_work = kmalloc(sizeof(count_work_t), GFP_ATOMIC);
- exiting_process_t* msg = (exiting_process_t*) kmalloc(sizeof(exiting_process_t), GFP_ATOMIC);
- msg= (create_process_pairing_t*) kmalloc(sizeof(create_process_pairing_t),GFP_ATOMIC);
- data_request_for_2_kernels_t* read_message = (data_request_for_2_kernels_t*) kmalloc(sizeof(data_request_for_2_kernels_t), GFP_ATOMIC);
- ack_answers_for_2_kernels_t* answers = (ack_answers_for_2_kernels_t*) kmalloc(sizeof(ack_answers_for_2_kernels_t), GFP_ATOMIC);
- invalid_data_for_2_kernels_t* invalid_message = (invalid_data_for_2_kernels_t*) kmalloc(sizeof(invalid_data_for_2_kernels_t), GFP_ATOMIC);
- data_request_for_2_kernels_t* write_message = (data_request_for_2_kernels_t*) kmalloc(sizeof(data_request_for_2_kernels_t),GFP_ATOMIC);
- mapping_answers_for_2_kernels_t* writing_page = (mapping_answers_for_2_kernels_t*) kmalloc(sizeof(mapping_answers_for_2_kernels_t), GFP_ATOMIC);
- fetching_page = (mapping_answers_for_2_kernels_t*) kmalloc(sizeof(mapping_answers_for_2_kernels_t), GFP_ATOMIC);
- fetch_message = (data_request_for_2_kernels_t*) kmalloc(sizeof(data_request_for_2_kernels_t), GFP_ATOMIC);
- request= (back_migration_request_t*) kmalloc(sizeof(back_migration_request_t), GFP_ATOMIC);
- request = kmalloc(sizeof(clone_request_t), GFP_ATOMIC);
- vma_ack_t* ack_to_server = (vma_ack_t*) kmalloc(sizeof(vma_ack_t), GFP_ATOMIC);
- work = kmalloc(sizeof(vma_lock_work_t), GFP_ATOMIC);
- vma_lock_t* lock_message = (vma_lock_t*) kmalloc(sizeof(vma_lock_t), GFP_ATOMIC);
- struct work_struct* work = kmalloc(sizeof(struct work_struct), GFP_ATOMIC);
- clone_work_t* delay = (clone_work_t*) kmalloc(sizeof(clone_work_t), GFP_ATOMIC);
- */
-
 
 #endif /* KERNEL_POPCORN_INTERNAL_H_ */

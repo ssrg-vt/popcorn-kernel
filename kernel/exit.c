@@ -698,6 +698,10 @@ void do_exit(long code)
 		schedule();
 	}
 
+#ifdef CONFIG_POPCORN
+	popcorn_process_exit(code);
+#endif
+
 	exit_signals(tsk);  /* sets PF_EXITING */
 	/*
 	 * tsk->flags are checked in the futex code to protect against

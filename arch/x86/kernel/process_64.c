@@ -57,7 +57,7 @@ __visible DEFINE_PER_CPU(unsigned long, rsp_scratch);
 
 unsigned long read_old_rsp(void)
 {
-	WARN_ONCE(1, "beowulf: used to read old_rsp. but changed to rsp_scratch?");
+	//WARN_ONCE(1, "beowulf: used to read old_rsp. but changed to rsp_scratch?");
 	return this_cpu_read(rsp_scratch);
 }
 

@@ -202,12 +202,10 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 /* MESSAGING */
 
 /* Send a message to the specified destination CPU. */
-int pcn_kmsg_send(unsigned int dest_cpu, struct pcn_kmsg_message *msg);
+int pcn_kmsg_send(unsigned int dest_cpu, void *msg);
 
 /* Send a long message to the specified destination CPU. */
-int pcn_kmsg_send_long(unsigned int dest_cpu,
-		struct pcn_kmsg_long_message *lmsg,
-		unsigned int payload_size);
+int pcn_kmsg_send_long(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
 
 /* Free a received message (called at the end of the callback function) */
 void pcn_kmsg_free_msg(void *msg);
@@ -251,7 +249,7 @@ int pcn_kmsg_mcast_send(pcn_kmsg_mcast_id id, struct pcn_kmsg_message *msg);
 
 /* Send a long message to the specified multicast group. */
 int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id,
-		struct pcn_kmsg_long_message *msg,
+		void *msg,
 		unsigned int payload_size);
 
 int pcn_kmsg_get_node_ids(uint16_t *nodes, int len, uint16_t *self);
