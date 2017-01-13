@@ -96,7 +96,7 @@ struct task_struct *pool_thread_handler[MAX_NUM_CHANNELS*RECV_THREAD_POOL];
 
 
 int is_connection_done=PCN_CONN_WATING;
- 
+
 inline int pcn_connection_status(void)
 {
 	return is_connection_done;
@@ -139,8 +139,8 @@ struct completion dma_complete[MAX_NUM_CHANNELS];
 
 #endif
 
-struct completion send_intr_flag[MAX_NUM_CHANNELS]; 
-struct completion recv_intr_flag[MAX_NUM_CHANNELS]; 
+struct completion send_intr_flag[MAX_NUM_CHANNELS];
+struct completion recv_intr_flag[MAX_NUM_CHANNELS];
 
 struct semaphore send_connDone[MAX_NUM_CHANNELS];
 struct semaphore recv_connDone[MAX_NUM_CHANNELS];
@@ -278,7 +278,7 @@ char *msg_names[] = {
 
 /* PCIe Callback functions */
 int local_cbfunc (void *arg, sci_l_segment_handle_t local_segment_handle,
-			unsigned32 reason, unsigned32 source_node, 
+			unsigned32 reason, unsigned32 source_node,
                        unsigned32 local_adapter_number)
 {
 	printk(" In %s: reason = %d for %p\n", __func__, reason, local_segment_handle);
@@ -361,7 +361,7 @@ int dma_cb(void IN *arg, dis_dma_status_t dmastatus)
 {
 	sci_dma_queue_t *temp = (sci_dma_queue_t *)arg;
 	int i = 0;
- 
+
 	for (i = 0; i<MAX_NUM_CHANNELS; i++) {
 		if (dma_queue[i] == *temp) {
 			//printk("DMA transfer status = %d %lx %lx\n", dmastatus, *temp, dma_queue[i]);
@@ -393,7 +393,7 @@ static send_wait * dq_send(int index)
 	if (list_empty(&send_wait_q[index].list)){
 		printk("List %d is empty...\n", index);
 		spin_unlock(&send_q_mutex[index]);
-		return NULL;	
+		return NULL;
 	} else {
 		tmp = list_first_entry (&send_wait_q[index].list, send_wait, list);
 		list_del(send_wait_q[index].list.next);
@@ -420,7 +420,7 @@ static send_wait * dq_send(void)
 	if (list_empty(&send_wait_q.list)){
 		printk("List is empty...\n");
 		spin_unlock(&send_q_mutex);
-		return NULL;	
+		return NULL;
 	} else {
 		tmp = list_first_entry (&send_wait_q.list, send_wait, list);
 		list_del(send_wait_q.list.next);
@@ -434,7 +434,7 @@ static send_wait * dq_send(void)
 // Initialize callback table to null, set up control and data channels
 int __init initialize()
 {
-	int status = 0, i = 0, j = 0; 
+	int status = 0, i = 0, j = 0;
 	recv_data_t* recv_data;
 	struct sched_param param = {.sched_priority = 10};
 
@@ -496,7 +496,7 @@ int __init initialize()
 #if ENABLE_DMA
 		init_completion(&dma_complete[i]);
 #endif
-		complete(&send_intr_flag[i]);	
+		complete(&send_intr_flag[i]);
 	}
 
 	/* Initilaize the adapter */
@@ -515,7 +515,7 @@ int __init initialize()
 			printk("MSG_LAYER: Failed to allocate memory\n");
 			return 0;
 		}
- 
+
 		recv_data->channel_num = i;
 		recv_data->is_worker = 0;
 
@@ -535,7 +535,7 @@ int __init initialize()
 		}
 
 		sched_setscheduler(sender_handler[i], SCHED_FIFO, &param);
-		set_cpus_allowed_ptr(sender_handler[i], cpumask_of(i%NR_CPUS));	
+		set_cpus_allowed_ptr(sender_handler[i], cpumask_of(i%NR_CPUS));
 	}
 
 	for (i = 0; i<MAX_NUM_CHANNELS; i++) {
@@ -558,7 +558,7 @@ int __init initialize()
 
 			sched_setscheduler(pool_thread_handler[i+j], SCHED_FIFO, &param);
 			set_cpus_allowed_ptr(pool_thread_handler[i+j], cpumask_of(i%NR_CPUS));
-		}		
+		}
 	}
 
 	for (i = 0; i<MAX_NUM_CHANNELS; i++)
@@ -669,7 +669,7 @@ int test_thread(void* arg0)
 	vfree(msg);
 	printk("Finished Testing\n");
 #endif
-	
+
 	return 0;
 }
 
@@ -696,7 +696,7 @@ int send_thread(int arg0)
 		printk("Failed in dma_init: %d\n", status);
 	}
 #endif
-	
+
 	up(&send_connDone[channel_num]);
 	printk("%s: INFO: Connection Done...PCN_SEND Thread\n", __func__);
 
@@ -732,7 +732,7 @@ int send_thread(int arg0)
 		}
 
 		wait_for_completion(&dma_complete[channel_num]);
-#else						
+#else
 		/*check whether remote is using the channel */
 		memcpy(send_remote_vaddr[channel_num], pcn_msg, pcn_msg->hdr.size);
 #endif
@@ -757,7 +757,7 @@ int send_thread(int arg0)
 
 		kfree(send_data);
 	}
-		
+
 #if TEST_MSG_LAYER
 	while (1) {
 		msleep(10);
@@ -930,20 +930,20 @@ do_retry:
 				printk("%lld\n", time[j]);
 			}
 			average = average/(NUM_MSGS*MAX_NUM_CHANNELS);
-			printk("Average time for sending msg = %lld\n", average); 
+			printk("Average time for sending msg = %lld\n", average);
 		}
 #else
 		if (atomic_read(&exec_count) == (NUM_MSGS*MAX_NUM_CHANNELS)) {
 			end = ktime_get();
 
-			average = ktime_to_ns(ktime_sub(end,start)) >> 10;		
+			average = ktime_to_ns(ktime_sub(end,start)) >> 10;
 			average = average/(NUM_MSGS*MAX_NUM_CHANNELS);
 
-			printk("Average time for sending msg = %lld\n", average); 
+			printk("Average time for sending msg = %lld\n", average);
 
 		}
 #endif
-#endif /*TEST_MSG_LAYER*/ 
+#endif /*TEST_MSG_LAYER*/
 	}
 
 #if TEST_MSG_LAYER
@@ -962,7 +962,7 @@ do_retry:
 #if TEST_MSG_LAYER
 int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback)
 {
-	if (type >= PCN_KMSG_TYPE_MAX) 
+	if (type >= PCN_KMSG_TYPE_MAX)
 		return -1; //invalid type
 
 	printk("%s: registering %d \n",__func__, type);
@@ -972,7 +972,7 @@ int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback)
 
 int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 {
-	if (type >= PCN_KMSG_TYPE_MAX) 
+	if (type >= PCN_KMSG_TYPE_MAX)
 		return -1;
 
 	printk("Unregistering callback %d\n", type);
@@ -1004,7 +1004,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 		printk("Send message: %d (%s) pid %d\n", lmsg->hdr.type, msg_names[lmsg->hdr.type], current->pid);*/
 
 #if !TEST_MSG_LAYER
-	if (dest_cpu==my_cpu) {	
+	if (dest_cpu==my_cpu) {
 		pcn_msg = lmsg;
 
 		printk("%s: INFO: Send message: dest_cpu == my_cpu\n", __func__);
@@ -1111,7 +1111,7 @@ static int pcie_send_init(int channel_num)
 		printk(" Error in sci_create_segment: %d\n", status);
 	}
 
-	status = sci_export_segment(local_send_seg_hdl[channel_num], 
+	status = sci_export_segment(local_send_seg_hdl[channel_num],
 					local_adapter_number,
                    			NO_FLAGS);
 	if (status != 0) {
@@ -1153,7 +1153,7 @@ static int pcie_send_init(int channel_num)
 	local_send_intr_no[channel_num] = sci_interrupt_number(local_send_intr_hdl[channel_num]);
 	printk("Local interrupt number = %d\n", local_send_intr_no);
 
- 
+
 	status = sci_is_local_segment_available(local_send_seg_hdl[channel_num],
 						local_adapter_number);
 	if (status != 0)
@@ -1215,7 +1215,7 @@ static int pcie_send_init(int channel_num)
 
 	return status;
 }
- 
+
 
 static int pcie_recv_init(int channel_num)
 {
@@ -1251,7 +1251,7 @@ static int pcie_recv_init(int channel_num)
 		printk(" Error in sci_create_segment: %d\n", status);
 	}
 
-	status = sci_export_segment(local_recv_seg_hdl[channel_num], 
+	status = sci_export_segment(local_recv_seg_hdl[channel_num],
 					local_adapter_number,
                    			NO_FLAGS);
 	if (status != 0)
@@ -1294,7 +1294,7 @@ static int pcie_recv_init(int channel_num)
 	local_recv_intr_no[channel_num] = sci_interrupt_number(local_recv_intr_hdl[channel_num]);
 	printk("Local interrupt number = %d\n", local_recv_intr_no);
 
- 
+
 	status = sci_is_local_segment_available(local_recv_seg_hdl[channel_num],
 						local_adapter_number);
 	if (status != 0)
@@ -1510,7 +1510,7 @@ static void __exit unload(void)
 		complete_all(&send_q_empty[i]);
 #else
 		complete_all(&send_q_empty);
-#endif		
+#endif
 		complete_all(&recv_intr_flag[i]);
 	}
 
@@ -1544,7 +1544,7 @@ static void __exit unload(void)
 
 	}
 
-	sci_terminate(module_id);	
+	sci_terminate(module_id);
 
 	printk("Successfully unloaded module\n");
 }

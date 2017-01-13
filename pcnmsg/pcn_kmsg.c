@@ -14,6 +14,7 @@ pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 EXPORT_SYMBOL(callbacks);
 
 send_cbftn send_callback;
+EXPORT_SYMBOL(send_callback);
 
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
@@ -67,8 +68,7 @@ int pcn_kmsg_send(unsigned int dest_cpu, void *msg)
 
 void pcn_kmsg_free_msg(void *msg)
 {
-	// vfree(msg);
-	kfree(msg);
+	vfree(msg);
 }
 
 
