@@ -683,6 +683,11 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		struct elfhdr interp_elf_ex;
 	} *loc;
 	struct arch_elf_state arch_state = INIT_ARCH_ELF_STATE;
+#ifdef CONFIG_POPCORN
+	char *string_table = NULL;
+	long string_table_length = 0;
+	struct elf_shdr *shdr = NULL;
+#endif
 
 	loc = kmalloc(sizeof(*loc), GFP_KERNEL);
 	if (!loc) {
@@ -717,6 +722,43 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	end_code = 0;
 	start_data = 0;
 	end_data = 0;
+
+#ifdef CONFIG_POPCORN
+	/* Ajith- allocate and populate the elf section header */
+	i = loc->elf_ex.e_shnum * sizeof(struct elf_shdr);
+
+	shdr = kmalloc(i, GFP_KERNEL);
+	if (shdr == NULL) {
+		printk("%s:%d - Failed to allocate memory\n", __func__, __LINE__);
+		retval = -ENOMEM;
+		goto out;
+	}
+
+	retval = kernel_read(bprm->file, loc->elf_ex.e_shoff, (char *)shdr, i);
+	if (retval != i) {
+		printk("Error loading section header\n"); //goto exit_read; //TODO
+	}
+
+	/* Ajith - Creating string table for elf sections */
+	if (loc->elf_ex.e_shstrndx < loc->elf_ex.e_shnum) {
+		struct elf_shdr *espnt = shdr + loc->elf_ex.e_shstrndx;
+		i = espnt->sh_size;
+
+		string_table = kmalloc(i, GFP_KERNEL);
+		if(string_table == NULL) {
+			printk("%s:%d - Failed to allocate memory\n", __func__, __LINE__);
+			kfree(shdr);
+			retval = -ENOMEM;
+			goto out;
+		}
+
+		retval = kernel_read(bprm->file, espnt->sh_offset, string_table, i);
+		if (retval != i) {
+			printk("Error loading string table\n");//goto exit_read;//TODO
+		}    
+		string_table_length = string_table != NULL ? i : 0;
+	}
+#endif
 
 	for (i = 0; i < loc->elf_ex.e_phnum; i++) {
 		if (elf_ppnt->p_type == PT_INTERP) {
@@ -865,6 +907,9 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		int elf_prot = 0, elf_flags;
 		unsigned long k, vaddr;
 		unsigned long total_size = 0;
+#ifdef CONFIG_POPCORN
+		int j;
+#endif
 
 		if (elf_ppnt->p_type != PT_LOAD)
 			continue;
@@ -932,6 +977,42 @@ static int load_elf_binary(struct linux_binprm *bprm)
 			goto out_free_dentry;
 		}
 
+#ifdef CONFIG_POPCORN
+		/* Ajith - Read the elf sections */
+
+		for (j = 1; j < loc->elf_ex.e_shnum; j++) {
+			struct elf_shdr *espnt = shdr + j;
+			struct vm_area_struct *vma;
+			if (espnt->sh_size <= 0)
+				continue;
+
+			for (vma = current->mm->mmap; vma != NULL; vma = vma->vm_next) {
+				/* Compare allocated sections by VMA, unallocated
+				 * sections by file offset.
+				 */
+			   if ((espnt->sh_flags & SHF_ALLOC) == 0)
+				   continue;
+
+				if (espnt->sh_addr < vma->vm_start ||
+						espnt->sh_addr + espnt->sh_size > vma->vm_end)
+					continue;
+				 /*
+				 printk ("In %s:%d: [%s %d 0x%lx:0x%lx]\n",
+					 __func__, __LINE__,
+					 string_table ? & string_table[espnt->sh_name]
+								  : "?", espnt->sh_type,
+					 (unsigned long)espnt->sh_addr,
+					 (unsigned long)espnt->sh_addr + espnt->sh_size);
+				 */
+
+				 if(!strcmp(".text", &string_table[espnt->sh_name]) || 
+					!strcmp(".got", &string_table[espnt->sh_name]) ||
+					!strcmp(".got.plt", &string_table[espnt->sh_name]))
+						vma->vm_flags |= VM_FETCH_LOCAL;
+			}
+		}
+#endif
+
 		if (!load_addr_set) {
 			load_addr_set = 1;
 			load_addr = (elf_ppnt->p_vaddr - elf_ppnt->p_offset);
@@ -981,6 +1062,15 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	end_code += load_bias;
 	start_data += load_bias;
 	end_data += load_bias;
+
+#ifdef CONFIG_POPCORN
+	/*Freeup allocated memory*/
+	if(shdr != NULL)
+		kfree(shdr);
+
+	if(string_table != NULL)
+		kfree(string_table);
+#endif
 
 	/* Calling set_brk effectively mmaps the pages that we need
 	 * for the bss and break sections.  We must do this before

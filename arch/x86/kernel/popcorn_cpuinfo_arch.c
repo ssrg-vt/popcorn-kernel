@@ -138,7 +138,7 @@ int fill_cpu_info(_remote_cpu_info_data_t *res) {
 	return 0;
 }
 
-int get_proccessor_id(){
+int get_proccessor_id() {
 
 	unsigned int a,b,feat;
 

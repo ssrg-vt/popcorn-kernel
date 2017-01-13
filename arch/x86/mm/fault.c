@@ -1002,7 +1002,7 @@ NOKPROBE_SYMBOL(spurious_fault);
 
 int show_unhandled_signals = 1;
 
-static inline int
+inline int
 access_error(unsigned long error_code, struct vm_area_struct *vma)
 {
 	if (error_code & PF_WRITE) {
@@ -1077,6 +1077,11 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
 
 	if (unlikely(kmmio_fault(regs, address)))
 		return;
+
+#ifdef CONFIG_POPCORN
+	// Helper should not fault
+	BUG_ON(tsk->tgroup_distributed && tsk->main);
+#endif
 
 	/*
 	 * We fault-in kernel-space virtual memory on-demand. The

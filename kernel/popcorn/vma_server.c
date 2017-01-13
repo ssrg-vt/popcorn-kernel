@@ -26,11 +26,8 @@
 #include <linux/elf.h>
 
 #include <linux/popcorn_cpuinfo.h>
+#include <popcorn/bundle.h>
 #include "internal.h"
-
-extern int _cpu;
-const int VM_FAULT_VMA = 0x00000000;
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // Working queues (servers)
@@ -206,7 +203,7 @@ static vma_operation_t * vma_operation_alloc(struct task_struct * task, int op_i
 	operation->prot = prot;
 	operation->flags = flags;
 	operation->vma_operation_index = index;
-	operation->from_cpu = _cpu;
+	operation->from_cpu = get_nid();
 	return operation;
 }
 
@@ -713,7 +710,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			operation->header.from_cpu, operation->tgroup_home_cpu, operation->tgroup_home_id, operation->operation);
 
 	down_write(&mm->mmap_sem);
-	if (_cpu == operation->tgroup_home_cpu) { //SERVER
+	if (get_nid() == operation->tgroup_home_cpu) { //SERVER
 		//if another operation is on going, it will be serialized after.
 #if 0
 		while (mm->distr_vma_op_counter > 0) {
@@ -857,7 +854,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 				return ;
 			}
 
-			if (operation->from_cpu != _cpu) {
+			if (operation->from_cpu != get_nid()) {
 				printk("%s: ERROR: the server pushed me an operation %i of cpu %i\n",
 				       __func__, operation->operation, operation->from_cpu);
 				up_write(&mm->mmap_sem);
@@ -889,7 +886,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		}
 
 		//I could have started the operation...check!
-		if (operation->from_cpu == _cpu) {
+		if (operation->from_cpu == get_nid()) {
 			if (memory->my_lock != 1) {
 				printk("%s: ERROR: wrong distributed lock aquisition\n", __func__);
 				up_write(&mm->mmap_sem);
@@ -1002,7 +999,7 @@ static void process_vma_lock(struct work_struct* work)
 	if (entry != NULL) {
 		down_write(&entry->mm->distribute_sem);
 		PSVMAPRINTK("Acquired distributed lock\n");
-		if (lock->from_cpu == _cpu)
+		if (lock->from_cpu == get_nid())
 			entry->my_lock = 1;
 	}
 
@@ -1096,7 +1093,7 @@ static int handle_vma_op(struct pcn_kmsg_message* inc_msg)
 		}
 	}
 	else {
-		if (operation->tgroup_home_cpu == _cpu)
+		if (operation->tgroup_home_cpu == get_nid())
 			printk("%s: ERROR: received an operation that said that I am the server but no memory_t found\n", __func__);
 		else {
 			printk("%s: WARN: Received an operation for a distributed process not present here\n", __func__);
@@ -1146,7 +1143,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		/*if(operation!=VMA_OP_MAP ||operation!=VMA_OP_REMAP ||operation!=VMA_OP_BRK )
 		  printk("ERROR: asking for saving address from operation %i",operation);
 		*/
-		if (_cpu != current->tgroup_home_cpu)
+		if (get_nid() != current->tgroup_home_cpu)
 			printk("%s: ERROR: asking for saving address from a client", __func__);
 
 		//now I have the new address I can send the message
@@ -1217,14 +1214,14 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		PSPRINTK("Releasing distributed lock\n");
 		up_write(&current->mm->distribute_sem);
 
-		if ( _cpu == current->tgroup_home_cpu && !(operation == VMA_OP_MAP || operation == VMA_OP_BRK) ) {
+		if ( get_nid() == current->tgroup_home_cpu && !(operation == VMA_OP_MAP || operation == VMA_OP_BRK) ) {
 			up_read(&entry->kernel_set_sem);
 		}
 		wake_up(&request_distributed_vma_op);
 	}
 	else { // there are nested operations --- not all situations are handled
 		if (current->mm->distr_vma_op_counter == 1
-		    && _cpu == current->tgroup_home_cpu && current->main == 1) {
+		    && get_nid() == current->tgroup_home_cpu && current->main == 1) {
 
 			if (!(operation == VMA_OP_MAP || operation == VMA_OP_BRK)){
 				PSVMAPRINTK("%s incrementing vma_operation_index\n",__func__);
@@ -1241,7 +1238,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		}
 		else {
 			if (!(current->mm->distr_vma_op_counter == 1
-			      && _cpu != current->tgroup_home_cpu && current->main == 1)) {
+			      && get_nid() != current->tgroup_home_cpu && current->main == 1)) {
 
 				//nested operation
 				if (operation != VMA_OP_UNMAP)
@@ -1277,21 +1274,23 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
  * and I am the server, push it in the system.
  *
  * If this is an unmap nested-called by an operation not pushed in the system,
- * and I am NOT the server, it is an error. The server should have pushed that unmap
- * before, if I am executing it again something is wrong.
+ * and I am NOT the server, it is an error. The server should have pushed that
+ * unmap
+ * Before, if I am executing it again something is wrong.
  */
-/*I assume that down_write(&mm->mmap_sem) is held
- *There are two different protocols:
- *mmap and brk need to only contact the server,
- *all other operations (remap, mprotect, unmap) need that the server pushes it in the system
+/* I assume that down_write(&mm->mmap_sem) is held
+ * There are two different protocols:
+ * mmap and brk need to only contact the server,
+ * all other operations (remap, mprotect, unmap) need that the server pushes
+ * it in the system
  */
 long start_distribute_operation(int operation, unsigned long addr, size_t len,
-				unsigned long prot, unsigned long new_addr, unsigned long new_len,
-				unsigned long flags, struct file *file, unsigned long pgoff)
+			unsigned long prot, unsigned long new_addr, unsigned long new_len,
+			unsigned long flags, struct file *file, unsigned long pgoff)
 {
 	long ret = addr;
 	int server = 1;
-	if (current->tgroup_home_cpu != _cpu)
+	if (current->tgroup_home_cpu != get_nid())
 		server = 0;
 
 	//set default return value
@@ -1303,8 +1302,12 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 // TODO review nesting
 	/*All the operation pushed by the server are executed as not distributed in clients*/
 	if (current->mm->distribute_unmap == 0) {
-		PSPRINTK(KERN_ALERT"%s: INFO: vma operation for pid %i tgroup_home_cpu %i tgroup_home_id %i main %d operation %i addr %lx len %lx end %lx RETURNING\n",
-				__func__, current->pid, current->tgroup_home_cpu, current->tgroup_home_id, current->main?1:0, operation, addr, len, addr+len);
+		PSPRINTK(KERN_ALERT"%s: INFO: vma operation for pid %i "
+				"tgroup_home_cpu %i tgroup_home_id %i main %d operation %i "
+				"addr %lx len %lx end %lx RETURNING\n", __func__,
+				current->pid, current->tgroup_home_cpu,
+				current->tgroup_home_id, current->main ? 1 : 0,
+				operation, addr, len, addr+len);
 		return ret;
 	}
 	/*printk("%s: INFO: pid %d tgroup_home_cpu %d tgroup_home_id %d main %d operation %s addr %lx len %lx end %lx index %d\n",
@@ -1323,8 +1326,7 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 			printk("%s: ERROR: invalid nested vma operation %d (counter %d)\n",
 					__func__, operation, current->mm->distr_vma_op_counter);
 			return -EPERM;
-		}
-		else {
+		} else {
 			/*the main executes the operations for the clients
 			 *distr_vma_op_counter is already increased when it start the operation*/
 			if (current->main == 1) {
@@ -1336,8 +1338,7 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 					printk("%s: ERROR: invalid nested vma operation in main server, operation %d (counter %d)\n",
 							__func__, operation, current->mm->distr_vma_op_counter);
 					return -EPERM;
-				}
-				else {
+				} else {
 					//current->mm->distr_vma_op_counter++;
 
 					if (current->mm->distr_vma_op_counter == 2) {
@@ -1349,25 +1350,21 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 						if (current->mm->was_not_pushed == 0) {
 							PSVMAPRINTK("%s, don't distribute again, return!\n",__func__);
 							return ret;
-						}
-						else {
+						} else {
 							current->mm->distr_vma_op_counter++;
 							goto start;
 						}
-					}
-					else {
+					} else {
 						current->mm->distr_vma_op_counter++;
 						goto start;
 					}
 				}
-			}
-			else { // not the main thread
+			} else { // not the main thread
 				if (current->mm->was_not_pushed == 0) {
 					current->mm->distr_vma_op_counter++; // this is decremented in end_distribute_operation
 					PSVMAPRINTK("%s, don't distribute again, return!\n",__func__);
 					return ret;
-				}
-				else {
+				} else {
 					current->mm->distr_vma_op_counter++;
 					goto start;
 				}
@@ -1449,15 +1446,15 @@ start:
 			/*Partial replication: mmap and brk need to communicate only between server and one client
 			 * */
 			if (operation == VMA_OP_MAP || operation == VMA_OP_BRK) {
-				error = pcn_kmsg_send_long(entry->message_push_operation->from_cpu,
-								(struct pcn_kmsg_long_message*) (lock_message),
-								sizeof(vma_lock_t));
+				error = pcn_kmsg_send_long(
+						entry->message_push_operation->from_cpu,
+						lock_message, sizeof(vma_lock_t));
 				if (error != -1)
 					acks->expected_responses++;
-			}
-			else {
+			} else {
 				down_read(&entry->kernel_set_sem);
-				acks->expected_responses = vma_send_long_all(entry, lock_message, sizeof(vma_lock_t), current, 2);
+				acks->expected_responses = vma_send_long_all(
+						entry, lock_message, sizeof(vma_lock_t), current, 2);
 			}
 
 			while (acks->expected_responses != acks->responses) {
@@ -1568,7 +1565,7 @@ start:
 			unsigned long flags;
 
 			/*First: send a message to everybody to acquire the lock to block page faults*/
-			vma_lock_t* lock_message = vma_lock_alloc(current, _cpu, index);
+			vma_lock_t* lock_message = vma_lock_alloc(current, get_nid(), index);
 			if (lock_message == NULL) {
 				down_write(&current->mm->mmap_sem);
 				ret = -ENOMEM;
@@ -1585,7 +1582,8 @@ start:
 
 //ANTONIOB: why here we are not distinguish between different type of operations?
 			down_read(&entry->kernel_set_sem);
-			acks->expected_responses = vma_send_long_all(entry, lock_message, sizeof(vma_lock_t), 0, 0);
+			acks->expected_responses = vma_send_long_all(
+					entry, lock_message, sizeof(vma_lock_t), 0, 0);
 
 			/*Second: wait that everybody acquire the lock, and acquire it locally too*/
 			while (acks->expected_responses != acks->responses) {
@@ -1632,16 +1630,19 @@ start:
 			 * a fixed flag.
 			 * */
 			if (!(operation == VMA_OP_REMAP) || (flags & MREMAP_FIXED)) {
-				PSPRINTK("%s: INFO: SERVER NOT MAIN sending done for operation, we can execute the operation in parallel! %d\n",
+				PSPRINTK("%s: INFO: SERVER NOT MAIN "
+						"sending done for operation, "
+						"we can execute the operation in parallel! %d\n",
 						__func__, operation);
 
-				vma_send_long_all(entry, operation_to_send, sizeof(vma_operation_t), 0, 0);
+				vma_send_long_all(
+						entry, operation_to_send,sizeof(vma_operation_t), 0, 0);
 				kfree(operation_to_send);
 				down_write(&current->mm->mmap_sem);
 				return ret;
-			}
-			else {
-				PSPRINTK("%s: INFO: SERVER NOT MAIN going to execute the operation locally %d\n",
+			} else {
+				PSPRINTK("%s: INFO: SERVER NOT MAIN "
+						"going to execute the operation locally %d\n",
 						__func__, operation);
 				entry->message_push_operation = operation_to_send;
 
@@ -1658,8 +1659,9 @@ start:
 		memory_t *entry;
 		int error;
 
-		PSPRINTK("%s: INFO: CLIENT starting operation %i for pid %d current index is%d\n",
-				__func__, operation, current->pid, current->mm->vma_operation_index);
+		PSPRINTK("%s: INFO: CLIENT starting operation %i for pid %d "
+				"current index is%d\n", __func__,
+				operation, current->pid, current->mm->vma_operation_index);
 
 		/*First: send the operation to the server*/
 		operation_to_send = vma_operation_alloc(current, operation,

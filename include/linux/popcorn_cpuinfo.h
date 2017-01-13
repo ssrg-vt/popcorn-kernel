@@ -20,6 +20,7 @@
 #define _LINUX_POPCORN_CPUINFO_H
 
 #include <linux/pcn_kmsg.h>
+
 // TODO rlist_head should be renamed,
 // TODO furthermore a R/W lock must be used to access the list
 extern struct list_head rlist_head;

@@ -73,7 +73,6 @@ extern unsigned int offset_cpus; //from kernel/smp.c
 //struct cpumask cpu_global_online_mask;
 #define for_each_global_online_cpu(cpu)   for_each_cpu((cpu), cpu_global_online_mask)
 
-
 int flush_cpu_info_var(void)
 {
 	memset(&cpu_result, 0, sizeof(cpu_result)); //cpu_result = NULL;
@@ -241,31 +240,32 @@ static int __init cpu_info_handler_init(void)
 }
 #endif
 
-extern int sched_server_init(void);
-extern int pcn_kmsg_init(void);
-extern int process_server_init(void);
-extern int setup_bundle_node(void);
 extern int popcorn_ns_init(int);
+extern int pcn_kmsg_init(void);
+extern int popcorn_nodes_init(void);
+extern int sched_server_init(void);
+extern int process_server_init(void);
 extern int vma_server_init(void);
+extern int page_server_init(void);
 
 static int __init popcorn_init(void)
 {
 	printk(KERN_INFO"Initialize Popcorn subsystems...\n");
 
 	popcorn_ns_init(false);
-
 	pcn_kmsg_init();
 
-	setup_bundle_node();
-
-	sched_server_init();
+	popcorn_nodes_init();
 
 #if 0 // beowulf
 	cpu_info_handler_init();
-	page_server_init();
 #endif
 	vma_server_init();
 	process_server_init();
+	page_server_init();
+	sched_server_init();
+
+	// file_handler_init();
 
 	return 0;
 }

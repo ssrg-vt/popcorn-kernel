@@ -47,6 +47,9 @@ enum {
 //#define MAX_KERNEL_IDS NR_CPUS
 #define MAX_KERNEL_IDS 2
 
+
+#define MAX_POPCORN_NODES 32
+
 /**
  * Use the preprocessor to turn off printk.
  */

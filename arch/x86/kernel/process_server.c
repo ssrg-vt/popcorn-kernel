@@ -133,10 +133,10 @@ int save_thread_info(struct task_struct *task, struct pt_regs *regs,
 		arch->thread_gs = gs;
 	}
 
-	PSPRINTK("%s: pc %lx sp %lx bp %lx ra %lx\n", __func__,
+	PSPRINTK(KERN_INFO"%s: pc %lx sp %lx bp %lx ra %lx\n", __func__,
 			arch->migration_pc, arch->old_rsp, arch->bp, arch->ra);
 
-	PSPRINTK("%s: fs task %lx[%lx], saved %lx[%lx], current %lx[%lx]\n", __func__,
+	PSPRINTK(KERN_INFO"%s: fs task %lx[%lx], saved %lx[%lx], current %lx[%lx]\n", __func__,
 	      (unsigned long)task->thread.fs, (unsigned long)task->thread.fsindex,
 	      (unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex,
 	      (unsigned long)fs, (unsigned long)fsindex);
@@ -225,13 +225,14 @@ int restore_thread_info(struct task_struct *task, field_arch *arch)
 	savesegment(fs, fsindex);
 	rdmsrl(MSR_FS_BASE, fs_val);
 
-	PSPRINTK("%s: ip=0x%lx, sp=0x%lx, bp=0x%lx\n", __func__,
+	PSPRINTK(KERN_INFO"%s: ip=0x%lx, sp=0x%lx, bp=0x%lx\n", __func__,
 			arch->migration_pc, arch->old_rsp, arch->bp);
 
-	PSPRINTK("%s: task=%s, current=%s (%d), FS saved=0x%lx[0x%lx], curr=0x%lx[0x%lx]\n",
-	       __func__, task->comm, current->comm, passed,
-	       (unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex,
-	       (unsigned long)fs_val, (unsigned long)fsindex);
+	PSPRINTK(KERN_INFO"%s: task=%s, current=%s (%d), FS saved=0x%lx[0x%lx], "
+			"curr=0x%lx[0x%lx]\n", __func__,
+			task->comm, current->comm, passed,
+			(unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex,
+			(unsigned long)fs_val, (unsigned long)fsindex);
 
 	//dump_processor_regs(task_pt_regs(task));
 

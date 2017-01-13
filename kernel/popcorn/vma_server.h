@@ -19,8 +19,9 @@
  * @return Returns 0 on success, an error code otherwise.
  */
 int vma_server_do_mapping_for_distributed_process(
-		mapping_answers_for_2_kernels_t* fetching_page, struct task_struct *tsk,
-		struct mm_struct* mm, unsigned long address, spinlock_t* ptl);
+		mapping_answers_for_2_kernels_t* fetching_page,
+		struct task_struct *tsk, struct mm_struct* mm,
+		unsigned long address, spinlock_t* ptl);
 
 /**
  * This is used to locally enqueue work to the vma_server (specifically

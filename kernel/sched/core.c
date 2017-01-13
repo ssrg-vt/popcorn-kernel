@@ -4622,7 +4622,7 @@ SYSCALL_DEFINE2(sched_migrate, pid_t, pid, unsigned int, nid)
 		goto out_unlock;
 	}
 
-	if (!is_bundle_online(nid)) {
+	if (!is_popcorn_node_online(nid)) {
 		retval = -EAGAIN;
 		goto out_unlock;
 	}

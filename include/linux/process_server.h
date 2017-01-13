@@ -6,10 +6,16 @@
 #ifndef _PROCESS_SERVER_H
 #define _PROCESS_SERVER_H
 
+#include <linux/completion.h>
+#include <linux/workqueue.h>
+#include <linux/signal.h>
+#include <linux/rwsem.h>
+
 #include <linux/pcn_kmsg.h> // Messaging
 
 #include <process_server_arch_macros.h>
 #include <popcorn/process_server_macro.h>
+
 /*
  * Structures
  */
@@ -106,8 +112,10 @@ typedef struct _memory_struct {
 	int tgroup_home_id;
 	struct mm_struct* mm;
 	int alive;
+
 	struct task_struct *helper;
 	bool helper_stop;
+	char path[512];
 
 	int operation;
 	unsigned long addr;
@@ -117,16 +125,18 @@ typedef struct _memory_struct {
 	unsigned long prot;
 	unsigned long pgoff;
 	unsigned long flags;
-	char path[512];
 
 	struct task_struct* waiting_for_main;
 	struct task_struct* waiting_for_op;
 	int arrived_op;
 	int my_lock;
-	int kernel_set[MAX_KERNEL_IDS];
-	atomic_t answers_remain;
+	int setting_up;
+
+	int kernel_set[MAX_POPCORN_NODES];
 	struct rw_semaphore kernel_set_sem;
+
 	vma_operation_t* message_push_operation;
+	atomic_t answers_remain;
 	atomic_t pending_migration;
 	atomic_t pending_back_migration;
 } memory_t;
@@ -281,7 +291,7 @@ typedef struct {
 #define PROCESS_PAIRING_FIELD int your_pid; \
 		int my_pid;
 
-struct _create_process_pairing{
+struct _create_process_pairing {
 	PROCESS_PAIRING_FIELD
 };
 
@@ -291,7 +301,7 @@ typedef struct {
 
 	union{
 
-		struct{
+		struct {
 			PROCESS_PAIRING_FIELD
 		};
 
