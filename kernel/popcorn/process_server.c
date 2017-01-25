@@ -191,8 +191,7 @@ static void __rename_task_comm(struct task_struct *task, char *name)
  */
 pid_t kernel_thread_popcorn(int (*fn)(void *), void *arg)
 {
-	const unsigned long flags = CLONE_THREAD | CLONE_SIGHAND |
-						  CLONE_VM | CLONE_UNTRACED | SIGCHLD;
+	const unsigned long flags = CLONE_THREAD | CLONE_SIGHAND | SIGCHLD;
 	const unsigned long flags_current = current->flags;
 	pid_t pid;
 
@@ -577,147 +576,35 @@ int popcorn_process_exit(long code)
 	memory_t *memory = current->memory;
 	if (!memory) return -ESRCH;
 
-	if (current->main) return 0;	// I'm a helper.
+	printk(KERN_INFO"%s: 0x%p %d %d\n", __func__,
+			current, current->pid, current->tgid);
 
-	printk("%s: Stopping 0x%p %d\n", __func__, current, current->pid);
+	// I'm a helper.
+	if (current->main) return 0;
+
+	// Remote proxy
+	if (current->executing_for_remote) {
+		// TODO: Send the result to the home
+		return 0;
+	}
+
+	if (current->pid != current->tgid) return 0;
+
+	printk("%s: Stopping 0x%p %d %d\n", __func__,
+			current, current->pid, current->tgid);
+
 	memory->helper_stop = true;
+	wake_up_process(memory->helper);
 	put_task_struct(memory->helper);
 
-	return 0;
-}
-
-static int helper_thread_main(memory_t *memory)
-{
-	// TODO: Need to explore how this has to be used
-	// TODO: Exit the thread
-	might_sleep();
-
-	printk("%s: Started pid = %d\n", __func__, current->pid);
-
-	while (!memory->helper_stop) {
-		int flush = 0;
-
-		__set_task_state(current, TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ * 10);
-		printk("%s: continues 0x%p\n", __func__, current);
-		__set_task_state(current, TASK_RUNNING);
-		continue;
-
-
-		while (current->distributed_exit != EXIT_ALIVE) {
-			flush = exit_distributed_process(memory, flush);
-			msleep(1000);
-		}
-		while (memory->operation != VMA_OP_NOP &&
-		       memory->mm->thread_op == current) {
-			struct file *f;
-			unsigned long populate = 0;
-			unsigned long ret = 0;
-
-			switch (memory->operation) {
-			case VMA_OP_UNMAP:
-				down_write(&memory->mm->mmap_sem);
-				GET_UNMAP_IF_HOME(current, memory);
-				ret = do_munmap(memory->mm, memory->addr, memory->len);
-				PUT_UNMAP_IF_HOME(current, memory);
-				up_write(&memory->mm->mmap_sem);
-				break;
-
-			case VMA_OP_MADVISE: { //this is only for MADV_REMOVE (thus write is 0)
-				struct vm_area_struct *pvma;
-				struct vm_area_struct *vma = find_vma(memory->mm, memory->addr);
-				if (!vma || (vma->vm_start > memory->addr || vma->vm_end < memory->addr))
-					printk("%s: ERROR VMA_OP_MADVISE cannot find VMA addr %lx start %lx end %lx\n",
-							__func__, memory->addr, (vma ? vma->vm_start : 0), (vma ? vma->vm_end : 0));
-				//write = madvise_need_mmap_write(behavior);
-				//if (write)
-				//	down_write(&(memory->mm->mmap_sem));
-				//else
-					down_read(&(memory->mm->mmap_sem));
-				GET_UNMAP_IF_HOME(current, memory);
-				ret = madvise_remove(vma, &pvma,
-						memory->addr, (memory->addr + memory->len) );
-				PUT_UNMAP_IF_HOME(current, memory);
-				//if (write)
-				//	up_write(&(memory->mm->mmap_sem));
-				//else
-					up_read(&(memory->mm->mmap_sem));
-				break; }
-
-			case VMA_OP_PROTECT:
-				GET_UNMAP_IF_HOME(current, memory);
-				ret = kernel_mprotect(memory->addr, memory->len, memory->prot);
-				PUT_UNMAP_IF_HOME(current, memory);
-				break;
-
-			case VMA_OP_REMAP:
-				// note that remap calls unmap --- thus is a nested operation ...
-				down_write(&memory->mm->mmap_sem);
-				GET_UNMAP_IF_HOME(current, memory);
-				ret = kernel_mremap(memory->addr, memory->len, memory->new_len, 0, memory->new_addr);
-				PUT_UNMAP_IF_HOME(current, memory);
-				up_write(&memory->mm->mmap_sem);
-				break;
-
-			case VMA_OP_BRK:
-				ret = -1;
-				down_write(&memory->mm->mmap_sem);
-				GET_UNMAP_IF_HOME(current, memory);
-				ret = do_brk(memory->addr, memory->len);
-				PUT_UNMAP_IF_HOME(current, memory);
-				up_write(&memory->mm->mmap_sem);
-				break;
-
-			case VMA_OP_MAP:
-				ret = -1;
-				f = NULL;
-				if (memory->path[0] != '\0') {
-					f = filp_open(memory->path, O_RDONLY | O_LARGEFILE, 0);
-					if (IS_ERR(f)) {
-						printk("ERROR: cannot open file to map\n");
-						break;
-					}
-				}
-				down_write(&memory->mm->mmap_sem);
-				GET_UNMAP_IF_HOME(current, memory);
-				ret = do_mmap_pgoff(f, memory->addr, memory->len, memory->prot,
-						    memory->flags, memory->pgoff, &populate);
-				PUT_UNMAP_IF_HOME(current, memory);
-				up_write(&memory->mm->mmap_sem);
-
-				if (memory->path[0] != '\0') {
-					filp_close(f, NULL);
-				}
-				break;
-
-			default:
-				break;
-			}
-			memory->addr = ret;
-			memory->operation = VMA_OP_NOP;
-
-            PSPRINTK("%s: wake up %d (cpu %d id %d)\n", __func__,
-					memory->waiting_for_main->pid,
-					current->tgroup_home_cpu, current->tgroup_home_id);
-			wake_up_process(memory->waiting_for_main);
-		}
-
-		if (current->distributed_exit != EXIT_ALIVE ||
-				(memory->operation != VMA_OP_NOP && memory->mm->thread_op == current)) {
-			__set_task_state(current, TASK_RUNNING);
-			printk("%s: continue 0x%p\n", __func__, current);
-			continue;
-		}
-		__set_task_state(current, TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ * 30);
-		printk("%s: continues 0x%p\n", __func__, current);
-		__set_task_state(current, TASK_RUNNING);
+	if (memory->shadow_spawner) {
+		complete(&memory->spawn_egg);
+		put_task_struct(memory->shadow_spawner);
 	}
-	printk("%s: Exiting from helper_thread_main\n", __func__);
+
 	return 0;
 }
 
-#include <popcorn/page_server.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 // exit group notification
@@ -728,19 +615,26 @@ static void process_exit_group_notification(struct work_struct *_work)
 	thread_group_exited_notification_t *msg = work->request;
 	unsigned long flags;
 
-	memory_t *mm_data = find_memory_entry(msg->tgroup_home_cpu,
+	memory_t *memory = find_memory_entry(msg->tgroup_home_cpu,
 					      msg->tgroup_home_id);
-	if (!mm_data) 
+	if (!memory)
 		goto out_free;
 
-	while (mm_data->helper == NULL)
+	while (memory->helper == NULL)
 		schedule();
 
-	lock_task_sighand(mm_data->helper, &flags);
-	mm_data->helper->distributed_exit = EXIT_PROCESS;
-	unlock_task_sighand(mm_data->helper, &flags);
+	lock_task_sighand(memory->helper, &flags);
+	memory->helper->distributed_exit = EXIT_PROCESS;
+	unlock_task_sighand(memory->helper, &flags);
 
-	wake_up_process(mm_data->helper);
+	memory->helper_stop = true;
+	wake_up_process(memory->helper);
+	put_task_struct(memory->helper);
+
+	if (memory->shadow_spawner) {
+		complete(&memory->spawn_egg);
+		put_task_struct(memory->shadow_spawner);
+	}
 
 out_free:
 	pcn_kmsg_free_msg(msg);
@@ -753,24 +647,24 @@ static void process_exiting_process_notification(struct work_struct *_work)
 	exiting_process_t *msg = work->request;
 
 	unsigned int source_cpu = msg->header.from_cpu;
-	struct task_struct *task;
+	struct task_struct *tsk;
 
-	task = find_task_by_vpid(msg->prev_pid);
+	tsk = find_task_by_vpid(msg->prev_pid);
 
-	if (task && task->next_pid == msg->my_pid
-		&& task->next_cpu == source_cpu
-	    && task->represents_remote == 1) {
+	if (tsk && tsk->next_pid == msg->my_pid
+		&& tsk->next_cpu == source_cpu
+	    && tsk->represents_remote == 1) {
 
 		// TODO: Handle return values
-		restore_thread_info(task, &msg->arch);
+		restore_thread_info(tsk, &msg->arch);
 
-		task->group_exit = msg->group_exit;
-		task->distributed_exit_code = msg->code;
+		tsk->group_exit = msg->group_exit;
+		tsk->distributed_exit_code = msg->code;
 #if MIGRATE_FPU
 		// TODO: Handle return values
-		restore_fpu_info(task, &msg->arch);
+		restore_fpu_info(tsk, &msg->arch);
 #endif
-		wake_up_process(task);
+		wake_up_process(tsk);
 	} else {
 		printk(KERN_ALERT"%s: ERROR: task not found."
 				"Impossible to kill shadow (pid %d cpu %d)\n",
@@ -784,13 +678,13 @@ static void process_exiting_process_notification(struct work_struct *_work)
 static int handle_thread_group_exited_notification(struct pcn_kmsg_message *inc_msg)
 {
 	exit_group_work_t *work;
-	thread_group_exited_notification_t *request =
-		(thread_group_exited_notification_t *) inc_msg;
+	thread_group_exited_notification_t *req =
+		(thread_group_exited_notification_t *)inc_msg;
 
 	work = kmalloc(sizeof(exit_group_work_t), GFP_ATOMIC);
 
 	if (work) {
-		work->request = request;
+		work->request = req;
 		INIT_WORK((struct work_struct *)work,
 			   process_exit_group_notification);
 		queue_work(exit_group_wq, (struct work_struct *) work);
@@ -801,7 +695,7 @@ static int handle_thread_group_exited_notification(struct pcn_kmsg_message *inc_
 static int handle_exiting_process_notification(struct pcn_kmsg_message *inc_msg)
 {
 	exit_work_t *work;
-	exiting_process_t *request = (exiting_process_t *) inc_msg;
+	exiting_process_t *request = (exiting_process_t *)inc_msg;
 
 	work = kmalloc(sizeof(exit_work_t), GFP_ATOMIC);
 	if (work) {
@@ -832,7 +726,7 @@ static int handle_process_pairing_request(struct pcn_kmsg_message *_msg)
 		return -ESRCH;
 	}
 
-	PSPRINTK("%s: %d --> %d at %d\n", __func__,
+	PSPRINTK("Pairing local:  %d --> %d at %d\n", 
 			task->pid, source_cpu, req->my_pid);
 	task->next_cpu = source_cpu;
 	task->next_pid = req->my_pid;
@@ -896,8 +790,8 @@ static void process_count_request(struct work_struct *_work)
 	BUG_ON(!response);
 	response->count = 0;
 
-	/* This is needed to know if the requesting kernel has to save the 
-	 * mapping or send the group dead message. 
+	/* This is needed to know if the requesting kernel has to save the
+	 * mapping or send the group dead message.
 	 * If there is at least one alive thread of the process in the system
 	 * the mapping must be saved.
 	 * I count how many threads there are but actually I can stop when
@@ -907,15 +801,15 @@ static void process_count_request(struct work_struct *_work)
 	 * I do not need to take the sighand lock (used to set
 	 * task->distributed_exit = 1) because:
 	 * -- count remote thread is called AFTER set task->distributed_exit = 1
-	 * -- if I am here the last thread of the process in the requesting 
+	 * -- if I am here the last thread of the process in the requesting
 	 *  kernel already set his flag distributed_exit to 1
-	 * -- two things can happend if the last thread of the process is 
+	 * -- two things can happend if the last thread of the process is
 	 *  in this kernel and it is dying too:
-	 * -- 1. set its flag before I check it => I send 0 => the other 
+	 * -- 1. set its flag before I check it => I send 0 => the other
 	 *  kernel will send the message
-	 * -- 2. set its flag after I check it => I send 1 => I will send 
+	 * -- 2. set its flag after I check it => I send 1 => I will send
 	 *  the message
-	 * Is important to not take the lock so everything can be done 
+	 * Is important to not take the lock so everything can be done
 	 * in the messaging layer without fork another kthread.
 	 */
 
@@ -1147,7 +1041,7 @@ static int process_server_notify_delegated_subprocess_starting(
 	msg->your_pid = remote_pid;
 	msg->my_pid = my_pid;
 
-	PSPRINTK("%s: pairing %d --> %d at %d\n", __func__,
+	PSPRINTK("Pairing remote: %d --> %d at %d\n",
 			my_pid, remote_pid, remote_cpu);
 
 	tx_ret = pcn_kmsg_send_long(remote_cpu, msg, sizeof(*msg));
@@ -1167,7 +1061,7 @@ static int process_server_notify_delegated_subprocess_starting(
  * This is a back migration => <task> must already been migrated at least once in <dst_cpu>.
  * It returns -1 in error case.
  */
-static int do_back_migration(struct task_struct *task, int dst_cpu,
+static int do_back_migration(struct task_struct *tsk, int dst_cpu,
 			     struct pt_regs *regs, void __user *uregs)
 {
 	back_migration_request_t *req;
@@ -1185,67 +1079,215 @@ static int do_back_migration(struct task_struct *task, int dst_cpu,
 	req->header.type = PCN_KMSG_TYPE_PROC_SRV_BACK_MIG_REQUEST;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
-	req->tgroup_home_cpu = task->tgroup_home_cpu;
-	req->tgroup_home_id = task->tgroup_home_id;
-	req->placeholder_pid = task->pid;
-	req->placeholder_tgid = task->tgid;
-	req->prev_pid= task->prev_pid;
-	req->personality = task->personality;
+	req->tgroup_home_cpu = tsk->tgroup_home_cpu;
+	req->tgroup_home_id = tsk->tgroup_home_id;
+	req->placeholder_pid = tsk->pid;
+	req->placeholder_tgid = tsk->tgid;
+	req->prev_pid = tsk->prev_pid;
+	req->personality = tsk->personality;
 
-	/*mklinux_akshay*/
-	req->origin_pid = task->origin_pid;
-	req->remote_blocked = task->blocked;
-	req->remote_real_blocked = task->real_blocked;
-	req->remote_saved_sigmask = task->saved_sigmask;
-	req->remote_pending = task->pending;
-	req->sas_ss_sp = task->sas_ss_sp;
-	req->sas_ss_size = task->sas_ss_size;
-	memcpy(req->action, task->sighand->action, sizeof(req->action));
+	req->origin_pid = tsk->origin_pid;
+	req->remote_blocked = tsk->blocked;
+	req->remote_real_blocked = tsk->real_blocked;
+	req->remote_saved_sigmask = tsk->saved_sigmask;
+	req->remote_pending = tsk->pending;
+	req->sas_ss_sp = tsk->sas_ss_sp;
+	req->sas_ss_size = tsk->sas_ss_size;
+	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
 
 	// TODO: Handle return value
-	save_thread_info(task, regs, &req->arch, uregs);
+	save_thread_info(tsk, regs, &req->arch, uregs);
 
 #if MIGRATE_FPU
 	// TODO: Handle return value
-	save_fpu_info(task, &req->arch);
+	save_fpu_info(tsk, &req->arch);
 #endif
 
-	lock_task_sighand(task, &flags);
+	lock_task_sighand(tsk, &flags);
 
-	if (task->tgroup_distributed == 0) {
-		unlock_task_sighand(task, &flags);
-		printk("%s: ERROR: not tgroup_distributed process (cpu %d id %d)\n",
-				__func__, task->tgroup_home_cpu, task->tgroup_home_id);
-		ret = -EINVAL;
-		goto out_free;
-	}
+	tsk->represents_remote = 1;
+	tsk->next_cpu = tsk->prev_cpu;
+	tsk->next_pid = tsk->prev_pid;
+	tsk->executing_for_remote = 0;
+	unlock_task_sighand(tsk, &flags);
 
-	task->represents_remote = 1;
-	task->next_cpu = task->prev_cpu;
-	task->next_pid = task->prev_pid;
-	task->executing_for_remote = 0;
-	unlock_task_sighand(task, &flags);
+	ret = pcn_kmsg_send_long(dst_cpu, req, sizeof(*req));
 
 #if MIGRATION_PROFILE
 	migration_end = ktime_get();
-	printk(KERN_ERR "Time for x86->arm back migration - x86 side: %ld ns\n",
+	printk(KERN_ERR"Time for x86->arm back migration - x86 side: %ld ns\n",
 			(unsigned long)ktime_to_ns(ktime_sub(migration_end, migration_start)));
 #endif
-	ret = pcn_kmsg_send_long(dst_cpu, req, sizeof(*req));
 
-out_free:
 	kfree(req);
 	return ret;
 }
+
+
+/*
+ * Main loop for in-kernel request handler
+ */
+static int helper_thread_main_(void)
+{
+	int count = 10;
+	memory_t *memory = current->memory;
+	might_sleep();
+
+	printk("%s: Started pid=%d\n", __func__, current->pid);
+
+	while (!memory->helper_stop && count > 0) {
+		__set_task_state(current, TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ * 1);
+		printk("%s: continues 0x%p %d\n", __func__, current, count--);
+		__set_task_state(current, TASK_RUNNING);
+	}
+	printk("%s: Exit helper %d\n", __func__, current->pid);
+
+	return 0;
+}
+
+static int helper_thread_main(void)
+{
+	memory_t *memory = current->memory;
+
+	might_sleep();
+
+	printk("%s: Started pid=%d\n", __func__, current->pid);
+
+	// TODO: Need to explore how this has to be used
+	// TODO: Exit the thread
+	while (!memory->helper_stop) {
+		int flush = 0;
+
+		/*
+		__set_task_state(current, TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ * 1);
+		printk("%s: continues 0x%p\n", __func__, current);
+		__set_task_state(current, TASK_RUNNING);
+		continue;
+		*/
+
+		while (current->distributed_exit != EXIT_ALIVE) {
+			flush = exit_distributed_process(memory, flush);
+			msleep(1000);
+		}
+		while (memory->operation != VMA_OP_NOP &&
+		       memory->mm->thread_op == current) {
+			struct file *f;
+			unsigned long populate = 0;
+			unsigned long ret = 0;
+
+			switch (memory->operation) {
+			case VMA_OP_UNMAP:
+				down_write(&memory->mm->mmap_sem);
+				GET_UNMAP_IF_HOME(current, memory);
+				ret = do_munmap(memory->mm, memory->addr, memory->len);
+				PUT_UNMAP_IF_HOME(current, memory);
+				up_write(&memory->mm->mmap_sem);
+				break;
+
+			case VMA_OP_MADVISE: { //this is only for MADV_REMOVE (thus write is 0)
+				struct vm_area_struct *pvma;
+				struct vm_area_struct *vma = find_vma(memory->mm, memory->addr);
+				if (!vma || (vma->vm_start > memory->addr || vma->vm_end < memory->addr))
+					printk("%s: ERROR VMA_OP_MADVISE cannot find VMA addr %lx start %lx end %lx\n",
+							__func__, memory->addr, (vma ? vma->vm_start : 0), (vma ? vma->vm_end : 0));
+				//write = madvise_need_mmap_write(behavior);
+				//if (write)
+				//	down_write(&(memory->mm->mmap_sem));
+				//else
+					down_read(&(memory->mm->mmap_sem));
+				GET_UNMAP_IF_HOME(current, memory);
+				ret = madvise_remove(vma, &pvma,
+						memory->addr, (memory->addr + memory->len) );
+				PUT_UNMAP_IF_HOME(current, memory);
+				//if (write)
+				//	up_write(&(memory->mm->mmap_sem));
+				//else
+					up_read(&(memory->mm->mmap_sem));
+				break; }
+
+			case VMA_OP_PROTECT:
+				GET_UNMAP_IF_HOME(current, memory);
+				ret = kernel_mprotect(memory->addr, memory->len, memory->prot);
+				PUT_UNMAP_IF_HOME(current, memory);
+				break;
+
+			case VMA_OP_REMAP:
+				// note that remap calls unmap --- thus is a nested operation ...
+				down_write(&memory->mm->mmap_sem);
+				GET_UNMAP_IF_HOME(current, memory);
+				ret = kernel_mremap(memory->addr, memory->len, memory->new_len, 0, memory->new_addr);
+				PUT_UNMAP_IF_HOME(current, memory);
+				up_write(&memory->mm->mmap_sem);
+				break;
+
+			case VMA_OP_BRK:
+				ret = -1;
+				down_write(&memory->mm->mmap_sem);
+				GET_UNMAP_IF_HOME(current, memory);
+				ret = do_brk(memory->addr, memory->len);
+				PUT_UNMAP_IF_HOME(current, memory);
+				up_write(&memory->mm->mmap_sem);
+				break;
+
+			case VMA_OP_MAP:
+				ret = -1;
+				f = NULL;
+				if (memory->path[0] != '\0') {
+					f = filp_open(memory->path, O_RDONLY | O_LARGEFILE, 0);
+					if (IS_ERR(f)) {
+						printk("ERROR: cannot open file to map\n");
+						break;
+					}
+				}
+				down_write(&memory->mm->mmap_sem);
+				GET_UNMAP_IF_HOME(current, memory);
+				ret = do_mmap_pgoff(f, memory->addr, memory->len, memory->prot,
+						    memory->flags, memory->pgoff, &populate);
+				PUT_UNMAP_IF_HOME(current, memory);
+				up_write(&memory->mm->mmap_sem);
+
+				if (memory->path[0] != '\0') {
+					filp_close(f, NULL);
+				}
+				break;
+
+			default:
+				break;
+			}
+			memory->addr = ret;
+			memory->operation = VMA_OP_NOP;
+
+            PSPRINTK("%s: wake up %d (cpu %d id %d)\n", __func__,
+					memory->waiting_for_main->pid,
+					current->tgroup_home_cpu, current->tgroup_home_id);
+			wake_up_process(memory->waiting_for_main);
+		}
+
+		if (current->distributed_exit != EXIT_ALIVE ||
+				(memory->operation != VMA_OP_NOP &&
+				 memory->mm->thread_op == current)) {
+			__set_task_state(current, TASK_RUNNING);
+			printk("%s: continue 0x%p\n", __func__, current);
+			continue;
+		}
+		__set_task_state(current, TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ * 30);
+		printk("%s: continues 0x%p\n", __func__, current);
+		__set_task_state(current, TASK_RUNNING);
+	}
+	printk("%s: Exiting from helper_thread_main\n", __func__);
+
+	return 0;
+}
+
 
 /*
  * Send a message to <dst_cpu> for migrating a task <task>.
  * This function will ask the remote cpu to create a thread to host task.
  * It returns -1 in error case.
  */
-//static
-static int handle_clone_request(struct pcn_kmsg_message *inc_msg);
-
 static int create_helper_thread_from_user(void *_memory)
 {
 	memory_t *memory = (memory_t *)_memory;
@@ -1253,172 +1295,189 @@ static int create_helper_thread_from_user(void *_memory)
 	might_sleep();
 
 	BUG_ON(memory != current->memory);
-	BUG_ON(memory->helper != current);
 
 	current->main = 1;	// Yes, i'm a helper
 
-	helper_thread_main(memory);
+	helper_thread_main();
 
 	return 0;
 }
 
-int do_migration(struct task_struct *task, int dst_nid,
+
+static int __request_clone_remote(int dst_nid, struct task_struct *tsk,
 		struct pt_regs *regs, void __user *uregs)
 {
-	int sent = -1;
 	char *rpath, path[512];
-	memory_t *memory;
-	bool create_helper = false;
-	unsigned long flags;
 	clone_request_t *req;
+	int sent;
+
+	might_sleep();
 
 	req = kmalloc(sizeof(*req), GFP_KERNEL);
-	if (req == NULL) return -ENOMEM;
+	BUG_ON(!req);
 
 	/* Build request */
 	req->header.type = PCN_KMSG_TYPE_PROC_SRV_CLONE_REQUEST;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
+	req->tgroup_home_cpu = get_nid();
+	req->tgroup_home_id = tsk->tgid;
+
 	// struct mm_struct --------------------------------------------------------
-	rpath = d_path(&task->mm->exe_file->f_path, path, sizeof(path));
+	rpath = d_path(&tsk->mm->exe_file->f_path, path, sizeof(path));
 	if (IS_ERR(rpath)) {
 		printk("%s: exe binary path is too long.\n", __func__);
 		kfree(req);
 		return -ESRCH;
 	} else {
 		strncpy(req->exe_path, rpath, sizeof(req->exe_path));
-		printk("%s: exe_path = %s\n", __func__, rpath);
+		// printk("%s: exe_path=%s\n", __func__, rpath);
 	}
 
-	req->stack_start = task->mm->start_stack;
-	req->start_brk = task->mm->start_brk;
-	req->brk = task->mm->brk;
-	req->env_start = task->mm->env_start;
-	req->env_end = task->mm->env_end;
-	req->arg_start = task->mm->arg_start;
-	req->arg_end = task->mm->arg_end;
-	req->start_code = task->mm->start_code;
-	req->end_code = task->mm->end_code;
-	req->start_data = task->mm->start_data;
-	req->end_data = task->mm->end_data;
-	req->def_flags = task->mm->def_flags;
-	req->popcorn_vdso = task->mm->context.popcorn_vdso;
+	req->stack_start = tsk->mm->start_stack;
+	req->start_brk = tsk->mm->start_brk;
+	req->brk = tsk->mm->brk;
+	req->env_start = tsk->mm->env_start;
+	req->env_end = tsk->mm->env_end;
+	req->arg_start = tsk->mm->arg_start;
+	req->arg_end = tsk->mm->arg_end;
+	req->start_code = tsk->mm->start_code;
+	req->end_code = tsk->mm->end_code;
+	req->start_data = tsk->mm->start_data;
+	req->end_data = tsk->mm->end_data;
+	req->def_flags = tsk->mm->def_flags;
+	req->popcorn_vdso = tsk->mm->context.popcorn_vdso;
 
-	// struct task_struct ------------------------------------------------------
-	req->placeholder_pid = task->pid;
-	req->placeholder_tgid = task->tgid;
-	req->personality = task->personality;
+	// struct tsk_struct ------------------------------------------------------
+	req->placeholder_pid = tsk->pid;
+	req->placeholder_tgid = tsk->tgid;
+	req->personality = tsk->personality;
 
-	/*mklinux_akshay*/
-	if (task->prev_pid == -1)
-		req->origin_pid = task->pid;
+	if (tsk->prev_pid == -1)
+		req->origin_pid = tsk->pid;
 	else
-		req->origin_pid = task->origin_pid;
-	req->remote_blocked = task->blocked;
-	req->remote_real_blocked = task->real_blocked;
-	req->remote_saved_sigmask = task->saved_sigmask;
-	req->remote_pending = task->pending;
-	req->sas_ss_sp = task->sas_ss_sp;
-	req->sas_ss_size = task->sas_ss_size;
+		req->origin_pid = tsk->origin_pid;
 
-	/*mklinux_akshay*/
-	/*
-	if (task->prev_pid == -1)
-		task->origin_pid = task->pid;
-	else
-		task->origin_pid = task->origin_pid;
-	*/
+	req->remote_blocked = tsk->blocked;
+	req->remote_real_blocked = tsk->real_blocked;
+	req->remote_saved_sigmask = tsk->saved_sigmask;
+	req->remote_pending = tsk->pending;
+	req->sas_ss_sp = tsk->sas_ss_sp;
+	req->sas_ss_size = tsk->sas_ss_size;
+	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
 
-	// TODO: Handle return value
-	if (save_thread_info(task, regs, &req->arch, uregs) != 0) {
-		kfree(req);
-		return -EINVAL;
-	}
+	save_thread_info(tsk, regs, &req->arch, uregs);
 
 #if MIGRATE_FPU
-	save_fpu_info(task, &req->arch);
+	save_fpu_info(tsk, &req->arch);
 #endif
 
+	sent = pcn_kmsg_send_long(dst_nid, req, sizeof(*req));
+	kfree(req);
+
+	return sent;
+}
+
+static memory_t *__allocate_memory_struct(int dst_nid, struct task_struct *tsk)
+{
+	memory_t *memory;
+	memory = kzalloc(sizeof(memory_t), GFP_KERNEL);
+	BUG_ON(!memory);
+
+	INIT_LIST_HEAD(&memory->list);
+	atomic_inc(&tsk->mm->mm_users);
+	memory->mm = tsk->mm;
+
+	memory->tgroup_home_cpu = tsk->tgroup_home_cpu;
+	memory->tgroup_home_id = tsk->tgroup_home_id;
+	memory->alive = 1;
+	memory->helper = NULL;
+	atomic_set(&memory->pending_migration, 0);
+	atomic_set(&memory->pending_back_migration, 0);
+	memory->operation = VMA_OP_NOP;
+	memory->waiting_for_main = NULL;
+	memory->waiting_for_op = NULL;
+	memory->arrived_op = 0;
+	memory->my_lock = 0;
+	memory->setting_up = 0;
+
+	memset(memory->kernel_set, 0, sizeof(memory->kernel_set));
+	memory->kernel_set[get_nid()] = 1;
+	memory->shadow_spawner = NULL;
+	init_rwsem(&memory->kernel_set_sem);
+
+	add_memory_entry_out(memory, dst_nid);
+
+	return memory;
+}
+
+int do_migration(struct task_struct *tsk, int dst_nid,
+		struct pt_regs *regs, void __user *uregs)
+{
+	int sent;
+	unsigned long flags;
+	bool create_helper = false;
+
+	might_sleep();
+
 	/* I use siglock to coordinate the thread group.
+	 */
+	lock_task_sighand(tsk, &flags);
+
+	/*
 	 * This process is becoming a distributed one if it was not already.
 	 * The first migrating thread has to create the memory entry to
 	 * handle page requests, and fork the main kernel thread of this process.
 	 */
-	lock_task_sighand(task, &flags);
+	if (tsk->tgroup_distributed == 0) {
+		struct task_struct *thread;
 
-	// convert the task to distributed one
-	if (task->tgroup_distributed == 0) {
-		struct task_struct *tgroup_iterator = NULL;
-
-		create_helper = true;
-
-		tgroup_iterator = task;
-		while_each_thread(task, tgroup_iterator) {
-			tgroup_iterator->tgroup_home_cpu = get_nid();
-			tgroup_iterator->tgroup_home_id = task->tgid;
-			tgroup_iterator->tgroup_distributed = 1;
+		for_each_thread(tsk, thread) {
+			thread->tgroup_home_cpu = get_nid();
+			thread->tgroup_home_id = tsk->tgid;
+			thread->tgroup_distributed = 1;
 		};
 
-		memory = kmalloc(sizeof(memory_t), GFP_ATOMIC);
-		BUG_ON(!memory);
+		init_rwsem(&tsk->mm->distribute_sem);
+		tsk->mm->distr_vma_op_counter = 0;
+		tsk->mm->was_not_pushed = 0;
+		tsk->mm->thread_op = NULL;
+		tsk->mm->vma_operation_index = 0;
+		tsk->mm->distribute_unmap = 1;
 
-		INIT_LIST_HEAD(&memory->list);
-		memory->mm = task->mm;
-		atomic_inc(&memory->mm->mm_users);
-		memory->tgroup_home_cpu = task->tgroup_home_cpu;
-		memory->tgroup_home_id = task->tgroup_home_id;
-		memory->alive = 1;
-		memory->helper = NULL;
-		atomic_set(&memory->pending_migration, 0);
-		atomic_set(&memory->pending_back_migration, 0);
-		memory->operation = VMA_OP_NOP;
-		memory->waiting_for_main = NULL;
-		memory->waiting_for_op = NULL;
-		memory->arrived_op = 0;
-		memory->my_lock = 0;
-		memory->setting_up = 0;
-		memset(memory->kernel_set, 0, sizeof(memory->kernel_set));
-		memory->kernel_set[get_nid()] = 1;
-		init_rwsem(&memory->kernel_set_sem);
+		tsk->memory = __allocate_memory_struct(dst_nid, tsk);
+		create_helper = true;
 
-		add_memory_entry_out(memory, dst_nid);
-		task->memory = memory;
-
-		init_rwsem(&task->mm->distribute_sem);
-		task->mm->distr_vma_op_counter = 0;
-		task->mm->was_not_pushed = 0;
-		task->mm->thread_op = NULL;
-		task->mm->vma_operation_index = 0;
-		task->mm->distribute_unmap = 1;
-
-		printk("%s: task distributed. cpu = %d, id = %d\n", __func__,
-				task->tgroup_home_cpu, task->tgroup_home_id);
+		printk("%s: task distributed. cpu=%d, id=%d\n", __func__,
+				tsk->tgroup_home_cpu, tsk->tgroup_home_id);
+	} else {
+		tsk->memory = find_memory_entry_out(
+				tsk->tgroup_home_cpu, tsk->tgroup_home_id);
+		BUG_ON(!tsk->memory);
 	}
-	task->represents_remote = 1;
+	tsk->represents_remote = 1;
+	unlock_task_sighand(tsk, &flags);
 
-	memcpy(req->action, task->sighand->action, sizeof(req->action));
+	if (create_helper) {
+		pid_t pid;
+		memory_t *memory = tsk->memory;
 
-	req->tgroup_home_cpu = get_nid();
-	req->tgroup_home_id = task->tgid;
+		pid = kernel_thread_popcorn(
+				create_helper_thread_from_user, memory);
+		memory->helper = find_task_by_vpid(pid);
+		memory->helper_stop = false;
 
-	unlock_task_sighand(task, &flags);
+		get_task_struct(memory->helper);
+	}
+
+	sent = __request_clone_remote(dst_nid, tsk, regs, uregs);
+	printk("%s: %d %p\n", __func__, tsk->pid, tsk->memory);
 
 #if MIGRATION_PROFILE
 	migration_end = ktime_get();
 	printk(KERN_ERR"Time for x86->arm migration - x86 side: %ld ns\n",
 		(unsigned long)ktime_to_ns(ktime_sub(migration_end, migration_start)));
 #endif
-
-	if (create_helper) {
-		pid_t pid;
-		memory->helper_stop = false;
-		pid = kernel_thread_popcorn(create_helper_thread_from_user, memory);
-		memory->helper = find_task_by_vpid(pid);
-		get_task_struct(memory->helper);
-	}
-
-	sent  = pcn_kmsg_send_long(dst_nid, req, sizeof(*req));
-	kfree(req);
 
 	return sent;
 }
@@ -1438,8 +1497,8 @@ int process_server_do_migration(struct task_struct *task, int dst_nid,
 {
 	int ret = 0;
 
-	PSPRINTK(KERN_INFO"%s: current = pid %d tgid %d "
-			"task->tgroup_home_id %d task->tgroup_home_cpu %d\n",
+	PSPRINTK(KERN_INFO"%s: current: pid=%d, tgid=%d "
+			"task: tgroup_home_id=%d, tgroup_home_cpu=%d\n",
 			__func__, current->pid, current->tgid,
 			task->tgroup_home_id, task->tgroup_home_cpu);
 
@@ -1449,37 +1508,28 @@ int process_server_do_migration(struct task_struct *task, int dst_nid,
 		ret = do_migration(task, dst_nid, regs, uregs);
 	}
 
-	if (ret < 0) {
-		return PROCESS_SERVER_CLONE_FAIL;
-	}
-
-	//printk(KERN_ALERT"%s clone request sent ret{%d}\n", __func__, ret);
-	//__set_task_state(task, TASK_UNINTERRUPTIBLE);
-	return PROCESS_SERVER_CLONE_SUCCESS;
+	return ret;
 }
 
-static int go_exit = 1;
+
+struct shadow_main_param {
+	struct completion start;
+};
+
 int shadow_main(void *_args)
 {
-	memory_t *memory = NULL;
-	struct completion *start = (struct completion *)_args;
-    PSPRINTK("%s: start pid = %d, tsk = 0x%p, mm = 0x%p\n", __func__,
-			current->pid, current, current->mm);
+	struct shadow_main_param *param = _args;
+	memory_t *memory = current->memory;
 
-	while (go_exit) {
-		set_task_state(current, TASK_INTERRUPTIBLE);
-		complete(start);
-		schedule_timeout(HZ * 1);
-		set_task_state(current, TASK_RUNNING);
-	}
-	// ---------------- Attached ---------------------
+    PSPRINTK("%s: start %d at 0x%p\n", __func__, current->pid, current);
 
-	PSPRINTK("%s: resume 0x%p %d\n", __func__, current, current->pid);
-	printk("%s: %d %d %d %d\n", __func__,
-			current->tgroup_distributed,
-			current->tgroup_home_cpu,
-			current->tgroup_home_id,
-			current->represents_remote);
+	set_task_state(current, TASK_INTERRUPTIBLE);
+	complete(&param->start);
+	schedule();
+
+	//---------------- Attached here ---------------------
+
+	PSPRINTK("%s: resume %d at 0x%p\n", __func__, current->pid, current);
 
 	current->distributed_exit = EXIT_ALIVE;
 
@@ -1487,22 +1537,7 @@ int shadow_main(void *_args)
 	process_server_notify_delegated_subprocess_starting(
 			current->pid, current->prev_pid, current->prev_cpu);
 
-	//this force the task to wait that the main correctly set up the memory
-	/*
-	while (current->tgroup_distributed != 1) {
-		msleep(1);
-	}
-	*/
-
-	PSPRINTK("%s main set up pid %d\n", __func__, current->pid);
-	memory = find_memory_entry_in(
-			current->tgroup_home_cpu, current->tgroup_home_id);
-	if (!memory) {
-		printk("%s: WARN: cannot find memory_t (cpu %d id %d)\n",
-				__func__, current->tgroup_home_cpu, current->tgroup_home_id);
-	} else {
-		memory->alive = 1;
-	}
+	memory->alive = 1;
 
 	// TODO: Handle return values
 	update_thread_info(current);
@@ -1514,13 +1549,8 @@ int shadow_main(void *_args)
 
 	//to synchronize migrations...
 	atomic_dec(&memory->pending_migration);
-	/*
-	while (atomic_read(&(memory->pending_migration)) != 0) {
-		msleep(1);
-	}
-	*/
-	BUG_ON(atomic_read(&memory->pending_migration));
 
+	kfree(param);
 	do_exit(0);
 
 	return 0;	// Returning starts executing the migrated thread.
@@ -1530,74 +1560,49 @@ int shadow_main(void *_args)
 ///////////////////////////////////////////////////////////////////////////////
 // thread specific handling
 ///////////////////////////////////////////////////////////////////////////////
-static int create_user_thread_for_distributed_process(clone_request_t *req)
+static int spawn_shadow_thread(clone_request_t *req)
 {
-	struct task_struct *task;
-	struct completion *start = kmalloc(sizeof(*start), GFP_KERNEL);
+	struct task_struct *tsk;
+	struct shadow_main_param *param = kmalloc(sizeof(*param), GFP_KERNEL);
 	//int ret;
-	const unsigned long flags = CLONE_THREAD | CLONE_SIGHAND |
-						  CLONE_VM | CLONE_UNTRACED | SIGCHLD;
+	const unsigned long flags = CLONE_THREAD | CLONE_SIGHAND | SIGCHLD;
 	pid_t pid;
-	go_exit = 1;
 
-	BUG_ON(!start);
-	init_completion(start);
-	pid = kernel_thread(shadow_main, start, flags);
+	init_completion(&param->start);
+
+	pid = kernel_thread(shadow_main, param, flags);
 	BUG_ON(pid < 0);
-	task = find_task_by_vpid(pid);
+	tsk = find_task_by_vpid(pid);
 
-	wait_for_completion(start);
+	wait_for_completion(&param->start);	/* Make sure the shadow is sleeping */
 
-	printk(KERN_INFO"%s: %d@0x%p for %d@0x%p\n", __func__,
-			pid, task, current->pid, current);
-	__rename_task_comm(task, req->exe_path);
-
-	/* if we are already attached, let's skip the unlinking and linking */
-	//associate the task with the namespace
-	/*
-	if (task->nsproxy->cpu_ns != popcorn_ns) {
-		// TODO temp fix or of all active cpus?!
-		// ---- TODO this must be fixed is not acceptable
-		do_set_cpus_allowed(task, cpu_online_mask);
-		put_cpu_ns(task->nsproxy->cpu_ns);
-		task->nsproxy->cpu_ns = get_cpu_ns(popcorn_ns);
-	}
-	*/
-	/*
-	ret = associate_to_popcorn_ns(task);
-	if (ret) {
-		printk(KERN_ERR "%s: ERROR: associate_to_popcorn_ns returned: %d\n",
-				__func__, ret);
-	}
-	*/
+	__rename_task_comm(tsk, req->exe_path);
 
 	// set thread info
 	// TODO: Handle return values
-	restore_thread_info(task, &req->arch);
-	initialize_thread_retval(task, 0);
-	task->distributed_exit = EXIT_NOT_ACTIVE;
+	restore_thread_info(tsk, &req->arch);
+	initialize_thread_retval(tsk, 0);
 
-	task->prev_cpu = req->header.from_cpu;
-	task->prev_pid = req->placeholder_pid;
-	task->personality = req->personality;
-	/*
-	task->origin_pid = req->origin_pid;
-	sigorsets(&task->blocked, &task->blocked, &req->remote_blocked) ;
-	sigorsets(&task->real_blocked, &task->real_blocked, &req->remote_real_blocked);
-	sigorsets(&task->saved_sigmask, &task->saved_sigmask, &req->remote_saved_sigmask);
-	task->pending = req->remote_pending;
-	task->sas_ss_sp = req->sas_ss_sp;
-	task->sas_ss_size = req->sas_ss_size;
-	for (int cnt = 0; cnt < _NSIG; cnt++)
-		task->sighand->action[cnt] = req->action[cnt];
-	*/
+	tsk->distributed_exit = EXIT_NOT_ACTIVE;
+	tsk->prev_cpu = req->header.from_cpu;
+	tsk->prev_pid = req->placeholder_pid;
+	tsk->personality = req->personality;
+
+	tsk->origin_pid = req->origin_pid;
+	sigorsets(&tsk->blocked, &tsk->blocked, &req->remote_blocked) ;
+	sigorsets(&tsk->real_blocked, &tsk->real_blocked, &req->remote_real_blocked);
+	sigorsets(&tsk->saved_sigmask, &tsk->saved_sigmask, &req->remote_saved_sigmask);
+	tsk->pending = req->remote_pending;
+	tsk->sas_ss_sp = req->sas_ss_sp;
+	tsk->sas_ss_size = req->sas_ss_size;
+	memcpy(tsk->sighand->action, req->action, sizeof(req->action));
+
 #if MIGRATE_FPU
-	restore_fpu_info(task, &req->arch);
+	restore_fpu_info(tsk, &req->arch);
 #endif
-	//the task will be activated only when task->executing_for_remote ==1
-	task->executing_for_remote = 1;
-	PSPRINTK("%s: wake up %d\n", __func__, task->pid);
-	wake_up_process(task);
+
+	tsk->executing_for_remote = 1;
+	wake_up_process(tsk);
 
 #if MIGRATION_PROFILE
 	migration_end = ktime_get();
@@ -1606,13 +1611,82 @@ static int create_user_thread_for_distributed_process(clone_request_t *req)
 #endif
 
 	printk("####### MIGRATED - pid %u@%d to %u@%d\n",
-			(unsigned int)task->prev_pid, task->prev_cpu, task->pid, get_nid());
+			(unsigned int)tsk->prev_pid, tsk->prev_cpu, tsk->pid, get_nid());
 	printk("%s: pc %lx\n", __func__, (&req->arch)->migration_pc);
-	printk("%s: ip %lx\n", __func__, task_pt_regs(task)->ip);
-	printk("%s: sp %lx\n", __func__, task_pt_regs(task)->sp);
-	printk("%s: bp %lx\n", __func__, task_pt_regs(task)->bp);
+	printk("%s: ip %lx\n", __func__, task_pt_regs(tsk)->ip);
+	printk("%s: sp %lx\n", __func__, task_pt_regs(tsk)->sp);
+	printk("%s: bp %lx\n", __func__, task_pt_regs(tsk)->bp);
 
 	return 0;
+}
+
+
+static void __kick_shadow_spawner(memory_t *memory, clone_work_t *work)
+{
+	// Utilize the list_head in work_struct
+	struct list_head *entry = &((struct work_struct *)work)->entry;
+
+	INIT_LIST_HEAD(entry);
+	spin_lock(&memory->shadow_eggs_lock);
+	list_add(entry, &memory->shadow_eggs);
+	atomic_inc(&memory->pending_migration);
+	spin_unlock(&memory->shadow_eggs_lock);
+
+	complete(&memory->spawn_egg);
+}
+
+
+int shadow_spawner(void *_args)
+{
+	memory_t *memory = (memory_t *)_args;
+	struct work_struct *work;
+
+	printk(KERN_INFO"%s: started memory=0x%p\n", __func__, memory);
+
+	while (true) {
+		clone_request_t *req;
+		wait_for_completion(&memory->spawn_egg);
+
+		if (memory->helper_stop) {
+			break;
+		}
+
+		spin_lock(&memory->shadow_eggs_lock);
+		if (!list_empty(&memory->shadow_eggs)) {
+			work = list_first_entry(
+					&memory->shadow_eggs, struct work_struct, entry);
+			list_del(&work->entry);
+		} else {
+			work = NULL;
+		}
+		spin_unlock(&memory->shadow_eggs_lock);
+
+		req = ((clone_work_t *)work)->request;
+		spawn_shadow_thread(req);
+		pcn_kmsg_free_msg(req);
+		kfree(work);
+	}
+
+	return 0;
+}
+
+
+static struct task_struct *create_shadow_spawner(void)
+{
+	const unsigned long flags = CLONE_THREAD | CLONE_SIGHAND | SIGCHLD;
+	memory_t *memory = current->memory;
+	pid_t pid;
+
+	INIT_LIST_HEAD(&memory->shadow_eggs);
+	spin_lock_init(&memory->shadow_eggs_lock);
+	init_completion(&memory->spawn_egg);
+	atomic_set(&memory->pending_migration, 0);
+
+	pid = kernel_thread(shadow_spawner, memory, flags);
+	memory->shadow_spawner = find_task_by_vpid(pid);
+	get_task_struct(memory->shadow_spawner);
+
+	return NULL;
 }
 
 
@@ -1621,20 +1695,20 @@ static int __construct_helper_mm(clone_request_t *req)
 {
 	struct mm_struct *mm;
 	struct file *f;
+	struct cred * new;
 
 	/* sanghoon: I think there is no point to deal with user-level stuff for
 	 * kernel thread...
-	struct cred * new;
-
 	spin_lock_irq(&current->sighand->siglock);
 	flush_signal_handlers(current, 1);
 	spin_unlock_irq(&current->sighand->siglock);
 
 	set_cpus_allowed_ptr(current, cpu_all_mask);
 	set_user_nice(current, 0);
+	*/
 	new = prepare_kernel_cred(current);
 	commit_creds(new);
-	*/
+
 	mm = mm_alloc();
 	BUG_ON(!mm);
 
@@ -1681,114 +1755,6 @@ static int __construct_helper_mm(clone_request_t *req)
 	return 0;
 }
 
-
-static int helper_thread_main_(memory_t *memory)
-{
-	int count = 3;
-	might_sleep();
-
-	printk("%s: Started pid = %d\n", __func__, current->pid);
-
-	while (!memory->helper_stop && count > 0) {
-		__set_task_state(current, TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ * 1);
-		printk("%s: continues 0x%p %d\n", __func__, current, count--);
-		__set_task_state(current, TASK_RUNNING);
-	}
-	go_exit = 0;
-	printk("%s: Exit helper %d\n", __func__, current->pid);
-
-	return 0;
-}
-
-/**
- * Remote side kernel thread
- */
-static int create_helper_thread(void *_data)
-{
-	clone_request_t *req = (clone_request_t *)_data;
-	struct task_struct *tgroup_iterator = NULL;
-	memory_t *memory;
-	int ret;
-
-	might_sleep();
-
-	PSPRINTK("%s: task = 0x%p, pid = %d\n", __func__, current, current->pid);
-	PSPRINTK("%s: exe_path = %s\n", __func__, req->exe_path);
-	PSPRINTK("%s: cpu = %d, id = %d, prev_pid = %d, origin_pid = %d\n", __func__,
-			req->tgroup_home_cpu, req->tgroup_home_id,
-			req->prev_pid, req->origin_pid);
-
-	memory = find_memory_entry_in(req->tgroup_home_cpu, req->tgroup_home_id);
-	if (memory) {
-		PSPRINTK("%s: memory found\n", __func__);
-		atomic_inc(&memory->pending_migration);
-		ret = create_user_thread_for_distributed_process(req);
-		pcn_kmsg_free_msg(req);
-		return -EEXIST;
-	}
-
-	current->tgroup_distributed = 1;
-	current->tgroup_home_cpu = req->tgroup_home_cpu;
-	current->tgroup_home_id = req->tgroup_home_id;
-	current->main = 1;
-	current->flags &= ~(PF_RANDOMIZE);
-
-	tgroup_iterator = current;
-	while_each_thread(current, tgroup_iterator) {
-		tgroup_iterator->tgroup_home_id = current->tgroup_home_id;
-		tgroup_iterator->tgroup_home_cpu = current->tgroup_home_cpu;
-		tgroup_iterator->tgroup_distributed = 1;
-	};
-
-	__rename_task_comm(current, req->exe_path);
-
-	if (__construct_helper_mm(req) != 0) {
-		BUG();
-		return -EINVAL;
-	}
-
-	memory = kzalloc(sizeof(*memory), GFP_KERNEL);
-	BUG_ON(!memory);
-
-	INIT_LIST_HEAD(&memory->list);
-	memory->helper = current;
-	memory->mm = current->mm;
-	memory->tgroup_home_cpu = current->tgroup_home_cpu;
-	memory->tgroup_home_id = current->tgroup_home_id;
-
-	memory->operation = VMA_OP_NOP;
-	memory->waiting_for_main = NULL;
-	memory->waiting_for_op = NULL;
-	memory->arrived_op = 0;
-	memory->my_lock = 0;
-	memory->setting_up = 1;
-	atomic_set(&memory->pending_migration, 1);
-	atomic_set(&memory->pending_back_migration, 0);
-
-	init_rwsem(&memory->kernel_set_sem);
-	memset(memory->kernel_set, 0, sizeof(memory->kernel_set));
-	memory->kernel_set[get_nid()] = 1;
-
-	memory->helper = current;
-	memory->helper_stop = false;
-
-	add_memory_entry_in(memory, req->tgroup_home_cpu);
-	/*
-	ret = add_check
-	WARN_ON(ret != 0, "memory entry exists. possible race condition..");
-	*/
-
-	// __inform_process_migration()
-
-	ret = create_user_thread_for_distributed_process(req);
-	pcn_kmsg_free_msg(req);
-
-	memory->alive = 1;
-	memory->setting_up = 0;
-
-	return helper_thread_main_(memory);
-}
 
 /*
  * inform all kernel that a new distributed process is present here
@@ -1839,6 +1805,41 @@ int inform_process_migration()
 }
 */
 
+/**
+ * Remote side kernel thread
+ */
+static int create_helper_thread(void *_data)
+{
+	clone_request_t *req = (clone_request_t *)_data;
+	memory_t *memory = current->memory;
+
+	might_sleep();
+
+	PSPRINTK("%s: task=0x%p, pid=%d\n", __func__, current, current->pid);
+	PSPRINTK("%s: exe_path=%s\n", __func__, req->exe_path);
+	PSPRINTK("%s: cpu=%d, id=%d, prev_pid=%d, origin_pid=%d\n", __func__,
+			req->tgroup_home_cpu, req->tgroup_home_id,
+			req->prev_pid, req->origin_pid);
+
+	current->tgroup_distributed = 1;
+	current->tgroup_home_cpu = req->tgroup_home_cpu;
+	current->tgroup_home_id = req->tgroup_home_id;
+	current->main = 1;
+	current->flags &= ~(PF_RANDOMIZE);
+
+	if (__construct_helper_mm(req) != 0) {
+		BUG();
+		return -EINVAL;
+	}
+	memory->mm = current->mm;
+
+	create_shadow_spawner();
+	memory->setting_up = 0;
+
+	// __inform_process_migration()
+
+	return helper_thread_main();
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // handle clone
@@ -1846,13 +1847,59 @@ int inform_process_migration()
 
 static void clone_remote_thread(struct work_struct *_work)
 {
+	/* Processing clone requests are serialized by clone_wq.
+	 * Thus we avoid introducing a new lock memory_entry
+	 */
+	struct task_struct *tsk;
 	clone_work_t *work = (clone_work_t *)_work;
 	clone_request_t *req = (clone_request_t *)work->request;
-	struct task_struct *tsk =
-			kthread_run(create_helper_thread, req, "helper_%d", 0);
-	BUG_ON(IS_ERR(tsk));
+	memory_t *memory;
+		
+	memory = find_memory_entry_in(req->tgroup_home_cpu, req->tgroup_home_id);
+	if (!memory) {
+		// Allocate memory instance
+		memory = kzalloc(sizeof(*memory), GFP_KERNEL);
+		BUG_ON(!memory);
 
-	kfree(work);
+		INIT_LIST_HEAD(&memory->list);
+		memory->tgroup_home_cpu = req->tgroup_home_cpu;
+		memory->tgroup_home_id = req->tgroup_home_id;
+
+		memory->operation = VMA_OP_NOP;
+		memory->waiting_for_main = NULL;
+		memory->waiting_for_op = NULL;
+		memory->arrived_op = 0;
+		memory->my_lock = 0;
+		memory->setting_up = 1;
+		atomic_set(&memory->pending_migration, 0);
+		atomic_set(&memory->pending_back_migration, 0);
+
+		init_rwsem(&memory->kernel_set_sem);
+		memset(memory->kernel_set, 0, sizeof(memory->kernel_set));
+		memory->kernel_set[get_nid()] = 1;
+		memory->alive = 1;
+
+		add_memory_entry_in(memory, req->tgroup_home_cpu);
+
+		// Start the helper thread
+		tsk = kthread_create(create_helper_thread, req, "helper_%d", 0);
+		BUG_ON(IS_ERR(tsk));
+		memory->helper = tsk;
+		memory->helper_stop = false;
+
+		tsk->memory = memory;
+		wake_up_process(tsk);
+
+		// Wait until the helper is set up
+		// TODO: completion might be prettier
+		while (memory->setting_up) {
+			msleep(10);
+		}
+	}
+
+	PSPRINTK("%s: memory found\n", __func__);
+	// Kick the spawner
+	__kick_shadow_spawner(memory, work);
 	return;
 }
 

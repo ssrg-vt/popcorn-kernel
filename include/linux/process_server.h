@@ -83,28 +83,6 @@ typedef struct _data_header {
 	struct _data_header* prev;
 } data_header_t;
 
-typedef struct {
-	data_header_t head;
-	//struct list_head list;
-	struct task_struct *thread;
-	struct list_head list;
-	struct completion start;
-	struct completion end;
-} shadow_thread_t;
-
-struct _memory_struct;
-
-typedef struct {
-	data_header_t head;
-	struct task_struct *main;
-
-	spinlock_t spinlock;
-	shadow_thread_t* threads;
-	struct list_head threadpool;
-
-	struct _memory_struct* memory;
-} remote_thread_t;
-
 typedef struct _memory_struct {
 	struct list_head list;
 
@@ -112,9 +90,18 @@ typedef struct _memory_struct {
 	int tgroup_home_id;
 	struct mm_struct* mm;
 	int alive;
+	int setting_up;
 
 	struct task_struct *helper;
 	bool helper_stop;
+
+	struct task_struct *shadow_spawner;
+	struct completion spawn_egg;
+	struct list_head shadow_eggs;
+	spinlock_t shadow_eggs_lock;
+	atomic_t pending_migration;
+	atomic_t pending_back_migration;
+
 	char path[512];
 
 	int operation;
@@ -130,15 +117,12 @@ typedef struct _memory_struct {
 	struct task_struct* waiting_for_op;
 	int arrived_op;
 	int my_lock;
-	int setting_up;
 
-	int kernel_set[MAX_POPCORN_NODES];
+	int kernel_set[MAX_POPCORN_NODES];	/* TODO: change to bitmap */
 	struct rw_semaphore kernel_set_sem;
 
 	vma_operation_t* message_push_operation;
 	atomic_t answers_remain;
-	atomic_t pending_migration;
-	atomic_t pending_back_migration;
 } memory_t;
 
 typedef struct count_answers {

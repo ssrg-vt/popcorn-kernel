@@ -412,6 +412,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 		tsk->tgroup_distributed = false;
 		tsk->tgroup_home_cpu = -1;
 		tsk->tgroup_home_id = -1;
+		tsk->memory = NULL;
 	}
 #endif
 

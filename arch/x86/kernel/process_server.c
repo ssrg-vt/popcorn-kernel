@@ -68,24 +68,13 @@ int save_thread_info(struct task_struct *task, struct pt_regs *regs,
 
 	//dump_processor_regs(task_pt_regs(task));
 
-	if ((task == NULL)  || (arch == NULL)) {
-		printk(KERN_ERR"%s: invalid params\n", __func__);
-		return -EINVAL;
-	}
-
-	if (task->migration_pc == 0) {
-		printk(KERN_ERR"%s: migration_pc == 0\n", __func__);
-		return -EINVAL;
-	}
+	BUG_ON(!task || !arch);
+	BUG_ON(!task->migration_pc);
 
 	if (uregs != NULL) {
 		int remain = copy_from_user(&arch->regs_aarch, uregs,
 				sizeof(struct popcorn_regset_aarch64));
-		if (remain != 0) {
-			printk(KERN_ERR"%s: ERROR: while copying registers (%d)\n",
-					__func__, remain);
-			return -EINVAL;
-		}
+		BUG_ON(remain != 0);
 	}
 	memcpy(&arch->regs, regs, sizeof(struct pt_regs));
 

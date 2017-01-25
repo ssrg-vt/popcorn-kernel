@@ -4585,55 +4585,67 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 
 #ifdef CONFIG_POPCORN
 #include <popcorn/bundle.h>
-static int __do_migrate(struct task_struct *p, unsigned int nid,
-		unsigned long pc, unsigned long ret_addr)
+static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
+		unsigned long ip, unsigned long ret_addr)
 {
 	struct pt_regs *regs = current_pt_regs();
 	int retval = 0;
 
-	get_task_struct(p);
-
 	/* sanghoon: take pc and ret_addr from syscall for het migration */
-	p->migration_pc = pc;
-	p->return_addr = ret_addr;
+	tsk->migration_pc = ip;
+	tsk->return_addr = ret_addr;
 
-	retval = process_server_do_migration(p, nid, regs, NULL);
+	retval = process_server_do_migration(tsk, nid, regs, NULL);
 
-	put_task_struct(p);
+	if (retval == 0) {
+		printk("%s: sleep %d\n", __func__, tsk->pid);
+		__set_task_state(tsk, TASK_UNINTERRUPTIBLE);
+		schedule();
+	}
+
 	return retval;
 }
 
 
 SYSCALL_DEFINE2(sched_migrate, pid_t, pid, unsigned int, nid)
 {
-	struct task_struct *p;
+	struct task_struct *tsk;
 	int retval;
 
-	printk(KERN_INFO"%s: %u, %u\n", __func__, pid, nid);
+	printk(KERN_INFO"%s: %u to %u\n", __func__, pid, nid);
 
 #if MIGRATION_PROFILE
 	migration_start = ktime_get();
 #endif
 
-	rcu_read_lock();
-	p = find_process_by_pid(pid);
-	if (!p) {
-		retval = -ESRCH;
-		goto out_unlock;
-	}
-
 	if (!is_popcorn_node_online(nid)) {
-		retval = -EAGAIN;
-		goto out_unlock;
+		printk(KERN_INFO"%s: Node %d is offline\n", __func__, nid);
+		return -EAGAIN;
 	}
 
-	printk(KERN_INFO"%s: bundle %d is online\n", __func__, nid);
-	retval = __do_migrate(p, nid, 
+	rcu_read_lock();
+	tsk = find_task_by_vpid(pid);
+	if (!tsk) {
+		rcu_read_unlock();
+		return -ESRCH;
+	}
+	get_task_struct(tsk);
+	rcu_read_unlock();
+
+	if (tsk->tgroup_distributed && tsk->represents_remote) {
+		// Already migrated. This is bug
+		printk(KERN_INFO"%s: already migrated to %d at %d\n", __func__,
+				tsk->tgroup_home_id, tsk->tgroup_home_cpu);
+		retval = -EBUSY;
+		goto out_put;
+	}
+
+	retval = __do_sched_migrate(tsk, nid, 
 			current_pt_regs()->ip,			/* some ip */
 			current_pt_regs()->ip + 16);	/* some ret addr */
 
-out_unlock:
-	rcu_read_unlock();
+out_put:
+	put_task_struct(tsk);
 	return retval;
 }
 
