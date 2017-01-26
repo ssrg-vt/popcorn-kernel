@@ -100,20 +100,19 @@ static unsigned long get_file_offset(struct file *file, int start_addr)
 			printk("%s: Page offset for 0x%x 0x%lx 0x%lx\n",
 				__func__, start_addr, (unsigned long)elf_eppnt->p_vaddr, (unsigned long)elf_eppnt->p_memsz);
 
-			if((start_addr >= elf_eppnt->p_vaddr) && (start_addr <= (elf_eppnt->p_vaddr+elf_eppnt->p_memsz)))
-			{
+			if((start_addr >= elf_eppnt->p_vaddr) && (start_addr <= (elf_eppnt->p_vaddr+elf_eppnt->p_memsz))) {
 				printk("%s: Finding page offset for 0x%x 0x%lx 0x%lx\n",
 					__func__, start_addr, (unsigned long)elf_eppnt->p_vaddr, (unsigned long)elf_eppnt->p_memsz);
 				retval = (elf_eppnt->p_offset - (elf_eppnt->p_vaddr & (ELF_MIN_ALIGN-1)));
 				goto out;
 			}
-/*
-  if ((elf_eppnt->p_flags & PF_R) && (elf_eppnt->p_flags & PF_X)) {
-  printk("Coming to executable program load section\n");
-  retval = (elf_eppnt->p_offset - (elf_eppnt->p_vaddr & (ELF_MIN_ALIGN-1)));
-  goto out;
-  }
-*/
+			/*
+			if ((elf_eppnt->p_flags & PF_R) && (elf_eppnt->p_flags & PF_X)) {
+				printk("Coming to executable program load section\n");
+				retval = (elf_eppnt->p_offset - (elf_eppnt->p_vaddr & (ELF_MIN_ALIGN-1)));
+				goto out;
+			}
+			*/
 		}
 	}
 
@@ -371,7 +370,6 @@ static unsigned long map_difference(struct file *file, unsigned long addr,
 #endif
 
 	while (1) {
-
 		if (start >= end)
 			goto done;
 
@@ -599,63 +597,63 @@ int vma_server_do_mapping_for_distributed_process(mapping_answers_for_2_kernels_
 
 			down_write(&mm->mmap_sem);
 
-				//check if other threads already installed the vma
-				vma = find_vma(mm, address);
-				if (!vma || address >= vma->vm_end || address < vma->vm_start) {
-					vma = NULL;
+			//check if other threads already installed the vma
+			vma = find_vma(mm, address);
+			if (!vma || address >= vma->vm_end || address < vma->vm_start) {
+				vma = NULL;
+			}
+
+			if (!vma
+				|| (vma->vm_start != fetching_page->vaddr_start)
+				|| (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size)) ) {
+
+				PSPRINTK("%s: Mapping file vma start %lx end %lx\n",
+						__func__, fetching_page->vaddr_start, (fetching_page->vaddr_start + fetching_page->vaddr_size));
+
+				/*Note:
+				 * This mapping is caused because when a thread migrates it does not have any vma
+				 * so during fetch vma can be pushed.
+				 * This mapping has the precedence over "normal" vma operations because is a page fault
+				 * */
+				if (tsk->mm->distribute_unmap == 0)
+					printk(KERN_ALERT"%s: ERROR: file backed value was already 0, check who is the older.\n", __func__);
+				tsk->mm->distribute_unmap = 0;
+
+				PSPRINTK("%s:%d page offset = %lu 0x%p\n", __func__,__LINE__,
+						fetching_page->pgoff, mm->exe_file);
+				fetching_page->pgoff = get_file_offset(mm->exe_file, fetching_page->vaddr_start);
+				PSPRINTK("%s:%d page offset = %lu\n", __func__, __LINE__,
+						fetching_page->pgoff);
+
+				/*map_difference should map in such a way that no unmap operations (the only nested operation that mmap can call) are nested called.
+				 * This is important both to not unmap pages that should not be unmapped
+				 * but also because otherwise the vma protocol will deadlock!
+				 */
+				err = map_difference(f, fetching_page->vaddr_start,
+							   fetching_page->vaddr_size, prot,
+							   MAP_FIXED
+							   | ((fetching_page->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
+							   /* Ported to Linux 3.12
+							  | ((fetching_page->vm_flags & VM_EXECUTABLE) ? MAP_EXECUTABLE : 0) */
+							   | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
+							   | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0),
+							   fetching_page->pgoff << PAGE_SHIFT);
+				if (tsk->mm->distribute_unmap == 1)
+					printk(KERN_ALERT"%s: ERROR: file backed value was already 1, check who is the older.\n", __func__);
+				tsk->mm->distribute_unmap = 1;
+
+				PSPRINTK("Map difference ended\n");
+				if (err != fetching_page->vaddr_start) {
+					up_write(&mm->mmap_sem);
+					down_read(&mm->mmap_sem);
+					spin_lock(ptl);
+					/*PTE LOCKED*/
+					printk("%s: ERROR: error mapping file vma while fetching address %lx\n",
+						__func__, address);
+					ret = VM_FAULT_VMA;
+					return ret;
 				}
-
-				if ( !vma
-					|| (vma->vm_start != fetching_page->vaddr_start)
-					|| (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size)) ) {
-
-					PSPRINTK("%s: Mapping file vma start %lx end %lx\n",
-							__func__, fetching_page->vaddr_start, (fetching_page->vaddr_start + fetching_page->vaddr_size));
-
-					/*Note:
-					 * This mapping is caused because when a thread migrates it does not have any vma
-					 * so during fetch vma can be pushed.
-					 * This mapping has the precedence over "normal" vma operations because is a page fault
-					 * */
-					if (tsk->mm->distribute_unmap == 0)
-						printk(KERN_ALERT"%s: ERROR: file backed value was already 0, check who is the older.\n", __func__);
-					tsk->mm->distribute_unmap = 0;
-
-					PSPRINTK("%s:%d page offset = %lu 0x%p\n", __func__,__LINE__,
-							fetching_page->pgoff, mm->exe_file);
-					fetching_page->pgoff = get_file_offset(mm->exe_file, fetching_page->vaddr_start);
-					PSPRINTK("%s:%d page offset = %lu\n", __func__, __LINE__,
-							fetching_page->pgoff);
-
-					/*map_difference should map in such a way that no unmap operations (the only nested operation that mmap can call) are nested called.
-					 * This is important both to not unmap pages that should not be unmapped
-					 * but also because otherwise the vma protocol will deadlock!
-					 */
-					err = map_difference(f, fetching_page->vaddr_start,
-								   fetching_page->vaddr_size, prot,
-								   MAP_FIXED
-								   | ((fetching_page->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
-								   /* Ported to Linux 3.12
-								  | ((fetching_page->vm_flags & VM_EXECUTABLE) ? MAP_EXECUTABLE : 0) */
-								   | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
-								   | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0),
-								   fetching_page->pgoff << PAGE_SHIFT);
-					if (tsk->mm->distribute_unmap == 1)
-						printk(KERN_ALERT"%s: ERROR: file backed value was already 1, check who is the older.\n", __func__);
-					tsk->mm->distribute_unmap = 1;
-
-					PSPRINTK("Map difference ended\n");
-					if (err != fetching_page->vaddr_start) {
-						up_write(&mm->mmap_sem);
-						down_read(&mm->mmap_sem);
-						spin_lock(ptl);
-						/*PTE LOCKED*/
-						printk("%s: ERROR: error mapping file vma while fetching address %lx\n",
-							__func__, address);
-						ret = VM_FAULT_VMA;
-						return ret;
-					}
-				}
+			}
 
 
 			up_write(&mm->mmap_sem);

@@ -73,7 +73,6 @@
 #if 0 // beowulf
 #include <popcorn/init.h>
 #include <popcorn/cpuinfo.h>
-#include <process_server_arch.h>
 #include <linux/process_server.h>
 #include <popcorn/process_server.h>
 #include "page_server.h"
@@ -86,6 +85,7 @@
 #include <popcorn/bundle.h>
 #include <linux/popcorn_cpuinfo.h>
 #include <linux/process_server.h>
+#include <process_server_arch.h>
 #include "stat.h"
 #include "internal.h"
 #include "vma_server.h"
@@ -2757,8 +2757,8 @@ int page_server_try_handle_mm_fault(
 	PSPRINTK("%s: page fault for address %lx in page %lx "
 			"task pid %d t_group_cpu %d t_group_id %d %s\n", __func__,
 			page_fault_address, address, tsk->pid,
-			 tgroup_home_cpu, tgroup_home_id,
-			 page_fault_flags & FAULT_FLAG_WRITE ? "WRITE" : "READ");
+			tgroup_home_cpu, tgroup_home_id,
+			page_fault_flags & FAULT_FLAG_WRITE ? "WRITE" : "READ");
 
 	if (address == 0) {
 		printk("%s: ERROR: accessing page at address 0 pid %i %d %d\n",

@@ -121,6 +121,9 @@ typedef struct _memory_struct {
 	int kernel_set[MAX_POPCORN_NODES];	/* TODO: change to bitmap */
 	struct rw_semaphore kernel_set_sem;
 
+	struct list_head pages;
+	spinlock_t pages_lock;
+
 	vma_operation_t* message_push_operation;
 	atomic_t answers_remain;
 } memory_t;

@@ -25,6 +25,10 @@
 #define CREATE_TRACE_POINTS
 #include <asm/trace/exceptions.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/page_server.h>
+#endif
+
 /*
  * Page fault error code bits:
  *

@@ -29,7 +29,7 @@ static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_messag
 		vfree(msg);
 		return -1;
 	}
-	printk(KERN_ERR"%s: CALL %d %d\n", __func__, hdr->type, hdr->size);
+	// printk(KERN_ERR"%s: CALL %d %d\n", __func__, hdr->type, hdr->size);
 
 	return fn(msg);
 }

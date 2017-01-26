@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/kthread.h>
 #include <linux/sched.h>
+#include <linux/ptrace.h>
 
 #include <asm/mmu_context.h>
 
@@ -166,8 +167,6 @@ void remove_memory_entry(memory_t* entry)
 	list_del_init(&entry->list);
 	spin_unlock_irqrestore(&_memory_head_lock,flags);
 }
-
-
 
 
 static void __rename_task_comm(struct task_struct *task, char *name)
@@ -726,7 +725,7 @@ static int handle_process_pairing_request(struct pcn_kmsg_message *_msg)
 		return -ESRCH;
 	}
 
-	PSPRINTK("Pairing local:  %d --> %d at %d\n", 
+	PSPRINTK("Pairing local:  %d --> %d at %d\n",
 			task->pid, source_cpu, req->my_pid);
 	task->next_cpu = source_cpu;
 	task->next_pid = req->my_pid;
@@ -1116,7 +1115,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_cpu,
 #if MIGRATION_PROFILE
 	migration_end = ktime_get();
 	printk(KERN_ERR"Time for x86->arm back migration - x86 side: %ld ns\n",
-			(unsigned long)ktime_to_ns(ktime_sub(migration_end, migration_start)));
+		(unsigned long)ktime_to_ns(ktime_sub(migration_end, migration_start)));
 #endif
 
 	kfree(req);
@@ -1127,6 +1126,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_cpu,
 /*
  * Main loop for in-kernel request handler
  */
+/*
 static int helper_thread_main_(void)
 {
 	int count = 10;
@@ -1145,6 +1145,7 @@ static int helper_thread_main_(void)
 
 	return 0;
 }
+*/
 
 static int helper_thread_main(void)
 {
@@ -1378,37 +1379,45 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk,
 	return sent;
 }
 
-static memory_t *__allocate_memory_struct(int dst_nid, struct task_struct *tsk)
+static memory_t *__alloc_memory_struct(int home_cpu, int home_id)
 {
-	memory_t *memory;
-	memory = kzalloc(sizeof(memory_t), GFP_KERNEL);
-	BUG_ON(!memory);
+	memory_t *m = kzalloc(sizeof(*m), GFP_KERNEL);
+	BUG_ON(!m);
 
-	INIT_LIST_HEAD(&memory->list);
-	atomic_inc(&tsk->mm->mm_users);
-	memory->mm = tsk->mm;
+	INIT_LIST_HEAD(&m->list);
 
-	memory->tgroup_home_cpu = tsk->tgroup_home_cpu;
-	memory->tgroup_home_id = tsk->tgroup_home_id;
-	memory->alive = 1;
-	memory->helper = NULL;
-	atomic_set(&memory->pending_migration, 0);
-	atomic_set(&memory->pending_back_migration, 0);
-	memory->operation = VMA_OP_NOP;
-	memory->waiting_for_main = NULL;
-	memory->waiting_for_op = NULL;
-	memory->arrived_op = 0;
-	memory->my_lock = 0;
-	memory->setting_up = 0;
+	m->tgroup_home_cpu = home_cpu;
+	m->tgroup_home_id = home_id;
+	m->alive = 1;
+	m->helper = NULL;
+	atomic_set(&m->pending_migration, 0);
+	atomic_set(&m->pending_back_migration, 0);
+	m->operation = VMA_OP_NOP;
+	m->waiting_for_main = NULL;
+	m->waiting_for_op = NULL;
+	m->arrived_op = 0;
+	m->my_lock = 0;
 
-	memset(memory->kernel_set, 0, sizeof(memory->kernel_set));
-	memory->kernel_set[get_nid()] = 1;
-	memory->shadow_spawner = NULL;
-	init_rwsem(&memory->kernel_set_sem);
+	m->helper = NULL;
+	m->helper_stop = false;
 
-	add_memory_entry_out(memory, dst_nid);
+	m->shadow_spawner = NULL;
+	INIT_LIST_HEAD(&m->shadow_eggs);
+	spin_lock_init(&m->shadow_eggs_lock);
+	init_completion(&m->spawn_egg);
+	atomic_set(&m->pending_migration, 0);
 
-	return memory;
+	init_rwsem(&m->kernel_set_sem);
+	//memset(m->kernel_set, 0x00, sizeof(m->kernel_set));
+	m->kernel_set[get_nid()] = 1;
+
+	INIT_LIST_HEAD(&m->pages);
+	spin_lock_init(&m->pages_lock);
+
+	printk(KERN_INFO"%s: at 0x%p for %d / %d\n",
+			__func__, m, home_cpu, home_id);
+
+	return m;
 }
 
 int do_migration(struct task_struct *tsk, int dst_nid,
@@ -1417,6 +1426,7 @@ int do_migration(struct task_struct *tsk, int dst_nid,
 	int sent;
 	unsigned long flags;
 	bool create_helper = false;
+	memory_t *memory;
 
 	might_sleep();
 
@@ -1445,33 +1455,33 @@ int do_migration(struct task_struct *tsk, int dst_nid,
 		tsk->mm->vma_operation_index = 0;
 		tsk->mm->distribute_unmap = 1;
 
-		tsk->memory = __allocate_memory_struct(dst_nid, tsk);
+		memory = __alloc_memory_struct(get_nid(), tsk->tgid);
+		memory->mm = tsk->mm;
+		atomic_inc(&tsk->mm->mm_users);
+
+		add_memory_entry_out(memory, dst_nid);
+
 		create_helper = true;
 
 		printk("%s: task distributed. cpu=%d, id=%d\n", __func__,
 				tsk->tgroup_home_cpu, tsk->tgroup_home_id);
 	} else {
-		tsk->memory = find_memory_entry_out(
+		memory = find_memory_entry_out(
 				tsk->tgroup_home_cpu, tsk->tgroup_home_id);
-		BUG_ON(!tsk->memory);
 	}
+	BUG_ON(!memory);
+	tsk->memory = memory;
 	tsk->represents_remote = 1;
 	unlock_task_sighand(tsk, &flags);
 
 	if (create_helper) {
-		pid_t pid;
-		memory_t *memory = tsk->memory;
-
-		pid = kernel_thread_popcorn(
+		pid_t pid = kernel_thread_popcorn(
 				create_helper_thread_from_user, memory);
 		memory->helper = find_task_by_vpid(pid);
-		memory->helper_stop = false;
-
 		get_task_struct(memory->helper);
 	}
 
 	sent = __request_clone_remote(dst_nid, tsk, regs, uregs);
-	printk("%s: %d %p\n", __func__, tsk->pid, tsk->memory);
 
 #if MIGRATION_PROFILE
 	migration_end = ktime_get();
@@ -1523,7 +1533,7 @@ int shadow_main(void *_args)
 
     PSPRINTK("%s: start %d at 0x%p\n", __func__, current->pid, current);
 
-	set_task_state(current, TASK_INTERRUPTIBLE);
+	__set_task_state(current, TASK_UNINTERRUPTIBLE);
 	complete(&param->start);
 	schedule();
 
@@ -1551,9 +1561,7 @@ int shadow_main(void *_args)
 	atomic_dec(&memory->pending_migration);
 
 	kfree(param);
-	do_exit(0);
-
-	return 0;	// Returning starts executing the migrated thread.
+	return 0;	/* Returning from here will start the user thread run */
 }
 
 
@@ -1564,30 +1572,39 @@ static int spawn_shadow_thread(clone_request_t *req)
 {
 	struct task_struct *tsk;
 	struct shadow_main_param *param = kmalloc(sizeof(*param), GFP_KERNEL);
-	//int ret;
 	const unsigned long flags = CLONE_THREAD | CLONE_SIGHAND | SIGCHLD;
+	//int ret;
 	pid_t pid;
 
 	init_completion(&param->start);
 
 	pid = kernel_thread(shadow_main, param, flags);
-	BUG_ON(pid < 0);
+	if (pid < 0) {
+		kfree(param);
+		return -EAGAIN;
+	}
 	tsk = find_task_by_vpid(pid);
+	get_task_struct(tsk);
+
+	printk("%s: %d %p\n", __func__, pid, tsk);
 
 	wait_for_completion(&param->start);	/* Make sure the shadow is sleeping */
 
 	__rename_task_comm(tsk, req->exe_path);
-
-	// set thread info
-	// TODO: Handle return values
-	restore_thread_info(tsk, &req->arch);
-	initialize_thread_retval(tsk, 0);
 
 	tsk->distributed_exit = EXIT_NOT_ACTIVE;
 	tsk->prev_cpu = req->header.from_cpu;
 	tsk->prev_pid = req->placeholder_pid;
 	tsk->personality = req->personality;
 
+	tsk->flags &= ~(PF_KTHREAD | PF_RANDOMIZE);	// Convert to user
+	initialize_thread_retval(tsk, 0);
+
+	// set thread info
+	// TODO: Handle return values
+	restore_thread_info(tsk, &req->arch);
+
+	/*
 	tsk->origin_pid = req->origin_pid;
 	sigorsets(&tsk->blocked, &tsk->blocked, &req->remote_blocked) ;
 	sigorsets(&tsk->real_blocked, &tsk->real_blocked, &req->remote_real_blocked);
@@ -1596,13 +1613,11 @@ static int spawn_shadow_thread(clone_request_t *req)
 	tsk->sas_ss_sp = req->sas_ss_sp;
 	tsk->sas_ss_size = req->sas_ss_size;
 	memcpy(tsk->sighand->action, req->action, sizeof(req->action));
+	*/
 
 #if MIGRATE_FPU
 	restore_fpu_info(tsk, &req->arch);
 #endif
-
-	tsk->executing_for_remote = 1;
-	wake_up_process(tsk);
 
 #if MIGRATION_PROFILE
 	migration_end = ktime_get();
@@ -1616,6 +1631,10 @@ static int spawn_shadow_thread(clone_request_t *req)
 	printk("%s: ip %lx\n", __func__, task_pt_regs(tsk)->ip);
 	printk("%s: sp %lx\n", __func__, task_pt_regs(tsk)->sp);
 	printk("%s: bp %lx\n", __func__, task_pt_regs(tsk)->bp);
+
+	tsk->executing_for_remote = 1;
+	wake_up_process(tsk);
+	put_task_struct(tsk);
 
 	return 0;
 }
@@ -1641,7 +1660,8 @@ int shadow_spawner(void *_args)
 	memory_t *memory = (memory_t *)_args;
 	struct work_struct *work;
 
-	printk(KERN_INFO"%s: started memory=0x%p\n", __func__, memory);
+	printk(KERN_INFO"%s: started %d %p\n", __func__, current->pid, _args);
+	current->main = false;
 
 	while (true) {
 		clone_request_t *req;
@@ -1662,7 +1682,9 @@ int shadow_spawner(void *_args)
 		spin_unlock(&memory->shadow_eggs_lock);
 
 		req = ((clone_work_t *)work)->request;
-		spawn_shadow_thread(req);
+		while (spawn_shadow_thread(req) == -EAGAIN) {
+			schedule();
+		}
 		pcn_kmsg_free_msg(req);
 		kfree(work);
 	}
@@ -1677,12 +1699,10 @@ static struct task_struct *create_shadow_spawner(void)
 	memory_t *memory = current->memory;
 	pid_t pid;
 
-	INIT_LIST_HEAD(&memory->shadow_eggs);
-	spin_lock_init(&memory->shadow_eggs_lock);
-	init_completion(&memory->spawn_egg);
-	atomic_set(&memory->pending_migration, 0);
+	BUG_ON(memory->shadow_spawner);
 
 	pid = kernel_thread(shadow_spawner, memory, flags);
+	BUG_ON(pid < 0);
 	memory->shadow_spawner = find_task_by_vpid(pid);
 	get_task_struct(memory->shadow_spawner);
 
@@ -1690,7 +1710,6 @@ static struct task_struct *create_shadow_spawner(void)
 }
 
 
-/* Construct mm_struct */
 static int __construct_helper_mm(clone_request_t *req)
 {
 	struct mm_struct *mm;
@@ -1699,13 +1718,13 @@ static int __construct_helper_mm(clone_request_t *req)
 
 	/* sanghoon: I think there is no point to deal with user-level stuff for
 	 * kernel thread...
+	*/
 	spin_lock_irq(&current->sighand->siglock);
 	flush_signal_handlers(current, 1);
 	spin_unlock_irq(&current->sighand->siglock);
 
 	set_cpus_allowed_ptr(current, cpu_all_mask);
 	set_user_nice(current, 0);
-	*/
 	new = prepare_kernel_cred(current);
 	commit_creds(new);
 
@@ -1718,11 +1737,8 @@ static int __construct_helper_mm(clone_request_t *req)
 	exec_mmap(mm);
 	atomic_dec(&mm->mm_users);
 	set_fs(USER_DS);
-	/*
-	current->flags &= ~(PF_RANDOMIZE | PF_KTHREAD);
 	flush_thread();
 	flush_signal_handlers(current, 0);
-	*/
 
 	f = filp_open(req->exe_path, O_RDONLY | O_LARGEFILE | O_EXCL, 0);
 	if (IS_ERR(f)) {
@@ -1805,16 +1821,22 @@ int inform_process_migration()
 }
 */
 
+struct helper_params {
+	clone_request_t *req;
+	memory_t *memory;
+	struct completion complete;
+};
+
 /**
  * Remote side kernel thread
  */
 static int create_helper_thread(void *_data)
 {
-	clone_request_t *req = (clone_request_t *)_data;
-	memory_t *memory = current->memory;
+	struct helper_params *params = (struct helper_params *)_data;
+	clone_request_t *req = params->req;
+	memory_t *memory = params->memory;
 
 	might_sleep();
-
 	PSPRINTK("%s: task=0x%p, pid=%d\n", __func__, current, current->pid);
 	PSPRINTK("%s: exe_path=%s\n", __func__, req->exe_path);
 	PSPRINTK("%s: cpu=%d, id=%d, prev_pid=%d, origin_pid=%d\n", __func__,
@@ -1825,17 +1847,19 @@ static int create_helper_thread(void *_data)
 	current->tgroup_home_cpu = req->tgroup_home_cpu;
 	current->tgroup_home_id = req->tgroup_home_id;
 	current->main = 1;
-	current->flags &= ~(PF_RANDOMIZE);
 
 	if (__construct_helper_mm(req) != 0) {
 		BUG();
 		return -EINVAL;
 	}
+	atomic_inc(&current->mm->mm_users);
 	memory->mm = current->mm;
+	current->memory = memory;
 
 	create_shadow_spawner();
-	memory->setting_up = 0;
 
+	complete(&params->complete);
+	kfree(params);
 	// __inform_process_migration()
 
 	return helper_thread_main();
@@ -1850,54 +1874,35 @@ static void clone_remote_thread(struct work_struct *_work)
 	/* Processing clone requests are serialized by clone_wq.
 	 * Thus we avoid introducing a new lock memory_entry
 	 */
-	struct task_struct *tsk;
 	clone_work_t *work = (clone_work_t *)_work;
 	clone_request_t *req = (clone_request_t *)work->request;
 	memory_t *memory;
-		
+
 	memory = find_memory_entry_in(req->tgroup_home_cpu, req->tgroup_home_id);
 	if (!memory) {
+		pid_t pid;
+		struct task_struct *tsk;
+		struct helper_params *params = kmalloc(sizeof(*params), GFP_KERNEL);
 		// Allocate memory instance
-		memory = kzalloc(sizeof(*memory), GFP_KERNEL);
-		BUG_ON(!memory);
-
-		INIT_LIST_HEAD(&memory->list);
-		memory->tgroup_home_cpu = req->tgroup_home_cpu;
-		memory->tgroup_home_id = req->tgroup_home_id;
-
-		memory->operation = VMA_OP_NOP;
-		memory->waiting_for_main = NULL;
-		memory->waiting_for_op = NULL;
-		memory->arrived_op = 0;
-		memory->my_lock = 0;
-		memory->setting_up = 1;
-		atomic_set(&memory->pending_migration, 0);
-		atomic_set(&memory->pending_back_migration, 0);
-
-		init_rwsem(&memory->kernel_set_sem);
-		memset(memory->kernel_set, 0, sizeof(memory->kernel_set));
-		memory->kernel_set[get_nid()] = 1;
-		memory->alive = 1;
-
+		memory = __alloc_memory_struct(
+				req->tgroup_home_cpu, req->tgroup_home_id);
 		add_memory_entry_in(memory, req->tgroup_home_cpu);
 
+		params->memory = memory;
+		params->req = req;
+		init_completion(&params->complete);
+
 		// Start the helper thread
-		tsk = kthread_create(create_helper_thread, req, "helper_%d", 0);
-		BUG_ON(IS_ERR(tsk));
+		pid = kernel_thread(create_helper_thread, params, 0);
+		BUG_ON(pid < 0);
+		tsk = find_task_by_vpid(pid);
+		get_task_struct(tsk);
 		memory->helper = tsk;
-		memory->helper_stop = false;
 
-		tsk->memory = memory;
-		wake_up_process(tsk);
-
-		// Wait until the helper is set up
-		// TODO: completion might be prettier
-		while (memory->setting_up) {
-			msleep(10);
-		}
+		wait_for_completion(&params->complete);
 	}
 
-	PSPRINTK("%s: memory found\n", __func__);
+	PSPRINTK("%s: memory at 0x%p\n", __func__, memory);
 	// Kick the spawner
 	__kick_shadow_spawner(memory, work);
 	return;

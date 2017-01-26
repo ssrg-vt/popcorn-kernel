@@ -25,12 +25,6 @@
 #include <asm/uaccess.h>
 #include <process_server_arch.h>
 
-/*
-#ifdef PSPRINTK
-#undef PSPRINTK
-#define PSPRINTK(...)
-#endif
-*/
 
 /* External function declarations */
 extern void __show_regs(struct pt_regs *regs, int all);
@@ -173,11 +167,11 @@ int restore_thread_info(struct task_struct *task, field_arch *arch)
 		pt_regs->sp = arch->old_rsp;
 		task->thread.usersp = arch->old_rsp;
 
-		/* pt_regs->cs = __KERNEL_CS | get_kernel_rpl(); */
-		/*
 		pt_regs->cs = __USER_CS;
+		pt_regs->ss = __USER_DS;
+		/*
+		pt_regs->cs = __KERNEL_CS | get_kernel_rpl();
 		pt_regs->ds = __USER_DS;
-		pt_regs->es = __USER_ES;
 		printk("%s: cs=0x%x, KERNEL_CS=0x%lx\n", __func__,
 				pt_regs->cs, __KERNEL_CS);
 		*/
@@ -207,9 +201,6 @@ int restore_thread_info(struct task_struct *task, field_arch *arch)
 		wrmsrl(MSR_FS_BASE, arch->thread_fs);
 		passed = 2;
 	}
-
-	fsindex = 0x1234;
-	fs_val = 0x11112222;
 
 	savesegment(fs, fsindex);
 	rdmsrl(MSR_FS_BASE, fs_val);
@@ -253,7 +244,7 @@ int update_thread_info(struct task_struct *task)
 
 	//printk("%s [+] TID: %d\n", __func__, task->pid);
 	if(task == NULL){
-		printk(KERN_ERR"%s: ERROR: process_server: invalid params\n", __func__);
+		printk(KERN_ERR"%s: invalid params\n", __func__);
 		return -EINVAL;
 	}
 
