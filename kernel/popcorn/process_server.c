@@ -365,7 +365,7 @@ static void process_new_kernel(struct work_struct *_work)
 		memset(answer->my_set, 0, sizeof(answer->my_set));
 	}
 
-	answer->header.type = PCN_KMSG_TYPE_PROC_SRV_NEW_KERNEL_ANSWER;
+	answer->header.type = PCN_KMSG_TYPE_PROC_SRV_NEW_KERNEL_RESPONSE;
 	answer->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	answer->tgroup_home_cpu = req->tgroup_home_cpu;
@@ -1075,7 +1075,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_cpu,
 	PSPRINTK("%s\n", __func__);
 
 	//printk("%s entered dst{%d}\n", __func__, dst_cpu);
-	req->header.type = PCN_KMSG_TYPE_PROC_SRV_BACK_MIG_REQUEST;
+	req->header.type = PCN_KMSG_TYPE_PROC_SRV_BACK_MIGRATE;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	req->tgroup_home_cpu = tsk->tgroup_home_cpu;
@@ -1318,7 +1318,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk,
 	BUG_ON(!req);
 
 	/* Build request */
-	req->header.type = PCN_KMSG_TYPE_PROC_SRV_CLONE_REQUEST;
+	req->header.type = PCN_KMSG_TYPE_PROC_SRV_MIGRATE;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	req->tgroup_home_cpu = get_nid();
@@ -1950,12 +1950,12 @@ int __init process_server_init(void)
 	/* Register handlers */
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_NEW_KERNEL,
 				   handle_new_kernel);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_NEW_KERNEL_ANSWER,
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_NEW_KERNEL_RESPONSE,
 				   handle_new_kernel_answer);
 
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_CLONE_REQUEST,
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_MIGRATE,
 				   handle_clone_request);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_BACK_MIG_REQUEST,
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_BACK_MIGRATE,
 				   handle_back_migration);
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_CREATE_PROCESS_PAIRING,
 				   handle_process_pairing_request);
