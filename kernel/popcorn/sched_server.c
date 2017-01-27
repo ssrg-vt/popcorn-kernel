@@ -22,11 +22,9 @@
 
 #include <linux/cpu_namespace.h>
 
-#include <linux/pcn_kmsg.h>
-#include <linux/process_server.h>
-#include <popcorn/process_server.h>
+#include <popcorn/pcn_kmsg.h>
 
-#include "internal.h"
+#include "types.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Vincent's scheduling infrasrtucture based on Antonio's power/pmu readings
@@ -43,19 +41,11 @@ EXPORT_SYMBOL_GPL(popcorn_power_arm_1);
 EXPORT_SYMBOL_GPL(popcorn_power_arm_2);
 EXPORT_SYMBOL_GPL(popcorn_power_arm_3);
 
-struct popcorn_sched {
-	int **power_arm;
-	int **power_x86;
-
-	struct task_struct **tasks;
-};
-
-//struct popcorn_sched pop_sched;
-//EXPORT_SYMBOL_GPL(pop_sched);
 
 ///////////////////////////////////////////////////////////////////////////////
 // scheduling stuff
 ///////////////////////////////////////////////////////////////////////////////
+
 static int popcorn_sched_sync(void *_param)
 {
 	sched_periodic_req req;
@@ -79,8 +69,7 @@ static int popcorn_sched_sync(void *_param)
 #endif
 
 #if 0 // beowulf
-		pcn_kmsg_send_long(other, (struct pcn_kmsg_long_message*) &req,
-				sizeof(req) - sizeof(struct pcn_kmsg_hdr));
+		pcn_kmsg_send_long(other, &req, sizeof(req));
 #endif
 	}
 

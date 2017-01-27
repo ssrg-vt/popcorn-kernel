@@ -1,6 +1,6 @@
 /*
  * File:
- * 	process_server_arch.h
+ * 	process_server.h
  *
  * Description:
  * 	this file provides the headers of the architecture specific
@@ -16,6 +16,9 @@
 
 #ifndef PROCESS_SERVER_ARCH_H_
 #define PROCESS_SERVER_ARCH_H_
+
+#include <popcorn/types.h>
+#include <asm/process_server_macros.h>
 
 extern int save_thread_info(struct task_struct *task,
 		struct pt_regs *regs, field_arch *arch, void __user *uregs);

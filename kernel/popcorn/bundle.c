@@ -5,8 +5,8 @@
 #include <linux/list.h>
 #include <linux/spinlock.h>
 
-#include <linux/process_server.h>
 #include <popcorn/bundle.h>
+#include "types.h"
 
 struct popcorn_node {
 	unsigned int id;

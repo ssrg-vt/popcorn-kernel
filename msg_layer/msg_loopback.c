@@ -3,10 +3,8 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 
-#include <linux/pcn_kmsg.h>
+#include <popcorn/pcn_kmsg.h>
 #include <popcorn/bundle.h>
-
-#include "msg_layer.h"
 
 static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_message *lmsg, unsigned int payload_size)
 {

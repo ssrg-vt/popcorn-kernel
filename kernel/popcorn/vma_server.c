@@ -25,33 +25,92 @@
 
 #include <linux/elf.h>
 
-#include <linux/popcorn_cpuinfo.h>
+#include <popcorn/cpuinfo.h>
 #include <popcorn/bundle.h>
-#include "internal.h"
+#include <popcorn/debug.h>
+
+#include "types.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Working queues (servers)
 ///////////////////////////////////////////////////////////////////////////////
+
 static struct workqueue_struct *vma_op_wq;
 static struct workqueue_struct *vma_lock_wq;
 
-static void vma_server_process_vma_op(struct work_struct* work);
-
-//wait list
 DECLARE_WAIT_QUEUE_HEAD(request_distributed_vma_op);
 
-int vma_server_enqueue_vma_op(memory_t * memory, vma_operation_t * operation, int fake)
-{
-	vma_op_work_t * work = kmalloc(sizeof(vma_op_work_t), GFP_ATOMIC);
-	if (!work) return -ENOMEM;
+/**
+ * Handle vma_ack
+ */
 
-	work->fake = fake;
-	work->memory = memory;
-	work->operation = operation;
-	INIT_WORK( (struct work_struct*)work, vma_server_process_vma_op);
-	queue_work(vma_op_wq, (struct work_struct*) work);
-	return 0;
+LIST_HEAD(_vma_ack_head);
+DEFINE_SPINLOCK(_vma_ack_head_lock);
+
+typedef struct vma_op_answers {
+	struct list_head list;
+
+	//data_header_t header;
+	int tgroup_home_cpu;
+	int tgroup_home_id;
+	int responses;
+	int expected_responses;
+	int vma_operation_index;
+	unsigned long address;
+	struct task_struct *waiting;
+	spinlock_t lock;
+} vma_op_answers_t;
+
+static inline void add_vma_ack_entry(vma_op_answers_t* entry)
+{
+	unsigned long flags;
+
+	if (!entry)
+		return;
+
+	spin_lock_irqsave(&_vma_ack_head_lock, flags);
+	list_add_tail(&entry->list, &_vma_ack_head);
+	spin_unlock_irqrestore(&_vma_ack_head_lock, flags);
 }
+
+static inline vma_op_answers_t* find_vma_ack_entry(int cpu, int id)
+{
+	vma_op_answers_t* v = NULL;
+	vma_op_answers_t* found = NULL;
+	unsigned long flags;
+
+	spin_lock_irqsave(&_vma_ack_head_lock, flags);
+	list_for_each_entry(v, &_vma_ack_head, list) {
+		if (v->tgroup_home_cpu == cpu && v->tgroup_home_id == id) {
+#ifdef CHECK_FOR_DUPLICATES
+			if (found) {
+				printk(KERN_ERR"%s: duplicates in list %s %s (cpu %d id %d)\n",
+						__func__,
+						found->waiting ? found->waiting->comm : "?",
+						v->waiting ? v->waiting->comm : "?",
+						cpu, id);
+			}
+			found = v;
+#else
+			found = v;
+			break;
+#endif
+		}
+	}
+	spin_unlock_irqrestore(&_vma_ack_head_lock, flags);
+
+	return found;
+}
+
+static inline void remove_vma_ack_entry(vma_op_answers_t* entry)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&_vma_ack_head_lock, flags);
+	list_del_init(&entry->list);
+	spin_unlock_irqrestore(&_vma_ack_head_lock, flags);
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Support for heterogeneous binaries
@@ -232,7 +291,7 @@ memory->waiting_for_main = current;
 //so it is the last one to be populated
 memory->operation = operation->operation;
 wake_up_process(memory->main);
-PSPRINTK("%s,SERVER: woke up the main\n",__func__);
+PSPRINTK("%s,SERVER: woke up the main\n", __func__);
 
 while (memory->operation != VMA_OP_NOP) {
 	set_task_state(current, TASK_UNINTERRUPTIBLE);
@@ -241,10 +300,10 @@ while (memory->operation != VMA_OP_NOP) {
 	}
 	set_task_state(current, TASK_RUNNING);
 }
-PSPRINTK("%s,SERVER: woke up the main1\n",__func__);
+PSPRINTK("%s,SERVER: woke up the main1\n", __func__);
 
 down_write(&mm->mmap_sem);
-PSPRINTK("%s,SERVER: woke up the main2\n",__func__);
+PSPRINTK("%s,SERVER: woke up the main2\n", __func__);
 #endif
 
 /*****************************************************************************/
@@ -253,10 +312,8 @@ PSPRINTK("%s,SERVER: woke up the main2\n",__func__);
 
 static vma_op_answers_t * vma_op_answer_alloc(struct task_struct * task, int index)
 {
-	vma_op_answers_t* acks = (vma_op_answers_t*) kmalloc(sizeof(vma_op_answers_t), GFP_ATOMIC);
-	if (!acks)
-		return NULL;
-	memset(acks, 0, sizeof(vma_op_answers_t));
+	vma_op_answers_t *acks = kzalloc(sizeof(*acks), GFP_ATOMIC);
+	if (!acks) return NULL;
 
 	acks->tgroup_home_cpu = task->tgroup_home_cpu;
 	acks->tgroup_home_id = task->tgroup_home_id;
@@ -266,86 +323,46 @@ static vma_op_answers_t * vma_op_answer_alloc(struct task_struct * task, int ind
 	acks->expected_responses = 0;
 	spin_lock_init(&(acks->lock));
 	add_vma_ack_entry(acks);
+
 	return acks;
 }
 
+#if 0
 /* THIS CAN BE DESTROY EQUIVALENT OF THE ABOVE
- unsigned long flags;
-			spin_lock_irqsave(&(acks->lock), flags);
-			spin_unlock_irqrestore(&(acks->lock), flags);
-			remove_vma_ack_entry(acks);
+	unsigned long flags;
+	spin_lock_irqsave(&(acks->lock), flags);
+	spin_unlock_irqrestore(&(acks->lock), flags);
+	remove_vma_ack_entry(acks);
  */
 
-// TODO
-#if 0
-//wake up the main thread to execute the operation locally
-memory->message_push_operation = operation;
-memory->addr = operation->addr;
-memory->len = operation->len;
-memory->prot = operation->prot;
-memory->new_addr = operation->new_addr;
-memory->new_len = operation->new_len;
-memory->flags = operation->flags;
-memory->pgoff = operation->pgoff;
-strcpy(memory->path, operation->path);
-memory->waiting_for_main = current;
-//This is the field check by the main thread
-//so it is the last one to be populated
-memory->operation = operation->operation;
-wake_up_process(memory->main);
-PSPRINTK("%s,SERVER: woke up the main\n",__func__);
+	// TODO
+	//wake up the main thread to execute the operation locally
+	memory->message_push_operation = operation;
+	memory->addr = operation->addr;
+	memory->len = operation->len;
+	memory->prot = operation->prot;
+	memory->new_addr = operation->new_addr;
+	memory->new_len = operation->new_len;
+	memory->flags = operation->flags;
+	memory->pgoff = operation->pgoff;
+	strcpy(memory->path, operation->path);
+	memory->waiting_for_main = current;
+	//This is the field check by the main thread
+	//so it is the last one to be populated
+	memory->operation = operation->operation;
+	wake_up_process(memory->main);
+	PSPRINTK("%s,SERVER: woke up the main\n", __func__);
 
-while (memory->operation != VMA_OP_NOP) {
-	set_task_state(current, TASK_UNINTERRUPTIBLE);
-	if (memory->operation != VMA_OP_NOP) {
-		schedule();
+	while (memory->operation != VMA_OP_NOP) {
+		set_task_state(current, TASK_UNINTERRUPTIBLE);
+		if (memory->operation != VMA_OP_NOP) {
+			schedule();
+		}
+		set_task_state(current, TASK_RUNNING);
 	}
-	set_task_state(current, TASK_RUNNING);
-}
-PSPRINTK("%s,SERVER: woke up the main1\n",__func__);
+	PSPRINTK("%s,SERVER: woke up the main1\n", __func__);
 #endif
 
-/*****************************************************************************/
-/* wait functions                                                            */
-/*****************************************************************************/
-#define WAIT_FOR_COMPLETION() \
-while (memory->operation != VMA_OP_NOP) { 			\
-	set_task_state(current, TASK_UNINTERRUPTIBLE);	\
-	if (memory->operation != VMA_OP_NOP) {			\
-		schedule();									\
-	}												\
-	set_task_state(current, TASK_RUNNING);			\
-}
-
-/*
- * This is to serialize multiple operation on the same server (one server per process option)
- * BUT THERE IS ONLY ONE FOR THE ENTIRE SYSTEM!!!
- */
-#define WAIT_FOR_BUDDY() \
-		while (mm->distr_vma_op_counter > 0) { \
-			printk("%s, A distributed operation already started, going to sleep\n",__func__); \
-			up_write(&mm->mmap_sem); \
-			DEFINE_WAIT(wait); \
-			prepare_to_wait(&request_distributed_vma_op, &wait, \
-					TASK_UNINTERRUPTIBLE); \
-			if (mm->distr_vma_op_counter > 0) { \
-				schedule(); \
-			} \
-			finish_wait(&request_distributed_vma_op, &wait); \
-			down_write(&mm->mmap_sem); \
-		}
-
-#define WAKE_UP_BUDDY() \
-		wake_up(&request_distributed_vma_op)
-
-/*
- * Make sure main is set (I was assuming main is created before than the server is able to run)
- */
-#define WAIT_FOR_MAIN() \
-		while(memory->main==NULL) \
-			schedule();
-
-// real code starts here //////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////
 // vma operations
@@ -359,9 +376,9 @@ static unsigned long map_difference(struct file *file, unsigned long addr,
 	unsigned long start = addr;
 	unsigned long local_end = start;
 	unsigned long end = addr + len;
-	struct vm_area_struct* curr;
 	unsigned long error;
 	unsigned long populate = 0;
+	struct vm_area_struct* curr;
 
 	// go through ALL vma's, looking for interference with this space.
 	curr = current->mm->mmap;
@@ -378,7 +395,6 @@ static unsigned long map_difference(struct file *file, unsigned long addr,
 			// map through the end
 			// Ported to Linux 3.12
 			//error = do_mmap(file, start, end - start, prot, flags, pgoff);
-			//error = vm_mmap(file, start, end - start, prot, flags, pgoff);
 			error = do_mmap_pgoff(file, start, end - start, prot, flags, pgoff, &populate);
 
 			if (error != start) {
@@ -391,8 +407,7 @@ static unsigned long map_difference(struct file *file, unsigned long addr,
 		else if (end <= curr->vm_start) {
 			// mmap through local_end
 			// Ported to Linux 3.12
-			// error = do_mmap(file, start, end - start, prot, flags, pgoff);
-			//error = vm_mmap(file, start, end - start, prot, flags, pgoff);
+			//error = do_mmap(file, start, end - start, prot, flags, pgoff);
 			error = do_mmap_pgoff(file, start, end - start, prot, flags, pgoff, &populate);
 
 			if (error != start)
@@ -430,8 +445,7 @@ static unsigned long map_difference(struct file *file, unsigned long addr,
 
 			// mmap through local_end
 			// Ported to Linux 3.12
-			// error = do_mmap(file, start, local_end - start, prot, flags, pgoff);
-			//error = vm_mmap(file, start, local_end - start, prot, flags, pgoff);
+			//error = do_mmap(file, start, local_end - start, prot, flags, pgoff);
 			error = do_mmap_pgoff(file, start, local_end - start, prot, flags, pgoff, &populate);
 			if (error != start)
 				ret = VM_FAULT_VMA;
@@ -447,8 +461,7 @@ static unsigned long map_difference(struct file *file, unsigned long addr,
 
 			// map the difference
 			// Ported to Linux 3.12
-			// error = do_mmap(file, start, local_end - start, prot, flags, pgoff);
-			//error = vm_mmap(file, start, local_end - start, prot, flags, pgoff);
+			//error = do_mmap(file, start, local_end - start, prot, flags, pgoff);
 			error = do_mmap_pgoff(file, start, local_end - start, prot, flags, pgoff, &populate);
 			if (error != start)
 				ret = VM_FAULT_VMA;
@@ -471,8 +484,10 @@ done:
  *
  * ptl is from pte_offset_map_lock (this is a lock on the page table entry somewhere)
  */
-int vma_server_do_mapping_for_distributed_process(mapping_answers_for_2_kernels_t* fetching_page,
-							struct task_struct *tsk, struct mm_struct* mm, unsigned long address, spinlock_t* ptl)
+int vma_server_do_mapping_for_distributed_process(
+		mapping_answers_for_2_kernels_t* fetching_page,
+		struct task_struct *tsk, struct mm_struct* mm,
+		unsigned long address, spinlock_t* ptl)
 {
 
 	struct vm_area_struct* vma;
@@ -704,15 +719,17 @@ static void vma_server_process_vma_op(struct work_struct* work)
 				__func__, (unsigned long)mm);
 		return;
 	}
-	PSPRINTK("Received vma operation from cpu %d for tgroup_home_cpu %i tgroup_home_id %i operation %i\n",
-			operation->header.from_cpu, operation->tgroup_home_cpu, operation->tgroup_home_id, operation->operation);
+	PSPRINTK("Received vma operation from cpu %d for tgroup_home_cpu %i "
+			"tgroup_home_id %i operation %i\n",
+			operation->header.from_cpu, operation->tgroup_home_cpu,
+			operation->tgroup_home_id, operation->operation);
 
 	down_write(&mm->mmap_sem);
 	if (get_nid() == operation->tgroup_home_cpu) { //SERVER
 		//if another operation is on going, it will be serialized after.
 #if 0
 		while (mm->distr_vma_op_counter > 0) {
-			printk("%s, A distributed operation already started, going to sleep\n",__func__);
+			printk("%s, A distributed operation already started, going to sleep\n", __func__);
 			up_write(&mm->mmap_sem);
 			DEFINE_WAIT(wait);
 			prepare_to_wait(&request_distributed_vma_op, &wait,
@@ -733,14 +750,15 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			kfree(work);
 			return ;
 		}
-		PSPRINTK("%s,SERVER: Starting operation %i for cpu %i\n",__func__, operation->operation, operation->header.from_cpu);
+		PSPRINTK("%s,SERVER: Starting operation %i for cpu %i\n", __func__, operation->operation, operation->header.from_cpu);
 
 		mm->distr_vma_op_counter++;
 		//the main kernel thread will execute the local operation
 #else
 		//original code has concurrency errors -- this is similar to the client code (client code not in Marina's terms)
 		if (mm->distr_vma_op_counter < 0)
-			printk(KERN_ALERT"%s: ERROR: distr_vma_op_counter is %d", __func__, mm->distr_vma_op_counter);
+			printk(KERN_ALERT"%s: ERROR: distr_vma_op_counter is %d",
+					__func__, mm->distr_vma_op_counter);
 		// ONLY ONE CAN BE IN DISTRIBUTED OPERATION AT THE TIME ... WHAT ABOUT NESTED OPERATIONS?
 		while (	atomic_cmpxchg((atomic_t*)&(mm->distr_vma_op_counter), 0, 1) != 0) { //success is indicated by comparing RETURN with OLD (arch/x86/include/asm/cmpxchg.h)
 			DEFINE_WAIT(wait);
@@ -748,7 +766,9 @@ static void vma_server_process_vma_op(struct work_struct* work)
 
 			prepare_to_wait(&request_distributed_vma_op, &wait, TASK_UNINTERRUPTIBLE);
 			if (mm->distr_vma_op_counter > 0) {
-				printk("%s: LOCK: Somebody already started a distributed operation (mm->thread_op->pid %d). I am pid worker %d and I am going to sleep.\n",
+				printk("%s: LOCK: Somebody already started a distributed "
+						"operation (mm->thread_op->pid %d). "
+						"I am pid worker %d and I am going to sleep.\n",
 						__func__, mm->thread_op->pid, current->pid);
 				schedule();
 			}
@@ -760,7 +780,9 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		if (mm->was_not_pushed != 0) {
 			up_write(&mm->mmap_sem);
 			current->mm->distr_vma_op_counter--;
-			printk("%s: ERROR: handling a new vma operation but mm->distr_vma_op_counter is %i and mm->was_not_pushed is %i\n",
+			printk("%s: ERROR: handling a new vma operation but "
+					"mm->distr_vma_op_counter is %i "
+					"and mm->was_not_pushed is %i\n",
 			       __func__, mm->distr_vma_op_counter, mm->was_not_pushed);
 			pcn_kmsg_free_msg(operation);
 			kfree(work);
@@ -793,7 +815,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		//so it is the last one to be populated
 		memory->operation = operation->operation;
 		wake_up_process(memory->helper);
-		PSPRINTK("%s,SERVER: woke up the main\n",__func__);
+		PSPRINTK("%s,SERVER: woke up the main\n", __func__);
 
 		while (memory->operation != VMA_OP_NOP) {
 			set_task_state(current, TASK_UNINTERRUPTIBLE);
@@ -802,39 +824,42 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			}
 			set_task_state(current, TASK_RUNNING);
 		}
-		PSPRINTK("%s,SERVER: woke up the main1\n",__func__);
+		PSPRINTK("%s,SERVER: woke up the main1\n", __func__);
 
 		down_write(&mm->mmap_sem);
-		PSPRINTK("%s,SERVER: woke up the main2\n",__func__);
+		PSPRINTK("%s,SERVER: woke up the main2\n", __func__);
 
 		mm->distr_vma_op_counter--;
 		if (mm->distr_vma_op_counter != 0)
-			printk(	"%s: ERROR: exiting from distributed operation but mm->distr_vma_op_counter is %i\n",
+			printk(	"%s: ERROR: exiting from distributed operation "
+					"but mm->distr_vma_op_counter is %i\n",
 				__func__, mm->distr_vma_op_counter);
 		if (operation->operation == VMA_OP_MAP
 		    || operation->operation == VMA_OP_BRK) {
 			mm->was_not_pushed--;
 			if (mm->was_not_pushed != 0)
-				printk("%s: ERROR: exiting from distributed operation but mm->was_not_pushed is %i\n",
+				printk("%s: ERROR: exiting from distributed operation "
+						"but mm->was_not_pushed is %i\n",
 				       __func__, mm->distr_vma_op_counter);
 		}
 
 		mm->thread_op = NULL;
 
-		PSPRINTK("%s,SERVER: woke up the main3\n",__func__);
+		PSPRINTK("%s,SERVER: woke up the main3\n", __func__);
 		up_write(&mm->mmap_sem);
-		PSPRINTK("%s,SERVER: woke up the main4\n",__func__);
+		PSPRINTK("%s,SERVER: woke up the main4\n", __func__);
 
 		wake_up(&request_distributed_vma_op);
 
 		pcn_kmsg_free_msg(operation);
 		kfree(work);
 		PSPRINTK("SERVER: vma_operation_index is %d\n",mm->vma_operation_index);
-		PSPRINTK("%s, SERVER: end requested operation\n",__func__);
+		PSPRINTK("%s, SERVER: end requested operation\n", __func__);
 		return ;
 	} else {
 		struct task_struct *prev;
-		PSPRINTK("%s, CLIENT: Starting operation %i of index %i\n ",__func__, operation->operation, operation->vma_operation_index);
+		PSPRINTK("%s, CLIENT: Starting operation %i of index %i\n ", __func__,
+				operation->operation, operation->vma_operation_index);
 		//CLIENT
 
 		//NOTE: the current->mm->distribute_sem is already held
@@ -873,7 +898,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			memory->arrived_op = 1;
 			//mm->vma_operation_index = operation->vma_operation_index;
 			PSPRINTK("CLIENT: vma_operation_index is %d\n",mm->vma_operation_index);
-			PSPRINTK("%s, CLIENT: Operation %i started by a local thread pid %d\n ",__func__,operation->operation,memory->waiting_for_op->pid);
+			PSPRINTK("%s, CLIENT: Operation %i started by a local thread pid %d\n ", __func__,operation->operation,memory->waiting_for_op->pid);
 			up_write(&mm->mmap_sem);
 
 			wake_up_process(memory->waiting_for_op);
@@ -916,9 +941,9 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			return ;
 		}
 
-		PSPRINTK("%s, CLIENT Pushed operation started by somebody else\n",__func__);
+		PSPRINTK("%s, CLIENT Pushed operation started by somebody else\n", __func__);
 		if (operation->addr < 0) {
-			printk("%s: WARN: server sent me and error\n",__func__);
+			printk("%s: WARN: server sent me and error\n", __func__);
 			pcn_kmsg_free_msg(operation);
 			kfree(work);
 			return ;
@@ -950,7 +975,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 
 		wake_up_process(memory->helper);
 
-		PSPRINTK("%s,CLIENT: woke up the main5\n",__func__);
+		PSPRINTK("%s,CLIENT: woke up the main5\n", __func__);
 
 		while (memory->operation != VMA_OP_NOP) {
 			set_task_state(current, TASK_UNINTERRUPTIBLE);
@@ -1079,18 +1104,14 @@ static int handle_vma_op(struct pcn_kmsg_message* inc_msg)
 	memory_t* memory = find_memory_entry(operation->tgroup_home_cpu,
 					     operation->tgroup_home_id);
 	if (memory != NULL) {
-
 		work = kmalloc(sizeof(vma_op_work_t), GFP_ATOMIC);
-
-		if (work) {
-			work->fake = 0;
-			work->memory = memory;
-			work->operation = operation;
-			INIT_WORK( (struct work_struct*)work, vma_server_process_vma_op);
-			queue_work(vma_op_wq, (struct work_struct*) work);
-		}
-	}
-	else {
+		BUG_ON(!work);
+		work->fake = 0;
+		work->memory = memory;
+		work->operation = operation;
+		INIT_WORK( (struct work_struct*)work, vma_server_process_vma_op);
+		queue_work(vma_op_wq, (struct work_struct*) work);
+	} else {
 		if (operation->tgroup_home_cpu == get_nid())
 			printk("%s: ERROR: received an operation that said that I am the server but no memory_t found\n", __func__);
 		else {
@@ -1176,7 +1197,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 							__func__, operation, entry->message_push_operation->from_cpu); }
 				break;
 			case VMA_OP_REMAP:
-				PSPRINTK("%s: INFO: sending operation %d to all\n",__func__,operation);
+				PSPRINTK("%s: INFO: sending operation %d to all\n", __func__,operation);
 				vma_send_long_all(entry, (entry->message_push_operation), sizeof(vma_operation_t), 0, 0);
 				break;
 			default:
@@ -1202,7 +1223,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		entry->my_lock = 0;
 
 		if (!(operation == VMA_OP_MAP || operation == VMA_OP_BRK)) { // operation is neither MAP nor BRK
-			PSVMAPRINTK("%s incrementing vma_operation_index\n",__func__);
+			PSVMAPRINTK("%s incrementing vma_operation_index\n", __func__);
 			current->mm->vma_operation_index++;
 			if (current->mm->vma_operation_index < 0)
 				printk("%s: WARN: vma_operation_index underflow detected %d [if:if].(cpu %d id %d)\n",
@@ -1222,7 +1243,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		    && get_nid() == current->tgroup_home_cpu && current->main == 1) {
 
 			if (!(operation == VMA_OP_MAP || operation == VMA_OP_BRK)){
-				PSVMAPRINTK("%s incrementing vma_operation_index\n",__func__);
+				PSVMAPRINTK("%s incrementing vma_operation_index\n", __func__);
 				current->mm->vma_operation_index++;
 				if (current->mm->vma_operation_index < 0)
 					printk("%s: WARN: vma_operation_index underflow detected %d [else:if].(cpu %d id %d)\n",
@@ -1244,7 +1265,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 							__func__, operation, current->tgroup_home_cpu, current->tgroup_home_id);
 
 				//nested operation do not release the lock
-				PSPRINTK("%s incrementing vma_operation_index\n",__func__);
+				PSPRINTK("%s incrementing vma_operation_index\n", __func__);
 				current->mm->vma_operation_index++;
 				if (current->mm->vma_operation_index < 0)
 					printk("%s: WARN: vma_operation_index underflow detected %d [else:else].(cpu %d id %d)\n",
@@ -1316,7 +1337,7 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 
 	/*only server can have legal distributed nested operations*/
 	if ((current->mm->distr_vma_op_counter > 0) && (current->mm->thread_op == current)) {
-		PSPRINTK("%s, Recursive operation\n",__func__);
+		PSPRINTK("%s, Recursive operation\n", __func__);
 
 		if (server == 0
 				|| (current->main == 0 && current->mm->distr_vma_op_counter > 1)
@@ -1328,7 +1349,7 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 			/*the main executes the operations for the clients
 			 *distr_vma_op_counter is already increased when it start the operation*/
 			if (current->main == 1) {
-				PSVMAPRINTK("%s, I am the main, so it maybe not a real recursive operation...\n",__func__); // what does this mean?
+				PSVMAPRINTK("%s, I am the main, so it maybe not a real recursive operation...\n", __func__); // what does this mean?
 
 				if (current->mm->distr_vma_op_counter < 1 // who change the value in the meantime?
 						|| current->mm->distr_vma_op_counter > 2
@@ -1341,12 +1362,12 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 
 					if (current->mm->distr_vma_op_counter == 2) {
 						current->mm->distr_vma_op_counter++;
-						PSVMAPRINTK("%s, Recursive operation for the main\n",__func__);
+						PSVMAPRINTK("%s, Recursive operation for the main\n", __func__);
 						/*in this case is a nested operation on main
 						 * if the previous operation was a pushed operation
 						 * do not distribute it again*/
 						if (current->mm->was_not_pushed == 0) {
-							PSVMAPRINTK("%s, don't distribute again, return!\n",__func__);
+							PSVMAPRINTK("%s, don't distribute again, return!\n", __func__);
 							return ret;
 						} else {
 							current->mm->distr_vma_op_counter++;
@@ -1373,16 +1394,20 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 	/* I did not start an operation, but another thread maybe did...
 	 * => no concurrent operations of the same process on the same kernel*/
 	if (current->mm->distr_vma_op_counter < 0)
-		printk(KERN_ALERT"%s: ERROR: distr_vma_op_counter is %d", __func__, current->mm->distr_vma_op_counter);
+		printk(KERN_ALERT"%s: ERROR: distr_vma_op_counter is %d", __func__,
+				current->mm->distr_vma_op_counter);
 	// ONLY ONE CAN BE IN DISTRIBUTED OPERATION AT THE TIME ... WHAT ABOUT NESTED OPERATIONS?
-	while (	atomic_cmpxchg((atomic_t*)&(current->mm->distr_vma_op_counter), 0, 1) != 0) { //success is indicated by comparing RETURN with OLD (arch/x86/include/asm/cmpxchg.h)
+	while (atomic_cmpxchg((atomic_t*)&(current->mm->distr_vma_op_counter), 0, 1) != 0) { //success is indicated by comparing RETURN with OLD (arch/x86/include/asm/cmpxchg.h)
 		DEFINE_WAIT(wait);
 		up_write(&current->mm->mmap_sem);
 
 		prepare_to_wait(&request_distributed_vma_op, &wait, TASK_UNINTERRUPTIBLE);
 		if (current->mm->distr_vma_op_counter > 0) {
-			printk("%s: LOCK: Somebody already started a distributed operation (current->mm->thread_op->pid is %d). I am pid %d and I am going to sleep (cpu %d id %d)\n",
-					__func__,current->mm->thread_op->pid,current->pid, current->tgroup_home_cpu, current->tgroup_home_id);
+			printk("%s: LOCK: Somebody already started a distributed operation "
+					"(current->mm->thread_op->pid is %d). "
+					"I am pid %d and I am going to sleep (cpu %d id %d)\n",
+					__func__, current->mm->thread_op->pid, current->pid,
+					current->tgroup_home_cpu, current->tgroup_home_id);
 			schedule();
 		}
 		finish_wait(&request_distributed_vma_op, &wait);
@@ -1523,7 +1548,7 @@ start:
 			case VMA_OP_MAP:
 			case VMA_OP_BRK:
 				//if I am the server, mmap and brk can be executed locally
-				PSVMAPRINTK("%s pure local operation!\n",__func__);
+				PSVMAPRINTK("%s pure local operation!\n", __func__);
 				//Note: the order in which locks are taken is important
 				up_write(&current->mm->mmap_sem);
 
@@ -1538,7 +1563,7 @@ start:
 			}
 
 			//new push-operation
-			PSPRINTK("%s push operation!\n",__func__);
+			PSPRINTK("%s push operation!\n", __func__);
 			//(current->mm->vma_operation_index)++;
 			index = current->mm->vma_operation_index;
 			PSPRINTK("current index is %d\n", index);
@@ -1684,8 +1709,9 @@ start:
 		entry = find_memory_entry(current->tgroup_home_cpu, current->tgroup_home_id);
 		if (entry) {
 			if (entry->waiting_for_op != NULL) {
-				printk("%s: ERROR: Somebody is already waiting for an op (cpu %d id %d)\n",
-						__func__, current->tgroup_home_cpu, current->tgroup_home_id);
+				printk("%s: ERROR: Somebody is already waiting for an op "
+						"(cpu %d id %d)\n", __func__,
+						current->tgroup_home_cpu, current->tgroup_home_id);
 				kfree(operation_to_send);
 				ret = -EPERM;
 				goto out;
@@ -1693,8 +1719,9 @@ start:
 			entry->waiting_for_op = current;
 			entry->arrived_op = 0;
 		} else {
-			printk("%s: ERROR: Mapping disappeared, cannot wait for push op (cpu %d id %d)\n",
-					__func__, current->tgroup_home_cpu, current->tgroup_home_id);
+			printk("%s: ERROR: Mapping disappeared, "
+					"cannot wait for push op (cpu %d id %d)\n", __func__,
+					current->tgroup_home_cpu, current->tgroup_home_id);
 			kfree(operation_to_send);
 			ret = -EPERM;
 			goto out;
@@ -1722,13 +1749,15 @@ start:
 			}
 			set_task_state(current, TASK_RUNNING);
 		}
-		PSPRINTK("My operation finally arrived pid %d vma operation %d\n",current->pid,current->mm->vma_operation_index);
+		PSPRINTK("My operation finally arrived pid %d vma operation %d\n",
+				current->pid,current->mm->vma_operation_index);
 
 		/*Note, the distributed lock already has been acquired*/
 		down_write(&current->mm->mmap_sem);
 
 		if (current->mm->thread_op != current) {
-			printk(	"%s: ERROR: waking up to locally execute a vma operation started by me, but thread_op s not me\n", __func__);
+			printk(	"%s: ERROR: waking up to locally execute a vma operation "
+					"started by me, but thread_op s not me\n", __func__);
 			kfree(operation_to_send);
 			ret = -EPERM;
 			goto out_dist_lock;
@@ -1738,7 +1767,8 @@ start:
 		    || operation == VMA_OP_BRK) {
 			ret = entry->addr;
 			if (entry->addr < 0) {
-				printk("%s: WARN: Received error %lx from the server for operation %d\n", __func__, ret,operation);
+				printk("%s: WARN: Received error %lx from the server for "
+						"operation %d\n", __func__, ret,operation);
 				goto out_dist_lock;
 			}
 		}
@@ -1750,7 +1780,8 @@ start:
 
 out_dist_lock:
 	up_write(&current->mm->distribute_sem);
-	PSPRINTK("%s: Released distributed lock from out_dist_lock, current index is %d in out_dist_lock\n",
+	PSPRINTK("%s: Released distributed lock from out_dist_lock, "
+			"current index is %d in out_dist_lock\n",
 			__func__, current->mm->vma_operation_index);
 
 out:
@@ -1764,6 +1795,22 @@ out:
 	return ret;
 }
 
+
+int vma_server_enqueue_vma_op(
+		memory_t * memory, vma_operation_t * operation, int fake)
+{
+	vma_op_work_t *work = kmalloc(sizeof(vma_op_work_t), GFP_ATOMIC);
+	if (!work) return -ENOMEM;
+
+	work->fake = fake;
+	work->memory = memory;
+	work->operation = operation;
+
+	INIT_WORK((struct work_struct *)work, vma_server_process_vma_op);
+	queue_work(vma_op_wq, (struct work_struct *)work);
+
+	return 0;
+}
 
 /**
  * This function registers the vma server with the messaging layer.
@@ -1780,11 +1827,17 @@ int vma_server_init(void)
 	if (!vma_op_wq) return -ENOMEM;
 
 	vma_lock_wq = create_singlethread_workqueue("vma_lock_wq");
-	if (!vma_lock_wq) return -ENOMEM;
+	if (!vma_lock_wq) {
+		destroy_workqueue(vma_op_wq);
+		return -ENOMEM;
+	}
 
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_VMA_OP, handle_vma_op);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_VMA_ACK, handle_vma_ack);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK, handle_vma_lock);
+	pcn_kmsg_register_callback(
+			PCN_KMSG_TYPE_PROC_SRV_VMA_OP, handle_vma_op);
+	pcn_kmsg_register_callback(
+			PCN_KMSG_TYPE_PROC_SRV_VMA_ACK, handle_vma_ack);
+	pcn_kmsg_register_callback(
+			PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK, handle_vma_lock);
  
 	return 0;
 }

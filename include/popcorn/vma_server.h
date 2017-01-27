@@ -13,8 +13,8 @@
 #define INCLUDE_POPCORN_VMA_SERVER_H_
 
 /**
- * This function takes a distributed lock for a VMA operation, and triggers the same
- * operation among different Popcorn Linux kernels.
+ * This function takes a distributed lock for a VMA operation, and triggers
+ * the same operation among different Popcorn Linux kernels.
  *
  * @return Returns either a valid memory address for the distributed operation
  *         or an error code in case of failures.
@@ -23,21 +23,23 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 		unsigned long prot, unsigned long new_addr, unsigned long new_len,
 		unsigned long flags, struct file *file, unsigned long pgoff);
 /**
- * This function coordinates the end of a distributed VMA operation among different
- * Popcorn Linux kernels.
+ * This function coordinates the end of a distributed VMA operation among
+ * different Popcorn Linux kernels.
  *
  * @return The function doesn't return an error but it can either print an error
  *         message on the kernel log or throw a kernel bug.
  */
 void end_distribute_operation(int operation, long start_ret, unsigned long addr);
 
-/**\note
- * The followings are wrappers around the start/end_distribute_operation functions.
- * start/end_distribute_operation create a distributed lock among Popcorn Linux
- * kernels to carry on VMA operations. David Katz's MS Thesis details the functioning.
- * For any additional VMA operation that has to be carried in a distributed fashion
- * a new function must be added in the following and the relative handling code should
- * also be added in start_distribute_operation and end_distribute_operation.
+/**
+ * NOTE
+ * The followings are wrappers around the start/end_distribute_operation
+ * functions. start/end_distribute_operation create a distributed lock among
+ * Popcorn Linux kernels to carry on VMA operations. David Katz's MS Thesis
+ * details the functioning. For any additional VMA operation that has to be
+ * carried in a distributed fashion a new function must be added in the
+ * following and the relative handling code should also be added in
+ * start_distribute_operation and end_distribute_operation.
  */
 static inline long vma_server_madvise_remove_start(struct mm_struct *mm,
 		unsigned long start, size_t len)

@@ -16,7 +16,7 @@
 #include <asm/mmu.h>
 
 #ifdef CONFIG_POPCORN
-#include <popcorn/process_server_macro.h>
+#include <popcorn/bundle.h>
 #endif
 
 #ifndef AT_VECTOR_SIZE_ARCH

@@ -18,8 +18,6 @@
 #include <linux/namei.h>
 
 #include <linux/cpu_namespace.h>
-#include <linux/popcorn_cpuinfo.h>
-#include <popcorn/process_server.h>
 
 static DEFINE_MUTEX(cpu_caches_mutex);
 static struct kmem_cache *cpu_ns_cachep;

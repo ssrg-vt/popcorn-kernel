@@ -8,7 +8,7 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 
-#include <linux/pcn_kmsg.h>
+#include <popcorn/pcn_kmsg.h>
 
 pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 EXPORT_SYMBOL(callbacks);

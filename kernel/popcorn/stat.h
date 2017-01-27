@@ -8,21 +8,19 @@
 #ifndef __KERNEL_POPCORN_STAT_H__
 #define __KERNEL_POPCORN_STAT_H__
 
-#include <popcorn/process_server_macro.h>
-
 #if MIGRATION_PROFILE
 extern ktime_t migration_start;
 extern ktime_t migration_end;
+#define GET_MIGRATION_TIME \
+	(unsigned long)ktime_to_ns(ktime_sub(migration_end, migration_start))
+
 #endif
 
-#if STATISTICS
-/*
-unsigned long long perf_aa;
-unsigned long long perf_bb;
-unsigned long long perf_cc;
-unsigned long long perf_dd;
-unsigned long long perf_ee;
-*/
+#if defined(CONFIG_ARM64)
+#define MY_ARCH	"ARM"
+#elif defined(CONFIG_X86) || defined(CONFIG_X86_64)
+#define MY_ARCH	"x86"
+#endif
 
 extern int page_fault_mio;
 extern int fetch;
@@ -44,6 +42,5 @@ extern int not_compressed_page;
 extern int not_compressed_diff_page;
 
 void print_popcorn_stat(void);
-#endif
 
 #endif /* KERNEL_POPCORN_STAT_H_ */

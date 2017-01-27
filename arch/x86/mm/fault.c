@@ -1201,6 +1201,19 @@ retry:
 	}
 
 	vma = find_vma(mm, address);
+#ifdef CONFIG_POPCORN
+	if (tsk->tgroup_distributed && tsk->main == 0) {
+		int ret;
+		// sanghoon: This should be the shadow thread
+		BUG_ON(!tsk->memory);
+		ret = page_server_do_page_fault(
+				tsk, mm, vma, address, flags, error_code);
+		if (ret != 0) {
+			bad_area(regs, error_code, address);
+			return;
+		}
+	}
+#endif
 	if (unlikely(!vma)) {
 		bad_area(regs, error_code, address);
 		return;

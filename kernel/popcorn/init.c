@@ -5,16 +5,12 @@
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/list.h>
-//#include <linux/cpumask.h>
 
 #include <linux/kthread.h>
-
 #include <linux/bootmem.h>
 
-#include <linux/pcn_kmsg.h>
-#include <linux/popcorn_cpuinfo.h>
-
-//#include <popcorn/process_server.h>
+#include <popcorn/pcn_kmsg.h>
+#include <popcorn/cpuinfo.h>
 
 /*
  * Function macros
@@ -22,20 +18,22 @@
 #ifdef POPCORN_DEBUG
 #define PRINTK(...) printk(__VA_ARGS__)
 #else
-#define PRINTK(...) ;
+#define PRINTK(...)
 #endif
 
 /*
  *  Variables
  */
 // TODO this must be refactored
-static DECLARE_WAIT_QUEUE_HEAD(wq_cpu);
 
 LIST_HEAD(rlist_head); // TODO sanghoon: lock? 
 
 /*
  * Function definitions
  */
+#if 0 // beowulf
+static DECLARE_WAIT_QUEUE_HEAD(wq_cpu);
+
 void add_node(_remote_cpu_info_data_t *arg, struct list_head *head)
 {
 	_remote_cpu_info_list_t *r = kmalloc(sizeof(*r), GFP_KERNEL);
@@ -65,7 +63,21 @@ int find_and_delete(int cpuno, struct list_head *head)
 }
 
 
-#if 0 // beowulf
+struct _remote_cpu_info_request {
+	struct pcn_kmsg_hdr header;
+	_remote_cpu_info_data_t _data;
+}__attribute__((packed)) __attribute__((aligned(64)));
+
+typedef struct _remote_cpu_info_request _remote_cpu_info_request_t;
+
+struct _remote_cpu_info_response {
+	struct pcn_kmsg_hdr header;
+	_remote_cpu_info_data_t _data;
+}__attribute__((packed)) __attribute__((aligned(64)));
+
+typedef struct _remote_cpu_info_response _remote_cpu_info_response_t;
+
+
 // TODO rewrite with a list
 static _remote_cpu_info_response_t cpu_result;
 static int wait_cpu_list = -1;
@@ -250,7 +262,7 @@ extern int page_server_init(void);
 
 static int __init popcorn_init(void)
 {
-	printk(KERN_INFO"Initialize Popcorn subsystems...\n");
+	PRINTK(KERN_INFO"Initialize Popcorn subsystems...\n");
 
 	popcorn_ns_init(false);
 	pcn_kmsg_init();

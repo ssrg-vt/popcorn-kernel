@@ -19,8 +19,8 @@
  * @return Returns 0 on success, an error code otherwise.
  */
 int page_server_update_page(struct task_struct * tsk, struct mm_struct *mm,
-			       struct vm_area_struct *vma, unsigned long address_not_page, unsigned long page_fault_flags,
-				   int retrying);
+		   struct vm_area_struct *vma, unsigned long address_not_page,
+		   unsigned long page_fault_flags, int retrying);
 
 /**
  * Cleans Popcorn Linux's related fields when a memory page is returned to the
@@ -39,8 +39,15 @@ void page_server_clean_page(struct page* page);
  * @return Returns 0 on success, an error code otherwise.
  */
 int page_server_try_handle_mm_fault(struct task_struct *tsk,
-				  struct mm_struct *mm, struct vm_area_struct *vma,
-				  unsigned long page_fault_address, unsigned long page_fault_flags,
-				  unsigned long error_code);
+		  struct mm_struct *mm, struct vm_area_struct *vma,
+		  unsigned long page_fault_address, unsigned long page_fault_flags,
+		  unsigned long error_code);
+
+int page_server_do_page_fault(struct task_struct *tsk,
+		  struct mm_struct *mm, struct vm_area_struct *vma,
+		  unsigned long page_fault_address, unsigned long page_fault_flags,
+		  unsigned long error_code);
+
+void synchronize_migrations(int tgroup_home_cpu,int tgroup_home_id);
 
 #endif /* INCLUDE_POPCORN_PAGE_SERVER_H_ */

@@ -110,7 +110,7 @@ obj-$(CONFIG_EFI)			+= sysfb_efi.o
 obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o
 obj-$(CONFIG_TRACING)			+= tracepoint.o
 
-obj-$(CONFIG_POPCORN)		+= popcorn_cpuinfo_arch.o process_server.o
+obj-$(CONFIG_POPCORN)		+= cpuinfo.o process_server.o
 
 ###
 # 64 bit specific files

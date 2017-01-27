@@ -49,8 +49,6 @@
 #include <asm/debugreg.h>
 #include <asm/switch_to.h>
 
-#include <linux/process_server.h>
-
 asmlinkage extern void ret_from_fork(void);
 
 __visible DEFINE_PER_CPU(unsigned long, rsp_scratch);

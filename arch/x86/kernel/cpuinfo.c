@@ -24,15 +24,14 @@
 #include <linux/smp.h>
 #include <linux/cpu.h>
 //#include <linux/cpumask.h>
-#include <linux/kthread.h>
 #include <linux/slab.h>
 #include <linux/timex.h>
 #include <linux/timer.h>
-#include <linux/pcn_kmsg.h>
 #include <linux/delay.h>
 
 #include <linux/cpufreq.h>
-#include <linux/popcorn_cpuinfo.h>
+
+#include <popcorn/cpuinfo.h>
 
 static void *remote_c_start(loff_t *pos) {
 	if (*pos == 0) /* just in case, cpu 0 is not the first */
@@ -46,8 +45,8 @@ static void *remote_c_start(loff_t *pos) {
 	return NULL;
 }
 
-int fill_cpu_info(_remote_cpu_info_data_t *res) {
-
+int fill_cpu_info(_remote_cpu_info_data_t *res)
+{
 	void *p;
 	loff_t pos = 0;
 	struct cpuinfo_x86 *c;
@@ -57,7 +56,7 @@ int fill_cpu_info(_remote_cpu_info_data_t *res) {
 
 	while (count < NR_CPUS) {
 		p = remote_c_start(&pos);
-		
+
 		if(p == NULL)
 			break;
 
@@ -72,10 +71,12 @@ int fill_cpu_info(_remote_cpu_info_data_t *res) {
 		res->arch_type = arch_x86;
 
 		arch->cpu[count]._processor = cpu;
-		strcpy(arch->cpu[count]._vendor_id, c->x86_vendor_id[0] ? c->x86_vendor_id : "unknown");
+		strcpy(arch->cpu[count]._vendor_id,
+				c->x86_vendor_id[0] ? c->x86_vendor_id : "unknown");
 		arch->cpu[count]._cpu_family = c->x86;
 		arch->cpu[count]._model = c->x86_model;
-		strcpy(arch->cpu[count]._model_name, c->x86_model_id[0] ? c->x86_model_id : "unknown");
+		strcpy(arch->cpu[count]._model_name,
+				c->x86_model_id[0] ? c->x86_model_id : "unknown");
 
 		if (c->x86_mask || c->cpuid_level >= 0)
 			arch->cpu[count]._stepping = c->x86_mask;
@@ -113,10 +114,10 @@ int fill_cpu_info(_remote_cpu_info_data_t *res) {
 		arch->cpu[count]._nbogomips = c->loops_per_jiffy / (500000 / HZ);
 		//(c->loops_per_jiffy/(5000/HZ)) % 100);
 
-	#ifdef CONFIG_X86_64
+#ifdef CONFIG_X86_64
 		if (c->x86_tlbsize > 0)
 			arch->cpu[count]._TLB_size = c->x86_tlbsize;
-	#endif
+#endif
 		arch->cpu[count]._clflush_size = c->x86_clflush_size;
 		arch->cpu[count]._cache_alignment = c->x86_cache_alignment;
 		arch->cpu[count]._bits_physical = c->x86_phys_bits;
@@ -126,7 +127,8 @@ int fill_cpu_info(_remote_cpu_info_data_t *res) {
 		for (i = 0; i < 32; i++) {
 			if (c->x86_power & (1 << i)) {
 				if (i < ARRAY_SIZE(x86_power_flags) && x86_power_flags[i])
-					strcat(arch->cpu[count]._flags, x86_power_flags[i][0] ? " " : "");
+					strcat(arch->cpu[count]._flags,
+							x86_power_flags[i][0] ? " " : "");
 			}
 		}
 

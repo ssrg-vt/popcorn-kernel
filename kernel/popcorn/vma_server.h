@@ -12,6 +12,8 @@
 #ifndef KERNEL_POPCORN_VMA_SERVER_H_
 #define KERNEL_POPCORN_VMA_SERVER_H_
 
+#include "types.h"
+
 /**
  * Creates a local mapping for the VMA -- this is the case in which is the local
  * kernel that decides how to create the mapping.

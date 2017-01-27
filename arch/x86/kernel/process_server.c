@@ -17,14 +17,12 @@
 /* File includes */
 #include <linux/sched.h>
 #include <linux/cpu_namespace.h>
-#include <linux/popcorn_cpuinfo.h>
-#include <linux/process_server.h>
 #if 0 // beowulf
 #include <asm/i387.h>
 #endif
 #include <asm/uaccess.h>
-#include <process_server_arch.h>
-
+#include <asm/process_server.h>
+#include <popcorn/debug.h>
 
 /* External function declarations */
 extern void __show_regs(struct pt_regs *regs, int all);

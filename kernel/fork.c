@@ -89,9 +89,8 @@
 #include <trace/events/task.h>
 
 #ifdef CONFIG_POPCORN
-#include <popcorn/process_server.h>
+#include <popcorn/types.h>
 #endif
-
 
 /*
  * Minimum number of threads to boot the kernel

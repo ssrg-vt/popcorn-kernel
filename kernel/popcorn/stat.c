@@ -1,14 +1,15 @@
 #include <linux/kernel.h>
 #include <linux/ktime.h>
 #include <linux/sched.h>
-#include <popcorn/process_server_macro.h>
+
+#include <popcorn/types.h>
+#include <popcorn/debug.h>
 
 #if MIGRATION_PROFILE
 ktime_t migration_start;
 ktime_t migration_end;
 #endif
 
-#if STATISTICS
 int page_fault_mio = 0;
 int fetch = 0;
 int local_fetch = 0;
@@ -27,7 +28,6 @@ int most_long_read = 0;
 int compressed_page_sent = 0;
 int not_compressed_page = 0;
 int not_compressed_diff_page = 0;
-#endif
 
 //asmlinkage 
 long sys_take_time(int start)
@@ -38,7 +38,6 @@ long sys_take_time(int start)
 		trace_printk("e\n");
 	return 0;
 }
-
 
 void print_popcorn_stat(void)
 {

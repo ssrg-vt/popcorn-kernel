@@ -145,13 +145,44 @@ struct pcn_kmsg_hdr {
 #define CACHE_LINE_SIZE 64
 #define PCN_KMSG_PAYLOAD_SIZE (CACHE_LINE_SIZE - sizeof(struct pcn_kmsg_hdr))
 
-#define MAX_CHUNKS ((1 << LG_SEQNUM_SIZE) -1)
-#define PCN_KMSG_LONG_PAYLOAD_SIZE (MAX_CHUNKS*PCN_KMSG_PAYLOAD_SIZE)
+#define MAX_CHUNKS ((1 << LG_SEQNUM_SIZE) - 1)
+#define PCN_KMSG_LONG_PAYLOAD_SIZE (MAX_CHUNKS * PCN_KMSG_PAYLOAD_SIZE)
+
 
 /* The actual messages.  The expectation is that developers will create their
    own message structs with the payload replaced with their own fields, and then
    cast them to a struct pcn_kmsg_message.  See the checkin message below for
    an example of how to do this. */
+
+#define PAD_LONG_MESSAGE(x) \
+	(((sizeof(x) + PCN_KMSG_PAYLOAD_SIZE) / PCN_KMSG_PAYLOAD_SIZE) \
+		* PCN_KMSG_PAYLOAD_SIZE)
+
+#define PCN_KMSG_PAD_SIZE(x) \
+	(sizeof(x) > PCN_KMSG_PAYLOAD_SIZE ? \
+		PAD_LONG_MESSAGE(sizeof(x)) : PCN_KMSG_PAYLOAD_SIZE)
+
+#define DEFINE_PCN_KMSG(type, fields) \
+	struct _##type {				\
+		fields						\
+	};								\
+	typedef struct {				\
+		struct pcn_kmsg_hdr header;	\
+		union {						\
+			struct {				\
+				fields				\
+			};						\
+			char _pad[PCN_KMSG_PAD_SIZE(struct _##type)];	\
+		}__attribute__((packed));	\
+	}__attribute__((packed)) type
+
+#define DEFINE_PCN_KMSG_NO_PAD(type, fields) \
+	typedef struct {				\
+		struct pcn_kmsg_hdr header;	\
+		fields						\
+		}__attribute__((packed));	\
+	}__attribute__((packed)) type
+
 
 /* Struct for the actual messages.  Note that hdr and payload are flipped
    when this actually goes out, so the receiver can poll on the ready bit
@@ -166,6 +197,7 @@ struct pcn_kmsg_long_message {
 	struct pcn_kmsg_hdr hdr;
 	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
 }__attribute__((packed));
+
 
 /* TYPES OF MESSAGES */
 
@@ -245,10 +277,12 @@ int pcn_kmsg_mcast_close(pcn_kmsg_mcast_id id);
 int pcn_kmsg_mcast_send(pcn_kmsg_mcast_id id, struct pcn_kmsg_message *msg);
 
 /* Send a long message to the specified multicast group. */
-int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id,
-		void *msg,
+int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id, void *msg,
 		unsigned int payload_size);
 
 int pcn_kmsg_get_node_ids(uint16_t *nodes, int len, uint16_t *self);
+
+extern send_cbftn send_callback;
+extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 
 #endif /* __LINUX_PCN_KMSG_H */

@@ -1,6 +1,6 @@
 /*
  * File:
- * process_server_arch_macros.h
+ * process_server_macros.h
  *
  * Description:
  * 	this file provides the architecture specific macro and structures of the
@@ -60,11 +60,8 @@ struct popcorn_regset_aarch64
 	unsigned __int128 v[32];
 };
 
-/*
- * Constant macros
- *
- */
-#define FIELDS_ARCH struct pt_regs regs;\
+#define FIELDS_ARCH \
+	struct pt_regs regs;\
 	unsigned long migration_pc;\
 	unsigned long thread_usersp;\
 	unsigned long old_rsp;\
@@ -80,12 +77,8 @@ struct popcorn_regset_aarch64
 	unsigned long bp;\
 	unsigned long ra;\
 	struct popcorn_regset_x86_64 regs_x86;\
-	struct popcorn_regset_aarch64 regs_aarch;\
+	struct popcorn_regset_aarch64 regs_aarch;
 //	union thread_xstate fpu_state;
-
-/*
- * Structures
- */
 
 typedef struct _fields_arch{
 	FIELDS_ARCH
