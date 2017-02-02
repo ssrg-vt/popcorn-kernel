@@ -25,11 +25,12 @@ static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_messag
 	if (!fn) {
 		printk(KERN_ERR"%s: NULL FN", __func__);
 		vfree(msg);
-		return -1;
+		return -ENOENT;
 	}
 	// printk(KERN_ERR"%s: CALL %d %d\n", __func__, hdr->type, hdr->size);
 
-	return fn(msg);
+	fn(msg);
+	return 0;
 }
 
 static int __init loopback_load(void)

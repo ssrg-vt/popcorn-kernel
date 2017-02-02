@@ -54,6 +54,7 @@ DEFINE_PCN_KMSG(unmap_message_t, UNMAP_FIELDS);
 
 typedef struct _memory_struct {
 	struct list_head list;
+	atomic_t count;
 
 	int tgroup_home_cpu;
 	int tgroup_home_id;
@@ -100,16 +101,21 @@ typedef struct _memory_struct {
 
 void add_memory_entry_in_out(memory_t *m, int nid, bool in);
 #define add_memory_entry_in(m, nid)	\
-	add_memory_entry_in_out((m), (nid), true)
+	add_memory_entry_in_out(m, nid, true)
 #define add_memory_entry_out(m, nid)	\
-	add_memory_entry_in_out((m), (nid), false)
+	add_memory_entry_in_out(m, nid, false)
 
 memory_t *find_memory_entry_in_out(int nid, int pid, bool in);
 #define find_memory_entry_in(nid, pid) \
-	find_memory_entry_in_out((nid), (pid), true)
+	find_memory_entry_in_out(nid, pid, true)
 #define find_memory_entry_out(nid, pid) \
-	find_memory_entry_in_out((nid), (pid), false)
+	find_memory_entry_in_out(nid, pid, false)
 
+void remove_memory_entry_in_out(memory_t *m, bool in);
+#define remove_memory_entry_in(m) \
+	remove_memory_entry_in_out(m, true)
+#define remove_memory_entry_out(m) \
+	remove_memory_entry_in_out(m, false)
 
 void add_memory_entry(memory_t* entry);
 int add_memory_entry_with_check(memory_t* entry);
@@ -329,6 +335,34 @@ typedef struct mapping_answers_2_kernels {
 	int futex_owner;
 } mapping_answers_for_2_kernels_t;
 
+
+#define REMOTE_PAGE_REQUEST_FIELDS \
+	int tgroup_home_cpu; \
+	int tgroup_home_id; \
+	int remote_pid; \
+	bool is_write; \
+	unsigned long addr;
+DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
+
+#define REMOTE_PAGE_RESPONSE_FIELDS \
+	int tgroup_home_cpu; \
+	int tgroup_home_id; \
+	int remote_pid;	\
+	int result; \
+	unsigned long addr; \
+	unsigned long vm_start; \
+	unsigned long vm_end; \
+	unsigned long vm_flags;	\
+	unsigned long vm_pgoff; \
+	char vm_file_path[512]; \
+	char page[PAGE_SIZE];
+DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
+
+#define REMOTE_PAGE_INVALIDATE_FIELDS \
+	int tgroup_home_cpu; \
+	int tgroup_home_id; \
+	unsigned long addr;
+DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
 
 /**
  * Works

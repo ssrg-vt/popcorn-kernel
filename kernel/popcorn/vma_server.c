@@ -10,7 +10,7 @@
  * @author Marina Sadini, Antonio Barbalace, SSRG Virginia Tech 2014
  * @author Marina Sadini, SSRG Virginia Tech 2013
  */
- 
+
 /*
  * As David Katz thesis the concept of this server is to do consistent modifications to the VMA list
  * The protocol is for N kernels
@@ -368,113 +368,98 @@ static vma_op_answers_t * vma_op_answer_alloc(struct task_struct * task, int ind
 // vma operations
 ///////////////////////////////////////////////////////////////////////////////
 
-static unsigned long map_difference(struct file *file, unsigned long addr,
-				    unsigned long len, unsigned long prot, unsigned long flags,
-				    unsigned long pgoff)
+static unsigned long map_difference(struct mm_struct *mm, struct file *file,
+		unsigned long start, unsigned long end,
+		unsigned long prot, unsigned long flags,
+		unsigned long pgoff)
 {
-	unsigned long ret = addr;
-	unsigned long start = addr;
+	unsigned long ret = start;
 	unsigned long local_end = start;
-	unsigned long end = addr + len;
 	unsigned long error;
 	unsigned long populate = 0;
-	struct vm_area_struct* curr;
+	struct vm_area_struct* vma;
 
 	// go through ALL vma's, looking for interference with this space.
-	curr = current->mm->mmap;
+	vma = current->mm->mmap;
 #if defined(CONFIG_ARM64)
 	pgoff = pgoff >> PAGE_SHIFT;
 #endif
 
 	while (1) {
-		if (start >= end)
-			goto done;
-
-		// We've reached the end of the list
-		else if (curr == NULL) {
+		if (start >= end) {
+			break;
+		} else if (vma == NULL) {
+			// We've reached the end of the list
 			// map through the end
-			// Ported to Linux 3.12
-			//error = do_mmap(file, start, end - start, prot, flags, pgoff);
-			error = do_mmap_pgoff(file, start, end - start, prot, flags, pgoff, &populate);
+			error = do_mmap_pgoff(file, start,
+					end - start, prot, flags, pgoff, &populate);
+			printk("map: %lx -- %lx\n", start, end);
 
 			if (error != start) {
 				ret = VM_FAULT_VMA;
 			}
-			goto done;
-		}
-
-		// the VMA is fully above the region of interest
-		else if (end <= curr->vm_start) {
+			break;
+		} else if (end <= vma->vm_start) {
+			// the VMA is fully above the region of interest
 			// mmap through local_end
-			// Ported to Linux 3.12
-			//error = do_mmap(file, start, end - start, prot, flags, pgoff);
-			error = do_mmap_pgoff(file, start, end - start, prot, flags, pgoff, &populate);
+			error = do_mmap_pgoff(file, start,
+					end - start, prot, flags, pgoff, &populate);
+			printk("map: %lx -- %lx\n", start, end);
 
 			if (error != start)
 				ret = VM_FAULT_VMA;
-			goto done;
-		}
-
-		// the VMA fully encompases the region of interest
-		else if (start >= curr->vm_start && end <= curr->vm_end) {
+			break;
+		} else if (start >= vma->vm_start && end <= vma->vm_end) {
+			// the VMA fully encompases the region of interest
 			// nothing to do
-			goto done;
-		}
-
-		// the VMA is fully below the region of interest
-		else if (curr->vm_end <= start) {
+			break;
+		} else if (vma->vm_end <= start) {
+			// the VMA is fully below the region of interest
 			// move on to the next one
 
-		}
-
-		// the VMA includes the start of the region of interest
-		// but not the end
-		else if (start >= curr->vm_start && start < curr->vm_end
-			 && end > curr->vm_end) {
-			// advance start (no mapping to do)
-			start = curr->vm_end;
+		} else if (start >= vma->vm_start && start < vma->vm_end
+			 && end > vma->vm_end) {
+			// the VMA includes the start of the region of interest
+			// but not the end: advance start (no mapping to do)
+			start = vma->vm_end;
 			local_end = start;
 
-		}
-
-		// the VMA includes the end of the region of interest
-		// but not the start
-		else if (start < curr->vm_start && end <= curr->vm_end
-			 && end > curr->vm_start) {
-			local_end = curr->vm_start;
+		} else if (start < vma->vm_start && end <= vma->vm_end
+			 && end > vma->vm_start) {
+			// the VMA includes the end of the region of interest
+			// but not the start
+			local_end = vma->vm_start;
 
 			// mmap through local_end
-			// Ported to Linux 3.12
-			//error = do_mmap(file, start, local_end - start, prot, flags, pgoff);
-			error = do_mmap_pgoff(file, start, local_end - start, prot, flags, pgoff, &populate);
+			error = do_mmap_pgoff(file, start,
+					local_end - start, prot, flags, pgoff, &populate);
+			printk("map: %lx -- %lx\n", start, local_end);
 			if (error != start)
 				ret = VM_FAULT_VMA;
 
 			// Then we're done
-			goto done;
-		}
+			break;
+		} else if (start <= vma->vm_start && end >= vma->vm_end) {
 
-		// the VMA is fully within the region of interest
-		else if (start <= curr->vm_start && end >= curr->vm_end) {
+			// the VMA is fully within the region of interest
 			// advance local end
-			local_end = curr->vm_start;
+			local_end = vma->vm_start;
 
 			// map the difference
-			// Ported to Linux 3.12
-			//error = do_mmap(file, start, local_end - start, prot, flags, pgoff);
-			error = do_mmap_pgoff(file, start, local_end - start, prot, flags, pgoff, &populate);
+			error = do_mmap_pgoff(file, start,
+					local_end - start, prot, flags, pgoff, &populate);
+			printk("map: %lx -- %lx\n", start, local_end);
 			if (error != start)
 				ret = VM_FAULT_VMA;
 
 			// Then advance to the end of this vma
-			start = curr->vm_end;
+			start = vma->vm_end;
 			local_end = start;
 		}
 
-		curr = curr->vm_next;
+		vma = vma->vm_next;
 	}
 
-done:
 	return ret;
 }
 
@@ -553,8 +538,8 @@ int vma_server_do_mapping_for_distributed_process(
 				 * This is important both to not unmap pages that should not be unmapped
 				 * but also because otherwise the vma protocol will deadlock!
 				 */
-				err = map_difference(NULL, fetching_page->vaddr_start,
-							 fetching_page->vaddr_size, prot,
+				err = map_difference(tsk->mm, NULL, fetching_page->vaddr_start,
+							 fetching_page->vaddr_start + fetching_page->vaddr_size, prot,
 							 MAP_FIXED | MAP_ANONYMOUS
 							 | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
 							 | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0)
@@ -601,13 +586,13 @@ int vma_server_do_mapping_for_distributed_process(
 			f = filp_open(fetching_page->path, O_RDONLY | O_LARGEFILE, 0);
 
 			if (IS_ERR(f)) {
-					down_read(&mm->mmap_sem);
-					spin_lock(ptl);
-					/*PTE LOCKED*/
-					printk("%s: ERROR: error while opening file %s\n",
-						   __func__, fetching_page->path);
-					ret = VM_FAULT_VMA;
-					return ret;
+				down_read(&mm->mmap_sem);
+				spin_lock(ptl);
+				/*PTE LOCKED*/
+				printk("%s: ERROR: error while opening file %s\n",
+						__func__, fetching_page->path);
+				ret = VM_FAULT_VMA;
+				return ret;
 			}
 
 			down_write(&mm->mmap_sem);
@@ -644,8 +629,8 @@ int vma_server_do_mapping_for_distributed_process(
 				 * This is important both to not unmap pages that should not be unmapped
 				 * but also because otherwise the vma protocol will deadlock!
 				 */
-				err = map_difference(f, fetching_page->vaddr_start,
-							   fetching_page->vaddr_size, prot,
+				err = map_difference(tsk->mm, f, fetching_page->vaddr_start,
+							   fetching_page->vaddr_start + fetching_page->vaddr_size, prot,
 							   MAP_FIXED
 							   | ((fetching_page->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
 							   /* Ported to Linux 3.12
@@ -1812,6 +1797,39 @@ int vma_server_enqueue_vma_op(
 	return 0;
 }
 
+
+int vma_server_map(struct mm_struct *mm, struct vm_area_struct *vma, remote_page_response_t *res)
+{
+	if (res->vm_file_path[0] == '\0') {
+		/* Anonymous page */
+	} else {
+		/* File-mapped page */
+		struct file *f;
+		int err;
+		unsigned long vm_prot = 0;
+		unsigned vm_flags = 0;
+
+		f = filp_open(res->vm_file_path, O_RDONLY | O_LARGEFILE, 0);
+		BUG_ON(IS_ERR(f));
+
+		vm_prot  = (res->vm_flags & VM_READ) ? PROT_READ : 0;
+		vm_prot |= (res->vm_flags & VM_WRITE) ? PROT_WRITE : 0;
+		vm_prot |= (res->vm_flags & VM_EXEC) ? PROT_EXEC : 0;
+
+		vm_flags = MAP_FIXED
+			   | ((res->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
+			   | ((res->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
+			   | ((res->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0),
+
+		err = map_difference(mm, f, res->vm_start, res->vm_end,
+					vm_prot, vm_flags, res->vm_pgoff << PAGE_SHIFT);
+
+		filp_close(f, NULL);
+	}
+
+	return 0;
+}
+
 /**
  * This function registers the vma server with the messaging layer.
  *
@@ -1838,6 +1856,6 @@ int vma_server_init(void)
 			PCN_KMSG_TYPE_PROC_SRV_VMA_ACK, handle_vma_ack);
 	pcn_kmsg_register_callback(
 			PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK, handle_vma_lock);
- 
+
 	return 0;
 }

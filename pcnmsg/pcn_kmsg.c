@@ -54,7 +54,7 @@ int pcn_kmsg_send_long(unsigned int dest_cpu, void *lmsg, unsigned int message_s
 					__func__, hdr->from_cpu, hdr->type, hdr->size);
 		// msleep(100);
 		//printk("Waiting for call back function to be registered\n");
-		return 0;
+		return -ENOENT;
 	}
 
 	return send_callback(dest_cpu, (struct pcn_kmsg_message *)lmsg,

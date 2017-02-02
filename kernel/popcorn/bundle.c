@@ -38,7 +38,6 @@ const unsigned long __node_addrs[] = {
 
 static struct popcorn_node popcorn_nodes[MAX_POPCORN_NODES];
 
-
 void add_memory_entry_in_out(memory_t *m, int nid, bool in)
 {
 	unsigned long flags;
@@ -75,6 +74,16 @@ memory_t *find_memory_entry_in_out(int nid, int pid, bool in)
 	spin_unlock_irqrestore(lock, flags);
 
 	return found;
+}
+
+void remove_memory_entry_in_out(memory_t *m, bool in)
+{
+	unsigned long flags;
+	spinlock_t *lock = popcorn_nodes[m->tgroup_home_cpu].memory_lock + in;
+
+	spin_lock_irqsave(lock, flags);
+	list_del(&m->list);
+	spin_unlock_irqrestore(lock, flags);
 }
 
 

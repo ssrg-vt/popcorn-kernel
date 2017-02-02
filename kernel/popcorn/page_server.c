@@ -54,6 +54,7 @@
 #include <linux/mm.h>
 #include <linux/rmap.h>
 #include <linux/mmu_notifier.h>
+#include <linux/wait.h>
 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
@@ -76,7 +77,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Working queues (servers)
 ///////////////////////////////////////////////////////////////////////////////
-static struct workqueue_struct *message_request_wq;
+static struct workqueue_struct *remote_page_wq;
 static struct workqueue_struct *invalid_message_wq;
 
 // wait lists
@@ -198,7 +199,7 @@ static inline void remove_mapping_entry(mapping_answers_for_2_kernels_t* entry)
 
 #ifdef USE_DEBUG_MAPPPINGS
 	{
-	data_response_for_2_kernels_t *response = 
+	data_response_for_2_kernels_t *response =
 			(data_response_for_2_kernels_t *)entry->data;
 	printk("%s: INFO: %pS %s pid %d f%dw%d (cpu %d id %d address 0x%lx) "
 			"0x%lx\n", __func__, __builtin_return_address(0),
@@ -930,7 +931,7 @@ static void process_mapping_request_for_2_kernels(struct work_struct *work)
 		delay->request = request;
 		INIT_DELAYED_WORK( (struct delayed_work *)delay,
 				   process_mapping_request_for_2_kernels);
-		queue_delayed_work(message_request_wq,
+		queue_delayed_work(remote_page_wq,
 				   (struct delayed_work *) delay, 10);
 
 		up_read(&mm->mmap_sem);
@@ -956,7 +957,7 @@ static void process_mapping_request_for_2_kernels(struct work_struct *work)
 			goto out;
 		}
 		PSPRINTK("Find vma from %s start %lx end %lx\n",
-				((vma->vm_file != NULL) ? 
+				((vma->vm_file != NULL) ?
 				d_path(&vma->vm_file->f_path, lpath, 512) : "no file"),
 				vma->vm_start, vma->vm_end);
 	}
@@ -1049,9 +1050,9 @@ static void process_mapping_request_for_2_kernels(struct work_struct *work)
 fetch:
 				PSPRINTK("concurrent request\n");
 				/*Whit marked pages only two scenarios can happenn:
-				 * Or I am the main and I an locally fetching 
+				 * Or I am the main and I an locally fetching
 				 *		=> delay this fetch
-				 * Or I am not the main, but the main already answer to 
+				 * Or I am not the main, but the main already answer to
 				 * my fetch (otherwise it will not answer to me the page)
 				 * so wait that the answer arrive before consuming the fetch.
 				 * */
@@ -1068,7 +1069,7 @@ fetch:
 				INIT_DELAYED_WORK(
 					(struct delayed_work *)delay,
 					process_mapping_request_for_2_kernels);
-				queue_delayed_work(message_request_wq,
+				queue_delayed_work(remote_page_wq,
 						   (struct delayed_work *) delay, 10);
 
 				spin_unlock(ptl);
@@ -1114,7 +1115,7 @@ fetch:
 	if (is_zero_pfn(pte_pfn(entry)) || !(page->replicated == 1)) {
 		PSPRINTK("Page not replicated\n");
 
-		/*There is the possibility that this request arrived while I am 
+		/*There is the possibility that this request arrived while I am
 		 * fetching, after that I installed the page
 		 * but before calling the update page....
 		 */
@@ -1135,7 +1136,7 @@ fetch:
 					request->tgroup_home_id, address);
 
 		if ((vma->vm_flags & VM_WRITE) ||
-				(vma->vm_start <= (unsigned long)mm->context.popcorn_vdso && 
+				(vma->vm_start <= (unsigned long)mm->context.popcorn_vdso &&
 				 (unsigned long)mm->context.popcorn_vdso < vma->vm_end) ) {
 			//if the page is writable but the pte has not the write flag set,
 			//it is a cow page
@@ -1278,7 +1279,7 @@ retry_cow:
 				delay->request = request;
 				INIT_DELAYED_WORK( (struct delayed_work *)delay,
 						   process_mapping_request_for_2_kernels);
-				queue_delayed_work(message_request_wq,
+				queue_delayed_work(remote_page_wq,
 						   (struct delayed_work *) delay, 10);
 			} else {
 				printk("%s: ERROR: cannot allocate memory to delay work 3 "
@@ -1449,7 +1450,7 @@ retry_cow:
 
 resolved:
 	PSPRINTK("Resolved Copy from %s\n",
-			((vma->vm_file != NULL) ? 
+			((vma->vm_file != NULL) ?
 			 d_path(&vma->vm_file->f_path, lpath, 512) : "no file"));
 	PSPRINTK("Page read only?%i Page shared?%i\n",
 			(vma->vm_flags & VM_WRITE) ? 0 : 1,
@@ -1550,7 +1551,7 @@ resolved:
 out:
 	PSPRINTK("sending void answer\n");
 
-	/*	
+	/*
 	char tmpchar; // Marina and Vincent debugging
 	char *addrp = (char *) (address & PAGE_MASK);
 	int ii;
@@ -1625,8 +1626,9 @@ static int handle_mapping_request(struct pcn_kmsg_message *inc_msg)
 
 	if (work) {
 		work->request = req;
-		INIT_WORK((struct work_struct *)work,process_mapping_request_for_2_kernels);
-		queue_work(message_request_wq, (struct work_struct *)work);
+		INIT_WORK((struct work_struct *)work,
+				process_mapping_request_for_2_kernels);
+		queue_work(remote_page_wq, (struct work_struct *)work);
 	}
 
 	return 1;
@@ -3136,10 +3138,42 @@ check:
 }
 
 
+
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+/****************************************************************************/
+
+
 struct remote_page {
 	struct list_head list;
+	spinlock_t lock;
+	wait_queue_head_t wait;
+	atomic_t count;
+	int fetch_result;
+	bool mapped;
 
 	unsigned long addr;
+
+	remote_page_response_t *response;
+
 	bool vma_present;
 	unsigned long vaddr_start;
 	unsigned long vaddr_size;
@@ -3157,46 +3191,21 @@ struct remote_page {
 	int arrived_response;
 	struct task_struct *waiting;
 	int futex_owner;
+
 };
 
-void __fetch_remote_page(struct task_struct *tsk, unsigned long addr)
+static struct remote_page *lookup_remote_page(memory_t *m, unsigned long addr)
 {
-	data_request_for_2_kernels_t *req;
-	req = kzalloc(sizeof(*req), GFP_KERNEL);
-
-	req->header.type = PCN_KMSG_TYPE_PROC_SRV_MAPPING_REQUEST;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-
-	req->address = addr;
-	req->tgroup_home_cpu = tsk->tgroup_home_cpu;
-	req->tgroup_home_id = tsk->tgroup_home_id;
-	req->is_write = 0;
-	req->is_fetch = 1;
-	req->vma_operation_index = tsk->mm->vma_operation_index;
-}
-
-static struct remote_page *lookup_remote_page(struct task_struct *tsk,
-		unsigned long addr)
-{
-	memory_t *m = tsk->memory;
-	unsigned long flags;
 	struct remote_page *rp;
-	struct remote_page *found = NULL;
 
-	BUG_ON(!m);
-
-	spin_lock_irqsave(&m->pages_lock, flags);
 	list_for_each_entry(rp, &m->pages, list) {
-		if (rp->addr == addr) {
-			found = rp;
-			break;
-		}
+		if (rp->addr == addr) return rp;
 	}
-	spin_unlock_irqrestore(&m->pages_lock, flags);
-	return found;
+	return NULL;
 }
 
 
+/*
 static void add_remote_page(struct task_struct *tsk, struct remote_page *rp)
 {
 	memory_t *m = tsk->memory;
@@ -3208,7 +3217,353 @@ static void add_remote_page(struct task_struct *tsk, struct remote_page *rp)
 
 	return;
 }
+*/
 
+
+static pte_t *__find_pte_lock(struct mm_struct *mm, unsigned long addr, spinlock_t **ptl)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+
+	pgd = pgd_offset(mm, addr);
+	pud = pud_alloc(mm, pgd, addr);
+	if (!pud) return NULL;
+	pmd = pmd_alloc(mm, pud, addr);
+	if (!pmd) return NULL;
+
+	pte = pte_alloc_map_lock(mm, pmd, addr, ptl);
+	return pte;
+}
+
+
+/**
+ * Response for remote page request and handling the response
+ */
+
+struct remote_page_work {
+	struct work_struct work;
+	void *private;
+};
+
+static void process_remote_page_response(struct work_struct *_work)
+{
+	struct remote_page_work *w = (struct remote_page_work *)_work;
+	remote_page_response_t *res = (remote_page_response_t *)w->private;
+	struct task_struct *tsk;
+	memory_t *m;
+	unsigned long flags;
+	struct remote_page *rp;
+
+	tsk = find_task_by_vpid(res->remote_pid);
+	if (!tsk) {
+		__WARN();
+		goto out_free;
+	}
+	get_task_struct(tsk);
+	m = tsk->memory;
+	BUG_ON(tsk->tgroup_home_id != res->tgroup_home_id);
+
+	spin_lock_irqsave(&m->pages_lock, flags);
+	rp = lookup_remote_page(m, res->addr);
+	spin_unlock_irqrestore(&m->pages_lock, flags);
+	if (!rp) {
+		__WARN();
+		goto out_unlock;
+	}
+
+	rp->response = res;
+	wake_up(&rp->wait);
+
+out_unlock:
+	put_task_struct(tsk);
+
+out_free:
+	kfree(w);
+}
+
+
+static int handle_remote_page_response(struct pcn_kmsg_message *msg)
+{
+	// Create work
+	struct remote_page_work *w = kmalloc(sizeof(*w), GFP_ATOMIC);
+	BUG_ON(!w);
+
+	w->private = msg;
+	INIT_WORK(&w->work, process_remote_page_response);
+	queue_work(remote_page_wq, &w->work);
+
+	return 1;
+}
+
+
+static void response_remote_page(int nid, struct task_struct *tsk, int remote_pid, remote_page_response_t *res)
+{
+	res->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
+	res->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+	res->tgroup_home_cpu = get_nid();
+	res->tgroup_home_id = tsk->tgid;
+	res->remote_pid = remote_pid;
+
+	pcn_kmsg_send_long(nid, res, sizeof(*res));
+}
+
+
+/**
+ * Request for remote pages and handling the request
+ */
+
+static int __fill_in_anon_page(struct mm_struct *mm, unsigned long addr, remote_page_response_t *res)
+{
+	spinlock_t *ptl;
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	struct page *page;
+	void *paddr;
+
+	pgd = pgd_offset(mm, addr);
+	if (!pgd || pgd_none(*pgd)) {
+		return -EINVAL;
+	}
+	pud = pud_offset(pgd, addr);
+	if (!pud || pud_none(*pud)) {
+		return -EINVAL;
+	}
+	pmd = pmd_offset(pud, addr);
+	if (!pmd || pmd_none(*pmd)) {
+		return -EINVAL;
+	}
+
+	pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
+	if (pte == NULL || pte_none(pte_clear_flags(*pte, _PAGE_SOFTW1))) {
+		// PTE not exist
+		printk("%s: invalid page at %lx\n", __func__, addr);
+		goto out_unlock;
+	}
+	page = pte_page(*pte);
+
+	paddr = kmap(page);
+	copy_page(&res->page, paddr);
+	printk("%s: copy page at %p %p\n", __func__, page, paddr);
+	kunmap(page);
+
+out_unlock:
+	spin_unlock(ptl);
+	return 0;
+}
+
+static void process_remote_page_request(struct work_struct *work)
+{
+	struct remote_page_work *w = (struct remote_page_work *)work;
+	remote_page_request_t *req = (remote_page_request_t *)(w->private);
+	remote_page_response_t *res = NULL;
+	memory_t *memory;
+	struct task_struct *tsk;
+	struct mm_struct *mm;
+	struct vm_area_struct *vma;
+	unsigned long addr = req->addr;
+	char path[512];
+	char *ppath;
+
+	might_sleep();
+
+	while (!res) {
+		res = kzalloc(sizeof(*res), GFP_KERNEL);
+	};
+	res->addr = addr;
+
+	tsk = find_task_by_vpid(req->tgroup_home_id);
+	if (!tsk) {
+		// TODO: Reply that th process does not exist.
+		__WARN();
+		res->result = -EINVAL;
+		goto out_free;
+	}
+	get_task_struct(tsk);
+	memory = tsk->memory;
+	mm = tsk->mm;
+
+	down_read(&mm->mmap_sem);
+
+	/* Fill-in the vma info */
+	vma = find_vma(mm, addr);
+	if (!vma || vma->vm_start > addr || vma->vm_end <= addr) {
+		printk("%s: invalid memory\n", __func__);
+		res->result = -EINVAL;
+		goto out_up;
+	}
+	res->vm_start = vma->vm_start;
+	res->vm_end = vma->vm_end;
+	res->vm_flags = vma->vm_flags;
+
+	if (vma->vm_flags & VM_FETCH_LOCAL) {
+		goto out_up;
+	}
+
+	if (vma->vm_file) {
+		/* File-mapped page */
+		ppath = d_path(&vma->vm_file->f_path, path, sizeof(path));
+		strncpy(res->vm_file_path, ppath, sizeof(res->vm_file_path));
+		res->vm_pgoff = vma->vm_pgoff;
+	} else {
+		/* Anonymous page */
+		res->result = __fill_in_anon_page(mm, addr, res);
+	}
+
+out_up:
+	up_read(&mm->mmap_sem);
+	put_task_struct(tsk);
+
+out_free:
+	printk("%s: vma %d %lx-%lx %lx\n", __func__,
+			res->result, res->vm_start, res->vm_end, res->vm_flags);
+	printk("%s: %s\n", __func__, res->vm_file_path[0] ? res->vm_file_path : "");
+
+	response_remote_page(req->header.from_cpu, tsk, req->remote_pid, res);
+
+	pcn_kmsg_free_msg(req);
+	kfree(w);
+	kfree(res);
+
+	return;
+}
+
+
+static int handle_remote_page_request(struct pcn_kmsg_message *msg)
+{
+	// Create work
+	struct remote_page_work *w = kmalloc(sizeof(*w), GFP_ATOMIC);
+	BUG_ON(!w);
+
+	w->private = msg;
+	INIT_WORK(&w->work, process_remote_page_request);
+	queue_work(remote_page_wq, &w->work);
+
+	return 1;
+}
+
+
+static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, unsigned long addr, remote_page_request_t **preq)
+{
+	struct remote_page *rp = kzalloc(sizeof(*rp), GFP_KERNEL);
+	remote_page_request_t *req = kzalloc(sizeof(*req), GFP_KERNEL);
+
+	BUG_ON(!rp || !req);
+
+	/* rp */
+	INIT_LIST_HEAD(&rp->list);
+	spin_lock_init(&rp->lock);
+	rp->addr = addr;
+	init_waitqueue_head(&rp->wait);
+	atomic_set(&rp->count, 0);
+	rp->mapped = false;
+
+	/* req */
+	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST;
+	req->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+	req->tgroup_home_cpu = tsk->tgroup_home_cpu;
+	req->tgroup_home_id = tsk->tgroup_home_id;
+	req->addr = addr;
+	req->remote_pid = tsk->tgid;
+
+	*preq = req;
+
+	return rp;
+}
+
+
+static int __map_fetched_remote_page(struct remote_page *rp)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	remote_page_response_t *res = rp->response;
+	unsigned long addr = res->addr;
+	//memory_t *m = tsk->memory;
+	int ret = 0;
+
+	// We are gonna holy shit out of this mm.
+	vma = find_vma(mm, addr);
+
+	// We need to deal with the vma first
+	if (!vma || vma->vm_start != res->vm_start || vma->vm_end != res->vm_end) {
+		ret = vma_server_map(mm, vma, res);
+	}
+
+out_up:
+	return ret;
+}
+
+int __fetch_remote_page(struct task_struct *tsk, unsigned long addr, spinlock_t *ptl)
+{
+	struct mm_struct *mm = tsk->mm;
+	memory_t *m = tsk->memory;
+	struct remote_page *rp;
+	unsigned long flags;
+	DEFINE_WAIT(wait);
+	int remaining;
+	int ret = 0;
+
+	spin_lock_irqsave(&m->pages_lock, flags);
+	rp = lookup_remote_page(m, addr);
+	if (!rp) {
+		struct remote_page *r;
+		remote_page_request_t *req;
+		spin_unlock_irqrestore(&m->pages_lock, flags);
+
+		rp = __alloc_remote_page_request(tsk, addr, &req);
+
+		spin_lock_irqsave(&m->pages_lock, flags);
+		r = lookup_remote_page(m, addr);
+		if (!r) {
+			/* request for the page to the remote */
+			printk("%s: %lx at %d, %d\n", __func__, addr,
+					tsk->tgroup_home_cpu, tsk->tgroup_home_id);
+			list_add(&rp->list, &m->pages);
+			pcn_kmsg_send_long(tsk->tgroup_home_cpu, req, sizeof(*req));
+		} else {
+			printk("%s: pending fetch %lx\n", __func__, addr);
+			kfree(rp);
+			rp = r;
+		}
+		kfree(req);
+	}
+	atomic_inc(&rp->count);
+	spin_unlock_irqrestore(&m->pages_lock, flags);
+
+	prepare_to_wait(&rp->wait, &wait, TASK_UNINTERRUPTIBLE);
+	spin_unlock(ptl);
+	up_read(&tsk->mm->mmap_sem);
+	schedule();
+
+	finish_wait(&rp->wait, &wait);
+	remaining = atomic_dec_return(&rp->count);
+	printk("%s: resume execution. map=%d, remaining=%d\n", __func__,
+			rp->mapped, remaining);
+	if (!rp->mapped) {
+		down_write(&mm->mmap_sem);
+		__map_fetched_remote_page(rp);
+		rp->mapped = true;
+		downgrade_write(&mm->mmap_sem);
+	} else {
+		down_read(&tsk->mm->mmap_sem);
+	}
+	ret = rp->fetch_result;
+
+	if (remaining) {
+		wake_up(&rp->wait);
+	} else {
+		// free rp
+		list_del(&rp->list);
+		kfree(rp);
+	}
+
+	return ret;
+}
 
 /**
  * down_read(&mm->mmap_sem) already held getting in
@@ -3223,68 +3578,67 @@ static void add_remote_page(struct task_struct *tsk, struct remote_page *rp)
  * 0, remotely fetched;
  */
 int page_server_do_page_fault(
-		struct task_struct *tsk, struct mm_struct *mm,
-		struct vm_area_struct *vma,
+		struct task_struct *tsk, struct vm_area_struct *vma,
 		unsigned long page_fault_address, unsigned long page_fault_flags,
 		unsigned long error_code)
 {
+	struct mm_struct *mm = tsk->mm;
+	memory_t *memory = tsk->memory;
 	unsigned long addr = page_fault_address & PAGE_MASK;
 	spinlock_t *ptl;
-	pgd_t *pgd;
-	pud_t *pud;
-	pmd_t *pmd;
 	pte_t *pte;
+	int ret = 0;
 
-	printk("%s: 0x%p 0x%p\n", __func__, mm, vma);
-	printk("%s: 0x%p 0x%p\n", __func__, mm->mmap, mm->pgd);
+	printk("%s: pid=%d, cpu=%d, tgid=%d\n", __func__,
+			tsk->pid, tsk->tgroup_home_cpu, tsk->tgroup_home_id);
+	//printk("%s: 0x%p 0x%p\n", __func__, mm, vma);
 	printk("%s: 0x%lx(0x%lx) 0x%lx\n", __func__,
 			page_fault_address, addr, page_fault_flags);
 	if (vma) {
 		printk("%s: vma %lx - %lx\n", __func__, vma->vm_start, vma->vm_end);
 	}
-	printk("%s: pid=%d, cpu=%d, tgid=%d\n", __func__,
-			tsk->pid, tsk->tgroup_home_cpu, tsk->tgroup_home_id);
 
-	BUG_ON(!tsk->memory);
+	BUG_ON(!memory);
 
-	pgd = pgd_offset(mm, addr);
-	pud = pud_alloc(mm, pgd, addr);
-	if (!pud) return VM_FAULT_OOM;
-	pmd = pmd_alloc(mm, pud, addr);
-	if (!pmd) return VM_FAULT_OOM;
-
-	__pte_alloc(mm, vma, pmd, addr);
-	pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
+	pte = __find_pte_lock(mm, addr, &ptl);
+	if (!pte) return VM_FAULT_OOM;
 
 	printk("%s: pte=0x%p %lx\n", __func__, pte, pte ? pte_flags(*pte) : 0);
 
 	if (pte == NULL || pte_none(pte_clear_flags(*pte, _PAGE_SOFTW1))) {
-		// Look up some pending remote pages
-		struct remote_page *rp = lookup_remote_page(tsk, addr);
-		printk("%p\n", rp);
-		
+		int ret = __fetch_remote_page(tsk, addr, ptl);
+		printk("%s: %d\n", __func__, ret);
+		/*
 		if (!vma || addr < vma->vm_start || addr >= vma->vm_end) {
 			vma = NULL;
 		}
-		__fetch_remote_page(tsk, addr);
+		*/
+		//struct remote_page *rp =
+		// If VMA problem? Map
+		//
+		// Page map
+
+		spin_unlock(ptl);
 	} else {
+		ret = VM_FAULT_VMA;
+		spin_unlock(ptl);
+		// Page exists.
 	}
-	spin_unlock(ptl);
 	up_read(&mm->mmap_sem);
 
-	return VM_FAULT_VMA;
+	return ret;
 }
 
 
 int __init page_server_init(void)
 {
-	message_request_wq = create_workqueue("request_wq");
-	if (!message_request_wq)
+	remote_page_wq = create_workqueue("remote_page_wq");
+	if (!remote_page_wq)
 		return -ENOMEM;
 
 	invalid_message_wq = create_workqueue("invalid_wq");
 	if (!invalid_message_wq) {
-		destroy_workqueue(message_request_wq);
+		destroy_workqueue(remote_page_wq);
 		return -ENOMEM;
 	}
 
@@ -3302,6 +3656,13 @@ int __init page_server_init(void)
 
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_ACK_DATA,
 				   handle_ack);
+
+
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
+					handle_remote_page_request);
+
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE,
+					handle_remote_page_response);
 
 	return 0;
 }

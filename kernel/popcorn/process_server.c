@@ -49,7 +49,6 @@ int _file_cpu = 1;	// This is for the Popcorn Linux file server
  * head: _count_head
  * lock: _count_head_lock
  */
-
 LIST_HEAD(_count_head);
 DEFINE_SPINLOCK(_count_head_lock);
 
@@ -456,31 +455,28 @@ static int handle_new_kernel(struct pcn_kmsg_message *inc_msg)
 }
 
 
-///////////////////////////////////////////////////////////////////////////////
-// main for distributed kernel thread (?)
-///////////////////////////////////////////////////////////////////////////////
-int popcorn_process_exit(long code)
+static void __release_memory_t(struct task_struct *tsk)
 {
-	memory_t *memory = current->memory;
-	if (!memory) return -ESRCH;
+	struct task_struct *thread;
+	unsigned long flags;
+	memory_t *memory = tsk->memory;
 
-	printk(KERN_INFO"%s: 0x%p %d %d\n", __func__,
-			current, current->pid, current->tgid);
-
-	// I'm a helper.
-	if (current->main) return 0;
-
-	// Remote proxy
-	if (current->executing_for_remote) {
-		// TODO: Send the result to the home
-		return 0;
+	lock_task_sighand(tsk, &flags);
+	if (atomic_dec_return(&memory->count) > 0) {
+		unlock_task_sighand(tsk, &flags);
+		tsk->memory = NULL;
+		return;
 	}
 
-	if (current->pid != current->tgid) return 0;
+	for_each_thread(tsk, thread) {
+		thread->tgroup_home_cpu = -1;
+		thread->tgroup_home_id = -1;
+		thread->tgroup_distributed = false;
+	}
+	unlock_task_sighand(tsk, &flags);
 
-	printk("%s: Stopping 0x%p %d %d\n", __func__,
-			current, current->pid, current->tgid);
 
+	/* Initiate the helper function termination */
 	memory->helper_stop = true;
 	wake_up_process(memory->helper);
 	put_task_struct(memory->helper);
@@ -489,10 +485,65 @@ int popcorn_process_exit(long code)
 		complete(&memory->spawn_egg);
 		put_task_struct(memory->shadow_spawner);
 	}
+	tsk->memory = NULL;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// main for distributed kernel thread (?)
+///////////////////////////////////////////////////////////////////////////////
+int popcorn_process_exit(struct task_struct *tsk)
+{
+	memory_t *memory = tsk->memory;
+
+	if (!memory) return -ESRCH;
+
+	printk(KERN_INFO"%s: 0x%p 0x%p %d/%d %d, %d\n", __func__,
+			tsk, memory, tsk->pid, tsk->tgid, tsk->main,
+			tsk->executing_for_remote);
+
+	/* I am helper */
+	if (tsk->main == 1) {
+		// TODO: flush memory
+		if (tsk == memory->shadow_spawner) {
+		} else {
+			if (tsk->executing_for_remote) {
+				remove_memory_entry_in(memory);
+			} else {
+				remove_memory_entry_out(memory);
+			}
+		}
+		return 0;
+	}
+
+	if (tsk->executing_for_remote) {
+		// I am a remote process
+		exiting_process_t *req = kzalloc(sizeof(*req), GFP_KERNEL);
+		BUG_ON(!req);
+
+		req->header.type = PCN_KMSG_TYPE_PROC_SRV_EXIT_PROCESS;
+		req->header.prio = PCN_KMSG_PRIO_NORMAL;
+		req->prev_pid = tsk->prev_pid;
+		req->my_pid = tsk->pid;
+		req->code = tsk->exit_code;
+		req->group_exit = tsk->group_exit;
+
+		save_thread_info(tsk, task_pt_regs(tsk), &req->arch, NULL);
+
+		pcn_kmsg_send_long(memory->tgroup_home_cpu, req, sizeof(*req));
+
+		kfree(req);
+	} else {
+		// I am a local process
+		BUG_ON("Strange. In fact, this thread should be paused");
+	}
+
+	__release_memory_t(tsk);
+
+	printk("%s: Stopping 0x%p %d %d\n", __func__,
+			tsk, tsk->pid, tsk->tgid);
 
 	return 0;
 }
-
 
 
 /* return type:
@@ -501,7 +552,7 @@ int popcorn_process_exit(long code)
  * */
 static int exit_distributed_process(memory_t *memory, int flush)
 {
-	struct task_struct *g, *thread;
+	struct task_struct *thread;
 	unsigned long flags;
 	int is_last_thread_in_local_group = true;
 	int count = 0, i, status;
@@ -686,6 +737,7 @@ static void process_exit_group_notification(struct work_struct *_work)
 
 	memory_t *memory = find_memory_entry(msg->tgroup_home_cpu,
 					      msg->tgroup_home_id);
+	printk("%s: %p\n", __func__, memory);
 	if (!memory)
 		goto out_free;
 
@@ -731,34 +783,33 @@ static int handle_thread_group_exited_notification(
 static void process_exiting_process_notification(struct work_struct *_work)
 {
 	exit_work_t *work = (exit_work_t *)_work;
-	exiting_process_t *msg = work->request;
+	exiting_process_t *req = work->request;
 
-	unsigned int source_cpu = msg->header.from_cpu;
+	unsigned int source_cpu = req->header.from_cpu;
 	struct task_struct *tsk;
 
-	tsk = find_task_by_vpid(msg->prev_pid);
+	tsk = find_task_by_vpid(req->prev_pid);
 
-	if (tsk && tsk->next_pid == msg->my_pid
-		&& tsk->next_cpu == source_cpu
-	    && tsk->represents_remote == 1) {
+	if (tsk && tsk->next_pid == req->my_pid
+			&& tsk->next_cpu == source_cpu
+			&& tsk->represents_remote == true) {
+		printk(KERN_INFO"%s: exit %d with %ld, %d\n", __func__,
+				tsk->pid, req->code, req->group_exit);
 
-		// TODO: Handle return values
-		restore_thread_info(tsk, &msg->arch);
+		//restore_thread_info(tsk, &req->arch);
 
-		tsk->group_exit = msg->group_exit;
-		tsk->distributed_exit_code = msg->code;
-#if MIGRATE_FPU
-		// TODO: Handle return values
-		restore_fpu_info(tsk, &msg->arch);
-#endif
+		tsk->distributed_exit_code = req->code;
+		tsk->group_exit = req->group_exit;
+		tsk->represents_remote = false;
+
+		__release_memory_t(tsk);
 		wake_up_process(tsk);
 	} else {
-		printk(KERN_ALERT"%s: ERROR: task not found."
-				"Impossible to kill shadow (pid %d cpu %d)\n",
-				__func__, msg->my_pid, source_cpu);
+		printk(KERN_INFO"%s: task not found (pid %d cpu %d)\n",
+				__func__, req->my_pid, source_cpu);
 	}
 
-	pcn_kmsg_free_msg(msg);
+	pcn_kmsg_free_msg(req);
 	kfree(work);
 }
 
@@ -775,35 +826,6 @@ static int handle_exiting_process_notification(struct pcn_kmsg_message *inc_msg)
 		queue_work(exit_wq, (struct work_struct *)work);
 	}
 	return 1;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// pairing request
-///////////////////////////////////////////////////////////////////////////////
-/**
- * Handler function for when another processor informs the current cpu
- * of a pid pairing.
- */
-static int handle_process_pairing_request(struct pcn_kmsg_message *_msg)
-{
-	create_process_pairing_t *req = (create_process_pairing_t *)_msg;
-	unsigned int source_cpu = req->header.from_cpu;
-	struct task_struct *task;
-
-	task = find_task_by_vpid(req->your_pid);
-	if (task == NULL || task->represents_remote == 0) {
-		pcn_kmsg_free_msg(req);
-		return -ESRCH;
-	}
-
-	PSPRINTK("Pairing local:  %d --> %d at %d\n",
-			task->pid, source_cpu, req->my_pid);
-	task->next_cpu = source_cpu;
-	task->next_pid = req->my_pid;
-	task->executing_for_remote = 0;
-
-	pcn_kmsg_free_msg(req);
-	return 0;
 }
 
 static int handle_remote_thread_count_response(struct pcn_kmsg_message *inc_msg)
@@ -1053,11 +1075,6 @@ static int do_back_migration(struct task_struct *tsk, int dst_cpu,
 	// TODO: Handle return value
 	save_thread_info(tsk, regs, &req->arch, uregs);
 
-#if MIGRATE_FPU
-	// TODO: Handle return value
-	save_fpu_info(tsk, &req->arch);
-#endif
-
 	lock_task_sighand(tsk, &flags);
 
 	tsk->represents_remote = 1;
@@ -1135,10 +1152,7 @@ int process_server_task_exit_notification(struct task_struct *tsk, long code)
 				msg->code = code;
 
 				msg->is_last_tgroup_member = (count == 1 ? 1 : 0);
-#if MIGRATE_FPU
-				// TODO: Handle return value
-				save_fpu_info(tsk, &msg->arch);
-#endif
+
 				//printk("message exit to shadow sent\n");
 				tx_ret = pcn_kmsg_send_long(tsk->prev_cpu,
 							    (struct pcn_kmsg_long_message *) msg,
@@ -1151,37 +1165,6 @@ int process_server_task_exit_notification(struct task_struct *tsk, long code)
 	return tx_ret;
 }
 
-/**
- * Create a pairing between a newly created delegate process and the
- * remote placeholder process.  This function creates the local
- * pairing first, then sends a message to the originating cpu
- * so that it can do the same.
- */
-static int process_server_notify_delegated_subprocess_starting(
-		pid_t my_pid, pid_t remote_pid, int remote_cpu)
-{
-	create_process_pairing_t *msg;
-	int tx_ret = -1;
-
-	msg = kmalloc(sizeof(*msg), GFP_KERNEL);
-	BUG_ON(!msg);
-
-	// Notify remote cpu of pairing between current task and remote
-	// representative task.
-	msg->header.type = PCN_KMSG_TYPE_PROC_SRV_CREATE_PROCESS_PAIRING;
-	msg->header.prio = PCN_KMSG_PRIO_NORMAL;
-	msg->your_pid = remote_pid;
-	msg->my_pid = my_pid;
-
-	PSPRINTK("Pairing remote: %d --> %d at %d\n",
-			my_pid, remote_pid, remote_cpu);
-
-	tx_ret = pcn_kmsg_send_long(remote_cpu, msg, sizeof(*msg));
-	kfree(msg);
-
-	return tx_ret;
-}
-
 
 static memory_t *__alloc_memory_struct(int home_cpu, int home_id)
 {
@@ -1190,12 +1173,14 @@ static memory_t *__alloc_memory_struct(int home_cpu, int home_id)
 
 	INIT_LIST_HEAD(&m->list);
 
+	atomic_set(&m->count, 0);
+	atomic_set(&m->pending_migration, 0);
+	atomic_set(&m->pending_back_migration, 0);
+
 	m->tgroup_home_cpu = home_cpu;
 	m->tgroup_home_id = home_id;
 	m->alive = true;
 	m->helper = NULL;
-	atomic_set(&m->pending_migration, 0);
-	atomic_set(&m->pending_back_migration, 0);
 	m->operation = VMA_OP_NOP;
 	m->waiting_for_main = NULL;
 	m->waiting_for_op = NULL;
@@ -1209,7 +1194,6 @@ static memory_t *__alloc_memory_struct(int home_cpu, int home_id)
 	INIT_LIST_HEAD(&m->shadow_eggs);
 	spin_lock_init(&m->shadow_eggs_lock);
 	init_completion(&m->spawn_egg);
-	atomic_set(&m->pending_migration, 0);
 
 	init_rwsem(&m->kernel_set_sem);
 	//memset(m->kernel_set, 0x00, sizeof(m->kernel_set));
@@ -1248,23 +1232,17 @@ extern int kernel_mprotect(unsigned long start, size_t len, unsigned long prot);
 extern long kernel_mremap(unsigned long addr, unsigned long old_len,
 		unsigned long new_len, unsigned long flags, unsigned long new_addr);
 
-static int helper_thread_main(void)
+static void helper_thread_main(const char *at)
 {
 	memory_t *memory = current->memory;
 
 	might_sleep();
 
-	printk("%s: Started pid=%d\n", __func__, current->pid);
+	printk("%s: Started %s, pid=%d\n", __func__, at, current->pid);
 
 	// TODO: Need to explore how this has to be used
 	// TODO: Exit the thread
 	while (!memory->helper_stop) {
-		int flush = 0;
-
-		while (current->distributed_exit != EXIT_ALIVE) {
-			flush = exit_distributed_process(memory, flush);
-			msleep(1000);
-		}
 		while (memory->operation != VMA_OP_NOP &&
 		       memory->mm->thread_op == current) {
 			unsigned long ret = 0;
@@ -1374,30 +1352,19 @@ static int helper_thread_main(void)
 		printk("%s: continues 0x%p\n", __func__, current);
 		__set_task_state(current, TASK_RUNNING);
 	}
-	printk("%s: Exiting from helper_thread_main\n", __func__);
 
-	return 0;
-}
-/*
-static int helper_thread_main_(void)
-{
-	int count = 10;
-	memory_t *memory = current->memory;
-	might_sleep();
+	printk("%s: Exiting %s pid=%d\n", __func__, at, current->pid);
 
-	printk("%s: Started pid=%d\n", __func__, current->pid);
-
-	while (!memory->helper_stop && count > 0) {
-		__set_task_state(current, TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ * 1);
-		printk("%s: continues 0x%p %d\n", __func__, current, count--);
-		__set_task_state(current, TASK_RUNNING);
+	/*
+	int flush = 0;
+	while (current->distributed_exit != EXIT_ALIVE) {
+		flush = exit_distributed_process(memory, flush);
+		msleep(1000);
 	}
-	printk("%s: Exit helper %d\n", __func__, current->pid);
+	*/
 
-	return 0;
+	return;
 }
-*/
 
 
 /*
@@ -1412,9 +1379,9 @@ static int create_helper_thread_from_user(void *_memory)
 
 	might_sleep();
 	current->main = 1;	// Yes, i'm a helper
-	helper_thread_main();
+	helper_thread_main("local");
 
-	return 0;
+	do_exit(0);
 }
 
 
@@ -1423,7 +1390,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk,
 {
 	char *rpath, path[512];
 	clone_request_t *req;
-	int sent;
+	int ret;
 
 	might_sleep();
 
@@ -1482,21 +1449,17 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk,
 
 	save_thread_info(tsk, regs, &req->arch, uregs);
 
-#if MIGRATE_FPU
-	save_fpu_info(tsk, &req->arch);
-#endif
-
-	sent = pcn_kmsg_send_long(dst_nid, req, sizeof(*req));
+	ret = pcn_kmsg_send_long(dst_nid, req, sizeof(*req));
 	kfree(req);
 
-	return sent;
+	return ret;
 }
 
 
 int do_migration(struct task_struct *tsk, int dst_nid,
 		struct pt_regs *regs, void __user *uregs)
 {
-	int sent;
+	int ret;
 	unsigned long flags;
 	bool create_helper = false;
 	memory_t *memory;
@@ -1543,6 +1506,7 @@ int do_migration(struct task_struct *tsk, int dst_nid,
 				tsk->tgroup_home_cpu, tsk->tgroup_home_id);
 	}
 	BUG_ON(!memory);
+	atomic_inc(&memory->count);
 	tsk->memory = memory;
 	tsk->represents_remote = 1;
 	unlock_task_sighand(tsk, &flags);
@@ -1554,7 +1518,7 @@ int do_migration(struct task_struct *tsk, int dst_nid,
 		get_task_struct(memory->helper);
 	}
 
-	sent = __request_clone_remote(dst_nid, tsk, regs, uregs);
+	ret = __request_clone_remote(dst_nid, tsk, regs, uregs);
 
 #if MIGRATION_PROFILE
 	migration_end = ktime_get();
@@ -1562,7 +1526,7 @@ int do_migration(struct task_struct *tsk, int dst_nid,
 			GET_MIGRATION_TIME);
 #endif
 
-	return sent;
+	return ret;
 }
 
 /**
@@ -1596,6 +1560,57 @@ int process_server_do_migration(struct task_struct *task, int dst_nid,
 
 
 ///////////////////////////////////////////////////////////////////////////////
+// pairing request
+///////////////////////////////////////////////////////////////////////////////
+static int handle_process_pairing_request(struct pcn_kmsg_message *_msg)
+{
+	create_process_pairing_t *req = (create_process_pairing_t *)_msg;
+	unsigned int source_cpu = req->header.from_cpu;
+	struct task_struct *tsk;
+
+	tsk = find_task_by_vpid(req->your_pid);
+	if (tsk == NULL) {
+		pcn_kmsg_free_msg(req);
+		return -ESRCH;
+	}
+	BUG_ON(!tsk->represents_remote);
+	BUG_ON(tsk->executing_for_remote);
+
+	PSPRINTK("Pairing local:  %d --> %d at %d\n",
+			tsk->pid, source_cpu, req->my_pid);
+	tsk->next_cpu = source_cpu;
+	tsk->next_pid = req->my_pid;
+
+	pcn_kmsg_free_msg(req);
+	return 0;
+}
+
+static int __pair_remote_process(pid_t my_pid, pid_t remote_pid, int remote_cpu)
+{
+	create_process_pairing_t *req;
+	int tx_ret = -1;
+
+	req = kmalloc(sizeof(*req), GFP_KERNEL);
+	BUG_ON(!req);
+
+	// Notify remote cpu of pairing between current task and remote
+	// representative task.
+	req->header.type = PCN_KMSG_TYPE_PROC_SRV_CREATE_PROCESS_PAIRING;
+	req->header.prio = PCN_KMSG_PRIO_NORMAL;
+	req->your_pid = remote_pid;
+	req->my_pid = my_pid;
+
+	PSPRINTK("Pairing remote: %d --> %d at %d\n",
+			my_pid, remote_pid, remote_cpu);
+
+	tx_ret = pcn_kmsg_send_long(remote_cpu, req, sizeof(*req));
+	kfree(req);
+
+	return tx_ret;
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
 // Remote-side thread
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1620,18 +1635,12 @@ int shadow_main(void *_args)
 	current->distributed_exit = EXIT_ALIVE;
 
 	// Notify of PID/PID pairing.
-	process_server_notify_delegated_subprocess_starting(
-			current->pid, current->prev_pid, current->prev_cpu);
+	__pair_remote_process(current->pid, current->prev_pid, current->prev_cpu);
 
 	memory->alive = true;
 
 	// TODO: Handle return values
 	update_thread_info(current);
-
-#if MIGRATE_FPU
-	// TODO: Handle return values
-	update_fpu_info(current);
-#endif
 
 	//to synchronize migrations...
 	atomic_dec(&memory->pending_migration);
@@ -1657,9 +1666,6 @@ static int spawn_shadow_thread(clone_request_t *req)
 		return -EAGAIN;
 	}
 	tsk = find_task_by_vpid(pid);
-	get_task_struct(tsk);
-
-	printk("%s: %d %p\n", __func__, pid, tsk);
 
 	wait_for_completion(&param->start);	/* Make sure the shadow is sleeping */
 
@@ -1674,7 +1680,6 @@ static int spawn_shadow_thread(clone_request_t *req)
 	initialize_thread_retval(tsk, 0);
 
 	// set thread info
-	// TODO: Handle return values
 	restore_thread_info(tsk, &req->arch);
 
 	/*
@@ -1688,10 +1693,6 @@ static int spawn_shadow_thread(clone_request_t *req)
 	memcpy(tsk->sighand->action, req->action, sizeof(req->action));
 	*/
 
-#if MIGRATE_FPU
-	restore_fpu_info(tsk, &req->arch);
-#endif
-
 #if MIGRATION_PROFILE
 	migration_end = ktime_get();
 	printk(KERN_ERR"Time for arm->x86 migration - x86 side: %ld ns\n",
@@ -1700,14 +1701,13 @@ static int spawn_shadow_thread(clone_request_t *req)
 
 	printk("####### MIGRATED - pid %u@%d to %u@%d\n",
 			(unsigned int)tsk->prev_pid, tsk->prev_cpu, tsk->pid, get_nid());
-	printk("%s: pc %lx\n", __func__, (&req->arch)->migration_pc);
-	printk("%s: ip %lx\n", __func__, task_pt_regs(tsk)->ip);
-	printk("%s: sp %lx\n", __func__, task_pt_regs(tsk)->sp);
-	printk("%s: bp %lx\n", __func__, task_pt_regs(tsk)->bp);
+	printk("%s: pc %lx ip %lx\n", __func__, 
+			(&req->arch)->migration_pc, task_pt_regs(tsk)->ip);
+	printk("%s: sp %lx bp %lx\n", __func__, 
+			task_pt_regs(tsk)->sp, task_pt_regs(tsk)->bp);
 
 	tsk->executing_for_remote = 1;
 	wake_up_process(tsk);
-	put_task_struct(tsk);
 
 	return 0;
 }
@@ -1722,6 +1722,7 @@ static void __kick_shadow_spawner(memory_t *memory, clone_work_t *work)
 	spin_lock(&memory->shadow_eggs_lock);
 	list_add(entry, &memory->shadow_eggs);
 	atomic_inc(&memory->pending_migration);
+	atomic_inc(&memory->count);
 	spin_unlock(&memory->shadow_eggs_lock);
 
 	complete(&memory->spawn_egg);
@@ -1733,16 +1734,12 @@ int shadow_spawner(void *_args)
 	memory_t *memory = (memory_t *)_args;
 	struct work_struct *work;
 
-	printk(KERN_INFO"%s: started %d %p\n", __func__, current->pid, _args);
-	current->main = false;
+	PSPRINTK(KERN_INFO"%s: started %d\n", __func__, current->pid);
+	current->main = true;
 
-	while (true) {
+	while (!memory->helper_stop) {
 		clone_request_t *req;
 		wait_for_completion(&memory->spawn_egg);
-
-		if (memory->helper_stop) {
-			break;
-		}
 
 		spin_lock(&memory->shadow_eggs_lock);
 		if (!list_empty(&memory->shadow_eggs)) {
@@ -1754,6 +1751,8 @@ int shadow_spawner(void *_args)
 		}
 		spin_unlock(&memory->shadow_eggs_lock);
 
+		if (!work) continue;
+
 		req = ((clone_work_t *)work)->request;
 		while (spawn_shadow_thread(req) == -EAGAIN) {
 			schedule();
@@ -1762,6 +1761,7 @@ int shadow_spawner(void *_args)
 		kfree(work);
 	}
 
+	PSPRINTK(KERN_INFO"%s: exited %d\n", __func__, current->pid);
 	return 0;
 }
 
@@ -1882,7 +1882,9 @@ static int create_helper_thread(void *_data)
 	complete(&params->complete);
 	kfree(params);
 
-	return helper_thread_main();
+	helper_thread_main("remote");
+
+	do_exit(0);
 }
 
 

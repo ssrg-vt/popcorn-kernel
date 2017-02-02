@@ -4586,6 +4586,7 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 #ifdef CONFIG_POPCORN
 #include <popcorn/bundle.h>
 #include <popcorn/process_server.h>
+#include <popcorn/types.h>
 static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
 		unsigned long ip, unsigned long ret_addr)
 {
@@ -4602,6 +4603,7 @@ static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
 		printk("%s: sleep %d\n", __func__, tsk->pid);
 		__set_task_state(tsk, TASK_UNINTERRUPTIBLE);
 		schedule();
+		printk("%s: wakeup %d\n", __func__, tsk->pid);
 	}
 
 	return retval;

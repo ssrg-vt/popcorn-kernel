@@ -35,4 +35,5 @@ int vma_server_do_mapping_for_distributed_process(
 int vma_server_enqueue_vma_op(memory_t * memory, vma_operation_t * operation,
 		int fake);
 
+int vma_server_map(struct mm_struct *mm, struct vm_area_struct *vma, remote_page_response_t *res);
 #endif /* KERNEL_POPCORN_VMA_SERVER_H_ */

@@ -1206,12 +1206,12 @@ retry:
 		int ret;
 		// sanghoon: This should be the shadow thread
 		BUG_ON(!tsk->memory);
-		ret = page_server_do_page_fault(
-				tsk, mm, vma, address, flags, error_code);
+		ret = page_server_do_page_fault(tsk, vma, address, flags, error_code);
 		if (ret != 0) {
 			bad_area(regs, error_code, address);
 			return;
 		}
+		vma = find_vma(mm, address);
 	}
 #endif
 	if (unlikely(!vma)) {

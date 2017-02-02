@@ -392,11 +392,8 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	/*
 	 * Reset variables for tracking remote execution
 	 */
-	tsk->executing_for_remote = 0;
-	tsk->represents_remote = 0;
 	tsk->distributed_exit = EXIT_ALIVE;
 	tsk->prev_cpu = tsk->next_cpu = -1;
-	tsk->prev_pid = tsk->next_pid = -1;
 	tsk->prev_pid = tsk->next_pid = -1;
 	tsk->main = 0;
 	tsk->surrogate = -1; // this is for futex
@@ -412,6 +409,8 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 		tsk->tgroup_home_cpu = -1;
 		tsk->tgroup_home_id = -1;
 		tsk->memory = NULL;
+		tsk->represents_remote = false;
+		tsk->executing_for_remote = false;
 	}
 #endif
 

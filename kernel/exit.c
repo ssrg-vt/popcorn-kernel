@@ -397,6 +397,11 @@ static void exit_mm(struct task_struct *tsk)
 	if (!mm)
 		return;
 	sync_mm_rss(mm);
+
+#ifdef CONFIG_POPCORN
+	popcorn_process_exit(tsk);
+#endif
+
 	/*
 	 * Serialize with any possible pending coredump.
 	 * We must hold mmap_sem around checking core_state
@@ -701,10 +706,6 @@ void do_exit(long code)
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule();
 	}
-
-#ifdef CONFIG_POPCORN
-	popcorn_process_exit(code);
-#endif
 
 	exit_signals(tsk);  /* sets PF_EXITING */
 	/*
