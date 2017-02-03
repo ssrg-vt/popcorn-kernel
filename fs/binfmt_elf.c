@@ -723,6 +723,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	start_data = 0;
 	end_data = 0;
 
+#if 0
 #ifdef CONFIG_POPCORN
 	/* Ajith- allocate and populate the elf section header */
 	i = loc->elf_ex.e_shnum * sizeof(struct elf_shdr);
@@ -758,6 +759,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		}    
 		string_table_length = string_table != NULL ? i : 0;
 	}
+#endif
 #endif
 
 	for (i = 0; i < loc->elf_ex.e_phnum; i++) {
@@ -907,8 +909,10 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		int elf_prot = 0, elf_flags;
 		unsigned long k, vaddr;
 		unsigned long total_size = 0;
+#if 0
 #ifdef CONFIG_POPCORN
 		int j;
+#endif
 #endif
 
 		if (elf_ppnt->p_type != PT_LOAD)
@@ -977,6 +981,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 			goto out_free_dentry;
 		}
 
+#if 0
 #ifdef CONFIG_POPCORN
 		/* Ajith - Read the elf sections */
 
@@ -1011,6 +1016,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 						vma->vm_flags |= VM_FETCH_LOCAL;
 			}
 		}
+#endif
 #endif
 
 		if (!load_addr_set) {

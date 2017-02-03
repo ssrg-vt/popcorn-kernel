@@ -497,9 +497,9 @@ int popcorn_process_exit(struct task_struct *tsk)
 
 	if (!memory) return -ESRCH;
 
-	printk(KERN_INFO"%s: 0x%p 0x%p %d/%d %d, %d\n", __func__,
-			tsk, memory, tsk->pid, tsk->tgid, tsk->main,
-			tsk->executing_for_remote);
+	printk(KERN_INFO"%s: 0x%p 0x%p\n", __func__, tsk, tsk->memory);
+	printk(KERN_INFO"%s: %d/%d %d, %d\n", __func__,
+			tsk->pid, tsk->tgid, tsk->main, tsk->executing_for_remote);
 
 	/* I am helper */
 	if (tsk->main == 1) {
@@ -526,6 +526,7 @@ int popcorn_process_exit(struct task_struct *tsk)
 		req->my_pid = tsk->pid;
 		req->code = tsk->exit_code;
 		req->group_exit = tsk->group_exit;
+		tsk->migration_pc = 0x00;
 
 		save_thread_info(tsk, task_pt_regs(tsk), &req->arch, NULL);
 
@@ -796,7 +797,7 @@ static void process_exiting_process_notification(struct work_struct *_work)
 		printk(KERN_INFO"%s: exit %d with %ld, %d\n", __func__,
 				tsk->pid, req->code, req->group_exit);
 
-		//restore_thread_info(tsk, &req->arch);
+		restore_thread_info(tsk, &req->arch);
 
 		tsk->distributed_exit_code = req->code;
 		tsk->group_exit = req->group_exit;
@@ -1038,9 +1039,9 @@ static int handle_back_migration(struct pcn_kmsg_message *inc_msg)
  * This is a back migration => <task> must already been migrated at least once in <dst_cpu>.
  * It returns -1 in error case.
  */
-static int do_back_migration(struct task_struct *tsk, int dst_cpu,
-			     struct pt_regs *regs, void __user *uregs)
+static int do_back_migration(struct task_struct *tsk, int dst_cpu, void __user *uregs)
 {
+	struct pt_regs *regs = task_pt_regs(tsk);
 	back_migration_request_t *req;
 	unsigned long flags;
 	int ret;
@@ -1456,13 +1457,13 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk,
 }
 
 
-int do_migration(struct task_struct *tsk, int dst_nid,
-		struct pt_regs *regs, void __user *uregs)
+int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 {
 	int ret;
 	unsigned long flags;
 	bool create_helper = false;
 	memory_t *memory;
+	struct pt_regs *regs = task_pt_regs(tsk);
 
 	might_sleep();
 
@@ -1540,7 +1541,7 @@ int do_migration(struct task_struct *tsk, int dst_nid,
  * PROCESS_SERVER_CLONE_SUCCESS otherwise.
  */
 int process_server_do_migration(struct task_struct *task, int dst_nid,
-				struct pt_regs *regs, void __user *uregs)
+		void __user *uregs)
 {
 	int ret = 0;
 
@@ -1550,9 +1551,9 @@ int process_server_do_migration(struct task_struct *task, int dst_nid,
 			task->tgroup_home_id, task->tgroup_home_cpu);
 
 	if (task->prev_cpu == dst_nid) {
-		ret = do_back_migration(task, dst_nid, regs, uregs);
+		ret = do_back_migration(task, dst_nid, uregs);
 	} else {
-		ret = do_migration(task, dst_nid, regs, uregs);
+		ret = do_migration(task, dst_nid, uregs);
 	}
 
 	return ret;

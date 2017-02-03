@@ -889,6 +889,6 @@ asmlinkage long sys_membarrier(int cmd, int flags);
 
 asmlinkage long sys_mlock2(unsigned long start, size_t len, int flags);
 
-asmlinkage long sys_sched_migrate(pid_t pid, unsigned int nid);
+asmlinkage long sys_sched_migrate(pid_t pid, unsigned int nid, unsigned long addr);
 
 #endif

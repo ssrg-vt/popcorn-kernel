@@ -18,7 +18,7 @@
 #define PROCESS_SERVER_ARCH_H_
 
 #include <popcorn/types.h>
-#include <asm/process_server_macros.h>
+#include <popcorn/regset.h>
 
 extern int save_thread_info(struct task_struct *task,
 		struct pt_regs *regs, field_arch *arch, void __user *uregs);

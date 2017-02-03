@@ -9,7 +9,9 @@
 enum popcorn_node_arch {
 	POPCORN_NODE_X86 = 0,
 	POPCORN_NODE_ARM = 1,
-	POPCORN_NODE_UNKNOWN = 2,
+	POPCORN_NODE_POWERPC = 2,
+	POPCORN_NODE_SPARC = 3,
+	POPCORN_NODE_UNKNOWN,
 };
 
 struct popcorn_node;

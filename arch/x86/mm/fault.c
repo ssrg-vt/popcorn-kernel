@@ -1206,6 +1206,9 @@ retry:
 		int ret;
 		// sanghoon: This should be the shadow thread
 		BUG_ON(!tsk->memory);
+		printk(KERN_WARNING"\n");
+		printk(KERN_WARNING"## PAGEFAULT: 0x%lx 0x%lx 0x%lx\n",
+				address, regs->ip, error_code);
 		ret = page_server_do_page_fault(tsk, vma, address, flags, error_code);
 		if (ret != 0) {
 			bad_area(regs, error_code, address);

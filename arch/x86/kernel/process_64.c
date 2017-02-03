@@ -55,8 +55,12 @@ __visible DEFINE_PER_CPU(unsigned long, rsp_scratch);
 
 unsigned long read_old_rsp(void)
 {
-	//WARN_ONCE(1, "beowulf: used to read old_rsp. but changed to rsp_scratch?");
 	return this_cpu_read(rsp_scratch);
+}
+
+void write_old_rsp(unsigned long rsp)
+{
+	this_cpu_write(rsp_scratch, rsp);
 }
 
 /* Prints also some state that isn't saved in the pt_regs */

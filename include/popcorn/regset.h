@@ -17,8 +17,7 @@
 #ifndef PROCESS_SERVER_ARCH_MACROS_H_
 #define PROCESS_SERVER_ARCH_MACROS_H_
 
-struct popcorn_regset_x86_64
-{
+struct popcorn_regset_x86_64 {
 	/* Program counter/instruction pointer */
 	void* rip;
 
@@ -47,8 +46,7 @@ struct popcorn_regset_x86_64
 	uint64_t rflags;
 };
 
-struct popcorn_regset_aarch64
-{
+struct popcorn_regset_aarch64 {
 	/* Stack pointer & program counter */
 	void* sp;
 	void* pc;
@@ -60,11 +58,21 @@ struct popcorn_regset_aarch64
 	unsigned __int128 v[32];
 };
 
+struct popcorn_regset_powerpc {
+
+};
+
+struct popcorn_regset_sparc {
+
+};
+
 #define FIELDS_ARCH \
 	struct pt_regs regs;\
 	unsigned long migration_pc;\
-	unsigned long thread_usersp;\
-	unsigned long old_rsp;\
+	unsigned long ip; \
+	unsigned long ra;\
+	unsigned long bp;\
+	unsigned long sp;\
 	unsigned short thread_es;\
 	unsigned short thread_ds;\
 	unsigned long thread_fs;\
@@ -74,10 +82,10 @@ struct popcorn_regset_aarch64
 	unsigned int  task_flags;\
 	unsigned char task_fpu_counter;\
 	unsigned char thread_has_fpu;\
-	unsigned long bp;\
-	unsigned long ra;\
 	struct popcorn_regset_x86_64 regs_x86;\
-	struct popcorn_regset_aarch64 regs_aarch;
+	struct popcorn_regset_aarch64 regs_aarch; \
+	struct popcorn_regset_powerpc regs_powerpc; \
+	struct popcorn_regset_sparc regs_sparc;
 //	union thread_xstate fpu_state;
 
 typedef struct _fields_arch{

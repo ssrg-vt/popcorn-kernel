@@ -27,7 +27,7 @@
 /* External function declarations */
 extern void __show_regs(struct pt_regs *regs, int all);
 extern unsigned long read_old_rsp(void);
-
+extern void write_old_rsp(unsigned long rsp);
 /*
  * Function:
  *		save_thread_info
@@ -51,81 +51,78 @@ extern unsigned long read_old_rsp(void);
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *task, struct pt_regs *regs,
+int save_thread_info(struct task_struct *tsk, struct pt_regs *regs,
                      field_arch *arch, void __user *uregs)
 {
 	unsigned short fsindex, gsindex;
-	unsigned short es, ds;
 	unsigned long fs, gs;
+	unsigned short es, ds;
 
-	//dump_processor_regs(task_pt_regs(task));
+	//dump_processor_regs(task_pt_regs(tsk));
 
-	BUG_ON(!task || !arch);
-	//BUG_ON(!task->migration_pc);
+	BUG_ON(!tsk || !arch);
 
 	if (uregs != NULL) {
 		int remain = copy_from_user(&arch->regs_aarch, uregs,
 				sizeof(struct popcorn_regset_aarch64));
 		BUG_ON(remain != 0);
 	}
+
 	memcpy(&arch->regs, regs, sizeof(struct pt_regs));
 
-	arch->migration_pc = task->migration_pc;
-
-	arch->thread_usersp = task->thread.usersp;
-	task->saved_old_rsp = read_old_rsp();
-	arch->old_rsp = read_old_rsp();
-
 	/*
-	 * Also save frame pointer and return address, required for stack
+	 * Save frame pointer and return address, required for stack
 	 * transformation.
 	 */
+	arch->migration_pc = tsk->migration_pc;
+	arch->ip = regs->ip;
+	arch->ra = tsk->return_addr;
 	arch->bp = regs->bp;
-	arch->ra = task->return_addr;
+	arch->sp = regs->sp;
 
 	/* Segments */
-	arch->thread_es = task->thread.es;
-	savesegment(es, es);
-
-	arch->thread_ds = task->thread.ds;
+	arch->thread_ds = tsk->thread.ds;
 	savesegment(ds, ds);
 
-	arch->thread_fsindex = task->thread.fsindex;
+	arch->thread_es = tsk->thread.es;
+	savesegment(es, es);
+
+	arch->thread_fsindex = tsk->thread.fsindex;
 	savesegment(fs, fsindex);
 	if (fsindex != arch->thread_fsindex) {
 		arch->thread_fsindex = fsindex;
 	}
 
-	arch->thread_gsindex = task->thread.gsindex;
-	savesegment(gs, gsindex);
-	if (gsindex != arch->thread_gsindex) {
-		arch->thread_gsindex = gsindex;
-	}
-
-	arch->thread_fs = task->thread.fs;
+	arch->thread_fs = tsk->thread.fs;
 	rdmsrl(MSR_FS_BASE, fs);
 	if (fs != arch->thread_fs) {
 		arch->thread_fs = fs;
 	}
 
-	arch->thread_gs = task->thread.gs;
+	arch->thread_gsindex = tsk->thread.gsindex;
+	savesegment(gs, gsindex);
+	if (gsindex != arch->thread_gsindex) {
+		arch->thread_gsindex = gsindex;
+	}
+
+	arch->thread_gs = tsk->thread.gs;
 	rdmsrl(MSR_KERNEL_GS_BASE, gs);
 	if (gs != arch->thread_gs) {
 		arch->thread_gs = gs;
 	}
 
 #if MIGRATE_FPU
-	save_fpu_info(task, arch);
+	save_fpu_info(tsk, arch);
 #endif
 
-	PSPRINTK(KERN_INFO"%s: pc 0x%lx sp 0x%lx\n", __func__,
-			arch->migration_pc, arch->old_rsp);
+	PSPRINTK(KERN_INFO"%s: ip 0x%lx sp 0x%lx\n", __func__,
+			arch->migration_pc, arch->sp);
 	PSPRINTK(KERN_INFO"%s: bp 0x%lx ra 0x%lx\n", __func__,
 			arch->bp, arch->ra);
 
-	PSPRINTK(KERN_INFO"%s: fs task 0x%lx[0x%lx], saved 0x%lx[0x%lx]\n",
-		__func__,
-		(unsigned long)task->thread.fs, (unsigned long)task->thread.fsindex,
+	PSPRINTK(KERN_INFO"%s: fs task 0x%lx[0x%lx]\n", __func__,
+		(unsigned long)tsk->thread.fs, (unsigned long)tsk->thread.fsindex);
+	PSPRINTK(KERN_INFO"%s:   saved 0x%lx[0x%lx]\n", __func__,
 		(unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex);
 	PSPRINTK(KERN_INFO"%s: current 0x%lx[0x%lx]\n", __func__,
 		(unsigned long)fs, (unsigned long)fsindex);
@@ -142,7 +139,7 @@ int save_thread_info(struct task_struct *task, struct pt_regs *regs,
  *		task from the field_arch structure passed
  *
  * Input:
- * 	task,	pointer to the task structure of the task of which the
+ * 	tsk,	pointer to the task structure of the task of which the
  * 			architecture specific info needs to be restored
  *
  * 	arch,	pointer to the field_arch structure type from which the
@@ -156,7 +153,48 @@ int save_thread_info(struct task_struct *task, struct pt_regs *regs,
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_thread_info(struct task_struct *task, field_arch *arch)
+int restore_thread_info(struct task_struct *tsk, field_arch *arch)
+{
+	struct pt_regs *regs = task_pt_regs(tsk);
+	unsigned long fsindex, fs;
+
+	memcpy(regs, &arch->regs, sizeof(struct pt_regs));
+
+	regs->ip = arch->migration_pc;
+	tsk->return_addr = arch->ra;
+	regs->bp = arch->bp;
+	regs->sp = arch->sp;
+
+	regs->cs = __USER_CS;
+	regs->ss = __USER_DS;
+
+	tsk->thread.ds = arch->thread_ds;
+	tsk->thread.es = arch->thread_es;
+	tsk->thread.fsindex = arch->thread_fsindex;
+	tsk->thread.fs = arch->thread_fs;
+	tsk->thread.gsindex = arch->thread_gsindex;
+	tsk->thread.gs = arch->thread_gs;
+
+#if MIGRATE_FPU
+	restore_fpu_info(tsk, arch);
+#endif
+	rdmsrl(MSR_FS_BASE, fs);
+	savesegment(fs, fsindex);
+
+	PSPRINTK(KERN_INFO"%s: ip 0x%lx, sp 0x%lx\n", __func__,
+			arch->migration_pc, arch->sp);
+	PSPRINTK(KERN_INFO"%s: bp 0x%lx, ra 0x%lx\n", __func__,
+			arch->bp, arch->ra);
+	PSPRINTK(KERN_INFO"%s: fs saved 0x%lx[0x%lx]\n", __func__,
+		(unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex);
+	PSPRINTK(KERN_INFO"%s:  current 0x%lx[0x%lx]\n", __func__,
+		(unsigned long)fs, (unsigned long)fsindex);
+
+	return 0;
+}
+
+#if 0
+int restore_thread_info_from_aarch64(struct task_struct *task, field_arch *arch)
 {
 	int passed;
 	unsigned long fsindex, fs_val;
@@ -165,13 +203,13 @@ int restore_thread_info(struct task_struct *task, field_arch *arch)
 
 	/* For het migration */
 	if (arch->migration_pc != 0) {
-		struct pt_regs *pt_regs = task_pt_regs(task);
+		struct pt_regs *pt_regs = task_pt_regs(tsk);
 
 		pt_regs->ip = arch->migration_pc;
 		pt_regs->bp = arch->bp;
-		/* pt_regs->sp = task->saved_old_rsp; */
+		/* pt_regs->sp = tsk->saved_old_rsp; */
 		pt_regs->sp = arch->old_rsp;
-		task->thread.usersp = arch->old_rsp;
+		tsk->thread.usersp = arch->old_rsp;
 
 		pt_regs->cs = __USER_CS;
 		pt_regs->ss = __USER_DS;
@@ -198,8 +236,8 @@ int restore_thread_info(struct task_struct *task, field_arch *arch)
 		pt_regs->di = arch->regs_x86.rdi;
 	}
 
-	task->thread.fs = arch->thread_fs;
-	task->thread.fsindex = arch->thread_fsindex;
+	tsk->thread.fs = arch->thread_fs;
+	tsk->thread.fsindex = arch->thread_fsindex;
 
 	passed = 1;
 	if (current == task) {
@@ -224,10 +262,11 @@ int restore_thread_info(struct task_struct *task, field_arch *arch)
 			(unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex,
 			(unsigned long)fs_val, (unsigned long)fsindex);
 
-	//dump_processor_regs(task_pt_regs(task));
+	//dump_processor_regs(task_pt_regs(tsk));
 
 	return 0;
 }
+#endif
 
 /*
  * Function:
@@ -248,42 +287,39 @@ int restore_thread_info(struct task_struct *task, field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int update_thread_info(struct task_struct *task)
+int update_thread_info(struct task_struct *tsk)
 {
 	unsigned int fsindex, gsindex;
 
-	//printk("%s [+] TID: %d\n", __func__, task->pid);
-	if(task == NULL){
-		printk(KERN_ERR"%s: invalid params\n", __func__);
-		return -EINVAL;
-	}
+	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
+	BUG_ON(!tsk);
 
 	savesegment(fs, fsindex);
-	if (unlikely(fsindex | task->thread.fsindex))
-		loadsegment(fs, task->thread.fsindex);
+	if (unlikely(fsindex | tsk->thread.fsindex))
+		loadsegment(fs, tsk->thread.fsindex);
 	else
 		loadsegment(fs, 0);
 
-	if (task->thread.fs)
-		wrmsrl_safe(MSR_FS_BASE, task->thread.fs);
+	if (tsk->thread.fs)
+		wrmsrl_safe(MSR_FS_BASE, tsk->thread.fs);
 
-	savesegment(gs, gsindex); //read the gs register in gsindex variable
-	if (unlikely(gsindex | task->thread.gsindex))
-		load_gs_index(task->thread.gsindex);
+	savesegment(gs, gsindex);
+	if (unlikely(gsindex | tsk->thread.gsindex))
+		load_gs_index(tsk->thread.gsindex);
 	else
 		load_gs_index(0);
 
-	if (task->thread.gs)
-		wrmsrl_safe(MSR_KERNEL_GS_BASE, task->thread.gs);
+	if (tsk->thread.gs)
+		wrmsrl_safe(MSR_KERNEL_GS_BASE, tsk->thread.gs);
 
 #if MIGRATE_FPU
-	update_fpu_info(task);
+	update_fpu_info(tsk);
 #endif
 
-	//dump_processor_regs(task_pt_regs(task));
-	//__show_regs(task_pt_regs(task), 1);
+	//dump_processor_regs(task_pt_regs(tsk));
+	//__show_regs(task_pt_regs(tsk), 1);
 
-	//printk("%s [-] TID: %d\n", __func__, task->pid);
+	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
 	return 0;
 }
 
@@ -307,15 +343,15 @@ int update_thread_info(struct task_struct *task)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int initialize_thread_retval(struct task_struct *task, int val)
+int initialize_thread_retval(struct task_struct *tsk, int val)
 {
-	//printk("%s [+] TID: %d\n", __func__, task->pid);
-	if (task == NULL) {
+	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
+	if (tsk == NULL) {
 		printk(KERN_ERR"process_server: invalid params to %s", __func__);
 		return -EINVAL;
 	}
-	task_pt_regs(task)->ax = val;
-	//printk("%s [-] TID: %d\n", __func__, task->pid);
+	task_pt_regs(tsk)->ax = val;
+	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
 
 	return 0;
 }
@@ -342,37 +378,37 @@ int initialize_thread_retval(struct task_struct *task, int val)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_fpu_info(struct task_struct *task, field_arch *arch)
+int save_fpu_info(struct task_struct *tsk, field_arch *arch)
 {
 	struct fpu temp;
 
-	//printk("%s [+] TID: %d\n", __func__, task->pid);
-	if ((task == NULL)  || (arch == NULL)) {
+	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
+	if ((tsk == NULL)  || (arch == NULL)) {
 		printk(KERN_ERR"process_server: invalid params to %s", __func__);
 		return -EINVAL;
 	}
 
 	//FPU migration code --- initiator
 	//PSPRINTK(KERN_ERR "%s: task flags %x fpu_counter %x has_fpu %x [%d:%d] %d:%d %x\n",
-	//		__func__, task->flags, (int)task->fpu_counter, (int)task->thread.has_fpu,
-	//		(int)__thread_has_fpu(task), (int)fpu_allocated(&task->thread.fpu),
+	//		__func__, tsk->flags, (int)tsk->fpu_counter, (int)tsk->thread.has_fpu,
+	//		(int)__thread_has_fpu(tsk), (int)fpu_allocated(&tsk->thread.fpu),
 	//		(int)use_xsave(), (int)use_fxsr(), (int) PF_USED_MATH);
 
-	arch->task_flags = task->flags;
-	arch->task_fpu_counter = task->thread.fpu.counter;
-	arch->thread_has_fpu = task->thread.fpu.fpregs_active;
+	arch->task_flags = tsk->flags;
+	arch->task_fpu_counter = tsk->thread.fpu.counter;
+	arch->thread_has_fpu = tsk->thread.fpu.fpregs_active;
 
-	//    if (__thread_has_fpu(task)) {
-	if (!fpu_allocated(&task->thread.fpu)){
-		fpu_alloc(&task->thread.fpu);
-		fpu_finit(&task->thread.fpu);
+	//    if (__thread_has_fpu(tsk)) {
+	if (!fpu_allocated(&tsk->thread.fpu)){
+		fpu_alloc(&tsk->thread.fpu);
+		fpu_finit(&tsk->thread.fpu);
 	}
 
-	fpu_save_init(&task->thread.fpu);
+	fpu_save_init(&tsk->thread.fpu);
 
 	temp.state = &request->fpu_state;
-	fpu_copy(&temp,&task->thread.fpu);
-	//printk("%s [-] TID: %d\n", __func__, task->pid);
+	fpu_copy(&temp,&tsk->thread.fpu);
+	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
 
 	return 0;
 }
@@ -399,11 +435,11 @@ int save_fpu_info(struct task_struct *task, field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_fpu_info(struct task_struct *task, field_arch *arch)
+int restore_fpu_info(struct task_struct *tsk, field_arch *arch)
 {
 	struct fpu fpu;
-	//printk("%s [+] TID: %d\n", __func__, task->pid);
-	BUG_ON(!task || !arch);
+	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
+	BUG_ON(!tsk || !arch);
 
 	//FPU migration code --- server
 	/* PF_USED_MATH is set if the task used the FPU before
@@ -413,27 +449,27 @@ int restore_fpu_info(struct task_struct *task, field_arch *arch)
 	 */
 	if (arch->task_flags & PF_USED_MATH)
 	//set_used_math();
-	set_stopped_child_used_math(task);
+	set_stopped_child_used_math(tsk);
 
-	task->fpu_counter = arch->task_fpu_counter;
+	tsk->fpu_counter = arch->task_fpu_counter;
 
-	if (!fpu_allocated(&task->thread.fpu)) {
-		fpu_alloc(&task->thread.fpu);
-		fpu_finit(&task->thread.fpu);
+	if (!fpu_allocated(&tsk->thread.fpu)) {
+		fpu_alloc(&tsk->thread.fpu);
+		fpu_finit(&tsk->thread.fpu);
 	}
 
 	fpu.state = &arch->fpu_state;
-	fpu_copy(&task->thread.fpu, &fpu);
+	fpu_copy(&tsk->thread.fpu, &fpu);
 
 	//PSPRINTK(KERN_ERR "%s: task flags %x fpu_counter %x has_fpu %x [%d:%d]\n",
-	//		__func__, task->flags, (int)task->fpu_counter, (int)task->thread.has_fpu,
-	//		(int)__thread_has_fpu(task), (int)fpu_allocated(&task->thread.fpu));
+	//		__func__, tsk->flags, (int)tsk->fpu_counter, (int)tsk->thread.has_fpu,
+	//		(int)__thread_has_fpu(tsk), (int)fpu_allocated(&tsk->thread.fpu));
 
 	//FPU migration code --- is the following optional?
-	if (tsk_used_math(task) && task->fpu_counter >5)//fpu.preload
-	__math_state_restore(task);
+	if (tsk_used_math(tsk) && tsk->fpu_counter >5)//fpu.preload
+	__math_state_restore(tsk);
 
-	//printk("%s [-] TID: %d\n", __func__, task->pid);
+	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
 	return 0;
 }
 
@@ -455,17 +491,17 @@ int restore_fpu_info(struct task_struct *task, field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int update_fpu_info(struct task_struct *task)
+int update_fpu_info(struct task_struct *tsk)
 {
-	//printk("%s [+] TID: %d\n", __func__, task->pid);
-	if (task == NULL){
+	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
+	if (tsk == NULL){
 		printk(KERN_ERR"process_server: invalid params to %s", __func__);
 		return -EINVAL;
 	}
 
-	if (tsk_used_math(task) && task->fpu_counter >5) //fpu.preload
-		__math_state_restore(task);
-	//printk("%s [-] TID: %d\n", __func__, task->pid);
+	if (tsk_used_math(tsk) && tsk->fpu_counter >5) //fpu.preload
+		__math_state_restore(tsk);
+	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
 
 	return 0;
 }

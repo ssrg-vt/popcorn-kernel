@@ -344,6 +344,13 @@ typedef struct mapping_answers_2_kernels {
 	unsigned long addr;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
+enum remote_page_status {
+	RP_STATUS_FETCHED = 0,
+	RP_STATUS_KILLED,
+	RP_STATUS_NOEXIST,
+	RP_STATUS_FAULT,
+};
+
 #define REMOTE_PAGE_RESPONSE_FIELDS \
 	int tgroup_home_cpu; \
 	int tgroup_home_id; \
@@ -357,6 +364,7 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 	char vm_file_path[512]; \
 	char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
+#define remote_page_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
 
 #define REMOTE_PAGE_INVALIDATE_FIELDS \
 	int tgroup_home_cpu; \

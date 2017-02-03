@@ -374,90 +374,68 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 		unsigned long pgoff)
 {
 	unsigned long ret = start;
-	unsigned long local_end = start;
+	unsigned long local_end;
 	unsigned long error;
 	unsigned long populate = 0;
 	struct vm_area_struct* vma;
 
-	// go through ALL vma's, looking for interference with this space.
-	vma = current->mm->mmap;
 #if defined(CONFIG_ARM64)
 	pgoff = pgoff >> PAGE_SHIFT;
 #endif
 
-	while (1) {
-		if (start >= end) {
-			break;
-		} else if (vma == NULL) {
-			// We've reached the end of the list
-			// map through the end
-			error = do_mmap_pgoff(file, start,
-					end - start, prot, flags, pgoff, &populate);
+	// go through ALL vma's, looking for interference with this space.
+	for (vma = current->mm->mmap; start < end; vma = vma->vm_next) {
+		if (vma == NULL || end <= vma->vm_start) {
+			// We've reached the end of the list,  or the VMA is fully 
+			// above the region of interest
+			error = do_mmap_pgoff(file, start, end - start,
+					prot, flags, pgoff, &populate);
 			printk("map: %lx -- %lx\n", start, end);
 
 			if (error != start) {
 				ret = VM_FAULT_VMA;
 			}
 			break;
-		} else if (end <= vma->vm_start) {
-			// the VMA is fully above the region of interest
-			// mmap through local_end
-			error = do_mmap_pgoff(file, start,
-					end - start, prot, flags, pgoff, &populate);
-			printk("map: %lx -- %lx\n", start, end);
-
-			if (error != start)
-				ret = VM_FAULT_VMA;
-			break;
 		} else if (start >= vma->vm_start && end <= vma->vm_end) {
 			// the VMA fully encompases the region of interest
 			// nothing to do
 			break;
-		} else if (vma->vm_end <= start) {
-			// the VMA is fully below the region of interest
-			// move on to the next one
-
-		} else if (start >= vma->vm_start && start < vma->vm_end
-			 && end > vma->vm_end) {
+		} else if (start >= vma->vm_start
+				&& start < vma->vm_end && end > vma->vm_end) {
 			// the VMA includes the start of the region of interest
 			// but not the end: advance start (no mapping to do)
 			start = vma->vm_end;
-			local_end = start;
-
-		} else if (start < vma->vm_start && end <= vma->vm_end
-			 && end > vma->vm_start) {
+		} else if (start < vma->vm_start
+				&& vma->vm_start < end && end <= vma->vm_end) {
 			// the VMA includes the end of the region of interest
 			// but not the start
 			local_end = vma->vm_start;
 
 			// mmap through local_end
-			error = do_mmap_pgoff(file, start,
-					local_end - start, prot, flags, pgoff, &populate);
+			error = do_mmap_pgoff(file, start, local_end - start,
+					prot, flags, pgoff, &populate);
 			printk("map: %lx -- %lx\n", start, local_end);
 			if (error != start)
 				ret = VM_FAULT_VMA;
-
 			// Then we're done
 			break;
-		} else if (start <= vma->vm_start && end >= vma->vm_end) {
-
+		} else if (start <= vma->vm_start && vma->vm_end <= end) {
 			// the VMA is fully within the region of interest
 			// advance local end
 			local_end = vma->vm_start;
 
 			// map the difference
-			error = do_mmap_pgoff(file, start,
-					local_end - start, prot, flags, pgoff, &populate);
+			error = do_mmap_pgoff(file, start, local_end - start,
+					prot, flags, pgoff, &populate);
 			printk("map: %lx -- %lx\n", start, local_end);
-			if (error != start)
+			if (error != start) {
 				ret = VM_FAULT_VMA;
+				break;
+			}
 
 			// Then advance to the end of this vma
 			start = vma->vm_end;
-			local_end = start;
 		}
-
-		vma = vma->vm_next;
 	}
 
 	return ret;
@@ -523,7 +501,9 @@ int vma_server_do_mapping_for_distributed_process(
 			if ( !vma
 				|| (vma->vm_start != fetching_page->vaddr_start)
 				|| (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size)) ) {
-				PSPRINTK("Mapping anonymous vma start %lx end %lx\n", fetching_page->vaddr_start, (fetching_page->vaddr_start + fetching_page->vaddr_size));
+				PSPRINTK("Mapping anonymous vma start %lx end %lx\n",
+					fetching_page->vaddr_start,
+					(fetching_page->vaddr_start + fetching_page->vaddr_size));
 
 				/*Note:
 				 * This mapping is caused because when a thread migrates it does not have any vma
@@ -539,11 +519,11 @@ int vma_server_do_mapping_for_distributed_process(
 				 * but also because otherwise the vma protocol will deadlock!
 				 */
 				err = map_difference(tsk->mm, NULL, fetching_page->vaddr_start,
-							 fetching_page->vaddr_start + fetching_page->vaddr_size, prot,
-							 MAP_FIXED | MAP_ANONYMOUS
-							 | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
-							 | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0)
-							 | ((fetching_page->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0), 0);
+						 fetching_page->vaddr_start + fetching_page->vaddr_size, prot,
+						 MAP_FIXED | MAP_ANONYMOUS
+						 | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
+						 | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0)
+						 | ((fetching_page->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0), 0);
 
 				if (tsk->mm->distribute_unmap == 1)
 					printk(KERN_ALERT"%s: ERROR: anon value was already 1, check who is the older.\n", __func__);
@@ -607,8 +587,9 @@ int vma_server_do_mapping_for_distributed_process(
 				|| (vma->vm_start != fetching_page->vaddr_start)
 				|| (vma->vm_end != (fetching_page->vaddr_start + fetching_page->vaddr_size)) ) {
 
-				PSPRINTK("%s: Mapping file vma start %lx end %lx\n",
-						__func__, fetching_page->vaddr_start, (fetching_page->vaddr_start + fetching_page->vaddr_size));
+				PSPRINTK("Mapping file vma start %lx end %lx\n",
+					fetching_page->vaddr_start,
+					(fetching_page->vaddr_start + fetching_page->vaddr_size));
 
 				/*Note:
 				 * This mapping is caused because when a thread migrates it does not have any vma
@@ -630,14 +611,14 @@ int vma_server_do_mapping_for_distributed_process(
 				 * but also because otherwise the vma protocol will deadlock!
 				 */
 				err = map_difference(tsk->mm, f, fetching_page->vaddr_start,
-							   fetching_page->vaddr_start + fetching_page->vaddr_size, prot,
-							   MAP_FIXED
-							   | ((fetching_page->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
-							   /* Ported to Linux 3.12
-							  | ((fetching_page->vm_flags & VM_EXECUTABLE) ? MAP_EXECUTABLE : 0) */
-							   | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
-							   | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0),
-							   fetching_page->pgoff << PAGE_SHIFT);
+						   fetching_page->vaddr_start + fetching_page->vaddr_size, prot,
+						   MAP_FIXED
+						   | ((fetching_page->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
+						   /* Ported to Linux 3.12
+						  | ((fetching_page->vm_flags & VM_EXECUTABLE) ? MAP_EXECUTABLE : 0) */
+						   | ((fetching_page->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
+						   | ((fetching_page->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0),
+						   fetching_page->pgoff << PAGE_SHIFT);
 				if (tsk->mm->distribute_unmap == 1)
 					printk(KERN_ALERT"%s: ERROR: file backed value was already 1, check who is the older.\n", __func__);
 				tsk->mm->distribute_unmap = 1;
@@ -745,7 +726,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			printk(KERN_ALERT"%s: ERROR: distr_vma_op_counter is %d",
 					__func__, mm->distr_vma_op_counter);
 		// ONLY ONE CAN BE IN DISTRIBUTED OPERATION AT THE TIME ... WHAT ABOUT NESTED OPERATIONS?
-		while (	atomic_cmpxchg((atomic_t*)&(mm->distr_vma_op_counter), 0, 1) != 0) { //success is indicated by comparing RETURN with OLD (arch/x86/include/asm/cmpxchg.h)
+		while (atomic_cmpxchg((atomic_t*)&(mm->distr_vma_op_counter), 0, 1) != 0) { //success is indicated by comparing RETURN with OLD (arch/x86/include/asm/cmpxchg.h)
 			DEFINE_WAIT(wait);
 			up_write(&mm->mmap_sem);
 
@@ -1798,36 +1779,39 @@ int vma_server_enqueue_vma_op(
 }
 
 
+/**
+ * Entered with down_write(mm->mmmap_sem)
+ */
 int vma_server_map(struct mm_struct *mm, struct vm_area_struct *vma, remote_page_response_t *res)
 {
-	if (res->vm_file_path[0] == '\0') {
-		/* Anonymous page */
+	unsigned long vm_prot;
+	unsigned vm_flags = MAP_FIXED;
+	struct file *f = NULL;
+	unsigned long err = 0;
+
+	if (remote_page_anon(res)) {
+		vm_flags |= MAP_ANONYMOUS;
 	} else {
-		/* File-mapped page */
-		struct file *f;
-		int err;
-		unsigned long vm_prot = 0;
-		unsigned vm_flags = 0;
-
 		f = filp_open(res->vm_file_path, O_RDONLY | O_LARGEFILE, 0);
-		BUG_ON(IS_ERR(f));
-
-		vm_prot  = (res->vm_flags & VM_READ) ? PROT_READ : 0;
-		vm_prot |= (res->vm_flags & VM_WRITE) ? PROT_WRITE : 0;
-		vm_prot |= (res->vm_flags & VM_EXEC) ? PROT_EXEC : 0;
-
-		vm_flags = MAP_FIXED
-			   | ((res->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
-			   | ((res->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
-			   | ((res->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0),
-
-		err = map_difference(mm, f, res->vm_start, res->vm_end,
-					vm_prot, vm_flags, res->vm_pgoff << PAGE_SHIFT);
-
-		filp_close(f, NULL);
+		if (IS_ERR(f)) return PTR_ERR(f);
 	}
 
-	return 0;
+	vm_prot  = (res->vm_flags & VM_READ) ? PROT_READ : 0;
+	vm_prot |= (res->vm_flags & VM_WRITE) ? PROT_WRITE : 0;
+	vm_prot |= (res->vm_flags & VM_EXEC) ? PROT_EXEC : 0;
+
+	vm_flags = vm_flags
+		   | ((res->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
+		   | ((res->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
+		   | ((res->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0);
+		   /* | ((res->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0) */
+
+	err = map_difference(mm, f, res->vm_start, res->vm_end,
+				vm_prot, vm_flags, res->vm_pgoff << PAGE_SHIFT);
+
+	if (f) filp_close(f, NULL);
+
+	return err != res->vm_start;
 }
 
 /**
