@@ -21,6 +21,7 @@
 #include <asm/mmu_context.h>
 #include <linux/cpu_namespace.h>
 
+#include <asm/kdebug.h>
 #include <asm/process_server.h>
 #include <popcorn/bundle.h>
 #include <popcorn/cpuinfo.h>
@@ -494,12 +495,15 @@ static void __release_memory_t(struct task_struct *tsk)
 int popcorn_process_exit(struct task_struct *tsk)
 {
 	memory_t *memory = tsk->memory;
+	struct pt_regs *regs = task_pt_regs(tsk);
 
 	if (!memory) return -ESRCH;
 
 	printk(KERN_INFO"%s: 0x%p 0x%p\n", __func__, tsk, tsk->memory);
-	printk(KERN_INFO"%s: %d/%d %d, %d\n", __func__,
-			tsk->pid, tsk->tgid, tsk->main, tsk->executing_for_remote);
+	printk(KERN_INFO"%s: %d/%d %d, %d %d %d\n", __func__,
+			tsk->pid, tsk->tgid, tsk->main, tsk->executing_for_remote,
+			tsk->exit_code, tsk->group_exit);
+	__show_regs(regs, 1);
 
 	/* I am helper */
 	if (tsk->main == 1) {
@@ -526,7 +530,7 @@ int popcorn_process_exit(struct task_struct *tsk)
 		req->my_pid = tsk->pid;
 		req->code = tsk->exit_code;
 		req->group_exit = tsk->group_exit;
-		tsk->migration_pc = 0x00;
+		tsk->migration_pc = tsk->return_addr;
 
 		save_thread_info(tsk, task_pt_regs(tsk), &req->arch, NULL);
 
@@ -1633,6 +1637,19 @@ int shadow_main(void *_args)
 	/*-------------- Remote thread is attached at here --------------------*/
 	PSPRINTK("%s: resume %d at 0x%p\n", __func__, current->pid, current);
 
+	/*
+	{
+		int i;
+		struct k_sigaction *a;
+		__show_regs(current_pt_regs(), 1);
+		printk(KERN_INFO"%d\n", atomic_read(&current->sighand->count));
+		for (i = 0; i < _NSIG; i++) {
+			a = current->sighand->action + i;
+			printk(KERN_INFO"%d %lx\n", i, (unsigned long)a->sa.sa_handler);
+		}
+	}
+	*/
+
 	current->distributed_exit = EXIT_ALIVE;
 
 	// Notify of PID/PID pairing.
@@ -1788,11 +1805,8 @@ static int __construct_helper_mm(clone_request_t *req)
 {
 	struct mm_struct *mm;
 	struct file *f;
-	struct cred * new;
+	struct cred *new;
 
-	/* sanghoon: I think there is no point to deal with user-level stuff for
-	 * kernel thread...
-	*/
 	spin_lock_irq(&current->sighand->siglock);
 	flush_signal_handlers(current, 1);
 	spin_unlock_irq(&current->sighand->siglock);

@@ -53,16 +53,6 @@ asmlinkage extern void ret_from_fork(void);
 
 __visible DEFINE_PER_CPU(unsigned long, rsp_scratch);
 
-unsigned long read_old_rsp(void)
-{
-	return this_cpu_read(rsp_scratch);
-}
-
-void write_old_rsp(unsigned long rsp)
-{
-	this_cpu_write(rsp_scratch, rsp);
-}
-
 /* Prints also some state that isn't saved in the pt_regs */
 void __show_regs(struct pt_regs *regs, int all)
 {

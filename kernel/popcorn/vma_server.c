@@ -374,14 +374,9 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 		unsigned long pgoff)
 {
 	unsigned long ret = start;
-	unsigned long local_end;
 	unsigned long error;
 	unsigned long populate = 0;
 	struct vm_area_struct* vma;
-
-#if defined(CONFIG_ARM64)
-	pgoff = pgoff >> PAGE_SHIFT;
-#endif
 
 	// go through ALL vma's, looking for interference with this space.
 	for (vma = current->mm->mmap; start < end; vma = vma->vm_next) {
@@ -390,7 +385,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			// above the region of interest
 			error = do_mmap_pgoff(file, start, end - start,
 					prot, flags, pgoff, &populate);
-			printk("map: %lx -- %lx\n", start, end);
+			printk("map0: %lx -- %lx, %lx\n", start, end, pgoff);
 
 			if (error != start) {
 				ret = VM_FAULT_VMA;
@@ -403,37 +398,35 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 		} else if (start >= vma->vm_start
 				&& start < vma->vm_end && end > vma->vm_end) {
 			// the VMA includes the start of the region of interest
-			// but not the end: advance start (no mapping to do)
+			// but not the end
+			// advance start (no mapping to do)
+			pgoff += ((vma->vm_end - start) >> PAGE_SHIFT);
 			start = vma->vm_end;
 		} else if (start < vma->vm_start
 				&& vma->vm_start < end && end <= vma->vm_end) {
 			// the VMA includes the end of the region of interest
 			// but not the start
-			local_end = vma->vm_start;
 
-			// mmap through local_end
-			error = do_mmap_pgoff(file, start, local_end - start,
+			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
-			printk("map: %lx -- %lx\n", start, local_end);
-			if (error != start)
+			printk("map1: %lx -- %lx, %lx\n", start, vma->vm_start, pgoff);
+			if (error != start) {
 				ret = VM_FAULT_VMA;
-			// Then we're done
+			}
 			break;
 		} else if (start <= vma->vm_start && vma->vm_end <= end) {
 			// the VMA is fully within the region of interest
-			// advance local end
-			local_end = vma->vm_start;
 
-			// map the difference
-			error = do_mmap_pgoff(file, start, local_end - start,
+			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
-			printk("map: %lx -- %lx\n", start, local_end);
+			printk("map2: %lx -- %lx, %lx\n", start, vma->vm_start, pgoff);
 			if (error != start) {
 				ret = VM_FAULT_VMA;
 				break;
 			}
 
 			// Then advance to the end of this vma
+			pgoff += ((vma->vm_end - start) >> PAGE_SHIFT);
 			start = vma->vm_end;
 		}
 	}
@@ -1796,9 +1789,9 @@ int vma_server_map(struct mm_struct *mm, struct vm_area_struct *vma, remote_page
 		if (IS_ERR(f)) return PTR_ERR(f);
 	}
 
-	vm_prot  = (res->vm_flags & VM_READ) ? PROT_READ : 0;
-	vm_prot |= (res->vm_flags & VM_WRITE) ? PROT_WRITE : 0;
-	vm_prot |= (res->vm_flags & VM_EXEC) ? PROT_EXEC : 0;
+	vm_prot  = ((res->vm_flags & VM_READ) ? PROT_READ : 0)
+			| ((res->vm_flags & VM_WRITE) ? PROT_WRITE : 0)
+			| ((res->vm_flags & VM_EXEC) ? PROT_EXEC : 0);
 
 	vm_flags = vm_flags
 		   | ((res->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
@@ -1807,7 +1800,7 @@ int vma_server_map(struct mm_struct *mm, struct vm_area_struct *vma, remote_page
 		   /* | ((res->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0) */
 
 	err = map_difference(mm, f, res->vm_start, res->vm_end,
-				vm_prot, vm_flags, res->vm_pgoff << PAGE_SHIFT);
+				vm_prot, vm_flags, res->vm_pgoff);
 
 	if (f) filp_close(f, NULL);
 

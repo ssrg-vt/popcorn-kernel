@@ -225,11 +225,12 @@ struct page {
 
 #ifdef CONFIG_POPCORN
 	//Multikernel
+	unsigned long rflags;
 	int replicated;
 	int status;
 	int owner;
 	long last_write;
-	int other_owners[MAX_KERNEL_IDS];
+	bool other_owners[MAX_KERNEL_IDS];
 	int writing;
 	int reading;
 	//Futex

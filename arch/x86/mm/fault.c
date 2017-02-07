@@ -1209,12 +1209,16 @@ retry:
 		printk(KERN_WARNING"\n");
 		printk(KERN_WARNING"## PAGEFAULT: 0x%lx 0x%lx 0x%lx\n",
 				address, regs->ip, error_code);
-		ret = page_server_do_page_fault(tsk, vma, address, flags, error_code);
-		if (ret != 0) {
+		ret = page_server_do_page_fault(tsk, vma, address, error_code);
+		if (ret == 0) {
+			fault = VM_FAULT_MAJOR;
+			goto out;
+		} else if (ret == VM_CONTINUE) {
+			vma = find_vma(mm, address);
+		} else if (ret != VM_CONTINUE) {
 			bad_area(regs, error_code, address);
 			return;
 		}
-		vma = find_vma(mm, address);
 	}
 #endif
 	if (unlikely(!vma)) {
@@ -1261,6 +1265,7 @@ good_area:
 	 * we get VM_FAULT_RETRY back, the mmap_sem has been unlocked.
 	 */
 	fault = handle_mm_fault(mm, vma, address, flags);
+out:
 	major |= fault & VM_FAULT_MAJOR;
 
 	/*

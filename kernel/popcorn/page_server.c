@@ -3159,6 +3159,8 @@ struct remote_page {
 	unsigned long addr;
 
 	remote_page_response_t *response;
+	unsigned long ret;
+
 
 	bool vma_present;
 	unsigned long vaddr_start;
@@ -3177,7 +3179,6 @@ struct remote_page {
 	int arrived_response;
 	struct task_struct *waiting;
 	int futex_owner;
-
 };
 
 static struct remote_page *lookup_remote_page(memory_t *m, unsigned long addr)
@@ -3281,7 +3282,6 @@ static void response_remote_page(int nid, struct task_struct *tsk, int remote_pi
 	pcn_kmsg_send_long(nid, res, sizeof(*res));
 }
 
-
 /**
  * Request for remote pages and handling the request
  */
@@ -3323,7 +3323,7 @@ static int __fill_in_anon_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	// TODO: if page is replicated.
 
 	paddr = kmap(page);
-	copy_user_page(&res->page, paddr, addr, page);
+	copy_page(res->page, paddr);
 	kunmap(page);
 	ret = RP_STATUS_FETCHED;
 
@@ -3354,8 +3354,6 @@ static void process_remote_page_request(struct work_struct *work)
 
 	tsk = find_task_by_vpid(req->tgroup_home_id);
 	if (!tsk) {
-		// TODO: Reply that th process does not exist.
-		__WARN();
 		res->result = RP_STATUS_KILLED;
 		goto out_free;
 	}
@@ -3367,26 +3365,30 @@ static void process_remote_page_request(struct work_struct *work)
 
 	/* Fill-in the vma info */
 	vma = find_vma(mm, addr);
-	if (vma) {
-		res->vm_start = vma->vm_start;
-		res->vm_end = vma->vm_end;
-		res->vm_flags = vma->vm_flags;
-	}
-
 	if (!vma || addr < vma->vm_start || vma->vm_end <= addr) {
 		printk("%s: VMA not exist %lx\n", __func__, addr);
-		res->result = RP_STATUS_NOEXIST;
+		res->result = RP_STATUS_FAULT_VMA;
 		goto out_up;
 	}
+
+	if (access_error(req->error_code, vma)) {
+		printk("%s: Access error\n", __func__);
+		res->result = RP_STATUS_FAULT;
+		goto out_up;
+	}
+
+	res->vm_start = vma->vm_start;
+	res->vm_end = vma->vm_end;
+	res->vm_flags = vma->vm_flags;
+	res->vm_pgoff = vma->vm_pgoff;
 
 	if (vma->vm_file) {
 		/* File-mapped page */
 		ppath = d_path(&vma->vm_file->f_path, path, sizeof(path));
 		strncpy(res->vm_file_path, ppath, sizeof(res->vm_file_path));
-		res->vm_pgoff = vma->vm_pgoff;
 
 		if (vma->vm_flags & VM_WRITE) {
-			printk("%s: writable file mapped page\n", __func__);
+			printk("remote_file_request: cow file mapped page\n");
 			res->result = __fill_in_anon_page(mm, vma, addr, res);
 		}
 	} else {
@@ -3398,12 +3400,13 @@ out_up:
 	up_read(&mm->mmap_sem);
 	put_task_struct(tsk);
 
-out_free:
 	printk("remote_page_request: vma %d %lx-%lx %lx\n",
 			res->result, res->vm_start, res->vm_end, res->vm_flags);
+	printk("remote_page_request: %lx\n", res->vm_pgoff);
 	printk("remote_page_request: %s\n",
 			remote_page_anon(res) ? "anonymous page": res->vm_file_path);
 
+out_free:
 	response_remote_page(req->header.from_cpu, tsk, req->remote_pid, res);
 
 	pcn_kmsg_free_msg(req);
@@ -3428,7 +3431,7 @@ static int handle_remote_page_request(struct pcn_kmsg_message *msg)
 }
 
 
-static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, unsigned long addr, remote_page_request_t **preq)
+static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, unsigned long addr, unsigned long error_code, remote_page_request_t **preq)
 {
 	struct remote_page *rp = kzalloc(sizeof(*rp), GFP_KERNEL);
 	remote_page_request_t *req = kzalloc(sizeof(*req), GFP_KERNEL);
@@ -3450,7 +3453,8 @@ static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, 
 	req->tgroup_home_cpu = tsk->tgroup_home_cpu;
 	req->tgroup_home_id = tsk->tgroup_home_id;
 	req->addr = addr;
-	req->remote_pid = tsk->tgid;
+	req->remote_pid = tsk->prev_pid;
+	req->error_code = error_code;
 
 	*preq = req;
 
@@ -3458,25 +3462,25 @@ static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, 
 }
 
 
-static int __map_fetched_remote_page(struct remote_page *rp)
+static int __map_remote_page(struct remote_page *rp)
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 	remote_page_response_t *res = rp->response;
 	unsigned long addr = res->addr;
-	//memory_t *m = tsk->memory;
 	int ret = 0;
 	struct page *page;
 	void *paddr;
-	pte_t pte, *ppte;
+	pte_t pte, *ptep;
 	spinlock_t *ptl;
 
 	switch (rp->response->result) {
 	case RP_STATUS_KILLED:
 	case RP_STATUS_FAULT:
+	case RP_STATUS_FAULT_VMA:
+		rp->ret = VM_FAULT_SIGSEGV;
 		down_read(&mm->mmap_sem);
-		return VM_FAULT_VMA;
-	case RP_STATUS_NOEXIST:
+		return VM_FAULT_SIGSEGV;
 	case RP_STATUS_FETCHED:
 		break;
 	}
@@ -3485,7 +3489,7 @@ static int __map_fetched_remote_page(struct remote_page *rp)
 	down_write(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
 
-	// Deal with the vma first
+	/* Deal with vma first */
 	if (!vma || vma->vm_start != res->vm_start || vma->vm_end != res->vm_end) {
 		ret = vma_server_map(mm, vma, res);
 
@@ -3494,9 +3498,11 @@ static int __map_fetched_remote_page(struct remote_page *rp)
 	}
 	downgrade_write(&mm->mmap_sem);
 
-	if (!remote_page_anon(res) && !(vma->vm_flags & VM_WRITE)) return 0;
-
-	if (rp->response->result == RP_STATUS_NOEXIST) return 0;
+	/* Nothing to do with for regular file pages */
+	if (!remote_page_anon(res) && !(vma->vm_flags & VM_WRITE)) {
+		rp->ret = 0;
+		return VM_CONTINUE;
+	}
 
 	printk("%s: Map %s page\n", __func__, 
 			remote_page_anon(res) ? "anonymous" : "writable file");
@@ -3504,37 +3510,43 @@ static int __map_fetched_remote_page(struct remote_page *rp)
 	anon_vma_prepare(vma);
 	page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
 
-	__SetPageUptodate(page);
 	paddr = kmap(page);
-	copy_page(paddr, &rp->response->page);
+	copy_page(paddr, rp->response->page);
 	kunmap(page);
 
-	ppte = __find_pte_lock(mm, addr, &ptl);
-	pte = mk_pte(page, vma->vm_page_prot);
-	if (vma->vm_flags & VM_WRITE) {
-		pte = pte_mkwrite(pte);
-	} else {
+	__SetPageUptodate(page);
 
-	}
+	ptep = __find_pte_lock(mm, addr, &ptl);
+
+	pte = mk_pte(page, vma->vm_page_prot);
+	pte = maybe_mkwrite(pte_mkdirty(pte), vma);
 	pte = pte_set_flags(pte, _PAGE_PRESENT);
 	pte = pte_set_flags(pte, _PAGE_USER);
 	pte = pte_mkyoung(pte);
 
-	ptep_clear_flush(vma, addr, ppte);
+	flush_icache_page(vma, page);
+	// ptep_clear_flush(vma, addr, ptep);
 
-	page_add_new_anon_rmap(page, vma, addr);
-	set_pte_at_notify(mm, addr, ppte, pte);
+	if (remote_page_anon(res)) {
+		page_add_new_anon_rmap(page, vma, addr);
+	} else {
+		page_add_file_rmap(page);
+	}
+	set_pte_at(mm, addr, ptep, pte);
 
-	update_mmu_cache(vma, addr, ppte);
+	update_mmu_cache(vma, addr, ptep);
 
+	/*
 	flush_tlb_page(vma, addr);
 	flush_tlb_fix_spurious_fault(vma, addr);
-	spin_unlock(ptl);
+	*/
 
-	return ret;
+	pte_unmap_unlock(ptep, ptl);
+
+	return 0;
 }
 
-int __fetch_remote_page(struct task_struct *tsk, unsigned long addr, spinlock_t *ptl)
+int __fetch_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long error_code, spinlock_t *ptl)
 {
 	memory_t *m = tsk->memory;
 	struct remote_page *rp;
@@ -3550,7 +3562,7 @@ int __fetch_remote_page(struct task_struct *tsk, unsigned long addr, spinlock_t 
 		remote_page_request_t *req;
 		spin_unlock_irqrestore(&m->pages_lock, flags);
 
-		rp = __alloc_remote_page_request(tsk, addr, &req);
+		rp = __alloc_remote_page_request(tsk, addr, error_code, &req);
 
 		spin_lock_irqsave(&m->pages_lock, flags);
 		r = lookup_remote_page(m, addr);
@@ -3577,15 +3589,14 @@ int __fetch_remote_page(struct task_struct *tsk, unsigned long addr, spinlock_t 
 	finish_wait(&rp->wait, &wait);
 
 	remaining = atomic_dec_return(&rp->count);
-	printk("%s: resume %lx %d %s%d\n", __func__,
-			addr, rp->response->result, rp->mapped ? "map " : "", remaining);
 	if (!rp->mapped) {
-		ret = __map_fetched_remote_page(rp);
+		ret = __map_remote_page(rp);
 		rp->mapped = true;
 	} else {
-		ret = rp->response->result;
+		ret = rp->ret;
 		down_read(&tsk->mm->mmap_sem);
 	}
+	printk("%s: resume %lx %d %d\n", __func__, addr, ret, remaining);
 
 	if (remaining) {
 		wake_up(&rp->wait);
@@ -3612,8 +3623,7 @@ int __fetch_remote_page(struct task_struct *tsk, unsigned long addr, spinlock_t 
  */
 int page_server_do_page_fault(
 		struct task_struct *tsk, struct vm_area_struct *vma,
-		unsigned long page_fault_address, unsigned long page_fault_flags,
-		unsigned long error_code)
+		unsigned long page_fault_address, unsigned long error_code)
 {
 	struct mm_struct *mm = tsk->mm;
 	memory_t *memory = tsk->memory;
@@ -3622,10 +3632,7 @@ int page_server_do_page_fault(
 	pte_t *pte;
 	int ret = 0;
 
-	printk("%s: pid=%d for cpu=%d tgid=%d\n", __func__,
-			tsk->pid, tsk->tgroup_home_cpu, tsk->tgroup_home_id);
-	//printk("%s: 0x%p 0x%p\n", __func__, mm, vma);
-	printk("%s: 0x%lx 0x%lx\n", __func__, addr, page_fault_flags);
+	printk("%s: 0x%lx\n", __func__, addr);
 
 	BUG_ON(!memory);
 
@@ -3633,17 +3640,12 @@ int page_server_do_page_fault(
 	if (!pte) return VM_FAULT_OOM;
 
 	if (pte == NULL || pte_none(pte_clear_flags(*pte, _PAGE_SOFTW1))) {
-		int ret = __fetch_remote_page(tsk, addr, ptl);
-		printk("%s: fetched %d\n", __func__, ret);
+		ret = __fetch_remote_page(tsk, addr, error_code, ptl);
+		printk("%s: fetched %x\n", __func__, ret);
 	} else {
 		struct page *page = pte_page(*pte);
 		printk("%s: already mapped to %p\n", __func__, page);
-		/*
-		if (vma->vm_flags & VM_WRITE && pte_write(*pte)) {
-			// CoW
-		}
-		*/
-		ret = VM_FAULT_VMA;
+		BUG_ON(1);
 		spin_unlock(ptl);
 	}
 

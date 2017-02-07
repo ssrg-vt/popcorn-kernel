@@ -336,19 +336,41 @@ typedef struct mapping_answers_2_kernels {
 } mapping_answers_for_2_kernels_t;
 
 
+#define REMOTE_VMA_REQUEST_FIELDS \
+	int tgroup_home_cpu; \
+	int tgroup_home_id; \
+	int remote_pid; \
+	unsigned long addr;
+DEFINE_PCN_KMSG(remote_vma_request_t, REMOTE_VMA_REQUEST_FIELDS);
+
+#define REMOTE_VMA_RESPONSE_FIELDS \
+	int tgroup_home_cpu; \
+	int tgroup_home_id; \
+	int remote_pid;	\
+	int result; \
+	unsigned long addr; \
+	unsigned long vm_start; \
+	unsigned long vm_end; \
+	unsigned long vm_flags;	\
+	unsigned long vm_pgoff; \
+	char vm_file_path[512]; \
+	unsigned char vm_owners[MAX_POPCORN_NODES];
+DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
+
+
 #define REMOTE_PAGE_REQUEST_FIELDS \
 	int tgroup_home_cpu; \
 	int tgroup_home_id; \
 	int remote_pid; \
-	bool is_write; \
-	unsigned long addr;
+	unsigned long addr; \
+	unsigned long error_code;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
 enum remote_page_status {
 	RP_STATUS_FETCHED = 0,
-	RP_STATUS_KILLED,
-	RP_STATUS_NOEXIST,
 	RP_STATUS_FAULT,
+	RP_STATUS_FAULT_VMA,
+	RP_STATUS_KILLED,
 };
 
 #define REMOTE_PAGE_RESPONSE_FIELDS \
@@ -364,6 +386,7 @@ enum remote_page_status {
 	char vm_file_path[512]; \
 	char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
+
 #define remote_page_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
 
 #define REMOTE_PAGE_INVALIDATE_FIELDS \
