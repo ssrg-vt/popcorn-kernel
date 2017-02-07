@@ -381,7 +381,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 	// go through ALL vma's, looking for interference with this space.
 	for (vma = current->mm->mmap; start < end; vma = vma->vm_next) {
 		if (vma == NULL || end <= vma->vm_start) {
-			// We've reached the end of the list,  or the VMA is fully 
+			// We've reached the end of the list,  or the VMA is fully
 			// above the region of interest
 			error = do_mmap_pgoff(file, start, end - start,
 					prot, flags, pgoff, &populate);
@@ -1773,20 +1773,259 @@ int vma_server_enqueue_vma_op(
 
 
 /**
- * Entered with down_write(mm->mmmap_sem)
+ * Response for remote page request and handling the response
  */
-int vma_server_map(struct mm_struct *mm, struct vm_area_struct *vma, remote_page_response_t *res)
+
+struct vma_info {
+	struct list_head list;
+	unsigned long addr;
+	bool mapped;
+	atomic_t pendings;
+	wait_queue_head_t pendings_wait;
+	int ret;
+
+	remote_vma_response_t *response;
+};
+
+
+struct remote_vma_work {
+	struct work_struct work;
+	void *private;
+};
+
+
+static struct vma_info *__lookup_pending_vma_request(memory_t *m, unsigned long addr)
 {
+	struct vma_info *v;
+
+	list_for_each_entry(v, &m->vmas, list) {
+		if (v->addr == addr) return v;
+	}
+
+	return NULL;
+}
+
+
+static void process_remote_vma_response(struct work_struct *_work)
+{
+	struct remote_vma_work *w = (struct remote_vma_work *)_work;
+	remote_vma_response_t *res = (remote_vma_response_t *)w->private;
+	struct task_struct *tsk;
+	memory_t *m;
+	unsigned long flags;
+	struct vma_info *vi;
+
+	tsk = find_task_by_vpid(res->remote_pid);
+	if (!tsk) {
+		__WARN();
+		goto out_free;
+	}
+	get_task_struct(tsk);
+	m = tsk->memory;
+	BUG_ON(tsk->tgroup_home_id != res->tgroup_home_id);
+
+	spin_lock_irqsave(&m->vmas_lock, flags);
+	vi = __lookup_pending_vma_request(m, res->addr);
+	spin_unlock_irqrestore(&m->vmas_lock, flags);
+	if (!vi) {
+		__WARN();
+		goto out_unlock;
+	}
+
+	vi->response = res;
+	wake_up(&vi->pendings_wait);
+
+out_unlock:
+	put_task_struct(tsk);
+
+out_free:
+	kfree(w);
+}
+
+
+static int handle_remote_vma_response(struct pcn_kmsg_message *msg)
+{
+	// Create work
+	struct remote_vma_work *w = kmalloc(sizeof(*w), GFP_ATOMIC);
+	BUG_ON(!w);
+
+	w->private = msg;
+	INIT_WORK(&w->work, process_remote_vma_response);
+	queue_work(vma_op_wq, &w->work);
+
+	return 1;
+}
+
+
+static void response_remote_page(int nid, struct task_struct *tsk, int remote_pid, remote_vma_response_t *res)
+{
+	res->header.type = PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE;
+	res->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+	res->tgroup_home_cpu = get_nid();
+	res->tgroup_home_id = tsk->tgid;
+	res->remote_pid = remote_pid;
+
+	pcn_kmsg_send_long(nid, res, sizeof(*res));
+}
+
+/**
+ * Request for remote pages and handling the request
+ */
+
+static void process_remote_vma_request(struct work_struct *work)
+{
+	struct remote_vma_work *w = (struct remote_vma_work *)work;
+	remote_vma_request_t *req = (remote_vma_request_t *)(w->private);
+	remote_vma_response_t *res = NULL;
+	struct task_struct *tsk;
+	struct mm_struct *mm;
+	struct vm_area_struct *vma;
+	unsigned long addr = req->addr;
+	char path[512];
+	char *ppath;
+
+	might_sleep();
+
+	while (!res) {
+		res = kmalloc(sizeof(*res), GFP_KERNEL);
+	};
+	res->addr = addr;
+
+	tsk = find_task_by_vpid(req->tgroup_home_id);
+	if (!tsk) {
+		res->result = -ESRCH;
+		goto out_free;
+	}
+	get_task_struct(tsk);
+	mm = tsk->mm;
+
+	BUG_ON(!tsk->tgroup_distributed);
+
+	down_read(&mm->mmap_sem);
+
+	/* Fill-in the vma info */
+	vma = find_vma(mm, addr);
+	if (!vma || addr < vma->vm_start) {
+		printk("%s: VMA not exist %lx\n", __func__, addr);
+		res->result = -ENOENT;
+		goto out_up;
+	}
+
+	res->vm_start = vma->vm_start;
+	res->vm_end = vma->vm_end;
+	res->vm_flags = vma->vm_flags;
+	res->vm_pgoff = vma->vm_pgoff;
+
+	if (vma->vm_file) {
+		/* File-mapped page */
+		ppath = d_path(&vma->vm_file->f_path, path, sizeof(path));
+		strncpy(res->vm_file_path, ppath, sizeof(res->vm_file_path));
+	} else {
+		res->vm_file_path[0] = '\0';
+	}
+	res->result = 0;
+
+	vma->vm_owners[req->header.from_cpu] = 1;
+	memcpy(res->vm_owners, vma->vm_owners, sizeof(vma->vm_owners));
+
+out_up:
+	up_read(&mm->mmap_sem);
+	put_task_struct(tsk);
+
+	printk("remote_vma_request: %lx -- %lx %lx\n",
+			res->vm_start, res->vm_end, res->vm_flags);
+	printk("remote_vma_request: %lx %s\n", res->vm_pgoff, res->vm_file_path);
+
+out_free:
+	response_remote_page(req->header.from_cpu, tsk, req->remote_pid, res);
+
+	pcn_kmsg_free_msg(req);
+	kfree(w);
+	kfree(res);
+
+	return;
+}
+
+
+static int handle_remote_vma_request(struct pcn_kmsg_message *msg)
+{
+	// Create work
+	struct remote_vma_work *w = kmalloc(sizeof(*w), GFP_ATOMIC);
+	BUG_ON(!w);
+
+	w->private = msg;
+	INIT_WORK(&w->work, process_remote_vma_request);
+	queue_work(vma_op_wq, &w->work);
+
+	return 1;
+}
+
+
+static struct vma_info *__alloc_remote_vma_request(struct task_struct *tsk, unsigned long addr, remote_vma_request_t **preq)
+{
+	struct vma_info *vi = kzalloc(sizeof(*vi), GFP_KERNEL);
+	remote_vma_request_t *req = kzalloc(sizeof(*req), GFP_KERNEL);
+
+	BUG_ON(!vi || !req);
+
+	/* vma_info */
+	INIT_LIST_HEAD(&vi->list);
+	vi->addr = addr;
+	vi->mapped = false;
+	atomic_set(&vi->pendings, 0);
+	init_waitqueue_head(&vi->pendings_wait);
+
+	/* req */
+	req->header.type = PCN_KMSG_TYPE_REMOTE_VMA_REQUEST;
+	req->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+	req->tgroup_home_cpu = tsk->tgroup_home_cpu;
+	req->tgroup_home_id = tsk->tgroup_home_id;
+	req->addr = addr;
+	req->remote_pid = tsk->pid;
+
+	*preq = req;
+
+	return vi;
+}
+
+
+void __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
+{
+	struct mm_struct *mm = tsk->mm;
+	struct vm_area_struct *vma;
 	unsigned long vm_prot;
 	unsigned vm_flags = MAP_FIXED;
 	struct file *f = NULL;
 	unsigned long err = 0;
+	unsigned long addr = vi->response->addr;
+	remote_vma_response_t *res = vi->response;
 
-	if (remote_page_anon(res)) {
+	vi->ret = res->result;
+	if (vi->ret) {
+		down_read(&mm->mmap_sem);
+		return;
+	}
+
+	down_write(&mm->mmap_sem);
+
+	vma = find_vma(mm, addr);
+	if (vma && vma->vm_start <= addr) {
+		/* someone already do things for me. */
+		goto out;
+	}
+
+	if (remote_vma_anon(res)) {
 		vm_flags |= MAP_ANONYMOUS;
 	} else {
 		f = filp_open(res->vm_file_path, O_RDONLY | O_LARGEFILE, 0);
-		if (IS_ERR(f)) return PTR_ERR(f);
+		if (IS_ERR(f)) {
+			printk(KERN_ERR"%s: cannot find backing file %s\n",__func__,
+				res->vm_file_path);
+			vi->ret = -EIO;
+			goto out;
+		}
 	}
 
 	vm_prot  = ((res->vm_flags & VM_READ) ? PROT_READ : 0)
@@ -1804,14 +2043,91 @@ int vma_server_map(struct mm_struct *mm, struct vm_area_struct *vma, remote_page
 
 	if (f) filp_close(f, NULL);
 
-	return err != res->vm_start;
+	vma = find_vma(mm, addr);
+	BUG_ON(!vma || vma->vm_start > addr);
+
+	memcpy(vma->vm_owners, res->vm_owners, sizeof(vma->vm_owners));
+	vma->vm_owners[get_nid()] = 1;
+
+out:
+	downgrade_write(&mm->mmap_sem);
+	return;
 }
 
-/**
- * This function registers the vma server with the messaging layer.
- *
- * @return Returns 0 on success, an error code otherwise.
- */
+
+int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
+{
+	memory_t *m = tsk->memory;
+	struct vma_info *vi;
+	unsigned long flags;
+	DEFINE_WAIT(wait);
+	int ret = 0;
+	unsigned long addr = address & PAGE_MASK;
+
+	might_sleep();
+
+	printk(KERN_WARNING"\n");
+	printk(KERN_WARNING"## VMAFAULT: %lx %lx\n", address, addr);
+
+	spin_lock_irqsave(&m->vmas_lock, flags);
+	vi = __lookup_pending_vma_request(m, addr);
+	if (!vi) {
+		struct vma_info *v;
+		remote_vma_request_t *req;
+		spin_unlock_irqrestore(&m->vmas_lock, flags);
+
+		vi = __alloc_remote_vma_request(tsk, addr, &req);
+
+		spin_lock_irqsave(&m->vmas_lock, flags);
+		v = __lookup_pending_vma_request(m, addr);
+		if (!v) {
+			printk("%s: %lx from %d, %d\n", __func__,
+					addr, tsk->tgroup_home_cpu, tsk->tgroup_home_id);
+			list_add(&vi->list, &m->vmas);
+			pcn_kmsg_send_long(tsk->tgroup_home_cpu, req, sizeof(*req));
+		} else {
+			printk("%s: %lx already pended\n", __func__, addr);
+			kfree(vi);
+			vi = v;
+		}
+		kfree(req);
+	}
+	atomic_inc(&vi->pendings);
+	spin_unlock_irqrestore(&m->vmas_lock, flags);
+
+	prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
+	up_read(&tsk->mm->mmap_sem);
+	schedule();
+	finish_wait(&vi->pendings_wait, &wait);
+
+	/* Now vi->response should points to the result
+	 * Also, mm_mmap_sem should be properly set when return
+	 */
+
+	if (!vi->mapped) {
+		__map_remote_vma(tsk, vi);
+		vi->mapped = true;
+	} else {
+		down_read(&tsk->mm->mmap_sem);
+	}
+	ret = vi->ret;
+
+	printk("%s: %lx resume %d\n", __func__, addr, ret);
+
+	spin_lock_irqsave(&m->vmas_lock, flags);
+	if (atomic_dec_return(&vi->pendings)) {
+		wake_up(&vi->pendings_wait);
+	} else {
+		list_del(&vi->list);
+		pcn_kmsg_free_msg(vi->response);
+		kfree(vi);
+	}
+	spin_unlock_irqrestore(&m->vmas_lock, flags);
+
+	return ret;
+}
+
+
 int vma_server_init(void)
 {
 	/*
@@ -1833,6 +2149,11 @@ int vma_server_init(void)
 			PCN_KMSG_TYPE_PROC_SRV_VMA_ACK, handle_vma_ack);
 	pcn_kmsg_register_callback(
 			PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK, handle_vma_lock);
+
+	pcn_kmsg_register_callback(
+			PCN_KMSG_TYPE_REMOTE_VMA_REQUEST, handle_remote_vma_request);
+	pcn_kmsg_register_callback(
+			PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE, handle_remote_vma_response);
 
 	return 0;
 }

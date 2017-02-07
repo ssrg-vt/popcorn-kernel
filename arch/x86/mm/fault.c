@@ -26,7 +26,7 @@
 #include <asm/trace/exceptions.h>
 
 #ifdef CONFIG_POPCORN
-#include <popcorn/page_server.h>
+#include <popcorn/vma_server.h>
 #endif
 
 /*
@@ -1200,28 +1200,16 @@ retry:
 		might_sleep();
 	}
 
+retry_vma:
 	vma = find_vma(mm, address);
+	if (unlikely(!vma || vma->vm_start > address)) {
 #ifdef CONFIG_POPCORN
-	if (tsk->tgroup_distributed && tsk->main == 0) {
-		int ret;
-		// sanghoon: This should be the shadow thread
-		BUG_ON(!tsk->memory);
-		printk(KERN_WARNING"\n");
-		printk(KERN_WARNING"## PAGEFAULT: 0x%lx 0x%lx 0x%lx\n",
-				address, regs->ip, error_code);
-		ret = page_server_do_page_fault(tsk, vma, address, error_code);
-		if (ret == 0) {
-			fault = VM_FAULT_MAJOR;
-			goto out;
-		} else if (ret == VM_CONTINUE) {
-			vma = find_vma(mm, address);
-		} else if (ret != VM_CONTINUE) {
-			bad_area(regs, error_code, address);
-			return;
+		if (tsk->tgroup_distributed && tsk->main == 0) {
+			if (!vma_server_fetch_vma(tsk, address)) {
+				goto retry_vma;
+			}
 		}
-	}
 #endif
-	if (unlikely(!vma)) {
 		bad_area(regs, error_code, address);
 		return;
 	}
@@ -1265,7 +1253,6 @@ good_area:
 	 * we get VM_FAULT_RETRY back, the mmap_sem has been unlocked.
 	 */
 	fault = handle_mm_fault(mm, vma, address, flags);
-out:
 	major |= fault & VM_FAULT_MAJOR;
 
 	/*

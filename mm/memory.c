@@ -72,6 +72,10 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/page_server.h>
+#endif
+
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
 #endif
@@ -3506,6 +3510,13 @@ static int handle_pte_fault(struct mm_struct *mm,
 	barrier();
 	if (!pte_present(entry)) {
 		if (pte_none(entry)) {
+#ifdef CONFIG_POPCORN
+			if (current->memory) {
+				int ret = page_server_handle_pte_fault(
+						mm, vma, address, pte, pmd, flags);
+				if (ret != VM_CONTINUE) return ret;
+			}
+#endif
 			if (vma_is_anonymous(vma))
 				return do_anonymous_page(mm, vma, address,
 							 pte, pmd, flags);
@@ -3524,6 +3535,11 @@ static int handle_pte_fault(struct mm_struct *mm,
 	spin_lock(ptl);
 	if (unlikely(!pte_same(*pte, entry)))
 		goto unlock;
+#ifdef CONFIG_POPCORN
+	/**
+	 * pte exists, but made this fault for some reason. maybe cow
+	 */
+#endif
 	if (flags & FAULT_FLAG_WRITE) {
 		if (!pte_write(entry))
 			return do_wp_page(mm, vma, address,

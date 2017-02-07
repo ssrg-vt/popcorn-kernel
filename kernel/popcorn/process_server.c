@@ -495,7 +495,7 @@ static void __release_memory_t(struct task_struct *tsk)
 int popcorn_process_exit(struct task_struct *tsk)
 {
 	memory_t *memory = tsk->memory;
-	struct pt_regs *regs = task_pt_regs(tsk);
+	// struct pt_regs *regs = task_pt_regs(tsk);
 
 	if (!memory) return -ESRCH;
 
@@ -503,7 +503,7 @@ int popcorn_process_exit(struct task_struct *tsk)
 	printk(KERN_INFO"%s: %d/%d %d, %d %d %d\n", __func__,
 			tsk->pid, tsk->tgid, tsk->main, tsk->executing_for_remote,
 			tsk->exit_code, tsk->group_exit);
-	__show_regs(regs, 1);
+	//__show_regs(regs, 1);
 
 	/* I am helper */
 	if (tsk->main == 1) {
@@ -1206,6 +1206,9 @@ static memory_t *__alloc_memory_struct(int home_cpu, int home_id)
 
 	INIT_LIST_HEAD(&m->pages);
 	spin_lock_init(&m->pages_lock);
+
+	INIT_LIST_HEAD(&m->vmas);
+	spin_lock_init(&m->vmas_lock);
 
 	printk(KERN_INFO"%s: at 0x%p for %d / %d\n",
 			__func__, m, home_cpu, home_id);

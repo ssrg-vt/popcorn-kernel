@@ -43,9 +43,10 @@ int page_server_try_handle_mm_fault(struct task_struct *tsk,
 		  unsigned long page_fault_address, unsigned long page_fault_flags,
 		  unsigned long error_code);
 
-int page_server_do_page_fault(struct task_struct *tsk,
-		  struct vm_area_struct *vma, unsigned long page_fault_address,
-		  unsigned long error_code);
+int page_server_handle_pte_fault(struct mm_struct *mm,
+		struct vm_area_struct *vma,
+		unsigned long address, pte_t *pte, pmd_t *pmd,
+		unsigned int flags);
 
 void synchronize_migrations(int tgroup_home_cpu,int tgroup_home_id);
 

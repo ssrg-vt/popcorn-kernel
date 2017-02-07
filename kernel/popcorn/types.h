@@ -88,11 +88,14 @@ typedef struct _memory_struct {
 	int arrived_op;
 	int my_lock;
 
-	int kernel_set[MAX_POPCORN_NODES];	/* TODO: change to bitmap */
+	unsigned char kernel_set[MAX_POPCORN_NODES];	/* TODO: change to bitmap */
 	struct rw_semaphore kernel_set_sem;
 
 	struct list_head pages;
 	spinlock_t pages_lock;
+
+	struct list_head vmas;
+	spinlock_t vmas_lock;
 
 	vma_operation_t *message_push_operation;
 	atomic_t answers_remain;
@@ -241,16 +244,6 @@ DEFINE_PCN_KMSG(thread_group_exited_notification_t, EXIT_GROUP_FIELDS);
 /**
  * Inform remote cpu of a vma to process mapping.
  */
-#define VMA_TRANSFER_FIELDS \
-	int vma_id; \
-	int clone_request_id; \
-	unsigned long start; \
-	unsigned long end; \
-	pgprot_t prot; \
-	unsigned long flags; \
-	unsigned long pgoff; \
-	char path[256];
-DEFINE_PCN_KMSG(vma_transfer_t, VMA_TRANSFER_FIELDS);
 
 #define MAPPING_FIELDS_FOR_2_KERNELS \
 	int tgroup_home_cpu; \
@@ -356,6 +349,7 @@ DEFINE_PCN_KMSG(remote_vma_request_t, REMOTE_VMA_REQUEST_FIELDS);
 	char vm_file_path[512]; \
 	unsigned char vm_owners[MAX_POPCORN_NODES];
 DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
+#define remote_vma_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
 
 
 #define REMOTE_PAGE_REQUEST_FIELDS \
@@ -366,28 +360,14 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 	unsigned long error_code;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
-enum remote_page_status {
-	RP_STATUS_FETCHED = 0,
-	RP_STATUS_FAULT,
-	RP_STATUS_FAULT_VMA,
-	RP_STATUS_KILLED,
-};
-
 #define REMOTE_PAGE_RESPONSE_FIELDS \
 	int tgroup_home_cpu; \
 	int tgroup_home_id; \
 	int remote_pid;	\
 	int result; \
 	unsigned long addr; \
-	unsigned long vm_start; \
-	unsigned long vm_end; \
-	unsigned long vm_flags;	\
-	unsigned long vm_pgoff; \
-	char vm_file_path[512]; \
 	char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
-
-#define remote_page_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
 
 #define REMOTE_PAGE_INVALIDATE_FIELDS \
 	int tgroup_home_cpu; \

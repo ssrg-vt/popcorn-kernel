@@ -12,6 +12,8 @@
 #ifndef INCLUDE_POPCORN_VMA_SERVER_H_
 #define INCLUDE_POPCORN_VMA_SERVER_H_
 
+#include <popcorn/types.h>
+
 /**
  * This function takes a distributed lock for a VMA operation, and triggers
  * the same operation among different Popcorn Linux kernels.
@@ -117,5 +119,7 @@ static inline long vma_server_do_mremap_end(unsigned long addr,
 	end_distribute_operation(VMA_OP_REMAP, start_ret, new_addr);
 	return 0;
 }
+
+int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address);
 
 #endif /* INCLUDE_POPCORN_VMA_SERVER_H_ */
