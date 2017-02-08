@@ -18,22 +18,9 @@ config POPCORN_DEBUG
 	help
 		Enable or disable kernel messages that can help debug Popcorn issues.
 
-config POPCORN_KMSG
-	bool "Popcorn Inter-Kernel Messaging Support"
-	depends on POPCORN
-	default y
-	help
-		Enable or disable support for inter-kernel messaging in Popcorn.
-
-#config POPCORN_UMSG
-#	bool "Popcorn Inter-Kernel Userspace Messaging Support"
-#	depends on POPCORN_KMSG
-#	default n
-#	help
-#		Enable or disable support for messaging between userspace processes
-#		on different kernels in Popcorn.
-
 comment "Popcorn is not currently supported on your architecture"
 	depends on !HAVE_POPCORN_ARCH_SUPPORT
+
+source msg_layer/Kconfig
 
 endmenu

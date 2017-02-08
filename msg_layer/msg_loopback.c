@@ -6,10 +6,9 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/bundle.h>
 
-static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_message *lmsg, unsigned int payload_size)
+static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_message *lmsg, unsigned int size)
 {
 	void *msg;
-	size_t size = payload_size + sizeof(struct pcn_kmsg_hdr);
 	struct pcn_kmsg_hdr *hdr;
 	pcn_kmsg_cbftn fn;
 

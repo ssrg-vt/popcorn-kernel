@@ -1,0 +1,35 @@
+if POPCORN
+
+config POPCORN_KMSG
+	bool "Popcorn Inter-Kernel Messaging Support"
+	depends on POPCORN
+	default y
+	help
+		Enable or disable support for inter-kernel messaging in Popcorn
+
+config POPCORN_KMSG_LOOPBACK
+	tristate "Loopback message passing layer"
+	depends on POPCORN_KMSG
+	default m
+
+config POPCORN_KMSG_SOCKET
+	tristate "Socket message passing layer"
+	depends on POPCORN_KMSG
+	default m
+
+config POPCORN_KMSG_ETHERNET
+	tristate "Ethernet message passing layer"
+	depends on POPCORN_KMSG
+	default n
+
+config POPCORN_KMSG_DOLPHIN
+	tristate "Dolphin message passing layer"
+	depends on POPCORN_KMSG
+	default n
+
+config POPCORN_KMSG_IB
+	tristate "InfiniBand message passing layer"
+	depends on POPCORN_KMSG
+	default n
+
+endif

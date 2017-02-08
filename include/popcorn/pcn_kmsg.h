@@ -115,6 +115,8 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
 	PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE,
 	PCN_KMSG_TYPE_REMOTE_PAGE_INVALIDATE,
+	PCN_KMSG_TYPE_REMOTE_PAGE_CLAIM,
+	PCN_KMSG_TYPE_REMOTE_PAGE_GRANT,
 	PCN_KMSG_TYPE_MAX
 };
 
@@ -193,13 +195,13 @@ struct pcn_kmsg_hdr {
    when this actually goes out, so the receiver can poll on the ready bit
    in the header. */
 struct pcn_kmsg_message {
-	struct pcn_kmsg_hdr hdr;
+	struct pcn_kmsg_hdr header;
 	unsigned char payload[PCN_KMSG_PAYLOAD_SIZE];
 }__attribute__((packed)) __attribute__((aligned(CACHE_LINE_SIZE)));
 
 /* Struct for sending long messages (>60 bytes payload) */
 struct pcn_kmsg_long_message {
-	struct pcn_kmsg_hdr hdr;
+	struct pcn_kmsg_hdr header;
 	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
 }__attribute__((packed));
 
@@ -208,7 +210,7 @@ struct pcn_kmsg_long_message {
 
 /* Message struct for guest kernels to check in with each other. */
 struct pcn_kmsg_checkin_message {
-	struct pcn_kmsg_hdr hdr;
+	struct pcn_kmsg_hdr header;
 	unsigned long window_phys_addr;
 	unsigned char cpu_to_add;
 	char pad[51];
@@ -285,9 +287,9 @@ int pcn_kmsg_mcast_send(pcn_kmsg_mcast_id id, struct pcn_kmsg_message *msg);
 int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id, void *msg,
 		unsigned int payload_size);
 
-int pcn_kmsg_get_node_ids(uint16_t *nodes, int len, uint16_t *self);
-
 extern send_cbftn send_callback;
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
+
+#define IP_TO_UINT32(a,b,c,d) (((a) << 24) | ((b) << 16) | ((c) << 8) | (d))
 
 #endif /* __LINUX_PCN_KMSG_H */

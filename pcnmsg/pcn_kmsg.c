@@ -45,7 +45,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 	return 0;
 }
 
-int pcn_kmsg_send_long(unsigned int dest_cpu, void *lmsg, unsigned int message_size)
+int pcn_kmsg_send_long(unsigned int to, void *lmsg, unsigned int size)
 {
 	if (send_callback == NULL) {
 		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
@@ -57,13 +57,12 @@ int pcn_kmsg_send_long(unsigned int dest_cpu, void *lmsg, unsigned int message_s
 		return -ENOENT;
 	}
 
-	return send_callback(dest_cpu, (struct pcn_kmsg_message *)lmsg,
-			message_size - sizeof(struct pcn_kmsg_hdr)); // adjust payload size
+	return send_callback(to, (struct pcn_kmsg_message *)lmsg, size);
 }
 
-int pcn_kmsg_send(unsigned int dest_cpu, void *msg)
+int pcn_kmsg_send(unsigned int to, void *msg)
 {
-	return pcn_kmsg_send_long(dest_cpu, msg, sizeof(*msg));
+	return pcn_kmsg_send_long(to, msg, sizeof(struct pcn_kmsg_message));
 }
 
 void pcn_kmsg_free_msg(void *msg)

@@ -2020,17 +2020,18 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	DEFINE_WAIT(wait);
 	int ret = 0;
 	unsigned long addr = address & PAGE_MASK;
+	struct pt_regs *regs = task_pt_regs(tsk);
+	remote_vma_request_t *req = NULL;
 
 	might_sleep();
 
 	printk(KERN_WARNING"\n");
-	printk(KERN_WARNING"## VMAFAULT: %lx\n", address);
+	printk(KERN_WARNING"## VMAFAULT: %lx %lx\n", address, regs->ip);
 
 	spin_lock_irqsave(&m->vmas_lock, flags);
 	vi = __lookup_pending_vma_request(m, addr);
 	if (!vi) {
 		struct vma_info *v;
-		remote_vma_request_t *req;
 		spin_unlock_irqrestore(&m->vmas_lock, flags);
 
 		vi = __alloc_remote_vma_request(tsk, addr, &req);
@@ -2041,16 +2042,21 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 			printk("%s: %lx from %d, %d\n", __func__,
 					addr, tsk->tgroup_home_cpu, tsk->tgroup_home_id);
 			list_add(&vi->list, &m->vmas);
-			pcn_kmsg_send_long(tsk->tgroup_home_cpu, req, sizeof(*req));
 		} else {
 			printk("%s: %lx already pended\n", __func__, addr);
 			kfree(vi);
 			vi = v;
+			kfree(req);
+			req = NULL;
 		}
-		kfree(req);
 	}
 	atomic_inc(&vi->pendings);
 	spin_unlock_irqrestore(&m->vmas_lock, flags);
+
+	if (req) {
+		pcn_kmsg_send_long(tsk->tgroup_home_cpu, req, sizeof(*req));
+		kfree(req);
+	}
 
 	prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	up_read(&tsk->mm->mmap_sem);

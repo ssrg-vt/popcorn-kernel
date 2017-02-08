@@ -468,12 +468,12 @@ int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	DEFINE_WAIT(wait);
 	int remaining;
 	int ret = 0;
+	remote_page_request_t *req = NULL;
 
 	spin_lock_irqsave(&m->pages_lock, flags);
 	rp = __lookup_pending_remote_page_request(m, addr);
 	if (!rp) {
 		struct remote_page *r;
-		remote_page_request_t *req;
 		spin_unlock_irqrestore(&m->pages_lock, flags);
 
 		rp = __alloc_remote_page_request(tsk, addr, fault_flags, &req);
@@ -484,16 +484,21 @@ int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 			printk("%s: %lx from %d, %d\n", __func__,
 					addr, tsk->tgroup_home_cpu, tsk->tgroup_home_id);
 			list_add(&rp->list, &m->pages);
-			pcn_kmsg_send_long(tsk->tgroup_home_cpu, req, sizeof(*req));
 		} else {
 			printk("%s: %lx pended\n", __func__, addr);
 			kfree(rp);
 			rp = r;
+			kfree(req);
+			req = NULL;
 		}
-		kfree(req);
 	}
 	atomic_inc(&rp->pendings);
 	spin_unlock_irqrestore(&m->pages_lock, flags);
+
+	if (req) {
+		pcn_kmsg_send_long(tsk->tgroup_home_cpu, req, sizeof(*req));
+		kfree(req);
+	}
 
 	prepare_to_wait(&rp->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	up_read(&tsk->mm->mmap_sem);
