@@ -4,6 +4,7 @@
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/mm.h>
 
 #include <popcorn/bundle.h>
 #include "types.h"
@@ -84,6 +85,12 @@ void remove_memory_entry_in_out(memory_t *m, bool in)
 	spin_lock_irqsave(lock, flags);
 	list_del(&m->list);
 	spin_unlock_irqrestore(lock, flags);
+}
+
+
+bool page_is_replicated(struct page *page)
+{
+	return !!bitmap_weight(page->page_owners, MAX_POPCORN_NODES);
 }
 
 

@@ -7,6 +7,7 @@
 #include <linux/workqueue.h>
 #include <linux/signal.h>
 #include <linux/rwsem.h>
+#include <linux/slab.h>
 
 #include <popcorn/pcn_kmsg.h> // Messaging
 #include <popcorn/types.h>
@@ -357,16 +358,17 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 	int tgroup_home_id; \
 	int remote_pid; \
 	unsigned long addr; \
-	unsigned long error_code;
+	unsigned long fault_flags;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
 #define REMOTE_PAGE_RESPONSE_FIELDS \
 	int tgroup_home_cpu; \
 	int tgroup_home_id; \
 	int remote_pid;	\
-	int result; \
 	unsigned long addr; \
-	char page[PAGE_SIZE];
+	int result; \
+	DECLARE_BITMAP(owners, MAX_POPCORN_NODES); \
+	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 
 #define REMOTE_PAGE_INVALIDATE_FIELDS \
@@ -375,100 +377,39 @@ DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 	unsigned long addr;
 DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
 
-/**
- * Works
- */
-
-/* Process server */
-
-typedef struct {
-	struct work_struct work;
-	exiting_process_t* request;
-} exit_work_t;
-
-typedef struct {
-	struct work_struct work;
-	remote_thread_count_request_t* request;
-} count_work_t;
-
-typedef struct {
-	struct work_struct work;
-	new_kernel_t* request;
-} new_kernel_work_t;
-
-typedef struct {
-	struct work_struct work;
-	new_kernel_response_t* answer;
-	memory_t* memory;
-} new_kernel_work_answer_t;
-
-typedef struct {
-	struct delayed_work work;
-	clone_request_t* request;
-} clone_work_t;
-
-typedef struct{
-	struct work_struct work;
-	back_migration_request_t* back_mig_request;
-} back_mig_work_t;
-
-typedef struct {
-	struct work_struct work;
-	thread_group_exited_notification_t* request;
-} exit_group_work_t;
-
-
-/* Page server */
-
-typedef struct {
-	struct delayed_work work;
-	data_request_for_2_kernels_t* request;
-	unsigned long address;
-	int tgroup_home_cpu;
-	int tgroup_home_id;
-} request_work_t;
-
-typedef struct {
-	struct work_struct work;
-	ack_t* response;
-} ack_work_t;
-
-typedef struct {
-	struct delayed_work work;
-	invalid_data_for_2_kernels_t* request;
-} invalid_work_t;
-
-
-/* vma server */
-
-typedef struct {
-	struct work_struct work;
-	vma_operation_t* operation;
-	memory_t* memory;
-	int fake;
-} vma_op_work_t;
-
-typedef struct {
-	struct work_struct work;
-	unmap_message_t* unmap;
-	int fake;
-	memory_t* memory;
-} vma_unmap_work_t;
-
-typedef struct {
-	struct work_struct work;
-	vma_lock_t* lock;
-	memory_t* memory;
-} vma_lock_work_t;
-
-
-/* sched server */
-
-typedef struct _sched_periodic_req {
-	struct pcn_kmsg_hdr header;
-	int power_1;
-	int power_2;
+#define SCHED_PERIODIC_FIELDS \
+	int power_1; \
+	int power_2; \
 	int power_3;
-} sched_periodic_req;
+DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
+
+
+/**
+ * Message routing using work queues
+ */
+struct pcn_kmsg_work {
+	struct work_struct work;
+	void *msg;
+};
+
+static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*handler)(struct work_struct *), struct workqueue_struct *wq)
+{
+	struct pcn_kmsg_work *w = kmalloc(sizeof(*w), GFP_ATOMIC);
+	BUG_ON(!w);
+
+	w->msg = msg;
+	INIT_WORK(&w->work, handler);
+	queue_work(wq, &w->work);
+
+	return 1;
+}
+
+#define DEFINE_KMSG_WQ_HANDLER(x, wq) \
+static inline int handle_##x(struct pcn_kmsg_message *msg) {\
+	return __handle_popcorn_work(msg, process_##x, wq);\
+}
+
+#define REGISTER_KMSG_WQ_HANDLER(x, y) \
+	pcn_kmsg_register_callback(x, handle_##y)
 
 #endif /* __TYPES_H__ */

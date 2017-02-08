@@ -224,6 +224,7 @@ struct page {
 #endif
 
 #ifdef CONFIG_POPCORN
+	DECLARE_BITMAP(page_owners, MAX_POPCORN_NODES);
 	//Multikernel
 	unsigned long rflags;
 	int replicated;
@@ -374,7 +375,7 @@ struct vm_area_struct {
 #endif
 	struct vm_userfaultfd_ctx vm_userfaultfd_ctx;
 #ifdef CONFIG_POPCORN
-	unsigned long vm_owners[32];
+	DECLARE_BITMAP(vm_owners, MAX_POPCORN_NODES);
 #endif
 };
 

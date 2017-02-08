@@ -340,10 +340,16 @@ static int count_remote_thread_members(
 ///////////////////////////////////////////////////////////////////////////////
 // handling a new incoming migration request?
 ///////////////////////////////////////////////////////////////////////////////
+struct new_kernel_work_answer {
+	struct work_struct work;
+	new_kernel_response_t* answer;
+	memory_t* memory;
+};
+
 static void process_new_kernel_response(struct work_struct *_work)
 {
 	int i;
-	new_kernel_work_answer_t *work = (new_kernel_work_answer_t *)_work;
+	struct new_kernel_work_answer *work = (struct new_kernel_work_answer *)_work;
 	new_kernel_response_t *answer = work->answer;
 	memory_t *memory = work->memory;
 
@@ -376,30 +382,32 @@ static int handle_new_kernel_response(struct pcn_kmsg_message *inc_msg)
 	new_kernel_response_t *answer = (new_kernel_response_t *)inc_msg;
 	memory_t *memory = find_memory_entry(answer->tgroup_home_cpu,
 					    answer->tgroup_home_id);
+	struct new_kernel_work_answer *work;
 
 	PSNEWTHREADPRINTK("received new kernel answer\n");
 	//printk("%s: %d\n", __func__, answer->vma_operation_index);
-	if (memory != NULL) {
-		new_kernel_work_answer_t *work = kmalloc(sizeof(*work), GFP_ATOMIC);
-		BUG_ON(!work);
-		work->answer = answer;
-		work->memory = memory;
-		INIT_WORK((struct work_struct *)work, process_new_kernel_response);
-		queue_work(new_kernel_wq, (struct work_struct *)work);
-	} else {
+	if (memory == NULL) {
 		printk("%s: ERROR: received an answer for new kernel "
 				"but memory_t not present cpu %d id %d\n", __func__,
 				answer->tgroup_home_cpu, answer->tgroup_home_id);
 		pcn_kmsg_free_msg(inc_msg);
+		return 1;
 	}
+	
+	work = kmalloc(sizeof(*work), GFP_ATOMIC);
+	BUG_ON(!work);
+	work->answer = answer;
+	work->memory = memory;
+	INIT_WORK((struct work_struct *)work, process_new_kernel_response);
+	queue_work(new_kernel_wq, (struct work_struct *)work);
 
 	return 1;
 }
 
 static void process_new_kernel(struct work_struct *_work)
 {
-	new_kernel_work_t *work = (new_kernel_work_t *)_work;
-	new_kernel_t *req = work->request;
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	new_kernel_t *req = work->msg;
 	memory_t *memory;
 	new_kernel_response_t *answer = kmalloc(sizeof(*answer), GFP_ATOMIC);
 	BUG_ON(!answer);
@@ -438,23 +446,6 @@ static void process_new_kernel(struct work_struct *_work)
 	kfree(work);
 	pcn_kmsg_free_msg(req);
 }
-
-static int handle_new_kernel(struct pcn_kmsg_message *inc_msg)
-{
-	new_kernel_t *req= (new_kernel_t *)inc_msg;
-	new_kernel_work_t *work;
-
-	work = kmalloc(sizeof(new_kernel_work_t), GFP_ATOMIC);
-
-	if (work) {
-		work->request = req;
-		INIT_WORK((struct work_struct *)work, process_new_kernel);
-		queue_work(new_kernel_wq, (struct work_struct *)work);
-	}
-
-	return 1;
-}
-
 
 static void __release_memory_t(struct task_struct *tsk)
 {
@@ -555,7 +546,7 @@ int popcorn_process_exit(struct task_struct *tsk)
  * 0 normal;
  * 1 flush pending operation
  * */
-static int exit_distributed_process(memory_t *memory, int flush)
+int exit_distributed_process(memory_t *memory, int flush)
 {
 	struct task_struct *thread;
 	unsigned long flags;
@@ -734,10 +725,10 @@ found:
 ///////////////////////////////////////////////////////////////////////////////
 // exit group notification
 ///////////////////////////////////////////////////////////////////////////////
-static void process_exit_group_notification(struct work_struct *_work)
+static void process_thread_group_exited_notification(struct work_struct *_work)
 {
-	exit_group_work_t *work = (exit_group_work_t *)_work;
-	thread_group_exited_notification_t *msg = work->request;
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	thread_group_exited_notification_t *msg = work->msg;
 	unsigned long flags;
 
 	memory_t *memory = find_memory_entry(msg->tgroup_home_cpu,
@@ -767,28 +758,11 @@ out_free:
 	kfree(work);
 }
 
-static int handle_thread_group_exited_notification(
-		struct pcn_kmsg_message *inc_msg)
-{
-	exit_group_work_t *work;
-	thread_group_exited_notification_t *req =
-		(thread_group_exited_notification_t *)inc_msg;
-
-	work = kmalloc(sizeof(exit_group_work_t), GFP_ATOMIC);
-	if (work) {
-		work->request = req;
-		INIT_WORK((struct work_struct *)work,
-			   process_exit_group_notification);
-		queue_work(exit_group_wq, (struct work_struct *) work);
-	}
-	return 1;
-}
-
 
 static void process_exiting_process_notification(struct work_struct *_work)
 {
-	exit_work_t *work = (exit_work_t *)_work;
-	exiting_process_t *req = work->request;
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	exiting_process_t *req = work->msg;
 
 	unsigned int source_cpu = req->header.from_cpu;
 	struct task_struct *tsk;
@@ -818,20 +792,6 @@ static void process_exiting_process_notification(struct work_struct *_work)
 	kfree(work);
 }
 
-static int handle_exiting_process_notification(struct pcn_kmsg_message *inc_msg)
-{
-	exit_work_t *work;
-	exiting_process_t *req = (exiting_process_t *)inc_msg;
-
-	work = kmalloc(sizeof(exit_work_t), GFP_ATOMIC);
-	if (work) {
-		work->request = req;
-		INIT_WORK((struct work_struct *)work,
-			   process_exiting_process_notification);
-		queue_work(exit_wq, (struct work_struct *)work);
-	}
-	return 1;
-}
 
 static int handle_remote_thread_count_response(struct pcn_kmsg_message *inc_msg)
 {
@@ -873,10 +833,10 @@ static int handle_remote_thread_count_response(struct pcn_kmsg_message *inc_msg)
 	return 0;
 }
 
-static void process_count_request(struct work_struct *_work)
+static void process_remote_thread_count_request(struct work_struct *_work)
 {
-	count_work_t *work = (count_work_t *)_work;
-	remote_thread_count_request_t *request = work->request;
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	remote_thread_count_request_t *request = work->msg;
 	remote_thread_count_response_t *response;
 	memory_t *memory;
 
@@ -944,21 +904,6 @@ static void process_count_request(struct work_struct *_work)
 	kfree(work);
 }
 
-static int handle_remote_thread_count_request(struct pcn_kmsg_message *inc_msg)
-{
-	count_work_t *work;
-	remote_thread_count_request_t *request =
-			(remote_thread_count_request_t *)inc_msg;
-
-	work = kmalloc(sizeof(*work), GFP_ATOMIC);
-	BUG_ON(!work);
-
-	work->request = request;
-	INIT_WORK( (struct work_struct *)work, process_count_request);
-	queue_work(exit_wq, (struct work_struct *)work);
-
-	return 1;
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // synch migrations (?)
@@ -1240,6 +1185,10 @@ extern int kernel_mprotect(unsigned long start, size_t len, unsigned long prot);
 extern long kernel_mremap(unsigned long addr, unsigned long old_len,
 		unsigned long new_len, unsigned long flags, unsigned long new_addr);
 
+/**
+ * We do this stupid thing because related meomry mapping functions operate
+ * on "current". Thus, we need mmap/munmap/madvise in our process
+ */
 static void helper_thread_main(const char *at)
 {
 	memory_t *memory = current->memory;
@@ -1570,9 +1519,9 @@ int process_server_do_migration(struct task_struct *task, int dst_nid,
 ///////////////////////////////////////////////////////////////////////////////
 // pairing request
 ///////////////////////////////////////////////////////////////////////////////
-static int handle_process_pairing_request(struct pcn_kmsg_message *_msg)
+static int handle_process_pairing_request(struct pcn_kmsg_message *msg)
 {
-	create_process_pairing_t *req = (create_process_pairing_t *)_msg;
+	create_process_pairing_t *req = (create_process_pairing_t *)msg;
 	unsigned int source_cpu = req->header.from_cpu;
 	struct task_struct *tsk;
 
@@ -1734,7 +1683,7 @@ static int spawn_shadow_thread(clone_request_t *req)
 }
 
 
-static void __kick_shadow_spawner(memory_t *memory, clone_work_t *work)
+static void __kick_shadow_spawner(memory_t *memory, struct pcn_kmsg_work *work)
 {
 	// Utilize the list_head in work_struct
 	struct list_head *entry = &((struct work_struct *)work)->entry;
@@ -1774,7 +1723,7 @@ int shadow_spawner(void *_args)
 
 		if (!work) continue;
 
-		req = ((clone_work_t *)work)->request;
+		req = ((struct pcn_kmsg_work *)work)->msg;
 		while (spawn_shadow_thread(req) == -EAGAIN) {
 			schedule();
 		}
@@ -1911,8 +1860,8 @@ static void clone_remote_thread(struct work_struct *_work)
 	/* Processing clone requests are serialized by clone_wq.
 	 * Thus we avoid introducing a new lock memory_entry
 	 */
-	clone_work_t *work = (clone_work_t *)_work;
-	clone_request_t *req = (clone_request_t *)work->request;
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	clone_request_t *req = work->msg;
 	memory_t *memory;
 
 	memory = find_memory_entry_in(req->tgroup_home_cpu, req->tgroup_home_id);
@@ -1949,20 +1898,26 @@ static void clone_remote_thread(struct work_struct *_work)
 static int handle_clone_request(struct pcn_kmsg_message *msg)
 {
 	clone_request_t *req = (clone_request_t *)msg;
-	clone_work_t *work = kmalloc(sizeof(*work), GFP_ATOMIC);
+	struct pcn_kmsg_work *work = kmalloc(sizeof(*work), GFP_ATOMIC);
+	BUG_ON(!work);
 
 #if MIGRATION_PROFILE
 	migration_start = ktime_get();
 #endif
 
-	BUG_ON(!work);
-	work->request = req;
+	work->msg = req;
 	INIT_WORK((struct work_struct *)work, clone_remote_thread);
 	queue_work(clone_wq, (struct work_struct *)work);
 
 	return 0;
 }
 
+
+
+DEFINE_KMSG_WQ_HANDLER(new_kernel, new_kernel_wq);
+DEFINE_KMSG_WQ_HANDLER(remote_thread_count_request, exit_wq);
+DEFINE_KMSG_WQ_HANDLER(exiting_process_notification, exit_wq);
+DEFINE_KMSG_WQ_HANDLER(thread_group_exited_notification, exit_group_wq);
 
 /**
  * Initialize the process server.
@@ -1980,8 +1935,17 @@ int __init process_server_init(void)
 	new_kernel_wq = create_workqueue("new_kernel_wq");
 
 	/* Register handlers */
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_NEW_KERNEL,
-				   handle_new_kernel);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_PROC_SRV_NEW_KERNEL, new_kernel);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_PROC_SRV_THREAD_COUNT_REQUEST,
+			remote_thread_count_request);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_PROC_SRV_EXIT_PROCESS, exiting_process_notification);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_PROC_SRV_THREAD_GROUP_EXITED_NOTIFICATION,
+			thread_group_exited_notification);
+
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_NEW_KERNEL_RESPONSE,
 				   handle_new_kernel_response);
 
@@ -1992,13 +1956,7 @@ int __init process_server_init(void)
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_CREATE_PROCESS_PAIRING,
 				   handle_process_pairing_request);
 
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_THREAD_COUNT_REQUEST,
-				   handle_remote_thread_count_request);
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_THREAD_COUNT_RESPONSE,
 				   handle_remote_thread_count_response);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_EXIT_PROCESS,
-				   handle_exiting_process_notification);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_PROC_SRV_THREAD_GROUP_EXITED_NOTIFICATION,
-				   handle_thread_group_exited_notification);
 	return 0;
 }

@@ -3508,15 +3508,15 @@ static int handle_pte_fault(struct mm_struct *mm,
 	 */
 	entry = *pte;
 	barrier();
+#ifdef CONFIG_POPCORN
+	if (current->memory) {
+		int ret = page_server_handle_pte_fault(
+				mm, vma, address, pte, pmd, flags);
+		if (ret != VM_CONTINUE) return ret;
+	}
+#endif
 	if (!pte_present(entry)) {
 		if (pte_none(entry)) {
-#ifdef CONFIG_POPCORN
-			if (current->memory) {
-				int ret = page_server_handle_pte_fault(
-						mm, vma, address, pte, pmd, flags);
-				if (ret != VM_CONTINUE) return ret;
-			}
-#endif
 			if (vma_is_anonymous(vma))
 				return do_anonymous_page(mm, vma, address,
 							 pte, pmd, flags);

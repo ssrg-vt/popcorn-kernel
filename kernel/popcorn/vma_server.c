@@ -648,9 +648,16 @@ int vma_server_do_mapping_for_distributed_process(
  * (not about server/client as Marina wrote that is home/not home kernel)
  * currently a workqueue
  */
+struct vma_op_work {
+	struct work_struct work;
+	vma_operation_t* operation;
+	memory_t* memory;
+	int fake;
+};
+
 static void vma_server_process_vma_op(struct work_struct* work)
 {
-	vma_op_work_t* vma_work = (vma_op_work_t*) work;
+	struct vma_op_work* vma_work = (struct vma_op_work*) work;
 	vma_operation_t* operation = vma_work->operation;
 	memory_t* memory = vma_work->memory;
 	struct mm_struct* mm = NULL;
@@ -970,10 +977,10 @@ static void vma_server_process_vma_op(struct work_struct* work)
 	}
 }
 
-static void process_vma_lock(struct work_struct* work)
+static void process_vma_lock(struct work_struct* _work)
 {
-	vma_lock_work_t* vma_lock_work = (vma_lock_work_t*) work;
-	vma_lock_t* lock = vma_lock_work->lock;
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	vma_lock_t* lock = work->msg;
 
 	memory_t* entry = find_memory_entry(lock->tgroup_home_cpu,
 					    lock->tgroup_home_id);
@@ -1002,23 +1009,6 @@ static void process_vma_lock(struct work_struct* work)
 	return ;
 }
 
-static int handle_vma_lock(struct pcn_kmsg_message* inc_msg)
-{
-	vma_lock_t* lock = (vma_lock_t*) inc_msg;
-	vma_lock_work_t* work;
-
-	work = kmalloc(sizeof(vma_lock_work_t), GFP_ATOMIC);
-
-	if (work) {
-		work->lock = lock;
-		INIT_WORK( (struct work_struct*)work, process_vma_lock);
-		queue_work(vma_lock_wq, (struct work_struct*) work);
-	}
-	else {
-		pcn_kmsg_free_msg(lock);
-	}
-	return 1;
-}
 
 static int handle_vma_ack(struct pcn_kmsg_message* inc_msg)
 {
@@ -1056,14 +1046,14 @@ static int handle_vma_ack(struct pcn_kmsg_message* inc_msg)
 static int handle_vma_op(struct pcn_kmsg_message* inc_msg)
 {
 	vma_operation_t* operation = (vma_operation_t*) inc_msg;
-	vma_op_work_t* work;
+	struct vma_op_work* work;
 
 	//printk("Received an operation\n");
 
 	memory_t* memory = find_memory_entry(operation->tgroup_home_cpu,
 					     operation->tgroup_home_id);
 	if (memory != NULL) {
-		work = kmalloc(sizeof(vma_op_work_t), GFP_ATOMIC);
+		work = kmalloc(sizeof(struct vma_op_work), GFP_ATOMIC);
 		BUG_ON(!work);
 		work->fake = 0;
 		work->memory = memory;
@@ -1758,7 +1748,7 @@ out:
 int vma_server_enqueue_vma_op(
 		memory_t * memory, vma_operation_t * operation, int fake)
 {
-	vma_op_work_t *work = kmalloc(sizeof(vma_op_work_t), GFP_ATOMIC);
+	struct vma_op_work *work = kmalloc(sizeof(struct vma_op_work), GFP_ATOMIC);
 	if (!work) return -ENOMEM;
 
 	work->fake = fake;
@@ -1788,12 +1778,6 @@ struct vma_info {
 };
 
 
-struct remote_vma_work {
-	struct work_struct work;
-	void *private;
-};
-
-
 static struct vma_info *__lookup_pending_vma_request(memory_t *m, unsigned long addr)
 {
 	struct vma_info *v;
@@ -1808,8 +1792,8 @@ static struct vma_info *__lookup_pending_vma_request(memory_t *m, unsigned long 
 
 static void process_remote_vma_response(struct work_struct *_work)
 {
-	struct remote_vma_work *w = (struct remote_vma_work *)_work;
-	remote_vma_response_t *res = (remote_vma_response_t *)w->private;
+	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)_work;
+	remote_vma_response_t *res = w->msg;
 	struct task_struct *tsk;
 	memory_t *m;
 	unsigned long flags;
@@ -1843,20 +1827,6 @@ out_free:
 }
 
 
-static int handle_remote_vma_response(struct pcn_kmsg_message *msg)
-{
-	// Create work
-	struct remote_vma_work *w = kmalloc(sizeof(*w), GFP_ATOMIC);
-	BUG_ON(!w);
-
-	w->private = msg;
-	INIT_WORK(&w->work, process_remote_vma_response);
-	queue_work(vma_op_wq, &w->work);
-
-	return 1;
-}
-
-
 static void response_remote_page(int nid, struct task_struct *tsk, int remote_pid, remote_vma_response_t *res)
 {
 	res->header.type = PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE;
@@ -1875,8 +1845,8 @@ static void response_remote_page(int nid, struct task_struct *tsk, int remote_pi
 
 static void process_remote_vma_request(struct work_struct *work)
 {
-	struct remote_vma_work *w = (struct remote_vma_work *)work;
-	remote_vma_request_t *req = (remote_vma_request_t *)(w->private);
+	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
+	remote_vma_request_t *req = w->msg;
 	remote_vma_response_t *res = NULL;
 	struct task_struct *tsk;
 	struct mm_struct *mm;
@@ -1888,12 +1858,13 @@ static void process_remote_vma_request(struct work_struct *work)
 	might_sleep();
 
 	while (!res) {
-		res = kmalloc(sizeof(*res), GFP_KERNEL);
+		res = kzalloc(sizeof(*res), GFP_KERNEL);
 	};
 	res->addr = addr;
 
 	tsk = find_task_by_vpid(req->tgroup_home_id);
 	if (!tsk) {
+		printk("remote_vma:: process does not exist %d\n", req->tgroup_home_id);
 		res->result = -ESRCH;
 		goto out_free;
 	}
@@ -1907,7 +1878,7 @@ static void process_remote_vma_request(struct work_struct *work)
 	/* Fill-in the vma info */
 	vma = find_vma(mm, addr);
 	if (!vma || addr < vma->vm_start) {
-		printk("%s: VMA not exist %lx\n", __func__, addr);
+		printk("remote_vma: does not exist for %lx\n", addr);
 		res->result = -ENOENT;
 		goto out_up;
 	}
@@ -1933,9 +1904,11 @@ out_up:
 	up_read(&mm->mmap_sem);
 	put_task_struct(tsk);
 
-	printk("remote_vma_request: %lx -- %lx %lx\n",
-			res->vm_start, res->vm_end, res->vm_flags);
-	printk("remote_vma_request: %lx %s\n", res->vm_pgoff, res->vm_file_path);
+	if (res->result == 0) {
+		printk("remote_vma: %lx -- %lx %lx\n",
+				res->vm_start, res->vm_end, res->vm_flags);
+		printk("remote_vma: %lx %s\n", res->vm_pgoff, res->vm_file_path);
+	}
 
 out_free:
 	response_remote_page(req->header.from_cpu, tsk, req->remote_pid, res);
@@ -1945,20 +1918,6 @@ out_free:
 	kfree(res);
 
 	return;
-}
-
-
-static int handle_remote_vma_request(struct pcn_kmsg_message *msg)
-{
-	// Create work
-	struct remote_vma_work *w = kmalloc(sizeof(*w), GFP_ATOMIC);
-	BUG_ON(!w);
-
-	w->private = msg;
-	INIT_WORK(&w->work, process_remote_vma_request);
-	queue_work(vma_op_wq, &w->work);
-
-	return 1;
 }
 
 
@@ -2009,7 +1968,6 @@ void __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 	}
 
 	down_write(&mm->mmap_sem);
-
 	vma = find_vma(mm, addr);
 	if (vma && vma->vm_start <= addr) {
 		/* someone already do things for me. */
@@ -2036,7 +1994,6 @@ void __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 		   | ((res->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
 		   | ((res->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
 		   | ((res->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0);
-		   /* | ((res->vm_flags & VM_HUGETLB) ? MAP_HUGETLB : 0) */
 
 	err = map_difference(mm, f, res->vm_start, res->vm_end,
 				vm_prot, vm_flags, res->vm_pgoff);
@@ -2067,7 +2024,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	might_sleep();
 
 	printk(KERN_WARNING"\n");
-	printk(KERN_WARNING"## VMAFAULT: %lx %lx\n", address, addr);
+	printk(KERN_WARNING"## VMAFAULT: %lx\n", address);
 
 	spin_lock_irqsave(&m->vmas_lock, flags);
 	vi = __lookup_pending_vma_request(m, addr);
@@ -2100,7 +2057,8 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	schedule();
 	finish_wait(&vi->pendings_wait, &wait);
 
-	/* Now vi->response should points to the result
+	/**
+	 * Now vi->response should points to the result
 	 * Also, mm_mmap_sem should be properly set when return
 	 */
 
@@ -2128,6 +2086,10 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 }
 
 
+DEFINE_KMSG_WQ_HANDLER(remote_vma_request, vma_op_wq);
+DEFINE_KMSG_WQ_HANDLER(remote_vma_response, vma_op_wq);
+DEFINE_KMSG_WQ_HANDLER(vma_lock, vma_lock_wq);
+
 int vma_server_init(void)
 {
 	/*
@@ -2147,13 +2109,14 @@ int vma_server_init(void)
 			PCN_KMSG_TYPE_PROC_SRV_VMA_OP, handle_vma_op);
 	pcn_kmsg_register_callback(
 			PCN_KMSG_TYPE_PROC_SRV_VMA_ACK, handle_vma_ack);
-	pcn_kmsg_register_callback(
-			PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK, handle_vma_lock);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK, vma_lock);
 
-	pcn_kmsg_register_callback(
-			PCN_KMSG_TYPE_REMOTE_VMA_REQUEST, handle_remote_vma_request);
-	pcn_kmsg_register_callback(
-			PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE, handle_remote_vma_response);
+	/* sanghoon: sanitized */
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_REMOTE_VMA_REQUEST, remote_vma_request);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE, remote_vma_response);
 
 	return 0;
 }

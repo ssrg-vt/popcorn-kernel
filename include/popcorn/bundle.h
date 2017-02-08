@@ -22,6 +22,9 @@ static inline bool get_popcorn_node_arch(int nid) {
 
 int get_nid(void);
 
+struct page;
+bool page_is_replicated(struct page *page);
+
 bool is_popcorn_node_online(int nid);
 
 int popcorn_nodes_init(void);
