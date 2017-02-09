@@ -2,51 +2,10 @@
  * @file page_server.c
  *
  * Popcorn Linux page server implementation
- * This work is an extension of Marina Sadini MS Thesis, please refer to the
- * Thesis for further information about the algorithm.
+ * This work was an extension of Marina Sadini MS Thesis, but totally revamped
+ * for multiple node setup.
  *
  * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
- * @author Vincent Legout, Antonio Barbalace, SSRG Virginia Tech 2016
- * @author Ajith Saya, Sharath Bhat, SSRG Virginia Tech 2015
- * @author Marina Sadini, Antonio Barbalace, SSRG Virginia Tech 2014
- * @author Marina Sadini, SSRG Virginia Tech 2013
- */
-/*
- * THE FOLLOWINGS ARE THE MESSAGE WAITERS/RECEIVERS: (rendevouz marina style)
- * handle_mapping_response_void
- * handle_mapping_response
- * handle_ack
- * END OF MESSAGE RECEIVERS
- *
- * REMOTE WORKERS == SERVERS
- * handle_invalid_request
- * handle_mapping_request
- *
- * process_invalid_request_for_2_kernels
- *	<<< called by handle_invalid_request called by itself as a delayed work
- * process_mapping_request_for_2_kernels
- *	<<< called by handle_mapping_request called by itself as a delayed work
- * END OF REMOTE WORKERS
- *
- * process_server_update_page
- *	<<< called by __do_page_fault, and do_page_fault
- * process_server_clean_page
- *	<<< called by get_page_from_freelist, and zap_pte_page
- *
- * LOCAL WORKERS == CLIENTS
- * do_remote_read_for_2_kernels
- *	<<< called by page_server_try_handle_mm_fault
- * do_remote_write_for_2_kernels
- *	<<< called by page_server_try_handle_mm_fault
- * do_remote_fetch_for_2_kernels
- *	<<< called by page_server_try_handle_mm_fault
- *
- * page_server_try_handle_mm_fault
- *	<<< called by __do_page_fault, __get_user_pages, fixup_user_fault
- * END LOCAL WORKERS
- *
- * page_server_init
- *	<<< called by process_server initialization function
  */
 
 #include <linux/sched.h>
@@ -55,6 +14,7 @@
 #include <linux/rmap.h>
 #include <linux/mmu_notifier.h>
 #include <linux/wait.h>
+#include <linux/ptrace.h>
 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
@@ -69,6 +29,17 @@
 #include "types.h"
 #include "stat.h"
 
+bool page_is_replicated(struct page *page)
+{
+	return !!bitmap_weight(page->page_owners, MAX_POPCORN_NODES);
+}
+
+bool page_is_mine(struct page *page)
+{
+	return !page_is_replicated(page) || test_bit(get_nid(), page->page_owners);
+}
+
+
 struct remote_page {
 	struct list_head list;
 	unsigned long addr;
@@ -81,7 +52,7 @@ struct remote_page {
 	remote_page_response_t *response;
 	DECLARE_BITMAP(page_owners, MAX_POPCORN_NODES);
 
-	unsigned char data[4096];
+	unsigned char data[PAGE_SIZE];
 };
 
 static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, remote_page_request_t **preq)
@@ -156,24 +127,20 @@ static struct page *__find_page_at(struct mm_struct *mm, unsigned long addr, pte
 
 	pgd = pgd_offset(mm, addr);
 	if (!pgd || pgd_none(*pgd)) {
-		// printk("%s: pgd fault\n", __func__);
 		return ERR_PTR(VM_FAULT_SIGSEGV);
 	}
 	pud = pud_offset(pgd, addr);
 	if (!pud || pud_none(*pud)) {
-		// printk("%s: pud fault\n", __func__);
 		return ERR_PTR(VM_FAULT_SIGSEGV);
 	}
 	pmd = pmd_offset(pud, addr);
 	if (!pmd || pmd_none(*pmd)) {
-		// printk("%s: pmd fault\n", __func__);
 		return ERR_PTR(VM_FAULT_SIGSEGV);
 	}
 
 	pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
-	if (pte == NULL || pte_none(pte_clear_flags(*pte, _PAGE_SOFTW1))) {
+	if (pte == NULL || pte_none(*pte)) {
 		// PTE not exist
-		// printk("%s: pte fault\n", __func__);
 		pte_unmap_unlock(pte, ptl);
 		page = ERR_PTR(VM_FAULT_SIGSEGV);
 		pte = NULL;
@@ -206,13 +173,28 @@ static void process_remote_page_invalidate(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)_work;
 	remote_page_invalidate_t *req = w->msg;
+	memory_t *memory;
+	struct mm_struct *mm;
 
+	printk("invalidate_page: %lu\n", req->addr);
+
+	/* Only home issues invalidate requests. Hence, I am a remote */
+	memory = find_memory_entry_in(req->tgroup_home_cpu, req->tgroup_home_id);
+	if (!memory) {
+		printk("%s: no memory for %d %d\n", __func__,
+				req->tgroup_home_cpu, req->tgroup_home_id);
+		goto out_free;
+	}
+	mm = memory->helper->mm;
+	printk("%s: mm at %p\n", __func__, mm);
+
+out_free:
 	pcn_kmsg_free_msg(req);
 	kfree(w);
 }
 
 
-static void __invalidate_page(struct page *page, unsigned long addr)
+static void __invalidate_page(struct task_struct *tsk, struct page *page, unsigned long addr)
 {
 	int nid;
 	remote_page_invalidate_t *req;
@@ -220,9 +202,14 @@ static void __invalidate_page(struct page *page, unsigned long addr)
 	req = kzalloc(sizeof(*req), GFP_KERNEL);
 
 	req->addr = addr;
+	req->tgroup_home_cpu = get_nid();
+	req->tgroup_home_id = tsk->tgid;
+
 	for_each_set_bit(nid, page->page_owners, MAX_POPCORN_NODES) {
 		pcn_kmsg_send_long(nid, req, sizeof(*req));
 	}
+
+	bitmap_zero(page->page_owners, MAX_POPCORN_NODES);
 
 	kfree(req);
 }
@@ -275,13 +262,16 @@ out_free:
 /**************************************************************************
  * Handle for remote page fetch
  */
-static void __forward_remote_page_request(void)
+static void __forward_remote_page_request(struct page *page)
 {
+	BUG_ON("Not implemented yet");
 }
 
 
 static void __reply_remote_page(int nid, struct task_struct *tsk, int remote_pid, remote_page_response_t *res)
 {
+	if (res->result == VM_FAULT_FORWARDED) return;
+
 	res->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
 	res->header.prio = PCN_KMSG_PRIO_NORMAL;
 
@@ -293,37 +283,37 @@ static void __reply_remote_page(int nid, struct task_struct *tsk, int remote_pid
 }
 
 
-static int __fill_remote_page(struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, int peer_nid, remote_page_response_t *res, bool unmap)
+static int __get_remote_page(struct task_struct *tsk,
+		struct vm_area_struct *vma, unsigned long addr,
+		int from, remote_page_response_t *res, bool invalidate)
 {
 	int ret = 0;
 	spinlock_t *ptl;
 	pte_t *pte;
 	struct page *page;
 	void *paddr;
+	struct mm_struct *mm = tsk->mm;
 
 	page = __find_page_at(mm, addr, &pte, &ptl);
 	if (IS_ERR(page)) {
 		return PTR_ERR(page);
 	}
 
-	if (page_is_replicated(page)) {
-		/* TODO
-		 * is mine? yes. fill in.
-		 * No? forward the request
-		 */
-		 __forward_remote_page_request();
+	if (!page_is_mine(page)) {
+		 __forward_remote_page_request(page);
+		 return VM_FAULT_FORWARDED;
 	}
 
 	flush_cache_page(vma, addr, pte_pfn(*pte));
 
 	paddr = kmap(page);
 	copy_page(res->page, paddr);
+
 	/* TODO: adjust page ownership and memory usage statistics */
-	if (unmap) {
-		__invalidate_page(page, addr);
-		bitmap_zero(page->page_owners, MAX_POPCORN_NODES);
+	if (invalidate) {
+		__invalidate_page(tsk, page, addr);
 	}
-	set_bit(peer_nid, page->page_owners);
+	set_bit(from, page->page_owners);
 	kunmap(page);
 
 	pte_unmap_unlock(pte, ptl);
@@ -336,12 +326,11 @@ static void process_remote_page_request(struct work_struct *work)
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
 	remote_page_request_t *req = w->msg;
 	remote_page_response_t *res = NULL;
-	memory_t *memory;
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	unsigned long addr = req->addr;
-	int peer_nid = req->header.from_cpu;
+	int from = req->header.from_cpu;
 
 	might_sleep();
 
@@ -356,7 +345,6 @@ static void process_remote_page_request(struct work_struct *work)
 		goto out;
 	}
 	get_task_struct(tsk);
-	memory = tsk->memory;
 	mm = tsk->mm;
 
 	down_read(&mm->mmap_sem);
@@ -369,10 +357,10 @@ static void process_remote_page_request(struct work_struct *work)
 
 	if (!(req->fault_flags & FAULT_FLAG_WRITE)) {
 		printk("remote_page_reqeust: read fault\n");
-		res->result = __fill_remote_page(mm, vma, addr, peer_nid, res, false);
+		res->result = __get_remote_page(tsk, vma, addr, from, res, false);
 	} else if (!(vma->vm_flags & VM_SHARED)) {
-		printk("remote_page_request: cow fault\n");
-		res->result = __fill_remote_page(mm, vma, addr, peer_nid, res, true);
+		printk("remote_page_request: write fault\n");
+		res->result = __get_remote_page(tsk, vma, addr, from, res, true);
 	} else {
 		BUG_ON("remote_page_request: shared fault\n");
 	}
@@ -384,7 +372,7 @@ out_up:
 	put_task_struct(tsk);
 
 out:
-	__reply_remote_page(peer_nid, tsk, req->remote_pid, res);
+	__reply_remote_page(from, tsk, req->remote_pid, res);
 	pcn_kmsg_free_msg(req);
 	kfree(w);
 	kfree(res);
@@ -537,7 +525,7 @@ int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
  * down_read(&mm->mmap_sem) already held getting in
  *
  * return types:
- * VM_CONTINUE, page_fault that can handled
+ * VM_FAULT_CONTINUE, page_fault that can handled
  * 0, remotely fetched;
  */
 int page_server_handle_pte_fault(struct mm_struct *mm,
@@ -546,26 +534,27 @@ int page_server_handle_pte_fault(struct mm_struct *mm,
 		unsigned int flags)
 {
 	unsigned long addr = address & PAGE_MASK;
+	struct pt_regs *regs = current_pt_regs();
 	pte_t entry = *pte;
 	barrier();
 
 	might_sleep();
 
 	printk(KERN_WARNING"\n");
-	printk(KERN_WARNING"## PAGEFAULT: %lx\n", address);
+	printk(KERN_WARNING"## PAGEFAULT: %lx %lx\n", address, regs->ip);
 
 	if (!pte_present(entry)) {
 		BUG_ON(!pte_none(entry) && "Is swap enabled?");
 
 		/* Can we handle the fault locally? */
 		if (vma->vm_flags & VM_FETCH_LOCAL) {
-			printk("pte_fault: VM_FETCH_LOCAL. continue\n");
-			return VM_CONTINUE;
+			WARN_ON("pte_fault: VM_FETCH_LOCAL. continue\n");
+			return VM_FAULT_CONTINUE;
 		}
 		if (!vma_is_anonymous(vma) &&
 				((vma->vm_flags & (VM_WRITE | VM_SHARED)) == 0)) {
 			printk("pte_fault: Locally file-mapped. continue\n");
-			return VM_CONTINUE;
+			return VM_FAULT_CONTINUE;
 		}
 		return __handle_remote_fault(addr, flags);
 	}
@@ -573,8 +562,8 @@ int page_server_handle_pte_fault(struct mm_struct *mm,
 	// Fault occurs whereas PTE exists: CoW?
 	if (flags & FAULT_FLAG_WRITE) {
 		if (!pte_write(entry)) {
-			printk("pte_fault: lets cow. dont forget to notify of server\n");
-			return VM_CONTINUE;
+			WARN_ON("pte_fault: lets cow. dont forget to notify of server\n");
+			return VM_FAULT_CONTINUE;
 		}
 	}
 	return VM_FAULT_SIGSEGV;

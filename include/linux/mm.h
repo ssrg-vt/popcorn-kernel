@@ -1045,8 +1045,9 @@ static inline void clear_page_pfmemalloc(struct page *page)
 #define VM_FAULT_REPLICATION_PROTOCOL	0x2000
 #define VM_CONTINUE_WITH_CHECK		0x4000
 
-#define VM_FAULT_KILLED		0x2000
-#define VM_CONTINUE			0x1000
+#define VM_FAULT_CONTINUE	0x1000
+#define VM_FAULT_FORWARDED	0x2000
+#define VM_FAULT_KILLED		0x4000
 #endif
 
 #define VM_FAULT_ERROR	(VM_FAULT_OOM | VM_FAULT_SIGBUS | VM_FAULT_SIGSEGV | \

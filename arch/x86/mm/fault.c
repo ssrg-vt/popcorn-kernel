@@ -1200,16 +1200,18 @@ retry:
 		might_sleep();
 	}
 
-retry_vma:
 	vma = find_vma(mm, address);
-	if (unlikely(!vma || vma->vm_start > address)) {
 #ifdef CONFIG_POPCORN
-		if (tsk->tgroup_distributed && tsk->main == 0) {
-			if (!vma_server_fetch_vma(tsk, address)) {
-				goto retry_vma;
+	if (tsk->tgroup_distributed && !tsk->main) {
+		if (!vma || vma->vm_start > address) {
+			if (vma_server_fetch_vma(tsk, address) == 0) {
+				/* Replace with updated VMA */
+				vma = find_vma(mm, address);
 			}
 		}
+	}
 #endif
+	if (unlikely(!vma)) {
 		bad_area(regs, error_code, address);
 		return;
 	}

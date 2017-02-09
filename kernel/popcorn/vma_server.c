@@ -388,7 +388,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			printk("map0: %lx -- %lx, %lx\n", start, end, pgoff);
 
 			if (error != start) {
-				ret = VM_FAULT_VMA;
+				ret = VM_FAULT_SIGBUS;
 			}
 			break;
 		} else if (start >= vma->vm_start && end <= vma->vm_end) {
@@ -411,7 +411,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 					prot, flags, pgoff, &populate);
 			printk("map1: %lx -- %lx, %lx\n", start, vma->vm_start, pgoff);
 			if (error != start) {
-				ret = VM_FAULT_VMA;
+				ret = VM_FAULT_SIGBUS;;
 			}
 			break;
 		} else if (start <= vma->vm_start && vma->vm_end <= end) {
@@ -421,7 +421,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 					prot, flags, pgoff, &populate);
 			printk("map2: %lx -- %lx, %lx\n", start, vma->vm_start, pgoff);
 			if (error != start) {
-				ret = VM_FAULT_VMA;
+				ret = VM_FAULT_SIGBUS;
 				break;
 			}
 
@@ -1873,16 +1873,29 @@ static void process_remote_vma_request(struct work_struct *work)
 
 	BUG_ON(!tsk->tgroup_distributed);
 
+	/**
+	 * This processing is insipired from the VMA fault handling at the
+	 * beginning of __do_page_fault.
+	 */
 	down_read(&mm->mmap_sem);
 
 	/* Fill-in the vma info */
 	vma = find_vma(mm, addr);
-	if (!vma || addr < vma->vm_start) {
+	if (unlikely(!vma)) {
 		printk("remote_vma: does not exist for %lx\n", addr);
 		res->result = -ENOENT;
 		goto out_up;
 	}
+	if (likely(vma->vm_start <= addr)) {
+		goto good;
+	}
+	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
+		printk("remote_vma: does not really exist for %lx\n", addr);
+		res->result = -ENOENT;
+		goto out_up;
+	}
 
+good:
 	res->vm_start = vma->vm_start;
 	res->vm_end = vma->vm_end;
 	res->vm_flags = vma->vm_flags;
@@ -1897,8 +1910,7 @@ static void process_remote_vma_request(struct work_struct *work)
 	}
 	res->result = 0;
 
-	vma->vm_owners[req->header.from_cpu] = 1;
-	memcpy(res->vm_owners, vma->vm_owners, sizeof(vma->vm_owners));
+	set_bit(req->header.from_cpu, vma->vm_owners);
 
 out_up:
 	up_read(&mm->mmap_sem);
@@ -1941,8 +1953,8 @@ static struct vma_info *__alloc_remote_vma_request(struct task_struct *tsk, unsi
 
 	req->tgroup_home_cpu = tsk->tgroup_home_cpu;
 	req->tgroup_home_id = tsk->tgroup_home_id;
-	req->addr = addr;
 	req->remote_pid = tsk->pid;
+	req->addr = addr;
 
 	*preq = req;
 
@@ -2002,9 +2014,6 @@ void __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 
 	vma = find_vma(mm, addr);
 	BUG_ON(!vma || vma->vm_start > addr);
-
-	memcpy(vma->vm_owners, res->vm_owners, sizeof(vma->vm_owners));
-	vma->vm_owners[get_nid()] = 1;
 
 out:
 	downgrade_write(&mm->mmap_sem);

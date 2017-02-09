@@ -1449,8 +1449,9 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		tsk->mm->distribute_unmap = 1;
 
 		memory = __alloc_memory_struct(get_nid(), tsk->tgid);
-		memory->mm = tsk->mm;
 		atomic_inc(&tsk->mm->mm_users);
+		memory->mm = tsk->mm;
+		wmb();
 
 		add_memory_entry_out(memory, dst_nid);
 

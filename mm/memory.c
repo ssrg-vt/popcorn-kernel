@@ -3512,7 +3512,7 @@ static int handle_pte_fault(struct mm_struct *mm,
 	if (current->memory) {
 		int ret = page_server_handle_pte_fault(
 				mm, vma, address, pte, pmd, flags);
-		if (ret != VM_CONTINUE) return ret;
+		if (ret != VM_FAULT_CONTINUE) return ret;
 	}
 #endif
 	if (!pte_present(entry)) {

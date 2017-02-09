@@ -88,15 +88,10 @@ void remove_memory_entry_in_out(memory_t *m, bool in)
 }
 
 
-bool page_is_replicated(struct page *page)
-{
-	return !!bitmap_weight(page->page_owners, MAX_POPCORN_NODES);
-}
-
-
 bool is_popcorn_node_online(int nid)
 {
-	return popcorn_nodes[nid].is_connected;
+	return true;
+	//return popcorn_nodes[nid].is_connected;
 }
 
 int get_nid(void)
