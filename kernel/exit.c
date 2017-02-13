@@ -399,7 +399,7 @@ static void exit_mm(struct task_struct *tsk)
 	sync_mm_rss(mm);
 
 #ifdef CONFIG_POPCORN
-	popcorn_process_exit(tsk);
+	process_server_task_exit(tsk);
 #endif
 
 	/*

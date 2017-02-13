@@ -36,7 +36,7 @@ bool page_is_replicated(struct page *page)
 
 bool page_is_mine(struct page *page)
 {
-	return !page_is_replicated(page) || test_bit(get_nid(), page->page_owners);
+	return !page_is_replicated(page) || test_bit(my_nid(), page->page_owners);
 }
 
 
@@ -75,10 +75,9 @@ static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, 
 	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
-	req->tgroup_home_cpu = tsk->tgroup_home_cpu;
-	req->tgroup_home_id = tsk->tgroup_home_id;
-	req->addr = addr;
 	req->remote_pid = tsk->pid;
+	req->origin_pid = tsk->origin_pid;
+	req->addr = addr;
 	req->fault_flags = fault_flags;
 
 	*preq = req;
@@ -87,11 +86,11 @@ static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, 
 }
 
 
-static struct remote_page *__lookup_pending_remote_page_request(memory_t *m, unsigned long addr)
+static struct remote_page *__lookup_pending_remote_page_request(struct remote_context *rc, unsigned long addr)
 {
 	struct remote_page *rp;
 
-	list_for_each_entry(rp, &m->pages, list) {
+	list_for_each_entry(rp, &rc->pages, list) {
 		if (rp->addr == addr) return rp;
 	}
 	return NULL;
@@ -173,20 +172,20 @@ static void process_remote_page_invalidate(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)_work;
 	remote_page_invalidate_t *req = w->msg;
-	memory_t *memory;
-	struct mm_struct *mm;
+	struct task_struct *tsk;
 
 	printk("invalidate_page: %lu\n", req->addr);
 
 	/* Only home issues invalidate requests. Hence, I am a remote */
-	memory = find_memory_entry_in(req->tgroup_home_cpu, req->tgroup_home_id);
-	if (!memory) {
-		printk("%s: no memory for %d %d\n", __func__,
-				req->tgroup_home_cpu, req->tgroup_home_id);
+	rcu_read_lock();
+	tsk = find_task_by_vpid(req->remote_pid);
+	rcu_read_unlock();
+
+	if (!tsk) {
+		printk("%s: no such process %d %d\n", __func__,
+				req->origin_pid, req->remote_pid);
 		goto out_free;
 	}
-	mm = memory->helper->mm;
-	printk("%s: mm at %p\n", __func__, mm);
 
 out_free:
 	pcn_kmsg_free_msg(req);
@@ -194,21 +193,38 @@ out_free:
 }
 
 
-static void __invalidate_page(struct task_struct *tsk, struct page *page, unsigned long addr)
+static void __invalidate_page(struct task_struct *tsk, unsigned long addr, struct page *page, pte_t *pte, spinlock_t *ptl)
 {
 	int nid;
+	struct remote_context *rc = get_task_remote(tsk);
 	remote_page_invalidate_t *req;
+	DECLARE_BITMAP(owners, MAX_POPCORN_NODES);
+
+	memcpy(owners, page->page_owners, sizeof(owners));
+	bitmap_zero(page->page_owners, MAX_POPCORN_NODES);
+	set_bit(0, page->page_owners);
+
+	// entry = clear present bit here
+	//
 
 	req = kzalloc(sizeof(*req), GFP_KERNEL);
 
 	req->addr = addr;
-	req->tgroup_home_cpu = get_nid();
-	req->tgroup_home_id = tsk->tgid;
+	req->origin_nid = my_nid();
+	req->origin_pid = tsk->pid;
+	req->remote_pid = 0;
 
 	for_each_set_bit(nid, page->page_owners, MAX_POPCORN_NODES) {
-		pcn_kmsg_send_long(nid, req, sizeof(*req));
+		if (nid != my_nid()) {
+			pid_t pid = rc->remote_tgids[nid];
+			printk("invalidate to %d at %d\n", pid, nid);
+			pcn_kmsg_send_long(nid, req, sizeof(*req));
+		} else {
+			// convert the pte
+			printk("skip invalidate myself\n");
+		}
 	}
-
+	put_task_remote(tsk);
 	bitmap_zero(page->page_owners, MAX_POPCORN_NODES);
 
 	kfree(req);
@@ -225,22 +241,23 @@ static void process_remote_page_response(struct work_struct *_work)
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)_work;
 	remote_page_response_t *res = w->msg;
 	struct task_struct *tsk;
-	memory_t *m;
 	unsigned long flags;
 	struct remote_page *rp;
+	struct remote_context *rc;
 
+	rcu_read_lock();
 	tsk = find_task_by_vpid(res->remote_pid);
+	rcu_read_unlock();
 	if (!tsk) {
 		__WARN();
 		goto out_free;
 	}
 	get_task_struct(tsk);
-	m = tsk->memory;
-	BUG_ON(tsk->tgroup_home_id != res->tgroup_home_id);
+	rc = get_task_remote(tsk);
 
-	spin_lock_irqsave(&m->pages_lock, flags);
-	rp = __lookup_pending_remote_page_request(m, res->addr);
-	spin_unlock_irqrestore(&m->pages_lock, flags);
+	spin_lock_irqsave(&rc->pages_lock, flags);
+	rp = __lookup_pending_remote_page_request(rc, res->addr);
+	spin_unlock_irqrestore(&rc->pages_lock, flags);
 	if (!rp) {
 		__WARN();
 		goto out_unlock;
@@ -251,6 +268,7 @@ static void process_remote_page_response(struct work_struct *_work)
 	wake_up(&rp->pendings_wait);
 
 out_unlock:
+	put_task_remote(tsk);
 	put_task_struct(tsk);
 
 out_free:
@@ -262,9 +280,17 @@ out_free:
 /**************************************************************************
  * Handle for remote page fetch
  */
-static void __forward_remote_page_request(struct page *page)
+static void __forward_remote_page_request(struct task_struct *tsk, struct page *page)
 {
-	BUG_ON("Not implemented yet");
+	struct remote_context *rc = get_task_remote(tsk);
+	int nid;
+
+	for_each_set_bit(nid, page->page_owners, MAX_POPCORN_NODES) {
+		printk("owner is at %d %d\n", nid, rc->remote_tgids[nid]);
+	}
+
+	WARN_ON("Not implemented yet");
+	put_task_remote(tsk);
 }
 
 
@@ -275,8 +301,6 @@ static void __reply_remote_page(int nid, struct task_struct *tsk, int remote_pid
 	res->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
 	res->header.prio = PCN_KMSG_PRIO_NORMAL;
 
-	res->tgroup_home_cpu = get_nid();
-	res->tgroup_home_id = tsk->tgid;
 	res->remote_pid = remote_pid;
 
 	pcn_kmsg_send_long(nid, res, sizeof(*res));
@@ -300,7 +324,7 @@ static int __get_remote_page(struct task_struct *tsk,
 	}
 
 	if (!page_is_mine(page)) {
-		 __forward_remote_page_request(page);
+		 __forward_remote_page_request(tsk, page);
 		 return VM_FAULT_FORWARDED;
 	}
 
@@ -311,7 +335,7 @@ static int __get_remote_page(struct task_struct *tsk,
 
 	/* TODO: adjust page ownership and memory usage statistics */
 	if (invalidate) {
-		__invalidate_page(tsk, page, addr);
+		__invalidate_page(tsk, addr, page, pte, ptl);
 	}
 	set_bit(from, page->page_owners);
 	kunmap(page);
@@ -339,7 +363,7 @@ static void process_remote_page_request(struct work_struct *work)
 	};
 	res->addr = addr;
 
-	tsk = find_task_by_vpid(req->tgroup_home_id);
+	tsk = find_task_by_vpid(req->origin_pid);
 	if (!tsk) {
 		res->result = VM_FAULT_SIGBUS;
 		goto out;
@@ -422,7 +446,7 @@ static void __map_remote_page(struct remote_page *rp)
 
 	// TODO: Update the page ownership
 	memcpy(page->page_owners, res->owners, sizeof(page->page_owners));
-	set_bit(get_nid(), page->page_owners);
+	set_bit(my_nid(), page->page_owners);
 
 	__SetPageUptodate(page);
 
@@ -450,7 +474,7 @@ static void __map_remote_page(struct remote_page *rp)
 int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 {
 	struct task_struct *tsk = current;
-	memory_t *m = tsk->memory;
+	struct remote_context *rc = get_task_remote(tsk);
 	struct remote_page *rp;
 	unsigned long flags;
 	DEFINE_WAIT(wait);
@@ -458,20 +482,20 @@ int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	int ret = 0;
 	remote_page_request_t *req = NULL;
 
-	spin_lock_irqsave(&m->pages_lock, flags);
-	rp = __lookup_pending_remote_page_request(m, addr);
+	spin_lock_irqsave(&rc->pages_lock, flags);
+	rp = __lookup_pending_remote_page_request(rc, addr);
 	if (!rp) {
 		struct remote_page *r;
-		spin_unlock_irqrestore(&m->pages_lock, flags);
+		spin_unlock_irqrestore(&rc->pages_lock, flags);
 
 		rp = __alloc_remote_page_request(tsk, addr, fault_flags, &req);
 
-		spin_lock_irqsave(&m->pages_lock, flags);
-		r = __lookup_pending_remote_page_request(m, addr);
+		spin_lock_irqsave(&rc->pages_lock, flags);
+		r = __lookup_pending_remote_page_request(rc, addr);
 		if (!r) {
 			printk("%s: %lx from %d, %d\n", __func__,
-					addr, tsk->tgroup_home_cpu, tsk->tgroup_home_id);
-			list_add(&rp->list, &m->pages);
+					addr, tsk->origin_nid, tsk->origin_pid);
+			list_add(&rp->list, &rc->pages);
 		} else {
 			printk("%s: %lx pended\n", __func__, addr);
 			kfree(rp);
@@ -481,10 +505,10 @@ int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 		}
 	}
 	atomic_inc(&rp->pendings);
-	spin_unlock_irqrestore(&m->pages_lock, flags);
+	spin_unlock_irqrestore(&rc->pages_lock, flags);
 
 	if (req) {
-		pcn_kmsg_send_long(tsk->tgroup_home_cpu, req, sizeof(*req));
+		pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));
 		kfree(req);
 	}
 
@@ -507,7 +531,7 @@ int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 
 	printk("%s: %lx resume %d %d\n", __func__, addr, ret, remaining);
 
-	spin_lock_irqsave(&m->pages_lock, flags);
+	spin_lock_irqsave(&rc->pages_lock, flags);
 	if (remaining) {
 		wake_up(&rp->pendings_wait);
 	} else {
@@ -515,7 +539,8 @@ int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 		pcn_kmsg_free_msg(rp->response);
 		kfree(rp);
 	}
-	spin_unlock_irqrestore(&m->pages_lock, flags);
+	spin_unlock_irqrestore(&rc->pages_lock, flags);
+	put_task_remote(tsk);
 
 	return ret;
 }

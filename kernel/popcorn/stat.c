@@ -53,5 +53,5 @@ void print_popcorn_stat(void)
 		concurrent_write, most_long_write, pages_allocated,
 		compressed_page_sent, not_compressed_page,
 		not_compressed_diff_page,
-		current->tgroup_home_id, current->tgroup_home_cpu);
+		current->origin_nid, current->origin_pid);
 }

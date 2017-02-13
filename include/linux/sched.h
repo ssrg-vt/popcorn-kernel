@@ -1815,34 +1815,31 @@ struct task_struct {
 	int pagefault_disabled;
 
 #ifdef CONFIG_POPCORN
-/* Popcorn */
-	void *memory;
-	int tgroup_distributed;
-	int tgroup_home_cpu;     /* cpu where the thread group was first migrated */
-	int tgroup_home_id;         /* home thread group id */
+	void  *memory;			/* remove me quickly */
 
-	int represents_remote;      /* Is this a shadow process? */
-	pid_t next_pid;             /* What is the pid on the remote cpu? */
-	int next_cpu;
+	union {
+		int remote_nid;
+		int origin_nid;
+	};
+	union {
+		int remote_pid;
+		int origin_pid;
+	};
 
-	int executing_for_remote;   /* Is this executing on behalf of another cpu? */
-	pid_t prev_pid;				/* What is the pid on the remote cpu? */
-	int prev_cpu;
+	bool is_vma_worker;			/* kernel thread that manages the process*/
+	bool is_shadow;				/* Is executing on behalf of another node? */
 
-	int main;					/* kernel thread that manages the process*/
+	int represents_remote;      /* Is migrated to other node ? */
 
 	int distributed_exit_code;
 	int group_exit;
 	int distributed_exit;
 
 	/*akshay*/
-	int return_disposition;
-	int origin_pid;
 	pid_t surrogate;
 
 	/*Ajith - for het migration */
 	unsigned long migration_pc;
-	unsigned long saved_old_rsp;
 	unsigned long return_addr;
 
 	// scheduling -- antoniob

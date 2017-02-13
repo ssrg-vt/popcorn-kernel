@@ -345,6 +345,7 @@ fail:
 }
 
 #ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
 int kernel_mprotect(unsigned long start, size_t len, unsigned long prot)
 {
 	unsigned long vm_flags, nstart, end, tmp, reqprot;
@@ -379,7 +380,7 @@ int kernel_mprotect(unsigned long start, size_t len, unsigned long prot)
 	down_write(&current->mm->mmap_sem);
 
 	//Multikernel
-	if (current->tgroup_distributed==1 && current->distributed_exit == EXIT_ALIVE){
+	if (process_is_distributed(current)) {
 		distributed= 1;
 		//printk("WARNING: mprotect called \n");
 #if 0 // beowulf
@@ -456,7 +457,7 @@ int kernel_mprotect(unsigned long start, size_t len, unsigned long prot)
 out:
 
 	//Multikernel
-	if(current->tgroup_distributed==1 && distributed == 1){
+	if (process_is_distributed(current) && distributed) {
 #if 0 // beowulf
 		vma_server_mprotect_end(start,len,prot,distr_ret);
 #else

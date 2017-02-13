@@ -90,6 +90,7 @@
 
 #ifdef CONFIG_POPCORN
 #include <popcorn/types.h>
+#include <popcorn/process_server.h>
 #endif
 
 /*
@@ -392,25 +393,21 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	/*
 	 * Reset variables for tracking remote execution
 	 */
+	tsk->remote_nid = tsk->origin_nid = -1;
+	tsk->remote_pid = tsk->origin_pid = -1;
+
+	tsk->is_vma_worker = false;
+	tsk->is_shadow = false;
+
 	tsk->distributed_exit = EXIT_ALIVE;
-	tsk->prev_cpu = tsk->next_cpu = -1;
-	tsk->prev_pid = tsk->next_pid = -1;
-	tsk->main = 0;
 	tsk->surrogate = -1; // this is for futex
-	tsk->group_exit = -1;
 
 	/* If the new tsk is not in the same thread group as the parent,
 	 * then we do not need to propagate the old thread info.
 	 * Otherwise, make sure to keep an accurate record
-	 * of which cpu and thread group the new thread is a part of.
+	 * of which node and thread group the new thread is a part of.
 	 */
-	if (orig->tgid != tsk->tgid || !orig->tgroup_distributed) {
-		tsk->tgroup_distributed = false;
-		tsk->tgroup_home_cpu = -1;
-		tsk->tgroup_home_id = -1;
-		tsk->memory = NULL;
-		tsk->represents_remote = false;
-		tsk->executing_for_remote = false;
+	if (orig->tgid != tsk->tgid) {
 	}
 #endif
 
@@ -641,6 +638,16 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 	mm->pmd_huge_pte = NULL;
 #endif
 
+#ifdef CONFIG_POPCORN
+	mm->remote = NULL;
+	init_rwsem(&mm->distribute_sem);
+	mm->distr_vma_op_counter = 0;
+	mm->was_not_pushed = 0;
+	mm->thread_op = NULL;
+	mm->vma_operation_index = 0;
+	mm->distribute_unmap = 1;
+#endif
+
 	if (current->mm) {
 		mm->flags = current->mm->flags & MMF_INIT_MASK;
 		mm->def_flags = current->mm->def_flags & VM_INIT_DEF_MASK;
@@ -740,6 +747,9 @@ void mmput(struct mm_struct *mm)
 		}
 		if (mm->binfmt)
 			module_put(mm->binfmt->module);
+#ifdef CONFIG_POPCORN
+		exit_remote_context(mm->remote);
+#endif
 		mmdrop(mm);
 	}
 }
@@ -1716,88 +1726,6 @@ struct task_struct *fork_idle(int cpu)
 	return task;
 }
 
-
-#ifdef CONFIG_POPCORN
-/**
- * Identical to _do_fork except putting the thread to shadow_main
- */
-struct task_struct* do_fork_shadow_thread(
-		unsigned long clone_flags,
-		unsigned long stack_start,
-		unsigned long stack_size,
-		int __user *parent_tidptr,
-		int __user *child_tidptr)
-{
-	struct task_struct *p;
-	int trace = 0;
-	long nr;
-
-	/*
-	 * Determine whether and which event to report to ptracer.  When
-	 * called from kernel_thread or CLONE_UNTRACED is explicitly
-	 * requested, no event is reported; otherwise, report if the event
-	 * for the type of forking is enabled.
-	 */
-	if (!(clone_flags & CLONE_UNTRACED)) {
-		if (clone_flags & CLONE_VFORK)
-			trace = PTRACE_EVENT_VFORK;
-		else if ((clone_flags & CSIGNAL) != SIGCHLD)
-			trace = PTRACE_EVENT_CLONE;
-		else
-			trace = PTRACE_EVENT_FORK;
-
-		if (likely(!ptrace_event_enabled(current, trace)))
-			trace = 0;
-	}
-
-	/* printk("%s: pid current %d\n", __func__, current->pid); */
-
-	p = copy_process(clone_flags, stack_start, stack_size,
-			child_tidptr, NULL, trace, 0);
-	/*
-	 * Do this prior waking up the new thread - the thread pointer
-	 * might get invalid after that point, if the thread exits quickly.
-	 */
-	if (!IS_ERR(p)) {
-		struct completion vfork;
-		struct pid *pid;
-
-		trace_sched_process_fork(current, p);
-
-		pid = get_task_pid(p, PIDTYPE_PID);
-		nr = pid_vnr(pid);
-
-		if (clone_flags & CLONE_PARENT_SETTID)
-			put_user(nr, parent_tidptr);
-
-		if (clone_flags & CLONE_VFORK) {
-			p->vfork_done = &vfork;
-			init_completion(&vfork);
-			get_task_struct(p);
-		}
-
-		/* Let the thread to jump to shadow_main (see schedule_tail) */
-		p->represents_remote = 1;
-		p->distributed_exit = EXIT_NOT_ACTIVE;
-		wake_up_new_task(p);
-
-		/* forking complete and child started to run, tell ptracer */
-		if (unlikely(trace))
-			ptrace_event_pid(trace, pid);
-
-		if (clone_flags & CLONE_VFORK) {
-			if (!wait_for_vfork_done(p, &vfork))
-				ptrace_event_pid(PTRACE_EVENT_VFORK_DONE, pid);
-		}
-
-		put_pid(pid);
-	} else {
-		nr = PTR_ERR(p);
-		printk(KERN_ERR"%s: Failed to fork kernel thread: %ld\n", __func__, nr);
-	}
-	return p;
-}
-#endif
 
 /*
  *  Ok, this is the main fork-routine.

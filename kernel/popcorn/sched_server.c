@@ -23,6 +23,7 @@
 #include <linux/cpu_namespace.h>
 
 #include <popcorn/pcn_kmsg.h>
+#include <popcorn/process_server.h>
 
 #include "types.h"
 
@@ -196,16 +197,18 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 
 		len += snprintf((buffer +len), PROC_BUFFER_PS - len,
 				"%s %d:%d:%d:%lu", ppp->comm,
-				ppp->tgroup_home_cpu, ppp->tgroup_home_id, ppp->tgroup_distributed,
+				ppp->origin_nid,
+				ppp->origin_pid,
+				process_is_distributed(ppp),
 				ppp->mm->total_vm); // this is in number of pages
 
 		t = ppp;
 		do {
 			// here I want to list only user/kernel threads
-			if (t->main) {
+			if (t->is_vma_worker) {
 				// this is the main thread (kernel space only) nothing to do
 			} else {
-				if (t->executing_for_remote == 0 && t->distributed_exit== EXIT_NOT_ACTIVE) {
+				if (!t->is_shadow) {
 					// this is the nothing to fo
 				} else {
 					// TODO print only the one that are currently running (not migrated!)
@@ -214,9 +217,9 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 					unsigned int uload, sload;
 					popcorn_ps_load(t, &uload, &sload);
 
-					len += snprintf((buffer +len), PROC_BUFFER_PS -len,
-							" %d:%d:%d:%d:%d %d:%d;",
-							(int)t->pid, t->represents_remote, t->executing_for_remote, t->main, t->distributed_exit,
+					len += snprintf((buffer + len), PROC_BUFFER_PS - len,
+							" %d:%d:%d:%d %d:%d;", (int)t->pid,
+							t->is_shadow, t->is_vma_worker, t->distributed_exit,
 							uload, sload); //these are in percentage
 				}
 			}
@@ -271,7 +274,8 @@ static ssize_t popcorn_ps_read1(struct file *file, char __user *buf, size_t coun
 
 			len += snprintf((buffer +len), PROC_BUFFER_PS - len,
 					"%s %d:%d:%d:%lu", ppp->comm,
-					ppp->tgroup_home_cpu, ppp->tgroup_home_id, ppp->tgroup_distributed,
+					ppp->origin_nid, ppp->origin_pid, 
+					process_is_distributed(ppp),
 					ppp->mm ? ppp->mm->total_vm : -1); // this is in number of pages
 
 			/* NOTEs
@@ -283,10 +287,10 @@ static ssize_t popcorn_ps_read1(struct file *file, char __user *buf, size_t coun
 			t = ppp;
 			do {
 				// here I want to list only user/kernel threads
-				if (t->main) {
+				if (t->is_vma_worker) {
 					// this is the main thread (kernel space only) nothing to do
 				} else {
-					if (t->executing_for_remote == 0 && t->distributed_exit== EXIT_NOT_ACTIVE) {
+					if (!t->is_shadow) {
 						// this is the nothing to fo
 					} else {
 						// TODO print only the one that are currently running (not migrated!)
@@ -295,8 +299,9 @@ static ssize_t popcorn_ps_read1(struct file *file, char __user *buf, size_t coun
 						popcorn_ps_load(t, &uload, &sload);
 
 						len += snprintf((buffer +len), PROC_BUFFER_PS -len,
-								" %d:%d:%d:%d:%d %d:%d;",
-								(int)t->pid, t->represents_remote, t->executing_for_remote, t->main, t->distributed_exit,
+								" %d:%d:%d:%d %d:%d;",
+								(int)t->pid, t->is_shadow, t->is_vma_worker,
+								t->distributed_exit,
 								uload, sload); //these are in percentage
 					}
 				}

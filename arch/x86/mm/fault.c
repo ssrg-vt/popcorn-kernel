@@ -26,6 +26,7 @@
 #include <asm/trace/exceptions.h>
 
 #ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
 #include <popcorn/vma_server.h>
 #endif
 
@@ -1082,11 +1083,6 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
 	if (unlikely(kmmio_fault(regs, address)))
 		return;
 
-#ifdef CONFIG_POPCORN
-	// Helper should not fault
-	BUG_ON(tsk->tgroup_distributed && tsk->main);
-#endif
-
 	/*
 	 * We fault-in kernel-space virtual memory on-demand. The
 	 * 'reference' page table is init_mm.pgd.
@@ -1202,7 +1198,10 @@ retry:
 
 	vma = find_vma(mm, address);
 #ifdef CONFIG_POPCORN
-	if (tsk->tgroup_distributed && !tsk->main) {
+	/* vma worker should not fault */
+	BUG_ON(tsk->is_vma_worker);
+
+	if (process_is_distributed(tsk)) {
 		if (!vma || vma->vm_start > address) {
 			if (vma_server_fetch_vma(tsk, address) == 0) {
 				/* Replace with updated VMA */

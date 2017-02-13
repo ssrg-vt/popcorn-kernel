@@ -29,6 +29,10 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
+#endif
+
 static pmd_t *get_old_pmd(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
@@ -508,7 +512,7 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 
 #ifdef CONFIG_POPCORN
 	//Multikernel
-	if (current->tgroup_distributed==1 && current->distributed_exit == EXIT_ALIVE){
+	if (process_is_distributed(current)) {
 		distributed = 1;
 		printk("WARNING: remap called\n");
 #if 0 // beowulf
@@ -613,7 +617,7 @@ out:
 
 #ifdef CONFIG_POPCORN
 	//Multikernel
-	if(current->tgroup_distributed==1 && distributed == 1){
+	if (process_is_distributed(current) && distributed == 1){
 #if 0 // beowulf
 		vma_server_do_mremap_end( addr,
 				old_len,new_len,
@@ -670,7 +674,7 @@ long kernel_mremap(unsigned long addr, unsigned long old_len,
 		return ret;
 
 	//Multikernel
-	if (current->tgroup_distributed==1 && current->distributed_exit == EXIT_ALIVE){
+	if (process_is_distributed(current)) {
 		distributed = 1;
 		printk("WARNING: remap called\n");
 #if 0 // beowulf
@@ -773,7 +777,7 @@ out:
 	}	
 
 	//Multikernel
-	if(current->tgroup_distributed==1 && distributed == 1){
+	if(process_is_distributed(current) && distributed == 1){
 #if 0 // beowulf
 		vma_server_do_mremap_end( addr,
 				old_len,new_len,

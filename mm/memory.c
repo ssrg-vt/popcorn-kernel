@@ -74,6 +74,7 @@
 
 #ifdef CONFIG_POPCORN
 #include <popcorn/page_server.h>
+#include <popcorn/process_server.h>
 #endif
 
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
@@ -3509,7 +3510,7 @@ static int handle_pte_fault(struct mm_struct *mm,
 	entry = *pte;
 	barrier();
 #ifdef CONFIG_POPCORN
-	if (current->memory) {
+	if (process_is_distributed(current)) {
 		int ret = page_server_handle_pte_fault(
 				mm, vma, address, pte, pmd, flags);
 		if (ret != VM_FAULT_CONTINUE) return ret;

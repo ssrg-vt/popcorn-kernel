@@ -4587,20 +4587,21 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 #include <popcorn/bundle.h>
 #include <popcorn/process_server.h>
 #include <popcorn/types.h>
+
 static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
 		unsigned long migration_ip, unsigned long ret_addr)
 {
 	int retval = 0;
 
-	/* sanghoon: take pc and ret_addr from syscall for het migration */
-	tsk->migration_pc = migration_ip;
+	//tsk->migration_pc = migration_ip;
+	tsk->migration_pc = task_pt_regs(tsk)->ip;
 	tsk->return_addr = ret_addr;
 
 	retval = process_server_do_migration(tsk, nid, NULL);
 
 	if (retval == 0) {
 		printk("%s: sleep %d\n", __func__, tsk->pid);
-		__set_task_state(tsk, TASK_UNINTERRUPTIBLE);
+		__set_task_state(tsk, TASK_INTERRUPTIBLE);
 		schedule();
 		printk("%s: wakeup %d\n", __func__, tsk->pid);
 	}
@@ -4634,12 +4635,14 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 	get_task_struct(tsk);
 	rcu_read_unlock();
 
-	if (tsk->tgroup_distributed && tsk->represents_remote) {
-		// Already migrated. This is bug
-		printk(KERN_INFO"%s: already migrated to %d at %d\n", __func__,
-				tsk->tgroup_home_id, tsk->tgroup_home_cpu);
-		retval = -EBUSY;
-		goto out_put;
+	if (process_is_distributed(tsk)) {
+		if (tsk->represents_remote) {
+			// Already migrated. This is bug
+			printk(KERN_INFO"%s: already migrated to %d at %d\n", __func__,
+					tsk->remote_pid, tsk->remote_nid);
+			retval = -EBUSY;
+			goto out_put;
+		}
 	}
 
 	retval = __do_sched_migrate(tsk, nid, addr, addr + 16 );

@@ -17,6 +17,7 @@
 
 #ifdef CONFIG_POPCORN
 #include <popcorn/bundle.h>
+struct remote_desc;
 #endif
 
 #ifndef AT_VECTOR_SIZE_ARCH
@@ -535,6 +536,7 @@ struct mm_struct {
 #endif
 
 #ifdef CONFIG_POPCORN
+	struct remote_context *remote;
 	struct rw_semaphore distribute_sem;
 	int distr_vma_op_counter;
 	int was_not_pushed;

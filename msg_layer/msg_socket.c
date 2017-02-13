@@ -43,6 +43,7 @@
 /* global */
 int my_cpu; // source
 
+#pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
 /**
  * Jack
  *  mssg layer multi-version

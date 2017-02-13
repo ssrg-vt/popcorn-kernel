@@ -20,7 +20,7 @@ static inline bool get_popcorn_node_arch(int nid) {
 	return (nid % 2 == 0) ? POPCORN_NODE_X86 : POPCORN_NODE_ARM;
 }
 
-int get_nid(void);
+int my_nid(void);
 
 bool is_popcorn_node_online(int nid);
 
