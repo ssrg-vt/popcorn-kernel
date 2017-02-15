@@ -263,7 +263,7 @@ static vma_operation_t * vma_operation_alloc(struct task_struct * task, int op_i
 	operation->prot = prot;
 	operation->flags = flags;
 	operation->vma_operation_index = index;
-	operation->from_cpu = my_nid();
+	operation->from_cpu = my_nid;
 	return operation;
 }
 
@@ -693,7 +693,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			operation->origin_pid, operation->operation);
 
 	down_write(&mm->mmap_sem);
-	if (my_nid() == operation->origin_nid) { //SERVER
+	if (my_nid == operation->origin_nid) { //SERVER
 		//if another operation is on going, it will be serialized after.
 #if 0
 		while (mm->distr_vma_op_counter > 0) {
@@ -845,7 +845,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 				return ;
 			}
 
-			if (operation->from_cpu != my_nid()) {
+			if (operation->from_cpu != my_nid) {
 				printk("%s: ERROR: the server pushed me an operation %i of cpu %i\n",
 				       __func__, operation->operation, operation->from_cpu);
 				up_write(&mm->mmap_sem);
@@ -877,7 +877,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		}
 
 		//I could have started the operation...check!
-		if (operation->from_cpu == my_nid()) {
+		if (operation->from_cpu == my_nid) {
 			if (memory->my_lock != 1) {
 				printk("%s: ERROR: wrong distributed lock aquisition\n", __func__);
 				up_write(&mm->mmap_sem);
@@ -990,7 +990,7 @@ static void process_vma_lock(struct work_struct* _work)
 	if (entry != NULL) {
 		down_write(&entry->mm->distribute_sem);
 		PSVMAPRINTK("Acquired distributed lock\n");
-		if (lock->from_cpu == my_nid())
+		if (lock->from_cpu == my_nid)
 			entry->my_lock = 1;
 	}
 
@@ -1063,7 +1063,7 @@ static int handle_vma_op(struct pcn_kmsg_message* inc_msg)
 		INIT_WORK( (struct work_struct*)work, vma_server_process_vma_op);
 		queue_work(vma_op_wq, (struct work_struct*) work);
 	} else {
-		if (operation->origin_nid == my_nid())
+		if (operation->origin_nid == my_nid)
 			printk("%s: ERROR: received an operation that said that I am the server but no memory_t found\n", __func__);
 		else {
 			printk("%s: WARN: Received an operation for a distributed process not present here\n", __func__);
@@ -1113,7 +1113,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		/*if(operation!=VMA_OP_MAP ||operation!=VMA_OP_REMAP ||operation!=VMA_OP_BRK )
 		  printk("ERROR: asking for saving address from operation %i",operation);
 		*/
-		if (my_nid() != current->origin_nid)
+		if (my_nid != current->origin_nid)
 			printk("%s: ERROR: asking for saving address from a client", __func__);
 
 		//now I have the new address I can send the message
@@ -1184,14 +1184,14 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		PSPRINTK("Releasing distributed lock\n");
 		up_write(&current->mm->distribute_sem);
 
-		if ( my_nid() == current->origin_nid && !(operation == VMA_OP_MAP || operation == VMA_OP_BRK) ) {
+		if ( my_nid == current->origin_nid && !(operation == VMA_OP_MAP || operation == VMA_OP_BRK) ) {
 			up_read(&entry->kernel_set_sem);
 		}
 		wake_up(&request_distributed_vma_op);
 	}
 	else { // there are nested operations --- not all situations are handled
 		if (current->mm->distr_vma_op_counter == 1
-		    && my_nid() == current->origin_nid && current->is_vma_worker == 1) {
+		    && my_nid == current->origin_nid && current->is_vma_worker == 1) {
 
 			if (!(operation == VMA_OP_MAP || operation == VMA_OP_BRK)){
 				PSVMAPRINTK("%s incrementing vma_operation_index\n", __func__);
@@ -1208,7 +1208,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		}
 		else {
 			if (!(current->mm->distr_vma_op_counter == 1
-			      && my_nid() != current->origin_nid && current->is_vma_worker == 1)) {
+			      && my_nid != current->origin_nid && current->is_vma_worker == 1)) {
 
 				//nested operation
 				if (operation != VMA_OP_UNMAP)
@@ -1260,7 +1260,7 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 {
 	long ret = addr;
 	int server = 1;
-	if (current->origin_nid != my_nid())
+	if (current->origin_nid != my_nid)
 		server = 0;
 
 	//set default return value
@@ -1539,7 +1539,7 @@ start:
 			unsigned long flags;
 
 			/*First: send a message to everybody to acquire the lock to block page faults*/
-			vma_lock_t* lock_message = vma_lock_alloc(current, my_nid(), index);
+			vma_lock_t* lock_message = vma_lock_alloc(current, my_nid, index);
 			if (lock_message == NULL) {
 				down_write(&current->mm->mmap_sem);
 				ret = -ENOMEM;
@@ -1765,14 +1765,14 @@ int vma_server_enqueue_vma_op(
 
 
 #define GET_UNMAP_IF_HOME(task, memory) { \
-if (task->tgroup_home_cpu != my_nid()) { \
+if (task->tgroup_home_cpu != my_nid) { \
 	WARN(memory->mm->distribute_unmap == 0, \
 		"GET_UNMAP_IF_HOME: value was already 0, check who is the older.\n"); \
 	memory->mm->distribute_unmap = 0; \
 	} \
 }
 #define PUT_UNMAP_IF_HOME(task, memory) { \
-if (task->tgroup_home_cpu != my_nid()) {\
+if (task->tgroup_home_cpu != my_nid) {\
 	WARN(memory->mm->distribute_unmap == 1, \
 		"PUT_UNMAP_IF_HOME: value was already 1, check who is the older.\n"); \
 	memory->mm->distribute_unmap = 1; \

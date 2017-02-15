@@ -43,10 +43,7 @@ bool is_popcorn_node_online(int nid)
 	//return popcorn_nodes[nid].is_connected;
 }
 
-int my_nid(void)
-{
-	return popcorn_node.id;
-}
+int my_nid __read_mostly = -1;
 EXPORT_SYMBOL(my_nid);
 
 static int __connect_to_popcorn_nodes(void)
@@ -64,7 +61,7 @@ static int __init parse_popcorn_node_opt(char *str)
 	unsigned int ids[3] = {-1};
 	get_options(str, sizeof(ids) / sizeof(unsigned int), ids);
 
-	popcorn_node.id = ids[1];
+	popcorn_node.id = my_nid = ids[1];
 	popcorn_node.subid = ids[2];
 
 	printk(KERN_INFO"Popcorn node: id=%d,%d arch=%s\n",

@@ -2937,7 +2937,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 #ifdef CONFIG_POPCORN
 	bitmap_zero(page->owners, MAX_POPCORN_NODES);
-	set_bit(my_nid(), page->owners);
+	set_bit(my_nid, page->owners);
 #endif
 
 	entry = mk_pte(page, vma->vm_page_prot);

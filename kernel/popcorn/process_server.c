@@ -411,7 +411,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	req->origin_pid = tsk->origin_pid;
-	req->remote_nid = my_nid();
+	req->remote_nid = my_nid;
 	req->remote_pid = tsk->pid;
 
 	req->personality = tsk->personality;
@@ -547,7 +547,7 @@ int shadow_main(void *_args)
 #endif
 
 	printk("####### MIGRATED - %d at %d --> %d at %d\n",
-			current->origin_pid, current->origin_nid, current->pid, my_nid());
+			current->origin_pid, current->origin_nid, current->pid, my_nid);
 	printk("%s: pc %lx ip %lx\n", __func__, 
 			(&req->arch)->migration_pc, current_pt_regs()->ip);
 	printk("%s: sp %lx bp %lx\n", __func__, 
@@ -716,7 +716,7 @@ static int vma_worker_at_remote(void *_data)
 	}
 
 	rc->tgid = current->tgid;
-	rc->remote_tgids[my_nid()] = rc->tgid;
+	rc->remote_tgids[my_nid] = rc->tgid;
 	rc->remote_tgids[req->origin_nid] = req->origin_tgid;
 	get_task_struct(current); /* for rc->vma_worker */
 	rc->vma_worker = current;
@@ -752,6 +752,7 @@ static void clone_remote_thread(struct work_struct *_work)
 	struct remote_context *rc_new =
 			__alloc_remote_context(nid_from, tgid_from);
 	struct vma_worker_params *params = kmalloc(sizeof(*params), GFP_KERNEL);
+	char *which_rc;
 
 	BUG_ON(!rc_new || !params);
 
@@ -770,13 +771,14 @@ static void clone_remote_thread(struct work_struct *_work)
 		 */
 		pid = kernel_thread(vma_worker_at_remote, params, 0);
 		BUG_ON(pid < 0);
+		which_rc = "created";
 	} else {
 		kfree(rc_new);
 		__unlock_remote_contexts_in(nid_from);
-		printk("%s: found at %p\n", __func__, rc);
+		which_rc = "found";
 	}
 
-	PSPRINTK("%s: remote_context at 0x%p\n", __func__, rc);
+	PSPRINTK("%s: remote_context %s at 0x%p\n", __func__, which_rc, rc);
 	// Kick the spawner
 	__kick_shadow_spawner(rc, work);
 	return;
@@ -846,7 +848,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk,
 	req->def_flags = tsk->mm->def_flags;
 
 	// struct tsk_struct ------------------------------------------------------
-	req->origin_nid = my_nid();
+	req->origin_nid = my_nid;
 	req->origin_tgid = tsk->tgid;
 	req->origin_pid = tsk->pid;
 
@@ -910,7 +912,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	might_sleep();
 
 	/* Want to avoid allocate this structure in the spinlock-ed area */
-	rc_new = __alloc_remote_context(my_nid(), tsk->tgid);
+	rc_new = __alloc_remote_context(my_nid, tsk->tgid);
 
 	__lock_remote_contexts_out(dst_nid);
 	rc = __lookup_remote_contexts_out(tsk->tgid);
@@ -933,7 +935,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		 */ 
 		tsk->mm->remote = rc;
 		rc->mm = tsk->mm;
-		rc->remote_tgids[my_nid()] = tsk->tgid;
+		rc->remote_tgids[my_nid] = tsk->tgid;
 
 		barrier();
 

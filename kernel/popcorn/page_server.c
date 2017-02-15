@@ -38,7 +38,7 @@ bool page_is_replicated(struct page *page)
 
 bool page_is_mine(struct page *page)
 {
-	return !page_is_replicated(page) || test_bit(my_nid(), page->owners);
+	return !page_is_replicated(page) || test_bit(my_nid, page->owners);
 }
 
 struct remote_page {
@@ -190,7 +190,7 @@ static int __do_invalidate_page(struct task_struct *tsk, unsigned long addr)
 		up_read(&mm->mmap_sem);
 		return PTR_ERR(page);
 	}
-	clear_bit(my_nid(), page->owners);
+	clear_bit(my_nid, page->owners);
 
 	entry = ptep_get_and_clear(mm, addr, pte);
 	entry = pte_set_flags(entry, _PAGE_SOFTW1);
@@ -242,7 +242,7 @@ static void __revoke_page_ownership(struct task_struct *tsk, unsigned long addr,
 		.header.type = PCN_KMSG_TYPE_REMOTE_PAGE_INVALIDATE,
 		.header.prio = PCN_KMSG_PRIO_NORMAL,
 		.addr = addr,
-		.origin_nid = my_nid(),
+		.origin_nid = my_nid,
 		.origin_pid = tsk->pid,
 	};
 
@@ -492,7 +492,7 @@ static void __map_remote_page(struct remote_page *rp, unsigned long fault_flags)
 	kunmap(page);
 
 	memcpy(page->owners, res->owners, sizeof(page->owners));
-	BUG_ON(!test_bit(my_nid(), page->owners));
+	BUG_ON(!test_bit(my_nid, page->owners));
 
 	__SetPageUptodate(page);
 	mem_cgroup_commit_charge(page, memcg, false);
@@ -571,7 +571,7 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	ret = rp->ret;
 
 	printk("%s: %lx resume %d at %d %d\n", __func__,
-			addr, current->pid, my_nid(), ret);
+			addr, current->pid, my_nid, ret);
 
 	spin_lock_irqsave(&rc->pages_lock, flags);
 	if (remaining) {
@@ -673,7 +673,7 @@ static void process_remote_page_flush(struct work_struct *work)
 	paddr = kmap(page);
 	copy_page(paddr, req->page);
 	kunmap(page);
-	set_bit(my_nid(), page->owners);
+	set_bit(my_nid, page->owners);
 
 	entry = pte_clear_flags(*pte, _PAGE_SOFTW1);
 	entry = pte_set_flags(entry, _PAGE_PRESENT | _PAGE_PROTNONE);
@@ -699,7 +699,7 @@ static int __flush_pte(pte_t *pte, unsigned long addr, unsigned long next, struc
 		return 0;
 	}
 
-	if (test_bit(my_nid(), page->owners)) {
+	if (test_bit(my_nid, page->owners)) {
 		void *paddr;
 		printk("flush_remote_page: %lx\n", addr);
 		req->addr = addr;
@@ -707,7 +707,7 @@ static int __flush_pte(pte_t *pte, unsigned long addr, unsigned long next, struc
 		copy_page(req->page, paddr);
 		kunmap(page);
 
-		clear_bit(my_nid(), page->owners);
+		clear_bit(my_nid, page->owners);
 
 		pcn_kmsg_send_long(current->origin_nid, req, sizeof(*req));
 	}
