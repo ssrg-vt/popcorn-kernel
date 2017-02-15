@@ -1764,6 +1764,27 @@ int vma_server_enqueue_vma_op(
 }
 
 
+#define GET_UNMAP_IF_HOME(task, memory) { \
+if (task->tgroup_home_cpu != my_nid()) { \
+	WARN(memory->mm->distribute_unmap == 0, \
+		"GET_UNMAP_IF_HOME: value was already 0, check who is the older.\n"); \
+	memory->mm->distribute_unmap = 0; \
+	} \
+}
+#define PUT_UNMAP_IF_HOME(task, memory) { \
+if (task->tgroup_home_cpu != my_nid()) {\
+	WARN(memory->mm->distribute_unmap == 1, \
+		"PUT_UNMAP_IF_HOME: value was already 1, check who is the older.\n"); \
+	memory->mm->distribute_unmap = 1; \
+	} \
+}
+
+extern long madvise_remove(struct vm_area_struct *vma,
+		struct vm_area_struct **prev, unsigned long start, unsigned long end);
+extern int kernel_mprotect(unsigned long start, size_t len, unsigned long prot);
+extern long kernel_mremap(unsigned long addr, unsigned long old_len,
+		unsigned long new_len, unsigned long flags, unsigned long new_addr);
+
 /**
  * We do this stupid thing because related meomry mapping functions operate
  * on "current". Thus, we need mmap/munmap/madvise in our process
@@ -1883,9 +1904,9 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 			continue;
 		}
 		*/
-		__set_task_state(current, TASK_UNINTERRUPTIBLE);
+		__set_task_state(current, TASK_INTERRUPTIBLE);
 		schedule_timeout(HZ * 30);
-		printk("%s: continues 0x%p\n", __func__, current);
+		//printk("%s: continues 0x%p\n", __func__, current);
 		__set_task_state(current, TASK_RUNNING);
 	}
 
@@ -2180,7 +2201,8 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	might_sleep();
 
 	printk(KERN_WARNING"\n");
-	printk(KERN_WARNING"## VMAFAULT: %lx %lx\n", address, regs->ip);
+	printk(KERN_WARNING"## VMAFAULT [%d]: %lx %lx\n",
+			current->pid, address, regs->ip);
 
 	spin_lock_irqsave(&rc->vmas_lock, flags);
 	vi = __lookup_pending_vma_request(rc, addr);
@@ -2193,8 +2215,8 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		spin_lock_irqsave(&rc->vmas_lock, flags);
 		v = __lookup_pending_vma_request(rc, addr);
 		if (!v) {
-			printk("%s: %lx from %d, %d\n", __func__,
-					addr, tsk->origin_nid, tsk->origin_pid);
+			printk("%s: %lx from %d at %d\n", __func__,
+					addr, tsk->origin_pid, tsk->origin_nid);
 			list_add(&vi->list, &rc->vmas);
 		} else {
 			printk("%s: %lx already pended\n", __func__, addr);

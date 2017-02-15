@@ -13,8 +13,6 @@
 #include <popcorn/types.h>
 #include <popcorn/bundle.h>
 
-#include <asm/process_server.h>
-
 #define VMA_OPERATION_FIELDS \
 	int origin_nid; \
 	int origin_pid; \
@@ -102,6 +100,13 @@ typedef struct _memory_struct {
 	atomic_t answers_remain;
 } memory_t;
 
+void add_memory_entry(memory_t* entry);
+int add_memory_entry_with_check(memory_t* entry);
+memory_t* find_memory_entry(int cpu, int id);
+int dump_memory_entries(memory_t * list[], int num, int *written);
+void remove_memory_entry(memory_t* entry);
+
+
 struct remote_context {
 	struct list_head list;
 	atomic_t count;
@@ -131,31 +136,6 @@ struct remote_context {
 
 struct remote_context *get_task_remote(struct task_struct *tsk);
 bool put_task_remote(struct task_struct *tsk);
-
-
-void add_memory_entry_in_out(memory_t *m, int nid, bool in);
-#define add_memory_entry_in(m, nid)	\
-	add_memory_entry_in_out(m, nid, true)
-#define add_memory_entry_out(m, nid)	\
-	add_memory_entry_in_out(m, nid, false)
-
-memory_t *find_memory_entry_in_out(int nid, int pid, bool in);
-#define find_memory_entry_in(nid, pid) \
-	find_memory_entry_in_out(nid, pid, true)
-#define find_memory_entry_out(nid, pid) \
-	find_memory_entry_in_out(nid, pid, false)
-
-void remove_memory_entry_in_out(memory_t *m, bool in);
-#define remove_memory_entry_in(m) \
-	remove_memory_entry_in_out(m, true)
-#define remove_memory_entry_out(m) \
-	remove_memory_entry_in_out(m, false)
-
-void add_memory_entry(memory_t* entry);
-int add_memory_entry_with_check(memory_t* entry);
-memory_t* find_memory_entry(int cpu, int id);
-int dump_memory_entries(memory_t * list[], int num, int *written);
-void remove_memory_entry(memory_t* entry);
 
 
 #define ACK_FIELDS \
@@ -230,10 +210,10 @@ DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
  * the specified pid is executing on behalf of the
  * requesting cpu.
  */
-#define PROCESS_PAIRING_FIELDS \
+#define REMOTE_TASK_PAIRING_FIELDS \
 	int your_pid; \
 	int my_pid;
-DEFINE_PCN_KMSG(create_process_pairing_t, PROCESS_PAIRING_FIELDS);
+DEFINE_PCN_KMSG(remote_task_pairing_t, REMOTE_TASK_PAIRING_FIELDS);
 
 #define COUNT_REQUEST_FIELDS \
 	int tgroup_home_cpu; \
@@ -271,24 +251,6 @@ DEFINE_PCN_KMSG(thread_group_exited_notification_t, EXIT_GROUP_FIELDS);
  * Inform remote cpu of a vma to process mapping.
  */
 
-#define MAPPING_FIELDS_FOR_2_KERNELS \
-	int tgroup_home_cpu; \
-	int tgroup_home_id; \
-	unsigned long address;\
-	int is_write; \
-	int is_fetch;\
-	int vma_operation_index;\
-	long last_write;
-DEFINE_PCN_KMSG(data_request_for_2_kernels_t, MAPPING_FIELDS_FOR_2_KERNELS);
-
-#define INVALID_FIELDS_FOR_2_KERNELS \
-	int tgroup_home_cpu;\
-	int tgroup_home_id; \
-	unsigned long address; \
-	long last_write;\
-	int vma_operation_index;
-DEFINE_PCN_KMSG(invalid_data_for_2_kernels_t, INVALID_FIELDS_FOR_2_KERNELS);
-
 #define DATA_RESPONSE_FIELDS \
 	int tgroup_home_cpu; \
 	int tgroup_home_id;  \
@@ -308,24 +270,6 @@ DEFINE_PCN_KMSG(invalid_data_for_2_kernels_t, INVALID_FIELDS_FOR_2_KERNELS);
 	int futex_owner; \
 	char data;
 DEFINE_PCN_KMSG(data_response_for_2_kernels_t,DATA_RESPONSE_FIELDS);
-
-#define DATA_VOID_RESPONSE_FIELDS \
-	int tgroup_home_cpu; \
-	int tgroup_home_id;  \
-	unsigned long address; \
-	int vma_present; \
-	unsigned long vaddr_start;\
-	unsigned long vaddr_size;\
-	unsigned long vm_flags; \
-	unsigned long pgoff;\
-	char path[512];\
-	pgprot_t prot; \
-	int fetching_read; \
-	int fetching_write;\
-	int owner;\
-	__wsum checksum; \
-	int futex_owner;
-DEFINE_PCN_KMSG(data_void_response_for_2_kernels_t, DATA_VOID_RESPONSE_FIELDS);
 
 
 #define REMOTE_VMA_REQUEST_FIELDS \
@@ -370,6 +314,13 @@ DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 	unsigned long addr;
 DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
 
+#define REMOTE_PAGE_FLUSH_FIELDS \
+	int origin_pid; \
+	int remote_pid; \
+	unsigned long addr; \
+	unsigned char page[PAGE_SIZE];
+DEFINE_PCN_KMSG(remote_page_flush_t, REMOTE_PAGE_FLUSH_FIELDS);
+
 #define SCHED_PERIODIC_FIELDS \
 	int power_1; \
 	int power_2; \
@@ -403,6 +354,9 @@ static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 }
 
 #define REGISTER_KMSG_WQ_HANDLER(x, y) \
+	pcn_kmsg_register_callback(x, handle_##y)
+
+#define REGISTER_KMSG_HANDLER(x, y) \
 	pcn_kmsg_register_callback(x, handle_##y)
 
 #endif /* __TYPES_H__ */

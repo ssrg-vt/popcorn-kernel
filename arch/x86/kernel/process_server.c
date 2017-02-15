@@ -21,13 +21,13 @@
 #include <asm/i387.h>
 #endif
 #include <asm/uaccess.h>
-#include <asm/process_server.h>
+
+#include <popcorn/types.h>
 #include <popcorn/debug.h>
 
 /* External function declarations */
 extern void __show_regs(struct pt_regs *regs, int all);
-extern unsigned long read_old_rsp(void);
-extern void write_old_rsp(unsigned long rsp);
+
 /*
  * Function:
  *		save_thread_info
@@ -111,7 +111,7 @@ int save_thread_info(struct task_struct *tsk, struct pt_regs *regs,
 		arch->thread_gs = gs;
 	}
 
-#if MIGRATE_FPU
+#ifdef MIGRATE_FPU
 	save_fpu_info(tsk, arch);
 #endif
 
@@ -157,7 +157,6 @@ int save_thread_info(struct task_struct *tsk, struct pt_regs *regs,
 int restore_thread_info(struct task_struct *tsk, field_arch *arch)
 {
 	struct pt_regs *regs = task_pt_regs(tsk);
-	unsigned long fsindex, fs;
 
 	memcpy(regs, &arch->regs, sizeof(struct pt_regs));
 
@@ -176,11 +175,16 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch)
 	tsk->thread.gsindex = arch->thread_gsindex;
 	tsk->thread.gs = arch->thread_gs;
 
-#if MIGRATE_FPU
+#ifdef MIGRATE_FPU
 	restore_fpu_info(tsk, arch);
 #endif
+	/*
+	unsigned long fsindex, fs;
 	rdmsrl(MSR_FS_BASE, fs);
 	savesegment(fs, fsindex);
+	PSPRINTK(KERN_INFO"%s:  current 0x%lx[0x%lx]\n", __func__,
+		(unsigned long)fs, (unsigned long)fsindex);
+	*/
 
 	PSPRINTK(KERN_INFO"%s: ip 0x%lx pc 0x%lx\n", __func__,
 			arch->ip, arch->migration_pc);
@@ -189,8 +193,6 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch)
 	PSPRINTK(KERN_INFO"%s: ra 0x%lx\n", __func__, arch->ra);
 	PSPRINTK(KERN_INFO"%s: fs saved 0x%lx[0x%lx]\n", __func__,
 		(unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex);
-	PSPRINTK(KERN_INFO"%s:  current 0x%lx[0x%lx]\n", __func__,
-		(unsigned long)fs, (unsigned long)fsindex);
 
 	return 0;
 }
@@ -248,7 +250,7 @@ int restore_thread_info_from_aarch64(struct task_struct *task, field_arch *arch)
 		passed = 2;
 	}
 
-#if MIGRATE_FPU
+#ifdef MIGRATE_FPU
 	restore_fpu_info(task, arch);
 #endif
 
@@ -289,33 +291,33 @@ int restore_thread_info_from_aarch64(struct task_struct *task, field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int update_thread_info(struct task_struct *tsk)
+int update_thread_info(void)
 {
 	unsigned int fsindex, gsindex;
 
-	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
-	BUG_ON(!tsk);
+	//printk("%s [+] TID: %d\n", __func__, current->pid);
+	BUG_ON(!current);
 
 	savesegment(fs, fsindex);
-	if (unlikely(fsindex | tsk->thread.fsindex))
-		loadsegment(fs, tsk->thread.fsindex);
+	if (unlikely(fsindex | current->thread.fsindex))
+		loadsegment(fs, current->thread.fsindex);
 	else
 		loadsegment(fs, 0);
 
-	if (tsk->thread.fs)
-		wrmsrl_safe(MSR_FS_BASE, tsk->thread.fs);
+	if (current->thread.fs)
+		wrmsrl_safe(MSR_FS_BASE, current->thread.fs);
 
 	savesegment(gs, gsindex);
-	if (unlikely(gsindex | tsk->thread.gsindex))
-		load_gs_index(tsk->thread.gsindex);
+	if (unlikely(gsindex | current->thread.gsindex))
+		load_gs_index(current->thread.gsindex);
 	else
 		load_gs_index(0);
 
-	if (tsk->thread.gs)
-		wrmsrl_safe(MSR_KERNEL_GS_BASE, tsk->thread.gs);
+	if (current->thread.gs)
+		wrmsrl_safe(MSR_KERNEL_GS_BASE, current->thread.gs);
 
-#if MIGRATE_FPU
-	update_fpu_info(tsk);
+#ifdef MIGRATE_FPU
+	update_fpu_info(current);
 #endif
 
 	//dump_processor_regs(task_pt_regs(tsk));
@@ -359,7 +361,7 @@ int initialize_thread_retval(struct task_struct *tsk, int val)
 }
 
 
-#if MIGRATE_FPU
+#ifdef MIGRATE_FPU
 /*/
  * Function:
  *		save_fpu_info

@@ -2935,6 +2935,11 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 */
 	__SetPageUptodate(page);
 
+#ifdef CONFIG_POPCORN
+	bitmap_zero(page->owners, MAX_POPCORN_NODES);
+	set_bit(my_nid(), page->owners);
+#endif
+
 	entry = mk_pte(page, vma->vm_page_prot);
 	if (vma->vm_flags & VM_WRITE)
 		entry = pte_mkwrite(pte_mkdirty(entry));
@@ -3512,7 +3517,7 @@ static int handle_pte_fault(struct mm_struct *mm,
 #ifdef CONFIG_POPCORN
 	if (process_is_distributed(current)) {
 		int ret = page_server_handle_pte_fault(
-				mm, vma, address, pte, pmd, flags);
+				mm, vma, address, entry, pmd, flags);
 		if (ret != VM_FAULT_CONTINUE) return ret;
 	}
 #endif

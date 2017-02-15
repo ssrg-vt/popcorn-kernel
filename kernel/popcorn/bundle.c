@@ -15,8 +15,6 @@ struct popcorn_node {
 	enum popcorn_node_arch arch;
 
 	bool is_connected;
-	struct list_head memory[2];
-	spinlock_t memory_lock[2];
 };
 
 struct popcorn_node popcorn_node = {
@@ -97,12 +95,6 @@ int __init popcorn_nodes_init(void)
 
 	for (i = 0; i < MAX_POPCORN_NODES; i++) {
 		struct popcorn_node *pn = popcorn_nodes + i;
-
-		INIT_LIST_HEAD(pn->memory + 0);
-		INIT_LIST_HEAD(pn->memory + 1);
-
-		spin_lock_init(pn->memory_lock + 0);
-		spin_lock_init(pn->memory_lock + 1);
 
 		pn->is_connected = false;
 		pn->arch = POPCORN_NODE_UNKNOWN;

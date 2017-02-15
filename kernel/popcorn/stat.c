@@ -5,7 +5,7 @@
 #include <popcorn/types.h>
 #include <popcorn/debug.h>
 
-#if MIGRATION_PROFILE
+#ifdef MIGRATION_PROFILE
 ktime_t migration_start;
 ktime_t migration_end;
 #endif

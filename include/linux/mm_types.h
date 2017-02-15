@@ -17,7 +17,7 @@
 
 #ifdef CONFIG_POPCORN
 #include <popcorn/bundle.h>
-struct remote_desc;
+struct remote_context;
 #endif
 
 #ifndef AT_VECTOR_SIZE_ARCH
@@ -225,7 +225,7 @@ struct page {
 #endif
 
 #ifdef CONFIG_POPCORN
-	DECLARE_BITMAP(page_owners, MAX_POPCORN_NODES);
+	DECLARE_BITMAP(owners, MAX_POPCORN_NODES);
 	//Multikernel
 	unsigned long rflags;
 	int replicated;

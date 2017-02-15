@@ -397,7 +397,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->remote_pid = tsk->origin_pid = -1;
 
 	tsk->is_vma_worker = false;
-	tsk->is_shadow = false;
+	tsk->ret_from_remote = EXIT_ALIVE;
 
 	tsk->distributed_exit = EXIT_ALIVE;
 	tsk->surrogate = -1; // this is for futex
@@ -408,6 +408,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	 * of which node and thread group the new thread is a part of.
 	 */
 	if (orig->tgid != tsk->tgid) {
+		tsk->at_remote = false;
 	}
 #endif
 
@@ -734,6 +735,9 @@ void mmput(struct mm_struct *mm)
 	might_sleep();
 
 	if (atomic_dec_and_test(&mm->mm_users)) {
+#ifdef CONFIG_POPCORN
+		exit_remote_context(mm->remote);
+#endif
 		uprobe_clear_state(mm);
 		exit_aio(mm);
 		ksm_exit(mm);
@@ -747,9 +751,6 @@ void mmput(struct mm_struct *mm)
 		}
 		if (mm->binfmt)
 			module_put(mm->binfmt->module);
-#ifdef CONFIG_POPCORN
-		exit_remote_context(mm->remote);
-#endif
 		mmdrop(mm);
 	}
 }

@@ -8,7 +8,9 @@
 #ifndef __KERNEL_POPCORN_STAT_H__
 #define __KERNEL_POPCORN_STAT_H__
 
-#if MIGRATION_PROFILE
+#define STATISTICS 0
+
+#ifdef MIGRATION_PROFILE
 extern ktime_t migration_start;
 extern ktime_t migration_end;
 #define GET_MIGRATION_TIME \

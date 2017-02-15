@@ -4599,14 +4599,19 @@ static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
 
 	retval = process_server_do_migration(tsk, nid, NULL);
 
-	if (retval == 0) {
-		printk("%s: sleep %d\n", __func__, tsk->pid);
-		__set_task_state(tsk, TASK_INTERRUPTIBLE);
-		schedule();
-		printk("%s: wakeup %d\n", __func__, tsk->pid);
+	if (retval) return retval;
+
+	printk("%s: sleep %d\n", __func__, tsk->pid);
+	__set_task_state(tsk, TASK_INTERRUPTIBLE);
+	schedule();
+	printk("%s: wakeup %d\n", __func__, tsk->pid);
+
+	if (tsk->ret_from_remote & (EXIT_THREAD | EXIT_PROCESS)) {
+		printk("%s: terminated with %d\n", __func__, tsk->exit_code);
+		do_exit(tsk->exit_code);
 	}
 
-	return retval;
+	return 0;
 }
 
 
@@ -4617,7 +4622,7 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 
 	printk(KERN_INFO"%s: %u to %u at 0x%lx\n", __func__, pid, nid, addr);
 
-#if MIGRATION_PROFILE
+#ifdef MIGRATION_PROFILE
 	migration_start = ktime_get();
 #endif
 
@@ -4626,22 +4631,29 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 		return -EAGAIN;
 	}
 
+	/*
 	rcu_read_lock();
 	tsk = find_task_by_vpid(pid);
 	if (!tsk) {
 		rcu_read_unlock();
 		return -ESRCH;
 	}
+	*/
+	tsk = current;
 	get_task_struct(tsk);
 	rcu_read_unlock();
 
 	if (process_is_distributed(tsk)) {
-		if (tsk->represents_remote) {
-			// Already migrated. This is bug
-			printk(KERN_INFO"%s: already migrated to %d at %d\n", __func__,
-					tsk->remote_pid, tsk->remote_nid);
-			retval = -EBUSY;
-			goto out_put;
+		if (tsk->at_remote) {
+			// this might be a back migration. allow it.
+		} else {
+			if (tsk->remote_nid != -1 && tsk->remote_pid != -1) {
+				// Already migrated. This is bug
+				printk(KERN_INFO"%s: already migrated to %d at %d\n", __func__,
+						tsk->remote_pid, tsk->remote_nid);
+				retval = -EBUSY;
+				goto out_put;
+			}
 		}
 	}
 

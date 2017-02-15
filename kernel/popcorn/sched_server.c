@@ -208,7 +208,7 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 			if (t->is_vma_worker) {
 				// this is the main thread (kernel space only) nothing to do
 			} else {
-				if (!t->is_shadow) {
+				if (!t->at_remote) {
 					// this is the nothing to fo
 				} else {
 					// TODO print only the one that are currently running (not migrated!)
@@ -219,7 +219,7 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 
 					len += snprintf((buffer + len), PROC_BUFFER_PS - len,
 							" %d:%d:%d:%d %d:%d;", (int)t->pid,
-							t->is_shadow, t->is_vma_worker, t->distributed_exit,
+							t->at_remote, t->is_vma_worker, t->distributed_exit,
 							uload, sload); //these are in percentage
 				}
 			}
@@ -290,7 +290,7 @@ static ssize_t popcorn_ps_read1(struct file *file, char __user *buf, size_t coun
 				if (t->is_vma_worker) {
 					// this is the main thread (kernel space only) nothing to do
 				} else {
-					if (!t->is_shadow) {
+					if (!t->at_remote) {
 						// this is the nothing to fo
 					} else {
 						// TODO print only the one that are currently running (not migrated!)
@@ -300,7 +300,7 @@ static ssize_t popcorn_ps_read1(struct file *file, char __user *buf, size_t coun
 
 						len += snprintf((buffer +len), PROC_BUFFER_PS -len,
 								" %d:%d:%d:%d %d:%d;",
-								(int)t->pid, t->is_shadow, t->is_vma_worker,
+								(int)t->pid, t->at_remote, t->is_vma_worker,
 								t->distributed_exit,
 								uload, sload); //these are in percentage
 					}

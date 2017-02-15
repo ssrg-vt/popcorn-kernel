@@ -1815,8 +1815,6 @@ struct task_struct {
 	int pagefault_disabled;
 
 #ifdef CONFIG_POPCORN
-	void  *memory;			/* remove me quickly */
-
 	union {
 		int remote_nid;
 		int origin_nid;
@@ -1827,13 +1825,13 @@ struct task_struct {
 	};
 
 	bool is_vma_worker;			/* kernel thread that manages the process*/
-	bool is_shadow;				/* Is executing on behalf of another node? */
+	bool at_remote;				/* Is executing on behalf of another node? */
 
-	int represents_remote;      /* Is migrated to other node ? */
+	int ret_from_remote;
 
 	int distributed_exit_code;
-	int group_exit;
 	int distributed_exit;
+	int group_exit;
 
 	/*akshay*/
 	pid_t surrogate;
