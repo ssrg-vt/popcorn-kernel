@@ -12,7 +12,7 @@
 #include <linux/file.h>
 #include <linux/ktime.h>
 
-#include <linux/pcn_kmsg.h>
+#include <popcorn/pcn_kmsg.h>
 
 #include <linux/fdtable.h>
 
@@ -28,9 +28,10 @@
 #include <asm/atomic.h>
 #include <linux/completion.h>
 
-#include <popcorn/init.h>
 #include <linux/cpumask.h>
 #include <linux/sched.h>
+
+#include <linux/vmalloc.h>
 
 #include "genif.h"
 
@@ -75,6 +76,8 @@ typedef struct _recv_data{
 	int is_worker;
 }recv_data_t;
 
+
+extern int _init_RemoteCPUMask(void);
 
 static int connection_handler(void* arg0);
 static int send_thread(int arg0);
@@ -152,9 +155,9 @@ static int __init initialize(void);
 int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg, unsigned int payload_size);
 
 #if CONFIG_ARM64
-unsigned int my_cpu = 0;
+static unsigned int my_cpu = 0;
 #else
-unsigned int my_cpu = 1;
+static unsigned int my_cpu = 1;
 #endif
 
 #if TEST_MSG_LAYER
@@ -593,7 +596,7 @@ int __init initialize()
 	smp_mb();
 
 	/* Make init popcorn call */
-	_init_RemoteCPUMask();
+//	_init_RemoteCPUMask();
 
 	printk(" Value of send ptr = %lx\n", send_callback);
 #endif
