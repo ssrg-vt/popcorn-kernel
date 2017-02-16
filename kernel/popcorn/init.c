@@ -26,7 +26,7 @@
  */
 // TODO this must be refactored
 
-LIST_HEAD(rlist_head); // TODO sanghoon: lock? 
+LIST_HEAD(rlist_head); // TODO sanghoon: lock?
 
 /*
  * Function definitions
@@ -221,7 +221,7 @@ int _init_RemoteCPUMask(void)
 	if (Kernel_Id != 0) {
 		printk("%s: OCCHIO checking other kernel\n", __func__);
 		//result = send_cpu_info_request(i);
-		// Sharath: 
+		// Sharath:
 		result = send_cpu_info_request(0);
 		if (result != -1) {
 			printk("OCCHIO waiting for answer proc cpu\n");

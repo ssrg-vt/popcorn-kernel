@@ -65,7 +65,7 @@ static int __init parse_popcorn_node_opt(char *str)
 	popcorn_node.subid = ids[2];
 
 	printk(KERN_INFO"Popcorn node: id=%d,%d arch=%s\n",
-			popcorn_node.id, popcorn_node.subid, 
+			popcorn_node.id, popcorn_node.subid,
 			popcorn_node.arch == POPCORN_NODE_X86 ? "x86" :
 			popcorn_node.arch == POPCORN_NODE_ARM ? "arm" : "???" );
 

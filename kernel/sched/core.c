@@ -4584,9 +4584,9 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 }
 
 #ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
 #include <popcorn/bundle.h>
 #include <popcorn/process_server.h>
-#include <popcorn/types.h>
 
 static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
 		unsigned long migration_ip, unsigned long ret_addr)
@@ -4606,7 +4606,7 @@ static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
 	schedule();
 	printk("%s: wakeup %d\n", __func__, tsk->pid);
 
-	if (tsk->ret_from_remote & (EXIT_THREAD | EXIT_PROCESS)) {
+	if (tsk->ret_from_remote & TASK_DEAD) {
 		printk("%s: terminated with %d\n", __func__, tsk->exit_code);
 		do_exit(tsk->exit_code);
 	}
@@ -4620,7 +4620,7 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 	struct task_struct *tsk;
 	int retval;
 
-	printk(KERN_INFO"%s: %u to %u at 0x%lx\n", __func__, pid, nid, addr);
+	printk(KERN_INFO"%s [%d]: to %u at 0x%lx\n", __func__, pid, nid, addr);
 
 #ifdef MIGRATION_PROFILE
 	migration_start = ktime_get();

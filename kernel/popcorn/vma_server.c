@@ -1793,7 +1793,7 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 {
 	might_sleep();
 
-	printk("%s: Started %s, pid=%d\n", __func__, at, current->pid);
+	printk("%s [%d]: starting %s\n", __func__, current->pid, at);
 
 	// TODO: Need to explore how this has to be used
 	// TODO: Exit the thread
@@ -1910,7 +1910,7 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 		__set_task_state(current, TASK_RUNNING);
 	}
 
-	printk("%s: Exiting %s pid=%d\n", __func__, at, current->pid);
+	printk("%s [%d]: exiting %s\n", __func__, current->pid, at);
 
 	/*
 	int flush = 0;
@@ -1974,17 +1974,17 @@ static void process_remote_vma_response(struct work_struct *_work)
 	spin_lock_irqsave(&rc->vmas_lock, flags);
 	vi = __lookup_pending_vma_request(rc, res->addr);
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
-	if (!vi) {
-		__WARN();
-		goto out_unlock;
-	}
-
-	vi->response = res;
-	wake_up(&vi->pendings_wait);
-
-out_unlock:
 	put_task_remote(tsk);
 	put_task_struct(tsk);
+
+	if (!vi) {
+		__WARN();
+		goto out_free;
+	}
+
+	printk("%s: %d %p\n", __func__, atomic_read(&vi->pendings), res);
+	vi->response = res;
+	wake_up(&vi->pendings_wait);
 
 out_free:
 	kfree(w);
@@ -2081,7 +2081,9 @@ out_up:
 	if (res->result == 0) {
 		printk("remote_vma: %lx -- %lx %lx\n",
 				res->vm_start, res->vm_end, res->vm_flags);
-		printk("remote_vma: %lx %s\n", res->vm_pgoff, res->vm_file_path);
+		if (!remote_vma_anon(res)) {
+			printk("remote_vma: %lx %s\n", res->vm_pgoff, res->vm_file_path);
+		}
 	}
 
 out_free:
@@ -2192,6 +2194,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	struct pt_regs *regs = task_pt_regs(tsk);
 	remote_vma_request_t *req = NULL;
 	struct remote_context *rc = get_task_remote(tsk);
+	bool wakeup = false;
 
 	/*
 	put_task_remote(tsk);
@@ -2227,6 +2230,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		}
 	}
 	atomic_inc(&vi->pendings);
+	prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
 	if (req) {
@@ -2234,15 +2238,15 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		kfree(req);
 	}
 
-	prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	up_read(&tsk->mm->mmap_sem);
 	schedule();
-	finish_wait(&vi->pendings_wait, &wait);
 
 	/**
 	 * Now vi->response should points to the result
 	 * Also, mm_mmap_sem should be properly set when return
 	 */
+
+	finish_wait(&vi->pendings_wait, &wait);
 
 	if (!vi->mapped) {
 		__map_remote_vma(tsk, vi);
@@ -2251,12 +2255,13 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		down_read(&tsk->mm->mmap_sem);
 	}
 	ret = vi->ret;
+	smp_wmb();
 
 	printk("%s: %lx resume %d\n", __func__, addr, ret);
 
 	spin_lock_irqsave(&rc->vmas_lock, flags);
 	if (atomic_dec_return(&vi->pendings)) {
-		wake_up(&vi->pendings_wait);
+		wakeup = true;
 	} else {
 		list_del(&vi->list);
 		pcn_kmsg_free_msg(vi->response);
@@ -2264,6 +2269,9 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	}
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
 	put_task_remote(tsk);
+	barrier();
+
+	if (wakeup) wake_up(&vi->pendings_wait);
 
 	return ret;
 }

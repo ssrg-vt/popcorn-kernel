@@ -168,12 +168,14 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch)
 	regs->cs = __USER_CS;
 	regs->ss = __USER_DS;
 
+	/*
 	tsk->thread.ds = arch->thread_ds;
 	tsk->thread.es = arch->thread_es;
 	tsk->thread.fsindex = arch->thread_fsindex;
 	tsk->thread.fs = arch->thread_fs;
 	tsk->thread.gsindex = arch->thread_gsindex;
 	tsk->thread.gs = arch->thread_gs;
+	*/
 
 #ifdef MIGRATE_FPU
 	restore_fpu_info(tsk, arch);
@@ -298,6 +300,7 @@ int update_thread_info(void)
 	//printk("%s [+] TID: %d\n", __func__, current->pid);
 	BUG_ON(!current);
 
+	/*
 	savesegment(fs, fsindex);
 	if (unlikely(fsindex | current->thread.fsindex))
 		loadsegment(fs, current->thread.fsindex);
@@ -315,6 +318,7 @@ int update_thread_info(void)
 
 	if (current->thread.gs)
 		wrmsrl_safe(MSR_KERNEL_GS_BASE, current->thread.gs);
+	*/
 
 #ifdef MIGRATE_FPU
 	update_fpu_info(current);

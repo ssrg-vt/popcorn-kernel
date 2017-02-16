@@ -288,18 +288,16 @@ static void process_remote_page_response(struct work_struct *_work)
 	spin_lock_irqsave(&rc->pages_lock, flags);
 	rp = __lookup_pending_remote_page_request(rc, res->addr);
 	spin_unlock_irqrestore(&rc->pages_lock, flags);
+	put_task_remote(tsk);
+	put_task_struct(tsk);
 	if (!rp) {
 		__WARN();
-		goto out_unlock;
+		goto out_free;
 	}
 	WARN_ON(atomic_read(&rp->pendings) <= 0);
 
 	rp->response = res;
 	wake_up(&rp->pendings_wait);
-
-out_unlock:
-	put_task_remote(tsk);
-	put_task_struct(tsk);
 
 out_free:
 	kfree(w);
@@ -517,7 +515,7 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	struct remote_page *rp;
 	unsigned long flags;
 	DEFINE_WAIT(wait);
-	int remaining;
+	bool wakeup = false;
 	int ret = 0;
 	remote_page_request_t *req = NULL;
 
@@ -546,6 +544,7 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 		}
 	}
 	atomic_inc(&rp->pendings);
+	prepare_to_wait(&rp->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	spin_unlock_irqrestore(&rc->pages_lock, flags);
 
 	if (req) {
@@ -553,7 +552,6 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 		kfree(req);
 	}
 
-	prepare_to_wait(&rp->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	up_read(&tsk->mm->mmap_sem);
 	schedule();
 
@@ -561,7 +559,6 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 
 	finish_wait(&rp->pendings_wait, &wait);
 
-	remaining = atomic_dec_return(&rp->pendings);
 	if (!rp->mapped) {
 		__map_remote_page(rp, fault_flags);	// This function set rp->ret
 		rp->mapped = true;
@@ -569,13 +566,14 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 		down_read(&tsk->mm->mmap_sem);
 	}
 	ret = rp->ret;
+	smp_wmb();
 
 	printk("%s: %lx resume %d at %d %d\n", __func__,
 			addr, current->pid, my_nid, ret);
 
 	spin_lock_irqsave(&rc->pages_lock, flags);
-	if (remaining) {
-		wake_up(&rp->pendings_wait);
+	if (atomic_dec_return(&rp->pendings)) {
+		wakeup = true;
 	} else {
 		list_del(&rp->list);
 		pcn_kmsg_free_msg(rp->response);
@@ -583,6 +581,9 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	}
 	spin_unlock_irqrestore(&rc->pages_lock, flags);
 	put_task_remote(tsk);
+	barrier();
+
+	if (wakeup) wake_up(&rp->pendings_wait);
 
 	return ret;
 }
@@ -626,6 +627,7 @@ int page_server_handle_pte_fault(struct mm_struct *mm,
 			printk("pte_fault: Locally file-mapped read-only. continue\n");
 			return VM_FAULT_CONTINUE;
 		}
+		printk("pte_fault: deal with it anyway\n");
 		return __handle_remote_fault(addr, fault_flags);
 	}
 
@@ -634,6 +636,7 @@ int page_server_handle_pte_fault(struct mm_struct *mm,
 		if (!pte_write(entry)) {
 			/* This page might be replicated by a read prior to current write.
 			 * Claim this page from the server */
+			printk("pte_fault: claim this page\n");
 			return __handle_remote_fault(addr, fault_flags);
 		}
 	}
@@ -667,7 +670,7 @@ static void process_remote_page_flush(struct work_struct *work)
 	vma = find_vma(tsk->mm, req->addr);
 	BUG_ON(!vma || vma->vm_start > req->addr);
 
-	page = __find_page_at(tsk->mm, req->addr, &pte, &ptl);	
+	page = __find_page_at(tsk->mm, req->addr, &pte, &ptl);
 	BUG_ON(IS_ERR(page));
 
 	paddr = kmap(page);

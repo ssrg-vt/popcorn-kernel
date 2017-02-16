@@ -20,9 +20,8 @@ extern int update_fpu_info(struct task_struct *task);
 
 
 int process_server_do_migration(struct task_struct* tsk, int cpu, void __user *uregs);
-int process_server_task_exit_notification(struct task_struct *tsk,long code);
-
 int process_server_task_exit(struct task_struct *tsk);
+
 
 static inline bool process_is_distributed(struct task_struct *tsk)
 {

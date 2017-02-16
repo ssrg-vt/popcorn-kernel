@@ -29,7 +29,7 @@ int compressed_page_sent = 0;
 int not_compressed_page = 0;
 int not_compressed_diff_page = 0;
 
-//asmlinkage 
+//asmlinkage
 long sys_take_time(int start)
 {
 	if (start == 1)

@@ -1815,6 +1815,7 @@ struct task_struct {
 	int pagefault_disabled;
 
 #ifdef CONFIG_POPCORN
+	struct remote_context *remote;
 	union {
 		int remote_nid;
 		int origin_nid;

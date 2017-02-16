@@ -88,7 +88,7 @@ struct popcorn_regset_sparc {
 	struct popcorn_regset_sparc regs_sparc;
 //	union thread_xstate fpu_state;
 
-typedef struct _fields_arch{
+typedef struct _fields_arch {
 	FIELDS_ARCH
 } field_arch;
 

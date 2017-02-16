@@ -393,13 +393,13 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	/*
 	 * Reset variables for tracking remote execution
 	 */
+	tsk->remote = NULL;
 	tsk->remote_nid = tsk->origin_nid = -1;
 	tsk->remote_pid = tsk->origin_pid = -1;
 
 	tsk->is_vma_worker = false;
-	tsk->ret_from_remote = EXIT_ALIVE;
+	tsk->ret_from_remote = TASK_RUNNING;
 
-	tsk->distributed_exit = EXIT_ALIVE;
 	tsk->surrogate = -1; // this is for futex
 
 	/* If the new tsk is not in the same thread group as the parent,

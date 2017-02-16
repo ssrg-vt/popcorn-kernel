@@ -274,7 +274,7 @@ static ssize_t popcorn_ps_read1(struct file *file, char __user *buf, size_t coun
 
 			len += snprintf((buffer +len), PROC_BUFFER_PS - len,
 					"%s %d:%d:%d:%lu", ppp->comm,
-					ppp->origin_nid, ppp->origin_pid, 
+					ppp->origin_nid, ppp->origin_pid,
 					process_is_distributed(ppp),
 					ppp->mm ? ppp->mm->total_vm : -1); // this is in number of pages
 

@@ -179,7 +179,7 @@ extern unsigned int offset_cpus; //from kernel/smp.c
 /*
  * This function should be called every time a new kernel will join the popcorn
  * namespace. Note that if there are applications using the popcorn namespace
- * it is not possible to modify the namespace. 
+ * it is not possible to modify the namespace.
  * TODO: "force" updates the * namespace data forcefully.
  */
 // NOTE this will modify the global variable popcorn_ns (so, no need to pass in anything)

@@ -112,6 +112,7 @@ struct remote_context {
 	atomic_t count;
 
 	int tgid;
+	bool for_remote;
 	
 	struct mm_struct *mm;
 
