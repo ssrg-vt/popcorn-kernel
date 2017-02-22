@@ -5,16 +5,13 @@
 # kernel Makefile or not.
 
 
-ifeq ($(BUILD_FOR_DOLPHIN),)
 DOLPHIN := /home/jingoo/dolphin
 
-EXTRA_CFLAGS := -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src/LINUX -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include/LINUX -I$(DOLPHIN)/DIS/src/include/ -I$(DOLPHIN)/DIS/src/include/dis/
+EXTRA_CFLAGS += -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src/LINUX -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include/LINUX -I$(DOLPHIN)/DIS/src/include/ -I$(DOLPHIN)/DIS/src/include/dis/
 EXTRA_CFLAGS += -I/opt/DIS/include/ 
 EXTRA_CFLAGS += -D_KERNEL -DOS_IS_LINUX
 
-KBUILD_EXTRA_SYMBOLS := $(DOLPHIN)/msg_layer/Module.symvers
-KBUILD_EXTRA_SYMBOLS := $(DOLPHIN)/DIS/src/SCI_SOCKET/scilib/GENIF/lib/LINUX/Module.symvers
-endif
+KBUILD_EXTRA_SYMBOLS=$(DOLPHIN)/DIS/src/SCI_SOCKET/scilib/GENIF/lib/LINUX/Module.symvers
 
 ifeq ($(KERNELRELEASE),)
 
