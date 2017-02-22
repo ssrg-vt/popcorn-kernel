@@ -186,7 +186,7 @@ struct semaphore recv_buf_cnt;
 
 struct test_msg_t
 {
-	struct pcn_kmsg_hdr hdr;
+	struct pcn_kmsg_hdr header;
 	unsigned char payload[MSG_LENGTH];
 };
 
@@ -644,7 +644,7 @@ int test_thread(void* arg0)
 	int payload_size = MSG_LENGTH;
 
 	msg = (struct test_msg_t *) vmalloc(sizeof(struct test_msg_t));
-	msg->hdr.type= PCN_KMSG_TYPE_SELFIE_TEST;
+	msg->header.type= PCN_KMSG_TYPE_SELFIE_TEST;
 	memset(msg->payload,'b',payload_size);
 
 #if !PROF_HISTOGRAM
@@ -725,10 +725,10 @@ int send_thread(int arg0)
 		wait_for_completion(&send_intr_flag[channel_num]);
 
 #if ENABLE_DMA
-		memcpy(send_vaddr[channel_num], pcn_msg, pcn_msg->hdr.size);
+		memcpy(send_vaddr[channel_num], pcn_msg, pcn_msg->header.size);
 
 		status = dis_start_dma_transfer(subuser_id[channel_num], send_vaddr[channel_num],
-						local_io[channel_num], pcn_msg->hdr.size, 0, remote_recv_seg_hdl[channel_num],
+						local_io[channel_num], pcn_msg->header.size, 0, remote_recv_seg_hdl[channel_num],
 						dma_cb, &dma_queue[channel_num], &dma_queue[channel_num], DMA_PUSH);
 		if (status != 0) {
 			printk(" Error in dis_start_dma_transfer: %d\n", status);
@@ -737,7 +737,7 @@ int send_thread(int arg0)
 		wait_for_completion(&dma_complete[channel_num]);
 #else
 		/*check whether remote is using the channel */
-		memcpy(send_remote_vaddr[channel_num], pcn_msg, pcn_msg->hdr.size);
+		memcpy(send_remote_vaddr[channel_num], pcn_msg, pcn_msg->header.size);
 #endif
 
 	        /* trigger the interrupt */
@@ -829,8 +829,8 @@ int connection_handler(void* arg0)
 		if (!temp)
 			printk("%s: ERROR: temp is zero\n", __func__);
 
-/*		if (temp->hdr.type != PCN_KMSG_TYPE_SCHED_PERIODIC)
-			printk("Receive message: %d (%s)\n", temp->hdr.type, msg_names[temp->hdr.type]);*/
+/*		if (temp->header.type != PCN_KMSG_TYPE_SCHED_PERIODIC)
+			printk("Receive message: %d (%s)\n", temp->header.type, msg_names[temp->header.type]);*/
 
 #if TEST_MSG_LAYER
 		down_interruptible(&recv_buf_cnt);
@@ -857,16 +857,16 @@ do_retry:
 		pcn_msg = recv_buf[i].buff;
 #else
 do_retry:
-		pcn_msg = (struct pcn_kmsg_message *) vmalloc(temp->hdr.size);
+		pcn_msg = (struct pcn_kmsg_message *) vmalloc(temp->header.size);
 		if (pcn_msg == NULL) {
 			if ( !(retry % 1000))
-				printk(KERN_ERR"%s: ERROR: Failed to allocate recv buffer size %d\n", __func__, temp->hdr.size);
+				printk(KERN_ERR"%s: ERROR: Failed to allocate recv buffer size %d\n", __func__, temp->header.size);
 			retry++;
 			goto do_retry;
 		}
 #endif
 
-		memcpy(pcn_msg, recv_vaddr[channel_num], temp->hdr.size);
+		memcpy(pcn_msg, recv_vaddr[channel_num], temp->header.size);
 
 	       /* trigger the interrupt */
 		status = sci_trigger_interrupt_flag(remote_send_intr_hdl[channel_num],
@@ -880,8 +880,8 @@ do_retry:
 		atomic_inc(&recv_count);
 #endif
 
-		if (pcn_msg->hdr.type < 0) {
-			printk("%s: ERROR: Received invalid message type %d\n", pcn_msg->hdr.type);
+		if (pcn_msg->header.type < 0) {
+			printk("%s: ERROR: Received invalid message type %d\n", pcn_msg->header.type);
 
 #if TEST_MSG_LAYER
 			recv_buf[i].is_free = 1;
@@ -892,7 +892,7 @@ do_retry:
 			vfree(pcn_msg);
 #endif
 		} else {
-			ftn = callbacks[pcn_msg->hdr.type];
+			ftn = callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {
 				ftn(pcn_msg);
 #if TEST_MSG_LAYER
@@ -902,7 +902,7 @@ do_retry:
 #endif
 			} else {
 				printk("%s: ERROR: Received message type %d size %d has no registered callback!\n",
-						__func__, pcn_msg->hdr.type,pcn_msg->hdr.size);
+						__func__, pcn_msg->header.type,pcn_msg->header.size);
 #if TEST_MSG_LAYER
 				recv_buf[i].is_free = 1;
 				smp_wmb();
@@ -996,15 +996,15 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 		return -1;
 	}
 
-	lmsg->hdr.from_cpu = my_cpu;
-	lmsg->hdr.size = (payload_size + sizeof(struct pcn_kmsg_hdr));
+	lmsg->header.from_cpu = my_cpu;
+	lmsg->header.size = (payload_size + sizeof(struct pcn_kmsg_hdr));
 
-	if ( lmsg->hdr.size > SEG_SIZE) {
+	if ( lmsg->header.size > SEG_SIZE) {
 		printk("%s: ALERT: trying to send a message bigger than the supported size %d (%pS) %s\n",
-				__func__, (int)SEG_SIZE, __builtin_return_address(0), msg_names[lmsg->hdr.type]);
+				__func__, (int)SEG_SIZE, __builtin_return_address(0), msg_names[lmsg->header.type]);
 	}
-/*	if (lmsg->hdr.type != PCN_KMSG_TYPE_SCHED_PERIODIC)
-		printk("Send message: %d (%s) pid %d\n", lmsg->hdr.type, msg_names[lmsg->hdr.type], current->pid);*/
+/*	if (lmsg->header.type != PCN_KMSG_TYPE_SCHED_PERIODIC)
+		printk("Send message: %d (%s) pid %d\n", lmsg->header.type, msg_names[lmsg->header.type], current->pid);*/
 
 #if !TEST_MSG_LAYER
 	if (dest_cpu==my_cpu) {
@@ -1012,22 +1012,22 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 
 		printk("%s: INFO: Send message: dest_cpu == my_cpu\n", __func__);
 
-		if (pcn_msg->hdr.type < 0 || pcn_msg->hdr.type >= PCN_KMSG_TYPE_MAX) {
-			printk(KERN_ERR"Received invalid message type %d\n", pcn_msg->hdr.type);
+		if (pcn_msg->header.type < 0 || pcn_msg->header.type >= PCN_KMSG_TYPE_MAX) {
+			printk(KERN_ERR"Received invalid message type %d\n", pcn_msg->header.type);
 			vfree(pcn_msg);
 		}
 		else {
-			ftn = callbacks[pcn_msg->hdr.type];
+			ftn = callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {
 				ftn(pcn_msg);
 			}
 			else {
 				printk(KERN_ERR"%s: ERROR: Recieved message type %d size %d has no registered callback!\n",
-						__func__, pcn_msg->hdr.type,pcn_msg->hdr.size);
+						__func__, pcn_msg->header.type,pcn_msg->header.size);
 				vfree(pcn_msg);
 			}
 		}
-		return lmsg->hdr.size;
+		return lmsg->header.size;
 	}
 #endif
 
@@ -1068,7 +1068,7 @@ do_retry:
 	send_data->msg=send_buf[i].buff;
 
 	memset(send_buf[i].buff, 0, SEG_SIZE); // NOTE probably not needed
-	memcpy(send_data->msg,lmsg,lmsg->hdr.size);
+	memcpy(send_data->msg,lmsg,lmsg->header.size);
 	send_data->dst_cpu = dest_cpu;
 
 #if SEND_QUEUE_POOL
