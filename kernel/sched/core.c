@@ -4614,13 +4614,13 @@ static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
 	return 0;
 }
 
-
 SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, addr)
 {
 	struct task_struct *tsk;
 	int retval;
 
-	printk(KERN_INFO"%s [%d]: to %u at 0x%lx\n", __func__, pid, nid, addr);
+	printk(KERN_INFO"%s [%d]: %d to %u at 0x%lx\n", __func__,
+			current->pid, pid, nid, addr);
 
 #ifdef MIGRATION_PROFILE
 	migration_start = ktime_get();
@@ -4632,7 +4632,6 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 	}
 
 	/*
-	rcu_read_lock();
 	tsk = find_task_by_vpid(pid);
 	if (!tsk) {
 		rcu_read_unlock();
@@ -4640,8 +4639,6 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 	}
 	*/
 	tsk = current;
-	get_task_struct(tsk);
-	rcu_read_unlock();
 
 	if (process_is_distributed(tsk)) {
 		if (tsk->at_remote) {
@@ -4660,7 +4657,6 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 	retval = __do_sched_migrate(tsk, nid, addr, addr + 16 );
 
 out_put:
-	put_task_struct(tsk);
 	return retval;
 }
 

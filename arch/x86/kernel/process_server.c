@@ -17,16 +17,13 @@
 /* File includes */
 #include <linux/sched.h>
 #include <linux/cpu_namespace.h>
-#if 0 // beowulf
-#include <asm/i387.h>
-#endif
+#include <linux/kdebug.h>
 #include <asm/uaccess.h>
+#include <asm/prctl.h>
+#include <asm/proto.h>
 
 #include <popcorn/types.h>
 #include <popcorn/debug.h>
-
-/* External function declarations */
-extern void __show_regs(struct pt_regs *regs, int all);
 
 /*
  * Function:
@@ -51,16 +48,18 @@ extern void __show_regs(struct pt_regs *regs, int all);
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *tsk, struct pt_regs *regs,
-                     field_arch *arch, void __user *uregs)
+int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *uregs)
 {
+	struct pt_regs *regs = task_pt_regs(tsk);
 	unsigned short fsindex, gsindex;
-	unsigned long fs, gs;
-	unsigned short es, ds;
+	int cpu;
 
 	//dump_processor_regs(task_pt_regs(tsk));
 
 	BUG_ON(!tsk || !arch);
+	BUG_ON(current != tsk);
+
+	cpu = get_cpu();
 
 	if (uregs != NULL) {
 		int remain = copy_from_user(&arch->regs_aarch, uregs,
@@ -68,7 +67,7 @@ int save_thread_info(struct task_struct *tsk, struct pt_regs *regs,
 		BUG_ON(remain != 0);
 	}
 
-	memcpy(&arch->regs, regs, sizeof(struct pt_regs));
+	memcpy(&arch->regs, regs, sizeof(*regs));
 
 	/*
 	 * Save frame pointer and return address, required for stack
@@ -80,56 +79,35 @@ int save_thread_info(struct task_struct *tsk, struct pt_regs *regs,
 	arch->bp = regs->bp;
 	arch->sp = regs->sp;
 
-	/* Segments */
+	/*
+	 * Segments
+	 * CS and SS are set during the user/kernel mode switch.
+	 * Thus, nothing to do with them.
+	 */
 	arch->thread_ds = tsk->thread.ds;
-	savesegment(ds, ds);
-
 	arch->thread_es = tsk->thread.es;
-	savesegment(es, es);
 
-	arch->thread_fsindex = tsk->thread.fsindex;
 	savesegment(fs, fsindex);
-	if (fsindex != arch->thread_fsindex) {
-		arch->thread_fsindex = fsindex;
-	}
+	rdmsrl(MSR_FS_BASE, arch->thread_fs);
 
-	arch->thread_fs = tsk->thread.fs;
-	rdmsrl(MSR_FS_BASE, fs);
-	if (fs != arch->thread_fs) {
-		arch->thread_fs = fs;
-	}
-
-	arch->thread_gsindex = tsk->thread.gsindex;
 	savesegment(gs, gsindex);
-	if (gsindex != arch->thread_gsindex) {
-		arch->thread_gsindex = gsindex;
-	}
-
-	arch->thread_gs = tsk->thread.gs;
-	rdmsrl(MSR_KERNEL_GS_BASE, gs);
-	if (gs != arch->thread_gs) {
-		arch->thread_gs = gs;
-	}
+	rdmsrl(MSR_KERNEL_GS_BASE, arch->thread_gs);
 
 #ifdef MIGRATE_FPU
 	save_fpu_info(tsk, arch);
 #endif
+	put_cpu();
 
-	PSPRINTK(KERN_INFO"%s: ip 0x%lx pc 0x%lx\n", __func__,
+	PSPRINTK(KERN_INFO"%s: ip %lx pc %lx\n", __func__,
 			arch->ip, arch->migration_pc);
-	PSPRINTK(KERN_INFO"%s: sp 0x%lx bp 0x%lx\n", __func__,
+	PSPRINTK(KERN_INFO"%s: sp %lx bp %lx\n", __func__,
 			arch->sp, arch->bp);
-	PSPRINTK(KERN_INFO"%s: ra 0x%lx\n", __func__, arch->ra);
-
-	PSPRINTK(KERN_INFO"%s: fs task 0x%lx[0x%lx]\n", __func__,
-		(unsigned long)tsk->thread.fs, (unsigned long)tsk->thread.fsindex);
-	PSPRINTK(KERN_INFO"%s:   saved 0x%lx[0x%lx]\n", __func__,
-		(unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex);
-	PSPRINTK(KERN_INFO"%s: current 0x%lx[0x%lx]\n", __func__,
-		(unsigned long)fs, (unsigned long)fsindex);
+	PSPRINTK(KERN_INFO"%s: fs %lx gs %lx\n", __func__,
+			arch->thread_fs, arch->thread_gs);
 
 	return 0;
 }
+
 
 /*
  * Function:
@@ -147,6 +125,9 @@ int save_thread_info(struct task_struct *tsk, struct pt_regs *regs,
  *			architecture specific information of the task has to be
  *			restored
  *
+ *	segs	restore segmentations as well if segs is true. Unless, do
+ *			not restore the segmentation units (for back migration)
+ *
  * Output:
  *	none
  *
@@ -154,50 +135,55 @@ int save_thread_info(struct task_struct *tsk, struct pt_regs *regs,
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_thread_info(struct task_struct *tsk, field_arch *arch)
+int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool segs)
 {
 	struct pt_regs *regs = task_pt_regs(tsk);
+	unsigned long fs;
+	int cpu;
 
-	memcpy(regs, &arch->regs, sizeof(struct pt_regs));
+	BUG_ON(segs && current != tsk);
+
+	cpu = get_cpu();
+	memcpy(regs, &arch->regs, sizeof(*regs));
 
 	regs->ip = arch->migration_pc;
 	tsk->return_addr = arch->ra;
 	regs->bp = arch->bp;
 	regs->sp = arch->sp;
 
-	regs->cs = __USER_CS;
-	regs->ss = __USER_DS;
+	if (segs) {
+		regs->cs = __USER_CS;
+		regs->ss = __USER_DS;
 
-	/*
-	tsk->thread.ds = arch->thread_ds;
-	tsk->thread.es = arch->thread_es;
-	tsk->thread.fsindex = arch->thread_fsindex;
-	tsk->thread.fs = arch->thread_fs;
-	tsk->thread.gsindex = arch->thread_gsindex;
-	tsk->thread.gs = arch->thread_gs;
-	*/
+		tsk->thread.ds = arch->thread_ds;
+		tsk->thread.es = arch->thread_es;
+
+		if (arch->thread_fs) {
+			do_arch_prctl(tsk, ARCH_SET_FS, arch->thread_fs);
+		}
+		if (arch->thread_gs) {
+			do_arch_prctl(tsk, ARCH_SET_GS, arch->thread_gs);
+		}
+	}
+	//initialize_thread_retval(tsk, 0);
 
 #ifdef MIGRATE_FPU
 	restore_fpu_info(tsk, arch);
 #endif
-	/*
-	unsigned long fsindex, fs;
-	rdmsrl(MSR_FS_BASE, fs);
-	savesegment(fs, fsindex);
-	PSPRINTK(KERN_INFO"%s:  current 0x%lx[0x%lx]\n", __func__,
-		(unsigned long)fs, (unsigned long)fsindex);
-	*/
+	put_cpu();
 
-	PSPRINTK(KERN_INFO"%s: ip 0x%lx pc 0x%lx\n", __func__,
+	rdmsrl(MSR_FS_BASE, fs);
+
+	PSPRINTK(KERN_INFO"%s: ip %lx pc %lx\n", __func__,
 			arch->ip, arch->migration_pc);
-	PSPRINTK(KERN_INFO"%s: sp 0x%lx bp 0x%lx\n", __func__,
+	PSPRINTK(KERN_INFO"%s: sp %lx bp %lx\n", __func__,
 			arch->sp, arch->bp);
-	PSPRINTK(KERN_INFO"%s: ra 0x%lx\n", __func__, arch->ra);
-	PSPRINTK(KERN_INFO"%s: fs saved 0x%lx[0x%lx]\n", __func__,
-		(unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex);
+	PSPRINTK(KERN_INFO"%s: fs %lx [%x]\n", __func__,
+			fs, tsk->thread.fsindex);
 
 	return 0;
 }
+
 
 #if 0
 int restore_thread_info_from_aarch64(struct task_struct *task, field_arch *arch)
@@ -213,18 +199,11 @@ int restore_thread_info_from_aarch64(struct task_struct *task, field_arch *arch)
 
 		pt_regs->ip = arch->migration_pc;
 		pt_regs->bp = arch->bp;
-		/* pt_regs->sp = tsk->saved_old_rsp; */
 		pt_regs->sp = arch->old_rsp;
 		tsk->thread.usersp = arch->old_rsp;
 
 		pt_regs->cs = __USER_CS;
 		pt_regs->ss = __USER_DS;
-		/*
-		pt_regs->cs = __KERNEL_CS | get_kernel_rpl();
-		pt_regs->ds = __USER_DS;
-		printk("%s: cs=0x%x, KERNEL_CS=0x%lx\n", __func__,
-				pt_regs->cs, __KERNEL_CS);
-		*/
 
 		pt_regs->r15 = arch->regs_x86.r15;
 		pt_regs->r14 = arch->regs_x86.r14;
@@ -293,41 +272,12 @@ int restore_thread_info_from_aarch64(struct task_struct *task, field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int update_thread_info(void)
+int update_thread_info(field_arch *arch)
 {
-	unsigned int fsindex, gsindex;
-
-	//printk("%s [+] TID: %d\n", __func__, current->pid);
-	BUG_ON(!current);
-
-	/*
-	savesegment(fs, fsindex);
-	if (unlikely(fsindex | current->thread.fsindex))
-		loadsegment(fs, current->thread.fsindex);
-	else
-		loadsegment(fs, 0);
-
-	if (current->thread.fs)
-		wrmsrl_safe(MSR_FS_BASE, current->thread.fs);
-
-	savesegment(gs, gsindex);
-	if (unlikely(gsindex | current->thread.gsindex))
-		load_gs_index(current->thread.gsindex);
-	else
-		load_gs_index(0);
-
-	if (current->thread.gs)
-		wrmsrl_safe(MSR_KERNEL_GS_BASE, current->thread.gs);
-	*/
-
 #ifdef MIGRATE_FPU
 	update_fpu_info(current);
 #endif
 
-	//dump_processor_regs(task_pt_regs(tsk));
-	//__show_regs(task_pt_regs(tsk), 1);
-
-	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
 	return 0;
 }
 
@@ -354,10 +304,8 @@ int update_thread_info(void)
 int initialize_thread_retval(struct task_struct *tsk, int val)
 {
 	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
-	if (tsk == NULL) {
-		printk(KERN_ERR"process_server: invalid params to %s", __func__);
-		return -EINVAL;
-	}
+	BUG_ON(!tsk);
+
 	task_pt_regs(tsk)->ax = val;
 	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
 
@@ -533,6 +481,8 @@ int update_fpu_info(struct task_struct *tsk)
  *
  * Return value:
  *	void
+ *
+ * Why don't use show_all() for x86?
  */
 void dump_processor_regs(struct pt_regs* regs)
 {
@@ -576,10 +526,3 @@ void dump_processor_regs(struct pt_regs* regs)
 	printk(KERN_ALERT"gsindex{%lx} - %x\n",gsindex, current->thread.gsindex);
 	printk(KERN_ALERT"REGS DUMP COMPLETE\n");
 }
-
-#if 0 // beowulf. removed
-void suggest_migration(int suggestion)
-{
-	vpopcorn_migrate = suggestion;
-}
-#endif

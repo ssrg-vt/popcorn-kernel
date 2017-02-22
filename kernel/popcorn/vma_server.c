@@ -84,19 +84,8 @@ static inline vma_op_answers_t* find_vma_ack_entry(int cpu, int id)
 	spin_lock_irqsave(&_vma_ack_head_lock, flags);
 	list_for_each_entry(v, &_vma_ack_head, list) {
 		if (v->origin_nid == cpu && v->origin_pid == id) {
-#ifdef CHECK_FOR_DUPLICATES
-			if (found) {
-				printk(KERN_ERR"%s: duplicates in list %s %s (cpu %d id %d)\n",
-						__func__,
-						found->waiting ? found->waiting->comm : "?",
-						v->waiting ? v->waiting->comm : "?",
-						cpu, id);
-			}
-			found = v;
-#else
 			found = v;
 			break;
-#endif
 		}
 	}
 	spin_unlock_irqrestore(&_vma_ack_head_lock, flags);
@@ -206,8 +195,7 @@ static inline int vma_send_long_all( memory_t * entry, void * message, int size,
 			if ( task && (task->mm->distr_vma_op_counter > max_distr_vma_op)
 					&& (i == entry->message_push_operation->from_cpu))
 				continue;
-			error = pcn_kmsg_send_long(i,
-					(struct pcn_kmsg_long_message*) message, size);
+			error = pcn_kmsg_send_long(i, message, size);
 			if (error != -1)
 				acks++;
 		}
@@ -1795,8 +1783,6 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 
 	printk("%s [%d]: starting %s\n", __func__, current->pid, at);
 
-	// TODO: Need to explore how this has to be used
-	// TODO: Exit the thread
 	while (!rc->vma_worker_stop) {
 		/*
 		while (memory->operation != VMA_OP_NOP &&
@@ -1906,23 +1892,14 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 		*/
 		__set_task_state(current, TASK_INTERRUPTIBLE);
 		schedule_timeout(HZ * 30);
-		//printk("%s: continues 0x%p\n", __func__, current);
 		__set_task_state(current, TASK_RUNNING);
+		//printk("%s: continues 0x%p\n", __func__, current);
 	}
 
 	printk("%s [%d]: exiting %s\n", __func__, current->pid, at);
 
-	/*
-	int flush = 0;
-	while (current->distributed_exit != EXIT_ALIVE) {
-		flush = exit_distributed_process(memory, flush);
-		msleep(1000);
-	}
-	*/
-
 	return;
 }
-
 
 
 
@@ -1963,12 +1940,15 @@ static void process_remote_vma_response(struct work_struct *_work)
 	struct vma_info *vi;
 	struct remote_context *rc;
 
+	rcu_read_lock();
 	tsk = find_task_by_vpid(res->remote_pid);
 	if (!tsk) {
 		__WARN();
+		rcu_read_unlock();
 		goto out_free;
 	}
 	get_task_struct(tsk);
+	rcu_read_unlock();
 	rc = get_task_remote(tsk);
 
 	spin_lock_irqsave(&rc->vmas_lock, flags);
@@ -2024,14 +2004,18 @@ static void process_remote_vma_request(struct work_struct *work)
 	};
 	res->addr = addr;
 
+	rcu_read_lock();
 	tsk = find_task_by_vpid(req->origin_pid);
 	if (!tsk) {
 		printk("remote_vma:: process does not exist %d\n", req->origin_pid);
 		res->result = -ESRCH;
+		rcu_read_unlock();
 		goto out_free;
 	}
 	get_task_struct(tsk);
-	mm = tsk->mm;
+	rcu_read_unlock();
+
+	mm = get_task_mm(tsk);
 
 	BUG_ON(!process_is_distributed(tsk));
 
@@ -2072,10 +2056,11 @@ good:
 	}
 	res->result = 0;
 
-	set_bit(req->header.from_cpu, vma->vm_owners);
+	set_bit(req->remote_nid, vma->vm_owners);
 
 out_up:
 	up_read(&mm->mmap_sem);
+	mmput(mm);
 	put_task_struct(tsk);
 
 	if (res->result == 0) {
@@ -2087,7 +2072,7 @@ out_up:
 	}
 
 out_free:
-	response_remote_vma(req->header.from_cpu, req->remote_pid, res);
+	response_remote_vma(req->remote_nid, req->remote_pid, res);
 
 	pcn_kmsg_free_msg(req);
 	kfree(w);
@@ -2116,6 +2101,7 @@ static struct vma_info *__alloc_remote_vma_request(struct task_struct *tsk, unsi
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	req->origin_pid = tsk->origin_pid;
+	req->remote_nid = my_nid;
 	req->remote_pid = tsk->pid;
 	req->addr = addr;
 
@@ -2196,11 +2182,6 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	struct remote_context *rc = get_task_remote(tsk);
 	bool wakeup = false;
 
-	/*
-	put_task_remote(tsk);
-	return VM_FAULT_OOM;
-	*/
-
 	might_sleep();
 
 	printk(KERN_WARNING"\n");
@@ -2255,7 +2236,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		down_read(&tsk->mm->mmap_sem);
 	}
 	ret = vi->ret;
-	smp_wmb();
+	smp_mb();
 
 	printk("%s: %lx resume %d\n", __func__, addr, ret);
 

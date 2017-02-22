@@ -105,13 +105,16 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	spin_lock_init(&rc->shadow_eggs_lock);
 	init_completion(&rc->spawn_egg);
 
-	memset(&rc->remote_tgids, 0x00, sizeof(rc->remote_tgids));
+	memset(rc->remote_tgids, 0x00, sizeof(rc->remote_tgids));
 
 	INIT_LIST_HEAD(&rc->pages);
 	spin_lock_init(&rc->pages_lock);
 
 	INIT_LIST_HEAD(&rc->vmas);
 	spin_lock_init(&rc->vmas_lock);
+
+	init_completion(&rc->flush);
+
 	barrier();
 
 	printk(KERN_INFO"%s: at 0x%p for %d at %d %c\n", __func__,
@@ -211,19 +214,20 @@ int process_server_task_exit(struct task_struct *tsk)
 	bool last = false;
 	bool notify = false;
 
+	WARN_ON(tsk != current);
+
 	if (!process_is_distributed(tsk)) return -ESRCH;
 
 	rc = tsk->mm->remote;
 
-	printk("EXIT [%d]: %s %s/ 0x%x 0x%x\n", tsk->pid,
+	printk("EXIT [%d]: %s / 0x%x 0x%x\n", tsk->pid,
 			tsk->at_remote ? "remote" : "local",
-			tsk->is_vma_worker ? "worker " : "",
 			tsk->exit_code, tsk->group_exit);
 	printk("EXIT [%d]: 0x%p %d\n", tsk->pid,
 			rc, atomic_read(&rc->count));
 	//__show_regs(regs, 1);
 
-	if (tsk->is_vma_worker == 1) return 0;
+	BUG_ON(tsk->is_vma_worker);
 
 	/*
 	 * Normally, tsk->remote should be null upon exit unless it is terminated
@@ -240,9 +244,9 @@ int process_server_task_exit(struct task_struct *tsk)
 	if (tsk->at_remote) {
 		if (tsk->exit_code == TASK_PARKED) {
 			// Quietly exit back-migrated thread.
-		} else  {
+		} else {
 			if (last) {
-				// TODO: might be redundant but safe..
+				// might be redundant but safe..
 				page_server_flush_remote_pages(rc);
 			}
 
@@ -259,8 +263,10 @@ int process_server_task_exit(struct task_struct *tsk)
 				req->exit_code = tsk->exit_code;
 				req->group_exit = tsk->group_exit;
 
+				req->expect_flush = last;
+
 				tsk->migration_pc = task_pt_regs(tsk)->ip;
-				save_thread_info(tsk, task_pt_regs(tsk), &req->arch, NULL);
+				save_thread_info(tsk, &req->arch, NULL);
 
 				pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));
 				kfree(req);
@@ -274,8 +280,10 @@ int process_server_task_exit(struct task_struct *tsk)
 	}
 
 	if (last) {
-		printk("EXIT [%d]: close the remote context\n", tsk->pid);
-		list_del(&rc->list);		// XXX: possible race in rc iteration
+		printk("EXIT [%d]: terminate remote execution\n", tsk->pid);
+		__lock_remote_contexts(tsk->at_remote);
+		list_del(&rc->list);
+		__unlock_remote_contexts(tsk->at_remote);
 		rc->vma_worker_stop = true;
 		while(!rc->vma_worker) {
 			schedule();
@@ -302,12 +310,14 @@ static void process_exit_task(struct work_struct *_work)
 
 	rcu_read_lock();
 	tsk = find_task_by_vpid(req->origin_pid);
-	rcu_read_unlock();
 
 	if (tsk && tsk->remote_pid == req->remote_pid) {
 		printk(KERN_INFO"%s: exit %d with %ld, %d\n", __func__,
 				tsk->pid, req->exit_code, req->group_exit);
 
+		if (req->expect_flush) {
+			wait_for_completion(&tsk->remote->flush);
+		}
 		tsk->remote = NULL;
 		tsk->remote_nid = -1;
 		tsk->remote_pid = -1;
@@ -317,13 +327,14 @@ static void process_exit_task(struct work_struct *_work)
 		tsk->exit_code = req->exit_code;
 		tsk->group_exit = req->group_exit;
 
-		restore_thread_info(tsk, &req->arch);
-		smp_wmb();
+		restore_thread_info(tsk, &req->arch, false);
+		smp_mb();
 
 		wake_up_process(tsk);
 	} else {
 		printk(KERN_INFO"%s: %d not found\n", __func__, req->origin_pid);
 	}
+	rcu_read_unlock();
 
 	pcn_kmsg_free_msg(req);
 	kfree(work);
@@ -349,29 +360,32 @@ static int handle_back_migration(struct pcn_kmsg_message *inc_msg)
 
 	rcu_read_lock();
 	tsk = find_task_by_vpid(req->origin_pid);
-	rcu_read_unlock();
-
 	if (!tsk) {
 		printk("%s: no origin taks %d for remote %d\n",
 				__func__, req->origin_pid, req->remote_pid);
+		rcu_read_unlock();
 		goto out_free;
 	}
 
 	get_task_struct(tsk);
+	rcu_read_unlock();
 
 	BUG_ON(tsk->remote_pid != req->remote_pid);
 
 	/* Welcome home */
+	if (req->expect_flush) {
+		wait_for_completion(&tsk->remote->flush);
+	}
 	tsk->remote = NULL;
 	tsk->remote_nid = -1;
 	tsk->remote_pid = -1;
-	tsk->ret_from_remote = TASK_RUNNING;
 	put_task_remote(tsk);
 
-	restore_thread_info(tsk, &req->arch);
+	tsk->ret_from_remote = TASK_RUNNING;
 	tsk->personality = req->personality;
-	initialize_thread_retval(tsk, 0);
-	smp_wmb();
+
+	restore_thread_info(tsk, &req->arch, false);
+	smp_mb();
 
 	wake_up_process(tsk);
 	put_task_struct(tsk);
@@ -396,7 +410,6 @@ out_free:
  */
 static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 {
-	struct pt_regs *regs = task_pt_regs(tsk);
 	back_migration_request_t *req;
 	int ret;
 
@@ -412,7 +425,10 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	 * the last remote at here,
 	 */
 	if (put_task_remote(tsk)) {
+		req->expect_flush = true;
 		page_server_flush_remote_pages(tsk->mm->remote);
+	} else {
+		req->expect_flush = false;
 	}
 
 	//printk("%s entered dst{%d}\n", __func__, dst_cpu);
@@ -432,7 +448,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	req->sas_ss_size = tsk->sas_ss_size;
 	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
 
-	save_thread_info(tsk, regs, &req->arch, uregs);
+	save_thread_info(tsk, &req->arch, uregs);
 
 	ret = pcn_kmsg_send_long(dst_nid, req, sizeof(*req));
 
@@ -458,24 +474,26 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 {
 	remote_task_pairing_t *req = (remote_task_pairing_t *)msg;
-	unsigned int nid_from = req->header.from_cpu;
 	struct task_struct *tsk;
 
 	rcu_read_lock();
 	tsk = find_task_by_vpid(req->your_pid);
-	rcu_read_unlock();
 	if (tsk == NULL) {
 		pcn_kmsg_free_msg(req);
+		rcu_read_unlock();
 		return -ESRCH;
 	}
 	BUG_ON(tsk->at_remote);
+	BUG_ON(!tsk->remote);
 
-	tsk->remote_nid = nid_from;
+	tsk->remote_nid = req->my_nid;
 	tsk->remote_pid = req->my_pid;
+	tsk->remote->remote_tgids[req->my_nid] = req->my_pid;
+	rcu_read_unlock();
 
 	/*
 	PSPRINTK("Pairing local:  %d --> %d at %d\n",
-			tsk->pid, nid_from, req->my_pid);
+			tsk->pid, req->my_nid, req->my_pid);
 	*/
 
 	pcn_kmsg_free_msg(req);
@@ -495,6 +513,7 @@ static int __pair_remote_task(struct task_struct *tsk)
 	// representative task.
 	req->header.type = PCN_KMSG_TYPE_PROC_SRV_CREATE_PROCESS_PAIRING;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
+	req->my_nid = my_nid;
 	req->my_pid = current->pid;
 	req->your_pid = current->origin_pid;
 
@@ -535,9 +554,8 @@ static int shadow_main(void *_args)
 	current->at_remote = true;
 	current->remote = get_task_remote(current);
 
-	// set thread info
-	restore_thread_info(current, &req->arch);
-	initialize_thread_retval(current, 0);
+	// Inject thread info
+	restore_thread_info(current, &req->arch, true);
 
 	/*
 	sigorsets(&current->blocked, &current->blocked, &req->remote_blocked);
@@ -561,17 +579,9 @@ static int shadow_main(void *_args)
 
 	printk("####### MIGRATED - %d at %d --> %d at %d\n",
 			current->origin_pid, current->origin_nid, current->pid, my_nid);
-	/*
-	printk("%s: pc %lx ip %lx\n", __func__,
-			(&req->arch)->migration_pc, current_pt_regs()->ip);
-	printk("%s: sp %lx bp %lx\n", __func__,
-			current_pt_regs()->sp, current_pt_regs()->bp);
-	*/
 
 	kfree(params);
 	pcn_kmsg_free_msg(req);
-
-	update_thread_info();
 
 	return 0;	/* Returning from here will start the user thread run */
 }
@@ -595,7 +605,7 @@ int shadow_spawner(void *_args)
 {
 	struct remote_context *rc = _args;
 	rc->shadow_spawner = current;
-	smp_wmb();
+	smp_mb();
 
 	PSPRINTK(KERN_INFO"%s [%d]: started\n", __func__, current->pid);
 	current->is_vma_worker = true;
@@ -618,6 +628,7 @@ int shadow_spawner(void *_args)
 
 		params = kmalloc(sizeof(*params), GFP_KERNEL);
 		params->req = ((struct pcn_kmsg_work *)work)->msg;
+		smp_mb();
 
 		/* Following loop deals with signals between concurrent migration */
 		while (kernel_thread(shadow_main, params,
@@ -638,10 +649,11 @@ static int __construct_vma_worker_mm(clone_request_t *req, struct remote_context
 	struct mm_struct *mm;
 	struct file *f;
 	struct cred *new;
+	unsigned long flags;
 
-	spin_lock_irq(&current->sighand->siglock);
+	lock_task_sighand(current, &flags);
 	flush_signal_handlers(current, 1);
-	spin_unlock_irq(&current->sighand->siglock);
+	unlock_task_sighand(current, &flags);
 
 	set_cpus_allowed_ptr(current, cpu_all_mask);
 	set_user_nice(current, 0);
@@ -681,7 +693,6 @@ static int __construct_vma_worker_mm(clone_request_t *req, struct remote_context
 	mm->end_data = req->end_data;
 	mm->def_flags = req->def_flags;
 
-	init_rwsem(&mm->distribute_sem);
 	mm->distr_vma_op_counter = 0;
 	mm->was_not_pushed = 0;
 	mm->thread_op = NULL;
@@ -736,7 +747,7 @@ static int vma_worker_remote(void *_data)
 	rc->remote_tgids[my_nid] = rc->tgid;
 	rc->remote_tgids[current->origin_nid] = origin_tgid;
 	rc->vma_worker = current;
-	smp_wmb();
+	smp_mb();
 
 	list_add(&rc->list, &__remote_contexts_in());
 	__unlock_remote_contexts_in(nid_from);
@@ -768,7 +779,7 @@ static void clone_remote_thread(struct work_struct *_work)
 		params->rc = rc = rc_new;
 		params->work = work;
 
-		smp_wmb();
+		smp_mb();
 		/*
 		 * Start the helper thread. remote_contexts_lock is released upon
 		 * thread creation completion
@@ -812,8 +823,7 @@ static int handle_clone_request(struct pcn_kmsg_message *msg)
  * This function will ask the remote node to create a thread to host the task.
  * It returns <0 in error case.
  */
-static int __request_clone_remote(int dst_nid, struct task_struct *tsk,
-		struct pt_regs *regs, void __user *uregs)
+static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __user *uregs)
 {
 	char *rpath, path[512];
 	clone_request_t *req;
@@ -866,7 +876,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk,
 	req->sas_ss_size = tsk->sas_ss_size;
 	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
 
-	save_thread_info(tsk, regs, &req->arch, uregs);
+	save_thread_info(tsk, &req->arch, uregs);
 
 	ret = pcn_kmsg_send_long(dst_nid, req, sizeof(*req));
 	kfree(req);
@@ -883,7 +893,7 @@ static int vma_worker_origin(void *_arg)
 	current->is_vma_worker = true;
 	current->at_remote = false;
 	rc->vma_worker = current;
-	smp_wmb();
+	smp_mb();
 
 	vma_worker_main(rc, "local");
 
@@ -898,7 +908,7 @@ static int vma_worker_origin(void *_arg)
 pid_t kernel_thread_popcorn(int (*fn)(void *), void *arg)
 {
 	const unsigned long flags = CLONE_THREAD | CLONE_SIGHAND | SIGCHLD;
-	const unsigned long flags_current = current->flags;
+	unsigned long flags_current = current->flags;
 	pid_t pid;
 
 	current->flags |= PF_KTHREAD;
@@ -913,7 +923,6 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	int ret;
 	unsigned long flags;
 	bool create_vma_worker = false;
-	struct pt_regs *regs = task_pt_regs(tsk);
 	struct remote_context *rc, *rc_new;
 
 	might_sleep();
@@ -921,7 +930,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	/* Want to avoid allocate this structure in the spinlock-ed area */
 	rc_new = __alloc_remote_context(my_nid, tsk->tgid, false);
 
-	/* I use siglock to coordinate the thread group. */
+	/* Use siglock to coordinate the thread group. */
 	lock_task_sighand(tsk, &flags);
 	if (tsk->mm->remote) {
 		kfree(rc_new);
@@ -940,7 +949,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		tsk->mm->remote = rc_new;
 		rc_new->mm = tsk->mm;
 		rc_new->remote_tgids[my_nid] = tsk->tgid;
-		smp_wmb();
+		smp_mb();
 
 		__lock_remote_contexts_out(dst_nid);
 		list_add(&rc_new->list, &__remote_contexts_out());
@@ -958,7 +967,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		BUG_ON(pid < 0);
 	}
 
-	ret = __request_clone_remote(dst_nid, tsk, regs, uregs);
+	ret = __request_clone_remote(dst_nid, tsk, uregs);
 
 #ifdef MIGRATION_PROFILE
 	migration_end = ktime_get();
@@ -989,6 +998,8 @@ int process_server_do_migration(struct task_struct *tsk, int dst_nid,
 	} else {
 		ret = do_migration(tsk, dst_nid, uregs);
 		if (ret < 0) {
+			tsk->remote = NULL;
+			tsk->remote_pid = tsk->remote_nid = -1;
 			put_task_remote(tsk);
 		}
 	}

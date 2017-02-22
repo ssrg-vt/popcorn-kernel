@@ -931,7 +931,6 @@ int accept_handler(void* arg0)
         memcpy(msg, data, sizeof(*msg));
         for (; len > 0;) {
             ret = ksock_recv(sock_data[conn_no], ((char *) msg) + offset, len);
-			printk("recv %d offset %d remain %d\n", ret, offset, len);
             if (ret == -1)
                 continue;
             offset += ret;

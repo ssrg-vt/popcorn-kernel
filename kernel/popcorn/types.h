@@ -132,6 +132,8 @@ struct remote_context {
 	struct list_head shadow_eggs;
 	spinlock_t shadow_eggs_lock;
 
+	struct completion flush;
+
 	pid_t remote_tgids[MAX_POPCORN_NODES];
 };
 
@@ -164,6 +166,7 @@ DEFINE_PCN_KMSG(new_kernel_response_t, NEW_KERNEL_RESPONSE_FIELDS);
 	int remote_nid;\
 	int remote_pid;\
 	int origin_pid;\
+	bool expect_flush;\
 	unsigned int personality;\
 	unsigned long def_flags;\
 	sigset_t remote_blocked, remote_real_blocked;\
@@ -213,7 +216,8 @@ DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
  */
 #define REMOTE_TASK_PAIRING_FIELDS \
 	int your_pid; \
-	int my_pid;
+	int my_pid; \
+	int my_nid;
 DEFINE_PCN_KMSG(remote_task_pairing_t, REMOTE_TASK_PAIRING_FIELDS);
 
 #define COUNT_REQUEST_FIELDS \
@@ -236,6 +240,7 @@ DEFINE_PCN_KMSG(remote_thread_count_response_t, COUNT_RESPONSE_FIELDS);
 #define TASK_EXIT_FIELDS  \
 	pid_t origin_pid; \
 	pid_t remote_pid; \
+	bool expect_flush; \
 	long exit_code; \
 	int is_last_tgroup_member; \
 	int group_exit; \
@@ -275,6 +280,7 @@ DEFINE_PCN_KMSG(data_response_for_2_kernels_t,DATA_RESPONSE_FIELDS);
 
 #define REMOTE_VMA_REQUEST_FIELDS \
 	int origin_pid; \
+	int remote_nid; \
 	int remote_pid; \
 	unsigned long addr;
 DEFINE_PCN_KMSG(remote_vma_request_t, REMOTE_VMA_REQUEST_FIELDS);
@@ -295,6 +301,7 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 
 #define REMOTE_PAGE_REQUEST_FIELDS \
 	int origin_pid; \
+	int remote_nid; \
 	int remote_pid; \
 	unsigned long addr; \
 	unsigned long fault_flags;
@@ -319,6 +326,7 @@ DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
 	int origin_pid; \
 	int remote_pid; \
 	unsigned long addr; \
+	bool last; \
 	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_flush_t, REMOTE_PAGE_FLUSH_FIELDS);
 

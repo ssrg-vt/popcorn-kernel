@@ -40,8 +40,8 @@
 #endif
 
 
-#define POPCORN_MSG_LAYER_VERBOSE 1        //Jack
-#define POPCORN_MSG_LAYER_DEBUG_VERBOSE 1   //Jack
+#define POPCORN_MSG_LAYER_VERBOSE 0        //Jack
+#define POPCORN_MSG_LAYER_DEBUG_VERBOSE 0   //Jack
 
 #if POPCORN_MSG_LAYER_VERBOSE
 #define MSGPRINTK(...) printk(__VA_ARGS__)
