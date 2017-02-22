@@ -22,14 +22,6 @@ enum VMA_OPERATION_CODES {
 	VMA_OP_NOT_SAVE = -71,
 };
 
-enum THREAD_EXIT_CODES {
-	EXIT_ALIVE = 0,
-	EXIT_THREAD,
-	EXIT_PROCESS,
-	EXIT_FLUSHING,
-	EXIT_NOT_ACTIVE,
-};
-
 
 /* Selective features */
 #undef MIGRATE_FPU

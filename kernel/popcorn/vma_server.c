@@ -19,6 +19,7 @@
 
 #include <linux/slab.h>
 #include <linux/mm.h>
+#include <linux/kthread.h>
 
 #include <linux/mman.h>
 #include <linux/highmem.h>
@@ -1783,7 +1784,7 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 
 	printk("%s [%d]: starting %s\n", __func__, current->pid, at);
 
-	while (!rc->vma_worker_stop) {
+	while (!kthread_should_stop()) {
 		/*
 		while (memory->operation != VMA_OP_NOP &&
 		       memory->mm->thread_op == current) {

@@ -101,13 +101,10 @@ struct _remote_cpu_info_data {
 	// TODO it must support different cpu type in an heterogeneous setting
 	unsigned int _processor;
 	enum arch_t arch_type;
-#if 1
+
 	int cpumask_offset;
 	int cpumask_size;
 	unsigned long cpumask[POPCORN_CPUMASK_SIZE];
-#else
-	struct cpumask _cpumask;
-#endif
 	cpuinfo_arch_t arch;
 };
 typedef struct _remote_cpu_info_data _remote_cpu_info_data_t;

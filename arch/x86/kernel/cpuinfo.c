@@ -33,7 +33,8 @@
 
 #include <popcorn/cpuinfo.h>
 
-static void *remote_c_start(loff_t *pos) {
+static void *remote_c_start(loff_t *pos)
+{
 	if (*pos == 0) /* just in case, cpu 0 is not the first */
 		*pos = cpumask_first(cpu_online_mask);
 	else {
@@ -140,16 +141,15 @@ int fill_cpu_info(_remote_cpu_info_data_t *res)
 	return 0;
 }
 
-int get_proccessor_id() {
-
-	unsigned int a,b,feat;
+int get_proccessor_id()
+{
+	unsigned int a, b, feat;
 
 	asm volatile(
-		     "cpuid"                       // call cpuid
-		     : "=a" (a), "=b" (b), "=d" (feat)           // outputs
-		     : "0" (1)                                   // inputs
-		     : "cx" );
-	if(feat & (1 << 25)) //TODO: Need to be refactored
-		return 0;
-	return 1;
+			 "cpuid"							// call cpuid
+			 : "=a" (a), "=b" (b), "=d" (feat)	// outputs
+			 : "0" (1)							// inputs
+			 : "cx" );
+
+	return !(feat & (1 << 25));
 }

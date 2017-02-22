@@ -397,6 +397,8 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->remote_nid = tsk->origin_nid = -1;
 	tsk->remote_pid = tsk->origin_pid = -1;
 
+	init_completion(&tsk->wait_for_remote_flush);
+
 	tsk->is_vma_worker = false;
 	tsk->ret_from_remote = TASK_RUNNING;
 
@@ -641,7 +643,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 
 #ifdef CONFIG_POPCORN
 	mm->remote = NULL;
-	init_rwsem(&mm->distribute_sem);
 	mm->distr_vma_op_counter = 0;
 	mm->was_not_pushed = 0;
 	mm->thread_op = NULL;

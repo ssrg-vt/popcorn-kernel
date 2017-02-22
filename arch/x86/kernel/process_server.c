@@ -21,6 +21,7 @@
 #include <asm/uaccess.h>
 #include <asm/prctl.h>
 #include <asm/proto.h>
+#include <asm/desc.h>
 
 #include <popcorn/types.h>
 #include <popcorn/debug.h>
@@ -88,22 +89,30 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *ure
 	arch->thread_es = tsk->thread.es;
 
 	savesegment(fs, fsindex);
-	rdmsrl(MSR_FS_BASE, arch->thread_fs);
+	if (fsindex) {
+		arch->thread_fs = get_desc_base(tsk->thread.tls_array + FS_TLS);
+	} else {
+		rdmsrl(MSR_FS_BASE, arch->thread_fs);
+	}
 
 	savesegment(gs, gsindex);
-	rdmsrl(MSR_KERNEL_GS_BASE, arch->thread_gs);
+	if (gsindex) {
+		arch->thread_gs = get_desc_base(tsk->thread.tls_array + GS_TLS);
+	} else {
+		rdmsrl(MSR_KERNEL_GS_BASE, arch->thread_gs);
+	}
 
 #ifdef MIGRATE_FPU
 	save_fpu_info(tsk, arch);
 #endif
 	put_cpu();
 
-	PSPRINTK(KERN_INFO"%s: ip %lx pc %lx\n", __func__,
-			arch->ip, arch->migration_pc);
-	PSPRINTK(KERN_INFO"%s: sp %lx bp %lx\n", __func__,
-			arch->sp, arch->bp);
-	PSPRINTK(KERN_INFO"%s: fs %lx gs %lx\n", __func__,
-			arch->thread_fs, arch->thread_gs);
+	PSPRINTK(KERN_INFO"%s [%d]: ip %lx pc %lx\n", __func__,
+			tsk->pid, arch->ip, arch->migration_pc);
+	PSPRINTK(KERN_INFO"%s [%d]: sp %lx bp %lx\n", __func__,
+			tsk->pid, arch->sp, arch->bp);
+	PSPRINTK(KERN_INFO"%s [%d]: fs %lx gs %lx\n", __func__,
+			tsk->pid, arch->thread_fs, arch->thread_gs);
 
 	return 0;
 }
@@ -125,7 +134,8 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *ure
  *			architecture specific information of the task has to be
  *			restored
  *
- *	segs	restore segmentations as well if segs is true. Unless, do
+ *	restore_segments,
+ *			restore segmentations as well if segs is true. Unless, do
  *			not restore the segmentation units (for back migration)
  *
  * Output:
@@ -135,13 +145,12 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *ure
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool segs)
+int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_segments)
 {
 	struct pt_regs *regs = task_pt_regs(tsk);
-	unsigned long fs;
 	int cpu;
 
-	BUG_ON(segs && current != tsk);
+	BUG_ON(restore_segments && current != tsk);
 
 	cpu = get_cpu();
 	memcpy(regs, &arch->regs, sizeof(*regs));
@@ -151,7 +160,7 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool segs)
 	regs->bp = arch->bp;
 	regs->sp = arch->sp;
 
-	if (segs) {
+	if (restore_segments) {
 		regs->cs = __USER_CS;
 		regs->ss = __USER_DS;
 
@@ -172,14 +181,12 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool segs)
 #endif
 	put_cpu();
 
-	rdmsrl(MSR_FS_BASE, fs);
-
-	PSPRINTK(KERN_INFO"%s: ip %lx pc %lx\n", __func__,
-			arch->ip, arch->migration_pc);
-	PSPRINTK(KERN_INFO"%s: sp %lx bp %lx\n", __func__,
-			arch->sp, arch->bp);
-	PSPRINTK(KERN_INFO"%s: fs %lx [%x]\n", __func__,
-			fs, tsk->thread.fsindex);
+	PSPRINTK(KERN_INFO"%s [%d]: ip %lx pc %lx\n", __func__,
+			tsk->pid, arch->ip, arch->migration_pc);
+	PSPRINTK(KERN_INFO"%s [%d]: sp %lx bp %lx\n", __func__,
+			tsk->pid, arch->sp, arch->bp);
+	PSPRINTK(KERN_INFO"%s [%d]: fs %lx [%x]\n", __func__,
+			tsk->pid, tsk->thread.fs, tsk->thread.fsindex);
 
 	return 0;
 }

@@ -10,33 +10,31 @@
 #define PRINTK(...)
 #endif
 
-#define PROCESS_SERVER_VERBOSE  1
-#define PROCESS_SERVER_VMA_VERBOSE 0
-#define PROCESS_SERVER_NEW_THREAD_VERBOSE 1
-#define PROCESS_SERVER_MINIMAL_PGF_VERBOSE 0
+
+#define PROCESS_SERVER_VERBOSE 1
 
 #if PROCESS_SERVER_VERBOSE
 #define PSPRINTK(...) printk(__VA_ARGS__)
 #else
-#define PSPRINTK(...) ;
+#define PSPRINTK(...)
 #endif
 
-#if PROCESS_SERVER_VMA_VERBOSE
+
+#define VMA_SERVER_VERBOSE 0
+
+#if VMA_SERVER_VERBOSE
 #define PSVMAPRINTK(...) printk(__VA_ARGS__)
 #else
-#define PSVMAPRINTK(...) ;
+#define PSVMAPRINTK(...)
 #endif
 
-#if PROCESS_SERVER_NEW_THREAD_VERBOSE
-#define PSNEWTHREADPRINTK(...) printk(__VA_ARGS__)
-#else
-#define PSNEWTHREADPRINTK(...) ;
-#endif
 
-#if PROCESS_SERVER_MINIMAL_PGF_VERBOSE
-#define PSMINPRINTK(...) printk(__VA_ARGS__)
+#define PAGE_SERVER_VERBOSE 0
+
+#if PAGE_SERVER_VERBOSE
+#define PGPRINTK(...) printk(__VA_ARGS__)
 #else
-#define PSMINPRINTK(...) ;
+#define PGPRINTK(...)
 #endif
 
 
@@ -46,12 +44,12 @@
 #if POPCORN_MSG_LAYER_VERBOSE
 #define MSGPRINTK(...) printk(__VA_ARGS__)
 #else
-#define MSGPRINTK(...) ;
+#define MSGPRINTK(...)
 #endif
 #if POPCORN_MSG_LAYER_DEBUG_VERBOSE
 #define MSGDPRINTK(...) printk(__VA_ARGS__)
 #else
-#define MSGDPRINTK(...) ;
+#define MSGDPRINTK(...)
 #endif
 
 #endif

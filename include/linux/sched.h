@@ -1828,6 +1828,7 @@ struct task_struct {
 	bool is_vma_worker;			/* kernel thread that manages the process*/
 	bool at_remote;				/* Is executing on behalf of another node? */
 
+	struct completion wait_for_remote_flush;
 	int ret_from_remote;
 
 	int distributed_exit_code;

@@ -6,13 +6,12 @@
 #include <linux/completion.h>
 #include <linux/workqueue.h>
 #include <linux/signal.h>
-#include <linux/rwsem.h>
 #include <linux/slab.h>
 
-#include <popcorn/pcn_kmsg.h> // Messaging
+#include <popcorn/pcn_kmsg.h>
 #include <popcorn/types.h>
-#include <popcorn/bundle.h>
 
+/* Legacy definitions. Remove these quickly -----------------------*/
 #define VMA_OPERATION_FIELDS \
 	int origin_nid; \
 	int origin_pid; \
@@ -43,13 +42,25 @@ DEFINE_PCN_KMSG(vma_lock_t, VMA_LOCK_FIELDS);
 	unsigned long addr;
 DEFINE_PCN_KMSG(vma_ack_t, VMA_ACK_FIELDS);
 
-#define UNMAP_FIELDS \
+#define DATA_RESPONSE_FIELDS \
 	int tgroup_home_cpu; \
-	int tgroup_home_id;\
-	unsigned long start;\
-	size_t len;
-DEFINE_PCN_KMSG(unmap_message_t, UNMAP_FIELDS);
-
+	int tgroup_home_id;  \
+	unsigned long address; \
+	__wsum checksum; \
+	long last_write;\
+	int owner;\
+	int vma_present; \
+	unsigned long vaddr_start;\
+	unsigned long vaddr_size;\
+	pgprot_t prot; \
+	unsigned long vm_flags; \
+	unsigned long pgoff;\
+	char path[512];\
+	unsigned int data_size;\
+	int diff;\
+	int futex_owner; \
+	char data;
+DEFINE_PCN_KMSG(data_response_for_2_kernels_t,DATA_RESPONSE_FIELDS);
 
 typedef struct _memory_struct {
 	struct list_head list;
@@ -59,17 +70,8 @@ typedef struct _memory_struct {
 	int tgroup_home_id;
 	struct mm_struct* mm;
 	int alive;
-	int setting_up;
 
 	struct task_struct *helper;
-	bool helper_stop;
-
-	struct task_struct *shadow_spawner;
-	struct completion spawn_egg;
-	struct list_head shadow_eggs;
-	spinlock_t shadow_eggs_lock;
-	atomic_t pending_migration;
-	atomic_t pending_back_migration;
 
 	char path[512];
 
@@ -87,26 +89,20 @@ typedef struct _memory_struct {
 	int arrived_op;
 	int my_lock;
 
-	unsigned char kernel_set[MAX_POPCORN_NODES];	/* TODO: change to bitmap */
+	unsigned char kernel_set[MAX_POPCORN_NODES];
 	struct rw_semaphore kernel_set_sem;
 
-	struct list_head pages;
-	spinlock_t pages_lock;
-
-	struct list_head vmas;
-	spinlock_t vmas_lock;
-
 	vma_operation_t *message_push_operation;
-	atomic_t answers_remain;
 } memory_t;
 
-void add_memory_entry(memory_t* entry);
-int add_memory_entry_with_check(memory_t* entry);
 memory_t* find_memory_entry(int cpu, int id);
 int dump_memory_entries(memory_t * list[], int num, int *written);
-void remove_memory_entry(memory_t* entry);
+/* Legacy definitions. Remove these quickly -----------------------*/
 
 
+/**
+ * Remote execution context
+ */
 struct remote_context {
 	struct list_head list;
 	atomic_t count;
@@ -132,8 +128,6 @@ struct remote_context {
 	struct list_head shadow_eggs;
 	spinlock_t shadow_eggs_lock;
 
-	struct completion flush;
-
 	pid_t remote_tgids[MAX_POPCORN_NODES];
 };
 
@@ -141,27 +135,9 @@ struct remote_context *get_task_remote(struct task_struct *tsk);
 bool put_task_remote(struct task_struct *tsk);
 
 
-#define ACK_FIELDS \
-	int tgroup_home_cpu;\
-	int tgroup_home_id; \
-	unsigned long address; \
-	int ack;\
-	int writing; \
-	unsigned long long time_stamp;
-DEFINE_PCN_KMSG(ack_t, ACK_FIELDS);
-
-#define NEW_KERNEL_FIELDS \
-	int tgroup_home_cpu;\
-	int tgroup_home_id;
-DEFINE_PCN_KMSG(new_kernel_t, NEW_KERNEL_FIELDS);
-
-#define NEW_KERNEL_RESPONSE_FIELDS \
-	int tgroup_home_cpu;\
-	int tgroup_home_id; \
-	int my_set[MAX_KERNEL_IDS];\
-	int vma_operation_index;
-DEFINE_PCN_KMSG(new_kernel_response_t, NEW_KERNEL_RESPONSE_FIELDS);
-
+/**
+ * Process migration
+ */
 #define BACK_MIGRATION_FIELDS \
 	int remote_nid;\
 	int remote_pid;\
@@ -220,23 +196,7 @@ DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
 	int my_nid;
 DEFINE_PCN_KMSG(remote_task_pairing_t, REMOTE_TASK_PAIRING_FIELDS);
 
-#define COUNT_REQUEST_FIELDS \
-	int tgroup_home_cpu; \
-	int tgroup_home_id;
 
-DEFINE_PCN_KMSG(remote_thread_count_request_t, COUNT_REQUEST_FIELDS);
-
-#define COUNT_RESPONSE_FIELDS \
-	int tgroup_home_cpu; \
-	int tgroup_home_id; \
-	int count;
-DEFINE_PCN_KMSG(remote_thread_count_response_t, COUNT_RESPONSE_FIELDS);
-
-/**
- * This message informs the remote cpu of delegated
- * process death. This occurs whether the process
- * is a placeholder or a delegate locally.
- */
 #define TASK_EXIT_FIELDS  \
 	pid_t origin_pid; \
 	pid_t remote_pid; \
@@ -247,37 +207,10 @@ DEFINE_PCN_KMSG(remote_thread_count_response_t, COUNT_RESPONSE_FIELDS);
 	field_arch arch;
 DEFINE_PCN_KMSG(task_exit_t, TASK_EXIT_FIELDS);
 
-#define EXIT_GROUP_FIELDS	\
-	int tgroup_home_cpu; \
-	int tgroup_home_id;
-DEFINE_PCN_KMSG(thread_group_exited_notification_t, EXIT_GROUP_FIELDS);
-
 
 /**
- * Inform remote cpu of a vma to process mapping.
+ * VMA and page management
  */
-
-#define DATA_RESPONSE_FIELDS \
-	int tgroup_home_cpu; \
-	int tgroup_home_id;  \
-	unsigned long address; \
-	__wsum checksum; \
-	long last_write;\
-	int owner;\
-	int vma_present; \
-	unsigned long vaddr_start;\
-	unsigned long vaddr_size;\
-	pgprot_t prot; \
-	unsigned long vm_flags; \
-	unsigned long pgoff;\
-	char path[512];\
-	unsigned int data_size;\
-	int diff;\
-	int futex_owner; \
-	char data;
-DEFINE_PCN_KMSG(data_response_for_2_kernels_t,DATA_RESPONSE_FIELDS);
-
-
 #define REMOTE_VMA_REQUEST_FIELDS \
 	int origin_pid; \
 	int remote_nid; \
@@ -330,6 +263,10 @@ DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
 	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_flush_t, REMOTE_PAGE_FLUSH_FIELDS);
 
+
+/**
+ * Schedule server. Not yet completely ported though
+ */
 #define SCHED_PERIODIC_FIELDS \
 	int power_1; \
 	int power_2; \

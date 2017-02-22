@@ -187,7 +187,7 @@ static void process_remote_page_flush(struct work_struct *work)
 	rcu_read_unlock();
 
 	if (req->last) {
-		complete(&tsk->remote->flush);
+		complete(&tsk->wait_for_remote_flush);
 		goto out_put;
 	}
 
@@ -204,13 +204,14 @@ static void process_remote_page_flush(struct work_struct *work)
 	printk("%s: %lx %s\n", __func__, req->addr,
 			pte_write(*pte) ? "writable" : "protected");
 
-	paddr = kmap(page);
+	paddr = kmap_atomic(page);
 	copy_page(paddr, req->page);
-	kunmap(page);
+	kunmap_atomic(paddr);
 	set_bit(my_nid, page->owners);
+	put_page(page);
 
 	entry = pte_clear_flags(*pte, _PAGE_SOFTW1);
-	entry = pte_set_flags(entry, _PAGE_PRESENT | _PAGE_PROTNONE);
+	entry = pte_set_flags(entry, _PAGE_PRESENT);
 	set_pte_at(mm, req->addr, pte, entry);
 
 	flush_tlb_page(vma, req->addr);
@@ -241,17 +242,17 @@ static int __flush_pte(pte_t *pte, unsigned long addr, unsigned long next, struc
 		void *paddr;
 		// TODO: Skip flushing read-only pages
 
-		printk("flush_remote_page: %lx %p %lx\n", addr, page, pte_pfn(entry));
+		printk("flush_remote_page:+ %lx %p\n", addr, page);
 		req->addr = addr;
-		paddr = kmap(page);
+		paddr = kmap_atomic(page);
 		copy_page(req->page, paddr);
-		kunmap(page);
+		kunmap_atomic(paddr);
 
 		clear_bit(my_nid, page->owners);
 
 		pcn_kmsg_send_long(current->origin_nid, req, sizeof(*req));
 	} else {
-		printk("flush_remote_page: %lx %p not mine\n", addr, page);
+		printk("flush_remote_page:- %lx %p\n", addr, page);
 	}
 
 	return 0;
@@ -332,7 +333,7 @@ static int __do_invalidate_page(struct task_struct *tsk, struct mm_struct *mm, u
 
 	entry = ptep_get_and_clear(mm, addr, pte);
 	entry = pte_set_flags(entry, _PAGE_SOFTW1);
-	entry = pte_clear_flags(entry, _PAGE_PRESENT | _PAGE_PROTNONE);
+	entry = pte_clear_flags(entry, _PAGE_PRESENT);
 	set_pte_at(mm, addr, pte, entry);
 
 	flush_tlb_page(vma, addr);
@@ -501,17 +502,19 @@ static int __get_remote_page(struct task_struct *tsk, struct mm_struct *mm,
 		// TODO: should fall back to the host pte fault.
 		return -PTR_ERR(page);
 	}
+	printk("remote_page_request: %s %d\n",
+			pte_write(*pte) ? "writable" : "protected",
+			pte_present(*pte));
 
-	lock_page(page);
 	if (!page_is_mine(page)) {
 		// TODO: mark that this page is requested...??/
 		ret = __forward_remote_page_request(tsk, page, pte, ptl);
 		goto out_put;
 	}
 
-	paddr = kmap(page);
+	paddr = kmap_atomic(page);
 	copy_page(res->page, paddr);
-	kunmap(page);
+	kunmap_atomic(paddr);
 
 	if (invalidate) {
 		__revoke_page_ownership(tsk, addr, page, pte, ptl, from);
@@ -522,7 +525,6 @@ static int __get_remote_page(struct task_struct *tsk, struct mm_struct *mm,
 	pte_unmap_unlock(pte, ptl);
 
 out_put:
-	unlock_page(page);
 	put_page(page);
 	return ret;
 }
@@ -545,7 +547,8 @@ static void process_remote_page_request(struct work_struct *work)
 		res = kzalloc(sizeof(*res), GFP_KERNEL);
 	};
 	res->addr = addr;
-	printk("%lx %d from %d %d\n", addr, req->origin_pid, from, req->remote_pid);
+	printk("remote_page_request: %lx at %d from %d %d\n",
+			addr, req->origin_pid, from, req->remote_pid);
 
 	rcu_read_lock();
 	tsk = find_task_by_vpid(req->origin_pid);
@@ -631,9 +634,9 @@ static void __map_remote_page(struct remote_page *rp, unsigned long fault_flags)
 		return;
 	}
 
-	paddr = kmap(page);
+	paddr = kmap_atomic(page);
 	copy_page(paddr, rp->response->page);
-	kunmap(page);
+	kunmap_atomic(paddr);
 
 	memcpy(page->owners, res->owners, sizeof(page->owners));
 	BUG_ON(!test_bit(my_nid, page->owners));
@@ -665,7 +668,7 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	int ret = 0;
 	remote_page_request_t *req = NULL;
 
-	// TODO: do_fault_around
+	// TODO: deal with the do_fault_around
 
 	spin_lock_irqsave(&rc->pages_lock, flags);
 	rp = __lookup_pending_remote_page_request(rc, addr);

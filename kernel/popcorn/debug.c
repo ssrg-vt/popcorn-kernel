@@ -15,6 +15,7 @@ void print_page_data(unsigned char *addr)
 		}
 		printk("%02x", *(addr + i));
 	}
+	printk("\n");
 }
 
 static DEFINE_SPINLOCK(__print_lock);
