@@ -106,11 +106,10 @@ int dump_memory_entries(memory_t * list[], int num, int *written);
 struct remote_context {
 	struct list_head list;
 	atomic_t count;
+	struct mm_struct *mm;
 
 	int tgid;
 	bool for_remote;
-	
-	struct mm_struct *mm;
 
 	/* For page replication protocol */
 	spinlock_t pages_lock;
@@ -120,6 +119,7 @@ struct remote_context {
 	spinlock_t vmas_lock;
 	struct list_head vmas;
 
+	/* Auxiliary threads */
 	struct task_struct *vma_worker;
 	bool vma_worker_stop;
 
@@ -192,6 +192,7 @@ DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
  */
 #define REMOTE_TASK_PAIRING_FIELDS \
 	int my_nid; \
+	pid_t my_tgid; \
 	pid_t my_pid; \
 	pid_t your_pid;
 DEFINE_PCN_KMSG(remote_task_pairing_t, REMOTE_TASK_PAIRING_FIELDS);

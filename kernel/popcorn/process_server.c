@@ -94,11 +94,20 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	BUG_ON(!rc);
 
 	INIT_LIST_HEAD(&rc->list);
+	atomic_set(&rc->count, 0);
+	rc->mm = NULL;
 
 	rc->tgid = tgid;
 	rc->for_remote = remote;
 
-	atomic_set(&rc->count, 0);
+	INIT_LIST_HEAD(&rc->pages);
+	spin_lock_init(&rc->pages_lock);
+
+	INIT_LIST_HEAD(&rc->vmas);
+	spin_lock_init(&rc->vmas_lock);
+
+	rc->vma_worker = NULL;
+	rc->vma_worker_stop = false;
 
 	rc->shadow_spawner = NULL;
 	INIT_LIST_HEAD(&rc->shadow_eggs);
@@ -106,12 +115,6 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	init_completion(&rc->spawn_egg);
 
 	memset(rc->remote_tgids, 0x00, sizeof(rc->remote_tgids));
-
-	INIT_LIST_HEAD(&rc->pages);
-	spin_lock_init(&rc->pages_lock);
-
-	INIT_LIST_HEAD(&rc->vmas);
-	spin_lock_init(&rc->vmas_lock);
 
 	barrier();
 
@@ -484,7 +487,7 @@ static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 
 	tsk->remote_nid = req->my_nid;
 	tsk->remote_pid = req->my_pid;
-	tsk->remote->remote_tgids[req->my_nid] = req->my_pid;
+	tsk->remote->remote_tgids[req->my_nid] = req->my_tgid;
 	rcu_read_unlock();
 
 	/*
@@ -510,6 +513,7 @@ static int __pair_remote_task(struct task_struct *tsk)
 	req->header.type = PCN_KMSG_TYPE_PROC_SRV_TASK_PAIRING;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 	req->my_nid = my_nid;
+	req->my_tgid = current->tgid;
 	req->my_pid = current->pid;
 	req->your_pid = current->origin_pid;
 
@@ -728,7 +732,6 @@ static int vma_worker_remote(void *_data)
 	}
 
 	rc->tgid = current->tgid;
-	rc->remote_tgids[my_nid] = rc->tgid;
 	smp_wmb();
 
 	/* Create the shadow spawner */
