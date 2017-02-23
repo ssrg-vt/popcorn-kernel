@@ -5,6 +5,7 @@
  * This work is an extension of David Katz MS Thesis, please refer to the
  * Thesis for further information about the algorithm.
  *
+ * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
  * @author Vincent Legout, Antonio Barbalace, SSRG Virginia Tech 2016
  * @author Ajith Saya, Sharath Bhat, SSRG Virginia Tech 2015
  * @author Marina Sadini, Antonio Barbalace, SSRG Virginia Tech 2014
@@ -12,9 +13,11 @@
  */
 
 /*
- * As David Katz thesis the concept of this server is to do consistent modifications to the VMA list
+ * As David Katz thesis the concept of this server is to do consistent 
+ * modifications to the VMA list
  * The protocol is for N kernels
- * The performed operation is shown atomic to every thread of the same application
+ * The performed operation is shown atomic to every thread of the same
+ * application
  */
 
 #include <linux/slab.h>
@@ -34,80 +37,15 @@
 #include "types.h"
 #include "vma_server.h"
 
-///////////////////////////////////////////////////////////////////////////////
-// Working queues (servers)
-///////////////////////////////////////////////////////////////////////////////
 
 static struct workqueue_struct *vma_op_wq;
-static struct workqueue_struct *vma_lock_wq;
-
-DECLARE_WAIT_QUEUE_HEAD(request_distributed_vma_op);
-
-/**
- * Handle vma_ack
- */
-
-LIST_HEAD(_vma_ack_head);
-DEFINE_SPINLOCK(_vma_ack_head_lock);
-
-typedef struct vma_op_answers {
-	struct list_head list;
-
-	//data_header_t header;
-	int origin_nid;
-	int origin_pid;
-	int responses;
-	int expected_responses;
-	int vma_operation_index;
-	unsigned long address;
-	struct task_struct *waiting;
-	spinlock_t lock;
-} vma_op_answers_t;
-
-static inline void add_vma_ack_entry(vma_op_answers_t* entry)
-{
-	unsigned long flags;
-
-	if (!entry)
-		return;
-
-	spin_lock_irqsave(&_vma_ack_head_lock, flags);
-	list_add_tail(&entry->list, &_vma_ack_head);
-	spin_unlock_irqrestore(&_vma_ack_head_lock, flags);
-}
-
-static inline vma_op_answers_t* find_vma_ack_entry(int cpu, int id)
-{
-	vma_op_answers_t* v = NULL;
-	vma_op_answers_t* found = NULL;
-	unsigned long flags;
-
-	spin_lock_irqsave(&_vma_ack_head_lock, flags);
-	list_for_each_entry(v, &_vma_ack_head, list) {
-		if (v->origin_nid == cpu && v->origin_pid == id) {
-			found = v;
-			break;
-		}
-	}
-	spin_unlock_irqrestore(&_vma_ack_head_lock, flags);
-
-	return found;
-}
-
-static inline void remove_vma_ack_entry(vma_op_answers_t* entry)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&_vma_ack_head_lock, flags);
-	list_del_init(&entry->list);
-	spin_unlock_irqrestore(&_vma_ack_head_lock, flags);
-}
 
 
 ///////////////////////////////////////////////////////////////////////////////
-// Support for heterogeneous binaries
+// Heterogeneous binary support
 ///////////////////////////////////////////////////////////////////////////////
-/* ajith - for file offset fetch */
+/* ajith - for file offset fetch. copied from fs/binfmt_elf.c*/
+
 #if ELF_EXEC_PAGESIZE > PAGE_SIZE
 #define ELF_MIN_ALIGN   ELF_EXEC_PAGESIZE
 #else
@@ -131,7 +69,7 @@ static unsigned long get_file_offset(struct file *file, int start_addr)
 	size = elf_ex.e_phnum * sizeof(struct elf_phdr);
 
 	elf_eppnt = kmalloc(size, GFP_KERNEL);
-	if(elf_eppnt == NULL) {
+	if (elf_eppnt == NULL) {
 		printk("%s: ERROR: kmalloc failed in\n", __func__);
 		retval = -1;
 		goto out;
@@ -148,19 +86,26 @@ static unsigned long get_file_offset(struct file *file, int start_addr)
 	for (i = 0; i < elf_ex.e_phnum; i++, elf_eppnt++) {
 		if (elf_eppnt->p_type == PT_LOAD) {
 
-			printk("%s: Page offset for 0x%x 0x%lx 0x%lx\n",
-				__func__, start_addr, (unsigned long)elf_eppnt->p_vaddr, (unsigned long)elf_eppnt->p_memsz);
+			printk("%s: Page offset for 0x%x 0x%lx 0x%lx\n", __func__,
+					start_addr,
+					(unsigned long)elf_eppnt->p_vaddr,
+					(unsigned long)elf_eppnt->p_memsz);
 
-			if((start_addr >= elf_eppnt->p_vaddr) && (start_addr <= (elf_eppnt->p_vaddr+elf_eppnt->p_memsz))) {
+			if ((start_addr >= elf_eppnt->p_vaddr)&&
+					(start_addr <= (elf_eppnt->p_vaddr+elf_eppnt->p_memsz))) {
 				printk("%s: Finding page offset for 0x%x 0x%lx 0x%lx\n",
-					__func__, start_addr, (unsigned long)elf_eppnt->p_vaddr, (unsigned long)elf_eppnt->p_memsz);
-				retval = (elf_eppnt->p_offset - (elf_eppnt->p_vaddr & (ELF_MIN_ALIGN-1)));
+					__func__, start_addr,
+					(unsigned long)elf_eppnt->p_vaddr,
+					(unsigned long)elf_eppnt->p_memsz);
+				retval = elf_eppnt->p_offset - 
+						(elf_eppnt->p_vaddr & (ELF_MIN_ALIGN-1));
 				goto out;
 			}
 			/*
 			if ((elf_eppnt->p_flags & PF_R) && (elf_eppnt->p_flags & PF_X)) {
 				printk("Coming to executable program load section\n");
-				retval = (elf_eppnt->p_offset - (elf_eppnt->p_vaddr & (ELF_MIN_ALIGN-1)));
+				retval = elf_eppnt->p_offset -
+						(elf_eppnt->p_vaddr & (ELF_MIN_ALIGN-1));
 				goto out;
 			}
 			*/
@@ -168,11 +113,61 @@ static unsigned long get_file_offset(struct file *file, int start_addr)
 	}
 
 out:
-	if(elf_eppnt_start != NULL)
+	if (elf_eppnt_start != NULL)
 		kfree(elf_eppnt_start);
 
 	return retval >> PAGE_SHIFT;
 }
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Legacy codes. Remove them quickly
+///////////////////////////////////////////////////////////////////////////////
+typedef struct vma_op_answers {
+	int origin_nid;
+	int origin_pid;
+	int responses;
+	int expected_responses;
+	int vma_operation_index;
+	unsigned long address;
+	struct task_struct *waiting;
+	spinlock_t lock;
+} vma_op_answers_t;
+
+
+static inline void add_vma_ack_entry(vma_op_answers_t* entry)
+{
+	return;
+}
+
+static inline vma_op_answers_t* find_vma_ack_entry(int cpu, int id)
+{
+	return NULL;
+}
+
+static inline void remove_vma_ack_entry(vma_op_answers_t* entry)
+{
+	return;
+}
+
+static vma_op_answers_t * vma_op_answer_alloc(struct task_struct * task, int index)
+{
+	vma_op_answers_t *acks = kzalloc(sizeof(*acks), GFP_ATOMIC);
+	if (!acks) return NULL;
+
+	acks->origin_nid = task->origin_nid;
+	acks->origin_pid = task->origin_pid;
+	acks->vma_operation_index = index;
+	acks->waiting = task;
+	acks->responses = 0;
+	acks->expected_responses = 0;
+	spin_lock_init(&(acks->lock));
+	add_vma_ack_entry(acks);
+
+	return acks;
+}
+
+
 
 /*****************************************************************************/
 /* Messaging related stuff                                                   */
@@ -183,35 +178,32 @@ static inline int vma_send_long_all( memory_t * entry, void * message, int size,
 		struct task_struct * task, int max_distr_vma_op)
 {
 	int i, acks =0;
-	struct list_head *iter, *tmp_iter;
-	_remote_cpu_info_list_t *objPtr;
+	_remote_cpu_info_list_t *objPtr, *tmpPtr;
 
 	// the list does not include the current processor group descirptor (TODO)
-	list_for_each_safe(iter, tmp_iter, &rlist_head) {
-		objPtr = list_entry(iter, _remote_cpu_info_list_t, cpu_list_member);
+	list_for_each_entry_safe(objPtr, tmpPtr, &rlist_head, cpu_list_member) {
+		int error;
 		i = objPtr->_data._processor;
 
-		if (entry->kernel_set[i]==1) {
-			int error;
-			if ( task && (task->mm->distr_vma_op_counter > max_distr_vma_op)
-					&& (i == entry->message_push_operation->from_cpu))
-				continue;
-			error = pcn_kmsg_send_long(i, message, size);
-			if (error != -1)
-				acks++;
-		}
+		if ( task && (task->mm->distr_vma_op_counter > max_distr_vma_op)
+				&& (i == entry->message_push_operation->from_cpu))
+			continue;
+		error = pcn_kmsg_send_long(i, message, size);
+		if (error != -1)
+			acks++;
 	}
 	return acks;
 }
 
 static vma_lock_t * vma_lock_alloc(struct task_struct * task, int from_cpu, int index)
 {
-	vma_lock_t* lock_message = (vma_lock_t*) kmalloc(sizeof(vma_lock_t), GFP_ATOMIC);
+	vma_lock_t* lock_message = kmalloc(sizeof(vma_lock_t), GFP_ATOMIC);
 	if (!lock_message)
 		return NULL;
 
 	lock_message->header.type = PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK;
 	lock_message->header.prio = PCN_KMSG_PRIO_NORMAL;
+
 	lock_message->origin_nid = task->origin_nid;
 	lock_message->origin_pid = task->origin_pid;
 	lock_message->from_cpu = from_cpu;
@@ -219,24 +211,11 @@ static vma_lock_t * vma_lock_alloc(struct task_struct * task, int from_cpu, int 
 	return lock_message;
 }
 
-#if 0
-// TODO TODO TODO --- this is used only once so it will have a low impact on code reduction and understanding
-vma_ack_t* ack_to_server = (vma_ack_t*) kmalloc(sizeof(vma_ack_t),
-						GFP_ATOMIC);
-if (ack_to_server == NULL)
-	return ;
-ack_to_server->origin_nid = lock->origin_nid;
-ack_to_server->origin_pid = lock->origin_pid;
-ack_to_server->vma_operation_index = lock->vma_operation_index;
-ack_to_server->header.type = PCN_KMSG_TYPE_PROC_SRV_VMA_ACK;
-ack_to_server->header.prio = PCN_KMSG_PRIO_NORMAL;
-#endif
-
 static vma_operation_t * vma_operation_alloc(struct task_struct * task, int op_id,
 		unsigned long addr, unsigned long new_addr, int len, int new_len,
 		unsigned long prot, unsigned long flags, int index)
 {
-	vma_operation_t* operation = (vma_operation_t*) kmalloc(sizeof(vma_operation_t), GFP_ATOMIC);
+	vma_operation_t* operation = kmalloc(sizeof(vma_operation_t), GFP_ATOMIC);
 	if (!operation)
 		return NULL;
 
@@ -258,75 +237,15 @@ static vma_operation_t * vma_operation_alloc(struct task_struct * task, int op_i
 
 #if 0
 //TODO --- questo stesso codice ce due volte in process_vma_operation
-vma_operation_copy
-mm->thread_op = memory->is_vma_worker;
+	vma_operation_copy
+	mm->thread_op = memory->is_vma_worker;
 
-if (operation->operation == VMA_OP_MAP
-    || operation->operation == VMA_OP_BRK) {
-	mm->was_not_pushed++;
-}
-up_write(&mm->mmap_sem);
-
-//wake up the main thread to execute the operation locally
-memory->message_push_operation = operation;
-memory->addr = operation->addr;
-memory->len = operation->len;
-memory->prot = operation->prot;
-memory->new_addr = operation->new_addr;
-memory->new_len = operation->new_len;
-memory->flags = operation->flags;
-memory->pgoff = operation->pgoff;
-strcpy(memory->path, operation->path);
-memory->waiting_for_main = current;
-//This is the field check by the main thread
-//so it is the last one to be populated
-memory->operation = operation->operation;
-wake_up_process(memory->is_vma_worker);
-PSPRINTK("%s,SERVER: woke up the main\n", __func__);
-
-while (memory->operation != VMA_OP_NOP) {
-	set_task_state(current, TASK_UNINTERRUPTIBLE);
-	if (memory->operation != VMA_OP_NOP) {
-		schedule();
+	if (operation->operation == VMA_OP_MAP
+		|| operation->operation == VMA_OP_BRK) {
+		mm->was_not_pushed++;
 	}
-	set_task_state(current, TASK_RUNNING);
-}
-PSPRINTK("%s,SERVER: woke up the main1\n", __func__);
+	up_write(&mm->mmap_sem);
 
-down_write(&mm->mmap_sem);
-PSPRINTK("%s,SERVER: woke up the main2\n", __func__);
-#endif
-
-/*****************************************************************************/
-/* Marina's data store handling                                              */
-/*****************************************************************************/
-
-static vma_op_answers_t * vma_op_answer_alloc(struct task_struct * task, int index)
-{
-	vma_op_answers_t *acks = kzalloc(sizeof(*acks), GFP_ATOMIC);
-	if (!acks) return NULL;
-
-	acks->origin_nid = task->origin_nid;
-	acks->origin_pid = task->origin_pid;
-	acks->vma_operation_index = index;
-	acks->waiting = task;
-	acks->responses = 0;
-	acks->expected_responses = 0;
-	spin_lock_init(&(acks->lock));
-	add_vma_ack_entry(acks);
-
-	return acks;
-}
-
-#if 0
-/* THIS CAN BE DESTROY EQUIVALENT OF THE ABOVE
-	unsigned long flags;
-	spin_lock_irqsave(&(acks->lock), flags);
-	spin_unlock_irqrestore(&(acks->lock), flags);
-	remove_vma_ack_entry(acks);
- */
-
-	// TODO
 	//wake up the main thread to execute the operation locally
 	memory->message_push_operation = operation;
 	memory->addr = operation->addr;
@@ -352,6 +271,44 @@ static vma_op_answers_t * vma_op_answer_alloc(struct task_struct * task, int ind
 		set_task_state(current, TASK_RUNNING);
 	}
 	PSPRINTK("%s,SERVER: woke up the main1\n", __func__);
+
+	down_write(&mm->mmap_sem);
+	PSPRINTK("%s,SERVER: woke up the main2\n", __func__);
+
+
+/* THIS CAN BE DESTROY EQUIVALENT OF THE ABOVE
+	unsigned long flags;
+	spin_lock_irqsave(&(acks->lock), flags);
+	remove_vma_ack_entry(acks);
+	spin_unlock_irqrestore(&(acks->lock), flags);
+
+	// TODO
+	//wake up the main thread to execute the operation locally
+	memory->message_push_operation = operation;
+	memory->addr = operation->addr;
+	memory->len = operation->len;
+	memory->prot = operation->prot;
+	memory->new_addr = operation->new_addr;
+	memory->new_len = operation->new_len;
+	memory->flags = operation->flags;
+	memory->pgoff = operation->pgoff;
+	strcpy(memory->path, operation->path);
+	memory->waiting_for_main = current;
+
+	//This is the field check by the main thread
+	//so it is the last one to be populated
+	memory->operation = operation->operation;
+	wake_up_process(memory->is_vma_worker);
+	PSPRINTK("%s,SERVER: woke up the main\n", __func__);
+
+	while (memory->operation != VMA_OP_NOP) {
+		set_task_state(current, TASK_UNINTERRUPTIBLE);
+		if (memory->operation != VMA_OP_NOP) {
+			schedule();
+		}
+		set_task_state(current, TASK_RUNNING);
+	}
+	PSPRINTK("%s,SERVER: woke up the main1\n", __func__);*/
 #endif
 
 
@@ -376,7 +333,8 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			// above the region of interest
 			error = do_mmap_pgoff(file, start, end - start,
 					prot, flags, pgoff, &populate);
-			printk("map0: %lx -- %lx, %lx\n", start, end, pgoff);
+			printk("map0 [%d]: %lx -- %lx @ %lx\n",
+					current->pid, start, end, pgoff);
 
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;
@@ -400,7 +358,8 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
-			printk("map1: %lx -- %lx, %lx\n", start, vma->vm_start, pgoff);
+			printk("map1 [%d]: %lx -- %lx, %lx\n",
+					current->pid, start, vma->vm_start, pgoff);
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;;
 			}
@@ -410,7 +369,8 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
-			printk("map2: %lx -- %lx, %lx\n", start, vma->vm_start, pgoff);
+			printk("map2 [%d]: %lx -- %lx, %lx\n",
+					current->pid, start, vma->vm_start, pgoff);
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;
 				break;
@@ -646,6 +606,12 @@ struct vma_op_work {
 	int fake;
 };
 
+enum {
+	EXIT_FLUSHING,
+};
+
+DECLARE_WAIT_QUEUE_HEAD(request_distributed_vma_op);
+
 static void vma_server_process_vma_op(struct work_struct* work)
 {
 	struct vma_op_work* vma_work = (struct vma_op_work*) work;
@@ -746,7 +712,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			return ;
 		}
 #endif
-		while(memory->helper==NULL)
+		while (memory->helper==NULL)
 			schedule();
 
 		mm->thread_op = memory->helper;
@@ -909,7 +875,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		mm->distr_vma_op_counter++;
 		prev = mm->thread_op;
 
-		while(memory->helper==NULL) // waiting for main to be allocated (?)
+		while (memory->helper==NULL) // waiting for main to be allocated (?)
 			schedule();
 
 		mm->thread_op = memory->helper;
@@ -1099,7 +1065,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 	}
 	if (start_ret == VMA_OP_SAVE) {
 		int err;
-		/*if(operation!=VMA_OP_MAP ||operation!=VMA_OP_REMAP ||operation!=VMA_OP_BRK )
+		/*if (operation!=VMA_OP_MAP ||operation!=VMA_OP_REMAP ||operation!=VMA_OP_BRK )
 		  printk("ERROR: asking for saving address from operation %i",operation);
 		*/
 		if (my_nid != current->origin_nid)
@@ -1774,15 +1740,16 @@ extern int kernel_mprotect(unsigned long start, size_t len, unsigned long prot);
 extern long kernel_mremap(unsigned long addr, unsigned long old_len,
 		unsigned long new_len, unsigned long flags, unsigned long new_addr);
 
+
 /**
- * We do this stupid thing because related meomry mapping functions operate
+ * We do this stupid thing because functions related to meomry mapping operate
  * on "current". Thus, we need mmap/munmap/madvise in our process
  */
 void vma_worker_main(struct remote_context *rc, const char *at)
 {
 	might_sleep();
 
-	printk("%s [%d]: starting %s\n", __func__, current->pid, at);
+	printk("%s [%d]: at %s\n", __func__, current->pid, at);
 
 	while (!kthread_should_stop()) {
 		/*
@@ -1883,21 +1850,18 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 			wake_up_process(memory->waiting_for_main);
 		}
 
-		if (current->distributed_exit != EXIT_ALIVE ||
-				(memory->operation != VMA_OP_NOP &&
-				 memory->mm->thread_op == current)) {
+		if ( (memory->operation != VMA_OP_NOP &&
+			 memory->mm->thread_op == current)) {
 			__set_task_state(current, TASK_RUNNING);
-			printk("%s: continue 0x%p\n", __func__, current);
 			continue;
 		}
 		*/
 		__set_task_state(current, TASK_INTERRUPTIBLE);
 		schedule_timeout(HZ * 30);
 		__set_task_state(current, TASK_RUNNING);
-		//printk("%s: continues 0x%p\n", __func__, current);
 	}
 
-	printk("%s [%d]: exiting %s\n", __func__, current->pid, at);
+	printk("%s [%d]: %s exited\n", __func__, current->pid, at);
 
 	return;
 }
@@ -1963,7 +1927,8 @@ static void process_remote_vma_response(struct work_struct *_work)
 		goto out_free;
 	}
 
-	printk("%s: %d %p\n", __func__, atomic_read(&vi->pendings), res);
+	printk("%s: %d, %d pended\n", __func__,
+			res->result, atomic_read(&vi->pendings));
 	vi->response = res;
 	wake_up(&vi->pendings_wait);
 
@@ -1981,6 +1946,7 @@ static void response_remote_vma(int remote_nid, int remote_pid, remote_vma_respo
 
 	pcn_kmsg_send_long(remote_nid, res, sizeof(*res));
 }
+
 
 /**
  * Request for remote pages and handling the request
@@ -2001,8 +1967,8 @@ static void process_remote_vma_request(struct work_struct *work)
 	might_sleep();
 
 	while (!res) {
-		res = kzalloc(sizeof(*res), GFP_KERNEL);
-	};
+		res = kmalloc(sizeof(*res), GFP_KERNEL);
+	}
 	res->addr = addr;
 
 	rcu_read_lock();
@@ -2085,8 +2051,8 @@ out_free:
 
 static struct vma_info *__alloc_remote_vma_request(struct task_struct *tsk, unsigned long addr, remote_vma_request_t **preq)
 {
-	struct vma_info *vi = kzalloc(sizeof(*vi), GFP_KERNEL);
-	remote_vma_request_t *req = kzalloc(sizeof(*req), GFP_KERNEL);
+	struct vma_info *vi = kmalloc(sizeof(*vi), GFP_KERNEL);
+	remote_vma_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
 
 	BUG_ON(!vi || !req);
 
@@ -2200,16 +2166,20 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		spin_lock_irqsave(&rc->vmas_lock, flags);
 		v = __lookup_pending_vma_request(rc, addr);
 		if (!v) {
-			printk("%s: %lx from %d at %d\n", __func__,
-					addr, tsk->origin_pid, tsk->origin_nid);
+			printk("%s [%d]: %lx from %d at %d\n", __func__,
+					current->pid, addr, tsk->origin_pid, tsk->origin_nid);
+			smp_wmb();
 			list_add(&vi->list, &rc->vmas);
 		} else {
-			printk("%s: %lx already pended\n", __func__, addr);
+			printk("%s [%d]: %lx already pended\n", __func__,
+					current->pid, addr);
 			kfree(vi);
 			vi = v;
 			kfree(req);
 			req = NULL;
 		}
+	} else {
+		printk("%s [%d]: %lx already pended\n", __func__, current->pid, addr);
 	}
 	atomic_inc(&vi->pendings);
 	prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
@@ -2221,7 +2191,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	}
 
 	up_read(&tsk->mm->mmap_sem);
-	schedule();
+	io_schedule();
 
 	/**
 	 * Now vi->response should points to the result
@@ -2237,9 +2207,8 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		down_read(&tsk->mm->mmap_sem);
 	}
 	ret = vi->ret;
-	smp_mb();
 
-	printk("%s: %lx resume %d\n", __func__, addr, ret);
+	printk("%s [%d]: %lx resume %d\n", __func__, current->pid, addr, ret);
 
 	spin_lock_irqsave(&rc->vmas_lock, flags);
 	if (atomic_dec_return(&vi->pendings)) {
@@ -2251,7 +2220,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	}
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
 	put_task_remote(tsk);
-	barrier();
+	smp_wmb();
 
 	if (wakeup) wake_up(&vi->pendings_wait);
 
@@ -2261,7 +2230,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 
 DEFINE_KMSG_WQ_HANDLER(remote_vma_request, vma_op_wq);
 DEFINE_KMSG_WQ_HANDLER(remote_vma_response, vma_op_wq);
-DEFINE_KMSG_WQ_HANDLER(vma_lock, vma_lock_wq);
+DEFINE_KMSG_WQ_HANDLER(vma_lock, vma_op_wq);
 
 int vma_server_init(void)
 {
@@ -2271,12 +2240,6 @@ int vma_server_init(void)
 	 */
 	vma_op_wq = create_singlethread_workqueue("vma_op_wq");
 	if (!vma_op_wq) return -ENOMEM;
-
-	vma_lock_wq = create_singlethread_workqueue("vma_lock_wq");
-	if (!vma_lock_wq) {
-		destroy_workqueue(vma_op_wq);
-		return -ENOMEM;
-	}
 
 	pcn_kmsg_register_callback(
 			PCN_KMSG_TYPE_PROC_SRV_VMA_OP, handle_vma_op);

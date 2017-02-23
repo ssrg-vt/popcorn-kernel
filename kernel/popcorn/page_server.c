@@ -502,9 +502,8 @@ static int __get_remote_page(struct task_struct *tsk, struct mm_struct *mm,
 		// TODO: should fall back to the host pte fault.
 		return -PTR_ERR(page);
 	}
-	printk("remote_page_request: %s %d\n",
-			pte_write(*pte) ? "writable" : "protected",
-			pte_present(*pte));
+	printk("remote_page_request: %s\n",
+			pte_write(*pte) ? "writable" : "protected");
 
 	if (!page_is_mine(page)) {
 		// TODO: mark that this page is requested...??/
@@ -547,8 +546,8 @@ static void process_remote_page_request(struct work_struct *work)
 		res = kzalloc(sizeof(*res), GFP_KERNEL);
 	};
 	res->addr = addr;
-	printk("remote_page_request: %lx at %d from %d %d\n",
-			addr, req->origin_pid, from, req->remote_pid);
+	printk("remote_page_request: %lx at %d from [%d/%d]\n",
+			addr, req->origin_pid, req->remote_pid, from);
 
 	rcu_read_lock();
 	tsk = find_task_by_vpid(req->origin_pid);
@@ -681,11 +680,11 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 		spin_lock_irqsave(&rc->pages_lock, flags);
 		r = __lookup_pending_remote_page_request(rc, addr);
 		if (!r) {
-			printk("%s: %lx from %d at %d\n", __func__,
-					addr, tsk->origin_pid, tsk->origin_nid);
+			printk("%s [%d]: %lx [%d/%d]\n", __func__,
+					tsk->pid, addr, tsk->origin_pid, tsk->origin_nid);
 			list_add(&rp->list, &rc->pages);
 		} else {
-			printk("%s: %lx pended\n", __func__, addr);
+			printk("%s [%d]: %lx pended\n", __func__, tsk->pid, addr);
 			kfree(rp);
 			rp = r;
 			kfree(req);
@@ -702,7 +701,7 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 		kfree(req);
 	}
 
-	schedule();
+	io_schedule();
 
 	/* Now the remote page would be brought in to rp */
 
@@ -717,8 +716,8 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	ret = rp->ret;
 	smp_mb();
 
-	printk("%s: %lx resume %d at %d %d\n", __func__,
-			addr, current->pid, my_nid, ret);
+	printk("%s [%d]: %lx resume %d [%d/%d]\n", __func__,
+			tsk->pid, addr, ret, tsk->origin_pid, tsk->origin_nid);
 
 	spin_lock_irqsave(&rc->pages_lock, flags);
 	if (atomic_dec_return(&rp->pendings)) {
@@ -790,7 +789,8 @@ int page_server_handle_pte_fault(struct mm_struct *mm,
 			BUG_ON("pte_fault: write fault on writable page\n");
 		}
 	}
-	return VM_FAULT_SIGSEGV;
+	printk("pte_fault: fall through for read\n");
+	return VM_FAULT_CONTINUE;
 }
 
 

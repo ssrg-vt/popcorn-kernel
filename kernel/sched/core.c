@@ -4601,13 +4601,14 @@ static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
 
 	if (retval) return retval;
 
-	printk("%s: sleep %d\n", __func__, tsk->pid);
+	printk("%s [%d]: put to sleep\n", __func__, tsk->pid);
 	__set_task_state(tsk, TASK_INTERRUPTIBLE);
 	schedule();
-	printk("%s: wakeup %d\n", __func__, tsk->pid);
+	printk("%s [%d]: wake up\n", __func__, tsk->pid);
 
 	if (tsk->ret_from_remote & TASK_DEAD) {
-		printk("%s: terminated with %d\n", __func__, tsk->exit_code);
+		printk("%s [%d]: terminated with 0x%d\n",__func__,
+				tsk->pid, tsk->exit_code);
 		do_exit(tsk->exit_code);
 	}
 
@@ -4619,7 +4620,7 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 	struct task_struct *tsk;
 	int retval;
 
-	printk(KERN_INFO"%s [%d]: %d to %u at 0x%lx\n", __func__,
+	printk(KERN_INFO"\n####### MIGRATE [%d]: %d to %u at 0x%lx\n",
 			current->pid, pid, nid, addr);
 
 #ifdef MIGRATION_PROFILE
@@ -4627,7 +4628,8 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 #endif
 
 	if (!is_popcorn_node_online(nid)) {
-		printk(KERN_INFO"%s: Node %d is offline\n", __func__, nid);
+		printk(KERN_INFO"%s [%d]: node %d is offline\n", __func__,
+				current->pid, nid);
 		return -EAGAIN;
 	}
 
@@ -4646,8 +4648,8 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 		} else {
 			if (tsk->remote_nid != -1 && tsk->remote_pid != -1) {
 				// Already migrated. This is bug
-				printk(KERN_INFO"%s: already migrated to %d at %d\n", __func__,
-						tsk->remote_pid, tsk->remote_nid);
+				printk(KERN_INFO"%s [%d]: already migrated to %d at %d\n",
+						__func__, tsk->pid, tsk->remote_pid, tsk->remote_nid);
 				retval = -EBUSY;
 				goto out_put;
 			}

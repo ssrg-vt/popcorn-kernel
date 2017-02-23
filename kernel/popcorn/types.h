@@ -140,8 +140,8 @@ bool put_task_remote(struct task_struct *tsk);
  */
 #define BACK_MIGRATION_FIELDS \
 	int remote_nid;\
-	int remote_pid;\
-	int origin_pid;\
+	pid_t remote_pid;\
+	pid_t origin_pid;\
 	bool expect_flush;\
 	unsigned int personality;\
 	unsigned long def_flags;\
@@ -156,8 +156,8 @@ DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 
 #define CLONE_FIELDS \
 	int origin_nid;\
-	int origin_tgid;\
-	int origin_pid;\
+	pid_t origin_tgid;\
+	pid_t origin_pid;\
 	unsigned long stack_start; \
 	unsigned long env_start;\
 	unsigned long env_end;\
@@ -191,9 +191,9 @@ DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
  * requesting cpu.
  */
 #define REMOTE_TASK_PAIRING_FIELDS \
-	int your_pid; \
-	int my_pid; \
-	int my_nid;
+	int my_nid; \
+	pid_t my_pid; \
+	pid_t your_pid;
 DEFINE_PCN_KMSG(remote_task_pairing_t, REMOTE_TASK_PAIRING_FIELDS);
 
 
@@ -202,24 +202,29 @@ DEFINE_PCN_KMSG(remote_task_pairing_t, REMOTE_TASK_PAIRING_FIELDS);
 	pid_t remote_pid; \
 	bool expect_flush; \
 	long exit_code; \
-	int is_last_tgroup_member; \
 	int group_exit; \
 	field_arch arch;
 DEFINE_PCN_KMSG(task_exit_t, TASK_EXIT_FIELDS);
+
+#define TASK_KILL_FIELDS \
+	int origin_nid; \
+	pid_t origin_pid; \
+	pid_t remote_pid;
+DEFINE_PCN_KMSG(task_kill_t, TASK_KILL_FIELDS);
 
 
 /**
  * VMA and page management
  */
 #define REMOTE_VMA_REQUEST_FIELDS \
-	int origin_pid; \
+	pid_t origin_pid; \
 	int remote_nid; \
-	int remote_pid; \
+	pid_t remote_pid; \
 	unsigned long addr;
 DEFINE_PCN_KMSG(remote_vma_request_t, REMOTE_VMA_REQUEST_FIELDS);
 
 #define REMOTE_VMA_RESPONSE_FIELDS \
-	int remote_pid; \
+	pid_t remote_pid; \
 	int result; \
 	unsigned long addr; \
 	unsigned long vm_start; \
@@ -233,15 +238,15 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 
 
 #define REMOTE_PAGE_REQUEST_FIELDS \
-	int origin_pid; \
+	pid_t origin_pid; \
 	int remote_nid; \
-	int remote_pid; \
+	pid_t remote_pid; \
 	unsigned long addr; \
 	unsigned long fault_flags;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
 #define REMOTE_PAGE_RESPONSE_FIELDS \
-	int remote_pid;	\
+	pid_t remote_pid;	\
 	unsigned long addr; \
 	int result; \
 	DECLARE_BITMAP(owners, MAX_POPCORN_NODES); \
@@ -250,14 +255,14 @@ DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 
 #define REMOTE_PAGE_INVALIDATE_FIELDS \
 	int origin_nid; \
-	int origin_pid; \
-	int remote_pid; \
+	pid_t origin_pid; \
+	pid_t remote_pid; \
 	unsigned long addr;
 DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
 
 #define REMOTE_PAGE_FLUSH_FIELDS \
-	int origin_pid; \
-	int remote_pid; \
+	pid_t origin_pid; \
+	pid_t remote_pid; \
 	unsigned long addr; \
 	bool last; \
 	unsigned char page[PAGE_SIZE];

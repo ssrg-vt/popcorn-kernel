@@ -90,7 +90,7 @@ static struct remote_context *__lookup_remote_contexts_in(int nid, int tgid)
 
 static struct remote_context *__alloc_remote_context(int nid, int tgid, bool remote)
 {
-	struct remote_context *rc = kzalloc(sizeof(*rc), GFP_KERNEL);
+	struct remote_context *rc = kmalloc(sizeof(*rc), GFP_KERNEL);
 	BUG_ON(!rc);
 
 	INIT_LIST_HEAD(&rc->list);
@@ -115,8 +115,10 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 
 	barrier();
 
+	/*
 	printk(KERN_INFO"%s: at 0x%p for %d at %d %c\n", __func__,
 			rc, tgid, nid, remote ? 'r' : 'l');
+	*/
 
 	return rc;
 }
@@ -218,12 +220,13 @@ int process_server_task_exit(struct task_struct *tsk)
 
 	rc = tsk->mm->remote;
 
-	printk("EXIT [%d]: %s / 0x%x 0x%x\n", tsk->pid,
+	PSPRINTK("EXIT [%d]: %s / 0x%x 0x%x\n", tsk->pid,
 			tsk->at_remote ? "remote" : "local",
 			tsk->exit_code, tsk->group_exit);
-	printk("EXIT [%d]: 0x%p %d\n", tsk->pid,
-			rc, atomic_read(&rc->count));
-	//__show_regs(regs, 1);
+	/*
+	printk("EXIT [%d]: 0x%p %d\n", tsk->pid, rc, atomic_read(&rc->count));
+	__show_regs(regs, 1);
+	*/
 
 	BUG_ON(tsk->is_vma_worker);
 
@@ -242,33 +245,31 @@ int process_server_task_exit(struct task_struct *tsk)
 	if (tsk->at_remote) {
 		if (tsk->exit_code == TASK_PARKED) {
 			// Quietly exit back-migrated thread.
-		} else {
+		} else if (notify) {
+			task_exit_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
+			BUG_ON(!req);
+
 			if (last) {
 				// might be redundant but safe..
 				page_server_flush_remote_pages(rc);
 			}
 
-			if (notify) {
-				// Notify the origin of the task exit
-				task_exit_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
-				BUG_ON(!req);
+			// Notify the origin of the task exit
+			req->header.type = PCN_KMSG_TYPE_PROC_SRV_TASK_EXIT;
+			req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
-				req->header.type = PCN_KMSG_TYPE_PROC_SRV_TASK_EXIT;
-				req->header.prio = PCN_KMSG_PRIO_NORMAL;
+			req->origin_pid = tsk->origin_pid;
+			req->remote_pid = tsk->pid;
+			req->exit_code = tsk->exit_code;
+			req->group_exit = tsk->group_exit;
 
-				req->origin_pid = tsk->origin_pid;
-				req->remote_pid = tsk->pid;
-				req->exit_code = tsk->exit_code;
-				req->group_exit = tsk->group_exit;
+			req->expect_flush = last;
 
-				req->expect_flush = last;
+			tsk->migration_pc = task_pt_regs(tsk)->ip;
+			save_thread_info(tsk, &req->arch, NULL);
 
-				tsk->migration_pc = task_pt_regs(tsk)->ip;
-				save_thread_info(tsk, &req->arch, NULL);
-
-				pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));
-				kfree(req);
-			}
+			pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));
+			kfree(req);
 		}
 	} else { // !tsk->at_remote
 		if (tsk->remote_nid != -1 || tsk->remote_pid != -1) {
@@ -277,7 +278,8 @@ int process_server_task_exit(struct task_struct *tsk)
 	}
 
 	if (last) {
-		printk("EXIT [%d]: terminate remote execution\n", tsk->pid);
+		PSPRINTK("EXIT [%d]: finish at %s\n",
+				tsk->pid, tsk->at_remote ? "remote" : "local");
 		__lock_remote_contexts(tsk->at_remote);
 		list_del(&rc->list);
 		__unlock_remote_contexts(tsk->at_remote);
@@ -306,7 +308,7 @@ static void process_exit_task(struct work_struct *_work)
 	tsk = find_task_by_vpid(req->origin_pid);
 
 	if (tsk && tsk->remote_pid == req->remote_pid) {
-		printk(KERN_INFO"%s: exit %d with %ld, %d\n", __func__,
+		printk(KERN_INFO"%s [%d]: exited with 0x%lx, 0x%x\n", __func__,
 				tsk->pid, req->exit_code, req->group_exit);
 
 		if (req->expect_flush) {
@@ -322,7 +324,7 @@ static void process_exit_task(struct work_struct *_work)
 		tsk->group_exit = req->group_exit;
 
 		restore_thread_info(tsk, &req->arch, false);
-		smp_mb();
+		smp_wmb();
 
 		wake_up_process(tsk);
 	} else {
@@ -349,9 +351,6 @@ static int handle_back_migration(struct pcn_kmsg_message *inc_msg)
 	migration_start = ktime_get();
 #endif
 
-	PSPRINTK("### BACKMIG from %d at %d to %d\n",
-			req->remote_pid, req->remote_nid, req->origin_pid);
-
 	rcu_read_lock();
 	tsk = find_task_by_vpid(req->origin_pid);
 	if (!tsk) {
@@ -363,6 +362,9 @@ static int handle_back_migration(struct pcn_kmsg_message *inc_msg)
 
 	get_task_struct(tsk);
 	rcu_read_unlock();
+
+	PSPRINTK("### BACKMIG [%d] from %d at %d to %d\n",
+			tsk->pid, req->remote_pid, req->remote_nid, req->origin_pid);
 
 	BUG_ON(tsk->remote_pid != req->remote_pid);
 
@@ -537,7 +539,8 @@ static int shadow_main(void *_args)
 	struct shadow_params *params = _args;
 	clone_request_t *req = params->req;
 
-    PSPRINTK("%s [%d]: start\n", __func__, current->pid);
+    PSPRINTK("%s [%d]: started for %d at %d\n", __func__,
+			current->pid, req->origin_pid, req->origin_nid);
 
 	__rename_task_comm(current, req->exe_path);
 
@@ -572,7 +575,7 @@ static int shadow_main(void *_args)
 			GET_MIGRATION_TIME);
 #endif
 
-	printk("####### MIGRATED - %d at %d --> %d at %d\n",
+	PSPRINTK("\n####### MIGRATED - %d at %d --> %d at %d\n",
 			current->origin_pid, current->origin_nid, current->pid, my_nid);
 
 	kfree(params);
@@ -699,13 +702,12 @@ static int vma_worker_remote(void *_data)
 	struct pcn_kmsg_work *work = params->work;
 	clone_request_t *req = work->msg;
 	struct remote_context *rc = params->rc;
-	int origin_tgid = req->origin_tgid;
 	struct cred *new;
 
 	might_sleep();
 
-	PSPRINTK("%s [%d]: origin nid=%d tgid=%d pid=%d\n", __func__,
-			current->pid, req->origin_nid, req->origin_tgid, req->origin_pid);
+	PSPRINTK("%s [%d]: started for origin %d in %d at %d\n", __func__,
+			current->pid, req->origin_pid, req->origin_tgid, req->origin_nid);
 	PSPRINTK("%s [%d]: exe_path=%s\n", __func__,
 			current->pid, req->exe_path);
 
@@ -727,8 +729,7 @@ static int vma_worker_remote(void *_data)
 
 	rc->tgid = current->tgid;
 	rc->remote_tgids[my_nid] = rc->tgid;
-	rc->remote_tgids[current->origin_nid] = origin_tgid;
-	smp_mb();
+	smp_wmb();
 
 	/* Create the shadow spawner */
 	kernel_thread(shadow_spawner, rc, CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
@@ -749,33 +750,36 @@ static void clone_remote_thread(struct work_struct *_work)
 	struct remote_context *rc;
 	struct remote_context *rc_new =
 			__alloc_remote_context(nid_from, tgid_from, true);
-	struct vma_worker_params *params = kmalloc(sizeof(*params), GFP_KERNEL);
-	char *which_rc;
 
-	BUG_ON(!rc_new || !params);
-	printk("%s [%d]: start for %d %d\n", __func__,
-			current->pid, tgid_from, req->origin_pid);
+	BUG_ON(!rc_new);
+
+	PSPRINTK("%s: for %d in %d at %d\n", __func__,
+			req->origin_pid, tgid_from, nid_from);
 
 	__lock_remote_contexts_in(nid_from);
 	rc = __lookup_remote_contexts_in(nid_from, tgid_from);
 	if (!rc) {
+		struct vma_worker_params *params;
+
 		rc = rc_new;
-		params->rc = rc;
-		params->work = work;
-		smp_mb();
+		rc->remote_tgids[nid_from] = tgid_from;
+		smp_wmb();
 		list_add(&rc->list, &__remote_contexts_in());
 		__unlock_remote_contexts_in(nid_from);
 
+		params = kmalloc(sizeof(*params), GFP_KERNEL);
+		BUG_ON(!params);
+
+		params->rc = rc;
+		params->work = work;
+		smp_wmb();
+
 		rc->vma_worker =
 				kthread_run(vma_worker_remote, params, "remote_worker");
-		which_rc = "created";
 	} else {
 		__unlock_remote_contexts_in(nid_from);
 		kfree(rc_new);
-		which_rc = "found";
 	}
-
-	PSPRINTK("%s [%d]: rc %s at %p\n", __func__, current->pid, which_rc, rc);
 
 	/* Kick the spawner */
 	__kick_shadow_spawner(rc, work);
@@ -920,7 +924,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		tsk->mm->remote = rc_new;
 		rc_new->mm = tsk->mm;
 		rc_new->remote_tgids[my_nid] = tsk->tgid;
-		smp_mb();
+		smp_wmb();
 
 		__lock_remote_contexts_out(dst_nid);
 		list_add(&rc_new->list, &__remote_contexts_out());
@@ -937,7 +941,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	if (create_vma_worker) {
 		rc->vma_worker = kthread_run(vma_worker_origin, rc, "worker_origin");
 	}
-	printk("%s [%d]: use %s\n", __func__, tsk->pid, which_rc);
+	PSPRINTK("%s [%d]: use %s remote context\n", __func__, tsk->pid, which_rc);
 
 	ret = __request_clone_remote(dst_nid, tsk, uregs);
 
@@ -962,8 +966,6 @@ int process_server_do_migration(struct task_struct *tsk, int dst_nid,
 		void __user *uregs)
 {
 	int ret = 0;
-
-	PSPRINTK(KERN_INFO"%s: pid=%d, tgid=%d\n", __func__, tsk->pid, tsk->tgid);
 
 	if (tsk->origin_nid == dst_nid) {
 		ret = do_back_migration(tsk, dst_nid, uregs);
