@@ -58,8 +58,8 @@ struct remote_page {
 
 static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, remote_page_request_t **preq)
 {
-	struct remote_page *rp = kzalloc(sizeof(*rp), GFP_KERNEL);
-	remote_page_request_t *req = kzalloc(sizeof(*req), GFP_KERNEL);
+	struct remote_page *rp = kmalloc(sizeof(*rp), GFP_KERNEL);
+	remote_page_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
 
 	BUG_ON(!rp || !req);
 
@@ -242,7 +242,7 @@ static int __flush_pte(pte_t *pte, unsigned long addr, unsigned long next, struc
 		void *paddr;
 		// TODO: Skip flushing read-only pages
 
-		printk("flush_remote_page:+ %lx %p\n", addr, page);
+		printk("flush_remote_page [%d]:+ %lx %p\n", current->pid, addr, page);
 		req->addr = addr;
 		paddr = kmap_atomic(page);
 		copy_page(req->page, paddr);
@@ -252,7 +252,7 @@ static int __flush_pte(pte_t *pte, unsigned long addr, unsigned long next, struc
 
 		pcn_kmsg_send_long(current->origin_nid, req, sizeof(*req));
 	} else {
-		printk("flush_remote_page:- %lx %p\n", addr, page);
+		printk("flush_remote_page [%d]:- %lx %p\n", current->pid, addr, page);
 	}
 
 	return 0;
@@ -511,13 +511,14 @@ static int __get_remote_page(struct task_struct *tsk, struct mm_struct *mm,
 		goto out_put;
 	}
 
+	if (invalidate) {
+		__revoke_page_ownership(tsk, addr, page, pte, ptl, from);
+	}
+
 	paddr = kmap_atomic(page);
 	copy_page(res->page, paddr);
 	kunmap_atomic(paddr);
 
-	if (invalidate) {
-		__revoke_page_ownership(tsk, addr, page, pte, ptl, from);
-	}
 	set_bit(from, page->owners);
 	memcpy(res->owners, page->owners, MAX_POPCORN_NODES);
 
@@ -543,7 +544,7 @@ static void process_remote_page_request(struct work_struct *work)
 	might_sleep();
 
 	while (!res) {	/* response contains a page. allocate from a heap */
-		res = kzalloc(sizeof(*res), GFP_KERNEL);
+		res = kmalloc(sizeof(*res), GFP_KERNEL);
 	};
 	res->addr = addr;
 	printk("remote_page_request: %lx at %d from [%d/%d]\n",

@@ -13,7 +13,7 @@
  */
 
 /*
- * As David Katz thesis the concept of this server is to do consistent 
+ * As David Katz thesis the concept of this server is to do consistent
  * modifications to the VMA list
  * The protocol is for N kernels
  * The performed operation is shown atomic to every thread of the same
@@ -97,7 +97,7 @@ static unsigned long get_file_offset(struct file *file, int start_addr)
 					__func__, start_addr,
 					(unsigned long)elf_eppnt->p_vaddr,
 					(unsigned long)elf_eppnt->p_memsz);
-				retval = elf_eppnt->p_offset - 
+				retval = elf_eppnt->p_offset -
 						(elf_eppnt->p_vaddr & (ELF_MIN_ALIGN-1));
 				goto out;
 			}
@@ -123,6 +123,33 @@ out:
 ///////////////////////////////////////////////////////////////////////////////
 // Legacy codes. Remove them quickly
 ///////////////////////////////////////////////////////////////////////////////
+typedef struct mapping_answers_2_kernels {
+	struct mapping_answers_2_kernels* next;
+	struct mapping_answers_2_kernels* prev;
+
+	int tgroup_home_cpu;
+	int tgroup_home_id;
+	unsigned long address;
+	int vma_present;
+	unsigned long vaddr_start;
+	unsigned long vaddr_size;
+	unsigned long pgoff;
+	char path[512];
+	pgprot_t prot;
+	unsigned long vm_flags;
+	int is_write;
+	int is_fetch;
+	int owner;
+	int address_present;
+	long last_write;
+	int owners [MAX_KERNEL_IDS];
+	data_response_for_2_kernels_t* data;
+	int arrived_response;
+	struct task_struct* waiting;
+	int futex_owner;
+} mapping_answers_for_2_kernels_t;
+
+
 typedef struct vma_op_answers {
 	int origin_nid;
 	int origin_pid;
@@ -392,7 +419,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
  * ptl is from pte_offset_map_lock (this is a lock on the page table entry somewhere)
  */
 int vma_server_do_mapping_for_distributed_process(
-		mapping_answers_for_2_kernels_t* fetching_page,
+		struct mapping_answers_for_2_kernels* _fetching_page,
 		struct task_struct *tsk, struct mm_struct* mm,
 		unsigned long address, spinlock_t* ptl)
 {
@@ -400,6 +427,8 @@ int vma_server_do_mapping_for_distributed_process(
 	struct vm_area_struct* vma;
 	unsigned long prot = 0;
 	unsigned long err, ret;
+	mapping_answers_for_2_kernels_t *fetching_page =
+		(mapping_answers_for_2_kernels_t *)_fetching_page;
 
 	prot |= (fetching_page->vm_flags & VM_READ) ? PROT_READ : 0;
 	prot |= (fetching_page->vm_flags & VM_WRITE) ? PROT_WRITE : 0;

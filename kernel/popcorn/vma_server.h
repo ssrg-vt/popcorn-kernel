@@ -13,31 +13,6 @@
 #define KERNEL_POPCORN_VMA_SERVER_H_
 
 #include "types.h"
-typedef struct mapping_answers_2_kernels {
-	struct mapping_answers_2_kernels* next;
-	struct mapping_answers_2_kernels* prev;
-
-	int tgroup_home_cpu;
-	int tgroup_home_id;
-	unsigned long address;
-	int vma_present;
-	unsigned long vaddr_start;
-	unsigned long vaddr_size;
-	unsigned long pgoff;
-	char path[512];
-	pgprot_t prot;
-	unsigned long vm_flags;
-	int is_write;
-	int is_fetch;
-	int owner;
-	int address_present;
-	long last_write;
-	int owners [MAX_KERNEL_IDS];
-	data_response_for_2_kernels_t* data;
-	int arrived_response;
-	struct task_struct* waiting;
-	int futex_owner;
-} mapping_answers_for_2_kernels_t;
 
 /**
  * Creates a local mapping for the VMA -- this is the case in which is the local
@@ -45,8 +20,10 @@ typedef struct mapping_answers_2_kernels {
  *
  * @return Returns 0 on success, an error code otherwise.
  */
+struct mapping_answers_for_2_kernels;
+
 int vma_server_do_mapping_for_distributed_process(
-		mapping_answers_for_2_kernels_t* fetching_page,
+		struct mapping_answers_for_2_kernels* fetching_page,
 		struct task_struct *tsk, struct mm_struct* mm,
 		unsigned long address, spinlock_t* ptl);
 
