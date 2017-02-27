@@ -1,5 +1,6 @@
 /*
  * pcn_kmesg.c - Kernel Module for Popcorn Messaging Layer over Socket
+ * on Linux 3.12 for only 2 nodes
  */
 
 #include <linux/module.h>

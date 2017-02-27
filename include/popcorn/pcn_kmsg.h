@@ -12,7 +12,7 @@
 enum pcn_connection_status {
 	PCN_CONN_WATING,
 	PCN_CONN_CONNECTED,
-	PCN_CONN_TYPE_MAX
+	//PCN_CONN_TYPE_MAX
 };
 typedef unsigned long pcn_kmsg_mcast_id;
 /* MESSAGING */

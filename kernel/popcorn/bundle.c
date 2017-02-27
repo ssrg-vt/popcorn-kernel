@@ -39,9 +39,21 @@ static struct popcorn_node popcorn_nodes[MAX_POPCORN_NODES];
 
 bool is_popcorn_node_online(int nid)
 {
-	return true;
-	//return popcorn_nodes[nid].is_connected;
+	return popcorn_nodes[nid].is_connected;
 }
+EXPORT_SYMBOL(is_popcorn_node_online);
+
+void set_popcorn_node_online(int nid)
+{
+    popcorn_nodes[nid].is_connected = true;
+}
+EXPORT_SYMBOL(set_popcorn_node_online);
+
+void set_popcorn_node_offline(int nid)
+{
+    popcorn_nodes[nid].is_connected = false;
+}
+EXPORT_SYMBOL(set_popcorn_node_offline);
 
 int my_nid __read_mostly = -1;
 EXPORT_SYMBOL(my_nid);

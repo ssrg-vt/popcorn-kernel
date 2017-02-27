@@ -6,6 +6,9 @@
 #define MAX_KERNEL_IDS 2
 //#define MAX_KERNEL_IDS NR_CPUS
 
+/* MSG layer manchine info */
+
+
 enum popcorn_node_arch {
 	POPCORN_NODE_X86 = 0,
 	POPCORN_NODE_ARM = 1,
@@ -22,7 +25,14 @@ static inline bool get_popcorn_node_arch(int nid) {
 
 extern int my_nid;
 
+#define MAX_NUM_NODES       2
+#define MAX_NUM_CHANNELS    MAX_NUM_NODES-1
+extern bool is_connection_done[MAX_NUM_NODES];
+
+//popcorn_nodes[nid].is_connected
 bool is_popcorn_node_online(int nid);
+void set_popcorn_node_online(int nid);
+void set_popcorn_node_offline(int nid);
 
 int popcorn_nodes_init(void);
 #endif
