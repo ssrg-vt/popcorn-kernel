@@ -33,17 +33,17 @@
 
 #include <linux/vmalloc.h>
 
+#include <popcorn/bundle.h>
+
 #include "genif.h"
 
 /* Macro definitions */
 #define MAX_NUM_CHANNELS	1
 #define SEND_OFFSET		1
 #define RECV_OFFSET		(MAX_NUM_CHANNELS+SEND_OFFSET)
-#if defined(CONFIG_ARM64)
-#define TARGET_NODE		4
-#else
-#define TARGET_NODE		8
-#endif
+
+#define TARGET_NODE		((my_nid == 0) ? 8 : 4)
+
 #define NO_FLAGS		0
 #define SEG_SIZE		20000
 #define MAX_NUM_BUF		20
@@ -167,12 +167,6 @@ static int __init initialize(void);
 int pci_kmsg_send_long(unsigned int dest_cpu,
 		       struct pcn_kmsg_long_message *lmsg,
 		       unsigned int payload_size);
-
-#if defined(CONFIG_ARM64)
-static unsigned int my_cpu = 0;
-#else
-static unsigned int my_cpu = 1;
-#endif
 
 #if TEST_MSG_LAYER
 pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
@@ -1034,7 +1028,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 		return -1;
 	}
 
-	lmsg->header.from_cpu = my_cpu;
+	lmsg->header.from_cpu = my_nid;
 	lmsg->header.size = (payload_size + sizeof(struct pcn_kmsg_hdr));
 
 	if (lmsg->header.size > SEG_SIZE) {
@@ -1051,10 +1045,10 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 	*/
 
 #if !TEST_MSG_LAYER
-	if (dest_cpu == my_cpu) {
+	if (dest_cpu == my_nid) {
 		pcn_msg = lmsg;
 
-		printk(KERN_INFO "%s: INFO: Send message: dest_cpu == my_cpu\n", __func__);
+		printk(KERN_INFO "%s: INFO: Send message: dest_cpu == my_nid\n", __func__);
 
 		if (pcn_msg->header.type < 0
 		    || pcn_msg->header.type >= PCN_KMSG_TYPE_MAX) {
