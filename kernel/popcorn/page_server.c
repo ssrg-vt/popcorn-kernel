@@ -622,7 +622,9 @@ static void __map_remote_page(struct remote_page *rp, unsigned long fault_flags)
 	printk("%s: vma %lx -- %lx %lx\n", __func__,
 			vma->vm_start, vma->vm_end, vma->vm_flags);
 
-	anon_vma_prepare(vma);
+	if (vma_is_anonymous(vma)) {
+		anon_vma_prepare(vma);
+	}
 	page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
 	if (!page) {
 		rp->ret = VM_FAULT_OOM;
@@ -791,7 +793,7 @@ int page_server_handle_pte_fault(struct mm_struct *mm,
 		}
 	}
 	printk("pte_fault: fall through for read\n");
-	return VM_FAULT_CONTINUE;
+	return 0;
 }
 
 
