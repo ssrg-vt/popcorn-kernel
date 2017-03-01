@@ -61,7 +61,7 @@ EXPORT_SYMBOL(my_nid);
 static int __connect_to_popcorn_nodes(void)
 {
 	// TODO: connect to other node. Now deal with loopback only
-	popcorn_nodes[0].is_connected = true;
+	//popcorn_nodes[0].is_connected = true;
 	popcorn_nodes[0].arch = POPCORN_NODE_X86;
 
 	return 0;
@@ -91,6 +91,7 @@ int __init popcorn_nodes_init(void)
 	int i;
 	BUG_ON(popcorn_node.arch == POPCORN_NODE_UNKNOWN);
 
+    /*
 	if (popcorn_node.id < 0 || popcorn_node.id >= MAX_POPCORN_NODES) {
 		printk(KERN_ERR"********************************************");
 		printk(KERN_ERR"***                                      ***");
@@ -101,6 +102,7 @@ int __init popcorn_nodes_init(void)
 		printk(KERN_ERR"********************************************");
 		BUG();
 	}
+    */
 
 	for (i = 0; i < MAX_POPCORN_NODES; i++) {
 		struct popcorn_node *pn = popcorn_nodes + i;
