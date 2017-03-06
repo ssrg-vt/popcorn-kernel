@@ -1838,9 +1838,7 @@ struct task_struct {
 	/*akshay*/
 	pid_t surrogate;
 
-	/*Ajith - for het migration */
-	unsigned long migration_pc;
-	unsigned long return_addr;
+	unsigned long migration_ip;
 
 	// scheduling -- antoniob
 	unsigned long lutime, lstime, llasttimestamp; /* in jiffies for load accounting */

@@ -268,7 +268,7 @@ int process_server_task_exit(struct task_struct *tsk)
 
 			req->expect_flush = last;
 
-			tsk->migration_pc = task_pt_regs(tsk)->ip;
+			tsk->migration_ip = task_pt_regs(tsk)->ip;
 			save_thread_info(tsk, &req->arch, NULL);
 
 			pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));
@@ -965,8 +965,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
  * The remote cpu will then create a new thread and import that
  * info into its new context.
  */
-int process_server_do_migration(struct task_struct *tsk, int dst_nid,
-		void __user *uregs)
+int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, void __user *uregs)
 {
 	int ret = 0;
 

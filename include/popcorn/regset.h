@@ -30,19 +30,16 @@ struct popcorn_regset_x86_64 {
 	/* Multimedia-extension (MMX) registers */
 	uint64_t mmx[8];
 
-	/* Streaming SIMD Extension (SSE)
-	 * registers */
+	/* Streaming SIMD Extension (SSE) registers */
 	unsigned __int128 xmm[16];
 
-	/* x87 floating point registers
-	 * */
+	/* x87 floating point registers */
 	long double st[8];
 
 	/* Segment registers */
 	uint32_t cs, ss, ds, es, fs, gs;
 
-	/* Flag register
-	 * */
+	/* Flag register */
 	uint64_t rflags;
 };
 
@@ -68,9 +65,8 @@ struct popcorn_regset_sparc {
 
 #define FIELDS_ARCH \
 	struct pt_regs regs;\
-	unsigned long migration_pc;\
+	unsigned long migration_ip;\
 	unsigned long ip; \
-	unsigned long ra;\
 	unsigned long bp;\
 	unsigned long sp;\
 	unsigned short thread_es;\

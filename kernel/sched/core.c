@@ -4588,16 +4588,13 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 #include <popcorn/bundle.h>
 #include <popcorn/process_server.h>
 
-static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
-		unsigned long migration_ip, unsigned long ret_addr)
+static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid, void __user *uregs)
 {
 	int retval = 0;
 
-	//tsk->migration_pc = migration_ip;
-	tsk->migration_pc = task_pt_regs(tsk)->ip;
-	tsk->return_addr = ret_addr;
+	tsk->migration_ip = task_pt_regs(tsk)->ip;
 
-	retval = process_server_do_migration(tsk, nid, NULL);
+	retval = process_server_do_migration(tsk, nid, uregs);
 
 	if (retval) return retval;
 
@@ -4615,13 +4612,13 @@ static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid,
 	return 0;
 }
 
-SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, addr)
+SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, void __user *, uregs)
 {
 	struct task_struct *tsk;
 	int retval;
 
-	printk(KERN_INFO"\n####### MIGRATE [%d]: %d to %u at 0x%lx\n",
-			current->pid, pid, nid, addr);
+	printk(KERN_INFO"\n####### MIGRATE [%d]: %d to %d\n",
+			current->pid, pid, nid);
 
 #ifdef MIGRATION_PROFILE
 	migration_start = ktime_get();
@@ -4656,7 +4653,7 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, add
 		}
 	}
 
-	retval = __do_sched_migrate(tsk, nid, addr, addr + 16 );
+	retval = __do_sched_migrate(tsk, nid, uregs);
 
 out_put:
 	return retval;
@@ -4664,7 +4661,7 @@ out_put:
 
 #else // CONFIG_POPCORN
 
-SYSCALL_DEFINE2(sched_migrate, pid_t, pid, unsigned int, nid, unsigned long, addr)
+SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, void __user *, uregs)
 {
 	return -EINVAL;
 }

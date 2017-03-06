@@ -49,10 +49,11 @@
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *uregs)
+int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *_uregs)
 {
 	struct pt_regs *regs = task_pt_regs(tsk);
 	unsigned short fsindex, gsindex;
+	struct popcorn_regset_x86_64 *uregs = _uregs;
 	int cpu;
 
 	//dump_processor_regs(task_pt_regs(tsk));
@@ -62,23 +63,27 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *ure
 
 	cpu = get_cpu();
 
-	if (uregs != NULL) {
-		int remain = copy_from_user(&arch->regs_aarch, uregs,
-				sizeof(struct popcorn_regset_aarch64));
-		BUG_ON(remain != 0);
-	}
-
 	memcpy(&arch->regs, regs, sizeof(*regs));
 
-	/*
-	 * Save frame pointer and return address, required for stack
-	 * transformation.
-	 */
-	arch->migration_pc = tsk->migration_pc;
-	arch->ip = regs->ip;
-	arch->ra = tsk->return_addr;
-	arch->bp = regs->bp;
-	arch->sp = regs->sp;
+	if (uregs) {
+		/*
+		 * TODO: Supposed to be supplied from user-space (i.e., compiler),
+		 * but we don't have the support for now.
+
+		int remain = copy_from_user(&arch->regs_x86, uregs,
+				sizeof(struct popcorn_regset_x86_64));
+		BUG_ON(remain != 0);
+		*/
+		arch->migration_ip = tsk->migration_ip;
+		get_user(arch->ip, (unsigned long *)&uregs->rip);
+		get_user(arch->bp, &uregs->rbp);
+		arch->sp = regs->sp;
+	} else {
+		arch->migration_ip = regs->ip;
+		arch->ip = regs->ip;
+		arch->bp = regs->bp;
+		arch->sp = regs->sp;
+	}
 
 	/*
 	 * Segments
@@ -108,7 +113,7 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *ure
 	put_cpu();
 
 	PSPRINTK(KERN_INFO"%s [%d]: ip %lx pc %lx\n", __func__,
-			tsk->pid, arch->ip, arch->migration_pc);
+			tsk->pid, arch->ip, arch->migration_ip);
 	PSPRINTK(KERN_INFO"%s [%d]: sp %lx bp %lx\n", __func__,
 			tsk->pid, arch->sp, arch->bp);
 	PSPRINTK(KERN_INFO"%s [%d]: fs %lx gs %lx\n", __func__,
@@ -155,10 +160,8 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_
 	cpu = get_cpu();
 	memcpy(regs, &arch->regs, sizeof(*regs));
 
-	regs->ip = arch->migration_pc;
-	tsk->return_addr = arch->ra;
+	regs->ip = arch->migration_ip;
 	regs->bp = arch->bp;
-	regs->sp = arch->sp;
 
 	if (restore_segments) {
 		regs->cs = __USER_CS;
@@ -182,9 +185,9 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_
 	put_cpu();
 
 	PSPRINTK(KERN_INFO"%s [%d]: ip %lx pc %lx\n", __func__,
-			tsk->pid, arch->ip, arch->migration_pc);
+			tsk->pid, regs->ip, arch->migration_ip);
 	PSPRINTK(KERN_INFO"%s [%d]: sp %lx bp %lx\n", __func__,
-			tsk->pid, arch->sp, arch->bp);
+			tsk->pid, regs->sp, regs->bp);
 	PSPRINTK(KERN_INFO"%s [%d]: fs %lx [%x]\n", __func__,
 			tsk->pid, tsk->thread.fs, tsk->thread.fsindex);
 
@@ -201,10 +204,10 @@ int restore_thread_info_from_aarch64(struct task_struct *task, field_arch *arch)
 	BUG_ON(!task || !arch);
 
 	/* For het migration */
-	if (arch->migration_pc != 0) {
+	if (arch->migration_ip != 0) {
 		struct pt_regs *pt_regs = task_pt_regs(tsk);
 
-		pt_regs->ip = arch->migration_pc;
+		pt_regs->ip = arch->migration_ip;
 		pt_regs->bp = arch->bp;
 		pt_regs->sp = arch->old_rsp;
 		tsk->thread.usersp = arch->old_rsp;
@@ -246,7 +249,7 @@ int restore_thread_info_from_aarch64(struct task_struct *task, field_arch *arch)
 	rdmsrl(MSR_FS_BASE, fs_val);
 
 	PSPRINTK(KERN_INFO"%s: ip 0x%lx, sp 0x%lx\n", __func__,
-			arch->migration_pc, arch->old_rsp);
+			arch->migration_ip, arch->old_rsp);
 	PSPRINTK(KERN_INFO"%s: bp 0x%lx\n", __func__, arch->bp);
 
 	PSPRINTK(KERN_INFO"%s: fs saved 0x%lx[0x%lx], "

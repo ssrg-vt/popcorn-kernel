@@ -21,7 +21,7 @@ extern int update_fpu_info(struct task_struct *task);
 #endif
 
 
-int process_server_do_migration(struct task_struct* tsk, int cpu, void __user *uregs);
+int process_server_do_migration(struct task_struct* tsk, unsigned int dst_nid, void __user *uregs);
 int process_server_task_exit(struct task_struct *tsk);
 
 
