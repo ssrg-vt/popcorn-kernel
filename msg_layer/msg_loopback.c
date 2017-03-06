@@ -35,6 +35,10 @@ static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_messag
 static int __init loopback_load(void)
 {
 	printk(KERN_INFO"Popcorn message layer loopback loaded\n");
+
+	my_nid = 0;
+	set_popcorn_node_online(my_nid);
+
 	send_callback = (send_cbftn)loopback_kmsg_send_long;
 
 	return 0;
