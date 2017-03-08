@@ -367,8 +367,8 @@ static int handle_back_migration(struct pcn_kmsg_message *inc_msg)
 	get_task_struct(tsk);
 	rcu_read_unlock();
 
-	PSPRINTK("### BACKMIG [%d] from %d at %d to %d\n",
-			tsk->pid, req->remote_pid, req->remote_nid, req->origin_pid);
+	PSPRINTK("### BACKMIG [%d] from %d at %d\n",
+			tsk->pid, req->remote_pid, req->remote_nid);
 
 	BUG_ON(tsk->remote_pid != req->remote_pid);
 

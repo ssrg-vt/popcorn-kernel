@@ -409,6 +409,8 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 		}
 	}
 
+	BUG_ON(populate);
+
 	return ret;
 }
 
@@ -2107,21 +2109,21 @@ static struct vma_info *__alloc_remote_vma_request(struct task_struct *tsk, unsi
 }
 
 
-void __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
+int __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 {
 	struct mm_struct *mm = tsk->mm;
 	struct vm_area_struct *vma;
-	unsigned long vm_prot;
-	unsigned vm_flags = MAP_FIXED;
+	unsigned long prot;
+	unsigned flags = MAP_FIXED;
 	struct file *f = NULL;
 	unsigned long err = 0;
+	int ret = 0;
 	unsigned long addr = vi->response->addr;
 	remote_vma_response_t *res = vi->response;
 
-	vi->ret = res->result;
-	if (vi->ret) {
+	if (res->result) {
 		down_read(&mm->mmap_sem);
-		return;
+		return res->result;
 	}
 
 	down_write(&mm->mmap_sem);
@@ -2132,28 +2134,28 @@ void __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 	}
 
 	if (remote_vma_anon(res)) {
-		vm_flags |= MAP_ANONYMOUS;
+		flags |= MAP_ANONYMOUS;
 	} else {
 		f = filp_open(res->vm_file_path, O_RDONLY | O_LARGEFILE, 0);
 		if (IS_ERR(f)) {
 			printk(KERN_ERR"%s: cannot find backing file %s\n",__func__,
 				res->vm_file_path);
-			vi->ret = -EIO;
+			ret = -EIO;
 			goto out;
 		}
 	}
 
-	vm_prot  = ((res->vm_flags & VM_READ) ? PROT_READ : 0)
+	prot  = ((res->vm_flags & VM_READ) ? PROT_READ : 0)
 			| ((res->vm_flags & VM_WRITE) ? PROT_WRITE : 0)
 			| ((res->vm_flags & VM_EXEC) ? PROT_EXEC : 0);
 
-	vm_flags = vm_flags
+	flags = flags
 		   | ((res->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
 		   | ((res->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
 		   | ((res->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0);
 
 	err = map_difference(mm, f, res->vm_start, res->vm_end,
-				vm_prot, vm_flags, res->vm_pgoff);
+				prot, flags, res->vm_pgoff);
 
 	if (f) filp_close(f, NULL);
 
@@ -2162,7 +2164,7 @@ void __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 
 out:
 	downgrade_write(&mm->mmap_sem);
-	return;
+	return ret;
 }
 
 
@@ -2231,7 +2233,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	finish_wait(&vi->pendings_wait, &wait);
 
 	if (!vi->mapped) {
-		__map_remote_vma(tsk, vi);
+		vi->ret = __map_remote_vma(tsk, vi);
 		vi->mapped = true;
 	} else {
 		down_read(&tsk->mm->mmap_sem);

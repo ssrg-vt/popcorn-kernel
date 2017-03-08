@@ -75,9 +75,13 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *_ur
 				sizeof(struct popcorn_regset_x86_64));
 		BUG_ON(remain != 0);
 		*/
+		int remain = copy_from_user(
+				&arch->regs_x86, uregs, sizeof(arch->regs_x86));
+		BUG_ON(remain != 0);
+
 		arch->migration_ip = tsk->migration_ip;
-		get_user(arch->ip, (unsigned long *)&uregs->rip);
-		get_user(arch->bp, &uregs->rbp);
+		arch->ip = (unsigned long)arch->regs_x86.rip;
+		arch->bp = arch->regs_x86.rbp;
 		arch->sp = regs->sp;
 	} else {
 		arch->migration_ip = regs->ip;
@@ -162,7 +166,13 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_
 	memcpy(regs, &arch->regs, sizeof(*regs));
 
 	regs->ip = arch->migration_ip;
-	regs->bp = arch->bp;
+
+	regs->r15 = arch->regs_x86.r15;
+	regs->r14 = arch->regs_x86.r14;
+	regs->r13 = arch->regs_x86.r13;
+	regs->r12 = arch->regs_x86.r12;
+	regs->bp = arch->regs_x86.rbp;
+	regs->bx = arch->regs_x86.rbx;
 
 	if (restore_segments) {
 		regs->cs = __USER_CS;
