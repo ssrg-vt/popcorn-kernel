@@ -16,9 +16,9 @@
 /*
  * Entry points for dealing with page fault in Popcorn Rack
  */
-int page_server_handle_pte_fault(struct mm_struct *mm,
-		struct vm_area_struct *vma,
-		unsigned long address, pte_t entry, pmd_t *pmd,
+int page_server_handle_pte_fault(
+		struct mm_struct *mm, struct vm_area_struct *vma,
+		unsigned long address, pte_t *pte, pte_t entry, pmd_t *pmd,
 		unsigned int flags);
 
 /*

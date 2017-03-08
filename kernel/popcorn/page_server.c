@@ -47,6 +47,7 @@ bool page_is_mine(struct page *page)
 struct remote_page {
 	struct list_head list;
 	unsigned long addr;
+	pid_t pid;
 
 	bool mapped;
 	int ret;
@@ -69,6 +70,7 @@ static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, 
 	/* rp */
 	INIT_LIST_HEAD(&rp->list);
 	rp->addr = addr;
+	rp->pid = tsk->pid;
 
 	rp->mapped = false;
 	rp->ret = 0;
@@ -96,27 +98,13 @@ static struct remote_page *__lookup_pending_remote_page_request(struct remote_co
 	struct remote_page *rp;
 
 	list_for_each_entry(rp, &rc->pages, list) {
+		/*
+		printk("LOOKUP [%d] %lx - [%d] %lx\n",
+				current->pid, addr, rp->pid, rp->addr);
+		*/
 		if (rp->addr == addr) return rp;
 	}
 	return NULL;
-}
-
-
-static inline pte_t *__find_pte_lock(struct mm_struct *mm, unsigned long addr, spinlock_t **ptl)
-{
-	pgd_t *pgd;
-	pud_t *pud;
-	pmd_t *pmd;
-	pte_t *pte;
-
-	pgd = pgd_offset(mm, addr);
-	pud = pud_alloc(mm, pgd, addr);
-	if (!pud) return NULL;
-	pmd = pmd_alloc(mm, pud, addr);
-	if (!pmd) return NULL;
-
-	pte = pte_alloc_map_lock(mm, pmd, addr, ptl);
-	return pte;
 }
 
 
@@ -127,38 +115,82 @@ static struct page *__find_page_at(struct mm_struct *mm, unsigned long addr, pte
 	pmd_t *pmd;
 	pte_t *pte = NULL;
 	spinlock_t *ptl = NULL;
-	struct page *page;
+	struct page *page = ERR_PTR(-ENOMEM);
 
 	pgd = pgd_offset(mm, addr);
 	if (!pgd || pgd_none(*pgd)) {
-		return ERR_PTR(-VM_FAULT_SIGSEGV);
+		goto out;
 	}
 	pud = pud_offset(pgd, addr);
 	if (!pud || pud_none(*pud)) {
-		return ERR_PTR(-VM_FAULT_SIGSEGV);
+		goto out;
 	}
 	pmd = pmd_offset(pud, addr);
 	if (!pmd || pmd_none(*pmd)) {
-		return ERR_PTR(-VM_FAULT_SIGSEGV);
+		goto out;
 	}
 
 	pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	if (pte == NULL || pte_none(*pte)) {
 		// PTE not exist
 		pte_unmap_unlock(pte, ptl);
-		page = ERR_PTR(-VM_FAULT_SIGSEGV);
 		pte = NULL;
 		ptl = NULL;
+		page = ERR_PTR(-ENOENT);
+		goto out;
 	} else {
 		page = pte_page(*pte);
 		get_page(page);
 	}
 
+out:
 	*ptep = pte;
 	*ptlp = ptl;
 	return page;
 }
 
+
+static struct page *__get_page_at(struct vm_area_struct *vma, unsigned long addr, pte_t **ptep, spinlock_t **ptlp, bool *populated)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	spinlock_t *ptl;
+	struct mm_struct *mm = vma->vm_mm;
+	struct page *page;
+
+	pgd = pgd_offset(mm, addr);
+	if (!pgd || pgd_none(*pgd)) {
+		return NULL;
+	}
+	pud = pud_offset(pgd, addr);
+	if (!pud || pud_none(*pud)) {
+		return NULL;
+	}
+	pmd = pmd_offset(pud, addr);
+	if (!pmd || pmd_none(*pmd)) {
+		return NULL;
+	}
+
+	pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
+	if (pte == NULL) {
+		*populated = false;
+		return NULL;
+	}
+
+	*ptep = pte;
+	*ptlp = ptl;
+	if (pte_none(*pte)) {
+		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
+		*populated = true;
+	} else {
+		page = pte_page(*pte);
+		*populated = false;
+	}
+	get_page(page);
+	return page;
+}
 
 
 /**************************************************************************
@@ -283,8 +315,9 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 
 	down_read(&mm->mmap_sem);
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+		printk("[%d] %p: %lx -- %lx\n",
+				current->pid, vma, vma->vm_start, vma->vm_end);
 		if (vma_is_anonymous(vma)) {
-			// Need to sync
 			walk.vma = vma;
 			walk_page_vma(vma, &walk);
 		} else {
@@ -330,7 +363,7 @@ static int __do_invalidate_page(struct task_struct *tsk, struct mm_struct *mm, u
 	if (IS_ERR(page)) {
 		printk("inv: page does not exist at %lx\n", addr);
 		up_read(&mm->mmap_sem);
-		return -PTR_ERR(page);
+		return VM_FAULT_SIGSEGV;
 	}
 	clear_bit(my_nid, page->owners);
 
@@ -503,7 +536,7 @@ static int __get_remote_page(struct task_struct *tsk, struct mm_struct *mm,
 	page = __find_page_at(mm, addr, &pte, &ptl);
 	if (IS_ERR(page)) {
 		// TODO: should fall back to the host pte fault.
-		return -PTR_ERR(page);
+		return VM_FAULT_SIGSEGV;
 	}
 	printk("remote_page_request: %s\n",
 			pte_write(*pte) ? "writable" : "protected");
@@ -518,12 +551,14 @@ static int __get_remote_page(struct task_struct *tsk, struct mm_struct *mm,
 		__revoke_page_ownership(tsk, addr, page, pte, ptl, from);
 	}
 
+	lock_page(page);
 	paddr = kmap_atomic(page);
 	copy_page(res->page, paddr);
 	kunmap_atomic(paddr);
 
 	set_bit(from, page->owners);
 	memcpy(res->owners, page->owners, MAX_POPCORN_NODES);
+	unlock_page(page);
 
 	pte_unmap_unlock(pte, ptl);
 
@@ -578,9 +613,9 @@ static void process_remote_page_request(struct work_struct *work)
 		printk("remote_page_request: write fault %d\n", from);
 		res->result = __get_remote_page(tsk, mm, vma, req->addr, from, res, true);
 	} else {
-		BUG_ON("remote_page_request: shared fault\n");
+		BUG_ON("remote_page_request: shared fault. flush to file??? \n");
 	}
-	printk("remote_page_request: vma at %lx -- %lx %lx\n",
+	printk("remote_page_request: %lx -- %lx %lx\n",
 			vma->vm_start, vma->vm_end, vma->vm_flags);
 
 out_up:
@@ -599,77 +634,12 @@ out:
 /**************************************************************************
  * Page fault handler
  */
-
-static void __map_remote_page(struct remote_page *rp, unsigned long fault_flags)
-{
-	struct mm_struct *mm = current->mm;
-	struct vm_area_struct *vma;
-	remote_page_response_t *res = rp->response;
-	unsigned long addr = res->addr;
-	struct page *page;
-	void *paddr;
-	pte_t *pte;
-	spinlock_t *ptl = NULL;
-	struct mem_cgroup *memcg;
-
-	down_read(&mm->mmap_sem);
-	if ((rp->ret = res->result)) {
-		// Something went wrong. Will not map this page
-		return;
-	}
-
-	vma = find_vma(mm, addr);
-	BUG_ON(!vma || vma->vm_start > addr);
-
-	printk("%s: vma %lx -- %lx %lx\n", __func__,
-			vma->vm_start, vma->vm_end, vma->vm_flags);
-
-	if (vma_is_anonymous(vma)) {
-		anon_vma_prepare(vma);
-	}
-	page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
-	if (!page) {
-		rp->ret = VM_FAULT_OOM;
-		return;
-	}
-	if (mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg)) {
-		page_cache_release(page);
-		rp->ret = VM_FAULT_OOM;
-		return;
-	}
-
-	paddr = kmap_atomic(page);
-	copy_page(paddr, rp->response->page);
-	kunmap_atomic(paddr);
-
-	memcpy(page->owners, res->owners, sizeof(page->owners));
-	BUG_ON(!test_bit(my_nid, page->owners));
-
-	__SetPageUptodate(page);
-	mem_cgroup_commit_charge(page, memcg, false);
-	lru_cache_add_active_or_unevictable(page, vma);
-
-	pte = __find_pte_lock(mm, addr, &ptl);
-	BUG_ON(!pte);
-
-	do_set_pte(vma, addr, page, pte,
-			fault_flags & FAULT_FLAG_WRITE, vma_is_anonymous(vma));
-
-	/* no need to invalidate: a not-present page won't be cached */
-
-	pte_unmap_unlock(pte, ptl);
-}
-
-
-static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
+static struct remote_page *__fetch_remote_page(struct remote_context *rc, unsigned long addr, unsigned long fault_flags)
 {
 	struct task_struct *tsk = current;
-	struct remote_context *rc = get_task_remote(tsk);
 	struct remote_page *rp;
 	unsigned long flags;
 	DEFINE_WAIT(wait);
-	bool wakeup = false;
-	int ret = 0;
 	remote_page_request_t *req = NULL;
 	int remaining = 0;
 
@@ -702,7 +672,6 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	atomic_inc(&rp->pendings);
 	prepare_to_wait(&rp->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	spin_unlock_irqrestore(&rc->pages_lock, flags);
-	up_read(&tsk->mm->mmap_sem);
 
 	if (req) {
 		pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));
@@ -715,17 +684,117 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 
 	finish_wait(&rp->pendings_wait, &wait);
 
+	return rp;
+}
+
+static int __map_remote_page(struct mm_struct *mm, struct remote_context *rc, struct remote_page *rp, pte_t pte_val, unsigned long fault_flags)
+{
+	remote_page_response_t *res = rp->response;
+	unsigned long addr = res->addr;
+	struct page *page;
+	void *paddr;
+	pte_t *pte;
+	spinlock_t *ptl = NULL;
+	struct mem_cgroup *memcg;
+	bool populated = false;
+	int ret = 0;
+
+	struct vm_area_struct *vma;
+
+	down_read(&mm->mmap_sem);
+
+	/* Something went wrong. Do not map this page */
+	if (res->result) return res->result;
+
+	/*
+	 * Grab vma again here since VMA might be changed during we fetch
+	 * the page with up_read().
+	 */
+	vma = find_vma(mm, addr);
+	if (!vma || vma->vm_start > addr) {
+		BUG_ON("VMA gets invalidated??");
+		return VM_FAULT_SIGBUS;
+	}
+
+	printk("%s: vma %lx -- %lx %lx\n", __func__,
+			vma->vm_start, vma->vm_end, vma->vm_flags);
+
+	if (anon_vma_prepare(vma)) {
+		BUG_ON("Cannot prepare vma for anonymous page");
+		return VM_FAULT_SIGBUS;
+	}
+
+	page = __get_page_at(vma, addr, &pte, &ptl, &populated);
+
+	if (!page) return VM_FAULT_OOM;
+
+	if (!pte_same(*pte, pte_val)) {
+		printk("%s: pte changed %lx %lx. This case happens!!\n", __func__,
+				(unsigned long)(pte->pte), (unsigned long)pte_val.pte);
+		goto out;
+	}
+
+	if (populated) {
+		if (mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg)) {
+			ret = VM_FAULT_OOM;
+			goto out;
+		}
+	}
+	printk("%s: %s %p\n", __func__, populated ? "populated" : "existing", page);
+
+	lock_page(page);
+	paddr = kmap_atomic(page);
+	copy_page(paddr, res->page);
+	kunmap_atomic(paddr);
+
+	memcpy(page->owners, res->owners, sizeof(page->owners));
+	BUG_ON(!test_bit(my_nid, page->owners));
+
+	__SetPageUptodate(page);
+	unlock_page(page);
+
+	if (populated) {
+		do_set_pte(vma, addr, page, pte,
+				fault_flags & FAULT_FLAG_WRITE, vma_is_anonymous(vma));
+		mem_cgroup_commit_charge(page, memcg, false);
+		lru_cache_add_active_or_unevictable(page, vma);
+	} else {
+		pte_val = pte_mkwrite(pte_val);
+		set_pte_at(mm, addr, pte, pte_val);
+		update_mmu_cache(vma, addr, pte);
+	}
+	flush_tlb_page(vma, addr);
+
+out:
+	page_cache_release(page);
+	pte_unmap_unlock(pte, ptl);
+	return ret;
+}
+
+
+static int __handle_remote_fault(struct mm_struct *mm, pmd_t *pmd, pte_t *pte, pte_t pte_val, unsigned long addr, unsigned long fault_flags)
+{
+	struct task_struct *tsk = current;
+	struct remote_context *rc = get_task_remote(tsk);
+	struct remote_page *rp;
+	unsigned long flags;
+	bool wakeup = false;
+	int ret = 0;
+
+	pte_unmap(pte);
+	up_read(&mm->mmap_sem);
+
+	rp = __fetch_remote_page(rc, addr, fault_flags);
+
 	if (!rp->mapped) {
-		__map_remote_page(rp, fault_flags);	// This function set rp->ret
+		/* __map() does down_read(mmap_sem) */
+		rp->ret = __map_remote_page(mm, rc, rp, pte_val, fault_flags);
 		rp->mapped = true;
 	} else {
-		down_read(&tsk->mm->mmap_sem);
+		BUG_ON(ret == VM_FAULT_CONTINUE);
+		down_read(&mm->mmap_sem);
 	}
 	ret = rp->ret;
-	smp_mb();
-
-	printk("%s [%d]: %lx resume %d [%d/%d]\n", __func__,
-			tsk->pid, addr, ret, tsk->origin_pid, tsk->origin_nid);
 
 	spin_lock_irqsave(&rc->pages_lock, flags);
 	remaining = atomic_dec_return(&rp->pendings);
@@ -738,66 +807,130 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	}
 	spin_unlock_irqrestore(&rc->pages_lock, flags);
 	put_task_remote(tsk);
-	barrier();
+	smp_wmb();
+
+	printk("%s [%d]: %lx resume %d [%d/%d]\n", __func__,
+			tsk->pid, addr, ret, tsk->origin_pid, tsk->origin_nid);
 
 	if (wakeup) wake_up(&rp->pendings_wait);
 
 	return ret;
 }
 
+
+static int __handle_fault_at_origin(struct mm_struct *mm,
+		unsigned long addr, pte_t *pte, pte_t pte_val, pmd_t *pmd,
+		unsigned int fault_flags)
+{
+	BUG_ON(current->at_remote);
+
+	/* Fresh access to the address. Handle locally since we are at the origin */
+	if (pte_none(pte_val)) {
+		BUG_ON(pte_present(pte_val));
+
+		printk("pte_fault: handle locally at origin\n");
+		return VM_FAULT_CONTINUE;
+	}
+
+	/* Nothing to do with page replication. Handle locally as well*/
+	if (!(pte_flags(pte_val) & _PAGE_SOFTW1)) {
+		printk("pte_fault: not dsm controlled. handle locally\n");
+		return VM_FAULT_CONTINUE;
+	}
+
+	/* DSM causes this fault. Claim the page */
+	printk("pte_fault: claim this page for origin\n");
+	return __handle_remote_fault(mm, pmd, pte, pte_val, addr, fault_flags);
+}
+
+
 /**
- * down_read(&mm->mmap_sem) already held getting in
+ * Function:
+ *	page_server_handle_pte_fault
  *
- * return types:
- * VM_FAULT_CONTINUE, page_fault that can handled
- * 0, remotely fetched;
+ * Description:
+ *	Handle PTE faults with Popcorn page replication protocol.
+ *  down_read(&mm->mmap_sem) is already held when getting in.
+ *  DO NOT FORGET to unmap pte before return non-VM_FAULT_CONTINUE.
+ *
+ * Input:
+ *	All are from the PTE handler
+ *
+ * Return values:
+ *	VM_FAULT_CONTINUE when the page fault can be handled locally.
+ *	0 if the fault is fetched remotely and fixed.
  */
-int page_server_handle_pte_fault(struct mm_struct *mm,
-		struct vm_area_struct *vma,
-		unsigned long address, pte_t entry, pmd_t *pmd,
+int page_server_handle_pte_fault(
+		struct mm_struct *mm, struct vm_area_struct *vma,
+		unsigned long address, pte_t *pte, pte_t pte_val, pmd_t *pmd,
 		unsigned int fault_flags)
 {
 	unsigned long addr = address & PAGE_MASK;
 
 	might_sleep();
 
-	printk(KERN_WARNING"\n");
-	printk(KERN_WARNING"## PAGEFAULT [%d]: %lx %lx\n",
-			current->pid, address, get_task_pc(current));
+	printk(KERN_WARNING"\n## PAGEFAULT [%d]: %lx %lx %x %lx\n",
+			current->pid, address, get_task_pc(current),
+			fault_flags, pte_flags(pte_val));
 
-	if (!pte_present(entry)) {
-		/* Do we need to create it locally or to bring from remote? */
-		if (!pte_none(entry)) {
-			WARN_ON("Claim the invalidated page.");
-			return __handle_remote_fault(addr, fault_flags);
-		}
+	/*
+	 * Distributed process but local thread
+	 */
+	if (!current->remote) {
+		BUG_ON(current->at_remote);
+		return __handle_fault_at_origin(
+				mm, addr, pte, pte_val, pmd, fault_flags);
+	}
 
+	/*
+	 * Distributed process, distributed thread
+	 *
+	 * Fault handling at the remote side is simpler than at the origin.
+	 * There will be no copy-on-write case at the remote since no thread
+	 * creation is allowed at the remote side.
+	 */
+	if (pte_none(pte_val)) {
 		/* Can we handle the fault locally? */
 		if (vma->vm_flags & VM_FETCH_LOCAL) {
 			printk("pte_fault [%d]: VM_FETCH_LOCAL. continue\n", current->pid);
 			return VM_FAULT_CONTINUE;
 		}
-
 		if (!vma_is_anonymous(vma) &&
 				((vma->vm_flags & (VM_WRITE | VM_SHARED)) == 0)) {
-			printk("pte_fault: Locally file-mapped read-only. continue\n");
+			printk("pte_fault: locally file-mapped read-only. continue\n");
 			return VM_FAULT_CONTINUE;
 		}
-		return __handle_remote_fault(addr, fault_flags);
+		printk("pte_fault: anonymous/shared writable file.\n");
+		return __handle_remote_fault(mm, pmd, pte, pte_val, addr, fault_flags);
 	}
 
-	/* Fault occurs whereas PTE exists: cow? */
-	if (fault_flags & FAULT_FLAG_WRITE) {
-		if (!pte_write(entry)) {
-			/* This page might be replicated by a read prior to current write.
-			 * Claim this page from the server */
-			printk("pte_fault: claim this page\n");
-			return __handle_remote_fault(addr, fault_flags);
-		} else {
-			BUG_ON("pte_fault: write fault on writable page\n");
-		}
+	/* pte exists at this point */
+
+	if (pte_flags(pte_val) & _PAGE_SOFTW1) {
+		/* Caused by the page replication protocol */
+		printk("pte_fault: claim this page\n");
+		return __handle_remote_fault(mm, pmd, pte, pte_val, addr, fault_flags);
 	}
-	printk("pte_fault: fall through for read\n");
+
+	if (fault_flags & FAULT_FLAG_WRITE) {
+		/*
+		 * This fault was not caused by the page replication. However, it
+		 * should be handled from server anyway since the access is for write.
+		 * Note that no-cow will be done at the remote side.
+		 */
+		printk("pte_fault: write on page\n");
+		return __handle_remote_fault(mm, pmd, pte, pte_val, addr, fault_flags);
+	}
+
+	/*
+	 * This case happens when multiple threads race for a page, especially
+	 * for codes upon multiple thread fork.
+	 *
+	 * TODO: fix spurious fault??
+	 */
+	printk("pte_fault: resolved concurrent faults\n");
+
+	pte_unmap(pte);
 	return 0;
 }
 

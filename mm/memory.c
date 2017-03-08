@@ -3516,7 +3516,7 @@ static int handle_pte_fault(struct mm_struct *mm,
 #ifdef CONFIG_POPCORN
 	if (process_is_distributed(current)) {
 		int ret = page_server_handle_pte_fault(
-				mm, vma, address, entry, pmd, flags);
+				mm, vma, address, pte, entry, pmd, flags);
 		if (ret != VM_FAULT_CONTINUE) return ret;
 	}
 #endif
@@ -3540,11 +3540,6 @@ static int handle_pte_fault(struct mm_struct *mm,
 	spin_lock(ptl);
 	if (unlikely(!pte_same(*pte, entry)))
 		goto unlock;
-#ifdef CONFIG_POPCORN
-	/**
-	 * pte exists, but made this fault for some reason. maybe cow
-	 */
-#endif
 	if (flags & FAULT_FLAG_WRITE) {
 		if (!pte_write(entry))
 			return do_wp_page(mm, vma, address,
