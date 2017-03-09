@@ -17,9 +17,11 @@
 #include <linux/sched.h>
 #include <linux/ptrace.h>
 #include <linux/mmu_context.h>
+#include <linux/fs.h>
 
 #include <asm/mmu_context.h>
 #include <asm/kdebug.h>
+#include <asm/uaccess.h>
 
 #include <popcorn/bundle.h>
 #include <popcorn/cpuinfo.h>
@@ -268,7 +270,6 @@ int process_server_task_exit(struct task_struct *tsk)
 
 			req->expect_flush = last;
 
-			tsk->migration_ip = task_pt_regs(tsk)->ip;
 			save_thread_info(tsk, &req->arch, NULL);
 
 			pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));

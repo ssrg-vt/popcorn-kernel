@@ -5,6 +5,7 @@
 
 extern int save_thread_info(struct task_struct *task, field_arch *arch, void __user *uregs);
 extern int restore_thread_info(struct task_struct *task, field_arch *arch, bool restore_segments);
+extern unsigned long get_task_pc(struct task_struct *task);
 
 /*
 extern int update_thread_info(field_arch *arch);

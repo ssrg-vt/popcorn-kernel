@@ -16,6 +16,8 @@
 #include <linux/wait.h>
 #include <linux/ptrace.h>
 #include <linux/swap.h>
+#include <linux/highmem.h>
+#include <linux/pagemap.h>
 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
@@ -26,6 +28,7 @@
 #include <popcorn/cpuinfo.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/debug.h>
+#include <popcorn/process_server.h>
 
 #include "types.h"
 #include "stat.h"
@@ -755,13 +758,12 @@ int page_server_handle_pte_fault(struct mm_struct *mm,
 		unsigned int fault_flags)
 {
 	unsigned long addr = address & PAGE_MASK;
-	struct pt_regs *regs = current_pt_regs();
 
 	might_sleep();
 
 	printk(KERN_WARNING"\n");
 	printk(KERN_WARNING"## PAGEFAULT [%d]: %lx %lx\n",
-			current->pid, address, regs->ip);
+			current->pid, address, get_task_pc(current));
 
 	if (!pte_present(entry)) {
 		/* Do we need to create it locally or to bring from remote? */
