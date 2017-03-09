@@ -617,7 +617,7 @@ int shadow_spawner(void *_args)
 		struct work_struct *work = NULL;
 		struct shadow_params *params;
 
-		wait_for_completion(&rc->spawn_egg);
+		wait_for_completion_timeout(&rc->spawn_egg, 10 * HZ);
 
 		spin_lock(&rc->shadow_eggs_lock);
 		if (!list_empty(&rc->shadow_eggs)) {
