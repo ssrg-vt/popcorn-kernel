@@ -11,7 +11,7 @@
 #endif
 
 
-#define PROCESS_SERVER_VERBOSE 1
+#define PROCESS_SERVER_VERBOSE 0
 
 #if PROCESS_SERVER_VERBOSE
 #define PSPRINTK(...) printk(__VA_ARGS__)
@@ -23,18 +23,18 @@
 #define VMA_SERVER_VERBOSE 0
 
 #if VMA_SERVER_VERBOSE
-#define PSVMAPRINTK(...) printk(__VA_ARGS__)
+#define VSPRINTK(...) printk(__VA_ARGS__)
 #else
-#define PSVMAPRINTK(...)
+#define VSPRINTK(...)
 #endif
 
 
 #define PAGE_SERVER_VERBOSE 0
 
 #if PAGE_SERVER_VERBOSE
-#define PGPRINTK(...) printk(__VA_ARGS__)
+#define PGSPRINTK(...) printk(__VA_ARGS__)
 #else
-#define PGPRINTK(...)
+#define PGSPRINTK(...)
 #endif
 
 

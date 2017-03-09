@@ -538,7 +538,6 @@ static void process_remote_page_request(struct work_struct *work)
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
-	unsigned long addr = req->addr;
 	int from = req->remote_nid;
 
 	might_sleep();
@@ -546,9 +545,9 @@ static void process_remote_page_request(struct work_struct *work)
 	while (!res) {	/* response contains a page. allocate from a heap */
 		res = kmalloc(sizeof(*res), GFP_KERNEL);
 	};
-	res->addr = addr;
-	printk("remote_page_request: %lx at %d from [%d/%d]\n",
-			addr, req->origin_pid, req->remote_pid, from);
+	res->addr = req->addr;
+	printk("remote_page_request [%d]: %lx from [%d/%d]\n",
+			req->origin_pid, req->addr, req->remote_pid, from);
 
 	rcu_read_lock();
 	tsk = find_task_by_vpid(req->origin_pid);
@@ -562,19 +561,19 @@ static void process_remote_page_request(struct work_struct *work)
 	rcu_read_unlock();
 
 	down_read(&mm->mmap_sem);
-	vma = find_vma(mm, addr);
+	vma = find_vma(mm, req->addr);
 
-	if (!vma || vma->vm_start > addr) {
+	if (!vma || vma->vm_start > req->addr) {
 		res->result = VM_FAULT_SIGBUS;
 		goto out_up;
 	}
 
 	if (!(req->fault_flags & FAULT_FLAG_WRITE)) {
 		printk("remote_page_reqeust: read fault %d\n", from);
-		res->result = __get_remote_page(tsk, mm, vma, addr, from, res, false);
+		res->result = __get_remote_page(tsk, mm, vma, req->addr, from, res, false);
 	} else if (!(vma->vm_flags & VM_SHARED)) {
 		printk("remote_page_request: write fault %d\n", from);
-		res->result = __get_remote_page(tsk, mm, vma, addr, from, res, true);
+		res->result = __get_remote_page(tsk, mm, vma, req->addr, from, res, true);
 	} else {
 		BUG_ON("remote_page_request: shared fault\n");
 	}
@@ -669,6 +668,7 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 	bool wakeup = false;
 	int ret = 0;
 	remote_page_request_t *req = NULL;
+	int remaining = 0;
 
 	// TODO: deal with the do_fault_around
 
@@ -693,6 +693,8 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 			kfree(req);
 			req = NULL;
 		}
+	} else {
+		printk("%s [%d]: %lx pended\n", __func__, tsk->pid, addr);
 	}
 	atomic_inc(&rp->pendings);
 	prepare_to_wait(&rp->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
@@ -723,7 +725,8 @@ static int __handle_remote_fault(unsigned long addr, unsigned long fault_flags)
 			tsk->pid, addr, ret, tsk->origin_pid, tsk->origin_nid);
 
 	spin_lock_irqsave(&rc->pages_lock, flags);
-	if (atomic_dec_return(&rp->pendings)) {
+	remaining = atomic_dec_return(&rp->pendings);
+	if (remaining) {
 		wakeup = true;
 	} else {
 		list_del(&rp->list);
@@ -769,7 +772,7 @@ int page_server_handle_pte_fault(struct mm_struct *mm,
 
 		/* Can we handle the fault locally? */
 		if (vma->vm_flags & VM_FETCH_LOCAL) {
-			printk("pte_fault: VM_FETCH_LOCAL. continue\n");
+			printk("pte_fault [%d]: VM_FETCH_LOCAL. continue\n", current->pid);
 			return VM_FAULT_CONTINUE;
 		}
 

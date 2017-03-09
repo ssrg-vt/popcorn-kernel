@@ -360,7 +360,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			// above the region of interest
 			error = do_mmap_pgoff(file, start, end - start,
 					prot, flags, pgoff, &populate);
-			printk("map0 [%d]: %lx -- %lx @ %lx\n",
+			VSPRINTK("map0 [%d]: %lx -- %lx @ %lx\n",
 					current->pid, start, end, pgoff);
 
 			if (error != start) {
@@ -385,7 +385,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
-			printk("map1 [%d]: %lx -- %lx, %lx\n",
+			VSPRINTK("map1 [%d]: %lx -- %lx, %lx\n",
 					current->pid, start, vma->vm_start, pgoff);
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;;
@@ -396,7 +396,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
-			printk("map2 [%d]: %lx -- %lx, %lx\n",
+			VSPRINTK("map2 [%d]: %lx -- %lx, %lx\n",
 					current->pid, start, vma->vm_start, pgoff);
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;
@@ -948,11 +948,11 @@ static void vma_server_process_vma_op(struct work_struct* work)
 					__func__, mm->vma_operation_index, operation->origin_nid, operation->origin_pid);
 
 		if (memory->my_lock != 1) {
-			PSVMAPRINTK("Released distributed lock\n");
+			VSPRINTK("Released distributed lock\n");
 			up_write(&mm->distribute_sem);
 		}
 
-		PSPRINTK("%s: INFO: CLIENT vma_operation_index is %d ENDING OP\n",
+		VSPRINTK("%s: INFO: CLIENT vma_operation_index is %d ENDING OP\n",
 				__func__, mm->vma_operation_index);
 		up_write(&mm->mmap_sem);
 
@@ -973,7 +973,7 @@ static void process_vma_lock(struct work_struct* _work)
 	vma_ack_t *ack_to_server;
 	if (entry != NULL) {
 		down_write(&entry->mm->distribute_sem);
-		PSVMAPRINTK("Acquired distributed lock\n");
+		VSPRINTK("Acquired distributed lock\n");
 		if (lock->from_cpu == my_nid)
 			entry->my_lock = 1;
 	}
@@ -1003,7 +1003,7 @@ static int handle_vma_ack(struct pcn_kmsg_message* inc_msg)
 	unsigned long flags;
 	struct task_struct* task_to_wake_up = NULL;
 
-	PSVMAPRINTK("Vma ack received from cpu %d\n", ack->header.from_cpu);
+	VSPRINTK("Vma ack received from cpu %d\n", ack->header.from_cpu);
 	ack_holder = find_vma_ack_entry(ack->origin_nid, ack->origin_pid);
 	if (ack_holder) {
 		spin_lock_irqsave(&(ack_holder->lock), flags);
@@ -1158,7 +1158,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		entry->my_lock = 0;
 
 		if (!(operation == VMA_OP_MAP || operation == VMA_OP_BRK)) { // operation is neither MAP nor BRK
-			PSVMAPRINTK("%s incrementing vma_operation_index\n", __func__);
+			VSPRINTK("%s incrementing vma_operation_index\n", __func__);
 			current->mm->vma_operation_index++;
 			if (current->mm->vma_operation_index < 0)
 				printk("%s: WARN: vma_operation_index underflow detected %d [if:if].(cpu %d id %d)\n",
@@ -1178,7 +1178,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		    && my_nid == current->origin_nid && current->is_vma_worker == 1) {
 
 			if (!(operation == VMA_OP_MAP || operation == VMA_OP_BRK)){
-				PSVMAPRINTK("%s incrementing vma_operation_index\n", __func__);
+				VSPRINTK("%s incrementing vma_operation_index\n", __func__);
 				current->mm->vma_operation_index++;
 				if (current->mm->vma_operation_index < 0)
 					printk("%s: WARN: vma_operation_index underflow detected %d [else:if].(cpu %d id %d)\n",
@@ -1284,7 +1284,7 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 			/*the main executes the operations for the clients
 			 *distr_vma_op_counter is already increased when it start the operation*/
 			if (current->is_vma_worker == 1) {
-				PSVMAPRINTK("%s, I am the main, so it maybe not a real recursive operation...\n", __func__); // what does this mean?
+				VSPRINTK("%s, I am the main, so it maybe not a real recursive operation...\n", __func__); // what does this mean?
 
 				if (current->mm->distr_vma_op_counter < 1 // who change the value in the meantime?
 						|| current->mm->distr_vma_op_counter > 2
@@ -1297,12 +1297,12 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 
 					if (current->mm->distr_vma_op_counter == 2) {
 						current->mm->distr_vma_op_counter++;
-						PSVMAPRINTK("%s, Recursive operation for the main\n", __func__);
+						VSPRINTK("%s, Recursive operation for the main\n", __func__);
 						/*in this case is a nested operation on main
 						 * if the previous operation was a pushed operation
 						 * do not distribute it again*/
 						if (current->mm->was_not_pushed == 0) {
-							PSVMAPRINTK("%s, don't distribute again, return!\n", __func__);
+							VSPRINTK("%s, don't distribute again, return!\n", __func__);
 							return ret;
 						} else {
 							current->mm->distr_vma_op_counter++;
@@ -1316,7 +1316,7 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 			} else { // not the main thread
 				if (current->mm->was_not_pushed == 0) {
 					current->mm->distr_vma_op_counter++; // this is decremented in end_distribute_operation
-					PSVMAPRINTK("%s, don't distribute again, return!\n",__func__);
+					VSPRINTK("%s, don't distribute again, return!\n",__func__);
 					return ret;
 				} else {
 					current->mm->distr_vma_op_counter++;
@@ -1435,7 +1435,7 @@ start:
 			 *Important: this should happen before sending the push message or executing the operation*/
 			if (current->mm->distr_vma_op_counter == 2) {
 				down_write(&current->mm->distribute_sem);
-				PSVMAPRINTK("local distributed lock acquired\n");
+				VSPRINTK("local distributed lock acquired\n");
 			}
 /*****************************************************************************/
 /* Locking and Acking --- END ---                                            */
@@ -1483,12 +1483,12 @@ start:
 			case VMA_OP_MAP:
 			case VMA_OP_BRK:
 				//if I am the server, mmap and brk can be executed locally
-				PSVMAPRINTK("%s pure local operation!\n", __func__);
+				VSPRINTK("%s pure local operation!\n", __func__);
 				//Note: the order in which locks are taken is important
 				up_write(&current->mm->mmap_sem);
 
 				down_write(&current->mm->distribute_sem);
-				PSVMAPRINTK("Distributed lock acquired\n");
+				VSPRINTK("Distributed lock acquired\n");
 				down_write(&current->mm->mmap_sem);
 
 				//(current->mm->vma_operation_index)++;
@@ -1564,7 +1564,7 @@ start:
 			 *Important: this should happen before sending the push message or executing the operation*/
 			if (current->mm->distr_vma_op_counter == 1) {
 				down_write(&current->mm->distribute_sem);
-				PSVMAPRINTK("Distributed lock acquired locally\n");
+				VSPRINTK("Distributed lock acquired locally\n");
 			}
 /*****************************************************************************/
 /* Locking and Acking --- END---                                             */
@@ -1778,7 +1778,7 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 {
 	might_sleep();
 
-	printk("%s [%d]: at %s\n", __func__, current->pid, at);
+	PSPRINTK("%s [%d]: at %s\n", __func__, current->pid, at);
 
 	while (!kthread_should_stop()) {
 		/*
@@ -1956,7 +1956,7 @@ static void process_remote_vma_response(struct work_struct *_work)
 		goto out_free;
 	}
 
-	printk("%s: %d, %d pended\n", __func__,
+	VSPRINTK("%s: %d, %d pended\n", __func__,
 			res->result, atomic_read(&vi->pendings));
 	vi->response = res;
 	wake_up(&vi->pendings_wait);
@@ -2060,10 +2060,10 @@ out_up:
 	put_task_struct(tsk);
 
 	if (res->result == 0) {
-		printk("remote_vma: %lx -- %lx %lx\n",
+		VSPRINTK("remote_vma: %lx -- %lx %lx\n",
 				res->vm_start, res->vm_end, res->vm_flags);
 		if (!remote_vma_anon(res)) {
-			printk("remote_vma: %lx %s\n", res->vm_pgoff, res->vm_file_path);
+			VSPRINTK("remote_vma: %lx %s\n", res->vm_pgoff, res->vm_file_path);
 		}
 	}
 
@@ -2173,16 +2173,17 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	DEFINE_WAIT(wait);
 	int ret = 0;
 	unsigned long addr = address & PAGE_MASK;
-	struct pt_regs *regs = task_pt_regs(tsk);
 	remote_vma_request_t *req = NULL;
 	struct remote_context *rc = get_task_remote(tsk);
 	bool wakeup = false;
+#if VMA_SERVER_VERBOSE
+	struct pt_regs *regs = task_pt_regs(tsk);
+#endif
 
 	might_sleep();
 
-	printk(KERN_WARNING"\n");
-	printk(KERN_WARNING"## VMAFAULT [%d]: %lx %lx\n",
-			current->pid, address, regs->ip);
+	VSPRINTK("\n");
+	VSPRINTK("## VMAFAULT [%d]: %lx %lx\n", current->pid, address, regs->ip);
 
 	spin_lock_irqsave(&rc->vmas_lock, flags);
 	vi = __lookup_pending_vma_request(rc, addr);
@@ -2195,7 +2196,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		spin_lock_irqsave(&rc->vmas_lock, flags);
 		v = __lookup_pending_vma_request(rc, addr);
 		if (!v) {
-			printk("%s [%d]: %lx from %d at %d\n", __func__,
+			VSPRINTK("%s [%d]: %lx from %d at %d\n", __func__,
 					current->pid, addr, tsk->origin_pid, tsk->origin_nid);
 			smp_wmb();
 			list_add(&vi->list, &rc->vmas);
@@ -2208,7 +2209,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 			req = NULL;
 		}
 	} else {
-		printk("%s [%d]: %lx already pended\n", __func__, current->pid, addr);
+		VSPRINTK("%s [%d]: %lx already pended\n", __func__, current->pid, addr);
 	}
 	atomic_inc(&vi->pendings);
 	prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
@@ -2237,7 +2238,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	}
 	ret = vi->ret;
 
-	printk("%s [%d]: %lx resume %d\n", __func__, current->pid, addr, ret);
+	VSPRINTK("%s [%d]: %lx resume %d\n", __func__, current->pid, addr, ret);
 
 	spin_lock_irqsave(&rc->vmas_lock, flags);
 	if (atomic_dec_return(&vi->pendings)) {

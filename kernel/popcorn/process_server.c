@@ -934,7 +934,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		__unlock_remote_contexts_out(dst_nid);
 
 		create_vma_worker = true;
-		which_rc = "new";
+		which_rc = "allocated";
 	}
 	rc = get_task_remote(tsk);
 	tsk->remote = rc;
@@ -944,7 +944,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	if (create_vma_worker) {
 		rc->vma_worker = kthread_run(vma_worker_origin, rc, "worker_origin");
 	}
-	PSPRINTK("%s [%d]: use %s remote context\n", __func__, tsk->pid, which_rc);
+	PSPRINTK("%s [%d]: remote context %s\n", __func__, tsk->pid, which_rc);
 
 	ret = __request_clone_remote(dst_nid, tsk, uregs);
 
