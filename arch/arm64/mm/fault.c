@@ -41,6 +41,8 @@
 
 #ifdef CONFIG_POPCORN
 #include <popcorn/page_server.h>
+#include <popcorn/process_server.h>
+#include <popcorn/vma_server.h>
 #endif
 
 static const char *fault_name(unsigned int esr);

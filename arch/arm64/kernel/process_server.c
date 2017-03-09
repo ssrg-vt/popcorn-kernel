@@ -18,23 +18,15 @@
 #include <linux/sched.h>
 #include <linux/uaccess.h>
 #include <linux/cpu_namespace.h>
-#include <linux/popcorn_cpuinfo.h>
-#include <popcorn/process_server.h>
-#include <process_server_arch.h>
+#include <linux/ptrace.h>
 
-#include <asm/pgtable.h>
-#include <asm/pgtable-hwdef.h>
-#include <asm/pgtable-3level-types.h>
+#include <popcorn/types.h>
+#include <popcorn/debug.h>
 
-#include <uapi/asm/ptrace.h>
-
-#define PSPRINTK(...)
-
-/* External function declarations */
-extern unsigned long read_old_rsp(void);
-extern struct task_struct* do_fork_for_main_kernel_thread(unsigned long clone_flags,
-		unsigned long stack_start, struct pt_regs *regs, unsigned long stack_size,
-		int __user *parent_tidptr, int __user *child_tidptr);
+unsigned long get_task_pc(struct task_struct *tsk)
+{
+	return task_pt_regs(tsk)->pc;
+}
 
 /*
  * Function:
@@ -61,7 +53,6 @@ extern struct task_struct* do_fork_for_main_kernel_thread(unsigned long clone_fl
  */
 int save_thread_info(struct task_struct *task, field_arch *arch, void __user *uregs)
 {
-	int ret;
 	struct pt_regs *regs = task_pt_regs(task);
 	int cpu;
 
@@ -69,28 +60,32 @@ int save_thread_info(struct task_struct *task, field_arch *arch, void __user *ur
 
 	cpu = get_cpu();
 
-	if (uregs != NULL) {
-		ret = copy_from_user(&arch->regs_x86, uregs,
+	memcpy(&arch->regs, regs, sizeof(*regs));
+
+	if (uregs) {
+		/*
+		int ret = copy_from_user(&arch->regs_x86, uregs,
 				sizeof(struct popcorn_regset_x86_64));
-		BUG_ON(remain != 0);
+		BUG_ON(ret != 0);
+		*/
+
+		arch->migration_ip = task->migration_ip;
+		arch->ip = regs->user_regs.pc;
+		arch->bp = regs->user_regs.regs[29];
+		arch->sp = regs->user_regs.sp;
+	} else {
+		arch->migration_ip = regs->user_regs.pc;
+		arch->ip = regs->user_regs.pc;
+		arch->bp = regs->user_regs.regs[29];
+		arch->sp = regs->user_regs.sp;
 	}
 
-	arch->migration_pc = regs->user_regs.pc;
-	arch->regs.sp = regs->user_regs.sp;
-	arch->old_rsp = regs->user_regs.sp;
 	arch->thread_fs = task->thread.tp_value;
 
-	arch->bp = regs->regs[29];
-
-	/*Ajith - for het migration */
-	if (task->migration_pc != 0){
-		arch->migration_pc = task->migration_pc;
-	}
 	put_cpu();
 
-	// printk("IN %s:%d migration PC = %lx\n", __func__, __LINE__, arch->migration_pc);
-
-	PSPRINTK("%s: pc %lx sp %lx bp %lx\n", __func__, arch->migration_pc, arch->old_rsp, arch->bp);
+	PSPRINTK("%s: pc %lx sp %lx bp %lx\n", __func__,
+			arch->migration_ip, arch->old_rsp, arch->bp);
 
 	return 0;
 }
@@ -118,32 +113,37 @@ int save_thread_info(struct task_struct *task, field_arch *arch, void __user *ur
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_thread_info(struct task_struct *task, field_arch *arch, bool segs)
+int restore_thread_info(struct task_struct *task, field_arch *arch, bool restore_segments)
 {
-	int i;
+	struct pt_regs *regs = task_pt_regs(task);
 	int cpu;
 
 	cpu = get_cpu();
+	memcpy(regs, &arch->regs, sizeof(*regs));
 
-	task_pt_regs(task)->user_regs.pc = arch->regs.ip;
-	task_pt_regs(task)->user_regs.pstate = PSR_MODE_EL0t;
-	task_pt_regs(task)->user_regs.sp = arch->old_rsp;
+	regs->user_regs.pc = arch->migration_ip;
+	regs->user_regs.pstate = PSR_MODE_EL0t;
+	//regs->user_regs.sp = arch->regs.sp;
+	//regs->regs[29] = arch->bp;
+	//regs->regs[30] = arch->ra;
 
-	task->thread.tp_value = arch->thread_fs;
+	if (restore_segments) {
+		task->thread.tp_value = arch->thread_fs;
+	}
 
+	/*
 	for (i = 0; i < 31; i++)
-		task_pt_regs(task)->regs[i] =  arch->regs_aarch.x[i];
+		regs->regs[i] =  arch->regs_aarch.x[i];
 	
-	task_pt_regs(task)->regs[29] = arch->bp;
-	task_pt_regs(task)->regs[30] = arch->ra;
 
-	if(arch->migration_pc != 0)
-		task_pt_regs(task)->user_regs.pc = arch->migration_pc;
+	if(arch->migration_ip != 0)
+		task_pt_regs(task)->user_regs.pc = arch->migration_ip;
+	*/
 	put_cpu();
 
-	PSPRINTK("%s: pc %lx sp %lx bp %lx ra %lx\n", __func__, arch->migration_pc, arch->old_rsp, arch->bp, arch->ra);
+	PSPRINTK("%s: pc %lx sp %lx bp %lx ra %lx\n", __func__,
+			arch->migration_ip, arch->old_rsp, arch->bp, arch->ra);
 
-//	dump_processor_regs(task_pt_regs(task));
 
 	return 0;
 }
@@ -167,7 +167,7 @@ int restore_thread_info(struct task_struct *task, field_arch *arch, bool segs)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int update_thread_info(struct task_struct *task)
+int update_thread_info(field_arch *arch)
 {
 	printk("%s\n", __func__);
 
@@ -199,7 +199,7 @@ int initialize_thread_retval(struct task_struct *task, int val)
 	return 0;
 }
 
-#if MIGRATE_FPU
+#ifdef MIGRATE_FPU
 
 /*
  * Function:
@@ -307,15 +307,15 @@ int dump_processor_regs(struct pt_regs *regs)
 
 	dump_stack();
 
-	printk(KERN_ALERT"DUMP REGS %s\n", __func__);
+	printk("DUMP REGS %s\n", __func__);
 
 	if (NULL != regs) {
-		printk(KERN_ALERT"sp: 0x%lx\n", regs->sp);
-		printk(KERN_ALERT"pc: 0x%lx\n", regs->pc);
-		printk(KERN_ALERT"pstate: 0x%lx\n", regs->pstate);
+		printk("sp: 0x%llx\n", regs->sp);
+		printk("pc: 0x%llx\n", regs->pc);
+		printk("pstate: 0x%llx\n", regs->pstate);
 
 		for (i = 0; i < 31; i++) {
-			printk(KERN_ALERT"regs[%d]: 0x%lx\n", i, regs->regs[i]);
+			printk("regs[%d]: 0x%llx\n", i, regs->regs[i]);
 		}
 	}
 
@@ -330,10 +330,4 @@ unsigned long futex_atomic_add(unsigned long ptr, unsigned long val)
 	
 	result = atomic64_add_return(val, &v);
 	return (result - val);
-}
-
-extern void update_popcorn_migrate(int a);
-void suggest_migration(int suggestion) 
-{
-	update_popcorn_migrate(suggestion);
 }
