@@ -393,10 +393,10 @@ config QCOM_SPMI_TEMP_ALARM
 
 config POWER_SENSOR_X86
 	bool "Power sensor for x86"
-	depends on X86
+	depends on X86 && POPCORN
 
 config POWER_SENSOR_ARM
 	bool "Power sensor for ARM"
-	depends on ARM || ARM64
+	depends on (ARM || ARM64) && POPCORN
 
 endif

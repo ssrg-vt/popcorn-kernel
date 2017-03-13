@@ -7,9 +7,13 @@ config ARCH_SUPPORTS_POPCORN
 config POPCORN
 	bool "Popcorn Multi-Kernel Support"
 	depends on ARCH_SUPPORTS_POPCORN
+	select CPU_NS
 	default y
 	help
 		Enable or disable the Popcorn multi-kernel Linux support.
+
+config CPU_NS
+	bool
 
 config POPCORN_DEBUG
 	bool "Popcorn debugging messages in kernel log"

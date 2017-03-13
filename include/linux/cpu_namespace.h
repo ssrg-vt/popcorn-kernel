@@ -57,8 +57,6 @@ struct cpu_namespace {
 extern struct cpu_namespace init_cpu_ns;
 extern struct cpu_namespace *popcorn_ns;
 
-//TODO must be added in menuconfig & friends
-#define CONFIG_CPU_NS
 #ifdef CONFIG_CPU_NS
 
 //NOTE

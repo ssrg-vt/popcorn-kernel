@@ -112,9 +112,11 @@ static struct nsproxy *create_new_namespaces(unsigned long flags,
 
 	return new_nsp;
 
+#ifdef CONFIG_POPCORN
 out_cpu:
 	if (new_nsp->net_ns)
 		put_net(new_nsp->net_ns);
+#endif
 out_net:
 	if (new_nsp->pid_ns_for_children)
 		put_pid_ns(new_nsp->pid_ns_for_children);
@@ -180,8 +182,10 @@ void free_nsproxy(struct nsproxy *ns)
 		put_ipc_ns(ns->ipc_ns);
 	if (ns->pid_ns_for_children)
 		put_pid_ns(ns->pid_ns_for_children);
+#ifdef CONFIG_POPCORN
 	if (ns->cpu_ns)
 		put_cpu_ns(ns->cpu_ns);
+#endif
 	put_net(ns->net_ns);
 	kmem_cache_free(nsproxy_cachep, ns);
 }
