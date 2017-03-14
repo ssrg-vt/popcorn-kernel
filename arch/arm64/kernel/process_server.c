@@ -79,8 +79,9 @@ int save_thread_info(struct task_struct *task, field_arch *arch, void __user *ur
 
 	put_cpu();
 
-	PSPRINTK("%s: pc %lx sp %lx bp %lx\n", __func__,
-			arch->migration_ip, arch->old_rsp, arch->bp);
+	PSPRINTK("%s: pc %lx sp %lx bp %lx tp %lx\n", __func__,
+			arch->migration_ip, arch->sp, arch->bp, arch->thread_fs);
+	show_regs(regs);
 
 	return 0;
 }
@@ -136,9 +137,9 @@ int restore_thread_info(struct task_struct *task, field_arch *arch, bool restore
 	*/
 	put_cpu();
 
-	PSPRINTK("%s: pc %lx sp %lx bp %lx ra %lx\n", __func__,
-			arch->migration_ip, arch->old_rsp, arch->bp, arch->ra);
-
+	PSPRINTK("%s: pc %lx sp %lx bp %lx\n", __func__,
+			arch->migration_ip, arch->sp, arch->bp);
+	show_regs(regs);
 
 	return 0;
 }

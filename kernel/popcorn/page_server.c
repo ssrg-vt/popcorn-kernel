@@ -261,8 +261,12 @@ static void process_remote_page_flush(struct work_struct *work)
 	set_bit(my_nid, page->owners);
 	put_page(page);
 
+#ifdef CONFIG_X86
 	entry = pte_clear_flags(*pte, _PAGE_SOFTW1);
 	entry = pte_set_flags(entry, _PAGE_PRESENT);
+#elif defined(CONFIG_ARM64)
+	entry = set_pte_bit(*pte, PTE_VALID);
+#endif
 	set_pte_at(mm, req->addr, pte, entry);
 
 	flush_tlb_page(vma, req->addr);
@@ -384,8 +388,12 @@ static int __do_invalidate_page(struct task_struct *tsk, struct mm_struct *mm, u
 	clear_bit(my_nid, page->owners);
 
 	entry = ptep_get_and_clear(mm, addr, pte);
+#ifdef CONFIG_X86
 	entry = pte_set_flags(entry, _PAGE_SOFTW1);
 	entry = pte_clear_flags(entry, _PAGE_PRESENT);
+#elif defined(CONFIG_ARM64)
+	entry = clear_pte_bit(entry, PTE_VALID);
+#endif
 	set_pte_at(mm, addr, pte, entry);
 
 	flush_tlb_page(vma, addr);
