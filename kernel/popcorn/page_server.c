@@ -816,8 +816,12 @@ static int __map_remote_page(struct mm_struct *mm, struct remote_context *rc, st
 		mem_cgroup_commit_charge(page, memcg, false);
 		lru_cache_add_active_or_unevictable(page, vma);
 	} else {
+		flush_icache_page(vma, page);
 		pte_val = pte_mkwrite(pte_val);
-		set_pte_at(mm, addr, pte, pte_val);
+		pte_val = pte_mkdirty(pte_val);
+		pte_val = pte_mkyoung(pte_val);
+
+		set_pte_at_notify(mm, addr, pte, pte_val);
 		update_mmu_cache(vma, addr, pte);
 	}
 	flush_tlb_page(vma, addr);
