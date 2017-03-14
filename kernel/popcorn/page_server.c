@@ -492,8 +492,9 @@ static void process_remote_page_response(struct work_struct *_work)
 		goto out_free;
 	}
 	WARN_ON(atomic_read(&rp->pendings) <= 0);
-
 	rp->response = res;
+	smp_wmb();
+
 	wake_up(&rp->pendings_wait);
 
 out_free:
