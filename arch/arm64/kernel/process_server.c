@@ -23,11 +23,6 @@
 #include <popcorn/types.h>
 #include <popcorn/debug.h>
 
-unsigned long get_task_pc(struct task_struct *tsk)
-{
-	return task_pt_regs(tsk)->pc;
-}
-
 /*
  * Function:
  *		save_thread_info
