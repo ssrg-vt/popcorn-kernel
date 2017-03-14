@@ -18,6 +18,7 @@
 #include <linux/sched.h>
 #include <linux/cpu_namespace.h>
 #include <linux/kdebug.h>
+#include <linux/ptrace.h>
 #include <asm/uaccess.h>
 #include <asm/prctl.h>
 #include <asm/proto.h>

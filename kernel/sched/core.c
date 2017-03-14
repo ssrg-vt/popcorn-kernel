@@ -4592,7 +4592,7 @@ static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid, void __
 {
 	int retval = 0;
 
-	tsk->migration_ip = task_pt_regs(tsk)->ip;
+	tsk->migration_ip = instruction_pointer(task_pt_regs(tsk));
 
 	retval = process_server_do_migration(tsk, nid, uregs);
 
