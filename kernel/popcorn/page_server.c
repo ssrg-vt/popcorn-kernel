@@ -929,7 +929,7 @@ int page_server_handle_pte_fault(
 	might_sleep();
 
 	printk(KERN_WARNING"\n## PAGEFAULT [%d]: %lx %lx %x %lx\n",
-			current->pid, address, instrction_pointer(current_pt_regs()),
+			current->pid, address, instruction_pointer(current_pt_regs()),
 			fault_flags, pte_flags(pte_val));
 
 	/*
