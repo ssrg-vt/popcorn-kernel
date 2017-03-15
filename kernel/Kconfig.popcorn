@@ -22,6 +22,31 @@ config POPCORN_DEBUG
 	help
 		Enable or disable kernel messages that can help debug Popcorn issues.
 
+config POPCORN_DEBUG_PROCESS_SERVER_VERBOSE
+	bool "Print debug message for process server"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_VMA_SERVER_VERBOSE
+	bool "Print debug message for VMA server"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_PAGE_SERVER_VERBOSE
+	bool "Print debug message for page server"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	bool "Print debug message for msg layer"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_MSG_LAYER_VERBOSE_DEBUG
+	bool "Print more debug message for msg layer"
+	depends on POPCORN_DEBUG
+	default n
+
 comment "Popcorn is not currently supported on your architecture"
 	depends on !ARCH_SUPPORTS_POPCORN
 
