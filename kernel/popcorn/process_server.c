@@ -138,60 +138,7 @@ void exit_remote_context(struct remote_context *rc)
 }
 
 
-
 ///////////////////////////////////////////////////////////////////////////////
-// Marina's data stores (linked lists). remove quickly
-/*
- * Functions to manipulate memory list
- * head: _memory_head
- * lock: _memory_head_lock
- */
-LIST_HEAD(_memory_head);
-DEFINE_SPINLOCK(_memory_head_lock);
-
-memory_t* find_memory_entry(int cpu, int id)
-{
-	memory_t *m = NULL;
-	memory_t *found = NULL;
-	unsigned long flags;
-
-	spin_lock_irqsave(&_memory_head_lock, flags);
-	list_for_each_entry(m, &_memory_head, list) {
-		if (m->tgroup_home_cpu == cpu && m->tgroup_home_id == id) {
-			found = m;
-			break;
-		}
-	}
-	spin_unlock_irqrestore(&_memory_head_lock, flags);
-
-	return found;
-}
-
-int dump_memory_entries(memory_t * list[], int num, int *written)
-{
-	memory_t *m = NULL;
-	int i = 0;
-	bool more = false;
-	unsigned long flags;
-
-	spin_lock_irqsave(&_memory_head_lock,flags);
-	list_for_each_entry(m, &_memory_head, list) {
-		if (i >= num) {
-			more = true;
-			break;
-		}
-		list[i] = m;
-		i++;
-	}
-	spin_unlock_irqrestore(&_memory_head_lock,flags);
-
-	if (written)
-		*written = i;
-
-	return more;
-}
-///////////////////////////////////////////////////////////////////////////////
-
 
 static void __rename_task_comm(struct task_struct *tsk, char *name)
 {

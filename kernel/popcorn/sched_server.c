@@ -135,7 +135,7 @@ static const struct file_operations power_fops = {
 ///////////////////////////////////////////////////////////////////////////////
 
 // CPU load per thread
-static void popcorn_ps_load(struct task_struct * t, unsigned int *puload, unsigned int *psload)
+static void popcorn_ps_load(struct task_struct *t, unsigned int *puload, unsigned int *psload)
 {
 	unsigned long delta, now;
 	unsigned long utime = cputime_to_jiffies(t->utime);
@@ -173,62 +173,51 @@ static void popcorn_ps_load(struct task_struct * t, unsigned int *puload, unsign
 #define PROC_BUFFER_PS 8192
 static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
-	int ret, len = 0, written = 0, i;
+	int ret, len = 0;
 	char * buffer;
-	memory_t ** lista;
+	struct task_struct *p;
+
+	buffer = kzalloc(PROC_BUFFER_PS, GFP_KERNEL);
+	if (!buffer)
+		return 0; // error
 
 	if (*ppos > 0)
 		return 0; //EOF
 
-	lista = (memory_t **)kzalloc(sizeof(memory_t*) * 1024, GFP_KERNEL);
-	BUG_ON(!lista);
+	for_each_process(p) {
+		if (process_is_distributed(p)) {
+			struct task_struct *t;
 
-	ret = dump_memory_entries(lista, sizeof(lista) / sizeof(memory_t *), &written);
+			len += snprintf((buffer + len), PROC_BUFFER_PS - len,
+					"%s %d:%d:%d:%lu",
+					p->comm,
+					p->origin_nid,
+					p->origin_pid,
+					process_is_distributed(p),
+					p->mm ? p->mm->total_vm : -1); // in # of pages
 
-	//if (!ret)
-	//printk("%s: WARN: there are more memory_t entries than %d\n", __func__, written);
+			for_each_thread(p, t) {
+				unsigned int uload, sload;
 
-	buffer = kzalloc(PROC_BUFFER_PS, GFP_KERNEL);
-	BUG_ON(!buffer);
-
-	for (i = 0; i < written; i++) {
-		struct task_struct * t;
-		struct task_struct * ppp = lista[i]->helper;
-
-		len += snprintf((buffer +len), PROC_BUFFER_PS - len,
-				"%s %d:%d:%d:%lu", ppp->comm,
-				ppp->origin_nid,
-				ppp->origin_pid,
-				process_is_distributed(ppp),
-				ppp->mm->total_vm); // this is in number of pages
-
-		t = ppp;
-		do {
-			// here I want to list only user/kernel threads
-			if (t->is_vma_worker) {
-				// this is the main thread (kernel space only) nothing to do
-			} else {
-				if (!t->at_remote) {
-					// this is the nothing to fo
-				} else {
-					// TODO print only the one that are currently running (not migrated!)
-
-					// CPU load per thread
-					unsigned int uload, sload;
-					popcorn_ps_load(t, &uload, &sload);
-
-					len += snprintf((buffer + len), PROC_BUFFER_PS - len,
-							" %d:%d:%d:%d %d:%d;", (int)t->pid,
-							t->at_remote, t->is_vma_worker, t->distributed_exit,
-							uload, sload); //these are in percentage
+				// here I want to list only user/kernel threads
+				if (t->is_vma_worker || !t->at_remote) {
+					// this is the main thread (kernel space only) nothing to do
+					continue;
 				}
-			}
-		} while_each_thread(ppp, t);
 
-		len += snprintf((buffer +len), PROC_BUFFER_PS - len, "\n");
+				// TODO print only the one that are currently running (not migrated!)
+				// CPU load per thread
+				popcorn_ps_load(t, &uload, &sload);
+
+				len += snprintf((buffer +len), PROC_BUFFER_PS - len,
+						" %d:%d %d:%d;",
+						t->pid, t->distributed_exit,
+						uload, sload); // in %
+			}
+
+			len += snprintf((buffer + len), PROC_BUFFER_PS - len, "\n");
+		}
 	}
-	if (written == 0)
-		len += snprintf(buffer, PROC_BUFFER_PS, "none\n");
 
 	if (count < len)
 		len = count;
@@ -243,104 +232,23 @@ static const struct file_operations popcorn_ps_fops = {
 	.read = popcorn_ps_read,
 };
 
-static ssize_t popcorn_ps_read1(struct file *file, char __user *buf, size_t count, loff_t *ppos)
-{
-	int ret, len = 0;
-	char * buffer;
-	struct task_struct * ppp;
-
-	buffer = kmalloc(PROC_BUFFER_PS, GFP_KERNEL);
-	if (!buffer)
-		return 0; // error
-	memset(buffer, 0, PROC_BUFFER_PS);
-
-	if (*ppos > 0)
-		return 0; //EOF
-
-	if (popcorn_ns == 0) {
-		printk("%s: popcorn_ns is ZERO\n", __func__);
-		return 0;
-	}
-
-	for_each_process(ppp) {
-		/* NOTEs
-		 * All process in the popcorn namespace can migrate, however it doesn't have sense to migrate
-		 * init (in fact we should check that any request of migrating init will return error)
-		 * and it doesn't make much sense to migrate a shell (for other reasons tho).
-		 */
-
-		if ( ppp && (ppp->nsproxy) && (ppp->nsproxy->cpu_ns == popcorn_ns) ) {
-			struct task_struct * t;
-
-			len += snprintf((buffer +len), PROC_BUFFER_PS - len,
-					"%s %d:%d:%d:%lu", ppp->comm,
-					ppp->origin_nid, ppp->origin_pid,
-					process_is_distributed(ppp),
-					ppp->mm ? ppp->mm->total_vm : -1); // this is in number of pages
-
-			/* NOTEs
-			 * A Popcorn process is a mix of different threads and Popcorn uses different tricks
-			 * to speed up migrations, one of those is setting up a pool of threads (Marina's pull)
-			 * and another is to use a kernel thread called main_for_distributed_kernel_thread. The threads
-			 * in the pool of threads are sleeping in a function sleep_shadow, thus called shadow threads.
-			 */
-			t = ppp;
-			do {
-				// here I want to list only user/kernel threads
-				if (t->is_vma_worker) {
-					// this is the main thread (kernel space only) nothing to do
-				} else {
-					if (!t->at_remote) {
-						// this is the nothing to fo
-					} else {
-						// TODO print only the one that are currently running (not migrated!)
-						// CPU load per thread
-						unsigned int uload, sload;
-						popcorn_ps_load(t, &uload, &sload);
-
-						len += snprintf((buffer +len), PROC_BUFFER_PS -len,
-								" %d:%d:%d:%d %d:%d;",
-								(int)t->pid, t->at_remote, t->is_vma_worker,
-								t->distributed_exit,
-								uload, sload); //these are in percentage
-					}
-				}
-			} while_each_thread(ppp, t);
-
-			len += snprintf((buffer +len), PROC_BUFFER_PS - len, "\n");
-		}
-	}
-
-	if (count < len)
-		len = count;
-	ret = copy_to_user(buf, buffer, len);
-
-	*ppos += len;
-	return len;
-}
-
-static const struct file_operations popcorn_ps_fops1 = {
-	.owner = THIS_MODULE,
-	.read = popcorn_ps_read1,
-};
-
 
 int __init sched_server_init(void)
 {
 	struct task_struct *kt_sched;
 	struct proc_dir_entry *res;
 	int i;
-	int ret;
-	if ((ret = pcn_kmsg_register_callback(PCN_KMSG_TYPE_SCHED_PERIODIC, handle_sched_periodic)))
-		return ret;
+
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SCHED_PERIODIC, handle_sched_periodic);
 
 	popcorn_power_x86_1 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
 	popcorn_power_x86_2 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
 	popcorn_power_arm_1 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
 	popcorn_power_arm_2 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
 	popcorn_power_arm_3 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
+
 	if (!popcorn_power_x86_1 || !popcorn_power_x86_1 ||
-			!popcorn_power_arm_1 || !popcorn_power_arm_2 || !popcorn_power_arm_3)
+		!popcorn_power_arm_1 || !popcorn_power_arm_2 || !popcorn_power_arm_3)
 		return -ENOMEM;
 
 	for (i = 0; i < POPCORN_POWER_N_VALUES; i++) {
@@ -364,10 +272,6 @@ int __init sched_server_init(void)
 	res = proc_create("popcorn_ps", S_IRUGO, NULL, &popcorn_ps_fops);
 	if (!res)
 		printk("%s: WARNING: failed to create proc entry for Popcorn process list\n", __func__);
-
-	res = proc_create("popcorn_ps1", S_IRUGO, NULL, &popcorn_ps_fops1);
-	if (!res)
-		printk("%s: WARNING: failed to create proc entry for Popcorn process list 1\n", __func__);
 
 	printk(KERN_INFO"%s: done\n", __func__);
 	return 0;

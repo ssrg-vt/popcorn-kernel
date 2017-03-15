@@ -63,18 +63,14 @@ DEFINE_PCN_KMSG(vma_ack_t, VMA_ACK_FIELDS);
 DEFINE_PCN_KMSG(data_response_for_2_kernels_t,DATA_RESPONSE_FIELDS);
 
 typedef struct _memory_struct {
-	struct list_head list;
-	atomic_t count;
-
 	int tgroup_home_cpu;
 	int tgroup_home_id;
 	struct mm_struct* mm;
-	int alive;
 
 	struct task_struct *helper;
 
+	// VMA operations
 	char path[512];
-
 	int operation;
 	unsigned long addr;
 	unsigned long new_addr;
@@ -83,7 +79,6 @@ typedef struct _memory_struct {
 	unsigned long prot;
 	unsigned long pgoff;
 	unsigned long flags;
-
 	struct task_struct* waiting_for_main;
 	struct task_struct* waiting_for_op;
 	int arrived_op;
@@ -94,9 +89,6 @@ typedef struct _memory_struct {
 
 	vma_operation_t *message_push_operation;
 } memory_t;
-
-memory_t* find_memory_entry(int cpu, int id);
-int dump_memory_entries(memory_t * list[], int num, int *written);
 /* Legacy definitions. Remove these quickly -----------------------*/
 
 
