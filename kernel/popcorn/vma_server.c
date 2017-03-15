@@ -26,6 +26,7 @@
 
 #include <linux/mman.h>
 #include <linux/highmem.h>
+#include <linux/ptrace.h>
 
 #include <linux/elf.h>
 
@@ -2178,14 +2179,12 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	remote_vma_request_t *req = NULL;
 	struct remote_context *rc = get_task_remote(tsk);
 	bool wakeup = false;
-#if VMA_SERVER_VERBOSE
-	struct pt_regs *regs = task_pt_regs(tsk);
-#endif
 
 	might_sleep();
 
 	VSPRINTK("\n");
-	VSPRINTK("## VMAFAULT [%d]: %lx %lx\n", current->pid, address, regs->ip);
+	VSPRINTK("## VMAFAULT [%d]: %lx %lx\n",
+			current->pid, address, instruction_pointer(current_pt_regs()));
 
 	spin_lock_irqsave(&rc->vmas_lock, flags);
 	vi = __lookup_pending_vma_request(rc, addr);

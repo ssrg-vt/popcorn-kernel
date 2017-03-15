@@ -256,13 +256,17 @@ static void process_remote_page_flush(struct work_struct *work)
 			pte_write(*pte) ? "writable" : "protected");
 
 	paddr = kmap_atomic(page);
-	copy_page(paddr, req->page);
+	memcpy(paddr, req->page, PAGE_SIZE);
 	kunmap_atomic(paddr);
 	set_bit(my_nid, page->owners);
 	put_page(page);
 
+#ifdef CONFIG_X86
 	entry = pte_clear_flags(*pte, _PAGE_SOFTW1);
 	entry = pte_set_flags(entry, _PAGE_PRESENT);
+#elif defined(CONFIG_ARM64)
+	entry = set_pte_bit(*pte, PTE_VALID);
+#endif
 	set_pte_at(mm, req->addr, pte, entry);
 
 	flush_tlb_page(vma, req->addr);
@@ -296,7 +300,7 @@ static int __flush_pte(pte_t *pte, unsigned long addr, unsigned long next, struc
 		printk("flush_remote_page [%d]:+ %lx %p\n", current->pid, addr, page);
 		req->addr = addr;
 		paddr = kmap_atomic(page);
-		copy_page(req->page, paddr);
+		memcpy(req->page, paddr, PAGE_SIZE);
 		kunmap_atomic(paddr);
 
 		clear_bit(my_nid, page->owners);
@@ -384,8 +388,12 @@ static int __do_invalidate_page(struct task_struct *tsk, struct mm_struct *mm, u
 	clear_bit(my_nid, page->owners);
 
 	entry = ptep_get_and_clear(mm, addr, pte);
+#ifdef CONFIG_X86
 	entry = pte_set_flags(entry, _PAGE_SOFTW1);
 	entry = pte_clear_flags(entry, _PAGE_PRESENT);
+#elif defined(CONFIG_ARM64)
+	entry = clear_pte_bit(entry, PTE_VALID);
+#endif
 	set_pte_at(mm, addr, pte, entry);
 
 	flush_tlb_page(vma, addr);
@@ -606,7 +614,7 @@ static int __get_remote_page(struct task_struct *tsk,
 
 	lock_page(page);
 	paddr = kmap_atomic(page);
-	copy_page(res->page, paddr);
+	memcpy(res->page, paddr, PAGE_SIZE);
 	kunmap_atomic(paddr);
 
 	set_bit(from, page->owners);
@@ -793,7 +801,7 @@ static int __map_remote_page(struct mm_struct *mm, struct remote_context *rc, st
 
 	lock_page(page);
 	paddr = kmap_atomic(page);
-	copy_page(paddr, res->page);
+	memcpy(paddr, res->page, PAGE_SIZE);
 	kunmap_atomic(paddr);
 
 	memcpy(page->owners, res->owners, sizeof(page->owners));
@@ -808,8 +816,12 @@ static int __map_remote_page(struct mm_struct *mm, struct remote_context *rc, st
 		mem_cgroup_commit_charge(page, memcg, false);
 		lru_cache_add_active_or_unevictable(page, vma);
 	} else {
+		flush_icache_page(vma, page);
 		pte_val = pte_mkwrite(pte_val);
-		set_pte_at(mm, addr, pte, pte_val);
+		pte_val = pte_mkdirty(pte_val);
+		pte_val = pte_mkyoung(pte_val);
+
+		set_pte_at_notify(mm, addr, pte, pte_val);
 		update_mmu_cache(vma, addr, pte);
 	}
 	flush_tlb_page(vma, addr);
