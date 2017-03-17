@@ -33,7 +33,7 @@ extern struct list_head rlist_head;
 #endif
 
 #define MAX_ARM_CORES 8
-#define MAX_X86_CORES 8
+#define MAX_X86_CORES 16
 
 enum arch_t {
 	arch_unknown = 0,
@@ -55,7 +55,7 @@ typedef struct __percpu_arch_x86 {
 	char _fpu_exception[3];
 	int _cpuid_level;
 	char _wp[3];
-	char _flags[512];
+	char _flags[640];
 	unsigned long _nbogomips;
 	int _TLB_size;
 	unsigned int _clflush_size;

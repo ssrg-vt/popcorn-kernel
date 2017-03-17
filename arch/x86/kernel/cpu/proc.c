@@ -4,6 +4,36 @@
 #include <linux/seq_file.h>
 #include <linux/cpufreq.h>
 
+#include <popcorn/bundle.h>
+
+#define CPU_PROC_VERBOSE 0
+#if CPU_PROC_VERBOSE
+#define CPPRINTK(...) printk(__VA_ARGS__)
+#else
+#define CPPRINTK(...)
+#endif
+
+extern int send_remote_cpu_info_request(unsigned int nid);
+extern unsigned int get_number_cpus_from_remote_node(unsigned int nid);
+extern int remote_proc_cpu_info(struct seq_file *m, unsigned int nid,
+				unsigned int vpos);
+
+static struct cpu_global_info {
+	unsigned int remote;
+	struct cpuinfo_x86 *c;
+	unsigned int vpos;
+	unsigned int nid;
+} cpu_global_info;
+
+static struct cpuinfo_x86 c;
+
+/*
+ * num_cpus: # of cores of each nodes
+ * num_total_cpus: # of total cpus of all connected nodes
+ */
+static unsigned int num_cpus[MAX_POPCORN_NODES];
+static unsigned int num_total_cpus;
+
 /*
  *	Get CPU information for use by the procfs.
  */
@@ -137,27 +167,147 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	return 0;
 }
 
+static void calc_nid_vpos(loff_t *pos, unsigned int *pnid, unsigned int *vpos)
+{
+	int i = 0;
+
+	*pnid = 0;
+	*vpos = 0;
+
+	for (i = nr_cpu_ids; i <= num_total_cpus; i++) {
+		if ((*pnid) == my_nid)
+			(*pnid)++;
+
+		if ((*vpos) == num_cpus[*pnid]) {
+			*vpos = 0;
+			(*pnid)++;
+		}
+
+		if (i == (*pos))
+			break;
+
+		(*vpos)++;
+	}
+
+	CPPRINTK("%s: pos: %lld, pnid: %d, vpos: %d\n", __func__,
+		*pos, *pnid, *vpos);
+}
+
 static void *c_start(struct seq_file *m, loff_t *pos)
 {
+	unsigned int vpos = 0;
+	unsigned int nid = 0;
+
+	CPPRINTK("%s: Entered, *pos: %lld\n", __func__, (*pos));
+
+	if (my_nid == -1)
+		goto local;
+
+	if ((*pos) < nr_cpu_ids) {
+		goto local;
+	} else if ((*pos) == nr_cpu_ids) {
+		int i = 0;
+		int j = 0;
+		bool connected = false;
+
+		/* Check the connection with remote nodes */
+		for (i = 0; i < MAX_POPCORN_NODES; i++) {
+			if (is_popcorn_node_online(i)) {
+				connected = true;
+				break;
+			}
+		}
+
+		if (connected == false) {
+			/* No connection */
+			goto local;
+		} else {
+			/* Connection with remote nodes */
+			for (i = 0; i < MAX_POPCORN_NODES; i++) {
+				if (i == my_nid) {
+					num_cpus[i] = nr_cpu_ids;
+					i++;
+					j = j + nr_cpu_ids;
+				}
+				if (is_popcorn_node_online(i)) {
+					send_remote_cpu_info_request(i);
+					num_cpus[i] = get_number_cpus_from_remote_node(i);
+					j = j + num_cpus[i];
+				} else {
+					num_cpus[i] = 0;
+				}
+			}
+
+			num_total_cpus = j;
+			CPPRINTK("%s: num_total_cpus: %d\n", __func__,
+				 num_total_cpus);
+			goto remote;
+		}
+	} else if ((*pos) > nr_cpu_ids) {
+		goto remote;
+	}
+
+local:
 	*pos = cpumask_next(*pos - 1, cpu_online_mask);
-	if ((*pos) < nr_cpu_ids)
-		return &cpu_data(*pos);
+	if ((*pos) < nr_cpu_ids) {
+		cpu_global_info.remote = 0;
+		c = cpu_data(*pos);
+		cpu_global_info.c = &c;
+
+		return &cpu_global_info;
+	}
+
+	return NULL;
+
+remote:
+	if ((*pos) < num_total_cpus) {
+		calc_nid_vpos(pos, &nid, &vpos);
+
+		cpu_global_info.remote = 1;
+		cpu_global_info.vpos = vpos;
+		cpu_global_info.nid = nid;
+
+		return &cpu_global_info;
+	}
+
 	return NULL;
 }
 
 static void *c_next(struct seq_file *m, void *v, loff_t *pos)
 {
+	CPPRINTK("%s: Entered\n", __func__);
+
 	(*pos)++;
 	return c_start(m, pos);
 }
 
 static void c_stop(struct seq_file *m, void *v)
 {
+	CPPRINTK("%s: Entered\n", __func__);
+}
+
+static int c_show(struct seq_file *m, void *v)
+{
+	struct cpu_global_info *cpu_global_info = v;
+	struct cpuinfo_x86 *c;
+
+	CPPRINTK("%s: Entered\n", __func__);
+
+	if (cpu_global_info->remote == 1) {
+		remote_proc_cpu_info(m,
+			cpu_global_info->nid,
+			cpu_global_info->vpos);
+	} else {
+		c = cpu_global_info->c;
+		show_cpuinfo(m, c);
+	}
+
+	return 0;
 }
 
 const struct seq_operations cpuinfo_op = {
 	.start	= c_start,
 	.next	= c_next,
 	.stop	= c_stop,
-	.show	= show_cpuinfo,
+	.show	= c_show,
 };
