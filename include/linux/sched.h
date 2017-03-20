@@ -1816,6 +1816,42 @@ struct task_struct {
 	unsigned long	task_state_change;
 #endif
 	int pagefault_disabled;
+
+#ifdef CONFIG_POPCORN
+	struct remote_context *remote;
+	union {
+		int remote_nid;
+		int origin_nid;
+	};
+	union {
+		int remote_pid;
+		int origin_pid;
+	};
+
+	bool is_vma_worker;			/* kernel thread that manages the process*/
+	bool at_remote;				/* Is executing on behalf of another node? */
+
+	struct completion wait_for_remote_flush;
+	int ret_from_remote;
+
+	int distributed_exit_code;
+	int distributed_exit;
+	int group_exit;
+
+	/*akshay*/
+	pid_t surrogate;
+
+	unsigned long migration_ip;
+
+	// scheduling -- antoniob
+	unsigned long lutime, lstime, llasttimestamp; /* in jiffies for load accounting */
+
+#if 0 // beowulf
+	//let's remove this?!
+	remote_file_info_t *fake_file_table[16];
+#endif
+#endif
+
 /* CPU-specific state of this task */
 	struct thread_struct thread;
 /*
@@ -2634,6 +2670,8 @@ extern long _do_fork(unsigned long, unsigned long, unsigned long, int __user *, 
 extern long do_fork(unsigned long, unsigned long, unsigned long, int __user *, int __user *);
 struct task_struct *fork_idle(int);
 extern pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags);
+
+extern int exec_mmap(struct mm_struct *mm);
 
 extern void __set_task_comm(struct task_struct *tsk, const char *from, bool exec);
 static inline void set_task_comm(struct task_struct *tsk, const char *from)

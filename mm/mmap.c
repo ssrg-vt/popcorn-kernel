@@ -281,7 +281,7 @@ static struct vm_area_struct *remove_vma(struct vm_area_struct *vma)
 	return next;
 }
 
-static unsigned long do_brk(unsigned long addr, unsigned long len);
+unsigned long do_brk(unsigned long addr, unsigned long len);
 
 SYSCALL_DEFINE1(brk, unsigned long, brk)
 {
@@ -2740,7 +2740,7 @@ static inline void verify_mm_writelocked(struct mm_struct *mm)
  *  anonymous maps.  eventually we may be able to do some
  *  brk-specific accounting here.
  */
-static unsigned long do_brk(unsigned long addr, unsigned long len)
+unsigned long do_brk(unsigned long addr, unsigned long len)
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma, *prev;

@@ -47,6 +47,7 @@ config X86
 	select ARCH_WANT_FRAME_POINTERS
 	select ARCH_WANT_IPC_PARSE_VERSION	if X86_32
 	select ARCH_WANT_OPTIONAL_GPIOLIB
+	select ARCH_SUPPORTS_POPCORN	if X86_64
 	select BUILDTIME_EXTABLE_SORT
 	select CLKEVT_I8253
 	select CLKSRC_I8253			if X86_32
@@ -297,6 +298,7 @@ config PGTABLE_LEVELS
 
 source "init/Kconfig"
 source "kernel/Kconfig.freezer"
+source "kernel/Kconfig.popcorn"
 
 menu "Processor type and features"
 

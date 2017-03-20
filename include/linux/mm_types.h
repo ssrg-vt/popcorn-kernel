@@ -15,6 +15,11 @@
 #include <asm/page.h>
 #include <asm/mmu.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/bundle.h>
+struct remote_context;
+#endif
+
 #ifndef AT_VECTOR_SIZE_ARCH
 #define AT_VECTOR_SIZE_ARCH 0
 #endif
@@ -218,6 +223,21 @@ struct page {
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
 	int _last_cpupid;
 #endif
+
+#ifdef CONFIG_POPCORN
+	DECLARE_BITMAP(owners, MAX_POPCORN_NODES);
+	//Multikernel
+	unsigned long rflags;
+	int replicated;
+	int status;
+	int owner;
+	long last_write;
+	bool other_owners[MAX_KERNEL_IDS];
+	int writing;
+	int reading;
+	//Futex
+	int futex_owner;
+#endif
 }
 /*
  * The struct page can be forced to be double word aligned so that atomic ops
@@ -355,6 +375,9 @@ struct vm_area_struct {
 	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
 #endif
 	struct vm_userfaultfd_ctx vm_userfaultfd_ctx;
+#ifdef CONFIG_POPCORN
+	DECLARE_BITMAP(vm_owners, MAX_POPCORN_NODES);
+#endif
 };
 
 struct core_thread {
@@ -511,6 +534,16 @@ struct mm_struct {
 #endif
 #ifdef CONFIG_HUGETLB_PAGE
 	atomic_long_t hugetlb_usage;
+#endif
+
+#ifdef CONFIG_POPCORN
+	struct remote_context *remote;
+	struct rw_semaphore distribute_sem;
+	int distr_vma_op_counter;
+	int was_not_pushed;
+	struct task_struct* thread_op;
+	int vma_operation_index;
+	int distribute_unmap;
 #endif
 };
 

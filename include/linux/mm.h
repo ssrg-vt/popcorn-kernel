@@ -158,6 +158,10 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_NOHUGEPAGE	0x40000000	/* MADV_NOHUGEPAGE marked this vma */
 #define VM_MERGEABLE	0x80000000	/* KSM may merge identical pages */
 
+#ifdef CONFIG_POPCORN
+#define VM_FETCH_LOCAL	0x00800000
+#endif
+
 #if defined(CONFIG_X86)
 # define VM_PAT		VM_ARCH_1	/* PAT reserves whole VMA at once (x86) */
 #elif defined(CONFIG_PPC)
@@ -1034,6 +1038,17 @@ static inline void clear_page_pfmemalloc(struct page *page)
 #define VM_FAULT_FALLBACK 0x0800	/* huge page fault failed, fall back to small */
 
 #define VM_FAULT_HWPOISON_LARGE_MASK 0xf000 /* encodes hpage index for large hwpoison */
+
+#ifdef CONFIG_POPCORN
+#define VM_FAULT_VMA	0x0080
+#define VM_FAULT_ACCESS_ERROR	0x1000
+#define VM_FAULT_REPLICATION_PROTOCOL	0x2000
+#define VM_CONTINUE_WITH_CHECK		0x4000
+
+#define VM_FAULT_CONTINUE	0x1000
+#define VM_FAULT_FORWARDED	0x2000
+#define VM_FAULT_KILLED		0x4000
+#endif
 
 #define VM_FAULT_ERROR	(VM_FAULT_OOM | VM_FAULT_SIGBUS | VM_FAULT_SIGSEGV | \
 			 VM_FAULT_HWPOISON | VM_FAULT_HWPOISON_LARGE | \
@@ -1945,6 +1960,7 @@ extern int vm_munmap(unsigned long, size_t);
 extern unsigned long vm_mmap(struct file *, unsigned long,
         unsigned long, unsigned long,
         unsigned long, unsigned long);
+extern unsigned long do_brk(unsigned long addr, unsigned long len);
 
 struct vm_unmapped_area_info {
 #define VM_UNMAPPED_AREA_TOPDOWN 1

@@ -72,6 +72,11 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/page_server.h>
+#include <popcorn/process_server.h>
+#endif
+
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
 #endif
@@ -106,7 +111,11 @@ int randomize_va_space __read_mostly =
 #ifdef CONFIG_COMPAT_BRK
 					1;
 #else
+#ifdef CONFIG_POPCORN
+					0;	/* Popcorn needs address space randomization to be turned off for the time being */
+#else
 					2;
+#endif
 #endif
 
 static int __init disable_randmaps(char *s)
@@ -2304,6 +2313,220 @@ static int wp_page_shared(struct mm_struct *mm, struct vm_area_struct *vma,
 			     orig_pte, old_page, page_mkwrite, 1);
 }
 
+#ifdef CONFIG_POPCORN
+//do cow page for Multikernel
+int do_wp_page_for_popcorn(struct mm_struct *mm, struct vm_area_struct *vma,
+		unsigned long address, pte_t *page_table, pmd_t *pmd,
+		spinlock_t *ptl, pte_t orig_pte)
+	__releases(ptl)
+{
+	struct page *old_page, *new_page;
+	pte_t entry;
+	int ret = 0;
+	int page_mkwrite = 0;
+	struct page *dirty_page = NULL;
+	struct mem_cgroup *memcg;
+
+	old_page = vm_normal_page(vma, address, orig_pte);
+	if (!old_page) {
+		if ((vma->vm_flags & (VM_WRITE|VM_SHARED)) ==
+				     (VM_WRITE|VM_SHARED))
+			goto reuse;
+		goto gotten;
+	}
+
+  	 	 	 
+	if (PageAnon(old_page) && !PageKsm(old_page)) {
+		if (!trylock_page(old_page)) {
+			page_cache_get(old_page);
+			pte_unmap_unlock(page_table, ptl);
+			lock_page(old_page);
+			page_table = pte_offset_map_lock(mm, pmd, address,
+							 &ptl);
+			if (!pte_same(*page_table, orig_pte)) {
+				unlock_page(old_page);
+				goto unlock;
+			}
+			page_cache_release(old_page);
+		}
+		unlock_page(old_page);
+	} else if (unlikely((vma->vm_flags & (VM_WRITE|VM_SHARED)) ==
+					(VM_WRITE|VM_SHARED))) {
+		
+		if (vma->vm_ops && vma->vm_ops->page_mkwrite) {
+			struct vm_fault vmf;
+			int tmp;
+
+			vmf.virtual_address = (void __user *)(address &
+								PAGE_MASK);
+			vmf.pgoff = old_page->index;
+			vmf.flags = FAULT_FLAG_WRITE|FAULT_FLAG_MKWRITE;
+			vmf.page = old_page;
+
+			page_cache_get(old_page);
+			pte_unmap_unlock(page_table, ptl);
+
+			tmp = vma->vm_ops->page_mkwrite(vma, &vmf);
+			if (unlikely(tmp &
+					(VM_FAULT_ERROR | VM_FAULT_NOPAGE))) {
+				ret = tmp;
+				goto unwritable_page;
+			}
+			if (unlikely(!(tmp & VM_FAULT_LOCKED))) {
+				lock_page(old_page);
+				if (!old_page->mapping) {
+					ret = 0; /* retry the fault */
+					unlock_page(old_page);
+					goto unwritable_page;
+				}
+			} else
+				VM_BUG_ON(!PageLocked(old_page));
+
+			page_table = pte_offset_map_lock(mm, pmd, address,
+							 &ptl);
+			if (!pte_same(*page_table, orig_pte)) {
+				unlock_page(old_page);
+				goto unlock;
+			}
+
+			page_mkwrite = 1;
+		}
+		dirty_page = old_page;
+		get_page(dirty_page);
+
+reuse:
+		flush_cache_page(vma, address, pte_pfn(orig_pte));
+		entry = pte_mkyoung(orig_pte);
+		entry = maybe_mkwrite(pte_mkdirty(entry), vma);
+		if (ptep_set_access_flags(vma, address, page_table, entry,1))
+			update_mmu_cache(vma, address, page_table);
+		pte_unmap_unlock(page_table, ptl);
+		ret |= VM_FAULT_WRITE;
+
+		if (!dirty_page)
+			return ret;
+ 
+		if (!page_mkwrite) {
+			wait_on_page_locked(dirty_page);
+			/* Ported to 4.4.0
+			set_page_dirty_balance(dirty_page, page_mkwrite);
+			*/
+		}
+		put_page(dirty_page);
+		if (page_mkwrite) {
+			struct address_space *mapping = dirty_page->mapping;
+
+			set_page_dirty(dirty_page);
+			unlock_page(dirty_page);
+			page_cache_release(dirty_page);
+			if (mapping)	{
+				balance_dirty_pages_ratelimited(mapping);
+			}
+		}
+
+		/* file_update_time outside page_lock */
+		if (vma->vm_file)
+			file_update_time(vma->vm_file);
+
+		return ret;
+	}
+
+	/*
+ 	 * Ok, we need to copy. Oh, well..
+  	 */
+	page_cache_get(old_page);
+gotten:
+	pte_unmap_unlock(page_table, ptl);
+
+	if (unlikely(anon_vma_prepare(vma)))
+		goto oom;
+
+	if (is_zero_pfn(pte_pfn(orig_pte))) {
+		new_page = alloc_zeroed_user_highpage_movable(vma, address);
+		if (!new_page)
+			goto oom;
+	} else {
+		new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, address);
+		if (!new_page)
+			goto oom;
+		cow_user_page(new_page, old_page, address, vma);
+	}
+	__SetPageUptodate(new_page);
+
+	if (mem_cgroup_try_charge(new_page, mm, GFP_KERNEL, &memcg))
+		goto oom_free_new;
+
+	/*
+ 	 * Re-check the pte - we dropped the lock
+  	 */
+	page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
+	if (likely(pte_same(*page_table, orig_pte))) {
+		if (old_page) {
+			if (!PageAnon(old_page)) {
+				dec_mm_counter_fast(mm, MM_FILEPAGES);
+				inc_mm_counter_fast(mm, MM_ANONPAGES);
+			}
+		} else
+			inc_mm_counter_fast(mm, MM_ANONPAGES);
+		flush_cache_page(vma, address, pte_pfn(orig_pte));
+		entry = mk_pte(new_page, vma->vm_page_prot);
+		entry = maybe_mkwrite(pte_mkdirty(entry), vma);
+		 	
+		ptep_clear_flush(vma, address, page_table);
+		page_add_new_anon_rmap(new_page, vma, address);
+		/*
+ 		 * We call the notify macro here because, when using secondary
+  		 * mmu page tables (such as kvm shadow page tables), we want the
+		 * new page to be mapped directly into the secondary page table.
+ 		 */
+		set_pte_at_notify(mm, address, page_table, entry);
+		update_mmu_cache(vma, address, page_table);
+		if (old_page) {
+			page_remove_rmap(old_page);
+		}
+
+		/* Free the old page.. */
+		new_page = old_page;
+		ret |= VM_FAULT_WRITE;
+	} else
+		mem_cgroup_uncharge(new_page);
+
+	if (new_page)
+		page_cache_release(new_page);
+unlock:
+	pte_unmap_unlock(page_table, ptl);
+	if (old_page) {
+		/*
+ 		 * Don't let another task, with possibly unlocked vma,
+ 		 * keep the mlocked page.
+ 		 */
+		if ((ret & VM_FAULT_WRITE) && (vma->vm_flags & VM_LOCKED)) {
+			lock_page(old_page);	/* LRU manipulation */
+			munlock_vma_page(old_page);
+			unlock_page(old_page);
+		}
+		page_cache_release(old_page);
+	}
+	return ret;
+oom_free_new:
+	page_cache_release(new_page);
+oom:
+	if (old_page) {
+		if (page_mkwrite) {
+			unlock_page(old_page);
+			page_cache_release(old_page);
+		}
+		page_cache_release(old_page);
+	}
+	return VM_FAULT_OOM;
+
+unwritable_page:
+	page_cache_release(old_page);
+	return ret;
+}
+#endif /* CONFIG_POPCORN */
+
+
 /*
  * This routine handles present pages, when users try to write
  * to a shared page. It is done by copying the page to a new address
@@ -2751,6 +2974,10 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * the set_pte_at() write.
 	 */
 	__SetPageUptodate(page);
+
+#ifdef CONFIG_POPCORN
+	bitmap_zero(page->owners, MAX_POPCORN_NODES);
+#endif
 
 	entry = mk_pte(page, vma->vm_page_prot);
 	if (vma->vm_flags & VM_WRITE)
@@ -3326,6 +3553,13 @@ static int handle_pte_fault(struct mm_struct *mm,
 	 */
 	entry = *pte;
 	barrier();
+#ifdef CONFIG_POPCORN
+	if (process_is_distributed(current)) {
+		int ret = page_server_handle_pte_fault(
+				mm, vma, address, pte, entry, pmd, flags);
+		if (ret != VM_FAULT_CONTINUE) return ret;
+	}
+#endif
 	if (!pte_present(entry)) {
 		if (pte_none(entry)) {
 			if (vma_is_anonymous(vma))
@@ -3369,6 +3603,66 @@ unlock:
 	pte_unmap_unlock(pte, ptl);
 	return 0;
 }
+
+#ifdef CONFIG_POPCORN
+int handle_pte_fault_origin(struct mm_struct *mm,
+		struct vm_area_struct *vma, unsigned long address,
+		pte_t *pte, pmd_t *pmd, unsigned int flags)
+{
+	pte_t entry;
+	spinlock_t *ptl;
+
+	/*
+	 * some architectures can have larger ptes than wordsize,
+	 * e.g.ppc44x-defconfig has CONFIG_PTE_64BIT=y and CONFIG_32BIT=y,
+	 * so READ_ONCE or ACCESS_ONCE cannot guarantee atomic accesses.
+	 * The code below just needs a consistent view for the ifs and
+	 * we later double check anyway with the ptl lock held. So here
+	 * a barrier will do.
+	 */
+	entry = *pte;
+	barrier();
+	if (!pte_present(entry)) {
+		if (pte_none(entry)) {
+			if (vma_is_anonymous(vma))
+				return do_anonymous_page(mm, vma, address,
+							 pte, pmd, flags);
+			else
+				return do_fault(mm, vma, address, pte, pmd,
+						flags, entry);
+		}
+		return do_swap_page(mm, vma, address,
+					pte, pmd, flags, entry);
+	}
+
+	ptl = pte_lockptr(mm, pmd);
+	spin_lock(ptl);
+	if (unlikely(!pte_same(*pte, entry)))
+		goto unlock;
+	if (flags & FAULT_FLAG_WRITE) {
+		if (!pte_write(entry))
+			return do_wp_page(mm, vma, address,
+					pte, pmd, ptl, entry);
+		entry = pte_mkdirty(entry);
+	}
+	entry = pte_mkyoung(entry);
+	if (ptep_set_access_flags(vma, address, pte, entry, flags & FAULT_FLAG_WRITE)) {
+		update_mmu_cache(vma, address, pte);
+	} else {
+		/*
+		 * This is needed only for protection faults but the arch code
+		 * is not yet telling us if this is a protection fault or not.
+		 * This still avoids useless tlb flushes for .text page faults
+		 * with threads.
+		 */
+		if (flags & FAULT_FLAG_WRITE)
+			flush_tlb_fix_spurious_fault(vma, address);
+	}
+unlock:
+	pte_unmap_unlock(pte, ptl);
+	return 0;
+}
+#endif
 
 /*
  * By the time we get here, we already hold the mm semaphore

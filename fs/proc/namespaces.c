@@ -8,6 +8,7 @@
 #include <linux/ipc_namespace.h>
 #include <linux/pid_namespace.h>
 #include <linux/user_namespace.h>
+#include <linux/cpu_namespace.h>
 #include "internal.h"
 
 
@@ -26,6 +27,9 @@ static const struct proc_ns_operations *ns_entries[] = {
 #endif
 #ifdef CONFIG_USER_NS
 	&userns_operations,
+#endif
+#ifdef CONFIG_CPU_NS
+	&cpuns_operations,
 #endif
 	&mntns_operations,
 };

@@ -88,6 +88,11 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/task.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/process_server.h>
+#endif
+
 /*
  * Minimum number of threads to boot the kernel
  */
@@ -384,6 +389,31 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 
 	account_kernel_stack(ti, 1);
 
+#ifdef CONFIG_POPCORN
+	/*
+	 * Reset variables for tracking remote execution
+	 */
+	tsk->remote = NULL;
+	tsk->remote_nid = tsk->origin_nid = -1;
+	tsk->remote_pid = tsk->origin_pid = -1;
+
+	init_completion(&tsk->wait_for_remote_flush);
+
+	tsk->is_vma_worker = false;
+	tsk->ret_from_remote = TASK_RUNNING;
+
+	tsk->surrogate = -1; // this is for futex
+
+	/* If the new tsk is not in the same thread group as the parent,
+	 * then we do not need to propagate the old thread info.
+	 * Otherwise, make sure to keep an accurate record
+	 * of which node and thread group the new thread is a part of.
+	 */
+	if (orig->tgid != tsk->tgid) {
+		tsk->at_remote = false;
+	}
+#endif
+
 	return tsk;
 
 free_ti:
@@ -612,6 +642,15 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mm->pmd_huge_pte = NULL;
 #endif
 
+#ifdef CONFIG_POPCORN
+	mm->remote = NULL;
+	mm->distr_vma_op_counter = 0;
+	mm->was_not_pushed = 0;
+	mm->thread_op = NULL;
+	mm->vma_operation_index = 0;
+	mm->distribute_unmap = 1;
+#endif
+
 	if (current->mm) {
 		mm->flags = current->mm->flags & MMF_INIT_MASK;
 		mm->def_flags = current->mm->def_flags & VM_INIT_DEF_MASK;
@@ -700,6 +739,9 @@ void mmput(struct mm_struct *mm)
 	might_sleep();
 
 	if (atomic_dec_and_test(&mm->mm_users)) {
+#ifdef CONFIG_POPCORN
+		exit_remote_context(mm->remote);
+#endif
 		uprobe_clear_state(mm);
 		exit_aio(mm);
 		ksm_exit(mm);
@@ -1371,6 +1413,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p->utime = p->stime = p->gtime = 0;
 	p->utimescaled = p->stimescaled = 0;
 	prev_cputime_init(&p->prev_cputime);
+#ifdef CONFIG_POPCORN
+	p->lutime = p->lstime = 0;
+	p->llasttimestamp = get_jiffies_64();
+#endif
 
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
 	seqlock_init(&p->vtime_seqlock);
@@ -1708,6 +1754,7 @@ struct task_struct *fork_idle(int cpu)
 	return task;
 }
 
+
 /*
  *  Ok, this is the main fork-routine.
  *
@@ -1745,6 +1792,13 @@ long _do_fork(unsigned long clone_flags,
 
 	p = copy_process(clone_flags, stack_start, stack_size,
 			 child_tidptr, NULL, trace, tls);
+
+	/*
+	if (current->tgroup_distributed == 1) {
+		PSPRINTK("%s: current=%d, new=%d\n", __func__, current->pid, p->pid);
+	}
+	*/
+
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
@@ -1807,6 +1861,7 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 	return _do_fork(flags|CLONE_VM|CLONE_UNTRACED, (unsigned long)fn,
 		(unsigned long)arg, NULL, NULL, 0);
 }
+
 
 #ifdef __ARCH_WANT_SYS_FORK
 SYSCALL_DEFINE0(fork)

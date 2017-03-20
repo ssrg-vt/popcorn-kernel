@@ -344,6 +344,133 @@ fail:
 	return error;
 }
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
+int kernel_mprotect(unsigned long start, size_t len, unsigned long prot)
+{
+	unsigned long vm_flags, nstart, end, tmp, reqprot;
+	struct vm_area_struct *vma, *prev;
+	int error = -EINVAL, distributed= 0;
+	const int grows = prot & (PROT_GROWSDOWN|PROT_GROWSUP);
+	long distr_ret = 0;
+	prot &= ~(PROT_GROWSDOWN|PROT_GROWSUP);
+	if (grows == (PROT_GROWSDOWN|PROT_GROWSUP)) /* can't be both */
+		return -EINVAL;
+
+	if (start & ~PAGE_MASK)
+		return -EINVAL;
+	if (!len)
+		return 0;
+	len = PAGE_ALIGN(len);
+	end = start + len;
+	if (end <= start)
+		return -ENOMEM;
+	if (!arch_validate_prot(prot))
+		return -EINVAL;
+
+	reqprot = prot;
+	/*
+	 * Does the application expect PROT_READ to imply PROT_EXEC:
+	 */
+	if ((prot & PROT_READ) && (current->personality & READ_IMPLIES_EXEC))
+		prot |= PROT_EXEC;
+
+	vm_flags = calc_vm_prot_bits(prot);
+
+	down_write(&current->mm->mmap_sem);
+
+	//Multikernel
+	if (process_is_distributed(current)) {
+		distributed= 1;
+		//printk("WARNING: mprotect called \n");
+#if 0 // beowulf
+		distr_ret = vma_server_mprotect_start( start, len, prot);
+#else
+		BUG();
+#endif
+		if (distr_ret<0 && distr_ret!=VMA_OP_SAVE && distr_ret!=VMA_OP_NOT_SAVE){
+			up_write(&current->mm->mmap_sem);
+			return distr_ret;
+		}
+	}
+
+	vma = find_vma_prev(current->mm, start, &prev);
+	error = -ENOMEM;
+	if (!vma)
+		goto out;
+	if (unlikely(grows & PROT_GROWSDOWN)) {
+		if (vma->vm_start >= end)
+			goto out;
+		start = vma->vm_start;
+		error = -EINVAL;
+		if (!(vma->vm_flags & VM_GROWSDOWN))
+			goto out;
+	} else {
+		if (vma->vm_start > start)
+			goto out;
+		if (unlikely(grows & PROT_GROWSUP)) {
+			end = vma->vm_end;
+			error = -EINVAL;
+			if (!(vma->vm_flags & VM_GROWSUP))
+				goto out;
+		}
+	}
+	if (start > vma->vm_start)
+		prev = vma;
+
+	for (nstart = start ; ; ) {
+		unsigned long newflags;
+
+		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
+
+		newflags = vm_flags | (vma->vm_flags & ~(VM_READ | VM_WRITE | VM_EXEC));
+
+		/* newflags >> 4 shift VM_MAY% in place of VM_% */
+		if ((newflags & ~(newflags >> 4)) & (VM_READ | VM_WRITE | VM_EXEC)) {
+			error = -EACCES;
+			goto out;
+		}
+
+		error = security_file_mprotect(vma, reqprot, prot);
+		if (error)
+			goto out;
+
+		tmp = vma->vm_end;
+		if (tmp > end)
+			tmp = end;
+		error = mprotect_fixup(vma, &prev, nstart, tmp, newflags);
+		if (error)
+			goto out;
+		nstart = tmp;
+
+		if (nstart < prev->vm_end)
+			nstart = prev->vm_end;
+		if (nstart >= end)
+			goto out;
+
+		vma = prev->vm_next;
+		if (!vma || vma->vm_start != nstart) {
+			error = -ENOMEM;
+			goto out;
+		}
+	}
+out:
+
+	//Multikernel
+	if (process_is_distributed(current) && distributed) {
+#if 0 // beowulf
+		vma_server_mprotect_end(start,len,prot,distr_ret);
+#else
+		BUG();
+#endif
+	}
+
+	up_write(&current->mm->mmap_sem);
+	return error;
+
+}
+#endif
+
 SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
 		unsigned long, prot)
 {

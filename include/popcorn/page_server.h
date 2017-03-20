@@ -1,0 +1,29 @@
+/**
+ * @file page_server.h
+ * (public interface)
+ *
+ * Popcorn Linux page server public interface
+ * This work is an extension of Marina Sadini MS Thesis, plese refer to the
+ * Thesis for further information about the algorithm.
+ *
+ * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
+ * @author Antonio Barbalace, SSRG Virginia Tech 2016
+ */
+
+#ifndef INCLUDE_POPCORN_PAGE_SERVER_H_
+#define INCLUDE_POPCORN_PAGE_SERVER_H_
+
+/*
+ * Entry points for dealing with page fault in Popcorn Rack
+ */
+int page_server_handle_pte_fault(
+		struct mm_struct *mm, struct vm_area_struct *vma,
+		unsigned long address, pte_t *pte, pte_t entry, pmd_t *pmd,
+		unsigned int flags);
+
+/*
+ * Flush pages in remote to the origin
+ */
+int page_server_flush_remote_pages(void);
+
+#endif /* INCLUDE_POPCORN_PAGE_SERVER_H_ */

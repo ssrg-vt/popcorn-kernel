@@ -92,6 +92,7 @@ config ARM64
 	select SPARSE_IRQ
 	select SYSCTL_EXCEPTION_TRACE
 	select HAVE_CONTEXT_TRACKING
+	select ARCH_SUPPORTS_POPCORN
 	help
 	  ARM 64-bit (AArch64) Linux support.
 
@@ -180,6 +181,8 @@ config PGTABLE_LEVELS
 	default 4 if !ARM64_64K_PAGES && ARM64_VA_BITS_48
 
 source "init/Kconfig"
+
+source "kernel/Kconfig.popcorn"
 
 source "kernel/Kconfig.freezer"
 

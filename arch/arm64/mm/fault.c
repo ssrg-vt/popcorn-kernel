@@ -41,6 +41,12 @@
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/page_server.h>
+#include <popcorn/process_server.h>
+#include <popcorn/vma_server.h>
+#endif
+
 static const char *fault_name(unsigned int esr);
 
 /*
@@ -214,6 +220,19 @@ static int __do_page_fault(struct mm_struct *mm, unsigned long addr,
 	int fault;
 
 	vma = find_vma(mm, addr);
+#ifdef CONFIG_POPCORN
+	/* vma worker should not fault */
+	BUG_ON(tsk->is_vma_worker);
+
+	if (process_is_distributed(tsk)) {
+		if (!vma || vma->vm_start > addr) {
+			if (vma_server_fetch_vma(tsk, addr) == 0) {
+				/* Replace with updated VMA */
+				vma = find_vma(mm, addr);
+			}
+		}
+	}
+#endif
 	fault = VM_FAULT_BADMAP;
 	if (unlikely(!vma))
 		goto out;

@@ -29,6 +29,10 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
+#endif
+
 static pmd_t *get_old_pmd(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
@@ -392,7 +396,7 @@ static struct vm_area_struct *vma_to_resize(unsigned long addr,
 	return vma;
 }
 
-static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
+unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 		unsigned long new_addr, unsigned long new_len, bool *locked)
 {
 	struct mm_struct *mm = current->mm;
@@ -461,6 +465,8 @@ static int vma_expandable(struct vm_area_struct *vma, unsigned long delta)
 	return 1;
 }
 
+
+
 /*
  * Expand (or shrink) an existing mapping, potentially moving it at the
  * same time (controlled by the MREMAP_MAYMOVE flag and available VM space)
@@ -477,6 +483,10 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 	unsigned long ret = -EINVAL;
 	unsigned long charged = 0;
 	bool locked = false;
+#ifdef CONFIG_POPCORN
+	long distr_ret = -EINVAL;
+	int distributed = 0;
+#endif
 
 	if (flags & ~(MREMAP_FIXED | MREMAP_MAYMOVE))
 		return ret;
@@ -499,6 +509,32 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 		return ret;
 
 	down_write(&current->mm->mmap_sem);
+
+#ifdef CONFIG_POPCORN
+	//Multikernel
+	if (process_is_distributed(current)) {
+		distributed = 1;
+		printk("WARNING: remap called\n");
+#if 0 // beowulf
+		distr_ret = vma_server_do_mremap_start(
+				addr, old_len, new_len, flags, new_addr);
+#else
+		BUG();
+#endif
+
+		if (distr_ret < 0 && distr_ret != VMA_OP_SAVE && distr_ret != VMA_OP_NOT_SAVE)
+			return distr_ret;
+
+		/* Only the server can have as output VMA_OP_SAVE and VMA_OP_NOT_SAVE.
+		 * the only output of server are VMA_OP_SAVE and VMA_OP_NOT_SAVE.
+		 * the client should always overwrite new_addr, the server never.
+		 * */
+		if (distr_ret != VMA_OP_SAVE && distr_ret != VMA_OP_NOT_SAVE) {
+			new_addr = ret;
+			flags |= MREMAP_FIXED;
+		}
+	}
+#endif
 
 	if (flags & MREMAP_FIXED) {
 		ret = mremap_to(addr, old_len, new_addr, new_len,
@@ -578,8 +614,181 @@ out:
 		vm_unacct_memory(charged);
 		locked = 0;
 	}
+
+#ifdef CONFIG_POPCORN
+	//Multikernel
+	if (process_is_distributed(current) && distributed == 1){
+#if 0 // beowulf
+		vma_server_do_mremap_end( addr,
+				old_len,new_len,
+				flags,  new_addr, distr_ret);
+#else
+		BUG();
+#endif
+
+	}
+#endif
+
 	up_write(&current->mm->mmap_sem);
 	if (locked && new_len > old_len)
 		mm_populate(new_addr + old_len, new_len - old_len);
 	return ret;
 }
+
+
+#ifdef CONFIG_POPCORN
+/* 
+ * sanghoon: this function is identical to mremap except mm->mmap_sem is 
+ * down before handing it
+ */
+long kernel_mremap(unsigned long addr, unsigned long old_len,
+		unsigned long new_len, unsigned long flags,
+		unsigned long new_addr)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	unsigned long ret = -EINVAL;
+	unsigned long charged = 0;
+	bool locked = false;
+	long distr_ret = -EINVAL;
+	int distributed= 0;
+
+	if (flags & ~(MREMAP_FIXED | MREMAP_MAYMOVE))
+		return ret;
+
+	if (flags & MREMAP_FIXED && !(flags & MREMAP_MAYMOVE))
+		return ret;
+
+	if (addr & ~PAGE_MASK)
+		return ret;
+
+	old_len = PAGE_ALIGN(old_len);
+	new_len = PAGE_ALIGN(new_len);
+
+	/*
+	 * We allow a zero old-len as a special case
+	 * for DOS-emu "duplicate shm area" thing. But
+	 * a zero new-len is nonsensical.
+	 */
+	if (!new_len)
+		return ret;
+
+	//Multikernel
+	if (process_is_distributed(current)) {
+		distributed = 1;
+		printk("WARNING: remap called\n");
+#if 0 // beowulf
+		distr_ret = vma_server_do_mremap_start(
+				addr, old_len, new_len, flags, new_addr);
+#else
+		BUG();
+#endif
+
+		if (distr_ret < 0 && distr_ret != VMA_OP_SAVE && distr_ret != VMA_OP_NOT_SAVE)
+			return distr_ret;
+
+		/* Only the server can have as output VMA_OP_SAVE and VMA_OP_NOT_SAVE.
+		 * the only output of server are VMA_OP_SAVE and VMA_OP_NOT_SAVE.
+		 * the client should always overwrite new_addr, the server never.
+		 * */
+		if ( distr_ret!=VMA_OP_SAVE && distr_ret != VMA_OP_NOT_SAVE) {
+			new_addr = ret;
+			flags |= MREMAP_FIXED;
+		}
+	}
+
+	if (flags & MREMAP_FIXED) {
+		ret = mremap_to(addr, old_len, new_addr, new_len,
+				&locked);
+		goto out;
+	}
+
+	/*
+	 * Always allow a shrinking remap: that just unmaps
+	 * the unnecessary pages..
+	 * do_munmap does all the needed commit accounting
+	 */
+	if (old_len >= new_len) {
+		ret = do_munmap(mm, addr+new_len, old_len - new_len);
+		if (ret && old_len != new_len)
+			goto out;
+		ret = addr;
+		goto out;
+	}
+
+	/*
+	 * Ok, we need to grow..
+	 */
+	vma = vma_to_resize(addr, old_len, new_len, &charged);
+	if (IS_ERR(vma)) {
+		ret = PTR_ERR(vma);
+		goto out;
+	}
+
+	/* old_len exactly to the end of the area..
+	 */
+	if (old_len == vma->vm_end - addr) {
+		/* can we just expand the current mapping? */
+		if (vma_expandable(vma, new_len - old_len)) {
+			int pages = (new_len - old_len) >> PAGE_SHIFT;
+
+			if (vma_adjust(vma, vma->vm_start, addr + new_len,
+						vma->vm_pgoff, NULL)) {
+				ret = -ENOMEM;
+				goto out;
+			}
+
+			vm_stat_account(mm, vma->vm_flags, vma->vm_file, pages);
+			if (vma->vm_flags & VM_LOCKED) {
+				mm->locked_vm += pages;
+				locked = true;
+				new_addr = addr;
+			}
+			ret = addr;
+			goto out;
+		}
+	}
+
+	/*
+	 * We weren't able to just expand or shrink the area,
+	 * we need to create a new one and move it..
+	 */
+	ret = -ENOMEM;
+	if (flags & MREMAP_MAYMOVE) {
+		unsigned long map_flags = 0;
+		if (vma->vm_flags & VM_MAYSHARE)
+			map_flags |= MAP_SHARED;
+
+		new_addr = get_unmapped_area(vma->vm_file, 0, new_len,
+				vma->vm_pgoff +
+				((addr - vma->vm_start) >> PAGE_SHIFT),
+				map_flags);
+		if (new_addr & ~PAGE_MASK) {
+			ret = new_addr;
+			goto out;
+		}
+
+		ret = move_vma(vma, addr, old_len, new_len, new_addr, &locked);
+	}
+out:
+	if (offset_in_page(ret)) {
+		vm_unacct_memory(charged);
+		locked = 0;
+	}	
+
+	//Multikernel
+	if(process_is_distributed(current) && distributed == 1){
+#if 0 // beowulf
+		vma_server_do_mremap_end( addr,
+				old_len,new_len,
+				flags,  new_addr, distr_ret);
+#else
+		BUG();
+#endif
+	}
+
+	if (locked && new_len > old_len)
+		mm_populate(new_addr + old_len, new_len - old_len);
+	return ret;
+}
+#endif

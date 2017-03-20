@@ -1,0 +1,55 @@
+menu "Popcorn Multi-Kernel Support"
+
+# This is selected by all the architectures Popcorn supports
+config ARCH_SUPPORTS_POPCORN
+	bool
+
+config POPCORN
+	bool "Popcorn Multi-Kernel Support"
+	depends on ARCH_SUPPORTS_POPCORN
+	select CPU_NS
+	default y
+	help
+		Enable or disable the Popcorn multi-kernel Linux support.
+
+config CPU_NS
+	bool
+
+config POPCORN_DEBUG
+	bool "Popcorn debugging messages in kernel log"
+	depends on POPCORN
+	default n
+	help
+		Enable or disable kernel messages that can help debug Popcorn issues.
+
+config POPCORN_DEBUG_PROCESS_SERVER_VERBOSE
+	bool "Print debug message for process server"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_VMA_SERVER_VERBOSE
+	bool "Print debug message for VMA server"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_PAGE_SERVER_VERBOSE
+	bool "Print debug message for page server"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	bool "Print debug message for msg layer"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_MSG_LAYER_VERBOSE_DEBUG
+	bool "Print more debug message for msg layer"
+	depends on POPCORN_DEBUG
+	default n
+
+comment "Popcorn is not currently supported on your architecture"
+	depends on !ARCH_SUPPORTS_POPCORN
+
+source msg_layer/Kconfig
+
+endmenu

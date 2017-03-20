@@ -332,6 +332,7 @@
 323	common	userfaultfd		sys_userfaultfd
 324	common	membarrier		sys_membarrier
 325	common	mlock2			sys_mlock2
+356 common	sched_migrate		sys_sched_migrate
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact

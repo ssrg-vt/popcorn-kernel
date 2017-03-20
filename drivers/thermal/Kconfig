@@ -391,4 +391,12 @@ config QCOM_SPMI_TEMP_ALARM
 	  real time die temperature if an ADC is present or an estimate of the
 	  temperature based upon the over temperature stage value.
 
+config POWER_SENSOR_X86
+	bool "Power sensor for x86"
+	depends on X86 && POPCORN
+
+config POWER_SENSOR_ARM
+	bool "Power sensor for ARM"
+	depends on (ARM || ARM64) && POPCORN
+
 endif
