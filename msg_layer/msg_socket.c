@@ -368,7 +368,7 @@ static int enq_send(struct pcn_kmsg_buf *buf, struct pcn_kmsg_message *msg,
 {
     int err;
 	unsigned long head;
-    MSGDPRINTK("Jackmsglayer: enq_send-1 not used right now\n");
+    MSGDPRINTK("msg_socket: enq_send-1 not used right now\n");
 
     err = down_interruptible(&(buf->q_full));
     if (err != 0) // testing - 0:correct others:wrong
@@ -394,11 +394,10 @@ static int deq_send(struct pcn_kmsg_buf * buf, int conn_no)
     int err;
     struct pcn_kmsg_buf_item msg;
     if (!is_popcorn_node_online(conn_no)) { // if still waiting for connecting
-        msleep(50);
         return -1;
     }
 
-    MSGDPRINTK("Jackmsglayer: deq_send-1 conn_no=%d\n", conn_no);
+    MSGDPRINTK("msg_socket: deq_send-1 conn_no=%d\n", conn_no);
     wait_for_completion(&send_completion[conn_no]); // Jack: make it with using completion
     err = down_interruptible(&(buf->q_empty));      // Jack: TODO: check whethere it's needed since here can be concurrently executed
     if (err != 0) // testing - 0:correct others:wrong
@@ -428,7 +427,7 @@ static int enq_recv(struct pcn_kmsg_buf *buf,
                     struct pcn_kmsg_message *msg, int conn_no)
 {
     int err;
-    MSGDPRINTK("Jackmsglayer: enq_recv-1 conn_no=%d\n", conn_no);
+    MSGDPRINTK("msg_socket: enq_recv-1 conn_no=%d\n", conn_no);
 
     err = down_interruptible(&(buf->q_full));
     if (err != 0) // testing - 0:correct others:wrong
@@ -455,19 +454,18 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
     pcn_kmsg_cbftn ftn; // function pointer - typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
 
     if (!is_popcorn_node_online(conn_no)) { // if still waiting for connecting
-        msleep(50);
         return -1;
     }
 
-    MSGDPRINTK("Jackmsglayer: deq_recv-1 conn_no=%d\n", conn_no);
+    MSGDPRINTK("msg_socket: deq_recv-1 conn_no=%d\n", conn_no);
     // TODO: replace spinlock with wait_for_complete. / wait_for_complete_interruptable() // really?
     wait_for_completion(&recv_completion[conn_no]); //TODO: the same as above
-    MSGDPRINTK("Jackmsglayer: deq_recv-2\n");
+    MSGDPRINTK("msg_socket: deq_recv-2\n");
 
     err = down_interruptible(&(buf->q_empty));
     if (err != 0) // testing - 0:correct others:wrong
         return err;
-    MSGDPRINTK("Jackmsglayer: deq_recv-3\n");
+    MSGDPRINTK("msg_socket: deq_recv-3\n");
     spin_lock(&(buf->deq_buf_mutex));
     //unsigned long head = ACCESS_ONCE(buf->head); // unused
     unsigned long tail = buf->tail;
@@ -542,7 +540,7 @@ static uint32_t get_host_ip(char **name_ret)
 			return IP_TO_UINT32(addr[0], addr[1], addr[2], addr[3]);
 		}
 	}
-	MSGPRINTK(KERN_ERR "Jackmsglayer: ERROR - cannot find host ip\n");
+	MSGPRINTK(KERN_ERR "msg_socket: ERROR - cannot find host ip\n");
 	return -1;
 }
 
@@ -553,18 +551,20 @@ static int __init initialize(void)
     int i, err;
 	char *name;
 	struct sockaddr_in serv_addr;
+	const uint32_t my_ip = get_host_ip(&name);
 
     //TODO: check how to assign a priority to these threads! make msg_layer faster (higher prio)
 	//struct sched_param param = {.sched_priority = 10};
 	MSGPRINTK("--- Popcorn messaging layer init starts ---\n");
 
+	/*
     MSGPRINTK("popcorn_node_online: \n");
     for (i = 0; i < MAX_NUM_NODES; i++)
-        MSGPRINTK("%d:%s ", i, is_popcorn_node_online(i)?"True":"False");
+        MSGPRINTK("%d:%s ", i, is_popcorn_node_online(i) ? "True" : "False");
     MSGPRINTK("\n");
-
+	*/
     for (i = 0; i < MAX_NUM_NODES; i++) {
-        if (get_host_ip(&name) == ip_table[i])  {
+        if (my_ip == ip_table[i])  {
             my_nid = i;
             MSGPRINTK("Device \"%s\" my_nid=%d on machine IP %u.%u.%u.%u\n",
                                                 name, my_nid,
@@ -729,22 +729,21 @@ static int __init initialize(void)
 
 	send_callback = (send_cbftn)sock_kmsg_send_long;
 	smp_mb();
-    msleep(1000);
-    MSGDPRINTK("Jackmsglayer: msg_layer first broadcasts for popcorn info "
+    MSGDPRINTK("msg_socket: msg_layer first broadcasts for popcorn info "
         "this soulde be launched after all connections are well prepared\n");
     MSGPRINTK("--- Popcorn messaging layer is up ---\n");
 
 	/* Make init popcorn call */
 	//_init_RemoteCPUMask(); // msg boradcast //Jack: deal w/ it later
 
-    /* Jack's simple testing if messaging layer healthy & as an example*/ //Jack TODO: move all to another place
+    /* Jack's simple testing if messaging layer healthy & as an example*///Jack TODO: move all to another place
     // register callback. also define in <linux/pcn_kmsg.h>
     pcn_kmsg_register_callback(PCN_KMSG_TYPE_TEST,  // ping -
                     (pcn_kmsg_cbftn)handle_remote_thread_first_test_request);
     //pcn_kmsg_register_callback(PCN_KMSG_TYPE_TEST, // pong - usually a pair but just simply test here
     //                           (pcn_kmsg_cbftn) handle_remote_thread_first_test_response);
 
-    msleep(3000); // make sure everyone's registered
+    msleep(1000); // make sure everyone's registered
     // compose msg - define -> alloc -> essential msg header info
     remote_thread_first_test_request_t* request; // youTODO: make your own struct
 
@@ -765,16 +764,14 @@ static int __init initialize(void)
         if (my_nid == i)
             continue;
     }
-	MSGPRINTK("Testing DONE! muli-node version msg_layer is healthy!!\n");
-    msleep(5000);
-	MSGDPRINTK(" Value of send ptr = %p\n", send_callback);
+	//MSGPRINTK("Testing DONE! msg_layer for multi-nodes is healthy!!\n");
+	//MSGDPRINTK(" Value of send ptr = %p\n", send_callback);
 
-	MSGDPRINTK(KERN_INFO "Popcorn Messaging Layer Initialized\n");
+	MSGDPRINTK(KERN_INFO"Popcorn Messaging Layer Initialized\n");
 
     MSGPRINTK("popcorn_node_online: \n");
     for (i = 0; i < MAX_NUM_NODES; i++)
-        MSGPRINTK("%d:%s ", i, is_popcorn_node_online(i)?"True":"False");
-    MSGPRINTK("\n");
+        MSGPRINTK(" %d: %s\n", i, is_popcorn_node_online(i) ? "online" : "offline");
 
 	return 0;
 }
@@ -789,12 +786,12 @@ static int connect_thread(void* arg0) // for a conn_no
     int conn_no = thread_data->conn_no;
 	struct sockaddr_in dest_addr;
 
-	MSGDPRINTK("Jackmsglayer: %s(): connect_thread() on conn_no=%d\n",
+	MSGDPRINTK("msg_socket: %s(): connect_thread() on conn_no=%d\n",
                                                         __func__, conn_no);
 
     //* sock connection init *//
     if ( conn_no < my_nid ) {
-        msleep(10000);  // for prevent both driver executed at the same time (it means the script can execute at the same time)
+        msleep(5000);  // for prevent both driver executed at the same time (it means the script can execute at the same time)
         err = sock_create(PF_INET, SOCK_STREAM,
             IPPROTO_TCP, &(sock_data[conn_no]));
         if (err < 0) {
@@ -818,9 +815,7 @@ static int connect_thread(void* arg0) // for a conn_no
                 MSGDPRINTK("Failed to connect to socket..!! "
                             "Messaging layer init failed with err %d\n", err);
             }
-            msleep(100);
-        }
-        while (err<0);
+        } while (err < 0);
         up(&connect_sem[conn_no]);
         // For slave, it's connected when connection is established
     } else if ( conn_no > my_nid ) {
@@ -831,7 +826,7 @@ static int connect_thread(void* arg0) // for a conn_no
             return err;
         // For master, it's connected when a connection is accepted
     } else if ( conn_no == my_nid ) {
-        MSGPRINTK("Jackmsglayer: %s(): accept() skip myself\n", __func__);
+        MSGPRINTK("msg_socket: %s(): accept() skip myself\n", __func__);
     }
     // sock connection init done
 	//up(&send_connDone[channel_num]);
@@ -872,7 +867,6 @@ static int accept_handler(void* arg0)
 
     int conn_no = conn_data->conn_no;
 
-    msleep(100);
     if (conn_no > my_nid) {
         err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sock_data[conn_no]);
         if (err < 0) {
@@ -880,7 +874,7 @@ static int accept_handler(void* arg0)
                             "Messaging layer init failed with err %d\n", err);
             goto end;
         }
-        MSGPRINTK("Jackmsglayer: %s(): accept()ing... conn_no=%d\n",
+        MSGPRINTK("msg_socket: %s(): accept()ing... conn_no=%d\n",
                                                         __func__, conn_no);
         err = sock_listen->ops->accept(sock_listen, sock_data[conn_no], 0); //IMPORTANT!!! and cannot be O_NONBLOCK
         if (err < 0) {
@@ -888,7 +882,7 @@ static int accept_handler(void* arg0)
                                             "Messaging layer init failed\n");
             goto exit;
         }
-        MSGPRINTK("Jackmsglayer: %s(): accept() conn_no=%d DONE\n",
+        MSGPRINTK("msg_socket: %s(): accept() conn_no=%d DONE\n",
                                                         __func__, conn_no);
         up(&accept_sem[conn_no]);
         // For master, it's able to receive messages when a connection is accepted
@@ -900,7 +894,7 @@ static int accept_handler(void* arg0)
             return err;
         // For slave, it's able to receive messages when connection is established
     } else if (conn_no == my_nid) {
-        MSGPRINTK("Jackmsglayer: %s(): connection() skip myself\n", __func__);
+        MSGPRINTK("msg_socket: %s(): connection() skip myself\n", __func__);
     }
     // kfree(conn_data); // since conn_data is a global pointers arry, don't release
     MSGPRINTK("%s(): my_nid=%d conn_no=%d ESTABLISHED (GOOD)\n",
@@ -1032,18 +1026,18 @@ static int sock_kmsg_send_long(unsigned int dest_cpu, // called by user or kerne
     while (left > 0) {
         MSGDPRINTK("%s: my_nid=%d dest_cpu=%d conn_no=%d\n",
                                         __func__, my_nid, dest_cpu, dest_cpu);
-        size = ksock_send(sock_data[dest_cpu], p, lmsg->header.size);
+        size = ksock_send(sock_data[dest_cpu], p, left);
         if (size < 0) {
-            msleep(10);
+			io_schedule();
             continue;
         }
         p += size; // p used to move forward // send...| hdr+data | data| data | ... |
         left -= size;
         MSGDPRINTK ("sent %d in %d (total including hdr), left=%d\n",
-                                        left-size, lmsg->header.size, left);
+                                        left - size, lmsg->header.size, left);
     }
     // TODO: mutext_unlock(&mutex_sock_data[dest_cpu]);
-    MSGDPRINTK("Jackmsglayer: 1 msg snet through dest_cpu=%d\n", dest_cpu);
+    MSGDPRINTK("msg_socket: 1 msg snet through dest_cpu=%d\n", dest_cpu);
     /////////////////////////////////////////////////////////////////////////////////////////////////////////
     // TODO: 2. enq() rather than directly ksock_send()
     //enq_send(struct pcn_kmsg_buf * buf, struct pcn_kmsg_message *msg, dest_cpu, payload_size, conn_no);
@@ -1065,7 +1059,6 @@ static void __exit unload(void)
         //sema_destroy(&connect_sem[i]); // api not found
         //sema_destroy(&accept_sem[i]); // api not found
 	}
-	msleep(100);
 
     // these five are local variable
     //kfree(send_data->buf);
@@ -1075,7 +1068,7 @@ static void __exit unload(void)
     //kfree(exec_data);
 
 	/* release */
-    MSGPRINTK("Release threadss\n");
+    MSGPRINTK("Release threads\n");
 	for (i = 0; i < MAX_NUM_NODES; i++) {
         if (handler[i] != NULL)
             kthread_stop(handler[i]);
