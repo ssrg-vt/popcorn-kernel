@@ -132,24 +132,24 @@ static bool have_full_constraints(void)
 	return has_full_constraints || of_have_populated_dt();
 }
 
+static inline struct regulator_dev *rdev_get_supply(struct regulator_dev *rdev)
+{
+	if (rdev && rdev->supply)
+		return rdev->supply->rdev;
+
+	return NULL;
+}
+
 /**
  * regulator_lock_supply - lock a regulator and its supplies
  * @rdev:         regulator source
  */
 static void regulator_lock_supply(struct regulator_dev *rdev)
 {
-	struct regulator *supply;
-	int i = 0;
+	int i;
 
-	while (1) {
-		mutex_lock_nested(&rdev->mutex, i++);
-		supply = rdev->supply;
-
-		if (!rdev->supply)
-			return;
-
-		rdev = supply->rdev;
-	}
+	for (i = 0; rdev; rdev = rdev_get_supply(rdev), i++)
+		mutex_lock_nested(&rdev->mutex, i);
 }
 
 /**
@@ -4273,12 +4273,13 @@ static void regulator_summary_show_subtree(struct seq_file *s,
 	seq_puts(s, "\n");
 
 	list_for_each_entry(consumer, &rdev->consumer_list, list) {
-		if (consumer->dev->class == &regulator_class)
+		if (consumer->dev && consumer->dev->class == &regulator_class)
 			continue;
 
 		seq_printf(s, "%*s%-*s ",
 			   (level + 1) * 3 + 1, "",
-			   30 - (level + 1) * 3, dev_name(consumer->dev));
+			   30 - (level + 1) * 3,
+			   consumer->dev ? dev_name(consumer->dev) : "deviceless");
 
 		switch (rdev->desc->type) {
 		case REGULATOR_VOLTAGE:
