@@ -5,7 +5,7 @@ config POPCORN_KMSG
 	depends on POPCORN
 	default y
 	help
-		Enable or disable support for inter-kernel messaging in Popcorn
+		Support various inter-kernel message passing implementations
 
 config POPCORN_KMSG_LOOPBACK
 	tristate "Loopback messaging layer"

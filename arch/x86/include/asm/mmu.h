@@ -20,7 +20,6 @@ typedef struct {
 
 	struct mutex lock;
 	void __user *vdso;
-	void *popcorn_vdso;
 
 	atomic_t perf_rdpmc_allowed;	/* nonzero if rdpmc is allowed */
 } mm_context_t;

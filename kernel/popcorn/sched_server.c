@@ -79,6 +79,7 @@ static int popcorn_sched_sync(void *_param)
 
 static int handle_sched_periodic(struct pcn_kmsg_message *inc_msg)
 {
+#if defined(CONFIG_POWER_SENSOR_X86) || defined(CONFIG_POWER_SENSOR_ARM)
 	sched_periodic_req *req = (sched_periodic_req *)inc_msg;
 
 	// printk("Power: %d %d %d\n", req->power_1, req->power_2, req->power_3);
@@ -92,6 +93,7 @@ static int handle_sched_periodic(struct pcn_kmsg_message *inc_msg)
 	popcorn_power_arm_1[POPCORN_POWER_N_VALUES - 1] = req->power_1;
 	popcorn_power_arm_2[POPCORN_POWER_N_VALUES - 1] = req->power_2;
 	popcorn_power_arm_3[POPCORN_POWER_N_VALUES - 1] = req->power_3;
+#endif
 #endif
 
 	pcn_kmsg_free_msg(inc_msg);
@@ -185,7 +187,7 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 		return 0; //EOF
 
 	for_each_process(p) {
-		if (process_is_distributed(p) && !p->is_vma_worker) {
+		if (process_is_distributed(p)) {
 			struct task_struct *t;
 
 			if (p->is_vma_worker && !p->at_remote) continue;
@@ -199,6 +201,8 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 
 			for_each_thread(p, t) {
 				unsigned int uload, sload;
+
+				if (p->at_remote && t->is_vma_worker) continue;
 
 				// CPU load per thread
 				popcorn_ps_load(t, &uload, &sload);
