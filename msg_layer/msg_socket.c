@@ -473,6 +473,11 @@ static int __init initialize(void)
 	//struct sched_param param = {.sched_priority = 10};
 	MSGPRINTK("--- Popcorn messaging layer init starts ---\n");
 
+    // register callback. also define in <linux/pcn_kmsg.h>
+    pcn_kmsg_register_callback(PCN_KMSG_TYPE_TEST,  // ping -
+                    (pcn_kmsg_cbftn)handle_remote_thread_first_test_request);
+	send_callback = (send_cbftn)sock_kmsg_send_long;
+
 	/*
     MSGPRINTK("popcorn_node_online: \n");
     for (i = 0; i < MAX_NUM_NODES; i++)
@@ -507,7 +512,6 @@ static int __init initialize(void)
         sema_init(&accept_sem[i],0);   // for waiting connection established
 	    
         mutex_init(&mutex_sock_data[i]);
-    
     }
 
 	/* Initilaize the sock */
@@ -646,8 +650,6 @@ static int __init initialize(void)
         }
     }
 
-	send_callback = (send_cbftn)sock_kmsg_send_long;
-	smp_mb();
     MSGDPRINTK("msg_socket: msg_layer first broadcasts for popcorn info "
         "this soulde be launched after all connections are well prepared\n");
     MSGPRINTK("--- Popcorn messaging layer is up ---\n");
@@ -655,14 +657,7 @@ static int __init initialize(void)
 	/* Make init popcorn call */
 	//_init_RemoteCPUMask(); // msg boradcast //Jack: deal w/ it later
 
-    /* Jack's simple testing if messaging layer healthy & as an example*///Jack TODO: move all to another place
-    // register callback. also define in <linux/pcn_kmsg.h>
-    pcn_kmsg_register_callback(PCN_KMSG_TYPE_TEST,  // ping -
-                    (pcn_kmsg_cbftn)handle_remote_thread_first_test_request);
-    //pcn_kmsg_register_callback(PCN_KMSG_TYPE_TEST, // pong - usually a pair but just simply test here
-    //                           (pcn_kmsg_cbftn) handle_remote_thread_first_test_response);
 
-    msleep(1000); // make sure everyone's registered
     // compose msg - define -> alloc -> essential msg header info
     remote_thread_first_test_request_t* request; // youTODO: make your own struct
 
