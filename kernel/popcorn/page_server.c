@@ -403,6 +403,8 @@ static int __do_invalidate_page(struct task_struct *tsk, struct mm_struct *mm, u
 
 	put_page(page);
 
+	printk("invalidate_page [%d]: %lx\n", tsk->pid, addr);
+
 	return 0;
 }
 
@@ -412,8 +414,6 @@ static void process_remote_page_invalidate(struct work_struct *_work)
 	remote_page_invalidate_t *req = w->msg;
 	struct task_struct *tsk;
 	struct mm_struct *mm;
-
-	printk("invalidate_page [%d]: %lx\n", req->origin_pid, req->addr);
 
 	/* Only home issues invalidate requests. Hence, I am a remote */
 	rcu_read_lock();
@@ -514,17 +514,19 @@ out_free:
 /**************************************************************************
  * Handle for remote page fetch
  */
-static int __forward_remote_page_request(struct task_struct *tsk, struct page *page, pte_t *pte)
+static int __forward_remote_page_request(struct task_struct *tsk, remote_page_request_t *req, struct page *page)
 {
 	struct remote_context *rc = get_task_remote(tsk);
 	int nid;
 	bool forwarded = false;
 
-	WARN_ON("Not implemented yet");
-
 	for_each_set_bit(nid, page->owners, MAX_POPCORN_NODES) {
-		printk("owner is at %d %d\n", nid, rc->remote_tgids[nid]);
+		printk("forward_remote_page_request [%d]: to %d at %d\n",
+				tsk->pid, rc->remote_tgids[nid], nid);
+		req->origin_pid = rc->remote_tgids[nid];
+		pcn_kmsg_send_long(nid, req, sizeof(*req));
 		forwarded = true;
+		break;
 	}
 
 	WARN_ON(!forwarded && "no page owner");
@@ -594,8 +596,7 @@ static int __get_remote_page(struct task_struct *tsk,
 	get_page(page);
 
 	if (!page_is_mine(page)) {
-		// TODO: mark that this page is requested...??/
-		ret = __forward_remote_page_request(tsk, page, pte);
+		ret = __forward_remote_page_request(tsk, req, page);
 		goto out_put;
 	}
 
@@ -684,7 +685,9 @@ out_up:
 	put_task_struct(tsk);
 
 out:
-	__reply_remote_page(from, req->remote_pid, res);
+	if (res->result != VM_FAULT_FORWARDED) {
+		__reply_remote_page(from, req->remote_pid, res);
+	}
 	pcn_kmsg_free_msg(req);
 	kfree(w);
 	kfree(res);
