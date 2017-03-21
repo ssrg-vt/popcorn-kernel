@@ -127,14 +127,14 @@ struct pcn_kmsg_hdr {
 	unsigned int conn_no;
     
     /* rdma */
-    uint32_t remote_rkey;   /* R/W remote RKEY */
-    uint32_t rdma_size;     /* R/W remote size */
-    uint64_t remote_addr;   /* remote TO */ 
-    int ticket;             /* rdma s/r ticket */
-    int rdma_ticket;        /* rdma R/W ticket */
-    int rw_ticket;          /* for dbging R/W sync problem */
-    bool rdma_ack;          /* passive side acks in the end of request */
-    void *your_buf_ptr;     /* will be copied to R/W buffer */
+    //uint32_t remote_rkey;   /* R/W remote RKEY */
+    //uint32_t rdma_size;     /* R/W remote size */
+    //uint64_t remote_addr;   /* remote TO */ 
+    unsigned long ticket;   /* (sock/rdma) s/r ticket */
+    //int rdma_ticket;        /* rdma R/W ticket */
+    //int rw_ticket;          /* for dbging R/W sync problem */
+    //bool rdma_ack;          /* passive side acks in the end of request */
+    //void *your_buf_ptr;     /* will be copied to R/W buffer */
 }__attribute__((packed));
 
 #define CACHE_LINE_SIZE 64

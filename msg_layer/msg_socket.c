@@ -55,7 +55,7 @@ typedef struct {
 }__attribute__((packed)) remote_thread_first_test_request_t; // for cache
 
 static void handle_remote_thread_first_test_request(
-                                struct pcn_kmsg_message* inc_msg)
+                                struct pcn_kmsg_long_message* inc_msg)
 {
     remote_thread_first_test_request_t *request =
 			(remote_thread_first_test_request_t *)inc_msg;
@@ -105,8 +105,8 @@ uint32_t ip_table[MAX_NUM_NODES] ={
 
 /* sock definitions */
 #define PORT 1000
-#define MAX_NUM_BUF         20
 #define MAX_ASYNC_BUFFER  1024 // num of rbuffer for each conn (numb for vmalloc)
+//#define MAX_NUM_BUF         20
 
 static int connect_thread(void *arg0); // kernel thread for waiting signal and then deq()
 static int accept_handler(void* arg0);
@@ -205,7 +205,7 @@ static struct mutex mutex_sock_data[MAX_NUM_NODES];
 
 static void *pcn_kmsg_alloc_msg(size_t size)
 {
-    struct pcn_kmsg_message *msg = vmalloc(size);
+    struct pcn_kmsg_long_message *msg = kmalloc(size, GFP_KERNEL);
 	msg->header.size = size;
     return msg;
 }
@@ -213,16 +213,18 @@ static void *pcn_kmsg_alloc_msg(size_t size)
 static int ksock_send(struct socket *sock, char *buf, int len)
 {
     struct msghdr msg;
-    struct iovec iov;
+    //struct iovec iov;
+    struct kvec iov;
     int size;
-    mm_segment_t oldfs;
+    //mm_segment_t oldfs;
 
     iov.iov_base = buf;
     iov.iov_len = len;
 
+    msg.msg_flags = 0;
     msg.msg_control = NULL;
     msg.msg_controllen = 0;
-    msg.msg_flags = 0;
+    /*
     //msg.msg_iov = &iov;       // 3.12
     msg.msg_iter.iov = &iov;    // 4.4
     //msg.msg_iovlen = 1;       // 3.12
@@ -230,16 +232,18 @@ static int ksock_send(struct socket *sock, char *buf, int len)
     msg.msg_iter.count      = len; // 4.4 Sang-Hoon
     msg.msg_iter.nr_segs    = 1;   // 4.4 Sang-Hoon
     msg.msg_iter.iov_offset = 0;   // 4.4 Sang-Hoon
-
+    */
     msg.msg_name = NULL;    //Jack msg_names[temp->header.type]
     msg.msg_namelen = 0;
-
+    /*
     oldfs = get_fs();
     set_fs(KERNEL_DS);
     // size = sock_sendmsg(sock, &msg, len); // 3.12
     size = sock_sendmsg(sock, &msg); // 4.4
     set_fs(oldfs);
-
+    */
+    // TODO: loop should be here
+    size = kernel_sendmsg(sock, &msg, &iov, 1, iov.iov_len);
     return size;
 }
 
@@ -256,6 +260,7 @@ static int ksock_recv(struct socket *sock, char *buf, int len)
     msg.msg_flags   = 0;
     msg.msg_control = NULL;
     msg.msg_controllen = 0;
+    /*
     //msg.msg_iov   = &iov;     // 3.12
     msg.msg_iter.iov = &iov;    // 4.4
     //msg.msg_iovlen = 1;       // 3.12
@@ -263,15 +268,17 @@ static int ksock_recv(struct socket *sock, char *buf, int len)
     msg.msg_iter.count      = len; // 4.4 Sang-Hoon
     msg.msg_iter.nr_segs    = 1;   // 4.4 Sang-Hoon
     msg.msg_iter.iov_offset = 0;   // 4.4 Sang-Hoon
-
+    */
     msg.msg_name = NULL;    //Jack: msg_names[temp->hdr.type])
     msg.msg_namelen = 0;
 
+    /*
     oldfs = get_fs();
     set_fs(KERNEL_DS);
     size = sock_recvmsg(sock, &msg, len, msg.msg_flags);
     set_fs(oldfs);
-
+    */
+    size = kernel_recvmsg(sock, &msg, &iov, 1, len, msg.msg_flags);
     return size;
 }
 
@@ -279,7 +286,7 @@ static int ksock_recv(struct socket *sock, char *buf, int len)
  * will be replaced with enq_send()
  */
 /*
-static int enq_send(struct pcn_kmsg_buf *buf, struct pcn_kmsg_message *msg,
+static int enq_send(struct pcn_kmsg_buf *buf, struct pcn_kmsg_long_message *msg,
                 unsigned int dest_cpu, unsigned int payload_size, int conn_no)
 {
     int err;
@@ -304,7 +311,7 @@ static int enq_send(struct pcn_kmsg_buf *buf, struct pcn_kmsg_message *msg,
     //complete(&send_completion[dest_cpu]);  // JACK: send to dest sock
     return 0;
 }
-*/
+
 static int deq_send(struct pcn_kmsg_buf * buf, int conn_no)
 {
     int err;
@@ -338,18 +345,20 @@ static int deq_send(struct pcn_kmsg_buf * buf, int conn_no)
     //pcn_kmsg_free_msg(msg.msg); // must be freed by programmer
     return 0;
 }
+*/
 
 static int enq_recv(struct pcn_kmsg_buf *buf,
-                    struct pcn_kmsg_message *msg, int conn_no)
+                    struct pcn_kmsg_long_message *msg, int conn_no)
 {
     int err;
     MSGDPRINTK("msg_socket: enq_recv-1 conn_no=%d\n", conn_no);
 
-    err = down_interruptible(&(buf->q_full));
+    err = down_interruptible(&(buf->q_full)); // 0 will wait
     if (err != 0) // testing - 0:correct others:wrong
         return err;
 
-    spin_lock(&(buf->enq_buf_mutex));
+    //spin_lock(&(buf->enq_buf_mutex));
+    spin_lock(&(buf->deq_buf_mutex));
     unsigned long head = buf->head;
     //unsigned long tail = ACCESS_ONCE(buf->tail); // unused
 
@@ -357,32 +366,38 @@ static int enq_recv(struct pcn_kmsg_buf *buf,
     smp_wmb();
     buf->head = (head + 1) & (MAX_ASYNC_BUFFER - 1);
     up(&(buf->q_empty));    //recv q_empty++
-    spin_unlock(&(buf->enq_buf_mutex));
+    //spin_unlock(&(buf->enq_buf_mutex));
+    spin_unlock(&(buf->deq_buf_mutex));
 
-    complete(&recv_completion[conn_no]); //Jack
+    complete(&recv_completion[conn_no]); //Jack: put into lock? for garuanteeing order
+    MSGDPRINTK("msg_socket: enq_recv-2 conn_no=%d done\n", conn_no);
     return 0;
 }
 
+
+/*
+ * buf is per conn
+ */
 static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 {
     int err;
     struct pcn_kmsg_buf_item msg;
-    pcn_kmsg_cbftn ftn; // function pointer - typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
+    pcn_kmsg_cbftn ftn; // function pointer - typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_long_message *);
 
     if (!is_popcorn_node_online(conn_no)) { // if still waiting for connecting
         return -1;
     }
 
-    MSGDPRINTK("msg_socket: deq_recv-1 conn_no=%d\n", conn_no);
+    MSGDPRINTK("msg_socket: deq_recv-1 conn_no=%d waiting...\n", conn_no);
     // TODO: replace spinlock with wait_for_complete. / wait_for_complete_interruptable() // really?
     wait_for_completion(&recv_completion[conn_no]); //TODO: the same as above
-    MSGDPRINTK("msg_socket: deq_recv-2\n");
+    MSGDPRINTK("msg_socket: deq_recv-2 got a signal\n");
 
     err = down_interruptible(&(buf->q_empty));
     if (err != 0) // testing - 0:correct others:wrong
         return err;
-    MSGDPRINTK("msg_socket: deq_recv-3\n");
     spin_lock(&(buf->deq_buf_mutex));
+    MSGDPRINTK("msg_socket: deq_recv-3 CS\n");
     //unsigned long head = ACCESS_ONCE(buf->head); // unused
     unsigned long tail = buf->tail;
 
@@ -390,25 +405,27 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
     msg = buf->rbuf[tail];
     smp_mb();
     buf->tail = (tail + 1) & (MAX_ASYNC_BUFFER - 1);
-    up(&(buf->q_full));     //recv q_empty++
+    up(&(buf->q_full));     //recv q_full++
     spin_unlock(&(buf->deq_buf_mutex));
 
     if (msg.msg->header.type < 0 ||
                 msg.msg->header.type >= PCN_KMSG_TYPE_MAX) {
         MSGDPRINTK(KERN_INFO "Received invalid message type %d\n",
 				                            msg.msg->header.type);
-        pcn_kmsg_free_msg(msg.msg);
+        //pcn_kmsg_free_msg(msg.msg);
     } else {
         ftn = callbacks[msg.msg->header.type];
         if (ftn != NULL) {
             ftn((void*)msg.msg); // Jack: invoke callback with input arguments
+            //pcn_kmsg_free_msg(msg.msg); //Jack: need to free 3/21
         } else {
             MSGDPRINTK(KERN_INFO "Recieved message type %d size %d "
 					            "has no registered callback!\n",
 					        msg.msg->header.type,msg.msg->header.size);
-            pcn_kmsg_free_msg(msg.msg);
+            //pcn_kmsg_free_msg(msg.msg);
         }
     }
+    pcn_kmsg_free_msg(msg.msg); //Jack: need to free 3/21
     return 0;
 }
 
@@ -512,6 +529,9 @@ static int __init initialize(void)
         sema_init(&accept_sem[i],0);   // for waiting connection established
 	    
         mutex_init(&mutex_sock_data[i]);
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+        dbg_ticket[i] = 0;
+#endif
     }
 
 	/* Initilaize the sock */
@@ -609,10 +629,10 @@ static int __init initialize(void)
         BUG_ON(!send_data);
 
         send_data->conn_no = i;     // Take node 1 for example. connect0 [1] accept2
-        send_data->buf = kmalloc(sizeof(*send_data->buf), GFP_KERNEL);
+        send_data->buf = kmalloc(sizeof(*send_data->buf), GFP_KERNEL); // TODO: kfree
         BUG_ON(!(send_data->buf));
         send_data->buf->rbuf =
-                    vmalloc(sizeof(*send_data->buf->rbuf) * MAX_ASYNC_BUFFER);
+                    vmalloc(sizeof(*send_data->buf->rbuf) * MAX_ASYNC_BUFFER); //TODO: vfree
 
         send_data->buf->head = 0;
         send_data->buf->tail = 0;
@@ -678,7 +698,8 @@ static int __init initialize(void)
         if (my_nid == i)
             continue;
     }
-	//MSGPRINTK("Testing DONE! msg_layer for multi-nodes is healthy!!\n");
+    kfree(request);
+    //MSGPRINTK("Testing DONE! msg_layer for multi-nodes is healthy!!\n");
 	//MSGDPRINTK(" Value of send ptr = %p\n", send_callback);
 
 	MSGDPRINTK(KERN_INFO"Popcorn Messaging Layer Initialized\n");
@@ -750,10 +771,11 @@ static int connect_thread(void* arg0) // for a conn_no
     smp_mb(); // Jack: MUST HAVE. actually I guess mb() is better than atomic since just one shot
     MSGPRINTK("%s(): Connection Established (Done)...PCN_SEND Thread "
                 "my_nid=%d conn_no=%d (GOOD)\n", __func__, my_nid, conn_no);
-
+    /*
     for (;;) {
         err = deq_send(send_buf[conn_no], conn_no); // global array
     }
+    */
 
     return 0;
 }
@@ -768,6 +790,7 @@ static int executer_thread(void* arg0)
         // TODO: change to
         err = deq_recv(recv_buf[conn_no], conn_no);
     }
+    //kfree(data); // TODO:
 	return 0;
 }
 
@@ -776,7 +799,7 @@ static int accept_handler(void* arg0)
     /** after sock_create ->  bind -> listern, now waiting for new connections **/
     // Jack: from sock
     int err;
-    struct pcn_kmsg_message *data;
+    struct pcn_kmsg_long_message *data;
     conn_thread_data *conn_data = (conn_thread_data*) arg0; // a threads handler data
 
     int conn_no = conn_data->conn_no;
@@ -824,19 +847,21 @@ static int accept_handler(void* arg0)
     int len;
     int ret;
     size_t offset;
-    struct pcn_kmsg_message *msg;
-    data = (struct pcn_kmsg_message*) pcn_kmsg_alloc_msg(2 * PAGE_SIZE); //Jack: TODO: check why 2 ??
-    if (data == NULL) {
-        MSGDPRINTK("Unable to alloc a message\n");
-    }
+    //struct pcn_kmsg_long_message *msg;
+    //data = (struct pcn_kmsg_long_message*) pcn_kmsg_alloc_msg(2 * PAGE_SIZE); //Jack: TODO: check why 2 ??
 
 	set_popcorn_node_online(conn_no); //Jack: atomic is more safe
     smp_mb(); // Jack: MUST HAVE. actually I guess mb() is better than atomic since just one shot
 
-    while (1) {
+    while (1) { /* only single demon doing this */
         //if (kthread_should_stop()) { //Jack: I think no need
         //    goto exit;    // check has anyone call thread_stop
         //}
+        
+        data = pcn_kmsg_alloc_msg(sizeof(struct pcn_kmsg_long_message)); //MAX msg size
+        if (data == NULL) {
+            MSGDPRINTK("Unable to alloc a message\n");
+        }
 
         /* TODO: Jack IMPORTANT for performance !!!!!!!!!!!!!!!!!
          * here we can use complete:
@@ -844,27 +869,54 @@ static int accept_handler(void* arg0)
          * the callback func execution part uses -> complete() or complete_all()
         */
 
-        offset = sizeof(struct pcn_kmsg_hdr);
-        ret = ksock_recv(sock_data[conn_no], (char *) data, offset); // blocking here
-        MSGDPRINTK ("recv %d in %d (total including hdr)\n",
-                                            ret, data->header.size);
-        len = data->header.size - sizeof(struct pcn_kmsg_hdr);
-        msg = pcn_kmsg_alloc_msg(data->header.size);
-        memcpy(msg, data, sizeof(*msg));
-        for (; len > 0;) {
-            ret = ksock_recv(sock_data[conn_no], ((char *) msg) + offset, len);
+        //- compose hdr in data -//
+        offset = 0;
+        len = sizeof(struct pcn_kmsg_hdr);
+        for(;len>0;) {
+            ret = ksock_recv(sock_data[conn_no], (char *) data + offset, len); // blocking here
             if (ret == -1)
                 continue;
             offset += ret;
             len -= ret;
+            MSGDPRINTK("demon: (hdr) recv %d in %lu (total including hdr) from NIC\n",
+                                              ret, sizeof(struct pcn_kmsg_hdr));
         }
 
+        //- compose body -//
+        //- data to msg -//
+        // offset remains the same
+        len = data->header.size - sizeof(struct pcn_kmsg_hdr);
+        //msg = pcn_kmsg_alloc_msg(data->header.size);
+        //msg = pcn_kmsg_alloc_msg(len);
+        //msg = pcn_kmsg_alloc_msg(len);
+MSGDPRINTK ("demon: (info) t %lu, data(msg) size = len %d = %d-%lu\n", 
+    data->header.ticket, len, data->header.size, sizeof(struct pcn_kmsg_hdr));
+        //memcpy(msg, data, sizeof(*msg));
+        //memcpy(msg, data, sizeof(struct pcn_kmsg_hdr));
+        // TODO: check if()
+            //offset += sizeof(struct pcn_kmsg_hdr);
+        
+        //- data -//
+        for (; len > 0;) {
+            //ret = ksock_recv(sock_data[conn_no], ((char *) msg) + offset, len);
+            ret = ksock_recv(sock_data[conn_no], ((char *) data) + offset, len);
+            if (ret == -1)
+                continue;
+            offset += ret;
+            len -= ret;
+            MSGDPRINTK("demon: (body) recv %lu in %d (total including hdr), left=%d\n",
+                                                 offset, data->header.size, len);
+                                                 //offset, msg->header.size, len);
+        }
+        
         if (data->header.size < sizeof(struct pcn_kmsg_hdr)) {
-            MSGDPRINTK("Corrupt message\n");
-            pcn_kmsg_free_msg(msg);
+            printk(KERN_ERR "Corrupt message\n");
+            //pcn_kmsg_free_msg(data);
+            //pcn_kmsg_free_msg(msg);
             continue;
         }
-        err = enq_recv(recv_buf[conn_no], msg, conn_no);
+        err = enq_recv(recv_buf[conn_no], data, conn_no);
+        //err = enq_recv(recv_buf[conn_no], msg, conn_no);
 
         /////////////////////////////////periodic debug
 #if MSG_TEST
@@ -897,22 +949,25 @@ static int sock_kmsg_send_long(unsigned int dest_cpu, // called by user or kerne
     volatile int left;
     int size = 0;
 
-    lmsg->header.size = payload_size;
+    //lmsg->header.size = payload_size; // future
+    lmsg->header.size = payload_size + sizeof(struct pcn_kmsg_hdr);
     lmsg->header.from_cpu = my_nid;
 
     // Jack: multi-msg_layer - Send msg to itself
     if (dest_cpu == my_nid) {
         // copy msg data since programmer will free two buffers (send & recv_handler) !!
-        struct pcn_kmsg_long_message *msg = pcn_kmsg_alloc_msg(payload_size);
+        //struct pcn_kmsg_long_message *msg = pcn_kmsg_alloc_msg(payload_size); // future
+        struct pcn_kmsg_long_message *msg = pcn_kmsg_alloc_msg(lmsg->header.size);
         BUG_ON(!msg);
-        memcpy(msg, lmsg, payload_size);
+        //memcpy(msg, lmsg, payload_size);
+        memcpy(msg, lmsg, lmsg->header.size);
 
         if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
             MSGDPRINTK(KERN_INFO "Received invalid message type %d\n",
                                                             msg->header.type);
-            pcn_kmsg_free_msg(msg);
+            //pcn_kmsg_free_msg(msg);
         } else {
-            pcn_kmsg_cbftn ftn; // function pointer - typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
+            pcn_kmsg_cbftn ftn; // function pointer - typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_long_message *);
             ftn = callbacks[msg->header.type];
             if (ftn != NULL) {
                 ftn((void*)msg);       // Jack: invoke callback with input arguments
@@ -921,12 +976,14 @@ static int sock_kmsg_send_long(unsigned int dest_cpu, // called by user or kerne
                                      "has no registered callback!\n",
                                      msg->header.type, msg->header.size);
 
-                pcn_kmsg_free_msg(msg);
+                //pcn_kmsg_free_msg(msg);
             }
         }
+        pcn_kmsg_free_msg(msg); // 3/21
         return 0;
     }
 
+    mutex_lock(&mutex_sock_data[dest_cpu]);
     // Send to others - two way to do. 1. directely send() 2 enq()
     //1.
     left = lmsg->header.size;
@@ -934,25 +991,25 @@ static int sock_kmsg_send_long(unsigned int dest_cpu, // called by user or kerne
     /////////////////////////////////////////////////////////////////////////////////////////////////////////
     // TODO: //mutex for sync problem // the following example code almost works but NEED TO TEST!!!!!
     // TODO: //mutex for sync problem // DO THE SAME FOR RECV
-    mutex_lock(&mutex_sock_data[dest_cpu]);
+    MSGDPRINTK("%s: my_nid=%d dest_cpu=%d ticket=%lu conn_no=%d\n",
+                    __func__, my_nid, dest_cpu, lmsg->header.ticket, dest_cpu);
     while (left > 0) {
-        MSGDPRINTK("%s: my_nid=%d dest_cpu=%d conn_no=%d\n",
-                                        __func__, my_nid, dest_cpu, dest_cpu);
         size = ksock_send(sock_data[dest_cpu], p, left);
         if (size < 0) {
+            MSGDPRINTK("%s: send size < 0\n", __func__);
 			io_schedule();
             continue;
         }
         p += size; // p used to move forward // send...| hdr+data | data| data | ... |
         left -= size;
-        MSGDPRINTK ("sent %d in %d (total including hdr), left=%d\n",
-                                        left - size, lmsg->header.size, left);
+        MSGDPRINTK ("\tsent %d in %d (total including hdr), left=%d\n",
+                                        size, lmsg->header.size, left);
     }
     mutex_unlock(&mutex_sock_data[dest_cpu]);
     MSGDPRINTK("msg_socket: 1 msg snet through dest_cpu=%d\n", dest_cpu);
     /////////////////////////////////////////////////////////////////////////////////////////////////////////
     // TODO: 2. enq() rather than directly ksock_send()
-    //enq_send(struct pcn_kmsg_buf * buf, struct pcn_kmsg_message *msg, dest_cpu, payload_size, conn_no);
+    //enq_send(struct pcn_kmsg_buf * buf, struct pcn_kmsg_long_message *msg, dest_cpu, payload_size, conn_no);
     //send_data->assoc_buf->status = 1; // pcie code, I don't think we need this
     /////////////////////////////////////////////////////////////////////////////////////////////////////////
     return 0;

@@ -663,7 +663,7 @@ int pcn_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 }
 
 inline void pcn_kmsg_free_msg(void *msg){
-	vfree(msg);
+	kfree(msg);
 }
 
 //TODO

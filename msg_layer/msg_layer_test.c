@@ -5,7 +5,6 @@
  *                      - large data (>=8K)
  *                      - (rdma read/write)
  */
-//#include "msg_layer_test.h"
 #include <linux/module.h>
 
 #include <linux/proc_fs.h>
@@ -23,11 +22,8 @@
 #include "msg_layer2.h"
 
 // for testing rdma read (test2)
-//int g_test_remote_len = (16384/4)-500;
 int g_test_remote_len = 4*1024; // testing size for RDMA, mimicing user buf size // for rdma dbg
-//int g_test_remote_len = 100; // try smaller one
 char *g_test_buf; // mimicing user buf
-
 
 int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback) 
 {
@@ -50,12 +46,22 @@ typedef struct {
 }__attribute__((packed)) remote_thread_first_test_request_t; // for cache
 
 /* example - handler */
-static void handle_remote_thread_first_test_request(struct pcn_kmsg_long_message* inc_lmsg)
+static void handle_remote_thread_first_test_request(
+                                        struct pcn_kmsg_long_message* inc_lmsg)
 {
-    remote_thread_first_test_request_t* request = (remote_thread_first_test_request_t*) inc_lmsg;
+    remote_thread_first_test_request_t* request = 
+                        (remote_thread_first_test_request_t*) inc_lmsg;
     
-    EXP_LOG("<<<<< Jack MSG_LAYER SELF-TESTING1: my_nid=%d from_cpu=%d example1=%d example2=%d msg_layer(good) >>>>>\n", 
-            my_nid, request->hdr.from_cpu, request->example1, request->example2);
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+    EXP_LOG("<<< TEST1: my_nid=%d t %lu "
+                            "example1(from)=%d example2=%d msg_layer(good) >>>\n", 
+                            my_nid, request->hdr.ticket, 
+                            request->example1, request->example2);
+#else
+    EXP_LOG("<<< TEST1: my_nid=%d example1(from)=%d "
+                        "example2=%d msg_layer(good) >>>\n", 
+                        my_nid, request->example1, request->example2);
+#endif
     /* extra examples */
     // sync
     //down_read(&mm_data->kernel_set_sem);
@@ -72,8 +78,7 @@ static void handle_remote_thread_first_test_request(struct pcn_kmsg_long_message
 
 static int test1(void)
 {
-    int i, tmp;
-    atomic_t cnt;
+    int i;
     /* ----- 1st testing ----- */
     /* pre-register corresponding handlers
     // register callback. also define in <linux/pcn_kmsg.h> 
@@ -85,39 +90,38 @@ static int test1(void)
 
     // compose msg - define -> alloc -> essential msg header info
     remote_thread_first_test_request_t* request; // youTODO: make your own struct 
-    request = (remote_thread_first_test_request_t*) kmalloc(sizeof(remote_thread_first_test_request_t), GFP_KERNEL);
+    request = kmalloc(sizeof(*request), GFP_KERNEL);
     if(request==NULL)
         return -1;
 
     request->hdr.type = PCN_KMSG_TYPE_FIRST_TEST;   // idx 0 // this indicates if it's a rdma read/write request as well
     request->hdr.prio = PCN_KMSG_PRIO_NORMAL;       // not supported yet
-    //request->tgroup_home_cpu = tgroup_home_cpu;
-    //request->tgroup_home_id = tgroup_home_id;
+    //request->tgroup_home_cpu = tgroup_home_cpu;   // legacy
+    //request->tgroup_home_id = tgroup_home_id;     // legacy
 
     /* msg essentials */
     /* ------------------------------------------------------------ */
     /* msg dependences */
-    cnt.counter = 0;
-    atomic_inc(&cnt);               // doesn't solve the problem
-    tmp = atomic_read(&cnt);    // doesn't solve the problem
-    request->example1 = tmp;        // doesn't solve the problem
+    request->example1 = my_nid;        // doesn't solve the problem
     request->example2 = 228;
     memset(request->msg,'J', sizeof(request->msg));
-    EXP_LOG("\n%s(): testing msg size = strlen(request->msg) %d %d to all others\n", __func__, (int)strlen(request->msg), tmp); //8192
+    EXP_LOG("\n%s(): testing msg size = strlen(request->msg) %d "
+                                        "to all others\n", __func__,
+                                            (int)strlen(request->msg));
 
     // send msg - broadcast // Jack TODO: compared with list_for_each_safe, which one is faster
     for(i=0; i<MAX_NUM_NODES; i++) {
         if(my_nid==i)
             continue;
-        DEBUG_LOG_V("Jack: send a msg to dst %d\n", i);
+        //DEBUG_LOG_V("Jack: sending a msg to dst %d ......\n", i);
         pcn_kmsg_send_long(i, (struct pcn_kmsg_long_message*) request,
-            sizeof(remote_thread_first_test_request_t) - sizeof(struct pcn_kmsg_hdr));  //Jack: redundant calculation
-            //sizeof(remote_thread_first_test_request_t) - sizeof(struct pcn_kmsg_rdma_hdr));  //Jack: redundant calculation
+            sizeof(*request) - sizeof(request->hdr));n
     }
 
     //3/13 free manually since user can reuse their buf
     kfree(request); //TODO: uncomment it but will crash!!!
-    DEBUG_LOG_V("Jack's testing DONE! If see N-1 (good), muli-node msg_layer over ipoib is healthy!!!\n");
+    //DEBUG_LOG_V("Jack's testing DONE! If see N-1 (good), "
+    //            "muli-node msg_layer over ipoib is healthy!!!\n");
     return 0;
 }
 
@@ -127,7 +131,7 @@ static int test2(void)
 {
     volatile int i;
     /* ----- 2nd testing: r_read ----- */
-    ////////////////////////////////////////////////rdma read///////////////////////////////////////////////////////////////////////////////
+    //////////////////////rdma read//////////////////////////////////
     /*  [compose]
      *  send       ---->   irq (recv)
      *                      perform READ
@@ -169,13 +173,13 @@ static int test2(void)
         /* [ib client] sending read key to remote server. this func will take care of EVERYTHING*/
         pcn_kmsg_send_rdma(i, (struct pcn_kmsg_rdma_message*)request_rdma_read, //pcn_kmsg_send_rdma()
                                g_test_remote_len); //1024*4*4
-                                                                                                //TODO kill this arg
-                                                            //TODO: make it as a func after WRITE is done according to request_type
+                                                        //TODO kill this arg
+        //TODO: make it as a func after WRITE is done according to request_type
         DEBUG_LOG_V("\n\n\n"); 
     }
     kfree(request_rdma_read);
     //DEBUG_LOG_V("Jack's READ testing DONE! If see N-1 (good), muli-node msg_layer over ipoib is healthy!!!\n");
-    ////////////////////////////////////////////////rdma read///////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////rdma read/////////////////////////////////////
     return 0;
 }
 
@@ -184,7 +188,7 @@ static int test3(void)
 {
     int i;
     /* ----- 3rd testing: r_write ----- */
-    ////////////////////////////////////////////////rdma write///////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////rdma write//////////////////////////////
     /* pre-register corresponding handlers
     // register callback. also define in <linux/pcn_kmsg.h> 
     pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_RDMA_READ_REQUEST,     // ping - 
@@ -451,6 +455,7 @@ static int __init msg_layer_test_init(void)
 
 static void __exit msg_layer_test_unload(void) {
     printk("\n\n--- Popcorn messaging self testing unloaded! ---\n\n");
+    remove_proc_entry("kmsg_test", NULL);
 }
 
 module_init(msg_layer_test_init);

@@ -67,7 +67,7 @@ int pcn_kmsg_send(unsigned int to, void *msg)
 
 void pcn_kmsg_free_msg(void *msg)
 {
-	vfree(msg);
+	kfree(msg);
 }
 
 
