@@ -195,7 +195,6 @@ DEFINE_PCN_KMSG(remote_task_pairing_t, REMOTE_TASK_PAIRING_FIELDS);
 	pid_t remote_pid; \
 	bool expect_flush; \
 	long exit_code; \
-	int group_exit; \
 	field_arch arch;
 DEFINE_PCN_KMSG(task_exit_t, TASK_EXIT_FIELDS);
 
@@ -255,6 +254,7 @@ DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
 
 #define REMOTE_PAGE_FLUSH_FIELDS \
 	pid_t origin_pid; \
+	int remote_nid; \
 	pid_t remote_pid; \
 	unsigned long addr; \
 	bool last; \
@@ -275,6 +275,9 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
 /**
  * Message routing using work queues
  */
+extern struct workqueue_struct *popcorn_wq;
+extern struct workqueue_struct *popcorn_ordered_wq;
+
 struct pcn_kmsg_work {
 	struct work_struct work;
 	void *msg;
@@ -292,9 +295,13 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 	return 1;
 }
 
-#define DEFINE_KMSG_WQ_HANDLER(x, wq) \
+#define DEFINE_KMSG_WQ_HANDLER(x) \
 static inline int handle_##x(struct pcn_kmsg_message *msg) {\
-	return __handle_popcorn_work(msg, process_##x, wq);\
+	return __handle_popcorn_work(msg, process_##x, popcorn_wq);\
+}
+#define DEFINE_KMSG_ORDERED_WQ_HANDLER(x) \
+static inline int handle_##x(struct pcn_kmsg_message *msg) {\
+	return __handle_popcorn_work(msg, process_##x, popcorn_ordered_wq);\
 }
 
 #define REGISTER_KMSG_WQ_HANDLER(x, y) \

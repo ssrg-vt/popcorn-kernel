@@ -297,7 +297,7 @@ int __init popcorn_ns_init(int force)
 }
 
 
-#if 0 // beowulf: actually does not used because proc entry is readonly.
+#if 0
 /* despite this is not the correct way to go, this is working in this way
  * every time we are writing something on this file (even NULL)
  * we are rebuilding a new popcorn namespace merging all the available kernels
@@ -411,20 +411,11 @@ static struct file_operations fops = {
 
 int register_popcorn_ns(void)
 {
-	// if kernels > 1 then create /proc/popcorn
 	struct proc_dir_entry *res;
 
-	printk(KERN_INFO"Popcornlinux NS: Creating popcorn namespace entry in proc\n");
+	printk(KERN_INFO"Creating popcorn namespace entry in procfs\n");
 
-	/* Linux 3.2.14 */
-	/*res = create_proc_entry("popcorn", S_IRUGO, NULL);
-	if (!res) {
-		printk(KERN_ALERT"%s: create_proc_entry failed (%p)\n", __func__, res);
-		return -ENOMEM;
-	}*/
-
-	/* Linux 3.12 onwards */
-	res = proc_create("popcorn", S_IRUGO, NULL, &fops);
+	res = proc_create("cpu_ns", S_IRUGO, NULL, &fops);
 	if (!res) {
 		printk(KERN_ERR"Popcornlinux NS: (ERROR) Failed to create proc entry!");
 		return -1;

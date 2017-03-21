@@ -38,10 +38,6 @@
 #include "types.h"
 #include "vma_server.h"
 
-
-static struct workqueue_struct *vma_op_wq;
-
-
 ///////////////////////////////////////////////////////////////////////////////
 // Heterogeneous binary support
 ///////////////////////////////////////////////////////////////////////////////
@@ -124,6 +120,8 @@ out:
 ///////////////////////////////////////////////////////////////////////////////
 // Legacy codes. Remove them quickly
 ///////////////////////////////////////////////////////////////////////////////
+LIST_HEAD(rlist_head);
+
 typedef struct mapping_answers_2_kernels {
 	struct mapping_answers_2_kernels* next;
 	struct mapping_answers_2_kernels* prev;
@@ -236,7 +234,7 @@ static vma_lock_t * vma_lock_alloc(struct task_struct * task, int from_cpu, int 
 {
 	vma_lock_t* lock_message = kmalloc(sizeof(vma_lock_t), GFP_ATOMIC);
 
-	lock_message->header.type = PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK;
+	lock_message->header.type = PCN_KMSG_TYPE_VMA_LOCK;
 	lock_message->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	lock_message->origin_nid = task->origin_nid;
@@ -253,7 +251,7 @@ static vma_operation_t * vma_operation_alloc(struct task_struct * task, int op_i
 {
 	vma_operation_t* operation = kmalloc(sizeof(vma_operation_t), GFP_ATOMIC);
 
-	operation->header.type = PCN_KMSG_TYPE_PROC_SRV_VMA_OP;
+	operation->header.type = PCN_KMSG_TYPE_VMA_OP;
 	operation->header.prio = PCN_KMSG_PRIO_NORMAL;
 	operation->origin_nid = task->origin_nid;
 	operation->origin_pid = task->origin_pid;
@@ -647,7 +645,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 
 		memory->arrived_op = 1;
 		lock_task_sighand(memory->helper, &flags);
-		memory->helper->distributed_exit = EXIT_FLUSHING;
+		//memory->helper->distributed_exit = EXIT_FLUSHING;
 		unlock_task_sighand(memory->helper, &flags);
 
 		wake_up_process(memory->helper);
@@ -923,7 +921,7 @@ static void process_vma_lock(struct work_struct* _work)
 	ack_to_server->origin_nid = lock->origin_nid;
 	ack_to_server->origin_pid = lock->origin_pid;
 	ack_to_server->vma_operation_index = lock->vma_operation_index;
-	ack_to_server->header.type = PCN_KMSG_TYPE_PROC_SRV_VMA_ACK;
+	ack_to_server->header.type = PCN_KMSG_TYPE_VMA_ACK;
 	ack_to_server->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	pcn_kmsg_send_long(lock->origin_nid, ack_to_server, sizeof(*ack_to_server));
@@ -984,7 +982,7 @@ static int handle_vma_op(struct pcn_kmsg_message* inc_msg)
 		work->memory = memory;
 		work->operation = operation;
 		INIT_WORK((struct work_struct*)work, vma_server_process_vma_op);
-		queue_work(vma_op_wq, (struct work_struct*) work);
+		queue_work(popcorn_ordered_wq, (struct work_struct*) work);
 	} else {
 		if (operation->origin_nid == my_nid)
 			printk("%s: ERROR: received an operation that said that I am the server but no memory_t found\n", __func__);
@@ -1597,7 +1595,7 @@ int vma_server_enqueue_vma_op(
 	work->operation = operation;
 
 	INIT_WORK((struct work_struct *)work, vma_server_process_vma_op);
-	queue_work(vma_op_wq, (struct work_struct *)work);
+	queue_work(popcorn_ordered_wq, (struct work_struct *)work);
 
 	return 0;
 }
@@ -2111,25 +2109,15 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 }
 
 
-DEFINE_KMSG_WQ_HANDLER(remote_vma_request, vma_op_wq);
-DEFINE_KMSG_WQ_HANDLER(remote_vma_response, vma_op_wq);
-DEFINE_KMSG_WQ_HANDLER(vma_lock, vma_op_wq);
+DEFINE_KMSG_WQ_HANDLER(remote_vma_request);
+DEFINE_KMSG_WQ_HANDLER(remote_vma_response);
+DEFINE_KMSG_ORDERED_WQ_HANDLER(vma_lock);
 
 int vma_server_init(void)
 {
-	/*
-	 * These two workqueues are singlethread because we ran into
-	 * synchronization issues using multithread workqueues.
-	 */
-	vma_op_wq = create_singlethread_workqueue("vma_op_wq");
-	if (!vma_op_wq) return -ENOMEM;
-
-	pcn_kmsg_register_callback(
-			PCN_KMSG_TYPE_PROC_SRV_VMA_OP, handle_vma_op);
-	pcn_kmsg_register_callback(
-			PCN_KMSG_TYPE_PROC_SRV_VMA_ACK, handle_vma_ack);
-	REGISTER_KMSG_WQ_HANDLER(
-			PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK, vma_lock);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_VMA_OP, handle_vma_op);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_VMA_ACK, handle_vma_ack);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_VMA_LOCK, vma_lock);
 
 	/* sanghoon: sanitized */
 	REGISTER_KMSG_WQ_HANDLER(

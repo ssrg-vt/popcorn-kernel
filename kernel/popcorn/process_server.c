@@ -33,9 +33,6 @@
 #include "page_server.h"
 #include "stat.h"
 
-static struct workqueue_struct *clone_wq;
-static struct workqueue_struct *exit_wq;
-
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
@@ -172,9 +169,8 @@ int process_server_task_exit(struct task_struct *tsk)
 
 	rc = tsk->mm->remote;
 
-	PSPRINTK("EXIT [%d]: %s / 0x%x 0x%x\n", tsk->pid,
-			tsk->at_remote ? "remote" : "local",
-			tsk->exit_code, tsk->group_exit);
+	PSPRINTK("EXIT [%d]: %s / 0x%x\n", tsk->pid,
+			tsk->at_remote ? "remote" : "local", tsk->exit_code);
 	/*
 	printk("EXIT [%d]: 0x%p %d\n", tsk->pid, rc, atomic_read(&rc->count));
 	__show_regs(regs, 1);
@@ -207,13 +203,12 @@ int process_server_task_exit(struct task_struct *tsk)
 			}
 
 			// Notify the origin of the task exit
-			req->header.type = PCN_KMSG_TYPE_PROC_SRV_TASK_EXIT;
+			req->header.type = PCN_KMSG_TYPE_TASK_EXIT;
 			req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 			req->origin_pid = tsk->origin_pid;
 			req->remote_pid = tsk->pid;
 			req->exit_code = tsk->exit_code;
-			req->group_exit = tsk->group_exit;
 
 			req->expect_flush = last;
 
@@ -259,8 +254,8 @@ static void process_exit_task(struct work_struct *_work)
 	tsk = find_task_by_vpid(req->origin_pid);
 
 	if (tsk && tsk->remote_pid == req->remote_pid) {
-		printk(KERN_INFO"%s [%d]: exited with 0x%lx, 0x%x\n", __func__,
-				tsk->pid, req->exit_code, req->group_exit);
+		printk(KERN_INFO"%s [%d]: exited with 0x%lx\n", __func__,
+				tsk->pid, req->exit_code);
 
 		if (req->expect_flush) {
 			wait_for_completion(&tsk->wait_for_remote_flush);
@@ -272,7 +267,6 @@ static void process_exit_task(struct work_struct *_work)
 
 		tsk->ret_from_remote = TASK_DEAD;
 		tsk->exit_code = req->exit_code;
-		tsk->group_exit = req->group_exit;
 
 		restore_thread_info(tsk, &req->arch, false);
 		smp_wmb();
@@ -379,7 +373,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	}
 
 	//printk("%s entered dst{%d}\n", __func__, dst_cpu);
-	req->header.type = PCN_KMSG_TYPE_PROC_SRV_BACK_MIGRATE;
+	req->header.type = PCN_KMSG_TYPE_TASK_MIGRATE_BACK;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	req->origin_pid = tsk->origin_pid;
@@ -458,7 +452,7 @@ static int __pair_remote_task(struct task_struct *tsk)
 
 	// Notify remote cpu of pairing between current task and remote
 	// representative task.
-	req->header.type = PCN_KMSG_TYPE_PROC_SRV_TASK_PAIRING;
+	req->header.type = PCN_KMSG_TYPE_TASK_PAIRING;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 	req->my_nid = my_nid;
 	req->my_tgid = current->tgid;
@@ -750,7 +744,7 @@ static int handle_clone_request(struct pcn_kmsg_message *msg)
 
 	work->msg = req;
 	INIT_WORK((struct work_struct *)work, clone_remote_thread);
-	queue_work(clone_wq, (struct work_struct *)work);
+	queue_work(popcorn_wq, (struct work_struct *)work);
 
 	return 0;
 }
@@ -774,7 +768,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 	BUG_ON(!req);
 
 	/* Build request */
-	req->header.type = PCN_KMSG_TYPE_PROC_SRV_MIGRATE;
+	req->header.type = PCN_KMSG_TYPE_TASK_MIGRATE;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* struct mm_struct */
@@ -932,21 +926,13 @@ int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, v
 }
 
 
-DEFINE_KMSG_WQ_HANDLER(exit_task, exit_wq);
+DEFINE_KMSG_WQ_HANDLER(exit_task);
 
 /**
  * Initialize the process server.
  */
 int __init process_server_init(void)
 {
-	/**
-	 * Create work queues so that we can do bottom side
-	 * processing on data that was brought in by the
-	 * communications module interrupt handlers.
-	 */
-	clone_wq = create_workqueue("clone_wq");
-	exit_wq  = create_workqueue("exit_wq");
-
 	INIT_LIST_HEAD(&remote_contexts[0]);
 	INIT_LIST_HEAD(&remote_contexts[1]);
 
@@ -954,15 +940,12 @@ int __init process_server_init(void)
 	spin_lock_init(&remote_contexts_lock[1]);
 
 	/* Register handlers */
-	REGISTER_KMSG_HANDLER(
-			PCN_KMSG_TYPE_PROC_SRV_MIGRATE, clone_request);
-	REGISTER_KMSG_HANDLER(
-			PCN_KMSG_TYPE_PROC_SRV_BACK_MIGRATE, back_migration);
-	REGISTER_KMSG_HANDLER(
-			PCN_KMSG_TYPE_PROC_SRV_TASK_PAIRING, remote_task_pairing);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_MIGRATE, clone_request);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_MIGRATE_BACK, back_migration);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_PAIRING, remote_task_pairing);
 
 	REGISTER_KMSG_WQ_HANDLER(
-			PCN_KMSG_TYPE_PROC_SRV_TASK_EXIT, exit_task);
+			PCN_KMSG_TYPE_TASK_EXIT, exit_task);
 
 	return 0;
 }

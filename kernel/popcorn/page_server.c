@@ -252,13 +252,13 @@ static void process_remote_page_flush(struct work_struct *work)
 		BUG_ON(IS_ERR(page));
 	}
 
-	printk("%s: %lx %s\n", __func__, req->addr,
-			pte_write(*pte) ? "writable" : "protected");
-
+	lock_page(page);
 	paddr = kmap_atomic(page);
 	memcpy(paddr, req->page, PAGE_SIZE);
 	kunmap_atomic(paddr);
 	set_bit(my_nid, page->owners);
+	clear_bit(req->remote_nid, page->owners);
+	unlock_page(page);
 	put_page(page);
 
 #ifdef CONFIG_X86
@@ -329,6 +329,7 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
+	req->remote_nid = my_nid;
 	req->remote_pid = current->pid;
 	req->origin_pid = current->origin_pid;
 	req->last = false;
@@ -413,7 +414,7 @@ static void process_remote_page_invalidate(struct work_struct *_work)
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 
-	printk("invalidate_page: %lx\n", req->addr);
+	printk("invalidate_page [%d]: %lx\n", req->origin_pid, req->addr);
 
 	/* Only home issues invalidate requests. Hence, I am a remote */
 	rcu_read_lock();
@@ -1006,19 +1007,14 @@ int page_server_handle_pte_fault(
 /**************************************************************************
  * Routing popcorn messages to worker
  */
-static struct workqueue_struct *remote_page_wq;
 
-DEFINE_KMSG_WQ_HANDLER(remote_page_request, remote_page_wq);
-DEFINE_KMSG_WQ_HANDLER(remote_page_response, remote_page_wq);
-DEFINE_KMSG_WQ_HANDLER(remote_page_invalidate, remote_page_wq);
-DEFINE_KMSG_WQ_HANDLER(remote_page_flush, remote_page_wq);
+DEFINE_KMSG_WQ_HANDLER(remote_page_request);
+DEFINE_KMSG_WQ_HANDLER(remote_page_response);
+DEFINE_KMSG_WQ_HANDLER(remote_page_invalidate);
+DEFINE_KMSG_ORDERED_WQ_HANDLER(remote_page_flush);
 
 int __init page_server_init(void)
 {
-	remote_page_wq = create_workqueue("remote_page_wq");
-	if (!remote_page_wq)
-		return -ENOMEM;
-
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST, remote_page_request);
 	REGISTER_KMSG_WQ_HANDLER(

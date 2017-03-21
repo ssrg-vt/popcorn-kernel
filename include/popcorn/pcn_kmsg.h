@@ -20,31 +20,22 @@ typedef unsigned long pcn_kmsg_mcast_id;
 /* Enum for message types.  Modules should add types after
    PCN_KMSG_END. */
 enum pcn_kmsg_type {
-    PCN_KMSG_TYPE_FIRST_TEST,
-    PCN_KMSG_TYPE_RDMA_START,
-    PCN_KMSG_TYPE_RDMA_READ_REQUEST,
-    PCN_KMSG_TYPE_RDMA_READ_RESPONSE,
-    PCN_KMSG_TYPE_RDMA_WRITE_REQUEST,
-    PCN_KMSG_TYPE_RDMA_WRITE_RESPONSE,
-    PCN_KMSG_TYPE_RDMA_END,
-    PCN_KMSG_TYPE_TEST,
-    PCN_KMSG_TYPE_TEST_LONG,
-	PCN_KMSG_TYPE_TEST_START,
-	PCN_KMSG_TYPE_TEST_REQUEST,
-	PCN_KMSG_TYPE_TEST_RESPONSE,
-	PCN_KMSG_TYPE_PROC_SRV_MIGRATE,
-	PCN_KMSG_TYPE_PROC_SRV_BACK_MIGRATE,
-	PCN_KMSG_TYPE_PROC_SRV_TASK_PAIRING,
-	PCN_KMSG_TYPE_PROC_SRV_TASK_EXIT,
-	PCN_KMSG_TYPE_PROC_SRV_MAPPING_RESPONSE,
-	PCN_KMSG_TYPE_PROC_SRV_MAPPING_RESPONSE_VOID,
-	PCN_KMSG_TYPE_PROC_SRV_MAPPING_REQUEST,
-	PCN_KMSG_TYPE_PROC_SRV_INVALID_DATA,
-	PCN_KMSG_TYPE_PROC_SRV_ACK_DATA,
-	PCN_KMSG_TYPE_PROC_SRV_VMA_OP,
-	PCN_KMSG_TYPE_PROC_SRV_VMA_LOCK,
-	PCN_KMSG_TYPE_PROC_SRV_VMA_ACK,
-	PCN_KMSG_TYPE_SHMTUN,
+	/* message layer testing */
+	PCN_KMSG_TYPE_RDMA_START,
+	PCN_KMSG_TYPE_RDMA_READ_REQUEST,
+	PCN_KMSG_TYPE_RDMA_READ_RESPONSE,
+	PCN_KMSG_TYPE_RDMA_WRITE_REQUEST,
+	PCN_KMSG_TYPE_RDMA_WRITE_RESPONSE,
+	PCN_KMSG_TYPE_RDMA_END,
+
+	PCN_KMSG_TYPE_FIRST_TEST,
+	PCN_KMSG_TYPE_SELFIE_TEST,
+	PCN_KMSG_TYPE_TEST,
+	PCN_KMSG_TYPE_TEST_LONG,
+
+	/* Provide the single system image */
+	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
 	PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
 	PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE,
 	PCN_KMSG_TYPE_REMOTE_PROC_STAT_REQUEST,
@@ -55,28 +46,31 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_REMOTE_PID_STAT_RESPONSE,
 	PCN_KMSG_TYPE_REMOTE_PID_CPUSET_REQUEST,
 	PCN_KMSG_TYPE_REMOTE_PID_CPUSET_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_SENDSIG_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_SENDSIG_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_SENDSIGPROCMASK_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_SENDSIGPROCMASK_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_SENDSIGACTION_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_SENDSIGACTION_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_IPC_SEMGET_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_IPC_SEMGET_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_IPC_SEMCTL_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_IPC_SEMCTL_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_IPC_SHMGET_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_IPC_SHMGET_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_IPC_SHMAT_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_IPC_SHMAT_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_WAKE_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_WAKE_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_KEY_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_KEY_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_TOKEN_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
-	PCN_KMSG_TYPE_SELFIE_TEST,
+
+	/* Thread migration */
+	PCN_KMSG_TYPE_TASK_MIGRATE,
+	PCN_KMSG_TYPE_TASK_MIGRATE_BACK,
+	PCN_KMSG_TYPE_TASK_PAIRING,
+	PCN_KMSG_TYPE_TASK_EXIT,
+
+	/* VMA synchronization */
+	PCN_KMSG_TYPE_REMOTE_VMA_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE,
+	PCN_KMSG_TYPE_VMA_OP,
+	PCN_KMSG_TYPE_VMA_LOCK,
+	PCN_KMSG_TYPE_VMA_ACK,
+
+	/* Page consistency protocol */
+	PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_PAGE_INVALIDATE,
+	PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH,
+
+	/* Schedule server */
+	PCN_KMSG_TYPE_SCHED_PERIODIC,
+
+
+	/* Remote file */
 	PCN_KMSG_TYPE_FILE_MIGRATE_REQUEST,		/*To send file name Messages*/
 	PCN_KMSG_TYPE_FILE_OPEN_REQUEST,	 	/*when some thread opens a file*/
 	PCN_KMSG_TYPE_FILE_OPEN_RESPONSE,		/*when some thread opens a file*/
@@ -84,17 +78,24 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_FILE_STATUS_RESPONSE,
 	PCN_KMSG_TYPE_FILE_OFFSET_REQUEST,
 	PCN_KMSG_TYPE_FILE_OFFSET_RESPONSE,
-	PCN_KMSG_TYPE_FILE_CLOSE_NOTIFICATION,	/*when some thread closes a file*/
 	PCN_KMSG_TYPE_FILE_OFFSET_UPDATE,		/*when some thread reads a file updates the offset value*/
 	PCN_KMSG_TYPE_FILE_OFFSET_CONFIRM,
-	PCN_KMSG_TYPE_FILE_LSEEK_NOTIFICATION,	/*when some thread lseek a file updates the offset value*/
-	PCN_KMSG_TYPE_SCHED_PERIODIC,
-	PCN_KMSG_TYPE_REMOTE_VMA_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_PAGE_INVALIDATE,
-	PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH,
+	PCN_KMSG_TYPE_FILE_LSEEK			,	/*when some thread lseek a file updates the offset value*/
+	PCN_KMSG_TYPE_FILE_CLOSE,				/*when some thread closes a file*/
+
+	/* signals / futex */
+	PCN_KMSG_TYPE_REMOTE_SENDSIG_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_SENDSIG_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_SENDSIGPROCMASK_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_SENDSIGPROCMASK_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_SENDSIGACTION_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_SENDSIGACTION_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_WAKE_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_WAKE_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_KEY_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_KEY_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_IPC_FUTEX_TOKEN_REQUEST,
+
 	PCN_KMSG_TYPE_MAX
 };
 
@@ -109,32 +110,31 @@ enum pcn_kmsg_prio {
 
 /* Message header */
 struct pcn_kmsg_hdr {
-	unsigned int from_cpu	:8; // b0
+	unsigned int from_cpu	:8;	// b0
 
-	enum pcn_kmsg_type type	:8; // b1
+	enum pcn_kmsg_type type	:8;	// b1
 
-	enum pcn_kmsg_prio prio	:5; // b2
-	unsigned int is_lg_msg  :1;
-	unsigned int lg_start   :1;
-	unsigned int lg_end     :1;
+	enum pcn_kmsg_prio prio	:5;	// b2
+	bool is_lg_msg			:1;
+	bool lg_start			:1;
+	bool lg_end				:1;
 
-	unsigned long long_number; // b3 .. b10
+	unsigned long long_number;	// b3 .. b10
 
-	unsigned int lg_seqnum 	:LG_SEQNUM_SIZE; // b11
+	unsigned int lg_seqnum 	:LG_SEQNUM_SIZE;	// b11
 	unsigned int __ready	:__READY_SIZE;
-	unsigned int size;      /* playload + hdr */
-	unsigned int slot;
-	unsigned int conn_no;
-    
-    /* rdma */
-    uint32_t remote_rkey;   /* R/W remote RKEY */
-    uint32_t rdma_size;     /* R/W remote size */
-    uint64_t remote_addr;   /* remote TO */ 
-    int ticket;             /* rdma s/r ticket */
-    int rdma_ticket;        /* rdma R/W ticket */
-    int rw_ticket;          /* for dbging R/W sync problem */
-    bool rdma_ack;          /* passive side acks in the end of request */
-    void *your_buf_ptr;     /* will be copied to R/W buffer */
+
+	unsigned int size		:16;	// b12 .. 13 payload + hdr
+
+	/* rdma */
+	uint32_t remote_rkey;   /* R/W remote RKEY */
+	uint32_t rdma_size;     /* R/W remote size */
+	uint64_t remote_addr;   /* remote TO */
+	int ticket;             /* rdma s/r ticket */
+	int rdma_ticket;        /* rdma R/W ticket */
+	int rw_ticket;          /* for dbging R/W sync problem */
+	bool rdma_ack;          /* passive side acks in the end of request */
+	void *your_buf_ptr;     /* will be copied to R/W buffer */
 }__attribute__((packed));
 
 #define CACHE_LINE_SIZE 64

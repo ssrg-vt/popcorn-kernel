@@ -1834,22 +1834,21 @@ struct task_struct {
 	struct completion wait_for_remote_flush;
 	int ret_from_remote;
 
-	int distributed_exit_code;
-	int distributed_exit;
-	int group_exit;
-
-	/*akshay*/
-	pid_t surrogate;
-
 	unsigned long migration_ip;
 
-	// scheduling -- antoniob
-	unsigned long lutime, lstime, llasttimestamp; /* in jiffies for load accounting */
+	/*
+	 * scheduling -- antoniob
+	 * in jiffies for load accounting
+	 */
+	unsigned long lutime, lstime, llasttimestamp;
 
-#if 0 // beowulf
-	//let's remove this?!
-	remote_file_info_t *fake_file_table[16];
-#endif
+	/*
+	 * Removed from rack popcorn
+	 */
+	/*
+	remote_file_info_t *fake_file_table[16];	// fd migration
+	pid_t surrogate = -1;						// futex
+	*/
 #endif
 
 /* CPU-specific state of this task */

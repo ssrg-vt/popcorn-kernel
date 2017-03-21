@@ -185,45 +185,38 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 		return 0; //EOF
 
 	for_each_process(p) {
-		if (process_is_distributed(p)) {
+		if (process_is_distributed(p) && !p->is_vma_worker) {
 			struct task_struct *t;
 
+			if (p->is_vma_worker && !p->at_remote) continue;
+
 			len += snprintf((buffer + len), PROC_BUFFER_PS - len,
-					"%s %d:%d:%d:%lu",
+					"%c: %16s %5d             %lu\n",
+					p->at_remote ? 'R' : 'L',
 					p->comm,
-					p->origin_nid,
-					p->origin_pid,
-					process_is_distributed(p),
-					p->mm ? p->mm->total_vm : -1); // in # of pages
+					p->pid,
+					p->mm->total_vm); // in # of pages
 
 			for_each_thread(p, t) {
 				unsigned int uload, sload;
 
-				// here I want to list only user/kernel threads
-				if (t->is_vma_worker || !t->at_remote) {
-					// this is the main thread (kernel space only) nothing to do
-					continue;
-				}
-
-				// TODO print only the one that are currently running (not migrated!)
 				// CPU load per thread
 				popcorn_ps_load(t, &uload, &sload);
 
 				len += snprintf((buffer +len), PROC_BUFFER_PS - len,
-						" %d:%d %d:%d;",
-						t->pid, t->distributed_exit,
+						"                    %5d %5d %5d %d %d\n",
+						t->pid, t->origin_nid, t->origin_pid,
 						uload, sload); // in %
 			}
-
-			len += snprintf((buffer + len), PROC_BUFFER_PS - len, "\n");
 		}
 	}
 
 	if (count < len)
 		len = count;
 	ret = copy_to_user(buf, buffer, len);
-
 	*ppos += len;
+
+	kfree(buffer);
 	return len;
 }
 
@@ -241,11 +234,11 @@ int __init sched_server_init(void)
 
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SCHED_PERIODIC, handle_sched_periodic);
 
-	popcorn_power_x86_1 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
-	popcorn_power_x86_2 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
-	popcorn_power_arm_1 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
-	popcorn_power_arm_2 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
-	popcorn_power_arm_3 = (int *) kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_ATOMIC);
+	popcorn_power_arm_1 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
+	popcorn_power_arm_2 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
+	popcorn_power_arm_3 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
+	popcorn_power_x86_1 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
+	popcorn_power_x86_2 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
 
 	if (!popcorn_power_x86_1 || !popcorn_power_x86_1 ||
 		!popcorn_power_arm_1 || !popcorn_power_arm_2 || !popcorn_power_arm_3)
@@ -267,11 +260,11 @@ int __init sched_server_init(void)
 
 	res = proc_create("power", S_IRUGO, NULL, &power_fops);
 	if (!res)
-		printk("%s: WARNING: failed to create proc entry for power\n", __func__);
+		printk("Failed to create proc entry for power monitoring\n");
 
 	res = proc_create("popcorn_ps", S_IRUGO, NULL, &popcorn_ps_fops);
 	if (!res)
-		printk("%s: WARNING: failed to create proc entry for Popcorn process list\n", __func__);
+		printk("Failed to create proc entry for process list\n");
 
 	printk(KERN_INFO"%s: done\n", __func__);
 	return 0;
