@@ -83,7 +83,7 @@ static void handle_remote_thread_first_test_request(
 ///////////////////Jack's testing & example code////////////////////////////
 
 
-#define MAX_NUM_NODES       3
+#define MAX_NUM_NODES       2
 #define MAX_NUM_CHANNELS    (MAX_NUM_NODES - 1)
 
 char *net_dev_names[] = {
@@ -201,91 +201,7 @@ static struct completion recv_completion[MAX_NUM_NODES];
 static struct semaphore connect_sem[MAX_NUM_NODES];  // sync in the end of init/before while (1) for waiting connection established
 static struct semaphore accept_sem[MAX_NUM_NODES];   // sync in the end of init/before while (1) for waiting connection established
 
-
-/* for testing
-char *msg_names[] = {
-	"TEST",
-	"TEST_LONG",
-	"CHECKIN",
-	"MCAST",
-	"PROC_SRV_CLONE_REQUEST",
-	"PROC_SRV_CREATE_PROCESS_PAIRING",
-	"PROC_SRV_EXIT_PROCESS",
-	"PROC_SRV_BACK_MIG_REQUEST",
-	"PROC_SRV_VMA_OP",
-	"PROC_SRV_VMA_LOCK",
-	"PROC_SRV_MAPPING_REQUEST",
-	"PROC_SRV_NEW_KERNEL",
-	"PROC_SRV_NEW_KERNEL_ANSWER",
-	"PROC_SRV_MAPPING_RESPONSE",
-	"PROC_SRV_MAPPING_RESPONSE_VOID",
-	"PROC_SRV_INVALID_DATA",
-	"PROC_SRV_ACK_DATA",
-	"PROC_SRV_THREAD_COUNT_REQUEST",
-	"PROC_SRV_THREAD_COUNT_RESPONSE",
-	"PROC_SRV_THREAD_GROUP_EXITED_NOTIFICATION",
-	"PROC_SRV_VMA_ACK",
-	"PROC_SRV_BACK_MIGRATION",
-	"PCN_PERF_START_MESSAGE",
-	"PCN_PERF_END_MESSAGE",
-	"PCN_PERF_CONTEXT_MESSAGE",
-	"PCN_PERF_ENTRY_MESSAGE",
-	"PCN_PERF_END_ACK_MESSAGE",
-	"START_TEST",
-	"REQUEST_TEST",
-	"ANSWER_TEST",
-	"MCAST_CLOSE",
-	"SHMTUN",
-	"REMOTE_PROC_MEMINFO_REQUEST",
-	"REMOTE_PROC_MEMINFO_RESPONSE",
-	"REMOTE_PROC_STAT_REQUEST",
-	"REMOTE_PROC_STAT_RESPONSE",
-	"REMOTE_PID_REQUEST",
-	"REMOTE_PID_RESPONSE",
-	"REMOTE_PID_STAT_REQUEST",
-	"REMOTE_PID_STAT_RESPONSE",
-	"REMOTE_PID_CPUSET_REQUEST",
-	"REMOTE_PID_CPUSET_RESPONSE",
-	"REMOTE_SENDSIG_REQUEST",
-	"REMOTE_SENDSIG_RESPONSE",
-	"REMOTE_SENDSIGPROCMASK_REQUEST",
-	"REMOTE_SENDSIGPROCMASK_RESPONSE",
-	"REMOTE_SENDSIGACTION_REQUEST",
-	"REMOTE_SENDSIGACTION_RESPONSE",
-	"REMOTE_IPC_SEMGET_REQUEST",
-	"REMOTE_IPC_SEMGET_RESPONSE",
-	"REMOTE_IPC_SEMCTL_REQUEST",
-	"REMOTE_IPC_SEMCTL_RESPONSE",
-	"REMOTE_IPC_SHMGET_REQUEST",
-	"REMOTE_IPC_SHMGET_RESPONSE",
-	"REMOTE_IPC_SHMAT_REQUEST",
-	"REMOTE_IPC_SHMAT_RESPONSE",
-	"REMOTE_IPC_FUTEX_WAKE_REQUEST",
-	"REMOTE_IPC_FUTEX_WAKE_RESPONSE",
-	"REMOTE_PFN_REQUEST",
-	"REMOTE_PFN_RESPONSE",
-	"REMOTE_IPC_FUTEX_KEY_REQUEST",
-	"REMOTE_IPC_FUTEX_KEY_RESPONSE",
-	"REMOTE_IPC_FUTEX_TOKEN_REQUEST",
-	"REMOTE_PROC_CPUINFO_RESPONSE",
-	"REMOTE_PROC_CPUINFO_REQUEST",
-	"PROC_SRV_CREATE_THREAD_PULL",
-	"PCN_KMSG_TERMINATE",
-	"SELFIE_TEST",
-	"FILE_MIGRATE_REQUEST",
-	"FILE_OPEN_REQUEST",
-	"FILE_OPEN_REPLY",
-	"FILE_STATUS_REQUEST",
-	"FILE_STATUS_REPLY",
-	"FILE_OFFSET_REQUEST",
-	"FILE_OFFSET_REPLY",
-	"FILE_CLOSE_NOTIFICATION",
-	"FILE_OFFSET_UPDATE",
-	"FILE_OFFSET_CONFIRM",
-	"FILE_LSEEK_NOTIFICATION",
-	"SCHED_PERIODIC"
-};
-*/
+static struct mutex mutex_sock_data[MAX_NUM_NODES];
 
 static void *pcn_kmsg_alloc_msg(size_t size)
 {
@@ -589,7 +505,10 @@ static int __init initialize(void)
 
         sema_init(&connect_sem[i],0);  // for waiting connection established
         sema_init(&accept_sem[i],0);   // for waiting connection established
-	}
+	    
+        mutex_init(&mutex_sock_data[i]);
+    
+    }
 
 	/* Initilaize the sock */
     /*
@@ -1020,9 +939,7 @@ static int sock_kmsg_send_long(unsigned int dest_cpu, // called by user or kerne
     /////////////////////////////////////////////////////////////////////////////////////////////////////////
     // TODO: //mutex for sync problem // the following example code almost works but NEED TO TEST!!!!!
     // TODO: //mutex for sync problem // DO THE SAME FOR RECV
-    // TODO: //mutext_t mutex_sock_data[MAX_NUM_NODES];
-    // TODO: static DEFINE_MUTEX(mutex_sock_data[MAX]);
-    // TODO: mutext_lock(&mutex_sock_data[dest_cpu]);
+    mutex_lock(&mutex_sock_data[dest_cpu]);
     while (left > 0) {
         MSGDPRINTK("%s: my_nid=%d dest_cpu=%d conn_no=%d\n",
                                         __func__, my_nid, dest_cpu, dest_cpu);
@@ -1036,7 +953,7 @@ static int sock_kmsg_send_long(unsigned int dest_cpu, // called by user or kerne
         MSGDPRINTK ("sent %d in %d (total including hdr), left=%d\n",
                                         left - size, lmsg->header.size, left);
     }
-    // TODO: mutext_unlock(&mutex_sock_data[dest_cpu]);
+    mutex_unlock(&mutex_sock_data[dest_cpu]);
     MSGDPRINTK("msg_socket: 1 msg snet through dest_cpu=%d\n", dest_cpu);
     /////////////////////////////////////////////////////////////////////////////////////////////////////////
     // TODO: 2. enq() rather than directly ksock_send()

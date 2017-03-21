@@ -20,8 +20,15 @@ typedef unsigned long pcn_kmsg_mcast_id;
 /* Enum for message types.  Modules should add types after
    PCN_KMSG_END. */
 enum pcn_kmsg_type {
-	PCN_KMSG_TYPE_TEST,
-	PCN_KMSG_TYPE_TEST_LONG,
+    PCN_KMSG_TYPE_FIRST_TEST,
+    PCN_KMSG_TYPE_RDMA_START,
+    PCN_KMSG_TYPE_RDMA_READ_REQUEST,
+    PCN_KMSG_TYPE_RDMA_READ_RESPONSE,
+    PCN_KMSG_TYPE_RDMA_WRITE_REQUEST,
+    PCN_KMSG_TYPE_RDMA_WRITE_RESPONSE,
+    PCN_KMSG_TYPE_RDMA_END,
+    PCN_KMSG_TYPE_TEST,
+    PCN_KMSG_TYPE_TEST_LONG,
 	PCN_KMSG_TYPE_TEST_START,
 	PCN_KMSG_TYPE_TEST_REQUEST,
 	PCN_KMSG_TYPE_TEST_RESPONSE,
@@ -115,9 +122,19 @@ struct pcn_kmsg_hdr {
 
 	unsigned int lg_seqnum 	:LG_SEQNUM_SIZE; // b11
 	unsigned int __ready	:__READY_SIZE;
-	unsigned int size;
+	unsigned int size;      /* playload + hdr */
 	unsigned int slot;
 	unsigned int conn_no;
+    
+    /* rdma */
+    uint32_t remote_rkey;   /* R/W remote RKEY */
+    uint32_t rdma_size;     /* R/W remote size */
+    uint64_t remote_addr;   /* remote TO */ 
+    int ticket;             /* rdma s/r ticket */
+    int rdma_ticket;        /* rdma R/W ticket */
+    int rw_ticket;          /* for dbging R/W sync problem */
+    bool rdma_ack;          /* passive side acks in the end of request */
+    void *your_buf_ptr;     /* will be copied to R/W buffer */
 }__attribute__((packed));
 
 #define CACHE_LINE_SIZE 64

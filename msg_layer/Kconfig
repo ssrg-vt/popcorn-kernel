@@ -7,6 +7,11 @@ config POPCORN_KMSG
 	help
 		Enable or disable support for inter-kernel messaging in Popcorn
 
+config POPCORN_KMSG_TEST
+	tristate "Testcases for message passing layer"
+	depends on POPCORN_KMSG
+	default m
+
 config POPCORN_KMSG_LOOPBACK
 	tristate "Loopback message passing layer"
 	depends on POPCORN_KMSG
