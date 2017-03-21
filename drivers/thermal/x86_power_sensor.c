@@ -3,31 +3,20 @@
 //this code doesn't support multipackage systems
 
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/errno.h>
-#include <linux/poll.h>
-#include <linux/sched.h>
-#include <linux/spinlock.h>
 #include <linux/slab.h>
-#include <linux/mutex.h>
 #include <linux/init.h>
-#include <linux/device.h>
-#include <linux/cdev.h>
-#include <linux/compat.h>
 #include <linux/kthread.h>
 #include <linux/completion.h>
 #include <linux/delay.h>
 
 #include <asm/msr.h>
 
-
+const int sampling_interval_ms = 200;
 static struct completion start;
-static struct completion stop;
-static int sampling_interval = 200; // in ms
 static atomic_t stop_sampling;
 static atomic_t power_value;
-static atomic_t exit_ps_read_thread;
-static struct task_struct *ps_thread = NULL;
+static struct task_struct *pwr_sensor_thread = NULL;
 //static struct device *ps_dev = NULL;
 
 int free_running = 1;
@@ -37,8 +26,6 @@ extern int *popcorn_power_x86_1;
 extern int *popcorn_power_x86_2;
 
 //move the following in a header file (this should be rdtsc)
-#define HP_TIMING_NOW(a)
-#define HP_TIMING_NOW_P(a)
 
 #define NR_RAPL_DOMAINS 4
 
@@ -52,7 +39,8 @@ static const char * const rapl_domain_names[NR_RAPL_DOMAINS] = {
 static int rapl_hw_unit[NR_RAPL_DOMAINS]; /* 1/2^hw_unit Joule */
 
 //from arch/x86/kernel/cpu/perf_event_intel_rapl.c:rapl_check_unit()
-static int rapl_init_hw_unit (void) {
+static int rapl_init_hw_unit (void)
+{
 	u64 msr_rapl_power_unit_bits;
 	int i;
 
@@ -89,11 +77,9 @@ int read_inst_power(int id, u64* prev, unsigned long *tprev)
 	long sstart, sstop; //, lstart =0, lstop =0, pstart =0, pstop =0;
 
 	sstart = ktime_to_ns(ktime_get());
-//	HP_TIMING_NOW(lstart); HP_TIMING_NOW_P(pstart);
 
 	rdmsrl(id, data);
 
-//	HP_TIMING_NOW(lstop); HP_TIMING_NOW_P(pstop);
 	sstop = ktime_to_ns(ktime_get());
 
 	stats = sstop - sstart;
@@ -167,9 +153,7 @@ int ps_read_thread(void *arg)
 			wait_for_completion(&start);
 		//printk("%s: Wokeup...\n", __func__);
 
-		if(kthread_should_stop() || (atomic_read(&exit_ps_read_thread) == 1)) {
-			break;
-		}
+		if(kthread_should_stop()) break;
 
 		while(atomic_read(&stop_sampling) == 0) {
 			pout = read_inst_power(MSR_PP0_ENERGY_STATUS, &pp0_prev, &pp0_tprev);
@@ -188,13 +172,12 @@ int ps_read_thread(void *arg)
 				//printk(KERN_ERR "%s: current reading %d\n", __func__, pout);
 			}
 			*/
-			msleep(sampling_interval);
+			msleep(sampling_interval_ms);
 		}
 
 		if (count) {
 			atomic_set(&power_value, local_power/count);
 		}
-		complete(&stop);
 	} while(1);
 	printk("%s: Stopping...\n", __func__);
 	return 0;
@@ -213,9 +196,9 @@ static int __init pwr_sensor_init(void)
 	}
 
 	/* Create kernel thread for periodic reading */
-	ps_thread = kthread_run(&ps_read_thread, NULL, "Power Sensor Read Thread");
+	pwr_sensor_thread = kthread_run(&ps_read_thread, NULL, "Power Sensor Read Thread");
 
-	if(!ps_thread) {
+	if(!pwr_sensor_thread) {
 		printk(KERN_ERR"ps_sensor: Failed to create kthread\n");
 		ret = -1;
 	}
@@ -227,10 +210,8 @@ static int __init pwr_sensor_init(void)
 
 	/* Initialize completion variables */
 	init_completion(&start);
-	init_completion(&stop);
 	atomic_set(&stop_sampling, 0);
 	atomic_set(&power_value, 0);
-	atomic_set(&exit_ps_read_thread, 0);
 	printk(KERN_INFO"ps_sensor: Initializing finished\n");
 	return ret;
 }
@@ -241,7 +222,7 @@ static void __exit pwr_sensor_exit(void)
 {
 	printk(KERN_INFO"ps_sensor: Exiting...\n");
 	printk(KERN_INFO"ps_sensor: signaling the read thread to exit\n");
-	atomic_set(&exit_ps_read_thread, 1);
+	kthread_stop(pwr_sensor_thread);
 
 	/* if free running we are not using the completion */
 	if (!free_running) {
@@ -252,7 +233,7 @@ static void __exit pwr_sensor_exit(void)
 
 	atomic_set(&stop_sampling, 1);
 
-	kthread_stop(ps_thread);
+	kthread_stop(pwr_sensor_thread);
 	printk(KERN_INFO"ps_sensor: Exited\n");
 }
 module_exit(pwr_sensor_exit);

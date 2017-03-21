@@ -137,19 +137,16 @@ void exit_remote_context(struct remote_context *rc)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static void __rename_task_comm(struct task_struct *tsk, char *name)
+static void __build_task_comm(char *buffer, char *path)
 {
 	int i, ch;
-	char comm[TASK_COMM_LEN];
-
-	for (i = 0; (ch = *(name++)) != '\0';) {
+	for (i = 0; (ch = *(path++)) != '\0';) {
 		if (ch == '/')
 			i = 0;
-		else if (i < (sizeof(comm) - 1))
-			comm[i++] = ch;
+		else if (i < (TASK_COMM_LEN - 1))
+			buffer[i++] = ch;
 	}
-	comm[i] = '\0';
-	set_task_comm(tsk, comm);
+	buffer[i] = '\0';
 }
 
 
@@ -488,8 +485,6 @@ static int shadow_main(void *_args)
     PSPRINTK("%s [%d]: started for %d at %d\n", __func__,
 			current->pid, req->origin_pid, req->origin_nid);
 
-	__rename_task_comm(current, req->exe_path);
-
 	current->flags &= ~PF_KTHREAD;	/* Drop to user */
 	current->origin_nid = req->origin_nid;
 	current->origin_pid = req->origin_pid;
@@ -640,6 +635,7 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 struct vma_worker_params {
 	struct pcn_kmsg_work *work;
 	struct remote_context *rc;
+	char comm[TASK_COMM_LEN];
 };
 
 static int vma_worker_remote(void *_data)
@@ -717,10 +713,11 @@ static void clone_remote_thread(struct work_struct *_work)
 
 		params->rc = rc;
 		params->work = work;
+		__build_task_comm(params->comm, req->exe_path);
 		smp_wmb();
 
 		rc->vma_worker =
-				kthread_run(vma_worker_remote, params, "remote_worker");
+				kthread_run(vma_worker_remote, params, params->comm);
 	} else {
 		__unlock_remote_contexts_in(nid_from);
 		kfree(rc_new);
