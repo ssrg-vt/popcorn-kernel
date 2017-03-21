@@ -457,7 +457,8 @@ static void __revoke_page_ownership(struct task_struct *tsk, unsigned long addr,
 		if (nid == except) continue;
 
 		req.remote_pid = rc->remote_tgids[nid];
-		printk("revoke_ownership: 0x%lx at %d %d\n", addr, req.remote_pid, nid);
+		printk("revoke_ownership [%d]: 0x%lx at %d %d\n", current->pid,
+				addr, req.remote_pid, nid);
 		pcn_kmsg_send_long(nid, &req, sizeof(req));
 		clear_bit(nid, page->owners);
 	}
@@ -616,6 +617,10 @@ static int __get_remote_page(struct task_struct *tsk,
 	paddr = kmap_atomic(page);
 	memcpy(res->page, paddr, PAGE_SIZE);
 	kunmap_atomic(paddr);
+
+	if (!bitmap_weight(page->owners, MAX_POPCORN_NODES)) {
+		set_bit(my_nid, page->owners);
+	}
 
 	set_bit(from, page->owners);
 	memcpy(res->owners, page->owners, MAX_POPCORN_NODES);
