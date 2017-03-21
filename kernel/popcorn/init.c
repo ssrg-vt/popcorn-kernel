@@ -22,6 +22,7 @@ extern int process_server_init(void);
 extern int vma_server_init(void);
 extern int page_server_init(void);
 extern int remote_cpu_info_init(void);
+extern int remote_mem_info_init(void);
 
 static int __init popcorn_init(void)
 {
@@ -45,6 +46,7 @@ static int __init popcorn_init(void)
 	sched_server_init();
 
 	remote_cpu_info_init();
+	remote_mem_info_init();
 
 	return 0;
 }
