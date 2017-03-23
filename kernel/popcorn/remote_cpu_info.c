@@ -107,12 +107,9 @@ static int handle_remote_cpu_info_request(struct pcn_kmsg_message *inc_msg)
 	CPUPRINTK("%s: Entered\n", __func__);
 
 	request = (struct remote_cpu_info_message *)inc_msg;
-	if (request == NULL) {
-		CPUPRINTK("%s: NULL pointer\n", __func__);
-		return -EINVAL;
-	}
 
 	response = kzalloc(sizeof(*response), GFP_KERNEL);
+	if (!response) return -ENOMEM;
 
 	/* 1. Save remote cpu info from remote node */
 	memcpy(saved_cpu_info[request->nid],
@@ -157,10 +154,6 @@ static int handle_remote_cpu_info_response(struct pcn_kmsg_message *inc_msg)
 	wait_cpu_list = 1;
 
 	response = (struct remote_cpu_info_message *)inc_msg;
-	if (response == NULL) {
-		CPUPRINTK("%s: NULL pointer\n", __func__);
-		return -EINVAL;
-	}
 
 	/* 1. Save remote cpu info from remote node */
 	memcpy(saved_cpu_info[response->nid],
@@ -235,7 +228,7 @@ static void print_unknown_cpuinfo(struct seq_file *m)
 
 int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos)
 {
-	seq_puts(m, "****    Remote CPU    ****\n");
+	seq_puts(m, "****    Remote CPU at %d   ****\n", nid);
 
 	switch (saved_cpu_info[nid]->arch_type) {
 	case arch_x86:
