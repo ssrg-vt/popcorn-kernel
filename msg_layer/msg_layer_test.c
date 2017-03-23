@@ -8,12 +8,11 @@
 #include <linux/module.h>
 
 #include <linux/proc_fs.h>
-
+#include <linux/seq_file.h>
 #include <linux/slab.h>
-//#include <linux/ktime.h> 
-//#include <linux/time.h> 
-#include <linux/delay.h> 
 #include <linux/kthread.h>
+
+#include <asm/uaccess.h>
 
 #include <popcorn/debug.h>
 #include <popcorn/pcn_kmsg.h>

@@ -18,8 +18,6 @@
 #include <linux/delay.h>
 #include <linux/kthread.h>
 #include <linux/semaphore.h>
-#include <linux/file.h>
-#include <linux/ktime.h>
 
 #include <linux/net.h>
 #include <linux/tcp.h>
@@ -32,14 +30,14 @@
 #include <asm/atomic.h>
 #include <linux/completion.h>
 
-#include <linux/cpumask.h>
-#include <linux/sched.h>
-
 #include <linux/vmalloc.h>
 
 /* geting host ip */
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
+
+#include <popcorn/pcn_kmsg.h>
+#include <popcorn/debug.h>
 
 #include "common.h"
 
