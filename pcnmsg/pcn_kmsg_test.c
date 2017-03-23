@@ -337,7 +337,7 @@ SYSCALL_DEFINE2(popcorn_test_kmsg, enum pcn_kmsg_test_op, op,
 static int handle_single_msg(struct pcn_kmsg_test_message *msg)
 {
 	TEST_PRINTK("Received single test message from CPU %d!\n",
-		    msg->header.from_cpu);
+		    msg->header.from_nid);
 	return 0;
 }
 

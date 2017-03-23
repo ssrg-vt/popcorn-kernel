@@ -109,7 +109,7 @@ enum pcn_kmsg_prio {
 
 /* Message header */
 struct pcn_kmsg_hdr {
-	unsigned int from_cpu	:8; // b0
+	unsigned int from_nid	:8; // b0
 
 	enum pcn_kmsg_type type	:8; // b1
 
@@ -130,7 +130,9 @@ struct pcn_kmsg_hdr {
     //uint32_t remote_rkey;   /* R/W remote RKEY */
     //uint32_t rdma_size;     /* R/W remote size */
     //uint64_t remote_addr;   /* remote TO */ 
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
     unsigned long ticket;   /* (sock/rdma) s/r ticket */
+#endif
     //int rdma_ticket;        /* rdma R/W ticket */
     //int rw_ticket;          /* for dbging R/W sync problem */
     //bool rdma_ack;          /* passive side acks in the end of request */

@@ -1028,7 +1028,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 		return -1;
 	}
 
-	lmsg->header.from_cpu = my_nid;
+	lmsg->header.from_nid = my_nid;
 	lmsg->header.size = (payload_size + sizeof(struct pcn_kmsg_hdr));
 
 	if (lmsg->header.size > SEG_SIZE) {

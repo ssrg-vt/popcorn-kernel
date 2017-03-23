@@ -17,7 +17,7 @@ static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_messag
 	memcpy(msg, lmsg, size);
 
 	hdr = (struct pcn_kmsg_hdr *)msg;
-	hdr->from_cpu = my_nid;
+	hdr->from_nid = my_nid;
 	hdr->size = size;
 
 	fn = callbacks[hdr->type];

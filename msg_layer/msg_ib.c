@@ -1328,7 +1328,7 @@ static int ib_kmsg_recv_long(struct krping_cb *cb,
 	/*
 		// example code - directly process
 		remote_thread_first_test_request_t* request = (remote_thread_first_test_request_t*) &cb->recv_buf; // int buf
-		printk("%s(): request->hdr.from_cpu %d\n", __func__, request->hdr.from_cpu);
+		printk("%s(): request->hdr.from_nid %d\n", __func__, request->hdr.from_nid);
 		printk("urlmsg(u def)->example1 %d IF SEE 1 PREPARE GO HOME\n", request->example1);
 		printk("urlmsg(u def)->example2 %d IF SEE 2 PREPARE GO HOME\n", request->example2);
 		printk("urlmsg(u def)->msg %d IF SEE morethan 4096 PREPARE GO HOME\n", sizeof(request->msg));
@@ -1470,7 +1470,7 @@ static void handle_remote_thread_rdma_read_response(
 {
 	remote_thread_rdma_read_request_t* response =
 								(remote_thread_rdma_read_request_t*) inc_lmsg;
-	struct krping_cb *_cb = cb[response->hdr.from_cpu]; // select the correct cb
+	struct krping_cb *_cb = cb[response->hdr.from_nid]; // select the correct cb
 
 	// example
 	//response->hdr.rdma_size;	  // if send/recv, this = 0
@@ -1511,7 +1511,7 @@ static void handle_remote_thread_rdma_write_response(
 {
 	remote_thread_rdma_write_request_t* response =
 								(remote_thread_rdma_write_request_t*) inc_lmsg;
-	struct krping_cb *_cb = cb[response->hdr.from_cpu]; // select the correct cb
+	struct krping_cb *_cb = cb[response->hdr.from_nid]; // select the correct cb
 
 	// examples
 	// response->hdr.rdma_size;	 // if send/recv, this = 0
@@ -1958,7 +1958,7 @@ int ib_kmsg_send_long(unsigned int dest_cpu,
 		BUG_ON(-1);
 	}
 
-	lmsg->hdr.from_cpu = my_cpu;
+	lmsg->hdr.from_nid = my_cpu;
 
 	if(dest_cpu==my_cpu) {
 		// TODO: directly call the corresponding function pointer
@@ -2084,7 +2084,7 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_rdma_message *lmsg,
 				(void*)cb[dest_cpu]->rdma_dma_addr, lmsg->hdr.rdma_size);
 	lmsg->hdr.remote_rkey = htonl(rkey);									// rdma request
 
-	lmsg->hdr.from_cpu = my_cpu;
+	lmsg->hdr.from_nid = my_cpu;
 	//lmsg->hdr.size = 0; // total size. It's just a signal, size=0
 	lmsg->hdr.rdma_ack = false;
 

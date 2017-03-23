@@ -52,7 +52,7 @@ int pcn_kmsg_send_long(unsigned int to, void *lmsg, unsigned int size)
 		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
 
 		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, size=%u\n",
-					__func__, hdr->from_cpu, hdr->type, size);
+					__func__, hdr->from_nid, hdr->type, size);
 		// msleep(100);
 		//printk("Waiting for call back function to be registered\n");
 		return -ENOENT;
