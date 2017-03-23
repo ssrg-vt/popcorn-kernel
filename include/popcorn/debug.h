@@ -42,5 +42,10 @@
 #else
 #define MSGDPRINTK(...)
 #endif
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_DATA
+#define MSGDATA(...) printk(__VA_ARGS__)
+#else
+#define MSGDATA(...)
+#endif
 
 #endif

@@ -221,7 +221,7 @@ static inline int vma_send_long_all( memory_t * entry, void * message, int size,
 		i = objPtr->_data._processor;
 
 		if ( task && (task->mm->distr_vma_op_counter > max_distr_vma_op)
-				&& (i == entry->message_push_operation->from_cpu))
+				&& (i == entry->message_push_operation->from_nid))
 			continue;
 		error = pcn_kmsg_send_long(i, message, size);
 		if (error != -1)
@@ -230,7 +230,7 @@ static inline int vma_send_long_all( memory_t * entry, void * message, int size,
 	return acks;
 }
 
-static vma_lock_t * vma_lock_alloc(struct task_struct * task, int from_cpu, int index)
+static vma_lock_t * vma_lock_alloc(struct task_struct * task, int from_nid, int index)
 {
 	vma_lock_t* lock_message = kmalloc(sizeof(vma_lock_t), GFP_ATOMIC);
 
@@ -239,7 +239,7 @@ static vma_lock_t * vma_lock_alloc(struct task_struct * task, int from_cpu, int 
 
 	lock_message->origin_nid = task->origin_nid;
 	lock_message->origin_pid = task->origin_pid;
-	lock_message->from_cpu = from_cpu;
+	lock_message->from_nid = from_nid;
 	lock_message->vma_operation_index = index;
 
 	return lock_message;
@@ -263,7 +263,8 @@ static vma_operation_t * vma_operation_alloc(struct task_struct * task, int op_i
 	operation->prot = prot;
 	operation->flags = flags;
 	operation->vma_operation_index = index;
-	operation->from_cpu = my_nid;
+	operation->from_nid = my_nid;
+	operation->from_nid = my_nid;
 
 	return operation;
 }
@@ -655,7 +656,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 
 	PSPRINTK("Received vma operation from cpu %d for origin_nid %i "
 			"origin_pid %i operation %i\n",
-			operation->header.from_cpu, operation->origin_nid,
+			operation->header.from_nid, operation->origin_nid,
 			operation->origin_pid, operation->operation);
 
 	down_write(&mm->mmap_sem);
@@ -684,7 +685,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			kfree(work);
 			return ;
 		}
-		PSPRINTK("%s,SERVER: Starting operation %i for cpu %i\n", __func__, operation->operation, operation->header.from_cpu);
+		PSPRINTK("%s,SERVER: Starting operation %i for cpu %i\n", __func__, operation->operation, operation->header.from_nid);
 
 		mm->distr_vma_op_counter++;
 		//the main kernel thread will execute the local operation
@@ -788,8 +789,8 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		    || operation->operation == VMA_OP_BRK) {
 
 			BUG_ON(memory->my_lock != 1 && "wrong distributed lock aquisition");
-			BUG_ON(operation->from_cpu != my_nid &&
-				"Server pushed me operation of cpu operation->from_cpu");
+			BUG_ON(operation->from_nid != my_nid &&
+				"Server pushed me operation of cpu operation->from_nid");
 			BUG_ON(memory->waiting_for_op == NULL &&
 				"Received a push operation started by me but nobody is waiting");
 
@@ -810,7 +811,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		}
 
 		//I could have started the operation...check!
-		if (operation->from_cpu == my_nid) {
+		if (operation->from_nid == my_nid) {
 			BUG_ON(memory->my_lock != 1 &&
 				"ERROR: wrong distributed lock aquisition");
 			BUG_ON(memory->waiting_for_op == NULL &&
@@ -911,7 +912,7 @@ static void process_vma_lock(struct work_struct* _work)
 	if (entry != NULL) {
 		down_write(&entry->mm->distribute_sem);
 		VSPRINTK("Acquired distributed lock\n");
-		if (lock->from_cpu == my_nid)
+		if (lock->from_nid == my_nid)
 			entry->my_lock = 1;
 	}
 
@@ -940,7 +941,7 @@ static int handle_vma_ack(struct pcn_kmsg_message* inc_msg)
 	unsigned long flags;
 	struct task_struct* task_to_wake_up = NULL;
 
-	VSPRINTK("Vma ack received from cpu %d\n", ack->header.from_cpu);
+	VSPRINTK("Vma ack received from cpu %d\n", ack->header.from_nid);
 	ack_holder = find_vma_ack_entry(ack->origin_nid, ack->origin_pid);
 	if (ack_holder) {
 		spin_lock_irqsave(&(ack_holder->lock), flags);
@@ -1056,10 +1057,10 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 			case VMA_OP_MAP:
 			case VMA_OP_BRK:
 				err = pcn_kmsg_send_long(
-						entry->message_push_operation->from_cpu,
+						entry->message_push_operation->from_nid,
 						entry->message_push_operation, sizeof(vma_operation_t));
 				PSPRINTK("INFO: operation %d sent to cpu %d\n",
-						operation, entry->message_push_operation->from_cpu);
+						operation, entry->message_push_operation->from_nid);
 				break;
 			case VMA_OP_REMAP:
 				PSPRINTK("INFO: sending operation %d to all\n", operation);
@@ -1286,7 +1287,7 @@ start:
 			{
 				vma_op_answers_t* acks;
 				//First: send a message to everybody to acquire the lock to block page faults
-				vma_lock_t* lock_message = vma_lock_alloc(current, entry->message_push_operation->from_cpu, index);
+				vma_lock_t* lock_message = vma_lock_alloc(current, entry->message_push_operation->from_nid, index);
 				acks = vma_op_answer_alloc(current, index);
 
 				/*
@@ -1294,7 +1295,7 @@ start:
 				 */
 				if (operation == VMA_OP_MAP || operation == VMA_OP_BRK) {
 					pcn_kmsg_send_long(
-							entry->message_push_operation->from_cpu,
+							entry->message_push_operation->from_nid,
 							lock_message, sizeof(vma_lock_t));
 					acks->expected_responses++;
 				} else {

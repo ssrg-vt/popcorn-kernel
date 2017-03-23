@@ -16,7 +16,7 @@ struct test_msg_t
 static int handle_self_test(struct pcn_kmsg_message* inc_msg)
 {
 	printk(KERN_INFO "%s: message handler is called from cpu %d successfully.\n",
-		__func__, inc_msg->header.from_cpu);
+		__func__, inc_msg->header.from_nid);
 
 	printk(KERN_INFO "%s: %s\n", __func__, inc_msg->payload);
 

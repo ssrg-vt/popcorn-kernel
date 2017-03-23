@@ -22,7 +22,7 @@
 	unsigned long new_len;\
 	unsigned long prot;\
 	unsigned long flags; \
-	int from_cpu;\
+	int from_nid;\
 	int vma_operation_index;\
 	int pgoff;\
 	char path[512];
@@ -31,7 +31,7 @@ DEFINE_PCN_KMSG(vma_operation_t, VMA_OPERATION_FIELDS);
 #define VMA_LOCK_FIELDS \
 	int origin_nid; \
 	int origin_pid; \
-	int from_cpu;\
+	int from_nid;\
 	int vma_operation_index;
 DEFINE_PCN_KMSG(vma_lock_t, VMA_LOCK_FIELDS);
 

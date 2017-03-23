@@ -1,40 +1,51 @@
 if POPCORN
 
 config POPCORN_KMSG
-	bool "Popcorn Inter-Kernel Messaging Support"
+	bool "Popcorn inter-kernel messaging support"
 	depends on POPCORN
 	default y
 	help
 		Enable or disable support for inter-kernel messaging in Popcorn
 
-config POPCORN_KMSG_TEST
-	tristate "Testcases for message passing layer"
-	depends on POPCORN_KMSG
-	default m
-
 config POPCORN_KMSG_LOOPBACK
-	tristate "Loopback message passing layer"
+	tristate "Loopback messaging layer"
 	depends on POPCORN_KMSG
 	default m
 
 config POPCORN_KMSG_SOCKET
-	tristate "Socket message passing layer"
+	tristate "Socket messaging layer"
 	depends on POPCORN_KMSG
 	default m
 
-config POPCORN_KMSG_ETHERNET
-	tristate "Ethernet message passing layer"
-	depends on POPCORN_KMSG
-	default n
-
 config POPCORN_KMSG_DOLPHIN
-	tristate "Dolphin message passing layer"
+	tristate "Dolphin messaging layer"
 	depends on POPCORN_KMSG
 	default n
 
 config POPCORN_KMSG_IB
-	tristate "InfiniBand message passing layer"
+	tristate "InfiniBand messaging layer"
 	depends on POPCORN_KMSG
 	default n
+
+config POPCORN_KMSG_TEST
+	tristate "Test modules for messaging layer"
+	depends on POPCORN_KMSG
+	default n
+
+
+config POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	bool "Print debug message for the message layer"
+	depends on POPCORN_KMSG && POPCORN_DEBUG
+	default n
+
+if POPCORN_DEBUG_MSG_LAYER_VERBOSE
+config POPCORN_DEBUG_MSG_LAYER_VERBOSE_DEBUG
+	bool "Print more debug message"
+	default n
+
+config POPCORN_DEBUG_MSG_LAYER_DATA
+	bool "Print experimental data"
+	default n
+endif
 
 endif

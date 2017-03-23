@@ -37,9 +37,7 @@ else # KERNELRELEASE
     # called from kernel build system: just declare what our modules are
     obj-$(CONFIG_POPCORN_KMSG_LOOPBACK) += msg_loopback.o
 	obj-$(CONFIG_POPCORN_KMSG_SOCKET) += msg_socket.o
-    obj-$(CONFIG_POPCORN_KMSG_ETHERNET) += msg_ethernet.o
     obj-$(CONFIG_POPCORN_KMSG_DOLPHIN) += msg_dolphin.o
     obj-$(CONFIG_POPCORN_KMSG_IB) += msg_ib.o
-    obj-$(CONFIG_POPCORN_KMSG_DOLPHIN) += msg_test.o
-    obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_layer_test.o
+    obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_test.o msg_layer_test.o
 endif
