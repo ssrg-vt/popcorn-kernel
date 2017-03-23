@@ -65,12 +65,19 @@ int pcn_kmsg_send(unsigned int to, void *msg)
 	return pcn_kmsg_send_long(to, msg, sizeof(struct pcn_kmsg_message));
 }
 
-void pcn_kmsg_free_msg(void *msg)
+void *pcn_kmsg_alloc_msg(size_t size)
 {
-	kfree(msg);
+    struct pcn_kmsg_long_message *msg = vmalloc(size);
+    msg->header.size = size;
+    return msg;
 }
 
+void pcn_kmsg_free_msg(void *msg)
+{
+    vfree(msg);
+}
 
+EXPORT_SYMBOL(pcn_kmsg_alloc_msg);
 EXPORT_SYMBOL(pcn_kmsg_free_msg);
 EXPORT_SYMBOL(pcn_kmsg_send_long);
 EXPORT_SYMBOL(pcn_kmsg_send);

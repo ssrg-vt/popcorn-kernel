@@ -47,6 +47,11 @@ config POPCORN_DEBUG_MSG_LAYER_VERBOSE_DEBUG
 	depends on POPCORN_DEBUG && POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	default n
 
+config POPCORN_DEBUG_MSG_LAYER_DATA
+	bool "Print experimental data for msg layer"
+	depends on POPCORN_DEBUG
+	default n
+
 comment "Popcorn is not currently supported on your architecture"
 	depends on !ARCH_SUPPORTS_POPCORN
 

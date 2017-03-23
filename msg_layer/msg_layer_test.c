@@ -17,9 +17,8 @@
 
 #include <popcorn/debug.h>
 #include <popcorn/pcn_kmsg.h>
-#include <popcorn/bundle.h>
 
-#include "msg_layer2.h"
+#include "common.h"
 
 // for testing rdma read (test2)
 int g_test_remote_len = 4*1024; // testing size for RDMA, mimicing user buf size // for rdma dbg
@@ -54,12 +53,12 @@ static void handle_remote_thread_first_test_request(
     
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
     EXP_LOG("<<< TEST1: my_nid=%d t %lu "
-                            "example1(from)=%d example2=%d msg_layer(good) >>>\n", 
+                            "example1(from)=%d example2=%d (good) >>>\n", 
                             my_nid, request->hdr.ticket, 
                             request->example1, request->example2);
 #else
     EXP_LOG("<<< TEST1: my_nid=%d example1(from)=%d "
-                        "example2=%d msg_layer(good) >>>\n", 
+                        "example2=%d (good) >>>\n", 
                         my_nid, request->example1, request->example2);
 #endif
     /* extra examples */
@@ -115,7 +114,7 @@ static int test1(void)
             continue;
         //DEBUG_LOG_V("Jack: sending a msg to dst %d ......\n", i);
         pcn_kmsg_send_long(i, (struct pcn_kmsg_long_message*) request,
-            sizeof(*request) - sizeof(request->hdr));n
+                                sizeof(*request));
     }
 
     //3/13 free manually since user can reuse their buf
@@ -179,7 +178,7 @@ static int test2(void)
     }
     kfree(request_rdma_read);
     //DEBUG_LOG_V("Jack's READ testing DONE! If see N-1 (good), muli-node msg_layer over ipoib is healthy!!!\n");
-    /////////////////////////////rdma read/////////////////////////////////////
+    /////////////////////////rdma read//////////////////////////////////
     return 0;
 }
 
@@ -241,7 +240,7 @@ static int test3(void)
     }
     kfree(request_rdma_write);
     //DEBUG_LOG_V("Jack's testing DONE! If see N-1 (good), muli-node msg_layer over ipoib is healthy!!!\n");
-    ////////////////////////////////////////////////rdma write///////////////////////////////////////////////////////////////////////////////
+    /////////////////////rdma write////////////////////////
     return 0;
 }
 #endif
@@ -290,7 +289,7 @@ int setup_read_buf(void)
     }                                                                       
     memset(g_test_buf, 'R', g_test_remote_len); // mimic: user data buffer ( will be copied to rdma buf)
                                                                             
-    //////////////////////TODO: put it to runtime code and TODO: put lock ////////////////
+    /////////////TODO: put it to runtime code and TODO: put lock ///////////
     for(i=0; i<MAX_NUM_NODES; i++) {                                                            
         if(i==my_nid)                                                       
             continue; // canot write to its rdma_buf since addr space

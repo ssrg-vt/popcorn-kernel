@@ -662,10 +662,11 @@ int pcn_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 
 }
 
+/*
 inline void pcn_kmsg_free_msg(void *msg){
-	kfree(msg);
+	vfree(msg);
 }
-
+*/
 //TODO
 inline int pcn_kmsg_get_node_ids(uint16_t *nodes, int len, uint16_t *self){
 	//*self = cpumask_first(cpu_present_mask);
@@ -715,7 +716,6 @@ MODULE_LICENSE("GPL");
 
 #else
 
-EXPORT_SYMBOL(pcn_kmsg_free_msg);
 EXPORT_SYMBOL(pcn_kmsg_send_long);
 EXPORT_SYMBOL(pcn_kmsg_send);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
