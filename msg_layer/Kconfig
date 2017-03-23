@@ -30,7 +30,7 @@ config POPCORN_KMSG_IB
 config POPCORN_KMSG_TEST
 	tristate "Test modules for messaging layer"
 	depends on POPCORN_KMSG
-	default m
+	default n
 
 
 config POPCORN_DEBUG_MSG_LAYER_VERBOSE

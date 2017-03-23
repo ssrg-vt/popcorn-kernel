@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 
 #include <popcorn/pcn_kmsg.h>
+#include <popcorn/debug.h>
 
 pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 EXPORT_SYMBOL(callbacks);
@@ -21,7 +22,7 @@ int __init pcn_kmsg_init(void)
 {
 	send_callback = NULL;
 
-	printk("%s: done\n", __func__);
+	MSGPRINTK("%s: done\n", __func__);
 	return 0;
 }
 
@@ -30,7 +31,7 @@ int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback)
 	if (type >= PCN_KMSG_TYPE_MAX)
 		return -ENODEV; /* invalid type */
 
-	printk("%s: %d \n", __func__, type);
+	MSGPRINTK("%s: %d \n", __func__, type);
 	callbacks[type] = callback;
 	return 0;
 }
@@ -40,7 +41,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 	if (type >= PCN_KMSG_TYPE_MAX)
 		return -ENODEV;
 
-	printk("%s: %d\n", __func__, type);
+	MSGPRINTK("%s: %d\n", __func__, type);
 	callbacks[type] = NULL;
 	return 0;
 }
@@ -67,14 +68,12 @@ int pcn_kmsg_send(unsigned int to, void *msg)
 
 void *pcn_kmsg_alloc_msg(size_t size)
 {
-    struct pcn_kmsg_long_message *msg = vmalloc(size);
-    msg->header.size = size;
-    return msg;
+	return vmalloc(size);
 }
 
 void pcn_kmsg_free_msg(void *msg)
 {
-    vfree(msg);
+	vfree(msg);
 }
 
 EXPORT_SYMBOL(pcn_kmsg_alloc_msg);
