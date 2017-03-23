@@ -12,8 +12,6 @@
 #include <linux/file.h>
 #include <linux/ktime.h>
 
-#include <popcorn/pcn_kmsg.h>
-
 #include <linux/fdtable.h>
 
 #include <linux/net.h>
@@ -33,7 +31,7 @@
 
 #include <linux/vmalloc.h>
 
-#include <popcorn/bundle.h>
+#include "common.h"
 
 #include "genif.h"
 

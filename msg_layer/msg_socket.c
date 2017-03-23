@@ -15,29 +15,14 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/delay.h>
+#include <linux/vmalloc.h>
 #include <linux/kthread.h>
-#include <linux/semaphore.h>
-
-#include <linux/net.h>
-#include <linux/tcp.h>
-#include <linux/in.h>
-#include <asm/uaccess.h>
-#include <linux/socket.h>
-
-#include <linux/delay.h>
-#include <linux/time.h>
-#include <asm/atomic.h>
 #include <linux/completion.h>
 
-#include <linux/vmalloc.h>
-
-/* geting host ip */
-#include <linux/netdevice.h>
+#include <linux/net.h>
 #include <linux/inetdevice.h>
 
-#include <popcorn/pcn_kmsg.h>
-#include <popcorn/debug.h>
+#include <asm/uaccess.h>
 
 #include "common.h"
 
@@ -71,9 +56,6 @@ struct pcn_kmsg_buf {
 	struct semaphore q_empty;
 	struct semaphore q_full;
 };
-
-static struct pcn_kmsg_buf *send_buf[MAX_NUM_NODES];
-static struct pcn_kmsg_buf *recv_buf[MAX_NUM_NODES];
 
 struct handler_data {
 	int conn_no;
@@ -236,18 +218,13 @@ static uint32_t get_host_ip(char **name_ret)
 //Jack: TODO:  NEED TO BE SWITCHED TO BE SOCK
 static int send_handler(void* arg0) // for a conn_no
 {
+	struct handler_data *handler_data = arg0;
+	int conn_no = handler_data->conn_no;
 	int err = 0;
-	//int val = 1; // unused
-	struct handler_data *thread_data = (struct handler_data *) arg0;
-	int conn_no = thread_data->conn_no;
-	struct sockaddr_in dest_addr;
-
-	MSGDPRINTK("msg_socket: %s(): send_handler() on conn_no=%d\n",
-														__func__, conn_no);
 
 	//* sock connection init *//
 	if (conn_no < my_nid ) {
-		msleep(5000);
+		struct sockaddr_in addr;
 		err = sock_create(PF_INET, SOCK_STREAM,
 			IPPROTO_TCP, &(sockets[conn_no]));
 		if (err < 0) {
@@ -255,41 +232,33 @@ static int send_handler(void* arg0) // for a conn_no
 							"Messaging layer init failed with err %d\n", err);
 			return err;
 		}
-		dest_addr.sin_family = AF_INET;
-		dest_addr.sin_port = htons(PORT);
-		dest_addr.sin_addr.s_addr = htonl(ip_table[conn_no]); // target ip(diff)
-		MSGDPRINTK("my_node=%d connecting to port %d on machine %u.%u.%u.%u\n",
-										conn_no, PORT,
+		addr.sin_family = AF_INET;
+		addr.sin_port = htons(PORT);
+		addr.sin_addr.s_addr = htonl(ip_table[conn_no]); // target ip(diff)
+		MSGDPRINTK("[%d] Connecting to %u.%u.%u.%u\n",
+										conn_no,
 										(ip_table[conn_no]>>24)&0x000000ff,
 										(ip_table[conn_no]>>16)&0x000000ff,
 										(ip_table[conn_no]>> 8)&0x000000ff,
 										(ip_table[conn_no]>> 0)&0x000000ff);
 		do {
 			err = kernel_connect(sockets[conn_no], 
-						(struct sockaddr *)&dest_addr, sizeof(dest_addr), 0);
+						(struct sockaddr *)&addr, sizeof(addr), 0);
 			if (err < 0) {
-				MSGDPRINTK("Failed to connect to socket..!! "
-							"Messaging layer init failed with err %d\n", err);
+				MSGDPRINTK("Failed to connect the socket %d. Attempt again!!\n",
+						err);
 			}
 		} while (err < 0);
 		complete(&connected[conn_no]);
-		// For slave, it's connected when connection is established
-	} else if ( conn_no > my_nid ) {
-		MSGPRINTK("%s(): my_nid=%d waiting... for conn_no=%d done "
-						"on recv_handler()\n", __func__, my_nid, conn_no);
+	} else if (conn_no > my_nid) {
 		wait_for_completion(&accepted[conn_no]);
-
-		// For master, it's connected when a connection is accepted
-	} else if ( conn_no == my_nid ) {
-		MSGPRINTK("msg_socket: %s(): accept() skip myself\n", __func__);
+	} else if (conn_no == my_nid) {
+		// Skip connecting to myself
 	}
-	// sock connection init done
-	//up(&send_connDone[channel_num]);
 
-	set_popcorn_node_online(conn_no); //Jack: atomic is more safe
-	smp_mb(); // Jack: MUST HAVE
-	MSGPRINTK("%s(): Connection Established (Done)...PCN_SEND Thread "
-				"my_nid=%d conn_no=%d (GOOD)\n", __func__, my_nid, conn_no);
+	set_popcorn_node_online(conn_no);
+
+	MSGPRINTK("[%d] PCN_SEND handler is up\n", conn_no);
 	return 0;
 }
 
@@ -300,7 +269,7 @@ static int exec_handler(void* arg0)
 	int conn_no = data->conn_no;
 
 	for (;;) {
-		err = deq_recv(recv_buf[conn_no], conn_no);
+		err = deq_recv(data->buf, conn_no);
 	}
 	return 0;
 }
@@ -311,9 +280,9 @@ static int recv_handler(void* arg0)
 	// Jack: from sock
 	int err;
 	struct handler_data *exec_data;
-	struct handler_data *conn_data = arg0;
+	struct handler_data *handler_data = arg0;
 
-	int conn_no = conn_data->conn_no;
+	int conn_no = handler_data->conn_no;
 
 	if (conn_no > my_nid) {
 		err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP,
@@ -323,46 +292,29 @@ static int recv_handler(void* arg0)
 							"Messaging layer init failed with err %d\n", err);
 			goto end;
 		}
-		MSGPRINTK("msg_socket: %s(): accept()ing... conn_no=%d\n",
-														__func__, conn_no);
-		//IMPORTANT!!! and cannot be O_NONBLOCK
+
 		err = kernel_accept(sock_listen, sockets + conn_no, 0);
 		if (err < 0) {
-			MSGDPRINTK("Failed to accept connection..!! "
-											"Messaging layer init failed\n");
+			MSGDPRINTK("Failed to accept from %d for %d\n", conn_no, err);
 			goto exit;
 		}
-		MSGPRINTK("msg_socket: %s(): accept() conn_no=%d DONE\n",
-														__func__, conn_no);
 		complete(&accepted[conn_no]);
-		// For master, it's able to receive messages when a conn is accepted
 	} else if (conn_no < my_nid) {
-		MSGPRINTK("%s(): my_nid=%d just waiting... for conn_no=%d done "
-						"on send_handler()\n", __func__, my_nid, conn_no);
 		wait_for_completion(&connected[conn_no]);
-
-		// For slave, it's able to receive messages when conn is established
 	} else if (conn_no == my_nid) {
-		MSGPRINTK("msg_socket: %s(): connection() skip myself\n", __func__);
+		// Skip connecting to myself
 	}
-	MSGPRINTK("%s(): my_nid=%d conn_no=%d ESTABLISHED (GOOD)\n",
-													__func__, my_nid, conn_no);
+
 	exec_data = kmalloc(sizeof(*exec_data), GFP_KERNEL);
 	exec_data->conn_no = conn_no;
 	exec_handlers[conn_no] =
-					kthread_run(exec_handler, exec_data, "pcnscif_execD_pp");
-	MSGPRINTK("%s(): execution damon ESTABLISHED my_nid=%d conn_no=%d (GOOD)\n",
-													__func__, my_nid, conn_no);
+					kthread_run(exec_handler, exec_data, "pcn_exec");
 
-	//* doese the polling. copy data from sock to kernel *//
-	set_popcorn_node_online(conn_no); //Jack: atomic is more safe
-	smp_mb(); // Jack: MUST HAVE
+	MSGPRINTK("[%d] PCN_RECV handler is up\n", conn_no);
 
-	while (!kthread_should_stop()) { /* only single daemon doing this */
-		//if (kthread_should_stop()) { //Jack: I think no need
-		//	goto exit;	// check has anyone call thread_stop
-		//}
+	set_popcorn_node_online(conn_no);
 
+	while (!kthread_should_stop()) {
 		/* TODO: make a function */
 		int len;
 		int ret;
@@ -387,7 +339,7 @@ static int recv_handler(void* arg0)
 				continue;
 			offset += ret;
 			len -= ret;
-			MSGDPRINTK("daemon: (hdr) recv %d in %lu remain=%d\n",
+			MSGDPRINTK("(hdr) recv %d in %lu remain=%d\n",
 					ret, sizeof(struct pcn_kmsg_hdr), len);
 		}
 
@@ -402,8 +354,7 @@ static int recv_handler(void* arg0)
 		offset = sizeof(header);
 		len = header.size - offset;
 
-		MSGDPRINTK ("daemon: (info) %lu, data(msg) size = len %d = %d-%lu\n",
-					header.ticket, len, header.size, sizeof(header));
+		MSGDPRINTK ("(info) %lu, data size %d\n", header.ticket, len);
 
 		//- data -//
 		while (len > 0) {
@@ -412,11 +363,11 @@ static int recv_handler(void* arg0)
 				continue;
 			offset += ret;
 			len -= ret;
-			MSGDPRINTK("daemon: (body) recv %d in %lu remain=%d\n",
+			MSGDPRINTK("(body) recv %d in %lu remain=%d\n",
 					ret, data->header.size - sizeof(header), len);
 		}
 
-		err = enq_recv(recv_buf[conn_no], data, conn_no);
+		err = enq_recv(handler_data->buf, data, conn_no);
 	}
 
 	/* all accect() are done */
@@ -500,26 +451,35 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 // Initialize callback table to null, set up control and data channels
 static int __init initialize(void)
 {
-	int i, err;
+	int i, err, sender;
 	char *name;
-	struct sockaddr_in serv_addr;
-	const uint32_t my_ip = get_host_ip(&name);
-	struct handler_data* conn_data;
-	struct handler_data* send_data;
-
-	//TODO: check how to assign a priority to these threads!
-	//	  make msg_layer faster (higher prio)
-	//struct sched_param param = {.sched_priority = 10};
+	struct sockaddr_in addr;
+	uint32_t my_ip;
 
 	MSGPRINTK("--- Popcorn messaging layer init starts ---\n");
+
+	my_ip = get_host_ip(&name);
 
 	// register callback.
 	send_callback = (send_cbftn)sock_kmsg_send_long;
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
+		init_completion(&send_completion[i]);
+		init_completion(&recv_completion[i]);
+
+		init_completion(&connected[i]);
+		init_completion(&accepted[i]);
+
+		mutex_init(&mutex_sockets[i]);
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+		dbg_ticket[i] = 0;
+#endif
+	}
+
+	for (i = 0; i < MAX_NUM_NODES; i++) {
 		if (my_ip == ip_table[i])  {
 			my_nid = i;
-			MSGPRINTK("Device \"%s\" my_nid=%d on machine IP %u.%u.%u.%u\n",
+			PRINTK("Device \"%s\" my_nid is %d on machine %u.%u.%u.%u\n",
 									name, my_nid,
 									(ip_table[i]>>24)&0x000000ff,
 									(ip_table[i]>>16)&0x000000ff,
@@ -532,24 +492,6 @@ static int __init initialize(void)
 	smp_mb();
 	BUG_ON(my_nid < 0);
 
-	MSGPRINTK("----------------------------------------------------------\n");
-	MSGPRINTK("----- updating to my_nid=%d wait for a moment ----\n", my_nid);
-	MSGPRINTK("----------------------------------------------------------\n");
-	MSGDPRINTK("MSG_LAYER: Initialization my_nid=%d\n", my_nid);
-
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-		init_completion(&send_completion[i]); // Jack:
-		init_completion(&recv_completion[i]); // Jack:
-
-		init_completion(&connected[i]);
-		init_completion(&accepted[i]);
-
-		mutex_init(&mutex_sockets[i]);
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-		dbg_ticket[i] = 0;
-#endif
-	}
-
 	/* Initilaize the sock */
 	/*
 	 *  Each node has a connection table like tihs:
@@ -560,7 +502,6 @@ static int __init initialize(void)
 	 * connect: connecting to existing nodes
 	 * accept:  waiting for the connection requests from later nodes
 	 */
-	// 0. init sock listening port // make a func // connect , [my_nid], accept
 	sock_listen = kmalloc(sizeof(*sock_listen), GFP_KERNEL);
 	err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sock_listen);
 	if (err < 0) {
@@ -569,12 +510,11 @@ static int __init initialize(void)
 		return err;
 	}
 
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_addr.s_addr = INADDR_ANY;
-	serv_addr.sin_port = htons(PORT);
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = INADDR_ANY;
+	addr.sin_port = htons(PORT);
 
-	err = kernel_bind(sock_listen, (struct sockaddr *)&serv_addr,
-		sizeof(serv_addr));
+	err = kernel_bind(sock_listen, (struct sockaddr *)&addr, sizeof(addr));
 	if (err < 0) {
 		printk(KERN_ERR "Failed to bind connection..!! "
 									"Messaging layer init failed\n");
@@ -593,84 +533,56 @@ static int __init initialize(void)
 	}
 
 	set_popcorn_node_online(my_nid);
-	smp_mb(); // Jack: MUST HAVE.
-	MSGDPRINTK("server successfully listening on socket port=%d\n", PORT);
+	MSGDPRINTK("Listen to the port %d\n", PORT);
 
-	// 1. init sock indo for conn thread (recv thread) and start it
-	for (i = 0; i < MAX_NUM_NODES; i++) { // connect , my_nid, [accept]
-		if (i == my_nid)
-			continue;
+	for (sender = 0; sender < 2; sender++) {
+		//TODO: check how to assign a priority to these threads!
+		//	  make msg_layer faster (higher prio)
+		//struct sched_param param = {.sched_priority = 10};
+		for (i = 0; i < MAX_NUM_NODES; i++) {
+			struct handler_data* data;
+			char handler_name[80];
+			struct task_struct *handler;
 
-		/* TODO: make a function */
-		conn_data = kmalloc(sizeof(*conn_data), GFP_KERNEL);
-		BUG_ON(!conn_data);
+			if (i == my_nid)
+				continue;
 
-		conn_data->conn_no = i; // Take node 1 for example. connect0 [1] accept2
-		// The circular buffer for received messages
-		conn_data->buf = kmalloc(sizeof(*conn_data->buf), GFP_KERNEL);
-		BUG_ON(!(conn_data->buf));
-		conn_data->buf->rbuf =
-					vmalloc(sizeof(*conn_data->buf->rbuf) * MAX_ASYNC_BUFFER);
+			/* TODO: make a function */
+			data = kmalloc(sizeof(*data), GFP_KERNEL);
+			BUG_ON(!data);
 
-		conn_data->buf->head = 0;
-		conn_data->buf->tail = 0;
+			data->conn_no = i; // Take node 1 for example. connect0 [1] accept2
+			// The circular buffer for received messages
+			data->buf = kmalloc(sizeof(*data->buf), GFP_KERNEL);
+			BUG_ON(!(data->buf));
+			data->buf->rbuf =
+						vmalloc(sizeof(*data->buf->rbuf) * MAX_ASYNC_BUFFER);
 
-		sema_init(&(conn_data->buf->q_empty), 0);
-		sema_init(&(conn_data->buf->q_full), MAX_ASYNC_BUFFER);
-		recv_buf[i] = conn_data->buf;   // save this pointer to a global arry!
-		spin_lock_init(&(conn_data->buf->enq_buf_mutex));
-		spin_lock_init(&(conn_data->buf->deq_buf_mutex));
+			data->buf->head = 0;
+			data->buf->tail = 0;
 
-		smp_wmb();
+			sema_init(&(data->buf->q_empty), 0);
+			sema_init(&(data->buf->q_full), MAX_ASYNC_BUFFER);
+			spin_lock_init(&(data->buf->enq_buf_mutex));
+			spin_lock_init(&(data->buf->deq_buf_mutex));
+			smp_wmb();
 
-		recv_handlers[i] = kthread_run(recv_handler, conn_data, "pcn_recv");
-		if (recv_handlers[i] < 0) {
-			printk(KERN_ERR "kthread_run failed! "
-								"Messaging Layer not initialized\n");
-			return (long long int)recv_handlers[i];
+			sprintf(handler_name, "pcn_%s%d\n", sender ? "send" : "recv", i);
+			handler = kthread_run(
+					sender ? send_handler : recv_handler, data, handler_name);
+			if (IS_ERR(handler)) {
+				printk(KERN_ERR "Handler creation failed!\n");
+				return -PTR_ERR(handler);
+			}
+
+			if (sender) {
+				send_handlers[i] = handler;
+			} else {
+				recv_handlers[i] = handler;
+				//sched_setscheduler(recv_handlers[i], SCHED_FIFO, &param);
+				//set_cpus_allowed_ptr(recv_handlers[i], cpumask_of(i%NR_CPUS));
+			}
 		}
-	}
-
-	// 2. init sock inf ofor send data thread (send thread) and start it
-	//for (i = 0; i < my_nid; i++) { // [connect] , my_nid, accept
-	for (i = 0; i < MAX_NUM_NODES; i++) { // [connect] , my_nid, accept
-		if (i == my_nid)
-			continue;
-
-		/* TODO: make a function */
-		send_data = kmalloc(sizeof(*send_data), GFP_KERNEL);
-		BUG_ON(!send_data);
-
-		send_data->conn_no = i; // Take node 1 for example. connect0 [1] accept2
-		send_data->buf = kmalloc(sizeof(*send_data->buf), GFP_KERNEL);
-		BUG_ON(!(send_data->buf));
-		send_data->buf->rbuf =
-					vmalloc(sizeof(*send_data->buf->rbuf) * MAX_ASYNC_BUFFER);
-
-		send_data->buf->head = 0;
-		send_data->buf->tail = 0;
-
-		//- legay -//
-		//send_data->buf->is_free = 1;
-		//send_data->buf->status = 0;
-
-		sema_init(&(send_data->buf->q_empty), 0);
-		sema_init(&(send_data->buf->q_full), MAX_ASYNC_BUFFER);
-		send_buf[i] = send_data->buf;   // save this pointer to a global arry!
-		spin_lock_init(&(send_data->buf->enq_buf_mutex));
-		spin_lock_init(&(send_data->buf->deq_buf_mutex));
-
-		smp_wmb();
-
-		send_handlers[i] = kthread_run(send_handler, send_data, "pcn_send");
-		if (send_handlers[i] < 0) {
-			printk(KERN_ERR "kthread_run failed! "
-								"Messaging Layer not initialized\n");
-			return (long long int)send_handlers[i];
-		}
-
-		//sched_setscheduler(recv_handlers[i], SCHED_FIFO, &param);
-		//set_cpus_allowed_ptr(recv_handlers[i], cpumask_of(i%NR_CPUS));
 	}
 
 	// Jack: wait for connection done;
@@ -678,27 +590,12 @@ static int __init initialize(void)
 	// Jack: BUTTTTT send_callback are still null pointers so far.
 	// Jack: So, we have to wait here!
 	for (i = 0; i < MAX_NUM_NODES; i++) {
-		while (!is_popcorn_node_online(i)) { //Jack: atomic is more safe
-			MSGDPRINTK("waiting for popcorn_nodes[%d].is_connected\n", i);
-			msleep(1000);
+		while (!is_popcorn_node_online(i)) {
+			io_schedule();
 		}
 	}
 
-	MSGDPRINTK("msg_socket: msg_layer first broadcasts for popcorn info "
-		"this soulde be launched after all connections are well prepared\n");
 	MSGPRINTK("--- Popcorn messaging layer is up ---\n");
-
-	/* Make init popcorn call */
-	//_init_RemoteCPUMask(); // msg boradcast //Jack: deal w/ it later
-
-	// compose msg - define -> alloc -> essential msg header info
-	/* make a testing function */
-
-	MSGDPRINTK(KERN_INFO"Popcorn Messaging Layer Initialized\n");
-	MSGPRINTK("popcorn_node_online: \n");
-	for (i = 0; i < MAX_NUM_NODES; i++)
-		MSGPRINTK(" %d: %s\n", i,
-					is_popcorn_node_online(i) ? "online" : "offline");
 
 	return 0;
 }

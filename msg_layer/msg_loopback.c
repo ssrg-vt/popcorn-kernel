@@ -1,10 +1,8 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/vmalloc.h>
 
-#include <popcorn/pcn_kmsg.h>
-#include <popcorn/bundle.h>
+#include "common.h"
 
 static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_message *lmsg, unsigned int size)
 {
@@ -12,7 +10,7 @@ static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_messag
 	struct pcn_kmsg_hdr *hdr;
 	pcn_kmsg_cbftn fn;
 
-	msg = vmalloc(size);
+	msg = pcn_kmsg_alloc_msg(size);
 	BUG_ON(!msg);
 	memcpy(msg, lmsg, size);
 
@@ -23,7 +21,7 @@ static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_messag
 	fn = callbacks[hdr->type];
 	if (!fn) {
 		printk(KERN_ERR"%s: NULL FN", __func__);
-		vfree(msg);
+		pcn_kmsg_free_msg(msg);
 		return -ENOENT;
 	}
 	// printk(KERN_ERR"%s: CALL %d %d\n", __func__, hdr->type, hdr->size);
@@ -34,7 +32,7 @@ static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_messag
 
 static int __init loopback_load(void)
 {
-	printk(KERN_INFO"Popcorn message layer loopback loaded\n");
+	MSGPRINTK(KERN_INFO"Popcorn message layer loopback loaded\n");
 
 	my_nid = 0;
 	set_popcorn_node_online(my_nid);
@@ -47,7 +45,7 @@ static int __init loopback_load(void)
 static void loopback_unload(void)
 {
 	send_callback = NULL;
-	printk(KERN_INFO"Popcorn message layer loopback unloaded\n");
+	MSGPRINTK(KERN_INFO"Popcorn message layer loopback unloaded\n");
 }
 
 module_init(loopback_load);
