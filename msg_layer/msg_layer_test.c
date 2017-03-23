@@ -20,19 +20,28 @@
 
 #include "common.h"
 
+// TODO: replace with
+//MSGPRINTK(...)
+//MSGDPRINTK(...)
+//MSGDATA(...)
+#define DEBUG 1
+#define DEBUG_VERBOSE 1
+#define KRPING_EXP_LOG 1
+#define KRPING_EXP_DATA 0
+#define FORCE_DEBUG 1
+
+/* perf data */
+#define EXP_DATA if(KRPING_EXP_DATA) printk
+/* perf log */
+#define EXP_LOG if(KRPING_EXP_LOG) printk 
+
+/* normal debug log */
+#define DEBUG_LOG if(FORCE_DEBUG || (DEBUG && !KRPING_EXP_DATA)) printk
+#define DEBUG_LOG_V if(DEBUG_VERBOSE) trace_printk 
+
 // for testing rdma read (test2)
 int g_test_remote_len = 4*1024; // testing size for RDMA, mimicing user buf size // for rdma dbg
 char *g_test_buf; // mimicing user buf
-
-int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback) 
-{
-    if (type >= PCN_KMSG_TYPE_MAX)
-        return -ENODEV; /* invalid type */
-
-    DEBUG_LOG_V("%s: registering %d\n",__func__, type);
-    callbacks[type] = callback; 
-    return 0;
-}
 
 /* example - data structure */
 typedef struct {

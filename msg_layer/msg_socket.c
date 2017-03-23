@@ -21,10 +21,7 @@
 #include <linux/file.h>
 #include <linux/ktime.h>
 
-#include <linux/fdtable.h>
-
 #include <linux/net.h>
-#include <net/sock.h>
 #include <linux/tcp.h>
 #include <linux/in.h>
 #include <asm/uaccess.h>
@@ -123,7 +120,9 @@ typedef struct _exec_thread_data {
 static struct task_struct *handler[MAX_NUM_NODES];
 static struct task_struct *sender_handler[MAX_NUM_NODES];
 static struct task_struct *execution_handler[MAX_NUM_NODES];
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 static unsigned long dbg_ticket[MAX_NUM_NODES];
+#endif
 
 /* sync */
 static struct mutex mutex_sock_data[MAX_NUM_NODES];

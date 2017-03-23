@@ -37,21 +37,6 @@ config POPCORN_DEBUG_PAGE_SERVER_VERBOSE
 	depends on POPCORN_DEBUG
 	default n
 
-config POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	bool "Print debug message for msg layer"
-	depends on POPCORN_DEBUG
-	default n
-
-config POPCORN_DEBUG_MSG_LAYER_VERBOSE_DEBUG
-	bool "Print more debug message for msg layer"
-	depends on POPCORN_DEBUG && POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	default n
-
-config POPCORN_DEBUG_MSG_LAYER_DATA
-	bool "Print experimental data for msg layer"
-	depends on POPCORN_DEBUG
-	default n
-
 comment "Popcorn is not currently supported on your architecture"
 	depends on !ARCH_SUPPORTS_POPCORN
 
