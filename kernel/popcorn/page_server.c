@@ -45,6 +45,7 @@ bool page_is_mine(struct page *page)
 
 struct remote_page {
 	struct list_head list;
+	int peer_nid;
 	unsigned long addr;
 	pid_t pid;
 
@@ -58,39 +59,6 @@ struct remote_page {
 
 	unsigned char data[PAGE_SIZE];
 };
-
-static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, remote_page_request_t **preq)
-{
-	struct remote_page *rp = kmalloc(sizeof(*rp), GFP_KERNEL);
-	remote_page_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
-
-	BUG_ON(!rp || !req);
-
-	/* rp */
-	INIT_LIST_HEAD(&rp->list);
-	rp->addr = addr;
-	rp->pid = tsk->pid;
-
-	rp->mapped = false;
-	rp->ret = 0;
-	atomic_set(&rp->pendings, 0);
-	init_waitqueue_head(&rp->pendings_wait);
-
-	/* req */
-	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-
-	req->remote_nid = my_nid;
-	req->remote_pid = tsk->pid;
-	req->origin_pid = tsk->origin_pid;
-	req->addr = addr;
-	req->fault_flags = fault_flags;
-
-	*preq = req;
-
-	return rp;
-}
-
 
 static struct remote_page *__lookup_pending_remote_page_request(struct remote_context *rc, unsigned long addr)
 {
@@ -206,6 +174,65 @@ static struct page *__get_page_at(struct vm_area_struct *vma, unsigned long addr
 	get_page(page);
 	return page;
 }
+
+
+static struct remote_page *__alloc_remote_page_request(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, remote_page_request_t **preq)
+{
+	struct remote_page *rp = kmalloc(sizeof(*rp), GFP_KERNEL);
+	remote_page_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
+
+	BUG_ON(!rp || !req);
+
+	/* rp */
+	INIT_LIST_HEAD(&rp->list);
+	rp->addr = addr;
+	rp->pid = tsk->pid;
+
+	rp->mapped = false;
+	rp->ret = 0;
+	atomic_set(&rp->pendings, 0);
+	init_waitqueue_head(&rp->pendings_wait);
+
+	/* req */
+	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST;
+	req->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+	req->addr = addr;
+	req->fault_flags = fault_flags;
+
+	req->remote_nid = my_nid;
+	req->remote_pid = tsk->pid;
+
+	if (tsk->at_remote) {
+		rp->peer_nid = tsk->origin_nid;
+		req->origin_pid = tsk->origin_pid;
+	} else {
+		int nid;
+		pte_t *ptep;
+		spinlock_t *ptlp;
+		struct mm_struct *mm = get_task_mm(tsk);
+		struct page *page = __find_page_at(mm, addr, &ptep, &ptlp);
+
+		BUG_ON(!page);
+		nid = find_first_bit(page->owners, MAX_POPCORN_NODES);
+		if (nid < MAX_POPCORN_NODES) {
+			struct remote_context *rc = get_task_remote(tsk);
+			req->origin_pid = rc->remote_tgids[nid];
+			put_task_remote(tsk);
+			rp->peer_nid = nid;
+		} else {
+			BUG_ON("Lost page without an owner??");
+		}
+		mmput(mm);
+		pte_unmap_unlock(ptep, ptlp);
+	}
+
+	*preq = req;
+
+	return rp;
+}
+
+
 
 
 /**************************************************************************
@@ -648,7 +675,7 @@ static void process_remote_page_request(struct work_struct *work)
 
 	while (!res) {	/* response contains a page. allocate from a heap */
 		res = kmalloc(sizeof(*res), GFP_KERNEL);
-	};
+	}
 	res->addr = req->addr;
 	printk("remote_page_request [%d]: %lx from [%d/%d]\n",
 			req->origin_pid, req->addr, req->remote_pid, from);
@@ -673,11 +700,6 @@ static void process_remote_page_request(struct work_struct *work)
 	}
 
 	res->result = __get_remote_page(tsk, mm, vma, req, res);
-
-	/*
-	printk("remote_page_request [%d]: %lx -- %lx %lx\n",
-			req->origin_pid, vma->vm_start, vma->vm_end, vma->vm_flags);
-	*/
 
 out_up:
 	up_read(&mm->mmap_sem);
@@ -719,7 +741,7 @@ static struct remote_page *__fetch_remote_page(struct remote_context *rc, unsign
 		r = __lookup_pending_remote_page_request(rc, addr);
 		if (!r) {
 			printk("%s [%d]: %lx [%d/%d]\n", __func__,
-					tsk->pid, addr, tsk->origin_pid, tsk->origin_nid);
+					tsk->pid, addr, req->origin_pid, rp->peer_nid);
 			list_add(&rp->list, &rc->pages);
 		} else {
 			printk("%s [%d]: %lx pended\n", __func__, tsk->pid, addr);
@@ -736,7 +758,7 @@ static struct remote_page *__fetch_remote_page(struct remote_context *rc, unsign
 	spin_unlock_irqrestore(&rc->pages_lock, flags);
 
 	if (req) {
-		pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));
+		pcn_kmsg_send_long(rp->peer_nid, req, sizeof(*req));
 		kfree(req);
 	}
 
@@ -828,6 +850,8 @@ static int __map_remote_page(struct mm_struct *mm, struct remote_context *rc, st
 		pte_val = pte_mkwrite(pte_val);
 		pte_val = pte_mkdirty(pte_val);
 		pte_val = pte_mkyoung(pte_val);
+		pte_val = pte_set_flags(pte_val, _PAGE_PRESENT);
+		pte_val = pte_clear_flags(pte_val, _PAGE_SOFTW1);
 
 		set_pte_at_notify(mm, addr, pte, pte_val);
 		update_mmu_cache(vma, addr, pte);

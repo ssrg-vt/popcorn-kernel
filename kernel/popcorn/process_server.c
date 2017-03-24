@@ -673,6 +673,13 @@ static int vma_worker_remote(void *_data)
 	/* Create the shadow spawner */
 	kernel_thread(shadow_spawner, rc, CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
 
+	/* Drop to user here to access mm using get_task_mm().
+	 * This should be done after forking shadow_spawner otherwise
+	 * kernel_thread() will consider this as a user thread fork() which
+	 * will end up an inproper instruction pointer (see copy_tls_copy()).
+	 */
+	current->flags &= ~PF_KTHREAD;
+
 	kfree(params);
 	vma_worker_main(rc, "remote");
 
