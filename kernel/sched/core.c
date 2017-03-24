@@ -4609,20 +4609,50 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 	return ret;
 }
 
+
 #ifdef CONFIG_POPCORN
 #include <popcorn/types.h>
 #include <popcorn/bundle.h>
 #include <popcorn/process_server.h>
 
-static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid, void __user *uregs)
+SYSCALL_DEFINE0(sched_migration_proposed)
+{
+	return current->migration_target_nid != -1;
+}
+
+SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
+{
+	struct task_struct *tsk;
+
+	if (nid < -1 || nid >= MAX_POPCORN_NODES) {
+		return -EINVAL;
+	}
+
+	rcu_read_lock();
+	tsk = find_task_by_vpid(pid);
+	if (!tsk) {
+		rcu_read_unlock();
+		return -ENOENT;
+	}
+	get_task_struct(tsk);
+	rcu_read_unlock();
+
+	tsk->migration_target_nid = nid;
+
+	put_task_struct(tsk);
+	return 0;
+}
+
+static int __do_sched_migrate(struct task_struct *tsk, int nid, void __user *uregs)
 {
 	int retval = 0;
 
 	tsk->migration_ip = instruction_pointer(task_pt_regs(tsk));
 
 	retval = process_server_do_migration(tsk, nid, uregs);
-
 	if (retval) return retval;
+
+	tsk->migration_target_nid = -1;
 
 	printk("%s [%d]: put to sleep\n", __func__, tsk->pid);
 	__set_task_state(tsk, TASK_INTERRUPTIBLE);
@@ -4638,17 +4668,26 @@ static int __do_sched_migrate(struct task_struct *tsk, unsigned int nid, void __
 	return 0;
 }
 
-SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, void __user *, uregs)
+SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 {
-	struct task_struct *tsk;
 	int retval;
-
-	printk(KERN_INFO"\n####### MIGRATE [%d]: %d to %d\n",
-			current->pid, pid, nid);
 
 #ifdef MIGRATION_PROFILE
 	migration_start = ktime_get();
 #endif
+
+	printk(KERN_INFO"\n####### MIGRATE [%d] to %d (%d)\n",
+			current->pid, nid, current->migration_target_nid);
+
+	if (nid == -1) {
+		nid = current->migration_target_nid;
+	}
+
+	if (nid == -1) {
+		printk(KERN_INFO"[%d]: destination nid is not specified\n",
+				current->pid);
+		return -EINVAL;
+	}
 
 	if (!is_popcorn_node_online(nid)) {
 		printk(KERN_INFO"%s [%d]: node %d is offline\n", __func__,
@@ -4656,30 +4695,22 @@ SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, void __user *, ure
 		return -EAGAIN;
 	}
 
-	/*
-	tsk = find_task_by_vpid(pid);
-	if (!tsk) {
-		rcu_read_unlock();
-		return -ESRCH;
-	}
-	*/
-	tsk = current;
-
-	if (process_is_distributed(tsk)) {
-		if (tsk->at_remote) {
+	if (process_is_distributed(current)) {
+		if (current->at_remote) {
 			// this might be a back migration. allow it.
 		} else {
-			if (tsk->remote_nid != -1 && tsk->remote_pid != -1) {
+			if (current->remote_nid != -1 && current->remote_pid != -1) {
 				// Already migrated. This is bug
 				printk(KERN_INFO"%s [%d]: already migrated to %d at %d\n",
-						__func__, tsk->pid, tsk->remote_pid, tsk->remote_nid);
+						__func__,
+						current->pid, current->remote_pid, current->remote_nid);
 				retval = -EBUSY;
 				goto out_put;
 			}
 		}
 	}
 
-	retval = __do_sched_migrate(tsk, nid, uregs);
+	retval = __do_sched_migrate(current, nid, uregs);
 
 out_put:
 	return retval;
@@ -4687,7 +4718,17 @@ out_put:
 
 #else // CONFIG_POPCORN
 
-SYSCALL_DEFINE3(sched_migrate, pid_t, pid, unsigned int, nid, void __user *, uregs)
+SYSCALL_DEFINE0(sched_migration_proposed)
+{
+	return false;
+}
+
+SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
+{
+	return -EINVAL;
+}
+
+SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 {
 	return -EINVAL;
 }
