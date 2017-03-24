@@ -410,6 +410,9 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	if (orig->tgid != tsk->tgid) {
 		tsk->at_remote = false;
 	}
+
+	tsk->migration_ip = 0;
+	tsk->migration_target_nid = -1;
 #endif
 
 	return tsk;

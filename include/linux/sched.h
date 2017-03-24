@@ -1835,6 +1835,7 @@ struct task_struct {
 	int ret_from_remote;
 
 	unsigned long migration_ip;
+	int migration_target_nid;
 
 	/*
 	 * scheduling -- antoniob
