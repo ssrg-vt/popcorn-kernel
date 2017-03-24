@@ -276,7 +276,6 @@ static int exec_handler(void* arg0)
 static int recv_handler(void* arg0)
 {
 	int err;
-	struct handler_data *exec_data;
 	struct handler_data *handler_data = arg0;
 
 	int conn_no = handler_data->conn_no;
@@ -302,10 +301,8 @@ static int recv_handler(void* arg0)
 		// Skip connecting to myself
 	}
 
-	exec_data = kmalloc(sizeof(*exec_data), GFP_KERNEL);
-	exec_data->conn_no = conn_no;
 	exec_handlers[conn_no] =
-					kthread_run(exec_handler, exec_data, "pcn_exec");
+					kthread_run(exec_handler, handler_data, "pcn_exec");
 
 	MSGPRINTK("[%d] PCN_RECV handler is up\n", conn_no);
 
