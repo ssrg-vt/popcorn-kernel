@@ -228,7 +228,7 @@ static void print_unknown_cpuinfo(struct seq_file *m)
 
 int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos)
 {
-	seq_puts(m, "****    Remote CPU at %d   ****\n", nid);
+	seq_printf(m, "****    Remote CPU at %d   ****\n", nid);
 
 	switch (saved_cpu_info[nid]->arch_type) {
 	case arch_x86:
