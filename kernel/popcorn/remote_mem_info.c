@@ -37,7 +37,7 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/remote_meminfo.h>
 
-#define REMOTE_MEMINFO_VERBOSE 1
+#define REMOTE_MEMINFO_VERBOSE 0
 #if REMOTE_MEMINFO_VERBOSE
 #define MEMPRINTK(...) printk(__VA_ARGS__)
 #else

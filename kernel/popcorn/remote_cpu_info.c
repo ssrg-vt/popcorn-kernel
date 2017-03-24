@@ -18,7 +18,7 @@
 #include <popcorn/cpuinfo.h>
 #include <popcorn/pcn_kmsg.h>
 
-#define REMOTE_CPUINFO_VERBOSE 1
+#define REMOTE_CPUINFO_VERBOSE 0
 #if REMOTE_CPUINFO_VERBOSE
 #define CPUPRINTK(...) printk(__VA_ARGS__)
 #else
