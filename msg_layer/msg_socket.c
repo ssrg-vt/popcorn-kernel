@@ -18,6 +18,7 @@
 #include <linux/completion.h>
 
 #include <linux/net.h>
+#include <linux/inet.h>
 #include <linux/inetdevice.h>
 
 #include <asm/uaccess.h>
@@ -30,11 +31,13 @@ char *net_dev_names[] = {
 	"p7p1",		// Xgene (ARM)
 };
 
-uint32_t ip_table[] = {
-	IP_TO_UINT32(10, 0, 0, 100),
-	IP_TO_UINT32(10, 0, 0, 101),
-	IP_TO_UINT32(10, 0, 0, 102),
+const char * const ip_addresses[] = {
+	"10.0.0.100",
+	"10.0.0.101",
+	"10.0.0.102",
 };
+
+uint32_t ip_table[MAX_NUM_NODES] = { 0 };
 
 #define PORT 30467
 #define MAX_ASYNC_BUFFER	1024
@@ -133,20 +136,14 @@ static uint32_t get_host_ip(char **name_ret)
 
 		if (device) {
 			struct in_ifaddr *if_info;
-			__u8 *addr;
 
 			*name_ret = name;
 			in_dev = (struct in_device *)device->ip_ptr;
 			if_info = in_dev->ifa_list;
-			addr = (char *)&if_info->ifa_local;
 
-			MSGDPRINTK(KERN_WARNING "Device %s IP: %u.%u.%u.%u\n",
-							name,
-							(__u32)addr[0],
-							(__u32)addr[1],
-							(__u32)addr[2],
-							(__u32)addr[3]);
-			return IP_TO_UINT32(addr[0], addr[1], addr[2], addr[3]);
+			MSGDPRINTK(KERN_WARNING "Device %s IP: %p4I\n",
+							name, if_info->ifa_local);
+			return if_info->ifa_local;
 		}
 	}
 	MSGPRINTK(KERN_ERR "msg_socket: ERROR - cannot find host ip\n");
@@ -171,13 +168,8 @@ static int send_handler(void* arg0)
 		}
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(PORT);
-		addr.sin_addr.s_addr = htonl(ip_table[conn_no]); // target ip(diff)
-		MSGDPRINTK("[%d] Connecting to %u.%u.%u.%u\n",
-										conn_no,
-										(ip_table[conn_no]>>24)&0x000000ff,
-										(ip_table[conn_no]>>16)&0x000000ff,
-										(ip_table[conn_no]>> 8)&0x000000ff,
-										(ip_table[conn_no]>> 0)&0x000000ff);
+		addr.sin_addr.s_addr = ip_table[conn_no];
+		MSGDPRINTK("[%d] Connecting to %pI4\n", conn_no, iptable + conn_no);
 		do {
 			err = kernel_connect(sockets[conn_no],
 						(struct sockaddr *)&addr, sizeof(addr), 0);
@@ -435,16 +427,15 @@ static int __init initialize(void)
 	int i, err, sender;
 	char *name;
 	struct sockaddr_in addr;
-	uint32_t my_ip;
+	uint32_t my_ip = get_host_ip(&name);
 
 	MSGPRINTK("--- Popcorn messaging layer init starts ---\n");
-
-	my_ip = get_host_ip(&name);
 
 	// register callback.
 	send_callback = (send_cbftn)sock_kmsg_send_long;
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
+		char *me = " ";
 		init_completion(&send_completion[i]);
 		init_completion(&recv_completion[i]);
 
@@ -455,20 +446,15 @@ static int __init initialize(void)
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 		dbg_ticket[i] = 0;
 #endif
-	}
+		ip_table[i] = in_aton(ip_addresses[i]);
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
 		if (my_ip == ip_table[i]) {
 			my_nid = i;
-			PRINTK("Device \"%s\" my_nid is %d on machine %u.%u.%u.%u\n",
-									name, my_nid,
-									(ip_table[i]>>24)&0x000000ff,
-									(ip_table[i]>>16)&0x000000ff,
-									(ip_table[i]>> 8)&0x000000ff,
-									(ip_table[i]>> 0)&0x000000ff);
-			break;
+			me = "*";
 		}
+		PRINTK(" %s %2d: %pI4\n", me, i, ip_table + i);
 	}
+	PRINTK("\n");
 
 	smp_mb();
 	BUG_ON(my_nid < 0);
