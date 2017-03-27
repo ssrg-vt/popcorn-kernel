@@ -15,7 +15,6 @@
 #include <linux/wait.h>
 #include <linux/ptrace.h>
 #include <linux/swap.h>
-#include <linux/highmem.h>
 #include <linux/pagemap.h>
 
 #include <asm/tlbflush.h>
@@ -32,6 +31,7 @@
 #include "types.h"
 #include "stat.h"
 #include "debug.h"
+#include "pgtable.h"
 
 bool page_is_replicated(struct page *page)
 {
@@ -287,12 +287,7 @@ static void process_remote_page_flush(struct work_struct *work)
 	unlock_page(page);
 	put_page(page);
 
-#ifdef CONFIG_X86
-	entry = pte_clear_flags(*pte, _PAGE_SOFTW1);
-	entry = pte_set_flags(entry, _PAGE_PRESENT);
-#elif defined(CONFIG_ARM64)
-	entry = set_pte_bit(*pte, PTE_VALID);
-#endif
+	entry = pte_make_valid(*pte);
 	set_pte_at(mm, req->addr, pte, entry);
 
 	flush_tlb_page(vma, req->addr);
@@ -415,12 +410,7 @@ static int __do_invalidate_page(struct task_struct *tsk, struct mm_struct *mm, u
 	clear_bit(my_nid, page->owners);
 
 	entry = ptep_get_and_clear(mm, addr, pte);
-#ifdef CONFIG_X86
-	entry = pte_set_flags(entry, _PAGE_SOFTW1);
-	entry = pte_clear_flags(entry, _PAGE_PRESENT);
-#elif defined(CONFIG_ARM64)
-	entry = clear_pte_bit(entry, PTE_VALID);
-#endif
+	entry = pte_make_invalid(entry);
 	set_pte_at(mm, addr, pte, entry);
 
 	flush_tlb_page(vma, addr);
@@ -816,7 +806,7 @@ static int __map_remote_page(struct mm_struct *mm, struct remote_context *rc, st
 
 	if (!pte_same(*pte, pte_val)) {
 		printk("%s [%d]: pte updated %lx -> %lx\n", __func__,
-				current->pid, pte_val.pte, pte->pte);
+				current->pid, pte_val(pte_val), pte_val(*pte));
 		goto out;
 	}
 
@@ -837,26 +827,31 @@ static int __map_remote_page(struct mm_struct *mm, struct remote_context *rc, st
 	memcpy(page->owners, res->owners, sizeof(page->owners));
 	BUG_ON(!test_bit(my_nid, page->owners));
 
-	__SetPageUptodate(page);
+	SetPageUptodate(page);
 	unlock_page(page);
 
 	if (populated) {
 		do_set_pte(vma, addr, page, pte,
 				fault_flags & FAULT_FLAG_WRITE, vma_is_anonymous(vma));
+
 		mem_cgroup_commit_charge(page, memcg, false);
 		lru_cache_add_active_or_unevictable(page, vma);
 	} else {
 		flush_icache_page(vma, page);
-		pte_val = pte_mkwrite(pte_val);
-		pte_val = pte_mkdirty(pte_val);
-		pte_val = pte_mkyoung(pte_val);
-		pte_val = pte_set_flags(pte_val, _PAGE_PRESENT);
-		pte_val = pte_clear_flags(pte_val, _PAGE_SOFTW1);
 
-		set_pte_at_notify(mm, addr, pte, pte_val);
+		pte_val = pte_make_valid(pte_val);
+		//pte_val = pte_mkyoung(pte_val);
+
+		if (fault_flags & FAULT_FLAG_WRITE) {
+			pte_val = pte_mkwrite(pte_val);
+			pte_val = pte_mkdirty(pte_val);
+		}
+
+		set_pte_at(mm, addr, pte, pte_val);
 		update_mmu_cache(vma, addr, pte);
+
+		flush_tlb_page(vma, addr);
 	}
-	flush_tlb_page(vma, addr);
 
 out:
 	page_cache_release(page);
@@ -927,7 +922,7 @@ static int __handle_fault_at_origin(struct mm_struct *mm,
 	}
 
 	/* Nothing to do with page replication. Handle locally as well*/
-	if (!(pte_flags(pte_val) & _PAGE_SOFTW1)) {
+	if (!pte_is_invalid(pte_val)) {
 		printk("pte_fault [%d]: not dsm controlled. handle locally\n",
 				current->pid);
 		return VM_FAULT_CONTINUE;
@@ -966,7 +961,7 @@ int page_server_handle_pte_fault(
 
 	printk(KERN_WARNING"\n## PAGEFAULT [%d]: %lx %lx %x %lx\n",
 			current->pid, address, instruction_pointer(current_pt_regs()),
-			fault_flags, pte_flags(pte_val));
+			fault_flags, pte_val(pte_val));
 
 	/*
 	 * Distributed process but local thread
@@ -1003,7 +998,7 @@ int page_server_handle_pte_fault(
 
 	/* pte exists at this point */
 
-	if (pte_flags(pte_val) & _PAGE_SOFTW1) {
+	if (pte_is_invalid(pte_val)) {
 		/* Caused by the page replication protocol */
 		printk("pte_fault [%d]: claim this page\n", current->pid);
 		return __handle_remote_fault(mm, pmd, pte, pte_val, addr, fault_flags);
