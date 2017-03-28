@@ -282,6 +282,4 @@ int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id, void *msg,
 extern send_cbftn send_callback;
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 
-#define IP_TO_UINT32(a,b,c,d) (((a) << 24) | ((b) << 16) | ((c) << 8) | (d))
-
 #endif /* __LINUX_PCN_KMSG_H */

@@ -18,6 +18,7 @@
 #include <linux/completion.h>
 
 #include <linux/net.h>
+#include <linux/inet.h>
 #include <linux/inetdevice.h>
 
 #include <asm/uaccess.h>
@@ -30,27 +31,26 @@ char *net_dev_names[] = {
 	"p7p1",		// Xgene (ARM)
 };
 
-uint32_t ip_table[] = {
-	IP_TO_UINT32(10, 0, 0, 100),
-	IP_TO_UINT32(10, 0, 0, 101),
-	IP_TO_UINT32(10, 0, 0, 102),
+const char * const ip_addresses[] = {
+	"10.0.0.100",
+	"10.0.0.101",
+	"10.0.0.102",
 };
+
+uint32_t ip_table[MAX_NUM_NODES] = { 0 };
 
 #define PORT 30467
 #define MAX_ASYNC_BUFFER	1024
 
 struct pcn_kmsg_buf_item {
 	struct pcn_kmsg_long_message *msg;
-	unsigned int dest_nid;
-	unsigned int payload_size;
 };
 
 struct pcn_kmsg_buf {
 	struct pcn_kmsg_buf_item *rbuf;
 	unsigned long head;
 	unsigned long tail;
-	spinlock_t enq_buf_mutex;
-	spinlock_t deq_buf_mutex;
+	spinlock_t buf_lock;
 	struct semaphore q_empty;
 	struct semaphore q_full;
 };
@@ -75,8 +75,6 @@ static unsigned long dbg_ticket[MAX_NUM_NODES];
 
 /* sync */
 static struct mutex mutex_sockets[MAX_NUM_NODES];
-static struct completion send_completion[MAX_NUM_NODES];
-static struct completion recv_completion[MAX_NUM_NODES];
 static struct completion connected[MAX_NUM_NODES];
 static struct completion accepted[MAX_NUM_NODES];
 
@@ -133,20 +131,14 @@ static uint32_t get_host_ip(char **name_ret)
 
 		if (device) {
 			struct in_ifaddr *if_info;
-			__u8 *addr;
 
 			*name_ret = name;
 			in_dev = (struct in_device *)device->ip_ptr;
 			if_info = in_dev->ifa_list;
-			addr = (char *)&if_info->ifa_local;
 
-			MSGDPRINTK(KERN_WARNING "Device %s IP: %u.%u.%u.%u\n",
-							name,
-							(__u32)addr[0],
-							(__u32)addr[1],
-							(__u32)addr[2],
-							(__u32)addr[3]);
-			return IP_TO_UINT32(addr[0], addr[1], addr[2], addr[3]);
+			MSGDPRINTK(KERN_WARNING "Device %s IP: %p4I\n",
+							name, &if_info->ifa_local);
+			return if_info->ifa_local;
 		}
 	}
 	MSGPRINTK(KERN_ERR "msg_socket: ERROR - cannot find host ip\n");
@@ -171,19 +163,15 @@ static int send_handler(void* arg0)
 		}
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(PORT);
-		addr.sin_addr.s_addr = htonl(ip_table[conn_no]); // target ip(diff)
-		MSGDPRINTK("[%d] Connecting to %u.%u.%u.%u\n",
-										conn_no,
-										(ip_table[conn_no]>>24)&0x000000ff,
-										(ip_table[conn_no]>>16)&0x000000ff,
-										(ip_table[conn_no]>> 8)&0x000000ff,
-										(ip_table[conn_no]>> 0)&0x000000ff);
+		addr.sin_addr.s_addr = ip_table[conn_no];
+		MSGDPRINTK("[%d] Connecting to %pI4\n", conn_no, ip_table + conn_no);
 		do {
 			err = kernel_connect(sockets[conn_no],
 						(struct sockaddr *)&addr, sizeof(addr), 0);
 			if (err < 0) {
 				MSGDPRINTK("Failed to connect the socket %d. Attempt again!!\n",
 						err);
+				msleep(1000);
 			}
 		} while (err < 0);
 		complete(&connected[conn_no]);
@@ -203,25 +191,21 @@ static int send_handler(void* arg0)
 /*
  * buf is per conn
  */
-static int enq_recv(struct pcn_kmsg_buf *buf,
-					struct pcn_kmsg_long_message *msg, int conn_no)
+static int enq_recv(struct pcn_kmsg_buf *buf, void *msg, int conn_no)
 {
 	int err;
-	unsigned long head;
 
-	err = down_interruptible(&(buf->q_full));
-	if (err != 0)
-		return err;
+	do {
+		err = down_interruptible(&(buf->q_full));
+	} while (err != 0);
 
-	spin_lock(&(buf->deq_buf_mutex));
-	head = buf->head;
-	buf->rbuf[head].msg = (struct pcn_kmsg_long_message*)msg;
-	smp_wmb();
-	buf->head = (head + 1) & (MAX_ASYNC_BUFFER - 1);
-	up(&(buf->q_empty));
-	spin_unlock(&(buf->deq_buf_mutex));
+	spin_lock(&(buf->buf_lock));
+	buf->rbuf[buf->head].msg = msg;
+	buf->head = (buf->head + 1) & (MAX_ASYNC_BUFFER - 1);
+	spin_unlock(&(buf->buf_lock));
 
-	complete(&recv_completion[conn_no]);
+	up(&buf->q_empty);
+
 	return 0;
 }
 
@@ -229,32 +213,26 @@ static int enq_recv(struct pcn_kmsg_buf *buf,
 static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 {
 	int err;
-	unsigned long tail;
 	struct pcn_kmsg_buf_item msg;
 	pcn_kmsg_cbftn ftn;
 
-	wait_for_completion(&recv_completion[conn_no]);
+	do {
+		err = down_interruptible(&(buf->q_empty));
+	} while (err != 0);
 
-	err = down_interruptible(&(buf->q_empty));
-	if (err != 0)
-		return err;
+	spin_lock(&buf->buf_lock);
+	msg = buf->rbuf[buf->tail];
+	buf->tail = (buf->tail + 1) & (MAX_ASYNC_BUFFER - 1);
+	spin_unlock(&buf->buf_lock);
 
-	spin_lock(&(buf->deq_buf_mutex));
-	tail = buf->tail;
-	smp_read_barrier_depends();
-	msg = buf->rbuf[tail];
-	smp_mb();
-	buf->tail = (tail + 1) & (MAX_ASYNC_BUFFER - 1);
-	up(&(buf->q_full));
-	spin_unlock(&(buf->deq_buf_mutex));
+	up(&buf->q_full);
 
 	ftn = callbacks[msg.msg->header.type];
 	if (ftn != NULL) {
 		ftn((void*)msg.msg);
 	} else {
-		printk(KERN_INFO "Recieved message type %d size %d "
-							"has no registered callback!\n",
-						msg.msg->header.type, msg.msg->header.size);
+		printk(KERN_INFO"No callback registered for %d\n",
+				msg.msg->header.type);
 	}
 	return 0;
 }
@@ -314,7 +292,7 @@ static int recv_handler(void* arg0)
 		int ret;
 		size_t offset;
 		struct pcn_kmsg_hdr header;
-		struct pcn_kmsg_long_message *data;
+		char *data;
 
 		//- compose hdr in data -//
 		offset = 0;
@@ -345,13 +323,12 @@ static int recv_handler(void* arg0)
 
 		//- data -//
 		while (len > 0) {
-			ret = ksock_recv(sockets[conn_no], ((char *)data) + offset, len);
+			ret = ksock_recv(sockets[conn_no], data + offset, len);
 			if (ret == -1)
 				continue;
 			offset += ret;
 			len -= ret;
-			MSGDPRINTK("(body) recv %d in %lu remain=%d\n",
-					ret, data->header.size - sizeof(header), len);
+			MSGDPRINTK("(body) recv %d remain %d\n", ret, len);
 		}
 
 		err = enq_recv(handler_data->buf, data, conn_no);
@@ -371,14 +348,14 @@ end:
  * This is the interface for message layer
  ***********************************************/
 static int sock_kmsg_send_long(unsigned int dest_nid,
-			struct pcn_kmsg_long_message *lmsg, unsigned int payload_size)
+			struct pcn_kmsg_long_message *lmsg, unsigned int size)
 {
 	int remaining;
 	char *p;
 
 	BUG_ON(lmsg->header.type < 0 || lmsg->header.type >= PCN_KMSG_TYPE_MAX);
 
-	lmsg->header.size = payload_size;
+	lmsg->header.size = size;
 	lmsg->header.from_nid = my_nid;
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	lmsg->header.ticket = ++dbg_ticket[dest_nid];
@@ -388,17 +365,16 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 	if (dest_nid == my_nid) {
 		pcn_kmsg_cbftn ftn;
 		struct pcn_kmsg_long_message *msg =
-									pcn_kmsg_alloc_msg(lmsg->header.size);
+									pcn_kmsg_alloc_msg(size);
 		BUG_ON(!msg);
-		memcpy(msg, lmsg, lmsg->header.size);
+		memcpy(msg, lmsg, size);
 
 		ftn = callbacks[msg->header.type];
 		if (ftn != NULL) {
 			ftn((void*)msg);
 		} else {
-			MSGDPRINTK(KERN_INFO "Recieved message type %d size %d "
-								 "has no registered callback!\n",
-								 msg->header.type, msg->header.size);
+			MSGDPRINTK(KERN_INFO"No callback registered for %d\n",
+								 msg->header.type);
 			return -ENOENT;
 		}
 		return 0;
@@ -406,7 +382,7 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 
 	mutex_lock(&mutex_sockets[dest_nid]);
 
-	remaining = lmsg->header.size;
+	remaining = size;
 	p = (char *)lmsg;
 	MSGDPRINTK("%s: dest_nid=%d ticket=%lu conn_no=%d\n",
 					__func__, dest_nid, lmsg->header.ticket, dest_nid);
@@ -419,8 +395,7 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 		}
 		p += sent;
 		remaining -= sent;
-		MSGDPRINTK ("Sent %d in %d. remaining=%d\n",
-				sent, lmsg->header.size, remaining);
+		MSGDPRINTK ("Sent %d remaining=%d\n", sent, remaining);
 	}
 	mutex_unlock(&mutex_sockets[dest_nid]);
 
@@ -435,18 +410,15 @@ static int __init initialize(void)
 	int i, err, sender;
 	char *name;
 	struct sockaddr_in addr;
-	uint32_t my_ip;
+	uint32_t my_ip = get_host_ip(&name);
 
 	MSGPRINTK("--- Popcorn messaging layer init starts ---\n");
-
-	my_ip = get_host_ip(&name);
 
 	// register callback.
 	send_callback = (send_cbftn)sock_kmsg_send_long;
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
-		init_completion(&send_completion[i]);
-		init_completion(&recv_completion[i]);
+		char *me = " ";
 
 		init_completion(&connected[i]);
 		init_completion(&accepted[i]);
@@ -455,20 +427,15 @@ static int __init initialize(void)
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 		dbg_ticket[i] = 0;
 #endif
-	}
+		ip_table[i] = in_aton(ip_addresses[i]);
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
 		if (my_ip == ip_table[i]) {
 			my_nid = i;
-			PRINTK("Device \"%s\" my_nid is %d on machine %u.%u.%u.%u\n",
-									name, my_nid,
-									(ip_table[i]>>24)&0x000000ff,
-									(ip_table[i]>>16)&0x000000ff,
-									(ip_table[i]>> 8)&0x000000ff,
-									(ip_table[i]>> 0)&0x000000ff);
-			break;
+			me = "*";
 		}
+		PRINTK(" %s %2d: %pI4\n", me, i, ip_table + i);
 	}
+	PRINTK("\n");
 
 	smp_mb();
 	BUG_ON(my_nid < 0);
@@ -547,8 +514,7 @@ static int __init initialize(void)
 
 			sema_init(&data->buf->q_empty, 0);
 			sema_init(&data->buf->q_full, MAX_ASYNC_BUFFER);
-			spin_lock_init(&data->buf->enq_buf_mutex);
-			spin_lock_init(&data->buf->deq_buf_mutex);
+			spin_lock_init(&data->buf->buf_lock);
 			smp_wmb();
 
 			sprintf(handler_name, "pcn_%s%d\n", sender ? "send" : "recv", i);
@@ -596,11 +562,6 @@ static void __exit unload(void)
 	MSGPRINTK("Stopping kernel threads\n");
 
 	/** TODO: at least a NULL a pointer below this line **/
-	/* To move out of recv_queue */
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-		complete_all(&send_completion[i]);
-		complete_all(&recv_completion[i]);
-	}
 
 	MSGPRINTK("Release threads\n");
 	for (i = 0; i < MAX_NUM_NODES; i++) {
