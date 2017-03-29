@@ -310,4 +310,19 @@ static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 #define REGISTER_KMSG_HANDLER(x, y) \
 	pcn_kmsg_register_callback(x, handle_##y)
 
+
+#include <linux/sched.h>
+
+static inline struct task_struct *__get_task_struct(pid_t pid)
+{
+	struct task_struct *tsk = NULL;
+	rcu_read_lock();
+	tsk = find_task_by_vpid(pid);
+	if (likely(tsk)) {
+		get_task_struct(tsk);
+	}
+	rcu_read_unlock();
+	return tsk;
+}
+
 #endif /* __TYPES_H__ */

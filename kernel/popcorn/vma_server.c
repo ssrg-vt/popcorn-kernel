@@ -1788,15 +1788,11 @@ static void process_remote_vma_response(struct work_struct *_work)
 	struct vma_info *vi;
 	struct remote_context *rc;
 
-	rcu_read_lock();
-	tsk = find_task_by_vpid(res->remote_pid);
+	tsk = __get_task_struct(res->remote_pid);
 	if (!tsk) {
 		__WARN();
-		rcu_read_unlock();
 		goto out_free;
 	}
-	get_task_struct(tsk);
-	rcu_read_unlock();
 	rc = get_task_remote(tsk);
 
 	spin_lock_irqsave(&rc->vmas_lock, flags);
@@ -1854,16 +1850,12 @@ static void process_remote_vma_request(struct work_struct *work)
 	}
 	res->addr = addr;
 
-	rcu_read_lock();
-	tsk = find_task_by_vpid(req->origin_pid);
+	tsk = __get_task_struct(req->origin_pid);
 	if (!tsk) {
 		printk("remote_vma:: process does not exist %d\n", req->origin_pid);
 		res->result = -ESRCH;
-		rcu_read_unlock();
 		goto out_free;
 	}
-	get_task_struct(tsk);
-	rcu_read_unlock();
 
 	mm = get_task_mm(tsk);
 

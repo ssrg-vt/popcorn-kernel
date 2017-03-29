@@ -14,7 +14,6 @@
 #include <linux/threads.h>
 #include <linux/slab.h>
 #include <linux/kthread.h>
-#include <linux/sched.h>
 #include <linux/ptrace.h>
 #include <linux/mmu_context.h>
 #include <linux/fs.h>
@@ -247,10 +246,13 @@ static void process_exit_task(struct work_struct *_work)
 
 	struct task_struct *tsk;
 
-	rcu_read_lock();
-	tsk = find_task_by_vpid(req->origin_pid);
+	tsk = __get_task_struct(req->origin_pid);
+	if (!tsk) {
+		printk(KERN_INFO"%s: %d not found\n", __func__, req->origin_pid);
+		goto out;
+	}
 
-	if (tsk && tsk->remote_pid == req->remote_pid) {
+	if (tsk->remote_pid == req->remote_pid) {
 		printk(KERN_INFO"%s [%d]: exited with 0x%lx\n", __func__,
 				tsk->pid, req->exit_code);
 
@@ -266,14 +268,15 @@ static void process_exit_task(struct work_struct *_work)
 		tsk->exit_code = req->exit_code;
 
 		restore_thread_info(tsk, &req->arch, false);
-		smp_wmb();
+		smp_mb();
 
 		wake_up_process(tsk);
 	} else {
 		printk(KERN_INFO"%s: %d not found\n", __func__, req->origin_pid);
 	}
-	rcu_read_unlock();
+	put_task_struct(tsk);
 
+out:
 	pcn_kmsg_free_msg(req);
 	kfree(work);
 }
@@ -293,17 +296,12 @@ static int handle_back_migration(struct pcn_kmsg_message *inc_msg)
 	migration_start = ktime_get();
 #endif
 
-	rcu_read_lock();
-	tsk = find_task_by_vpid(req->origin_pid);
+	tsk = __get_task_struct(req->origin_pid);
 	if (!tsk) {
 		printk("%s: no origin taks %d for remote %d\n",
 				__func__, req->origin_pid, req->remote_pid);
-		rcu_read_unlock();
 		goto out_free;
 	}
-
-	get_task_struct(tsk);
-	rcu_read_unlock();
 
 	PSPRINTK("### BACKMIG [%d] from %d at %d\n",
 			tsk->pid, req->remote_pid, req->remote_nid);
@@ -413,13 +411,12 @@ static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 {
 	remote_task_pairing_t *req = (remote_task_pairing_t *)msg;
 	struct task_struct *tsk;
+	int ret = 0;
 
-	rcu_read_lock();
-	tsk = find_task_by_vpid(req->your_pid);
-	if (tsk == NULL) {
-		pcn_kmsg_free_msg(req);
-		rcu_read_unlock();
-		return -ESRCH;
+	tsk = __get_task_struct(req->your_pid);
+	if (!tsk) {
+		ret = -ESRCH;
+		goto out;
 	}
 	BUG_ON(tsk->at_remote);
 	BUG_ON(!tsk->remote);
@@ -427,13 +424,14 @@ static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 	tsk->remote_nid = req->my_nid;
 	tsk->remote_pid = req->my_pid;
 	tsk->remote->remote_tgids[req->my_nid] = req->my_tgid;
-	rcu_read_unlock();
 
 	/*
 	PSPRINTK("Pairing local:  %d --> %d at %d\n",
 			tsk->pid, req->my_nid, req->my_pid);
 	*/
 
+	put_task_struct(tsk);
+out:
 	pcn_kmsg_free_msg(req);
 	return 0;
 }

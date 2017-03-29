@@ -8,7 +8,6 @@
  * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
  */
 
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/rmap.h>
