@@ -208,7 +208,7 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 				popcorn_ps_load(t, &uload, &sload);
 
 				len += snprintf((buffer +len), PROC_BUFFER_PS - len,
-						"                    %5d %5d %5d %d %d\n",
+						"                    %5d %5d %5d  %3d %3d\n",
 						t->pid, t->origin_nid, t->origin_pid,
 						uload, sload); // in %
 			}

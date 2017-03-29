@@ -380,6 +380,10 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 		return 0;
 	}
 
+	if (callbacks[lmsg->header.type] == NULL) {
+		dump_stack();
+	}
+
 	mutex_lock(&mutex_sockets[dest_nid]);
 
 	remaining = size;
