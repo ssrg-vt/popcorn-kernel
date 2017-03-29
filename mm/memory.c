@@ -3556,7 +3556,7 @@ static int handle_pte_fault(struct mm_struct *mm,
 #ifdef CONFIG_POPCORN
 	if (process_is_distributed(current)) {
 		int ret = page_server_handle_pte_fault(
-				mm, vma, address, pte, entry, pmd, flags);
+				mm, vma, address, pmd, pte, entry, flags);
 		if (ret != VM_FAULT_CONTINUE) return ret;
 	}
 #endif

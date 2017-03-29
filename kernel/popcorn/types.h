@@ -241,7 +241,6 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 	pid_t remote_pid;	\
 	unsigned long addr; \
 	int result; \
-	DECLARE_BITMAP(owners, MAX_POPCORN_NODES); \
 	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 
