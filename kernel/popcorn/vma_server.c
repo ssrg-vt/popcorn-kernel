@@ -2042,7 +2042,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		if (!v) {
 			VSPRINTK("%s [%d]: %lx from %d at %d\n", __func__,
 					current->pid, addr, tsk->origin_pid, tsk->origin_nid);
-			smp_wmb();
+			smp_mb();
 			list_add(&vi->list, &rc->vmas);
 		} else {
 			printk("%s [%d]: %lx already pended\n", __func__,
@@ -2094,7 +2094,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	}
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
 	put_task_remote(tsk);
-	smp_wmb();
+	smp_mb();
 
 	if (wakeup) wake_up(&vi->pendings_wait);
 

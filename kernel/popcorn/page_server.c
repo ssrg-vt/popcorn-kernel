@@ -234,13 +234,13 @@ static void process_remote_page_flush(struct work_struct *work)
 	kunmap_atomic(paddr);
 	set_bit(my_nid, page->owners);
 	clear_bit(req->remote_nid, page->owners);
-	unlock_page(page);
-	put_page(page);
 
 	entry = pte_make_valid(*pte);
 	set_pte_at(mm, req->addr, pte, entry);
-
 	flush_tlb_page(vma, req->addr);
+
+	unlock_page(page);
+	put_page(page);
 
 	pte_unmap_unlock(pte, ptl);
 	up_read(&mm->mmap_sem);
@@ -264,10 +264,8 @@ static int __flush_pte(pte_t *pte, unsigned long addr, unsigned long next, struc
 
 	page = pte_page(entry);
 
-	if (test_bit(my_nid, page->owners)) {
+	if (test_bit(my_nid, page->owners) && pte_write(entry)) {
 		void *paddr;
-		// TODO: Skip flushing read-only pages
-
 		printk("flush_remote_page [%d]:+ %lx %p\n", current->pid, addr, page);
 		req->addr = addr;
 		paddr = kmap_atomic(page);
@@ -465,7 +463,7 @@ static void process_remote_page_response(struct work_struct *_work)
 	}
 	WARN_ON(atomic_read(&rp->pendings) <= 0);
 	rp->response = res;
-	smp_wmb();
+	smp_mb();
 
 	wake_up(&rp->pendings_wait);
 
@@ -527,6 +525,7 @@ static int __get_remote_page(struct task_struct *tsk,
 	void *paddr;
 	unsigned long addr = req->addr;
 	pte_t entry;
+	spinlock_t *ptl;
 
 	pmd_t *pmd;
 	pte_t *pte;
@@ -556,6 +555,9 @@ static int __get_remote_page(struct task_struct *tsk,
 			return VM_FAULT_OOM;
 		}
 	}
+	ptl = pte_lockptr(mm, pmd);
+	spin_lock(ptl);
+
 	page = vm_normal_page(vma, addr, *pte);
 	BUG_ON(!page);
 
@@ -566,17 +568,17 @@ static int __get_remote_page(struct task_struct *tsk,
 		goto out_put;
 	}
 
+	paddr = kmap_atomic(page);
+	memcpy(res->page, paddr, PAGE_SIZE);
+	kunmap_atomic(paddr);
+
+	set_bit(my_nid, page->owners);
+	set_bit(from, page->owners);
+	SetPageUptodate(page);
+
 	if (!(req->fault_flags & FAULT_FLAG_WRITE)) {
 		printk("remote_page_reqeust [%d]: read fault\n", req->origin_pid);
 
-		if (!page_is_replicated(page)) {
-			/*
-			 * The ownership of non-replicated pages are not tracked for
-			 * minimizing unnecessary overhead. Now, start tracking the
-			 * ownership of this page upon the page replication.
-			 */
-			set_bit(my_nid, page->owners);
-		}
 		entry = pte_wrprotect(*pte);
 
 		set_pte_at(mm, addr, pte, entry);
@@ -594,16 +596,10 @@ static int __get_remote_page(struct task_struct *tsk,
 		BUG_ON("remote_page_request: shared fault. flush to file???");
 	}
 
-	paddr = kmap_atomic(page);
-	memcpy(res->page, paddr, PAGE_SIZE);
-	kunmap_atomic(paddr);
-
-	set_bit(from, page->owners);
-
 out_put:
 	unlock_page(page);
-	pte_unmap(pte);
-	page_cache_release(page);
+	put_page(page);
+	pte_unmap_unlock(pte, ptl);
 	return ret;
 }
 
@@ -764,7 +760,6 @@ static int __map_remote_page(struct remote_page *rp,
 	set_bit(my_nid, page->owners);
 
 	SetPageUptodate(page);
-	unlock_page(page);
 
 	if (populated) {
 		do_set_pte(vma, addr, page, pte, fault_flags & FAULT_FLAG_WRITE, true);
@@ -785,6 +780,7 @@ static int __map_remote_page(struct remote_page *rp,
 
 		flush_tlb_page(vma, addr);
 	}
+	unlock_page(page);
 
 out:
 	put_page(page);
@@ -826,7 +822,7 @@ static int __handle_remote_fault(struct mm_struct *mm,
 	}
 	spin_unlock_irqrestore(&rc->pages_lock, flags);
 	put_task_remote(tsk);
-	smp_wmb();
+	smp_mb();
 
 	printk("__done_remote_fault [%d]: %lx %d / %d\n",
 			tsk->pid, addr, ret, remaining);

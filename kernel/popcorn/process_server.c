@@ -668,7 +668,7 @@ static int vma_worker_remote(void *_data)
 	}
 
 	rc->tgid = current->tgid;
-	smp_wmb();
+	smp_mb();
 
 	/* Create the shadow spawner */
 	kernel_thread(shadow_spawner, rc, CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
@@ -709,7 +709,7 @@ static void clone_remote_thread(struct work_struct *_work)
 
 		rc = rc_new;
 		rc->remote_tgids[nid_from] = tgid_from;
-		smp_wmb();
+		smp_mb();
 		list_add(&rc->list, &__remote_contexts_in());
 		__unlock_remote_contexts_in(nid_from);
 
@@ -719,7 +719,7 @@ static void clone_remote_thread(struct work_struct *_work)
 		params->rc = rc;
 		params->work = work;
 		__build_task_comm(params->comm, req->exe_path);
-		smp_wmb();
+		smp_mb();
 
 		rc->vma_worker =
 				kthread_run(vma_worker_remote, params, params->comm);
@@ -871,7 +871,6 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		tsk->mm->remote = rc_new;
 		rc_new->mm = tsk->mm;
 		rc_new->remote_tgids[my_nid] = tsk->tgid;
-		smp_wmb();
 
 		__lock_remote_contexts_out(dst_nid);
 		list_add(&rc_new->list, &__remote_contexts_out());
