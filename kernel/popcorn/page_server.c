@@ -63,8 +63,8 @@ static struct remote_page *__lookup_pending_remote_page_request(struct remote_co
 
 	list_for_each_entry(rp, &rc->pages, list) {
 		/*
-		printk("LOOKUP [%d] %lx - [%d] %lx\n",
-				current->pid, addr, rp->pid, rp->addr);
+		printk("LOOKUP [%d] %lx ?= %lx\n",
+				current->pid, addr, rp->addr);
 		*/
 		if (rp->addr == addr) return rp;
 	}
@@ -362,6 +362,8 @@ static void process_remote_page_invalidate(struct work_struct *_work)
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)_work;
 	remote_page_invalidate_t *req = w->msg;
 	struct task_struct *tsk;
+	struct remote_context *rc;
+	struct remote_page *rp;
 
 	/* Only home issues invalidate requests. Hence, I am a remote */
 	tsk = __get_task_struct(req->remote_pid);
@@ -371,8 +373,23 @@ static void process_remote_page_invalidate(struct work_struct *_work)
 		goto out_free;
 	}
 
+	rc = get_task_remote(tsk);
+	do {
+		unsigned long flags;
+
+		spin_lock_irqsave(&rc->pages_lock, flags);
+		rp = __lookup_pending_remote_page_request(rc, req->addr);
+		spin_unlock_irqrestore(&rc->pages_lock, flags);
+		if (rp) {
+			printk("%s: MAPPING IN-PROGRESS\n", __func__);
+			io_schedule();
+		}
+	} while (rp);
+
 	__do_invalidate_page(tsk, req->addr);
+
 	put_task_struct(tsk);
+	put_task_remote(tsk);
 
 out_free:
 	pcn_kmsg_free_msg(req);
@@ -564,11 +581,13 @@ static int __get_remote_page(struct task_struct *tsk,
 		entry = pte_wrprotect(*pte);
 
 		set_pte_at(mm, addr, pte, entry);
+		update_mmu_cache(vma, addr, pte);
 		flush_tlb_page(vma, addr);
 	} else if (!(vma->vm_flags & VM_SHARED)) {
 		entry = pte_make_invalid(*pte);
 
 		set_pte_at(mm, addr, pte, entry);
+		update_mmu_cache(vma, addr, pte);
 		flush_tlb_page(vma, addr);
 
 		__revoke_page_ownership(tsk, addr, page, pte, from);
@@ -605,6 +624,8 @@ static void process_remote_page_request(struct work_struct *work)
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	int from = req->remote_nid;
+	struct remote_context *rc;
+	struct remote_page *rp;
 
 	might_sleep();
 
@@ -831,11 +852,39 @@ static int __handle_remote_fault(struct mm_struct *mm,
 }
 
 
+static int __handle_write_at_origin(struct mm_struct *mm,
+		struct vm_area_struct *vma, unsigned long addr,
+		pmd_t *pmd, pte_t *pte, pte_t pte_val, struct page *page)
+{
+	spinlock_t *ptl;
+	struct page *page;
+
+	ptl = pte_lockptr(mm, pmd);
+	spin_lock(ptl);
+	if (!pte_same(*pte, pte_val)) {
+		goto out;
+	}
+
+	pte_val = pte_mkwrite(*pte);
+	set_pte_at(mm, addr, pte, pte_val);
+	update_mmu_cache(vma, addr, pte);
+	flush_tlb_page(vma, addr);
+
+	__revoke_page_ownership(current, addr, page, pte, my_nid);
+
+out:
+	pte_unmap_unlock(pte, ptl);
+	//printk("WRITE_AT_ORIGIN: %lx\n", addr);
+	return 0;
+}
+
+
 static int __handle_fault_at_origin(struct mm_struct *mm,
 		struct vm_area_struct *vma, unsigned long addr,
 		pmd_t *pmd, pte_t *pte, pte_t pte_val, unsigned int fault_flags)
 {
 	struct page *page;
+	spinlock_t *ptl;
 
 	/* Fresh access to the address. Handle locally since we are at the origin */
 	if (pte_none(pte_val)) {
@@ -852,6 +901,11 @@ static int __handle_fault_at_origin(struct mm_struct *mm,
 		/* Handle replicated page via the dsm protocol */
 		printk("pte_fault [%d]: handle replicated page at the origin\n",
 				current->pid);
+		if (page_is_mine(page)) {
+			BUG_ON(!(fault_flags & FAULT_FLAG_WRITE));
+			return __handle_write_at_origin(
+					mm, vma, addr, pmd, pte, pte_val, page);
+		}
 		return __handle_remote_fault(
 				mm, vma, addr, pmd, pte, pte_val, fault_flags);
 	}
@@ -887,8 +941,10 @@ int page_server_handle_pte_fault(
 
 	might_sleep();
 
-	printk(KERN_WARNING"\n## PAGEFAULT [%d]: %lx %lx %x %lx\n",
-			current->pid, address, instruction_pointer(current_pt_regs()),
+	printk(KERN_WARNING"\n## PAGEFAULT [%d]: %lx %c %lx %x %lx\n",
+			current->pid, address,
+			fault_flags & FAULT_FLAG_WRITE ? 'W' : 'R',
+			instruction_pointer(current_pt_regs()),
 			fault_flags, pte_val(pte_val));
 
 	/*
