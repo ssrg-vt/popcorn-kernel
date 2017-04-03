@@ -397,6 +397,10 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->remote_nid = tsk->origin_nid = -1;
 	tsk->remote_pid = tsk->origin_pid = -1;
 
+	init_completion(&tsk->pendings);
+	atomic_set(&tsk->pendings_count, 0);
+	tsk->private = NULL;
+
 	init_completion(&tsk->wait_for_remote_flush);
 
 	tsk->is_vma_worker = false;

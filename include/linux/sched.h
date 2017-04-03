@@ -1831,6 +1831,10 @@ struct task_struct {
 	bool is_vma_worker;			/* kernel thread that manages the process*/
 	bool at_remote;				/* Is executing on behalf of another node? */
 
+	struct completion pendings;
+	atomic_t pendings_count;
+	void *private;
+
 	struct completion wait_for_remote_flush;
 	int ret_from_remote;
 

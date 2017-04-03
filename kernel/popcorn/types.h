@@ -244,13 +244,6 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 
-#define REMOTE_PAGE_INVALIDATE_FIELDS \
-	int origin_nid; \
-	pid_t origin_pid; \
-	pid_t remote_pid; \
-	unsigned long addr;
-DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
-
 #define REMOTE_PAGE_FLUSH_FIELDS \
 	pid_t origin_pid; \
 	int remote_nid; \
@@ -259,6 +252,21 @@ DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
 	bool last; \
 	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_flush_t, REMOTE_PAGE_FLUSH_FIELDS);
+
+#define PAGE_INVALIDATE_REQUEST_FIELDS \
+	int origin_nid; \
+	pid_t origin_pid; \
+	pid_t remote_pid; \
+	unsigned long addr;
+DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
+
+#define PAGE_INVALIDATE_RESPONSE_FIELDS \
+	int origin_nid; \
+	pid_t origin_pid; \
+	pid_t remote_pid; \
+	unsigned long addr;
+DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
+
 
 
 /**
