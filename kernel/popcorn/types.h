@@ -267,6 +267,13 @@ DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 	unsigned long addr;
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 
+#define PAGE_INVALIDATE_DONE_FIELDS \
+	int origin_nid; \
+	pid_t origin_pid; \
+	pid_t remote_pid; \
+	unsigned long addr;
+DEFINE_PCN_KMSG(page_invalidate_done_t, PAGE_INVALIDATE_DONE_FIELDS);
+
 
 
 /**
