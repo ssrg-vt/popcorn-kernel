@@ -20,6 +20,11 @@ static inline pte_t pte_make_valid(pte_t entry)
 
 #elif defined(CONFIG_ARM64)
 
+static inline unsigned long pte_flags(pte_t entry)
+{
+	return (unsigned long)entry;
+}
+
 static inline pte_t pte_make_invalid(pte_t entry)
 {
 	entry = clear_pte_bit(entry, PTE_VALID);
