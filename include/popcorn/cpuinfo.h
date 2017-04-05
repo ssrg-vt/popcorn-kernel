@@ -72,12 +72,13 @@ typedef struct __cpuinfo_arch_x86 {
 
 typedef struct __per_core_info_t {
 	unsigned int processor_id;
+	bool compat;
 	char model_name[64];
 	int model_rev;
 	char model_elf[8];
 	unsigned long bogo_mips;
+	unsigned long bogo_mips_fraction;
 	char flags[64];
-
 	unsigned int cpu_implementer;
 	unsigned int cpu_archtecture;
 	unsigned int cpu_variant;
@@ -87,8 +88,6 @@ typedef struct __per_core_info_t {
 
 typedef struct __cpuinfo_arch_arm64 {
 	unsigned int num_cpus;
-	char __processor[64];
-
 	per_core_info_t percore[MAX_ARM_CORES];
 } cpuinfo_arch_arm64_t;
 

@@ -81,7 +81,6 @@ int fill_cpu_info(_remote_cpu_info_data_t *res)
 	cpuinfo_arch_arm64_t *arch = &res->arch.arm64;
 
 	res->arch_type = arch_arm;
-	strcpy(arch->__processor, "Arch64 Processor");
 
 	for_each_online_cpu(i) {
 		struct cpuinfo_arm64 *cpuinfo = &per_cpu(cpu_data, i);
@@ -90,13 +89,19 @@ int fill_cpu_info(_remote_cpu_info_data_t *res)
 #ifdef CONFIG_SMP
 		arch->percore[count].processor_id = i;
 #endif
+
 		if (compat) {
+			arch->percore[count].compat = true;
 			strcpy(arch->percore[count].model_name, "ARMv8 Processor");
 			arch->percore[count].model_rev = MIDR_REVISION(midr);
 			strcpy(arch->percore[count].model_elf, COMPAT_ELF_PLATFORM);
+		} else {
+			arch->percore[count].compat = false;
+			strcpy(arch->percore[count].model_name, "ARMv8 Processor");
 		}
 
 		arch->percore[count].bogo_mips = loops_per_jiffy / (500000UL/HZ);
+		arch->percore[count].bogo_mips_fraction = loops_per_jiffy / (5000UL/HZ) % 100;
 
 		strcpy(arch->percore[count].flags, "");
 		if (compat) {

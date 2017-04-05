@@ -86,7 +86,7 @@ unsigned int get_number_cpus_from_remote_node(unsigned int nid)
 		num_cpus = saved_cpu_info[nid]->arch.x86.num_cpus;
 		break;
 	case arch_arm:
-		/* TODO */
+		num_cpus = saved_cpu_info[nid]->arch.arm64.num_cpus;
 		break;
 	default:
 		CPUPRINTK("%s: Unknown CPU\n", __func__);
@@ -216,6 +216,37 @@ static void print_x86_cpuinfo(struct seq_file *m,
 		   data->arch.x86.cpu[count]._bits_virtual);
 }
 
+static void print_arm_cpuinfo(struct seq_file *m,
+		       struct _remote_cpu_info_data *data,
+		       int count)
+{
+	seq_printf(m, "processor\t: %u\n", data->arch.arm64.percore[count].processor_id);
+
+	if (data->arch.arm64.percore[count].compat)
+		 seq_printf(m, "model name\t: %s %d (%s)\n",
+			    data->arch.arm64.percore[count].model_name,
+			    data->arch.arm64.percore[count].model_rev,
+			    data->arch.arm64.percore[count].model_elf);
+	else
+		 seq_printf(m, "model name\t: %s\n",
+			    data->arch.arm64.percore[count].model_name);
+
+	seq_printf(m, "BogoMIPS\t: %lu.%02lu\n",
+		   data->arch.arm64.percore[count].bogo_mips,
+		   data->arch.arm64.percore[count].bogo_mips_fraction);
+	seq_puts(m, "Features\t:");
+	seq_printf(m, " %s", data->arch.arm64.percore[count].flags);
+	seq_puts(m, "\n");
+
+	seq_printf(m, "CPU implementer\t: 0x%02x\n", data->arch.arm64.percore[count].cpu_implementer);
+	seq_printf(m, "CPU architecture: %d\n", data->arch.arm64.percore[count].cpu_archtecture);
+	seq_printf(m, "CPU variant\t: 0x%x\n", data->arch.arm64.percore[count].cpu_variant);
+	seq_printf(m, "CPU part\t: 0x%03x\n", data->arch.arm64.percore[count].cpu_part);
+	seq_printf(m, "CPU revision\t: %d\n", data->arch.arm64.percore[count].cpu_revision);
+
+	return;
+}
+
 static void print_unknown_cpuinfo(struct seq_file *m)
 {
 	seq_puts(m, "processor\t: Unknown\n");
@@ -234,7 +265,7 @@ int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos
 		print_x86_cpuinfo(m, saved_cpu_info[nid], vpos);
 		break;
 	case arch_arm:
-		/* TODO */
+		print_arm_cpuinfo(m, saved_cpu_info[nid], vpos);
 		break;
 	default:
 		print_unknown_cpuinfo(m);
