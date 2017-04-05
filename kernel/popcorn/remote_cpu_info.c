@@ -18,7 +18,7 @@
 #include <popcorn/cpuinfo.h>
 #include <popcorn/pcn_kmsg.h>
 
-#define REMOTE_CPUINFO_VERBOSE 1
+#define REMOTE_CPUINFO_VERBOSE 0
 #if REMOTE_CPUINFO_VERBOSE
 #define CPUPRINTK(...) printk(__VA_ARGS__)
 #else
@@ -28,17 +28,16 @@
 static DECLARE_WAIT_QUEUE_HEAD(wq_cpu);
 static int wait_cpu_list = -1;
 
-struct remote_cpu_info_message {
-	struct pcn_kmsg_hdr header;
-	struct _remote_cpu_info_data cpu_info_data;
+#define REMOTE_CPUINFO_MESSAGE_FIELDS \
+	struct _remote_cpu_info_data cpu_info_data; \
 	int nid;
-} __packed __aligned(64);
+DEFINE_PCN_KMSG(remote_cpu_info_data_t, REMOTE_CPUINFO_MESSAGE_FIELDS);
 
 static struct _remote_cpu_info_data *saved_cpu_info[MAX_POPCORN_NODES];
 
 int send_remote_cpu_info_request(unsigned int nid)
 {
-	struct remote_cpu_info_message *request;
+	remote_cpu_info_data_t *request;
 	int ret = 0;
 
 	CPUPRINTK("%s: Entered, nid: %d\n", __func__, nid);
@@ -100,19 +99,16 @@ unsigned int get_number_cpus_from_remote_node(unsigned int nid)
 
 static int handle_remote_cpu_info_request(struct pcn_kmsg_message *inc_msg)
 {
-	struct remote_cpu_info_message *request;
-	struct remote_cpu_info_message *response;
+	remote_cpu_info_data_t *request;
+	remote_cpu_info_data_t *response;
 	int ret;
 
 	CPUPRINTK("%s: Entered\n", __func__);
 
-	request = (struct remote_cpu_info_message *)inc_msg;
-	if (request == NULL) {
-		CPUPRINTK("%s: NULL pointer\n", __func__);
-		return -EINVAL;
-	}
+	request = (remote_cpu_info_data_t *)inc_msg;
 
 	response = kzalloc(sizeof(*response), GFP_KERNEL);
+	if (!response) return -ENOMEM;
 
 	/* 1. Save remote cpu info from remote node */
 	memcpy(saved_cpu_info[request->nid],
@@ -150,17 +146,13 @@ out:
 
 static int handle_remote_cpu_info_response(struct pcn_kmsg_message *inc_msg)
 {
-	struct remote_cpu_info_message *response;
+	remote_cpu_info_data_t *response;
 
 	CPUPRINTK("%s: Entered\n", __func__);
 
 	wait_cpu_list = 1;
 
-	response = (struct remote_cpu_info_message *)inc_msg;
-	if (response == NULL) {
-		CPUPRINTK("%s: NULL pointer\n", __func__);
-		return -EINVAL;
-	}
+	response = (remote_cpu_info_data_t *)inc_msg;
 
 	/* 1. Save remote cpu info from remote node */
 	memcpy(saved_cpu_info[response->nid],
@@ -235,7 +227,7 @@ static void print_unknown_cpuinfo(struct seq_file *m)
 
 int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos)
 {
-	seq_puts(m, "****    Remote CPU    ****\n");
+	seq_printf(m, "****    Remote CPU at %d   ****\n", nid);
 
 	switch (saved_cpu_info[nid]->arch_type) {
 	case arch_x86:

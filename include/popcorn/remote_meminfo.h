@@ -3,60 +3,58 @@
 
 #include <popcorn/pcn_kmsg.h>
 
-struct remote_mem_info_request {
-	struct pcn_kmsg_hdr header;
+#define REMOTE_MEMINFO_REQUEST_FIELDS \
 	int nid;
-	char pad_string[56];
-} __packed __aligned(64);
+DEFINE_PCN_KMSG(remote_mem_info_request_t, REMOTE_MEMINFO_REQUEST_FIELDS);
 
-struct remote_mem_info_response {
-	struct pcn_kmsg_hdr header;
-	int nid;
+#define REMOTE_MEMINFO_RESPONSE_FIELDS \
+	int nid; \
+	unsigned long MemTotal; \
+	unsigned long MemFree; \
+	unsigned long MemAvailable; \
+	unsigned long Buffers; \
+	unsigned long Cached; \
+	unsigned long SwapCached; \
+	unsigned long Active; \
+	unsigned long Inactive; \
+	unsigned long Active_anon; \
+	unsigned long Inactive_anon; \
+	unsigned long Active_file; \
+	unsigned long Inactive_file; \
+	unsigned long Unevictable; \
+	unsigned long Mlocked; \
+	unsigned long HighTotal; \
+	unsigned long HighFree; \
+	unsigned long LowTotal; \
+	unsigned long LowFree; \
+	unsigned long MmapCopy; \
+	unsigned long SwapTotal; \
+	unsigned long SwapFree; \
+	unsigned long Dirty; \
+	unsigned long Writeback; \
+	unsigned long AnonPages; \
+	unsigned long Mapped; \
+	unsigned long Shmem; \
+	unsigned long Slab; \
+	unsigned long SReclaimable; \
+	unsigned long SUnreclaim; \
+	unsigned long KernelStack; \
+	unsigned long PageTables; \
+	unsigned long Quicklists; \
+	unsigned long NFS_Unstable; \
+	unsigned long Bounce; \
+	unsigned long WritebackTmp; \
+	unsigned long CommitLimit; \
+	unsigned long Committed_AS; \
+	unsigned long VmallocTotal; \
+	unsigned long VmallocUsed; \
+	unsigned long VmallocChunk; \
+	unsigned long HardwareCorrupted; \
+	unsigned long AnonHugePages; \
+	unsigned long CmaTotal; \
+	unsigned long CmaFree;
+DEFINE_PCN_KMSG(remote_mem_info_response_t, REMOTE_MEMINFO_RESPONSE_FIELDS);
 
-	unsigned long _MemTotal;
-	unsigned long _MemFree;
-	unsigned long _MemAvailable;
-	unsigned long _Buffers;
-	unsigned long _Cached;
-	unsigned long _SwapCached;
-	unsigned long _Active;
-	unsigned long _Inactive;
-	unsigned long _Active_anon;
-	unsigned long _Inactive_anon;
-	unsigned long _Active_file;
-	unsigned long _Inactive_file;
-	unsigned long _Unevictable;
-	unsigned long _Mlocked;
-	unsigned long _HighTotal;
-	unsigned long _HighFree;
-	unsigned long _LowTotal;
-	unsigned long _LowFree;
-	unsigned long _MmapCopy;
-	unsigned long _SwapTotal;
-	unsigned long _SwapFree;
-	unsigned long _Dirty;
-	unsigned long _Writeback;
-	unsigned long _AnonPages;
-	unsigned long _Mapped;
-	unsigned long _Shmem;
-	unsigned long _Slab;
-	unsigned long _SReclaimable;
-	unsigned long _SUnreclaim;
-	unsigned long _KernelStack;
-	unsigned long _PageTables;
-	unsigned long _Quicklists;
-	unsigned long _NFS_Unstable;
-	unsigned long _Bounce;
-	unsigned long _WritebackTmp;
-	unsigned long _CommitLimit;
-	unsigned long _Committed_AS;
-	unsigned long _VmallocTotal;
-	unsigned long _VmallocUsed;
-	unsigned long _VmallocChunk;
-	unsigned long _HardwareCorrupted;
-	unsigned long _AnonHugePages;
-	unsigned long _CmaTotal;
-	unsigned long _CmaFree;
-} __packed __aligned(64);
+int remote_proc_mem_info(remote_mem_info_response_t *total);
 
 #endif

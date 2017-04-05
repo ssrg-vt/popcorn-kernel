@@ -226,8 +226,8 @@ static void *c_start(struct seq_file *m, loff_t *pos)
 			for (i = 0; i < MAX_POPCORN_NODES; i++) {
 				if (i == my_nid) {
 					num_cpus[i] = nr_cpu_ids;
-					i++;
 					j = j + nr_cpu_ids;
+					continue;
 				}
 				if (is_popcorn_node_online(i)) {
 					send_remote_cpu_info_request(i);

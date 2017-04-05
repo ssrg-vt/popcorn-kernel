@@ -37,7 +37,7 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/remote_meminfo.h>
 
-#define REMOTE_MEMINFO_VERBOSE 1
+#define REMOTE_MEMINFO_VERBOSE 0
 #if REMOTE_MEMINFO_VERBOSE
 #define MEMPRINTK(...) printk(__VA_ARGS__)
 #else
@@ -47,9 +47,9 @@
 static DECLARE_WAIT_QUEUE_HEAD(wq_mem);
 static int wait_mem_list = -1;
 
-static struct remote_mem_info_response *saved_mem_info[MAX_POPCORN_NODES];
+static remote_mem_info_response_t *saved_mem_info[MAX_POPCORN_NODES];
 
-int fill_meminfo_response(struct remote_mem_info_response *res)
+int fill_meminfo_response(remote_mem_info_response_t *res)
 {
 	struct sysinfo i;
 	unsigned long committed;
@@ -109,65 +109,63 @@ int fill_meminfo_response(struct remote_mem_info_response *res)
 		available = 0;
 
 	/* Fill the mem information for response */
-
-
-	res->_MemTotal = K(i.totalram);
-	res->_MemFree = K(i.freeram);
-	res->_MemAvailable = K(available);
-	res->_Buffers = K(i.bufferram);
-	res->_Cached = K(cached);
-	res->_SwapCached = K(total_swapcache_pages());
-	res->_Active = K(pages[LRU_ACTIVE_ANON]   + pages[LRU_ACTIVE_FILE]);
-	res->_Inactive = K(pages[LRU_INACTIVE_ANON] + pages[LRU_INACTIVE_FILE]);
-	res->_Active_anon = K(pages[LRU_ACTIVE_ANON]);
-	res->_Inactive_anon = K(pages[LRU_INACTIVE_ANON]);
-	res->_Active_file = K(pages[LRU_ACTIVE_FILE]);
-	res->_Inactive_file = K(pages[LRU_INACTIVE_FILE]);
-	res->_Unevictable = K(pages[LRU_UNEVICTABLE]);
-	res->_Mlocked = K(global_page_state(NR_MLOCK));
+	res->MemTotal = K(i.totalram);
+	res->MemFree = K(i.freeram);
+	res->MemAvailable = K(available);
+	res->Buffers = K(i.bufferram);
+	res->Cached = K(cached);
+	res->SwapCached = K(total_swapcache_pages());
+	res->Active = K(pages[LRU_ACTIVE_ANON]   + pages[LRU_ACTIVE_FILE]);
+	res->Inactive = K(pages[LRU_INACTIVE_ANON] + pages[LRU_INACTIVE_FILE]);
+	res->Active_anon = K(pages[LRU_ACTIVE_ANON]);
+	res->Inactive_anon = K(pages[LRU_INACTIVE_ANON]);
+	res->Active_file = K(pages[LRU_ACTIVE_FILE]);
+	res->Inactive_file = K(pages[LRU_INACTIVE_FILE]);
+	res->Unevictable = K(pages[LRU_UNEVICTABLE]);
+	res->Mlocked = K(global_page_state(NR_MLOCK));
 #ifdef CONFIG_HIGHMEM
-	res->_HighTotal = K(i.totalhigh);
-	res->_HighFree = K(i.freehigh);
-	res->_LowTotal = K(i.totalram-i.totalhigh);
-	res->_LowFree = K(i.freeram-i.freehigh);
+	res->HighTotal = K(i.totalhigh);
+	res->HighFree = K(i.freehigh);
+	res->LowTotal = K(i.totalram-i.totalhigh);
+	res->LowFree = K(i.freeram-i.freehigh);
 #endif
 #ifndef CONFIG_MMU
-	res->rem_mem._MmapCopy = K((unsigned long) atomic_long_read(&mmap_pages_allocated));
+	res->rem_mem.MmapCopy = K((unsigned long) atomic_long_read(&mmap_pages_allocated));
 #endif
-	res->_SwapTotal = K(i.totalswap);
-	res->_SwapFree = K(i.freeswap);
-	res->_Dirty = K(global_page_state(NR_FILE_DIRTY));
-	res->_Writeback = K(global_page_state(NR_WRITEBACK));
-	res->_AnonPages = K(global_page_state(NR_ANON_PAGES));
-	res->_Mapped = K(global_page_state(NR_FILE_MAPPED));
-	res->_Shmem = K(i.sharedram);
-	res->_Slab = K(global_page_state(NR_SLAB_RECLAIMABLE) +
+	res->SwapTotal = K(i.totalswap);
+	res->SwapFree = K(i.freeswap);
+	res->Dirty = K(global_page_state(NR_FILE_DIRTY));
+	res->Writeback = K(global_page_state(NR_WRITEBACK));
+	res->AnonPages = K(global_page_state(NR_ANON_PAGES));
+	res->Mapped = K(global_page_state(NR_FILE_MAPPED));
+	res->Shmem = K(i.sharedram);
+	res->Slab = K(global_page_state(NR_SLAB_RECLAIMABLE) +
 				global_page_state(NR_SLAB_UNRECLAIMABLE));
-	res->_SReclaimable = K(global_page_state(NR_SLAB_RECLAIMABLE));
-	res->_SUnreclaim = K(global_page_state(NR_SLAB_UNRECLAIMABLE));
-	res->_KernelStack = global_page_state(NR_KERNEL_STACK) * THREAD_SIZE / 1024;
-	res->_PageTables = K(global_page_state(NR_PAGETABLE));
+	res->SReclaimable = K(global_page_state(NR_SLAB_RECLAIMABLE));
+	res->SUnreclaim = K(global_page_state(NR_SLAB_UNRECLAIMABLE));
+	res->KernelStack = global_page_state(NR_KERNEL_STACK) * THREAD_SIZE / 1024;
+	res->PageTables = K(global_page_state(NR_PAGETABLE));
 #ifdef CONFIG_QUICKLIST
-	res->_Quicklists = K(quicklist_total_size());
+	res->Quicklists = K(quicklist_total_size());
 #endif
-	res->_NFS_Unstable = K(global_page_state(NR_UNSTABLE_NFS));
-	res->_Bounce = K(global_page_state(NR_BOUNCE));
-	res->_WritebackTmp = K(global_page_state(NR_WRITEBACK_TEMP));
-	res->_CommitLimit = K(vm_commit_limit());
-	res->_Committed_AS = K(committed);
-	res->_VmallocTotal = (unsigned long)VMALLOC_TOTAL >> 10;
-	res->_VmallocUsed = 0ul;
-	res->_VmallocChunk = 0ul;
+	res->NFS_Unstable = K(global_page_state(NR_UNSTABLE_NFS));
+	res->Bounce = K(global_page_state(NR_BOUNCE));
+	res->WritebackTmp = K(global_page_state(NR_WRITEBACK_TEMP));
+	res->CommitLimit = K(vm_commit_limit());
+	res->Committed_AS = K(committed);
+	res->VmallocTotal = (unsigned long)VMALLOC_TOTAL >> 10;
+	res->VmallocUsed = 0ul;
+	res->VmallocChunk = 0ul;
 #ifdef CONFIG_MEMORY_FAILURE
-	res->_HardwareCorrupted = atomic_long_read(&num_poisoned_pages) << (PAGE_SHIFT - 10);
+	res->HardwareCorrupted = atomic_long_read(&num_poisoned_pages) << (PAGE_SHIFT - 10);
 #endif
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	res->_AnonHugePages = K(global_page_state(NR_ANON_TRANSPARENT_HUGEPAGES) *
+	res->AnonHugePages = K(global_page_state(NR_ANON_TRANSPARENT_HUGEPAGES) *
 		   HPAGE_PMD_NR);
 #endif
 #ifdef CONFIG_CMA
-	res->_CmaTotal = K(totalcma_pages);
-	res->_CmaFree = K(global_page_state(NR_FREE_CMA_PAGES));
+	res->CmaTotal = K(totalcma_pages);
+	res->CmaFree = K(global_page_state(NR_FREE_CMA_PAGES));
 #endif
 
 	return 0;
@@ -175,13 +173,13 @@ int fill_meminfo_response(struct remote_mem_info_response *res)
 
 static int handle_remote_mem_info_request(struct pcn_kmsg_message *inc_msg)
 {
-	struct remote_mem_info_request *request;
-	struct remote_mem_info_response *response;
+	remote_mem_info_request_t *request;
+	remote_mem_info_response_t *response;
 	int ret;
 
 	MEMPRINTK("%s: Entered\n", __func__);
 
-	request = (struct remote_mem_info_request *)inc_msg;
+	request = (remote_mem_info_request_t *)inc_msg;
 	if (request == NULL) {
 		MEMPRINTK("%s: NULL pointer\n", __func__);
 		return -EINVAL;
@@ -221,13 +219,13 @@ out:
 
 static int handle_remote_mem_info_response(struct pcn_kmsg_message *inc_msg)
 {
-	struct remote_mem_info_response *response;
+	remote_mem_info_response_t *response;
 
 	MEMPRINTK("%s: Entered\n", __func__);
 
 	wait_mem_list = 1;
 
-	response = (struct remote_mem_info_response *)inc_msg;
+	response = (remote_mem_info_response_t *)inc_msg;
 	if (response == NULL) {
 		MEMPRINTK("%s: NULL pointer\n", __func__);
 		return -EINVAL;
@@ -252,7 +250,7 @@ int remote_mem_info_init(void)
 
 	/* Allocate the buffer for saving remote memory info */
 	for (i = 0; i < MAX_POPCORN_NODES; i++)
-		saved_mem_info[i] = kzalloc(sizeof(struct remote_mem_info_response),
+		saved_mem_info[i] = kzalloc(sizeof(remote_mem_info_response_t),
 					    GFP_KERNEL);
 
 	/* Register callbacks for both request and response */
@@ -267,7 +265,7 @@ int remote_mem_info_init(void)
 
 int send_remote_mem_info_request(unsigned int nid)
 {
-	struct remote_mem_info_request *request;
+	remote_mem_info_request_t *request;
 	int ret = 0;
 
 	MEMPRINTK("%s: Entered, nid: %d\n", __func__, nid);
@@ -296,15 +294,15 @@ out:
 	return 0;
 }
 
-int remote_proc_mem_info(struct remote_mem_info_response *total)
+int remote_proc_mem_info(remote_mem_info_response_t *total)
 {
 	int i;
-	struct remote_mem_info_response *meminfo_result;
+	remote_mem_info_response_t *meminfo_result;
 
 	if (total == NULL)
 		return -EINVAL;
 
-	memset(total, 0, sizeof(struct remote_mem_info_response));
+	memset(total, 0, sizeof(remote_mem_info_response_t));
 
 	for (i = 0; i < MAX_POPCORN_NODES; i++) {
 		if (i == my_nid)
@@ -322,65 +320,65 @@ int remote_proc_mem_info(struct remote_mem_info_response *total)
 		if (meminfo_result == NULL)
 			return -EINVAL;
 
-		total->_MemTotal += meminfo_result->_MemTotal;
-		total->_MemFree += meminfo_result->_MemFree;
-		total->_MemAvailable += meminfo_result->_MemAvailable;
-		total->_Buffers += meminfo_result->_Buffers;
-		total->_Cached += meminfo_result->_Cached;
-		total->_SwapCached += meminfo_result->_SwapCached;
-		total->_Active += meminfo_result->_Active;
-		total->_Inactive += meminfo_result->_Inactive;
-		total->_Active_anon += meminfo_result->_Active_anon;
-		total->_Inactive_anon += meminfo_result->_Inactive_anon;
-		total->_Active_file += meminfo_result->_Active_file;
-		total->_Inactive_file += meminfo_result->_Inactive_file;
-		total->_Unevictable += meminfo_result->_Unevictable;
-		total->_Mlocked += meminfo_result->_Mlocked;
+		total->MemTotal += meminfo_result->MemTotal;
+		total->MemFree += meminfo_result->MemFree;
+		total->MemAvailable += meminfo_result->MemAvailable;
+		total->Buffers += meminfo_result->Buffers;
+		total->Cached += meminfo_result->Cached;
+		total->SwapCached += meminfo_result->SwapCached;
+		total->Active += meminfo_result->Active;
+		total->Inactive += meminfo_result->Inactive;
+		total->Active_anon += meminfo_result->Active_anon;
+		total->Inactive_anon += meminfo_result->Inactive_anon;
+		total->Active_file += meminfo_result->Active_file;
+		total->Inactive_file += meminfo_result->Inactive_file;
+		total->Unevictable += meminfo_result->Unevictable;
+		total->Mlocked += meminfo_result->Mlocked;
 
 #ifdef CONFIG_HIGHMEM
-		total->_HighTotal += meminfo_result->_HighTotal;
-		total->_HighFre += meminfo_result->_HighFree;
-		total->_LowTotal += meminfo_result->_LowTotal;
-		total->_LowFree += meminfo_result->_LowFree;
+		total->HighTotal += meminfo_result->HighTotal;
+		total->HighFre += meminfo_result->HighFree;
+		total->LowTotal += meminfo_result->LowTotal;
+		total->LowFree += meminfo_result->LowFree;
 #endif
 
 #ifndef CONFIG_MMU
-		total->_MmapCopy += meminfo_result->_MmapCopy;
+		total->MmapCopy += meminfo_result->MmapCopy;
 #endif
 
-		total->_SwapTotal += meminfo_result->_SwapTotal;
-		total->_SwapFree += meminfo_result->_SwapFree;
-		total->_Dirty += meminfo_result->_Dirty;
-		total->_Writeback += meminfo_result->_Writeback;
-		total->_AnonPages += meminfo_result->_AnonPages;
-		total->_Mapped += meminfo_result->_Mapped;
-		total->_Shmem += meminfo_result->_Shmem;
-		total->_Slab += meminfo_result->_Slab;
-		total->_SReclaimable += meminfo_result->_SReclaimable;
-		total->_SUnreclaim += meminfo_result->_SUnreclaim;
-		total->_KernelStack += meminfo_result->_KernelStack;
-		total->_PageTables += meminfo_result->_PageTables;
+		total->SwapTotal += meminfo_result->SwapTotal;
+		total->SwapFree += meminfo_result->SwapFree;
+		total->Dirty += meminfo_result->Dirty;
+		total->Writeback += meminfo_result->Writeback;
+		total->AnonPages += meminfo_result->AnonPages;
+		total->Mapped += meminfo_result->Mapped;
+		total->Shmem += meminfo_result->Shmem;
+		total->Slab += meminfo_result->Slab;
+		total->SReclaimable += meminfo_result->SReclaimable;
+		total->SUnreclaim += meminfo_result->SUnreclaim;
+		total->KernelStack += meminfo_result->KernelStack;
+		total->PageTables += meminfo_result->PageTables;
 #ifdef CONFIG_QUICKLIST
-		total->_Quicklists += meminfo_result->_Quicklists;
+		total->Quicklists += meminfo_result->Quicklists;
 #endif
 
-		total->_NFS_Unstable += meminfo_result->_NFS_Unstable;
-		total->_Bounce += meminfo_result->_Bounce;
-		total->_WritebackTmp += meminfo_result->_WritebackTmp;
-		total->_CommitLimit += meminfo_result->_CommitLimit;
-		total->_Committed_AS += meminfo_result->_Committed_AS;
-		total->_VmallocTotal += meminfo_result->_VmallocTotal;
-		total->_VmallocUsed += 0ul;
-		total->_VmallocChunk += 0ul;
+		total->NFS_Unstable += meminfo_result->NFS_Unstable;
+		total->Bounce += meminfo_result->Bounce;
+		total->WritebackTmp += meminfo_result->WritebackTmp;
+		total->CommitLimit += meminfo_result->CommitLimit;
+		total->Committed_AS += meminfo_result->Committed_AS;
+		total->VmallocTotal += meminfo_result->VmallocTotal;
+		total->VmallocUsed += 0ul;
+		total->VmallocChunk += 0ul;
 #ifdef CONFIG_MEMORY_FAILURE
-		total->_HardwareCorrupted += meminfo_result->_HardwareCorrupted;
+		total->HardwareCorrupted += meminfo_result->HardwareCorrupted;
 #endif
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-		total->_AnonHugePages += meminfo_result->_AnonHugePages;
+		total->AnonHugePages += meminfo_result->AnonHugePages;
 #endif
 #ifdef CONFIG_CMA
-		total->_CmaTotal += meminfo_result->_CmaTotal;
-		total->_CmaFree += meminfo_result->_CmaFree;
+		total->CmaTotal += meminfo_result->CmaTotal;
+		total->CmaFree += meminfo_result->CmaFree;
 #endif
 	}
 

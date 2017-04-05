@@ -1,108 +1,138 @@
-/*
- * File:
-  * popcorn_cpuinfo_arch.c
+/**
+ * @file cpuinfo_popcorn.c
  *
- * Description:
- * 	this file provides the architecture specific functionality of
-  * populating cpuinfo
+ * Popcorn Linux ARM64 cpuinfo implementation
+ * This work is a rework of Ajithchandra Saya's implementation
+ * to provide the ARM64 specific information for remote cpuinfo.
+ * The original implementation was based on the custom Linux kernel
+ * for the X-Gene, but, the current implementation is based on
+ * the vanilla Linux kernel.
  *
- * Created on:
- * 	Nov 11, 2014
- *
- * Author:
- * 	Ajithchandra Saya, SSRG, VirginiaTech
- *
+ * @author Ajithchandra Saya, SSRG, VirginiaTech 2014
+ * @author Jingoo Han, SSRG Virginia Tech 2017
  */
 
-#include <linux/kernel.h>
-//#include <asm/bootparam.h>
-//#include <asm/uaccess.h>
-#include <linux/mm.h>
-#include <asm/setup.h>
-#include <linux/slab.h>
-#include <linux/highmem.h>
-#include <linux/list.h>
-#include <linux/smp.h>
-#include <linux/cpu.h>
-//#include <linux/cpumask.h>
-#include <linux/kthread.h>
-#include <linux/slab.h>
-#include <linux/timex.h>
-#include <linux/timer.h>
-#include <linux/pcn_kmsg.h>
-#include <linux/delay.h>
+#include <asm/cpu.h>
 
-#include <linux/cpufreq.h>
+#include <linux/kernel.h>
+#include <linux/cpu.h>
+#include <linux/delay.h>
+#include <linux/elf.h>
+#include <linux/personality.h>
 
 #include <popcorn/cpuinfo.h>
-#include <linux/popcorn_cpuinfo.h>
+#include <popcorn/pcn_kmsg.h>
 
-#include <linux/of_fdt.h>
-#include <asm/cputable.h>
-#include <asm/cputype.h>
+static const char *const hwcap_str[] = {
+	"fp",
+	"asimd",
+	"evtstrm",
+	"aes",
+	"pmull",
+	"sha1",
+	"sha2",
+	"crc32",
+	"atomics",
+	NULL
+};
 
-extern const char *machine_name;
+#ifdef CONFIG_COMPAT
+static const char *const compat_hwcap_str[] = {
+	"swp",
+	"half",
+	"thumb",
+	"26bit",
+	"fastmult",
+	"fpa",
+	"vfp",
+	"edsp",
+	"java",
+	"iwmmxt",
+	"crunch",
+	"thumbee",
+	"neon",
+	"vfpv3",
+	"vfpv3d16",
+	"tls",
+	"vfpv4",
+	"idiva",
+	"idivt",
+	"vfpd32",
+	"lpae",
+	"evtstrm",
+	NULL
+};
 
-int fill_cpu_info(_remote_cpu_info_data_t *res) {
+static const char *const compat_hwcap2_str[] = {
+	"aes",
+	"pmull",
+	"sha1",
+	"sha2",
+	"crc32",
+	NULL
+};
+#endif /* CONFIG_COMPAT */
 
-	unsigned int cpu = 0;
-	int i, count = 0;
+int fill_cpu_info(_remote_cpu_info_data_t *res)
+{
+	int i, j;
+	bool compat = personality(current->personality) == PER_LINUX32;
+	unsigned int count = 0;
 	cpuinfo_arch_arm64_t *arch = &res->arch.arm64;
-	static const char *cpu_name;
-	struct cpu_info *cpu_info;
 
-	/*
-	 * locate processor in the list of supported processor
-	 * types.  The linker builds this table for us from the
-	 * entries in arch/arm/mm/proc.S
-	 */
-	cpu_info = lookup_processor_type(read_cpuid_id());
-	if (!cpu_info) {
-		printk("CPU configuration botched (ID %08x), unable to continue.\n",
-		       read_cpuid_id());
-		while (1);
-	}
-
-	cpu_name = cpu_info->cpu_name;
-
-	res->_processor = cpu;
 	res->arch_type = arch_arm;
-
-	strcpy(arch->__processor, cpu_name);
+	strcpy(arch->__processor, "Arch64 Processor");
 
 	for_each_online_cpu(i) {
-		/*
-		 * glibc reads /proc/cpuinfo to determine the number of
-		 * online processors, looking for lines beginning with
-		 * "processor".  Give glibc what it expects.
-		 */
+		struct cpuinfo_arm64 *cpuinfo = &per_cpu(cpu_data, i);
+		u32 midr = cpuinfo->reg_midr;
+
 #ifdef CONFIG_SMP
-		arch->per_core[i].processor_id = i;
+		arch->percore[count].processor_id = i;
 #endif
-		strcpy(arch->per_core[i].model_name, machine_name);
+		if (compat) {
+			strcpy(arch->percore[count].model_name, "ARMv8 Processor");
+			arch->percore[count].model_rev = MIDR_REVISION(midr);
+			strcpy(arch->percore[count].model_elf, COMPAT_ELF_PLATFORM);
+		}
 
-		if (cpu_freq)
-			arch->per_core[i].cpu_freq = cpu_freq;
+		arch->percore[count].bogo_mips = loops_per_jiffy / (500000UL/HZ);
 
-		strcpy(arch->per_core[i].fpu, ((elf_hwcap & HWCAP_FP) ? "yes" : "no"));
+		strcpy(arch->percore[count].flags, "");
+		if (compat) {
+#ifdef CONFIG_COMPAT
+			for (j = 0; compat_hwcap_str[j]; j++) {
+				if (compat_elf_hwcap & (1 << j)) {
+					strcat(arch->percore[count].flags, compat_hwcap_str[j]);
+					strcat(arch->percore[count].flags, " ");
+				}
+			}
+
+			for (j = 0; compat_hwcap2_str[j]; j++) {
+				if (compat_elf_hwcap2 & (1 << j)) {
+					strcat(arch->percore[count].flags, compat_hwcap2_str[j]);
+					strcat(arch->percore[count].flags, " ");
+				}
+			}
+#endif /* CONFIG_COMPAT */
+		} else {
+			for (j = 0; hwcap_str[j]; j++) {
+				if (elf_hwcap & (1 << j)) {
+					strcat(arch->percore[count].flags, hwcap_str[j]);
+					strcat(arch->percore[count].flags, " ");
+				}
+			}
+		}
+
+		arch->percore[count].cpu_implementer = MIDR_IMPLEMENTOR(midr);
+		arch->percore[count].cpu_archtecture = 8;
+		arch->percore[count].cpu_variant = MIDR_VARIANT(midr);
+		arch->percore[count].cpu_part = MIDR_PARTNUM(midr);
+		arch->percore[count].cpu_revision = MIDR_REVISION(midr);
+
 		count++;
+		arch->num_cpus = count;
 	}
 
-	arch->num_cpus = count;
-
-	arch->cpu_implementer = read_cpuid_id() >> 24;
-	strcpy(arch->cpu_arch, "AArch64");
-
-	arch->cpu_variant = (read_cpuid_id() >> 20) & 15;
-	arch->cpu_part = (read_cpuid_id() >> 4) & 0xfff;
-	arch->cpu_revision = read_cpuid_id() & 15;
-
-	return 0;
-}
-
-int get_proccessor_id(){
-
-	//TODO
-	//Not used in popcorn as of now..!!
 	return 0;
 }

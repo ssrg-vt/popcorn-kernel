@@ -32,7 +32,7 @@ extern struct list_head rlist_head;
 #error POPCORN_CPUMASK_BITS can not be smaller then NR_CPUS
 #endif
 
-#define MAX_ARM_CORES 8
+#define MAX_ARM_CORES 96
 #define MAX_X86_CORES 16
 
 enum arch_t {
@@ -73,19 +73,23 @@ typedef struct __cpuinfo_arch_x86 {
 typedef struct __per_core_info_t {
 	unsigned int processor_id;
 	char model_name[64];
-	unsigned long cpu_freq;
-	char fpu[8];
+	int model_rev;
+	char model_elf[8];
+	unsigned long bogo_mips;
+	char flags[64];
+
+	unsigned int cpu_implementer;
+	unsigned int cpu_archtecture;
+	unsigned int cpu_variant;
+	unsigned int cpu_part;
+	unsigned int cpu_revision;
 } per_core_info_t;
 
 typedef struct __cpuinfo_arch_arm64 {
 	unsigned int num_cpus;
 	char __processor[64];
-	per_core_info_t per_core[MAX_ARM_CORES];
-	unsigned int cpu_implementer;
-	char cpu_arch[16];
-	unsigned int cpu_variant;
-	unsigned int cpu_part;
-	unsigned int cpu_revision;
+
+	per_core_info_t percore[MAX_ARM_CORES];
 } cpuinfo_arch_arm64_t;
 
 typedef union __cpuinfo_arch {
