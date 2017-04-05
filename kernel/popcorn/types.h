@@ -291,6 +291,7 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
  */
 extern struct workqueue_struct *popcorn_wq;
 extern struct workqueue_struct *popcorn_ordered_wq;
+extern struct workqueue_struct *popcorn_nonblock_wq;
 
 struct pcn_kmsg_work {
 	struct work_struct work;
@@ -316,6 +317,10 @@ static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 #define DEFINE_KMSG_ORDERED_WQ_HANDLER(x) \
 static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 	return __handle_popcorn_work(msg, process_##x, popcorn_ordered_wq);\
+}
+#define DEFINE_KMSG_NONBLOCK_WQ_HANDLER(x) \
+static inline int handle_##x(struct pcn_kmsg_message *msg) {\
+	return __handle_popcorn_work(msg, process_##x, popcorn_nonblock_wq);\
 }
 
 #define REGISTER_KMSG_WQ_HANDLER(x, y) \

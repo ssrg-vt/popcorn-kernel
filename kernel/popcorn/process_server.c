@@ -287,14 +287,11 @@ out:
 // handling back migration
 ///////////////////////////////////////////////////////////////////////////////
 
-static int handle_back_migration(struct pcn_kmsg_message *inc_msg)
+static void bring_back_remote_thread(struct work_struct *_work)
 {
-	back_migration_request_t *req = (back_migration_request_t *)inc_msg;
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	back_migration_request_t *req = work->msg;
 	struct task_struct *tsk;
-
-#ifdef MIGRATION_PROFILE
-	migration_start = ktime_get();
-#endif
 
 	tsk = __get_task_struct(req->origin_pid);
 	if (!tsk) {
@@ -334,6 +331,21 @@ static int handle_back_migration(struct pcn_kmsg_message *inc_msg)
 
 out_free:
 	pcn_kmsg_free_msg(req);
+}
+
+static int handle_back_migration(struct pcn_kmsg_message *msg)
+{
+	back_migration_request_t *req = (back_migration_request_t *)msg;
+	struct pcn_kmsg_work *work = kmalloc(sizeof(*work), GFP_ATOMIC);
+	BUG_ON(!work);
+
+#ifdef MIGRATION_PROFILE
+	migration_start = ktime_get();
+#endif
+
+	work->msg = req;
+	INIT_WORK((struct work_struct *)work, bring_back_remote_thread);
+	queue_work(popcorn_wq, (struct work_struct *)work);
 	return 0;
 }
 
@@ -945,8 +957,7 @@ int __init process_server_init(void)
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_MIGRATE_BACK, back_migration);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_PAIRING, remote_task_pairing);
 
-	REGISTER_KMSG_WQ_HANDLER(
-			PCN_KMSG_TYPE_TASK_EXIT, exit_task);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_TASK_EXIT, exit_task);
 
 	return 0;
 }

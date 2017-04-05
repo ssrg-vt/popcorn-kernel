@@ -1137,10 +1137,10 @@ int page_server_handle_pte_fault(
  */
 
 DEFINE_KMSG_WQ_HANDLER(remote_page_request);
-DEFINE_KMSG_WQ_HANDLER(remote_page_response);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(remote_page_response);
 DEFINE_KMSG_WQ_HANDLER(page_invalidate_request);
-DEFINE_KMSG_WQ_HANDLER(page_invalidate_response);
-DEFINE_KMSG_WQ_HANDLER(page_invalidate_ack);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(page_invalidate_ack);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(page_invalidate_response);
 DEFINE_KMSG_ORDERED_WQ_HANDLER(remote_page_flush);
 
 int __init page_server_init(void)
