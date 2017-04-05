@@ -114,7 +114,7 @@ static int ksock_recv(struct socket *sock, char *buf, int len)
 	msg.msg_namelen = 0;
 
 	// TODO: loop should be here
-	size = kernel_recvmsg(sock, &msg, &iov, 1, len, 0);
+	size = kernel_recvmsg(sock, &msg, &iov, 1, len, MSG_WAITALL);
 	return size;
 }
 
@@ -227,6 +227,8 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 
 	up(&buf->q_full);
 
+	MSGPRINTK("Call %d, %d\n", conn_no, msg.msg->header.type);
+
 	ftn = callbacks[msg.msg->header.type];
 	if (ftn != NULL) {
 		ftn((void*)msg.msg);
@@ -307,6 +309,7 @@ static int recv_handler(void* arg0)
 			MSGDPRINTK("(hdr) recv %d in %lu remain=%d\n",
 					ret, sizeof(struct pcn_kmsg_hdr), len);
 		}
+		MSGPRINTK("RcvH %d, %d %ld\n", conn_no, header.type, offset);
 
 		//- compose body -//
 		BUG_ON(header.type < 0 || header.type >= PCN_KMSG_TYPE_MAX);
@@ -330,6 +333,7 @@ static int recv_handler(void* arg0)
 			len -= ret;
 			MSGDPRINTK("(body) recv %d remain %d\n", ret, len);
 		}
+		MSGPRINTK("RecB %d, %d %d\n", conn_no, header.type, header.size);
 
 		err = enq_recv(handler_data->buf, data, conn_no);
 	}
@@ -354,6 +358,7 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 	char *p;
 
 	BUG_ON(lmsg->header.type < 0 || lmsg->header.type >= PCN_KMSG_TYPE_MAX);
+	BUG_ON(dest_nid < 0 || dest_nid >= MAX_POPCORN_NODES);
 
 	lmsg->header.size = size;
 	lmsg->header.from_nid = my_nid;
@@ -399,11 +404,11 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 		}
 		p += sent;
 		remaining -= sent;
-		MSGDPRINTK ("Sent %d remaining=%d\n", sent, remaining);
+		MSGDPRINTK("Sent %d remaining=%d\n", sent, remaining);
 	}
 	mutex_unlock(&mutex_sockets[dest_nid]);
 
-	MSGDPRINTK("Sent to %d\n", dest_nid);
+	MSGPRINTK("Sent %d, %d %d\n", dest_nid, lmsg->header.type, size);
 
 	return 0;
 }
