@@ -544,7 +544,7 @@ int vma_server_do_mapping_for_distributed_process(
 				/*PTE LOCKED*/
 				printk("%s: ERROR: error while opening file %s\n",
 						__func__, fetching_page->path);
-				ret = VM_FAULT_VMA;
+				ret = VM_FAULT_SIGBUS;
 				return ret;
 			}
 

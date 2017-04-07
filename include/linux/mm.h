@@ -1040,13 +1040,8 @@ static inline void clear_page_pfmemalloc(struct page *page)
 #define VM_FAULT_HWPOISON_LARGE_MASK 0xf000 /* encodes hpage index for large hwpoison */
 
 #ifdef CONFIG_POPCORN
-#define VM_FAULT_VMA	0x0080
-#define VM_FAULT_ACCESS_ERROR	0x1000
-#define VM_FAULT_REPLICATION_PROTOCOL	0x2000
-#define VM_CONTINUE_WITH_CHECK		0x4000
-
 #define VM_FAULT_CONTINUE	0x1000
-#define VM_FAULT_KILLED		0x4000
+#define VM_FAULT_KILLED		0x2000
 #endif
 
 #define VM_FAULT_ERROR	(VM_FAULT_OOM | VM_FAULT_SIGBUS | VM_FAULT_SIGSEGV | \
