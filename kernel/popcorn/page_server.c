@@ -35,6 +35,7 @@
 #include "stat.h"
 #include "debug.h"
 #include "pgtable.h"
+#include "wait_station.h"
 
 static inline bool page_is_replicated(struct page *page)
 {
@@ -55,59 +56,6 @@ static inline bool fault_for_read(unsigned long flags)
 {
 	return !fault_for_write(flags);
 }
-
-
-
-/**
- * Waiting lots that allows threads to be waited for a given 
- * amount of completion
- *
- */
-
-struct wait_slot {
-	int id;
-	pid_t pid;
-	struct completion pendings;
-	atomic_t pendings_count;
-	void *private;
-};
-
-#define MAX_WAIT_SLOTS 64
-
-struct wait_slot waits[MAX_WAIT_SLOTS];
-
-DEFINE_SPINLOCK(wait_slot_lock);
-DECLARE_BITMAP(wait_slot_available, MAX_WAIT_SLOTS) = { 0 };
-
-static struct wait_slot *__get_alloc_slot(pid_t pid)
-{
-	int i;
-	struct wait_slot *slot;
-	spin_lock(&wait_slot_lock);
-	i = find_first_zero_bit(wait_slot_available, MAX_WAIT_SLOTS);
-	slot = waits + i;
-	set_bit(i, wait_slot_available);
-	spin_unlock(&wait_slot_lock);
-
-	slot->id = i;
-	slot->pid = pid;
-	init_completion(&slot->pendings);
-	slot->private = NULL;
-	//printk(" *[%d]: %d allocated\n", pid, i);
-
-	return slot;
-}
-
-
-static void __put_wait_slot(pid_t pid, int i)
-{
-	spin_lock(&wait_slot_lock);
-	clear_bit(i, wait_slot_available);
-	spin_unlock(&wait_slot_lock);
-	//printk(" *[%d]: %d returned\n", pid, i);
-}
-
-
 
 /**
  * Fault tracking mechanism
@@ -520,7 +468,7 @@ static void process_page_invalidate_request(struct work_struct *work)
 			.prio = PCN_KMSG_PRIO_NORMAL,
 		},
 		.origin_pid = req->origin_pid,
-		.origin_slot = req->origin_slot,
+		.origin_ws = req->origin_ws,
 		.remote_pid = req->remote_pid,
 	};
 	struct task_struct *tsk;
@@ -551,10 +499,10 @@ static void process_page_invalidate_response(struct work_struct *work)
 {
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
 	page_invalidate_response_t *res = w->msg;
-	struct wait_slot *slot = waits + res->origin_slot;
+	struct wait_station *ws = wait_stations + res->origin_ws;
 
-	if (atomic_dec_and_test(&slot->pendings_count)) {
-		complete(&slot->pendings);
+	if (atomic_dec_and_test(&ws->pendings_count)) {
+		complete(&ws->pendings);
 	}
 
 	pcn_kmsg_free_msg(res);
@@ -562,7 +510,7 @@ static void process_page_invalidate_response(struct work_struct *work)
 }
 
 
-static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid, unsigned long addr, int slot_id)
+static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid, unsigned long addr, int ws_id)
 {
 	page_invalidate_request_t req = {
 		.header.type = PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST,
@@ -570,7 +518,7 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
 		.addr = addr,
 		.origin_nid = my_nid,
 		.origin_pid = tsk->pid,
-		.origin_slot = slot_id,
+		.origin_ws = ws_id,
 		.remote_pid = pid,
 	};
 
@@ -587,21 +535,21 @@ static void process_remote_page_response(struct work_struct *work)
 {
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
 	remote_page_response_t *res = w->msg;
-	struct wait_slot *slot = waits + res->origin_slot;
+	struct wait_station *ws = wait_stations + res->origin_ws;
 
 	printk("  [%d]: <-[%d/%d] %lx\n",
-			slot->pid, res->remote_pid, res->remote_nid, res->addr);
-	slot->private = res;
+			ws->pid, res->remote_pid, res->remote_nid, res->addr);
+	ws->private = res;
 
 	smp_mb();
-	if (atomic_dec_and_test(&slot->pendings_count))
-		complete(&slot->pendings);
+	if (atomic_dec_and_test(&ws->pendings_count))
+		complete(&ws->pendings);
 
 	kfree(w);
 }
 
 
-static void __fetch_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int slot_id)
+static void __fetch_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id)
 {
 	remote_page_request_t req = {
 		.header = {
@@ -614,7 +562,7 @@ static void __fetch_remote_page(struct task_struct *tsk, int from_nid, pid_t fro
 
 		.origin_nid = my_nid,
 		.origin_pid = tsk->pid,
-		.origin_slot = slot_id,
+		.origin_ws = ws_id,
 
 		.remote_pid = from_pid,
 	};
@@ -668,20 +616,20 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, stru
 	if (peers > 0) {
 		int nid;
 		struct remote_context *rc = get_task_remote(tsk);
-		struct wait_slot *slot = __get_alloc_slot(tsk->pid);
+		struct wait_station *ws = get_wait_station(tsk->pid);
 
-		atomic_set(&slot->pendings_count, peers);
+		atomic_set(&ws->pendings_count, peers);
 
 		for_each_set_bit(nid, page->owners, MAX_POPCORN_NODES) {
 			pid_t pid = rc->remote_tgids[nid];
 			if (nid == my_nid) continue;
 
-			__revoke_page_ownership(tsk, nid, pid, addr, slot->id);
+			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 			clear_bit(nid, page->owners);
 		}
 
-		wait_for_completion(&slot->pendings);
-		__put_wait_slot(tsk->pid, slot->id);
+		wait_for_completion(&ws->pendings);
+		put_wait_station(tsk->pid, ws->id);
 
 		put_task_remote(tsk);
 	}
@@ -689,21 +637,21 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, stru
 
 static remote_page_response_t *__get_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
 {
-	struct wait_slot *slot = __get_alloc_slot(tsk->pid);
+	struct wait_station *ws = get_wait_station(tsk->pid);
 	remote_page_response_t *rp;
 
 	printk("  [%d]: Fetch %lx from origin %d\n",
 			tsk->pid, addr, tsk->origin_nid);
 
-	init_completion(&slot->pendings);
-	atomic_set(&slot->pendings_count, 1);
+	init_completion(&ws->pendings);
+	atomic_set(&ws->pendings_count, 1);
 
 	__fetch_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
-			addr, fault_flags, slot->id);
+			addr, fault_flags, ws->id);
 
-	wait_for_completion(&slot->pendings);
-	rp = slot->private;
-	__put_wait_slot(tsk->pid, slot->id);
+	wait_for_completion(&ws->pendings);
+	rp = ws->private;
+	put_wait_station(tsk->pid, ws->id);
 
 	return rp;
 }
@@ -711,7 +659,7 @@ static remote_page_response_t *__get_remote_page(struct task_struct *tsk, unsign
 
 static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, struct page *page)
 {
-	struct wait_slot *slot = __get_alloc_slot(tsk->pid);
+	struct wait_station *ws = get_wait_station(tsk->pid);
 	int peers = bitmap_weight(page->owners, MAX_POPCORN_NODES);
 	unsigned int random = prandom_u32();
 	struct remote_context *rc = get_task_remote(tsk);
@@ -732,28 +680,28 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 		peers--;
 	}
 
-	init_completion(&slot->pendings);
-	atomic_set(&slot->pendings_count, peers + 1);
+	init_completion(&ws->pendings);
+	atomic_set(&ws->pendings_count, peers + 1);
 	// Fetch from 1, revocation from peers
 
 	for_each_set_bit(nid, page->owners, MAX_POPCORN_NODES) {
 		pid_t pid = rc->remote_tgids[nid];
 		if (nid == my_nid) continue;
 		if (from-- == 0) {
-			__fetch_remote_page(tsk, nid, pid, addr, fault_flags, slot->id);
+			__fetch_remote_page(tsk, nid, pid, addr, fault_flags, ws->id);
 
 			if (fault_for_read(fault_flags)) break;
 			continue;
 		}
 		if (fault_for_write(fault_flags)) {
-			__revoke_page_ownership(tsk, nid, pid, addr, slot->id);
+			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 			clear_bit(nid, page->owners);
 		}
 	}
 
-	wait_for_completion(&slot->pendings);
-	rp = slot->private;
-	__put_wait_slot(tsk->pid, slot->id);
+	wait_for_completion(&ws->pendings);
+	rp = ws->private;
+	put_wait_station(tsk->pid, ws->id);
 
 	put_task_remote(tsk);
 	return rp;
@@ -981,7 +929,7 @@ out:
 
 	req->origin_nid = req->origin_nid;
 	req->origin_pid = req->origin_pid;
-	res->origin_slot = req->origin_slot;
+	res->origin_ws = req->origin_ws;
 
 	pcn_kmsg_send_long(from, res, sizeof(*res));
 	printk("->[%d]: %lx %d\n", req->remote_pid, req->addr, res->result);

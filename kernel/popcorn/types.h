@@ -233,7 +233,7 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 #define REMOTE_PAGE_REQUEST_FIELDS \
 	int origin_nid; \
 	pid_t origin_pid; \
-	int origin_slot; \
+	int origin_ws; \
 	pid_t remote_pid; \
 	unsigned long addr; \
 	unsigned long fault_flags;
@@ -244,7 +244,7 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 	pid_t remote_pid; \
 	int origin_nid; \
 	pid_t origin_pid; \
-	int origin_slot; \
+	int origin_ws; \
 	unsigned long addr; \
 	int result; \
 	unsigned char page[PAGE_SIZE];
@@ -262,7 +262,7 @@ DEFINE_PCN_KMSG(remote_page_flush_t, REMOTE_PAGE_FLUSH_FIELDS);
 #define PAGE_INVALIDATE_REQUEST_FIELDS \
 	int origin_nid; \
 	pid_t origin_pid; \
-	int origin_slot; \
+	int origin_ws; \
 	pid_t remote_pid; \
 	unsigned long addr;
 DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
@@ -270,7 +270,7 @@ DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 #define PAGE_INVALIDATE_RESPONSE_FIELDS \
 	int origin_nid; \
 	pid_t origin_pid; \
-	int origin_slot; \
+	int origin_ws; \
 	pid_t remote_pid; \
 	unsigned long addr;
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
