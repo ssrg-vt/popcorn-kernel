@@ -14,6 +14,8 @@ struct wait_station {
 
 extern struct wait_station wait_stations[];
 
-struct wait_station *get_wait_station(pid_t pid);
-void put_wait_station(pid_t pid, int i);
+struct wait_station *get_wait_station(pid_t pid, int count);
+struct wait_station *wait_station(int id);
+void put_wait_station(pid_t pid, struct wait_station *ws);
+void wait_at_station(struct wait_station *ws);
 #endif
