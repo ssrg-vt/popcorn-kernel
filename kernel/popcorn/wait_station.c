@@ -29,7 +29,7 @@ struct wait_station *get_wait_station(pid_t pid, int count)
 	ws->private = NULL;
 	init_completion(&ws->pendings);
 	atomic_set(&ws->pendings_count, count);
-	//printk(" *[%d]: %d allocated\n", pid, id);
+	//printk(" *[%d]: %d allocated\n", ws->pid, id);
 
 	return ws;
 }
@@ -39,14 +39,14 @@ struct wait_station *wait_station(int id)
 	return wait_stations + id;
 }
 
-void put_wait_station(pid_t pid, struct wait_station *ws)
+void put_wait_station(struct wait_station *ws)
 {
 	int id = ws->id;
 	spin_lock(&wait_station_lock);
 	BUG_ON(!test_bit(id, wait_station_available));
 	clear_bit(id, wait_station_available);
 	spin_unlock(&wait_station_lock);
-	//printk(" *[%d]: %d returned\n", pid, id);
+	//printk(" *[%d]: %d returned\n", ws->pid, id);
 }
 
 void wait_at_station(struct wait_station *ws)

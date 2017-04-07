@@ -35,7 +35,7 @@ void print_page_signature(unsigned char *addr)
 static DEFINE_SPINLOCK(__print_lock);
 static char *__print_buffer = NULL;
 
-void print_page_owner(struct page *page, unsigned long addr, char *tag)
+void print_page_owner(struct page *page, unsigned long addr, pid_t pid)
 {
 	if (!unlikely(__print_buffer)) {
 		__print_buffer = kmalloc(PAGE_SIZE, GFP_KERNEL);
@@ -43,7 +43,7 @@ void print_page_owner(struct page *page, unsigned long addr, char *tag)
 	spin_lock(&__print_lock);
 	bitmap_print_to_pagebuf(
 			true, __print_buffer, page->owners, MAX_POPCORN_NODES);
-	printk("page_owner %s: %lx %s", tag, addr, __print_buffer);
+	printk("  [%d] %lx %s", pid, addr, __print_buffer);
 	spin_unlock(&__print_lock);
 }
 

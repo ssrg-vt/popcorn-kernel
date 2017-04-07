@@ -239,16 +239,23 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 	unsigned long fault_flags;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
-#define REMOTE_PAGE_RESPONSE_FIELDS \
+#define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	int remote_nid; \
 	pid_t remote_pid; \
 	int origin_nid; \
 	pid_t origin_pid; \
 	int origin_ws; \
 	unsigned long addr; \
-	int result; \
+	int result;
+
+#define REMOTE_PAGE_RESPONSE_FIELDS \
+	REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
+
+#define REMOTE_PAGE_GRANT_FIELDS \
+	REMOTE_PAGE_RESPONSE_COMMON_FIELDS
+DEFINE_PCN_KMSG(remote_page_grant_t, REMOTE_PAGE_GRANT_FIELDS);
 
 #define REMOTE_PAGE_FLUSH_FIELDS \
 	pid_t origin_pid; \
