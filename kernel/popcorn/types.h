@@ -104,8 +104,8 @@ struct remote_context {
 	bool for_remote;
 
 	/* For page replication protocol */
-	spinlock_t pages_lock;
-	struct list_head pages;
+	spinlock_t faults_lock;
+	struct list_head faults;
 
 	/* For VMA management */
 	spinlock_t vmas_lock;
@@ -125,6 +125,7 @@ struct remote_context {
 
 struct remote_context *get_task_remote(struct task_struct *tsk);
 bool put_task_remote(struct task_struct *tsk);
+bool __put_task_remote(struct remote_context *rc);
 
 
 /**
@@ -230,15 +231,20 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 
 
 #define REMOTE_PAGE_REQUEST_FIELDS \
+	int origin_nid; \
 	pid_t origin_pid; \
-	int remote_nid; \
+	int origin_slot; \
 	pid_t remote_pid; \
 	unsigned long addr; \
 	unsigned long fault_flags;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
 #define REMOTE_PAGE_RESPONSE_FIELDS \
-	pid_t remote_pid;	\
+	int remote_nid; \
+	pid_t remote_pid; \
+	int origin_nid; \
+	pid_t origin_pid; \
+	int origin_slot; \
 	unsigned long addr; \
 	int result; \
 	unsigned char page[PAGE_SIZE];
@@ -256,6 +262,7 @@ DEFINE_PCN_KMSG(remote_page_flush_t, REMOTE_PAGE_FLUSH_FIELDS);
 #define PAGE_INVALIDATE_REQUEST_FIELDS \
 	int origin_nid; \
 	pid_t origin_pid; \
+	int origin_slot; \
 	pid_t remote_pid; \
 	unsigned long addr;
 DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
@@ -263,16 +270,10 @@ DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 #define PAGE_INVALIDATE_RESPONSE_FIELDS \
 	int origin_nid; \
 	pid_t origin_pid; \
+	int origin_slot; \
 	pid_t remote_pid; \
 	unsigned long addr;
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
-
-#define PAGE_INVALIDATE_DONE_FIELDS \
-	int origin_nid; \
-	pid_t origin_pid; \
-	pid_t remote_pid; \
-	unsigned long addr;
-DEFINE_PCN_KMSG(page_invalidate_done_t, PAGE_INVALIDATE_DONE_FIELDS);
 
 
 

@@ -44,10 +44,16 @@ struct remote_context *get_task_remote(struct task_struct *tsk)
 	return rc;
 }
 
+bool __put_task_remote(struct remote_context *rc)
+{
+	return atomic_dec_and_test(&rc->count);
+}
+
 bool put_task_remote(struct task_struct *tsk)
 {
-	return atomic_dec_and_test(&tsk->mm->remote->count);
+	return __put_task_remote(tsk->mm->remote);
 }
+
 
 enum {
 	INDEX_OUTBOUND = 0,
@@ -98,8 +104,8 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	rc->tgid = tgid;
 	rc->for_remote = remote;
 
-	INIT_LIST_HEAD(&rc->pages);
-	spin_lock_init(&rc->pages_lock);
+	INIT_LIST_HEAD(&rc->faults);
+	spin_lock_init(&rc->faults_lock);
 
 	INIT_LIST_HEAD(&rc->vmas);
 	spin_lock_init(&rc->vmas_lock);
