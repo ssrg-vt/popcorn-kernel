@@ -106,6 +106,7 @@ struct remote_context {
 	/* For page replication protocol */
 	spinlock_t faults_lock;
 	struct list_head faults;
+	bool flushing;
 
 	/* For VMA management */
 	spinlock_t vmas_lock;
@@ -262,6 +263,7 @@ DEFINE_PCN_KMSG(remote_page_grant_t, REMOTE_PAGE_GRANT_FIELDS);
 	pid_t origin_pid; \
 	int remote_nid; \
 	pid_t remote_pid; \
+	int remote_ws; \
 	unsigned long addr; \
 	unsigned long flags;
 
@@ -273,6 +275,11 @@ DEFINE_PCN_KMSG(remote_page_flush_t, REMOTE_PAGE_FLUSH_FIELDS);
 #define REMOTE_PAGE_RELEASE_FIELDS \
 	REMOTE_PAGE_FLUSH_COMMON_FIELDS
 DEFINE_PCN_KMSG(remote_page_release_t, REMOTE_PAGE_RELEASE_FIELDS);
+
+#define REMOTE_PAGE_FLUSH_ACK_FIELDS \
+	int remote_ws; \
+	unsigned long flags;
+DEFINE_PCN_KMSG(remote_page_flush_ack_t, REMOTE_PAGE_FLUSH_ACK_FIELDS);
 
 
 #define PAGE_INVALIDATE_REQUEST_FIELDS \

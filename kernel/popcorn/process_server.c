@@ -106,6 +106,7 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 
 	INIT_LIST_HEAD(&rc->faults);
 	spin_lock_init(&rc->faults_lock);
+	rc->flushing = false;
 
 	INIT_LIST_HEAD(&rc->vmas);
 	spin_lock_init(&rc->vmas_lock);

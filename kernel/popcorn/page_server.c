@@ -117,12 +117,17 @@ static int __start_fault_handling(struct task_struct *tsk, unsigned long addr, u
 	unsigned long flags;
 	struct fault_handle *fh;
 	bool found = false;
-	unsigned int backoff;
+	unsigned int backoff = 1;
 	struct remote_context *rc = get_task_remote(tsk);
 	char *ongoing = NULL;
 
 	spin_lock_irqsave(&rc->faults_lock, flags);
 	spin_unlock(ptl);
+
+	if (unlikely(rc->flushing)) {
+		ongoing = "flushing";
+		goto out_unlock;
+	}
 
 	list_for_each_entry(fh, &rc->faults, list) {
 		if (fh->addr == addr) {
@@ -188,6 +193,7 @@ static int __start_fault_handling(struct task_struct *tsk, unsigned long addr, u
 
 out_backoff:
 	backoff = fh->backoff++;
+out_unlock:
 	spin_unlock_irqrestore(&rc->faults_lock, flags);
 
 	put_task_remote(tsk);
@@ -299,8 +305,9 @@ out:
  */
 
 enum {
-	FLUSH_FLAG_FLUSH = 0x01,
-	FLUSH_FLAG_RELEASE = 0x02,
+	FLUSH_FLAG_START = 0x01,
+	FLUSH_FLAG_FLUSH = 0x02,
+	FLUSH_FLAG_RELEASE = 0x04,
 	FLUSH_FLAG_LAST = 0x10,
 };
 
@@ -312,11 +319,20 @@ static void process_remote_page_flush(struct work_struct *work)
 	unsigned long addr = req->addr;
 	struct task_struct *tsk;
 	struct mm_struct *mm;
+	struct remote_context *rc;
+	unsigned long flags;
 	struct page *page;
 	pte_t *pte, entry;
 	spinlock_t *ptl;
 	void *paddr;
 	struct vm_area_struct *vma;
+	remote_page_flush_ack_t res = {
+		.header = {
+			.type = PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH_ACK,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.remote_ws = req->remote_ws,
+	};
 
 	PGPRINTK("<-[%d] flush [%d/%d] %lx\n",
 			req->origin_pid, req->remote_pid, req->remote_nid, addr);
@@ -325,9 +341,25 @@ static void process_remote_page_flush(struct work_struct *work)
 	if (!tsk) goto out_free;
 
 	mm = get_task_mm(tsk);
+	rc = get_task_remote(tsk);
 
-	if (req->flags & FLUSH_FLAG_LAST) {
+	if (req->flags & FLUSH_FLAG_START) {
+		spin_lock_irqsave(&rc->faults_lock, flags);
+		rc->flushing = true;
+		spin_unlock_irqrestore(&rc->faults_lock, flags);
+
+		res.flags = FLUSH_FLAG_START;
+		pcn_kmsg_send_long(req->remote_nid, &res, sizeof(res));
+		goto out_put;
+	} else if (req->flags & FLUSH_FLAG_LAST) {
+		spin_lock_irqsave(&rc->faults_lock, flags);
+		rc->flushing = false;
+		spin_unlock_irqrestore(&rc->faults_lock, flags);
+
 		complete(&tsk->wait_for_remote_flush);
+
+		res.flags = FLUSH_FLAG_LAST;
+		pcn_kmsg_send_long(req->remote_nid, &res, sizeof(res));
 		goto out_put;
 	}
 
@@ -364,6 +396,7 @@ static void process_remote_page_flush(struct work_struct *work)
 	up_read(&mm->mmap_sem);
 
 out_put:
+	put_task_remote(tsk);
 	put_task_struct(tsk);
 	mmput(mm);
 
@@ -427,6 +460,7 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 		.private = req,
 	};
 	struct vm_area_struct *vma;
+	struct wait_station *ws = get_wait_station(current->pid, 1);
 
 	BUG_ON(!req);
 
@@ -436,8 +470,17 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 
 	req->remote_nid = my_nid;
 	req->remote_pid = current->pid;
+	req->remote_ws = ws->id;
 	req->origin_pid = current->origin_pid;
+	req->addr = 0;
 
+	/* Notify the start synchronously */
+	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE;
+	req->flags = FLUSH_FLAG_START;
+	pcn_kmsg_send_long(current->origin_nid, req, sizeof(*req));
+	wait_at_station(ws);
+
+	/* Send pages asynchronously */
 	down_read(&mm->mmap_sem);
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		walk.vma = vma;
@@ -445,16 +488,32 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 	}
 	up_read(&mm->mmap_sem);
 
+	/* Notify the completion synchronously */
 	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH;
 	req->flags = FLUSH_FLAG_LAST;
 	pcn_kmsg_send_long(current->origin_nid, req, sizeof(*req));
+	wait_at_station(ws);
 
 	kfree(req);
+	put_wait_station(ws);
+
+	// XXX: make sure there is no backlog.
+	msleep(1000);
 
 	return 0;
 }
 
+void process_remote_page_flush_ack(struct work_struct *work)
+{
+	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
+	remote_page_flush_ack_t *req = w->msg;
+	struct wait_station *ws = wait_station(req->remote_ws);
 
+	complete(&ws->pendings);
+
+	pcn_kmsg_free_msg(req);
+	kfree(w);
+}
 
 /**************************************************************************
  * Page invalidation protocol
@@ -1209,7 +1268,11 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	}
 
 	if (page_is_mine(page)) {
-		BUG_ON(fault_for_read(fault_flags));
+		if (fault_for_read(fault_flags)) {
+			/* Racy exit */
+			pte_unmap(pte);
+			goto out_wakeup;
+		}
 
 		__claim_local_page(current, addr, page, my_nid);
 
@@ -1339,6 +1402,7 @@ DEFINE_KMSG_NONBLOCK_WQ_HANDLER(remote_page_response);
 DEFINE_KMSG_WQ_HANDLER(page_invalidate_request);
 DEFINE_KMSG_NONBLOCK_WQ_HANDLER(page_invalidate_response);
 DEFINE_KMSG_ORDERED_WQ_HANDLER(remote_page_flush);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(remote_page_flush_ack);
 
 int __init page_server_init(void)
 {
@@ -1356,6 +1420,8 @@ int __init page_server_init(void)
 			PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH, remote_page_flush);
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE, remote_page_flush);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH_ACK, remote_page_flush_ack);
 
 	return 0;
 }
