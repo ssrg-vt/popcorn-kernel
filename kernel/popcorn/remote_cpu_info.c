@@ -18,6 +18,8 @@
 #include <popcorn/cpuinfo.h>
 #include <popcorn/pcn_kmsg.h>
 
+#include "wait_station.h"
+
 #define REMOTE_CPUINFO_VERBOSE 0
 #if REMOTE_CPUINFO_VERBOSE
 #define CPUPRINTK(...) printk(__VA_ARGS__)
@@ -25,24 +27,21 @@
 #define CPUPRINTK(...)
 #endif
 
-static DECLARE_WAIT_QUEUE_HEAD(wq_cpu);
-static int wait_cpu_list = -1;
-
 #define REMOTE_CPUINFO_MESSAGE_FIELDS \
 	struct _remote_cpu_info_data cpu_info_data; \
-	int nid;
+	int nid; \
+	int origin_ws;
 DEFINE_PCN_KMSG(remote_cpu_info_data_t, REMOTE_CPUINFO_MESSAGE_FIELDS);
 
 static struct _remote_cpu_info_data *saved_cpu_info[MAX_POPCORN_NODES];
 
-int send_remote_cpu_info_request(unsigned int nid)
+void send_remote_cpu_info_request(struct task_struct *tsk, unsigned int nid)
 {
 	remote_cpu_info_data_t *request;
-	int ret = 0;
+	remote_cpu_info_data_t *response;
+	struct wait_station *ws = get_wait_station(tsk->pid, 1);
 
 	CPUPRINTK("%s: Entered, nid: %d\n", __func__, nid);
-
-	wait_cpu_list = -1;
 
 	request = kzalloc(sizeof(*request), GFP_KERNEL);
 
@@ -52,29 +51,26 @@ int send_remote_cpu_info_request(unsigned int nid)
 	request->header.type = PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST;
 	request->header.prio = PCN_KMSG_PRIO_NORMAL;
 	request->nid = my_nid;
+	request->origin_ws = ws->id;
 
 	/* 1-2. Fill the machine-dependent CPU infomation */
-	ret = fill_cpu_info(&request->cpu_info_data);
-	if (ret < 0) {
-		CPUPRINTK("%s: failed to fill cpu info\n", __func__);
-		goto out;
-	}
+	fill_cpu_info(&request->cpu_info_data);
 
 	/* 1-3. Send request into remote node */
-	ret = pcn_kmsg_send_long(nid, request, sizeof(*request));
-	if (ret < 0) {
-		CPUPRINTK("%s: failed to send request message\n", __func__);
-		goto out;
-	}
+	pcn_kmsg_send_long(nid, request, sizeof(*request));
 
 	/* 2. Request message should wait until response message is done. */
-	wait_event_interruptible(wq_cpu, wait_cpu_list != -1);
-	wait_cpu_list = -1;
+	wait_at_station(ws);
+	response = ws->private;
+	put_wait_station(ws);
+
+	memcpy(saved_cpu_info[nid], &response->cpu_info_data,
+	       sizeof(response->cpu_info_data));
+
+	kfree(request);
+	pcn_kmsg_free_msg(response);
 
 	CPUPRINTK("%s: done\n", __func__);
-out:
-	kfree(request);
-	return 0;
 }
 
 unsigned int get_number_cpus_from_remote_node(unsigned int nid)
@@ -147,22 +143,19 @@ out:
 static int handle_remote_cpu_info_response(struct pcn_kmsg_message *inc_msg)
 {
 	remote_cpu_info_data_t *response;
+	struct wait_station *ws;
 
 	CPUPRINTK("%s: Entered\n", __func__);
 
-	wait_cpu_list = 1;
-
 	response = (remote_cpu_info_data_t *)inc_msg;
 
-	/* 1. Save remote cpu info from remote node */
-	memcpy(saved_cpu_info[response->nid],
-	       &response->cpu_info_data, sizeof(response->cpu_info_data));
+	ws = wait_station(response->origin_ws);
+	ws->private = response;
 
-	/* 2. Wake up request message waiting */
-	wake_up_interruptible(&wq_cpu);
+	smp_mb();
 
-	/* 3. Remove response message received from remote node */
-	pcn_kmsg_free_msg(response);
+	if (atomic_dec_and_test(&ws->pendings_count))
+		complete(&ws->pendings);
 
 	CPUPRINTK("%s: done\n", __func__);
 	return 0;

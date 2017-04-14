@@ -13,7 +13,7 @@
 #define CPPRINTK(...)
 #endif
 
-extern int send_remote_cpu_info_request(unsigned int nid);
+extern void send_remote_cpu_info_request(struct task_struct *tsk, unsigned int nid);
 extern unsigned int get_number_cpus_from_remote_node(unsigned int nid);
 extern int remote_proc_cpu_info(struct seq_file *m, unsigned int nid,
 				unsigned int vpos);
@@ -230,7 +230,7 @@ static void *c_start(struct seq_file *m, loff_t *pos)
 					continue;
 				}
 				if (is_popcorn_node_online(i)) {
-					send_remote_cpu_info_request(i);
+					send_remote_cpu_info_request(current, i);
 					num_cpus[i] = get_number_cpus_from_remote_node(i);
 					j = j + num_cpus[i];
 				} else {
