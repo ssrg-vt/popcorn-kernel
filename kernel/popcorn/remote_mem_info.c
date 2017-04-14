@@ -37,17 +37,14 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/remote_meminfo.h>
 
+#include "wait_station.h"
+
 #define REMOTE_MEMINFO_VERBOSE 0
 #if REMOTE_MEMINFO_VERBOSE
 #define MEMPRINTK(...) printk(__VA_ARGS__)
 #else
 #define MEMPRINTK(...)
 #endif
-
-static DECLARE_WAIT_QUEUE_HEAD(wq_mem);
-static int wait_mem_list = -1;
-
-static remote_mem_info_response_t *saved_mem_info[MAX_POPCORN_NODES];
 
 int fill_meminfo_response(remote_mem_info_response_t *res)
 {
@@ -220,10 +217,9 @@ out:
 static int handle_remote_mem_info_response(struct pcn_kmsg_message *inc_msg)
 {
 	remote_mem_info_response_t *response;
+	struct wait_station *ws;
 
 	MEMPRINTK("%s: Entered\n", __func__);
-
-	wait_mem_list = 1;
 
 	response = (remote_mem_info_response_t *)inc_msg;
 	if (response == NULL) {
@@ -231,14 +227,13 @@ static int handle_remote_mem_info_response(struct pcn_kmsg_message *inc_msg)
 		return -EINVAL;
 	}
 
-	/* 1. Save remote mem info from remote node */
-	memcpy(saved_mem_info[response->nid], response, sizeof(*response));
+	ws = wait_station(response->origin_ws);
+	ws->private = response;
 
-	/* 2. Wake up request message waiting */
-	wake_up_interruptible(&wq_mem);
+	smp_mb();
 
-	/* 3. Remove response message received from remote node */
-	pcn_kmsg_free_msg(response);
+	if (atomic_dec_and_test(&ws->pendings_count))
+		complete(&ws->pendings);
 
 	MEMPRINTK("%s: done\n", __func__);
 	return 0;
@@ -246,13 +241,6 @@ static int handle_remote_mem_info_response(struct pcn_kmsg_message *inc_msg)
 
 int remote_mem_info_init(void)
 {
-	int i = 0;
-
-	/* Allocate the buffer for saving remote memory info */
-	for (i = 0; i < MAX_POPCORN_NODES; i++)
-		saved_mem_info[i] = kzalloc(sizeof(remote_mem_info_response_t),
-					    GFP_KERNEL);
-
 	/* Register callbacks for both request and response */
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
 				   handle_remote_mem_info_request);
@@ -263,14 +251,14 @@ int remote_mem_info_init(void)
 	return 0;
 }
 
-int send_remote_mem_info_request(unsigned int nid)
+remote_mem_info_response_t *send_remote_mem_info_request(struct task_struct *tsk,
+							 unsigned int nid)
 {
 	remote_mem_info_request_t *request;
-	int ret = 0;
+	remote_mem_info_response_t *response;
+	struct wait_station *ws = get_wait_station(tsk->pid, 1);
 
 	MEMPRINTK("%s: Entered, nid: %d\n", __func__, nid);
-
-	wait_mem_list = -1;
 
 	request = kzalloc(sizeof(*request), GFP_KERNEL);
 
@@ -280,18 +268,19 @@ int send_remote_mem_info_request(unsigned int nid)
 	request->header.type = PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST;
 	request->header.prio = PCN_KMSG_PRIO_NORMAL;
 	request->nid = my_nid;
+	request->origin_ws = ws->id;
 
 	/* 1-2. Send request into remote node */
-	ret = pcn_kmsg_send_long(nid, request, sizeof(*request));
-	if (ret < 0) {
-		MEMPRINTK("%s: failed to send request message\n", __func__);
-		goto out;
-	}
+	pcn_kmsg_send_long(nid, request, sizeof(*request));
+
+	wait_at_station(ws);
+	response = ws->private;
+	put_wait_station(ws);
+
+	kfree(request);
 
 	MEMPRINTK("%s: done\n", __func__);
-out:
-	kfree(request);
-	return 0;
+	return response;
 }
 
 int remote_proc_mem_info(remote_mem_info_response_t *total)
@@ -311,12 +300,7 @@ int remote_proc_mem_info(remote_mem_info_response_t *total)
 		if (!is_popcorn_node_online(i))
 			continue;
 
-		send_remote_mem_info_request(i);
-
-		wait_event_interruptible(wq_mem, wait_mem_list != -1);
-		wait_mem_list = -1;
-
-		meminfo_result = saved_mem_info[i];
+		meminfo_result = send_remote_mem_info_request(current, i);
 		if (meminfo_result == NULL)
 			return -EINVAL;
 
@@ -380,6 +364,8 @@ int remote_proc_mem_info(remote_mem_info_response_t *total)
 		total->CmaTotal += meminfo_result->CmaTotal;
 		total->CmaFree += meminfo_result->CmaFree;
 #endif
+
+		pcn_kmsg_free_msg(meminfo_result);
 	}
 
 	return 0;

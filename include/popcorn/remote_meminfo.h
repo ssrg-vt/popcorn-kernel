@@ -4,11 +4,13 @@
 #include <popcorn/pcn_kmsg.h>
 
 #define REMOTE_MEMINFO_REQUEST_FIELDS \
-	int nid;
+	int nid; \
+	int origin_ws;
 DEFINE_PCN_KMSG(remote_mem_info_request_t, REMOTE_MEMINFO_REQUEST_FIELDS);
 
 #define REMOTE_MEMINFO_RESPONSE_FIELDS \
 	int nid; \
+	int origin_ws; \
 	unsigned long MemTotal; \
 	unsigned long MemFree; \
 	unsigned long MemAvailable; \
