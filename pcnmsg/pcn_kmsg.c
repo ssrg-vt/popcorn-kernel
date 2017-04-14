@@ -17,6 +17,9 @@ EXPORT_SYMBOL(callbacks);
 send_cbftn send_callback;
 EXPORT_SYMBOL(send_callback);
 
+send_cbftn send_callback_rdma;
+EXPORT_SYMBOL(send_callback_rdma);
+
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {
@@ -61,6 +64,23 @@ int pcn_kmsg_send_long(unsigned int to, void *lmsg, unsigned int size)
 	return send_callback(to, (struct pcn_kmsg_message *)lmsg, size);
 }
 
+
+/*
+ * Your request must be allocated by kmalloc().
+ */
+int pcn_kmsg_send_rdma(unsigned int to, void *lmsg, unsigned int size)
+{
+    if (send_callback_rdma == NULL) {
+		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
+		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, size=%u\n",
+                    __func__, hdr->from_nid, hdr->type, size);
+        return -ENOENT;
+    }
+
+    return send_callback_rdma(to, (struct pcn_kmsg_message *)lmsg, size);
+}
+
+
 int pcn_kmsg_send(unsigned int to, void *msg)
 {
 	return pcn_kmsg_send_long(to, msg, sizeof(struct pcn_kmsg_message));
@@ -79,6 +99,7 @@ void pcn_kmsg_free_msg(void *msg)
 EXPORT_SYMBOL(pcn_kmsg_alloc_msg);
 EXPORT_SYMBOL(pcn_kmsg_free_msg);
 EXPORT_SYMBOL(pcn_kmsg_send_long);
+EXPORT_SYMBOL(pcn_kmsg_send_rdma);
 EXPORT_SYMBOL(pcn_kmsg_send);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 EXPORT_SYMBOL(pcn_kmsg_register_callback);

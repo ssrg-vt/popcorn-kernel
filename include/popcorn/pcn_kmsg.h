@@ -20,7 +20,7 @@ typedef unsigned long pcn_kmsg_mcast_id;
 /* Enum for message types.  Modules should add types after
    PCN_KMSG_END. */
 enum pcn_kmsg_type {
-	/* message layer testing */
+	/* RDMA handlers */
 	PCN_KMSG_TYPE_RDMA_START,
 	PCN_KMSG_TYPE_RDMA_READ_REQUEST,
 	PCN_KMSG_TYPE_RDMA_READ_RESPONSE,
@@ -28,6 +28,7 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_RDMA_WRITE_RESPONSE,
 	PCN_KMSG_TYPE_RDMA_END,
 
+	/* message layer testing */
 	PCN_KMSG_TYPE_FIRST_TEST,
 	PCN_KMSG_TYPE_SELFIE_TEST,
 	PCN_KMSG_TYPE_TEST,
@@ -124,27 +125,17 @@ struct pcn_kmsg_hdr {
 	unsigned int lg_seqnum 	:LG_SEQNUM_SIZE;	// b11
 	unsigned int __ready	:__READY_SIZE;
 	unsigned int size		:16;	// b12 .. 13 payload + hdr
-
-    /* rdma */
-    bool is_rdma;           
-	bool is_write;
-    bool rdma_ack;          /* passive side acks in the end of request */
-    //uint32_t remote_rkey;   /* R/W remote RKEY (body) */
-    //uint32_t rdma_size;     /* R/W remote size (body) */
-    //uint64_t remote_addr;   /* remote TO (body) */ 
-    //void *your_buf_ptr;     /* will be copied to R/W buffer (body) */
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-    unsigned long ticket;   /* (sock/rdma) s/r ticket */
-    int rdma_ticket;        /* rdma R/W ticket */
-    int rw_ticket;          /* for dbging R/W sync problem */
-#endif
+	unsigned long ticket;	// useful dbg for msg layer
+#endif  
 }__attribute__((packed));
 
 #define CACHE_LINE_SIZE 64
 #define PCN_KMSG_PAYLOAD_SIZE (CACHE_LINE_SIZE - sizeof(struct pcn_kmsg_hdr))
-
 #define MAX_CHUNKS ((1 << LG_SEQNUM_SIZE) - 1)
-#define PCN_KMSG_LONG_PAYLOAD_SIZE (MAX_CHUNKS * PCN_KMSG_PAYLOAD_SIZE)
+//#define PCN_KMSG_LONG_PAYLOAD_SIZE (MAX_CHUNKS * PCN_KMSG_PAYLOAD_SIZE)
+
+#define PCN_KMSG_LONG_PAYLOAD_SIZE 16384
 
 
 /* The actual messages.  The expectation is that developers will create their

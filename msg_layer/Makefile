@@ -39,5 +39,5 @@ else # KERNELRELEASE
 	obj-$(CONFIG_POPCORN_KMSG_SOCKET) += msg_socket.o
     obj-$(CONFIG_POPCORN_KMSG_DOLPHIN) += msg_dolphin.o
     obj-$(CONFIG_POPCORN_KMSG_IB) += msg_ib.o
-    obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_test.o msg_layer_test.o
+    obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_test.o
 endif

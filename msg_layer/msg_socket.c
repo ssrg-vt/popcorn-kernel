@@ -319,7 +319,7 @@ static int recv_handler(void* arg0)
 		offset = sizeof(header);
 		len = header.size - offset;
 
-		MSGDPRINTK ("(info) %lu, data size %d\n", header.ticket, len);
+		MSGDPRINTK ("(info) data size %d\n", len);
 
 		//- data -//
 		while (len > 0) {
@@ -358,7 +358,7 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 	lmsg->header.size = size;
 	lmsg->header.from_nid = my_nid;
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	lmsg->header.ticket = ++dbg_ticket[dest_nid];
+	//lmsg->header.ticket = ++dbg_ticket[dest_nid];
 #endif
 
 	// Send msg to myself
@@ -385,7 +385,7 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 	remaining = size;
 	p = (char *)lmsg;
 	MSGDPRINTK("%s: dest_nid=%d ticket=%lu conn_no=%d\n",
-					__func__, dest_nid, lmsg->header.ticket, dest_nid);
+						__func__, dest_nid, lmsg->header.ticket, dest_nid);
 	while (remaining > 0) {
 		int sent = ksock_send(sockets[dest_nid], p, remaining);
 		if (sent < 0) {
