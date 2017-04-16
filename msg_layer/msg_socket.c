@@ -25,6 +25,15 @@
 
 #include "common.h"
 
+/* Message usage pattern */
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN                                                                                          
+extern unsigned long g_max_pattrn_size;
+extern unsigned long send_pattern_head[];
+extern unsigned long recv_pattern_head[];
+extern atomic_t recv_cnt;
+#endif
+
+/* Socket */
 char *net_dev_names[] = {
 	"eth0",		// Socket
 	"ib0",		// InfiniBand
@@ -32,9 +41,9 @@ char *net_dev_names[] = {
 };
 
 const char * const ip_addresses[] = {
-	"10.0.0.100",
-	"10.0.0.101",
-	"10.0.0.102",
+	"10.1.1.203",
+	"10.1.1.204",
+	"10.1.1.205",
 };
 
 uint32_t ip_table[MAX_NUM_NODES] = { 0 };
@@ -229,6 +238,9 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 
 	ftn = callbacks[msg.msg->header.type];
 	if (ftn != NULL) {
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+		recv_pattern_head[atomic_inc_return(&recv_cnt)] = msg.msg->header.size;
+#endif
 		ftn((void*)msg.msg);
 	} else {
 		printk(KERN_INFO"No callback registered for %d\n",
@@ -533,6 +545,13 @@ static int __init initialize(void)
 				//set_cpus_allowed_ptr(recv_handlers[i], cpumask_of(i%NR_CPUS));
 			}
 		}
+	}
+
+	send_pattern_head[0]=999999;	// ignore the first slot
+	recv_pattern_head[0]=999999;	// ignore the first slot
+	for ( i=1; i<g_max_pattrn_size; i++ ) {
+		send_pattern_head[i] = 0;
+		recv_pattern_head[i] = 0;
 	}
 
 	/**

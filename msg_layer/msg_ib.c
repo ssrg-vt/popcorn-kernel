@@ -72,21 +72,35 @@
 #define KRPRINT_INIT(...) printk(__VA_ARGS__)
 #define MSG_SYNC_PRK(...) printk(__VA_ARGS__)
 #define DEBUG_LOG(...) printk(__VA_ARGS__)
-
+#define DEBUG_LOG_V(...) printk(__VA_ARGS__)
 #else
 #define EXP_LOG(...)
 #define MSG_RDMA_PRK(...)
 #define KRPRINT_INIT(...)
 #define MSG_SYNC_PRK(...)
 #define DEBUG_LOG(...)
+#define DEBUG_LOG_V(...)
 #endif 
 
 #define EXP_DATA(...) printk(__VA_ARGS__)
 
-
 #define htonll(x) cpu_to_be64((x))
 #define ntohll(x) cpu_to_be64((x)) 
 
+/* Debug */
+atomic_t g_rw_ticket;	// dbg, from1
+atomic_t g_send_ticket;  // dbg, from1
+atomic_t g_recv_ticket;  // dbg, from1
+
+/* Message usage pattern */
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN                                                                                          
+extern unsigned long g_max_pattrn_size;
+extern unsigned long send_pattern_head[];
+extern unsigned long recv_pattern_head[];
+extern atomic_t recv_cnt;
+#endif
+
+/* IB */
 char net_dev_name[]="ib0";
 const char net_dev_name2[]="p7p1"; //another special case, Xgene(ARM)
 
@@ -98,11 +112,6 @@ uint32_t ip_table2[] = { (192<<24 | 168<<16 | 69<<8 | 127),		// echo3 ib0
 						 (192<<24 | 168<<16 | 69<<8 | 128),		// echo4 ib0
 						 (192<<24 | 168<<16 | 69<<8 | 129)};	// none ib0
 
-/* dbg */
-atomic_t g_rw_ticket;	// dbg, from1
-atomic_t g_send_ticket;  // dbg, from1
-atomic_t g_recv_ticket;  // dbg, from1
-
 #define PORT 1000
 #define MAX_RDMA_SIZE 4*1024*1024 // MAX R/W BUFFER SIZE
 /*
@@ -111,9 +120,9 @@ atomic_t g_recv_ticket;  // dbg, from1
  * - cq entries - indicating we want room for ten entries on the queue.
  *   This number should be set large enough that the queue isn’t overrun.
  */
-//recv
+// - recv
 #define MAX_RECV_WR 15000	// important!! If only sender crash, must check it.
-//send
+// - send
 #define RPING_SQ_DEPTH 128	// sender depth (txdepth)
 #define SEND_DEPTH 8
 //[x.xxxxxx] mlx5_core 0000:01:00.0: swiotlb buffer is full (sz: 8388608 bytes)
@@ -122,6 +131,12 @@ atomic_t g_recv_ticket;  // dbg, from1
 #define INT_MASK 0
 //#define INT_MASK (int)((int)0-1)
 
+/* ib configurations */
+int g_conn_responder_resuorces = 1;
+int g_conn_initiator_depth = 1;
+int g_conn_retry_count = 10;
+
+// - status
 #define IDLE 1
 #define CONNECT_REQUEST 2
 #define ADDR_RESOLVED 3
@@ -140,11 +155,8 @@ atomic_t g_recv_ticket;  // dbg, from1
 LIST_HEAD(krping_cbs);
 DEFINE_MUTEX(krping_mutex);
 
-/* ib configurations */
-int g_conn_responder_resuorces = 1;
-int g_conn_initiator_depth = 1;
-int g_conn_retry_count = 10;
 
+/* IB data structures */
 struct krping_stats {
 	atomic_t send_msgs;
 	atomic_t recv_msgs;
@@ -200,8 +212,8 @@ struct krping_cb {
 	struct ib_sge rdma_sgl;			/* rdma single SGE */
 
 	/* a rdma buf for active */
-	char *rw_active_buf;		 /* used as rdma sink */
-	u64  active_dma_addr;	 /* for active buffer */
+	char *rw_active_buf;		/* used as rdma sink */
+	u64  active_dma_addr;	 	/* for active buffer */
 	//DECLARE_PCI_UNMAP_ADDR(rdma_mapping) // cannot compile
 	u64 rdma_mapping;
 	struct ib_mr *rdma_mr;
@@ -211,7 +223,7 @@ struct krping_cb {
 	uint32_t remote_len;		/* save remote LEN */
 
 	/* a rdma buf for passive */
-	char *rw_passive_buf;			/* passive R/W buffer */
+	char *rw_passive_buf;		/* passive R/W buffer */
 	u64  passive_dma_addr;		/* passive R/W buffer addr */
 	//DECLARE_PCI_UNMAP_ADDR(start_mapping) // cannot compile
 	u64 start_mapping;
@@ -268,19 +280,14 @@ struct krping_cb {
 	atomic_t g_wr_id;			/*  for assigning wr_id */
 };
 
-/* utilities */
-u32 krping_rdma_rkey(struct krping_cb *cb, u64 buf, 
-									int post_inv, int rdma_len);
-u32 krping_rdma_rkey_passive(struct krping_cb *cb, u64 buf, 
-									int post_inv,int rdma_len);
-
 /*
- * List of running krping threads. 
+ * List of running IB threads. 
  */
 struct krping_cb *cb[MAX_NUM_NODES];
 EXPORT_SYMBOL(cb);
 struct krping_cb *cb_listen;
 
+/* IB utilities */
 int ib_kmsg_send_long(unsigned int dest_cpu,
 						struct pcn_kmsg_long_message *lmsg,
 						unsigned int msg_size);
@@ -290,6 +297,13 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu,
 int ib_kmsg_send_smart(unsigned int dest_cpu,
 						struct pcn_kmsg_long_message *lmsg,
 						unsigned int msg_size);
+static int ib_kmsg_recv_long(struct krping_cb *cb, 
+								struct wc_struct *wcs);
+u32 krping_rdma_rkey(struct krping_cb *cb, u64 buf, 
+						int post_inv, int rdma_len);
+u32 krping_rdma_rkey_passive(struct krping_cb *cb, u64 buf, 
+						int post_inv,int rdma_len);
+static int krping_create_qp(struct krping_cb *cb);
 
 /* Popcorn utility */
 uint32_t get_host_ip(char **tmp_net_dev_name);
@@ -297,10 +311,6 @@ static int __init initialize(void);
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 extern send_cbftn send_callback;
 extern send_cbftn send_callback_rdma;
-
-/* funcs */
-static int krping_create_qp(struct krping_cb *cb);
-static int ib_kmsg_recv_long(struct krping_cb *cb, struct wc_struct *wcs);
 
 /* workqueue */
 struct workqueue_struct *msg_handler;
@@ -522,7 +532,7 @@ static void krping_cq_event_handler(struct ib_cq *cq, void *ctx)
 			atomic_inc(&_cb->stats.send_msgs);
 			DEBUG_LOG("<<< --- from %d [[[[[ SEND ]]]]] COMPLETION %d --- >>>\n",
 							_cb->conn_no, atomic_read(&_cb->stats.send_msgs));
-			//cb->stats.send_bytes += cb->send_sgl.length;
+			
 			atomic_set(&_cb->state, RDMA_SEND_COMPLETE);
 			wake_up_interruptible(&_cb->sem);
 			break;
@@ -1497,7 +1507,6 @@ static void handle_remote_thread_rdma_write_request(
 	MSG_SYNC_PRK("/////////// WRITE passive lock() %d /////////////////\n",
 										(int)atomic_read(&_cb->passive_cnt));
 
-
 	// perform WRITE (passive side) + performance evaluation
 	// <time1 : compose msg info>
 	rdtscll(ts_wr_start);
@@ -1518,8 +1527,6 @@ static void handle_remote_thread_rdma_write_request(
 						_cb, _cb->passive_dma_addr, 1, _cb->remote_len);
 	//  TODO: rdma_sgl will conflict each other (R&W)
 	// Jack: cb->rdma_sq_wr.wr.sg_list = &cb->rdma_sgl;
-
-
 
 	MSGPRINTK("<<<<< WRITE request: my_nid %d from_nid %d, "
 						"lkey %d laddr %llx _cb->rdma_sgl.lkey %d, "
@@ -1615,7 +1622,6 @@ static void handle_remote_thread_rdma_write_request(
 	return; 
 }
 
-
 /* action for bottom half
  * handler no longer has to kfree the lmsg !!
  */
@@ -1624,17 +1630,16 @@ static void pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 	pcn_kmsg_work_t *w = (pcn_kmsg_work_t *) work;
 	struct pcn_kmsg_long_message *lmsg;
 	pcn_kmsg_cbftn ftn;
-	
+
 	MSGPRINTK("%s(): \n", __func__);
 
-	// main
+
 	lmsg = vmalloc(w->lmsg.header.size);
 	if(!lmsg) {
 		printk(KERN_ERR "CANNOT ALLOC\n");
 		BUG();
 	}
 	memcpy(lmsg, &w->lmsg, w->lmsg.header.size);
-
 
 	if( lmsg->header.type < 0 || lmsg->header.type >= PCN_KMSG_TYPE_MAX) {
 		printk(KERN_ERR "Received invalid message type %d > MAX %d\n",
@@ -1656,6 +1661,9 @@ static void pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 		/* normal msg */
 		ftn = callbacks[lmsg->header.type];
 		if(ftn != NULL) {
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+			recv_pattern_head[atomic_inc_return(&recv_cnt)] = w->lmsg.header.size;
+#endif
 			ftn((void*)lmsg);
 			//ftn((void*)&w->lmsg);
 		} else {
@@ -1665,8 +1673,8 @@ static void pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 			BUG_ON(-1);
 		}
 	}
+
 	MSGPRINTK("%s(): done & free everything\n\n", __func__);
-	
 	kfree((void*)w);
 	return;
 }
@@ -2090,7 +2098,7 @@ int __init initialize()
 
 	for ( i=0; i<MAX_NUM_NODES; i++ ) {
 		while ( !is_popcorn_node_online(i) ) {
-			MSGDPRINTK("waiting for is_popcorn_node_online(%d)\n", i);
+			printk("waiting for is_popcorn_node_online(%d)\n", i);
 			//MSGDPRINTK("waiting for is_connection_done[%d]\n", i);
 			msleep(3000);
 			//io_schedule();
@@ -2118,6 +2126,14 @@ int __init initialize()
 		atomic_set(&cb[i]->write_state, IDLE);
 	}
 
+	send_pattern_head[0]=999999;	// ignore the first slot
+	recv_pattern_head[0]=999999;	// ignore the first slot
+	for ( i=1; i<g_max_pattrn_size; i++ ) {
+		send_pattern_head[i] = 0;
+		recv_pattern_head[i] = 0;
+	}
+
+
 	/* Make init popcorn call */
 	//_init_RemoteCPUMask(); // msg boradcast //Jack: deal w/ it later
 
@@ -2139,8 +2155,10 @@ int __init initialize()
 					(pcn_kmsg_cbftn)handle_remote_thread_rdma_write_response);
 
 	smp_mb();
-	MSGPRINTK(KERN_INFO "Popcorn Messaging Layer Initialized\n"
-														"\n\n\n\n\n\n\n\n");
+	printk("===============================================\n");
+	printk("----- Popcorn Messaging Layer Initialized -----\n");
+	printk("===============================================\n"
+														"\n\n\n\n\n\n\n");
 	return 0;
 
 out:

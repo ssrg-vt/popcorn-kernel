@@ -137,7 +137,6 @@ struct pcn_kmsg_hdr {
 
 #define PCN_KMSG_LONG_PAYLOAD_SIZE 16384
 
-
 /* The actual messages.  The expectation is that developers will create their
    own message structs with the payload replaced with their own fields, and then
    cast them to a struct pcn_kmsg_message.  See the checkin message below for

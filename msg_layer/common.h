@@ -12,11 +12,11 @@
 #include <popcorn/bundle.h>
 #include <popcorn/debug.h>
 
-#define MAX_NUM_NODES		2		// TODO: use MAX_KERNEL_IDS
+#define MAX_NUM_NODES		2	// For development convenience
 #define MAX_NUM_CHANNELS	(MAX_NUM_NODES - 1)
 
-/* put here since ib request handler and caller response handler(user defined) 
- * will both need.
+/* put here since ib request handler and 
+ * caller response handler(user defined) will both need.
  */
 typedef struct {
 	struct pcn_kmsg_hdr header; /* must followd */
@@ -27,11 +27,11 @@ typedef struct {
 	uint32_t remote_rkey;	/* R/W remote RKEY (body) */
 	uint32_t rw_size;		/* R/W remote size (body) */
 	uint64_t remote_addr;	/* remote TO (body) */ 
-	void *your_buf_ptr;	/* will be copied to R/W buffer (body) */
+	void *your_buf_ptr;		/* will be copied to R/W buffer (body) */
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	int rw_ticket;
 	int rdma_ticket;
 #endif	
-}__attribute__((packed)) remote_thread_rdma_rw_request_t; // for cache
+}__attribute__((packed)) remote_thread_rdma_rw_request_t;
 
 #endif

@@ -54,6 +54,14 @@
 #define TEST_MSG_LAYER		0
 #define TEST_SERVER		1
 
+/* Message usage pattern */
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN                                                                                          
+extern unsigned long g_max_pattrn_size;
+extern unsigned long send_pattern_head[];
+extern unsigned long recv_pattern_head[];
+extern atomic_t recv_cnt;
+#endif
+
 typedef struct _pool_buffer {
 	char *buff;
 	int is_free;
@@ -582,6 +590,13 @@ int __init initialize(void)
 
 	is_connection_done = PCN_CONN_CONNECTED;
 
+    send_pattern_head[0]=999999;    // ignore the first slot
+    recv_pattern_head[0]=999999;    // ignore the first slot
+    for ( i=1; i<g_max_pattrn_size; i++ ) {
+        send_pattern_head[i] = 0;
+        recv_pattern_head[i] = 0;
+    }
+
 #if TEST_MSG_LAYER
 	atomic_set(&exec_count, 0);
 	atomic_set(&recv_count, 0);
@@ -923,6 +938,9 @@ do_retry:
 			vfree(pcn_msg);
 #endif
 		} else {
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+        recv_pattern_head[atomic_inc_return(&recv_cnt)] = msg.msg->header.size;
+#endif
 			ftn = callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {
 				ftn(pcn_msg);
