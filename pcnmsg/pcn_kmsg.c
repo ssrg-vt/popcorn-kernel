@@ -11,6 +11,21 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/debug.h>
 
+/* Message usage pattern */                                                     
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+#define MAX_PATTRN_SIZE (1<<20)	// if wanna go larger, implement linked-list
+unsigned long  g_max_pattrn_size;	// if wanna go larger, implement linked-list
+EXPORT_SYMBOL(g_max_pattrn_size);
+unsigned long send_pattern_head[MAX_PATTRN_SIZE];   // skip [0]
+unsigned long recv_pattern_head[MAX_PATTRN_SIZE];   // skip [0]
+EXPORT_SYMBOL(send_pattern_head);
+EXPORT_SYMBOL(recv_pattern_head);
+atomic_t send_cnt;
+atomic_t recv_cnt;
+EXPORT_SYMBOL(send_cnt);
+EXPORT_SYMBOL(recv_cnt);
+#endif
+
 pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 EXPORT_SYMBOL(callbacks);
 
@@ -24,6 +39,7 @@ EXPORT_SYMBOL(send_callback_rdma);
 int __init pcn_kmsg_init(void)
 {
 	send_callback = NULL;
+	g_max_pattrn_size = MAX_PATTRN_SIZE;
 
 	MSGPRINTK("%s: done\n", __func__);
 	return 0;
@@ -60,6 +76,10 @@ int pcn_kmsg_send_long(unsigned int to, void *lmsg, unsigned int size)
 		//printk("Waiting for call back function to be registered\n");
 		return -ENOENT;
 	}
+
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+	send_pattern_head[atomic_inc_return(&send_cnt)] = size;
+#endif
 
 	return send_callback(to, (struct pcn_kmsg_message *)lmsg, size);
 }
