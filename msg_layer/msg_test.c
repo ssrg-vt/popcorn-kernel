@@ -297,7 +297,7 @@ static int kthread_test3(void* arg0)
 // only support nid x sends to nid 0 so far
 void test_send_throughput(unsigned long long payload_size)
 {
-	int i;
+	int i, dst = 0;
 	struct timeval t1, t2;
 	struct test_msg_t *msg;
 
@@ -306,13 +306,12 @@ void test_send_throughput(unsigned long long payload_size)
 	memset(msg->payload, 'b', payload_size);
 
 	if (my_nid == 0) {
-		DEBUG_LOG_V("%s: my_nid is %d, Skip! \n",__func__, my_nid);
-		return;
+		dst=1;
 	}
 
 	do_gettimeofday(&t1);
 	for (i = 0; i < MAX_TESTING_SIZE/payload_size; i++)
-		pcn_kmsg_send_long(0, msg, payload_size + sizeof(msg->header));
+		pcn_kmsg_send_long(dst, msg, payload_size + sizeof(msg->header));
 	do_gettimeofday(&t2);
 	
 	if( t2.tv_usec-t1.tv_usec >= 0) {
