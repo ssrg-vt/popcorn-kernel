@@ -93,7 +93,7 @@ atomic_t g_send_ticket;  // dbg, from1
 atomic_t g_recv_ticket;  // dbg, from1
 
 /* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN                                                                                          
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 extern unsigned long g_max_pattrn_size;
 extern unsigned long send_pattern_head[];
 extern unsigned long recv_pattern_head[];
@@ -1670,6 +1670,7 @@ static void pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 			MSGPRINTK(KERN_INFO "Recieved message type %d size %d "
 									"has no registered callback!\n",
 									lmsg->header.type, lmsg->header.size);
+			kfree(lmsg);
 			BUG_ON(-1);
 		}
 	}
@@ -2125,14 +2126,14 @@ int __init initialize()
 		atomic_set(&cb[i]->read_state, IDLE);
 		atomic_set(&cb[i]->write_state, IDLE);
 	}
-
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	send_pattern_head[0]=999999;	// ignore the first slot
 	recv_pattern_head[0]=999999;	// ignore the first slot
 	for ( i=1; i<g_max_pattrn_size; i++ ) {
 		send_pattern_head[i] = 0;
 		recv_pattern_head[i] = 0;
 	}
-
+#endif
 
 	/* Make init popcorn call */
 	//_init_RemoteCPUMask(); // msg boradcast //Jack: deal w/ it later
@@ -2155,9 +2156,9 @@ int __init initialize()
 					(pcn_kmsg_cbftn)handle_remote_thread_rdma_write_response);
 
 	smp_mb();
-	printk("===============================================\n");
-	printk("----- Popcorn Messaging Layer Initialized -----\n");
-	printk("===============================================\n"
+	printk("==================================================\n");
+	printk("----- Popcorn Messaging Layer IB Initialized -----\n");
+	printk("==================================================\n"
 														"\n\n\n\n\n\n\n");
 	return 0;
 
