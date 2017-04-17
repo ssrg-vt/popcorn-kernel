@@ -39,8 +39,9 @@ EXPORT_SYMBOL(send_callback_rdma);
 int __init pcn_kmsg_init(void)
 {
 	send_callback = NULL;
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	g_max_pattrn_size = MAX_PATTRN_SIZE;
-
+#endif
 	MSGPRINTK("%s: done\n", __func__);
 	return 0;
 }

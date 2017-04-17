@@ -23,6 +23,8 @@
 
 #include "common.h"
 
+#include <linux/delay.h>
+
 /* testing args */
 #define ITER 1					// iter for test10 (send throughput)
 #define MAX_ARGS_NUM 10	
@@ -65,9 +67,10 @@
 #endif 
 
 #define MAX_TESTING_SIZE 125829120 // = 120*1024*1024
-#define TEST1_PAYLOAD_SIZE 1024                                                                                                                              
+#define TEST1_PAYLOAD_SIZE 1024
+
 /* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN                                                                                          
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 extern unsigned long g_max_pattrn_size;
 extern unsigned long recv_pattern_head[];
 extern unsigned long send_pattern_head[];
@@ -78,7 +81,7 @@ extern atomic_t send_cnt;
 /* for testing rdma read */
 int g_remote_read_len = 4*1024; // testing size for RDMA, mimicing user buf size
 int g_rdma_write_len;			// size wanna read/write
-char *g_test_buf;				// mimicing user buf
+char *g_test_buf = NULL;		// mimicing user buf
 
 /* example - data structure (dbg info) */
 typedef struct {
@@ -125,7 +128,7 @@ static int handle_self_test(struct pcn_kmsg_message* inc_msg)
 	DEBUG_LOG_V("%s(): message handler is called from cpu %d successfully.\n",
 		__func__, request->header.from_nid);
 
-	DEBUG_LOG_V("%s(): %s\n", __func__, request->payload);
+	//DEBUG_LOG_V("%s(): %s\n", __func__, request->payload);
 
 	pcn_kmsg_free_msg(request);
 	return 0;
@@ -313,7 +316,7 @@ void test_send_throughput(unsigned long long payload_size)
 	for (i = 0; i < MAX_TESTING_SIZE/payload_size; i++)
 		pcn_kmsg_send_long(dst, msg, payload_size + sizeof(msg->header));
 	do_gettimeofday(&t2);
-	
+
 	if( t2.tv_usec-t1.tv_usec >= 0) {
 		EXP_DATA("Send throughput result: send payload size %llu, "
 							"total size %d, %llu times, spent %ld.%06ld s\n",
@@ -545,17 +548,21 @@ int get_a_slot(struct statistic pattern[], unsigned long size)
 static ssize_t read_func(struct file *filp, char *usr_buf,
 									size_t count, loff_t *offset)
 {
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	char *buf;
-	int i, iter, len = 0, slot;
+	int len = 0;
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+	int i, iter, slot;
+#endif
 
+	buf = kzalloc(PROC_BUF_SIZE, GFP_KERNEL);
+	if(!buf)
+		BUG();
+
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	//TODO: lock // unlock untile return 0
 	if (*offset > 0)
 		return 0;
 	
-	buf = kzalloc(PROC_BUF_SIZE, GFP_KERNEL);
-	if(!buf)
-		BUG();
 	
 	for(i=0; i<MAX_STATISTIC_SLOTS; i++) {
 		send_pattern[i].size = 0;
@@ -569,8 +576,7 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 	for(i=1; i<iter;i++) {
 		slot = get_a_slot(send_pattern, send_pattern_head[i]);
 		if(send_pattern[slot].size == 0) // create
-			send_pattern[slot].size
-											= send_pattern_head[i];
+			send_pattern[slot].size = send_pattern_head[i];
 		send_pattern[slot].cnt++;
 	}
 
@@ -578,14 +584,13 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 	iter = atomic_read(&recv_cnt);
 	if(iter<=0) { //TODO: init it
 		printk(KERN_WARNING
-				"Never sent / RECV needs your support in yor msg module\n");
-		return len;
+				"Never RECV / it needs your support in yor msg module\n");
+		//return len; //let send pass
 	}
 	for(i=1; i<iter;i++) {
 		slot = get_a_slot(recv_pattern, recv_pattern_head[i]);
 		if(recv_pattern[slot].size == 0) //create
-			recv_pattern[slot].size
-												= recv_pattern_head[i];
+			recv_pattern[slot].size = recv_pattern_head[i];
 		recv_pattern[slot].cnt++;
 	}
 
@@ -655,8 +660,10 @@ static struct file_operations kmsg_test_ops = {
 /* example - main usage */
 static int __init msg_test_init(void)
 {
-	int i;
 	static struct proc_dir_entry *kmsg_test_proc;
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+	int i;
+#endif
 
 	/* register a proc */
 	printk("\n\n--- Popcorn messaging self testing proc init ---\n");
@@ -666,10 +673,12 @@ static int __init msg_test_init(void)
 		return -ENOMEM;
 	}
 
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	if (g_max_pattrn_size <= 0) {
 		for(i=0; i< 100; i++)
 			printk(KERN_WARNING "%s(): g_max_pattrn_size is <= 0\n", __func__);
 	}
+#endif
 
 	/* register callback. also define in <linux/pcn_kmsg.h>  */
 	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_FIRST_TEST,// ping - 
@@ -694,7 +703,7 @@ static int __init msg_test_init(void)
 									"send/recv/READ/WRITE test ---\n");
 	printk("---      ex: echo [NUM] > /proc/kmsg_test---\n");
 	printk("==================== experimental data ====================\n");
-	printk("---  10: send throughput ---\n");
+	printk("---  10: single thread send throughput ---\n");
 	printk("---      ex: echo 10 [SIZE] > /proc/kmsg_test ---\n");
 	printk("=============== msg_layer usage pattern  ===============\n");
 	printk("---  cat: showing msg_layer usage pattern ---\n");
@@ -707,6 +716,8 @@ static int __init msg_test_init(void)
 static void __exit msg_test_exit(void) 
 {
 	printk("\n\n--- Popcorn messaging self testing unloaded! ---\n\n");
+	if(!g_test_buf)
+		kfree(g_test_buf);
 	remove_proc_entry("kmsg_test", NULL);
 }
 

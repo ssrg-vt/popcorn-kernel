@@ -245,6 +245,7 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 	} else {
 		printk(KERN_INFO"No callback registered for %d\n",
 				msg.msg->header.type);
+		pcn_kmsg_free_msg(msg.msg);
 	}
 	return 0;
 }
@@ -387,6 +388,7 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 		} else {
 			MSGDPRINTK(KERN_INFO"No callback registered for %d\n",
 								 msg->header.type);
+			pcn_kmsg_free_msg(msg);
 			return -ENOENT;
 		}
 		return 0;
@@ -546,14 +548,14 @@ static int __init initialize(void)
 			}
 		}
 	}
-
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	send_pattern_head[0]=999999;	// ignore the first slot
 	recv_pattern_head[0]=999999;	// ignore the first slot
 	for ( i=1; i<g_max_pattrn_size; i++ ) {
 		send_pattern_head[i] = 0;
 		recv_pattern_head[i] = 0;
 	}
-
+#endif
 	/**
 	 * wait for connection done;
 	 * multi version will be a problem. Jack: but deq() should check it.

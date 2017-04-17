@@ -183,7 +183,8 @@ extern send_cbftn send_callback;
 
 #if TEST_MSG_LAYER
 
-#define MSG_LENGTH 4096
+#define MSG_LENGTH 16384
+//#define MSG_LENGTH 4096
 #define NUM_MSGS 25
 
 #define PROF_HISTOGRAM  1
@@ -590,12 +591,14 @@ int __init initialize(void)
 
 	is_connection_done = PCN_CONN_CONNECTED;
 
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
     send_pattern_head[0]=999999;    // ignore the first slot
     recv_pattern_head[0]=999999;    // ignore the first slot
     for ( i=1; i<g_max_pattrn_size; i++ ) {
         send_pattern_head[i] = 0;
         recv_pattern_head[i] = 0;
     }
+#endif
 
 #if TEST_MSG_LAYER
 	atomic_set(&exec_count, 0);
