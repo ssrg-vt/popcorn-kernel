@@ -41,6 +41,12 @@ int __init pcn_kmsg_init(void)
 	send_callback = NULL;
 #ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	g_max_pattrn_size = MAX_PATTRN_SIZE;
+	send_cnt.counter = 0;
+	recv_cnt.counter = 0;
+    for ( i=1; i<g_max_pattrn_size; i++ ) { // ignore the first slot
+        send_pattern_head[i] = 0;
+        recv_pattern_head[i] = 0;
+    }
 #endif
 	MSGPRINTK("%s: done\n", __func__);
 	return 0;
@@ -68,6 +74,10 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 
 int pcn_kmsg_send_long(unsigned int to, void *lmsg, unsigned int size)
 {
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+	int slot;
+#endif
+
 	if (send_callback == NULL) {
 		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
 
@@ -79,7 +89,12 @@ int pcn_kmsg_send_long(unsigned int to, void *lmsg, unsigned int size)
 	}
 
 #ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-	send_pattern_head[atomic_inc_return(&send_cnt)] = size;
+	slot = atomic_inc_return(&recv_cnt);
+	if( slot >= g_max_pattrn_size) {
+		slot = g_max_pattrn_size - 1;
+		printk(KERN_WARNING "WARNING: SEND - out of statistic array space\n");
+	}
+	send_pattern_head[slot] = size;
 #endif
 
 	return send_callback(to, (struct pcn_kmsg_message *)lmsg, size);
