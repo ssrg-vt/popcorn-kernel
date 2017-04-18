@@ -485,7 +485,10 @@ static ssize_t write_proc(struct file * file,
 			printk(KERN_ERR "sudo echo 10 <SIZE> > /proc/kmsg_test\n");
 			return count;
 		}
-
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+		printk(KERN_WARNING "You are tracking MSG_USAGE_PATTERN "
+				"and geting not accurate performance data now\n");
+#endif
 		KRPRINT_INIT("arg %llu\n", simple_strtoull(argv[1], NULL, 0));
 		for(i=0; i<ITER; i++) {
 			do_gettimeofday(&t1);

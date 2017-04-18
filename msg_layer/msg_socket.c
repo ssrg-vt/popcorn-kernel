@@ -239,7 +239,13 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 	ftn = callbacks[msg.msg->header.type];
 	if (ftn != NULL) {
 #ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-		recv_pattern_head[atomic_inc_return(&recv_cnt)] = msg.msg->header.size;
+		int slot;
+		slot = atomic_inc_return(&recv_cnt);
+		if( slot >= g_max_pattrn_size) {
+			slot = g_max_pattrn_size - 1;
+			printk(KERN_WARNING "WARNING: out of statistic array space\n");
+		}		
+		recv_pattern_head[slot] = msg.msg->header.size;
 #endif
 		ftn((void*)msg.msg);
 	} else {
@@ -548,14 +554,6 @@ static int __init initialize(void)
 			}
 		}
 	}
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-	send_pattern_head[0]=999999;	// ignore the first slot
-	recv_pattern_head[0]=999999;	// ignore the first slot
-	for ( i=1; i<g_max_pattrn_size; i++ ) {
-		send_pattern_head[i] = 0;
-		recv_pattern_head[i] = 0;
-	}
-#endif
 	/**
 	 * wait for connection done;
 	 * multi version will be a problem. Jack: but deq() should check it.

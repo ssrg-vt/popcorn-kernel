@@ -1662,7 +1662,13 @@ static void pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 		ftn = callbacks[lmsg->header.type];
 		if(ftn != NULL) {
 #ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-			recv_pattern_head[atomic_inc_return(&recv_cnt)] = w->lmsg.header.size;
+			int slot;
+			slot = atomic_inc_return(&recv_cnt);
+			if( slot >= g_max_pattrn_size) {
+				slot = g_max_pattrn_size - 1;
+				printk(KERN_WARNING "WARNING: out of statistic array space\n");
+			}	
+			recv_pattern_head[slot] = w->lmsg.header.size;
 #endif
 			ftn((void*)lmsg);
 			//ftn((void*)&w->lmsg);
@@ -2030,17 +2036,6 @@ int __init initialize()
 
 		cb[i]->server_invalidate = 0;
 		cb[i]->read_inv = 0;
-
-		//TODO: remove these all
-		//memcpy(cb[i]->addr, ip_table[i], sizeof(ip_table[i]));
-		//mutex_init(&cb[i]->read_mutex);
-		//mutex_init(&cb[i]->write_mutex);
-		//mutex_init(&cb[i]->sync_prob);
-		//mutex_init(&sync_prob);
-		//spin_lock_init(&splock);
-		//cb[i]->irq.counter = 0;
-		//g_ticket.counter = 0;
-
 	}
 	KRPRINT_INIT("---- main init done (still cannot send/recv) -----\n\n");
 
@@ -2126,14 +2121,6 @@ int __init initialize()
 		atomic_set(&cb[i]->read_state, IDLE);
 		atomic_set(&cb[i]->write_state, IDLE);
 	}
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-	send_pattern_head[0]=999999;	// ignore the first slot
-	recv_pattern_head[0]=999999;	// ignore the first slot
-	for ( i=1; i<g_max_pattrn_size; i++ ) {
-		send_pattern_head[i] = 0;
-		recv_pattern_head[i] = 0;
-	}
-#endif
 
 	/* Make init popcorn call */
 	//_init_RemoteCPUMask(); // msg boradcast //Jack: deal w/ it later
