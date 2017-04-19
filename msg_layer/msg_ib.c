@@ -57,11 +57,12 @@
  * 			multithread WRITE (test6) works w/o mutex_lock(&_cb->qp_mutex);
  * 			multithread all together DOESN'T work w/o mutex_lock(&_cb->qp_mutex);
  *  TODO:
+ *			replace msleep with wait/complete 
+ *			replace addr lookup with Sang-Hoon's implementation
  *			test htonll and remove #define htonll(x) cpu_to_be64((x))
  *			test ntohll and remove #define ntohll(x) cpu_to_be64((x))
- *			cb -> _cb
  * 			make parameters in krping_create_qp global
- *
+ *			cb -> _cb
  */
 #define SMART_IB_MSG 0
 
@@ -86,11 +87,6 @@
 
 #define htonll(x) cpu_to_be64((x))
 #define ntohll(x) cpu_to_be64((x)) 
-
-/* Debug */
-atomic_t g_rw_ticket;	// dbg, from1
-atomic_t g_send_ticket;  // dbg, from1
-atomic_t g_recv_ticket;  // dbg, from1
 
 /* Message usage pattern */
 #ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
@@ -155,6 +151,12 @@ int g_conn_retry_count = 10;
 LIST_HEAD(krping_cbs);
 DEFINE_MUTEX(krping_mutex);
 
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+/* Debug */
+atomic_t g_rw_ticket;	// dbg, from1
+atomic_t g_send_ticket;  // dbg, from1
+atomic_t g_recv_ticket;  // dbg, from1
+#endif
 
 /* IB data structures */
 struct krping_stats {
@@ -272,12 +274,11 @@ struct krping_cb {
 	atomic_t active_cnt;		/* used for cond/signalling */
 	atomic_t passive_cnt;		/* used for cond/signalling */
 
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	/* for sync dbg */
 	spinlock_t rw_slock;
 	atomic_t g_all_ticket;
-	atomic_t g_now_ticket;
-	/* for dbg */
-	atomic_t g_wr_id;			/*  for assigning wr_id */
+#endif
 };
 
 /*
@@ -698,7 +699,7 @@ static void fill_sockaddr(struct sockaddr_storage *sin, struct krping_cb *_cb)
 {
 	memset(sin, 0, sizeof(*sin));
 
-	if(!_cb->server) { // TODO: whould it be a potential bug?
+	if(!_cb->server) {
 		if (_cb->addr_type == AF_INET) { // client: load as usuall (ip=remote)
 			struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
 			sin4->sin_family = AF_INET;
@@ -985,15 +986,6 @@ static int krping_setup_buffers(struct krping_cb *cb)
 	MSGDPRINTK("@@@ 1 correct lkey=%d (ref: ./drivers/infiniband/core/mad.c )"
 				"(ctx->pd->local_dma_lkey)\n", cb->pd->local_dma_lkey);
 																//4xxx dynamic
-	/* info
-	//MSGPRINTK("@@@ 1 cb->send_sgl.lkey %d from mr \n", cb->send_sgl.lkey); //0
-	//MSGPRINTK("@@@ 1 cb->recv_sgl.lkey %d from mr \n", cb->recv_sgl.lkey); //0
-		// these are all NULL.
-		cb->dma_mr->lkey, cb->dma_mr->rkey	  // null
-		cb->rdma_mr->lkey, cb->rdma_mr->rkey	// null
-		cb->start_mr->lkey, cb->start_mr->rkey  // null
-	*/
-
 	/* passive rw */
 	MSGPRINTK("only client(not true) setup rw_passive_buf passive_dma_addr\n");
 	cb->rw_passive_buf = kmalloc(cb->rdma_size, GFP_KERNEL); // vmalloc(X)
@@ -1127,7 +1119,7 @@ int krping_persistent_server_thread(void* arg0)
 		printk(KERN_ERR "krping_setup_buffers failed: %d\n", ret);
 		goto err1;
 	}
-	// so far you can do send/recv
+	// after now, you can send/recv
 
 	ret = krping_accept(cb);
 	if (ret) {
@@ -1135,7 +1127,6 @@ int krping_persistent_server_thread(void* arg0)
 		goto err2;
 	}
 
-	//is_connection_done[cb->conn_no] = 1; // atomic is more safe
 	set_popcorn_node_online(cb->conn_no);
 	printk("conn_no %d is ready (GOOD)\n", cb->conn_no);
 
@@ -1167,7 +1158,6 @@ static int krping_run_server(void* arg0)
 
 	MSGPRINTK("\n\n\n");
 
-	//TODO: MCJack-modify outside
 	//- create multiple connections -//
 	while(1){
 		/* Wait for client's Start STAG/TO/Len */
@@ -1181,14 +1171,6 @@ static int krping_run_server(void* arg0)
 		}
 		KRPRINT_INIT("Got a connection\n");
 
-		/* create a thread for this */
-		//exec_thread_data *exec_data = (exec_thread_data *) 
-		//						kmalloc(sizeof(exec_thread_data), GFP_KERNEL);
-		//exec_data->conn_no = conn_no;
-		//TODO: catch return thread
-		//struct krping_cb* cb = (struct krping_cb*)
-							//* (cb + (sizeof(struct krping_cb)*(my_nid))
-							//+ (sizeof(struct krping_cb)*(i)));
 		_cb = cb[my_nid+i];
 		_cb->server=1;
 
@@ -1253,7 +1235,7 @@ static int krping_create_qp(struct krping_cb *cb)
 
 	memset(&init_attr, 0, sizeof(init_attr));
 	init_attr.cap.max_send_wr = cb->txdepth;	//
-	init_attr.cap.max_recv_wr = MAX_RECV_WR*2;	// TODO: +++++++++++++++++++
+	init_attr.cap.max_recv_wr = MAX_RECV_WR*2;	//
 
 	/* For flush_qp() */
 	init_attr.cap.max_send_wr++;
@@ -1355,20 +1337,17 @@ static void handle_remote_thread_rdma_read_request(
 	// register local buf for performing R/W (rdma_rkey)
 	_cb->rdma_sgl.lkey = krping_rdma_rkey_passive(_cb, _cb->passive_dma_addr, 
 											!_cb->read_inv, _cb->remote_len);
-	//  TODO: rdma_sgl will conflict each other (R&W) but rdma_send protects.
-	_cb->rdma_sq_wr.wr.next = NULL; // a work request
+	_cb->rdma_sq_wr.wr.next = NULL; // one work request
 
 	if (unlikely(_cb->read_inv))
 		_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_READ_WITH_INV;
 	else { 
 		/* Compose a READ sge with a invalidation */
 		_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_READ;
-		/* Immediately follow the read with a
-		 * fenced LOCAL_INV. */
+		/* Immediately follow the read with a fenced LOCAL_INV. */
 		_cb->rdma_sq_wr.wr.next = &inv; // followed by a inv
 		memset(&inv, 0, sizeof inv);
 		inv.opcode = IB_WR_LOCAL_INV;
-		//inv.ex.invalidate_rkey = _cb->reg_mr->rkey;
 		inv.ex.invalidate_rkey = _cb->reg_mr_passive->rkey;
 		inv.send_flags = IB_SEND_FENCE;
 	}
@@ -1417,8 +1396,6 @@ static void handle_remote_thread_rdma_read_request(
 						request->rw_size, 
 						strlen(_cb->rw_passive_buf), _cb->rw_passive_buf);
 
-	//TODO:try uncomment this
-	//memset(cb->rw_passive_buf, '\n', strlen(_cb->rw_passive_buf));
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	dbg = request->rdma_ticket;
 #endif
@@ -1525,8 +1502,6 @@ static void handle_remote_thread_rdma_write_request(
 	// register local buf for performing R/W (rdma_rkey)
 	_cb->rdma_sgl.lkey = krping_rdma_rkey_passive(
 						_cb, _cb->passive_dma_addr, 1, _cb->remote_len);
-	//  TODO: rdma_sgl will conflict each other (R&W)
-	// Jack: cb->rdma_sq_wr.wr.sg_list = &cb->rdma_sgl;
 
 	MSGPRINTK("<<<<< WRITE request: my_nid %d from_nid %d, "
 						"lkey %d laddr %llx _cb->rdma_sgl.lkey %d, "
@@ -1989,13 +1964,17 @@ int __init initialize()
 		cb[i]->active_cnt.counter = 0;
 		cb[i]->passive_cnt.counter = 0;
 
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 		g_rw_ticket.counter = 0;
 		g_send_ticket.counter = 0;
 		g_recv_ticket.counter = 0;
+#endif
 
 		/* for sync prob */
-		cb[i]->g_all_ticket.counter = 0;
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 		spin_lock_init(&cb[i]->rw_slock);
+		cb[i]->g_all_ticket.counter = 0;
+#endif
 
 		cb[i]->stats.send_msgs.counter = 0;
 		cb[i]->stats.recv_msgs.counter = 0;
@@ -2072,7 +2051,7 @@ int __init initialize()
 			cb[conn_no]->server = 0;
 
 			// server/client dependant init
-			msleep(1000);  // TODO: replace this with wait/completion
+			msleep(1000);
 			err = krping_run_client(cb[conn_no]); // connect_to()
 			if (err) {
 				printk("WRONG!!\n");
@@ -2087,7 +2066,6 @@ int __init initialize()
 			MSGPRINTK("no action needed for conn %d "
 					   "(listening will take care)\n", i);
 		}
-		// TODO: Jack: use kthread run?
 		//sched_setscheduler(<kthread_run()'s return>, SCHED_FIFO, &param);
 		//set_cpus_allowed_ptr(<kthread_run()'s return>, cpumask_of(i%NR_CPUS));
 	}
@@ -2095,24 +2073,10 @@ int __init initialize()
 	for ( i=0; i<MAX_NUM_NODES; i++ ) {
 		while ( !is_popcorn_node_online(i) ) {
 			printk("waiting for is_popcorn_node_online(%d)\n", i);
-			//MSGDPRINTK("waiting for is_connection_done[%d]\n", i);
 			msleep(3000);
-			//io_schedule();
 		}
 	}
-
-	// load
-	if(!SMART_IB_MSG) {
-		send_callback = (send_cbftn)ib_kmsg_send_long;  // send()
-		send_callback_rdma = (send_cbftn)ib_kmsg_send_rdma; // rdma read/write()
-	} else {
-		send_callback = (send_cbftn)ib_kmsg_send_smart;
-	}
-	MSGPRINTK("Value of send ptr = %p\n", send_callback);
-	MSGPRINTK("--- Popcorn messaging layer is up ---\n");
-
-
-	// TODO: move to an earlier place
+	
 	MSGPRINTK("--- init all ib[]->state ---\n");
 	for ( i=0; i<MAX_NUM_NODES; i++ ) {
 		atomic_set(&cb[i]->state, IDLE);
@@ -2121,11 +2085,6 @@ int __init initialize()
 		atomic_set(&cb[i]->read_state, IDLE);
 		atomic_set(&cb[i]->write_state, IDLE);
 	}
-
-	/* Make init popcorn call */
-	//_init_RemoteCPUMask(); // msg boradcast //Jack: deal w/ it later
-
-	/* testing is in another module msg_layer_test.ko */
 
 	/* register RDMA must-have callbacks */
 	pcn_kmsg_register_callback(
@@ -2142,6 +2101,15 @@ int __init initialize()
 					(enum pcn_kmsg_type)PCN_KMSG_TYPE_RDMA_WRITE_RESPONSE,
 					(pcn_kmsg_cbftn)handle_remote_thread_rdma_write_response);
 
+	if(!SMART_IB_MSG) {
+		send_callback = (send_cbftn)ib_kmsg_send_long;
+		send_callback_rdma = (send_cbftn)ib_kmsg_send_rdma;
+	} else {
+		send_callback = (send_cbftn)ib_kmsg_send_smart;
+	}
+	MSGPRINTK("Value of send ptr = %p\n", send_callback);
+	MSGPRINTK("--- Popcorn messaging layer is up ---\n");
+	
 	smp_mb();
 	printk("==================================================\n");
 	printk("----- Popcorn Messaging Layer IB Initialized -----\n");
@@ -2151,7 +2119,6 @@ int __init initialize()
 
 out:
 	for(i=0; i<MAX_NUM_NODES; i++){
-		//if(cb[i]->state!=0) { // making sure it hasbeen inited
 		if(atomic_read(&(cb[i]->state))) {
 			mutex_lock(&krping_mutex);
 			list_del(&cb[i]->list);
@@ -2175,28 +2142,24 @@ u32 krping_rdma_rkey(struct krping_cb *_cb, u64 buf, int post_inv, int rdma_len)
 	int ret;
 	struct scatterlist sg = {0};
 
-	// old key
+	// old key - save corrent reg rkey
 	_cb->invalidate_wr.ex.invalidate_rkey = _cb->reg_mr->rkey;
-													// save corrent reg rkey
 
-	// Update the reg key.
-	ib_update_fast_reg_key(_cb->reg_mr, _cb->key); // keeps the key the same
+	// Update the reg key - keeps the key the same
+	ib_update_fast_reg_key(_cb->reg_mr, _cb->key);
 	_cb->reg_mr_wr.key = _cb->reg_mr->rkey;
 
-	//
 	// Setup permissions
-	//
-	// reg_mr_wr_passive in another function
+	// reg_mr_wr_passive is in another function
 	_cb->reg_mr_wr.access = IB_ACCESS_REMOTE_READ   |
 							IB_ACCESS_REMOTE_WRITE  |
 							IB_ACCESS_LOCAL_WRITE   |
 							IB_ACCESS_REMOTE_ATOMIC; // unsafe but works
 
-	sg_dma_address(&sg) = buf;		// passed by caller
-	sg_dma_len(&sg) = rdma_len;		// R/W length
+	sg_dma_address(&sg) = buf;			// passed by caller
+	sg_dma_len(&sg) = rdma_len;			// R/W length
 	DEBUG_LOG("%s(): rdma_len (dynamical) %d\n", __func__, sg_dma_len(&sg));
 
-	//ret = ib_map_mr_sg(cb->reg_mr, &sg, 1, NULL, PAGE_SIZE);
 	ret = ib_map_mr_sg(_cb->reg_mr, &sg, 1, PAGE_SIZE);
 										// snyc ib_dma_sync_single_for_cpu/dev
 	BUG_ON(ret <= 0 || ret > _cb->page_list_len);
@@ -2216,16 +2179,14 @@ u32 krping_rdma_rkey(struct krping_cb *_cb, u64 buf, int post_inv, int rdma_len)
 
 	if (ret) {
 		printk(KERN_ERR "post send error %d\n", ret);
-		//cb->state = ERROR;
 		atomic_set(&_cb->state, ERROR);
-		//TODO ALL / corresponding to the request
 		atomic_set(&_cb->send_state, ERROR);
 		atomic_set(&_cb->recv_state, ERROR);
 		atomic_set(&_cb->read_state, ERROR);
 		atomic_set(&_cb->write_state, ERROR);
 	}
 
-	rkey = _cb->reg_mr->rkey; // TODO: check this [cb->reg_mr->rkey]
+	rkey = _cb->reg_mr->rkey;
 	return rkey;
 }
 EXPORT_SYMBOL(krping_rdma_rkey);
@@ -2238,13 +2199,9 @@ u32 krping_rdma_rkey_passive(struct krping_cb *_cb,
 	int ret;
 	struct scatterlist sg = {0};
 
-	// store old key
 	_cb->invalidate_wr_passive.ex.invalidate_rkey = _cb->reg_mr_passive->rkey;
-														// save corrent reg rkey
 
-	// Update the reg key.
 	ib_update_fast_reg_key(_cb->reg_mr_passive, _cb->key);
-													// keeps the key the same
 	_cb->reg_mr_wr_passive.key = _cb->reg_mr_passive->rkey;
 
 	_cb->reg_mr_wr_passive.access = IB_ACCESS_REMOTE_READ   |
@@ -2252,11 +2209,10 @@ u32 krping_rdma_rkey_passive(struct krping_cb *_cb,
 									IB_ACCESS_LOCAL_WRITE   |
 									IB_ACCESS_REMOTE_ATOMIC; // unsafe but works
 
-	sg_dma_address(&sg) = buf;		// passed by caller
-	sg_dma_len(&sg) = rdma_len;		// R/W length
+	sg_dma_address(&sg) = buf;
+	sg_dma_len(&sg) = rdma_len;
 
 	ret = ib_map_mr_sg(_cb->reg_mr_passive, &sg, 1, PAGE_SIZE);  
-										// snyc ib_dma_sync_single_for_cpu/dev
 	BUG_ON(ret <= 0 || ret > _cb->page_list_len);
 
 	MSG_RDMA_PRK("%s(): ### post_inv = %d, reg_mr_wr_passive new rkey %d "
@@ -2270,21 +2226,18 @@ u32 krping_rdma_rkey_passive(struct krping_cb *_cb,
 		ret = ib_post_send(_cb->qp, &_cb->invalidate_wr_passive, &bad_wr);
 	else
 		ret = ib_post_send(_cb->qp, &_cb->reg_mr_wr_passive.wr, &bad_wr); 
-												// called by only passive WRITE
 	mutex_unlock(&_cb->qp_mutex);
 
 	if (ret) {
 		printk(KERN_ERR "post send error %d\n", ret);
-		//cb->state = ERROR;
 		atomic_set(&_cb->state, ERROR);
-		//TODO ALL / corresponding to the request
 		atomic_set(&_cb->send_state, ERROR);
 		atomic_set(&_cb->recv_state, ERROR);
 		atomic_set(&_cb->read_state, ERROR);
 		atomic_set(&_cb->write_state, ERROR);
 	}
 
-	rkey = _cb->reg_mr_passive->rkey; // TODO: check this [cb->reg_mr->rkey]
+	rkey = _cb->reg_mr_passive->rkey;
 	return rkey;
 }
 EXPORT_SYMBOL(krping_rdma_rkey_passive);
@@ -2466,12 +2419,11 @@ int ib_kmsg_send_long(unsigned int dest_cpu,
 					// sq_wr is hardcoded used for send&recv, rdma_sq_wr for W/R
 	mutex_unlock(&cb[dest_cpu]->qp_mutex);
 
-	//wait_event(cb[dest_cpu]->sem,
 	wait_event_interruptible(cb[dest_cpu]->sem,
 				atomic_read(&(cb[dest_cpu]->state)) == RDMA_SEND_COMPLETE);
 	// since this // I don't have to have enq/deq()
 
-	atomic_set(&cb[dest_cpu]->state, IDLE); // dont let it stay stay the state
+	atomic_set(&cb[dest_cpu]->state, IDLE); // don't let it stay the state
 	mutex_unlock(&cb[dest_cpu]->send_mutex);
 	MSG_SYNC_PRK("//////////////unlock() conn %d///////////////\n", dest_cpu);
 	MSGDPRINTK("Jackmsglayer: 1 msg sent to dest_cpu %d!!!!!!\n\n", dest_cpu);
@@ -2509,13 +2461,7 @@ static void __exit unload(void)
 	/* release */
 	KRPRINT_INIT("Release threadss\n");
 	for (i = 0; i<MAX_NUM_NODES; i++) {
-		//if(handler[i]!=NULL)
-		//	kthread_stop(handler[i]);
-		//if(sender_handler[i]!=NULL)
-		//	kthread_stop(sender_handler[i]);
-		//if(execution_handler[i]!=NULL)
-		//	kthread_stop(execution_handler[i]);
-		//Jack: TODO: sock release buffer, check(according to) the init
+		printk(KERN_ERR "Not implemented yet\n");
 	}
 
 	KRPRINT_INIT("Release IBs\n");
