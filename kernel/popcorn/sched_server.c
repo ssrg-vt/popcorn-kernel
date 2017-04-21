@@ -191,64 +191,65 @@ static void popcorn_ps_load(struct task_struct *t, unsigned int *puload, unsigne
 	return;
 }
 
-static remote_ps_response_t *get_remote_popcorn_ps_load(struct task_struct *tsk,
-							int origin_nid,
-							int origin_pid)
+static int get_remote_popcorn_ps_load(struct task_struct *tsk, int origin_nid, int origin_pid, unsigned int *uload, unsigned int *sload)
 {
-	remote_ps_request_t *req;
+	remote_ps_request_t req = {
+		.header = {
+			.type = PCN_KMSG_TYPE_REMOTE_PROC_PS_REQUEST,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.nid = my_nid,
+		.origin_pid = origin_pid,
+	};
 	remote_ps_response_t *res;
 	struct wait_station *ws = get_wait_station(tsk->pid, 1);
 
 	RPSPRINTK("%s: Entered, origin nid: %d, origin pid: %d\n",
 		  __func__, origin_nid, origin_pid);
 
-	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	req.origin_ws = ws->id;
 
-	req->header.type = PCN_KMSG_TYPE_REMOTE_PROC_PS_REQUEST;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-	req->nid = my_nid;
-	req->origin_pid = origin_pid;
-	req->origin_ws = ws->id;
-
-	pcn_kmsg_send_long(origin_nid, req, sizeof(*req));
+	pcn_kmsg_send_long(origin_nid, &req, sizeof(req));
 
 	wait_at_station(ws);
 	res = ws->private;
 	put_wait_station(ws);
 
-	kfree(req);
+	*uload = res->uload;
+	*sload = res->sload;
 
 	RPSPRINTK("%s: done\n", __func__);
-	return res;
+	pcn_kmsg_free_msg(res);
+
+	return 0;
 }
 
 static void process_remote_ps_request(struct work_struct *work)
 {
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
 	remote_ps_request_t *req = w->msg;
-	remote_ps_response_t *res = NULL;
+	remote_ps_response_t res = {
+		.header = {
+			.type = PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.origin_ws = req->origin_ws,
+	};
 	struct task_struct *tsk;
 
 	RPSPRINTK("%s: Entered\n", __func__);
-
-	res = kzalloc(sizeof(*res), GFP_KERNEL);
-
-	res->header.type = PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE;
-	res->header.prio = PCN_KMSG_PRIO_NORMAL;
-	res->origin_ws = req->origin_ws;
 
 	tsk = __get_task_struct((pid_t)req->origin_pid);
 	if (!tsk) {
 		RPSPRINTK("%s: process does not exist %d\n", __func__, req->origin_pid);
 		goto out;
 	}
-	popcorn_ps_load(tsk, &res->uload, &res->sload);
+	popcorn_ps_load(tsk, &res.uload, &res.sload);
+	put_task_struct(tsk);
 
-	pcn_kmsg_send_long(req->nid, res, sizeof(*res));
+	pcn_kmsg_send_long(req->nid, &res, sizeof(res));
 
 out:
-	kfree(res);
-
 	pcn_kmsg_free_msg(req);
 	kfree(w);
 
@@ -314,15 +315,9 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 						// Get CPU load per thread from local node
 						popcorn_ps_load(t, &uload, &sload);
 					} else {
-						remote_ps_response_t *rps;
-
 						// Get CPU load per thread from remote node
-						rps = get_remote_popcorn_ps_load(current,
-								t->origin_nid, t->origin_pid);
-						uload = rps->uload;
-						sload = rps->sload;
-
-						pcn_kmsg_free_msg(rps);
+						get_remote_popcorn_ps_load(current,
+								t->origin_nid, t->origin_pid, &uload, &sload);
 					}
 				}
 
