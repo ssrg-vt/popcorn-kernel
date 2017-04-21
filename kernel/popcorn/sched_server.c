@@ -26,6 +26,14 @@
 #include <popcorn/process_server.h>
 
 #include "types.h"
+#include "wait_station.h"
+
+#define REMOTE_PS_VERBOSE 0
+#if REMOTE_PS_VERBOSE
+#define RPSPRINTK(...) printk(__VA_ARGS__)
+#else
+#define RPSPRINTK(...)
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // Vincent's scheduling infrasrtucture based on Antonio's power/pmu readings
@@ -136,6 +144,18 @@ static const struct file_operations power_fops = {
 // List of Popcorn processes
 ///////////////////////////////////////////////////////////////////////////////
 
+#define REMOTE_PS_REQUEST_FIELDS \
+	int nid; \
+	int origin_pid; \
+	int origin_ws;
+DEFINE_PCN_KMSG(remote_ps_request_t, REMOTE_PS_REQUEST_FIELDS);
+
+#define REMOTE_PS_RESPONSE_FIELDS \
+	int origin_ws; \
+	unsigned int uload; \
+	unsigned int sload;
+DEFINE_PCN_KMSG(remote_ps_response_t, REMOTE_PS_RESPONSE_FIELDS);
+
 // CPU load per thread
 static void popcorn_ps_load(struct task_struct *t, unsigned int *puload, unsigned int *psload)
 {
@@ -171,6 +191,89 @@ static void popcorn_ps_load(struct task_struct *t, unsigned int *puload, unsigne
 	return;
 }
 
+static int get_remote_popcorn_ps_load(struct task_struct *tsk, int origin_nid, int origin_pid, unsigned int *uload, unsigned int *sload)
+{
+	remote_ps_request_t req = {
+		.header = {
+			.type = PCN_KMSG_TYPE_REMOTE_PROC_PS_REQUEST,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.nid = my_nid,
+		.origin_pid = origin_pid,
+	};
+	remote_ps_response_t *res;
+	struct wait_station *ws = get_wait_station(tsk->pid, 1);
+
+	RPSPRINTK("%s: Entered, origin nid: %d, origin pid: %d\n",
+		  __func__, origin_nid, origin_pid);
+
+	req.origin_ws = ws->id;
+
+	pcn_kmsg_send_long(origin_nid, &req, sizeof(req));
+
+	wait_at_station(ws);
+	res = ws->private;
+	put_wait_station(ws);
+
+	*uload = res->uload;
+	*sload = res->sload;
+
+	RPSPRINTK("%s: done\n", __func__);
+	pcn_kmsg_free_msg(res);
+
+	return 0;
+}
+
+static void process_remote_ps_request(struct work_struct *work)
+{
+	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
+	remote_ps_request_t *req = w->msg;
+	remote_ps_response_t res = {
+		.header = {
+			.type = PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.origin_ws = req->origin_ws,
+	};
+	struct task_struct *tsk;
+
+	RPSPRINTK("%s: Entered\n", __func__);
+
+	tsk = __get_task_struct((pid_t)req->origin_pid);
+	if (!tsk) {
+		RPSPRINTK("%s: process does not exist %d\n", __func__, req->origin_pid);
+		goto out;
+	}
+	popcorn_ps_load(tsk, &res.uload, &res.sload);
+	put_task_struct(tsk);
+
+	pcn_kmsg_send_long(req->nid, &res, sizeof(res));
+
+out:
+	pcn_kmsg_free_msg(req);
+	kfree(w);
+
+	RPSPRINTK("%s: done\n", __func__);
+}
+
+static void process_remote_ps_response(struct work_struct *work)
+{
+	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
+	remote_ps_response_t *res = w->msg;
+	struct wait_station *ws = wait_station(res->origin_ws);
+
+	RPSPRINTK("%s: Entered\n", __func__);
+
+	ws->private = res;
+
+	smp_mb();
+	if (atomic_dec_and_test(&ws->pendings_count))
+		complete(&ws->pendings);
+
+	kfree(w);
+
+	RPSPRINTK("%s: done\n", __func__);
+}
 
 #define PROC_BUFFER_PS 8192
 static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
@@ -205,8 +308,19 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 
 				if (p->at_remote && t->is_vma_worker) continue;
 
-				// CPU load per thread
-				popcorn_ps_load(t, &uload, &sload);
+				if (t->origin_nid == -1) {
+					// CPU load per thread
+					popcorn_ps_load(t, &uload, &sload);
+				} else {
+					if (t->at_remote) {
+						// Get CPU load per thread from local node
+						popcorn_ps_load(t, &uload, &sload);
+					} else {
+						// Get CPU load per thread from remote node
+						get_remote_popcorn_ps_load(current,
+								t->origin_nid, t->origin_pid, &uload, &sload);
+					}
+				}
 
 				uload_total += uload;
 				sload_total += sload;
@@ -236,6 +350,9 @@ static const struct file_operations popcorn_ps_fops = {
 	.read = popcorn_ps_read,
 };
 
+
+DEFINE_KMSG_WQ_HANDLER(remote_ps_request);
+DEFINE_KMSG_WQ_HANDLER(remote_ps_response);
 
 int __init sched_server_init(void)
 {
@@ -276,6 +393,11 @@ int __init sched_server_init(void)
 	res = proc_create("popcorn_ps", S_IRUGO, NULL, &popcorn_ps_fops);
 	if (!res)
 		printk("Failed to create proc entry for process list\n");
+
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_REMOTE_PROC_PS_REQUEST, remote_ps_request);
+	REGISTER_KMSG_WQ_HANDLER(
+			PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE, remote_ps_response);
 
 	printk(KERN_INFO"%s: done\n", __func__);
 	return 0;
