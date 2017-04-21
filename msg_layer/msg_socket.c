@@ -26,6 +26,7 @@
 #include "common.h"
 
 char *net_dev_names[] = {
+	"br0",		// bridge
 	"eth0",		// Socket
 	"ib0",		// InfiniBand
 	"p7p1",		// Xgene (ARM)
