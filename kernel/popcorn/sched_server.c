@@ -189,15 +189,16 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 	for_each_process(p) {
 		if (process_is_distributed(p)) {
 			struct task_struct *t;
+			unsigned int uload_total = 0;
+			unsigned int sload_total = 0;
 
 			if (p->is_vma_worker && !p->at_remote) continue;
 
 			len += snprintf((buffer + len), PROC_BUFFER_PS - len,
-					"%c: %16s %5d             %lu\n",
+					"%c: %16s %5d\n",
 					p->at_remote ? 'R' : 'L',
 					p->comm,
-					p->pid,
-					p->mm->total_vm); // in # of pages
+					p->pid);
 
 			for_each_thread(p, t) {
 				unsigned int uload, sload;
@@ -207,11 +208,17 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 				// CPU load per thread
 				popcorn_ps_load(t, &uload, &sload);
 
-				len += snprintf((buffer +len), PROC_BUFFER_PS - len,
-						"                    %5d %5d %5d  %3d %3d\n",
+				uload_total += uload;
+				sload_total += sload;
+
+				len += snprintf((buffer + len), PROC_BUFFER_PS - len,
+						"                    %5d %5d %5d  %4d %4d\n",
 						t->pid, t->origin_nid, t->origin_pid,
 						uload, sload); // in %
 			}
+			len += snprintf((buffer + len), PROC_BUFFER_PS - len,
+						"                                TOTAL  %4d %4d\n",
+						uload_total, sload_total);
 		}
 	}
 
