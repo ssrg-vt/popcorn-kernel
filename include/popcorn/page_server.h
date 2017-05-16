@@ -18,7 +18,7 @@
  */
 int page_server_handle_pte_fault(
 		struct mm_struct *mm, struct vm_area_struct *vma,
-		unsigned long address, pte_t *pte, pte_t entry, pmd_t *pmd,
+		unsigned long address, pmd_t *pmd, pte_t *pte, pte_t entry,
 		unsigned int flags);
 
 /*

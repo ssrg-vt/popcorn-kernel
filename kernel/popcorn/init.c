@@ -13,6 +13,7 @@
 
 struct workqueue_struct *popcorn_wq;
 struct workqueue_struct *popcorn_ordered_wq;
+struct workqueue_struct *popcorn_nonblock_wq;
 
 extern int popcorn_ns_init(int);
 extern int pcn_kmsg_init(void);
@@ -34,6 +35,7 @@ static int __init popcorn_init(void)
 	 * communications module interrupt handlers.
 	 */
 	popcorn_wq = create_workqueue("pcn_wq");
+	popcorn_nonblock_wq = create_workqueue("pcn_wq_nb");
 	popcorn_ordered_wq = create_singlethread_workqueue("pcn_wq_ordered");
 
 	popcorn_ns_init(false);

@@ -4657,11 +4657,10 @@ static int __do_sched_migrate(struct task_struct *tsk, int nid, void __user *ure
 	printk("%s [%d]: put to sleep\n", __func__, tsk->pid);
 	__set_task_state(tsk, TASK_INTERRUPTIBLE);
 	schedule();
-	printk("%s [%d]: wake up\n", __func__, tsk->pid);
+	printk("%s [%d]: waken up, 0x%x 0x%x\n", __func__,
+			tsk->pid, tsk->ret_from_remote, tsk->exit_code);
 
 	if (tsk->ret_from_remote & TASK_DEAD) {
-		printk("%s [%d]: terminated with 0x%d\n",__func__,
-				tsk->pid, tsk->exit_code);
 		do_exit(tsk->exit_code);
 	}
 

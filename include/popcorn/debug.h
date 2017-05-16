@@ -26,9 +26,9 @@
 
 
 #ifdef CONFIG_POPCORN_DEBUG_PAGE_SERVER_VERBOSE
-#define PGSPRINTK(...) printk(__VA_ARGS__)
+#define PGPRINTK(...) printk(__VA_ARGS__)
 #else
-#define PGSPRINTK(...)
+#define PGPRINTK(...)
 #endif
 
 

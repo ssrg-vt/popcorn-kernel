@@ -104,8 +104,9 @@ struct remote_context {
 	bool for_remote;
 
 	/* For page replication protocol */
-	spinlock_t pages_lock;
-	struct list_head pages;
+	spinlock_t faults_lock;
+	struct list_head faults;
+	bool flushing;
 
 	/* For VMA management */
 	spinlock_t vmas_lock;
@@ -125,6 +126,7 @@ struct remote_context {
 
 struct remote_context *get_task_remote(struct task_struct *tsk);
 bool put_task_remote(struct task_struct *tsk);
+bool __put_task_remote(struct remote_context *rc);
 
 
 /**
@@ -137,7 +139,8 @@ bool put_task_remote(struct task_struct *tsk);
 	bool expect_flush;\
 	unsigned int personality;\
 	unsigned long def_flags;\
-	sigset_t remote_blocked, remote_real_blocked;\
+	sigset_t remote_blocked;\
+	sigset_t remote_real_blocked;\
 	sigset_t remote_saved_sigmask;\
 	struct sigpending remote_pending;\
 	unsigned long sas_ss_sp;\
@@ -171,7 +174,6 @@ DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 	unsigned long sas_ss_sp;\
 	size_t sas_ss_size;\
 	struct k_sigaction action[_NSIG];\
-	void *popcorn_vdso; \
 	field_arch arch;
 DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
 
@@ -230,36 +232,72 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 
 
 #define REMOTE_PAGE_REQUEST_FIELDS \
+	int origin_nid; \
 	pid_t origin_pid; \
-	int remote_nid; \
+	int origin_ws; \
 	pid_t remote_pid; \
 	unsigned long addr; \
 	unsigned long fault_flags;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
-#define REMOTE_PAGE_RESPONSE_FIELDS \
-	pid_t remote_pid;	\
+#define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
+	int remote_nid; \
+	pid_t remote_pid; \
+	int origin_nid; \
+	pid_t origin_pid; \
+	int origin_ws; \
 	unsigned long addr; \
-	int result; \
-	DECLARE_BITMAP(owners, MAX_POPCORN_NODES); \
+	int result;
+
+#define REMOTE_PAGE_RESPONSE_FIELDS \
+	REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 
-#define REMOTE_PAGE_INVALIDATE_FIELDS \
-	int origin_nid; \
-	pid_t origin_pid; \
-	pid_t remote_pid; \
-	unsigned long addr;
-DEFINE_PCN_KMSG(remote_page_invalidate_t, REMOTE_PAGE_INVALIDATE_FIELDS);
+#define REMOTE_PAGE_GRANT_FIELDS \
+	REMOTE_PAGE_RESPONSE_COMMON_FIELDS
+DEFINE_PCN_KMSG(remote_page_grant_t, REMOTE_PAGE_GRANT_FIELDS);
 
-#define REMOTE_PAGE_FLUSH_FIELDS \
+
+#define REMOTE_PAGE_FLUSH_COMMON_FIELDS \
 	pid_t origin_pid; \
 	int remote_nid; \
 	pid_t remote_pid; \
+	int remote_ws; \
 	unsigned long addr; \
-	bool last; \
+	unsigned long flags;
+
+#define REMOTE_PAGE_FLUSH_FIELDS \
+	REMOTE_PAGE_FLUSH_COMMON_FIELDS \
 	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_page_flush_t, REMOTE_PAGE_FLUSH_FIELDS);
+
+#define REMOTE_PAGE_RELEASE_FIELDS \
+	REMOTE_PAGE_FLUSH_COMMON_FIELDS
+DEFINE_PCN_KMSG(remote_page_release_t, REMOTE_PAGE_RELEASE_FIELDS);
+
+#define REMOTE_PAGE_FLUSH_ACK_FIELDS \
+	int remote_ws; \
+	unsigned long flags;
+DEFINE_PCN_KMSG(remote_page_flush_ack_t, REMOTE_PAGE_FLUSH_ACK_FIELDS);
+
+
+#define PAGE_INVALIDATE_REQUEST_FIELDS \
+	int origin_nid; \
+	pid_t origin_pid; \
+	int origin_ws; \
+	pid_t remote_pid; \
+	unsigned long addr;
+DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
+
+#define PAGE_INVALIDATE_RESPONSE_FIELDS \
+	int origin_nid; \
+	pid_t origin_pid; \
+	int origin_ws; \
+	pid_t remote_pid; \
+	unsigned long addr;
+DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
+
 
 
 /**
@@ -277,6 +315,7 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
  */
 extern struct workqueue_struct *popcorn_wq;
 extern struct workqueue_struct *popcorn_ordered_wq;
+extern struct workqueue_struct *popcorn_nonblock_wq;
 
 struct pcn_kmsg_work {
 	struct work_struct work;
@@ -303,11 +342,30 @@ static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 	return __handle_popcorn_work(msg, process_##x, popcorn_ordered_wq);\
 }
+#define DEFINE_KMSG_NONBLOCK_WQ_HANDLER(x) \
+static inline int handle_##x(struct pcn_kmsg_message *msg) {\
+	return __handle_popcorn_work(msg, process_##x, popcorn_nonblock_wq);\
+}
 
 #define REGISTER_KMSG_WQ_HANDLER(x, y) \
 	pcn_kmsg_register_callback(x, handle_##y)
 
 #define REGISTER_KMSG_HANDLER(x, y) \
 	pcn_kmsg_register_callback(x, handle_##y)
+
+
+#include <linux/sched.h>
+
+static inline struct task_struct *__get_task_struct(pid_t pid)
+{
+	struct task_struct *tsk = NULL;
+	rcu_read_lock();
+	tsk = find_task_by_vpid(pid);
+	if (likely(tsk)) {
+		get_task_struct(tsk);
+	}
+	rcu_read_unlock();
+	return tsk;
+}
 
 #endif /* __TYPES_H__ */
