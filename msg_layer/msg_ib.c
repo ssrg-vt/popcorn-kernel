@@ -653,7 +653,8 @@ static int krping_connect_client(struct krping_cb *cb)
 /* Jack utility -
  *		  free the name buffer manually!
  */
-uint32_t get_host_ip(char **tmp_net_dev_name) {
+uint32_t get_host_ip(char **tmp_net_dev_name)
+{
 	struct net_device *device;
 	struct in_device *in_dev;
 	struct in_ifaddr *if_info;
@@ -673,8 +674,7 @@ uint32_t get_host_ip(char **tmp_net_dev_name) {
 											(__u32)addr[0], (__u32)addr[1],
 											(__u32)addr[2], (__u32)addr[3]);
 		return (addr[0]<<24 | addr[1]<<16 | addr[2]<<8 | addr[3]);
-	}
-	else{
+	} else {
 		device = __dev_get_by_name(&init_net, net_dev_name2);
 		if(device) {
 			*tmp_net_dev_name = (char *) vmalloc(sizeof(net_dev_name2));
@@ -2085,6 +2085,17 @@ int __init initialize()
 		atomic_set(&cb[i]->read_state, IDLE);
 		atomic_set(&cb[i]->write_state, IDLE);
 	}
+
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+	send_pattern_head[0]=999999;	// ignore the first slot
+	recv_pattern_head[0]=999999;	// ignore the first slot
+	for ( i=1; i<g_max_pattrn_size; i++ ) {
+		send_pattern_head[i] = 0;
+		recv_pattern_head[i] = 0;
+	}
+#endif
+
+	/* testing is in another module msg_layer_test.ko */
 
 	/* register RDMA must-have callbacks */
 	pcn_kmsg_register_callback(

@@ -561,12 +561,11 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 	if(!buf)
 		BUG();
 
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	//TODO: lock // unlock untile return 0
 	if (*offset > 0)
 		return 0;
 	
-	
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	for(i=0; i<MAX_STATISTIC_SLOTS; i++) {
 		send_pattern[i].size = 0;
 		send_pattern[i].cnt = 0;
@@ -627,7 +626,6 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 		return -EFAULT;
 	}
 
-	kfree(buf);
 #else
 	printk("Please turn on CONFIG_POPCORN_MSG_USAGE_PATTERN "
 								"and recompile the kernel agaian!!\n");
@@ -635,6 +633,7 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 					"Please turn on CONFIG_POPCORN_MSG_USAGE_PATTERN "
 								"and recompile the kernel agaian!!\n");
 #endif
+	kfree(buf);
 	*offset = len;
 	return len;
 }
@@ -663,6 +662,9 @@ static struct file_operations kmsg_test_ops = {
 /* example - main usage */
 static int __init msg_test_init(void)
 {
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+	int i;
+#endif
 	static struct proc_dir_entry *kmsg_test_proc;
 #ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 	int i;

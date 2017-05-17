@@ -26,7 +26,7 @@
 #include "common.h"
 
 /* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN                                                                                          
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 extern unsigned long g_max_pattrn_size;
 extern unsigned long send_pattern_head[];
 extern unsigned long recv_pattern_head[];
@@ -564,6 +564,16 @@ static int __init initialize(void)
 			}
 		}
 	}
+
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+	send_pattern_head[0]=999999;	// ignore the first slot
+	recv_pattern_head[0]=999999;	// ignore the first slot
+	for ( i=1; i<g_max_pattrn_size; i++ ) {
+		send_pattern_head[i] = 0;
+		recv_pattern_head[i] = 0;
+	}
+#endif
+
 	/**
 	 * wait for connection done;
 	 * multi version will be a problem. Jack: but deq() should check it.

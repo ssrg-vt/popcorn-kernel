@@ -31,16 +31,35 @@
 
 #include <linux/vmalloc.h>
 
+#include <linux/net.h>
+#include <linux/inet.h>
+#include <linux/inetdevice.h>
+
 #include "common.h"
 
 #include "genif.h"
 
 /* Macro definitions */
-#define MAX_NUM_CHANNELS	1
+//#define MAX_NUM_CHANNELS	1
 #define SEND_OFFSET		1
 #define RECV_OFFSET		(MAX_NUM_CHANNELS+SEND_OFFSET)
 
 #define TARGET_NODE		((my_nid == 0) ? 8 : 4)
+
+/* Socket */
+char *net_dev_names[] = {
+    "eth0",     // Socket
+    //"ib0",      // InfiniBand
+    //"p7p1",     // Xgene (ARM)
+};
+
+const char * const ip_addresses[] = {
+    "10.4.4.15",
+    "10.4.4.16",
+};
+
+uint32_t ip_table[MAX_NUM_NODES] = { 0 };
+
 
 #define NO_FLAGS		0
 #define SEG_SIZE		20000
@@ -55,7 +74,7 @@
 #define TEST_SERVER		1
 
 /* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN                                                                                          
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
 extern unsigned long g_max_pattrn_size;
 extern unsigned long send_pattern_head[];
 extern unsigned long recv_pattern_head[];
@@ -455,14 +474,67 @@ static send_wait *dq_send(void)
 #endif
 
 
+/* Jack utility -
+ *        free the name buffer manually!
+ */
+static uint32_t get_host_ip(char **name_ret)
+{
+    int i;
+
+    for (i = 0; i < sizeof(net_dev_names) / sizeof(*net_dev_names); i++) {
+        struct net_device *device;
+        struct in_device *in_dev;
+        char *name = net_dev_names[i];
+        device = dev_get_by_name(&init_net, name); // namespace=normale
+
+        if (device) {
+            struct in_ifaddr *if_info;
+
+            *name_ret = name;
+            in_dev = (struct in_device *)device->ip_ptr;
+            if_info = in_dev->ifa_list;
+
+            MSGDPRINTK(KERN_WARNING "Device %s IP: %p4I\n",
+                            name, &if_info->ifa_local);
+            return if_info->ifa_local;
+        }
+    }
+    MSGPRINTK(KERN_ERR "msg_socket: ERROR - cannot find host ip\n");
+    return -1;
+}
+
 /* Initialize callback table to null, set up control and data channels */
 int __init initialize(void)
 {
 	int status = 0, i = 0, j = 0;
 	recv_data_t *recv_data;
 	struct sched_param param = {.sched_priority = 10};
+	char *name;
+	uint32_t my_ip = get_host_ip(&name);
+printk("jack0816\n");
+	
+	for(i=0; i<MAX_NUM_NODES; i++) {
+		char *me = " ";
+		ip_table[i] = in_aton(ip_addresses[i]);
+	   	if (my_ip == ip_table[i]) {
+			my_nid = i;
+			me = "*";
+		}
+		PRINTK(" %s %2d: %pI4\n", me, i, ip_table + i);
+    }
+    if(my_nid==-99)
+        BUG_ON("my_nid isn't initialized\n");
 
-	printk(KERN_INFO "MSG_LAYER: Initialization\n");
+    smp_mb(); // since my_nid is extern (global)
+	printk("---------------------------------------------------------\n");
+	printk("---- updating to my_nid=%d wait for a moment ----\n", my_nid);
+	printk("---------------------------------------------------------\n");
+	printk("MSG_LAYER: Initialization my_nid=%d\n", my_nid);
+
+	if (MAX_NUM_NODES!=2) {
+		printk(KERN_WARNING "MAX_NUM_NODES must be 2\n");
+		return -1;
+	}
 
 #if SEND_QUEUE_POOL
 	for (i = 0; i < MAX_NUM_CHANNELS; i++) {
@@ -584,12 +656,21 @@ int __init initialize(void)
 	}
 
 	for (i = 0; i < MAX_NUM_CHANNELS; i++)
-		down_interruptible(&send_connDone[i]);
+		BUG_ON(!down_interruptible(&send_connDone[i]));
 
 	for (i = 0; i < MAX_NUM_CHANNELS; i++)
-		down_interruptible(&recv_connDone[i]);
+		BUG_ON(!down_interruptible(&recv_connDone[i]));
 
 	is_connection_done = PCN_CONN_CONNECTED;
+
+#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+    send_pattern_head[0]=999999;    // ignore the first slot
+    recv_pattern_head[0]=999999;    // ignore the first slot
+    for ( i=1; i<g_max_pattrn_size; i++ ) {
+        send_pattern_head[i] = 0;
+        recv_pattern_head[i] = 0;
+    }
+#endif
 
 #if TEST_MSG_LAYER
 	atomic_set(&exec_count, 0);
@@ -1094,7 +1175,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 	}
 
 	/* released in the sender thread, it blocks all possible other senders */
-	down_interruptible(&pool_buf_cnt);
+	BUG_ON(!down_interruptible(&pool_buf_cnt));
 
 do_retry:
 	for (i = 0; i < MAX_NUM_BUF; i++) {
@@ -1139,7 +1220,7 @@ do_retry:
 	channel_select = atomic_inc_return(&send_channel)%MAX_NUM_CHANNELS;
 	enq_send(send_data, channel_select);
 #else
-	enq_send(send_data);
+	enq_send(send_data);	//Jack TODO
 	send_data->assoc_buf->status = 1;
 #endif
 
@@ -1280,10 +1361,16 @@ static int pcie_recv_init(int channel_num)
 	int value = 0;
 	unsigned int local_segid = 0;
 	unsigned int remote_segid = 0;
+    
+
+
 
 	status = sci_bind(&recv_binding[channel_num]);
 	if (status != 0)
 		printk(KERN_ERR "Error in sci_bind: %d\n", status);
+
+
+
 
 	/* Query node ID */
 	status = sci_query_adapter_number(local_adapter_number,
