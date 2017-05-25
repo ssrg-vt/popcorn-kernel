@@ -32,8 +32,8 @@ config POPCORN_KMSG_TEST
 	depends on POPCORN_KMSG
 	default n
 
-config POPCORN_MSG_USAGE_PATTERN
-    tristate "Extract messaging later usage pattern"
+config POPCORN_MSG_STATISTIC
+    tristate "Extract messaging layer usage statistic"
     depends on POPCORN_KMSG
     default n
 

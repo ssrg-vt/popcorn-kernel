@@ -69,15 +69,6 @@
 #define MAX_TESTING_SIZE 125829120 // = 120*1024*1024
 #define TEST1_PAYLOAD_SIZE 1024
 
-/* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-extern unsigned long g_max_pattrn_size;
-extern unsigned long recv_pattern_head[];
-extern unsigned long send_pattern_head[];
-extern atomic_t recv_cnt;
-extern atomic_t send_cnt;
-#endif
-
 /* for testing rdma read */
 int g_remote_read_len = 4*1024; // testing size for RDMA, mimicing user buf size
 int g_rdma_write_len;			// size wanna read/write
@@ -332,6 +323,54 @@ void test_send_throughput(unsigned long long payload_size)
 	pcn_kmsg_free_msg(msg);
 }
 
+#ifdef RDMAWR
+/* ===== Jack testing: page READ/WRITE =====
+ * 	[we are here]
+ *	[compose]
+ *  *remap addr*
+ *  send       ---->   irq (recv)
+ *                      perform WRITE
+ * irq (recv)  <-----   send
+ * 
+ */
+static int page_RW_test(void)
+{
+	int i;
+
+	remote_thread_rdma_rw_request_t* request_rdma_write;
+	//request_rdma_write = pcn_kmsg_alloc_msg(sizeof(*request_rdma_write));
+	request_rdma_write = kmalloc(sizeof(*request_rdma_write), GFP_KERNEL);
+
+	if(request_rdma_write==NULL)
+		return -1;
+
+	request_rdma_write->header.type = PCN_KMSG_TYPE_RDMA_WRITE_REQUEST;
+	request_rdma_write->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+	/* msg essentials */
+	/* ------------------------------------------------------------ */
+	/* msg dependences */
+
+	/* READ/WRITE specific */
+	request_rdma_write->is_write = true;
+	request_rdma_write->rw_size = g_remote_read_len; //testing
+									// size you wanna passive remote to WRITE
+
+	for(i=0; i<MAX_NUM_NODES; i++) {
+		if(my_nid==i)
+			continue;
+		
+		g_rdma_write_len = 4*1024; // size wanna remote to perform read/write
+		pcn_kmsg_send_rdma(i, (struct pcn_kmsg_long_message*)request_rdma_write, g_rdma_write_len);
+		
+		DEBUG_LOG_V("\n\n\n"); 
+	}
+	//pcn_kmsg_free_msg(request_rdma_write);
+	kfree(request_rdma_write);
+	return 0;
+}
+#endif
+
 /* testing utility */
 /*
  * in the reality, this function should be called between send()s
@@ -485,9 +524,9 @@ static ssize_t write_proc(struct file * file,
 			printk(KERN_ERR "sudo echo 10 <SIZE> > /proc/kmsg_test\n");
 			return count;
 		}
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-		printk(KERN_WARNING "You are tracking MSG_USAGE_PATTERN "
-				"and geting not accurate performance data now\n");
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+		printk(KERN_WARNING "You are tracking POPCORN_MSG_STATISTIC "
+				"and geting inaccurate performance data now\n");
 #endif
 		KRPRINT_INIT("arg %llu\n", simple_strtoull(argv[1], NULL, 0));
 		for(i=0; i<ITER; i++) {
@@ -521,88 +560,29 @@ static ssize_t write_proc(struct file * file,
 	return count;	// if not reach count, will reenter again
 }
 
-struct statistic {
-	unsigned long size;
-	unsigned long cnt;
-	//bool is_send;
-};
-
-// too large to put in a function (frame size 2M limitation)
-struct statistic send_pattern[MAX_STATISTIC_SLOTS];
-struct statistic recv_pattern[MAX_STATISTIC_SLOTS];
-
-/*
- * return:
- * 	-1: not found
- * 	positive: the slot
- */
-int get_a_slot(struct statistic pattern[], unsigned long size)
-{
-	int i = 0;
-	while(pattern[i].size){
-		if(pattern[i].size == size) {
-			return i;
-		}
-		i++;
-	}
-	return i;
-}
-
 static ssize_t read_func(struct file *filp, char *usr_buf,
 									size_t count, loff_t *offset)
 {
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+	int i;
+#endif
 	char *buf;
 	int len = 0;
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-	int i, iter, slot;
-#endif
 
 	buf = kzalloc(PROC_BUF_SIZE, GFP_KERNEL);
 	if(!buf)
 		BUG();
 
-	//TODO: lock // unlock untile return 0
 	if (*offset > 0)
 		return 0;
 	
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-	for(i=0; i<MAX_STATISTIC_SLOTS; i++) {
-		send_pattern[i].size = 0;
-		send_pattern[i].cnt = 0;
-		recv_pattern[i].size = 0;
-		recv_pattern[i].cnt = 0;
-	}
-
-	/* Send statistic */
-	iter = atomic_read(&send_cnt);
-	for(i=1; i<iter;i++) {
-		slot = get_a_slot(send_pattern, send_pattern_head[i]);
-		if(send_pattern[slot].size == 0) // create
-			send_pattern[slot].size = send_pattern_head[i];
-		send_pattern[slot].cnt++;
-	}
-
-	/* Recv statistic */
-	iter = atomic_read(&recv_cnt);
-	if(iter<=0) { //TODO: init it
-		printk(KERN_WARNING
-				"Never RECV / it needs your support in yor msg module\n");
-		//return len; //let send pass
-	}
-	for(i=1; i<iter;i++) {
-		slot = get_a_slot(recv_pattern, recv_pattern_head[i]);
-		if(recv_pattern[slot].size == 0) //create
-			recv_pattern[slot].size = recv_pattern_head[i];
-		recv_pattern[slot].cnt++;
-	}
-
-	/* Output statistic */
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
 	i=0;
 	while(send_pattern[i].size > 0) {
 		len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
 						"SEND: size %lu cnt %lu\n",
 						send_pattern[i].size,
-						send_pattern[i].cnt);
+						(unsigned long)atomic_read(&send_pattern[i].cnt));
 		i++;
 	}
 	
@@ -611,7 +591,7 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 		len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
 						"RECV: size %lu cnt %lu\n",
 						recv_pattern[i].size,
-						recv_pattern[i].cnt);
+						(unsigned long)atomic_read(&recv_pattern[i].cnt));
 		i++;
 	}
 
@@ -627,10 +607,10 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 	}
 
 #else
-	printk("Please turn on CONFIG_POPCORN_MSG_USAGE_PATTERN "
+	printk("Please turn on CONFIG_POPCORN_MSG_STATISTIC "
 								"and recompile the kernel agaian!!\n");
 	len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
-					"Please turn on CONFIG_POPCORN_MSG_USAGE_PATTERN "
+					"Please turn on CONFIG_POPCORN_MSG_STATISTIC "
 								"and recompile the kernel agaian!!\n");
 #endif
 	kfree(buf);
@@ -662,13 +642,10 @@ static struct file_operations kmsg_test_ops = {
 /* example - main usage */
 static int __init msg_test_init(void)
 {
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
 	int i;
 #endif
 	static struct proc_dir_entry *kmsg_test_proc;
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-	int i;
-#endif
 
 	/* register a proc */
 	printk("\n\n--- Popcorn messaging self testing proc init ---\n");
@@ -678,7 +655,7 @@ static int __init msg_test_init(void)
 		return -ENOMEM;
 	}
 
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
 	if (g_max_pattrn_size <= 0) {
 		for(i=0; i< 100; i++)
 			printk(KERN_WARNING "%s(): g_max_pattrn_size is <= 0\n", __func__);

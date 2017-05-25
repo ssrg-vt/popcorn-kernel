@@ -4,14 +4,13 @@
 # This conditional selects whether we are being included from the
 # kernel Makefile or not.
 
+DOLPHIN := /home/jackchuang/dolphin
 
-DOLPHIN := /home/jingoo/dolphin
+EXTRA_CFLAGS += -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src/LINUX -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include/LINUX -I$(DOLPHIN)/DIS/src/include/ -I$(DOLPHIN)/DIS/src/include/dis/ -I$(DOLPHIN)/DIS/include/
+EXTRA_CFLAGS += -D_KERNEL
+EXTRA_CFLAGS += -DOS_IS_LINUX
 
-EXTRA_CFLAGS += -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src/LINUX -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include/LINUX -I$(DOLPHIN)/DIS/src/include/ -I$(DOLPHIN)/DIS/src/include/dis/
-EXTRA_CFLAGS += -I/opt/DIS/include/ 
-EXTRA_CFLAGS += -D_KERNEL -DOS_IS_LINUX
-
-KBUILD_EXTRA_SYMBOLS=$(DOLPHIN)/DIS/src/SCI_SOCKET/scilib/GENIF/lib/LINUX/Module.symvers
+KBUILD_EXTRA_SYMBOLS = $(DOLPHIN)/DIS/src/IRM_GX/drv/src/LINUX/Module.symvers
 
 ifeq ($(KERNELRELEASE),)
 
@@ -36,7 +35,7 @@ clean:
 else # KERNELRELEASE
     # called from kernel build system: just declare what our modules are
     obj-$(CONFIG_POPCORN_KMSG_LOOPBACK) += msg_loopback.o
-	obj-$(CONFIG_POPCORN_KMSG_SOCKET) += msg_socket.o
+    obj-$(CONFIG_POPCORN_KMSG_SOCKET) += msg_socket.o
     obj-$(CONFIG_POPCORN_KMSG_DOLPHIN) += msg_dolphin.o
     obj-$(CONFIG_POPCORN_KMSG_IB) += msg_ib.o
     obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_test.o

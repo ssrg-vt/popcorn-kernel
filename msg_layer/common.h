@@ -15,6 +15,16 @@
 #define MAX_NUM_NODES		2	// For development convenience
 #define MAX_NUM_CHANNELS	(MAX_NUM_NODES - 1)
 
+/* Message usage pattern */
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+extern struct statistic send_pattern[];
+extern struct statistic recv_pattern[];
+extern unsigned long g_max_pattrn_size;
+extern atomic_t send_cnt;
+extern atomic_t recv_cnt;
+extern int get_a_slot(struct statistic pattern[], unsigned long size);
+#endif
+
 /* put here since ib request handler and 
  * caller response handler(user defined) will both need.
  */

@@ -73,14 +73,6 @@ uint32_t ip_table[MAX_NUM_NODES] = { 0 };
 #define TEST_MSG_LAYER		0
 #define TEST_SERVER		1
 
-/* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-extern unsigned long g_max_pattrn_size;
-extern unsigned long send_pattern_head[];
-extern unsigned long recv_pattern_head[];
-extern atomic_t recv_cnt;
-#endif
-
 typedef struct _pool_buffer {
 	char *buff;
 	int is_free;
@@ -444,7 +436,7 @@ static send_wait *dq_send(int index)
 	}
 }
 
-#else
+#else	// Jack
 static void enq_send(send_wait *strc)
 {
 	spin_lock(&send_q_mutex);
@@ -511,7 +503,6 @@ int __init initialize(void)
 	struct sched_param param = {.sched_priority = 10};
 	char *name;
 	uint32_t my_ip = get_host_ip(&name);
-printk("jack0816\n");
 	
 	for(i=0; i<MAX_NUM_NODES; i++) {
 		char *me = " ";
@@ -526,9 +517,9 @@ printk("jack0816\n");
         BUG_ON("my_nid isn't initialized\n");
 
     smp_mb(); // since my_nid is extern (global)
-	printk("---------------------------------------------------------\n");
+	printk("-------------------------------------------------\n");
 	printk("---- updating to my_nid=%d wait for a moment ----\n", my_nid);
-	printk("---------------------------------------------------------\n");
+	printk("-------------------------------------------------\n");
 	printk("MSG_LAYER: Initialization my_nid=%d\n", my_nid);
 
 	if (MAX_NUM_NODES!=2) {
@@ -656,21 +647,12 @@ printk("jack0816\n");
 	}
 
 	for (i = 0; i < MAX_NUM_CHANNELS; i++)
-		BUG_ON(!down_interruptible(&send_connDone[i]));
+		down(&send_connDone[i]);
 
 	for (i = 0; i < MAX_NUM_CHANNELS; i++)
-		BUG_ON(!down_interruptible(&recv_connDone[i]));
+		down(&recv_connDone[i]);
 
 	is_connection_done = PCN_CONN_CONNECTED;
-
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-    send_pattern_head[0]=999999;    // ignore the first slot
-    recv_pattern_head[0]=999999;    // ignore the first slot
-    for ( i=1; i<g_max_pattrn_size; i++ ) {
-        send_pattern_head[i] = 0;
-        recv_pattern_head[i] = 0;
-    }
-#endif
 
 #if TEST_MSG_LAYER
 	atomic_set(&exec_count, 0);
@@ -949,7 +931,7 @@ int connection_handler(void *arg0)
 		*/
 
 #if TEST_MSG_LAYER
-		down_interruptible(&recv_buf_cnt);
+		down(&recv_buf_cnt);
 do_retry:
 		for (i = 0; i < MAX_NUM_BUF; i++) {
 			if (atomic_cmpxchg(((atomic_t *) &recv_buf[i].is_free),
@@ -1013,14 +995,14 @@ do_retry:
 			vfree(pcn_msg);
 #endif
 		} else {
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-		int slot;
-		slot = atomic_inc_return(&recv_cnt);
-		if( slot >= g_max_pattrn_size) {
-			slot = g_max_pattrn_size - 1;
-			printk(KERN_WARNING "WARNING: out of statistic array space\n");
-		}	
-        recv_pattern_head[slot] = msg.msg->header.size;
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+			int slot;
+			slot = get_a_slot(recv_pattern, pcn_msg->header.size);
+			if (slot >= 0) {
+				if(recv_pattern[slot].size == 0)
+					recv_pattern[slot].size = pcn_msg->header.size;
+				atomic_inc(&recv_pattern[slot].cnt);
+			}
 #endif
 			ftn = callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {
@@ -1175,7 +1157,8 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 	}
 
 	/* released in the sender thread, it blocks all possible other senders */
-	BUG_ON(!down_interruptible(&pool_buf_cnt));
+	down(&pool_buf_cnt);
+
 
 do_retry:
 	for (i = 0; i < MAX_NUM_BUF; i++) {

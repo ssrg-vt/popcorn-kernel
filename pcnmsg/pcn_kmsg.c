@@ -11,19 +11,40 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/debug.h>
 
-/* Message usage pattern */                                                     
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-#define MAX_PATTRN_SIZE (1<<20)	// if wanna go larger, implement linked-list
-unsigned long  g_max_pattrn_size;	// if wanna go larger, implement linked-list
+/* Message usage pattern */
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+#define MAX_STATISTIC_SLOTS 100 // support n diffrent sizes of msg
+struct statistic send_pattern[MAX_STATISTIC_SLOTS];
+struct statistic recv_pattern[MAX_STATISTIC_SLOTS];
+EXPORT_SYMBOL(send_pattern);
+EXPORT_SYMBOL(recv_pattern);
+#define MAX_PATTRN_SIZE (1<<20)		// if larger than 1<<20, do linked-list
+unsigned long  g_max_pattrn_size;
 EXPORT_SYMBOL(g_max_pattrn_size);
-unsigned long send_pattern_head[MAX_PATTRN_SIZE];   // skip [0]
-unsigned long recv_pattern_head[MAX_PATTRN_SIZE];   // skip [0]
-EXPORT_SYMBOL(send_pattern_head);
-EXPORT_SYMBOL(recv_pattern_head);
 atomic_t send_cnt;
 atomic_t recv_cnt;
 EXPORT_SYMBOL(send_cnt);
 EXPORT_SYMBOL(recv_cnt);
+/*
+ * input:
+ *  pattern[]: 
+ *  size: search this size in pattern[].size
+ *  return value:
+ * -1: not found & no space (not implemented)  
+ *  0: not found
+ *  positive: return the slot
+ */
+int get_a_slot(struct statistic pattern[], unsigned long size)
+{
+    int i = 0;
+    while (pattern[i].size) {
+        if (pattern[i].size == size)
+            return i;
+        i++;
+    }
+    return i;
+}
+EXPORT_SYMBOL(get_a_slot);
 #endif
 
 pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
@@ -38,16 +59,19 @@ EXPORT_SYMBOL(send_callback_rdma);
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {
-	send_callback = NULL;
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+	int i; 
 	g_max_pattrn_size = MAX_PATTRN_SIZE;
-	send_cnt.counter = 0;
-	recv_cnt.counter = 0;
-    for ( i=1; i<g_max_pattrn_size; i++ ) { // ignore the first slot
-        send_pattern_head[i] = 0;
-        recv_pattern_head[i] = 0;
-    }
+	send_cnt.counter = -1;
+	recv_cnt.counter = -1;
+	for(i=0; i<MAX_STATISTIC_SLOTS; i++) {
+		send_pattern[i].size = 0;
+		send_pattern[i].cnt.counter = 0;
+        recv_pattern[i].size = 0;
+        recv_pattern[i].cnt.counter = 0;
+	}
 #endif
+	send_callback = NULL;
 	MSGPRINTK("%s: done\n", __func__);
 	return 0;
 }
@@ -74,7 +98,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 
 int pcn_kmsg_send_long(unsigned int to, void *lmsg, unsigned int size)
 {
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
 	int slot;
 #endif
 
@@ -88,13 +112,13 @@ int pcn_kmsg_send_long(unsigned int to, void *lmsg, unsigned int size)
 		return -ENOENT;
 	}
 
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-	slot = atomic_inc_return(&recv_cnt);
-	if( slot >= g_max_pattrn_size) {
-		slot = g_max_pattrn_size - 1;
-		printk(KERN_WARNING "WARNING: SEND - out of statistic array space\n");
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+	slot = get_a_slot(send_pattern, size);
+	if (slot >= 0) {
+		if(send_pattern[slot].size == 0) // create a new pattern
+			send_pattern[slot].size = size;
+		atomic_inc(&send_pattern[slot].cnt); // adding cnt
 	}
-	send_pattern_head[slot] = size;
 #endif
 
 	return send_callback(to, (struct pcn_kmsg_message *)lmsg, size);

@@ -25,14 +25,6 @@
 
 #include "common.h"
 
-/* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-extern unsigned long g_max_pattrn_size;
-extern unsigned long send_pattern_head[];
-extern unsigned long recv_pattern_head[];
-extern atomic_t recv_cnt;
-#endif
-
 /* Socket */
 char *net_dev_names[] = {
 	"br0",		// bridge
@@ -241,14 +233,14 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 
 	ftn = callbacks[msg.msg->header.type];
 	if (ftn != NULL) {
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-		int slot;
-		slot = atomic_inc_return(&recv_cnt);
-		if( slot >= g_max_pattrn_size) {
-			slot = g_max_pattrn_size - 1;
-			printk(KERN_WARNING "WARNING: out of statistic array space\n");
-		}		
-		recv_pattern_head[slot] = msg.msg->header.size;
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+        int slot;
+        slot = get_a_slot(recv_pattern, msg.msg->header.size);
+        if (slot >= 0) {
+            if(recv_pattern[slot].size == 0)
+                recv_pattern[slot].size = msg.msg->header.size;
+            atomic_inc(&recv_pattern[slot].cnt);
+        }
 #endif
 		ftn((void*)msg.msg);
 	} else {
@@ -564,15 +556,6 @@ static int __init initialize(void)
 			}
 		}
 	}
-
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-	send_pattern_head[0]=999999;	// ignore the first slot
-	recv_pattern_head[0]=999999;	// ignore the first slot
-	for ( i=1; i<g_max_pattrn_size; i++ ) {
-		send_pattern_head[i] = 0;
-		recv_pattern_head[i] = 0;
-	}
-#endif
 
 	/**
 	 * wait for connection done;

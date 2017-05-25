@@ -281,4 +281,8 @@ int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id, void *msg,
 extern send_cbftn send_callback;
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 
+struct statistic {
+    unsigned long size;
+    atomic_t cnt;
+};
 #endif /* __LINUX_PCN_KMSG_H */

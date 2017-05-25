@@ -88,25 +88,15 @@
 #define htonll(x) cpu_to_be64((x))
 #define ntohll(x) cpu_to_be64((x)) 
 
-/* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-extern unsigned long g_max_pattrn_size;
-extern unsigned long send_pattern_head[];
-extern unsigned long recv_pattern_head[];
-extern atomic_t recv_cnt;
-#endif
-
 /* IB */
 char net_dev_name[]="ib0";
 const char net_dev_name2[]="p7p1"; //another special case, Xgene(ARM)
 
-char* ip_table[] = { "192.168.69.127",		// echo3 ib0
-					 "192.168.69.128",		// echo4 ib0
-					 "192.168.69.129"};		// none ib0
+char* ip_table[] = { "192.168.69.129",		// echo5 ib0
+					 "192.168.69.128",};	// echo6 ib0
 // temporary solution................
-uint32_t ip_table2[] = { (192<<24 | 168<<16 | 69<<8 | 127),		// echo3 ib0
-						 (192<<24 | 168<<16 | 69<<8 | 128),		// echo4 ib0
-						 (192<<24 | 168<<16 | 69<<8 | 129)};	// none ib0
+uint32_t ip_table2[] = { (192<<24 | 168<<16 | 69<<8 | 129),		// echo5 ib0
+						 (192<<24 | 168<<16 | 69<<8 | 128)};	// echo6 ib0
 
 #define PORT 1000
 #define MAX_RDMA_SIZE 4*1024*1024 // MAX R/W BUFFER SIZE
@@ -1636,14 +1626,14 @@ static void pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 		/* normal msg */
 		ftn = callbacks[lmsg->header.type];
 		if(ftn != NULL) {
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
 			int slot;
-			slot = atomic_inc_return(&recv_cnt);
-			if( slot >= g_max_pattrn_size) {
-				slot = g_max_pattrn_size - 1;
-				printk(KERN_WARNING "WARNING: out of statistic array space\n");
-			}	
-			recv_pattern_head[slot] = w->lmsg.header.size;
+			slot = get_a_slot(recv_pattern, lmsg->header.size);
+			if (slot >= 0) {
+				if(recv_pattern[slot].size == 0)
+					recv_pattern[slot].size = lmsg->header.size;
+				atomic_inc(&recv_pattern[slot].cnt);
+			}
 #endif
 			ftn((void*)lmsg);
 			//ftn((void*)&w->lmsg);
@@ -2085,15 +2075,6 @@ int __init initialize()
 		atomic_set(&cb[i]->read_state, IDLE);
 		atomic_set(&cb[i]->write_state, IDLE);
 	}
-
-#ifdef CONFIG_POPCORN_MSG_USAGE_PATTERN
-	send_pattern_head[0]=999999;	// ignore the first slot
-	recv_pattern_head[0]=999999;	// ignore the first slot
-	for ( i=1; i<g_max_pattrn_size; i++ ) {
-		send_pattern_head[i] = 0;
-		recv_pattern_head[i] = 0;
-	}
-#endif
 
 	/* testing is in another module msg_layer_test.ko */
 
