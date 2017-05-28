@@ -96,7 +96,7 @@ typedef struct _recv_data {
 extern int _init_RemoteCPUMask(void);
 
 static int connection_handler(void *arg0);
-static int send_thread(void *arg0);
+//static int send_thread(void *arg0);
 
 /* PCI function declarations */
 static int pcie_send_init(int channel_num);
@@ -362,7 +362,7 @@ signed32 send_intr_cb(unsigned32 local_adapter_number,
 
 	for (i = 0; i < MAX_NUM_CHANNELS; i++) {
 		if (interrupt_number == local_send_intr_no[i]) {
-			printk(KERN_DEBUG "Remote send interrupt for %d %d\n",
+			MSGDPRINTK(KERN_DEBUG "Remote send interrupt for %d %d\n",
 			       i, interrupt_number);
 			complete(&send_intr_flag[i]);
 			break;
@@ -378,7 +378,7 @@ signed32 recv_intr_cb(unsigned32 local_adapter_number,
 
 	for (i = 0; i < MAX_NUM_CHANNELS; i++) {
 		if (interrupt_number == local_recv_intr_no[i]) {
-			printk(KERN_DEBUG "Remote recv interrupt for %d %d\n",
+			MSGDPRINTK(KERN_DEBUG "Remote recv interrupt for %d %d\n",
 			       i, interrupt_number);
 			complete(&recv_intr_flag[i]);
 			break;
@@ -395,7 +395,7 @@ int dma_cb(void IN *arg, dis_dma_status_t dmastatus)
 
 	for (i = 0; i < MAX_NUM_CHANNELS; i++) {
 		if (dma_queue[i] == *temp) {
-			printk(KERN_DEBUG "DMA transfer status = %d %lx %lx\n",
+			MSGPRINTK(KERN_DEBUG "DMA transfer status = %d %lx %lx\n",
 			       dmastatus, *temp, dma_queue[i]);
 			complete(&dma_complete[i]);
 		}
@@ -435,8 +435,8 @@ static send_wait *dq_send(int index)
 		return tmp;
 	}
 }
-
-#else	// Jack
+#else
+#if 0
 static void enq_send(send_wait *strc)
 {
 	spin_lock(&send_q_mutex);
@@ -445,7 +445,6 @@ static void enq_send(send_wait *strc)
 	complete(&send_q_empty);
 	spin_unlock(&send_q_mutex);
 }
-
 static send_wait *dq_send(void)
 {
 	send_wait *tmp;
@@ -463,6 +462,7 @@ static send_wait *dq_send(void)
 		return tmp;
 	}
 }
+#endif
 #endif
 
 
@@ -608,17 +608,21 @@ int __init initialize(void)
 			return (long long int)handler;
 		}
 
+		status = pcie_send_init(i);
+		if (status != 0)
+	        printk(KERN_ERR "Failed to initialize pcie connection\n");
+		up(&send_connDone[i]);
+#if 0
 		sched_setscheduler(handler[i], SCHED_FIFO, &param);
 		set_cpus_allowed_ptr(handler[i], cpumask_of(i));
-
 		sender_handler[i] = kthread_run(send_thread, &i, "pcn_send");
 		if (sender_handler[i] < 0) {
 			printk(KERN_INFO "kthread_run failed! Messaging Layer not initialized\n");
 			return (long long int)sender_handler;
 		}
-
 		sched_setscheduler(sender_handler[i], SCHED_FIFO, &param);
 		set_cpus_allowed_ptr(sender_handler[i], cpumask_of(i%NR_CPUS));
+#endif
 	}
 
 	for (i = 0; i < MAX_NUM_CHANNELS; i++) {
@@ -675,9 +679,6 @@ int __init initialize(void)
 #else /* TEST_MSG_LAYER */
 	send_callback = (send_cbftn) pci_kmsg_send_long;
 	smp_mb();
-
-	/* Make init popcorn call */
-//	_init_RemoteCPUMask();
 
 	printk(KERN_INFO "Value of send ptr = %lx\n",
 	       (unsigned long int)send_callback);
@@ -762,12 +763,12 @@ int test_thread(void *arg0)
 
 #endif /* TEST_MSG_LAYER */
 
-
+#if 0
 int send_thread(void *arg0)
 {
-	int status = 0, channel_num = 0;
-	send_wait *send_data = NULL;
-	struct pcn_kmsg_message *pcn_msg;
+	int status, channel_num;
+	//send_wait *send_data = NULL;
+	//struct pcn_kmsg_message *pcn_msg;
 	int *ch_num = (int *)arg0;
 
 	channel_num = *ch_num;
@@ -777,7 +778,6 @@ int send_thread(void *arg0)
 	status = pcie_send_init(channel_num);
 	if (status != 0)
 		printk(KERN_ERR "Failed to initialize pcie connection\n");
-
 #if ENABLE_DMA
 	status = dma_init(channel_num);
 	if (status != 0)
@@ -825,23 +825,16 @@ int send_thread(void *arg0)
 
 		wait_for_completion(&dma_complete[channel_num]);
 #else
-		/*check whether remote is using the channel */
+		//check whether remote is using the channel //
 		memcpy(send_remote_vaddr[channel_num], pcn_msg,
 		       pcn_msg->header.size);
 #endif
 
-		/* trigger the interrupt */
+		// trigger the interrupt //
 		status = sci_trigger_interrupt_flag(remote_recv_intr_hdl[channel_num], NO_FLAGS);
 		if (status != 0)
 			printk(KERN_ERR"%s: ERROR: in sci_trigger_interrupt_flag: %d\n",
 			       __func__, status);
-
-#if TEST_MSG_LAYER
-		atomic_inc(&send_count);
-
-		if (atomic_read(&send_count) == NUM_MSGS*MAX_NUM_CHANNELS)
-			printk(KERN_INFO "after send all messages\n");
-#endif
 
 		send_data->assoc_buf->is_free = 1;
 		smp_wmb();
@@ -858,11 +851,10 @@ int send_thread(void *arg0)
 			return 0;
 		}
 	}
-#endif /*TEST_MSG_LAYER*/
-
+#endif
 	return 0;
 }
-
+#endif
 static int connection_handler_cnt;
 int connection_handler(void *arg0)
 {
@@ -1098,9 +1090,11 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 {
 	int i = 0;
 	int retry = 0;
-	send_wait *send_data = NULL;
+	int channel_num = 0, ret;
+	//send_wait *send_data = NULL;
 	struct pcn_kmsg_long_message *pcn_msg = NULL;
 	pcn_kmsg_cbftn ftn;
+
 
 	if (pcn_connection_status() != PCN_CONN_CONNECTED) {
 		printk(KERN_ERR "PCN_CONNECTION is not yet established\n");
@@ -1148,17 +1142,15 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 		return lmsg->header.size;
 	}
 #endif
-
-	/* TODO use a cache */
+/*
+	// TODO use a cache //
 	send_data = kmalloc(sizeof(send_wait), GFP_ATOMIC);
 	if (send_data == NULL) {
 		printk(KERN_ERR "%s: ERROR: Failed to allocate send data kmalloc\n", __func__);
 		return -1;
 	}
-
-	/* released in the sender thread, it blocks all possible other senders */
+*/
 	down(&pool_buf_cnt);
-
 
 do_retry:
 	for (i = 0; i < MAX_NUM_BUF; i++) {
@@ -1166,14 +1158,6 @@ do_retry:
 			smp_wmb();
 			break;
 		}
-		/* this is not atomic */
-		/*
-		if (send_buf[i].is_free != 0) {
-			send_buf[i].is_free = 0;
-			smp_wmb();
-			break;
-		}
-		*/
 	}
 
 	if (i == MAX_NUM_BUF) {
@@ -1188,24 +1172,50 @@ do_retry:
 				       send_buf[i].status);
 		retry++;
 		goto do_retry;
-       }
+   }
 
-	send_data->assoc_buf = (pool_buffer_t *) &send_buf[i];
-	send_data->assoc_buf->status = 0;
-	send_data->msg = send_buf[i].buff;
+	// NOTE probably not needed //
+	//memset(send_buf[i].buff, 0, SEG_SIZE);
+	memcpy(send_buf[i].buff, lmsg, lmsg->header.size);
+	memset(send_buf[i].buff + lmsg->header.size, 0, 1);
 
-	/* NOTE probably not needed */
-	memset(send_buf[i].buff, 0, SEG_SIZE);
-	memcpy(send_data->msg, lmsg, lmsg->header.size);
-	send_data->dst_cpu = dest_cpu;
+	pcn_msg = (struct pcn_kmsg_long_message *) send_buf[i].buff;
 
-#if SEND_QUEUE_POOL
-	channel_select = atomic_inc_return(&send_channel)%MAX_NUM_CHANNELS;
-	enq_send(send_data, channel_select);
+	// Only one can send. Tirggered by INT.
+	wait_for_completion(&send_intr_flag[channel_num]);
+
+#if ENABLE_DMA
+        memcpy(send_vaddr[channel_num], pcn_msg, pcn_msg->header.size);
+
+        status = dis_start_dma_transfer(subuser_id[channel_num],
+                        send_vaddr[channel_num],
+                        local_io[channel_num],
+                        pcn_msg->header.size, 0,
+                        remote_recv_seg_hdl[channel_num],
+                        dma_cb, &dma_queue[channel_num],
+                        &dma_queue[channel_num],
+                        DMA_PUSH);
+        if (status != 0)
+            printk(KERN_ERR "Error in dis_start_dma_transfer: %d\n",
+                   status);
+
+        wait_for_completion(&dma_complete[channel_num]);
 #else
-	enq_send(send_data);	//Jack TODO
-	send_data->assoc_buf->status = 1;
+    /*check whether remote is using the channel */
+    memcpy(send_remote_vaddr[channel_num], pcn_msg,
+								pcn_msg->header.size);
 #endif
+
+	/* trigger the interrupt */
+	ret = sci_trigger_interrupt_flag(remote_recv_intr_hdl[channel_num],
+																	NO_FLAGS);
+	if (ret != 0)
+		printk(KERN_ERR"%s: ERROR: in sci_trigger_interrupt_flag: %d\n",
+														   __func__, ret);
+
+	atomic_set(((atomic_t *) &send_buf[i].is_free), 1);
+	smp_wmb();
+	up(&pool_buf_cnt);
 
 	return 1;
 }
