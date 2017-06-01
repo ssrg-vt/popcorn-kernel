@@ -25,22 +25,6 @@
 
 #include "common.h"
 
-/* Socket */
-char *net_dev_names[] = {
-	"br0",		// bridge
-	"eth0",		// Socket
-	"ib0",		// InfiniBand
-	"p7p1",		// Xgene (ARM)
-};
-
-const char * const ip_addresses[] = {
-	"10.1.1.203",
-	"10.1.1.204",
-	"10.1.1.205",
-};
-
-uint32_t ip_table[MAX_NUM_NODES] = { 0 };
-
 #define PORT 30467
 #define MAX_ASYNC_BUFFER	1024
 
@@ -119,34 +103,6 @@ static int ksock_recv(struct socket *sock, char *buf, int len)
 	size = kernel_recvmsg(sock, &msg, &iov, 1, len, MSG_WAITALL);
 	return size;
 }
-
-
-static uint32_t get_host_ip(char **name_ret)
-{
-	int i;
-
-	for (i = 0; i < sizeof(net_dev_names) / sizeof(*net_dev_names); i++) {
-		struct net_device *device;
-		struct in_device *in_dev;
-		char *name = net_dev_names[i];
-		device = dev_get_by_name(&init_net, name); // namespace=normale
-
-		if (device) {
-			struct in_ifaddr *if_info;
-
-			*name_ret = name;
-			in_dev = (struct in_device *)device->ip_ptr;
-			if_info = in_dev->ifa_list;
-
-			MSGDPRINTK(KERN_WARNING "Device %s IP: %p4I\n",
-							name, &if_info->ifa_local);
-			return if_info->ifa_local;
-		}
-	}
-	MSGPRINTK(KERN_ERR "msg_socket: ERROR - cannot find host ip\n");
-	return -1;
-}
-
 
 static int send_handler(void* arg0)
 {
@@ -461,7 +417,6 @@ static int __init initialize(void)
 
 	smp_mb();
 	BUG_ON(my_nid < 0);
-
 
 	/* Initilaize the sock */
 	/*

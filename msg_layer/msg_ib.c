@@ -88,16 +88,6 @@
 #define htonll(x) cpu_to_be64((x))
 #define ntohll(x) cpu_to_be64((x)) 
 
-/* IB */
-char net_dev_name[]="ib0";
-const char net_dev_name2[]="p7p1"; //another special case, Xgene(ARM)
-
-char* ip_table[] = { "192.168.69.129",		// echo5 ib0
-					 "192.168.69.128",};	// echo6 ib0
-// temporary solution................
-uint32_t ip_table2[] = { (192<<24 | 168<<16 | 69<<8 | 129),		// echo5 ib0
-						 (192<<24 | 168<<16 | 69<<8 | 128)};	// echo6 ib0
-
 #define PORT 1000
 #define MAX_RDMA_SIZE 4*1024*1024 // MAX R/W BUFFER SIZE
 /*
@@ -137,9 +127,6 @@ int g_conn_retry_count = 10;
 #define RDMA_SEND_NOT_COMPLETE 12
 #define BUSY 13
 #define ERROR 14
-
-LIST_HEAD(krping_cbs);
-DEFINE_MUTEX(krping_mutex);
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 /* Debug */
@@ -252,7 +239,7 @@ struct krping_cb {
 	struct rdma_cm_id *cm_id;		/* connection on client side */
 									/* listener on server side */
 	struct rdma_cm_id *child_cm_id;	/* connection on server side */
-	struct list_head list;
+	//struct list_head list;
 	int conn_no;
 
 	/* sync */
@@ -297,7 +284,6 @@ u32 krping_rdma_rkey_passive(struct krping_cb *cb, u64 buf,
 static int krping_create_qp(struct krping_cb *cb);
 
 /* Popcorn utility */
-uint32_t get_host_ip(char **tmp_net_dev_name);
 static int __init initialize(void);
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 extern send_cbftn send_callback;
@@ -638,51 +624,6 @@ static int krping_connect_client(struct krping_cb *cb)
 	MSGPRINTK("rdma_connect successful\n");
 	// Jack: accep() done
 	return 0;
-}
-
-/* Jack utility -
- *		  free the name buffer manually!
- */
-uint32_t get_host_ip(char **tmp_net_dev_name)
-{
-	struct net_device *device;
-	struct in_device *in_dev;
-	struct in_ifaddr *if_info;
-
-	__u8 *addr;
-
-	device = __dev_get_by_name(&init_net, net_dev_name); // namespace=normale
-	if(device) {
-		*tmp_net_dev_name = (char *) vmalloc(sizeof(net_dev_name));
-		memcpy(*tmp_net_dev_name, net_dev_name, sizeof(net_dev_name));
-		in_dev = (struct in_device *)device->ip_ptr;
-		if_info = in_dev->ifa_list;
-		addr = (char *)&if_info->ifa_local;
-		
-		MSGDPRINTK(KERN_WARNING "Device %s IP: %u.%u.%u.%u\n",
-											net_dev_name, 
-											(__u32)addr[0], (__u32)addr[1],
-											(__u32)addr[2], (__u32)addr[3]);
-		return (addr[0]<<24 | addr[1]<<16 | addr[2]<<8 | addr[3]);
-	} else {
-		device = __dev_get_by_name(&init_net, net_dev_name2);
-		if(device) {
-			*tmp_net_dev_name = (char *) vmalloc(sizeof(net_dev_name2));
-			memcpy(*tmp_net_dev_name, net_dev_name2, sizeof(net_dev_name2));
-			in_dev = (struct in_device *)device->ip_ptr;
-			if_info = in_dev->ifa_list;
-			addr = (char *)&if_info->ifa_local;
-			MSGDPRINTK(KERN_WARNING "Device2 %s IP: %u.%u.%u.%u\n",
-											net_dev_name2,
-											(__u32)addr[0], (__u32)addr[1],
-											(__u32)addr[2], (__u32)addr[3]);
-			return (addr[0]<<24 | addr[1]<<16 | addr[2]<<8 | addr[3]);
-		}
-		else {
-			MSGPRINTK(KERN_ERR "ERROR - cannot find host ip (eth0/p7p1)\n");
-			return -1;
-		}
-	}
 }
 
 static void fill_sockaddr(struct sockaddr_storage *sin, struct krping_cb *_cb)
@@ -1872,44 +1813,33 @@ static void handle_remote_thread_rdma_write_response(
 int __init initialize()
 {
 	int i, err, conn_no;
-	char *tmp_net_dev_name=NULL;
+	char *name;
 	struct task_struct *t;
+	uint32_t my_ip = get_host_ip(&name);
 	// TODO: check how to assign a priority to these threads! 
 	// make msg_layer faster (higher prio)
 	// struct sched_param param = {.sched_priority = 10};
 	KRPRINT_INIT("--- Popcorn messaging layer init starts ---\n");
-
-	KRPRINT_INIT("Registering softirq handler (BottomHalf)...\n");
 	//open_softirq(PCN_KMSG_SOFTIRQ, pcn_kmsg_action); 
 	// TODO: check open_softirq()
 	msg_handler = create_workqueue("MSGHandBotm"); // per-cpu
 
-	for(i=0; i<MAX_NUM_NODES; i++) {
-		// find my name
-		if ( get_host_ip(&tmp_net_dev_name) == ip_table2[i])  {
-			my_nid=i;
-			KRPRINT_INIT("Device \"%s\" my_nid=%d on machine IP %u.%u.%u.%u\n",
-												tmp_net_dev_name, my_nid,
-												(ip_table2[i]>>24)&0x000000ff,
-												(ip_table2[i]>>16)&0x000000ff,
-												(ip_table2[i]>> 8)&0x000000ff,
-												(ip_table2[i]>> 0)&0x000000ff);
-			vfree(tmp_net_dev_name);
-			break;
-		}
-	}
-	if(my_nid==-99)
-		BUG_ON("my_nid isn't initialized\n");
-
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+        char *me = " ";
+        ip_table[i] = in_aton(ip_addresses[i]);
+        if (my_ip == ip_table[i]) {
+            my_nid = i;
+            me = "*";
+        }
+        PRINTK(" %s %2d: %pI4\n", me, i, ip_table + i);
+    }
+    PRINTK("\n");
 	smp_mb(); // since my_nid is extern (global)
+	BUG_ON(my_nid < 0);
 	KRPRINT_INIT("---------------------------------------------------------\n");
 	KRPRINT_INIT("---- updating to my_nid=%d wait for a moment ----\n", my_nid);
 	KRPRINT_INIT("---------------------------------------------------------\n");
 	KRPRINT_INIT("MSG_LAYER: Initialization my_nid=%d\n", my_nid);
-
-	for (i = 0; i<MAX_NUM_NODES; i++) {
-		set_popcorn_node_offline(i);
-	}
 
 	/* Initilaize the IB -
 	 * Each node has a connection table like tihs:
@@ -1921,21 +1851,13 @@ int __init initialize()
 	 * accept:  waiting for the connection requests from later nodes
 	 */
 	for (i=0; i<MAX_NUM_NODES; i++) {
-		MSGDPRINTK("cb[%d] %p\n", i, cb[i]);
-
-		conn_no=i;
-		// 0. create and save to list
-		
+		// 0. create cb context for each connection
 		cb[i] = kzalloc(sizeof(struct krping_cb), GFP_KERNEL); // TODO: release
 
-		mutex_lock(&krping_mutex);
-		list_add_tail(&cb[i]->list, &krping_cbs); // multiple cb!!!
-		mutex_unlock(&krping_mutex);
-
 		// settup node number
+		conn_no = i;
 		cb[i]->conn_no = i;
-
-		// setup ip
+		set_popcorn_node_offline(i);
 
 		// setup locks
 		mutex_init(&cb[i]->send_mutex);
@@ -1980,14 +1902,16 @@ int __init initialize()
 		// server/client/myself
 		cb[i]->server = -1; // -1: myself
 
+		// setup ip
 		// set up IPv4 address
-		cb[i]->addr_str = ip_table[conn_no];
-		in4_pton(ip_table[conn_no], -1, cb[i]->addr, -1, NULL); // will be used
+		//cb[i]->addr_str = (char*)ip_addresses[conn_no];
+		cb[i]->addr_str = ip_addresses[conn_no];
+		in4_pton(ip_addresses[conn_no], -1, cb[i]->addr, -1, NULL); // will be used
 		cb[i]->addr_type = AF_INET;				// [IPv4]/V6 // for determining
 		cb[i]->port = htons(PORT);		// sock always the same port, not for ib
-		KRPRINT_INIT("ip_table[conn_no] %s, cb[i]->addr_str %s, "
+		KRPRINT_INIT("ip_addresses[conn_no] %s, cb[i]->addr_str %s, "
 										 "cb[i]->addr %s,  port %d\n",
-										 ip_table[conn_no], cb[i]->addr_str,
+										 ip_addresses[conn_no], cb[i]->addr_str,
 													 cb[i]->addr, (int)PORT);
 
 		// register event handler
@@ -2112,9 +2036,6 @@ int __init initialize()
 out:
 	for(i=0; i<MAX_NUM_NODES; i++){
 		if(atomic_read(&(cb[i]->state))) {
-			mutex_lock(&krping_mutex);
-			list_del(&cb[i]->list);
-			mutex_unlock(&krping_mutex);
 			kfree(cb[i]);
 			// TODO: cut connections
 		}

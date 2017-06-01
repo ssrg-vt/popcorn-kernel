@@ -31,10 +31,6 @@
 
 #include <linux/vmalloc.h>
 
-#include <linux/net.h>
-#include <linux/inet.h>
-#include <linux/inetdevice.h>
-
 #include "common.h"
 
 #include "genif.h"
@@ -45,21 +41,6 @@
 #define RECV_OFFSET		(MAX_NUM_CHANNELS+SEND_OFFSET)
 
 #define TARGET_NODE		((my_nid == 0) ? 8 : 4)
-
-/* Socket */
-char *net_dev_names[] = {
-    "eth0",     // Socket
-    //"ib0",      // InfiniBand
-    //"p7p1",     // Xgene (ARM)
-};
-
-const char * const ip_addresses[] = {
-    "10.4.4.15",
-    "10.4.4.16",
-};
-
-uint32_t ip_table[MAX_NUM_NODES] = { 0 };
-
 
 #define NO_FLAGS		0
 #define SEG_SIZE		20000
@@ -436,64 +417,7 @@ static send_wait *dq_send(int index)
 	}
 }
 #else
-#if 0
-static void enq_send(send_wait *strc)
-{
-	spin_lock(&send_q_mutex);
-	INIT_LIST_HEAD(&(strc->list));
-	list_add_tail(&(strc->list), &(send_wait_q.list));
-	complete(&send_q_empty);
-	spin_unlock(&send_q_mutex);
-}
-static send_wait *dq_send(void)
-{
-	send_wait *tmp;
-
-	wait_for_completion(&send_q_empty);
-	spin_lock(&send_q_mutex);
-	if (list_empty(&send_wait_q.list)) {
-		printk(KERN_INFO "List is empty...\n");
-		spin_unlock(&send_q_mutex);
-		return NULL;
-	} else {
-		tmp = list_first_entry(&send_wait_q.list, send_wait, list);
-		list_del(send_wait_q.list.next);
-		spin_unlock(&send_q_mutex);
-		return tmp;
-	}
-}
 #endif
-#endif
-
-
-/* Jack utility -
- *        free the name buffer manually!
- */
-static uint32_t get_host_ip(char **name_ret)
-{
-    int i;
-
-    for (i = 0; i < sizeof(net_dev_names) / sizeof(*net_dev_names); i++) {
-        struct net_device *device;
-        struct in_device *in_dev;
-        char *name = net_dev_names[i];
-        device = dev_get_by_name(&init_net, name); // namespace=normale
-
-        if (device) {
-            struct in_ifaddr *if_info;
-
-            *name_ret = name;
-            in_dev = (struct in_device *)device->ip_ptr;
-            if_info = in_dev->ifa_list;
-
-            MSGDPRINTK(KERN_WARNING "Device %s IP: %p4I\n",
-                            name, &if_info->ifa_local);
-            return if_info->ifa_local;
-        }
-    }
-    MSGPRINTK(KERN_ERR "msg_socket: ERROR - cannot find host ip\n");
-    return -1;
-}
 
 /* Initialize callback table to null, set up control and data channels */
 int __init initialize(void)
@@ -513,10 +437,9 @@ int __init initialize(void)
 		}
 		PRINTK(" %s %2d: %pI4\n", me, i, ip_table + i);
     }
-    if(my_nid==-99)
-        BUG_ON("my_nid isn't initialized\n");
-
+	PRINTK("\n");
     smp_mb(); // since my_nid is extern (global)
+	BUG_ON(my_nid < 0);
 	printk("-------------------------------------------------\n");
 	printk("---- updating to my_nid=%d wait for a moment ----\n", my_nid);
 	printk("-------------------------------------------------\n");
@@ -612,17 +535,8 @@ int __init initialize(void)
 		if (status != 0)
 	        printk(KERN_ERR "Failed to initialize pcie connection\n");
 		up(&send_connDone[i]);
-#if 0
 		sched_setscheduler(handler[i], SCHED_FIFO, &param);
 		set_cpus_allowed_ptr(handler[i], cpumask_of(i));
-		sender_handler[i] = kthread_run(send_thread, &i, "pcn_send");
-		if (sender_handler[i] < 0) {
-			printk(KERN_INFO "kthread_run failed! Messaging Layer not initialized\n");
-			return (long long int)sender_handler;
-		}
-		sched_setscheduler(sender_handler[i], SCHED_FIFO, &param);
-		set_cpus_allowed_ptr(sender_handler[i], cpumask_of(i%NR_CPUS));
-#endif
 	}
 
 	for (i = 0; i < MAX_NUM_CHANNELS; i++) {
@@ -763,98 +677,6 @@ int test_thread(void *arg0)
 
 #endif /* TEST_MSG_LAYER */
 
-#if 0
-int send_thread(void *arg0)
-{
-	int status, channel_num;
-	//send_wait *send_data = NULL;
-	//struct pcn_kmsg_message *pcn_msg;
-	int *ch_num = (int *)arg0;
-
-	channel_num = *ch_num;
-	printk(KERN_INFO "In MSG LAYER send thread for channel %d\n",
-	       channel_num);
-
-	status = pcie_send_init(channel_num);
-	if (status != 0)
-		printk(KERN_ERR "Failed to initialize pcie connection\n");
-#if ENABLE_DMA
-	status = dma_init(channel_num);
-	if (status != 0)
-		printk(KERN_ERR "Failed in dma_init: %d\n", status);
-#endif
-
-	up(&send_connDone[channel_num]);
-	printk(KERN_INFO "%s: INFO: Connection Done...PCN_SEND Thread\n", __func__);
-
-	while (1) {
-#if SEND_QUEUE_POOL
-		send_data = dq_send(channel_num);
-#else
-		send_data = dq_send();
-#endif
-
-#if TEST_MSG_LAYER
-		if (atomic_read(&send_count) == NUM_MSGS*MAX_NUM_CHANNELS)
-			break;
-#endif
-
-		if (send_data == NULL) {
-			printk(KERN_INFO "send queue is empty\n");
-			continue;
-		}
-
-		pcn_msg = (struct pcn_kmsg_message *) send_data->msg;
-
-		wait_for_completion(&send_intr_flag[channel_num]);
-
-#if ENABLE_DMA
-		memcpy(send_vaddr[channel_num], pcn_msg, pcn_msg->header.size);
-
-		status = dis_start_dma_transfer(subuser_id[channel_num],
-						send_vaddr[channel_num],
-						local_io[channel_num],
-						pcn_msg->header.size, 0,
-						remote_recv_seg_hdl[channel_num],
-						dma_cb, &dma_queue[channel_num],
-						&dma_queue[channel_num],
-						DMA_PUSH);
-		if (status != 0)
-			printk(KERN_ERR "Error in dis_start_dma_transfer: %d\n",
-			       status);
-
-		wait_for_completion(&dma_complete[channel_num]);
-#else
-		//check whether remote is using the channel //
-		memcpy(send_remote_vaddr[channel_num], pcn_msg,
-		       pcn_msg->header.size);
-#endif
-
-		// trigger the interrupt //
-		status = sci_trigger_interrupt_flag(remote_recv_intr_hdl[channel_num], NO_FLAGS);
-		if (status != 0)
-			printk(KERN_ERR"%s: ERROR: in sci_trigger_interrupt_flag: %d\n",
-			       __func__, status);
-
-		send_data->assoc_buf->is_free = 1;
-		smp_wmb();
-		up(&pool_buf_cnt);
-
-		kfree(send_data);
-	}
-
-#if TEST_MSG_LAYER
-	while (1) {
-		msleep(10);
-		if (kthread_should_stop()) {
-			printk(KERN_INFO "coming out of send thread\n");
-			return 0;
-		}
-	}
-#endif
-	return 0;
-}
-#endif
 static int connection_handler_cnt;
 int connection_handler(void *arg0)
 {
@@ -1091,7 +913,6 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 	int i = 0;
 	int retry = 0;
 	int channel_num = 0, ret;
-	//send_wait *send_data = NULL;
 	struct pcn_kmsg_long_message *pcn_msg = NULL;
 	pcn_kmsg_cbftn ftn;
 
@@ -1142,14 +963,6 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 		return lmsg->header.size;
 	}
 #endif
-/*
-	// TODO use a cache //
-	send_data = kmalloc(sizeof(send_wait), GFP_ATOMIC);
-	if (send_data == NULL) {
-		printk(KERN_ERR "%s: ERROR: Failed to allocate send data kmalloc\n", __func__);
-		return -1;
-	}
-*/
 	down(&pool_buf_cnt);
 
 do_retry:
@@ -1175,11 +988,12 @@ do_retry:
    }
 
 	// NOTE probably not needed //
-	//memset(send_buf[i].buff, 0, SEG_SIZE);
-	memcpy(send_buf[i].buff, lmsg, lmsg->header.size);
-	memset(send_buf[i].buff + lmsg->header.size, 0, 1);
+	//memcpy(send_buf[i].buff, lmsg, lmsg->header.size);
+	//memset(send_buf[i].buff + lmsg->header.size, 0, 1);
 
-	pcn_msg = (struct pcn_kmsg_long_message *) send_buf[i].buff;
+	//pcn_msg = (struct pcn_kmsg_long_message *) send_buf[i].buff;
+
+	pcn_msg = lmsg;
 
 	// Only one can send. Tirggered by INT.
 	wait_for_completion(&send_intr_flag[channel_num]);
