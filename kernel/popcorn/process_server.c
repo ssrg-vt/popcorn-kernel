@@ -877,8 +877,8 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		which_rc = "found";
 	} else {
 		/*
-		 * This process is becoming a distributed one if it was not already.
-		 * The first migrating thread attaches the remote context to
+		 * This process is becoming a distributed one if it was not yet.
+		 * The first thread get migrated attaches the remote context to
 		 * mm->remote, which indicates this process is distributed, and
 		 * forks the vma worker thread for this process.
 		 */

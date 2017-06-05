@@ -135,7 +135,7 @@ int fill_cpu_info(_remote_cpu_info_data_t *res)
 
 		count++;
 		arch->num_cpus = count;
-		printk("Number of cpus = %d\n", arch->num_cpus);
+		//printk("Number of cpus = %d\n", arch->num_cpus);
 	}
 
 	return 0;
