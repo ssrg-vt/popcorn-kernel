@@ -297,7 +297,7 @@ int remote_proc_mem_info(remote_mem_info_response_t *total)
 		if (i == my_nid)
 			i++;
 
-		if (!is_popcorn_node_online(i))
+		if (!get_popcorn_node_online(i))
 			continue;
 
 		meminfo_result = send_remote_mem_info_request(current, i);

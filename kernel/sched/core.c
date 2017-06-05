@@ -4688,7 +4688,7 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 		return -EINVAL;
 	}
 
-	if (!is_popcorn_node_online(nid)) {
+	if (!get_popcorn_node_online(nid)) {
 		printk(KERN_INFO"%s [%d]: node %d is offline\n", __func__,
 				current->pid, nid);
 		return -EAGAIN;

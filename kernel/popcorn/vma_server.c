@@ -141,7 +141,7 @@ typedef struct mapping_answers_2_kernels {
 	int owner;
 	int address_present;
 	long last_write;
-	int owners [MAX_KERNEL_IDS];
+	int owners [MAX_POPCORN_NODES];
 	data_response_for_2_kernels_t* data;
 	int arrived_response;
 	struct task_struct* waiting;

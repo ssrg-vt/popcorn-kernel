@@ -299,6 +299,12 @@ DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 
 
+#define NODE_INFO_FIELDS \
+	int nid; \
+	int bundle_id; \
+	int arch;
+DEFINE_PCN_KMSG(node_info_t, NODE_INFO_FIELDS);
+
 
 /**
  * Schedule server. Not yet completely ported though

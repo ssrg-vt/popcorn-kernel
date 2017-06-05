@@ -35,7 +35,7 @@ static int __init loopback_load(void)
 	MSGPRINTK(KERN_INFO"Popcorn message layer loopback loaded\n");
 
 	my_nid = 0;
-	set_popcorn_node_online(my_nid);
+	set_popcorn_node_online(my_nid, true);
 
 	send_callback = (send_cbftn)loopback_kmsg_send_long;
 

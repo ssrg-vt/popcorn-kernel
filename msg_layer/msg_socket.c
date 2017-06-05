@@ -139,7 +139,8 @@ static int send_handler(void* arg0)
 		// Skip connecting to myself
 	}
 
-	set_popcorn_node_online(conn_no);
+	set_popcorn_node_online(conn_no, true);
+	notify_my_node_info(conn_no);
 
 	MSGPRINTK("[%d] PCN_SEND handler is up\n", conn_no);
 	return 0;
@@ -254,7 +255,7 @@ static int recv_handler(void* arg0)
 
 	MSGPRINTK("[%d] PCN_RECV handler is up\n", conn_no);
 
-	set_popcorn_node_online(conn_no);
+	set_popcorn_node_online(conn_no, true);
 
 	while (!kthread_should_stop()) {
 		/* TODO: make a function */
@@ -445,7 +446,7 @@ static int __init initialize(void)
 		return err;
 	}
 
-	set_popcorn_node_online(my_nid);
+	set_popcorn_node_online(my_nid, true);
 	MSGDPRINTK("Listen to the port %d\n", PORT);
 
 	for (sender = 0; sender < 2; sender++) {
@@ -506,7 +507,7 @@ static int __init initialize(void)
 	 * So, we have to wait here!
 	*/
 	for (i = 0; i < MAX_NUM_NODES; i++) {
-		while (!is_popcorn_node_online(i)) {
+		while (!get_popcorn_node_online(i)) {
 			io_schedule();
 		}
 	}
