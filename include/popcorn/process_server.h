@@ -3,7 +3,7 @@
 
 #include <popcorn/types.h>
 
-extern int save_thread_info(struct task_struct *task, field_arch *arch, void __user *uregs);
+extern int save_thread_info(struct task_struct *task, field_arch *arch);
 extern int restore_thread_info(struct task_struct *task, field_arch *arch, bool restore_segments);
 
 /*

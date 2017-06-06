@@ -17,9 +17,9 @@
 #ifndef PROCESS_SERVER_ARCH_MACROS_H_
 #define PROCESS_SERVER_ARCH_MACROS_H_
 
-struct popcorn_regset_x86_64 {
+struct regset_x86_64 {
 	/* Program counter/instruction pointer */
-	void* rip;
+	uint64_t rip;
 
 	/* General purpose registers */
 	uint64_t rax, rdx, rcx, rbx,
@@ -43,10 +43,10 @@ struct popcorn_regset_x86_64 {
 	uint64_t rflags;
 };
 
-struct popcorn_regset_aarch64 {
+struct regset_aarch64 {
 	/* Stack pointer & program counter */
-	void* sp;
-	void* pc;
+	uint64_t sp;
+	uint64_t pc;
 
 	/* General purpose registers */
 	uint64_t x[31];
@@ -55,37 +55,48 @@ struct popcorn_regset_aarch64 {
 	unsigned __int128 v[32];
 };
 
-struct popcorn_regset_powerpc {
-
+struct regset_powerpc {
+	uint64_t dummy;
 };
 
-struct popcorn_regset_sparc {
-
+struct regset_sparc {
+	uint64_t dummy;
 };
 
 #define FIELDS_ARCH \
-	struct pt_regs regs;\
-	unsigned long migration_ip;\
-	unsigned long ip; \
-	unsigned long bp;\
-	unsigned long sp;\
+	/* Segmentations */ \
+	/* \
 	unsigned short thread_es;\
 	unsigned short thread_ds;\
 	unsigned long thread_fs;\
-	unsigned short thread_fsindex;\
 	unsigned long thread_gs;\
-	unsigned short thread_gsindex; \
+	*/ \
+	unsigned long tls; \
+	/* FPU \
 	unsigned int  task_flags;\
 	unsigned char task_fpu_counter;\
-	unsigned char thread_has_fpu;\
-	struct popcorn_regset_x86_64 regs_x86;\
-	struct popcorn_regset_aarch64 regs_aarch; \
-	struct popcorn_regset_powerpc regs_powerpc; \
-	struct popcorn_regset_sparc regs_sparc;
-//	union thread_xstate fpu_state;
+	unsigned char thread_has_fpu; \
+	union thread_xstate fpu_state; */ \
+	union { \
+		struct regset_x86_64 regs_x86;\
+		struct regset_aarch64 regs_aarch; \
+		struct regset_powerpc regs_powerpc; \
+		struct regset_sparc regs_sparc; \
+	}; \
 
 typedef struct _fields_arch {
 	FIELDS_ARCH
 } field_arch;
+
+static inline size_t regset_size(int arch) {
+	const size_t sizes[] = {
+		sizeof(struct regset_x86_64),
+		sizeof(struct regset_aarch64),
+		sizeof(struct regset_powerpc),
+		sizeof(struct regset_sparc),
+	};
+	BUG_ON(arch < 0 || arch >= POPCORN_NODE_UNKNOWN);
+	return sizes[arch];
+}
 
 #endif

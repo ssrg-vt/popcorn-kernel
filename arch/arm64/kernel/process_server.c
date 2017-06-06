@@ -3,14 +3,14 @@
  * 	process_server.c
  *
  * Description:
- * 	Dummy file to support helper functionality
- * of the process server
+ * 	Helper functionality of the process server
  *
  * Created on:
  * 	Sep 19, 2014
  *
  * Author:
  * 	Ajithchandra Saya, SSRG, VirginiaTech
+ * 	Sang-Hoon Kim, SSRG, Virginia Tech
  *
  */
 
@@ -19,6 +19,8 @@
 #include <linux/uaccess.h>
 #include <linux/cpu_namespace.h>
 #include <linux/ptrace.h>
+
+#include <asm/compat.h>
 
 #include <popcorn/types.h>
 #include <popcorn/debug.h>
@@ -46,7 +48,7 @@
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *task, field_arch *arch, void __user *uregs)
+int save_thread_info(struct task_struct *task, field_arch *arch)
 {
 	struct pt_regs *regs = task_pt_regs(task);
 	int cpu;
@@ -55,14 +57,11 @@ int save_thread_info(struct task_struct *task, field_arch *arch, void __user *ur
 
 	cpu = get_cpu();
 
-	memcpy(&arch->regs, regs, sizeof(*regs));
-
+	/*
 	if (uregs) {
-		/*
-		int ret = copy_from_user(&arch->regs_x86, uregs,
-				sizeof(struct popcorn_regset_x86_64));
+		int ret = copy_from_user(&arch->regs_aarch, uregs,
+				sizeof(struct regset_x86_64));
 		BUG_ON(ret != 0);
-		*/
 
 		arch->migration_ip = task->migration_ip;
 		arch->ip = regs->user_regs.pc;
@@ -74,13 +73,16 @@ int save_thread_info(struct task_struct *task, field_arch *arch, void __user *ur
 		arch->bp = regs->user_regs.regs[29];
 		arch->sp = regs->user_regs.sp;
 	}
+	*/
 
-	arch->thread_fs = task->thread.tp_value;
+	arch->tls = task->thread.tp_value;
 
 	put_cpu();
 
+	/*
 	PSPRINTK("%s: pc %lx sp %lx bp %lx tp %lx\n", __func__,
-			arch->migration_ip, arch->sp, arch->bp, arch->thread_fs);
+			arch->migration_ip, arch->sp, arch->bp, arch->tls);
+	*/
 	show_regs(regs);
 
 	return 0;
@@ -112,33 +114,35 @@ int save_thread_info(struct task_struct *task, field_arch *arch, void __user *ur
 int restore_thread_info(struct task_struct *task, field_arch *arch, bool restore_segments)
 {
 	struct pt_regs *regs = task_pt_regs(task);
-	int cpu;
+	struct regset_aarch64 *regset = &arch->regs_aarch;
+	int cpu, i;
 
 	cpu = get_cpu();
-	memcpy(regs, &arch->regs, sizeof(*regs));
 
-	regs->user_regs.pc = arch->migration_ip;
-	regs->user_regs.pstate = PSR_MODE_EL0t;
-	//regs->user_regs.sp = arch->regs.sp;
-	//regs->regs[29] = arch->bp;
-	//regs->regs[30] = arch->ra;
+	regs->sp = regset->sp;
+	regs->pc = regset->pc;
+	regs->pstate = PSR_MODE_EL0t;
+
+	for (i = 0; i < 31; i++)
+		regs->regs[i] =  regset->x[i];
 
 	if (restore_segments) {
-		task->thread.tp_value = arch->thread_fs;
+		unsigned long tpidr, tpidrro;
+
+		*task_user_tls(task) = arch->tls;
+
+		tpidr = *task_user_tls(task);
+		tpidrro = is_compat_thread(task_thread_info(task)) ?
+			task->thread.tp_value : 0;
+		asm("msr tpidr_el0, %0;"
+			"msr tpidrro_el0, %1;"
+			: : "r" (tpidr), "r" (tpidrro));
 	}
 
-	/*
-	for (i = 0; i < 31; i++)
-		regs->regs[i] =  arch->regs_aarch.x[i];
-
-
-	if(arch->migration_ip != 0)
-		task_pt_regs(task)->user_regs.pc = arch->migration_ip;
-	*/
 	put_cpu();
 
-	PSPRINTK("%s: pc %lx sp %lx bp %lx\n", __func__,
-			arch->migration_ip, arch->sp, arch->bp);
+	PSPRINTK("%s: pc %lx sp %lx tls %lx\n", __func__,
+			regs->pc, regs->sp, arch->tls);
 	show_regs(regs);
 
 	return 0;

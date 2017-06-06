@@ -4617,7 +4617,7 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 
 SYSCALL_DEFINE0(sched_migration_proposed)
 {
-	return current->migration_target_nid != -1;
+	return current->migration_target_nid;
 }
 
 SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
@@ -4647,8 +4647,6 @@ static int __do_sched_migrate(struct task_struct *tsk, int nid, void __user *ure
 {
 	int retval = 0;
 
-	tsk->migration_ip = instruction_pointer(task_pt_regs(tsk));
-
 	retval = process_server_do_migration(tsk, nid, uregs);
 	if (retval) return retval;
 
@@ -4675,8 +4673,8 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 	migration_start = ktime_get();
 #endif
 
-	printk(KERN_INFO"\n####### MIGRATE [%d] to %d (%d)\n",
-			current->pid, nid, current->migration_target_nid);
+	printk(KERN_INFO"\n####### MIGRATE [%d] to %d\n",
+			current->pid, nid);
 
 	if (nid == -1) {
 		nid = current->migration_target_nid;

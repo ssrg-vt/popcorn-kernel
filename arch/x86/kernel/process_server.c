@@ -50,79 +50,55 @@
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *_uregs)
+int save_thread_info(struct task_struct *tsk, field_arch *arch)
 {
-	struct pt_regs *regs = task_pt_regs(tsk);
 	unsigned short fsindex, gsindex;
-	struct popcorn_regset_x86_64 *uregs = _uregs;
+	unsigned long ds, es, fs, gs;
 	int cpu;
-
-	//dump_processor_regs(task_pt_regs(tsk));
 
 	BUG_ON(!tsk || !arch);
 	BUG_ON(current != tsk);
 
 	cpu = get_cpu();
 
-	memcpy(&arch->regs, regs, sizeof(*regs));
-
-	if (uregs) {
-		/*
-		 * TODO: Supposed to be supplied from user-space (i.e., compiler),
-		 * but we don't have the support for now.
-
-		int remain = copy_from_user(&arch->regs_x86, uregs,
-				sizeof(struct popcorn_regset_x86_64));
-		BUG_ON(remain != 0);
-		*/
-		int remain = copy_from_user(
-				&arch->regs_x86, uregs, sizeof(arch->regs_x86));
-		BUG_ON(remain != 0);
-
-		arch->migration_ip = tsk->migration_ip;
-		arch->ip = (unsigned long)arch->regs_x86.rip;
-		arch->bp = arch->regs_x86.rbp;
-		arch->sp = regs->sp;
-	} else {
-		arch->migration_ip = regs->ip;
-		arch->ip = regs->ip;
-		arch->bp = regs->bp;
-		arch->sp = regs->sp;
-	}
-
 	/*
 	 * Segments
 	 * CS and SS are set during the user/kernel mode switch.
 	 * Thus, nothing to do with them.
 	 */
-	arch->thread_ds = tsk->thread.ds;
-	arch->thread_es = tsk->thread.es;
+
+	ds = tsk->thread.ds; // 0 usually
+	es = tsk->thread.es; // 0 usually
 
 	savesegment(fs, fsindex);
 	if (fsindex) {
-		arch->thread_fs = get_desc_base(tsk->thread.tls_array + FS_TLS);
+		fs = get_desc_base(tsk->thread.tls_array + FS_TLS);
 	} else {
-		rdmsrl(MSR_FS_BASE, arch->thread_fs);
+		rdmsrl(MSR_FS_BASE, fs);
 	}
 
 	savesegment(gs, gsindex);
 	if (gsindex) {
-		arch->thread_gs = get_desc_base(tsk->thread.tls_array + GS_TLS);
+		gs = get_desc_base(tsk->thread.tls_array + GS_TLS);
 	} else {
-		rdmsrl(MSR_KERNEL_GS_BASE, arch->thread_gs);
+		rdmsrl(MSR_KERNEL_GS_BASE, gs);
 	}
+
+	arch->tls = fs;
 
 #ifdef MIGRATE_FPU
 	save_fpu_info(tsk, arch);
 #endif
 	put_cpu();
 
-	PSPRINTK(KERN_INFO"%s [%d]: ip %lx pc %lx\n", __func__,
-			tsk->pid, arch->ip, arch->migration_ip);
+	/*
+	PSPRINTK(KERN_INFO"%s [%d]: ip %lx\n", __func__,
+			tsk->pid, arch->ip);
 	PSPRINTK(KERN_INFO"%s [%d]: sp %lx bp %lx\n", __func__,
 			tsk->pid, arch->sp, arch->bp);
-	PSPRINTK(KERN_INFO"%s [%d]: fs %lx gs %lx\n", __func__,
-			tsk->pid, arch->thread_fs, arch->thread_gs);
+	*/
+	PSPRINTK(KERN_INFO"%s [%d]: tls %lx gs %lx\n", __func__,
+			tsk->pid, arch->tls, gs);
 
 	return 0;
 }
@@ -158,35 +134,50 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch, void __user *_ur
 int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_segments)
 {
 	struct pt_regs *regs = task_pt_regs(tsk);
+	struct regset_x86_64 *regset = &arch->regs_x86;
 	int cpu;
 
 	BUG_ON(restore_segments && current != tsk);
 
 	cpu = get_cpu();
-	memcpy(regs, &arch->regs, sizeof(*regs));
 
-	regs->ip = arch->migration_ip;
+	regs->r15 = regset->r15;
+	regs->r14 = regset->r14;
+	regs->r13 = regset->r13;
+	regs->r12 = regset->r12;
+	regs->bp = regset->rbp;
+	regs->bx = regset->rbx;
 
-	regs->r15 = arch->regs_x86.r15;
-	regs->r14 = arch->regs_x86.r14;
-	regs->r13 = arch->regs_x86.r13;
-	regs->r12 = arch->regs_x86.r12;
-	regs->bp = arch->regs_x86.rbp;
-	regs->bx = arch->regs_x86.rbx;
+	regs->r11 = regset->r11;
+	regs->r10 = regset->r10;
+	regs->r9 = regset->r9;
+	regs->r8 = regset->r8;
+	regs->ax = regset->rax;
+	regs->cx = regset->rcx;
+	regs->dx = regset->rdx;
+	regs->si = regset->rsi;
+	regs->di = regset->rdi;
+
+	regs->ip = regset->rip;
+	regs->sp = regset->rsp;
+	regs->flags = regset->rflags;
 
 	if (restore_segments) {
 		regs->cs = __USER_CS;
 		regs->ss = __USER_DS;
 
-		tsk->thread.ds = arch->thread_ds;
-		tsk->thread.es = arch->thread_es;
+		tsk->thread.ds = regset->ds;
+		tsk->thread.es = regset->es;
 
-		if (arch->thread_fs) {
-			do_arch_prctl(tsk, ARCH_SET_FS, arch->thread_fs);
+		if (arch->tls) {
+			do_arch_prctl(tsk, ARCH_SET_FS, arch->tls);
 		}
+		/*
 		if (arch->thread_gs) {
 			do_arch_prctl(tsk, ARCH_SET_GS, arch->thread_gs);
 		}
+		*/
+		printk("%lx %x %x\n", arch->tls, regset->fs, regset->gs);
 	}
 	//initialize_thread_retval(tsk, 0);
 
@@ -195,84 +186,16 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_
 #endif
 	put_cpu();
 
-	PSPRINTK(KERN_INFO"%s [%d]: ip %lx pc %lx\n", __func__,
-			tsk->pid, regs->ip, arch->migration_ip);
+	PSPRINTK(KERN_INFO"%s [%d]: ip %lx\n", __func__,
+			tsk->pid, regs->ip);
 	PSPRINTK(KERN_INFO"%s [%d]: sp %lx bp %lx\n", __func__,
 			tsk->pid, regs->sp, regs->bp);
-	PSPRINTK(KERN_INFO"%s [%d]: fs %lx [%x]\n", __func__,
-			tsk->pid, tsk->thread.fs, tsk->thread.fsindex);
+	PSPRINTK(KERN_INFO"%s [%d]: fs %lx\n", __func__,
+			tsk->pid, arch->tls);
 
 	return 0;
 }
 
-
-#if 0
-int restore_thread_info_from_aarch64(struct task_struct *task, field_arch *arch)
-{
-	int passed;
-	unsigned long fsindex, fs_val;
-
-	BUG_ON(!task || !arch);
-
-	/* For het migration */
-	if (arch->migration_ip != 0) {
-		struct pt_regs *pt_regs = task_pt_regs(tsk);
-
-		pt_regs->ip = arch->migration_ip;
-		pt_regs->bp = arch->bp;
-		pt_regs->sp = arch->old_rsp;
-		tsk->thread.usersp = arch->old_rsp;
-
-		pt_regs->cs = __USER_CS;
-		pt_regs->ss = __USER_DS;
-
-		pt_regs->r15 = arch->regs_x86.r15;
-		pt_regs->r14 = arch->regs_x86.r14;
-		pt_regs->r13 = arch->regs_x86.r13;
-		pt_regs->r12 = arch->regs_x86.r12;
-		pt_regs->r11 = arch->regs_x86.r11;
-		pt_regs->r10 = arch->regs_x86.r10;
-		pt_regs->r9 = arch->regs_x86.r9;
-		pt_regs->r8 = arch->regs_x86.r8;
-		pt_regs->ax = arch->regs_x86.rax;
-		pt_regs->dx = arch->regs_x86.rdx;
-		pt_regs->cx = arch->regs_x86.rcx;
-		pt_regs->bx = arch->regs_x86.rbx;
-		pt_regs->si = arch->regs_x86.rsi;
-		pt_regs->di = arch->regs_x86.rdi;
-	}
-
-	tsk->thread.fs = arch->thread_fs;
-	tsk->thread.fsindex = arch->thread_fsindex;
-
-	passed = 1;
-	if (current == task) {
-		loadsegment(fs, arch->thread_fsindex);
-		wrmsrl(MSR_FS_BASE, arch->thread_fs);
-		passed = 2;
-	}
-
-#ifdef MIGRATE_FPU
-	restore_fpu_info(task, arch);
-#endif
-
-	savesegment(fs, fsindex);
-	rdmsrl(MSR_FS_BASE, fs_val);
-
-	PSPRINTK(KERN_INFO"%s: ip 0x%lx, sp 0x%lx\n", __func__,
-			arch->migration_ip, arch->old_rsp);
-	PSPRINTK(KERN_INFO"%s: bp 0x%lx\n", __func__, arch->bp);
-
-	PSPRINTK(KERN_INFO"%s: fs saved 0x%lx[0x%lx], "
-			"curr 0x%lx[0x%lx]\n", __func__,
-			(unsigned long)arch->thread_fs, (unsigned long)arch->thread_fsindex,
-			(unsigned long)fs_val, (unsigned long)fsindex);
-
-	//dump_processor_regs(task_pt_regs(tsk));
-
-	return 0;
-}
-#endif
 
 /*
  * Function:

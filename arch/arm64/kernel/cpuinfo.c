@@ -231,7 +231,7 @@ static void *c_start(struct seq_file *m, loff_t *pos)
 
 		/* Check the connection with remote nodes */
 		for (i = 0; i < MAX_POPCORN_NODES; i++) {
-			if (is_popcorn_node_online(i)) {
+			if (get_popcorn_node_online(i)) {
 				connected = true;
 				break;
 			}
@@ -248,7 +248,7 @@ static void *c_start(struct seq_file *m, loff_t *pos)
 					j = j + 1;
 					continue;
 				}
-				if (is_popcorn_node_online(i)) {
+				if (get_popcorn_node_online(i)) {
 					send_remote_cpu_info_request(current, i);
 					num_cpus[i] = get_number_cpus_from_remote_node(i);
 					j = j + num_cpus[i];

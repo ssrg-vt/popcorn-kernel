@@ -1834,7 +1834,6 @@ struct task_struct {
 	struct completion wait_for_remote_flush;
 	int ret_from_remote;
 
-	unsigned long migration_ip;
 	int migration_target_nid;
 
 	/*

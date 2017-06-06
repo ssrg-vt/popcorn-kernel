@@ -44,6 +44,11 @@
 #include <asm/siginfo.h>
 #include <asm/debug.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
+#include <popcorn/vma_server.h>
+#endif
+
 #include "icswx.h"
 
 #ifdef CONFIG_KPROBES
@@ -331,6 +336,19 @@ retry:
 	}
 
 	vma = find_vma(mm, address);
+#ifdef CONFIG_POPCORN
+	/* vma worker should not fault */
+	BUG_ON(tsk->is_vma_worker);
+
+	if (process_is_distributed(tsk)) {
+		if (!vma || vma->vm_start > address) {
+			if (vma_server_fetch_vma(tsk, address) == 0) {
+				/* Replace with updated VMA */
+				vma = find_vma(mm, address);
+			}
+		}
+	}
+#endif
 	if (!vma)
 		goto bad_area;
 	if (vma->vm_start <= address)

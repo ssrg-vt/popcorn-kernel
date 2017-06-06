@@ -717,9 +717,13 @@ __SYSCALL(__NR_membarrier, sys_membarrier)
 __SYSCALL(__NR_mlock2, sys_mlock2)
 #define __NR_sched_migrate 285
 __SYSCALL(__NR_sched_migrate, sys_sched_migrate)
+#define __NR_sched_migration_proposed 286
+__SYSCALL(__NR_sched_migration_proposed, sys_sched_migration_proposed)
+#define __NR_sched_propose_migration 287
+__SYSCALL(__NR_sched_propose_migration, sys_sched_propose_migration)
 
 #undef __NR_syscalls
-#define __NR_syscalls 286
+#define __NR_syscalls 288
 
 /*
  * All syscalls below here should go away really,

@@ -411,7 +411,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 		tsk->at_remote = false;
 	}
 
-	tsk->migration_ip = 0;
 	tsk->migration_target_nid = -1;
 #endif
 

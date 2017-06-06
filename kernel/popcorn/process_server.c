@@ -216,7 +216,7 @@ int process_server_task_exit(struct task_struct *tsk)
 
 			req->expect_flush = last;
 
-			save_thread_info(tsk, &req->arch, NULL);
+			save_thread_info(tsk, &req->arch);
 
 			pcn_kmsg_send(tsk->origin_nid, req, sizeof(*req));
 			kfree(req);
@@ -404,7 +404,11 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	req->sas_ss_size = tsk->sas_ss_size;
 	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
 
-	save_thread_info(tsk, &req->arch, uregs);
+	ret = copy_from_user(&req->arch.regs_x86, uregs,
+			regset_size(get_popcorn_node_arch(dst_nid)));
+	BUG_ON(ret != 0);
+
+	save_thread_info(tsk, &req->arch);
 
 	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
 
@@ -827,7 +831,11 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 	req->sas_ss_size = tsk->sas_ss_size;
 	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
 
-	save_thread_info(tsk, &req->arch, uregs);
+	ret = copy_from_user(&req->arch.regs_x86, uregs,
+			regset_size(get_popcorn_node_arch(dst_nid)));
+	BUG_ON(ret != 0);
+
+	save_thread_info(tsk, &req->arch);
 
 	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
 
