@@ -21,10 +21,6 @@ EXPORT_SYMBOL(recv_pattern);
 #define MAX_PATTRN_SIZE (1<<20)		// if larger than 1<<20, do linked-list
 unsigned long  g_max_pattrn_size;
 EXPORT_SYMBOL(g_max_pattrn_size);
-atomic_t send_cnt;
-atomic_t recv_cnt;
-EXPORT_SYMBOL(send_cnt);
-EXPORT_SYMBOL(recv_cnt);
 /*
  * input:
  *  pattern[]: 
@@ -62,8 +58,6 @@ int __init pcn_kmsg_init(void)
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
 	int i; 
 	g_max_pattrn_size = MAX_PATTRN_SIZE;
-	send_cnt.counter = -1;
-	recv_cnt.counter = -1;
 	for(i=0; i<MAX_STATISTIC_SLOTS; i++) {
 		send_pattern[i].size = 0;
 		send_pattern[i].cnt.counter = 0;

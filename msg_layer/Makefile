@@ -4,16 +4,25 @@
 # This conditional selects whether we are being included from the
 # kernel Makefile or not.
 
-DOLPHIN := /home/jackchuang/dolphin
+ifdef $(CONFIG_POPCORN_MSG_DOLPHIN)
+DOLPHIN := /usr/local/dolphin/DIS	# XXX set according to your installation path
+EXTRA_CFLAGS += \
+	-I$(DOLPHIN)/src/IRM_GX/drv/src \
+	-I$(DOLPHIN)/src/IRM_GX/drv/src/LINUX \
+	-I$(DOLPHIN)/src/COMMON/osif/kernel/include \
+	-I$(DOLPHIN)/src/COMMON/osif/kernel/include/LINUX \
+	-I$(DOLPHIN)/src/include/ \
+	-I$(DOLPHIN)/src/include/dis/ \
+	-I$(DOLPHIN)/include
 
-EXTRA_CFLAGS += -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src -I$(DOLPHIN)/DIS/src/IRM_GX/drv/src/LINUX -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include -I$(DOLPHIN)/DIS/src/COMMON/osif/kernel/include/LINUX -I$(DOLPHIN)/DIS/src/include/ -I$(DOLPHIN)/DIS/src/include/dis/ -I$(DOLPHIN)/DIS/include/
 EXTRA_CFLAGS += -D_KERNEL
 EXTRA_CFLAGS += -DOS_IS_LINUX
 
-KBUILD_EXTRA_SYMBOLS = $(DOLPHIN)/DIS/src/IRM_GX/drv/src/LINUX/Module.symvers
+KBUILD_EXTRA_SYMBOLS = $(DOLPHIN)/src/IRM_GX/drv/src/LINUX/Module.symvers
+endif # CONFIG_POPCORN_MSG_DOLPHIN
+
 
 ifeq ($(KERNELRELEASE),)
-
     # Assume the source tree is where the running kernel was built
     # You should set KERNELDIR in the environment if it's elsewhere
     KERNELDIR ?= /lib/modules/$(shell uname -r)/build
@@ -33,7 +42,7 @@ clean:
 	rm -rf *.o *~ core .depend .*.cmd *.ko *.mod.c .tmp_versions Module.symvers modules.order
 
 else # KERNELRELEASE
-    # called from kernel build system: just declare what our modules are
+    # called from kernel build system
     obj-$(CONFIG_POPCORN_KMSG_LOOPBACK) += msg_loopback.o
     obj-$(CONFIG_POPCORN_KMSG_SOCKET) += msg_socket.o
     obj-$(CONFIG_POPCORN_KMSG_DOLPHIN) += msg_dolphin.o

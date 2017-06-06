@@ -15,9 +15,6 @@ struct popcorn_node {
 	bool is_connected;
 };
 
-struct popcorn_node this_node = {
-};
-
 
 static struct popcorn_node popcorn_nodes[MAX_POPCORN_NODES];
 

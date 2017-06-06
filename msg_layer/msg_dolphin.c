@@ -422,24 +422,12 @@ static send_wait *dq_send(int index)
 /* Initialize callback table to null, set up control and data channels */
 int __init initialize(void)
 {
-	int status = 0, i = 0, j = 0;
+	int status = 0, i, j = 0;
 	recv_data_t *recv_data;
 	struct sched_param param = {.sched_priority = 10};
-	char *name;
-	uint32_t my_ip = get_host_ip(&name);
 	
-	for(i=0; i<MAX_NUM_NODES; i++) {
-		char *me = " ";
-		ip_table[i] = in_aton(ip_addresses[i]);
-	   	if (my_ip == ip_table[i]) {
-			my_nid = i;
-			me = "*";
-		}
-		PRINTK(" %s %2d: %pI4\n", me, i, ip_table + i);
-    }
-	PRINTK("\n");
-    smp_mb(); // since my_nid is extern (global)
-	BUG_ON(my_nid < 0);
+	if (!init_ip_table()) return -EINVAL;
+
 	printk("-------------------------------------------------\n");
 	printk("---- updating to my_nid=%d wait for a moment ----\n", my_nid);
 	printk("-------------------------------------------------\n");

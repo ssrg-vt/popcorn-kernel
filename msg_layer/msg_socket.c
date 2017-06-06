@@ -3,10 +3,10 @@
  * on Linux 4.4 for multiple nodes
  *
  * TODO:
- *		  warp up data to a single struct
+ *		  wrap up data to a single struct
  *		  2 layer pointer to 1
  *		  concurrent connection request
- *		  use accpt/conn addr to determine my_nid (kernel_accept/conn)
+ *		  use accept/conn addr to determine my_nid (kernel_accept/conn)
  */
 
 #include <linux/module.h>
@@ -386,18 +386,13 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 static int __init initialize(void)
 {
 	int i, err, sender;
-	char *name;
 	struct sockaddr_in addr;
-	uint32_t my_ip = get_host_ip(&name);
 
 	MSGPRINTK("--- Popcorn messaging layer init starts ---\n");
 
-	// register callback.
-	send_callback = (send_cbftn)sock_kmsg_send_long;
+	if (!init_ip_table()) return -EINVAL;
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
-		char *me = " ";
-
 		init_completion(&connected[i]);
 		init_completion(&accepted[i]);
 
@@ -405,18 +400,10 @@ static int __init initialize(void)
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 		dbg_ticket[i] = 0;
 #endif
-		ip_table[i] = in_aton(ip_addresses[i]);
-
-		if (my_ip == ip_table[i]) {
-			my_nid = i;
-			me = "*";
-		}
-		PRINTK(" %s %2d: %pI4\n", me, i, ip_table + i);
 	}
-	PRINTK("\n");
 
-	smp_mb();
-	BUG_ON(my_nid < 0);
+	// register callback.
+	send_callback = (send_cbftn)sock_kmsg_send_long;
 
 	/* Initilaize the sock */
 	/*

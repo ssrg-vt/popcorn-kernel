@@ -218,7 +218,7 @@ struct krping_cb {
 
 	uint16_t port;				/* dst port in NBO */
 	u8 addr[16];				/* dst addr in NBO */
-	char *addr_str;				/* dst addr string */
+	const char *addr_str;				/* dst addr string */
 	uint8_t addr_type;			/* ADDR_FAMILY - IPv4/V6 */
 	int txdepth;				/* SQ depth */
 	unsigned long rdma_size;	/* ping data size */
@@ -1813,9 +1813,10 @@ static void handle_remote_thread_rdma_write_response(
 int __init initialize()
 {
 	int i, err, conn_no;
-	char *name;
 	struct task_struct *t;
-	uint32_t my_ip = get_host_ip(&name);
+
+	if (!init_ip_table()) return -EINVAL;
+
 	// TODO: check how to assign a priority to these threads! 
 	// make msg_layer faster (higher prio)
 	// struct sched_param param = {.sched_priority = 10};
@@ -1824,18 +1825,6 @@ int __init initialize()
 	// TODO: check open_softirq()
 	msg_handler = create_workqueue("MSGHandBotm"); // per-cpu
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-        char *me = " ";
-        ip_table[i] = in_aton(ip_addresses[i]);
-        if (my_ip == ip_table[i]) {
-            my_nid = i;
-            me = "*";
-        }
-        PRINTK(" %s %2d: %pI4\n", me, i, ip_table + i);
-    }
-    PRINTK("\n");
-	smp_mb(); // since my_nid is extern (global)
-	BUG_ON(my_nid < 0);
 	KRPRINT_INIT("---------------------------------------------------------\n");
 	KRPRINT_INIT("---- updating to my_nid=%d wait for a moment ----\n", my_nid);
 	KRPRINT_INIT("---------------------------------------------------------\n");
@@ -1906,8 +1895,8 @@ int __init initialize()
 		// set up IPv4 address
 		//cb[i]->addr_str = (char*)ip_addresses[conn_no];
 		cb[i]->addr_str = ip_addresses[conn_no];
-		in4_pton(ip_addresses[conn_no], -1, cb[i]->addr, -1, NULL); // will be used
-		cb[i]->addr_type = AF_INET;				// [IPv4]/V6 // for determining
+		//cb[i]->addr = ip_table[conn_no]; // will be used
+		cb[i]->addr_type = AF_INET;		// [IPv4]/V6 // for determining
 		cb[i]->port = htons(PORT);		// sock always the same port, not for ib
 		KRPRINT_INIT("ip_addresses[conn_no] %s, cb[i]->addr_str %s, "
 										 "cb[i]->addr %s,  port %d\n",
