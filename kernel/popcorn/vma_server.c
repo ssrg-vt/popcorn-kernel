@@ -223,7 +223,7 @@ static inline int vma_send_long_all( memory_t * entry, void * message, int size,
 		if ( task && (task->mm->distr_vma_op_counter > max_distr_vma_op)
 				&& (i == entry->message_push_operation->from_nid))
 			continue;
-		error = pcn_kmsg_send_long(i, message, size);
+		error = pcn_kmsg_send(i, message, size);
 		if (error != -1)
 			acks++;
 	}
@@ -925,7 +925,7 @@ static void process_vma_lock(struct work_struct* _work)
 	ack_to_server->header.type = PCN_KMSG_TYPE_VMA_ACK;
 	ack_to_server->header.prio = PCN_KMSG_PRIO_NORMAL;
 
-	pcn_kmsg_send_long(lock->origin_nid, ack_to_server, sizeof(*ack_to_server));
+	pcn_kmsg_send(lock->origin_nid, ack_to_server, sizeof(*ack_to_server));
 
 	kfree(ack_to_server);
 	pcn_kmsg_free_msg(lock);
@@ -1056,7 +1056,7 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 			switch (operation) {
 			case VMA_OP_MAP:
 			case VMA_OP_BRK:
-				err = pcn_kmsg_send_long(
+				err = pcn_kmsg_send(
 						entry->message_push_operation->from_nid,
 						entry->message_push_operation, sizeof(vma_operation_t));
 				PSPRINTK("INFO: operation %d sent to cpu %d\n",
@@ -1294,7 +1294,7 @@ start:
 				 * Partial replication: mmap and brk need to communicate only between server and one client
 				 */
 				if (operation == VMA_OP_MAP || operation == VMA_OP_BRK) {
-					pcn_kmsg_send_long(
+					pcn_kmsg_send(
 							entry->message_push_operation->from_nid,
 							lock_message, sizeof(vma_lock_t));
 					acks->expected_responses++;
@@ -1525,7 +1525,7 @@ start:
 
 		up_write(&current->mm->mmap_sem);
 		//send the operation to the server
-		error = pcn_kmsg_send_long(current->origin_nid,
+		error = pcn_kmsg_send(current->origin_nid,
 					   (struct pcn_kmsg_long_message*) (operation_to_send),
 					   sizeof(vma_operation_t));
 
@@ -1823,7 +1823,7 @@ static void response_remote_vma(int remote_nid, int remote_pid, remote_vma_respo
 
 	res->remote_pid = remote_pid;
 
-	pcn_kmsg_send_long(remote_nid, res, sizeof(*res));
+	pcn_kmsg_send(remote_nid, res, sizeof(*res));
 }
 
 
@@ -2060,7 +2060,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
 	if (req) {
-		pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));
+		pcn_kmsg_send(tsk->origin_nid, req, sizeof(*req));
 		kfree(req);
 	}
 

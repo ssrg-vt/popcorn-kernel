@@ -19,8 +19,6 @@ struct statistic recv_pattern[MAX_STATISTIC_SLOTS];
 EXPORT_SYMBOL(send_pattern);
 EXPORT_SYMBOL(recv_pattern);
 #define MAX_PATTRN_SIZE (1<<20)		// if larger than 1<<20, do linked-list
-unsigned long  g_max_pattrn_size;
-EXPORT_SYMBOL(g_max_pattrn_size);
 /*
  * input:
  *  pattern[]: 
@@ -57,7 +55,6 @@ int __init pcn_kmsg_init(void)
 {
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
 	int i; 
-	g_max_pattrn_size = MAX_PATTRN_SIZE;
 	for(i=0; i<MAX_STATISTIC_SLOTS; i++) {
 		send_pattern[i].size = 0;
 		send_pattern[i].cnt.counter = 0;
@@ -90,7 +87,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 	return 0;
 }
 
-int pcn_kmsg_send_long(unsigned int to, void *lmsg, unsigned int size)
+int pcn_kmsg_send(unsigned int to, void *lmsg, unsigned int size)
 {
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
 	int slot;
@@ -135,11 +132,6 @@ int pcn_kmsg_send_rdma(unsigned int to, void *lmsg, unsigned int size)
 }
 
 
-int pcn_kmsg_send(unsigned int to, void *msg)
-{
-	return pcn_kmsg_send_long(to, msg, sizeof(struct pcn_kmsg_message));
-}
-
 void *pcn_kmsg_alloc_msg(size_t size)
 {
 	return vmalloc(size);
@@ -152,7 +144,6 @@ void pcn_kmsg_free_msg(void *msg)
 
 EXPORT_SYMBOL(pcn_kmsg_alloc_msg);
 EXPORT_SYMBOL(pcn_kmsg_free_msg);
-EXPORT_SYMBOL(pcn_kmsg_send_long);
 EXPORT_SYMBOL(pcn_kmsg_send_rdma);
 EXPORT_SYMBOL(pcn_kmsg_send);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);

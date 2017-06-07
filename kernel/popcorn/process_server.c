@@ -217,7 +217,7 @@ int process_server_task_exit(struct task_struct *tsk)
 
 			save_thread_info(tsk, &req->arch, NULL);
 
-			pcn_kmsg_send_long(tsk->origin_nid, req, sizeof(*req));
+			pcn_kmsg_send(tsk->origin_nid, req, sizeof(*req));
 			kfree(req);
 		}
 	} else { // !tsk->at_remote
@@ -405,7 +405,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 
 	save_thread_info(tsk, &req->arch, uregs);
 
-	ret = pcn_kmsg_send_long(dst_nid, req, sizeof(*req));
+	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
 
 	tsk->remote = NULL;
 	tsk->origin_nid = tsk->origin_pid = -1;
@@ -478,7 +478,7 @@ static int __pair_remote_task(struct task_struct *tsk)
 			req->my_pid, req->your_pid, current->origin_nid);
 	*/
 
-	ret = pcn_kmsg_send_long(current->origin_nid, req, sizeof(*req));
+	ret = pcn_kmsg_send(current->origin_nid, req, sizeof(*req));
 	kfree(req);
 
 	return ret;
@@ -832,7 +832,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 
 	save_thread_info(tsk, &req->arch, uregs);
 
-	ret = pcn_kmsg_send_long(dst_nid, req, sizeof(*req));
+	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
 
 out:
 	kfree(req);

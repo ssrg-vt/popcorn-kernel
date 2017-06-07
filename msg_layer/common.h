@@ -37,7 +37,6 @@ typedef struct {
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
 extern struct statistic send_pattern[];
 extern struct statistic recv_pattern[];
-extern unsigned long g_max_pattrn_size;
 extern int get_a_slot(struct statistic pattern[], unsigned long size);
 #endif
 

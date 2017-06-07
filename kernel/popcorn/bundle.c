@@ -68,7 +68,7 @@ void notify_my_node_info(int nid)
 		.arch = my_arch,
 	};
 
-	pcn_kmsg_send_long(nid, &info, sizeof(info));	
+	pcn_kmsg_send(nid, &info, sizeof(info));	
 }
 EXPORT_SYMBOL(notify_my_node_info);
 

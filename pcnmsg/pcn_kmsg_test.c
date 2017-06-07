@@ -98,7 +98,7 @@ static int pcn_kmsg_test_send_single(struct pcn_kmsg_test_args __user *args)
     rdtscll(ts_start);
 #endif
 
-	pcn_kmsg_send(args->cpu, (struct pcn_kmsg_message *) &msg);
+	pcn_kmsg_send(args->cpu, &msg, sizeof(msg));
 
 #if defined(CONFIG_ARM64)
     ts_end = rdtsc32();
@@ -131,7 +131,7 @@ static int pcn_kmsg_test_send_pingpong(struct pcn_kmsg_test_args __user *args)
     rdtscll(tsc_init);
 #endif
 
-    pcn_kmsg_send(args->cpu, (struct pcn_kmsg_message *) &msg);
+    pcn_kmsg_send(args->cpu, &msg, sizeof(msg));
 	while (!kmsg_done) {}
 
 	TEST_PRINTK("Elapsed time (ticks): %lu\n", kmsg_tsc - tsc_init);
@@ -177,8 +177,7 @@ static int pcn_kmsg_test_send_batch(struct pcn_kmsg_test_args __user *args)
 		TEST_PRINTK("Sending batch message, cpu %d, seqnum %lu\n",
 			    args->cpu, i);
 
-		rc = pcn_kmsg_send(args->cpu,
-				   (struct pcn_kmsg_message *) &msg);
+		rc = pcn_kmsg_send(args->cpu, &msg, sizeof(msg));
 
 		if (rc) {
 			TEST_ERR("Error sending message!\n");
@@ -232,7 +231,7 @@ static int pcn_kmsg_test_long_msg(struct pcn_kmsg_test_args __user *args)
     rdtscll(start_ts);
 #endif
 
-	rc = pcn_kmsg_send_long(args->cpu, lmsg, strlen(__long_str) + 5);
+	rc = pcn_kmsg_send(args->cpu, lmsg, strlen(__long_str) + 5);
 
 #if defined(CONFIG_ARM64)
     end_ts = rdtsc32();
@@ -242,7 +241,7 @@ static int pcn_kmsg_test_long_msg(struct pcn_kmsg_test_args __user *args)
 
 	args->send_ts = end_ts - start_ts;
 
-	TEST_PRINTK("POPCORN: pcn_kmsg_send_long returned %d\n", rc);
+	TEST_PRINTK("POPCORN: pcn_kmsg_send returned %d\n", rc);
 	kfree(lmsg);
 
 	return rc;
@@ -403,7 +402,7 @@ static int handle_pingpong_msg(struct pcn_kmsg_test_message *msg)
 		reply_msg.ts5 = handler_ts;
 
 		TEST_PRINTK("Sending message back to CPU 0...\n");
-		rc = pcn_kmsg_send(0, (struct pcn_kmsg_message *) &reply_msg);
+		rc = pcn_kmsg_send(0, &reply_msg, sizeof(reply_msg));
 
 		if (rc) {
 			TEST_ERR("Message send failed!\n");
@@ -470,7 +469,7 @@ static int handle_batch_msg(struct pcn_kmsg_test_message *msg)
 
 		isr_ts = isr_ts_2 = bh_ts = bh_ts_2 = 0;
 
-		rc = pcn_kmsg_send(0, (struct pcn_kmsg_message *) &reply_msg);
+		rc = pcn_kmsg_send(0, &reply_msg, sizeof(reply_msg));
 
 		if (rc) {
 			TEST_ERR("Message send failed!\n");

@@ -78,7 +78,7 @@ static int popcorn_sched_sync(void *_param)
 #endif
 
 #if 0 // beowulf
-		pcn_kmsg_send_long(other, &req, sizeof(req));
+		pcn_kmsg_send(other, &req, sizeof(req));
 #endif
 	}
 
@@ -209,7 +209,7 @@ static int get_remote_popcorn_ps_load(struct task_struct *tsk, int origin_nid, i
 
 	req.origin_ws = ws->id;
 
-	pcn_kmsg_send_long(origin_nid, &req, sizeof(req));
+	pcn_kmsg_send(origin_nid, &req, sizeof(req));
 
 	wait_at_station(ws);
 	res = ws->private;
@@ -247,7 +247,7 @@ static void process_remote_ps_request(struct work_struct *work)
 	popcorn_ps_load(tsk, &res.uload, &res.sload);
 	put_task_struct(tsk);
 
-	pcn_kmsg_send_long(req->nid, &res, sizeof(res));
+	pcn_kmsg_send(req->nid, &res, sizeof(res));
 
 out:
 	pcn_kmsg_free_msg(req);

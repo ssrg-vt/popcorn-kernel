@@ -54,12 +54,6 @@ static struct task_struct *send_handlers[MAX_NUM_NODES];
 static struct task_struct *recv_handlers[MAX_NUM_NODES];
 static struct task_struct *exec_handlers[MAX_NUM_NODES];
 
-/* for debug */
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-static unsigned long dbg_ticket[MAX_NUM_NODES];
-#endif
-
-/* sync */
 static struct mutex mutex_sockets[MAX_NUM_NODES];
 static struct completion connected[MAX_NUM_NODES];
 static struct completion accepted[MAX_NUM_NODES];
@@ -320,7 +314,7 @@ end:
 /***********************************************
  * This is the interface for message layer
  ***********************************************/
-static int sock_kmsg_send_long(unsigned int dest_nid,
+static int sock_kmsg_send(unsigned int dest_nid,
 			struct pcn_kmsg_long_message *lmsg, unsigned int size)
 {
 	int remaining;
@@ -331,9 +325,6 @@ static int sock_kmsg_send_long(unsigned int dest_nid,
 
 	lmsg->header.size = size;
 	lmsg->header.from_nid = my_nid;
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	//lmsg->header.ticket = ++dbg_ticket[dest_nid];
-#endif
 
 	// Send msg to myself
 	if (dest_nid == my_nid) {
@@ -398,13 +389,10 @@ static int __init initialize(void)
 		init_completion(&accepted[i]);
 
 		mutex_init(&mutex_sockets[i]);
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-		dbg_ticket[i] = 0;
-#endif
 	}
 
 	// register callback.
-	send_callback = (send_cbftn)sock_kmsg_send_long;
+	send_callback = (send_cbftn)sock_kmsg_send;
 
 	/* Initilaize the sock */
 	/*

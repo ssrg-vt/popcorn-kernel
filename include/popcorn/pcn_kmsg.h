@@ -226,10 +226,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 /* MESSAGING */
 
 /* Send a message to the specified destination CPU. */
-int pcn_kmsg_send(unsigned int dest_cpu, void *msg);
-
-/* Send a long message to the specified destination CPU. */
-int pcn_kmsg_send_long(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
+int pcn_kmsg_send(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
 int pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
 
 /* Free a received message (called at the end of the callback function) */

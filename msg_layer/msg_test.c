@@ -158,7 +158,7 @@ static int test1(void)
 	for(i=0; i<MAX_NUM_NODES; i++) {
 		if(my_nid==i)
 			continue;
-		pcn_kmsg_send_long(i, (struct pcn_kmsg_long_message*) request,
+		pcn_kmsg_send(i, (struct pcn_kmsg_long_message*) request,
 														sizeof(*request));
 	}
 
@@ -305,7 +305,7 @@ void test_send_throughput(unsigned long long payload_size)
 
 	do_gettimeofday(&t1);
 	for (i = 0; i < MAX_TESTING_SIZE/payload_size; i++)
-		pcn_kmsg_send_long(dst, msg, payload_size + sizeof(msg->header));
+		pcn_kmsg_send(dst, msg, payload_size + sizeof(msg->header));
 	do_gettimeofday(&t2);
 
 	if( t2.tv_usec-t1.tv_usec >= 0) {
@@ -654,13 +654,6 @@ static int __init msg_test_init(void)
 		printk(KERN_ERR "cannot create /proc/kmsg_test\n");
 		return -ENOMEM;
 	}
-
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-	if (g_max_pattrn_size <= 0) {
-		for(i=0; i< 100; i++)
-			printk(KERN_WARNING "%s(): g_max_pattrn_size is <= 0\n", __func__);
-	}
-#endif
 
 	/* register callback. also define in <linux/pcn_kmsg.h>  */
 	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_FIRST_TEST,// ping - 

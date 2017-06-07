@@ -199,7 +199,7 @@ static int handle_remote_mem_info_request(struct pcn_kmsg_message *inc_msg)
 	}
 
 	/* 1-3. Send response into remote node */
-	ret = pcn_kmsg_send_long(request->nid, response, sizeof(*response));
+	ret = pcn_kmsg_send(request->nid, response, sizeof(*response));
 	if (ret < 0) {
 		MEMPRINTK("%s: failed to send response message\n", __func__);
 		goto out;
@@ -271,7 +271,7 @@ remote_mem_info_response_t *send_remote_mem_info_request(struct task_struct *tsk
 	request->origin_ws = ws->id;
 
 	/* 1-2. Send request into remote node */
-	pcn_kmsg_send_long(nid, request, sizeof(*request));
+	pcn_kmsg_send(nid, request, sizeof(*request));
 
 	wait_at_station(ws);
 	response = ws->private;

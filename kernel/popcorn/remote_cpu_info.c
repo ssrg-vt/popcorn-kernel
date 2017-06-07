@@ -57,7 +57,7 @@ void send_remote_cpu_info_request(struct task_struct *tsk, unsigned int nid)
 	fill_cpu_info(&request->cpu_info_data);
 
 	/* 1-3. Send request into remote node */
-	pcn_kmsg_send_long(nid, request, sizeof(*request));
+	pcn_kmsg_send(nid, request, sizeof(*request));
 
 	/* 2. Request message should wait until response message is done. */
 	wait_at_station(ws);
@@ -125,7 +125,7 @@ static int handle_remote_cpu_info_request(struct pcn_kmsg_message *inc_msg)
 	}
 
 	/* 2-3. Send response into remote node */
-	ret = pcn_kmsg_send_long(request->nid, response, sizeof(*response));
+	ret = pcn_kmsg_send(request->nid, response, sizeof(*response));
 	if (ret < 0) {
 		CPUPRINTK("%s: failed to send response message\n", __func__);
 		goto out;

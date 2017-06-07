@@ -349,7 +349,7 @@ static void process_remote_page_flush(struct work_struct *work)
 		spin_unlock_irqrestore(&rc->faults_lock, flags);
 
 		res.flags = FLUSH_FLAG_START;
-		pcn_kmsg_send_long(req->remote_nid, &res, sizeof(res));
+		pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
 		goto out_put;
 	} else if (req->flags & FLUSH_FLAG_LAST) {
 		spin_lock_irqsave(&rc->faults_lock, flags);
@@ -359,7 +359,7 @@ static void process_remote_page_flush(struct work_struct *work)
 		complete(&tsk->wait_for_remote_flush);
 
 		res.flags = FLUSH_FLAG_LAST;
-		pcn_kmsg_send_long(req->remote_nid, &res, sizeof(res));
+		pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
 		goto out_put;
 	}
 
@@ -439,7 +439,7 @@ static int __do_pte_flush(pte_t *pte, unsigned long addr, unsigned long next, st
 		}
 		clear_bit(my_nid, page->owners);
 
-		pcn_kmsg_send_long(current->origin_nid, req, req_size);
+		pcn_kmsg_send(current->origin_nid, req, req_size);
 	} else {
 		*pte = pte_make_valid(*pte);
 		type = '-';
@@ -477,7 +477,7 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 	/* Notify the start synchronously */
 	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE;
 	req->flags = FLUSH_FLAG_START;
-	pcn_kmsg_send_long(current->origin_nid, req, sizeof(*req));
+	pcn_kmsg_send(current->origin_nid, req, sizeof(*req));
 	wait_at_station(ws);
 
 	/* Send pages asynchronously */
@@ -491,7 +491,7 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 	/* Notify the completion synchronously */
 	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH;
 	req->flags = FLUSH_FLAG_LAST;
-	pcn_kmsg_send_long(current->origin_nid, req, sizeof(*req));
+	pcn_kmsg_send(current->origin_nid, req, sizeof(*req));
 	wait_at_station(ws);
 
 	kfree(req);
@@ -598,7 +598,7 @@ static void process_page_invalidate_request(struct work_struct *work)
 
 	__do_invalidate_page(tsk, req);
 
-	pcn_kmsg_send_long(req->origin_nid, &res, sizeof(res));
+	pcn_kmsg_send(req->origin_nid, &res, sizeof(res));
 	// PGPRINTK("  [%d] [%d/%d]\n", req->remote_pid, res.origin_pid, res.origin_nid);
 
 	put_task_struct(tsk);
@@ -639,7 +639,7 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
 	};
 
 	PGPRINTK("  [%d] revoke 0x%lx from [%d/%d]\n", tsk->pid, addr, pid, nid);
-	pcn_kmsg_send_long(nid, &req, sizeof(req));
+	pcn_kmsg_send(nid, &req, sizeof(req));
 }
 
 
@@ -683,7 +683,7 @@ static void __fetch_remote_page(struct task_struct *tsk, int from_nid, pid_t fro
 		.remote_pid = from_pid,
 	};
 
-	pcn_kmsg_send_long(from_nid, &req, sizeof(req));
+	pcn_kmsg_send(from_nid, &req, sizeof(req));
 
 	// PGPRINTK("  [%d] ->[%d/%d] %lx\n", tsk->pid, from_pid, from_nid, addr);
 }
@@ -1088,7 +1088,7 @@ out:
 	res->origin_pid = req->origin_pid;
 	res->origin_ws = req->origin_ws;
 
-	pcn_kmsg_send_long(from, res, res_size);
+	pcn_kmsg_send(from, res, res_size);
 	PGPRINTK("->[%d] [%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
 
