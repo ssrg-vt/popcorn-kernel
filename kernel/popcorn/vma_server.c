@@ -34,6 +34,7 @@
 #include <popcorn/bundle.h>
 #include <popcorn/debug.h>
 #include <popcorn/process_server.h>
+#include <popcorn/vma_server.h>
 
 #include "types.h"
 #include "vma_server.h"
@@ -120,6 +121,7 @@ out:
 ///////////////////////////////////////////////////////////////////////////////
 // Legacy codes. Remove them quickly
 ///////////////////////////////////////////////////////////////////////////////
+
 LIST_HEAD(rlist_head);
 
 typedef struct mapping_answers_2_kernels {

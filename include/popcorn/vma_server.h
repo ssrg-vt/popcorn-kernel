@@ -14,6 +14,18 @@
 
 #include <popcorn/types.h>
 
+enum VMA_OPERATION_CODES {
+	VMA_OP_NOP = 0,
+	VMA_OP_UNMAP,
+	VMA_OP_PROTECT,
+	VMA_OP_REMAP,
+	VMA_OP_MAP,
+	VMA_OP_BRK,
+	VMA_OP_MADVISE,
+	VMA_OP_SAVE = -70,
+	VMA_OP_NOT_SAVE = -71,
+};
+
 /**
  * This function takes a distributed lock for a VMA operation, and triggers
  * the same operation among different Popcorn Linux kernels.
