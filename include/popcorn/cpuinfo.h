@@ -19,12 +19,6 @@
 #ifndef _LINUX_POPCORN_CPUINFO_H
 #define _LINUX_POPCORN_CPUINFO_H
 
-// TODO rlist_head should be renamed,
-// TODO furthermore a R/W lock must be used to access the list
-extern struct list_head rlist_head;
-
-//#include <popcorn/cpuinfo.h>
-
 #define POPCORN_CPUMASK_SIZE 64
 #define POPCORN_CPUMASK_BITS (POPCORN_CPUMASK_SIZE * BITS_PER_BYTE)
 

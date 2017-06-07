@@ -190,6 +190,7 @@ static int handle_remote_mem_info_request(struct pcn_kmsg_message *inc_msg)
 	response->header.type = PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE;
 	response->header.prio = PCN_KMSG_PRIO_NORMAL;
 	response->nid = my_nid;
+	response->origin_ws = request->origin_ws;
 
 	/* 1-2. Fill the machine-dependent MEMORY information */
 	ret = fill_meminfo_response(response);
@@ -251,33 +252,31 @@ int remote_mem_info_init(void)
 	return 0;
 }
 
-remote_mem_info_response_t *send_remote_mem_info_request(struct task_struct *tsk,
-							 unsigned int nid)
+remote_mem_info_response_t *send_remote_mem_info_request(unsigned int nid)
 {
-	remote_mem_info_request_t *request;
+	remote_mem_info_request_t request = {
+		.header = {
+			.type = PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.nid = my_nid,
+	};
 	remote_mem_info_response_t *response;
-	struct wait_station *ws = get_wait_station(tsk->pid, 1);
+	struct wait_station *ws = get_wait_station(current->pid, 1);
 
 	MEMPRINTK("%s: Entered, nid: %d\n", __func__, nid);
-
-	request = kzalloc(sizeof(*request), GFP_KERNEL);
 
 	/* 1. Construct request data to send it into remote node */
 
 	/* 1-1. Fill the header information */
-	request->header.type = PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST;
-	request->header.prio = PCN_KMSG_PRIO_NORMAL;
-	request->nid = my_nid;
-	request->origin_ws = ws->id;
+	request.origin_ws = ws->id;
 
 	/* 1-2. Send request into remote node */
-	pcn_kmsg_send(nid, request, sizeof(*request));
+	pcn_kmsg_send(nid, &request, sizeof(request));
 
 	wait_at_station(ws);
 	response = ws->private;
 	put_wait_station(ws);
-
-	kfree(request);
 
 	MEMPRINTK("%s: done\n", __func__);
 	return response;
@@ -286,21 +285,18 @@ remote_mem_info_response_t *send_remote_mem_info_request(struct task_struct *tsk
 int remote_proc_mem_info(remote_mem_info_response_t *total)
 {
 	int i;
-	remote_mem_info_response_t *meminfo_result;
 
-	if (total == NULL)
-		return -EINVAL;
-
-	memset(total, 0, sizeof(remote_mem_info_response_t));
+	memset(total, 0, sizeof(*total));
 
 	for (i = 0; i < MAX_POPCORN_NODES; i++) {
+		remote_mem_info_response_t *meminfo_result;
 		if (i == my_nid)
-			i++;
+			continue;
 
 		if (!get_popcorn_node_online(i))
 			continue;
 
-		meminfo_result = send_remote_mem_info_request(current, i);
+		meminfo_result = send_remote_mem_info_request(i);
 		if (meminfo_result == NULL)
 			return -EINVAL;
 

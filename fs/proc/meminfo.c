@@ -86,7 +86,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	if (available < 0)
 		available = 0;
 
-	memset(&rem_mem, 0, sizeof(remote_mem_info_response_t));
 	remote_proc_mem_info(&rem_mem);
 
 	/*

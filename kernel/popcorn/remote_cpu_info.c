@@ -35,11 +35,11 @@ DEFINE_PCN_KMSG(remote_cpu_info_data_t, REMOTE_CPUINFO_MESSAGE_FIELDS);
 
 static struct _remote_cpu_info_data *saved_cpu_info[MAX_POPCORN_NODES];
 
-void send_remote_cpu_info_request(struct task_struct *tsk, unsigned int nid)
+void send_remote_cpu_info_request(unsigned int nid)
 {
 	remote_cpu_info_data_t *request;
 	remote_cpu_info_data_t *response;
-	struct wait_station *ws = get_wait_station(tsk->pid, 1);
+	struct wait_station *ws = get_wait_station(current->pid, 1);
 
 	CPUPRINTK("%s: Entered, nid: %d\n", __func__, nid);
 
@@ -116,6 +116,7 @@ static int handle_remote_cpu_info_request(struct pcn_kmsg_message *inc_msg)
 	response->header.type = PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE;
 	response->header.prio = PCN_KMSG_PRIO_NORMAL;
 	response->nid = my_nid;
+	response->origin_ws = request->origin_ws;
 
 	/* 2-2. Fill the machine-dependent CPU infomation */
 	ret = fill_cpu_info(&response->cpu_info_data);
