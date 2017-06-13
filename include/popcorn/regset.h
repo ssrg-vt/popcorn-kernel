@@ -78,6 +78,7 @@ struct regset_sparc {
 	unsigned char thread_has_fpu; \
 	union thread_xstate fpu_state; */ \
 	union { \
+		unsigned long regsets; \
 		struct regset_x86_64 regs_x86;\
 		struct regset_aarch64 regs_aarch; \
 		struct regset_powerpc regs_powerpc; \

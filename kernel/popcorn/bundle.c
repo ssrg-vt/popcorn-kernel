@@ -8,6 +8,7 @@
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/bundle.h>
+#include <popcorn/debug.h>
 #include "types.h"
 
 struct popcorn_node {
@@ -56,6 +57,13 @@ int get_popcorn_node_arch(int nid)
 }
 EXPORT_SYMBOL(get_popcorn_node_arch);
 
+const char *archs_sz[] = {
+	"x86_64",
+	"aarch64",
+	"powerpc",
+	"sparcs",
+};
+
 
 void notify_my_node_info(int nid)
 {
@@ -78,9 +86,10 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 
 	if (my_nid != -1) {
 		popcorn_nodes[my_nid].arch = my_arch;
+		PRINTK("  %d identified as %s\n", my_nid, archs_sz[my_arch]);
 	}
 
-	printk("  %d - %d\n", info->nid, info->arch);
+	PRINTK("  %d identified as %s\n", info->nid, archs_sz[info->arch]);
 	popcorn_nodes[info->nid].arch = info->arch;
 	pcn_kmsg_free_msg(msg);
 

@@ -404,7 +404,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	req->sas_ss_size = tsk->sas_ss_size;
 	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
 
-	ret = copy_from_user(&req->arch.regs_x86, uregs,
+	ret = copy_from_user(&req->arch.regsets, uregs,
 			regset_size(get_popcorn_node_arch(dst_nid)));
 	BUG_ON(ret != 0);
 
@@ -831,7 +831,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 	req->sas_ss_size = tsk->sas_ss_size;
 	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
 
-	ret = copy_from_user(&req->arch.regs_x86, uregs,
+	ret = copy_from_user(&req->arch.regsets, uregs,
 			regset_size(get_popcorn_node_arch(dst_nid)));
 	BUG_ON(ret != 0);
 
