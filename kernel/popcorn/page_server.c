@@ -930,8 +930,10 @@ again:
 		int ret;
 		PGPRINTK("  [%d] handle local fault at origin\n", tsk->pid);
 		ret = handle_pte_fault_origin(mm, vma, addr, pte, pmd, fault_flags);
-		if (ret) return ret;
-
+		if (ret & VM_FAULT_RETRY) {
+			/* mmap_sem is released during do_fault */
+			return VM_FAULT_RETRY;
+		}
 		goto again;
 	}
 
@@ -947,6 +949,7 @@ again:
 	 */
 	if (fh == NULL) {
 		pte_unmap(pte);
+		up_read(&mm->mmap_sem); /* To match the sematic for VM_FAULT_RETRY */
 		return VM_FAULT_RETRY;
 	}
 
@@ -1066,7 +1069,9 @@ static void process_remote_page_request(struct work_struct *work)
 	}
 
 out_up:
-	up_read(&mm->mmap_sem);
+	if (res->result != VM_FAULT_RETRY) {
+		up_read(&mm->mmap_sem);
+	}
 	mmput(mm);
 	put_task_struct(tsk);
 
