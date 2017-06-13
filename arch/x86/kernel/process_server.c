@@ -67,8 +67,8 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch)
 	 * Thus, nothing to do with them.
 	 */
 
-	ds = tsk->thread.ds; // 0 usually
-	es = tsk->thread.es; // 0 usually
+	ds = tsk->thread.ds;
+	es = tsk->thread.es;
 
 	savesegment(fs, fsindex);
 	if (fsindex) {
@@ -84,21 +84,14 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch)
 		rdmsrl(MSR_KERNEL_GS_BASE, gs);
 	}
 
+	WARN_ON(ds);
+	WARN_ON(es);
+	WARN_ON(gs);
 	arch->tls = fs;
 
-#ifdef MIGRATE_FPU
-	save_fpu_info(tsk, arch);
-#endif
 	put_cpu();
 
-	/*
-	PSPRINTK(KERN_INFO"%s [%d]: ip %lx\n", __func__,
-			tsk->pid, arch->ip);
-	PSPRINTK(KERN_INFO"%s [%d]: sp %lx bp %lx\n", __func__,
-			tsk->pid, arch->sp, arch->bp);
-	*/
-	PSPRINTK(KERN_INFO"%s [%d]: tls %lx gs %lx\n", __func__,
-			tsk->pid, arch->tls, gs);
+	PSPRINTK(KERN_INFO"%s [%d]: tls %lx\n", __func__, tsk->pid, arch->tls);
 
 	return 0;
 }
@@ -166,8 +159,10 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_
 		regs->cs = __USER_CS;
 		regs->ss = __USER_DS;
 
+		/*
 		tsk->thread.ds = regset->ds;
 		tsk->thread.es = regset->es;
+		*/
 
 		if (arch->tls) {
 			do_arch_prctl(tsk, ARCH_SET_FS, arch->tls);
@@ -177,13 +172,9 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_
 			do_arch_prctl(tsk, ARCH_SET_GS, arch->thread_gs);
 		}
 		*/
-		printk("%lx %x %x\n", arch->tls, regset->fs, regset->gs);
 	}
 	//initialize_thread_retval(tsk, 0);
 
-#ifdef MIGRATE_FPU
-	restore_fpu_info(tsk, arch);
-#endif
 	put_cpu();
 
 	PSPRINTK(KERN_INFO"%s [%d]: ip %lx\n", __func__,
@@ -195,218 +186,6 @@ int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_
 
 	return 0;
 }
-
-
-/*
- * Function:
- *		update_thread_info
- *
- * Description:
- *		this function updates the task's thread structure to
- *		the latest register values.
- *
- * Input:
- * 	task,	pointer to the task structure of the task of which the
- * 			thread structure needs to be updated
- *
- * Output:
- * 	none
- *
- * Return value:
- *	on success, returns 0
- * 	on failure, returns negative integer
- */
-int update_thread_info(field_arch *arch)
-{
-#ifdef MIGRATE_FPU
-	update_fpu_info(current);
-#endif
-
-	return 0;
-}
-
-/*
- * Function:
- *		initialize_thread_retval
- *
- * Description:
- *		this function sets the return value of the task
- *		to the value specified in the argument val
- *
- * Input:
- * 	task,	pointer to the task structure of the task of which the
- * 			return value needs to be set
- * 	val,	the return value to be set
- *
- * Output:
- * 	none
- *
- * Return value:
- *	on success, returns 0
- * 	on failure, returns negative integer
- */
-int initialize_thread_retval(struct task_struct *tsk, int val)
-{
-	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
-	BUG_ON(!tsk);
-
-	task_pt_regs(tsk)->ax = val;
-	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
-
-	return 0;
-}
-
-
-#ifdef MIGRATE_FPU
-/*/
- * Function:
- *		save_fpu_info
- *
- * Description:
- *		this function saves the FPU info of the task specified
- *		to the arch structure specified in the argument
- *
- * Input:
- * 	task,	pointer to the task structure of the task of which the
- * 			FPU info needs to be saved
- *
- * Output:
- * 	arch,	pointer to the field_arch structure where the FPU info
- * 			needs to be saved
- *
- * Return value:
- *	on success, returns 0
- * 	on failure, returns negative integer
- */
-int save_fpu_info(struct task_struct *tsk, field_arch *arch)
-{
-	struct fpu temp;
-
-	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
-	if ((tsk == NULL)  || (arch == NULL)) {
-		printk(KERN_ERR"process_server: invalid params to %s", __func__);
-		return -EINVAL;
-	}
-
-	//FPU migration code --- initiator
-	//PSPRINTK(KERN_ERR "%s: task flags %x fpu_counter %x has_fpu %x [%d:%d] %d:%d %x\n",
-	//		__func__, tsk->flags, (int)tsk->fpu_counter, (int)tsk->thread.has_fpu,
-	//		(int)__thread_has_fpu(tsk), (int)fpu_allocated(&tsk->thread.fpu),
-	//		(int)use_xsave(), (int)use_fxsr(), (int) PF_USED_MATH);
-
-	arch->task_flags = tsk->flags;
-	arch->task_fpu_counter = tsk->thread.fpu.counter;
-	arch->thread_has_fpu = tsk->thread.fpu.fpregs_active;
-
-	//    if (__thread_has_fpu(tsk)) {
-	if (!fpu_allocated(&tsk->thread.fpu)){
-		fpu_alloc(&tsk->thread.fpu);
-		fpu_finit(&tsk->thread.fpu);
-	}
-
-	fpu_save_init(&tsk->thread.fpu);
-
-	temp.state = &request->fpu_state;
-	fpu_copy(&temp,&tsk->thread.fpu);
-	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
-
-	return 0;
-}
-
-/*
- * Function:
- *		restore_fpu_info
- *
- * Description:
- *		this function restores the FPU info of the task specified
- *		from the arch structure specified in the argument
- *
- * Input:
- * 	task,	pointer to the task structure of the task of which the
- * 			FPU info needs to be restored
- *
- * 	arch,	pointer to the field_arch struture from where the fpu info
- * 			needs to be restored
- *
- * Output:
- * 	none
- *
- * Return value:
- *	on success, returns 0
- * 	on failure, returns negative integer
- */
-int restore_fpu_info(struct task_struct *tsk, field_arch *arch)
-{
-	struct fpu fpu;
-	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
-	BUG_ON(!tsk || !arch);
-
-	//FPU migration code --- server
-	/* PF_USED_MATH is set if the task used the FPU before
-	 * fpu_counter is incremented every time you go in __switch_to while owning the FPU
-	 * has_fpu is true if the task is the owner of the FPU, thus the FPU contains its data
-	 * fpu.preload (see arch/x86/include/asm.i387.h:switch_fpu_prepare()) is a heuristic
-	 */
-	if (arch->task_flags & PF_USED_MATH)
-	//set_used_math();
-	set_stopped_child_used_math(tsk);
-
-	tsk->fpu_counter = arch->task_fpu_counter;
-
-	if (!fpu_allocated(&tsk->thread.fpu)) {
-		fpu_alloc(&tsk->thread.fpu);
-		fpu_finit(&tsk->thread.fpu);
-	}
-
-	fpu.state = &arch->fpu_state;
-	fpu_copy(&tsk->thread.fpu, &fpu);
-
-	//PSPRINTK(KERN_ERR "%s: task flags %x fpu_counter %x has_fpu %x [%d:%d]\n",
-	//		__func__, tsk->flags, (int)tsk->fpu_counter, (int)tsk->thread.has_fpu,
-	//		(int)__thread_has_fpu(tsk), (int)fpu_allocated(&tsk->thread.fpu));
-
-	//FPU migration code --- is the following optional?
-	if (tsk_used_math(tsk) && tsk->fpu_counter >5)//fpu.preload
-	__math_state_restore(tsk);
-
-	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
-	return 0;
-}
-
-/*
- * Function:
- *		update_fpu_info
- *
- * Description:
- *		this function updates the FPU info of the task specified
- *
- * Input:
- * 	task,	pointer to the task structure of the task of which the
- * 			FPU info needs to be updated
- *
- * Output:
- * 	none
- *
- * Return value:
- *	on success, returns 0
- * 	on failure, returns negative integer
- */
-int update_fpu_info(struct task_struct *tsk)
-{
-	//printk("%s [+] TID: %d\n", __func__, tsk->pid);
-	if (tsk == NULL){
-		printk(KERN_ERR"process_server: invalid params to %s", __func__);
-		return -EINVAL;
-	}
-
-	if (tsk_used_math(tsk) && tsk->fpu_counter >5) //fpu.preload
-		__math_state_restore(tsk);
-	//printk("%s [-] TID: %d\n", __func__, tsk->pid);
-
-	return 0;
-}
-
-#endif	// MIGRATE_FPU
 
 
 /*

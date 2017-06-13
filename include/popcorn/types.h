@@ -11,7 +11,6 @@
 #define __INCLUDE_POPCORN_TYPES_H__
 
 /* Selective features */
-#undef MIGRATE_FPU
 #undef MIGRATION_PROFILE
 #undef STATISTICS
 

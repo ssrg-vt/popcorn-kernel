@@ -6,20 +6,6 @@
 extern int save_thread_info(struct task_struct *task, field_arch *arch);
 extern int restore_thread_info(struct task_struct *task, field_arch *arch, bool restore_segments);
 
-/*
-extern int update_thread_info(field_arch *arch);
-extern int initialize_thread_retval(struct task_struct *task, int val);
-extern void dump_processor_regs(struct pt_regs* regs);
-*/
-
-
-/* FPU related functions */
-#ifdef MIGRATE_FPU
-extern int save_fpu_info(struct task_struct *task, field_arch *arch);
-extern int restore_fpu_info(struct task_struct *task, field_arch *arch);
-extern int update_fpu_info(struct task_struct *task);
-#endif
-
 
 int process_server_do_migration(struct task_struct* tsk, unsigned int dst_nid, void __user *uregs);
 int process_server_task_exit(struct task_struct *tsk);
