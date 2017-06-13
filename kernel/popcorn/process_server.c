@@ -22,17 +22,16 @@
 #include <asm/kdebug.h>
 #include <asm/uaccess.h>
 
+#include <popcorn/types.h>
 #include <popcorn/bundle.h>
 #include <popcorn/cpuinfo.h>
-#include <popcorn/debug.h>
-#include <popcorn/process_server.h>
 
 #include "types.h"
+#include "process_server.h"
 #include "vma_server.h"
 #include "page_server.h"
 #include "util.h"
 #include "stat.h"
-
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];

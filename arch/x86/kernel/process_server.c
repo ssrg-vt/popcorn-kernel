@@ -25,7 +25,7 @@
 #include <asm/desc.h>
 
 #include <popcorn/types.h>
-#include <popcorn/debug.h>
+#include <popcorn/regset.h>
 
 /*
  * Function:
@@ -33,7 +33,7 @@
  *
  * Description:
  *		this function saves the architecture specific info of the task
- *		to the field_arch structure passed
+ *		to the struct struct field_arch structure passed
  *
  * Input:
  *	task,	pointer to the task structure of the task of which the
@@ -42,7 +42,7 @@
  *	regs,	pointer to the pt_regs field of the task
  *
  * Output:
- *	arch,	pointer to the field_arch structure type where the
+ *	arch,	pointer to the struct field_arch structure type where the
  *			architecture specific information of the task has to be
  *			saved
  *
@@ -50,7 +50,7 @@
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *tsk, field_arch *arch)
+int save_thread_info(struct task_struct *tsk, struct field_arch *arch)
 {
 	unsigned short fsindex, gsindex;
 	unsigned long ds, es, fs, gs;
@@ -103,13 +103,13 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch)
  *
  * Description:
  *		this function restores the architecture specific info of the
- *		task from the field_arch structure passed
+ *		task from the struct field_arch structure passed
  *
  * Input:
  * 	tsk,	pointer to the task structure of the task of which the
  * 			architecture specific info needs to be restored
  *
- * 	arch,	pointer to the field_arch structure type from which the
+ * 	arch,	pointer to the struct field_arch structure type from which the
  *			architecture specific information of the task has to be
  *			restored
  *
@@ -124,7 +124,7 @@ int save_thread_info(struct task_struct *tsk, field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_thread_info(struct task_struct *tsk, field_arch *arch, bool restore_segments)
+int restore_thread_info(struct task_struct *tsk, struct field_arch *arch, bool restore_segments)
 {
 	struct pt_regs *regs = task_pt_regs(tsk);
 	struct regset_x86_64 *regset = &arch->regs_x86;

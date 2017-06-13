@@ -1,5 +1,5 @@
-#ifndef __POPCORN_DEBUG_H__
-#define __POPCORN_DEBUG_H__
+#ifndef __INCLUDE_POPCORN_DEBUG_H__
+#define __INCLUDE_POPCORN_DEBUG_H__
 
 /*
  * Function macros
@@ -48,4 +48,4 @@
 #define MSGDATA(...)
 #endif
 
-#endif
+#endif /*  __INCLUDE_POPCORN_DEBUG_H__ */

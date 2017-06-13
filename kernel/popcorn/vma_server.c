@@ -30,15 +30,337 @@
 
 #include <linux/elf.h>
 
-#include <popcorn/cpuinfo.h>
+#include <popcorn/types.h>
 #include <popcorn/bundle.h>
-#include <popcorn/debug.h>
-#include <popcorn/process_server.h>
-#include <popcorn/vma_server.h>
 
 #include "types.h"
 #include "util.h"
 #include "vma_server.h"
+
+
+/* Legacy definitions. Remove these quickly -----------------------*/
+#define VMA_OPERATION_FIELDS \
+	int origin_nid; \
+	int origin_pid; \
+	int operation;\
+	unsigned long addr;\
+	unsigned long new_addr;\
+	size_t len;\
+	unsigned long new_len;\
+	unsigned long prot;\
+	unsigned long flags; \
+	int from_nid;\
+	int vma_operation_index;\
+	int pgoff;\
+	char path[512];
+DEFINE_PCN_KMSG(vma_operation_t, VMA_OPERATION_FIELDS);
+
+#define VMA_LOCK_FIELDS \
+	int origin_nid; \
+	int origin_pid; \
+	int from_nid;\
+	int vma_operation_index;
+DEFINE_PCN_KMSG(vma_lock_t, VMA_LOCK_FIELDS);
+
+#define VMA_ACK_FIELDS \
+	int origin_nid; \
+	int origin_pid; \
+	int vma_operation_index;\
+	unsigned long addr;
+DEFINE_PCN_KMSG(vma_ack_t, VMA_ACK_FIELDS);
+
+#define DATA_RESPONSE_FIELDS \
+	int tgroup_home_cpu; \
+	int tgroup_home_id;  \
+	unsigned long address; \
+	__wsum checksum; \
+	long last_write;\
+	int owner;\
+	int vma_present; \
+	unsigned long vaddr_start;\
+	unsigned long vaddr_size;\
+	pgprot_t prot; \
+	unsigned long vm_flags; \
+	unsigned long pgoff;\
+	char path[512];\
+	unsigned int data_size;\
+	int diff;\
+	int futex_owner; \
+	char data;
+DEFINE_PCN_KMSG(data_response_for_2_kernels_t,DATA_RESPONSE_FIELDS);
+
+typedef struct _memory_struct {
+	struct mm_struct* mm;
+	struct task_struct *helper;
+
+	// VMA operations
+	char path[512];
+	int operation;
+	unsigned long addr;
+	unsigned long new_addr;
+	size_t len;
+	unsigned long new_len;
+	unsigned long prot;
+	unsigned long pgoff;
+	unsigned long flags;
+	struct task_struct* waiting_for_main;
+	struct task_struct* waiting_for_op;
+	int arrived_op;
+	int my_lock;
+
+	unsigned char kernel_set[MAX_POPCORN_NODES];
+	struct rw_semaphore kernel_set_sem;
+
+	vma_operation_t *message_push_operation;
+} memory_t;
+
+
+enum VMA_OPERATION_CODES {
+	VMA_OP_NOP = 0,
+	VMA_OP_UNMAP,
+	VMA_OP_PROTECT,
+	VMA_OP_REMAP,
+	VMA_OP_MAP,
+	VMA_OP_BRK,
+	VMA_OP_MADVISE,
+	VMA_OP_SAVE = -70,
+	VMA_OP_NOT_SAVE = -71,
+};
+
+/**
+ * This function takes a distributed lock for a VMA operation, and triggers
+ * the same operation among different Popcorn Linux kernels.
+ *
+ * @return Returns either a valid memory address for the distributed operation
+ *         or an error code in case of failures.
+ */
+long start_distribute_operation(int operation, unsigned long addr, size_t len,
+		unsigned long prot, unsigned long new_addr, unsigned long new_len,
+		unsigned long flags, struct file *file, unsigned long pgoff);
+/**
+ * This function coordinates the end of a distributed VMA operation among
+ * different Popcorn Linux kernels.
+ *
+ * @return The function doesn't return an error but it can either print an error
+ *         message on the kernel log or throw a kernel bug.
+ */
+void end_distribute_operation(int operation, long start_ret, unsigned long addr);
+
+/**
+ * NOTE
+ * The followings are wrappers around the start/end_distribute_operation
+ * functions. start/end_distribute_operation create a distributed lock among
+ * Popcorn Linux kernels to carry on VMA operations. David Katz's MS Thesis
+ * details the functioning. For any additional VMA operation that has to be
+ * carried in a distributed fashion a new function must be added in the
+ * following and the relative handling code should also be added in
+ * start_distribute_operation and end_distribute_operation.
+ */
+static inline long vma_server_madvise_remove_start(struct mm_struct *mm,
+		unsigned long start, size_t len)
+{
+	return start_distribute_operation(VMA_OP_MADVISE, start, len, 0, 0, 0, 0,
+			NULL, 0);
+}
+static inline long vma_server_madvise_remove_end(struct mm_struct *mm,
+		unsigned long start, size_t len, int start_ret)
+{
+	end_distribute_operation(VMA_OP_MADVISE, start_ret, start);
+	return 0;
+}
+static inline long vma_server_do_unmap_start(struct mm_struct *mm,
+		unsigned long start, size_t len)
+{
+	return start_distribute_operation(VMA_OP_UNMAP, start, len, 0, 0, 0, 0,
+			NULL, 0);
+}
+static inline long vma_server_do_unmap_end(struct mm_struct *mm,
+		unsigned long start, size_t len, int start_ret)
+{
+	end_distribute_operation(VMA_OP_UNMAP, start_ret, start);
+	return 0;
+}
+static inline long vma_server_mprotect_start(unsigned long start, size_t len,
+		unsigned long prot)
+{
+	return start_distribute_operation(VMA_OP_PROTECT, start, len, prot, 0, 0, 0,
+			NULL, 0);
+}
+static inline long vma_server_mprotect_end(unsigned long start, size_t len,
+		unsigned long prot, int start_ret)
+{
+	end_distribute_operation(VMA_OP_PROTECT, start_ret, start);
+	return 0;
+}
+static inline long vma_server_do_mmap_pgoff_start(struct file *file,
+		unsigned long addr, unsigned long len, unsigned long prot,
+		unsigned long flags, unsigned long pgoff)
+{
+	return start_distribute_operation(VMA_OP_MAP, addr, len, prot, 0, 0, flags,
+			file, pgoff);
+}
+static inline long vma_server_do_mmap_pgoff_end(struct file *file,
+		unsigned long addr, unsigned long len, unsigned long prot,
+		unsigned long flags, unsigned long pgoff, unsigned long start_ret)
+{
+	end_distribute_operation(VMA_OP_MAP, start_ret, addr);
+	return 0;
+}
+static inline long vma_server_do_brk_start(unsigned long addr,
+		unsigned long len)
+{
+	return start_distribute_operation(VMA_OP_BRK, addr, len, 0, 0, 0, 0, NULL,
+			0);
+}
+static inline long vma_server_do_brk_end(unsigned long addr, unsigned long len,
+		unsigned long start_ret)
+{
+	end_distribute_operation(VMA_OP_BRK, start_ret, addr);
+	return 0;
+}
+static inline long vma_server_do_mremap_start(unsigned long addr,
+		unsigned long old_len, unsigned long new_len, unsigned long flags,
+		unsigned long new_addr)
+{
+	return start_distribute_operation(VMA_OP_REMAP, addr, (size_t) old_len, 0,
+			new_addr, new_len, flags, NULL, 0);
+}
+static inline long vma_server_do_mremap_end(unsigned long addr,
+		unsigned long old_len, unsigned long new_len, unsigned long flags,
+		unsigned long new_addr, unsigned long start_ret)
+{
+	end_distribute_operation(VMA_OP_REMAP, start_ret, new_addr);
+	return 0;
+}
+
+
+/*****************************************************************************/
+/* Messaging related stuff                                                   */
+/*****************************************************************************/
+typedef struct mapping_answers_2_kernels {
+	struct mapping_answers_2_kernels* next;
+	struct mapping_answers_2_kernels* prev;
+
+	int tgroup_home_cpu;
+	int tgroup_home_id;
+	unsigned long address;
+	int vma_present;
+	unsigned long vaddr_start;
+	unsigned long vaddr_size;
+	unsigned long pgoff;
+	char path[512];
+	pgprot_t prot;
+	unsigned long vm_flags;
+	int is_write;
+	int is_fetch;
+	int owner;
+	int address_present;
+	long last_write;
+	int owners [MAX_POPCORN_NODES];
+	data_response_for_2_kernels_t* data;
+	int arrived_response;
+	struct task_struct* waiting;
+	int futex_owner;
+} mapping_answers_for_2_kernels_t;
+
+memory_t* find_memory_entry(int cpu, int id)
+{
+	return NULL;
+}
+
+
+typedef struct vma_op_answers {
+	int origin_nid;
+	int origin_pid;
+	int responses;
+	int expected_responses;
+	int vma_operation_index;
+	unsigned long address;
+	struct task_struct *waiting;
+	spinlock_t lock;
+} vma_op_answers_t;
+
+
+static inline int vma_send_long_all(memory_t *entry, void *message, int size,
+		struct task_struct *task, int max_distr_vma_op)
+{
+	int i;
+	int acks = 0;
+
+	// the list does not include the current processor group descirptor (TODO)
+	for (i = 0; i < MAX_POPCORN_NODES; i++) {
+		if (!get_popcorn_node_online(i) || i == my_nid) {
+			continue;
+		}
+		if (task
+			&& (task->mm->distr_vma_op_counter > max_distr_vma_op)
+			&& (i == entry->message_push_operation->from_nid))
+			continue;
+
+		if (pcn_kmsg_send(i, message, size) != -1) {
+			acks++;
+		}
+	}
+	return acks;
+}
+
+
+static vma_op_answers_t *vma_op_answer_alloc(struct task_struct * task, int index)
+{
+	vma_op_answers_t *acks = kzalloc(sizeof(*acks), GFP_ATOMIC);
+	if (!acks) return NULL;
+
+	acks->origin_nid = task->origin_nid;
+	acks->origin_pid = task->origin_pid;
+	acks->vma_operation_index = index;
+	acks->waiting = task;
+	acks->responses = 0;
+	acks->expected_responses = 0;
+	spin_lock_init(&acks->lock);
+	// add_vma_ack_entry(acks);
+
+	return acks;
+}
+
+static vma_lock_t *vma_lock_alloc(struct task_struct * task, int from_nid, int index)
+{
+	vma_lock_t* lock_message = kmalloc(sizeof(vma_lock_t), GFP_ATOMIC);
+
+	lock_message->header.type = PCN_KMSG_TYPE_VMA_LOCK;
+	lock_message->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+	lock_message->origin_nid = task->origin_nid;
+	lock_message->origin_pid = task->origin_pid;
+	lock_message->from_nid = from_nid;
+	lock_message->vma_operation_index = index;
+
+	return lock_message;
+}
+
+static vma_operation_t * vma_operation_alloc(struct task_struct * task, int op_id,
+		unsigned long addr, unsigned long new_addr, int len, int new_len,
+		unsigned long prot, unsigned long flags, int index)
+{
+	vma_operation_t* operation = kmalloc(sizeof(vma_operation_t), GFP_ATOMIC);
+
+	operation->header.type = PCN_KMSG_TYPE_VMA_OP;
+	operation->header.prio = PCN_KMSG_PRIO_NORMAL;
+	operation->origin_nid = task->origin_nid;
+	operation->origin_pid = task->origin_pid;
+	operation->operation = op_id;
+	operation->addr = addr;
+	operation->new_addr = new_addr;
+	operation->len = len;
+	operation->new_len = new_len;
+	operation->prot = prot;
+	operation->flags = flags;
+	operation->vma_operation_index = index;
+	operation->from_nid = my_nid;
+	operation->from_nid = my_nid;
+
+	return operation;
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Heterogeneous binary support
@@ -116,160 +438,6 @@ out:
 		kfree(elf_eppnt_start);
 
 	return retval >> PAGE_SHIFT;
-}
-
-
-///////////////////////////////////////////////////////////////////////////////
-// Legacy codes. Remove them quickly
-///////////////////////////////////////////////////////////////////////////////
-
-LIST_HEAD(rlist_head);
-
-typedef struct mapping_answers_2_kernels {
-	struct mapping_answers_2_kernels* next;
-	struct mapping_answers_2_kernels* prev;
-
-	int tgroup_home_cpu;
-	int tgroup_home_id;
-	unsigned long address;
-	int vma_present;
-	unsigned long vaddr_start;
-	unsigned long vaddr_size;
-	unsigned long pgoff;
-	char path[512];
-	pgprot_t prot;
-	unsigned long vm_flags;
-	int is_write;
-	int is_fetch;
-	int owner;
-	int address_present;
-	long last_write;
-	int owners [MAX_POPCORN_NODES];
-	data_response_for_2_kernels_t* data;
-	int arrived_response;
-	struct task_struct* waiting;
-	int futex_owner;
-} mapping_answers_for_2_kernels_t;
-
-
-typedef struct vma_op_answers {
-	int origin_nid;
-	int origin_pid;
-	int responses;
-	int expected_responses;
-	int vma_operation_index;
-	unsigned long address;
-	struct task_struct *waiting;
-	spinlock_t lock;
-} vma_op_answers_t;
-
-
-static inline void add_vma_ack_entry(vma_op_answers_t* entry)
-{
-	return;
-}
-
-static inline vma_op_answers_t* find_vma_ack_entry(int cpu, int id)
-{
-	return NULL;
-}
-
-static inline void remove_vma_ack_entry(vma_op_answers_t* entry)
-{
-	return;
-}
-
-static vma_op_answers_t *vma_op_answer_alloc(struct task_struct * task, int index)
-{
-	vma_op_answers_t *acks = kzalloc(sizeof(*acks), GFP_ATOMIC);
-	if (!acks) return NULL;
-
-	acks->origin_nid = task->origin_nid;
-	acks->origin_pid = task->origin_pid;
-	acks->vma_operation_index = index;
-	acks->waiting = task;
-	acks->responses = 0;
-	acks->expected_responses = 0;
-	spin_lock_init(&(acks->lock));
-	add_vma_ack_entry(acks);
-
-	return acks;
-}
-
-memory_t* find_memory_entry(int cpu, int id)
-{
-	return NULL;
-}
-
-int dump_memory_entries(memory_t * list[], int num, int *written)
-{
-	return false;
-}
-
-
-/*****************************************************************************/
-/* Messaging related stuff                                                   */
-/*****************************************************************************/
-
-// TODO this have to me moved somewhere else but made more generic (!!!)
-static inline int vma_send_long_all( memory_t * entry, void * message, int size,
-		struct task_struct * task, int max_distr_vma_op)
-{
-	int i, acks =0;
-	_remote_cpu_info_list_t *objPtr, *tmpPtr;
-
-	// the list does not include the current processor group descirptor (TODO)
-	list_for_each_entry_safe(objPtr, tmpPtr, &rlist_head, cpu_list_member) {
-		int error;
-		i = objPtr->_data._processor;
-
-		if ( task && (task->mm->distr_vma_op_counter > max_distr_vma_op)
-				&& (i == entry->message_push_operation->from_nid))
-			continue;
-		error = pcn_kmsg_send(i, message, size);
-		if (error != -1)
-			acks++;
-	}
-	return acks;
-}
-
-static vma_lock_t * vma_lock_alloc(struct task_struct * task, int from_nid, int index)
-{
-	vma_lock_t* lock_message = kmalloc(sizeof(vma_lock_t), GFP_ATOMIC);
-
-	lock_message->header.type = PCN_KMSG_TYPE_VMA_LOCK;
-	lock_message->header.prio = PCN_KMSG_PRIO_NORMAL;
-
-	lock_message->origin_nid = task->origin_nid;
-	lock_message->origin_pid = task->origin_pid;
-	lock_message->from_nid = from_nid;
-	lock_message->vma_operation_index = index;
-
-	return lock_message;
-}
-
-static vma_operation_t * vma_operation_alloc(struct task_struct * task, int op_id,
-		unsigned long addr, unsigned long new_addr, int len, int new_len,
-		unsigned long prot, unsigned long flags, int index)
-{
-	vma_operation_t* operation = kmalloc(sizeof(vma_operation_t), GFP_ATOMIC);
-
-	operation->header.type = PCN_KMSG_TYPE_VMA_OP;
-	operation->header.prio = PCN_KMSG_PRIO_NORMAL;
-	operation->origin_nid = task->origin_nid;
-	operation->origin_pid = task->origin_pid;
-	operation->operation = op_id;
-	operation->addr = addr;
-	operation->new_addr = new_addr;
-	operation->len = len;
-	operation->new_len = new_len;
-	operation->prot = prot;
-	operation->flags = flags;
-	operation->vma_operation_index = index;
-	operation->from_nid = my_nid;
-	operation->from_nid = my_nid;
-
-	return operation;
 }
 
 #if 0
@@ -424,14 +592,22 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 	return ret;
 }
 
-/* which locks are held when entering here?!
+
+/**
+ * Creates a local mapping for the VMA -- this is the case in which is the local
+ * kernel that decides how to create the mapping.
+ *
+ * @return Returns 0 on success, an error code otherwise.
+ *
+ * which locks are held when entering here?!
  * mm->mm_sem is taken in down_read
  * ptl is locked (on the pte)
  *
- * ptl is from pte_offset_map_lock (this is a lock on the page table entry somewhere)
+ * ptl is from pte_offset_map_lock
+ *		(this is a lock on the page table entry somewhere)
  */
 int vma_server_do_mapping_for_distributed_process(
-		struct mapping_answers_for_2_kernels* _fetching_page,
+		mapping_answers_for_2_kernels_t * fetching_page,
 		struct task_struct *tsk, struct mm_struct* mm,
 		unsigned long address, spinlock_t* ptl)
 {
@@ -439,8 +615,6 @@ int vma_server_do_mapping_for_distributed_process(
 	struct vm_area_struct* vma;
 	unsigned long prot = 0;
 	unsigned long err, ret;
-	mapping_answers_for_2_kernels_t *fetching_page =
-		(mapping_answers_for_2_kernels_t *)_fetching_page;
 
 	prot |= (fetching_page->vm_flags & VM_READ) ? PROT_READ : 0;
 	prot |= (fetching_page->vm_flags & VM_WRITE) ? PROT_WRITE : 0;
@@ -491,17 +665,23 @@ int vma_server_do_mapping_for_distributed_process(
 					(fetching_page->vaddr_start + fetching_page->vaddr_size));
 
 				/*Note:
-				 * This mapping is caused because when a thread migrates it does not have any vma
+				 * This mapping is caused because when a thread migrates
+				 * it does not have any vma
 				 * so during fetch vma can be pushed.
-				 * This mapping has the precedence over "normal" vma operations because is a page fault
+				 * This mapping has the precedence over "normal" vma operations
+				 * because is a page fault
 				 * */
 				if (tsk->mm->distribute_unmap == 0)
-					printk(KERN_ALERT"%s: ERROR: anon value was already 0, check who is the older.\n", __func__);
+					printk(KERN_ALERT"%s: ERROR: anon value was already 0, "
+							"check who is the older.\n", __func__);
 				tsk->mm->distribute_unmap = 0;
 
-				/*map_difference should map in such a way that no unmap operations (the only nested operation that mmap can call) are nested called.
-				 * This is important both to not unmap pages that should not be unmapped
-				 * but also because otherwise the vma protocol will deadlock!
+				/**
+				 * map_difference should map in such a way that no unmap
+				 * operations (the only nested operation that mmap can call)
+				 * are nested called.
+				 * This is important not only to unmap pages that should not
+				 * be unmapped but also prevent vma protocol from deadlock!
 				 */
 				err = map_difference(tsk->mm, NULL, fetching_page->vaddr_start,
 						 fetching_page->vaddr_start + fetching_page->vaddr_size, prot,
@@ -511,11 +691,12 @@ int vma_server_do_mapping_for_distributed_process(
 						 | ((fetching_page->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0), 0);
 
 				if (tsk->mm->distribute_unmap == 1)
-					printk(KERN_ALERT"%s: ERROR: anon value was already 1, check who is the older.\n", __func__);
+					printk(KERN_ALERT"%s: ERROR: anon value was already 1, "
+							"check who is the older.\n", __func__);
 				tsk->mm->distribute_unmap = 1;
 
 				BUG_ON(err != fetching_page->vaddr_start &&
-					"ERROR: error mapping anonymous vma while fetching address");
+					"error mapping anonymous vma while fetching address");
 			}
 
 			up_write(&mm->mmap_sem);
@@ -568,17 +749,21 @@ int vma_server_do_mapping_for_distributed_process(
 					(fetching_page->vaddr_start + fetching_page->vaddr_size));
 
 				/*Note:
-				 * This mapping is caused because when a thread migrates it does not have any vma
+				 * This mapping is caused because when a thread migrates it
+				 * does not have any vma
 				 * so during fetch vma can be pushed.
-				 * This mapping has the precedence over "normal" vma operations because is a page fault
+				 * This mapping has the precedence over "normal" vma operations
+				 * because is a page fault
 				 * */
 				if (tsk->mm->distribute_unmap == 0)
-					printk(KERN_ALERT"%s: ERROR: file backed value was already 0, check who is the older.\n", __func__);
+					printk("ERROR: file backed value was already 0, "
+							"check who is the older.\n");
 				tsk->mm->distribute_unmap = 0;
 
 				PSPRINTK("%s:%d page offset = %lu 0x%p\n", __func__,__LINE__,
 						fetching_page->pgoff, mm->exe_file);
-				fetching_page->pgoff = get_file_offset(mm->exe_file, fetching_page->vaddr_start);
+				fetching_page->pgoff = get_file_offset(
+						mm->exe_file, fetching_page->vaddr_start);
 				PSPRINTK("%s:%d page offset = %lu\n", __func__, __LINE__,
 						fetching_page->pgoff);
 
@@ -627,12 +812,9 @@ struct vma_op_work {
 	struct work_struct work;
 	vma_operation_t* operation;
 	memory_t* memory;
-	int fake;
+	int dying;
 };
 
-enum {
-	EXIT_FLUSHING,
-};
 
 DECLARE_WAIT_QUEUE_HEAD(request_distributed_vma_op);
 
@@ -644,12 +826,12 @@ static void vma_server_process_vma_op(struct work_struct* work)
 	struct mm_struct* mm = memory->mm;
 
 	// Coordinate the death of process
-	if (vma_work->fake == 1) {
+	if (vma_work->dying == 1) {
 		unsigned long flags;
 
 		memory->arrived_op = 1;
 		lock_task_sighand(memory->helper, &flags);
-		//memory->helper->distributed_exit = EXIT_FLUSHING;
+		memory->helper->exit_code = 0; // sanghoon: was EXIT_FLUSHING
 		unlock_task_sighand(memory->helper, &flags);
 
 		wake_up_process(memory->helper);
@@ -774,7 +956,7 @@ static void vma_server_process_vma_op(struct work_struct* work)
 
 		pcn_kmsg_free_msg(operation);
 		kfree(work);
-		PSPRINTK("SERVER: vma_operation_index is %d\n",mm->vma_operation_index);
+		PSPRINTK("SERVER: %d\n", mm->vma_operation_index);
 		PSPRINTK("SERVER: end requested operation\n");
 
 		return;
@@ -799,9 +981,8 @@ static void vma_server_process_vma_op(struct work_struct* work)
 
 			memory->addr = operation->addr;
 			memory->arrived_op = 1;
-			//mm->vma_operation_index = operation->vma_operation_index;
 
-			PSPRINTK("CLIENT: vma_operation_index is %d\n",mm->vma_operation_index);
+			PSPRINTK("CLIENT: %d\n", mm->vma_operation_index);
 			PSPRINTK("CLIENT: Operation %i started by a local thread pid %d\n ",
 					operation->operation, memory->waiting_for_op->pid);
 			up_write(&mm->mmap_sem);
@@ -818,15 +999,15 @@ static void vma_server_process_vma_op(struct work_struct* work)
 			BUG_ON(memory->my_lock != 1 &&
 				"ERROR: wrong distributed lock aquisition");
 			BUG_ON(memory->waiting_for_op == NULL &&
-				"ERROR:received a push operation started by me but nobody is waiting");
+				"ERROR:received a push operation started by me "
+				"but nobody is waiting");
 
 			if (operation->operation == VMA_OP_REMAP)
 				memory->addr = operation->new_addr;
 
 			memory->arrived_op = 1;
-			//mm->vma_operation_index = operation->vma_operation_index;
 			PSPRINTK("CLIENT: Operation %i started by a local thread pid %d index %d\n ",
-					operation->operation,memory->waiting_for_op->pid, mm->vma_operation_index);
+					operation->operation, memory->waiting_for_op->pid, mm->vma_operation_index);
 			up_write(&mm->mmap_sem);
 
 			wake_up_process(memory->waiting_for_op);
@@ -885,17 +1066,13 @@ static void vma_server_process_vma_op(struct work_struct* work)
 		mm->distr_vma_op_counter--;
 
 		mm->vma_operation_index++;
-		if ( mm->vma_operation_index < 0 )
-			printk("WARN: vma_operation_index is underflow detected %d (cpu %d id %d)\n",
-					mm->vma_operation_index, operation->origin_nid, operation->origin_pid);
 
 		if (memory->my_lock != 1) {
 			VSPRINTK("Released distributed lock\n");
 			up_write(&mm->distribute_sem);
 		}
 
-		VSPRINTK("INFO: CLIENT vma_operation_index is %d ENDING OP\n",
-				mm->vma_operation_index);
+		VSPRINTK("INFO: %d ENDING OP\n", mm->vma_operation_index);
 		up_write(&mm->mmap_sem);
 
 		wake_up(&request_distributed_vma_op);
@@ -945,7 +1122,7 @@ static int handle_vma_ack(struct pcn_kmsg_message* inc_msg)
 	struct task_struct* task_to_wake_up = NULL;
 
 	VSPRINTK("Vma ack received from cpu %d\n", ack->header.from_nid);
-	ack_holder = find_vma_ack_entry(ack->origin_nid, ack->origin_pid);
+	ack_holder = NULL; // find_vma_ack_entry(ack->origin_nid, ack->origin_pid);
 	if (ack_holder) {
 		spin_lock_irqsave(&(ack_holder->lock), flags);
 
@@ -955,7 +1132,7 @@ static int handle_vma_ack(struct pcn_kmsg_message* inc_msg)
 		if (ack_holder->vma_operation_index == -1)
 			ack_holder->vma_operation_index = ack->vma_operation_index;
 		else if (ack_holder->vma_operation_index != ack->vma_operation_index)
-			printk("%s: ERROR: receiving an ack vma for a different operation index\n", __func__);
+			printk("ERROR: receiving an ack vma for a different operation index");
 
 		if (ack_holder->responses >= ack_holder->expected_responses)
 			task_to_wake_up = ack_holder->waiting;
@@ -982,7 +1159,7 @@ static int handle_vma_op(struct pcn_kmsg_message* inc_msg)
 	if (memory != NULL) {
 		work = kmalloc(sizeof(struct vma_op_work), GFP_ATOMIC);
 		BUG_ON(!work);
-		work->fake = 0;
+		work->dying = 0;
 		work->memory = memory;
 		work->operation = operation;
 		INIT_WORK((struct work_struct*)work, vma_server_process_vma_op);
@@ -1012,24 +1189,30 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 	if (current->mm->distribute_unmap == 0)
 		return;
 
-	//printk("%s: INFO: Ending distributed vma operation %i pid %d counter %d\n", __func__, operation,current->pid, current->mm->distr_vma_op_counter);
+	//printk("INFO: Ending distributed vma operation %i pid %d counter %d\n",
+	//	operation,current->pid, current->mm->distr_vma_op_counter);
 	if (current->mm->distr_vma_op_counter <= 0
 	    || (!current->is_vma_worker && current->mm->distr_vma_op_counter > 2)
 	    || ( current->is_vma_worker && current->mm->distr_vma_op_counter > 3))
-		printk("ERROR: exiting from a distributed vma operation with distr_vma_op_counter = %i\n",
+		printk("ERROR: exiting from a distributed vma operation "
+				"with distr_vma_op_counter = %i\n",
 				current->mm->distr_vma_op_counter);
 
-	current->mm->distr_vma_op_counter--; // decrement the counter for nested operations
+	// decrement the counter for nested operations
+	current->mm->distr_vma_op_counter--;
 
 	if (operation == VMA_OP_MAP || operation == VMA_OP_BRK) {
 		if (current->mm->was_not_pushed <= 0)
-			printk("ERROR: exiting from a mapping operation with was_not_pushed = %i\n",
+			printk("ERROR: exiting from a mapping operation "
+					"with was_not_pushed = %i\n",
 					current->mm->was_not_pushed);
 		current->mm->was_not_pushed--;
 	}
 
 	entry = find_memory_entry(current->origin_nid, current->origin_pid);
 	BUG_ON(!entry && "Cannot find message to send in exit operation");
+
+#define VMA_OP_SAVE (-70)
 
 	if (start_ret == VMA_OP_SAVE) {
 		int err;
@@ -1067,7 +1250,8 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 				break;
 			case VMA_OP_REMAP:
 				PSPRINTK("INFO: sending operation %d to all\n", operation);
-				vma_send_long_all(entry, (entry->message_push_operation), sizeof(vma_operation_t), 0, 0);
+				vma_send_long_all(entry, entry->message_push_operation,
+						sizeof(vma_operation_t), 0, 0);
 				break;
 			}
 
@@ -1088,9 +1272,6 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 		if (!(operation == VMA_OP_MAP || operation == VMA_OP_BRK)) { // operation is neither MAP nor BRK
 			VSPRINTK("Incrementing vma_operation_index\n");
 			current->mm->vma_operation_index++;
-			if (current->mm->vma_operation_index < 0)
-				printk("WARN: vma_operation_index underflow detected %d [if:if].(cpu %d id %d)\n",
-						current->mm->vma_operation_index, current->origin_nid, current->origin_pid);
 		}
 
 		PSPRINTK("Releasing distributed lock\n");
@@ -1107,9 +1288,6 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 			if (!(operation == VMA_OP_MAP || operation == VMA_OP_BRK)){
 				VSPRINTK("Incrementing vma_operation_index\n");
 				current->mm->vma_operation_index++;
-				if (current->mm->vma_operation_index < 0)
-					printk("WARN: vma_operation_index underflow detected %d [else:if].(cpu %d id %d)\n",
-							current->mm->vma_operation_index, current->origin_nid, current->origin_pid);
 
 				up_read(&entry->kernel_set_sem);
 			}
@@ -1121,21 +1299,17 @@ void end_distribute_operation(int operation, long start_ret, unsigned long addr)
 			      && my_nid != current->origin_nid && current->is_vma_worker)) {
 
 				//nested operation
-				if (operation != VMA_OP_UNMAP)
-					printk("WARN: exiting from a nest operation that is %d (cpu %d id %d)\n",
-							operation, current->origin_nid, current->origin_pid);
+				WARN(operation != VMA_OP_UNMAP, "Exiting from a nest operation");
 
 				//nested operation do not release the lock
 				PSPRINTK("incrementing vma_operation_index\n");
 				current->mm->vma_operation_index++;
-				if (current->mm->vma_operation_index < 0)
-					printk("WARN: vma_operation_index underflow detected %d [else:else].(cpu %d id %d)\n",
-							current->mm->vma_operation_index, current->origin_nid, current->origin_pid);
 			}
 		}
 	}
-	PSPRINTK("%s: operation index is %d\n", __func__, current->mm->vma_operation_index);
+	PSPRINTK("%d\n", current->mm->vma_operation_index);
 }
+
 
 /* Marina: nesting is handled manually (?)
  *
@@ -1173,7 +1347,7 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 
 	// set default return value
 	if (server)
-		ret = VMA_OP_NOT_SAVE;
+		ret = VMA_OP_SAVE - 1;
 	else if (operation == VMA_OP_REMAP)
 		ret = new_addr;
 
@@ -1202,35 +1376,34 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 		/* the main executes the operations for the clients
 		 * distr_vma_op_counter is already increased when it start the operation*/
 		if (current->is_vma_worker) {
-			VSPRINTK("I am the worker, so it maybe not a real recursive operation..."); // what does this mean?
+			VSPRINTK("I am the worker, so it maybe not a real "
+					"recursive operation..."); // what??????
 
 			if (current->mm->distr_vma_op_counter < 1 // who change the value in the meantime?
 				|| current->mm->distr_vma_op_counter > 2
 				|| (current->mm->distr_vma_op_counter == 2 && operation != VMA_OP_UNMAP)) {
-				printk("ERROR: invalid nested vma operation in main server, operation %d (counter %d)\n",
+				printk("ERROR: invalid nested vma operation in main server, "
+						"operation %d (counter %d)\n",
 						operation, current->mm->distr_vma_op_counter);
 				return -EPERM;
 			}
 			//current->mm->distr_vma_op_counter++;
 
-			if (current->mm->distr_vma_op_counter == 2) {
-				current->mm->distr_vma_op_counter++;
-				VSPRINTK("%s, Recursive operation for the main\n", __func__);
-				/*in this case is a nested operation on main
+			if (current->mm->distr_vma_op_counter++ == 2) {
+				VSPRINTK("Recursive operation for the main\n");
+				/* in this case is a nested operation on main
 				 * if the previous operation was a pushed operation
 				 * do not distribute it again*/
 				if (current->mm->was_not_pushed == 0) {
-					VSPRINTK("%s, don't distribute again, return!\n", __func__);
+					VSPRINTK("Don't distribute again, return!\n");
 					return ret;
 				}
-				current->mm->distr_vma_op_counter++;
-			} else {
 				current->mm->distr_vma_op_counter++;
 			}
 		} else {
 			if (current->mm->was_not_pushed == 0) {
 				current->mm->distr_vma_op_counter++; // this is decremented in end_distribute_operation
-				VSPRINTK("%s, don't distribute again, return!\n",__func__);
+				VSPRINTK("Don't distribute again, return!\n");
 				return ret;
 			}
 			current->mm->distr_vma_op_counter++;
@@ -1241,17 +1414,19 @@ long start_distribute_operation(int operation, unsigned long addr, size_t len,
 	/* I did not start an operation, but another thread maybe did...
 	 * => no concurrent operations of the same process on the same kernel*/
 	if (current->mm->distr_vma_op_counter < 0)
-		printk("ERROR: distr_vma_op_counter is %d", current->mm->distr_vma_op_counter);
+		printk("ERROR: distr_vma_op_counter is %d",
+				current->mm->distr_vma_op_counter);
 
-	// ONLY ONE CAN BE IN DISTRIBUTED OPERATION AT THE TIME ... WHAT ABOUT NESTED OPERATIONS?
-	while (atomic_cmpxchg((atomic_t*)&(current->mm->distr_vma_op_counter), 0, 1) != 0) { //success is indicated by comparing RETURN with OLD (arch/x86/include/asm/cmpxchg.h)
+	// ONLY ONE CAN BE IN DISTRIBUTED OPERATION AT THE TIME...
+	// WHAT ABOUT NESTED OPERATIONS?
+	while (atomic_cmpxchg((atomic_t*)&(current->mm->distr_vma_op_counter), 0, 1) != 0) {
 		DEFINE_WAIT(wait);
 		up_write(&current->mm->mmap_sem);
 
-		prepare_to_wait(&request_distributed_vma_op, &wait, TASK_UNINTERRUPTIBLE);
+		prepare_to_wait(
+				&request_distributed_vma_op, &wait,TASK_UNINTERRUPTIBLE);
 		if (current->mm->distr_vma_op_counter > 0) {
-			printk("LOCK: Somebody already started a distributed operation "
-					"(current->mm->thread_op->pid is %d).",
+			printk("LOCK: %d already started a distributed operation ",
 					current->mm->thread_op->pid);
 			schedule();
 		}
@@ -1275,9 +1450,10 @@ start:
 	if (server) {
 		if (current->is_vma_worker && current->mm->distr_vma_op_counter <= 2) {
 			/* I am the main thread=> a client asked me to do an operation. */
-			int index = current->mm->vma_operation_index; //(current->mm->vma_operation_index)++;
+			int index = current->mm->vma_operation_index;
 			memory_t* entry;
-			PSPRINTK("SERVER MAIN: starting operation %d, current index is %d\n", operation, index);
+			PSPRINTK("SERVER MAIN: starting operation %d, current index %d\n",
+					operation, index);
 
 			up_write(&current->mm->mmap_sem);
 			entry = find_memory_entry(current->origin_nid, current->origin_pid);
@@ -1290,33 +1466,31 @@ start:
 			{
 				vma_op_answers_t* acks;
 				//First: send a message to everybody to acquire the lock to block page faults
-				vma_lock_t* lock_message = vma_lock_alloc(current, entry->message_push_operation->from_nid, index);
+				vma_lock_t* lock_message = vma_lock_alloc(current,
+						entry->message_push_operation->from_nid, index);
 				acks = vma_op_answer_alloc(current, index);
 
 				/*
 				 * Partial replication: mmap and brk need to communicate only between server and one client
 				 */
 				if (operation == VMA_OP_MAP || operation == VMA_OP_BRK) {
-					pcn_kmsg_send(
-							entry->message_push_operation->from_nid,
+					pcn_kmsg_send(entry->message_push_operation->from_nid,
 							lock_message, sizeof(vma_lock_t));
 					acks->expected_responses++;
 				} else {
 					down_read(&entry->kernel_set_sem);
-					acks->expected_responses = vma_send_long_all(
-							entry, lock_message, sizeof(vma_lock_t), current, 2);
+					acks->expected_responses = vma_send_long_all(entry,
+							lock_message, sizeof(vma_lock_t), current, 2);
 				}
 
 				while (acks->expected_responses != acks->responses) {
 					set_task_state(current, TASK_UNINTERRUPTIBLE);
-					if (acks->expected_responses != acks->responses) {
-						schedule();
-					}
+					schedule();
 					set_task_state(current, TASK_RUNNING);
 				}
 				PSPRINTK("SERVER MAIN: Received all ack to lock\n");
 
-				remove_vma_ack_entry(acks);
+				//remove_vma_ack_entry(acks);
 				kfree(acks);
 				kfree(lock_message);
 			}
@@ -1339,41 +1513,45 @@ start:
 			 * I need to push what the server choose as parameter to the other an push the operation with
 			 * a fixed flag.
 			 * */
-			if (operation == VMA_OP_UNMAP || operation == VMA_OP_PROTECT
-			    || ((operation == VMA_OP_REMAP) && (flags & MREMAP_FIXED))) {
-				PSPRINTK("%s: INFO: SERVER MAIN we can execute the operation in parallel! %d %lx %lx\n",
+			if (operation == VMA_OP_UNMAP
+				|| operation == VMA_OP_PROTECT
+				|| (operation == VMA_OP_REMAP && (flags & MREMAP_FIXED))) {
+				PSPRINTK("%s: INFO: SERVER MAIN we can execute the operation"
+						"in parallel! %d %lx %lx\n",
 						__func__, operation, flags, flags & MREMAP_FIXED);
 
-				vma_send_long_all(
-						entry, entry->message_push_operation, sizeof(vma_operation_t), 0, 0);
+				vma_send_long_all(entry, entry->message_push_operation,
+						sizeof(vma_operation_t), 0, 0);
 				down_write(&current->mm->mmap_sem);
 				return ret;
 			} else {
-				PSPRINTK("%s: INFO: SERVER MAIN going to execute the operation locally %d\n",
+				PSPRINTK("%s: INFO: SERVER MAIN going to execute the operation"
+						"locally %d\n",
 						__func__, operation);
 
 				down_write(&current->mm->mmap_sem);
 				return VMA_OP_SAVE;
 			}
-		}
+		} else {
 //SERVER not main//////////////////////////////////////////////////////////////
-		else {
 			int index;
 			memory_t *entry;
 			vma_operation_t* operation_to_send;
 
 			if (current->is_vma_worker != 0) ///ERROR IF I AM NOT MAIN - do this check because there can be a possibility of >2 counter
-				printk(KERN_ALERT"%s: WARN?ERROR: Server not main operation but curr->is_vma_worker is %d\n",
-					__func__, current->is_vma_worker);
+				printk("%s: WARN?ERROR: Server not main operation "
+						"but curr->is_vma_worker is %d\n",
+						__func__, current->is_vma_worker);
 
-			PSPRINTK("%s: SERVER NOT MAIN starting operation %d for pid %d current index is %d\n",
-					__func__, operation, current->pid, current->mm->vma_operation_index);
+			PSPRINTK("%s: SERVER NOT MAIN starting operation %d for pid %d "
+					"current index is %d\n", __func__,
+					operation, current->pid, current->mm->vma_operation_index);
 
 			switch (operation) {
 			case VMA_OP_MAP:
 			case VMA_OP_BRK:
 				//if I am the server, mmap and brk can be executed locally
-				VSPRINTK("%s pure local operation!\n", __func__);
+				VSPRINTK("Pure local operation!\n");
 				//Note: the order in which locks are taken is important
 				up_write(&current->mm->mmap_sem);
 
@@ -1381,15 +1559,13 @@ start:
 				VSPRINTK("Distributed lock acquired\n");
 				down_write(&current->mm->mmap_sem);
 
-				//(current->mm->vma_operation_index)++;
 				return ret;
 			default:
 				break;
 			}
 
 			//new push-operation
-			PSPRINTK("%s push operation!\n", __func__);
-			//(current->mm->vma_operation_index)++;
+			PSPRINTK("Push operation!\n");
 			index = current->mm->vma_operation_index;
 			PSPRINTK("current index is %d\n", index);
 
@@ -1409,11 +1585,9 @@ start:
 /* Locking and Acking                                                        */
 /*****************************************************************************/
 			{
-				vma_op_answers_t *acks;
-
 				/*First: send a message to everybody to acquire the lock to block page faults*/
+				vma_op_answers_t *acks = vma_op_answer_alloc(current, index);
 				vma_lock_t* lock_message = vma_lock_alloc(current, my_nid, index);
-				acks = vma_op_answer_alloc(current, index);
 
 	//ANTONIOB: why here we are not distinguish between different type of operations?
 				down_read(&entry->kernel_set_sem);
@@ -1430,7 +1604,7 @@ start:
 				}
 				PSPRINTK("SERVER NOT MAIN: Received all ack to lock\n");
 
-				remove_vma_ack_entry(acks);
+				//remove_vma_ack_entry(acks);
 				kfree(acks);
 				kfree(lock_message);
 			}
@@ -1461,7 +1635,7 @@ start:
 						__func__, operation);
 
 				vma_send_long_all(
-						entry, operation_to_send,sizeof(vma_operation_t), 0, 0);
+						entry, operation_to_send, sizeof(vma_operation_t), 0, 0);
 				kfree(operation_to_send);
 				down_write(&current->mm->mmap_sem);
 				return ret;
@@ -1518,8 +1692,8 @@ start:
 			entry->waiting_for_op = current;
 			entry->arrived_op = 0;
 		} else {
-			printk("%s: ERROR: Mapping disappeared, "
-					"cannot wait for push op (cpu %d id %d)\n", __func__,
+			printk("ERROR: Mapping disappeared, "
+					"cannot wait for push op (cpu %d id %d)\n",
 					current->origin_nid, current->origin_pid);
 			kfree(operation_to_send);
 			ret = -EPERM;
@@ -1529,16 +1703,13 @@ start:
 		up_write(&current->mm->mmap_sem);
 		//send the operation to the server
 		error = pcn_kmsg_send(current->origin_nid,
-					   (struct pcn_kmsg_long_message*) (operation_to_send),
-					   sizeof(vma_operation_t));
+					   operation_to_send, sizeof(vma_operation_t));
 
 		/*Second: the server will send me a LOCK message... another thread will handle it...*/
 		/*Third: wait that the server push me the operation*/
 		while (entry->arrived_op == 0) {
 			set_task_state(current, TASK_UNINTERRUPTIBLE);
-			if (entry->arrived_op == 0) {
-				schedule();
-			}
+			schedule();
 			set_task_state(current, TASK_RUNNING);
 		}
 		PSPRINTK("My operation finally arrived pid %d vma operation %d\n",
@@ -1555,7 +1726,8 @@ start:
 			goto out_dist_lock;
 		}
 
-		if (operation == VMA_OP_REMAP || operation == VMA_OP_MAP
+		if (operation == VMA_OP_REMAP
+			|| operation == VMA_OP_MAP
 		    || operation == VMA_OP_BRK) {
 			ret = entry->addr;
 			if (entry->addr < 0) {
@@ -1588,44 +1760,19 @@ out:
 }
 
 
-int vma_server_enqueue_vma_op(
-		memory_t * memory, vma_operation_t * operation, int fake)
-{
-	struct vma_op_work *work = kmalloc(sizeof(struct vma_op_work), GFP_ATOMIC);
-	if (!work) return -ENOMEM;
-
-	work->fake = fake;
-	work->memory = memory;
-	work->operation = operation;
-
-	INIT_WORK((struct work_struct *)work, vma_server_process_vma_op);
-	queue_work(popcorn_ordered_wq, (struct work_struct *)work);
-
-	return 0;
-}
-
-
-#define GET_UNMAP_IF_HOME(task, memory) { \
-if (task->tgroup_home_cpu != my_nid) { \
+#define GET_UNMAP_IF_HOME(memory) \
+if (current->at_remote) { \
 	WARN(memory->mm->distribute_unmap == 0, \
-		"GET_UNMAP_IF_HOME: value was already 0, check who is the older.\n"); \
+		"GET_UNMAP_IF_HOME: already 0, check who is the older.\n"); \
 	memory->mm->distribute_unmap = 0; \
-	} \
 }
-#define PUT_UNMAP_IF_HOME(task, memory) { \
-if (task->tgroup_home_cpu != my_nid) {\
+
+#define PUT_UNMAP_IF_HOME(memory) \
+if (current->at_remote) { \
 	WARN(memory->mm->distribute_unmap == 1, \
-		"PUT_UNMAP_IF_HOME: value was already 1, check who is the older.\n"); \
+		"PUT_UNMAP_IF_HOME: already 1, check who is the older.\n"); \
 	memory->mm->distribute_unmap = 1; \
-	} \
 }
-
-extern long madvise_remove(struct vm_area_struct *vma,
-		struct vm_area_struct **prev, unsigned long start, unsigned long end);
-extern int kernel_mprotect(unsigned long start, size_t len, unsigned long prot);
-extern long kernel_mremap(unsigned long addr, unsigned long old_len,
-		unsigned long new_len, unsigned long flags, unsigned long new_addr);
-
 
 /**
  * We do this stupid thing because functions related to meomry mapping operate
@@ -1639,6 +1786,12 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 
 	while (!kthread_should_stop()) {
 		/*
+extern long madvise_remove(struct vm_area_struct *vma,
+		struct vm_area_struct **prev, unsigned long start, unsigned long end);
+extern int kernel_mprotect(unsigned long start, size_t len, unsigned long prot);
+extern long kernel_mremap(unsigned long addr, unsigned long old_len,
+
+		unsigned long new_len, unsigned long flags, unsigned long new_addr);
 		while (memory->operation != VMA_OP_NOP &&
 		       memory->mm->thread_op == current) {
 			unsigned long ret = 0;
@@ -1646,29 +1799,31 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 			switch (memory->operation) {
 			case VMA_OP_UNMAP:
 				down_write(&memory->mm->mmap_sem);
-				GET_UNMAP_IF_HOME(current, memory);
+				GET_UNMAP_IF_HOME(memory);
 				ret = do_munmap(memory->mm, memory->addr, memory->len);
-				PUT_UNMAP_IF_HOME(current, memory);
+				PUT_UNMAP_IF_HOME(memory);
 				up_write(&memory->mm->mmap_sem);
 				break;
 
-			case VMA_OP_MADVISE: { //this is only for MADV_REMOVE (thus write is 0)
+			case VMA_OP_MADVISE: {
+				//this is only for MADV_REMOVE (thus write is 0)
 				struct vm_area_struct *pvma;
 				struct vm_area_struct *vma = find_vma(memory->mm, memory->addr);
-				if (!vma ||(vma->vm_start > memory->addr || vma->vm_end < memory->addr))
+				if (!vma || vma->vm_start > memory->addr) {
 					printk("%s: ERROR VMA_OP_MADVISE cannot find VMA "
 							"addr %lx start %lx end %lx\n", __func__,
 							memory->addr, (vma ? vma->vm_start : 0),
 							(vma ? vma->vm_end : 0));
+				}
 				//write = madvise_need_mmap_write(behavior);
 				//if (write)
 				//	down_write(&(memory->mm->mmap_sem));
 				//else
 				down_read(&(memory->mm->mmap_sem));
-				GET_UNMAP_IF_HOME(current, memory);
+				GET_UNMAP_IF_HOME(memory);
 				ret = madvise_remove(vma, &pvma,
 						memory->addr, (memory->addr + memory->len));
-				PUT_UNMAP_IF_HOME(current, memory);
+				PUT_UNMAP_IF_HOME(memory);
 				//if (write)
 				//	up_write(&(memory->mm->mmap_sem));
 				//else
@@ -1677,33 +1832,31 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 			}
 
 			case VMA_OP_PROTECT:
-				GET_UNMAP_IF_HOME(current, memory);
+				GET_UNMAP_IF_HOME(memory);
 				ret = kernel_mprotect(memory->addr, memory->len, memory->prot);
-				PUT_UNMAP_IF_HOME(current, memory);
+				PUT_UNMAP_IF_HOME(memory);
 				break;
 
 			case VMA_OP_REMAP:
-				// note that remap calls unmap --- thus is a nested operation ...
+				// remap calls unmap --- thus is a nested operation ...
 				down_write(&memory->mm->mmap_sem);
-				GET_UNMAP_IF_HOME(current, memory);
+				GET_UNMAP_IF_HOME(memory);
 				ret = kernel_mremap(memory->addr, memory->len, memory->new_len, 0, memory->new_addr);
-				PUT_UNMAP_IF_HOME(current, memory);
+				PUT_UNMAP_IF_HOME(memory);
 				up_write(&memory->mm->mmap_sem);
 				break;
 
 			case VMA_OP_BRK:
-				ret = -1;
 				down_write(&memory->mm->mmap_sem);
-				GET_UNMAP_IF_HOME(current, memory);
+				GET_UNMAP_IF_HOME(memory);
 				ret = do_brk(memory->addr, memory->len);
-				PUT_UNMAP_IF_HOME(current, memory);
+				PUT_UNMAP_IF_HOME(memory);
 				up_write(&memory->mm->mmap_sem);
 				break;
 
 			case VMA_OP_MAP: {
 				struct file *f = NULL;
 				unsigned long populate = 0;
-				ret = -1;
 				if (memory->path[0] != '\0') {
 					f = filp_open(memory->path, O_RDONLY | O_LARGEFILE, 0);
 					if (IS_ERR(f)) {
@@ -1712,38 +1865,27 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 					}
 				}
 				down_write(&memory->mm->mmap_sem);
-				GET_UNMAP_IF_HOME(current, memory);
+				GET_UNMAP_IF_HOME(memory);
 				ret = do_mmap_pgoff(f, memory->addr, memory->len, memory->prot,
 						    memory->flags, memory->pgoff, &populate);
-				PUT_UNMAP_IF_HOME(current, memory);
+				PUT_UNMAP_IF_HOME(memory);
 				up_write(&memory->mm->mmap_sem);
 
-				if (memory->path[0] != '\0') {
-					filp_close(f, NULL);
-				}
+				if (f) filp_close(f, NULL);
 				break;
 			}
 
 			default:
 				break;
 			}
-			memory->addr = ret;
 			memory->operation = VMA_OP_NOP;
+			memory->addr = ret;
 
-            PSPRINTK("%s: wake up %d (cpu %d id %d)\n", __func__,
-					memory->waiting_for_main->pid,
-					current->origin_nid, current->origin_pid);
 			wake_up_process(memory->waiting_for_main);
-		}
-
-		if ( (memory->operation != VMA_OP_NOP &&
-			 memory->mm->thread_op == current)) {
-			__set_task_state(current, TASK_RUNNING);
-			continue;
 		}
 		*/
 		__set_task_state(current, TASK_INTERRUPTIBLE);
-		schedule_timeout(HZ * 30);
+		schedule_timeout(HZ * 10);
 		__set_task_state(current, TASK_RUNNING);
 	}
 

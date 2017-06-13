@@ -17,6 +17,8 @@
 #ifndef PROCESS_SERVER_ARCH_MACROS_H_
 #define PROCESS_SERVER_ARCH_MACROS_H_
 
+#include <popcorn/bundle.h>
+
 struct regset_x86_64 {
 	/* Program counter/instruction pointer */
 	uint64_t rip;
@@ -63,31 +65,23 @@ struct regset_sparc {
 	uint64_t dummy;
 };
 
-#define FIELDS_ARCH \
-	/* Segmentations */ \
-	/* \
-	unsigned short thread_es;\
-	unsigned short thread_ds;\
-	unsigned long thread_fs;\
-	unsigned long thread_gs;\
-	*/ \
-	unsigned long tls; \
-	/* FPU \
-	unsigned int  task_flags;\
-	unsigned char task_fpu_counter;\
-	unsigned char thread_has_fpu; \
-	union thread_xstate fpu_state; */ \
-	union { \
-		unsigned long regsets; \
-		struct regset_x86_64 regs_x86;\
-		struct regset_aarch64 regs_aarch; \
-		struct regset_powerpc regs_powerpc; \
-		struct regset_sparc regs_sparc; \
-	}; \
+struct field_arch {
+	/* Segmentations
+	unsigned short thread_es;
+	unsigned short thread_ds;
+	unsigned long thread_fs;
+	unsigned long thread_gs;
+	*/
+	unsigned long tls;
 
-typedef struct _fields_arch {
-	FIELDS_ARCH
-} field_arch;
+	union {
+		unsigned long regsets;
+		struct regset_x86_64 regs_x86;
+		struct regset_aarch64 regs_aarch;
+		struct regset_powerpc regs_powerpc;
+		struct regset_sparc regs_sparc;
+	};
+};
 
 static inline size_t regset_size(int arch) {
 	const size_t sizes[] = {
@@ -96,7 +90,7 @@ static inline size_t regset_size(int arch) {
 		sizeof(struct regset_powerpc),
 		sizeof(struct regset_sparc),
 	};
-	BUG_ON(arch < 0 || arch >= POPCORN_NODE_UNKNOWN);
+	BUG_ON(arch < 0 || arch >= POPCORN_ARCH_UNKNOWN);
 	return sizes[arch];
 }
 

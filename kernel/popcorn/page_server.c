@@ -23,17 +23,12 @@
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
-#include <asm/kdebug.h>
 
+#include <popcorn/types.h>
 #include <popcorn/bundle.h>
-#include <popcorn/cpuinfo.h>
 #include <popcorn/pcn_kmsg.h>
-#include <popcorn/debug.h>
-#include <popcorn/process_server.h>
 
 #include "types.h"
-#include "stat.h"
-#include "util.h"
 #include "pgtable.h"
 #include "wait_station.h"
 

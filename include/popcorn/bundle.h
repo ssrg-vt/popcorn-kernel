@@ -4,12 +4,12 @@
 #define MAX_POPCORN_NODES 32
 #define MAX_BUNDLE_ID 32
 
-enum popcorn_node_arch {
-	POPCORN_NODE_X86 = 0,
-	POPCORN_NODE_ARM = 1,
-	POPCORN_NODE_PPC = 2,
-	POPCORN_NODE_SPARC = 3,
-	POPCORN_NODE_UNKNOWN,
+enum popcorn_arch {
+	POPCORN_ARCH_X86 = 0,
+	POPCORN_ARCH_ARM = 1,
+	POPCORN_ARCH_PPC = 2,
+	POPCORN_ARCH_SPARC = 3,
+	POPCORN_ARCH_UNKNOWN,
 };
 
 extern int my_nid;

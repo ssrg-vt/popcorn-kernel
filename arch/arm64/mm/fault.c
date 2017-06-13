@@ -42,8 +42,7 @@
 #include <asm/tlbflush.h>
 
 #ifdef CONFIG_POPCORN
-#include <popcorn/page_server.h>
-#include <popcorn/process_server.h>
+#include <popcorn/types.h>
 #include <popcorn/vma_server.h>
 #endif
 

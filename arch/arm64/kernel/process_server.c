@@ -22,7 +22,7 @@
 
 #include <asm/compat.h>
 
-#include <popcorn/types.h>
+#include <popcorn/regset.h>
 #include <popcorn/debug.h>
 
 /*
@@ -31,7 +31,7 @@
  *
  * Description:
  *		this function saves the architecture specific info of the task
- *		to the field_arch structure passed
+ *		to the struct field_arch structure passed
  *
  * Input:
  *	task,	pointer to the task structure of the task of which the
@@ -40,7 +40,7 @@
  *	regs,	pointer to the pt_regs field of the task
  *
  * Output:
- *	arch,	pointer to the field_arch structure type where the
+ *	arch,	pointer to the struct field_arch structure type where the
  *			architecture specific information of the task has to be
  *			saved
  *
@@ -48,9 +48,8 @@
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *task, field_arch *arch)
+int save_thread_info(struct task_struct *task, struct field_arch *arch)
 {
-	struct pt_regs *regs = task_pt_regs(task);
 	int cpu;
 
 	cpu = get_cpu();
@@ -60,7 +59,6 @@ int save_thread_info(struct task_struct *task, field_arch *arch)
 	put_cpu();
 
 	PSPRINTK(KERN_INFO"%s [%d]: tls: %lx\n", __func__, task->pid, arch->tls);
-	// show_regs(regs);
 
 	return 0;
 }
@@ -71,13 +69,13 @@ int save_thread_info(struct task_struct *task, field_arch *arch)
  *
  * Description:
  *		this function restores the architecture specific info of the
- *		task from the field_arch structure passed
+ *		task from the struct field_arch structure passed
  *
  * Input:
  * 	task,	pointer to the task structure of the task of which the
  * 			architecture specific info needs to be restored
  *
- * 	arch,	pointer to the field_arch structure type from which the
+ * 	arch,	pointer to the struct field_arch structure type from which the
  *			architecture specific information of the task has to be
  *			restored
  *
@@ -88,7 +86,7 @@ int save_thread_info(struct task_struct *task, field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_thread_info(struct task_struct *task, field_arch *arch, bool restore_segments)
+int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool restore_segments)
 {
 	struct pt_regs *regs = task_pt_regs(task);
 	struct regset_aarch64 *regset = &arch->regs_aarch;
@@ -120,7 +118,7 @@ int restore_thread_info(struct task_struct *task, field_arch *arch, bool restore
 
 	put_cpu();
 
-	PSPRINTK(KERN_INFO"%s [%d]: pc %lx sp %lx tls %lx\n", __func__, task->pid,
+	PSPRINTK(KERN_INFO"%s [%d]: pc %llx sp %llx tls %lx\n", __func__, task->pid,
 			regs->pc, regs->sp, *task_user_tls(task));
 	show_regs(regs);
 

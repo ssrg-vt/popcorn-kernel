@@ -23,7 +23,7 @@
 #include <linux/cpu_namespace.h>
 
 #include <popcorn/pcn_kmsg.h>
-#include <popcorn/process_server.h>
+#include <popcorn/types.h>
 
 #include "types.h"
 #include "wait_station.h"

@@ -14,6 +14,14 @@
 #undef MIGRATION_PROFILE
 #undef STATISTICS
 
-#include <popcorn/regset.h>
+#include <linux/sched.h>
+
+static inline bool process_is_distributed(struct task_struct *tsk)
+{
+	if (!tsk->mm) return false;
+	return !!tsk->mm->remote;
+}
+
+#include <popcorn/debug.h>
 
 #endif /* __INCLUDE_POPCORN_TYPES_H__ */

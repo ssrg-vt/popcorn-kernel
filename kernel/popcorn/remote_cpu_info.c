@@ -28,12 +28,12 @@
 #endif
 
 #define REMOTE_CPUINFO_MESSAGE_FIELDS \
-	struct _remote_cpu_info_data cpu_info_data; \
+	struct remote_cpu_info cpu_info_data; \
 	int nid; \
 	int origin_ws;
 DEFINE_PCN_KMSG(remote_cpu_info_data_t, REMOTE_CPUINFO_MESSAGE_FIELDS);
 
-static struct _remote_cpu_info_data *saved_cpu_info[MAX_POPCORN_NODES];
+static struct remote_cpu_info *saved_cpu_info[MAX_POPCORN_NODES];
 
 void send_remote_cpu_info_request(unsigned int nid)
 {
@@ -77,10 +77,10 @@ unsigned int get_number_cpus_from_remote_node(unsigned int nid)
 	unsigned int num_cpus = 0;
 
 	switch (saved_cpu_info[nid]->arch_type) {
-	case arch_x86:
+	case POPCORN_ARCH_X86:
 		num_cpus = saved_cpu_info[nid]->arch.x86.num_cpus;
 		break;
-	case arch_arm:
+	case POPCORN_ARCH_ARM:
 		num_cpus = saved_cpu_info[nid]->arch.arm64.num_cpus;
 		break;
 	default:
@@ -167,7 +167,7 @@ int remote_cpu_info_init(void)
 
 	/* Allocate the buffer for saving remote CPU info */
 	for (i = 0; i < MAX_POPCORN_NODES; i++)
-		saved_cpu_info[i] = kzalloc(sizeof(struct _remote_cpu_info_data),
+		saved_cpu_info[i] = kzalloc(sizeof(struct remote_cpu_info),
 					    GFP_KERNEL);
 
 	/* Register callbacks for both request and response */
@@ -181,7 +181,7 @@ int remote_cpu_info_init(void)
 }
 
 static void print_x86_cpuinfo(struct seq_file *m,
-		       struct _remote_cpu_info_data *data,
+		       struct remote_cpu_info *data,
 		       int count)
 {
 	seq_printf(m, "processor\t: %u\n", data->arch.x86.cpu[count]._processor);
@@ -210,7 +210,7 @@ static void print_x86_cpuinfo(struct seq_file *m,
 }
 
 static void print_arm_cpuinfo(struct seq_file *m,
-		       struct _remote_cpu_info_data *data,
+		       struct remote_cpu_info *data,
 		       int count)
 {
 	seq_printf(m, "processor\t: %u\n", data->arch.arm64.percore[count].processor_id);
@@ -254,10 +254,10 @@ int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos
 	seq_printf(m, "****    Remote CPU at %d   ****\n", nid);
 
 	switch (saved_cpu_info[nid]->arch_type) {
-	case arch_x86:
+	case POPCORN_ARCH_X86:
 		print_x86_cpuinfo(m, saved_cpu_info[nid], vpos);
 		break;
-	case arch_arm:
+	case POPCORN_ARCH_ARM:
 		print_arm_cpuinfo(m, saved_cpu_info[nid], vpos);
 		break;
 	default:

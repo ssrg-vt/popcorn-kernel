@@ -26,7 +26,7 @@
 #include <asm/trace/exceptions.h>
 
 #ifdef CONFIG_POPCORN
-#include <popcorn/process_server.h>
+#include <popcorn/types.h>
 #include <popcorn/vma_server.h>
 #endif
 
@@ -1014,7 +1014,7 @@ NOKPROBE_SYMBOL(spurious_fault);
 
 int show_unhandled_signals = 1;
 
-inline int
+static inline int
 access_error(unsigned long error_code, struct vm_area_struct *vma)
 {
 	if (error_code & PF_WRITE) {

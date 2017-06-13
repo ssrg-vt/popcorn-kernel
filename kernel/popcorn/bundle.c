@@ -12,7 +12,7 @@
 #include "types.h"
 
 struct popcorn_node {
-	enum popcorn_node_arch arch;
+	enum popcorn_arch arch;
 	int bundle_id;
 
 	bool is_connected;
@@ -39,15 +39,15 @@ EXPORT_SYMBOL(my_nid);
 
 const int my_arch =
 #ifdef CONFIG_X86_64
-	POPCORN_NODE_X86;
+	POPCORN_ARCH_X86;
 #elif defined(CONFIG_ARM64)
-	POPCORN_NODE_ARM;
+	POPCORN_ARCH_ARM;
 #elif defined(CONFIG_PPC64)
-	POPCORN_NODE_PPC;
+	POPCORN_ARCH_PPC;
 #elif defined(CONFIG_SPARC64)
-	POPCORN_NODE_SPARC;
+	POPCORN_ARCH_SPARC;
 #else
-	POPCORN_NODE_UNKNOWN;
+	POPCORN_ARCH_UNKNOWN;
 #endif
 EXPORT_SYMBOL(my_arch);
 
@@ -58,8 +58,8 @@ int get_popcorn_node_arch(int nid)
 EXPORT_SYMBOL(get_popcorn_node_arch);
 
 const char *archs_sz[] = {
-	"x86_64",
-	"aarch64",
+	"x86",
+	"arm",
 	"powerpc",
 	"sparcs",
 };
@@ -99,13 +99,13 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 int __init popcorn_nodes_init(void)
 {
 	int i;
-	BUG_ON(my_arch == POPCORN_NODE_UNKNOWN);
+	BUG_ON(my_arch == POPCORN_ARCH_UNKNOWN);
 
 	for (i = 0; i < MAX_POPCORN_NODES; i++) {
 		struct popcorn_node *pn = popcorn_nodes + i;
 
 		pn->is_connected = false;
-		pn->arch = POPCORN_NODE_UNKNOWN;
+		pn->arch = POPCORN_ARCH_UNKNOWN;
 		pn->bundle_id = -1;
 	}
 

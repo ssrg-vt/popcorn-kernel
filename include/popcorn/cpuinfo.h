@@ -19,22 +19,12 @@
 #ifndef _LINUX_POPCORN_CPUINFO_H
 #define _LINUX_POPCORN_CPUINFO_H
 
-#define POPCORN_CPUMASK_SIZE 64
-#define POPCORN_CPUMASK_BITS (POPCORN_CPUMASK_SIZE * BITS_PER_BYTE)
-
-#if (POPCORN_CPUMASK_BITS < NR_CPUS)
-#error POPCORN_CPUMASK_BITS can not be smaller then NR_CPUS
-#endif
-
 #define MAX_ARM_CORES 96
 #define MAX_X86_CORES 16
 
-enum arch_t {
-	arch_unknown = 0,
-	arch_x86,
-	arch_arm,
-};
+#include <popcorn/bundle.h>
 
+/* For x86_64 cores */
 typedef struct __percpu_arch_x86 {
 	unsigned int _processor;
 	char _vendor_id[16];
@@ -64,6 +54,8 @@ typedef struct __cpuinfo_arch_x86 {
 	percpu_arch_x86_t cpu[MAX_X86_CORES];
 } cpuinfo_arch_x86_t;
 
+
+/* For arm64 cores */
 typedef struct __per_core_info_t {
 	unsigned int processor_id;
 	bool compat;
@@ -85,36 +77,22 @@ typedef struct __cpuinfo_arch_arm64 {
 	per_core_info_t percore[MAX_ARM_CORES];
 } cpuinfo_arch_arm64_t;
 
+
 typedef union __cpuinfo_arch {
 	cpuinfo_arch_x86_t x86;
 	cpuinfo_arch_arm64_t arm64;
 } cpuinfo_arch_t;
 
 
-struct _remote_cpu_info_data {
-	// TODO the following must be added for the messaging layer
-	unsigned int endpoint;
-
-	// TODO it must support different cpu type in an heterogeneous setting
+struct remote_cpu_info {
 	unsigned int _processor;
-	enum arch_t arch_type;
+	enum popcorn_arch arch_type;
 
-	int cpumask_offset;
-	int cpumask_size;
-	unsigned long cpumask[POPCORN_CPUMASK_SIZE];
 	cpuinfo_arch_t arch;
 };
-typedef struct _remote_cpu_info_data _remote_cpu_info_data_t;
-
-struct _remote_cpu_info_list {
-	_remote_cpu_info_data_t _data;
-	struct list_head cpu_list_member;
-};
-typedef struct _remote_cpu_info_list _remote_cpu_info_list_t;
-
 
 /* External function declarations */
-extern int fill_cpu_info(_remote_cpu_info_data_t *res);
+extern int fill_cpu_info(struct remote_cpu_info *res);
 extern int get_proccessor_id(void);
 
 #endif

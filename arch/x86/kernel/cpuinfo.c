@@ -46,17 +46,18 @@ static void *remote_c_start(loff_t *pos)
 	return NULL;
 }
 
-int fill_cpu_info(_remote_cpu_info_data_t *res)
+int fill_cpu_info(struct remote_cpu_info *res)
 {
-	void *p;
 	loff_t pos = 0;
 	struct cpuinfo_x86 *c;
 	unsigned int cpu = 0;
 	int i, count = 0;
 	cpuinfo_arch_x86_t *arch = &res->arch.x86;
 
+	res->arch_type = POPCORN_ARCH_X86;
+
 	while (count < NR_CPUS) {
-		p = remote_c_start(&pos);
+		void *p = remote_c_start(&pos);
 
 		if(p == NULL)
 			break;
@@ -69,7 +70,6 @@ int fill_cpu_info(_remote_cpu_info_data_t *res)
 #endif
 
 		res->_processor = cpu;
-		res->arch_type = arch_x86;
 
 		arch->cpu[count]._processor = cpu;
 		strcpy(arch->cpu[count]._vendor_id,

@@ -73,14 +73,14 @@ static const char *const compat_hwcap2_str[] = {
 };
 #endif /* CONFIG_COMPAT */
 
-int fill_cpu_info(_remote_cpu_info_data_t *res)
+int fill_cpu_info(struct remote_cpu_info *res)
 {
 	int i, j;
 	bool compat = personality(current->personality) == PER_LINUX32;
 	unsigned int count = 0;
 	cpuinfo_arch_arm64_t *arch = &res->arch.arm64;
 
-	res->arch_type = arch_arm;
+	res->arch_type = POPCORN_ARCH_ARM;
 
 	for_each_online_cpu(i) {
 		struct cpuinfo_arm64 *cpuinfo = &per_cpu(cpu_data, i);

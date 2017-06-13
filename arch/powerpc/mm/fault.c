@@ -45,7 +45,7 @@
 #include <asm/debug.h>
 
 #ifdef CONFIG_POPCORN
-#include <popcorn/process_server.h>
+#include <popcorn/types.h>
 #include <popcorn/vma_server.h>
 #endif
 

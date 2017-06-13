@@ -9,8 +9,7 @@
 #include <linux/slab.h>
 
 #include <popcorn/pcn_kmsg.h>
-#include <popcorn/types.h>
-
+#include <popcorn/regset.h>
 
 /**
  * Remote execution context
@@ -66,7 +65,7 @@ bool __put_task_remote(struct remote_context *rc);
 	unsigned long sas_ss_sp;\
 	size_t sas_ss_size;\
 	struct k_sigaction action[_NSIG]; \
-	field_arch arch;
+	struct field_arch arch;
 DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 
 #define CLONE_FIELDS \
@@ -94,7 +93,7 @@ DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 	unsigned long sas_ss_sp;\
 	size_t sas_ss_size;\
 	struct k_sigaction action[_NSIG];\
-	field_arch arch;
+	struct field_arch arch;
 DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
 
 
@@ -117,7 +116,7 @@ DEFINE_PCN_KMSG(remote_task_pairing_t, REMOTE_TASK_PAIRING_FIELDS);
 	pid_t remote_pid; \
 	bool expect_flush; \
 	long exit_code; \
-	field_arch arch;
+	struct field_arch arch;
 DEFINE_PCN_KMSG(task_exit_t, TASK_EXIT_FIELDS);
 
 #define TASK_KILL_FIELDS \
@@ -128,7 +127,7 @@ DEFINE_PCN_KMSG(task_kill_t, TASK_KILL_FIELDS);
 
 
 /**
- * VMA and page management
+ * VMA management
  */
 #define REMOTE_VMA_REQUEST_FIELDS \
 	pid_t origin_pid; \
@@ -151,6 +150,9 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 #define remote_vma_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
 
 
+/**
+ * Page management
+ */
 #define REMOTE_PAGE_REQUEST_FIELDS \
 	int origin_nid; \
 	pid_t origin_pid; \
@@ -219,6 +221,9 @@ DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 
 
+/**
+ * Node information
+ */
 #define NODE_INFO_FIELDS \
 	int nid; \
 	int bundle_id; \
