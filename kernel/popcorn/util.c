@@ -1,8 +1,6 @@
 #include <linux/mm.h>
 #include <linux/slab.h>
 
-#include <popcorn/debug.h>
-
 void print_page_data(unsigned char *addr)
 {
 	int i;
@@ -37,7 +35,7 @@ static char *__print_buffer = NULL;
 
 void print_page_owner(struct page *page, unsigned long addr, pid_t pid)
 {
-	if (!unlikely(__print_buffer)) {
+	if (unlikely(!__print_buffer)) {
 		__print_buffer = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	}
 	spin_lock(&__print_lock);
@@ -47,3 +45,37 @@ void print_page_owner(struct page *page, unsigned long addr, pid_t pid)
 	spin_unlock(&__print_lock);
 }
 
+
+#include <linux/fs.h>
+
+static DEFINE_SPINLOCK(__file_path_lock);
+static char *__file_path_buffer = NULL;
+
+int get_file_path(struct file *file, char *sz, size_t size)
+{
+	char *ppath;
+	int retval = 0;
+
+	if (!file) {
+		BUG_ON(size < 1);
+		sz[0] = '\0';
+		return -EINVAL;
+	}
+
+	if (unlikely(!__file_path_buffer)) {
+		__file_path_buffer = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	}
+
+	spin_lock(&__file_path_lock);
+	ppath = file_path(file, __file_path_buffer, PAGE_SIZE);
+	if (IS_ERR(ppath)) {
+		retval = -ESRCH;
+		goto out_unlock;
+	}
+
+	strncpy(sz, ppath, size);
+
+out_unlock:
+	spin_unlock(&__file_path_lock);
+	return 0;
+}

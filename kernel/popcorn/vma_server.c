@@ -37,6 +37,7 @@
 #include <popcorn/vma_server.h>
 
 #include "types.h"
+#include "util.h"
 #include "vma_server.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1842,8 +1843,6 @@ static void process_remote_vma_request(struct work_struct *work)
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	unsigned long addr = req->addr;
-	char path[512];
-	char *ppath;
 
 	might_sleep();
 
@@ -1891,13 +1890,7 @@ good:
 	res->vm_flags = vma->vm_flags;
 	res->vm_pgoff = vma->vm_pgoff;
 
-	if (vma->vm_file) {
-		/* File-mapped page */
-		ppath = d_path(&vma->vm_file->f_path, path, sizeof(path));
-		strncpy(res->vm_file_path, ppath, sizeof(res->vm_file_path));
-	} else {
-		res->vm_file_path[0] = '\0';
-	}
+	get_file_path(vma->vm_file, res->vm_file_path, sizeof(res->vm_file_path));
 	res->result = 0;
 
 	set_bit(req->remote_nid, vma->vm_owners);

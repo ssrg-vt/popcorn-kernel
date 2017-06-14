@@ -33,7 +33,7 @@
 
 #include "types.h"
 #include "stat.h"
-#include "debug.h"
+#include "util.h"
 #include "pgtable.h"
 #include "wait_station.h"
 

@@ -30,6 +30,7 @@
 #include "types.h"
 #include "vma_server.h"
 #include "page_server.h"
+#include "util.h"
 #include "stat.h"
 
 
@@ -778,7 +779,6 @@ static int handle_clone_request(struct pcn_kmsg_message *msg)
  */
 static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __user *uregs)
 {
-	char *rpath, path[512];
 	struct mm_struct *mm = get_task_mm(tsk);
 	clone_request_t *req;
 	int ret;
@@ -793,13 +793,10 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* struct mm_struct */
-	rpath = d_path(&mm->exe_file->f_path, path, sizeof(path));
-	if (IS_ERR(rpath)) {
-		printk("%s: exe binary path is too long.\n", __func__);
+	if (get_file_path(mm->exe_file, req->exe_path, sizeof(req->exe_path))) {
+		printk("%s: cannot get path to exe binary\n", __func__);
 		ret = -ESRCH;
 		goto out;
-	} else {
-		strncpy(req->exe_path, rpath, sizeof(req->exe_path));
 	}
 
 	req->stack_start = mm->start_stack;
