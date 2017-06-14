@@ -29,6 +29,11 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 #include "internal.h"
 
 /*
@@ -365,6 +370,12 @@ SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
 		return -ENOMEM;
 	if (!arch_validate_prot(prot))
 		return -EINVAL;
+
+#ifdef CONFIG_POPCORN
+	if (process_is_distributed(current) && current->at_remote) {
+		vma_server_mprotect_remote(start, len, prot);
+	}
+#endif
 
 	reqprot = prot;
 	/*

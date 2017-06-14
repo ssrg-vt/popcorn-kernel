@@ -21,6 +21,11 @@
 #include <linux/swap.h>
 #include <linux/swapops.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 /*
  * Any behaviour which results in changes to the vma->vm_flags needs to
  * take mmap_sem for writing. Others, which simply traverse vmas, need
@@ -489,6 +494,12 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	error = 0;
 	if (end == start)
 		return error;
+
+#ifdef CONFIG_POPCORN
+	if (process_is_distributed(current) && current->remote) {
+		vma_server_madvise_remote(start, len, behavior);
+	}
+#endif
 
 	write = madvise_need_mmap_write(behavior);
 	if (write)

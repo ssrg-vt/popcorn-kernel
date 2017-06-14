@@ -31,10 +31,16 @@ struct remote_context {
 	spinlock_t vmas_lock;
 	struct list_head vmas;
 
-	/* Auxiliary threads */
-	struct task_struct *vma_worker;
+	/* Auxiliary threads control */
 	bool vma_worker_stop;
 
+	/* VMA worker */
+	struct task_struct *vma_worker;
+	struct completion vma_works_ready;
+	struct list_head vma_works;
+	spinlock_t vma_works_lock;
+
+	/* Shadow spawner */
 	struct task_struct *shadow_spawner;
 	struct completion spawn_egg;
 	struct list_head shadow_eggs;
@@ -147,7 +153,39 @@ DEFINE_PCN_KMSG(remote_vma_request_t, REMOTE_VMA_REQUEST_FIELDS);
 	char vm_file_path[512]; \
 	unsigned char vm_owners[MAX_POPCORN_NODES];
 DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
+
 #define remote_vma_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
+
+
+struct mmap_params {
+	unsigned long prot;
+	unsigned long flags;
+	unsigned long pgoff;
+	char path[512];
+};
+
+#define VMA_OP_REQUEST_FIELDS \
+	pid_t origin_pid; \
+	int remote_nid; \
+	pid_t remote_pid; \
+	int remote_ws; \
+	int operation; \
+	unsigned long addr; \
+	unsigned long len; \
+	union { \
+		struct mmap_params mmap_params; \
+	};
+DEFINE_PCN_KMSG(vma_op_request_t, VMA_OP_REQUEST_FIELDS);
+
+#define VMA_OP_RESPONSE_FIELDS \
+	pid_t origin_pid; \
+	int origin_nid; \
+	pid_t remote_pid; \
+	int remote_ws; \
+	int ret; \
+	unsigned long addr; \
+	unsigned long len;
+DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 
 
 /**

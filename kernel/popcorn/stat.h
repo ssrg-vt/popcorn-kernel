@@ -18,12 +18,6 @@ extern ktime_t migration_end;
 
 #endif
 
-#if defined(CONFIG_ARM64)
-#define MY_ARCH	"ARM"
-#elif defined(CONFIG_X86) || defined(CONFIG_X86_64)
-#define MY_ARCH	"x86"
-#endif
-
 extern int page_fault_mio;
 extern int fetch;
 extern int local_fetch;

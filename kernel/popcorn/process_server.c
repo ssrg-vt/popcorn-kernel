@@ -111,8 +111,12 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	INIT_LIST_HEAD(&rc->vmas);
 	spin_lock_init(&rc->vmas_lock);
 
-	rc->vma_worker = NULL;
 	rc->vma_worker_stop = false;
+
+	rc->vma_worker = NULL;
+	INIT_LIST_HEAD(&rc->vma_works);
+	spin_lock_init(&rc->vma_works_lock);
+	init_completion(&rc->vma_works_ready);
 
 	rc->shadow_spawner = NULL;
 	INIT_LIST_HEAD(&rc->shadow_eggs);
@@ -855,7 +859,9 @@ static int vma_worker_origin(void *_arg)
 	current->at_remote = false;
 	use_mm(rc->mm);
 
-	vma_worker_main(rc, "local");
+	current->flags &= ~(PF_KTHREAD);
+
+	vma_worker_main(rc, "origin");
 
 	return 0;
 }

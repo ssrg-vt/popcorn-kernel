@@ -29,6 +29,11 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 static pmd_t *get_old_pmd(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
@@ -489,6 +494,12 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 
 	old_len = PAGE_ALIGN(old_len);
 	new_len = PAGE_ALIGN(new_len);
+
+#ifdef CONFIG_POPCORN
+	if (process_is_distributed(current) && current->at_remote) {
+		vma_server_mremap_remote(addr, old_len, new_len, flags, new_addr);
+	}
+#endif
 
 	/*
 	 * We allow a zero old-len as a special case

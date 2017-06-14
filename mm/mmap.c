@@ -48,6 +48,11 @@
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 #include "internal.h"
 
 #ifndef arch_mmap_check
@@ -290,6 +295,14 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 	struct mm_struct *mm = current->mm;
 	unsigned long min_brk;
 	bool populate;
+
+#ifdef CONFIG_POPCORN
+	if (process_is_distributed(current) && current->at_remote) {
+		if (!vma_server_brk_remote(brk)) {
+			return mm->brk;
+		}
+	}
+#endif
 
 	down_write(&mm->mmap_sem);
 
@@ -1452,6 +1465,13 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 	}
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
+
+#ifdef CONFIG_POPCORN
+	if (process_is_distributed(current) && current->at_remote) {
+		retval = vma_server_mmap_remote(file, addr, len, prot, flags, pgoff);
+		goto out_fput;
+	}
+#endif
 
 	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
 out_fput:
@@ -2629,6 +2649,12 @@ EXPORT_SYMBOL(vm_munmap);
 SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 {
 	profile_munmap(addr);
+
+#ifdef CONFIG_POPCORN
+	if (process_is_distributed(current) && current->at_remote) {
+		vma_server_munmap_remote(addr, len);
+	}
+#endif
 	return vm_munmap(addr, len);
 }
 
