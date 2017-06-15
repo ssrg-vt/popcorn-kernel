@@ -14,6 +14,7 @@
 
 struct remote_context;
 
-void vma_worker_main(struct remote_context *rc, const char *at);
+void vma_worker_origin(struct remote_context *rc);
+void vma_worker_remote(struct remote_context *rc);
 
 #endif /* KERNEL_POPCORN_VMA_SERVER_H_ */

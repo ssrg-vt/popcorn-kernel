@@ -663,7 +663,7 @@ struct vma_worker_params {
 	char comm[TASK_COMM_LEN];
 };
 
-static int vma_worker_remote(void *_data)
+static int start_vma_worker_remote(void *_data)
 {
 	struct vma_worker_params *params = (struct vma_worker_params *)_data;
 	struct pcn_kmsg_work *work = params->work;
@@ -708,7 +708,7 @@ static int vma_worker_remote(void *_data)
 	current->flags &= ~PF_KTHREAD;
 
 	kfree(params);
-	vma_worker_main(rc, "remote");
+	vma_worker_remote(rc);
 
 	return 0;
 }
@@ -749,7 +749,7 @@ static void clone_remote_thread(struct work_struct *_work)
 		smp_mb();
 
 		rc->vma_worker =
-				kthread_run(vma_worker_remote, params, params->comm);
+				kthread_run(start_vma_worker_remote, params, params->comm);
 	} else {
 		__unlock_remote_contexts_in(nid_from);
 		kfree(rc_new);
@@ -850,7 +850,7 @@ out:
 }
 
 
-static int vma_worker_origin(void *_arg)
+static int start_vma_worker_origin(void *_arg)
 {
 	struct remote_context *rc = _arg;
 
@@ -861,7 +861,7 @@ static int vma_worker_origin(void *_arg)
 
 	current->flags &= ~(PF_KTHREAD);
 
-	vma_worker_main(rc, "origin");
+	vma_worker_origin(rc);
 
 	return 0;
 }
@@ -914,7 +914,8 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	unlock_task_sighand(tsk, &flags);
 
 	if (create_vma_worker) {
-		rc->vma_worker = kthread_run(vma_worker_origin, rc, "worker_origin");
+		rc->vma_worker =
+			kthread_run(start_vma_worker_origin, rc, "worker_origin");
 	}
 	PSPRINTK("%s [%d]: remote context %s\n", __func__, tsk->pid, which_rc);
 

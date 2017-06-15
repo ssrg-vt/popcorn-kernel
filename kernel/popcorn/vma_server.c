@@ -1416,12 +1416,12 @@ static vma_op_request_t *__get_pending_vma_op(struct remote_context *rc)
 	return req;
 }
 
-void vma_worker_main(struct remote_context *rc, const char *at)
+void vma_worker_origin(struct remote_context *rc)
 {
 	struct mm_struct *mm = get_task_mm(current);
 	might_sleep();
 
-	PSPRINTK("%s [%d] at %s\n", __func__, current->pid, at);
+	PSPRINTK("%s [%d] started\n", __func__, current->pid);
 
 	while (!kthread_should_stop()) {
 		vma_op_request_t *req;
@@ -1458,22 +1458,32 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 			}
 
 			req->addr = raddr;
-			__reply_vma_op(req, ret);
 
 			if (f) filp_close(f, NULL);
 			break;
 		}
+		case VMA_OP_BRK:
+			down_write(&mm->mmap_sem);
+			ret = do_brk(req->addr, req->len);
+			up_write(&mm->mmap_sem);
+			break;
 		case VMA_OP_UNMAP:
-			__replay_vma_op(req, 0);
+			down_write(&mm->mmap_sem);
+			ret = do_munmap(mm, req->addr, req->len);
+			up_write(&mm->mmap_sem);
 			break;
 		case VMA_OP_PROTECT:
 		case VMA_OP_REMAP:
-		case VMA_OP_BRK:
 		case VMA_OP_MADVISE:
+			ret = -EPERM;
 			break;
 		default:
+			ret = -EPERM;
 			WARN_ON("NO valid VMA operation");
 		}
+
+		__reply_vma_op(req, ret);
+
 		/*
 		extern long madvise_remove(struct vm_area_struct *vma,
 			struct vm_area_struct **prev, unsigned long start, unsigned long end);
@@ -1539,7 +1549,38 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 	}
 	mmput(mm);
 
-	printk("%s [%d] %s exited\n", __func__, current->pid, at);
+	printk("%s [%d] exited\n", __func__, current->pid);
+
+	return;
+}
+
+void vma_worker_remote(struct remote_context *rc)
+{
+	struct mm_struct *mm = get_task_mm(current);
+	might_sleep();
+
+	PSPRINTK("%s [%d] started\n", __func__, current->pid);
+
+	while (!kthread_should_stop()) {
+		vma_op_request_t *req;
+		int ret;
+
+		if (!(req = __get_pending_vma_op(rc))) continue;
+
+		printk("\n#### VMA_WORKER [%d] %d - %lx %lx\n", current->pid,
+				req->operation, req->addr, req->len);
+
+		switch (req->operation) {
+		case VMA_OP_MAP:
+			break;
+		default:
+			break;
+		}
+		pcn_kmsg_free_msg(req);
+	}
+	mmput(mm);
+
+	printk("%s [%d] exited\n", __func__, current->pid);
 
 	return;
 }
