@@ -1264,28 +1264,26 @@ unsigned long vma_server_mmap_remote(struct file *file,
 	unsigned long ret = 0;
 	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_MAP, &ws);
 
-	struct mmap_params *params = &req->mmap_params;
 	vma_op_response_t *res;
 
 	req->addr = addr;
 	req->len = len;
 
-	params->prot = prot;
-	params->flags = flags;
-	params->pgoff = pgoff;
-	get_file_path(file, params->path, sizeof(params->path));
+	req->prot = prot;
+	req->flags = flags;
+	req->pgoff = pgoff;
+	get_file_path(file, req->path, sizeof(req->path));
 
 	VSPRINTK("\n### VMA mmap [%d] %lx - %lx\n", current->pid,
 			addr, addr + len);
-	if (params->path[0] != '\0') {
-		VSPRINTK("  [%d] %s\n", current->pid, params->path);
+	if (req->path[0] != '\0') {
+		VSPRINTK("  [%d] %s\n", current->pid, req->path);
 	}
-
-	down_write(&current->mm->mmap_sem);
 
 	pcn_kmsg_send(current->origin_nid, req, sizeof(*req));
 	res = wait_at_station(ws);
 	put_wait_station(ws);
+	BUG_ON(res->operation != req->operation);
 
 	if (res->ret) {
 		ret = -EINVAL;
@@ -1295,6 +1293,7 @@ unsigned long vma_server_mmap_remote(struct file *file,
 	VSPRINTK("  [%d] <-- %lx %lx -- %lx\n", current->pid,
 			addr, res->addr, res->addr + res->len);
 
+	down_write(&current->mm->mmap_sem);
 	ret = map_difference(current->mm, file, res->addr, res->addr + res->len,
 			prot, flags, pgoff);
 	up_write(&current->mm->mmap_sem);
@@ -1320,10 +1319,20 @@ int vma_server_munmap_remote(unsigned long start, size_t len)
 	pcn_kmsg_send(current->origin_nid, req, sizeof(*req));
 	res = wait_at_station(ws);
 	put_wait_station(ws);
+	BUG_ON(res->operation != req->operation);
+
+	down_write(&current->mm->mmap_sem);
+	up_write(&current->mm->mmap_sem);
 
 	kfree(req);
 	pcn_kmsg_free_msg(res);
 
+	return -EINVAL;
+}
+
+int vma_server_munmap_origin(unsigned long start, size_t len)
+{
+	VSPRINTK("\n### VMA munmap [%d] %lx %lx\n", current->pid, start, len);
 	return -EINVAL;
 }
 
@@ -1362,7 +1371,7 @@ int vma_server_mremap_remote(unsigned long addr, unsigned long old_len,
  * We do this stupid thing because functions related to meomry mapping operate
  * on "current". Thus, we need mmap/munmap/madvise in our process
  */
-static void __reply_vma_op(vma_op_request_t *req)
+static void __reply_vma_op(vma_op_request_t *req, int ret)
 {
 	vma_op_response_t res = {
 		.header = {
@@ -1374,11 +1383,12 @@ static void __reply_vma_op(vma_op_request_t *req)
 		.origin_nid = my_nid,
 		.remote_pid = req->remote_pid,
 		.remote_ws = req->remote_ws,
+		.operation = req->operation,
 	};
 
+	res.ret = ret;
 	res.addr = req->addr;
 	res.len = req->len;
-	res.ret = 0;
 
 	pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
 }
@@ -1415,6 +1425,7 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 
 	while (!kthread_should_stop()) {
 		vma_op_request_t *req;
+		int ret;
 
 		if (!(req = __get_pending_vma_op(rc))) continue;
 
@@ -1424,31 +1435,37 @@ void vma_worker_main(struct remote_context *rc, const char *at)
 		switch (req->operation) {
 		case VMA_OP_MAP: {
 			unsigned long populate = 0;
-			struct mmap_params *p = &req->mmap_params;
 			unsigned long raddr;
 			struct file *f = NULL;
 
-			if (p->path[0] != '\0')
-				f = filp_open(p->path, O_RDONLY | O_LARGEFILE, 0);
+			if (req->path[0] != '\0')
+				f = filp_open(req->path, O_RDONLY | O_LARGEFILE, 0);
 
 			if (IS_ERR(f)) {
-				printk("  [%d] Cannot open %s\n", current->pid, p->path);
+				printk("  [%d] Cannot open %s\n", current->pid, req->path);
 				break;
 			}
 			down_write(&mm->mmap_sem);
-			raddr = do_mmap_pgoff(f, req->addr, req->len, p->prot,
-					p->flags, p->pgoff, &populate);
+			raddr = do_mmap_pgoff(f, req->addr, req->len, req->prot,
+					req->flags, req->pgoff, &populate);
 			up_write(&mm->mmap_sem);
-
 			if (populate) mm_populate(raddr, populate);
 
+			if (IS_ERR_VALUE(raddr)) {
+				ret = raddr;
+			} else {
+				ret = 0;
+			}
+
 			req->addr = raddr;
-			__reply_vma_op(req);
+			__reply_vma_op(req, ret);
 
 			if (f) filp_close(f, NULL);
 			break;
 		}
 		case VMA_OP_UNMAP:
+			__replay_vma_op(req, 0);
+			break;
 		case VMA_OP_PROTECT:
 		case VMA_OP_REMAP:
 		case VMA_OP_BRK:

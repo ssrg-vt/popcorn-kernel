@@ -17,6 +17,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address);
 unsigned long vma_server_mmap_remote(struct file *file,
 		unsigned long addr, unsigned long len,
 		unsigned long prot, unsigned long flags, unsigned long pgoff);
+int vma_server_munmap_origin(unsigned long start, size_t len);
 int vma_server_munmap_remote(unsigned long start, size_t len);
 int vma_server_brk_remote(unsigned long brk);
 int vma_server_madvise_remote(unsigned long start, size_t len, int behavior);

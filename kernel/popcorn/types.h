@@ -157,24 +157,32 @@ DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 #define remote_vma_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
 
 
-struct mmap_params {
-	unsigned long prot;
-	unsigned long flags;
-	unsigned long pgoff;
-	char path[512];
-};
-
 #define VMA_OP_REQUEST_FIELDS \
 	pid_t origin_pid; \
 	int remote_nid; \
 	pid_t remote_pid; \
 	int remote_ws; \
 	int operation; \
-	unsigned long addr; \
-	unsigned long len; \
 	union { \
-		struct mmap_params mmap_params; \
-	};
+		unsigned long addr; \
+		unsigned long start; \
+		unsigned long brk; \
+	}; \
+	union { \
+		unsigned long len;		/* mmap */ \
+		unsigned long old_len;	/* mremap */ \
+	}; \
+	union { \
+		unsigned long prot;		/* mmap */ \
+		int behavior;			/* madvise */ \
+		unsigned long new_len;	/* mremap */ \
+	}; \
+	unsigned long flags;		/* mmap, remap */ \
+	union { \
+		unsigned long pgoff;	/* mmap */ \
+		unsigned long new_addr;	/* mremap */ \
+	}; \
+	char path[512];
 DEFINE_PCN_KMSG(vma_op_request_t, VMA_OP_REQUEST_FIELDS);
 
 #define VMA_OP_RESPONSE_FIELDS \
@@ -182,6 +190,7 @@ DEFINE_PCN_KMSG(vma_op_request_t, VMA_OP_REQUEST_FIELDS);
 	int origin_nid; \
 	pid_t remote_pid; \
 	int remote_ws; \
+	int operation; \
 	int ret; \
 	unsigned long addr; \
 	unsigned long len;
