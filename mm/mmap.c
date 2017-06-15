@@ -2651,8 +2651,14 @@ SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 	profile_munmap(addr);
 
 #ifdef CONFIG_POPCORN
-	if (process_is_distributed(current) && current->at_remote) {
-		vma_server_munmap_remote(addr, len);
+	if (process_is_distributed(current)) {
+		int ret;
+		if (current->at_remote) {
+			ret = vma_server_munmap_remote(addr, len);
+		} else {
+			ret = vma_server_munmap_origin(addr, len, my_nid);
+		}
+		if (ret) return ret;
 	}
 #endif
 	return vm_munmap(addr, len);
