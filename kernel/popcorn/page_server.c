@@ -822,6 +822,20 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, stru
 }
 
 
+void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *pte, pte_t *pteval)
+{
+	struct page *page;
+
+	if (!process_is_distributed(current)) return;
+
+	page = vm_normal_page(vma, addr, *pte);
+	if (!page) return;
+
+	*pteval = pte_make_valid(*pte);
+	set_pte_at(vma->vm_mm, addr, pte, *pteval);
+	PGPRINTK("  [%d] zap %lx\n", current->pid, addr);
+}
+
 
 /**************************************************************************
  * Remote fault handler at a remote location
@@ -899,7 +913,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
  */
 
 /* Defined in mm/memory.c */
-int handle_pte_fault_origin(struct mm_struct *mm, struct vm_area_struct *vma, unsigned long address, pte_t *pte, pmd_t *pmd, unsigned int flags);
+int handle_pte_fault_origin(struct mm_struct *, struct vm_area_struct *, unsigned long, pte_t *, pmd_t *, unsigned int);
 
 
 static int __handle_remotefault_at_origin(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, remote_page_request_t *req, remote_page_response_t *res)

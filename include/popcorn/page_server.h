@@ -26,4 +26,7 @@ int page_server_handle_pte_fault(
  */
 int page_server_flush_remote_pages(void);
 
+void page_server_zap_pte(
+	struct vm_area_struct *vma, unsigned long addr, pte_t *pte, pte_t *pteval);
+
 #endif /* INCLUDE_POPCORN_PAGE_SERVER_H_ */

@@ -1143,6 +1143,10 @@ again:
 			continue;
 		}
 
+#ifdef CONFIG_POPCORN
+		page_server_zap_pte(vma, addr, pte, &ptent);
+#endif
+
 		if (pte_present(ptent)) {
 			struct page *page;
 
