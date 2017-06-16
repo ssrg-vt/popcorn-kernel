@@ -939,7 +939,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 
 
 DEFINE_KMSG_WQ_HANDLER(remote_vma_request);
-DEFINE_KMSG_WQ_HANDLER(remote_vma_response);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(remote_vma_response);
 DEFINE_KMSG_WQ_HANDLER(vma_op_request);
 DEFINE_KMSG_NONBLOCK_WQ_HANDLER(vma_op_response);
 
