@@ -201,7 +201,7 @@ int process_server_task_exit(struct task_struct *tsk)
 		if (tsk->exit_code == TASK_PARKED) {
 			// Quietly exit back-migrated thread.
 		} else if (notify) {
-			task_exit_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
+			task_exit_t *req = kzalloc(sizeof(*req), GFP_KERNEL);
 			BUG_ON(!req);
 
 			if (last) {
@@ -236,8 +236,9 @@ int process_server_task_exit(struct task_struct *tsk)
 		__lock_remote_contexts(tsk->at_remote);
 		list_del(&rc->list);
 		__unlock_remote_contexts(tsk->at_remote);
-		kthread_stop(rc->vma_worker);
 		rc->vma_worker_stop = true;
+		smp_mb();
+		complete(&rc->vma_works_ready);
 		complete(&rc->spawn_egg);
 	}
 
@@ -258,33 +259,29 @@ static void process_exit_task(struct work_struct *_work)
 	struct task_struct *tsk;
 
 	tsk = __get_task_struct(req->origin_pid);
-	if (!tsk) {
+	if (!tsk || tsk->remote_pid != req->remote_pid) {
 		printk(KERN_INFO"%s: %d not found\n", __func__, req->origin_pid);
 		goto out;
 	}
 
-	if (tsk->remote_pid == req->remote_pid) {
-		printk(KERN_INFO"%s [%d]: exited with 0x%lx\n", __func__,
-				tsk->pid, req->exit_code);
+	printk(KERN_INFO"%s [%d]: exited with 0x%lx\n", __func__,
+			tsk->pid, req->exit_code);
 
-		if (req->expect_flush) {
-			wait_for_completion(&tsk->wait_for_remote_flush);
-		}
-		tsk->remote = NULL;
-		tsk->remote_nid = -1;
-		tsk->remote_pid = -1;
-		put_task_remote(tsk);
-
-		tsk->ret_from_remote = TASK_DEAD;
-		tsk->exit_code = req->exit_code;
-
-		restore_thread_info(tsk, &req->arch, false);
-		smp_mb();
-
-		wake_up_process(tsk);
-	} else {
-		printk(KERN_INFO"%s: %d not found\n", __func__, req->origin_pid);
+	if (req->expect_flush) {
+		wait_for_completion(&tsk->wait_for_remote_flush);
 	}
+	tsk->remote = NULL;
+	tsk->remote_nid = -1;
+	tsk->remote_pid = -1;
+	put_task_remote(tsk);
+
+	tsk->ret_from_remote = TASK_DEAD;
+	tsk->exit_code = req->exit_code;
+
+	restore_thread_info(tsk, &req->arch, false);
+	smp_mb();
+
+	wake_up_process(tsk);
 	put_task_struct(tsk);
 
 out:

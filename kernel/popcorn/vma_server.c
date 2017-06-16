@@ -419,7 +419,7 @@ static vma_op_request_t *__get_pending_vma_op(struct remote_context *rc)
 	struct work_struct *work = NULL;
 	vma_op_request_t *req;
 
-	wait_for_completion_timeout(&rc->vma_works_ready, 10 * HZ);
+	wait_for_completion_interruptible_timeout(&rc->vma_works_ready, HZ);
 
 	spin_lock(&rc->vma_works_lock);
 	if (!list_empty(&rc->vma_works)) {
@@ -464,7 +464,7 @@ void vma_worker_origin(struct remote_context *rc)
 
 	PSPRINTK("%s [%d] started\n", __func__, current->pid);
 
-	while (!kthread_should_stop()) {
+	while (!rc->vma_worker_stop) {
 		vma_op_request_t *req;
 		int ret = -EPERM;
 
@@ -554,7 +554,7 @@ void vma_worker_remote(struct remote_context *rc)
 
 	PSPRINTK("%s [%d] started\n", __func__, current->pid);
 
-	while (!kthread_should_stop()) {
+	while (!rc->vma_worker_stop) {
 		vma_op_request_t *req;
 		int ret = -EPERM;
 
