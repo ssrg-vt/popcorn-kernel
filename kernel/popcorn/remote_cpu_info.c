@@ -39,7 +39,7 @@ void send_remote_cpu_info_request(unsigned int nid)
 {
 	remote_cpu_info_data_t *request;
 	remote_cpu_info_data_t *response;
-	struct wait_station *ws = get_wait_station(current->pid, 1);
+	struct wait_station *ws = get_wait_station(current);
 
 	CPUPRINTK("%s: Entered, nid: %d\n", __func__, nid);
 
@@ -60,8 +60,7 @@ void send_remote_cpu_info_request(unsigned int nid)
 	pcn_kmsg_send(nid, request, sizeof(*request));
 
 	/* 2. Request message should wait until response message is done. */
-	wait_at_station(ws);
-	response = ws->private;
+	response = wait_at_station(ws);
 	put_wait_station(ws);
 
 	memcpy(saved_cpu_info[nid], &response->cpu_info_data,

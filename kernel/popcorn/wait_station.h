@@ -12,10 +12,14 @@ struct wait_station {
 	atomic_t pendings_count;
 };
 
-extern struct wait_station wait_stations[];
+struct task_struct;
 
-struct wait_station *get_wait_station(pid_t pid, int count);
+struct wait_station *get_wait_station_multiple(struct task_struct *tsk, int count);
+static inline struct wait_station *get_wait_station(struct task_struct *tsk)
+{
+	return get_wait_station_multiple(tsk, 1);
+}
 struct wait_station *wait_station(int id);
 void put_wait_station(struct wait_station *ws);
-void wait_at_station(struct wait_station *ws);
+void *wait_at_station(struct wait_station *ws);
 #endif

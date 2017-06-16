@@ -202,7 +202,7 @@ static int get_remote_popcorn_ps_load(struct task_struct *tsk, int origin_nid, i
 		.origin_pid = origin_pid,
 	};
 	remote_ps_response_t *res;
-	struct wait_station *ws = get_wait_station(tsk->pid, 1);
+	struct wait_station *ws = get_wait_station(tsk);
 
 	RPSPRINTK("%s: Entered, origin nid: %d, origin pid: %d\n",
 		  __func__, origin_nid, origin_pid);

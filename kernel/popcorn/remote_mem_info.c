@@ -262,7 +262,7 @@ remote_mem_info_response_t *send_remote_mem_info_request(unsigned int nid)
 		.nid = my_nid,
 	};
 	remote_mem_info_response_t *response;
-	struct wait_station *ws = get_wait_station(current->pid, 1);
+	struct wait_station *ws = get_wait_station(current);
 
 	MEMPRINTK("%s: Entered, nid: %d\n", __func__, nid);
 
@@ -274,8 +274,7 @@ remote_mem_info_response_t *send_remote_mem_info_request(unsigned int nid)
 	/* 1-2. Send request into remote node */
 	pcn_kmsg_send(nid, &request, sizeof(request));
 
-	wait_at_station(ws);
-	response = ws->private;
+	response = wait_at_station(ws);
 	put_wait_station(ws);
 
 	MEMPRINTK("%s: done\n", __func__);

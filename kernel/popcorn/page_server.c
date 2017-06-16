@@ -460,7 +460,7 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 		.private = req,
 	};
 	struct vm_area_struct *vma;
-	struct wait_station *ws = get_wait_station(current->pid, 1);
+	struct wait_station *ws = get_wait_station(current);
 
 	BUG_ON(!req);
 
@@ -691,15 +691,14 @@ static void __fetch_remote_page(struct task_struct *tsk, int from_nid, pid_t fro
 static remote_page_response_t *__get_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
 {
 	remote_page_response_t *rp;
-	struct wait_station *ws = get_wait_station(tsk->pid, 1);
+	struct wait_station *ws = get_wait_station(tsk);
 
 	// PGPRINTK("  [%d] fetch %lx origin %d\n", tsk->pid, addr, tsk->origin_nid);
 
 	__fetch_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
 			addr, fault_flags, ws->id);
 
-	wait_at_station(ws);
-	rp = ws->private;
+	rp = wait_at_station(ws);
 	put_wait_station(ws);
 
 	return rp;
@@ -764,7 +763,7 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 	}
 
 	/* one for fetch, @peers for revocation */
-	ws = get_wait_station(tsk->pid, peers + 1);
+	ws = get_wait_station_multiple(tsk, peers + 1);
 
 	for_each_set_bit(nid, page->owners, MAX_POPCORN_NODES) {
 		pid_t pid = rc->remote_tgids[nid];
@@ -782,13 +781,12 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 		}
 	}
 
-	wait_at_station(ws);
+	rp = wait_at_station(ws);
+	put_wait_station(ws);
 
 	if (fault_for_write(fault_flags)) {
 		clear_bit(from_nid, page->owners);
 	}
-	rp = ws->private;
-	put_wait_station(ws);
 
 	put_task_remote(tsk);
 	return rp;
@@ -805,7 +803,7 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, stru
 	if (peers > 0) {
 		int nid;
 		struct remote_context *rc = get_task_remote(tsk);
-		struct wait_station *ws = get_wait_station(tsk->pid, peers);
+		struct wait_station *ws = get_wait_station_multiple(tsk, peers);
 
 		for_each_set_bit(nid, page->owners, MAX_POPCORN_NODES) {
 			pid_t pid = rc->remote_tgids[nid];
