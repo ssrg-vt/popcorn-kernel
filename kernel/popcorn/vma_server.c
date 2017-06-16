@@ -353,8 +353,9 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 		struct wait_station *ws;
 		vma_op_response_t *res;
 
-		if (nid == my_nid|| nid == nid_except || !get_popcorn_node_online(nid))
-			continue;
+		if (!get_popcorn_node_online(nid) || !rc->remote_tgids[nid]) continue;
+
+		if (nid == my_nid|| nid == nid_except) continue;
 
 		ws = get_wait_station(current);
 		req->remote_ws = ws->id;
@@ -382,6 +383,28 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
  * We do this stupid thing because functions related to meomry mapping operate
  * on "current". Thus, we need mmap/munmap/madvise in our process
  */
+
+static void __reply_vma_op(vma_op_request_t *req, int ret)
+{
+	vma_op_response_t res = {
+		.header = {
+			.type = PCN_KMSG_TYPE_VMA_OP_RESPONSE,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.origin_pid = current->pid,
+		.origin_nid = my_nid,
+		.remote_pid = req->remote_pid,
+		.remote_ws = req->remote_ws,
+
+		.operation = req->operation,
+		.ret = ret,
+		.addr = req->addr,
+		.len = req->len,
+	};
+
+	pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
+}
+
 static void process_vma_op_request(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
@@ -390,7 +413,10 @@ static void process_vma_op_request(struct work_struct *_work)
 	struct list_head *entry = &((struct work_struct *)work)->entry;
 	struct remote_context *rc;
 
-	if (!tsk) goto out_free;
+	if (!tsk) {
+		__reply_vma_op(req, -EINVAL);
+		goto out_free;
+	}
 
 	BUG_ON(req->operation <= VMA_OP_NOP || req->operation >= VMA_OP_MAX);
 
@@ -434,27 +460,6 @@ static vma_op_request_t *__get_pending_vma_op(struct remote_context *rc)
 	kfree(work);
 
 	return req;
-}
-
-static void __reply_vma_op(vma_op_request_t *req, int ret)
-{
-	vma_op_response_t res = {
-		.header = {
-			.type = PCN_KMSG_TYPE_VMA_OP_RESPONSE,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
-		.origin_pid = current->pid,
-		.origin_nid = my_nid,
-		.remote_pid = req->remote_pid,
-		.remote_ws = req->remote_ws,
-
-		.operation = req->operation,
-		.ret = ret,
-		.addr = req->addr,
-		.len = req->len,
-	};
-
-	pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
 }
 
 void vma_worker_origin(struct remote_context *rc)

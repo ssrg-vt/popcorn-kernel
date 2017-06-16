@@ -315,7 +315,10 @@ static void bring_back_remote_thread(struct work_struct *_work)
 
 	/* Welcome home */
 	if (req->expect_flush) {
+		struct remote_context *rc = get_task_remote(tsk);
 		wait_for_completion(&tsk->wait_for_remote_flush);
+		rc->remote_tgids[req->remote_nid] = 0;
+		put_task_remote(tsk);
 	}
 	tsk->remote = NULL;
 	tsk->remote_nid = -1;
