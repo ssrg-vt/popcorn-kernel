@@ -135,7 +135,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 #endif
 
 /* Ajith - adding file offset parsing */
-static unsigned long __get_file_offset(struct file *file, int start_addr)
+static unsigned long __get_file_offset(struct file *file, unsigned long vm_start)
 {
 	struct elfhdr elf_ex;
 	struct elf_phdr *elf_eppnt = NULL, *elf_eppnt_start = NULL;
@@ -167,15 +167,16 @@ static unsigned long __get_file_offset(struct file *file, int start_addr)
 	for (i = 0; i < elf_ex.e_phnum; i++, elf_eppnt++) {
 		if (elf_eppnt->p_type != PT_LOAD) continue;
 
-		printk("%s: Page offset for 0x%x 0x%lx 0x%lx\n", __func__,
-				start_addr,
-				(unsigned long)elf_eppnt->p_vaddr,
-				(unsigned long)elf_eppnt->p_memsz);
-
-		if ((start_addr >= elf_eppnt->p_vaddr) &&
-				(start_addr <= (elf_eppnt->p_vaddr + elf_eppnt->p_memsz))) {
-			retval = elf_eppnt->p_offset -
-					(elf_eppnt->p_vaddr & (ELF_MIN_ALIGN - 1));
+		if ((vm_start >= elf_eppnt->p_vaddr) &&
+				(vm_start <= (elf_eppnt->p_vaddr + elf_eppnt->p_memsz))) {
+			retval = (elf_eppnt->p_offset -
+					(elf_eppnt->p_vaddr & (ELF_MIN_ALIGN - 1))) >> PAGE_SHIFT;
+			/*
+			printk("%s: Page offset for 0x%x 0x%lx 0x%lx\n", __func__,
+					vm_start,
+					(unsigned long)elf_eppnt->p_vaddr,
+					(unsigned long)elf_eppnt->p_memsz);
+			*/
 			break;
 		}
 		/*
@@ -192,7 +193,7 @@ out:
 	if (elf_eppnt_start != NULL)
 		kfree(elf_eppnt_start);
 
-	return retval >> PAGE_SHIFT;
+	return retval;
 }
 
 
@@ -819,6 +820,7 @@ static int __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 	if (remote_vma_anon(res)) {
 		flags |= MAP_ANONYMOUS;
 	} else {
+		unsigned long pgoff = res->vm_pgoff;
 		f = filp_open(res->vm_file_path, O_RDONLY | O_LARGEFILE, 0);
 		if (IS_ERR(f)) {
 			printk(KERN_ERR"%s: cannot find backing file %s\n",__func__,
@@ -826,6 +828,8 @@ static int __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 			ret = -EIO;
 			goto out;
 		}
+		res->vm_pgoff = __get_file_offset(f, res->vm_start);
+		printk("  [%d] offset %lx -> %lx\n", tsk->pid, pgoff, res->vm_pgoff);
 	}
 
 	prot  = ((res->vm_flags & VM_READ) ? PROT_READ : 0)
@@ -845,6 +849,7 @@ static int __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 	vma = find_vma(mm, addr);
 	BUG_ON(!vma || vma->vm_start > addr);
 
+	if (res->vm_flags & VM_FETCH_LOCAL) vma->vm_flags |= VM_FETCH_LOCAL;
 out:
 	downgrade_write(&mm->mmap_sem);
 	return ret;
