@@ -9,9 +9,6 @@
  * XXX DO NOT commit your local file
  */
 
-#define MAX_NUM_NODES		3
-#define MAX_NUM_CHANNELS	(MAX_NUM_NODES - 1)
-
 const char *ip_addresses[] = {
 	/* ib */
 	/*
@@ -30,6 +27,10 @@ const char *ip_addresses[] = {
     "10.0.0.20",
     "10.0.0.101",
 };
+
+#define MAX_NUM_NODES		(sizeof(ip_addresses) \
+								/ sizeof(typeof(*ip_addresses)))
+#define MAX_NUM_CHANNELS	(MAX_NUM_NODES - 1)
 
 const char *net_dev_names[] = {
     "ib0",      // InfiniBand
