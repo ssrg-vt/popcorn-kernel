@@ -234,13 +234,11 @@ static void __finish_fault_handling(struct fault_handle *fh)
 /**************************************************************************
  * Helper functions for PTE following
  */
-
 static pte_t *__get_pte_at(struct mm_struct *mm, unsigned long addr, pmd_t **ppmd, spinlock_t **ptlp)
 {
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
-	pte_t *pte;
 
 	pgd = pgd_offset(mm, addr);
 	if (!pgd || pgd_none(*pgd)) return NULL;
@@ -254,9 +252,28 @@ static pte_t *__get_pte_at(struct mm_struct *mm, unsigned long addr, pmd_t **ppm
 	*ppmd = pmd;
 	*ptlp = pte_lockptr(mm, pmd);
 
-	pte = pte_offset_map(pmd, addr);
+	return pte_offset_map(pmd, addr);
+}
 
-	return pte;
+static pte_t *__get_pte_at_alloc(struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, pmd_t **ppmd, spinlock_t **ptlp)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+
+	pgd = pgd_offset(mm, addr);
+	if (!pgd) return NULL;
+
+	pud = pud_alloc(mm, pgd, addr);
+	if (!pud) return NULL;
+
+	pmd = pmd_alloc(mm, pud, addr);
+	if (!pmd) return NULL;
+
+	*ppmd = pmd;
+	*ptlp = pte_lockptr(mm, pmd);
+
+	return pte_alloc_map(mm, vma, pmd, addr);
 }
 
 static struct page *__find_page_at(struct mm_struct *mm, unsigned long addr, pte_t **ptep, spinlock_t **ptlp)
@@ -363,10 +380,7 @@ static void process_remote_page_flush(struct work_struct *work)
 	BUG_ON(!vma || vma->vm_start > addr);
 
 	page = __find_page_at(mm, addr, &pte, &ptl);
-	if (IS_ERR(page)) {
-		PGPRINTK("%s: %lx\n", __func__, addr);
-		BUG_ON(IS_ERR(page));
-	}
+	BUG_ON(IS_ERR(page));
 
 	if (req->flags & FLUSH_FLAG_FLUSH) {
 		lock_page(page);
@@ -537,6 +551,7 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 			req->origin_pid, req->origin_nid);
 
 	pte = __get_pte_at(mm, addr, &pmd, &ptl);
+	if (!pte) goto out;
 
 	spin_lock(ptl);
 	while (__check_fault_handling(tsk, addr)) {
@@ -852,6 +867,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 
 	pte = __get_pte_at(mm, addr, &pmd, &ptl);
 	if (!pte) {
+		PGPRINTK("  [%d] No PTE!!\n", tsk->pid);
 		return VM_FAULT_OOM;
 	}
 
@@ -927,9 +943,9 @@ static int __handle_remotefault_at_origin(struct task_struct *tsk, struct mm_str
 	bool grant = false;
 
 again:
-	pte = __get_pte_at(mm, addr, &pmd, &ptl);
+	pte = __get_pte_at_alloc(mm, vma, addr, &pmd, &ptl);
 	if (!pte) {
-		PGPRINTK("  [%d] No PTE\n", tsk->pid);
+		PGPRINTK("  [%d] No PTE!!\n", tsk->pid);
 		return VM_FAULT_OOM;
 	}
 
@@ -1124,6 +1140,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	struct page *page;
 	bool populated = false;
 	struct mem_cgroup *memcg;
+	int ret = 0;
 
 	DEFINE_WAIT(wait);
 	struct fault_handle *fh;
@@ -1168,10 +1185,21 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 	rp = __get_remote_page(current, addr, fault_flags);
 
-	if (rp->result == VM_FAULT_RETRY) {
-		PGPRINTK("  [%d] contended. retry\n", current->pid);
-		backoff = true;
-		goto out_free;
+	if (rp->result) {
+		if (rp->result == VM_FAULT_RETRY) {
+			PGPRINTK("  [%d] contended. retry\n", current->pid);
+			backoff = true;
+			ret = 0;
+			pte_unmap(pte);
+			goto out_free;
+		}
+		if (rp->result != VM_FAULT_CONTINUE) {
+			PGPRINTK("  [%d] failed 0x%x\n", current->pid, rp->result);
+			backoff = false;
+			ret = rp->result;
+			pte_unmap(pte);
+			goto out_free;
+		}
 	}
 
 	spin_lock(ptl);
@@ -1218,7 +1246,7 @@ out_free:
 out:
 	__finish_fault_handling(fh);
 	if (backoff) msleep(1);
-	return 0;
+	return ret;
 }
 
 
@@ -1333,6 +1361,7 @@ out_wakeup:
  * Return values:
  *	VM_FAULT_CONTINUE when the page fault can be handled locally.
  *	0 if the fault is fetched remotely and fixed.
+ *  ERROR otherwise
  *
  * TODO: deal with the do_fault_around
  *
