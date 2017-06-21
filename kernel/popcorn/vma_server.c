@@ -27,6 +27,7 @@
 #include <linux/mman.h>
 #include <linux/highmem.h>
 #include <linux/ptrace.h>
+#include <linux/syscalls.h>
 
 #include <linux/elf.h>
 
@@ -317,9 +318,29 @@ int vma_server_brk_remote(unsigned long brk)
 
 int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 {
+	int ret;
+	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_MADVISE);
+	vma_op_response_t *res;
+
+	req->addr = start;
+	req->len = len;
+	req->behavior = behavior;
+
 	VSPRINTK("\nVMA madvise [%d] %lx %lx %d\n", current->pid,
 			start, len, behavior);
-	return -EINVAL;
+
+	res = __delegate_vma_op(req);
+	ret = res->ret;
+
+	VSPRINTK("  [%d] %d %lx -- %lx %d\n", current->pid,
+			ret, res->addr, res->addr + res->len, behavior);
+
+	/* Actual process() is done at the caller when ret == 0 */
+
+	kfree(req);
+	pcn_kmsg_free_msg(res);
+
+	return ret;
 }
 
 int vma_server_mprotect_remote(unsigned long start, size_t len, unsigned long prot)
@@ -472,7 +493,7 @@ void vma_worker_origin(struct remote_context *rc)
 
 	while (!rc->vma_worker_stop) {
 		vma_op_request_t *req;
-		int ret = -EPERM;
+		long ret = -EPERM;
 
 		if (!(req = __get_pending_vma_op(rc))) continue;
 
@@ -490,7 +511,7 @@ void vma_worker_origin(struct remote_context *rc)
 
 			if (IS_ERR(f)) {
 				ret = PTR_ERR(f);
-				printk("  [%d] Cannot open %s %d\n",current->pid, req->path,
+				printk("  [%d] Cannot open %s %ld\n", current->pid, req->path,
 						ret);
 				break;
 			}
@@ -502,6 +523,8 @@ void vma_worker_origin(struct remote_context *rc)
 
 			ret = IS_ERR_VALUE(raddr) ? raddr : 0;
 			req->addr = raddr;
+			VSPRINTK("  [%d] %lx %lx -- %lx\n", current->pid,
+					ret, req->addr, req->addr + req->len);
 
 			if (f) filp_close(f, NULL);
 			break;
@@ -514,35 +537,20 @@ void vma_worker_origin(struct remote_context *rc)
 			ret = vm_munmap(req->addr, req->len);
 			break;
 		case VMA_OP_MPROTECT:
-			/*
 			ret = sys_mprotect(req->addr, req->len, req->prot);
 			break;
-			*/
 		case VMA_OP_MREMAP:
-			/*
-			// remap may call unmap; consider the recursive invocation
-			down_write(&mm->mmap_sem);
 			ret = sys_mremap(req->addr, req->old_len, req->new_len,
 				req->flags, req->new_addr);
-			up_write(&mm->mmap_sem);
 			break;
-			*/
 		case VMA_OP_MADVISE:
-			/*
-			// This is only for MADV_REMOVE (thus write is 0)
-			struct vm_area_struct *pvma;
-			struct vm_area_struct *vma = find_vma(mm, req->addr);
-			down_read(&(mm->mmap_sem));
-			ret = madvise_remove(vma, &pvma, req->addr, (req->addr + req->len));
-			up_read(&(mm->mmap_sem));
-			*/
-			ret = -EPERM;
+			ret = sys_madvise(req->start, req->len, req->behavior);
 			break;
 		default:
 			BUG_ON("unreachable");
 		}
 
-		VSPRINTK("  [%d] <-%s %d\n",current->pid,
+		VSPRINTK("  [%d] <-%s %ld\n", current->pid,
 				vma_op_code_sz[req->operation], ret);
 		__reply_vma_op(req, ret);
 		pcn_kmsg_free_msg(req);
