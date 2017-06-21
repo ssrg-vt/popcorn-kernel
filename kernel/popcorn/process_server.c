@@ -308,7 +308,7 @@ static void bring_back_remote_thread(struct work_struct *_work)
 		goto out_free;
 	}
 
-	PSPRINTK("### BACKMIG [%d] from %d at %d\n",
+	PSPRINTK("\n### BACKMIG [%d] from %d at %d\n",
 			tsk->pid, req->remote_pid, req->remote_nid);
 
 	BUG_ON(tsk->remote_pid != req->remote_pid);

@@ -4652,10 +4652,10 @@ static int __do_sched_migrate(struct task_struct *tsk, int nid, void __user *ure
 
 	tsk->migration_target_nid = -1;
 
-	printk("%s [%d]: put to sleep\n", __func__, tsk->pid);
+	PSPRINTK("%s [%d]: put to sleep\n", __func__, tsk->pid);
 	__set_task_state(tsk, TASK_INTERRUPTIBLE);
 	schedule();
-	printk("%s [%d]: waken up, 0x%x 0x%x\n", __func__,
+	PSPRINTK("%s [%d]: waken up, 0x%x 0x%x\n", __func__,
 			tsk->pid, tsk->ret_from_remote, tsk->exit_code);
 
 	if (tsk->ret_from_remote & TASK_DEAD) {
@@ -4673,7 +4673,7 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 	migration_start = ktime_get();
 #endif
 
-	printk(KERN_INFO"\n####### MIGRATE [%d] to %d\n",
+	PRINTK(KERN_INFO"\n####### MIGRATE [%d] to %d\n",
 			current->pid, nid);
 
 	if (nid == -1) {

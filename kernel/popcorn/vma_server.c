@@ -497,7 +497,7 @@ void vma_worker_origin(struct remote_context *rc)
 
 		if (!(req = __get_pending_vma_op(rc))) continue;
 
-		printk("\n### VMA_WORKER [%d] %s %lx %lx\n", current->pid,
+		VSPRINTK("\n### VMA_WORKER [%d] %s %lx %lx\n", current->pid,
 				vma_op_code_sz[req->operation], req->addr, req->len);
 
 		switch (req->operation) {
@@ -557,7 +557,7 @@ void vma_worker_origin(struct remote_context *rc)
 	}
 	mmput(mm);
 
-	printk("%s [%d] exited\n", __func__, current->pid);
+	PSPRINTK("%s [%d] exited\n", __func__, current->pid);
 	return;
 }
 
@@ -574,7 +574,7 @@ void vma_worker_remote(struct remote_context *rc)
 
 		if (!(req = __get_pending_vma_op(rc))) continue;
 
-		printk("\n### VMA_WORKER [%d] %s %lx %lx\n", current->pid,
+		VSPRINTK("\n### VMA_WORKER [%d] %s %lx %lx\n", current->pid,
 				vma_op_code_sz[req->operation], req->addr, req->len);
 
 		switch (req->operation) {
@@ -599,7 +599,7 @@ void vma_worker_remote(struct remote_context *rc)
 	}
 	mmput(mm);
 
-	printk("%s [%d] exited\n", __func__, current->pid);
+	PSPRINTK("%s [%d] exited\n", __func__, current->pid);
 	return;
 }
 
@@ -828,7 +828,6 @@ static int __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 	if (remote_vma_anon(res)) {
 		flags |= MAP_ANONYMOUS;
 	} else {
-		unsigned long pgoff = res->vm_pgoff;
 		f = filp_open(res->vm_file_path, O_RDONLY | O_LARGEFILE, 0);
 		if (IS_ERR(f)) {
 			printk(KERN_ERR"%s: cannot find backing file %s\n",__func__,
