@@ -3399,13 +3399,59 @@ int handle_pte_fault_origin(struct mm_struct *mm,
 		struct vm_area_struct *vma, unsigned long address,
 		pte_t *pte, pmd_t *pmd, unsigned int flags)
 {
+	struct mem_cgroup *memcg;
+	struct page *page;
+	spinlock_t *ptl;
 	pte_t entry = *pte;
 	barrier();
 
-	if (vma_is_anonymous(vma))
-		return do_anonymous_page(mm, vma, address, pte, pmd, flags);
+	if (!vma_is_anonymous(vma))
+		return do_fault(mm, vma, address, pte, pmd, flags, entry);
 
-	return do_fault(mm, vma, address, pte, pmd, flags, entry);
+	/**
+	 * Following is for anonymous page. Almost same to do_anonymos_page
+	 * except it allocates page upon read
+	 */
+	pte_unmap(pte);
+
+	if (vma->vm_flags & VM_SHARED) return VM_FAULT_SIGBUS;
+
+	/* Check if we need to add a guard page to the stack */
+	if (check_stack_guard_page(vma, address) < 0)
+		return VM_FAULT_SIGSEGV;
+
+	if (unlikely(anon_vma_prepare(vma)))
+		return VM_FAULT_OOM;
+
+	page = alloc_zeroed_user_highpage_movable(vma, address);
+	if (!page)
+		return VM_FAULT_OOM;
+
+	if (mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg)) {
+		page_cache_release(page);
+		return VM_FAULT_OOM;
+	}
+
+	__SetPageUptodate(page);
+	bitmap_zero(page->owners, MAX_POPCORN_NODES);
+
+	entry = mk_pte(page, vma->vm_page_prot);
+	if (vma->vm_flags & VM_WRITE)
+		entry = pte_mkwrite(pte_mkdirty(entry));
+
+	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
+	BUG_ON(!pte_none(*pte));
+
+	inc_mm_counter_fast(mm, MM_ANONPAGES);
+	page_add_new_anon_rmap(page, vma, address);
+	mem_cgroup_commit_charge(page, memcg, false);
+	lru_cache_add_active_or_unevictable(page, vma);
+
+	set_pte_at(mm, address, pte, entry);
+	/* No need to invalidate - it was non-present before */
+	update_mmu_cache(vma, address, pte);
+	pte_unmap_unlock(pte, ptl);
+	return 0;
 }
 #endif
 

@@ -382,8 +382,8 @@ static void process_remote_page_flush(struct work_struct *work)
 	page = __find_page_at(mm, addr, &pte, &ptl);
 	BUG_ON(IS_ERR(page));
 
+	lock_page(page);
 	if (req->flags & FLUSH_FLAG_FLUSH) {
-		lock_page(page);
 		paddr = kmap_atomic(page);
 		copy_to_user_page(vma, page, addr, paddr, req->page, PAGE_SIZE);
 		kunmap_atomic(paddr);
