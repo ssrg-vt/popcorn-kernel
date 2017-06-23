@@ -124,18 +124,13 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 }
 
 
+#if 0
 /**
  * Heterogeneous binary support
+ *
+ * ajith - for file offset fetch. copied from fs/binfmt_elf.c
  */
-/* ajith - for file offset fetch. copied from fs/binfmt_elf.c*/
 
-#if ELF_EXEC_PAGESIZE > PAGE_SIZE
-#define ELF_MIN_ALIGN   ELF_EXEC_PAGESIZE
-#else
-#define ELF_MIN_ALIGN   PAGE_SIZE
-#endif
-
-/* Ajith - adding file offset parsing */
 static unsigned long __get_file_offset(struct file *file, unsigned long vm_start)
 {
 	struct elfhdr elf_ex;
@@ -165,29 +160,17 @@ static unsigned long __get_file_offset(struct file *file, unsigned long vm_start
 		retval = -1;
 		goto out;
 	}
+	retval = 0;
 	for (i = 0; i < elf_ex.e_phnum; i++, elf_eppnt++) {
 		if (elf_eppnt->p_type != PT_LOAD) continue;
 
 		if ((vm_start >= elf_eppnt->p_vaddr) &&
 				(vm_start <= (elf_eppnt->p_vaddr + elf_eppnt->p_memsz))) {
-			retval = (elf_eppnt->p_offset -
-					(elf_eppnt->p_vaddr & (ELF_MIN_ALIGN - 1))) >> PAGE_SHIFT;
-			/*
-			printk("%s: Page offset for 0x%x 0x%lx 0x%lx\n", __func__,
-					vm_start,
-					(unsigned long)elf_eppnt->p_vaddr,
-					(unsigned long)elf_eppnt->p_memsz);
-			*/
+			retval = elf_eppnt->p_offset +
+				(vm_start & PAGE_MASK) - (elf_eppnt->p_vaddr & PAGE_MASK);
+			retval >>= PAGE_SHIFT;
 			break;
 		}
-		/*
-		if ((elf_eppnt->p_flags & PF_R) && (elf_eppnt->p_flags & PF_X)) {
-			printk("Coming to executable program load section\n");
-			retval = elf_eppnt->p_offset -
-					(elf_eppnt->p_vaddr & (ELF_MIN_ALIGN - 1));
-			break;
-		}
-		*/
 	}
 
 out:
@@ -196,6 +179,7 @@ out:
 
 	return retval;
 }
+#endif
 
 
 /**
@@ -835,8 +819,13 @@ static int __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 			ret = -EIO;
 			goto out;
 		}
+		/*
+		unsigned long orig_pgoff = res->vm_pgoff;
 		res->vm_pgoff = __get_file_offset(f, res->vm_start);
-		printk("  [%d] offset %lx -> %lx\n", tsk->pid, pgoff, res->vm_pgoff);
+		BUG_ON(res->vm_pgoff == -1); // no matching vma in heterogeneous binary
+		VSPRINTK("  [%d] %s %lx -> %lx\n", tsk->pid,
+				res->vm_file_path, orig_pgoff, res->vm_pgoff);
+		*/
 	}
 
 	prot  = ((res->vm_flags & VM_READ) ? PROT_READ : 0)

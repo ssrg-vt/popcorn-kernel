@@ -430,8 +430,9 @@ static int __do_pte_flush(pte_t *pte, unsigned long addr, unsigned long next, st
 
 	if (test_bit(my_nid, page->owners)) {
 		req->addr = addr;
-		if (vma->vm_flags & VM_WRITE && pte_write(*pte)) {
+		if ((vma->vm_flags & VM_WRITE) && pte_write(*pte)) {
 			void *paddr;
+			flush_cache_page(vma, addr, page_to_pfn(page));
 			paddr = kmap_atomic(page);
 			copy_from_user_page(walk->vma, page, addr, req->page, paddr, PAGE_SIZE);
 			kunmap_atomic(paddr);

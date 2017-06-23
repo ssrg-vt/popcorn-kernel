@@ -683,7 +683,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		struct elfhdr interp_elf_ex;
 	} *loc;
 	struct arch_elf_state arch_state = INIT_ARCH_ELF_STATE;
-#ifdef CONFIG_POPCORN
+#if 0
 	char *string_table = NULL;
 	long string_table_length = 0;
 	struct elf_shdr *shdr = NULL;
@@ -723,7 +723,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	start_data = 0;
 	end_data = 0;
 
-#ifdef CONFIG_POPCORN
+#if 0
 	/* Ajith- allocate and populate the elf section header */
 	i = loc->elf_ex.e_shnum * sizeof(struct elf_shdr);
 
@@ -907,7 +907,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		int elf_prot = 0, elf_flags;
 		unsigned long k, vaddr;
 		unsigned long total_size = 0;
-#ifdef CONFIG_POPCORN
+#if 0
 		int j;
 #endif
 
@@ -977,7 +977,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 			goto out_free_dentry;
 		}
 
-#ifdef CONFIG_POPCORN
+#if 0
 		/* Ajith - Read the elf sections */
 
 		for (j = 1; j < loc->elf_ex.e_shnum; j++) {
@@ -1063,7 +1063,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	start_data += load_bias;
 	end_data += load_bias;
 
-#ifdef CONFIG_POPCORN
+#if 0
 	/*Freeup allocated memory*/
 	if(shdr != NULL)
 		kfree(shdr);
