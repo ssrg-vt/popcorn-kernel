@@ -3395,6 +3395,44 @@ unlock:
 }
 
 #ifdef CONFIG_POPCORN
+struct page *get_normal_page(struct vm_area_struct *vma, unsigned long addr, pte_t *pte)
+{
+	struct mm_struct *mm = vma->vm_mm;
+	struct mem_cgroup *memcg;
+	struct page *page;
+	pte_t entry = *pte;
+
+	if ((page = vm_normal_page(vma, addr, entry))) return page;
+
+	BUG_ON(!is_zero_pfn(pte_pfn(entry)) && "Cannot handle this special page");
+
+	page = alloc_zeroed_user_highpage_movable(vma, addr);
+	if (!page) return NULL;
+
+	if (mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg)) {
+		page_cache_release(page);
+		return NULL;
+	}
+
+	__SetPageUptodate(page);
+	bitmap_zero(page->owners, MAX_POPCORN_NODES);
+
+	entry = mk_pte(page, vma->vm_page_prot);
+	if (vma->vm_flags & VM_WRITE)
+		entry = pte_mkwrite(pte_mkdirty(entry));
+
+	inc_mm_counter_fast(mm, MM_ANONPAGES);
+	page_add_new_anon_rmap(page, vma, addr);
+	mem_cgroup_commit_charge(page, memcg, false);
+	lru_cache_add_active_or_unevictable(page, vma);
+
+	set_pte_at_notify(mm, addr, pte, entry);
+	update_mmu_cache(vma, addr, pte);
+	flush_tlb_page(vma, addr);
+
+	return page;
+}
+
 int handle_pte_fault_origin(struct mm_struct *mm,
 		struct vm_area_struct *vma, unsigned long address,
 		pte_t *pte, pmd_t *pmd, unsigned int flags)

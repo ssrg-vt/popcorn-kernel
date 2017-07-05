@@ -31,6 +31,7 @@
 #include "types.h"
 #include "pgtable.h"
 #include "wait_station.h"
+#include "page_server.h"
 
 static inline bool page_is_replicated(struct page *page)
 {
@@ -921,11 +922,6 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 /**************************************************************************
  * Remote fault handler at the origin
  */
-
-/* Defined in mm/memory.c */
-int handle_pte_fault_origin(struct mm_struct *, struct vm_area_struct *, unsigned long, pte_t *, pmd_t *, unsigned int);
-
-
 static int __handle_remotefault_at_origin(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, remote_page_request_t *req, remote_page_response_t *res)
 {
 	int from_nid = req->origin_nid;
@@ -977,7 +973,7 @@ again:
 		return VM_FAULT_RETRY;
 	}
 
-	page = vm_normal_page(vma, addr, *pte);
+	page = get_normal_page(vma, addr, pte);
 	BUG_ON(!page);
 	get_page(page);
 
