@@ -4673,7 +4673,7 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 	migration_start = ktime_get();
 #endif
 
-	PRINTK(KERN_INFO"\n####### MIGRATE [%d] to %d\n",
+	PRINTK("\n####### MIGRATE [%d] to %d\n",
 			current->pid, nid);
 
 	if (nid == -1) {

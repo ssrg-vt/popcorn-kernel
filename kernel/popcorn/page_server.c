@@ -1376,7 +1376,7 @@ int page_server_handle_pte_fault(
 
 	might_sleep();
 
-	PGPRINTK(KERN_WARNING"\n## PAGEFAULT [%d] %lx %c %lx %x %lx\n",
+	PGPRINTK("\n## PAGEFAULT [%d] %lx %c %lx %x %lx\n",
 			current->pid, address,
 			fault_for_write(fault_flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()),

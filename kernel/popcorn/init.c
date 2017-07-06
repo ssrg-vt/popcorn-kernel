@@ -27,7 +27,7 @@ extern int remote_mem_info_init(void);
 
 static int __init popcorn_init(void)
 {
-	PRINTK(KERN_INFO"Initialize Popcorn subsystems...\n");
+	PRINTK("Initialize Popcorn subsystems...\n");
 
 	/**
 	 * Create work queues so that we can do bottom side

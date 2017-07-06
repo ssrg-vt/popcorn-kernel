@@ -16,24 +16,24 @@ config CPU_NS
 	bool
 
 config POPCORN_DEBUG
-	bool "Popcorn debugging messages in kernel log"
+	bool "Log debug messages for Popcorn"
 	depends on POPCORN
 	default n
 	help
 		Enable or disable kernel messages that can help debug Popcorn issues.
 
-config POPCORN_DEBUG_PROCESS_SERVER_VERBOSE
-	bool "Print debug message for process server"
+config POPCORN_DEBUG_PROCESS_SERVER
+	bool "Log debug messages for task migration"
 	depends on POPCORN_DEBUG
 	default n
 
-config POPCORN_DEBUG_VMA_SERVER_VERBOSE
-	bool "Print debug message for VMA server"
+config POPCORN_DEBUG_VMA_SERVER
+	bool "Log debug messages for VMA handling"
 	depends on POPCORN_DEBUG
 	default n
 
-config POPCORN_DEBUG_PAGE_SERVER_VERBOSE
-	bool "Print debug message for page server"
+config POPCORN_DEBUG_PAGE_SERVER
+	bool "Log debug messages for page migration"
 	depends on POPCORN_DEBUG
 	default n
 

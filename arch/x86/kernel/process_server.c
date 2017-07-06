@@ -91,7 +91,7 @@ int save_thread_info(struct task_struct *tsk, struct field_arch *arch)
 
 	put_cpu();
 
-	PSPRINTK(KERN_INFO"%s [%d]: tls %lx\n", __func__, tsk->pid, arch->tls);
+	PSPRINTK("%s [%d]: tls %lx\n", __func__, tsk->pid, arch->tls);
 
 	return 0;
 }
@@ -177,11 +177,11 @@ int restore_thread_info(struct task_struct *tsk, struct field_arch *arch, bool r
 
 	put_cpu();
 
-	PSPRINTK(KERN_INFO"%s [%d]: ip %lx\n", __func__,
+	PSPRINTK("%s [%d]: ip %lx\n", __func__,
 			tsk->pid, regs->ip);
-	PSPRINTK(KERN_INFO"%s [%d]: sp %lx bp %lx\n", __func__,
+	PSPRINTK("%s [%d]: sp %lx bp %lx\n", __func__,
 			tsk->pid, regs->sp, regs->bp);
-	PSPRINTK(KERN_INFO"%s [%d]: fs %lx\n", __func__,
+	PSPRINTK("%s [%d]: fs %lx\n", __func__,
 			tsk->pid, arch->tls);
 
 	return 0;

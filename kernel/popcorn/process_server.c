@@ -264,7 +264,7 @@ static void process_exit_task(struct work_struct *_work)
 		goto out;
 	}
 
-	printk(KERN_INFO"%s [%d]: exited with 0x%lx\n", __func__,
+	PSPRINTK("%s [%d]: exited with 0x%lx\n", __func__,
 			tsk->pid, req->exit_code);
 
 	if (req->expect_flush) {
@@ -303,15 +303,19 @@ static void bring_back_remote_thread(struct work_struct *_work)
 
 	tsk = __get_task_struct(req->origin_pid);
 	if (!tsk) {
-		printk("%s: no origin taks %d for remote %d\n",
+		printk(KERN_INFO"%s: no origin taks %d for remote %d\n",
 				__func__, req->origin_pid, req->remote_pid);
+		goto out_free;
+	}
+	if (tsk->remote_pid != req->remote_pid) {
+		printk(KERN_INFO"%s: pid mismatch during back migration (%d != %d)\n",
+				__func__, tsk->remote_pid, req->remote_pid);
+		put_task_struct(tsk);
 		goto out_free;
 	}
 
 	PSPRINTK("\n### BACKMIG [%d] from %d at %d\n",
 			tsk->pid, req->remote_pid, req->remote_nid);
-
-	BUG_ON(tsk->remote_pid != req->remote_pid);
 
 	/* Welcome home */
 	if (req->expect_flush) {
@@ -336,7 +340,7 @@ static void bring_back_remote_thread(struct work_struct *_work)
 
 #ifdef MIGRATION_PROFILE
 	migration_end = ktime_get();
-	printk(KERN_ERR"Time for back migration - origin side: %ld ns\n",
+	printk(KERN_INFO"Time for back migration - origin side: %ld ns\n",
 			GET_MIGRATION_TIME);
 #endif
 
@@ -421,7 +425,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 
 #ifdef MIGRATION_PROFILE
 	migration_end = ktime_get();
-	printk(KERN_ERR"Time for back migration - remote side: %ld ns\n",
+	printk(KERN_INFO"Time for back migration - remote side: %ld ns\n",
 			GET_MIGRATION_TIME);
 #endif
 
@@ -507,7 +511,7 @@ static int shadow_main(void *_args)
 	struct shadow_params *params = _args;
 	clone_request_t *req = params->req;
 
-    PSPRINTK("%s [%d]: started for %d at %d\n", __func__,
+    PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
 			current->pid, req->origin_pid, req->origin_nid);
 
 	current->flags &= ~PF_KTHREAD;	/* Drop to user */
@@ -537,7 +541,7 @@ static int shadow_main(void *_args)
 
 #ifdef MIGRATION_PROFILE
 	migration_end = ktime_get();
-	printk(KERN_ERR"Time for migration - remote side: %ld ns\n",
+	printk(KERN_INFO"Time for migration - remote side: %ld ns\n",
 			GET_MIGRATION_TIME);
 #endif
 
@@ -570,7 +574,7 @@ int shadow_spawner(void *_args)
 {
 	struct remote_context *rc = _args;
 
-	PSPRINTK(KERN_INFO"%s [%d]: started\n", __func__, current->pid);
+	PSPRINTK("%s [%d] started\n", __func__, current->pid);
 
 	current->is_vma_worker = true;
 	rc->shadow_spawner = current;
@@ -602,7 +606,7 @@ int shadow_spawner(void *_args)
 		kfree(work);
 	}
 
-	PSPRINTK(KERN_INFO"%s [%d]: exited\n", __func__, current->pid);
+	PSPRINTK("%s [%d] exiting\n", __func__, current->pid);
 
 	do_exit(0);
 }
@@ -672,10 +676,11 @@ static int start_vma_worker_remote(void *_data)
 	struct cred *new;
 
 	might_sleep();
+	kfree(params);
 
-	PSPRINTK("%s [%d]: started for origin %d in %d at %d\n", __func__,
+	PSPRINTK("%s [%d] started for origin %d [%d/%d]\n", __func__,
 			current->pid, req->origin_pid, req->origin_tgid, req->origin_nid);
-	PSPRINTK("%s [%d]: exe_path=%s\n", __func__,
+	PSPRINTK("%s [%d] %s\n", __func__,
 			current->pid, req->exe_path);
 
 	current->flags &= ~PF_RANDOMIZE;	/* Disable ASLR for now*/
@@ -700,10 +705,10 @@ static int start_vma_worker_remote(void *_data)
 	/* Create the shadow spawner */
 	kernel_thread(shadow_spawner, rc, CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
 
-	/* Drop to user here to access mm using get_task_mm().
+	/* Drop to user here to access mm using get_task_mm() in vma_worker routine.
 	 * This should be done after forking shadow_spawner otherwise
 	 * kernel_thread() will consider this as a user thread fork() which
-	 * will end up an inproper instruction pointer (see copy_tls_copy()).
+	 * will end up an inproper instruction pointer (see copy_thread_tls()).
 	 */
 	current->flags &= ~PF_KTHREAD;
 
@@ -726,7 +731,7 @@ static void clone_remote_thread(struct work_struct *_work)
 
 	BUG_ON(!rc_new);
 
-	PSPRINTK("%s: for %d in %d at %d\n", __func__,
+	PSPRINTK("%s: for %d in [%d/%d]\n", __func__,
 			req->origin_pid, tgid_from, nid_from);
 
 	__lock_remote_contexts_in(nid_from);
@@ -917,7 +922,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		rc->vma_worker =
 			kthread_run(start_vma_worker_origin, rc, "worker_origin");
 	}
-	PSPRINTK("%s [%d]: remote context %s\n", __func__, tsk->pid, which_rc);
+	PSPRINTK("%s [%d] remote context %s\n", __func__, tsk->pid, which_rc);
 
 	ret = __request_clone_remote(dst_nid, tsk, uregs);
 
@@ -934,8 +939,8 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 /**
  * Migrate the specified task <task> to node <dst_nid>
  * Currently, this function will put the specified task to sleep,
- * and push its info over to the remote cpu.
- * The remote cpu will then create a new thread and import that
+ * and push its info over to the remote node.
+ * The remote node will then create a new thread and import that
  * info into its new context.
  */
 int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, void __user *uregs)

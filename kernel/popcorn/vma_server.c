@@ -539,9 +539,8 @@ void vma_worker_origin(struct remote_context *rc)
 		__reply_vma_op(req, ret);
 		pcn_kmsg_free_msg(req);
 	}
-	mmput(mm);
 
-	PSPRINTK("%s [%d] exited\n", __func__, current->pid);
+	mmput(mm);
 	return;
 }
 
@@ -581,9 +580,8 @@ void vma_worker_remote(struct remote_context *rc)
 		__reply_vma_op(req, ret);
 		pcn_kmsg_free_msg(req);
 	}
-	mmput(mm);
 
-	PSPRINTK("%s [%d] exited\n", __func__, current->pid);
+	mmput(mm);
 	return;
 }
 

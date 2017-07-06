@@ -5,28 +5,28 @@
  * Function macros
  */
 #ifdef CONFIG_POPCORN_DEBUG
-#define PRINTK(...) printk(__VA_ARGS__)
+#define PRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
 #define PRINTK(...)
 #endif
 
 
-#ifdef CONFIG_POPCORN_DEBUG_PROCESS_SERVER_VERBOSE
-#define PSPRINTK(...) printk(__VA_ARGS__)
+#ifdef CONFIG_POPCORN_DEBUG_PROCESS_SERVER
+#define PSPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
 #define PSPRINTK(...)
 #endif
 
 
-#ifdef CONFIG_POPCORN_DEBUG_VMA_SERVER_VERBOSE
-#define VSPRINTK(...) printk(__VA_ARGS__)
+#ifdef CONFIG_POPCORN_DEBUG_VMA_SERVER
+#define VSPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
 #define VSPRINTK(...)
 #endif
 
 
-#ifdef CONFIG_POPCORN_DEBUG_PAGE_SERVER_VERBOSE
-#define PGPRINTK(...) printk(__VA_ARGS__)
+#ifdef CONFIG_POPCORN_DEBUG_PAGE_SERVER
+#define PGPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
 #define PGPRINTK(...)
 #endif
