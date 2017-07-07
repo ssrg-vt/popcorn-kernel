@@ -29,7 +29,7 @@
 #define MAX_ASYNC_BUFFER	1024
 
 struct pcn_kmsg_buf_item {
-	struct pcn_kmsg_long_message *msg;
+	struct pcn_kmsg_message *msg;
 };
 
 struct pcn_kmsg_buf {
@@ -315,7 +315,7 @@ end:
  * This is the interface for message layer
  ***********************************************/
 static int sock_kmsg_send(unsigned int dest_nid,
-			struct pcn_kmsg_long_message *lmsg, unsigned int size)
+			struct pcn_kmsg_message *lmsg, unsigned int size)
 {
 	int remaining;
 	char *p;
@@ -329,8 +329,7 @@ static int sock_kmsg_send(unsigned int dest_nid,
 	// Send msg to myself
 	if (dest_nid == my_nid) {
 		pcn_kmsg_cbftn ftn;
-		struct pcn_kmsg_long_message *msg =
-									pcn_kmsg_alloc_msg(size);
+		struct pcn_kmsg_message *msg = pcn_kmsg_alloc_msg(size);
 		BUG_ON(!msg);
 		memcpy(msg, lmsg, size);
 

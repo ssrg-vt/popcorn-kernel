@@ -120,20 +120,12 @@ enum pcn_kmsg_prio {
 
 /* Message header */
 struct pcn_kmsg_hdr {
-	unsigned int from_nid	:8; // b0
+	unsigned int from_nid	:8;
+	enum pcn_kmsg_type type	:8;
+	enum pcn_kmsg_prio prio	:7;
+	unsigned int is_rdma    :1;
 
-	enum pcn_kmsg_type type	:8;	// b1
-
-	enum pcn_kmsg_prio prio	:5;	// b2
-	bool is_lg_msg			:1;
-	bool lg_start			:1;
-	bool lg_end				:1;
-
-	unsigned long long_number;	// b3 .. b10
-
-	unsigned int lg_seqnum 	:LG_SEQNUM_SIZE;	// b11
-	unsigned int __ready	:__READY_SIZE;
-	unsigned int size		:16;	// b12 .. 13 payload + hdr
+	unsigned int size;
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	unsigned long ticket;	// useful dbg for msg layer
 #endif  
@@ -141,43 +133,12 @@ struct pcn_kmsg_hdr {
 
 #define CACHE_LINE_SIZE 64
 #define PCN_KMSG_PAYLOAD_SIZE (CACHE_LINE_SIZE - sizeof(struct pcn_kmsg_hdr))
-#define MAX_CHUNKS ((1 << LG_SEQNUM_SIZE) - 1)
-//#define PCN_KMSG_LONG_PAYLOAD_SIZE (MAX_CHUNKS * PCN_KMSG_PAYLOAD_SIZE)
-
-#define PCN_KMSG_LONG_PAYLOAD_SIZE 16384
-
-/* The actual messages.  The expectation is that developers will create their
-   own message structs with the payload replaced with their own fields, and then
-   cast them to a struct pcn_kmsg_message.  See the checkin message below for
-   an example of how to do this. */
-
-#define PAD_LONG_MESSAGE(x) \
-	(((sizeof(x) + PCN_KMSG_PAYLOAD_SIZE) / PCN_KMSG_PAYLOAD_SIZE) \
-		* PCN_KMSG_PAYLOAD_SIZE)
-
-#define PCN_KMSG_PAD_SIZE(x) \
-	(sizeof(x) > PCN_KMSG_PAYLOAD_SIZE ? \
-		PAD_LONG_MESSAGE(sizeof(x)) : PCN_KMSG_PAYLOAD_SIZE)
+#define PCN_KMSG_LONG_PAYLOAD_SIZE 65536
 
 #define DEFINE_PCN_KMSG(type, fields) \
-	struct _##type {				\
-		fields						\
-	};								\
 	typedef struct {				\
 		struct pcn_kmsg_hdr header;	\
-		union {						\
-			struct {				\
-				fields				\
-			};						\
-			char _pad[PCN_KMSG_PAD_SIZE(struct _##type)];	\
-		}__attribute__((packed));	\
-	}__attribute__((packed)) type
-
-#define DEFINE_PCN_KMSG_NO_PAD(type, fields) \
-	typedef struct {				\
-		struct pcn_kmsg_hdr header;	\
-		fields						\
-		}__attribute__((packed));	\
+		fields				\
 	}__attribute__((packed)) type
 
 
@@ -186,14 +147,8 @@ struct pcn_kmsg_hdr {
    in the header. */
 struct pcn_kmsg_message {
 	struct pcn_kmsg_hdr header;
-	unsigned char payload[PCN_KMSG_PAYLOAD_SIZE];
-}__attribute__((packed)) __attribute__((aligned(CACHE_LINE_SIZE)));
-
-/* Struct for sending long messages (>60 bytes payload) */
-struct pcn_kmsg_long_message {
-	struct pcn_kmsg_hdr header;
 	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
-}__attribute__((packed));
+}__attribute__((packed)) __attribute__((aligned(CACHE_LINE_SIZE)));
 
 
 /* TYPES OF MESSAGES */

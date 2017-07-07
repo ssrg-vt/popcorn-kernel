@@ -4,7 +4,7 @@
 
 #include "common.h"
 
-static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_long_message *lmsg, unsigned int size)
+static int loopback_kmsg_send_long(unsigned int nid, struct pcn_kmsg_message *lmsg, unsigned int size)
 {
 	void *msg;
 	struct pcn_kmsg_hdr *hdr;
