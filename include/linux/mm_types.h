@@ -528,12 +528,6 @@ struct mm_struct {
 
 #ifdef CONFIG_POPCORN
 	struct remote_context *remote;
-	struct rw_semaphore distribute_sem;
-	int distr_vma_op_counter;
-	int was_not_pushed;
-	struct task_struct* thread_op;
-	int vma_operation_index;
-	int distribute_unmap;
 #endif
 };
 

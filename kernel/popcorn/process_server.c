@@ -135,15 +135,6 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	return rc;
 }
 
-void exit_remote_context(struct remote_context *rc)
-{
-	if (!rc) return;
-
-	printk("%s: %p\n", __func__, rc);
-	// TODO: deallocate this context.
-	//kfree(rc);
-}
-
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -332,6 +323,8 @@ static void bring_back_remote_thread(struct work_struct *_work)
 	tsk->ret_from_remote = TASK_RUNNING;
 	tsk->personality = req->personality;
 
+	/* XXX signals */
+
 	restore_thread_info(tsk, &req->arch, false);
 	smp_mb();
 
@@ -346,6 +339,7 @@ static void bring_back_remote_thread(struct work_struct *_work)
 
 out_free:
 	pcn_kmsg_free_msg(req);
+	kfree(work);
 }
 
 static int handle_back_migration(struct pcn_kmsg_message *msg)
@@ -403,6 +397,8 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	req->remote_pid = tsk->pid;
 
 	req->personality = tsk->personality;
+
+	/*
 	req->remote_blocked = tsk->blocked;
 	req->remote_real_blocked = tsk->real_blocked;
 	req->remote_saved_sigmask = tsk->saved_sigmask;
@@ -410,6 +406,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	req->sas_ss_sp = tsk->sas_ss_sp;
 	req->sas_ss_size = tsk->sas_ss_size;
 	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
+	*/
 
 	ret = copy_from_user(&req->arch.regsets, uregs,
 			regset_size(get_popcorn_node_arch(dst_nid)));
@@ -525,7 +522,7 @@ static int shadow_main(void *_args)
 	/* Inject thread info here */
 	restore_thread_info(current, &req->arch, true);
 
-	/*
+	/* XXX: Skip restoring signals and handlers for now
 	sigorsets(&current->blocked, &current->blocked, &req->remote_blocked);
 	sigorsets(&current->real_blocked,
 			&current->real_blocked, &req->remote_real_blocked);
@@ -645,12 +642,6 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 	mm->start_data = req->start_data;
 	mm->end_data = req->end_data;
 	mm->def_flags = req->def_flags;
-
-	mm->distr_vma_op_counter = 0;
-	mm->was_not_pushed = 0;
-	mm->thread_op = NULL;
-	mm->vma_operation_index = 0;
-	mm->distribute_unmap = 1;
 
 	use_mm(mm);
 
@@ -831,6 +822,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 
 	req->personality = tsk->personality;
 
+	/* Signals and handlers
 	req->remote_blocked = tsk->blocked;
 	req->remote_real_blocked = tsk->real_blocked;
 	req->remote_saved_sigmask = tsk->saved_sigmask;
@@ -838,7 +830,9 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 	req->sas_ss_sp = tsk->sas_ss_sp;
 	req->sas_ss_size = tsk->sas_ss_size;
 	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
+	*/
 
+	/* Register sets from userspace */
 	ret = copy_from_user(&req->arch.regsets, uregs,
 			regset_size(get_popcorn_node_arch(dst_nid)));
 	BUG_ON(ret != 0);

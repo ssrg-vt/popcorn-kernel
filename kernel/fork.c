@@ -644,11 +644,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 
 #ifdef CONFIG_POPCORN
 	mm->remote = NULL;
-	mm->distr_vma_op_counter = 0;
-	mm->was_not_pushed = 0;
-	mm->thread_op = NULL;
-	mm->vma_operation_index = 0;
-	mm->distribute_unmap = 1;
 #endif
 
 	if (current->mm) {
@@ -739,9 +734,6 @@ void mmput(struct mm_struct *mm)
 	might_sleep();
 
 	if (atomic_dec_and_test(&mm->mm_users)) {
-#ifdef CONFIG_POPCORN
-		exit_remote_context(mm->remote);
-#endif
 		uprobe_clear_state(mm);
 		exit_aio(mm);
 		ksm_exit(mm);

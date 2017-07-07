@@ -4,7 +4,7 @@
 struct task_struct;
 struct field_arch;
 
-extern int save_thread_info(struct task_struct *task, struct field_arch *arch);
-extern int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool restore_segments);
+int save_thread_info(struct task_struct *task, struct field_arch *arch);
+int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool restore_segments);
 
 #endif
