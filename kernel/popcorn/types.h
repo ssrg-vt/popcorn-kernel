@@ -25,7 +25,6 @@ struct remote_context {
 	/* For page replication protocol */
 	spinlock_t faults_lock;
 	struct list_head faults;
-	bool flushing;
 
 	/* For VMA management */
 	spinlock_t vmas_lock;
@@ -61,7 +60,6 @@ bool __put_task_remote(struct remote_context *rc);
 	int remote_nid;\
 	pid_t remote_pid;\
 	pid_t origin_pid;\
-	bool expect_flush;\
 	unsigned int personality;\
 	unsigned long def_flags;\
 	sigset_t remote_blocked;\
@@ -119,19 +117,17 @@ DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
 DEFINE_PCN_KMSG(remote_task_pairing_t, REMOTE_TASK_PAIRING_FIELDS);
 
 
-#define TASK_EXIT_FIELDS  \
+#define REMOTE_TASK_EXIT_FIELDS  \
 	pid_t origin_pid; \
 	pid_t remote_pid; \
-	bool expect_flush; \
-	long exit_code; \
-	struct field_arch arch;
-DEFINE_PCN_KMSG(task_exit_t, TASK_EXIT_FIELDS);
+	int exit_code;
+DEFINE_PCN_KMSG(remote_task_exit_t, REMOTE_TASK_EXIT_FIELDS);
 
-#define TASK_KILL_FIELDS \
-	int origin_nid; \
+#define ORIGIN_TASK_EXIT_FIELDS \
 	pid_t origin_pid; \
-	pid_t remote_pid;
-DEFINE_PCN_KMSG(task_kill_t, TASK_KILL_FIELDS);
+	pid_t remote_pid; \
+	int exit_code;
+DEFINE_PCN_KMSG(origin_task_exit_t, ORIGIN_TASK_EXIT_FIELDS);
 
 
 /**

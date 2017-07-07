@@ -36,25 +36,6 @@
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
 
-struct remote_context *get_task_remote(struct task_struct *tsk)
-{
-	struct remote_context *rc = tsk->mm->remote;
-	atomic_inc(&rc->count);
-
-	return rc;
-}
-
-bool __put_task_remote(struct remote_context *rc)
-{
-	return atomic_dec_and_test(&rc->count);
-}
-
-bool put_task_remote(struct task_struct *tsk)
-{
-	return __put_task_remote(tsk->mm->remote);
-}
-
-
 enum {
 	INDEX_OUTBOUND = 0,
 	INDEX_INBOUND = 1,
@@ -92,6 +73,38 @@ static struct remote_context *__lookup_remote_contexts_in(int nid, int tgid)
 #define __remote_contexts_out() remote_contexts[INDEX_OUTBOUND]
 
 
+inline struct remote_context *get_task_remote(struct task_struct *tsk)
+{
+	struct remote_context *rc = tsk->mm->remote;
+	atomic_inc(&rc->count);
+
+	return rc;
+}
+
+inline bool __put_task_remote(struct remote_context *rc)
+{
+	if (unlikely(!atomic_dec_and_test(&rc->count)))
+		return false;
+
+	__lock_remote_contexts(rc->for_remote);
+	if (atomic_read(&rc->count)) {
+		BUG();
+		__unlock_remote_contexts(rc->for_remote);
+		return false;
+	}
+	list_del(&rc->list);
+	__unlock_remote_contexts(rc->for_remote);
+
+	mmput(rc->mm);
+	kfree(rc);
+	return true;
+}
+
+inline bool put_task_remote(struct task_struct *tsk)
+{
+	return __put_task_remote(tsk->mm->remote);
+}
+
 static struct remote_context *__alloc_remote_context(int nid, int tgid, bool remote)
 {
 	struct remote_context *rc = kmalloc(sizeof(*rc), GFP_KERNEL);
@@ -106,7 +119,6 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 
 	INIT_LIST_HEAD(&rc->faults);
 	spin_lock_init(&rc->faults_lock);
-	rc->flushing = false;
 
 	INIT_LIST_HEAD(&rc->vmas);
 	spin_lock_init(&rc->vmas_lock);
@@ -154,113 +166,128 @@ static void __build_task_comm(char *buffer, char *path)
 ///////////////////////////////////////////////////////////////////////////////
 // Handle process/task exit
 ///////////////////////////////////////////////////////////////////////////////
-
-int process_server_task_exit(struct task_struct *tsk)
+static int __exit_origin_task(struct task_struct *tsk)
 {
 	struct remote_context *rc;
-	bool last = false;
-	bool notify = false;
-
-	WARN_ON(tsk != current);
-
-	if (!process_is_distributed(tsk)) return -ESRCH;
-
 	rc = tsk->mm->remote;
 
-	PSPRINTK("EXIT [%d]: %s / 0x%x\n", tsk->pid,
-			tsk->at_remote ? "remote" : "local", tsk->exit_code);
-	/*
-	printk("EXIT [%d]: 0x%p %d\n", tsk->pid, rc, atomic_read(&rc->count));
-	__show_regs(regs, 1);
-	*/
-
-	BUG_ON(tsk->is_vma_worker);
-
-	/*
-	 * Normally, tsk->remote should be null upon exit unless it is terminated
-	 * unexpectedly. Deal with this case
-	 */
 	if (tsk->remote) {
 		put_task_remote(tsk);
-		notify = true;
 	}
-	if (atomic_read(&rc->count) == 0) {
-		last = (rc == cmpxchg(&tsk->mm->remote, rc, NULL));
-	}
+	tsk->remote = NULL;
+	tsk->origin_nid = tsk->origin_pid = -1;
 
-	if (tsk->at_remote) {
-		if (tsk->exit_code == TASK_PARKED) {
-			// Quietly exit back-migrated thread.
-		} else if (notify) {
-			task_exit_t *req = kzalloc(sizeof(*req), GFP_KERNEL);
-			BUG_ON(!req);
-
-			if (last) {
-				// might be redundant but safe..
-				page_server_flush_remote_pages(rc);
-			}
-
-			// Notify the origin of the task exit
-			req->header.type = PCN_KMSG_TYPE_TASK_EXIT;
-			req->header.prio = PCN_KMSG_PRIO_NORMAL;
-
-			req->origin_pid = tsk->origin_pid;
-			req->remote_pid = tsk->pid;
-			req->exit_code = tsk->exit_code;
-
-			req->expect_flush = last;
-
-			save_thread_info(tsk, &req->arch);
-
-			pcn_kmsg_send(tsk->origin_nid, req, sizeof(*req));
-			kfree(req);
-		}
-	} else { // !tsk->at_remote
-		if (tsk->remote_nid != -1 || tsk->remote_pid != -1) {
-			WARN_ON("Don't forget to terminate remote tasks");
-		}
-	}
-
-	if (last) {
-		PSPRINTK("EXIT [%d]: finish at %s\n",
-				tsk->pid, tsk->at_remote ? "remote" : "local");
-		__lock_remote_contexts(tsk->at_remote);
-		list_del(&rc->list);
-		__unlock_remote_contexts(tsk->at_remote);
+	/**
+	 * Trigger the vma worker termination if this is the last user thread
+	 * referring to this mm.
+	 * 3 == current + get_task_mm in vma_worker + remote_context.
+	 */
+	if (atomic_read(&tsk->mm->mm_users) == 3) {
 		rc->vma_worker_stop = true;
 		smp_mb();
 		complete(&rc->vma_works_ready);
-		complete(&rc->spawn_egg);
 	}
 
 	return 0;
 }
 
+static void __terminate_peers(struct remote_context *rc)
+{
+	int nid;
+	origin_task_exit_t req = {
+		.header.type = PCN_KMSG_TYPE_TASK_EXIT_ORIGIN,
+		.header.prio = PCN_KMSG_PRIO_NORMAL,
+
+		.origin_pid = current->pid,
+		.exit_code = current->exit_code,
+	};
+
+	/* Take down peer vma workers */
+	for (nid = 0; nid < MAX_POPCORN_NODES; nid++) {
+		if (nid == my_nid || rc->remote_tgids[nid] == 0) continue;
+		PSPRINTK("EXIT [%d] terminate [%d/%d] %d\n", current->pid,
+				rc->remote_tgids[nid], nid, req.exit_code);
+
+		req.remote_pid = rc->remote_tgids[nid];
+		pcn_kmsg_send(nid, &req, sizeof(req));
+	}
+}
+
+static int __exit_remote_task(struct task_struct *tsk)
+{
+	if (tsk->exit_code == TASK_PARKED) {
+		/* Skip notifying for back-migrated threads */
+	} else {
+		/* Something went south. Notify the origin. */
+		if (!get_task_remote(tsk)->vma_worker_stop) {
+			remote_task_exit_t req = {
+				.header.type = PCN_KMSG_TYPE_TASK_EXIT_REMOTE,
+				.header.prio = PCN_KMSG_PRIO_NORMAL,
+
+				.origin_pid = tsk->origin_pid,
+				.remote_pid = tsk->pid,
+				.exit_code = tsk->exit_code,
+			};
+			pcn_kmsg_send(tsk->origin_nid, &req, sizeof(req));
+		}
+		put_task_remote(tsk);
+	}
+
+	put_task_remote(tsk);
+	tsk->remote = NULL;
+	tsk->origin_nid = tsk->origin_pid = -1;
+
+	return 0;
+}
+
+int process_server_task_exit(struct task_struct *tsk)
+{
+	WARN_ON(tsk != current);
+
+	if (!process_is_distributed(tsk)) return -ESRCH;
+
+	PSPRINTK("EXITED [%d] %s%s / 0x%x\n", tsk->pid,
+			tsk->at_remote ? "remote" : "local",
+			tsk->is_vma_worker ? " worker": "",
+			tsk->exit_code);
+
+#ifdef CONFIG_POPCORN_DEBUG_PROCESS_SERVER
+	show_regs(task_pt_regs(tsk));
+#endif
+
+	if (tsk->is_vma_worker) return 0;
+
+	if (tsk->at_remote) {
+		return __exit_remote_task(tsk);
+	} else {
+		return __exit_origin_task(tsk);
+	}
+}
+
 
 /**
- * Notify of the fact that either a delegate or placeholder has died locally.
- * In this case, the remote cpu housing its counterpart must be notified, so
- * that it can kill that counterpart.
+ * Handle the notification of the task kill at the remote.
  */
-static void process_exit_task(struct work_struct *_work)
+static void process_remote_task_exit(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
-	task_exit_t *req = work->msg;
-
+	remote_task_exit_t *req = work->msg;
 	struct task_struct *tsk;
 
 	tsk = __get_task_struct(req->origin_pid);
-	if (!tsk || tsk->remote_pid != req->remote_pid) {
-		printk(KERN_INFO"%s: %d not found\n", __func__, req->origin_pid);
+	if (!tsk) {
+		printk(KERN_INFO"%s: task %d not found\n", __func__, req->origin_pid);
+		goto out;
+	}
+	if (tsk->remote_pid != req->remote_pid) {
+		printk(KERN_INFO"%s: pid mismatch %d != %d\n", __func__,
+				tsk->remote_pid, req->remote_pid);
+		put_task_struct(tsk);
 		goto out;
 	}
 
-	PSPRINTK("%s [%d]: exited with 0x%lx\n", __func__,
-			tsk->pid, req->exit_code);
+	PSPRINTK("%s [%d] 0x%x\n", __func__, tsk->pid, req->exit_code);
 
-	if (req->expect_flush) {
-		wait_for_completion(&tsk->wait_for_remote_flush);
-	}
 	tsk->remote = NULL;
 	tsk->remote_nid = -1;
 	tsk->remote_pid = -1;
@@ -269,10 +296,13 @@ static void process_exit_task(struct work_struct *_work)
 	tsk->ret_from_remote = TASK_DEAD;
 	tsk->exit_code = req->exit_code;
 
-	restore_thread_info(tsk, &req->arch, false);
 	smp_mb();
 
-	wake_up_process(tsk);
+	if (tsk->exit_code & 0xff) {
+		force_sig(tsk->exit_code & 0xff, tsk);
+	} else {
+		wake_up_process(tsk);
+	}
 	put_task_struct(tsk);
 
 out:
@@ -280,6 +310,35 @@ out:
 	kfree(work);
 }
 
+
+static void process_origin_task_exit(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	origin_task_exit_t *req = work->msg;
+	struct task_struct *tsk;
+	struct remote_context *rc;
+
+	tsk = __get_task_struct(req->remote_pid);
+	if (!tsk) {
+		printk(KERN_INFO"%s: task %d not found\n", __func__, req->remote_pid);
+		goto out;
+	}
+	PSPRINTK("\nTERMINATE [%d] with 0x%x\n", tsk->pid, req->exit_code);
+	BUG_ON(!tsk->is_vma_worker);
+	tsk->exit_code = req->exit_code;
+
+	rc = get_task_remote(tsk);
+	rc->vma_worker_stop = true;
+	smp_mb();
+	complete(&rc->vma_works_ready);
+	complete(&rc->spawn_egg);
+
+	put_task_remote(tsk);
+	put_task_struct(tsk);
+out:
+	pcn_kmsg_free_msg(req);
+	kfree(work);
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -309,12 +368,7 @@ static void bring_back_remote_thread(struct work_struct *_work)
 			tsk->pid, req->remote_pid, req->remote_nid);
 
 	/* Welcome home */
-	if (req->expect_flush) {
-		struct remote_context *rc = get_task_remote(tsk);
-		wait_for_completion(&tsk->wait_for_remote_flush);
-		rc->remote_tgids[req->remote_nid] = 0;
-		put_task_remote(tsk);
-	}
+
 	tsk->remote = NULL;
 	tsk->remote_nid = -1;
 	tsk->remote_pid = -1;
@@ -377,18 +431,6 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	req = kmalloc(sizeof(*req), GFP_KERNEL);
 	BUG_ON(!req);
 
-	/*
-	 * Flush pages to the server before back-migrate this if this is
-	 * the last remote at here,
-	 */
-	if (put_task_remote(tsk)) {
-		req->expect_flush = true;
-		page_server_flush_remote_pages(tsk->mm->remote);
-	} else {
-		req->expect_flush = false;
-	}
-
-	//printk("%s entered dst{%d}\n", __func__, dst_cpu);
 	req->header.type = PCN_KMSG_TYPE_TASK_MIGRATE_BACK;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
@@ -416,8 +458,6 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 
 	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
 
-	tsk->remote = NULL;
-	tsk->origin_nid = tsk->origin_pid = -1;
 	kfree(req);
 
 #ifdef MIGRATION_PROFILE
@@ -569,7 +609,7 @@ static void __kick_shadow_spawner(struct remote_context *rc, struct pcn_kmsg_wor
 
 int shadow_spawner(void *_args)
 {
-	struct remote_context *rc = _args;
+	struct remote_context *rc = get_task_remote(current);
 
 	PSPRINTK("%s [%d] started\n", __func__, current->pid);
 
@@ -580,7 +620,7 @@ int shadow_spawner(void *_args)
 		struct work_struct *work = NULL;
 		struct shadow_params *params;
 
-		wait_for_completion_timeout(&rc->spawn_egg, 10 * HZ);
+		wait_for_completion_interruptible_timeout(&rc->spawn_egg, HZ);
 
 		spin_lock(&rc->shadow_eggs_lock);
 		if (!list_empty(&rc->shadow_eggs)) {
@@ -605,6 +645,7 @@ int shadow_spawner(void *_args)
 
 	PSPRINTK("%s [%d] exiting\n", __func__, current->pid);
 
+	put_task_remote(current);
 	do_exit(0);
 }
 
@@ -645,7 +686,7 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 
 	use_mm(mm);
 
-	rc->mm = mm;
+	rc->mm = mm;  /* No need to increase mm_users due to mm_alloc() */
 	mm->remote = rc;
 
 	return 0;
@@ -657,6 +698,21 @@ struct vma_worker_params {
 	struct remote_context *rc;
 	char comm[TASK_COMM_LEN];
 };
+
+static void __terminate_remote_threads(struct remote_context *rc)
+{
+	struct task_struct *tsk;
+
+	/* Terminate userspace threads. Tried to use do_group_exit() but it
+	 * didn't work */
+	rcu_read_lock();
+	for_each_thread(current, tsk) {
+		if (tsk->is_vma_worker) continue;
+		force_sig(SIGKILL, tsk);
+		break;
+	}
+	rcu_read_unlock();
+}
 
 static int start_vma_worker_remote(void *_data)
 {
@@ -690,6 +746,7 @@ static int start_vma_worker_remote(void *_data)
 		return -EINVAL;
 	}
 
+	get_task_remote(current);
 	rc->tgid = current->tgid;
 	smp_mb();
 
@@ -703,9 +760,10 @@ static int start_vma_worker_remote(void *_data)
 	 */
 	current->flags &= ~PF_KTHREAD;
 
-	kfree(params);
 	vma_worker_remote(rc);
+	__terminate_remote_threads(rc);
 
+	put_task_remote(current);
 	return 0;
 }
 
@@ -848,19 +906,22 @@ out:
 	return ret;
 }
 
-
 static int start_vma_worker_origin(void *_arg)
 {
 	struct remote_context *rc = _arg;
-
 	might_sleep();
+
 	current->is_vma_worker = true;
 	current->at_remote = false;
+	current->flags &= ~PF_KTHREAD;
 	use_mm(rc->mm);
 
-	current->flags &= ~(PF_KTHREAD);
+	get_task_remote(current);
 
 	vma_worker_origin(rc);
+	__terminate_peers(rc);
+
+	put_task_remote(current);
 
 	return 0;
 }
@@ -897,7 +958,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		 * this process is distributed
 		 */
 		tsk->mm->remote = rc_new;
-		rc_new->mm = tsk->mm;
+		rc_new->mm = get_task_mm(tsk);
 		rc_new->remote_tgids[my_nid] = tsk->tgid;
 
 		__lock_remote_contexts_out(dst_nid);
@@ -907,8 +968,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		create_vma_worker = true;
 		which_rc = "allocated";
 	}
-	rc = get_task_remote(tsk);
-	tsk->remote = rc;
+	rc = tsk->remote = get_task_remote(tsk);
 	tsk->at_remote = false;
 	unlock_task_sighand(tsk, &flags);
 
@@ -956,7 +1016,8 @@ int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, v
 }
 
 
-DEFINE_KMSG_WQ_HANDLER(exit_task);
+DEFINE_KMSG_WQ_HANDLER(remote_task_exit);
+DEFINE_KMSG_WQ_HANDLER(origin_task_exit);
 
 /**
  * Initialize the process server.
@@ -974,7 +1035,8 @@ int __init process_server_init(void)
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_MIGRATE_BACK, back_migration);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_PAIRING, remote_task_pairing);
 
-	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_TASK_EXIT, exit_task);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_TASK_EXIT_REMOTE, remote_task_exit);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_TASK_EXIT_ORIGIN, origin_task_exit);
 
 	return 0;
 }

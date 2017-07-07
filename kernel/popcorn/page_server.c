@@ -120,11 +120,6 @@ static int __start_fault_handling(struct task_struct *tsk, unsigned long addr, u
 	spin_lock_irqsave(&rc->faults_lock, flags);
 	spin_unlock(ptl);
 
-	if (unlikely(rc->flushing)) {
-		ongoing = "flushing";
-		goto out_unlock;
-	}
-
 	list_for_each_entry(fh, &rc->faults, list) {
 		if (fh->addr == addr) {
 			found = true;
@@ -189,7 +184,6 @@ static int __start_fault_handling(struct task_struct *tsk, unsigned long addr, u
 
 out_backoff:
 	backoff = fh->backoff++;
-out_unlock:
 	spin_unlock_irqrestore(&rc->faults_lock, flags);
 
 	put_task_remote(tsk);
@@ -358,7 +352,6 @@ static void process_remote_page_flush(struct work_struct *work)
 
 	if (req->flags & FLUSH_FLAG_START) {
 		spin_lock_irqsave(&rc->faults_lock, flags);
-		rc->flushing = true;
 		spin_unlock_irqrestore(&rc->faults_lock, flags);
 
 		res.flags = FLUSH_FLAG_START;
@@ -366,10 +359,7 @@ static void process_remote_page_flush(struct work_struct *work)
 		goto out_put;
 	} else if (req->flags & FLUSH_FLAG_LAST) {
 		spin_lock_irqsave(&rc->faults_lock, flags);
-		rc->flushing = false;
 		spin_unlock_irqrestore(&rc->faults_lock, flags);
-
-		complete(&tsk->wait_for_remote_flush);
 
 		res.flags = FLUSH_FLAG_LAST;
 		pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
@@ -836,7 +826,7 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 {
 	struct page *page;
 
-	if (!process_is_distributed(current)) return;
+	if (!vma->vm_mm->remote) return;
 
 	page = vm_normal_page(vma, addr, *pte);
 	if (!page) return;
