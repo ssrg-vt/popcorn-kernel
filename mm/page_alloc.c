@@ -3271,6 +3271,9 @@ out:
 	 */
 	if (unlikely(!page && read_mems_allowed_retry(cpuset_mems_cookie)))
 		goto retry_cpuset;
+#ifdef CONFIG_POPCORN
+	bitmap_zero(page->owners, MAX_POPCORN_NODES);
+#endif
 
 	return page;
 }
