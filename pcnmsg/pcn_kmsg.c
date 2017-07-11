@@ -13,32 +13,10 @@
 
 /* Message usage pattern */
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-#define MAX_STATISTIC_SLOTS 100 // support n diffrent sizes of msg
-struct statistic send_pattern[MAX_STATISTIC_SLOTS];
-struct statistic recv_pattern[MAX_STATISTIC_SLOTS];
+atomic_t send_pattern[MAX_STATISTIC_SLOTS];
+atomic_t recv_pattern[MAX_STATISTIC_SLOTS];
 EXPORT_SYMBOL(send_pattern);
 EXPORT_SYMBOL(recv_pattern);
-#define MAX_PATTRN_SIZE (1<<20)		// if larger than 1<<20, do linked-list
-/*
- * input:
- *  pattern[]: 
- *  size: search this size in pattern[].size
- *  return value:
- * -1: not found & no space (not implemented)  
- *  0: not found
- *  positive: return the slot
- */
-int get_a_slot(struct statistic pattern[], unsigned long size)
-{
-    int i = 0;
-    while (pattern[i].size) {
-        if (pattern[i].size == size)
-            return i;
-        i++;
-    }
-    return i;
-}
-EXPORT_SYMBOL(get_a_slot);
 #endif
 
 pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
@@ -56,10 +34,8 @@ int __init pcn_kmsg_init(void)
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
 	int i; 
 	for(i=0; i<MAX_STATISTIC_SLOTS; i++) {
-		send_pattern[i].size = 0;
-		send_pattern[i].cnt.counter = 0;
-        recv_pattern[i].size = 0;
-        recv_pattern[i].cnt.counter = 0;
+		send_pattern[i].counter = 0;
+        recv_pattern[i].counter = 0;
 	}
 #endif
 	send_callback = NULL;
@@ -89,10 +65,6 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 
 int pcn_kmsg_send(unsigned int to, void *lmsg, unsigned int size)
 {
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-	int slot;
-#endif
-
 	if (send_callback == NULL) {
 		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
 
@@ -104,12 +76,7 @@ int pcn_kmsg_send(unsigned int to, void *lmsg, unsigned int size)
 	}
 
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-	slot = get_a_slot(send_pattern, size);
-	if (slot >= 0) {
-		if(send_pattern[slot].size == 0) // create a new pattern
-			send_pattern[slot].size = size;
-		atomic_inc(&send_pattern[slot].cnt); // adding cnt
-	}
+	atomic_inc(&send_pattern[size]);
 #endif
 
 	return send_callback(to, (struct pcn_kmsg_message *)lmsg, size);
@@ -134,12 +101,12 @@ int pcn_kmsg_send_rdma(unsigned int to, void *lmsg, unsigned int size)
 
 void *pcn_kmsg_alloc_msg(size_t size)
 {
-	return vmalloc(size);
+	return kmalloc(size, GFP_KERNEL);
 }
 
 void pcn_kmsg_free_msg(void *msg)
 {
-	vfree(msg);
+	kfree(msg);
 }
 
 EXPORT_SYMBOL(pcn_kmsg_alloc_msg);

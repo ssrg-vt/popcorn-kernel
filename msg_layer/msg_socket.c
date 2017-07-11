@@ -185,13 +185,7 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 	ftn = callbacks[msg.msg->header.type];
 	if (ftn != NULL) {
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-        int slot;
-        slot = get_a_slot(recv_pattern, msg.msg->header.size);
-        if (slot >= 0) {
-            if(recv_pattern[slot].size == 0)
-                recv_pattern[slot].size = msg.msg->header.size;
-            atomic_inc(&recv_pattern[slot].cnt);
-        }
+		atomic_inc(&recv_pattern[msg.msg->header.size]);
 #endif
 		ftn((void*)msg.msg);
 	} else {

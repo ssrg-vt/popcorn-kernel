@@ -34,11 +34,13 @@ struct wait_station *get_wait_station_multiple(struct task_struct *tsk, int coun
 
 	return ws;
 }
+EXPORT_SYMBOL_GPL(get_wait_station_multiple);
 
 struct wait_station *wait_station(int id)
 {
 	return wait_stations + id;
 }
+EXPORT_SYMBOL_GPL(wait_station);
 
 void put_wait_station(struct wait_station *ws)
 {
@@ -49,9 +51,11 @@ void put_wait_station(struct wait_station *ws)
 	spin_unlock(&wait_station_lock);
 	//printk(" *[%d]: %d returned\n", ws->pid, id);
 }
+EXPORT_SYMBOL_GPL(put_wait_station);
 
 void *wait_at_station(struct wait_station *ws)
 {
 	wait_for_completion(&ws->pendings);
 	return ws->private;
 }
+EXPORT_SYMBOL_GPL(wait_at_station);

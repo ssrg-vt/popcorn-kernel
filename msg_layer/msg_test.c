@@ -5,34 +5,35 @@
  *                      - large data (>=8K)
  *                      - (rdma read/write)
  */
+#include <linux/slab.h>
+#include <linux/delay.h>
+#include <asm/uaccess.h>
 #include <linux/module.h>
-
+#include <linux/string.h>
+#include <linux/kthread.h>
+#include <linux/vmalloc.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-#include <linux/slab.h>
-#include <linux/kthread.h>
-
-#include <linux/string.h>
-
-#include <asm/uaccess.h>
 
 #include <popcorn/debug.h>
 #include <popcorn/pcn_kmsg.h>
 
-#include <linux/vmalloc.h>
+//#include <popcorn/types.h>
+#include "../../kernel/popcorn/types.h"
+#include <popcorn/bundle.h>
 
 #include "common.h"
-
-#include <linux/delay.h>
+#include "../../kernel/popcorn/wait_station.h"
 
 /* testing args */
 #define ITER 1					// iter for test10 (send throughput)
 #define MAX_ARGS_NUM 10	
 #define MAX_MSG_LENGTH 16384	// max msg payload size supported by msg_test.c 
 #define TEST1_MSG_COUNT 100000	// specifically for test1 iterations
+char dump_buf[MAX_MSG_LENGTH];
 
 /* proc output args */
-#define MAX_STATISTIC_SLOTS 100	// support n diffrent sizes of msg
+//#define MAX_STATISTIC_SLOTS 100	// support n diffrent sizes of msg
 #define PROC_BUF_SIZE 1024*1024 // proc output size
 
 /* getting performance data */
@@ -85,11 +86,24 @@ typedef struct {
     char msg[TEST1_PAYLOAD_SIZE];
 }__attribute__((packed)) remote_thread_first_test_request_t;
 
-struct test_msg_t
-{
+struct test_msg_t {
 	struct pcn_kmsg_hdr header;
 	unsigned char payload[MAX_MSG_LENGTH];
 };
+
+struct test_msg_request_t {
+	struct pcn_kmsg_hdr header;
+	int remote_ws;
+	bool is_mimic_read;
+	unsigned char payload[MAX_MSG_LENGTH];
+};
+
+struct test_msg_response_t {
+	struct pcn_kmsg_hdr header;
+	int remote_ws;
+};
+
+
 
 /* example - handler */
 static void handle_remote_thread_first_test_request(
@@ -123,6 +137,72 @@ static int handle_self_test(struct pcn_kmsg_message* inc_msg)
 
 	pcn_kmsg_free_msg(request);
 	return 0;
+}
+
+
+
+
+static struct test_msg_request_t *__alloc_send_roundtrip_request(void)
+{
+    struct test_msg_request_t *req = pcn_kmsg_alloc_msg(sizeof(struct test_msg_request_t));
+    if(req == NULL)
+		return NULL;
+
+	req->header.type = PCN_KMSG_TYPE_SEND_ROUND_REQUEST;
+	req->header.prio = PCN_KMSG_PRIO_NORMAL;
+    return req;
+}
+
+void roundtrip_show_time(	struct timeval *t1, struct timeval *t2,
+							unsigned long long payload_size,
+							unsigned long long iter)
+{
+	if( t2->tv_usec-t1->tv_usec >= 0) {
+		EXP_DATA("Send roundtrip: send payload size %llu, "
+							"%llu times, spent %ld.%06ld s\n",
+							payload_size, iter, t2->tv_sec-t1->tv_sec,
+							t2->tv_usec-t1->tv_usec);
+	} else {
+		EXP_DATA("Send roundtrip: send payload size %llu, "
+							"%llu times, spent %ld.%06ld s\n",
+							payload_size, iter, t2->tv_sec-t1->tv_sec-1,
+							(1000000-(t1->tv_usec-t2->tv_usec)));
+	}
+}
+
+void test_send_roundtrip_throughput(unsigned long long payload_size,
+									unsigned long long iter,
+									bool is_mimic_read)
+{
+	int i, dst = 0;
+	struct timeval t1, t2;
+	struct test_msg_request_t *req = __alloc_send_roundtrip_request();
+	struct test_msg_request_t *res;
+
+	req->is_mimic_read = is_mimic_read;
+	memset(req->payload, 'b', payload_size);
+
+	if (my_nid == 0)
+		dst=1;
+
+	do_gettimeofday(&t1);
+	for (i = 0; i < iter; i++) { //
+		struct wait_station *ws = get_wait_station(current);
+		req->remote_ws = ws->id;
+		pcn_kmsg_send(dst, req, payload_size + sizeof(struct pcn_kmsg_hdr));
+		res = wait_at_station(ws);
+		put_wait_station(ws);
+
+		if(!is_mimic_read) {
+			//printk("mimic WRITE\n");
+			// round-trip simulaties WRITE
+			memcpy(&dump_buf, &res->payload,
+								res->header.size - sizeof(struct pcn_kmsg_hdr));
+		}
+		pcn_kmsg_free_msg(res);
+	}
+	do_gettimeofday(&t2);
+	roundtrip_show_time(&t1, &t2, payload_size, iter);
 }
 
 static int test1(void)
@@ -288,7 +368,6 @@ static int kthread_test3(void* arg0)
 	return 0;
 }
 
-// only support nid x sends to nid 0 so far
 void test_send_throughput(unsigned long long payload_size)
 {
 	int i, dst = 0;
@@ -299,9 +378,8 @@ void test_send_throughput(unsigned long long payload_size)
 	msg->header.type= PCN_KMSG_TYPE_SELFIE_TEST;
 	memset(msg->payload, 'b', payload_size);
 
-	if (my_nid == 0) {
+	if (my_nid == 0)
 		dst=1;
-	}
 
 	do_gettimeofday(&t1);
 	for (i = 0; i < MAX_TESTING_SIZE/payload_size; i++)
@@ -309,12 +387,12 @@ void test_send_throughput(unsigned long long payload_size)
 	do_gettimeofday(&t2);
 
 	if( t2.tv_usec-t1.tv_usec >= 0) {
-		EXP_DATA("Send throughput result: send payload size %llu, "
+		EXP_DATA("Send one-way: send payload size %llu, "
 							"total size %d, %llu times, spent %ld.%06ld s\n",
 				payload_size, MAX_TESTING_SIZE, MAX_TESTING_SIZE/payload_size, 
 									t2.tv_sec-t1.tv_sec, t2.tv_usec-t1.tv_usec);
 	} else {
-		EXP_DATA("Send throughput result: send payload size %llu, "
+		EXP_DATA("Send one-way: send payload size %llu, "
 							"total size %d, %llu times, spent %ld.%06ld s\n",
 				payload_size, MAX_TESTING_SIZE, MAX_TESTING_SIZE/payload_size,
 					t2.tv_sec-t1.tv_sec-1, (1000000-(t1.tv_usec-t2.tv_usec)));
@@ -533,22 +611,29 @@ static ssize_t write_proc(struct file * file,
 			do_gettimeofday(&t1);
 			test_send_throughput(simple_strtoull(argv[1], NULL, 0));
 			do_gettimeofday(&t2);
-#if 0			
-			if( t2.tv_usec-t1.tv_usec >= 0) {
-				EXP_DATA("Send throughput result: send msg size %llu, "
-							"total size %llu, %llu times, spent %ld.%06ld s\n",
-				payload_size, MAX_TESTING_SIZE, MAX_TESTING_SIZE/payload_size, 
-									t2.tv_sec-t1.tv_sec, t2.tv_usec-t1.tv_usec);
-			} else {
-				EXP_DATA("Send throughput result: size %llu, "
-							"total size %llu, %llu times, spent %ld.%06ld s\n",
-				payload_size, MAX_TESTING_SIZE, MAX_TESTING_SIZE/payload_size,
-					t2.tv_sec-t1.tv_sec-1, (1000000-(t1.tv_usec-t2.tv_usec)));
-			}
-#endif
 		}
 		EXP_LOG("test %c%c test_send_throughput() done\n\n\n", 
 														cmd[0], cmd[1]);
+	}
+	else if(!memcmp(argv[0], "11", 2) || !memcmp(argv[0], "12", 2)) { // EXP
+		if(args<2) {
+			printk(KERN_ERR "sudo echo 11 <SIZE> > /proc/kmsg_test\n");
+			return count;
+		}
+		if(simple_strtoull(argv[2], NULL, 0) == 0)
+			printk(KERN_WARNING "iter = 0\n");
+
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+		printk(KERN_WARNING "You are tracking POPCORN_MSG_STATISTIC "
+				"and geting inaccurate performance data now\n");
+#endif
+		KRPRINT_INIT("arg %llu\n", simple_strtoull(argv[1], NULL, 0));
+		for(i=0; i<ITER; i++) {
+			test_send_roundtrip_throughput(simple_strtoull(argv[1], NULL, 0),
+										simple_strtoull(argv[2], NULL, 0),
+										memcmp(argv[0], "11", 2)==0?true:false);
+		}
+		EXP_LOG("test %s test_send_throughput() done\n\n\n", argv[0]);
 	}
 	else { 
 		printk("Not support yet. Try \"1,2,3,4,5,6,9,10\"\n"); 
@@ -577,22 +662,19 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 		return 0;
 	
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-	i=0;
-	while(send_pattern[i].size > 0) {
+	for (i=1; i<MAX_STATISTIC_SLOTS; i++) {
+		if(atomic_read(&send_pattern[i]) == 0)
+			continue;
 		len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
-						"SEND: size %lu cnt %lu\n",
-						send_pattern[i].size,
-						(unsigned long)atomic_read(&send_pattern[i].cnt));
-		i++;
+                        "SEND: size %d cnt %lu\n", i,
+                        (unsigned long)atomic_read(&send_pattern[i]));
 	}
-	
-	i=0;
-	while(recv_pattern[i].size > 0) {
+	for (i=1; i<MAX_STATISTIC_SLOTS; i++) {
+		if(atomic_read(&recv_pattern[i]) == 0)
+			continue;
 		len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
-						"RECV: size %lu cnt %lu\n",
-						recv_pattern[i].size,
-						(unsigned long)atomic_read(&recv_pattern[i].cnt));
-		i++;
+                        "RECV: size %d cnt %lu\n", i,
+                        (unsigned long)atomic_read(&recv_pattern[i]));
 	}
 
 	if( len > PROC_BUF_SIZE ) {
@@ -638,13 +720,62 @@ static struct file_operations kmsg_test_ops = {
 	.write = write_proc,
 };
 
+/**
+ * VMA worker
+ *
+ * We do this stupid thing because functions related to meomry mapping operate
+ * on "current". Thus, we need mmap/munmap/madvise in our process
+ */
+static void __reply_send_roundtrip(struct test_msg_request_t *req, int ret)
+{
+    struct test_msg_response_t res = {
+        .header = {
+			.type = PCN_KMSG_TYPE_SEND_ROUND_RESPONSE,
+            .prio = PCN_KMSG_PRIO_NORMAL,
+        },
+        .remote_ws = req->remote_ws,
+    };
+    pcn_kmsg_send(req->header.from_nid, &res, sizeof(res));
+    //pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
+}
+
+static void process_send_roundtrip_request(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	struct test_msg_request_t *req = work->msg;
+
+	if(req->is_mimic_read) {
+		//printk("mimic READ\n");
+		// round-trip simulaties READ
+		memcpy(&dump_buf, &req->payload,
+					req->header.size - sizeof(struct pcn_kmsg_hdr));
+	}
+
+	__reply_send_roundtrip(req, -EINVAL);
+
+	pcn_kmsg_free_msg(req);
+    kfree(work);
+}
+
+static void process_send_roundtrip_response(struct work_struct *_work)
+{
+    struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+    struct test_msg_response_t *res = work->msg;
+    struct wait_station *ws = wait_station(res->remote_ws);
+
+    ws->private = res;
+    smp_mb();
+    complete(&ws->pendings);
+
+    kfree(work);
+}
+
+DEFINE_KMSG_WQ_HANDLER(send_roundtrip_request);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(send_roundtrip_response);
 
 /* example - main usage */
 static int __init msg_test_init(void)
 {
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-	int i;
-#endif
 	static struct proc_dir_entry *kmsg_test_proc;
 
 	/* register a proc */
@@ -664,6 +795,14 @@ static int __init msg_test_init(void)
 	// for experiments - send throughput
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SELFIE_TEST, handle_self_test);
 
+	// for data
+    REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_REQUEST,
+													send_roundtrip_request);
+    REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_RESPONSE,
+													send_roundtrip_response);
+
+
+
 	smp_mb(); // Just in case
 	printk("--- Popcorn messaging layer self-testing proc init done ---\n");
 	printk("--- Usage: sudo echo [NUM] [DEPENDS] > /proc/kmsg_test ---\n");
@@ -678,8 +817,14 @@ static int __init msg_test_init(void)
 									"send/recv/READ/WRITE test ---\n");
 	printk("---      ex: echo [NUM] > /proc/kmsg_test---\n");
 	printk("==================== experimental data ====================\n");
-	printk("---  10: single thread send throughput ---\n");
+	printk("---  10: single thread send throughput (one way) ---\n");
 	printk("---      ex: echo 10 [SIZE] > /proc/kmsg_test ---\n");
+	printk("---  11: single thread send throughput (round-trip - "
+												"simulate RDMA READ) ---\n");
+	printk("---      ex: echo 11 [SIZE] > /proc/kmsg_test ---\n");
+	printk("---  12: single thread send throughput (round-trip - "
+												"simulate RDMA WRITE) ---\n");
+	printk("---      ex: echo 12 [SIZE] > /proc/kmsg_test ---\n");
 	printk("=============== msg_layer usage pattern  ===============\n");
 	printk("---  cat: showing msg_layer usage pattern ---\n");
 	printk("---      ex: cat /proc/kmsg_test ---\n");

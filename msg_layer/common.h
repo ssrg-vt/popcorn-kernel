@@ -35,9 +35,8 @@ typedef struct {
 
 /* Message usage pattern */
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-extern struct statistic send_pattern[];
-extern struct statistic recv_pattern[];
-extern int get_a_slot(struct statistic pattern[], unsigned long size);
+extern atomic_t send_pattern[];
+extern atomic_t recv_pattern[];
 #endif
 
 #endif

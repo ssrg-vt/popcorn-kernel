@@ -9,6 +9,10 @@
 
 #include <linux/types.h>
 
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+#define MAX_STATISTIC_SLOTS 1048576
+#endif
+
 enum pcn_connection_status {
 	PCN_CONN_WATING,
 	PCN_CONN_CONNECTED,
@@ -30,10 +34,14 @@ enum pcn_kmsg_type {
 
 	/* message layer testing */
 	PCN_KMSG_TYPE_FIRST_TEST,
-	PCN_KMSG_TYPE_SELFIE_TEST,
 	PCN_KMSG_TYPE_TEST,
 	PCN_KMSG_TYPE_TEST_LONG,
 	PCN_KMSG_TYPE_NODE_INFO,
+
+	/* Performance experiments */
+	PCN_KMSG_TYPE_SELFIE_TEST,
+	PCN_KMSG_TYPE_SEND_ROUND_REQUEST,
+	PCN_KMSG_TYPE_SEND_ROUND_RESPONSE,
 
 	/* Provide the single system image */
 	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
@@ -236,8 +244,5 @@ int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id, void *msg,
 extern send_cbftn send_callback;
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 
-struct statistic {
-    unsigned long size;
-    atomic_t cnt;
-};
+
 #endif /* __LINUX_PCN_KMSG_H */

@@ -52,7 +52,7 @@
 
 /* for debug */
 #define TEST_MSG_LAYER		0
-#define TEST_SERVER		1
+#define TEST_SERVER		0
 
 typedef struct _pool_buffer {
 	char *buff;
@@ -451,23 +451,11 @@ int __init initialize(void)
 	init_completion(&(send_q_empty));
 #endif
 
-	for (i = 0; i < MAX_NUM_BUF; i++) {
-		send_buf[i].buff = vmalloc(SEG_SIZE);
-		if (send_buf[i].buff == NULL)
-			printk(KERN_WARNING "************* Failed to allocate buffer pool **************\n");
-
-		send_buf[i].is_free = 1;
-		send_buf[i].status = 0;
-		smp_wmb();
-
-		printk(KERN_INFO "allocated buffer %p\n", send_buf[i].buff);
-	}
-
 	sema_init(&pool_buf_cnt, MAX_NUM_BUF);
 
 #if TEST_MSG_LAYER
 	for (i = 0; i < MAX_NUM_BUF; i++) {
-		recv_buf[i].buff = vmalloc(SEG_SIZE);
+		recv_buf[i].buff = pcn_kmsg_alloc_msg(SEG_SIZE);
 		if (recv_buf[i].buff == NULL)
 			printk(KERN_WARNING "************* Failed to allocate buffer pool **************\n");
 
@@ -586,7 +574,11 @@ int __init initialize(void)
 	       (unsigned long int)send_callback);
 #endif
 
+	printk(KERN_INFO "\n\n\n");
+	printk(KERN_INFO "-----------------------------------\n");
 	printk(KERN_INFO "Popcorn Messaging Layer Initialized\n");
+	printk(KERN_INFO "-----------------------------------\n");
+	printk(KERN_INFO "\n\n\n");
 	return 0;
 }
 
@@ -718,10 +710,11 @@ int connection_handler(void *arg0)
 			break;
 #endif
 
-	connection_handler_cnt++;
-	if (connection_handler_cnt > 1)
-		printk(KERN_ALERT "%s: ALERT: detected connection_handler_cnt %d\n",
-		       __func__, connection_handler_cnt);
+		connection_handler_cnt++;
+		if (connection_handler_cnt > 1)
+			printk(KERN_ALERT "%s: ALERT: detected connection_handler_cnt %d\n",
+				   __func__, connection_handler_cnt);
+
 		temp = (struct pcn_kmsg_message *)recv_vaddr[channel_num];
 		if (!temp)
 			printk(KERN_ERR"%s: ERROR: temp is zero\n", __func__);
@@ -759,7 +752,7 @@ do_retry:
 		pcn_msg = recv_buf[i].buff;
 #else
 do_retry:
-		pcn_msg = (struct pcn_kmsg_message *) vmalloc(temp->header.size);
+		pcn_msg = (struct pcn_kmsg_message *) pcn_kmsg_alloc_msg(temp->header.size);
 		if (pcn_msg == NULL) {
 			if (!(retry % 1000))
 				printk(KERN_ERR "%s: ERROR: Failed to allocate recv buffer size %d\n",
@@ -794,17 +787,11 @@ do_retry:
 
 			up(&recv_buf_cnt);
 #else
-			vfree(pcn_msg);
+			pcn_kmsg_free_msg(pcn_msg);
 #endif
 		} else {
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-			int slot;
-			slot = get_a_slot(recv_pattern, pcn_msg->header.size);
-			if (slot >= 0) {
-				if(recv_pattern[slot].size == 0)
-					recv_pattern[slot].size = pcn_msg->header.size;
-				atomic_inc(&recv_pattern[slot].cnt);
-			}
+			atomic_inc(&recv_pattern[pcn_msg->header.size]);
 #endif
 			ftn = callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {
@@ -823,7 +810,7 @@ do_retry:
 				smp_wmb();
 				up(&recv_buf_cnt);
 #else
-				vfree(pcn_msg);
+				pcn_kmsg_free_msg(pcn_msg);
 #endif
 			}
 		}
@@ -898,8 +885,6 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 
 int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg, unsigned int payload_size)
 {
-	int i = 0;
-	int retry = 0;
 	int channel_num = 0, ret;
 	struct pcn_kmsg_long_message *pcn_msg = NULL;
 	pcn_kmsg_cbftn ftn;
@@ -936,7 +921,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 		    || pcn_msg->header.type >= PCN_KMSG_TYPE_MAX) {
 			printk(KERN_ERR "Received invalid message type %d\n",
 			       pcn_msg->header.type);
-			vfree(pcn_msg);
+			pcn_kmsg_free_msg(pcn_msg);
 		} else {
 			ftn = (pcn_kmsg_cbftn) callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {
@@ -945,43 +930,15 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg
 				printk(KERN_ERR "%s: ERROR: Recieved message type %d size %d has no registered callback!\n",
 				       __func__, pcn_msg->header.type,
 				       pcn_msg->header.size);
-				vfree(pcn_msg);
+				pcn_kmsg_free_msg(pcn_msg);
 			}
 		}
 		return lmsg->header.size;
 	}
 #endif
-	down(&pool_buf_cnt);
-
-do_retry:
-	for (i = 0; i < MAX_NUM_BUF; i++) {
-		if (atomic_cmpxchg(((atomic_t *) &send_buf[i].is_free), 1, 0) == 1) {
-			smp_wmb();
-			break;
-		}
-	}
-
-	if (i == MAX_NUM_BUF) {
-		if (!(retry % 1000))
-			printk(KERN_WARNING "%s: WARN: Couldnt find a free buffer. Retry %d\n",
-			       __func__, retry);
-		if (!(retry % 10000))
-			for (i = 0; i < MAX_NUM_BUF; i++)
-				printk(KERN_WARNING "%s: WARN: i %d is_free %d buff 0x%lx status %d\n",
-				       __func__, i, send_buf[i].is_free,
-				       (long unsigned int)send_buf[i].buff,
-				       send_buf[i].status);
-		retry++;
-		goto do_retry;
-   }
-
-	// NOTE probably not needed //
-	//memcpy(send_buf[i].buff, lmsg, lmsg->header.size);
-	//memset(send_buf[i].buff + lmsg->header.size, 0, 1);
-
-	//pcn_msg = (struct pcn_kmsg_long_message *) send_buf[i].buff;
 
 	pcn_msg = lmsg;
+	down(&pool_buf_cnt);
 
 	// Only one can send. Tirggered by INT.
 	wait_for_completion(&send_intr_flag[channel_num]);
@@ -1015,7 +972,6 @@ do_retry:
 		printk(KERN_ERR"%s: ERROR: in sci_trigger_interrupt_flag: %d\n",
 														   __func__, ret);
 
-	atomic_set(((atomic_t *) &send_buf[i].is_free), 1);
 	smp_wmb();
 	up(&pool_buf_cnt);
 
@@ -1454,9 +1410,8 @@ static void __exit unload(void)
 	}
 
 	for (i = 0; i < MAX_NUM_BUF; i++) {
-		vfree(send_buf[i].buff);
 #if TEST_MSG_LAYER
-		vfree(recv_buf[i].buff);
+		pcn_kmsg_free_msg(recv_buf[i].buff);
 #endif
 	}
 
