@@ -43,7 +43,7 @@
 #define TARGET_NODE		((my_nid == 0) ? 8 : 4)
 
 #define NO_FLAGS		0
-#define SEG_SIZE		20000
+#define SEG_SIZE		70000	// to support max msg size 65536
 #define MAX_NUM_BUF		20
 #define RECV_THREAD_POOL	2
 
@@ -53,6 +53,7 @@
 /* for debug */
 #define TEST_MSG_LAYER		0
 #define TEST_SERVER		0
+
 
 typedef struct _pool_buffer {
 	char *buff;
@@ -163,7 +164,7 @@ sci_r_interrupt_handle_t remote_recv_intr_hdl[MAX_NUM_CHANNELS] = {NULL};
 
 static int __init initialize(void);
 int pci_kmsg_send_long(unsigned int dest_cpu,
-		       struct pcn_kmsg_long_message *lmsg,
+		       struct pcn_kmsg_message *lmsg,
 		       unsigned int payload_size);
 
 #if TEST_MSG_LAYER
@@ -175,7 +176,8 @@ extern send_cbftn send_callback;
 
 #if TEST_MSG_LAYER
 
-#define MSG_LENGTH 16384
+#define MSG_LENGTH 65536
+//#define MSG_LENGTH 16384
 //#define MSG_LENGTH 4096
 #define NUM_MSGS 25
 
@@ -599,7 +601,7 @@ void pcn_kmsg_cbftn handle_selfie_test(struct pcn_kmsg_message *inc_msg)
 #if !TEST_SERVER
 	int payload_size = MSG_LENGTH;
 
-	pci_kmsg_send_long(1, (struct pcn_kmsg_long_message *)inc_msg,
+	pci_kmsg_send_long(1, (struct pcn_kmsg_message *)inc_msg,
 			   payload_size);
 #endif
 }
@@ -639,7 +641,7 @@ int test_thread(void *arg0)
 		printk(KERN_DEBUG "start_time = %lld\n",
 		       ktime_to_ns(start[temp_count]));
 #endif
-		pci_kmsg_send_long(1, (struct pcn_kmsg_long_message *)msg,
+		pci_kmsg_send_long(1, (struct pcn_kmsg_message *)msg,
 				   payload_size);
 
 		if (!(i%(NUM_MSGS/5))) {
@@ -883,10 +885,10 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 }
 #endif
 
-int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_long_message *lmsg, unsigned int payload_size)
+int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg, unsigned int payload_size)
 {
 	int channel_num = 0, ret;
-	struct pcn_kmsg_long_message *pcn_msg = NULL;
+	struct pcn_kmsg_message *pcn_msg = NULL;
 	pcn_kmsg_cbftn ftn;
 
 

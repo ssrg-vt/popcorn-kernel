@@ -19,20 +19,29 @@ EXPORT_SYMBOL(send_pattern);
 EXPORT_SYMBOL(recv_pattern);
 #endif
 
+/* For testing RDMA READ/WRITE */
+char *dummy_act_buf;
+char *dummy_pass_buf;
+EXPORT_SYMBOL(dummy_act_buf);
+EXPORT_SYMBOL(dummy_pass_buf);
+
+char *msg_layer = NULL;
+EXPORT_SYMBOL(msg_layer);
+
 pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 EXPORT_SYMBOL(callbacks);
 
 send_cbftn send_callback;
 EXPORT_SYMBOL(send_callback);
 
-send_cbftn send_callback_rdma;
+send_rdma_cbftn send_callback_rdma;
 EXPORT_SYMBOL(send_callback_rdma);
 
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-	int i; 
+	int i;
 	for(i=0; i<MAX_STATISTIC_SLOTS; i++) {
 		send_pattern[i].counter = 0;
         recv_pattern[i].counter = 0;
@@ -86,16 +95,16 @@ int pcn_kmsg_send(unsigned int to, void *lmsg, unsigned int size)
 /*
  * Your request must be allocated by kmalloc().
  */
-int pcn_kmsg_send_rdma(unsigned int to, void *lmsg, unsigned int size)
+int pcn_kmsg_send_rdma(unsigned int to, void *lmsg, unsigned int msg_size, unsigned int rw_size)
 {
     if (send_callback_rdma == NULL) {
 		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
-		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, size=%u\n",
-                    __func__, hdr->from_nid, hdr->type, size);
+		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, msg_size=%u rw_size=%u\n",
+                    __func__, hdr->from_nid, hdr->type, msg_size, rw_size);
         return -ENOENT;
     }
 
-    return send_callback_rdma(to, (struct pcn_kmsg_message *)lmsg, size);
+    return send_callback_rdma(to, (struct pcn_kmsg_message *)lmsg, msg_size, rw_size);
 }
 
 

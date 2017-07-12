@@ -42,6 +42,9 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_SELFIE_TEST,
 	PCN_KMSG_TYPE_SEND_ROUND_REQUEST,
 	PCN_KMSG_TYPE_SEND_ROUND_RESPONSE,
+	PCN_KMSG_TYPE_SEND_ROUND_WRITE_REQUEST,
+	PCN_KMSG_TYPE_SEND_ROUND_WRITE_RESPONSE,
+	PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF,
 
 	/* Provide the single system image */
 	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
@@ -131,8 +134,7 @@ struct pcn_kmsg_hdr {
 	unsigned int from_nid	:8;
 	enum pcn_kmsg_type type	:8;
 	enum pcn_kmsg_prio prio	:7;
-	unsigned int is_rdma    :1;
-
+	bool is_rdma			:1;
 	unsigned int size;
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	unsigned long ticket;	// useful dbg for msg layer
@@ -141,7 +143,7 @@ struct pcn_kmsg_hdr {
 
 #define CACHE_LINE_SIZE 64
 #define PCN_KMSG_PAYLOAD_SIZE (CACHE_LINE_SIZE - sizeof(struct pcn_kmsg_hdr))
-#define PCN_KMSG_LONG_PAYLOAD_SIZE 65536
+#define PCN_KMSG_LONG_PAYLOAD_SIZE 65536+64
 
 #define DEFINE_PCN_KMSG(type, fields) \
 	typedef struct {				\
@@ -176,6 +178,7 @@ typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
 
 /* Typedef for function pointer to callback functions */
 typedef int (*send_cbftn)(unsigned int, struct pcn_kmsg_message *, unsigned int);
+typedef int (*send_rdma_cbftn)(unsigned int, struct pcn_kmsg_message *, unsigned int, unsigned int);
 
 /* SETUP */
 
@@ -192,7 +195,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
 /* Send a message to the specified destination CPU. */
 int pcn_kmsg_send(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
-int pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
+int pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg, unsigned int msg_size, unsigned int rw_size);
 
 /* Free a received message (called at the end of the callback function) */
 void pcn_kmsg_free_msg(void *msg);

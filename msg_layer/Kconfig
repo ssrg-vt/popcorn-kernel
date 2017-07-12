@@ -27,14 +27,20 @@ config POPCORN_KMSG_IB
 	depends on POPCORN_KMSG
 	default n
 
+if POPCORN_KMSG_IB
+config POPCORN_IBWR_PAGE
+	bool "Passing pages via Infiniband READ/WRITE"
+	default n
+endif
+
 config POPCORN_KMSG_TEST
 	tristate "Test modules for messaging layer"
 	depends on POPCORN_KMSG
 	default n
 
 config POPCORN_MSG_STATISTIC
-    tristate "Extract messaging layer usage statistic"
-    depends on POPCORN_KMSG
+    bool "Extract messaging layer usage statistic"
+	depends on POPCORN_KMSG
     default n
 
 config POPCORN_DEBUG_MSG_LAYER_VERBOSE
