@@ -23,6 +23,7 @@
 #include <asm/prctl.h>
 #include <asm/proto.h>
 #include <asm/desc.h>
+#include <asm/fpu/internal.h>
 
 #include <popcorn/types.h>
 #include <popcorn/regset.h>
@@ -88,10 +89,13 @@ int save_thread_info(struct task_struct *tsk, struct field_arch *arch)
 	WARN_ON(es);
 	WARN_ON(gs);
 	arch->tls = fs;
+	arch->fpu_active = !!tsk->thread.fpu.fpstate_active;
 
 	put_cpu();
 
-	PSPRINTK("%s [%d]: tls %lx\n", __func__, tsk->pid, arch->tls);
+	PSPRINTK("%s [%d] tls %lx\n", __func__, tsk->pid, arch->tls);
+	PSPRINTK("%s [%d] fpu %sactive\n", __func__, tsk->pid,
+			arch->fpu_active ? "" : "in");
 
 	return 0;
 }
@@ -172,17 +176,19 @@ int restore_thread_info(struct task_struct *tsk, struct field_arch *arch, bool r
 			do_arch_prctl(tsk, ARCH_SET_GS, arch->thread_gs);
 		}
 		*/
+		if (arch->fpu_active) {
+			fpu__activate_curr(&tsk->thread.fpu);
+		}
 	}
-	//initialize_thread_retval(tsk, 0);
 
 	put_cpu();
 
-	PSPRINTK("%s [%d]: ip %lx\n", __func__,
-			tsk->pid, regs->ip);
-	PSPRINTK("%s [%d]: sp %lx bp %lx\n", __func__,
-			tsk->pid, regs->sp, regs->bp);
-	PSPRINTK("%s [%d]: fs %lx\n", __func__,
-			tsk->pid, arch->tls);
+	PSPRINTK("%s [%d] ip %lx\n", __func__, tsk->pid,
+			regs->ip);
+	PSPRINTK("%s [%d] sp %lx bp %lx\n", __func__, tsk->pid,
+			regs->sp, regs->bp);
+	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, tsk->pid,
+			arch->tls, arch->fpu_active ? "" : "in");
 
 	return 0;
 }

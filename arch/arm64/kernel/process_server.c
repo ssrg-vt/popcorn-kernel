@@ -21,6 +21,7 @@
 #include <linux/ptrace.h>
 
 #include <asm/compat.h>
+#include <asm/fpsimd.h>
 
 #include <popcorn/regset.h>
 #include <popcorn/debug.h>
@@ -55,10 +56,13 @@ int save_thread_info(struct task_struct *task, struct field_arch *arch)
 	cpu = get_cpu();
 
 	arch->tls = task->thread.tp_value;
+	arch->fpu_active = test_thread_flag(TIF_FOREIGN_FPSTATE);
 
 	put_cpu();
 
-	PSPRINTK("%s [%d]: tls: %lx\n", __func__, task->pid, arch->tls);
+	PSPRINTK("%s [%d] tls %lx\n", __func__, task->pid, arch->tls);
+	PSPRINTK("%s [%d] fpu %sactive\n", __func__, task->pid,
+			arch->fpu_active ? "" : "in");
 
 	return 0;
 }
@@ -114,12 +118,19 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 		asm("msr tpidr_el0, %0;"
 			"msr tpidrro_el0, %1;"
 			: : "r" (tpidr), "r" (tpidrro));
+
+		if (arch->fpu_active) {
+			fpsimd_flush_task_state(task);
+			set_thread_flag(TIF_FOREIGN_FPSTATE);
+		}
 	}
 
 	put_cpu();
 
-	PSPRINTK("%s [%d]: pc %llx sp %llx tls %lx\n", __func__, task->pid,
-			regs->pc, regs->sp, *task_user_tls(task));
+	PSPRINTK("%s [%d] pc %llx sp %llx\n", __func__, task->pid,
+			regs->pc, regs->sp);
+	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, task->pid,
+			*task_user_tls(task), arch->fpu_active ? "" : "in");
 	show_regs(regs);
 
 	return 0;

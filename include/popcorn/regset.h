@@ -66,13 +66,8 @@ struct regset_sparc {
 };
 
 struct field_arch {
-	/* Segmentations
-	unsigned short thread_es;
-	unsigned short thread_ds;
-	unsigned long thread_fs;
-	unsigned long thread_gs;
-	*/
 	unsigned long tls;
+	bool fpu_active;
 
 	union {
 		unsigned long regsets;
