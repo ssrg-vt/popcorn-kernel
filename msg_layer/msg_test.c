@@ -47,8 +47,8 @@
 char *dummy_send_buf;				// dummy_send_buf for testing
 EXPORT_SYMBOL(dummy_send_buf);
 
-extern char* dummy_act_buf;
-extern char* dummy_pass_buf;
+extern char *dummy_act_buf;
+extern char *dummy_pass_buf;
 
 /* for testing rdma read */
 int g_remote_read_len = 8*1024; // testing size for RDMA, mimicing user buf size
@@ -196,7 +196,7 @@ void show_RW_dummy_buf(void)
 	pcn_kmsg_free_msg(request);
 }
 
-static void handle_show_RW_dummy_buf( struct pcn_kmsg_message* inc_lmsg)
+static void handle_show_RW_dummy_buf( struct pcn_kmsg_message *inc_lmsg)
 {
 	_show_RW_dummy_buf();
 	pcn_kmsg_free_msg(inc_lmsg);
@@ -211,39 +211,6 @@ void init_RW_dummy_buf(void) {
 	memset(dummy_pass_buf, 'P', 10);
 	memset(dummy_pass_buf+10, 'Q', MAX_MSG_LENGTH-10);
 }
-
-/* example - handler */
-static void handle_remote_thread_first_test_request(
-									struct pcn_kmsg_message* inc_lmsg)
-{
-	remote_thread_first_test_request_t* request = 
-						(remote_thread_first_test_request_t*) inc_lmsg;
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	DEBUG_LOG_V("<<< TEST1: my_nid=%d t %lu "
-							"example1(from)=%d example2(t)=%d (good) >>>\n", 
-							my_nid, request->header.ticket, 
-							request->example1, request->example2);
-#else
-	DEBUG_LOG_V("<<< TEST1: my_nid=%d example1(from)=%d "
-						"example2(t)=%d (good) >>>\n", 
-						my_nid, request->example1, request->example2);
-#endif
-
-	pcn_kmsg_free_msg(request);
-	return;
-}
-
-static int handle_self_test(struct pcn_kmsg_message* inc_msg)
-{
-	struct test_msg_t *request = (struct test_msg_t*) inc_msg;
-	DEBUG_LOG_V("%s(): message handler is called from cpu %d successfully.\n",
-		__func__, request->header.from_nid);
-
-	pcn_kmsg_free_msg(request);
-	return 0;
-}
-
 
 static struct test_msg_request_t *__alloc_send_roundtrip_request(void)
 {
@@ -284,6 +251,74 @@ void _show_time(struct timeval *t1, struct timeval *t2,
 						t2->tv_usec-t1->tv_usec:
 						(1000000-(t1->tv_usec-t2->tv_usec)));
 }
+
+
+
+
+/* example - handler */
+static void handle_remote_thread_first_test_request(
+									struct pcn_kmsg_message* inc_lmsg)
+{
+	remote_thread_first_test_request_t* request = 
+						(remote_thread_first_test_request_t*) inc_lmsg;
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	DEBUG_LOG_V("<<< TEST1: my_nid=%d t %lu "
+							"example1(from)=%d example2(t)=%d (good) >>>\n", 
+							my_nid, request->header.ticket, 
+							request->example1, request->example2);
+#else
+	DEBUG_LOG_V("<<< TEST1: my_nid=%d example1(from)=%d "
+						"example2(t)=%d (good) >>>\n", 
+						my_nid, request->example1, request->example2);
+#endif
+
+	pcn_kmsg_free_msg(request);
+	return;
+}
+
+static int handle_self_test(struct pcn_kmsg_message* inc_msg)
+{
+	struct test_msg_t *request = (struct test_msg_t*) inc_msg;
+	DEBUG_LOG_V("%s(): message handler is called from cpu %d successfully.\n",
+		__func__, request->header.from_nid);
+
+	pcn_kmsg_free_msg(request);
+	return 0;
+}
+
+static void handle_test_read_request(struct pcn_kmsg_message* inc_lmsg)
+{
+	/* Prepare your *paddr */
+	void* paddr = dummy_pass_buf;
+
+	/* RDMA routine */
+	pcn_kmsg_handle_remote_rdma_request(inc_lmsg, paddr);
+}
+
+static void handle_test_read_response(struct pcn_kmsg_message* inc_lmsg)
+{
+	/* RDMA routine */
+	pcn_kmsg_handle_remote_rdma_request(inc_lmsg, NULL);
+}
+
+static void handle_test_write_request(struct pcn_kmsg_message* inc_lmsg)
+{
+	/* Prepare your *paddr */
+	void* paddr = dummy_pass_buf;
+
+	/* RDMA routine */
+	pcn_kmsg_handle_remote_rdma_request(inc_lmsg, paddr);
+}
+
+static void handle_test_writeresponse(struct pcn_kmsg_message* inc_lmsg)
+{
+	/* RDMA routine */
+	pcn_kmsg_handle_remote_rdma_request(inc_lmsg, NULL);
+}
+
+
+
 
 
 /* tests */
@@ -331,7 +366,7 @@ static int test1(void)
 /* ===== 2nd testing: r_read =====
  * 	[we are here]
  *	[compose]
- *  send       ---->   irq (recv)
+ *  send       ----->   irq (recv)
  *                      perform READ
  * irq (recv)  <-----   send
  * 
@@ -346,7 +381,8 @@ static int test2(void)
 	if (request_rdma_read==NULL)
 		return -1;
 
-	request_rdma_read->header.type = PCN_KMSG_TYPE_RDMA_READ_REQUEST;
+	request_rdma_read->header.type = PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
+	request_rdma_read->rmda_type_res = PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
 	request_rdma_read->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* msg essentials */
@@ -379,7 +415,7 @@ static int test2(void)
 /* ===== 3rd testing: r_write =====
  * 	[we are here]
  *	[compose]
- *  send       ---->   irq (recv)
+ *  send       ----->   irq (recv)
  *                      perform WRITE
  * irq (recv)  <-----   send
  * 
@@ -395,7 +431,8 @@ static int test3(void)
 	if (request_rdma_write==NULL)
 		return -1;
 
-	request_rdma_write->header.type = PCN_KMSG_TYPE_RDMA_WRITE_REQUEST;
+	request_rdma_write->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+	request_rdma_write->rmda_type_res = PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
 	request_rdma_write->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* msg essentials */
@@ -508,11 +545,13 @@ static int rdma_RW_test(unsigned long long payload_size,
 			if (!request_rdma)
 				return -1;
 
-			if (is_rdma_read == true)
-				request_rdma->header.type = PCN_KMSG_TYPE_RDMA_READ_REQUEST;
-			else
-				request_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_REQUEST;
-			/* TODO implement: type shold be user's callback function */
+			if (is_rdma_read == true) {
+				request_rdma->header.type = PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
+				request_rdma->rmda_type_res = PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
+			} else {
+				request_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+				request_rdma->rmda_type_res = PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
+			}
 
 			request_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
 
@@ -641,11 +680,13 @@ static int rdma_RW_inv_test(void* buf, unsigned long long payload_size,
 	if (!request_rdma)
 		return -1;
 
-	if (is_rdma_read == true)
-		request_rdma->header.type = PCN_KMSG_TYPE_RDMA_READ_REQUEST;	// change to your handler
-	else
-		request_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_REQUEST;	// change to  your handler
-	
+	if (is_rdma_read == true) {
+		request_rdma->header.type = PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
+		request_rdma->rmda_type_res = PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
+	} else {
+		request_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+		request_rdma->rmda_type_res = PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
+	}
 	request_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* msg essentials */
@@ -1113,6 +1154,17 @@ static int __init msg_test_init(void)
 													send_roundtrip_w_request);
 	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_WRITE_RESPONSE,
 													send_roundtrip_w_response);
+
+	// RW test
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST,
+									(pcn_kmsg_cbftn)handle_test_read_request);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
+									(pcn_kmsg_cbftn)handle_test_read_response);
+
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST,
+									(pcn_kmsg_cbftn)handle_test_write_request);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE,
+									(pcn_kmsg_cbftn)handle_test_writeresponse);
 
 	smp_mb(); // Just in case
 	printk("--- Popcorn messaging layer self-testing proc init done ---\n");

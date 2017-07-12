@@ -37,6 +37,9 @@ EXPORT_SYMBOL(send_callback);
 send_rdma_cbftn send_callback_rdma;
 EXPORT_SYMBOL(send_callback_rdma);
 
+handle_rdma_request_ftn handle_rdma_callback;
+EXPORT_SYMBOL(handle_rdma_callback);
+
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {
@@ -91,23 +94,6 @@ int pcn_kmsg_send(unsigned int to, void *lmsg, unsigned int size)
 	return send_callback(to, (struct pcn_kmsg_message *)lmsg, size);
 }
 
-
-/*
- * Your request must be allocated by kmalloc().
- */
-int pcn_kmsg_send_rdma(unsigned int to, void *lmsg, unsigned int msg_size, unsigned int rw_size)
-{
-    if (send_callback_rdma == NULL) {
-		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
-		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, msg_size=%u rw_size=%u\n",
-                    __func__, hdr->from_nid, hdr->type, msg_size, rw_size);
-        return -ENOENT;
-    }
-
-    return send_callback_rdma(to, (struct pcn_kmsg_message *)lmsg, msg_size, rw_size);
-}
-
-
 void *pcn_kmsg_alloc_msg(size_t size)
 {
 	return kmalloc(size, GFP_KERNEL);
@@ -118,9 +104,38 @@ void pcn_kmsg_free_msg(void *msg)
 	kfree(msg);
 }
 
+/*
+ * Your request must be allocated by kmalloc().
+ */
+int pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
+						unsigned int msg_size, unsigned int rw_size)
+{
+    if (send_callback_rdma == NULL) {
+		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
+		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, msg_size=%u "
+		"rw_size=%u\n", __func__, hdr->from_nid, hdr->type, msg_size, rw_size);
+        return -ENOENT;
+    }
+
+    return send_callback_rdma(to, (struct pcn_kmsg_message *)lmsg,
+															msg_size, rw_size);
+}
+
+void pcn_kmsg_handle_remote_rdma_request(
+								struct pcn_kmsg_message *inc_lmsg, void *paddr)
+{
+	if (!memcmp(msg_layer,"IB", 2))
+		handle_rdma_callback(inc_lmsg, paddr);
+	else
+		printk(KERN_ERR "%s: current msg_layer (%s) is not \"IB\"\n",
+														__func__, msg_layer);
+}
+
+
 EXPORT_SYMBOL(pcn_kmsg_alloc_msg);
 EXPORT_SYMBOL(pcn_kmsg_free_msg);
 EXPORT_SYMBOL(pcn_kmsg_send_rdma);
 EXPORT_SYMBOL(pcn_kmsg_send);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 EXPORT_SYMBOL(pcn_kmsg_register_callback);
+EXPORT_SYMBOL(pcn_kmsg_handle_remote_rdma_request);
