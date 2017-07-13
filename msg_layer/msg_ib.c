@@ -714,16 +714,16 @@ static void krping_cq_event_handler(struct ib_cq *cq, void *ctx)
 #if 0
 			// you don't know whether is a rdma request or not
 			MSG_RDMA_PRK("< info > _wc->wr_id %p rw_t %d "
-						 "r_recv_ticket %lu r_rdma_ticket %d rdma_ack \"%s\"\n",
-						 (void*)_wc->wr_id,
-			 			 ((struct wc_struct*)_wc->wr_id)->element_addr->
-			 												rw_ticket,
-						 ((struct wc_struct*)_wc->wr_id)->element_addr->
-			 												ticket,
-						 ((struct wc_struct*)_wc->wr_id)->element_addr->
-			 												rdma_ticket,
-						 ((struct wc_struct*)_wc->wr_id)->element_addr->
-			 									rdma_ack?"true":"false");
+						"r_recv_ticket %lu r_rdma_ticket %d rdma_ack \"%s\"\n",
+						(void*)_wc->wr_id,
+						((struct wc_struct*)_wc->wr_id)->element_addr->
+															rw_ticket,
+						((struct wc_struct*)_wc->wr_id)->element_addr->
+																ticket,
+						((struct wc_struct*)_wc->wr_id)->element_addr->
+															rdma_ticket,
+						((struct wc_struct*)_wc->wr_id)->element_addr->
+										rdma_header.rdma_ack?"true":"false");
 #endif
 #endif
 
@@ -907,7 +907,7 @@ static void jack_setup_send_wr(struct krping_cb *cb,
 	MSGDPRINTK("@@@ cb->send_dma_addr = %p\n", (void*)cb->send_dma_addr);
 									// user vaddr (O) mapped to the next line
 	//MSGDPRINTK("@@@ sizeof(cb->send_buf) = %ld\n", sizeof cb->send_buf);
-	//MSGDPRINTK("@@@ sizeof(*lmsg) = %ld (X)\n", sizeof(*lmsg));	//ERROR; THIS MIGHT COST A ETH CONNECTION CRASH
+	//MSGDPRINTK("@@@ sizeof(*lmsg) = %ld (X)\n", sizeof(*lmsg));
 	//MSGDPRINTK("@@@ strlen(lmsg) = %ld (X)\n", strlen((char*)lmsg));
 	MSGDPRINTK("@@@ lmsg->header.size = %d (O)\n", lmsg->header.size);
 									// kernel addr (X) (mapped to each other)
@@ -1067,11 +1067,11 @@ static int krping_setup_buffers(struct krping_cb *cb)
 	KRPRINT_INIT("cb->rdma_size %d, /PAGESIZE, cb->page_list_len %d \n",
 										cb->rdma_size, cb->page_list_len);
 	/* mr for active */
-	cb->reg_mr = ib_alloc_mr(cb->pd, IB_MR_TYPE_MEM_REG,	// fill out lkey and rkey
-										 cb->page_list_len);
+	cb->reg_mr = ib_alloc_mr(cb->pd, IB_MR_TYPE_MEM_REG, cb->page_list_len);
+													// fill out lkey and rkey
 	/* mr for passive */
 	cb->reg_mr_passive = ib_alloc_mr(cb->pd, IB_MR_TYPE_MEM_REG,
-										 cb->page_list_len);
+														 cb->page_list_len);
 
 	if (IS_ERR(cb->reg_mr)) {
 		ret = PTR_ERR(cb->reg_mr);
@@ -1343,11 +1343,11 @@ static int krping_create_qp(struct krping_cb *cb)
 ///////////////////////////rdma nead/////////////////////////////////////////
 // can happen simultaneously
 static void __handle_remote_thread_rdma_read_request(
-									struct pcn_kmsg_message* inc_lmsg, void* target_paddr)
+						struct pcn_kmsg_message* inc_lmsg, void* target_paddr)
 {
-	remote_thread_rdma_rw_request_t* request = 
-								(remote_thread_rdma_rw_request_t*) inc_lmsg;
-	remote_thread_rdma_rw_request_t *reply; 
+	remote_thread_rdma_rw_t* request = 
+								(remote_thread_rdma_rw_t*) inc_lmsg;
+	remote_thread_rdma_rw_t *reply; 
 	int ret;
 	struct ib_send_wr *bad_wr; // for ib_post_send
 	struct krping_cb *_cb = cb[request->header.from_nid];
@@ -1406,7 +1406,7 @@ static void __handle_remote_thread_rdma_read_request(
 #else						// (dynamic)
 	// use a dummy buf
 	_cb->passive_dma_addr = jack_map_pass(target_paddr, _cb->conn_no,
-															request->rw_size);
+												request->rdma_header.rw_size);
 #endif
 
 	// perform READ (passive side)
@@ -1418,9 +1418,9 @@ static void __handle_remote_thread_rdma_read_request(
 
 	/* RDMA READ echo data */
 	// remote info:
-	_cb->remote_rkey = ntohl(request->remote_rkey);		// redaundant
-	_cb->remote_addr = ntohll(request->remote_addr);	// redaundant
-	_cb->remote_len = request->rw_size;					// redaundant
+	_cb->remote_rkey = ntohl(request->rdma_header.remote_rkey);	// redaundant
+	_cb->remote_addr = ntohll(request->rdma_header.remote_addr);// redaundant
+	_cb->remote_len = request->rdma_header.rw_size;				// redaundant
 
 	_cb->rdma_sq_wr.rkey = _cb->remote_rkey;		// updated from remote!!!!
 	_cb->rdma_sq_wr.remote_addr = _cb->remote_addr;	// updated from remote!!!!
@@ -1513,24 +1513,24 @@ static void __handle_remote_thread_rdma_read_request(
 	CHECK_LOG("<<<<< CHECK rpc (passive) R_READ DONE size %d done\n"
 						"_cb->rw_pass_buf(first10) \"%.10s\"\n"
 						"_cb->rw_pass_buf(last 10) \"%.10s\"\n\n\n",
-						request->rw_size,
+						request->rdma_header.rw_size,
 						dummy_pass_buf,
-						request->rw_size>10?
-						dummy_pass_buf+(request->rw_size-11):
+						request->rdma_header.rw_size>10?
+						dummy_pass_buf+(request->rdma_header.rw_size-11):
 						dummy_pass_buf);
 
 #if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
 	// put_page
 	unmap_pass_page(_cb->conn_no);
 #else
-	//unmap_pass(_cb->conn_no, request->rw_size);
+	//unmap_pass(_cb->conn_no, request->rdma_header.rw_size);
 #endif
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	/* time result */
 	DEBUG_LOG("R: %d K compose_time %lu post_time %lu "
 										"end_time %lu (cpu ticks)\n",
-										(request->rw_size+1)/1024, 
+										(request->rdma_header.rw_size+1)/1024, 
 										ts_compose-ts_start, // +1 end char
 										ts_post-ts_start, ts_end-ts_start);
 #endif
@@ -1559,23 +1559,23 @@ static void __handle_remote_thread_rdma_read_request(
 	if (!reply)
 		BUG_ON(-1);
 
-	reply->header.type = request->rmda_type_res;
+	reply->header.type = request->rdma_header.rmda_type_res;
 	reply->header.prio = PCN_KMSG_PRIO_NORMAL;
 	//reply->tgroup_home_cpu = tgroup_home_cpu;
 	//reply->tgroup_home_id = tgroup_home_id;
 
 	// meaning it's a rdma msg == is_rdma
 	reply->header.is_rdma = true;
-	((remote_thread_rdma_rw_request_t*) reply)
-											->remote_rkey  = _cb->remote_rkey;
-	((remote_thread_rdma_rw_request_t*) reply)
-											->remote_addr  = _cb->remote_addr;
-	((remote_thread_rdma_rw_request_t*) reply)
-											->rw_size = _cb->remote_len;
+	((remote_thread_rdma_rw_t*) reply)
+								->rdma_header.remote_rkey = _cb->remote_rkey;
+	((remote_thread_rdma_rw_t*) reply)
+								->rdma_header.remote_addr = _cb->remote_addr;
+	((remote_thread_rdma_rw_t*) reply)
+								->rdma_header.rw_size = _cb->remote_len;
 
 	// RDMA R/W complete ACK
-	reply->rdma_ack = true;						// activator: 1 passive: 0
-	reply->is_write = false;
+	reply->rdma_header.rdma_ack = true;			// activator: 1 passive: 0
+	reply->rdma_header.is_write = false;
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	reply->rdma_ticket = dbg;					// dbg
@@ -1595,27 +1595,28 @@ static void __handle_remote_thread_rdma_read_request(
 static void __handle_remote_thread_rdma_read_response(
 										struct pcn_kmsg_message* inc_lmsg)
 {
-	remote_thread_rdma_rw_request_t* response =
-								(remote_thread_rdma_rw_request_t*) inc_lmsg;
+	remote_thread_rdma_rw_t* response =
+								(remote_thread_rdma_rw_t*) inc_lmsg;
 	struct krping_cb *_cb = cb[response->header.from_nid];
 
 	// READ DEBUG: check data (check response() not here)
-	CHECK_LOG("%s(): CHECK response->header.rw_size %d\n"
+	CHECK_LOG("%s(): CHECK response->rdma_header.rw_size %d\n"
 							"dummy_act_buf,(first10) %.10s\n"
 							"dummy_act_buf(last 10) %.10s\n"
 							"rdma_ack %s\n\n\n",
-							__func__, response->rw_size,
+							__func__, response->rdma_header.rw_size,
 							dummy_act_buf,
-							response->rw_size>10?
-							dummy_act_buf+(response->rw_size-11):dummy_act_buf,
-							response->rdma_ack?"true":"false");
+							response->rdma_header.rw_size>10?
+							dummy_act_buf+(response->rdma_header.rw_size-11):
+							dummy_act_buf,
+							response->rdma_header.rdma_ack?"true":"false");
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	DEBUG_LOG("response->header.remote_rkey %u remote_addr %p rw_size %u "
+	DEBUG_LOG("response->rdma_hdr.remote_rkey %u remote_addr %p rw_size %u "
 							"rw_t %d recv_ticket %lu ack_rdma_ticket %d\n",
-									response->remote_rkey,
-									(void*)response->remote_addr,
-									response->rw_size,
+									response->rdma_header.remote_rkey,
+									(void*)response->rdma_header.remote_addr,
+									response->rdma_header.rw_size,
 									response->rw_ticket,		// rdma dbg
 									response->header.ticket,	// send/recv dbg
 									response->rdma_ticket); 	// rdma dbg
@@ -1625,7 +1626,7 @@ static void __handle_remote_thread_rdma_read_response(
 #if CONFIG_POPCORN_IBWR_PAGE
 	unmap_act_page(_cb->conn_no);
 #else
-	//unmap_act(_cb->conn_no, response->rw_size);
+	//unmap_act(_cb->conn_no, response->rdma_header.rw_size);
 #endif
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
@@ -1644,11 +1645,11 @@ static void __handle_remote_thread_rdma_read_response(
 
 /* Jack TODO: give usr to call it */
 static void __handle_remote_thread_rdma_write_request(
-								struct pcn_kmsg_message* inc_lmsg, void* target_paddr)
+						struct pcn_kmsg_message* inc_lmsg, void* target_paddr)
 {
-	remote_thread_rdma_rw_request_t* request = 
-								(remote_thread_rdma_rw_request_t*) inc_lmsg;
-	remote_thread_rdma_rw_request_t *reply; 
+	remote_thread_rdma_rw_t* request = 
+								(remote_thread_rdma_rw_t*) inc_lmsg;
+	remote_thread_rdma_rw_t *reply; 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	unsigned long ts_wr_start, ts_wr_compose, ts_wr_post, ts_wr_end;
 #endif
@@ -1723,7 +1724,7 @@ static void __handle_remote_thread_rdma_write_request(
 #else 						// (dynamic)
 	// use a dummy buf
 	_cb->passive_dma_addr = jack_map_pass(target_paddr, _cb->conn_no,
-															request->rw_size);
+												request->rdma_header.rw_size);
 #endif
 
 	// perform WRITE (passive side) + performance evaluation
@@ -1734,9 +1735,9 @@ static void __handle_remote_thread_rdma_write_request(
 
 	/* RDMA WRITE echo data */
 	// remote info:
-	 _cb->remote_rkey = ntohl(request->remote_rkey);	// redaundant
-	 _cb->remote_addr = ntohll(request->remote_addr);	// redaundant
-	 _cb->remote_len = request->rw_size;				// redaundant
+	 _cb->remote_rkey = ntohl(request->rdma_header.remote_rkey); // redaundant
+	 _cb->remote_addr = ntohll(request->rdma_header.remote_addr);// redaundant
+	 _cb->remote_len = request->rdma_header.rw_size;			 // redaundant
 
 	_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_WRITE;
 	_cb->rdma_sq_wr.rkey = _cb->remote_rkey;		// updated from remote!!!!
@@ -1810,7 +1811,7 @@ static void __handle_remote_thread_rdma_write_request(
 	/* time result */ 
 	DEBUG_LOG("W: %d K compose_time %lu post_time %lu "
 								"end_time %lu (cpu ticks)\n",
-								(request->rw_size+1)/1024,
+								(request->rdma_header.rw_size+1)/1024,
 								ts_wr_compose-ts_wr_start, // +1 end char
 								ts_wr_post-ts_wr_start, ts_wr_end-ts_wr_start);
 #endif
@@ -1819,18 +1820,18 @@ static void __handle_remote_thread_rdma_write_request(
 	CHECK_LOG("<<<<< CHECK rpc (passive) R_WRITE DONE size %d\n"// done strlen %ld\n"
 						"_cb->rw_pass_buf(first10) \"%.10s\"\n"
 						"_cb->rw_pass_buf(last 10) \"%.10s\"\n\n\n",
-						request->rw_size,
+						request->rdma_header.rw_size,
 						//strlen(dummy_pass_buf),
 						dummy_pass_buf,
-						request->rw_size>10?
-						dummy_pass_buf+(request->rw_size-11):
+						request->rdma_header.rw_size>10?
+						dummy_pass_buf+(request->rdma_header.rw_size-11):
 						dummy_pass_buf);
 
 #if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
 	// put_page
 	unmap_pass_page(_cb->conn_no);
 #else
-	//unmap_pass(_cb->conn_no, request->rw_size);
+	//unmap_pass(_cb->conn_no, request->rdma_header.rw_size);
 #endif
 
 	// nooe (check in response)
@@ -1853,23 +1854,23 @@ static void __handle_remote_thread_rdma_write_request(
 	if (!reply)
 		BUG_ON(-1);
 
-	reply->header.type = request->rmda_type_res;
+	reply->header.type = request->rdma_header.rmda_type_res;
 	reply->header.prio = PCN_KMSG_PRIO_NORMAL;
 	//reply->tgroup_home_cpu = tgroup_home_cpu;
 	//reply->tgroup_home_id = tgroup_home_id;
 
 	// RDMA W/R complete ACK
 	reply->header.is_rdma = true;
-	((remote_thread_rdma_rw_request_t*) reply)->remote_rkey  
+	((remote_thread_rdma_rw_t*) reply)->rdma_header.remote_rkey  
 														= _cb->remote_rkey;
-	((remote_thread_rdma_rw_request_t*) reply)->remote_addr  
+	((remote_thread_rdma_rw_t*) reply)->rdma_header.remote_addr
 														= _cb->remote_addr;
-	((remote_thread_rdma_rw_request_t*) reply)->rw_size
+	((remote_thread_rdma_rw_t*) reply)->rdma_header.rw_size
 														= _cb->remote_len;
 
 	// RDMA W/R complete ACK
-	reply->rdma_ack = true;		// activator: 1 passive: 0
-	reply->is_write = true;
+	reply->rdma_header.rdma_ack = true;		// activator: 1 passive: 0
+	reply->rdma_header.is_write = true;
 
 
 	__ib_kmsg_send_long(request->header.from_nid,
@@ -1886,8 +1887,8 @@ static void __handle_remote_thread_rdma_write_request(
 static void __handle_remote_thread_rdma_write_response(
 										struct pcn_kmsg_message* inc_lmsg)
 {
-	remote_thread_rdma_rw_request_t* response =
-								(remote_thread_rdma_rw_request_t*) inc_lmsg;
+	remote_thread_rdma_rw_t* response =
+								(remote_thread_rdma_rw_t*) inc_lmsg;
 	struct krping_cb *_cb = cb[response->header.from_nid];
 
 	// WRITE DEBUG: check data (check here not write_request())
@@ -1895,7 +1896,7 @@ static void __handle_remote_thread_rdma_write_response(
 								"dummy_act_buf(first10) %.10s\n"
 								"dummy_act_buf(last 10) %.10s\n"
 								"rdma_ack %s(==true)\n\n\n",
-								__func__, response->rw_size,
+								__func__, response->rdma_header.rw_size,
 
 #if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
 								"IB_PAGE not support",
@@ -1903,18 +1904,18 @@ static void __handle_remote_thread_rdma_write_response(
 								// canot debug if using dynamically remaping buf
 #else
 								dummy_act_buf,
-								response->rw_size>10?
-								dummy_act_buf+(response->rw_size-11):
+								response->rdma_header.rw_size>10?
+								dummy_act_buf+(response->rdma_header.rw_size-11):
 								dummy_act_buf,
 #endif
-								response->rdma_ack?"true":"false");
+								response->rdma_header.rdma_ack?"true":"false");
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	DEBUG_LOG("CHECK response->header.remote_rkey %u remote_addr %p "
 							"rw_size %u rw_t %d ticket %lu rdma_ticket %d\n",
-												response->remote_rkey,
-												(void*)response->remote_addr,
-												response->rw_size,
+									response->rdma_header.remote_rkey,
+									(void*)response->rdma_header.remote_addr,
+												response->rdma_header.rw_size,
 												response->rw_ticket,
 												response->header.ticket,
 												response->rdma_ticket);
@@ -1923,7 +1924,7 @@ static void __handle_remote_thread_rdma_write_response(
 #if CONFIG_POPCORN_IBWR_PAGE
 	unmap_act_page(_cb->conn_no);
 #else
-	//unmap_act(_cb->conn_no, response->rw_size);
+	//unmap_act(_cb->conn_no, response->rdma_header.rw_size);
 #endif
 
 	MSG_SYNC_PRK("/////////////WRITE active unlock() %d////////////////\n",
@@ -1941,17 +1942,19 @@ static void __handle_remote_thread_rdma_write_response(
  */
 void handle_rdma_request(struct pcn_kmsg_message* inc_lmsg, void* paddr)
 {
-	if (inc_lmsg->header.is_rdma) {
+	remote_thread_rdma_rw_t *lmsg =
+								(remote_thread_rdma_rw_t*)inc_lmsg;
+	if (lmsg->header.is_rdma) {
 		/* Jack: enforced RW routine */
 		/* rdmaRW signal msgs "req"/"ack" */
-		if (!((remote_thread_rdma_rw_request_t*)inc_lmsg)->rdma_ack) {
-			if (((remote_thread_rdma_rw_request_t*)inc_lmsg)->is_write)
+		if (!lmsg->rdma_header.rdma_ack) {
+			if (lmsg->rdma_header.is_write)
 				__handle_remote_thread_rdma_write_request(inc_lmsg, paddr);
 			else
 				__handle_remote_thread_rdma_read_request(inc_lmsg, paddr);
 		}
 		else { // ack
-			if (((remote_thread_rdma_rw_request_t*)inc_lmsg)->is_write)
+			if (lmsg->rdma_header.is_write)
 				__handle_remote_thread_rdma_write_response(inc_lmsg);
 			else
 				__handle_remote_thread_rdma_read_response(inc_lmsg);
@@ -1961,9 +1964,9 @@ void handle_rdma_request(struct pcn_kmsg_message* inc_lmsg, void* paddr)
 		printk(KERN_ERR "This is not a rdma request you shouldn't call"
 							"\"pcn_kmsg_handle_remote_rdma_request\"\n"
 							"from=%u, type=%d, msg_size=%u\n\n",
-							inc_lmsg->header.from_nid,
-							inc_lmsg->header.type,
-							inc_lmsg->header.size);
+							lmsg->header.from_nid,
+							lmsg->header.type,
+							lmsg->header.size);
 	}
 }
 EXPORT_SYMBOL(handle_rdma_request);
@@ -2004,14 +2007,14 @@ static void pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 		if (lmsg->header.is_rdma) {
 			//- Jack: enforced RW routine -//
 			//- rdmaRW signal msgs "req"/"ack" -//
-			if (!((remote_thread_rdma_rw_request_t*)lmsg)->rdma_ack) {
-				if (((remote_thread_rdma_rw_request_t*)lmsg)->is_write)
+			if (!((remote_thread_rdma_rw_t*)lmsg)->rdma_header.rdma_ack) {
+				if (((remote_thread_rdma_rw_t*)lmsg)->rdma_header.is_write)
 					handle_remote_thread_rdma_write_request(lmsg);
 				else
 					handle_remote_thread_rdma_read_request(lmsg);
 			}
 			else { // ack
-				if (((remote_thread_rdma_rw_request_t*)lmsg)->is_write)
+				if (((remote_thread_rdma_rw_t*)lmsg)->rdma_header.is_write)
 					handle_remote_thread_rdma_write_response(lmsg);
 				else
 					handle_remote_thread_rdma_read_response(lmsg);
@@ -2079,7 +2082,7 @@ static int ib_kmsg_recv_long(struct krping_cb *cb,
 					lmsg->header.type==2?"REQUEST":"RESPONSE",
 					lmsg->header.size,
 					lmsg->header.is_rdma?
-					((remote_thread_rdma_rw_request_t*)lmsg)->rw_ticket:-1);
+					((remote_thread_rdma_rw_t*)lmsg)->rw_ticket:-1);
 #endif
 	if (unlikely(!memcpy(kmsg_work->lmsg, lmsg, lmsg->header.size)))
 		BUG();
@@ -2598,12 +2601,13 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
 #endif
 	MSGDPRINTK("%s(): \n", __func__);
 
-	if (!((remote_thread_rdma_rw_request_t*)lmsg)->your_buf_ptr || rw_size < 0)
+	if (!((remote_thread_rdma_rw_t*)lmsg)->rdma_header.your_buf_ptr ||
+			rw_size < 0)
 		BUG();
 
 	// info setup
 	lmsg->header.is_rdma = true;
-	((remote_thread_rdma_rw_request_t*) lmsg)->rw_size = rw_size;
+	((remote_thread_rdma_rw_t*) lmsg)->rdma_header.rw_size = rw_size;
 
 	/* kmsg
 	 * if R/W
@@ -2620,13 +2624,13 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
 	if (lmsg->header.type == PCN_KMSG_TYPE_RDMA_READ_REQUEST) {
 		MSG_SYNC_PRK("///////READ active   lock() %d rw_t %d conn %d ///////\n",
 									(int)atomic_read(&_cb->active_cnt),
-							((remote_thread_rdma_rw_request_t*)lmsg)->rw_ticket,
+							((remote_thread_rdma_rw_t*)lmsg)->rw_ticket,
 														_cb->conn_no);
 	}
 	else if (lmsg->header.type == PCN_KMSG_TYPE_RDMA_WRITE_REQUEST) {
 		MSG_SYNC_PRK("////////WRITE active lock() %d  rw_t %d conn %d //////\n",
 									(int)atomic_read(&_cb->active_cnt),
-							((remote_thread_rdma_rw_request_t*)lmsg)->rw_ticket,
+							((remote_thread_rdma_rw_t*)lmsg)->rw_ticket,
 														_cb->conn_no);
 		}
 	else
@@ -2644,12 +2648,12 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
 	_cb->active_dma_addr = jack_map_act_page(_cb->act_paddr, _cb->conn_no);
 #else
 	_cb->active_dma_addr = jack_map_act(
-						((remote_thread_rdma_rw_request_t*)lmsg)->your_buf_ptr,
+			((remote_thread_rdma_rw_t*)lmsg)->rdma_header.your_buf_ptr,
 														_cb->conn_no, rw_size);
 #endif
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	((remote_thread_rdma_rw_request_t*)lmsg)->rw_ticket = 
+	((remote_thread_rdma_rw_t*)lmsg)->rw_ticket = 
 								atomic_inc_return(&_cb->g_all_ticket);
 #endif
 	
@@ -2665,18 +2669,18 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
 							// active_dma_addr is sent for remote READ/WRITE
 													// failed to trun inv off
 	
-	((remote_thread_rdma_rw_request_t*) lmsg)->remote_addr = 
-										htonll(_cb->active_dma_addr);
-	((remote_thread_rdma_rw_request_t*) lmsg)->remote_rkey = htonl(rkey);
-	//MSGPRINTK("%s(): - @@@ cb[%d] rkey %d cb[]->active_dma_addr %p "
+	((remote_thread_rdma_rw_t*) lmsg)->rdma_header.remote_addr =
+												htonll(_cb->active_dma_addr);
+	((remote_thread_rdma_rw_t*) lmsg)->rdma_header.remote_rkey =
+																htonl(rkey);
 	CHECK_LOG("%s(): - @@@ cb[%d] rkey %d cb[]->active_dma_addr %p "
 												"lmsg->rw_size %d\n",
 												__func__, dest_cpu, rkey,
-											(void*)_cb->active_dma_addr,
-					((remote_thread_rdma_rw_request_t*) lmsg)->rw_size);
+												(void*)_cb->active_dma_addr,
+				((remote_thread_rdma_rw_t*) lmsg)->rdma_header.rw_size);
 
 	lmsg->header.from_nid = my_nid;
-	((remote_thread_rdma_rw_request_t*) lmsg)->rdma_ack = false;
+	((remote_thread_rdma_rw_t*) lmsg)->rdma_header.rdma_ack = false;
 
 	if (dest_cpu == my_nid) {
 		printk(KERN_ERR "No support for sending msg to itself %d\n", dest_cpu);
@@ -2689,16 +2693,15 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
 	//----------------------------------------------------------
 	// ib
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	((remote_thread_rdma_rw_request_t*)lmsg)->rdma_ticket = 
+	((remote_thread_rdma_rw_t*)lmsg)->rdma_ticket = 
 									atomic_inc_return(&g_rw_ticket); // from 1
 	MSGPRINTK("%s(): rw ticket %d\n",
-			__func__, ((remote_thread_rdma_rw_request_t*)lmsg)->rdma_ticket);
+			__func__, ((remote_thread_rdma_rw_t*)lmsg)->rdma_ticket);
 #endif
 
 	// send signal/request
-	__ib_kmsg_send_long(dest_cpu,
-						//(struct pcn_kmsg_message*) lmsg, sizeof(*lmsg));
-						(struct pcn_kmsg_message*) lmsg, msg_size);	//lmsg is a container. real msg is smaller
+	__ib_kmsg_send_long(dest_cpu, (struct pcn_kmsg_message*) lmsg, msg_size);
+									//lmsg is a container. real msg is smaller
 
 	MSGPRINTK("%s(): Sent 1 rdma request\n", __func__);
 	return 0;
@@ -2731,7 +2734,7 @@ int __ib_kmsg_send_long(unsigned int dest_cpu,
 #if 0
 	MSGPRINTK("%s(): - msg_size %d sizeof(lmsg->header) %ld ack %s\n",
 							__func__, msg_size, sizeof(lmsg->header),
-									lmsg->rdma_ack?"true":"false");
+									lmsg->rdma_header.rdma_ack?"true":"false");
 #endif
 #endif
 
@@ -2757,9 +2760,9 @@ int __ib_kmsg_send_long(unsigned int dest_cpu,
 
 	/* rdma w/r */
 	if ( lmsg->header.is_rdma ) {
-	//if ( ((remote_thread_rdma_rw_request_t*) lmsg)->remote_rkey &&
-		//((remote_thread_rdma_rw_request_t*) lmsg)->remote_addr &&
-		//((remote_thread_rdma_rw_request_t*) lmsg)->rw_size ) {
+	//if ( ((remote_thread_rdma_rw_t*) lmsg)->rdma_header.remote_rkey &&
+		//((remote_thread_rdma_rw_t*) lmsg)->rdma_header.remote_addr &&
+		//((remote_thread_rdma_rw_t*) lmsg)->rdma_header.rw_size ) {
 		; // This msg is just a (RDMA READ/WRITE) signal
 	}
 		

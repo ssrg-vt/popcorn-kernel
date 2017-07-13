@@ -375,14 +375,15 @@ static int test2(void)
 {
 	volatile int i;
 
-	remote_thread_rdma_rw_request_t* request_rdma_read;
+	remote_thread_rdma_rw_t* request_rdma_read;
 	//request_rdma_read = pcn_kmsg_alloc_msg(sizeof(*request_rdma_read));
 	request_rdma_read = kmalloc(sizeof(*request_rdma_read), GFP_KERNEL);
 	if (request_rdma_read==NULL)
 		return -1;
 
 	request_rdma_read->header.type = PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
-	request_rdma_read->rmda_type_res = PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
+	request_rdma_read->rdma_header.rmda_type_res =
+									PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
 	request_rdma_read->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* msg essentials */
@@ -390,10 +391,10 @@ static int test2(void)
 	/* msg dependences */
 
 	/* READ/WRITE specific: *buf, size */
-	request_rdma_read->is_write = false;
+	request_rdma_read->rdma_header.is_write = false;
 	
-	/* g_test_buf is done by setup_read_buf() */
-	request_rdma_read->your_buf_ptr = g_test_buf;		// must be kmalloc()ed	
+	/* g_test_buf is allocated by setup_read_buf() */
+	request_rdma_read->rdma_header.your_buf_ptr = g_test_buf;
 	/*
 	 * your buf will be copied to rdma buf for a passive remote read
 	 * user should protect
@@ -404,7 +405,7 @@ static int test2(void)
 			continue;
 		
 		pcn_kmsg_send_rdma(i, request_rdma_read,
-								sizeof(*request_rdma_read), g_remote_read_len);
+							sizeof(*request_rdma_read), g_remote_read_len);
 		DEBUG_LOG_V("\n\n\n");
 	}
 	//pcn_kmsg_free_msg(request_rdma_read);
@@ -424,7 +425,7 @@ static int test3(void)
 {
 	int i;
 
-	remote_thread_rdma_rw_request_t* request_rdma_write;
+	remote_thread_rdma_rw_t* request_rdma_write;
 	//request_rdma_write = pcn_kmsg_alloc_msg(sizeof(*request_rdma_write));
 	request_rdma_write = kmalloc(sizeof(*request_rdma_write), GFP_KERNEL);
 
@@ -432,7 +433,8 @@ static int test3(void)
 		return -1;
 
 	request_rdma_write->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
-	request_rdma_write->rmda_type_res = PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
+	request_rdma_write->rdma_header.rmda_type_res =
+									PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
 	request_rdma_write->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* msg essentials */
@@ -440,16 +442,16 @@ static int test3(void)
 	/* msg dependences */
 
 	/* READ/WRITE specific */
-	request_rdma_write->is_write = true;
+	request_rdma_write->rdma_header.is_write = true;
 
-	request_rdma_write->your_buf_ptr = g_test_write_buf; // must be kmalloc()ed
+	request_rdma_write->rdma_header.your_buf_ptr = g_test_write_buf;
 
 	for(i=0; i<MAX_NUM_NODES; i++) {
 		if (my_nid==i)
 			continue;
 		
 		pcn_kmsg_send_rdma(i, request_rdma_write,
-								sizeof(*request_rdma_write), g_rdma_write_len);
+							sizeof(*request_rdma_write), g_rdma_write_len);
 		
 		DEBUG_LOG_V("\n\n\n");
 	}
@@ -537,7 +539,7 @@ static int rdma_RW_test(unsigned long long payload_size,
 	do_gettimeofday(&t1);
 	for(j=0; j<iter; j++) {
 		for(i=0; i<MAX_NUM_NODES; i++) {
-			remote_thread_rdma_rw_request_t* request_rdma;
+			remote_thread_rdma_rw_t* request_rdma;
 			if (my_nid==i)
 				continue;
 
@@ -546,11 +548,15 @@ static int rdma_RW_test(unsigned long long payload_size,
 				return -1;
 
 			if (is_rdma_read == true) {
-				request_rdma->header.type = PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
-				request_rdma->rmda_type_res = PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
+				request_rdma->header.type =
+										PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
+				request_rdma->rdma_header.rmda_type_res =
+										PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
 			} else {
-				request_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
-				request_rdma->rmda_type_res = PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
+				request_rdma->header.type =
+										PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+				request_rdma->rdma_header.rmda_type_res =
+										PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
 			}
 
 			request_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
@@ -561,10 +567,11 @@ static int rdma_RW_test(unsigned long long payload_size,
 
 			/* READ/WRITE specific */
 			if (is_rdma_read == true)
-				request_rdma->is_write = false;
+				request_rdma->rdma_header.is_write = false;
 			else
-				request_rdma->is_write = true;
-			request_rdma->your_buf_ptr = dummy_act_buf;	// provided by user
+				request_rdma->rdma_header.is_write = true;
+			
+			request_rdma->rdma_header.your_buf_ptr = dummy_act_buf;
 
 			pcn_kmsg_send_rdma(i, request_rdma,
 							sizeof(*request_rdma), (unsigned int)payload_size);
@@ -675,17 +682,19 @@ static int rdma_RW_inv_test(void* buf, unsigned long long payload_size,
 {
 	unsigned long long i;
 
-	remote_thread_rdma_rw_request_t* request_rdma;
+	remote_thread_rdma_rw_t* request_rdma;
 	request_rdma = pcn_kmsg_alloc_msg(sizeof(*request_rdma));
 	if (!request_rdma)
 		return -1;
 
 	if (is_rdma_read == true) {
 		request_rdma->header.type = PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
-		request_rdma->rmda_type_res = PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
+		request_rdma->rdma_header.rmda_type_res =
+										PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
 	} else {
 		request_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
-		request_rdma->rmda_type_res = PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
+		request_rdma->rdma_header.rmda_type_res =
+										PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
 	}
 	request_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
 
@@ -695,11 +704,11 @@ static int rdma_RW_inv_test(void* buf, unsigned long long payload_size,
 
 	/* READ/WRITE specific */
 	if (is_rdma_read == true)
-		request_rdma->is_write = false;
+		request_rdma->rdma_header.is_write = false;
 	else
-		request_rdma->is_write = true;
+		request_rdma->rdma_header.is_write = true;
 
-	request_rdma->your_buf_ptr = buf;	// provided by user
+	request_rdma->rdma_header.your_buf_ptr = buf;	// provided by user
 
 
 	for(i=0; i<MAX_NUM_NODES; i++) {
@@ -1134,17 +1143,15 @@ static int __init msg_test_init(void)
 	memset(dummy_send_buf+(MAX_MSG_LENGTH/2), 'T', MAX_MSG_LENGTH/2);
 
 	/* register callback. also define in <linux/pcn_kmsg.h>  */
-	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_FIRST_TEST,// ping - 
+	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_FIRST_TEST,
 					(pcn_kmsg_cbftn)handle_remote_thread_first_test_request);
-	//pcn_kmsg_register_callback(PCN_KMSG_TYPE_FIRST_TEST_RESPONSE,			// pong - usually a pair but just simply test here
-	//								handle_remote_thread_first_test_response);
 
-	// for experiments - send throughput
+	/* for experimental data - send throughput */
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SELFIE_TEST, handle_self_test);
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF,
 								(pcn_kmsg_cbftn)handle_show_RW_dummy_buf);
 
-	// for data
+	/* for experimental data - Round-trip throughput */
 	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_REQUEST,
 													send_roundtrip_request);
 	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_RESPONSE,
@@ -1155,7 +1162,7 @@ static int __init msg_test_init(void)
 	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_WRITE_RESPONSE,
 													send_roundtrip_w_response);
 
-	// RW test
+	/* for experimental data - READ/WRITE throughput */
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST,
 									(pcn_kmsg_cbftn)handle_test_read_request);
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
@@ -1166,7 +1173,6 @@ static int __init msg_test_init(void)
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE,
 									(pcn_kmsg_cbftn)handle_test_writeresponse);
 
-	smp_mb(); // Just in case
 	printk("--- Popcorn messaging layer self-testing proc init done ---\n");
 	printk("--- Usage: sudo echo [NUM] [DEPENDS] > /proc/kmsg_test ---\n");
 	printk("==================== sanity check ====================\n");
@@ -1198,7 +1204,7 @@ static int __init msg_test_init(void)
 	printk("---  cat: showing msg_layer usage pattern ---\n");
 	printk("---      ex: cat /proc/kmsg_test ---\n");
 	printk("\n\n\n\n\n\n\n\n");
-
+	smp_mb();
 	return 0;
 }
 

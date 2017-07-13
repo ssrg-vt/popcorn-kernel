@@ -160,6 +160,27 @@ struct pcn_kmsg_message {
 	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
 }__attribute__((packed)) __attribute__((aligned(CACHE_LINE_SIZE)));
 
+/* rdma header */
+struct pcn_kmsg_rdma_hdr {
+    bool is_write;				/* is a READ/WRITE request */
+    bool rdma_ack;				/* is a rdma req/ack */
+    uint32_t remote_rkey;		/* R/W remote RKEY */
+    uint32_t rw_size;			/* R/W remote size */
+    uint64_t remote_addr;		/* remote TO */
+    void *your_buf_ptr;			/* will be copied to R/W buffer */
+    enum pcn_kmsg_type rmda_type_res;	/* response callback func */
+};
+
+/* Template for RDMA request/ack */
+typedef struct {
+    struct pcn_kmsg_hdr header; /* must follow */
+	struct pcn_kmsg_rdma_hdr rdma_header; /* must follow, rdma essential */
+    /* your data structures */
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+    int rw_ticket;
+    int rdma_ticket;
+#endif
+}__attribute__((packed)) remote_thread_rdma_rw_t;
 
 /* TYPES OF MESSAGES */
 
