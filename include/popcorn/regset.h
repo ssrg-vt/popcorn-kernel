@@ -58,7 +58,15 @@ struct regset_aarch64 {
 };
 
 struct regset_powerpc {
-	uint64_t dummy;
+	unsigned long gpr[32];
+	unsigned long nip;
+	unsigned long msr;
+	unsigned long orig_gpr3;	/* Used for restarting system calls */
+	unsigned long ctr;
+	unsigned long link;
+	unsigned long xer;
+	unsigned long ccr;
+	unsigned long softe;		/* Soft enabled/disabled */
 };
 
 struct regset_sparc {
