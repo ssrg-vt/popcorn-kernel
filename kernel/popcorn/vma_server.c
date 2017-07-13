@@ -821,9 +821,9 @@ static int __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 		unsigned long orig_pgoff = res->vm_pgoff;
 		res->vm_pgoff = __get_file_offset(f, res->vm_start);
 		BUG_ON(res->vm_pgoff == -1); // no matching vma in heterogeneous binary
-		VSPRINTK("  [%d] %s %lx -> %lx\n", tsk->pid,
-				res->vm_file_path, orig_pgoff, res->vm_pgoff);
 		*/
+		VSPRINTK("  [%d] %s + %lx\n", tsk->pid,
+				res->vm_file_path, res->vm_pgoff);
 	}
 
 	prot  = ((res->vm_flags & VM_READ) ? PROT_READ : 0)
