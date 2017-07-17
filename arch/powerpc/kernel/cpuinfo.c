@@ -6,6 +6,7 @@
  * @author: Sang-Hoon Kim <sanghoon@vt.edu>
  */
 #include <linux/kernel.h>
+#include <linux/errno.h>
 
 #include <popcorn/cpuinfo.h>
 

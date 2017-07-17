@@ -69,10 +69,6 @@ struct regset_powerpc {
 	unsigned long softe;		/* Soft enabled/disabled */
 };
 
-struct regset_sparc {
-	uint64_t dummy;
-};
-
 struct field_arch {
 	unsigned long tls;
 	bool fpu_active;
@@ -81,8 +77,7 @@ struct field_arch {
 		unsigned long regsets;
 		struct regset_x86_64 regs_x86;
 		struct regset_aarch64 regs_aarch;
-		struct regset_powerpc regs_powerpc;
-		struct regset_sparc regs_sparc;
+		struct regset_powerpc regs_ppc;
 	};
 };
 
@@ -91,7 +86,6 @@ static inline size_t regset_size(int arch) {
 		sizeof(struct regset_x86_64),
 		sizeof(struct regset_aarch64),
 		sizeof(struct regset_powerpc),
-		sizeof(struct regset_sparc),
 	};
 	BUG_ON(arch < 0 || arch >= POPCORN_ARCH_UNKNOWN);
 	return sizes[arch];

@@ -88,7 +88,7 @@ int save_thread_info(struct task_struct *task, struct field_arch *arch)
 int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool restore_segments)
 {
 	struct pt_regs *regs = task_pt_regs(task);
-	struct regset_aarch64 *regset = &arch->regs_aarch;
+	struct regset_powerpc *regset = &arch->regs_ppc;
 	int cpu, i;
 
 	BUG_ON(restore_segments && current != task);
@@ -111,7 +111,7 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 	}
 	put_cpu();
 
-	PSPRINTK("%s [%d] pc %llx sp %llx\n", __func__, task->pid,
+	PSPRINTK("%s [%d] pc %lx sp %lx\n", __func__, task->pid,
 			regs->nip, regs->ctr);
 	show_regs(regs);
 

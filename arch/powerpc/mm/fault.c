@@ -338,11 +338,11 @@ retry:
 	vma = find_vma(mm, address);
 #ifdef CONFIG_POPCORN
 	/* vma worker should not fault */
-	BUG_ON(tsk->is_vma_worker);
+	BUG_ON(current->is_vma_worker);
 
-	if (process_is_distributed(tsk)) {
+	if (process_is_distributed(current)) {
 		if (!vma || vma->vm_start > address) {
-			if (vma_server_fetch_vma(tsk, address) == 0) {
+			if (vma_server_fetch_vma(current, address) == 0) {
 				/* Replace with updated VMA */
 				vma = find_vma(mm, address);
 			}
