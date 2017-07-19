@@ -289,7 +289,7 @@ int __ib_kmsg_send_long(unsigned int dest_cpu,
 						struct pcn_kmsg_message *lmsg,
 						unsigned int msg_size);
 int ib_kmsg_send_rdma(unsigned int dest_cpu,
-						struct pcn_kmsg_message *lmsg,
+						remote_thread_rdma_rw_t *lmsg,
 						unsigned int msg_size,
 						unsigned int rw_size);
 int ib_kmsg_send_smart(unsigned int dest_cpu,
@@ -1343,7 +1343,7 @@ static int krping_create_qp(struct krping_cb *cb)
 ///////////////////////////rdma nead/////////////////////////////////////////
 // can happen simultaneously
 static void __handle_remote_thread_rdma_read_request(
-						struct pcn_kmsg_message* inc_lmsg, void* target_paddr)
+						remote_thread_rdma_rw_t* inc_lmsg, void* target_paddr)
 {
 	remote_thread_rdma_rw_t* request = 
 								(remote_thread_rdma_rw_t*) inc_lmsg;
@@ -1577,6 +1577,9 @@ static void __handle_remote_thread_rdma_read_request(
 	reply->rdma_header.rdma_ack = true;			// activator: 1 passive: 0
 	reply->rdma_header.is_write = false;
 
+	/* for wait station */
+	reply->remote_ws = inc_lmsg->remote_ws;
+
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	reply->rdma_ticket = dbg;					// dbg
 	reply->rw_ticket = request->rw_ticket;
@@ -1588,12 +1591,11 @@ static void __handle_remote_thread_rdma_read_request(
 
 	MSGPRINTK("%s(): end\n", __func__);
 	pcn_kmsg_free_msg(reply);
-	pcn_kmsg_free_msg(inc_lmsg);
 	return;
 }
 
 static void __handle_remote_thread_rdma_read_response(
-										struct pcn_kmsg_message* inc_lmsg)
+										remote_thread_rdma_rw_t* inc_lmsg)
 {
 	remote_thread_rdma_rw_t* response =
 								(remote_thread_rdma_rw_t*) inc_lmsg;
@@ -1638,14 +1640,13 @@ static void __handle_remote_thread_rdma_read_response(
 	mutex_unlock(&_cb->active_mutex);
 
 	MSGPRINTK("%s(): end\n", __func__);
-	pcn_kmsg_free_msg(inc_lmsg);
 	return;
 }
 
 
 /* Jack TODO: give usr to call it */
 static void __handle_remote_thread_rdma_write_request(
-						struct pcn_kmsg_message* inc_lmsg, void* target_paddr)
+						remote_thread_rdma_rw_t* inc_lmsg, void* target_paddr)
 {
 	remote_thread_rdma_rw_t* request = 
 								(remote_thread_rdma_rw_t*) inc_lmsg;
@@ -1872,6 +1873,8 @@ static void __handle_remote_thread_rdma_write_request(
 	reply->rdma_header.rdma_ack = true;		// activator: 1 passive: 0
 	reply->rdma_header.is_write = true;
 
+	/* for wait station */
+	reply->remote_ws = inc_lmsg->remote_ws;
 
 	__ib_kmsg_send_long(request->header.from_nid,
 				(struct pcn_kmsg_message*) reply, sizeof(*reply));
@@ -1879,13 +1882,11 @@ static void __handle_remote_thread_rdma_write_request(
 
 	MSGPRINTK("%s(): end\n\n\n", __func__);
 	pcn_kmsg_free_msg(reply);
-//out_write:
-	pcn_kmsg_free_msg(inc_lmsg);
 	return; 
 }
 
 static void __handle_remote_thread_rdma_write_response(
-										struct pcn_kmsg_message* inc_lmsg)
+										remote_thread_rdma_rw_t* inc_lmsg)
 {
 	remote_thread_rdma_rw_t* response =
 								(remote_thread_rdma_rw_t*) inc_lmsg;
@@ -1933,31 +1934,29 @@ static void __handle_remote_thread_rdma_write_response(
 
 
 	MSGPRINTK("%s(): end\n\n\n", __func__);
-	pcn_kmsg_free_msg(inc_lmsg);
 	return;
 }
 
 /* paddr: ptr of pages you wanna perform on passive side
  *
  */
-void handle_rdma_request(struct pcn_kmsg_message* inc_lmsg, void* paddr)
+void handle_rdma_request(remote_thread_rdma_rw_t *inc_lmsg, void *paddr)
 {
-	remote_thread_rdma_rw_t *lmsg =
-								(remote_thread_rdma_rw_t*)inc_lmsg;
+	remote_thread_rdma_rw_t *lmsg = inc_lmsg;
 	if (lmsg->header.is_rdma) {
 		/* Jack: enforced RW routine */
 		/* rdmaRW signal msgs "req"/"ack" */
 		if (!lmsg->rdma_header.rdma_ack) {
 			if (lmsg->rdma_header.is_write)
-				__handle_remote_thread_rdma_write_request(inc_lmsg, paddr);
+				__handle_remote_thread_rdma_write_request(lmsg, paddr);
 			else
-				__handle_remote_thread_rdma_read_request(inc_lmsg, paddr);
+				__handle_remote_thread_rdma_read_request(lmsg, paddr);
 		}
 		else { // ack
 			if (lmsg->rdma_header.is_write)
-				__handle_remote_thread_rdma_write_response(inc_lmsg);
+				__handle_remote_thread_rdma_write_response(lmsg);
 			else
-				__handle_remote_thread_rdma_read_response(inc_lmsg);
+				__handle_remote_thread_rdma_read_response(lmsg);
 		}
 	}
 	else {
@@ -2590,7 +2589,7 @@ EXPORT_SYMBOL(krping_rdma_rkey_passive);
  *
  * rw_size: size you wanna passive remote to READ/WRITE
  */
-int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
+int ib_kmsg_send_rdma(unsigned int dest_cpu, remote_thread_rdma_rw_t *lmsg,
 					  unsigned int msg_size, unsigned int rw_size)
 {
 	uint32_t rkey;
@@ -2601,13 +2600,13 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
 #endif
 	MSGDPRINTK("%s(): \n", __func__);
 
-	if (!((remote_thread_rdma_rw_t*)lmsg)->rdma_header.your_buf_ptr ||
+	if (!lmsg->rdma_header.your_buf_ptr ||
 			rw_size < 0)
 		BUG();
 
 	// info setup
 	lmsg->header.is_rdma = true;
-	((remote_thread_rdma_rw_t*) lmsg)->rdma_header.rw_size = rw_size;
+	lmsg->rdma_header.rw_size = rw_size;
 
 	/* kmsg
 	 * if R/W
@@ -2647,14 +2646,12 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
 	_cb->act_paddr = jack_kmap(_cb->act_page);
 	_cb->active_dma_addr = jack_map_act_page(_cb->act_paddr, _cb->conn_no);
 #else
-	_cb->active_dma_addr = jack_map_act(
-			((remote_thread_rdma_rw_t*)lmsg)->rdma_header.your_buf_ptr,
-														_cb->conn_no, rw_size);
+	_cb->active_dma_addr = jack_map_act( lmsg->rdma_header.your_buf_ptr,
+													_cb->conn_no, rw_size);
 #endif
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	((remote_thread_rdma_rw_t*)lmsg)->rw_ticket = 
-								atomic_inc_return(&_cb->g_all_ticket);
+	lmsg->rw_ticket = atomic_inc_return(&_cb->g_all_ticket);
 #endif
 	
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
@@ -2669,18 +2666,16 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
 							// active_dma_addr is sent for remote READ/WRITE
 													// failed to trun inv off
 	
-	((remote_thread_rdma_rw_t*) lmsg)->rdma_header.remote_addr =
-												htonll(_cb->active_dma_addr);
-	((remote_thread_rdma_rw_t*) lmsg)->rdma_header.remote_rkey =
-																htonl(rkey);
+	lmsg->rdma_header.remote_addr = htonll(_cb->active_dma_addr);
+	lmsg->rdma_header.remote_rkey = htonl(rkey);
 	CHECK_LOG("%s(): - @@@ cb[%d] rkey %d cb[]->active_dma_addr %p "
 												"lmsg->rw_size %d\n",
 												__func__, dest_cpu, rkey,
 												(void*)_cb->active_dma_addr,
-				((remote_thread_rdma_rw_t*) lmsg)->rdma_header.rw_size);
+												 lmsg->rdma_header.rw_size);
 
 	lmsg->header.from_nid = my_nid;
-	((remote_thread_rdma_rw_t*) lmsg)->rdma_header.rdma_ack = false;
+	lmsg->rdma_header.rdma_ack = false;
 
 	if (dest_cpu == my_nid) {
 		printk(KERN_ERR "No support for sending msg to itself %d\n", dest_cpu);
@@ -2693,10 +2688,8 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg,
 	//----------------------------------------------------------
 	// ib
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	((remote_thread_rdma_rw_t*)lmsg)->rdma_ticket = 
-									atomic_inc_return(&g_rw_ticket); // from 1
-	MSGPRINTK("%s(): rw ticket %d\n",
-			__func__, ((remote_thread_rdma_rw_t*)lmsg)->rdma_ticket);
+	lmsg->rdma_ticket = atomic_inc_return(&g_rw_ticket); // from 1
+	MSGPRINTK("%s(): rw ticket %d\n", __func__, lmsg->rdma_ticket);
 #endif
 
 	// send signal/request

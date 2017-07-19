@@ -111,21 +111,21 @@ int pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
 						unsigned int msg_size, unsigned int rw_size)
 {
     if (send_callback_rdma == NULL) {
-		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
+		struct pcn_kmsg_hdr *hdr = (remote_thread_rdma_rw_t *)lmsg;
 		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, msg_size=%u "
 		"rw_size=%u\n", __func__, hdr->from_nid, hdr->type, msg_size, rw_size);
         return -ENOENT;
     }
 
-    return send_callback_rdma(to, (struct pcn_kmsg_message *)lmsg,
+    return send_callback_rdma(to, (remote_thread_rdma_rw_t *)lmsg,
 															msg_size, rw_size);
 }
 
 void pcn_kmsg_handle_remote_rdma_request(
-								struct pcn_kmsg_message *inc_lmsg, void *paddr)
+								void *inc_lmsg, void *paddr)
 {
 	if (!memcmp(msg_layer,"IB", 2))
-		handle_rdma_callback(inc_lmsg, paddr);
+		handle_rdma_callback((remote_thread_rdma_rw_t *)inc_lmsg, paddr);
 	else
 		printk(KERN_ERR "%s: current msg_layer (%s) is not \"IB\"\n",
 														__func__, msg_layer);
