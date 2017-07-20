@@ -213,7 +213,7 @@ static int pcn_kmsg_test_long_msg(struct pcn_kmsg_test_args __user *args)
 {
 	int rc;
 	unsigned long start_ts, end_ts;
-	struct pcn_kmsg_long_message *lmsg = kzalloc(sizeof(*lmsg), GFP_KERNEL);;
+	struct pcn_kmsg_message *lmsg = kzalloc(sizeof(*lmsg), GFP_KERNEL);;
 
 	lmsg->header.type = PCN_KMSG_TYPE_TEST_LONG;
 	lmsg->header.prio = PCN_KMSG_PRIO_NORMAL;
@@ -535,8 +535,8 @@ static int pcn_kmsg_test_callback(struct pcn_kmsg_message *message)
 
 static int pcn_kmsg_test_long_callback(struct pcn_kmsg_message *message)
 {
-	struct pcn_kmsg_long_message *lmsg =
-		(struct pcn_kmsg_long_message *)message;
+	struct pcn_kmsg_message *lmsg =
+		(struct pcn_kmsg_message *)message;
 
 	TEST_PRINTK("Received test long message, payload: %s\n",
 		    (char *) &lmsg->payload);

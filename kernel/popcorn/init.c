@@ -14,6 +14,9 @@
 struct workqueue_struct *popcorn_wq;
 struct workqueue_struct *popcorn_ordered_wq;
 struct workqueue_struct *popcorn_nonblock_wq;
+EXPORT_SYMBOL(popcorn_wq);
+EXPORT_SYMBOL(popcorn_ordered_wq);
+EXPORT_SYMBOL(popcorn_nonblock_wq);
 
 extern int popcorn_ns_init(int);
 extern int pcn_kmsg_init(void);

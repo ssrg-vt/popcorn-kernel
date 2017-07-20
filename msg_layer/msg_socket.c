@@ -28,8 +28,9 @@
 #define PORT 30467
 #define MAX_ASYNC_BUFFER	1024
 
+
 struct pcn_kmsg_buf_item {
-	struct pcn_kmsg_long_message *msg;
+	struct pcn_kmsg_message *msg;
 };
 
 struct pcn_kmsg_buf {
@@ -185,13 +186,7 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 	ftn = callbacks[msg.msg->header.type];
 	if (ftn != NULL) {
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-        int slot;
-        slot = get_a_slot(recv_pattern, msg.msg->header.size);
-        if (slot >= 0) {
-            if(recv_pattern[slot].size == 0)
-                recv_pattern[slot].size = msg.msg->header.size;
-            atomic_inc(&recv_pattern[slot].cnt);
-        }
+		atomic_inc(&recv_pattern[msg.msg->header.size]);
 #endif
 		ftn((void*)msg.msg);
 	} else {
@@ -315,7 +310,7 @@ end:
  * This is the interface for message layer
  ***********************************************/
 static int sock_kmsg_send(unsigned int dest_nid,
-			struct pcn_kmsg_long_message *lmsg, unsigned int size)
+			struct pcn_kmsg_message *lmsg, unsigned int size)
 {
 	int remaining;
 	char *p;
@@ -329,8 +324,7 @@ static int sock_kmsg_send(unsigned int dest_nid,
 	// Send msg to myself
 	if (dest_nid == my_nid) {
 		pcn_kmsg_cbftn ftn;
-		struct pcn_kmsg_long_message *msg =
-									pcn_kmsg_alloc_msg(size);
+		struct pcn_kmsg_message *msg = pcn_kmsg_alloc_msg(size);
 		BUG_ON(!msg);
 		memcpy(msg, lmsg, size);
 

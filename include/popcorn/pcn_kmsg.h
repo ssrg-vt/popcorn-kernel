@@ -9,6 +9,10 @@
 
 #include <linux/types.h>
 
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+#define MAX_STATISTIC_SLOTS 1048576
+#endif
+
 enum pcn_connection_status {
 	PCN_CONN_WATING,
 	PCN_CONN_CONNECTED,
@@ -22,18 +26,25 @@ typedef unsigned long pcn_kmsg_mcast_id;
 enum pcn_kmsg_type {
 	/* RDMA handlers */
 	PCN_KMSG_TYPE_RDMA_START,
-	PCN_KMSG_TYPE_RDMA_READ_REQUEST,
-	PCN_KMSG_TYPE_RDMA_READ_RESPONSE,
-	PCN_KMSG_TYPE_RDMA_WRITE_REQUEST,
-	PCN_KMSG_TYPE_RDMA_WRITE_RESPONSE,
+	PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST,
+	PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
+	PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST,
+	PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE,
 	PCN_KMSG_TYPE_RDMA_END,
 
 	/* message layer testing */
 	PCN_KMSG_TYPE_FIRST_TEST,
-	PCN_KMSG_TYPE_SELFIE_TEST,
 	PCN_KMSG_TYPE_TEST,
 	PCN_KMSG_TYPE_TEST_LONG,
 	PCN_KMSG_TYPE_NODE_INFO,
+
+	/* Performance experiments */
+	PCN_KMSG_TYPE_SELFIE_TEST,
+	PCN_KMSG_TYPE_SEND_ROUND_REQUEST,
+	PCN_KMSG_TYPE_SEND_ROUND_RESPONSE,
+	PCN_KMSG_TYPE_SEND_ROUND_WRITE_REQUEST,
+	PCN_KMSG_TYPE_SEND_ROUND_WRITE_RESPONSE,
+	PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF,
 
 	/* Provide the single system image */
 	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
@@ -121,20 +132,11 @@ enum pcn_kmsg_prio {
 
 /* Message header */
 struct pcn_kmsg_hdr {
-	unsigned int from_nid	:8; // b0
-
-	enum pcn_kmsg_type type	:8;	// b1
-
-	enum pcn_kmsg_prio prio	:5;	// b2
-	bool is_lg_msg			:1;
-	bool lg_start			:1;
-	bool lg_end				:1;
-
-	unsigned long long_number;	// b3 .. b10
-
-	unsigned int lg_seqnum 	:LG_SEQNUM_SIZE;	// b11
-	unsigned int __ready	:__READY_SIZE;
-	unsigned int size		:16;	// b12 .. 13 payload + hdr
+	unsigned int from_nid	:8;
+	enum pcn_kmsg_type type	:8;
+	enum pcn_kmsg_prio prio	:7;
+	bool is_rdma			:1;
+	unsigned int size;
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	unsigned long ticket;	// useful dbg for msg layer
 #endif  
@@ -142,43 +144,12 @@ struct pcn_kmsg_hdr {
 
 #define CACHE_LINE_SIZE 64
 #define PCN_KMSG_PAYLOAD_SIZE (CACHE_LINE_SIZE - sizeof(struct pcn_kmsg_hdr))
-#define MAX_CHUNKS ((1 << LG_SEQNUM_SIZE) - 1)
-//#define PCN_KMSG_LONG_PAYLOAD_SIZE (MAX_CHUNKS * PCN_KMSG_PAYLOAD_SIZE)
-
-#define PCN_KMSG_LONG_PAYLOAD_SIZE 16384
-
-/* The actual messages.  The expectation is that developers will create their
-   own message structs with the payload replaced with their own fields, and then
-   cast them to a struct pcn_kmsg_message.  See the checkin message below for
-   an example of how to do this. */
-
-#define PAD_LONG_MESSAGE(x) \
-	(((sizeof(x) + PCN_KMSG_PAYLOAD_SIZE) / PCN_KMSG_PAYLOAD_SIZE) \
-		* PCN_KMSG_PAYLOAD_SIZE)
-
-#define PCN_KMSG_PAD_SIZE(x) \
-	(sizeof(x) > PCN_KMSG_PAYLOAD_SIZE ? \
-		PAD_LONG_MESSAGE(sizeof(x)) : PCN_KMSG_PAYLOAD_SIZE)
+#define PCN_KMSG_LONG_PAYLOAD_SIZE 65536+64
 
 #define DEFINE_PCN_KMSG(type, fields) \
-	struct _##type {				\
-		fields						\
-	};								\
 	typedef struct {				\
 		struct pcn_kmsg_hdr header;	\
-		union {						\
-			struct {				\
-				fields				\
-			};						\
-			char _pad[PCN_KMSG_PAD_SIZE(struct _##type)];	\
-		}__attribute__((packed));	\
-	}__attribute__((packed)) type
-
-#define DEFINE_PCN_KMSG_NO_PAD(type, fields) \
-	typedef struct {				\
-		struct pcn_kmsg_hdr header;	\
-		fields						\
-		}__attribute__((packed));	\
+		fields				\
 	}__attribute__((packed)) type
 
 
@@ -187,15 +158,31 @@ struct pcn_kmsg_hdr {
    in the header. */
 struct pcn_kmsg_message {
 	struct pcn_kmsg_hdr header;
-	unsigned char payload[PCN_KMSG_PAYLOAD_SIZE];
+	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
 }__attribute__((packed)) __attribute__((aligned(CACHE_LINE_SIZE)));
 
-/* Struct for sending long messages (>60 bytes payload) */
-struct pcn_kmsg_long_message {
-	struct pcn_kmsg_hdr header;
-	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
-}__attribute__((packed));
+/* rdma header */
+struct pcn_kmsg_rdma_hdr {
+    bool is_write;				/* is a READ/WRITE request */
+    bool rdma_ack;				/* is a rdma req/ack */
+    uint32_t remote_rkey;		/* R/W remote RKEY */
+    uint32_t rw_size;			/* R/W remote size */
+    uint64_t remote_addr;		/* remote TO */
+    void *your_buf_ptr;			/* will be copied to R/W buffer */
+    enum pcn_kmsg_type rmda_type_res;	/* response callback func */
+};
 
+/* Template for RDMA request/ack */
+typedef struct {
+    struct pcn_kmsg_hdr header; /* must follow */
+	struct pcn_kmsg_rdma_hdr rdma_header; /* must follow, rdma essential */
+    /* your data structures */
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+    int rw_ticket;
+    int rdma_ticket;
+#endif
+	int remote_ws;
+}__attribute__((packed)) remote_thread_rdma_rw_t;
 
 /* TYPES OF MESSAGES */
 
@@ -214,6 +201,8 @@ typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
 
 /* Typedef for function pointer to callback functions */
 typedef int (*send_cbftn)(unsigned int, struct pcn_kmsg_message *, unsigned int);
+typedef int (*send_rdma_cbftn)(unsigned int, remote_thread_rdma_rw_t *, unsigned int, unsigned int);
+typedef void (*handle_rdma_request_ftn)(remote_thread_rdma_rw_t *, void *);
 
 /* SETUP */
 
@@ -230,7 +219,8 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
 /* Send a message to the specified destination CPU. */
 int pcn_kmsg_send(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
-int pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
+int pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg, unsigned int msg_size, unsigned int rw_size);
+void pcn_kmsg_handle_remote_rdma_request(void *inc_lmsg, void *paddr);
 
 /* Free a received message (called at the end of the callback function) */
 void pcn_kmsg_free_msg(void *msg);
@@ -282,8 +272,5 @@ int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id, void *msg,
 extern send_cbftn send_callback;
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 
-struct statistic {
-    unsigned long size;
-    atomic_t cnt;
-};
+
 #endif /* __LINUX_PCN_KMSG_H */

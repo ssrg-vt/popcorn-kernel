@@ -5,35 +5,63 @@
  *                      - large data (>=8K)
  *                      - (rdma read/write)
  */
+#include <linux/slab.h>
+#include <linux/delay.h>
+#include <asm/uaccess.h>
 #include <linux/module.h>
-
+#include <linux/string.h>
+#include <linux/kthread.h>
+#include <linux/vmalloc.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-#include <linux/slab.h>
-#include <linux/kthread.h>
-
-#include <linux/string.h>
-
-#include <asm/uaccess.h>
 
 #include <popcorn/debug.h>
+#include <popcorn/bundle.h>
 #include <popcorn/pcn_kmsg.h>
 
-#include <linux/vmalloc.h>
+/* rdma */
+#include <rdma/ib_verbs.h>
+#include <rdma/rdma_cm.h>
+/* page */
+#include <linux/pagemap.h>
+
+/* wait station */
+#include "../../kernel/popcorn/types.h"
+#include "../../kernel/popcorn/wait_station.h"
 
 #include "common.h"
 
-#include <linux/delay.h>
+#define MAX_MSG_LENGTH 65536	// max msg payload size supported by msg_test.c
 
 /* testing args */
 #define ITER 1					// iter for test10 (send throughput)
 #define MAX_ARGS_NUM 10	
-#define MAX_MSG_LENGTH 16384	// max msg payload size supported by msg_test.c 
 #define TEST1_MSG_COUNT 100000	// specifically for test1 iterations
 
+#define MAX_TESTING_SIZE 120*1024*1024
+#define TEST1_PAYLOAD_SIZE 1024
+
 /* proc output args */
-#define MAX_STATISTIC_SLOTS 100	// support n diffrent sizes of msg
 #define PROC_BUF_SIZE 1024*1024 // proc output size
+
+char *dummy_send_buf;				// dummy_send_buf for testing
+EXPORT_SYMBOL(dummy_send_buf);
+
+extern char *dummy_act_buf;
+extern char *dummy_pass_buf;
+
+/* for testing rdma read */
+int g_remote_read_len = 8*1024; // testing size for RDMA, mimicing user buf size
+int g_rdma_write_len = 8*1024;		// size wanna remote to perform write
+char *g_test_buf = NULL;			// mimicing user buf
+char *g_test_write_buf = NULL;		// mimicing user buf
+
+/* workqueue arg for testing */
+typedef struct {
+	struct work_struct work;
+	struct pcn_kmsg_message *lmsg;
+} pcn_kmsg_work_t;
+
 
 /* getting performance data */
 #define POPCORN_EXP_DATA_MSG_IB 1
@@ -58,42 +86,178 @@
 #define KRPRINT_INIT(...) printk(__VA_ARGS__)
 #define MSG_SYNC_PRK(...) printk(__VA_ARGS__)
 #define DEBUG_LOG_V(...) printk(__VA_ARGS__)
+#define DEBUG_CORRECTNESS(...) printk(__VA_ARGS__)
 //#define DEBUG_LOG_V(...) trace_printk(__VA_ARGS__)
 #else
 #define MSG_RDMA_PRK(...)
 #define KRPRINT_INIT(...)
 #define MSG_SYNC_PRK(...)
 #define DEBUG_LOG_V(...)
+#define DEBUG_CORRECTNESS(...)
 #endif 
-
-#define MAX_TESTING_SIZE 125829120 // = 120*1024*1024
-#define TEST1_PAYLOAD_SIZE 1024
-
-/* for testing rdma read */
-int g_remote_read_len = 4*1024; // testing size for RDMA, mimicing user buf size
-int g_rdma_write_len;			// size wanna read/write
-char *g_test_buf = NULL;		// mimicing user buf
 
 /* example - data structure (dbg info) */
 typedef struct {
-    struct pcn_kmsg_hdr header; /* must follow */
-    /* you define */
-    int example1;
-    int example2;
+	struct pcn_kmsg_hdr header; /* must follow */
+	/* you define */
+	int example1;
+	int example2;
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 #endif  
-    char msg[TEST1_PAYLOAD_SIZE];
+	char msg[TEST1_PAYLOAD_SIZE];
 }__attribute__((packed)) remote_thread_first_test_request_t;
 
-struct test_msg_t
-{
+struct test_msg_t {
 	struct pcn_kmsg_hdr header;
 	unsigned char payload[MAX_MSG_LENGTH];
 };
 
+struct test_msg_request_t {
+	struct pcn_kmsg_hdr header;
+	int remote_ws;
+	unsigned int size;
+	unsigned char payload[MAX_MSG_LENGTH];
+};
+
+struct test_msg_signal_t {
+	struct pcn_kmsg_hdr header;
+	int remote_ws;
+	unsigned int size;
+};
+
+struct test_msg_response_t {
+	struct pcn_kmsg_hdr header;
+	int remote_ws;
+};
+
+
+/* testing utility */
+/*
+ * in the reality, this function should be called between send()s
+ */
+void setup_read_buf(void)
+{
+	// read specific (data you wanna let remote side to read)
+	g_test_buf = kmalloc(g_remote_read_len, GFP_KERNEL);
+	if (!g_test_buf) {
+		printk(KERN_ERR "kmalloc failure\n");
+		BUG();
+	}
+
+	memset(g_test_buf, 'R', g_remote_read_len);
+							// user data buffer ( will be copied to rdma buf)
+}
+
+void setup_write_buf(void)
+{
+	// read specific (data you wanna let remote side to write)
+	g_test_write_buf = kmalloc(g_rdma_write_len, GFP_KERNEL);
+	if (!g_test_write_buf) {
+		printk(KERN_ERR "kmalloc failure\n");
+		BUG();
+	}
+	memset(g_test_write_buf, 'W', g_rdma_write_len);
+							// user data buffer ( will be copied to rdma buf)
+}
+
+void _show_RW_dummy_buf(void)
+{
+	printk("<<<<< CHECK active buffer >>>>> \n"
+					"_cb->rw_act_buf(first10) \"%.10s\"\n"
+					"_cb->rw_act_buf(last 10) \"%.10s\"\n\n\n",
+					dummy_act_buf,
+					dummy_act_buf+(MAX_MSG_LENGTH-11));
+	printk("<<<<< CHECK pass buffer>>>>> \n"
+					"_cb->rw_pass_buf(first10) \"%.10s\"\n"
+					"_cb->rw_pass_buf(last 10) \"%.10s\"\n\n\n",
+					dummy_pass_buf,
+					dummy_pass_buf+(MAX_MSG_LENGTH-11));
+}
+
+void show_RW_dummy_buf(void)
+{
+	int i;
+	struct pcn_kmsg_message *request; // youTODO: make your own struct
+
+	_show_RW_dummy_buf();
+
+	/* send to remote a request of  showing R/W buffers */
+	request = pcn_kmsg_alloc_msg(sizeof(*request));
+	if (!request) BUG();
+
+	request->header.type = PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF;
+	request->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+	for(i=0; i<MAX_NUM_NODES; i++) {
+		if (my_nid==i) continue;
+		pcn_kmsg_send(i, request, sizeof(*request));
+	}
+
+	pcn_kmsg_free_msg(request);
+}
+
+static void handle_show_RW_dummy_buf( struct pcn_kmsg_message *inc_lmsg)
+{
+	_show_RW_dummy_buf();
+	pcn_kmsg_free_msg(inc_lmsg);
+}
+
+void init_RW_dummy_buf(void) {
+	printk("---------------------------\n");
+	printk("----- init dummy buff -----\n");
+	printk("---------------------------\n");
+	memset(dummy_act_buf, 'A', 10);
+	memset(dummy_act_buf+10, 'B', MAX_MSG_LENGTH-10);
+	memset(dummy_pass_buf, 'P', 10);
+	memset(dummy_pass_buf+10, 'Q', MAX_MSG_LENGTH-10);
+}
+
+static struct test_msg_request_t *__alloc_send_roundtrip_read_request(void)
+{
+	struct test_msg_request_t *req = pcn_kmsg_alloc_msg(sizeof(*req));
+	if (!req)
+		return NULL;
+
+	req->header.type = PCN_KMSG_TYPE_SEND_ROUND_REQUEST;
+	req->header.prio = PCN_KMSG_PRIO_NORMAL;
+	return req;
+}
+
+
+static struct test_msg_signal_t *__alloc_send_roundtrip_write_request(void)
+{
+	struct test_msg_signal_t *req =
+						pcn_kmsg_alloc_msg(sizeof(struct test_msg_signal_t));
+	if (!req)
+		return NULL;
+
+	req->header.type = PCN_KMSG_TYPE_SEND_ROUND_WRITE_REQUEST;
+	req->header.prio = PCN_KMSG_PRIO_NORMAL;
+	return req;
+}
+
+void _show_time(struct timeval *t1, struct timeval *t2,
+				unsigned long long payload_size,
+				unsigned long long iter, char *str)
+{
+	EXP_DATA("%s: payload size %llu, %llu times, spent %ld.%06ld s\n",
+						str, payload_size, iter,
+
+						t2->tv_usec-t1->tv_usec >= 0?
+						t2->tv_sec-t1->tv_sec:
+						t2->tv_sec-t1->tv_sec-1,
+
+						t2->tv_usec-t1->tv_usec >= 0?
+						t2->tv_usec-t1->tv_usec:
+						(1000000-(t1->tv_usec-t2->tv_usec)));
+}
+
+
+
+
 /* example - handler */
 static void handle_remote_thread_first_test_request(
-									struct pcn_kmsg_long_message* inc_lmsg)
+									struct pcn_kmsg_message* inc_lmsg)
 {
 	remote_thread_first_test_request_t* request = 
 						(remote_thread_first_test_request_t*) inc_lmsg;
@@ -119,27 +283,28 @@ static int handle_self_test(struct pcn_kmsg_message* inc_msg)
 	DEBUG_LOG_V("%s(): message handler is called from cpu %d successfully.\n",
 		__func__, request->header.from_nid);
 
-	//DEBUG_LOG_V("%s(): %s\n", __func__, request->payload);
-
 	pcn_kmsg_free_msg(request);
 	return 0;
 }
 
+
+
+
+
+/* tests */
+/* ----- 1st testing -----
+ * 	[we are here]
+ *	[compose]
+ *  send       ---->   irq (recv)
+ *  [done]
+ */
 static int test1(void)
 {
-	/* ----- 1st testing -----
-	 * 	[we are here]
-	 *	[compose]
-	 *  send       ---->   irq (recv)
-	 *  [done]
-	 */
-
 	int i;
 	static int cnt = 0;
-	
-	remote_thread_first_test_request_t* request; // youTODO: make your own struct 
-	request = pcn_kmsg_alloc_msg(sizeof(*request));
-	if(request==NULL)
+	remote_thread_first_test_request_t* request =
+										pcn_kmsg_alloc_msg(sizeof(*request));
+	if (request==NULL)
 		return -1;
 
 	request->header.type = PCN_KMSG_TYPE_FIRST_TEST;
@@ -148,7 +313,7 @@ static int test1(void)
 	/* msg essentials */
 	/* ------------------------------------------------------------ */
 	/* msg dependences */
-	request->example1 = my_nid;        // doesn't solve the problem
+	request->example1 = my_nid;
 	request->example2 = ++cnt;
 	memset(request->msg,'J', sizeof(request->msg));
 	DEBUG_LOG_V("\n%s(): example2(t) %d strlen(request->msg) %d "
@@ -156,9 +321,9 @@ static int test1(void)
 												(int)strlen(request->msg));
 
 	for(i=0; i<MAX_NUM_NODES; i++) {
-		if(my_nid==i)
+		if (my_nid==i)
 			continue;
-		pcn_kmsg_send(i, (struct pcn_kmsg_long_message*) request,
+		pcn_kmsg_send(i, (struct pcn_kmsg_message*) request,
 														sizeof(*request));
 	}
 
@@ -169,7 +334,7 @@ static int test1(void)
 /* ===== 2nd testing: r_read =====
  * 	[we are here]
  *	[compose]
- *  send       ---->   irq (recv)
+ *  send       ----->   irq (recv)
  *                      perform READ
  * irq (recv)  <-----   send
  * 
@@ -178,13 +343,15 @@ static int test2(void)
 {
 	volatile int i;
 
-	remote_thread_rdma_rw_request_t* request_rdma_read;
+	remote_thread_rdma_rw_t* request_rdma_read;
 	//request_rdma_read = pcn_kmsg_alloc_msg(sizeof(*request_rdma_read));
 	request_rdma_read = kmalloc(sizeof(*request_rdma_read), GFP_KERNEL);
-	if(request_rdma_read==NULL)
+	if (request_rdma_read==NULL)
 		return -1;
 
-	request_rdma_read->header.type = PCN_KMSG_TYPE_RDMA_READ_REQUEST;
+	request_rdma_read->header.type = PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
+	request_rdma_read->rdma_header.rmda_type_res =
+									PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
 	request_rdma_read->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* msg essentials */
@@ -192,23 +359,22 @@ static int test2(void)
 	/* msg dependences */
 
 	/* READ/WRITE specific: *buf, size */
-	request_rdma_read->is_write = false;
+	request_rdma_read->rdma_header.is_write = false;
 	
-
-	request_rdma_read->rw_size = g_remote_read_len;	// size you wanna passive remote to read //testing
-	/* g_test_buf is done by setup_read_buf() */
-	request_rdma_read->your_buf_ptr = g_test_buf;		// must be kmalloc()ed	
+	/* g_test_buf is allocated by setup_read_buf() */
+	request_rdma_read->rdma_header.your_buf_ptr = g_test_buf;
 	/*
 	 * your buf will be copied to rdma buf for a passive remote read
 	 * user should protect
 	 * local buffer size for passive remote to read
 	 */
 	for(i=0; i<MAX_NUM_NODES; i++) {
-		if(my_nid==i)
+		if (my_nid==i)
 			continue;
 		
-		pcn_kmsg_send_rdma(i, (struct pcn_kmsg_long_message*)request_rdma_read, g_remote_read_len);
-		DEBUG_LOG_V("\n\n\n"); 
+		pcn_kmsg_send_rdma(i, request_rdma_read,
+							sizeof(*request_rdma_read), g_remote_read_len);
+		DEBUG_LOG_V("\n\n\n");
 	}
 	//pcn_kmsg_free_msg(request_rdma_read);
 	kfree(request_rdma_read);
@@ -218,7 +384,7 @@ static int test2(void)
 /* ===== 3rd testing: r_write =====
  * 	[we are here]
  *	[compose]
- *  send       ---->   irq (recv)
+ *  send       ----->   irq (recv)
  *                      perform WRITE
  * irq (recv)  <-----   send
  * 
@@ -227,14 +393,16 @@ static int test3(void)
 {
 	int i;
 
-	remote_thread_rdma_rw_request_t* request_rdma_write;
+	remote_thread_rdma_rw_t* request_rdma_write;
 	//request_rdma_write = pcn_kmsg_alloc_msg(sizeof(*request_rdma_write));
 	request_rdma_write = kmalloc(sizeof(*request_rdma_write), GFP_KERNEL);
 
-	if(request_rdma_write==NULL)
+	if (request_rdma_write==NULL)
 		return -1;
 
-	request_rdma_write->header.type = PCN_KMSG_TYPE_RDMA_WRITE_REQUEST;
+	request_rdma_write->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+	request_rdma_write->rdma_header.rmda_type_res =
+									PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
 	request_rdma_write->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* msg essentials */
@@ -242,25 +410,24 @@ static int test3(void)
 	/* msg dependences */
 
 	/* READ/WRITE specific */
-	request_rdma_write->is_write = true;
-	request_rdma_write->rw_size = g_remote_read_len; //testing
-									// size you wanna passive remote to WRITE
+	request_rdma_write->rdma_header.is_write = true;
+
+	request_rdma_write->rdma_header.your_buf_ptr = g_test_write_buf;
 
 	for(i=0; i<MAX_NUM_NODES; i++) {
-		if(my_nid==i)
+		if (my_nid==i)
 			continue;
 		
-		g_rdma_write_len = 4*1024; // size wanna remote to perform read/write
-		pcn_kmsg_send_rdma(i, (struct pcn_kmsg_long_message*)request_rdma_write, g_rdma_write_len);
+		pcn_kmsg_send_rdma(i, request_rdma_write,
+							sizeof(*request_rdma_write), g_rdma_write_len);
 		
-		DEBUG_LOG_V("\n\n\n"); 
+		DEBUG_LOG_V("\n\n\n");
 	}
 	//pcn_kmsg_free_msg(request_rdma_write);
 	kfree(request_rdma_write);
 	return 0;
 }
 
-//static void kthread_test1(void* arg0)
 static int kthread_test1(void* arg0)
 {
 	volatile int i;
@@ -288,33 +455,30 @@ static int kthread_test3(void* arg0)
 	return 0;
 }
 
-// only support nid x sends to nid 0 so far
 void test_send_throughput(unsigned long long payload_size)
 {
 	int i, dst = 0;
 	struct timeval t1, t2;
-	struct test_msg_t *msg;
+	struct test_msg_t *msg = pcn_kmsg_alloc_msg(sizeof(*msg));
 
-	msg = pcn_kmsg_alloc_msg(sizeof(struct test_msg_t));
 	msg->header.type= PCN_KMSG_TYPE_SELFIE_TEST;
 	memset(msg->payload, 'b', payload_size);
 
-	if (my_nid == 0) {
+	if (my_nid == 0)
 		dst=1;
-	}
 
 	do_gettimeofday(&t1);
-	for (i = 0; i < MAX_TESTING_SIZE/payload_size; i++)
+	for (i=0; i<MAX_TESTING_SIZE/payload_size; i++)
 		pcn_kmsg_send(dst, msg, payload_size + sizeof(msg->header));
 	do_gettimeofday(&t2);
 
-	if( t2.tv_usec-t1.tv_usec >= 0) {
-		EXP_DATA("Send throughput result: send payload size %llu, "
+	if (t2.tv_usec-t1.tv_usec >= 0) {
+		EXP_DATA("Send one-way: send payload size %llu, "
 							"total size %d, %llu times, spent %ld.%06ld s\n",
 				payload_size, MAX_TESTING_SIZE, MAX_TESTING_SIZE/payload_size, 
 									t2.tv_sec-t1.tv_sec, t2.tv_usec-t1.tv_usec);
 	} else {
-		EXP_DATA("Send throughput result: send payload size %llu, "
+		EXP_DATA("Send one-way: send payload size %llu, "
 							"total size %d, %llu times, spent %ld.%06ld s\n",
 				payload_size, MAX_TESTING_SIZE, MAX_TESTING_SIZE/payload_size,
 					t2.tv_sec-t1.tv_sec-1, (1000000-(t1.tv_usec-t2.tv_usec)));
@@ -323,77 +487,221 @@ void test_send_throughput(unsigned long long payload_size)
 	pcn_kmsg_free_msg(msg);
 }
 
-#ifdef RDMAWR
-/* ===== Jack testing: page READ/WRITE =====
+/*
  * 	[we are here]
- *	[compose]
+ *	compose
+ *  send()
  *  *remap addr*
- *  send       ---->   irq (recv)
- *                      perform WRITE
+ *             ----->   irq (recv)
+ *                      perform READ/WRITE
  * irq (recv)  <-----   send
  * 
  */
-static int page_RW_test(void)
+static int rdma_RW_test(unsigned long long payload_size,
+						unsigned long long iter, bool is_rdma_read)
 {
-	int i;
+	unsigned long long i, j;
+	struct timeval t1, t2;
 
-	remote_thread_rdma_rw_request_t* request_rdma_write;
-	//request_rdma_write = pcn_kmsg_alloc_msg(sizeof(*request_rdma_write));
-	request_rdma_write = kmalloc(sizeof(*request_rdma_write), GFP_KERNEL);
+	do_gettimeofday(&t1);
+	for(j=0; j<iter; j++) {
+		for(i=0; i<MAX_NUM_NODES; i++) {
+			remote_thread_rdma_rw_t* request_rdma;
+			remote_thread_rdma_rw_t *res;
+			struct wait_station *ws;
 
-	if(request_rdma_write==NULL)
+			if (my_nid==i)
+				continue;
+
+			request_rdma = pcn_kmsg_alloc_msg(sizeof(*request_rdma));
+			if (!request_rdma)
+				BUG();
+
+			ws = get_wait_station(current);
+			request_rdma->remote_ws = ws->id;
+
+			if (is_rdma_read == true) {
+				request_rdma->header.type =
+										PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
+				request_rdma->rdma_header.rmda_type_res =
+										PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
+			} else {
+				request_rdma->header.type =
+										PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+				request_rdma->rdma_header.rmda_type_res =
+										PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
+			}
+
+			request_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+			/* msg essentials */
+			/* ------------------------------------------------------------ */
+			/* msg dependences */
+
+			/* READ/WRITE specific */
+			if (is_rdma_read == true)
+				request_rdma->rdma_header.is_write = false;
+			else
+				request_rdma->rdma_header.is_write = true;
+
+			request_rdma->rdma_header.your_buf_ptr = dummy_act_buf;
+
+			pcn_kmsg_send_rdma(i, request_rdma,
+							sizeof(*request_rdma), (unsigned int)payload_size);
+			pcn_kmsg_free_msg(request_rdma);
+
+			res = wait_at_station(ws);
+			put_wait_station(ws);
+			pcn_kmsg_free_msg(res);
+			DEBUG_LOG_V("\n\n\n");
+		}
+	}
+	do_gettimeofday(&t2);
+
+	EXP_DATA("RDMA %s payload size %llu, %llu times, spent %ld.%06ld s\n",
+							is_rdma_read?"READ":"WRITE",
+							payload_size, iter,
+
+							t2.tv_usec-t1.tv_usec >= 0?
+							t2.tv_sec-t1.tv_sec:
+							t2.tv_sec-t1.tv_sec-1,
+
+							t2.tv_usec-t1.tv_usec >= 0?
+							t2.tv_usec-t1.tv_usec:
+							(1000000-(t1.tv_usec-t2.tv_usec)));
+
+	return 0;
+}
+
+/*	mimic_read:
+ *			=====>
+ *					[copy]
+ *			<-----
+ *
+ *	mimic_write:	(more often)
+ *			----->
+ *			<====
+ *	 [copy]
+ *
+ */
+void test_send_read_throughput(unsigned long long payload_size,
+										 unsigned long long iter)
+{
+	int i, dst = 0;
+	struct timeval t1, t2;
+
+	if (my_nid == 0)
+		dst=1;
+
+	do_gettimeofday(&t1);
+	for (i = 0; i < iter; i++) {
+		struct wait_station *ws = get_wait_station(current);
+		struct test_msg_request_t *req = __alloc_send_roundtrip_read_request();
+		struct test_msg_signal_t *res;
+		req->remote_ws = ws->id;
+		req->size = payload_size;
+		memcpy(&req->payload, dummy_send_buf, payload_size);
+
+		DEBUG_CORRECTNESS("%s(): r local to remote size %llu = "
+							"sizeof(*req)(%llu) - sizeof(req->payload)(%llu)"
+							" + payload_size(%llu)\n",
+				__func__, sizeof(*req) - sizeof(req->payload) + payload_size,
+							sizeof(*req), sizeof(req->payload), payload_size);
+		
+		pcn_kmsg_send(dst, req,
+							sizeof(*req) - sizeof(req->payload) + payload_size);
+
+		pcn_kmsg_free_msg(req);
+		res = wait_at_station(ws);
+		put_wait_station(ws);
+
+		pcn_kmsg_free_msg(res);
+	}
+	do_gettimeofday(&t2);
+
+	_show_time(&t1, &t2, payload_size, iter, "Send roundtrip (READ)");
+}
+
+
+void test_send_write_throughput(unsigned long long payload_size,
+											unsigned long long iter)
+{
+	int i, dst = 0;
+	struct timeval t1, t2;
+
+	if (my_nid == 0)
+		dst=1;
+
+	do_gettimeofday(&t1);
+	for (i = 0; i < iter; i++) {
+		struct wait_station *ws = get_wait_station(current);
+		struct test_msg_signal_t *req = __alloc_send_roundtrip_write_request();
+		struct test_msg_request_t *res;
+		req->remote_ws = ws->id;
+		req->size = payload_size;
+
+		pcn_kmsg_send(dst, req, sizeof(*req));
+
+		pcn_kmsg_free_msg(req);
+		res = wait_at_station(ws);
+		put_wait_station(ws);
+
+		//printk("mimic WRITE\n");
+		memcpy(dummy_send_buf, &res->payload, payload_size);
+
+		pcn_kmsg_free_msg(res);
+	}
+	do_gettimeofday(&t2);
+	_show_time(&t1, &t2, payload_size, iter, "Send roundtrip (WRITE)");
+}
+
+static int rdma_RW_inv_test(void* buf, unsigned long long payload_size,
+														bool is_rdma_read)
+{
+	unsigned long long i;
+
+	remote_thread_rdma_rw_t* request_rdma;
+	request_rdma = pcn_kmsg_alloc_msg(sizeof(*request_rdma));
+	if (!request_rdma)
 		return -1;
 
-	request_rdma_write->header.type = PCN_KMSG_TYPE_RDMA_WRITE_REQUEST;
-	request_rdma_write->header.prio = PCN_KMSG_PRIO_NORMAL;
+	if (is_rdma_read == true) {
+		request_rdma->header.type = PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST;
+		request_rdma->rdma_header.rmda_type_res =
+										PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE;
+	} else {
+		request_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+		request_rdma->rdma_header.rmda_type_res =
+										PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
+	}
+	request_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* msg essentials */
 	/* ------------------------------------------------------------ */
 	/* msg dependences */
 
 	/* READ/WRITE specific */
-	request_rdma_write->is_write = true;
-	request_rdma_write->rw_size = g_remote_read_len; //testing
-									// size you wanna passive remote to WRITE
+	if (is_rdma_read == true)
+		request_rdma->rdma_header.is_write = false;
+	else
+		request_rdma->rdma_header.is_write = true;
+
+	request_rdma->rdma_header.your_buf_ptr = buf;	// provided by user
+
 
 	for(i=0; i<MAX_NUM_NODES; i++) {
-		if(my_nid==i)
+		if (my_nid==i)
 			continue;
-		
-		g_rdma_write_len = 4*1024; // size wanna remote to perform read/write
-		pcn_kmsg_send_rdma(i, (struct pcn_kmsg_long_message*)request_rdma_write, g_rdma_write_len);
-		
-		DEBUG_LOG_V("\n\n\n"); 
+		pcn_kmsg_send_rdma(i, request_rdma,
+							sizeof(*request_rdma), (unsigned int)payload_size);
+		DEBUG_LOG_V("\n\n\n");
 	}
-	//pcn_kmsg_free_msg(request_rdma_write);
-	kfree(request_rdma_write);
-	return 0;
-}
-#endif
+	msleep(1000); // wait for taking effect
 
-/* testing utility */
-/*
- * in the reality, this function should be called between send()s
- */
-int setup_read_buf(void)
-{
-	volatile int i;
-	// read specific (data you wanna let remote side read)
-	g_test_buf = kmalloc(g_remote_read_len, GFP_KERNEL);
-	if (!g_test_buf) {
-		printk(KERN_ERR "kmalloc failure\n");
-		return -ENOMEM;
-	}
-	memset(g_test_buf, 'R', g_remote_read_len); 
-							// user data buffer ( will be copied to rdma buf)
-																			
-	for(i=0; i<MAX_NUM_NODES; i++) {
-		if(i==my_nid)
-			continue; 	// canot write to its rw_active_buf since addr space
-	}	
-	
+	pcn_kmsg_free_msg(request_rdma);
 	return 0;
 }
+
 
 static ssize_t write_proc(struct file * file, 
 					const char __user * buffer, size_t count, loff_t *ppos)
@@ -403,7 +711,7 @@ static ssize_t write_proc(struct file * file,
 	volatile int cnt = 0;
 	struct task_struct *t;
 	char *argv[MAX_ARGS_NUM];
-	
+
 	int args = 0;
 	char *tok, *end;
 
@@ -436,61 +744,63 @@ static ssize_t write_proc(struct file * file,
 	}
 	
 	for(i=0; i<MAX_ARGS_NUM; i++) {
-		if(argv[i]!=NULL)
+		if (argv[i]!=NULL)
 			KRPRINT_INIT("argv[%d]= %s\n", i, argv[i]);
 	}
+
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+	printk(KERN_WARNING "You are tracking POPCORN_MSG_STATISTIC "
+					"and geting inaccurate performance data now\n");
+#endif
 	
 	KRPRINT_INIT("\n\n[ proc write |%s| cnt %ld ] [%d args] \n", 
 												cmd, count, args);
 
-	/* do the coresponding function */
-	if(cmd[0]=='0') {
-		// Can reset log
-		//for (i=0; i<MAX_NUM_NODES; i++)
-			//atomic_set(&cb[i]->stats.send_msgs, 0);
+	/* do the coresponding work */
+	if (cmd[0]=='0') {
 		printk("Reserved. Not implemented yet\n");
-		EXP_LOG("cmd%c clean all done\n\n\n\n", cmd[0]);
 	}
-	else if(cmd[0]=='1' && cmd[1]=='\0') {
+	else if (cmd[0]=='1' && cmd[1]=='\0') {
 		struct timeval t1;
 		struct timeval t2;
 		
 		do_gettimeofday(&t1);
-		while(++cnt<=TEST1_MSG_COUNT)
+		while (++cnt<=TEST1_MSG_COUNT)
 			test1();
 		do_gettimeofday(&t2);
-		if( t2.tv_usec-t1.tv_usec >= 0) {
+		if ( t2.tv_usec-t1.tv_usec >= 0) {
 			EXP_DATA("Send throughput result: send msg size %d, "
 					"total size %d, %d times, spent %ld.%06ld s\n",
 					TEST1_PAYLOAD_SIZE, MAX_TESTING_SIZE, TEST1_MSG_COUNT,
 								t2.tv_sec-t1.tv_sec, t2.tv_usec-t1.tv_usec);
 		} else {
-			EXP_DATA("Send throughput result: size %d, "
+			EXP_DATA("Send throughput result: send msg size %d, "
 					"total size %d, %d times, spent %ld.%06ld s\n",
 					TEST1_PAYLOAD_SIZE, MAX_TESTING_SIZE, TEST1_MSG_COUNT,
 					t2.tv_sec-t1.tv_sec-1, (1000000-(t1.tv_usec-t2.tv_usec)));
 		}
 		EXP_LOG("test%c done\n\n\n\n", cmd[0]);
 	}
-	else if(cmd[0]=='2' && cmd[1]=='\0') {
+	else if (cmd[0]=='2' && cmd[1]=='\0') {
 		setup_read_buf();
-		while(++cnt<=5000)
+		while (++cnt<=5000)
 			test2();
 		EXP_LOG("test%c done\n\n\n\n", cmd[0]);
 	}
-	else if(cmd[0]=='3' && cmd[1]=='\0') {
-		while(++cnt<=5000)
+	else if (cmd[0]=='3' && cmd[1]=='\0') {
+		setup_write_buf();
+		while (++cnt<=5000)
 			test3();
 		EXP_LOG("test%c done\n\n\n\n", cmd[0]);
 	}
-	else if(cmd[0]=='4' && cmd[1]=='\0') { // conccurent multithreading test1()
+	else if (cmd[0]=='4' && cmd[1]=='\0') { // conccurent multithreading test1()
 		for(i=0; i<10; i++) {
 			t = kthread_run(kthread_test1, NULL, "kthread_test1()");
 			BUG_ON(IS_ERR(t));
 		}
 		EXP_LOG("test%c done\n\n\n\n", cmd[0]);
 	}
-	else if(cmd[0]=='5' && cmd[1]=='\0') { // conccurent multithreading test2()
+	else if (cmd[0]=='5' && cmd[1]=='\0') { // conccurent multithreading test2()
 		setup_read_buf();
 		for(i=0; i<10; i++) {
 			t = kthread_run(kthread_test2, NULL, "kthread_test2()");
@@ -498,14 +808,15 @@ static ssize_t write_proc(struct file * file,
 		}
 		EXP_LOG("test%c done\n\n\n\n", cmd[0]);
 	}
-	else if(cmd[0]=='6' && cmd[1]=='\0') { // conccurent multithreading test3()
+	else if (cmd[0]=='6' && cmd[1]=='\0') { // conccurent multithreading test3()
+		setup_write_buf();
 		for(i=0; i<10; i++) {
 			t = kthread_run(kthread_test3, NULL, "kthread_test3()");
 			BUG_ON(IS_ERR(t));
 		}
 		EXP_LOG("test%c done\n\n\n\n", cmd[0]);
 	}
-	else if(cmd[0]=='9' && cmd[1]=='\0') {
+	else if (cmd[0]=='9' && cmd[1]=='\0') {
 		// conccurent multithreading test1&2&3() at the same time
 		setup_read_buf();
 		for(i=0; i<10; i++) {
@@ -518,40 +829,100 @@ static ssize_t write_proc(struct file * file,
 		}
 		EXP_LOG("test%c done\n\n\n\n", cmd[0]);
 	}
-	else if(!memcmp(argv[0], "10", 2)) { // EXP DATA - SEND
+	else if (!memcmp(argv[0], "10", 2)) { // EXP DATA - SEND
 		struct timeval t1, t2;
-		if(args!=2) {
+		if (args!=2) {
 			printk(KERN_ERR "sudo echo 10 <SIZE> > /proc/kmsg_test\n");
 			return count;
 		}
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-		printk(KERN_WARNING "You are tracking POPCORN_MSG_STATISTIC "
-				"and geting inaccurate performance data now\n");
-#endif
 		KRPRINT_INIT("arg %llu\n", simple_strtoull(argv[1], NULL, 0));
 		for(i=0; i<ITER; i++) {
 			do_gettimeofday(&t1);
 			test_send_throughput(simple_strtoull(argv[1], NULL, 0));
 			do_gettimeofday(&t2);
-#if 0			
-			if( t2.tv_usec-t1.tv_usec >= 0) {
-				EXP_DATA("Send throughput result: send msg size %llu, "
-							"total size %llu, %llu times, spent %ld.%06ld s\n",
-				payload_size, MAX_TESTING_SIZE, MAX_TESTING_SIZE/payload_size, 
-									t2.tv_sec-t1.tv_sec, t2.tv_usec-t1.tv_usec);
-			} else {
-				EXP_DATA("Send throughput result: size %llu, "
-							"total size %llu, %llu times, spent %ld.%06ld s\n",
-				payload_size, MAX_TESTING_SIZE, MAX_TESTING_SIZE/payload_size,
-					t2.tv_sec-t1.tv_sec-1, (1000000-(t1.tv_usec-t2.tv_usec)));
-			}
-#endif
 		}
 		EXP_LOG("test %c%c test_send_throughput() done\n\n\n", 
 														cmd[0], cmd[1]);
 	}
-	else { 
-		printk("Not support yet. Try \"1,2,3,4,5,6,9,10\"\n"); 
+	else if (!memcmp(argv[0], "11", 2) || !memcmp(argv[0], "12", 2)) { // EXP
+		if (args<2) {
+			printk(KERN_ERR "sudo echo 11/12 <SIZE> <ITER> > /proc/kmsg_test\n");
+			return count;
+		}
+
+		if (simple_strtoull(argv[2], NULL, 0) == 0)
+			printk(KERN_WARNING "iter = 0\n");
+
+		KRPRINT_INIT("arg %llu\n", simple_strtoull(argv[1], NULL, 0));
+		for(i=0; i<ITER; i++) {
+			if (!memcmp(argv[0], "11", 2))
+				test_send_read_throughput(simple_strtoull(argv[1], NULL, 0),
+											simple_strtoull(argv[2], NULL, 0));
+			else
+				test_send_write_throughput(simple_strtoull(argv[1], NULL, 0),
+											 simple_strtoull(argv[2], NULL, 0));
+		}
+		EXP_LOG("test %s test_send_roundtrip_throughput() done\n\n\n", argv[0]);
+	}
+	else if (!memcmp(argv[0], "13", 2) || !memcmp(argv[0], "14", 2)) {
+
+		rdma_RW_test(simple_strtoull(argv[1], NULL, 0),
+						simple_strtoull(argv[2], NULL, 0),
+						!memcmp(argv[0], "13", 2)?true:false);
+		EXP_LOG("test RDMA %s rdma_RW_test() done\n\n\n",
+									!memcmp(argv[0], "13", 2)?"READ":"WRITE");
+	}
+	else if (!memcmp(argv[0], "15", 2)) {
+		/* Because of this LENGTH is not divided by 10,
+		 * the last few chars are not changed!			*/
+		int z, jack = MAX_MSG_LENGTH/10;
+
+		printk("----------------------------------\n");
+		printk("----- READ test sanity start -----\n");
+		printk("----------------------------------\n\n");
+
+		/* init act_buf */
+		for(z=0; z<10; z++) {
+			memset(dummy_act_buf+(z*jack), z+'a', jack);
+			printk("z %d act_buf \"%.10s\"\n", z, dummy_act_buf+(z*jack));
+		}
+
+		/* READ test */
+		for(z=0; z<10; z++) {
+			rdma_RW_inv_test(dummy_act_buf+(z*jack), jack, 1); //is read
+			show_RW_dummy_buf();
+			msleep(3000);
+		}
+
+		printk("---------------------------------\n");
+		printk("----- READ test sanity done -----\n");
+		printk("---------------------------------\n\n");
+		msleep(5000);
+		init_RW_dummy_buf();
+		show_RW_dummy_buf();
+		msleep(5000);
+
+		printk("----------------------------------\n");
+		printk("----- WRITE test sanity start ----\n");
+		printk("----------------------------------\n\n");
+
+		for(z=0; z<10; z++) {
+			rdma_RW_inv_test(dummy_act_buf+(z*jack), jack, 0); //is read
+			show_RW_dummy_buf();
+			msleep(3000);
+		}
+		printk("----------------------------------\n");
+		printk("----- WRITE test sanity done -----\n");
+		printk("----------------------------------\n\n");
+	}
+	else if (!memcmp(argv[0], "16", 2)) {
+		init_RW_dummy_buf();
+	}
+	else if (!memcmp(argv[0], "20", 2)) {
+		show_RW_dummy_buf();
+	}
+	else {
+		printk("Not support yet. Try \"1,2,3,4,5,6,9,10\"\n");
 	}
 
 	kfree(cmd);
@@ -570,32 +941,29 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 	int len = 0;
 
 	buf = kzalloc(PROC_BUF_SIZE, GFP_KERNEL);
-	if(!buf)
+	if (!buf)
 		BUG();
 
 	if (*offset > 0)
 		return 0;
 	
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-	i=0;
-	while(send_pattern[i].size > 0) {
+	for (i=1; i<MAX_STATISTIC_SLOTS; i++) {
+		if (atomic_read(&send_pattern[i]) == 0)
+			continue;
 		len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
-						"SEND: size %lu cnt %lu\n",
-						send_pattern[i].size,
-						(unsigned long)atomic_read(&send_pattern[i].cnt));
-		i++;
+						"SEND: size %d cnt %lu\n", i,
+						(unsigned long)atomic_read(&send_pattern[i]));
 	}
-	
-	i=0;
-	while(recv_pattern[i].size > 0) {
+	for (i=1; i<MAX_STATISTIC_SLOTS; i++) {
+		if (atomic_read(&recv_pattern[i]) == 0)
+			continue;
 		len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
-						"RECV: size %lu cnt %lu\n",
-						recv_pattern[i].size,
-						(unsigned long)atomic_read(&recv_pattern[i].cnt));
-		i++;
+						"RECV: size %d cnt %lu\n", i,
+						(unsigned long)atomic_read(&recv_pattern[i]));
 	}
 
-	if( len > PROC_BUF_SIZE ) {
+	if ( len > PROC_BUF_SIZE ) {
 		len = PROC_BUF_SIZE;
 		printk(KERN_WARNING "logs dropped\n");
 	}
@@ -613,6 +981,7 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 					"Please turn on CONFIG_POPCORN_MSG_STATISTIC "
 								"and recompile the kernel agaian!!\n");
 #endif
+
 	kfree(buf);
 	*offset = len;
 	return len;
@@ -620,7 +989,7 @@ static ssize_t read_func(struct file *filp, char *usr_buf,
 
 static int kmsg_test_read_proc(struct seq_file *seq, void *v)
 {
-	printk("Not suppor open/read\n");
+	printk("Not suppor open\n");
 	return 0;
 }
 
@@ -639,12 +1008,174 @@ static struct file_operations kmsg_test_ops = {
 };
 
 
+/**
+ *	Too large to static allocate - if do statically, array drain happens
+ **/
+static void __reply_send_r_roundtrip(struct test_msg_request_t *req, int ret)
+{
+	struct test_msg_signal_t *res = pcn_kmsg_alloc_msg(sizeof(*res));
+	res->header.type = PCN_KMSG_TYPE_SEND_ROUND_RESPONSE;
+	res->header.prio = PCN_KMSG_PRIO_NORMAL;
+	res->remote_ws = req->remote_ws;
+	//res->size = req->size;
+	pcn_kmsg_send(req->header.from_nid, res, sizeof(*res));
+	pcn_kmsg_free_msg(res);
+}
+
+static void process_send_roundtrip_request(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	struct test_msg_request_t *req = work->msg;
+
+	memcpy(dummy_send_buf, &req->payload, req->size);
+
+	__reply_send_r_roundtrip(req, -EINVAL);
+
+	pcn_kmsg_free_msg(req);
+	kfree(work);
+}
+
+static void process_send_roundtrip_response(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	struct test_msg_signal_t *res = work->msg;
+	struct wait_station *ws = wait_station(res->remote_ws);
+
+	ws->private = res;
+	smp_mb();
+	complete(&ws->pendings);
+
+	kfree(work);
+}
+
+/**
+ *	Too large to static allocate - if do statically, array drain happens
+ **/
+static void __reply_send_w_roundtrip(struct test_msg_signal_t *req, int ret)
+{
+	struct test_msg_request_t *res = pcn_kmsg_alloc_msg(sizeof(*res));
+	res->header.type = PCN_KMSG_TYPE_SEND_ROUND_WRITE_RESPONSE;
+	res->header.prio = PCN_KMSG_PRIO_NORMAL;
+	res->remote_ws = req->remote_ws;
+	res->size = req->size;
+
+	DEBUG_CORRECTNESS("%s(): w remote back size %d = "
+			"sizeof(*res)%d - sizeof(res->payload)%d + req->size %d\n",
+			__func__, sizeof(*res) - sizeof(res->payload) + req->size,
+			sizeof(*res), sizeof(res->payload), req->size);
+
+	/* mimic WRITE */
+	memcpy(&res->payload, dummy_send_buf, req->size);
+	pcn_kmsg_send(req->header.from_nid, res,
+					sizeof(*res) - sizeof(res->payload) + req->size);
+	pcn_kmsg_free_msg(res);
+}
+
+static void process_send_roundtrip_w_request(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	struct test_msg_signal_t *req = work->msg;
+
+	__reply_send_w_roundtrip(req, -EINVAL);
+
+	pcn_kmsg_free_msg(req);
+	kfree(work);
+}
+
+static void process_send_roundtrip_w_response(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	struct test_msg_request_t *res = work->msg;
+	struct wait_station *ws = wait_station(res->remote_ws);
+
+	ws->private = res;
+	smp_mb();
+	complete(&ws->pendings);
+
+	kfree(work);
+}
+
+
+// READ
+static void process_handle_test_read_request(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	remote_thread_rdma_rw_t *req = work->msg;
+
+	/* Prepare your *paddr */
+	void* paddr = dummy_pass_buf;
+
+	/* RDMA routine */
+	pcn_kmsg_handle_remote_rdma_request(req, paddr);
+
+	pcn_kmsg_free_msg(req);
+	kfree(work);
+}
+
+static void process_handle_test_read_response(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	remote_thread_rdma_rw_t *res = work->msg;
+	struct wait_station *ws = wait_station(res->remote_ws);
+
+	/* RDMA routine */
+	pcn_kmsg_handle_remote_rdma_request(res, NULL);
+
+	ws->private = res;
+	smp_mb();
+	complete(&ws->pendings);
+
+	kfree(work);
+}
+
+// WRITE
+static void process_handle_test_write_request(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	remote_thread_rdma_rw_t *req = work->msg;
+
+	/* Prepare your *paddr */
+	void* paddr = dummy_pass_buf;
+
+	/* RDMA routine */
+	pcn_kmsg_handle_remote_rdma_request(req, paddr);
+
+	pcn_kmsg_free_msg(req);
+	kfree(work);
+}
+
+static void process_handle_test_write_response(struct work_struct *_work)
+{
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	remote_thread_rdma_rw_t *res = work->msg;
+	struct wait_station *ws = wait_station(res->remote_ws);
+
+	/* RDMA routine */
+	pcn_kmsg_handle_remote_rdma_request(res, NULL);
+
+	ws->private = res;
+	smp_mb();
+	complete(&ws->pendings);
+
+	kfree(work);
+}
+
+
+DEFINE_KMSG_WQ_HANDLER(send_roundtrip_request);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(send_roundtrip_response);
+
+DEFINE_KMSG_WQ_HANDLER(send_roundtrip_w_request);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(send_roundtrip_w_response);
+
+DEFINE_KMSG_WQ_HANDLER(handle_test_read_request);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(handle_test_read_response);
+
+DEFINE_KMSG_WQ_HANDLER(handle_test_write_request);
+DEFINE_KMSG_NONBLOCK_WQ_HANDLER(handle_test_write_response);
+
 /* example - main usage */
 static int __init msg_test_init(void)
 {
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-	int i;
-#endif
 	static struct proc_dir_entry *kmsg_test_proc;
 
 	/* register a proc */
@@ -655,16 +1186,43 @@ static int __init msg_test_init(void)
 		return -ENOMEM;
 	}
 
+	dummy_send_buf = kzalloc(MAX_MSG_LENGTH, GFP_KERNEL);
+	if (!dummy_send_buf) BUG();
+
+	memset(dummy_send_buf, 'S', MAX_MSG_LENGTH/2);
+	memset(dummy_send_buf+(MAX_MSG_LENGTH/2), 'T', MAX_MSG_LENGTH/2);
+
 	/* register callback. also define in <linux/pcn_kmsg.h>  */
-	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_FIRST_TEST,// ping - 
+	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_FIRST_TEST,
 					(pcn_kmsg_cbftn)handle_remote_thread_first_test_request);
-	//pcn_kmsg_register_callback(PCN_KMSG_TYPE_FIRST_TEST_RESPONSE,			// pong - usually a pair but just simply test here
-	//								handle_remote_thread_first_test_response);
 
-	// for experiments - send throughput
+	/* for experimental data - send throughput */
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SELFIE_TEST, handle_self_test);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF,
+								(pcn_kmsg_cbftn)handle_show_RW_dummy_buf);
 
-	smp_mb(); // Just in case
+	/* for experimental data - Round-trip throughput */
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_REQUEST,
+													send_roundtrip_request);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_RESPONSE,
+													send_roundtrip_response);
+
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_WRITE_REQUEST,
+													send_roundtrip_w_request);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_WRITE_RESPONSE,
+													send_roundtrip_w_response);
+
+	/* for experimental data - READ/WRITE throughput */
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST,
+													handle_test_read_request);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
+													handle_test_read_response);
+
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST,
+													handle_test_write_request);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE,
+													handle_test_write_response);
+
 	printk("--- Popcorn messaging layer self-testing proc init done ---\n");
 	printk("--- Usage: sudo echo [NUM] [DEPENDS] > /proc/kmsg_test ---\n");
 	printk("==================== sanity check ====================\n");
@@ -678,21 +1236,35 @@ static int __init msg_test_init(void)
 									"send/recv/READ/WRITE test ---\n");
 	printk("---      ex: echo [NUM] > /proc/kmsg_test---\n");
 	printk("==================== experimental data ====================\n");
-	printk("---  10: single thread send throughput ---\n");
+	printk("---  10: single thread send throughput (one way) ---\n");
 	printk("---      ex: echo 10 [SIZE] > /proc/kmsg_test ---\n");
+	printk("---  11: single thread send throughput (round-trip - "
+												"simulate RDMA READ) ---\n");
+	printk("---      ex: echo 11 [SIZE] [ITER] > /proc/kmsg_test ---\n");
+	printk("---  12: single thread send throughput (round-trip - "
+												"simulate RDMA WRITE) ---\n");
+	printk("---      ex: echo 12 [SIZE] [ITER] > /proc/kmsg_test ---\n");
+	printk("---  13: RDMA READ a page throughput  ---\n");
+	printk("---      ex: echo 13 [SIZE] [ITER] > /proc/kmsg_test ---\n");
+	printk("---  14: RDMA WRITE a page throughput  ---\n");
+	printk("---      ex: echo 14 [SIZE] [ITER] > /proc/kmsg_test ---\n");
+	printk("---  15: RDMA READ invalidation test (10 buf of 8192 size)  ---\n");
+	printk("---      ex: echo 15 > /proc/kmsg_test ---\n");
 	printk("=============== msg_layer usage pattern  ===============\n");
 	printk("---  cat: showing msg_layer usage pattern ---\n");
 	printk("---      ex: cat /proc/kmsg_test ---\n");
 	printk("\n\n\n\n\n\n\n\n");
-
+	smp_mb();
 	return 0;
 }
 
 static void __exit msg_test_exit(void) 
 {
 	printk("\n\n--- Popcorn messaging self testing unloaded! ---\n\n");
-	if(!g_test_buf)
+	if (g_test_buf)
 		kfree(g_test_buf);
+	if (g_test_write_buf)
+		kfree(g_test_write_buf);
 	remove_proc_entry("kmsg_test", NULL);
 }
 
