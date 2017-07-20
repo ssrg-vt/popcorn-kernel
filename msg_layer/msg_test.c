@@ -38,7 +38,7 @@
 #define MAX_ARGS_NUM 10	
 #define TEST1_MSG_COUNT 100000	// specifically for test1 iterations
 
-#define MAX_TESTING_SIZE 125829120 // = 120*1024*1024
+#define MAX_TESTING_SIZE 120*1024*1024
 #define TEST1_PAYLOAD_SIZE 1024
 
 /* proc output args */
@@ -292,20 +292,18 @@ static int handle_self_test(struct pcn_kmsg_message* inc_msg)
 
 
 /* tests */
+/* ----- 1st testing -----
+ * 	[we are here]
+ *	[compose]
+ *  send       ---->   irq (recv)
+ *  [done]
+ */
 static int test1(void)
 {
-	/* ----- 1st testing -----
-	 * 	[we are here]
-	 *	[compose]
-	 *  send       ---->   irq (recv)
-	 *  [done]
-	 */
-
 	int i;
 	static int cnt = 0;
-	
-	remote_thread_first_test_request_t* request; // youTODO: make your own struct 
-	request = pcn_kmsg_alloc_msg(sizeof(*request));
+	remote_thread_first_test_request_t* request =
+										pcn_kmsg_alloc_msg(sizeof(*request));
 	if (request==NULL)
 		return -1;
 
@@ -315,7 +313,7 @@ static int test1(void)
 	/* msg essentials */
 	/* ------------------------------------------------------------ */
 	/* msg dependences */
-	request->example1 = my_nid;					// doesn't solve the problem
+	request->example1 = my_nid;
 	request->example2 = ++cnt;
 	memset(request->msg,'J', sizeof(request->msg));
 	DEBUG_LOG_V("\n%s(): example2(t) %d strlen(request->msg) %d "
@@ -461,9 +459,8 @@ void test_send_throughput(unsigned long long payload_size)
 {
 	int i, dst = 0;
 	struct timeval t1, t2;
-	struct test_msg_t *msg;
+	struct test_msg_t *msg = pcn_kmsg_alloc_msg(sizeof(*msg));
 
-	msg = pcn_kmsg_alloc_msg(sizeof(struct test_msg_t));
 	msg->header.type= PCN_KMSG_TYPE_SELFIE_TEST;
 	memset(msg->payload, 'b', payload_size);
 
@@ -471,11 +468,11 @@ void test_send_throughput(unsigned long long payload_size)
 		dst=1;
 
 	do_gettimeofday(&t1);
-	for (i = 0; i < MAX_TESTING_SIZE/payload_size; i++)
+	for (i=0; i<MAX_TESTING_SIZE/payload_size; i++)
 		pcn_kmsg_send(dst, msg, payload_size + sizeof(msg->header));
 	do_gettimeofday(&t2);
 
-	if ( t2.tv_usec-t1.tv_usec >= 0) {
+	if (t2.tv_usec-t1.tv_usec >= 0) {
 		EXP_DATA("Send one-way: send payload size %llu, "
 							"total size %d, %llu times, spent %ld.%06ld s\n",
 				payload_size, MAX_TESTING_SIZE, MAX_TESTING_SIZE/payload_size, 
@@ -605,8 +602,9 @@ void test_send_read_throughput(unsigned long long payload_size,
 		req->size = payload_size;
 		memcpy(&req->payload, dummy_send_buf, payload_size);
 
-		DEBUG_CORRECTNESS("%s(): r local to remote size %d = "
-			"sizeof(*req)(%d) - sizeof(req->payload)(%d) + payload_size(%d)\n",
+		DEBUG_CORRECTNESS("%s(): r local to remote size %llu = "
+							"sizeof(*req)(%llu) - sizeof(req->payload)(%llu)"
+							" + payload_size(%llu)\n",
 				__func__, sizeof(*req) - sizeof(req->payload) + payload_size,
 							sizeof(*req), sizeof(req->payload), payload_size);
 		
@@ -751,8 +749,8 @@ static ssize_t write_proc(struct file * file,
 	}
 
 #ifdef CONFIG_POPCORN_MSG_STATISTIC
-		printk(KERN_WARNING "You are tracking POPCORN_MSG_STATISTIC "
-				"and geting inaccurate performance data now\n");
+	printk(KERN_WARNING "You are tracking POPCORN_MSG_STATISTIC "
+					"and geting inaccurate performance data now\n");
 #endif
 	
 	KRPRINT_INIT("\n\n[ proc write |%s| cnt %ld ] [%d args] \n", 
@@ -767,7 +765,7 @@ static ssize_t write_proc(struct file * file,
 		struct timeval t2;
 		
 		do_gettimeofday(&t1);
-		while(++cnt<=TEST1_MSG_COUNT)
+		while (++cnt<=TEST1_MSG_COUNT)
 			test1();
 		do_gettimeofday(&t2);
 		if ( t2.tv_usec-t1.tv_usec >= 0) {
@@ -776,7 +774,7 @@ static ssize_t write_proc(struct file * file,
 					TEST1_PAYLOAD_SIZE, MAX_TESTING_SIZE, TEST1_MSG_COUNT,
 								t2.tv_sec-t1.tv_sec, t2.tv_usec-t1.tv_usec);
 		} else {
-			EXP_DATA("Send throughput result: size %d, "
+			EXP_DATA("Send throughput result: send msg size %d, "
 					"total size %d, %d times, spent %ld.%06ld s\n",
 					TEST1_PAYLOAD_SIZE, MAX_TESTING_SIZE, TEST1_MSG_COUNT,
 					t2.tv_sec-t1.tv_sec-1, (1000000-(t1.tv_usec-t2.tv_usec)));
@@ -785,13 +783,13 @@ static ssize_t write_proc(struct file * file,
 	}
 	else if (cmd[0]=='2' && cmd[1]=='\0') {
 		setup_read_buf();
-		while(++cnt<=5000)
+		while (++cnt<=5000)
 			test2();
 		EXP_LOG("test%c done\n\n\n\n", cmd[0]);
 	}
 	else if (cmd[0]=='3' && cmd[1]=='\0') {
 		setup_write_buf();
-		while(++cnt<=5000)
+		while (++cnt<=5000)
 			test3();
 		EXP_LOG("test%c done\n\n\n\n", cmd[0]);
 	}
@@ -1242,14 +1240,14 @@ static int __init msg_test_init(void)
 	printk("---      ex: echo 10 [SIZE] > /proc/kmsg_test ---\n");
 	printk("---  11: single thread send throughput (round-trip - "
 												"simulate RDMA READ) ---\n");
-	printk("---      ex: echo 11 [SIZE] [ITER]> /proc/kmsg_test ---\n");
+	printk("---      ex: echo 11 [SIZE] [ITER] > /proc/kmsg_test ---\n");
 	printk("---  12: single thread send throughput (round-trip - "
 												"simulate RDMA WRITE) ---\n");
 	printk("---      ex: echo 12 [SIZE] [ITER] > /proc/kmsg_test ---\n");
 	printk("---  13: RDMA READ a page throughput  ---\n");
-	printk("---      ex: echo 13 [SIZE] [ITER]> /proc/kmsg_test ---\n");
+	printk("---      ex: echo 13 [SIZE] [ITER] > /proc/kmsg_test ---\n");
 	printk("---  14: RDMA WRITE a page throughput  ---\n");
-	printk("---      ex: echo 14 [SIZE] [ITER]> /proc/kmsg_test ---\n");
+	printk("---      ex: echo 14 [SIZE] [ITER] > /proc/kmsg_test ---\n");
 	printk("---  15: RDMA READ invalidation test (10 buf of 8192 size)  ---\n");
 	printk("---      ex: echo 15 > /proc/kmsg_test ---\n");
 	printk("=============== msg_layer usage pattern  ===============\n");
