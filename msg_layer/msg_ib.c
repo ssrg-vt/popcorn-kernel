@@ -58,14 +58,12 @@
  *			replace addr lookup with Sang-Hoon's implementation
  *			test htonll and remove #define htonll(x) cpu_to_be64((x))
  *			test ntohll and remove #define ntohll(x) cpu_to_be64((x))
- * 			make parameters in krping_create_qp global
+ * 			make parameters in __krping_create_qp global
  *			cb -> _cb
  *			doesn't check RW size
  */
 
 // features been developed
-#define SMART_IB_MSG 0
-#define CONFIG_POPCORN_IBWR_PAGE 0
 #define DEMON_POST_RECV_WCS 0
 
 #define POPCORN_DEBUG_MSG_IB 0
@@ -111,7 +109,7 @@
 // Attention:
 // [x.xxxxxx] mlx5_core 0000:01:00.0: swiotlb buffer is full (sz: 8388608 bytes)
 
-/* for prevent from long staying in INT handler, krping_cq_event_handler() */
+/* for prevent from long staying in INT handler, __krping_cq_event_handler() */
 #define RECV_WQ_THRESHOLD 10
 #define LISTEN_BACKLOG 99
 
@@ -140,7 +138,7 @@ atomic_t g_send_ticket;
 atomic_t g_recv_ticket;
 #endif
 
-#define MAX_MSG_LENGTH 65536	// max msg payload size supported by msg_test.c
+#define MAX_MSG_LENGTH PCN_KMSG_LONG_PAYLOAD_SIZE
 
 /* rdma RW testing buffers */
 extern char* dummy_act_buf;
@@ -189,28 +187,26 @@ struct krping_cb {
 	u8 key;
 
 	/* Send buffer */
-	struct ib_send_wr sq_wr;			/* send work requrest record */
+	struct ib_send_wr sq_wr;			/* send work requrest info for send */
 	struct ib_sge send_sgl;
 	struct pcn_kmsg_message send_buf;	/* single send buf - msg unit */
 	u64 send_dma_addr;					/* for send buffer */
 	u64 send_mapping;					/* for unmapping */
 
 	/* RDMA common */
-	struct ib_reg_wr reg_mr_wr_act;	/* can reg be placed with rdma?TODO */
+	struct ib_reg_wr reg_mr_wr_act;		/* can reg be placed with rdma (name)?TODO */
 	struct ib_reg_wr reg_mr_wr_pass;
 	struct ib_send_wr inv_wr_act;
 	struct ib_send_wr inv_wr_pass;
 	struct ib_mr *reg_mr_act;
 	struct ib_mr *reg_mr_pass;
 
-	struct ib_rdma_wr rdma_sq_wr;	/* rdma work request record */	/* TODO: check 1 or 2*/
-	struct ib_sge rdma_sgl;			/* rdma single SGE */	/* TODO: check 1 or 2*/
+	struct ib_rdma_wr rdma_sq_wr;	/* rdma work request info for WR */
+	struct ib_sge rdma_sgl;			/* rdma single SGE */
 
-	uint32_t remote_rkey;		/* temporary saving remote RKEY */	/* TODO: check 1 or 2*/
-	uint64_t remote_addr;		/* temporary saving remote TO */	/* TODO: check 1 or 2*/
-	uint32_t remote_len;		/* temporary saving remote LEN */	/* TODO: check 1 or 2*/
-
-	//int local_dma_lkey;			/* use 0 for lkey */ //TODO remote
+	uint32_t remote_rkey;		/* temporary saving remote RKEY */
+	uint64_t remote_addr;		/* temporary saving remote TO */
+	uint32_t remote_len;		/* temporary saving remote LEN */
 
 	/* RDMA buf for active */
 	u64 active_dma_addr;	 	/* for active buffer */
@@ -252,11 +248,11 @@ struct krping_cb {
 	struct mutex active_mutex;
 	struct mutex passive_mutex;	/* passive lock*/
 	struct mutex qp_mutex;		/* protect ib_post_send(qp) */
-	atomic_t active_cnt;		/* used for cond/signalling */
-	atomic_t passive_cnt;		/* used for cond/signalling */
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	/* Dbging sync problem */
+	atomic_t active_cnt;		/* used for cond/signalling */
+	atomic_t passive_cnt;		/* used for cond/signalling */
 	atomic_t g_all_ticket;
 	struct krping_stats stats;
 #endif
@@ -273,29 +269,10 @@ struct krping_cb *cb_listen;
 /* For RECV wc_struct queue */
 spinlock_t wcs_q_mutex[MAX_NUM_NODES];
 struct completion wcs_comp[MAX_NUM_NODES];
-static struct wc_struct wcs_wait_q[MAX_NUM_CHANNELS];	// Sentinel
+static struct wc_struct wcs_wait_q[MAX_NUM_CHANNELS];	/* Sentinel */
 
-/* IB utilities */
-int ib_kmsg_send_long(unsigned int dest_cpu,
-						struct pcn_kmsg_message *lmsg,
-						unsigned int msg_size);
-int __ib_kmsg_send_long(unsigned int dest_cpu,
-						struct pcn_kmsg_message *lmsg,
-						unsigned int msg_size);
-int ib_kmsg_send_rdma(unsigned int dest_cpu,
-						remote_thread_rdma_rw_t *lmsg,
-						unsigned int msg_size,
-						unsigned int rw_size);
-int ib_kmsg_send_smart(unsigned int dest_cpu,
-						struct pcn_kmsg_message *lmsg,
-						unsigned int msg_size);
-static int ib_kmsg_recv_long(struct krping_cb *cb, 
-								struct wc_struct *wcs);
-u32 krping_rdma_rkey(struct krping_cb *cb, u64 buf, 
-						int post_inv, int rdma_len);
-u32 krping_rdma_rkey_passive(struct krping_cb *cb, u64 buf, 
-						int post_inv,int rdma_len);
-static int krping_create_qp(struct krping_cb *cb);
+/* functions */
+static void __krping_cq_event_handler(struct ib_cq *cq, void *ctx);
 
 /* Popcorn utilities */
 static int __init initialize(void);
@@ -315,129 +292,7 @@ typedef struct {
 } pcn_kmsg_work_t;
 
 
-/* IB utility functions for supporting dynamic mapping
- *		specifically for RW user suash as page migration
- */
-// get a page
-void* ib_alloc_page(void)
-{
-	void *page;
-	page = alloc_page(GFP_HIGHUSER_MOVABLE);
-	return page;
-}
-
-/*
- * cannot sleep because of lock_page()
-*/
-void* ib_kmap_page(void* page)
-{
-	void* addr;
-	get_page(page);
-	lock_page(page);
-	addr = kmap(page); // kmap_atomic doesn't work
-	if (!addr)
-		BUG();
-	return addr;
-}
-
-u64 ib_map_act_page(void* paddr, int conn_no)
-{
-	struct krping_cb *_cb = cb[conn_no];
-	u64 dma_addr = dma_map_single(_cb->pd->device->dma_device,
-												paddr, PAGE_SIZE,
-												DMA_BIDIRECTIONAL);
-	pci_unmap_addr_set(_cb, active_rdma_mapping, dma_addr);
-	return dma_addr;
-}
-
-u64 ib_map_act(void* paddr, int conn_no, int rw_size)
-{
-	struct krping_cb *_cb = cb[conn_no];
-	u64 dma_addr = dma_map_single(_cb->pd->device->dma_device,
-												  paddr, rw_size,
-												  DMA_BIDIRECTIONAL);
-	pci_unmap_addr_set(_cb, active_rdma_mapping, dma_addr);
-	return dma_addr;
-}
-
-u64 ib_map_pass_page(void* paddr, int conn_no)
-{
-	struct krping_cb *_cb = cb[conn_no];
-	u64 dma_addr = dma_map_single(_cb->pd->device->dma_device,
-											  paddr, PAGE_SIZE,
-											  DMA_BIDIRECTIONAL);
-	pci_unmap_addr_set(_cb, passive_rdma_mapping, dma_addr);
-	return dma_addr;
-}
-
-u64 ib_map_pass(void* paddr, int conn_no, int rw_size)
-{
-	struct krping_cb *_cb = cb[conn_no];
-	u64 dma_addr = dma_map_single(_cb->pd->device->dma_device,
-											  paddr, rw_size,
-											  DMA_BIDIRECTIONAL);
-	pci_unmap_addr_set(_cb, passive_rdma_mapping, dma_addr);
-	return dma_addr;
-}
-
-void unmap_act_page(int conn_no)
-{
-	struct krping_cb *_cb = cb[conn_no];
-
-	DEBUG_LOG_V("act: unmap page\n");
-	dma_unmap_single(_cb->pd->device->dma_device,
-						pci_unmap_addr(_cb, active_rdma_mapping),
-										PAGE_SIZE, DMA_BIDIRECTIONAL);
-
-	DEBUG_LOG_V("act: release page\n");
-	kunmap(_cb->act_page);
-
-	DEBUG_LOG_V("act: put_page\n");
-	unlock_page(_cb->act_page);
-	put_page(_cb->act_page);
-	// No need to release a real page
-}
-
-void unmap_act(int conn_no, int rw_size)
-{
-	struct krping_cb *_cb = cb[conn_no];
-
-	DEBUG_LOG_V("act: unmap\n");
-	dma_unmap_single(_cb->pd->device->dma_device,
-						pci_unmap_addr(_cb, active_rdma_mapping),
-										rw_size, DMA_BIDIRECTIONAL);
-}
-
-void unmap_pass_page(int conn_no)
-{
-	struct krping_cb *_cb = cb[conn_no];
-
-	DEBUG_LOG_V("pass: unmap page\n");
-	dma_unmap_single(_cb->pd->device->dma_device,
-						pci_unmap_addr(_cb, passive_rdma_mapping),
-									PAGE_SIZE, DMA_BIDIRECTIONAL);
-
-	DEBUG_LOG_V("pass: release_page\n");
-	kunmap(_cb->pass_page);
-
-	DEBUG_LOG_V("pass: put_page\n");
-	unlock_page(_cb->pass_page);
-	put_page(_cb->pass_page);
-	// release page !!!!!!!!
-	// No need to release a real page
-}
-
-void unmap_pass(int conn_no, int rw_size)
-{
-	struct krping_cb *_cb = cb[conn_no];
-
-	DEBUG_LOG_V("pass: unmap pass buf\n");
-	dma_unmap_single(_cb->pd->device->dma_device,
-						pci_unmap_addr(_cb, passive_rdma_mapping),
-										rw_size, DMA_BIDIRECTIONAL);
-}
-
-
+/* Reuse recv wcs */
 static void __enq_wcs(struct wc_struct *strc, int index)
 {
 	spin_lock(&wcs_q_mutex[index]);
@@ -458,7 +313,7 @@ static struct wc_struct *__dq_wcs(int index)
         return NULL;
     } else {
         tmp = list_first_entry(&wcs_wait_q[index].list,
-										struct wc_struct, list);
+								struct wc_struct, list);
         list_del(wcs_wait_q[index].list.next);
 		spin_unlock(&wcs_q_mutex[index]);
         return tmp;
@@ -466,11 +321,11 @@ static struct wc_struct *__dq_wcs(int index)
 }
 
 
-static int krping_cma_event_handler(struct rdma_cm_id *cma_id,
+static int __krping_cma_event_handler(struct rdma_cm_id *cma_id,
 										struct rdma_cm_event *event)
 {
 	int ret;
-	struct krping_cb *_cb = cma_id->context; // !! use cm_id to retrive cb
+	struct krping_cb *_cb = cma_id->context; /* use cm_id to retrive cb */
 	static int cma_event_cnt = 0, conn_event_cnt = 0;
 	KRPRINT_INIT("[[[[[external]]]]] conn_no %d (%s) >>>>>>>> %s(): "
 			  "cma_event type %d cma_id %p (%s)\n", _cb->conn_no,
@@ -498,7 +353,8 @@ static int krping_cma_event_handler(struct rdma_cm_id *cma_id,
 		atomic_set(&_cb->state, CONNECT_REQUEST);
 		KRPRINT_INIT("< ----CONNECT_REQUEST----: node %d _cb->child_cm_id %p = "
 						"cma_id(external) >\n", _cb->conn_no, _cb->child_cm_id);
-		_cb->child_cm_id = cma_id; // distributed to other connections
+		/* distributed to other connections */
+		_cb->child_cm_id = cma_id;
 		KRPRINT_INIT("< ----CONNECT_REQUEST----: node %d _cb->child_cm_id %p = "
 						"cma_id(external) >\n", _cb->conn_no, _cb->child_cm_id);
 		wake_up_interruptible(&_cb->sem);
@@ -560,10 +416,9 @@ static int krping_cma_event_handler(struct rdma_cm_id *cma_id,
 }
 
 /*
- * Attention: can be in INT
  * Create a recv_sql/rq_we
  */
-struct ib_recv_wr* create_recv_wr(int conn_no, bool is_int)
+struct ib_recv_wr* __create_recv_wr(int conn_no, bool is_int)
 {
 	struct krping_cb *_cb = cb[conn_no];
 	struct pcn_kmsg_message *element_addr;
@@ -572,65 +427,50 @@ struct ib_recv_wr* create_recv_wr(int conn_no, bool is_int)
 	struct wc_struct *wcs;
 	u64 element_dma_addr;
 
-	if (likely(is_int))
-		element_addr = kmalloc(sizeof(*element_addr), GFP_ATOMIC);
-	else
-		element_addr = kmalloc(sizeof(*element_addr), GFP_KERNEL);
-
+	element_addr = kmalloc(sizeof(*element_addr), GFP_KERNEL);
 	if (!element_addr) {
 		printk(KERN_ERR "recv_buf malloc failed\n");
 		BUG();
 	}
 
-	if (likely(is_int))
-		_recv_sgl = kmalloc(sizeof(*_recv_sgl), GFP_ATOMIC);
-	else
-		_recv_sgl = kmalloc(sizeof(*_recv_sgl), GFP_KERNEL);
+	_recv_sgl = kmalloc(sizeof(*_recv_sgl), GFP_KERNEL);
 	if (!_recv_sgl) {
 		printk(KERN_ERR "sgl recv_buf malloc failed\n");
 		BUG();
 	}
 
-	if (likely(is_int))
-		_rq_wr =  kmalloc(sizeof(*_rq_wr), GFP_ATOMIC);
-	else
-		_rq_wr =  kmalloc(sizeof(*_rq_wr), GFP_KERNEL);
+	_rq_wr =  kmalloc(sizeof(*_rq_wr), GFP_KERNEL);
 	if (!_rq_wr) {
 		printk(KERN_ERR "rq_wr recv_buf malloc failed\n");
 		BUG();
 	}
 
-	if (likely(is_int))
-		wcs = kmalloc(sizeof(*wcs), GFP_ATOMIC);
-	else
-		wcs = kmalloc(sizeof(*wcs), GFP_KERNEL);
+	wcs = kmalloc(sizeof(*wcs), GFP_KERNEL);
 	if (!wcs) {
 		printk(KERN_ERR "wcs malloc failed\n");
 		BUG();
 	}
 
-	// map buf to ib addr space
+	/* map buf to ib addr space */
 	element_dma_addr = dma_map_single(_cb->pd->device->dma_device,
-									  element_addr, _cb->recv_size,
-												DMA_BIDIRECTIONAL);
+						  element_addr, _cb->recv_size, DMA_BIDIRECTIONAL);
 
-	// set up sgl
+	/* set up sgl */
 	_recv_sgl->length = _cb->recv_size;
 	_recv_sgl->addr = element_dma_addr;
 	_recv_sgl->lkey = _cb->pd->local_dma_lkey;
 
-	// set up rq_wr
+	/* set up rq_wr */
 	_rq_wr->sg_list = _recv_sgl;
 	_rq_wr->num_sge = 1;
 	_rq_wr->wr_id = (u64)wcs;
 	_rq_wr->next = NULL;
 
-	// save all address to release
+	/* save all address to release */
 	wcs->element_addr = element_addr;
 	wcs->recv_sgl = _recv_sgl;
 	wcs->rq_wr = _rq_wr;
 	INIT_LIST_HEAD(&wcs->list);
-
 
 	//MSGDPRINTK("_rq_wr %p _cb->recv_size %d element_addr %p\n",
 	//				(void*)_rq_wr, _cb->recv_size, (void*)element_addr);
@@ -638,7 +478,1508 @@ struct ib_recv_wr* create_recv_wr(int conn_no, bool is_int)
 }
 
 
-static void krping_cq_event_handler(struct ib_cq *cq, void *ctx)
+static int __krping_connect_client(struct krping_cb *_cb)
+{
+	int ret;
+	struct rdma_conn_param conn_param;
+
+	KRPRINT_INIT("->%s();\n", __func__);
+
+	memset(&conn_param, 0, sizeof conn_param);
+	conn_param.responder_resources = g_conn_responder_resuorces;
+	conn_param.initiator_depth = g_conn_initiator_depth;
+	conn_param.retry_count = g_conn_retry_count;
+
+	ret = rdma_connect(_cb->cm_id, &conn_param);
+	if (ret) {
+		printk(KERN_ERR "rdma_connect error %d\n", ret);
+		return ret;
+	}
+
+	wait_event_interruptible(_cb->sem,
+							atomic_read(&_cb->state) == CONNECTED);
+	if (atomic_read(&_cb->state) == ERROR) {
+		printk(KERN_ERR "wait for CONNECTED state %d\n",
+								atomic_read(&_cb->state));
+		return -1;
+	}
+
+	KRPRINT_INIT("rdma_connect successful\n");
+	return 0;
+}
+
+static void __fill_sockaddr(struct sockaddr_storage *sin, struct krping_cb *_cb)
+{
+	memset(sin, 0, sizeof(*sin));
+
+	if (!_cb->server) {
+		/* client: load as usuall (ip=remote) */
+		if (_cb->addr_type == AF_INET) {
+			struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
+			sin4->sin_family = AF_INET;
+			memcpy((void *)&sin4->sin_addr.s_addr, _cb->addr, 4);
+			sin4->sin_port = _cb->port;
+		}
+		KRPRINT_INIT("client IP fillup _cb->addr %s _cb->port %d\n",
+												_cb->addr, _cb->port);
+	} else {
+		/* cb->server: load from global (ip=itself) */
+		if (cb[my_nid]->addr_type == AF_INET) {
+			struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
+			sin4->sin_family = AF_INET;
+			memcpy((void *)&sin4->sin_addr.s_addr, cb[my_nid]->addr, 4);
+			sin4->sin_port = cb[my_nid]->port;
+			KRPRINT_INIT("server IP fillup cb[my_nid]->addr %s"
+										" cb[my_nid]->port %d\n",
+										cb[my_nid]->addr, cb[my_nid]->port);
+		}
+	}
+}
+
+/*
+ *	  IB/mlx5: Remove support for IB_DEVICE_LOCAL_DMA_LKEY (FASTREG)
+ */
+static int __reg_supported(struct ib_device *dev)
+{
+	int ret;
+	struct ib_device_attr device_attr;
+	u64 needed_flags = IB_DEVICE_MEM_MGT_EXTENSIONS |
+						IB_DEVICE_LOCAL_DMA_LKEY;
+	ret = ib_query_device(dev, &device_attr);
+
+	MSGDPRINTK("%s(): IB_DEVICE_MEM_WINDOW %d support?%d\n",
+				__func__, IB_DEVICE_MEM_WINDOW,
+				device_attr.device_cap_flags&IB_DEVICE_MEM_WINDOW);
+	MSGDPRINTK("%s(): IB_DEVICE_MEM_MGT_EXTENSIONS %d\n",
+				__func__, IB_DEVICE_MEM_MGT_EXTENSIONS);
+	MSGDPRINTK("%s(): IB_DEVICE_LOCAL_DMA_LKEY %d\n",
+				__func__, IB_DEVICE_LOCAL_DMA_LKEY);
+	MSGDPRINTK("%s(): (device_attr.device_cap_flags & needed_flags) %llx\n",
+				__func__, (device_attr.device_cap_flags & needed_flags));
+
+	if ((device_attr.device_cap_flags & needed_flags) != needed_flags) {
+		printk(KERN_ERR "Fastreg not supported - device_cap_flags 0x%llx\n",
+											(u64)device_attr.device_cap_flags);
+		return 1;
+	}
+	MSGDPRINTK("Fastreg/local_dma_lkey supported - device_cap_flags 0x%llx\n",
+											(u64)device_attr.device_cap_flags);
+	return 1;
+}
+
+static int __krping_bind_server(struct krping_cb *cb)
+{
+	struct sockaddr_storage sin;
+	int ret;
+
+	__fill_sockaddr(&sin, cb);
+
+	ret = rdma_bind_addr(cb->cm_id, (struct sockaddr *)&sin);
+	if (ret) {
+		printk(KERN_ERR "rdma_bind_addr error %d\n", ret);
+		return ret;
+	}
+
+	ret = rdma_listen(cb->cm_id, LISTEN_BACKLOG);
+	if (ret) {
+		printk(KERN_ERR "rdma_listen failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static void __setup_send_wr(struct krping_cb *cb,
+							struct pcn_kmsg_message *lmsg)
+{
+	cb->send_dma_addr = dma_map_single(cb->pd->device->dma_device,
+							lmsg, lmsg->header.size,
+							DMA_BIDIRECTIONAL);
+	pci_unmap_addr_set(cb, send_mapping, cb->send_dma_addr);
+
+	/* Send buffer */
+	cb->send_sgl.addr = cb->send_dma_addr;
+	cb->send_sgl.length = lmsg->header.size;
+
+	MSGPRINTK("@@@ <send addr (synamical mapping)>\n");
+	MSGDPRINTK("@@@ lmsg = %p\n", (void*)lmsg);
+	MSGDPRINTK("@@@ cb->send_sgl.addr = %p\n", (void*)cb->send_sgl.addr);
+								// user vaddr (O) mapped to the next line
+	//MSGDPRINTK("@@@ sizeof(cb->send_buf) = %ld\n", sizeof cb->send_buf);
+	//MSGDPRINTK("@@@ sizeof(*lmsg) = %ld (X)\n", sizeof(*lmsg));
+	//MSGDPRINTK("@@@ strlen(lmsg) = %ld (X)\n", strlen((char*)lmsg));
+	MSGDPRINTK("@@@ lmsg->header.size = %d (O)\n", lmsg->header.size);
+								// kernel addr (X) (mapped to each other)
+	MSGDPRINTK("\n");
+}
+
+/* set up sgl, used for rdma */
+static void __krping_setup_wr(struct krping_cb *cb)
+{
+	int i=0, ret;
+
+	/* Pre-post RECV buffers */
+	MSGPRINTK("\n\n\n->%s(): \n", __func__);
+	MSGPRINTK("@@@ 2 cb->recv_size = %d\n", cb->recv_size);
+	for(i=0;i<MAX_RECV_WR;i++) {
+		struct ib_recv_wr *bad_wr;
+		struct ib_recv_wr *_rq_wr = __create_recv_wr(cb->conn_no, false);
+
+		if (i<5 || i>(MAX_RECV_WR-5)) {
+			MSGPRINTK("_rq_wr %p cb->conn_no %d recv_size %d wr_id %p\n",
+			(void*)_rq_wr, cb->conn_no, cb->recv_size, (void*)_rq_wr->wr_id);
+		}
+
+		/* 90% posted, 10% reserved */
+		if (i <= MAX_RECV_WR*90/100) {
+			ret = ib_post_recv(cb->qp, _rq_wr, &bad_wr);
+			if (ret) {
+				printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
+				BUG();
+			}
+		} else {
+			__enq_wcs((struct wc_struct *)_rq_wr->wr_id, cb->conn_no);
+		}
+	}
+
+	/* send buffer: unchanged parameters */
+	//cb->send_sgl.lkey = cb->qp->device->local_dma_lkey; // A BUG from kprint.c
+	//cb->send_sgl.lkey = cb->reg_mr_act->lkey;			// A BUG from kprint.c
+	cb->send_sgl.lkey = cb->pd->local_dma_lkey;			// Fixed the BUG (O)
+	MSGDPRINTK("@@@ <lkey>\n");
+	MSGDPRINTK("@@@ lkey=%d from ../mad.c (ctx->pd->local_dma_lkey)\n",
+							cb->pd->local_dma_lkey);
+	MSGDPRINTK("@@@ cb->qp->device->local_dma_lkey = %d = 0\n",
+				cb->qp->device->local_dma_lkey);
+	MSGDPRINTK("@@@ lkey=%d from client/server example(cb->mr->lkey)\n",
+							cb->reg_mr_act->lkey);
+
+	/* normal send/recv */
+	cb->sq_wr.opcode = IB_WR_SEND;
+	cb->sq_wr.send_flags = IB_SEND_SIGNALED;
+	/* sge */
+	cb->sq_wr.sg_list = &cb->send_sgl;
+	cb->sq_wr.num_sge = 1;
+
+	/*
+	send_flags: Extra attributes for the Send Request:
+	- IB_SEND_FENCE: Before performing this operation,
+					wait until the processing of prior Send Requests has ended.
+	- IB_SEND_SIGNALED: If the QP was created with selective signaling,
+						when the processing of this Send Request is ended,
+						a Work Completion will be generated.
+	- IB_SEND_SOLICITED: Mark that a Solicited event will be created
+							in the remote side.
+	- IB_SEND_INLINE: Post this Send Request as inline—that is,
+						let the low-level driver read the memory buffers in
+						if sg_list instead of the RDMA device; this may increase
+						the latency.
+	- IB_SEND_IP_CSUM: Send an IPoIB message and calculate the IP checksum in HW
+						(checksum offload).
+	*/
+
+	/* READ/WRITE passive buf are allocated dynamically in other places
+	 *		active: active_dma_addr; passive: passive_dma_addr
+	 *		used for seting up rdma_sgl.addr
+	 *		e.g. cb->rdma_sgl.addr = cb->passive_dma_addr;
+	 */
+
+	/* Common for RW - RW wr */
+	cb->rdma_sq_wr.wr.sg_list = &cb->rdma_sgl;
+	cb->rdma_sq_wr.wr.send_flags = IB_SEND_SIGNALED;
+	cb->rdma_sq_wr.wr.num_sge = 1;
+
+	/*
+	 * A chain of 2 WRs, INVALDATE_MR + REG_MR.
+	 * both unsignaled (no completion).  The client uses them to reregister
+	 * the rdma buffers with a new key each iteration.
+	 */
+	cb->reg_mr_wr_act.wr.opcode = IB_WR_REG_MR;		/* (legacy:fastreg) */
+	cb->reg_mr_wr_act.mr = cb->reg_mr_act;
+
+	cb->reg_mr_wr_pass.wr.opcode = IB_WR_REG_MR;	/* (legacy:fastreg) */
+	cb->reg_mr_wr_pass.mr = cb->reg_mr_pass;
+
+
+	/*
+	 * 1. invalidate Memory Window
+	 * 2. then register this new key to mr
+	 */
+	cb->inv_wr_act.opcode = IB_WR_LOCAL_INV;
+	cb->inv_wr_act.next = &cb->reg_mr_wr_act.wr;
+
+	cb->inv_wr_pass.next = &cb->reg_mr_wr_pass.wr;
+	cb->inv_wr_pass.opcode = IB_WR_LOCAL_INV;
+	/*  The reg mem_mode uses a reg mr on the client side for the (We are)
+	 *  rw_passive_buf and rw_active_buf buffers.  Each time the client will 
+	 *  advertise one of these buffers, it invalidates the previous registration 
+	 *  and fast registers the new buffer with a new key.
+	 *
+	 *  If the server_invalidate	(We are not)
+	 *  option is on, then the server will do the invalidation via the
+	 * "go ahead" messages using the IB_WR_SEND_WITH_INV opcode. Otherwise the
+	 * client invalidates the mr using the IB_WR_LOCAL_INV work request.
+	 */
+
+	return;
+}
+
+static int __krping_create_qp(struct krping_cb *cb)
+{
+	int ret;
+	struct ib_qp_init_attr init_attr;
+
+	memset(&init_attr, 0, sizeof(init_attr));
+
+	/* send and recv queue depth */
+	init_attr.cap.max_send_wr = cb->txdepth;
+	init_attr.cap.max_recv_wr = MAX_RECV_WR*2;
+
+	/* For flush_qp() */
+	init_attr.cap.max_send_wr++;
+	init_attr.cap.max_recv_wr++;
+
+	init_attr.cap.max_recv_sge = 1;
+	init_attr.cap.max_send_sge = 1;
+	init_attr.qp_type = IB_QPT_RC;
+
+	/* send and recv use a same cq */
+	init_attr.send_cq = cb->cq;
+	init_attr.recv_cq = cb->cq;
+	init_attr.sq_sig_type = IB_SIGNAL_REQ_WR;
+
+	/*	The IB_SIGNAL_REQ_WR flag means that not all send requests posted to
+	 *	the send queue will generate a completion -- only those marked with
+	 *	the IB_SEND_SIGNALED flag.  However, the driver can't free a send
+	 *	request from the send queue until it knows it has completed, and the
+	 *	only way for the driver to know that is to see a completion for the
+	 *	given request or a later request.  Requests on a queue always complete
+	 *	in order, so if a later request completes and generates a completion,
+	 *	the driver can also free any earlier unsignaled requests)
+	 */
+
+	if (cb->server) {
+		ret = rdma_create_qp(cb->child_cm_id, cb->pd, &init_attr);
+		if (!ret)
+			cb->qp = cb->child_cm_id->qp;
+	} else {
+		ret = rdma_create_qp(cb->cm_id, cb->pd, &init_attr);
+		if (!ret)
+			cb->qp = cb->cm_id->qp;
+	}
+
+	return ret;
+}
+
+static int __krping_setup_qp(struct krping_cb *cb, struct rdma_cm_id *cm_id)
+{
+	int ret;
+	struct ib_cq_init_attr attr = {0};
+
+	MSGPRINTK("\n->%s();\n", __func__);
+
+	//cb->pd = ib_alloc_pd(cm_id->device, 0);
+	cb->pd = ib_alloc_pd(cm_id->device);
+	if (IS_ERR(cb->pd)) {
+		printk(KERN_ERR "ib_alloc_pd failed\n");
+		return PTR_ERR(cb->pd);
+	}
+	MSGPRINTK("created pd %p\n", cb->pd);
+
+	attr.cqe = cb->txdepth * SEND_DEPTH;
+	attr.comp_vector = INT_MASK;
+	cb->cq = ib_create_cq(cm_id->device,
+							__krping_cq_event_handler, NULL, cb, &attr);
+	if (IS_ERR(cb->cq)) {
+		printk(KERN_ERR "ib_create_cq failed\n");
+		ret = PTR_ERR(cb->cq);
+		goto err1;
+	}
+	MSGPRINTK("created cq %p task\n", cb->cq);
+
+	/* INT flag/mask raised */
+	ret = ib_req_notify_cq(cb->cq, IB_CQ_NEXT_COMP);
+	if (ret) {
+		printk(KERN_ERR "ib_create_cq failed\n");
+		goto err2;
+	}
+
+	ret = __krping_create_qp(cb);
+	if (ret) {
+		printk(KERN_ERR "krping_create_qp failed: %d\n", ret);
+		goto err2;
+	}
+	MSGPRINTK("created qp %p\n", cb->qp);
+	return 0;
+err2:
+	ib_destroy_cq(cb->cq);
+err1:
+	ib_dealloc_pd(cb->pd);
+	return ret;
+}
+
+// init all buffers < 1.pd->cq->qp 2.[mr] 3.xxx >
+static int __krping_setup_buffers(struct krping_cb *cb)
+{
+	int ret;
+	MSGPRINTK("\n->%s();\n", __func__);
+	MSGPRINTK("__krping_setup_buffers called on cb %p\n", cb);
+
+	/* No send READ WRITE buffer is allocated statically */
+
+	/* recv wq has been changed to be dinamically allocated */
+	
+	cb->page_list_len = (((cb->rdma_size - 1) & PAGE_MASK) + PAGE_SIZE)
+															>> PAGE_SHIFT;
+
+	KRPRINT_INIT("cb->rdma_size %lu, /PAGESIZE, cb->page_list_len %d \n",
+										cb->rdma_size, cb->page_list_len);
+	/* mr for active */
+	cb->reg_mr_act = ib_alloc_mr(cb->pd, IB_MR_TYPE_MEM_REG, cb->page_list_len);
+													// fill out lkey and rkey
+	/* mr for passive */
+	cb->reg_mr_pass = ib_alloc_mr(cb->pd, IB_MR_TYPE_MEM_REG,
+														 cb->page_list_len);
+
+	if (IS_ERR(cb->reg_mr_act)) {
+		ret = PTR_ERR(cb->reg_mr_act);
+		MSGPRINTK("reg_mr_act failed %d\n", ret);
+		goto bail;
+	}
+	if (IS_ERR(cb->reg_mr_pass)) {
+		ret = PTR_ERR(cb->reg_mr_pass);
+		MSGPRINTK("reg_mr_pass failed %d\n", ret);
+		goto bail;
+	}
+
+	MSGDPRINTK("\n@@@ after mr\n");
+	MSGDPRINTK("@@@ reg rkey %d page_list_len %u\n",
+										cb->reg_mr_act->rkey, cb->page_list_len);
+	MSGDPRINTK("@@@ 1 cb->reg_mr_act->lkey %d from mr \n", cb->reg_mr_act->lkey);
+	MSGDPRINTK("@@@ 1 correct lkey=%d (ref: ./drivers/infiniband/core/mad.c )"
+				"(ctx->pd->local_dma_lkey)\n", cb->pd->local_dma_lkey);
+																//4xxx dynamic
+	__krping_setup_wr(cb);
+	MSGPRINTK("allocated & registered buffers done!\n");
+	MSGPRINTK("\n\n");
+	return 0;
+bail:
+	if (cb->reg_mr_act && !IS_ERR(cb->reg_mr_act))
+		ib_dereg_mr(cb->reg_mr_act);
+	if (cb->reg_mr_pass && !IS_ERR(cb->reg_mr_pass))
+		ib_dereg_mr(cb->reg_mr_pass);
+	if (cb->rdma_mr && !IS_ERR(cb->rdma_mr))
+		ib_dereg_mr(cb->rdma_mr);
+	if (cb->dma_mr && !IS_ERR(cb->dma_mr))
+		ib_dereg_mr(cb->dma_mr);
+	return ret;
+}
+
+
+static int __krping_accept(struct krping_cb *_cb)
+{
+	int ret;
+	struct rdma_conn_param conn_param;
+	KRPRINT_INIT("->%s(); _cb->conn_%d accepting a connection request...\n",
+														__func__, _cb->conn_no);
+	memset(&conn_param, 0, sizeof conn_param);
+	conn_param.responder_resources = 1;
+	conn_param.initiator_depth = 1;
+
+	ret = rdma_accept(_cb->child_cm_id, &conn_param);
+	if (ret) {
+		printk(KERN_ERR "rdma_accept error: %d\n", ret);
+		return ret;
+	}
+
+	KRPRINT_INIT("->%s(): blocking wating for a signal %d..........\n",
+											__func__, _cb->conn_no);
+	wait_event_interruptible(_cb->sem,
+								atomic_read(&_cb->state) == CONNECTED);
+													// have a look child_cm_id
+	if (atomic_read(&_cb->state) == ERROR) {
+		printk(KERN_ERR "wait for CONNECTED state %d\n",
+								atomic_read(&_cb->state));
+		return -1;
+	}
+	KRPRINT_INIT("->%s(): got the signal !!!!(GOOD)!!!!!!! _cb->state = %d \n",
+										__func__, atomic_read(&_cb->state));
+
+	set_popcorn_node_online(_cb->conn_no, true);
+	return 0;
+}
+
+static void __krping_free_buffers(struct krping_cb *cb)
+{
+	MSGPRINTK("%s(): called on cb %p\n", __func__, cb);
+
+	if (cb->dma_mr)
+		ib_dereg_mr(cb->dma_mr);
+	if (cb->rdma_mr)
+		ib_dereg_mr(cb->rdma_mr);
+	if (cb->start_mr)
+		ib_dereg_mr(cb->start_mr);
+	if (cb->reg_mr_act)
+		ib_dereg_mr(cb->reg_mr_act);
+	if (cb->reg_mr_pass)
+		ib_dereg_mr(cb->reg_mr_pass);
+}
+
+static void __krping_free_qp(struct krping_cb *cb)
+{
+	ib_destroy_qp(cb->qp);
+	ib_destroy_cq(cb->cq);
+	ib_dealloc_pd(cb->pd);
+}
+
+#if DEMON_POST_RECV_WCS
+static int __recv_post(void* arg0)
+{
+	struct krping_cb *_cb = arg0;
+	struct ib_recv_wr *bad_wr;
+	int ret;
+
+	while (1) {
+		struct wc_struct *_wcs = __dq_wcs(_cb->conn_no);
+		if(unlikely(!_wcs))
+			break;
+
+		ret = ib_post_recv(_cb->qp, _wcs->rq_wr, &bad_wr);
+
+		if (ret) {
+			printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
+			BUG();
+		}
+	}
+	return 0;
+}
+#endif
+
+static int __krping_persistent_server_thread(void* arg0)
+{
+	struct krping_cb *_cb = arg0;
+	int ret = -1;
+
+	KRPRINT_INIT("%s(): conn %d\n", __func__, _cb->conn_no);
+	ret = __krping_setup_qp(_cb, _cb->child_cm_id);
+	if (ret) {
+		printk(KERN_ERR "setup_qp failed: %d\n", ret);
+		goto err0;
+	}
+
+	ret = __krping_setup_buffers(_cb);
+	if (ret) {
+		printk(KERN_ERR "__krping_setup_buffers failed: %d\n", ret);
+		goto err1;
+	}
+	/* after here, you can send/recv */
+
+	ret = __krping_accept(_cb);
+	if (ret) {
+		printk(KERN_ERR "connect error %d\n", ret);
+		goto err2;
+	}
+	return 0;
+err2:
+	__krping_free_buffers(_cb);
+err1:
+	__krping_free_qp(_cb);
+err0:
+	rdma_destroy_id(_cb->child_cm_id);
+	return ret;
+}
+
+static int __krping_run_server(void* arg0)
+{
+	struct krping_cb *my_cb = arg0;
+	int ret, i = 0;
+
+	ret = __krping_bind_server(my_cb);
+	if (ret)
+		return ret;
+
+	KRPRINT_INIT("\n\n\n");
+
+	/* create multiple connections */
+	while (1){
+		struct krping_cb *target_cb;
+		i++;
+
+		KRPRINT_INIT("my_nid %d + i %d\n", my_nid, i);
+		if (my_nid+i >= MAX_NUM_NODES) {
+			KRPRINT_INIT("All connections are done\n");
+			break;
+		}
+
+		/* Wait for client's Start STAG/TO/Len */
+		wait_event_interruptible(my_cb->sem,
+					atomic_read(&my_cb->state) == CONNECT_REQUEST);
+		if (atomic_read(&my_cb->state) != CONNECT_REQUEST) {
+			printk(KERN_ERR "wait for CONNECT_REQUEST state %d\n",
+										atomic_read(&my_cb->state));
+			continue;
+		}
+		atomic_set(&my_cb->state, IDLE);
+
+		KRPRINT_INIT("Got a connection\n");
+
+		target_cb = cb[my_nid+i];
+		target_cb->server = 1;
+
+		/* got from INT. Will be used [setup_qp(SRWRirq)] -> setup_buf -> */
+		target_cb->child_cm_id = my_cb->child_cm_id;
+
+		if (__krping_persistent_server_thread(target_cb))
+			rdma_disconnect(target_cb->child_cm_id);
+
+		printk("conn_no %d is ready (GOOD)\n", target_cb->conn_no);
+	}
+	return 0;
+}
+
+static int __krping_bind_client(struct krping_cb *cb)
+{
+	struct sockaddr_storage sin;
+	int ret;
+
+	__fill_sockaddr(&sin, cb);
+
+	ret = rdma_resolve_addr(cb->cm_id, NULL, (struct sockaddr *)&sin, 2000);
+	if (ret) {
+		printk(KERN_ERR "rdma_resolve_addr error %d\n", ret);
+		return ret;
+	}
+
+	wait_event_interruptible(cb->sem,
+								atomic_read(&cb->state) == ROUTE_RESOLVED);
+	if (atomic_read(&cb->state) != ROUTE_RESOLVED) {
+		printk(KERN_ERR "addr/route resolution did not resolve: state %d\n",
+													atomic_read(&cb->state));
+		return -EINTR;
+	}
+
+	if (!__reg_supported(cb->cm_id->device))
+		return -EINVAL;
+
+	MSGPRINTK("rdma_resolve_addr - rdma_resolve_route successful\n");
+	return 0;
+}
+
+static int __krping_run_client(struct krping_cb *cb)
+{
+	int ret;
+
+	KRPRINT_INIT("====================================\n");
+	KRPRINT_INIT("<<<<<<<< %s(): cb->conno %d >>>>>>>>\n", __func__, cb->conn_no);
+	KRPRINT_INIT("====================================\n");
+	ret = __krping_bind_client(cb);
+	if (ret)
+		return ret;
+
+	ret = __krping_setup_qp(cb, cb->cm_id);
+	if (ret) {
+		printk(KERN_ERR "setup_qp failed: %d\n", ret);
+		return ret;
+	}
+
+	ret = __krping_setup_buffers(cb);
+	if (ret) {
+		printk(KERN_ERR "__krping_setup_buffers failed: %d\n", ret);
+		goto err1;
+	}
+
+	ret = __krping_connect_client(cb);
+	if (ret) {
+		printk(KERN_ERR "connect error %d\n", ret);
+		goto err2;
+	}
+	return 0;
+err2:
+	__krping_free_buffers(cb);
+err1:
+	__krping_free_qp(cb);
+	return ret;
+}
+
+
+/*
+ * IB utility functions for supporting dynamic mapping
+ * specifically for RW users such as page migration
+ */
+u64 __ib_map_act(void *paddr, int conn_no, int rw_size)
+{
+	struct krping_cb *_cb = cb[conn_no];
+	u64 dma_addr = dma_map_single(_cb->pd->device->dma_device,
+							  paddr, rw_size, DMA_BIDIRECTIONAL);
+	pci_unmap_addr_set(_cb, active_rdma_mapping, dma_addr);
+	return dma_addr;
+}
+
+u64 __ib_map_pass(void *paddr, int conn_no, int rw_size)
+{
+	struct krping_cb *_cb = cb[conn_no];
+	u64 dma_addr = dma_map_single(_cb->pd->device->dma_device,
+							  paddr, rw_size, DMA_BIDIRECTIONAL);
+	pci_unmap_addr_set(_cb, passive_rdma_mapping, dma_addr);
+	return dma_addr;
+}
+
+/* no need to umap, just remap directly */
+void __unmap_act(int conn_no, int rw_size)
+{
+	struct krping_cb *_cb = cb[conn_no];
+
+	DEBUG_LOG_V("act: unmap\n");
+	dma_unmap_single(_cb->pd->device->dma_device,
+						pci_unmap_addr(_cb, active_rdma_mapping),
+										rw_size, DMA_BIDIRECTIONAL);
+}
+
+void __unmap_pass(int conn_no, int rw_size)
+{
+	struct krping_cb *_cb = cb[conn_no];
+
+	DEBUG_LOG_V("pass: unmap pass buf\n");
+	dma_unmap_single(_cb->pd->device->dma_device,
+						pci_unmap_addr(_cb, passive_rdma_mapping),
+										rw_size, DMA_BIDIRECTIONAL);
+}
+
+
+/*
+ * Return the (possibly rebound) rkey for the rdma buffer.
+ * REG mode: invalidate and rebind via reg wr.
+ * Other modes: just return the mr rkey.
+ */
+u32 __krping_rdma_rkey_act(struct krping_cb *_cb, u64 buf, int post_inv, int rdma_len)
+{
+	u32 rkey;
+	struct ib_send_wr *bad_wr;
+	int ret;
+	struct scatterlist sg = {0};
+
+	/* old key - save corrent reg rkey (if dynamic) */
+	_cb->inv_wr_act.ex.invalidate_rkey = _cb->reg_mr_act->rkey;
+
+	/* Update the reg key - keeps the key the same */
+	ib_update_fast_reg_key(_cb->reg_mr_act, _cb->key);
+	_cb->reg_mr_wr_act.key = _cb->reg_mr_act->rkey;
+
+	/* Setup permissions, reg_mr_wr_pass is in another function */
+	/*	In krping.c
+	 *	local about to perform READ: IB_ACCESS_REMOTE_READ
+	 *
+	 *	local about to perform WRITE: 	IB_ACCESS_LOCAL_WRITE |
+	 *									IB_ACCESS_REMOTE_WRITE
+	 */
+
+	_cb->reg_mr_wr_act.access = IB_ACCESS_REMOTE_READ	|
+								IB_ACCESS_REMOTE_WRITE	|
+								IB_ACCESS_LOCAL_WRITE	|
+								IB_ACCESS_REMOTE_ATOMIC;
+
+	sg_dma_address(&sg) = buf;
+	sg_dma_len(&sg) = rdma_len;
+	DEBUG_LOG("%s(): rdma_len (dynamical) %d\n", __func__, sg_dma_len(&sg));
+
+	ret = ib_map_mr_sg(_cb->reg_mr_act, &sg, 1, PAGE_SIZE);
+										// snyc ib_dma_sync_single_for_cpu/dev
+	BUG_ON(ret <= 0 || ret > _cb->page_list_len);
+
+	DEBUG_LOG("%s(): ### post_inv = %d, reg_mr_act new rkey %d pgsz %u len %u"
+			" rdma_len (dynamical) %d iova_start %llx\n", __func__, post_inv,
+			_cb->reg_mr_wr_act.key, _cb->reg_mr_act->page_size, _cb->reg_mr_act->length,
+			rdma_len, _cb->reg_mr_act->iova);
+	/*
+	 * ib_map_mr_sg() - Map the largest prefix of a dma mapped SG list
+	 *     and set it the memory region.
+	 * @mr:            memory region
+	 * @sg:            dma mapped scatterlist
+	 * @sg_nents:      number of entries in sg
+	 * @sg_offset:     offset in bytes into sg
+	 * @page_size:     page vector desired page size
+	 *
+	 * Constraints:
+	 * - The first sg element is allowed to have an offset.
+	 * - Each sg element must be aligned to page_size (or physically
+	 *   contiguous to the previous element). In case an sg element has a
+	 *   non contiguous offset, the mapping prefix will not include it.
+	 * - The last sg element is allowed to have length less than page_size.
+	 * - If sg_nents total byte length exceeds the mr max_num_sge * page_size
+	 *   then only max_num_sg entries will be mapped.
+	 * - If the MR was allocated with type IB_MR_TYPE_SG_GAPS_REG, non of these
+	 *   constraints holds and the page_size argument is ignored.
+	 *
+	 * Returns the number of sg elements that were mapped to the memory region.
+	 *
+	 * After this completes successfully, the  memory region
+	 * is ready for registration.
+	 */
+
+	mutex_lock(&_cb->qp_mutex);
+	if (likely(post_inv))
+		/* no inv from remote, so manually does it in local side */
+		ret = ib_post_send(_cb->qp, &_cb->inv_wr_act, &bad_wr);	// INV+MR
+	else
+		ret = ib_post_send(_cb->qp, &_cb->reg_mr_wr_act.wr, &bad_wr);// MR
+	mutex_unlock(&_cb->qp_mutex);
+
+	if (ret) {
+		printk(KERN_ERR "post send error %d\n", ret);
+		atomic_set(&_cb->state, ERROR);
+		atomic_set(&_cb->send_state, ERROR);
+		atomic_set(&_cb->read_state, ERROR);
+		atomic_set(&_cb->write_state, ERROR);
+	}
+
+	rkey = _cb->reg_mr_act->rkey;
+	return rkey;
+}
+
+u32 __krping_rdma_rkey_pass(struct krping_cb *_cb,
+							 u64 buf, int post_inv, int rdma_len)
+{
+	u32 rkey;
+	struct ib_send_wr *bad_wr;
+	int ret;
+	struct scatterlist sg = {0};
+
+
+	/* key generated by local and used for remote - going to be invalidated*/
+	_cb->inv_wr_pass.ex.invalidate_rkey = _cb->reg_mr_pass->rkey;
+
+	/* update new key */
+	ib_update_fast_reg_key(_cb->reg_mr_pass, _cb->key);
+	_cb->reg_mr_wr_pass.key = _cb->reg_mr_pass->rkey;
+
+	/*	In krping.c
+	 *	local going to perform READ: IB_ACCESS_REMOTE_READ
+	 *
+	 *	local going to perform WRITE: 	IB_ACCESS_LOCAL_WRITE |
+	 *									IB_ACCESS_REMOTE_WRITE
+	 */
+	_cb->reg_mr_wr_pass.access = IB_ACCESS_REMOTE_READ	|
+								IB_ACCESS_REMOTE_WRITE	|
+								IB_ACCESS_LOCAL_WRITE	|
+								IB_ACCESS_REMOTE_ATOMIC;
+
+	sg_dma_address(&sg) = buf;
+	sg_dma_len(&sg) = rdma_len;
+
+	ret = ib_map_mr_sg(_cb->reg_mr_pass, &sg, 1, PAGE_SIZE);
+	BUG_ON(ret <= 0 || ret > _cb->page_list_len);
+
+	/**
+	 * ib_map_mr_sg() - Map the largest prefix of a dma mapped SG list
+	 *     and set it the memory region.
+	 * @mr:            memory region
+	 * @sg:            dma mapped scatterlist
+	 * @sg_nents:      number of entries in sg
+	 * @sg_offset:     offset in bytes into sg
+	 * @page_size:     page vector desired page size
+	 *
+	 * Constraints:
+	 * - The first sg element is allowed to have an offset.
+	 * - Each sg element must be aligned to page_size (or physically
+	 *   contiguous to the previous element). In case an sg element has a
+	 *   non contiguous offset, the mapping prefix will not include it.
+	 * - The last sg element is allowed to have length less than page_size.
+	 * - If sg_nents total byte length exceeds the mr max_num_sge * page_size
+	 *   then only max_num_sg entries will be mapped.
+	 * - If the MR was allocated with type IB_MR_TYPE_SG_GAPS_REG, non of these
+	 *   constraints holds and the page_size argument is ignored.
+	 *
+	 * Returns the number of sg elements that were mapped to the memory region.
+	 *
+	 * After this completes successfully, the  memory region
+	 * is ready for registration.
+	 */
+
+	MSG_RDMA_PRK("%s(): ### post_inv = %d, reg_mr_wr_pass new rkey %d "
+				 "pgsz %u len %u rdma_len (dynamical) %d iova_start %llx\n",
+				 __func__, post_inv, _cb->reg_mr_wr_pass.key,
+				 _cb->reg_mr_pass->page_size, _cb->reg_mr_pass->length,
+										rdma_len, _cb->reg_mr_pass->iova);
+
+	mutex_lock(&_cb->qp_mutex);
+	/* in krping.c, READ: likely, WRITE: unlikely. BUT NOT HERE */
+	if (likely(post_inv))
+		/* no inv from remote, so manually does it in local side */
+		ret = ib_post_send(_cb->qp, &_cb->inv_wr_pass, &bad_wr);
+	else
+		ret = ib_post_send(_cb->qp, &_cb->reg_mr_wr_pass.wr, &bad_wr);
+	mutex_unlock(&_cb->qp_mutex);
+
+	if (ret) {
+		printk(KERN_ERR "post send error %d\n", ret);
+		atomic_set(&_cb->state, ERROR);
+		atomic_set(&_cb->send_state, ERROR);
+		atomic_set(&_cb->read_state, ERROR);
+		atomic_set(&_cb->write_state, ERROR);
+	}
+
+	rkey = _cb->reg_mr_pass->rkey;
+	return rkey;
+}
+
+
+/*
+ * User doesn't have to take care of concurrency problems.
+ * This func will take care of it.
+ * User has to free the allocated mem manually
+ */
+int __ib_kmsg_send_long(unsigned int dest_cpu,
+					  struct pcn_kmsg_message *lmsg,
+					  unsigned int msg_size)
+{
+	int ret;
+	struct ib_send_wr *bad_wr;
+
+	if ( msg_size > sizeof(struct pcn_kmsg_message)) {
+		printk("%s(): ERROR - MSG %d larger than MAX_MSG_SIZE %ld\n",
+					__func__, msg_size, sizeof(struct pcn_kmsg_message));
+		BUG();
+	}
+
+	if (dest_cpu == my_nid) {
+		printk(KERN_ERR "No support for sending msg to itself %d\n", dest_cpu);
+		return 0;
+	}
+
+	lmsg->header.size = msg_size;
+	lmsg->header.from_nid = my_nid;
+
+	// pcn_msg (abstraction msg layer)
+	//----------------------------------------------------------
+	// ib
+
+	MSG_SYNC_PRK("////////////////lock() conn %d/////////////\n", dest_cpu);
+	mutex_lock(&cb[dest_cpu]->send_mutex);
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	lmsg->header.ticket = atomic_inc_return(&g_send_ticket);
+	MSGPRINTK("%s(): send ticket %lu\n", __func__, lmsg->header.ticket);
+#endif
+
+	__setup_send_wr(cb[dest_cpu], lmsg);
+
+	mutex_lock(&cb[dest_cpu]->qp_mutex);
+	ret = ib_post_send(cb[dest_cpu]->qp, &cb[dest_cpu]->sq_wr, &bad_wr);
+	mutex_unlock(&cb[dest_cpu]->qp_mutex);
+
+	wait_event_interruptible(cb[dest_cpu]->sem,
+			atomic_read(&cb[dest_cpu]->send_state) == RDMA_SEND_COMPLETE);
+	atomic_set(&cb[dest_cpu]->send_state, IDLE);
+
+	// unmap
+	dma_unmap_single(cb[dest_cpu]->pd->device->dma_device,
+			 pci_unmap_addr(cb[dest_cpu], send_mapping),
+			 sizeof(cb[dest_cpu]->send_buf), DMA_BIDIRECTIONAL);
+
+	mutex_unlock(&cb[dest_cpu]->send_mutex);
+	MSG_SYNC_PRK("//////////////unlock() conn %d///////////////\n", dest_cpu);
+	MSGDPRINTK("1 msg sent to dest_cpu %d!!!!!!\n\n", dest_cpu);
+	return 0;
+}
+
+static void __handle_remote_thread_rdma_read_request(
+						remote_thread_rdma_rw_t* inc_lmsg, void* target_paddr)
+{
+	remote_thread_rdma_rw_t* request = 
+								(remote_thread_rdma_rw_t*) inc_lmsg;
+	remote_thread_rdma_rw_t *reply; 
+	struct ib_send_wr *bad_wr; // for ib_post_send
+	struct krping_cb *_cb = cb[request->header.from_nid];
+	int ret;
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	volatile unsigned long ts_start, ts_compose, ts_post, ts_end;
+	MSGPRINTK("%s(): <<<<< passive READ request: "
+				"my_nid=%d from_nid=%d rw_t %d recv_ticket %lu "
+				"r_rdma_ticket %d msg_layer(good) >>>>>\n",
+						__func__, my_nid, request->header.from_nid,
+											request->rw_ticket,
+											request->header.ticket,
+											request->rdma_ticket);
+#endif
+
+	MSGDPRINTK("RPC passive READ request\n");
+
+	/* send        ----->   irq (recv)
+	 *                      [lock R]
+	 *             =====>   perform READ
+	 *                      unlock R
+	 * irq (recv)  <-----   send
+	 */
+
+	mutex_lock(&_cb->passive_mutex);
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	atomic_inc(&_cb->passive_cnt);
+	MSG_SYNC_PRK("////// READ passive lock() %d (active) rw_t %d ////////\n",
+										(int)atomic_read(&_cb->passive_cnt),
+														request->rw_ticket);
+#endif
+
+	_cb->passive_dma_addr = __ib_map_pass(target_paddr, _cb->conn_no,
+												request->rdma_header.rw_size);
+
+	/* perform READ (passive side) */
+	/* performance evaluation */
+	//- <time1 : compose msg info> -//
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	rdtscll(ts_start);
+#endif
+
+	/* RDMA READ echo data */
+	// remote info:
+	_cb->remote_rkey = ntohl(request->rdma_header.remote_rkey);	// redaundant
+	_cb->remote_addr = ntohll(request->rdma_header.remote_addr);// redaundant
+	_cb->remote_len = request->rdma_header.rw_size;				// redaundant
+
+	_cb->rdma_sq_wr.rkey = _cb->remote_rkey;		// updated from remote!!!!
+	_cb->rdma_sq_wr.remote_addr = _cb->remote_addr;	// updated from remote!!!!
+	//_cb->rdma_sq_wr.wr.sg_list->length = _cb->remote_len;
+
+	CHECK_LOG("<<<<< READ request: my_nid %d from_nid %d "
+					"remote_rkey %d remote_addr %p rw_size %d>>>>>\n",
+											my_nid, request->header.from_nid,
+											_cb->remote_rkey,
+											(void*)_cb->remote_addr,
+											_cb->remote_len);
+
+	// local info:
+	//_active_dma_addr -> passive_dma_addr
+	// register local buf for performing R/W (rdma_rkey)
+	// rdma_sq_wr.wr.sg_list = &cb->rdma_sgl
+	_cb->rdma_sgl.length = _cb->remote_len;
+	_cb->rdma_sgl.addr = _cb->passive_dma_addr;
+	_cb->rdma_sgl.lkey = __krping_rdma_rkey_pass(_cb, _cb->passive_dma_addr,
+											!_cb->read_inv, _cb->remote_len);
+
+	_cb->rdma_sq_wr.wr.next = NULL; // one work request
+
+	/* Issue RDMA READ */
+	if (unlikely(_cb->read_inv))
+		_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_READ_WITH_INV;
+	else {
+		/* Compose a READ sge with a invalidation */
+		_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_READ;
+
+		/*	Jack: reserve this. just in case.
+		 * 		In krping.c READ, they do send this redaundant FENCE.
+		 * 		But it works find even if I take this part off.
+		 *
+		 * 		In krping.c WRITE, they do not send this redaundant FENCE.
+		 *
+		 *		In krping.c, they do READ and then WRITE and again and again.
+		 */
+
+		/*	To put a fence between an RDMA READ and the following SEND.
+		 *
+		 *	IB_SEND_FENCE: Before performing this operation, wait until
+		 *	the processing of prior Send Requests has ended.
+		 */
+
+		/*
+		// By originial example code
+		struct ib_send_wr inv;
+		// - Immediately follow the read with a fenced LOCAL_INV. - //
+		_cb->rdma_sq_wr.wr.next = &inv;			// followed by a inv
+		memset(&inv, 0, sizeof inv);
+		inv.opcode = IB_WR_LOCAL_INV;
+		inv.ex.invalidate_rkey = _cb->reg_mr_pass->rkey;
+		inv.send_flags = IB_SEND_FENCE;
+		*/
+	}
+
+	MSG_RDMA_PRK("ib_post_send R>>>>\n");
+	//- <time 2: send> -//
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	rdtscll(ts_compose);
+#endif
+
+	mutex_lock(&_cb->qp_mutex);
+	ret = ib_post_send(_cb->qp, &_cb->rdma_sq_wr.wr, &bad_wr);
+	mutex_unlock(&_cb->qp_mutex);
+	if (ret) {
+		printk(KERN_ERR "post send error %d\n", ret);
+		return;
+	}
+	/*	if just sent a FENCE, this should be turned on */
+	//	_cb->rdma_sq_wr.wr.next = NULL;
+
+	//- <time 3: send request done> /-/
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	rdtscll(ts_post);
+#endif
+
+	/* Wait for read completion */
+	wait_event_interruptible(_cb->sem,
+				(int)atomic_read(&_cb->read_state) == RDMA_READ_COMPLETE);
+	/* passive READ done */
+	atomic_set(&_cb->read_state, IDLE);
+
+	//- <time 4: READ(task) done> /-/
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	rdtscll(ts_end);
+	//- time result -//
+	DEBUG_LOG("R: %d K compose_time %lu post_time %lu "
+										"end_time %lu (cpu ticks)\n",
+										(request->rdma_header.rw_size+1)/1024,
+										ts_compose-ts_start, // +1 end char
+										ts_post-ts_start, ts_end-ts_start);
+	MSG_SYNC_PRK("/////// READ passive unlock() %d (active) rw_t %d ///////\n",
+										(int)atomic_read(&_cb->passive_cnt),
+										request->rw_ticket);
+#endif
+
+	CHECK_LOG("<<<<< CHECK rpc (passive) R_READ DONE size %d done\n"
+						"_cb->rw_pass_buf(first10) \"%.10s\"\n"
+						"_cb->rw_pass_buf(last 10) \"%.10s\"\n"
+						"check READ here, not response\n\n\n",
+						request->rdma_header.rw_size,
+						dummy_pass_buf,
+						request->rdma_header.rw_size>10?
+						dummy_pass_buf+(request->rdma_header.rw_size-11):
+						dummy_pass_buf);
+
+	//__unmap_pass(_cb->conn_no, request->rdma_header.rw_size);
+
+	/* send ----->   irq
+	 *              lock R
+	 *      =====>  perform READ
+	 *              [unlock R]
+	 * irq  <-----  send
+	 *
+	 */
+
+	mutex_unlock(&_cb->passive_mutex);
+
+	MSG_RDMA_PRK("%s(): send READ COMPLETION ACK !!! -->>\n", __func__);
+	reply = pcn_kmsg_alloc_msg(sizeof(*reply));
+	if (!reply)
+		BUG();
+
+	reply->header.type = request->rdma_header.rmda_type_res;
+	reply->header.prio = PCN_KMSG_PRIO_NORMAL;
+	//reply->tgroup_home_cpu = tgroup_home_cpu;
+	//reply->tgroup_home_id = tgroup_home_id;
+
+	/* RDMA R/W complete ACK */
+	reply->header.is_rdma = true;
+	reply->rdma_header.rdma_ack = true;
+	reply->rdma_header.is_write = false;
+	reply->rdma_header.remote_rkey = _cb->remote_rkey;
+	reply->rdma_header.remote_addr = _cb->remote_addr;
+	reply->rdma_header.rw_size = _cb->remote_len;
+
+	/* for wait station */
+	reply->remote_ws = inc_lmsg->remote_ws;
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	reply->rdma_ticket = request->rdma_ticket;
+	reply->rw_ticket = request->rw_ticket;
+#endif
+
+	__ib_kmsg_send_long(request->header.from_nid,
+						(struct pcn_kmsg_message*) reply,
+						sizeof(*reply));
+
+	MSGPRINTK("%s(): end\n", __func__);
+	pcn_kmsg_free_msg(reply);
+	return;
+}
+
+static void __handle_remote_thread_rdma_read_response(
+										remote_thread_rdma_rw_t* inc_lmsg)
+{
+	remote_thread_rdma_rw_t* response =
+								(remote_thread_rdma_rw_t*) inc_lmsg;
+	struct krping_cb *_cb = cb[response->header.from_nid];
+
+	CHECK_LOG("%s(): CHECK response->rdma_header.rw_size %d\n"
+							"dummy_act_buf,(first10) %.10s\n"
+							"dummy_act_buf(last 10) %.10s\n"
+							"rdma_ack %s (check r_response, not here)\n\n\n",
+							__func__, response->rdma_header.rw_size,
+							dummy_act_buf,
+							response->rdma_header.rw_size>10?
+							dummy_act_buf+(response->rdma_header.rw_size-11):
+							dummy_act_buf,
+							response->rdma_header.rdma_ack?"true":"false");
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	DEBUG_LOG("response->rdma_hdr.remote_rkey %u remote_addr %p rw_size %u "
+							"rw_t %d recv_ticket %lu ack_rdma_ticket %d\n",
+									response->rdma_header.remote_rkey,
+									(void*)response->rdma_header.remote_addr,
+									response->rdma_header.rw_size,
+									response->rw_ticket,		// rdma dbg
+									response->header.ticket,	// send/recv dbg
+									response->rdma_ticket); 	// rdma dbg
+	MSG_SYNC_PRK("///////READ active unlock() %d rw_t %d conn %d///////////\n",
+										(int)atomic_read(&_cb->active_cnt),
+										response->rw_ticket,
+										_cb->conn_no);
+#endif
+
+	//__unmap_act(_cb->conn_no, response->rdma_header.rw_size);
+	mutex_unlock(&_cb->active_mutex);
+
+	MSGPRINTK("%s(): end\n", __func__);
+	return;
+}
+
+
+static void __handle_remote_thread_rdma_write_request(
+						remote_thread_rdma_rw_t* inc_lmsg, void* target_paddr)
+{
+	remote_thread_rdma_rw_t* request =
+								(remote_thread_rdma_rw_t*) inc_lmsg;
+	remote_thread_rdma_rw_t *reply;
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	unsigned long ts_wr_start, ts_wr_compose, ts_wr_post, ts_wr_end;
+#endif
+	struct krping_cb *_cb = cb[request->header.from_nid];
+	struct ib_send_wr *bad_wr; // for ib_post_send
+	int ret;
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	MSGPRINTK("<<<<< passive WRITE request: my %d from %d rw_t %d "
+				"ticket %lu rdma_ticket %d  >>>>>\n",
+				my_nid, request->header.from_nid, request->rw_ticket,
+				request->header.ticket, request->rdma_ticket);
+#endif
+	/* ib client sending write key to [remote server] */
+	// get key, and conjuct to the cb
+	MSGDPRINTK("<<<<< rpc (remote request) r_write(remotely write)\n");
+
+	/* send        ----->   irq (recv)
+	 *                      [lock]
+	 *             <=====   perform WRITE
+	 *                      unlock
+	 * irq (recv)  <-----   send
+	 */
+
+	mutex_lock(&_cb->passive_mutex);
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	atomic_inc(&_cb->passive_cnt);
+	MSG_SYNC_PRK("/////////// WRITE passive lock() %d /////////////////\n",
+										(int)atomic_read(&_cb->passive_cnt));
+#endif
+
+	_cb->passive_dma_addr = __ib_map_pass(target_paddr, _cb->conn_no,
+												request->rdma_header.rw_size);
+
+	// perform WRITE (passive side) + performance evaluation
+	// <time1 : compose msg info>
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	rdtscll(ts_wr_start);
+#endif
+
+	/* RDMA WRITE echo data */
+	// remote info:
+	 _cb->remote_rkey = ntohl(request->rdma_header.remote_rkey); // redaundant
+	 _cb->remote_addr = ntohll(request->rdma_header.remote_addr);// redaundant
+	 _cb->remote_len = request->rdma_header.rw_size;			 // redaundant
+
+	_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_WRITE;
+	_cb->rdma_sq_wr.rkey = _cb->remote_rkey;		// updated from remote!!!!
+	_cb->rdma_sq_wr.remote_addr = _cb->remote_addr;	// updated from remote!!!!
+	//_cb->rdma_sq_wr.wr.sg_list->length = _cb->remote_len;
+
+	_cb->rdma_sq_wr.wr.next = NULL;					// one work request
+
+	/*
+	struct ib_send_wr inv;			// for ib_post_send
+	_cb->rdma_sq_wr.wr.next = &inv;	// followed by a inv
+	memset(&inv, 0, sizeof inv);
+	inv.opcode = IB_WR_LOCAL_INV;
+	inv.ex.invalidate_rkey = _cb->reg_mr_pass->rkey;
+	inv.send_flags = IB_SEND_FENCE;
+	*/
+
+	// local info:
+	// note: rdma_sq_wr.wr.sg_list = &cb->rdma_sgl
+	_cb->rdma_sgl.length = _cb->remote_len;
+	_cb->rdma_sgl.addr = _cb->passive_dma_addr;		// local
+	// register local buf for performing R/W (rdma_rkey)
+	_cb->rdma_sgl.lkey = __krping_rdma_rkey_pass(	// local
+						_cb, _cb->passive_dma_addr, 1, _cb->remote_len);
+						/*	In krping.c, they use 0 as the post_inv. */
+
+	CHECK_LOG("<<<<< WRITE request: my_nid %d from_nid %d, "
+						"lkey %d laddr %llx _cb->rdma_sgl.lkey %d, "
+						"remote_rkey %d remote_addr %p rw_size %d>>>>>\n",
+						my_nid, request->header.from_nid,
+						_cb->rdma_sq_wr.wr.sg_list->lkey,
+						(unsigned long long)_cb->rdma_sq_wr.wr.sg_list->addr,
+						_cb->rdma_sgl.lkey, _cb->remote_rkey,
+						(void*)_cb->remote_addr, cb->remote_len);
+
+	MSG_RDMA_PRK("ib_post_send W>>>>\n");
+	// <time 2: send>
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	rdtscll(ts_wr_compose);
+#endif
+
+	mutex_lock(&_cb->qp_mutex);
+	ret = ib_post_send(_cb->qp, &_cb->rdma_sq_wr.wr, &bad_wr);
+	mutex_unlock(&_cb->qp_mutex);
+	MSG_RDMA_PRK("ib_post_send W done>>>>\n");
+	if (ret) {
+		printk(KERN_ERR "post send error %d\n", ret);
+		return;
+	}
+	/* If just sent a FENCE, this should be turned on */
+	//_cb->rdma_sq_wr.wr.next = NULL;
+
+	// <time 3: send request done>
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	rdtscll(ts_wr_post);
+#endif
+
+	/* Wait for completion */
+	ret = wait_event_interruptible(_cb->sem,
+					atomic_read(&_cb->write_state) == RDMA_WRITE_COMPLETE);
+	atomic_set(&_cb->write_state, IDLE);
+	// <time 4: WRITE(task) done>
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	rdtscll(ts_wr_end);
+	/* time result */
+	DEBUG_LOG("W: %d K compose_time %lu post_time %lu "
+								"end_time %lu (cpu ticks)\n",
+								(request->rdma_header.rw_size+1)/1024,
+								ts_wr_compose-ts_wr_start, // +1 end char
+								ts_wr_post-ts_wr_start, ts_wr_end-ts_wr_start);
+#endif
+
+	/* passive WRITE done */
+
+	CHECK_LOG("<<<<< CHECK rpc (passive) R_WRITE DONE size %d\n"
+						"_cb->rw_pass_buf(first10) \"%.10s\"\n"
+						"_cb->rw_pass_buf(last 10) \"%.10s\"\n"
+						"(check in response, not here)\n\n\n",
+						request->rdma_header.rw_size,
+						dummy_pass_buf,
+						request->rdma_header.rw_size>10?
+						dummy_pass_buf+(request->rdma_header.rw_size-11):
+						dummy_pass_buf);
+
+	//__unmap_pass(_cb->conn_no, request->rdma_header.rw_size);
+
+	/* send ----->  irq
+	 *				lock W
+	 *      <=====  perform WRITE
+	 *				[unlock W]
+	 * irq  <-----  send
+	 */
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	MSG_SYNC_PRK("///////////// WRITE passive unlock() %d /////////////////\n",
+										(int)atomic_read(&_cb->passive_cnt));
+#endif
+	mutex_unlock(&_cb->passive_mutex);
+
+	/* send W completion ACK */
+	DEBUG_LOG("send WRITE COMPLETION ACK\n");
+	reply = pcn_kmsg_alloc_msg(sizeof(*reply));
+	if (!reply)
+		BUG_ON(-1);
+
+	reply->header.type = request->rdma_header.rmda_type_res;
+	reply->header.prio = PCN_KMSG_PRIO_NORMAL;
+	//reply->tgroup_home_cpu = tgroup_home_cpu;
+	//reply->tgroup_home_id = tgroup_home_id;
+
+	// RDMA W/R complete ACK
+	reply->header.is_rdma = true;
+	reply->rdma_header.rdma_ack = true;
+	reply->rdma_header.is_write = true;
+	reply->rdma_header.remote_rkey = _cb->remote_rkey;
+	reply->rdma_header.remote_addr = _cb->remote_addr;
+	reply->rdma_header.rw_size = _cb->remote_len;
+
+	/* for wait station */
+	reply->remote_ws = inc_lmsg->remote_ws;
+
+	__ib_kmsg_send_long(request->header.from_nid,
+				(struct pcn_kmsg_message*) reply, sizeof(*reply));
+
+	MSGPRINTK("%s(): end\n\n\n", __func__);
+	pcn_kmsg_free_msg(reply);
+	return;
+}
+
+static void __handle_remote_thread_rdma_write_response(
+										remote_thread_rdma_rw_t* inc_lmsg)
+{
+	remote_thread_rdma_rw_t* response =
+								(remote_thread_rdma_rw_t*) inc_lmsg;
+	struct krping_cb *_cb = cb[response->header.from_nid];
+
+	CHECK_LOG("%s(): CHECK response->header.rw_size %d\n"
+								"dummy_act_buf(first10) %.10s\n"
+								"dummy_act_buf(last 10) %.10s\n"
+				"rdma_ack %s(==true) (check here not w_request)\n\n\n",
+								__func__, response->rdma_header.rw_size,
+								dummy_act_buf,
+								response->rdma_header.rw_size>10?
+								dummy_act_buf+(response->rdma_header.rw_size-11):
+								dummy_act_buf,
+								response->rdma_header.rdma_ack?"true":"false");
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	DEBUG_LOG("CHECK response->header.remote_rkey %u remote_addr %p "
+							"rw_size %u rw_t %d ticket %lu rdma_ticket %d\n",
+										response->rdma_header.remote_rkey,
+										(void*)response->rdma_header.remote_addr,
+										response->rdma_header.rw_size,
+										response->rw_ticket,
+										response->header.ticket,
+										response->rdma_ticket);
+	MSG_SYNC_PRK("/////////////WRITE active unlock() %d////////////////\n",
+											(int)atomic_read(&_cb->active_cnt));
+#endif
+
+	//__unmap_act(_cb->conn_no, response->rdma_header.rw_size);
+	mutex_unlock(&_cb->active_mutex);
+
+
+	MSGPRINTK("%s(): end\n\n\n", __func__);
+	return;
+}
+
+/*
+ *paddr: ptr of pages you wanna perform on passive side
+ */
+void handle_rdma_request(remote_thread_rdma_rw_t *inc_lmsg, void *paddr)
+{
+	remote_thread_rdma_rw_t *lmsg = inc_lmsg;
+	if (lmsg->header.is_rdma) {
+		if (!lmsg->rdma_header.rdma_ack) {
+			if (lmsg->rdma_header.is_write)
+				__handle_remote_thread_rdma_write_request(lmsg, paddr);
+			else
+				__handle_remote_thread_rdma_read_request(lmsg, paddr);
+		}
+		else {
+			if (lmsg->rdma_header.is_write)
+				__handle_remote_thread_rdma_write_response(lmsg);
+			else
+				__handle_remote_thread_rdma_read_response(lmsg);
+		}
+	} else {
+		printk(KERN_ERR "This is not a rdma request you shouldn't call"
+						"\"pcn_kmsg_handle_remote_rdma_request\"\n"
+						"from=%u, type=%d, msg_size=%u\n\n",
+						lmsg->header.from_nid,
+						lmsg->header.type,
+						lmsg->header.size);
+	}
+}
+
+/*
+ * Pass msg to upper layer and do the corresponding callback function
+ */
+static void __pcn_kmsg_handler_BottomHalf(struct work_struct * work)
+{
+	pcn_kmsg_work_t *w = (pcn_kmsg_work_t *) work;
+	struct pcn_kmsg_message *lmsg;
+	pcn_kmsg_cbftn ftn;
+
+	MSGPRINTK("%s(): \n", __func__);
+
+	lmsg = w->lmsg;
+	if ( lmsg->header.type < 0 || lmsg->header.type >= PCN_KMSG_TYPE_MAX) {
+		printk(KERN_ERR "Received invalid message type %d > MAX %d\n",
+									lmsg->header.type, PCN_KMSG_TYPE_MAX);
+	} else {
+		ftn = callbacks[lmsg->header.type];
+		if (ftn != NULL) {
+#ifdef CONFIG_POPCORN_MSG_STATISTIC
+			atomic_inc(&recv_pattern[lmsg->header.size]);
+#endif
+			ftn((void*)lmsg);
+		} else {
+			MSGPRINTK(KERN_INFO "Recieved message type %d size %d "
+								"has no registered callback!\n",
+								lmsg->header.type, lmsg->header.size);
+			pcn_kmsg_free_msg(lmsg);
+			BUG();
+		}
+	}
+
+	MSGPRINTK("%s(): done & free everything\n\n", __func__);
+	kfree((void*)w);
+	return;
+}
+
+/*
+ * Parse recved msg in the buf to msg_layer in INT
+ */
+static int __ib_kmsg_recv_long(struct krping_cb *_cb,
+							 struct wc_struct *wcs)
+{
+	struct pcn_kmsg_message *lmsg = wcs->element_addr;
+	pcn_kmsg_work_t *kmsg_work;
+
+	if (unlikely( lmsg->header.size > sizeof(struct pcn_kmsg_message))) {
+		printk(KERN_ERR "Received invalide message size > MAX %lu\n",
+									sizeof(struct pcn_kmsg_message));
+		BUG();
+	}
+
+	DEBUG_LOG("%s(): producing BottomHalf wc->wr_id = lmsg %p header.size %d\n",
+						__func__, (void*)lmsg, lmsg->header.size);
+
+	// - alloc & cpy msg to kernel buffer
+	kmsg_work = kmalloc(sizeof(pcn_kmsg_work_t), GFP_ATOMIC);
+	if (unlikely(!kmsg_work)) {
+		printk("Failed to kmalloc work structure!\n");
+		BUG();
+	}
+	kmsg_work->lmsg = kmalloc(lmsg->header.size, GFP_ATOMIC);
+	if (unlikely(!kmsg_work->lmsg)) {
+		printk("Failed to kmalloc msg in work structure!\n");
+		BUG();
+	}
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	MSG_RDMA_PRK("bf: Spwning BottomHalf, leaving INT "
+					"kwq->lmsg->header.type %d "
+					"kwq->lmsg->header.size %d rw_t %d\n",
+					lmsg->header.type,
+					lmsg->header.size,
+					lmsg->header.is_rdma?
+					((remote_thread_rdma_rw_t*)lmsg)->rw_ticket:-1);
+#endif
+	if (unlikely(!memcpy(kmsg_work->lmsg, lmsg, lmsg->header.size)))
+		BUG();
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	kmsg_work->lmsg->header.ticket = atomic_inc_return(&g_recv_ticket);
+	MSGPRINTK("%s() recv ticket %lu\n",
+						__func__, kmsg_work->lmsg->header.ticket);
+#endif
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+	MSG_RDMA_PRK("af: Spwning BottomHalf, leaving INT "
+						"kwq->lmsg->header.size %d\n",
+						kmsg_work->lmsg->header.type,
+						kmsg_work->lmsg->header.size);
+#endif
+
+	INIT_WORK((struct work_struct *)kmsg_work, __pcn_kmsg_handler_BottomHalf);
+	if (unlikely(!queue_work(msg_handler, (struct work_struct *)kmsg_work)))
+		BUG();
+
+	return 0;
+}
+
+static void __krping_cq_event_handler(struct ib_cq *cq, void *ctx)
 {
 	struct krping_cb *_cb = ctx;
 	struct ib_wc wc; // work complition->wr_id (work request ID)
@@ -656,7 +1997,8 @@ static void krping_cq_event_handler(struct ib_cq *cq, void *ctx)
 		return;
 	}
 
-	while ((ret = ib_poll_cq(_cb->cq, 1, &wc)) > 0) {	// get a completion
+	/* get a completion */
+	while ((ret = ib_poll_cq(_cb->cq, 1, &wc)) > 0) {
 		_wc = &wc;
 
 		if (_wc->status) { // !=IBV_WC_SUCCESS(0)
@@ -715,21 +2057,7 @@ static void krping_cq_event_handler(struct ib_cq *cq, void *ctx)
 							  _cb->conn_no, atomic_read(&_cb->stats.recv_msgs));
 #endif
 
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-#if 0
-			// you don't know whether is a rdma request or not
-			MSG_RDMA_PRK("< info > _wc->wr_id %p rw_t %d "
-					"r_recv_ticket %lu r_rdma_ticket %d rdma_ack \"%s\"\n",
-					(void*)_wc->wr_id,
-					((struct wc_struct*)_wc->wr_id)->element_addr->rw_ticket,
-					((struct wc_struct*)_wc->wr_id)->element_addr->ticket,
-					((struct wc_struct*)_wc->wr_id)->element_addr->rdma_ticket,
-					((struct wc_struct*)_wc->wr_id)->element_addr->
-											rdma_header.rdma_ack?"true":"false");
-#endif
-#endif
-
-			ret = ib_kmsg_recv_long(_cb, (struct wc_struct*)_wc->wr_id);
+			ret = __ib_kmsg_recv_long(_cb, (struct wc_struct*)_wc->wr_id);
 			if (ret) {
 				printk(KERN_ERR "< recv wc error: %d >\n", ret);
 				goto error;
@@ -770,1393 +2098,90 @@ error:
 	wake_up_interruptible(&_cb->sem);
 }
 
-static int krping_connect_client(struct krping_cb *_cb)
-{
-	struct rdma_conn_param conn_param;
-	int ret;
 
-	KRPRINT_INIT("->%s();\n", __func__);
-
-	memset(&conn_param, 0, sizeof conn_param);
-	conn_param.responder_resources = g_conn_responder_resuorces;
-	conn_param.initiator_depth = g_conn_initiator_depth;
-	conn_param.retry_count = g_conn_retry_count;
-
-	ret = rdma_connect(_cb->cm_id, &conn_param);
-	if (ret) {
-		printk(KERN_ERR "rdma_connect error %d\n", ret);
-		return ret;
-	}
-
-	wait_event_interruptible(_cb->sem,
-								atomic_read(&_cb->state) == CONNECTED);
-	if (atomic_read(&_cb->state) == ERROR) {
-		printk(KERN_ERR "wait for CONNECTED state %d\n",
-										atomic_read(&_cb->state));
-		return -1;
-	}
-
-	KRPRINT_INIT("rdma_connect successful\n");
-	return 0;
-}
-
-static void fill_sockaddr(struct sockaddr_storage *sin, struct krping_cb *_cb)
-{
-	memset(sin, 0, sizeof(*sin));
-
-	if (!_cb->server) {
-		if (_cb->addr_type == AF_INET) { // client: load as usuall (ip=remote)
-			struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
-			sin4->sin_family = AF_INET;
-			memcpy((void *)&sin4->sin_addr.s_addr, _cb->addr, 4);
-			//cb[i]->port = htons(PORT+my_nid);
-			sin4->sin_port = _cb->port;
-		}
-		KRPRINT_INIT("client IP fillup _cb->addr %s _cb->port %d\n",
-														_cb->addr, _cb->port);
-	}
-	else { // cb->server: load from global (ip=itself)
-		if (cb[my_nid]->addr_type == AF_INET) {
-			struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
-			sin4->sin_family = AF_INET;
-			memcpy((void *)&sin4->sin_addr.s_addr, cb[my_nid]->addr, 4);
-			sin4->sin_port = cb[my_nid]->port;
-			KRPRINT_INIT("server IP fillup cb[my_nid]->addr %s cb[my_nid]->port %d\n",
-											cb[my_nid]->addr, cb[my_nid]->port);
-		}
-	}
-	/*
-	else if (cb->addr_type == AF_INET6) {
-		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)sin;
-		sin6->sin6_family = AF_INET6;
-		memcpy((void *)&sin6->sin6_addr, cb->addr, 16);
-		sin6->sin6_port = cb->port;
-	} */
-}
 
 /*
- *	  IB/mlx5: Remove support for IB_DEVICE_LOCAL_DMA_LKEY (FASTREG)
- */
-static int reg_supported(struct ib_device *dev)
-{
-	u64 needed_flags = IB_DEVICE_MEM_MGT_EXTENSIONS |
-						IB_DEVICE_LOCAL_DMA_LKEY;
-	struct ib_device_attr device_attr;
-	int ret;
-	ret = ib_query_device(dev, &device_attr);
-
-	MSGDPRINTK("%s(): IB_DEVICE_MEM_WINDOW %d support?%d\n",
-				__func__, IB_DEVICE_MEM_WINDOW,
-				device_attr.device_cap_flags&IB_DEVICE_MEM_WINDOW);
-	MSGDPRINTK("%s(): IB_DEVICE_MEM_MGT_EXTENSIONS %d\n",
-				__func__, IB_DEVICE_MEM_MGT_EXTENSIONS);
-	MSGDPRINTK("%s(): IB_DEVICE_LOCAL_DMA_LKEY %d\n",
-				__func__, IB_DEVICE_LOCAL_DMA_LKEY);
-	MSGDPRINTK("%s(): (device_attr.device_cap_flags & needed_flags) %llx\n",
-				__func__, (device_attr.device_cap_flags & needed_flags));
-
-	if ((device_attr.device_cap_flags & needed_flags) != needed_flags) {
-		printk(KERN_ERR
-			"Fastreg not supported - device_cap_flags 0x%llx\n",
-			(u64)device_attr.device_cap_flags);
-		return 1; // let it pass
-	}
-	MSGDPRINTK("Fastreg/local_dma_lkey supported - device_cap_flags 0x%llx\n",
-											(u64)device_attr.device_cap_flags);
-	return 1;
-}
-
-static int krping_bind_server(struct krping_cb *cb)
-{
-	struct sockaddr_storage sin;
-	int ret;
-
-	fill_sockaddr(&sin, cb);
-
-	MSGPRINTK("rdma_bind_addr\n");
-	ret = rdma_bind_addr(cb->cm_id, (struct sockaddr *)&sin);
-	if (ret) {
-		printk(KERN_ERR "rdma_bind_addr error %d\n", ret);
-		return ret;
-	}
-
-	MSGPRINTK("rdma_listen\n");
-	ret = rdma_listen(cb->cm_id, LISTEN_BACKLOG);
-	if (ret) {
-		printk(KERN_ERR "rdma_listen failed: %d\n", ret);
-		return ret;
-	}
-
-	return 0;
-}
-
-static void __setup_send_wr(struct krping_cb *cb,
-				struct pcn_kmsg_message *lmsg)
-{
-	cb->send_dma_addr = dma_map_single(cb->pd->device->dma_device,
-							//&cb->send_buf, sizeof(cb->send_buf),
-							//lmsg, sizeof(*lmsg),	// USE HEADER.SIZE
-							lmsg, lmsg->header.size,	// or use header size
-							DMA_BIDIRECTIONAL);
-	pci_unmap_addr_set(cb, send_mapping, cb->send_dma_addr);
-							// cb->send_mapping = cb->send_dma_addr
-
-	//- Send buffer -//
-	cb->send_sgl.addr = cb->send_dma_addr; // addr
-	//cb->send_sgl.addr = lmsg; // addr
-	//cb->send_sgl.length = sizeof cb->send_buf;
-	cb->send_sgl.length = lmsg->header.size;
-
-
-	MSGPRINTK("@@@ <send addr (synamical mapping)>\n");
-	MSGDPRINTK("@@@ lmsg = %p\n", (void*)lmsg);
-	MSGDPRINTK("@@@ cb->send_sgl.addr = %p\n", (void*)cb->send_sgl.addr);
-	MSGDPRINTK("@@@ cb->send_dma_addr = %p\n", (void*)cb->send_dma_addr);
-									// user vaddr (O) mapped to the next line
-	//MSGDPRINTK("@@@ sizeof(cb->send_buf) = %ld\n", sizeof cb->send_buf);
-	//MSGDPRINTK("@@@ sizeof(*lmsg) = %ld (X)\n", sizeof(*lmsg));
-	//MSGDPRINTK("@@@ strlen(lmsg) = %ld (X)\n", strlen((char*)lmsg));
-	MSGDPRINTK("@@@ lmsg->header.size = %d (O)\n", lmsg->header.size);
-									// kernel addr (X) (mapped to each other)
-	MSGDPRINTK("\n");
-}
-
-static void krping_setup_wr(struct krping_cb *cb) // set up sgl, used for rdma
-{
-	int i=0, ret;
-
-	/* Pre-post RECV buffers */
-	MSGPRINTK("\n\n\n->%s(): \n", __func__);
-	MSGPRINTK("@@@ 2 cb->recv_size = %d\n", cb->recv_size);
-	for(i=0;i<MAX_RECV_WR;i++) {
-		struct ib_recv_wr *bad_wr;
-		struct ib_recv_wr *_rq_wr = create_recv_wr(cb->conn_no, false);
-
-		if (i<5 || i>(MAX_RECV_WR-5)) {
-			MSGPRINTK("_rq_wr %p cb->conn_no %d recv_size %d wr_id %p\n",
-			(void*)_rq_wr, cb->conn_no, cb->recv_size, (void*)_rq_wr->wr_id);
-		}
-
-		/* 90% posted, 10 reserved */
-		if (i <= MAX_RECV_WR*90/100) {
-			ret = ib_post_recv(cb->qp, _rq_wr, &bad_wr);
-			if (ret) {
-				printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
-				BUG();
-			}
-		} else {
-			__enq_wcs((struct wc_struct *)_rq_wr->wr_id, cb->conn_no);
-		}
-	}
-
-	/* send buffer: unchanged parameters */
-	//cb->send_sgl.lkey = cb->qp->device->local_dma_lkey; // A BUG from kprint.c
-	//cb->send_sgl.lkey = cb->reg_mr_act->lkey;				// A BUG from kprint.c
-	cb->send_sgl.lkey = cb->pd->local_dma_lkey;			// Fixed the BUG (O)
-	MSGDPRINTK("@@@ <lkey>\n");
-	MSGDPRINTK("@@@ lkey=%d from ../mad.c (ctx->pd->local_dma_lkey)\n",
-							cb->pd->local_dma_lkey);	//4450 (dynamic diff)
-	MSGDPRINTK("@@@ cb->qp->device->local_dma_lkey = %d\n",
-				cb->qp->device->local_dma_lkey);		//0
-	MSGDPRINTK("@@@ lkey=%d from client/server example(cb->mr->lkey)\n",
-							cb->reg_mr_act->lkey);			//4463 (dynamic diff)
-	cb->sq_wr.opcode = IB_WR_SEND;					// normal send/recv
-	cb->sq_wr.send_flags = IB_SEND_SIGNALED;		// to trigger a completion
-	cb->sq_wr.sg_list = &cb->send_sgl;				// sge
-	cb->sq_wr.num_sge = 1;
-
-
-	/* READ/WRITE passive buf are allocated dynamically in other places
-	 *		active: active_dma_addr; passive: passive_dma_addr
-	 *		used for seting up rdma_sgl.addr
-	 *		e.g. cb->rdma_sgl.addr = cb->passive_dma_addr;
-	 */
-
-
-	/* Common for RW - RW wr */
-	cb->rdma_sq_wr.wr.sg_list = &cb->rdma_sgl;
-	cb->rdma_sq_wr.wr.send_flags = IB_SEND_SIGNALED; // to trigger a completion
-	cb->rdma_sq_wr.wr.num_sge = 1;
-
-	/*
-	 * A chain of 2 WRs, INVALDATE_MR + REG_MR.
-	 * both unsignaled (no completion).  The client uses them to reregister
-	 * the rdma buffers with a new key each iteration.
-	 */
-	cb->reg_mr_wr_act.wr.opcode = IB_WR_REG_MR;			//(legacy:fastreg)
-	cb->reg_mr_wr_act.mr = cb->reg_mr_act;
-
-	cb->reg_mr_wr_pass.wr.opcode = IB_WR_REG_MR;	//(legacy:fastreg)
-	cb->reg_mr_wr_pass.mr = cb->reg_mr_pass;
-
-
-	cb->inv_wr_act.opcode = IB_WR_LOCAL_INV;	// 1. invalidate Memory Window
-	cb->inv_wr_act.next = &cb->reg_mr_wr_act.wr;	// 2. then register this new key
-												//		to mr
-
-	cb->inv_wr_pass.next = &cb->reg_mr_wr_pass.wr;
-	cb->inv_wr_pass.opcode = IB_WR_LOCAL_INV;
-	/*  The reg mem_mode uses a reg mr on the client side for the (We are)
-	 *  rw_passive_buf and rw_active_buf buffers.  Each time the client will 
-	 *  advertise one of these buffers, it invalidates the previous registration 
-	 *  and fast registers the new buffer with a new key.
-	 *
-	 *  If the server_invalidate	(We are not)
-	 *  option is on, then the server will do the invalidation via the
-	 * "go ahead" messages using the IB_WR_SEND_WITH_INV opcode. Otherwise the
-	 * client invalidates the mr using the IB_WR_LOCAL_INV work request.
-	 */
-
-	return;
-}
-
-static int krping_setup_qp(struct krping_cb *cb, struct rdma_cm_id *cm_id)
-{
-	int ret;
-	struct ib_cq_init_attr attr = {0};
-
-	MSGPRINTK("\n->%s();\n", __func__);
-
-	//cb->pd = ib_alloc_pd(cm_id->device, 0);
-	cb->pd = ib_alloc_pd(cm_id->device);
-	if (IS_ERR(cb->pd)) {
-		printk(KERN_ERR "ib_alloc_pd failed\n");
-		return PTR_ERR(cb->pd);
-	}
-	MSGPRINTK("created pd %p\n", cb->pd);
-
-	attr.cqe = cb->txdepth * SEND_DEPTH;
-	attr.comp_vector = INT_MASK;
-	cb->cq =
-		ib_create_cq(cm_id->device, krping_cq_event_handler, NULL, cb, &attr);
-	if (IS_ERR(cb->cq)) {
-		printk(KERN_ERR "ib_create_cq failed\n");
-		ret = PTR_ERR(cb->cq);
-		goto err1;
-	}
-	MSGPRINTK("created cq %p task\n", cb->cq);
-
-	ret = ib_req_notify_cq(cb->cq, IB_CQ_NEXT_COMP); // INT flag/mask raised
-	if (ret) {
-		printk(KERN_ERR "ib_create_cq failed\n");
-		goto err2;
-	}
-
-	ret = krping_create_qp(cb);
-	if (ret) {
-		printk(KERN_ERR "krping_create_qp failed: %d\n", ret);
-		goto err2;
-	}
-	MSGPRINTK("created qp %p\n", cb->qp);
-	return 0;
-err2:
-	ib_destroy_cq(cb->cq);
-err1:
-	ib_dealloc_pd(cb->pd);
-	return ret;
-}
-
-// init all buffers < 1.pd->cq->qp 2.[mr] 3.xxx >
-static int krping_setup_buffers(struct krping_cb *cb)
-{
-	int ret;
-	MSGPRINTK("\n->%s();\n", __func__);
-	MSGPRINTK("krping_setup_buffers called on cb %p\n", cb);
-
-	/* No send READ WRITE buffer is allocated statically */
-
-	/* recv wq has been changed to be dinamically allocated */
-	
-
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
-	//cb->rdma_size = PAGE_SIZE; // TODO change this according to user like
-#endif
-
-	cb->page_list_len = (((cb->rdma_size - 1) & PAGE_MASK) + PAGE_SIZE)
-															>> PAGE_SHIFT;
-
-	KRPRINT_INIT("cb->rdma_size %lu, /PAGESIZE, cb->page_list_len %d \n",
-										cb->rdma_size, cb->page_list_len);
-	/* mr for active */
-	cb->reg_mr_act = ib_alloc_mr(cb->pd, IB_MR_TYPE_MEM_REG, cb->page_list_len);
-													// fill out lkey and rkey
-	/* mr for passive */
-	cb->reg_mr_pass = ib_alloc_mr(cb->pd, IB_MR_TYPE_MEM_REG,
-														 cb->page_list_len);
-
-	if (IS_ERR(cb->reg_mr_act)) {
-		ret = PTR_ERR(cb->reg_mr_act);
-		MSGPRINTK("reg_mr_act failed %d\n", ret);
-		goto bail;
-	}
-	if (IS_ERR(cb->reg_mr_pass)) {
-		ret = PTR_ERR(cb->reg_mr_pass);
-		MSGPRINTK("reg_mr_pass failed %d\n", ret);
-		goto bail;
-	}
-
-	MSGDPRINTK("\n@@@ after mr\n");
-	MSGDPRINTK("@@@ reg rkey %d page_list_len %u\n",
-										cb->reg_mr_act->rkey, cb->page_list_len);
-	MSGDPRINTK("@@@ 1 cb->reg_mr_act->lkey %d from mr \n", cb->reg_mr_act->lkey);
-	MSGDPRINTK("@@@ 1 correct lkey=%d (ref: ./drivers/infiniband/core/mad.c )"
-				"(ctx->pd->local_dma_lkey)\n", cb->pd->local_dma_lkey);
-																//4xxx dynamic
-	krping_setup_wr(cb);
-	MSGPRINTK("allocated & registered buffers done!\n");
-	MSGPRINTK("\n\n");
-	return 0;
-bail:
-	if (cb->reg_mr_act && !IS_ERR(cb->reg_mr_act))
-		ib_dereg_mr(cb->reg_mr_act);
-	if (cb->reg_mr_pass && !IS_ERR(cb->reg_mr_pass))
-		ib_dereg_mr(cb->reg_mr_pass);
-	if (cb->rdma_mr && !IS_ERR(cb->rdma_mr))
-		ib_dereg_mr(cb->rdma_mr);
-	if (cb->dma_mr && !IS_ERR(cb->dma_mr))
-		ib_dereg_mr(cb->dma_mr);
-	return ret;
-}
-
-
-static int krping_accept(struct krping_cb *_cb)
-{
-	int ret;
-	struct rdma_conn_param conn_param;
-	KRPRINT_INIT("->%s(); _cb->conn_%d accepting a connection request...\n",
-														__func__, _cb->conn_no);
-	memset(&conn_param, 0, sizeof conn_param);
-	conn_param.responder_resources = 1;
-	conn_param.initiator_depth = 1;
-
-	ret = rdma_accept(_cb->child_cm_id, &conn_param);
-	if (ret) {
-		printk(KERN_ERR "rdma_accept error: %d\n", ret);
-		return ret;
-	}
-
-	KRPRINT_INIT("->%s(): blocking wating for a signal %d..........\n",
-											__func__, _cb->conn_no);
-	wait_event_interruptible(_cb->sem,
-								atomic_read(&_cb->state) == CONNECTED);
-													// have a look child_cm_id
-	if (atomic_read(&_cb->state) == ERROR) {
-		printk(KERN_ERR "wait for CONNECTED state %d\n",
-								atomic_read(&_cb->state));
-		return -1;
-	}
-	KRPRINT_INIT("->%s(): got the signal !!!!(GOOD)!!!!!!! _cb->state = %d \n",
-										__func__, atomic_read(&_cb->state));
-
-	set_popcorn_node_online(_cb->conn_no, true);
-	return 0;
-}
-
-static void krping_free_buffers(struct krping_cb *cb)
-{
-	MSGPRINTK("krping_free_buffers called on cb %p\n", cb);
-
-	if (cb->dma_mr)
-		ib_dereg_mr(cb->dma_mr);
-	if (cb->rdma_mr)
-		ib_dereg_mr(cb->rdma_mr);
-	if (cb->start_mr)
-		ib_dereg_mr(cb->start_mr);
-	if (cb->reg_mr_act)
-		ib_dereg_mr(cb->reg_mr_act);
-	if (cb->reg_mr_pass)
-		ib_dereg_mr(cb->reg_mr_pass);
-}
-
-static void krping_free_qp(struct krping_cb *cb)
-{
-	ib_destroy_qp(cb->qp);
-	ib_destroy_cq(cb->cq);
-	ib_dealloc_pd(cb->pd);
-}
-
-#if DEMON_POST_RECV_WCS
-static int __recv_post(void* arg0)
-{
-	struct krping_cb *_cb = arg0;
-	struct ib_recv_wr *bad_wr;
-	int ret;
-
-	while (1) {
-		struct wc_struct *_wcs = __dq_wcs(_cb->conn_no);
-		if(unlikely(!_wcs))
-			break;
-
-		ret = ib_post_recv(_cb->qp, _wcs->rq_wr, &bad_wr);
-
-		if (ret) {
-			printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
-			BUG();
-		}
-	}
-	return 0;
-}
-#endif
-
-static int krping_persistent_server_thread(void* arg0)
-{
-	struct krping_cb *_cb = arg0;
-	int ret = -1;
-
-	KRPRINT_INIT("%s(): conn %d\n", __func__, _cb->conn_no);
-	ret = krping_setup_qp(_cb, _cb->child_cm_id);
-	if (ret) {
-		printk(KERN_ERR "setup_qp failed: %d\n", ret);
-		goto err0;
-	}
-
-	ret = krping_setup_buffers(_cb);
-	if (ret) {
-		printk(KERN_ERR "krping_setup_buffers failed: %d\n", ret);
-		goto err1;
-	}
-	/* after here, you can send/recv */
-
-	ret = krping_accept(_cb);
-	if (ret) {
-		printk(KERN_ERR "connect error %d\n", ret);
-		goto err2;
-	}
-	return 0;
-err2:
-	krping_free_buffers(_cb);
-err1:
-	krping_free_qp(_cb);
-err0:
-	rdma_destroy_id(_cb->child_cm_id);
-	return ret;
-}
-
-static int krping_run_server(void* arg0)
-{
-	struct krping_cb *my_cb = arg0;
-	int ret, i = 0;
-
-	ret = krping_bind_server(my_cb);
-	if (ret)
-		return ret;
-
-	KRPRINT_INIT("\n\n\n");
-
-	//- create multiple connections -//
-	while (1){
-		struct krping_cb *target_cb;
-		i++;
-
-		KRPRINT_INIT("my_nid %d + i %d\n", my_nid, i);
-		if (my_nid+i >= MAX_NUM_NODES) {
-			KRPRINT_INIT("All connections are done\n");
-			break;
-		}
-
-		/* Wait for client's Start STAG/TO/Len */
-		wait_event_interruptible(my_cb->sem,
-					atomic_read(&my_cb->state) == CONNECT_REQUEST);
-		if (atomic_read(&my_cb->state) != CONNECT_REQUEST) {
-			printk(KERN_ERR "wait for CONNECT_REQUEST state %d\n",
-										atomic_read(&my_cb->state));
-			continue;
-		}
-		atomic_set(&my_cb->state, IDLE);	// TODO Jack: sem/completion is better
-
-		KRPRINT_INIT("Got a connection\n");
-
-		target_cb = cb[my_nid+i];
-		target_cb->server = 1;
-
-		/* got from INT. Will be used [setup_qp(SRWRirq)] -> setup_buf -> */
-		target_cb->child_cm_id = my_cb->child_cm_id;
-
-		if (krping_persistent_server_thread(target_cb))
-			rdma_disconnect(target_cb->child_cm_id);
-
-		printk("conn_no %d is ready (GOOD)\n", target_cb->conn_no);
-	}
-	return 0;
-}
-
-static int krping_bind_client(struct krping_cb *cb)
-{
-	struct sockaddr_storage sin;
-	int ret;
-
-	fill_sockaddr(&sin, cb);
-
-	ret = rdma_resolve_addr(cb->cm_id, NULL, (struct sockaddr *)&sin, 2000);
-	if (ret) {
-		printk(KERN_ERR "rdma_resolve_addr error %d\n", ret);
-		return ret;
-	}
-
-	wait_event_interruptible(cb->sem,
-								atomic_read(&cb->state) == ROUTE_RESOLVED);
-	if (atomic_read(&cb->state) != ROUTE_RESOLVED) {
-		printk(KERN_ERR "addr/route resolution did not resolve: state %d\n",
-													atomic_read(&cb->state));
-		return -EINTR;
-	}
-
-	if (!reg_supported(cb->cm_id->device))
-		return -EINVAL;
-
-	MSGPRINTK("rdma_resolve_addr - rdma_resolve_route successful\n");
-	return 0;
-}
-
-static int krping_create_qp(struct krping_cb *cb)
-{
-	struct ib_qp_init_attr init_attr;
-	int ret;
-
-	memset(&init_attr, 0, sizeof(init_attr));
-	init_attr.cap.max_send_wr = cb->txdepth;	//
-	init_attr.cap.max_recv_wr = MAX_RECV_WR*2;	//
-
-	/* For flush_qp() */
-	init_attr.cap.max_send_wr++;
-	init_attr.cap.max_recv_wr++;
-
-	init_attr.cap.max_recv_sge = 1;	 // ok for now
-	init_attr.cap.max_send_sge = 1;	 // ok for now
-	init_attr.qp_type = IB_QPT_RC;
-	init_attr.send_cq = cb->cq;		 // send and recv use a same cq
-	init_attr.recv_cq = cb->cq;
-	init_attr.sq_sig_type = IB_SIGNAL_REQ_WR;
-
-/*	The IB_SIGNAL_REQ_WR flag means that not all send requests posted to
- *	the send queue will generate a completion -- only those marked with
- *	the IB_SEND_SIGNALED flag.  However, the driver can't free a send
- *	request from the send queue until it knows it has completed, and the
- *	only way for the driver to know that is to see a completion for the
- *	given request or a later request.  Requests on a queue always complete
- *	in order, so if a later request completes and generates a completion,
- *	the driver can also free any earlier unsignaled requests) */
-
-	if (cb->server) {
-		ret = rdma_create_qp(cb->child_cm_id, cb->pd, &init_attr);
-		if (!ret)
-			cb->qp = cb->child_cm_id->qp;
-	} else {
-		ret = rdma_create_qp(cb->cm_id, cb->pd, &init_attr);
-		if (!ret)
-			cb->qp = cb->cm_id->qp;
-	}
-
-	return ret;
-}
-
-
-///////////////////////////rdma nead/////////////////////////////////////////
-// can happen simultaneously
-static void __handle_remote_thread_rdma_read_request(
-						remote_thread_rdma_rw_t* inc_lmsg, void* target_paddr)
-{
-	remote_thread_rdma_rw_t* request = 
-								(remote_thread_rdma_rw_t*) inc_lmsg;
-	remote_thread_rdma_rw_t *reply; 
-	int ret;
-	struct ib_send_wr *bad_wr; // for ib_post_send
-	struct krping_cb *_cb = cb[request->header.from_nid];
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	volatile unsigned long ts_start, ts_compose, ts_post, ts_end;
-	int dbg;
-#endif
-
-/*
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
-#else
-	char *target_paddr;
-#endif
-*/
-
-	MSGDPRINTK("%s():\n", __func__);
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	MSGPRINTK("<<<<< passive READ request: "
-				"my_nid=%d from_nid=%d rw_t %d recv_ticket %lu "
-				"r_rdma_ticket %d msg_layer(good) >>>>>\n",
-								my_nid, request->header.from_nid, 
-											request->rw_ticket,
-											request->header.ticket,
-											request->rdma_ticket);
-#endif
-				
-	/* ib client  sending read key to [remote server] */
-	// get key, and connjuct to the cb
-	MSGDPRINTK("RPC passive READ request\n");
-
-	/* send        ----->   irq (recv)
-	 *                      [lock R]
-	 *             =====>   perform READ
-	 *                      unlock R
-	 * irq (recv)  <-----   send
-	 */    
-
-/*
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
-#else
-	// mimicing
-	target_paddr = dummy_pass_buf;
-#endif
-*/
-
-	mutex_lock(&_cb->passive_mutex); // passive side
-	atomic_inc(&_cb->passive_cnt);
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	MSG_SYNC_PRK("////// READ passive lock() %d (active) rw_t %d ////////\n",
-										(int)atomic_read(&_cb->passive_cnt),
-										request->rw_ticket);// rdms dbg
-#endif
-
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic page)
-#else						// (dynamic)
-	// use a dummy buf
-	_cb->passive_dma_addr = ib_map_pass(target_paddr, _cb->conn_no,
-												request->rdma_header.rw_size);
-#endif
-
-	// perform READ (passive side)
-	// performance evaluation
-	// <time1 : compose msg info>
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	rdtscll(ts_start);
-#endif
-
-	/* RDMA READ echo data */
-	// remote info:
-	_cb->remote_rkey = ntohl(request->rdma_header.remote_rkey);	// redaundant
-	_cb->remote_addr = ntohll(request->rdma_header.remote_addr);// redaundant
-	_cb->remote_len = request->rdma_header.rw_size;				// redaundant
-
-	_cb->rdma_sq_wr.rkey = _cb->remote_rkey;		// updated from remote!!!!
-	_cb->rdma_sq_wr.remote_addr = _cb->remote_addr;	// updated from remote!!!!
-	//_cb->rdma_sq_wr.wr.sg_list->length = _cb->remote_len;
-
-	CHECK_LOG("<<<<< READ request: my_nid %d from_nid %d "
-					"remote_rkey %d remote_addr %p rw_size %d>>>>>\n", 
-											my_nid, request->header.from_nid,
-											_cb->remote_rkey,
-											(void*)_cb->remote_addr,
-											_cb->remote_len);
-	
-	// local info:
-	//_active_dma_addr -> passive_dma_addr
-	// register local buf for performing R/W (rdma_rkey)
-	// rdma_sq_wr.wr.sg_list = &cb->rdma_sgl
-	_cb->rdma_sgl.length = _cb->remote_len;
-	_cb->rdma_sgl.addr = _cb->passive_dma_addr;
-	_cb->rdma_sgl.lkey = krping_rdma_rkey_passive(_cb, _cb->passive_dma_addr, 
-											!_cb->read_inv, _cb->remote_len);
-
-	_cb->rdma_sq_wr.wr.next = NULL; // one work request
-
-	/* Issue RDMA READ */
-	if (unlikely(_cb->read_inv))
-		_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_READ_WITH_INV;
-	else { 
-		/* Compose a READ sge with a invalidation */
-		_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_READ;
-
-		/*	Jack: reserve this. just in case.
-		 * 		In krping.c READ, they do send this redaundant FENCE.
-		 * 		But it works find even if I take this part off.
-		 *
-		 * 		In krping.c WRITE, they do not send this redaundant FENCE.
-		 *
-		 *		In krping.c, they do READ and then WRITE and again and again.
-		 */
-
-		/*	To put a fence between an RDMA READ and the following SEND.
-		 *
-		 *	IB_SEND_FENCE: Before performing this operation, wait until
-		 *	the processing of prior Send Requests has ended.
-		 */
-
-		/*
-		struct ib_send_wr inv;
-		// - Immediately follow the read with a fenced LOCAL_INV. - //
-		_cb->rdma_sq_wr.wr.next = &inv;			// followed by a inv
-		memset(&inv, 0, sizeof inv);
-		inv.opcode = IB_WR_LOCAL_INV;
-		inv.ex.invalidate_rkey = _cb->reg_mr_pass->rkey;
-		inv.send_flags = IB_SEND_FENCE;
-		*/		
-	}
-
-	MSG_RDMA_PRK("ib_post_send R>>>>\n");
-	// <time 2: send>
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	rdtscll(ts_compose);
-#endif
-
-	mutex_lock(&_cb->qp_mutex);
-	ret = ib_post_send(_cb->qp, &_cb->rdma_sq_wr.wr, &bad_wr);
-	mutex_unlock(&_cb->qp_mutex);
-	if (ret) {
-		printk(KERN_ERR "post send error %d\n", ret);
-		return;
-	}
-	/*	if just sent a FENCE, this should be turned on */
-	//	_cb->rdma_sq_wr.wr.next = NULL;
-
-	// <time 3: send request done>
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	rdtscll(ts_post);
-#endif
-
-	/* Wait for read completion */
-	wait_event_interruptible(_cb->sem, 
-				(int)atomic_read(&_cb->read_state) == RDMA_READ_COMPLETE);
-	/* passive READ done */
-	atomic_set(&_cb->read_state, IDLE);
-
-	// <time 4: READ(task) done>
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	rdtscll(ts_end);
-#endif
-
-	// READ DEBUG: check data (check here not response())
-	CHECK_LOG("<<<<< CHECK rpc (passive) R_READ DONE size %d done\n"
-						"_cb->rw_pass_buf(first10) \"%.10s\"\n"
-						"_cb->rw_pass_buf(last 10) \"%.10s\"\n\n\n",
-						request->rdma_header.rw_size,
-						dummy_pass_buf,
-						request->rdma_header.rw_size>10?
-						dummy_pass_buf+(request->rdma_header.rw_size-11):
-						dummy_pass_buf);
-
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
-	// put_page
-	unmap_pass_page(_cb->conn_no);
-#else
-	//unmap_pass(_cb->conn_no, request->rdma_header.rw_size);
-#endif
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	/* time result */
-	DEBUG_LOG("R: %d K compose_time %lu post_time %lu "
-										"end_time %lu (cpu ticks)\n",
-										(request->rdma_header.rw_size+1)/1024, 
-										ts_compose-ts_start, // +1 end char
-										ts_post-ts_start, ts_end-ts_start);
-#endif
-
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	dbg = request->rdma_ticket;
-#endif
-	/* send ----->   irq
-	 *              lock R
-	 *      =====>  perform READ
-	 *              [unlock R]
-	 * irq  <-----  send
-	 * 
-	 */
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	MSG_SYNC_PRK("/////// READ passive unlock() %d (active) rw_t %d ///////\n",
-										(int)atomic_read(&_cb->passive_cnt),
-										request->rw_ticket);// rdms dbg
-#endif
-										
-	mutex_unlock(&_cb->passive_mutex); // passive side
-
-	MSG_RDMA_PRK("%s(): send READ COMPLETION ACK !!! -->>\n", __func__); 
-	reply = pcn_kmsg_alloc_msg(sizeof(*reply));
-	if (!reply)
-		BUG_ON(-1);
-
-	reply->header.type = request->rdma_header.rmda_type_res;
-	reply->header.prio = PCN_KMSG_PRIO_NORMAL;
-	//reply->tgroup_home_cpu = tgroup_home_cpu;
-	//reply->tgroup_home_id = tgroup_home_id;
-
-	// meaning it's a rdma msg == is_rdma
-	reply->header.is_rdma = true;
-	((remote_thread_rdma_rw_t*) reply)
-								->rdma_header.remote_rkey = _cb->remote_rkey;
-	((remote_thread_rdma_rw_t*) reply)
-								->rdma_header.remote_addr = _cb->remote_addr;
-	((remote_thread_rdma_rw_t*) reply)
-								->rdma_header.rw_size = _cb->remote_len;
-
-	// RDMA R/W complete ACK
-	reply->rdma_header.rdma_ack = true;			// activator: 1 passive: 0
-	reply->rdma_header.is_write = false;
-
-	/* for wait station */
-	reply->remote_ws = inc_lmsg->remote_ws;
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	reply->rdma_ticket = dbg;					// dbg
-	reply->rw_ticket = request->rw_ticket;
-#endif
-
-	__ib_kmsg_send_long(request->header.from_nid,
-						(struct pcn_kmsg_message*) reply,
-						sizeof(*reply));
-
-	MSGPRINTK("%s(): end\n", __func__);
-	pcn_kmsg_free_msg(reply);
-	return;
-}
-
-static void __handle_remote_thread_rdma_read_response(
-										remote_thread_rdma_rw_t* inc_lmsg)
-{
-	remote_thread_rdma_rw_t* response =
-								(remote_thread_rdma_rw_t*) inc_lmsg;
-	struct krping_cb *_cb = cb[response->header.from_nid];
-
-	// READ DEBUG: check data (check response() not here)
-	CHECK_LOG("%s(): CHECK response->rdma_header.rw_size %d\n"
-							"dummy_act_buf,(first10) %.10s\n"
-							"dummy_act_buf(last 10) %.10s\n"
-							"rdma_ack %s\n\n\n",
-							__func__, response->rdma_header.rw_size,
-							dummy_act_buf,
-							response->rdma_header.rw_size>10?
-							dummy_act_buf+(response->rdma_header.rw_size-11):
-							dummy_act_buf,
-							response->rdma_header.rdma_ack?"true":"false");
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	DEBUG_LOG("response->rdma_hdr.remote_rkey %u remote_addr %p rw_size %u "
-							"rw_t %d recv_ticket %lu ack_rdma_ticket %d\n",
-									response->rdma_header.remote_rkey,
-									(void*)response->rdma_header.remote_addr,
-									response->rdma_header.rw_size,
-									response->rw_ticket,		// rdma dbg
-									response->header.ticket,	// send/recv dbg
-									response->rdma_ticket); 	// rdma dbg
-#endif
-
-
-#if CONFIG_POPCORN_IBWR_PAGE
-	unmap_act_page(_cb->conn_no);
-#else
-	//unmap_act(_cb->conn_no, response->rdma_header.rw_size);
-#endif
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	MSG_SYNC_PRK("///////READ active unlock() %d rw_t %d conn %d///////////\n",
-										(int)atomic_read(&_cb->active_cnt),
-										response->rw_ticket,
-										_cb->conn_no);
-#endif
-	mutex_unlock(&_cb->active_mutex);
-
-	MSGPRINTK("%s(): end\n", __func__);
-	return;
-}
-
-
-static void __handle_remote_thread_rdma_write_request(
-						remote_thread_rdma_rw_t* inc_lmsg, void* target_paddr)
-{
-	remote_thread_rdma_rw_t* request = 
-								(remote_thread_rdma_rw_t*) inc_lmsg;
-	remote_thread_rdma_rw_t *reply; 
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	unsigned long ts_wr_start, ts_wr_compose, ts_wr_post, ts_wr_end;
-#endif
-	struct krping_cb *_cb = cb[request->header.from_nid];
-	struct ib_send_wr *bad_wr; // for ib_post_send
-	int ret;
-
-/*
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
-	//struct page *target_page;
-	//pcn_kmsg_cbftn ftn;
-#else
-	char *target_paddr;
-#endif
-*/
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	MSGPRINTK("<<<<< passive WRITE request: my %d from %d rw_t %d "
-				"ticket %lu rdma_ticket %d  >>>>>\n", 
-				my_nid, request->header.from_nid, request->rw_ticket,
-				request->header.ticket, request->rdma_ticket);
-#endif
-	/* ib client  sending write key to [remote server] */
-	// get key, and conjuct to the cb
-	MSGDPRINTK("<<<<< rpc (remote request) r_write(remotely write)\n"); 
-
-	/* send        ----->   irq (recv)
-	 *                      [lock]
-	 *             <=====   perform WRITE
-	 *                      unlock
-	 * irq (recv)  <-----   send
-	 */
-
-/*
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
-	//- looking for the page (paddr) -//
-
-	//	0629: this part will be done before calling this function
-	//	call this func with assigning the target addr
-
-	// call page_server() for geting the page
-	//ftn = callbacks[inc_lmsg->header.type];
-	//if (ftn != NULL) {
-	//	target_page = (struct page*)ftn((void*)inc_lmsg);
-	//	if (!target_page)
-	//		goto out_write; // no page, don't write
-	//} else {
-	//	MSGPRINTK(KERN_INFO "No special action for this RDMA WRITE\n");
-	//	// force do ib write
-	//}
-
-#else
-	// mimicing
-	target_paddr = dummy_pass_buf;
-#endif
-*/
-
-	mutex_lock(&_cb->passive_mutex);
-	atomic_inc(&_cb->passive_cnt);
-	MSG_SYNC_PRK("/////////// WRITE passive lock() %d /////////////////\n",
-										(int)atomic_read(&_cb->passive_cnt));
-
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic page)
-	/* map the page (paddr) */
-	/*
-	// already got a page, set it up
-	_cb->pass_page = target_page;
-	// map the page
-	_cb->pass_paddr = ib_kmap_page(_cb->pass_page);
-	_cb->passive_dma_addr = ib_map_pass_page(_cb->pass_paddr, _cb->conn_no);
-	*/
-#else 						// (dynamic)
-	// use a dummy buf
-	_cb->passive_dma_addr = ib_map_pass(target_paddr, _cb->conn_no,
-												request->rdma_header.rw_size);
-#endif
-
-	// perform WRITE (passive side) + performance evaluation
-	// <time1 : compose msg info>
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	rdtscll(ts_wr_start);
-#endif
-
-	/* RDMA WRITE echo data */
-	// remote info:
-	 _cb->remote_rkey = ntohl(request->rdma_header.remote_rkey); // redaundant
-	 _cb->remote_addr = ntohll(request->rdma_header.remote_addr);// redaundant
-	 _cb->remote_len = request->rdma_header.rw_size;			 // redaundant
-
-	_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_WRITE;
-	_cb->rdma_sq_wr.rkey = _cb->remote_rkey;		// updated from remote!!!!
-	_cb->rdma_sq_wr.remote_addr = _cb->remote_addr;	// updated from remote!!!!
-	//_cb->rdma_sq_wr.wr.sg_list->length = _cb->remote_len;
-
-	_cb->rdma_sq_wr.wr.next = NULL;					// one work request
-	/*
-	struct ib_send_wr inv; // for ib_post_send
-	_cb->rdma_sq_wr.wr.next = &inv; // followed by a inv
-	memset(&inv, 0, sizeof inv);
-	inv.opcode = IB_WR_LOCAL_INV;
-	inv.ex.invalidate_rkey = _cb->reg_mr_pass->rkey;
-	inv.send_flags = IB_SEND_FENCE;
-	*/
-
-	// local info:
-	// note: rdma_sq_wr.wr.sg_list = &cb->rdma_sgl
-	_cb->rdma_sgl.length = _cb->remote_len;
-	_cb->rdma_sgl.addr = _cb->passive_dma_addr;		// local
-	// register local buf for performing R/W (rdma_rkey)
-	_cb->rdma_sgl.lkey = krping_rdma_rkey_passive(	// local
-						_cb, _cb->passive_dma_addr, 1, _cb->remote_len);
-						/*	In krping.c, they use 0 as the post_inv. */
-
-	CHECK_LOG("<<<<< WRITE request: my_nid %d from_nid %d, "
-						"lkey %d laddr %llx _cb->rdma_sgl.lkey %d, "
-						"remote_rkey %d remote_addr %p rw_size %d>>>>>\n", 
-						my_nid, request->header.from_nid, 
-						_cb->rdma_sq_wr.wr.sg_list->lkey,
-						(unsigned long long)_cb->rdma_sq_wr.wr.sg_list->addr,
-						_cb->rdma_sgl.lkey,
-						_cb->remote_rkey,
-						(void*)_cb->remote_addr,
-						_cb->remote_len);
-	
-	MSG_RDMA_PRK("ib_post_send W>>>>\n");
-	// <time 2: send>
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	rdtscll(ts_wr_compose);
-#endif
-
-	mutex_lock(&_cb->qp_mutex);
-	ret = ib_post_send(_cb->qp, &_cb->rdma_sq_wr.wr, &bad_wr);
-	mutex_unlock(&_cb->qp_mutex);
-	MSG_RDMA_PRK("ib_post_send W done>>>>\n");
-	if (ret) {
-		printk(KERN_ERR "post send error %d\n", ret);
-		return;
-	}
-	/*	if just sent a FENCE, this should be turned on */
-	//_cb->rdma_sq_wr.wr.next = NULL;
-
-	// <time 3: send request done>
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	rdtscll(ts_wr_post);
-#endif
-
-	/* Wait for completion */
-	ret = wait_event_interruptible(_cb->sem, 
-					atomic_read(&_cb->write_state) == RDMA_WRITE_COMPLETE);
-	atomic_set(&_cb->write_state, IDLE);
-	// <time 4: WRITE(task) done>
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	rdtscll(ts_wr_end);
-#endif
-
-	/* passive WRITE done */
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	/* time result */ 
-	DEBUG_LOG("W: %d K compose_time %lu post_time %lu "
-								"end_time %lu (cpu ticks)\n",
-								(request->rdma_header.rw_size+1)/1024,
-								ts_wr_compose-ts_wr_start, // +1 end char
-								ts_wr_post-ts_wr_start, ts_wr_end-ts_wr_start);
-#endif
-
-	// WRITE DEBUG: check data (check response() not here)
-	CHECK_LOG("<<<<< CHECK rpc (passive) R_WRITE DONE size %d\n"// done strlen %ld\n"
-						"_cb->rw_pass_buf(first10) \"%.10s\"\n"
-						"_cb->rw_pass_buf(last 10) \"%.10s\"\n\n\n",
-						request->rdma_header.rw_size,
-						//strlen(dummy_pass_buf),
-						dummy_pass_buf,
-						request->rdma_header.rw_size>10?
-						dummy_pass_buf+(request->rdma_header.rw_size-11):
-						dummy_pass_buf);
-
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
-	// put_page
-	unmap_pass_page(_cb->conn_no);
-#else
-	//unmap_pass(_cb->conn_no, request->rdma_header.rw_size);
-#endif
-
-	// nooe (check in response)
-
-	/* send ----->  irq
-					lock W
-	 *      <=====  perform WRITE
-					[unlock W]
-	 * irq  <-----  send
-	 */
-	MSG_SYNC_PRK("///////////// WRITE passive unlock() %d /////////////////\n",
-										(int)atomic_read(&_cb->passive_cnt));
-	mutex_unlock(&_cb->passive_mutex); // passive side
-
-
-
-	/* send W completion ACK */
-	DEBUG_LOG("send WRITE COMPLETION ACK\n");
-	reply = pcn_kmsg_alloc_msg(sizeof(*reply));
-	if (!reply)
-		BUG_ON(-1);
-
-	reply->header.type = request->rdma_header.rmda_type_res;
-	reply->header.prio = PCN_KMSG_PRIO_NORMAL;
-	//reply->tgroup_home_cpu = tgroup_home_cpu;
-	//reply->tgroup_home_id = tgroup_home_id;
-
-	// RDMA W/R complete ACK
-	reply->header.is_rdma = true;
-	((remote_thread_rdma_rw_t*) reply)->rdma_header.remote_rkey  
-														= _cb->remote_rkey;
-	((remote_thread_rdma_rw_t*) reply)->rdma_header.remote_addr
-														= _cb->remote_addr;
-	((remote_thread_rdma_rw_t*) reply)->rdma_header.rw_size
-														= _cb->remote_len;
-
-	// RDMA W/R complete ACK
-	reply->rdma_header.rdma_ack = true;		// activator: 1 passive: 0
-	reply->rdma_header.is_write = true;
-
-	/* for wait station */
-	reply->remote_ws = inc_lmsg->remote_ws;
-
-	__ib_kmsg_send_long(request->header.from_nid,
-				(struct pcn_kmsg_message*) reply, sizeof(*reply));
-
-
-	MSGPRINTK("%s(): end\n\n\n", __func__);
-	pcn_kmsg_free_msg(reply);
-	return; 
-}
-
-static void __handle_remote_thread_rdma_write_response(
-										remote_thread_rdma_rw_t* inc_lmsg)
-{
-	remote_thread_rdma_rw_t* response =
-								(remote_thread_rdma_rw_t*) inc_lmsg;
-	struct krping_cb *_cb = cb[response->header.from_nid];
-
-	// WRITE DEBUG: check data (check here not write_request())
-	CHECK_LOG("%s(): CHECK response->header.rw_size %d\n"
-								"dummy_act_buf(first10) %.10s\n"
-								"dummy_act_buf(last 10) %.10s\n"
-								"rdma_ack %s(==true)\n\n\n",
-								__func__, response->rdma_header.rw_size,
-
-#if CONFIG_POPCORN_IBWR_PAGE // (dynamic)
-								"IB_PAGE not support",
-								"IB_PAGE not support",
-								// canot debug if using dynamically remaping buf
-#else
-								dummy_act_buf,
-								response->rdma_header.rw_size>10?
-								dummy_act_buf+(response->rdma_header.rw_size-11):
-								dummy_act_buf,
-#endif
-								response->rdma_header.rdma_ack?"true":"false");
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	DEBUG_LOG("CHECK response->header.remote_rkey %u remote_addr %p "
-							"rw_size %u rw_t %d ticket %lu rdma_ticket %d\n",
-									response->rdma_header.remote_rkey,
-									(void*)response->rdma_header.remote_addr,
-												response->rdma_header.rw_size,
-												response->rw_ticket,
-												response->header.ticket,
-												response->rdma_ticket);
-#endif
-
-#if CONFIG_POPCORN_IBWR_PAGE
-	unmap_act_page(_cb->conn_no);
-#else
-	//unmap_act(_cb->conn_no, response->rdma_header.rw_size);
-#endif
-
-	MSG_SYNC_PRK("/////////////WRITE active unlock() %d////////////////\n",
-											(int)atomic_read(&_cb->active_cnt));
-	mutex_unlock(&_cb->active_mutex);
-
-
-	MSGPRINTK("%s(): end\n\n\n", __func__);
-	return;
-}
-
-/* paddr: ptr of pages you wanna perform on passive side
+ * Your request must be done by kmalloc().
+ * You have to free by yourself
  *
+ * rw_size: size you wanna passive remote to READ/WRITE
  */
-void handle_rdma_request(remote_thread_rdma_rw_t *inc_lmsg, void *paddr)
+int ib_kmsg_send_rdma(unsigned int dest_cpu, remote_thread_rdma_rw_t *lmsg,
+					  unsigned int msg_size, unsigned int rw_size)
 {
-	remote_thread_rdma_rw_t *lmsg = inc_lmsg;
-	if (lmsg->header.is_rdma) {
-		/* Jack: enforced RW routine */
-		/* rdmaRW signal msgs "req"/"ack" */
-		if (!lmsg->rdma_header.rdma_ack) {
-			if (lmsg->rdma_header.is_write)
-				__handle_remote_thread_rdma_write_request(lmsg, paddr);
-			else
-				__handle_remote_thread_rdma_read_request(lmsg, paddr);
-		}
-		else { // ack
-			if (lmsg->rdma_header.is_write)
-				__handle_remote_thread_rdma_write_response(lmsg);
-			else
-				__handle_remote_thread_rdma_read_response(lmsg);
-		}
-	}
-	else {
-		printk(KERN_ERR "This is not a rdma request you shouldn't call"
-							"\"pcn_kmsg_handle_remote_rdma_request\"\n"
-							"from=%u, type=%d, msg_size=%u\n\n",
-							lmsg->header.from_nid,
-							lmsg->header.type,
-							lmsg->header.size);
-	}
-}
-EXPORT_SYMBOL(handle_rdma_request);
+	uint32_t rkey;
+	struct krping_cb *_cb = cb[dest_cpu];
+	MSGDPRINTK("%s(): \n", __func__);
 
-
-/* action for bottom half
- * handler no longer has to kfree the lmsg !!
- */
-static void pcn_kmsg_handler_BottomHalf(struct work_struct * work)
-{
-	pcn_kmsg_work_t *w = (pcn_kmsg_work_t *) work;
-	struct pcn_kmsg_message *lmsg; // for user to free
-	pcn_kmsg_cbftn ftn;
-
-	MSGPRINTK("%s(): \n", __func__);
-
-	lmsg = w->lmsg;
-
-	if ( lmsg->header.type < 0 || lmsg->header.type >= PCN_KMSG_TYPE_MAX) {
-		printk(KERN_ERR "Received invalid message type %d > MAX %d\n",
-									lmsg->header.type, PCN_KMSG_TYPE_MAX);
-	}
-	else {
-
-#if 0
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-		// you don't know whether is a rdma request or not
-		printk(" Grabing to callbacks kwq->lmsg->header.type %d %s "
-							"kwq->lmsg->header.size %d is_rdma %d rw_t %d\n",
-							lmsg->header.type,
-							lmsg->header.type==2?"REQUEST":"RESPONSE",
-							lmsg->header.size,
-							(int)lmsg->header.is_rdma,
-							lmsg->rw_ticket);
-#endif
-#endif
-		/*
-		if (lmsg->header.is_rdma) {
-			//- Jack: enforced RW routine -//
-			//- rdmaRW signal msgs "req"/"ack" -//
-			if (!((remote_thread_rdma_rw_t*)lmsg)->rdma_header.rdma_ack) {
-				if (((remote_thread_rdma_rw_t*)lmsg)->rdma_header.is_write)
-					handle_remote_thread_rdma_write_request(lmsg);
-				else
-					handle_remote_thread_rdma_read_request(lmsg);
-			}
-			else { // ack
-				if (((remote_thread_rdma_rw_t*)lmsg)->rdma_header.is_write)
-					handle_remote_thread_rdma_write_response(lmsg);
-				else
-					handle_remote_thread_rdma_read_response(lmsg);
-			}
-		}
-		else {	//- normal msg - //
-		*/
-			ftn = callbacks[lmsg->header.type];
-			if (ftn != NULL) {
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-				atomic_inc(&recv_pattern[lmsg->header.size]);
-#endif
-				ftn((void*)lmsg);
-			} else {
-				MSGPRINTK(KERN_INFO "Recieved message type %d size %d "
-										"has no registered callback!\n",
-										lmsg->header.type, lmsg->header.size);
-				pcn_kmsg_free_msg(lmsg);
-				BUG_ON(-1);
-			}
-		//}
-	}
-
-	MSGPRINTK("%s(): done & free everything\n\n", __func__);
-	kfree((void*)w);
-	return;
-}
-
-/*
- * parse recved msg in the buf to msg_layer
- * in INT
- */
-static int ib_kmsg_recv_long(struct krping_cb *_cb,
-							 struct wc_struct *wcs)
-{
-	struct pcn_kmsg_message *lmsg = wcs->element_addr;
-	pcn_kmsg_work_t *kmsg_work;
-
-	if (unlikely( lmsg->header.size > sizeof(struct pcn_kmsg_message))) {
-		printk(KERN_ERR "Received invalide message size > MAX %lu\n", 
-									sizeof(struct pcn_kmsg_message));
+	if (!lmsg->rdma_header.your_buf_ptr || rw_size < 0)
 		BUG();
+
+	if (dest_cpu == my_nid) {
+		printk(KERN_ERR "No support for sending msg to itself %d\n", dest_cpu);
+		return 0;
 	}
 
-	DEBUG_LOG("%s(): producing BottomHalf wc->wr_id = lmsg %p header.size %d\n",
-						__func__, (void*)lmsg, lmsg->header.size);
+	lmsg->header.is_rdma = true;
+	lmsg->header.from_nid = my_nid;
+	lmsg->rdma_header.rdma_ack = false;
+	lmsg->rdma_header.rw_size = rw_size;
 
-	// - alloc & cpy msg to kernel buffer
-	kmsg_work = kmalloc(sizeof(pcn_kmsg_work_t), GFP_ATOMIC);
-	if (unlikely(!kmsg_work)) {
-		printk("Failed to kmalloc work structure!\n");
-		BUG();
-	}
-	kmsg_work->lmsg = kmalloc(lmsg->header.size, GFP_ATOMIC);
-	if (unlikely(!kmsg_work->lmsg)) {
-		printk("Failed to kmalloc msg in work structure!\n");
-		BUG();
-	}
+	/* kmsg
+	 * if R/W
+	 * [lock]
+	 * send		 ----->   irq (recv)
+	 *					   |-lock R/W
+	 *					   |-perform READ
+	 *					   |-unlock R/W
+	 * irq (recv)   <-----   |-send
+	 *  |-unlock
+	 */
+	
+	mutex_lock(&_cb->active_mutex);
+
+	_cb->active_dma_addr = __ib_map_act( lmsg->rdma_header.your_buf_ptr,
+													_cb->conn_no, rw_size);
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	MSG_RDMA_PRK("bf: Spwning BottomHalf, leaving INT "
-					"kwq->lmsg->header.type %d "
-					"kwq->lmsg->header.size %d rw_t %d\n",
-					lmsg->header.type,
-					lmsg->header.size,
-					lmsg->header.is_rdma?
-					((remote_thread_rdma_rw_t*)lmsg)->rw_ticket:-1);
-#endif
-	if (unlikely(!memcpy(kmsg_work->lmsg, lmsg, lmsg->header.size)))
-		BUG();
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	kmsg_work->lmsg->header.ticket = atomic_inc_return(&g_recv_ticket);
-	MSGPRINTK("%s() recv ticket %lu\n",
-						__func__, kmsg_work->lmsg->header.ticket);
+	lmsg->rw_ticket = atomic_inc_return(&_cb->g_all_ticket);
+	atomic_inc(&_cb->active_cnt);
 #endif
 
+	/* form rdma meta data */
+	rkey = __krping_rdma_rkey_act(_cb, _cb->active_dma_addr,
+								!_cb->server_invalidate, rw_size);
+
+	lmsg->rdma_header.remote_addr = htonll(_cb->active_dma_addr);
+	lmsg->rdma_header.remote_rkey = htonl(rkey);
+	CHECK_LOG("%s(): - @@@ cb[%d] rkey %d cb[]->active_dma_addr %p "
+												"lmsg->rw_size %d\n",
+												__func__, dest_cpu, rkey,
+												(void*)_cb->active_dma_addr,
+												 lmsg->rdma_header.rw_size);
+
+	// pcn_msg (abstraction msg layer)
+	//----------------------------------------------------------
+	// ib
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	MSG_RDMA_PRK("af: Spwning BottomHalf, leaving INT "
-						"kwq->lmsg->header.size %d\n",
-						kmsg_work->lmsg->header.type,
-						kmsg_work->lmsg->header.size);
-#endif 
+	lmsg->rdma_ticket = atomic_inc_return(&g_rw_ticket); // from 1
+	MSGPRINTK("%s(): rw ticket %d\n", __func__, lmsg->rdma_ticket);
+#endif
 
-	INIT_WORK((struct work_struct *)kmsg_work, pcn_kmsg_handler_BottomHalf);
-	if (unlikely(!queue_work(msg_handler, (struct work_struct *)kmsg_work)))
-		BUG();
+	__ib_kmsg_send_long(dest_cpu, (struct pcn_kmsg_message*) lmsg, msg_size);
 
-	/*
-	/// DON'T REALEASE BUT RECYCLE IT //
-	kfree(lmsg);
-	kfree(wcs->recv_sgl);
-	kfree(wcs->rq_wr);
-	kfree(wcs);
-	*/
+	MSGPRINTK("%s(): Sent 1 rdma request\n", __func__);
 	return 0;
 }
 
-static int krping_run_client(struct krping_cb *cb)
+
+int ib_kmsg_send_long(unsigned int dest_cpu,
+					  struct pcn_kmsg_message *lmsg,
+					  unsigned int msg_size)
 {
-	int ret;
-
-	KRPRINT_INIT("====================================\n");
-	KRPRINT_INIT("<<<<<<<< %s(): cb->conno %d >>>>>>>>\n", __func__, cb->conn_no);
-	KRPRINT_INIT("====================================\n");
-	ret = krping_bind_client(cb);
-	if (ret)
-		return ret;
-
-	ret = krping_setup_qp(cb, cb->cm_id);
-	if (ret) {
-		printk(KERN_ERR "setup_qp failed: %d\n", ret);
-		return ret;
-	}
-
-	ret = krping_setup_buffers(cb);
-	if (ret) {
-		printk(KERN_ERR "krping_setup_buffers failed: %d\n", ret);
-		goto err1;
-	}
-
-	ret = krping_connect_client(cb);
-	if (ret) {
-		printk(KERN_ERR "connect error %d\n", ret);
-		goto err2;
-	}
-	return 0;
-err2:
-	krping_free_buffers(cb);
-err1:
-	krping_free_qp(cb);
-	return ret;
+	lmsg->header.is_rdma = false;
+	return __ib_kmsg_send_long(dest_cpu, lmsg, msg_size);
 }
+
 
 
 // Initialize callback table to null, set up control and data channels
@@ -2182,7 +2207,8 @@ int __init initialize()
 	/* init dummy buffers for geting experimental data */
 	dummy_act_buf = kzalloc(MAX_MSG_LENGTH, GFP_KERNEL);
 	dummy_pass_buf = kzalloc(MAX_MSG_LENGTH, GFP_KERNEL);
-	if (!dummy_act_buf || !dummy_pass_buf) BUG();
+	if (!dummy_act_buf || !dummy_pass_buf)
+		BUG();
 	memset(dummy_act_buf, 'A', 10);
 	memset(dummy_act_buf+10, 'B', MAX_MSG_LENGTH-10);
 	memset(dummy_pass_buf, 'P', 10);
@@ -2230,8 +2256,10 @@ int __init initialize()
 		cb[i]->read_state.counter = IDLE;
 		cb[i]->write_state.counter = IDLE;
 
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 		cb[i]->active_cnt.counter = 0;
 		cb[i]->passive_cnt.counter = 0;
+#endif
 
 		/* For RECV wc_struct queue */
         INIT_LIST_HEAD(&wcs_wait_q[i].list);
@@ -2263,7 +2291,7 @@ int __init initialize()
 
 		/* 2. init uncommon parameters */
 		// server/client/myself
-		cb[i]->server = -1; // -1: myself
+		cb[i]->server = -1;
 
 		/* set up IPv4 address */
 		cb[i]->addr_str = ip_addresses[conn_no];
@@ -2277,7 +2305,7 @@ int __init initialize()
 												 cb[i]->addr, (int)PORT);
 
 		/* register event handler */
-		cb[i]->cm_id = rdma_create_id(&init_net, krping_cma_event_handler,
+		cb[i]->cm_id = rdma_create_id(&init_net, __krping_cma_event_handler,
 											cb[i], RDMA_PS_TCP, IB_QPT_RC);
 		if (IS_ERR(cb[i]->cm_id)) {
 			err = PTR_ERR(cb[i]->cm_id);
@@ -2319,7 +2347,7 @@ int __init initialize()
 			cb[conn_no]->server = 0;
 
 			// server/client dependant init
-			if (krping_run_client(cb[conn_no])) {
+			if (__krping_run_client(cb[conn_no])) {
 				printk("WRONG!!\n");
 				rdma_disconnect(cb[conn_no]->cm_id);
 				return err;
@@ -2338,7 +2366,7 @@ int __init initialize()
 	}
 
 	/* 2. <my_nid: connect / [>=my_nid: accept] */
-	krping_run_server(cb[my_nid]);
+	__krping_run_server(cb[my_nid]);
 
 
 	for ( i=0; i<MAX_NUM_NODES; i++ ) {
@@ -2347,7 +2375,7 @@ int __init initialize()
 			msleep(3000);
 		}
 	}
-	
+
 #if DEMON_POST_RECV_WCS
 	for (i=0; i<MAX_NUM_NODES; i++) {
 		if (i == my_nid)
@@ -2368,16 +2396,12 @@ int __init initialize()
 
 	/* testing code is in another module, msg_layer_test.ko */
 
-	if (!SMART_IB_MSG) {
-		send_callback = (send_cbftn)ib_kmsg_send_long;
-		send_callback_rdma = (send_rdma_cbftn)ib_kmsg_send_rdma;
-	} else {
-		send_callback = (send_cbftn)ib_kmsg_send_smart; // NOT SUPPORT
-	}
+	send_callback = (send_cbftn)ib_kmsg_send_long;
+	send_callback_rdma = (send_rdma_cbftn)ib_kmsg_send_rdma;
 	handle_rdma_callback = (handle_rdma_request_ftn)handle_rdma_request;
 	MSGPRINTK("Value of send ptr = %p\n", send_callback);
 	MSGPRINTK("--- Popcorn messaging layer is up ---\n");
-	
+
 	smp_mb();
 	printk("==================================================\n");
 	printk("----- Popcorn Messaging Layer IB Initialized -----\n");
@@ -2395,393 +2419,6 @@ out:
 	return err;
 }
 
-/*
- * return the (possibly rebound) rkey for the rdma buffer.
- * REG mode: invalidate and rebind via reg wr.
- * other modes: just return the mr rkey.
- */
-u32 krping_rdma_rkey(struct krping_cb *_cb, u64 buf, int post_inv, int rdma_len)
-{
-	u32 rkey;
-	struct ib_send_wr *bad_wr;
-	int ret;
-	struct scatterlist sg = {0};
-
-	/* old key - save corrent reg rkey (if dynamic) */
-	_cb->inv_wr_act.ex.invalidate_rkey = _cb->reg_mr_act->rkey;
-
-	/* Update the reg key - keeps the key the same */
-	ib_update_fast_reg_key(_cb->reg_mr_act, _cb->key);
-	_cb->reg_mr_wr_act.key = _cb->reg_mr_act->rkey;
-
-	/* Setup permissions, reg_mr_wr_pass is in another function */
-	/*	In krping.c
-	 *	local going to perform READ: IB_ACCESS_REMOTE_READ
-	 *
-	 *	local going to perform WRITE: 	IB_ACCESS_LOCAL_WRITE |
-	 *									IB_ACCESS_REMOTE_WRITE
-	 */
-	_cb->reg_mr_wr_act.access = IB_ACCESS_REMOTE_READ	|// local going to perform
-							IB_ACCESS_REMOTE_WRITE	|
-							IB_ACCESS_LOCAL_WRITE	|
-							IB_ACCESS_REMOTE_ATOMIC; // unsafe but works
-
-
-	sg_dma_address(&sg) = buf;			// passed by caller
-	sg_dma_len(&sg) = rdma_len;			// R/W length
-	DEBUG_LOG("%s(): rdma_len (dynamical) %d\n", __func__, sg_dma_len(&sg));
-
-	ret = ib_map_mr_sg(_cb->reg_mr_act, &sg, 1, PAGE_SIZE);
-										// snyc ib_dma_sync_single_for_cpu/dev
-	/**
-	 * ib_map_mr_sg() - Map the largest prefix of a dma mapped SG list
-	 *     and set it the memory region.
-	 * @mr:            memory region
-	 * @sg:            dma mapped scatterlist
-	 * @sg_nents:      number of entries in sg
-	 * @sg_offset:     offset in bytes into sg
-	 * @page_size:     page vector desired page size
-	 *
-	 * Constraints:
-	 * - The first sg element is allowed to have an offset.
-	 * - Each sg element must be aligned to page_size (or physically
-	 *   contiguous to the previous element). In case an sg element has a
-	 *   non contiguous offset, the mapping prefix will not include it.
-	 * - The last sg element is allowed to have length less than page_size.
-	 * - If sg_nents total byte length exceeds the mr max_num_sge * page_size
-	 *   then only max_num_sg entries will be mapped.
-	 * - If the MR was allocated with type IB_MR_TYPE_SG_GAPS_REG, non of these
-	 *   constraints holds and the page_size argument is ignored.
-	 *
-	 * Returns the number of sg elements that were mapped to the memory region.
-	 *
-	 * After this completes successfully, the  memory region
-	 * is ready for registration.
-	 */
-
-	BUG_ON(ret <= 0 || ret > _cb->page_list_len);
-
-	DEBUG_LOG("%s(): ### post_inv = %d, reg_mr_act new rkey %d pgsz %u len %u"
-			" rdma_len (dynamical) %d iova_start %llx\n", __func__, post_inv,
-			_cb->reg_mr_wr_act.key, _cb->reg_mr_act->page_size, _cb->reg_mr_act->length,
-			rdma_len, _cb->reg_mr_act->iova);
-
-	mutex_lock(&_cb->qp_mutex);
-	if (likely(post_inv)) // becaus remote doesn't have inv, so manual? then W?
-		ret = ib_post_send(_cb->qp, &_cb->inv_wr_act, &bad_wr);	// INV+MR
-	else
-		ret = ib_post_send(_cb->qp, &_cb->reg_mr_wr_act.wr, &bad_wr);	// 	MR
-					// by passive WRITE in krping.c
-					// I guess in krping.c first do READ then WRITE and same buf
-					// so the second WRITE doesn't have to invalidate it
-	mutex_unlock(&_cb->qp_mutex);
-
-	if (ret) {
-		printk(KERN_ERR "post send error %d\n", ret);
-		atomic_set(&_cb->state, ERROR);
-		atomic_set(&_cb->send_state, ERROR);
-		atomic_set(&_cb->read_state, ERROR);
-		atomic_set(&_cb->write_state, ERROR);
-	}
-
-	rkey = _cb->reg_mr_act->rkey;
-	return rkey;
-}
-
-u32 krping_rdma_rkey_passive(struct krping_cb *_cb,
-							 u64 buf, int post_inv, int rdma_len)
-{
-	u32 rkey;
-	struct ib_send_wr *bad_wr;
-	int ret;
-	struct scatterlist sg = {0};
-
-
-	/* key generated by local and used for remote - going to be invalidated*/
-	_cb->inv_wr_pass.ex.invalidate_rkey = _cb->reg_mr_pass->rkey;
-
-	/* update new key */
-	ib_update_fast_reg_key(_cb->reg_mr_pass, _cb->key);
-	_cb->reg_mr_wr_pass.key = _cb->reg_mr_pass->rkey;
-
-	/*	In krping.c
-	 *	local going to perform READ: IB_ACCESS_REMOTE_READ
-	 *
-	 *	local going to perform WRITE: 	IB_ACCESS_LOCAL_WRITE |
-	 *									IB_ACCESS_REMOTE_WRITE
-	 */
-	_cb->reg_mr_wr_pass.access = IB_ACCESS_REMOTE_READ	|
-									IB_ACCESS_REMOTE_WRITE	|
-									IB_ACCESS_LOCAL_WRITE	|
-									IB_ACCESS_REMOTE_ATOMIC;
-
-	sg_dma_address(&sg) = buf;
-	sg_dma_len(&sg) = rdma_len;
-
-	ret = ib_map_mr_sg(_cb->reg_mr_pass, &sg, 1, PAGE_SIZE);
-	BUG_ON(ret <= 0 || ret > _cb->page_list_len);
-
-	/**
-	 * ib_map_mr_sg() - Map the largest prefix of a dma mapped SG list
-	 *     and set it the memory region.
-	 * @mr:            memory region
-	 * @sg:            dma mapped scatterlist
-	 * @sg_nents:      number of entries in sg
-	 * @sg_offset:     offset in bytes into sg
-	 * @page_size:     page vector desired page size
-	 *
-	 * Constraints:
-	 * - The first sg element is allowed to have an offset.
-	 * - Each sg element must be aligned to page_size (or physically
-	 *   contiguous to the previous element). In case an sg element has a
-	 *   non contiguous offset, the mapping prefix will not include it.
-	 * - The last sg element is allowed to have length less than page_size.
-	 * - If sg_nents total byte length exceeds the mr max_num_sge * page_size
-	 *   then only max_num_sg entries will be mapped.
-	 * - If the MR was allocated with type IB_MR_TYPE_SG_GAPS_REG, non of these
-	 *   constraints holds and the page_size argument is ignored.
-	 *
-	 * Returns the number of sg elements that were mapped to the memory region.
-	 *
-	 * After this completes successfully, the  memory region
-	 * is ready for registration.
-	 */
-
-	MSG_RDMA_PRK("%s(): ### post_inv = %d, reg_mr_wr_pass new rkey %d "
-				 "pgsz %u len %u rdma_len (dynamical) %d iova_start %llx\n",
-				 __func__, post_inv, _cb->reg_mr_wr_pass.key,
-				 _cb->reg_mr_pass->page_size, _cb->reg_mr_pass->length,
-										rdma_len, _cb->reg_mr_pass->iova);
-
-	mutex_lock(&_cb->qp_mutex);
-
-	/* in krping.c, READ: likely, WRITE: unlikely. BUT NOT HERE */
-	if (likely(post_inv))
-		ret = ib_post_send(_cb->qp, &_cb->inv_wr_pass, &bad_wr);
-	else
-		ret = ib_post_send(_cb->qp, &_cb->reg_mr_wr_pass.wr, &bad_wr);
-	mutex_unlock(&_cb->qp_mutex);
-
-	if (ret) {
-		printk(KERN_ERR "post send error %d\n", ret);
-		atomic_set(&_cb->state, ERROR);
-		atomic_set(&_cb->send_state, ERROR);
-		atomic_set(&_cb->read_state, ERROR);
-		atomic_set(&_cb->write_state, ERROR);
-	}
-
-	rkey = _cb->reg_mr_pass->rkey;
-	return rkey;
-}
-EXPORT_SYMBOL(krping_rdma_rkey_passive);
-
-/*
- * Your request must be done by kmalloc().
- * You have to free by yourself
- *
- * rw_size: size you wanna passive remote to READ/WRITE
- */
-int ib_kmsg_send_rdma(unsigned int dest_cpu, remote_thread_rdma_rw_t *lmsg,
-					  unsigned int msg_size, unsigned int rw_size)
-{
-	uint32_t rkey;
-#if CONFIG_POPCORN_IBWR_PAGE
-	struct krping_cb *_cb = cb[dest_cpu];
-#else
-	struct krping_cb *_cb = cb[dest_cpu];
-#endif
-	MSGDPRINTK("%s(): \n", __func__);
-
-	if (!lmsg->rdma_header.your_buf_ptr ||
-			rw_size < 0)
-		BUG();
-
-	// info setup
-	lmsg->header.is_rdma = true;
-	lmsg->rdma_header.rw_size = rw_size;
-
-	/* kmsg
-	 * if R/W
-	 * [lock]
-	 * send		 ----->   irq (recv)
-	 *					   |-lock R/W
-	 *					   |-perform READ
-	 *					   |-unlock R/W
-	 * irq (recv)   <-----   |-send
-	 *  |-unlock
-	 */
-	
-	mutex_lock(&_cb->active_mutex);
-
-#if CONFIG_POPCORN_IBWR_PAGE
-	// alloc or use a page
-	_cb->act_page = ib_alloc_page();
-	// map the page
-	_cb->act_paddr = ib_kmap_page(_cb->act_page);
-	_cb->active_dma_addr = ib_map_act_page(_cb->act_paddr, _cb->conn_no);
-#else
-	_cb->active_dma_addr = ib_map_act( lmsg->rdma_header.your_buf_ptr,
-													_cb->conn_no, rw_size);
-#endif
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	lmsg->rw_ticket = atomic_inc_return(&_cb->g_all_ticket);
-#endif
-	
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	atomic_inc(&_cb->active_cnt);  // lock dbg
-#endif
-
-	/* form rdma meta data */
-	MSGPRINTK("krping_format_W/R info(): \n"); // composing a W/R ACK (active)
-	rkey = krping_rdma_rkey(_cb, _cb->active_dma_addr,
-								!_cb->server_invalidate,
-												rw_size);
-							// active_dma_addr is sent for remote READ/WRITE
-													// failed to trun inv off
-	
-	lmsg->rdma_header.remote_addr = htonll(_cb->active_dma_addr);
-	lmsg->rdma_header.remote_rkey = htonl(rkey);
-	CHECK_LOG("%s(): - @@@ cb[%d] rkey %d cb[]->active_dma_addr %p "
-												"lmsg->rw_size %d\n",
-												__func__, dest_cpu, rkey,
-												(void*)_cb->active_dma_addr,
-												 lmsg->rdma_header.rw_size);
-
-	lmsg->header.from_nid = my_nid;
-	lmsg->rdma_header.rdma_ack = false;
-
-	if (dest_cpu == my_nid) {
-		printk(KERN_ERR "No support for sending msg to itself %d\n", dest_cpu);
-		printk(KERN_ERR "No support for sending msg to itself %d\n", dest_cpu);
-		printk(KERN_ERR "No support for sending msg to itself %d\n", dest_cpu);
-		return 0;
-	}
-
-	// pcn_msg (abstraction msg layer)
-	//----------------------------------------------------------
-	// ib
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	lmsg->rdma_ticket = atomic_inc_return(&g_rw_ticket); // from 1
-	MSGPRINTK("%s(): rw ticket %d\n", __func__, lmsg->rdma_ticket);
-#endif
-
-	// send signal/request
-	__ib_kmsg_send_long(dest_cpu, (struct pcn_kmsg_message*) lmsg, msg_size);
-									//lmsg is a container. real msg is smaller
-
-	MSGPRINTK("%s(): Sent 1 rdma request\n", __func__);
-	return 0;
-}
-
-
-int ib_kmsg_send_long(unsigned int dest_cpu,
-					  struct pcn_kmsg_message *lmsg,
-					  unsigned int msg_size)
-{
-	lmsg->header.is_rdma = false;
-	return __ib_kmsg_send_long(dest_cpu, lmsg, msg_size);
-}
-
-/*
- * User doesn't have to take care of concurrency problems.
- * This func will take care of it.
- * User has to free the allocated mem manually since they can reuse their buf
- */
-int __ib_kmsg_send_long(unsigned int dest_cpu,
-					  struct pcn_kmsg_message *lmsg,
-					  unsigned int msg_size)
-{
-	int ret;
-	struct ib_send_wr *bad_wr;
-
-	lmsg->header.size = msg_size;
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-#if 0
-	MSGPRINTK("%s(): - msg_size %d sizeof(lmsg->header) %ld ack %s\n",
-							__func__, msg_size, sizeof(lmsg->header),
-									lmsg->rdma_header.rdma_ack?"true":"false");
-#endif
-#endif
-
-	// check size with ib_send window size
-	if ( lmsg->header.size > sizeof(struct pcn_kmsg_message)) {
-		printk("%s(): ERROR - MSG %d larger than MAX_MSG_SIZE %ld\n",
-			__func__, lmsg->header.size, sizeof(struct pcn_kmsg_message));
-		BUG();
-	}
-
-	lmsg->header.from_nid = my_nid;
-
-	if (dest_cpu == my_nid) {
-		printk(KERN_ERR "No support for sending msg to itself %d\n", dest_cpu);
-		return 0;
-	}
-
-	// pcn_msg (abstraction msg layer)
-	//----------------------------------------------------------
-	// ib
-
-	/* rdma w/r */
-	/*
-	if ( lmsg->header.is_rdma ) {
-		; // This msg is just a (RDMA READ/WRITE) signal
-	}*/
-		
-	MSG_SYNC_PRK("//////////////////lock() conn %d///////////////\n", dest_cpu);
-	mutex_lock(&cb[dest_cpu]->send_mutex); // send lock
-
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	lmsg->header.ticket = atomic_inc_return(&g_send_ticket); // from 1
-	MSGPRINTK("%s(): send ticket %lu\n", __func__, lmsg->header.ticket);
-#endif
-
-	__setup_send_wr(cb[dest_cpu], lmsg);
-	mutex_lock(&cb[dest_cpu]->qp_mutex); 	// qp lock since RW&inv 
-											// signal will use it as well
-	ret = ib_post_send(cb[dest_cpu]->qp, &cb[dest_cpu]->sq_wr, &bad_wr); 
-					// sq_wr is hardcoded used for send&recv, rdma_sq_wr for W/R
-	mutex_unlock(&cb[dest_cpu]->qp_mutex);
-
-	wait_event_interruptible(cb[dest_cpu]->sem,
-				atomic_read(&cb[dest_cpu]->send_state) == RDMA_SEND_COMPLETE);
-	// because of this, I don't have to enq/deq()
-
-	atomic_set(&cb[dest_cpu]->send_state, IDLE); // don't let it stay the state
-
-	// unmap
-	dma_unmap_single(cb[dest_cpu]->pd->device->dma_device,
-			 pci_unmap_addr(cb[dest_cpu], send_mapping),
-			 sizeof(cb[dest_cpu]->send_buf), DMA_BIDIRECTIONAL);
-
-	mutex_unlock(&cb[dest_cpu]->send_mutex);
-	MSG_SYNC_PRK("//////////////unlock() conn %d///////////////\n", dest_cpu);
-	MSGDPRINTK("1 msg sent to dest_cpu %d!!!!!!\n\n", dest_cpu);
-	return 0;
-}
-
-
-/* WRONG DESIGN*/
-int ib_kmsg_send_smart(unsigned int dest_cpu,
-					  struct pcn_kmsg_message *lmsg,
-					  unsigned int msg_size)
-{
-	printk("NOT SUPPORT\n");
-	return -1;
-/*
-	if ( msg_size > (sizeof(*lmsg)) ) {
-		if ( unlikely(msg_size > MAX_RDMA_SIZE) ) {
-			printk(KERN_ERR "%s(): ERROR - R/W size %u "
-							"is larger than MAX_RDMA_SIZE %d\n",
-							__func__, msg_size, MAX_RDMA_SIZE);
-			BUG();
-		}
-		return ib_kmsg_send_rdma(dest_cpu, lmsg, sizeof(), msg_size); // WRONG DESIGN
-	}
-	return ib_kmsg_send_long(dest_cpu, lmsg, msg_size);
-*/
-}
 
 /*
  *  Not yet done.

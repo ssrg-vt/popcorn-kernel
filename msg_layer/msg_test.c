@@ -31,7 +31,7 @@
 
 #include "common.h"
 
-#define MAX_MSG_LENGTH 65536	// max msg payload size supported by msg_test.c
+#define MAX_MSG_LENGTH PCN_KMSG_LONG_PAYLOAD_SIZE
 
 /* testing args */
 #define ITER 1					// iter for test10 (send throughput)

@@ -144,7 +144,7 @@ struct pcn_kmsg_hdr {
 
 #define CACHE_LINE_SIZE 64
 #define PCN_KMSG_PAYLOAD_SIZE (CACHE_LINE_SIZE - sizeof(struct pcn_kmsg_hdr))
-#define PCN_KMSG_LONG_PAYLOAD_SIZE 65536+64
+#define PCN_KMSG_LONG_PAYLOAD_SIZE 65536
 
 #define DEFINE_PCN_KMSG(type, fields) \
 	typedef struct {				\
@@ -158,6 +158,7 @@ struct pcn_kmsg_hdr {
    in the header. */
 struct pcn_kmsg_message {
 	struct pcn_kmsg_hdr header;
+	struct pcn_kmsg_rdma_hdr;
 	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
 }__attribute__((packed)) __attribute__((aligned(CACHE_LINE_SIZE)));
 
