@@ -153,15 +153,6 @@ struct pcn_kmsg_hdr {
 	}__attribute__((packed)) type
 
 
-/* Struct for the actual messages.  Note that hdr and payload are flipped
-   when this actually goes out, so the receiver can poll on the ready bit
-   in the header. */
-struct pcn_kmsg_message {
-	struct pcn_kmsg_hdr header;
-	struct pcn_kmsg_rdma_hdr;
-	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
-}__attribute__((packed)) __attribute__((aligned(CACHE_LINE_SIZE)));
-
 /* rdma header */
 struct pcn_kmsg_rdma_hdr {
     bool is_write;				/* is a READ/WRITE request */
@@ -172,6 +163,15 @@ struct pcn_kmsg_rdma_hdr {
     void *your_buf_ptr;			/* will be copied to R/W buffer */
     enum pcn_kmsg_type rmda_type_res;	/* response callback func */
 };
+
+/* Struct for the actual messages.  Note that hdr and payload are flipped
+   when this actually goes out, so the receiver can poll on the ready bit
+   in the header. */
+struct pcn_kmsg_message {
+	struct pcn_kmsg_hdr header;
+	struct pcn_kmsg_rdma_hdr rdma_header;
+	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
+}__attribute__((packed)) __attribute__((aligned(CACHE_LINE_SIZE)));
 
 /* Template for RDMA request/ack */
 typedef struct {

@@ -1,4 +1,15 @@
 
+Popcorn Messaging Layer supports
+- Loopback messaging layer
+	msg_loopback.ko
+- Ethernet messaging layer
+	msg_socket.ko
+- PCIe messaging layer
+	msg_dolphin.ko
+- Infiniband messaging layer
+	msg_ib.ko
+____________________________________________________________________________________
+
 PCIe messaging layer
 ____________________________________________________________________________________
 

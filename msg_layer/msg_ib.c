@@ -64,6 +64,7 @@
  */
 
 // features been developed
+#define CONFIG_FARM 1
 #define DEMON_POST_RECV_WCS 0
 
 #define POPCORN_DEBUG_MSG_IB 0
@@ -1373,8 +1374,8 @@ int __ib_kmsg_send_long(unsigned int dest_cpu,
 
 	// unmap
 	dma_unmap_single(cb[dest_cpu]->pd->device->dma_device,
-			 pci_unmap_addr(cb[dest_cpu], send_mapping),
-			 sizeof(cb[dest_cpu]->send_buf), DMA_BIDIRECTIONAL);
+					 pci_unmap_addr(cb[dest_cpu], send_mapping),
+					 sizeof(cb[dest_cpu]->send_buf), DMA_BIDIRECTIONAL);
 
 	mutex_unlock(&cb[dest_cpu]->send_mutex);
 	MSG_SYNC_PRK("//////////////unlock() conn %d///////////////\n", dest_cpu);
@@ -1637,7 +1638,10 @@ static void __handle_remote_thread_rdma_write_request(
 {
 	remote_thread_rdma_rw_t* request =
 								(remote_thread_rdma_rw_t*) inc_lmsg;
+#if !CONFIG_FARM
 	remote_thread_rdma_rw_t *reply;
+#endif
+
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	unsigned long ts_wr_start, ts_wr_compose, ts_wr_post, ts_wr_end;
 #endif
@@ -1717,7 +1721,7 @@ static void __handle_remote_thread_rdma_write_request(
 						_cb->rdma_sq_wr.wr.sg_list->lkey,
 						(unsigned long long)_cb->rdma_sq_wr.wr.sg_list->addr,
 						_cb->rdma_sgl.lkey, _cb->remote_rkey,
-						(void*)_cb->remote_addr, cb->remote_len);
+						(void*)_cb->remote_addr, _cb->remote_len);
 
 	MSG_RDMA_PRK("ib_post_send W>>>>\n");
 	// <time 2: send>
@@ -1783,6 +1787,7 @@ static void __handle_remote_thread_rdma_write_request(
 #endif
 	mutex_unlock(&_cb->passive_mutex);
 
+#if !CONFIG_FARM
 	/* send W completion ACK */
 	DEBUG_LOG("send WRITE COMPLETION ACK\n");
 	reply = pcn_kmsg_alloc_msg(sizeof(*reply));
@@ -1810,16 +1815,23 @@ static void __handle_remote_thread_rdma_write_request(
 
 	MSGPRINTK("%s(): end\n\n\n", __func__);
 	pcn_kmsg_free_msg(reply);
+#endif
 	return;
 }
 
 static void __handle_remote_thread_rdma_write_response(
 										remote_thread_rdma_rw_t* inc_lmsg)
 {
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	remote_thread_rdma_rw_t* response =
 								(remote_thread_rdma_rw_t*) inc_lmsg;
-	struct krping_cb *_cb = cb[response->header.from_nid];
+#endif
 
+#if !CONFIG_FARM
+	struct krping_cb *_cb = cb[response->header.from_nid];
+#endif
+
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	CHECK_LOG("%s(): CHECK response->header.rw_size %d\n"
 								"dummy_act_buf(first10) %.10s\n"
 								"dummy_act_buf(last 10) %.10s\n"
@@ -1830,6 +1842,7 @@ static void __handle_remote_thread_rdma_write_response(
 								dummy_act_buf+(response->rdma_header.rw_size-11):
 								dummy_act_buf,
 								response->rdma_header.rdma_ack?"true":"false");
+#endif
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	DEBUG_LOG("CHECK response->header.remote_rkey %u remote_addr %p "
@@ -1844,9 +1857,10 @@ static void __handle_remote_thread_rdma_write_response(
 											(int)atomic_read(&_cb->active_cnt));
 #endif
 
+#if !CONFIG_FARM
 	//__unmap_act(_cb->conn_no, response->rdma_header.rw_size);
 	mutex_unlock(&_cb->active_mutex);
-
+#endif
 
 	MSGPRINTK("%s(): end\n\n\n", __func__);
 	return;
@@ -2110,6 +2124,7 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, remote_thread_rdma_rw_t *lmsg,
 					  unsigned int msg_size, unsigned int rw_size)
 {
 	uint32_t rkey;
+	char *poll_tail_at;
 	struct krping_cb *_cb = cb[dest_cpu];
 	MSGDPRINTK("%s(): \n", __func__);
 
@@ -2169,9 +2184,22 @@ int ib_kmsg_send_rdma(unsigned int dest_cpu, remote_thread_rdma_rw_t *lmsg,
 
 	__ib_kmsg_send_long(dest_cpu, (struct pcn_kmsg_message*) lmsg, msg_size);
 
+#if CONFIG_FARM
+	poll_tail_at = lmsg->rdma_header.your_buf_ptr + rw_size - 1;
+	/* poll at tail */
+	while (*poll_tail_at == 0)
+		schedule();
+	mutex_unlock(&_cb->active_mutex);
+#endif
 	MSGPRINTK("%s(): Sent 1 rdma request\n", __func__);
 	return 0;
 }
+
+void usr_rdma_poll_done(int dst_cpu)
+{
+	mutex_unlock(&cb[dst_cpu]->active_mutex);
+}
+EXPORT_SYMBOL(usr_rdma_poll_done);
 
 
 int ib_kmsg_send_long(unsigned int dest_cpu,
@@ -2206,6 +2234,9 @@ int __init initialize()
 
 	/* init dummy buffers for geting experimental data */
 	dummy_act_buf = kzalloc(MAX_MSG_LENGTH, GFP_KERNEL);
+	KRPRINT_INIT("act_buf c %c d %u\n",
+					(char)*(dummy_act_buf+MAX_MSG_LENGTH-1),
+					(unsigned int)((char)*(dummy_act_buf+MAX_MSG_LENGTH-1)));
 	dummy_pass_buf = kzalloc(MAX_MSG_LENGTH, GFP_KERNEL);
 	if (!dummy_act_buf || !dummy_pass_buf)
 		BUG();
