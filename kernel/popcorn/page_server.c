@@ -60,12 +60,9 @@ static inline bool fault_for_read(unsigned long flags)
  */
 
 enum {
-	FAULT_HANDLE_START = 0x01,
-	FAULT_HANDLE_RETRY = 0x02,
-	FAULT_HANDLE_DENIED = 0x04,
-
-	FAULT_HANDLE_LEADER = 0x10,
-	FAULT_HANDLE_INVALIDATE = 0x20,
+	FAULT_HANDLE_WRITE = 0x01,
+	FAULT_HANDLE_REMOTE = 0x02,
+	FAULT_HANDLE_INVALIDATE = 0x04,
 
 	FAULT_FLAG_REMOTE = 0x100,
 };
@@ -74,20 +71,40 @@ struct fault_handle {
 	struct list_head list;
 
 	unsigned long addr;
+	unsigned long flags;
 
-	bool write;
-	bool remote;
-
+	unsigned int limit;
 	unsigned int backoff;
 	pid_t pid;
 
-	int pendings;
+	unsigned int pendings;
 	wait_queue_head_t waits;
 	struct remote_context *rc;
 };
 
+static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsigned long addr)
+{
+	struct fault_handle *fh = kmalloc(sizeof(*fh), GFP_ATOMIC);
+	BUG_ON(!fh);
 
-static struct fault_handle *__check_fault_handling(struct task_struct *tsk, unsigned long addr)
+	INIT_LIST_HEAD(&fh->list);
+
+	fh->addr = addr;
+	fh->flags = 0;
+
+	init_waitqueue_head(&fh->waits);
+	fh->pendings = 1;
+	fh->limit = 0;
+	fh->backoff = 0;
+	fh->rc = get_task_remote(tsk);
+	fh->pid = tsk->pid;
+
+	list_add(&fh->list, &fh->rc->faults);
+	return fh;
+}
+
+
+static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsigned long addr)
 {
 	unsigned long flags;
 	struct remote_context *rc = get_task_remote(tsk);
@@ -101,20 +118,8 @@ static struct fault_handle *__check_fault_handling(struct task_struct *tsk, unsi
 		}
 	}
 
-	fh = kmalloc(sizeof(*fh), GFP_ATOMIC);
-
-	INIT_LIST_HEAD(&fh->list);
-	fh->addr = addr;
-
-	fh->write = true;
-	fh->remote = true;
-	init_waitqueue_head(&fh->waits);
-	fh->pendings = 1;
-	fh->backoff = 0;
-	fh->rc = get_task_remote(tsk);
-	fh->pid = tsk->pid;
-
-	list_add(&fh->list, &rc->faults);
+	fh = __alloc_fault_handle(tsk, addr);
+	fh->flags = FAULT_HANDLE_INVALIDATE;
 
 out_found:
 	spin_unlock_irqrestore(&rc->faults_lock, flags);
@@ -144,23 +149,37 @@ static int __start_fault_handling(struct task_struct *tsk, unsigned long addr, u
 	}
 
 	if (found) {
+		/* Invalidation cannot be merged with others */
+		if (fh->flags & FAULT_HANDLE_INVALIDATE) {
+			ongoing = "invalidate";
+			goto out_backoff;
+		}
+
 		/* Remote fault cannot be coalesced with others */
-		if (fh->remote) {
+		if (fh->flags & FAULT_HANDLE_REMOTE) {
 			ongoing = "remote";
+			if (fault_flags & FAULT_FLAG_REMOTE) {
+				goto out_retry;
+			}
 			goto out_backoff;
 		}
 		if (fault_flags & FAULT_FLAG_REMOTE) {
 			ongoing = "local";
 			if (!tsk->at_remote) {
 				goto out_retry;
-			} else {
-				goto out_backoff;
 			}
+			goto out_backoff;
 		}
 
 		/* Different fault types cannot be coalesced */
-		if (fh->write != fault_for_write(fault_flags)) {
-			ongoing = fh->write ? "write" : "read";
+		if (fault_for_write(fault_flags) ^ !!(fh->flags & FAULT_HANDLE_WRITE)) {
+			ongoing = (fh->flags & FAULT_HANDLE_WRITE) ? "write" : "read";
+			goto out_backoff;
+		}
+
+		/* Prevent starvation */
+		if (fh->limit++ > 8) {
+			ongoing = "limit";
 			goto out_backoff;
 		}
 
@@ -178,21 +197,12 @@ static int __start_fault_handling(struct task_struct *tsk, unsigned long addr, u
 		return true;
 	}
 
-	fh = kmalloc(sizeof(*fh), GFP_ATOMIC);
+	fh = __alloc_fault_handle(tsk, addr);
+	fh->flags |= fault_for_write(fault_flags) ? FAULT_HANDLE_WRITE : 0;
+	fh->flags |= (fault_flags & FAULT_FLAG_REMOTE) ? FAULT_HANDLE_REMOTE : 0;
 
-	INIT_LIST_HEAD(&fh->list);
-	fh->addr = addr;
-
-	fh->write = fault_for_write(fault_flags);
-	fh->remote = !!(fault_flags & FAULT_FLAG_REMOTE);
-	init_waitqueue_head(&fh->waits);
-	fh->pendings = 1;
-	fh->backoff = 0;
-	fh->rc = rc;
-	fh->pid = tsk->pid;
-
-	list_add(&fh->list, &rc->faults);
 	spin_unlock_irqrestore(&rc->faults_lock, flags);
+	put_task_remote(tsk);
 
 	*handle = fh;
 	*leader = true;
@@ -200,20 +210,19 @@ static int __start_fault_handling(struct task_struct *tsk, unsigned long addr, u
 
 out_backoff:
 	backoff = fh->backoff++;
+
 	spin_unlock_irqrestore(&rc->faults_lock, flags);
-
 	put_task_remote(tsk);
-	PGPRINTK("  [%d] %s ongoing. back off %d\n", tsk->pid, ongoing, backoff);
 
+	PGPRINTK("  [%d] %s ongoing. back off %d\n", tsk->pid, ongoing, backoff);
 	msleep(backoff);
 	return false;
 
 out_retry:
 	spin_unlock_irqrestore(&rc->faults_lock, flags);
-
 	put_task_remote(tsk);
-	PGPRINTK("  [%d] locked %s ongoing. retry\n", tsk->pid, ongoing);
 
+	PGPRINTK("  [%d] locked %s ongoing. retry\n", tsk->pid, ongoing);
 	*handle = NULL;
 	return true;
 }
@@ -545,7 +554,6 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 	pte_t *pte, entry;
 	spinlock_t *ptl;
 	int ret = 0;
-	int backoff = 0;
 	unsigned long addr = req->addr;
 	struct fault_handle *fh = NULL;
 
@@ -564,10 +572,10 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 
 	while (!fh) {
 		spin_lock(ptl);
-		if ((fh = __check_fault_handling(tsk, addr))) break;
+		if ((fh = __start_invalidation(tsk, addr))) break;
 		spin_unlock(ptl);
-		PGPRINTK("  [%d] back-off %d\n", tsk->pid, backoff++);
-		msleep(backoff);
+		PGPRINTK("  [%d] retry\n", tsk->pid);
+		schedule();
 	}
 
 	page = vm_normal_page(vma, addr, *pte);
@@ -576,6 +584,7 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 	clear_bit(my_nid, page->owners);
 	put_page(page);
 
+	BUG_ON(!pte_present(*pte));
 	entry = pte_make_invalid(*pte);
 	entry = pte_mkyoung(entry);
 
@@ -991,9 +1000,9 @@ again:
 		pte_t entry;
 
 		/* Prepare the page if it is not mine. This should be leader */
-		PGPRINTK("  [%d] %s%s\n",
-				tsk->pid, page_is_mine(page) ? "origin" : "",
-				test_bit(from_nid, page->owners) ? " remote": "");
+		PGPRINTK(" =[%d] %s%s\n",
+				tsk->pid, page_is_mine(page) ? "origin " : "",
+				test_bit(from_nid, page->owners) ? "remote": "");
 
 		if (test_bit(from_nid, page->owners)) {
 			BUG_ON(fault_for_read(fault_flags) && "Read fault from owner??");
