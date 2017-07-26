@@ -1425,12 +1425,14 @@ int page_server_handle_pte_fault(
  * Routing popcorn messages to workers
  */
 
-DEFINE_KMSG_WQ_HANDLER(remote_page_request);
-DEFINE_KMSG_NONBLOCK_WQ_HANDLER(remote_page_response);
-DEFINE_KMSG_WQ_HANDLER(page_invalidate_request);
-DEFINE_KMSG_NONBLOCK_WQ_HANDLER(page_invalidate_response);
+DEFINE_KMSG_WQ_HANDLER(PCN_WQ_REMOTE_PAGE_REQUEST, remote_page_request);
+DEFINE_KMSG_WQ_HANDLER(PCN_WQ_REMOTE_PAGE_RESPONSE, remote_page_response);
+DEFINE_KMSG_WQ_HANDLER(
+		PCN_WQ_PAGE_INVALIDATE_REQUEST, page_invalidate_request);
+DEFINE_KMSG_WQ_HANDLER(
+		PCN_WQ_PAGE_INVALIDATE_RESPONSE, page_invalidate_response);
+DEFINE_KMSG_WQ_HANDLER(PCN_WQ_REMOTE_PAGE_FLUSH_ACK, remote_page_flush_ack);
 DEFINE_KMSG_ORDERED_WQ_HANDLER(remote_page_flush);
-DEFINE_KMSG_NONBLOCK_WQ_HANDLER(remote_page_flush_ack);
 
 int __init page_server_init(void)
 {

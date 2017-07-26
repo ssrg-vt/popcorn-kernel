@@ -10,13 +10,12 @@
 #include <linux/workqueue.h>
 
 #include <popcorn/debug.h>
+#include "types.h"
 
-struct workqueue_struct *popcorn_wq;
+struct workqueue_struct *popcorn_wq[PCN_WQ_MAX];
 struct workqueue_struct *popcorn_ordered_wq;
-struct workqueue_struct *popcorn_nonblock_wq;
 EXPORT_SYMBOL(popcorn_wq);
 EXPORT_SYMBOL(popcorn_ordered_wq);
-EXPORT_SYMBOL(popcorn_nonblock_wq);
 
 extern int popcorn_ns_init(int);
 extern int pcn_kmsg_init(void);
@@ -30,6 +29,7 @@ extern int remote_mem_info_init(void);
 
 static int __init popcorn_init(void)
 {
+	int i;
 	PRINTK("Initialize Popcorn subsystems...\n");
 
 	/**
@@ -37,9 +37,10 @@ static int __init popcorn_init(void)
 	 * processing on data that was brought in by the
 	 * communications module interrupt handlers.
 	 */
-	popcorn_wq = create_workqueue("pcn_wq");
-	popcorn_nonblock_wq = create_workqueue("pcn_wq_nb");
 	popcorn_ordered_wq = create_singlethread_workqueue("pcn_wq_ordered");
+	for (i = 0; i < PCN_WQ_MAX; i++) {
+		popcorn_wq[i] = create_workqueue("pcn_wq");
+	}
 
 	popcorn_ns_init(false);
 	pcn_kmsg_init();
