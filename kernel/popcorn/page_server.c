@@ -87,23 +87,39 @@ struct fault_handle {
 };
 
 
-static bool __check_fault_handling(struct task_struct *tsk, unsigned long addr)
+static struct fault_handle *__check_fault_handling(struct task_struct *tsk, unsigned long addr)
 {
 	unsigned long flags;
-	bool found = false;
 	struct remote_context *rc = get_task_remote(tsk);
 	struct fault_handle *fh;
 
 	spin_lock_irqsave(&rc->faults_lock, flags);
 	list_for_each_entry(fh, &rc->faults, list) {
 		if (fh->addr == addr) {
-			found = true;
-			break;
+			fh = NULL;
+			goto out_found;
 		}
 	}
+
+	fh = kmalloc(sizeof(*fh), GFP_ATOMIC);
+
+	INIT_LIST_HEAD(&fh->list);
+	fh->addr = addr;
+
+	fh->write = true;
+	fh->remote = true;
+	init_waitqueue_head(&fh->waits);
+	fh->pendings = 1;
+	fh->backoff = 0;
+	fh->rc = get_task_remote(tsk);
+	fh->pid = tsk->pid;
+
+	list_add(&fh->list, &rc->faults);
+
+out_found:
 	spin_unlock_irqrestore(&rc->faults_lock, flags);
 	put_task_remote(tsk);
-	return found;
+	return fh;
 }
 
 
@@ -531,6 +547,7 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 	int ret = 0;
 	int backoff = 0;
 	unsigned long addr = req->addr;
+	struct fault_handle *fh = NULL;
 
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
@@ -545,15 +562,16 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 	pte = __get_pte_at(mm, addr, &pmd, &ptl);
 	if (!pte) goto out;
 
-	spin_lock(ptl);
-	while (__check_fault_handling(tsk, addr)) {
+	while (!fh) {
+		spin_lock(ptl);
+		if ((fh = __check_fault_handling(tsk, addr))) break;
 		spin_unlock(ptl);
 		PGPRINTK("  [%d] back-off %d\n", tsk->pid, backoff++);
 		msleep(backoff);
-		spin_lock(ptl);
 	}
 
 	page = vm_normal_page(vma, addr, *pte);
+	BUG_ON(!page);
 	get_page(page);
 	clear_bit(my_nid, page->owners);
 	put_page(page);
@@ -566,6 +584,8 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 	flush_tlb_page(vma, addr);
 
 	pte_unmap_unlock(pte, ptl);
+
+	__finish_fault_handling(fh);
 
 out:
 	up_read(&mm->mmap_sem);
@@ -1304,9 +1324,8 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		__claim_local_page(current, addr, page, my_nid);
 
 		spin_lock(ptl);
-		BUG_ON(!pte_same(*pte, pte_val));
 
-		pte_val = pte_make_valid(pte_val);
+		pte_val = pte_make_valid(*pte);
 		pte_val = pte_mkwrite(pte_val);
 		pte_val = pte_mkdirty(pte_val);
 		pte_val = pte_mkyoung(pte_val);
