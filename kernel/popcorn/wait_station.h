@@ -7,7 +7,7 @@
 struct wait_station {
 	int id;
 	pid_t pid;
-	void *private;
+	volatile void *private;
 	struct completion pendings;
 	atomic_t pendings_count;
 };

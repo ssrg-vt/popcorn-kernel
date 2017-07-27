@@ -211,8 +211,7 @@ static int get_remote_popcorn_ps_load(struct task_struct *tsk, int origin_nid, i
 
 	pcn_kmsg_send(origin_nid, &req, sizeof(req));
 
-	wait_at_station(ws);
-	res = ws->private;
+	res = wait_at_station(ws);
 	put_wait_station(ws);
 
 	*uload = res->uload;

@@ -30,6 +30,7 @@ struct wait_station *get_wait_station_multiple(struct task_struct *tsk, int coun
 	ws->private = NULL;
 	init_completion(&ws->pendings);
 	atomic_set(&ws->pendings_count, count);
+	smp_wmb();
 	//printk(" *[%d]: %d allocated\n", ws->pid, id);
 
 	return ws;
@@ -38,6 +39,7 @@ EXPORT_SYMBOL_GPL(get_wait_station_multiple);
 
 struct wait_station *wait_station(int id)
 {
+	smp_rmb();
 	return wait_stations + id;
 }
 EXPORT_SYMBOL_GPL(wait_station);
@@ -56,6 +58,6 @@ EXPORT_SYMBOL_GPL(put_wait_station);
 void *wait_at_station(struct wait_station *ws)
 {
 	wait_for_completion(&ws->pendings);
-	return ws->private;
+	return (void *)ws->private;
 }
 EXPORT_SYMBOL_GPL(wait_at_station);
