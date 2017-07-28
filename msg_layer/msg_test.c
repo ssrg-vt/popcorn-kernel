@@ -601,13 +601,13 @@ static int rdma_farm_test(unsigned long long payload_size,
 			if (my_nid==i)
 				continue;
 
-			DEBUG_LOG_V("bf last char act_buf \%c %c \%d %u\n",
+			DEBUG_LOG_V("bf last char act_buf %c %u\n",
 						*(dummy_act_buf+payload_size-1), // 0 is " " (empty)
 						(unsigned int)((char)*(dummy_act_buf+payload_size-1)));
 
 			memset(dummy_act_buf+payload_size-1, 0, 1);
 
-			DEBUG_LOG_V("af last char act_buf \%c %c \%d %u\n",
+			DEBUG_LOG_V("af last char act_buf %c %u\n",
 						*(dummy_act_buf+payload_size-1),
 						(unsigned int)((char)*(dummy_act_buf+payload_size-1)));
 			DEBUG_LOG_V("addr dummy_act_buf %p, final %p final2 %p\n",
@@ -635,7 +635,7 @@ static int rdma_farm_test(unsigned long long payload_size,
 							sizeof(*request_rdma), (unsigned int)payload_size);
 			pcn_kmsg_free_msg(request_rdma);
 
-			DEBUG_LOG_V("\n\n\n");
+			DEBUG_LOG_V("\n\n");
 		}
 	}
 	do_gettimeofday(&t2);
@@ -650,6 +650,91 @@ static int rdma_farm_test(unsigned long long payload_size,
 							t2.tv_usec-t1.tv_usec:
 							(1000000-(t1.tv_usec-t2.tv_usec)));
 
+	return 0;
+}
+
+/*
+ * 	[we are here]
+ *	compose
+ *  send()
+ *  *remap addr*
+ *             ----->   irq (recv)
+ *  poll                perform READ/WRITE
+ *  done				done
+ *
+ */
+/* real FaRM perf data */
+static int rdma_farm_mem_cpy_test(unsigned long long payload_size,
+								unsigned long long iter)
+{
+	unsigned long long i, j;
+	struct timeval t1, t2;
+	int temp_max_node = 2;
+
+	do_gettimeofday(&t1);
+	for(j=0; j<iter; j++) {
+		for(i=0; i<temp_max_node; i++) {
+			remote_thread_rdma_rw_t* request_rdma;
+			char *act_buf;
+			if (my_nid==i)
+				continue;
+
+			request_rdma = pcn_kmsg_alloc_msg(sizeof(*request_rdma));
+			if (!request_rdma)
+				BUG();
+
+			request_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+			request_rdma->rdma_header.rmda_type_res =
+										PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
+			request_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+			request_rdma->rdma_header.is_write = true;
+			//request_rdma->rdma_header.your_buf_ptr = dummy_act_buf;	// NOt used for FaRM WRITE
+
+			act_buf = pcn_kmsg_send_rdma(i, request_rdma,
+						sizeof(*request_rdma), (unsigned int)payload_size);
+			if (act_buf) {
+#if POPCORN_DEBUG_MSG_IB
+				int lengh = 0;
+
+				DEBUG_LOG_V("%s(): head length is 0x%.2x %.2x %.2x %.2x "
+												"MUST BE %.8x(O)\n", __func__,
+																*(act_buf+0),
+																*(act_buf+1),
+																*(act_buf+2),
+																*(act_buf+3),
+													(unsigned int)payload_size);
+				DEBUG_LOG_V("%s(): is data 0x%.2x\n", __func__, *(act_buf+4));
+				DEBUG_LOG_V("%s(): last byte 0x%.2x\n",
+										__func__, *(act_buf+payload_size-1));
+
+				lengh += *(act_buf+0)<< 24;
+				lengh += *(act_buf+1)<< 16;
+				lengh += *(act_buf+2)<< 8;
+				lengh += *(act_buf+3)<< 0;
+				DEBUG_LOG_V("%s(): return int %d payload_size %llu\n\n",
+											__func__, lengh, payload_size);
+#endif
+				kfree(act_buf);
+			} else
+				printk("%s(): recv size 0\n\n", __func__);
+
+			pcn_kmsg_free_msg(request_rdma);
+
+			DEBUG_LOG_V("\n\n");
+		}
+	}
+	do_gettimeofday(&t2);
+
+	EXP_DATA("RDMA FaRM real WRITE payload size %llu, %llu times,"
+						" spent %ld.%06ld s\n", payload_size, iter,
+										t2.tv_usec-t1.tv_usec >= 0?
+										t2.tv_sec-t1.tv_sec:
+										t2.tv_sec-t1.tv_sec-1,
+
+										t2.tv_usec-t1.tv_usec >= 0?
+										t2.tv_usec-t1.tv_usec:
+										(1000000-(t1.tv_usec-t2.tv_usec)));
 	return 0;
 }
 
@@ -683,7 +768,7 @@ void test_send_read_throughput(unsigned long long payload_size,
 		memcpy(&req->payload, dummy_send_buf, payload_size);
 
 		DEBUG_CORRECTNESS("%s(): r local to remote size %llu = "
-							"sizeof(*req)(%llu) - sizeof(req->payload)(%llu)"
+							"sizeof(*req)(%lu) - sizeof(req->payload)(%lu)"
 							" + payload_size(%llu)\n",
 				__func__, sizeof(*req) - sizeof(req->payload) + payload_size,
 							sizeof(*req), sizeof(req->payload), payload_size);
@@ -955,7 +1040,7 @@ static ssize_t write_proc(struct file * file,
 	else if (!memcmp(argv[0], "15", 2)) {
 		/* Because of this LENGTH is not divided by 10,
 		 * the last few chars are not changed!			*/
-		int z, jack = MAX_MSG_LENGTH/10;
+		int z, ofs = MAX_MSG_LENGTH/10;
 
 		printk("----------------------------------\n");
 		printk("----- READ test sanity start -----\n");
@@ -963,13 +1048,13 @@ static ssize_t write_proc(struct file * file,
 
 		/* init act_buf */
 		for(z=0; z<10; z++) {
-			memset(dummy_act_buf+(z*jack), z+'a', jack);
-			printk("z %d act_buf \"%.10s\"\n", z, dummy_act_buf+(z*jack));
+			memset(dummy_act_buf+(z*ofs), z+'a', ofs);
+			printk("z %d act_buf \"%.10s\"\n", z, dummy_act_buf+(z*ofs));
 		}
 
 		/* READ test */
 		for(z=0; z<10; z++) {
-			rdma_RW_inv_test(dummy_act_buf+(z*jack), jack, 1); //is read
+			rdma_RW_inv_test(dummy_act_buf+(z*ofs), ofs, 1); //is read
 			show_RW_dummy_buf();
 			msleep(3000);
 		}
@@ -987,26 +1072,26 @@ static ssize_t write_proc(struct file * file,
 		printk("----------------------------------\n\n");
 
 		for(z=0; z<10; z++) {
-			rdma_RW_inv_test(dummy_act_buf+(z*jack), jack, 0); //is read
+			rdma_RW_inv_test(dummy_act_buf+(z*ofs), ofs, 0); //is read
 			show_RW_dummy_buf();
 			msleep(3000);
 		}
 		printk("----------------------------------\n");
 		printk("----- WRITE test sanity done -----\n");
 		printk("----------------------------------\n\n");
-	}
-	else if (!memcmp(argv[0], "16", 2)) {
+	} else if (!memcmp(argv[0], "16", 2)) {
 		init_RW_dummy_buf();
-	}
-	else if (!memcmp(argv[0], "17", 2)) {
+	} else if (!memcmp(argv[0], "17", 2)) {
 		show_RW_dummy_buf();
-	}
-	else if (!memcmp(argv[0], "20", 2)) {
+	} else if (!memcmp(argv[0], "20", 2)) {
 		rdma_farm_test(simple_strtoull(argv[1], NULL, 0),
 						simple_strtoull(argv[2], NULL, 0));
 		EXP_LOG("test RDMA: FaRM RDMA WRITE rdma_farm_test() done\n\n\n");
-	}
-	else {
+	} else if (!memcmp(argv[0], "21", 2)) {
+		rdma_farm_mem_cpy_test(simple_strtoull(argv[1], NULL, 0),
+							simple_strtoull(argv[2], NULL, 0));
+		EXP_LOG("test RDMA: FaRM RDMA WRITE rdma_farm_mem_cpy_test() done\n\n");
+	} else {
 		printk("Not support yet. Try \"1,2,3,4,5,6,9,10\"\n");
 	}
 
@@ -1144,10 +1229,10 @@ static void __reply_send_w_roundtrip(struct test_msg_signal_t *req, int ret)
 	res->remote_ws = req->remote_ws;
 	res->size = req->size;
 
-	DEBUG_CORRECTNESS("%s(): w remote back size %d = "
-			"sizeof(*res)%d - sizeof(res->payload)%d + req->size %d\n",
-			__func__, sizeof(*res) - sizeof(res->payload) + req->size,
-			sizeof(*res), sizeof(res->payload), req->size);
+	DEBUG_CORRECTNESS("%s(): w remote back size %lu = "
+				"sizeof(*res)%lu - sizeof(res->payload)%lu + req->size %d\n",
+				__func__, sizeof(*res) - sizeof(res->payload) + req->size,
+							sizeof(*res), sizeof(res->payload), req->size);
 
 	/* mimic WRITE */
 	memcpy(&res->payload, dummy_send_buf, req->size);
@@ -1263,6 +1348,14 @@ static int __init msg_test_init(void)
 {
 	static struct proc_dir_entry *kmsg_test_proc;
 
+	/* Essential checks */
+    if (MAX_MSG_LENGTH > PCN_KMSG_LONG_PAYLOAD_SIZE) {
+        printk(KERN_ERR "MAX_MSG_LENGTH %d shouldn't be larger than "
+                        "PCN_KMSG_LONG_PAYLOAD_SIZE %d\n",
+                        MAX_MSG_LENGTH, PCN_KMSG_LONG_PAYLOAD_SIZE);
+        BUG();
+    }
+
 	/* register a proc */
 	printk("\n\n--- Popcorn messaging self testing proc init ---\n");
 	kmsg_test_proc = proc_create("kmsg_test", 0666, NULL, &kmsg_test_ops);
@@ -1339,8 +1432,10 @@ static int __init msg_test_init(void)
 	printk("---      ex: echo 16 > /proc/kmsg_test ---\n");
 	printk("---  17: show RDMA RW testing buffers  ---\n");
 	printk("---      ex: echo 17 > /proc/kmsg_test ---\n");
-	printk("---  20: FaRM RDMA WRITE ---\n");
+	printk("---  20: FaRM RDMA WRITE w/o memory copying (prelim data) ---\n");
 	printk("---      ex: echo 20 [SIZE] [ITER] > /proc/kmsg_test ---\n");
+	printk("---  21: FaRM RDMA WRITE w/ memory copying ---\n");
+	printk("---      ex: echo 21 [SIZE] [ITER] > /proc/kmsg_test ---\n");
 	printk("=============== msg_layer usage pattern  ===============\n");
 	printk("---  cat: showing msg_layer usage pattern ---\n");
 	printk("---      ex: cat /proc/kmsg_test ---\n");

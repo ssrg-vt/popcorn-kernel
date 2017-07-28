@@ -202,7 +202,7 @@ typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
 
 /* Typedef for function pointer to callback functions */
 typedef int (*send_cbftn)(unsigned int, struct pcn_kmsg_message *, unsigned int);
-typedef int (*send_rdma_cbftn)(unsigned int, remote_thread_rdma_rw_t *, unsigned int, unsigned int);
+typedef char* (*send_rdma_cbftn)(unsigned int, remote_thread_rdma_rw_t *, unsigned int, unsigned int);
 typedef void (*handle_rdma_request_ftn)(remote_thread_rdma_rw_t *, void *);
 
 /* SETUP */
@@ -220,7 +220,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
 /* Send a message to the specified destination CPU. */
 int pcn_kmsg_send(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
-int pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg, unsigned int msg_size, unsigned int rw_size);
+char *pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg, unsigned int msg_size, unsigned int rw_size);
 void pcn_kmsg_handle_remote_rdma_request(void *inc_lmsg, void *paddr);
 
 /* Free a received message (called at the end of the callback function) */
