@@ -78,7 +78,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 int pcn_kmsg_send(unsigned int to, void *lmsg, unsigned int size)
 {
 	if (send_callback == NULL) {
-		struct pcn_kmsg_hdr *hdr = (struct pcn_kmsg_hdr *)lmsg;
+		struct pcn_kmsg_hdr *hdr = lmsg;
 
 		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, size=%u\n",
 					__func__, hdr->from_nid, hdr->type, size);
@@ -111,21 +111,20 @@ int pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
 						unsigned int msg_size, unsigned int rw_size)
 {
     if (send_callback_rdma == NULL) {
-		struct pcn_kmsg_hdr *hdr = (remote_thread_rdma_rw_t *)lmsg;
+		struct pcn_kmsg_hdr *hdr = lmsg;
 		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, msg_size=%u "
 		"rw_size=%u\n", __func__, hdr->from_nid, hdr->type, msg_size, rw_size);
         return -ENOENT;
     }
 
-    return send_callback_rdma(to, (remote_thread_rdma_rw_t *)lmsg,
-															msg_size, rw_size);
+    return send_callback_rdma(to, lmsg, msg_size, rw_size);
 }
 
 void pcn_kmsg_handle_remote_rdma_request(
 								void *inc_lmsg, void *paddr)
 {
 	if (!memcmp(msg_layer,"IB", 2))
-		handle_rdma_callback((remote_thread_rdma_rw_t *)inc_lmsg, paddr);
+		handle_rdma_callback(inc_lmsg, paddr);
 	else
 		printk(KERN_ERR "%s: current msg_layer (%s) is not \"IB\"\n",
 														__func__, msg_layer);
