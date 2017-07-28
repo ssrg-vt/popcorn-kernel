@@ -65,6 +65,8 @@ enum {
 	FAULT_HANDLE_INVALIDATE = 0x04,
 
 	FAULT_FLAG_REMOTE = 0x100,
+
+	FAULT_COALESCE_MAX = 8,
 };
 
 struct fault_handle {
@@ -73,13 +75,15 @@ struct fault_handle {
 	unsigned long addr;
 	unsigned long flags;
 
-	unsigned int limit;
 	unsigned int backoff;
+	unsigned int limit;
 	pid_t pid;
 
-	unsigned int pendings;
+	atomic_t pendings;
 	wait_queue_head_t waits;
 	struct remote_context *rc;
+
+	struct completion *complete;
 };
 
 static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsigned long addr)
@@ -93,38 +97,48 @@ static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsign
 	fh->flags = 0;
 
 	init_waitqueue_head(&fh->waits);
-	fh->pendings = 1;
-	fh->limit = 0;
+	atomic_set(&fh->pendings, 1);
 	fh->backoff = 0;
+	fh->limit = 0;
 	fh->rc = get_task_remote(tsk);
 	fh->pid = tsk->pid;
+	fh->complete = NULL;
 
 	list_add(&fh->list, &fh->rc->faults);
 	return fh;
 }
 
 
-static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsigned long addr)
+static int __start_invalidation(struct task_struct *tsk, unsigned long addr, spinlock_t *ptl)
 {
 	unsigned long flags;
 	struct remote_context *rc = get_task_remote(tsk);
 	struct fault_handle *fh;
+	bool found = false;
+	DECLARE_COMPLETION_ONSTACK(complete);
 
 	spin_lock_irqsave(&rc->faults_lock, flags);
 	list_for_each_entry(fh, &rc->faults, list) {
 		if (fh->addr == addr) {
-			fh = NULL;
-			goto out_found;
+			PGPRINTK("  [%d] %s %s ongoing, wait\n", tsk->pid,
+				fh->flags & FAULT_HANDLE_REMOTE ? "remote" : "local",
+				fh->flags & FAULT_HANDLE_WRITE ? "write" : "read");
+			BUG_ON(fh->flags & FAULT_HANDLE_INVALIDATE);
+			fh->flags |= FAULT_HANDLE_INVALIDATE;
+			fh->complete = &complete;
+			found = true;
+			break;
 		}
 	}
-
-	fh = __alloc_fault_handle(tsk, addr);
-	fh->flags = FAULT_HANDLE_INVALIDATE;
-
-out_found:
 	spin_unlock_irqrestore(&rc->faults_lock, flags);
 	put_task_remote(tsk);
-	return fh;
+
+	if (found) {
+		spin_unlock(ptl);
+		wait_for_completion(&complete);
+		spin_lock(ptl);
+	}
+	return 0;
 }
 
 
@@ -158,10 +172,7 @@ static int __start_fault_handling(struct task_struct *tsk, unsigned long addr, u
 		/* Remote fault cannot be coalesced with others */
 		if (fh->flags & FAULT_HANDLE_REMOTE) {
 			ongoing = "remote";
-			if (fault_flags & FAULT_FLAG_REMOTE) {
-				goto out_retry;
-			}
-			goto out_backoff;
+			goto out_retry;
 		}
 		if (fault_flags & FAULT_FLAG_REMOTE) {
 			ongoing = "local";
@@ -177,13 +188,12 @@ static int __start_fault_handling(struct task_struct *tsk, unsigned long addr, u
 			goto out_backoff;
 		}
 
-		/* Prevent starvation */
-		if (fh->limit++ > 8) {
-			ongoing = "limit";
+		if (fh->limit++ > FAULT_COALESCE_MAX) {
+			ongoing = "max";
 			goto out_backoff;
 		}
 
-		fh->pendings++;
+		atomic_inc(&fh->pendings);
 		prepare_to_wait(&fh->waits, wait, TASK_UNINTERRUPTIBLE);
 		spin_unlock_irqrestore(&rc->faults_lock, flags);
 		put_task_remote(tsk);
@@ -234,10 +244,11 @@ static void __finish_fault_handling(struct fault_handle *fh)
 	bool last = false;
 
 	spin_lock_irqsave(&fh->rc->faults_lock, flags);
-	if (--fh->pendings > 0) {
+	if (!atomic_dec_and_test(&fh->pendings)) {
 		wake_up(&fh->waits);
 	} else {
 		list_del(&fh->list);
+		if (fh->complete) complete(fh->complete);
 		last = true;
 	}
 	spin_unlock_irqrestore(&fh->rc->faults_lock, flags);
@@ -545,7 +556,7 @@ void process_remote_page_flush_ack(struct work_struct *work)
  * Page invalidation protocol
  */
 
-static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request_t *req)
+static void __do_invalidate_page(struct task_struct *tsk, page_invalidate_request_t *req)
 {
 	struct mm_struct *mm = get_task_mm(tsk);
 	struct page *page;
@@ -555,7 +566,6 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 	spinlock_t *ptl;
 	int ret = 0;
 	unsigned long addr = req->addr;
-	struct fault_handle *fh = NULL;
 
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
@@ -570,13 +580,8 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 	pte = __get_pte_at(mm, addr, &pmd, &ptl);
 	if (!pte) goto out;
 
-	while (!fh) {
-		spin_lock(ptl);
-		if ((fh = __start_invalidation(tsk, addr))) break;
-		spin_unlock(ptl);
-		PGPRINTK("  [%d] retry\n", tsk->pid);
-		schedule();
-	}
+	spin_lock(ptl);
+	__start_invalidation(tsk, addr, ptl);
 
 	page = vm_normal_page(vma, addr, *pte);
 	BUG_ON(!page);
@@ -594,13 +599,9 @@ static int __do_invalidate_page(struct task_struct *tsk, page_invalidate_request
 
 	pte_unmap_unlock(pte, ptl);
 
-	__finish_fault_handling(fh);
-
 out:
 	up_read(&mm->mmap_sem);
 	mmput(mm);
-
-	return 0;
 }
 
 
@@ -630,7 +631,7 @@ static void process_page_invalidate_request(struct work_struct *work)
 	__do_invalidate_page(tsk, req);
 
 	pcn_kmsg_send(req->origin_nid, &res, sizeof(res));
-	// PGPRINTK("  [%d] [%d/%d]\n", req->remote_pid, res.origin_pid, res.origin_nid);
+	PGPRINTK(">>[%d] [%d/%d]\n", req->remote_pid, res.origin_pid, res.origin_nid);
 
 	put_task_struct(tsk);
 
@@ -989,6 +990,7 @@ again:
 	if (fh == NULL) {
 		pte_unmap(pte);
 		up_read(&mm->mmap_sem); /* To match the sematic for VM_FAULT_RETRY */
+		io_schedule();
 		return VM_FAULT_RETRY;
 	}
 
@@ -1182,6 +1184,13 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	} while (!__start_fault_handling(current, addr,
 				fault_flags, ptl, &wait, &fh, &leader));
 
+	if (fh == NULL) {
+		pte_unmap(pte);
+		up_read(&mm->mmap_sem);
+		io_schedule();
+		return VM_FAULT_RETRY;
+	}
+
 	PGPRINTK(" %c[%d] %lx\n", leader ? '=' : ' ', current->pid, addr);
 	if (!leader) {
 		pte_unmap(pte);
@@ -1261,7 +1270,7 @@ out_free:
 
 out:
 	__finish_fault_handling(fh);
-	if (backoff) msleep(1);
+	if (backoff) msleep(20);
 	return ret;
 }
 
@@ -1309,6 +1318,13 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	while (!__start_fault_handling(
 				current, addr, fault_flags, ptl, &wait, &fh, &leader)) {
 		spin_lock(ptl);
+	}
+
+	if (fh == NULL) {
+		pte_unmap(pte);
+		up_read(&mm->mmap_sem);
+		io_schedule();
+		return VM_FAULT_RETRY;
 	}
 
 	/* Handle replicated page via the dsm protocol */
