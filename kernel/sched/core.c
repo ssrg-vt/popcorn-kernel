@@ -4655,6 +4655,7 @@ static int __do_sched_migrate(struct task_struct *tsk, int nid, void __user *ure
 	PSPRINTK("%s [%d]: put to sleep\n", __func__, tsk->pid);
 	__set_task_state(tsk, TASK_INTERRUPTIBLE);
 	schedule();
+	smp_mb();
 	PSPRINTK("%s [%d]: waken up, 0x%x 0x%x\n", __func__,
 			tsk->pid, tsk->ret_from_remote, tsk->exit_code);
 

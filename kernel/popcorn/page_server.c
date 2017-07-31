@@ -1159,6 +1159,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	bool populated = false;
 	struct mem_cgroup *memcg;
 	int ret = 0;
+	int retry = 0;
 
 	DEFINE_WAIT(wait);
 	struct fault_handle *fh;
@@ -1174,6 +1175,11 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 	ptl = pte_lockptr(mm, pmd);
 	do {
+		if (retry++ >= 10) {
+			PGPRINTK("  [%d] %lx too many retry\n", current->pid, addr);
+			fh = NULL;
+			break;
+		}
 		spin_lock(ptl);
 
 		if (!pte_same(*pte, pte_val)) {

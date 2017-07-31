@@ -91,8 +91,9 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 
 	PRINTK("  %d identified as %s\n", info->nid, archs_sz[info->arch]);
 	popcorn_nodes[info->nid].arch = info->arch;
-	pcn_kmsg_free_msg(msg);
+	smp_mb();
 
+	pcn_kmsg_free_msg(msg);
 	return 0;
 }
 

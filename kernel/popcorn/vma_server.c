@@ -882,7 +882,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 			smp_mb();
 			list_add(&vi->list, &rc->vmas);
 		} else {
-			printk("  [%d] %lx already pended\n",
+			VSPRINTK("  [%d] %lx already pended\n",
 					current->pid, addr);
 			kfree(vi);
 			vi = v;
