@@ -363,7 +363,6 @@ static void process_remote_page_flush(struct work_struct *work)
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	struct remote_context *rc;
-	unsigned long flags;
 	struct page *page;
 	pte_t *pte, entry;
 	spinlock_t *ptl;
@@ -387,16 +386,10 @@ static void process_remote_page_flush(struct work_struct *work)
 	rc = get_task_remote(tsk);
 
 	if (req->flags & FLUSH_FLAG_START) {
-		spin_lock_irqsave(&rc->faults_lock, flags);
-		spin_unlock_irqrestore(&rc->faults_lock, flags);
-
 		res.flags = FLUSH_FLAG_START;
 		pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
 		goto out_put;
 	} else if (req->flags & FLUSH_FLAG_LAST) {
-		spin_lock_irqsave(&rc->faults_lock, flags);
-		spin_unlock_irqrestore(&rc->faults_lock, flags);
-
 		res.flags = FLUSH_FLAG_LAST;
 		pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
 		goto out_put;

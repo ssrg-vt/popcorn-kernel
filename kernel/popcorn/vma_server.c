@@ -593,12 +593,12 @@ void vma_worker_remote(struct remote_context *rc)
 struct vma_info {
 	struct list_head list;
 	unsigned long addr;
-	bool mapped;
+	volatile bool mapped;
 	atomic_t pendings;
 	wait_queue_head_t pendings_wait;
-	int ret;
+	volatile int ret;
 
-	remote_vma_response_t *response;
+	volatile remote_vma_response_t *response;
 };
 
 
@@ -644,6 +644,8 @@ static void process_remote_vma_response(struct work_struct *_work)
 	}
 
 	vi->response = res;
+	smp_wmb();
+
 	wake_up(&vi->pendings_wait);
 	return;
 
@@ -765,6 +767,7 @@ static struct vma_info *__alloc_remote_vma_request(struct task_struct *tsk, unsi
 	INIT_LIST_HEAD(&vi->list);
 	vi->addr = addr;
 	vi->mapped = false;
+	vi->response = (volatile remote_vma_response_t *)0xdeadbeaf; /* poision */
 	atomic_set(&vi->pendings, 0);
 	init_waitqueue_head(&vi->pendings_wait);
 
@@ -792,8 +795,8 @@ static int __map_remote_vma(struct task_struct *tsk, struct vma_info *vi)
 	struct file *f = NULL;
 	unsigned long err = 0;
 	int ret = 0;
-	unsigned long addr = vi->response->addr;
-	remote_vma_response_t *res = vi->response;
+	remote_vma_response_t *res = (remote_vma_response_t *)vi->response;
+	unsigned long addr = res->addr;
 
 	if (res->result) {
 		down_read(&mm->mmap_sem);
@@ -893,13 +896,16 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		VSPRINTK("  [%d] %lx already pended\n", current->pid, addr);
 	}
 	atomic_inc(&vi->pendings);
-	prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
-	spin_unlock_irqrestore(&rc->vmas_lock, flags);
-
 	if (req) {
+		spin_unlock_irqrestore(&rc->vmas_lock, flags);
+
 		pcn_kmsg_send(tsk->origin_nid, req, sizeof(*req));
 		kfree(req);
+
+		spin_unlock_irqrestore(&rc->vmas_lock, flags);
 	}
+	prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
+	spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
 	up_read(&tsk->mm->mmap_sem);
 	io_schedule();
@@ -908,7 +914,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	 * Now vi->response should points to the result
 	 * Also, mm_mmap_sem should be properly set when return
 	 */
-
+	smp_rmb();
 	finish_wait(&vi->pendings_wait, &wait);
 
 	if (!vi->mapped) {
@@ -924,7 +930,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		wakeup = true;
 	} else {
 		list_del(&vi->list);
-		pcn_kmsg_free_msg(vi->response);
+		pcn_kmsg_free_msg((void *)vi->response);
 		kfree(vi);
 	}
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
