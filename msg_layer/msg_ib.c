@@ -89,6 +89,8 @@
 #define CHECK_LOG(...)
 #endif 
 
+#define ASPLOS_DLOG(...) printk(__VA_ARGS__)
+
 #define htonll(x) cpu_to_be64((x))
 #define ntohll(x) cpu_to_be64((x)) 
 
@@ -103,6 +105,7 @@
 
 /* - send - */
 #define RPING_SQ_DEPTH 128	// sender depth (txdepth)
+//#define RPING_SQ_DEPTH 512	// sender depth (txdepth)
 #define SEND_DEPTH 8
 // Attention:
 // [x.xxxxxx] mlx5_core 0000:01:00.0: swiotlb buffer is full (sz: 8388608 bytes)
@@ -153,6 +156,10 @@ atomic_t g_recv_ticket;
 /* rdma RW testing buffers */
 extern char* dummy_act_buf;
 extern char* dummy_pass_buf;
+
+#if DEMON_POST_RECV_WCS
+struct task_struct *recv_post_demon[i];
+#endif
 
 /*
  * rq_wr -> wc
@@ -255,7 +262,6 @@ struct krping_cb {
 
 	/* Synchronization */
 	struct mutex send_mutex;
-	struct mutex recv_mutex;
 	struct mutex active_mutex;
 	struct mutex passive_mutex;	/* passive lock*/
 	struct mutex qp_mutex;		/* protect ib_post_send(qp) */
@@ -407,10 +413,11 @@ static int __krping_cma_event_handler(struct rdma_cm_id *cma_id,
 		break;
 
 	case RDMA_CM_EVENT_DISCONNECTED:
-		printk(KERN_ERR "< -----DISCONNECT EVENT------... >\n");
+		printk(KERN_ERR "< --- DISCONNECT EVENT conn %d --- >\n", _cb->conn_no);
 		KRPRINT_INIT("< %s(): _cb->state = %d, CONNECTED=%d >\n",
 						__func__, (int)atomic_read(&_cb->state), CONNECTED);
-		atomic_set(&_cb->state, ERROR);
+		//atomic_set(&_cb->state, ERROR);	// TODO for rmmod
+		/* Wurrent implementation:  free all resources in __exit */
 		wake_up_interruptible(&_cb->sem);
 		break;
 
@@ -429,7 +436,7 @@ static int __krping_cma_event_handler(struct rdma_cm_id *cma_id,
 /*
  * Create a recv_sql/rq_we
  */
-struct ib_recv_wr* __create_recv_wr(int conn_no, bool is_int)
+struct ib_recv_wr* __create_recv_wr(int conn_no)
 {
 	struct krping_cb *_cb = cb[conn_no];
 	struct pcn_kmsg_message *element_addr;
@@ -604,8 +611,8 @@ static void __setup_send_wr(struct krping_cb *cb,
 							struct pcn_kmsg_message *lmsg)
 {
 	cb->send_dma_addr = dma_map_single(cb->pd->device->dma_device,
-							lmsg, lmsg->header.size,
-							DMA_BIDIRECTIONAL);
+											lmsg, lmsg->header.size,
+													DMA_BIDIRECTIONAL);
 	pci_unmap_addr_set(cb, send_mapping, cb->send_dma_addr);
 
 	/* Send buffer */
@@ -625,52 +632,52 @@ static void __setup_send_wr(struct krping_cb *cb,
 }
 
 /* set up sgl, used for rdma */
-static void __krping_setup_wr(struct krping_cb *cb)
+static void __krping_setup_wr(struct krping_cb *_cb)
 {
 	int i=0, ret;
 
 	/* Pre-post RECV buffers */
 	MSGPRINTK("\n\n\n->%s(): \n", __func__);
-	MSGPRINTK("@@@ 2 cb->recv_size = %d\n", cb->recv_size);
+	MSGPRINTK("@@@ 2 _cb->recv_size = %d\n", _cb->recv_size);
 	for(i=0;i<MAX_RECV_WR;i++) {
 		struct ib_recv_wr *bad_wr;
-		struct ib_recv_wr *_rq_wr = __create_recv_wr(cb->conn_no, false);
+		struct ib_recv_wr *_rq_wr = __create_recv_wr(_cb->conn_no);
 
 		if (i<5 || i>(MAX_RECV_WR-5)) {
-			MSGPRINTK("_rq_wr %p cb->conn_no %d recv_size %d wr_id %p\n",
-			(void*)_rq_wr, cb->conn_no, cb->recv_size, (void*)_rq_wr->wr_id);
+			MSGPRINTK("_rq_wr %p _cb->conn_no %d recv_size %d wr_id %p\n",
+			(void*)_rq_wr, _cb->conn_no, _cb->recv_size, (void*)_rq_wr->wr_id);
 		}
 
 		/* 90% posted, 10% reserved */
-		if (i <= MAX_RECV_WR*90/100) {
-			ret = ib_post_recv(cb->qp, _rq_wr, &bad_wr);
+		if (i <= MAX_RECV_WR*70/100) {
+			ret = ib_post_recv(_cb->qp, _rq_wr, &bad_wr);
 			if (ret) {
 				printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
 				BUG();
 			}
 		} else {
-			__enq_wcs((struct wc_struct *)_rq_wr->wr_id, cb->conn_no);
+			__enq_wcs((struct wc_struct *)_rq_wr->wr_id, _cb->conn_no);
 		}
 	}
 
 	/* send buffer: unchanged parameters */
-	//cb->send_sgl.lkey = cb->qp->device->local_dma_lkey; // A BUG from kprint.c
-	//cb->send_sgl.lkey = cb->reg_mr_act->lkey;			// A BUG from kprint.c
-	cb->send_sgl.lkey = cb->pd->local_dma_lkey;			// Fixed the BUG (O)
+	//_cb->send_sgl.lkey = _cb->qp->device->local_dma_lkey; // A BUG from kprint.c
+	//_cb->send_sgl.lkey = _cb->reg_mr_act->lkey;			// A BUG from kprint.c
+	_cb->send_sgl.lkey = _cb->pd->local_dma_lkey;			// Fixed the BUG (O)
 	MSGDPRINTK("@@@ <lkey>\n");
 	MSGDPRINTK("@@@ lkey=%d from ../mad.c (ctx->pd->local_dma_lkey)\n",
-							cb->pd->local_dma_lkey);
+							_cb->pd->local_dma_lkey);
 	MSGDPRINTK("@@@ cb->qp->device->local_dma_lkey = %d = 0\n",
-				cb->qp->device->local_dma_lkey);
-	MSGDPRINTK("@@@ lkey=%d from client/server example(cb->mr->lkey)\n",
-							cb->reg_mr_act->lkey);
+				_cb->qp->device->local_dma_lkey);
+	MSGDPRINTK("@@@ lkey=%d from client/server example(_cb->mr->lkey)\n",
+							_cb->reg_mr_act->lkey);
 
 	/* normal send/recv */
-	cb->sq_wr.opcode = IB_WR_SEND;
-	cb->sq_wr.send_flags = IB_SEND_SIGNALED;
+	_cb->sq_wr.opcode = IB_WR_SEND;
+	_cb->sq_wr.send_flags = IB_SEND_SIGNALED;
 	/* sge */
-	cb->sq_wr.sg_list = &cb->send_sgl;
-	cb->sq_wr.num_sge = 1;
+	_cb->sq_wr.sg_list = &_cb->send_sgl;
+	_cb->sq_wr.num_sge = 1;
 
 	/*
 	send_flags: Extra attributes for the Send Request:
@@ -692,35 +699,35 @@ static void __krping_setup_wr(struct krping_cb *cb)
 	/* READ/WRITE passive buf are allocated dynamically in other places
 	 *		active: active_dma_addr; passive: passive_dma_addr
 	 *		used for seting up rdma_sgl.addr
-	 *		e.g. cb->rdma_sgl.addr = cb->passive_dma_addr;
+	 *		e.g. _cb->rdma_sgl.addr = _cb->passive_dma_addr;
 	 */
 
 	/* Common for RW - RW wr */
-	cb->rdma_sq_wr.wr.sg_list = &cb->rdma_sgl;
-	cb->rdma_sq_wr.wr.send_flags = IB_SEND_SIGNALED;
-	cb->rdma_sq_wr.wr.num_sge = 1;
+	_cb->rdma_sq_wr.wr.sg_list = &_cb->rdma_sgl;
+	_cb->rdma_sq_wr.wr.send_flags = IB_SEND_SIGNALED;
+	_cb->rdma_sq_wr.wr.num_sge = 1;
 
 	/*
 	 * A chain of 2 WRs, INVALDATE_MR + REG_MR.
 	 * both unsignaled (no completion).  The client uses them to reregister
 	 * the rdma buffers with a new key each iteration.
 	 */
-	cb->reg_mr_wr_act.wr.opcode = IB_WR_REG_MR;		/* (legacy:fastreg) */
-	cb->reg_mr_wr_act.mr = cb->reg_mr_act;
+	_cb->reg_mr_wr_act.wr.opcode = IB_WR_REG_MR;		/* (legacy:fastreg) */
+	_cb->reg_mr_wr_act.mr = _cb->reg_mr_act;
 
-	cb->reg_mr_wr_pass.wr.opcode = IB_WR_REG_MR;	/* (legacy:fastreg) */
-	cb->reg_mr_wr_pass.mr = cb->reg_mr_pass;
+	_cb->reg_mr_wr_pass.wr.opcode = IB_WR_REG_MR;	/* (legacy:fastreg) */
+	_cb->reg_mr_wr_pass.mr = _cb->reg_mr_pass;
 
 
 	/*
 	 * 1. invalidate Memory Window
 	 * 2. then register this new key to mr
 	 */
-	cb->inv_wr_act.opcode = IB_WR_LOCAL_INV;
-	cb->inv_wr_act.next = &cb->reg_mr_wr_act.wr;
+	_cb->inv_wr_act.opcode = IB_WR_LOCAL_INV;
+	_cb->inv_wr_act.next = &_cb->reg_mr_wr_act.wr;
 
-	cb->inv_wr_pass.next = &cb->reg_mr_wr_pass.wr;
-	cb->inv_wr_pass.opcode = IB_WR_LOCAL_INV;
+	_cb->inv_wr_pass.next = &_cb->reg_mr_wr_pass.wr;
+	_cb->inv_wr_pass.opcode = IB_WR_LOCAL_INV;
 	/*  The reg mem_mode uses a reg mr on the client side for the (We are)
 	 *  rw_passive_buf and rw_active_buf buffers.  Each time the client will 
 	 *  advertise one of these buffers, it invalidates the previous registration 
@@ -794,7 +801,8 @@ static int __krping_setup_qp(struct krping_cb *cb, struct rdma_cm_id *cm_id)
 		printk(KERN_ERR "ib_alloc_pd failed\n");
 		return PTR_ERR(cb->pd);
 	}
-	MSGPRINTK("created pd %p\n", cb->pd);
+	MSGPRINTK("created pd %p: for protecting RDMA resources."
+						" PDx cannot access PDy\n", cb->pd);
 
 	attr.cqe = cb->txdepth * SEND_DEPTH;
 	attr.comp_vector = INT_MASK;
@@ -807,7 +815,7 @@ static int __krping_setup_qp(struct krping_cb *cb, struct rdma_cm_id *cm_id)
 	}
 	MSGPRINTK("created cq %p task\n", cb->cq);
 
-	/* INT flag/mask raised */
+	/* to arm CA to send eveent on next completion added to CQ */
 	ret = ib_req_notify_cq(cb->cq, IB_CQ_NEXT_COMP);
 	if (ret) {
 		printk(KERN_ERR "ib_create_cq failed\n");
@@ -915,6 +923,7 @@ static int __krping_accept(struct krping_cb *_cb)
 										__func__, atomic_read(&_cb->state));
 
 	set_popcorn_node_online(_cb->conn_no, true);
+	//notify_my_node_info(_cb->conn_no);
 	return 0;
 }
 
@@ -964,7 +973,7 @@ static int __recv_post(void* arg0)
 }
 #endif
 
-static int __krping_persistent_server_thread(void* arg0)
+static int __krping_server_accept(void* arg0)
 {
 	struct krping_cb *_cb = arg0;
 	int ret = -1;
@@ -1038,7 +1047,7 @@ static int __krping_run_server(void* arg0)
 		/* got from INT. Will be used [setup_qp(SRWRirq)] -> setup_buf -> */
 		target_cb->child_cm_id = my_cb->child_cm_id;
 
-		if (__krping_persistent_server_thread(target_cb))
+		if (__krping_server_accept(target_cb))
 			rdma_disconnect(target_cb->child_cm_id);
 
 		printk("conn_no %d is ready (GOOD)\n", target_cb->conn_no);
@@ -1194,7 +1203,7 @@ u32 __krping_rdma_rkey_act(struct krping_cb *_cb, u64 buf,
 	DEBUG_LOG("%s(): rdma_len (dynamical) %d\n", __func__, sg_dma_len(&sg));
 
 	ret = ib_map_mr_sg(_cb->reg_mr_act, &sg, 1, PAGE_SIZE);
-										// snyc ib_dma_sync_single_for_cpu/dev
+			// snyc: use ib_dma_sync_single_for_cpu/dev dev:accessed by IB
 	BUG_ON(ret <= 0 || ret > _cb->page_list_len);
 
 	DEBUG_LOG("%s(): ### post_inv = %d, reg_mr_act new rkey %d pgsz %u len %u"
@@ -1346,8 +1355,8 @@ u32 __krping_rdma_rkey_pass(struct krping_cb *_cb,
  * User has to free the allocated mem manually
  */
 int __ib_kmsg_send_long(unsigned int dest_cpu,
-					  struct pcn_kmsg_message *lmsg,
-					  unsigned int msg_size)
+						  struct pcn_kmsg_message *lmsg,
+						  unsigned int msg_size)
 {
 	int ret;
 	struct ib_send_wr *bad_wr;
@@ -1370,6 +1379,8 @@ int __ib_kmsg_send_long(unsigned int dest_cpu,
 	//----------------------------------------------------------
 	// ib
 
+	if (in_interrupt())
+		BUG();
 	MSG_SYNC_PRK("////////////////lock() conn %d/////////////\n", dest_cpu);
 	mutex_lock(&cb[dest_cpu]->send_mutex);
 
@@ -1394,7 +1405,8 @@ int __ib_kmsg_send_long(unsigned int dest_cpu,
 
 	mutex_unlock(&cb[dest_cpu]->send_mutex);
 	MSG_SYNC_PRK("//////////////unlock() conn %d///////////////\n", dest_cpu);
-	MSGDPRINTK("1 msg sent to dest_cpu %d!!!!!!\n\n", dest_cpu);
+	MSGDPRINTK("%s(): 1 msg sent type %d size %u to dst %d!!!\n\n",
+					__func__, lmsg->header.type, msg_size, dest_cpu);
 	return 0;
 }
 
@@ -1478,6 +1490,10 @@ static void __handle_remote_thread_rdma_read_request(
 	else {
 		/* Compose a READ sge with a invalidation */
 		_cb->rdma_sq_wr.wr.opcode = IB_WR_RDMA_READ;
+
+		/*	If u perform RDMA READ followed by RDMA WRITE, send or ATOMIC ops
+		 *	you may wneed to use Fence (if you access the same addresse).
+		 */
 
 		/*	Jack: reserve this. just in case.
 		 * 		In krping.c READ, they do send this redaundant FENCE.
@@ -1948,9 +1964,8 @@ static void __pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 	struct pcn_kmsg_message *lmsg;
 	pcn_kmsg_cbftn ftn;
 
-	MSGPRINTK("%s(): \n", __func__);
-
 	lmsg = w->lmsg;
+	MSGPRINTK("%s(): bottom start lmsg %p\n", __func__, lmsg);
 	if ( lmsg->header.type < 0 || lmsg->header.type >= PCN_KMSG_TYPE_MAX) {
 		printk(KERN_ERR "Received invalid message type %d > MAX %d\n",
 									lmsg->header.type, PCN_KMSG_TYPE_MAX);
@@ -1962,7 +1977,7 @@ static void __pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 #endif
 			ftn((void*)lmsg);
 		} else {
-			MSGPRINTK(KERN_INFO "Recieved message type %d size %d "
+			printk(KERN_ERR "Recieved message type %d size %d "
 								"has no registered callback!\n",
 								lmsg->header.type, lmsg->header.size);
 			pcn_kmsg_free_msg(lmsg);
@@ -1970,7 +1985,7 @@ static void __pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 		}
 	}
 
-	MSGPRINTK("%s(): done & free everything\n\n", __func__);
+	MSGPRINTK("%s(): bottom done & free everything\n\n", __func__);
 	kfree((void*)w);
 	return;
 }
@@ -1979,7 +1994,7 @@ static void __pcn_kmsg_handler_BottomHalf(struct work_struct * work)
  * Parse recved msg in the buf to msg_layer in INT
  */
 static int __ib_kmsg_recv_long(struct krping_cb *_cb,
-							 struct wc_struct *wcs)
+								 struct wc_struct *wcs)
 {
 	struct pcn_kmsg_message *lmsg = wcs->element_addr;
 	pcn_kmsg_work_t *kmsg_work;
@@ -1991,15 +2006,17 @@ static int __ib_kmsg_recv_long(struct krping_cb *_cb,
 	}
 
 	DEBUG_LOG("%s(): producing BottomHalf wc->wr_id = lmsg %p "
-				"header.size %d\n", __func__, (void*)lmsg, lmsg->header.size);
+			"header.size %d\n", __func__, (void*)lmsg, lmsg->header.size);
 
 	/* - alloc & cpy msg to upper layer */
-	kmsg_work = kmalloc(sizeof(pcn_kmsg_work_t), GFP_ATOMIC);
+	kmsg_work = kmalloc(sizeof(*kmsg_work), GFP_ATOMIC);
 	if (unlikely(!kmsg_work)) {
 		printk("Failed to kmalloc work structure!\n");
 		BUG();
 	}
+	//TODO Jack
 	kmsg_work->lmsg = kmalloc(lmsg->header.size, GFP_ATOMIC);
+	//kmsg_work->lmsg = kmalloc(sizeof(struct pcn_kmsg_message), GFP_ATOMIC);
 	if (unlikely(!kmsg_work->lmsg)) {
 		printk("Failed to kmalloc msg in work structure!\n");
 		BUG();
@@ -2025,9 +2042,9 @@ static int __ib_kmsg_recv_long(struct krping_cb *_cb,
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	MSG_RDMA_PRK("af: Spwning BottomHalf, leaving INT "
-					"kwq->lmsg->header.size %d type %d\n",
-							kmsg_work->lmsg->header.size,
-							kmsg_work->lmsg->header.type);
+					"kwq->lmsg->header.type %d size %d\n",
+							kmsg_work->lmsg->header.type,
+							kmsg_work->lmsg->header.size);
 #endif
 
 	INIT_WORK((struct work_struct *)kmsg_work, __pcn_kmsg_handler_BottomHalf);
@@ -2105,6 +2122,10 @@ static void __krping_cq_event_handler(struct ib_cq *cq, void *ctx)
 			break;
 
 		case IB_WC_RECV:
+			ASPLOS_DLOG("<<< --- from %d [[[ RECV ]]] COMPLETION  "
+						"type %d size %d--- >>>\n", _cb->conn_no,
+					((struct wc_struct*)_wc->wr_id)->element_addr->header.type,
+					((struct wc_struct*)_wc->wr_id)->element_addr->header.size);
 			recv_cnt++;
 			MSG_RDMA_PRK("ret %d recv_cnt %d\n", ret, recv_cnt);
 
@@ -2123,9 +2144,12 @@ static void __krping_cq_event_handler(struct ib_cq *cq, void *ctx)
 			break;
 
 		default:
-			printk(KERN_ERR "< %s:%d Unexpected opcode %d, Shutting down >\n",
-											__func__, __LINE__, _wc->opcode);
-			goto error;
+			//printk(KERN_ERR "< %s:%d Unexpected opcode %d, Shutting down >\n",
+			//								__func__, __LINE__, _wc->opcode);
+			//goto error;	//TODO for rmmod
+			//wake_up_interruptible(&_cb->sem);
+			//ib_req_notify_cq(_cb->cq, IB_CQ_NEXT_COMP);
+			return;
 		}
 
 		if (recv_cnt >= RECV_WQ_THRESHOLD)
@@ -2349,19 +2373,18 @@ int __init initialize()
 		/* 0. create cb context for each connection */
 		cb[i] = kzalloc(sizeof(struct krping_cb), GFP_KERNEL);
 
-		/* settup node number */
+		/* Settup node number */
 		conn_no = i;
 		cb[i]->conn_no = i;
 		set_popcorn_node_online(i, false);
 
-		/* setup locks */
+		/* Setup locks */
 		mutex_init(&cb[i]->send_mutex);
-		mutex_init(&cb[i]->recv_mutex);
 		mutex_init(&cb[i]->active_mutex);
 		mutex_init(&cb[i]->passive_mutex);
 		mutex_init(&cb[i]->qp_mutex);
 
-		/* 1. init comment parameters */
+		/* Init common parameters */
 		cb[i]->state.counter = IDLE;
 		cb[i]->send_state.counter = IDLE;
 		cb[i]->read_state.counter = IDLE;
@@ -2384,7 +2407,7 @@ int __init initialize()
 #endif
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-		/* for sync problem */
+		/* For sync problem */
 		cb[i]->g_all_ticket.counter = 0;
 #endif
 
@@ -2394,15 +2417,6 @@ int __init initialize()
 		cb[i]->stats.write_msgs.counter = 0;
 		cb[i]->stats.read_msgs.counter = 0;
 #endif
-
-		cb[i]->rdma_size = MAX_RDMA_SIZE;
-
-		init_waitqueue_head(&cb[i]->sem); // init waitq for wait, wake up
-		cb[i]->txdepth = RPING_SQ_DEPTH;
-
-		/* 2. init uncommon parameters */
-		// server/client/myself
-		cb[i]->server = -1;
 
 		/* set up IPv4 address */
 		cb[i]->addr_str = ip_addresses[conn_no];
@@ -2424,12 +2438,19 @@ int __init initialize()
 			goto out;
 		}
 		KRPRINT_INIT("created cm_id %p (pair to event handler)\n",
-															cb[i]->cm_id);
+													cb[i]->cm_id);
 
+
+		cb[i]->read_inv = 0;
+		cb[i]->server_invalidate = 0;
+		init_waitqueue_head(&cb[i]->sem); // init waitq for wait, wake up
+		cb[i]->txdepth = RPING_SQ_DEPTH;
+		cb[i]->rdma_size = MAX_RDMA_SIZE;
 		cb[i]->recv_size = sizeof(struct pcn_kmsg_message);
 
-		cb[i]->server_invalidate = 0;
-		cb[i]->read_inv = 0;
+		/* Init uncommon parameters */
+		// server:1/client:0/myself:-1
+		cb[i]->server = -1;
 
 		/* passive RW buffer */
 		cb[i]->FaRM_pass_buf = kzalloc(MAX_RDMA_SIZE, GFP_KERNEL);
@@ -2438,9 +2459,8 @@ int __init initialize()
 	}
 	KRPRINT_INIT("---- main init done (still cannot send/recv) -----\n\n");
 
-	/* Initilaize the sock */
-	/*
-	 *  Each node has a connection table like tihs:
+	/* Establish connections
+	 * Each node has a connection table like tihs:
 	 * -------------------------------------------------------------------
 	 * | connect | (many)... | my_nid(one) | accept | accept | (many)... |
 	 * -------------------------------------------------------------------
@@ -2448,21 +2468,20 @@ int __init initialize()
 	 * connect: connecting to existing nodes
 	 * accept:  waiting for the connection requests from later nodes
 	 */
-
-	cb[my_nid]->server = 1;
+	//cb[my_nid]->server = 1;	//TODO remove
 	set_popcorn_node_online(my_nid, true);
 
-	//- client -//
-	/* 1. [<my_nid: connect] / >=my_nid: accept */
-	for (i=0; i<MAX_NUM_NODES; i++) {
+	/* 1. [<my_nid: connect] | =my_nid | >=my_nid: accept */
+	for (i = 0; i < MAX_NUM_NODES; i++) {
 		if (i == my_nid)
-			continue; // has done (server)
+			continue;
 
-		conn_no = i;	 // Take node 1 for example. connect0 [1] accept2
-		if (conn_no < my_nid) { // 1. my_nid(accept), [connect]
+		conn_no = i;
+		if (conn_no < my_nid) {
+			/* [connect] | my_nid | accept */
 			cb[conn_no]->server = 0;
 
-			// server/client dependant init
+			/* server/client dependant init */
 			if (__krping_run_client(cb[conn_no])) {
 				printk("WRONG!!\n");
 				rdma_disconnect(cb[conn_no]->cm_id);
@@ -2470,22 +2489,20 @@ int __init initialize()
 			}
 
 			set_popcorn_node_online(conn_no, true);
+			//notify_my_node_info(conn_no);
 			smp_mb();
 			printk("conn_no %d is ready (GOOD)\n", conn_no);
 		}
 		else{
 			KRPRINT_INIT("no action needed for conn %d "
-						  "(listening will take care)\n", i);
+						  "(listen/accept will take care)\n", i);
 		}
-		//sched_setscheduler(<kthread_run()'s return>, SCHED_FIFO, &param);
-		//set_cpus_allowed_ptr(<kthread_run()'s return>, cpumask_of(i%NR_CPUS));
 	}
 
-	/* 2. <my_nid: connect / [>=my_nid: accept] */
+	/* 2. <my_nid: connect | =my_nid | [>=my_nid: accept] */
 	__krping_run_server(cb[my_nid]);
 
-
-	for ( i=0; i<MAX_NUM_NODES; i++ ) {
+	for (i = 0;i < MAX_NUM_NODES; i++) {
 		while ( !get_popcorn_node_online(i) ) {
 			printk("waiting for get_popcorn_node_online(%d)\n", i);
 			msleep(3000);
@@ -2493,24 +2510,24 @@ int __init initialize()
 	}
 
 #if DEMON_POST_RECV_WCS
-	for (i=0; i<MAX_NUM_NODES; i++) {
+	for (i = 0; i < MAX_NUM_NODES; i++) {
 		if (i == my_nid)
 			continue;
-		t = kthread_run(__recv_post, cb[i],
-								"demon for recyclingly posting recv_wc");
-		BUG_ON(IS_ERR(t));
+		recv_post_demon[i] = kthread_run(__recv_post, cb[i],
+									"demon for recyclingly posting recv_wc");
+		BUG_ON(IS_ERR(recv_post_demon[i]));
 	}
 #endif
 
 	MSGPRINTK("--- init all ib[]->state ---\n");
-	for ( i=0; i<MAX_NUM_NODES; i++ ) {
+	for (i = 0; i < MAX_NUM_NODES; i++) {
 		atomic_set(&cb[i]->state, IDLE);
 		atomic_set(&cb[i]->send_state, IDLE);
 		atomic_set(&cb[i]->read_state, IDLE);
 		atomic_set(&cb[i]->write_state, IDLE);
 	}
 
-	/* testing code is in another module, msg_layer_test.ko */
+	/* testing code is in another module, msg_test.ko */
 
 	send_callback = (send_cbftn)ib_kmsg_send_long;
 	send_callback_rdma = (send_rdma_cbftn)ib_kmsg_send_rdma;
@@ -2519,17 +2536,25 @@ int __init initialize()
 	MSGPRINTK("--- Popcorn messaging layer is up ---\n");
 
 	smp_mb();
+
+	/* Popcorn exchanging arch info */
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+		if (i == my_nid)
+			continue;
+		notify_my_node_info(i);
+	}
+
 	printk("==================================================\n");
 	printk("----- Popcorn Messaging Layer IB Initialized -----\n");
 	printk("==================================================\n"
-														"\n\n\n\n\n\n\n");
+													"\n\n\n\n\n\n\n");
 	return 0;
 
 out:
-	for(i=0; i<MAX_NUM_NODES; i++){
+	for (i = 0; i < MAX_NUM_NODES; i++){
 		if (atomic_read(&cb[i]->state)) {
 			kfree(cb[i]);
-			// TODO: cut connections
+			/* TODO: cut connections */
 		}
 	}
 	return err;
@@ -2542,29 +2567,89 @@ out:
 static void __exit unload(void)
 {
 	int i;
-	KRPRINT_INIT("Stopping kernel threads\n");
+	//int ret;
+	KRPRINT_INIT("TODO: Stop kernel threads\n");
 
-	/* TODO: rdma_disconnect() */
+	KRPRINT_INIT("Release buffers\n");
+	kfree(dummy_act_buf);
+	kfree(dummy_pass_buf);
 
-	for (i=0; i<MAX_NUM_NODES; i++) {
+	KRPRINT_INIT("Release general\n");
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+		/* */
+        complete_all(&(wcs_comp[i]));
+		msleep(100);
+
+		/* mutex */
+		mutex_destroy(&cb[i]->send_mutex);
+
+		/* IB FaRM WRITE passive buffer */
+		if (cb[i]->FaRM_pass_buf)
+			kfree(cb[i]->FaRM_pass_buf);
+	}
+
+	KRPRINT_INIT("Release threadss\n");
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+#if DEMON_POST_RECV_WCS
+		kthread_stop(recv_post_demon[i]);
+#endif
+	}
+
+	KRPRINT_INIT("Release IB recv pre-post buffers and flush it\n");
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+	}
+
+	/* TODO: test rdma_disconnect() */
+	KRPRINT_INIT("rdma_disconnect() only on one side\n");
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+		if (i == my_nid)
+			continue;
+		if (i < my_nid) {
+			/* client */
+			if (cb[i]->cm_id)
+				//if (rdma_disconnect(cb[i]->cm_id))
+				//	BUG();
+				;
+		} else {
+			/* server */
+			if (cb[i]->child_cm_id)
+				if (rdma_disconnect(cb[i]->child_cm_id))
+					BUG();
+		}
+		//if (cb[i]->cm_id)
+		//	rdma_disconnect(cb[i]->cm_id);
+	}
+
+	KRPRINT_INIT("Release IB server/client productions \n");
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+		struct krping_cb *_cb = cb[i];
+
+		if (!get_popcorn_node_online(i))
+			continue;
+
+		set_popcorn_node_online(i, false);
+
+		if (i == my_nid)
+			continue;
+
+		if (i < my_nid) {
+			/* client */
+			__krping_free_buffers(_cb);
+			__krping_free_qp(_cb);
+		} else {
+			/* server */
+			__krping_free_buffers(_cb);
+			__krping_free_qp(_cb);
+			rdma_destroy_id(_cb->child_cm_id);
+		}
+	}
+
+	KRPRINT_INIT("Release cb context\n");
+	for (i = 0; i < MAX_NUM_NODES; i++) {
 		kfree(cb[i]);
 	}
 
-	KRPRINT_INIT("Release generals\n");
-	for (i = 0; i<MAX_NUM_NODES; i++) {
-	}
-
-	/* release */
-	KRPRINT_INIT("Release threadss\n");
-	for (i = 0; i<MAX_NUM_NODES; i++) {
-		printk(KERN_ERR "Not implemented yet\n");
-	}
-
-	KRPRINT_INIT("Release IBs\n");
-	for (i = 0; i<MAX_NUM_NODES; i++) {
-	}
-
-	KRPRINT_INIT("Successfully unloaded module!\n");
+	printk("Successfully unloaded module!\n");
 }
 
 module_init(initialize);
