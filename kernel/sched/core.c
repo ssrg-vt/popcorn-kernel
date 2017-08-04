@@ -4693,6 +4693,12 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 		return -EAGAIN;
 	}
 
+	if (nid == my_nid) {
+		printk(KERN_INFO"%s [%d]: loopback is not supported anymore\n", __func__,
+				current->pid);
+		return -EINVAL;
+	}
+
 	if (process_is_distributed(current)) {
 		if (current->at_remote) {
 			// this might be a back migration. allow it.
