@@ -548,16 +548,15 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 	return 0;
 }
 
-void process_remote_page_flush_ack(struct work_struct *work)
+static int handle_remote_page_flush_ack(struct pcn_kmsg_message *msg)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	remote_page_flush_ack_t *req = w->msg;
+	remote_page_flush_ack_t *req = (remote_page_flush_ack_t *)msg;
 	struct wait_station *ws = wait_station(req->remote_ws);
 
 	complete(&ws->pendings);
 
 	pcn_kmsg_free_msg(req);
-	kfree(w);
+	return 0;
 }
 
 /**************************************************************************
@@ -649,10 +648,9 @@ out_free:
 }
 
 
-static void process_page_invalidate_response(struct work_struct *work)
+static int handle_page_invalidate_response(struct pcn_kmsg_message *msg)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	page_invalidate_response_t *res = w->msg;
+	page_invalidate_response_t *res = (page_invalidate_response_t *)msg;
 	struct wait_station *ws = wait_station(res->origin_ws);
 
 	if (atomic_dec_and_test(&ws->pendings_count)) {
@@ -660,7 +658,7 @@ static void process_page_invalidate_response(struct work_struct *work)
 	}
 
 	pcn_kmsg_free_msg(res);
-	kfree(w);
+	return 0;
 }
 
 
@@ -688,10 +686,9 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
  * Handle page faults happened at remote nodes.
  */
 
-static void process_remote_page_response(struct work_struct *work)
+static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	remote_page_response_t *res = w->msg;
+	remote_page_response_t *res = (remote_page_response_t *)msg;
 	struct wait_station *ws = wait_station(res->origin_ws);
 
 	PGPRINTK("  [%d] <-[%d/%d] %lx %x\n",
@@ -701,8 +698,7 @@ static void process_remote_page_response(struct work_struct *work)
 	smp_mb();
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
-
-	kfree(w);
+	return 0;
 }
 
 static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id)
@@ -1468,31 +1464,27 @@ int page_server_handle_pte_fault(
  */
 
 DEFINE_KMSG_WQ_HANDLER(PCN_WQ_REMOTE_PAGE_REQUEST, remote_page_request);
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_REMOTE_PAGE_RESPONSE, remote_page_response);
 DEFINE_KMSG_WQ_HANDLER(
 		PCN_WQ_PAGE_INVALIDATE_REQUEST, page_invalidate_request);
-DEFINE_KMSG_WQ_HANDLER(
-		PCN_WQ_PAGE_INVALIDATE_RESPONSE, page_invalidate_response);
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_REMOTE_PAGE_FLUSH_ACK, remote_page_flush_ack);
 DEFINE_KMSG_ORDERED_WQ_HANDLER(remote_page_flush);
 
 int __init page_server_init(void)
 {
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST, remote_page_request);
-	REGISTER_KMSG_WQ_HANDLER(
+	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE, remote_page_response);
-	REGISTER_KMSG_WQ_HANDLER(
+	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_GRANT, remote_page_response);
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, page_invalidate_request);
-	REGISTER_KMSG_WQ_HANDLER(
+	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE, page_invalidate_response);
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH, remote_page_flush);
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE, remote_page_flush);
-	REGISTER_KMSG_WQ_HANDLER(
+	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH_ACK, remote_page_flush_ack);
 
 	return 0;
