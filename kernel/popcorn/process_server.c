@@ -930,7 +930,6 @@ static int start_vma_worker_origin(void *_arg)
 int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 {
 	int ret;
-	unsigned long flags;
 	bool create_vma_worker = false;
 	struct remote_context *rc, *rc_new;
 	char *which_rc;
@@ -940,9 +939,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	/* Want to avoid allocate this structure in the spinlock-ed area */
 	rc_new = __alloc_remote_context(my_nid, tsk->tgid, false);
 
-	/* Use siglock to coordinate the thread group. */
-	lock_task_sighand(tsk, &flags);
-	if (tsk->mm->remote) {
+	if (!cmpxchg(&tsk->mm->remote, 0, rc_new) == 0) {
 		kfree(rc_new);
 		which_rc = "found";
 	} else {
@@ -957,7 +954,6 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		 * Setting mm->remote to remote_context indicates
 		 * this process is distributed
 		 */
-		tsk->mm->remote = rc_new;
 		rc_new->mm = get_task_mm(tsk);
 		rc_new->remote_tgids[my_nid] = tsk->tgid;
 
@@ -970,7 +966,6 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	}
 	rc = tsk->remote = get_task_remote(tsk);
 	tsk->at_remote = false;
-	unlock_task_sighand(tsk, &flags);
 
 	if (create_vma_worker) {
 		rc->vma_worker =

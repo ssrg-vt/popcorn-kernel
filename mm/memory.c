@@ -73,6 +73,7 @@
 #include "internal.h"
 
 #ifdef CONFIG_POPCORN
+#include <linux/delay.h>
 #include <popcorn/page_server.h>
 #include <popcorn/process_server.h>
 #endif
@@ -3343,6 +3344,17 @@ static int handle_pte_fault(struct mm_struct *mm,
 	if (process_is_distributed(current)) {
 		int ret = page_server_handle_pte_fault(
 				mm, vma, address, pmd, pte, entry, flags);
+		if (ret == VM_FAULT_RETRY) {
+			int backoff = ++current->backoff_weight;
+			PGPRINTK("  [%d] backoff %d\n", current->pid, backoff);
+			if (backoff < 10) {
+				udelay(backoff * 100);
+			} else {
+				msleep(backoff - 10);
+			}
+		} else {
+			current->backoff_weight /= 2;
+		}
 		if (ret != VM_FAULT_CONTINUE) return ret;
 	}
 #endif

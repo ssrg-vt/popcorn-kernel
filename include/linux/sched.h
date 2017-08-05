@@ -1834,6 +1834,7 @@ struct task_struct {
 	int ret_from_remote;
 
 	int migration_target_nid;
+	int backoff_weight;
 
 	/*
 	 * scheduling -- antoniob

@@ -904,7 +904,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 
 		spin_unlock_irqrestore(&rc->vmas_lock, flags);
 	}
-	prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
+	prepare_to_wait_exclusive(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
 	up_read(&tsk->mm->mmap_sem);
