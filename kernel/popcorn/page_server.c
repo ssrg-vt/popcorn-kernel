@@ -256,15 +256,13 @@ static void __finish_fault_handling(struct fault_handle *fh)
 {
 	unsigned long flags;
 	bool last = false;
-#ifdef CONFIG_POPCORN_DEBUG_PAGE_SERVER
-	const pid_t pid = fh->pid;
-	const unsigned long addr = fh->addr;
-#endif
 
 	spin_lock_irqsave(&fh->rc->faults_lock, flags);
 	if (atomic_dec_return(&fh->pendings)) {
+		PGPRINTK(" >[%d] %lx %p\n", fh->pid, fh->addr, fh);
 		wake_up(&fh->waits);
 	} else {
+		PGPRINTK(">>[%d] %lx %p\n", fh->pid, fh->addr, fh);
 		list_del(&fh->list);
 		if (fh->complete) complete(fh->complete);
 		last = true;
@@ -274,9 +272,6 @@ static void __finish_fault_handling(struct fault_handle *fh)
 	if (last) {
 		__put_task_remote(fh->rc);
 		wake_up_all(&fh->waits_retry);
-		PGPRINTK(">>[%d] %lx %p\n", pid, addr, fh);
-	} else {
-		PGPRINTK(" >[%d] %lx %p\n", pid, addr, fh);
 	}
 }
 
@@ -396,7 +391,7 @@ static void process_remote_page_flush(struct work_struct *work)
 		.remote_ws = req->remote_ws,
 	};
 
-	PGPRINTK("<-[%d] flush [%d/%d] %lx\n",
+	PGPRINTK("  [%d] flush ->[%d/%d] %lx\n",
 			req->origin_pid, req->remote_pid, req->remote_nid, addr);
 
 	tsk = __get_task_struct(req->origin_pid);
@@ -683,7 +678,7 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
 		.remote_pid = pid,
 	};
 
-	PGPRINTK("  [%d] revoke 0x%lx from [%d/%d]\n", tsk->pid, addr, pid, nid);
+	PGPRINTK("  [%d] revoke %lx [%d/%d]\n", tsk->pid, addr, pid, nid);
 	pcn_kmsg_send(nid, &req, sizeof(req));
 }
 
@@ -737,8 +732,6 @@ static remote_page_response_t *__fetch_remote_page(struct task_struct *tsk, unsi
 {
 	remote_page_response_t *rp;
 	struct wait_station *ws = get_wait_station(tsk);
-
-	// PGPRINTK("  [%d] fetch %lx origin %d\n", tsk->pid, addr, tsk->origin_nid);
 
 	__request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
 			addr, fault_flags, ws->id);
@@ -998,7 +991,7 @@ again:
 	 * this node to be blocked recursively. This prevents forming the loop
 	 * by releasing everything from remote.
 	 */
-	if (fh == NULL) {
+	if (!fh) {
 		pte_unmap(pte);
 		up_read(&mm->mmap_sem); /* To match the sematic for VM_FAULT_RETRY */
 		return VM_FAULT_RETRY;
@@ -1040,7 +1033,8 @@ again:
 			entry = pte_make_invalid(*pte);
 			clear_bit(my_nid, page->owners);
 		} else {
-			entry = pte_wrprotect(*pte);
+			entry = pte_make_valid(*pte);
+			entry = pte_wrprotect(entry);
 			set_bit(my_nid, page->owners);
 		}
 
@@ -1150,7 +1144,7 @@ out:
 	res->origin_ws = req->origin_ws;
 
 	pcn_kmsg_send(from, res, res_size);
-	PGPRINTK("->[%d] [%d/%d] %x\n", req->remote_pid,
+	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
 
 	kfree(res);
