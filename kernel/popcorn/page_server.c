@@ -80,6 +80,7 @@ struct fault_handle {
 	int ret;
 
 	atomic_t pendings;
+	atomic_t pendings_retry;
 	wait_queue_head_t waits;
 	wait_queue_head_t waits_retry;
 	struct remote_context *rc;
@@ -100,6 +101,7 @@ static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsign
 	init_waitqueue_head(&fh->waits);
 	init_waitqueue_head(&fh->waits_retry);
 	atomic_set(&fh->pendings, 1);
+	atomic_set(&fh->pendings_retry, 0);
 	fh->limit = 0;
 	fh->ret = 0;
 	fh->rc = get_task_remote(tsk);
@@ -228,6 +230,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	return fh;
 
 out_wait:
+	atomic_inc(&fh->pendings_retry);
 	prepare_to_wait(&fh->waits_retry, &wait, TASK_UNINTERRUPTIBLE);
 	spin_unlock_irqrestore(&rc->faults_lock, flags);
 	put_task_remote(tsk);
@@ -235,6 +238,9 @@ out_wait:
 	PGPRINTK("  [%d] %s ongoing. waits %p\n", tsk->pid, ongoing, fh);
 	io_schedule();
 	finish_wait(&fh->waits_retry, &wait);
+	if (atomic_dec_and_test(&fh->pendings_retry)) {
+		kfree(fh);
+	}
 	return NULL;
 
 out_retry:
@@ -269,7 +275,6 @@ static void __finish_fault_handling(struct fault_handle *fh)
 		__put_task_remote(fh->rc);
 		wake_up_all(&fh->waits_retry);
 		PGPRINTK(">>[%d] %lx %p\n", pid, addr, fh);
-		kfree(fh);
 	} else {
 		PGPRINTK(" >[%d] %lx %p\n", pid, addr, fh);
 	}

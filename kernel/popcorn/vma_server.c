@@ -902,7 +902,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		pcn_kmsg_send(tsk->origin_nid, req, sizeof(*req));
 		kfree(req);
 
-		spin_unlock_irqrestore(&rc->vmas_lock, flags);
+		spin_lock_irqsave(&rc->vmas_lock, flags);
 	}
 	prepare_to_wait_exclusive(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
