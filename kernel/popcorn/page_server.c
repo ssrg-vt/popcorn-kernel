@@ -113,7 +113,7 @@ static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsign
 }
 
 
-static int __start_invalidation(struct task_struct *tsk, unsigned long addr, spinlock_t *ptl)
+static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsigned long addr, spinlock_t *ptl)
 {
 	unsigned long flags;
 	struct remote_context *rc = get_task_remote(tsk);
@@ -144,9 +144,10 @@ static int __start_invalidation(struct task_struct *tsk, unsigned long addr, spi
 		PGPRINTK(" =[%d] %lx %p\n", tsk->pid, addr, fh);
 		spin_lock(ptl);
 	} else {
+		fh = NULL;
 		PGPRINTK(" =[%d] %lx\n", tsk->pid, addr);
 	}
-	return 0;
+	return fh;
 }
 
 
@@ -263,9 +264,12 @@ static void __finish_fault_handling(struct fault_handle *fh)
 		wake_up(&fh->waits);
 	} else {
 		PGPRINTK(">>[%d] %lx %p\n", fh->pid, fh->addr, fh);
-		list_del(&fh->list);
-		if (fh->complete) complete(fh->complete);
-		last = true;
+		if (fh->complete) {
+			complete(fh->complete);
+		} else {
+			list_del(&fh->list);
+			last = true;
+		}
 	}
 	spin_unlock_irqrestore(&fh->rc->faults_lock, flags);
 
@@ -573,6 +577,7 @@ static void __do_invalidate_page(struct task_struct *tsk, page_invalidate_reques
 	spinlock_t *ptl;
 	int ret = 0;
 	unsigned long addr = req->addr;
+	struct fault_handle *fh;
 
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
@@ -588,7 +593,7 @@ static void __do_invalidate_page(struct task_struct *tsk, page_invalidate_reques
 	if (!pte) goto out;
 
 	spin_lock(ptl);
-	__start_invalidation(tsk, addr, ptl);
+	fh = __start_invalidation(tsk, addr, ptl);
 
 	page = vm_normal_page(vma, addr, *pte);
 	BUG_ON(!page);
@@ -603,6 +608,17 @@ static void __do_invalidate_page(struct task_struct *tsk, page_invalidate_reques
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
 	flush_tlb_page(vma, addr);
+
+	if (fh) {
+		unsigned long flags;
+		BUG_ON(atomic_read(&fh->pendings));
+		spin_lock_irqsave(&fh->rc->faults_lock, flags);
+		list_del(&fh->list);
+		spin_unlock_irqrestore(&fh->rc->faults_lock, flags);
+
+		__put_task_remote(fh->rc);
+		wake_up_all(&fh->waits_retry);
+	}
 
 	pte_unmap_unlock(pte, ptl);
 
@@ -638,7 +654,7 @@ static void process_page_invalidate_request(struct work_struct *work)
 	__do_invalidate_page(tsk, req);
 
 	pcn_kmsg_send(req->origin_nid, &res, sizeof(res));
-	PGPRINTK(">>[%d] [%d/%d]\n", req->remote_pid, res.origin_pid, res.origin_nid);
+	PGPRINTK(">>[%d] ->[%d/%d]\n", req->remote_pid, res.origin_pid, res.origin_nid);
 
 	put_task_struct(tsk);
 

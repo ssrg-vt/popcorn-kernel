@@ -896,6 +896,8 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		VSPRINTK("  [%d] %lx already pended\n", current->pid, addr);
 	}
 	atomic_inc(&vi->pendings);
+	up_read(&tsk->mm->mmap_sem);
+
 	if (req) {
 		spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
@@ -906,15 +908,12 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	}
 	prepare_to_wait_exclusive(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 	spin_unlock_irqrestore(&rc->vmas_lock, flags);
-
-	up_read(&tsk->mm->mmap_sem);
 	io_schedule();
 
 	/**
 	 * Now vi->response should points to the result
 	 * Also, mm_mmap_sem should be properly set when return
 	 */
-	smp_rmb();
 	finish_wait(&vi->pendings_wait, &wait);
 
 	if (!vi->mapped) {
