@@ -69,6 +69,8 @@ enum {
 	FAULT_COALESCE_MAX = 8,
 };
 
+static struct kmem_cache *__fault_handle_cache = NULL;
+
 struct fault_handle {
 	struct list_head list;
 
@@ -90,7 +92,8 @@ struct fault_handle {
 
 static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsigned long addr)
 {
-	struct fault_handle *fh = kmalloc(sizeof(*fh), GFP_ATOMIC);
+	struct fault_handle *fh =
+			kmem_cache_alloc(__fault_handle_cache, GFP_ATOMIC);
 	BUG_ON(!fh);
 
 	INIT_LIST_HEAD(&fh->list);
@@ -148,6 +151,25 @@ static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsign
 		PGPRINTK(" =[%d] %lx\n", tsk->pid, addr);
 	}
 	return fh;
+}
+
+static void __finish_invalidation(struct fault_handle *fh)
+{
+	unsigned long flags;
+
+	if (!fh) return;
+
+	BUG_ON(atomic_read(&fh->pendings));
+	spin_lock_irqsave(&fh->rc->faults_lock, flags);
+	list_del(&fh->list);
+	spin_unlock_irqrestore(&fh->rc->faults_lock, flags);
+
+	__put_task_remote(fh->rc);
+	if (atomic_read(&fh->pendings_retry)) {
+		wake_up_all(&fh->waits_retry);
+	} else {
+		kmem_cache_free(__fault_handle_cache, fh);
+	}
 }
 
 
@@ -240,7 +262,7 @@ out_wait:
 	io_schedule();
 	finish_wait(&fh->waits_retry, &wait);
 	if (atomic_dec_and_test(&fh->pendings_retry)) {
-		kfree(fh);
+		kmem_cache_free(__fault_handle_cache, fh);
 	}
 	return NULL;
 
@@ -251,7 +273,6 @@ out_retry:
 	PGPRINTK("  [%d] %s locked. retry %p\n", tsk->pid, ongoing, fh);
 	return NULL;
 }
-
 
 static void __finish_fault_handling(struct fault_handle *fh)
 {
@@ -275,10 +296,13 @@ static void __finish_fault_handling(struct fault_handle *fh)
 
 	if (last) {
 		__put_task_remote(fh->rc);
-		wake_up_all(&fh->waits_retry);
+		if (atomic_read(&fh->pendings_retry)) {
+			wake_up_all(&fh->waits_retry);
+		} else {
+			kmem_cache_free(__fault_handle_cache, fh);
+		}
 	}
 }
-
 
 
 /**************************************************************************
@@ -563,6 +587,7 @@ static int handle_remote_page_flush_ack(struct pcn_kmsg_message *msg)
 	return 0;
 }
 
+
 /**************************************************************************
  * Page invalidation protocol
  */
@@ -609,24 +634,13 @@ static void __do_invalidate_page(struct task_struct *tsk, page_invalidate_reques
 	update_mmu_cache(vma, addr, pte);
 	flush_tlb_page(vma, addr);
 
-	if (fh) {
-		unsigned long flags;
-		BUG_ON(atomic_read(&fh->pendings));
-		spin_lock_irqsave(&fh->rc->faults_lock, flags);
-		list_del(&fh->list);
-		spin_unlock_irqrestore(&fh->rc->faults_lock, flags);
-
-		__put_task_remote(fh->rc);
-		wake_up_all(&fh->waits_retry);
-	}
-
+	__finish_invalidation(fh);
 	pte_unmap_unlock(pte, ptl);
 
 out:
 	up_read(&mm->mmap_sem);
 	mmput(mm);
 }
-
 
 static void process_page_invalidate_request(struct work_struct *work)
 {
@@ -1502,6 +1516,9 @@ int __init page_server_init(void)
 			PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE, remote_page_flush);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH_ACK, remote_page_flush_ack);
+
+	__fault_handle_cache = kmem_cache_create("fault_handle",
+			sizeof(struct fault_handle), 0, 0, NULL);
 
 	return 0;
 }
