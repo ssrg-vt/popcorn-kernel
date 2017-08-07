@@ -7,11 +7,6 @@ config POPCORN_KMSG
 	help
 		Support various inter-kernel message passing implementations
 
-config POPCORN_KMSG_LOOPBACK
-	tristate "Loopback messaging layer"
-	depends on POPCORN_KMSG
-	default m
-
 config POPCORN_KMSG_SOCKET
 	tristate "Socket messaging layer"
 	depends on POPCORN_KMSG
