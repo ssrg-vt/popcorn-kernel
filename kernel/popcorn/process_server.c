@@ -408,7 +408,8 @@ static int handle_back_migration(struct pcn_kmsg_message *msg)
 
 	work->msg = req;
 	INIT_WORK((struct work_struct *)work, bring_back_remote_thread);
-	queue_work(popcorn_wq[PCN_WQ_GENERAL], (struct work_struct *)work);
+	queue_work(popcorn_wq, (struct work_struct *)work);
+
 	return 0;
 }
 
@@ -827,7 +828,7 @@ static int handle_clone_request(struct pcn_kmsg_message *msg)
 
 	work->msg = req;
 	INIT_WORK((struct work_struct *)work, clone_remote_thread);
-	queue_work(popcorn_wq[PCN_WQ_GENERAL], (struct work_struct *)work);
+	queue_work(popcorn_wq, (struct work_struct *)work);
 
 	return 0;
 }
@@ -1011,8 +1012,8 @@ int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, v
 }
 
 
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_TASK_EXIT_REMOTE, remote_task_exit);
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_TASK_EXIT_ORIGIN, origin_task_exit);
+DEFINE_KMSG_WQ_HANDLER(remote_task_exit);
+DEFINE_KMSG_WQ_HANDLER(origin_task_exit);
 
 /**
  * Initialize the process server.

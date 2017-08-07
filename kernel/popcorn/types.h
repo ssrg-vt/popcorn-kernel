@@ -289,25 +289,7 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
 /**
  * Message routing using work queues
  */
-enum {
-	/* General */
-	PCN_WQ_GENERAL = 0,
-	PCN_WQ_GENERAL0 = 1,
-	PCN_WQ_GENERAL1 = 2,
-	/* process server */
-	PCN_WQ_TASK_EXIT_REMOTE,
-	PCN_WQ_TASK_EXIT_ORIGIN,
-	/* vma server */
-	PCN_WQ_REMOTE_VMA_REQUEST,
-	PCN_WQ_REMOTE_VMA_RESPONSE,
-	PCN_WQ_VMA_OP_REQUEST,
-	PCN_WQ_VMA_OP_RESPONSE,
-	/* page server */
-	PCN_WQ_REMOTE_PAGE_REQUEST,
-	PCN_WQ_PAGE_INVALIDATE_REQUEST,
-	PCN_WQ_MAX,
-};
-extern struct workqueue_struct *popcorn_wq[PCN_WQ_MAX];
+extern struct workqueue_struct *popcorn_wq;
 extern struct workqueue_struct *popcorn_ordered_wq;
 
 struct pcn_kmsg_work {
@@ -327,9 +309,9 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 	return 1;
 }
 
-#define DEFINE_KMSG_WQ_HANDLER(q, x) \
+#define DEFINE_KMSG_WQ_HANDLER(x) \
 static inline int handle_##x(struct pcn_kmsg_message *msg) {\
-	return __handle_popcorn_work(msg, process_##x, popcorn_wq[q]);\
+	return __handle_popcorn_work(msg, process_##x, popcorn_wq);\
 }
 #define DEFINE_KMSG_ORDERED_WQ_HANDLER(x) \
 static inline int handle_##x(struct pcn_kmsg_message *msg) {\

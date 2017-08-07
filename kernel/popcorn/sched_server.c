@@ -350,8 +350,8 @@ static const struct file_operations popcorn_ps_fops = {
 };
 
 
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL, remote_ps_request);
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL, remote_ps_response);
+DEFINE_KMSG_WQ_HANDLER(remote_ps_request);
+DEFINE_KMSG_WQ_HANDLER(remote_ps_response);
 
 int __init sched_server_init(void)
 {

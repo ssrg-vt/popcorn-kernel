@@ -12,7 +12,7 @@
 #include <popcorn/debug.h>
 #include "types.h"
 
-struct workqueue_struct *popcorn_wq[PCN_WQ_MAX];
+struct workqueue_struct *popcorn_wq;
 struct workqueue_struct *popcorn_ordered_wq;
 EXPORT_SYMBOL(popcorn_wq);
 EXPORT_SYMBOL(popcorn_ordered_wq);
@@ -29,7 +29,6 @@ extern int remote_mem_info_init(void);
 
 static int __init popcorn_init(void)
 {
-	int i;
 	PRINTK("Initialize Popcorn subsystems...\n");
 
 	/**
@@ -38,9 +37,7 @@ static int __init popcorn_init(void)
 	 * communications module interrupt handlers.
 	 */
 	popcorn_ordered_wq = create_singlethread_workqueue("pcn_wq_ordered");
-	for (i = 0; i < PCN_WQ_MAX; i++) {
-		popcorn_wq[i] = create_workqueue("pcn_wq");
-	}
+	popcorn_wq = alloc_workqueue("pcn_wq", WQ_MEM_RECLAIM, 0);
 
 	popcorn_ns_init(false);
 	pcn_kmsg_init();

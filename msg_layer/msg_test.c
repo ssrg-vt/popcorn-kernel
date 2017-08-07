@@ -1161,17 +1161,17 @@ static void process_handle_test_write_response(struct work_struct *_work)
 }
 
 
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL0, send_roundtrip_request);
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL1, send_roundtrip_response);
+DEFINE_KMSG_WQ_HANDLER(send_roundtrip_request);
+DEFINE_KMSG_WQ_HANDLER(send_roundtrip_response);
 
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL0, send_roundtrip_w_request);
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL1, send_roundtrip_w_response);
+DEFINE_KMSG_WQ_HANDLER(send_roundtrip_w_request);
+DEFINE_KMSG_WQ_HANDLER(send_roundtrip_w_response);
 
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL0, handle_test_read_request);
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL1, handle_test_read_response);
+DEFINE_KMSG_WQ_HANDLER(handle_test_read_request);
+DEFINE_KMSG_WQ_HANDLER(handle_test_read_response);
 
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL0, handle_test_write_request);
-DEFINE_KMSG_WQ_HANDLER(PCN_WQ_GENERAL1, handle_test_write_response);
+DEFINE_KMSG_WQ_HANDLER(handle_test_write_request);
+DEFINE_KMSG_WQ_HANDLER(handle_test_write_response);
 
 /* example - main usage */
 static int __init msg_test_init(void)
