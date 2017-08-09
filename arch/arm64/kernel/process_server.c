@@ -17,7 +17,6 @@
 /* File includes */
 #include <linux/sched.h>
 #include <linux/uaccess.h>
-#include <linux/cpu_namespace.h>
 #include <linux/ptrace.h>
 
 #include <asm/compat.h>

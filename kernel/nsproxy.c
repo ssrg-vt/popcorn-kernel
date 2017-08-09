@@ -25,7 +25,6 @@
 #include <linux/proc_ns.h>
 #include <linux/file.h>
 #include <linux/syscalls.h>
-#include <linux/cpu_namespace.h>
 
 static struct kmem_cache *nsproxy_cachep;
 
@@ -39,9 +38,6 @@ struct nsproxy init_nsproxy = {
 	.pid_ns_for_children	= &init_pid_ns,
 #ifdef CONFIG_NET
 	.net_ns			= &init_net,
-#endif
-#ifdef CONFIG_POPCORN
-	.cpu_ns			= &init_cpu_ns,
 #endif
 };
 
@@ -102,21 +98,8 @@ static struct nsproxy *create_new_namespaces(unsigned long flags,
 		goto out_net;
 	}
 
-#ifdef CONFIG_POPCORN
-	new_nsp->cpu_ns = copy_cpu_ns(flags, tsk->nsproxy->cpu_ns);
-	if (IS_ERR(new_nsp->cpu_ns)) {
-		err = PTR_ERR(new_nsp->cpu_ns);
-		goto out_cpu;
-	}
-#endif
-
 	return new_nsp;
 
-#ifdef CONFIG_POPCORN
-out_cpu:
-	if (new_nsp->net_ns)
-		put_net(new_nsp->net_ns);
-#endif
 out_net:
 	if (new_nsp->pid_ns_for_children)
 		put_pid_ns(new_nsp->pid_ns_for_children);
@@ -182,10 +165,6 @@ void free_nsproxy(struct nsproxy *ns)
 		put_ipc_ns(ns->ipc_ns);
 	if (ns->pid_ns_for_children)
 		put_pid_ns(ns->pid_ns_for_children);
-#ifdef CONFIG_POPCORN
-	if (ns->cpu_ns)
-		put_cpu_ns(ns->cpu_ns);
-#endif
 	put_net(ns->net_ns);
 	kmem_cache_free(nsproxy_cachep, ns);
 }

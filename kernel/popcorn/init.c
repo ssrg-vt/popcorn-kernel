@@ -17,7 +17,6 @@ struct workqueue_struct *popcorn_ordered_wq;
 EXPORT_SYMBOL(popcorn_wq);
 EXPORT_SYMBOL(popcorn_ordered_wq);
 
-extern int popcorn_ns_init(int);
 extern int pcn_kmsg_init(void);
 extern int popcorn_nodes_init(void);
 extern int sched_server_init(void);
@@ -39,7 +38,6 @@ static int __init popcorn_init(void)
 	popcorn_ordered_wq = create_singlethread_workqueue("pcn_wq_ordered");
 	popcorn_wq = alloc_workqueue("pcn_wq", WQ_MEM_RECLAIM, 0);
 
-	popcorn_ns_init(false);
 	pcn_kmsg_init();
 
 	popcorn_nodes_init();

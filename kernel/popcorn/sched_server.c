@@ -20,8 +20,6 @@
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
 
-#include <linux/cpu_namespace.h>
-
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/types.h>
 

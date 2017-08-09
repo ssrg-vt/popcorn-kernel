@@ -4,7 +4,6 @@
 #include <linux/spinlock.h>
 #include <linux/sched.h>
 
-struct cpu_namespace;
 struct mnt_namespace;
 struct uts_namespace;
 struct ipc_namespace;
@@ -34,9 +33,6 @@ struct nsproxy {
 	struct mnt_namespace *mnt_ns;
 	struct pid_namespace *pid_ns_for_children;
 	struct net 	     *net_ns;
-#ifdef CONFIG_POPCORN
-	struct cpu_namespace *cpu_ns;
-#endif
 };
 extern struct nsproxy init_nsproxy;
 

@@ -1,4 +1,4 @@
-obj-$(CONFIG_POPCORN)	+= init.o cpu_namespace.o stat.o util.o
+obj-$(CONFIG_POPCORN)	+= init.o stat.o util.o
 obj-$(CONFIG_POPCORN)	+= wait_station.o
 obj-$(CONFIG_POPCORN)	+= sched_server.o process_server.o vma_server.o
 obj-$(CONFIG_POPCORN)	+= page_server.o
