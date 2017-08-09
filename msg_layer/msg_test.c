@@ -168,6 +168,8 @@ void show_instruction(void)
 	printk("---      ex: echo 20 [SIZE] [ITER] > /proc/kmsg_test ---\n");
 	printk("---  21: FaRM RDMA WRITE w/ memory copying ---\n");
 	printk("---      ex: echo 21 [SIZE] [ITER] > /proc/kmsg_test ---\n");
+	printk("---  22: FaRM RDMA WRITE w/ 2 WRITE ---\n");
+	printk("---      ex: echo 22 [SIZE] [ITER] > /proc/kmsg_test ---\n");
 	printk("=============== msg_layer usage pattern  ===============\n");
 	printk("---  cat: showing msg_layer usage pattern ---\n");
 	printk("---      ex: cat /proc/kmsg_test ---\n");
@@ -345,32 +347,28 @@ static int test1(void)
 {
 	int i;
 	static int cnt = 0;
-	remote_thread_first_test_request_t* request =
-										pcn_kmsg_alloc_msg(sizeof(*request));
-	if (!request)
-		BUG();
+	for(i = 0; i < MAX_NUM_NODES; i++) {
+		remote_thread_first_test_request_t *req;
+		if (my_nid==i) continue;
+		req = pcn_kmsg_alloc_msg(sizeof(*req));
+		if (!req) BUG();
+		req->header.type = PCN_KMSG_TYPE_FIRST_TEST;
+		req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
-	request->header.type = PCN_KMSG_TYPE_FIRST_TEST;
-	request->header.prio = PCN_KMSG_PRIO_NORMAL;
+		/* msg essentials */
+		/* ------------------------------------------------------------ */
+		/* msg dependences */
+		req->example1 = my_nid;
+		req->example2 = ++cnt;
+		memset(&req->msg,'J', sizeof(req->msg));
+		DEBUG_LOG_V("\n%s(): example2(t) %d strlen(req->msg) %d "
+							"to all others\n", __func__, req->example2,
+													(int)strlen(req->msg));
 
-	/* msg essentials */
-	/* ------------------------------------------------------------ */
-	/* msg dependences */
-	request->example1 = my_nid;
-	request->example2 = ++cnt;
-	memset(&request->msg,'J', sizeof(request->msg));
-	DEBUG_LOG_V("\n%s(): example2(t) %d strlen(request->msg) %d "
-						"to all others\n", __func__, request->example2,
-												(int)strlen(request->msg));
-
-	for(i=0; i<MAX_NUM_NODES; i++) {
-		if (my_nid==i)
-			continue;
-		pcn_kmsg_send(i, (struct pcn_kmsg_message*) request,
-														sizeof(*request));
+		//pcn_kmsg_send(i, (struct pcn_kmsg_message*) req, sizeof(*req));
+		pcn_kmsg_send(i, req, sizeof(*req));
+		pcn_kmsg_free_msg(req);
 	}
-
-	pcn_kmsg_free_msg(request);
 	return 0;
 }
 
@@ -616,13 +614,13 @@ static int rdma_RW_test(unsigned long long payload_size,
 	return 0;
 }
 
-/*
+/*	FaRM
  * 	[we are here]
  *	compose
  *  send()
  *  *remap addr*
  *             ----->   irq (recv)
- *  poll                perform READ/WRITE
+ *  poll                perform WRITE
  *  done				done
  *
  */
@@ -655,9 +653,9 @@ static int rdma_farm_test(unsigned long long payload_size,
 							dummy_act_buf, dummy_act_buf + payload_size - 1,
 									(char*)(dummy_act_buf + payload_size -1));
 			if (*poll_tail_at == 0)
-				DEBUG_LOG_V("good is 0\n");
+				DEBUG_LOG_V("good: is 0\n");
 			else
-				DEBUG_LOG_V("bad is not 0\n");
+				DEBUG_LOG_V("bad: is not 0\n");
 
 			request_rdma = pcn_kmsg_alloc_msg(sizeof(*request_rdma));
 			if (!request_rdma)
@@ -694,14 +692,14 @@ static int rdma_farm_test(unsigned long long payload_size,
 	return 0;
 }
 
-/*
+/*	FaRM with 1 extra mem copy
  * 	[we are here]
  *	compose
  *  send()
  *  *remap addr*
  *             ----->   irq (recv)
- *  poll                perform READ/WRITE
- *  done				done
+ *  poll                perform WRITE
+ *  return act_buf		done
  *
  */
 /* real FaRM perf data */
@@ -715,8 +713,8 @@ static int rdma_farm_mem_cpy_test(unsigned long long payload_size,
 	do_gettimeofday(&t1);
 	for(j=0; j<iter; j++) {
 		for(i=0; i<temp_max_node; i++) {
-			remote_thread_rdma_rw_t* request_rdma;
 			char *act_buf;
+			remote_thread_rdma_rw_t* request_rdma;
 			if (my_nid==i)
 				continue;
 
@@ -778,6 +776,69 @@ static int rdma_farm_mem_cpy_test(unsigned long long payload_size,
 										(1000000-(t1.tv_usec-t2.tv_usec)));
 	return 0;
 }
+
+/*	FaRM2
+ * 	[we are here]
+ *	compose
+ *  send()
+ *  *remap addr*
+ *             ----->   irq (recv)
+ *   	                perform WRITE
+ *  poll                perform WRITE
+ *  done				done
+ *
+ */
+/* real FaRM perf data */
+static int rdma_farm2_data(unsigned long long payload_size,
+								unsigned long long iter)
+{
+	unsigned long long i, j;
+	struct timeval t1, t2;
+	int temp_max_node = 2;
+
+	do_gettimeofday(&t1);
+	for(j=0; j<iter; j++) {
+		for(i=0; i<temp_max_node; i++) {
+			remote_thread_rdma_rw_t* request_rdma;
+			if (my_nid==i)
+				continue;
+
+			request_rdma = pcn_kmsg_alloc_msg(sizeof(*request_rdma));
+			if (!request_rdma)
+				BUG();
+
+			request_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+			//request_rdma->rdma_header.rmda_type_res =					// Not used for FaRM WRITE
+			//							PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
+			request_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
+
+			request_rdma->rdma_header.is_write = true;
+			request_rdma->rdma_header.your_buf_ptr = dummy_act_buf;	// Not used for FaRM WRITE
+
+			pcn_kmsg_send_rdma(i, request_rdma,
+						sizeof(*request_rdma), (unsigned int)payload_size);
+
+			/* data's been done in your_buf_ptr*/
+
+			pcn_kmsg_free_msg(request_rdma);
+
+			DEBUG_LOG_V("\n\n");
+		}
+	}
+	do_gettimeofday(&t2);
+
+	EXP_DATA("RDMA FaRM2 WRITE payload size %llu, %llu times,"
+						" spent %ld.%06ld s\n", payload_size, iter,
+										t2.tv_usec-t1.tv_usec >= 0?
+										t2.tv_sec-t1.tv_sec:
+										t2.tv_sec-t1.tv_sec-1,
+
+										t2.tv_usec-t1.tv_usec >= 0?
+										t2.tv_usec-t1.tv_usec:
+										(1000000-(t1.tv_usec-t2.tv_usec)));
+	return 0;
+}
+
 
 /*	mimic_read:
  *			=====>
@@ -1128,6 +1189,10 @@ static ssize_t write_proc(struct file * file,
 		rdma_farm_mem_cpy_test(simple_strtoull(argv[1], NULL, 0),
 							simple_strtoull(argv[2], NULL, 0));
 		EXP_LOG("test RDMA: FaRM RDMA WRITE rdma_farm_mem_cpy_test() done\n\n");
+	} else if (!memcmp(argv[0], "22", 2)) {
+		rdma_farm2_data(simple_strtoull(argv[1], NULL, 0),
+							simple_strtoull(argv[2], NULL, 0));
+		EXP_LOG("data RDMA: FaRM RDMA WRITE rdma_farm2_data() done\n\n");
 	} else {
 		printk("Not support yet. Try \"1,2,3,4,5,6,9,10\"\n");
 	}
