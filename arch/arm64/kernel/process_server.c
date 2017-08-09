@@ -139,8 +139,15 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 
 void noinline update_frame_address(void)
 {
+	unsigned long *rbp;
+	asm volatile("mov %0, x29" : "=r"(rbp)); /* arch/update_frame_address */
+
 	/* User rbp is at 3 stack frames below */
-	/* XXX Not implemented yet */
+	rbp = (unsigned long *)*rbp; /* process_server_update_frame_address */
+	rbp = (unsigned long *)*rbp; /* __do_sched_migrate */
+	rbp = (unsigned long *)*rbp; /* sched_migrate */
+
+	*rbp = current_pt_regs()->regs[29];
 }
 
 
