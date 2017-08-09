@@ -107,14 +107,14 @@ void pcn_kmsg_free_msg(void *msg)
 /*
  * Your request must be allocated by kmalloc().
  */
-int pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
+char *pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
 						unsigned int msg_size, unsigned int rw_size)
 {
     if (send_callback_rdma == NULL) {
 		struct pcn_kmsg_hdr *hdr = lmsg;
 		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, msg_size=%u "
 		"rw_size=%u\n", __func__, hdr->from_nid, hdr->type, msg_size, rw_size);
-        return -ENOENT;
+        return NULL;
     }
 
     return send_callback_rdma(to, lmsg, msg_size, rw_size);

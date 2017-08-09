@@ -26,27 +26,34 @@
 #include "common.h"
 
 #define PORT 30467
-#define MAX_ASYNC_BUFFER	1024
+#define MAX_ASYNC_BUFFER	64
 
+extern char *msg_layer;
 
+/* For enq and deq */
 struct pcn_kmsg_buf_item {
 	struct pcn_kmsg_message *msg;
+	unsigned int dest_nid;			/* dst is not in msg_hdr */
 };
 
+/* For send and recv threads */
 struct pcn_kmsg_buf {
 	struct pcn_kmsg_buf_item *rbuf;
 	unsigned long head;
 	unsigned long tail;
-	spinlock_t buf_lock;
+	spinlock_t lock;		/* for send & recv queue */
 	struct semaphore q_empty;
 	struct semaphore q_full;
 };
 
-struct handler_data {
+struct handler_params {
 	int conn_no;
-	struct pcn_kmsg_buf *buf;
+	struct socket *socket;
+	struct pcn_kmsg_buf buf;
 };
 
+/* send requires this info */
+static struct pcn_kmsg_buf *send_buf[MAX_NUM_NODES];
 
 static struct socket *sock_listen;
 
@@ -55,7 +62,6 @@ static struct task_struct *send_handlers[MAX_NUM_NODES];
 static struct task_struct *recv_handlers[MAX_NUM_NODES];
 static struct task_struct *exec_handlers[MAX_NUM_NODES];
 
-static struct mutex mutex_sockets[MAX_NUM_NODES];
 static struct completion connected[MAX_NUM_NODES];
 static struct completion accepted[MAX_NUM_NODES];
 
@@ -99,10 +105,74 @@ static int ksock_recv(struct socket *sock, char *buf, int len)
 	return size;
 }
 
+/* now is polling, not using this function right now
+ * will be replaced with enq_send()
+ */
+static int enq_send(struct pcn_kmsg_buf *buf,
+					struct pcn_kmsg_message *msg,
+					unsigned int dest_nid)
+{
+    int err;
+    unsigned long at;
+	do {
+		err = down_interruptible(&buf->q_full);
+	} while (err);
+
+	spin_lock(&buf->lock);
+    at = buf->head;
+    buf->rbuf[at].msg = msg;
+    buf->rbuf[at].dest_nid = dest_nid;
+    buf->head = (at + 1) & (MAX_ASYNC_BUFFER - 1);
+    spin_unlock(&buf->lock);
+
+    up(&buf->q_empty);
+
+    return at;
+}
+
+static int deq_send(struct pcn_kmsg_buf * buf)
+{
+	char *p;
+    unsigned long from;
+    int err, dest_nid, remaining;
+	struct pcn_kmsg_buf_item *msg_qitem;
+
+	do {
+		err = down_interruptible(&buf->q_empty);
+	} while (err);
+
+    spin_lock(&buf->lock);
+    from = buf->tail;
+    msg_qitem = buf->rbuf + from;
+    buf->tail = (from + 1) & (MAX_ASYNC_BUFFER - 1);
+	spin_unlock(&buf->lock);
+
+	dest_nid = msg_qitem->dest_nid;
+	p = (char *)msg_qitem->msg;
+	remaining = msg_qitem->msg->header.size;
+
+    up(&(buf->q_full));     //send q_empty++
+
+	/* Is serialized */
+	while (remaining > 0) {
+		int sent = ksock_send(sockets[dest_nid], p, remaining);
+		if (sent < 0) {
+			MSGDPRINTK("%s: sent size < 0\n", __func__);
+			io_schedule();
+			continue;
+		}
+		p += sent;
+		remaining -= sent;
+		MSGDPRINTK("Sent %d remaining %d\n", sent, remaining);
+	}
+	pcn_kmsg_free_msg(msg_qitem->msg);
+    return 0;
+}
+
 static int send_handler(void* arg0)
 {
-	struct handler_data *handler_data = arg0;
-	int conn_no = handler_data->conn_no;
+	struct handler_params *handler_params = arg0;
+	int conn_no = handler_params->conn_no;
 	int err = 0;
 
 	if (conn_no < my_nid) {
@@ -111,7 +181,7 @@ static int send_handler(void* arg0)
 			IPPROTO_TCP, &(sockets[conn_no]));
 		if (err < 0) {
 			MSGDPRINTK("Failed to create socket..!! "
-							"Messaging layer init failed with err %d\n", err);
+						"Messaging layer init failed with err %d\n", err);
 			return err;
 		}
 		addr.sin_family = AF_INET;
@@ -131,16 +201,18 @@ static int send_handler(void* arg0)
 	} else if (conn_no > my_nid) {
 		wait_for_completion(&accepted[conn_no]);
 	} else if (conn_no == my_nid) {
-		// Skip connecting to myself
 	}
 
 	set_popcorn_node_online(conn_no, true);
-	notify_my_node_info(conn_no);
 
 	MSGPRINTK("[%d] PCN_SEND handler is up\n", conn_no);
+
+    for (;;) {
+        err = deq_send(&handler_params->buf);
+    }
+
 	return 0;
 }
-
 
 /*
  * buf is per conn
@@ -148,15 +220,14 @@ static int send_handler(void* arg0)
 static int enq_recv(struct pcn_kmsg_buf *buf, void *msg, int conn_no)
 {
 	int err;
-
 	do {
-		err = down_interruptible(&(buf->q_full));
-	} while (err != 0);
+		err = down_interruptible(&buf->q_full);
+	} while (err);
 
-	spin_lock(&(buf->buf_lock));
+	spin_lock(&(buf->lock));
 	buf->rbuf[buf->head].msg = msg;
 	buf->head = (buf->head + 1) & (MAX_ASYNC_BUFFER - 1);
-	spin_unlock(&(buf->buf_lock));
+	spin_unlock(&(buf->lock));
 
 	up(&buf->q_empty);
 
@@ -171,13 +242,13 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 	pcn_kmsg_cbftn ftn;
 
 	do {
-		err = down_interruptible(&(buf->q_empty));
-	} while (err != 0);
+		err = down_interruptible(&buf->q_empty);
+	} while (err);
 
-	spin_lock(&buf->buf_lock);
+	spin_lock(&buf->lock);
 	msg = buf->rbuf[buf->tail];
 	buf->tail = (buf->tail + 1) & (MAX_ASYNC_BUFFER - 1);
-	spin_unlock(&buf->buf_lock);
+	spin_unlock(&buf->lock);
 
 	up(&buf->q_full);
 
@@ -197,15 +268,16 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 	return 0;
 }
 
-
+/* recv handler */
 static int exec_handler(void* arg0)
 {
 	int err;
-	struct handler_data *data = arg0;
+	struct handler_params *data = arg0;
 	int conn_no = data->conn_no;
 
 	for (;;) {
-		err = deq_recv(data->buf, conn_no);
+		err = deq_recv(&data->buf, conn_no);
+		io_schedule();
 	}
 	return 0;
 }
@@ -214,16 +286,16 @@ static int exec_handler(void* arg0)
 static int recv_handler(void* arg0)
 {
 	int err;
-	struct handler_data *handler_data = arg0;
-
-	int conn_no = handler_data->conn_no;
+	struct handler_params *handler_params = arg0;
+	char name[40];
+	int conn_no = handler_params->conn_no;
 
 	if (conn_no > my_nid) {
 		err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP,
 													&sockets[conn_no]);
 		if (err < 0) {
 			MSGDPRINTK("Failed to create socket..!! "
-							"Messaging layer init failed with err %d\n", err);
+						"Messaging layer init failed with err %d\n", err);
 			goto end;
 		}
 
@@ -239,13 +311,13 @@ static int recv_handler(void* arg0)
 		// Skip connecting to myself
 	}
 
+	sprintf(name, "pcn_exec_%d", conn_no);
 	exec_handlers[conn_no] =
-					kthread_run(exec_handler, handler_data, "pcn_exec");
+					kthread_run(exec_handler, handler_params, name);
 
 	MSGPRINTK("[%d] PCN_RECV handler is up\n", conn_no);
 
 	set_popcorn_node_online(conn_no, true);
-
 	while (!kthread_should_stop()) {
 		/* TODO: make a function */
 		int len;
@@ -264,13 +336,15 @@ static int recv_handler(void* arg0)
 				continue;
 			offset += ret;
 			len -= ret;
-			MSGDPRINTK("(hdr) recv %d in %lu remain=%d\n",
+			MSGDPRINTK("(hdr) recv %d in %lu remain %d\n",
 					ret, sizeof(struct pcn_kmsg_hdr), len);
 		}
 		MSGPRINTK("RcvH %d, %d %ld\n", conn_no, header.type, offset);
 
 		//- compose body -//
-		BUG_ON(header.type < 0 || header.type >= PCN_KMSG_TYPE_MAX);
+		BUG_ON(header.type < 0 || header.size < 0 ||
+					header.size > sizeof(struct pcn_kmsg_message) ||
+					header.type >= PCN_KMSG_TYPE_MAX);
 
 		data = pcn_kmsg_alloc_msg(header.size);
 		BUG_ON(!data && "Unable to alloc a message");
@@ -293,15 +367,13 @@ static int recv_handler(void* arg0)
 		}
 		MSGPRINTK("RecB %d, %d %d\n", conn_no, header.type, header.size);
 
-		err = enq_recv(handler_data->buf, data, conn_no);
+		err = enq_recv(&handler_params->buf, data, conn_no);
 	}
-
 exit:
 	sock_release(sockets[conn_no]);
 	sockets[conn_no] = NULL;
 end:
 	sock_release(sock_listen);
-	sock_listen = NULL;
 	return err;
 }
 
@@ -310,23 +382,23 @@ end:
  * This is the interface for message layer
  ***********************************************/
 static int sock_kmsg_send(unsigned int dest_nid,
-			struct pcn_kmsg_message *lmsg, unsigned int size)
+						struct pcn_kmsg_message *lmsg, unsigned int size)
 {
-	int remaining;
-	char *p;
-
+	struct pcn_kmsg_message *msg;
 	BUG_ON(lmsg->header.type < 0 || lmsg->header.type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(dest_nid < 0 || dest_nid >= MAX_POPCORN_NODES);
 
 	lmsg->header.size = size;
 	lmsg->header.from_nid = my_nid;
 
+	msg = pcn_kmsg_alloc_msg(size);
+	BUG_ON(!msg);
+	memcpy(msg, lmsg, size);
+
 	// Send msg to myself
 	if (dest_nid == my_nid) {
 		pcn_kmsg_cbftn ftn;
-		struct pcn_kmsg_message *msg = pcn_kmsg_alloc_msg(size);
-		BUG_ON(!msg);
-		memcpy(msg, lmsg, size);
+		BUG_ON("No loopback anymore");
 
 		ftn = callbacks[msg->header.type];
 		if (ftn != NULL) {
@@ -340,31 +412,13 @@ static int sock_kmsg_send(unsigned int dest_nid,
 		return 0;
 	}
 
-	if (callbacks[lmsg->header.type] == NULL) {
+	if (callbacks[lmsg->header.type] == NULL)
 		dump_stack();
-	}
 
-	mutex_lock(&mutex_sockets[dest_nid]);
+	enq_send(send_buf[dest_nid], msg, dest_nid);
 
-	remaining = size;
-	p = (char *)lmsg;
-	MSGDPRINTK("%s: dest_nid=%d ticket=%lu conn_no=%d\n",
-						__func__, dest_nid, lmsg->header.ticket, dest_nid);
-	while (remaining > 0) {
-		int sent = ksock_send(sockets[dest_nid], p, remaining);
-		if (sent < 0) {
-			MSGDPRINTK("%s: sent size < 0\n", __func__);
-			io_schedule();
-			continue;
-		}
-		p += sent;
-		remaining -= sent;
-		MSGDPRINTK("Sent %d remaining=%d\n", sent, remaining);
-	}
-	mutex_unlock(&mutex_sockets[dest_nid]);
-
-	MSGPRINTK("Sent %d, %d %d\n", dest_nid, lmsg->header.type, size);
-
+	MSGPRINTK("%s(): sent %d, %d %d\n", __func__,
+				dest_nid, lmsg->header.type, size);
 	return 0;
 }
 
@@ -378,15 +432,13 @@ static int __init initialize(void)
 
 	if (!init_ip_table()) return -EINVAL;
 
+	msg_layer = "sock";
+	send_callback = (send_cbftn)sock_kmsg_send;
+
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		init_completion(&connected[i]);
 		init_completion(&accepted[i]);
-
-		mutex_init(&mutex_sockets[i]);
 	}
-
-	// register callback.
-	send_callback = (send_cbftn)sock_kmsg_send;
 
 	/* Initilaize the sock */
 	/*
@@ -398,7 +450,6 @@ static int __init initialize(void)
 	 * connect: connecting to existing nodes
 	 * accept:  waiting for the connection requests from later nodes
 	 */
-	sock_listen = kmalloc(sizeof(*sock_listen), GFP_KERNEL);
 	err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sock_listen);
 	if (err < 0) {
 		printk(KERN_ERR "Failed to create socket..!! "
@@ -432,41 +483,38 @@ static int __init initialize(void)
 	MSGDPRINTK("Listen to the port %d\n", PORT);
 
 	for (sender = 0; sender < 2; sender++) {
-		// TODO: support prioritized msg handler
-		//struct sched_param param = {.sched_priority = 10};
-
 		for (i = 0; i < MAX_NUM_NODES; i++) {
-			struct handler_data* data;
-			char handler_name[80];
+			struct handler_params* param;
+			char handler_name[40];
 			struct task_struct *handler;
+			struct pcn_kmsg_buf *pb;
 
 			if (i == my_nid)
 				continue;
 
-			/* TODO: make a function */
-			data = kmalloc(sizeof(*data), GFP_KERNEL);
-			BUG_ON(!data);
+			param = kmalloc(sizeof(*param), GFP_KERNEL);
+			BUG_ON(!param);
 
-			data->conn_no = i;
+			param->conn_no = i;
+			pb = &param->buf;
 
-			// The ring buffer for asynchronous amessage processing
-			data->buf = kmalloc(sizeof(*data->buf), GFP_KERNEL);
-			BUG_ON(!(data->buf));
-			data->buf->rbuf =
-						vmalloc(sizeof(*data->buf->rbuf) * MAX_ASYNC_BUFFER);
-			BUG_ON(!(data->buf->rbuf));
+			pb->rbuf = kmalloc(sizeof(*pb->rbuf) * MAX_ASYNC_BUFFER, GFP_KERNEL);
+			BUG_ON(!(pb->rbuf));
 
-			data->buf->head = 0;
-			data->buf->tail = 0;
+			spin_lock_init(&pb->lock);
+			pb->head = 0;
+			pb->tail = 0;
 
-			sema_init(&data->buf->q_empty, 0);
-			sema_init(&data->buf->q_full, MAX_ASYNC_BUFFER);
-			spin_lock_init(&data->buf->buf_lock);
+			sema_init(&pb->q_empty, 0);
+			sema_init(&pb->q_full, MAX_ASYNC_BUFFER);
+
+			if (sender)
+				send_buf[i] = pb;
 			smp_wmb();
 
-			sprintf(handler_name, "pcn_%s%d\n", sender ? "send" : "recv", i);
+			sprintf(handler_name, "pcn_%s_%d", sender ? "send" : "recv", i);
 			handler = kthread_run(
-					sender ? send_handler : recv_handler, data, handler_name);
+					sender ? send_handler : recv_handler, param, handler_name);
 			if (IS_ERR(handler)) {
 				printk(KERN_ERR "Handler creation failed!\n");
 				return -PTR_ERR(handler);
@@ -476,24 +524,24 @@ static int __init initialize(void)
 				send_handlers[i] = handler;
 			} else {
 				recv_handlers[i] = handler;
-				//sched_setscheduler(recv_handlers[i], SCHED_FIFO, &param);
-				//set_cpus_allowed_ptr(recv_handlers[i], cpumask_of(i%NR_CPUS));
 			}
+
+			// TODO: support prioritized msg handler
+			//struct sched_param param = {.sched_priority = 10};
+
+			//sched_setscheduler(recv_handlers[i], SCHED_FIFO, &param);
+			//set_cpus_allowed_ptr(recv_handlers[i], cpumask_of(i%NR_CPUS));
 		}
 	}
 
-	/**
-	 * wait for connection done;
-	 * multi version will be a problem. Jack: but deq() should check it.
-	 * BUTTTTT send_callback are still null pointers so far.
-	 * So, we have to wait here!
-	*/
+	/* Wait for all connections done */
 	for (i = 0; i < MAX_NUM_NODES; i++) {
+		if (i == my_nid) continue;
 		while (!get_popcorn_node_online(i)) {
-			io_schedule();
+			msleep(10);
 		}
+		notify_my_node_info(i);
 	}
-
 	MSGPRINTK("--- Popcorn messaging layer is up ---\n");
 
 	return 0;
@@ -518,7 +566,7 @@ static void __exit unload(void)
 			kthread_stop(recv_handlers[i]);
 		if (exec_handlers[i] != NULL)
 			kthread_stop(exec_handlers[i]);
-		//Jack: TODO: sock release buffer, check(according to) the init
+		//TODO: sock release buffer, check(according to) the init
 	}
 
 	MSGPRINTK("Release sockets\n");
