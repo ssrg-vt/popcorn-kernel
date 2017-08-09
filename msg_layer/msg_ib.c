@@ -2353,7 +2353,7 @@ int __init initialize()
 	if (!init_ip_table()) return -EINVAL;
 
 	/* Create a workqueue for bottom-half */
-	msg_handler = create_workqueue("MSGHandBotm"); // per-cpu
+	msg_handler = alloc_workqueue("MSGHandBotm", WQ_MEM_RECLAIM, 0);
 
 	KRPRINT_INIT("-------------------------------------------------\n");
 	KRPRINT_INIT("---- updating to my_nid=%d wait for a moment ----\n", my_nid);
