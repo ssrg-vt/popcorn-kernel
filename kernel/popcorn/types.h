@@ -148,8 +148,7 @@ DEFINE_PCN_KMSG(remote_vma_request_t, REMOTE_VMA_REQUEST_FIELDS);
 	unsigned long vm_end; \
 	unsigned long vm_flags;	\
 	unsigned long vm_pgoff; \
-	char vm_file_path[512]; \
-	unsigned char vm_owners[MAX_POPCORN_NODES];
+	char vm_file_path[512];
 DEFINE_PCN_KMSG(remote_vma_response_t, REMOTE_VMA_RESPONSE_FIELDS);
 
 #define remote_vma_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)

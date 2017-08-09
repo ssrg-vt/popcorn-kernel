@@ -365,9 +365,6 @@ struct vm_area_struct {
 	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
 #endif
 	struct vm_userfaultfd_ctx vm_userfaultfd_ctx;
-#ifdef CONFIG_POPCORN
-	DECLARE_BITMAP(vm_owners, MAX_POPCORN_NODES);
-#endif
 };
 
 struct core_thread {
