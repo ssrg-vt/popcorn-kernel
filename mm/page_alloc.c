@@ -3256,6 +3256,9 @@ retry_cpuset:
 
 		page = __alloc_pages_slowpath(alloc_mask, order, &ac);
 	}
+#ifdef CONFIG_POPCORN
+	if (page) bitmap_zero(page->owners, MAX_POPCORN_NODES);
+#endif
 
 	if (kmemcheck_enabled && page)
 		kmemcheck_pagealloc_alloc(page, order, gfp_mask);
@@ -3271,9 +3274,6 @@ out:
 	 */
 	if (unlikely(!page && read_mems_allowed_retry(cpuset_mems_cookie)))
 		goto retry_cpuset;
-#ifdef CONFIG_POPCORN
-	bitmap_zero(page->owners, MAX_POPCORN_NODES);
-#endif
 
 	return page;
 }
