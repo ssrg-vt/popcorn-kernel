@@ -137,6 +137,13 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 }
 
 
+void noinline update_frame_address(void)
+{
+	/* User rbp is at 3 stack frames below */
+	/* XXX Not implemented yet */
+}
+
+
 /*
  * Function:
  *		dump_processor_regs

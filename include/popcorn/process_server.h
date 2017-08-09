@@ -6,5 +6,6 @@ struct remote_context;
 
 int process_server_do_migration(struct task_struct* tsk, unsigned int dst_nid, void __user *uregs);
 int process_server_task_exit(struct task_struct *tsk);
+int process_server_update_frame_address(void);
 
 #endif /* __POPCORN_PROCESS_SERVER_H */
