@@ -44,8 +44,9 @@
 char *dummy_send_buf;				// dummy_send_buf for testing
 EXPORT_SYMBOL(dummy_send_buf);
 
-extern char *dummy_act_buf;
-extern char *dummy_pass_buf;
+/* For testing RDMA READ/WRITE */
+char *dummy_act_buf;
+char *dummy_pass_buf;
 
 extern void usr_rdma_poll_done(int);
 
@@ -1414,6 +1415,21 @@ static int __init msg_test_init(void)
 	memset(dummy_send_buf, 'S', MAX_MSG_LENGTH/2);
 	memset(dummy_send_buf+(MAX_MSG_LENGTH/2), 'T', MAX_MSG_LENGTH/2);
 
+	/* init dummy buffers for geting experimental data */
+	if (MAX_MSG_LENGTH > PCN_KMSG_LONG_PAYLOAD_SIZE) {
+		printk(KERN_ERR "MAX_MSG_LENGTH %d shouldn't be larger than "
+						"PCN_KMSG_LONG_PAYLOAD_SIZE %d\n",
+						MAX_MSG_LENGTH, PCN_KMSG_LONG_PAYLOAD_SIZE);
+		BUG();
+	}
+	dummy_act_buf = kzalloc(MAX_MSG_LENGTH, GFP_KERNEL);
+	dummy_pass_buf = kzalloc(MAX_MSG_LENGTH, GFP_KERNEL);
+	if (!dummy_act_buf || !dummy_pass_buf) BUG();
+	memset(dummy_act_buf, 'A', 10);
+	memset(dummy_act_buf + 10, 'B', MAX_MSG_LENGTH - 10);
+	memset(dummy_pass_buf, 'P', 10);
+	memset(dummy_pass_buf + 10, 'Q', MAX_MSG_LENGTH - 10);
+
 	/* register callback. also define in <linux/pcn_kmsg.h>  */
 	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_FIRST_TEST,
 					(pcn_kmsg_cbftn)handle_remote_thread_first_test_request);
@@ -1452,10 +1468,15 @@ static int __init msg_test_init(void)
 static void __exit msg_test_exit(void) 
 {
 	printk("\n\n--- Popcorn messaging self testing unloaded! ---\n\n");
+	kfree(dummy_act_buf);
+	kfree(dummy_pass_buf);
+
 	if (g_test_buf)
 		kfree(g_test_buf);
+
 	if (g_test_write_buf)
 		kfree(g_test_write_buf);
+
 	remove_proc_entry("kmsg_test", NULL);
 }
 

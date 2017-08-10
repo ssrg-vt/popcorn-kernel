@@ -100,9 +100,6 @@ struct pcn_kmsg_hdr {
 	enum pcn_kmsg_prio prio	:7;
 	bool is_rdma			:1;
 	unsigned int size;
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	unsigned long ticket;	// useful dbg for msg layer
-#endif  
 }__attribute__((packed));
 
 #define CACHE_LINE_SIZE 64
@@ -141,10 +138,6 @@ typedef struct {
     struct pcn_kmsg_hdr header; /* must follow */
 	struct pcn_kmsg_rdma_hdr rdma_header; /* must follow, rdma essential */
     /* your data structures */
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-    int rw_ticket;
-    int rdma_ticket;
-#endif
 	int remote_ws;
 }__attribute__((packed)) remote_thread_rdma_rw_t;
 

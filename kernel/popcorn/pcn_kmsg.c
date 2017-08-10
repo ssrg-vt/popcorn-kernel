@@ -12,12 +12,6 @@
 #include <popcorn/debug.h>
 #include <popcorn/stat.h>
 
-/* For testing RDMA READ/WRITE */
-char *dummy_act_buf;
-char *dummy_pass_buf;
-EXPORT_SYMBOL(dummy_act_buf);
-EXPORT_SYMBOL(dummy_pass_buf);
-
 char *msg_layer = NULL;
 EXPORT_SYMBOL(msg_layer);
 
