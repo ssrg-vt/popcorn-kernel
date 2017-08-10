@@ -1,11 +1,11 @@
-menu "Popcorn Multi-Kernel Support"
+menu "Popcorn Distributed Execution Support"
 
 # This is selected by all the architectures Popcorn supports
 config ARCH_SUPPORTS_POPCORN
 	bool
 
 config POPCORN
-	bool "Popcorn Multi-Kernel Support"
+	bool "Popcorn Distributed Execution Support"
 	depends on ARCH_SUPPORTS_POPCORN
 	default y
 	help
@@ -31,6 +31,11 @@ config POPCORN_DEBUG_VMA_SERVER
 config POPCORN_DEBUG_PAGE_SERVER
 	bool "Log debug messages for page migration"
 	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_REMOTE_INFO
+	bool "Single system image over multiple nodes"
+	depends on POPCORN
 	default n
 
 comment "Popcorn is not currently supported on your architecture"

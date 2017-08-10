@@ -69,66 +69,66 @@ int fill_cpu_info(struct remote_cpu_info *res)
 		cpu = c->cpu_index;
 #endif
 
-		res->_processor = cpu;
+		res->processor = cpu;
 
-		arch->cpu[count]._processor = cpu;
-		strcpy(arch->cpu[count]._vendor_id,
+		arch->cpu[count].processor = cpu;
+		strcpy(arch->cpu[count].vendor_id,
 				c->x86_vendor_id[0] ? c->x86_vendor_id : "unknown");
-		arch->cpu[count]._cpu_family = c->x86;
-		arch->cpu[count]._model = c->x86_model;
-		strcpy(arch->cpu[count]._model_name,
+		arch->cpu[count].cpu_family = c->x86;
+		arch->cpu[count].model = c->x86_model;
+		strcpy(arch->cpu[count].model_name,
 				c->x86_model_id[0] ? c->x86_model_id : "unknown");
 
 		if (c->x86_mask || c->cpuid_level >= 0)
-			arch->cpu[count]._stepping = c->x86_mask;
+			arch->cpu[count].stepping = c->x86_mask;
 		else
-			arch->cpu[count]._stepping = -1;
+			arch->cpu[count].stepping = -1;
 
 		if (c->microcode)
-			arch->cpu[count]._microcode = c->microcode;
+			arch->cpu[count].microcode = c->microcode;
 
 		if (cpu_has(c, X86_FEATURE_TSC)) {
 			unsigned int freq = cpufreq_quick_get(cpu);
 
 			if (!freq)
 				freq = cpu_khz;
-			arch->cpu[count]._cpu_freq = freq / 1000; //, (freq % 1000);
+			arch->cpu[count].cpu_freq = freq / 1000; //, (freq % 1000);
 		}
 
 		/* Cache size */
 		if (c->x86_cache_size >= 0)
-			arch->cpu[count]._cache_size = c->x86_cache_size;
+			arch->cpu[count].cache_size = c->x86_cache_size;
 
-		strcpy(arch->cpu[count]._fpu, "yes");
-		strcpy(arch->cpu[count]._fpu_exception, "yes");
-		arch->cpu[count]._cpuid_level = c->cpuid_level;
-		strcpy(arch->cpu[count]._wp, "yes");
+		strcpy(arch->cpu[count].fpu, "yes");
+		strcpy(arch->cpu[count].fpu_exception, "yes");
+		arch->cpu[count].cpuid_level = c->cpuid_level;
+		strcpy(arch->cpu[count].wp, "yes");
 
-		strcpy(arch->cpu[count]._flags, "");
+		strcpy(arch->cpu[count].flags, "");
 		//strcpy(res->_flags,"flags\t\t:");
 		for (i = 0; i < 32 * NCAPINTS; i++)
 			if (cpu_has(c, i) && x86_cap_flags[i] != NULL){
-				strcat(arch->cpu[count]._flags, x86_cap_flags[i]);
-				strcat(arch->cpu[count]._flags, " ");
+				strcat(arch->cpu[count].flags, x86_cap_flags[i]);
+				strcat(arch->cpu[count].flags, " ");
 			}
 
-		arch->cpu[count]._nbogomips = c->loops_per_jiffy / (500000 / HZ);
+		arch->cpu[count].nbogomips = c->loops_per_jiffy / (500000 / HZ);
 		//(c->loops_per_jiffy/(5000/HZ)) % 100);
 
 #ifdef CONFIG_X86_64
 		if (c->x86_tlbsize > 0)
-			arch->cpu[count]._TLB_size = c->x86_tlbsize;
+			arch->cpu[count].TLB_size = c->x86_tlbsize;
 #endif
-		arch->cpu[count]._clflush_size = c->x86_clflush_size;
-		arch->cpu[count]._cache_alignment = c->x86_cache_alignment;
-		arch->cpu[count]._bits_physical = c->x86_phys_bits;
-		arch->cpu[count]._bits_virtual = c->x86_virt_bits;
+		arch->cpu[count].clflush_size = c->x86_clflush_size;
+		arch->cpu[count].cache_alignment = c->x86_cache_alignment;
+		arch->cpu[count].bits_physical = c->x86_phys_bits;
+		arch->cpu[count].bits_virtual = c->x86_virt_bits;
 
-		strcpy(arch->cpu[count]._power_management, "");
+		strcpy(arch->cpu[count].power_management, "");
 		for (i = 0; i < 32; i++) {
 			if (c->x86_power & (1 << i)) {
 				if (i < ARRAY_SIZE(x86_power_flags) && x86_power_flags[i])
-					strcat(arch->cpu[count]._flags,
+					strcat(arch->cpu[count].flags,
 							x86_power_flags[i][0] ? " " : "");
 			}
 		}

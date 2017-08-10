@@ -6,13 +6,6 @@
 
 #include <popcorn/bundle.h>
 
-#define CPU_PROC_VERBOSE 0
-#if CPU_PROC_VERBOSE
-#define CPPRINTK(...) printk(__VA_ARGS__)
-#else
-#define CPPRINTK(...)
-#endif
-
 extern void send_remote_cpu_info_request(unsigned int nid);
 extern unsigned int get_number_cpus_from_remote_node(unsigned int nid);
 extern int remote_proc_cpu_info(struct seq_file *m, unsigned int nid,
@@ -188,17 +181,12 @@ static void calc_nid_vpos(loff_t *pos, unsigned int *pnid, unsigned int *vpos)
 
 		(*vpos)++;
 	}
-
-	CPPRINTK("%s: pos: %lld, pnid: %d, vpos: %d\n", __func__,
-		*pos, *pnid, *vpos);
 }
 
 static void *c_start(struct seq_file *m, loff_t *pos)
 {
 	unsigned int vpos = 0;
 	unsigned int nid = 0;
-
-	CPPRINTK("%s: Entered, *pos: %lld\n", __func__, (*pos));
 
 	if (my_nid == -1)
 		goto local;
@@ -239,8 +227,6 @@ static void *c_start(struct seq_file *m, loff_t *pos)
 			}
 
 			num_total_cpus = j;
-			CPPRINTK("%s: num_total_cpus: %d\n", __func__,
-				 num_total_cpus);
 			goto remote;
 		}
 	} else if ((*pos) > nr_cpu_ids) {
@@ -275,23 +261,18 @@ remote:
 
 static void *c_next(struct seq_file *m, void *v, loff_t *pos)
 {
-	CPPRINTK("%s: Entered\n", __func__);
-
 	(*pos)++;
 	return c_start(m, pos);
 }
 
 static void c_stop(struct seq_file *m, void *v)
 {
-	CPPRINTK("%s: Entered\n", __func__);
 }
 
 static int c_show(struct seq_file *m, void *v)
 {
 	struct cpu_global_info *cpu_global_info = v;
 	struct cpuinfo_x86 *c;
-
-	CPPRINTK("%s: Entered\n", __func__);
 
 	if (cpu_global_info->remote == 1) {
 		remote_proc_cpu_info(m,

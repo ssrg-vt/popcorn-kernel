@@ -1,9 +1,9 @@
 /*
  * File:
- * popcorn_cpuinfo_arch.c
+ *  cpuinfo.c
  *
  * Description:
- * 	this file provides the architecture specific functionality of
+ * 	This file provides the architecture specific functionality of
  * populating cpuinfo
  *
  * Created on:
@@ -20,43 +20,43 @@
 #define _LINUX_POPCORN_CPUINFO_H
 
 #define MAX_ARM_CORES 96
-#define MAX_X86_CORES 16
+#define MAX_X86_CORES 32
 
 #include <popcorn/bundle.h>
 
 /* For x86_64 cores */
-typedef struct __percpu_arch_x86 {
-	unsigned int _processor;
-	char _vendor_id[16];
-	int _cpu_family;
-	unsigned int _model;
-	char _model_name[64];
-	int _stepping;
-	unsigned long _microcode;
-	unsigned _cpu_freq;
-	int _cache_size;
-	char _fpu[3];
-	char _fpu_exception[3];
-	int _cpuid_level;
-	char _wp[3];
-	char _flags[640];
-	unsigned long _nbogomips;
-	int _TLB_size;
-	unsigned int _clflush_size;
-	int _cache_alignment;
-	unsigned int _bits_physical;
-	unsigned int _bits_virtual;
-	char _power_management[64];
+typedef struct percpu_arch_x86 {
+	unsigned int processor;
+	char vendor_id[16];
+	int cpu_family;
+	unsigned int model;
+	char model_name[64];
+	int stepping;
+	unsigned long microcode;
+	unsigned cpu_freq;
+	int cache_size;
+	char fpu[3];
+	char fpu_exception[3];
+	int cpuid_level;
+	char wp[3];
+	char flags[640];
+	unsigned long nbogomips;
+	int TLB_size;
+	unsigned int clflush_size;
+	int cache_alignment;
+	unsigned int bits_physical;
+	unsigned int bits_virtual;
+	char power_management[64];
 } percpu_arch_x86_t;
 
-typedef struct __cpuinfo_arch_x86 {
+typedef struct cpuinfo_arch_x86 {
 	int num_cpus;
 	percpu_arch_x86_t cpu[MAX_X86_CORES];
 } cpuinfo_arch_x86_t;
 
 
 /* For arm64 cores */
-typedef struct __per_core_info_t {
+typedef struct per_core_info_t {
 	unsigned int processor_id;
 	bool compat;
 	char model_name[64];
@@ -72,20 +72,20 @@ typedef struct __per_core_info_t {
 	unsigned int cpu_revision;
 } per_core_info_t;
 
-typedef struct __cpuinfo_arch_arm64 {
+typedef struct cpuinfo_arch_arm64 {
 	unsigned int num_cpus;
 	per_core_info_t percore[MAX_ARM_CORES];
 } cpuinfo_arch_arm64_t;
 
 
-typedef union __cpuinfo_arch {
+typedef union cpuinfo_arch {
 	cpuinfo_arch_x86_t x86;
 	cpuinfo_arch_arm64_t arm64;
 } cpuinfo_arch_t;
 
 
 struct remote_cpu_info {
-	unsigned int _processor;
+	unsigned int processor;
 	enum popcorn_arch arch_type;
 
 	cpuinfo_arch_t arch;
