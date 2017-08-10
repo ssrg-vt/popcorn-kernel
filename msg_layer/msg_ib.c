@@ -62,10 +62,13 @@
 #define RECV_WQ_THRESHOLD 10	/* MAX poll number in a INT */
 
 /* IB recv */
-#define MAX_RECV_WR 1500	/* important! Check it if only sender crash */
+//#define MAX_RECV_WR 15000	/* important! Check it if only sender crash */
+#define MAX_RECV_WR 16000	/* important! Check it if only sender crash */
 
 /* IB send & completetion */
-#define MAX_SEND_WR 128	/* sender depth (txdepth) = MAX_SEND_WR */
+//#define MAX_SEND_WR 128	/* sender depth (txdepth) = MAX_SEND_WR */
+#define MAX_SEND_WR 512	/* sender depth (txdepth) = MAX_SEND_WR */
+//#define MAX_SEND_WR 1024	/* sender depth (txdepth) = MAX_SEND_WR */
 #define SEND_WR_DEPTH 8	/* Completion Entries = THIS DEPTH x MAX_SEND_WR */
 #define MAX_CQE MAX_SEND_WR * SEND_WR_DEPTH
 
@@ -165,6 +168,9 @@ struct ib_cb {
 	struct ib_pd *pd;
 	struct ib_qp *qp;
 
+	/* how many WR in Work Queue */
+	atomic_t WQ_WR_cnt;
+
 	/* Send buffer */
 	struct ib_send_wr send_wr;		/* send work requrest info for send */
 	struct ib_sge send_sgl;
@@ -253,14 +259,45 @@ struct ib_cb {
 
 /* InfiniBand Control Block per connection*/
 struct ib_cb *gcb[MAX_NUM_NODES];
+/* workqueue */
+struct workqueue_struct *msg_handler;
 
 #if DEMON_POST_RECV_WCS
-struct task_struct *recv_post_demon[i];
+struct task_struct *recv_post_demon[MAX_NUM_NODES];
 #endif
+
+/* Completion station for send work requests */
+static struct completion send_wr_comp[MAX_NUM_NODES][MAX_CQE];
+static spinlock_t send_avail_bmap_lock[MAX_NUM_NODES];
+static unsigned long send_avail[MAX_NUM_NODES][BITS_TO_LONGS(MAX_CQE)];
+
+struct completion *get_send_wr_comp(int dst)
+{
+	int ofs;
+	struct completion *comp;
+
+	spin_lock(&send_avail_bmap_lock[dst]);
+	ofs = find_first_zero_bit(send_avail[dst], MAX_CQE);
+	if(ofs == MAX_CQE-1) BUG();
+	set_bit(ofs, send_avail[dst]);
+	comp = send_wr_comp[dst] + ofs;
+	spin_unlock(&send_avail_bmap_lock[dst]);
+
+	return comp;
+}
+
+static void put_send_wr_comp(int dst, struct completion *comp)
+{
+	int ofs = (comp - send_wr_comp[dst]) / sizeof(*comp);
+
+	spin_lock(&send_avail_bmap_lock[dst]);
+	clear_bit(ofs, send_avail[dst]);
+	spin_unlock(&send_avail_bmap_lock[dst]);
+}
 
 /* For RECV ib_recv_work_struct queue */
 spinlock_t rws_q_spinlock[MAX_NUM_NODES];
-static struct ib_recv_work_struct rws_wait_list_head[MAX_NUM_CHANNELS];	/* Sentinel */
+static struct ib_recv_work_struct rws_wait_list_head[MAX_NUM_NODES];	/* Sentinel */
 
 /* Functions */
 static int __init initialize(void);
@@ -273,9 +310,9 @@ extern send_rdma_cbftn send_callback_rdma;
 extern handle_rdma_request_ftn handle_rdma_callback;
 extern char *msg_layer;
 
-/* workqueue */
-struct workqueue_struct *msg_handler;
-
+#if DEMON_POST_RECV_WCS
+static struct completion rws_comp[MAX_NUM_NODES];
+#endif
 
 /* Reuse recv rws */
 static void __enq_rws(struct ib_recv_work_struct *strc, int index)
@@ -283,17 +320,24 @@ static void __enq_rws(struct ib_recv_work_struct *strc, int index)
 	spin_lock(&rws_q_spinlock[index]);
     list_add_tail(&(strc->list), &(rws_wait_list_head[index].list));
 	spin_unlock(&rws_q_spinlock[index]);
+#if DEMON_POST_RECV_WCS
+	complete(&rws_comp[index]);
+#endif
 }
 
 static struct ib_recv_work_struct *__dq_rws(int index)
 {
 	struct ib_recv_work_struct *tmp;
 
+#if DEMON_POST_RECV_WCS
+	wait_for_completion(&rws_comp[index]);
+#endif
 	spin_lock(&rws_q_spinlock[index]);
     if (list_empty(&rws_wait_list_head[index].list)) {
         printk(KERN_INFO "List %d is empty...\n", index);
 		spin_unlock(&rws_q_spinlock[index]);
-        return NULL;
+		BUG();
+        //return NULL;
     } else {
         tmp = list_first_entry(&rws_wait_list_head[index].list,
 								struct ib_recv_work_struct, list);
@@ -508,18 +552,6 @@ static int __ib_bind_server(struct ib_cb *cb)
 	return 0;
 }
 
-static void __setup_send_wr(struct ib_cb *cb,
-							struct pcn_kmsg_message *lmsg)
-{
-	cb->send_dma_addr = dma_map_single(cb->pd->device->dma_device,
-						lmsg, lmsg->header.size, DMA_BIDIRECTIONAL);
-	pci_unmap_addr_set(cb, send_mapping, cb->send_dma_addr);
-
-	/* Send buffer */
-	cb->send_sgl.addr = cb->send_dma_addr;
-	cb->send_sgl.length = lmsg->header.size;
-}
-
 /* set up sgl */
 static void __ib_setup_wr(struct ib_cb *cb)
 {
@@ -544,11 +576,11 @@ static void __ib_setup_wr(struct ib_cb *cb)
 	}
 
 	/* send work request: unchanged parameters */
-	cb->send_sgl.lkey = cb->pd->local_dma_lkey;
-	cb->send_wr.opcode = IB_WR_SEND;
-	cb->send_wr.send_flags = IB_SEND_SIGNALED;
-	cb->send_wr.num_sge = 1;
-	cb->send_wr.sg_list = &cb->send_sgl;
+//	cb->send_sgl.lkey = cb->pd->local_dma_lkey;
+//	cb->send_wr.opcode = IB_WR_SEND;
+//	cb->send_wr.send_flags = IB_SEND_SIGNALED;
+//	cb->send_wr.num_sge = 1;
+//	cb->send_wr.sg_list = &cb->send_sgl;
 
 	/* Common for RW - RW wr */
 	cb->rdma_send_wr.wr.num_sge = 1;
@@ -1058,9 +1090,9 @@ err1:
  */
 u64 __ib_map_act(void *paddr, int conn_no, int rw_size)
 {
-struct ib_cb *cb = gcb[conn_no];
-u64 dma_addr = dma_map_single(cb->pd->device->dma_device,
-							  paddr, rw_size, DMA_BIDIRECTIONAL);
+	struct ib_cb *cb = gcb[conn_no];
+	u64 dma_addr = dma_map_single(cb->pd->device->dma_device,
+								  paddr, rw_size, DMA_BIDIRECTIONAL);
 	pci_unmap_addr_set(cb, rdma_mapping_act, dma_addr);
 	return dma_addr;
 }
@@ -1069,7 +1101,7 @@ u64 __ib_map_pass(void *paddr, int conn_no, int rw_size)
 {
 	struct ib_cb *cb = gcb[conn_no];
 	u64 dma_addr = dma_map_single(cb->pd->device->dma_device,
-							  paddr, rw_size, DMA_BIDIRECTIONAL);
+								  paddr, rw_size, DMA_BIDIRECTIONAL);
 	pci_unmap_addr_set(cb, rdma_mapping_pass, dma_addr);
 	return dma_addr;
 }
@@ -1102,7 +1134,17 @@ int __ib_kmsg_send_long(unsigned int dst,
 						  unsigned int msg_size)
 {
 	int ret;
+	struct completion *comp;
 	struct ib_send_wr *bad_wr;
+	struct ib_sge send_sgl;
+	struct ib_send_wr send_wr = {
+		.opcode = IB_WR_SEND,
+		.send_flags = IB_SEND_SIGNALED,
+		.num_sge = 1,
+		.sg_list = &send_sgl,
+		.next = NULL,
+	};
+	u64 send_dma_addr;
 
 	if ( msg_size > sizeof(struct pcn_kmsg_message)) {
 		printk("%s(): ERROR - MSG %d larger than MAX_MSG_SIZE %ld\n",
@@ -1118,23 +1160,25 @@ int __ib_kmsg_send_long(unsigned int dst,
 	lmsg->header.size = msg_size;
 	lmsg->header.from_nid = my_nid;
 
-	mutex_lock(&gcb[dst]->send_mutex);
+	comp = get_send_wr_comp(dst);
+	send_wr.wr_id = (u64)comp;
 
-	__setup_send_wr(gcb[dst], lmsg);
+	send_dma_addr = dma_map_single(gcb[dst]->pd->device->dma_device,
+					lmsg, msg_size, DMA_BIDIRECTIONAL);
+	send_sgl.addr = send_dma_addr;
+	send_sgl.length = msg_size;
+	send_sgl.lkey = gcb[dst]->pd->local_dma_lkey;
 
-	mutex_lock(&gcb[dst]->qp_mutex);
-	ret = ib_post_send(gcb[dst]->qp, &gcb[dst]->send_wr, &bad_wr);
-	mutex_unlock(&gcb[dst]->qp_mutex);
+	ret = ib_post_send(gcb[dst]->qp, &send_wr, &bad_wr);
+	atomic_inc(&gcb[dst]->WQ_WR_cnt);
+	if (atomic_read(&gcb[dst]->WQ_WR_cnt) == MAX_SEND_WR)
+		BUG();
 
-	wait_event_interruptible(gcb[dst]->sem,
-			atomic_read(&gcb[dst]->send_state) == RDMA_SEND_COMPLETE);
-	atomic_set(&gcb[dst]->send_state, IDLE);
+	wait_for_completion(comp);
+	put_send_wr_comp(dst, comp);
 
 	dma_unmap_single(gcb[dst]->pd->device->dma_device,
-					 pci_unmap_addr(gcb[dst], send_mapping),
-					 msg_size, DMA_BIDIRECTIONAL);
-
-	mutex_unlock(&gcb[dst]->send_mutex);
+					 send_dma_addr, lmsg->header.size, DMA_BIDIRECTIONAL);
 	return 0;
 }
 
@@ -1491,8 +1535,10 @@ static int __ib_kmsg_recv_long(struct ib_cb *cb,
 	pcn_kmsg_work_t *kmsg_work;
 
 	if (unlikely( lmsg->header.size > sizeof(struct pcn_kmsg_message))) {
-		printk(KERN_ERR "Received invalide message size > MAX %lu\n",
-									sizeof(struct pcn_kmsg_message));
+		printk(KERN_ERR "Received invalide message size > MAX %lu "
+						"from %d type %d size %d\n",
+						sizeof(struct pcn_kmsg_message), lmsg->header.from_nid,
+						lmsg->header.type, lmsg->header.size);
 		BUG();
 	}
 
@@ -1521,11 +1567,9 @@ static int __ib_kmsg_recv_long(struct ib_cb *cb,
 static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 {
 	struct ib_cb *cb = ctx;
-	struct ib_wc wc;	/* work complition->wr_id (work request ID) */
 	struct ib_recv_wr *bad_wr;
-	int ret;
-	int i, recv_cnt = 0;
-	struct ib_wc *_wc;
+	int i, ret,  recv_cnt = 0;
+	struct ib_wc *_wc;	/* work complition->wr_id (work request ID) */
 
 	BUG_ON(cb->cq != cq);
 	if (atomic_read(&cb->state) == ERROR) {
@@ -1534,10 +1578,8 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 	}
 
 	/* get a completion */
-	while ((ret = ib_poll_cq(cb->cq, 1, &wc)) > 0) {
-		_wc = &wc;
-
-		if (_wc->status) { // !=IBV_WC_SUCCESS(0)
+	while ((ret = ib_poll_cq(cb->cq, 1, _wc)) > 0) {
+		if (_wc->status) {
 			if (_wc->status == IB_WC_WR_FLUSH_ERR) {
 				printk("< cq flushed >\n");
 			} else {
@@ -1551,18 +1593,8 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 
 		switch (_wc->opcode) {
 		case IB_WC_SEND:
-			atomic_set(&cb->send_state, RDMA_SEND_COMPLETE);
-			wake_up_interruptible(&cb->sem);
-			break;
-
-		case IB_WC_RDMA_WRITE:
-			atomic_set(&cb->write_state, RDMA_WRITE_COMPLETE);
-			wake_up_interruptible(&cb->sem);
-			break;
-
-		case IB_WC_RDMA_READ:
-			atomic_set(&cb->read_state, RDMA_READ_COMPLETE);
-			wake_up_interruptible(&cb->sem);
+			atomic_dec(&gcb[i]->WQ_WR_cnt);
+			complete((struct completion *)_wc->wr_id);
 			break;
 
 		case IB_WC_RECV:
@@ -1576,9 +1608,19 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 			__enq_rws((struct ib_recv_work_struct*)_wc->wr_id, cb->conn_no);
 			break;
 
+		case IB_WC_RDMA_WRITE:
+			atomic_set(&cb->write_state, RDMA_WRITE_COMPLETE);
+			wake_up_interruptible(&cb->sem);
+			break;
+
+		case IB_WC_RDMA_READ:
+			atomic_set(&cb->read_state, RDMA_READ_COMPLETE);
+			wake_up_interruptible(&cb->sem);
+			break;
+
 		default:
 			printk(KERN_ERR "< %s:%d Unexpected opcode %d, Shutting down >\n",
-											__func__, __LINE__, _wc->opcode);
+							__func__, __LINE__, _wc->opcode);
 			goto error;	/* TODO for rmmod */
 			//wake_up_interruptible(&cb->sem);
 			//ib_req_notify_cq(cb->cq, IB_CQ_NEXT_COMP);
@@ -1588,7 +1630,7 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 		if (recv_cnt >= RECV_WQ_THRESHOLD)
 			break;
 	}
-
+#if !DEMON_POST_RECV_WCS
 	for(i = 0; i < recv_cnt; i++) {
 		struct ib_recv_work_struct *_rws = __dq_rws(cb->conn_no);
 		if(unlikely(!_rws))
@@ -1600,7 +1642,7 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 			BUG();
 		}
 	}
-
+#endif
 	ib_req_notify_cq(cb->cq, IB_CQ_NEXT_COMP);
 	return;
 
@@ -1785,8 +1827,21 @@ static void handle_rdma_FaRM2_request(struct pcn_kmsg_message *inc_msg)
 /* Initialize callback table to null, set up control and data channels */
 int __init initialize()
 {
-	int i, err, conn_no;
+	int i, j, err, conn_no;
 	msg_layer = "IB";
+
+	for (i=0; i<MAX_NUM_NODES; i++) {
+#if DEMON_POST_RECV_WCS
+		init_completion(&rws_comp[i]);
+#endif
+		spin_lock_init(&send_avail_bmap_lock[i]);
+	}
+
+	for (i=0; i<MAX_NUM_NODES; i++)
+		for (j=0; j<MAX_CQE; j++) {
+			init_completion(&send_wr_comp[i][j]);
+			clear_bit(j, send_avail[i]);
+		}
 
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_FARM2_REQUEST,
 								(pcn_kmsg_cbftn)handle_rdma_FaRM2_request);
@@ -1825,6 +1880,7 @@ int __init initialize()
 		gcb[i]->send_state.counter = IDLE;
 		gcb[i]->read_state.counter = IDLE;
 		gcb[i]->write_state.counter = IDLE;
+		gcb[i]->WQ_WR_cnt.counter = 0;
 
 		/* For RECV ib_recv_work_struct queue */
         INIT_LIST_HEAD(&rws_wait_list_head[i].list);
@@ -1919,6 +1975,7 @@ int __init initialize()
 		atomic_set(&gcb[i]->send_state, IDLE);
 		atomic_set(&gcb[i]->read_state, IDLE);
 		atomic_set(&gcb[i]->write_state, IDLE);
+		atomic_set(&gcb[i]->WQ_WR_cnt, 0);
 	}
 
 	send_callback = (send_cbftn)ib_kmsg_send_long;
