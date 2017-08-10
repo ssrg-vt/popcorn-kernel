@@ -9,10 +9,6 @@
 
 #include <linux/types.h>
 
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-#define MAX_STATISTIC_SLOTS 1048576
-#endif
-
 enum pcn_connection_status {
 	PCN_CONN_WATING,
 	PCN_CONN_CONNECTED,

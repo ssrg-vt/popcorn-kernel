@@ -10,14 +10,7 @@
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/debug.h>
-
-/* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-atomic_t send_pattern[MAX_STATISTIC_SLOTS];
-atomic_t recv_pattern[MAX_STATISTIC_SLOTS];
-EXPORT_SYMBOL(send_pattern);
-EXPORT_SYMBOL(recv_pattern);
-#endif
+#include <popcorn/stat.h>
 
 /* For testing RDMA READ/WRITE */
 char *dummy_act_buf;
@@ -43,13 +36,6 @@ EXPORT_SYMBOL(handle_rdma_callback);
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-	int i;
-	for(i=0; i<MAX_STATISTIC_SLOTS; i++) {
-		send_pattern[i].counter = 0;
-        recv_pattern[i].counter = 0;
-	}
-#endif
 	send_callback = NULL;
 	MSGPRINTK("%s: done\n", __func__);
 	return 0;
@@ -75,11 +61,10 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 	return 0;
 }
 
-int pcn_kmsg_send(unsigned int to, void *lmsg, unsigned int size)
+int pcn_kmsg_send(unsigned int to, void *msg, unsigned int size)
 {
+	struct pcn_kmsg_hdr *hdr = msg;
 	if (send_callback == NULL) {
-		struct pcn_kmsg_hdr *hdr = lmsg;
-
 		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, size=%u\n",
 					__func__, hdr->from_nid, hdr->type, size);
 		// msleep(100);
@@ -87,11 +72,11 @@ int pcn_kmsg_send(unsigned int to, void *lmsg, unsigned int size)
 		return -ENOENT;
 	}
 
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-	atomic_inc(&send_pattern[size]);
+#ifdef CONFIG_POPCORN_STAT
+	account_pcn_message_sent(msg);
 #endif
 
-	return send_callback(to, (struct pcn_kmsg_message *)lmsg, size);
+	return send_callback(to, (struct pcn_kmsg_message *)msg, size);
 }
 
 void *pcn_kmsg_alloc_msg(size_t size)

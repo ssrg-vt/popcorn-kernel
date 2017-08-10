@@ -23,6 +23,7 @@
 
 #include <asm/uaccess.h>
 
+#include <popcorn/stat.h>
 #include "common.h"
 
 #define PORT 30467
@@ -256,8 +257,8 @@ static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
 
 	ftn = callbacks[msg.msg->header.type];
 	if (ftn != NULL) {
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-		atomic_inc(&recv_pattern[msg.msg->header.size]);
+#ifdef CONFIG_POPCORN_STAT
+		account_pcn_message_recv(msg.msg);
 #endif
 		ftn((void*)msg.msg);
 	} else {

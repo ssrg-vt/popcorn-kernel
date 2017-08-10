@@ -31,6 +31,8 @@
 
 #include <linux/vmalloc.h>
 
+#include <popcorn/stat.h>
+
 #include "common.h"
 
 #include "genif.h"
@@ -792,8 +794,8 @@ do_retry:
 			pcn_kmsg_free_msg(pcn_msg);
 #endif
 		} else {
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-			atomic_inc(&recv_pattern[pcn_msg->header.size]);
+#ifdef CONFIG_POPCORN_STAT
+			account_pcn_message_recv(msg.msg);
 #endif
 			ftn = callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {

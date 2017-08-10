@@ -44,8 +44,6 @@ const int my_arch =
 	POPCORN_ARCH_ARM;
 #elif defined(CONFIG_PPC64)
 	POPCORN_ARCH_PPC;
-#elif defined(CONFIG_SPARC64)
-	POPCORN_ARCH_SPARC;
 #else
 	POPCORN_ARCH_UNKNOWN;
 #endif
@@ -61,7 +59,6 @@ const char *archs_sz[] = {
 	"x86",
 	"arm",
 	"powerpc",
-	"sparcs",
 };
 
 

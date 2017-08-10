@@ -41,9 +41,6 @@
 #define MAX_TESTING_SIZE 120*1024*1024
 #define TEST1_PAYLOAD_SIZE 1024
 
-/* proc output args */
-#define PROC_BUF_SIZE 1024*1024 // proc output size
-
 char *dummy_send_buf;				// dummy_send_buf for testing
 EXPORT_SYMBOL(dummy_send_buf);
 
@@ -957,9 +954,9 @@ static ssize_t write_proc(struct file * file,
 			KRPRINT_INIT("argv[%d]= %s\n", i, argv[i]);
 	}
 
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-	printk(KERN_WARNING "You are tracking POPCORN_MSG_STATISTIC "
-					"and geting inaccurate performance data now\n");
+#ifdef CONFIG_POPCORN_STAT
+	printk(KERN_WARNING "You are collecting statistics "
+					"and may get inaccurate performance data now\n");
 #endif
 	
 	KRPRINT_INIT("\n\n[ proc write |%s| cnt %ld ] [%d args] \n", 
@@ -1141,65 +1138,8 @@ static ssize_t write_proc(struct file * file,
 	return count;	// if not reach count, will reenter again
 }
 
-static ssize_t read_func(struct file *filp, char *usr_buf,
-									size_t count, loff_t *offset)
-{
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-	int i;
-#endif
-	char *buf;
-	int len = 0;
-
-	buf = kzalloc(PROC_BUF_SIZE, GFP_KERNEL);
-	if (!buf)
-		BUG();
-
-	if (*offset > 0)
-		return 0;
-	
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-	for (i=1; i<MAX_STATISTIC_SLOTS; i++) {
-		if (atomic_read(&send_pattern[i]) == 0)
-			continue;
-		len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
-						"SEND: size %d cnt %lu\n", i,
-						(unsigned long)atomic_read(&send_pattern[i]));
-	}
-	for (i=1; i<MAX_STATISTIC_SLOTS; i++) {
-		if (atomic_read(&recv_pattern[i]) == 0)
-			continue;
-		len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
-						"RECV: size %d cnt %lu\n", i,
-						(unsigned long)atomic_read(&recv_pattern[i]));
-	}
-
-	if ( len > PROC_BUF_SIZE ) {
-		len = PROC_BUF_SIZE;
-		printk(KERN_WARNING "logs dropped\n");
-	}
-
-	if (copy_to_user(usr_buf, buf, len)) {
-		printk(KERN_ERR "cpy_2_usr failed\n");
-		kfree(buf);
-		return -EFAULT;
-	}
-
-#else
-	printk("Please turn on CONFIG_POPCORN_MSG_STATISTIC "
-								"and recompile the kernel agaian!!\n");
-	len += snprintf(buf+strlen(buf), PROC_BUF_SIZE,
-					"Please turn on CONFIG_POPCORN_MSG_STATISTIC "
-								"and recompile the kernel agaian!!\n");
-#endif
-
-	kfree(buf);
-	*offset = len;
-	return len;
-}
-
 static int kmsg_test_read_proc(struct seq_file *seq, void *v)
 {
-	printk("Not suppor open\n");
 	return 0;
 }
 
@@ -1211,7 +1151,6 @@ static int kmsg_test_read_open(struct inode *inode, struct file *file)
 static struct file_operations kmsg_test_ops = {
 	.owner = THIS_MODULE,
 	.open = kmsg_test_read_open,
-	.read = read_func,
 	.llseek  = seq_lseek,
 	.release = single_release,
 	.write = write_proc,

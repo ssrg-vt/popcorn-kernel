@@ -31,7 +31,6 @@
 #include "vma_server.h"
 #include "page_server.h"
 #include "util.h"
-#include "stat.h"
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
@@ -389,12 +388,6 @@ static void bring_back_remote_thread(struct work_struct *_work)
 	wake_up_process(tsk);
 	put_task_struct(tsk);
 
-#ifdef MIGRATION_PROFILE
-	migration_end = ktime_get();
-	printk(KERN_INFO"Time for back migration - origin side: %ld ns\n",
-			GET_MIGRATION_TIME);
-#endif
-
 out_free:
 	pcn_kmsg_free_msg(req);
 	kfree(work);
@@ -405,10 +398,6 @@ static int handle_back_migration(struct pcn_kmsg_message *msg)
 	back_migration_request_t *req = (back_migration_request_t *)msg;
 	struct pcn_kmsg_work *work = kmalloc(sizeof(*work), GFP_ATOMIC);
 	BUG_ON(!work);
-
-#ifdef MIGRATION_PROFILE
-	migration_start = ktime_get();
-#endif
 
 	work->msg = req;
 	INIT_WORK((struct work_struct *)work, bring_back_remote_thread);
@@ -464,12 +453,6 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
 
 	kfree(req);
-
-#ifdef MIGRATION_PROFILE
-	migration_end = ktime_get();
-	printk(KERN_INFO"Time for back migration - remote side: %ld ns\n",
-			GET_MIGRATION_TIME);
-#endif
 
 	do_exit(TASK_PARKED);
 }
@@ -580,12 +563,6 @@ static int shadow_main(void *_args)
 	*/
 
 	__pair_remote_task(current);
-
-#ifdef MIGRATION_PROFILE
-	migration_end = ktime_get();
-	printk(KERN_INFO"Time for migration - remote side: %ld ns\n",
-			GET_MIGRATION_TIME);
-#endif
 
 	PSPRINTK("\n####### MIGRATED - %d at %d --> %d at %d\n",
 			current->origin_pid, current->origin_nid, current->pid, my_nid);
@@ -826,10 +803,6 @@ static int handle_clone_request(struct pcn_kmsg_message *msg)
 	struct pcn_kmsg_work *work = kmalloc(sizeof(*work), GFP_ATOMIC);
 	BUG_ON(!work);
 
-#ifdef MIGRATION_PROFILE
-	migration_start = ktime_get();
-#endif
-
 	work->msg = req;
 	INIT_WORK((struct work_struct *)work, clone_remote_thread);
 	queue_work(popcorn_wq, (struct work_struct *)work);
@@ -979,12 +952,6 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	PSPRINTK("%s [%d] remote context %s\n", __func__, tsk->pid, which_rc);
 
 	ret = __request_clone_remote(dst_nid, tsk, uregs);
-
-#ifdef MIGRATION_PROFILE
-	migration_end = ktime_get();
-	printk(KERN_ERR"Time for migration - origin side: %ld ns\n",
-			GET_MIGRATION_TIME);
-#endif
 
 	return ret;
 }

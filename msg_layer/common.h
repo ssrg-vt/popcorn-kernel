@@ -14,10 +14,4 @@
 
 #include "config.h"
 
-/* Message usage pattern */
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-extern atomic_t send_pattern[];
-extern atomic_t recv_pattern[];
-#endif
-
 #endif

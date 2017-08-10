@@ -4672,10 +4672,6 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 {
 	int retval;
 
-#ifdef MIGRATION_PROFILE
-	migration_start = ktime_get();
-#endif
-
 	PRINTK("\n####### MIGRATE [%d] to %d\n",
 			current->pid, nid);
 

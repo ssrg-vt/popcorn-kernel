@@ -49,6 +49,7 @@
 
 /* page */
 #include <linux/pagemap.h>
+#include <popcorn/stat.h>
 
 /* Jack
  *  mssg layer multi-version
@@ -1972,8 +1973,8 @@ static void __pcn_kmsg_handler_BottomHalf(struct work_struct * work)
 	} else {
 		ftn = callbacks[lmsg->header.type];
 		if (ftn != NULL) {
-#ifdef CONFIG_POPCORN_MSG_STATISTIC
-			atomic_inc(&recv_pattern[lmsg->header.size]);
+#ifdef CONFIG_POPCORN_STAT
+			account_pcn_message_recv(lmsg);
 #endif
 			ftn((void*)lmsg);
 		} else {

@@ -19,22 +19,27 @@ config POPCORN_DEBUG
 		Enable or disable kernel messages that can help debug Popcorn issues.
 
 config POPCORN_DEBUG_PROCESS_SERVER
-	bool "Log debug messages for task migration"
-	depends on POPCORN_DEBUG
-	default n
-
-config POPCORN_DEBUG_VMA_SERVER
-	bool "Log debug messages for VMA handling"
+	bool "Task migration"
 	depends on POPCORN_DEBUG
 	default n
 
 config POPCORN_DEBUG_PAGE_SERVER
-	bool "Log debug messages for page migration"
+	bool "Page migration"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_VMA_SERVER
+	bool "VMA handling"
 	depends on POPCORN_DEBUG
 	default n
 
 config POPCORN_REMOTE_INFO
 	bool "Single system image over multiple nodes"
+	depends on POPCORN
+	default n
+
+config POPCORN_STAT
+	bool "Collect performance statistics"
 	depends on POPCORN
 	default n
 

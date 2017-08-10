@@ -10,10 +10,6 @@
 #ifndef __INCLUDE_POPCORN_TYPES_H__
 #define __INCLUDE_POPCORN_TYPES_H__
 
-/* Selective features */
-#undef MIGRATION_PROFILE
-#undef STATISTICS
-
 #include <linux/sched.h>
 
 static inline bool process_is_distributed(struct task_struct *tsk)

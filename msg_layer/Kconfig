@@ -33,11 +33,6 @@ config POPCORN_KMSG_TEST
 	depends on POPCORN_KMSG
 	default n
 
-config POPCORN_MSG_STATISTIC
-    bool "Extract messaging layer usage statistic"
-	depends on POPCORN_KMSG
-    default n
-
 config POPCORN_DEBUG_MSG_LAYER_VERBOSE
 	bool "Print debug message for the message layer"
 	depends on POPCORN_KMSG && POPCORN_DEBUG
