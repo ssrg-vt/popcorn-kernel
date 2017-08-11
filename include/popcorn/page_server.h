@@ -13,6 +13,8 @@
 #ifndef INCLUDE_POPCORN_PAGE_SERVER_H_
 #define INCLUDE_POPCORN_PAGE_SERVER_H_
 
+struct fault_handle;
+
 /*
  * Entry points for dealing with page fault in Popcorn Rack
  */
@@ -28,5 +30,8 @@ int page_server_flush_remote_pages(void);
 
 void page_server_zap_pte(
 	struct vm_area_struct *vma, unsigned long addr, pte_t *pte, pte_t *pteval);
+
+int page_server_get_userpage(u32 __user *uaddr, struct fault_handle **handle);
+void page_server_put_userpage(struct fault_handle *fh);
 
 #endif /* INCLUDE_POPCORN_PAGE_SERVER_H_ */

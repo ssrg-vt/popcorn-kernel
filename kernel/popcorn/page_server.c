@@ -859,8 +859,11 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 
 static void __claim_local_page(struct task_struct *tsk, unsigned long addr, struct page *page, int except_nid)
 {
-	int peers = bitmap_weight(page->owners, MAX_POPCORN_NODES) - 1;
-	BUG_ON(!test_bit(except_nid, page->owners) || peers < 0);
+	int peers = bitmap_weight(page->owners, MAX_POPCORN_NODES);
+	if (!peers) return;	/* skip claiming the page that is not distributed */
+
+	BUG_ON(!test_bit(except_nid, page->owners));
+	peers--;	/* exclude except_nid from peers */
 
 	if (test_bit(my_nid, page->owners) && except_nid != my_nid) peers--;
 
@@ -1180,11 +1183,107 @@ out:
 }
 
 
+/**************************************************************************
+ * Exclusively keep a user page to the current node. Should put the user
+ * page after use. This routine is similar to localfault handler at origin
+ * thus may be refactored.
+ */
+int page_server_get_userpage(u32 __user *uaddr, struct fault_handle **handle)
+{
+	unsigned long addr = (unsigned long)uaddr & PAGE_MASK;
+	struct mm_struct *mm;
+	struct vm_area_struct *vma;
+
+	const unsigned long fault_flags = FAULT_FLAG_WRITE;
+	struct fault_handle *fh = NULL;
+	spinlock_t *ptl;
+	pmd_t *pmd;
+	pte_t *pte;
+
+	struct page *page;
+	bool leader;
+	int ret = 0;
+
+	*handle = NULL;
+	if (!distributed_process(current)) return 0;
+
+	mm = get_task_mm(current);
+retry:
+	down_read(&mm->mmap_sem);
+	vma = find_vma(mm, addr);
+	if (!vma || vma->vm_start > addr) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	pte = __get_pte_at(mm, addr, &pmd, &ptl);
+	if (!pte) {
+		ret = -EINVAL;
+		goto out;
+	}
+	spin_lock(ptl);
+	fh = __start_fault_handling(current, addr, fault_flags, ptl, &leader);
+	if (!fh) {
+		pte_unmap(pte);
+		up_read(&mm->mmap_sem);
+		goto retry;
+	}
+
+	if (!leader) {
+		ret = 0;
+		pte_unmap(pte);
+		goto out;
+	}
+
+	page = get_normal_page(vma, addr, pte);
+	get_page(page);
+
+	if (page_is_mine(page)) {
+		pte_t pte_val;
+		__claim_local_page(current, addr, page, my_nid);
+
+		spin_lock(ptl);
+
+		pte_val = pte_make_valid(*pte);
+		pte_val = pte_mkwrite(pte_val);
+		pte_val = pte_mkdirty(pte_val);
+		pte_val = pte_mkyoung(pte_val);
+
+		set_pte_at_notify(mm, addr, pte, pte_val);
+		update_mmu_cache(vma, addr, pte);
+		flush_tlb_page(vma, addr);
+	} else {
+		remote_page_response_t *rp =
+				__claim_remote_page(current, addr, fault_flags, page);
+
+		spin_lock(ptl);
+		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
+		pcn_kmsg_free_msg(rp);
+	}
+	pte_unmap_unlock(pte, ptl);
+	put_page(page);
+	ret = 0;
+
+out:
+	*handle = fh;
+	up_read(&mm->mmap_sem);
+	mmput(mm);
+	PGPRINTK("  [%d] gup %p %lx %d\n", current->pid, fh, addr, ret);
+	return ret;
+}
+
+void page_server_put_userpage(struct fault_handle *fh)
+{
+	if (!fh) return;
+
+	PGPRINTK("  [%d] pup %p\n", current->pid, fh);
+	__finish_fault_handling(fh);
+}
+
 
 /**************************************************************************
  * Local fault handler at the remote
  */
-
 static int __handle_localfault_at_remote(struct mm_struct *mm,
 		struct vm_area_struct *vma, unsigned long addr,
 		pmd_t *pmd, pte_t *pte, pte_t pte_val, unsigned int fault_flags)

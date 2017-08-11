@@ -17,6 +17,7 @@
 #include <linux/ptrace.h>
 #include <linux/mmu_context.h>
 #include <linux/fs.h>
+#include <linux/futex.h>
 
 #include <asm/mmu_context.h>
 #include <asm/kdebug.h>
@@ -30,6 +31,7 @@
 #include "process_server.h"
 #include "vma_server.h"
 #include "page_server.h"
+#include "wait_station.h"
 #include "util.h"
 
 static struct list_head remote_contexts[2];
@@ -155,6 +157,105 @@ static void __build_task_comm(char *buffer, char *path)
 			buffer[i++] = ch;
 	}
 	buffer[i] = '\0';
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Distributed mutex
+///////////////////////////////////////////////////////////////////////////////
+long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
+		bool valid_ts, struct timespec *ts,
+		u32 __user *uaddr2,u32 val2, u32 val3)
+{
+	struct wait_station *ws = get_wait_station(current);
+	remote_futex_request req = {
+		.header = {
+			.type = PCN_KMSG_TYPE_FUTEX_REQUEST,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.origin_pid = current->origin_pid,
+		.remote_ws = ws->id,
+		.op = op,
+		.val = val,
+		.ts = {
+			.tv_sec = -1,
+		},
+		.uaddr = uaddr,
+		.uaddr2 = uaddr2,
+		.val2 = val2,
+		.val3 = val3,
+	};
+	remote_futex_response *res;
+	long ret;
+
+	if (valid_ts) {
+		req.ts = *ts;
+	}
+
+	/*
+	printk("  [%d] ->[%d/%d] 0x%x %p 0x%x\n", current->pid,
+			current->origin_pid, current->origin_nid,
+			op, uaddr, val);
+	*/
+	pcn_kmsg_send(current->origin_nid, &req, sizeof(req));
+	res = wait_at_station(ws);
+	ret = res->ret;
+	/*
+	printk("  [%d] <-[%d/%d] 0x%x %p %ld\n", current->pid,
+			current->origin_pid, current->origin_nid,
+			op, uaddr, ret);
+	*/
+
+	put_wait_station(ws);
+	pcn_kmsg_free_msg(res);
+	return ret;
+}
+
+static int handle_remote_futex_response(struct pcn_kmsg_message *msg)
+{
+	remote_futex_response *res = (remote_futex_response *)msg;
+	struct wait_station *ws = wait_station(res->remote_ws);
+
+	ws->private = res;
+	smp_mb();
+
+	complete(&ws->pendings);
+	return 0;
+}
+
+static void process_remote_futex_request(struct pcn_kmsg_message *msg)
+{
+	remote_futex_request *req = (remote_futex_request *)msg;
+	remote_futex_response res = {
+		.header = {
+			.type = PCN_KMSG_TYPE_FUTEX_RESPONSE,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.remote_ws = req->remote_ws,
+	};
+	ktime_t t, *tp = NULL;
+
+	if (timespec_valid(&req->ts)) {
+		t = timespec_to_ktime(req->ts);
+		t = ktime_add_safe(ktime_get(), t);
+		tp = &t;
+	}
+
+	/*
+	printk("  [%d] <-[%d/%d] 0x%x %p 0x%x\n", current->pid,
+			current->remote_pid, current->remote_nid,
+			req->op, req->uaddr, req->val);
+	*/
+	res.ret = do_futex(req->uaddr, req->op, req->val,
+			tp, req->uaddr2, req->val2, req->val3);
+	/*
+	printk("  [%d] ->[%d/%d] 0x%x %p %ld\n", current->pid,
+			current->remote_pid, current->remote_nid,
+			req->op, req->uaddr, res.ret);
+	*/
+
+	pcn_kmsg_send(current->remote_nid, &res, sizeof(res));
+	pcn_kmsg_free_msg(req);
 }
 
 
@@ -771,6 +872,9 @@ static int __process_remote_works(void)
 		case PCN_KMSG_TYPE_REMOTE_VMA_REQUEST:
 			process_remote_vma_request(req);
 			break;
+		case PCN_KMSG_TYPE_FUTEX_REQUEST:
+			process_remote_futex_request(req);
+			break;
 		case PCN_KMSG_TYPE_TASK_EXIT_REMOTE:
 			process_remote_task_exit(req);
 			run = false;
@@ -925,6 +1029,8 @@ int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, v
 
 DEFINE_KMSG_RW_HANDLER(remote_task_exit, remote_task_exit_t, origin_pid);
 DEFINE_KMSG_RW_HANDLER(back_migration, back_migration_request_t, origin_pid);
+DEFINE_KMSG_RW_HANDLER(remote_futex_request, remote_futex_request, origin_pid);
+
 /**
  * Initialize the process server.
  */
@@ -943,6 +1049,9 @@ int __init process_server_init(void)
 
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_EXIT_REMOTE, remote_task_exit);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_EXIT_ORIGIN, origin_task_exit);
+
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_FUTEX_REQUEST, remote_futex_request);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_FUTEX_RESPONSE, remote_futex_response);
 
 	return 0;
 }

@@ -268,6 +268,26 @@ DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 
 
 /**
+ * Futex
+ */
+#define REMOTE_FUTEX_REQ_FIELDS \
+	pid_t origin_pid; \
+	int remote_ws; \
+	int op; \
+	u32 val; \
+	struct timespec ts; \
+	void *uaddr; \
+	void *uaddr2; \
+	u32 val2; \
+	u32 val3;
+DEFINE_PCN_KMSG(remote_futex_request, REMOTE_FUTEX_REQ_FIELDS);
+
+#define REMOTE_FUTEX_RES_FIELDS \
+	int remote_ws; \
+	long ret;
+DEFINE_PCN_KMSG(remote_futex_response, REMOTE_FUTEX_RES_FIELDS);
+
+/**
  * Node information
  */
 #define NODE_INFO_FIELDS \
