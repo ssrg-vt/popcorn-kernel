@@ -21,11 +21,14 @@ EXPORT_SYMBOL(callbacks);
 send_cbftn send_callback;
 EXPORT_SYMBOL(send_callback);
 
-send_rdma_cbftn send_callback_rdma;
-EXPORT_SYMBOL(send_callback_rdma);
+send_rdma_cbftn send_rdma_callback;
+EXPORT_SYMBOL(send_rdma_callback);
 
 handle_rdma_request_ftn handle_rdma_callback;
 EXPORT_SYMBOL(handle_rdma_callback);
+
+kmsg_free_ftn kmsg_free_callback = NULL;
+EXPORT_SYMBOL(kmsg_free_callback);
 
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
@@ -80,7 +83,12 @@ void *pcn_kmsg_alloc_msg(size_t size)
 
 void pcn_kmsg_free_msg(void *msg)
 {
-	kfree(msg);
+	if (!memcmp(msg_layer,"IB", 2)) {
+		BUG_ON(!kmsg_free_callback);
+		kmsg_free_callback(msg);
+	}
+	else
+		kfree(msg);
 }
 
 /*
@@ -89,14 +97,14 @@ void pcn_kmsg_free_msg(void *msg)
 char *pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
 						unsigned int msg_size, unsigned int rw_size)
 {
-    if (send_callback_rdma == NULL) {
+    if (send_rdma_callback == NULL) {
 		struct pcn_kmsg_hdr *hdr = lmsg;
 		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, msg_size=%u "
 		"rw_size=%u\n", __func__, hdr->from_nid, hdr->type, msg_size, rw_size);
         return NULL;
     }
 
-    return send_callback_rdma(to, lmsg, msg_size, rw_size);
+    return send_rdma_callback(to, lmsg, msg_size, rw_size);
 }
 
 void pcn_kmsg_handle_remote_rdma_request(

@@ -56,13 +56,6 @@ int g_rdma_write_len = 8*1024;		// size wanna remote to perform write
 char *g_test_buf = NULL;			// mimicing user buf
 char *g_test_write_buf = NULL;		// mimicing user buf
 
-/* workqueue arg for testing */
-typedef struct {
-	struct work_struct work;
-	struct pcn_kmsg_message *lmsg;
-} pcn_kmsg_work_t;
-
-
 /* getting performance data */
 #define POPCORN_EXP_DATA_MSG_IB 1
 #if POPCORN_EXP_DATA_MSG_IB
@@ -1246,7 +1239,7 @@ static void process_send_roundtrip_request(struct work_struct *_work)
 
 	__reply_send_r_roundtrip(req, -EINVAL);
 
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_free_msg(work->msg);
 	kfree(work);
 }
 

@@ -26,7 +26,7 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
 	PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST,
 	PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE,
-	PCN_KMSG_TYPE_RDMA_FARM2_REQUEST,
+	PCN_KMSG_TYPE_RDMA_FARM2_KEY_EXCH_REQUEST,
 	PCN_KMSG_TYPE_RDMA_END,
 
 	/* message layer testing */
@@ -105,6 +105,9 @@ struct pcn_kmsg_hdr {
 #define CACHE_LINE_SIZE 64
 #define PCN_KMSG_PAYLOAD_SIZE (CACHE_LINE_SIZE - sizeof(struct pcn_kmsg_hdr))
 #define PCN_KMSG_LONG_PAYLOAD_SIZE 65536
+#define PCN_KMSG_MAX_SIZE PCN_KMSG_LONG_PAYLOAD_SIZE + \
+							sizeof(struct pcn_kmsg_hdr) + \
+							sizeof(struct pcn_kmsg_rdma_hdr)
 
 #define DEFINE_PCN_KMSG(type, fields) \
 	typedef struct {				\
@@ -160,6 +163,7 @@ typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
 typedef int (*send_cbftn)(unsigned int, struct pcn_kmsg_message *, unsigned int);
 typedef char* (*send_rdma_cbftn)(unsigned int, remote_thread_rdma_rw_t *, unsigned int, unsigned int);
 typedef void (*handle_rdma_request_ftn)(remote_thread_rdma_rw_t *, void *);
+typedef void (*kmsg_free_ftn)(struct pcn_kmsg_message *);
 
 /* SETUP */
 

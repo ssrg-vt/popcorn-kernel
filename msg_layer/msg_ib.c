@@ -4,14 +4,17 @@
  * Author: Ho-Ren(Jack) Chuang
  *
  * TODO:
- *		remove mutex in send()
- *		recv_buf_pool
- *		doesn't check RW size
- *		implemet a wait/wakup in exchaging rkey
+ *		define 0~1 to enum if needed
+ *		(perf!)recv_buf_pool + ib_recv_work_request
+ *		(perf!)sping when send
+ *		RDMA:
+ *			remove mutex in READ/WRITE
+ *			doesn't check RW size
+ *			implemet a wait/wakup in exchaging rkey
  */
+
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
@@ -56,21 +59,18 @@
 #include "common.h"
 
 /* features been developed */
-#define CONFIG_FARM2 1
+#define CONFIG_FARM2WRITE 1
 #define CONFIG_FARM 0
-#define DEMON_POST_RECV_WCS 0
-#define RECV_WQ_THRESHOLD 10	/* MAX poll number in a INT */
 
 /* IB recv */
-//#define MAX_RECV_WR 15000	/* important! Check it if only sender crash */
-#define MAX_RECV_WR 16000	/* important! Check it if only sender crash */
+#define MAX_RECV_WR 1024	/* important! Check it if only sender crash */
 
 /* IB send & completetion */
-//#define MAX_SEND_WR 128	/* sender depth (txdepth) = MAX_SEND_WR */
-#define MAX_SEND_WR 512	/* sender depth (txdepth) = MAX_SEND_WR */
-//#define MAX_SEND_WR 1024	/* sender depth (txdepth) = MAX_SEND_WR */
-#define SEND_WR_DEPTH 8	/* Completion Entries = THIS DEPTH x MAX_SEND_WR */
-#define MAX_CQE MAX_SEND_WR * SEND_WR_DEPTH
+#define MAX_SEND_WR 4096
+#define MAX_CQE MAX_SEND_WR + MAX_RECV_WR
+
+/* RECV_BUF_POOL */
+#define MAX_RECV_WORK_POOL 1024
 
 /* IB qp */
 #define MAX_RECV_SGE 1
@@ -94,7 +94,7 @@
 #endif
 
 /* FaRM2: two WRITE version of FaRM */
-#if CONFIG_FARM2
+#if CONFIG_FARM2WRITE
 #define MAX_SGE_NUM 1
 #define FaRM2_DATA_SIZE 1
 #define MAX_RDMA_FARM2_SIZE 1
@@ -140,12 +140,13 @@ struct ib_recv_work_struct {
 
 /* workqueue arg */
 typedef struct {
-	struct work_struct work;
-	struct pcn_kmsg_message *lmsg;
+	struct work_struct work;	/* DONT MOVE! */
+	int id;
+	struct pcn_kmsg_message msg;
 } pcn_kmsg_work_t;
 
 /* FaRM2 */
-#if CONFIG_FARM2
+#if CONFIG_FARM2WRITE
 struct FaRM2_init_req_t {
     struct pcn_kmsg_hdr header;
     uint32_t remote_rkey;
@@ -203,7 +204,7 @@ struct ib_cb {
 	char *FaRM_pass_buf;			/* reuse passive buffer to perform WRITE */
 #endif
 
-#if CONFIG_FARM2
+#if CONFIG_FARM2WRITE
 	unsigned long rdma_FaRM2_max_size;
 	struct ib_reg_wr reg_FaRM2_mr_wr_act;
 	struct ib_reg_wr reg_FaRM2_mr_wr_pass;
@@ -262,91 +263,61 @@ struct ib_cb *gcb[MAX_NUM_NODES];
 /* workqueue */
 struct workqueue_struct *msg_handler;
 
-#if DEMON_POST_RECV_WCS
-struct task_struct *recv_post_demon[MAX_NUM_NODES];
-#endif
-
-/* Completion station for send work requests */
-static struct completion send_wr_comp[MAX_NUM_NODES][MAX_CQE];
-static spinlock_t send_avail_bmap_lock[MAX_NUM_NODES];
-static unsigned long send_avail[MAX_NUM_NODES][BITS_TO_LONGS(MAX_CQE)];
-
-struct completion *get_send_wr_comp(int dst)
-{
-	int ofs;
-	struct completion *comp;
-
-	spin_lock(&send_avail_bmap_lock[dst]);
-	ofs = find_first_zero_bit(send_avail[dst], MAX_CQE);
-	if(ofs == MAX_CQE-1) BUG();
-	set_bit(ofs, send_avail[dst]);
-	comp = send_wr_comp[dst] + ofs;
-	spin_unlock(&send_avail_bmap_lock[dst]);
-
-	return comp;
-}
-
-static void put_send_wr_comp(int dst, struct completion *comp)
-{
-	int ofs = (comp - send_wr_comp[dst]) / sizeof(*comp);
-
-	spin_lock(&send_avail_bmap_lock[dst]);
-	clear_bit(ofs, send_avail[dst]);
-	spin_unlock(&send_avail_bmap_lock[dst]);
-}
-
-/* For RECV ib_recv_work_struct queue */
-spinlock_t rws_q_spinlock[MAX_NUM_NODES];
-static struct ib_recv_work_struct rws_wait_list_head[MAX_NUM_NODES];	/* Sentinel */
+/* Recv work pool for recv procedure */
+static pcn_kmsg_work_t *recv_work_pool[MAX_NUM_NODES][MAX_RECV_WORK_POOL];
+static spinlock_t recv_work_bmap_lock[MAX_NUM_NODES];
+static unsigned long recv_work_avail_bmap[MAX_NUM_NODES]\
+										[BITS_TO_LONGS(MAX_RECV_WORK_POOL)];
 
 /* Functions */
 static int __init initialize(void);
 static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx);
 
 /* Popcorn utilities */
+extern char *msg_layer;
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 extern send_cbftn send_callback;
-extern send_rdma_cbftn send_callback_rdma;
+extern send_rdma_cbftn send_rdma_callback;
 extern handle_rdma_request_ftn handle_rdma_callback;
-extern char *msg_layer;
+extern kmsg_free_ftn kmsg_free_callback;
 
-#if DEMON_POST_RECV_WCS
-static struct completion rws_comp[MAX_NUM_NODES];
-#endif
-
-/* Reuse recv rws */
-static void __enq_rws(struct ib_recv_work_struct *strc, int index)
+pcn_kmsg_work_t *get_recv_work_pool(int dst)
 {
-	spin_lock(&rws_q_spinlock[index]);
-    list_add_tail(&(strc->list), &(rws_wait_list_head[index].list));
-	spin_unlock(&rws_q_spinlock[index]);
-#if DEMON_POST_RECV_WCS
-	complete(&rws_comp[index]);
-#endif
+	int ofs;
+	pcn_kmsg_work_t *kmsg_work;
+
+	spin_lock(&recv_work_bmap_lock[dst]);
+	ofs = find_first_zero_bit(recv_work_avail_bmap[dst], MAX_RECV_WORK_POOL);
+	BUG_ON(ofs >= MAX_RECV_WORK_POOL);
+	set_bit(ofs, recv_work_avail_bmap[dst]);
+	kmsg_work = recv_work_pool[dst][ofs];
+	//printk("get %p (%d)\n", kmsg_work, kmsg_work->id);
+	spin_unlock(&recv_work_bmap_lock[dst]);
+
+	return kmsg_work;
 }
 
-static struct ib_recv_work_struct *__dq_rws(int index)
+static void put_recv_work_pool(int dst, pcn_kmsg_work_t *kmsg_work)
 {
-	struct ib_recv_work_struct *tmp;
-
-#if DEMON_POST_RECV_WCS
-	wait_for_completion(&rws_comp[index]);
-#endif
-	spin_lock(&rws_q_spinlock[index]);
-    if (list_empty(&rws_wait_list_head[index].list)) {
-        printk(KERN_INFO "List %d is empty...\n", index);
-		spin_unlock(&rws_q_spinlock[index]);
-		BUG();
-        //return NULL;
-    } else {
-        tmp = list_first_entry(&rws_wait_list_head[index].list,
-								struct ib_recv_work_struct, list);
-        list_del(rws_wait_list_head[index].list.next);
-		spin_unlock(&rws_q_spinlock[index]);
-        return tmp;
-    }
+	spin_lock(&recv_work_bmap_lock[dst]);
+	clear_bit(kmsg_work->id, recv_work_avail_bmap[dst]);
+	//printk("put %p (%d)\n", kmsg_work, kmsg_work->id);
+	spin_unlock(&recv_work_bmap_lock[dst]);
 }
 
+static void kmsg_free(struct pcn_kmsg_message *msg)
+{
+	if(msg->header.from_nid == my_nid) {
+		//printk("%s(): send %p\n", __func__, msg);
+		kfree(msg);
+	} else {
+		pcn_kmsg_work_t *kmsg_work =
+						container_of(msg, pcn_kmsg_work_t, msg);
+		//printk("%s(): recv msg %p -> wt %p (%d)\n",
+		//		__func__, msg, kmsg_work, kmsg_work->id);
+		put_recv_work_pool(msg->header.from_nid, kmsg_work);
+	}
+}
 
 static int __ib_cma_event_handler(struct rdma_cm_id *cma_id,
 										struct rdma_cm_event *event)
@@ -425,7 +396,7 @@ static int __ib_cma_event_handler(struct rdma_cm_id *cma_id,
  */
 struct ib_recv_wr *__create_recv_wr(int conn_no)
 {
-	int recv_size = sizeof(struct pcn_kmsg_message);
+	int recv_size = PCN_KMSG_MAX_SIZE;
 	struct ib_cb *cb = gcb[conn_no];
 	struct pcn_kmsg_message *element_addr;
 	struct ib_sge *_recv_sgl;
@@ -440,10 +411,7 @@ struct ib_recv_wr *__create_recv_wr(int conn_no)
 	}
 
 	_recv_sgl = kmalloc(sizeof(*_recv_sgl), GFP_KERNEL);
-	if (!_recv_sgl) {
-		printk(KERN_ERR "sgl recv_buf malloc failed\n");
-		BUG();
-	}
+	BUG_ON(!_recv_sgl && "sgl recv_buf malloc failed");
 
 	_recv_wr =  kmalloc(sizeof(*_recv_wr), GFP_KERNEL);
 	if (!_recv_wr) {
@@ -562,25 +530,13 @@ static void __ib_setup_wr(struct ib_cb *cb)
 		struct ib_recv_wr *bad_wr;
 		struct ib_recv_wr *_recv_wr = __create_recv_wr(cb->conn_no);
 
-		/* 70% posted, 30% reserved */
-		if (i <= MAX_RECV_WR * 70 / 100) {
-			ret = ib_post_recv(cb->qp, _recv_wr, &bad_wr);
-			if (ret) {
-				printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
-				BUG();
-			}
-		} else {
-			__enq_rws((struct ib_recv_work_struct *)_recv_wr->wr_id,
-						cb->conn_no);
+		ret = ib_post_recv(cb->qp, _recv_wr, &bad_wr);
+		if (ret) {
+			printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
+			BUG();
 		}
 	}
 
-	/* send work request: unchanged parameters */
-//	cb->send_sgl.lkey = cb->pd->local_dma_lkey;
-//	cb->send_wr.opcode = IB_WR_SEND;
-//	cb->send_wr.send_flags = IB_SEND_SIGNALED;
-//	cb->send_wr.num_sge = 1;
-//	cb->send_wr.sg_list = &cb->send_sgl;
 
 	/* Common for RW - RW wr */
 	cb->rdma_send_wr.wr.num_sge = 1;
@@ -598,7 +554,7 @@ static void __ib_setup_wr(struct ib_cb *cb)
 	cb->reg_mr_wr_pass.wr.opcode = IB_WR_REG_MR;
 	cb->reg_mr_wr_pass.mr = cb->reg_mr_pass;
 
-#if CONFIG_FARM2
+#if CONFIG_FARM2WRITE
 	cb->rdma_FaRM2_send_wr.wr.num_sge = 1;
 	cb->rdma_FaRM2_send_wr.wr.sg_list = &cb->rdma_FaRM2_sgl;
 	cb->rdma_FaRM2_send_wr.wr.send_flags = IB_SEND_SIGNALED;
@@ -628,7 +584,7 @@ static void __ib_setup_wr(struct ib_cb *cb)
 	 * client invalidates the mr using the IB_WR_LOCAL_INV work request.
 	 */
 
-#if CONFIG_FARM2
+#if CONFIG_FARM2WRITE
 	cb->inv_FaRM2_wr_act.opcode = IB_WR_LOCAL_INV;
 	cb->inv_FaRM2_wr_act.next = &cb->reg_FaRM2_mr_wr_act.wr;
 	cb->inv_FaRM2_wr_pass.opcode = IB_WR_LOCAL_INV;
@@ -738,7 +694,7 @@ err1:
  *		2:RDMA_FARM2_RKEY_ACT
  *		3:RDMA_FARM2_RKEY_PASS
  */
-u32 __ib_rdma_rkey(struct ib_cb *cb, u64 buf,
+static u32 __ib_rdma_rkey(struct ib_cb *cb, u64 buf,
 								int post_inv, int rdma_len, int mode)
 {
 	int ret;
@@ -828,7 +784,7 @@ static int __ib_setup_buffers(struct ib_cb *cb)
 		ret = PTR_ERR(cb->reg_mr_pass);
 		goto bail;
 	}
-#if CONFIG_FARM2
+#if CONFIG_FARM2WRITE
 	FaRM2_page_list_len =
 			(((cb->rdma_FaRM2_max_size - 1) & PAGE_MASK) + PAGE_SIZE)
 														>> PAGE_SHIFT;
@@ -905,8 +861,6 @@ static int __ib_accept(struct ib_cb *cb)
 						atomic_read(&cb->state));
 		return -1;
 	}
-
-	set_popcorn_node_online(cb->conn_no, true);
 	return 0;
 }
 
@@ -928,29 +882,6 @@ static void __ib_free_qp(struct ib_cb *cb)
 	ib_destroy_cq(cb->cq);
 	ib_dealloc_pd(cb->pd);
 }
-
-#if DEMON_POST_RECV_WCS
-static int __recv_post(void *arg0)
-{
-	struct ib_cb *cb = arg0;
-	struct ib_recv_wr *bad_wr;
-	int ret;
-
-	while (1) {
-		struct ib_recv_work_struct *_rws = __dq_rws(cb->conn_no);
-		if(unlikely(!_rws))
-			break;
-
-		ret = ib_post_recv(cb->qp, _rws->recv_wr, &bad_wr);
-
-		if (ret) {
-			printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
-			BUG();
-		}
-	}
-	return 0;
-}
-#endif
 
 static int __ib_server_accept(void *arg0)
 {
@@ -1022,6 +953,7 @@ static int __ib_run_server(void *arg0)
 			rdma_disconnect(target_cb->child_cm_id);
 
 		printk("conn_no %d is ready (sever)\n", target_cb->conn_no);
+		set_popcorn_node_online(target_cb->conn_no, true);
 	}
 	return 0;
 }
@@ -1129,64 +1061,64 @@ void __unmap_pass(int conn_no, int rw_size)
  * This func will take care of it.
  * User has to free the allocated mem manually
  */
-int __ib_kmsg_send_long(unsigned int dst,
-						  struct pcn_kmsg_message *lmsg,
+int __ib_kmsg_send(unsigned int dst,
+						  struct pcn_kmsg_message *msg,
 						  unsigned int msg_size)
 {
 	int ret;
-	struct completion *comp;
+	struct completion comp;
 	struct ib_send_wr *bad_wr;
-	struct ib_sge send_sgl;
+	struct ib_sge send_sgl = {
+			.length = msg_size,
+			.lkey = gcb[dst]->pd->local_dma_lkey,
+	};
 	struct ib_send_wr send_wr = {
-		.opcode = IB_WR_SEND,
-		.send_flags = IB_SEND_SIGNALED,
-		.num_sge = 1,
-		.sg_list = &send_sgl,
-		.next = NULL,
+			.opcode = IB_WR_SEND,
+			.send_flags = IB_SEND_SIGNALED,
+			.num_sge = 1,
+			.sg_list = &send_sgl,
+			.next = NULL,
 	};
 	u64 send_dma_addr;
 
-	if ( msg_size > sizeof(struct pcn_kmsg_message)) {
+	if ( msg_size > PCN_KMSG_MAX_SIZE) {
 		printk("%s(): ERROR - MSG %d larger than MAX_MSG_SIZE %ld\n",
-					__func__, msg_size, sizeof(struct pcn_kmsg_message));
+					__func__, msg_size, PCN_KMSG_MAX_SIZE);
 		BUG();
 	}
 
 	if (dst == my_nid) {
 		printk(KERN_ERR "No support for sending msg to itself %d\n", dst);
-		return 0;
+		BUG();
 	}
 
-	lmsg->header.size = msg_size;
-	lmsg->header.from_nid = my_nid;
+	msg->header.size = msg_size;
+	msg->header.from_nid = my_nid;
 
-	comp = get_send_wr_comp(dst);
-	send_wr.wr_id = (u64)comp;
+	init_completion(&comp);
+	send_wr.wr_id = (u64)&comp;
 
 	send_dma_addr = dma_map_single(gcb[dst]->pd->device->dma_device,
-					lmsg, msg_size, DMA_BIDIRECTIONAL);
+					msg, msg_size, DMA_BIDIRECTIONAL);
 	send_sgl.addr = send_dma_addr;
-	send_sgl.length = msg_size;
-	send_sgl.lkey = gcb[dst]->pd->local_dma_lkey;
 
 	ret = ib_post_send(gcb[dst]->qp, &send_wr, &bad_wr);
 	atomic_inc(&gcb[dst]->WQ_WR_cnt);
-	if (atomic_read(&gcb[dst]->WQ_WR_cnt) == MAX_SEND_WR)
+	if (atomic_read(&gcb[dst]->WQ_WR_cnt) >= MAX_SEND_WR)
 		BUG();
 
-	wait_for_completion(comp);
-	put_send_wr_comp(dst, comp);
+	wait_for_completion(&comp);
 
 	dma_unmap_single(gcb[dst]->pd->device->dma_device,
-					 send_dma_addr, lmsg->header.size, DMA_BIDIRECTIONAL);
+					 send_dma_addr, msg->header.size, DMA_BIDIRECTIONAL);
 	return 0;
 }
 
 static void __handle_remote_thread_rdma_read_request(
-						remote_thread_rdma_rw_t *inc_lmsg, void *target_paddr)
+						remote_thread_rdma_rw_t *inc_msg, void *target_paddr)
 {
 	remote_thread_rdma_rw_t* req =
-								(remote_thread_rdma_rw_t*) inc_lmsg;
+								(remote_thread_rdma_rw_t*) inc_msg;
 	remote_thread_rdma_rw_t *reply;
 	struct ib_send_wr *bad_wr; // for ib_post_send
 	struct ib_cb *cb = gcb[req->header.from_nid];
@@ -1258,9 +1190,9 @@ static void __handle_remote_thread_rdma_read_request(
 	reply->rdma_header.rw_size = cb->remote_pass_len;
 
 	/* for wait station */
-	reply->remote_ws = inc_lmsg->remote_ws;
+	reply->remote_ws = inc_msg->remote_ws;
 
-	__ib_kmsg_send_long(req->header.from_nid,
+	__ib_kmsg_send(req->header.from_nid,
 						(struct pcn_kmsg_message*)reply, sizeof(*reply));
 
 	pcn_kmsg_free_msg(reply);
@@ -1268,10 +1200,10 @@ static void __handle_remote_thread_rdma_read_request(
 }
 
 static void __handle_remote_thread_rdma_read_response(
-										remote_thread_rdma_rw_t* inc_lmsg)
+										remote_thread_rdma_rw_t* inc_msg)
 {
 	remote_thread_rdma_rw_t* res =
-								(remote_thread_rdma_rw_t*) inc_lmsg;
+								(remote_thread_rdma_rw_t*) inc_msg;
 	struct ib_cb *cb = gcb[res->header.from_nid];
 
 	__unmap_act(cb->conn_no, res->rdma_header.rw_size);
@@ -1298,16 +1230,16 @@ static void __handle_remote_thread_rdma_read_response(
  * done					done
  */
 static void __handle_remote_thread_rdma_write_request(
-					remote_thread_rdma_rw_t *inc_lmsg, void *target_paddr)
+					remote_thread_rdma_rw_t *inc_msg, void *target_paddr)
 {
-	remote_thread_rdma_rw_t *req = (remote_thread_rdma_rw_t*) inc_lmsg;
-#if !CONFIG_FARM && !CONFIG_FARM2
+	remote_thread_rdma_rw_t *req = (remote_thread_rdma_rw_t*) inc_msg;
+#if !CONFIG_FARM && !CONFIG_FARM2WRITE
 	remote_thread_rdma_rw_t *reply;
 #endif
 
 	struct ib_cb *cb = gcb[req->header.from_nid];
 #if CONFIG_FARM
-#if !CONFIG_FARM2
+#if !CONFIG_FARM2WRITE
 	char *_FaRM_pass_buf = cb->FaRM_pass_buf;
 #endif
 #endif
@@ -1317,7 +1249,7 @@ static void __handle_remote_thread_rdma_write_request(
 	mutex_lock(&cb->passive_mutex);
 
 #if CONFIG_FARM
-#if !CONFIG_FARM2
+#if !CONFIG_FARM2WRITE
 	/* FaRM w/ buffer copying - make a new buffer aligned with the formate */
 	if (target_paddr && req->rdma_header.rw_size!=0) {
 		/* FaRM head: length + 1B */
@@ -1396,7 +1328,7 @@ static void __handle_remote_thread_rdma_write_request(
 #if CONFIG_FARM
 	__unmap_pass(cb->conn_no,
 					req->rdma_header.rw_size + FaRM_HEAD_AND_TAIL);
-#elif CONFIG_FARM2
+#elif CONFIG_FARM2WRITE
 	mutex_lock(&cb->qp_mutex);
 	ret = ib_post_send(cb->qp, &cb->rdma_FaRM2_send_wr.wr, &bad_wr);
 	mutex_unlock(&cb->qp_mutex);
@@ -1433,9 +1365,9 @@ static void __handle_remote_thread_rdma_write_request(
 	reply->rdma_header.rw_size = cb->remote_pass_len;
 
 	/* for wait station */
-	reply->remote_ws = inc_lmsg->remote_ws;
+	reply->remote_ws = inc_msg->remote_ws;
 
-	__ib_kmsg_send_long(req->header.from_nid,
+	__ib_kmsg_send(req->header.from_nid,
 				(struct pcn_kmsg_message*) reply, sizeof(*reply));
 
 	pcn_kmsg_free_msg(reply);
@@ -1445,16 +1377,16 @@ static void __handle_remote_thread_rdma_write_request(
 }
 
 static void __handle_remote_thread_rdma_write_response(
-										remote_thread_rdma_rw_t* inc_lmsg)
+										remote_thread_rdma_rw_t* inc_msg)
 {
 	remote_thread_rdma_rw_t* res =
-								(remote_thread_rdma_rw_t*) inc_lmsg;
+								(remote_thread_rdma_rw_t*) inc_msg;
 
 #if !CONFIG_FARM
 	struct ib_cb *cb = gcb[res->header.from_nid];
 #endif
 
-#if CONFIG_FARM2|| !CONFIG_FARM
+#if CONFIG_FARM2WRITE|| !CONFIG_FARM
 	__unmap_act(cb->conn_no, res->rdma_header.rw_size);
 	mutex_unlock(&cb->active_mutex);
 #endif
@@ -1465,30 +1397,30 @@ static void __handle_remote_thread_rdma_write_response(
 /*
  *paddr: ptr of pages you wanna perform on passive side
  */
-void handle_rdma_request(remote_thread_rdma_rw_t *inc_lmsg, void *paddr)
+void handle_rdma_request(remote_thread_rdma_rw_t *inc_msg, void *paddr)
 {
-	remote_thread_rdma_rw_t *lmsg = inc_lmsg;
-	if (likely(lmsg->header.is_rdma)) {
-		if(unlikely(inc_lmsg->rdma_header.rw_size > MAX_RDMA_SIZE))
+	remote_thread_rdma_rw_t *msg = inc_msg;
+	if (likely(msg->header.is_rdma)) {
+		if(unlikely(inc_msg->rdma_header.rw_size > MAX_RDMA_SIZE))
 			BUG();
-		if (!lmsg->rdma_header.rdma_ack) {
-			if (lmsg->rdma_header.is_write)
-				__handle_remote_thread_rdma_write_request(lmsg, paddr);
+		if (!msg->rdma_header.rdma_ack) {
+			if (msg->rdma_header.is_write)
+				__handle_remote_thread_rdma_write_request(msg, paddr);
 			else
-				__handle_remote_thread_rdma_read_request(lmsg, paddr);
+				__handle_remote_thread_rdma_read_request(msg, paddr);
 		} else {
-			if (lmsg->rdma_header.is_write)
-				__handle_remote_thread_rdma_write_response(lmsg);
+			if (msg->rdma_header.is_write)
+				__handle_remote_thread_rdma_write_response(msg);
 			else
-				__handle_remote_thread_rdma_read_response(lmsg);
+				__handle_remote_thread_rdma_read_response(msg);
 		}
 	} else {
 		printk(KERN_ERR "This is not a rdma request you shouldn't call"
 						"\"pcn_kmsg_handle_remote_rdma_request\"\n"
 						"from=%u, type=%d, msg_size=%u\n\n",
-						lmsg->header.from_nid,
-						lmsg->header.type,
-						lmsg->header.size);
+						msg->header.from_nid,
+						msg->header.type,
+						msg->header.size);
 	}
 }
 
@@ -1497,64 +1429,51 @@ void handle_rdma_request(remote_thread_rdma_rw_t *inc_lmsg, void *paddr)
  */
 static void __pcn_kmsg_handler_BottomHalf(struct work_struct *work)
 {
-	pcn_kmsg_work_t *w = (pcn_kmsg_work_t *) work;
-	struct pcn_kmsg_message *lmsg;
 	pcn_kmsg_cbftn ftn;
+	pcn_kmsg_work_t *w = (pcn_kmsg_work_t *) work;
+	struct pcn_kmsg_message *msg = (struct pcn_kmsg_message *)(&w->msg);
 
-	lmsg = w->lmsg;
-	if ( lmsg->header.type < 0 || lmsg->header.type >= PCN_KMSG_TYPE_MAX) {
+	if ( msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
 		printk(KERN_ERR "Received invalid message type %d > MAX %d\n",
-						lmsg->header.type, PCN_KMSG_TYPE_MAX);
+						msg->header.type, PCN_KMSG_TYPE_MAX);
+		BUG();
 	} else {
-		ftn = callbacks[lmsg->header.type];
+		ftn = callbacks[msg->header.type];
 		if (ftn != NULL) {
 #ifdef CONFIG_POPCORN_STAT
 			account_pcn_message_recv(lmsg);
 #endif
-			ftn((void*)lmsg);
+			ftn((void*)(&((pcn_kmsg_work_t *)work)->msg));
 		} else {
 			printk(KERN_ERR "Recieved message type %d size %d "
 							"has no registered callback!\n",
-							lmsg->header.type, lmsg->header.size);
-			pcn_kmsg_free_msg(lmsg);
+							msg->header.type, msg->header.size);
 			BUG();
 		}
 	}
-
-	kfree((void*)w);
 	return;
 }
 
 /*
  * Parse recved msg in the buf to msg_layer in INT
  */
-static int __ib_kmsg_recv_long(struct ib_cb *cb,
+static int __ib_kmsg_recv(struct ib_cb *cb,
 								 struct ib_recv_work_struct *rws)
 {
-	struct pcn_kmsg_message *lmsg = rws->element_addr;
+	struct pcn_kmsg_message *msg = rws->element_addr;
 	pcn_kmsg_work_t *kmsg_work;
 
-	if (unlikely( lmsg->header.size > sizeof(struct pcn_kmsg_message))) {
+	if (unlikely(msg->header.size > PCN_KMSG_MAX_SIZE)) {
 		printk(KERN_ERR "Received invalide message size > MAX %lu "
 						"from %d type %d size %d\n",
-						sizeof(struct pcn_kmsg_message), lmsg->header.from_nid,
-						lmsg->header.type, lmsg->header.size);
+						PCN_KMSG_MAX_SIZE, msg->header.from_nid,
+						msg->header.type, msg->header.size);
 		BUG();
 	}
 
-	/* - alloc & cpy msg to upper layer */
-	kmsg_work = kmalloc(sizeof(*kmsg_work), GFP_ATOMIC);
-	if (unlikely(!kmsg_work)) {
-		printk(KERN_ERR "Failed to kmalloc work structure!\n");
-		BUG();
-	}
-	kmsg_work->lmsg = kmalloc(lmsg->header.size, GFP_ATOMIC);
-	if (unlikely(!kmsg_work->lmsg)) {
-		printk(KERN_ERR "Failed to kmalloc msg in work structure!\n");
-		BUG();
-	}
-
-	if (unlikely(!memcpy(kmsg_work->lmsg, lmsg, lmsg->header.size)))
+	/* recycle recv buf & cpy msg to upper layer */
+	kmsg_work = get_recv_work_pool(cb->conn_no);
+	if (unlikely(!memcpy(&kmsg_work->msg, msg, msg->header.size)))
 		BUG();
 
 	INIT_WORK((struct work_struct *)kmsg_work, __pcn_kmsg_handler_BottomHalf);
@@ -1568,8 +1487,9 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 {
 	struct ib_cb *cb = ctx;
 	struct ib_recv_wr *bad_wr;
-	int i, ret,  recv_cnt = 0;
+	int ret;
 	struct ib_wc *_wc;	/* work complition->wr_id (work request ID) */
+	struct ib_wc wc;	/* work complition->wr_id (work request ID) */
 
 	BUG_ON(cb->cq != cq);
 	if (atomic_read(&cb->state) == ERROR) {
@@ -1577,8 +1497,9 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 		return;
 	}
 
-	/* get a completion */
-	while ((ret = ib_poll_cq(cb->cq, 1, _wc)) > 0) {
+	ib_req_notify_cq(cb->cq, IB_CQ_NEXT_COMP);
+	while ((ret = ib_poll_cq(cb->cq, 1, &wc)) > 0) {
+		_wc = &wc;
 		if (_wc->status) {
 			if (_wc->status == IB_WC_WR_FLUSH_ERR) {
 				printk("< cq flushed >\n");
@@ -1593,19 +1514,23 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 
 		switch (_wc->opcode) {
 		case IB_WC_SEND:
-			atomic_dec(&gcb[i]->WQ_WR_cnt);
+			atomic_dec(&gcb[cb->conn_no]->WQ_WR_cnt);
 			complete((struct completion *)_wc->wr_id);
 			break;
 
 		case IB_WC_RECV:
-			recv_cnt++;
-			ret = __ib_kmsg_recv_long(cb,
+			//recv_cnt++;
+			ret = __ib_kmsg_recv(cb,
 				(struct ib_recv_work_struct*)_wc->wr_id);
 			if (ret) {
 				printk(KERN_ERR "< recv wc error: %d >\n", ret);
 				goto error;
 			}
-			__enq_rws((struct ib_recv_work_struct*)_wc->wr_id, cb->conn_no);
+			//__enq_rws((struct ib_recv_work_struct*)_wc->wr_id, cb->conn_no);
+			//memset(((struct ib_recv_work_struct*)_wc->wr_id)->element_addr,
+			//		0, 1);
+			ret = ib_post_recv(cb->qp,
+				((struct ib_recv_work_struct*)_wc->wr_id)->recv_wr, &bad_wr);
 			break;
 
 		case IB_WC_RDMA_WRITE:
@@ -1626,24 +1551,7 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 			//ib_req_notify_cq(cb->cq, IB_CQ_NEXT_COMP);
 			return;
 		}
-
-		if (recv_cnt >= RECV_WQ_THRESHOLD)
-			break;
 	}
-#if !DEMON_POST_RECV_WCS
-	for(i = 0; i < recv_cnt; i++) {
-		struct ib_recv_work_struct *_rws = __dq_rws(cb->conn_no);
-		if(unlikely(!_rws))
-			break;
-
-		ret = ib_post_recv(cb->qp, _rws->recv_wr, &bad_wr);
-		if (ret) {
-			printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
-			BUG();
-		}
-	}
-#endif
-	ib_req_notify_cq(cb->cq, IB_CQ_NEXT_COMP);
 	return;
 
 error:
@@ -1671,16 +1579,25 @@ error:
  * FaRM WRITE:
  * [active lock]
  * send		 ----->   irq (recv)
- * polling				|-passive lock R/W
- *						|-perform WRITE
+ * 						|-passive lock R/W
+ * polling				|-perform WRITE
  *						|-passive unlock R/W
  * active unlock
+ *
+ * FaRM2WRITE:
+ * [active lock]
+ * send		 ----->   irq (recv)
+ * 						|-passive lock R/W
+ *						|-perform WRITE
+ *						|-passive unlock R/W
+ * polling				|- WRITE (signal)
+ * active unlock
  */
-char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *lmsg,
+char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 					  unsigned int msg_size, unsigned int rw_size)
 {
 	uint32_t rkey;
-#if !CONFIG_FARM2 && CONFIG_FARM
+#if !CONFIG_FARM2WRITE && CONFIG_FARM
 	char *poll_tail_at, *FaRM_act_buf;
 #endif
 	struct ib_cb *cb = gcb[dst];
@@ -1688,8 +1605,8 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *lmsg,
 	if (rw_size <= 0)
 		BUG();
 
-	if (!lmsg->rdma_header.is_write)
-		if (!lmsg->rdma_header.your_buf_ptr)
+	if (!msg->rdma_header.is_write)
+		if (!msg->rdma_header.your_buf_ptr)
 			BUG();
 
 	if (dst == my_nid) {
@@ -1697,30 +1614,30 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *lmsg,
 		return 0;
 	}
 
-	lmsg->header.is_rdma = true;
-	lmsg->header.from_nid = my_nid;
-	lmsg->rdma_header.rdma_ack = false;
-	lmsg->rdma_header.rw_size = rw_size;
+	msg->header.is_rdma = true;
+	msg->header.from_nid = my_nid;
+	msg->rdma_header.rdma_ack = false;
+	msg->rdma_header.rw_size = rw_size;
 
-#if !CONFIG_FARM2 && CONFIG_FARM
-	if (lmsg->rdma_header.is_write)
+#if !CONFIG_FARM2WRITE && CONFIG_FARM
+	if (msg->rdma_header.is_write)
 		FaRM_act_buf = kzalloc(rw_size + FaRM_HEAD_AND_TAIL, GFP_KERNEL);
 #endif
 
 	mutex_lock(&cb->active_mutex);
 
-#if !CONFIG_FARM2 && CONFIG_FARM
-	if (lmsg->rdma_header.is_write) {
+#if !CONFIG_FARM2WRITE && CONFIG_FARM
+	if (msg->rdma_header.is_write) {
 		cb->dma_addr_act = __ib_map_act(FaRM_act_buf,
 							cb->conn_no, rw_size + FaRM_HEAD_AND_TAIL);
 	}
 #else
-	cb->dma_addr_act = __ib_map_act(lmsg->rdma_header.your_buf_ptr,
+	cb->dma_addr_act = __ib_map_act(msg->rdma_header.your_buf_ptr,
 									cb->conn_no, rw_size);
 #endif
 
 	/* form rdma meta data */
-	if (lmsg->rdma_header.is_write)
+	if (msg->rdma_header.is_write)
 #if CONFIG_FARM
 		rkey = __ib_rdma_rkey(cb, cb->dma_addr_act,
 				!cb->server_invalidate,
@@ -1733,13 +1650,13 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *lmsg,
 		rkey = __ib_rdma_rkey(cb, cb->dma_addr_act,
 				!cb->server_invalidate, rw_size, RDMA_RKEY_ACT);
 
-	lmsg->rdma_header.remote_addr = htonll(cb->dma_addr_act);
-	lmsg->rdma_header.remote_rkey = htonl(rkey);
+	msg->rdma_header.remote_addr = htonll(cb->dma_addr_act);
+	msg->rdma_header.remote_rkey = htonl(rkey);
 
-	__ib_kmsg_send_long(dst, (struct pcn_kmsg_message*) lmsg, msg_size);
+	__ib_kmsg_send(dst, (struct pcn_kmsg_message*) msg, msg_size);
 
-	if (lmsg->rdma_header.is_write) {
-#if CONFIG_FARM2
+	if (msg->rdma_header.is_write) {
+#if CONFIG_FARM2WRITE
 		while (*cb->FaRM2_buf_act == 0)
 			schedule();
 		*cb->FaRM2_buf_act = 0;
@@ -1768,21 +1685,21 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *lmsg,
 	return 0;
 }
 
-int ib_kmsg_send_long(unsigned int dst,
-					  struct pcn_kmsg_message *lmsg,
+int ib_kmsg_send(unsigned int dst,
+					  struct pcn_kmsg_message *msg,
 					  unsigned int msg_size)
 {
-	lmsg->header.is_rdma = false;
-	return __ib_kmsg_send_long(dst, lmsg, msg_size);
+	msg->header.is_rdma = false;
+	return __ib_kmsg_send(dst, msg, msg_size);
 }
 
-static void rdma_FaRM2_request(int dst)
+static void rdma_FaRM2_key_exchange_request(int dst)
 {
 	struct FaRM2_init_req_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
 	struct ib_cb *cb = gcb[dst];
 	u32 rkey;
 
-	req->header.type = PCN_KMSG_TYPE_RDMA_FARM2_REQUEST;
+	req->header.type = PCN_KMSG_TYPE_RDMA_FARM2_KEY_EXCH_REQUEST;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	rkey = __ib_rdma_rkey(cb, cb->FaRM2_dma_addr_act,
@@ -1790,10 +1707,12 @@ static void rdma_FaRM2_request(int dst)
 								FaRM2_DATA_SIZE, RDMA_FARM2_RKEY_ACT);
 	req->remote_addr = htonll(cb->FaRM2_dma_addr_act);
 	req->remote_rkey = htonl(rkey);
-	ib_kmsg_send_long(dst, (void*)req, sizeof(*req));
+	ib_kmsg_send(dst, (void*)req, sizeof(*req));
+	pcn_kmsg_free_msg(req);
 }
 
-static void handle_rdma_FaRM2_request(struct pcn_kmsg_message *inc_msg)
+static void handle_rdma_FaRM2_key_exchange_request(
+									struct pcn_kmsg_message *inc_msg)
 {
 	struct FaRM2_init_req_t *req = (struct FaRM2_init_req_t*) inc_msg;
 	struct ib_cb *cb = gcb[req->header.from_nid];
@@ -1820,7 +1739,7 @@ static void handle_rdma_FaRM2_request(struct pcn_kmsg_message *inc_msg)
 	//cb->rdma_FaRM2_send_wr.wr.sg_list->length = FaRM2_DATA_SIZE;
 	cb->rdma_FaRM2_send_wr.wr.next = NULL;
 
-	kfree(req);
+	pcn_kmsg_free_msg(inc_msg);
 }
 
 
@@ -1830,27 +1749,49 @@ int __init initialize()
 	int i, j, err, conn_no;
 	msg_layer = "IB";
 
-	for (i=0; i<MAX_NUM_NODES; i++) {
-#if DEMON_POST_RECV_WCS
-		init_completion(&rws_comp[i]);
-#endif
-		spin_lock_init(&send_avail_bmap_lock[i]);
-	}
-
-	for (i=0; i<MAX_NUM_NODES; i++)
-		for (j=0; j<MAX_CQE; j++) {
-			init_completion(&send_wr_comp[i][j]);
-			clear_bit(j, send_avail[i]);
-		}
-
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_FARM2_REQUEST,
-								(pcn_kmsg_cbftn)handle_rdma_FaRM2_request);
-
-	/* Establish node numbers with ip */
+	/* Establish node numbers according to its IP */
 	if (!init_ip_table()) return -EINVAL;
 
-	/* Create a workqueue for bottom-half */
+	/* Create workers for bottom-halves */
 	msg_handler = alloc_workqueue("MSGHandBotm", WQ_MEM_RECLAIM, 0);
+
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_FARM2_KEY_EXCH_REQUEST,
+					(pcn_kmsg_cbftn)handle_rdma_FaRM2_key_exchange_request);
+
+	send_callback = (send_cbftn)ib_kmsg_send;
+	send_rdma_callback = (send_rdma_cbftn)ib_kmsg_send_rdma;
+	handle_rdma_callback = (handle_rdma_request_ftn)handle_rdma_request;
+	kmsg_free_callback = (kmsg_free_ftn)kmsg_free;
+
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+		if(my_nid == i) continue;
+		spin_lock_init(&recv_work_bmap_lock[i]);
+//		recv_work_pool[i] = kzalloc(
+//					sizeof(*recv_work_pool) * MAX_RECV_WORK_POOL, GFP_KERNEL);
+//		printk("JACK: %lu\n", sizeof(*recv_work_pool));
+		for(j = 0; j < MAX_RECV_WORK_POOL; j++) {
+			//pcn_kmsg_work_t *kmsg_work = recv_work_pool[i][j];
+			pcn_kmsg_work_t *kmsg_work;
+			kmsg_work = kzalloc(sizeof(pcn_kmsg_work_t), GFP_KERNEL);
+			BUG_ON(!kmsg_work &&
+					"Failed to kmalloc msg/work for recv work bug pool");
+			kmsg_work->id = j;
+			recv_work_pool[i][j] = kmsg_work;
+			put_recv_work_pool(i, kmsg_work);
+		}
+	}
+
+	/*
+	for (i = 0; i < MAX_NUM_NODES; i++)
+		for (j = 0; j<MAX_RECV_WORK_POOL; j++) {
+			clear_bit(j, recv_work_avail_bmap[i]);
+		}
+	*/
+	bitmap_clear(&recv_work_avail_bmap[0][0], 0,
+				MAX_NUM_NODES * MAX_RECV_WORK_POOL);
+	smp_mb();
+
+
 
 	/* Initilaize the IB: Each node has a connection table like tihs
 	 * -------------------------------------------------------------------
@@ -1860,7 +1801,7 @@ int __init initialize()
 	 * connect: connecting to existing nodes
 	 * accept:  waiting for the connection requests from later nodes
 	 */
-	for (i=0; i<MAX_NUM_NODES; i++) {
+	for (i = 0; i < MAX_NUM_NODES; i++) {
 		/* Create global Control Block context for each connection */
 		gcb[i] = kzalloc(sizeof(struct ib_cb), GFP_KERNEL);
 
@@ -1881,10 +1822,6 @@ int __init initialize()
 		gcb[i]->read_state.counter = IDLE;
 		gcb[i]->write_state.counter = IDLE;
 		gcb[i]->WQ_WR_cnt.counter = 0;
-
-		/* For RECV ib_recv_work_struct queue */
-        INIT_LIST_HEAD(&rws_wait_list_head[i].list);
-		spin_lock_init(&(rws_q_spinlock[i]));
 
 		/* set up IPv4 address */
 		gcb[i]->addr_str = ip_addresses[conn_no];
@@ -1910,8 +1847,8 @@ int __init initialize()
 #if CONFIG_FARM
 		/* passive RW buffer */
 		gcb[i]->FaRM_pass_buf = kzalloc(MAX_RDMA_SIZE, GFP_KERNEL);
-		if(!gcb[i]->FaRM_pass_buf)
-			BUG();
+		//if(!gcb[i]->FaRM_pass_buf)
+			BUG_ON(!gcb[i]->FaRM_pass_buf);
 #endif
 	}
 
@@ -1952,24 +1889,6 @@ int __init initialize()
 	/* case 2: <my_nid: connect | =my_nid | [>=my_nid: accept] */
 	__ib_run_server(gcb[my_nid]);
 
-	for (i = 0;i < MAX_NUM_NODES; i++) {
-		while ( !get_popcorn_node_online(i) ) {
-			printk("waiting for get_popcorn_node_online(%d)\n", i);
-			msleep(3000);
-			//TODO: do semephor up down
-		}
-	}
-
-#if DEMON_POST_RECV_WCS
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-		if (i == my_nid)
-			continue;
-		recv_post_demon[i] = kthread_run(__recv_post, gcb[i],
-							"demon for recyclingly posting recv_wc");
-		BUG_ON(IS_ERR(recv_post_demon[i]));
-	}
-#endif
-
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		atomic_set(&gcb[i]->state, IDLE);
 		atomic_set(&gcb[i]->send_state, IDLE);
@@ -1978,10 +1897,19 @@ int __init initialize()
 		atomic_set(&gcb[i]->WQ_WR_cnt, 0);
 	}
 
-	send_callback = (send_cbftn)ib_kmsg_send_long;
-	send_callback_rdma = (send_rdma_cbftn)ib_kmsg_send_rdma;
-	handle_rdma_callback = (handle_rdma_request_ftn)handle_rdma_request;
+	for (i = 0;i < MAX_NUM_NODES; i++) {
+		while ( !get_popcorn_node_online(i) ) {
+			printk("waiting for get_popcorn_node_online(%d)\n", i);
+			msleep(3000);
+			//TODO: do semephor up down
+		}
+	}
 	smp_mb();
+
+	printk("------------------------------------------\n");
+	printk("- Popcorn Messaging Layer IB Initialized -\n");
+	printk("------------------------------------------\n"
+										"\n\n\n\n\n\n\n");
 
 	/* Popcorn exchanging arch info */
 	for (i = 0; i < MAX_NUM_NODES; i++) {
@@ -1989,14 +1917,11 @@ int __init initialize()
 			continue;
 		notify_my_node_info(i);
 	}
-	printk("------------------------------------------\n");
-	printk("- Popcorn Messaging Layer IB Initialized -\n");
-	printk("------------------------------------------\n"
-										"\n\n\n\n\n\n\n");
+
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		if (i == my_nid)
 			continue;
-		rdma_FaRM2_request(i);
+		rdma_FaRM2_key_exchange_request(i);
 		//TODO: waiting by wait_station
 	}
 
@@ -2030,13 +1955,6 @@ static void __exit unload(void)
 #if CONFIG_FARM
 		if (gcb[i]->FaRM_pass_buf)
 			kfree(gcb[i]->FaRM_pass_buf);
-#endif
-	}
-
-	printk("Release threadss\n");
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-#if DEMON_POST_RECV_WCS
-		kthread_stop(recv_post_demon[i]);
 #endif
 	}
 
