@@ -14,6 +14,7 @@
 #include <linux/swap.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
+#include <linux/cma.h>
 
 #include <popcorn/bundle.h>
 #include <popcorn/pcn_kmsg.h>

@@ -16,7 +16,6 @@
 /* File includes */
 #include <linux/sched.h>
 #include <linux/uaccess.h>
-#include <linux/cpu_namespace.h>
 #include <linux/ptrace.h>
 
 #include <popcorn/regset.h>
@@ -116,4 +115,13 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 	show_regs(regs);
 
 	return 0;
+}
+
+
+void noinline_for_stack update_frame_pointer(void)
+{
+#ifdef CONFIG_FRAME_POINTER
+#else
+	WARN_ON_ONCE("May not be migrated back correctly due to omit-frame-buffer");
+#endif
 }
