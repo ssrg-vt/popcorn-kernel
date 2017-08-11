@@ -4643,7 +4643,7 @@ SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
 	return 0;
 }
 
-static noinline int __do_sched_migrate(struct task_struct *tsk, int nid, void __user *uregs)
+static noinline_for_stack int __do_sched_migrate(struct task_struct *tsk, int nid, void __user *uregs)
 {
 	int retval = 0;
 
@@ -4654,12 +4654,13 @@ static noinline int __do_sched_migrate(struct task_struct *tsk, int nid, void __
 
 	PSPRINTK("%s [%d]: put to sleep\n", __func__, tsk->pid);
 	__set_task_state(tsk, TASK_INTERRUPTIBLE);
+
 	schedule();
 	smp_mb();
 	PSPRINTK("%s [%d]: waken up, 0x%x 0x%x\n", __func__,
 			tsk->pid, tsk->ret_from_remote, tsk->exit_code);
 
-	process_server_update_frame_address();
+	update_frame_pointer();
 
 	if (tsk->ret_from_remote & TASK_DEAD) {
 		do_exit(tsk->exit_code);

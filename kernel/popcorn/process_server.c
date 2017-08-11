@@ -343,11 +343,6 @@ out:
 ///////////////////////////////////////////////////////////////////////////////
 // handling back migration
 ///////////////////////////////////////////////////////////////////////////////
-void noinline process_server_update_frame_address(void)
-{
-	update_frame_address();
-}
-
 static void bring_back_remote_thread(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;

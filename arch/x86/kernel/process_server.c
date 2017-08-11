@@ -192,18 +192,22 @@ int restore_thread_info(struct task_struct *tsk, struct field_arch *arch, bool r
 	return 0;
 }
 
-
-void noinline update_frame_address(void)
+#include <asm/stacktrace.h>
+void noinline_for_stack update_frame_pointer(void)
 {
+#ifdef CONFIG_FRAME_POINTER
 	unsigned long *rbp;
-	asm volatile("mov %%rbp, %0" : "=r"(rbp)); /* arch/update_frame_address */
 
-	/* User rbp is at 3 stack frames below */
-	rbp = (unsigned long *)*rbp; /* process_server_update_frame_address */
+	get_bp(rbp); /* update_frame_pointer */
+
+	/* User rbp is at two stack frames below */
 	rbp = (unsigned long *)*rbp; /* __do_sched_migrate */
 	rbp = (unsigned long *)*rbp; /* sched_migrate */
 
 	*rbp = current_pt_regs()->bp;
+#else
+	WARN_ON_ONCE("May not be migrated back correctly due to omit-frame-buffer");
+#endif
 }
 
 
