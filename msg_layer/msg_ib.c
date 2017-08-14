@@ -5,10 +5,9 @@
  *
  * TODO:
  *		define 0~1 to enum if needed
- *		(perf!)recv_buf_pool + ib_recv_work_request
  *		(perf!)sping when send
  *		RDMA:
- *			remove mutex in READ/WRITE
+ *			remove mutex in READ/WRITE (static wr)
  *			doesn't check RW size
  *			implemet a wait/wakup in exchaging rkey
  */
@@ -66,11 +65,11 @@
 #define MAX_RECV_WR 1024	/* important! Check it if only sender crash */
 
 /* IB send & completetion */
-#define MAX_SEND_WR 4096
+#define MAX_SEND_WR 1024
 #define MAX_CQE MAX_SEND_WR + MAX_RECV_WR
 
 /* RECV_BUF_POOL */
-#define MAX_RECV_WORK_POOL 1024
+#define MAX_RECV_WORK_POOL MAX_RECV_WR
 
 /* IB qp */
 #define MAX_RECV_SGE 1
@@ -130,20 +129,14 @@
 #define RDMA_SEND_COMPLETE 8
 #define ERROR 9
 
-/* recv_wr -> wc */
-struct ib_recv_work_struct {
-	struct list_head list;
-	struct ib_sge *recv_sgl;
-	struct ib_recv_wr *recv_wr;
-	struct pcn_kmsg_message *element_addr;
-};
-
 /* workqueue arg */
 typedef struct {
 	struct work_struct work;	/* DONT MOVE! */
 	int id;
+	struct ib_sge *recv_sgl;
+	struct ib_recv_wr *recv_wr;
 	struct pcn_kmsg_message msg;
-} pcn_kmsg_work_t;
+} ib_recv_work_t;
 
 /* FaRM2 */
 #if CONFIG_FARM2WRITE
@@ -263,15 +256,9 @@ struct ib_cb *gcb[MAX_NUM_NODES];
 /* workqueue */
 struct workqueue_struct *msg_handler;
 
-/* Recv work pool for recv procedure */
-static pcn_kmsg_work_t *recv_work_pool[MAX_NUM_NODES][MAX_RECV_WORK_POOL];
-static spinlock_t recv_work_bmap_lock[MAX_NUM_NODES];
-static unsigned long recv_work_avail_bmap[MAX_NUM_NODES]\
-										[BITS_TO_LONGS(MAX_RECV_WORK_POOL)];
-
 /* Functions */
 static int __init initialize(void);
-static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx);
+static void ib_cq_event_handler(struct ib_cq *cq, void *ctx);
 
 /* Popcorn utilities */
 extern char *msg_layer;
@@ -281,45 +268,7 @@ extern send_rdma_cbftn send_rdma_callback;
 extern handle_rdma_request_ftn handle_rdma_callback;
 extern kmsg_free_ftn kmsg_free_callback;
 
-pcn_kmsg_work_t *get_recv_work_pool(int dst)
-{
-	int ofs;
-	pcn_kmsg_work_t *kmsg_work;
-
-	spin_lock(&recv_work_bmap_lock[dst]);
-	ofs = find_first_zero_bit(recv_work_avail_bmap[dst], MAX_RECV_WORK_POOL);
-	BUG_ON(ofs >= MAX_RECV_WORK_POOL);
-	set_bit(ofs, recv_work_avail_bmap[dst]);
-	kmsg_work = recv_work_pool[dst][ofs];
-	//printk("get %p (%d)\n", kmsg_work, kmsg_work->id);
-	spin_unlock(&recv_work_bmap_lock[dst]);
-
-	return kmsg_work;
-}
-
-static void put_recv_work_pool(int dst, pcn_kmsg_work_t *kmsg_work)
-{
-	spin_lock(&recv_work_bmap_lock[dst]);
-	clear_bit(kmsg_work->id, recv_work_avail_bmap[dst]);
-	//printk("put %p (%d)\n", kmsg_work, kmsg_work->id);
-	spin_unlock(&recv_work_bmap_lock[dst]);
-}
-
-static void kmsg_free(struct pcn_kmsg_message *msg)
-{
-	if(msg->header.from_nid == my_nid) {
-		//printk("%s(): send %p\n", __func__, msg);
-		kfree(msg);
-	} else {
-		pcn_kmsg_work_t *kmsg_work =
-						container_of(msg, pcn_kmsg_work_t, msg);
-		//printk("%s(): recv msg %p -> wt %p (%d)\n",
-		//		__func__, msg, kmsg_work, kmsg_work->id);
-		put_recv_work_pool(msg->header.from_nid, kmsg_work);
-	}
-}
-
-static int __ib_cma_event_handler(struct rdma_cm_id *cma_id,
+static int ib_cma_event_handler(struct rdma_cm_id *cma_id,
 										struct rdma_cm_event *event)
 {
 	int ret;
@@ -392,65 +341,39 @@ static int __ib_cma_event_handler(struct rdma_cm_id *cma_id,
 }
 
 /*
- * Create a recv_sql/rq_we
+ * Create a recv scatter-gather list(entries) & work request
  */
-struct ib_recv_wr *__create_recv_wr(int conn_no)
+void create_recv_wr(int conn_no, ib_recv_work_t *kmsg_work)
 {
-	int recv_size = PCN_KMSG_MAX_SIZE;
-	struct ib_cb *cb = gcb[conn_no];
-	struct pcn_kmsg_message *element_addr;
 	struct ib_sge *_recv_sgl;
 	struct ib_recv_wr *_recv_wr;
-	struct ib_recv_work_struct *rws;
-	u64 element_dma_addr;
+	struct ib_cb *cb = gcb[conn_no];
+	int recv_size = PCN_KMSG_MAX_SIZE;
 
-	element_addr = kmalloc(sizeof(*element_addr), GFP_KERNEL);
-	if (!element_addr) {
-		printk(KERN_ERR "recv_buf malloc failed\n");
-		BUG();
-	}
-
-	_recv_sgl = kmalloc(sizeof(*_recv_sgl), GFP_KERNEL);
+	_recv_sgl = kzalloc(sizeof(*_recv_sgl), GFP_KERNEL);
 	BUG_ON(!_recv_sgl && "sgl recv_buf malloc failed");
 
-	_recv_wr =  kmalloc(sizeof(*_recv_wr), GFP_KERNEL);
-	if (!_recv_wr) {
-		printk(KERN_ERR "recv_wr recv_buf malloc failed\n");
-		BUG();
-	}
-
-	rws = kmalloc(sizeof(*rws), GFP_KERNEL);
-	if (!rws) {
-		printk(KERN_ERR "rws malloc failed\n");
-		BUG();
-	}
-
-	/* map buf to ib addr space */
-	element_dma_addr = dma_map_single(cb->pd->device->dma_device,
-						  element_addr, recv_size, DMA_BIDIRECTIONAL);
+	_recv_wr = kzalloc(sizeof(*_recv_wr), GFP_KERNEL);
+	BUG_ON(!_recv_wr && "recv_wr recv_buf malloc failed");
 
 	/* set up sgl */
 	_recv_sgl->length = recv_size;
-	_recv_sgl->addr = element_dma_addr;
 	_recv_sgl->lkey = cb->pd->local_dma_lkey;
+	_recv_sgl->addr = dma_map_single(cb->pd->device->dma_device,
+					  &kmsg_work->msg, recv_size, DMA_BIDIRECTIONAL);
 
 	/* set up recv_wr */
 	_recv_wr->sg_list = _recv_sgl;
 	_recv_wr->num_sge = 1;
-	_recv_wr->wr_id = (u64)rws;
+	_recv_wr->wr_id = (u64)kmsg_work;
 	_recv_wr->next = NULL;
 
-	/* save all address to release */
-	rws->element_addr = element_addr;
-	rws->recv_sgl = _recv_sgl;
-	rws->recv_wr = _recv_wr;
-	INIT_LIST_HEAD(&rws->list);
-
-	return _recv_wr;
+	kmsg_work->recv_wr =  _recv_wr;
+	kmsg_work->recv_sgl = _recv_sgl;
 }
 
 
-static int __ib_connect_client(struct ib_cb *cb)
+static int ib_connect_client(struct ib_cb *cb)
 {
 	int ret;
 	struct rdma_conn_param conn_param;
@@ -476,7 +399,7 @@ static int __ib_connect_client(struct ib_cb *cb)
 	return 0;
 }
 
-static void __fill_sockaddr(struct sockaddr_storage *sin, struct ib_cb *cb)
+static void fill_sockaddr(struct sockaddr_storage *sin, struct ib_cb *cb)
 {
 	memset(sin, 0, sizeof(*sin));
 
@@ -499,12 +422,12 @@ static void __fill_sockaddr(struct sockaddr_storage *sin, struct ib_cb *cb)
 	}
 }
 
-static int __ib_bind_server(struct ib_cb *cb)
+static int ib_bind_server(struct ib_cb *cb)
 {
 	int ret;
 	struct sockaddr_storage sin;
 
-	__fill_sockaddr(&sin, cb);
+	fill_sockaddr(&sin, cb);
 	ret = rdma_bind_addr(cb->cm_id, (struct sockaddr *)&sin);
 	if (ret) {
 		printk(KERN_ERR "rdma_bind_addr error %d\n", ret);
@@ -521,20 +444,22 @@ static int __ib_bind_server(struct ib_cb *cb)
 }
 
 /* set up sgl */
-static void __ib_setup_wr(struct ib_cb *cb)
+static void ib_setup_wr(struct ib_cb *cb)
 {
 	int i = 0, ret;
 
 	/* Pre-post RECV buffers */
 	for(i = 0; i < MAX_RECV_WR; i++) {
 		struct ib_recv_wr *bad_wr;
-		struct ib_recv_wr *_recv_wr = __create_recv_wr(cb->conn_no);
+		ib_recv_work_t *kmsg_work = kzalloc(sizeof(*kmsg_work), GFP_KERNEL);
+		BUG_ON(!kmsg_work);
 
-		ret = ib_post_recv(cb->qp, _recv_wr, &bad_wr);
-		if (ret) {
-			printk(KERN_ERR "ib_post_recv failed: %d\n", ret);
-			BUG();
-		}
+		kmsg_work->id = i;
+		create_recv_wr(cb->conn_no, kmsg_work);
+		BUG_ON(!kmsg_work->recv_wr);
+
+		ret = ib_post_recv(cb->qp, kmsg_work->recv_wr, &bad_wr);
+		BUG_ON(ret && "ib_post_recv failed");
 	}
 
 
@@ -594,7 +519,7 @@ static void __ib_setup_wr(struct ib_cb *cb)
 	return;
 }
 
-static int __ib_create_qp(struct ib_cb *cb)
+static int _ib_create_qp(struct ib_cb *cb)
 {
 	int ret;
 	struct ib_qp_init_attr init_attr;
@@ -641,7 +566,7 @@ static int __ib_create_qp(struct ib_cb *cb)
 	return ret;
 }
 
-static int __ib_setup_qp(struct ib_cb *cb, struct rdma_cm_id *cm_id)
+static int ib_setup_qp(struct ib_cb *cb, struct rdma_cm_id *cm_id)
 {
 	int ret;
 	struct ib_cq_init_attr attr = {0};
@@ -655,7 +580,7 @@ static int __ib_setup_qp(struct ib_cb *cb, struct rdma_cm_id *cm_id)
 	attr.cqe = MAX_CQE;
 	attr.comp_vector = INT_MASK;
 	cb->cq = ib_create_cq(cm_id->device,
-							__ib_cq_event_handler, NULL, cb, &attr);
+							ib_cq_event_handler, NULL, cb, &attr);
 	if (IS_ERR(cb->cq)) {
 		printk(KERN_ERR "ib_create_cq failed\n");
 		ret = PTR_ERR(cb->cq);
@@ -669,7 +594,7 @@ static int __ib_setup_qp(struct ib_cb *cb, struct rdma_cm_id *cm_id)
 		goto err2;
 	}
 
-	ret = __ib_create_qp(cb);
+	ret = _ib_create_qp(cb);
 	if (ret) {
 		printk(KERN_ERR "ib_create_qp failed: %d\n", ret);
 		goto err2;
@@ -694,7 +619,7 @@ err1:
  *		2:RDMA_FARM2_RKEY_ACT
  *		3:RDMA_FARM2_RKEY_PASS
  */
-static u32 __ib_rdma_rkey(struct ib_cb *cb, u64 buf,
+static u32 ib_rdma_rkey(struct ib_cb *cb, u64 buf,
 								int post_inv, int rdma_len, int mode)
 {
 	int ret;
@@ -763,7 +688,7 @@ static u32 __ib_rdma_rkey(struct ib_cb *cb, u64 buf,
 /*
  * init all buffers < 1.pd->cq->qp 2.[mr] 3.xxx >
  */
-static int __ib_setup_buffers(struct ib_cb *cb)
+static int ib_setup_buffers(struct ib_cb *cb)
 {
 	int ret, page_list_len, FaRM2_page_list_len;
 
@@ -824,7 +749,7 @@ static int __ib_setup_buffers(struct ib_cb *cb)
 	*cb->pass_FaRM2_buf = 1;
 #endif
 
-	__ib_setup_wr(cb);
+	ib_setup_wr(cb);
 	return 0;
 bail:
 	if (cb->reg_mr_act && !IS_ERR(cb->reg_mr_act))
@@ -839,7 +764,7 @@ bail:
 }
 
 
-static int __ib_accept(struct ib_cb *cb)
+static int ib_accept(struct ib_cb *cb)
 {
 	int ret;
 	struct rdma_conn_param conn_param;
@@ -864,7 +789,7 @@ static int __ib_accept(struct ib_cb *cb)
 	return 0;
 }
 
-static void __ib_free_buffers(struct ib_cb *cb)
+static void ib_free_buffers(struct ib_cb *cb)
 {
 	if (cb->reg_mr_act)
 		ib_dereg_mr(cb->reg_mr_act);
@@ -876,52 +801,52 @@ static void __ib_free_buffers(struct ib_cb *cb)
 		ib_dereg_mr(cb->reg_FaRM2_mr_pass);
 }
 
-static void __ib_free_qp(struct ib_cb *cb)
+static void ib_free_qp(struct ib_cb *cb)
 {
 	ib_destroy_qp(cb->qp);
 	ib_destroy_cq(cb->cq);
 	ib_dealloc_pd(cb->pd);
 }
 
-static int __ib_server_accept(void *arg0)
+static int ib_server_accept(void *arg0)
 {
 	struct ib_cb *cb = arg0;
 	int ret = -1;
 
-	ret = __ib_setup_qp(cb, cb->child_cm_id);
+	ret = ib_setup_qp(cb, cb->child_cm_id);
 	if (ret) {
 		printk(KERN_ERR "setup_qp failed: %d\n", ret);
 		goto err0;
 	}
 
-	ret = __ib_setup_buffers(cb);
+	ret = ib_setup_buffers(cb);
 	if (ret) {
-		printk(KERN_ERR "__ib_setup_buffers failed: %d\n", ret);
+		printk(KERN_ERR "ib_setup_buffers failed: %d\n", ret);
 		goto err1;
 	}
 	/* after here, you can send/recv */
 
-	ret = __ib_accept(cb);
+	ret = ib_accept(cb);
 	if (ret) {
 		printk(KERN_ERR "connect error %d\n", ret);
 		goto err2;
 	}
 	return 0;
 err2:
-	__ib_free_buffers(cb);
+	ib_free_buffers(cb);
 err1:
-	__ib_free_qp(cb);
+	ib_free_qp(cb);
 err0:
 	rdma_destroy_id(cb->child_cm_id);
 	return ret;
 }
 
-static int __ib_run_server(void *arg0)
+static int ib_run_server(void *arg0)
 {
 	struct ib_cb *my_cb = arg0;
 	int ret, i = 0;
 
-	ret = __ib_bind_server(my_cb);
+	ret = ib_bind_server(my_cb);
 	if (ret)
 		return ret;
 
@@ -949,7 +874,7 @@ static int __ib_run_server(void *arg0)
 		/* got from INT. Will be used [setup_qp(SRWRirq)] -> setup_buf -> */
 		target_cb->child_cm_id = my_cb->child_cm_id;
 
-		if (__ib_server_accept(target_cb))
+		if (ib_server_accept(target_cb))
 			rdma_disconnect(target_cb->child_cm_id);
 
 		printk("conn_no %d is ready (sever)\n", target_cb->conn_no);
@@ -958,12 +883,12 @@ static int __ib_run_server(void *arg0)
 	return 0;
 }
 
-static int __ib_bind_client(struct ib_cb *cb)
+static int ib_bind_client(struct ib_cb *cb)
 {
 	struct sockaddr_storage sin;
 	int ret;
 
-	__fill_sockaddr(&sin, cb);
+	fill_sockaddr(&sin, cb);
 
 	ret = rdma_resolve_addr(cb->cm_id, NULL, (struct sockaddr *)&sin, 2000);
 	if (ret) {
@@ -982,36 +907,36 @@ static int __ib_bind_client(struct ib_cb *cb)
 	return 0;
 }
 
-static int __ib_run_client(struct ib_cb *cb)
+static int ib_run_client(struct ib_cb *cb)
 {
 	int ret;
 
-	ret = __ib_bind_client(cb);
+	ret = ib_bind_client(cb);
 	if (ret)
 		return ret;
 
-	ret = __ib_setup_qp(cb, cb->cm_id);
+	ret = ib_setup_qp(cb, cb->cm_id);
 	if (ret) {
 		printk(KERN_ERR "setup_qp failed: %d\n", ret);
 		return ret;
 	}
 
-	ret = __ib_setup_buffers(cb);
+	ret = ib_setup_buffers(cb);
 	if (ret) {
-		printk(KERN_ERR "__ib_setup_buffers failed: %d\n", ret);
+		printk(KERN_ERR "ib_setup_buffers failed: %d\n", ret);
 		goto err1;
 	}
 
-	ret = __ib_connect_client(cb);
+	ret = ib_connect_client(cb);
 	if (ret) {
 		printk(KERN_ERR "connect error %d\n", ret);
 		goto err2;
 	}
 	return 0;
 err2:
-	__ib_free_buffers(cb);
+	ib_free_buffers(cb);
 err1:
-	__ib_free_qp(cb);
+	ib_free_qp(cb);
 	return ret;
 }
 
@@ -1062,8 +987,8 @@ void __unmap_pass(int conn_no, int rw_size)
  * User has to free the allocated mem manually
  */
 int __ib_kmsg_send(unsigned int dst,
-						  struct pcn_kmsg_message *msg,
-						  unsigned int msg_size)
+				  struct pcn_kmsg_message *msg,
+				  unsigned int msg_size)
 {
 	int ret;
 	struct completion comp;
@@ -1114,7 +1039,7 @@ int __ib_kmsg_send(unsigned int dst,
 	return 0;
 }
 
-static void __handle_remote_thread_rdma_read_request(
+static void handle_remote_thread_rdma_read_request(
 						remote_thread_rdma_rw_t *inc_msg, void *target_paddr)
 {
 	remote_thread_rdma_rw_t* req =
@@ -1142,7 +1067,7 @@ static void __handle_remote_thread_rdma_read_request(
 	// rdma_send_wr.wr.sg_list = &cb->rdma_sgl[0]
 	cb->rdma_sgl[0].length = cb->remote_pass_len;
 	cb->rdma_sgl[0].addr = cb->dma_addr_pass;
-	cb->rdma_sgl[0].lkey = __ib_rdma_rkey(cb, cb->dma_addr_pass,
+	cb->rdma_sgl[0].lkey = ib_rdma_rkey(cb, cb->dma_addr_pass,
 						!cb->read_inv, cb->remote_pass_len, RDMA_RKEY_PASS);
 
 	cb->rdma_send_wr.wr.next = NULL; // one work request
@@ -1199,7 +1124,7 @@ static void __handle_remote_thread_rdma_read_request(
 	return;
 }
 
-static void __handle_remote_thread_rdma_read_response(
+static void handle_remote_thread_rdma_read_response(
 										remote_thread_rdma_rw_t* inc_msg)
 {
 	remote_thread_rdma_rw_t* res =
@@ -1229,7 +1154,7 @@ static void __handle_remote_thread_rdma_read_response(
  *                      unlock
  * done					done
  */
-static void __handle_remote_thread_rdma_write_request(
+static void handle_remote_thread_rdma_write_request(
 					remote_thread_rdma_rw_t *inc_msg, void *target_paddr)
 {
 	remote_thread_rdma_rw_t *req = (remote_thread_rdma_rw_t*) inc_msg;
@@ -1305,7 +1230,7 @@ static void __handle_remote_thread_rdma_write_request(
 	/* RDMA local info: */
 	cb->rdma_sgl[0].length = cb->remote_pass_len;
 	cb->rdma_sgl[0].addr = cb->dma_addr_pass;
-	cb->rdma_sgl[0].lkey = __ib_rdma_rkey(
+	cb->rdma_sgl[0].lkey = ib_rdma_rkey(
 							cb, cb->dma_addr_pass, 1,
 							cb->remote_pass_len, RDMA_RKEY_PASS);
 
@@ -1376,7 +1301,7 @@ static void __handle_remote_thread_rdma_write_request(
 	return;
 }
 
-static void __handle_remote_thread_rdma_write_response(
+static void handle_remote_thread_rdma_write_response(
 										remote_thread_rdma_rw_t* inc_msg)
 {
 	remote_thread_rdma_rw_t* res =
@@ -1405,14 +1330,14 @@ void handle_rdma_request(remote_thread_rdma_rw_t *inc_msg, void *paddr)
 			BUG();
 		if (!msg->rdma_header.rdma_ack) {
 			if (msg->rdma_header.is_write)
-				__handle_remote_thread_rdma_write_request(msg, paddr);
+				handle_remote_thread_rdma_write_request(msg, paddr);
 			else
-				__handle_remote_thread_rdma_read_request(msg, paddr);
+				handle_remote_thread_rdma_read_request(msg, paddr);
 		} else {
 			if (msg->rdma_header.is_write)
-				__handle_remote_thread_rdma_write_response(msg);
+				handle_remote_thread_rdma_write_response(msg);
 			else
-				__handle_remote_thread_rdma_read_response(msg);
+				handle_remote_thread_rdma_read_response(msg);
 		}
 	} else {
 		printk(KERN_ERR "This is not a rdma request you shouldn't call"
@@ -1427,15 +1352,20 @@ void handle_rdma_request(remote_thread_rdma_rw_t *inc_msg, void *paddr)
 /*
  * Pass msg to upper layer and do the corresponding callback function
  */
-static void __pcn_kmsg_handler_BottomHalf(struct work_struct *work)
+static void ib_recv_handler_BottomHalf(struct work_struct *work)
 {
 	pcn_kmsg_cbftn ftn;
-	pcn_kmsg_work_t *w = (pcn_kmsg_work_t *) work;
+	ib_recv_work_t *w = (ib_recv_work_t *) work;
 	struct pcn_kmsg_message *msg = (struct pcn_kmsg_message *)(&w->msg);
 
-	if ( msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-		printk(KERN_ERR "Received invalid message type %d > MAX %d\n",
-						msg->header.type, PCN_KMSG_TYPE_MAX);
+	if (unlikely(msg->header.type < 0 ||
+				msg->header.type >= PCN_KMSG_TYPE_MAX ||
+				msg->header.size < 0 ||
+				msg->header.size > PCN_KMSG_MAX_SIZE)) {
+		printk(KERN_ERR "Recved invalid msg from %d type %d > MAX %d || "
+						"size %d > MAX %lu\n", msg->header.from_nid,
+						msg->header.type, PCN_KMSG_TYPE_MAX,
+						msg->header.size, PCN_KMSG_MAX_SIZE);
 		BUG();
 	} else {
 		ftn = callbacks[msg->header.type];
@@ -1443,7 +1373,7 @@ static void __pcn_kmsg_handler_BottomHalf(struct work_struct *work)
 #ifdef CONFIG_POPCORN_STAT
 			account_pcn_message_recv(lmsg);
 #endif
-			ftn((void*)(&((pcn_kmsg_work_t *)work)->msg));
+			ftn((void*)(&((ib_recv_work_t *)work)->msg));
 		} else {
 			printk(KERN_ERR "Recieved message type %d size %d "
 							"has no registered callback!\n",
@@ -1457,36 +1387,18 @@ static void __pcn_kmsg_handler_BottomHalf(struct work_struct *work)
 /*
  * Parse recved msg in the buf to msg_layer in INT
  */
-static int __ib_kmsg_recv(struct ib_cb *cb,
-								 struct ib_recv_work_struct *rws)
+static int ib_kmsg_recv(struct ib_cb *cb, ib_recv_work_t *rws)
 {
-	struct pcn_kmsg_message *msg = rws->element_addr;
-	pcn_kmsg_work_t *kmsg_work;
-
-	if (unlikely(msg->header.size > PCN_KMSG_MAX_SIZE)) {
-		printk(KERN_ERR "Received invalide message size > MAX %lu "
-						"from %d type %d size %d\n",
-						PCN_KMSG_MAX_SIZE, msg->header.from_nid,
-						msg->header.type, msg->header.size);
+	INIT_WORK((struct work_struct *)rws, ib_recv_handler_BottomHalf);
+	if (unlikely(!queue_work(msg_handler, (struct work_struct *)rws)))
 		BUG();
-	}
-
-	/* recycle recv buf & cpy msg to upper layer */
-	kmsg_work = get_recv_work_pool(cb->conn_no);
-	if (unlikely(!memcpy(&kmsg_work->msg, msg, msg->header.size)))
-		BUG();
-
-	INIT_WORK((struct work_struct *)kmsg_work, __pcn_kmsg_handler_BottomHalf);
-	if (unlikely(!queue_work(msg_handler, (struct work_struct *)kmsg_work)))
-		BUG();
-
 	return 0;
 }
 
-static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
+static void ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 {
 	struct ib_cb *cb = ctx;
-	struct ib_recv_wr *bad_wr;
+	//struct ib_recv_wr *bad_wr;
 	int ret;
 	struct ib_wc *_wc;	/* work complition->wr_id (work request ID) */
 	struct ib_wc wc;	/* work complition->wr_id (work request ID) */
@@ -1505,8 +1417,8 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 				printk("< cq flushed >\n");
 			} else {
 				printk(KERN_ERR "< cq completion failed with "
-						"wr_id %Lx status %d opcode %d vender_err %x >\n",
-						_wc->wr_id, _wc->status, _wc->opcode, _wc->vendor_err);
+					"wr_id %Lx status %d opcode %d vender_err %x >\n",
+					_wc->wr_id, _wc->status, _wc->opcode, _wc->vendor_err);
 				BUG_ON(_wc->status);
 				goto error;
 			}
@@ -1519,18 +1431,8 @@ static void __ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 			break;
 
 		case IB_WC_RECV:
-			//recv_cnt++;
-			ret = __ib_kmsg_recv(cb,
-				(struct ib_recv_work_struct*)_wc->wr_id);
-			if (ret) {
-				printk(KERN_ERR "< recv wc error: %d >\n", ret);
-				goto error;
-			}
-			//__enq_rws((struct ib_recv_work_struct*)_wc->wr_id, cb->conn_no);
-			//memset(((struct ib_recv_work_struct*)_wc->wr_id)->element_addr,
-			//		0, 1);
-			ret = ib_post_recv(cb->qp,
-				((struct ib_recv_work_struct*)_wc->wr_id)->recv_wr, &bad_wr);
+			ret = ib_kmsg_recv(cb, (ib_recv_work_t*)_wc->wr_id);
+			BUG_ON(ret);
 			break;
 
 		case IB_WC_RDMA_WRITE:
@@ -1639,15 +1541,15 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 	/* form rdma meta data */
 	if (msg->rdma_header.is_write)
 #if CONFIG_FARM
-		rkey = __ib_rdma_rkey(cb, cb->dma_addr_act,
+		rkey = ib_rdma_rkey(cb, cb->dma_addr_act,
 				!cb->server_invalidate,
 				rw_size + FaRM_HEAD_AND_TAIL, RDMA_RKEY_ACT);
 #else
-		rkey = __ib_rdma_rkey(cb, cb->dma_addr_act,
+		rkey = ib_rdma_rkey(cb, cb->dma_addr_act,
 				!cb->server_invalidate, rw_size, RDMA_RKEY_ACT);
 #endif
 	else
-		rkey = __ib_rdma_rkey(cb, cb->dma_addr_act,
+		rkey = ib_rdma_rkey(cb, cb->dma_addr_act,
 				!cb->server_invalidate, rw_size, RDMA_RKEY_ACT);
 
 	msg->rdma_header.remote_addr = htonll(cb->dma_addr_act);
@@ -1693,6 +1595,19 @@ int ib_kmsg_send(unsigned int dst,
 	return __ib_kmsg_send(dst, msg, msg_size);
 }
 
+static void ib_kmsg_free_msg(struct pcn_kmsg_message *msg)
+{
+	if(msg->header.from_nid == my_nid) {
+		kfree(msg);
+	} else {
+		struct ib_recv_wr *bad_wr;
+		ib_recv_work_t *rws = container_of(msg, ib_recv_work_t, msg);
+		int ret = ib_post_recv(gcb[msg->header.from_nid]->qp,
+								rws->recv_wr, &bad_wr);
+		BUG_ON(ret && "ib_post_recv failed");
+	}
+}
+
 static void rdma_FaRM2_key_exchange_request(int dst)
 {
 	struct FaRM2_init_req_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
@@ -1702,7 +1617,7 @@ static void rdma_FaRM2_key_exchange_request(int dst)
 	req->header.type = PCN_KMSG_TYPE_RDMA_FARM2_KEY_EXCH_REQUEST;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
-	rkey = __ib_rdma_rkey(cb, cb->FaRM2_dma_addr_act,
+	rkey = ib_rdma_rkey(cb, cb->FaRM2_dma_addr_act,
 								!cb->server_invalidate,
 								FaRM2_DATA_SIZE, RDMA_FARM2_RKEY_ACT);
 	req->remote_addr = htonll(cb->FaRM2_dma_addr_act);
@@ -1725,7 +1640,7 @@ static void handle_rdma_FaRM2_key_exchange_request(
 	/* local info: */
 	cb->local_FaRM2_llen = FaRM2_DATA_SIZE;
 	cb->local_FaRM2_laddr = cb->pass_FaRM2_dma_addr;
-	cb->local_FaRM2_lkey = __ib_rdma_rkey(cb,
+	cb->local_FaRM2_lkey = ib_rdma_rkey(cb,
 						cb->pass_FaRM2_dma_addr, !cb->read_inv,
 						FaRM2_DATA_SIZE, RDMA_FARM2_RKEY_PASS);
 
@@ -1746,12 +1661,15 @@ static void handle_rdma_FaRM2_key_exchange_request(
 /* Initialize callback table to null, set up control and data channels */
 int __init initialize()
 {
-	int i, j, err, conn_no;
+	int i, err, conn_no;
 	msg_layer = "IB";
 
+	printk("- Popcorn Messaging Layer IB Initialization Starts -\n");
 	/* Establish node numbers according to its IP */
-	if (!init_ip_table()) return -EINVAL;
-
+	if (!init_ip_table()) {
+		printk("%s(): check your IP table!\n", __func__);
+		return -EINVAL;
+	}
 	/* Create workers for bottom-halves */
 	msg_handler = alloc_workqueue("MSGHandBotm", WQ_MEM_RECLAIM, 0);
 
@@ -1761,37 +1679,7 @@ int __init initialize()
 	send_callback = (send_cbftn)ib_kmsg_send;
 	send_rdma_callback = (send_rdma_cbftn)ib_kmsg_send_rdma;
 	handle_rdma_callback = (handle_rdma_request_ftn)handle_rdma_request;
-	kmsg_free_callback = (kmsg_free_ftn)kmsg_free;
-
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-		if(my_nid == i) continue;
-		spin_lock_init(&recv_work_bmap_lock[i]);
-//		recv_work_pool[i] = kzalloc(
-//					sizeof(*recv_work_pool) * MAX_RECV_WORK_POOL, GFP_KERNEL);
-//		printk("JACK: %lu\n", sizeof(*recv_work_pool));
-		for(j = 0; j < MAX_RECV_WORK_POOL; j++) {
-			//pcn_kmsg_work_t *kmsg_work = recv_work_pool[i][j];
-			pcn_kmsg_work_t *kmsg_work;
-			kmsg_work = kzalloc(sizeof(pcn_kmsg_work_t), GFP_KERNEL);
-			BUG_ON(!kmsg_work &&
-					"Failed to kmalloc msg/work for recv work bug pool");
-			kmsg_work->id = j;
-			recv_work_pool[i][j] = kmsg_work;
-			put_recv_work_pool(i, kmsg_work);
-		}
-	}
-
-	/*
-	for (i = 0; i < MAX_NUM_NODES; i++)
-		for (j = 0; j<MAX_RECV_WORK_POOL; j++) {
-			clear_bit(j, recv_work_avail_bmap[i]);
-		}
-	*/
-	bitmap_clear(&recv_work_avail_bmap[0][0], 0,
-				MAX_NUM_NODES * MAX_RECV_WORK_POOL);
-	smp_mb();
-
-
+	kmsg_free_callback = (kmsg_free_ftn)ib_kmsg_free_msg;
 
 	/* Initilaize the IB: Each node has a connection table like tihs
 	 * -------------------------------------------------------------------
@@ -1830,7 +1718,7 @@ int __init initialize()
 
 		/* register event handler */
 		gcb[i]->cm_id = rdma_create_id(&init_net,
-				__ib_cma_event_handler, gcb[i], RDMA_PS_TCP, IB_QPT_RC);
+				ib_cma_event_handler, gcb[i], RDMA_PS_TCP, IB_QPT_RC);
 		if (IS_ERR(gcb[i]->cm_id)) {
 			err = PTR_ERR(gcb[i]->cm_id);
 			printk(KERN_ERR "rdma_create_id error %d\n", err);
@@ -1847,8 +1735,7 @@ int __init initialize()
 #if CONFIG_FARM
 		/* passive RW buffer */
 		gcb[i]->FaRM_pass_buf = kzalloc(MAX_RDMA_SIZE, GFP_KERNEL);
-		//if(!gcb[i]->FaRM_pass_buf)
-			BUG_ON(!gcb[i]->FaRM_pass_buf);
+		BUG_ON(!gcb[i]->FaRM_pass_buf);
 #endif
 	}
 
@@ -1874,7 +1761,7 @@ int __init initialize()
 			gcb[conn_no]->server = 0;
 
 			/* server/client dependant init */
-			if (__ib_run_client(gcb[conn_no])) {
+			if (ib_run_client(gcb[conn_no])) {
 				printk("WRONG!!\n");
 				rdma_disconnect(gcb[conn_no]->cm_id);
 				return err;
@@ -1887,7 +1774,7 @@ int __init initialize()
 	}
 
 	/* case 2: <my_nid: connect | =my_nid | [>=my_nid: accept] */
-	__ib_run_server(gcb[my_nid]);
+	ib_run_server(gcb[my_nid]);
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		atomic_set(&gcb[i]->state, IDLE);
@@ -1997,12 +1884,12 @@ static void __exit unload(void)
 
 		if (i < my_nid) {
 			/* client */
-			__ib_free_buffers(cb);
-			__ib_free_qp(cb);
+			ib_free_buffers(cb);
+			ib_free_qp(cb);
 		} else {
 			/* server */
-			__ib_free_buffers(cb);
-			__ib_free_qp(cb);
+			ib_free_buffers(cb);
+			ib_free_qp(cb);
 			rdma_destroy_id(cb->child_cm_id);
 		}
 	}

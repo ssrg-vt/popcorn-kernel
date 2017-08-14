@@ -1395,7 +1395,7 @@ static int __init msg_test_init(void)
     }
 
 	/* register a proc */
-	printk("\n\n--- Popcorn messaging self testing proc init ---\n");
+	printk("--- Popcorn messaging self testing proc init ---\n");
 	kmsg_test_proc = proc_create("kmsg_test", 0666, NULL, &kmsg_test_ops);
 	if (kmsg_test_proc == NULL) {
 		printk(KERN_ERR "cannot create /proc/kmsg_test\n");
