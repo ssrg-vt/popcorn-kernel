@@ -8,7 +8,7 @@
  *		(perf!)sping when send
  *		RDMA:
  *			remove mutex in READ/WRITE (static wr)
- *			doesn't check RW size
+ * 			support multithreading FaRM2 by bmap polling slots
  *			implemet a wait/wakup in exchaging rkey
  */
 
@@ -58,8 +58,9 @@
 #include "common.h"
 
 /* features been developed */
-#define CONFIG_FARM2WRITE 1
-#define CONFIG_FARM 0
+#define CONFIG_FARM 0		/* Original FaRM - user follows convention  */
+#define CONFIG_FARM_COPY 1	/* with 1 buf copy */
+#define CONFIG_FARM2WRITE 0	/* 2 WRITE */
 
 /* IB recv */
 #define MAX_RECV_WR 1024	/* important! Check it if only sender crash */
@@ -76,14 +77,15 @@
 #define MAX_SEND_SGE 1
 
 /* IB buffers */
-#define MAX_KMALLOC_SIZE 4 * 1024 * 1024	/* limited by MAX_ORDER */
-#if CONFIG_FARM
+#define MAX_KMALLOC_SIZE 1 * 1024 * 1024	/* limited by MAX_ORDER (4M now)*/
+#if CONFIG_FARM_COPY
 #define MAX_RDMA_SIZE MAX_KMALLOC_SIZE - FaRM_HEAD_AND_TAIL
-#endif
+#else
 #define MAX_RDMA_SIZE MAX_KMALLOC_SIZE
+#endif
 
 /* FaRM: w/ 1 extra copy version of FaRM */
-#if CONFIG_FARM
+#if CONFIG_FARM_COPY
 #define FaRM_HEAD 4 + 1	/* length + length end bit*/
 #define FaRM_TAIL 1
 #define FaRM_HEAD_AND_TAIL FaRM_HEAD + FaRM_TAIL
@@ -95,7 +97,8 @@
 /* FaRM2: two WRITE version of FaRM */
 #if CONFIG_FARM2WRITE
 #define MAX_SGE_NUM 1
-#define FaRM2_DATA_SIZE 1
+#define FaRM2_ACT_DATA_SIZE MAX_SEND_WR
+#define FaRM2_PASS_DATA_SIZE 1
 #define MAX_RDMA_FARM2_SIZE 1
 #endif
 
@@ -111,7 +114,6 @@
 #define htonll(x) cpu_to_be64((x))
 #define ntohll(x) cpu_to_be64((x))
 
-
 /* RDMA key register */
 #define RDMA_RKEY_ACT 0
 #define RDMA_RKEY_PASS 1
@@ -124,14 +126,11 @@
 #define ADDR_RESOLVED 3
 #define ROUTE_RESOLVED 4
 #define CONNECTED 5
-#define RDMA_READ_COMPLETE 6
-#define RDMA_WRITE_COMPLETE 7
-#define RDMA_SEND_COMPLETE 8
-#define ERROR 9
+#define ERROR 6
 
 /* workqueue arg */
 typedef struct {
-	struct work_struct work;	/* DONT MOVE! */
+	struct work_struct work;	/* Convention! */
 	int id;
 	struct ib_sge *recv_sgl;
 	struct ib_recv_wr *recv_wr;
@@ -172,59 +171,44 @@ struct ib_cb {
 	u64 send_mapping;				/* for unmapping */
 
 	/* RDMA common */
+	struct ib_mr *reg_mr_act;
+	struct ib_mr *reg_mr_pass;
+
 	struct ib_reg_wr reg_mr_wr_act;	/* reg kind of = rdma  */
 	struct ib_reg_wr reg_mr_wr_pass;
 	struct ib_send_wr inv_wr_act;
 	struct ib_send_wr inv_wr_pass;
-	struct ib_mr *reg_mr_act;
-	struct ib_mr *reg_mr_pass;
-
-	/* RDMA issuer only (passive) - wr includes sge(s)<->mr(s) */
-	struct ib_rdma_wr rdma_send_wr;	/* rdma work request info for WR */
-	struct ib_sge rdma_sgl[MAX_SGE_NUM];
-
-	/* RDMA remote info */
-	uint32_t remote_pass_rkey;		/* saving remote RKEY */
-	uint64_t remote_pass_addr;		/* saving remote TO ADDR */
-	uint32_t remote_pass_len;		/* saving remote LEN */
 
 	/* RDMA local info */
-	u64 dma_addr_act;
 	u64 rdma_mapping_act;
-	u64 dma_addr_pass;
 	u64 rdma_mapping_pass;
-#if CONFIG_FARM
+#if CONFIG_FARM_COPY
 	char *FaRM_pass_buf;			/* reuse passive buffer to perform WRITE */
 #endif
 
 #if CONFIG_FARM2WRITE
-	unsigned long rdma_FaRM2_max_size;
+	struct ib_mr *reg_FaRM2_mr_act;
+	struct ib_mr *reg_FaRM2_mr_pass;
+
 	struct ib_reg_wr reg_FaRM2_mr_wr_act;
 	struct ib_reg_wr reg_FaRM2_mr_wr_pass;
 	struct ib_send_wr inv_FaRM2_wr_act;
 	struct ib_send_wr inv_FaRM2_wr_pass;
-	struct ib_mr *reg_FaRM2_mr_act;
-	struct ib_mr *reg_FaRM2_mr_pass;
-
-	struct ib_rdma_wr rdma_FaRM2_send_wr;
-	struct ib_sge rdma_FaRM2_sgl;
 
 	/* From remote */
 	uint32_t remote_FaRM2_rkey;
 	uint64_t remote_FaRM2_raddr;
-	uint32_t remote_FaRM2_rlen;
+	//uint32_t remote_FaRM2_rlen;
 	/* From locaol */
 	uint32_t local_FaRM2_lkey;
 	uint64_t local_FaRM2_laddr;
-	uint32_t local_FaRM2_llen;
+	//uint32_t local_FaRM2_llen;
 
 	/* RDMA buf for FaRM2 (local) */
-	char *pass_FaRM2_buf;
-	u64 pass_FaRM2_dma_addr;
-	u64 pass_FaRM2_rdma_mapping;
 	char *FaRM2_buf_act;
+	char *FaRM2_buf_pass;
 	u64 FaRM2_dma_addr_act;
-	u64 FaRM2_rdma_mapping_act;
+	u64 FaRM2_dma_addr_pass;
 #endif
 
 	/* Connection */
@@ -267,6 +251,29 @@ extern send_cbftn send_callback;
 extern send_rdma_cbftn send_rdma_callback;
 extern handle_rdma_request_ftn handle_rdma_callback;
 extern kmsg_free_ftn kmsg_free_callback;
+
+#if CONFIG_FARM2WRITE
+/* FaRM2 multiple polling slots */
+static spinlock_t FaRM2_avail_bmap_lock[MAX_NUM_NODES];
+static unsigned long FaRM2_poll_slot_avail[MAX_NUM_NODES][BITS_TO_LONGS(FaRM2_ACT_DATA_SIZE)];
+static u32 get_send_wr_comp(int dst)
+{
+    int ofs;
+    spin_lock(&FaRM2_avail_bmap_lock[dst]);
+    ofs = find_first_zero_bit(FaRM2_poll_slot_avail[dst], FaRM2_ACT_DATA_SIZE);
+    BUG_ON(ofs == FaRM2_ACT_DATA_SIZE);
+    set_bit(ofs, FaRM2_poll_slot_avail[dst]);
+    spin_unlock(&FaRM2_avail_bmap_lock[dst]);
+    return ofs;
+}
+
+static void put_send_wr_comp(int dst, u32 ofs)
+{
+    spin_lock(&FaRM2_avail_bmap_lock[dst]);
+    clear_bit(ofs, FaRM2_poll_slot_avail[dst]);
+    spin_unlock(&FaRM2_avail_bmap_lock[dst]);
+}
+#endif
 
 static int ib_cma_event_handler(struct rdma_cm_id *cma_id,
 										struct rdma_cm_event *event)
@@ -462,12 +469,6 @@ static void ib_setup_wr(struct ib_cb *cb)
 		BUG_ON(ret && "ib_post_recv failed");
 	}
 
-
-	/* Common for RW - RW wr */
-	cb->rdma_send_wr.wr.num_sge = 1;
-	cb->rdma_send_wr.wr.sg_list = &cb->rdma_sgl[0];
-	cb->rdma_send_wr.wr.send_flags = IB_SEND_SIGNALED;
-
 	/*
 	 * A chain of 2 WRs, INVALDATE_MR + REG_MR.
 	 * both unsignaled (no completion).  The client uses them to reregister
@@ -480,10 +481,6 @@ static void ib_setup_wr(struct ib_cb *cb)
 	cb->reg_mr_wr_pass.mr = cb->reg_mr_pass;
 
 #if CONFIG_FARM2WRITE
-	cb->rdma_FaRM2_send_wr.wr.num_sge = 1;
-	cb->rdma_FaRM2_send_wr.wr.sg_list = &cb->rdma_FaRM2_sgl;
-	cb->rdma_FaRM2_send_wr.wr.send_flags = IB_SEND_SIGNALED;
-
 	cb->reg_FaRM2_mr_wr_act.wr.opcode = IB_WR_REG_MR;
 	cb->reg_FaRM2_mr_wr_act.mr = cb->reg_FaRM2_mr_act;
 	cb->reg_FaRM2_mr_wr_pass.wr.opcode = IB_WR_REG_MR;
@@ -620,16 +617,15 @@ err1:
  *		3:RDMA_FARM2_RKEY_PASS
  */
 static u32 ib_rdma_rkey(struct ib_cb *cb, u64 buf,
-								int post_inv, int rdma_len, int mode)
+						int post_inv, int rdma_len, int mode)
 {
 	int ret;
-	u32 rkey;
 	struct ib_send_wr *bad_wr;
 	struct scatterlist sg = {0};
 	struct ib_mr *reg_mr;
+
 	struct ib_send_wr *inv_wr;
 	struct ib_reg_wr *reg_mr_wr;
-
 	if (mode == RDMA_RKEY_ACT) {
 		reg_mr = cb->reg_mr_act;
 		inv_wr = &cb->inv_wr_act;
@@ -638,6 +634,7 @@ static u32 ib_rdma_rkey(struct ib_cb *cb, u64 buf,
 		reg_mr = cb->reg_mr_pass;
 		inv_wr = &cb->inv_wr_pass;
 		reg_mr_wr = &cb->reg_mr_wr_pass;
+#if CONFIG_FARM2WRITE
 	} else if (mode == RDMA_FARM2_RKEY_ACT) {
 		reg_mr = cb->reg_FaRM2_mr_act;
 		inv_wr = &cb->inv_FaRM2_wr_act;
@@ -646,6 +643,7 @@ static u32 ib_rdma_rkey(struct ib_cb *cb, u64 buf,
 		reg_mr = cb->reg_FaRM2_mr_pass;
 		inv_wr = &cb->inv_FaRM2_wr_pass;
 		reg_mr_wr = &cb->reg_FaRM2_mr_wr_pass;
+#endif
 	}
 
 	inv_wr->ex.invalidate_rkey = reg_mr->rkey;
@@ -665,24 +663,78 @@ static u32 ib_rdma_rkey(struct ib_cb *cb, u64 buf,
 	BUG_ON(ret <= 0 || ret > ((((MAX_RDMA_SIZE - 1) & PAGE_MASK) + PAGE_SIZE)
 	                                                            >> PAGE_SHIFT));
 
-	mutex_lock(&cb->qp_mutex);
+	//mutex_lock(&cb->qp_mutex);
 	if (likely(post_inv))
-		/* no inv from remote, so manually does it on local side */
-		ret = ib_post_send(cb->qp, inv_wr, &bad_wr);	/* INV+MR */
+		// no inv from remote, so manually does it on local side //
+		ret = ib_post_send(cb->qp, inv_wr, &bad_wr);	// INV+MR //
 	else
-		ret = ib_post_send(cb->qp, &reg_mr_wr->wr, &bad_wr);	/* MR */
-	mutex_unlock(&cb->qp_mutex);
+		ret = ib_post_send(cb->qp, &reg_mr_wr->wr, &bad_wr);	// MR //
+	//mutex_unlock(&cb->qp_mutex);
+	BUG_ON(ret);
 
-	if (ret) {
-		printk(KERN_ERR "post send error %d\n", ret);
-		atomic_set(&cb->state, ERROR);
-		atomic_set(&cb->send_state, ERROR);
-		atomic_set(&cb->read_state, ERROR);
-		atomic_set(&cb->write_state, ERROR);
+/*
+	struct ib_send_wr inv_wr;
+	struct ib_reg_wr reg_mr_wr;
+	if (mode == RDMA_RKEY_ACT) {
+		reg_mr = cb->reg_mr_act;
+		//inv_wr = &cb->inv_wr_act;
+		reg_mr_wr.wr.opcode = IB_WR_REG_MR;
+		reg_mr_wr.mr = cb->reg_mr_act;
+		inv_wr.opcode = IB_WR_LOCAL_INV;
+		inv_wr.next = &reg_mr_wr.wr;
+		//reg_mr_wr = &cb->reg_mr_wr_act;
+	} else if (mode == RDMA_RKEY_PASS) {
+		reg_mr = cb->reg_mr_pass;
+		//inv_wr = &cb->inv_wr_pass;
+		reg_mr_wr.wr.opcode = IB_WR_REG_MR;
+		reg_mr_wr.mr = cb->reg_mr_pass;
+		inv_wr.opcode = IB_WR_LOCAL_INV;
+		inv_wr.next = &reg_mr_wr.wr;
+		//reg_mr_wr = &cb->reg_mr_wr_pass;
+#if CONFIG_FARM2WRITE
+	} else if (mode == RDMA_FARM2_RKEY_ACT) {
+		reg_mr = cb->reg_FaRM2_mr_act;
+		//inv_wr = &cb->inv_FaRM2_wr_act;
+		reg_mr_wr.wr.opcode = IB_WR_REG_MR;
+		reg_mr_wr.mr = cb->reg_FaRM2_mr_act;
+		inv_wr.opcode = IB_WR_LOCAL_INV;
+		inv_wr.next = &reg_mr_wr.wr;
+		//reg_mr_wr = &cb->reg_FaRM2_mr_wr_act;
+	} else if (mode == RDMA_FARM2_RKEY_PASS) {
+		reg_mr = cb->reg_FaRM2_mr_pass;
+		//inv_wr = &cb->inv_FaRM2_wr_pass;
+		reg_mr_wr.wr.opcode = IB_WR_REG_MR;
+		reg_mr_wr.mr = cb->reg_FaRM2_mr_pass;
+		inv_wr.opcode = IB_WR_LOCAL_INV;
+		inv_wr.next = &reg_mr_wr.wr;
+		//reg_mr_wr = &cb->reg_FaRM2_mr_wr_pass;
+#endif
 	}
 
-	rkey = reg_mr->rkey;
-	return rkey;
+	inv_wr.ex.invalidate_rkey = reg_mr->rkey;
+	ib_update_fast_reg_key(reg_mr, cb->key);
+	reg_mr_wr.key = reg_mr->rkey;
+
+	reg_mr_wr.access = IB_ACCESS_REMOTE_READ	|
+						IB_ACCESS_REMOTE_WRITE	|
+						IB_ACCESS_LOCAL_WRITE	|
+						IB_ACCESS_REMOTE_ATOMIC;
+
+	sg_dma_address(&sg) = buf;
+	sg_dma_len(&sg) = rdma_len;
+
+	ret = ib_map_mr_sg(reg_mr, &sg, 1, PAGE_SIZE);
+			// snyc: use ib_dma_sync_single_for_cpu/dev dev:accessed by IB
+	BUG_ON(ret <= 0 || ret > ((((MAX_RDMA_SIZE - 1) & PAGE_MASK) + PAGE_SIZE)
+	                                                            >> PAGE_SHIFT));
+	if (likely(post_inv))
+		// no inv from remote, so manually does it on local side //
+		ret = ib_post_send(cb->qp, &inv_wr, &bad_wr);	// INV+MR //
+	else
+		ret = ib_post_send(cb->qp, &reg_mr_wr.wr, &bad_wr);	// MR //
+	BUG_ON(ret);
+*/
+	return reg_mr->rkey;
 }
 
 /*
@@ -690,28 +742,29 @@ static u32 ib_rdma_rkey(struct ib_cb *cb, u64 buf,
  */
 static int ib_setup_buffers(struct ib_cb *cb)
 {
-	int ret, page_list_len, FaRM2_page_list_len;
-
+	int ret, page_list_len;
+#if CONFIG_FARM2WRITE
+	int FaRM2_page_list_len;
+#endif
 	page_list_len = (((MAX_RDMA_SIZE - 1) & PAGE_MASK) + PAGE_SIZE)
 															>> PAGE_SHIFT;
 
 	/* fill out lkey and rkey */
-	cb->reg_mr_act = ib_alloc_mr(cb->pd,
-							IB_MR_TYPE_MEM_REG, page_list_len);
+	cb->reg_mr_act = ib_alloc_mr(cb->pd, IB_MR_TYPE_MEM_REG, page_list_len);
 	if (IS_ERR(cb->reg_mr_act)) {
 		ret = PTR_ERR(cb->reg_mr_act);
 		goto bail;
 	}
 
-	cb->reg_mr_pass = ib_alloc_mr(cb->pd,
-							IB_MR_TYPE_MEM_REG, page_list_len);
+	cb->reg_mr_pass = ib_alloc_mr(cb->pd, IB_MR_TYPE_MEM_REG, page_list_len);
 	if (IS_ERR(cb->reg_mr_pass)) {
 		ret = PTR_ERR(cb->reg_mr_pass);
 		goto bail;
 	}
+
 #if CONFIG_FARM2WRITE
 	FaRM2_page_list_len =
-			(((cb->rdma_FaRM2_max_size - 1) & PAGE_MASK) + PAGE_SIZE)
+			(((MAX_RDMA_FARM2_SIZE - 1) & PAGE_MASK) + PAGE_SIZE)
 														>> PAGE_SHIFT;
 	cb->reg_FaRM2_mr_act = ib_alloc_mr(cb->pd,
 						IB_MR_TYPE_MEM_REG, FaRM2_page_list_len);
@@ -720,33 +773,29 @@ static int ib_setup_buffers(struct ib_cb *cb)
 		goto bail;
 	}
 	cb->reg_FaRM2_mr_pass = ib_alloc_mr(cb->pd,
-						IB_MR_TYPE_MEM_REG, FaRM2_page_list_len);
+							IB_MR_TYPE_MEM_REG, FaRM2_page_list_len);
 	if (IS_ERR(cb->reg_FaRM2_mr_pass)) {
 		ret = PTR_ERR(cb->reg_FaRM2_mr_pass);
 		goto bail;
 	}
 
-	cb->FaRM2_buf_act = kmalloc(FaRM2_DATA_SIZE, GFP_KERNEL);
+	cb->FaRM2_buf_act = kmalloc(FaRM2_ACT_DATA_SIZE, GFP_KERNEL);
 	if (!cb->FaRM2_buf_act) {
         ret = -ENOMEM;
         goto bail;
     }
     cb->FaRM2_dma_addr_act = dma_map_single(cb->pd->device->dma_device,
-				   cb->FaRM2_buf_act, FaRM2_DATA_SIZE, DMA_BIDIRECTIONAL);
-    pci_unmap_addr_set(cb, FaRM2_rdma_mapping_act,
-							cb->FaRM2_dma_addr_act);
+				   cb->FaRM2_buf_act, FaRM2_ACT_DATA_SIZE, DMA_BIDIRECTIONAL);
 
-	cb->pass_FaRM2_buf = kmalloc(FaRM2_DATA_SIZE, GFP_KERNEL);
-	if (!cb->pass_FaRM2_buf) {
+	cb->FaRM2_buf_pass = kmalloc(FaRM2_PASS_DATA_SIZE, GFP_KERNEL);
+	if (!cb->FaRM2_buf_pass) {
         ret = -ENOMEM;
         goto bail;
     }
-    cb->pass_FaRM2_dma_addr = dma_map_single(cb->pd->device->dma_device,
-                   cb->pass_FaRM2_buf, FaRM2_DATA_SIZE, DMA_BIDIRECTIONAL);
-    pci_unmap_addr_set(cb, pass_FaRM2_rdma_mapping,
-							cb->pass_FaRM2_dma_addr);
+    cb->FaRM2_dma_addr_pass = dma_map_single(cb->pd->device->dma_device,
+                   cb->FaRM2_buf_pass, FaRM2_PASS_DATA_SIZE, DMA_BIDIRECTIONAL);
 	*cb->FaRM2_buf_act = 0;
-	*cb->pass_FaRM2_buf = 1;
+	*cb->FaRM2_buf_pass = 1;
 #endif
 
 	ib_setup_wr(cb);
@@ -756,10 +805,12 @@ bail:
 		ib_dereg_mr(cb->reg_mr_act);
 	if (cb->reg_mr_pass && !IS_ERR(cb->reg_mr_pass))
 		ib_dereg_mr(cb->reg_mr_pass);
+#if CONFIG_FARM2WRITE
 	if (cb->reg_FaRM2_mr_act && !IS_ERR(cb->reg_FaRM2_mr_act))
 		ib_dereg_mr(cb->reg_FaRM2_mr_act);
 	if (cb->reg_FaRM2_mr_pass && !IS_ERR(cb->reg_FaRM2_mr_pass))
 		ib_dereg_mr(cb->reg_FaRM2_mr_pass);
+#endif
 	return ret;
 }
 
@@ -795,10 +846,12 @@ static void ib_free_buffers(struct ib_cb *cb)
 		ib_dereg_mr(cb->reg_mr_act);
 	if (cb->reg_mr_pass)
 		ib_dereg_mr(cb->reg_mr_pass);
+#if CONFIG_FARM2WRITE
 	if (cb->reg_FaRM2_mr_act)
 		ib_dereg_mr(cb->reg_FaRM2_mr_act);
 	if (cb->reg_FaRM2_mr_pass)
 		ib_dereg_mr(cb->reg_FaRM2_mr_pass);
+#endif
 }
 
 static void ib_free_qp(struct ib_cb *cb)
@@ -957,7 +1010,7 @@ u64 __ib_map_act(void *paddr, int conn_no, int rw_size)
 u64 __ib_map_pass(void *paddr, int conn_no, int rw_size)
 {
 	struct ib_cb *cb = gcb[conn_no];
-	u64 dma_addr = dma_map_single(cb->pd->device->dma_device,
+u64 dma_addr = dma_map_single(cb->pd->device->dma_device,
 								  paddr, rw_size, DMA_BIDIRECTIONAL);
 	pci_unmap_addr_set(cb, rdma_mapping_pass, dma_addr);
 	return dma_addr;
@@ -1028,6 +1081,8 @@ int __ib_kmsg_send(unsigned int dst,
 	send_sgl.addr = send_dma_addr;
 
 	ret = ib_post_send(gcb[dst]->qp, &send_wr, &bad_wr);
+	BUG_ON(ret);
+
 	atomic_inc(&gcb[dst]->WQ_WR_cnt);
 	if (atomic_read(&gcb[dst]->WQ_WR_cnt) >= MAX_SEND_WR)
 		BUG();
@@ -1039,68 +1094,71 @@ int __ib_kmsg_send(unsigned int dst,
 	return 0;
 }
 
+
+
+
+/*
+ * RDMA READ:
+ * send        ----->   irq (recv)
+ *                      lock
+ *             <=====   perform READ
+ *                      unlock
+ * irq (recv)  <-----   send
+ *
+ */
 static void handle_remote_thread_rdma_read_request(
 						remote_thread_rdma_rw_t *inc_msg, void *target_paddr)
 {
-	remote_thread_rdma_rw_t* req =
-								(remote_thread_rdma_rw_t*) inc_msg;
+	remote_thread_rdma_rw_t *req = (remote_thread_rdma_rw_t*) inc_msg;
 	remote_thread_rdma_rw_t *reply;
-	struct ib_send_wr *bad_wr; // for ib_post_send
-	struct ib_cb *cb = gcb[req->header.from_nid];
-	int ret;
+	struct ib_send_wr *bad_wr;
+	int ret, from = req->header.from_nid;
+	struct ib_cb *cb = gcb[from];
+	struct completion comp;
+	int rw_size = req->rdma_header.rw_size;
+	u64 dma_addr_pass = dma_map_single(cb->pd->device->dma_device,
+				target_paddr, rw_size, DMA_BIDIRECTIONAL);
+	struct ib_sge rdma_sgl = {
+		.length = rw_size,
+		.addr = dma_addr_pass,
+		.lkey = ib_rdma_rkey(cb, dma_addr_pass, !cb->read_inv,
+							rw_size, RDMA_RKEY_PASS),
+	};
+	struct ib_rdma_wr rdma_send_wr = {
+		.wr.num_sge = 1,
+		.wr.sg_list = &rdma_sgl,
+		.wr.send_flags = IB_SEND_SIGNALED,
+		.rkey = ntohl(req->rdma_header.remote_rkey),
+		.remote_addr = ntohll(req->rdma_header.remote_addr),
+		.wr.next = NULL,
+	};
 
-	mutex_lock(&cb->passive_mutex);
-
-	cb->dma_addr_pass = __ib_map_pass(target_paddr, cb->conn_no,
-												req->rdma_header.rw_size);
-
-	/* RDMA READ echo data */
-	/* remote info: */
-	cb->remote_pass_rkey = ntohl(req->rdma_header.remote_rkey);
-	cb->remote_pass_addr = ntohll(req->rdma_header.remote_addr);
-	cb->remote_pass_len = req->rdma_header.rw_size;
-	cb->rdma_send_wr.rkey = cb->remote_pass_rkey;
-	cb->rdma_send_wr.remote_addr = cb->remote_pass_addr;
-	//cb->rdma_send_wr.wr.sg_list->length = cb->remote_pass_len;
-
-	/* local info: */
-	// rdma_send_wr.wr.sg_list = &cb->rdma_sgl[0]
-	cb->rdma_sgl[0].length = cb->remote_pass_len;
-	cb->rdma_sgl[0].addr = cb->dma_addr_pass;
-	cb->rdma_sgl[0].lkey = ib_rdma_rkey(cb, cb->dma_addr_pass,
-						!cb->read_inv, cb->remote_pass_len, RDMA_RKEY_PASS);
-
-	cb->rdma_send_wr.wr.next = NULL; // one work request
+	init_completion(&comp);
+	rdma_send_wr.wr.wr_id = (u64)&comp;
 
 	if (unlikely(cb->read_inv))
-		cb->rdma_send_wr.wr.opcode = IB_WR_RDMA_READ_WITH_INV;
+		rdma_send_wr.wr.opcode = IB_WR_RDMA_READ_WITH_INV;
 	else {
 		/* Compose a READ sge with a invalidation */
-		cb->rdma_send_wr.wr.opcode = IB_WR_RDMA_READ;
+		rdma_send_wr.wr.opcode = IB_WR_RDMA_READ;
 	}
 
-	mutex_lock(&cb->qp_mutex);
-	ret = ib_post_send(cb->qp, &cb->rdma_send_wr.wr, &bad_wr);
-	mutex_unlock(&cb->qp_mutex);
-	if (ret) {
-		printk(KERN_ERR "post send error %d\n", ret);
-		return;
-	}
-	/*	if just sent a FENCE, this should be turned on */
-	//	cb->rdma_send_wr.wr.next = NULL;
+	ret = ib_post_send(cb->qp, &rdma_send_wr.wr, &bad_wr);
+	BUG_ON(ret);
 
-	wait_event_interruptible(cb->sem,
-				(int)atomic_read(&cb->read_state) == RDMA_READ_COMPLETE);
-	atomic_set(&cb->read_state, IDLE);
-
-	__unmap_pass(cb->conn_no, req->rdma_header.rw_size);
-
-	mutex_unlock(&cb->passive_mutex);
-
-	reply = pcn_kmsg_alloc_msg(sizeof(*reply));
-	if (!reply)
+	atomic_inc(&cb->WQ_WR_cnt);
+	if (atomic_read(&cb->WQ_WR_cnt) >= MAX_SEND_WR)
 		BUG();
 
+	wait_for_completion(&comp);
+
+	dma_unmap_single(cb->pd->device->dma_device,
+					dma_addr_pass, rw_size, DMA_BIDIRECTIONAL);
+
+	reply = pcn_kmsg_alloc_msg(sizeof(*reply));
+	BUG_ON(!reply);
+
+	/* ACK */
 	reply->header.type = req->rdma_header.rmda_type_res;
 	reply->header.prio = PCN_KMSG_PRIO_NORMAL;
 	//reply->tgroup_home_cpu = tgroup_home_cpu;
@@ -1110,12 +1168,14 @@ static void handle_remote_thread_rdma_read_request(
 	reply->header.is_rdma = true;
 	reply->rdma_header.rdma_ack = true;
 	reply->rdma_header.is_write = false;
-	reply->rdma_header.remote_rkey = cb->remote_pass_rkey;
-	reply->rdma_header.remote_addr = cb->remote_pass_addr;
-	reply->rdma_header.rw_size = cb->remote_pass_len;
+	reply->rdma_header.remote_rkey = ntohl(req->rdma_header.remote_rkey);
+	reply->rdma_header.remote_addr = ntohll(req->rdma_header.remote_addr);
+	reply->rdma_header.rw_size = rw_size;
 
 	/* for wait station */
 	reply->remote_ws = inc_msg->remote_ws;
+	/* for umap dma addr */
+	reply->dma_addr_act = inc_msg->dma_addr_act;
 
 	__ib_kmsg_send(req->header.from_nid,
 						(struct pcn_kmsg_message*)reply, sizeof(*reply));
@@ -1124,16 +1184,20 @@ static void handle_remote_thread_rdma_read_request(
 	return;
 }
 
+/* FARM implementations will never call this func */
 static void handle_remote_thread_rdma_read_response(
-										remote_thread_rdma_rw_t* inc_msg)
+										remote_thread_rdma_rw_t *inc_msg)
 {
-	remote_thread_rdma_rw_t* res =
-								(remote_thread_rdma_rw_t*) inc_msg;
+	remote_thread_rdma_rw_t *res = (remote_thread_rdma_rw_t*) inc_msg;
 	struct ib_cb *cb = gcb[res->header.from_nid];
 
-	__unmap_act(cb->conn_no, res->rdma_header.rw_size);
 	mutex_unlock(&cb->active_mutex);
 
+	dma_unmap_single(cb->pd->device->dma_device,
+					res->dma_addr_act,
+					res->rdma_header.rw_size, DMA_BIDIRECTIONAL);
+
+	/* completed outside is fine by wait station */
 	return;
 }
 
@@ -1141,7 +1205,7 @@ static void handle_remote_thread_rdma_read_response(
 /*
  * RDMA WRITE:
  * send        ----->   irq (recv)
- *                      [lock]
+ *                      lock
  *             <=====   perform WRITE
  *                      unlock
  * irq (recv)  <-----   send
@@ -1149,7 +1213,7 @@ static void handle_remote_thread_rdma_read_response(
  *
  * FaRM RDMA WRITE:
  * send        ----->   irq (recv)
- * poll                 [lock]
+ * poll                 lock
  *             <=====   perform WRITE
  *                      unlock
  * done					done
@@ -1158,27 +1222,56 @@ static void handle_remote_thread_rdma_write_request(
 					remote_thread_rdma_rw_t *inc_msg, void *target_paddr)
 {
 	remote_thread_rdma_rw_t *req = (remote_thread_rdma_rw_t*) inc_msg;
-#if !CONFIG_FARM && !CONFIG_FARM2WRITE
+#if !CONFIG_FARM_COPY && !CONFIG_FARM2WRITE && !CONFIG_FARM
 	remote_thread_rdma_rw_t *reply;
 #endif
-
+	int rw_size = req->rdma_header.rw_size;
 	struct ib_cb *cb = gcb[req->header.from_nid];
-#if CONFIG_FARM
-#if !CONFIG_FARM2WRITE
-	char *_FaRM_pass_buf = cb->FaRM_pass_buf;
+#if CONFIG_FARM_COPY
+	char *_FaRM_pass_buf = cb->FaRM_pass_buf;	//FaRM copy use a single buf
 #endif
+	struct completion comp;
+#if CONFIG_FARM2WRITE
+	struct completion comp2;
 #endif
-	struct ib_send_wr *bad_wr;
 	int ret;
+	u64 dma_addr_pass;
+	uint32_t remote_pass_len;
+	struct ib_send_wr *bad_wr;
+	struct ib_sge rdma_sgl;
+	struct ib_rdma_wr rdma_send_wr = {
+		.wr.sg_list = &rdma_sgl,
+		.wr.send_flags = IB_SEND_SIGNALED,
+		.wr.opcode = IB_WR_RDMA_WRITE,
+		.wr.num_sge = 1,
+		.wr.next = NULL,
+
+		.rkey = ntohl(req->rdma_header.remote_rkey),
+		.remote_addr = ntohll(req->rdma_header.remote_addr),
+	};
+#if CONFIG_FARM2WRITE
+	struct ib_sge rdma_FaRM2_sgl = {
+		.addr = cb->local_FaRM2_laddr,
+		.lkey = cb->local_FaRM2_lkey,
+		.length = FaRM2_PASS_DATA_SIZE,
+	};
+	struct ib_rdma_wr rdma_FaRM2_send_wr = {
+		.wr.num_sge = 1,
+		.wr.sg_list = &rdma_FaRM2_sgl,
+		.wr.send_flags = IB_SEND_SIGNALED,
+		.wr.opcode = IB_WR_RDMA_WRITE,
+		.rkey = cb->remote_FaRM2_rkey,
+		.remote_addr = cb->remote_FaRM2_raddr + req->FaRM2_poll_ofs,
+		.wr.next = NULL,
+	};
+#endif
 
 	mutex_lock(&cb->passive_mutex);
 
-#if CONFIG_FARM
-#if !CONFIG_FARM2WRITE
+#if CONFIG_FARM_COPY
 	/* FaRM w/ buffer copying - make a new buffer aligned with the formate */
-	if (target_paddr && req->rdma_header.rw_size!=0) {
+	if (target_paddr && rw_size != 0) {
 		/* FaRM head: length + 1B */
-		int rw_size = req->rdma_header.rw_size;
 		*(_FaRM_pass_buf + 3) = (char)((rw_size) >> 0);
 		*(_FaRM_pass_buf + 2) = (char)((rw_size) >> 8);
 		*(_FaRM_pass_buf + 1) = (char)((rw_size) >> 16);
@@ -1186,141 +1279,119 @@ static void handle_remote_thread_rdma_write_request(
 		*(_FaRM_pass_buf + FaRM_HEAD - 1) = FaRM_IS_DATA;
 		/* payload */
 		memcpy(_FaRM_pass_buf + FaRM_HEAD, target_paddr,
-				req->rdma_header.rw_size);
+				rw_size);
 		/* FaRM tail: 1B */
-		memset(_FaRM_pass_buf + req->rdma_header.rw_size +
-				FaRM_HEAD_AND_TAIL - 1, 1, 1);
+		memset(_FaRM_pass_buf + rw_size + FaRM_HEAD_AND_TAIL - 1, 1, 1);
 	}
 	else
 		memset(_FaRM_pass_buf, FaRM_IS_EMPTY, FaRM_HEAD);
 
-	cb->dma_addr_pass = __ib_map_pass(_FaRM_pass_buf, cb->conn_no,
-						req->rdma_header.rw_size + FaRM_HEAD_AND_TAIL);
+	dma_addr_pass = dma_map_single(cb->pd->device->dma_device,
+		  _FaRM_pass_buf, rw_size + FaRM_HEAD_AND_TAIL, DMA_BIDIRECTIONAL);
 #else
-	cb->dma_addr_pass = __ib_map_pass(target_paddr,
-						cb->conn_no, req->rdma_header.rw_size);
-#endif
+	dma_addr_pass = dma_map_single(cb->pd->device->dma_device,
+								  target_paddr, rw_size, DMA_BIDIRECTIONAL);
 #endif
 
-	/* remote info: */
-	 cb->remote_pass_rkey = ntohl(req->rdma_header.remote_rkey);
-	 cb->remote_pass_addr = ntohll(req->rdma_header.remote_addr);
-#if CONFIG_FARM
-	 cb->remote_pass_len = req->rdma_header.rw_size + FaRM_HEAD_AND_TAIL;
+#if CONFIG_FARM_COPY
+	 remote_pass_len = rw_size + FaRM_HEAD_AND_TAIL;
 #else
-	 cb->remote_pass_len = req->rdma_header.rw_size;
+	 remote_pass_len = rw_size;
 #endif
 
-	cb->rdma_send_wr.wr.opcode = IB_WR_RDMA_WRITE;
-	cb->rdma_send_wr.rkey = cb->remote_pass_rkey;
-	cb->rdma_send_wr.remote_addr = cb->remote_pass_addr;
-	//cb->rdma_send_wr.wr.sg_list->length = cb->remote_pass_len;
 
-	cb->rdma_send_wr.wr.next = NULL;
-
+	rdma_sgl.addr = dma_addr_pass;
+	rdma_sgl.length = remote_pass_len;
+	rdma_sgl.lkey = ib_rdma_rkey(cb, dma_addr_pass, 1,
+								remote_pass_len, RDMA_RKEY_PASS);
 	/*
 	struct ib_send_wr inv;			//- for ib_post_send -//
-	cb->rdma_send_wr.wr.next = &inv;	//- followed by a inv -//
+	rdma_send_wr.wr.next = &inv;	//- followed by a inv -//
 	memset(&inv, 0, sizeof inv);
 	inv.opcode = IB_WR_LOCAL_INV;
 	inv.ex.invalidate_rkey = cb->reg_mr_pass->rkey;
 	inv.send_flags = IB_SEND_FENCE;
 	*/
 
-	/* RDMA local info: */
-	cb->rdma_sgl[0].length = cb->remote_pass_len;
-	cb->rdma_sgl[0].addr = cb->dma_addr_pass;
-	cb->rdma_sgl[0].lkey = ib_rdma_rkey(
-							cb, cb->dma_addr_pass, 1,
-							cb->remote_pass_len, RDMA_RKEY_PASS);
+	init_completion(&comp);
+	rdma_send_wr.wr.wr_id = (u64)&comp;
 
+	ret = ib_post_send(cb->qp, &rdma_send_wr.wr, &bad_wr);
+	BUG_ON(ret);
 
-	mutex_lock(&cb->qp_mutex);
-	ret = ib_post_send(cb->qp, &cb->rdma_send_wr.wr, &bad_wr);
-	mutex_unlock(&cb->qp_mutex);
-	if (ret) {
-		printk(KERN_ERR "post send error %d\n", ret);
-		return;
-	}
-	/* If just sent a FENCE, this should be turned on */
-	//cb->rdma_send_wr.wr.next = NULL;
+	atomic_inc(&cb->WQ_WR_cnt);
+	BUG_ON(atomic_read(&cb->WQ_WR_cnt) >= MAX_SEND_WR);
 
-	/* Wait for completion */
-	ret = wait_event_interruptible(cb->sem,
-			atomic_read(&cb->write_state) == RDMA_WRITE_COMPLETE);
-	atomic_set(&cb->write_state, IDLE);
+	wait_for_completion(&comp);
 
 #if CONFIG_FARM
-	__unmap_pass(cb->conn_no,
-					req->rdma_header.rw_size + FaRM_HEAD_AND_TAIL);
+	dma_unmap_single(cb->pd->device->dma_device,
+			dma_addr_pass, rw_size, DMA_BIDIRECTIONAL);
+#elif CONFIG_FARM_COPY
+	dma_unmap_single(cb->pd->device->dma_device,
+			dma_addr_pass, rw_size + FaRM_HEAD_AND_TAIL, DMA_BIDIRECTIONAL);
 #elif CONFIG_FARM2WRITE
-	mutex_lock(&cb->qp_mutex);
-	ret = ib_post_send(cb->qp, &cb->rdma_FaRM2_send_wr.wr, &bad_wr);
-	mutex_unlock(&cb->qp_mutex);
-	if (ret) {
-		printk(KERN_ERR "post send error %d\n", ret);
-		return;
-	}
-	/* If just sent a FENCE, this should be turned on */
-	//cb->rdma_FaRM2_send_wr.wr.next = NULL;
+	init_completion(&comp2);
+	rdma_FaRM2_send_wr.wr.wr_id = (u64)&comp2;
+	ret = ib_post_send(cb->qp, &rdma_FaRM2_send_wr.wr, &bad_wr);
+	BUG_ON(ret);
 
-	ret = wait_event_interruptible(cb->sem,
-					atomic_read(&cb->write_state) == RDMA_WRITE_COMPLETE);
-	atomic_set(&cb->write_state, IDLE);
+	atomic_inc(&cb->WQ_WR_cnt);
+	BUG_ON(atomic_read(&cb->WQ_WR_cnt) >= MAX_SEND_WR);
 
-	__unmap_pass(cb->conn_no, FaRM2_DATA_SIZE);
-
-	mutex_unlock(&cb->passive_mutex);
-#elif !CONFIG_FARM
+	printk("remote: req->FaRM2_poll_ofs %u\n", req->FaRM2_poll_ofs);
+	wait_for_completion(&comp2);
+	/* No need to umap FaRM2WRITE polling bits */
+#else
 	reply = pcn_kmsg_alloc_msg(sizeof(*reply));
-	if (!reply)
-		BUG();
+	BUG_ON(!reply);
 
 	reply->header.type = req->rdma_header.rmda_type_res;
 	reply->header.prio = PCN_KMSG_PRIO_NORMAL;
-	//reply->tgroup_home_cpu = tgroup_home_cpu;
-	//reply->tgroup_home_id = tgroup_home_id;
 
 	/* RDMA W/R complete ACK */
 	reply->header.is_rdma = true;
 	reply->rdma_header.rdma_ack = true;
 	reply->rdma_header.is_write = true;
-	reply->rdma_header.remote_rkey = cb->remote_pass_rkey;
-	reply->rdma_header.remote_addr = cb->remote_pass_addr;
-	reply->rdma_header.rw_size = cb->remote_pass_len;
+	reply->rdma_header.remote_rkey = ntohl(req->rdma_header.remote_rkey);
+	reply->rdma_header.remote_addr = ntohll(req->rdma_header.remote_addr);
+	reply->rdma_header.rw_size = remote_pass_len;
 
 	/* for wait station */
 	reply->remote_ws = inc_msg->remote_ws;
+	/* for umap dma addr */
+	reply->dma_addr_act = inc_msg->dma_addr_act;
 
 	__ib_kmsg_send(req->header.from_nid,
 				(struct pcn_kmsg_message*) reply, sizeof(*reply));
 
 	pcn_kmsg_free_msg(reply);
 #endif
+	mutex_unlock(&cb->passive_mutex);
 
 	return;
 }
 
+/* FARM implementations will never call this func */
 static void handle_remote_thread_rdma_write_response(
-										remote_thread_rdma_rw_t* inc_msg)
+										remote_thread_rdma_rw_t *inc_msg)
 {
-	remote_thread_rdma_rw_t* res =
-								(remote_thread_rdma_rw_t*) inc_msg;
-
-#if !CONFIG_FARM
+	remote_thread_rdma_rw_t *res = (remote_thread_rdma_rw_t*) inc_msg;
 	struct ib_cb *cb = gcb[res->header.from_nid];
-#endif
 
-#if CONFIG_FARM2WRITE|| !CONFIG_FARM
-	__unmap_act(cb->conn_no, res->rdma_header.rw_size);
+	dma_unmap_single(cb->pd->device->dma_device,
+					res->dma_addr_act,
+					res->rdma_header.rw_size, DMA_BIDIRECTIONAL);
+
 	mutex_unlock(&cb->active_mutex);
-#endif
 
+	/* completed outside is fine by wait station */
 	return;
 }
 
 /*
- *paddr: ptr of pages you wanna perform on passive side
+ * Caller has to free the msg by him/herself
+ * paddr: ptr of pages you wanna perform on RDMA R/W passive side
  */
 void handle_rdma_request(remote_thread_rdma_rw_t *inc_msg, void *paddr)
 {
@@ -1436,13 +1507,22 @@ static void ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 			break;
 
 		case IB_WC_RDMA_WRITE:
-			atomic_set(&cb->write_state, RDMA_WRITE_COMPLETE);
-			wake_up_interruptible(&cb->sem);
+			atomic_dec(&gcb[cb->conn_no]->WQ_WR_cnt);
+			complete((struct completion *)_wc->wr_id);
 			break;
 
 		case IB_WC_RDMA_READ:
-			atomic_set(&cb->read_state, RDMA_READ_COMPLETE);
-			wake_up_interruptible(&cb->sem);
+			atomic_dec(&gcb[cb->conn_no]->WQ_WR_cnt);
+			complete((struct completion *)_wc->wr_id);
+			break;
+
+		case IB_WC_LOCAL_INV:
+			printk("IB_WC_LOCAL_INV:\n");
+			break;
+
+		case IB_WC_REG_MR:
+			printk("IB_WC_REG_MR:\n");
+			//complete((struct completion *)_wc->wr_id);
 			break;
 
 		default:
@@ -1466,7 +1546,7 @@ error:
  * Your request must be done by kmalloc()
  * You have to free the buf by yourself
  *
- * rw_size: size you wanna passive remote side to READ/WRITE
+ * rw_size: size you wanna RDMA RW to perform
  *
  * READ/WRITE:
  * if R/W
@@ -1478,7 +1558,7 @@ error:
  * irq (recv)   <-----   |-send
  *  |-active unlock
  *
- * FaRM WRITE:
+ * FaRM WRITE: user gives last bit for polling
  * [active lock]
  * send		 ----->   irq (recv)
  * 						|-passive lock R/W
@@ -1499,13 +1579,18 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 					  unsigned int msg_size, unsigned int rw_size)
 {
 	uint32_t rkey;
-#if !CONFIG_FARM2WRITE && CONFIG_FARM
-	char *poll_tail_at, *FaRM_act_buf;
+	u64 dma_addr_act;
+#if CONFIG_FARM2WRITE || CONFIG_FARM_COPY || CONFIG_FARM
+	char *poll_tail_at;
 #endif
 	struct ib_cb *cb = gcb[dst];
-
-	if (rw_size <= 0)
-		BUG();
+#if !CONFIG_FARM2WRITE && CONFIG_FARM_COPY
+	char *FaRM_act_buf;
+#endif
+#if CONFIG_FARM2WRITE
+	u32 FaRM2_poll_ofs;
+#endif
+	BUG_ON(rw_size <= 0);
 
 	if (!msg->rdma_header.is_write)
 		if (!msg->rdma_header.your_buf_ptr)
@@ -1521,49 +1606,80 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 	msg->rdma_header.rdma_ack = false;
 	msg->rdma_header.rw_size = rw_size;
 
-#if !CONFIG_FARM2WRITE && CONFIG_FARM
-	if (msg->rdma_header.is_write)
-		FaRM_act_buf = kzalloc(rw_size + FaRM_HEAD_AND_TAIL, GFP_KERNEL);
-#endif
+	mutex_lock(&cb->active_mutex);	/* protects rkey */
 
-	mutex_lock(&cb->active_mutex);
-
-#if !CONFIG_FARM2WRITE && CONFIG_FARM
+#if CONFIG_FARM_COPY
 	if (msg->rdma_header.is_write) {
-		cb->dma_addr_act = __ib_map_act(FaRM_act_buf,
-							cb->conn_no, rw_size + FaRM_HEAD_AND_TAIL);
+		FaRM_act_buf = kzalloc(rw_size + FaRM_HEAD_AND_TAIL, GFP_KERNEL);
+		dma_addr_act = dma_map_single(cb->pd->device->dma_device,
+						FaRM_act_buf, rw_size + FaRM_HEAD_AND_TAIL,
+						DMA_BIDIRECTIONAL);
 	}
+	else
+		dma_addr_act = dma_map_single(cb->pd->device->dma_device,
+						msg->rdma_header.your_buf_ptr,
+						rw_size, DMA_BIDIRECTIONAL);
 #else
-	cb->dma_addr_act = __ib_map_act(msg->rdma_header.your_buf_ptr,
-									cb->conn_no, rw_size);
+	dma_addr_act = dma_map_single(cb->pd->device->dma_device,
+					msg->rdma_header.your_buf_ptr,
+					rw_size, DMA_BIDIRECTIONAL);
 #endif
+
 
 	/* form rdma meta data */
-	if (msg->rdma_header.is_write)
-#if CONFIG_FARM
-		rkey = ib_rdma_rkey(cb, cb->dma_addr_act,
+	if (msg->rdma_header.is_write) {
+#if CONFIG_FARM_COPY
+		rkey = ib_rdma_rkey(cb, dma_addr_act,
 				!cb->server_invalidate,
 				rw_size + FaRM_HEAD_AND_TAIL, RDMA_RKEY_ACT);
 #else
-		rkey = ib_rdma_rkey(cb, cb->dma_addr_act,
+		rkey = ib_rdma_rkey(cb, dma_addr_act,
 				!cb->server_invalidate, rw_size, RDMA_RKEY_ACT);
 #endif
-	else
-		rkey = ib_rdma_rkey(cb, cb->dma_addr_act,
+	} else {
+		rkey = ib_rdma_rkey(cb, dma_addr_act,
 				!cb->server_invalidate, rw_size, RDMA_RKEY_ACT);
+	}
 
-	msg->rdma_header.remote_addr = htonll(cb->dma_addr_act);
+	msg->rdma_header.remote_addr = htonll(dma_addr_act);
 	msg->rdma_header.remote_rkey = htonl(rkey);
+
+	if (msg->rdma_header.is_write) {
+#if !CONFIG_FARM_COPY && !CONFIG_FARM2WRITE
+		/* free when it's done */
+		msg->dma_addr_act = dma_addr_act;
+#elif CONFIG_FARM2WRITE
+		FaRM2_poll_ofs = get_send_wr_comp(dst);
+		msg->FaRM2_poll_ofs = FaRM2_poll_ofs;
+		printk("origin: FaRM2_poll_ofs %u\n", FaRM2_poll_ofs);
+#endif
+	} else
+		/* free when it's done */
+		msg->dma_addr_act = dma_addr_act;
+
+#if CONFIG_FARM2WRITE
+	poll_tail_at = cb->FaRM2_buf_act + FaRM2_poll_ofs;
+	*poll_tail_at = 0;
+#endif
+
+#if CONFIG_FARM
+	poll_tail_at = msg->rdma_header.your_buf_ptr + rw_size - 1;
+	*poll_tail_at = 0;
+#endif
 
 	__ib_kmsg_send(dst, (struct pcn_kmsg_message*) msg, msg_size);
 
 	if (msg->rdma_header.is_write) {
 #if CONFIG_FARM2WRITE
-		while (*cb->FaRM2_buf_act == 0)
+		poll_tail_at = cb->FaRM2_buf_act + FaRM2_poll_ofs;
+		while (*poll_tail_at == 0)
 			schedule();
-		*cb->FaRM2_buf_act = 0;
+		put_send_wr_comp(dst, FaRM2_poll_ofs);
+
+		dma_unmap_single(cb->pd->device->dma_device,
+						dma_addr_act, rw_size, DMA_BIDIRECTIONAL);
 		mutex_unlock(&cb->active_mutex);
-#else
+#elif CONFIG_FARM_COPY
 		/* polling - not done:0  */
 		while (*(FaRM_act_buf + FaRM_HEAD - 1) == 0)
 			schedule();
@@ -1578,10 +1694,23 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 		poll_tail_at = FaRM_act_buf + rw_size + FaRM_HEAD_AND_TAIL - 1;
 		while (*poll_tail_at == 0)
 			schedule();
-		__unmap_act(cb->conn_no, rw_size + FaRM_HEAD_AND_TAIL);
-		mutex_unlock(&cb->active_mutex);
 
+		dma_unmap_single(cb->pd->device->dma_device, dma_addr_act,
+						rw_size + FaRM_HEAD_AND_TAIL, DMA_BIDIRECTIONAL);
+
+		mutex_unlock(&cb->active_mutex);
 		return FaRM_act_buf;
+#elif CONFIG_FARM
+		poll_tail_at = msg->rdma_header.your_buf_ptr + rw_size - 1;
+		while (*poll_tail_at == 0)
+			schedule();
+
+		dma_unmap_single(cb->pd->device->dma_device, dma_addr_act,
+						rw_size, DMA_BIDIRECTIONAL);
+
+		mutex_unlock(&cb->active_mutex);
+#else
+		/* Response handler will complete and free dma_addr_act */
 #endif
 	}
 	return 0;
@@ -1608,6 +1737,7 @@ static void ib_kmsg_free_msg(struct pcn_kmsg_message *msg)
 	}
 }
 
+#if CONFIG_FARM2WRITE
 static void rdma_FaRM2_key_exchange_request(int dst)
 {
 	struct FaRM2_init_req_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
@@ -1616,10 +1746,9 @@ static void rdma_FaRM2_key_exchange_request(int dst)
 
 	req->header.type = PCN_KMSG_TYPE_RDMA_FARM2_KEY_EXCH_REQUEST;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-
 	rkey = ib_rdma_rkey(cb, cb->FaRM2_dma_addr_act,
-								!cb->server_invalidate,
-								FaRM2_DATA_SIZE, RDMA_FARM2_RKEY_ACT);
+						!cb->server_invalidate,
+						FaRM2_ACT_DATA_SIZE, RDMA_FARM2_RKEY_ACT);
 	req->remote_addr = htonll(cb->FaRM2_dma_addr_act);
 	req->remote_rkey = htonl(rkey);
 	ib_kmsg_send(dst, (void*)req, sizeof(*req));
@@ -1635,28 +1764,18 @@ static void handle_rdma_FaRM2_key_exchange_request(
 	/* remote info: */
 	cb->remote_FaRM2_rkey = ntohl(req->remote_rkey);
 	cb->remote_FaRM2_raddr = ntohll(req->remote_addr);
-	cb->remote_FaRM2_rlen = FaRM2_DATA_SIZE;
+	//cb->remote_FaRM2_rlen = FaRM2_ACT_DATA_SIZE;
 
 	/* local info: */
-	cb->local_FaRM2_llen = FaRM2_DATA_SIZE;
-	cb->local_FaRM2_laddr = cb->pass_FaRM2_dma_addr;
+	//cb->local_FaRM2_llen = FaRM2_PASS_DATA_SIZE;
+	cb->local_FaRM2_laddr = cb->FaRM2_dma_addr_pass;
 	cb->local_FaRM2_lkey = ib_rdma_rkey(cb,
-						cb->pass_FaRM2_dma_addr, !cb->read_inv,
-						FaRM2_DATA_SIZE, RDMA_FARM2_RKEY_PASS);
-
-	cb->rdma_FaRM2_sgl.addr = cb->local_FaRM2_laddr;
-	cb->rdma_FaRM2_sgl.lkey = cb->local_FaRM2_lkey;
-	cb->rdma_FaRM2_sgl.length = cb->local_FaRM2_llen;
-
-	cb->rdma_FaRM2_send_wr.wr.opcode = IB_WR_RDMA_WRITE;
-	cb->rdma_FaRM2_send_wr.rkey = cb->remote_FaRM2_rkey;
-	cb->rdma_FaRM2_send_wr.remote_addr = cb->remote_FaRM2_raddr;
-	//cb->rdma_FaRM2_send_wr.wr.sg_list->length = FaRM2_DATA_SIZE;
-	cb->rdma_FaRM2_send_wr.wr.next = NULL;
+							cb->FaRM2_dma_addr_pass, !cb->read_inv,
+							FaRM2_PASS_DATA_SIZE, RDMA_FARM2_RKEY_PASS);
 
 	pcn_kmsg_free_msg(inc_msg);
 }
-
+#endif
 
 /* Initialize callback table to null, set up control and data channels */
 int __init initialize()
@@ -1664,7 +1783,7 @@ int __init initialize()
 	int i, err, conn_no;
 	msg_layer = "IB";
 
-	printk("- Popcorn Messaging Layer IB Initialization Starts -\n");
+	printk("- Popcorn Messaging Layer IB Initialization Start -\n");
 	/* Establish node numbers according to its IP */
 	if (!init_ip_table()) {
 		printk("%s(): check your IP table!\n", __func__);
@@ -1673,8 +1792,10 @@ int __init initialize()
 	/* Create workers for bottom-halves */
 	msg_handler = alloc_workqueue("MSGHandBotm", WQ_MEM_RECLAIM, 0);
 
+#if CONFIG_FARM2WRITE
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_FARM2_KEY_EXCH_REQUEST,
 					(pcn_kmsg_cbftn)handle_rdma_FaRM2_key_exchange_request);
+#endif
 
 	send_callback = (send_cbftn)ib_kmsg_send;
 	send_rdma_callback = (send_rdma_cbftn)ib_kmsg_send_rdma;
@@ -1730,9 +1851,8 @@ int __init initialize()
 		gcb[i]->read_inv = 0;
 		gcb[i]->server_invalidate = 0;
 		init_waitqueue_head(&gcb[i]->sem);
-		gcb[i]->rdma_FaRM2_max_size = MAX_RDMA_FARM2_SIZE;
 
-#if CONFIG_FARM
+#if CONFIG_FARM_COPY
 		/* passive RW buffer */
 		gcb[i]->FaRM_pass_buf = kzalloc(MAX_RDMA_SIZE, GFP_KERNEL);
 		BUG_ON(!gcb[i]->FaRM_pass_buf);
@@ -1788,7 +1908,7 @@ int __init initialize()
 		while ( !get_popcorn_node_online(i) ) {
 			printk("waiting for get_popcorn_node_online(%d)\n", i);
 			msleep(3000);
-			//TODO: do semephor up down
+			//TODO: do semephor up&down
 		}
 	}
 	smp_mb();
@@ -1805,12 +1925,14 @@ int __init initialize()
 		notify_my_node_info(i);
 	}
 
+#if CONFIG_FARM2WRITE
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		if (i == my_nid)
 			continue;
 		rdma_FaRM2_key_exchange_request(i);
 		//TODO: waiting by wait_station
 	}
+#endif
 
 	return 0;
 
@@ -1839,7 +1961,7 @@ static void __exit unload(void)
 		mutex_destroy(&gcb[i]->send_mutex);
 
 		/* IB FaRM WRITE passive buffer */
-#if CONFIG_FARM
+#if CONFIG_FARM_COPY
 		if (gcb[i]->FaRM_pass_buf)
 			kfree(gcb[i]->FaRM_pass_buf);
 #endif
@@ -1894,17 +2016,19 @@ static void __exit unload(void)
 		}
 	}
 
+#if CONFIG_FARM2WRITE
 	printk("Release RDMA relavant\n");
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		kfree(gcb[i]->FaRM2_buf_act);
-		kfree(gcb[i]->pass_FaRM2_buf);
+		kfree(gcb[i]->FaRM2_buf_pass);
 		dma_unmap_single(gcb[i]->pd->device->dma_device,
-						pci_unmap_addr(gcb[i], pass_FaRM2_rdma_mapping),
-						FaRM2_DATA_SIZE, DMA_BIDIRECTIONAL);
+						gcb[i]->FaRM2_dma_addr_pass,
+						FaRM2_PASS_DATA_SIZE, DMA_BIDIRECTIONAL);
 		dma_unmap_single(gcb[i]->pd->device->dma_device,
-						pci_unmap_addr(gcb[i], FaRM2_rdma_mapping_act),
-						FaRM2_DATA_SIZE, DMA_BIDIRECTIONAL);
+						gcb[i]->FaRM2_dma_addr_act,
+						FaRM2_ACT_DATA_SIZE, DMA_BIDIRECTIONAL);
 	}
+#endif
 
 	printk("Release cb context\n");
 	for (i = 0; i < MAX_NUM_NODES; i++) {
