@@ -4652,20 +4652,8 @@ static noinline_for_stack int __do_sched_migrate(struct task_struct *tsk, int ni
 
 	tsk->migration_target_nid = -1;
 
-	PSPRINTK("%s [%d]: put to sleep\n", __func__, tsk->pid);
-	__set_task_state(tsk, TASK_INTERRUPTIBLE);
-
-	schedule();
-	smp_mb();
-	PSPRINTK("%s [%d]: waken up, 0x%x 0x%x\n", __func__,
-			tsk->pid, tsk->ret_from_remote, tsk->exit_code);
-
+	PSPRINTK("%s [%d]: waken up\n", __func__, tsk->pid);
 	update_frame_pointer();
-
-	if (tsk->ret_from_remote & TASK_DEAD) {
-		do_exit(tsk->exit_code);
-	}
-
 	return 0;
 }
 

@@ -398,7 +398,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->remote_pid = tsk->origin_pid = -1;
 
 	tsk->is_vma_worker = false;
-	tsk->ret_from_remote = TASK_RUNNING;
 
 	/* If the new tsk is not in the same thread group as the parent,
 	 * then we do not need to propagate the old thread info.
@@ -408,6 +407,9 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	if (orig->tgid != tsk->tgid) {
 		tsk->at_remote = false;
 	}
+
+	tsk->remote_work = NULL;
+	init_completion(&tsk->remote_work_pended);
 
 	tsk->migration_target_nid = -1;
 	tsk->backoff_weight = 0;

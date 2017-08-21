@@ -666,12 +666,10 @@ static void response_remote_vma(int remote_nid, int remote_pid, remote_vma_respo
  * Request for remote vma and handling the request
  */
 
-static void process_remote_vma_request(struct work_struct *work)
+void process_remote_vma_request(struct pcn_kmsg_message *msg)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	remote_vma_request_t *req = w->msg;
+	remote_vma_request_t *req = (remote_vma_request_t *)msg;
 	remote_vma_response_t *res = NULL;
-	struct task_struct *tsk;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	unsigned long addr = req->addr;
@@ -683,16 +681,7 @@ static void process_remote_vma_request(struct work_struct *work)
 	}
 	res->addr = addr;
 
-	tsk = __get_task_struct(req->origin_pid);
-	if (!tsk) {
-		printk("remote_vma:: process does not exist %d\n", req->origin_pid);
-		res->result = -ESRCH;
-		goto out_free;
-	}
-
-	mm = get_task_mm(tsk);
-
-	BUG_ON(!process_is_distributed(tsk));
+	mm = get_task_mm(current);
 
 	/**
 	 * This processing is insipired from the VMA fault handling at the
@@ -728,22 +717,19 @@ good:
 out_up:
 	up_read(&mm->mmap_sem);
 	mmput(mm);
-	put_task_struct(tsk);
 
 	if (res->result == 0) {
-		VSPRINTK("\n### VMA_SERVER [%d] %lx -- %lx %lx\n", req->origin_pid,
+		VSPRINTK("\n### VMA_SERVER [%d] %lx -- %lx %lx\n", current->pid,
 				res->vm_start, res->vm_end, res->vm_flags);
 		if (!remote_vma_anon(res)) {
-			VSPRINTK("  [%d] %s + %lx\n", req->origin_pid,
+			VSPRINTK("  [%d] %s + %lx\n", current->pid,
 					res->vm_file_path, res->vm_pgoff);
 		}
 	}
 
-out_free:
 	response_remote_vma(req->remote_nid, req->remote_pid, res);
 
 	pcn_kmsg_free_msg(req);
-	kfree(w);
 	kfree(res);
 
 	return;
@@ -927,12 +913,12 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 }
 
 
-DEFINE_KMSG_WQ_HANDLER(remote_vma_request);
+DEFINE_KMSG_RW_HANDLER(remote_vma_request, remote_vma_request_t, origin_pid);
 DEFINE_KMSG_WQ_HANDLER(vma_op_request);
 
 int vma_server_init(void)
 {
-	REGISTER_KMSG_WQ_HANDLER(
+	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_VMA_REQUEST, remote_vma_request);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE, remote_vma_response);

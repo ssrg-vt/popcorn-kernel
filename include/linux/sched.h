@@ -1831,7 +1831,8 @@ struct task_struct {
 	bool is_vma_worker;			/* kernel thread that manages the process*/
 	bool at_remote;				/* Is executing on behalf of another node? */
 
-	int ret_from_remote;
+	volatile void *remote_work;
+	struct completion remote_work_pended;
 
 	int migration_target_nid;
 	int backoff_weight;
@@ -1841,14 +1842,6 @@ struct task_struct {
 	 * in jiffies for load accounting
 	 */
 	unsigned long lutime, lstime, llasttimestamp;
-
-	/*
-	 * Removed from rack popcorn
-	 */
-	/*
-	remote_file_info_t *fake_file_table[16];	// fd migration
-	pid_t surrogate = -1;						// futex
-	*/
 #endif
 
 /* CPU-specific state of this task */

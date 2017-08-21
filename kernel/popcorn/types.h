@@ -61,6 +61,7 @@ bool __put_task_remote(struct remote_context *rc);
 	pid_t remote_pid;\
 	pid_t origin_pid;\
 	unsigned int personality;\
+	/* \
 	unsigned long def_flags;\
 	sigset_t remote_blocked;\
 	sigset_t remote_real_blocked;\
@@ -69,6 +70,7 @@ bool __put_task_remote(struct remote_context *rc);
 	unsigned long sas_ss_sp;\
 	size_t sas_ss_size;\
 	struct k_sigaction action[_NSIG]; \
+	*/ \
 	struct field_arch arch;
 DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 
@@ -308,6 +310,8 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 	return 1;
 }
 
+int request_remote_work(pid_t pid, struct pcn_kmsg_message *req);
+
 #define DEFINE_KMSG_WQ_HANDLER(x) \
 static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 	return __handle_popcorn_work(msg, process_##x, popcorn_wq);\
@@ -315,6 +319,11 @@ static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 #define DEFINE_KMSG_ORDERED_WQ_HANDLER(x) \
 static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 	return __handle_popcorn_work(msg, process_##x, popcorn_ordered_wq);\
+}
+#define DEFINE_KMSG_RW_HANDLER(x,type,member) \
+static inline int handle_##x(struct pcn_kmsg_message *msg) {\
+	type *req = (type *)msg; \
+	return request_remote_work(req->member, msg); \
 }
 
 #define REGISTER_KMSG_WQ_HANDLER(x, y) \

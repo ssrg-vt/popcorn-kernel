@@ -146,9 +146,6 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	return rc;
 }
 
-
-///////////////////////////////////////////////////////////////////////////////
-
 static void __build_task_comm(char *buffer, char *path)
 {
 	int i, ch;
@@ -267,22 +264,17 @@ int process_server_task_exit(struct task_struct *tsk)
 /**
  * Handle the notification of the task kill at the remote.
  */
-static void process_remote_task_exit(struct work_struct *_work)
+static void process_remote_task_exit(struct pcn_kmsg_message *msg)
 {
-	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
-	remote_task_exit_t *req = work->msg;
-	struct task_struct *tsk;
+	remote_task_exit_t *req = (remote_task_exit_t *)msg;
+	struct task_struct *tsk = current;
+	int exit_code = req->exit_code;
 
-	tsk = __get_task_struct(req->origin_pid);
-	if (!tsk) {
-		printk(KERN_INFO"%s: task %d not found\n", __func__, req->origin_pid);
-		goto out;
-	}
 	if (tsk->remote_pid != req->remote_pid) {
 		printk(KERN_INFO"%s: pid mismatch %d != %d\n", __func__,
 				tsk->remote_pid, req->remote_pid);
-		put_task_struct(tsk);
-		goto out;
+		pcn_kmsg_free_msg(req);
+		return;
 	}
 
 	PSPRINTK("%s [%d] 0x%x\n", __func__, tsk->pid, req->exit_code);
@@ -292,28 +284,18 @@ static void process_remote_task_exit(struct work_struct *_work)
 	tsk->remote_pid = -1;
 	put_task_remote(tsk);
 
-	tsk->ret_from_remote = TASK_DEAD;
-	tsk->exit_code = req->exit_code;
-
-	smp_mb();
-
-	if (tsk->exit_code & 0xff) {
-		force_sig(tsk->exit_code & 0xff, tsk);
-	} else {
-		wake_up_process(tsk);
-	}
-	put_task_struct(tsk);
-
-out:
+	exit_code = req->exit_code;
 	pcn_kmsg_free_msg(req);
-	kfree(work);
+
+	if (exit_code & 0xff) {
+		force_sig(exit_code & 0xff, tsk);
+	}
+	do_exit(exit_code);
 }
 
-
-static void process_origin_task_exit(struct work_struct *_work)
+static int handle_origin_task_exit(struct pcn_kmsg_message *msg)
 {
-	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
-	origin_task_exit_t *req = work->msg;
+	origin_task_exit_t *req = (origin_task_exit_t *)msg;
 	struct task_struct *tsk;
 	struct remote_context *rc;
 
@@ -336,69 +318,41 @@ static void process_origin_task_exit(struct work_struct *_work)
 	put_task_struct(tsk);
 out:
 	pcn_kmsg_free_msg(req);
-	kfree(work);
+	return 0;
 }
 
 
 ///////////////////////////////////////////////////////////////////////////////
 // handling back migration
 ///////////////////////////////////////////////////////////////////////////////
-static void bring_back_remote_thread(struct work_struct *_work)
+static void bring_back_remote_thread(struct pcn_kmsg_message *msg)
 {
-	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
-	back_migration_request_t *req = work->msg;
-	struct task_struct *tsk;
+	back_migration_request_t *req = (back_migration_request_t *)msg;
 
-	tsk = __get_task_struct(req->origin_pid);
-	if (!tsk) {
-		printk(KERN_INFO"%s: no origin taks %d for remote %d\n",
-				__func__, req->origin_pid, req->remote_pid);
-		goto out_free;
-	}
-	if (tsk->remote_pid != req->remote_pid) {
+	if (current->remote_pid != req->remote_pid) {
 		printk(KERN_INFO"%s: pid mismatch during back migration (%d != %d)\n",
-				__func__, tsk->remote_pid, req->remote_pid);
-		put_task_struct(tsk);
+				__func__, current->remote_pid, req->remote_pid);
 		goto out_free;
 	}
 
 	PSPRINTK("\n### BACKMIG [%d] from %d at %d\n",
-			tsk->pid, req->remote_pid, req->remote_nid);
+			current->pid, req->remote_pid, req->remote_nid);
 
 	/* Welcome home */
 
-	tsk->remote = NULL;
-	tsk->remote_nid = -1;
-	tsk->remote_pid = -1;
-	put_task_remote(tsk);
+	current->remote = NULL;
+	current->remote_nid = -1;
+	current->remote_pid = -1;
+	put_task_remote(current);
 
-	tsk->ret_from_remote = TASK_RUNNING;
-	tsk->personality = req->personality;
+	current->personality = req->personality;
 
 	/* XXX signals */
 
-	restore_thread_info(tsk, &req->arch, false);
-	smp_mb();
-
-	wake_up_process(tsk);
-	put_task_struct(tsk);
+	restore_thread_info(current, &req->arch, false);
 
 out_free:
-	pcn_kmsg_free_msg(req);
-	kfree(work);
-}
-
-static int handle_back_migration(struct pcn_kmsg_message *msg)
-{
-	back_migration_request_t *req = (back_migration_request_t *)msg;
-	struct pcn_kmsg_work *work = kmalloc(sizeof(*work), GFP_ATOMIC);
-	BUG_ON(!work);
-
-	work->msg = req;
-	INIT_WORK((struct work_struct *)work, bring_back_remote_thread);
-	queue_work(popcorn_wq, (struct work_struct *)work);
-
-	return 0;
+	pcn_kmsg_free_msg(msg);
 }
 
 
@@ -448,7 +402,6 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
 
 	kfree(req);
-
 	do_exit(TASK_PARKED);
 }
 
@@ -791,7 +744,6 @@ static void clone_remote_thread(struct work_struct *_work)
 	return;
 }
 
-
 static int handle_clone_request(struct pcn_kmsg_message *msg)
 {
 	clone_request_t *req = (clone_request_t *)msg;
@@ -805,6 +757,63 @@ static int handle_clone_request(struct pcn_kmsg_message *msg)
 	return 0;
 }
 
+
+/**
+ * Pend and dispatch remote works
+ */
+int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
+{
+	struct task_struct *tsk;
+	tsk = __get_task_struct(pid);
+	if (!tsk) {
+		printk(KERN_INFO"%s: invalid origin task %d for remote work %d\n",
+				__func__, pid, req->header.type);
+		pcn_kmsg_free_msg(req);
+		return -ESRCH;
+	}
+	BUG_ON(tsk->remote_work);
+	tsk->remote_work = req;
+	complete(&tsk->remote_work_pended);
+
+	put_task_struct(tsk);
+	return 0;
+}
+
+static int __process_remote_works(void)
+{
+	bool run = true;
+	while (run) {
+		struct pcn_kmsg_message *req;
+		long ret;
+		ret = wait_for_completion_interruptible_timeout(
+				&current->remote_work_pended, HZ);
+		if (ret == 0) continue; /* timeout */
+		if (ret == -ERESTARTSYS) break;
+
+		req = (struct pcn_kmsg_message *)current->remote_work;
+		current->remote_work = NULL;
+		smp_wmb();
+
+		switch (req->header.type) {
+		case PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST:
+		case PCN_KMSG_TYPE_VMA_OP_REQUEST:
+			WARN_ON_ONCE("Not implemented yet!");
+			break;
+		case PCN_KMSG_TYPE_REMOTE_VMA_REQUEST:
+			process_remote_vma_request(req);
+			break;
+		case PCN_KMSG_TYPE_TASK_EXIT_REMOTE:
+			process_remote_task_exit(req);
+			run = false;
+			break;
+		case PCN_KMSG_TYPE_TASK_MIGRATE_BACK:
+			bring_back_remote_thread(req);
+			run = false;
+			break;
+		}
+	}
+	return 0;
+}
 
 /**
  * Send a message to <dst_nid> for migrating a task <task>.
@@ -899,13 +908,11 @@ static int start_vma_worker_origin(void *_arg)
 	return 0;
 }
 
-
 int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 {
 	int ret;
 	bool create_vma_worker = false;
 	struct remote_context *rc, *rc_new;
-	char *which_rc;
 
 	might_sleep();
 
@@ -914,7 +921,6 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 
 	if (!cmpxchg(&tsk->mm->remote, 0, rc_new) == 0) {
 		kfree(rc_new);
-		which_rc = "found";
 	} else {
 		/*
 		 * This process is becoming a distributed one if it was not yet.
@@ -935,7 +941,6 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		__unlock_remote_contexts_out(dst_nid);
 
 		create_vma_worker = true;
-		which_rc = "allocated";
 	}
 	rc = tsk->remote = get_task_remote(tsk);
 	tsk->at_remote = false;
@@ -944,11 +949,10 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		rc->vma_worker =
 			kthread_run(start_vma_worker_origin, rc, "worker_origin");
 	}
-	PSPRINTK("%s [%d] remote context %s\n", __func__, tsk->pid, which_rc);
 
 	ret = __request_clone_remote(dst_nid, tsk, uregs);
-
-	return ret;
+	if (ret < 0) return ret;
+	return __process_remote_works();
 }
 
 
@@ -978,8 +982,8 @@ int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, v
 }
 
 
-DEFINE_KMSG_WQ_HANDLER(remote_task_exit);
-DEFINE_KMSG_WQ_HANDLER(origin_task_exit);
+DEFINE_KMSG_RW_HANDLER(remote_task_exit, remote_task_exit_t, origin_pid);
+DEFINE_KMSG_RW_HANDLER(back_migration, back_migration_request_t, origin_pid);
 
 /**
  * Initialize the process server.
@@ -997,8 +1001,8 @@ int __init process_server_init(void)
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_MIGRATE_BACK, back_migration);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_PAIRING, remote_task_pairing);
 
-	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_TASK_EXIT_REMOTE, remote_task_exit);
-	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_TASK_EXIT_ORIGIN, origin_task_exit);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_EXIT_REMOTE, remote_task_exit);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TASK_EXIT_ORIGIN, origin_task_exit);
 
 	return 0;
 }

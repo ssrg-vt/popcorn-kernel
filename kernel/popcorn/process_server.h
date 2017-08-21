@@ -6,6 +6,4 @@ struct field_arch;
 
 int save_thread_info(struct task_struct *task, struct field_arch *arch);
 int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool restore_segments);
-void update_frame_address(void);
-
 #endif
