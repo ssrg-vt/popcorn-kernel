@@ -118,7 +118,7 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 }
 
 
-void noinline_for_stack update_frame_pointer(void)
+noinline_for_stack void update_frame_pointer(void)
 {
 #ifdef CONFIG_FRAME_POINTER
 #else
