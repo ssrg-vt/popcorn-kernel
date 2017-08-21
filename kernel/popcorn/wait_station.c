@@ -57,7 +57,9 @@ EXPORT_SYMBOL_GPL(put_wait_station);
 
 void *wait_at_station(struct wait_station *ws)
 {
-	wait_for_completion(&ws->pendings);
+	if (!try_wait_for_completion(&ws->pendings)) {
+		wait_for_completion(&ws->pendings);
+	}
 	return (void *)ws->private;
 }
 EXPORT_SYMBOL_GPL(wait_at_station);
