@@ -840,8 +840,8 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 			continue;
 		}
 		if (fault_for_write(fault_flags)) {
-			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 			clear_bit(nid, page->owners);
+			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 		}
 	}
 
@@ -873,8 +873,8 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, stru
 			pid_t pid = rc->remote_tgids[nid];
 			if (nid == except_nid || nid == my_nid) continue;
 
-			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 			clear_bit(nid, page->owners);
+			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 		}
 		put_task_remote(tsk);
 
@@ -945,8 +945,8 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	spin_lock(ptl);
 
 	if (fault_for_write(fault_flags)) {
-		entry = pte_make_invalid(*pte);
 		clear_bit(my_nid, page->owners);
+		entry = pte_make_invalid(*pte);
 	} else {
 		entry = pte_wrprotect(*pte);
 	}
@@ -1056,8 +1056,8 @@ again:
 		spin_lock(ptl);
 
 		if (fault_for_write(fault_flags)) {
-			entry = pte_make_invalid(*pte);
 			clear_bit(my_nid, page->owners);
+			entry = pte_make_invalid(*pte);
 		} else {
 			entry = pte_make_valid(*pte);
 			entry = pte_wrprotect(entry);
