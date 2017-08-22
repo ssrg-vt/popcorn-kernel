@@ -138,14 +138,15 @@ struct pcn_kmsg_message {
 
 /* Template for RDMA request/ack */
 typedef struct {
-    struct pcn_kmsg_hdr header; /* must follow */
-	struct pcn_kmsg_rdma_hdr rdma_header; /* must follow, rdma essential */
+    struct pcn_kmsg_hdr header;				/* must follow */
+	struct pcn_kmsg_rdma_hdr rdma_header;	/* must follow, rdma essential */
     /* your data structures */
 	int remote_ws;
 	u64 dma_addr_act;
 //#if CONFIG_FARM2WRITE
-	u32 FaRM2_poll_ofs;
+	u32 mr_ofs;
 //#endif
+	int t_num;								/* for multi-thread testing */
 }__attribute__((packed)) remote_thread_rdma_rw_t;
 
 /* TYPES OF MESSAGES */
