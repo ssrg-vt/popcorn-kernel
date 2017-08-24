@@ -40,7 +40,6 @@ enum {
 	INDEX_INBOUND = 1,
 };
 
-
 /* Hold the correnponding remote_contexts_lock */
 static struct remote_context *__lookup_remote_contexts_in(int nid, int tgid)
 {
@@ -110,7 +109,7 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	BUG_ON(!rc);
 
 	INIT_LIST_HEAD(&rc->list);
-	atomic_set(&rc->count, 0);
+	atomic_set(&rc->count, 1);
 	rc->mm = NULL;
 
 	rc->tgid = tgid;
@@ -162,31 +161,6 @@ static void __build_task_comm(char *buffer, char *path)
 ///////////////////////////////////////////////////////////////////////////////
 // Handle process/task exit
 ///////////////////////////////////////////////////////////////////////////////
-static int __exit_origin_task(struct task_struct *tsk)
-{
-	struct remote_context *rc;
-	rc = tsk->mm->remote;
-
-	if (tsk->remote) {
-		put_task_remote(tsk);
-	}
-	tsk->remote = NULL;
-	tsk->origin_nid = tsk->origin_pid = -1;
-
-	/**
-	 * Trigger the vma worker termination if this is the last user thread
-	 * referring to this mm.
-	 * 3 == current + get_task_mm in vma_worker + remote_context.
-	 */
-	if (atomic_read(&tsk->mm->mm_users) == 3) {
-		rc->vma_worker_stop = true;
-		smp_mb();
-		complete(&rc->vma_works_ready);
-	}
-
-	return 0;
-}
-
 static void __terminate_peers(struct remote_context *rc)
 {
 	int nid;
@@ -207,6 +181,29 @@ static void __terminate_peers(struct remote_context *rc)
 		req.remote_pid = rc->remote_tgids[nid];
 		pcn_kmsg_send(nid, &req, sizeof(req));
 	}
+}
+
+static int __exit_origin_task(struct task_struct *tsk)
+{
+	struct remote_context *rc = tsk->mm->remote;
+
+	if (tsk->remote) {
+		put_task_remote(tsk);
+	}
+	tsk->remote = NULL;
+	tsk->origin_nid = tsk->origin_pid = -1;
+
+	/**
+	 * Trigger peer termination if this is the last user thread
+	 * referring to this mm.
+	 * 2 == current + remote_context
+	 */
+	if (atomic_read(&tsk->mm->mm_users) == 2) {
+		__terminate_peers(rc);
+		__put_task_remote(rc);
+	}
+
+	return 0;
 }
 
 static int __exit_remote_task(struct task_struct *tsk)
@@ -406,11 +403,9 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 }
 
 
-
 ///////////////////////////////////////////////////////////////////////////////
-// Pairing task pid
+// Remote thread
 ///////////////////////////////////////////////////////////////////////////////
-
 static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 {
 	remote_task_pairing_t *req = (remote_task_pairing_t *)msg;
@@ -429,51 +424,27 @@ static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 	tsk->remote_pid = req->my_pid;
 	tsk->remote->remote_tgids[req->my_nid] = req->my_tgid;
 
-	/*
-	PSPRINTK("Pairing local:  %d --> %d at %d\n",
-			tsk->pid, req->my_nid, req->my_pid);
-	*/
-
 	put_task_struct(tsk);
 out:
 	pcn_kmsg_free_msg(req);
 	return 0;
 }
 
-
-static int __pair_remote_task(struct task_struct *tsk)
+static int __pair_remote_task(void)
 {
-	remote_task_pairing_t *req;
-	int ret;
-
-	req = kmalloc(sizeof(*req), GFP_KERNEL);
-	BUG_ON(!req);
-
-	// Notify remote cpu of pairing between current task and remote
-	// representative task.
-	req->header.type = PCN_KMSG_TYPE_TASK_PAIRING;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-	req->my_nid = my_nid;
-	req->my_tgid = current->tgid;
-	req->my_pid = current->pid;
-	req->your_pid = current->origin_pid;
-
-	/*
-	PSPRINTK("Pairing remote: %d --> %d at %d\n",
-			req->my_pid, req->your_pid, current->origin_nid);
-	*/
-
-	ret = pcn_kmsg_send(current->origin_nid, req, sizeof(*req));
-	kfree(req);
-
-	return ret;
+	remote_task_pairing_t req = {
+		.header = {
+			.type = PCN_KMSG_TYPE_TASK_PAIRING,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.my_nid = my_nid,
+		.my_tgid = current->tgid,
+		.my_pid = current->pid,
+		.your_pid = current->origin_pid,
+	};
+	return pcn_kmsg_send(current->origin_nid, &req, sizeof(req));
 }
 
-
-
-///////////////////////////////////////////////////////////////////////////////
-// Remote thread
-///////////////////////////////////////////////////////////////////////////////
 
 struct shadow_params {
 	clone_request_t *req;
@@ -484,7 +455,7 @@ static int shadow_main(void *_args)
 	struct shadow_params *params = _args;
 	clone_request_t *req = params->req;
 
-    PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
+	PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
 			current->pid, req->origin_pid, req->origin_nid);
 
 	current->flags &= ~PF_KTHREAD;	/* Drop to user */
@@ -510,7 +481,7 @@ static int shadow_main(void *_args)
 	memcpy(current->sighand->action, req->action, sizeof(req->action));
 	*/
 
-	__pair_remote_task(current);
+	__pair_remote_task();
 
 	PSPRINTK("\n####### MIGRATED - %d at %d --> %d at %d\n",
 			current->origin_pid, current->origin_nid, current->pid, my_nid);
@@ -655,8 +626,8 @@ static int start_vma_worker_remote(void *_data)
 	might_sleep();
 	kfree(params);
 
-	PSPRINTK("%s [%d] started for origin %d [%d/%d]\n", __func__,
-			current->pid, req->origin_pid, req->origin_tgid, req->origin_nid);
+	PSPRINTK("%s [%d] for [%d/%d]\n", __func__,
+			current->pid, req->origin_tgid, req->origin_nid);
 	PSPRINTK("%s [%d] %s\n", __func__,
 			current->pid, req->exe_path);
 
@@ -710,9 +681,6 @@ static void clone_remote_thread(struct work_struct *_work)
 
 	BUG_ON(!rc_new);
 
-	PSPRINTK("%s: for %d in [%d/%d]\n", __func__,
-			req->origin_pid, tgid_from, nid_from);
-
 	__lock_remote_contexts_in(nid_from);
 	rc = __lookup_remote_contexts_in(nid_from, tgid_from);
 	if (!rc) {
@@ -758,9 +726,9 @@ static int handle_clone_request(struct pcn_kmsg_message *msg)
 }
 
 
-/**
- * Pend and dispatch remote works
- */
+///////////////////////////////////////////////////////////////////////////////
+// Handle remote works at the origin
+///////////////////////////////////////////////////////////////////////////////
 int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 {
 	struct task_struct *tsk;
@@ -796,8 +764,10 @@ static int __process_remote_works(void)
 
 		switch (req->header.type) {
 		case PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST:
-		case PCN_KMSG_TYPE_VMA_OP_REQUEST:
 			WARN_ON_ONCE("Not implemented yet!");
+			break;
+		case PCN_KMSG_TYPE_VMA_OP_REQUEST:
+			process_remote_vma_op((vma_op_request_t *)req);
 			break;
 		case PCN_KMSG_TYPE_REMOTE_VMA_REQUEST:
 			process_remote_vma_request(req);
@@ -814,6 +784,7 @@ static int __process_remote_works(void)
 	}
 	return 0;
 }
+
 
 /**
  * Send a message to <dst_nid> for migrating a task <task>.
@@ -888,67 +859,38 @@ out:
 	return ret;
 }
 
-static int start_vma_worker_origin(void *_arg)
-{
-	struct remote_context *rc = _arg;
-	might_sleep();
-
-	current->is_vma_worker = true;
-	current->at_remote = false;
-	current->flags &= ~PF_KTHREAD;
-	use_mm(rc->mm);
-
-	get_task_remote(current);
-
-	vma_worker_origin(rc);
-	__terminate_peers(rc);
-
-	put_task_remote(current);
-
-	return 0;
-}
-
 int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 {
 	int ret;
-	bool create_vma_worker = false;
-	struct remote_context *rc, *rc_new;
+	struct remote_context *rc;
 
 	might_sleep();
 
 	/* Want to avoid allocate this structure in the spinlock-ed area */
-	rc_new = __alloc_remote_context(my_nid, tsk->tgid, false);
+	rc = __alloc_remote_context(my_nid, tsk->tgid, false);
 
-	if (!cmpxchg(&tsk->mm->remote, 0, rc_new) == 0) {
-		kfree(rc_new);
+	if (!cmpxchg(&tsk->mm->remote, 0, rc) == 0) {
+		kfree(rc);
 	} else {
 		/*
 		 * This process is becoming a distributed one if it was not yet.
 		 * The first thread get migrated attaches the remote context to
-		 * mm->remote, which indicates this process is distributed, and
-		 * forks the vma worker thread for this process.
+		 * mm->remote, which indicates this process is distributed.
 		 */
 
 		/*
 		 * Setting mm->remote to remote_context indicates
 		 * this process is distributed
 		 */
-		rc_new->mm = get_task_mm(tsk);
-		rc_new->remote_tgids[my_nid] = tsk->tgid;
+		rc->mm = get_task_mm(tsk);
+		rc->remote_tgids[my_nid] = tsk->tgid;
 
 		__lock_remote_contexts_out(dst_nid);
-		list_add(&rc_new->list, &__remote_contexts_out());
+		list_add(&rc->list, &__remote_contexts_out());
 		__unlock_remote_contexts_out(dst_nid);
-
-		create_vma_worker = true;
 	}
-	rc = tsk->remote = get_task_remote(tsk);
+	tsk->remote = get_task_remote(tsk);
 	tsk->at_remote = false;
-
-	if (create_vma_worker) {
-		rc->vma_worker =
-			kthread_run(start_vma_worker_origin, rc, "worker_origin");
-	}
 
 	ret = __request_clone_remote(dst_nid, tsk, uregs);
 	if (ret < 0) return ret;
@@ -984,7 +926,6 @@ int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, v
 
 DEFINE_KMSG_RW_HANDLER(remote_task_exit, remote_task_exit_t, origin_pid);
 DEFINE_KMSG_RW_HANDLER(back_migration, back_migration_request_t, origin_pid);
-
 /**
  * Initialize the process server.
  */

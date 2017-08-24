@@ -142,8 +142,7 @@ noinline_for_stack void update_frame_pointer(void)
 	unsigned long *rbp;
 	asm volatile("mov %0, x29" : "=r"(rbp)); /* update_frame_pointer */
 
-	/* User rbp is at 2 stack frames below */
-	rbp = (unsigned long *)*rbp;		/* __do_sched_migrate */
+	/* User rbp is at one stack frames below */
 	*rbp = current_pt_regs()->regs[29];	/* sched_migrate */
 #else
 	WARN_ON_ONCE("May not be migrated back correctly due to omit-frame-buffer");

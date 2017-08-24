@@ -388,7 +388,6 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
  * We do this stupid thing because functions related to meomry mapping operate
  * on "current". Thus, we need mmap/munmap/madvise in our process
  */
-
 static void __reply_vma_op(vma_op_request_t *req, int ret)
 {
 	vma_op_response_t res = {
@@ -408,41 +407,6 @@ static void __reply_vma_op(vma_op_request_t *req, int ret)
 	};
 
 	pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
-}
-
-static void process_vma_op_request(struct work_struct *_work)
-{
-	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
-	vma_op_request_t *req = work->msg;
-	struct task_struct *tsk = __get_task_struct(req->origin_pid);
-	struct list_head *entry = &((struct work_struct *)work)->entry;
-	struct remote_context *rc;
-
-	if (!tsk) {
-		__reply_vma_op(req, -EINVAL);
-		goto out_free;
-	}
-
-	BUG_ON(req->operation <= VMA_OP_NOP || req->operation >= VMA_OP_MAX);
-
-	rc = get_task_remote(tsk);
-
-	/* Enqueue the incoming vma operation request into the vma worker queue */
-	INIT_LIST_HEAD(entry);
-	spin_lock(&rc->vma_works_lock);
-	list_add(entry, &rc->vma_works);
-	spin_unlock(&rc->vma_works_lock);
-
-	complete(&rc->vma_works_ready);
-
-	put_task_remote(tsk);
-	put_task_struct(tsk);
-
-	return;
-
-out_free:
-	pcn_kmsg_free_msg(req);
-	kfree(work);
 }
 
 static vma_op_request_t *__get_pending_vma_op(struct remote_context *rc)
@@ -467,88 +431,71 @@ static vma_op_request_t *__get_pending_vma_op(struct remote_context *rc)
 	return req;
 }
 
-void vma_worker_origin(struct remote_context *rc)
+void process_remote_vma_op(vma_op_request_t *req)
 {
+	long ret = -EPERM;
 	struct mm_struct *mm = get_task_mm(current);
-	might_sleep();
 
-	PSPRINTK("%s [%d] started\n", __func__, current->pid);
+	switch (req->operation) {
+	case VMA_OP_MMAP: {
+		unsigned long populate = 0;
+		unsigned long raddr;
+		struct file *f = NULL;
 
-	while (!rc->vma_worker_stop) {
-		vma_op_request_t *req;
-		long ret = -EPERM;
+		if (req->path[0] != '\0')
+			f = filp_open(req->path, O_RDONLY | O_LARGEFILE, 0);
 
-		if (!(req = __get_pending_vma_op(rc))) continue;
-
-		VSPRINTK("\n### VMA_WORKER [%d] %s %lx %lx\n", current->pid,
-				vma_op_code_sz[req->operation], req->addr, req->len);
-
-		switch (req->operation) {
-		case VMA_OP_MMAP: {
-			unsigned long populate = 0;
-			unsigned long raddr;
-			struct file *f = NULL;
-
-			if (req->path[0] != '\0')
-				f = filp_open(req->path, O_RDONLY | O_LARGEFILE, 0);
-
-			if (IS_ERR(f)) {
-				ret = PTR_ERR(f);
-				printk("  [%d] Cannot open %s %ld\n", current->pid, req->path,
-						ret);
-				break;
-			}
-			down_write(&mm->mmap_sem);
-			raddr = do_mmap_pgoff(f, req->addr, req->len, req->prot,
-					req->flags, req->pgoff, &populate);
-			up_write(&mm->mmap_sem);
-			if (populate) mm_populate(raddr, populate);
-
-			ret = IS_ERR_VALUE(raddr) ? raddr : 0;
-			req->addr = raddr;
-			VSPRINTK("  [%d] %lx %lx -- %lx\n", current->pid,
-					ret, req->addr, req->addr + req->len);
-
-			if (f) filp_close(f, NULL);
+		if (IS_ERR(f)) {
+			ret = PTR_ERR(f);
+			printk("  [%d] Cannot open %s %ld\n", current->pid, req->path, ret);
 			break;
 		}
-		case VMA_OP_BRK:
-			ret = vm_brk(req->addr, req->len);
-			break;
-		case VMA_OP_MUNMAP:
-			ret = vma_server_munmap_origin(req->addr, req->len, req->remote_nid);
-			ret = vm_munmap(req->addr, req->len);
-			break;
-		case VMA_OP_MPROTECT:
-			ret = sys_mprotect(req->addr, req->len, req->prot);
-			break;
-		case VMA_OP_MREMAP:
-			ret = sys_mremap(req->addr, req->old_len, req->new_len,
-				req->flags, req->new_addr);
-			break;
-		case VMA_OP_MADVISE:
-			ret = sys_madvise(req->start, req->len, req->behavior);
-			break;
-		default:
-			BUG_ON("unreachable");
-		}
+		down_write(&mm->mmap_sem);
+		raddr = do_mmap_pgoff(f, req->addr, req->len, req->prot,
+				req->flags, req->pgoff, &populate);
+		up_write(&mm->mmap_sem);
+		if (populate) mm_populate(raddr, populate);
 
-		VSPRINTK("  [%d] <-%s %ld\n", current->pid,
-				vma_op_code_sz[req->operation], ret);
-		__reply_vma_op(req, ret);
-		pcn_kmsg_free_msg(req);
+		ret = IS_ERR_VALUE(raddr) ? raddr : 0;
+		req->addr = raddr;
+		VSPRINTK("  [%d] %lx %lx -- %lx\n", current->pid,
+				ret, req->addr, req->addr + req->len);
+
+		if (f) filp_close(f, NULL);
+		break;
+	}
+	case VMA_OP_BRK:
+		ret = vm_brk(req->addr, req->len);
+		break;
+	case VMA_OP_MUNMAP:
+		ret = vma_server_munmap_origin(req->addr, req->len, req->remote_nid);
+		ret = vm_munmap(req->addr, req->len);
+		break;
+	case VMA_OP_MPROTECT:
+		ret = sys_mprotect(req->addr, req->len, req->prot);
+		break;
+	case VMA_OP_MREMAP:
+		ret = sys_mremap(req->addr, req->old_len, req->new_len,
+			req->flags, req->new_addr);
+		break;
+	case VMA_OP_MADVISE:
+		ret = sys_madvise(req->start, req->len, req->behavior);
+		break;
+	default:
+		BUG_ON("unreachable");
 	}
 
+	VSPRINTK("  [%d] <-%s %ld\n", current->pid,
+			vma_op_code_sz[req->operation], ret);
+	__reply_vma_op(req, ret);
+	pcn_kmsg_free_msg(req);
 	mmput(mm);
-	return;
 }
 
 void vma_worker_remote(struct remote_context *rc)
 {
 	struct mm_struct *mm = get_task_mm(current);
 	might_sleep();
-
-	PSPRINTK("%s [%d] started\n", __func__, current->pid);
 
 	while (!rc->vma_worker_stop) {
 		vma_op_request_t *req;
@@ -588,15 +535,14 @@ void vma_worker_remote(struct remote_context *rc)
 /**
  * Response for remote VMA request and handling the response
  */
-
 struct vma_info {
 	struct list_head list;
 	unsigned long addr;
 	atomic_t pendings;
 	struct completion complete;
 	wait_queue_head_t pendings_wait;
-	volatile int ret;
 
+	volatile int ret;
 	volatile remote_vma_response_t *response;
 };
 
@@ -608,7 +554,6 @@ static struct vma_info *__lookup_pending_vma_request(struct remote_context *rc, 
 	list_for_each_entry(vi, &rc->vmas, list) {
 		if (vi->addr == addr) return vi;
 	}
-
 	return NULL;
 }
 
@@ -651,21 +596,9 @@ out_free:
 }
 
 
-static void response_remote_vma(int remote_nid, int remote_pid, remote_vma_response_t *res)
-{
-	res->header.type = PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE;
-	res->header.prio = PCN_KMSG_PRIO_NORMAL;
-
-	res->remote_pid = remote_pid;
-
-	pcn_kmsg_send(remote_nid, res, sizeof(*res));
-}
-
-
 /**
  * Request for remote vma and handling the request
  */
-
 void process_remote_vma_request(struct pcn_kmsg_message *msg)
 {
 	remote_vma_request_t *req = (remote_vma_request_t *)msg;
@@ -680,6 +613,8 @@ void process_remote_vma_request(struct pcn_kmsg_message *msg)
 		res = kmalloc(sizeof(*res), GFP_KERNEL);
 	}
 	res->addr = addr;
+	res->header.type = PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE;
+	res->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	mm = get_task_mm(current);
 
@@ -727,11 +662,11 @@ out_up:
 		}
 	}
 
-	response_remote_vma(req->remote_nid, req->remote_pid, res);
+	res->remote_pid = req->remote_pid;
+	pcn_kmsg_send(req->remote_nid, res, sizeof(*res));
 
 	pcn_kmsg_free_msg(req);
 	kfree(res);
-
 	return;
 }
 
@@ -914,7 +849,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 
 
 DEFINE_KMSG_RW_HANDLER(remote_vma_request, remote_vma_request_t, origin_pid);
-DEFINE_KMSG_WQ_HANDLER(vma_op_request);
+DEFINE_KMSG_RW_HANDLER(vma_op_request, vma_op_request_t, origin_pid);
 
 int vma_server_init(void)
 {
@@ -923,7 +858,7 @@ int vma_server_init(void)
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE, remote_vma_response);
 
-	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_VMA_OP_REQUEST, vma_op_request);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_VMA_OP_REQUEST, vma_op_request);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_VMA_OP_RESPONSE, vma_op_response);
 
 	return 0;

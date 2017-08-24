@@ -4643,68 +4643,39 @@ SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
 	return 0;
 }
 
-static noinline_for_stack int __do_sched_migrate(struct task_struct *tsk, int nid, void __user *uregs)
-{
-	int retval = 0;
-
-	retval = process_server_do_migration(tsk, nid, uregs);
-	if (retval) return retval;
-
-	tsk->migration_target_nid = -1;
-
-	PSPRINTK("%s [%d]: waken up\n", __func__, tsk->pid);
-	update_frame_pointer();
-	return 0;
-}
-
 SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 {
-	int retval;
-
-	PRINTK("\n####### MIGRATE [%d] to %d\n",
-			current->pid, nid);
+	int ret;
+	PRINTK("\n####### MIGRATE [%d] to %d\n", current->pid, nid);
 
 	if (nid == -1) {
 		nid = current->migration_target_nid;
 	}
-
 	if (nid == -1) {
-		printk(KERN_INFO"[%d]: destination nid is not specified\n",
+		printk(KERN_INFO"  [%d] destination nid is not specified\n",
 				current->pid);
+		return -EINVAL;
+	}
+	if (nid == my_nid) {
+		printk(KERN_INFO"  [%d] already running at the destination %d\n",
+				current->pid, nid);
 		return -EINVAL;
 	}
 
 	if (!get_popcorn_node_online(nid)) {
-		printk(KERN_INFO"%s [%d]: node %d is offline\n", __func__,
+		printk(KERN_INFO"  [%d] destination node %d is offline\n",
 				current->pid, nid);
 		return -EAGAIN;
 	}
 
-	if (nid == my_nid) {
-		printk(KERN_INFO"%s [%d]: loopback is not supported anymore\n", __func__,
-				current->pid);
-		return -EINVAL;
-	}
+	ret = process_server_do_migration(current, nid, uregs);
+	if (ret) return ret;
 
-	if (process_is_distributed(current)) {
-		if (current->at_remote) {
-			// this might be a back migration. allow it.
-		} else {
-			if (current->remote_nid != -1 && current->remote_pid != -1) {
-				// Already migrated. This is bug
-				printk(KERN_INFO"%s [%d]: already migrated to %d at %d\n",
-						__func__,
-						current->pid, current->remote_pid, current->remote_nid);
-				retval = -EBUSY;
-				goto out_put;
-			}
-		}
-	}
+	current->migration_target_nid = -1;
 
-	retval = __do_sched_migrate(current, nid, uregs);
-
-out_put:
-	return retval;
+	update_frame_pointer();
+	PSPRINTK("  [%d] resume execution\n", current->pid);
+	return 0;
 }
 
 #else // CONFIG_POPCORN
