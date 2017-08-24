@@ -223,7 +223,7 @@ static int __do_page_fault(struct mm_struct *mm, unsigned long addr,
 	/* vma worker should not fault */
 	BUG_ON(tsk->is_vma_worker);
 
-	if (distributed_process(tsk)) {
+	if (distributed_remote_process(tsk)) {
 		if (!vma || vma->vm_start > addr) {
 			if (vma_server_fetch_vma(tsk, addr) == 0) {
 				/* Replace with updated VMA */
@@ -361,6 +361,10 @@ retry:
 			goto retry;
 		}
 	}
+#ifdef CONFIG_POPCORN
+	else if (distributed_process(current) && (fault & VM_FAULT_RETRY))
+		return 0;
+#endif
 
 	up_read(&mm->mmap_sem);
 
