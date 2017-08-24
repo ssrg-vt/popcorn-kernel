@@ -496,7 +496,7 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 		return error;
 
 #ifdef CONFIG_POPCORN
-	if (process_is_distributed(current) && current->remote) {
+	if (distributed_remote_process(current)) {
 		error = vma_server_madvise_remote(start, len, behavior);
 		if (error) return error;
 	}

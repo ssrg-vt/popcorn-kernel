@@ -1208,7 +1208,7 @@ retry:
 	/* vma worker should not fault */
 	BUG_ON(tsk->is_vma_worker);
 
-	if (process_is_distributed(tsk) && tsk->at_remote) {
+	if (distributed_remote_process(tsk)) {
 		if (!vma || vma->vm_start > address) {
 			if (vma_server_fetch_vma(tsk, address) == 0) {
 				/* Replace with updated VMA */

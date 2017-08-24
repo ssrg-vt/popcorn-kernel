@@ -1747,7 +1747,6 @@ struct task_struct *fork_idle(int cpu)
 	return task;
 }
 
-
 /*
  *  Ok, this is the main fork-routine.
  *
@@ -1785,13 +1784,6 @@ long _do_fork(unsigned long clone_flags,
 
 	p = copy_process(clone_flags, stack_start, stack_size,
 			 child_tidptr, NULL, trace, tls);
-
-	/*
-	if (current->tgroup_distributed == 1) {
-		PSPRINTK("%s: current=%d, new=%d\n", __func__, current->pid, p->pid);
-	}
-	*/
-
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
@@ -1854,7 +1846,6 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 	return _do_fork(flags|CLONE_VM|CLONE_UNTRACED, (unsigned long)fn,
 		(unsigned long)arg, NULL, NULL, 0);
 }
-
 
 #ifdef __ARCH_WANT_SYS_FORK
 SYSCALL_DEFINE0(fork)

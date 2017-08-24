@@ -372,7 +372,7 @@ SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
 		return -EINVAL;
 
 #ifdef CONFIG_POPCORN
-	if (process_is_distributed(current) && current->at_remote) {
+	if (distributed_remote_process(current)) {
 		error = vma_server_mprotect_remote(start, len, prot);
 		if (error) return error;
 	}

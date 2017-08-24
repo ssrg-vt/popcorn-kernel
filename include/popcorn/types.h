@@ -12,10 +12,15 @@
 
 #include <linux/sched.h>
 
-static inline bool process_is_distributed(struct task_struct *tsk)
+static inline bool distributed_process(struct task_struct *tsk)
 {
 	if (!tsk->mm) return false;
 	return !!tsk->mm->remote;
+}
+
+static inline bool distributed_remote_process(struct task_struct *tsk)
+{
+	return distributed_process(tsk) && tsk->at_remote;
 }
 
 #include <popcorn/debug.h>

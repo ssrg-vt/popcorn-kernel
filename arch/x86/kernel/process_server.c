@@ -92,9 +92,11 @@ int save_thread_info(struct task_struct *tsk, struct field_arch *arch)
 
 	put_cpu();
 
+	/*
 	PSPRINTK("%s [%d] tls %lx\n", __func__, tsk->pid, arch->tls);
 	PSPRINTK("%s [%d] fpu %sactive\n", __func__, tsk->pid,
 			arch->fpu_active ? "" : "in");
+	*/
 
 	return 0;
 }

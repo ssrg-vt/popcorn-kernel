@@ -128,7 +128,7 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 	struct nsproxy *new_ns;
 
 	if (likely(!(flags & (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
-			      CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWCPU)))) {
+			      CLONE_NEWPID | CLONE_NEWNET)))) {
 		get_nsproxy(old_ns);
 		return 0;
 	}
@@ -180,7 +180,7 @@ int unshare_nsproxy_namespaces(unsigned long unshare_flags,
 	int err = 0;
 
 	if (!(unshare_flags & (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
-			       CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWCPU)))
+			       CLONE_NEWNET | CLONE_NEWPID)))
 		return 0;
 
 	user_ns = new_cred ? new_cred->user_ns : current_user_ns();

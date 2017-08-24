@@ -608,7 +608,7 @@ int fixup_user_fault(struct task_struct *tsk, struct mm_struct *mm,
 
 	vma = find_extend_vma(mm, address);
 #ifdef CONFIG_POPCORN
-	if (process_is_distributed(tsk)) {
+	if (distributed_process(tsk)) {
 		if (!vma || address < vma->vm_start) {
 			if (vma_server_fetch_vma(tsk, address) == 0) {
 				/* Replace with updated VMA */

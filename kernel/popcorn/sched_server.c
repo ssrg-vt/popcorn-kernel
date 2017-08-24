@@ -249,7 +249,7 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 		return 0; //EOF
 
 	for_each_process(p) {
-		if (process_is_distributed(p)) {
+		if (distributed_process(p)) {
 			struct task_struct *t;
 			unsigned int uload_total = 0;
 			unsigned int sload_total = 0;

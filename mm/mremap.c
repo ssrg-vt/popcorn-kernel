@@ -496,7 +496,7 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 	new_len = PAGE_ALIGN(new_len);
 
 #ifdef CONFIG_POPCORN
-	if (process_is_distributed(current) && current->at_remote) {
+	if (distributed_remote_process(current)) {
 		vma_server_mremap_remote(addr, old_len, new_len, flags, new_addr);
 	}
 #endif

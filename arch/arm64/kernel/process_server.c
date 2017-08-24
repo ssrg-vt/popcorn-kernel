@@ -138,7 +138,7 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 
 noinline_for_stack void update_frame_pointer(void)
 {
-#ifndef CONFIG_FRAME_POINTER
+#ifdef CONFIG_FRAME_POINTER
 	unsigned long *rbp;
 	asm volatile("mov %0, x29" : "=r"(rbp)); /* update_frame_pointer */
 

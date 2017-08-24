@@ -39,11 +39,11 @@ struct remote_context {
 	struct list_head vma_works;
 	spinlock_t vma_works_lock;
 
-	/* Shadow spawner */
-	struct task_struct *shadow_spawner;
-	struct completion spawn_egg;
-	struct list_head shadow_eggs;
-	spinlock_t shadow_eggs_lock;
+	/* Remote thread spawner */
+	struct task_struct *remote_thread_spawner;
+	struct completion spawn_pended;
+	struct list_head spawn_requests;
+	spinlock_t spawn_requests_lock;
 
 	pid_t remote_tgids[MAX_POPCORN_NODES];
 };

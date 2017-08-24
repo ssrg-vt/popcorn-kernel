@@ -128,10 +128,10 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	spin_lock_init(&rc->vma_works_lock);
 	init_completion(&rc->vma_works_ready);
 
-	rc->shadow_spawner = NULL;
-	INIT_LIST_HEAD(&rc->shadow_eggs);
-	spin_lock_init(&rc->shadow_eggs_lock);
-	init_completion(&rc->spawn_egg);
+	rc->remote_thread_spawner = NULL;
+	INIT_LIST_HEAD(&rc->spawn_requests);
+	spin_lock_init(&rc->spawn_requests_lock);
+	init_completion(&rc->spawn_pended);
 
 	memset(rc->remote_tgids, 0x00, sizeof(rc->remote_tgids));
 
@@ -175,7 +175,7 @@ static void __terminate_peers(struct remote_context *rc)
 	/* Take down peer vma workers */
 	for (nid = 0; nid < MAX_POPCORN_NODES; nid++) {
 		if (nid == my_nid || rc->remote_tgids[nid] == 0) continue;
-		PSPRINTK("EXIT [%d] terminate [%d/%d] %d\n", current->pid,
+		PSPRINTK("TERMINATE [%d/%d] with 0x%d\n",
 				rc->remote_tgids[nid], nid, req.exit_code);
 
 		req.remote_pid = rc->remote_tgids[nid];
@@ -237,16 +237,14 @@ int process_server_task_exit(struct task_struct *tsk)
 {
 	WARN_ON(tsk != current);
 
-	if (!process_is_distributed(tsk)) return -ESRCH;
+	if (!distributed_process(tsk)) return -ESRCH;
 
 	PSPRINTK("EXITED [%d] %s%s / 0x%x\n", tsk->pid,
 			tsk->at_remote ? "remote" : "local",
 			tsk->is_vma_worker ? " worker": "",
 			tsk->exit_code);
 
-#ifdef CONFIG_POPCORN_DEBUG_PROCESS_SERVER
-	show_regs(task_pt_regs(tsk));
-#endif
+	// show_regs(task_pt_regs(tsk));
 
 	if (tsk->is_vma_worker) return 0;
 
@@ -309,7 +307,7 @@ static int handle_origin_task_exit(struct pcn_kmsg_message *msg)
 	rc->vma_worker_stop = true;
 	smp_mb();
 	complete(&rc->vma_works_ready);
-	complete(&rc->spawn_egg);
+	complete(&rc->spawn_pended);
 
 	put_task_remote(tsk);
 	put_task_struct(tsk);
@@ -450,7 +448,7 @@ struct shadow_params {
 	clone_request_t *req;
 };
 
-static int shadow_main(void *_args)
+static int remote_thread_main(void *_args)
 {
 	struct shadow_params *params = _args;
 	clone_request_t *req = params->req;
@@ -483,8 +481,8 @@ static int shadow_main(void *_args)
 
 	__pair_remote_task();
 
-	PSPRINTK("\n####### MIGRATED - %d at %d --> %d at %d\n",
-			current->origin_pid, current->origin_nid, current->pid, my_nid);
+	PSPRINTK("\n####### MIGRATED - [%d/%d] from [%d/%d]\n",
+			current->pid, my_nid, current->origin_pid, current->origin_nid);
 
 	kfree(params);
 	pcn_kmsg_free_msg(req);
@@ -494,42 +492,43 @@ static int shadow_main(void *_args)
 }
 
 
-static void __kick_shadow_spawner(struct remote_context *rc, struct pcn_kmsg_work *work)
+static void __kick_remote_thread_spawner(struct remote_context *rc, struct pcn_kmsg_work *work)
 {
 	/* Exploit the list_head in work_struct */
 	struct list_head *entry = &((struct work_struct *)work)->entry;
 
 	INIT_LIST_HEAD(entry);
-	spin_lock(&rc->shadow_eggs_lock);
-	list_add(entry, &rc->shadow_eggs);
-	spin_unlock(&rc->shadow_eggs_lock);
+	spin_lock(&rc->spawn_requests_lock);
+	list_add(entry, &rc->spawn_requests);
+	spin_unlock(&rc->spawn_requests_lock);
 
-	complete(&rc->spawn_egg);
+	complete(&rc->spawn_pended);
 }
 
 
-int shadow_spawner(void *_args)
+int remote_thread_spawner(void *_args)
 {
 	struct remote_context *rc = get_task_remote(current);
 
 	PSPRINTK("%s [%d] started\n", __func__, current->pid);
 
 	current->is_vma_worker = true;
-	rc->shadow_spawner = current;
+	rc->remote_thread_spawner = current;
 
 	while (!rc->vma_worker_stop) {
 		struct work_struct *work = NULL;
 		struct shadow_params *params;
 
-		wait_for_completion_interruptible_timeout(&rc->spawn_egg, HZ);
+		if (!wait_for_completion_interruptible_timeout(&rc->spawn_pended, HZ))
+			continue;
 
-		spin_lock(&rc->shadow_eggs_lock);
-		if (!list_empty(&rc->shadow_eggs)) {
+		spin_lock(&rc->spawn_requests_lock);
+		if (!list_empty(&rc->spawn_requests)) {
 			work = list_first_entry(
-					&rc->shadow_eggs, struct work_struct, entry);
+					&rc->spawn_requests, struct work_struct, entry);
 			list_del(&work->entry);
 		}
-		spin_unlock(&rc->shadow_eggs_lock);
+		spin_unlock(&rc->spawn_requests_lock);
 
 		if (!work) continue;
 
@@ -537,7 +536,7 @@ int shadow_spawner(void *_args)
 		params->req = ((struct pcn_kmsg_work *)work)->msg;
 
 		/* Following loop deals with signals between concurrent migration */
-		while (kernel_thread(shadow_main, params,
+		while (kernel_thread(remote_thread_main, params,
 						CLONE_THREAD | CLONE_SIGHAND | SIGCHLD) < 0) {
 			schedule();
 		}
@@ -652,10 +651,10 @@ static int start_vma_worker_remote(void *_data)
 	smp_mb();
 
 	/* Create the shadow spawner */
-	kernel_thread(shadow_spawner, rc, CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
+	kernel_thread(remote_thread_spawner, rc, CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
 
 	/* Drop to user here to access mm using get_task_mm() in vma_worker routine.
-	 * This should be done after forking shadow_spawner otherwise
+	 * This should be done after forking remote_thread_spawner otherwise
 	 * kernel_thread() will consider this as a user thread fork() which
 	 * will end up an inproper instruction pointer (see copy_thread_tls()).
 	 */
@@ -708,7 +707,7 @@ static void clone_remote_thread(struct work_struct *_work)
 	}
 
 	/* Kick the spawner */
-	__kick_shadow_spawner(rc, work);
+	__kick_remote_thread_spawner(rc, work);
 	return;
 }
 

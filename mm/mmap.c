@@ -297,7 +297,7 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 	bool populate;
 
 #ifdef CONFIG_POPCORN
-	if (process_is_distributed(current) && current->at_remote) {
+	if (distributed_remote_process(current)) {
 		if (!vma_server_brk_remote(brk)) {
 			return mm->brk;
 		}
@@ -1467,7 +1467,7 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
 #ifdef CONFIG_POPCORN
-	if (process_is_distributed(current) && current->at_remote) {
+	if (distributed_remote_process(current)) {
 		retval = vma_server_mmap_remote(file, addr, len, prot, flags, pgoff);
 		goto out_fput;
 	}
@@ -2651,7 +2651,7 @@ SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 	profile_munmap(addr);
 
 #ifdef CONFIG_POPCORN
-	if (process_is_distributed(current)) {
+	if (distributed_process(current)) {
 		int ret;
 		if (current->at_remote) {
 			ret = vma_server_munmap_remote(addr, len);
