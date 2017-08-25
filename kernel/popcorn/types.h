@@ -78,6 +78,7 @@ DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 	int origin_nid;\
 	pid_t origin_tgid;\
 	pid_t origin_pid;\
+	unsigned long task_size; \
 	unsigned long stack_start; \
 	unsigned long env_start;\
 	unsigned long env_end;\

@@ -85,7 +85,7 @@ static int handle_sched_periodic(struct pcn_kmsg_message *msg)
 	popcorn_power_arm_3[POPCORN_POWER_N_VALUES - 1] = req->power_3;
 #endif
 
-	pcn_kmsg_free_msg(msg);
+	pcn_kmsg_free_msg(req);
 	return 0;
 }
 

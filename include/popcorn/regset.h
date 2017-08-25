@@ -58,19 +58,23 @@ struct regset_aarch64 {
 };
 
 struct regset_powerpc {
-	unsigned long gpr[32];
 	unsigned long nip;
 	unsigned long msr;
-	unsigned long orig_gpr3;	/* Used for restarting system calls */
 	unsigned long ctr;
 	unsigned long link;
 	unsigned long xer;
 	unsigned long ccr;
+
+	unsigned long gpr[32];
+	uint64_t fpr[32];
+
+	unsigned long orig_gpr3;	/* Used for restarting system calls */
 	unsigned long softe;		/* Soft enabled/disabled */
 };
 
 struct field_arch {
 	unsigned long tls;
+	unsigned long oob[4];
 	bool fpu_active;
 
 	union {

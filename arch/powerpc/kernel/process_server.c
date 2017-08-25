@@ -30,9 +30,6 @@
  *		to the struct field_arch structure passed
  *
  * Input:
- *	task,	pointer to the task structure of the task of which the
- *			architecture specific info needs to be saved
- *
  *	regs,	pointer to the pt_regs field of the task
  *
  * Output:
@@ -44,18 +41,23 @@
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *task, struct field_arch *arch)
+int save_thread_info(struct field_arch *arch)
 {
 	int cpu;
 
 	cpu = get_cpu();
 
+	/* TODO handle these registers at the userspace correctly */
+	arch->oob[0] = regs->msr;
+	arch->oob[1] = regs->ccr;
+	arch->oob[2] = regs->xer;
+
 	/* TODO set arch->tls and arch->fpu_active */
 
 	put_cpu();
 
-	PSPRINTK("%s [%d] tls %lx\n", __func__, task->pid, arch->tls);
-	PSPRINTK("%s [%d] fpu %sactive\n", __func__, task->pid,
+	PSPRINTK("%s [%d] tls %lx\n", __func__, current->pid, arch->tls);
+	PSPRINTK("%s [%d] fpu %sactive\n", __func__, current->pid,
 			arch->fpu_active ? "" : "in");
 
 	return 0;
@@ -70,9 +72,6 @@ int save_thread_info(struct task_struct *task, struct field_arch *arch)
  *		task from the struct field_arch structure passed
  *
  * Input:
- * 	task,	pointer to the task structure of the task of which the
- * 			architecture specific info needs to be restored
- *
  * 	arch,	pointer to the struct field_arch structure type from which the
  *			architecture specific information of the task has to be
  *			restored
@@ -84,35 +83,34 @@ int save_thread_info(struct task_struct *task, struct field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool restore_segments)
+int restore_thread_info(struct field_arch *arch, bool restore_segments)
 {
-	struct pt_regs *regs = task_pt_regs(task);
+	struct pt_regs *regs = current_pt_regs();
 	struct regset_powerpc *regset = &arch->regs_ppc;
 	int cpu, i;
-
-	BUG_ON(restore_segments && current != task);
 
 	cpu = get_cpu();
 
 	regs->nip = regset->nip;
-	regs->msr = regset->msr;
-	regs->orig_gpr3 = regset->orig_gpr3;
-	regs->ctr = regset->ctr;
 	regs->link = regset->link;
-	regs->xer = regset->xer;
-	regs->ccr = regset->ccr;
+	regs->ctr = regset->ctr;
 
-	for (i = 0; i < 31; i++)
-		regs->gpr[i] =  regset->gpr[i];
+	regs->msr = arch->oob[0];
+	regs->ccr = arch->oob[1];
+	regs->xer = arch->oob[2];
+
+	for (i = 0; i < 31; i++) {
+		regs->gpr[i] = regset->gpr[i];
+	}
 
 	if (restore_segments) {
 		/* TODO set up TLS and FPU status */
 	}
 	put_cpu();
 
-	PSPRINTK("%s [%d] pc %lx sp %lx\n", __func__, task->pid,
-			regs->nip, regs->ctr);
-	show_regs(regs);
+	PSPRINTK("%s [%d] ip %lx lr %lx\n", __func__, current->pid,
+			regs->nip, regs->link);
+	//show_regs(regs);
 
 	return 0;
 }
@@ -120,4 +118,8 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 
 noinline_for_stack void update_frame_pointer(void)
 {
+	unsigned long *lr;
+	asm volatile ("mtlr 4; std 4, %0" : "=m"(lr));
+
+	*lr = current_pt_regs()->link;
 }

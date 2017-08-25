@@ -340,7 +340,7 @@ retry:
 	/* vma worker should not fault */
 	BUG_ON(current->is_vma_worker);
 
-	if (process_is_distributed(current)) {
+	if (distributed_process(current)) {
 		if (!vma || vma->vm_start > address) {
 			if (vma_server_fetch_vma(current, address) == 0) {
 				/* Replace with updated VMA */
@@ -492,6 +492,11 @@ good_area:
 			goto retry;
 		}
 	}
+#ifdef CONFIG_POPCORN
+	else if (distributed_process(current) && fault == VM_FAULT_RETRY) {
+		return 0;
+	}
+#endif
 
 	up_read(&mm->mmap_sem);
 	goto bail;

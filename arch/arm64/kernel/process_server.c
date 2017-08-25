@@ -34,9 +34,6 @@
  *		to the struct field_arch structure passed
  *
  * Input:
- *	task,	pointer to the task structure of the task of which the
- *			architecture specific info needs to be saved
- *
  *	regs,	pointer to the pt_regs field of the task
  *
  * Output:
@@ -48,19 +45,19 @@
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *task, struct field_arch *arch)
+int save_thread_info(struct field_arch *arch)
 {
 	int cpu;
 
 	cpu = get_cpu();
 
-	arch->tls = task->thread.tp_value;
+	arch->tls = current->thread.tp_value;
 	arch->fpu_active = test_thread_flag(TIF_FOREIGN_FPSTATE);
 
 	put_cpu();
 
-	PSPRINTK("%s [%d] tls %lx\n", __func__, task->pid, arch->tls);
-	PSPRINTK("%s [%d] fpu %sactive\n", __func__, task->pid,
+	PSPRINTK("%s [%d] tls %lx\n", __func__, current->pid, arch->tls);
+	PSPRINTK("%s [%d] fpu %sactive\n", __func__, current->pid,
 			arch->fpu_active ? "" : "in");
 
 	return 0;
@@ -75,9 +72,6 @@ int save_thread_info(struct task_struct *task, struct field_arch *arch)
  *		task from the struct field_arch structure passed
  *
  * Input:
- * 	task,	pointer to the task structure of the task of which the
- * 			architecture specific info needs to be restored
- *
  * 	arch,	pointer to the struct field_arch structure type from which the
  *			architecture specific information of the task has to be
  *			restored
@@ -89,13 +83,11 @@ int save_thread_info(struct task_struct *task, struct field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool restore_segments)
+int restore_thread_info(struct field_arch *arch, bool restore_segments)
 {
-	struct pt_regs *regs = task_pt_regs(task);
+	struct pt_regs *regs = current_pt_regs();
 	struct regset_aarch64 *regset = &arch->regs_aarch;
 	int cpu, i;
-
-	BUG_ON(restore_segments && current != task);
 
 	cpu = get_cpu();
 
@@ -109,27 +101,27 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 	if (restore_segments) {
 		unsigned long tpidr, tpidrro;
 
-		*task_user_tls(task) = arch->tls;
+		*task_user_tls(current) = arch->tls;
 
-		tpidr = *task_user_tls(task);
-		tpidrro = is_compat_thread(task_thread_info(task)) ?
-			task->thread.tp_value : 0;
+		tpidr = *task_user_tls(current);
+		tpidrro = is_compat_thread(current_thread_info()) ?
+			current->thread.tp_value : 0;
 		asm("msr tpidr_el0, %0;"
 			"msr tpidrro_el0, %1;"
 			: : "r" (tpidr), "r" (tpidrro));
 
 		if (arch->fpu_active) {
-			fpsimd_flush_task_state(task);
+			fpsimd_flush_task_state(current);
 			set_thread_flag(TIF_FOREIGN_FPSTATE);
 		}
 	}
 
 	put_cpu();
 
-	PSPRINTK("%s [%d] pc %llx sp %llx\n", __func__, task->pid,
+	PSPRINTK("%s [%d] pc %llx sp %llx\n", __func__, current->pid,
 			regs->pc, regs->sp);
-	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, task->pid,
-			*task_user_tls(task), arch->fpu_active ? "" : "in");
+	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, current->pid,
+			*task_user_tls(current), arch->fpu_active ? "" : "in");
 	show_regs(regs);
 
 	return 0;

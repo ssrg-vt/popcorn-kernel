@@ -389,5 +389,8 @@
 #define __NR_userfaultfd	364
 #define __NR_membarrier		365
 #define __NR_mlock2		378
+#define __NR_sched_migrate	379
+#define __NR_sched_migration_proposed	380
+#define __NR_sched_propose_migration	381
 
 #endif /* _UAPI_ASM_POWERPC_UNISTD_H_ */

@@ -445,7 +445,7 @@ static void bring_back_remote_thread(struct pcn_kmsg_message *msg)
 
 	/* XXX signals */
 
-	restore_thread_info(current, &req->arch, false);
+	restore_thread_info(&req->arch, false);
 
 out_free:
 	pcn_kmsg_free_msg(msg);
@@ -493,7 +493,7 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 			regset_size(get_popcorn_node_arch(dst_nid)));
 	BUG_ON(ret != 0);
 
-	save_thread_info(tsk, &req->arch);
+	save_thread_info(&req->arch);
 
 	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
 
@@ -566,7 +566,7 @@ static int remote_thread_main(void *_args)
 	set_fs(USER_DS);
 
 	/* Inject thread info here */
-	restore_thread_info(current, &req->arch, true);
+	restore_thread_info(&req->arch, true);
 
 	/* XXX: Skip restoring signals and handlers for now
 	sigorsets(&current->blocked, &current->blocked, &req->remote_blocked);
@@ -672,6 +672,7 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 	set_mm_exe_file(mm, f);
 	filp_close(f, NULL);
 
+	mm->task_size = req->task_size;
 	mm->start_stack = req->stack_start;
 	mm->start_brk = req->start_brk;
 	mm->brk = req->brk;
@@ -916,6 +917,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 		goto out;
 	}
 
+	req->task_size = mm->task_size;
 	req->stack_start = mm->start_stack;
 	req->start_brk = mm->start_brk;
 	req->brk = mm->brk;
@@ -951,7 +953,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 			regset_size(get_popcorn_node_arch(dst_nid)));
 	BUG_ON(ret != 0);
 
-	save_thread_info(tsk, &req->arch);
+	save_thread_info(&req->arch);
 
 	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
 

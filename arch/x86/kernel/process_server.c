@@ -36,9 +36,6 @@
  *		to the struct struct field_arch structure passed
  *
  * Input:
- *	task,	pointer to the task structure of the task of which the
- *			architecture specific info needs to be saved
- *
  *	regs,	pointer to the pt_regs field of the task
  *
  * Output:
@@ -50,14 +47,13 @@
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int save_thread_info(struct task_struct *tsk, struct field_arch *arch)
+int save_thread_info(struct field_arch *arch)
 {
 	unsigned short fsindex, gsindex;
 	unsigned long ds, es, fs, gs;
 	int cpu;
 
-	BUG_ON(!tsk || !arch);
-	BUG_ON(current != tsk);
+	BUG_ON(!arch);
 
 	cpu = get_cpu();
 
@@ -67,19 +63,19 @@ int save_thread_info(struct task_struct *tsk, struct field_arch *arch)
 	 * Thus, nothing to do with them.
 	 */
 
-	ds = tsk->thread.ds;
-	es = tsk->thread.es;
+	ds = current->thread.ds;
+	es = current->thread.es;
 
 	savesegment(fs, fsindex);
 	if (fsindex) {
-		fs = get_desc_base(tsk->thread.tls_array + FS_TLS);
+		fs = get_desc_base(current->thread.tls_array + FS_TLS);
 	} else {
 		rdmsrl(MSR_FS_BASE, fs);
 	}
 
 	savesegment(gs, gsindex);
 	if (gsindex) {
-		gs = get_desc_base(tsk->thread.tls_array + GS_TLS);
+		gs = get_desc_base(current->thread.tls_array + GS_TLS);
 	} else {
 		rdmsrl(MSR_KERNEL_GS_BASE, gs);
 	}
@@ -88,13 +84,13 @@ int save_thread_info(struct task_struct *tsk, struct field_arch *arch)
 	WARN_ON(es);
 	WARN_ON(gs);
 	arch->tls = fs;
-	arch->fpu_active = !!tsk->thread.fpu.fpstate_active;
+	arch->fpu_active = !!current->thread.fpu.fpstate_active;
 
 	put_cpu();
 
 	/*
-	PSPRINTK("%s [%d] tls %lx\n", __func__, tsk->pid, arch->tls);
-	PSPRINTK("%s [%d] fpu %sactive\n", __func__, tsk->pid,
+	PSPRINTK("%s [%d] tls %lx\n", __func__, current->pid, arch->tls);
+	PSPRINTK("%s [%d] fpu %sactive\n", __func__, current->pid,
 			arch->fpu_active ? "" : "in");
 	*/
 
@@ -111,9 +107,6 @@ int save_thread_info(struct task_struct *tsk, struct field_arch *arch)
  *		task from the struct field_arch structure passed
  *
  * Input:
- * 	tsk,	pointer to the task structure of the task of which the
- * 			architecture specific info needs to be restored
- *
  * 	arch,	pointer to the struct field_arch structure type from which the
  *			architecture specific information of the task has to be
  *			restored
@@ -129,13 +122,11 @@ int save_thread_info(struct task_struct *tsk, struct field_arch *arch)
  *	on success, returns 0
  * 	on failure, returns negative integer
  */
-int restore_thread_info(struct task_struct *tsk, struct field_arch *arch, bool restore_segments)
+int restore_thread_info(struct field_arch *arch, bool restore_segments)
 {
-	struct pt_regs *regs = task_pt_regs(tsk);
+	struct pt_regs *regs = current_pt_regs();
 	struct regset_x86_64 *regset = &arch->regs_x86;
 	int cpu;
-
-	BUG_ON(restore_segments && current != tsk);
 
 	cpu = get_cpu();
 
@@ -165,30 +156,30 @@ int restore_thread_info(struct task_struct *tsk, struct field_arch *arch, bool r
 		regs->ss = __USER_DS;
 
 		/*
-		tsk->thread.ds = regset->ds;
-		tsk->thread.es = regset->es;
+		current->thread.ds = regset->ds;
+		current->thread.es = regset->es;
 		*/
 
 		if (arch->tls) {
-			do_arch_prctl(tsk, ARCH_SET_FS, arch->tls);
+			do_arch_prctl(current, ARCH_SET_FS, arch->tls);
 		}
 		/*
 		if (arch->thread_gs) {
-			do_arch_prctl(tsk, ARCH_SET_GS, arch->thread_gs);
+			do_arch_prctl(current, ARCH_SET_GS, arch->thread_gs);
 		}
 		*/
 		if (arch->fpu_active) {
-			fpu__activate_curr(&tsk->thread.fpu);
+			fpu__activate_curr(&current->thread.fpu);
 		}
 	}
 
 	put_cpu();
 
-	PSPRINTK("%s [%d] ip %lx\n", __func__, tsk->pid,
+	PSPRINTK("%s [%d] ip %lx\n", __func__, current->pid,
 			regs->ip);
-	PSPRINTK("%s [%d] sp %lx bp %lx\n", __func__, tsk->pid,
+	PSPRINTK("%s [%d] sp %lx bp %lx\n", __func__, current->pid,
 			regs->sp, regs->bp);
-	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, tsk->pid,
+	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, current->pid,
 			arch->tls, arch->fpu_active ? "" : "in");
 
 	return 0;
