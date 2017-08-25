@@ -197,15 +197,11 @@ int restore_thread_info(struct task_struct *tsk, struct field_arch *arch, bool r
 #include <asm/stacktrace.h>
 noinline_for_stack void update_frame_pointer(void)
 {
-#ifdef CONFIG_FRAME_POINTER
 	unsigned long *rbp;
 	get_bp(rbp); /* update_frame_pointer */
 
 	/* User rbp is at one stack frames below */
 	*rbp = current_pt_regs()->bp;	/* sched_migrate */
-#else
-	WARN_ON_ONCE("May not be migrated back correctly due to omit-frame-buffer");
-#endif
 }
 
 

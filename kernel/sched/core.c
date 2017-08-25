@@ -4643,6 +4643,8 @@ SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
 	return 0;
 }
 
+#pragma GCC optimize ("no-omit-frame-pointer")
+#pragma GCC optimize ("no-optimize-sibling-calls")
 SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 {
 	int ret;
@@ -4677,7 +4679,7 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 	PSPRINTK("  [%d] resume execution\n", current->pid);
 	return 0;
 }
-
+#pragma GCC reset_options
 #else // CONFIG_POPCORN
 
 SYSCALL_DEFINE0(sched_migration_proposed)

@@ -120,8 +120,4 @@ int restore_thread_info(struct task_struct *task, struct field_arch *arch, bool 
 
 noinline_for_stack void update_frame_pointer(void)
 {
-#ifdef CONFIG_FRAME_POINTER
-#else
-	WARN_ON_ONCE("May not be migrated back correctly due to omit-frame-buffer");
-#endif
 }
