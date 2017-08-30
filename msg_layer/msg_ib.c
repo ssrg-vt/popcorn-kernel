@@ -1480,7 +1480,7 @@ static void ib_recv_handler_BottomHalf(struct work_struct *work)
 		ftn = callbacks[msg->header.type];
 		if (ftn != NULL) {
 #ifdef CONFIG_POPCORN_STAT
-			account_pcn_message_recv(lmsg);
+			account_pcn_message_recv(msg);
 #endif
 			ftn((void*)(&((ib_recv_work_t *)work)->msg));
 		} else {

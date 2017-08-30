@@ -33,9 +33,6 @@
 #include "wait_station.h"
 #include "page_server.h"
 
-#include "util.h"
-#define CONFIG_RDMA 1
-
 static inline bool page_is_replicated(struct page *page)
 {
 	return !!bitmap_weight(page->owners, MAX_POPCORN_NODES);
@@ -718,6 +715,39 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
 /**************************************************************************
  * Handle page faults happened at remote nodes.
  */
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
+static remote_page_response_t *__fetch_remote_page_rdma(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags)
+{
+	remote_page_request_t req = {
+		.header = {
+			.type = PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.rdma_header = {
+			.is_write = true,
+		},
+
+		.addr = addr,
+		.fault_flags = fault_flags,
+
+		.origin_nid = my_nid,
+		.origin_pid = tsk->pid,
+
+		.remote_pid = from_pid,
+	};
+
+	PGPRINTK("  [%d] ->[%d/%d] %lx\n", tsk->pid, from_pid, from_nid, addr);
+	return pcn_kmsg_send_rdma(from_nid, &req, sizeof(req),
+								sizeof(remote_page_response_t));
+}
+static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
+{
+	return __fetch_remote_page_rdma(tsk, tsk->origin_nid, tsk->origin_pid,
+			addr, fault_flags);
+}
+
+#else /* CONFIG_POPCORN_KMSG_IB_RDMA */
+
 static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 {
 	remote_page_response_t *res = (remote_page_response_t *)msg;
@@ -733,11 +763,7 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	return 0;
 }
 
-#if CONFIG_RDMA
-static remote_page_response_t *__request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags)
-#else
 static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id)
-#endif
 {
 	remote_page_request_t req = {
 		.header = {
@@ -750,32 +776,18 @@ static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t f
 
 		.origin_nid = my_nid,
 		.origin_pid = tsk->pid,
-#if !CONFIG_RDMA
 		.origin_ws = ws_id,
-#else
-		.rdma_header = {
-			.is_write = true,
-		},
-#endif
 
 		.remote_pid = from_pid,
 	};
 
-	PGPRINTK("  [%d] ->[%d/%d] %lx\n", tsk->pid, from_pid, from_nid, addr);
-#if CONFIG_RDMA
-	return pcn_kmsg_send_rdma(from_nid, &req, sizeof(req),
-								sizeof(remote_page_response_t));
-#else
 	pcn_kmsg_send(from_nid, &req, sizeof(req));
-#endif
+
+	PGPRINTK("  [%d] ->[%d/%d] %lx\n", tsk->pid, from_pid, from_nid, addr);
 }
 
-static remote_page_response_t *__fetch_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
+static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
 {
-#if CONFIG_RDMA
-	return __request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
-			addr, fault_flags);
-#else
 	remote_page_response_t *rp;
 	struct wait_station *ws = get_wait_station(tsk);
 
@@ -786,8 +798,8 @@ static remote_page_response_t *__fetch_remote_page(struct task_struct *tsk, unsi
 	put_wait_station(ws);
 
 	return rp;
-#endif
 }
+#endif /* CONFIG_POPCORN_KMSG_IB_RDMA */
 
 
 static void __update_remote_page(struct mm_struct *mm,
@@ -846,9 +858,8 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 	} else {
 		peers--;
 	}
-
-#if !CONFIG_RDMA
-	/* one for fetch, @peers for revocation */
+#ifndef CONFIG_POPCORN_KMSG_IB_RDMA
+	/* counting the fetch request */
 	peers++;
 #endif
 	ws = get_wait_station_multiple(tsk, peers);
@@ -858,10 +869,8 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 		if (nid == my_nid) continue;
 		if (from-- == 0) {
 			from_nid = nid;
-#if CONFIG_RDMA
-			rp = __request_remote_page(tsk, nid, pid, addr, fault_flags);
-			PGPRINTK("  [%d] <-[%d/%d] %lx %x\n",
-					ws->pid, rp->remote_pid, rp->remote_nid, rp->addr, rp->result);
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
+			rp = __fetch_remote_page_rdma(tsk, nid, pid, addr, fault_flags);
 #else
 			__request_remote_page(tsk, nid, pid, addr, fault_flags, ws->id);
 #endif
@@ -874,12 +883,10 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 		}
 	}
 
-#if !CONFIG_RDMA
-	rp = wait_at_station(ws);
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
+	if (peers) wait_at_station(ws);
 #else
-	if (peers) {
-		wait_at_station(ws);
-	}
+	rp = wait_at_station(ws);
 #endif
 	put_wait_station(ws);
 
@@ -996,7 +1003,6 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	// lock_page(page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
 	paddr = kmap_atomic(page);
-	//print_page_signature(paddr, tsk->pid);
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 	kunmap_atomic(paddr);
 	// unlock_page(page);
@@ -1089,7 +1095,7 @@ again:
 				kunmap_atomic(paddr);
 				// unlock_page(page);
 
-#if CONFIG_RDMA
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
 				pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
 #else
 				pcn_kmsg_free_msg(rp);
@@ -1120,7 +1126,6 @@ again:
 		// lock_page(page);
 		flush_cache_page(vma, addr, page_to_pfn(page));
 		paddr = kmap_atomic(page);
-		//print_page_signature(paddr, tsk->pid);
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 		kunmap_atomic(paddr);
 		// unlock_page(page);
@@ -1150,9 +1155,6 @@ static void process_remote_page_request(struct work_struct *work)
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
-//#if !CONFIG_RDMA
-	int from = req->origin_nid;
-//#endif
 	int res_size;
 
 	while (!res) {	/* response contains a page. allocate from a heap */
@@ -1171,7 +1173,7 @@ again:
 	PGPRINTK("\nREMOTE_PAGE_REQUEST [%d] %lx %s from [%d/%d]\n",
 			req->remote_pid, req->addr,
 			fault_for_write(req->fault_flags) ? "W" : "R",
-			req->origin_pid, from);
+			req->origin_pid, req->origin_nid);
 
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, req->addr);
@@ -1215,16 +1217,10 @@ out:
 	res->origin_pid = req->origin_pid;
 	res->origin_ws = req->origin_ws;
 
-	/*
-	if (res->result == 0) {
-		print_page_signature(res->page, req->remote_pid);
-	}
-	*/
-
-#if CONFIG_RDMA
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
 	pcn_kmsg_handle_remote_rdma_request(req, res, res_size);
 #else
-	pcn_kmsg_send(from, res, res_size);
+	pcn_kmsg_send(req->origin_nid, res, res_size);
 #endif
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
@@ -1311,7 +1307,7 @@ retry:
 
 		spin_lock(ptl);
 		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
-#if CONFIG_RDMA
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
 		pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
 #else
 		pcn_kmsg_free_msg(rp);
@@ -1395,7 +1391,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
-	rp = __fetch_remote_page(current, addr, fault_flags);
+	rp = __fetch_page_from_origin(current, addr, fault_flags);
 
 	if (rp->result) {
 		if (rp->result == VM_FAULT_RETRY) { /* contended with local origin */
@@ -1452,7 +1448,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 out_free:
 	put_page(page);
-#if CONFIG_RDMA
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
 	pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
 #else
 	pcn_kmsg_free_msg(rp);
@@ -1548,7 +1544,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 
 		spin_lock(ptl);
 		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
-#if CONFIG_RDMA
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
 		pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
 #else
 		pcn_kmsg_free_msg(rp);
@@ -1661,10 +1657,12 @@ int __init page_server_init(void)
 {
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST, remote_page_request);
+#ifndef CONFIG_POPCORN_KMSG_IB_RDMA
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE, remote_page_response);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_GRANT, remote_page_response);
+#endif
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, page_invalidate_request);
 	REGISTER_KMSG_HANDLER(

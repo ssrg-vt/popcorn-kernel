@@ -9,7 +9,7 @@ config POPCORN_KMSG
 
 config POPCORN_KMSG_SOCKET
 	tristate "Socket messaging layer"
-	depends on POPCORN_KMSG
+	depends on POPCORN_KMSG && INET
 	default m
 
 config POPCORN_KMSG_DOLPHIN
@@ -19,14 +19,15 @@ config POPCORN_KMSG_DOLPHIN
 
 config POPCORN_KMSG_IB
 	tristate "InfiniBand messaging layer"
-	depends on POPCORN_KMSG
+	depends on POPCORN_KMSG && INFINIBAND
 	default n
 
-if POPCORN_KMSG_IB
-config POPCORN_IBWR_PAGE
-	bool "Passing pages via Infiniband READ/WRITE"
+config POPCORN_KMSG_IB_RDMA
+	bool "Use RDMA to transfer pages"
+	depends on POPCORN_KMSG_IB
 	default n
-endif
+	help
+		Transfer pages through RDMA. N will transfer pages using IB verb.
 
 config POPCORN_KMSG_TEST
 	tristate "Test modules for messaging layer"
