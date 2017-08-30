@@ -30,6 +30,12 @@ void print_page_signature(unsigned char *addr)
 	printk("\n");
 }
 
+void print_page_signature_pid(pid_t pid, unsigned char *addr)
+{
+	printk("  [%d] ", pid);
+	print_page_signature(addr);
+}
+
 static DEFINE_SPINLOCK(__print_lock);
 static char *__print_buffer = NULL;
 

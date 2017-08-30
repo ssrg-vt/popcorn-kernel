@@ -21,6 +21,7 @@ struct wait_station *get_wait_station_multiple(struct task_struct *tsk, int coun
 
 	spin_lock(&wait_station_lock);
 	id = find_first_zero_bit(wait_station_available, MAX_WAIT_STATIONS);
+	BUG_ON(id >= MAX_WAIT_STATIONS);
 	ws = wait_stations + id;
 	set_bit(id, wait_station_available);
 	spin_unlock(&wait_station_lock);

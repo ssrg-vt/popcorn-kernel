@@ -1570,11 +1570,6 @@ int page_server_handle_pte_fault(
 				mm, vma, addr, pmd, pte, pte_val, fault_flags);
 	}
 
-	if (fault_flags & FAULT_FLAG_TRIED) {
-		/* Some do_fault() makes the fault to be called again. */
-		return VM_FAULT_CONTINUE;
-	}
-
 	if ((vma->vm_flags & VM_WRITE) &&
 			fault_for_write(fault_flags) && !pte_write(pte_val)) {
 		/* wr-protected for keeping page consistency */
@@ -1582,6 +1577,7 @@ int page_server_handle_pte_fault(
 				mm, vma, addr, pmd, pte, pte_val, fault_flags);
 	}
 
+	pte_unmap(pte);
 	PGPRINTK("  [%d] might be fixed by others???\n", current->pid);
 	return 0;
 }
