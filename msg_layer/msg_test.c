@@ -650,21 +650,24 @@ static int rdma_farm_test(unsigned long long payload_size,
 	do_gettimeofday(&t1);
 	for (j = 0; j < iter; j++) {
 		for (i = 0; i < MAX_NUM_NODES; i++) {
-			remote_thread_rdma_rw_t req_rdma;
+			remote_thread_rdma_rw_t *req_rdma;
 			if (my_nid == i) continue;
 
-			req_rdma.header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
+			req_rdma = pcn_kmsg_alloc_msg(sizeof(*req_rdma));
+			BUG_ON(!req_rdma);
+			req_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
 			//req_rdma->rdma_header.rmda_type_res =
 			//						PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
-			req_rdma.header.prio = PCN_KMSG_PRIO_NORMAL;
+			req_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
 
-			req_rdma.rdma_header.is_write = true;
-			req_rdma.rdma_header.your_buf_ptr = dummy_act_buf[i][t];
+			req_rdma->rdma_header.is_write = true;
+			req_rdma->rdma_header.your_buf_ptr = dummy_act_buf[i][t];
 
-			req_rdma.t_num = t;
+			req_rdma->t_num = t;
 
-			pcn_kmsg_send_rdma(i, &req_rdma,
-							sizeof(req_rdma), (unsigned int)payload_size);
+			pcn_kmsg_send_rdma(i, req_rdma,
+							sizeof(*req_rdma), (unsigned int)payload_size);
+			pcn_kmsg_free_msg(req_rdma);
 		}
 	}
 	do_gettimeofday(&t2);
@@ -719,15 +722,14 @@ static int rdma_farm_mem_cpy_test(unsigned long long payload_size,
 			BUG_ON(!req_rdma);
 
 			req_rdma->header.type = PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST;
-			//req_rdma->rdma_header.rmda_type_res =					// Not used for FaRM WRITE
+			//req_rdma->rdma_header.rmda_type_res =
 			//							PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE;
 			req_rdma->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 			req_rdma->rdma_header.is_write = true;
-			req_rdma->rdma_header.your_buf_ptr = dummy_act_buf[i][t];
+			//req_rdma->rdma_header.your_buf_ptr = dummy_act_buf[i][t];
 
 			req_rdma->t_num = t;
-
 			act_buf = pcn_kmsg_send_rdma(i, req_rdma,
 						sizeof(*req_rdma), (unsigned int)payload_size);
 			if (act_buf) {
@@ -752,9 +754,10 @@ static int rdma_farm_mem_cpy_test(unsigned long long payload_size,
 				DEBUG_LOG_V("%s(): return int %d payload_size %llu\n\n",
 											__func__, lengh, payload_size);
 #endif
-				kfree(act_buf);
+				memcpy(dummy_act_buf[i][t], act_buf, payload_size);
+				kfree(((remote_thread_rdma_rw_t*)act_buf)->poll_head_addr);
 			} else
-				printk("%s(): recv size 0\n\n", __func__);
+				printk(KERN_WARNING "%s(): recv size 0\n", __func__);
 
 			pcn_kmsg_free_msg(req_rdma);
 		}
@@ -1481,7 +1484,7 @@ static void process_handle_test_read_request(struct work_struct *_work)
 	void* paddr = dummy_pass_buf[req->header.from_nid][req->t_num];
 
 	/* RDMA routine */
-	pcn_kmsg_handle_remote_rdma_request(req, paddr);
+	pcn_kmsg_handle_remote_rdma_request(req, paddr, req->rdma_header.rw_size);
 
 	pcn_kmsg_free_msg(req);
 	kfree(work);
@@ -1494,7 +1497,7 @@ static void process_handle_test_read_response(struct work_struct *_work)
 	struct wait_station *ws = wait_station(res->remote_ws);
 
 	/* RDMA routine */
-	pcn_kmsg_handle_remote_rdma_request(res, NULL);
+	pcn_kmsg_handle_remote_rdma_request(res, NULL, 0);
 
 	ws->private = res;
 	smp_mb();
@@ -1513,7 +1516,7 @@ static void process_handle_test_write_request(struct work_struct *_work)
 	void *paddr = dummy_pass_buf[req->header.from_nid][req->t_num];
 
 	/* RDMA routine */
-	pcn_kmsg_handle_remote_rdma_request(req, paddr);
+	pcn_kmsg_handle_remote_rdma_request(req, paddr, req->rdma_header.rw_size);
 
 	pcn_kmsg_free_msg(req);
 	kfree(work);
@@ -1526,7 +1529,7 @@ static void process_handle_test_write_response(struct work_struct *_work)
 	struct wait_station *ws = wait_station(res->remote_ws);
 
 	/* RDMA routine */
-	pcn_kmsg_handle_remote_rdma_request(res, NULL);
+	pcn_kmsg_handle_remote_rdma_request(res, NULL, 0);
 
 	ws->private = res;
 	smp_mb();

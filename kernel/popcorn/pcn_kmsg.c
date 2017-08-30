@@ -91,16 +91,23 @@ void pcn_kmsg_free_msg(void *msg)
 		kfree(msg);
 }
 
+void pcn_rdma_kmsg_free_msg(void *msg)
+{
+	kfree(msg);
+}
+
 /*
  * Your request must be allocated by kmalloc().
+ * rw_size: Max size you expect remote to perform a R/W
  */
-char *pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
+void *pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
 						unsigned int msg_size, unsigned int rw_size)
 {
     if (send_rdma_callback == NULL) {
 		struct pcn_kmsg_hdr *hdr = lmsg;
-		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, msg_size=%u "
-		"rw_size=%u\n", __func__, hdr->from_nid, hdr->type, msg_size, rw_size);
+		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, "
+				"msg_size=%u rw_size=%u\n", __func__,
+				hdr->from_nid, hdr->type, msg_size, rw_size);
         return NULL;
     }
 
@@ -108,18 +115,19 @@ char *pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
 }
 
 void pcn_kmsg_handle_remote_rdma_request(
-								void *inc_lmsg, void *paddr)
+				void *inc_lmsg, void *paddr, u32 rw_size)
 {
 	if (!memcmp(msg_layer,"IB", 2))
-		handle_rdma_callback(inc_lmsg, paddr);
+		handle_rdma_callback(inc_lmsg, paddr, rw_size);
 	else
-		printk(KERN_ERR "%s: current msg_layer (%s) is not \"IB\"\n",
-														__func__, msg_layer);
+		printk(KERN_ERR "%s: current msg_layer (%s) "
+				"is not \"IB\"\n", __func__, msg_layer);
 }
 
 
 EXPORT_SYMBOL(pcn_kmsg_alloc_msg);
 EXPORT_SYMBOL(pcn_kmsg_free_msg);
+EXPORT_SYMBOL(pcn_rdma_kmsg_free_msg);
 EXPORT_SYMBOL(pcn_kmsg_send_rdma);
 EXPORT_SYMBOL(pcn_kmsg_send);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);

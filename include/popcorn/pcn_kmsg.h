@@ -115,6 +115,13 @@ struct pcn_kmsg_hdr {
 		fields				\
 	}__attribute__((packed)) type
 
+#define DEFINE_PCN_RDMA_KMSG(type, fields) \
+	typedef struct {				\
+		struct pcn_kmsg_hdr header;	\
+		struct pcn_kmsg_rdma_hdr rdma_header; \
+		void *poll_head_addr; \
+		fields				\
+	}__attribute__((packed)) type
 
 /* rdma header */
 struct pcn_kmsg_rdma_hdr {
@@ -140,13 +147,27 @@ struct pcn_kmsg_message {
 typedef struct {
     struct pcn_kmsg_hdr header;				/* must follow */
 	struct pcn_kmsg_rdma_hdr rdma_header;	/* must follow, rdma essential */
+	void* poll_head_addr;					/* for rdma poll */
+
+	/* res format */
+    int remote_nid;
+    pid_t remote_pid;
+    int origin_nid;
+    pid_t origin_pid;
+    int origin_ws;
+    unsigned long addr;
+    int result;
+
+	/* for multi-thread testing */
+	unsigned char payload[8192];
+
     /* your data structures */
 	int remote_ws;
 	u64 dma_addr_act;
 //#if CONFIG_FARM2WRITE
 	u32 mr_ofs;
 //#endif
-	int t_num;								/* for multi-thread testing */
+	int t_num;
 }__attribute__((packed)) remote_thread_rdma_rw_t;
 
 /* TYPES OF MESSAGES */
@@ -168,10 +189,11 @@ typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
 typedef int (*send_cbftn)(unsigned int,
 						struct pcn_kmsg_message *,
 						unsigned int);
-typedef char* (*send_rdma_cbftn)(unsigned int,
+typedef void* (*send_rdma_cbftn)(unsigned int,
 								remote_thread_rdma_rw_t *,
 								unsigned int, unsigned int);
-typedef void (*handle_rdma_request_ftn)(remote_thread_rdma_rw_t *, void *);
+typedef void (*handle_rdma_request_ftn)(remote_thread_rdma_rw_t *,
+												void *, u32 rw_size);
 typedef void (*kmsg_free_ftn)(struct pcn_kmsg_message *);
 
 /* SETUP */
@@ -189,12 +211,14 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
 /* Send a message to the specified destination CPU. */
 int pcn_kmsg_send(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
-char *pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg,
+void *pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg,
 						unsigned int msg_size, unsigned int rw_size);
-void pcn_kmsg_handle_remote_rdma_request(void *inc_lmsg, void *paddr);
+void pcn_kmsg_handle_remote_rdma_request(
+						void *inc_lmsg, void *paddr, u32 rw_size);
 
 /* Free a received message (called at the end of the callback function) */
 void pcn_kmsg_free_msg(void *msg);
+void pcn_rdma_kmsg_free_msg(void *msg);
 
 /* Allocate a received message */
 void *pcn_kmsg_alloc_msg(size_t size);

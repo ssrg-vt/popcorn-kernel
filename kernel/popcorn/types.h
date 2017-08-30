@@ -11,6 +11,8 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
 
+#define CONFIG_RDMA 1
+
 /**
  * Remote execution context
  */
@@ -207,7 +209,11 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	pid_t remote_pid; \
 	unsigned long addr; \
 	unsigned long fault_flags;
+#if CONFIG_RDMA
+DEFINE_PCN_RDMA_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
+#else
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
+#endif
 
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	int remote_nid; \
@@ -221,11 +227,19 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 #define REMOTE_PAGE_RESPONSE_FIELDS \
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	unsigned char page[PAGE_SIZE];
+#if CONFIG_RDMA
+DEFINE_PCN_RDMA_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
+#else
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
+#endif
 
 #define REMOTE_PAGE_GRANT_FIELDS \
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS
+#if CONFIG_RDMA
+DEFINE_PCN_RDMA_KMSG(remote_page_grant_t, REMOTE_PAGE_GRANT_FIELDS);
+#else
 DEFINE_PCN_KMSG(remote_page_grant_t, REMOTE_PAGE_GRANT_FIELDS);
+#endif
 
 
 #define REMOTE_PAGE_FLUSH_COMMON_FIELDS \

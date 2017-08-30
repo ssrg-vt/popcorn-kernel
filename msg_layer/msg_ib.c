@@ -54,6 +54,7 @@
 #include <popcorn/stat.h>
 
 #include "common.h"
+#include "../kernel/popcorn/types.h"
 
 /* features been developed */
 #define CONFIG_FARM 0			/* Original FaRM - user follows convention */
@@ -79,17 +80,17 @@
 #define MAX_RECV_SGE 1
 #define MAX_SEND_SGE 1
 
-/* RDMA poll conventionals: w/ 1 extra copy version of RDMA */
+/* RDMA POLL conventionals: w/ 1 extra copy version of RDMA */
 #if CONFIG_RDMA_POLL
 #define POLL_HEAD 4 + 1	/* length + length end bit*/
 #define POLL_TAIL 1
 #define POLL_HEAD_AND_TAIL POLL_HEAD + POLL_TAIL
 
-#define POLL_IS_DATA (char)0x01
-#define POLL_IS_EMPTY (char)0xff
+#define POLL_IS_DATA 0x01
+#define POLL_IS_EMPTY 0xff
 #endif
 
-#define POLL_IS_IDLE (char)0x00
+#define POLL_IS_IDLE 0
 
 /* IB buffers */
 #define MAX_KMALLOC_SIZE 1 * 1024 * 1024	/* limited by MAX_ORDER (4M now)*/
@@ -158,7 +159,6 @@ struct ib_cb {
 	int server;						/* server:1/client:0/myself:-1 */
 	int conn_no;
 	int read_inv;
-	int server_invalidate;
 	u8 key;
 
 	/* IB essentials */
@@ -264,6 +264,7 @@ retry:
 	ofs = find_first_zero_bit(mr_poll_slot_avail[dst][mode], MAX_MR_SIZE);
 	if (ofs >= MAX_MR_SIZE) {
 		spin_unlock(&mr_avail_bmap_lock[dst][mode]);
+		printk(KERN_WARNING "mr full !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 		schedule();
 		goto retry;
 	}
@@ -1142,7 +1143,7 @@ int __ib_kmsg_send(unsigned int dst,
  *
  */
 static void handle_remote_thread_rdma_read_request(
-						remote_thread_rdma_rw_t *inc_msg, void *target_paddr)
+			remote_thread_rdma_rw_t *inc_msg, void *target_paddr, u32 rw_size)
 {
 	remote_thread_rdma_rw_t *req = (remote_thread_rdma_rw_t*) inc_msg;
 	remote_thread_rdma_rw_t *reply;
@@ -1151,7 +1152,6 @@ static void handle_remote_thread_rdma_read_request(
 	struct ib_cb *cb = gcb[from];
 	struct completion comp;
 	u32 mr_ofs;
-	int rw_size = req->rdma_header.rw_size;
 	u64 dma_addr_pass = dma_map_single(cb->pd->device->dma_device,
 				target_paddr, rw_size, DMA_BIDIRECTIONAL);
 
@@ -1256,15 +1256,14 @@ static void handle_remote_thread_rdma_read_response(
  * done					done
  */
 static void handle_remote_thread_rdma_write_request(
-					remote_thread_rdma_rw_t *inc_msg, void *target_paddr)
+			remote_thread_rdma_rw_t *inc_msg, void *target_paddr, u32 rw_size)
 {
 	remote_thread_rdma_rw_t *req = (remote_thread_rdma_rw_t*) inc_msg;
 #if !CONFIG_RDMA_POLL && !CONFIG_RDMA_NOTIFY && !CONFIG_FARM
 	remote_thread_rdma_rw_t *reply;
 #endif
-	int rw_size = req->rdma_header.rw_size;
 	struct ib_cb *cb = gcb[req->header.from_nid];
-	int ret, tmp;
+	int ret;
 	u64 dma_addr_pass;
 	struct completion comp;
 	uint32_t remote_pass_len;
@@ -1282,6 +1281,7 @@ static void handle_remote_thread_rdma_write_request(
 	};
 	u32 mr_ofs = get_mr_ofs(req->header.from_nid, RDMA_RKEY_PASS);
 #if CONFIG_RDMA_NOTIFY
+	int tmp;
 	struct completion comp2;
 	struct ib_sge rdma_rdma_notify_sgl = {
 		.addr = cb->local_rdma_notify_laddr[mr_ofs],
@@ -1300,6 +1300,7 @@ static void handle_remote_thread_rdma_write_request(
 #endif
 
 #if CONFIG_RDMA_POLL
+	int tmp;
 	char *_rmda_poll_pass_buf = cb->rmda_poll_pass_buf[mr_ofs];
 	remote_pass_len = rw_size + POLL_HEAD_AND_TAIL;
 
@@ -1315,11 +1316,11 @@ static void handle_remote_thread_rdma_write_request(
 		memcpy(_rmda_poll_pass_buf + POLL_HEAD, target_paddr, rw_size);
 		/* RDMA poll tail: 1B */
 		memset(_rmda_poll_pass_buf + rw_size + POLL_HEAD_AND_TAIL - 1,
-													1, POLL_IS_DATA);
+													POLL_IS_DATA, 1);
 	}
-	else
+	else {
 		memset(_rmda_poll_pass_buf, POLL_IS_EMPTY, POLL_HEAD);
-
+	}
 	dma_addr_pass = dma_map_single(cb->pd->device->dma_device,
 								  _rmda_poll_pass_buf,
 								  rw_size + POLL_HEAD_AND_TAIL,
@@ -1347,6 +1348,9 @@ static void handle_remote_thread_rdma_write_request(
 	rdma_send_wr.wr.wr_id = (u64)&comp;
 
 	ret = ib_post_send(cb->qp, &rdma_send_wr.wr, &bad_wr);
+#if CONFIG_RDMA_POLL
+	tmp = *(_rmda_poll_pass_buf + rw_size + POLL_HEAD_AND_TAIL - 1);	/* touch for flushing */
+#endif
 	wr_wq_inc(cb);
 	BUG_ON(ret);
 
@@ -1424,19 +1428,20 @@ static void handle_remote_thread_rdma_write_response(
  * Caller has to free the msg by him/herself
  * paddr: ptr of pages you wanna perform on RDMA R/W passive side
  */
-void handle_rdma_request(remote_thread_rdma_rw_t *inc_msg, void *paddr)
+void handle_rdma_request(remote_thread_rdma_rw_t *inc_msg,
+						void *paddr, u32 rw_size)
 {
 	remote_thread_rdma_rw_t *msg = inc_msg;
 	if (likely(msg->header.is_rdma)) {
-		if(unlikely(inc_msg->rdma_header.rw_size > MAX_RDMA_SIZE)) {
-			printk("size %d\n", inc_msg->rdma_header.rw_size);
+		if(unlikely(rw_size > MAX_RDMA_SIZE)) {
+			printk("size %d\n", rw_size);
 			BUG();
 		}
 		if (!msg->rdma_header.rdma_ack) {
 			if (msg->rdma_header.is_write)
-				handle_remote_thread_rdma_write_request(msg, paddr);
+				handle_remote_thread_rdma_write_request(msg, paddr, rw_size);
 			else
-				handle_remote_thread_rdma_read_request(msg, paddr);
+				handle_remote_thread_rdma_read_request(msg, paddr, rw_size);
 		} else {
 			if (msg->rdma_header.is_write)
 				handle_remote_thread_rdma_write_response(msg);
@@ -1608,7 +1613,7 @@ error:
  * polling				|- WRITE (signal)
  * active unlock
  */
-char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
+void *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 					  unsigned int msg_size, unsigned int rw_size)
 {
 	u32 mr_ofs;
@@ -1620,15 +1625,18 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 	struct ib_cb *cb = gcb[dst];
 #if CONFIG_RDMA_POLL
 	char *rdma_poll_act_buf;
-#endif
-#if CONFIG_RDMA_NOTIFY
-	//u32 rdma_notify_poll_ofs;
+	int remote_rw_size = 0;
 #endif
 	BUG_ON(rw_size <= 0);
 
+#if CONFIG_RDMA_POLL
 	if (!msg->rdma_header.is_write)
 		if (!msg->rdma_header.your_buf_ptr)
 			BUG();
+#else
+	if (!msg->rdma_header.your_buf_ptr)
+		BUG();
+#endif
 
 	if (dst == my_nid) {
 		printk(KERN_ERR "No support for sending msg to itself %d\n", dst);
@@ -1643,6 +1651,7 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 #if CONFIG_RDMA_POLL
 	if (msg->rdma_header.is_write) {
 		rdma_poll_act_buf = kzalloc(rw_size + POLL_HEAD_AND_TAIL, GFP_KERNEL);
+		memset(rdma_poll_act_buf, 0xcb, rw_size + POLL_HEAD_AND_TAIL); //xx
 		dma_addr_act = dma_map_single(cb->pd->device->dma_device,
 						rdma_poll_act_buf, rw_size + POLL_HEAD_AND_TAIL,
 						DMA_BIDIRECTIONAL);
@@ -1660,22 +1669,20 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 	mr_ofs = get_mr_ofs(dst, RDMA_RKEY_ACT);
 	if (msg->rdma_header.is_write) {
 #if CONFIG_RDMA_POLL
-		rkey = ib_rdma_rkey(cb, dma_addr_act,
-				!cb->server_invalidate,
+		rkey = ib_rdma_rkey(cb, dma_addr_act, 1,
 				rw_size + POLL_HEAD_AND_TAIL, mr_ofs, RDMA_RKEY_ACT);
 #else
-		rkey = ib_rdma_rkey(cb, dma_addr_act,
-				!cb->server_invalidate, rw_size, mr_ofs, RDMA_RKEY_ACT);
+		rkey = ib_rdma_rkey(cb, dma_addr_act, 1,
+				rw_size, mr_ofs, RDMA_RKEY_ACT);
 #endif
 	} else {
-		rkey = ib_rdma_rkey(cb, dma_addr_act,
-				!cb->server_invalidate, rw_size, mr_ofs, RDMA_RKEY_ACT);
+		rkey = ib_rdma_rkey(cb, dma_addr_act, 1,
+				rw_size, mr_ofs, RDMA_RKEY_ACT);
 	}
 
 	msg->rdma_header.remote_addr = htonll(dma_addr_act);
 	msg->rdma_header.remote_rkey = htonl(rkey);
 
-	msg->mr_ofs = mr_ofs;
 	if (msg->rdma_header.is_write) {
 #if !CONFIG_FARM && !CONFIG_RDMA_POLL && !CONFIG_RDMA_NOTIFY
 		/* free when it's done */
@@ -1697,6 +1704,9 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 	*poll_tail_at = POLL_IS_IDLE;
 #elif CONFIG_RDMA_POLL
 	*(rdma_poll_act_buf + POLL_HEAD - 1) = POLL_IS_IDLE;
+
+	*(rdma_poll_act_buf + POLL_HEAD_AND_TAIL + sizeof(remote_page_response_t) - 1) = POLL_IS_IDLE;
+	*(rdma_poll_act_buf + POLL_HEAD_AND_TAIL + sizeof(remote_page_grant_t) - 1) = POLL_IS_IDLE;
 #endif
 
 	__ib_kmsg_send(dst, (struct pcn_kmsg_message*) msg, msg_size);
@@ -1723,15 +1733,25 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 			return NULL;
 		}
 
+		/* remote write size */
+		remote_rw_size  = *(rdma_poll_act_buf + 0) << 24;
+		remote_rw_size += *(rdma_poll_act_buf + 1) << 16;
+		remote_rw_size += *(rdma_poll_act_buf + 2) << 8;
+		remote_rw_size += *(rdma_poll_act_buf + 3) << 0;
+
 		/* poll at tail */
-		poll_tail_at = rdma_poll_act_buf + rw_size + POLL_HEAD_AND_TAIL - 1;
+		poll_tail_at = rdma_poll_act_buf + remote_rw_size + POLL_HEAD_AND_TAIL - 1;
 		while (*poll_tail_at == POLL_IS_IDLE)
 			schedule();
 
 		put_mr_ofs(dst, mr_ofs, RDMA_RKEY_ACT);
 		dma_unmap_single(cb->pd->device->dma_device, dma_addr_act,
 						rw_size + POLL_HEAD_AND_TAIL, DMA_BIDIRECTIONAL);
-		return rdma_poll_act_buf;
+
+		/* pointer for usr to free */
+		((remote_thread_rdma_rw_t *)(rdma_poll_act_buf + POLL_HEAD))->
+										poll_head_addr = rdma_poll_act_buf;
+		return rdma_poll_act_buf + POLL_HEAD;
 #elif CONFIG_FARM
 		while (*poll_tail_at == POLL_IS_IDLE)
 			schedule();
@@ -1743,7 +1763,7 @@ char *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 		/* Response handler will complete and free dma_addr_act */
 #endif
 	}
-	return 0;
+	return NULL;
 }
 
 int ib_kmsg_send(unsigned int dst,
@@ -1776,8 +1796,7 @@ static void rdma_rdma_notify_key_exchange_request(int dst)
 
 	req->header.type = PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_REQUEST;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-	rkey = ib_rdma_rkey(cb, cb->rdma_notify_dma_addr_act,
-					!cb->server_invalidate,
+	rkey = ib_rdma_rkey(cb, cb->rdma_notify_dma_addr_act, 1,
 					RDMA_NOTIFY_ACT_DATA_SIZE, 0, RDMA_FARM_NOTIFY_RKEY_ACT);
 	req->remote_addr = htonll(cb->rdma_notify_dma_addr_act);
 	req->remote_rkey = htonl(rkey);
@@ -1879,7 +1898,6 @@ int __init initialize()
 		gcb[i]->key = i;
 		gcb[i]->server = -1;
 		gcb[i]->read_inv = 0;
-		gcb[i]->server_invalidate = 0;
 		init_waitqueue_head(&gcb[i]->sem);
 
 #if CONFIG_RDMA_POLL
@@ -1888,6 +1906,18 @@ int __init initialize()
 			gcb[i]->rmda_poll_pass_buf[j] = kzalloc(MAX_RDMA_SIZE, GFP_KERNEL);
 			BUG_ON(!gcb[i]->rmda_poll_pass_buf[j]);
 		}
+
+		for (j = 0; j < RDMA_LAST_RKEY_MODE; j++) {
+			spin_lock_init(&mr_avail_bmap_lock[i][j]);
+		}
+
+        for (j = 0; j < RDMA_LAST_RKEY_MODE; j++) {
+			int k;
+			for (k = 0; k < MAX_MR_SIZE; k++)
+				clear_bit(k, mr_poll_slot_avail[i][j]);
+        }
+		//bitmap_clear(&mr_poll_slot_avail[i][0], 0, RDMA_LAST_RKEY_MODE * MAX_MR_SIZE);
+
 #endif
 	}
 

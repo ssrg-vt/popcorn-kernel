@@ -33,6 +33,9 @@
 #include "wait_station.h"
 #include "page_server.h"
 
+#include "util.h"
+#define CONFIG_RDMA 1
+
 static inline bool page_is_replicated(struct page *page)
 {
 	return !!bitmap_weight(page->owners, MAX_POPCORN_NODES);
@@ -715,7 +718,6 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
 /**************************************************************************
  * Handle page faults happened at remote nodes.
  */
-
 static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 {
 	remote_page_response_t *res = (remote_page_response_t *)msg;
@@ -731,7 +733,11 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	return 0;
 }
 
+#if CONFIG_RDMA
+static remote_page_response_t *__request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags)
+#else
 static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id)
+#endif
 {
 	remote_page_request_t req = {
 		.header = {
@@ -744,18 +750,32 @@ static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t f
 
 		.origin_nid = my_nid,
 		.origin_pid = tsk->pid,
+#if !CONFIG_RDMA
 		.origin_ws = ws_id,
+#else
+		.rdma_header = {
+			.is_write = true,
+		},
+#endif
 
 		.remote_pid = from_pid,
 	};
 
-	pcn_kmsg_send(from_nid, &req, sizeof(req));
-
 	PGPRINTK("  [%d] ->[%d/%d] %lx\n", tsk->pid, from_pid, from_nid, addr);
+#if CONFIG_RDMA
+	return pcn_kmsg_send_rdma(from_nid, &req, sizeof(req),
+								sizeof(remote_page_response_t));
+#else
+	pcn_kmsg_send(from_nid, &req, sizeof(req));
+#endif
 }
 
 static remote_page_response_t *__fetch_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
 {
+#if CONFIG_RDMA
+	return __request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
+			addr, fault_flags);
+#else
 	remote_page_response_t *rp;
 	struct wait_station *ws = get_wait_station(tsk);
 
@@ -766,6 +786,7 @@ static remote_page_response_t *__fetch_remote_page(struct task_struct *tsk, unsi
 	put_wait_station(ws);
 
 	return rp;
+#endif
 }
 
 
@@ -826,16 +847,24 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 		peers--;
 	}
 
+#if !CONFIG_RDMA
 	/* one for fetch, @peers for revocation */
-	ws = get_wait_station_multiple(tsk, peers + 1);
+	peers++;
+#endif
+	ws = get_wait_station_multiple(tsk, peers);
 
 	for_each_set_bit(nid, page->owners, MAX_POPCORN_NODES) {
 		pid_t pid = rc->remote_tgids[nid];
 		if (nid == my_nid) continue;
 		if (from-- == 0) {
 			from_nid = nid;
+#if CONFIG_RDMA
+			rp = __request_remote_page(tsk, nid, pid, addr, fault_flags);
+			PGPRINTK("  [%d] <-[%d/%d] %lx %x\n",
+					ws->pid, rp->remote_pid, rp->remote_nid, rp->addr, rp->result);
+#else
 			__request_remote_page(tsk, nid, pid, addr, fault_flags, ws->id);
-
+#endif
 			if (fault_for_read(fault_flags)) break;
 			continue;
 		}
@@ -845,7 +874,13 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 		}
 	}
 
+#if !CONFIG_RDMA
 	rp = wait_at_station(ws);
+#else
+	if (peers) {
+		wait_at_station(ws);
+	}
+#endif
 	put_wait_station(ws);
 
 	if (fault_for_write(fault_flags)) {
@@ -961,6 +996,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	// lock_page(page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
 	paddr = kmap_atomic(page);
+	//print_page_signature(paddr, tsk->pid);
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 	kunmap_atomic(paddr);
 	// unlock_page(page);
@@ -1053,7 +1089,11 @@ again:
 				kunmap_atomic(paddr);
 				// unlock_page(page);
 
+#if CONFIG_RDMA
+				pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
+#else
 				pcn_kmsg_free_msg(rp);
+#endif
 			}
 		}
 		spin_lock(ptl);
@@ -1080,6 +1120,7 @@ again:
 		// lock_page(page);
 		flush_cache_page(vma, addr, page_to_pfn(page));
 		paddr = kmap_atomic(page);
+		//print_page_signature(paddr, tsk->pid);
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 		kunmap_atomic(paddr);
 		// unlock_page(page);
@@ -1109,7 +1150,9 @@ static void process_remote_page_request(struct work_struct *work)
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
+//#if !CONFIG_RDMA
 	int from = req->origin_nid;
+//#endif
 	int res_size;
 
 	while (!res) {	/* response contains a page. allocate from a heap */
@@ -1172,7 +1215,17 @@ out:
 	res->origin_pid = req->origin_pid;
 	res->origin_ws = req->origin_ws;
 
+	/*
+	if (res->result == 0) {
+		print_page_signature(res->page, req->remote_pid);
+	}
+	*/
+
+#if CONFIG_RDMA
+	pcn_kmsg_handle_remote_rdma_request(req, res, res_size);
+#else
 	pcn_kmsg_send(from, res, res_size);
+#endif
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
 
@@ -1258,7 +1311,11 @@ retry:
 
 		spin_lock(ptl);
 		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
+#if CONFIG_RDMA
+		pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
+#else
 		pcn_kmsg_free_msg(rp);
+#endif
 	}
 	pte_unmap_unlock(pte, ptl);
 	put_page(page);
@@ -1395,7 +1452,11 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 out_free:
 	put_page(page);
+#if CONFIG_RDMA
+	pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
+#else
 	pcn_kmsg_free_msg(rp);
+#endif
 	fh->ret = ret;
 
 out:
@@ -1487,7 +1548,11 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 
 		spin_lock(ptl);
 		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
+#if CONFIG_RDMA
+		pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
+#else
 		pcn_kmsg_free_msg(rp);
+#endif
 	}
 	BUG_ON(!test_bit(my_nid, page->owners));
 	pte_unmap_unlock(pte, ptl);
@@ -1570,10 +1635,13 @@ int page_server_handle_pte_fault(
 				mm, vma, addr, pmd, pte, pte_val, fault_flags);
 	}
 
+	/*
 	if (fault_flags & FAULT_FLAG_TRIED) {
-		/* Some do_fault() makes the fault to be called again. */
-		return VM_FAULT_CONTINUE;
+		// Some do_fault() makes the fault to be called again.
+		up_read(&mm->mmap_sem);
+		return VM_FAULT_RETRY;
 	}
+	*/
 
 	if ((vma->vm_flags & VM_WRITE) &&
 			fault_for_write(fault_flags) && !pte_write(pte_val)) {
@@ -1582,6 +1650,7 @@ int page_server_handle_pte_fault(
 				mm, vma, addr, pmd, pte, pte_val, fault_flags);
 	}
 
+	pte_unmap(pte);
 	PGPRINTK("  [%d] might be fixed by others???\n", current->pid);
 	return 0;
 }
