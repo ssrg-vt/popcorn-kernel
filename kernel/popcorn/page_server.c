@@ -1635,14 +1635,6 @@ int page_server_handle_pte_fault(
 				mm, vma, addr, pmd, pte, pte_val, fault_flags);
 	}
 
-	/*
-	if (fault_flags & FAULT_FLAG_TRIED) {
-		// Some do_fault() makes the fault to be called again.
-		up_read(&mm->mmap_sem);
-		return VM_FAULT_RETRY;
-	}
-	*/
-
 	if ((vma->vm_flags & VM_WRITE) &&
 			fault_for_write(fault_flags) && !pte_write(pte_val)) {
 		/* wr-protected for keeping page consistency */

@@ -16,11 +16,10 @@ void print_page_data(unsigned char *addr)
 	printk("\n");
 }
 
-void print_page_signature(unsigned char *addr, int pid)
+void print_page_signature(unsigned char *addr)
 {
 	unsigned char *p = addr;
 	int i, j;
-	printk("  [%d] ", pid);
 	for (i = 0; i < PAGE_SIZE / 128; i++) {
 		unsigned char signature = 0;
 		for (j = 0; j < 32; j++) {
@@ -29,6 +28,12 @@ void print_page_signature(unsigned char *addr, int pid)
 		printk("%02x", signature);
 	}
 	printk("\n");
+}
+
+void print_page_signature_pid(pid_t pid, unsigned char *addr)
+{
+	printk("  [%d] ", pid);
+	print_page_signature(addr);
 }
 
 static DEFINE_SPINLOCK(__print_lock);
