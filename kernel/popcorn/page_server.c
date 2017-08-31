@@ -1093,11 +1093,7 @@ again:
 				kunmap_atomic(paddr);
 				// unlock_page(page);
 
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-				pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
-#else
 				pcn_kmsg_free_msg(rp);
-#endif
 			}
 		}
 		spin_lock(ptl);
@@ -1306,11 +1302,7 @@ retry:
 
 		spin_lock(ptl);
 		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-		pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
-#else
 		pcn_kmsg_free_msg(rp);
-#endif
 	}
 	pte_unmap_unlock(pte, ptl);
 	put_page(page);
@@ -1438,14 +1430,11 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	SetPageDistributed(page);
 	set_bit(my_nid, page->owners);
 	pte_unmap_unlock(pte, ptl);
+	ret = 0;	/* The leader squash both 0 and VM_FAULT_CONTINUE to 0 */
 
 out_free:
 	put_page(page);
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-	pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
-#else
 	pcn_kmsg_free_msg(rp);
-#endif
 	fh->ret = ret;
 
 out:
@@ -1470,7 +1459,6 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	/* Fresh access to the address. Handle locally since we are at the origin */
 	if (pte_none(pte_val)) {
 		BUG_ON(pte_present(pte_val));
-
 		PGPRINTK("  [%d] fresh at origin. continue\n", current->pid);
 		return VM_FAULT_CONTINUE;
 	}
@@ -1487,7 +1475,6 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	page = vm_normal_page(vma, addr, pte_val);
 	if (page == NULL || !PageDistributed(page)) {
 		spin_unlock(ptl);
-
 		/* Nothing to do with DSM (e.g. COW). Handle locally */
 		PGPRINTK("  [%d] local at origin. continue\n", current->pid);
 		return VM_FAULT_CONTINUE;
@@ -1538,11 +1525,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		BUG_ON(rp->result != 0);
 		spin_lock(ptl);
 		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-		pcn_rdma_kmsg_free_msg(rp->poll_head_addr);
-#else
 		pcn_kmsg_free_msg(rp);
-#endif
 	}
 	BUG_ON(!test_bit(my_nid, page->owners));
 	pte_unmap_unlock(pte, ptl);

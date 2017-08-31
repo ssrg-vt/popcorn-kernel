@@ -86,9 +86,15 @@ void pcn_kmsg_free_msg(void *msg)
 	if (!memcmp(msg_layer,"IB", 2)) {
 		BUG_ON(!kmsg_free_callback);
 		kmsg_free_callback(msg);
+	} else {
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
+		struct pcn_kmsg_message *m = (struct pcn_kmsg_message *)msg;
+		if (m->header.is_rdma)
+			kfree(msg->poll_head_addr);
+		else
+#endif
+			kfree(msg);
 	}
-	else
-		kfree(msg);
 }
 
 void pcn_rdma_kmsg_free_msg(void *msg)
