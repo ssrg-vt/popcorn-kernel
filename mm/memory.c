@@ -3347,7 +3347,7 @@ static int handle_pte_fault(struct mm_struct *mm,
 		if (ret == VM_FAULT_RETRY) {
 			int backoff = ++current->backoff_weight;
 			PGPRINTK("  [%d] backoff %d\n", current->pid, backoff);
-			if (backoff < 10) {
+			if (backoff <= 10) {
 				udelay(backoff * 100);
 			} else {
 				msleep(backoff - 10);
@@ -3367,6 +3367,9 @@ static int handle_pte_fault(struct mm_struct *mm,
 				return do_fault(mm, vma, address, pte, pmd,
 						flags, entry);
 		}
+#ifdef CONFIG_POPCORN
+		BUG_ON("Should not fall into this swap case!!");
+#endif
 		return do_swap_page(mm, vma, address,
 					pte, pmd, flags, entry);
 	}
