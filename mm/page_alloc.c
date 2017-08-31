@@ -3259,7 +3259,7 @@ retry_cpuset:
 #ifdef CONFIG_POPCORN
 	if (page) {
 		bitmap_zero(page->owners, MAX_POPCORN_NODES);
-		page->distributed = false;
+		ClearPageDistributed(page);
 	}
 #endif
 
