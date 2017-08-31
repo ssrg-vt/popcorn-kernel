@@ -1148,7 +1148,7 @@ again:
  * Entry point to remote fault handler
  *
  * To accelerate the ownership grant by skipping transferring page data,
- * the response might be multiplexed between remote_page_grant_t and
+ * the response might be multiplexed between remote_page_response_short_t and
  * remote_page_response_t.
  */
 static void process_remote_page_request(struct work_struct *work)
@@ -1204,12 +1204,12 @@ out_up:
 	}
 
 out:
-	if (res->result == VM_FAULT_CONTINUE) {
-		res->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_GRANT;
-		res_size = sizeof(remote_page_grant_t);
-	} else {
+	if (res->result == 0) {
 		res->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
 		res_size = sizeof(remote_page_response_t);
+	} else {
+		res->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT;
+		res_size = sizeof(remote_page_response_short_t);
 	}
 	res->header.prio = PCN_KMSG_PRIO_NORMAL;
 
@@ -1397,20 +1397,13 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 	rp = __fetch_page_from_origin(current, addr, fault_flags);
 
-	if (rp->result) {
-		if (rp->result == VM_FAULT_RETRY) { /* contended with local origin */
-			ret = VM_FAULT_RETRY;
-			pte_unmap(pte);
-			up_read(&mm->mmap_sem);
-			goto out_free;
-		}
-		if (rp->result != VM_FAULT_CONTINUE) {
+	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
+		if (rp->result != VM_FAULT_RETRY)
 			PGPRINTK("  [%d] failed 0x%x\n", current->pid, rp->result);
-			ret = rp->result;
-			pte_unmap(pte);
-			up_read(&mm->mmap_sem);
-			goto out_free;
-		}
+		ret = rp->result;
+		pte_unmap(pte);
+		up_read(&mm->mmap_sem);
+		goto out_free;
 	}
 
 	spin_lock(ptl);
@@ -1547,6 +1540,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		remote_page_response_t *rp =
 				__claim_remote_page(current, addr, fault_flags, page);
 
+		BUG_ON(rp->result != 0);
 		spin_lock(ptl);
 		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
 #ifdef CONFIG_POPCORN_KMSG_IB_RDMA
@@ -1666,7 +1660,7 @@ int __init page_server_init(void)
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE, remote_page_response);
 	REGISTER_KMSG_HANDLER(
-			PCN_KMSG_TYPE_REMOTE_PAGE_GRANT, remote_page_response);
+			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT, remote_page_response);
 #endif
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, page_invalidate_request);
