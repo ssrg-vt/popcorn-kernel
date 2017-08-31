@@ -33,14 +33,14 @@
 #include "wait_station.h"
 #include "page_server.h"
 
-static inline bool page_is_replicated(struct page *page)
+static inline bool page_is_distributed(struct page *page)
 {
-	return !!bitmap_weight(page->owners, MAX_POPCORN_NODES);
+	return page->distributed;
 }
 
 static inline bool page_is_mine(struct page *page)
 {
-	return !page_is_replicated(page) || test_bit(my_nid, page->owners);
+	return !page_is_distributed(page) || test_bit(my_nid, page->owners);
 }
 
 static inline bool fault_for_write(unsigned long flags)
@@ -452,6 +452,7 @@ static void process_remote_page_flush(struct work_struct *work)
 		kunmap_atomic(paddr);
 	}
 
+	page->distributed = true;
 	set_bit(my_nid, page->owners);
 	clear_bit(req->remote_nid, page->owners);
 
@@ -832,6 +833,7 @@ static void __update_remote_page(struct mm_struct *mm,
 	update_mmu_cache(vma, addr, pte);
 	flush_tlb_page(vma, addr);
 
+	page->distributed = true;
 	set_bit(my_nid, page->owners);
 }
 
@@ -988,6 +990,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	BUG_ON(!page_is_mine(page));
 
 	spin_lock(ptl);
+	page->distributed = true;
 
 	if (fault_for_write(fault_flags)) {
 		clear_bit(my_nid, page->owners);
@@ -1117,6 +1120,7 @@ again:
 		update_mmu_cache(vma, addr, pte);
 		flush_tlb_page(vma, addr);
 
+		page->distributed = true;
 		set_bit(from_nid, page->owners);
 	} else {
 		spin_lock(ptl);
@@ -1443,6 +1447,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 			__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
 		}
 	}
+	page->distributed = true;
 	set_bit(my_nid, page->owners);
 	pte_unmap_unlock(pte, ptl);
 
@@ -1492,7 +1497,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	}
 
 	page = vm_normal_page(vma, addr, pte_val);
-	if (page == NULL || !page_is_replicated(page)) {
+	if (page == NULL || !page_is_distributed(page)) {
 		spin_unlock(ptl);
 
 		/* Nothing to do with DSM (e.g. COW). Handle locally */

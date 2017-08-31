@@ -3423,7 +3423,6 @@ struct page *get_normal_page(struct vm_area_struct *vma, unsigned long addr, pte
 	}
 
 	__SetPageUptodate(page);
-	bitmap_zero(page->owners, MAX_POPCORN_NODES);
 
 	entry = mk_pte(page, vma->vm_page_prot);
 	if (vma->vm_flags & VM_WRITE)
@@ -3479,7 +3478,6 @@ int handle_pte_fault_origin(struct mm_struct *mm,
 	}
 
 	__SetPageUptodate(page);
-	bitmap_zero(page->owners, MAX_POPCORN_NODES);
 
 	entry = mk_pte(page, vma->vm_page_prot);
 	if (vma->vm_flags & VM_WRITE)

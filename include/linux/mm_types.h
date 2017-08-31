@@ -226,7 +226,7 @@ struct page {
 
 #ifdef CONFIG_POPCORN
 	DECLARE_BITMAP(owners, MAX_POPCORN_NODES);
-	//Multikernel
+	bool distributed;
 #endif
 }
 /*
