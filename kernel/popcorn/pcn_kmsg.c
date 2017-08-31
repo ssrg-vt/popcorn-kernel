@@ -130,7 +130,7 @@ void *pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
     return send_rdma_callback(to, lmsg, msg_size, rw_size);
 }
 
-void pcn_kmsg_handle_remote_rdma_request(
+void pcn_kmsg_handle_rdma_at_remote(
 				void *inc_lmsg, void *paddr, u32 rw_size)
 {
 	if (!memcmp(msg_layer,"IB", 2))
@@ -148,4 +148,4 @@ EXPORT_SYMBOL(pcn_kmsg_send_rdma);
 EXPORT_SYMBOL(pcn_kmsg_send);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 EXPORT_SYMBOL(pcn_kmsg_register_callback);
-EXPORT_SYMBOL(pcn_kmsg_handle_remote_rdma_request);
+EXPORT_SYMBOL(pcn_kmsg_handle_rdma_at_remote);

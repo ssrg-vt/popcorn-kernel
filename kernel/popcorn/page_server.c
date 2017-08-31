@@ -1213,7 +1213,7 @@ out:
 	res->origin_ws = req->origin_ws;
 
 #ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-	pcn_kmsg_handle_remote_rdma_request(req, res, res_size);
+	pcn_kmsg_handle_rdma_at_remote(req, res, res_size);
 #else
 	pcn_kmsg_send(req->origin_nid, res, res_size);
 #endif

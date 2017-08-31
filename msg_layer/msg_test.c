@@ -1484,7 +1484,7 @@ static void process_handle_test_read_request(struct work_struct *_work)
 	void* paddr = dummy_pass_buf[req->header.from_nid][req->t_num];
 
 	/* RDMA routine */
-	pcn_kmsg_handle_remote_rdma_request(req, paddr, req->rdma_header.rw_size);
+	pcn_kmsg_handle_rdma_at_remote(req, paddr, req->rdma_header.rw_size);
 
 	pcn_kmsg_free_msg(req);
 	kfree(work);
@@ -1497,7 +1497,7 @@ static void process_handle_test_read_response(struct work_struct *_work)
 	struct wait_station *ws = wait_station(res->remote_ws);
 
 	/* RDMA routine */
-	pcn_kmsg_handle_remote_rdma_request(res, NULL, 0);
+	pcn_kmsg_handle_rdma_at_remote(res, NULL, 0);
 
 	ws->private = res;
 	smp_mb();
@@ -1516,7 +1516,7 @@ static void process_handle_test_write_request(struct work_struct *_work)
 	void *paddr = dummy_pass_buf[req->header.from_nid][req->t_num];
 
 	/* RDMA routine */
-	pcn_kmsg_handle_remote_rdma_request(req, paddr, req->rdma_header.rw_size);
+	pcn_kmsg_handle_rdma_at_remote(req, paddr, req->rdma_header.rw_size);
 
 	pcn_kmsg_free_msg(req);
 	kfree(work);
@@ -1529,7 +1529,7 @@ static void process_handle_test_write_response(struct work_struct *_work)
 	struct wait_station *ws = wait_station(res->remote_ws);
 
 	/* RDMA routine */
-	pcn_kmsg_handle_remote_rdma_request(res, NULL, 0);
+	pcn_kmsg_handle_rdma_at_remote(res, NULL, 0);
 
 	ws->private = res;
 	smp_mb();

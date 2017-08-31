@@ -100,6 +100,7 @@ struct pcn_kmsg_hdr {
 	enum pcn_kmsg_prio prio	:7;
 	bool is_rdma			:1;
 	unsigned int size;
+	void *recv_ptr;
 }__attribute__((packed));
 
 #define CACHE_LINE_SIZE 64
@@ -196,7 +197,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 int pcn_kmsg_send(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
 void *pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg,
 						unsigned int msg_size, unsigned int rw_size);
-void pcn_kmsg_handle_remote_rdma_request(
+void pcn_kmsg_handle_rdma_at_remote(
 						void *inc_lmsg, void *paddr, u32 rw_size);
 
 /* Free a received message (called at the end of the callback function) */
