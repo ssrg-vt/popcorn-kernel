@@ -1740,7 +1740,8 @@ void *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 		remote_rw_size += *(rdma_poll_act_buf + 3) << 0;
 
 		/* poll at tail */
-		poll_tail_at = rdma_poll_act_buf + remote_rw_size + POLL_HEAD_AND_TAIL - 1;
+		poll_tail_at = rdma_poll_act_buf +
+						remote_rw_size + POLL_HEAD_AND_TAIL - 1;
 		while (*poll_tail_at == POLL_IS_IDLE)
 			schedule();
 

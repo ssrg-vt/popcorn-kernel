@@ -84,9 +84,6 @@ void *pcn_kmsg_alloc_msg(size_t size)
 void pcn_kmsg_free_msg(void *msg)
 {
 	if (!memcmp(msg_layer,"IB", 2)) {
-		BUG_ON(!kmsg_free_callback);
-		kmsg_free_callback(msg);
-	} else {
 #ifdef CONFIG_POPCORN_KMSG_IB_RDMA
 		struct pcn_kmsg_message *m = (struct pcn_kmsg_message *)msg;
 		if (m->header.is_rdma)
@@ -99,6 +96,7 @@ void pcn_kmsg_free_msg(void *msg)
 
 void pcn_rdma_kmsg_free_msg(void *msg)
 {
+	
 	kfree(msg);
 }
 
