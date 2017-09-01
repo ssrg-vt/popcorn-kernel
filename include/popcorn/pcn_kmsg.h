@@ -143,32 +143,15 @@ struct pcn_kmsg_message {
 	unsigned char payload[PCN_KMSG_LONG_PAYLOAD_SIZE];
 }__attribute__((packed)) __attribute__((aligned(CACHE_LINE_SIZE)));
 
-/* Template for RDMA request/ack */
-typedef struct {
-    struct pcn_kmsg_hdr header;				/* must follow */
-	struct pcn_kmsg_rdma_hdr rdma_header;	/* must follow, rdma essential */
-	void* poll_head_addr;					/* for rdma poll */
-
-	/* res format */
-    int remote_nid;
-    pid_t remote_pid;
-    int origin_nid;
-    pid_t origin_pid;
-    int origin_ws;
-    unsigned long addr;
-    int result;
-
-	/* for multi-thread testing */
-	unsigned char payload[8192];
-
-    /* your data structures */
-	int remote_ws;
-	u64 dma_addr_act;
-//#if CONFIG_FARM2WRITE
-	u32 mr_ofs;
-//#endif
-	int t_num;
-}__attribute__((packed)) remote_thread_rdma_rw_t;
+#define RDMA_TEMPLATE ;
+DEFINE_PCN_RDMA_KMSG(pcn_kmsg_rdma_t, RDMA_TEMPLATE);
+    
+#define RDMA_TEST \
+	int remote_ws; \
+	u64 dma_addr_act; \
+	u32 mr_ofs; \
+	int t_num; ;
+DEFINE_PCN_RDMA_KMSG(pcn_kmsg_perf_rdma_t, RDMA_TEST);
 
 /* TYPES OF MESSAGES */
 
@@ -190,9 +173,9 @@ typedef int (*send_cbftn)(unsigned int,
 						struct pcn_kmsg_message *,
 						unsigned int);
 typedef void* (*send_rdma_cbftn)(unsigned int,
-								remote_thread_rdma_rw_t *,
+								pcn_kmsg_rdma_t *,
 								unsigned int, unsigned int);
-typedef void (*handle_rdma_request_ftn)(remote_thread_rdma_rw_t *,
+typedef void (*handle_rdma_request_ftn)(pcn_kmsg_rdma_t *,
 												void *, u32 rw_size);
 typedef void (*kmsg_free_ftn)(struct pcn_kmsg_message *);
 

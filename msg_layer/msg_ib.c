@@ -1143,10 +1143,10 @@ int __ib_kmsg_send(unsigned int dst,
  *
  */
 static void handle_remote_thread_rdma_read_request(
-			remote_thread_rdma_rw_t *inc_msg, void *target_paddr, u32 rw_size)
+			pcn_kmsg_perf_rdma_t *inc_msg, void *target_paddr, u32 rw_size)
 {
-	remote_thread_rdma_rw_t *req = (remote_thread_rdma_rw_t*) inc_msg;
-	remote_thread_rdma_rw_t *reply;
+	pcn_kmsg_perf_rdma_t *req = (pcn_kmsg_perf_rdma_t*) inc_msg;
+	pcn_kmsg_perf_rdma_t *reply;
 	struct ib_send_wr *bad_wr;
 	int ret, from = req->header.from_nid;
 	struct ib_cb *cb = gcb[from];
@@ -1224,9 +1224,9 @@ static void handle_remote_thread_rdma_read_request(
 
 /* FARM implementations will never call this func */
 static void handle_remote_thread_rdma_read_response(
-										remote_thread_rdma_rw_t *inc_msg)
+										pcn_kmsg_perf_rdma_t *inc_msg)
 {
-	remote_thread_rdma_rw_t *res = (remote_thread_rdma_rw_t*) inc_msg;
+	pcn_kmsg_perf_rdma_t *res = (pcn_kmsg_perf_rdma_t*) inc_msg;
 	struct ib_cb *cb = gcb[res->header.from_nid];
 
 	put_mr_ofs(res->header.from_nid, res->mr_ofs, RDMA_RKEY_ACT);
@@ -1256,11 +1256,11 @@ static void handle_remote_thread_rdma_read_response(
  * done					done
  */
 static void handle_remote_thread_rdma_write_request(
-			remote_thread_rdma_rw_t *inc_msg, void *target_paddr, u32 rw_size)
+			pcn_kmsg_perf_rdma_t *inc_msg, void *target_paddr, u32 rw_size)
 {
-	remote_thread_rdma_rw_t *req = (remote_thread_rdma_rw_t*) inc_msg;
+	pcn_kmsg_perf_rdma_t *req = (pcn_kmsg_perf_rdma_t*) inc_msg;
 #if !CONFIG_RDMA_POLL && !CONFIG_RDMA_NOTIFY && !CONFIG_FARM
-	remote_thread_rdma_rw_t *reply;
+	pcn_kmsg_perf_rdma_t *reply;
 #endif
 	struct ib_cb *cb = gcb[req->header.from_nid];
 	int ret;
@@ -1410,9 +1410,9 @@ static void handle_remote_thread_rdma_write_request(
 
 /* FARM implementations will never call this func */
 static void handle_remote_thread_rdma_write_response(
-										remote_thread_rdma_rw_t *inc_msg)
+										pcn_kmsg_perf_rdma_t *inc_msg)
 {
-	remote_thread_rdma_rw_t *res = (remote_thread_rdma_rw_t*) inc_msg;
+	pcn_kmsg_perf_rdma_t *res = (pcn_kmsg_perf_rdma_t*) inc_msg;
 	struct ib_cb *cb = gcb[res->header.from_nid];
 
 	put_mr_ofs(res->header.from_nid, res->mr_ofs, RDMA_RKEY_ACT);
@@ -1428,10 +1428,10 @@ static void handle_remote_thread_rdma_write_response(
  * Caller has to free the msg by him/herself
  * paddr: ptr of pages you wanna perform on RDMA R/W passive side
  */
-void handle_rdma_request(remote_thread_rdma_rw_t *inc_msg,
+void handle_rdma_request(pcn_kmsg_perf_rdma_t *inc_msg,
 						void *paddr, u32 rw_size)
 {
-	remote_thread_rdma_rw_t *msg = inc_msg;
+	pcn_kmsg_perf_rdma_t *msg = inc_msg;
 	if (likely(msg->header.is_rdma)) {
 		if(unlikely(rw_size > MAX_RDMA_SIZE)) {
 			printk("size %d\n", rw_size);
@@ -1613,7 +1613,7 @@ error:
  * polling				|- WRITE (signal)
  * active unlock
  */
-void *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
+void *ib_kmsg_send_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 					  unsigned int msg_size, unsigned int rw_size)
 {
 	u32 mr_ofs;
@@ -1626,6 +1626,7 @@ void *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 #if CONFIG_RDMA_POLL
 	char *rdma_poll_act_buf;
 	int remote_rw_size = 0;
+	pcn_kmsg_perf_rdma_t *rp;
 #endif
 	BUG_ON(rw_size <= 0);
 
@@ -1750,8 +1751,15 @@ void *ib_kmsg_send_rdma(unsigned int dst, remote_thread_rdma_rw_t *msg,
 						rw_size + POLL_HEAD_AND_TAIL, DMA_BIDIRECTIONAL);
 
 		/* pointer for usr to free */
-		((remote_thread_rdma_rw_t *)(rdma_poll_act_buf + POLL_HEAD))->
-										poll_head_addr = rdma_poll_act_buf;
+		rp = (pcn_kmsg_perf_rdma_t *)(rdma_poll_act_buf + POLL_HEAD);
+		rp->poll_head_addr = rdma_poll_act_buf;
+		
+		/* for dsm */
+		rp->header.is_rdma = true;
+		rp->rdma_header.rdma_ack = true;
+		rp->rdma_header.is_write = true;
+		//pp->rdma_header.rw_size = remote_rw_size;
+		
 		return rdma_poll_act_buf + POLL_HEAD;
 #elif CONFIG_FARM
 		while (*poll_tail_at == POLL_IS_IDLE)

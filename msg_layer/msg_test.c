@@ -399,7 +399,7 @@ static int test2(void)
 {
 	int i;
 
-	remote_thread_rdma_rw_t *req_rdma_read;
+	pcn_kmsg_perf_rdma_t *req_rdma_read;
 	req_rdma_read = kmalloc(sizeof(*req_rdma_read), GFP_KERNEL);
 	if (!req_rdma_read)
 		return -1;
@@ -446,7 +446,7 @@ static int test3(void)
 {
 	int i;
 
-	remote_thread_rdma_rw_t *req_rdma_write;
+	pcn_kmsg_perf_rdma_t *req_rdma_write;
 	//req_rdma_write = pcn_kmsg_alloc_msg(sizeof(*req_rdma_write));
 	req_rdma_write = kmalloc(sizeof(*req_rdma_write), GFP_KERNEL);
 
@@ -558,8 +558,8 @@ static int rdma_RW_test(unsigned long long payload_size,
 	do_gettimeofday(&t1);
 	for (j = 0; j < iter; j++) {
 		for (i = 0; i < MAX_NUM_NODES; i++) {
-			remote_thread_rdma_rw_t *req_rdma;
-			remote_thread_rdma_rw_t *res;
+			pcn_kmsg_perf_rdma_t *req_rdma;
+			pcn_kmsg_perf_rdma_t *res;
 			struct wait_station *ws;
 			if (my_nid == i) continue;
 
@@ -650,7 +650,7 @@ static int rdma_farm_test(unsigned long long payload_size,
 	do_gettimeofday(&t1);
 	for (j = 0; j < iter; j++) {
 		for (i = 0; i < MAX_NUM_NODES; i++) {
-			remote_thread_rdma_rw_t *req_rdma;
+			pcn_kmsg_perf_rdma_t *req_rdma;
 			if (my_nid == i) continue;
 
 			req_rdma = pcn_kmsg_alloc_msg(sizeof(*req_rdma));
@@ -715,7 +715,7 @@ static int rdma_farm_mem_cpy_test(unsigned long long payload_size,
 	for (j = 0; j < iter; j++) {
 		for (i = 0; i < MAX_NUM_NODES; i++) {
 			char *act_buf;
-			remote_thread_rdma_rw_t *req_rdma;
+			pcn_kmsg_perf_rdma_t *req_rdma;
 			if (my_nid == i) continue;
 
 			req_rdma = pcn_kmsg_alloc_msg(sizeof(*req_rdma));
@@ -755,7 +755,7 @@ static int rdma_farm_mem_cpy_test(unsigned long long payload_size,
 											__func__, lengh, payload_size);
 #endif
 				memcpy(dummy_act_buf[i][t], act_buf, payload_size);
-				kfree(((remote_thread_rdma_rw_t*)act_buf)->poll_head_addr);
+				kfree(((pcn_kmsg_perf_rdma_t*)act_buf)->poll_head_addr);
 			} else
 				printk(KERN_WARNING "%s(): recv size 0\n", __func__);
 
@@ -806,7 +806,7 @@ static int rdma_farm2_data(unsigned long long payload_size,
 	do_gettimeofday(&t1);
 	for (j = 0; j < iter; j++) {
 		for (i = 0; i < MAX_NUM_NODES; i++) {
-			remote_thread_rdma_rw_t *req_rdma;
+			pcn_kmsg_perf_rdma_t *req_rdma;
 			if (my_nid == i) continue;
 
 			req_rdma = pcn_kmsg_alloc_msg(sizeof(*req_rdma));
@@ -961,7 +961,7 @@ static int rdma_RW_inv_test(void* buf, unsigned long long payload_size,
 {
 	unsigned long long i;
 
-	remote_thread_rdma_rw_t *req_rdma;
+	pcn_kmsg_perf_rdma_t *req_rdma;
 	req_rdma = pcn_kmsg_alloc_msg(sizeof(*req_rdma));
 	if (!req_rdma)
 		return -1;
@@ -1478,7 +1478,7 @@ static void process_send_roundtrip_w_response(struct work_struct *_work)
 static void process_handle_test_read_request(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
-	remote_thread_rdma_rw_t *req = work->msg;
+	pcn_kmsg_perf_rdma_t *req = work->msg;
 
 	/* Prepare your *paddr */
 	void* paddr = dummy_pass_buf[req->header.from_nid][req->t_num];
@@ -1493,7 +1493,7 @@ static void process_handle_test_read_request(struct work_struct *_work)
 static void process_handle_test_read_response(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
-	remote_thread_rdma_rw_t *res = work->msg;
+	pcn_kmsg_perf_rdma_t *res = work->msg;
 	struct wait_station *ws = wait_station(res->remote_ws);
 
 	/* RDMA routine */
@@ -1510,7 +1510,7 @@ static void process_handle_test_read_response(struct work_struct *_work)
 static void process_handle_test_write_request(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
-	remote_thread_rdma_rw_t *req = work->msg;
+	pcn_kmsg_perf_rdma_t *req = work->msg;
 
 	/* Prepare your *paddr */
 	void *paddr = dummy_pass_buf[req->header.from_nid][req->t_num];
@@ -1525,7 +1525,7 @@ static void process_handle_test_write_request(struct work_struct *_work)
 static void process_handle_test_write_response(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
-	remote_thread_rdma_rw_t *res = work->msg;
+	pcn_kmsg_perf_rdma_t *res = work->msg;
 	struct wait_station *ws = wait_station(res->remote_ws);
 
 	/* RDMA routine */
