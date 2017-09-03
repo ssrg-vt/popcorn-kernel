@@ -55,7 +55,6 @@
 #include <popcorn/stat.h>
 
 #include "common.h"
-#include "../kernel/popcorn/types.h"
 
 /* features been developed */
 #define CONFIG_FARM 0			/* Original FaRM - user follows convention */
@@ -63,20 +62,20 @@
 #define CONFIG_RDMA_NOTIFY 0	/* Two WRITE */
 
 /* self-testing */
-#define AUTO_WQ_WR_CHECK 0
+#define AUTO_WQ_WR_CHECK 1
 #define AUTO_RECV_WR_CHECK 0
 
 /* IB recv */
-#define MAX_RECV_WR 1024	/* important! Check it if only sender crash */
+#define MAX_RECV_WR 128	/* important! Check it if only sender crash */
 /* IB send & completetion */
-#define MAX_SEND_WR 1024
+#define MAX_SEND_WR 128
 #define MAX_CQE MAX_SEND_WR + MAX_RECV_WR
 
 /* RECV_BUF_POOL */
 #define MAX_RECV_WORK_POOL MAX_RECV_WR
 
 /* RDMA MR POOL */
-#define MAX_MR_SIZE 32
+#define MAX_MR_SIZE 64
 
 /* IB qp */
 #define MAX_RECV_SGE 1
@@ -95,7 +94,7 @@
 #define POLL_IS_IDLE 0
 
 /* IB buffers */
-#define MAX_KMALLOC_SIZE 1 * 1024 * 1024	/* limited by MAX_ORDER (4M now)*/
+#define MAX_KMALLOC_SIZE PCN_KMSG_MAX_SIZE
 #if CONFIG_RDMA_POLL
 #define MAX_RDMA_SIZE MAX_KMALLOC_SIZE - POLL_HEAD_AND_TAIL
 #else
@@ -1232,6 +1231,9 @@ static void handle_remote_thread_rdma_write_request(
 #if !CONFIG_RDMA_POLL && !CONFIG_RDMA_NOTIFY && !CONFIG_FARM
 	pcn_kmsg_perf_rdma_t *reply;
 #endif
+#if CONFIG_RDMA_POLL || CONFIG_RDMA_NOTIFY
+	char flush;
+#endif
 	struct ib_cb *cb = gcb[req->header.from_nid];
 	int ret;
 	u64 dma_addr_pass;
@@ -1251,7 +1253,6 @@ static void handle_remote_thread_rdma_write_request(
 	};
 	u32 mr_ofs = get_mr_ofs(req->header.from_nid, RDMA_RKEY_PASS);
 #if CONFIG_RDMA_NOTIFY
-	int tmp;
 	struct completion comp2;
 	struct ib_sge rdma_rdma_notify_sgl = {
 		.addr = cb->local_rdma_notify_laddr[mr_ofs],
@@ -1270,17 +1271,16 @@ static void handle_remote_thread_rdma_write_request(
 #endif
 
 #if CONFIG_RDMA_POLL
-	int tmp;
 	char *_rmda_poll_pass_buf = cb->rmda_poll_pass_buf[mr_ofs];
 	remote_pass_len = rw_size + POLL_HEAD_AND_TAIL;
 
 	/* create and copy to a new buffer followed rdma poll rule */
 	if (target_paddr && rw_size != 0) {
 		/* RDMA poll head: length + 1B */
-		*(_rmda_poll_pass_buf + 3) = (char)((rw_size) >> 0);
-		*(_rmda_poll_pass_buf + 2) = (char)((rw_size) >> 8);
-		*(_rmda_poll_pass_buf + 1) = (char)((rw_size) >> 16);
-		*(_rmda_poll_pass_buf + 0) = (char)((rw_size) >> 24);
+		*(_rmda_poll_pass_buf + 3) = (char)((rw_size & 0x000000ff) >> 0);
+		*(_rmda_poll_pass_buf + 2) = (char)((rw_size & 0x0000ff00) >> 8);
+		*(_rmda_poll_pass_buf + 1) = (char)((rw_size & 0x00ff0000) >> 16);
+		*(_rmda_poll_pass_buf + 0) = (char)((rw_size & 0xff000000) >> 24);
 		*(_rmda_poll_pass_buf + POLL_HEAD - 1) = POLL_IS_DATA;
 		/* payload */
 		memcpy(_rmda_poll_pass_buf + POLL_HEAD, target_paddr, rw_size);
@@ -1295,6 +1295,7 @@ static void handle_remote_thread_rdma_write_request(
 								  _rmda_poll_pass_buf,
 								  rw_size + POLL_HEAD_AND_TAIL,
 								  DMA_BIDIRECTIONAL);
+
 #else
 	remote_pass_len = rw_size;
 	dma_addr_pass = dma_map_single(cb->pd->device->dma_device,
@@ -1321,7 +1322,7 @@ static void handle_remote_thread_rdma_write_request(
 
 	ret = ib_post_send(cb->qp, &rdma_send_wr.wr, &bad_wr);
 #if CONFIG_RDMA_POLL
-	tmp = *(_rmda_poll_pass_buf + rw_size + POLL_HEAD_AND_TAIL - 1);	/* touch for flushing */
+	flush = *(_rmda_poll_pass_buf + rw_size + POLL_HEAD_AND_TAIL - 1);	/* touch for flushing */
 #endif
 	selftest_wr_wq_inc(cb);
 	BUG_ON(ret);
@@ -1341,7 +1342,7 @@ static void handle_remote_thread_rdma_write_request(
 	init_completion(&comp2);
 	rdma_rdma_notify_send_wr.wr.wr_id = (u64)&comp2;
 	ret = ib_post_send(cb->qp, &rdma_rdma_notify_send_wr.wr, &bad_wr);
-	tmp = *cb->rdma_notify_buf_pass[mr_ofs];	/* touch for flushing */
+	flush = *cb->rdma_notify_buf_pass[mr_ofs];	/* touch for flushing */
 	selftest_wr_wq_inc(cb);
 	BUG_ON(ret);
 
@@ -1349,11 +1350,11 @@ static void handle_remote_thread_rdma_write_request(
 		wait_for_completion(&comp2);
 	/* No need to umap rdma_notify_WRITE polling bits */
 #elif !CONFIG_RDMA_POLL && !CONFIG_RDMA_NOTIFY && !CONFIG_FARM
-	reply = pcn_kmsg_alloc_msg(sizeof(*reply));
+	reply = kmalloc(sizeof(*reply), GFP_KERNEL);
 	BUG_ON(!reply);
 
 	reply->header.type = req->rdma_header.rmda_type_res;
-	reply->header.prio = PCN_KMSG_PRIO_NORMAL;
+	//reply->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* RDMA W/R complete ACK */
 	reply->header.is_rdma = true;
@@ -1364,6 +1365,7 @@ static void handle_remote_thread_rdma_write_request(
 	reply->rdma_header.rw_size = remote_pass_len;
 
 	/* for multi-threading */
+	reply->t_num = req->t_num;
 	reply->mr_ofs = req->mr_ofs;
 	/* for wait station */
 	reply->remote_ws = req->remote_ws;
@@ -1373,7 +1375,7 @@ static void handle_remote_thread_rdma_write_request(
 	__ib_kmsg_send(req->header.from_nid,
 				(struct pcn_kmsg_message*) reply, sizeof(*reply));
 
-	pcn_kmsg_free_msg(reply);
+	kfree(reply);
 #endif
 
 	put_mr_ofs(cb->conn_no, mr_ofs, RDMA_RKEY_PASS);
@@ -1602,7 +1604,7 @@ void *ib_kmsg_send_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 	struct ib_cb *cb = gcb[dst];
 #if CONFIG_RDMA_POLL
 	char *rdma_poll_act_buf;
-	int remote_rw_size = 0;
+	unsigned int remote_rw_size = 0;
 	pcn_kmsg_perf_rdma_t *rp;
 #endif
 	BUG_ON(rw_size <= 0);
@@ -1625,7 +1627,6 @@ void *ib_kmsg_send_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 	msg->header.from_nid = my_nid;
 	msg->rdma_header.rdma_ack = false;
 	msg->rdma_header.rw_size = rw_size;
-
 #if CONFIG_RDMA_POLL
 	if (msg->rdma_header.is_write) {
 		rdma_poll_act_buf = kzalloc(rw_size + POLL_HEAD_AND_TAIL, GFP_KERNEL);
@@ -1711,10 +1712,14 @@ void *ib_kmsg_send_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 		}
 
 		/* remote write size */
-		remote_rw_size  = *(rdma_poll_act_buf + 0) << 24;
-		remote_rw_size += *(rdma_poll_act_buf + 1) << 16;
-		remote_rw_size += *(rdma_poll_act_buf + 2) << 8;
-		remote_rw_size += *(rdma_poll_act_buf + 3) << 0;
+		remote_rw_size  =
+				 (u32)((*(rdma_poll_act_buf + 0) << 24) & 0xff000000);
+		remote_rw_size +=
+				 (u32)((*(rdma_poll_act_buf + 1) << 16) & 0x00ff0000);
+		remote_rw_size +=
+				 (u32)((*(rdma_poll_act_buf + 2) << 8) & 0x0000ff00);
+		remote_rw_size +=
+				 (u32)((*(rdma_poll_act_buf + 3) << 0) & 0x000000ff);
 
 		/* poll at tail */
 		poll_tail_at = rdma_poll_act_buf +
@@ -1745,7 +1750,7 @@ void *ib_kmsg_send_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 		dma_unmap_single(cb->pd->device->dma_device, dma_addr_act,
 						rw_size, DMA_BIDIRECTIONAL);
 #else
-		/* Response handler will complete and free dma_addr_act */
+		/* handle rdma response handler will complete and free dma_addr_act */
 #endif
 	}
 	return NULL;
@@ -1781,7 +1786,7 @@ inline void recv_pool_selftest(ib_recv_work_t *rws, struct pcn_kmsg_message *msg
 #endif
 }
 
-static void ib_kmsg_free_msg(struct pcn_kmsg_message *msg)
+static void ib_kmsg_recv_msg(struct pcn_kmsg_message *msg)
 {
 	if(msg->header.from_nid == my_nid) {
 		kfree(msg);
@@ -1791,6 +1796,34 @@ static void ib_kmsg_free_msg(struct pcn_kmsg_message *msg)
 		recv_pool_selftest(rws, msg);
 		BUG_ON(ib_post_recv(gcb[msg->header.from_nid]->qp,
 									rws->recv_wr, &bad_wr));
+	}
+}
+
+static void ib_kmsg_free_msg(struct pcn_kmsg_message *msg)
+{
+#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
+	struct pcn_kmsg_message *m = (struct pcn_kmsg_message *)msg;
+	if (m->header.is_rdma) {
+		if (((pcn_kmsg_rdma_t *)m)->rdma_header.rdma_ack &&
+			((pcn_kmsg_rdma_t *)m)->rdma_header.is_write) {
+#if CONFIG_RDMA_POLL
+				kfree(((pcn_kmsg_rdma_t *)m)->poll_head_addr);
+#elif !CONFIG_RDMA_POLL && !CONFIG_RDMA_NOTIFY && !CONFIG_FARM
+				//kfree(msg);
+				ib_kmsg_recv_msg(msg);// this is a ack msg
+#else
+				kfree(msg);
+#endif
+		} else if (!((pcn_kmsg_rdma_t *)m)->rdma_header.rdma_ack) {
+			ib_kmsg_recv_msg(msg); //recv?  (is this a req msg? yes I guess)
+		} else {
+			kfree(msg);
+		}
+	}
+	else
+#endif
+	{
+		ib_kmsg_recv_msg(msg);
 	}
 }
 
@@ -1811,7 +1844,7 @@ static void rdma_rdma_notify_key_exchange_request(int dst)
 	req->comp = &comp;
 
 	ib_kmsg_send(dst, (void*)req, sizeof(*req));
-	pcn_kmsg_free_msg(req);
+	kfree(req);
 	wait_for_completion(&comp);
 }
 
@@ -1874,8 +1907,7 @@ int __init initialize()
 		return -EINVAL;
 	}
 	/* Create workers for bottom-halves */
-	msg_handler = alloc_workqueue("MSGHandBotm", WQ_MEM_RECLAIM, 0);
-	//msg_handler = alloc_workqueue("MSGHandBotm", WQ_UNBOUND, 32);
+	msg_handler = alloc_workqueue("MSGHandBotm", WQ_MEM_RECLAIM | WQ_UNBOUND, 0);
 
 #if CONFIG_RDMA_NOTIFY
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_REQUEST,

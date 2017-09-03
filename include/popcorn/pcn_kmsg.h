@@ -152,7 +152,7 @@ DEFINE_PCN_RDMA_KMSG(pcn_kmsg_rdma_t, RDMA_TEMPLATE);
 	int remote_ws; \
 	u64 dma_addr_act; \
 	u32 mr_ofs; \
-	int t_num; ;
+	int t_num;
 DEFINE_PCN_RDMA_KMSG(pcn_kmsg_perf_rdma_t, RDMA_TEST);
 
 /* TYPES OF MESSAGES */
@@ -203,7 +203,6 @@ void pcn_kmsg_handle_rdma_at_remote(
 
 /* Free a received message (called at the end of the callback function) */
 void pcn_kmsg_free_msg(void *msg);
-void pcn_rdma_kmsg_free_msg(void *msg);
 
 /* Allocate a received message */
 void *pcn_kmsg_alloc_msg(size_t size);

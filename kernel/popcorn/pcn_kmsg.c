@@ -84,32 +84,10 @@ void *pcn_kmsg_alloc_msg(size_t size)
 void pcn_kmsg_free_msg(void *msg)
 {
 	if (!memcmp(msg_layer,"IB", 2)) {
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-		struct pcn_kmsg_message *m = (struct pcn_kmsg_message *)msg;
-		if (m->header.is_rdma) {
-			if (((pcn_kmsg_rdma_t *)m)->rdma_header.rdma_ack &&
-				((pcn_kmsg_rdma_t *)m)->rdma_header.is_write) {
-					kfree(((pcn_kmsg_rdma_t *)m)->poll_head_addr);
-			} else if (!((pcn_kmsg_rdma_t *)m)->rdma_header.rdma_ack) {
-				kmsg_free_callback(msg);
-			} else {
-				kfree(msg);
-			}
-		}
-		else
-#endif
-		{
-			kmsg_free_callback(msg);
-		}
+		kmsg_free_callback(msg);
 	} else {
 		kfree(msg);
 	}
-}
-
-void pcn_rdma_kmsg_free_msg(void *msg)
-{
-	
-	kfree(msg);
 }
 
 /*
@@ -143,7 +121,6 @@ void pcn_kmsg_handle_rdma_at_remote(
 
 EXPORT_SYMBOL(pcn_kmsg_alloc_msg);
 EXPORT_SYMBOL(pcn_kmsg_free_msg);
-EXPORT_SYMBOL(pcn_rdma_kmsg_free_msg);
 EXPORT_SYMBOL(pcn_kmsg_send_rdma);
 EXPORT_SYMBOL(pcn_kmsg_send);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
