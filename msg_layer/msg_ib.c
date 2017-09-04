@@ -6,8 +6,9 @@
  * TODO:
  *		define 0~1 to enum if needed
  *		(perf!)sping when send
- *		RDMA:
- *			implemet a wait/wakup in exchaging rkey
+ *	RDMA:
+ *		ib_kmsg_send_rdma(..., is_write)
+ *		remove req_rdma->rdma_header.is_write = true;
  */
 
 #include <linux/module.h>
@@ -156,7 +157,12 @@ struct rdma_notify_init_req_t {
     uint32_t remote_rkey;
     uint64_t remote_addr;
     //uint32_t remote_size;
-	//xx complete
+	struct completion *comp;
+};
+
+struct rdma_notify_init_res_t {
+    struct pcn_kmsg_hdr header;
+	struct completion *comp;
 };
 #endif
 
@@ -1584,7 +1590,7 @@ error:
  * active unlock
  */
 void *ib_kmsg_send_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
-					  unsigned int msg_size, unsigned int rw_size)
+						  unsigned int msg_size, unsigned int rw_size)
 {
 	int ret;
 	u32 mr_ofs;
@@ -1793,26 +1799,31 @@ static void rdma_rdma_notify_key_exchange_request(int dst)
 {
 	struct rdma_notify_init_req_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
 	struct ib_cb *cb = gcb[dst];
+	DECLARE_COMPLETION_ONSTACK(comp);
 	u32 rkey;
-
 	BUG_ON(!req);
+
 	req->header.type = PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_REQUEST;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 	rkey = ib_rdma_rkey(cb, cb->rdma_notify_dma_addr_act, 1,
 					RDMA_NOTIFY_ACT_DATA_SIZE, 0, RDMA_FARM_NOTIFY_RKEY_ACT);
 	req->remote_addr = htonll(cb->rdma_notify_dma_addr_act);
 	req->remote_rkey = htonl(rkey);
+	req->comp = &comp;
+
 	ib_kmsg_send(dst, (void*)req, sizeof(*req));
 	pcn_kmsg_free_msg(req);
+	wait_for_completion(&comp);
 }
 
 static void handle_rdma_rdma_notify_key_exchange_request(
 								struct pcn_kmsg_message *inc_msg)
 {
+	int i;
 	struct rdma_notify_init_req_t *req =
 						(struct rdma_notify_init_req_t*) inc_msg;
+	struct rdma_notify_init_res_t *res = kmalloc(sizeof(*res), GFP_KERNEL);
 	struct ib_cb *cb = gcb[req->header.from_nid];
-	int i;
+	BUG_ON(!res);
 
 	/* remote info: */
 	cb->remote_rdma_notify_rkey = ntohl(req->remote_rkey);
@@ -1827,7 +1838,23 @@ static void handle_rdma_rdma_notify_key_exchange_request(
 				cb->rdma_notify_dma_addr_pass[i], 1,
 				RMDA_NOTIFY_PASS_DATA_SIZE, i, RDMA_FARM_NOTIFY_RKEY_PASS);
 	}
-	pcn_kmsg_free_msg(inc_msg);
+
+	res->header.type = PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_RESPONSE;
+	res->comp = req->comp;
+	ib_kmsg_send(req->header.from_nid, (void*)res, sizeof(*res));
+	kfree(res);
+
+	pcn_kmsg_free_msg(req);
+}
+
+
+static void handle_rdma_rdma_notify_key_exchange_response(
+								struct pcn_kmsg_message *inc_msg)
+{
+	struct rdma_notify_init_res_t *res =
+						(struct rdma_notify_init_res_t*) inc_msg;
+	complete(res->comp);
+	pcn_kmsg_free_msg(res);
 }
 #endif
 
@@ -1853,6 +1880,8 @@ int __init initialize()
 #if CONFIG_RDMA_NOTIFY
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_REQUEST,
 				(pcn_kmsg_cbftn)handle_rdma_rdma_notify_key_exchange_request);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_RESPONSE,
+				(pcn_kmsg_cbftn)handle_rdma_rdma_notify_key_exchange_response);
 #endif
 
 	send_callback = (send_cbftn)ib_kmsg_send;
