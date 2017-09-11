@@ -832,17 +832,34 @@ static int handle_clone_request(struct pcn_kmsg_message *msg)
 ///////////////////////////////////////////////////////////////////////////////
 int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 {
-	struct task_struct *tsk;
-	tsk = __get_task_struct(pid);
+	struct task_struct *tsk = __get_task_struct(pid);
 	if (!tsk) {
 		printk(KERN_INFO"%s: invalid origin task %d for remote work %d\n",
 				__func__, pid, req->header.type);
 		pcn_kmsg_free_msg(req);
 		return -ESRCH;
 	}
-	BUG_ON(tsk->remote_work);
-	tsk->remote_work = req;
-	complete(&tsk->remote_work_pended);
+
+	if (tsk->at_remote) {
+		struct remote_context *rc = get_task_remote(tsk);
+		struct pcn_kmsg_work *work = kmalloc(sizeof(*work), GFP_ATOMIC);
+		struct list_head *entry = &((struct work_struct *)work)->entry;
+
+		BUG_ON(!tsk->is_vma_worker);
+
+		work->msg = req;
+		INIT_LIST_HEAD(entry);
+		spin_lock(&rc->vma_works_lock);
+		list_add(entry, &rc->vma_works);
+		spin_unlock(&rc->vma_works_lock);
+		complete(&rc->vma_works_ready);
+
+		put_task_remote(tsk);
+	} else {
+		BUG_ON(tsk->remote_work);
+		tsk->remote_work = req;
+		complete(&tsk->remote_work_pended);
+	}
 
 	put_task_struct(tsk);
 	return 0;

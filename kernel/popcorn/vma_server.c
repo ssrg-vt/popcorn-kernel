@@ -366,11 +366,10 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 		req->remote_ws = ws->id;
 		req->origin_pid = rc->remote_tgids[nid];
 
-		VSPRINTK("  [%d] -> unmap %d %lx+%lx\n", current->pid, nid, start, len);
+		VSPRINTK("  [%d] -> unmap [%d/%d] %lx+%lx\n", current->pid, req->origin_pid, nid, start, len);
 		pcn_kmsg_send(nid, req, sizeof(*req));
 		res = wait_at_station(ws);
 		put_wait_station(ws);
-
 		pcn_kmsg_free_msg(res);
 	}
 
