@@ -269,7 +269,7 @@ out_retry:
 	return NULL;
 }
 
-static void __finish_fault_handling(struct fault_handle *fh)
+static bool __finish_fault_handling(struct fault_handle *fh)
 {
 	unsigned long flags;
 	bool last = false;
@@ -297,6 +297,7 @@ static void __finish_fault_handling(struct fault_handle *fh)
 			kmem_cache_free(__fault_handle_cache, fh);
 		}
 	}
+	return last;
 }
 
 
