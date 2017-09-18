@@ -1095,6 +1095,9 @@ again:
 				// unlock_page(page);
 
 				pcn_kmsg_free_msg(rp);
+			} else {
+				if (fault_for_write(fault_flags))
+					__claim_local_page(tsk, addr, page, my_nid);
 			}
 		}
 		spin_lock(ptl);
