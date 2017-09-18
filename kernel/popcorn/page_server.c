@@ -1236,13 +1236,13 @@ out:
  * page after use. This routine is similar to localfault handler at origin
  * thus may be refactored.
  */
-int page_server_get_userpage(u32 __user *uaddr, struct fault_handle **handle)
+int page_server_get_userpage(u32 __user *uaddr, struct fault_handle **handle, char *mode)
 {
 	unsigned long addr = (unsigned long)uaddr & PAGE_MASK;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 
-	const unsigned long fault_flags = FAULT_FLAG_WRITE;
+	const unsigned long fault_flags = 0;
 	struct fault_handle *fh = NULL;
 	spinlock_t *ptl;
 	pmd_t *pmd;
@@ -1274,9 +1274,14 @@ retry:
 	if (!fh) {
 		pte_unmap(pte);
 		up_read(&mm->mmap_sem);
+		io_schedule();
 		goto retry;
 	}
 
+	/*
+	printk(" %c[%d] gup %s %p %p\n", leader ? '=' : '-', current->pid, mode,
+		fh, uaddr);
+	*/
 	if (!leader) {
 		ret = 0;
 		pte_unmap(pte);
@@ -1286,29 +1291,16 @@ retry:
 	page = get_normal_page(vma, addr, pte);
 	get_page(page);
 
-	if (page_is_mine(page)) {
-		pte_t pte_val;
-		__claim_local_page(current, addr, page, my_nid);
-
-		spin_lock(ptl);
-
-		pte_val = pte_make_valid(*pte);
-		pte_val = pte_mkwrite(pte_val);
-		pte_val = pte_mkdirty(pte_val);
-		pte_val = pte_mkyoung(pte_val);
-
-		set_pte_at_notify(mm, addr, pte, pte_val);
-		update_mmu_cache(vma, addr, pte);
-		flush_tlb_page(vma, addr);
-	} else {
+	if (!page_is_mine(page)) {
 		remote_page_response_t *rp =
 				__claim_remote_page(current, addr, fault_flags, page);
 
 		spin_lock(ptl);
 		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
 		pcn_kmsg_free_msg(rp);
+		spin_unlock(ptl);
 	}
-	pte_unmap_unlock(pte, ptl);
+	pte_unmap(pte);
 	put_page(page);
 	ret = 0;
 
@@ -1316,15 +1308,13 @@ out:
 	*handle = fh;
 	up_read(&mm->mmap_sem);
 	mmput(mm);
-	PGPRINTK("  [%d] gup %p %lx %d\n", current->pid, fh, addr, ret);
 	return ret;
 }
 
-void page_server_put_userpage(struct fault_handle *fh)
+void page_server_put_userpage(struct fault_handle *fh, char *mode)
 {
 	if (!fh) return;
 
-	PGPRINTK("  [%d] pup %p\n", current->pid, fh);
 	__finish_fault_handling(fh);
 }
 

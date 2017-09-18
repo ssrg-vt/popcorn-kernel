@@ -1341,12 +1341,15 @@ futex_wake(u32 __user *uaddr, unsigned int flags, int nr_wake, u32 bitset)
 		return -EINVAL;
 
 #ifdef CONFIG_POPCORN
-	ret = page_server_get_userpage(uaddr, &fh);
+	ret = page_server_get_userpage(uaddr, &fh, "wake");
 	if (ret < 0)
 		return ret;
 #endif
 
 	ret = get_futex_key(uaddr, flags & FLAGS_SHARED, &key, VERIFY_READ);
+#ifdef CONFIG_POPCORN
+	page_server_put_userpage(fh, "wake");
+#endif
 	if (unlikely(ret != 0))
 		goto out;
 
@@ -1380,9 +1383,6 @@ futex_wake(u32 __user *uaddr, unsigned int flags, int nr_wake, u32 bitset)
 out_put_key:
 	put_futex_key(&key);
 out:
-#ifdef CONFIG_POPCORN
-	page_server_put_userpage(fh);
-#endif
 	return ret;
 }
 
@@ -2323,7 +2323,7 @@ static int futex_wait(u32 __user *uaddr, unsigned int flags, u32 val,
 
 retry:
 #ifdef CONFIG_POPCORN
-	ret = page_server_get_userpage(uaddr, &fh);
+	ret = page_server_get_userpage(uaddr, &fh, "wait");
 	if (ret < 0)
 		goto out;
 #endif
@@ -2333,7 +2333,7 @@ retry:
 	 */
 	ret = futex_wait_setup(uaddr, val, flags, &q, &hb);
 #ifdef CONFIG_POPCORN
-	page_server_put_userpage(fh);
+	page_server_put_userpage(fh, "wait");
 #endif
 	if (ret)
 		goto out;

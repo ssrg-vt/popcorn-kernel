@@ -193,7 +193,7 @@ long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
 	}
 
 	/*
-	printk("  [%d] ->[%d/%d] 0x%x %p 0x%x\n", current->pid,
+	printk(" f[%d] ->[%d/%d] 0x%x %p 0x%x\n", current->pid,
 			current->origin_pid, current->origin_nid,
 			op, uaddr, val);
 	*/
@@ -201,7 +201,7 @@ long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
 	res = wait_at_station(ws);
 	ret = res->ret;
 	/*
-	printk("  [%d] <-[%d/%d] 0x%x %p %ld\n", current->pid,
+	printk(" f[%d] <-[%d/%d] 0x%x %p %ld\n", current->pid,
 			current->origin_pid, current->origin_nid,
 			op, uaddr, ret);
 	*/
@@ -242,14 +242,14 @@ static void process_remote_futex_request(struct pcn_kmsg_message *msg)
 	}
 
 	/*
-	printk("  [%d] <-[%d/%d] 0x%x %p 0x%x\n", current->pid,
+	printk(" f[%d] <-[%d/%d] 0x%x %p 0x%x\n", current->pid,
 			current->remote_pid, current->remote_nid,
 			req->op, req->uaddr, req->val);
 	*/
 	res.ret = do_futex(req->uaddr, req->op, req->val,
 			tp, req->uaddr2, req->val2, req->val3);
 	/*
-	printk("  [%d] ->[%d/%d] 0x%x %p %ld\n", current->pid,
+	printk(" f[%d] ->[%d/%d] 0x%x %p %ld\n", current->pid,
 			current->remote_pid, current->remote_nid,
 			req->op, req->uaddr, res.ret);
 	*/
