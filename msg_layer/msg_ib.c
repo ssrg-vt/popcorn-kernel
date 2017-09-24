@@ -1740,6 +1740,10 @@ void *ib_kmsg_send_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 		rp->rdma_header.rdma_ack = true;
 		rp->rdma_header.is_write = true;
 		//pp->rdma_header.rw_size = remote_rw_size;
+
+#ifdef CONFIG_POPCORN_STAT
+		account_pcn_message_recv((struct pcn_kmsg_message *)rp);
+#endif
 		
 		return rdma_poll_act_buf + POLL_HEAD;
 #elif CONFIG_FARM

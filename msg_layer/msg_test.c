@@ -179,10 +179,45 @@ void show_instruction(void)
 	printk("---      ex: echo 21 [SIZE] [ITER] (M) > /proc/kmsg_test ---\n");
 	printk("---  22: FaRM RDMA WRITE w/ 2 WRITE ---\n");
 	printk("---      ex: echo 22 [SIZE] [ITER] (M) > /proc/kmsg_test ---\n");
+	printk("==================== other data ====================\n");
+	printk("---  50: print out all msg size ---\n");
+	printk("---      ex: echo 50 > /proc/kmsg_test ---\n");
 	printk("=============== msg_layer usage pattern  ===============\n");
 	printk("---  cat: showing msg_layer usage pattern ---\n");
 	printk("---      ex: cat /proc/kmsg_test ---\n");
 	printk("\n\n\n\n\n\n\n\n");
+}
+
+void show_all_msg_size(void)
+{
+	/* Thread */
+	printk("24 node_info_t %lu\n", sizeof(node_info_t));
+	printk("25 clone_request_t %lu\n", sizeof(clone_request_t));//s
+	printk("26 back_migration_request_t %lu\n", sizeof(back_migration_request_t));//r
+	printk("27 remote_task_pairing_t %lu\n", sizeof(remote_task_pairing_t));//r
+	printk("28 origin_task_exit_t %lu\n", sizeof(origin_task_exit_t));//s
+	//printk("29  %ld", sizeof());
+
+	/* VMA */
+	printk("30 remote_vma_request_t %lu\n", sizeof(remote_vma_request_t));//r
+	printk("31 remote_vma_response_t %lu\n", sizeof(remote_vma_response_t));//s
+	printk("32 vma_op_request_t %lu\n", sizeof(vma_op_request_t));//s
+	printk("33 vma_op_response_t %lu\n", sizeof(vma_op_response_t));//r
+
+    /* Page consistency protocol */
+	printk("34 remote_page_request_t %lu\n", sizeof(remote_page_request_t));//r
+	printk("35 remote_page_response_t %lu\n", sizeof(remote_page_response_t));//r
+	printk("36 remote_page_response_short_t %lu\n", sizeof(remote_page_response_short_t));//remote_r
+	printk("37 remote_page_flush_ack_t %lu\n", sizeof(remote_page_flush_ack_t));
+	printk("38 remote_page_flush_t %lu\n", sizeof(remote_page_flush_t));
+	printk("39 remote_page_flush_ack_t %lu\n", sizeof(remote_page_flush_ack_t));
+	printk("40 page_invalidate_request_t %lu\n", sizeof(page_invalidate_request_t));//s
+	printk("41 page_invalidate_response_t %lu\n", sizeof(page_invalidate_response_t));//r
+
+    /* Distributed futex */
+	printk("42 remote_futex_request %lu\n", sizeof(remote_futex_request));//r
+	printk("43 remote_futex_response %lu\n", sizeof(remote_futex_response));//s
+	return;
 }
 
 bool cmp_args(int a, int b)
@@ -1332,6 +1367,8 @@ static ssize_t write_proc(struct file * file,
 			show_instruction();
 			goto exit;
 		}
+	} else if (!memcmp(argv[0], "50", 2)) {
+		show_all_msg_size();
 	} else {
 		printk("Not support yet. Try \"1,2,3,4,5,6,9,10\"\n");
 	}

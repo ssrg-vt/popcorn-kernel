@@ -196,10 +196,10 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
 /* Send a message to the specified destination CPU. */
 int pcn_kmsg_send(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
-void *pcn_kmsg_send_rdma(unsigned int dest_cpu, void *lmsg,
+void *pcn_kmsg_send_rdma(unsigned int dest_cpu, void *msg,
 						unsigned int msg_size, unsigned int rw_size);
 void pcn_kmsg_handle_rdma_at_remote(
-						void *inc_lmsg, void *paddr, u32 rw_size);
+						void *msg, void *paddr, u32 rw_size);
 
 /* Free a received message (called at the end of the callback function) */
 void pcn_kmsg_free_msg(void *msg);

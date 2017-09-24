@@ -94,25 +94,33 @@ void pcn_kmsg_free_msg(void *msg)
  * Your request must be allocated by kmalloc().
  * rw_size: Max size you expect remote to perform a R/W
  */
-void *pcn_kmsg_send_rdma(unsigned int to, void *lmsg,
+void *pcn_kmsg_send_rdma(unsigned int to, void *msg,
 						unsigned int msg_size, unsigned int rw_size)
 {
     if (send_rdma_callback == NULL) {
-		struct pcn_kmsg_hdr *hdr = lmsg;
+		struct pcn_kmsg_hdr *hdr = msg;
 		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, "
 				"msg_size=%u rw_size=%u\n", __func__,
 				hdr->from_nid, hdr->type, msg_size, rw_size);
         return NULL;
     }
 
-    return send_rdma_callback(to, lmsg, msg_size, rw_size);
+#ifdef CONFIG_POPCORN_STAT
+	account_pcn_message_sent(msg);
+#endif
+
+    return send_rdma_callback(to, msg, msg_size, rw_size);
 }
 
 void pcn_kmsg_handle_rdma_at_remote(
-				void *inc_lmsg, void *paddr, u32 rw_size)
+				void *msg, void *paddr, u32 rw_size)
 {
-	if (!memcmp(msg_layer,"IB", 2))
-		handle_rdma_callback(inc_lmsg, paddr, rw_size);
+	if (!memcmp(msg_layer,"IB", 2)) {
+#ifdef CONFIG_POPCORN_STAT
+		account_pcn_message_sent((struct pcn_kmsg_message *)paddr);
+#endif
+		handle_rdma_callback(msg, paddr, rw_size);
+	}
 	else
 		printk(KERN_ERR "%s: current msg_layer (%s) "
 				"is not \"IB\"\n", __func__, msg_layer);
