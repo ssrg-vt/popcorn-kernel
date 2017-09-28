@@ -1584,8 +1584,8 @@ int page_server_handle_pte_fault(
 	 */
 	if (pte_none(pte_val)) {
 		/* Can we handle the fault locally? */
-		if (vma->vm_flags & VM_FETCH_LOCAL) {
-			PGPRINTK("  [%d] VM_FETCH_LOCAL. continue\n", current->pid);
+		if (vma->vm_flags & VM_EXEC) {
+			PGPRINTK("  [%d] VM_EXEC. continue\n", current->pid);
 			return VM_FAULT_CONTINUE;
 		}
 		if (!vma_is_anonymous(vma) &&
