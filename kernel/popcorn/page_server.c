@@ -1362,7 +1362,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		pte_unmap(pte);
 		ret = fh->ret;
 		if (ret) up_read(&mm->mmap_sem);
-		goto out;
+		goto out_follower;
 	}
 
 	if (pte_none(*pte) || !(page = vm_normal_page(vma, addr, *pte))) {
@@ -1431,7 +1431,7 @@ out_free:
 	pcn_kmsg_free_msg(rp);
 	fh->ret = ret;
 
-out:
+out_follower:
 	__finish_fault_handling(fh);
 	return ret;
 }

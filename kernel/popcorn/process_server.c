@@ -868,6 +868,8 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 static int __process_remote_works(void)
 {
 	bool run = true;
+	BUG_ON(current->at_remote);
+
 	while (run) {
 		struct pcn_kmsg_message *req;
 		long ret;

@@ -360,13 +360,14 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 
 		if (!get_popcorn_node_online(nid) || !rc->remote_tgids[nid]) continue;
 
-		if (nid == my_nid|| nid == nid_except) continue;
+		if (nid == my_nid || nid == nid_except) continue;
 
 		ws = get_wait_station(current);
 		req->remote_ws = ws->id;
 		req->origin_pid = rc->remote_tgids[nid];
 
-		VSPRINTK("  [%d] -> unmap [%d/%d] %lx+%lx\n", current->pid, req->origin_pid, nid, start, len);
+		VSPRINTK("  [%d] -> unmap [%d/%d] %lx+%lx\n", current->pid,
+				req->origin_pid, nid, start, len);
 		pcn_kmsg_send(nid, req, sizeof(*req));
 		res = wait_at_station(ws);
 		put_wait_station(ws);
@@ -435,6 +436,7 @@ void process_remote_vma_op(vma_op_request_t *req)
 	long ret = -EPERM;
 	struct mm_struct *mm = get_task_mm(current);
 
+	VSPRINTK("  [%d] <-%s\n", current->pid, vma_op_code_sz[req->operation]);
 	switch (req->operation) {
 	case VMA_OP_MMAP: {
 		unsigned long populate = 0;
@@ -484,7 +486,7 @@ void process_remote_vma_op(vma_op_request_t *req)
 		BUG_ON("unreachable");
 	}
 
-	VSPRINTK("  [%d] <-%s %ld\n", current->pid,
+	VSPRINTK("  [%d] ->%s %ld\n", current->pid,
 			vma_op_code_sz[req->operation], ret);
 	__reply_vma_op(req, ret);
 	pcn_kmsg_free_msg(req);
