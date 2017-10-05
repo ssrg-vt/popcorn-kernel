@@ -295,8 +295,26 @@ int vma_server_munmap_remote(unsigned long start, size_t len)
 
 int vma_server_brk_remote(unsigned long brk)
 {
-	VSPRINTK("\nVMA brk [%d] %lx\n", current->pid, brk);
-	return -EINVAL;
+	int ret;
+	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_BRK);
+	vma_op_response_t *res;
+
+	req->brk = brk;
+
+	VSPRINTK("\nVMA brk [%d] %lx --> %lx\n", current->pid,
+				   current->mm->brk, brk);
+
+	res = __delegate_vma_op(req);
+	ret = res->ret;
+
+	VSPRINTK("  [%d] %d %lx\n", current->pid, ret, res->brk);
+
+	/* Actual process() is done at the caller when ret == 0 */
+
+	kfree(req);
+	pcn_kmsg_free_msg(res);
+
+	return ret;
 }
 
 int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
@@ -328,6 +346,7 @@ int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 
 int vma_server_mprotect_remote(unsigned long start, size_t len, unsigned long prot)
 {
+	WARN_ON_ONCE("Does not support yet");
 	VSPRINTK("\nVMA mprotect [%d] %lx %lx %lx\n", current->pid,
 			start, len, prot);
 	return -EINVAL;
@@ -336,6 +355,7 @@ int vma_server_mprotect_remote(unsigned long start, size_t len, unsigned long pr
 int vma_server_mremap_remote(unsigned long addr, unsigned long old_len,
 		unsigned long new_len, unsigned long flags, unsigned long new_addr)
 {
+	WARN_ON_ONCE("Does not support yet");
 	VSPRINTK("\nVMA mremap [%d] %lx %lx %lx %lx %lx\n", current->pid,
 			addr, old_len, new_len, flags, new_addr);
 	return -EINVAL;
@@ -366,7 +386,7 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 		req->remote_ws = ws->id;
 		req->origin_pid = rc->remote_tgids[nid];
 
-		VSPRINTK("  [%d] -> unmap [%d/%d] %lx+%lx\n", current->pid,
+		VSPRINTK("  [%d] ->unmap [%d/%d] %lx+%lx\n", current->pid,
 				req->origin_pid, nid, start, len);
 		pcn_kmsg_send(nid, req, sizeof(*req));
 		res = wait_at_station(ws);
@@ -436,7 +456,7 @@ void process_remote_vma_op(vma_op_request_t *req)
 	long ret = -EPERM;
 	struct mm_struct *mm = get_task_mm(current);
 
-	VSPRINTK("  [%d] <-%s\n", current->pid, vma_op_code_sz[req->operation]);
+	VSPRINTK("\nREMOTE_VMA_REQUEST [%d] %s\n", current->pid, vma_op_code_sz[req->operation]);
 	switch (req->operation) {
 	case VMA_OP_MMAP: {
 		unsigned long populate = 0;
@@ -465,9 +485,12 @@ void process_remote_vma_op(vma_op_request_t *req)
 		if (f) filp_close(f, NULL);
 		break;
 	}
-	case VMA_OP_BRK:
-		ret = vm_brk(req->addr, req->len);
+	case VMA_OP_BRK: {
+		unsigned long brk = req->brk;
+		req->brk = sys_brk(req->brk);
+		ret = brk != req->brk;
 		break;
+	}
 	case VMA_OP_MUNMAP:
 		ret = vma_server_munmap_origin(req->addr, req->len, req->remote_nid);
 		ret = vm_munmap(req->addr, req->len);

@@ -192,7 +192,10 @@ DEFINE_PCN_KMSG(vma_op_request_t, VMA_OP_REQUEST_FIELDS);
 	int remote_ws; \
 	int operation; \
 	int ret; \
-	unsigned long addr; \
+	union { \
+		unsigned long addr; \
+		unsigned long brk; \
+	}; \
 	unsigned long len;
 DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 

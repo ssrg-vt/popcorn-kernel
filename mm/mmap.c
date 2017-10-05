@@ -298,7 +298,7 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
-		if (!vma_server_brk_remote(brk)) {
+		if (vma_server_brk_remote(brk)) {
 			return mm->brk;
 		}
 	}
