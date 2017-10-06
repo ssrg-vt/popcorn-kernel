@@ -232,7 +232,6 @@ static int handle_vma_op_response(struct pcn_kmsg_message *msg)
 	struct wait_station *ws = wait_station(res->remote_ws);
 
 	ws->private = res;
-	smp_mb();
 	complete(&ws->pendings);
 
 	return 0;
@@ -618,8 +617,6 @@ static int handle_vma_info_response(struct pcn_kmsg_message *msg)
 	}
 
 	vi->response = res;
-	smp_wmb();
-
 	complete(&vi->complete);
 	return 0;
 
@@ -826,7 +823,6 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		spin_lock_irqsave(&rc->vmas_lock, flags);
 		v = __lookup_pending_vma_request(rc, addr);
 		if (!v) {
-			smp_mb();
 			list_add(&vi->list, &rc->vmas);
 		} else {
 			kfree(vi);
@@ -847,7 +843,6 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 
 		ret = vi->ret =
 			__update_vma(tsk, (vma_info_response_t *)vi->response);
-		smp_wmb();
 
 		spin_lock_irqsave(&rc->vmas_lock, flags);
 		list_del(&vi->list);

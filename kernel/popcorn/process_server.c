@@ -217,8 +217,6 @@ static int handle_remote_futex_response(struct pcn_kmsg_message *msg)
 	struct wait_station *ws = wait_station(res->remote_ws);
 
 	ws->private = res;
-	smp_mb();
-
 	complete(&ws->pendings);
 	return 0;
 }
@@ -406,7 +404,6 @@ static int handle_origin_task_exit(struct pcn_kmsg_message *msg)
 
 	rc = get_task_remote(tsk);
 	rc->vma_worker_stop = true;
-	smp_mb();
 	complete(&rc->vma_works_ready);
 	complete(&rc->spawn_pended);
 
@@ -789,7 +786,6 @@ static void clone_remote_thread(struct work_struct *_work)
 
 		rc = rc_new;
 		rc->remote_tgids[nid_from] = tgid_from;
-		smp_mb();
 		list_add(&rc->list, &__remote_contexts_in());
 		__unlock_remote_contexts_in(nid_from);
 
