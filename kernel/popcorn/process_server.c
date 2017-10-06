@@ -887,10 +887,10 @@ static int __process_remote_works(void)
 			WARN_ON_ONCE("Not implemented yet!");
 			break;
 		case PCN_KMSG_TYPE_VMA_OP_REQUEST:
-			process_remote_vma_op((vma_op_request_t *)req);
+			process_vma_op_request((vma_op_request_t *)req);
 			break;
-		case PCN_KMSG_TYPE_REMOTE_VMA_REQUEST:
-			process_remote_vma_request(req);
+		case PCN_KMSG_TYPE_VMA_INFO_REQUEST:
+			process_vma_info_request(req);
 			break;
 		case PCN_KMSG_TYPE_FUTEX_REQUEST:
 			process_remote_futex_request(req);

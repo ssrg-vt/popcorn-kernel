@@ -64,11 +64,15 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 	unsigned long populate = 0;
 	struct vm_area_struct* vma;
 
-	// go through ALL vma's, looking for interference with this space.
+	/**
+	 * Go through ALL VMAs, looking for overlapping with this space.
+	 */
 	for (vma = current->mm->mmap; start < end; vma = vma->vm_next) {
 		if (vma == NULL || end <= vma->vm_start) {
-			// We've reached the end of the list,  or the VMA is fully
-			// above the region of interest
+			/**
+			 * We've reached the end of the list, or the VMA is fully
+			 * above the region of interest
+			 */
 			error = do_mmap_pgoff(file, start, end - start,
 					prot, flags, pgoff, &populate);
 			VSPRINTK("  [%d] map0 %lx -- %lx @ %lx\n",
@@ -79,21 +83,24 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			}
 			break;
 		} else if (start >= vma->vm_start && end <= vma->vm_end) {
-			// the VMA fully encompases the region of interest
-			// nothing to do
+			/**
+			 * VMA fully encompases the region of interest. nothing to do
+			 */
 			break;
 		} else if (start >= vma->vm_start
 				&& start < vma->vm_end && end > vma->vm_end) {
-			// the VMA includes the start of the region of interest
-			// but not the end
-			// advance start (no mapping to do)
+			/**
+			 * VMA includes the start of the region of interest
+			 * but not the end. advance start (no mapping to do)
+			 */
 			pgoff += ((vma->vm_end - start) >> PAGE_SHIFT);
 			start = vma->vm_end;
 		} else if (start < vma->vm_start
 				&& vma->vm_start < end && end <= vma->vm_end) {
-			// the VMA includes the end of the region of interest
-			// but not the start
-
+			/**
+			 * VMA includes the end of the region of interest
+			 * but not the start
+			 */
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
 			VSPRINTK("  [%d] map1 %lx -- %lx, %lx\n",
@@ -103,8 +110,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			}
 			break;
 		} else if (start <= vma->vm_start && vma->vm_end <= end) {
-			// the VMA is fully within the region of interest
-
+			/* VMA is fully within the region of interest */
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
 			VSPRINTK("  [%d] map2 %lx -- %lx, %lx\n",
@@ -114,7 +120,9 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 				break;
 			}
 
-			// Then advance to the end of this vma
+			/**
+			 * Then advance to the end of this VMA
+			 */
 			pgoff += ((vma->vm_end - start) >> PAGE_SHIFT);
 			start = vma->vm_end;
 		}
@@ -128,9 +136,11 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 /**
  * Heterogeneous binary support
  *
- * ajith - for file offset fetch. copied from fs/binfmt_elf.c
+ * Handle misaligned ELF sections in the heterogeneous binary.
+ * However, recent alignment tool updates makes ELF sections aligned,
+ * so this is not required anymore
+ * Should be paried to fs/binfmt_elf.c
  */
-
 static unsigned long __get_file_offset(struct file *file, unsigned long vm_start)
 {
 	struct elfhdr elf_ex;
@@ -183,7 +193,7 @@ out:
 
 
 /**
- * VMA handlers for remote
+ * VMA operation delegators at remotes
  */
 static vma_op_request_t *__alloc_vma_op_request(enum vma_op_code opcode)
 {
@@ -200,7 +210,7 @@ static vma_op_request_t *__alloc_vma_op_request(enum vma_op_code opcode)
 	return req;
 }
 
-static vma_op_response_t *__delegate_vma_op(vma_op_request_t *req)
+static int __delegate_vma_op(vma_op_request_t *req, vma_op_response_t **resp)
 {
 	vma_op_response_t *res;
 	struct wait_station *ws = get_wait_station(current);
@@ -212,7 +222,8 @@ static vma_op_response_t *__delegate_vma_op(vma_op_request_t *req)
 	put_wait_station(ws);
 	BUG_ON(res->operation != req->operation);
 
-	return res;
+	*resp = res;
+	return res->ret;
 }
 
 static int handle_vma_op_response(struct pcn_kmsg_message *msg)
@@ -242,14 +253,13 @@ unsigned long vma_server_mmap_remote(struct file *file,
 	req->pgoff = pgoff;
 	get_file_path(file, req->path, sizeof(req->path));
 
-	VSPRINTK("\nVMA mmap [%d] %lx - %lx\n", current->pid,
+	VSPRINTK("\n## VMA mmap [%d] %lx - %lx\n", current->pid,
 			addr, addr + len);
 	if (req->path[0] != '\0') {
 		VSPRINTK("  [%d] %s\n", current->pid, req->path);
 	}
 
-	res = __delegate_vma_op(req);
-	ret = res->ret;
+	ret = __delegate_vma_op(req, &res);
 
 	VSPRINTK("  [%d] %ld %lx -- %lx\n", current->pid,
 			ret, res->addr, res->addr + res->len);
@@ -277,10 +287,9 @@ int vma_server_munmap_remote(unsigned long start, size_t len)
 	req->addr = start;
 	req->len = len;
 
-	VSPRINTK("\nVMA munmap [%d] %lx %lx\n", current->pid, start, len);
+	VSPRINTK("\n## VMA munmap [%d] %lx %lx\n", current->pid, start, len);
 
-	res = __delegate_vma_op(req);
-	ret = res->ret;
+	ret = __delegate_vma_op(req, &res);
 
 	VSPRINTK("  [%d] %d %lx -- %lx\n", current->pid,
 			ret, res->addr, res->addr + res->len);
@@ -301,11 +310,10 @@ int vma_server_brk_remote(unsigned long brk)
 
 	req->brk = brk;
 
-	VSPRINTK("\nVMA brk [%d] %lx --> %lx\n", current->pid,
+	VSPRINTK("\n## VMA brk [%d] %lx --> %lx\n", current->pid,
 				   current->mm->brk, brk);
 
-	res = __delegate_vma_op(req);
-	ret = res->ret;
+	ret = __delegate_vma_op(req, &res);
 
 	VSPRINTK("  [%d] %d %lx\n", current->pid, ret, res->brk);
 
@@ -327,11 +335,10 @@ int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 	req->len = len;
 	req->behavior = behavior;
 
-	VSPRINTK("\nVMA madvise [%d] %lx %lx %d\n", current->pid,
+	VSPRINTK("\n## VMA madvise [%d] %lx %lx %d\n", current->pid,
 			start, len, behavior);
 
-	res = __delegate_vma_op(req);
-	ret = res->ret;
+	ret = __delegate_vma_op(req, &res);
 
 	VSPRINTK("  [%d] %d %lx -- %lx %d\n", current->pid,
 			ret, res->addr, res->addr + res->len, behavior);
@@ -346,7 +353,7 @@ int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 
 int vma_server_mprotect_remote(unsigned long start, size_t len, unsigned long prot)
 {
-	WARN_ON_ONCE("Does not support yet");
+	WARN_ON_ONCE("Does not support remote mprotect yet");
 	VSPRINTK("\nVMA mprotect [%d] %lx %lx %lx\n", current->pid,
 			start, len, prot);
 	return -EINVAL;
@@ -355,7 +362,7 @@ int vma_server_mprotect_remote(unsigned long start, size_t len, unsigned long pr
 int vma_server_mremap_remote(unsigned long addr, unsigned long old_len,
 		unsigned long new_len, unsigned long flags, unsigned long new_addr)
 {
-	WARN_ON_ONCE("Does not support yet");
+	WARN_ON_ONCE("Does not support remote mremap yet");
 	VSPRINTK("\nVMA mremap [%d] %lx %lx %lx %lx %lx\n", current->pid,
 			addr, old_len, new_len, flags, new_addr);
 	return -EINVAL;
@@ -386,7 +393,7 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 		req->remote_ws = ws->id;
 		req->origin_pid = rc->remote_tgids[nid];
 
-		VSPRINTK("  [%d] ->unmap [%d/%d] %lx+%lx\n", current->pid,
+		VSPRINTK("  [%d] ->munmap [%d/%d] %lx+%lx\n", current->pid,
 				req->origin_pid, nid, start, len);
 		pcn_kmsg_send(nid, req, sizeof(*req));
 		res = wait_at_station(ws);
@@ -429,34 +436,13 @@ static void __reply_vma_op(vma_op_request_t *req, int ret)
 	pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
 }
 
-static vma_op_request_t *__get_pending_vma_op(struct remote_context *rc)
-{
-	struct work_struct *work = NULL;
-	vma_op_request_t *req;
-
-	wait_for_completion_interruptible_timeout(&rc->vma_works_ready, HZ);
-
-	spin_lock(&rc->vma_works_lock);
-	if (!list_empty(&rc->vma_works)) {
-		work = list_first_entry(&rc->vma_works, struct work_struct, entry);
-		list_del(&work->entry);
-	}
-	spin_unlock(&rc->vma_works_lock);
-
-	if (!work) return NULL;
-
-	req = ((struct pcn_kmsg_work *)work)->msg;
-	kfree(work);
-
-	return req;
-}
-
-void process_remote_vma_op(vma_op_request_t *req)
+void process_vma_op_request(vma_op_request_t *req)
 {
 	long ret = -EPERM;
 	struct mm_struct *mm = get_task_mm(current);
 
-	VSPRINTK("\nREMOTE_VMA_REQUEST [%d] %s\n", current->pid, vma_op_code_sz[req->operation]);
+	VSPRINTK("\nVMA_OP_REQUEST [%d] %s\n", current->pid,
+			vma_op_code_sz[req->operation]);
 	switch (req->operation) {
 	case VMA_OP_MMAP: {
 		unsigned long populate = 0;
@@ -516,6 +502,33 @@ void process_remote_vma_op(vma_op_request_t *req)
 	mmput(mm);
 }
 
+
+/**
+ * Remote worker at the remote.
+ * Currently, the remote worker only handles munmap VMA operations.
+ */
+static vma_op_request_t *__get_pending_vma_op(struct remote_context *rc)
+{
+	struct work_struct *work = NULL;
+	vma_op_request_t *req;
+
+	wait_for_completion_interruptible_timeout(&rc->vma_works_ready, HZ);
+
+	spin_lock(&rc->vma_works_lock);
+	if (!list_empty(&rc->vma_works)) {
+		work = list_first_entry(&rc->vma_works, struct work_struct, entry);
+		list_del(&work->entry);
+	}
+	spin_unlock(&rc->vma_works_lock);
+
+	if (!work) return NULL;
+
+	req = ((struct pcn_kmsg_work *)work)->msg;
+	kfree(work);
+
+	return req;
+}
+
 void vma_worker_remote(struct remote_context *rc)
 {
 	struct mm_struct *mm = get_task_mm(current);
@@ -527,7 +540,7 @@ void vma_worker_remote(struct remote_context *rc)
 
 		if (!(req = __get_pending_vma_op(rc))) continue;
 
-		VSPRINTK("\n### VMA_WORKER [%d] %s %lx %lx\n", current->pid,
+		VSPRINTK("\n## VMA_WORK [%d] %s %lx %lx\n", current->pid,
 				vma_op_code_sz[req->operation], req->addr, req->len);
 
 		switch (req->operation) {
@@ -539,7 +552,7 @@ void vma_worker_remote(struct remote_context *rc)
 		case VMA_OP_MREMAP:
 		case VMA_OP_BRK:
 		case VMA_OP_MADVISE:
-			BUG_ON("not implemented yet");
+			BUG_ON("Not implemented yet");
 			break;
 		default:
 			BUG_ON("unreachable");
@@ -567,9 +580,8 @@ struct vma_info {
 	wait_queue_head_t pendings_wait;
 
 	volatile int ret;
-	volatile remote_vma_response_t *response;
+	volatile vma_info_response_t *response;
 };
-
 
 static struct vma_info *__lookup_pending_vma_request(struct remote_context *rc, unsigned long addr)
 {
@@ -581,18 +593,16 @@ static struct vma_info *__lookup_pending_vma_request(struct remote_context *rc, 
 	return NULL;
 }
 
-
-static int handle_remote_vma_response(struct pcn_kmsg_message *msg)
+static int handle_vma_info_response(struct pcn_kmsg_message *msg)
 {
-	remote_vma_response_t *res = (remote_vma_response_t *)msg;
+	vma_info_response_t *res = (vma_info_response_t *)msg;
 	struct task_struct *tsk;
 	unsigned long flags;
 	struct vma_info *vi;
 	struct remote_context *rc;
 
 	tsk = __get_task_struct(res->remote_pid);
-	if (!tsk) {
-		__WARN();
+	if (WARN_ON(!tsk)) {
 		goto out_free;
 	}
 	rc = get_task_remote(tsk);
@@ -603,8 +613,7 @@ static int handle_remote_vma_response(struct pcn_kmsg_message *msg)
 	put_task_remote(tsk);
 	put_task_struct(tsk);
 
-	if (!vi) {
-		__WARN();
+	if (WARN_ON(!vi)) {
 		goto out_free;
 	}
 
@@ -621,12 +630,13 @@ out_free:
 
 
 /**
- * Request for remote vma and handling the request
+ * Handle VMA info requests at the origin.
+ * This is invoked through the remote work delegation.
  */
-void process_remote_vma_request(struct pcn_kmsg_message *msg)
+void process_vma_info_request(struct pcn_kmsg_message *msg)
 {
-	remote_vma_request_t *req = (remote_vma_request_t *)msg;
-	remote_vma_response_t *res = NULL;
+	vma_info_request_t *req = (vma_info_request_t *)msg;
+	vma_info_response_t *res = NULL;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	unsigned long addr = req->addr;
@@ -637,21 +647,15 @@ void process_remote_vma_request(struct pcn_kmsg_message *msg)
 		res = kmalloc(sizeof(*res), GFP_KERNEL);
 	}
 	res->addr = addr;
-	res->header.type = PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE;
+	res->header.type = PCN_KMSG_TYPE_VMA_INFO_RESPONSE;
 	res->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	mm = get_task_mm(current);
-
-	/**
-	 * This processing is insipired from the VMA fault handling at the
-	 * beginning of __do_page_fault.
-	 */
 	down_read(&mm->mmap_sem);
 
-	/* Fill-in the vma info */
 	vma = find_vma(mm, addr);
 	if (unlikely(!vma)) {
-		printk("remote_vma: does not exist for %lx\n", addr);
+		printk("vma_info: vma does not exist at %lx\n", addr);
 		res->result = -ENOENT;
 		goto out_up;
 	}
@@ -659,7 +663,7 @@ void process_remote_vma_request(struct pcn_kmsg_message *msg)
 		goto good;
 	}
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
-		printk("remote_vma: does not really exist for %lx\n", addr);
+		printk("vma_info: vma does not really exist at %lx\n", addr);
 		res->result = -ENOENT;
 		goto out_up;
 	}
@@ -678,9 +682,9 @@ out_up:
 	mmput(mm);
 
 	if (res->result == 0) {
-		VSPRINTK("\n### VMA_SERVER [%d] %lx -- %lx %lx\n", current->pid,
+		VSPRINTK("\n## VMA_INFO [%d] %lx -- %lx %lx\n", current->pid,
 				res->vm_start, res->vm_end, res->vm_flags);
-		if (!remote_vma_anon(res)) {
+		if (!vma_info_anon(res)) {
 			VSPRINTK("  [%d] %s + %lx\n", current->pid,
 					res->vm_file_path, res->vm_pgoff);
 		}
@@ -695,23 +699,23 @@ out_up:
 }
 
 
-static struct vma_info *__alloc_remote_vma_request(struct task_struct *tsk, unsigned long addr, remote_vma_request_t **preq)
+static struct vma_info *__alloc_vma_info_request(struct task_struct *tsk, unsigned long addr, vma_info_request_t **preq)
 {
 	struct vma_info *vi = kmalloc(sizeof(*vi), GFP_KERNEL);
-	remote_vma_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
+	vma_info_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
 
 	BUG_ON(!vi || !req);
 
 	/* vma_info */
 	INIT_LIST_HEAD(&vi->list);
 	vi->addr = addr;
-	vi->response = (volatile remote_vma_response_t *)0xdeadbeaf; /* poision */
+	vi->response = (volatile vma_info_response_t *)0xdeadbeaf; /* poision */
 	atomic_set(&vi->pendings, 0);
 	init_completion(&vi->complete);
 	init_waitqueue_head(&vi->pendings_wait);
 
 	/* req */
-	req->header.type = PCN_KMSG_TYPE_REMOTE_VMA_REQUEST;
+	req->header.type = PCN_KMSG_TYPE_VMA_INFO_REQUEST;
 	req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	req->origin_pid = tsk->origin_pid;
@@ -725,7 +729,7 @@ static struct vma_info *__alloc_remote_vma_request(struct task_struct *tsk, unsi
 }
 
 
-static int __map_remote_vma(struct task_struct *tsk, remote_vma_response_t *res)
+static int __update_vma(struct task_struct *tsk, vma_info_response_t *res)
 {
 	struct mm_struct *mm = tsk->mm;
 	struct vm_area_struct *vma;
@@ -744,11 +748,11 @@ static int __map_remote_vma(struct task_struct *tsk, remote_vma_response_t *res)
 	down_write(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
 	if (vma && vma->vm_start <= addr) {
-		/* someone already do things for me. */
+		/* somebody already done for me. */
 		goto out;
 	}
 
-	if (remote_vma_anon(res)) {
+	if (vma_info_anon(res)) {
 		flags |= MAP_ANONYMOUS;
 	} else {
 		f = filp_open(res->vm_file_path, O_RDONLY | O_LARGEFILE, 0);
@@ -761,7 +765,7 @@ static int __map_remote_vma(struct task_struct *tsk, remote_vma_response_t *res)
 		/*
 		unsigned long orig_pgoff = res->vm_pgoff;
 		res->vm_pgoff = __get_file_offset(f, res->vm_start);
-		BUG_ON(res->vm_pgoff == -1); // no matching vma in heterogeneous binary
+		BUG_ON(res->vm_pgoff == -1);
 		*/
 		VSPRINTK("  [%d] %s + %lx\n", tsk->pid,
 				res->vm_file_path, res->vm_pgoff);
@@ -772,25 +776,30 @@ static int __map_remote_vma(struct task_struct *tsk, remote_vma_response_t *res)
 			| ((res->vm_flags & VM_EXEC) ? PROT_EXEC : 0);
 
 	flags = flags
-		   | ((res->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
-		   | ((res->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
-		   | ((res->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0);
+			| ((res->vm_flags & VM_DENYWRITE) ? MAP_DENYWRITE : 0)
+			| ((res->vm_flags & VM_SHARED) ? MAP_SHARED : MAP_PRIVATE)
+			| ((res->vm_flags & VM_GROWSDOWN) ? MAP_GROWSDOWN : 0);
 
 	err = map_difference(mm, f, res->vm_start, res->vm_end,
 				prot, flags, res->vm_pgoff);
 
 	if (f) filp_close(f, NULL);
 
+	/*
 	vma = find_vma(mm, addr);
 	BUG_ON(!vma || vma->vm_start > addr);
-
 	if (res->vm_flags & VM_FETCH_LOCAL) vma->vm_flags |= VM_FETCH_LOCAL;
+	*/
 out:
 	downgrade_write(&mm->mmap_sem);
 	return ret;
 }
 
 
+/**
+ * Fetch VMA information from the origin.
+ * mm->mmap_sem is down_read() at this point and should be downed upon return.
+ */
 int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 {
 	struct vma_info *vi;
@@ -798,7 +807,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 	DEFINE_WAIT(wait);
 	int ret = 0;
 	unsigned long addr = address & PAGE_MASK;
-	remote_vma_request_t *req = NULL;
+	vma_info_request_t *req = NULL;
 	struct remote_context *rc = get_task_remote(tsk);
 
 	might_sleep();
@@ -812,35 +821,32 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		struct vma_info *v;
 		spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
-		vi = __alloc_remote_vma_request(tsk, addr, &req);
+		vi = __alloc_vma_info_request(tsk, addr, &req);
 
 		spin_lock_irqsave(&rc->vmas_lock, flags);
 		v = __lookup_pending_vma_request(rc, addr);
 		if (!v) {
-			VSPRINTK("  [%d] %lx ->[%d/%d]\n", current->pid,
-					addr, tsk->origin_pid, tsk->origin_nid);
 			smp_mb();
 			list_add(&vi->list, &rc->vmas);
 		} else {
-			VSPRINTK("  [%d] %lx already pended\n", current->pid, addr);
 			kfree(vi);
 			vi = v;
 			kfree(req);
 			req = NULL;
 		}
-	} else {
-		VSPRINTK("  [%d] %lx already pended\n", current->pid, addr);
 	}
 	up_read(&tsk->mm->mmap_sem);
 
 	if (req) {
 		spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
+		VSPRINTK("  [%d] %lx ->[%d/%d]\n", current->pid,
+				addr, tsk->origin_pid, tsk->origin_nid);
 		pcn_kmsg_send(tsk->origin_nid, req, sizeof(*req));
 		wait_for_completion(&vi->complete);
 
 		ret = vi->ret =
-			__map_remote_vma(tsk, (remote_vma_response_t *)vi->response);
+			__update_vma(tsk, (vma_info_response_t *)vi->response);
 		smp_wmb();
 
 		spin_lock_irqsave(&rc->vmas_lock, flags);
@@ -852,8 +858,9 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		pcn_kmsg_free_msg((void *)vi->response);
 		kfree(req);
 	} else {
+		VSPRINTK("  [%d] %lx already pended\n", current->pid, addr);
 		atomic_inc(&vi->pendings);
-		prepare_to_wait(&vi->pendings_wait, &wait,TASK_UNINTERRUPTIBLE);
+		prepare_to_wait(&vi->pendings_wait, &wait, TASK_UNINTERRUPTIBLE);
 		spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
 		io_schedule();
@@ -872,15 +879,15 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 }
 
 
-DEFINE_KMSG_RW_HANDLER(remote_vma_request, remote_vma_request_t, origin_pid);
+DEFINE_KMSG_RW_HANDLER(vma_info_request, vma_info_request_t, origin_pid);
 DEFINE_KMSG_RW_HANDLER(vma_op_request, vma_op_request_t, origin_pid);
 
 int vma_server_init(void)
 {
 	REGISTER_KMSG_HANDLER(
-			PCN_KMSG_TYPE_REMOTE_VMA_REQUEST, remote_vma_request);
+			PCN_KMSG_TYPE_VMA_INFO_REQUEST, vma_info_request);
 	REGISTER_KMSG_HANDLER(
-			PCN_KMSG_TYPE_REMOTE_VMA_RESPONSE, remote_vma_response);
+			PCN_KMSG_TYPE_VMA_INFO_RESPONSE, vma_info_response);
 
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_VMA_OP_REQUEST, vma_op_request);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_VMA_OP_RESPONSE, vma_op_response);
