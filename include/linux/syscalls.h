@@ -892,5 +892,6 @@ asmlinkage long sys_mlock2(unsigned long start, size_t len, int flags);
 asmlinkage long sys_sched_migrate(int nid, void __user *uregs);
 asmlinkage long sys_sched_migration_proposed(void);
 asmlinkage long sys_sched_propose_migration(pid_t pid, int nid);
+asmlinkage long sys_sched_get_node_info(int nid, void __user *info);
 
 #endif

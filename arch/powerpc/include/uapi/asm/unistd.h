@@ -392,5 +392,6 @@
 #define __NR_sched_migrate	379
 #define __NR_sched_migration_proposed	380
 #define __NR_sched_propose_migration	381
+#define __NR_sched_get_node_info	382
 
 #endif /* _UAPI_ASM_POWERPC_UNISTD_H_ */

@@ -4643,6 +4643,32 @@ SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
 	return 0;
 }
 
+SYSCALL_DEFINE2(sched_get_node_info, int, nid, void __user *, info)
+{
+	struct popcorn_node_info res = {
+		.status = 0,
+		.arch = POPCORN_ARCH_UNKNOWN,
+		.distance = 0,
+	};
+
+	if (nid < 0 || nid >= MAX_POPCORN_NODES) {
+		return -EINVAL;
+	}
+	if (!access_ok(VERIFY_WRITE, info, sizeof(res))) {
+		return -EACCES;
+	}
+
+	if (get_popcorn_node_online(nid)) {
+		res.status = 1;
+		res.arch = get_popcorn_node_arch(nid);
+	}
+
+	if (copy_to_user(info, &res, sizeof(res))) {
+		return -EINVAL;
+	}
+	return 0;
+}
+
 #pragma GCC optimize ("no-omit-frame-pointer")
 #pragma GCC optimize ("no-optimize-sibling-calls")
 SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
@@ -4689,12 +4715,17 @@ SYSCALL_DEFINE0(sched_migration_proposed)
 
 SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
 {
-	return -EINVAL;
+	return -EPERM;
+}
+
+SYSCALL_DEFINE2(sched_get_node_info, int, nid, void __user *, info)
+{
+	return -EPERM;
 }
 
 SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 {
-	return -EINVAL;
+	return -EPERM;
 }
 #endif
 

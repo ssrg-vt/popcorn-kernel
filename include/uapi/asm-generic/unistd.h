@@ -721,9 +721,11 @@ __SYSCALL(__NR_sched_migrate, sys_sched_migrate)
 __SYSCALL(__NR_sched_migration_proposed, sys_sched_migration_proposed)
 #define __NR_sched_propose_migration 287
 __SYSCALL(__NR_sched_propose_migration, sys_sched_propose_migration)
+#define __NR_sched_get_node_info 288
+__SYSCALL(__NR_sched_get_node_info, sys_sched_get_node_info)
 
 #undef __NR_syscalls
-#define __NR_syscalls 288
+#define __NR_syscalls 289
 
 /*
  * All syscalls below here should go away really,

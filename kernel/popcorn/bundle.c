@@ -56,9 +56,9 @@ int get_popcorn_node_arch(int nid)
 EXPORT_SYMBOL(get_popcorn_node_arch);
 
 const char *archs_sz[] = {
-	"x86",
 	"arm",
-	"powerpc",
+	"x86",
+	"ppc",
 };
 
 

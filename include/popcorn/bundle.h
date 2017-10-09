@@ -5,8 +5,8 @@
 #define MAX_BUNDLE_ID 32
 
 enum popcorn_arch {
-	POPCORN_ARCH_X86 = 0,
-	POPCORN_ARCH_ARM = 1,
+	POPCORN_ARCH_ARM = 0,
+	POPCORN_ARCH_X86 = 1,
 	POPCORN_ARCH_PPC = 2,
 	POPCORN_ARCH_UNKNOWN,
 };
@@ -22,4 +22,11 @@ int get_popcorn_node_arch(int nid);
 void notify_my_node_info(int nid);
 
 int popcorn_nodes_init(void);
+
+struct popcorn_node_info {
+	unsigned int status;
+	int arch;
+	int distance;
+};
+
 #endif

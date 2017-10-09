@@ -44,6 +44,7 @@
 int save_thread_info(struct field_arch *arch)
 {
 	int cpu;
+	struct pt_regs *regs = current_pt_regs();
 
 	cpu = get_cpu();
 
