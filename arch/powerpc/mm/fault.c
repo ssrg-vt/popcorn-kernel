@@ -340,7 +340,7 @@ retry:
 	/* vma worker should not fault */
 	BUG_ON(current->is_vma_worker);
 
-	if (distributed_process(current)) {
+	if (distributed_remote_process(current)) {
 		if (!vma || vma->vm_start > address) {
 			if (vma_server_fetch_vma(current, address) == 0) {
 				/* Replace with updated VMA */

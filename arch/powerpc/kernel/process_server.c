@@ -100,7 +100,7 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 	regs->ccr = arch->oob[1];
 	regs->xer = arch->oob[2];
 
-	for (i = 0; i < 31; i++) {
+	for (i = 0; i < 32; i++) {
 		regs->gpr[i] = regset->gpr[i];
 	}
 
