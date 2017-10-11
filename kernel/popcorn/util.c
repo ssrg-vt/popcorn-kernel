@@ -85,3 +85,24 @@ out_unlock:
 	spin_unlock(&__file_path_lock);
 	return 0;
 }
+
+
+static const char *__comm_to_trace[] = {
+};
+
+#include <linux/kernel.h>
+#include <linux/sched.h>
+#include <linux/ptrace.h>
+
+void trace_task_status(void)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(__comm_to_trace); i++) {
+		const char *comm = __comm_to_trace[i];
+		if (memcmp(current->comm, comm, strlen(comm)) == 0) {
+			printk("@@[%d] %s %lx\n", current->pid,
+					current->comm, instruction_pointer(current_pt_regs()));
+			break;
+		}
+	}
+}

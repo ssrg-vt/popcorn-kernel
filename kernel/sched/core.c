@@ -2684,6 +2684,10 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 		put_user(task_pid_vnr(current), current->set_child_tid);
 }
 
+#ifdef CONFIG_POPCORN_DEBUG
+extern void trace_task_status(void);
+#endif
+
 /*
  * context_switch - switch to the new MM and the new thread's register state.
  */
@@ -2693,6 +2697,9 @@ context_switch(struct rq *rq, struct task_struct *prev,
 {
 	struct mm_struct *mm, *oldmm;
 
+#ifdef CONFIG_POPCORN_DEBUG
+	trace_task_status();
+#endif
 	prepare_task_switch(rq, prev, next);
 
 	mm = next->mm;

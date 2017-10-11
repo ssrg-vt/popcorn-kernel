@@ -8,4 +8,6 @@ void print_page_signature_pid(pid_t pid, unsigned char *addr);
 void print_page_owner(struct page *page, unsigned long addr, pid_t pid);
 
 int get_file_path(struct file *file, char *sz, size_t size);
+
+void trace_task_status(void);
 #endif
