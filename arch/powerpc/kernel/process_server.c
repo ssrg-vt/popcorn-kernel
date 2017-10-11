@@ -50,10 +50,11 @@ int save_thread_info(struct field_arch *arch)
 
 	/* TODO handle these registers at the userspace correctly */
 	arch->oob[0] = regs->msr;
-	arch->oob[1] = regs->ccr;
-	arch->oob[2] = regs->xer;
+	arch->oob[1] = regs->xer;
 
 	/* TODO set arch->tls and arch->fpu_active */
+	arch->tls = 0;
+	arch->fpu_active = false;
 
 	put_cpu();
 
@@ -95,10 +96,10 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 	regs->nip = regset->nip;
 	regs->link = regset->link;
 	regs->ctr = regset->ctr;
+	regs->ccr = regset->ccr;
 
 	regs->msr = arch->oob[0];
-	regs->ccr = arch->oob[1];
-	regs->xer = arch->oob[2];
+	regs->xer = arch->oob[1];
 
 	for (i = 0; i < 32; i++) {
 		regs->gpr[i] = regset->gpr[i];
@@ -119,8 +120,10 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 
 noinline_for_stack void update_frame_pointer(void)
 {
+	/*
 	unsigned long *lr;
 	asm volatile ("mtlr 4; std 4, %0" : "=m"(lr));
 
 	*lr = current_pt_regs()->link;
+	*/
 }

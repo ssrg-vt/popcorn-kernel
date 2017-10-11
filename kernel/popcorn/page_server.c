@@ -627,9 +627,9 @@ static void __do_invalidate_page(struct task_struct *tsk, page_invalidate_reques
 	entry = pte_make_invalid(*pte);
 	entry = pte_mkyoung(entry);
 
-	set_pte_at_notify(mm, addr, pte, entry);
-	update_mmu_cache(vma, addr, pte);
-	flush_tlb_page(vma, addr);
+	if (ptep_set_access_flags(vma, addr, pte, entry, 1)) {
+		update_mmu_cache(vma, addr, pte);
+	}
 
 	__finish_invalidation(fh);
 	pte_unmap_unlock(pte, ptl);
@@ -825,9 +825,9 @@ static void __update_remote_page(struct mm_struct *mm,
 	}
 	entry = pte_mkyoung(entry);
 
-	set_pte_at_notify(mm, addr, pte, entry);
-	update_mmu_cache(vma, addr, pte);
-	flush_tlb_page(vma, addr);
+	if (ptep_set_access_flags(vma, addr, pte, entry, 1)) {
+		update_mmu_cache(vma, addr, pte);
+	}
 
 	SetPageDistributed(page);
 	set_bit(my_nid, page->owners);
@@ -937,7 +937,10 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 	if (!page) return;
 
 	*pteval = pte_make_valid(*pte);
-	set_pte_at(vma->vm_mm, addr, pte, *pteval);
+	*pteval = pte_mkyoung(*pteval);
+	if (ptep_set_access_flags(vma, addr, pte, *pteval, 1)) {
+		update_mmu_cache(vma, addr, pte);
+	}
 	PGPRINTK("  [%d] zap %lx\n", current->pid, addr);
 }
 
@@ -994,10 +997,11 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	} else {
 		entry = pte_wrprotect(*pte);
 	}
+	entry = pte_mkyoung(entry);
 
-	set_pte_at_notify(mm, addr, pte, entry);
-	update_mmu_cache(vma, addr, pte);
-	flush_tlb_page(vma, addr);
+	if (ptep_set_access_flags(vma, addr, pte, entry, 1)) {
+		update_mmu_cache(vma, addr, pte);
+	}
 
 	// lock_page(page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
@@ -1110,10 +1114,11 @@ again:
 			entry = pte_wrprotect(entry);
 			set_bit(my_nid, page->owners);
 		}
+		entry = pte_mkyoung(entry);
 
-		set_pte_at_notify(mm, addr, pte, entry);
-		update_mmu_cache(vma, addr, pte);
-		flush_tlb_page(vma, addr);
+		if (ptep_set_access_flags(vma, addr, pte, entry, 1)) {
+			update_mmu_cache(vma, addr, pte);
+		}
 
 		SetPageDistributed(page);
 		set_bit(from_nid, page->owners);
@@ -1404,9 +1409,11 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		} else {
 			entry = pte_wrprotect(entry);
 		}
-		set_pte_at_notify(mm, addr, pte, entry);
-		update_mmu_cache(vma, addr, pte);
-		flush_tlb_page(vma, addr);
+		entry = pte_mkyoung(entry);
+
+		if (ptep_set_access_flags(vma, addr, pte, entry, 1)) {
+			update_mmu_cache(vma, addr, pte);
+		}
 	} else {
 		if (populated) {
 			void *paddr;
@@ -1509,9 +1516,9 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		pte_val = pte_mkdirty(pte_val);
 		pte_val = pte_mkyoung(pte_val);
 
-		set_pte_at_notify(mm, addr, pte, pte_val);
-		update_mmu_cache(vma, addr, pte);
-		flush_tlb_page(vma, addr);
+		if (ptep_set_access_flags(vma, addr, pte, pte_val, 1)) {
+			update_mmu_cache(vma, addr, pte);
+		}
 	} else {
 		remote_page_response_t *rp =
 				__claim_remote_page(current, addr, fault_flags, page);
