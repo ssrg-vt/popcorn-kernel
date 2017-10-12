@@ -58,9 +58,13 @@ int save_thread_info(struct field_arch *arch)
 
 	put_cpu();
 
+	PSPRINTK("%s [%d] ip %lx lr %lx\n", __func__, current->pid,
+			instruction_pointer(regs), regs->link);
+	/*
 	PSPRINTK("%s [%d] tls %lx\n", __func__, current->pid, arch->tls);
 	PSPRINTK("%s [%d] fpu %sactive\n", __func__, current->pid,
 			arch->fpu_active ? "" : "in");
+	*/
 
 	return 0;
 }
@@ -111,7 +115,7 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 	put_cpu();
 
 	PSPRINTK("%s [%d] ip %lx lr %lx\n", __func__, current->pid,
-			regs->nip, regs->link);
+			instruction_pointer(regs), regs->link);
 	//show_regs(regs);
 
 	return 0;
