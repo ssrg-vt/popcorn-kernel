@@ -441,24 +441,24 @@ static void process_remote_page_flush(struct work_struct *work)
 	page = __find_page_at(mm, addr, &pte, &ptl);
 	BUG_ON(IS_ERR(page));
 
-	// lock_page(page);
+	/* XXX should be outside of ptl lock */
 	if (req->flags & FLUSH_FLAG_FLUSH) {
-		paddr = kmap_atomic(page);
+		paddr = kmap(page);
 		copy_to_user_page(vma, page, addr, paddr, req->page, PAGE_SIZE);
-		kunmap_atomic(paddr);
+		kunmap(page);
 	}
 
 	SetPageDistributed(page);
 	set_bit(my_nid, page->owners);
 	clear_bit(req->remote_nid, page->owners);
 
+	/* XXX Should update through clear_flush and set */
 	entry = pte_make_valid(*pte);
 
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
 	flush_tlb_page(vma, addr);
 
-	// unlock_page(page);
 	put_page(page);
 
 	pte_unmap_unlock(pte, ptl);
@@ -627,9 +627,8 @@ static void __do_invalidate_page(struct task_struct *tsk, page_invalidate_reques
 	entry = ptep_clear_flush(vma, addr, pte);
 	entry = pte_make_invalid(entry);
 
-	set_pte_at(mm, addr, pte, entry);
+	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
-	// flush_tlb_page(vma, addr);
 
 	__finish_invalidation(fh);
 	pte_unmap_unlock(pte, ptl);
@@ -799,10 +798,9 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 #endif /* CONFIG_POPCORN_KMSG_IB_RDMA */
 
 
-static void __update_remote_page(struct mm_struct *mm,
+static void __make_pte_valid(struct mm_struct *mm,
 		struct vm_area_struct *vma, unsigned long addr,
-		unsigned long fault_flags, pte_t *pte,
-		struct page *page, remote_page_response_t *remote_page)
+		unsigned long fault_flags, pte_t *pte, struct page *page)
 {
 	pte_t entry;
 
@@ -815,7 +813,6 @@ static void __update_remote_page(struct mm_struct *mm,
 	} else {
 		entry = pte_wrprotect(entry);
 	}
-	// entry = pte_mkyoung(entry);
 
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
@@ -990,18 +987,14 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	} else {
 		entry = pte_wrprotect(entry);
 	}
-	// entry = pte_mkyoung(entry);
 
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
-	//flush_tlb_page(vma, addr);
 
-	// lock_page(page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
 	paddr = kmap_atomic(page);
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 	kunmap_atomic(paddr);
-	// unlock_page(page);
 
 	pte_unmap_unlock(pte, ptl);
 
@@ -1086,11 +1079,9 @@ again:
 				remote_page_response_t *rp =
 					__claim_remote_page(tsk, addr, fault_flags, page);
 
-				// lock_page(page);
-				paddr = kmap_atomic(page);
+				paddr = kmap(page);
 				copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
-				kunmap_atomic(paddr);
-				// unlock_page(page);
+				kunmap(page);
 
 				pcn_kmsg_free_msg(rp);
 			} else {
@@ -1105,15 +1096,13 @@ again:
 			clear_bit(my_nid, page->owners);
 			entry = pte_make_invalid(entry);
 		} else {
-			entry = pte_make_valid(entry);
+			entry = pte_make_valid(entry); /* For remote-claimed case */
 			entry = pte_wrprotect(entry);
 			set_bit(my_nid, page->owners);
 		}
-		//entry = pte_mkyoung(entry);
 
 		set_pte_at_notify(mm, addr, pte, entry);
 		update_mmu_cache(vma, addr, pte);
-		//flush_tlb_page(vma, addr);
 
 		SetPageDistributed(page);
 		set_bit(from_nid, page->owners);
@@ -1122,12 +1111,10 @@ again:
 	}
 
 	if (!grant) {
-		// lock_page(page);
 		flush_cache_page(vma, addr, page_to_pfn(page));
 		paddr = kmap_atomic(page);
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 		kunmap_atomic(paddr);
-		// unlock_page(page);
 	}
 
 	pte_unmap_unlock(pte, ptl);
@@ -1296,15 +1283,13 @@ retry:
 				__claim_remote_page(current, addr, fault_flags, page);
 		void *paddr;
 
-		// lock_page(page);
-		paddr = kmap_atomic(page);
+		paddr = kmap(page);
 		copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		kunmap_atomic(paddr);
+		kunmap(page);
 		SetPageUptodate(page);
-		// unlock_page(page);
 
 		spin_lock(ptl);
-		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
+		__make_pte_valid(mm, vma, addr, fault_flags, pte, page);
 		pcn_kmsg_free_msg(rp);
 		spin_unlock(ptl);
 	}
@@ -1421,9 +1406,9 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		}
 	} else {
 		void *paddr;
-		paddr = kmap_atomic(page);
+		paddr = kmap(page);
 		copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		kunmap_atomic(paddr);
+		kunmap(page);
 		SetPageUptodate(page);
 
 		spin_lock(ptl);
@@ -1432,7 +1417,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 			mem_cgroup_commit_charge(page, memcg, false);
 			lru_cache_add_active_or_unevictable(page, vma);
 		} else {
-			__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
+			__make_pte_valid(mm, vma, addr, fault_flags, pte, page);
 		}
 	}
 	SetPageDistributed(page);
@@ -1518,8 +1503,6 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		__claim_local_page(current, addr, page, my_nid);
 
 		spin_lock(ptl);
-
-		pte_val = pte_make_valid(*pte);
 		pte_val = pte_mkwrite(pte_val);
 		pte_val = pte_mkdirty(pte_val);
 		pte_val = pte_mkyoung(pte_val);
@@ -1534,15 +1517,13 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 
 		BUG_ON(rp->result != 0);
 
-		// lock_page(page);
-		paddr = kmap_atomic(page);
+		paddr = kmap(page);
 		copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		kunmap_atomic(paddr);
+		kunmap(page);
 		SetPageUptodate(page);
-		// unlock_page(page);
 
 		spin_lock(ptl);
-		__update_remote_page(mm, vma, addr, fault_flags, pte, page, rp);
+		__make_pte_valid(mm, vma, addr, fault_flags, pte, page);
 		pcn_kmsg_free_msg(rp);
 	}
 	BUG_ON(!test_bit(my_nid, page->owners));
