@@ -430,7 +430,7 @@ int __init initialize(void)
 	recv_data_t *recv_data;
 	struct sched_param param = {.sched_priority = 10};
 	
-	if (!init_ip_table()) return -EINVAL;
+	if (!identify_myself()) return -EINVAL;
 
 	printk("-------------------------------------------------\n");
 	printk("---- updating to my_nid=%d wait for a moment ----\n", my_nid);

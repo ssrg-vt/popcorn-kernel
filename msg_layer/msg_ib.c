@@ -1906,7 +1906,7 @@ int __init initialize()
 
 	printk("- Popcorn Messaging Layer IB Initialization Start -\n");
 	/* Establish node numbers according to its IP */
-	if (!init_ip_table()) {
+	if (!identify_myself()) {
 		printk("%s(): check your IP table!\n", __func__);
 		return -EINVAL;
 	}

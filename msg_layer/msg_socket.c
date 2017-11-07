@@ -431,7 +431,7 @@ static int __init initialize(void)
 
 	MSGPRINTK("--- Popcorn messaging layer init starts ---\n");
 
-	if (!init_ip_table()) return -EINVAL;
+	if (!identify_myself()) return -EINVAL;
 
 	msg_layer = "sock";
 	send_callback = (send_cbftn)sock_kmsg_send;
