@@ -899,6 +899,10 @@ static int __process_remote_works(void)
 			bring_back_remote_thread(req);
 			run = false;
 			break;
+		default:
+			if (WARN_ON("Receive unsupported message")) {
+				printk("  Type: %d\n", req->header.type);
+			}
 		}
 	}
 	return 0;
