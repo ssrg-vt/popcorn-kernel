@@ -4635,6 +4635,8 @@ SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
 		return -EINVAL;
 	}
 
+	if (!pid) pid = current->pid;
+
 	rcu_read_lock();
 	tsk = find_task_by_vpid(pid);
 	if (!tsk) {
