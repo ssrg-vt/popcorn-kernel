@@ -199,8 +199,8 @@ void show_all_msg_size(void)
 	//printk("29  %ld", sizeof());
 
 	/* VMA */
-	printk("30 remote_vma_request_t %lu\n", sizeof(remote_vma_request_t));//r
-	printk("31 remote_vma_response_t %lu\n", sizeof(remote_vma_response_t));//s
+	printk("30 remote_vma_request_t %lu\n", sizeof(vma_info_request_t));//r
+	printk("31 remote_vma_response_t %lu\n", sizeof(vma_info_response_t));//s
 	printk("32 vma_op_request_t %lu\n", sizeof(vma_op_request_t));//s
 	printk("33 vma_op_response_t %lu\n", sizeof(vma_op_response_t));//r
 

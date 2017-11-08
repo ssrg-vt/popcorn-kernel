@@ -4,8 +4,10 @@
 # This conditional selects whether we are being included from the
 # kernel Makefile or not.
 
-ifdef $(CONFIG_POPCORN_MSG_DOLPHIN)
-DOLPHIN := /usr/local/dolphin/DIS	# XXX set according to your installation path
+ifneq ($(CONFIG_POPCORN_KMSG_DOLPHIN),)
+# XXX set installation path accordingly
+DOLPHIN = /path/to/source/DIS
+
 EXTRA_CFLAGS += \
 	-I$(DOLPHIN)/src/IRM_GX/drv/src \
 	-I$(DOLPHIN)/src/IRM_GX/drv/src/LINUX \

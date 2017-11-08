@@ -795,7 +795,7 @@ do_retry:
 #endif
 		} else {
 #ifdef CONFIG_POPCORN_STAT
-			account_pcn_message_recv(msg.msg);
+			account_pcn_message_recv(pcn_msg);
 #endif
 			ftn = callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {
