@@ -577,6 +577,10 @@ int __init initialize(void)
 	printk(KERN_INFO "Value of send ptr = %lx\n",
 	       (unsigned long int)send_callback);
 #endif
+	set_popcorn_node_online(my_nid, true);
+
+	set_popcorn_node_online(!my_nid, true);
+	notify_my_node_info(!my_nid);
 
 	printk(KERN_INFO "\n\n\n");
 	printk(KERN_INFO "-----------------------------------\n");

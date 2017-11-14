@@ -1,26 +1,16 @@
-
-Popcorn Messaging Layer supports
-- Loopback messaging layer
-	msg_loopback.ko
-- Ethernet messaging layer
-	msg_socket.ko
-- PCIe messaging layer
-	msg_dolphin.ko
-- Infiniband messaging layer
-	msg_ib.ko
 ____________________________________________________________________________________
 
 PCIe messaging layer
 ____________________________________________________________________________________
 
+**** Following instructions are outdated. Please refer to with discretion. ****
+
 a. Introduction
 _____________________________________________________
 
-This is the PCI based messaging layer module built on top of 
-dolphin interconnect solution
+This is the PCI based messaging layer module built on top of dolphin interconnect solution
 
-This can be built as a standalone kernel module on vanilla linux for
-testing the msg layer or as part of popcorn linux using compile time MACROS
+This can be built as a standalone kernel module on vanilla linux for testing the msg layer or as part of popcorn linux using compile time MACROS
 
 b. Folder Contents
 _____________________________________________________
