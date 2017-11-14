@@ -49,13 +49,7 @@
 #define MAX_NUM_BUF		20
 #define RECV_THREAD_POOL	2
 
-#define ENABLE_DMA		0
 #define SEND_QUEUE_POOL		0
-
-/* for debug */
-#define TEST_MSG_LAYER		0
-#define TEST_SERVER		0
-
 
 typedef struct _pool_buffer {
 	char *buff;
@@ -88,7 +82,7 @@ static int pcie_recv_init(int channel_num);
 static int pcie_send_cleanup(int channel_num);
 static int pcie_recv_cleanup(int channel_num);
 
-#if ENABLE_DMA
+#ifdef ENABLE_DMA
 static int dma_init(int channel_num);
 static int dma_cleanup(int channel_num);
 #endif
@@ -143,7 +137,7 @@ sci_map_handle_t recv_map_handle[MAX_NUM_CHANNELS] = {NULL};
 probe_status_t send_report;
 probe_status_t recv_report;
 
-#if ENABLE_DMA
+#ifdef ENABLE_DMA
 /* dma variables */
 sci_dma_queue_t dma_queue[MAX_NUM_CHANNELS];
 ioaddr64_t local_io[MAX_NUM_CHANNELS];
@@ -169,21 +163,19 @@ int pci_kmsg_send_long(unsigned int dest_cpu,
 		       struct pcn_kmsg_message *lmsg,
 		       unsigned int payload_size);
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 #else
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 extern send_cbftn send_callback;
 #endif
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 
 #define MSG_LENGTH 65536
 //#define MSG_LENGTH 16384
 //#define MSG_LENGTH 4096
 #define NUM_MSGS 25
-
-#define PROF_HISTOGRAM  1
 
 static atomic_t recv_count;
 static atomic_t exec_count;
@@ -372,7 +364,7 @@ signed32 recv_intr_cb(unsigned32 local_adapter_number,
 	return 0;
 }
 
-#if ENABLE_DMA
+#ifdef ENABLE_DMA
 int dma_cb(void IN *arg, dis_dma_status_t dmastatus)
 {
 	sci_dma_queue_t *temp = (sci_dma_queue_t *)arg;
@@ -457,7 +449,7 @@ int __init initialize(void)
 
 	sema_init(&pool_buf_cnt, MAX_NUM_BUF);
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 	for (i = 0; i < MAX_NUM_BUF; i++) {
 		recv_buf[i].buff = pcn_kmsg_alloc_msg(SEG_SIZE);
 		if (recv_buf[i].buff == NULL)
@@ -478,7 +470,7 @@ int __init initialize(void)
 		init_completion(&send_intr_flag[i]);
 		init_completion(&recv_intr_flag[i]);
 
-#if ENABLE_DMA
+#ifdef ENABLE_DMA
 		init_completion(&dma_complete[i]);
 #endif
 		complete(&send_intr_flag[i]);
@@ -559,7 +551,7 @@ int __init initialize(void)
 
 	notify_my_node_info(!my_nid);
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 	atomic_set(&exec_count, 0);
 	atomic_set(&recv_count, 0);
 	atomic_set(&send_count, 0);
@@ -586,9 +578,9 @@ int __init initialize(void)
 	return 0;
 }
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 
-#if defined(PROF_HISTOGRAM)
+#ifdef (PROF_HISTOGRAM)
 ktime_t start[(NUM_MSGS*MAX_NUM_CHANNELS)+1];
 ktime_t end[(NUM_MSGS*MAX_NUM_CHANNELS)+1];
 unsigned long long time[(NUM_MSGS*MAX_NUM_CHANNELS)+1];
@@ -600,7 +592,7 @@ static int time_started;
 
 void pcn_kmsg_cbftn handle_selfie_test(struct pcn_kmsg_message *inc_msg)
 {
-#if !TEST_SERVER
+#ifndef TEST_MSG_LAYER_SERVER
 	int payload_size = MSG_LENGTH;
 
 	pci_kmsg_send_long(1, (struct pcn_kmsg_message *)inc_msg,
@@ -613,7 +605,7 @@ int test_thread(void *arg0)
 	int i = 0;
 	int temp_count = 0;
 
-#if TEST_SERVER
+#ifdef TEST_MSG_LAYER_SERVER
 	printk(KERN_INFO "Test function %s: called\n", __func__);
 
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SELFIE_TEST,
@@ -666,7 +658,7 @@ int connection_handler(void *arg0)
 {
 	struct pcn_kmsg_message *pcn_msg, *temp;
 	int status = 0, channel_num = 0, retry = 0;
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 	int i = 0;
 	unsigned long long average = 0;
 #endif
@@ -710,7 +702,7 @@ int connection_handler(void *arg0)
 		wait_for_completion(&recv_intr_flag[channel_num]);
 		/* Ajith :  the wait for completion will wake up only one thread on interrupt callback */
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 		if (atomic_read(&recv_count) == NUM_MSGS*MAX_NUM_CHANNELS)
 			break;
 #endif
@@ -730,7 +722,7 @@ int connection_handler(void *arg0)
 			       temp->header.type, msg_names[temp->header.type]);
 		*/
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 		down(&recv_buf_cnt);
 do_retry:
 		for (i = 0; i < MAX_NUM_BUF; i++) {
@@ -757,17 +749,17 @@ do_retry:
 		pcn_msg = recv_buf[i].buff;
 #else
 do_retry:
-		pcn_msg = (struct pcn_kmsg_message *) pcn_kmsg_alloc_msg(temp->header.size);
+		pcn_msg = (struct pcn_kmsg_message *)pcn_kmsg_alloc_msg(temp->header.size + sizeof(struct pcn_kmsg_hdr));
 		if (pcn_msg == NULL) {
 			if (!(retry % 1000))
-				printk(KERN_ERR "%s: ERROR: Failed to allocate recv buffer size %d\n",
-				       __func__, temp->header.size);
+				printk(KERN_ERR "%s: ERROR: Failed to allocate recv buffer size %ld\n",
+				       __func__, temp->header.size + sizeof(struct pcn_kmsg_hdr));
 			retry++;
 			goto do_retry;
 		}
 #endif
 
-		memcpy(pcn_msg, recv_vaddr[channel_num], temp->header.size);
+		memcpy(pcn_msg, recv_vaddr[channel_num], temp->header.size + sizeof(struct pcn_kmsg_hdr));
 
 		/* trigger the interrupt */
 		status = sci_trigger_interrupt_flag(remote_send_intr_hdl[channel_num], NO_FLAGS);
@@ -778,7 +770,7 @@ do_retry:
 		/* safe to release the control here */
 		connection_handler_cnt--;
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 		atomic_inc(&recv_count);
 #endif
 
@@ -786,7 +778,7 @@ do_retry:
 			printk(KERN_ERR "%s: ERROR: Received invalid message type %d\n",
 			       __func__, pcn_msg->header.type);
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 			recv_buf[i].is_free = 1;
 			smp_wmb();
 
@@ -801,16 +793,16 @@ do_retry:
 			ftn = callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {
 				ftn(pcn_msg);
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 				recv_buf[i].is_free = 1;
 				smp_wmb();
 				up(&recv_buf_cnt);
 #endif
 			} else {
-				printk(KERN_ERR "%s: ERROR: Received message type %d size %d has no registered callback!\n",
+				printk(KERN_ERR "%s: ERROR: Received message type %d size %ld has no registered callback!\n",
 				       __func__, pcn_msg->header.type,
-				       pcn_msg->header.size);
-#if TEST_MSG_LAYER
+				       pcn_msg->header.size + sizeof(struct pcn_kmsg_hdr));
+#ifdef TEST_MSG_LAYER
 				recv_buf[i].is_free = 1;
 				smp_wmb();
 				up(&recv_buf_cnt);
@@ -820,7 +812,7 @@ do_retry:
 			}
 		}
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 		atomic_inc(&exec_count);
 
 #if defined(PROF_HISTOGRAM)
@@ -853,7 +845,7 @@ do_retry:
 #endif /*TEST_MSG_LAYER*/
 	}
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 	while (1) {
 		msleep(10);
 		if (kthread_should_stop()) {
@@ -866,7 +858,7 @@ do_retry:
 	return status;
 }
 
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback)
 {
 	if (type >= PCN_KMSG_TYPE_MAX)
@@ -901,7 +893,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg, uns
 	}
 
 	lmsg->header.from_nid = my_nid;
-	lmsg->header.size = (payload_size + sizeof(struct pcn_kmsg_hdr));
+	lmsg->header.size = payload_size;
 
 	if (lmsg->header.size > SEG_SIZE) {
 		printk(KERN_ALERT"%s: ALERT: trying to send a message bigger than the supported size %d (%pS) %s\n",
@@ -916,7 +908,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg, uns
 		       current->pid);
 	*/
 
-#if !TEST_MSG_LAYER
+#ifndef TEST_MSG_LAYER
 	if (dest_cpu == my_nid) {
 		pcn_msg = lmsg;
 
@@ -938,7 +930,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg, uns
 				pcn_kmsg_free_msg(pcn_msg);
 			}
 		}
-		return lmsg->header.size;
+		return 0;
 	}
 #endif
 
@@ -948,7 +940,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg, uns
 	// Only one can send. Tirggered by INT.
 	wait_for_completion(&send_intr_flag[channel_num]);
 
-#if ENABLE_DMA
+#ifdef ENABLE_DMA
         memcpy(send_vaddr[channel_num], pcn_msg, pcn_msg->header.size);
 
         status = dis_start_dma_transfer(subuser_id[channel_num],
@@ -966,8 +958,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg, uns
         wait_for_completion(&dma_complete[channel_num]);
 #else
     /*check whether remote is using the channel */
-    memcpy(send_remote_vaddr[channel_num], pcn_msg,
-								pcn_msg->header.size);
+    memcpy(send_remote_vaddr[channel_num], pcn_msg, pcn_msg->header.size);
 #endif
 
 	/* trigger the interrupt */
@@ -1337,7 +1328,7 @@ static int pcie_recv_cleanup(int channel_num)
 	return status;
 }
 
-#if ENABLE_DMA
+#ifdef ENABLE_DMA
 static int dma_init(int channel_num)
 {
 	int status = 0;
@@ -1406,7 +1397,7 @@ static void __exit unload(void)
 
 	/* cleanup */
 	for (i = 0; i < MAX_NUM_CHANNELS; i++) {
-#if ENABLE_DMA
+#ifdef ENABLE_DMA
 		status = dma_cleanup(i);
 #endif
 		status = pcie_send_cleanup(i);
@@ -1414,7 +1405,7 @@ static void __exit unload(void)
 	}
 
 	for (i = 0; i < MAX_NUM_BUF; i++) {
-#if TEST_MSG_LAYER
+#ifdef TEST_MSG_LAYER
 		pcn_kmsg_free_msg(recv_buf[i].buff);
 #endif
 	}
