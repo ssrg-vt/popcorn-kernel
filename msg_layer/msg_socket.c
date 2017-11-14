@@ -29,8 +29,6 @@
 #define PORT 30467
 #define MAX_ASYNC_BUFFER	256
 
-extern char *msg_layer;
-
 /* For enq and deq */
 struct pcn_kmsg_buf_item {
 	struct pcn_kmsg_message *msg;
@@ -433,7 +431,7 @@ static int __init initialize(void)
 
 	if (!identify_myself()) return -EINVAL;
 
-	msg_layer = "sock";
+	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_SOCKET;
 	send_callback = (send_cbftn)sock_kmsg_send;
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {

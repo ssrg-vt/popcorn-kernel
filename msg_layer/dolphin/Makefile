@@ -5,7 +5,7 @@
 # kernel Makefile or not.
 
 # XXX set installation path accordingly
-DOLPHIN = /home/beowulf/dolphin/DIS
+DOLPHIN = /path/to/src/dolphin/DIS
 
 EXTRA_CFLAGS += \
 	-I$(DOLPHIN)/src/IRM_GX/drv/src \

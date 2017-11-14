@@ -251,5 +251,12 @@ int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id, void *msg,
 extern send_cbftn send_callback;
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 
+enum pcn_kmsg_layer_types {
+	PCN_KMSG_LAYER_TYPE_UNKNOWN = -1,
+	PCN_KMSG_LAYER_TYPE_SOCKET = 0,
+	PCN_KMSG_LAYER_TYPE_DOLPHIN,
+	PCN_KMSG_LAYER_TYPE_IB,
+};
+extern enum pcn_kmsg_layer_types pcn_kmsg_layer_type;
 
 #endif /* __LINUX_PCN_KMSG_H */

@@ -12,8 +12,8 @@
 #include <popcorn/debug.h>
 #include <popcorn/stat.h>
 
-char *msg_layer = NULL;
-EXPORT_SYMBOL(msg_layer);
+enum pcn_kmsg_layer_types pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_UNKNOWN;
+EXPORT_SYMBOL(pcn_kmsg_layer_type);
 
 pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 EXPORT_SYMBOL(callbacks);
@@ -83,7 +83,7 @@ void *pcn_kmsg_alloc_msg(size_t size)
 
 void pcn_kmsg_free_msg(void *msg)
 {
-	if (!memcmp(msg_layer,"IB", 2)) {
+	if (pcn_kmsg_layer_type == PCN_KMSG_LAYER_TYPE_IB) {
 		kmsg_free_callback(msg);
 	} else {
 		kfree(msg);
@@ -115,15 +115,15 @@ void *pcn_kmsg_send_rdma(unsigned int to, void *msg,
 void pcn_kmsg_handle_rdma_at_remote(
 				void *msg, void *paddr, u32 rw_size)
 {
-	if (!memcmp(msg_layer,"IB", 2)) {
+	if (pcn_kmsg_layer_type == PCN_KMSG_LAYER_TYPE_IB) {
 #ifdef CONFIG_POPCORN_STAT
 		account_pcn_message_sent((struct pcn_kmsg_message *)paddr);
 #endif
 		handle_rdma_callback(msg, paddr, rw_size);
 	}
 	else
-		printk(KERN_ERR "%s: current msg_layer (%s) "
-				"is not \"IB\"\n", __func__, msg_layer);
+		printk(KERN_ERR "%s: current msg_layer is not \"IB\" (%d)\n", __func__,
+				pcn_kmsg_layer_type);
 }
 
 

@@ -246,7 +246,6 @@ static int __init initialize(void);
 static void ib_cq_event_handler(struct ib_cq *cq, void *ctx);
 
 /* Popcorn utilities */
-extern char *msg_layer;
 extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
 extern send_cbftn send_callback;
 extern send_rdma_cbftn send_rdma_callback;
@@ -1902,7 +1901,7 @@ int __init initialize()
 #if CONFIG_RDMA_POLL
 	int j;
 #endif
-	msg_layer = "IB";
+	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_IB;
 
 	printk("- Popcorn Messaging Layer IB Initialization Start -\n");
 	/* Establish node numbers according to its IP */

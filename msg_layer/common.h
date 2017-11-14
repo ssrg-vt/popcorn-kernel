@@ -16,10 +16,10 @@
 #include <linux/inetdevice.h>
 #include <linux/netdevice.h>
 
+extern char *msg_layer;
 #include "config.h"
 
 #define MAX_NUM_NODES		ARRAY_SIZE(ip_addresses)
-#define MAX_NUM_CHANNELS	(MAX_NUM_NODES - 1)
 
 static uint32_t ip_table[MAX_NUM_NODES] = { 0 };
 

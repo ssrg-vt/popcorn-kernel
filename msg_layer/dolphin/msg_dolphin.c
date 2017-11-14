@@ -38,7 +38,7 @@
 #include "genif.h"
 
 /* Macro definitions */
-//#define MAX_NUM_CHANNELS	1
+#define MAX_NUM_CHANNELS	1
 #define SEND_OFFSET		1
 #define RECV_OFFSET		(MAX_NUM_CHANNELS+SEND_OFFSET)
 
@@ -550,7 +550,14 @@ int __init initialize(void)
 	for (i = 0; i < MAX_NUM_CHANNELS; i++)
 		down(&recv_connDone[i]);
 
+	send_callback = (send_cbftn) pci_kmsg_send_long;
+	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_DOLPHIN;
+
 	is_connection_done = PCN_CONN_CONNECTED;
+	set_popcorn_node_online(my_nid, true);
+	set_popcorn_node_online(!my_nid, true);
+
+	notify_my_node_info(!my_nid);
 
 #if TEST_MSG_LAYER
 	atomic_set(&exec_count, 0);
@@ -570,18 +577,7 @@ int __init initialize(void)
 			return (long long int)test_handler;
 		}
 	}
-#else /* TEST_MSG_LAYER */
-	send_callback = (send_cbftn) pci_kmsg_send_long;
-	smp_mb();
-
-	printk(KERN_INFO "Value of send ptr = %lx\n",
-	       (unsigned long int)send_callback);
 #endif
-	set_popcorn_node_online(my_nid, true);
-
-	set_popcorn_node_online(!my_nid, true);
-	notify_my_node_info(!my_nid);
-
 	printk(KERN_INFO "\n\n\n");
 	printk(KERN_INFO "-----------------------------------\n");
 	printk(KERN_INFO "Popcorn Messaging Layer Initialized\n");
@@ -686,8 +682,9 @@ int connection_handler(void *arg0)
 	channel_num = thread_data->channel_num;
 
 	msleep(100);
-	printk(KERN_INFO "%s: INFO: Channel  %d %d\n", __func__,
-	       thread_data->channel_num, thread_data->is_worker);
+	printk(KERN_INFO "%s: INFO: Channel  %d %d %p %p\n", __func__,
+	       thread_data->channel_num, thread_data->is_worker,
+		   remote_send_intr_hdl, remote_send_intr_hdl[channel_num]);
 	if (thread_data->is_worker == 0) {
 		printk(KERN_INFO "%s: INFO: Initializing recv channel %d\n",
 		       __func__, channel_num);
@@ -1052,8 +1049,7 @@ static int pcie_send_init(int channel_num)
 		printk(KERN_ERR "Local interrupt cannot be created %d\n", status);
 
 	local_send_intr_no[channel_num] = sci_interrupt_number(local_send_intr_hdl[channel_num]);
-	printk(KERN_INFO "Local interrupt number = %ld\n",
-	       (long int) local_send_intr_no);
+	printk(KERN_INFO "Local interrupt number = %lx\n", local_send_intr_no[channel_num]);
 
 	status = sci_is_local_segment_available(local_send_seg_hdl[channel_num],
 						local_adapter_number);
