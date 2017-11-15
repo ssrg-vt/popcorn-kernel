@@ -56,9 +56,9 @@ int get_popcorn_node_arch(int nid)
 EXPORT_SYMBOL(get_popcorn_node_arch);
 
 const char *archs_sz[] = {
-	"arm",
-	"x86",
-	"ppc",
+	"aarch64",
+	"x86_86",
+	"ppc64le",
 };
 
 
@@ -77,16 +77,18 @@ void notify_my_node_info(int nid)
 }
 EXPORT_SYMBOL(notify_my_node_info);
 
+static bool my_node_info_printed = false;
+
 static int handle_node_info(struct pcn_kmsg_message *msg)
 {
 	node_info_t *info = (node_info_t *)msg;
 
-	if (my_nid != -1) {
+	if (my_nid != -1 && !my_node_info_printed) {
 		popcorn_nodes[my_nid].arch = my_arch;
-		PRINTK("  %d identified as %s\n", my_nid, archs_sz[my_arch]);
+		my_node_info_printed = true;
 	}
 
-	PRINTK("  %d identified as %s\n", info->nid, archs_sz[info->arch]);
+	PCNPRINTK("   %d joined, %s\n", info->nid, archs_sz[info->arch]);
 	popcorn_nodes[info->nid].arch = info->arch;
 	smp_mb();
 

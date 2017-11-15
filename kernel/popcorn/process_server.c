@@ -663,7 +663,7 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 
 	f = filp_open(req->exe_path, O_RDONLY | O_LARGEFILE | O_EXCL, 0);
 	if (IS_ERR(f)) {
-		printk("%s: ERROR to open exe_path %s\n", __func__, req->exe_path);
+		PCNPRINTK_ERR("cannot open executable from %s\n", req->exe_path);
 		return -EINVAL;
 	}
 	set_mm_exe_file(mm, f);
@@ -724,9 +724,9 @@ static int start_vma_worker_remote(void *_data)
 	might_sleep();
 	kfree(params);
 
-	PSPRINTK("%s [%d] for [%d/%d]\n", __func__,
+	PSPRINTK("%s: [%d] for [%d/%d]\n", __func__,
 			current->pid, req->origin_tgid, req->origin_nid);
-	PSPRINTK("%s [%d] %s\n", __func__,
+	PSPRINTK("%s: [%d] %s\n", __func__,
 			current->pid, req->exe_path);
 
 	current->flags &= ~PF_RANDOMIZE;	/* Disable ASLR for now*/

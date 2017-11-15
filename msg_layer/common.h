@@ -52,6 +52,7 @@ bool __init identify_myself(void)
 	}
 
 	my_ip = __get_host_ip();
+	PCNPRINTK("Loading messaging layer...");
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		char *me = " ";
@@ -59,12 +60,11 @@ bool __init identify_myself(void)
 			my_nid = i;
 			me = "*";
 		}
-		PRINTK(" %s %2d: %pI4\n", me, i, ip_table + i);
+		PCNPRINTK("%s %d: %pI4\n", me, i, ip_table + i);
 	}
-	PRINTK("\n");
 
 	if (my_nid < 0) {
-		printk(KERN_ERR " My IP is not listed in the node configuration\n");
+		PCNPRINTK_ERR("My IP is not listed in the node configuration\n");
 		return false;
 	}
 

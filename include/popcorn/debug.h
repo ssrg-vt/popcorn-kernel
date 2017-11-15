@@ -1,6 +1,9 @@
 #ifndef __INCLUDE_POPCORN_DEBUG_H__
 #define __INCLUDE_POPCORN_DEBUG_H__
 
+#define PCNPRINTK(...) printk(KERN_INFO "popcorn: " __VA_ARGS__)
+#define PCNPRINTK_ERR(...) printk(KERN_ERR "popcorn: " __VA_ARGS__)
+
 /*
  * Function macros
  */
@@ -33,17 +36,17 @@
 
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-#define MSGPRINTK(...) printk(__VA_ARGS__)
+#define MSGPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
 #define MSGPRINTK(...)
 #endif
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE_DEBUG
-#define MSGDPRINTK(...) printk(__VA_ARGS__)
+#define MSGDPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
 #define MSGDPRINTK(...)
 #endif
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_DATA
-#define MSGDATA(...) printk(__VA_ARGS__)
+#define MSGDATA(...) printk(KERN_INFO __VA_ARGS__)
 #else
 #define MSGDATA(...)
 #endif
