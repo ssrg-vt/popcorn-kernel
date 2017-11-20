@@ -87,8 +87,8 @@ struct field_arch {
 
 static inline size_t regset_size(int arch) {
 	const size_t sizes[] = {
-		sizeof(struct regset_x86_64),
 		sizeof(struct regset_aarch64),
+		sizeof(struct regset_x86_64),
 		sizeof(struct regset_powerpc),
 	};
 	BUG_ON(arch < 0 || arch >= POPCORN_ARCH_UNKNOWN);
