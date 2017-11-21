@@ -1144,6 +1144,7 @@ static void process_remote_page_request(struct work_struct *work)
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	int res_size;
+	int down_read_retry = 0;
 
 	while (!res) {	/* response contains a page. allocate from a heap */
 		res = kmalloc(sizeof(*res), GFP_KERNEL);
@@ -1163,7 +1164,13 @@ again:
 			fault_for_write(req->fault_flags) ? "W" : "R",
 			req->origin_pid, req->origin_nid);
 
-	down_read(&mm->mmap_sem);
+	while (!down_read_trylock(&mm->mmap_sem)) {
+		if (!tsk->at_remote && down_read_retry++ > 4) {
+			res->result = VM_FAULT_RETRY;
+			goto out_up;
+		}
+		schedule();
+	}
 	vma = find_vma(mm, req->addr);
 	if (!vma || vma->vm_start > req->addr) {
 		res->result = VM_FAULT_SIGBUS;
