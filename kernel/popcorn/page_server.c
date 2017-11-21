@@ -330,6 +330,7 @@ static pte_t *__get_pte_at_alloc(struct mm_struct *mm, struct vm_area_struct *vm
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
+	pte_t *pte;
 
 	pgd = pgd_offset(mm, addr);
 	if (!pgd) return NULL;
@@ -340,10 +341,11 @@ static pte_t *__get_pte_at_alloc(struct mm_struct *mm, struct vm_area_struct *vm
 	pmd = pmd_alloc(mm, pud, addr);
 	if (!pmd) return NULL;
 
+	pte = pte_alloc_map(mm, vma, pmd, addr);
+
 	*ppmd = pmd;
 	*ptlp = pte_lockptr(mm, pmd);
-
-	return pte_alloc_map(mm, vma, pmd, addr);
+	return pte;
 }
 
 static struct page *__find_page_at(struct mm_struct *mm, unsigned long addr, pte_t **ptep, spinlock_t **ptlp)
