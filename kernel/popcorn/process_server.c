@@ -221,9 +221,8 @@ static int handle_remote_futex_response(struct pcn_kmsg_message *msg)
 	return 0;
 }
 
-static void process_remote_futex_request(struct pcn_kmsg_message *msg)
+static void process_remote_futex_request(remote_futex_request *req)
 {
-	remote_futex_request *req = (remote_futex_request *)msg;
 	remote_futex_response res = {
 		.header = {
 			.type = PCN_KMSG_TYPE_FUTEX_RESPONSE,
@@ -358,9 +357,8 @@ int process_server_task_exit(struct task_struct *tsk)
 /**
  * Handle the notification of the task kill at the remote.
  */
-static void process_remote_task_exit(struct pcn_kmsg_message *msg)
+static void process_remote_task_exit(remote_task_exit_t *req)
 {
-	remote_task_exit_t *req = (remote_task_exit_t *)msg;
 	struct task_struct *tsk = current;
 	int exit_code = req->exit_code;
 
@@ -418,10 +416,8 @@ out:
 ///////////////////////////////////////////////////////////////////////////////
 // handling back migration
 ///////////////////////////////////////////////////////////////////////////////
-static void bring_back_remote_thread(struct pcn_kmsg_message *msg)
+static void bring_back_remote_thread(back_migration_request_t *req)
 {
-	back_migration_request_t *req = (back_migration_request_t *)msg;
-
 	if (current->remote_pid != req->remote_pid) {
 		printk(KERN_INFO"%s: pid mismatch during back migration (%d != %d)\n",
 				__func__, current->remote_pid, req->remote_pid);
@@ -445,7 +441,7 @@ static void bring_back_remote_thread(struct pcn_kmsg_message *msg)
 	restore_thread_info(&req->arch, false);
 
 out_free:
-	pcn_kmsg_free_msg(msg);
+	pcn_kmsg_free_msg(req);
 }
 
 
@@ -886,17 +882,17 @@ static int __process_remote_works(void)
 			process_vma_op_request((vma_op_request_t *)req);
 			break;
 		case PCN_KMSG_TYPE_VMA_INFO_REQUEST:
-			process_vma_info_request(req);
+			process_vma_info_request((vma_info_request_t *)req);
 			break;
 		case PCN_KMSG_TYPE_FUTEX_REQUEST:
-			process_remote_futex_request(req);
+			process_remote_futex_request((remote_futex_request *)req);
 			break;
 		case PCN_KMSG_TYPE_TASK_EXIT_REMOTE:
-			process_remote_task_exit(req);
+			process_remote_task_exit((remote_task_exit_t *)req);
 			run = false;
 			break;
 		case PCN_KMSG_TYPE_TASK_MIGRATE_BACK:
-			bring_back_remote_thread(req);
+			bring_back_remote_thread((back_migration_request_t *)req);
 			run = false;
 			break;
 		default:

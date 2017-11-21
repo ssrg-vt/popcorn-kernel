@@ -16,7 +16,7 @@ struct remote_context;
 
 void vma_worker_remote(struct remote_context *rc);
 
-void process_vma_info_request(struct pcn_kmsg_message *msg);
+void process_vma_info_request(vma_info_request_t *req);
 void process_vma_op_request(vma_op_request_t *req);
 
 #endif /* KERNEL_POPCORN_VMA_SERVER_H_ */

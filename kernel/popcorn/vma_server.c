@@ -630,9 +630,8 @@ out_free:
  * Handle VMA info requests at the origin.
  * This is invoked through the remote work delegation.
  */
-void process_vma_info_request(struct pcn_kmsg_message *msg)
+void process_vma_info_request(vma_info_request_t *req)
 {
-	vma_info_request_t *req = (vma_info_request_t *)msg;
 	vma_info_response_t *res = NULL;
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
