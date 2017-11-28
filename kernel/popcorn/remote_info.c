@@ -154,73 +154,47 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 
 static int handle_remote_mem_info_request(struct pcn_kmsg_message *inc_msg)
 {
-	remote_mem_info_request_t *request;
+	remote_mem_info_request_t *request = (remote_mem_info_request_t *)inc_msg;
 	remote_mem_info_response_t *response;
 	int ret;
 
-	RIPRINTK("%s: Entered\n", __func__);
-
-	request = (remote_mem_info_request_t *)inc_msg;
-	if (request == NULL) {
-		RIPRINTK("%s: NULL pointer\n", __func__);
-		return -EINVAL;
-	}
-
 	response = kzalloc(sizeof(*response), GFP_KERNEL);
 
-	/* 1. Construct response data to send it into remote node */
-
-	/* 1-1. Fill the header information */
 	response->header.type = PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE;
 	response->header.prio = PCN_KMSG_PRIO_NORMAL;
 	response->nid = my_nid;
 	response->origin_ws = request->origin_ws;
 
-	/* 1-2. Fill the machine-dependent MEMORY information */
 	ret = fill_meminfo_response(response);
 	if (ret < 0) {
 		RIPRINTK("%s: failed to fill memory info\n", __func__);
 		goto out;
 	}
 
-	/* 1-3. Send response into remote node */
 	ret = pcn_kmsg_send(request->nid, response, sizeof(*response));
 	if (ret < 0) {
 		RIPRINTK("%s: failed to send response message\n", __func__);
 		goto out;
 	}
 
-	/* 2. Remove request message received from remote node */
-	pcn_kmsg_free_msg(request);
-
-	RIPRINTK("%s: done\n", __func__);
 out:
+	pcn_kmsg_free_msg(request);
 	kfree(response);
 	return 0;
 }
 
 static int handle_remote_mem_info_response(struct pcn_kmsg_message *inc_msg)
 {
-	remote_mem_info_response_t *response;
+	remote_mem_info_response_t *response = (remote_mem_info_response_t *)inc_msg;
 	struct wait_station *ws;
-
-	RIPRINTK("%s: Entered\n", __func__);
-
-	response = (remote_mem_info_response_t *)inc_msg;
-	if (response == NULL) {
-		RIPRINTK("%s: NULL pointer\n", __func__);
-		return -EINVAL;
-	}
 
 	ws = wait_station(response->origin_ws);
 	ws->private = response;
-
 	smp_mb();
 
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
 
-	RIPRINTK("%s: done\n", __func__);
 	return 0;
 }
 
@@ -236,20 +210,12 @@ remote_mem_info_response_t *send_remote_mem_info_request(unsigned int nid)
 	remote_mem_info_response_t *response;
 	struct wait_station *ws = get_wait_station(current);
 
-	RIPRINTK("%s: Entered, nid: %d\n", __func__, nid);
-
-	/* 1. Construct request data to send it into remote node */
-
-	/* 1-1. Fill the header information */
 	request.origin_ws = ws->id;
 
-	/* 1-2. Send request into remote node */
 	pcn_kmsg_send(nid, &request, sizeof(request));
-
 	response = wait_at_station(ws);
 	put_wait_station(ws);
 
-	RIPRINTK("%s: done\n", __func__);
 	return response;
 }
 
@@ -355,25 +321,17 @@ void send_remote_cpu_info_request(unsigned int nid)
 	remote_cpu_info_data_t *response;
 	struct wait_station *ws = get_wait_station(current);
 
-	RIPRINTK("%s: Entered, nid: %d\n", __func__, nid);
+	request = kmalloc(sizeof(*request), GFP_KERNEL);
 
-	request = kzalloc(sizeof(*request), GFP_KERNEL);
-
-	/* 1. Construct request data to send it into remote node */
-
-	/* 1-1. Fill the header information */
 	request->header.type = PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST;
 	request->header.prio = PCN_KMSG_PRIO_NORMAL;
 	request->nid = my_nid;
 	request->origin_ws = ws->id;
 
-	/* 1-2. Fill the machine-dependent CPU infomation */
 	fill_cpu_info(&request->cpu_info_data);
 
-	/* 1-3. Send request into remote node */
 	pcn_kmsg_send(nid, request, sizeof(*request));
 
-	/* 2. Request message should wait until response message is done. */
 	response = wait_at_station(ws);
 	put_wait_station(ws);
 
@@ -382,8 +340,6 @@ void send_remote_cpu_info_request(unsigned int nid)
 
 	kfree(request);
 	pcn_kmsg_free_msg(response);
-
-	RIPRINTK("%s: done\n", __func__);
 }
 
 unsigned int get_number_cpus_from_remote_node(unsigned int nid)
@@ -392,10 +348,10 @@ unsigned int get_number_cpus_from_remote_node(unsigned int nid)
 
 	switch (saved_cpu_info[nid]->arch_type) {
 	case POPCORN_ARCH_X86:
-		num_cpus = saved_cpu_info[nid]->arch.x86.num_cpus;
+		num_cpus = saved_cpu_info[nid]->x86.num_cpus;
 		break;
 	case POPCORN_ARCH_ARM:
-		num_cpus = saved_cpu_info[nid]->arch.arm64.num_cpus;
+		num_cpus = saved_cpu_info[nid]->arm64.num_cpus;
 		break;
 	default:
 		RIPRINTK("%s: Unknown CPU\n", __func__);
@@ -412,44 +368,33 @@ static int handle_remote_cpu_info_request(struct pcn_kmsg_message *inc_msg)
 	remote_cpu_info_data_t *response;
 	int ret;
 
-	RIPRINTK("%s: Entered\n", __func__);
-
 	request = (remote_cpu_info_data_t *)inc_msg;
 
 	response = kzalloc(sizeof(*response), GFP_KERNEL);
 	if (!response) return -ENOMEM;
 
-	/* 1. Save remote cpu info from remote node */
 	memcpy(saved_cpu_info[request->nid],
 	       &request->cpu_info_data, sizeof(request->cpu_info_data));
 
-	/* 2. Construct response data to send it into remote node */
-
-	/* 2-1. Fill the header information */
 	response->header.type = PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE;
 	response->header.prio = PCN_KMSG_PRIO_NORMAL;
 	response->nid = my_nid;
 	response->origin_ws = request->origin_ws;
 
-	/* 2-2. Fill the machine-dependent CPU infomation */
 	ret = fill_cpu_info(&response->cpu_info_data);
 	if (ret < 0) {
 		RIPRINTK("%s: failed to fill cpu info\n", __func__);
 		goto out;
 	}
 
-	/* 2-3. Send response into remote node */
 	ret = pcn_kmsg_send(request->nid, response, sizeof(*response));
 	if (ret < 0) {
 		RIPRINTK("%s: failed to send response message\n", __func__);
 		goto out;
 	}
 
-	/* 3. Remove request message received from remote node */
-	pcn_kmsg_free_msg(request);
-
-	RIPRINTK("%s: done\n", __func__);
 out:
+	pcn_kmsg_free_msg(request);
 	kfree(response);
 	return 0;
 }
@@ -458,8 +403,6 @@ static int handle_remote_cpu_info_response(struct pcn_kmsg_message *inc_msg)
 {
 	remote_cpu_info_data_t *response;
 	struct wait_station *ws;
-
-	RIPRINTK("%s: Entered\n", __func__);
 
 	response = (remote_cpu_info_data_t *)inc_msg;
 
@@ -471,7 +414,6 @@ static int handle_remote_cpu_info_response(struct pcn_kmsg_message *inc_msg)
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
 
-	RIPRINTK("%s: done\n", __func__);
 	return 0;
 }
 
@@ -479,58 +421,62 @@ static void print_x86_cpuinfo(struct seq_file *m,
 		       struct remote_cpu_info *data,
 		       int count)
 {
-	seq_printf(m, "processor\t: %u\n", data->arch.x86.cpu[count].processor);
-	seq_printf(m, "vendor_id\t: %s\n", data->arch.x86.cpu[count].vendor_id);
-	seq_printf(m, "cpu_family\t: %d\n", data->arch.x86.cpu[count].cpu_family);
-	seq_printf(m, "model\t\t: %u\n", data->arch.x86.cpu[count].model);
-	seq_printf(m, "model name\t: %s\n", data->arch.x86.cpu[count].model_name);
+	struct percore_info_x86 *cpu = &data->x86.cores[count];
 
-	if (data->arch.x86.cpu[count].stepping != -1)
-		seq_printf(m, "stepping\t: %d\n", data->arch.x86.cpu[count].stepping);
+	seq_printf(m, "processor\t: %u\n", cpu->processor);
+	seq_printf(m, "vendor_id\t: %s\n", cpu->vendor_id);
+	seq_printf(m, "cpu_family\t: %d\n", cpu->cpu_family);
+	seq_printf(m, "model\t\t: %u\n", cpu->model);
+	seq_printf(m, "model name\t: %s\n", cpu->model_name);
+
+	if (cpu->stepping != -1)
+		seq_printf(m, "stepping\t: %d\n", cpu->stepping);
 	else
 		seq_puts(m, "stepping\t: unknown\n");
 
-	seq_printf(m, "microcode\t: 0x%lx\n", data->arch.x86.cpu[count].microcode);
-	seq_printf(m, "cpu MHz\t\t: %u\n", data->arch.x86.cpu[count].cpu_freq);
-	seq_printf(m, "cache size\t: %d kB\n", data->arch.x86.cpu[count].cache_size);
+	seq_printf(m, "microcode\t: 0x%lx\n", cpu->microcode);
+	seq_printf(m, "cpu MHz\t\t: %u\n", cpu->cpu_freq);
+	seq_printf(m, "cache size\t: %d kB\n", cpu->cache_size);
 	seq_puts(m, "flags\t\t:");
-	seq_printf(m, " %s", data->arch.x86.cpu[count].flags);
-	seq_printf(m, "\nbogomips\t: %lu\n", data->arch.x86.cpu[count].nbogomips);
-	seq_printf(m, "TLB size\t: %d 4K pages\n", data->arch.x86.cpu[count].TLB_size);
-	seq_printf(m, "clflush size\t: %u\n", data->arch.x86.cpu[count].clflush_size);
-	seq_printf(m, "cache_alignment\t: %d\n", data->arch.x86.cpu[count].cache_alignment);
+	seq_printf(m, " %s", cpu->flags);
+	seq_printf(m, "\nbogomips\t: %lu\n", cpu->nbogomips);
+	seq_printf(m, "TLB size\t: %d 4K pages\n", cpu->TLB_size);
+	seq_printf(m, "clflush size\t: %u\n", cpu->clflush_size);
+	seq_printf(m, "cache_alignment\t: %d\n", cpu->cache_alignment);
 	seq_printf(m, "address sizes\t: %u bits physical, %u bits virtual\n",
-		   data->arch.x86.cpu[count].bits_physical,
-		   data->arch.x86.cpu[count].bits_virtual);
+		   cpu->bits_physical,
+		   cpu->bits_virtual);
 }
 
 static void print_arm_cpuinfo(struct seq_file *m,
 		       struct remote_cpu_info *data,
 		       int count)
 {
-	seq_printf(m, "processor\t: %u\n", data->arch.arm64.percore[count].processor_id);
+	struct percore_info_arm64 *cpu = &data->arm64.cores[count];
 
-	if (data->arch.arm64.percore[count].compat)
+	seq_printf(m, "processor\t: %u\n", cpu->processor_id);
+
+	if (cpu->compat)
 		 seq_printf(m, "model name\t: %s %d (%s)\n",
-			    data->arch.arm64.percore[count].model_name,
-			    data->arch.arm64.percore[count].model_rev,
-			    data->arch.arm64.percore[count].model_elf);
+			    cpu->model_name,
+			    cpu->model_rev,
+			    cpu->model_elf);
 	else
 		 seq_printf(m, "model name\t: %s\n",
-			    data->arch.arm64.percore[count].model_name);
+			    cpu->model_name);
 
 	seq_printf(m, "BogoMIPS\t: %lu.%02lu\n",
-		   data->arch.arm64.percore[count].bogo_mips,
-		   data->arch.arm64.percore[count].bogo_mips_fraction);
+		   cpu->bogo_mips,
+		   cpu->bogo_mips_fraction);
 	seq_puts(m, "Features\t:");
-	seq_printf(m, " %s", data->arch.arm64.percore[count].flags);
+	seq_printf(m, " %s", cpu->flags);
 	seq_puts(m, "\n");
 
-	seq_printf(m, "CPU implementer\t: 0x%02x\n", data->arch.arm64.percore[count].cpu_implementer);
-	seq_printf(m, "CPU architecture: %d\n", data->arch.arm64.percore[count].cpu_archtecture);
-	seq_printf(m, "CPU variant\t: 0x%x\n", data->arch.arm64.percore[count].cpu_variant);
-	seq_printf(m, "CPU part\t: 0x%03x\n", data->arch.arm64.percore[count].cpu_part);
-	seq_printf(m, "CPU revision\t: %d\n", data->arch.arm64.percore[count].cpu_revision);
+	seq_printf(m, "CPU implementer\t: 0x%02x\n", cpu->cpu_implementer);
+	seq_printf(m, "CPU architecture: %d\n", cpu->cpu_archtecture);
+	seq_printf(m, "CPU variant\t: 0x%x\n", cpu->cpu_variant);
+	seq_printf(m, "CPU part\t: 0x%03x\n", cpu->cpu_part);
+	seq_printf(m, "CPU revision\t: %d\n", cpu->cpu_revision);
 
 	return;
 }
@@ -570,8 +516,7 @@ int remote_info_init(void)
 
 	/* Allocate the buffer for saving remote CPU info */
 	for (i = 0; i < MAX_POPCORN_NODES; i++)
-		saved_cpu_info[i] = kzalloc(sizeof(struct remote_cpu_info),
-					    GFP_KERNEL);
+		saved_cpu_info[i] = kzalloc(sizeof(struct remote_cpu_info), GFP_KERNEL);
 
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
 				   handle_remote_cpu_info_request);

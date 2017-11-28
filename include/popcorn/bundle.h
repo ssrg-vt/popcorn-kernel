@@ -2,7 +2,6 @@
 #define __POPCORN_RACK_H__
 
 #define MAX_POPCORN_NODES 32
-#define MAX_BUNDLE_ID 32
 
 enum popcorn_arch {
 	POPCORN_ARCH_ARM = 0,

@@ -78,66 +78,63 @@ int fill_cpu_info(struct remote_cpu_info *res)
 	int i, j;
 	bool compat = personality(current->personality) == PER_LINUX32;
 	unsigned int count = 0;
-	cpuinfo_arch_arm64_t *arch = &res->arch.arm64;
+	struct cpuinfo_arch_arm64 *arch = &res->arm64;
 
 	res->arch_type = POPCORN_ARCH_ARM;
 
 	for_each_online_cpu(i) {
 		struct cpuinfo_arm64 *cpuinfo = &per_cpu(cpu_data, i);
+		struct percore_info_arm64 *core = &arch->cores[count];
 		u32 midr = cpuinfo->reg_midr;
 
 #ifdef CONFIG_SMP
-		arch->percore[count].processor_id = i;
+		core->processor_id = i;
 #endif
-
+		strcpy(core->model_name, "ARMv8 Processor");
+		core->compat = compat;
 		if (compat) {
-			arch->percore[count].compat = true;
-			strcpy(arch->percore[count].model_name, "ARMv8 Processor");
-			arch->percore[count].model_rev = MIDR_REVISION(midr);
-			strcpy(arch->percore[count].model_elf, COMPAT_ELF_PLATFORM);
-		} else {
-			arch->percore[count].compat = false;
-			strcpy(arch->percore[count].model_name, "ARMv8 Processor");
+			core->model_rev = MIDR_REVISION(midr);
+			strcpy(core->model_elf, COMPAT_ELF_PLATFORM);
 		}
 
-		arch->percore[count].bogo_mips = loops_per_jiffy / (500000UL/HZ);
-		arch->percore[count].bogo_mips_fraction = loops_per_jiffy / (5000UL/HZ) % 100;
+		core->bogo_mips = loops_per_jiffy / (500000UL/HZ);
+		core->bogo_mips_fraction = loops_per_jiffy / (5000UL/HZ) % 100;
 
-		strcpy(arch->percore[count].flags, "");
+		strcpy(core->flags, "");
 		if (compat) {
 #ifdef CONFIG_COMPAT
 			for (j = 0; compat_hwcap_str[j]; j++) {
 				if (compat_elf_hwcap & (1 << j)) {
-					strcat(arch->percore[count].flags, compat_hwcap_str[j]);
-					strcat(arch->percore[count].flags, " ");
+					strcat(core->flags, compat_hwcap_str[j]);
+					strcat(core->flags, " ");
 				}
 			}
 
 			for (j = 0; compat_hwcap2_str[j]; j++) {
 				if (compat_elf_hwcap2 & (1 << j)) {
-					strcat(arch->percore[count].flags, compat_hwcap2_str[j]);
-					strcat(arch->percore[count].flags, " ");
+					strcat(core->flags, compat_hwcap2_str[j]);
+					strcat(core->flags, " ");
 				}
 			}
 #endif /* CONFIG_COMPAT */
 		} else {
 			for (j = 0; hwcap_str[j]; j++) {
 				if (elf_hwcap & (1 << j)) {
-					strcat(arch->percore[count].flags, hwcap_str[j]);
-					strcat(arch->percore[count].flags, " ");
+					strcat(core->flags, hwcap_str[j]);
+					strcat(core->flags, " ");
 				}
 			}
 		}
 
-		arch->percore[count].cpu_implementer = MIDR_IMPLEMENTOR(midr);
-		arch->percore[count].cpu_archtecture = 8;
-		arch->percore[count].cpu_variant = MIDR_VARIANT(midr);
-		arch->percore[count].cpu_part = MIDR_PARTNUM(midr);
-		arch->percore[count].cpu_revision = MIDR_REVISION(midr);
+		core->cpu_implementer = MIDR_IMPLEMENTOR(midr);
+		core->cpu_archtecture = 8;
+		core->cpu_variant = MIDR_VARIANT(midr);
+		core->cpu_part = MIDR_PARTNUM(midr);
+		core->cpu_revision = MIDR_REVISION(midr);
 
 		count++;
-		arch->num_cpus = count;
 	}
+	arch->num_cpus = count;
 
 	return 0;
 }

@@ -14,16 +14,8 @@
  *
  */
 #include <linux/kernel.h>
-#include <asm/bootparam.h>
-#include <asm/uaccess.h>
-#include <linux/mm.h>
-#include <asm/setup.h>
-#include <linux/slab.h>
-#include <linux/highmem.h>
-#include <linux/list.h>
 #include <linux/smp.h>
 #include <linux/cpu.h>
-//#include <linux/cpumask.h>
 #include <linux/slab.h>
 #include <linux/timex.h>
 #include <linux/timer.h>
@@ -52,12 +44,13 @@ int fill_cpu_info(struct remote_cpu_info *res)
 	struct cpuinfo_x86 *c;
 	unsigned int cpu = 0;
 	int i, count = 0;
-	cpuinfo_arch_x86_t *arch = &res->arch.x86;
+	struct cpuinfo_arch_x86 *arch = &res->x86;
 
 	res->arch_type = POPCORN_ARCH_X86;
 
 	while (count < NR_CPUS) {
 		void *p = remote_c_start(&pos);
+		struct percore_info_x86 *core = &arch->cores[count];
 
 		if(p == NULL)
 			break;
@@ -68,80 +61,74 @@ int fill_cpu_info(struct remote_cpu_info *res)
 #ifdef CONFIG_SMP
 		cpu = c->cpu_index;
 #endif
-
-		res->processor = cpu;
-
-		arch->cpu[count].processor = cpu;
-		strcpy(arch->cpu[count].vendor_id,
+		core->processor = cpu;
+		strcpy(core->vendor_id,
 				c->x86_vendor_id[0] ? c->x86_vendor_id : "unknown");
-		arch->cpu[count].cpu_family = c->x86;
-		arch->cpu[count].model = c->x86_model;
-		strcpy(arch->cpu[count].model_name,
+		core->cpu_family = c->x86;
+		core->model = c->x86_model;
+		strcpy(core->model_name,
 				c->x86_model_id[0] ? c->x86_model_id : "unknown");
 
 		if (c->x86_mask || c->cpuid_level >= 0)
-			arch->cpu[count].stepping = c->x86_mask;
+			core->stepping = c->x86_mask;
 		else
-			arch->cpu[count].stepping = -1;
+			core->stepping = -1;
 
 		if (c->microcode)
-			arch->cpu[count].microcode = c->microcode;
+			core->microcode = c->microcode;
 
 		if (cpu_has(c, X86_FEATURE_TSC)) {
 			unsigned int freq = cpufreq_quick_get(cpu);
 
 			if (!freq)
 				freq = cpu_khz;
-			arch->cpu[count].cpu_freq = freq / 1000; //, (freq % 1000);
+			core->cpu_freq = freq / 1000;
 		}
 
 		/* Cache size */
 		if (c->x86_cache_size >= 0)
-			arch->cpu[count].cache_size = c->x86_cache_size;
+			core->cache_size = c->x86_cache_size;
 
-		strcpy(arch->cpu[count].fpu, "yes");
-		strcpy(arch->cpu[count].fpu_exception, "yes");
-		arch->cpu[count].cpuid_level = c->cpuid_level;
-		strcpy(arch->cpu[count].wp, "yes");
+		strcpy(core->fpu, "yes");
+		strcpy(core->fpu_exception, "yes");
+		core->cpuid_level = c->cpuid_level;
+		strcpy(core->wp, "yes");
 
-		strcpy(arch->cpu[count].flags, "");
-		//strcpy(res->_flags,"flags\t\t:");
+		strcpy(core->flags, "");
 		for (i = 0; i < 32 * NCAPINTS; i++)
 			if (cpu_has(c, i) && x86_cap_flags[i] != NULL){
-				strcat(arch->cpu[count].flags, x86_cap_flags[i]);
-				strcat(arch->cpu[count].flags, " ");
+				strcat(core->flags, x86_cap_flags[i]);
+				strcat(core->flags, " ");
 			}
 
-		arch->cpu[count].nbogomips = c->loops_per_jiffy / (500000 / HZ);
-		//(c->loops_per_jiffy/(5000/HZ)) % 100);
+		core->nbogomips = c->loops_per_jiffy / (500000 / HZ);
 
 #ifdef CONFIG_X86_64
 		if (c->x86_tlbsize > 0)
-			arch->cpu[count].TLB_size = c->x86_tlbsize;
+			core->TLB_size = c->x86_tlbsize;
 #endif
-		arch->cpu[count].clflush_size = c->x86_clflush_size;
-		arch->cpu[count].cache_alignment = c->x86_cache_alignment;
-		arch->cpu[count].bits_physical = c->x86_phys_bits;
-		arch->cpu[count].bits_virtual = c->x86_virt_bits;
+		core->clflush_size = c->x86_clflush_size;
+		core->cache_alignment = c->x86_cache_alignment;
+		core->bits_physical = c->x86_phys_bits;
+		core->bits_virtual = c->x86_virt_bits;
 
-		strcpy(arch->cpu[count].power_management, "");
+		strcpy(core->power_management, "");
 		for (i = 0; i < 32; i++) {
 			if (c->x86_power & (1 << i)) {
 				if (i < ARRAY_SIZE(x86_power_flags) && x86_power_flags[i])
-					strcat(arch->cpu[count].flags,
+					strcat(core->flags,
 							x86_power_flags[i][0] ? " " : "");
 			}
 		}
 
 		count++;
-		arch->num_cpus = count;
-		//printk("Number of cpus = %d\n", arch->num_cpus);
 	}
+	arch->num_cpus = count;
 
 	return 0;
 }
 
-int get_proccessor_id()
+int get_proccessor_id(void)
 {
 	unsigned int a, b, feat;
 

@@ -14,39 +14,17 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include <asm/arch_timer.h>
-#include <asm/cachetype.h>
-#include <asm/cpu.h>
-#include <asm/cputype.h>
-#include <asm/cpufeature.h>
 
 #include <linux/bitops.h>
-#include <linux/bug.h>
-#include <linux/compat.h>
 #include <linux/elf.h>
-#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/personality.h>
-#include <linux/preempt.h>
-#include <linux/printk.h>
 #include <linux/seq_file.h>
-#include <linux/sched.h>
-#include <linux/smp.h>
 #include <linux/delay.h>
 
-#include <popcorn/bundle.h>
+#include <asm/cpu.h>
 
-#define CPU_PROC_VERBOSE 0
-#if CPU_PROC_VERBOSE
-#define CPPRINTK(...) printk(__VA_ARGS__)
-#else
-#define CPPRINTK(...)
-#endif
-
-extern void send_remote_cpu_info_request(struct task_struct *tsk, unsigned int nid);
-extern unsigned int get_number_cpus_from_remote_node(unsigned int nid);
-extern int remote_proc_cpu_info(struct seq_file *m, unsigned int nid,
-				unsigned int vpos);
+#include <popcorn/cpuinfo.h>
 
 static struct cpu_global_info {
 	unsigned int remote;
@@ -207,9 +185,6 @@ static void calc_nid_vpos(loff_t *pos, unsigned int *pnid, unsigned int *vpos)
 
 		(*vpos)++;
 	}
-
-	CPPRINTK("%s: pos: %lld, pnid: %d, vpos: %d\n", __func__,
-		*pos, *pnid, *vpos);
 }
 
 static void *c_start(struct seq_file *m, loff_t *pos)
@@ -217,14 +192,10 @@ static void *c_start(struct seq_file *m, loff_t *pos)
 	unsigned int vpos = 0;
 	unsigned int nid = 0;
 
-	CPPRINTK("%s: Entered, *pos: %lld\n", __func__, (*pos));
-
-	if (my_nid == -1)
+	if (my_nid == -1 || (*pos) == 0)
 		goto local;
 
-	if ((*pos) < 1) {
-		goto local;
-	} else if ((*pos) == 1) {
+	if ((*pos) == 1) {
 		int i = 0;
 		int j = 0;
 		bool connected = false;
@@ -249,7 +220,7 @@ static void *c_start(struct seq_file *m, loff_t *pos)
 					continue;
 				}
 				if (get_popcorn_node_online(i)) {
-					send_remote_cpu_info_request(current, i);
+					send_remote_cpu_info_request(i);
 					num_cpus[i] = get_number_cpus_from_remote_node(i);
 					j = j + num_cpus[i];
 				} else {
@@ -258,10 +229,7 @@ static void *c_start(struct seq_file *m, loff_t *pos)
 			}
 
 			num_total_cpus = j;
-			CPPRINTK("%s: num_total_cpus: %d\n", __func__,
-				 num_total_cpus);
 			goto remote;
-
 		}
 	} else if ((*pos) > 1) {
 		goto remote;
@@ -291,27 +259,20 @@ remote:
 
 static void *c_next(struct seq_file *m, void *v, loff_t *pos)
 {
-	CPPRINTK("%s: Entered\n", __func__);
-
 	++*pos;
 	return NULL;
 }
 
 static void c_stop(struct seq_file *m, void *v)
 {
-	CPPRINTK("%s: Entered\n", __func__);
 }
 
 static int c_show(struct seq_file *m, void *v)
 {
 	struct cpu_global_info *cpu_global_info = v;
 
-	CPPRINTK("%s: Entered\n", __func__);
-
 	if (cpu_global_info->remote == 1) {
-		remote_proc_cpu_info(m,
-			cpu_global_info->nid,
-			cpu_global_info->vpos);
+		remote_proc_cpu_info(m, cpu_global_info->nid, cpu_global_info->vpos);
 	} else {
 		c_show_arm64(m, v);
 	}

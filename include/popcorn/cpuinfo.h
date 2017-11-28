@@ -3,29 +3,28 @@
  *  cpuinfo.c
  *
  * Description:
- * 	This file provides the architecture specific functionality of
- * populating cpuinfo
+ * 	Provides the architecture specific functionality of populating cpuinfo
  *
  * Created on:
  * 	Oct 10, 2014
  *
  * Author:
- *  Akshay Giridhar, SSRG, VirginiaTech
- *  Antonio Barbalace, SSRG, VirginiaTech
- *  Sharath Kumar Bhat, SSRG, VirginiaTech
- *
+ *  Akshay Giridhar, SSRG, Virginia Tech
+ *  Antonio Barbalace, SSRG, Virginia Tech
+ *  Sharath Kumar Bhat, SSRG, Virginia Tech
+ *  Sang-Hoon Kim, SSRG, Virginia Tech
  */
 
 #ifndef _LINUX_POPCORN_CPUINFO_H
 #define _LINUX_POPCORN_CPUINFO_H
 
-#define MAX_ARM_CORES 96
+#define MAX_ARM_CORES 128
 #define MAX_X86_CORES 32
 
 #include <popcorn/bundle.h>
 
 /* For x86_64 cores */
-typedef struct percpu_arch_x86 {
+struct percore_info_x86 {
 	unsigned int processor;
 	char vendor_id[16];
 	int cpu_family;
@@ -47,16 +46,16 @@ typedef struct percpu_arch_x86 {
 	unsigned int bits_physical;
 	unsigned int bits_virtual;
 	char power_management[64];
-} percpu_arch_x86_t;
+};
 
-typedef struct cpuinfo_arch_x86 {
-	int num_cpus;
-	percpu_arch_x86_t cpu[MAX_X86_CORES];
-} cpuinfo_arch_x86_t;
+struct cpuinfo_arch_x86 {
+	unsigned int num_cpus;
+	struct percore_info_x86 cores[MAX_X86_CORES];
+};
 
 
 /* For arm64 cores */
-typedef struct per_core_info_t {
+struct percore_info_arm64 {
 	unsigned int processor_id;
 	bool compat;
 	char model_name[64];
@@ -70,29 +69,28 @@ typedef struct per_core_info_t {
 	unsigned int cpu_variant;
 	unsigned int cpu_part;
 	unsigned int cpu_revision;
-} per_core_info_t;
+};
 
-typedef struct cpuinfo_arch_arm64 {
+struct cpuinfo_arch_arm64 {
 	unsigned int num_cpus;
-	per_core_info_t percore[MAX_ARM_CORES];
-} cpuinfo_arch_arm64_t;
-
-
-typedef union cpuinfo_arch {
-	cpuinfo_arch_x86_t x86;
-	cpuinfo_arch_arm64_t arm64;
-} cpuinfo_arch_t;
+	struct percore_info_arm64 cores[MAX_ARM_CORES];
+};
 
 
 struct remote_cpu_info {
-	unsigned int processor;
 	enum popcorn_arch arch_type;
-
-	cpuinfo_arch_t arch;
+	union {
+		struct cpuinfo_arch_x86 x86;
+		struct cpuinfo_arch_arm64 arm64;
+	};
 };
 
-/* External function declarations */
+
+struct seq_file;
+
 extern int fill_cpu_info(struct remote_cpu_info *res);
-extern int get_proccessor_id(void);
+extern void send_remote_cpu_info_request(unsigned int nid);
+extern unsigned int get_number_cpus_from_remote_node(unsigned int nid);
+extern int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos);
 
 #endif
