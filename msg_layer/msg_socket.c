@@ -27,7 +27,7 @@
 #include "common.h"
 
 #define PORT 30467
-#define MAX_ASYNC_BUFFER	64
+#define MAX_ASYNC_BUFFER	256
 
 extern char *msg_layer;
 
