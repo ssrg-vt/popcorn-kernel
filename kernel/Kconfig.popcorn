@@ -33,6 +33,11 @@ config POPCORN_DEBUG_VMA_SERVER
 	depends on POPCORN_DEBUG
 	default n
 
+config POPCORN_CHECK_SANITY
+	bool "Perform extra-sanity checks"
+	depends on POPCORN
+	default y
+
 config POPCORN_REMOTE_INFO
 	bool "Single system image over multiple nodes"
 	depends on POPCORN
