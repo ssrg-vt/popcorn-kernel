@@ -296,14 +296,6 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 	unsigned long min_brk;
 	bool populate;
 
-#ifdef CONFIG_POPCORN
-	if (distributed_remote_process(current)) {
-		if (vma_server_brk_remote(brk)) {
-			return mm->brk;
-		}
-	}
-#endif
-
 	down_write(&mm->mmap_sem);
 
 #ifdef CONFIG_COMPAT_BRK
@@ -358,6 +350,13 @@ set_brk:
 	up_write(&mm->mmap_sem);
 	if (populate)
 		mm_populate(oldbrk, newbrk - oldbrk);
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		if (vma_server_brk_remote(brk)) {
+			return brk;
+		}
+	}
+#endif
 	return brk;
 
 out:
@@ -2651,14 +2650,11 @@ SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 	profile_munmap(addr);
 
 #ifdef CONFIG_POPCORN
-	if (distributed_process(current)) {
-		int ret;
+	if (unlikely(distributed_process(current))) {
 		if (current->at_remote) {
-			ret = vma_server_munmap_remote(addr, len);
-		} else {
-			ret = vma_server_munmap_origin(addr, len, my_nid);
+			return vma_server_munmap_remote(addr, len);
 		}
-		if (ret) return ret;
+		return vma_server_munmap_origin(addr, len, my_nid);
 	}
 #endif
 	return vm_munmap(addr, len);

@@ -471,6 +471,10 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	int write;
 	size_t len;
 	struct blk_plug plug;
+#ifdef CONFIG_POPCORN
+	unsigned long start_orig = start;
+	size_t len_orig = len_in;
+#endif
 
 #ifdef CONFIG_MEMORY_FAILURE
 	if (behavior == MADV_HWPOISON || behavior == MADV_SOFT_OFFLINE)
@@ -494,13 +498,6 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	error = 0;
 	if (end == start)
 		return error;
-
-#ifdef CONFIG_POPCORN
-	if (distributed_remote_process(current)) {
-		error = vma_server_madvise_remote(start, len, behavior);
-		if (error) return error;
-	}
-#endif
 
 	write = madvise_need_mmap_write(behavior);
 	if (write)
@@ -558,6 +555,13 @@ out:
 		up_write(&current->mm->mmap_sem);
 	else
 		up_read(&current->mm->mmap_sem);
+
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = vma_server_madvise_remote(start_orig, len_orig, behavior);
+		if (error) return error;
+	}
+#endif
 
 	return error;
 }

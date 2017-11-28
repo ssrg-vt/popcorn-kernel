@@ -67,17 +67,21 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 	/**
 	 * Go through ALL VMAs, looking for overlapping with this space.
 	 */
+	VSPRINTK("  [%d] map+ %lx %lx\n", current->pid, start, end);
 	for (vma = current->mm->mmap; start < end; vma = vma->vm_next) {
+		/*
+		VSPRINTK("  [%d] vma  %lx -- %lx\n", current->pid,
+				vma ? vma->vm_start : 0, vma ? vma->vm_end : 0);
+		*/
 		if (vma == NULL || end <= vma->vm_start) {
 			/**
 			 * We've reached the end of the list, or the VMA is fully
 			 * above the region of interest
 			 */
+			VSPRINTK("  [%d] map0 %lx -- %lx @ %lx\n", current->pid,
+					start, end, pgoff);
 			error = do_mmap_pgoff(file, start, end - start,
 					prot, flags, pgoff, &populate);
-			VSPRINTK("  [%d] map0 %lx -- %lx @ %lx\n",
-					current->pid, start, end, pgoff);
-
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;
 			}
@@ -101,20 +105,20 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			 * VMA includes the end of the region of interest
 			 * but not the start
 			 */
+			VSPRINTK("  [%d] map1 %lx -- %lx @ %lx\n", current->pid,
+					start, vma->vm_start, pgoff);
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
-			VSPRINTK("  [%d] map1 %lx -- %lx, %lx\n",
-					current->pid, start, vma->vm_start, pgoff);
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;;
 			}
 			break;
 		} else if (start <= vma->vm_start && vma->vm_end <= end) {
 			/* VMA is fully within the region of interest */
+			VSPRINTK("  [%d] map2 %lx -- %lx @ %lx\n", current->pid,
+					start, vma->vm_start, pgoff);
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
 					prot, flags, pgoff, &populate);
-			VSPRINTK("  [%d] map2 %lx -- %lx, %lx\n",
-					current->pid, start, vma->vm_start, pgoff);
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;
 				break;
@@ -280,20 +284,22 @@ out_free:
 int vma_server_munmap_remote(unsigned long start, size_t len)
 {
 	int ret;
-	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_MUNMAP);
+	vma_op_request_t *req;
 	vma_op_response_t *res;
 
+	VSPRINTK("\n## VMA munmap [%d] %lx %lx\n", current->pid, start, len);
+
+	ret = vm_munmap(start, len);
+	if (ret) return ret;
+
+	req = __alloc_vma_op_request(VMA_OP_MUNMAP);
 	req->addr = start;
 	req->len = len;
-
-	VSPRINTK("\n## VMA munmap [%d] %lx %lx\n", current->pid, start, len);
 
 	ret = __delegate_vma_op(req, &res);
 
 	VSPRINTK("  [%d] %d %lx -- %lx\n", current->pid,
 			ret, res->addr, res->addr + res->len);
-
-	/* Actual munmap() is done at the caller when ret == 0 */
 
 	kfree(req);
 	pcn_kmsg_free_msg(res);
@@ -309,14 +315,12 @@ int vma_server_brk_remote(unsigned long brk)
 
 	req->brk = brk;
 
-	VSPRINTK("\n## VMA brk [%d] %lx --> %lx\n", current->pid,
+	VSPRINTK("\n## VMA brk-ed [%d] %lx --> %lx\n", current->pid,
 				   current->mm->brk, brk);
 
 	ret = __delegate_vma_op(req, &res);
 
 	VSPRINTK("  [%d] %d %lx\n", current->pid, ret, res->brk);
-
-	/* Actual process() is done at the caller when ret == 0 */
 
 	kfree(req);
 	pcn_kmsg_free_msg(res);
@@ -334,15 +338,13 @@ int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 	req->len = len;
 	req->behavior = behavior;
 
-	VSPRINTK("\n## VMA madvise [%d] %lx %lx %d\n", current->pid,
+	VSPRINTK("\n## VMA madvise-d [%d] %lx %lx %d\n", current->pid,
 			start, len, behavior);
 
 	ret = __delegate_vma_op(req, &res);
 
 	VSPRINTK("  [%d] %d %lx -- %lx %d\n", current->pid,
 			ret, res->addr, res->addr + res->len, behavior);
-
-	/* Actual process() is done at the caller when ret == 0 */
 
 	kfree(req);
 	pcn_kmsg_free_msg(res);
@@ -399,11 +401,10 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 		put_wait_station(ws);
 		pcn_kmsg_free_msg(res);
 	}
-
-	/* Actual munmap() is done at the caller when ret == 0 */
-
 	put_task_remote(current);
 	kfree(req);
+
+	vm_munmap(start, len);
 	return 0;
 }
 
@@ -440,8 +441,8 @@ void process_vma_op_request(vma_op_request_t *req)
 	long ret = -EPERM;
 	struct mm_struct *mm = get_task_mm(current);
 
-	VSPRINTK("\nVMA_OP_REQUEST [%d] %s\n", current->pid,
-			vma_op_code_sz[req->operation]);
+	VSPRINTK("\nVMA_OP_REQUEST [%d] %s %lx %lx\n", current->pid,
+			vma_op_code_sz[req->operation], req->addr, req->len);
 	switch (req->operation) {
 	case VMA_OP_MMAP: {
 		unsigned long populate = 0;
@@ -478,7 +479,6 @@ void process_vma_op_request(vma_op_request_t *req)
 	}
 	case VMA_OP_MUNMAP:
 		ret = vma_server_munmap_origin(req->addr, req->len, req->remote_nid);
-		ret = vm_munmap(req->addr, req->len);
 		break;
 	case VMA_OP_MPROTECT:
 		ret = sys_mprotect(req->addr, req->len, req->prot);
@@ -743,6 +743,7 @@ static int __update_vma(struct task_struct *tsk, vma_info_response_t *res)
 
 	down_write(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
+	VSPRINTK("  [%d] %lx %lx\n", tsk->pid, vma ? vma->vm_start : 0, addr);
 	if (vma && vma->vm_start <= addr) {
 		/* somebody already done for me. */
 		goto out;
