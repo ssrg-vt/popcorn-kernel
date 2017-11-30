@@ -25,6 +25,13 @@ void notify_my_node_info(int nid);
 
 int popcorn_nodes_init(void);
 
+struct popcorn_thread_status {
+	int current_nid;
+	int proposed_nid;
+	int peer_nid;
+	pid_t peer_pid;
+};
+
 struct popcorn_node_info {
 	unsigned int status;
 	int arch;

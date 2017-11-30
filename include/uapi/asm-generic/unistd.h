@@ -715,14 +715,14 @@ __SYSCALL(__NR_userfaultfd, sys_userfaultfd)
 __SYSCALL(__NR_membarrier, sys_membarrier)
 #define __NR_mlock2 284
 __SYSCALL(__NR_mlock2, sys_mlock2)
-#define __NR_sched_migrate 285
-__SYSCALL(__NR_sched_migrate, sys_sched_migrate)
-#define __NR_sched_migration_proposed 286
-__SYSCALL(__NR_sched_migration_proposed, sys_sched_migration_proposed)
-#define __NR_sched_propose_migration 287
-__SYSCALL(__NR_sched_propose_migration, sys_sched_propose_migration)
-#define __NR_sched_get_node_info 288
-__SYSCALL(__NR_sched_get_node_info, sys_sched_get_node_info)
+#define __NR_popcorn_migrate 285
+__SYSCALL(__NR_popcorn_migrate, sys_popcorn_migrate)
+#define __NR_popcorn_propose_migration 286
+__SYSCALL(__NR_popcorn_propose_migration, sys_popcorn_propose_migration)
+#define __NR_popcorn_get_thread_status 287
+__SYSCALL(__NR_popcorn_get_thread_status, sys_popcorn_get_thread_status)
+#define __NR_popcorn_get_node_info 288
+__SYSCALL(__NR_popcorn_get_node_info, sys_popcorn_get_node_info)
 
 #undef __NR_syscalls
 #define __NR_syscalls 289

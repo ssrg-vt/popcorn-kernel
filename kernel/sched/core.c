@@ -4622,12 +4622,27 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 #include <popcorn/bundle.h>
 #include <popcorn/process_server.h>
 
-SYSCALL_DEFINE0(sched_migration_proposed)
+SYSCALL_DEFINE1(popcorn_get_thread_status, struct popcorn_thread_status __user *, status)
 {
-	return current->migration_target_nid;
+	struct popcorn_thread_status st = {
+		.current_nid = my_nid,
+		.proposed_nid = current->migration_target_nid,
+		.peer_nid = current->peer_nid,
+		.peer_pid = current->peer_pid,
+	};
+
+	if (!access_ok(VERIFY_WRITE, status, sizeof(*status))) {
+		return -EINVAL;
+	}
+
+	if (copy_to_user(status, &st, sizeof(st))) {
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
-SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
+SYSCALL_DEFINE2(popcorn_propose_migration, pid_t, pid, int, nid)
 {
 	struct task_struct *tsk;
 
@@ -4652,35 +4667,43 @@ SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
 	return 0;
 }
 
-SYSCALL_DEFINE2(sched_get_node_info, int, nid, void __user *, info)
+SYSCALL_DEFINE2(popcorn_get_node_info, int *, _my_nid, struct popcorn_node_info __user *, info)
 {
-	struct popcorn_node_info res = {
-		.status = 0,
-		.arch = POPCORN_ARCH_UNKNOWN,
-		.distance = 0,
-	};
+	int i;
 
-	if (nid < 0 || nid >= MAX_POPCORN_NODES) {
+	if (!access_ok(VERIFY_WRITE, _my_nid, sizeof(*_my_nid))) {
 		return -EINVAL;
 	}
-	if (!access_ok(VERIFY_WRITE, info, sizeof(res))) {
-		return -EACCES;
-	}
-
-	if (get_popcorn_node_online(nid)) {
-		res.status = 1;
-		res.arch = get_popcorn_node_arch(nid);
-	}
-
-	if (copy_to_user(info, &res, sizeof(res))) {
+	if (copy_to_user(_my_nid, &my_nid, sizeof(my_nid))) {
 		return -EINVAL;
+	}
+
+	if (!access_ok(VERIFY_WRITE, info, sizeof(*info) * MAX_POPCORN_NODES)) {
+		return -EINVAL;
+	}
+	for (i = 0; i < MAX_POPCORN_NODES; i++) {
+		struct popcorn_node_info res = {
+			.status = 0,
+			.arch = POPCORN_ARCH_UNKNOWN,
+			.distance = 0,
+		};
+		struct popcorn_node_info __user *ni = info + i;
+
+		if (get_popcorn_node_online(i)) {
+			res.status = 1;
+			res.arch = get_popcorn_node_arch(i);
+		}
+
+		if (copy_to_user(ni, &res, sizeof(res))) {
+			return -EINVAL;
+		}
 	}
 	return 0;
 }
 
 #pragma GCC optimize ("no-omit-frame-pointer")
 #pragma GCC optimize ("no-optimize-sibling-calls")
-SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
+SYSCALL_DEFINE2(popcorn_migrate, int, nid, void __user *, uregs)
 {
 	int ret;
 	PRINTK("\n####### MIGRATE [%d] to %d\n", current->pid, nid);
@@ -4718,24 +4741,26 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 }
 #pragma GCC reset_options
 #else // CONFIG_POPCORN
-
-SYSCALL_DEFINE0(sched_migration_proposed)
+SYSCALL_DEFINE2(popcorn_migrate, int, nid, void __user *, uregs)
 {
-	return false;
-}
-
-SYSCALL_DEFINE2(sched_propose_migration, pid_t, pid, int, nid)
-{
+	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE2(sched_get_node_info, int, nid, void __user *, info)
+SYSCALL_DEFINE2(popcorn_propose_migration, pid_t, pid, int, nid)
 {
+	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
+SYSCALL_DEFINE1(popcorn_get_thread_status, struct popcorn_node_info __user *, status)
 {
+	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
+	return -EPERM;
+}
+
+SYSCALL_DEFINE2(popcorn_get_node_info, int *, _my_nid, struct popcorn_node_info __user *, info)
+	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 #endif

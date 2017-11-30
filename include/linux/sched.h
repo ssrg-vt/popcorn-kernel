@@ -1820,12 +1820,14 @@ struct task_struct {
 #ifdef CONFIG_POPCORN
 	struct remote_context *remote;
 	union {
+		int peer_nid;
 		int remote_nid;
 		int origin_nid;
 	};
 	union {
-		int remote_pid;
-		int origin_pid;
+		pid_t peer_pid;
+		pid_t remote_pid;
+		pid_t origin_pid;
 	};
 
 	bool is_vma_worker;			/* kernel thread that manages the process*/
