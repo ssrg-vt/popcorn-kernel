@@ -1,52 +1,68 @@
 if POPCORN
 
 config POPCORN_KMSG
-	bool "Popcorn inter-kernel messaging support"
-	depends on POPCORN
+	bool "Inter-kernel messaging layer"
 	default y
 	help
 		Support various inter-kernel message passing implementations
 
+if POPCORN_KMSG
+
+# Socket
 config POPCORN_KMSG_SOCKET
 	tristate "Socket messaging layer"
-	depends on POPCORN_KMSG && INET
+	depends on INET && m
 	default m
+	help
+		Communicate through sockets on IP
 
-config POPCORN_KMSG_DOLPHIN
-	tristate "Dolphin messaging layer"
-	depends on POPCORN_KMSG
-	default n
-
+# InfiniBand
 config POPCORN_KMSG_IB
-	tristate "InfiniBand messaging layer"
-	depends on POPCORN_KMSG && INFINIBAND
-	default n
-
-config POPCORN_KMSG_IB_RDMA
-	bool "Use RDMA to transfer pages"
-	depends on POPCORN_KMSG_IB
+	tristate "InfiniBand"
+	depends on m && INFINIBAND
 	default n
 	help
-		Transfer pages through RDMA. N will transfer pages using IB verb.
+		Mellanox Connect-X4 and Connect-X5
 
+config POPCORN_KMSG_IB_RDMA
+	bool "Use RDMA to transfer pages" if POPCORN_KMSG_IB
+	default n
+	help
+		Transfer pages through RDMA. 'N' will transfer pages using IB verb.
+
+# Dolphin PCIe
+config POPCORN_KMSG_DOLPHIN
+	tristate "Dolphin PCI-e"
+	depends on m
+	default n
+	help
+		Dolphin PCI-e PX-810
+
+config POPCORN_KMSG_DOLPHIN_DIS_PATH
+	string "Path to Dolphin software suite"
+	depends on POPCORN_KMSG_DOLPHIN
+	default "/opt/source/DIS/"
+
+
+# Test and debug
 config POPCORN_KMSG_TEST
-	tristate "Test modules for messaging layer"
-	depends on POPCORN_KMSG
+	tristate "Build test modules"
+	default n
+
+config POPCORN_DEBUG_MSG_LAYER
+	bool "Print debug message "
+	depends on POPCORN_DEBUG
 	default n
 
 config POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	bool "Print debug message for the message layer"
-	depends on POPCORN_KMSG && POPCORN_DEBUG
-	default n
-
-if POPCORN_DEBUG_MSG_LAYER_VERBOSE
-config POPCORN_DEBUG_MSG_LAYER_VERBOSE_DEBUG
 	bool "Print more debug message"
+	depends on POPCORN_DEBUG_MSG_LAYER
 	default n
 
 config POPCORN_DEBUG_MSG_LAYER_DATA
 	bool "Print experimental data"
+	depends on POPCORN_DEBUG_MSG_LAYER
 	default n
 endif
 
-endif
+endif # POPCORN_KMSG

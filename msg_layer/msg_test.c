@@ -98,7 +98,7 @@ typedef struct {
 	/* you define */
 	int example1;
 	int example2;
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER
 #endif  
 	char msg[TEST1_PAYLOAD_SIZE];
 }__attribute__((packed)) test_request_t;
@@ -355,7 +355,7 @@ static void handle_remote_thread_first_test_request(
 	test_request_t* request = 
 						(test_request_t*) inc_lmsg;
 
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
+#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER
 	DEBUG_LOG_V("<<< TEST1: my_nid %d t %lu "
 							"example1(from) %d example2(t) %d (good) >>>\n", 
 							my_nid, request->header.ticket, 

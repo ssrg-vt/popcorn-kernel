@@ -122,7 +122,10 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 			regs->pc, regs->sp);
 	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, current->pid,
 			*task_user_tls(current), arch->fpu_active ? "" : "in");
+#if defined(CONFIG_POPCORN_DEBUG_PROCESS_SERVER) && \
+		defined(CONFIG_POPCORN_DEBUG_VERBOSE)
 	show_regs(regs);
+#endif
 
 	return 0;
 }

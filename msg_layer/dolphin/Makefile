@@ -1,33 +1,4 @@
-# To build modules outside of the kernel tree, we run "make"
-# in the kernel source tree; the Makefile these then includes this
-# Makefile once again.
-# This conditional selects whether we are being included from the
-# kernel Makefile or not.
-
-# XXX set installation path accordingly
-DOLPHIN = /path/to/src/dolphin/DIS
-
-EXTRA_CFLAGS += \
-	-I$(DOLPHIN)/src/IRM_GX/drv/src \
-	-I$(DOLPHIN)/src/IRM_GX/drv/src/LINUX \
-	-I$(DOLPHIN)/src/COMMON/osif/kernel/include \
-	-I$(DOLPHIN)/src/COMMON/osif/kernel/include/LINUX \
-	-I$(DOLPHIN)/src/include/ \
-	-I$(DOLPHIN)/src/include/dis/ \
-	-I$(DOLPHIN)/include
-
-EXTRA_CFLAGS += -D_KERNEL
-EXTRA_CFLAGS += -DOS_IS_LINUX
-#EXTRA_CFLAGS += -DENABLE_DMA
-#EXTRA_CFLAGS += -DPROF_HISTOGRAM
-#EXTRA_CFLAGS += -DTEST_MSG_LAYER
-#EXTRA_CFLAGS += -DTEST_MSG_LAYER_SERVER
-
-KBUILD_EXTRA_SYMBOLS = $(DOLPHIN)/src/IRM_GX/drv/src/LINUX/Module.symvers
-
-
-ifeq ($(KERNELRELEASE),)
-KERNELDIR ?= ../..
+KERNELDIR := ../..
 PWD := $(shell pwd)
 
 .PHONY: modules
@@ -41,7 +12,3 @@ modules_install:
 .PHONY: clean
 clean:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
-
-else
-obj-$(CONFIG_POPCORN_KMSG_DOLPHIN) += msg_dolphin.o
-endif

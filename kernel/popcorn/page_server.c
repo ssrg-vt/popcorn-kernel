@@ -932,7 +932,9 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 	if (ptep_set_access_flags(vma, addr, pte, *pteval, 1)) {
 		update_mmu_cache(vma, addr, pte);
 	}
+#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PGPRINTK("  [%d] zap %lx\n", current->pid, addr);
+#endif
 }
 
 

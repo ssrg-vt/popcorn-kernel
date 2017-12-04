@@ -11,9 +11,10 @@ config POPCORN
 	help
 		Enable or disable the Popcorn multi-kernel Linux support.
 
+if POPCORN
+
 config POPCORN_DEBUG
 	bool "Log debug messages for Popcorn"
-	depends on POPCORN
 	default n
 	help
 		Enable or disable kernel messages that can help debug Popcorn issues.
@@ -33,24 +34,28 @@ config POPCORN_DEBUG_VMA_SERVER
 	depends on POPCORN_DEBUG
 	default n
 
+config POPCORN_DEBUG_VERBOSE
+	bool "Log more debug messages"
+	depends on POPCORN_DEBUG
+	default n
+
 config POPCORN_CHECK_SANITY
 	bool "Perform extra-sanity checks"
-	depends on POPCORN
 	default y
 
 config POPCORN_REMOTE_INFO
 	bool "Single system image over multiple nodes"
-	depends on POPCORN
 	default n
 
 config POPCORN_STAT
 	bool "Collect performance statistics"
-	depends on POPCORN
 	default n
 
 comment "Popcorn is not currently supported on your architecture"
 	depends on !ARCH_SUPPORTS_POPCORN
 
 source msg_layer/Kconfig
+
+endif # POPCORN
 
 endmenu
