@@ -741,7 +741,7 @@ static int start_vma_worker_remote(void *_data)
 		return -EINVAL;
 	}
 
-	get_task_remote(current);
+	// get_task_remote(current);
 	rc->tgid = current->tgid;
 	smp_mb();
 
