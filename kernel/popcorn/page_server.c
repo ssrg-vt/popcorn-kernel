@@ -1288,9 +1288,9 @@ again:
 	}
 	mm = get_task_mm(tsk);
 
-	PGPRINTK("\nREMOTE_PAGE_REQUEST [%d] %lx %s from [%d/%d]\n",
+	PGPRINTK("\nREMOTE_PAGE_REQUEST [%d] %lx %c from [%d/%d]\n",
 			req->remote_pid, req->addr,
-			fault_for_write(req->fault_flags) ? "W" : "R",
+			fault_for_write(req->fault_flags) ? 'W' : 'R',
 			req->origin_pid, req->origin_nid);
 
 	while (!down_read_trylock(&mm->mmap_sem)) {
@@ -1348,6 +1348,9 @@ out:
 #endif
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
+
+	trace_printk("%lx %c %d\n", req->addr,
+			fault_for_write(req->fault_flags) ? 'W' : 'R', res->result);
 
 	kfree(res);
 
@@ -1701,6 +1704,7 @@ int page_server_handle_pte_fault(
 		unsigned int fault_flags)
 {
 	unsigned long addr = address & PAGE_MASK;
+	int ret = 0;
 
 	might_sleep();
 
@@ -1714,8 +1718,9 @@ int page_server_handle_pte_fault(
 	 * Thread at the origin
 	 */
 	if (!current->at_remote) {
-		return __handle_localfault_at_origin(
+		ret = __handle_localfault_at_origin(
 				mm, vma, addr, pmd, pte, pte_val, fault_flags);
+		goto out;
 	}
 
 	/**
@@ -1729,32 +1734,42 @@ int page_server_handle_pte_fault(
 		/* Can we handle the fault locally? */
 		if (vma->vm_flags & VM_EXEC) {
 			PGPRINTK("  [%d] VM_EXEC. continue\n", current->pid);
-			return VM_FAULT_CONTINUE;
+			ret = VM_FAULT_CONTINUE;
+			goto out;
 		}
 		if (!vma_is_anonymous(vma) &&
 				((vma->vm_flags & (VM_WRITE | VM_SHARED)) == 0)) {
 			PGPRINTK("  [%d] locally file-mapped read-only. continue\n",
 					current->pid);
-			return VM_FAULT_CONTINUE;
+			ret = VM_FAULT_CONTINUE;
+			goto out;
 		}
 	}
 
 	if (!pte_present(pte_val)) {
 		/* Remote page fault */
-		return __handle_localfault_at_remote(
+		ret = __handle_localfault_at_remote(
 				mm, vma, addr, pmd, pte, pte_val, fault_flags);
+		goto out;
 	}
 
 	if ((vma->vm_flags & VM_WRITE) &&
 			fault_for_write(fault_flags) && !pte_write(pte_val)) {
 		/* wr-protected for keeping page consistency */
-		return __handle_localfault_at_remote(
+		ret = __handle_localfault_at_remote(
 				mm, vma, addr, pmd, pte, pte_val, fault_flags);
+		goto out;
 	}
 
 	pte_unmap(pte);
 	PGPRINTK("  [%d] might be fixed by others???\n", current->pid);
-	return 0;
+	ret = 0;
+
+out:
+	trace_printk("%lx %c %lx %d\n",
+			address, fault_for_write(fault_flags) ? 'W' : 'R',
+			instruction_pointer(current_pt_regs()), ret);
+	return ret;
 }
 
 
