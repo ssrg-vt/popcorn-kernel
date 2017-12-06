@@ -175,13 +175,14 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 
 	put_cpu();
 
+#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PSPRINTK("%s [%d] ip %lx\n", __func__, current->pid,
 			regs->ip);
 	PSPRINTK("%s [%d] sp %lx bp %lx\n", __func__, current->pid,
 			regs->sp, regs->bp);
 	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, current->pid,
 			arch->tls, arch->fpu_active ? "" : "in");
-
+#endif
 	return 0;
 }
 

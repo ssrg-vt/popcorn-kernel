@@ -56,9 +56,11 @@ int save_thread_info(struct field_arch *arch)
 
 	put_cpu();
 
+#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PSPRINTK("%s [%d] tls %lx\n", __func__, current->pid, arch->tls);
 	PSPRINTK("%s [%d] fpu %sactive\n", __func__, current->pid,
 			arch->fpu_active ? "" : "in");
+#endif
 
 	return 0;
 }
@@ -118,13 +120,14 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 
 	put_cpu();
 
+#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PSPRINTK("%s [%d] pc %llx sp %llx\n", __func__, current->pid,
 			regs->pc, regs->sp);
 	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, current->pid,
 			*task_user_tls(current), arch->fpu_active ? "" : "in");
-#if defined(CONFIG_POPCORN_DEBUG_PROCESS_SERVER) && \
-		defined(CONFIG_POPCORN_DEBUG_VERBOSE)
+#if defined(CONFIG_POPCORN_DEBUG_PROCESS_SERVER)
 	show_regs(regs);
+#endif
 #endif
 
 	return 0;

@@ -4688,19 +4688,19 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 	if (nid == -1) {
 		nid = current->migration_target_nid;
 	}
-	if (nid == -1) {
-		printk(KERN_INFO"  [%d] destination nid is not specified\n",
-				current->pid);
-		return -EINVAL;
-	}
-	if (nid == my_nid) {
-		printk(KERN_INFO"  [%d] already running at the destination %d\n",
+	if (nid < 0 || nid >= MAX_POPCORN_NODES) {
+		PSPRINTK("  [%d] invalid migration destination %d\n",
 				current->pid, nid);
 		return -EINVAL;
 	}
+	if (nid == my_nid) {
+		PSPRINTK("  [%d] already running at the destination %d\n",
+				current->pid, nid);
+		return -EBUSY;
+	}
 
 	if (!get_popcorn_node_online(nid)) {
-		printk(KERN_INFO"  [%d] destination node %d is offline\n",
+		PSPRINTK("  [%d] destination node %d is offline\n",
 				current->pid, nid);
 		return -EAGAIN;
 	}
@@ -4711,7 +4711,9 @@ SYSCALL_DEFINE2(sched_migrate, int, nid, void __user *, uregs)
 	current->migration_target_nid = -1;
 
 	update_frame_pointer();
+#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PSPRINTK("  [%d] resume execution\n", current->pid);
+#endif
 	return 0;
 }
 #pragma GCC reset_options

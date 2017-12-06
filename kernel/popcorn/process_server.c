@@ -428,7 +428,7 @@ static void bring_back_remote_thread(back_migration_request_t *req)
 		goto out_free;
 	}
 
-	PSPRINTK("\n### BACKMIG [%d] from %d at %d\n",
+	PSPRINTK("\n### BACKMIG [%d] from [%d/%d]\n",
 			current->pid, req->remote_pid, req->remote_nid);
 
 	/* Welcome home */
@@ -551,8 +551,10 @@ static int remote_thread_main(void *_args)
 	struct shadow_params *params = _args;
 	clone_request_t *req = params->req;
 
+#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
 			current->pid, req->origin_pid, req->origin_nid);
+#endif
 
 	current->flags &= ~PF_KTHREAD;	/* Drop to user */
 	current->origin_nid = req->origin_nid;
