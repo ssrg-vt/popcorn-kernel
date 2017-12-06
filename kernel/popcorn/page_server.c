@@ -144,6 +144,30 @@ static inline bool page_is_mine(struct mm_struct *mm, unsigned long addr, struct
 	return test_bit(my_nid, pi);
 }
 
+static inline bool test_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long *pi = __get_page_info(mm, addr);
+
+	if (!pi) return false;
+	return test_bit(nid, pi);
+}
+
+static inline void set_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long *pi = __get_page_info(mm, addr);
+
+	if (!pi) return;
+	set_bit(nid, pi);
+}
+
+static inline void clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long *pi = __get_page_info(mm, addr);
+
+	if (!pi) return;
+	clear_bit(nid, pi);
+}
+
 /**************************************************************************
  * Fault tracking mechanism
  */
@@ -544,8 +568,8 @@ static void process_remote_page_flush(struct work_struct *work)
 	}
 
 	SetPageDistributed(mm, addr);
-	set_bit(my_nid, page->owners);
-	clear_bit(req->remote_nid, page->owners);
+	set_page_owner(my_nid, mm, addr);
+	clear_page_owner(req->remote_nid, mm, addr);
 
 	/* XXX Should update through clear_flush and set */
 	entry = pte_make_valid(*pte);
@@ -583,7 +607,7 @@ static int __do_pte_flush(pte_t *pte, unsigned long addr, unsigned long next, st
 	page = pte_page(*pte);
 	BUG_ON(!page);
 
-	if (test_bit(my_nid, page->owners)) {
+	if (test_page_owner(my_nid, vma->vm_mm, addr)) {
 		req->addr = addr;
 		if ((vma->vm_flags & VM_WRITE) && pte_write(*pte)) {
 			void *paddr;
@@ -602,7 +626,7 @@ static int __do_pte_flush(pte_t *pte, unsigned long addr, unsigned long next, st
 			req->flags = FLUSH_FLAG_RELEASE;
 			type = '+';
 		}
-		clear_bit(my_nid, page->owners);
+		clear_page_owner(my_nid, vma->vm_mm, addr);
 
 		pcn_kmsg_send(current->origin_nid, req, req_size);
 	} else {
@@ -715,7 +739,7 @@ static void __do_invalidate_page(struct task_struct *tsk, page_invalidate_reques
 	page = vm_normal_page(vma, addr, *pte);
 	BUG_ON(!page);
 	get_page(page);
-	clear_bit(my_nid, page->owners);
+	clear_page_owner(my_nid, mm, addr);
 	put_page(page);
 
 	BUG_ON(!pte_present(*pte));
@@ -914,21 +938,25 @@ static void __make_pte_valid(struct mm_struct *mm,
 	// flush_tlb_page(vma, addr);
 
 	SetPageDistributed(mm, addr);
-	set_bit(my_nid, page->owners);
+	set_page_owner(my_nid, mm, addr);
 }
 
 
 static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, struct page *page)
 {
-	int peers = bitmap_weight(page->owners, MAX_POPCORN_NODES);
+	int peers;
 	unsigned int random = prandom_u32();
 	struct wait_station *ws;
 	struct remote_context *rc = get_task_remote(tsk);
 	remote_page_response_t *rp;
 	int from, nid;
 	int from_nid;
+	unsigned long *pi = __get_page_info(rc->mm, addr);
+	BUG_ON(!pi);
 
-	if (test_bit(my_nid, page->owners)) {
+	peers = bitmap_weight(pi, MAX_POPCORN_NODES);
+
+	if (test_bit(my_nid, pi)) {
 		peers--;
 	}
 	from = random % peers;
@@ -946,7 +974,7 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 #endif
 	ws = get_wait_station_multiple(tsk, peers);
 
-	for_each_set_bit(nid, page->owners, MAX_POPCORN_NODES) {
+	for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
 		pid_t pid = rc->remote_tgids[nid];
 		if (nid == my_nid) continue;
 		if (from-- == 0) {
@@ -960,7 +988,7 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 			continue;
 		}
 		if (fault_for_write(fault_flags)) {
-			clear_bit(nid, page->owners);
+			clear_bit(nid, pi);
 			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 		}
 	}
@@ -973,7 +1001,7 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 	put_wait_station(ws);
 
 	if (fault_for_write(fault_flags)) {
-		clear_bit(from_nid, page->owners);
+		clear_bit(from_nid, pi);
 	}
 
 	put_task_remote(tsk);
@@ -983,24 +1011,29 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 
 static void __claim_local_page(struct task_struct *tsk, unsigned long addr, struct page *page, int except_nid)
 {
-	int peers = bitmap_weight(page->owners, MAX_POPCORN_NODES);
+	struct mm_struct *mm = tsk->mm;
+	unsigned long *pi = __get_page_info(mm, addr);
+	int peers;
+
+	if (!pi) return; /* skip claiming non-distributed page */
+	peers = bitmap_weight(pi, MAX_POPCORN_NODES);
 	if (!peers) return;	/* skip claiming the page that is not distributed */
 
-	BUG_ON(!test_bit(except_nid, page->owners));
+	BUG_ON(!test_bit(except_nid, pi));
 	peers--;	/* exclude except_nid from peers */
 
-	if (test_bit(my_nid, page->owners) && except_nid != my_nid) peers--;
+	if (test_bit(my_nid, pi) && except_nid != my_nid) peers--;
 
 	if (peers > 0) {
 		int nid;
 		struct remote_context *rc = get_task_remote(tsk);
 		struct wait_station *ws = get_wait_station_multiple(tsk, peers);
 
-		for_each_set_bit(nid, page->owners, MAX_POPCORN_NODES) {
+		for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
 			pid_t pid = rc->remote_tgids[nid];
 			if (nid == except_nid || nid == my_nid) continue;
 
-			clear_bit(nid, page->owners);
+			clear_bit(nid, pi);
 			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 		}
 		put_task_remote(tsk);
@@ -1080,7 +1113,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	entry = ptep_clear_flush(vma, addr, pte);
 
 	if (fault_for_write(fault_flags)) {
-		clear_bit(my_nid, page->owners);
+		clear_page_owner(my_nid, mm, addr);
 		entry = pte_make_invalid(entry);
 	} else {
 		entry = pte_wrprotect(entry);
@@ -1166,9 +1199,9 @@ again:
 		/* Prepare the page if it is not mine. This should be leader */
 		PGPRINTK(" =[%d] %s%s %p\n",
 				tsk->pid, page_is_mine(mm, addr, page) ? "origin " : "",
-				test_bit(from_nid, page->owners) ? "remote": "", fh);
+				test_page_owner(from_nid, mm, addr) ? "remote": "", fh);
 
-		if (test_bit(from_nid, page->owners)) {
+		if (test_page_owner(from_nid, mm, addr)) {
 			BUG_ON(fault_for_read(fault_flags) && "Read fault from owner??");
 			__claim_local_page(tsk, addr, page, from_nid);
 			grant = true;
@@ -1191,19 +1224,19 @@ again:
 		entry = ptep_clear_flush(vma, addr, pte);
 
 		if (fault_for_write(fault_flags)) {
-			clear_bit(my_nid, page->owners);
+			clear_page_owner(my_nid, mm, addr);
 			entry = pte_make_invalid(entry);
 		} else {
 			entry = pte_make_valid(entry); /* For remote-claimed case */
 			entry = pte_wrprotect(entry);
-			set_bit(my_nid, page->owners);
+			set_page_owner(my_nid, mm, addr);
 		}
 
 		set_pte_at_notify(mm, addr, pte, entry);
 		update_mmu_cache(vma, addr, pte);
 
 		SetPageDistributed(mm, addr);
-		set_bit(from_nid, page->owners);
+		set_page_owner(from_nid, mm, addr);
 	} else {
 		spin_lock(ptl);
 	}
@@ -1526,7 +1559,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		}
 	}
 	SetPageDistributed(mm, addr);
-	set_bit(my_nid, page->owners);
+	set_page_owner(my_nid, mm, addr);
 	pte_unmap_unlock(pte, ptl);
 	ret = 0;	/* The leader squash both 0 and VM_FAULT_CONTINUE to 0 */
 
@@ -1631,7 +1664,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		__make_pte_valid(mm, vma, addr, fault_flags, pte, page);
 		pcn_kmsg_free_msg(rp);
 	}
-	BUG_ON(!test_bit(my_nid, page->owners));
+	BUG_ON(!test_page_owner(my_nid, mm, addr));
 	pte_unmap_unlock(pte, ptl);
 
 out_wakeup:

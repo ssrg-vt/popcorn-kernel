@@ -39,18 +39,17 @@ void print_page_signature_pid(pid_t pid, unsigned char *addr)
 static DEFINE_SPINLOCK(__print_lock);
 static char *__print_buffer = NULL;
 
-void print_page_owner(struct page *page, unsigned long addr, pid_t pid)
+void print_page_owner(unsigned long addr, unsigned long *owners, pid_t pid)
 {
 	if (unlikely(!__print_buffer)) {
 		__print_buffer = kmalloc(PAGE_SIZE, GFP_KERNEL);
 	}
 	spin_lock(&__print_lock);
 	bitmap_print_to_pagebuf(
-			true, __print_buffer, page->owners, MAX_POPCORN_NODES);
+			true, __print_buffer, owners, MAX_POPCORN_NODES);
 	printk("  [%d] %lx %s", pid, addr, __print_buffer);
 	spin_unlock(&__print_lock);
 }
-
 
 #include <linux/fs.h>
 
