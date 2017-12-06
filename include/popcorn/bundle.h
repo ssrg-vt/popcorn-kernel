@@ -2,6 +2,9 @@
 #define __POPCORN_RACK_H__
 
 #define MAX_POPCORN_NODES 32
+#if (MAX_POPCORN_NODES > 63)
+#error Currently support up to 63 nodes
+#endif
 
 enum popcorn_arch {
 	POPCORN_ARCH_ARM = 0,

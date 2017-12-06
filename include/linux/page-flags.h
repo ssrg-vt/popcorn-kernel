@@ -108,9 +108,6 @@ enum pageflags {
 	PG_young,
 	PG_idle,
 #endif
-#ifdef CONFIG_POPCORN
-	PG_distributed,
-#endif
 	__NR_PAGEFLAGS,
 
 	/* Filesystems */
@@ -225,9 +222,6 @@ PAGEFLAG(Foreign, foreign);				/* Xen */
 PAGEFLAG(Reserved, reserved) __CLEARPAGEFLAG(Reserved, reserved)
 PAGEFLAG(SwapBacked, swapbacked) __CLEARPAGEFLAG(SwapBacked, swapbacked)
 	__SETPAGEFLAG(SwapBacked, swapbacked)
-#ifdef CONFIG_POPCORN
-PAGEFLAG(Distributed, distributed)
-#endif
 
 __PAGEFLAG(SlobFree, slob_free)
 

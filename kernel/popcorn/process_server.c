@@ -95,6 +95,8 @@ inline bool __put_task_remote(struct remote_context *rc)
 	list_del(&rc->list);
 	__unlock_remote_contexts(rc->for_remote);
 
+	free_remote_context_pages(rc);
+
 	mmput(rc->mm);
 	kfree(rc);
 	return true;
@@ -136,6 +138,8 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	init_completion(&rc->spawn_pended);
 
 	memset(rc->remote_tgids, 0x00, sizeof(rc->remote_tgids));
+
+	INIT_RADIX_TREE(&rc->pages, GFP_ATOMIC);
 
 	barrier();
 

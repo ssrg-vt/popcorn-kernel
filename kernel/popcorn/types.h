@@ -7,6 +7,7 @@
 #include <linux/workqueue.h>
 #include <linux/signal.h>
 #include <linux/slab.h>
+#include <linux/radix-tree.h>
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
@@ -21,6 +22,9 @@ struct remote_context {
 
 	int tgid;
 	bool for_remote;
+
+	/* Tracking page status */
+	struct radix_tree_root pages;
 
 	/* For page replication protocol */
 	spinlock_t faults_lock;

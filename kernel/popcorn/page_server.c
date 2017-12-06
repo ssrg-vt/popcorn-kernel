@@ -19,6 +19,7 @@
 #include <linux/pagemap.h>
 #include <linux/delay.h>
 #include <linux/random.h>
+#include <linux/radix-tree.h>
 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
@@ -33,11 +34,6 @@
 #include "wait_station.h"
 #include "page_server.h"
 
-static inline bool page_is_mine(struct page *page)
-{
-	return !PageDistributed(page) || test_bit(my_nid, page->owners);
-}
-
 static inline bool fault_for_write(unsigned long flags)
 {
 	return !!(flags & FAULT_FLAG_WRITE);
@@ -49,11 +45,108 @@ static inline bool fault_for_read(unsigned long flags)
 }
 
 
+/**************************************************************************
+ * Page ownership tracking mechanism
+ */
+#define PER_PAGE_INFO_SIZE \
+		(sizeof(unsigned long) * BITS_TO_LONGS(MAX_POPCORN_NODES))
+#define PAGE_INFO_PER_REGION (PAGE_SIZE / PER_PAGE_INFO_SIZE)
+
+static inline void __get_page_info_key(unsigned long addr, unsigned long *key, unsigned long *offset)
+{
+	unsigned long paddr = addr >> PAGE_SHIFT;
+	*key = paddr / PAGE_INFO_PER_REGION;
+	*offset = (paddr % PAGE_INFO_PER_REGION) *
+			(PER_PAGE_INFO_SIZE / sizeof(unsigned long));
+}
+
+static inline unsigned long *__get_page_info(struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long key, offset;
+	unsigned long *region;
+	struct remote_context *rc = mm->remote;
+	__get_page_info_key(addr, &key, &offset);
+
+	region = radix_tree_lookup(&rc->pages, key);
+	if (!region) return NULL;
+
+	return region + offset;
+}
+
+void free_remote_context_pages(struct remote_context *rc)
+{
+	int nr_regions;
+	const int FREE_BATCH = 16;
+	unsigned long regions[FREE_BATCH];
+
+	do {
+		int i;
+
+		nr_regions = radix_tree_gang_lookup(&rc->pages,
+				(void **)regions, 0, FREE_BATCH);
+
+		for (i = 0; i < nr_regions; i++) {
+			struct page *page = virt_to_page(regions[i]);
+			radix_tree_delete(&rc->pages, page->private);
+			free_page(regions[i]);
+		}
+	} while (nr_regions == FREE_BATCH);
+}
+
+#define FLAG_DISTRIBUTED 63
+
+static inline bool SetPageDistributed(struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long key, offset;
+	unsigned long *region;
+	struct remote_context *rc = mm->remote;
+	__get_page_info_key(addr, &key, &offset);
+
+	region = radix_tree_lookup(&rc->pages, key);
+	if (!region) {
+		int ret;
+		struct page *page = alloc_page(GFP_ATOMIC | __GFP_ZERO);
+		region = (unsigned long *)page_address(page);
+		BUG_ON(!region);
+
+		page->private = key;
+		ret = radix_tree_insert(&rc->pages, key, region);
+		BUG_ON(ret);
+	}
+	set_bit(FLAG_DISTRIBUTED, region + offset);
+
+	return false;
+}
+
+static inline void ClearPageDistributed(struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long *pi = __get_page_info(mm, addr);
+
+	if (!pi) return;
+	clear_bit(FLAG_DISTRIBUTED, pi);
+	bitmap_clear(pi, 0, MAX_POPCORN_NODES);
+}
+
+static inline bool PageDistributed(struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long *pi = __get_page_info(mm, addr);
+
+	if (!pi || !test_bit(FLAG_DISTRIBUTED, pi)) return false;
+	return true;
+}
+
+
+static inline bool page_is_mine(struct mm_struct *mm, unsigned long addr, struct page *page)
+{
+	unsigned long *pi = __get_page_info(mm, addr);
+
+	if (!pi || !test_bit(FLAG_DISTRIBUTED, pi)) return true;
+	return test_bit(my_nid, pi);
+}
 
 /**************************************************************************
  * Fault tracking mechanism
  */
-
 enum {
 	FAULT_HANDLE_WRITE = 0x01,
 	FAULT_HANDLE_REMOTE = 0x02,
@@ -450,7 +543,7 @@ static void process_remote_page_flush(struct work_struct *work)
 		kunmap(page);
 	}
 
-	SetPageDistributed(page);
+	SetPageDistributed(mm, addr);
 	set_bit(my_nid, page->owners);
 	clear_bit(req->remote_nid, page->owners);
 
@@ -820,7 +913,7 @@ static void __make_pte_valid(struct mm_struct *mm,
 	update_mmu_cache(vma, addr, pte);
 	// flush_tlb_page(vma, addr);
 
-	SetPageDistributed(page);
+	SetPageDistributed(mm, addr);
 	set_bit(my_nid, page->owners);
 }
 
@@ -932,6 +1025,7 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 	if (ptep_set_access_flags(vma, addr, pte, *pteval, 1)) {
 		update_mmu_cache(vma, addr, pte);
 	}
+	ClearPageDistributed(vma->vm_mm, addr);
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PGPRINTK("  [%d] zap %lx\n", current->pid, addr);
 #endif
@@ -979,10 +1073,10 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	BUG_ON(!page);
 	get_page(page);
 
-	BUG_ON(!page_is_mine(page));
+	BUG_ON(!page_is_mine(mm, addr, page));
 
 	spin_lock(ptl);
-	SetPageDistributed(page);
+	SetPageDistributed(mm, addr);
 	entry = ptep_clear_flush(vma, addr, pte);
 
 	if (fault_for_write(fault_flags)) {
@@ -1071,7 +1165,7 @@ again:
 
 		/* Prepare the page if it is not mine. This should be leader */
 		PGPRINTK(" =[%d] %s%s %p\n",
-				tsk->pid, page_is_mine(page) ? "origin " : "",
+				tsk->pid, page_is_mine(mm, addr, page) ? "origin " : "",
 				test_bit(from_nid, page->owners) ? "remote": "", fh);
 
 		if (test_bit(from_nid, page->owners)) {
@@ -1079,7 +1173,7 @@ again:
 			__claim_local_page(tsk, addr, page, from_nid);
 			grant = true;
 		} else  {
-			if (!page_is_mine(page)) {
+			if (!page_is_mine(mm, addr, page)) {
 				remote_page_response_t *rp =
 					__claim_remote_page(tsk, addr, fault_flags, page);
 
@@ -1108,7 +1202,7 @@ again:
 		set_pte_at_notify(mm, addr, pte, entry);
 		update_mmu_cache(vma, addr, pte);
 
-		SetPageDistributed(page);
+		SetPageDistributed(mm, addr);
 		set_bit(from_nid, page->owners);
 	} else {
 		spin_lock(ptl);
@@ -1289,7 +1383,7 @@ retry:
 	page = get_normal_page(vma, addr, pte);
 	get_page(page);
 
-	if (!page_is_mine(page)) {
+	if (!page_is_mine(mm, addr, page)) {
 		remote_page_response_t *rp =
 				__claim_remote_page(current, addr, fault_flags, page);
 		void *paddr;
@@ -1431,7 +1525,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 			__make_pte_valid(mm, vma, addr, fault_flags, pte, page);
 		}
 	}
-	SetPageDistributed(page);
+	SetPageDistributed(mm, addr);
 	set_bit(my_nid, page->owners);
 	pte_unmap_unlock(pte, ptl);
 	ret = 0;	/* The leader squash both 0 and VM_FAULT_CONTINUE to 0 */
@@ -1478,7 +1572,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	}
 
 	page = vm_normal_page(vma, addr, pte_val);
-	if (page == NULL || !PageDistributed(page)) {
+	if (page == NULL || !PageDistributed(mm, addr)) {
 		spin_unlock(ptl);
 		/* Nothing to do with DSM (e.g. COW). Handle locally */
 		PGPRINTK("  [%d] local at origin. continue\n", current->pid);
@@ -1497,14 +1591,14 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 
 	PGPRINTK(" %c[%d] %lx replicated %smine %p\n",
 			leader ? '=' : ' ', current->pid, addr,
-			page_is_mine(page) ? "" : "not ", fh);
+			page_is_mine(mm, addr, page) ? "" : "not ", fh);
 
 	if (!leader) {
 		pte_unmap(pte);
 		goto out_wakeup;
 	}
 
-	if (page_is_mine(page)) {
+	if (page_is_mine(mm, addr, page)) {
 		if (fault_for_read(fault_flags)) {
 			/* Racy exit */
 			pte_unmap(pte);
