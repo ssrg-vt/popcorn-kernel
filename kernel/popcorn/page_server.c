@@ -136,7 +136,7 @@ static inline bool PageDistributed(struct mm_struct *mm, unsigned long addr)
 }
 
 
-static inline bool page_is_mine(struct mm_struct *mm, unsigned long addr, struct page *page)
+static inline bool page_is_mine(struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
 
@@ -1106,7 +1106,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	BUG_ON(!page);
 	get_page(page);
 
-	BUG_ON(!page_is_mine(mm, addr, page));
+	BUG_ON(!page_is_mine(mm, addr));
 
 	spin_lock(ptl);
 	SetPageDistributed(mm, addr);
@@ -1198,7 +1198,7 @@ again:
 
 		/* Prepare the page if it is not mine. This should be leader */
 		PGPRINTK(" =[%d] %s%s %p\n",
-				tsk->pid, page_is_mine(mm, addr, page) ? "origin " : "",
+				tsk->pid, page_is_mine(mm, addr) ? "origin " : "",
 				test_page_owner(from_nid, mm, addr) ? "remote": "", fh);
 
 		if (test_page_owner(from_nid, mm, addr)) {
@@ -1206,7 +1206,7 @@ again:
 			__claim_local_page(tsk, addr, page, from_nid);
 			grant = true;
 		} else  {
-			if (!page_is_mine(mm, addr, page)) {
+			if (!page_is_mine(mm, addr)) {
 				remote_page_response_t *rp =
 					__claim_remote_page(tsk, addr, fault_flags, page);
 
@@ -1416,7 +1416,7 @@ retry:
 	page = get_normal_page(vma, addr, pte);
 	get_page(page);
 
-	if (!page_is_mine(mm, addr, page)) {
+	if (!page_is_mine(mm, addr)) {
 		remote_page_response_t *rp =
 				__claim_remote_page(current, addr, fault_flags, page);
 		void *paddr;
@@ -1624,14 +1624,14 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 
 	PGPRINTK(" %c[%d] %lx replicated %smine %p\n",
 			leader ? '=' : ' ', current->pid, addr,
-			page_is_mine(mm, addr, page) ? "" : "not ", fh);
+			page_is_mine(mm, addr) ? "" : "not ", fh);
 
 	if (!leader) {
 		pte_unmap(pte);
 		goto out_wakeup;
 	}
 
-	if (page_is_mine(mm, addr, page)) {
+	if (page_is_mine(mm, addr)) {
 		if (fault_for_read(fault_flags)) {
 			/* Racy exit */
 			pte_unmap(pte);
