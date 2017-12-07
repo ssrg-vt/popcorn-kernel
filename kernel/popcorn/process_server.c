@@ -113,7 +113,7 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	BUG_ON(!rc);
 
 	INIT_LIST_HEAD(&rc->list);
-	atomic_set(&rc->count, 1);
+	atomic_set(&rc->count, 0);
 	rc->mm = NULL;
 
 	rc->tgid = tgid;
@@ -747,7 +747,7 @@ static int start_vma_worker_remote(void *_data)
 		return -EINVAL;
 	}
 
-	// get_task_remote(current);
+	get_task_remote(current);
 	rc->tgid = current->tgid;
 	smp_mb();
 
@@ -1010,6 +1010,14 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		 */
 		rc->mm = get_task_mm(tsk);
 		rc->remote_tgids[my_nid] = tsk->tgid;
+
+		/*
+		 * At the origin, the remote_context should exist to the last moment
+		 * so that the remote vma workers are taken down. The following ref
+		 * counting is to prevent remote_context from being released when
+		 * the last remote thread is brought back to the origin.
+		 */
+		atomic_inc(&rc->count);
 
 		__lock_remote_contexts_out(dst_nid);
 		list_add(&rc->list, &__remote_contexts_out());
