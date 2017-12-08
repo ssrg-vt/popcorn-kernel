@@ -1,12 +1,13 @@
 /**
  * @file process_server.c
  *
- * Popcorn Linux Migration server implementation
- * This work is an extension of David Katz MS Thesis, please refer to the
- * Thesis for further information about the algorithm.
+ * Popcorn Linux thread migration implementation
+ * This work was an extension of David Katz MS Thesis, but totally rewritten 
+ * by Sang-Hoon to support multithread environment.
  *
- * @author Antonio Barbalace, SSRG Virginia Tech 2016
- * @author Vincent Legout, Antonio Barbalace, Sharat Kumar Bath, Ajithchandra Saya, SSRG Virginia Tech 2014-2015
+ * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
+ * @author Antonio Barbalace, SSRG Virginia Tech 2014-2016
+ * @author Vincent Legout, Sharat Kumar Bath, Ajithchandra Saya, SSRG Virginia Tech 2014-2015
  * @author David Katz, Marina Sadini, SSRG Virginia 2013
  */
 
@@ -142,11 +143,6 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	INIT_RADIX_TREE(&rc->pages, GFP_ATOMIC);
 
 	barrier();
-
-	/*
-	printk(KERN_INFO"%s: at 0x%p for %d at %d %c\n", __func__,
-			rc, tgid, nid, remote ? 'r' : 'l');
-	*/
 
 	return rc;
 }
@@ -754,7 +750,8 @@ static int start_vma_worker_remote(void *_data)
 	/* Create the shadow spawner */
 	kernel_thread(remote_thread_spawner, rc, CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
 
-	/* Drop to user here to access mm using get_task_mm() in vma_worker routine.
+	/*
+	 * Drop to user here to access mm using get_task_mm() in vma_worker routine.
 	 * This should be done after forking remote_thread_spawner otherwise
 	 * kernel_thread() will consider this as a user thread fork() which
 	 * will end up an inproper instruction pointer (see copy_thread_tls()).
@@ -992,7 +989,7 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 
 	might_sleep();
 
-	/* Want to avoid allocate this structure in the spinlock-ed area */
+	/* Won't to allocate this object in a spinlock-ed area */
 	rc = __alloc_remote_context(my_nid, tsk->tgid, false);
 
 	if (!cmpxchg(&tsk->mm->remote, 0, rc) == 0) {
@@ -1000,22 +997,19 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 	} else {
 		/*
 		 * This process is becoming a distributed one if it was not yet.
-		 * The first thread get migrated attaches the remote context to
-		 * mm->remote, which indicates this process is distributed.
-		 */
-
-		/*
-		 * Setting mm->remote to remote_context indicates
-		 * this process is distributed
+		 * The first thread gets migrated attaches the remote context to
+		 * mm->remote, which indicates some threads in this process is
+		 * distributed.
 		 */
 		rc->mm = get_task_mm(tsk);
 		rc->remote_tgids[my_nid] = tsk->tgid;
 
 		/*
-		 * At the origin, the remote_context should exist to the last moment
-		 * so that the remote vma workers are taken down. The following ref
-		 * counting is to prevent remote_context from being released when
-		 * the last remote thread is brought back to the origin.
+		 * At the origin, the remote_context should exist to the very last
+		 * moment to take down remote vma workers. Following explicit ref
+		 * count takes the reference through mm->remote into account and
+		 * prevents remote_context from being released when the last
+		 * remote thread is brought back to the origin.
 		 */
 		atomic_inc(&rc->count);
 
@@ -1023,6 +1017,9 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		list_add(&rc->list, &__remote_contexts_out());
 		__unlock_remote_contexts_out(dst_nid);
 	}
+	/*
+	 * tsk->remote != NULL implies this task is a distributed one.
+	 */
 	tsk->remote = get_task_remote(tsk);
 	tsk->at_remote = false;
 

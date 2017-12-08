@@ -3,7 +3,7 @@
  *
  * Popcorn Linux page server implementation
  * This work was an extension of Marina Sadini MS Thesis, but totally revamped
- * for multiple node setup.
+ * for multi-threaded setup.
  *
  * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
  */
@@ -1068,7 +1068,6 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 /**************************************************************************
  * Remote fault handler at a remote location
  */
-
 static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, remote_page_request_t *req, remote_page_response_t *res)
 {
 	unsigned long addr = req->addr;
@@ -1523,13 +1522,11 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 	if (rp->result == VM_FAULT_CONTINUE) {
 		/**
-		 * Page ownership is transferred without transferring the content
-		 * since this node already owns the page
+		 * Page ownership is granted without transferring the page data
+		 * since this node already owns the up-to-dated page
 		 */
 		pte_t entry;
 		BUG_ON(populated);
-
-		// PGPRINTK("  [%d] granted quickly\n", current->pid);
 
 		spin_lock(ptl);
 		entry = pte_make_valid(*pte);
@@ -1564,7 +1561,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	SetPageDistributed(mm, addr);
 	set_page_owner(my_nid, mm, addr);
 	pte_unmap_unlock(pte, ptl);
-	ret = 0;	/* The leader squash both 0 and VM_FAULT_CONTINUE to 0 */
+	ret = 0;	/* The leader squashes both 0 and VM_FAULT_CONTINUE to 0 */
 
 out_free:
 	put_page(page);
@@ -1622,7 +1619,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		return VM_FAULT_RETRY;
 	}
 
-	/* Handle replicated page via the dsm protocol */
+	/* Handle replicated page via the memory consistency protocol */
 	get_page(page);
 
 	PGPRINTK(" %c[%d] %lx replicated %smine %p\n",
@@ -1685,7 +1682,7 @@ out_wakeup:
  * Description:
  *	Handle PTE faults with Popcorn page replication protocol.
  *  down_read(&mm->mmap_sem) is already held when getting in.
- *  DO NOT FORGET to unmap pte before return non-VM_FAULT_CONTINUE.
+ *  DO NOT FORGET to unmap pte before returning non-VM_FAULT_CONTINUE.
  *
  * Input:
  *	All are from the PTE handler
@@ -1694,9 +1691,6 @@ out_wakeup:
  *	VM_FAULT_CONTINUE when the page fault can be handled locally.
  *	0 if the fault is fetched remotely and fixed.
  *  ERROR otherwise
- *
- * TODO: deal with the do_fault_around
- *
  */
 int page_server_handle_pte_fault(
 		struct mm_struct *mm, struct vm_area_struct *vma,

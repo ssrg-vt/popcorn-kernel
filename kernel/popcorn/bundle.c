@@ -57,7 +57,7 @@ EXPORT_SYMBOL(get_popcorn_node_arch);
 
 const char *archs_sz[] = {
 	"aarch64",
-	"x86_86",
+	"x86_64",
 	"ppc64le",
 };
 

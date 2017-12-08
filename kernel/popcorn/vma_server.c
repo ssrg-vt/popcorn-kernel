@@ -1,23 +1,15 @@
 /**
  * @file vma_server.c
  *
- * Popcorn Linux VMA server implementation
- * This work is an extension of David Katz MS Thesis, please refer to the
- * Thesis for further information about the algorithm.
+ * Popcorn Linux VMA handler implementation
+ * This work was an extension of David Katz MS Thesis, but totally rewritten 
+ * by Sang-Hoon to support multithread environment.
  *
- * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
+ * @author Sang-Hoon Kim, SSRG Virginia Tech 2016-2017
  * @author Vincent Legout, Antonio Barbalace, SSRG Virginia Tech 2016
  * @author Ajith Saya, Sharath Bhat, SSRG Virginia Tech 2015
  * @author Marina Sadini, Antonio Barbalace, SSRG Virginia Tech 2014
  * @author Marina Sadini, SSRG Virginia Tech 2013
- */
-
-/*
- * As David Katz thesis the concept of this server is to do consistent
- * modifications to the VMA list
- * The protocol is for N kernels
- * The performed operation is shown atomic to every thread of the same
- * application
  */
 
 #include <linux/slab.h>
