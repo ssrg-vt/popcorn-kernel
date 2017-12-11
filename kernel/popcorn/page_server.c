@@ -87,7 +87,8 @@ void free_remote_context_pages(struct remote_context *rc)
 
 		for (i = 0; i < nr_regions; i++) {
 			struct page *page = virt_to_page(regions[i]);
-			radix_tree_delete(&rc->pages, page->private);
+			radix_tree_delete(&rc->pages, page_private(page));
+			set_page_private(page, 0);
 			free_page(regions[i]);
 		}
 	} while (nr_regions == FREE_BATCH);
@@ -109,7 +110,7 @@ static inline bool SetPageDistributed(struct mm_struct *mm, unsigned long addr)
 		region = (unsigned long *)page_address(page);
 		BUG_ON(!region);
 
-		page->private = key;
+		set_page_private(page, key);
 		ret = radix_tree_insert(&rc->pages, key, region);
 		BUG_ON(ret);
 	}
