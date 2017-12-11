@@ -96,9 +96,8 @@ inline bool __put_task_remote(struct remote_context *rc)
 	list_del(&rc->list);
 	__unlock_remote_contexts(rc->for_remote);
 
-	free_remote_context_pages(rc);
-
 	mmput(rc->mm);
+	free_remote_context_pages(rc);
 	kfree(rc);
 	return true;
 }
