@@ -1051,6 +1051,7 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 
 	if (!vma->vm_mm->remote) return;
 
+	ClearPageDistributed(vma->vm_mm, addr);
 	page = vm_normal_page(vma, addr, *pte);
 	if (!page) return;
 
@@ -1059,7 +1060,6 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 	if (ptep_set_access_flags(vma, addr, pte, *pteval, 1)) {
 		update_mmu_cache(vma, addr, pte);
 	}
-	ClearPageDistributed(vma->vm_mm, addr);
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PGPRINTK("  [%d] zap %lx\n", current->pid, addr);
 #endif

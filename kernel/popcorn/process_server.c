@@ -84,27 +84,24 @@ inline struct remote_context *get_task_remote(struct task_struct *tsk)
 
 inline bool __put_task_remote(struct remote_context *rc)
 {
-	if (unlikely(!atomic_dec_and_test(&rc->count)))
-		return false;
-
-	__lock_remote_contexts(rc->for_remote);
-	if (atomic_read(&rc->count)) {
-		BUG();
-		__unlock_remote_contexts(rc->for_remote);
-		return false;
-	}
-	list_del(&rc->list);
-	__unlock_remote_contexts(rc->for_remote);
-
-	mmput(rc->mm);
-	free_remote_context_pages(rc);
-	kfree(rc);
-	return true;
+	return atomic_dec_and_test(&rc->count);
 }
 
 inline bool put_task_remote(struct task_struct *tsk)
 {
 	return __put_task_remote(tsk->mm->remote);
+}
+
+void free_remote_context(struct remote_context *rc)
+{
+	BUG_ON(atomic_read(&rc->count));
+
+	__lock_remote_contexts(rc->for_remote);
+	list_del(&rc->list);
+	__unlock_remote_contexts(rc->for_remote);
+
+	free_remote_context_pages(rc);
+	kfree(rc);
 }
 
 static struct remote_context *__alloc_remote_context(int nid, int tgid, bool remote)
@@ -293,11 +290,9 @@ static int __exit_origin_task(struct task_struct *tsk)
 	/**
 	 * Trigger peer termination if this is the last user thread
 	 * referring to this mm.
-	 * 2 == current + remote_context
 	 */
-	if (atomic_read(&tsk->mm->mm_users) == 2) {
+	if (atomic_read(&tsk->mm->mm_users) == 1) {
 		__terminate_peers(rc);
-		__put_task_remote(rc);
 	}
 
 	return 0;
@@ -1000,17 +995,8 @@ int do_migration(struct task_struct *tsk, int dst_nid, void __user *uregs)
 		 * mm->remote, which indicates some threads in this process is
 		 * distributed.
 		 */
-		rc->mm = get_task_mm(tsk);
+		rc->mm = tsk->mm;
 		rc->remote_tgids[my_nid] = tsk->tgid;
-
-		/*
-		 * At the origin, the remote_context should exist to the very last
-		 * moment to take down remote vma workers. Following explicit ref
-		 * count takes the reference through mm->remote into account and
-		 * prevents remote_context from being released when the last
-		 * remote thread is brought back to the origin.
-		 */
-		atomic_inc(&rc->count);
 
 		__lock_remote_contexts_out(dst_nid);
 		list_add(&rc->list, &__remote_contexts_out());

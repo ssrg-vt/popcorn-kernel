@@ -11,4 +11,7 @@ long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
 		bool valid_ts, struct timespec *ts,
 		u32 __user *uaddr2, u32 val2, u32 val3);
 
+struct remote_context;
+void free_remote_context(struct remote_context *);
+
 #endif /* __POPCORN_PROCESS_SERVER_H */

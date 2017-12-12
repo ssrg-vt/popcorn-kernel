@@ -723,6 +723,9 @@ void __mmdrop(struct mm_struct *mm)
 	mmu_notifier_mm_destroy(mm);
 	check_mm(mm);
 	put_user_ns(mm->user_ns);
+#ifdef CONFIG_POPCORN
+	if (mm->remote) free_remote_context(mm->remote);
+#endif
 	free_mm(mm);
 }
 EXPORT_SYMBOL_GPL(__mmdrop);
