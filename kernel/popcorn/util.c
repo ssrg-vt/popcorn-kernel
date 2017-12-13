@@ -1,6 +1,8 @@
 #include <linux/mm.h>
 #include <linux/slab.h>
 
+#include <popcorn/bundle.h>
+
 void print_page_data(unsigned char *addr)
 {
 	int i;

@@ -27,7 +27,7 @@
 #include "common.h"
 
 #define PORT 30467
-#define MAX_ASYNC_BUFFER	256
+#define MAX_ASYNC_BUFFER	1024
 
 /* For enq and deq */
 struct pcn_kmsg_buf_item {

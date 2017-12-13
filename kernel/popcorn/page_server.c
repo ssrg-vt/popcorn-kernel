@@ -67,7 +67,9 @@ static inline unsigned long *__get_page_info(struct mm_struct *mm, unsigned long
 	struct remote_context *rc = mm->remote;
 	__get_page_info_key(addr, &key, &offset);
 
+	rcu_read_lock();
 	region = radix_tree_lookup(&rc->pages, key);
+	rcu_read_unlock();
 	if (!region) return NULL;
 
 	return region + offset;
@@ -81,7 +83,7 @@ void free_remote_context_pages(struct remote_context *rc)
 
 	do {
 		int i;
-
+		rcu_read_lock();
 		nr_regions = radix_tree_gang_lookup(&rc->pages,
 				(void **)regions, 0, FREE_BATCH);
 
@@ -91,6 +93,7 @@ void free_remote_context_pages(struct remote_context *rc)
 			set_page_private(page, 0);
 			free_page(regions[i]);
 		}
+		rcu_read_unlock();
 	} while (nr_regions == FREE_BATCH);
 }
 
@@ -103,7 +106,9 @@ static inline bool SetPageDistributed(struct mm_struct *mm, unsigned long addr)
 	struct remote_context *rc = mm->remote;
 	__get_page_info_key(addr, &key, &offset);
 
+	rcu_read_lock();
 	region = radix_tree_lookup(&rc->pages, key);
+	rcu_read_unlock();
 	if (!region) {
 		int ret;
 		struct page *page = alloc_page(GFP_ATOMIC | __GFP_ZERO);

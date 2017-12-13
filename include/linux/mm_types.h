@@ -16,7 +16,6 @@
 #include <asm/mmu.h>
 
 #ifdef CONFIG_POPCORN
-#include <popcorn/bundle.h>
 struct remote_context;
 #endif
 

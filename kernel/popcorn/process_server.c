@@ -84,7 +84,16 @@ inline struct remote_context *get_task_remote(struct task_struct *tsk)
 
 inline bool __put_task_remote(struct remote_context *rc)
 {
-	return atomic_dec_and_test(&rc->count);
+	if (!atomic_dec_and_test(&rc->count)) return false;
+
+	__lock_remote_contexts(rc->for_remote);
+	BUG_ON(atomic_read(&rc->count));
+	list_del(&rc->list);
+	__unlock_remote_contexts(rc->for_remote);
+
+	free_remote_context_pages(rc);
+	kfree(rc);
+	return true;
 }
 
 inline bool put_task_remote(struct task_struct *tsk)
@@ -94,14 +103,7 @@ inline bool put_task_remote(struct task_struct *tsk)
 
 void free_remote_context(struct remote_context *rc)
 {
-	BUG_ON(atomic_read(&rc->count));
-
-	__lock_remote_contexts(rc->for_remote);
-	list_del(&rc->list);
-	__unlock_remote_contexts(rc->for_remote);
-
-	free_remote_context_pages(rc);
-	kfree(rc);
+	__put_task_remote(rc);
 }
 
 static struct remote_context *__alloc_remote_context(int nid, int tgid, bool remote)
@@ -110,7 +112,7 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	BUG_ON(!rc);
 
 	INIT_LIST_HEAD(&rc->list);
-	atomic_set(&rc->count, 0);
+	atomic_set(&rc->count, 1); /* Account for mm->remote in a near future */
 	rc->mm = NULL;
 
 	rc->tgid = tgid;

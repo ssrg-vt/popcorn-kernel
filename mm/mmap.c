@@ -49,6 +49,7 @@
 #include <asm/mmu_context.h>
 
 #ifdef CONFIG_POPCORN
+#include <popcorn/bundle.h>
 #include <popcorn/types.h>
 #include <popcorn/vma_server.h>
 #endif
