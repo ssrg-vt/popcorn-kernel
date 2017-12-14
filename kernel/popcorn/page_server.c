@@ -87,44 +87,60 @@ void free_remote_context_pages(struct remote_context *rc)
 		for (i = 0; i < nr_regions; i++) {
 			struct page *page = virt_to_page(regions[i]);
 			radix_tree_delete(&rc->pages, page_private(page));
-			set_page_private(page, 0);
-			free_page(regions[i]);
+			kunmap(page);
+			__free_page(page);
 		}
 	} while (nr_regions == FREE_BATCH);
 }
 
-#define FLAG_DISTRIBUTED 63
+#define PI_FLAG_COWED 62
+#define PI_FLAG_DISTRIBUTED 63
 
-static inline bool SetPageDistributed(struct mm_struct *mm, unsigned long addr)
+static unsigned long *__lookup_region(struct remote_context *rc, unsigned long key)
+{
+	unsigned long *region = radix_tree_lookup(&rc->pages, key);
+	if (!region) {
+		int ret;
+		struct page *page = alloc_page(GFP_ATOMIC | __GFP_ZERO);
+		BUG_ON(!page);
+		set_page_private(page, key);
+
+		region = kmap(page);
+		ret = radix_tree_insert(&rc->pages, key, region);
+		BUG_ON(ret);
+	}
+	return region;
+}
+
+static inline void SetPageDistributed(struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long key, offset;
 	unsigned long *region;
 	struct remote_context *rc = mm->remote;
 	__get_page_info_key(addr, &key, &offset);
 
-	region = radix_tree_lookup(&rc->pages, key);
-	if (!region) {
-		int ret;
-		struct page *page = alloc_page(GFP_ATOMIC | __GFP_ZERO);
-		BUG_ON(!page);
-		region = (unsigned long *)page_address(page);
-		BUG_ON(!region);
-
-		set_page_private(page, key);
-		ret = radix_tree_insert(&rc->pages, key, region);
-		BUG_ON(ret);
-	}
-	set_bit(FLAG_DISTRIBUTED, region + offset);
-
-	return false;
+	region = __lookup_region(rc, key);
+	set_bit(PI_FLAG_DISTRIBUTED, region + offset);
 }
 
-static inline void ClearPageDistributed(struct mm_struct *mm, unsigned long addr)
+static inline void SetPageCowed(struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long key, offset;
+	unsigned long *region;
+	struct remote_context *rc = mm->remote;
+	__get_page_info_key(addr, &key, &offset);
+
+	region = __lookup_region(rc, key);
+	set_bit(PI_FLAG_COWED, region + offset);
+}
+
+static inline void ClearPageInfo(struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
 
 	if (!pi) return;
-	clear_bit(FLAG_DISTRIBUTED, pi);
+	clear_bit(PI_FLAG_DISTRIBUTED, pi);
+	clear_bit(PI_FLAG_COWED, pi);
 	bitmap_clear(pi, 0, MAX_POPCORN_NODES);
 }
 
@@ -132,16 +148,23 @@ static inline bool PageDistributed(struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
 
-	if (!pi || !test_bit(FLAG_DISTRIBUTED, pi)) return false;
-	return true;
+	if (!pi) return false;
+	return test_bit(PI_FLAG_DISTRIBUTED, pi);
 }
 
+static inline bool PageCowed(struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long *pi = __get_page_info(mm, addr);
+
+	if (!pi) return false;
+	return test_bit(PI_FLAG_COWED, pi);
+}
 
 static inline bool page_is_mine(struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
 
-	if (!pi || !test_bit(FLAG_DISTRIBUTED, pi)) return true;
+	if (!pi || !test_bit(PI_FLAG_DISTRIBUTED, pi)) return true;
 	return test_bit(my_nid, pi);
 }
 
@@ -1042,7 +1065,7 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 {
 	if (!vma->vm_mm->remote) return;
 
-	ClearPageDistributed(vma->vm_mm, addr);
+	ClearPageInfo(vma->vm_mm, addr);
 
 	*pteval = pte_make_valid(*pte);
 	*pteval = pte_mkyoung(*pteval);
@@ -1151,8 +1174,8 @@ again:
 	spin_lock(ptl);
 	if (pte_none(*pte)) {
 		int ret;
-		PGPRINTK("  [%d] handle local fault at origin\n", tsk->pid);
 		spin_unlock(ptl);
+		PGPRINTK("  [%d] handle local fault at origin\n", tsk->pid);
 		ret = handle_pte_fault_origin(mm, vma, addr, pte, pmd, fault_flags);
 		if (ret & VM_FAULT_RETRY) {
 			/* mmap_sem is released during do_fault */
@@ -1288,6 +1311,7 @@ again:
 		res->result = VM_FAULT_SIGBUS;
 		goto out_up;
 	}
+	BUG_ON(vma->vm_flags & VM_EXEC);
 
 	if (tsk->at_remote) {
 		res->result = __handle_remotefault_at_remote(tsk, mm, vma, req, res);
@@ -1359,7 +1383,6 @@ int page_server_get_userpage(u32 __user *uaddr, struct fault_handle **handle, ch
 	pmd_t *pmd;
 	pte_t *pte;
 
-	struct page *page;
 	bool leader;
 	int ret = 0;
 
@@ -1399,12 +1422,10 @@ retry:
 		goto out;
 	}
 
-	page = get_normal_page(vma, addr, pte);
-	get_page(page);
-
 	if (!page_is_mine(mm, addr)) {
 		remote_page_response_t *rp =
 				__claim_remote_page(current, addr, fault_flags);
+		struct page *page = get_normal_page(vma, addr, pte);
 		void *paddr;
 
 		paddr = kmap(page);
@@ -1414,11 +1435,11 @@ retry:
 
 		spin_lock(ptl);
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
-		pcn_kmsg_free_msg(rp);
 		spin_unlock(ptl);
+
+		pcn_kmsg_free_msg(rp);
 	}
 	pte_unmap(pte);
-	put_page(page);
 	ret = 0;
 
 out:
@@ -1558,6 +1579,38 @@ out_follower:
 }
 
 
+
+static bool __handle_copy_on_write(struct mm_struct *mm,
+		struct vm_area_struct *vma, unsigned long addr,
+		pte_t *pte, pte_t *pte_val, unsigned int fault_flags)
+{
+	if (vma_is_anonymous(vma) || fault_for_read(fault_flags)) return false;
+	BUG_ON(vma->vm_flags & VM_SHARED);
+
+	/**
+	 * We need to determine whether the page is already cowed or not to
+	 * avoid unnecessary cows. But there is no explicit data structure that
+	 * bookkeeping such information. Also, explicitly tracking every CoW
+	 * including non-distributed processes is not desirable due to the
+	 * high frequency of CoW.
+	 * Fortunately, private vma is not flushed, implying the PTE dirty bit
+	 * is not cleared but kept throughout its lifetime. If the dirty bit is
+	 * set for a page, the page is written previously, which implies the page
+	 * is CoWed!!!
+	 */
+	if (pte_dirty(*pte_val)) return false;
+
+	if (PageCowed(mm, addr)) return false;
+
+	if (cow_file_at_origin(mm, vma, addr, pte)) return false;
+
+	*pte_val = *pte;
+	SetPageCowed(mm, addr);
+
+	return true;
+}
+
+
 /**************************************************************************
  * Local fault handler at the origin
  */
@@ -1611,10 +1664,11 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		goto out_wakeup;
 	}
 
+	__handle_copy_on_write(mm, vma, addr, pte, &pte_val, fault_flags);
+
 	if (page_is_mine(mm, addr)) {
 		if (fault_for_read(fault_flags)) {
 			/* Racy exit */
-			printk("WHAT IS THIS????\n");
 			pte_unmap(pte);
 			goto out_wakeup;
 		}
@@ -1630,10 +1684,10 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 			update_mmu_cache(vma, addr, pte);
 		}
 	} else {
+		struct page *page;
 		remote_page_response_t *rp =
 				__claim_remote_page(current, addr, fault_flags);
 		void *paddr;
-		struct page *page;
 		BUG_ON(rp->result != 0);
 
 		page = vm_normal_page(vma, addr, pte_val);

@@ -3500,6 +3500,55 @@ int handle_pte_fault_origin(struct mm_struct *mm,
 	pte_unmap_unlock(pte, ptl);
 	return 0;
 }
+
+int cow_file_at_origin(struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, pte_t *pte)
+{
+	struct page *new_page, *old_page;
+	struct mem_cgroup *memcg;
+	pte_t entry;
+
+	/**
+	 * Following is very similar to do_wp_page() and wp_page_copy()
+	 */
+	if (anon_vma_prepare(vma)) return VM_FAULT_OOM;
+
+	new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
+	if (!new_page) return VM_FAULT_OOM;
+
+	if (mem_cgroup_try_charge(new_page, mm, GFP_KERNEL, &memcg)) {
+		page_cache_release(new_page);
+		return VM_FAULT_OOM;
+	}
+
+	old_page = vm_normal_page(vma, addr, *pte);
+	BUG_ON(!old_page);
+	BUG_ON(PageAnon(old_page));
+
+	page_cache_get(old_page);
+
+	copy_user_highpage(new_page, old_page, addr, vma);
+	__SetPageUptodate(new_page);
+
+	dec_mm_counter_fast(mm, MM_FILEPAGES);
+	inc_mm_counter_fast(mm, MM_ANONPAGES);
+
+	flush_cache_page(vma, addr, pte_pfn(orig_pte));
+	entry = mk_pte(new_page, vma->vm_page_prot);
+	entry = maybe_mkwrite(pte_mkdirty(entry), vma);
+
+	ptep_clear_flush_notify(vma, addr, pte);
+	page_add_new_anon_rmap(new_page, vma, addr);
+	mem_cgroup_commit_charge(new_page, memcg, false);
+	lru_cache_add_active_or_unevictable(new_page, vma);
+
+	set_pte_at_notify(mm, addr, pte, entry);
+	update_mmu_cache(vma, addr, pte);
+
+	page_remove_rmap(old_page);
+	page_cache_release(old_page);
+
+	return 0;
+}
 #endif
 
 /*
