@@ -198,6 +198,7 @@ DEFINE_PCN_KMSG(vma_op_request_t, VMA_OP_REQUEST_FIELDS);
 	int ret; \
 	union { \
 		unsigned long addr; \
+		unsigned long start; \
 		unsigned long brk; \
 	}; \
 	unsigned long len;

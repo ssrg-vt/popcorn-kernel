@@ -1181,6 +1181,7 @@ again:
 			/* mmap_sem is released during do_fault */
 			return VM_FAULT_RETRY;
 		}
+		if (fault_for_write(fault_flags)) PageCowed(mm, addr);
 		goto again;
 	}
 

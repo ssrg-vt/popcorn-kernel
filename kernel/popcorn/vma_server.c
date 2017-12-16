@@ -70,8 +70,8 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			 * We've reached the end of the list, or the VMA is fully
 			 * above the region of interest
 			 */
-			VSPRINTK("  [%d] map0 %lx -- %lx @ %lx\n", current->pid,
-					start, end, pgoff);
+			VSPRINTK("  [%d] map0 %lx -- %lx @ %lx, %lx\n", current->pid,
+					start, end, pgoff, prot);
 			error = do_mmap_pgoff(file, start, end - start,
 					prot, flags, pgoff, &populate);
 			if (error != start) {
@@ -248,8 +248,8 @@ unsigned long vma_server_mmap_remote(struct file *file,
 	req->pgoff = pgoff;
 	get_file_path(file, req->path, sizeof(req->path));
 
-	VSPRINTK("\n## VMA mmap [%d] %lx - %lx\n", current->pid,
-			addr, addr + len);
+	VSPRINTK("\n## VMA mmap [%d] %lx - %lx, %lx %lx\n", current->pid,
+			addr, addr + len, prot, flags);
 	if (req->path[0] != '\0') {
 		VSPRINTK("  [%d] %s\n", current->pid, req->path);
 	}
@@ -346,10 +346,26 @@ int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 
 int vma_server_mprotect_remote(unsigned long start, size_t len, unsigned long prot)
 {
-	WARN_ON_ONCE("Does not support remote mprotect yet");
+	int ret;
+	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_MPROTECT);
+	vma_op_response_t *res;
+
+	req->start = start;
+	req->len = len;
+	req->prot = prot;
+
 	VSPRINTK("\nVMA mprotect [%d] %lx %lx %lx\n", current->pid,
 			start, len, prot);
-	return -EINVAL;
+
+	ret = __delegate_vma_op(req, &res);
+
+	VSPRINTK("  [%d] %d %lx -- %lx %lx\n", current->pid,
+			ret, res->start, res->start + res->len, prot);
+
+	kfree(req);
+	pcn_kmsg_free_msg(res);
+
+	return ret;
 }
 
 int vma_server_mremap_remote(unsigned long addr, unsigned long old_len,
@@ -457,8 +473,8 @@ void process_vma_op_request(vma_op_request_t *req)
 
 		ret = IS_ERR_VALUE(raddr) ? raddr : 0;
 		req->addr = raddr;
-		VSPRINTK("  [%d] %lx %lx -- %lx\n", current->pid,
-				ret, req->addr, req->addr + req->len);
+		VSPRINTK("  [%d] %lx %lx -- %lx %lx %lx\n", current->pid,
+				ret, req->addr, req->addr + req->len, req->prot, req->flags);
 
 		if (f) filp_close(f, NULL);
 		break;
