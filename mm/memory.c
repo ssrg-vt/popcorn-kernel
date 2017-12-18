@@ -3532,7 +3532,7 @@ int cow_file_at_origin(struct mm_struct *mm, struct vm_area_struct *vma, unsigne
 	dec_mm_counter_fast(mm, MM_FILEPAGES);
 	inc_mm_counter_fast(mm, MM_ANONPAGES);
 
-	flush_cache_page(vma, addr, pte_pfn(orig_pte));
+	flush_cache_page(vma, addr, pte_pfn(*pte));
 	entry = mk_pte(new_page, vma->vm_page_prot);
 	entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 
