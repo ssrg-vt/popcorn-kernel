@@ -1839,6 +1839,12 @@ struct task_struct {
 	int migration_target_nid;
 	int backoff_weight;
 
+#ifdef CONFIG_POPCORN_STAT
+	unsigned long fault_address;
+	int fault_retry;
+	struct timeval fault_start;
+#endif
+
 	/*
 	 * scheduling -- antoniob
 	 * in jiffies for load accounting

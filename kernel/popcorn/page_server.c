@@ -44,6 +44,41 @@ static inline bool fault_for_read(unsigned long flags)
 	return !fault_for_write(flags);
 }
 
+inline void page_server_start_mm_fault(unsigned long address)
+{
+	if (!distributed_process(current)) return;
+	if (current->fault_address == 0) {
+		current->fault_address = address;
+		current->fault_retry = 0;
+		do_gettimeofday(&current->fault_start);
+	} else if (current->fault_address != address) {
+		printk("%lx != %lx\n", current->fault_address, address);
+		current->fault_address = address;
+	}
+}
+
+inline int page_server_end_mm_fault(int ret)
+{
+	bool remote = ret & VM_FAULT_REMOTE;
+	ret &= ~VM_FAULT_REMOTE;
+	if (!distributed_process(current)) return ret;
+
+	if (ret & VM_FAULT_RETRY) {
+		current->fault_retry++;
+	} else if (!(ret & VM_FAULT_ERROR)) {
+		unsigned long dt;
+		struct timeval tv_end;
+		do_gettimeofday(&tv_end);
+
+		dt = tv_end.tv_sec * 1000000 + tv_end.tv_usec
+			- current->fault_start.tv_sec * 1000000
+			- current->fault_start.tv_usec;
+		trace_printk("%lx %d %d %lu\n",
+				current->fault_address, remote, current->fault_retry, dt);
+		current->fault_address = 0;
+	}
+	return ret;
+}
 
 /**************************************************************************
  * Page ownership tracking mechanism

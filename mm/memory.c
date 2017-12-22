@@ -3355,7 +3355,7 @@ static int handle_pte_fault(struct mm_struct *mm,
 		} else {
 			current->backoff_weight /= 2;
 		}
-		if (ret != VM_FAULT_CONTINUE) return ret;
+		if (ret != VM_FAULT_CONTINUE) return ret | VM_FAULT_REMOTE;
 	}
 #endif
 	if (!pte_present(entry)) {
@@ -3659,6 +3659,9 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	count_vm_event(PGFAULT);
 	mem_cgroup_count_vm_event(mm, PGFAULT);
+#ifdef CONFIG_POPCORN_STAT
+	page_server_start_mm_fault(address);
+#endif
 
 	/* do counter updates before entering really critical section. */
 	check_sync_rss_stat(current);
@@ -3683,6 +3686,10 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
                 if (task_in_memcg_oom(current) && !(ret & VM_FAULT_OOM))
                         mem_cgroup_oom_synchronize(false);
 	}
+
+#ifdef CONFIG_POPCORN_STAT
+	ret = page_server_end_mm_fault(ret);
+#endif
 
 	return ret;
 }
