@@ -59,7 +59,6 @@ static struct socket *sock_listen;
 static struct socket *sockets[MAX_NUM_NODES];
 static struct task_struct *send_handlers[MAX_NUM_NODES];
 static struct task_struct *recv_handlers[MAX_NUM_NODES];
-static struct task_struct *exec_handlers[MAX_NUM_NODES];
 
 static struct completion connected[MAX_NUM_NODES];
 static struct completion accepted[MAX_NUM_NODES];
@@ -216,77 +215,32 @@ static int send_handler(void* arg0)
 /*
  * buf is per conn
  */
-static int enq_recv(struct pcn_kmsg_buf *buf, void *msg, int conn_no)
+
+static int deq_recv(struct pcn_kmsg_buf *buf, void *_msg, int conn_no)
 {
-	int err;
-	do {
-		err = down_interruptible(&buf->q_full);
-	} while (err);
-
-	spin_lock(&(buf->lock));
-	buf->rbuf[buf->head].msg = msg;
-	buf->head = (buf->head + 1) & (MAX_ASYNC_BUFFER - 1);
-	spin_unlock(&(buf->lock));
-
-	up(&buf->q_empty);
-
-	return 0;
-}
-
-
-static int deq_recv(struct pcn_kmsg_buf *buf, int conn_no)
-{
-	int err;
-	struct pcn_kmsg_buf_item msg;
+	struct pcn_kmsg_message *msg = _msg;
 	pcn_kmsg_cbftn ftn;
-
-	do {
-		err = down_interruptible(&buf->q_empty);
-	} while (err);
-
-	spin_lock(&buf->lock);
-	msg = buf->rbuf[buf->tail];
-	buf->tail = (buf->tail + 1) & (MAX_ASYNC_BUFFER - 1);
-	spin_unlock(&buf->lock);
-
-	up(&buf->q_full);
 
 	MSGPRINTK("Call %d, %d\n", conn_no, msg.msg->header.type);
 
-	ftn = callbacks[msg.msg->header.type];
+	ftn = callbacks[msg->header.type];
 	if (ftn != NULL) {
 #ifdef CONFIG_POPCORN_STAT
-		account_pcn_message_recv(msg.msg);
+		account_pcn_message_recv(msg);
 #endif
-		ftn((void*)msg.msg);
+		ftn((void*)msg);
 	} else {
 		printk(KERN_INFO"No callback registered for %d\n",
-				msg.msg->header.type);
-		pcn_kmsg_free_msg(msg.msg);
+				msg->header.type);
+		pcn_kmsg_free_msg(msg);
 	}
 	return 0;
 }
-
-/* recv handler */
-static int exec_handler(void* arg0)
-{
-	int err;
-	struct handler_params *data = arg0;
-	int conn_no = data->conn_no;
-
-	for (;;) {
-		err = deq_recv(&data->buf, conn_no);
-		io_schedule();
-	}
-	return 0;
-}
-
 
 static int recv_handler(void* arg0)
 {
 	int err;
 	struct handler_params *handler_params = arg0;
-	char name[40];
 	int conn_no = handler_params->conn_no;
 
 	if (conn_no > my_nid) {
@@ -309,10 +263,6 @@ static int recv_handler(void* arg0)
 	} else if (conn_no == my_nid) {
 		// Skip connecting to myself
 	}
-
-	sprintf(name, "pcn_exec_%d", conn_no);
-	exec_handlers[conn_no] =
-					kthread_run(exec_handler, handler_params, name);
 
 	MSGPRINTK("[%d] PCN_RECV handler is up\n", conn_no);
 
@@ -366,7 +316,7 @@ static int recv_handler(void* arg0)
 		}
 		MSGPRINTK("RecB %d, %d %d\n", conn_no, header.type, header.size);
 
-		err = enq_recv(&handler_params->buf, data, conn_no);
+		err = deq_recv(&handler_params->buf, data, conn_no);
 	}
 exit:
 	sock_release(sockets[conn_no]);
@@ -563,8 +513,6 @@ static void __exit unload(void)
 			kthread_stop(send_handlers[i]);
 		if (recv_handlers[i] != NULL)
 			kthread_stop(recv_handlers[i]);
-		if (exec_handlers[i] != NULL)
-			kthread_stop(exec_handlers[i]);
 		//TODO: sock release buffer, check(according to) the init
 	}
 
