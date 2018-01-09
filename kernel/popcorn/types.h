@@ -214,7 +214,8 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	int origin_ws; \
 	pid_t remote_pid; \
 	unsigned long addr; \
-	unsigned long fault_flags;
+	unsigned long fault_flags; \
+	unsigned long instr_addr;
 #ifdef CONFIG_POPCORN_KMSG_IB_RDMA
 DEFINE_PCN_RDMA_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 #else

@@ -902,8 +902,10 @@ static remote_page_response_t *__fetch_remote_page_rdma(struct task_struct *tsk,
 
 		.remote_pid = from_pid,
 	};
+	req.instr_addr = instruction_pointer(current_pt_regs());
 
-	PGPRINTK("  [%d] ->[%d/%d] %lx\n", tsk->pid, from_pid, from_nid, addr);
+	PGPRINTK("  [%d] ->[%d/%d] %lx %lx\n", tsk->pid,
+			from_pid, from_nid, addr, req.instr_addr);
 	return pcn_kmsg_send_rdma(from_nid, &req, sizeof(req),
 								sizeof(remote_page_response_t));
 }
@@ -947,10 +949,12 @@ static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t f
 
 		.remote_pid = from_pid,
 	};
+	req.instr_addr = instruction_pointer(current_pt_regs());
 
 	pcn_kmsg_send(from_nid, &req, sizeof(req));
 
-	PGPRINTK("  [%d] ->[%d/%d] %lx\n", tsk->pid, from_pid, from_nid, addr);
+	PGPRINTK("  [%d] ->[%d/%d] %lx %lx\n", tsk->pid,
+			from_pid, from_nid, addr, req.instr_addr);
 }
 
 static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
@@ -1330,10 +1334,10 @@ again:
 	}
 	mm = get_task_mm(tsk);
 
-	PGPRINTK("\nREMOTE_PAGE_REQUEST [%d] %lx %c from [%d/%d]\n",
+	PGPRINTK("\nREMOTE_PAGE_REQUEST [%d] %lx %c %lx from [%d/%d]\n",
 			req->remote_pid, req->addr,
 			fault_for_write(req->fault_flags) ? 'W' : 'R',
-			req->origin_pid, req->origin_nid);
+			req->instr_addr, req->origin_pid, req->origin_nid);
 
 	while (!down_read_trylock(&mm->mmap_sem)) {
 		if (!tsk->at_remote && down_read_retry++ > 4) {
@@ -1392,8 +1396,10 @@ out:
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
 
-	trace_printk("%lx %c %d\n", req->addr,
-			fault_for_write(req->fault_flags) ? 'W' : 'R', res->result);
+	trace_printk("%d %d %lx %c %lx %d\n",
+			req->origin_nid, req->origin_pid, req->addr,
+			fault_for_write(req->fault_flags) ? 'W' : 'R',
+			req->instr_addr, res->result);
 
 	kfree(res);
 
@@ -1832,8 +1838,9 @@ int page_server_handle_pte_fault(
 	ret = 0;
 
 out:
-	trace_printk("%lx %c %lx %d\n",
-			address, fault_for_write(fault_flags) ? 'W' : 'R',
+	trace_printk("%d %d %lx %c %lx %d\n",
+			my_nid, current->pid, address,
+			fault_for_write(fault_flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), ret);
 	return ret;
 }
