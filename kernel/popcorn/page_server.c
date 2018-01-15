@@ -46,6 +46,7 @@ static inline bool fault_for_read(unsigned long flags)
 
 inline void page_server_start_mm_fault(unsigned long address)
 {
+#ifdef CONFIG_POPCORN_STAT
 	if (!distributed_process(current)) return;
 	if (current->fault_address == 0) {
 		current->fault_address = address;
@@ -55,10 +56,12 @@ inline void page_server_start_mm_fault(unsigned long address)
 		printk("%lx != %lx\n", current->fault_address, address);
 		current->fault_address = address;
 	}
+#endif
 }
 
 inline int page_server_end_mm_fault(int ret)
 {
+#ifdef CONFIG_POPCORN_STAT
 	bool remote = ret & VM_FAULT_REMOTE;
 	ret &= ~VM_FAULT_REMOTE;
 	if (!distributed_process(current)) return ret;
@@ -77,6 +80,7 @@ inline int page_server_end_mm_fault(int ret)
 				current->fault_address, remote, current->fault_retry, dt);
 		current->fault_address = 0;
 	}
+#endif
 	return ret;
 }
 
