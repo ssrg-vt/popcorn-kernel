@@ -988,6 +988,7 @@ static remote_page_response_t *__fetch_remote_page_rdma(struct task_struct *tsk,
 
 		.addr = addr,
 		.fault_flags = fault_flags,
+		.aux = tsk->trace_aux,
 
 		.origin_nid = my_nid,
 		.origin_pid = tsk->pid,
@@ -1034,6 +1035,7 @@ static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t f
 
 		.addr = addr,
 		.fault_flags = fault_flags,
+		.aux = tsk->trace_aux,
 
 		.origin_nid = my_nid,
 		.origin_pid = tsk->pid,
@@ -1494,10 +1496,11 @@ out:
 			res->origin_pid, res->origin_nid, res->result);
 
 #ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
-	trace_printk("%d %d %c %lx %lx %d\n",
+	trace_printk("%d %d %c %lx %lx %ld %d\n",
 			req->origin_nid, req->remote_pid,
 			fault_for_write(req->fault_flags) ? 'W' : 'R',
-			req->instr_addr, req->addr, res->result);
+			req->instr_addr, req->addr,
+			req->aux, res->result);
 #endif
 
 	kfree(res);
@@ -1935,10 +1938,11 @@ int page_server_handle_pte_fault(
 
 out:
 #ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
-	trace_printk("%d %d %c %lx %lx %d\n",
+	trace_printk("%d %d %c %lx %lx %ld %d\n",
 			my_nid, current->pid,
 			fault_for_write(fault_flags) ? 'W' : 'R',
-			instruction_pointer(current_pt_regs()), addr, ret);
+			instruction_pointer(current_pt_regs()), addr,
+			current->trace_aux, ret);
 #endif
 	return ret;
 }
