@@ -1016,6 +1016,7 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 
 	req->remote_pid = from_pid;
 	req->instr_addr = instruction_pointer(current_pt_regs());
+	req->aux = tsk->trace_aux;
 
 	if (TRANSFER_PAGE_WITH_RDMA) {
 		struct pcn_kmsg_rdma_handle *handle =
@@ -1505,7 +1506,7 @@ out:
 
 	trace_pgfault(from_nid, req->remote_pid,
 			fault_for_write(req->fault_flags) ? 'W' : 'R',
-			req->instr_addr, req->addr, res->result);
+			req->instr_addr, req->addr, req->aux, res->result);
 
 	pcn_kmsg_post(res_type, from_nid, res, res_size);
 
@@ -1918,7 +1919,8 @@ int page_server_handle_pte_fault(
 out:
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(fault_flags) ? 'W' : 'R',
-			instruction_pointer(current_pt_regs()), addr, ret);
+			instruction_pointer(current_pt_regs()), addr,
+			current->trace_aux, ret);
 
 	return ret;
 }

@@ -10,9 +10,9 @@
 TRACE_EVENT(pgfault,
 	TP_PROTO(const int nid, const int pid, const char rw,
 		const unsigned long instr_addr, const unsigned long addr,
-		const int result),
+		const unsigned long aux, const int result),
 
-	TP_ARGS(nid, pid, rw, instr_addr, addr, result),
+	TP_ARGS(nid, pid, rw, instr_addr, addr, aux, result),
 
 	TP_STRUCT__entry(
 		__field(int, nid)
@@ -20,6 +20,7 @@ TRACE_EVENT(pgfault,
 		__field(char, rw)
 		__field(unsigned long, instr_addr)
 		__field(unsigned long, addr)
+		__field(unsigned long, aux)
 		__field(int, result)
 	),
 
@@ -29,12 +30,13 @@ TRACE_EVENT(pgfault,
 		__entry->rw = rw;
 		__entry->instr_addr = instr_addr;
 		__entry->addr = addr;
+		__entry->aux = aux;
 		__entry->result = result;
 	),
 
-	TP_printk("%d %d %c %lx %lx %d",
+	TP_printk("%d %d %c %lx %lx %ld %d",
 		__entry->nid, __entry->pid, __entry->rw,
-		__entry->instr_addr, __entry->addr, __entry->result)
+		__entry->instr_addr, __entry->addr, __entry->aux, __entry->result)
 );
 
 
