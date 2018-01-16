@@ -1817,6 +1817,8 @@ struct task_struct {
 #endif
 	int pagefault_disabled;
 
+	unsigned long trace_aux;
+
 #ifdef CONFIG_POPCORN
 	struct remote_context *remote;
 	union {
