@@ -414,7 +414,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->migration_target_nid = -1;
 	tsk->backoff_weight = 0;
 
-#ifdef CONFIG_POPCORN_STAT
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	tsk->fault_address = 0;
 	tsk->fault_retry = 0;
 #endif
