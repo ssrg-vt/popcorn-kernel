@@ -1483,6 +1483,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	p->pagefault_disabled = 0;
 
+	p->trace_aux = 0;
+
 #ifdef CONFIG_LOCKDEP
 	p->lockdep_depth = 0; /* no locks held yet */
 	p->curr_chain_key = 0;

@@ -2266,6 +2266,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 	case PR_GET_FP_MODE:
 		error = GET_FP_MODE(me);
 		break;
+	case PR_SET_PAGE_ACCESS_TRACE_AUX:
+		error = current->trace_aux = arg2;
+		break;
 	default:
 		error = -EINVAL;
 		break;
