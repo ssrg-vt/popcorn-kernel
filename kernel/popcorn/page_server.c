@@ -1672,18 +1672,18 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	ptl = pte_lockptr(mm, pmd);
 	spin_lock(ptl);
 
+	if (!pte_same(*pte, pte_val)) {
+		pte_unmap_unlock(pte, ptl);
+		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
+		return 0;
+	}
+
 	/* Fresh access to the address. Handle locally since we are at the origin */
 	if (pte_none(pte_val)) {
 		BUG_ON(pte_present(pte_val));
 		spin_unlock(ptl);
 		PGPRINTK("  [%d] fresh at origin. continue\n", current->pid);
 		return VM_FAULT_CONTINUE;
-	}
-
-	if (!pte_same(*pte, pte_val)) {
-		pte_unmap_unlock(pte, ptl);
-		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
-		return 0;
 	}
 
 	/* Nothing to do with DSM (e.g. COW). Handle locally */
