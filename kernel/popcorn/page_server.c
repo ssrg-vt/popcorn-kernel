@@ -218,16 +218,16 @@ static inline bool test_page_owner(int nid, struct mm_struct *mm, unsigned long 
 static inline void set_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
+	BUG_ON(!pi);
 
-	if (!pi) return;
 	set_bit(nid, pi);
 }
 
 static inline void clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
+	BUG_ON(!pi);
 
-	if (!pi) return;
 	clear_bit(nid, pi);
 }
 
@@ -1224,7 +1224,8 @@ again:
 			/* mmap_sem is released during do_fault */
 			return VM_FAULT_RETRY;
 		}
-		if (fault_for_write(fault_flags)) PageCowed(mm, addr);
+		if (fault_for_write(fault_flags) && !vma_is_anonymous(vma))
+			SetPageCowed(mm, addr);
 		goto again;
 	}
 
@@ -1273,8 +1274,11 @@ again:
 			}
 		}
 		spin_lock(ptl);
-		entry = ptep_clear_flush(vma, addr, pte);
 
+		SetPageDistributed(mm, addr);
+		set_page_owner(from_nid, mm, addr);
+
+		entry = ptep_clear_flush(vma, addr, pte);
 		if (fault_for_write(fault_flags)) {
 			clear_page_owner(my_nid, mm, addr);
 			entry = pte_make_invalid(entry);
@@ -1283,12 +1287,8 @@ again:
 			entry = pte_wrprotect(entry);
 			set_page_owner(my_nid, mm, addr);
 		}
-
 		set_pte_at_notify(mm, addr, pte, entry);
 		update_mmu_cache(vma, addr, pte);
-
-		SetPageDistributed(mm, addr);
-		set_page_owner(from_nid, mm, addr);
 	} else {
 		spin_lock(ptl);
 	}
@@ -1672,18 +1672,18 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	ptl = pte_lockptr(mm, pmd);
 	spin_lock(ptl);
 
+	if (!pte_same(*pte, pte_val)) {
+		pte_unmap_unlock(pte, ptl);
+		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
+		return 0;
+	}
+
 	/* Fresh access to the address. Handle locally since we are at the origin */
 	if (pte_none(pte_val)) {
 		BUG_ON(pte_present(pte_val));
 		spin_unlock(ptl);
 		PGPRINTK("  [%d] fresh at origin. continue\n", current->pid);
 		return VM_FAULT_CONTINUE;
-	}
-
-	if (!pte_same(*pte, pte_val)) {
-		pte_unmap_unlock(pte, ptl);
-		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
-		return 0;
 	}
 
 	/* Nothing to do with DSM (e.g. COW). Handle locally */
