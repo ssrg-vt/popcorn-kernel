@@ -218,16 +218,16 @@ static inline bool test_page_owner(int nid, struct mm_struct *mm, unsigned long 
 static inline void set_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
+	BUG_ON(!pi);
 
-	if (!pi) return;
 	set_bit(nid, pi);
 }
 
 static inline void clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
+	BUG_ON(!pi);
 
-	if (!pi) return;
 	clear_bit(nid, pi);
 }
 
@@ -1274,8 +1274,11 @@ again:
 			}
 		}
 		spin_lock(ptl);
-		entry = ptep_clear_flush(vma, addr, pte);
 
+		SetPageDistributed(mm, addr);
+		set_page_owner(from_nid, mm, addr);
+
+		entry = ptep_clear_flush(vma, addr, pte);
 		if (fault_for_write(fault_flags)) {
 			clear_page_owner(my_nid, mm, addr);
 			entry = pte_make_invalid(entry);
@@ -1284,12 +1287,8 @@ again:
 			entry = pte_wrprotect(entry);
 			set_page_owner(my_nid, mm, addr);
 		}
-
 		set_pte_at_notify(mm, addr, pte, entry);
 		update_mmu_cache(vma, addr, pte);
-
-		SetPageDistributed(mm, addr);
-		set_page_owner(from_nid, mm, addr);
 	} else {
 		spin_lock(ptl);
 	}
