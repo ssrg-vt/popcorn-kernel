@@ -223,7 +223,7 @@ static int deq_recv(struct pcn_kmsg_buf *buf, void *_msg, int conn_no)
 
 	MSGPRINTK("Call %d, %d\n", conn_no, msg.msg->header.type);
 
-	ftn = callbacks[msg->header.type];
+	ftn = pcn_kmsg_cbftns[msg->header.type];
 	if (ftn != NULL) {
 #ifdef CONFIG_POPCORN_STAT
 		account_pcn_message_recv(msg);
@@ -334,8 +334,6 @@ static int sock_kmsg_send(unsigned int dest_nid,
 						struct pcn_kmsg_message *lmsg, unsigned int size)
 {
 	struct pcn_kmsg_message *msg;
-	BUG_ON(lmsg->header.type < 0 || lmsg->header.type >= PCN_KMSG_TYPE_MAX);
-	BUG_ON(dest_nid < 0 || dest_nid >= MAX_POPCORN_NODES);
 
 	lmsg->header.size = size;
 	lmsg->header.from_nid = my_nid;
@@ -343,26 +341,6 @@ static int sock_kmsg_send(unsigned int dest_nid,
 	msg = pcn_kmsg_alloc_msg(size);
 	BUG_ON(!msg);
 	memcpy(msg, lmsg, size);
-
-	// Send msg to myself
-	if (dest_nid == my_nid) {
-		pcn_kmsg_cbftn ftn;
-		BUG_ON("No loopback anymore");
-
-		ftn = callbacks[msg->header.type];
-		if (ftn != NULL) {
-			ftn((void*)msg);
-		} else {
-			MSGDPRINTK(KERN_INFO"No callback registered for %d\n",
-								 msg->header.type);
-			pcn_kmsg_free_msg(msg);
-			return -ENOENT;
-		}
-		return 0;
-	}
-
-	if (callbacks[lmsg->header.type] == NULL)
-		dump_stack();
 
 	enq_send(send_buf[dest_nid], msg, dest_nid);
 
@@ -382,7 +360,7 @@ static int __init initialize(void)
 	if (!identify_myself()) return -EINVAL;
 
 	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_SOCKET;
-	send_callback = (send_cbftn)sock_kmsg_send;
+	pcn_kmsg_send_ftn = (send_ftn)sock_kmsg_send;
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		init_completion(&connected[i]);
