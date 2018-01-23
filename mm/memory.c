@@ -3487,7 +3487,11 @@ int handle_pte_fault_origin(struct mm_struct *mm,
 		entry = pte_mkwrite(pte_mkdirty(entry));
 
 	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
-	BUG_ON(!pte_none(*pte));
+	if (!pte_none(*pte)) {
+		mem_cgroup_cancel_charge(page, memcg);
+		page_cache_release(page);
+		return 0;
+	}
 
 	inc_mm_counter_fast(mm, MM_ANONPAGES);
 	page_add_new_anon_rmap(page, vma, address);
