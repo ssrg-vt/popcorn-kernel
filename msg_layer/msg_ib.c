@@ -238,8 +238,6 @@ struct ib_cb {
 
 /* InfiniBand Control Block per connection*/
 struct ib_cb *gcb[MAX_NUM_NODES];
-/* workqueue */
-struct workqueue_struct *msg_handler;
 
 /* Functions */
 static int __init initialize(void);
@@ -1434,10 +1432,9 @@ void handle_rdma_request(pcn_kmsg_perf_rdma_t *inc_msg,
 /*
  * Pass msg to upper layer and do the corresponding callback function
  */
-static void ib_recv_handler_BottomHalf(struct work_struct *work)
+static void handle_ib_recv(ib_recv_work_t *w)
 {
 	pcn_kmsg_cbftn ftn;
-	ib_recv_work_t *w = (ib_recv_work_t *)work;
 	struct pcn_kmsg_message *msg = (struct pcn_kmsg_message *)(&w->msg);
 
 	if (unlikely(msg->header.type < 0 ||
@@ -1455,7 +1452,7 @@ static void ib_recv_handler_BottomHalf(struct work_struct *work)
 #ifdef CONFIG_POPCORN_STAT
 			account_pcn_message_recv(msg);
 #endif
-			ftn((void*)(&((ib_recv_work_t *)work)->msg));
+			ftn((void*)(&w->msg));
 		} else {
 			printk(KERN_ERR "Recieved message type %d size %d "
 							"has no registered callback!\n",
@@ -1464,17 +1461,6 @@ static void ib_recv_handler_BottomHalf(struct work_struct *work)
 		}
 	}
 	return;
-}
-
-/*
- * Parse recved msg in the buf to msg_layer in INT
- */
-static int ib_kmsg_recv(struct ib_cb *cb, ib_recv_work_t *rws)
-{
-	INIT_WORK((struct work_struct *)rws, ib_recv_handler_BottomHalf);
-	if (unlikely(!queue_work(msg_handler, (struct work_struct *)rws)))
-		BUG();
-	return 0;
 }
 
 static void ib_cq_event_handler(struct ib_cq *cq, void *ctx)
@@ -1512,8 +1498,7 @@ retry:
 			break;
 
 		case IB_WC_RECV:
-			ret = ib_kmsg_recv(cb, (ib_recv_work_t*)_wc->wr_id);
-			BUG_ON(ret);
+			handle_ib_recv((ib_recv_work_t *)_wc->wr_id);
 			break;
 
 		case IB_WC_RDMA_WRITE:
@@ -1909,8 +1894,6 @@ int __init initialize()
 		printk("%s(): check your IP table!\n", __func__);
 		return -EINVAL;
 	}
-	/* Create workers for bottom-halves */
-	msg_handler = alloc_workqueue("MSGHandBotm", WQ_MEM_RECLAIM | WQ_UNBOUND, 0);
 
 #if CONFIG_RDMA_NOTIFY
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_REQUEST,
