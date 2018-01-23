@@ -428,25 +428,20 @@ static int ib_connect_client(struct ib_cb *cb)
 
 static void fill_sockaddr(struct sockaddr_storage *sin, struct ib_cb *cb)
 {
-	memset(sin, 0, sizeof(*sin));
+	struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
+	u8 *addr;
 
-	if (!cb->server) {
-		/* client: load as usuall (ip=remote) */
-		if (cb->addr_type == AF_INET) {
-			struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
-			sin4->sin_family = AF_INET;
-			memcpy((void *)&sin4->sin_addr.s_addr, cb->addr, 4);
-			sin4->sin_port = htons(PORT);
-		}
+	memset(sin4, 0, sizeof(*sin4));
+	if (cb->server) {
+		/* server: load from global (ip=itself) */
+		addr = gcb[my_nid]->addr;
 	} else {
-		/* cb->server: load from global (ip=itself) */
-		if (gcb[my_nid]->addr_type == AF_INET) {
-			struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
-			sin4->sin_family = AF_INET;
-			memcpy((void *)&sin4->sin_addr.s_addr, gcb[my_nid]->addr, 4);
-			sin4->sin_port = htons(PORT);
-		}
+		/* client: load as usuall (ip=remote) */
+		addr = cb->addr;
 	}
+	sin4->sin_family = AF_INET;
+	sin4->sin_port = htons(PORT);
+	memcpy((void *)&sin4->sin_addr.s_addr, addr, 4);
 }
 
 static int ib_bind_server(struct ib_cb *cb)
@@ -860,11 +855,10 @@ bail:
 static int ib_accept(struct ib_cb *cb)
 {
 	int ret;
-	struct rdma_conn_param conn_param;
-	
-	memset(&conn_param, 0, sizeof conn_param);
-	conn_param.responder_resources = 1;
-	conn_param.initiator_depth = 1;
+	struct rdma_conn_param conn_param = {
+		.responder_resources = 1,
+		.initiator_depth = 1,
+	};
 
 	ret = rdma_accept(cb->child_cm_id, &conn_param);
 	if (ret) {
@@ -1223,7 +1217,7 @@ static void handle_remote_thread_rdma_write_request(
 {
 	pcn_kmsg_perf_rdma_t *req = (pcn_kmsg_perf_rdma_t*) inc_msg;
 #if !CONFIG_RDMA_POLL && !CONFIG_RDMA_NOTIFY && !CONFIG_FARM
-	pcn_kmsg_perf_rdma_t *reply;
+	pcn_kmsg_perf_rdma_t reply;
 #endif
 #if CONFIG_RDMA_POLL || CONFIG_RDMA_NOTIFY
 	char flush;
@@ -1344,32 +1338,27 @@ static void handle_remote_thread_rdma_write_request(
 		wait_for_completion(&comp2);
 	/* No need to umap rdma_notify_WRITE polling bits */
 #elif !CONFIG_RDMA_POLL && !CONFIG_RDMA_NOTIFY && !CONFIG_FARM
-	reply = kmalloc(sizeof(*reply), GFP_KERNEL);
-	BUG_ON(!reply);
-
-	reply->header.type = req->rdma_header.rmda_type_res;
-	//reply->header.prio = PCN_KMSG_PRIO_NORMAL;
+	reply.header.type = req->rdma_header.rmda_type_res;
+	//reply.header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* RDMA W/R complete ACK */
-	reply->header.is_rdma = true;
-	reply->rdma_header.rdma_ack = true;
-	reply->rdma_header.is_write = true;
-	reply->rdma_header.remote_rkey = ntohl(req->rdma_header.remote_rkey);
-	reply->rdma_header.remote_addr = ntohll(req->rdma_header.remote_addr);
-	reply->rdma_header.rw_size = remote_pass_len;
+	reply.header.is_rdma = true;
+	reply.rdma_header.rdma_ack = true;
+	reply.rdma_header.is_write = true;
+	reply.rdma_header.remote_rkey = ntohl(req->rdma_header.remote_rkey);
+	reply.rdma_header.remote_addr = ntohll(req->rdma_header.remote_addr);
+	reply.rdma_header.rw_size = remote_pass_len;
 
 	/* for multi-threading */
-	reply->t_num = req->t_num;
-	reply->mr_ofs = req->mr_ofs;
+	reply.t_num = req->t_num;
+	reply.mr_ofs = req->mr_ofs;
 	/* for wait station */
-	reply->remote_ws = req->remote_ws;
+	reply.remote_ws = req->remote_ws;
 	/* for umap dma addr */
-	reply->dma_addr_act = req->dma_addr_act;
+	reply.dma_addr_act = req->dma_addr_act;
 
-	__ib_kmsg_send(req->header.from_nid,
-				(struct pcn_kmsg_message*) reply, sizeof(*reply));
+	__ib_kmsg_send(req->header.from_nid, &reply, sizeof(reply));
 
-	kfree(reply);
 #endif
 
 	put_mr_ofs(cb->conn_no, mr_ofs, RDMA_RKEY_PASS);
@@ -1806,21 +1795,22 @@ static void ib_kmsg_free_msg(struct pcn_kmsg_message *msg)
 #if CONFIG_RDMA_NOTIFY
 static void rdma_rdma_notify_key_exchange_request(int dst)
 {
-	struct rdma_notify_init_req_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
+	u32 rkey;
 	struct ib_cb *cb = gcb[dst];
 	DECLARE_COMPLETION_ONSTACK(comp);
-	u32 rkey;
-	BUG_ON(!req);
+	struct rdma_notify_init_req_t req = {
+		.header = {
+			.type = PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_REQUEST,
+		},
+		.comp = &comp,
+	};
 
-	req->header.type = PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_REQUEST;
 	rkey = ib_rdma_rkey(cb, cb->rdma_notify_dma_addr_act, 1,
 					RDMA_NOTIFY_ACT_DATA_SIZE, 0, RDMA_FARM_NOTIFY_RKEY_ACT);
-	req->remote_addr = htonll(cb->rdma_notify_dma_addr_act);
-	req->remote_rkey = htonl(rkey);
-	req->comp = &comp;
+	req.remote_addr = htonll(cb->rdma_notify_dma_addr_act);
+	req.remote_rkey = htonl(rkey);
 
-	ib_kmsg_send(dst, (void*)req, sizeof(*req));
-	kfree(req);
+	ib_kmsg_send(dst, &req, sizeof(req));
 	wait_for_completion(&comp);
 }
 
@@ -1830,9 +1820,13 @@ static void handle_rdma_rdma_notify_key_exchange_request(
 	int i;
 	struct rdma_notify_init_req_t *req =
 						(struct rdma_notify_init_req_t*) inc_msg;
-	struct rdma_notify_init_res_t *res = kmalloc(sizeof(*res), GFP_KERNEL);
+	struct rdma_notify_init_res_t res = {
+		.header = {
+			.type = PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_RESPONSE,
+		},
+		.comp = req->comp,
+	};
 	struct ib_cb *cb = gcb[req->header.from_nid];
-	BUG_ON(!res);
 
 	/* remote info: */
 	cb->remote_rdma_notify_rkey = ntohl(req->remote_rkey);
@@ -1848,11 +1842,7 @@ static void handle_rdma_rdma_notify_key_exchange_request(
 				RMDA_NOTIFY_PASS_DATA_SIZE, i, RDMA_FARM_NOTIFY_RKEY_PASS);
 	}
 
-	res->header.type = PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_RESPONSE;
-	res->comp = req->comp;
-	ib_kmsg_send(req->header.from_nid, (void*)res, sizeof(*res));
-	kfree(res);
-
+	ib_kmsg_send(req->header.from_nid, &res, sizeof(res));
 	pcn_kmsg_free_msg(req);
 }
 
@@ -1914,7 +1904,7 @@ int __init initialize()
 		set_popcorn_node_online(i, false);
 
 		/* Init common parameters */
-		gcb[i]->state.counter = IDLE;
+		atomic_set(&gcb[i]->state, IDLE);
 #if AUTO_WQ_WR_CHECK
 		gcb[i]->WQ_WR_cnt.counter = 0;
 #endif
