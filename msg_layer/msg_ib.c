@@ -136,12 +136,11 @@
 #define ERROR 6
 
 /* workqueue arg */
-typedef struct {
+struct recv_work_t {
 	struct work_struct work;	/* Convention! */
-	struct ib_sge *recv_sgl;
 	struct ib_recv_wr *recv_wr;
 	struct pcn_kmsg_message msg;
-}ib_recv_work_t;
+};
 
 /*for testing */
 #if AUTO_RECV_WR_CHECK
@@ -370,36 +369,34 @@ static int ib_cma_event_handler(struct rdma_cm_id *cma_id,
 /*
  * Create a recv scatter-gather list(entries) & work request
  */
-void create_recv_wr(int conn_no, ib_recv_work_t *kmsg_work)
+void create_recv_wr(int conn_no, struct recv_work_t *kmsg_work)
 {
 	int ret;
-	struct ib_sge *_recv_sgl;
-	struct ib_recv_wr *_recv_wr;
+	struct ib_sge *sgl;
+	struct ib_recv_wr *recv_wr;
 	struct ib_cb *cb = gcb[conn_no];
-	int recv_size = PCN_KMSG_MAX_SIZE;
-
-	_recv_sgl = kzalloc(sizeof(*_recv_sgl), GFP_KERNEL);
-	BUG_ON(!_recv_sgl && "sgl recv_buf malloc failed");
-
-	_recv_wr = kzalloc(sizeof(*_recv_wr), GFP_KERNEL);
-	BUG_ON(!_recv_wr && "recv_wr recv_buf malloc failed");
 
 	/* set up sgl */
-	_recv_sgl->length = recv_size;
-	_recv_sgl->lkey = cb->pd->local_dma_lkey;
-	_recv_sgl->addr = dma_map_single(cb->pd->device->dma_device,
-					  &kmsg_work->msg, recv_size, DMA_BIDIRECTIONAL);
-	ret = dma_mapping_error(cb->pd->device->dma_device, _recv_sgl->addr);
+	sgl = kzalloc(sizeof(*sgl), GFP_KERNEL);
+	BUG_ON(!sgl && "sgl recv_buf malloc failed");
+
+	sgl->length = PCN_KMSG_MAX_SIZE;
+	sgl->lkey = cb->pd->local_dma_lkey;
+	sgl->addr = dma_map_single(cb->pd->device->dma_device,
+					  &kmsg_work->msg, PCN_KMSG_MAX_SIZE, DMA_BIDIRECTIONAL);
+	ret = dma_mapping_error(cb->pd->device->dma_device, sgl->addr);
 	BUG_ON(ret);
 
 	/* set up recv_wr */
-	_recv_wr->sg_list = _recv_sgl;
-	_recv_wr->num_sge = 1;
-	_recv_wr->wr_id = (u64)kmsg_work;
-	_recv_wr->next = NULL;
+	recv_wr = kzalloc(sizeof(*recv_wr), GFP_KERNEL);
+	BUG_ON(!recv_wr && "recv_wr recv_buf malloc failed");
 
-	kmsg_work->recv_wr =  _recv_wr;
-	kmsg_work->recv_sgl = _recv_sgl;
+	recv_wr->sg_list = sgl;
+	recv_wr->num_sge = 1;
+	recv_wr->next = NULL;
+	recv_wr->wr_id = (u64)kmsg_work;
+
+	kmsg_work->recv_wr =  recv_wr;
 }
 
 
@@ -481,7 +478,7 @@ static void ib_setup_wr(struct ib_cb *cb)
 	/* Pre-post RECV buffers */
 	for(i = 0; i < MAX_RECV_WR; i++) {
 		struct ib_recv_wr *bad_wr;
-		ib_recv_work_t *kmsg_work = kzalloc(sizeof(*kmsg_work), GFP_KERNEL);
+		struct recv_work_t *kmsg_work = kzalloc(sizeof(*kmsg_work), GFP_KERNEL);
 		BUG_ON(!kmsg_work);
 
 		create_recv_wr(cb->conn_no, kmsg_work);
@@ -1403,36 +1400,35 @@ void handle_rdma_request(pcn_kmsg_perf_rdma_t *inc_msg,
 						void *paddr, u32 rw_size)
 {
 	pcn_kmsg_perf_rdma_t *msg = inc_msg;
-	if (likely(msg->header.is_rdma)) {
-		if(unlikely(rw_size > MAX_RDMA_SIZE)) {
-			printk("size %d\n", rw_size);
-			BUG();
-		}
-		if (!msg->rdma_header.rdma_ack) {
-			if (msg->rdma_header.is_write)
-				handle_remote_thread_rdma_write_request(msg, paddr, rw_size);
-			else
-				handle_remote_thread_rdma_read_request(msg, paddr, rw_size);
-		} else {
-			if (msg->rdma_header.is_write)
-				handle_remote_thread_rdma_write_response(msg);
-			else
-				handle_remote_thread_rdma_read_response(msg);
-		}
-	} else {
+
+	if (!(msg->header.is_rdma)) {
 		printk(KERN_ERR "This is not a rdma request you shouldn't call"
 						"\"pcn_kmsg_handle_rdma_at_remote\"\n"
 						"from %u, type %d, msg_size %u\n\n",
 						msg->header.from_nid,
 						msg->header.type,
 						msg->header.size);
+		BUG();
+	}
+
+	BUG_ON(rw_size > MAX_RDMA_SIZE);
+	if (!msg->rdma_header.rdma_ack) {
+		if (msg->rdma_header.is_write)
+			handle_remote_thread_rdma_write_request(msg, paddr, rw_size);
+		else
+			handle_remote_thread_rdma_read_request(msg, paddr, rw_size);
+	} else {
+		if (msg->rdma_header.is_write)
+			handle_remote_thread_rdma_write_response(msg);
+		else
+			handle_remote_thread_rdma_read_response(msg);
 	}
 }
 
 /*
  * Pass msg to upper layer and do the corresponding callback function
  */
-static void handle_ib_recv(ib_recv_work_t *w)
+static void handle_ib_recv(struct recv_work_t *w)
 {
 	pcn_kmsg_cbftn ftn;
 	struct pcn_kmsg_message *msg = (struct pcn_kmsg_message *)(&w->msg);
@@ -1446,20 +1442,15 @@ static void handle_ib_recv(ib_recv_work_t *w)
 						msg->header.type, PCN_KMSG_TYPE_MAX,
 						msg->header.size, PCN_KMSG_MAX_SIZE);
 		BUG();
-	} else {
-		ftn = callbacks[msg->header.type];
-		if (ftn != NULL) {
-#ifdef CONFIG_POPCORN_STAT
-			account_pcn_message_recv(msg);
-#endif
-			ftn((void*)(&w->msg));
-		} else {
-			printk(KERN_ERR "Recieved message type %d size %d "
-							"has no registered callback!\n",
-							msg->header.type, msg->header.size);
-			BUG();
-		}
 	}
+
+	ftn = callbacks[msg->header.type];
+	BUG_ON(!ftn);
+
+#ifdef CONFIG_POPCORN_STAT
+	account_pcn_message_recv(msg);
+#endif
+	ftn((void*)(&w->msg));
 	return;
 }
 
@@ -1467,7 +1458,6 @@ static void ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 {
 	struct ib_cb *cb = ctx;
 	int ret, err;
-	struct ib_wc *_wc;
 	struct ib_wc wc;	/* work complition->wr_id (work request ID) */
 
 	BUG_ON(cb->cq != cq);
@@ -1478,37 +1468,36 @@ static void ib_cq_event_handler(struct ib_cq *cq, void *ctx)
 
 retry:
 	while ((ret = ib_poll_cq(cb->cq, 1, &wc)) > 0) {
-		_wc = &wc;
-		if (_wc->status) {
-			if (_wc->status == IB_WC_WR_FLUSH_ERR) {
+		if (wc.status) {
+			if (wc.status == IB_WC_WR_FLUSH_ERR) {
 				printk("< cq flushed >\n");
 			} else {
 				printk(KERN_ERR "< cq completion failed with "
 					"wr_id %Lx status %d opcode %d vender_err %x >\n",
-					_wc->wr_id, _wc->status, _wc->opcode, _wc->vendor_err);
-				BUG_ON(_wc->status);
+					wc.wr_id, wc.status, wc.opcode, wc.vendor_err);
+				BUG_ON(wc.status);
 				goto error;
 			}
 		}
 
-		switch (_wc->opcode) {
+		switch (wc.opcode) {
 		case IB_WC_SEND:
 			selftest_wr_wq_dec(gcb[cb->conn_no]);
-			complete((struct completion *)_wc->wr_id);
+			complete((struct completion *)wc.wr_id);
 			break;
 
 		case IB_WC_RECV:
-			handle_ib_recv((ib_recv_work_t *)_wc->wr_id);
+			handle_ib_recv((struct recv_work_t *)wc.wr_id);
 			break;
 
 		case IB_WC_RDMA_WRITE:
 			selftest_wr_wq_dec(gcb[cb->conn_no]);
-			complete((struct completion *)_wc->wr_id);
+			complete((struct completion *)wc.wr_id);
 			break;
 
 		case IB_WC_RDMA_READ:
 			selftest_wr_wq_dec(gcb[cb->conn_no]);
-			complete((struct completion *)_wc->wr_id);
+			complete((struct completion *)wc.wr_id);
 			break;
 
 		case IB_WC_LOCAL_INV:
@@ -1517,12 +1506,12 @@ retry:
 
 		case IB_WC_REG_MR:
 			printk("IB_WC_REG_MR:\n");
-			//complete((struct completion *)_wc->wr_id);
+			//complete((struct completion *)wc.wr_id);
 			break;
 
 		default:
 			printk(KERN_ERR "< %s:%d Unexpected opcode %d, Shutting down >\n",
-							__func__, __LINE__, _wc->opcode);
+							__func__, __LINE__, wc.opcode);
 			goto error;	/* TODO for rmmod */
 			//wake_up_interruptible(&cb->sem);
 			//ib_req_notify_cq(cb->cq, IB_CQ_NEXT_COMP);
@@ -1752,7 +1741,7 @@ int ib_kmsg_send(unsigned int dst,
 	return __ib_kmsg_send(dst, msg, msg_size);
 }
 
-inline void recv_pool_selftest(ib_recv_work_t *rws, struct pcn_kmsg_message *msg)
+inline void recv_pool_selftest(struct recv_work_t *rws, struct pcn_kmsg_message *msg)
 {
 #if AUTO_RECV_WR_CHECK
 	int i;
@@ -1776,14 +1765,13 @@ inline void recv_pool_selftest(ib_recv_work_t *rws, struct pcn_kmsg_message *msg
 
 static void ib_kmsg_recv_msg(struct pcn_kmsg_message *msg)
 {
-	if(msg->header.from_nid == my_nid) {
+	if (msg->header.from_nid == my_nid) {
 		kfree(msg);
 	} else {
 		struct ib_recv_wr *bad_wr;
-		ib_recv_work_t *rws = container_of(msg, ib_recv_work_t, msg);
+		struct recv_work_t *rws = container_of(msg, struct recv_work_t, msg);
 		recv_pool_selftest(rws, msg);
-		BUG_ON(ib_post_recv(gcb[msg->header.from_nid]->qp,
-									rws->recv_wr, &bad_wr));
+		ib_post_recv(gcb[msg->header.from_nid]->qp, rws->recv_wr, &bad_wr);
 	}
 }
 
