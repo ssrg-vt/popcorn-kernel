@@ -26,8 +26,8 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
 	PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST,
 	PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE,
-	PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_REQUEST,
-	PCN_KMSG_TYPE_RDMA_FARM_NOTIFY_KEY_EXCH_RESPONSE,
+	PCN_KMSG_TYPE_RDMA_KEY_EXCHANGE_REQUEST,
+	PCN_KMSG_TYPE_RDMA_KEY_EXCHANGE_RESPONSE,
 	PCN_KMSG_TYPE_RDMA_END,
 
 	/* message layer testing */
@@ -121,7 +121,7 @@ struct pcn_kmsg_hdr {
 	typedef struct {				\
 		struct pcn_kmsg_hdr header;	\
 		struct pcn_kmsg_rdma_hdr rdma_header; \
-		void *poll_head_addr; \
+		void *private; \
 		fields				\
 	}__attribute__((packed)) type
 
@@ -151,7 +151,7 @@ DEFINE_PCN_RDMA_KMSG(pcn_kmsg_rdma_t, RDMA_TEMPLATE);
 #define RDMA_TEST \
 	int remote_ws; \
 	u64 dma_addr_act; \
-	u32 mr_ofs; \
+	u32 mr_id; \
 	int t_num;
 DEFINE_PCN_RDMA_KMSG(pcn_kmsg_perf_rdma_t, RDMA_TEST);
 
@@ -171,15 +171,14 @@ struct pcn_kmsg_checkin_message {
 typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
 
 /* Typedef for function pointer to callback functions */
-typedef int (*send_cbftn)(unsigned int,
+typedef int (*send_ftn)(unsigned int,
 						struct pcn_kmsg_message *,
 						unsigned int);
-typedef void* (*send_rdma_cbftn)(unsigned int,
+typedef void* (*request_rdma_ftn)(unsigned int,
 								pcn_kmsg_rdma_t *,
 								unsigned int, unsigned int);
-typedef void (*handle_rdma_request_ftn)(pcn_kmsg_rdma_t *,
-												void *, u32 rw_size);
-typedef void (*kmsg_free_ftn)(struct pcn_kmsg_message *);
+typedef void (*respond_rdma_ftn)(pcn_kmsg_rdma_t *, void *, u32 rw_size);
+typedef void (*free_ftn)(struct pcn_kmsg_message *);
 
 /* SETUP */
 
@@ -196,10 +195,9 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
 /* Send a message to the specified destination CPU. */
 int pcn_kmsg_send(unsigned int dest_cpu, void *lmsg, unsigned int msg_size);
-void *pcn_kmsg_send_rdma(unsigned int dest_cpu, void *msg,
+void *pcn_kmsg_request_rdma(unsigned int dest_cpu, void *msg,
 						unsigned int msg_size, unsigned int rw_size);
-void pcn_kmsg_handle_rdma_at_remote(
-						void *msg, void *paddr, u32 rw_size);
+void pcn_kmsg_respond_rdma(void *msg, void *paddr, u32 rw_size);
 
 /* Free a received message (called at the end of the callback function) */
 void pcn_kmsg_free_msg(void *msg);
@@ -248,8 +246,11 @@ int pcn_kmsg_mcast_send(pcn_kmsg_mcast_id id, struct pcn_kmsg_message *msg);
 int pcn_kmsg_mcast_send_long(pcn_kmsg_mcast_id id, void *msg,
 		unsigned int payload_size);
 
-extern send_cbftn send_callback;
-extern pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
+extern send_ftn pcn_kmsg_send_ftn;
+extern request_rdma_ftn pcn_kmsg_request_rdma_ftn;
+extern respond_rdma_ftn pcn_kmsg_respond_rdma_ftn;
+extern pcn_kmsg_cbftn pcn_kmsg_cbftns[PCN_KMSG_TYPE_MAX];
+extern free_ftn pcn_kmsg_free_ftn;
 
 enum pcn_kmsg_layer_types {
 	PCN_KMSG_LAYER_TYPE_UNKNOWN = -1,

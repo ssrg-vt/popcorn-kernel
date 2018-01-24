@@ -11,69 +11,67 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/debug.h>
 #include <popcorn/stat.h>
+#include <popcorn/bundle.h>
 
 enum pcn_kmsg_layer_types pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_UNKNOWN;
 EXPORT_SYMBOL(pcn_kmsg_layer_type);
 
-pcn_kmsg_cbftn callbacks[PCN_KMSG_TYPE_MAX];
-EXPORT_SYMBOL(callbacks);
+pcn_kmsg_cbftn pcn_kmsg_cbftns[PCN_KMSG_TYPE_MAX] = { NULL };
+EXPORT_SYMBOL(pcn_kmsg_cbftns);
 
-send_cbftn send_callback;
-EXPORT_SYMBOL(send_callback);
+send_ftn pcn_kmsg_send_ftn = NULL;
+EXPORT_SYMBOL(pcn_kmsg_send_ftn);
 
-send_rdma_cbftn send_rdma_callback;
-EXPORT_SYMBOL(send_rdma_callback);
+request_rdma_ftn pcn_kmsg_request_rdma_ftn = NULL;
+EXPORT_SYMBOL(pcn_kmsg_request_rdma_ftn);
 
-handle_rdma_request_ftn handle_rdma_callback;
-EXPORT_SYMBOL(handle_rdma_callback);
+respond_rdma_ftn pcn_kmsg_respond_rdma_ftn = NULL;
+EXPORT_SYMBOL(pcn_kmsg_respond_rdma_ftn);
 
-kmsg_free_ftn kmsg_free_callback = NULL;
-EXPORT_SYMBOL(kmsg_free_callback);
+free_ftn pcn_kmsg_free_ftn = NULL;
+EXPORT_SYMBOL(pcn_kmsg_free_ftn);
 
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {
-	send_callback = NULL;
-	MSGPRINTK("%s: done\n", __func__);
 	return 0;
 }
 
 int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback)
 {
-	if (type >= PCN_KMSG_TYPE_MAX)
+	if (type < 0 || type >= PCN_KMSG_TYPE_MAX)
 		return -ENODEV; /* invalid type */
 
-	MSGPRINTK("%s: %d \n", __func__, type);
-	callbacks[type] = callback;
+	MSGPRINTK("%s: %d %p\n", __func__, type, callback);
+	pcn_kmsg_cbftns[type] = callback;
 	return 0;
 }
 
 int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 {
-	if (type >= PCN_KMSG_TYPE_MAX)
-		return -ENODEV;
-
-	MSGPRINTK("%s: %d\n", __func__, type);
-	callbacks[type] = NULL;
-	return 0;
+	return pcn_kmsg_register_callback(type, (pcn_kmsg_cbftn)NULL);
 }
 
 int pcn_kmsg_send(unsigned int to, void *msg, unsigned int size)
 {
-	struct pcn_kmsg_hdr *hdr = msg;
-	if (send_callback == NULL) {
-		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, size=%u\n",
-					__func__, hdr->from_nid, hdr->type, size);
-		// msleep(100);
-		//printk("Waiting for call back function to be registered\n");
+	struct pcn_kmsg_message *m = msg;
+
+	if (pcn_kmsg_send_ftn == NULL) {
+		printk(KERN_ERR "No send function registered. "
+				"Make sure the msg_layer is properly loaded");
 		return -ENOENT;
 	}
+
+	BUG_ON(!msg);
+	BUG_ON(m->header.type < 0 || m->header.type >= PCN_KMSG_TYPE_MAX);
+	BUG_ON(size > PCN_KMSG_MAX_SIZE);
+	BUG_ON(to < 0 || to >= MAX_POPCORN_NODES);
+	BUG_ON(to == my_nid);
 
 #ifdef CONFIG_POPCORN_STAT
 	account_pcn_message_sent(msg);
 #endif
-
-	return send_callback(to, (struct pcn_kmsg_message *)msg, size);
+	return pcn_kmsg_send_ftn(to, (struct pcn_kmsg_message *)msg, size);
 }
 
 void *pcn_kmsg_alloc_msg(size_t size)
@@ -83,8 +81,8 @@ void *pcn_kmsg_alloc_msg(size_t size)
 
 void pcn_kmsg_free_msg(void *msg)
 {
-	if (pcn_kmsg_layer_type == PCN_KMSG_LAYER_TYPE_IB) {
-		kmsg_free_callback(msg);
+	if (pcn_kmsg_free_ftn) {
+		pcn_kmsg_free_ftn(msg);
 	} else {
 		kfree(msg);
 	}
@@ -94,43 +92,29 @@ void pcn_kmsg_free_msg(void *msg)
  * Your request must be allocated by kmalloc().
  * rw_size: Max size you expect remote to perform a R/W
  */
-void *pcn_kmsg_send_rdma(unsigned int to, void *msg,
+void *pcn_kmsg_request_rdma(unsigned int to, void *msg,
 						unsigned int msg_size, unsigned int rw_size)
 {
-    if (send_rdma_callback == NULL) {
-		struct pcn_kmsg_hdr *hdr = msg;
-		printk(KERN_ERR"%s: No send fn. from=%u, type=%d, "
-				"msg_size=%u rw_size=%u\n", __func__,
-				hdr->from_nid, hdr->type, msg_size, rw_size);
-        return NULL;
-    }
+	BUG_ON(to == my_nid);
 
 #ifdef CONFIG_POPCORN_STAT
 	account_pcn_message_sent(msg);
 #endif
-
-    return send_rdma_callback(to, msg, msg_size, rw_size);
+    return pcn_kmsg_request_rdma_ftn(to, msg, msg_size, rw_size);
 }
 
-void pcn_kmsg_handle_rdma_at_remote(
-				void *msg, void *paddr, u32 rw_size)
+void pcn_kmsg_respond_rdma(void *msg, void *paddr, u32 rw_size)
 {
-	if (pcn_kmsg_layer_type == PCN_KMSG_LAYER_TYPE_IB) {
 #ifdef CONFIG_POPCORN_STAT
-		account_pcn_message_sent((struct pcn_kmsg_message *)paddr);
+	account_pcn_message_sent((struct pcn_kmsg_message *)paddr);
 #endif
-		handle_rdma_callback(msg, paddr, rw_size);
-	}
-	else
-		printk(KERN_ERR "%s: current msg_layer is not \"IB\" (%d)\n", __func__,
-				pcn_kmsg_layer_type);
+	pcn_kmsg_respond_rdma_ftn(msg, paddr, rw_size);
 }
-
 
 EXPORT_SYMBOL(pcn_kmsg_alloc_msg);
 EXPORT_SYMBOL(pcn_kmsg_free_msg);
-EXPORT_SYMBOL(pcn_kmsg_send_rdma);
+EXPORT_SYMBOL(pcn_kmsg_request_rdma);
+EXPORT_SYMBOL(pcn_kmsg_respond_rdma);
 EXPORT_SYMBOL(pcn_kmsg_send);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 EXPORT_SYMBOL(pcn_kmsg_register_callback);
-EXPORT_SYMBOL(pcn_kmsg_handle_rdma_at_remote);

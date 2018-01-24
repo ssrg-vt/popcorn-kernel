@@ -910,7 +910,7 @@ static remote_page_response_t *__fetch_remote_page_rdma(struct task_struct *tsk,
 
 	PGPRINTK("  [%d] ->[%d/%d] %lx %lx\n", tsk->pid,
 			from_pid, from_nid, addr, req.instr_addr);
-	return pcn_kmsg_send_rdma(from_nid, &req, sizeof(req),
+	return pcn_kmsg_request_rdma(from_nid, &req, sizeof(req),
 								sizeof(remote_page_response_t));
 }
 static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
@@ -1393,7 +1393,7 @@ out:
 	res->origin_ws = req->origin_ws;
 
 #ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-	pcn_kmsg_handle_rdma_at_remote(req, res, res_size);
+	pcn_kmsg_respond_rdma(req, res, res_size);
 #else
 	pcn_kmsg_send(req->origin_nid, res, res_size);
 #endif
