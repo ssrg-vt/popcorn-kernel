@@ -53,7 +53,6 @@ inline void page_server_start_mm_fault(unsigned long address)
 		current->fault_retry = 0;
 		do_gettimeofday(&current->fault_start);
 	} else if (current->fault_address != address) {
-		printk("%lx != %lx\n", current->fault_address, address);
 		current->fault_address = address;
 	}
 #endif
@@ -561,6 +560,22 @@ out:
 	*ptep = pte;
 	*ptlp = ptl;
 	return page;
+}
+
+
+/**************************************************************************
+ * Panicked by bug!!!!!
+ */
+void page_server_panic(struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val)
+{
+	struct pt_regs *regs = current_pt_regs();
+	unsigned long *pi = __get_page_info(mm, address);
+
+	printk(KERN_ERR "------------------ Start of panic -----------------\n");
+	printk(KERN_ERR "%s: %lx %p %lx %p %lx\n", __func__,
+			address, pi, pi ? *pi : -1, pte, pte_flags(pte_val));
+	show_regs(regs);
+	BUG_ON("Page server panicked!!");
 }
 
 
@@ -1400,10 +1415,10 @@ out:
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
 
-	trace_printk("%d %d %lx %c %lx %d\n",
-			req->origin_nid, req->origin_pid, req->addr,
+	trace_printk("%d %d %c %lx %lx %d\n",
+			req->origin_nid, req->remote_pid,
 			fault_for_write(req->fault_flags) ? 'W' : 'R',
-			req->instr_addr, res->result);
+			req->instr_addr, req->addr, res->result);
 
 	kfree(res);
 
@@ -1842,10 +1857,10 @@ int page_server_handle_pte_fault(
 	ret = 0;
 
 out:
-	trace_printk("%d %d %lx %c %lx %d\n",
-			my_nid, current->pid, address,
+	trace_printk("%d %d %c %lx %lx %d\n",
+			my_nid, current->pid,
 			fault_for_write(fault_flags) ? 'W' : 'R',
-			instruction_pointer(current_pt_regs()), ret);
+			instruction_pointer(current_pt_regs()), addr, ret);
 	return ret;
 }
 

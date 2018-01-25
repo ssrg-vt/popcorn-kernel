@@ -37,4 +37,6 @@ void page_server_put_userpage(struct fault_handle *fh, char *mode);
 void page_server_start_mm_fault(unsigned long address);
 int page_server_end_mm_fault(int ret);
 
+void page_server_panic(struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val);
+
 #endif /* INCLUDE_POPCORN_PAGE_SERVER_H_ */
