@@ -144,7 +144,6 @@ struct rdma_notify_init_req_t {
     struct pcn_kmsg_hdr header;
     uint32_t remote_key;
     uint64_t remote_addr;
-    //uint32_t remote_size;
 	struct completion *comp;
 };
 
@@ -206,7 +205,7 @@ struct ib_cb {
 #endif
 
 	/* Connection */
-	u8 addr[16];				/* dst addr in NBO */
+	uint32_t addr;
 	atomic_t state;
 	wait_queue_head_t sem;
 
@@ -222,11 +221,10 @@ struct ib_cb *gcb[MAX_NUM_NODES];
 /* Functions */
 static void __cq_event_handler(struct ib_cq *cq, void *ctx);
 
-/* MR bit map */
+/* memory region pool */
 static spinlock_t mr_pool_lock[MAX_NUM_NODES][RDMA_MR_TYPES];
 static unsigned long mr_pool[MAX_NUM_NODES][RDMA_MR_TYPES]
 										[BITS_TO_LONGS(MR_POOL_SIZE)];
-/* Wrapped by a sem for reducing cpu usage? */
 static u32 __get_mr(int dst, int mode)
 {
     int ofs;
@@ -361,7 +359,7 @@ static int __cm_event_handler(struct rdma_cm_id *cm_id, struct rdma_cm_event *ev
 }
 
 /*
- * Create a recv scatter-gather list(entries) & work request
+ * Create recv work requests
  */
 static struct recv_work_t *__alloc_recv_wr(int conn_no)
 {
@@ -393,47 +391,6 @@ static struct recv_work_t *__alloc_recv_wr(int conn_no)
 	return work;
 }
 
-
-static void fill_sockaddr(struct sockaddr_storage *sin, struct ib_cb *cb)
-{
-	struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
-	u8 *addr;
-
-	memset(sin4, 0, sizeof(*sin4));
-	if (cb->server) {
-		/* server: load from global (ip=itself) */
-		addr = gcb[my_nid]->addr;
-	} else {
-		/* client: load as usuall (ip=remote) */
-		addr = cb->addr;
-	}
-	sin4->sin_family = AF_INET;
-	sin4->sin_port = htons(PORT);
-	memcpy((void *)&sin4->sin_addr.s_addr, addr, 4);
-}
-
-static int ib_bind_server(struct ib_cb *cb)
-{
-	int ret;
-	struct sockaddr_storage sin;
-
-	fill_sockaddr(&sin, cb);
-	ret = rdma_bind_addr(cb->cm_id, (struct sockaddr *)&sin);
-	if (ret) {
-		printk(KERN_ERR "rdma_bind_addr error %d\n", ret);
-		return ret;
-	}
-
-	ret = rdma_listen(cb->cm_id, LISTEN_BACKLOG);
-	if (ret) {
-		printk(KERN_ERR "rdma_listen failed: %d\n", ret);
-		return ret;
-	}
-
-	return 0;
-}
-
-/* set up sgl */
 static void __setup_recv_wr(struct ib_cb *cb)
 {
 	int i = 0, ret;
@@ -453,6 +410,7 @@ static void __setup_recv_wr(struct ib_cb *cb)
 	}
 	return;
 }
+
 
 static int _ib_create_qp(struct ib_cb *cb)
 {
@@ -476,17 +434,17 @@ static int _ib_create_qp(struct ib_cb *cb)
 	/* send and recv use a same cq */
 	init_attr.send_cq = cb->cq;
 	init_attr.recv_cq = cb->cq;
-	init_attr.sq_sig_type = IB_SIGNAL_REQ_WR;
 
 	/*	The IB_SIGNAL_REQ_WR flag means that not all send requests posted to
 	 *	the send queue will generate a completion -- only those marked with
-	 *	the IB_SEND_SIGNALED flag.  However, the driver can't free a send
+	 *	the IB_SEND_SIGNALED flag. However, the driver can't free a send
 	 *	request from the send queue until it knows it has completed, and the
 	 *	only way for the driver to know that is to see a completion for the
-	 *	given request or a later request.  Requests on a queue always complete
+	 *	given request or a later request. Requests on a queue always complete
 	 *	in order, so if a later request completes and generates a completion,
 	 *	the driver can also free any earlier unsignaled requests)
 	 */
+	init_attr.sq_sig_type = IB_SIGNAL_REQ_WR;
 
 	if (cb->server) {
 		ret = rdma_create_qp(cb->peer_cm_id, cb->pd, &init_attr);
@@ -583,7 +541,7 @@ static u32 __map_rdma_mr(struct ib_cb *cb, u64 dma_addr, int dma_len, u32 mr_id,
 	sg_dma_len(&sg) = dma_len;
 	ib_update_fast_reg_key(reg_mr, cb->key);
 	ret = ib_map_mr_sg(reg_mr, &sg, 1, PAGE_SIZE);
-	// snyc: use ib_dma_sync_single_for_cpu/dev dev:accessed by IB
+	// sync: use ib_dma_sync_single_for_cpu/dev dev:accessed by IB
 	BUG_ON(ret <= 0 || ret > MAX_RDMA_PAGES);
 
 	reg_wr->key = reg_mr->rkey;
@@ -673,7 +631,7 @@ bail:
 #endif
 
 /*
- * init all buffers < 1.pd->cq->qp 2.[mr] 3.xxx >
+ * init all buffers
  */
 static int ib_setup_buffers(struct ib_cb *cb)
 {
@@ -694,8 +652,6 @@ static int ib_setup_buffers(struct ib_cb *cb)
 		 */
 		cb->reg_wr_pool[i].wr.opcode = IB_WR_REG_MR;
 		cb->reg_wr_pool[i].mr = cb->mr_pool[i];
-		cb->reg_wr_pool[i].wr.opcode = IB_WR_REG_MR;
-		cb->reg_wr_pool[i].mr = cb->mr_pool[i];
 
 		/*
 		 * 1. invalidate Memory Window locally
@@ -703,17 +659,17 @@ static int ib_setup_buffers(struct ib_cb *cb)
 		 */
 		cb->inv_wr_pool[i].opcode = IB_WR_LOCAL_INV;
 		cb->inv_wr_pool[i].next = &cb->reg_wr_pool[i].wr;
-		/*  The reg mem_mode uses a reg mr on the client side for the (We are)
-		 *  rw_passive_buf and rw_active_buf buffers.  Each time the client will
-		 *  advertise one of these buffers, it invalidates the previous registration
-		 *  and fast registers the new buffer with a new key.
+
+		/* The reg mem_mode uses a reg mr on the client side for the (We are)
+		 * rw_passive_buf and rw_active_buf buffers. Each time the client will
+		 * advertise one of these buffers, it invalidates the previous registration
+		 * and fast registers the new buffer with a new key.
 		 *
-		 *  If the server_invalidate	(We are not)
-		 *  option is on, then the server will do the invalidation via the
+		 * If the server_invalidate (We are not)
+		 * option is on, then the server will do the invalidation via the
 		 * "go ahead" messages using the IB_WR_SEND_WITH_INV opcode. Otherwise the
 		 * client invalidates the mr using the IB_WR_LOCAL_INV work request.
 		 */
-
 	}
 
 #if CONFIG_RDMA_NOTIFY
@@ -730,7 +686,6 @@ bail:
 	}
 	return ret;
 }
-
 
 static void ib_free_buffers(struct ib_cb *cb, u32 mr_id)
 {
@@ -750,6 +705,47 @@ static void ib_free_qp(struct ib_cb *cb)
 	ib_destroy_cq(cb->cq);
 	ib_dealloc_pd(cb->pd);
 }
+
+
+static void fill_sockaddr(struct sockaddr_storage *sin, struct ib_cb *cb)
+{
+	struct sockaddr_in *sin4 = (struct sockaddr_in *)sin;
+	uint32_t addr;
+
+	memset(sin4, 0, sizeof(*sin4));
+	if (cb->server) {
+		/* server: load from global (ip=itself) */
+		addr = gcb[my_nid]->addr;
+	} else {
+		/* client: load as usuall (ip=remote) */
+		addr = cb->addr;
+	}
+	sin4->sin_family = AF_INET;
+	sin4->sin_port = htons(PORT);
+	memcpy((void *)&sin4->sin_addr.s_addr, &addr, sizeof(addr));
+}
+
+static int __bind_rdma_addr(struct ib_cb *cb)
+{
+	int ret;
+	struct sockaddr_storage sin;
+
+	fill_sockaddr(&sin, cb);
+	ret = rdma_bind_addr(cb->cm_id, (struct sockaddr *)&sin);
+	if (ret) {
+		printk(KERN_ERR "rdma_bind_addr error %d\n", ret);
+		return ret;
+	}
+
+	ret = rdma_listen(cb->cm_id, LISTEN_BACKLOG);
+	if (ret) {
+		printk(KERN_ERR "rdma_listen failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
 
 static int ib_accept(struct ib_cb *cb)
 {
@@ -774,7 +770,7 @@ static int ib_accept(struct ib_cb *cb)
 	return 0;
 }
 
-static int ib_server_accept(struct ib_cb *cb)
+static int __accept_client(struct ib_cb *cb)
 {
 	int i, ret = -1;
 
@@ -807,11 +803,11 @@ err0:
 	return ret;
 }
 
-static int ib_run_server(struct ib_cb *my_cb)
+static int __run_server(struct ib_cb *my_cb)
 {
 	int ret, i = 0;
 
-	ret = ib_bind_server(my_cb);
+	ret = __bind_rdma_addr(my_cb);
 	if (ret)
 		return ret;
 
@@ -831,27 +827,25 @@ static int ib_run_server(struct ib_cb *my_cb)
 
 		peer_cb = gcb[i];
 		peer_cb->server = 1;
-
-		/* got from INT. Will be used [setup_qp(SRWRirq)] -> setup_buf -> */
 		peer_cb->peer_cm_id = my_cb->peer_cm_id;
 
-		if (ib_server_accept(peer_cb))
+		if (__accept_client(peer_cb))
 			rdma_disconnect(peer_cb->peer_cm_id);
 
-		printk("conn_no %d is ready (sever)\n", peer_cb->conn_no);
+		printk("Node %d is ready (sever)\n", peer_cb->conn_no);
 		set_popcorn_node_online(peer_cb->conn_no, true);
 	}
 	return 0;
 }
 
 
-static int ib_bind_client(struct ib_cb *cb)
+/* Counter-part for __bind_rdma_addr from the server */
+static int __resolve_rdma_addr(struct ib_cb *cb)
 {
-	struct sockaddr_storage sin;
 	int ret;
+	struct sockaddr_storage sin;
 
 	fill_sockaddr(&sin, cb);
-
 	ret = rdma_resolve_addr(cb->cm_id, NULL, (struct sockaddr *)&sin, 2000);
 	if (ret) {
 		printk(KERN_ERR "rdma_resolve_addr error %d\n", ret);
@@ -869,10 +863,9 @@ static int ib_bind_client(struct ib_cb *cb)
 }
 
 
-static int ib_connect_client(struct ib_cb *cb)
+static int __connect_to_server(struct ib_cb *cb)
 {
-	int ret;
-	struct rdma_conn_param conn_param;
+	int ret; struct rdma_conn_param conn_param;
 
 	memset(&conn_param, 0, sizeof conn_param);
 	conn_param.responder_resources = CONN_RESPONDER_RESOURCES;
@@ -895,11 +888,11 @@ static int ib_connect_client(struct ib_cb *cb)
 	return 0;
 }
 
-static int ib_run_client(struct ib_cb *cb)
+static int __run_client(struct ib_cb *cb)
 {
 	int i, ret;
 
-	ret = ib_bind_client(cb);
+	ret = __resolve_rdma_addr(cb);
 	if (ret)
 		return ret;
 
@@ -915,7 +908,7 @@ static int ib_run_client(struct ib_cb *cb)
 		goto err1;
 	}
 
-	ret = ib_connect_client(cb);
+	ret = __connect_to_server(cb);
 	if (ret) {
 		printk(KERN_ERR "connect error %d\n", ret);
 		goto err2;
@@ -1619,6 +1612,53 @@ static void __init_rdma_poll(void)
 }
 #endif
 
+/**
+ * Establish connections
+ * Each node has a connection table like tihs:
+ * -------------------------------------------------------------------
+ * | connect | (many)... | my_nid(one) | accept | accept | (many)... |
+ * -------------------------------------------------------------------
+ * my_nid:  no need to talk to itself
+ * connect: connecting to existing nodes
+ * accept:  waiting for the connection requests from later nodes
+ */
+int __init __establish_connections(void)
+{
+	int i, err;
+	set_popcorn_node_online(my_nid, true);
+
+	/* case 1: [<my_nid: connect] | == my_nid | >=my_nid: accept */
+	for (i = 0; i < my_nid; i++) {
+		/* [connect] | my_nid | accept */
+		gcb[i]->server = 0;
+
+		/* server/client dependant init */
+		if ((err = __run_client(gcb[i]))) {
+			rdma_disconnect(gcb[i]->cm_id);
+			return err;
+		}
+
+		set_popcorn_node_online(i, true);
+		printk("Node %d is ready (client)\n", i);
+	}
+
+	/* case 2: <my_nid: connect | == my_nid | [>=my_nid: accept] */
+	__run_server(gcb[my_nid]);
+
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+		if (i == my_nid) continue;
+		while (!get_popcorn_node_online(i)) {
+			msleep(10);
+		}
+		atomic_set(&gcb[i]->state, IDLE);
+		notify_my_node_info(i);
+#if CONFIG_RDMA_NOTIFY
+		__exchange_rdma_keys(i);
+#endif
+	}
+	return 0;
+}
+
 int __init initialize(void)
 {
 	int i, err;
@@ -1659,6 +1699,7 @@ int __init initialize(void)
 		gcb[i]->conn_no = i;
 		gcb[i]->key = i;
 		gcb[i]->server = -1;
+		gcb[i]->addr = ip_table[i];
 		init_waitqueue_head(&gcb[i]->sem);
 
 		/* Init common parameters */
@@ -1666,8 +1707,6 @@ int __init initialize(void)
 #if CHECK_WQ_WR
 		gcb[i]->WQ_WR_cnt.counter = 0;
 #endif
-		/* set up IPv4 address */
-		in4_pton(ip_addresses[i], -1, gcb[i]->addr, -1, NULL);
 
 		/* register event handler */
 		gcb[i]->cm_id = rdma_create_id(&init_net,
@@ -1681,48 +1720,7 @@ int __init initialize(void)
 #if CONFIG_RDMA_POLL
 	__init_rdma_poll();
 #endif
-
-	/* Establish connections
-	 * Each node has a connection table like tihs:
-	 * -------------------------------------------------------------------
-	 * | connect | (many)... | my_nid(one) | accept | accept | (many)... |
-	 * -------------------------------------------------------------------
-	 * my_nid:  no need to talk to itself
-	 * connect: connecting to existing nodes
-	 * accept:  waiting for the connection requests from later nodes
-	 */
-	set_popcorn_node_online(my_nid, true);
-
-	/* case 1: [<my_nid: connect] | =my_nid | >=my_nid: accept */
-	for (i = 0; i < my_nid; i++) {
-		/* [connect] | my_nid | accept */
-		gcb[i]->server = 0;
-
-		/* server/client dependant init */
-		if (ib_run_client(gcb[i])) {
-			printk("WRONG!!\n");
-			rdma_disconnect(gcb[i]->cm_id);
-			return err;
-		}
-
-		set_popcorn_node_online(i, true);
-		printk("Node %d is ready (client)\n", i);
-	}
-
-	/* case 2: <my_nid: connect | =my_nid | [>=my_nid: accept] */
-	ib_run_server(gcb[my_nid]);
-
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-		if (i == my_nid) continue;
-		while (!get_popcorn_node_online(i)) {
-			msleep(10);
-		}
-		atomic_set(&gcb[i]->state, IDLE);
-		notify_my_node_info(i);
-#if CONFIG_RDMA_NOTIFY
-		__exchange_rdma_keys(i);
-#endif
-	}
+	if (__establish_connections()) goto out;
 
 	printk("------------------------------------------\n");
 	printk("- Popcorn Messaging Layer IB Initialized -\n");
@@ -1749,7 +1747,7 @@ void __exit unload(void)
 	int i, j;
 	printk("TODO: Stop kernel threads\n");
 
-	printk("Release general\n");
+	/* Release general */
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 
 #if CONFIG_RDMA_POLL
@@ -1760,12 +1758,12 @@ void __exit unload(void)
 #endif
 	}
 
-	printk("Release IB recv pre-post buffers and flush it\n");
+	/* Release IB recv pre-post buffers and flush it */
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 	}
 
 	/* TODO: test rdma_disconnect() */
-	printk("rdma_disconnect() only on one side\n");
+	/* rdma_disconnect() only on one side */
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		if (i == my_nid)
 			continue;
@@ -1785,7 +1783,7 @@ void __exit unload(void)
 		//	rdma_disconnect(gcb[i]->cm_id);
 	}
 
-	printk("Release IB server/client productions \n");
+	/* Release IB server/client productions */
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		struct ib_cb *cb = gcb[i];
 
@@ -1812,7 +1810,7 @@ void __exit unload(void)
 	}
 
 #if CONFIG_RDMA_NOTIFY
-	printk("Release RDMA relavant\n");
+	/* Release RDMA relavant */
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		kfree(gcb[i]->rdma_notify_buf_act);
 		kfree(gcb[i]->rdma_notify_buf_pass);
@@ -1827,7 +1825,7 @@ void __exit unload(void)
 	}
 #endif
 
-	printk("Release cb context\n");
+	/* Release cb context */
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		kfree(gcb[i]);
 	}
