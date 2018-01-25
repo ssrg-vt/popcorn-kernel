@@ -261,7 +261,9 @@ unsigned long vma_server_mmap_remote(struct file *file,
 
 	if (ret) goto out_free;
 
-	down_write(&current->mm->mmap_sem);
+	while (!down_write_trylock(&current->mm->mmap_sem)) {
+		schedule();
+	}
 	ret = map_difference(current->mm, file, res->addr, res->addr + res->len,
 			prot, flags, pgoff);
 	up_write(&current->mm->mmap_sem);
@@ -749,7 +751,9 @@ static int __update_vma(struct task_struct *tsk, vma_info_response_t *res)
 		return res->result;
 	}
 
-	down_write(&mm->mmap_sem);
+	while (!down_write_trylock(&mm->mmap_sem)) {
+		schedule();
+	}
 	vma = find_vma(mm, addr);
 	VSPRINTK("  [%d] %lx %lx\n", tsk->pid, vma ? vma->vm_start : 0, addr);
 	if (vma && vma->vm_start <= addr) {
