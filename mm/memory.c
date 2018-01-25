@@ -3488,19 +3488,19 @@ int handle_pte_fault_origin(struct mm_struct *mm,
 
 	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
 	if (!pte_none(*pte)) {
+		/* Somebody already attached a page */
 		mem_cgroup_cancel_charge(page, memcg);
 		page_cache_release(page);
-		return 0;
+	} else {
+		inc_mm_counter_fast(mm, MM_ANONPAGES);
+		page_add_new_anon_rmap(page, vma, address);
+		mem_cgroup_commit_charge(page, memcg, false);
+		lru_cache_add_active_or_unevictable(page, vma);
+
+		set_pte_at(mm, address, pte, entry);
+		/* No need to invalidate - it was non-present before */
+		update_mmu_cache(vma, address, pte);
 	}
-
-	inc_mm_counter_fast(mm, MM_ANONPAGES);
-	page_add_new_anon_rmap(page, vma, address);
-	mem_cgroup_commit_charge(page, memcg, false);
-	lru_cache_add_active_or_unevictable(page, vma);
-
-	set_pte_at(mm, address, pte, entry);
-	/* No need to invalidate - it was non-present before */
-	update_mmu_cache(vma, address, pte);
 	pte_unmap_unlock(pte, ptl);
 	return 0;
 }
