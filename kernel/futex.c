@@ -1333,23 +1333,11 @@ futex_wake(u32 __user *uaddr, unsigned int flags, int nr_wake, u32 bitset)
 	union futex_key key = FUTEX_KEY_INIT;
 	int ret;
 	WAKE_Q(wake_q);
-#ifdef CONFIG_POPCORN
-	struct fault_handle *fh = NULL;
-#endif
 
 	if (!bitset)
 		return -EINVAL;
 
-#ifdef CONFIG_POPCORN
-	ret = page_server_get_userpage(uaddr, &fh, "wake");
-	if (ret < 0)
-		return ret;
-#endif
-
 	ret = get_futex_key(uaddr, flags & FLAGS_SHARED, &key, VERIFY_READ);
-#ifdef CONFIG_POPCORN
-	page_server_put_userpage(fh, "wake");
-#endif
 	if (unlikely(ret != 0))
 		goto out;
 

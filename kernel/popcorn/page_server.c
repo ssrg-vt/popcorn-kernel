@@ -1474,16 +1474,11 @@ retry:
 	}
 
 	/*
-	printk(" %c[%d] gup %s %p %p\n", leader ? '=' : '-', current->pid, mode,
+	PGPRINTK(" %c[%d] gup %s %p %p\n", leader ? '=' : '-', current->pid, mode,
 		fh, uaddr);
 	*/
-	if (!leader) {
-		ret = 0;
-		pte_unmap(pte);
-		goto out;
-	}
 
-	if (!page_is_mine(mm, addr)) {
+	if (leader && !page_is_mine(mm, addr)) {
 		remote_page_response_t *rp =
 				__claim_remote_page(current, addr, fault_flags);
 		struct page *page = get_normal_page(vma, addr, pte);
