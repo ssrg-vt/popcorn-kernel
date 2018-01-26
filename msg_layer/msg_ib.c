@@ -1428,7 +1428,7 @@ void *request_ib_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 
 	if (!msg->rdma_header.is_write) return NULL;
 
-#if CONFIG_RDMA_NOTIFY
+#if CONFIG_RDMA_NOTIFY || CONFIG_FARM
 	while (*poll_tail_at == POLL_IS_IDLE)
 		io_schedule();
 
@@ -1467,14 +1467,6 @@ void *request_ib_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 	account_pcn_message_recv((struct pcn_kmsg_message *)rp);
 #endif
 	return dma_buffer + POLL_HEAD;
-
-#elif CONFIG_FARM
-	while (*poll_tail_at == POLL_IS_IDLE)
-		io_schedule();
-
-	__put_mr(dst, mr_id, RDMA_MR);
-	dma_unmap_single(cb->pd->device->dma_device, dma_addr,
-					rw_size, DMA_BIDIRECTIONAL);
 #else
 	/* handle rdma response handler will complete and free dma_addr */
 #endif
