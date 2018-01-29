@@ -109,6 +109,7 @@ void free_remote_context(struct remote_context *rc)
 static struct remote_context *__alloc_remote_context(int nid, int tgid, bool remote)
 {
 	struct remote_context *rc = kmalloc(sizeof(*rc), GFP_KERNEL);
+	int i;
 	BUG_ON(!rc);
 
 	INIT_LIST_HEAD(&rc->list);
@@ -118,8 +119,10 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	rc->tgid = tgid;
 	rc->for_remote = remote;
 
-	INIT_LIST_HEAD(&rc->faults);
-	spin_lock_init(&rc->faults_lock);
+	for (i = 0; i < FAULTS_HASH; i++) {
+		INIT_LIST_HEAD(&rc->faults[i]);
+		spin_lock_init(&rc->faults_lock[i]);
+	}
 
 	INIT_LIST_HEAD(&rc->vmas);
 	spin_lock_init(&rc->vmas_lock);

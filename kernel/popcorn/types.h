@@ -12,6 +12,8 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
 
+#define FAULTS_HASH 31
+
 /**
  * Remote execution context
  */
@@ -27,8 +29,8 @@ struct remote_context {
 	struct radix_tree_root pages;
 
 	/* For page replication protocol */
-	spinlock_t faults_lock;
-	struct list_head faults;
+	spinlock_t faults_lock[FAULTS_HASH];
+	struct list_head faults[FAULTS_HASH];
 
 	/* For VMA management */
 	spinlock_t vmas_lock;

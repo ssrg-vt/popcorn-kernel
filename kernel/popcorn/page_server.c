@@ -83,6 +83,11 @@ inline int page_server_end_mm_fault(int ret)
 	return ret;
 }
 
+static inline int __fault_hash_key(unsigned long address)
+{
+	return (address >> PAGE_SHIFT) % FAULTS_HASH;
+}
+
 /**************************************************************************
  * Page ownership tracking mechanism
  */
@@ -269,6 +274,7 @@ static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsign
 {
 	struct fault_handle *fh =
 			kmem_cache_alloc(__fault_handle_cache, GFP_ATOMIC);
+	int fk = __fault_hash_key(addr);
 	BUG_ON(!fh);
 
 	INIT_LIST_HEAD(&fh->list);
@@ -286,7 +292,7 @@ static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsign
 	fh->pid = tsk->pid;
 	fh->complete = NULL;
 
-	list_add(&fh->list, &fh->rc->faults);
+	list_add(&fh->list, &fh->rc->faults[fk]);
 	return fh;
 }
 
@@ -298,9 +304,10 @@ static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsign
 	struct fault_handle *fh;
 	bool found = false;
 	DECLARE_COMPLETION_ONSTACK(complete);
+	int fk = __fault_hash_key(addr);
 
-	spin_lock_irqsave(&rc->faults_lock, flags);
-	list_for_each_entry(fh, &rc->faults, list) {
+	spin_lock_irqsave(&rc->faults_lock[fk], flags);
+	list_for_each_entry(fh, &rc->faults[fk], list) {
 		if (fh->addr == addr) {
 			PGPRINTK("  [%d] %s %s ongoing, wait\n", tsk->pid,
 				fh->flags & FAULT_HANDLE_REMOTE ? "remote" : "local",
@@ -312,7 +319,7 @@ static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsign
 			break;
 		}
 	}
-	spin_unlock_irqrestore(&rc->faults_lock, flags);
+	spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 	put_task_remote(tsk);
 
 	if (found) {
@@ -331,13 +338,15 @@ static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsign
 static void __finish_invalidation(struct fault_handle *fh)
 {
 	unsigned long flags;
+	int fk;
 
 	if (!fh) return;
+	fk = __fault_hash_key(fh->addr);
 
 	BUG_ON(atomic_read(&fh->pendings));
-	spin_lock_irqsave(&fh->rc->faults_lock, flags);
+	spin_lock_irqsave(&fh->rc->faults_lock[fk], flags);
 	list_del(&fh->list);
-	spin_unlock_irqrestore(&fh->rc->faults_lock, flags);
+	spin_unlock_irqrestore(&fh->rc->faults_lock[fk], flags);
 
 	__put_task_remote(fh->rc);
 	if (atomic_read(&fh->pendings_retry)) {
@@ -357,11 +366,12 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	struct remote_context *rc = get_task_remote(tsk);
 	char *ongoing = NULL;
 	DEFINE_WAIT(wait);
+	int fk = __fault_hash_key(addr);
 
-	spin_lock_irqsave(&rc->faults_lock, flags);
+	spin_lock_irqsave(&rc->faults_lock[fk], flags);
 	spin_unlock(ptl);
 
-	list_for_each_entry(fh, &rc->faults, list) {
+	list_for_each_entry(fh, &rc->faults[fk], list) {
 		if (fh->addr == addr) {
 			found = true;
 			break;
@@ -404,7 +414,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 
 		atomic_inc(&fh->pendings);
 		prepare_to_wait_exclusive(&fh->waits, &wait, TASK_UNINTERRUPTIBLE);
-		spin_unlock_irqrestore(&rc->faults_lock, flags);
+		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 		PGPRINTK(" +[%d] %lx %p\n", tsk->pid, addr, fh);
 		put_task_remote(tsk);
 
@@ -421,7 +431,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	fh->flags |= fault_for_write(fault_flags) ? FAULT_HANDLE_WRITE : 0;
 	fh->flags |= (fault_flags & FAULT_FLAG_REMOTE) ? FAULT_HANDLE_REMOTE : 0;
 
-	spin_unlock_irqrestore(&rc->faults_lock, flags);
+	spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 	put_task_remote(tsk);
 
 	*leader = true;
@@ -430,7 +440,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 out_wait:
 	atomic_inc(&fh->pendings_retry);
 	prepare_to_wait(&fh->waits_retry, &wait, TASK_UNINTERRUPTIBLE);
-	spin_unlock_irqrestore(&rc->faults_lock, flags);
+	spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 	put_task_remote(tsk);
 
 	PGPRINTK("  [%d] %s ongoing. waits %p\n", tsk->pid, ongoing, fh);
@@ -442,7 +452,7 @@ out_wait:
 	return NULL;
 
 out_retry:
-	spin_unlock_irqrestore(&rc->faults_lock, flags);
+	spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 	put_task_remote(tsk);
 
 	PGPRINTK("  [%d] %s locked. retry %p\n", tsk->pid, ongoing, fh);
@@ -453,8 +463,9 @@ static bool __finish_fault_handling(struct fault_handle *fh)
 {
 	unsigned long flags;
 	bool last = false;
+	int fk = __fault_hash_key(fh->addr);
 
-	spin_lock_irqsave(&fh->rc->faults_lock, flags);
+	spin_lock_irqsave(&fh->rc->faults_lock[fk], flags);
 	if (atomic_dec_return(&fh->pendings)) {
 		PGPRINTK(" >[%d] %lx %p\n", fh->pid, fh->addr, fh);
 		wake_up(&fh->waits);
@@ -467,7 +478,7 @@ static bool __finish_fault_handling(struct fault_handle *fh)
 			last = true;
 		}
 	}
-	spin_unlock_irqrestore(&fh->rc->faults_lock, flags);
+	spin_unlock_irqrestore(&fh->rc->faults_lock[fk], flags);
 
 	if (last) {
 		__put_task_remote(fh->rc);
