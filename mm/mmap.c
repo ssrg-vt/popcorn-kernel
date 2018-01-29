@@ -297,7 +297,16 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 	unsigned long min_brk;
 	bool populate;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		while (!down_write_trylock(&mm->mmap_sem))
+			schedule();
+	} else {
+		down_write(&mm->mmap_sem);
+	}
+#else
 	down_write(&mm->mmap_sem);
+#endif
 
 #ifdef CONFIG_COMPAT_BRK
 	/*
