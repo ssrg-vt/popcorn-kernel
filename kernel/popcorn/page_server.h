@@ -9,5 +9,6 @@ struct page *get_normal_page(struct vm_area_struct *vma, unsigned long addr, pte
 int cow_file_at_origin(struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, pte_t *pte);
 
 void free_remote_context_pages(struct remote_context *rc);
+int process_madvise_release_from_remote(int from_nid, unsigned long start, unsigned long end);
 
 #endif

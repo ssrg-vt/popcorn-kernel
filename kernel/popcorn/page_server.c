@@ -222,15 +222,13 @@ static inline bool test_page_owner(int nid, struct mm_struct *mm, unsigned long 
 static inline void set_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
-	BUG_ON(!pi);
-
 	set_bit(nid, pi);
 }
 
 static inline void clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
-	BUG_ON(!pi);
+	if (!pi) return;
 
 	clear_bit(nid, pi);
 }
@@ -916,6 +914,62 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
 }
 
 
+/**************************************************************************
+ * Voluntarily release page ownership
+ */
+int process_madvise_release_from_remote(int from_nid, unsigned long start, unsigned long end)
+{
+	struct mm_struct *mm;
+	unsigned long addr;
+	int nr_pages = 0;
+
+	mm = get_task_mm(current);
+	for (addr = start; addr < end; addr += PAGE_SIZE) {
+		pmd_t *pmd;
+		pte_t *pte;
+		spinlock_t *ptl;
+		pte = __get_pte_at(mm, addr, &pmd, &ptl);
+		if (!pte) continue;
+		spin_lock(ptl);
+		if (!pte_none(*pte)) {
+			clear_page_owner(from_nid, mm, addr);
+			nr_pages++;
+		}
+		pte_unmap_unlock(pte, ptl);
+	}
+	mmput(mm);
+	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n", current->pid, from_nid,
+			nr_pages, (end - start) / PAGE_SIZE, start, end);
+	return 0;
+}
+
+int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long addr)
+{
+	struct mm_struct *mm = vma->vm_mm;
+	pmd_t *pmd;
+	pte_t *pte;
+	pte_t pte_val;
+	spinlock_t *ptl;
+
+	pte = __get_pte_at(mm, addr, &pmd, &ptl);
+	if (!pte) return 0;
+
+	spin_lock(ptl);
+	if (pte_none(*pte) || !pte_present(*pte)) {
+		pte_unmap_unlock(pte, ptl);
+		return 0;
+	}
+
+	clear_page_owner(my_nid, mm, addr);
+	pte_val = ptep_clear_flush(vma, addr, pte);
+	pte_val = pte_make_invalid(pte_val);
+
+	set_pte_at_notify(mm, addr, pte, pte_val);
+	update_mmu_cache(vma, addr, pte);
+	pte_unmap_unlock(pte, ptl);
+	return 1;
+}
+
 
 /**************************************************************************
  * Handle page faults happened at remote nodes.
@@ -1052,6 +1106,9 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 
 	if (test_bit(my_nid, pi)) {
 		peers--;
+	}
+	if (peers == 0) {
+		page_server_panic(tsk->mm, addr, NULL, __pte(0));
 	}
 	from = random % peers;
 
@@ -1291,7 +1348,7 @@ again:
 			BUG_ON(fault_for_read(fault_flags) && "Read fault from owner??");
 			__claim_local_page(tsk, addr, from_nid);
 			grant = true;
-		} else  {
+		} else {
 			if (!page_is_mine(mm, addr)) {
 				remote_page_response_t *rp =
 					__claim_remote_page(tsk, addr, fault_flags);

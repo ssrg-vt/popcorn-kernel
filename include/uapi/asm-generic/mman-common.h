@@ -57,6 +57,10 @@
 					   overrides the coredump filter bits */
 #define MADV_DODUMP	17		/* Clear the MADV_DONTDUMP flag */
 
+#ifdef CONFIG_POPCORN
+#define MADV_RELEASE 18
+#endif
+
 /* compatibility flags */
 #define MAP_FILE	0
 

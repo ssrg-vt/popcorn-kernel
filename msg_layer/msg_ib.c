@@ -62,8 +62,13 @@
 #define CONFIG_RDMA_NOTIFY 0	/* Two WRITE */
 
 /* self-testing */
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 #define CHECK_WQ_WR 1
 #define CHECK_RECV_WR 0
+#else
+#define CHECK_WQ_WR 0
+#define CHECK_RECV_WR 0
+#endif
 
 /* IB recv */
 #define MAX_RECV_WR 128	/* important! Check it if only sender crash */
