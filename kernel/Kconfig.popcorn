@@ -29,6 +29,11 @@ config POPCORN_DEBUG_PAGE_SERVER
 	depends on POPCORN_DEBUG
 	default n
 
+config POPCORN_DEBUG_PAGE_FAULT
+	bool "Page faults (ftrace)"
+	depends on POPCORN_DEBUG
+	default n
+
 config POPCORN_DEBUG_VMA_SERVER
 	bool "VMA handling"
 	depends on POPCORN_DEBUG
@@ -49,6 +54,11 @@ config POPCORN_REMOTE_INFO
 
 config POPCORN_STAT
 	bool "Collect performance statistics"
+	default n
+
+config POPCORN_STAT_PGFAULTS
+	bool "Page fault handling (ftrace)"
+	depends on POPCORN_STAT
 	default n
 
 comment "Popcorn is not currently supported on your architecture"
