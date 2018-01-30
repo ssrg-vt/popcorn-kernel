@@ -413,7 +413,11 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 		}
 
 		atomic_inc(&fh->pendings);
+#ifndef CONFIG_POPCORN_DEBUG_PAGE_SERVER
+		prepare_to_wait(&fh->waits, &wait, TASK_UNINTERRUPTIBLE);
+#else
 		prepare_to_wait_exclusive(&fh->waits, &wait, TASK_UNINTERRUPTIBLE);
+#endif
 		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 		PGPRINTK(" +[%d] %lx %p\n", tsk->pid, addr, fh);
 		put_task_remote(tsk);
@@ -468,7 +472,11 @@ static bool __finish_fault_handling(struct fault_handle *fh)
 	spin_lock_irqsave(&fh->rc->faults_lock[fk], flags);
 	if (atomic_dec_return(&fh->pendings)) {
 		PGPRINTK(" >[%d] %lx %p\n", fh->pid, fh->addr, fh);
+#ifndef CONFIG_POPCORN_DEBUG_PAGE_SERVER
+		wake_up_all(&fh->waits);
+#else
 		wake_up(&fh->waits);
+#endif
 	} else {
 		PGPRINTK(">>[%d] %lx %p\n", fh->pid, fh->addr, fh);
 		if (fh->complete) {
