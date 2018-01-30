@@ -120,7 +120,7 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	rc->for_remote = remote;
 
 	for (i = 0; i < FAULTS_HASH; i++) {
-		INIT_LIST_HEAD(&rc->faults[i]);
+		INIT_HLIST_HEAD(&rc->faults[i]);
 		spin_lock_init(&rc->faults_lock[i]);
 	}
 

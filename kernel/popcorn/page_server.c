@@ -252,7 +252,7 @@ enum {
 static struct kmem_cache *__fault_handle_cache = NULL;
 
 struct fault_handle {
-	struct list_head list;
+	struct hlist_node list;
 
 	unsigned long addr;
 	unsigned long flags;
@@ -277,7 +277,7 @@ static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsign
 	int fk = __fault_hash_key(addr);
 	BUG_ON(!fh);
 
-	INIT_LIST_HEAD(&fh->list);
+	INIT_HLIST_NODE(&fh->list);
 
 	fh->addr = addr;
 	fh->flags = 0;
@@ -292,7 +292,7 @@ static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsign
 	fh->pid = tsk->pid;
 	fh->complete = NULL;
 
-	list_add(&fh->list, &fh->rc->faults[fk]);
+	hlist_add_head(&fh->list, &fh->rc->faults[fk]);
 	return fh;
 }
 
@@ -307,7 +307,7 @@ static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsign
 	int fk = __fault_hash_key(addr);
 
 	spin_lock_irqsave(&rc->faults_lock[fk], flags);
-	list_for_each_entry(fh, &rc->faults[fk], list) {
+	hlist_for_each_entry(fh, &rc->faults[fk], list) {
 		if (fh->addr == addr) {
 			PGPRINTK("  [%d] %s %s ongoing, wait\n", tsk->pid,
 				fh->flags & FAULT_HANDLE_REMOTE ? "remote" : "local",
@@ -345,7 +345,7 @@ static void __finish_invalidation(struct fault_handle *fh)
 
 	BUG_ON(atomic_read(&fh->pendings));
 	spin_lock_irqsave(&fh->rc->faults_lock[fk], flags);
-	list_del(&fh->list);
+	hlist_del(&fh->list);
 	spin_unlock_irqrestore(&fh->rc->faults_lock[fk], flags);
 
 	__put_task_remote(fh->rc);
@@ -371,7 +371,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	spin_lock_irqsave(&rc->faults_lock[fk], flags);
 	spin_unlock(ptl);
 
-	list_for_each_entry(fh, &rc->faults[fk], list) {
+	hlist_for_each_entry(fh, &rc->faults[fk], list) {
 		if (fh->addr == addr) {
 			found = true;
 			break;
@@ -482,7 +482,7 @@ static bool __finish_fault_handling(struct fault_handle *fh)
 		if (fh->complete) {
 			complete(fh->complete);
 		} else {
-			list_del(&fh->list);
+			hlist_del(&fh->list);
 			last = true;
 		}
 	}
