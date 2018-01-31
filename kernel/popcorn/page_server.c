@@ -1092,7 +1092,7 @@ static void __make_pte_valid(struct mm_struct *mm,
 }
 
 
-static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
+static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, unsigned long instr_addr)
 {
 	int peers;
 	unsigned int random = prandom_u32();
@@ -1126,6 +1126,14 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 	peers++;
 #endif
 	ws = get_wait_station_multiple(tsk, peers);
+
+#ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
+	if (peers) {
+		unsigned long dest_mask = MAX_POPCORN_NODES - 1;
+		dest_mask &= ~(1UL << my_nid);
+		trace_printk("%d %lx %lx %lu\n", tsk->pid, instr_addr, addr, *pi & dest_mask);
+	}
+#endif
 
 	for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
 		pid_t pid = rc->remote_tgids[nid];
@@ -1162,7 +1170,7 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 }
 
 
-static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_nid)
+static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_nid, unsigned long instr_addr)
 {
 	struct mm_struct *mm = tsk->mm;
 	unsigned long *pi = __get_page_info(mm, addr);
@@ -1181,11 +1189,17 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int 
 		int nid;
 		struct remote_context *rc = get_task_remote(tsk);
 		struct wait_station *ws = get_wait_station_multiple(tsk, peers);
-
+#ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
+		{
+			unsigned long dest_mask = MAX_POPCORN_NODES - 1;
+			dest_mask &= ~(1UL << my_nid);
+			dest_mask &= ~(1UL << except_nid);
+			trace_printk("%d %lx %lx %lu\n", tsk->pid, instr_addr, addr, *pi & dest_mask);
+		}
+#endif
 		for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
 			pid_t pid = rc->remote_tgids[nid];
 			if (nid == except_nid || nid == my_nid) continue;
-
 			clear_bit(nid, pi);
 			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 		}
@@ -1350,12 +1364,12 @@ again:
 
 		if (test_page_owner(from_nid, mm, addr)) {
 			BUG_ON(fault_for_read(fault_flags) && "Read fault from owner??");
-			__claim_local_page(tsk, addr, from_nid);
+			__claim_local_page(tsk, addr, from_nid, req->instr_addr);
 			grant = true;
 		} else {
 			if (!page_is_mine(mm, addr)) {
 				remote_page_response_t *rp =
-					__claim_remote_page(tsk, addr, fault_flags);
+					__claim_remote_page(tsk, addr, fault_flags, req->instr_addr);
 
 				paddr = kmap(page);
 				copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
@@ -1365,7 +1379,7 @@ again:
 				pcn_kmsg_free_msg(rp);
 			} else {
 				if (fault_for_write(fault_flags))
-					__claim_local_page(tsk, addr, my_nid);
+					__claim_local_page(tsk, addr, my_nid, req->instr_addr);
 			}
 		}
 		spin_lock(ptl);
@@ -1563,7 +1577,8 @@ retry:
 
 	if (leader && !page_is_mine(mm, addr)) {
 		remote_page_response_t *rp =
-				__claim_remote_page(current, addr, fault_flags);
+				__claim_remote_page(current, addr, fault_flags,
+					instruction_pointer(current_pt_regs()));
 		struct page *page = get_normal_page(vma, addr, pte);
 		void *paddr;
 
@@ -1812,7 +1827,8 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 			goto out_wakeup;
 		}
 
-		__claim_local_page(current, addr, my_nid);
+		__claim_local_page(current, addr, my_nid,
+				instruction_pointer(current_pt_regs()));
 
 		spin_lock(ptl);
 		pte_val = pte_mkwrite(pte_val);
@@ -1825,7 +1841,8 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	} else {
 		struct page *page;
 		remote_page_response_t *rp =
-				__claim_remote_page(current, addr, fault_flags);
+				__claim_remote_page(current, addr, fault_flags,
+					instruction_pointer(current_pt_regs()));
 		void *paddr;
 		BUG_ON(rp->result != 0);
 
