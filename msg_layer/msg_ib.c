@@ -969,8 +969,17 @@ static int __ib_kmsg_send(unsigned int dst,
 	ret = ib_post_send(cb->qp, &send_wr, &bad_wr);
 	BUG_ON(ret);
 
-	if (!try_wait_for_completion(&comp))
+	if (msg_size >= PAGE_SIZE) {
 		wait_for_completion(&comp);
+	} else {
+		int retry = 0;
+		const int MAX_RETRY = 32;
+		while (retry++ < MAX_RETRY) {
+			if (try_wait_for_completion(&comp)) break;
+		}
+		if (retry > MAX_RETRY)
+			wait_for_completion(&comp);
+	}
 
 	dma_unmap_single(cb->pd->device->dma_device,
 					 dma_addr, msg->header.size, DMA_BIDIRECTIONAL);
