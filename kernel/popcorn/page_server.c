@@ -1248,7 +1248,9 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 		return VM_FAULT_SIGSEGV;
 	}
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!page_is_mine(mm, addr));
+#endif
 
 	spin_lock(ptl);
 	SetPageDistributed(mm, addr);
@@ -1835,7 +1837,9 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
 		pcn_kmsg_free_msg(rp);
 	}
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!test_page_owner(my_nid, mm, addr));
+#endif
 	pte_unmap_unlock(pte, ptl);
 
 out_wakeup:

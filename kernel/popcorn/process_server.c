@@ -423,7 +423,7 @@ static void bring_back_remote_thread(back_migration_request_t *req)
 		goto out_free;
 	}
 
-	PSPRINTK("\n### BACKMIG [%d] from [%d/%d]\n",
+	PRINTK("### BACKMIG [%d] from [%d/%d]\n",
 			current->pid, req->remote_pid, req->remote_nid);
 
 	/* Welcome home */
