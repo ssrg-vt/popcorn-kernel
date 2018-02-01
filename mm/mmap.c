@@ -2648,7 +2648,16 @@ int vm_munmap(unsigned long start, size_t len)
 	int ret;
 	struct mm_struct *mm = current->mm;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_process(current)) {
+		while (!down_write_trylock(&mm->mmap_sem))
+			schedule();
+	} else {
+		down_write(&mm->mmap_sem);
+	}
+#else
 	down_write(&mm->mmap_sem);
+#endif
 	ret = do_munmap(mm, start, len);
 	up_write(&mm->mmap_sem);
 	return ret;
