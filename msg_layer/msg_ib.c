@@ -1322,20 +1322,8 @@ void respond_ib_rdma(pcn_kmsg_perf_rdma_t *req, void *res, u32 res_size)
 
 static void __process_recv_work_completion(struct recv_work_t *w)
 {
-	pcn_kmsg_cbftn ftn;
 	struct pcn_kmsg_message *msg = &w->msg;
-
-	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
-	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
-
-	ftn = pcn_kmsg_cbftns[msg->header.type];
-	BUG_ON(!ftn);
-
-#ifdef CONFIG_POPCORN_STAT
-	account_pcn_message_recv(msg);
-#endif
-	ftn(&w->msg);
-	return;
+	pcn_kmsg_process(msg);
 }
 
 static void __process_send_work_completion(struct ib_cb *cb, struct send_work_comp_desc *cd)

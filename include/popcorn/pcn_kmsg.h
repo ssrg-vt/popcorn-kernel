@@ -191,6 +191,8 @@ int pcn_kmsg_register_callback(enum pcn_kmsg_type type,
    be called when a kernel module is unloaded. */
 int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
+void pcn_kmsg_process(struct pcn_kmsg_message *msg);
+
 /* MESSAGING */
 
 /* Send a message to the specified destination CPU. */

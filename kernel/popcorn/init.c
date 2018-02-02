@@ -24,10 +24,7 @@ extern int process_server_init(void);
 extern int vma_server_init(void);
 extern int page_server_init(void);
 extern int remote_info_init(void);
-
-#ifdef CONFIG_POPCORN_STAT
 extern int statistics_init(void);
-#endif
 
 static int __init popcorn_init(void)
 {
@@ -50,10 +47,7 @@ static int __init popcorn_init(void)
 	sched_server_init();
 
 	remote_info_init();
-
-#ifdef CONFIG_POPCORN_STAT
 	statistics_init();
-#endif
 	return 0;
 }
 late_initcall(popcorn_init);
