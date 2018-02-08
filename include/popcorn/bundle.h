@@ -7,10 +7,10 @@
 #endif
 
 enum popcorn_arch {
+	POPCORN_ARCH_UNKNOWN = -1,
 	POPCORN_ARCH_ARM = 0,
 	POPCORN_ARCH_X86 = 1,
 	POPCORN_ARCH_PPC = 2,
-	POPCORN_ARCH_UNKNOWN,
 };
 
 extern int my_nid;
