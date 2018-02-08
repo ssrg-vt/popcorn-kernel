@@ -31,6 +31,11 @@ EXPORT_SYMBOL(pcn_kmsg_respond_rdma_ftn);
 free_ftn pcn_kmsg_free_ftn = NULL;
 EXPORT_SYMBOL(pcn_kmsg_free_ftn);
 
+unsigned long long pcn_bytes_sent = 0;
+EXPORT_SYMBOL(pcn_bytes_sent);
+unsigned long long pcn_bytes_recv = 0;
+EXPORT_SYMBOL(pcn_bytes_recv);
+
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {
@@ -52,6 +57,28 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 	return pcn_kmsg_register_callback(type, (pcn_kmsg_cbftn)NULL);
 }
 
+void pcn_kmsg_process(struct pcn_kmsg_message *msg)
+{
+	pcn_kmsg_cbftn ftn;
+
+	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
+	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
+
+	ftn = pcn_kmsg_cbftns[msg->header.type];
+
+	if (ftn != NULL) {
+		ftn(msg);
+	} else {
+		printk(KERN_ERR"No callback registered for %d\n", msg->header.type);
+		pcn_kmsg_free_msg(msg);
+	}
+
+	pcn_bytes_recv += msg->header.size;
+#ifdef CONFIG_POPCORN_STAT
+	account_pcn_message_recv(msg);
+#endif
+}
+
 int pcn_kmsg_send(unsigned int to, void *msg, unsigned int size)
 {
 	struct pcn_kmsg_message *m = msg;
@@ -68,6 +95,7 @@ int pcn_kmsg_send(unsigned int to, void *msg, unsigned int size)
 	BUG_ON(to < 0 || to >= MAX_POPCORN_NODES);
 	BUG_ON(to == my_nid);
 
+	pcn_bytes_sent += size;
 #ifdef CONFIG_POPCORN_STAT
 	account_pcn_message_sent(msg);
 #endif
@@ -116,5 +144,6 @@ EXPORT_SYMBOL(pcn_kmsg_free_msg);
 EXPORT_SYMBOL(pcn_kmsg_request_rdma);
 EXPORT_SYMBOL(pcn_kmsg_respond_rdma);
 EXPORT_SYMBOL(pcn_kmsg_send);
+EXPORT_SYMBOL(pcn_kmsg_process);
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 EXPORT_SYMBOL(pcn_kmsg_register_callback);

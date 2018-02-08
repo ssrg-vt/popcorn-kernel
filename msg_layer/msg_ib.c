@@ -62,8 +62,13 @@
 #define CONFIG_RDMA_NOTIFY 0	/* Two WRITE */
 
 /* self-testing */
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 #define CHECK_WQ_WR 1
 #define CHECK_RECV_WR 0
+#else
+#define CHECK_WQ_WR 0
+#define CHECK_RECV_WR 0
+#endif
 
 /* IB recv */
 #define MAX_RECV_WR 128	/* important! Check it if only sender crash */
@@ -132,6 +137,19 @@ struct recv_work_t {
 	struct pcn_kmsg_message msg;
 };
 
+struct send_work_comp_desc {
+	unsigned long flags;
+	void *private;
+};
+
+struct send_work_t {
+	struct ib_send_wr send_wr;
+	struct ib_sge sgl;
+	char *buffer;
+	struct send_work_comp_desc comp;
+	struct send_work_t *next;
+};
+
 /*for testing */
 #if CHECK_RECV_WR
 void *rws_ptr[MAX_NUM_NODES][MAX_RECV_WR];
@@ -164,6 +182,9 @@ struct ib_cb {
 	struct ib_cq *cq;				/* can split into two send/recv */
 	struct ib_pd *pd;
 	struct ib_qp *qp;
+
+	spinlock_t send_work_pool_lock;
+	struct send_work_t *send_work_pool;
 
 	/* how many WR in Work Queue */
 #if CHECK_WQ_WR
@@ -409,6 +430,48 @@ static void __setup_recv_wr(struct ib_cb *cb)
 #endif
 	}
 	return;
+}
+
+static void __setup_send_wr_pool(struct ib_cb *cb)
+{
+	int i;
+
+	spin_lock_init(&cb->send_work_pool_lock);
+	cb->send_work_pool = NULL;
+
+	for (i = 0; i < MAX_SEND_WR; i++) {
+		struct ib_send_wr *wr;
+		struct ib_sge *sgl;
+		struct send_work_comp_desc *comp;
+		struct send_work_t *work = kmalloc(sizeof(*work), GFP_KERNEL);
+		u64 dma_addr;
+		BUG_ON(!work);
+
+		work->buffer = (char *)__get_free_pages(GFP_KERNEL, 2);
+		BUG_ON(!work->buffer);
+		dma_addr = dma_map_single(cb->pd->device->dma_device,
+				work->buffer, PAGE_SIZE * (1UL << 2), DMA_BIDIRECTIONAL);
+		BUG_ON(dma_mapping_error(cb->pd->device->dma_device, dma_addr));
+
+		comp = &work->comp;
+		comp->flags = 0;
+		comp->private = work;
+
+		sgl = &work->sgl;
+		sgl->lkey = cb->pd->local_dma_lkey;
+		sgl->addr = dma_addr;
+
+		wr = &work->send_wr;
+		wr->opcode = IB_WR_SEND;
+		wr->send_flags = IB_SEND_SIGNALED;
+		wr->sg_list = sgl;
+		wr->num_sge = 1;
+		wr->next = NULL;
+		wr->wr_id = (unsigned long)comp;
+
+		work->next = cb->send_work_pool;
+		cb->send_work_pool = work;
+	}
 }
 
 
@@ -678,6 +741,7 @@ static int ib_setup_buffers(struct ib_cb *cb)
 	}
 #endif
 	__setup_recv_wr(cb);
+	__setup_send_wr_pool(cb);
 	return 0;
 bail:
 	for (i = 0; i < MR_POOL_SIZE; i++) {
@@ -928,7 +992,7 @@ err1:
  * This func will take care of it.
  * User has to free the allocated mem manually
  */
-static int __ib_kmsg_send(unsigned int dst,
+static int __ib_kmsg_send_large(unsigned int dst,
 				  struct pcn_kmsg_message *msg,
 				  unsigned int msg_size)
 {
@@ -940,20 +1004,19 @@ static int __ib_kmsg_send(unsigned int dst,
 		.length = msg_size,
 		.lkey = cb->pd->local_dma_lkey,
 	};
+	struct send_work_comp_desc cd = {
+		.flags = 1,
+		.private = &comp,
+	};
 	struct ib_send_wr send_wr = {
 		.opcode = IB_WR_SEND,
 		.send_flags = IB_SEND_SIGNALED,
 		.num_sge = 1,
 		.sg_list = &send_sgl,
 		.next = NULL,
-		.wr_id = (unsigned long)&comp,
+		.wr_id = (unsigned long)&cd,
 	};
-	u64 dma_addr;
-
-	msg->header.size = msg_size;
-	msg->header.from_nid = my_nid;
-
-	dma_addr = dma_map_single(cb->pd->device->dma_device,
+	u64 dma_addr = dma_map_single(cb->pd->device->dma_device,
 							msg, msg_size, DMA_BIDIRECTIONAL);
 	ret = dma_mapping_error(cb->pd->device->dma_device, dma_addr);
 	BUG_ON(ret);
@@ -964,14 +1027,53 @@ static int __ib_kmsg_send(unsigned int dst,
 	ret = ib_post_send(cb->qp, &send_wr, &bad_wr);
 	BUG_ON(ret);
 
-	if (!try_wait_for_completion(&comp))
-		wait_for_completion(&comp);
-
+	wait_for_completion(&comp);
 	dma_unmap_single(cb->pd->device->dma_device,
 					 dma_addr, msg->header.size, DMA_BIDIRECTIONAL);
 	return 0;
 }
 
+static int __ib_kmsg_send_small(unsigned int dst,
+		struct pcn_kmsg_message *msg, unsigned int msg_size)
+{
+	int ret;
+	struct send_work_t *work;
+	struct ib_cb *cb = gcb[dst];
+	struct ib_send_wr *bad_wr;
+	unsigned long flags;
+
+	spin_lock_irqsave(&cb->send_work_pool_lock, flags);
+	work = cb->send_work_pool;
+	cb->send_work_pool = work->next;
+	spin_unlock_irqrestore(&cb->send_work_pool_lock, flags);
+	BUG_ON(!work);
+
+	memcpy(work->buffer, msg, msg_size);
+	BUG_ON(work->comp.flags != 0);
+	BUG_ON(work->comp.private != work);
+
+	work->sgl.length = msg_size;
+
+	selftest_wr_wq_inc(cb);
+	ret = ib_post_send(cb->qp, &work->send_wr, &bad_wr);
+	BUG_ON(ret);
+
+	return 0;
+}
+
+static int __ib_kmsg_send(unsigned int dst, struct pcn_kmsg_message *msg, unsigned int msg_size)
+{
+	int ret = 0;
+	msg->header.size = msg_size;
+	msg->header.from_nid = my_nid;
+
+	if (msg_size < PAGE_SIZE) {
+		ret = __ib_kmsg_send_small(dst, msg, msg_size);
+	} else {
+		ret = __ib_kmsg_send_large(dst, msg, msg_size);
+	}
+	return ret;
+}
 
 /*
  * RDMA READ:
@@ -1218,23 +1320,26 @@ void respond_ib_rdma(pcn_kmsg_perf_rdma_t *req, void *res, u32 res_size)
 }
 
 
-static void __process_recv_work(struct recv_work_t *w)
+static void __process_recv_work_completion(struct recv_work_t *w)
 {
-	pcn_kmsg_cbftn ftn;
 	struct pcn_kmsg_message *msg = &w->msg;
-
-	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
-	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
-
-	ftn = pcn_kmsg_cbftns[msg->header.type];
-	BUG_ON(!ftn);
-
-#ifdef CONFIG_POPCORN_STAT
-	account_pcn_message_recv(msg);
-#endif
-	ftn(&w->msg);
-	return;
+	pcn_kmsg_process(msg);
 }
+
+static void __process_send_work_completion(struct ib_cb *cb, struct send_work_comp_desc *cd)
+{
+	if (cd->flags == 0) {
+		struct send_work_t *work = cd->private;
+		unsigned long flags;
+		spin_lock_irqsave(&cb->send_work_pool_lock, flags);
+		work->next = cb->send_work_pool;
+		cb->send_work_pool = work;
+		spin_unlock_irqrestore(&cb->send_work_pool_lock, flags);
+	} else {
+		complete((struct completion *)cd->private);
+	}
+}
+
 
 static void __cq_event_handler(struct ib_cq *cq, void *ctx)
 {
@@ -1265,11 +1370,12 @@ retry:
 		switch (wc.opcode) {
 		case IB_WC_SEND:
 			selftest_wr_wq_dec(gcb[cb->conn_no]);
-			complete((struct completion *)wc.wr_id);
+			__process_send_work_completion(cb,
+					(struct send_work_comp_desc *)wc.wr_id);
 			break;
 
 		case IB_WC_RECV:
-			__process_recv_work((struct recv_work_t *)wc.wr_id);
+			__process_recv_work_completion((struct recv_work_t *)wc.wr_id);
 			break;
 
 		case IB_WC_RDMA_WRITE:

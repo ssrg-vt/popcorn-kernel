@@ -29,6 +29,7 @@
 #include "types.h"
 #include "util.h"
 #include "vma_server.h"
+#include "page_server.h"
 #include "wait_station.h"
 
 enum vma_op_code {
@@ -498,7 +499,12 @@ void process_vma_op_request(vma_op_request_t *req)
 			req->flags, req->new_addr);
 		break;
 	case VMA_OP_MADVISE:
-		ret = sys_madvise(req->start, req->len, req->behavior);
+		if (req->behavior == MADV_RELEASE) {
+			ret = process_madvise_release_from_remote(req->remote_nid,
+					req->start, req->start + req->len);
+		} else {
+			ret = sys_madvise(req->start, req->len, req->behavior);
+		}
 		break;
 	default:
 		BUG_ON("unreachable");

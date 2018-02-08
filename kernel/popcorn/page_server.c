@@ -48,11 +48,11 @@ inline void page_server_start_mm_fault(unsigned long address)
 {
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	if (!distributed_process(current)) return;
-	if (current->fault_address == 0) {
+	if (current->fault_address == 0 ||
+			current->fault_address != address) {
 		current->fault_address = address;
 		current->fault_retry = 0;
 		do_gettimeofday(&current->fault_start);
-	} else if (current->fault_address != address) {
 		current->fault_address = address;
 	}
 #endif
@@ -60,7 +60,6 @@ inline void page_server_start_mm_fault(unsigned long address)
 
 inline int page_server_end_mm_fault(int ret)
 {
-	ret &= ~VM_FAULT_REMOTE;
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	if (!distributed_process(current)) return ret;
 
@@ -74,8 +73,9 @@ inline int page_server_end_mm_fault(int ret)
 		dt = tv_end.tv_sec * 1000000 + tv_end.tv_usec
 			- current->fault_start.tv_sec * 1000000
 			- current->fault_start.tv_usec;
-		trace_printk("%lx %d %d %lu\n",
-				current->fault_address, ret & VM_FAULT_REMOTE,
+		trace_printk("%lx %lx %d %d %lu\n",
+				instruction_pointer(current_pt_regs()),
+				current->fault_address, ret,
 				current->fault_retry, dt);
 		current->fault_address = 0;
 	}
@@ -222,15 +222,13 @@ static inline bool test_page_owner(int nid, struct mm_struct *mm, unsigned long 
 static inline void set_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
-	BUG_ON(!pi);
-
 	set_bit(nid, pi);
 }
 
 static inline void clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long *pi = __get_page_info(mm, addr);
-	BUG_ON(!pi);
+	if (!pi) return;
 
 	clear_bit(nid, pi);
 }
@@ -252,7 +250,7 @@ enum {
 static struct kmem_cache *__fault_handle_cache = NULL;
 
 struct fault_handle {
-	struct list_head list;
+	struct hlist_node list;
 
 	unsigned long addr;
 	unsigned long flags;
@@ -277,7 +275,7 @@ static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsign
 	int fk = __fault_hash_key(addr);
 	BUG_ON(!fh);
 
-	INIT_LIST_HEAD(&fh->list);
+	INIT_HLIST_NODE(&fh->list);
 
 	fh->addr = addr;
 	fh->flags = 0;
@@ -292,7 +290,7 @@ static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsign
 	fh->pid = tsk->pid;
 	fh->complete = NULL;
 
-	list_add(&fh->list, &fh->rc->faults[fk]);
+	hlist_add_head(&fh->list, &fh->rc->faults[fk]);
 	return fh;
 }
 
@@ -307,7 +305,7 @@ static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsign
 	int fk = __fault_hash_key(addr);
 
 	spin_lock_irqsave(&rc->faults_lock[fk], flags);
-	list_for_each_entry(fh, &rc->faults[fk], list) {
+	hlist_for_each_entry(fh, &rc->faults[fk], list) {
 		if (fh->addr == addr) {
 			PGPRINTK("  [%d] %s %s ongoing, wait\n", tsk->pid,
 				fh->flags & FAULT_HANDLE_REMOTE ? "remote" : "local",
@@ -345,7 +343,7 @@ static void __finish_invalidation(struct fault_handle *fh)
 
 	BUG_ON(atomic_read(&fh->pendings));
 	spin_lock_irqsave(&fh->rc->faults_lock[fk], flags);
-	list_del(&fh->list);
+	hlist_del(&fh->list);
 	spin_unlock_irqrestore(&fh->rc->faults_lock[fk], flags);
 
 	__put_task_remote(fh->rc);
@@ -371,7 +369,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	spin_lock_irqsave(&rc->faults_lock[fk], flags);
 	spin_unlock(ptl);
 
-	list_for_each_entry(fh, &rc->faults[fk], list) {
+	hlist_for_each_entry(fh, &rc->faults[fk], list) {
 		if (fh->addr == addr) {
 			found = true;
 			break;
@@ -482,7 +480,7 @@ static bool __finish_fault_handling(struct fault_handle *fh)
 		if (fh->complete) {
 			complete(fh->complete);
 		} else {
-			list_del(&fh->list);
+			hlist_del(&fh->list);
 			last = true;
 		}
 	}
@@ -916,6 +914,62 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
 }
 
 
+/**************************************************************************
+ * Voluntarily release page ownership
+ */
+int process_madvise_release_from_remote(int from_nid, unsigned long start, unsigned long end)
+{
+	struct mm_struct *mm;
+	unsigned long addr;
+	int nr_pages = 0;
+
+	mm = get_task_mm(current);
+	for (addr = start; addr < end; addr += PAGE_SIZE) {
+		pmd_t *pmd;
+		pte_t *pte;
+		spinlock_t *ptl;
+		pte = __get_pte_at(mm, addr, &pmd, &ptl);
+		if (!pte) continue;
+		spin_lock(ptl);
+		if (!pte_none(*pte)) {
+			clear_page_owner(from_nid, mm, addr);
+			nr_pages++;
+		}
+		pte_unmap_unlock(pte, ptl);
+	}
+	mmput(mm);
+	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n", current->pid, from_nid,
+			nr_pages, (end - start) / PAGE_SIZE, start, end);
+	return 0;
+}
+
+int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long addr)
+{
+	struct mm_struct *mm = vma->vm_mm;
+	pmd_t *pmd;
+	pte_t *pte;
+	pte_t pte_val;
+	spinlock_t *ptl;
+
+	pte = __get_pte_at(mm, addr, &pmd, &ptl);
+	if (!pte) return 0;
+
+	spin_lock(ptl);
+	if (pte_none(*pte) || !pte_present(*pte)) {
+		pte_unmap_unlock(pte, ptl);
+		return 0;
+	}
+
+	clear_page_owner(my_nid, mm, addr);
+	pte_val = ptep_clear_flush(vma, addr, pte);
+	pte_val = pte_make_invalid(pte_val);
+
+	set_pte_at_notify(mm, addr, pte, pte_val);
+	update_mmu_cache(vma, addr, pte);
+	pte_unmap_unlock(pte, ptl);
+	return 1;
+}
+
 
 /**************************************************************************
  * Handle page faults happened at remote nodes.
@@ -1052,6 +1106,9 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 
 	if (test_bit(my_nid, pi)) {
 		peers--;
+	}
+	if (peers == 0) {
+		page_server_panic(tsk->mm, addr, NULL, __pte(0));
 	}
 	from = random % peers;
 
@@ -1191,7 +1248,9 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 		return VM_FAULT_SIGSEGV;
 	}
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!page_is_mine(mm, addr));
+#endif
 
 	spin_lock(ptl);
 	SetPageDistributed(mm, addr);
@@ -1291,7 +1350,7 @@ again:
 			BUG_ON(fault_for_read(fault_flags) && "Read fault from owner??");
 			__claim_local_page(tsk, addr, from_nid);
 			grant = true;
-		} else  {
+		} else {
 			if (!page_is_mine(mm, addr)) {
 				remote_page_response_t *rp =
 					__claim_remote_page(tsk, addr, fault_flags);
@@ -1434,10 +1493,12 @@ out:
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
 
+#ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
 	trace_printk("%d %d %c %lx %lx %d\n",
 			req->origin_nid, req->remote_pid,
 			fault_for_write(req->fault_flags) ? 'W' : 'R',
 			req->instr_addr, req->addr, res->result);
+#endif
 
 	kfree(res);
 
@@ -1776,7 +1837,9 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
 		pcn_kmsg_free_msg(rp);
 	}
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!test_page_owner(my_nid, mm, addr));
+#endif
 	pte_unmap_unlock(pte, ptl);
 
 out_wakeup:
@@ -1871,10 +1934,12 @@ int page_server_handle_pte_fault(
 	ret = 0;
 
 out:
+#ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
 	trace_printk("%d %d %c %lx %lx %d\n",
 			my_nid, current->pid,
 			fault_for_write(fault_flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
+#endif
 	return ret;
 }
 

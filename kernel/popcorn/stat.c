@@ -10,30 +10,14 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/stat.h>
 
-static unsigned long stats[STAT_ENTRY_MAX] = {0};
 static unsigned long sent_stats[PCN_KMSG_TYPE_MAX] = {0};
 static unsigned long recv_stats[PCN_KMSG_TYPE_MAX] = {0};
 
 #ifndef CONFIG_POPCORN_STAT
-
-void inc_popcorn_stat(enum stat_item i) {};
-void add_popcorn_stat(enum stat_item i, int n) {};
 void account_pcn_message_sent(struct pcn_kmsg_message *msg) {};
 void account_pcn_message_recv(struct pcn_kmsg_message *msg) {};
 
 #else
-
-void inc_popcorn_stat(enum stat_item i)
-{
-	BUG_ON(i < 0 || i >= STAT_ENTRY_MAX);
-	stats[i]++;
-}
-
-void add_popcorn_stat(enum stat_item i, int n)
-{
-	BUG_ON(i < 0 || i >= STAT_ENTRY_MAX);
-	stats[i] += n;
-}
 
 void account_pcn_message_sent(struct pcn_kmsg_message *msg)
 {
@@ -63,13 +47,15 @@ static ssize_t __read_stats(struct file *filp, char *usr_buf, size_t count, loff
 
 	if (*offset == 0) {
 		stats = sent_stats;
+		len += snprintf(buf, PROC_BUF_SIZE, "%llu ", pcn_bytes_sent);
 	} else if (*offset == 1) {
 		stats = recv_stats;
+		len += snprintf(buf, PROC_BUF_SIZE, "%llu ", pcn_bytes_recv);
 	} else {
 		return 0;
 	}
 
-	for (i = 0; i < PCN_KMSG_TYPE_MAX; i++) {
+	for (i = PCN_KMSG_TYPE_NODE_INFO; i < PCN_KMSG_TYPE_MAX; i++) {
 		len += snprintf(buf + len, PROC_BUF_SIZE - len,
 						"%lu ", stats[i]);
 		if (len >= PROC_BUF_SIZE) {
@@ -120,7 +106,5 @@ int statistics_init(void)
 	return 0;
 }
 
-EXPORT_SYMBOL(inc_popcorn_stat);
-EXPORT_SYMBOL(add_popcorn_stat);
 EXPORT_SYMBOL(account_pcn_message_sent);
 EXPORT_SYMBOL(account_pcn_message_recv);

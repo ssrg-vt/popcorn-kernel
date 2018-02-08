@@ -216,25 +216,10 @@ static int send_handler(void* arg0)
  * buf is per conn
  */
 
-static int deq_recv(struct pcn_kmsg_buf *buf, void *_msg, int conn_no)
+static void deq_recv(struct pcn_kmsg_buf *buf, void *_msg, int conn_no)
 {
 	struct pcn_kmsg_message *msg = _msg;
-	pcn_kmsg_cbftn ftn;
-
-	MSGPRINTK("Call %d, %d\n", conn_no, msg.msg->header.type);
-
-	ftn = pcn_kmsg_cbftns[msg->header.type];
-	if (ftn != NULL) {
-#ifdef CONFIG_POPCORN_STAT
-		account_pcn_message_recv(msg);
-#endif
-		ftn((void*)msg);
-	} else {
-		printk(KERN_INFO"No callback registered for %d\n",
-				msg->header.type);
-		pcn_kmsg_free_msg(msg);
-	}
-	return 0;
+	pcn_kmsg_process(msg);
 }
 
 static int recv_handler(void* arg0)
@@ -316,7 +301,7 @@ static int recv_handler(void* arg0)
 		}
 		MSGPRINTK("RecB %d, %d %d\n", conn_no, header.type, header.size);
 
-		err = deq_recv(&handler_params->buf, data, conn_no);
+		deq_recv(&handler_params->buf, data, conn_no);
 	}
 exit:
 	sock_release(sockets[conn_no]);

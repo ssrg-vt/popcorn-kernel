@@ -21,6 +21,7 @@
 #include <popcorn/remote_meminfo.h>
 #include <popcorn/cpuinfo.h>
 
+#include "types.h"
 #include "wait_station.h"
 
 //#define REMOTE_INFO_VERBOSE
@@ -152,26 +153,27 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 	return 0;
 }
 
-static int handle_remote_mem_info_request(struct pcn_kmsg_message *inc_msg)
+static void process_remote_mem_info_request(struct work_struct *work)
 {
-	remote_mem_info_request_t *request = (remote_mem_info_request_t *)inc_msg;
-	remote_mem_info_response_t *response;
+	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
+	remote_mem_info_request_t *request = w->msg;
+	remote_mem_info_response_t response = {
+		.header = {
+			.type = PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE,
+			.prio = PCN_KMSG_PRIO_NORMAL,
+		},
+		.nid = my_nid,
+		.origin_ws = request->origin_ws,
+	};
 	int ret;
 
-	response = kzalloc(sizeof(*response), GFP_KERNEL);
-
-	response->header.type = PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE;
-	response->header.prio = PCN_KMSG_PRIO_NORMAL;
-	response->nid = my_nid;
-	response->origin_ws = request->origin_ws;
-
-	ret = fill_meminfo_response(response);
+	ret = fill_meminfo_response(&response);
 	if (ret < 0) {
 		RIPRINTK("%s: failed to fill memory info\n", __func__);
 		goto out;
 	}
 
-	ret = pcn_kmsg_send(request->nid, response, sizeof(*response));
+	ret = pcn_kmsg_send(request->nid, &response, sizeof(response));
 	if (ret < 0) {
 		RIPRINTK("%s: failed to send response message\n", __func__);
 		goto out;
@@ -179,8 +181,7 @@ static int handle_remote_mem_info_request(struct pcn_kmsg_message *inc_msg)
 
 out:
 	pcn_kmsg_free_msg(request);
-	kfree(response);
-	return 0;
+	kfree(w);
 }
 
 static int handle_remote_mem_info_response(struct pcn_kmsg_message *inc_msg)
@@ -362,16 +363,15 @@ unsigned int get_number_cpus_from_remote_node(unsigned int nid)
 	return num_cpus;
 }
 
-static int handle_remote_cpu_info_request(struct pcn_kmsg_message *inc_msg)
+static void process_remote_cpu_info_request(struct work_struct *work)
 {
-	remote_cpu_info_data_t *request;
+	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
+	remote_cpu_info_data_t *request = w->msg;
 	remote_cpu_info_data_t *response;
 	int ret;
 
-	request = (remote_cpu_info_data_t *)inc_msg;
-
 	response = kzalloc(sizeof(*response), GFP_KERNEL);
-	if (!response) return -ENOMEM;
+	if (!response) goto out_err;
 
 	memcpy(saved_cpu_info[request->nid],
 	       &request->cpu_info_data, sizeof(request->cpu_info_data));
@@ -394,17 +394,17 @@ static int handle_remote_cpu_info_request(struct pcn_kmsg_message *inc_msg)
 	}
 
 out:
-	pcn_kmsg_free_msg(request);
 	kfree(response);
-	return 0;
+out_err:
+	pcn_kmsg_free_msg(request);
+	kfree(w);
+	return;
 }
 
 static int handle_remote_cpu_info_response(struct pcn_kmsg_message *inc_msg)
 {
-	remote_cpu_info_data_t *response;
+	remote_cpu_info_data_t *response = (remote_cpu_info_data_t *)inc_msg;
 	struct wait_station *ws;
-
-	response = (remote_cpu_info_data_t *)inc_msg;
 
 	ws = wait_station(response->origin_ws);
 	ws->private = response;
@@ -510,6 +510,9 @@ int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos
 	return 0;
 }
 
+DEFINE_KMSG_WQ_HANDLER(remote_cpu_info_request);
+DEFINE_KMSG_WQ_HANDLER(remote_mem_info_request);
+
 int remote_info_init(void)
 {
 	int i = 0;
@@ -518,14 +521,14 @@ int remote_info_init(void)
 	for (i = 0; i < MAX_POPCORN_NODES; i++)
 		saved_cpu_info[i] = kzalloc(sizeof(struct remote_cpu_info), GFP_KERNEL);
 
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
-				   handle_remote_cpu_info_request);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
-				   handle_remote_cpu_info_response);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
+				   remote_cpu_info_request);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
+				   remote_cpu_info_response);
 
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
-				   handle_remote_mem_info_request);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE,
-				   handle_remote_mem_info_response);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
+				   remote_mem_info_request);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE,
+				   remote_mem_info_response);
 	return 0;
 }

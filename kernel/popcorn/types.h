@@ -30,7 +30,7 @@ struct remote_context {
 
 	/* For page replication protocol */
 	spinlock_t faults_lock[FAULTS_HASH];
-	struct list_head faults[FAULTS_HASH];
+	struct hlist_head faults[FAULTS_HASH];
 
 	/* For VMA management */
 	spinlock_t vmas_lock;
