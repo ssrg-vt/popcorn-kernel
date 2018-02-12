@@ -25,6 +25,7 @@
 #include <popcorn/types.h>
 #include <popcorn/vma_server.h>
 #include <popcorn/page_server.h>
+#include <popcorn/bundle.h>
 #endif
 
 /*
