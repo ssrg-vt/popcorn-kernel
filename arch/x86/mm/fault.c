@@ -1206,7 +1206,7 @@ retry:
 	vma = find_vma(mm, address);
 #ifdef CONFIG_POPCORN
 	/* vma worker should not fault */
-	BUG_ON(tsk->is_vma_worker);
+	BUG_ON(tsk->is_worker);
 
 	if (distributed_remote_process(tsk)) {
 		if (!vma || vma->vm_start > address) {

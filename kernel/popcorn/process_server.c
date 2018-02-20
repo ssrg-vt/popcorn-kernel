@@ -127,14 +127,13 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	INIT_LIST_HEAD(&rc->vmas);
 	spin_lock_init(&rc->vmas_lock);
 
-	rc->vma_worker_stop = false;
+	rc->stop_workers = false;
 
 	rc->vma_worker = NULL;
 	INIT_LIST_HEAD(&rc->vma_works);
 	spin_lock_init(&rc->vma_works_lock);
 	init_completion(&rc->vma_works_ready);
 
-	rc->remote_thread_spawner = NULL;
 	INIT_LIST_HEAD(&rc->spawn_requests);
 	spin_lock_init(&rc->spawn_requests_lock);
 	init_completion(&rc->spawn_pended);
@@ -309,7 +308,7 @@ static int __exit_remote_task(struct task_struct *tsk)
 		/* Skip notifying for back-migrated threads */
 	} else {
 		/* Something went south. Notify the origin. */
-		if (!get_task_remote(tsk)->vma_worker_stop) {
+		if (!get_task_remote(tsk)->stop_workers) {
 			remote_task_exit_t req = {
 				.header.type = PCN_KMSG_TYPE_TASK_EXIT_REMOTE,
 				.header.prio = PCN_KMSG_PRIO_NORMAL,
@@ -338,12 +337,12 @@ int process_server_task_exit(struct task_struct *tsk)
 
 	PSPRINTK("EXITED [%d] %s%s / 0x%x\n", tsk->pid,
 			tsk->at_remote ? "remote" : "local",
-			tsk->is_vma_worker ? " worker": "",
+			tsk->is_worker ? " worker": "",
 			tsk->exit_code);
 
 	// show_regs(task_pt_regs(tsk));
 
-	if (tsk->is_vma_worker) return 0;
+	if (tsk->is_worker) return 0;
 
 	if (tsk->at_remote) {
 		return __exit_remote_task(tsk);
@@ -396,11 +395,11 @@ static int handle_origin_task_exit(struct pcn_kmsg_message *msg)
 		goto out;
 	}
 	PSPRINTK("\nTERMINATE [%d] with 0x%x\n", tsk->pid, req->exit_code);
-	BUG_ON(!tsk->is_vma_worker);
+	BUG_ON(!tsk->is_worker);
 	tsk->exit_code = req->exit_code;
 
 	rc = get_task_remote(tsk);
-	rc->vma_worker_stop = true;
+	rc->stop_workers = true;
 	complete(&rc->vma_works_ready);
 	complete(&rc->spawn_pended);
 
@@ -537,13 +536,13 @@ static int __pair_remote_task(void)
 }
 
 
-struct shadow_params {
+struct remote_thread_params {
 	clone_request_t *req;
 };
 
 static int remote_thread_main(void *_args)
 {
-	struct shadow_params *params = _args;
+	struct remote_thread_params *params = _args;
 	clone_request_t *req = params->req;
 
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
@@ -607,12 +606,11 @@ int remote_thread_spawner(void *_args)
 
 	PSPRINTK("%s [%d] started\n", __func__, current->pid);
 
-	current->is_vma_worker = true;
-	rc->remote_thread_spawner = current;
+	current->is_worker = true;
 
-	while (!rc->vma_worker_stop) {
+	while (!rc->stop_workers) {
 		struct work_struct *work = NULL;
-		struct shadow_params *params;
+		struct remote_thread_params *params;
 
 		if (!wait_for_completion_interruptible_timeout(&rc->spawn_pended, HZ))
 			continue;
@@ -689,7 +687,7 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 }
 
 
-struct vma_worker_params {
+struct remote_worker_params {
 	struct pcn_kmsg_work *work;
 	struct remote_context *rc;
 	char comm[TASK_COMM_LEN];
@@ -703,20 +701,19 @@ static void __terminate_remote_threads(struct remote_context *rc)
 	 * didn't work */
 	rcu_read_lock();
 	for_each_thread(current, tsk) {
-		if (tsk->is_vma_worker) continue;
+		if (tsk->is_worker) continue;
 		force_sig(SIGKILL, tsk);
 		break;
 	}
 	rcu_read_unlock();
 }
 
-static int start_vma_worker_remote(void *_data)
+static int start_remote_worker(void *_data)
 {
-	struct vma_worker_params *params = (struct vma_worker_params *)_data;
+	struct remote_worker_params *params = (struct remote_worker_params *)_data;
 	struct pcn_kmsg_work *work = params->work;
 	clone_request_t *req = work->msg;
 	struct remote_context *rc = params->rc;
-	struct cred *new;
 
 	might_sleep();
 	kfree(params);
@@ -728,14 +725,19 @@ static int start_vma_worker_remote(void *_data)
 
 	current->flags &= ~PF_RANDOMIZE;	/* Disable ASLR for now*/
 	current->personality = req->personality;
-	current->is_vma_worker = true;
+	current->is_worker = true;
 	current->at_remote = true;
 	current->origin_nid = req->origin_nid;
 	current->origin_pid = req->origin_pid;
 
 	set_user_nice(current, 0);
-	new = prepare_kernel_cred(current);
+
+	/* meaningless for now */
+	/*
+	struct cred *new;
+	new = prepare_kernel_cred(NULL);
 	commit_creds(new);
+	*/
 
 	if (__construct_mm(req, rc) != 0) {
 		BUG();
@@ -746,13 +748,13 @@ static int start_vma_worker_remote(void *_data)
 	rc->tgid = current->tgid;
 	smp_mb();
 
-	/* Create the shadow spawner */
+	/* Create the remote thread spawner */
 	kernel_thread(remote_thread_spawner, rc, CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
 
 	/*
 	 * Drop to user here to access mm using get_task_mm() in vma_worker routine.
 	 * This should be done after forking remote_thread_spawner otherwise
-	 * kernel_thread() will consider this as a user thread fork() which
+	 * kernel_thread(spawner) will be assumed as a user thread fork(), which
 	 * will end up an inproper instruction pointer (see copy_thread_tls()).
 	 */
 	current->flags &= ~PF_KTHREAD;
@@ -780,7 +782,7 @@ static void clone_remote_thread(struct work_struct *_work)
 	__lock_remote_contexts_in(nid_from);
 	rc = __lookup_remote_contexts_in(nid_from, tgid_from);
 	if (!rc) {
-		struct vma_worker_params *params;
+		struct remote_worker_params *params;
 
 		rc = rc_new;
 		rc->remote_tgids[nid_from] = tgid_from;
@@ -796,7 +798,7 @@ static void clone_remote_thread(struct work_struct *_work)
 		smp_mb();
 
 		rc->vma_worker =
-				kthread_run(start_vma_worker_remote, params, params->comm);
+				kthread_run(start_remote_worker, params, params->comm);
 	} else {
 		__unlock_remote_contexts_in(nid_from);
 		kfree(rc_new);
@@ -828,7 +830,7 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 {
 	struct task_struct *tsk = __get_task_struct(pid);
 	if (!tsk) {
-		printk(KERN_INFO"%s: invalid origin task %d for remote work %d\n",
+		printk(KERN_INFO"%s: invalid origin task %d for remote work type %d\n",
 				__func__, pid, req->header.type);
 		pcn_kmsg_free_msg(req);
 		return -ESRCH;
@@ -839,7 +841,7 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 		struct pcn_kmsg_work *work = kmalloc(sizeof(*work), GFP_ATOMIC);
 		struct list_head *entry = &((struct work_struct *)work)->entry;
 
-		BUG_ON(!tsk->is_vma_worker);
+		BUG_ON(!tsk->is_worker);
 
 		work->msg = req;
 		INIT_LIST_HEAD(entry);
@@ -898,8 +900,8 @@ static int __process_remote_works(void)
 			run = false;
 			break;
 		default:
-			if (WARN_ON("Receive unsupported message")) {
-				printk("  Type: %d\n", req->header.type);
+			if (WARN_ON("Received unsupported remote work")) {
+				printk("  type: %d\n", req->header.type);
 			}
 		}
 	}

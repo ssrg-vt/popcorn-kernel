@@ -29,7 +29,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Vincent's scheduling infrasrtucture based on Antonio's power/pmu readings
 ///////////////////////////////////////////////////////////////////////////////
-#define POPCORN_POWER_N_VALUES 10
+#define POWER_N_VALUES 10
 int *popcorn_power_x86_1;
 int *popcorn_power_x86_2;
 int *popcorn_power_arm_1;
@@ -46,6 +46,7 @@ EXPORT_SYMBOL_GPL(popcorn_power_arm_3);
 // scheduling stuff
 ///////////////////////////////////////////////////////////////////////////////
 
+/*
 static int popcorn_sched_sync(void *_param)
 {
 	sched_periodic_req req;
@@ -57,14 +58,14 @@ static int popcorn_sched_sync(void *_param)
 		req.header.type = PCN_KMSG_TYPE_SCHED_PERIODIC;
 		req.header.prio = PCN_KMSG_PRIO_NORMAL;
 
-#ifdef CONFIG_POWER_SENSOR_ARM
-		req.power_1 = popcorn_power_arm_1[POPCORN_POWER_N_VALUES - 1];
-		req.power_2 = popcorn_power_arm_2[POPCORN_POWER_N_VALUES - 1];
-		req.power_3 = popcorn_power_arm_3[POPCORN_POWER_N_VALUES - 1];
+#ifdef CONFIG_POPCORN_POWER_SENSOR_ARM
+		req.power_1 = popcorn_power_arm_1[POWER_N_VALUES - 1];
+		req.power_2 = popcorn_power_arm_2[POWER_N_VALUES - 1];
+		req.power_3 = popcorn_power_arm_3[POWER_N_VALUES - 1];
 #endif
-#ifdef CONFIG_POWER_SENSOR_X86
-		req.power_1 = popcorn_power_x86_1[POPCORN_POWER_N_VALUES - 1];
-		req.power_2 = popcorn_power_x86_2[POPCORN_POWER_N_VALUES - 1];
+#ifdef CONFIG_POPCORN_POWER_SENSOR_X86
+		req.power_1 = popcorn_power_x86_1[POWER_N_VALUES - 1];
+		req.power_2 = popcorn_power_x86_2[POWER_N_VALUES - 1];
 		req.power_3 = 0;
 #endif
 	}
@@ -75,20 +76,19 @@ static int handle_sched_periodic(struct pcn_kmsg_message *msg)
 {
 	sched_periodic_req *req = (sched_periodic_req *)msg;
 
-#ifdef CONFIG_POWER_SENSOR_ARM
-	popcorn_power_x86_1[POPCORN_POWER_N_VALUES - 1] = req->power_1;
-	popcorn_power_x86_2[POPCORN_POWER_N_VALUES - 1] = req->power_2;
+#ifdef CONFIG_POPCORN_POWER_SENSOR_ARM
+	popcorn_power_x86_1[POWER_N_VALUES - 1] = req->power_1;
+	popcorn_power_x86_2[POWER_N_VALUES - 1] = req->power_2;
 #endif
-#ifdef CONFIG_POWER_SENSOR_X86
-	popcorn_power_arm_1[POPCORN_POWER_N_VALUES - 1] = req->power_1;
-	popcorn_power_arm_2[POPCORN_POWER_N_VALUES - 1] = req->power_2;
-	popcorn_power_arm_3[POPCORN_POWER_N_VALUES - 1] = req->power_3;
+#ifdef CONFIG_POPCORN_POWER_SENSOR_X86
+	popcorn_power_arm_1[POWER_N_VALUES - 1] = req->power_1;
+	popcorn_power_arm_2[POWER_N_VALUES - 1] = req->power_2;
+	popcorn_power_arm_3[POWER_N_VALUES - 1] = req->power_3;
 #endif
 
 	pcn_kmsg_free_msg(req);
 	return 0;
 }
-
 
 static ssize_t power_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
@@ -99,13 +99,13 @@ static ssize_t power_read(struct file *file, char __user *buf, size_t count, lof
 
 	len += snprintf(buffer, sizeof(buffer),
 			"ARM\t%d\t%d\t%d\n",
-			popcorn_power_arm_1[POPCORN_POWER_N_VALUES - 1],
-			popcorn_power_arm_2[POPCORN_POWER_N_VALUES - 1],
-			popcorn_power_arm_3[POPCORN_POWER_N_VALUES - 1]);
+			popcorn_power_arm_1[POWER_N_VALUES - 1],
+			popcorn_power_arm_2[POWER_N_VALUES - 1],
+			popcorn_power_arm_3[POWER_N_VALUES - 1]);
 	len += snprintf((buffer + len), sizeof(buffer) - len,
 			"x86\t%d\t%d\n",
-			popcorn_power_x86_1[POPCORN_POWER_N_VALUES - 1],
-			popcorn_power_x86_2[POPCORN_POWER_N_VALUES - 1]);
+			popcorn_power_x86_1[POWER_N_VALUES - 1],
+			popcorn_power_x86_2[POWER_N_VALUES - 1]);
 
 	if (count < len)
 		len = count;
@@ -119,6 +119,7 @@ static const struct file_operations power_fops = {
 	.owner = THIS_MODULE,
 	.read = power_read,
 };
+*/
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -254,7 +255,7 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 			unsigned int uload_total = 0;
 			unsigned int sload_total = 0;
 
-			if (p->is_vma_worker && !p->at_remote) continue;
+			if (p->is_worker && !p->at_remote) continue;
 
 			len += snprintf((buffer + len), PROC_BUFFER_PS - len,
 					"%c: %16s %5d\n",
@@ -265,7 +266,7 @@ static ssize_t popcorn_ps_read(struct file *file, char __user *buf, size_t count
 			for_each_thread(p, t) {
 				unsigned int uload, sload;
 
-				if (p->at_remote && t->is_vma_worker) continue;
+				if (p->at_remote && t->is_worker) continue;
 
 				if (t->origin_nid == -1) {
 					// CPU load per thread
@@ -308,7 +309,6 @@ static const struct file_operations popcorn_ps_fops = {
 	.owner = THIS_MODULE,
 	.read = popcorn_ps_read,
 };
-static struct task_struct *kt_sched;
 
 DEFINE_KMSG_WQ_HANDLER(remote_ps_request);
 DEFINE_KMSG_WQ_HANDLER(remote_ps_response);
@@ -319,17 +319,17 @@ int __init sched_server_init(void)
 	int i;
 
 	/* Collect power consumption */
-	popcorn_power_arm_1 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
-	popcorn_power_arm_2 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
-	popcorn_power_arm_3 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
-	popcorn_power_x86_1 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
-	popcorn_power_x86_2 = kmalloc(POPCORN_POWER_N_VALUES * sizeof(int), GFP_KERNEL);
+	popcorn_power_arm_1 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
+	popcorn_power_arm_2 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
+	popcorn_power_arm_3 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
+	popcorn_power_x86_1 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
+	popcorn_power_x86_2 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
 
 	if (!popcorn_power_x86_1 || !popcorn_power_x86_1 ||
 		!popcorn_power_arm_1 || !popcorn_power_arm_2 || !popcorn_power_arm_3)
 		return -ENOMEM;
 
-	for (i = 0; i < POPCORN_POWER_N_VALUES; i++) {
+	for (i = 0; i < POWER_N_VALUES; i++) {
 		popcorn_power_x86_1[i] = 0;
 		popcorn_power_x86_2[i] = 0;
 		popcorn_power_arm_1[i] = 0;
@@ -337,18 +337,24 @@ int __init sched_server_init(void)
 		popcorn_power_arm_3[i] = 0;
 	}
 
+	/**
+	 * Meaningless without revamping power sensors
+	 */
+	/*
+	struct task_struct *kt_sched;
 	kt_sched = kthread_run(popcorn_sched_sync, NULL, "popcorn_sched_sync");
 	if (IS_ERR(kt_sched)) {
 		printk(KERN_ERR"cannot create popcorn sched thread");
 		return (int)PTR_ERR(kt_sched);
 	}
-	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SCHED_PERIODIC, sched_periodic);
 
-	/* Provide sched statistics via procfs */
 	res = proc_create("popcorn_power", S_IRUGO, NULL, &power_fops);
 	if (!res)
 		printk(KERN_ERR"Failed to create proc entry for power monitoring\n");
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SCHED_PERIODIC, sched_periodic);
+	*/
 
+	/* Provide sched statistics via procfs */
 	res = proc_create("popcorn_ps", S_IRUGO, NULL, &popcorn_ps_fops);
 	if (!res)
 		printk(KERN_ERR"Failed to create proc entry for process list\n");

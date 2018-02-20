@@ -1493,7 +1493,7 @@ out:
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
 
-#ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
+#ifdef CONFIG_POPCORN_TRACE_PAGE_FAULT
 	trace_printk("%d %d %c %lx %lx %d\n",
 			req->origin_nid, req->remote_pid,
 			fault_for_write(req->fault_flags) ? 'W' : 'R',
@@ -1934,7 +1934,7 @@ int page_server_handle_pte_fault(
 	ret = 0;
 
 out:
-#ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
+#ifdef CONFIG_POPCORN_TRACE_PAGE_FAULT
 	trace_printk("%d %d %c %lx %lx %d\n",
 			my_nid, current->pid,
 			fault_for_write(fault_flags) ? 'W' : 'R',

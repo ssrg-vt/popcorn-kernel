@@ -549,7 +549,7 @@ void vma_worker_remote(struct remote_context *rc)
 	struct mm_struct *mm = get_task_mm(current);
 	might_sleep();
 
-	while (!rc->vma_worker_stop) {
+	while (!rc->stop_workers) {
 		vma_op_request_t *req;
 		int ret = -EPERM;
 
