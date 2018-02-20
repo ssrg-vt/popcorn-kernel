@@ -404,7 +404,7 @@ static int handle_origin_task_exit(struct pcn_kmsg_message *msg)
 	complete(&rc->vma_works_ready);
 	complete(&rc->spawn_pended);
 
-	put_task_remote(tsk);
+	__put_task_remote(rc);
 	put_task_struct(tsk);
 out:
 	pcn_kmsg_free_msg(req);
