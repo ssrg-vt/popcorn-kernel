@@ -67,17 +67,6 @@ config POPCORN_STAT_PGFAULTS
 	default n
 
 
-config POPCORN_TRACE
-	bool "Trace execution"
-	default n
-	help
-		Trace popcorn execution through ftrace.
-
-config POPCORN_TRACE_PGFAULTS
-	bool "Page faults"
-	depends on POPCORN_TRACE
-	default n
-
 comment "Popcorn is not currently supported on this architecture"
 	depends on !ARCH_SUPPORTS_POPCORN
 

@@ -34,6 +34,8 @@
 #include "wait_station.h"
 #include "page_server.h"
 
+#include "trace_events.h"
+
 static inline bool fault_for_write(unsigned long flags)
 {
 	return !!(flags & FAULT_FLAG_WRITE);
@@ -73,8 +75,7 @@ inline int page_server_end_mm_fault(int ret)
 		dt = tv_end.tv_sec * 1000000 + tv_end.tv_usec
 			- current->fault_start.tv_sec * 1000000
 			- current->fault_start.tv_usec;
-		trace_printk("%lx %lx %d %d %lu\n",
-				instruction_pointer(current_pt_regs()),
+		trace_pgfault_stat(instruction_pointer(current_pt_regs()),
 				current->fault_address, ret,
 				current->fault_retry, dt);
 		current->fault_address = 0;
@@ -1493,12 +1494,9 @@ out:
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);
 
-#ifdef CONFIG_POPCORN_TRACE_PAGE_FAULT
-	trace_printk("%d %d %c %lx %lx %d\n",
-			req->origin_nid, req->remote_pid,
+	trace_pgfault(req->origin_nid, req->remote_pid,
 			fault_for_write(req->fault_flags) ? 'W' : 'R',
 			req->instr_addr, req->addr, res->result);
-#endif
 
 	kfree(res);
 
@@ -1934,12 +1932,10 @@ int page_server_handle_pte_fault(
 	ret = 0;
 
 out:
-#ifdef CONFIG_POPCORN_TRACE_PAGE_FAULT
-	trace_printk("%d %d %c %lx %lx %d\n",
-			my_nid, current->pid,
+	trace_pgfault(my_nid, current->pid,
 			fault_for_write(fault_flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
-#endif
+
 	return ret;
 }
 
