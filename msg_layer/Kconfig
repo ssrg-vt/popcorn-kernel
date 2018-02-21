@@ -16,6 +16,13 @@ config POPCORN_KMSG_SOCKET
 	help
 		Communicate through sockets on IP on Ethernet
 
+config POPCORN_KMSG_RDMA
+	tristate "Over RDMA"
+	depends on m && INFINIBAND
+	default n
+	help
+		Mellanox Connect-X4 and Connect-X5
+
 # InfiniBand
 config POPCORN_KMSG_IB
 	tristate "Over InfiniBand"

@@ -7,6 +7,7 @@ endif
 obj-$(CONFIG_POPCORN_KMSG_SOCKET) += msg_socket.o
 obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_test.o
 obj-$(CONFIG_POPCORN_KMSG_IB) += msg_ib.o
+obj-$(CONFIG_POPCORN_KMSG_RDMA) += msg_rdma.o
 
 .PHONY: modules
 modules:
