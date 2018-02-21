@@ -16,7 +16,6 @@
 #include <linux/inetdevice.h>
 #include <linux/netdevice.h>
 
-extern char *msg_layer;
 #include "config.h"
 
 #define MAX_NUM_NODES		ARRAY_SIZE(ip_addresses)
@@ -47,12 +46,13 @@ bool __init identify_myself(void)
 	int i;
 	uint32_t my_ip;
 
+	PCNPRINTK("Loading node configuration...");
+
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		ip_table[i] = in_aton(ip_addresses[i]);
 	}
 
 	my_ip = __get_host_ip();
-	PCNPRINTK("Loading messaging layer...");
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		char *me = " ";

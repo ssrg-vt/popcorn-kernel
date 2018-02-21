@@ -1,7 +1,9 @@
-/*
+/**
  * msg_ib.c - Kernel Module for Popcorn Messaging Layer
  * multi-node version over InfiniBand
- * Author: Ho-Ren(Jack) Chuang
+ * Authors:
+ * Ho-Ren(Jack) Chuang <horenc@vt.edu>
+ * Sang-Hoon Kim <sanghoon@vt.edu>
  *
  * TODO:
  *		define 0~1 to enum if needed
@@ -17,34 +19,21 @@
 #include <linux/delay.h>
 #include <linux/kthread.h>
 #include <linux/semaphore.h>
-#include <linux/file.h>
 #include <linux/ktime.h>
-#include <linux/fdtable.h>
 #include <linux/time.h>
-#include <asm/atomic.h>
 #include <linux/atomic.h>
 #include <linux/completion.h>
 #include <linux/errno.h>
-#include <linux/cpumask.h>
-#include <linux/sched.h>
 #include <linux/vmalloc.h>
 
 /* net */
 #include <linux/net.h>
-#include <net/sock.h>
-#include <linux/tcp.h>
 #include <linux/in.h>
-#include <asm/uaccess.h>
 #include <linux/socket.h>
-
 /* geting host ip */
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
 #include <linux/inet.h>
-
-/* pci */
-#include <linux/pci.h>
-#include <asm/pci.h>
 
 /* RDMA */
 #include <rdma/ib_verbs.h>
@@ -60,15 +49,6 @@
 #define CONFIG_FARM 0			/* Original FaRM - user follows convention */
 #define CONFIG_RDMA_POLL 1		/* with one extra buf copy */
 #define CONFIG_RDMA_NOTIFY 0	/* Two WRITE */
-
-/* self-testing */
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-#define CHECK_WQ_WR 1
-#define CHECK_RECV_WR 0
-#else
-#define CHECK_WQ_WR 0
-#define CHECK_RECV_WR 0
-#endif
 
 /* IB recv */
 #define MAX_RECV_WR 128	/* important! Check it if only sender crash */
@@ -112,6 +92,14 @@
 #define CONN_INITIATOR_DEPTH 1
 #define CONN_RETRY_CNT 1
 
+#define RDMA_TEST \
+	int remote_ws; \
+	u64 dma_addr_act; \
+	u32 mr_id; \
+	int t_num;
+DEFINE_PCN_RDMA_KMSG(pcn_kmsg_perf_rdma_t, RDMA_TEST);
+
+
 /* RDMA key register */
 enum IB_MR_TYPES {
 	RDMA_MR = 0,
@@ -150,11 +138,6 @@ struct send_work_t {
 	struct send_work_t *next;
 };
 
-/*for testing */
-#if CHECK_RECV_WR
-void *rws_ptr[MAX_NUM_NODES][MAX_RECV_WR];
-void *msg_ptr[MAX_NUM_NODES][MAX_RECV_WR];
-#endif
 
 /* rdma_notify */
 #if CONFIG_RDMA_NOTIFY
@@ -185,11 +168,6 @@ struct ib_cb {
 
 	spinlock_t send_work_pool_lock;
 	struct send_work_t *send_work_pool;
-
-	/* how many WR in Work Queue */
-#if CHECK_WQ_WR
-	atomic_t WQ_WR_cnt;
-#endif
 
 	/* RDMA common */
 	struct ib_mr *mr_pool[MR_POOL_SIZE];
@@ -269,44 +247,6 @@ static void __put_mr(int dst, u32 ofs, int mode)
 	BUG_ON(!test_bit(ofs, mr_pool[dst][mode]));
     clear_bit(ofs, mr_pool[dst][mode]);
     spin_unlock(&mr_pool_lock[dst][mode]);
-}
-
-#if CHECK_WQ_WR
-static inline void selftest_wr_wq_inc(struct ib_cb *cb)
-{
-	atomic_inc(&cb->WQ_WR_cnt);
-	BUG_ON(atomic_read(&cb->WQ_WR_cnt) >= MAX_SEND_WR);
-}
-
-static inline void selftest_wr_wq_dec(struct ib_cb *cb)
-{
-	atomic_dec(&cb->WQ_WR_cnt);
-}
-#else
-static inline void selftest_wr_wq_inc(struct ib_cb *cb) {}
-static inline void selftest_wr_wq_dec(struct ib_cb *cb) {}
-#endif
-
-inline void selftest_recv_pool(struct recv_work_t *rws, struct pcn_kmsg_message *msg)
-{
-#if CHECK_RECV_WR
-	int i;
-	bool good_rws = false, good_msg = false;
-	for (i = 0; i < MAX_RECV_WR; i++) {
-		if (msg == msg_ptr[msg->header.from_nid][i])
-			good_msg = true;
-		if ( rws == rws_ptr[msg->header.from_nid][i])
-			good_rws = true;
-	}
-	if(good_msg == false) {
-		printk("%p\n", msg);
-		BUG();
-	}
-	if(good_rws == false) {
-		printk("%p\n", rws);
-		BUG();
-	}
-#endif
 }
 
 
@@ -423,11 +363,6 @@ static void __setup_recv_wr(struct ib_cb *cb)
 
 		ret = ib_post_recv(cb->qp, &work->recv_wr, &bad_wr);
 		BUG_ON(ret && "ib_post_recv failed");
-
-#if CHECK_RECV_WR
-		rws_ptr[cb->conn_no][i] = work;
-		msg_ptr[cb->conn_no][i] = &work->msg;
-#endif
 	}
 	return;
 }
@@ -1023,7 +958,6 @@ static int __ib_kmsg_send_large(unsigned int dst,
 
 	send_sgl.addr = dma_addr;
 
-	selftest_wr_wq_inc(cb);
 	ret = ib_post_send(cb->qp, &send_wr, &bad_wr);
 	BUG_ON(ret);
 
@@ -1054,7 +988,6 @@ static int __ib_kmsg_send_small(unsigned int dst,
 
 	work->sgl.length = msg_size;
 
-	selftest_wr_wq_inc(cb);
 	ret = ib_post_send(cb->qp, &work->send_wr, &bad_wr);
 	BUG_ON(ret);
 
@@ -1118,7 +1051,6 @@ static void __respond_rdma_read(pcn_kmsg_perf_rdma_t *req, void *res, u32 res_si
 	sgl.lkey = __map_rdma_mr(cb, dma_addr_pass, res_size, mr_id, RDMA_MR),
 
 	ret = ib_post_send(cb->qp, &rdma_wr.wr, &bad_wr);
-	selftest_wr_wq_inc(cb);
 	BUG_ON(ret);
 
 	if (!try_wait_for_completion(&comp))
@@ -1243,7 +1175,6 @@ static void __respond_rdma_write(
 #if CONFIG_RDMA_POLL
 	flush = *(payload + dma_len - 1);	/* touch for flushing */
 #endif
-	selftest_wr_wq_inc(cb);
 	BUG_ON(ret);
 
 	/* Awaken by cq_event_handler */
@@ -1256,7 +1187,6 @@ static void __respond_rdma_write(
 #if CONFIG_RDMA_NOTIFY
 	ret = ib_post_send(cb->qp, &rdma_notify_send_wr.wr, &bad_wr);
 	flush = *cb->rdma_notify_buf_pass[mr_id];	/* touch for flushing */
-	selftest_wr_wq_inc(cb);
 	BUG_ON(ret);
 
 	if (!try_wait_for_completion(&comp2))
@@ -1369,7 +1299,6 @@ retry:
 
 		switch (wc.opcode) {
 		case IB_WC_SEND:
-			selftest_wr_wq_dec(gcb[cb->conn_no]);
 			__process_send_work_completion(cb,
 					(struct send_work_comp_desc *)wc.wr_id);
 			break;
@@ -1379,12 +1308,10 @@ retry:
 			break;
 
 		case IB_WC_RDMA_WRITE:
-			selftest_wr_wq_dec(gcb[cb->conn_no]);
 			complete((struct completion *)wc.wr_id);
 			break;
 
 		case IB_WC_RDMA_READ:
-			selftest_wr_wq_dec(gcb[cb->conn_no]);
 			complete((struct completion *)wc.wr_id);
 			break;
 
@@ -1595,7 +1522,6 @@ static void __putback_recv_wr(struct pcn_kmsg_message *msg)
 	} else {
 		struct ib_recv_wr *bad_wr;
 		struct recv_work_t *rws = container_of(msg, struct recv_work_t, msg);
-		selftest_recv_pool(rws, msg);
 		ib_post_recv(gcb[msg->header.from_nid]->qp, &rws->recv_wr, &bad_wr);
 	}
 }
@@ -1757,16 +1683,20 @@ int __init __establish_connections(void)
 	return 0;
 }
 
-int __init initialize(void)
+int __init init_msg_ib(void)
 {
 	int i, err;
-	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_IB;
 
-	printk("- Popcorn Messaging Layer IB Initialization Start -\n");
-	/* Establish node numbers according to its IP */
-	if (!identify_myself()) {
-		return -EINVAL;
-	}
+	MSGPRINTK("Loading Popcorn messaging layer over InfiniBand...\n");
+
+	if (!identify_myself()) return -EINVAL;
+
+	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_IB;
+	pcn_kmsg_send_ftn = (send_ftn)ib_kmsg_send;
+	pcn_kmsg_post_ftn = (post_ftn)ib_kmsg_send;
+	pcn_kmsg_request_rdma_ftn = (request_rdma_ftn)request_ib_rdma;
+	pcn_kmsg_respond_rdma_ftn = (respond_rdma_ftn)respond_ib_rdma;
+	pcn_kmsg_free_ftn = (free_ftn)ib_kmsg_free_ftn;
 
 #if CONFIG_RDMA_NOTIFY
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_KEY_EXCHANGE_REQUEST,
@@ -1775,10 +1705,6 @@ int __init initialize(void)
 				(pcn_kmsg_cbftn)handle_rdma_key_exchange_response);
 #endif
 
-	pcn_kmsg_send_ftn = (send_ftn)ib_kmsg_send;
-	pcn_kmsg_request_rdma_ftn = (request_rdma_ftn)request_ib_rdma;
-	pcn_kmsg_respond_rdma_ftn = (respond_rdma_ftn)respond_ib_rdma;
-	pcn_kmsg_free_ftn = (free_ftn)ib_kmsg_free_ftn;
 
 	/* Initilaize the IB: Each node has a connection table like tihs
 	 * -------------------------------------------------------------------
@@ -1802,9 +1728,6 @@ int __init initialize(void)
 
 		/* Init common parameters */
 		atomic_set(&gcb[i]->state, IDLE);
-#if CHECK_WQ_WR
-		gcb[i]->WQ_WR_cnt.counter = 0;
-#endif
 
 		/* register event handler */
 		gcb[i]->cm_id = rdma_create_id(&init_net,
@@ -1840,7 +1763,7 @@ out:
 /*
  *  Not yet done.
  */
-void __exit unload(void)
+void __exit exit_msg_ib(void)
 {
 	int i, j;
 	printk("TODO: Stop kernel threads\n");
@@ -1931,6 +1854,6 @@ void __exit unload(void)
 	printk("Successfully unloaded module!\n");
 }
 
-module_init(initialize);
-module_exit(unload);
+module_init(init_msg_ib);
+module_exit(exit_msg_ib);
 MODULE_LICENSE("GPL");

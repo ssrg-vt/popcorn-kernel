@@ -21,8 +21,6 @@
 /* rdma */
 #include <rdma/ib_verbs.h>
 #include <rdma/rdma_cm.h>
-/* page */
-#include <linux/pagemap.h>
 
 /* wait station */
 #include "../../kernel/popcorn/types.h"
@@ -399,7 +397,7 @@ static int test1(void)
 
 		req = pcn_kmsg_alloc_msg(sizeof(*req));
 		BUG_ON(!req);
-		req->header.type = PCN_KMSG_TYPE_FIRST_TEST;
+		req->header.type = PCN_KMSG_TYPE_TEST_0;
 		req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 		/* msg essentials */
@@ -543,7 +541,7 @@ void test_send_throughput(unsigned int payload_size)
 	struct timeval t1, t2;
 	struct test_msg_t *msg = pcn_kmsg_alloc_msg(sizeof(*msg));
 
-	msg->header.type = PCN_KMSG_TYPE_SELFIE_TEST;
+	msg->header.type = PCN_KMSG_TYPE_TEST_1;
 	memset(&msg->payload, 'b', payload_size);
 
 	if (!my_nid)
@@ -1615,11 +1613,11 @@ static int __init msg_test_init(void)
 		}
 	}
 	/* register callback. also define in <linux/pcn_kmsg.h>  */
-	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_FIRST_TEST,
+	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_TEST_0,
 					(pcn_kmsg_cbftn)handle_remote_thread_first_test_request);
 
 	/* for experimental data - send throughput */
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SELFIE_TEST, handle_self_test);
+	pcn_kmsg_register_callback(PCN_KMSG_TYPE_TEST_1, handle_self_test);
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF,
 								(pcn_kmsg_cbftn)handle_show_RW_dummy_buf);
 

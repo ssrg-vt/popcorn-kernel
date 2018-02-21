@@ -198,6 +198,12 @@ struct task_struct *test_handler;
 pcn_kmsg_cbftn handle_selfie_test(struct pcn_kmsg_message *inc_msg);
 #endif
 
+enum pcn_connection_status {
+	PCN_CONN_WATING,
+	PCN_CONN_CONNECTED,
+	//PCN_CONN_TYPE_MAX
+};
+
 char *msg_names[] = {
 	"TEST",
 	"TEST_LONG",

@@ -155,13 +155,13 @@ static int deq_send(struct pcn_kmsg_buf * buf)
 	while (remaining > 0) {
 		int sent = ksock_send(sockets[dest_nid], p, remaining);
 		if (sent < 0) {
-			MSGDPRINTK("%s: sent size < 0\n", __func__);
+			MSGPRINTK("%s: sent size < 0\n", __func__);
 			io_schedule();
 			continue;
 		}
 		p += sent;
 		remaining -= sent;
-		MSGDPRINTK("Sent %d remaining %d\n", sent, remaining);
+		//printk("Sent %d remaining %d\n", sent, remaining);
 	}
 	pcn_kmsg_free_msg(msg_qitem->msg);
     return 0;
@@ -178,19 +178,19 @@ static int send_handler(void* arg0)
 		err = sock_create(PF_INET, SOCK_STREAM,
 			IPPROTO_TCP, &(sockets[conn_no]));
 		if (err < 0) {
-			MSGDPRINTK("Failed to create socket..!! "
+			MSGPRINTK("Failed to create socket..!! "
 						"Messaging layer init failed with err %d\n", err);
 			return err;
 		}
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(PORT);
 		addr.sin_addr.s_addr = ip_table[conn_no];
-		MSGDPRINTK("[%d] Connecting to %pI4\n", conn_no, ip_table + conn_no);
+		MSGPRINTK("[%d] Connecting to %pI4\n", conn_no, ip_table + conn_no);
 		do {
 			err = kernel_connect(sockets[conn_no],
 						(struct sockaddr *)&addr, sizeof(addr), 0);
 			if (err < 0) {
-				MSGDPRINTK("Failed to connect the socket %d. Attempt again!!\n",
+				MSGPRINTK("Failed to connect the socket %d. Attempt again!!\n",
 						err);
 				msleep(1000);
 			}
@@ -203,7 +203,7 @@ static int send_handler(void* arg0)
 
 	set_popcorn_node_online(conn_no, true);
 
-	MSGPRINTK("[%d] PCN_SEND handler is up\n", conn_no);
+	MSGPRINTK("[%d] PCN_SEND handler is ready\n", conn_no);
 
     for (;;) {
         err = deq_send(&handler_params->buf);
@@ -232,14 +232,14 @@ static int recv_handler(void* arg0)
 		err = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP,
 													&sockets[conn_no]);
 		if (err < 0) {
-			MSGDPRINTK("Failed to create socket..!! "
+			MSGPRINTK("Failed to create socket..!! "
 						"Messaging layer init failed with err %d\n", err);
 			goto end;
 		}
 
 		err = kernel_accept(sock_listen, sockets + conn_no, 0);
 		if (err < 0) {
-			MSGDPRINTK("Failed to accept from %d for %d\n", conn_no, err);
+			MSGPRINTK("Failed to accept from %d for %d\n", conn_no, err);
 			goto exit;
 		}
 		complete(&accepted[conn_no]);
@@ -249,7 +249,7 @@ static int recv_handler(void* arg0)
 		// Skip connecting to myself
 	}
 
-	MSGPRINTK("[%d] PCN_RECV handler is up\n", conn_no);
+	MSGPRINTK("[%d] PCN_RECV handler is ready\n", conn_no);
 
 	set_popcorn_node_online(conn_no, true);
 	while (!kthread_should_stop()) {
@@ -270,7 +270,7 @@ static int recv_handler(void* arg0)
 				continue;
 			offset += ret;
 			len -= ret;
-			MSGDPRINTK("(hdr) recv %d in %lu remain %d\n",
+			//printk("(hdr) recv %d in %lu remain %d\n",
 					ret, sizeof(struct pcn_kmsg_hdr), len);
 		}
 		MSGPRINTK("RcvH %d, %d %ld\n", conn_no, header.type, offset);
@@ -288,7 +288,7 @@ static int recv_handler(void* arg0)
 		offset = sizeof(header);
 		len = header.size - offset;
 
-		MSGDPRINTK ("(info) data size %d\n", len);
+		//printk ("(info) data size %d\n", len);
 
 		//- data -//
 		while (len > 0) {
@@ -297,9 +297,9 @@ static int recv_handler(void* arg0)
 				continue;
 			offset += ret;
 			len -= ret;
-			MSGDPRINTK("(body) recv %d remain %d\n", ret, len);
+			//printk("(body) recv %d remain %d\n", ret, len);
 		}
-		MSGPRINTK("RecB %d, %d %d\n", conn_no, header.type, header.size);
+		//printk("RecB %d, %d %d\n", conn_no, header.type, header.size);
 
 		deq_recv(&handler_params->buf, data, conn_no);
 	}
@@ -316,22 +316,27 @@ end:
  * This is the interface for message layer
  ***********************************************/
 static int sock_kmsg_send(unsigned int dest_nid,
-						struct pcn_kmsg_message *lmsg, unsigned int size)
+						struct pcn_kmsg_message *msg, size_t size)
 {
 	struct pcn_kmsg_message *msg;
 
-	lmsg->header.size = size;
-	lmsg->header.from_nid = my_nid;
-
 	msg = pcn_kmsg_alloc_msg(size);
 	BUG_ON(!msg);
-	memcpy(msg, lmsg, size);
+	memcpy(msg, msg, size);
 
 	enq_send(send_buf[dest_nid], msg, dest_nid);
 
-	MSGPRINTK("%s(): sent %d, %d %d\n", __func__,
-				dest_nid, lmsg->header.type, size);
+	/*
+	printk("%s(): sent %d, %d %d\n", __func__,
+				dest_nid, msg->header.type, size);
+	*/
 	return 0;
+}
+
+static int sock_kmsg_post(unsigned int dest_nid,
+						struct pcn_kmsg_message *msg, size_t size)
+{
+	return sock_kmsg_send(dest_nid, msg, size);
 }
 
 
@@ -340,12 +345,13 @@ static int __init initialize(void)
 	int i, err, sender;
 	struct sockaddr_in addr;
 
-	MSGPRINTK("--- Popcorn messaging layer init starts ---\n");
+	MSGPRINTK("Loading Popcorn messaging layer over TCP/IP...\n");
 
 	if (!identify_myself()) return -EINVAL;
 
 	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_SOCKET;
 	pcn_kmsg_send_ftn = (send_ftn)sock_kmsg_send;
+	pcn_kmsg_post_ftn = (post_ftn)sock_kmsg_post;
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		init_completion(&connected[i]);
@@ -392,7 +398,7 @@ static int __init initialize(void)
 	}
 
 	set_popcorn_node_online(my_nid, true);
-	MSGDPRINTK("Listen to the port %d\n", PORT);
+	MSGPRINTK("Listen to the port %d\n", PORT);
 
 	for (sender = 0; sender < 2; sender++) {
 		for (i = 0; i < MAX_NUM_NODES; i++) {
@@ -454,7 +460,7 @@ static int __init initialize(void)
 		}
 		notify_my_node_info(i);
 	}
-	MSGPRINTK("--- Popcorn messaging layer is up ---\n");
+	PCNPRINTK("Popcorn messaging layer over TCP/IP is ready\n");
 
 	return 0;
 }

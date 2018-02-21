@@ -13,24 +13,26 @@
 static unsigned long sent_stats[PCN_KMSG_TYPE_MAX] = {0};
 static unsigned long recv_stats[PCN_KMSG_TYPE_MAX] = {0};
 
-#ifndef CONFIG_POPCORN_STAT
-void account_pcn_message_sent(struct pcn_kmsg_message *msg) {};
-void account_pcn_message_recv(struct pcn_kmsg_message *msg) {};
-
-#else
+static unsigned long long bytes_sent = 0;
+static unsigned long long bytes_recv = 0;
 
 void account_pcn_message_sent(struct pcn_kmsg_message *msg)
 {
 	struct pcn_kmsg_hdr *h = (struct pcn_kmsg_hdr *)msg;
+	bytes_sent += h->size;
+#ifndef CONFIG_POPCORN_STAT
 	sent_stats[h->type]++;
+#endif
 }
 
 void account_pcn_message_recv(struct pcn_kmsg_message *msg)
 {
 	struct pcn_kmsg_hdr *h = (struct pcn_kmsg_hdr *)msg;
+	bytes_recv += h->size;
+#ifndef CONFIG_POPCORN_STAT
 	recv_stats[h->type]++;
-}
 #endif
+}
 
 
 #define PROC_BUF_SIZE 8192
@@ -47,10 +49,10 @@ static ssize_t __read_stats(struct file *filp, char *usr_buf, size_t count, loff
 
 	if (*offset == 0) {
 		stats = sent_stats;
-		len += snprintf(buf, PROC_BUF_SIZE, "%llu ", pcn_bytes_sent);
+		len += snprintf(buf, PROC_BUF_SIZE, "%llu ", bytes_sent);
 	} else if (*offset == 1) {
 		stats = recv_stats;
-		len += snprintf(buf, PROC_BUF_SIZE, "%llu ", pcn_bytes_recv);
+		len += snprintf(buf, PROC_BUF_SIZE, "%llu ", bytes_recv);
 	} else {
 		return 0;
 	}
@@ -105,6 +107,3 @@ int statistics_init(void)
 	}
 	return 0;
 }
-
-EXPORT_SYMBOL(account_pcn_message_sent);
-EXPORT_SYMBOL(account_pcn_message_recv);

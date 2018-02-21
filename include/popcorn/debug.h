@@ -40,15 +40,5 @@
 #else
 #define MSGPRINTK(...)
 #endif
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_VERBOSE
-#define MSGDPRINTK(...) printk(KERN_INFO __VA_ARGS__)
-#else
-#define MSGDPRINTK(...)
-#endif
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER_DATA
-#define MSGDATA(...) printk(KERN_INFO __VA_ARGS__)
-#else
-#define MSGDATA(...)
-#endif
 
 #endif /*  __INCLUDE_POPCORN_DEBUG_H__ */

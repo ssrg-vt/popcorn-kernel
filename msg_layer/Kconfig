@@ -8,17 +8,17 @@ config POPCORN_KMSG
 
 if POPCORN_KMSG
 
-# Socket
+# Socket over Ethernet
 config POPCORN_KMSG_SOCKET
-	tristate "Socket messaging layer"
+	tristate "Over TCP/IP"
 	depends on INET && m
 	default m
 	help
-		Communicate through sockets on IP
+		Communicate through sockets on IP on Ethernet
 
 # InfiniBand
 config POPCORN_KMSG_IB
-	tristate "InfiniBand"
+	tristate "Over InfiniBand"
 	depends on m && INFINIBAND
 	default n
 	help
@@ -31,17 +31,17 @@ config POPCORN_KMSG_IB_RDMA
 		Transfer pages through RDMA. 'N' will transfer pages using IB verb.
 
 # Dolphin PCIe
-config POPCORN_KMSG_DOLPHIN
-	tristate "Dolphin PCI-e"
-	depends on m
-	default n
-	help
-		Dolphin PCI-e PX-810
-
-config POPCORN_KMSG_DOLPHIN_DIS_PATH
-	string "Path to Dolphin software suite"
-	depends on POPCORN_KMSG_DOLPHIN
-	default "/opt/source/DIS/"
+#config POPCORN_KMSG_DOLPHIN
+#	tristate "Dolphin PCI-e"
+#	depends on m
+#	default n
+#	help
+#		Dolphin PCI-e PX-810
+#
+#config POPCORN_KMSG_DOLPHIN_DIS_PATH
+#	string "Path to Dolphin software suite"
+#	depends on POPCORN_KMSG_DOLPHIN
+#	default "/opt/source/DIS/"
 
 
 # Test and debug
@@ -54,15 +54,6 @@ config POPCORN_DEBUG_MSG_LAYER
 	depends on POPCORN_DEBUG
 	default n
 
-config POPCORN_DEBUG_MSG_LAYER_VERBOSE
-	bool "Print more debug message"
-	depends on POPCORN_DEBUG_MSG_LAYER
-	default n
-
-config POPCORN_DEBUG_MSG_LAYER_DATA
-	bool "Print experimental data"
-	depends on POPCORN_DEBUG_MSG_LAYER
-	default n
-endif
-
 endif # POPCORN_KMSG
+
+endif # POPCORN
