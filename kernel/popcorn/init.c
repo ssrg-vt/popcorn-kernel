@@ -12,6 +12,9 @@
 #include <popcorn/debug.h>
 #include "types.h"
 
+#define CREATE_TRACE_POINTS
+#include "trace_events.h"
+
 struct workqueue_struct *popcorn_wq;
 struct workqueue_struct *popcorn_ordered_wq;
 EXPORT_SYMBOL(popcorn_wq);

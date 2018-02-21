@@ -37,7 +37,7 @@ struct remote_context {
 	struct list_head vmas;
 
 	/* Auxiliary threads control */
-	bool vma_worker_stop;
+	bool stop_workers;
 
 	/* VMA worker */
 	struct task_struct *vma_worker;
@@ -46,7 +46,6 @@ struct remote_context {
 	struct list_head vma_works;
 
 	/* Remote thread spawner */
-	struct task_struct *remote_thread_spawner;
 	struct completion spawn_pended;
 	spinlock_t spawn_requests_lock;
 	struct list_head spawn_requests;

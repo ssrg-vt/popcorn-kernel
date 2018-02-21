@@ -1830,8 +1830,8 @@ struct task_struct {
 		pid_t origin_pid;
 	};
 
-	bool is_vma_worker;			/* kernel thread that manages the process*/
-	bool at_remote;				/* Is executing on behalf of another node? */
+	bool is_worker;			/* kernel thread that manages the process*/
+	bool at_remote;			/* Is executing on behalf of another node? */
 
 	volatile void *remote_work;
 	struct completion remote_work_pended;
