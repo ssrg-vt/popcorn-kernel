@@ -98,8 +98,8 @@ struct pcn_kmsg_rdma_hdr {
 } __attribute__((packed));
 
 #define CACHE_LINE_SIZE 64
-#define PCN_KMSG_MAX_SIZE_TOTAL (64UL << 10)
-#define PCN_KMSG_MAX_SIZE  (PCN_KMSG_MAX_SIZE_TOTAL \
+#define PCN_KMSG_MAX_SIZE (64UL << 10)
+#define PCN_KMSG_MAX_PAYLOAD_SIZE (PCN_KMSG_MAX_SIZE \
 					- sizeof(struct pcn_kmsg_hdr) \
 					- sizeof(struct pcn_kmsg_rdma_hdr))
 
