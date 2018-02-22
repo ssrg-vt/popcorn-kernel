@@ -15,7 +15,7 @@ enum popcorn_arch {
 };
 
 extern int my_nid;
-extern const int my_arch;
+extern const enum popcorn_arch my_arch;
 
 bool get_popcorn_node_online(int nid);
 void set_popcorn_node_online(int nid, bool online);
