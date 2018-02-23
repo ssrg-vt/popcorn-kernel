@@ -8,8 +8,8 @@
 #define RDMA_PORT 11453
 #define RDMA_ADDR_RESOLVE_TIMEOUT_MS 5000
 
-#define MAX_SEND_DEPTH	256
-#define MAX_RECV_DEPTH	256
+#define MAX_SEND_DEPTH	((1 << (MAX_ORDER + PAGE_SHIFT - 1)) / PCN_KMSG_MAX_SIZE)
+#define MAX_RECV_DEPTH	((1 << (MAX_ORDER + PAGE_SHIFT - 1)) / PCN_KMSG_MAX_SIZE)
 
 struct recv_work {
 	struct ib_sge sgl;
@@ -54,28 +54,24 @@ static struct rdma_peer *peers[MAX_NUM_NODES] = { NULL };
 /****************************************************************************
  * Event handlers
  */
-static void __process_recv(struct ib_qp *qp, struct ib_wc *wc)
+static void __process_recv(struct ib_wc *wc)
 {
 	struct recv_work *rw = (void *)wc->wr_id;
 	struct ib_recv_wr *bad_wr = NULL;
 	int ret;
 
-	printk("recv %p %c %c %c\n", rw->buffer,
-			rw->buffer[0], rw->buffer[1], rw->buffer[2]);
+	printk("recv %x %u %x / %c %c %c\n",
+			wc->wc_flags, wc->byte_len, wc->ex.imm_data,
+			rw->buffer[0], rw->buffer[1], rw->buffer[PAGE_SIZE-1]);
 
 	/* Put back the receive work */
-	ret = ib_post_recv(qp, &rw->wr, &bad_wr);
+	ret = ib_post_recv(wc->qp, &rw->wr, &bad_wr);
 	BUG_ON(ret || bad_wr);
 }
 
 static int sent = 0;
-static void __process_sent(struct ib_qp *qp, struct ib_wc *wc)
+static void __process_sent(struct ib_wc *wc)
 {
-	/*
-	struct completion *comp = (void *)wc->wr_id;
-	// printk("eent something\n");
-	complete(comp);
-	*/
 	sent++;
 }
 
@@ -87,10 +83,10 @@ void cq_comp_handler(struct ib_cq *cq, void *context)
 	while ((ret = ib_poll_cq(cq, 1, &wc)) > 0) {
 		switch(wc.opcode) {
 		case IB_WC_RECV:
-			__process_recv(wc.qp, &wc);
+			__process_recv(&wc);
 			break;
 		case IB_WC_SEND:
-			__process_sent(wc.qp, &wc);
+			__process_sent(&wc);
 			break;
 		case IB_WC_REG_MR:
 		case IB_WC_RDMA_WRITE:
@@ -172,7 +168,7 @@ static int __setup_buffers_and_pools(struct rdma_peer *peer)
 	const size_t buffer_size = PCN_KMSG_MAX_SIZE * MAX_RECV_DEPTH;
 
 	/* Initalize receive buffers */
-	recv_buffer = vmalloc(buffer_size);
+	recv_buffer = kmalloc(buffer_size, GFP_KERNEL);
 	if (!recv_buffer) {
 		return -ENOMEM;
 	}
@@ -217,7 +213,7 @@ static int __setup_buffers_and_pools(struct rdma_peer *peer)
 	return ret;
 
 out_free:
-	if (recv_buffer) vfree(recv_buffer);
+	if (recv_buffer) kfree(recv_buffer);
 	if (rws) kfree(rws);
 	return ret;
 }
@@ -473,27 +469,18 @@ static int __listen_to_connection(void)
 static void __test_send(int to_nid)
 {
 	struct rdma_peer *peer = peers[to_nid];
-	struct ib_sge sgl = {
-		.lkey = peer->pd->local_dma_lkey,
-	};
-	struct ib_send_wr wr = {
-		.wr_id = 0,
-		.opcode = IB_WR_SEND,
-		.send_flags = IB_SEND_SIGNALED,
-		.sg_list = &sgl,
-		.num_sge = 1,
-		.next = NULL,
-	};
 	struct ib_device *dev = peer->device;
 	struct ib_send_wr *bad_wr = NULL;
-	char *buffer = (char *)__get_free_pages(GFP_KERNEL, 5);
-	int ret, i;
+	int N = MAX_RECV_DEPTH;
 	u64 dma_addr;
+	int ret, i;
 
+	const int alloc_order = MAX_ORDER - 1;
+	char *buffer = (char *)__get_free_pages(GFP_KERNEL, alloc_order);
 	BUG_ON(!buffer);
 	sent = 0;
 
-	dma_addr = ib_dma_map_single(dev, buffer, PAGE_SIZE << 5, DMA_TO_DEVICE);
+	dma_addr = ib_dma_map_single(dev, buffer, PAGE_SIZE * N, DMA_TO_DEVICE);
 	ret = ib_dma_mapping_error(dev, dma_addr);
 	if (ret) {
 		printk("dma fail %d\n", ret);
@@ -501,27 +488,39 @@ static void __test_send(int to_nid)
 		printk("mapped %p to %llx\n", buffer, dma_addr);
 	}
 
-	for (i = 0; i < 10; i++) {
+	for (i = 0; i < N; i++) {
+		struct ib_sge sgl = {
+			.lkey = peer->pd->local_dma_lkey,
+			.addr = dma_addr + PAGE_SIZE * i,
+			.length = PAGE_SIZE,
+		};
+		struct ib_send_wr wr = {
+			.wr_id = 0,
+			.opcode = IB_WR_SEND_WITH_IMM,
+			.send_flags = IB_SEND_SIGNALED,
+			.sg_list = &sgl,
+			.num_sge = 1,
+			.next = NULL,
+			.ex.imm_data = 0xdeafbeef + i,
+		};
 		char *p = buffer + PAGE_SIZE * i;
-		memset(p, 'a' + i, PAGE_SIZE);
-
-		sgl.addr = dma_addr + PAGE_SIZE * i;
-		sgl.length = PAGE_SIZE;
+		memset(p, ('a' + i) % 26 + 'a', PAGE_SIZE);
 
 		ret = ib_post_send(peer->qp, &wr, &bad_wr);
 		if (ret || bad_wr) {
 			printk("%d failed to send, %d %p\n", i, ret, bad_wr);
 			continue;
 		} else {
-			printk("%d sent %llx %c %c %c\n", i, sgl.addr, p[0], p[1], p[2]);
+			printk("%d sent %llx %c %c %c\n", i, sgl.addr,
+					p[0], p[1], p[PAGE_SIZE - 1]);
 		}
 	}
-	while (sent < 10) {
+	while (sent < N) {
 		io_schedule();
 	}
 
-	ib_dma_unmap_single(dev, dma_addr, PAGE_SIZE, DMA_TO_DEVICE);
-	free_pages((unsigned long)buffer, 5);
+	ib_dma_unmap_single(dev, dma_addr, PAGE_SIZE * N, DMA_TO_DEVICE);
+	free_pages((unsigned long)buffer, alloc_order);
 	return;
 }
 
@@ -558,7 +557,7 @@ void __exit exit_kmsg_rdma(void)
 		if (peer->recv_buffer) {
 			ib_dma_unmap_single(peer->device, peer->recv_buffer_dma_addr,
 					PCN_KMSG_MAX_SIZE * MAX_RECV_DEPTH, DMA_FROM_DEVICE);
-			vfree(peer->recv_buffer);
+			kfree(peer->recv_buffer);
 			kfree(peer->recv_works);
 		}
 
@@ -597,9 +596,6 @@ int __init init_kmsg_rdma(void)
 	if (my_nid == 1) {
 		__test_send(0);
 	}
-	msleep(1500);
-	sent = 0;
-	msleep(1500);
 	if (my_nid == 0) {
 		__test_send(1);
 	}
