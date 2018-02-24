@@ -105,6 +105,9 @@ static inline void *__get_rdma_buffer_addr(int slot) {
 }
 
 
+/****************************************************************************
+ * Send 
+ */
 static int __post_send(struct rdma_handle *rh, dma_addr_t dma_addr, size_t size, u64 wr_id)
 {
 	struct ib_send_wr *bad_wr = NULL;
@@ -125,10 +128,8 @@ static int __post_send(struct rdma_handle *rh, dma_addr_t dma_addr, size_t size,
 
 	ret = ib_post_send(rh->qp, &wr, &bad_wr);
 	if (ret) return ret;
-	if (bad_wr) {
-		printk("failed to send, %d %p\n", ret, bad_wr);
-		return -EINVAL;
-	}
+	BUG_ON(bad_wr);
+
 	return 0;
 }
 
@@ -148,13 +149,18 @@ static int __send_to(int to_nid, void *payload, size_t size)
 	}
 	ret = __post_send(rh, dma_addr, size, (u64)&comp);
 	if (ret) goto out;
-	ret = wait_for_completion_io_timeout(&comp, 10 * HZ);
+	ret = wait_for_completion_io_timeout(&comp, 60 * HZ);
 	if (!ret) ret = -EAGAIN;
 	ret = 0;
 
 out:
 	ib_dma_unmap_single(dev, dma_addr, size, DMA_TO_DEVICE);
 	return ret;
+}
+
+int rdma_kmsg_send(int dst, struct pcn_kmsg_message *msg, size_t size)
+{
+	return __send_to(dst, msg, size);
 }
 
 
@@ -166,7 +172,7 @@ struct rdma_request {
 	char fill;
 };
 
-static void __test_rdma(int to_nid)
+void __test_rdma(int to_nid)
 {
 	static int sent = 0;
 	struct rdma_request req;
@@ -209,7 +215,7 @@ out:
 	return;
 }
 
-static void __perform_rdma(struct ib_wc *wc, struct recv_work *_rw)
+void __perform_rdma(struct ib_wc *wc, struct recv_work *_rw)
 {
 	DECLARE_COMPLETION_ONSTACK(comp);
 	struct rdma_request *req = _rw->buffer;
@@ -259,6 +265,22 @@ static void __perform_rdma(struct ib_wc *wc, struct recv_work *_rw)
 	}
 }
 
+void rdma_kmsg_free(struct pcn_kmsg_message *msg)
+{
+	/* Put back the receive work */
+	int ret;
+	struct ib_recv_wr *bad_wr = NULL;
+	struct recv_work *rw = container_of((void *)msg, struct recv_work, buffer);
+	ret = ib_post_recv(rdma_handles[msg->header.from_nid]->qp, &rw->wr, &bad_wr);
+	if (ret) {
+		printk("shit ret %d\n", ret);
+		WARN_ON("shit");
+	}
+	if (bad_wr) {
+		printk("shit bad wr %d\n", ret);
+		WARN_ON("shit");
+	}
+}
 
 /****************************************************************************
  * Event handlers
@@ -266,14 +288,9 @@ static void __perform_rdma(struct ib_wc *wc, struct recv_work *_rw)
 static void __process_recv(struct ib_wc *wc)
 {
 	struct recv_work *rw = (void *)wc->wr_id;
-	struct ib_recv_wr *bad_wr = NULL;
-	int ret;
 
-	__perform_rdma(wc, rw);
-
-	/* Put back the receive work */
-	ret = ib_post_recv(wc->qp, &rw->wr, &bad_wr);
-	BUG_ON(ret || bad_wr);
+	//__perform_rdma(wc, rw);
+	pcn_kmsg_process(rw->buffer);
 }
 
 static void __process_rdma_completion(struct ib_wc *wc)
@@ -323,17 +340,6 @@ void cq_comp_handler(struct ib_cq *cq, void *context)
 	ib_req_notify_cq(cq, IB_CQ_NEXT_COMP);
 }
 
-
-/****************************************************************************
- * Setup connections
- */
-int rdma_kmsg_send(int dst, struct pcn_kmsg_message *msg, size_t size)
-{
-	msg->header.size = size;
-	msg->header.from_nid = my_nid;
-
-	return __send_to(dst, msg, size);
-}
 
 /****************************************************************************
  * Setup connections
@@ -824,6 +830,7 @@ struct pcn_kmsg_transport transport_rdma = {
 
 	.send_fn = rdma_kmsg_send,
 	.post_fn = rdma_kmsg_send,
+	.free_fn = rdma_kmsg_free,
 };
 
 int __init init_kmsg_rdma(void)
@@ -849,9 +856,11 @@ int __init init_kmsg_rdma(void)
 		goto out_free;
 	}
 
-	printk("Start testing!!\n");
-	__test_rdma(!my_nid);
-	printk("Testing done!!\n");
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+		if (i == my_nid) continue;
+		notify_my_node_info(i);
+	}
+
 
 	PCNPRINTK("Popcorn messaging layer over RDMA is ready\n");
 	return 0;
