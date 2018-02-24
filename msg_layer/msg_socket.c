@@ -276,9 +276,10 @@ static int recv_handler(void* arg0)
 		MSGPRINTK("RcvH %d, %d %ld\n", conn_no, header.type, offset);
 
 		//- compose body -//
-		BUG_ON(header.type < 0 || header.size < 0 ||
-					header.size > sizeof(struct pcn_kmsg_message) ||
-					header.type >= PCN_KMSG_TYPE_MAX);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		BUG_ON(header.type < 0 || header.type >= PCN_KMSG_TYPE_MAX);
+		BUG_ON(header.size < 0 || header.size >= PCN_KMSG_MAX_SIZE);
+#endif
 
 		data = pcn_kmsg_alloc_msg(header.size);
 		BUG_ON(!data && "Unable to alloc a message");
@@ -315,8 +316,7 @@ end:
 /***********************************************
  * This is the interface for message layer
  ***********************************************/
-int sock_kmsg_send(unsigned int dest_nid,
-						struct pcn_kmsg_message *_msg, size_t size)
+int sock_kmsg_send(int dest_nid, struct pcn_kmsg_message *_msg, size_t size)
 {
 	struct pcn_kmsg_message *msg;
 
@@ -333,8 +333,7 @@ int sock_kmsg_send(unsigned int dest_nid,
 	return 0;
 }
 
-int sock_kmsg_post(unsigned int dest_nid,
-						struct pcn_kmsg_message *msg, size_t size)
+int sock_kmsg_post(int dest_nid, struct pcn_kmsg_message *msg, size_t size)
 {
 	return sock_kmsg_send(dest_nid, msg, size);
 }

@@ -65,15 +65,11 @@ const char *archs_sz[] = {
 void notify_my_node_info(int nid)
 {
 	node_info_t info = {
-		.header = {
-			.type = PCN_KMSG_TYPE_NODE_INFO,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.nid = my_nid,
 		.arch = my_arch,
 	};
 
-	pcn_kmsg_send(nid, &info, sizeof(info));	
+	pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, nid, &info, sizeof(info));	
 }
 EXPORT_SYMBOL(notify_my_node_info);
 

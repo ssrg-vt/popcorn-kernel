@@ -169,10 +169,6 @@ long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
 {
 	struct wait_station *ws = get_wait_station(current);
 	remote_futex_request req = {
-		.header = {
-			.type = PCN_KMSG_TYPE_FUTEX_REQUEST,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.origin_pid = current->origin_pid,
 		.remote_ws = ws->id,
 		.op = op,
@@ -197,7 +193,8 @@ long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
 			current->origin_pid, current->origin_nid,
 			op, uaddr, val);
 	*/
-	pcn_kmsg_send(current->origin_nid, &req, sizeof(req));
+	pcn_kmsg_send(PCN_KMSG_TYPE_FUTEX_REQUEST,
+			current->origin_nid, &req, sizeof(req));
 	res = wait_at_station(ws);
 	ret = res->ret;
 	/*
@@ -224,10 +221,6 @@ static int handle_remote_futex_response(struct pcn_kmsg_message *msg)
 static void process_remote_futex_request(remote_futex_request *req)
 {
 	remote_futex_response res = {
-		.header = {
-			.type = PCN_KMSG_TYPE_FUTEX_RESPONSE,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.remote_ws = req->remote_ws,
 	};
 	ktime_t t, *tp = NULL;
@@ -251,7 +244,8 @@ static void process_remote_futex_request(remote_futex_request *req)
 			req->op, req->uaddr, res.ret);
 	*/
 
-	pcn_kmsg_send(current->remote_nid, &res, sizeof(res));
+	pcn_kmsg_send(PCN_KMSG_TYPE_FUTEX_RESPONSE,
+			current->remote_nid, &res, sizeof(res));
 	pcn_kmsg_free_msg(req);
 }
 
@@ -263,9 +257,6 @@ static void __terminate_peers(struct remote_context *rc)
 {
 	int nid;
 	origin_task_exit_t req = {
-		.header.type = PCN_KMSG_TYPE_TASK_EXIT_ORIGIN,
-		.header.prio = PCN_KMSG_PRIO_NORMAL,
-
 		.origin_pid = current->pid,
 		.exit_code = current->exit_code,
 	};
@@ -277,7 +268,7 @@ static void __terminate_peers(struct remote_context *rc)
 				rc->remote_tgids[nid], nid, req.exit_code);
 
 		req.remote_pid = rc->remote_tgids[nid];
-		pcn_kmsg_send(nid, &req, sizeof(req));
+		pcn_kmsg_send(PCN_KMSG_TYPE_TASK_EXIT_ORIGIN, nid, &req, sizeof(req));
 	}
 }
 
@@ -310,14 +301,12 @@ static int __exit_remote_task(struct task_struct *tsk)
 		/* Something went south. Notify the origin. */
 		if (!get_task_remote(tsk)->stop_workers) {
 			remote_task_exit_t req = {
-				.header.type = PCN_KMSG_TYPE_TASK_EXIT_REMOTE,
-				.header.prio = PCN_KMSG_PRIO_NORMAL,
-
 				.origin_pid = tsk->origin_pid,
 				.remote_pid = tsk->pid,
 				.exit_code = tsk->exit_code,
 			};
-			pcn_kmsg_send(tsk->origin_nid, &req, sizeof(req));
+			pcn_kmsg_send(PCN_KMSG_TYPE_TASK_EXIT_REMOTE,
+					tsk->origin_nid, &req, sizeof(req));
 		}
 		put_task_remote(tsk);
 	}
@@ -461,9 +450,6 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 	req = kmalloc(sizeof(*req), GFP_KERNEL);
 	BUG_ON(!req);
 
-	req->header.type = PCN_KMSG_TYPE_TASK_MIGRATE_BACK;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-
 	req->origin_pid = tsk->origin_pid;
 	req->remote_nid = my_nid;
 	req->remote_pid = tsk->pid;
@@ -486,7 +472,8 @@ static int do_back_migration(struct task_struct *tsk, int dst_nid, void __user *
 
 	save_thread_info(&req->arch);
 
-	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
+	ret = pcn_kmsg_send(
+			PCN_KMSG_TYPE_TASK_MIGRATE_BACK, dst_nid, req, sizeof(*req));
 
 	kfree(req);
 	do_exit(TASK_PARKED);
@@ -523,16 +510,13 @@ out:
 static int __pair_remote_task(void)
 {
 	remote_task_pairing_t req = {
-		.header = {
-			.type = PCN_KMSG_TYPE_TASK_PAIRING,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.my_nid = my_nid,
 		.my_tgid = current->tgid,
 		.my_pid = current->pid,
 		.your_pid = current->origin_pid,
 	};
-	return pcn_kmsg_send(current->origin_nid, &req, sizeof(req));
+	return pcn_kmsg_send(
+			PCN_KMSG_TYPE_TASK_PAIRING, current->origin_nid, &req, sizeof(req));
 }
 
 
@@ -925,10 +909,6 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 	req = kmalloc(sizeof(*req), GFP_KERNEL);
 	BUG_ON(!req);
 
-	/* Build request */
-	req->header.type = PCN_KMSG_TYPE_TASK_MIGRATE;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-
 	/* struct mm_struct */
 	if (get_file_path(mm->exe_file, req->exe_path, sizeof(req->exe_path))) {
 		printk("%s: cannot get path to exe binary\n", __func__);
@@ -974,7 +954,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 
 	save_thread_info(&req->arch);
 
-	ret = pcn_kmsg_send(dst_nid, req, sizeof(*req));
+	ret = pcn_kmsg_send(PCN_KMSG_TYPE_TASK_MIGRATE, dst_nid, req, sizeof(*req));
 
 out:
 	kfree(req);

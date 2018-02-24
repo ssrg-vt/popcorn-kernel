@@ -196,9 +196,6 @@ static vma_op_request_t *__alloc_vma_op_request(enum vma_op_code opcode)
 {
 	vma_op_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
 
-	req->header.type = PCN_KMSG_TYPE_VMA_OP_REQUEST;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-
 	req->origin_pid = current->origin_pid,
 	req->remote_nid = my_nid,
 	req->remote_pid = current->pid,
@@ -214,7 +211,8 @@ static int __delegate_vma_op(vma_op_request_t *req, vma_op_response_t **resp)
 
 	req->remote_ws = ws->id;
 
-	pcn_kmsg_send(current->origin_nid, req, sizeof(*req));
+	pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_REQUEST,
+			current->origin_nid, req, sizeof(*req));
 	res = wait_at_station(ws);
 	put_wait_station(ws);
 	BUG_ON(res->operation != req->operation);
@@ -407,7 +405,7 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 
 		VSPRINTK("  [%d] ->munmap [%d/%d] %lx+%lx\n", current->pid,
 				req->origin_pid, nid, start, len);
-		pcn_kmsg_send(nid, req, sizeof(*req));
+		pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_REQUEST, nid, req, sizeof(*req));
 		res = wait_at_station(ws);
 		put_wait_station(ws);
 		pcn_kmsg_free_msg(res);
@@ -429,10 +427,6 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 static void __reply_vma_op(vma_op_request_t *req, int ret)
 {
 	vma_op_response_t res = {
-		.header = {
-			.type = PCN_KMSG_TYPE_VMA_OP_RESPONSE,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.origin_pid = current->pid,
 		.origin_nid = my_nid,
 		.remote_pid = req->remote_pid,
@@ -444,7 +438,8 @@ static void __reply_vma_op(vma_op_request_t *req, int ret)
 		.len = req->len,
 	};
 
-	pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
+	pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_RESPONSE,
+			req->remote_nid, &res, sizeof(res));
 }
 
 void process_vma_op_request(vma_op_request_t *req)
@@ -659,8 +654,6 @@ void process_vma_info_request(vma_info_request_t *req)
 		res = kmalloc(sizeof(*res), GFP_KERNEL);
 	}
 	res->addr = addr;
-	res->header.type = PCN_KMSG_TYPE_VMA_INFO_RESPONSE;
-	res->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	mm = get_task_mm(current);
 	down_read(&mm->mmap_sem);
@@ -703,7 +696,8 @@ out_up:
 	}
 
 	res->remote_pid = req->remote_pid;
-	pcn_kmsg_send(req->remote_nid, res, sizeof(*res));
+	pcn_kmsg_send(PCN_KMSG_TYPE_VMA_INFO_RESPONSE,
+			req->remote_nid, res, sizeof(*res));
 
 	pcn_kmsg_free_msg(req);
 	kfree(res);
@@ -727,9 +721,6 @@ static struct vma_info *__alloc_vma_info_request(struct task_struct *tsk, unsign
 	init_waitqueue_head(&vi->pendings_wait);
 
 	/* req */
-	req->header.type = PCN_KMSG_TYPE_VMA_INFO_REQUEST;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-
 	req->origin_pid = tsk->origin_pid;
 	req->remote_nid = my_nid;
 	req->remote_pid = tsk->pid;
@@ -856,7 +847,8 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 
 		VSPRINTK("  [%d] %lx ->[%d/%d]\n", current->pid,
 				addr, tsk->origin_pid, tsk->origin_nid);
-		pcn_kmsg_send(tsk->origin_nid, req, sizeof(*req));
+		pcn_kmsg_send(PCN_KMSG_TYPE_VMA_INFO_REQUEST,
+				tsk->origin_nid, req, sizeof(*req));
 		wait_for_completion(&vi->complete);
 
 		ret = vi->ret =

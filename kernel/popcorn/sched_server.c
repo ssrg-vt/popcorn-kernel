@@ -174,17 +174,14 @@ static int get_remote_popcorn_ps_load(struct task_struct *tsk, int origin_nid, i
 {
 	struct wait_station *ws = get_wait_station(tsk);
 	remote_ps_request_t req = {
-		.header = {
-			.type = PCN_KMSG_TYPE_REMOTE_PROC_PS_REQUEST,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.nid = my_nid,
 		.origin_pid = origin_pid,
 		.origin_ws = ws->id,
 	};
 	remote_ps_response_t *res;
 
-	pcn_kmsg_send(origin_nid, &req, sizeof(req));
+	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_PS_REQUEST,
+			origin_nid, &req, sizeof(req));
 	res = wait_at_station(ws);
 
 	*uload = res->uload;
@@ -200,10 +197,6 @@ static void process_remote_ps_request(struct work_struct *work)
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
 	remote_ps_request_t *req = w->msg;
 	remote_ps_response_t res = {
-		.header = {
-			.type = PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.origin_ws = req->origin_ws,
 	};
 	struct task_struct *tsk;
@@ -216,7 +209,8 @@ static void process_remote_ps_request(struct work_struct *work)
 	}
 	popcorn_ps_load(tsk, &res.uload, &res.sload);
 	put_task_struct(tsk);
-	pcn_kmsg_send(req->nid, &res, sizeof(res));
+	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE,
+			req->nid, &res, sizeof(res));
 out:
 	pcn_kmsg_free_msg(req);
 	kfree(w);

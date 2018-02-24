@@ -122,7 +122,7 @@ struct pcn_kmsg_rdma_hdr {
    in the header. */
 struct pcn_kmsg_message {
 	struct pcn_kmsg_hdr header;
-	unsigned char payload[PCN_KMSG_MAX_SIZE];
+	unsigned char payload[PCN_KMSG_MAX_PAYLOAD_SIZE];
 } __attribute__((packed, aligned(CACHE_LINE_SIZE)));
 
 /* SETUP */
@@ -139,10 +139,10 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
 /* MESSAGING */
 /* Send @msg whose size is @msg_size to the node @dest_nid */
-int pcn_kmsg_send(int dest_nid, void *msg, size_t msg_size);
+int pcn_kmsg_send(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_size);
 
 /* Post @msg whose size is @msg_size to be sent to the node @dest_nid */
-int pcn_kmsg_post(int dest_nid, void *msg, size_t msg_size);
+int pcn_kmsg_post(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_size);
 
 /**
  * Process the received messag @msg. Each message layer should start processing

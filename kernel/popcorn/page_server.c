@@ -622,10 +622,6 @@ static void process_remote_page_flush(struct work_struct *work)
 	void *paddr;
 	struct vm_area_struct *vma;
 	remote_page_flush_ack_t res = {
-		.header = {
-			.type = PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH_ACK,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.remote_ws = req->remote_ws,
 	};
 
@@ -640,11 +636,13 @@ static void process_remote_page_flush(struct work_struct *work)
 
 	if (req->flags & FLUSH_FLAG_START) {
 		res.flags = FLUSH_FLAG_START;
-		pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
+		pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH_ACK,
+				req->remote_nid, &res, sizeof(res));
 		goto out_put;
 	} else if (req->flags & FLUSH_FLAG_LAST) {
 		res.flags = FLUSH_FLAG_LAST;
-		pcn_kmsg_send(req->remote_nid, &res, sizeof(res));
+		pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH_ACK,
+				req->remote_nid, &res, sizeof(res));
 		goto out_put;
 	}
 
@@ -695,6 +693,7 @@ static int __do_pte_flush(pte_t *pte, unsigned long addr, unsigned long next, st
 	struct vm_area_struct *vma = walk->vma;
 	struct page *page;
 	int req_size;
+	enum pcn_kmsg_type req_type;
 	char type;
 
 	if (pte_none(*pte)) return 0;
@@ -711,19 +710,19 @@ static int __do_pte_flush(pte_t *pte, unsigned long addr, unsigned long next, st
 			copy_from_user_page(walk->vma, page, addr, req->page, paddr, PAGE_SIZE);
 			kunmap_atomic(paddr);
 
-			req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH;
+			req_type = PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH;
 			req_size = sizeof(remote_page_flush_t);
 			req->flags = FLUSH_FLAG_FLUSH;
 			type = '*';
 		} else {
-			req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE;
+			req_type = PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE;
 			req_size = sizeof(remote_page_release_t);
 			req->flags = FLUSH_FLAG_RELEASE;
 			type = '+';
 		}
 		clear_page_owner(my_nid, vma->vm_mm, addr);
 
-		pcn_kmsg_send(current->origin_nid, req, req_size);
+		pcn_kmsg_send(req_type, current->origin_nid, req, req_size);
 	} else {
 		*pte = pte_make_valid(*pte);
 		type = '-';
@@ -759,9 +758,9 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 	req->addr = 0;
 
 	/* Notify the start synchronously */
-	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE;
 	req->flags = FLUSH_FLAG_START;
-	pcn_kmsg_send(current->origin_nid, req, sizeof(*req));
+	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE,
+			current->origin_nid, req, sizeof(*req));
 	wait_at_station(ws);
 
 	/* Send pages asynchronously */
@@ -773,9 +772,9 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 	up_read(&mm->mmap_sem);
 
 	/* Notify the completion synchronously */
-	req->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH;
 	req->flags = FLUSH_FLAG_LAST;
-	pcn_kmsg_send(current->origin_nid, req, sizeof(*req));
+	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH,
+			current->origin_nid, req, sizeof(*req));
 	wait_at_station(ws);
 
 	kfree(req);
@@ -851,10 +850,6 @@ static void process_page_invalidate_request(struct work_struct *work)
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
 	page_invalidate_request_t *req = w->msg;
 	page_invalidate_response_t res = {
-		.header = {
-			.type = PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.origin_pid = req->origin_pid,
 		.origin_ws = req->origin_ws,
 		.remote_pid = req->remote_pid,
@@ -871,7 +866,8 @@ static void process_page_invalidate_request(struct work_struct *work)
 
 	__do_invalidate_page(tsk, req);
 
-	pcn_kmsg_send(req->origin_nid, &res, sizeof(res));
+	pcn_kmsg_send(PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE,
+			req->origin_nid, &res, sizeof(res));
 	PGPRINTK(">>[%d] ->[%d/%d]\n", req->remote_pid, res.origin_pid, res.origin_nid);
 
 	put_task_struct(tsk);
@@ -899,10 +895,6 @@ static int handle_page_invalidate_response(struct pcn_kmsg_message *msg)
 static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid, unsigned long addr, int ws_id)
 {
 	page_invalidate_request_t req = {
-		.header = {
-			.type = PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.addr = addr,
 		.origin_nid = my_nid,
 		.origin_pid = tsk->pid,
@@ -911,7 +903,7 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
 	};
 
 	PGPRINTK("  [%d] revoke %lx [%d/%d]\n", tsk->pid, addr, pid, nid);
-	pcn_kmsg_send(nid, &req, sizeof(req));
+	pcn_kmsg_send(PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, nid, &req, sizeof(req));
 }
 
 
@@ -1028,11 +1020,6 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id)
 {
 	remote_page_request_t req = {
-		.header = {
-			.type = PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
-
 		.addr = addr,
 		.fault_flags = fault_flags,
 
@@ -1044,7 +1031,8 @@ static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t f
 	};
 	req.instr_addr = instruction_pointer(current_pt_regs());
 
-	pcn_kmsg_send(from_nid, &req, sizeof(req));
+	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
+			from_nid, &req, sizeof(req));
 
 	PGPRINTK("  [%d] ->[%d/%d] %lx %lx\n", tsk->pid,
 			from_pid, from_nid, addr, req.instr_addr);
@@ -1417,6 +1405,7 @@ static void process_remote_page_request(struct work_struct *work)
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	int res_size;
+	enum pcn_kmsg_type res_type;
 	int down_read_retry = 0;
 
 	while (!res) {	/* response contains a page. allocate from a heap */
@@ -1470,10 +1459,10 @@ out_up:
 
 out:
 	if (res->result == 0) {
-		res->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
+		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
 		res_size = sizeof(remote_page_response_t);
 	} else {
-		res->header.type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT;
+		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT;
 		res_size = sizeof(remote_page_response_short_t);
 	}
 	res->header.prio = PCN_KMSG_PRIO_NORMAL;
@@ -1489,7 +1478,7 @@ out:
 #ifdef CONFIG_POPCORN_KMSG_IB_RDMA
 	pcn_kmsg_respond_rdma(req, res, res_size);
 #else
-	pcn_kmsg_send(req->origin_nid, res, res_size);
+	pcn_kmsg_send(res_type, req->origin_nid, res, res_size);
 #endif
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, res->origin_nid, res->result);

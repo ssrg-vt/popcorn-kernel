@@ -28,7 +28,7 @@
 
 #include "common.h"
 
-#define MAX_MSG_LENGTH PCN_KMSG_LONG_PAYLOAD_SIZE	/* 1 bit for FaRM */
+#define MAX_MSG_LENGTH PCN_KMSG_MAX_PAYLOAD_SIZE	/* 1 bit for FaRM */
 
 /* testing args */
 #define ITER 1					/* iter for test10 (send throughput) */
@@ -90,16 +90,18 @@ char *g_test_write_buf = NULL;
 #endif 
 
 /* example - data structure (dbg info) */
-typedef struct {
-	struct pcn_kmsg_hdr header; /* must follow */
-	struct pcn_kmsg_rdma_hdr rdma_header;
-	/* you define */
-	int example1;
-	int example2;
-#ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER
-#endif  
+#define TEST_REQUEST_FIELDS \
+	int example1; \
+	int example2; \
 	char msg[TEST1_PAYLOAD_SIZE];
-}__attribute__((packed)) test_request_t;
+DEFINE_PCN_RDMA_KMSG(test_request_t, TEST_REQUEST_FIELDS);
+
+#define PERF_RDMA_FIELDS \
+	int remote_ws; \
+	u64 dma_addr_act; \
+	u32 mr_id; \
+	int t_num;
+DEFINE_PCN_RDMA_KMSG(pcn_kmsg_perf_rdma_t, PERF_RDMA_FIELDS);
 
 struct test_msg_t {
 	struct pcn_kmsg_hdr header;
@@ -273,21 +275,20 @@ void show_RW_dummy_buf(void)
 	request = pcn_kmsg_alloc_msg(sizeof(*request));
 	BUG_ON(!request);
 
-	request->header.type = PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF;
-	request->header.prio = PCN_KMSG_PRIO_NORMAL;
-
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		if (my_nid == i) continue;
-		pcn_kmsg_send(i, request, sizeof(*request));
+		pcn_kmsg_send(PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF, i, request, sizeof(*request));
 	}
 
 	kfree(request);
 }
 
-static void handle_show_RW_dummy_buf( struct pcn_kmsg_message *inc_lmsg)
+static int handle_show_RW_dummy_buf(struct pcn_kmsg_message *inc_lmsg)
 {
 	_show_RW_dummy_buf(0);
 	pcn_kmsg_free_msg(inc_lmsg);
+
+	return 0;
 }
 
 void init_RW_dummy_buf(int t)
@@ -302,31 +303,6 @@ void init_RW_dummy_buf(int t)
 		memset(dummy_pass_buf[j][t], 'P', 10);
 		memset(dummy_pass_buf[j][t] + 10, 'Q', MAX_MSG_LENGTH-10);
 	}
-}
-
-static struct mimic_rw_msg_request *
-				__alloc_send_roundtrip_read_request(void)
-{
-	struct mimic_rw_msg_request *req = pcn_kmsg_alloc_msg(sizeof(*req));
-	BUG_ON (!req);
-
-	req->header.type = PCN_KMSG_TYPE_SEND_ROUND_READ_REQUEST;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-	return req;
-}
-
-
-static struct mimic_rw_signal_request *
-			__alloc_send_roundtrip_write_request(void)
-{
-	struct mimic_rw_signal_request *req =
-			pcn_kmsg_alloc_msg(sizeof(struct mimic_rw_signal_request));
-	if (!req)
-		return NULL;
-
-	req->header.type = PCN_KMSG_TYPE_SEND_ROUND_WRITE_REQUEST;
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-	return req;
 }
 
 void _show_time(struct timeval *t1, struct timeval *t2,
@@ -347,7 +323,7 @@ void _show_time(struct timeval *t1, struct timeval *t2,
 
 
 /* example - handler */
-static void handle_remote_thread_first_test_request(
+static int handle_remote_thread_first_test_request(
 									struct pcn_kmsg_message* inc_lmsg)
 {
 	test_request_t* request = 
@@ -365,7 +341,7 @@ static void handle_remote_thread_first_test_request(
 #endif
 
 	pcn_kmsg_free_msg(request);
-	return;
+	return 0;
 }
 
 static int handle_self_test(struct pcn_kmsg_message* inc_msg)
@@ -397,8 +373,6 @@ static int test1(void)
 
 		req = pcn_kmsg_alloc_msg(sizeof(*req));
 		BUG_ON(!req);
-		req->header.type = PCN_KMSG_TYPE_TEST_0;
-		req->header.prio = PCN_KMSG_PRIO_NORMAL;
 
 		/* msg essentials */
 		/* ------------------------------------------------------------ */
@@ -411,7 +385,7 @@ static int test1(void)
 													(int)strlen(req->msg));
 
 		//pcn_kmsg_send(i, (struct pcn_kmsg_message*) req, sizeof(*req));
-		pcn_kmsg_send(i, req, sizeof(*req));
+		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_0, i, req, sizeof(*req));
 		//pcn_kmsg_free_msg(req);
 		kfree(req);
 	}
@@ -541,7 +515,6 @@ void test_send_throughput(unsigned int payload_size)
 	struct timeval t1, t2;
 	struct test_msg_t *msg = pcn_kmsg_alloc_msg(sizeof(*msg));
 
-	msg->header.type = PCN_KMSG_TYPE_TEST_1;
 	memset(&msg->payload, 'b', payload_size);
 
 	if (!my_nid)
@@ -549,7 +522,7 @@ void test_send_throughput(unsigned int payload_size)
 
 	do_gettimeofday(&t1);
 	for (i = 0; i < MAX_TESTING_SIZE/payload_size; i++)
-		pcn_kmsg_send(dst, msg, payload_size + sizeof(msg->header));
+		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_1, dst, msg, payload_size + sizeof(msg->header));
 	do_gettimeofday(&t2);
 
 	if (t2.tv_usec-t1.tv_usec >= 0) {
@@ -899,7 +872,7 @@ void test_send_read_throughput(unsigned int payload_size,
 			struct mimic_rw_msg_request *req;
 			struct mimic_rw_signal_request *res;
 			if (my_nid == dst) continue;
-			req = __alloc_send_roundtrip_read_request();
+			req = pcn_kmsg_alloc_msg(sizeof(*req));
 			BUG_ON(!req);
 
 			ws = get_wait_station(current);
@@ -915,7 +888,7 @@ void test_send_read_throughput(unsigned int payload_size,
 							sizeof(*req) - sizeof(req->payload) + payload_size,
 							sizeof(*req), sizeof(req->payload), payload_size);
 
-			pcn_kmsg_send(dst, req,
+			pcn_kmsg_send(PCN_KMSG_TYPE_SEND_ROUND_READ_REQUEST, dst, req,
 						sizeof(*req) - sizeof(req->payload) + payload_size);
 
 			kfree(req);
@@ -948,7 +921,7 @@ void test_send_write_throughput(unsigned int payload_size,
 			struct mimic_rw_signal_request *req;
 			struct mimic_rw_msg_request *res;
 			if (my_nid == dst) continue;
-			req = __alloc_send_roundtrip_write_request();
+			req = pcn_kmsg_alloc_msg(sizeof(struct mimic_rw_signal_request));
 			BUG_ON(!req);
 
 			ws = get_wait_station(current);
@@ -956,7 +929,8 @@ void test_send_write_throughput(unsigned int payload_size,
 			req->size = payload_size;
 			req->tid = tid;
 
-			pcn_kmsg_send(dst, req, sizeof(*req));
+			pcn_kmsg_send(PCN_KMSG_TYPE_SEND_ROUND_WRITE_REQUEST,
+					dst, req, sizeof(*req));
 
 			kfree(req);
 			res = wait_at_station(ws);
@@ -1053,11 +1027,13 @@ static ssize_t write_proc(struct file * file,
 	atomic_t thread_done_cnt;
 	wait_queue_head_t wait_thread_sem;
 
+#ifdef CONFIG_POPCORN_STAT
+	printk(KERN_WARNING "You are collecting statistics "
+			"and may get inaccurate performance data now\n");
+#endif
+
 	thread_done_cnt.counter = 0;
 	init_waitqueue_head(&wait_thread_sem);
-
-	if (!try_module_get(THIS_MODULE))
-		return -ENODEV;
 
 	cmd = kmalloc(count, GFP_KERNEL);
 	if (!cmd) {
@@ -1088,11 +1064,6 @@ static ssize_t write_proc(struct file * file,
 			KRPRINT_INIT("argv[%d] = %s\n", i, argv[i]);
 	}
 
-#ifdef CONFIG_POPCORN_STAT
-	printk(KERN_WARNING "You are collecting statistics "
-			"and may get inaccurate performance data now\n");
-#endif
-	
 	KRPRINT_INIT("\n\n[ proc write |%s| cnt %ld ] [%d args] \n", 
 												cmd, count, args);
 
@@ -1125,6 +1096,9 @@ static ssize_t write_proc(struct file * file,
 		_karg->thread_done_cnt = karg.thread_done_cnt;
 		karg_ptrs[i] = _karg;
 	}
+
+	if (!try_module_get(THIS_MODULE))
+		return -ENODEV;
 
 	/* do the coresponding work */
 	if (cmd[0] == '0') {
@@ -1407,11 +1381,9 @@ static struct file_operations kmsg_test_ops = {
 static void __reply_send_r_roundtrip(struct mimic_rw_msg_request *req, int ret)
 {
 	struct mimic_rw_signal_request *res = pcn_kmsg_alloc_msg(sizeof(*res));
-	res->header.type = PCN_KMSG_TYPE_SEND_ROUND_READ_RESPONSE;
-	res->header.prio = PCN_KMSG_PRIO_NORMAL;
 	res->remote_ws = req->remote_ws;
 	//res->size = req->size;
-	pcn_kmsg_send(req->header.from_nid, res, sizeof(*res));
+	pcn_kmsg_send(PCN_KMSG_TYPE_SEND_ROUND_READ_RESPONSE, req->header.from_nid, res, sizeof(*res));
 	kfree(res);
 }
 
@@ -1451,8 +1423,6 @@ static void __reply_send_w_roundtrip(struct mimic_rw_signal_request *req,
 									int ret)
 {
 	struct mimic_rw_msg_request *res = pcn_kmsg_alloc_msg(sizeof(*res));
-	res->header.type = PCN_KMSG_TYPE_SEND_ROUND_WRITE_RESPONSE;
-	res->header.prio = PCN_KMSG_PRIO_NORMAL;
 	res->remote_ws = req->remote_ws;
 	res->size = req->size;
 
@@ -1464,7 +1434,7 @@ static void __reply_send_w_roundtrip(struct mimic_rw_signal_request *req,
 	//printk("mimic WRITE (cost for msg layer)\n");
 	memcpy(&res->payload,
 			dummy_send_buf[req->header.from_nid][req->tid], req->size);
-	pcn_kmsg_send(req->header.from_nid, res,
+	pcn_kmsg_send(PCN_KMSG_TYPE_SEND_ROUND_WRITE_RESPONSE, req->header.from_nid, res,
 					sizeof(*res) - sizeof(res->payload) + req->size);
 	kfree(res);
 }
@@ -1585,16 +1555,10 @@ static int __init msg_test_init(void)
 	kmsg_test_proc = proc_create("kmsg_test", 0666, NULL, &kmsg_test_ops);
 	if (!kmsg_test_proc) {
 		printk(KERN_ERR "cannot create /proc/kmsg_test\n");
-		return -ENOMEM;
+		return -EPERM;
 	}
 
 	/* init dummy buffers for geting experimental data */
-	if (MAX_MSG_LENGTH > PCN_KMSG_LONG_PAYLOAD_SIZE) {
-		printk(KERN_ERR "MAX_MSG_LENGTH %d shouldn't be larger than "
-						"PCN_KMSG_LONG_PAYLOAD_SIZE %d\n",
-						MAX_MSG_LENGTH, PCN_KMSG_LONG_PAYLOAD_SIZE);
-		BUG();
-	}
 	for (j = 0; j < MAX_NUM_NODES; j++) {
 		for (i = 0; i < MAX_CONCURRENT_THREADS; i++) {
 			dummy_send_buf[j][i] = kzalloc(MAX_MSG_LENGTH, GFP_KERNEL);
@@ -1613,13 +1577,13 @@ static int __init msg_test_init(void)
 		}
 	}
 	/* register callback. also define in <linux/pcn_kmsg.h>  */
-	pcn_kmsg_register_callback((enum pcn_kmsg_type)PCN_KMSG_TYPE_TEST_0,
-					(pcn_kmsg_cbftn)handle_remote_thread_first_test_request);
+	pcn_kmsg_register_callback(
+			PCN_KMSG_TYPE_TEST_0, handle_remote_thread_first_test_request);
 
 	/* for experimental data - send throughput */
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_TEST_1, handle_self_test);
-	pcn_kmsg_register_callback(PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF,
-								(pcn_kmsg_cbftn)handle_show_RW_dummy_buf);
+	pcn_kmsg_register_callback(
+			PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF, handle_show_RW_dummy_buf);
 
 	/* for experimental data - Round-trip throughput */
 	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_SEND_ROUND_READ_REQUEST,

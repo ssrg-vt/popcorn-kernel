@@ -158,10 +158,6 @@ static void process_remote_mem_info_request(struct work_struct *work)
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
 	remote_mem_info_request_t *request = w->msg;
 	remote_mem_info_response_t response = {
-		.header = {
-			.type = PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.nid = my_nid,
 		.origin_ws = request->origin_ws,
 	};
@@ -173,7 +169,8 @@ static void process_remote_mem_info_request(struct work_struct *work)
 		goto out;
 	}
 
-	ret = pcn_kmsg_send(request->nid, &response, sizeof(response));
+	ret = pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE,
+			request->nid, &response, sizeof(response));
 	if (ret < 0) {
 		RIPRINTK("%s: failed to send response message\n", __func__);
 		goto out;
@@ -202,10 +199,6 @@ static int handle_remote_mem_info_response(struct pcn_kmsg_message *inc_msg)
 remote_mem_info_response_t *send_remote_mem_info_request(unsigned int nid)
 {
 	remote_mem_info_request_t request = {
-		.header = {
-			.type = PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
 		.nid = my_nid,
 	};
 	remote_mem_info_response_t *response;
@@ -213,7 +206,8 @@ remote_mem_info_response_t *send_remote_mem_info_request(unsigned int nid)
 
 	request.origin_ws = ws->id;
 
-	pcn_kmsg_send(nid, &request, sizeof(request));
+	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
+			nid, &request, sizeof(request));
 	response = wait_at_station(ws);
 	put_wait_station(ws);
 
@@ -324,14 +318,13 @@ void send_remote_cpu_info_request(unsigned int nid)
 
 	request = kmalloc(sizeof(*request), GFP_KERNEL);
 
-	request->header.type = PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST;
-	request->header.prio = PCN_KMSG_PRIO_NORMAL;
 	request->nid = my_nid;
 	request->origin_ws = ws->id;
 
 	fill_cpu_info(&request->cpu_info_data);
 
-	pcn_kmsg_send(nid, request, sizeof(*request));
+	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
+			nid, request, sizeof(*request));
 
 	response = wait_at_station(ws);
 	put_wait_station(ws);
@@ -376,8 +369,6 @@ static void process_remote_cpu_info_request(struct work_struct *work)
 	memcpy(saved_cpu_info[request->nid],
 	       &request->cpu_info_data, sizeof(request->cpu_info_data));
 
-	response->header.type = PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE;
-	response->header.prio = PCN_KMSG_PRIO_NORMAL;
 	response->nid = my_nid;
 	response->origin_ws = request->origin_ws;
 
@@ -387,7 +378,8 @@ static void process_remote_cpu_info_request(struct work_struct *work)
 		goto out;
 	}
 
-	ret = pcn_kmsg_send(request->nid, response, sizeof(*response));
+	ret = pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
+			request->nid, response, sizeof(*response));
 	if (ret < 0) {
 		RIPRINTK("%s: failed to send response message\n", __func__);
 		goto out;

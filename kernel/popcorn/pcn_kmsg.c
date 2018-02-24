@@ -64,16 +64,16 @@ EXPORT_SYMBOL(pcn_kmsg_process);
 
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-static void __check_kmsg_sanity(int to, struct pcn_kmsg_message *msg, size_t size)
+static void __check_kmsg_sanity(enum pcn_kmsg_type type, int to, struct pcn_kmsg_message *msg, size_t size)
 {
-	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
+	BUG_ON(type < 0 || type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(size > PCN_KMSG_MAX_SIZE);
 	BUG_ON(to < 0 || to >= MAX_POPCORN_NODES);
 	BUG_ON(to == my_nid);
 }
 #endif
 
-int pcn_kmsg_send(int to, void *_msg, size_t size)
+int pcn_kmsg_send(enum pcn_kmsg_type type, int to, void *_msg, size_t size)
 {
 	struct pcn_kmsg_message *msg = _msg;
 
@@ -83,9 +83,11 @@ int pcn_kmsg_send(int to, void *_msg, size_t size)
 				"Make sure the msg_layer is properly loaded");
 		return -EINVAL;
 	}
-	__check_kmsg_sanity(to, msg, size);
+	__check_kmsg_sanity(type, to, msg, size);
 #endif
 
+	msg->header.type = type;
+	msg->header.prio = PCN_KMSG_PRIO_NORMAL;
 	msg->header.size = size;
 	msg->header.from_nid = my_nid;
 
@@ -94,7 +96,7 @@ int pcn_kmsg_send(int to, void *_msg, size_t size)
 }
 EXPORT_SYMBOL(pcn_kmsg_send);
 
-int pcn_kmsg_post(int to, void *_msg, size_t size)
+int pcn_kmsg_post(enum pcn_kmsg_type type, int to, void *_msg, size_t size)
 {
 	struct pcn_kmsg_message *msg = _msg;
 
@@ -104,7 +106,7 @@ int pcn_kmsg_post(int to, void *_msg, size_t size)
 				"Make sure the msg_layer is properly loaded");
 		return -EINVAL;
 	}
-	__check_kmsg_sanity(to, msg, size);
+	__check_kmsg_sanity(type, to, msg, size);
 #endif
 
 	msg->header.size = size;
@@ -127,7 +129,7 @@ void *pcn_kmsg_request_rdma(int to, void *_msg, size_t msg_size, size_t res_size
 		printk(KERN_ERR "No rdma function registered");
 		return NULL;
 	}
-	__check_kmsg_sanity(to, msg, msg_size);
+	__check_kmsg_sanity(0, to, msg, msg_size);
 #endif
 
 	msg->header.size = msg_size;
@@ -148,7 +150,7 @@ void pcn_kmsg_respond_rdma(void *_req, void *_res, size_t res_size)
 		printk(KERN_ERR "No rdma respond function");
 		return;
 	}
-	__check_kmsg_sanity(req->header.from_nid, _res, res_size);
+	__check_kmsg_sanity(0, req->header.from_nid, _res, res_size);
 #endif
 
 	res->header.size = res_size;
