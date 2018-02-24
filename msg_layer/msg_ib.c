@@ -1683,6 +1683,19 @@ int __init __establish_connections(void)
 	return 0;
 }
 
+
+struct pcn_kmsg_transport transport_ib = {
+	.name = "ib",
+	.type = PCN_KMSG_LAYER_TYPE_IB,
+
+	.send_fn = (send_ftn)ib_kmsg_send,
+	.post_fn = (post_ftn)ib_kmsg_send,
+	.free_fn = (free_ftn)ib_kmsg_free_ftn,
+
+	.request_rdma_fn = (request_rdma_ftn)request_ib_rdma,
+	.respond_rdma_fn = (respond_rdma_ftn)respond_ib_rdma,
+};
+
 int __init init_msg_ib(void)
 {
 	int i, err;
@@ -1691,12 +1704,7 @@ int __init init_msg_ib(void)
 
 	if (!identify_myself()) return -EINVAL;
 
-	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_IB;
-	pcn_kmsg_send_ftn = (send_ftn)ib_kmsg_send;
-	pcn_kmsg_post_ftn = (post_ftn)ib_kmsg_send;
-	pcn_kmsg_request_rdma_ftn = (request_rdma_ftn)request_ib_rdma;
-	pcn_kmsg_respond_rdma_ftn = (respond_rdma_ftn)respond_ib_rdma;
-	pcn_kmsg_free_ftn = (free_ftn)ib_kmsg_free_ftn;
+	pcn_kmsg_set_transport(&transport_ib);
 
 #if CONFIG_RDMA_NOTIFY
 	pcn_kmsg_register_callback(PCN_KMSG_TYPE_RDMA_KEY_EXCHANGE_REQUEST,

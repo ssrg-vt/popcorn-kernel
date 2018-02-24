@@ -270,8 +270,8 @@ static int recv_handler(void* arg0)
 				continue;
 			offset += ret;
 			len -= ret;
-			//printk("(hdr) recv %d in %lu remain %d\n",
-					ret, sizeof(struct pcn_kmsg_hdr), len);
+			/* printk("(hdr) recv %d in %lu remain %d\n",
+					ret, sizeof(struct pcn_kmsg_hdr), len); */
 		}
 		MSGPRINTK("RcvH %d, %d %ld\n", conn_no, header.type, offset);
 
@@ -315,14 +315,14 @@ end:
 /***********************************************
  * This is the interface for message layer
  ***********************************************/
-static int sock_kmsg_send(unsigned int dest_nid,
-						struct pcn_kmsg_message *msg, size_t size)
+int sock_kmsg_send(unsigned int dest_nid,
+						struct pcn_kmsg_message *_msg, size_t size)
 {
 	struct pcn_kmsg_message *msg;
 
 	msg = pcn_kmsg_alloc_msg(size);
 	BUG_ON(!msg);
-	memcpy(msg, msg, size);
+	memcpy(msg, _msg, size);
 
 	enq_send(send_buf[dest_nid], msg, dest_nid);
 
@@ -333,12 +333,20 @@ static int sock_kmsg_send(unsigned int dest_nid,
 	return 0;
 }
 
-static int sock_kmsg_post(unsigned int dest_nid,
+int sock_kmsg_post(unsigned int dest_nid,
 						struct pcn_kmsg_message *msg, size_t size)
 {
 	return sock_kmsg_send(dest_nid, msg, size);
 }
 
+
+struct pcn_kmsg_transport transport_socket = {
+	.name = "socket",
+	.type = PCN_KMSG_LAYER_TYPE_SOCKET,
+
+	.send_fn = (send_ftn)sock_kmsg_send,
+	.post_fn = (post_ftn)sock_kmsg_post,
+};
 
 static int __init initialize(void)
 {
@@ -349,14 +357,12 @@ static int __init initialize(void)
 
 	if (!identify_myself()) return -EINVAL;
 
-	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_SOCKET;
-	pcn_kmsg_send_ftn = (send_ftn)sock_kmsg_send;
-	pcn_kmsg_post_ftn = (post_ftn)sock_kmsg_post;
-
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		init_completion(&connected[i]);
 		init_completion(&accepted[i]);
 	}
+
+	pcn_kmsg_set_transport(&transport_socket);
 
 	/* Initilaize the sock */
 	/*

@@ -806,9 +806,19 @@ void __exit exit_kmsg_rdma(void)
 
 		kfree(rdma_handles[i]);
 	}
+	pcn_kmsg_set_transport(NULL);
+
 	MSGPRINTK("Popcorn message layer over RDMA unloaded\n");
 	return;
 }
+
+struct pcn_kmsg_transport transport_rdma = {
+	.name = "rdma",
+	.type = PCN_KMSG_LAYER_TYPE_RDMA,
+
+	.send_fn = rdma_kmsg_send,
+	.post_fn = rdma_kmsg_send,
+};
 
 int __init init_kmsg_rdma(void)
 {
@@ -830,9 +840,7 @@ int __init init_kmsg_rdma(void)
 		bitmap_zero(rh->rdma_slots, NR_RDMA_SLOTS);
 	}
 
-	pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_RDMA;
-	pcn_kmsg_send_ftn = (send_ftn)rdma_kmsg_send;
-	pcn_kmsg_post_ftn = (post_ftn)rdma_kmsg_send;
+	pcn_kmsg_set_transport(&transport_rdma);
 
 	if (__establish_connections()) {
 		goto out_free;

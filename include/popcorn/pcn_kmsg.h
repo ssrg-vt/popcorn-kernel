@@ -129,7 +129,6 @@ struct pcn_kmsg_message {
 
 /* Function pointer to callback functions */
 typedef int (*pcn_kmsg_cbftn)(struct pcn_kmsg_message *);
-extern pcn_kmsg_cbftn pcn_kmsg_cbftns[PCN_KMSG_TYPE_MAX];
 
 /* Register a callback function to handle the message type */
 int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback);
@@ -142,14 +141,8 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 /* Send @msg whose size is @msg_size to the node @dest_nid */
 int pcn_kmsg_send(int dest_nid, void *msg, size_t msg_size);
 
-typedef int (*send_ftn)(int, struct pcn_kmsg_message *, size_t);
-extern send_ftn pcn_kmsg_send_ftn;
-
 /* Post @msg whose size is @msg_size to be sent to the node @dest_nid */
 int pcn_kmsg_post(int dest_nid, void *msg, size_t msg_size);
-
-typedef int (*post_ftn)(int, struct pcn_kmsg_message *, size_t);
-extern post_ftn pcn_kmsg_post_ftn;
 
 /**
  * Process the received messag @msg. Each message layer should start processing
@@ -166,30 +159,42 @@ DEFINE_PCN_RDMA_KMSG(pcn_kmsg_rdma_t, RDMA_TEMPLATE);
     
 void *pcn_kmsg_request_rdma(int dest_nid, void *msg, size_t msg_size, size_t rw_size);
 
-typedef void* (*request_rdma_ftn)(int, pcn_kmsg_rdma_t *, size_t, size_t);
-extern request_rdma_ftn pcn_kmsg_request_rdma_ftn;
-
 void pcn_kmsg_respond_rdma(void *msg, void *paddr, size_t rw_size);
-
-typedef void (*respond_rdma_ftn)(pcn_kmsg_rdma_t *, void *, size_t rw_size);
-extern respond_rdma_ftn pcn_kmsg_respond_rdma_ftn;
 
 
 /* Allocate/free buffers for receiving a message */
 void *pcn_kmsg_alloc_msg(size_t size);
 void pcn_kmsg_free_msg(void *msg);
 
-typedef void (*free_ftn)(struct pcn_kmsg_message *);
-extern free_ftn pcn_kmsg_free_ftn;
-
 
 enum pcn_kmsg_layer_types {
 	PCN_KMSG_LAYER_TYPE_UNKNOWN = -1,
 	PCN_KMSG_LAYER_TYPE_SOCKET = 0,
+	PCN_KMSG_LAYER_TYPE_RDMA,
 	PCN_KMSG_LAYER_TYPE_IB,
 	PCN_KMSG_LAYER_TYPE_DOLPHIN,
 	PCN_KMSG_LAYER_TYPE_MAX,
 };
-extern enum pcn_kmsg_layer_types pcn_kmsg_layer_type;
+
+typedef int (*send_ftn)(int, struct pcn_kmsg_message *, size_t);
+typedef int (*post_ftn)(int, struct pcn_kmsg_message *, size_t);
+typedef void (*free_ftn)(struct pcn_kmsg_message *);
+
+typedef void* (*request_rdma_ftn)(int, pcn_kmsg_rdma_t *, size_t, size_t);
+typedef void (*respond_rdma_ftn)(pcn_kmsg_rdma_t *, void *, size_t rw_size);
+
+struct pcn_kmsg_transport {
+	char *name;
+	enum pcn_kmsg_layer_types type;
+
+	send_ftn send_fn;
+	post_ftn post_fn;
+	free_ftn free_fn;
+
+	request_rdma_ftn request_rdma_fn;
+	respond_rdma_ftn respond_rdma_fn;
+};
+
+extern void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr);
 
 #endif /* __LINUX_PCN_KMSG_H */

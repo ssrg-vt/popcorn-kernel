@@ -13,26 +13,18 @@
 #include <popcorn/stat.h>
 #include <popcorn/bundle.h>
 
-enum pcn_kmsg_layer_types pcn_kmsg_layer_type = PCN_KMSG_LAYER_TYPE_UNKNOWN;
-EXPORT_SYMBOL(pcn_kmsg_layer_type);
-
 pcn_kmsg_cbftn pcn_kmsg_cbftns[PCN_KMSG_TYPE_MAX] = { NULL };
 EXPORT_SYMBOL(pcn_kmsg_cbftns);
 
-send_ftn pcn_kmsg_send_ftn = NULL;
-EXPORT_SYMBOL(pcn_kmsg_send_ftn);
+static struct pcn_kmsg_transport *transport = NULL;
 
-post_ftn pcn_kmsg_post_ftn = NULL;
-EXPORT_SYMBOL(pcn_kmsg_post_ftn);
-
-request_rdma_ftn pcn_kmsg_request_rdma_ftn = NULL;
-EXPORT_SYMBOL(pcn_kmsg_request_rdma_ftn);
-
-respond_rdma_ftn pcn_kmsg_respond_rdma_ftn = NULL;
-EXPORT_SYMBOL(pcn_kmsg_respond_rdma_ftn);
-
-free_ftn pcn_kmsg_free_ftn = NULL;
-EXPORT_SYMBOL(pcn_kmsg_free_ftn);
+void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr)
+{
+	if (transport) {
+	}
+	transport = tr;
+}
+EXPORT_SYMBOL(pcn_kmsg_set_transport);
 
 int pcn_kmsg_register_callback(enum pcn_kmsg_type type, pcn_kmsg_cbftn callback)
 {
@@ -86,7 +78,7 @@ int pcn_kmsg_send(int to, void *_msg, size_t size)
 	struct pcn_kmsg_message *msg = _msg;
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-	if (pcn_kmsg_send_ftn == NULL) {
+	if (!transport || !transport->send_fn) {
 		printk(KERN_ERR "No send function registered. "
 				"Make sure the msg_layer is properly loaded");
 		return -EINVAL;
@@ -98,7 +90,7 @@ int pcn_kmsg_send(int to, void *_msg, size_t size)
 	msg->header.from_nid = my_nid;
 
 	account_pcn_message_sent(msg);
-	return pcn_kmsg_send_ftn(to, msg, size);
+	return transport->send_fn(to, msg, size);
 }
 EXPORT_SYMBOL(pcn_kmsg_send);
 
@@ -107,7 +99,7 @@ int pcn_kmsg_post(int to, void *_msg, size_t size)
 	struct pcn_kmsg_message *msg = _msg;
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-	if (pcn_kmsg_post_ftn == NULL) {
+	if (!transport || !transport->post_fn) {
 		printk(KERN_ERR "No send function registered. "
 				"Make sure the msg_layer is properly loaded");
 		return -EINVAL;
@@ -119,7 +111,7 @@ int pcn_kmsg_post(int to, void *_msg, size_t size)
 	msg->header.from_nid = my_nid;
 
 	account_pcn_message_sent(msg);
-	return pcn_kmsg_post_ftn(to, msg, size);
+	return transport->post_fn(to, msg, size);
 }
 EXPORT_SYMBOL(pcn_kmsg_post);
 
@@ -131,6 +123,10 @@ void *pcn_kmsg_request_rdma(int to, void *_msg, size_t msg_size, size_t res_size
 	struct pcn_kmsg_message *msg = _msg;
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
+	if (!transport || !transport->request_rdma_fn) {
+		printk(KERN_ERR "No rdma function registered");
+		return NULL;
+	}
 	__check_kmsg_sanity(to, msg, msg_size);
 #endif
 
@@ -138,7 +134,7 @@ void *pcn_kmsg_request_rdma(int to, void *_msg, size_t msg_size, size_t res_size
 	msg->header.from_nid = my_nid;
 
 	account_pcn_message_sent(msg);
-    return pcn_kmsg_request_rdma_ftn(to, _msg, msg_size, res_size);
+    return transport->request_rdma_fn(to, _msg, msg_size, res_size);
 }
 EXPORT_SYMBOL(pcn_kmsg_request_rdma);
 
@@ -148,6 +144,10 @@ void pcn_kmsg_respond_rdma(void *_req, void *_res, size_t res_size)
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	struct pcn_kmsg_message *req = _req;
+	if (!transport || !transport->respond_rdma_fn) {
+		printk(KERN_ERR "No rdma respond function");
+		return;
+	}
 	__check_kmsg_sanity(req->header.from_nid, _res, res_size);
 #endif
 
@@ -155,7 +155,7 @@ void pcn_kmsg_respond_rdma(void *_req, void *_res, size_t res_size)
 	res->header.from_nid = my_nid;
 
 	account_pcn_message_sent(res);
-	pcn_kmsg_respond_rdma_ftn(_req, _res, res_size);
+	transport->respond_rdma_fn(_req, _res, res_size);
 }
 EXPORT_SYMBOL(pcn_kmsg_respond_rdma);
 
@@ -168,8 +168,8 @@ EXPORT_SYMBOL(pcn_kmsg_alloc_msg);
 
 void pcn_kmsg_free_msg(void *msg)
 {
-	if (pcn_kmsg_free_ftn) {
-		pcn_kmsg_free_ftn(msg);
+	if (transport && transport->free_fn) {
+		transport->free_fn(msg);
 	} else {
 		kfree(msg);
 	}
