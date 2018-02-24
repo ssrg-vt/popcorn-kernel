@@ -86,6 +86,8 @@ struct pcn_kmsg_hdr {
 	size_t size;
 } __attribute__((packed));
 
+#define PCN_KMSG_FROM_NID(x) ((x)->header.from_nid)
+
 /* rdma header */
 struct pcn_kmsg_rdma_hdr {
     bool rdma_ack			:1;

@@ -85,10 +85,10 @@ static inline int __get_rdma_buffer(char **addr, dma_addr_t *dma_addr) {
 	spin_unlock(&__rdma_slots_lock);
 
 	if (addr) {
-		*addr = __rdma_sink_addr + PAGE_SIZE * i;
+		*addr = __rdma_sink_addr + PCN_KMSG_MAX_SIZE * i;
 	}
 	if (dma_addr) {
-		*dma_addr = __rdma_sink_dma_addr + PAGE_SIZE * i;
+		*dma_addr = __rdma_sink_dma_addr + PCN_KMSG_MAX_SIZE * i;
 	}
 	return i;
 }
@@ -101,7 +101,7 @@ static inline void __put_rdma_buffer(int slot) {
 }
 
 static inline void *__get_rdma_buffer_addr(int slot) {
-	return __rdma_sink_addr + PAGE_SIZE * slot;
+	return __rdma_sink_addr + PCN_KMSG_MAX_SIZE * slot;
 }
 
 
@@ -270,16 +270,12 @@ void rdma_kmsg_free(struct pcn_kmsg_message *msg)
 	/* Put back the receive work */
 	int ret;
 	struct ib_recv_wr *bad_wr = NULL;
-	struct recv_work *rw = container_of((void *)msg, struct recv_work, buffer);
-	ret = ib_post_recv(rdma_handles[msg->header.from_nid]->qp, &rw->wr, &bad_wr);
-	if (ret) {
-		printk("shit ret %d\n", ret);
-		WARN_ON("shit");
-	}
-	if (bad_wr) {
-		printk("shit bad wr %d\n", ret);
-		WARN_ON("shit");
-	}
+	int from_nid = PCN_KMSG_FROM_NID(msg);
+	struct rdma_handle *rh = rdma_handles[from_nid];
+	int index = ((void *)msg - rh->recv_buffer) / PCN_KMSG_MAX_SIZE;
+
+	ret = ib_post_recv(rh->qp, &rh->recv_works[index].wr, &bad_wr);
+	BUG_ON(ret || bad_wr);
 }
 
 /****************************************************************************
