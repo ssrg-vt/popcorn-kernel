@@ -57,59 +57,61 @@ struct rdma_handle {
 	void *recv_buffer;
 	dma_addr_t recv_buffer_dma_addr;
 
-	spinlock_t rdma_slots_lock;
-	DECLARE_BITMAP(rdma_slots, NR_RDMA_SLOTS);
-	char *rdma_sink;
-	dma_addr_t rdma_sink_dma_addr;
-
 	struct rdma_cm_id *cm_id;
 	struct ib_device *device;
-	struct ib_pd *pd;
 	struct ib_cq *cq;
 	struct ib_qp *qp;
-	struct ib_mr *mr;
 };
 
+/* RDMA handle for each node */
 static struct rdma_handle *rdma_handles[MAX_NUM_NODES] = { NULL };
 
+/* Global protection domain (pd) and memory region (mr) */
+static struct ib_pd *rdma_pd = NULL;
+static struct ib_mr *rdma_mr = NULL;
 
-static inline int __get_rdma_slot(struct rdma_handle *rh, dma_addr_t *dma_addr)
-{
+/* Global RDMA sink */
+static DEFINE_SPINLOCK(__rdma_slots_lock);
+static DECLARE_BITMAP(__rdma_slots, NR_RDMA_SLOTS) = {0};
+static char *__rdma_sink_addr;
+static dma_addr_t __rdma_sink_dma_addr;
+
+static inline int __get_rdma_buffer(char **addr, dma_addr_t *dma_addr) {
 	int i;
-	spin_lock(&rh->rdma_slots_lock);
-	i = find_first_zero_bit(rh->rdma_slots, MAX_RECV_DEPTH);
+	spin_lock(&__rdma_slots_lock);
+	i = find_first_zero_bit(__rdma_slots, MAX_RECV_DEPTH);
 	BUG_ON(i >= MAX_RECV_DEPTH);
-	set_bit(i, rh->rdma_slots);
-	spin_unlock(&rh->rdma_slots_lock);
+	set_bit(i, __rdma_slots);
+	spin_unlock(&__rdma_slots_lock);
 
-	if (dma_addr) {
-		*dma_addr = rh->rdma_sink_dma_addr + PAGE_SIZE * i;
+	if (addr) {
+		*addr = __rdma_sink_addr + PAGE_SIZE * i;
 	}
-
+	if (dma_addr) {
+		*dma_addr = __rdma_sink_dma_addr + PAGE_SIZE * i;
+	}
 	return i;
 }
 
-static inline void __put_rdma_slot(struct rdma_handle *rh, int slot)
-{
-	spin_lock(&rh->rdma_slots_lock);
-	BUG_ON(!test_bit(slot, rh->rdma_slots));
-	clear_bit(slot, rh->rdma_slots);
-	spin_unlock(&rh->rdma_slots_lock);
+static inline void __put_rdma_buffer(int slot) {
+	spin_lock(&__rdma_slots_lock);
+	BUG_ON(!test_bit(slot, __rdma_slots));
+	clear_bit(slot, __rdma_slots);
+	spin_unlock(&__rdma_slots_lock);
 }
 
-static inline void *__get_rdma_slot_addr(struct rdma_handle *rh, int slot)
-{
-	return rh->rdma_sink + PAGE_SIZE * slot;
+static inline void *__get_rdma_buffer_addr(int slot) {
+	return __rdma_sink_addr + PAGE_SIZE * slot;
 }
 
 
-static inline int __post_send(struct rdma_handle *rh, dma_addr_t dma_addr, size_t size, u64 wr_id)
+static int __post_send(struct rdma_handle *rh, dma_addr_t dma_addr, size_t size, u64 wr_id)
 {
 	struct ib_send_wr *bad_wr = NULL;
 	struct ib_sge sgl = {
 		.addr = dma_addr,
 		.length = size,
-		.lkey = rh->pd->local_dma_lkey,
+		.lkey = rdma_pd->local_dma_lkey,
 	};
 	struct ib_send_wr wr = {
 		.next = NULL,
@@ -167,22 +169,21 @@ struct rdma_request {
 static void __test_rdma(int to_nid)
 {
 	static int sent = 0;
-	struct rdma_handle *rh = rdma_handles[to_nid];
 	struct rdma_request req;
 	DECLARE_COMPLETION_ONSTACK(comp);
 	dma_addr_t dma_addr;
 	int ret, i;
-	const int slot = __get_rdma_slot(rh, &dma_addr);
-	char *dest = __get_rdma_slot_addr(rh, slot);
+	char *dest;
+	const int slot = __get_rdma_buffer(&dest, &dma_addr);
 
 	req.nid = my_nid;
-	req.rkey = rh->mr->rkey;
+	req.rkey = rdma_mr->rkey;
 	req.addr = dma_addr;
 	req.length = PAGE_SIZE;
 
-	for (i = 0; i < 1000000; i++) {
+	for (i = 0; i < 100000; i++) {
 		req.fill = sent++ % 26 + 'a';
-		memset(dest, 0x00, PAGE_SIZE);
+		dest[PAGE_SIZE-1] = 0;
 
 		ret = __send_to(to_nid, &req, sizeof(req));
 		if (ret) goto out;
@@ -196,13 +197,15 @@ static void __test_rdma(int to_nid)
 		if (dest[0] != req.fill) {
 			printk("Somthing happened %c != %c\n", req.fill, dest[0]);
 		}
+		/*
 		if (i && i % 100 == 0) {
 			printk("%d completed\n", i);
 		}
+		*/
 	}
 
 out:
-	__put_rdma_slot(rh, slot);
+	__put_rdma_buffer(slot);
 	return;
 }
 
@@ -236,7 +239,7 @@ static void __perform_rdma(struct ib_wc *wc, struct recv_work *_rw)
 	sgl = &rw->sgl;
 	sgl->addr = dma_addr;
 	sgl->length = size;
-	sgl->lkey = wc->qp->pd->local_dma_lkey;
+	sgl->lkey = rdma_pd->local_dma_lkey;
 
 	wr = &rw->wr;
 	wr->wr.next = NULL;
@@ -339,17 +342,20 @@ static int __setup_pd_cq_qp(struct rdma_handle *rh)
 {
 	int ret;
 
-	BUG_ON(rh->state != RDMA_ROUTE_RESOLVED);
+	BUG_ON(rh->state != RDMA_ROUTE_RESOLVED && "for rh->device");
 
-	/* Create pd */
-	rh->pd = ib_alloc_pd(rh->device);
-	if (IS_ERR(rh->pd)) {
-		ret = PTR_ERR(rh->pd);
-		goto out_err;
+	/* Create global pd if it is not allocated yet */
+	if (!rdma_pd) {
+		rdma_pd = ib_alloc_pd(rh->device);
+		if (IS_ERR(rdma_pd)) {
+			ret = PTR_ERR(rdma_pd);
+			rdma_pd = NULL;
+			goto out_err;
+		}
 	}
 
 	/* create completion queue */
-	{
+	if (!rh->cq) {
 		struct ib_cq_init_attr cq_attr = {
 			.cqe = MAX_SEND_DEPTH + MAX_RECV_DEPTH,
 			.comp_vector = 0,
@@ -383,7 +389,7 @@ static int __setup_pd_cq_qp(struct rdma_handle *rh)
 			.recv_cq = rh->cq,
 		};
 
-		ret = rdma_create_qp(rh->cm_id, rh->pd, &qp_attr);
+		ret = rdma_create_qp(rh->cm_id, rdma_pd, &qp_attr);
 		if (ret) goto out_err;
 		rh->qp = rh->cm_id->qp;
 	}
@@ -427,7 +433,7 @@ static int __setup_buffers_and_pools(struct rdma_handle *rh)
 		rw->buffer = recv_buffer + PCN_KMSG_MAX_SIZE * i;
 
 		sgl = &rw->sgl;
-		sgl->lkey = rh->pd->local_dma_lkey;
+		sgl->lkey = rdma_pd->local_dma_lkey;
 		sgl->addr = rw->dma_addr;
 		sgl->length = PCN_KMSG_MAX_SIZE;
 
@@ -452,7 +458,7 @@ out_free:
 	return ret;
 }
 
-static int __setup_rdma_buffer(struct rdma_handle *rh)
+static int __setup_rdma_buffer(const int nr_chunks)
 {
 	int ret;
 	DECLARE_COMPLETION_ONSTACK(comp);
@@ -471,21 +477,19 @@ static int __setup_rdma_buffer(struct rdma_handle *rh)
 	struct scatterlist sg = {};
 	const int alloc_order = MAX_ORDER - 1;
 
-	BUG_ON(rh->state != RDMA_CONNECTED);
+	__rdma_sink_addr = (void *)__get_free_pages(GFP_KERNEL, alloc_order);
+	if (!__rdma_sink_addr) return -EINVAL;
 
-	rh->rdma_sink = (void *)__get_free_pages(GFP_KERNEL, alloc_order);
-	if (!rh->rdma_sink) return -EINVAL;
-
-	rh->rdma_sink_dma_addr = ib_dma_map_single(
-			rh->device, rh->rdma_sink, 1 << (PAGE_SHIFT + alloc_order),
+	__rdma_sink_dma_addr = ib_dma_map_single(
+			rdma_pd->device, __rdma_sink_addr, 1 << (PAGE_SHIFT + alloc_order),
 			DMA_FROM_DEVICE);
-	ret = ib_dma_mapping_error(rh->device, rh->rdma_sink_dma_addr);
+	ret = ib_dma_mapping_error(rdma_pd->device, __rdma_sink_dma_addr);
 	if (ret) goto out_free;
 
-	mr = ib_alloc_mr(rh->pd, IB_MR_TYPE_MEM_REG, 1 << alloc_order);
+	mr = ib_alloc_mr(rdma_pd, IB_MR_TYPE_MEM_REG, 1 << alloc_order);
 	if (IS_ERR(mr)) goto out_free;
 
-	sg_dma_address(&sg) = rh->rdma_sink_dma_addr;
+	sg_dma_address(&sg) = __rdma_sink_dma_addr;
 	sg_dma_len(&sg) = 1 << (PAGE_SHIFT + alloc_order);
 
 	ret = ib_map_mr_sg(mr, &sg, 1, PAGE_SIZE);
@@ -496,7 +500,11 @@ static int __setup_rdma_buffer(struct rdma_handle *rh)
 	reg_wr.mr = mr;
 	reg_wr.key = mr->rkey;
 
-	ret = ib_post_send(rh->qp, &reg_wr.wr, &bad_wr);
+	/**
+	 * rdma_handles[my_nid] is for accepting connection without qp & cp.
+	 * So, let's use rdma_handles[1] for nid 0 and rdma_handles[0] otherwise.
+	 */
+	ret = ib_post_send(rdma_handles[!my_nid]->qp, &reg_wr.wr, &bad_wr);
 	if (ret || bad_wr) {
 		printk("Cannot register mr, %d %p\n", ret, bad_wr);
 		if (bad_wr) ret = -EINVAL;
@@ -509,7 +517,7 @@ static int __setup_rdma_buffer(struct rdma_handle *rh)
 		goto out_dereg;
 	}
 
-	rh->mr = mr;
+	rdma_mr = mr;
 	//printk("lkey: %x, rkey: %x, length: %x\n", mr->lkey, mr->rkey, mr->length);
 	return 0;
 
@@ -518,8 +526,8 @@ out_dereg:
 	return ret;
 	
 out_free:
-	free_pages((unsigned long)rh->rdma_sink, alloc_order);
-	rh->rdma_sink = NULL;
+	free_pages((unsigned long)__rdma_sink_addr, alloc_order);
+	__rdma_sink_addr = NULL;
 	return ret;
 }
 
@@ -623,10 +631,6 @@ static int __connect_to_server(int nid)
 		}
 	}
 
-	step = "setup rdma buffer";
-	ret = __setup_rdma_buffer(rh);
-	if (ret) goto out_err;
-
 	set_popcorn_node_online(nid, true);
 	MSGPRINTK("Connected to %d\n", nid);
 	return 0;
@@ -660,11 +664,7 @@ static int __accept_client(int nid)
 	ret = rdma_accept(rh->cm_id, &conn_param);
 	if (ret) return ret;
 
-	ret = wait_for_completion_io_timeout(&rh->cm_done, 10 * HZ);
-	if (!ret) return -EAGAIN;
-	if (rh->state != RDMA_CONNECTED) return -EINVAL;
-
-	ret = __setup_rdma_buffer(rh);
+	ret = wait_for_completion_interruptible(&rh->cm_done);
 	if (ret) return ret;
 
 	set_popcorn_node_online(rh->nid, true);
@@ -762,6 +762,9 @@ static int __establish_connections(void)
 	ret = __listen_to_connection();
 	if (ret) return ret;
 
+	/* Wait for a while so that nodes are ready to listen to connections */
+	msleep(100);
+
 	for (i = 0; i < my_nid; i++) {
 		if ((ret = __connect_to_server(i))) return ret;
 	}
@@ -770,6 +773,8 @@ static int __establish_connections(void)
 		if ((ret = __accept_client(i))) return ret;
 	}
 
+	if ((ret = __setup_rdma_buffer(1))) return ret;
+
 	printk("Connections are established.\n");
 	return 0;
 }
@@ -777,20 +782,14 @@ static int __establish_connections(void)
 void __exit exit_kmsg_rdma(void)
 {
 	int i;
+
+	/* Detach from upper layer to prevent race condition during exit */
+	pcn_kmsg_set_transport(NULL);
+
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		struct rdma_handle *rh = rdma_handles[i];
 		set_popcorn_node_online(i, false);
 		if (!rh) continue;
-
-		if (rh->mr) {
-			ib_dereg_mr(rh->mr);
-		}
-
-		if (rh->rdma_sink) {
-			ib_dma_unmap_single(rh->device, rh->rdma_sink_dma_addr,
-					1 << (PAGE_SHIFT + MAX_ORDER - 1), DMA_FROM_DEVICE);
-			free_pages((unsigned long)rh->rdma_sink, MAX_ORDER - 1);
-		}
 
 		if (rh->recv_buffer) {
 			ib_dma_unmap_single(rh->device, rh->recv_buffer_dma_addr,
@@ -801,12 +800,19 @@ void __exit exit_kmsg_rdma(void)
 
 		if (rh->qp && !IS_ERR(rh->qp)) rdma_destroy_qp(rh->cm_id);
 		if (rh->cq && !IS_ERR(rh->cq)) ib_destroy_cq(rh->cq);
-		if (rh->pd && !IS_ERR(rh->pd)) ib_dealloc_pd(rh->pd);
 		if (rh->cm_id && !IS_ERR(rh->cm_id)) rdma_destroy_id(rh->cm_id);
 
 		kfree(rdma_handles[i]);
 	}
-	pcn_kmsg_set_transport(NULL);
+
+	/* MR is set correctly iff rdma buffer and pd are correctly allocated */
+	if (rdma_mr && !IS_ERR(rdma_mr)) {
+		ib_dereg_mr(rdma_mr);
+		ib_dma_unmap_single(rdma_pd->device, __rdma_sink_dma_addr,
+				1 << (PAGE_SHIFT + MAX_ORDER - 1), DMA_FROM_DEVICE);
+		free_pages((unsigned long)__rdma_sink_addr, MAX_ORDER - 1);
+		ib_dealloc_pd(rdma_pd);
+	}
 
 	MSGPRINTK("Popcorn message layer over RDMA unloaded\n");
 	return;
@@ -825,7 +831,9 @@ int __init init_kmsg_rdma(void)
 	int i;
 
 	MSGPRINTK("\nLoading Popcorn messaging layer over RDMA...\n");
+
 	if (!identify_myself()) return -EINVAL;
+	pcn_kmsg_set_transport(&transport_rdma);
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		struct rdma_handle *rh;
@@ -835,22 +843,15 @@ int __init init_kmsg_rdma(void)
 		rh->nid = i;
 		rh->state = RDMA_INIT;
 		init_completion(&rh->cm_done);
-
-		spin_lock_init(&rh->rdma_slots_lock);
-		bitmap_zero(rh->rdma_slots, NR_RDMA_SLOTS);
 	}
-
-	pcn_kmsg_set_transport(&transport_rdma);
 
 	if (__establish_connections()) {
 		goto out_free;
 	}
 
-	if (my_nid == 1) {
-		printk("Start testing!!\n");
-		__test_rdma(0);
-		printk("Testing done!!\n");
-	}
+	printk("Start testing!!\n");
+	__test_rdma(!my_nid);
+	printk("Testing done!!\n");
 
 	PCNPRINTK("Popcorn messaging layer over RDMA is ready\n");
 	return 0;
