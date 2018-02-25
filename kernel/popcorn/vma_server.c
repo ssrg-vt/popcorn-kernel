@@ -197,7 +197,6 @@ static vma_op_request_t *__alloc_vma_op_request(enum vma_op_code opcode)
 	vma_op_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
 
 	req->origin_pid = current->origin_pid,
-	req->remote_nid = my_nid,
 	req->remote_pid = current->pid,
 	req->operation = opcode;
 
@@ -428,7 +427,6 @@ static void __reply_vma_op(vma_op_request_t *req, int ret)
 {
 	vma_op_response_t res = {
 		.origin_pid = current->pid,
-		.origin_nid = my_nid,
 		.remote_pid = req->remote_pid,
 		.remote_ws = req->remote_ws,
 
@@ -439,13 +437,14 @@ static void __reply_vma_op(vma_op_request_t *req, int ret)
 	};
 
 	pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_RESPONSE,
-			req->remote_nid, &res, sizeof(res));
+			PCN_KMSG_FROM_NID(req), &res, sizeof(res));
 }
 
 void process_vma_op_request(vma_op_request_t *req)
 {
 	long ret = -EPERM;
 	struct mm_struct *mm = get_task_mm(current);
+	int from_nid = PCN_KMSG_FROM_NID(req);
 
 	VSPRINTK("\nVMA_OP_REQUEST [%d] %s %lx %lx\n", current->pid,
 			vma_op_code_sz[req->operation], req->addr, req->len);
@@ -484,7 +483,7 @@ void process_vma_op_request(vma_op_request_t *req)
 		break;
 	}
 	case VMA_OP_MUNMAP:
-		ret = vma_server_munmap_origin(req->addr, req->len, req->remote_nid);
+		ret = vma_server_munmap_origin(req->addr, req->len, from_nid);
 		break;
 	case VMA_OP_MPROTECT:
 		ret = sys_mprotect(req->addr, req->len, req->prot);
@@ -495,8 +494,8 @@ void process_vma_op_request(vma_op_request_t *req)
 		break;
 	case VMA_OP_MADVISE:
 		if (req->behavior == MADV_RELEASE) {
-			ret = process_madvise_release_from_remote(req->remote_nid,
-					req->start, req->start + req->len);
+			ret = process_madvise_release_from_remote(
+					from_nid, req->start, req->start + req->len);
 		} else {
 			ret = sys_madvise(req->start, req->len, req->behavior);
 		}
@@ -697,7 +696,7 @@ out_up:
 
 	res->remote_pid = req->remote_pid;
 	pcn_kmsg_send(PCN_KMSG_TYPE_VMA_INFO_RESPONSE,
-			req->remote_nid, res, sizeof(*res));
+			PCN_KMSG_FROM_NID(req), res, sizeof(*res));
 
 	pcn_kmsg_done(req);
 	kfree(res);
@@ -722,7 +721,6 @@ static struct vma_info *__alloc_vma_info_request(struct task_struct *tsk, unsign
 
 	/* req */
 	req->origin_pid = tsk->origin_pid;
-	req->remote_nid = my_nid;
 	req->remote_pid = tsk->pid;
 	req->addr = addr;
 

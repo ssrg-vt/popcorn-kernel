@@ -487,6 +487,7 @@ static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 {
 	remote_task_pairing_t *req = (remote_task_pairing_t *)msg;
 	struct task_struct *tsk;
+	int from_nid = PCN_KMSG_FROM_NID(req);
 	int ret = 0;
 
 	tsk = __get_task_struct(req->your_pid);
@@ -497,9 +498,9 @@ static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 	BUG_ON(tsk->at_remote);
 	BUG_ON(!tsk->remote);
 
-	tsk->remote_nid = req->my_nid;
+	tsk->remote_nid = from_nid;
 	tsk->remote_pid = req->my_pid;
-	tsk->remote->remote_tgids[req->my_nid] = req->my_tgid;
+	tsk->remote->remote_tgids[from_nid] = req->my_tgid;
 
 	put_task_struct(tsk);
 out:
@@ -510,7 +511,6 @@ out:
 static int __pair_remote_task(void)
 {
 	remote_task_pairing_t req = {
-		.my_nid = my_nid,
 		.my_tgid = current->tgid,
 		.my_pid = current->pid,
 		.your_pid = current->origin_pid,
@@ -531,11 +531,11 @@ static int remote_thread_main(void *_args)
 
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
-			current->pid, req->origin_pid, req->origin_nid);
+			current->pid, req->origin_pid, PCN_KMSG_FROM_NID(req));
 #endif
 
 	current->flags &= ~PF_KTHREAD;	/* Drop to user */
-	current->origin_nid = req->origin_nid;
+	current->origin_nid = PCN_KMSG_FROM_NID(req);
 	current->origin_pid = req->origin_pid;
 	current->at_remote = true;
 	current->remote = get_task_remote(current);
@@ -703,7 +703,7 @@ static int start_remote_worker(void *_data)
 	kfree(params);
 
 	PSPRINTK("%s: [%d] for [%d/%d]\n", __func__,
-			current->pid, req->origin_tgid, req->origin_nid);
+			current->pid, req->origin_tgid, PCN_KMSG_FROM_NID(req));
 	PSPRINTK("%s: [%d] %s\n", __func__,
 			current->pid, req->exe_path);
 
@@ -711,7 +711,7 @@ static int start_remote_worker(void *_data)
 	current->personality = req->personality;
 	current->is_worker = true;
 	current->at_remote = true;
-	current->origin_nid = req->origin_nid;
+	current->origin_nid = PCN_KMSG_FROM_NID(req);
 	current->origin_pid = req->origin_pid;
 
 	set_user_nice(current, 0);
@@ -755,7 +755,7 @@ static void clone_remote_thread(struct work_struct *_work)
 {
 	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
 	clone_request_t *req = work->msg;
-	int nid_from = req->origin_nid;
+	int nid_from = PCN_KMSG_FROM_NID(req);
 	int tgid_from = req->origin_tgid;
 	struct remote_context *rc;
 	struct remote_context *rc_new =
@@ -931,7 +931,6 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 	req->def_flags = mm->def_flags;
 
 	/* struct tsk_struct */
-	req->origin_nid = my_nid;
 	req->origin_tgid = tsk->tgid;
 	req->origin_pid = tsk->pid;
 

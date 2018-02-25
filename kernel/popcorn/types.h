@@ -80,7 +80,6 @@ bool __put_task_remote(struct remote_context *rc);
 DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 
 #define CLONE_FIELDS \
-	int origin_nid;\
 	pid_t origin_tgid;\
 	pid_t origin_pid;\
 	unsigned long task_size; \
@@ -118,7 +117,6 @@ DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
  * requesting cpu.
  */
 #define REMOTE_TASK_PAIRING_FIELDS \
-	int my_nid; \
 	pid_t my_tgid; \
 	pid_t my_pid; \
 	pid_t your_pid;
@@ -143,7 +141,6 @@ DEFINE_PCN_KMSG(origin_task_exit_t, ORIGIN_TASK_EXIT_FIELDS);
  */
 #define VMA_INFO_REQUEST_FIELDS \
 	pid_t origin_pid; \
-	int remote_nid; \
 	pid_t remote_pid; \
 	unsigned long addr;
 DEFINE_PCN_KMSG(vma_info_request_t, VMA_INFO_REQUEST_FIELDS);
@@ -164,7 +161,6 @@ DEFINE_PCN_KMSG(vma_info_response_t, VMA_INFO_RESPONSE_FIELDS);
 
 #define VMA_OP_REQUEST_FIELDS \
 	pid_t origin_pid; \
-	int remote_nid; \
 	pid_t remote_pid; \
 	int remote_ws; \
 	int operation; \
@@ -192,7 +188,6 @@ DEFINE_PCN_KMSG(vma_op_request_t, VMA_OP_REQUEST_FIELDS);
 
 #define VMA_OP_RESPONSE_FIELDS \
 	pid_t origin_pid; \
-	int origin_nid; \
 	pid_t remote_pid; \
 	int remote_ws; \
 	int operation; \
@@ -210,7 +205,6 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
  * Page management
  */
 #define REMOTE_PAGE_REQUEST_FIELDS \
-	int origin_nid; \
 	pid_t origin_pid; \
 	int origin_ws; \
 	pid_t remote_pid; \
@@ -224,9 +218,7 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 #endif
 
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
-	int remote_nid; \
 	pid_t remote_pid; \
-	int origin_nid; \
 	pid_t origin_pid; \
 	int origin_ws; \
 	unsigned long addr; \
@@ -274,7 +266,6 @@ DEFINE_PCN_KMSG(remote_page_flush_ack_t, REMOTE_PAGE_FLUSH_ACK_FIELDS);
 
 
 #define PAGE_INVALIDATE_REQUEST_FIELDS \
-	int origin_nid; \
 	pid_t origin_pid; \
 	int origin_ws; \
 	pid_t remote_pid; \
@@ -282,11 +273,9 @@ DEFINE_PCN_KMSG(remote_page_flush_ack_t, REMOTE_PAGE_FLUSH_ACK_FIELDS);
 DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 
 #define PAGE_INVALIDATE_RESPONSE_FIELDS \
-	int origin_nid; \
 	pid_t origin_pid; \
 	int origin_ws; \
-	pid_t remote_pid; \
-	unsigned long addr;
+	pid_t remote_pid;
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 
 
