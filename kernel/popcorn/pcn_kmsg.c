@@ -152,6 +152,7 @@ void pcn_kmsg_done(void *msg)
 		kfree(msg);
 	}
 }
+EXPORT_SYMBOL(pcn_kmsg_done);
 
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
