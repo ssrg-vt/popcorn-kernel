@@ -98,7 +98,7 @@
 	u32 mr_id; \
 	int t_num;
 DEFINE_PCN_RDMA_KMSG(pcn_kmsg_perf_rdma_t, RDMA_TEST);
-
+#define RDMA_HEADER_FLAG 1
 
 /* RDMA key register */
 enum IB_MR_TYPES {
@@ -1065,7 +1065,7 @@ static void __respond_rdma_read(pcn_kmsg_perf_rdma_t *req, void *res, u32 res_si
 	reply.header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* RDMA R/W complete ACK */
-	reply.header.is_rdma = true;
+	reply.header.flags = RDMA_HEADER_FLAG;
 	reply.rdma_header.rdma_ack = true;
 	reply.rdma_header.is_write = false;
 	reply.rdma_header.remote_rkey = req->rdma_header.remote_rkey;
@@ -1197,7 +1197,7 @@ static void __respond_rdma_write(
 	//reply.header.prio = PCN_KMSG_PRIO_NORMAL;
 
 	/* RDMA W/R complete ACK */
-	reply.header.is_rdma = true;
+	reply.header.flags = RDMA_HEADER_FLAG;
 	reply.rdma_header.rdma_ack = true;
 	reply.rdma_header.is_write = true;
 	reply.rdma_header.remote_rkey = req->rdma_header.remote_rkey;
@@ -1236,7 +1236,7 @@ static void __respond_rdma(pcn_kmsg_perf_rdma_t *res)
  */
 void respond_ib_rdma(pcn_kmsg_perf_rdma_t *req, void *res, u32 res_size)
 {
-	BUG_ON(!req->header.is_rdma);
+	BUG_ON(!req->header.flags);
 	BUG_ON(res_size > MAX_RDMA_SIZE);
 
 	if (!req->rdma_header.rdma_ack) {
@@ -1400,7 +1400,7 @@ void *request_ib_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 
 	BUG_ON(rw_size <= 0);
 
-	msg->header.is_rdma = true;
+	msg->header.flags = RDMA_HEADER_FLAG;
 	msg->header.from_nid = my_nid;
 	msg->rdma_header.rdma_ack = false;
 	msg->rdma_header.rw_size = rw_size;
@@ -1491,7 +1491,7 @@ void *request_ib_rdma(unsigned int dst, pcn_kmsg_perf_rdma_t *msg,
 	rp->private = dma_buffer;
 
 	/* for dsm */
-	rp->header.is_rdma = true;
+	rp->header.flags = RDMA_HEADER_FLAG;
 	rp->rdma_header.rdma_ack = true;
 	rp->rdma_header.is_write = true;
 	//rp->rdma_header.rw_size = remote_rw_size;
@@ -1510,7 +1510,7 @@ int ib_kmsg_send(unsigned int dst,
 				  struct pcn_kmsg_message *msg,
 				  unsigned int msg_size)
 {
-	msg->header.is_rdma = false;
+	msg->header.flags = 0;
 	return __ib_kmsg_send(dst, msg, msg_size);
 }
 
@@ -1529,7 +1529,7 @@ static void __putback_recv_wr(struct pcn_kmsg_message *msg)
 static void ib_kmsg_free_ftn(struct pcn_kmsg_message *msg)
 {
 #ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-	if (msg->header.is_rdma) {
+	if (msg->header.flags == RDMA_HEADER_FLAG) {
 		pcn_kmsg_rdma_t *msg_rdma = (pcn_kmsg_rdma_t *)msg;
 		if (msg_rdma->rdma_header.rdma_ack && msg_rdma->rdma_header.is_write) {
 #if CONFIG_RDMA_POLL
@@ -1675,7 +1675,6 @@ int __init __establish_connections(void)
 			msleep(10);
 		}
 		atomic_set(&gcb[i]->state, IDLE);
-		notify_my_node_info(i);
 #if CONFIG_RDMA_NOTIFY
 		__exchange_rdma_keys(i);
 #endif
@@ -1750,6 +1749,7 @@ int __init init_msg_ib(void)
 	__init_rdma_poll();
 #endif
 	if (__establish_connections()) goto out;
+	broadcast_my_node_info(MAX_NUM_NODES);
 
 	printk("------------------------------------------\n");
 	printk("- Popcorn Messaging Layer IB Initialized -\n");

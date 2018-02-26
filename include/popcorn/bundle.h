@@ -22,7 +22,7 @@ void set_popcorn_node_online(int nid, bool online);
 
 int get_popcorn_node_arch(int nid);
 
-void notify_my_node_info(int nid);
+void broadcast_my_node_info(int nr_nodes);
 
 int popcorn_nodes_init(void);
 

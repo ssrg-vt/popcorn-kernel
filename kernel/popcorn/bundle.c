@@ -62,16 +62,19 @@ const char *archs_sz[] = {
 };
 
 
-void notify_my_node_info(int nid)
+void broadcast_my_node_info(int nr_nodes)
 {
+	int i;
 	node_info_t info = {
 		.nid = my_nid,
 		.arch = my_arch,
 	};
-
-	pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, nid, &info, sizeof(info));	
+	for (i = 0; i < nr_nodes; i++) {
+		if (i == my_nid) continue;
+		pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, i, &info, sizeof(info));
+	}
 }
-EXPORT_SYMBOL(notify_my_node_info);
+EXPORT_SYMBOL(broadcast_my_node_info);
 
 static bool my_node_info_printed = false;
 

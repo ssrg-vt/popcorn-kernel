@@ -638,7 +638,6 @@ static int __connect_to_server(int nid)
 		}
 	}
 
-	set_popcorn_node_online(nid, true);
 	MSGPRINTK("Connected to %d\n", nid);
 	return 0;
 
@@ -673,8 +672,6 @@ static int __accept_client(int nid)
 
 	ret = wait_for_completion_interruptible(&rh->cm_done);
 	if (ret) return ret;
-
-	set_popcorn_node_online(rh->nid, true);
 
 	return 0;
 }
@@ -774,10 +771,14 @@ static int __establish_connections(void)
 
 	for (i = 0; i < my_nid; i++) {
 		if ((ret = __connect_to_server(i))) return ret;
+		set_popcorn_node_online(i, true);
 	}
+
+	set_popcorn_node_online(my_nid, true);
 
 	for (i = my_nid + 1; i < MAX_NUM_NODES; i++) {
 		if ((ret = __accept_client(i))) return ret;
+		set_popcorn_node_online(rh->nid, true);
 	}
 
 	if ((ret = __setup_rdma_buffer(1))) return ret;
@@ -857,11 +858,7 @@ int __init init_kmsg_rdma(void)
 		goto out_free;
 	}
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-		if (i == my_nid) continue;
-		notify_my_node_info(i);
-	}
-
+	broadcast_my_node_info(i);
 
 	PCNPRINTK("Popcorn messaging layer over RDMA is ready\n");
 	return 0;
