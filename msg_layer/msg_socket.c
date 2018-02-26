@@ -163,7 +163,7 @@ static int deq_send(struct pcn_kmsg_buf * buf)
 		remaining -= sent;
 		//printk("Sent %d remaining %d\n", sent, remaining);
 	}
-	pcn_kmsg_free_msg(msg_qitem->msg);
+	kfree(msg_qitem->msg);
     return 0;
 }
 
@@ -215,13 +215,6 @@ static int send_handler(void* arg0)
 /*
  * buf is per conn
  */
-
-static void deq_recv(struct pcn_kmsg_buf *buf, void *_msg, int conn_no)
-{
-	struct pcn_kmsg_message *msg = _msg;
-	pcn_kmsg_process(msg);
-}
-
 static int recv_handler(void* arg0)
 {
 	int err;
@@ -281,7 +274,7 @@ static int recv_handler(void* arg0)
 		BUG_ON(header.size < 0 || header.size >= PCN_KMSG_MAX_SIZE);
 #endif
 
-		data = pcn_kmsg_alloc_msg(header.size);
+		data = kmalloc(header.size, GFP_KERNEL);
 		BUG_ON(!data && "Unable to alloc a message");
 
 		memcpy(data, &header, sizeof(header));
@@ -302,7 +295,7 @@ static int recv_handler(void* arg0)
 		}
 		//printk("RecB %d, %d %d\n", conn_no, header.type, header.size);
 
-		deq_recv(&handler_params->buf, data, conn_no);
+		pcn_kmsg_process(&handler_params->buf);
 	}
 exit:
 	sock_release(sockets[conn_no]);
@@ -320,7 +313,7 @@ int sock_kmsg_send(int dest_nid, struct pcn_kmsg_message *_msg, size_t size)
 {
 	struct pcn_kmsg_message *msg;
 
-	msg = pcn_kmsg_alloc_msg(size);
+	msg = kmalloc(size);
 	BUG_ON(!msg);
 	memcpy(msg, _msg, size);
 
@@ -333,9 +326,22 @@ int sock_kmsg_send(int dest_nid, struct pcn_kmsg_message *_msg, size_t size)
 	return 0;
 }
 
-int sock_kmsg_post(int dest_nid, struct pcn_kmsg_message *msg, size_t size)
+int sock_kmsg_post(int dest_nid, struct pcn_kmsg_message *_msg, size_t size)
 {
-	return sock_kmsg_send(dest_nid, msg, size);
+	struct pcn_kmsg_message *msg;
+
+	msg = kmalloc(size);
+	BUG_ON(!msg);
+	memcpy(msg, _msg, size);
+
+	enq_send(send_buf[dest_nid], msg, dest_nid);
+
+	return 0;
+}
+
+void sock_kmsg_done(struct pcn_kmsg_message *msg)
+{
+	kfree(msg);
 }
 
 
@@ -345,6 +351,8 @@ struct pcn_kmsg_transport transport_socket = {
 
 	.send_fn = (send_ftn)sock_kmsg_send,
 	.post_fn = (post_ftn)sock_kmsg_post,
+
+	.done_fn = sock_kmsg_done,
 };
 
 static int __init initialize(void)

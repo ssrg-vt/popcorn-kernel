@@ -88,7 +88,7 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 	popcorn_nodes[info->nid].arch = info->arch;
 	smp_mb();
 
-	pcn_kmsg_free_msg(msg);
+	pcn_kmsg_done(msg);
 	return 0;
 }
 

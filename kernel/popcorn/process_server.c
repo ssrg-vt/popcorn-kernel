@@ -204,7 +204,7 @@ long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
 	*/
 
 	put_wait_station(ws);
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 	return ret;
 }
 
@@ -246,7 +246,7 @@ static void process_remote_futex_request(remote_futex_request *req)
 
 	pcn_kmsg_send(PCN_KMSG_TYPE_FUTEX_RESPONSE,
 			current->remote_nid, &res, sizeof(res));
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 }
 
 
@@ -352,7 +352,7 @@ static void process_remote_task_exit(remote_task_exit_t *req)
 	if (tsk->remote_pid != req->remote_pid) {
 		printk(KERN_INFO"%s: pid mismatch %d != %d\n", __func__,
 				tsk->remote_pid, req->remote_pid);
-		pcn_kmsg_free_msg(req);
+		pcn_kmsg_done(req);
 		return;
 	}
 
@@ -364,7 +364,7 @@ static void process_remote_task_exit(remote_task_exit_t *req)
 	put_task_remote(tsk);
 
 	exit_code = req->exit_code;
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 
 	if (exit_code & 0xff) {
 		force_sig(exit_code & 0xff, tsk);
@@ -395,7 +395,7 @@ static int handle_origin_task_exit(struct pcn_kmsg_message *msg)
 	__put_task_remote(rc);
 	put_task_struct(tsk);
 out:
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	return 0;
 }
 
@@ -428,7 +428,7 @@ static void bring_back_remote_thread(back_migration_request_t *req)
 	restore_thread_info(&req->arch, false);
 
 out_free:
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 }
 
 
@@ -503,7 +503,7 @@ static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 
 	put_task_struct(tsk);
 out:
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	return 0;
 }
 
@@ -563,7 +563,7 @@ static int remote_thread_main(void *_args)
 			current->pid, my_nid, current->origin_pid, current->origin_nid);
 
 	kfree(params);
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 
 	return 0;
 	/* Returning from here makes this thread jump into the user-space */
@@ -816,7 +816,7 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 	if (!tsk) {
 		printk(KERN_INFO"%s: invalid origin task %d for remote work type %d\n",
 				__func__, pid, req->header.type);
-		pcn_kmsg_free_msg(req);
+		pcn_kmsg_done(req);
 		return -ESRCH;
 	}
 

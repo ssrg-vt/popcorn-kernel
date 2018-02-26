@@ -86,7 +86,7 @@ static int handle_sched_periodic(struct pcn_kmsg_message *msg)
 	popcorn_power_arm_3[POWER_N_VALUES - 1] = req->power_3;
 #endif
 
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	return 0;
 }
 
@@ -188,7 +188,7 @@ static int get_remote_popcorn_ps_load(struct task_struct *tsk, int origin_nid, i
 	*sload = res->sload;
 
 	put_wait_station(ws);
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 	return 0;
 }
 
@@ -212,7 +212,7 @@ static void process_remote_ps_request(struct work_struct *work)
 	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE,
 			req->nid, &res, sizeof(res));
 out:
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	kfree(w);
 }
 

@@ -79,14 +79,15 @@ enum pcn_kmsg_prio {
 
 /* Message header */
 struct pcn_kmsg_hdr {
-	unsigned int from_nid	:8;
+	int from_nid			:6;
+	enum pcn_kmsg_prio prio	:2;
 	enum pcn_kmsg_type type	:8;
-	enum pcn_kmsg_prio prio	:7;
-	bool is_rdma			:1;
+	int flags				:8;
 	size_t size;
 } __attribute__((packed));
 
-#define PCN_KMSG_FROM_NID(x) ((x)->header.from_nid)
+#define PCN_KMSG_FROM_NID(x) \
+	(((struct pcn_kmsg_message *)x)->header.from_nid)
 
 /* rdma header */
 struct pcn_kmsg_rdma_hdr {
@@ -94,12 +95,11 @@ struct pcn_kmsg_rdma_hdr {
     bool is_write			:1;
     enum pcn_kmsg_type rmda_type_res	:6;	/* response callback func */
     uint32_t remote_rkey;
-    uint32_t rw_size;
+    size_t rw_size;
     uint64_t remote_addr;
     void *your_buf_ptr;			/* will be copied to R/W buffer */
 } __attribute__((packed));
 
-#define CACHE_LINE_SIZE 64
 #define PCN_KMSG_MAX_SIZE (64UL << 10)
 #define PCN_KMSG_MAX_PAYLOAD_SIZE (PCN_KMSG_MAX_SIZE \
 					- sizeof(struct pcn_kmsg_hdr) \
@@ -125,7 +125,7 @@ struct pcn_kmsg_rdma_hdr {
 struct pcn_kmsg_message {
 	struct pcn_kmsg_hdr header;
 	unsigned char payload[PCN_KMSG_MAX_PAYLOAD_SIZE];
-} __attribute__((packed, aligned(CACHE_LINE_SIZE)));
+} __attribute__((packed));
 
 /* SETUP */
 
@@ -140,11 +140,18 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
 
 /* MESSAGING */
-/* Send @msg whose size is @msg_size to the node @dest_nid */
+/**
+ * Send @msg whose size is @msg_size to the node @dest_nid.
+ * @msg is sent synchronously
+ */
 int pcn_kmsg_send(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_size);
 
-/* Post @msg whose size is @msg_size to be sent to the node @dest_nid */
+/**
+ * Post @msg whose size is @msg_size to be sent to the node @dest_nid.
+ * The messsage is sent asynchronously
+ */
 int pcn_kmsg_post(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_size);
+
 
 /**
  * Process the received messag @msg. Each message layer should start processing
@@ -159,14 +166,15 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg);
 #define RDMA_TEMPLATE ;
 DEFINE_PCN_RDMA_KMSG(pcn_kmsg_rdma_t, RDMA_TEMPLATE);
     
-void *pcn_kmsg_request_rdma(int dest_nid, void *msg, size_t msg_size, size_t rw_size);
+void *pcn_kmsg_request_rdma(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_size, size_t rw_size);
 
-void pcn_kmsg_respond_rdma(void *msg, void *paddr, size_t rw_size);
+void pcn_kmsg_respond_rdma(enum pcn_kmsg_type type, void *msg, void *paddr, size_t rw_size);
 
 
 /* Allocate/free buffers for receiving a message */
-void *pcn_kmsg_alloc_msg(size_t size);
-void pcn_kmsg_free_msg(void *msg);
+void *pcn_kmsg_alloc(size_t size);
+void pcn_kmsg_free(void *msg);
+void pcn_kmsg_done(void *msg);
 
 
 enum pcn_kmsg_layer_types {
@@ -180,7 +188,10 @@ enum pcn_kmsg_layer_types {
 
 typedef int (*send_ftn)(int, struct pcn_kmsg_message *, size_t);
 typedef int (*post_ftn)(int, struct pcn_kmsg_message *, size_t);
+
+typedef void *(*alloc_ftn)(size_t);
 typedef void (*free_ftn)(struct pcn_kmsg_message *);
+typedef void (*done_ftn)(struct pcn_kmsg_message *);
 
 typedef void* (*request_rdma_ftn)(int, pcn_kmsg_rdma_t *, size_t, size_t);
 typedef void (*respond_rdma_ftn)(pcn_kmsg_rdma_t *, void *, size_t rw_size);
@@ -191,7 +202,9 @@ struct pcn_kmsg_transport {
 
 	send_ftn send_fn;
 	post_ftn post_fn;
+	alloc_ftn alloc_fn;
 	free_ftn free_fn;
+	done_ftn done_fn;
 
 	request_rdma_ftn request_rdma_fn;
 	respond_rdma_ftn respond_rdma_fn;

@@ -163,6 +163,11 @@ int rdma_kmsg_send(int dst, struct pcn_kmsg_message *msg, size_t size)
 	return __send_to(dst, msg, size);
 }
 
+int rdma_kmsg_post(int dst, struct pcn_kmsg_message *msg, size_t size)
+{
+	return __send_to(dst, msg, size);
+}
+
 
 struct rdma_request {
 	int nid;
@@ -825,7 +830,7 @@ struct pcn_kmsg_transport transport_rdma = {
 	.type = PCN_KMSG_LAYER_TYPE_RDMA,
 
 	.send_fn = rdma_kmsg_send,
-	.post_fn = rdma_kmsg_send,
+	.post_fn = rdma_kmsg_post,
 	.free_fn = rdma_kmsg_free,
 };
 

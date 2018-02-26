@@ -269,7 +269,7 @@ unsigned long vma_server_mmap_remote(struct file *file,
 
 out_free:
 	kfree(req);
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 
 	return ret;
 }
@@ -295,7 +295,7 @@ int vma_server_munmap_remote(unsigned long start, size_t len)
 			ret, res->addr, res->addr + res->len);
 
 	kfree(req);
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 
 	return ret;
 }
@@ -316,7 +316,7 @@ int vma_server_brk_remote(unsigned long brk)
 	VSPRINTK("  [%d] %d %lx\n", current->pid, ret, res->brk);
 
 	kfree(req);
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 
 	return ret;
 }
@@ -340,7 +340,7 @@ int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 			ret, res->addr, res->addr + res->len, behavior);
 
 	kfree(req);
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 
 	return ret;
 }
@@ -364,7 +364,7 @@ int vma_server_mprotect_remote(unsigned long start, size_t len, unsigned long pr
 			ret, res->start, res->start + res->len, prot);
 
 	kfree(req);
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 
 	return ret;
 }
@@ -408,7 +408,7 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 		pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_REQUEST, nid, req, sizeof(*req));
 		res = wait_at_station(ws);
 		put_wait_station(ws);
-		pcn_kmsg_free_msg(res);
+		pcn_kmsg_done(res);
 	}
 	put_task_remote(current);
 	kfree(req);
@@ -508,7 +508,7 @@ void process_vma_op_request(vma_op_request_t *req)
 	VSPRINTK("  [%d] ->%s %ld\n", current->pid,
 			vma_op_code_sz[req->operation], ret);
 	__reply_vma_op(req, ret);
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	mmput(mm);
 }
 
@@ -571,7 +571,7 @@ void vma_worker_remote(struct remote_context *rc)
 		VSPRINTK("  [%d] <-%s %d\n", current->pid,
 				vma_op_code_sz[req->operation], ret);
 		__reply_vma_op(req, ret);
-		pcn_kmsg_free_msg(req);
+		pcn_kmsg_done(req);
 	}
 
 	mmput(mm);
@@ -632,7 +632,7 @@ static int handle_vma_info_response(struct pcn_kmsg_message *msg)
 	return 0;
 
 out_free:
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 	return 0;
 }
 
@@ -699,7 +699,7 @@ out_up:
 	pcn_kmsg_send(PCN_KMSG_TYPE_VMA_INFO_RESPONSE,
 			req->remote_nid, res, sizeof(*res));
 
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	kfree(res);
 	return;
 }
@@ -860,7 +860,7 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 
 		wake_up_all(&vi->pendings_wait);
 
-		pcn_kmsg_free_msg((void *)vi->response);
+		pcn_kmsg_done((void *)vi->response);
 		kfree(req);
 	} else {
 		VSPRINTK("  [%d] %lx already pended\n", current->pid, addr);

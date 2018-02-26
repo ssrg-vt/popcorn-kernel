@@ -457,7 +457,7 @@ int __init initialize(void)
 
 #ifdef TEST_MSG_LAYER
 	for (i = 0; i < MAX_NUM_BUF; i++) {
-		recv_buf[i].buff = pcn_kmsg_alloc_msg(SEG_SIZE);
+		recv_buf[i].buff = kmalloc(SEG_SIZE);
 		if (recv_buf[i].buff == NULL)
 			printk(KERN_WARNING "************* Failed to allocate buffer pool **************\n");
 
@@ -755,7 +755,7 @@ do_retry:
 		pcn_msg = recv_buf[i].buff;
 #else
 do_retry:
-		pcn_msg = (struct pcn_kmsg_message *)pcn_kmsg_alloc_msg(temp->header.size + sizeof(struct pcn_kmsg_hdr));
+		pcn_msg = kmalloc(temp->header.size + sizeof(struct pcn_kmsg_hdr));
 		if (pcn_msg == NULL) {
 			if (!(retry % 1000))
 				printk(KERN_ERR "%s: ERROR: Failed to allocate recv buffer size %ld\n",
@@ -790,7 +790,7 @@ do_retry:
 
 			up(&recv_buf_cnt);
 #else
-			pcn_kmsg_free_msg(pcn_msg);
+			pcn_kmsg_done(pcn_msg);
 #endif
 		} else {
 #ifdef CONFIG_POPCORN_STAT
@@ -813,7 +813,7 @@ do_retry:
 				smp_wmb();
 				up(&recv_buf_cnt);
 #else
-				pcn_kmsg_free_msg(pcn_msg);
+				pcn_kmsg_done(pcn_msg);
 #endif
 			}
 		}
@@ -924,7 +924,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg, uns
 		    || pcn_msg->header.type >= PCN_KMSG_TYPE_MAX) {
 			printk(KERN_ERR "Received invalid message type %d\n",
 			       pcn_msg->header.type);
-			pcn_kmsg_free_msg(pcn_msg);
+			pcn_kmsg_done(pcn_msg);
 		} else {
 			ftn = (pcn_kmsg_cbftn) callbacks[pcn_msg->header.type];
 			if (ftn != NULL) {
@@ -933,7 +933,7 @@ int pci_kmsg_send_long(unsigned int dest_cpu, struct pcn_kmsg_message *lmsg, uns
 				printk(KERN_ERR "%s: ERROR: Recieved message type %d size %d has no registered callback!\n",
 				       __func__, pcn_msg->header.type,
 				       pcn_msg->header.size);
-				pcn_kmsg_free_msg(pcn_msg);
+				pcn_kmsg_done(pcn_msg);
 			}
 		}
 		return 0;
@@ -1412,7 +1412,7 @@ static void __exit unload(void)
 
 	for (i = 0; i < MAX_NUM_BUF; i++) {
 #ifdef TEST_MSG_LAYER
-		pcn_kmsg_free_msg(recv_buf[i].buff);
+		kfree(recv_buf[i].buff);
 #endif
 	}
 

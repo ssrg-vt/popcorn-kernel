@@ -1600,7 +1600,7 @@ static void handle_rdma_key_exchange_request(struct pcn_kmsg_message *msg)
 
 	ib_kmsg_send(req->header.from_nid,
 			(struct pcn_kmsg_message *)&res, sizeof(res));
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 }
 
 
@@ -1608,7 +1608,7 @@ static void handle_rdma_key_exchange_response(struct pcn_kmsg_message *msg)
 {
 	struct rdma_notify_init_res_t *res = (struct rdma_notify_init_res_t*)msg;
 	complete(res->comp);
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 }
 #endif
 

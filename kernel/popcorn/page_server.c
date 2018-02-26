@@ -682,7 +682,7 @@ out_put:
 	mmput(mm);
 
 out_free:
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	kfree(w);
 }
 
@@ -793,7 +793,7 @@ static int handle_remote_page_flush_ack(struct pcn_kmsg_message *msg)
 
 	complete(&ws->pendings);
 
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	return 0;
 }
 
@@ -873,7 +873,7 @@ static void process_page_invalidate_request(struct work_struct *work)
 	put_task_struct(tsk);
 
 out_free:
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	kfree(w);
 }
 
@@ -887,7 +887,7 @@ static int handle_page_invalidate_response(struct pcn_kmsg_message *msg)
 		complete(&ws->pendings);
 	}
 
-	pcn_kmsg_free_msg(res);
+	pcn_kmsg_done(res);
 	return 0;
 }
 
@@ -1349,7 +1349,7 @@ again:
 				kunmap(page);
 				__SetPageUptodate(page);
 
-				pcn_kmsg_free_msg(rp);
+				pcn_kmsg_done(rp);
 			} else {
 				if (fault_for_write(fault_flags))
 					__claim_local_page(tsk, addr, my_nid);
@@ -1489,7 +1489,7 @@ out:
 
 	kfree(res);
 
-	pcn_kmsg_free_msg(req);
+	pcn_kmsg_done(req);
 	kfree(w);
 }
 
@@ -1560,7 +1560,7 @@ retry:
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
 		spin_unlock(ptl);
 
-		pcn_kmsg_free_msg(rp);
+		pcn_kmsg_done(rp);
 	}
 	pte_unmap(pte);
 	ret = 0;
@@ -1693,7 +1693,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 out_free:
 	put_page(page);
-	pcn_kmsg_free_msg(rp);
+	pcn_kmsg_done(rp);
 	fh->ret = ret;
 
 out_follower:
@@ -1822,7 +1822,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 
 		spin_lock(ptl);
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
-		pcn_kmsg_free_msg(rp);
+		pcn_kmsg_done(rp);
 	}
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!test_page_owner(my_nid, mm, addr));

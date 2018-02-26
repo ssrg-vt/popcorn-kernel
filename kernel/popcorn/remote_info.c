@@ -177,7 +177,7 @@ static void process_remote_mem_info_request(struct work_struct *work)
 	}
 
 out:
-	pcn_kmsg_free_msg(request);
+	pcn_kmsg_done(request);
 	kfree(w);
 }
 
@@ -293,7 +293,7 @@ int remote_proc_mem_info(remote_mem_info_response_t *total)
 		total->CmaFree += res->CmaFree;
 #endif
 
-		pcn_kmsg_free_msg(res);
+		pcn_kmsg_done(res);
 	}
 
 	return 0;
@@ -333,7 +333,7 @@ void send_remote_cpu_info_request(unsigned int nid)
 	       sizeof(response->cpu_info_data));
 
 	kfree(request);
-	pcn_kmsg_free_msg(response);
+	pcn_kmsg_done(response);
 }
 
 unsigned int get_number_cpus_from_remote_node(unsigned int nid)
@@ -388,7 +388,7 @@ static void process_remote_cpu_info_request(struct work_struct *work)
 out:
 	kfree(response);
 out_err:
-	pcn_kmsg_free_msg(request);
+	pcn_kmsg_done(request);
 	kfree(w);
 	return;
 }
