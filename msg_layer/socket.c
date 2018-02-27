@@ -15,12 +15,23 @@
 #define PORT 30467
 #define MAX_ASYNC_BUFFER	1024
 
+enum {
+	SEND_FLAG_POSTED = 0,
+	SEND_FLAG_NOTIFY = 1,
+};
+
+struct q_item {
+	struct pcn_kmsg_message *msg;
+	unsigned long flags;
+	struct completion *done;
+};
+
 /* Per-node handle for socket */
 struct sock_handle {
 	int nid;
 
 	/* Ring buffer for queueing outbound messages */
-	struct pcn_kmsg_message **msg_q;
+	struct q_item *msg_q;
 	unsigned long q_head;
 	unsigned long q_tail;
 	spinlock_t q_lock;
@@ -129,48 +140,62 @@ static int ksock_send(struct socket *sock, char *buf, size_t len)
 	return kernel_sendmsg(sock, &msg, &iov, 1, len);
 }
 
-static int enq_send(int dest_nid, struct pcn_kmsg_message *msg)
+static int enq_send(int dest_nid, struct pcn_kmsg_message *msg, unsigned long flags, struct completion *done)
 {
-    int ret;
-    unsigned long at;
+	int ret;
+	unsigned long at;
 	struct sock_handle *sh = sock_handles + dest_nid;
+	struct q_item *qi;
 	do {
 		ret = down_interruptible(&sh->q_full);
 	} while (ret);
 
 	spin_lock(&sh->q_lock);
-    at = sh->q_tail;
-    sh->msg_q[at] = msg;
-    sh->q_tail = (at + 1) & (MAX_ASYNC_BUFFER - 1);
-    spin_unlock(&sh->q_lock);
+	at = sh->q_tail;
+	qi = sh->msg_q + at;
+	sh->q_tail = (at + 1) & (MAX_ASYNC_BUFFER - 1);
+	spin_unlock(&sh->q_lock);
 
-    up(&sh->q_empty);
+	qi->msg = msg;
+	qi->flags = flags;
+	qi->done = done;
+	up(&sh->q_empty);	/* implicit mb */
 
-    return at;
+	return at;
 }
 
 static int deq_send(struct sock_handle *sh)
 {
-    int ret;
+	int ret;
 	char *p;
-    unsigned long from;
+	unsigned long from;
 	size_t remaining;
 	struct pcn_kmsg_message *msg;
+	struct q_item *qi;
+	unsigned long flags;
+	struct completion *done;
 
 	do {
 		ret = down_interruptible(&sh->q_empty);
 	} while (ret);
 
-    spin_lock(&sh->q_lock);
-    from = sh->q_head;
-    msg = sh->msg_q[from];
-    sh->q_head = (from + 1) & (MAX_ASYNC_BUFFER - 1);
+	spin_lock(&sh->q_lock);
+	from = sh->q_head;
+	qi = sh->msg_q + from;
+	sh->q_head = (from + 1) & (MAX_ASYNC_BUFFER - 1);
 	spin_unlock(&sh->q_lock);
+
+	/**
+	 * qi can be overwritten by subsequent enqueue after the up(), so should
+	 * backup q_item values prior to invoke up().
+	 */
+	msg = qi->msg;
+	flags = qi->flags;
+	done = qi->done;
+	up(&(sh->q_full));	/* implicit mb */
 
 	p = (char *)msg;
 	remaining = msg->header.size;
-
-    up(&(sh->q_full));
 
 	while (remaining > 0) {
 		int sent = ksock_send(sh->sock, p, remaining);
@@ -183,8 +208,13 @@ static int deq_send(struct sock_handle *sh)
 		remaining -= sent;
 		//printk("Sent %d remaining %d\n", sent, remaining);
 	}
-	kfree(msg);
-    return 0;
+	if (test_bit(SEND_FLAG_POSTED, &flags)) {
+		ring_buffer_put(&send_buffer, msg);
+	}
+	if (test_bit(SEND_FLAG_NOTIFY, &flags)) {
+		complete(done);
+	}
+	return 0;
 }
 
 static int send_handler(void* arg0)
@@ -194,57 +224,22 @@ static int send_handler(void* arg0)
 
 	while (!kthread_should_stop()) {
 		deq_send(sh);
-    }
+	}
 	kfree(sh->msg_q);
 	return 0;
 }
 
 
 /***********************************************
- * This is the interface for message layer
+ * Manage send buffer
  ***********************************************/
-int sock_kmsg_send(int dest_nid, struct pcn_kmsg_message *_msg, size_t size)
-{
-	struct pcn_kmsg_message *msg;
-
-	msg = kmalloc(size, GFP_KERNEL);
-	BUG_ON(!msg);
-	memcpy(msg, _msg, size);
-
-	enq_send(dest_nid, msg);
-
-	/*
-	printk("%s(): sent %d, %d %d\n", __func__,
-				dest_nid, msg->header.type, size);
-	*/
-	return 0;
-}
-
-int sock_kmsg_post(int dest_nid, struct pcn_kmsg_message *_msg, size_t size)
-{
-	struct pcn_kmsg_message *msg;
-
-	msg = kmalloc(size, GFP_KERNEL);
-	BUG_ON(!msg);
-	memcpy(msg, _msg, size);
-
-	enq_send(dest_nid, msg);
-
-	return 0;
-}
-
-void sock_kmsg_done(struct pcn_kmsg_message *msg)
-{
-	kfree(msg);
-}
-
 struct pcn_kmsg_message *sock_kmsg_get(size_t size)
 {
 	struct pcn_kmsg_message *msg;
+	might_sleep();
+
 	while (!(msg = ring_buffer_get(&send_buffer, size))) {
-		printk("send_buffer is full, %p %p / %p %p %d\n",
-				send_buffer.buffer_start, send_buffer.buffer_end,
-				send_buffer.head, send_buffer.tail, send_buffer.wraparound);
+		WARN_ON("buffer is full\n");
 		schedule();
 	}
 	return msg;
@@ -255,16 +250,40 @@ void sock_kmsg_put(struct pcn_kmsg_message *msg)
 	ring_buffer_put(&send_buffer, msg);
 }
 
+
+/***********************************************
+ * This is the interface for message layer
+ ***********************************************/
+int sock_kmsg_send(int dest_nid, struct pcn_kmsg_message *msg, size_t size)
+{
+	DECLARE_COMPLETION_ONSTACK(done);
+	enq_send(dest_nid, msg, 1 << SEND_FLAG_NOTIFY, &done);
+	wait_for_completion(&done);
+
+	return 0;
+}
+
+int sock_kmsg_post(int dest_nid, struct pcn_kmsg_message *msg, size_t size)
+{
+	enq_send(dest_nid, msg, 1 << SEND_FLAG_POSTED, NULL);
+
+	return 0;
+}
+
+void sock_kmsg_done(struct pcn_kmsg_message *msg)
+{
+	kfree(msg);
+}
+
 struct pcn_kmsg_transport transport_socket = {
 	.name = "socket",
 	.type = PCN_KMSG_LAYER_TYPE_SOCKET,
 
-	.send_fn = (send_ftn)sock_kmsg_send,
-	.post_fn = (post_ftn)sock_kmsg_post,
-
 	.get_fn = sock_kmsg_get,
 	.put_fn = sock_kmsg_put,
 
+	.send_fn = sock_kmsg_send,
+	.post_fn = sock_kmsg_post,
 	.done_fn = sock_kmsg_done,
 };
 
@@ -468,7 +487,7 @@ static int __init init_kmsg_sock(void)
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		struct sock_handle *sh = sock_handles + i;
 
-		sh->msg_q = kmalloc(sizeof(sh->msg_q) * MAX_ASYNC_BUFFER, GFP_KERNEL);
+		sh->msg_q = kmalloc(sizeof(*sh->msg_q) * MAX_ASYNC_BUFFER, GFP_KERNEL);
 		if (!sh->msg_q) {
 			ret = -ENOMEM;
 			goto out_exit;
@@ -483,7 +502,7 @@ static int __init init_kmsg_sock(void)
 		sema_init(&sh->q_full, MAX_ASYNC_BUFFER);
 	}
 
-	if ((ret = ring_buffer_init(&send_buffer, "sock_send"))) goto out_exit;
+	if ((ret = ring_buffer_init(&send_buffer, 0, NULL, "sock_send"))) goto out_exit;
 
 	if ((ret = __listen_to_connection())) return ret;
 

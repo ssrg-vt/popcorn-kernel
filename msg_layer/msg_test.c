@@ -80,7 +80,6 @@ struct test_msg_response_t {
 enum test_action {
 	TEST_ACTION_SEND = 0,
 	TEST_ACTION_SEND_WAIT,
-	TEST_ACTION_SEND_ALLOC,
 	TEST_ACTION_POST,
 	TEST_ACTION_RDMA_READ,
 	TEST_ACTION_RDMA_WRITE,
@@ -164,12 +163,12 @@ void _show_RW_dummy_buf(int t)
 {
 	int j;
 	for (j = 0; j < MAX_NUM_NODES; j++) {
-		printk("<<<<< CHECK active buffer >>>>> \n"
+		printk("CHECK active buffer\n"
 						"_cb->rw_act_buf(first10) \"%.10s\"\n"
 						"_cb->rw_act_buf(last 10) \"%.10s\"\n\n\n",
 						dummy_act_buf[j][t],
 						dummy_act_buf[j][t] + (MAX_MSG_LENGTH - 11));
-		printk("<<<<< CHECK pass buffer>>>>> \n"
+		printk("CHECK pass buffe\n"
 						"_cb->rw_pass_buf(first10) \"%.10s\"\n"
 						"_cb->rw_pass_buf(last 10) \"%.10s\"\n\n\n",
 						dummy_pass_buf[j][t],
@@ -800,18 +799,16 @@ static int test_send(void *arg)
 	req = kmalloc(sizeof(*req), GFP_KERNEL);
 	BUG_ON(!req);
 	prandom_bytes(&req->msg, sizeof(req->msg));
+	req->flags = 0;
+	if (param->action == TEST_ACTION_SEND_WAIT) {
+		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
+		req->comp = (unsigned long)&comp;
+	}
 
 	__barrier_wait(param->barrier);
 	for (i = 0; i < param->nr_iterations; i++) {
-		req->flags = 0;
-
-		if (param->action == TEST_ACTION_SEND_WAIT) {
-			set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
-			req->comp = (unsigned long)&comp;
-		}
-
-		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_REQUEST, !my_nid, req,
-				PCN_KMSG_SIZE(param->payload_size));
+		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_REQUEST,
+				!my_nid, req, PCN_KMSG_SIZE(param->payload_size));
 
 		if (param->action == TEST_ACTION_SEND_WAIT) {
 			wait_for_completion(&comp);
@@ -820,32 +817,6 @@ static int test_send(void *arg)
 	__barrier_wait(param->barrier);
 
 	kfree(req);
-	return 0;
-}
-
-static int test_send_alloc(void *arg)
-{
-	struct test_params *param = arg;
-	DECLARE_COMPLETION_ONSTACK(comp);
-	test_request_t *req;
-	int i;
-
-	__barrier_wait(param->barrier);
-	for (i = 0; i < param->nr_iterations; i++) {
-		req = pcn_kmsg_get(PCN_KMSG_SIZE(param->payload_size));
-		BUG_ON(!req);
-
-		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
-		set_bit(TEST_REQUEST_FLAG_PREALLOC, &req->flags);
-		req->comp = (unsigned long)&comp;
-
-		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_REQUEST, !my_nid, req,
-				PCN_KMSG_SIZE(param->payload_size));
-
-		wait_for_completion(&comp);
-		pcn_kmsg_put(req);
-	}
-	__barrier_wait(param->barrier);
 	return 0;
 }
 
@@ -858,20 +829,15 @@ static int test_post(void *arg)
 
 	__barrier_wait(param->barrier);
 	for (i = 0; i < param->nr_iterations; i++) {
-		req = pcn_kmsg_get(sizeof(*req));
+		req = pcn_kmsg_get(PCN_KMSG_SIZE(param->payload_size));
 
 		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
 		req->comp = (unsigned long)&comp;
 
 		pcn_kmsg_post(PCN_KMSG_TYPE_TEST_REQUEST, !my_nid, req,
 				PCN_KMSG_SIZE(param->payload_size));
-
-		wait_for_completion(&comp);
-		pcn_kmsg_put(req);
 	}
 	__barrier_wait(param->barrier);
-
-	kfree(req);
 	return 0;
 }
 
@@ -920,8 +886,6 @@ struct test_desc {
 static struct test_desc tests[] = {
 	[TEST_ACTION_SEND]			= { test_send, "synchronous send"  },
 	[TEST_ACTION_SEND_WAIT]		= { test_send, "synchronous send with wait" },
-	[TEST_ACTION_SEND_ALLOC]	= { test_send_alloc,
-				"synchronous send using preallocated buffers" },
 	[TEST_ACTION_POST]			= { test_post, "synchronous post" },
 
 	[TEST_ACTION_RDMA_READ]		= { test_rdma_read, "RDMA read" },
@@ -1050,7 +1014,6 @@ static ssize_t start_test(struct file *file, const char __user *buffer, size_t c
 	switch(action) {
 	case TEST_ACTION_SEND:
 	case TEST_ACTION_SEND_WAIT:
-	case TEST_ACTION_SEND_ALLOC:
 	case TEST_ACTION_POST:
 		__run_test(action, &params);
 		break;

@@ -21,12 +21,19 @@ struct recv_work {
 	void *buffer;
 };
 
+enum {
+	SEND_FLAG_POSTED = 0,
+	SEND_FLAG_NOTIFY = 1,
+};
+
 struct send_work {
+	struct send_work *next;
 	struct ib_sge sgl;
 	struct ib_send_wr wr;
 	dma_addr_t dma_addr;
 	void *buffer;
-	struct send_work *next;
+	unsigned long flags;
+	struct completion *done;
 };
 
 struct rdma_work {
@@ -291,9 +298,9 @@ struct pcn_kmsg_message *rdma_kmsg_get(size_t size)
 {
 	struct pcn_kmsg_message *msg;
 	while (!(msg = ring_buffer_get(&send_buffer, size))) {
-		printk("send_buffer is full, %p %p / %p %p %d\n",
+		printk("%s is full, %p %p / %p %p %d\n", send_buffer.name,
 				send_buffer.buffer_start, send_buffer.buffer_end,
-				send_buffer.head, send_buffer.tail, send_buffer.wraparound);
+				send_buffer.head, send_buffer.tail, send_buffer.wraparounded);
 		schedule();
 	}
 	return msg;
@@ -879,7 +886,7 @@ int __init init_kmsg_rdma(void)
 		rh->state = RDMA_INIT;
 		init_completion(&rh->cm_done);
 	}
-	if (ring_buffer_init(&send_buffer, "rdma_send")) goto out_free;
+	if (ring_buffer_init(&send_buffer, 0, NULL, "rdma_send")) goto out_free;
 
 	if (__establish_connections()) {
 		goto out_free;
