@@ -31,6 +31,11 @@ int g_rdma_write_len = 8 * 1024;
 char *g_test_buf = NULL;
 char *g_test_write_buf = NULL;
 
+enum TEST_REQUEST_FLAG {
+	TEST_REQUEST_FLAG_REPLY = 1,
+	TEST_REQUEST_FLAG_PREALLOC = 2,
+};
+
 #define TEST_REQUEST_FIELDS \
 	unsigned long flags; \
 	unsigned long comp; \
@@ -801,7 +806,7 @@ static int test_send(void *arg)
 		req->flags = 0;
 
 		if (param->action == TEST_ACTION_SEND_WAIT) {
-			req->flags = 1;
+			set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
 			req->comp = (unsigned long)&comp;
 		}
 
@@ -827,17 +832,18 @@ static int test_send_alloc(void *arg)
 
 	__barrier_wait(param->barrier);
 	for (i = 0; i < param->nr_iterations; i++) {
-		req = pcn_kmsg_alloc(PCN_KMSG_SIZE(param->payload_size));
+		req = pcn_kmsg_get(PCN_KMSG_SIZE(param->payload_size));
 		BUG_ON(!req);
 
-		req->flags = 1;
+		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
+		set_bit(TEST_REQUEST_FLAG_PREALLOC, &req->flags);
 		req->comp = (unsigned long)&comp;
 
 		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_REQUEST, !my_nid, req,
 				PCN_KMSG_SIZE(param->payload_size));
 
 		wait_for_completion(&comp);
-		pcn_kmsg_free(req);
+		pcn_kmsg_put(req);
 	}
 	__barrier_wait(param->barrier);
 	return 0;
@@ -852,16 +858,16 @@ static int test_post(void *arg)
 
 	__barrier_wait(param->barrier);
 	for (i = 0; i < param->nr_iterations; i++) {
-		req = pcn_kmsg_alloc(sizeof(*req));
+		req = pcn_kmsg_get(sizeof(*req));
 
-		req->flags = 1;
+		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
 		req->comp = (unsigned long)&comp;
 
 		pcn_kmsg_post(PCN_KMSG_TYPE_TEST_REQUEST, !my_nid, req,
 				PCN_KMSG_SIZE(param->payload_size));
 
 		wait_for_completion(&comp);
-		pcn_kmsg_free(req);
+		pcn_kmsg_put(req);
 	}
 	__barrier_wait(param->barrier);
 
@@ -872,13 +878,24 @@ static int test_post(void *arg)
 static int handle_test_send_request(struct pcn_kmsg_message *msg)
 {
 	test_request_t *req = (test_request_t *)msg;
+	test_response_t res_stack = {};
+	test_response_t *res;
 
-	if (req->flags == 1) {
-		test_response_t res = {
-			.comp = req->comp,
-		};
+	if (test_bit(TEST_REQUEST_FLAG_PREALLOC, &req->flags)) {
+		res = pcn_kmsg_get(sizeof(*res));
+	} else {
+		res = &res_stack;
+	}
+
+	if (test_bit(TEST_REQUEST_FLAG_REPLY, &req->flags)) {
+		res->comp = req->comp;
+
 		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_RESPONSE, PCN_KMSG_FROM_NID(req),
-				&res, sizeof(res));
+				res, sizeof(*res));
+	}
+
+	if (test_bit(TEST_REQUEST_FLAG_PREALLOC, &req->flags)) {
+		pcn_kmsg_put(res);
 	}
 
 	pcn_kmsg_done(req);

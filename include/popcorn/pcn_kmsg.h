@@ -168,8 +168,8 @@ void pcn_kmsg_respond_rdma(enum pcn_kmsg_type type, void *msg, void *paddr, size
 
 
 /* Allocate/free buffers for receiving a message */
-void *pcn_kmsg_alloc(size_t size);
-void pcn_kmsg_free(void *msg);
+void *pcn_kmsg_get(size_t size);
+void pcn_kmsg_put(void *msg);
 void pcn_kmsg_done(void *msg);
 
 
@@ -185,8 +185,8 @@ enum pcn_kmsg_layer_types {
 typedef int (*send_ftn)(int, struct pcn_kmsg_message *, size_t);
 typedef int (*post_ftn)(int, struct pcn_kmsg_message *, size_t);
 
-typedef struct pcn_kmsg_message *(*alloc_ftn)(size_t);
-typedef void (*free_ftn)(struct pcn_kmsg_message *);
+typedef struct pcn_kmsg_message *(*get_ftn)(size_t);
+typedef void (*put_ftn)(struct pcn_kmsg_message *);
 typedef void (*done_ftn)(struct pcn_kmsg_message *);
 
 typedef void* (*request_rdma_ftn)(int, pcn_kmsg_rdma_t *, size_t, size_t);
@@ -198,9 +198,10 @@ struct pcn_kmsg_transport {
 
 	send_ftn send_fn;
 	post_ftn post_fn;
-	alloc_ftn alloc_fn;
-	free_ftn free_fn;
 	done_ftn done_fn;
+
+	get_ftn get_fn;
+	put_ftn put_fn;
 
 	request_rdma_ftn request_rdma_fn;
 	respond_rdma_ftn respond_rdma_fn;

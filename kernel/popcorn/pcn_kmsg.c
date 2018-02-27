@@ -125,23 +125,23 @@ void pcn_kmsg_respond_rdma(enum pcn_kmsg_type type, void *req, void *res, size_t
 EXPORT_SYMBOL(pcn_kmsg_respond_rdma);
 
 
-void *pcn_kmsg_alloc(size_t size)
+void *pcn_kmsg_get(size_t size)
 {
-	if (transport && transport->alloc_fn)
-		return transport->alloc_fn(size);
+	if (transport && transport->get_fn)
+		return transport->get_fn(size);
 	return kmalloc(size, GFP_KERNEL);
 }
-EXPORT_SYMBOL(pcn_kmsg_alloc);
+EXPORT_SYMBOL(pcn_kmsg_get);
 
-void pcn_kmsg_free(void *msg)
+void pcn_kmsg_put(void *msg)
 {
-	if (transport && transport->free_fn) {
-		transport->free_fn(msg);
+	if (transport && transport->put_fn) {
+		transport->put_fn(msg);
 	} else {
 		kfree(msg);
 	}
 }
-EXPORT_SYMBOL(pcn_kmsg_free);
+EXPORT_SYMBOL(pcn_kmsg_put);
 
 
 void pcn_kmsg_done(void *msg)

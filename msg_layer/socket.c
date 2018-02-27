@@ -238,7 +238,7 @@ void sock_kmsg_done(struct pcn_kmsg_message *msg)
 	kfree(msg);
 }
 
-struct pcn_kmsg_message *sock_kmsg_alloc(size_t size)
+struct pcn_kmsg_message *sock_kmsg_get(size_t size)
 {
 	struct pcn_kmsg_message *msg;
 	while (!(msg = ring_buffer_get(&send_buffer, size))) {
@@ -250,7 +250,7 @@ struct pcn_kmsg_message *sock_kmsg_alloc(size_t size)
 	return msg;
 }
 
-void sock_kmsg_free(struct pcn_kmsg_message *msg)
+void sock_kmsg_put(struct pcn_kmsg_message *msg)
 {
 	ring_buffer_put(&send_buffer, msg);
 }
@@ -262,8 +262,8 @@ struct pcn_kmsg_transport transport_socket = {
 	.send_fn = (send_ftn)sock_kmsg_send,
 	.post_fn = (post_ftn)sock_kmsg_post,
 
-	.alloc_fn = sock_kmsg_alloc,
-	.free_fn = sock_kmsg_free,
+	.get_fn = sock_kmsg_get,
+	.put_fn = sock_kmsg_put,
 
 	.done_fn = sock_kmsg_done,
 };

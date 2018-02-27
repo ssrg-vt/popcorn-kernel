@@ -287,7 +287,7 @@ void rdma_kmsg_done(struct pcn_kmsg_message *msg)
 	BUG_ON(ret || bad_wr);
 }
 
-struct pcn_kmsg_message *rdma_kmsg_alloc(size_t size)
+struct pcn_kmsg_message *rdma_kmsg_get(size_t size)
 {
 	struct pcn_kmsg_message *msg;
 	while (!(msg = ring_buffer_get(&send_buffer, size))) {
@@ -299,7 +299,7 @@ struct pcn_kmsg_message *rdma_kmsg_alloc(size_t size)
 	return msg;
 }
 
-void rdma_kmsg_free(struct pcn_kmsg_message *msg)
+void rdma_kmsg_put(struct pcn_kmsg_message *msg)
 {
 	ring_buffer_put(&send_buffer, msg);
 }
@@ -855,10 +855,10 @@ struct pcn_kmsg_transport transport_rdma = {
 
 	.send_fn = rdma_kmsg_send,
 	.post_fn = rdma_kmsg_post,
-	.done_fn = rdma_kmsg_free,
+	.done_fn = rdma_kmsg_done,
 
-	.alloc_fn = rdma_kmsg_alloc,
-	.free_fn = rdma_kmsg_free,
+	.get_fn = rdma_kmsg_get,
+	.put_fn = rdma_kmsg_put,
 };
 
 int __init init_kmsg_rdma(void)
