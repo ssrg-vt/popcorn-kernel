@@ -886,7 +886,7 @@ int __init init_kmsg_rdma(void)
 		rh->state = RDMA_INIT;
 		init_completion(&rh->cm_done);
 	}
-	if (ring_buffer_init(&send_buffer, 0, NULL, "rdma_send")) goto out_free;
+	if (ring_buffer_init(&send_buffer, NULL, "rdma_send")) goto out_free;
 
 	if (__establish_connections()) {
 		goto out_free;

@@ -154,6 +154,15 @@ void pcn_kmsg_done(void *msg)
 }
 EXPORT_SYMBOL(pcn_kmsg_done);
 
+
+ssize_t pcn_kmsg_stat(char *buffer, size_t count)
+{
+	if (transport && transport->stat_fn) {
+		return transport->stat_fn(buffer, count);
+	}
+	return 0;
+}
+
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {

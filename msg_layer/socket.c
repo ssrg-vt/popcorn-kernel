@@ -275,12 +275,18 @@ void sock_kmsg_done(struct pcn_kmsg_message *msg)
 	kfree(msg);
 }
 
+ssize_t sock_kmsg_stat(char *buffer, size_t count)
+{
+	return snprintf(buffer, count, "/ %lu ", ring_buffer_usage(&send_buffer));
+}
+
 struct pcn_kmsg_transport transport_socket = {
 	.name = "socket",
 	.type = PCN_KMSG_LAYER_TYPE_SOCKET,
 
 	.get_fn = sock_kmsg_get,
 	.put_fn = sock_kmsg_put,
+	.stat_fn = sock_kmsg_stat,
 
 	.send_fn = sock_kmsg_send,
 	.post_fn = sock_kmsg_post,
@@ -502,7 +508,7 @@ static int __init init_kmsg_sock(void)
 		sema_init(&sh->q_full, MAX_ASYNC_BUFFER);
 	}
 
-	if ((ret = ring_buffer_init(&send_buffer, 0, NULL, "sock_send"))) goto out_exit;
+	if ((ret = ring_buffer_init(&send_buffer, NULL, "sock_send"))) goto out_exit;
 
 	if ((ret = __listen_to_connection())) return ret;
 

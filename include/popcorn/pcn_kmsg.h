@@ -155,6 +155,7 @@ int pcn_kmsg_post(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_s
  */
 void pcn_kmsg_process(struct pcn_kmsg_message *msg);
 
+ssize_t pcn_kmsg_stat(char *buffer, size_t count);
 
 /**
  * RDMA-specific functions
@@ -192,6 +193,8 @@ typedef void (*done_ftn)(struct pcn_kmsg_message *);
 typedef void* (*request_rdma_ftn)(int, pcn_kmsg_rdma_t *, size_t, size_t);
 typedef void (*respond_rdma_ftn)(pcn_kmsg_rdma_t *, void *, size_t rw_size);
 
+typedef ssize_t (*stat_ftn)(char *, size_t);
+
 struct pcn_kmsg_transport {
 	char *name;
 	enum pcn_kmsg_layer_types type;
@@ -199,6 +202,8 @@ struct pcn_kmsg_transport {
 	send_ftn send_fn;
 	post_ftn post_fn;
 	done_ftn done_fn;
+
+	stat_ftn stat_fn;
 
 	get_ftn get_fn;
 	put_ftn put_fn;

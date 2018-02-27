@@ -57,6 +57,8 @@ static ssize_t __read_stats(struct file *filp, char *usr_buf, size_t count, loff
 		return 0;
 	}
 
+	len += pcn_kmsg_stat(buf + len, PROC_BUF_SIZE - len);
+
 	for (i = PCN_KMSG_TYPE_NODE_INFO; i < PCN_KMSG_TYPE_MAX; i++) {
 		len += snprintf(buf + len, PROC_BUF_SIZE - len,
 						"%lu ", stats[i]);
