@@ -851,12 +851,13 @@ static void process_page_invalidate_request(struct work_struct *work)
 {
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
 	page_invalidate_request_t *req = w->msg;
-	page_invalidate_response_t res = {
-		.origin_pid = req->origin_pid,
-		.origin_ws = req->origin_ws,
-		.remote_pid = req->remote_pid,
-	};
+	page_invalidate_response_t *res;
 	struct task_struct *tsk;
+
+	res = pcn_kmsg_get(sizeof(*res));
+	res->origin_pid = req->origin_pid;
+	res->origin_ws = req->origin_ws;
+	res->remote_pid = req->remote_pid;
 
 	/* Only home issues invalidate requests. Hence, I am a remote */
 	tsk = __get_task_struct(req->remote_pid);
@@ -868,10 +869,10 @@ static void process_page_invalidate_request(struct work_struct *work)
 
 	__do_invalidate_page(tsk, req);
 
-	pcn_kmsg_send(PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE,
-			PCN_KMSG_FROM_NID(req), &res, sizeof(res));
-	PGPRINTK(">>[%d] ->[%d/%d]\n", req->remote_pid, res.origin_pid,
+	PGPRINTK(">>[%d] ->[%d/%d]\n", req->remote_pid, res->origin_pid,
 			PCN_KMSG_FROM_NID(req));
+	pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE,
+			PCN_KMSG_FROM_NID(req), res, sizeof(*res));
 
 	put_task_struct(tsk);
 
@@ -897,15 +898,15 @@ static int handle_page_invalidate_response(struct pcn_kmsg_message *msg)
 
 static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid, unsigned long addr, int ws_id)
 {
-	page_invalidate_request_t req = {
-		.addr = addr,
-		.origin_pid = tsk->pid,
-		.origin_ws = ws_id,
-		.remote_pid = pid,
-	};
+	page_invalidate_request_t *req = pcn_kmsg_get(sizeof(*req));
+
+	req->addr = addr;
+	req->origin_pid = tsk->pid;
+	req->origin_ws = ws_id;
+	req->remote_pid = pid;
 
 	PGPRINTK("  [%d] revoke %lx [%d/%d]\n", tsk->pid, addr, pid, nid);
-	pcn_kmsg_send(PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, nid, &req, sizeof(req));
+	pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, nid, req, sizeof(*req));
 }
 
 
@@ -987,22 +988,23 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 
 static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id)
 {
-	remote_page_request_t req = {
-		.addr = addr,
-		.fault_flags = fault_flags,
+	remote_page_request_t *req;
 
-		.origin_pid = tsk->pid,
-		.origin_ws = ws_id,
+	req = pcn_kmsg_get(sizeof(*req));
+	req->addr = addr;
+	req->fault_flags = fault_flags;
 
-		.remote_pid = from_pid,
-	};
-	req.instr_addr = instruction_pointer(current_pt_regs());
+	req->origin_pid = tsk->pid;
+	req->origin_ws = ws_id;
 
-	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
-			from_nid, &req, sizeof(req));
+	req->remote_pid = from_pid;
+	req->instr_addr = instruction_pointer(current_pt_regs());
 
 	PGPRINTK("  [%d] ->[%d/%d] %lx %lx\n", tsk->pid,
-			from_pid, from_nid, addr, req.instr_addr);
+			from_pid, from_nid, addr, req->instr_addr);
+
+	pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
+			from_nid, req, sizeof(*req));
 }
 
 static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
@@ -1348,7 +1350,7 @@ static void process_remote_page_request(struct work_struct *work)
 {
 	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
 	remote_page_request_t *req = w->msg;
-	remote_page_response_t *res = NULL;
+	remote_page_response_t *res;
 	int from_nid = PCN_KMSG_FROM_NID(req);
 	struct task_struct *tsk;
 	struct mm_struct *mm;
@@ -1357,9 +1359,7 @@ static void process_remote_page_request(struct work_struct *work)
 	enum pcn_kmsg_type res_type;
 	int down_read_retry = 0;
 
-	while (!res) {	/* response contains a page. allocate from a heap */
-		res = kmalloc(sizeof(*res), GFP_KERNEL);
-	}
+	res = pcn_kmsg_get(sizeof(*res));
 
 again:
 	tsk = __get_task_struct(req->remote_pid);
@@ -1422,11 +1422,6 @@ out:
 	res->origin_pid = req->origin_pid;
 	res->origin_ws = req->origin_ws;
 
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-	pcn_kmsg_respond_rdma(req, res, res_size);
-#else
-	pcn_kmsg_send(res_type, from_nid, res, res_size);
-#endif
 	PGPRINTK("  [%d] ->[%d/%d] %x\n", req->remote_pid,
 			res->origin_pid, from_nid, res->result);
 
@@ -1434,7 +1429,7 @@ out:
 			fault_for_write(req->fault_flags) ? 'W' : 'R',
 			req->instr_addr, req->addr, res->result);
 
-	kfree(res);
+	pcn_kmsg_post(res_type, from_nid, res, res_size);
 
 	pcn_kmsg_done(req);
 	kfree(w);

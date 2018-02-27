@@ -219,9 +219,8 @@ static int handle_remote_futex_response(struct pcn_kmsg_message *msg)
 
 static void process_remote_futex_request(remote_futex_request *req)
 {
-	remote_futex_response res = {
-		.remote_ws = req->remote_ws,
-	};
+	int ret;
+	remote_futex_response *res;
 	ktime_t t, *tp = NULL;
 
 	if (timespec_valid(&req->ts)) {
@@ -235,16 +234,19 @@ static void process_remote_futex_request(remote_futex_request *req)
 			current->remote_pid, current->remote_nid,
 			req->op, req->uaddr, req->val);
 	*/
-	res.ret = do_futex(req->uaddr, req->op, req->val,
+	ret = do_futex(req->uaddr, req->op, req->val,
 			tp, req->uaddr2, req->val2, req->val3);
 	/*
 	printk(" f[%d] ->[%d/%d] 0x%x %p %ld\n", current->pid,
 			current->remote_pid, current->remote_nid,
 			req->op, req->uaddr, res.ret);
 	*/
+	res = pcn_kmsg_get(sizeof(*res));
+	res->remote_ws = req->remote_ws;
+	res->ret = ret;
 
-	pcn_kmsg_send(PCN_KMSG_TYPE_FUTEX_RESPONSE,
-			current->remote_nid, &res, sizeof(res));
+	pcn_kmsg_post(PCN_KMSG_TYPE_FUTEX_RESPONSE,
+			current->remote_nid, res, sizeof(*res));
 	pcn_kmsg_done(req);
 }
 
@@ -905,7 +907,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 
 	might_sleep();
 
-	req = kmalloc(sizeof(*req), GFP_KERNEL);
+	req = pcn_kmsg_get(sizeof(*req));
 	BUG_ON(!req);
 
 	/* struct mm_struct */
@@ -952,10 +954,9 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 
 	save_thread_info(&req->arch);
 
-	ret = pcn_kmsg_send(PCN_KMSG_TYPE_TASK_MIGRATE, dst_nid, req, sizeof(*req));
+	ret = pcn_kmsg_post(PCN_KMSG_TYPE_TASK_MIGRATE, dst_nid, req, sizeof(*req));
 
 out:
-	kfree(req);
 	mmput(mm);
 
 	return ret;
