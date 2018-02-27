@@ -16,13 +16,8 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_RDMA_KEY_EXCHANGE_RESPONSE,
 
 	/* Performance experiments */
-	PCN_KMSG_TYPE_TEST_0,
-	PCN_KMSG_TYPE_TEST_1,
-	PCN_KMSG_TYPE_SEND_ROUND_READ_REQUEST,
-	PCN_KMSG_TYPE_SEND_ROUND_READ_RESPONSE,
-	PCN_KMSG_TYPE_SEND_ROUND_WRITE_REQUEST,
-	PCN_KMSG_TYPE_SEND_ROUND_WRITE_RESPONSE,
-	PCN_KMSG_TYPE_SHOW_REMOTE_TEST_BUF,
+	PCN_KMSG_TYPE_TEST_REQUEST,
+	PCN_KMSG_TYPE_TEST_RESPONSE,
 	PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST,
 	PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
 	PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST,
@@ -88,6 +83,7 @@ struct pcn_kmsg_hdr {
 
 #define PCN_KMSG_FROM_NID(x) \
 	(((struct pcn_kmsg_message *)x)->header.from_nid)
+#define PCN_KMSG_SIZE(x) (sizeof(struct pcn_kmsg_hdr) + x)
 
 /* rdma header */
 struct pcn_kmsg_rdma_hdr {
@@ -189,7 +185,7 @@ enum pcn_kmsg_layer_types {
 typedef int (*send_ftn)(int, struct pcn_kmsg_message *, size_t);
 typedef int (*post_ftn)(int, struct pcn_kmsg_message *, size_t);
 
-typedef void *(*alloc_ftn)(size_t);
+typedef struct pcn_kmsg_message *(*alloc_ftn)(size_t);
 typedef void (*free_ftn)(struct pcn_kmsg_message *);
 typedef void (*done_ftn)(struct pcn_kmsg_message *);
 
