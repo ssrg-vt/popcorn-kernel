@@ -46,7 +46,7 @@ size_t ring_buffer_usage(struct ring_buffer *rb)
 	return used;
 }
 
-static int __init_ring_buffer(struct ring_buffer *rb, unsigned int nr_chunks, int (*map)(unsigned long, size_t), const char *fmt, va_list args)
+static int __init_ring_buffer(struct ring_buffer *rb, const unsigned int nr_chunks, const char *fmt, va_list args)
 {
 	int i;
 	int ret = 0;
@@ -57,9 +57,9 @@ static int __init_ring_buffer(struct ring_buffer *rb, unsigned int nr_chunks, in
 			ret = -ENOMEM;
 			goto out_free;
 		}
-		if (map) map((unsigned long)buffer, RB_CHUNK_SIZE);
 		rb->chunk_start[i] = buffer;
 		rb->chunk_end[i] = buffer + RB_CHUNK_SIZE;
+		rb->dma_addr_base[i] = 0;
 	}
 
 	rb->head_chunk = rb->tail_chunk = 0;
@@ -84,19 +84,19 @@ out_free:
 	return ret;
 }
 
-int ring_buffer_init(struct ring_buffer *rb, int (*map)(unsigned long, size_t), const char *namefmt, ...)
+int ring_buffer_init(struct ring_buffer *rb, const char *namefmt, ...)
 {
 	int ret;
 	va_list args;
 
 	va_start(args, namefmt);
-	ret = __init_ring_buffer(rb, RB_NR_CHUNKS, map, namefmt, args);
+	ret = __init_ring_buffer(rb, RB_NR_CHUNKS, namefmt, args);
 	va_end(args);
 
 	return ret;
 }
 
-struct ring_buffer *ring_buffer_create(int (*map)(unsigned long, size_t), const char *namefmt, ...)
+struct ring_buffer *ring_buffer_create(const char *namefmt, ...)
 {
 	struct ring_buffer *rb;
 	int ret;
@@ -106,7 +106,7 @@ struct ring_buffer *ring_buffer_create(int (*map)(unsigned long, size_t), const 
 	if (!rb) return ERR_PTR(ENOMEM);
 
 	va_start(args, namefmt);
-	ret = __init_ring_buffer(rb, RB_NR_CHUNKS, map, namefmt, args);
+	ret = __init_ring_buffer(rb, RB_NR_CHUNKS, namefmt, args);
 	va_end(args);
 
 	if (ret) {
@@ -144,10 +144,11 @@ static inline bool __get_next_chunk(struct ring_buffer *rb, unsigned int *index)
 	return false;
 }
 
-void *ring_buffer_get(struct ring_buffer *rb, size_t size)
+void *ring_buffer_get_mapped(struct ring_buffer *rb, size_t size, dma_addr_t *dma_addr)
 {
 	struct ring_buffer_header *header;
 	unsigned long flags;
+	int alloc_index;
 
 	size = ALIGN(sizeof(*header) + size, RB_ALIGN) - sizeof(*header);
 
@@ -170,6 +171,7 @@ void *ring_buffer_get(struct ring_buffer *rb, size_t size)
 		}
 	}
 
+	alloc_index = rb->tail_chunk;
 	header = rb->tail;
 	rb->tail += sizeof(*header) + size;
 	if (rb->tail + ALIGN(sizeof(*header), RB_ALIGN) >=
@@ -183,7 +185,16 @@ void *ring_buffer_get(struct ring_buffer *rb, size_t size)
 	__set_header(header, false, size);
 	spin_unlock_irqrestore(&rb->lock, flags);
 
+	if (dma_addr) {
+		*dma_addr = rb->dma_addr_base[alloc_index] +
+			((void *)(header + 1) - rb->chunk_start[alloc_index]);
+	}
 	return header + 1;
+}
+
+void *ring_buffer_get(struct ring_buffer *rb, size_t size)
+{
+	return ring_buffer_get_mapped(rb, size, NULL);
 }
 
 void ring_buffer_put(struct ring_buffer *rb, void *buffer)

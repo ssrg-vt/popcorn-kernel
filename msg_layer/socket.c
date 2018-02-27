@@ -17,7 +17,6 @@
 
 enum {
 	SEND_FLAG_POSTED = 0,
-	SEND_FLAG_NOTIFY = 1,
 };
 
 struct q_item {
@@ -211,9 +210,8 @@ static int deq_send(struct sock_handle *sh)
 	if (test_bit(SEND_FLAG_POSTED, &flags)) {
 		ring_buffer_put(&send_buffer, msg);
 	}
-	if (test_bit(SEND_FLAG_NOTIFY, &flags)) {
-		complete(done);
-	}
+	if (done) complete(done);
+
 	return 0;
 }
 
@@ -257,7 +255,7 @@ void sock_kmsg_put(struct pcn_kmsg_message *msg)
 int sock_kmsg_send(int dest_nid, struct pcn_kmsg_message *msg, size_t size)
 {
 	DECLARE_COMPLETION_ONSTACK(done);
-	enq_send(dest_nid, msg, 1 << SEND_FLAG_NOTIFY, &done);
+	enq_send(dest_nid, msg, 0, &done);
 	wait_for_completion(&done);
 
 	return 0;
@@ -266,7 +264,6 @@ int sock_kmsg_send(int dest_nid, struct pcn_kmsg_message *msg, size_t size)
 int sock_kmsg_post(int dest_nid, struct pcn_kmsg_message *msg, size_t size)
 {
 	enq_send(dest_nid, msg, 1 << SEND_FLAG_POSTED, NULL);
-
 	return 0;
 }
 
@@ -515,7 +512,7 @@ static int __init init_kmsg_sock(void)
 		sema_init(&sh->q_full, MAX_ASYNC_BUFFER);
 	}
 
-	if ((ret = ring_buffer_init(&send_buffer, NULL, "sock_send"))) goto out_exit;
+	if ((ret = ring_buffer_init(&send_buffer, "sock_send"))) goto out_exit;
 
 	if ((ret = __listen_to_connection())) return ret;
 
