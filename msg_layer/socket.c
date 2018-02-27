@@ -9,6 +9,7 @@
 
 #include <linux/kthread.h>
 
+#include "ring_buffer.h"
 #include "common.h"
 
 #define PORT 30467
@@ -33,6 +34,7 @@ struct sock_handle {
 static struct sock_handle sock_handles[MAX_NUM_NODES] = {};
 
 static struct socket *sock_listen = NULL;
+static struct ring_buffer send_buffer = {};
 
 
 /**
@@ -236,6 +238,36 @@ void sock_kmsg_done(struct pcn_kmsg_message *msg)
 	kfree(msg);
 }
 
+struct pcn_kmsg_message *sock_kmsg_alloc(size_t size)
+{
+	struct pcn_kmsg_message *msg;
+	while (!(msg = ring_buffer_get(&send_buffer, size))) {
+		printk("send_buffer is full!!\n");
+		schedule();
+	}
+	return msg;
+	return kmalloc(size, GFP_KERNEL);
+}
+
+void sock_kmsg_free(struct pcn_kmsg_message *msg)
+{
+	ring_buffer_put(&send_buffer, msg);
+	kfree(msg);
+}
+
+struct pcn_kmsg_transport transport_socket = {
+	.name = "socket",
+	.type = PCN_KMSG_LAYER_TYPE_SOCKET,
+
+	.send_fn = (send_ftn)sock_kmsg_send,
+	.post_fn = (post_ftn)sock_kmsg_post,
+
+	.alloc_fn = sock_kmsg_alloc,
+	.free_fn = sock_kmsg_free,
+
+	.done_fn = sock_kmsg_done,
+};
+
 
 static struct task_struct * __init __start_handler(const int nid, const char *type, int (*handler)(void *data))
 {
@@ -405,7 +437,6 @@ static void __exit exit_kmsg_sock(void)
 
 	if (sock_listen) sock_release(sock_listen);
 
-	MSGPRINTK("Release threads\n");
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		struct sock_handle *sh = sock_handles + i;
 		if (sh->send_handler) {
@@ -420,20 +451,10 @@ static void __exit exit_kmsg_sock(void)
 			sock_release(sh->sock);
 		}
 	}
+	ring_buffer_destroy(&send_buffer);
 
 	MSGPRINTK("Successfully unloaded module!\n");
 }
-
-
-struct pcn_kmsg_transport transport_socket = {
-	.name = "socket",
-	.type = PCN_KMSG_LAYER_TYPE_SOCKET,
-
-	.send_fn = (send_ftn)sock_kmsg_send,
-	.post_fn = (post_ftn)sock_kmsg_post,
-
-	.done_fn = sock_kmsg_done,
-};
 
 static int __init init_kmsg_sock(void)
 {
@@ -461,6 +482,8 @@ static int __init init_kmsg_sock(void)
 		sema_init(&sh->q_empty, 0);
 		sema_init(&sh->q_full, MAX_ASYNC_BUFFER);
 	}
+
+	if ((ret = ring_buffer_init(&send_buffer, "rb_socket"))) goto out_exit;
 
 	if ((ret = __listen_to_connection())) return ret;
 
