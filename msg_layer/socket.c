@@ -242,17 +242,17 @@ struct pcn_kmsg_message *sock_kmsg_alloc(size_t size)
 {
 	struct pcn_kmsg_message *msg;
 	while (!(msg = ring_buffer_get(&send_buffer, size))) {
-		printk("send_buffer is full!!\n");
+		printk("send_buffer is full, %p %p / %p %p %d\n",
+				send_buffer.buffer_start, send_buffer.buffer_end,
+				send_buffer.head, send_buffer.tail, send_buffer.wraparound);
 		schedule();
 	}
 	return msg;
-	return kmalloc(size, GFP_KERNEL);
 }
 
 void sock_kmsg_free(struct pcn_kmsg_message *msg)
 {
 	ring_buffer_put(&send_buffer, msg);
-	kfree(msg);
 }
 
 struct pcn_kmsg_transport transport_socket = {
@@ -483,7 +483,7 @@ static int __init init_kmsg_sock(void)
 		sema_init(&sh->q_full, MAX_ASYNC_BUFFER);
 	}
 
-	if ((ret = ring_buffer_init(&send_buffer, "rb_socket"))) goto out_exit;
+	if ((ret = ring_buffer_init(&send_buffer, "sock_send"))) goto out_exit;
 
 	if ((ret = __listen_to_connection())) return ret;
 

@@ -827,7 +827,7 @@ static int test_send_alloc(void *arg)
 
 	__barrier_wait(param->barrier);
 	for (i = 0; i < param->nr_iterations; i++) {
-		req = pcn_kmsg_alloc(sizeof(*req));
+		req = pcn_kmsg_alloc(PCN_KMSG_SIZE(param->payload_size));
 		BUG_ON(!req);
 
 		req->flags = 1;
@@ -840,8 +840,6 @@ static int test_send_alloc(void *arg)
 		pcn_kmsg_free(req);
 	}
 	__barrier_wait(param->barrier);
-
-	kfree(req);
 	return 0;
 }
 
@@ -1035,6 +1033,7 @@ static ssize_t start_test(struct file *file, const char __user *buffer, size_t c
 	switch(action) {
 	case TEST_ACTION_SEND:
 	case TEST_ACTION_SEND_WAIT:
+	case TEST_ACTION_SEND_ALLOC:
 	case TEST_ACTION_POST:
 		__run_test(action, &params);
 		break;

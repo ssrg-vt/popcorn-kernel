@@ -5,6 +5,7 @@
 #include <rdma/rdma_cm.h>
 
 #include "common.h"
+#include "ring_buffer.h"
 
 #define RDMA_PORT 11453
 #define RDMA_ADDR_RESOLVE_TIMEOUT_MS 5000
@@ -75,6 +76,9 @@ static DEFINE_SPINLOCK(__rdma_slots_lock);
 static DECLARE_BITMAP(__rdma_slots, NR_RDMA_SLOTS) = {0};
 static char *__rdma_sink_addr;
 static dma_addr_t __rdma_sink_dma_addr;
+
+/* Global send buffer */
+static struct ring_buffer send_buffer = {};
 
 static inline int __get_rdma_buffer(char **addr, dma_addr_t *dma_addr) {
 	int i;
@@ -270,7 +274,7 @@ void __perform_rdma(struct ib_wc *wc, struct recv_work *_rw)
 	}
 }
 
-void rdma_kmsg_free(struct pcn_kmsg_message *msg)
+void rdma_kmsg_done(struct pcn_kmsg_message *msg)
 {
 	/* Put back the receive work */
 	int ret;
@@ -281,6 +285,23 @@ void rdma_kmsg_free(struct pcn_kmsg_message *msg)
 
 	ret = ib_post_recv(rh->qp, &rh->recv_works[index].wr, &bad_wr);
 	BUG_ON(ret || bad_wr);
+}
+
+struct pcn_kmsg_message *rdma_kmsg_alloc(size_t size)
+{
+	struct pcn_kmsg_message *msg;
+	while (!(msg = ring_buffer_get(&send_buffer, size))) {
+		printk("send_buffer is full, %p %p / %p %p %d\n",
+				send_buffer.buffer_start, send_buffer.buffer_end,
+				send_buffer.head, send_buffer.tail, send_buffer.wraparound);
+		schedule();
+	}
+	return msg;
+}
+
+void rdma_kmsg_free(struct pcn_kmsg_message *msg)
+{
+	ring_buffer_put(&send_buffer, msg);
 }
 
 /****************************************************************************
@@ -778,7 +799,7 @@ static int __establish_connections(void)
 
 	for (i = my_nid + 1; i < MAX_NUM_NODES; i++) {
 		if ((ret = __accept_client(i))) return ret;
-		set_popcorn_node_online(rh->nid, true);
+		set_popcorn_node_online(i, true);
 	}
 
 	if ((ret = __setup_rdma_buffer(1))) return ret;
@@ -822,6 +843,8 @@ void __exit exit_kmsg_rdma(void)
 		ib_dealloc_pd(rdma_pd);
 	}
 
+	ring_buffer_destroy(&send_buffer);
+
 	MSGPRINTK("Popcorn message layer over RDMA unloaded\n");
 	return;
 }
@@ -832,6 +855,9 @@ struct pcn_kmsg_transport transport_rdma = {
 
 	.send_fn = rdma_kmsg_send,
 	.post_fn = rdma_kmsg_post,
+	.done_fn = rdma_kmsg_free,
+
+	.alloc_fn = rdma_kmsg_alloc,
 	.free_fn = rdma_kmsg_free,
 };
 
@@ -853,6 +879,7 @@ int __init init_kmsg_rdma(void)
 		rh->state = RDMA_INIT;
 		init_completion(&rh->cm_done);
 	}
+	if (ring_buffer_init(&send_buffer, "rdma_send")) goto out_free;
 
 	if (__establish_connections()) {
 		goto out_free;

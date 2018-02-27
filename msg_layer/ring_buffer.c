@@ -4,10 +4,17 @@
 
 #include "ring_buffer.h"
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+#define RING_BUFFER_MAGIC 0xa9
+#endif
+
 struct ring_buffer_header {
-	bool ready;
-	size_t size;
-};
+	bool ready	:1;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	unsigned int magic :8;
+#endif
+	size_t size:23;
+} __attribute__((packed, aligned (64)));
 
 static int __init_ring_buffer(struct ring_buffer *rb, const char *fmt, va_list args)
 {
@@ -77,6 +84,9 @@ void *ring_buffer_get(struct ring_buffer *rb, size_t size)
 		header = rb->tail;
 		header->ready = true;
 		header->size = rb->buffer_end - (rb->tail + sizeof(*header));
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		header->magic = RING_BUFFER_MAGIC;
+#endif
 		rb->tail = rb->buffer_start;
 		rb->wraparound--;
 	}
@@ -88,22 +98,30 @@ void *ring_buffer_get(struct ring_buffer *rb, size_t size)
 	}
 	header = rb->tail;
 	rb->tail += sizeof(*header) + size;
-	spin_unlock(&rb->lock);
-
 	header->ready = false;
 	header->size = size;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	header->magic = RING_BUFFER_MAGIC;
+#endif
+	spin_unlock(&rb->lock);
 
-	return header + sizeof(*header);
+	//printk("get %p - %p\n", header, (void *)header + sizeof(*header) + size);
+	return header + 1;
 }
 
 void ring_buffer_put(struct ring_buffer *rb, void *buffer)
 {
 	struct ring_buffer_header *header;
+
 	header = buffer - sizeof(*header);
+	//printk("put %p - %p\n", header, buffer - sizeof(*header) + header->size);
 	spin_lock(&rb->lock);
 	header->ready = true;
 	if (header == rb->head) {
 		while (header->ready) {
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+			BUG_ON(header->magic != RING_BUFFER_MAGIC);
+#endif
 			rb->head += sizeof(*header) + header->size;
 			if (rb->head == rb->buffer_end) {
 				rb->head = rb->buffer_start;
@@ -114,5 +132,3 @@ void ring_buffer_put(struct ring_buffer *rb, void *buffer)
 	}
 	spin_unlock(&rb->lock);
 }
-
-MODULE_LICENSE("GPL");
