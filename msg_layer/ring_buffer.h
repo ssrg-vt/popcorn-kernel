@@ -13,8 +13,8 @@ struct ring_buffer {
 	int wraparounded;
 
 	spinlock_t lock;
-	void *buffer_start[RB_MAX_CHUNKS];
-	void *buffer_end[RB_MAX_CHUNKS];
+	void *chunk_start[RB_MAX_CHUNKS];
+	void *chunk_end[RB_MAX_CHUNKS];
 	unsigned int nr_chunks;
 
 #ifdef CONFIG_POPCORN_STAT

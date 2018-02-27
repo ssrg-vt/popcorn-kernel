@@ -12,16 +12,19 @@
 
 struct ring_buffer_header {
 	bool reclaim:1;
+	bool last:1;
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	unsigned int magic:8;
 #endif
-	size_t size:23;
-} __attribute__((packed, aligned(64)));
+	size_t size:22;
+} __attribute__((packed));
 
 size_t ring_buffer_usage(struct ring_buffer *rb)
 {
 	size_t used = 0;
+	unsigned long flags;
 
+	spin_lock_irqsave(&rb->lock, flags);
 	if (rb->head_chunk == rb->tail_chunk) {
 		if (!rb->wraparounded) {
 			used = rb->tail - rb->head;
@@ -30,11 +33,16 @@ size_t ring_buffer_usage(struct ring_buffer *rb)
 			used -= rb->head - rb->tail;
 		}
 	} else {
-		used  = rb->buffer_end[rb->head_chunk] - rb->head;
-		used += rb->tail - rb->buffer_start[rb->tail_chunk];
+		used  = rb->chunk_end[rb->head_chunk] - rb->head;
+		used += rb->tail - rb->chunk_start[rb->tail_chunk];
 		used += ((rb->tail_chunk + rb->wraparounded * rb->nr_chunks)
 				- rb->head_chunk - 1) * RB_CHUNK_SIZE;
 	}
+#ifdef CONFIG_POPCORN_STAT
+	rb->peak_usage = max(rb->peak_usage, used);
+#endif
+	spin_unlock_irqrestore(&rb->lock, flags);
+
 	return used;
 }
 
@@ -50,14 +58,14 @@ static int __init_ring_buffer(struct ring_buffer *rb, unsigned int nr_chunks, in
 			goto out_free;
 		}
 		if (map) map((unsigned long)buffer, RB_CHUNK_SIZE);
-		rb->buffer_start[i] = buffer;
-		rb->buffer_end[i] = buffer + RB_CHUNK_SIZE;
+		rb->chunk_start[i] = buffer;
+		rb->chunk_end[i] = buffer + RB_CHUNK_SIZE;
 	}
 
 	rb->head_chunk = rb->tail_chunk = 0;
 	rb->nr_chunks = nr_chunks;
 	rb->wraparounded = 0;
-	rb->head = rb->tail = rb->buffer_start[0];
+	rb->head = rb->tail = rb->chunk_start[0];
 #ifdef CONFIG_POPCORN_STAT
 	rb->total_size = RB_CHUNK_SIZE * nr_chunks;
 	rb->peak_usage = 0;
@@ -68,9 +76,9 @@ static int __init_ring_buffer(struct ring_buffer *rb, unsigned int nr_chunks, in
 
 out_free:
 	for (i = 0; i < nr_chunks; i++) {
-		if (rb->buffer_start[i]) {
-			free_pages((unsigned long)rb->buffer_start[i], RB_CHUNK_ORDER);
-			rb->buffer_start[i] = NULL;
+		if (rb->chunk_start[i]) {
+			free_pages((unsigned long)rb->chunk_start[i], RB_CHUNK_ORDER);
+			rb->chunk_start[i] = NULL;
 		}
 	}
 	return ret;
@@ -113,8 +121,8 @@ void ring_buffer_destroy(struct ring_buffer *rb)
 {
 	int i;
 	for (i = 0; i < RB_MAX_CHUNKS; i++) {
-		if (rb->buffer_start[i]) {
-			free_pages((unsigned long)rb->buffer_start[i], RB_CHUNK_ORDER);
+		if (rb->chunk_start[i]) {
+			free_pages((unsigned long)rb->chunk_start[i], RB_CHUNK_ORDER);
 		}
 	}
 }
@@ -131,9 +139,6 @@ static inline bool __get_next_chunk(struct ring_buffer *rb, unsigned int *index)
 	(*index)++;
 	if (*index >= rb->nr_chunks) {
 		*index = 0;
-#ifdef CONFIG_POPCORN_STAT
-		rb->peak_usage = max(rb->peak_usage, ring_buffer_usage(rb));
-#endif
 		return true;
 	}
 	return false;
@@ -147,14 +152,14 @@ void *ring_buffer_get(struct ring_buffer *rb, size_t size)
 	size = ALIGN(sizeof(*header) + size, RB_ALIGN) - sizeof(*header);
 
 	spin_lock_irqsave(&rb->lock, flags);
-	if (rb->tail + sizeof(*header) + size > rb->buffer_end[rb->tail_chunk]) {
+	if (rb->tail + sizeof(*header) + size > rb->chunk_end[rb->tail_chunk]) {
 		/* Put the terminator and wrap around the ring */
 		header = rb->tail;
 		__set_header(header, true,
-				rb->buffer_end[rb->tail_chunk] - (rb->tail + sizeof(*header)));
+				rb->chunk_end[rb->tail_chunk] - (rb->tail + sizeof(*header)));
 		if (__get_next_chunk(rb, &rb->tail_chunk))
 			rb->wraparounded++;
-		rb->tail = rb->buffer_start[rb->tail_chunk];
+		rb->tail = rb->chunk_start[rb->tail_chunk];
 	}
 
 	/* Is buffer full? */
@@ -167,12 +172,13 @@ void *ring_buffer_get(struct ring_buffer *rb, size_t size)
 
 	header = rb->tail;
 	rb->tail += sizeof(*header) + size;
-	if (rb->tail + sizeof(*header) >= rb->buffer_end[rb->tail_chunk]) {
+	if (rb->tail + ALIGN(sizeof(*header), RB_ALIGN) >=
+				rb->chunk_end[rb->tail_chunk]) {
 		/* Skip small trailor */
-		size += rb->buffer_end[rb->tail_chunk] - rb->tail;
+		size += rb->chunk_end[rb->tail_chunk] - rb->tail;
 		if (__get_next_chunk(rb, &rb->tail_chunk))
 			rb->wraparounded++;
-		rb->tail = rb->buffer_start[rb->tail_chunk];
+		rb->tail = rb->chunk_start[rb->tail_chunk];
 	}
 	__set_header(header, false, size);
 	spin_unlock_irqrestore(&rb->lock, flags);
@@ -189,20 +195,20 @@ void ring_buffer_put(struct ring_buffer *rb, void *buffer)
 
 	spin_lock_irqsave(&rb->lock, flags);
 	header->reclaim = true;
-	if (header == rb->head) {
-		while (header->reclaim) {
+
+	header = rb->head;
+	while (header->reclaim) {
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-			BUG_ON(header->magic != RB_HEADER_MAGIC);
+		BUG_ON(header->magic != RB_HEADER_MAGIC);
 #endif
-			rb->head += sizeof(*header) + header->size;
-			if (rb->head == rb->buffer_end[rb->head_chunk]) {
-				if (__get_next_chunk(rb, &rb->head_chunk))
-					rb->wraparounded--;
-				rb->head = rb->buffer_start[rb->head_chunk];
-			}
-			if (rb->head == rb->tail) break;
-			header = rb->head;
+		rb->head += sizeof(*header) + header->size;
+		if (rb->head == rb->chunk_end[rb->head_chunk]) {
+			if (__get_next_chunk(rb, &rb->head_chunk))
+				rb->wraparounded--;
+			rb->head = rb->chunk_start[rb->head_chunk];
 		}
+		if (rb->head == rb->tail) break;
+		header = rb->head;
 	}
 	spin_unlock_irqrestore(&rb->lock, flags);
 }

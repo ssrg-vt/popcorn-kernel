@@ -277,7 +277,14 @@ void sock_kmsg_done(struct pcn_kmsg_message *msg)
 
 ssize_t sock_kmsg_stat(char *buffer, size_t count)
 {
-	return snprintf(buffer, count, "/ %lu ", ring_buffer_usage(&send_buffer));
+	return snprintf(buffer, count, "/ %lu %lu / ",
+			ring_buffer_usage(&send_buffer),
+#ifdef CONFIG_POPCORN_STAT
+			send_buffer.peak_usage
+#else
+			0UL
+#endif
+			);
 }
 
 struct pcn_kmsg_transport transport_socket = {

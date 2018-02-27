@@ -20,7 +20,7 @@ void account_pcn_message_sent(struct pcn_kmsg_message *msg)
 {
 	struct pcn_kmsg_hdr *h = (struct pcn_kmsg_hdr *)msg;
 	bytes_sent += h->size;
-#ifndef CONFIG_POPCORN_STAT
+#ifdef CONFIG_POPCORN_STAT
 	sent_stats[h->type]++;
 #endif
 }
@@ -29,7 +29,7 @@ void account_pcn_message_recv(struct pcn_kmsg_message *msg)
 {
 	struct pcn_kmsg_hdr *h = (struct pcn_kmsg_hdr *)msg;
 	bytes_recv += h->size;
-#ifndef CONFIG_POPCORN_STAT
+#ifdef CONFIG_POPCORN_STAT
 	recv_stats[h->type]++;
 #endif
 }
