@@ -1028,7 +1028,11 @@ void __exit exit_kmsg_rdma(void)
 
 struct pcn_kmsg_transport transport_rdma = {
 	.name = "rdma",
-	.type = PCN_KMSG_LAYER_TYPE_RDMA,
+#ifdef CONFIG_POPCORN_KMSG_RDMA_PAGES
+	.features = PCN_KMSG_FEATURE_RDMA,
+#else
+	.features = 0,
+#endif
 
 	.get_fn = rdma_kmsg_get,
 	.put_fn = rdma_kmsg_put,

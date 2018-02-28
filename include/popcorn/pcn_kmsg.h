@@ -173,16 +173,6 @@ void *pcn_kmsg_get(size_t size);
 void pcn_kmsg_put(void *msg);
 void pcn_kmsg_done(void *msg);
 
-
-enum pcn_kmsg_layer_types {
-	PCN_KMSG_LAYER_TYPE_UNKNOWN = -1,
-	PCN_KMSG_LAYER_TYPE_SOCKET = 0,
-	PCN_KMSG_LAYER_TYPE_RDMA,
-	PCN_KMSG_LAYER_TYPE_IB,
-	PCN_KMSG_LAYER_TYPE_DOLPHIN,
-	PCN_KMSG_LAYER_TYPE_MAX,
-};
-
 typedef int (*send_ftn)(int, struct pcn_kmsg_message *, size_t);
 typedef int (*post_ftn)(int, struct pcn_kmsg_message *, size_t);
 
@@ -195,9 +185,14 @@ typedef void (*respond_rdma_ftn)(pcn_kmsg_rdma_t *, void *, size_t rw_size);
 
 typedef ssize_t (*stat_ftn)(char *, size_t);
 
+enum {
+	PCN_KMSG_FEATURE_RDMA = 1,
+};
+bool pcn_kmsg_has_features(unsigned int features);
+
 struct pcn_kmsg_transport {
 	char *name;
-	enum pcn_kmsg_layer_types type;
+	unsigned long features;
 
 	send_ftn send_fn;
 	post_ftn post_fn;

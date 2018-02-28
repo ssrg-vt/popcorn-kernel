@@ -19,7 +19,8 @@ static struct pcn_kmsg_transport *transport = NULL;
 
 void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr)
 {
-	if (transport) {
+	if (transport && tr) {
+		printk(KERN_ERR "Replace hot transport at your own risk.\n");
 	}
 	transport = tr;
 }
@@ -162,6 +163,14 @@ ssize_t pcn_kmsg_stat(char *buffer, size_t count)
 	}
 	return 0;
 }
+
+bool pcn_kmsg_has_features(unsigned int features)
+{
+	if (!transport) return false;
+
+	return (transport->features & features) == features;
+}
+EXPORT_SYMBOL(pcn_kmsg_has_features);
 
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)

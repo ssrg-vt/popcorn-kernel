@@ -289,7 +289,7 @@ ssize_t sock_kmsg_stat(char *buffer, size_t count)
 
 struct pcn_kmsg_transport transport_socket = {
 	.name = "socket",
-	.type = PCN_KMSG_LAYER_TYPE_SOCKET,
+	.features = 0,
 
 	.get_fn = sock_kmsg_get,
 	.put_fn = sock_kmsg_put,
