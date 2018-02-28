@@ -967,39 +967,6 @@ int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long
 /**************************************************************************
  * Handle page faults happened at remote nodes.
  */
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-static remote_page_response_t *__fetch_remote_page_rdma(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags)
-{
-	remote_page_request_t req = {
-		.header = {
-			.type = PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
-			.prio = PCN_KMSG_PRIO_NORMAL,
-		},
-		.rdma_header = {
-			.is_write = true,
-		},
-
-		.addr = addr,
-		.fault_flags = fault_flags,
-
-		.origin_pid = tsk->pid,
-		.remote_pid = from_pid,
-	};
-	req.instr_addr = instruction_pointer(current_pt_regs());
-
-	PGPRINTK("  [%d] ->[%d/%d] %lx %lx\n", tsk->pid,
-			from_pid, from_nid, addr, req.instr_addr);
-	return pcn_kmsg_request_rdma(from_nid, &req, sizeof(req),
-								sizeof(remote_page_response_t));
-}
-static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
-{
-	return __fetch_remote_page_rdma(tsk, tsk->origin_nid, tsk->origin_pid,
-			addr, fault_flags);
-}
-
-#else /* CONFIG_POPCORN_KMSG_IB_RDMA */
-
 static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 {
 	remote_page_response_t *res = (remote_page_response_t *)msg;
@@ -1049,7 +1016,6 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 
 	return rp;
 }
-#endif /* CONFIG_POPCORN_KMSG_IB_RDMA */
 
 
 static void __make_pte_valid(struct mm_struct *mm,
@@ -1102,14 +1068,8 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 	// PGPRINTK("  [%d] fetch %lx from %d peers\n", tsk->pid, addr, peers);
 
 	if (fault_for_read(fault_flags)) {
-		peers = 0;
-	} else {
-		peers--;
+		peers = 1;
 	}
-#ifndef CONFIG_POPCORN_KMSG_IB_RDMA
-	/* counting the fetch request */
-	peers++;
-#endif
 	ws = get_wait_station_multiple(tsk, peers);
 
 	for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
@@ -1117,25 +1077,17 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 		if (nid == my_nid) continue;
 		if (from-- == 0) {
 			from_nid = nid;
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-			rp = __fetch_remote_page_rdma(tsk, nid, pid, addr, fault_flags);
-#else
 			__request_remote_page(tsk, nid, pid, addr, fault_flags, ws->id);
-#endif
-			if (fault_for_read(fault_flags)) break;
-			continue;
+		} else {
+			if (fault_for_write(fault_flags)) {
+				clear_bit(nid, pi);
+				__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
+			}
 		}
-		if (fault_for_write(fault_flags)) {
-			clear_bit(nid, pi);
-			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
-		}
+		if (--peers == 0) break;
 	}
 
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-	if (peers) wait_at_station(ws);
-#else
 	rp = wait_at_station(ws);
-#endif
 	put_wait_station(ws);
 
 	if (fault_for_write(fault_flags)) {
@@ -1937,12 +1889,10 @@ int __init page_server_init(void)
 {
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST, remote_page_request);
-#ifndef CONFIG_POPCORN_KMSG_IB_RDMA
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE, remote_page_response);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT, remote_page_response);
-#endif
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, page_invalidate_request);
 	REGISTER_KMSG_HANDLER(

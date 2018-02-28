@@ -211,11 +211,7 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	unsigned long addr; \
 	unsigned long fault_flags; \
 	unsigned long instr_addr;
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-DEFINE_PCN_RDMA_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
-#else
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
-#endif
 
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	pid_t remote_pid; \
@@ -227,19 +223,11 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 #define REMOTE_PAGE_RESPONSE_FIELDS \
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	unsigned char page[PAGE_SIZE];
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-DEFINE_PCN_RDMA_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
-#else
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
-#endif
 
 #define REMOTE_PAGE_GRANT_FIELDS \
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-DEFINE_PCN_RDMA_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
-#else
 DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
-#endif
 
 
 #define REMOTE_PAGE_FLUSH_COMMON_FIELDS \

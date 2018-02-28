@@ -17,25 +17,25 @@ config POPCORN_KMSG_SOCKET
 		Communicate through sockets on IP on Ethernet
 
 config POPCORN_KMSG_RDMA
-	tristate "Over RDMA"
+	tristate "Over InfiniBand RDMA"
 	depends on m && INFINIBAND
 	default n
 	help
 		Mellanox Connect-X4 and Connect-X5
 
-# InfiniBand
-config POPCORN_KMSG_IB
-	tristate "Over InfiniBand"
-	depends on m && INFINIBAND
-	default n
-	help
-		Mellanox Connect-X4 and Connect-X5
-
-config POPCORN_KMSG_IB_RDMA
-	bool "Use RDMA to transfer pages" if POPCORN_KMSG_IB
+config POPCORN_KMSG_RDMA_PAGES
+	bool "Use RDMA to transfer pages" if POPCORN_KMSG_RDMA
 	default n
 	help
 		Transfer pages through RDMA. 'N' will transfer pages using IB verb.
+
+# InfiniBand
+#config POPCORN_KMSG_IB
+#	tristate "Over InfiniBand"
+#	depends on m && INFINIBAND
+#	default n
+#	help
+#		Mellanox Connect-X4 and Connect-X5
 
 # Dolphin PCIe
 #config POPCORN_KMSG_DOLPHIN
@@ -49,7 +49,6 @@ config POPCORN_KMSG_IB_RDMA
 #	string "Path to Dolphin software suite"
 #	depends on POPCORN_KMSG_DOLPHIN
 #	default "/opt/source/DIS/"
-
 
 # Test and debug
 config POPCORN_KMSG_TEST

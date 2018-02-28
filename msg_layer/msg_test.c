@@ -1193,7 +1193,7 @@ static void __show_usage(void)
 {
 	int i;
 	printk(" Usage: echo [action] {payload size in byte} {# of threads} \\\n");
-	printk("                      {# of iterations} > /proc/kmsg_test\n");
+	printk("                      {# of iterations} > /proc/msg_test\n");
 	printk(" Default: %d KB payload, iterate %d time%s, single thread\n",
 			DEFAULT_PAYLOAD_SIZE_KB,
 			DEFAULT_NR_ITERATIONS, DEFAULT_NR_ITERATIONS == 1 ? "" : "s");
@@ -1252,9 +1252,9 @@ static int __init msg_test_init(void)
 #endif
 
 	/* register a proc fs entry */
-	kmsg_test_proc = proc_create("kmsg_test", 0666, NULL, &kmsg_test_ops);
+	kmsg_test_proc = proc_create("msg_test", 0666, NULL, &kmsg_test_ops);
 	if (!kmsg_test_proc) {
-		printk(KERN_ERR " Cannot create /proc/kmsg_test\n");
+		printk(KERN_ERR " Cannot create /proc/msg_test\n");
 		return -EPERM;
 	}
 
