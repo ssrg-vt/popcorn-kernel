@@ -584,15 +584,17 @@ out:
 /**************************************************************************
  * Panicked by bug!!!!!
  */
-void page_server_panic(struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val)
+void page_server_panic(bool condition, struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val)
 {
-	struct pt_regs *regs = current_pt_regs();
-	unsigned long *pi = __get_page_info(mm, address);
+	unsigned long *pi;
+	if (!condition) return;
 
-	printk(KERN_ERR "------------------ Start of panic -----------------\n");
+	pi = __get_page_info(mm, address);
+
+	printk(KERN_ERR "------------------ Start panicking -----------------\n");
 	printk(KERN_ERR "%s: %lx %p %lx %p %lx\n", __func__,
 			address, pi, pi ? *pi : -1, pte, pte_flags(pte_val));
-	show_regs(regs);
+	show_regs(current_pt_regs());
 	BUG_ON("Page server panicked!!");
 }
 
@@ -1059,9 +1061,9 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 	if (test_bit(my_nid, pi)) {
 		peers--;
 	}
-	if (peers == 0) {
-		page_server_panic(tsk->mm, addr, NULL, __pte(0));
-	}
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	page_server_panic(peers == 0, tsk->mm, addr, NULL, __pte(0));
+#endif
 	from = random % peers;
 
 	// PGPRINTK("  [%d] fetch %lx from %d peers\n", tsk->pid, addr, peers);
