@@ -203,7 +203,6 @@ long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
 			op, uaddr, ret);
 	*/
 
-	put_wait_station(ws);
 	pcn_kmsg_done(res);
 	return ret;
 }

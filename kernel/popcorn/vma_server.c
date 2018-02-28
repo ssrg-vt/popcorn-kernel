@@ -213,7 +213,6 @@ static int __delegate_vma_op(vma_op_request_t *req, vma_op_response_t **resp)
 	pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_REQUEST,
 			current->origin_nid, req, sizeof(*req));
 	res = wait_at_station(ws);
-	put_wait_station(ws);
 	BUG_ON(res->operation != req->operation);
 
 	*resp = res;
@@ -406,7 +405,6 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 				req->origin_pid, nid, start, len);
 		pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_REQUEST, nid, req, sizeof(*req));
 		res = wait_at_station(ws);
-		put_wait_station(ws);
 		pcn_kmsg_done(res);
 	}
 	put_task_remote(current);

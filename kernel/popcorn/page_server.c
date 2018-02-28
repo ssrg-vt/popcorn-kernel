@@ -764,6 +764,7 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 	wait_at_station(ws);
 
 	/* Send pages asynchronously */
+	ws = get_wait_station(current);
 	down_read(&mm->mmap_sem);
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		walk.vma = vma;
@@ -778,7 +779,6 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 	wait_at_station(ws);
 
 	kfree(req);
-	put_wait_station(ws);
 
 	// XXX: make sure there is no backlog.
 	msleep(1000);
@@ -1012,7 +1012,6 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 			addr, fault_flags, ws->id);
 
 	rp = wait_at_station(ws);
-	put_wait_station(ws);
 
 	return rp;
 }
@@ -1088,7 +1087,6 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 	}
 
 	rp = wait_at_station(ws);
-	put_wait_station(ws);
 
 	if (fault_for_write(fault_flags)) {
 		clear_bit(from_nid, pi);
@@ -1129,10 +1127,8 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int 
 		put_task_remote(tsk);
 
 		wait_at_station(ws);
-		put_wait_station(ws);
 	}
 }
-
 
 void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *pte, pte_t *pteval)
 {

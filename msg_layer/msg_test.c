@@ -408,7 +408,6 @@ static int rdma_RW_test(unsigned int payload_size,
 			kfree(req_rdma);
 
 			res = wait_at_station(ws);
-			put_wait_station(ws);
 			/* data is in dummy_act_buf[i][t] */
 			pcn_kmsg_done(res);
 		}
@@ -634,7 +633,6 @@ void test_send_read_throughput(unsigned int payload_size,
 
 			kfree(req);
 			res = wait_at_station(ws);
-			put_wait_station(ws);
 
 			pcn_kmsg_done(res);
 		}
@@ -670,7 +668,6 @@ void test_send_write_throughput(unsigned int payload_size,
 
 			kfree(req);
 			res = wait_at_station(ws);
-			put_wait_station(ws);
 
 			//printk("mimic WRITE (cost for usr)\n");
 			//memcpy(dummy_send_buf[dst][tid], &res->payload, payload_size);
