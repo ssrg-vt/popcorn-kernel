@@ -1007,7 +1007,7 @@ static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t f
 			from_nid, req, sizeof(*req));
 }
 
-static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
+static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, struct page *page)
 {
 	remote_page_response_t *rp;
 	struct wait_station *ws = get_wait_station(tsk);
@@ -1020,41 +1020,16 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 	return rp;
 }
 
-
-static void __make_pte_valid(struct mm_struct *mm,
-		struct vm_area_struct *vma, unsigned long addr,
-		unsigned long fault_flags, pte_t *pte)
-{
-	pte_t entry;
-
-	entry = ptep_clear_flush(vma, addr, pte);
-	entry = pte_make_valid(entry);
-
-	if (fault_for_write(fault_flags)) {
-		entry = pte_mkwrite(entry);
-		entry = pte_mkdirty(entry);
-	} else {
-		entry = pte_wrprotect(entry);
-	}
-
-	set_pte_at_notify(mm, addr, pte, entry);
-	update_mmu_cache(vma, addr, pte);
-	// flush_tlb_page(vma, addr);
-
-	SetPageDistributed(mm, addr);
-	set_page_owner(my_nid, mm, addr);
-}
-
-
-static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
+static remote_page_response_t *__fetch_page_from_remotes(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
 {
 	int peers;
 	unsigned int random = prandom_u32();
 	struct wait_station *ws;
 	struct remote_context *rc = get_task_remote(tsk);
 	remote_page_response_t *rp;
-	int from, nid;
-	int from_nid;
+	int from, from_nid;
+	/* Read when @from becomes zero and save the nid to @from_nid */
+	int nid;
 	unsigned long *pi = __get_page_info(rc->mm, addr);
 	BUG_ON(!pi);
 
@@ -1095,9 +1070,25 @@ static remote_page_response_t *__claim_remote_page(struct task_struct *tsk, unsi
 	if (fault_for_write(fault_flags)) {
 		clear_bit(from_nid, pi);
 	}
-
-	put_task_remote(tsk);
 	return rp;
+}
+
+static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
+{
+	remote_page_response_t *rp;
+	void *paddr;
+
+	rp = __fetch_page_from_remotes(tsk, addr, fault_flags);
+	BUG_ON(IS_ERR(rp) || rp->result);
+
+	paddr = kmap(page);
+	copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
+	kunmap(page);
+	__SetPageUptodate(page);
+
+	pcn_kmsg_done(rp);
+	put_task_remote(tsk);
+	return 0;
 }
 
 
@@ -1148,6 +1139,30 @@ void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PGPRINTK("  [%d] zap %lx\n", current->pid, addr);
 #endif
+}
+
+static void __make_pte_valid(struct mm_struct *mm,
+		struct vm_area_struct *vma, unsigned long addr,
+		unsigned long fault_flags, pte_t *pte)
+{
+	pte_t entry;
+
+	entry = ptep_clear_flush(vma, addr, pte);
+	entry = pte_make_valid(entry);
+
+	if (fault_for_write(fault_flags)) {
+		entry = pte_mkwrite(entry);
+		entry = pte_mkdirty(entry);
+	} else {
+		entry = pte_wrprotect(entry);
+	}
+
+	set_pte_at_notify(mm, addr, pte, entry);
+	update_mmu_cache(vma, addr, pte);
+	// flush_tlb_page(vma, addr);
+
+	SetPageDistributed(mm, addr);
+	set_page_owner(my_nid, mm, addr);
 }
 
 
@@ -1204,6 +1219,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
+	pte_unmap_unlock(pte, ptl);
 
 	page = vm_normal_page(vma, addr, *pte);
 	BUG_ON(!page);
@@ -1211,8 +1227,6 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	paddr = kmap_atomic(page);
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 	kunmap_atomic(paddr);
-
-	pte_unmap_unlock(pte, ptl);
 
 	__finish_fault_handling(fh);
 	return 0;
@@ -1252,6 +1266,7 @@ again:
 		spin_unlock(ptl);
 		PGPRINTK("  [%d] handle local fault at origin\n", tsk->pid);
 		ret = handle_pte_fault_origin(mm, vma, addr, pte, pmd, fault_flags);
+		/* returned with pte unmapped */
 		if (ret & VM_FAULT_RETRY) {
 			/* mmap_sem is released during do_fault */
 			return VM_FAULT_RETRY;
@@ -1291,15 +1306,7 @@ again:
 			grant = true;
 		} else {
 			if (!page_is_mine(mm, addr)) {
-				remote_page_response_t *rp =
-					__claim_remote_page(tsk, addr, fault_flags);
-
-				paddr = kmap(page);
-				copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
-				kunmap(page);
-				__SetPageUptodate(page);
-
-				pcn_kmsg_done(rp);
+				__claim_remote_page(tsk, vma, addr, fault_flags, page);
 			} else {
 				if (fault_for_write(fault_flags))
 					__claim_local_page(tsk, addr, my_nid);
@@ -1321,9 +1328,10 @@ again:
 		}
 		set_pte_at_notify(mm, addr, pte, entry);
 		update_mmu_cache(vma, addr, pte);
-	} else {
-		spin_lock(ptl);
+
+		spin_unlock(ptl);
 	}
+	pte_unmap(pte);
 
 	if (!grant) {
 		flush_cache_page(vma, addr, page_to_pfn(page));
@@ -1332,9 +1340,7 @@ again:
 		kunmap_atomic(paddr);
 	}
 
-	pte_unmap_unlock(pte, ptl);
 	__finish_fault_handling(fh);
-
 	return grant ? VM_FAULT_CONTINUE : 0;
 }
 
@@ -1488,21 +1494,12 @@ retry:
 	*/
 
 	if (leader && !page_is_mine(mm, addr)) {
-		remote_page_response_t *rp =
-				__claim_remote_page(current, addr, fault_flags);
 		struct page *page = get_normal_page(vma, addr, pte);
-		void *paddr;
-
-		paddr = kmap(page);
-		copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		kunmap(page);
-		__SetPageUptodate(page);
+		__claim_remote_page(current, vma, addr, fault_flags, page);
 
 		spin_lock(ptl);
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
 		spin_unlock(ptl);
-
-		pcn_kmsg_done(rp);
 	}
 	pte_unmap(pte);
 	ret = 0;
@@ -1579,7 +1576,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
-	rp = __fetch_page_from_origin(current, addr, fault_flags);
+	rp = __fetch_page_from_origin(current, addr, fault_flags, page);
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
 		if (rp->result != VM_FAULT_RETRY)
@@ -1749,22 +1746,13 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 			update_mmu_cache(vma, addr, pte);
 		}
 	} else {
-		struct page *page;
-		remote_page_response_t *rp =
-				__claim_remote_page(current, addr, fault_flags);
-		void *paddr;
-		BUG_ON(rp->result != 0);
-
-		page = vm_normal_page(vma, addr, pte_val);
+		struct page *page = vm_normal_page(vma, addr, pte_val);
 		BUG_ON(!page);
-		paddr = kmap(page);
-		copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		kunmap(page);
-		__SetPageUptodate(page);
+
+		__claim_remote_page(current, vma, addr, fault_flags, page);
 
 		spin_lock(ptl);
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
-		pcn_kmsg_done(rp);
 	}
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!test_page_owner(my_nid, mm, addr));
