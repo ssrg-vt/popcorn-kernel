@@ -158,6 +158,18 @@ void rdma_kmsg_put(struct pcn_kmsg_message *msg)
 	__put_send_work(sw);
 }
 
+ssize_t rdma_kmsg_stat(char *buffer, size_t count)
+{
+	return snprintf(buffer, count, "/ %lu %lu / ",
+			ring_buffer_usage(&send_buffer),
+#ifdef CONFIG_POPCORN_STAT
+			send_buffer.peak_usage
+#else
+			0UL
+#endif
+			);
+}
+
 
 /****************************************************************************
  * Send 
@@ -970,7 +982,7 @@ struct pcn_kmsg_transport transport_rdma = {
 
 	.get_fn = rdma_kmsg_get,
 	.put_fn = rdma_kmsg_put,
-	.stat_fn = NULL,
+	.stat_fn = rdma_kmsg_stat,
 
 	.send_fn = rdma_kmsg_send,
 	.post_fn = rdma_kmsg_post,
