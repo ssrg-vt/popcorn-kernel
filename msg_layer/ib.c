@@ -45,6 +45,18 @@
 
 #include "common.h"
 
+/* rdma header */
+struct pcn_kmsg_rdma_hdr {
+    bool rdma_ack			:1;
+    bool is_write			:1;
+    enum pcn_kmsg_type rmda_type_res	:6;	/* response callback func */
+    uint32_t remote_rkey;
+    size_t rw_size;
+    uint64_t remote_addr;
+    void *your_buf_ptr;			/* will be copied to R/W buffer */
+} __attribute__((packed));
+
+
 /* features been developed */
 #define CONFIG_FARM 0			/* Original FaRM - user follows convention */
 #define CONFIG_RDMA_POLL 1		/* with one extra buf copy */

@@ -237,7 +237,7 @@ struct pcn_kmsg_message *sock_kmsg_get(size_t size)
 	might_sleep();
 
 	while (!(msg = ring_buffer_get(&send_buffer, size))) {
-		WARN_ON("buffer is full\n");
+		WARN_ON_ONCE("ring buffer is full\n");
 		schedule();
 	}
 	return msg;
@@ -291,13 +291,13 @@ struct pcn_kmsg_transport transport_socket = {
 	.name = "socket",
 	.features = 0,
 
-	.get_fn = sock_kmsg_get,
-	.put_fn = sock_kmsg_put,
-	.stat_fn = sock_kmsg_stat,
+	.get = sock_kmsg_get,
+	.put = sock_kmsg_put,
+	.stat = sock_kmsg_stat,
 
-	.send_fn = sock_kmsg_send,
-	.post_fn = sock_kmsg_post,
-	.done_fn = sock_kmsg_done,
+	.send = sock_kmsg_send,
+	.post = sock_kmsg_post,
+	.done = sock_kmsg_done,
 };
 
 

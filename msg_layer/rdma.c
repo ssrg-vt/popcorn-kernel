@@ -79,7 +79,7 @@ static DECLARE_BITMAP(__rdma_slots, NR_RDMA_SLOTS) = {0};
 static char *__rdma_sink_addr;
 static dma_addr_t __rdma_sink_dma_addr;
 
-static inline int __get_rdma_buffer(char **addr, dma_addr_t *dma_addr) {
+static inline int __get_rdma_buffer(void **addr, dma_addr_t *dma_addr) {
 	int i;
 	spin_lock(&__rdma_slots_lock);
 	i = find_first_zero_bit(__rdma_slots, MAX_RECV_DEPTH);
@@ -1034,13 +1034,13 @@ struct pcn_kmsg_transport transport_rdma = {
 	.features = 0,
 #endif
 
-	.get_fn = rdma_kmsg_get,
-	.put_fn = rdma_kmsg_put,
-	.stat_fn = rdma_kmsg_stat,
+	.get = rdma_kmsg_get,
+	.put = rdma_kmsg_put,
+	.stat = rdma_kmsg_stat,
 
-	.send_fn = rdma_kmsg_send,
-	.post_fn = rdma_kmsg_post,
-	.done_fn = rdma_kmsg_done,
+	.send = rdma_kmsg_send,
+	.post = rdma_kmsg_post,
+	.done = rdma_kmsg_done,
 };
 
 int __init init_kmsg_rdma(void)

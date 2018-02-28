@@ -16,6 +16,7 @@
 #define DEFAULT_PAYLOAD_SIZE_KB	4
 #define DEFAULT_NR_ITERATIONS 1000
 
+
 #if 0
 /* for mimicing RW */
 char *dummy_send_buf[MAX_NUM_NODES][MAX_THREADS];
@@ -47,6 +48,7 @@ DEFINE_PCN_KMSG(test_request_t, TEST_REQUEST_FIELDS);
 	unsigned long done;
 DEFINE_PCN_KMSG(test_response_t, TEST_RESPONSE_FIELDS);
 
+/*
 #define RDMA_TEST_FIELDS \
 	int remote_ws; \
 	u64 dma_addr_act; \
@@ -54,7 +56,6 @@ DEFINE_PCN_KMSG(test_response_t, TEST_RESPONSE_FIELDS);
 	int t_num;
 DEFINE_PCN_RDMA_KMSG(pcn_kmsg_perf_rdma_t, RDMA_TEST_FIELDS);
 
-/*
 struct mimic_rw_msg_request {
 	struct pcn_kmsg_hdr header;
 	int tid;
@@ -80,8 +81,6 @@ enum test_action {
 	TEST_ACTION_SEND = 0,
 	TEST_ACTION_SEND_WAIT,
 	TEST_ACTION_POST,
-	TEST_ACTION_RDMA_READ,
-	TEST_ACTION_RDMA_WRITE,
 	TEST_ACTION_MAX,
 };
 
@@ -214,7 +213,6 @@ void init_RW_dummy_buf(int t)
 		memset(dummy_pass_buf[j][t] + 10, 'Q', MAX_MSG_LENGTH-10);
 	}
 }
-#endif
 
 
 /**
@@ -284,7 +282,6 @@ static int test_rdma_write(void *arg)
 }
 
 
-#if 0
 // READ
 static void process_handle_test_read_request(struct work_struct *_work)
 {
@@ -874,9 +871,6 @@ static struct test_desc tests[] = {
 	[TEST_ACTION_SEND]			= { test_send, "synchronous send"  },
 	[TEST_ACTION_SEND_WAIT]		= { test_send, "synchronous send with wait" },
 	[TEST_ACTION_POST]			= { test_post, "synchronous post" },
-
-	[TEST_ACTION_RDMA_READ]		= { test_rdma_read, "RDMA read" },
-	[TEST_ACTION_RDMA_WRITE]	= { test_rdma_write, "RDMA write" },
 };
 
 static void __run_test(enum test_action action, struct test_params *param)
@@ -1006,6 +1000,10 @@ static ssize_t start_test(struct file *file, const char __user *buffer, size_t c
 	case TEST_ACTION_POST:
 		__run_test(action, &params);
 		break;
+	default:
+		printk("Unknown test no #%d\n", action);
+	}
+#if 0
 	case TEST_ACTION_RDMA_READ:
 		setup_read_buf();
 		__run_test(action, &params);
@@ -1014,10 +1012,6 @@ static ssize_t start_test(struct file *file, const char __user *buffer, size_t c
 		setup_write_buf();
 		__run_test(action, &params);
 		break;
-	default:
-		printk("Unknown test no #%d\n", action);
-	}
-#if 0
 	else if (cmd[0] == '9' && cmd[1] == '\0') {
 		setup_read_buf();
 		for (i = 0; i < 10; i++) {

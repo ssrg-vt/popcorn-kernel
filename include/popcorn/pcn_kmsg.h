@@ -1,37 +1,19 @@
-/*
+/**
  * Header file for Popcorn inter-kernel messaging layer
  *
- * (C) Ben Shelton <beshelto@vt.edu> 2013
+ * (C) Ben Shelton   <beshelto@vt.edu> 2013
+ *     Sang-Hoon Kim <sanghoon@vt.edu> 2017-2018
  */
 
-#ifndef __LINUX_PCN_KMSG_H
-#define __LINUX_PCN_KMSG_H
+#ifndef __POPCORN_PCN_KMSG_H__
+#define __POPCORN_PCN_KMSG_H__
 
 #include <linux/types.h>
 
-/* Enum for message types */
+/* Enumerate message types */
 enum pcn_kmsg_type {
-	/* RDMA handlers */
-	PCN_KMSG_TYPE_RDMA_KEY_EXCHANGE_REQUEST,
-	PCN_KMSG_TYPE_RDMA_KEY_EXCHANGE_RESPONSE,
-
-	/* Performance experiments */
-	PCN_KMSG_TYPE_TEST_REQUEST,
-	PCN_KMSG_TYPE_TEST_RESPONSE,
-	PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST,
-	PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
-	PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST,
-	PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE,
-
-	/* Provide the single system image */
-	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE,
-	PCN_KMSG_TYPE_REMOTE_PROC_PS_REQUEST,
-	PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE,
-
 	/* Thread migration */
+	PCN_KMSG_TYPE_STAT_START,
 	PCN_KMSG_TYPE_NODE_INFO,
 	PCN_KMSG_TYPE_TASK_MIGRATE,
 	PCN_KMSG_TYPE_TASK_MIGRATE_BACK,
@@ -49,23 +31,40 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
 	PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE,
 	PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT,
-	PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH,
-	PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE,
-	PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH_ACK,
 	PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST,
 	PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH,	/* XXX page flush is not working now */
+	PCN_KMSG_TYPE_REMOTE_PAGE_RELEASE,
+	PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH_ACK,
 
 	/* Distributed futex */
 	PCN_KMSG_TYPE_FUTEX_REQUEST,
 	PCN_KMSG_TYPE_FUTEX_RESPONSE,
 
+	/* Performance experiments */
+	PCN_KMSG_TYPE_TEST_REQUEST,
+	PCN_KMSG_TYPE_TEST_RESPONSE,
+	PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST,
+	PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
+	PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST,
+	PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE,
+	PCN_KMSG_TYPE_STAT_END,
+
+	/* Provide the single system image */
+	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_PROC_PS_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE,
+
 	/* Schedule server */
-	PCN_KMSG_TYPE_SCHED_PERIODIC,
+	PCN_KMSG_TYPE_SCHED_PERIODIC,		/* XXX sched requires help!! */
 
 	PCN_KMSG_TYPE_MAX
 };
 
-/* Enum for message priority */
+/* Enumerate message priority. XXX Priority is not supported yet. */
 enum pcn_kmsg_prio {
 	PCN_KMSG_PRIO_LOW,
 	PCN_KMSG_PRIO_NORMAL,
@@ -85,43 +84,22 @@ struct pcn_kmsg_hdr {
 	(((struct pcn_kmsg_message *)x)->header.from_nid)
 #define PCN_KMSG_SIZE(x) (sizeof(struct pcn_kmsg_hdr) + x)
 
-/* rdma header */
-struct pcn_kmsg_rdma_hdr {
-    bool rdma_ack			:1;
-    bool is_write			:1;
-    enum pcn_kmsg_type rmda_type_res	:6;	/* response callback func */
-    uint32_t remote_rkey;
-    size_t rw_size;
-    uint64_t remote_addr;
-    void *your_buf_ptr;			/* will be copied to R/W buffer */
-} __attribute__((packed));
-
 #define PCN_KMSG_MAX_SIZE (64UL << 10)
-#define PCN_KMSG_MAX_PAYLOAD_SIZE (PCN_KMSG_MAX_SIZE \
-					- sizeof(struct pcn_kmsg_hdr) \
-					- sizeof(struct pcn_kmsg_rdma_hdr))
+#define PCN_KMSG_MAX_PAYLOAD_SIZE \
+	(PCN_KMSG_MAX_SIZE - sizeof(struct pcn_kmsg_hdr))
+
 
 #define DEFINE_PCN_KMSG(type, fields) \
 	typedef struct {				\
 		struct pcn_kmsg_hdr header;	\
-		fields				\
-	}__attribute__((packed)) type
+		fields;				\
+	} __attribute__((packed)) type
 
-#define DEFINE_PCN_RDMA_KMSG(type, fields) \
-	typedef struct {				\
-		struct pcn_kmsg_hdr header;	\
-		struct pcn_kmsg_rdma_hdr rdma_header; \
-		void *private; \
-		fields				\
-	}__attribute__((packed)) type
-
-/* Struct for the actual messages. Note that hdr and payload are flipped
-   when this actually goes out, so the receiver can poll on the ready bit
-   in the header. */
 struct pcn_kmsg_message {
 	struct pcn_kmsg_hdr header;
 	unsigned char payload[PCN_KMSG_MAX_PAYLOAD_SIZE];
 } __attribute__((packed));
+
 
 /* SETUP */
 
@@ -136,18 +114,26 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type);
 
 
 /* MESSAGING */
+
 /**
  * Send @msg whose size is @msg_size to the node @dest_nid.
- * @msg is sent synchronously
+ * @msg is sent synchronously; it is safe to deallocate @msg after the return.
  */
 int pcn_kmsg_send(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_size);
 
 /**
  * Post @msg whose size is @msg_size to be sent to the node @dest_nid.
- * The messsage is sent asynchronously
+ * The message should be allocated through pcn_kmsg_get(), and the message
+ * is reclaimed automatically once it is sent.
  */
 int pcn_kmsg_post(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_size);
 
+/**
+ * Get message buffer for posting. Note pcn_kmsg_put() is for returning
+ * unused buffer without posting it; posted message is reclaimed automatically.
+ */
+void *pcn_kmsg_get(size_t size);
+void pcn_kmsg_put(void *msg);
 
 /**
  * Process the received messag @msg. Each message layer should start processing
@@ -155,58 +141,44 @@ int pcn_kmsg_post(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_s
  */
 void pcn_kmsg_process(struct pcn_kmsg_message *msg);
 
-ssize_t pcn_kmsg_stat(char *buffer, size_t count);
-
 /**
- * RDMA-specific functions
+ * Return received message @msg after handling to recyle it. @msg becomes
+ * unavailable after the call. Make sure return received messages otherwise
+ * the message layer will panick.
  */
-#define RDMA_TEMPLATE ;
-DEFINE_PCN_RDMA_KMSG(pcn_kmsg_rdma_t, RDMA_TEMPLATE);
-    
-void *pcn_kmsg_request_rdma(enum pcn_kmsg_type type, int dest_nid, void *msg, size_t msg_size, size_t rw_size);
-
-void pcn_kmsg_respond_rdma(enum pcn_kmsg_type type, void *msg, void *paddr, size_t rw_size);
-
-
-/* Allocate/free buffers for receiving a message */
-void *pcn_kmsg_get(size_t size);
-void pcn_kmsg_put(void *msg);
 void pcn_kmsg_done(void *msg);
 
-typedef int (*send_ftn)(int, struct pcn_kmsg_message *, size_t);
-typedef int (*post_ftn)(int, struct pcn_kmsg_message *, size_t);
+/**
+ * Print out transport-specific statistics into @buffer
+ */
+ssize_t pcn_kmsg_stat(char *buffer, size_t count);
 
-typedef struct pcn_kmsg_message *(*get_ftn)(size_t);
-typedef void (*put_ftn)(struct pcn_kmsg_message *);
-typedef void (*done_ftn)(struct pcn_kmsg_message *);
 
-typedef void* (*request_rdma_ftn)(int, pcn_kmsg_rdma_t *, size_t, size_t);
-typedef void (*respond_rdma_ftn)(pcn_kmsg_rdma_t *, void *, size_t rw_size);
-
-typedef ssize_t (*stat_ftn)(char *, size_t);
-
+/* TRANSPORT DESCRIPTOR */
 enum {
 	PCN_KMSG_FEATURE_RDMA = 1,
 };
+
+/**
+ * Check the features that the transport layer provides. Return true iff all
+ * features are supported.
+ */
 bool pcn_kmsg_has_features(unsigned int features);
 
 struct pcn_kmsg_transport {
 	char *name;
 	unsigned long features;
 
-	send_ftn send_fn;
-	post_ftn post_fn;
-	done_ftn done_fn;
+	struct pcn_kmsg_message *(*get)(size_t);
+	void (*put)(struct pcn_kmsg_message *);
 
-	stat_ftn stat_fn;
+	int (*send)(int, struct pcn_kmsg_message *, size_t);
+	int (*post)(int, struct pcn_kmsg_message *, size_t);
+	void (*done)(struct pcn_kmsg_message *);
 
-	get_ftn get_fn;
-	put_ftn put_fn;
-
-	request_rdma_ftn request_rdma_fn;
-	respond_rdma_ftn respond_rdma_fn;
+	ssize_t (*stat)(char *, size_t);
 };
 
-extern void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr);
+void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr);
 
-#endif /* __LINUX_PCN_KMSG_H */
+#endif /* __POPCORN_PCN_KMSG_H__ */

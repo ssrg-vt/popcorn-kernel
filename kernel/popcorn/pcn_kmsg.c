@@ -87,7 +87,7 @@ int pcn_kmsg_send(enum pcn_kmsg_type type, int to, void *msg, size_t size)
 	if ((ret = __build_and_check_msg(type, to, msg, size))) return ret;
 
 	account_pcn_message_sent(msg);
-	return transport->send_fn(to, msg, size);
+	return transport->send(to, msg, size);
 }
 EXPORT_SYMBOL(pcn_kmsg_send);
 
@@ -97,47 +97,22 @@ int pcn_kmsg_post(enum pcn_kmsg_type type, int to, void *msg, size_t size)
 	if ((ret = __build_and_check_msg(type, to, msg, size))) return ret;
 
 	account_pcn_message_sent(msg);
-	return transport->post_fn(to, msg, size);
+	return transport->post(to, msg, size);
 }
 EXPORT_SYMBOL(pcn_kmsg_post);
 
-
-/*
- * @res_size: The maximum size expected
- */
-void *pcn_kmsg_request_rdma(enum pcn_kmsg_type type, int to, void *msg, size_t msg_size, size_t res_size)
-{
-	int ret;
-	if ((ret = __build_and_check_msg(type, to, msg, msg_size))) return NULL;
-
-	account_pcn_message_sent(msg);
-    return transport->request_rdma_fn(to, msg, msg_size, res_size);
-}
-EXPORT_SYMBOL(pcn_kmsg_request_rdma);
-
-void pcn_kmsg_respond_rdma(enum pcn_kmsg_type type, void *req, void *res, size_t res_size)
-{
-	int ret = __build_and_check_msg(type, PCN_KMSG_FROM_NID(req), res, res_size);
-	if (ret) return;
-
-	account_pcn_message_sent(res);
-	transport->respond_rdma_fn(req, res, res_size);
-}
-EXPORT_SYMBOL(pcn_kmsg_respond_rdma);
-
-
 void *pcn_kmsg_get(size_t size)
 {
-	if (transport && transport->get_fn)
-		return transport->get_fn(size);
+	if (transport && transport->get)
+		return transport->get(size);
 	return kmalloc(size, GFP_KERNEL);
 }
 EXPORT_SYMBOL(pcn_kmsg_get);
 
 void pcn_kmsg_put(void *msg)
 {
-	if (transport && transport->put_fn) {
-		transport->put_fn(msg);
+	if (transport && transport->put) {
+		transport->put(msg);
 	} else {
 		kfree(msg);
 	}
@@ -147,8 +122,8 @@ EXPORT_SYMBOL(pcn_kmsg_put);
 
 void pcn_kmsg_done(void *msg)
 {
-	if (transport && transport->done_fn) {
-		transport->done_fn(msg);
+	if (transport && transport->done) {
+		transport->done(msg);
 	} else {
 		kfree(msg);
 	}
@@ -158,8 +133,8 @@ EXPORT_SYMBOL(pcn_kmsg_done);
 
 ssize_t pcn_kmsg_stat(char *buffer, size_t count)
 {
-	if (transport && transport->stat_fn) {
-		return transport->stat_fn(buffer, count);
+	if (transport && transport->stat) {
+		return transport->stat(buffer, count);
 	}
 	return 0;
 }
