@@ -736,9 +736,6 @@ static int rdma_RW_inv_test(void* buf, unsigned int payload_size,
 	return 0;
 }
 
-/**
- *	Too large to static allocate - if do statically, array drain happens
- **/
 static void __reply_send_w_roundtrip(struct mimic_rw_signal_request *req,
 									int ret)
 {
@@ -916,14 +913,16 @@ static void __run_test(enum test_action action, struct test_params *param)
 
 
 	elapsed = (t_end.tv_sec * 1000000 + t_end.tv_usec) -
-		(t_start.tv_sec * 1000000 + t_start.tv_usec);
+			(t_start.tv_sec * 1000000 + t_start.tv_usec);
 
 	printk("Done testing %s\n", tests[action].description);
 	printk("  %u thread%s %lu iteration%s\n",
 			param->nr_threads, param->nr_threads == 1 ? "" : "s",
 			param->nr_iterations, param->nr_iterations == 1 ? "" : "s");
 	printk("  %9lu us in total\n", elapsed);
-	printk("  %9lu us per operation\n", elapsed / param->nr_iterations);
+	printk("  %3lu.%05lu us per operation\n",
+			elapsed / param->nr_iterations,
+			(elapsed % param->nr_iterations) * 1000 /  param->nr_iterations);
 }
 
 

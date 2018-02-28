@@ -14,11 +14,17 @@
 #define MAX_RECV_DEPTH	((1 << (PAGE_SHIFT + MAX_ORDER - 1)) / PCN_KMSG_MAX_SIZE)
 #define NR_RDMA_SLOTS	MAX_RECV_DEPTH
 
+static unsigned int use_rb_thr = PAGE_SIZE;
+
 struct recv_work {
 	struct ib_sge sgl;
 	struct ib_recv_wr wr;
 	dma_addr_t dma_addr;
 	void *addr;
+};
+
+enum {
+	SW_FLAG_OWN_BUFFER = 0,
 };
 
 struct send_work {
@@ -105,13 +111,17 @@ static inline void *__get_rdma_buffer_addr(int slot) {
 /* Global send buffer */
 struct rb_alloc_header {
 	struct send_work *sw;
-	void *start;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	unsigned int magic;
+#endif
 };
+const unsigned int rb_alloc_header_magic = 0xbeefcafe;
+
 static struct ring_buffer send_buffer = {};
 static spinlock_t send_work_pool_lock;
 static struct send_work *send_work_pool = NULL;
 
-static struct send_work *__get_send_work(size_t size)
+static struct send_work *__get_send_work_map(struct pcn_kmsg_message *msg, size_t size)
 {
 	unsigned long flags;
 	struct send_work *sw;
@@ -120,24 +130,51 @@ static struct send_work *__get_send_work(size_t size)
 	send_work_pool = sw->next;
 	spin_unlock_irqrestore(&send_work_pool_lock, flags);
 
-	sw->next = NULL;
 	sw->done = NULL;
 	sw->flags = 0;
 
-	sw->addr = ring_buffer_get_mapped(
-			&send_buffer, size + sizeof(void *), &sw->sgl.addr);
-	((struct rb_alloc_header *)sw->addr)->sw = sw;
-	BUG_ON(!sw->addr);
+	if (!msg) {
+		struct rb_alloc_header *rah;
+		sw->addr = ring_buffer_get_mapped(&send_buffer,
+				sizeof(struct rb_alloc_header) + size, &sw->sgl.addr);
+		BUG_ON(!sw->addr);
+		sw->sgl.addr += sizeof(struct rb_alloc_header);
+
+		rah = sw->addr;
+		rah->sw = sw;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		rah->magic = rb_alloc_header_magic;
+#endif
+	} else {
+		int ret;
+		sw->addr = msg;
+		sw->sgl.addr =ib_dma_map_single(
+				rdma_pd->device, msg, size, DMA_TO_DEVICE);
+		ret = ib_dma_mapping_error(rdma_pd->device, sw->sgl.addr);
+		BUG_ON(ret);
+
+		set_bit(SW_FLAG_OWN_BUFFER, &sw->flags);
+	}
 	sw->sgl.length = size;	/* Should be updated before sending out */
 
 	BUG_ON(!send_work_pool);
 	return sw;
 }
 
+static struct send_work *__get_send_work(size_t size)
+{
+	return __get_send_work_map(NULL, size);
+}
+
 static void __put_send_work(struct send_work *sw)
 {
 	unsigned long flags;
-	ring_buffer_put(&send_buffer, sw->addr);
+	if (!test_bit(SW_FLAG_OWN_BUFFER, &sw->flags)) {
+		ring_buffer_put(&send_buffer, sw->addr);
+	} else {
+		ib_dma_unmap_single(rdma_pd->device,
+				sw->sgl.addr, sw->sgl.length, DMA_TO_DEVICE);
+	}
 
 	spin_lock_irqsave(&send_work_pool_lock, flags);
 	sw->next = send_work_pool;
@@ -149,12 +186,13 @@ static void __put_send_work(struct send_work *sw)
 struct pcn_kmsg_message *rdma_kmsg_get(size_t size)
 {
 	struct send_work *sw = __get_send_work(size);
-	return sw->addr + sizeof(struct send_work *);
+	return sw->addr + sizeof(struct rb_alloc_header);
 }
 
 void rdma_kmsg_put(struct pcn_kmsg_message *msg)
 {
-	struct send_work *sw = *(struct send_work **)((void *)msg - sizeof(void *));
+	struct rb_alloc_header *ah = (struct rb_alloc_header *)msg - 1;
+	struct send_work *sw = ah->sw;
 	__put_send_work(sw);
 }
 
@@ -183,7 +221,6 @@ static int __send_to(int to_nid, struct send_work *sw, size_t size)
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(size > sw->sgl.length);
 #endif
-	sw->sgl.addr += sizeof(void *);
 	sw->sgl.length = size; /* Might be shrunk after get*/
 
 	ret = ib_post_send(rh->qp, &sw->wr, &bad_wr);
@@ -195,21 +232,29 @@ static int __send_to(int to_nid, struct send_work *sw, size_t size)
 
 int rdma_kmsg_send(int dst, struct pcn_kmsg_message *msg, size_t size)
 {
-	struct send_work *sw = __get_send_work(size);
+	struct send_work *sw;
 	DECLARE_COMPLETION_ONSTACK(done);
 	int ret;
 	might_sleep();
 
-	memcpy(sw->addr + sizeof(void *), msg, size);	/* XXX map adaptively */
+	if (size <= use_rb_thr) {
+		sw = __get_send_work(size);
+		memcpy(sw->addr + sizeof(struct rb_alloc_header), msg, size);
+	} else {
+		sw = __get_send_work_map(msg, size);
+	}
+
 	sw->done = &done;
 
 	ret = __send_to(dst, sw, size);
 	if (ret) goto out;
 
-	ret = wait_for_completion_io_timeout(&done, 60 * HZ);
-	if (!ret) {
-		ret = -EAGAIN;
-		goto out;
+	if (!try_wait_for_completion(&done)) {
+		ret = wait_for_completion_io_timeout(&done, 60 * HZ);
+		if (!ret) {
+			ret = -EAGAIN;
+			goto out;
+		}
 	}
 	return 0;
 out:
@@ -219,8 +264,13 @@ out:
 
 int rdma_kmsg_post(int dst, struct pcn_kmsg_message *msg, size_t size)
 {
-	struct send_work *sw = *(struct send_work **)((void *)msg - sizeof(void *));
+	struct rb_alloc_header *ah = (struct rb_alloc_header *)msg - 1;
+	struct send_work *sw = ah->sw;
 	int ret;
+
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	BUG_ON(ah->magic != rb_alloc_header_magic && "send buffer is compromised");
+#endif
 
 	ret = __send_to(dst, sw, size);
 	if (ret) {
@@ -920,7 +970,7 @@ static int __establish_connections(void)
 
 	if ((ret = __setup_rdma_buffer(1))) return ret;
 
-	printk("Connections are established.\n");
+	MSGPRINTK("Connections are established.\n");
 	return 0;
 }
 
@@ -1023,6 +1073,12 @@ out_free:
 	exit_kmsg_rdma();
 	return -EINVAL;
 }
+
+module_param(use_rb_thr, uint, 0644);
+/*
+MODULE_PARAM_DESC(use_rb_thr,
+		"Threshold for using pre-allocated and pre-mapped ring buffer");
+*/
 
 module_init(init_kmsg_rdma);
 module_exit(exit_kmsg_rdma);

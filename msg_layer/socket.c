@@ -13,7 +13,7 @@
 #include "common.h"
 
 #define PORT 30467
-#define MAX_ASYNC_BUFFER	1024
+#define MAX_SEND_DEPTH	1024
 
 enum {
 	SEND_FLAG_POSTED = 0,
@@ -152,7 +152,7 @@ static int enq_send(int dest_nid, struct pcn_kmsg_message *msg, unsigned long fl
 	spin_lock(&sh->q_lock);
 	at = sh->q_tail;
 	qi = sh->msg_q + at;
-	sh->q_tail = (at + 1) & (MAX_ASYNC_BUFFER - 1);
+	sh->q_tail = (at + 1) & (MAX_SEND_DEPTH - 1);
 	spin_unlock(&sh->q_lock);
 
 	qi->msg = msg;
@@ -181,7 +181,7 @@ static int deq_send(struct sock_handle *sh)
 	spin_lock(&sh->q_lock);
 	from = sh->q_head;
 	qi = sh->msg_q + from;
-	sh->q_head = (from + 1) & (MAX_ASYNC_BUFFER - 1);
+	sh->q_head = (from + 1) & (MAX_SEND_DEPTH - 1);
 	spin_unlock(&sh->q_lock);
 
 	/**
@@ -256,8 +256,11 @@ int sock_kmsg_send(int dest_nid, struct pcn_kmsg_message *msg, size_t size)
 {
 	DECLARE_COMPLETION_ONSTACK(done);
 	enq_send(dest_nid, msg, 0, &done);
-	wait_for_completion(&done);
 
+	if (!try_wait_for_completion(&done)) {
+		int ret = wait_for_completion_io_timeout(&done, 60 * HZ);
+		if (!ret) return -EAGAIN;
+	}
 	return 0;
 }
 
@@ -497,7 +500,7 @@ static int __init init_kmsg_sock(void)
 	for (i = 0; i < MAX_NUM_NODES; i++) {
 		struct sock_handle *sh = sock_handles + i;
 
-		sh->msg_q = kmalloc(sizeof(*sh->msg_q) * MAX_ASYNC_BUFFER, GFP_KERNEL);
+		sh->msg_q = kmalloc(sizeof(*sh->msg_q) * MAX_SEND_DEPTH, GFP_KERNEL);
 		if (!sh->msg_q) {
 			ret = -ENOMEM;
 			goto out_exit;
@@ -509,7 +512,7 @@ static int __init init_kmsg_sock(void)
 		spin_lock_init(&sh->q_lock);
 
 		sema_init(&sh->q_empty, 0);
-		sema_init(&sh->q_full, MAX_ASYNC_BUFFER);
+		sema_init(&sh->q_full, MAX_SEND_DEPTH);
 	}
 
 	if ((ret = ring_buffer_init(&send_buffer, "sock_send"))) goto out_exit;
