@@ -10,7 +10,7 @@
 #define RDMA_PORT 11453
 #define RDMA_ADDR_RESOLVE_TIMEOUT_MS 5000
 
-#define MAX_SEND_DEPTH	((1 << (PAGE_SHIFT + MAX_ORDER - 1)) / PCN_KMSG_MAX_SIZE)
+#define MAX_SEND_DEPTH	((RB_CHUNK_SIZE * RB_MAX_CHUNKS) / PCN_KMSG_MAX_SIZE)
 #define MAX_RECV_DEPTH	((1 << (PAGE_SHIFT + MAX_ORDER - 1)) / PCN_KMSG_MAX_SIZE)
 #define NR_RDMA_SLOTS	MAX_RECV_DEPTH
 
@@ -18,7 +18,7 @@ struct recv_work {
 	struct ib_sge sgl;
 	struct ib_recv_wr wr;
 	dma_addr_t dma_addr;
-	void *buffer;
+	void *addr;
 };
 
 struct send_work {
@@ -26,7 +26,6 @@ struct send_work {
 	struct ib_sge sgl;
 	struct ib_send_wr wr;
 	void *addr;
-	dma_addr_t dma_addr;
 	unsigned long flags;
 	struct completion *done;
 };
@@ -102,47 +101,60 @@ static inline void *__get_rdma_buffer_addr(int slot) {
 	return __rdma_sink_addr + PCN_KMSG_MAX_SIZE * slot;
 }
 
+
 /* Global send buffer */
+struct rb_alloc_header {
+	struct send_work *sw;
+	void *start;
+};
 static struct ring_buffer send_buffer = {};
 static spinlock_t send_work_pool_lock;
 static struct send_work *send_work_pool = NULL;
+
 static struct send_work *__get_send_work(size_t size)
 {
+	unsigned long flags;
 	struct send_work *sw;
-	spin_lock(&send_work_pool_lock);
+	spin_lock_irqsave(&send_work_pool_lock, flags);
 	sw = send_work_pool;
 	send_work_pool = sw->next;
-	spin_unlock(&send_work_pool_lock);
+	spin_unlock_irqrestore(&send_work_pool_lock, flags);
 
-	sw->addr = ring_buffer_get_mapped(&send_buffer, size, &sw->dma_addr);
+	sw->next = NULL;
+	sw->done = NULL;
+	sw->flags = 0;
+
+	sw->addr = ring_buffer_get_mapped(
+			&send_buffer, size + sizeof(void *), &sw->sgl.addr);
+	((struct rb_alloc_header *)sw->addr)->sw = sw;
 	BUG_ON(!sw->addr);
-
-	sw->sgl.addr = sw->dma_addr;
-	sw->sgl.length = size;
+	sw->sgl.length = size;	/* Should be updated before sending out */
 
 	BUG_ON(!send_work_pool);
 	return sw;
 }
 
-static void __put_send_work(struct send_work *sw) {
+static void __put_send_work(struct send_work *sw)
+{
+	unsigned long flags;
 	ring_buffer_put(&send_buffer, sw->addr);
 
-	spin_lock(&send_work_pool_lock);
+	spin_lock_irqsave(&send_work_pool_lock, flags);
 	sw->next = send_work_pool;
 	send_work_pool = sw;
-	spin_unlock(&send_work_pool_lock);
+	spin_unlock_irqrestore(&send_work_pool_lock, flags);
 }
 
 
 struct pcn_kmsg_message *rdma_kmsg_get(size_t size)
 {
 	struct send_work *sw = __get_send_work(size);
-	return sw->addr;
+	return sw->addr + sizeof(struct send_work *);
 }
 
 void rdma_kmsg_put(struct pcn_kmsg_message *msg)
 {
-	struct send_work *sw = container_of((void *)msg, struct send_work, addr);
+	struct send_work *sw = *(struct send_work **)((void *)msg - sizeof(void *));
 	__put_send_work(sw);
 }
 
@@ -156,7 +168,11 @@ static int __send_to(int to_nid, struct send_work *sw, size_t size)
 	struct ib_send_wr *bad_wr = NULL;
 	int ret;
 
-	sw->sgl.length = size; /* Might be adjusted */
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	BUG_ON(size > sw->sgl.length);
+#endif
+	sw->sgl.addr += sizeof(void *);
+	sw->sgl.length = size; /* Might be shrunk after get*/
 
 	ret = ib_post_send(rh->qp, &sw->wr, &bad_wr);
 	if (ret) return ret;
@@ -170,20 +186,20 @@ int rdma_kmsg_send(int dst, struct pcn_kmsg_message *msg, size_t size)
 	struct send_work *sw = __get_send_work(size);
 	DECLARE_COMPLETION_ONSTACK(done);
 	int ret;
+	might_sleep();
 
-	memcpy(sw->addr, msg, size);	/* XXX adaptively map */
+	memcpy(sw->addr + sizeof(void *), msg, size);	/* XXX map adaptively */
 	sw->done = &done;
 
 	ret = __send_to(dst, sw, size);
-	if (!ret) goto out;
+	if (ret) goto out;
 
 	ret = wait_for_completion_io_timeout(&done, 60 * HZ);
 	if (!ret) {
 		ret = -EAGAIN;
 		goto out;
 	}
-
-	ret = 0;
+	return 0;
 out:
 	__put_send_work(sw);
 	return ret;
@@ -191,13 +207,11 @@ out:
 
 int rdma_kmsg_post(int dst, struct pcn_kmsg_message *msg, size_t size)
 {
-	struct send_work *sw = container_of((void *)msg, struct send_work, addr);
+	struct send_work *sw = *(struct send_work **)((void *)msg - sizeof(void *));
 	int ret;
 
-	sw->done = NULL;
-
 	ret = __send_to(dst, sw, size);
-	if (!ret) {
+	if (ret) {
 		__put_send_work(sw);
 		return ret;
 	}
@@ -325,8 +339,11 @@ void rdma_kmsg_done(struct pcn_kmsg_message *msg)
 static void __process_recv(struct ib_wc *wc)
 {
 	struct recv_work *rw = (void *)wc->wr_id;
-
-	pcn_kmsg_process(rw->buffer);
+	/*
+	printk("recv %d %d\n", wc->byte_len,
+			((struct pcn_kmsg_message *)rw->addr)->header.type);
+	*/
+	pcn_kmsg_process(rw->addr);
 }
 
 static void __process_sent(struct ib_wc *wc)
@@ -348,8 +365,8 @@ static void __process_rdma_completion(struct ib_wc *wc)
 
 static void __process_comp_wakeup(struct ib_wc *wc, const char *msg)
 {
-	struct completion *comp = (void *)wc->wr_id;
-	complete(comp);
+	struct completion *done = (void *)wc->wr_id;
+	complete(done);
 }
 
 void cq_comp_handler(struct ib_cq *cq, void *context)
@@ -357,6 +374,7 @@ void cq_comp_handler(struct ib_cq *cq, void *context)
 	int ret;
 	struct ib_wc wc;
 
+retry:
 	while ((ret = ib_poll_cq(cq, 1, &wc)) > 0) {
 		if (wc.opcode < 0 || wc.status) {
 			struct recv_work *rw = (void *)wc.wr_id;
@@ -383,14 +401,15 @@ void cq_comp_handler(struct ib_cq *cq, void *context)
 			break;
 		}
 	}
-	ib_req_notify_cq(cq, IB_CQ_NEXT_COMP);
+	ret = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS);
+	if (ret > 0) goto retry;
 }
 
 
 /****************************************************************************
  * Setup connections
  */
-static int __setup_pd_cq_qp(struct rdma_handle *rh)
+static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 {
 	int ret;
 
@@ -451,7 +470,7 @@ out_err:
 	return ret;
 }
 
-static int __setup_buffers_and_pools(struct rdma_handle *rh)
+static __init int __setup_buffers_and_pools(struct rdma_handle *rh)
 {
 	int ret = 0, i;
 	dma_addr_t dma_addr;
@@ -482,7 +501,7 @@ static int __setup_buffers_and_pools(struct rdma_handle *rh)
 		struct ib_sge *sgl;
 
 		rw->dma_addr = dma_addr + PCN_KMSG_MAX_SIZE * i;
-		rw->buffer = recv_buffer + PCN_KMSG_MAX_SIZE * i;
+		rw->addr = recv_buffer + PCN_KMSG_MAX_SIZE * i;
 
 		sgl = &rw->sgl;
 		sgl->lkey = rdma_pd->local_dma_lkey;
@@ -513,17 +532,17 @@ out_free:
 	return ret;
 }
 
-static int __setup_rdma_buffer(const int nr_chunks)
+static __init int __setup_rdma_buffer(const int nr_chunks)
 {
 	int ret;
-	DECLARE_COMPLETION_ONSTACK(comp);
+	DECLARE_COMPLETION_ONSTACK(done);
 	struct ib_mr *mr = NULL;
 	struct ib_send_wr *bad_wr = NULL;
 	struct ib_reg_wr reg_wr = {
 		.wr = {
 			.opcode = IB_WR_REG_MR,
 			.send_flags = IB_SEND_SIGNALED,
-			.wr_id = (u64)&comp,
+			.wr_id = (u64)&done,
 		},
 		.access = IB_ACCESS_LOCAL_WRITE |
 				  IB_ACCESS_REMOTE_READ |
@@ -565,7 +584,7 @@ static int __setup_rdma_buffer(const int nr_chunks)
 		if (bad_wr) ret = -EINVAL;
 		goto out_dereg;
 	}
-	ret = wait_for_completion_io_timeout(&comp, 5 * HZ);
+	ret = wait_for_completion_io_timeout(&done, 5 * HZ);
 	if (!ret) {
 		printk("Timed-out to register mr\n");
 		ret = -EBUSY;
@@ -600,6 +619,7 @@ static int __init __setup_send_buffer(void)
 				send_buffer.chunk_start[i], RB_CHUNK_SIZE, DMA_TO_DEVICE);
 		ret = ib_dma_mapping_error(rdma_pd->device, dma_addr);
 		if (ret) goto out_unmap;
+		send_buffer.dma_addr_base[i] = dma_addr;
 	}
 
 	for (i = 0; i < MAX_SEND_DEPTH; i++) {
@@ -610,6 +630,8 @@ static int __init __setup_send_buffer(void)
 			ret = -ENOMEM;
 			goto out_unmap;
 		}
+		sw->sgl.addr = 0;
+		sw->sgl.length = 0;
 		sw->sgl.lkey = rdma_pd->local_dma_lkey;
 
 		sw->wr.next = NULL;
@@ -946,12 +968,13 @@ struct pcn_kmsg_transport transport_rdma = {
 	.name = "rdma",
 	.type = PCN_KMSG_LAYER_TYPE_RDMA,
 
+	.get_fn = rdma_kmsg_get,
+	.put_fn = rdma_kmsg_put,
+	.stat_fn = NULL,
+
 	.send_fn = rdma_kmsg_send,
 	.post_fn = rdma_kmsg_post,
 	.done_fn = rdma_kmsg_done,
-
-	.get_fn = rdma_kmsg_get,
-	.put_fn = rdma_kmsg_put,
 };
 
 int __init init_kmsg_rdma(void)

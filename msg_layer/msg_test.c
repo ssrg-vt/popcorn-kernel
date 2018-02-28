@@ -32,20 +32,19 @@ char *g_test_buf = NULL;
 char *g_test_write_buf = NULL;
 
 enum TEST_REQUEST_FLAG {
-	TEST_REQUEST_FLAG_REPLY = 1,
-	TEST_REQUEST_FLAG_PREALLOC = 2,
+	TEST_REQUEST_FLAG_REPLY = 0,
 };
 
 #define TEST_REQUEST_FIELDS \
 	unsigned long flags; \
-	unsigned long comp; \
+	unsigned long done; \
 	char msg[PCN_KMSG_MAX_PAYLOAD_SIZE -  \
 		sizeof(unsigned long) * 2 \
 	];
 DEFINE_PCN_KMSG(test_request_t, TEST_REQUEST_FIELDS);
 
 #define TEST_RESPONSE_FIELDS \
-	unsigned long comp;
+	unsigned long done;
 DEFINE_PCN_KMSG(test_response_t, TEST_RESPONSE_FIELDS);
 
 #define RDMA_TEST_FIELDS \
@@ -283,6 +282,7 @@ static int test_rdma_write(void *arg)
 	kfree(req_rdma_write);
 	return 0;
 }
+
 
 #if 0
 // READ
@@ -783,7 +783,6 @@ static void process_send_roundtrip_w_response(struct work_struct *_work)
 	//free outside
 	kfree(work);
 }
-
 #endif
 
 /**
@@ -792,7 +791,7 @@ static void process_send_roundtrip_w_response(struct work_struct *_work)
 static int test_send(void *arg)
 {
 	struct test_params *param = arg;
-	DECLARE_COMPLETION_ONSTACK(comp);
+	DECLARE_COMPLETION_ONSTACK(done);
 	test_request_t *req;
 	int i;
 
@@ -802,7 +801,7 @@ static int test_send(void *arg)
 	req->flags = 0;
 	if (param->action == TEST_ACTION_SEND_WAIT) {
 		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
-		req->comp = (unsigned long)&comp;
+		req->done = (unsigned long)&done;
 	}
 
 	__barrier_wait(param->barrier);
@@ -811,7 +810,7 @@ static int test_send(void *arg)
 				!my_nid, req, PCN_KMSG_SIZE(param->payload_size));
 
 		if (param->action == TEST_ACTION_SEND_WAIT) {
-			wait_for_completion(&comp);
+			wait_for_completion(&done);
 		}
 	}
 	__barrier_wait(param->barrier);
@@ -823,7 +822,7 @@ static int test_send(void *arg)
 static int test_post(void *arg)
 {
 	struct test_params *param = arg;
-	DECLARE_COMPLETION_ONSTACK(comp);
+	DECLARE_COMPLETION_ONSTACK(done);
 	test_request_t *req;
 	int i;
 
@@ -832,46 +831,40 @@ static int test_post(void *arg)
 		req = pcn_kmsg_get(PCN_KMSG_SIZE(param->payload_size));
 
 		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
-		req->comp = (unsigned long)&comp;
+		req->done = (unsigned long)&done;
 
-		pcn_kmsg_post(PCN_KMSG_TYPE_TEST_REQUEST, !my_nid, req,
-				PCN_KMSG_SIZE(param->payload_size));
+		pcn_kmsg_post(PCN_KMSG_TYPE_TEST_REQUEST,
+				!my_nid, req, PCN_KMSG_SIZE(param->payload_size));
+
+		wait_for_completion(&done);
 	}
 	__barrier_wait(param->barrier);
 	return 0;
 }
 
-static int handle_test_send_request(struct pcn_kmsg_message *msg)
+static void process_test_send_request(struct work_struct *_work)
 {
-	test_request_t *req = (test_request_t *)msg;
-	test_response_t res_stack = {};
-	test_response_t *res;
-
-	if (test_bit(TEST_REQUEST_FLAG_PREALLOC, &req->flags)) {
-		res = pcn_kmsg_get(sizeof(*res));
-	} else {
-		res = &res_stack;
-	}
+	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
+	test_request_t *req = work->msg;
 
 	if (test_bit(TEST_REQUEST_FLAG_REPLY, &req->flags)) {
-		res->comp = req->comp;
+		test_response_t *res = pcn_kmsg_get(sizeof(*res));
+		res->done = req->done;
 
-		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_RESPONSE, PCN_KMSG_FROM_NID(req),
+		pcn_kmsg_post(PCN_KMSG_TYPE_TEST_RESPONSE, PCN_KMSG_FROM_NID(req),
 				res, sizeof(*res));
 	}
 
-	if (test_bit(TEST_REQUEST_FLAG_PREALLOC, &req->flags)) {
-		pcn_kmsg_put(res);
-	}
-
 	pcn_kmsg_done(req);
-	return 0;
+	kfree(work);
 }
 
 static int handle_test_send_response(struct pcn_kmsg_message *msg)
 {
 	test_response_t *res = (test_response_t *)msg;
-	complete((struct completion *)res->comp);
+	if (res->done) {
+		complete((struct completion *)res->done);
+	}
 
 	pcn_kmsg_done(res);
 	return 0;
@@ -898,7 +891,7 @@ static void __run_test(enum test_action action, struct test_params *param)
 	struct task_struct *tsks[MAX_THREADS] = { NULL };
 	struct test_barrier barrier;
 	struct timeval t_start, t_end;
-	DECLARE_COMPLETION_ONSTACK(comp);
+	DECLARE_COMPLETION_ONSTACK(done);
 	unsigned long elapsed;
 	int i;
 
@@ -1233,6 +1226,7 @@ static struct file_operations kmsg_test_ops = {
 };
 
 
+DEFINE_KMSG_WQ_HANDLER(test_send_request);
 /*
 DEFINE_KMSG_WQ_HANDLER(send_roundtrip_r_request);
 DEFINE_KMSG_WQ_HANDLER(send_roundtrip_r_response);
@@ -1265,7 +1259,7 @@ static int __init msg_test_init(void)
 		return -EPERM;
 	}
 
-	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TEST_REQUEST, test_send_request);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_TEST_REQUEST, test_send_request);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_TEST_RESPONSE, test_send_response);
 
 #if 0
