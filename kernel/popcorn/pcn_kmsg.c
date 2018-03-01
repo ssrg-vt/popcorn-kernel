@@ -65,10 +65,8 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 EXPORT_SYMBOL(pcn_kmsg_process);
 
 
-static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, void *_msg, size_t size)
+static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, struct pcn_kmsg_message *msg, size_t size)
 {
-	struct pcn_kmsg_message *msg = _msg;
-
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(type < 0 || type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(size > PCN_KMSG_MAX_SIZE);
@@ -151,21 +149,25 @@ bool pcn_kmsg_has_features(unsigned int features)
 EXPORT_SYMBOL(pcn_kmsg_has_features);
 
 
-int pcn_kmsg_rdma_read(int from_nid, void *addr, size_t size, dma_addr_t rdma_addr, u32 rdma_key)
+int pcn_kmsg_rdma_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size, u32 rdma_key)
 {
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	if (!transport || !transport->rdma_read) return -EPERM;
+#endif
 
 	account_pcn_rdma_read(size);
-	return transport->rdma_read(from_nid, addr, size, rdma_addr, rdma_key);
+	return transport->rdma_read(from_nid, addr, rdma_addr, size, rdma_key);
 }
 EXPORT_SYMBOL(pcn_kmsg_rdma_read);
 
-int pcn_kmsg_rdma_write(int dest_nid, void *addr, size_t size, dma_addr_t rdma_addr, u32 rdma_key)
+int pcn_kmsg_rdma_write(int dest_nid, dma_addr_t rdma_addr, void *addr, size_t size, u32 rdma_key)
 {
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	if (!transport || !transport->rdma_write) return -EPERM;
+#endif
 
 	account_pcn_rdma_write(size);
-    return transport->rdma_write(dest_nid, addr, size, rdma_addr, rdma_key);
+    return transport->rdma_write(dest_nid, rdma_addr, addr, size, rdma_key);
 }
 EXPORT_SYMBOL(pcn_kmsg_rdma_write);
 

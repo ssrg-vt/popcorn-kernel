@@ -1255,7 +1255,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	if (TRANSFER_PAGE_WITH_RDMA) {
 		paddr = kmap(page);
 		pcn_kmsg_rdma_write(PCN_KMSG_FROM_NID(req),
-				paddr, PAGE_SIZE, req->rdma_addr, req->rdma_key);
+				req->rdma_addr, paddr, PAGE_SIZE, req->rdma_key);
 		kunmap(page);
 	} else {
 		paddr = kmap_atomic(page);
@@ -1373,7 +1373,7 @@ again:
 		if (TRANSFER_PAGE_WITH_RDMA) {
 			paddr = kmap(page);
 			pcn_kmsg_rdma_write(PCN_KMSG_FROM_NID(req),
-					paddr, PAGE_SIZE, req->rdma_addr, req->rdma_key);
+					req->rdma_addr, paddr, PAGE_SIZE, req->rdma_key);
 			kunmap(page);
 		} else {
 			paddr = kmap_atomic(page);

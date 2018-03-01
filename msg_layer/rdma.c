@@ -319,7 +319,7 @@ void rdma_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
 	kfree(handle);
 }
 
-int rdma_kmsg_write(int to_nid, void *addr, size_t size, dma_addr_t rdma_addr, u32 rdma_key)
+int rdma_kmsg_write(int to_nid, dma_addr_t rdma_addr, void *addr, size_t size, u32 rdma_key)
 {
 	DECLARE_COMPLETION_ONSTACK(done);
 	struct rdma_work *rw;
@@ -372,6 +372,11 @@ out:
 	ib_dma_unmap_single(rdma_mr->device, dma_addr, size, DMA_TO_DEVICE);
 	kfree(rw);
 	return ret;
+}
+
+int rdma_kmsg_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size, u32 rdma_key)
+{
+	return -EPERM;
 }
 
 
@@ -1039,6 +1044,7 @@ struct pcn_kmsg_transport transport_rdma = {
 	.pin_rdma_buffer = rdma_kmsg_pin_rdma_buffer,
 	.unpin_rdma_buffer = rdma_kmsg_unpin_rdma_buffer,
 	.rdma_write = rdma_kmsg_write,
+	.rdma_read = rdma_kmsg_read,
 };
 
 int __init init_kmsg_rdma(void)
