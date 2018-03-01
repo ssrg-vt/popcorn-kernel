@@ -612,8 +612,7 @@ enum {
 
 static void process_remote_page_flush(struct work_struct *work)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	remote_page_flush_t *req = w->msg;
+	START_KMSG_WORK(remote_page_flush_t, req, work);
 	unsigned long addr = req->addr;
 	struct task_struct *tsk;
 	struct mm_struct *mm;
@@ -684,8 +683,7 @@ out_put:
 	mmput(mm);
 
 out_free:
-	pcn_kmsg_done(req);
-	kfree(w);
+	END_KMSG_WORK(req);
 }
 
 
@@ -847,8 +845,7 @@ out:
 
 static void process_page_invalidate_request(struct work_struct *work)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	page_invalidate_request_t *req = w->msg;
+	START_KMSG_WORK(page_invalidate_request_t, req, work);
 	page_invalidate_response_t *res;
 	struct task_struct *tsk;
 
@@ -876,8 +873,7 @@ static void process_page_invalidate_request(struct work_struct *work)
 	put_task_struct(tsk);
 
 out_free:
-	pcn_kmsg_done(req);
-	kfree(w);
+	END_KMSG_WORK(req);
 }
 
 
@@ -1397,8 +1393,7 @@ again:
  */
 static void process_remote_page_request(struct work_struct *work)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	remote_page_request_t *req = w->msg;
+	START_KMSG_WORK(remote_page_request_t, req, work);
 	remote_page_response_t *res;
 	int from_nid = PCN_KMSG_FROM_NID(req);
 	struct task_struct *tsk;
@@ -1481,8 +1476,7 @@ out:
 
 	pcn_kmsg_post(res_type, from_nid, res, res_size);
 
-	pcn_kmsg_done(req);
-	kfree(w);
+	END_KMSG_WORK(req);
 }
 
 

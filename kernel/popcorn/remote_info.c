@@ -155,8 +155,7 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 
 static void process_remote_mem_info_request(struct work_struct *work)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	remote_mem_info_request_t *request = w->msg;
+	START_KMSG_WORK(remote_mem_info_request_t, request, work);
 	remote_mem_info_response_t response = {
 		.nid = my_nid,
 		.origin_ws = request->origin_ws,
@@ -177,8 +176,7 @@ static void process_remote_mem_info_request(struct work_struct *work)
 	}
 
 out:
-	pcn_kmsg_done(request);
-	kfree(w);
+	END_KMSG_WORK(request);
 }
 
 static int handle_remote_mem_info_response(struct pcn_kmsg_message *inc_msg)
@@ -356,12 +354,11 @@ unsigned int get_number_cpus_from_remote_node(unsigned int nid)
 
 static void process_remote_cpu_info_request(struct work_struct *work)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	remote_cpu_info_data_t *request = w->msg;
+	START_KMSG_WORK(remote_cpu_info_data_t, request, work);
 	remote_cpu_info_data_t *response;
 	int ret;
 
-	response = kzalloc(sizeof(*response), GFP_KERNEL);
+	response = pcn_kmsg_get(sizeof(*response));
 	if (!response) goto out_err;
 
 	memcpy(saved_cpu_info[request->nid],
@@ -373,22 +370,18 @@ static void process_remote_cpu_info_request(struct work_struct *work)
 	ret = fill_cpu_info(&response->cpu_info_data);
 	if (ret < 0) {
 		RIPRINTK("%s: failed to fill cpu info\n", __func__);
-		goto out;
+		pcn_kmsg_put(response);
+		goto out_err;
 	}
 
-	ret = pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
+	ret = pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PROC_CPUINFO_RESPONSE,
 			request->nid, response, sizeof(*response));
 	if (ret < 0) {
 		RIPRINTK("%s: failed to send response message\n", __func__);
-		goto out;
 	}
 
-out:
-	kfree(response);
 out_err:
-	pcn_kmsg_done(request);
-	kfree(w);
-	return;
+	END_KMSG_WORK(request);
 }
 
 static int handle_remote_cpu_info_response(struct pcn_kmsg_message *inc_msg)

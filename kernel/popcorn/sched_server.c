@@ -193,8 +193,7 @@ static int get_remote_popcorn_ps_load(struct task_struct *tsk, int origin_nid, i
 
 static void process_remote_ps_request(struct work_struct *work)
 {
-	struct pcn_kmsg_work *w = (struct pcn_kmsg_work *)work;
-	remote_ps_request_t *req = w->msg;
+	START_KMSG_WORK(remote_ps_request_t, req, work);
 	remote_ps_response_t res = {
 		.origin_ws = req->origin_ws,
 	};
@@ -211,8 +210,7 @@ static void process_remote_ps_request(struct work_struct *work)
 	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE,
 			req->nid, &res, sizeof(res));
 out:
-	pcn_kmsg_done(req);
-	kfree(w);
+	END_KMSG_WORK(req);
 }
 
 static void process_remote_ps_response(struct work_struct *work)
