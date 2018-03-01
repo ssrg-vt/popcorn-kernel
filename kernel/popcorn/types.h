@@ -210,7 +210,9 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	pid_t remote_pid; \
 	unsigned long addr; \
 	unsigned long fault_flags; \
-	unsigned long instr_addr;
+	unsigned long instr_addr; \
+	dma_addr_t rdma_addr; \
+	u32 rdma_key;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \

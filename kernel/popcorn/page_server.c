@@ -986,9 +986,14 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	return 0;
 }
 
-static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id)
+#define TRANSFER_PAGE_WITH_RDMA \
+	   (IS_ENABLED(CONFIG_POPCORN_KMSG_RDMA_PAGES) && pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA))
+
+static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh)
 {
 	remote_page_request_t *req;
+
+	*rh = NULL;
 
 	req = pcn_kmsg_get(sizeof(*req));
 	req->addr = addr;
@@ -1000,27 +1005,53 @@ static void __request_remote_page(struct task_struct *tsk, int from_nid, pid_t f
 	req->remote_pid = from_pid;
 	req->instr_addr = instruction_pointer(current_pt_regs());
 
+	if (TRANSFER_PAGE_WITH_RDMA) {
+		struct pcn_kmsg_rdma_handle *handle =
+				pcn_kmsg_pin_rdma_buffer(NULL, PAGE_SIZE);
+		if (IS_ERR(handle)) return PTR_ERR(handle);
+		*rh = handle;
+		req->rdma_addr = handle->dma_addr;
+		req->rdma_key = handle->rkey;
+	} else {
+		req->rdma_addr = 0;
+		req->rdma_key = 0;
+	}
+
 	PGPRINTK("  [%d] ->[%d/%d] %lx %lx\n", tsk->pid,
 			from_pid, from_nid, addr, req->instr_addr);
 
 	pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
 			from_nid, req, sizeof(*req));
+	return 0;
 }
 
 static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, struct page *page)
 {
 	remote_page_response_t *rp;
 	struct wait_station *ws = get_wait_station(tsk);
+	struct pcn_kmsg_rdma_handle *rh;
 
 	__request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
-			addr, fault_flags, ws->id);
+			addr, fault_flags, ws->id, &rh);
 
 	rp = wait_at_station(ws);
+	if (rp->result == 0) {
+		void *paddr = kmap(page);
+		if (TRANSFER_PAGE_WITH_RDMA) {
+			copy_to_user_page(vma, page, addr, paddr, rh->addr, PAGE_SIZE);
+		} else {
+			copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
+		}
+		kunmap(page);
+		__SetPageUptodate(page);
+	}
+
+	if (rh) pcn_kmsg_unpin_rdma_buffer(rh);
 
 	return rp;
 }
 
-static remote_page_response_t *__fetch_page_from_remotes(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags)
+static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
 {
 	int peers;
 	unsigned int random = prandom_u32();
@@ -1030,6 +1061,7 @@ static remote_page_response_t *__fetch_page_from_remotes(struct task_struct *tsk
 	int from, from_nid;
 	/* Read when @from becomes zero and save the nid to @from_nid */
 	int nid;
+	struct pcn_kmsg_rdma_handle *rh;
 	unsigned long *pi = __get_page_info(rc->mm, addr);
 	BUG_ON(!pi);
 
@@ -1055,7 +1087,7 @@ static remote_page_response_t *__fetch_page_from_remotes(struct task_struct *tsk
 		if (nid == my_nid) continue;
 		if (from-- == 0) {
 			from_nid = nid;
-			__request_remote_page(tsk, nid, pid, addr, fault_flags, ws->id);
+			__request_remote_page(tsk, nid, pid, addr, fault_flags, ws->id, &rh);
 		} else {
 			if (fault_for_write(fault_flags)) {
 				clear_bit(nid, pi);
@@ -1070,23 +1102,19 @@ static remote_page_response_t *__fetch_page_from_remotes(struct task_struct *tsk
 	if (fault_for_write(fault_flags)) {
 		clear_bit(from_nid, pi);
 	}
-	return rp;
-}
 
-static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
-{
-	remote_page_response_t *rp;
-	void *paddr;
+	if (rp->result == 0) {
+		void *paddr = kmap(page);
+		if (TRANSFER_PAGE_WITH_RDMA) {
+			copy_to_user_page(vma, page, addr, paddr, rh->addr, PAGE_SIZE);
+		} else {
+			copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
+		}
+		kunmap(page);
+		__SetPageUptodate(page);
+	}
 
-	rp = __fetch_page_from_remotes(tsk, addr, fault_flags);
-	BUG_ON(IS_ERR(rp) || rp->result);
-
-	paddr = kmap(page);
-	copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
-	kunmap(page);
-	__SetPageUptodate(page);
-
-	pcn_kmsg_done(rp);
+	if (rh) pcn_kmsg_unpin_rdma_buffer(rh);
 	put_task_remote(tsk);
 	return 0;
 }
@@ -1224,9 +1252,16 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	page = vm_normal_page(vma, addr, *pte);
 	BUG_ON(!page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
-	paddr = kmap_atomic(page);
-	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
-	kunmap_atomic(paddr);
+	if (TRANSFER_PAGE_WITH_RDMA) {
+		paddr = kmap(page);
+		pcn_kmsg_rdma_write(PCN_KMSG_FROM_NID(req),
+				paddr, PAGE_SIZE, req->rdma_addr, req->rdma_key);
+		kunmap(page);
+	} else {
+		paddr = kmap_atomic(page);
+		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
+		kunmap_atomic(paddr);
+	}
 
 	__finish_fault_handling(fh);
 	return 0;
@@ -1335,9 +1370,16 @@ again:
 
 	if (!grant) {
 		flush_cache_page(vma, addr, page_to_pfn(page));
-		paddr = kmap_atomic(page);
-		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
-		kunmap_atomic(paddr);
+		if (TRANSFER_PAGE_WITH_RDMA) {
+			paddr = kmap(page);
+			pcn_kmsg_rdma_write(PCN_KMSG_FROM_NID(req),
+					paddr, PAGE_SIZE, req->rdma_addr, req->rdma_key);
+			kunmap(page);
+		} else {
+			paddr = kmap_atomic(page);
+			copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
+			kunmap_atomic(paddr);
+		}
 	}
 
 	__finish_fault_handling(fh);
@@ -1413,12 +1455,12 @@ out_up:
 	}
 
 out:
-	if (res->result == 0) {
-		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
-		res_size = sizeof(remote_page_response_t);
-	} else {
+	if (res->result != 0 || TRANSFER_PAGE_WITH_RDMA) {
 		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT;
 		res_size = sizeof(remote_page_response_short_t);
+	} else {
+		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
+		res_size = sizeof(remote_page_response_t);
 	}
 	res->header.prio = PCN_KMSG_PRIO_NORMAL;
 
@@ -1610,12 +1652,6 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 			update_mmu_cache(vma, addr, pte);
 		}
 	} else {
-		void *paddr;
-		paddr = kmap(page);
-		copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		kunmap(page);
-		__SetPageUptodate(page);
-
 		spin_lock(ptl);
 		if (populated) {
 			do_set_pte(vma, addr, page, pte, fault_for_write(fault_flags), true);

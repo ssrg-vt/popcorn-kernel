@@ -39,8 +39,7 @@ struct send_work {
 struct rdma_work {
 	struct ib_sge sgl;
 	struct ib_rdma_wr wr;
-	dma_addr_t dma_addr;
-	void *buffer;
+	struct completion *done;
 };
 
 struct rdma_handle {
@@ -280,82 +279,53 @@ int rdma_kmsg_post(int dst, struct pcn_kmsg_message *msg, size_t size)
 	return 0;
 }
 
-/*
-struct rdma_request {
-	int nid;
-	u32 rkey;
-	dma_addr_t addr;
-	size_t length;
-	char fill;
-};
 
-void __test_rdma(int to_nid)
+/****************************************************************************
+ * Perform RDMA
+ */
+struct pcn_kmsg_rdma_handle *rdma_kmsg_pin_rdma_buffer(void *msg, size_t size)
 {
-	static int sent = 0;
-	struct rdma_request req;
-	DECLARE_COMPLETION_ONSTACK(comp);
-	dma_addr_t dma_addr;
-	int ret, i;
-	char *dest;
-	const int slot = __get_rdma_buffer(&dest, &dma_addr);
+	struct pcn_kmsg_rdma_handle *rh = kmalloc(sizeof(*rh), GFP_KERNEL);
 
-	req.nid = my_nid;
-	req.rkey = rdma_mr->rkey;
-	req.addr = dma_addr;
-	req.length = PAGE_SIZE;
+	if (!rh) return ERR_PTR(-ENOMEM);
 
-	for (i = 0; i < 100000; i++) {
-		req.fill = sent++ % 26 + 'a';
-		dest[PAGE_SIZE-1] = 0;
-
-		ret = __send_to(to_nid, &req, sizeof(req));
-		if (ret) goto out;
-
-		while (true) {
-			if (dest[PAGE_SIZE-1] && !dest[0]) {
-				printk("What the!!\n");
-			}
-			if (dest[PAGE_SIZE-1]) break;
-		}
-		if (dest[0] != req.fill) {
-			printk("Somthing happened %c != %c\n", req.fill, dest[0]);
-		}
-		if (i && i % 100 == 0) {
-			printk("%d completed\n", i);
-		}
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	if (size > PCN_KMSG_MAX_SIZE) {
+		BUG_ON("Too large buffer to pin");
+		return ERR_PTR(-EINVAL);
 	}
+#endif
+	rh->rkey = rdma_mr->rkey;
+	rh->private = (void *)(unsigned long)__get_rdma_buffer(&rh->addr, &rh->dma_addr);
 
-out:
-	__put_rdma_buffer(slot);
-	return;
+	return rh;
 }
 
-void __perform_rdma(struct ib_wc *wc, struct recv_work *_rw)
+void rdma_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
 {
-	DECLARE_COMPLETION_ONSTACK(comp);
-	struct rdma_request *req = _rw->buffer;
+	__put_rdma_buffer((unsigned long)handle->private);
+	kfree(handle);
+}
+
+int rdma_kmsg_write(int to_nid, void *addr, size_t size, dma_addr_t rdma_addr, u32 rdma_key)
+{
+	DECLARE_COMPLETION_ONSTACK(done);
 	struct rdma_work *rw;
 	struct ib_sge *sgl;
 	struct ib_rdma_wr *wr;
 	struct ib_send_wr *bad_wr = NULL;
 
-	char *payload = (void *)__get_free_page(GFP_ATOMIC);
-	const int size = PAGE_SIZE;
 	dma_addr_t dma_addr;
 	int ret;
-	BUG_ON(!payload);
 
-	memset(payload, req->fill, PAGE_SIZE);
-
-	dma_addr = ib_dma_map_single(wc->qp->device, payload, size, DMA_TO_DEVICE);
-	ret = ib_dma_mapping_error(wc->qp->device, dma_addr);
+	dma_addr = ib_dma_map_single(rdma_mr->device, addr, size, DMA_TO_DEVICE);
+	ret = ib_dma_mapping_error(rdma_mr->device, dma_addr);
 	BUG_ON(ret);
 
 	rw = kmalloc(sizeof(*rw), GFP_ATOMIC);
 	BUG_ON(!rw);
 
-	rw->dma_addr = dma_addr;
-	rw->buffer = payload;
+	rw->done = &done;
 
 	sgl = &rw->sgl;
 	sgl->addr = dma_addr;
@@ -369,17 +339,24 @@ void __perform_rdma(struct ib_wc *wc, struct recv_work *_rw)
 	wr->wr.num_sge = 1;
 	wr->wr.opcode = IB_WR_RDMA_WRITE; // IB_WR_RDMA_WRITE_WITH_IMM;
 	wr->wr.send_flags = IB_SEND_SIGNALED;
-	wr->remote_addr = req->addr;
-	wr->rkey = req->rkey;
+	wr->remote_addr = rdma_addr;
+	wr->rkey = rdma_key;
 
-	ret = ib_post_send(wc->qp, &wr->wr, &bad_wr);
+	ret = ib_post_send(rdma_handles[to_nid]->qp, &wr->wr, &bad_wr);
 	if (ret || bad_wr) {
 		printk("Cannot post rdma write, %d, %p\n", ret, bad_wr);
-		ib_dma_unmap_single(wc->qp->device, dma_addr, size, DMA_TO_DEVICE);
-		free_page((unsigned long)payload);
+		goto out;
 	}
+
+	if (!try_wait_for_completion(&done)) {
+		wait_for_completion(&done);
+	}
+
+out:
+	ib_dma_unmap_single(rdma_mr->device, dma_addr, size, DMA_TO_DEVICE);
+	kfree(rw);
+	return 0;
 }
-*/
 
 
 /****************************************************************************
@@ -421,8 +398,7 @@ static void __process_sent(struct ib_wc *wc)
 static void __process_rdma_completion(struct ib_wc *wc)
 {
 	struct rdma_work *rw = (void *)wc->wr_id;
-	ib_dma_unmap_single(wc->qp->device, rw->dma_addr, PAGE_SIZE, DMA_TO_DEVICE);
-	free_page((unsigned long)rw->buffer);
+	complete(rw->done);
 }
 
 static void __process_comp_wakeup(struct ib_wc *wc, const char *msg)
@@ -1041,6 +1017,10 @@ struct pcn_kmsg_transport transport_rdma = {
 	.send = rdma_kmsg_send,
 	.post = rdma_kmsg_post,
 	.done = rdma_kmsg_done,
+
+	.pin_rdma_buffer = rdma_kmsg_pin_rdma_buffer,
+	.unpin_rdma_buffer = rdma_kmsg_unpin_rdma_buffer,
+	.rdma_write = rdma_kmsg_write,
 };
 
 int __init init_kmsg_rdma(void)

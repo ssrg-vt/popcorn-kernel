@@ -145,7 +145,30 @@ bool pcn_kmsg_has_features(unsigned int features)
 
 	return (transport->features & features) == features;
 }
-EXPORT_SYMBOL(pcn_kmsg_has_features);
+
+
+int pcn_kmsg_rdma_write(int dest_nid, void *addr, size_t size, dma_addr_t rdma_addr, u32 rdma_key)
+{
+	// account_pcn_message_sent(msg);
+    return transport->rdma_write(dest_nid, addr, size, rdma_addr, rdma_key);
+}
+EXPORT_SYMBOL(pcn_kmsg_rdma_write);
+
+
+struct pcn_kmsg_rdma_handle *pcn_kmsg_pin_rdma_buffer(void *buffer, size_t size)
+{
+	if (transport && transport->pin_rdma_buffer) {
+		return transport->pin_rdma_buffer(buffer, size);
+	}
+	return ERR_PTR(-EINVAL);
+}
+void pcn_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
+{
+	if (transport && transport->unpin_rdma_buffer) {
+		transport->unpin_rdma_buffer(handle);
+	}
+}
+
 
 /* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)

@@ -154,6 +154,22 @@ void pcn_kmsg_done(void *msg);
 ssize_t pcn_kmsg_stat(char *buffer, size_t count);
 
 
+struct pcn_kmsg_rdma_handle {
+	u32 rkey;
+	void *addr;
+	dma_addr_t dma_addr;
+	void *private;
+};
+
+/**
+ * Pin @buffer for RDMA and get @rdma_addr and @rdma_key.
+ */
+struct pcn_kmsg_rdma_handle *pcn_kmsg_pin_rdma_buffer(void *buffer, size_t size);
+
+void pcn_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle);
+
+int pcn_kmsg_rdma_write(int dest_nid, void *addr, size_t size, dma_addr_t rdma_addr, u32 rdma_key);
+
 /* TRANSPORT DESCRIPTOR */
 enum {
 	PCN_KMSG_FEATURE_RDMA = 1,
@@ -177,6 +193,10 @@ struct pcn_kmsg_transport {
 	void (*done)(struct pcn_kmsg_message *);
 
 	ssize_t (*stat)(char *, size_t);
+
+	struct pcn_kmsg_rdma_handle *(*pin_rdma_buffer)(void *, size_t);
+	void (*unpin_rdma_buffer)(struct pcn_kmsg_rdma_handle *);
+	int (*rdma_write)(int, void *addr, size_t size, dma_addr_t, u32);
 };
 
 void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr);
