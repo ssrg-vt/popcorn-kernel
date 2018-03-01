@@ -751,8 +751,6 @@ int page_server_flush_remote_pages(struct remote_context *rc)
 
 	PGPRINTK("FLUSH_REMOTE_PAGES [%d]\n", current->pid);
 
-	req->header.prio = PCN_KMSG_PRIO_NORMAL;
-
 	req->remote_nid = my_nid;
 	req->remote_pid = current->pid;
 	req->remote_ws = ws->id;
@@ -864,6 +862,7 @@ static void process_page_invalidate_request(struct work_struct *work)
 	if (!tsk) {
 		PGPRINTK("%s: no such process %d %d %lx\n", __func__,
 				req->origin_pid, req->remote_pid, req->addr);
+		pcn_kmsg_put(res);
 		goto out_free;
 	}
 
@@ -987,7 +986,8 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 }
 
 #define TRANSFER_PAGE_WITH_RDMA \
-	   (IS_ENABLED(CONFIG_POPCORN_KMSG_RDMA_PAGES) && pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA))
+	   (IS_ENABLED(CONFIG_POPCORN_KMSG_RDMA_PAGES) && \
+		pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA))
 
 static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh)
 {
@@ -1061,7 +1061,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *v
 	int from, from_nid;
 	/* Read when @from becomes zero and save the nid to @from_nid */
 	int nid;
-	struct pcn_kmsg_rdma_handle *rh;
+	struct pcn_kmsg_rdma_handle *rh = NULL;
 	unsigned long *pi = __get_page_info(rc->mm, addr);
 	BUG_ON(!pi);
 
@@ -1113,6 +1113,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *v
 		kunmap(page);
 		__SetPageUptodate(page);
 	}
+	pcn_kmsg_done(rp);
 
 	if (rh) pcn_kmsg_unpin_rdma_buffer(rh);
 	put_task_remote(tsk);
@@ -1435,7 +1436,10 @@ again:
 		res->result = VM_FAULT_SIGBUS;
 		goto out_up;
 	}
+
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(vma->vm_flags & VM_EXEC);
+#endif
 
 	if (tsk->at_remote) {
 		res->result = __handle_remotefault_at_remote(tsk, mm, vma, req, res);
@@ -1462,8 +1466,6 @@ out:
 		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
 		res_size = sizeof(remote_page_response_t);
 	}
-	res->header.prio = PCN_KMSG_PRIO_NORMAL;
-
 	res->addr = req->addr;
 	res->remote_pid = req->remote_pid;
 

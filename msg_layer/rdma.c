@@ -137,6 +137,7 @@ static struct send_work *__get_send_work_map(struct pcn_kmsg_message *msg, size_
 	unsigned long flags;
 	struct send_work *sw;
 	spin_lock_irqsave(&send_work_pool_lock, flags);
+	BUG_ON(!send_work_pool);
 	sw = send_work_pool;
 	send_work_pool = sw->next;
 	spin_unlock_irqrestore(&send_work_pool_lock, flags);
@@ -167,8 +168,6 @@ static struct send_work *__get_send_work_map(struct pcn_kmsg_message *msg, size_
 		set_bit(SW_FLAG_OWN_BUFFER, &sw->flags);
 	}
 	sw->sgl.length = size;	/* Should be updated before sending out */
-
-	BUG_ON(!send_work_pool);
 	return sw;
 }
 
@@ -181,6 +180,10 @@ static void __put_send_work(struct send_work *sw)
 {
 	unsigned long flags;
 	if (!test_bit(SW_FLAG_OWN_BUFFER, &sw->flags)) {
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		BUG_ON(((struct rb_alloc_header *)sw->addr)->magic !=
+				rb_alloc_header_magic);
+#endif
 		ring_buffer_put(&send_buffer, sw->addr);
 	} else {
 		ib_dma_unmap_single(rdma_pd->device,
@@ -267,6 +270,7 @@ int rdma_kmsg_send(int dst, struct pcn_kmsg_message *msg, size_t size)
 			goto out;
 		}
 	}
+	/* send_work is returned in the completion handler */
 	return 0;
 out:
 	__put_send_work(sw);
@@ -288,6 +292,7 @@ int rdma_kmsg_post(int dst, struct pcn_kmsg_message *msg, size_t size)
 		__put_send_work(sw);
 		return ret;
 	}
+	/* send_work is returned in the completion handler */
 	return 0;
 }
 
@@ -308,7 +313,8 @@ struct pcn_kmsg_rdma_handle *rdma_kmsg_pin_rdma_buffer(void *msg, size_t size)
 	}
 #endif
 	rh->rkey = rdma_mr->rkey;
-	rh->private = (void *)(unsigned long)__get_rdma_buffer(&rh->addr, &rh->dma_addr);
+	rh->private = (void *)
+		(unsigned long)__get_rdma_buffer(&rh->addr, &rh->dma_addr);
 
 	return rh;
 }
@@ -342,8 +348,7 @@ int rdma_kmsg_write(int to_nid, dma_addr_t rdma_addr, void *addr, size_t size, u
 	sgl = &rw->sgl;
 	sgl->addr = dma_addr;
 	sgl->length = size;
-	sgl->lkey = rdma_mr->lkey;
-	//sgl->lkey = rdma_pd->local_dma_lkey;
+	sgl->lkey = rdma_pd->local_dma_lkey;
 
 	wr = &rw->wr;
 	wr->wr.next = NULL;
@@ -354,8 +359,6 @@ int rdma_kmsg_write(int to_nid, dma_addr_t rdma_addr, void *addr, size_t size, u
 	wr->wr.send_flags = IB_SEND_SIGNALED;
 	wr->remote_addr = rdma_addr;
 	wr->rkey = rdma_key;
-
-	bytes_rdma_written += size;
 
 	ret = ib_post_send(rdma_handles[to_nid]->qp, &wr->wr, &bad_wr);
 	if (ret || bad_wr) {
@@ -436,9 +439,8 @@ void cq_comp_handler(struct ib_cq *cq, void *context)
 retry:
 	while ((ret = ib_poll_cq(cq, 1, &wc)) > 0) {
 		if (wc.opcode < 0 || wc.status) {
-			struct recv_work *rw = (void *)wc.wr_id;
-			printk("abnormal status %d with %d, %p\n",
-					wc.status, wc.opcode, rw);
+			printk("abnormal status %d with %d, %llx\n",
+					wc.status, wc.opcode, wc.wr_id);
 			continue;
 		}
 		switch(wc.opcode) {
