@@ -1,11 +1,9 @@
 #include <linux/kernel.h>
 #include <linux/ktime.h>
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <asm/uaccess.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-//#include <linux/stat.h>
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/stat.h>
@@ -15,6 +13,8 @@ static unsigned long recv_stats[PCN_KMSG_TYPE_MAX] = {0};
 
 static unsigned long long bytes_sent = 0;
 static unsigned long long bytes_recv = 0;
+static unsigned long long bytes_rdma_written = 0;
+static unsigned long long bytes_rdma_read = 0;
 
 void account_pcn_message_sent(struct pcn_kmsg_message *msg)
 {
@@ -34,6 +34,15 @@ void account_pcn_message_recv(struct pcn_kmsg_message *msg)
 #endif
 }
 
+void account_pcn_rdma_write(size_t size)
+{
+	bytes_rdma_written += size;
+}
+
+void account_pcn_rdma_read(size_t size)
+{
+	bytes_rdma_read += size;
+}
 
 #define PROC_BUF_SIZE 8192
 static ssize_t __read_stats(struct file *filp, char *usr_buf, size_t count, loff_t *offset)

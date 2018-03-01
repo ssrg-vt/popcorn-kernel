@@ -46,8 +46,10 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 {
 	pcn_kmsg_cbftn ftn;
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
+#endif
 
 	ftn = pcn_kmsg_cbftns[msg->header.type];
 
@@ -138,6 +140,7 @@ ssize_t pcn_kmsg_stat(char *buffer, size_t count)
 	}
 	return 0;
 }
+EXPORT_SYMBOL(pcn_kmsg_stat);
 
 bool pcn_kmsg_has_features(unsigned int features)
 {
@@ -145,11 +148,23 @@ bool pcn_kmsg_has_features(unsigned int features)
 
 	return (transport->features & features) == features;
 }
+EXPORT_SYMBOL(pcn_kmsg_has_features);
 
+
+int pcn_kmsg_rdma_read(int from_nid, void *addr, size_t size, dma_addr_t rdma_addr, u32 rdma_key)
+{
+	if (!transport || !transport->rdma_read) return -EPERM;
+
+	account_pcn_rdma_read(size);
+	return transport->rdma_read(from_nid, addr, size, rdma_addr, rdma_key);
+}
+EXPORT_SYMBOL(pcn_kmsg_rdma_read);
 
 int pcn_kmsg_rdma_write(int dest_nid, void *addr, size_t size, dma_addr_t rdma_addr, u32 rdma_key)
 {
-	// account_pcn_message_sent(msg);
+	if (!transport || !transport->rdma_write) return -EPERM;
+
+	account_pcn_rdma_write(size);
     return transport->rdma_write(dest_nid, addr, size, rdma_addr, rdma_key);
 }
 EXPORT_SYMBOL(pcn_kmsg_rdma_write);
@@ -162,15 +177,17 @@ struct pcn_kmsg_rdma_handle *pcn_kmsg_pin_rdma_buffer(void *buffer, size_t size)
 	}
 	return ERR_PTR(-EINVAL);
 }
+EXPORT_SYMBOL(pcn_kmsg_pin_rdma_buffer);
+
 void pcn_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
 {
 	if (transport && transport->unpin_rdma_buffer) {
 		transport->unpin_rdma_buffer(handle);
 	}
 }
+EXPORT_SYMBOL(pcn_kmsg_unpin_rdma_buffer);
 
 
-/* Initialize callback table to null, set up control and data channels */
 int __init pcn_kmsg_init(void)
 {
 	return 0;

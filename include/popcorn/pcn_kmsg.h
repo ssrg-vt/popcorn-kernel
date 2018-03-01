@@ -44,10 +44,8 @@ enum pcn_kmsg_type {
 	/* Performance experiments */
 	PCN_KMSG_TYPE_TEST_REQUEST,
 	PCN_KMSG_TYPE_TEST_RESPONSE,
-	PCN_KMSG_TYPE_RDMA_READ_TEST_REQUEST,
-	PCN_KMSG_TYPE_RDMA_READ_TEST_RESPONSE,
-	PCN_KMSG_TYPE_RDMA_WRITE_TEST_REQUEST,
-	PCN_KMSG_TYPE_RDMA_WRITE_TEST_RESPONSE,
+	PCN_KMSG_TYPE_TEST_RDMA_REQUEST,
+	PCN_KMSG_TYPE_TEST_RDMA_RESPONSE,
 	PCN_KMSG_TYPE_STAT_END,
 
 	/* Provide the single system image */
@@ -197,6 +195,7 @@ struct pcn_kmsg_transport {
 	struct pcn_kmsg_rdma_handle *(*pin_rdma_buffer)(void *, size_t);
 	void (*unpin_rdma_buffer)(struct pcn_kmsg_rdma_handle *);
 	int (*rdma_write)(int, void *addr, size_t size, dma_addr_t, u32);
+	int (*rdma_read)(int, void *addr, size_t size, dma_addr_t, u32);
 };
 
 void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr);
