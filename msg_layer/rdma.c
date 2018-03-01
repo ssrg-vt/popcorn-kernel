@@ -11,8 +11,9 @@
 #define RDMA_ADDR_RESOLVE_TIMEOUT_MS 5000
 
 #define MAX_SEND_DEPTH	((RB_CHUNK_SIZE * RB_MAX_CHUNKS) / PCN_KMSG_MAX_SIZE)
-#define MAX_RECV_DEPTH	((1 << (PAGE_SHIFT + MAX_ORDER - 1)) / PCN_KMSG_MAX_SIZE)
-#define NR_RDMA_SLOTS	MAX_RECV_DEPTH
+#define MAX_RECV_DEPTH	((PAGE_SIZE << (MAX_ORDER - 1)) / PCN_KMSG_MAX_SIZE)
+#define RDMA_SLOT_SIZE	(PAGE_SIZE * 2)
+#define NR_RDMA_SLOTS	((PAGE_SIZE << (MAX_ORDER - 1)) / RDMA_SLOT_SIZE)
 
 static unsigned int use_rb_thr = PAGE_SIZE;
 
@@ -65,6 +66,9 @@ struct rdma_handle {
 	struct ib_qp *qp;
 };
 
+static unsigned long bytes_rdma_written = 0;
+static unsigned long bytes_rdma_read = 0;
+
 /* RDMA handle for each node */
 static struct rdma_handle *rdma_handles[MAX_NUM_NODES] = { NULL };
 
@@ -80,30 +84,38 @@ static dma_addr_t __rdma_sink_dma_addr;
 
 static inline int __get_rdma_buffer(void **addr, dma_addr_t *dma_addr) {
 	int i;
-	spin_lock(&__rdma_slots_lock);
-	i = find_first_zero_bit(__rdma_slots, MAX_RECV_DEPTH);
-	BUG_ON(i >= MAX_RECV_DEPTH);
+	do {
+		spin_lock(&__rdma_slots_lock);
+		i = find_first_zero_bit(__rdma_slots, NR_RDMA_SLOTS);
+		if (i >= NR_RDMA_SLOTS) {
+			spin_unlock(&__rdma_slots_lock);
+			WARN_ON_ONCE("recv buffer is full");
+			io_schedule();
+		}
+	} while (i >= NR_RDMA_SLOTS);
 	set_bit(i, __rdma_slots);
 	spin_unlock(&__rdma_slots_lock);
 
 	if (addr) {
-		*addr = __rdma_sink_addr + PCN_KMSG_MAX_SIZE * i;
+		*addr = __rdma_sink_addr + RDMA_SLOT_SIZE * i;
 	}
 	if (dma_addr) {
-		*dma_addr = __rdma_sink_dma_addr + PCN_KMSG_MAX_SIZE * i;
+		*dma_addr = __rdma_sink_dma_addr + RDMA_SLOT_SIZE * i;
 	}
 	return i;
 }
 
 static inline void __put_rdma_buffer(int slot) {
 	spin_lock(&__rdma_slots_lock);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!test_bit(slot, __rdma_slots));
+#endif
 	clear_bit(slot, __rdma_slots);
 	spin_unlock(&__rdma_slots_lock);
 }
 
 static inline void *__get_rdma_buffer_addr(int slot) {
-	return __rdma_sink_addr + PCN_KMSG_MAX_SIZE * slot;
+	return __rdma_sink_addr + RDMA_SLOT_SIZE * slot;
 }
 
 
@@ -197,12 +209,12 @@ void rdma_kmsg_put(struct pcn_kmsg_message *msg)
 
 ssize_t rdma_kmsg_stat(char *buffer, size_t count)
 {
-	return snprintf(buffer, count, "/ %lu %lu / ",
+	return snprintf(buffer, count, "/ %lu %lu %lu %lu / ",
 			ring_buffer_usage(&send_buffer),
 #ifdef CONFIG_POPCORN_STAT
-			send_buffer.peak_usage
+			send_buffer.peak_usage, bytes_rdma_written, bytes_rdma_read
 #else
-			0UL
+			0UL, 0UL, 0UL
 #endif
 			);
 }
@@ -290,7 +302,7 @@ struct pcn_kmsg_rdma_handle *rdma_kmsg_pin_rdma_buffer(void *msg, size_t size)
 	if (!rh) return ERR_PTR(-ENOMEM);
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-	if (size > PCN_KMSG_MAX_SIZE) {
+	if (size > RDMA_SLOT_SIZE) {
 		BUG_ON("Too large buffer to pin");
 		return ERR_PTR(-EINVAL);
 	}
@@ -330,7 +342,8 @@ int rdma_kmsg_write(int to_nid, void *addr, size_t size, dma_addr_t rdma_addr, u
 	sgl = &rw->sgl;
 	sgl->addr = dma_addr;
 	sgl->length = size;
-	sgl->lkey = rdma_pd->local_dma_lkey;
+	sgl->lkey = rdma_mr->lkey;
+	//sgl->lkey = rdma_pd->local_dma_lkey;
 
 	wr = &rw->wr;
 	wr->wr.next = NULL;
@@ -342,9 +355,12 @@ int rdma_kmsg_write(int to_nid, void *addr, size_t size, dma_addr_t rdma_addr, u
 	wr->remote_addr = rdma_addr;
 	wr->rkey = rdma_key;
 
+	bytes_rdma_written += size;
+
 	ret = ib_post_send(rdma_handles[to_nid]->qp, &wr->wr, &bad_wr);
 	if (ret || bad_wr) {
 		printk("Cannot post rdma write, %d, %p\n", ret, bad_wr);
+		if (ret == 0) ret = -EINVAL;
 		goto out;
 	}
 
@@ -355,7 +371,7 @@ int rdma_kmsg_write(int to_nid, void *addr, size_t size, dma_addr_t rdma_addr, u
 out:
 	ib_dma_unmap_single(rdma_mr->device, dma_addr, size, DMA_TO_DEVICE);
 	kfree(rw);
-	return 0;
+	return ret;
 }
 
 
@@ -416,7 +432,7 @@ retry:
 	while ((ret = ib_poll_cq(cq, 1, &wc)) > 0) {
 		if (wc.opcode < 0 || wc.status) {
 			struct recv_work *rw = (void *)wc.wr_id;
-			printk("abnormal status %d with %d %p\n",
+			printk("abnormal status %d with %d, %p\n",
 					wc.status, wc.opcode, rw);
 			continue;
 		}
@@ -466,7 +482,7 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 	/* create completion queue */
 	if (!rh->cq) {
 		struct ib_cq_init_attr cq_attr = {
-			.cqe = MAX_SEND_DEPTH + MAX_RECV_DEPTH,
+			.cqe = MAX_SEND_DEPTH + MAX_RECV_DEPTH + NR_RDMA_SLOTS,
 			.comp_vector = 0,
 		};
 
@@ -488,7 +504,7 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 			.qp_context = rh,
 			.cap = {
 				.max_send_wr = MAX_SEND_DEPTH,
-				.max_recv_wr = MAX_RECV_DEPTH,
+				.max_recv_wr = MAX_RECV_DEPTH + NR_RDMA_SLOTS,
 				.max_send_sge = PCN_KMSG_MAX_SIZE >> PAGE_SHIFT,
 				.max_recv_sge = PCN_KMSG_MAX_SIZE >> PAGE_SHIFT,
 			},
@@ -582,9 +598,11 @@ static __init int __setup_rdma_buffer(const int nr_chunks)
 			.send_flags = IB_SEND_SIGNALED,
 			.wr_id = (u64)&done,
 		},
-		.access = IB_ACCESS_LOCAL_WRITE |
+		.access = IB_ACCESS_REMOTE_WRITE,
+				  /*
+				  IB_ACCESS_LOCAL_WRITE |
 				  IB_ACCESS_REMOTE_READ |
-				  IB_ACCESS_REMOTE_WRITE,
+				  */
 	};
 	struct scatterlist sg = {};
 	const int alloc_order = MAX_ORDER - 1;
