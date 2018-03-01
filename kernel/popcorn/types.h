@@ -352,6 +352,14 @@ static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 #define REGISTER_KMSG_HANDLER(x, y) \
 	pcn_kmsg_register_callback(x, handle_##y)
 
+#define START_KMSG_WORK(type, name, work) \
+	struct pcn_kmsg_work *__pcn_kmsg_work__ = (struct pcn_kmsg_work *)(work); \
+	type *name = __pcn_kmsg_work__->msg
+
+#define END_KMSG_WORK(name) \
+	pcn_kmsg_done(name); \
+	kfree(__pcn_kmsg_work__);
+
 
 #include <linux/sched.h>
 
