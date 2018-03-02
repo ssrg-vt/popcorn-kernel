@@ -297,7 +297,7 @@ void rdma_kmsg_put(struct pcn_kmsg_message *msg)
 
 void rdma_kmsg_stat(struct seq_file *seq, void *v)
 {
-	seq_printf(seq, POPCORN_STAT_FMT, 
+	seq_printf(seq, POPCORN_STAT_FMT,
 			(unsigned long long)ring_buffer_usage(&send_buffer),
 #ifdef CONFIG_POPCORN_STAT
 			(unsigned long long)send_buffer.peak_usage,
@@ -309,7 +309,7 @@ void rdma_kmsg_stat(struct seq_file *seq, void *v)
 
 
 /****************************************************************************
- * Send 
+ * Send
  */
 static int __send_to(int to_nid, struct send_work *sw, size_t size)
 {
@@ -351,7 +351,7 @@ int rdma_kmsg_send(int dst, struct pcn_kmsg_message *msg, size_t size)
 	if (!try_wait_for_completion(&done)) {
 		ret = wait_for_completion_io_timeout(&done, 60 * HZ);
 		if (!ret) {
-			ret = -EAGAIN;
+			ret = -ETIME;
 			goto out;
 		}
 	}
@@ -480,7 +480,7 @@ static void __process_recv(struct ib_wc *wc)
 static void __process_sent(struct ib_wc *wc)
 {
 	struct send_work *sw = (void *)wc->wr_id;
-	
+
 	if (sw->done) {
 		complete(sw->done);
 	}
@@ -750,7 +750,7 @@ static __init int __setup_rdma_buffer(const int nr_chunks)
 	ret = wait_for_completion_io_timeout(&done, 5 * HZ);
 	if (!ret) {
 		printk("Timed-out to register mr\n");
-		ret = -EBUSY;
+		ret = -ETIMEDOUT;
 		goto out_dereg;
 	}
 
@@ -761,7 +761,7 @@ static __init int __setup_rdma_buffer(const int nr_chunks)
 out_dereg:
 	ib_dereg_mr(mr);
 	return ret;
-	
+
 out_free:
 	free_pages((unsigned long)__rdma_sink_addr, alloc_order);
 	__rdma_sink_addr = NULL;
@@ -773,7 +773,7 @@ static int __init __setup_work_request_pools(void)
 	int ret;
 	int i;
 
-	/* Initialize send buffer and send work request pool */
+	/* Initialize send buffer */
 	ret = ring_buffer_init(&send_buffer, "rdma_send");
 	if (ret) return ret;
 
@@ -785,6 +785,7 @@ static int __init __setup_work_request_pools(void)
 		send_buffer.dma_addr_base[i] = dma_addr;
 	}
 
+	/* Initialize send work request pool */
 	for (i = 0; i < MAX_SEND_DEPTH; i++) {
 		struct send_work *sw;
 
@@ -930,7 +931,7 @@ static int __connect_to_server(int nid)
 		ret = wait_for_completion_interruptible(&rh->cm_done);
 		if (ret) goto out_err;
 		if (rh->state != RDMA_CONNECTED) {
-			ret = -EAGAIN;
+			ret = -ETIMEDOUT;
 			goto out_err;
 		}
 	}
@@ -954,7 +955,7 @@ static int __accept_client(int nid)
 	int ret;
 
 	ret = wait_for_completion_io_timeout(&rh->cm_done, 60 * HZ);
-	if (!ret) return -EAGAIN;
+	if (!ret) return -ETIMEDOUT;
 	if (rh->state != RDMA_ROUTE_RESOLVED) return -EINVAL;
 
 	ret = __setup_pd_cq_qp(rh);
@@ -1078,8 +1079,6 @@ static int __establish_connections(void)
 		set_popcorn_node_online(i, true);
 	}
 
-	if ((ret = __setup_rdma_buffer(1))) return ret;
-
 	MSGPRINTK("Connections are established.\n");
 	return 0;
 }
@@ -1184,6 +1183,9 @@ int __init init_kmsg_rdma(void)
 	}
 
 	if (__establish_connections())
+		goto out_free;
+
+	if (__setup_rdma_buffer(1))
 		goto out_free;
 
 	if (__setup_work_request_pools())

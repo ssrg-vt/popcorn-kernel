@@ -14,7 +14,7 @@
 
 #define MAX_THREADS 32
 #define DEFAULT_PAYLOAD_SIZE_KB	4
-#define DEFAULT_NR_ITERATIONS 1000
+#define DEFAULT_NR_ITERATIONS 1
 
 enum TEST_REQUEST_FLAG {
 	TEST_REQUEST_FLAG_REPLY = 0,
@@ -44,9 +44,9 @@ DEFINE_PCN_KMSG(test_response_t, TEST_RESPONSE_FIELDS);
 
 enum test_action {
 	TEST_ACTION_SEND = 0,
-	TEST_ACTION_SEND_WAIT,
 	TEST_ACTION_POST,
 	TEST_ACTION_RDMA_WRITE,
+	TEST_ACTION_RDMA_READ,
 	TEST_ACTION_MAX,
 };
 
@@ -332,28 +332,31 @@ static int test_send(void *arg)
 	DECLARE_COMPLETION_ONSTACK(done);
 	test_request_t *req;
 	int i;
-
-	req = kmalloc(sizeof(*req), GFP_KERNEL);
-	BUG_ON(!req);
-	prandom_bytes(&req->msg, sizeof(req->msg));
-	req->flags = 0;
-	if (param->action == TEST_ACTION_SEND_WAIT) {
-		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
-		req->done = (unsigned long)&done;
-	}
+	char buffer[256];
+	size_t msg_size = PCN_KMSG_SIZE(param->payload_size);
 
 	__barrier_wait(param->barrier);
 	for (i = 0; i < param->nr_iterations; i++) {
-		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_REQUEST,
-				!my_nid, req, PCN_KMSG_SIZE(param->payload_size));
+		if (msg_size > sizeof(buffer)) {
+			req = kmalloc(sizeof(msg_size), GFP_KERNEL);
+			BUG_ON(!req);
+		} else {
+			req = (void *)buffer;
+		}
 
-		if (param->action == TEST_ACTION_SEND_WAIT) {
-			wait_for_completion(&done);
+		req->flags = 0;
+		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
+		req->done = (unsigned long)&done;
+		*(unsigned long *)req->msg = 0xcafe00dead00beef;
+
+		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_REQUEST, !my_nid, req, msg_size);
+
+		wait_for_completion(&done);
+		if (msg_size > sizeof(buffer)) {
+			kfree(req);
 		}
 	}
 	__barrier_wait(param->barrier);
-
-	kfree(req);
 	return 0;
 }
 
@@ -368,8 +371,10 @@ static int test_post(void *arg)
 	for (i = 0; i < param->nr_iterations; i++) {
 		req = pcn_kmsg_get(PCN_KMSG_SIZE(param->payload_size));
 
+		req->flags = 0;
 		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags);
 		req->done = (unsigned long)&done;
+		*(unsigned long *)req->msg = 0xcafe00dead00beef;
 
 		pcn_kmsg_post(PCN_KMSG_TYPE_TEST_REQUEST,
 				!my_nid, req, PCN_KMSG_SIZE(param->payload_size));
@@ -383,7 +388,6 @@ static int test_post(void *arg)
 static void process_test_send_request(struct work_struct *work)
 {
 	START_KMSG_WORK(test_request_t, req, work);
-
 	if (test_bit(TEST_REQUEST_FLAG_REPLY, &req->flags)) {
 		test_response_t *res = pcn_kmsg_get(sizeof(*res));
 		res->done = req->done;
@@ -391,7 +395,6 @@ static void process_test_send_request(struct work_struct *work)
 		pcn_kmsg_post(PCN_KMSG_TYPE_TEST_RESPONSE,
 				PCN_KMSG_FROM_NID(req), res, sizeof(*res));
 	}
-
 	END_KMSG_WORK(req);
 }
 
@@ -436,7 +439,15 @@ static int test_rdma_write(void *arg)
 		pcn_kmsg_unpin_rdma_buffer(rh);
 	}
 	__barrier_wait(param->barrier);
+	return 0;
+}
 
+static int test_rdma_read(void *arg)
+{
+	struct test_params *param = arg;
+
+	__barrier_wait(param->barrier);
+	__barrier_wait(param->barrier);
 	return 0;
 }
 
@@ -448,7 +459,7 @@ static void process_test_rdma_request(struct work_struct *work)
 	int ret;
 
 	if (req->flags & TEST_REQUEST_FLAG_RDMA_WRITE) {
-		*(unsigned long *)buffer = 0xdeadbeef;
+		*(unsigned long *)buffer = 0xbaffdeafbeefface;
 
 		ret = pcn_kmsg_rdma_write(PCN_KMSG_FROM_NID(req),
 				req->rdma_addr, buffer, req->size, req->rdma_key);
@@ -474,9 +485,9 @@ struct test_desc {
 
 static struct test_desc tests[] = {
 	[TEST_ACTION_SEND]			= { test_send, "synchronous send"  },
-	[TEST_ACTION_SEND_WAIT]		= { test_send, "synchronous send with wait" },
 	[TEST_ACTION_POST]			= { test_post, "synchronous post" },
 	[TEST_ACTION_RDMA_WRITE]	= { test_rdma_write, "RDMA write" },
+	[TEST_ACTION_RDMA_READ]		= { test_rdma_read, "RDMA read" },
 };
 
 static void __run_test(enum test_action action, struct test_params *param)
@@ -489,9 +500,13 @@ static void __run_test(enum test_action action, struct test_params *param)
 	unsigned long elapsed;
 	int i;
 
+	printk("Starting testing %s with %lu payload, %u thread%s, %lu iteration%s\n",
+			tests[action].description, param->payload_size,
+			param->nr_threads, param->nr_threads == 1 ? "" : "s",
+			param->nr_iterations, param->nr_iterations == 1 ? "" : "s");
+
 	__barrier_init(&barrier, param->nr_threads + 1);
 	param->barrier = &barrier;
-	//param->is_read = (action == 13) || (action == 15) ? true : false;
 
 	for (i = 0; i < param->nr_threads; i++) {
 		struct test_params *thr_param = thread_params + i;
@@ -513,9 +528,6 @@ static void __run_test(enum test_action action, struct test_params *param)
 			(t_start.tv_sec * 1000000 + t_start.tv_usec);
 
 	printk("Done testing %s\n", tests[action].description);
-	printk("  %u thread%s %lu iteration%s\n",
-			param->nr_threads, param->nr_threads == 1 ? "" : "s",
-			param->nr_iterations, param->nr_iterations == 1 ? "" : "s");
 	printk("  %9lu us in total\n", elapsed);
 	printk("  %3lu.%05lu us per operation\n",
 			elapsed / param->nr_iterations,
@@ -550,7 +562,7 @@ static int __parse_cmd(const char __user *buffer, size_t count, struct test_para
 
 	params->action = action;
 
-	if (args >= 2)
+	if (args >= 2) {
 		if (payload_size < sizeof(unsigned long) * 2) {
 			printk(KERN_ERR "Payload should be larger than %ld\n",
 					sizeof(unsigned long) * 2);
@@ -564,6 +576,7 @@ static int __parse_cmd(const char __user *buffer, size_t count, struct test_para
 			return -EINVAL;
 		}
 		params->payload_size = payload_size;
+	}
 	if (args >= 3) {
 		if (nr_threads > MAX_THREADS) {
 			printk(KERN_ERR "# of threads cannot be larger than %d\n",
@@ -602,11 +615,11 @@ static ssize_t start_test(struct file *file, const char __user *buffer, size_t c
 	/* do the coresponding work */
 	switch(action) {
 	case TEST_ACTION_SEND:
-	case TEST_ACTION_SEND_WAIT:
 	case TEST_ACTION_POST:
 		__run_test(action, &params);
 		break;
 	case TEST_ACTION_RDMA_WRITE:
+	case TEST_ACTION_RDMA_READ:
 		if (pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA)) {
 			__run_test(action, &params);
 		} else {
@@ -664,7 +677,7 @@ static struct proc_dir_entry *kmsg_test_proc = NULL;
 
 static int __init msg_test_init(void)
 {
-	printk("Loading Popcorn messaging layer tester...\n");
+	printk("\nLoading Popcorn messaging layer tester...\n");
 
 #ifdef CONFIG_POPCORN_STAT
 	printk(KERN_WARNING " * You are collecting statistics "
