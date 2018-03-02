@@ -1,8 +1,9 @@
 #include <linux/module.h>
 #include <linux/bitmap.h>
+#include <linux/seq_file.h>
 
-#include <linux/vmalloc.h>
 #include <rdma/rdma_cm.h>
+#include <popcorn/stat.h>
 
 #include "common.h"
 #include "ring_buffer.h"
@@ -77,9 +78,6 @@ struct rdma_handle {
 	struct ib_cq *cq;
 	struct ib_qp *qp;
 };
-
-static unsigned long bytes_rdma_written = 0;
-static unsigned long bytes_rdma_read = 0;
 
 /* RDMA handle for each node */
 static struct rdma_handle *rdma_handles[MAX_NUM_NODES] = { NULL };
@@ -297,16 +295,16 @@ void rdma_kmsg_put(struct pcn_kmsg_message *msg)
 	__put_send_work(sw);
 }
 
-ssize_t rdma_kmsg_stat(char *buffer, size_t count)
+void rdma_kmsg_stat(struct seq_file *seq, void *v)
 {
-	return snprintf(buffer, count, "/ %lu %lu %lu %lu / ",
-			ring_buffer_usage(&send_buffer),
+	seq_printf(seq, POPCORN_STAT_FMT, 
+			(unsigned long long)ring_buffer_usage(&send_buffer),
 #ifdef CONFIG_POPCORN_STAT
-			send_buffer.peak_usage, bytes_rdma_written, bytes_rdma_read
+			(unsigned long long)send_buffer.peak_usage,
 #else
-			0UL, 0UL, 0UL
+			0ULL,
 #endif
-			);
+			"rdma");
 }
 
 

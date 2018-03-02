@@ -149,7 +149,7 @@ void pcn_kmsg_done(void *msg);
 /**
  * Print out transport-specific statistics into @buffer
  */
-ssize_t pcn_kmsg_stat(char *buffer, size_t count);
+void pcn_kmsg_stat(struct seq_file *seq, void *v);
 
 
 struct pcn_kmsg_rdma_handle {
@@ -192,7 +192,7 @@ struct pcn_kmsg_transport {
 	int (*post)(int, struct pcn_kmsg_message *, size_t);
 	void (*done)(struct pcn_kmsg_message *);
 
-	ssize_t (*stat)(char *, size_t);
+	void (*stat)(struct seq_file *, void *);
 
 	struct pcn_kmsg_rdma_handle *(*pin_rdma_buffer)(void *, size_t);
 	void (*unpin_rdma_buffer)(struct pcn_kmsg_rdma_handle *);

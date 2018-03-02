@@ -4,22 +4,32 @@
 #include <asm/uaccess.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/percpu.h>
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/stat.h>
 
-static unsigned long sent_stats[PCN_KMSG_TYPE_MAX] = {0};
-static unsigned long recv_stats[PCN_KMSG_TYPE_MAX] = {0};
+static unsigned long long sent_stats[PCN_KMSG_TYPE_MAX] = {0};
+static unsigned long long recv_stats[PCN_KMSG_TYPE_MAX] = {0};
 
-static unsigned long long bytes_sent = 0;
-static unsigned long long bytes_recv = 0;
-static unsigned long long bytes_rdma_written = 0;
-static unsigned long long bytes_rdma_read = 0;
+static DEFINE_PER_CPU(unsigned long long, bytes_sent) = 0;
+static DEFINE_PER_CPU(unsigned long long, bytes_recv) = 0;
+static DEFINE_PER_CPU(unsigned long long, bytes_rdma_written) = 0;
+static DEFINE_PER_CPU(unsigned long long, bytes_rdma_read) = 0;
+
+const char *pcn_kmsg_type_name[PCN_KMSG_TYPE_MAX] = {
+	[PCN_KMSG_TYPE_TASK_MIGRATE] = "migration",
+	[PCN_KMSG_TYPE_VMA_INFO_REQUEST] = "VMA info",
+	[PCN_KMSG_TYPE_VMA_OP_RESPONSE] = "VMA op",
+	[PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST] = "remote page",
+	[PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST] = "invalidate",
+	[PCN_KMSG_TYPE_FUTEX_REQUEST] = "futex",
+};
 
 void account_pcn_message_sent(struct pcn_kmsg_message *msg)
 {
 	struct pcn_kmsg_hdr *h = (struct pcn_kmsg_hdr *)msg;
-	bytes_sent += h->size;
+	this_cpu_add(bytes_sent, h->size);
 #ifdef CONFIG_POPCORN_STAT
 	sent_stats[h->type]++;
 #endif
@@ -28,7 +38,7 @@ void account_pcn_message_sent(struct pcn_kmsg_message *msg)
 void account_pcn_message_recv(struct pcn_kmsg_message *msg)
 {
 	struct pcn_kmsg_hdr *h = (struct pcn_kmsg_hdr *)msg;
-	bytes_recv += h->size;
+	this_cpu_add(bytes_recv, h->size);
 #ifdef CONFIG_POPCORN_STAT
 	recv_stats[h->type]++;
 #endif
@@ -36,61 +46,41 @@ void account_pcn_message_recv(struct pcn_kmsg_message *msg)
 
 void account_pcn_rdma_write(size_t size)
 {
-	bytes_rdma_written += size;
+	this_cpu_add(bytes_rdma_written, size);
 }
 
 void account_pcn_rdma_read(size_t size)
 {
-	bytes_rdma_read += size;
+	this_cpu_add(bytes_rdma_read, size);
 }
 
-#define PROC_BUF_SIZE 8192
-static ssize_t __read_stats(struct file *filp, char *usr_buf, size_t count, loff_t *offset)
-{
-	int i;
-	char *buf;
-	int len = 0;
-	unsigned long *stats;
-
-	buf = kzalloc(PROC_BUF_SIZE, GFP_KERNEL);
-	if (!buf)
-		BUG();
-
-	if (*offset == 0) {
-		stats = sent_stats;
-		len += snprintf(buf, PROC_BUF_SIZE, "%llu ", bytes_sent);
-	} else if (*offset == 1) {
-		stats = recv_stats;
-		len += snprintf(buf, PROC_BUF_SIZE, "%llu ", bytes_recv);
-	} else {
-		return 0;
-	}
-
-	len += pcn_kmsg_stat(buf + len, PROC_BUF_SIZE - len);
-
-	for (i = PCN_KMSG_TYPE_STAT_START + 1; i < PCN_KMSG_TYPE_STAT_END; i++) {
-		len += snprintf(buf + len, PROC_BUF_SIZE - len,
-						"%lu ", stats[i]);
-		if (len >= PROC_BUF_SIZE) {
-			len = PROC_BUF_SIZE;
-			printk(KERN_WARNING "Dropping logs \n");
-			break;
-		}
-	}
-	len += snprintf(buf + len, PROC_BUF_SIZE - len, "\n");
-
-	if (copy_to_user(usr_buf, buf, len)) {
-		kfree(buf);
-		return -EFAULT;
-	}
-
-	kfree(buf);
-	*offset = *offset + 1;
-	return len;
-}
 
 static int __show_stats(struct seq_file *seq, void *v)
 {
+	int i;
+	unsigned long long sent = 0;
+	unsigned long long recv = 0;
+
+	for (i = 0; i < NR_CPUS; i++) {
+		sent += per_cpu(bytes_sent, i);
+		recv += per_cpu(bytes_recv, i);
+	}
+	seq_printf(seq, POPCORN_STAT_FMT, sent, recv, "total network I/O");
+
+	recv = sent = 0;
+	for (i = 0; i < NR_CPUS; i++) {
+		sent += per_cpu(bytes_rdma_written, i);
+		recv += per_cpu(bytes_rdma_read, i);
+	}
+	seq_printf(seq, POPCORN_STAT_FMT, sent, recv, "RDMA");
+
+	pcn_kmsg_stat(seq, v);
+
+	seq_printf(seq, "-----------------------------------------------\n");
+	for (i = PCN_KMSG_TYPE_STAT_START + 1; i < PCN_KMSG_TYPE_STAT_END; i++) {
+		seq_printf(seq, POPCORN_STAT_FMT,
+				sent_stats[i], recv_stats[i], pcn_kmsg_type_name[i] ? : "");
+	}
 	return 0;
 }
 
@@ -102,7 +92,7 @@ static int __open_stats(struct inode *inode, struct file *file)
 static struct file_operations stats_ops = {
 	.owner = THIS_MODULE,
 	.open = __open_stats,
-	.read = __read_stats,
+	.read = seq_read,
 	.llseek  = seq_lseek,
 	.release = single_release,
 };

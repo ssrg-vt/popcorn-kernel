@@ -8,6 +8,7 @@
  */
 
 #include <linux/kthread.h>
+#include <popcorn/stat.h>
 
 #include "ring_buffer.h"
 #include "common.h"
@@ -275,16 +276,16 @@ void sock_kmsg_done(struct pcn_kmsg_message *msg)
 	kfree(msg);
 }
 
-ssize_t sock_kmsg_stat(char *buffer, size_t count)
+void sock_kmsg_stat(struct seq_file *seq, void *v)
 {
-	return snprintf(buffer, count, "/ %lu %lu / ",
-			ring_buffer_usage(&send_buffer),
+	seq_printf(seq, POPCORN_STAT_FMT,
+			(unsigned long long)ring_buffer_usage(&send_buffer),
 #ifdef CONFIG_POPCORN_STAT
-			send_buffer.peak_usage
+			(unsigned long long)send_buffer.peak_usage,
 #else
-			0UL
+			0ULL,
 #endif
-			);
+			"socket");
 }
 
 struct pcn_kmsg_transport transport_socket = {

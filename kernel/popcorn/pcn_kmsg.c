@@ -131,12 +131,11 @@ void pcn_kmsg_done(void *msg)
 EXPORT_SYMBOL(pcn_kmsg_done);
 
 
-ssize_t pcn_kmsg_stat(char *buffer, size_t count)
+void pcn_kmsg_stat(struct seq_file *seq, void *v)
 {
 	if (transport && transport->stat) {
-		return transport->stat(buffer, count);
+		transport->stat(seq, v);
 	}
-	return 0;
 }
 EXPORT_SYMBOL(pcn_kmsg_stat);
 
