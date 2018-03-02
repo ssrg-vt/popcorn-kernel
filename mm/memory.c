@@ -3368,7 +3368,7 @@ static int handle_pte_fault(struct mm_struct *mm,
 						flags, entry);
 		}
 #ifdef CONFIG_POPCORN
-		page_server_panic(mm, address, pte, entry);
+		page_server_panic(true, mm, address, pte, entry);
 #endif
 		return do_swap_page(mm, vma, address,
 					pte, pmd, flags, entry);

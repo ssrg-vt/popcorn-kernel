@@ -8,6 +8,7 @@
  */
 
 #include <linux/kthread.h>
+#include <popcorn/stat.h>
 
 #include "ring_buffer.h"
 #include "common.h"
@@ -237,7 +238,7 @@ struct pcn_kmsg_message *sock_kmsg_get(size_t size)
 	might_sleep();
 
 	while (!(msg = ring_buffer_get(&send_buffer, size))) {
-		WARN_ON("buffer is full\n");
+		WARN_ON_ONCE("ring buffer is full\n");
 		schedule();
 	}
 	return msg;
@@ -275,29 +276,29 @@ void sock_kmsg_done(struct pcn_kmsg_message *msg)
 	kfree(msg);
 }
 
-ssize_t sock_kmsg_stat(char *buffer, size_t count)
+void sock_kmsg_stat(struct seq_file *seq, void *v)
 {
-	return snprintf(buffer, count, "/ %lu %lu / ",
-			ring_buffer_usage(&send_buffer),
+	seq_printf(seq, POPCORN_STAT_FMT,
+			(unsigned long long)ring_buffer_usage(&send_buffer),
 #ifdef CONFIG_POPCORN_STAT
-			send_buffer.peak_usage
+			(unsigned long long)send_buffer.peak_usage,
 #else
-			0UL
+			0ULL,
 #endif
-			);
+			"socket");
 }
 
 struct pcn_kmsg_transport transport_socket = {
 	.name = "socket",
-	.type = PCN_KMSG_LAYER_TYPE_SOCKET,
+	.features = 0,
 
-	.get_fn = sock_kmsg_get,
-	.put_fn = sock_kmsg_put,
-	.stat_fn = sock_kmsg_stat,
+	.get = sock_kmsg_get,
+	.put = sock_kmsg_put,
+	.stat = sock_kmsg_stat,
 
-	.send_fn = sock_kmsg_send,
-	.post_fn = sock_kmsg_post,
-	.done_fn = sock_kmsg_done,
+	.send = sock_kmsg_send,
+	.post = sock_kmsg_post,
+	.done = sock_kmsg_done,
 };
 
 

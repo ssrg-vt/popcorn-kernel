@@ -37,7 +37,7 @@ void page_server_put_userpage(struct fault_handle *fh, char *mode);
 void page_server_start_mm_fault(unsigned long address);
 int page_server_end_mm_fault(int ret);
 
-void page_server_panic(struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val);
+void page_server_panic(bool condition, struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val);
 
 int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long addr);
 

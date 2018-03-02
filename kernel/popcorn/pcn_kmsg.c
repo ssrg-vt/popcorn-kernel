@@ -19,7 +19,8 @@ static struct pcn_kmsg_transport *transport = NULL;
 
 void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr)
 {
-	if (transport) {
+	if (transport && tr) {
+		printk(KERN_ERR "Replace hot transport at your own risk.\n");
 	}
 	transport = tr;
 }
@@ -45,8 +46,10 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 {
 	pcn_kmsg_cbftn ftn;
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
+#endif
 
 	ftn = pcn_kmsg_cbftns[msg->header.type];
 
@@ -62,10 +65,8 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 EXPORT_SYMBOL(pcn_kmsg_process);
 
 
-static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, void *_msg, size_t size)
+static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, struct pcn_kmsg_message *msg, size_t size)
 {
-	struct pcn_kmsg_message *msg = _msg;
-
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(type < 0 || type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(size > PCN_KMSG_MAX_SIZE);
@@ -86,7 +87,7 @@ int pcn_kmsg_send(enum pcn_kmsg_type type, int to, void *msg, size_t size)
 	if ((ret = __build_and_check_msg(type, to, msg, size))) return ret;
 
 	account_pcn_message_sent(msg);
-	return transport->send_fn(to, msg, size);
+	return transport->send(to, msg, size);
 }
 EXPORT_SYMBOL(pcn_kmsg_send);
 
@@ -96,47 +97,22 @@ int pcn_kmsg_post(enum pcn_kmsg_type type, int to, void *msg, size_t size)
 	if ((ret = __build_and_check_msg(type, to, msg, size))) return ret;
 
 	account_pcn_message_sent(msg);
-	return transport->post_fn(to, msg, size);
+	return transport->post(to, msg, size);
 }
 EXPORT_SYMBOL(pcn_kmsg_post);
 
-
-/*
- * @res_size: The maximum size expected
- */
-void *pcn_kmsg_request_rdma(enum pcn_kmsg_type type, int to, void *msg, size_t msg_size, size_t res_size)
-{
-	int ret;
-	if ((ret = __build_and_check_msg(type, to, msg, msg_size))) return NULL;
-
-	account_pcn_message_sent(msg);
-    return transport->request_rdma_fn(to, msg, msg_size, res_size);
-}
-EXPORT_SYMBOL(pcn_kmsg_request_rdma);
-
-void pcn_kmsg_respond_rdma(enum pcn_kmsg_type type, void *req, void *res, size_t res_size)
-{
-	int ret = __build_and_check_msg(type, PCN_KMSG_FROM_NID(req), res, res_size);
-	if (ret) return;
-
-	account_pcn_message_sent(res);
-	transport->respond_rdma_fn(req, res, res_size);
-}
-EXPORT_SYMBOL(pcn_kmsg_respond_rdma);
-
-
 void *pcn_kmsg_get(size_t size)
 {
-	if (transport && transport->get_fn)
-		return transport->get_fn(size);
+	if (transport && transport->get)
+		return transport->get(size);
 	return kmalloc(size, GFP_KERNEL);
 }
 EXPORT_SYMBOL(pcn_kmsg_get);
 
 void pcn_kmsg_put(void *msg)
 {
-	if (transport && transport->put_fn) {
-		transport->put_fn(msg);
+	if (transport && transport->put) {
+		transport->put(msg);
 	} else {
 		kfree(msg);
 	}
@@ -146,8 +122,8 @@ EXPORT_SYMBOL(pcn_kmsg_put);
 
 void pcn_kmsg_done(void *msg)
 {
-	if (transport && transport->done_fn) {
-		transport->done_fn(msg);
+	if (transport && transport->done) {
+		transport->done(msg);
 	} else {
 		kfree(msg);
 	}
@@ -155,15 +131,64 @@ void pcn_kmsg_done(void *msg)
 EXPORT_SYMBOL(pcn_kmsg_done);
 
 
-ssize_t pcn_kmsg_stat(char *buffer, size_t count)
+void pcn_kmsg_stat(struct seq_file *seq, void *v)
 {
-	if (transport && transport->stat_fn) {
-		return transport->stat_fn(buffer, count);
+	if (transport && transport->stat) {
+		transport->stat(seq, v);
 	}
-	return 0;
 }
+EXPORT_SYMBOL(pcn_kmsg_stat);
 
-/* Initialize callback table to null, set up control and data channels */
+bool pcn_kmsg_has_features(unsigned int features)
+{
+	if (!transport) return false;
+
+	return (transport->features & features) == features;
+}
+EXPORT_SYMBOL(pcn_kmsg_has_features);
+
+
+int pcn_kmsg_rdma_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size, u32 rdma_key)
+{
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	if (!transport || !transport->rdma_read) return -EPERM;
+#endif
+
+	account_pcn_rdma_read(size);
+	return transport->rdma_read(from_nid, addr, rdma_addr, size, rdma_key);
+}
+EXPORT_SYMBOL(pcn_kmsg_rdma_read);
+
+int pcn_kmsg_rdma_write(int dest_nid, dma_addr_t rdma_addr, void *addr, size_t size, u32 rdma_key)
+{
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	if (!transport || !transport->rdma_write) return -EPERM;
+#endif
+
+	account_pcn_rdma_write(size);
+    return transport->rdma_write(dest_nid, rdma_addr, addr, size, rdma_key);
+}
+EXPORT_SYMBOL(pcn_kmsg_rdma_write);
+
+
+struct pcn_kmsg_rdma_handle *pcn_kmsg_pin_rdma_buffer(void *buffer, size_t size)
+{
+	if (transport && transport->pin_rdma_buffer) {
+		return transport->pin_rdma_buffer(buffer, size);
+	}
+	return ERR_PTR(-EINVAL);
+}
+EXPORT_SYMBOL(pcn_kmsg_pin_rdma_buffer);
+
+void pcn_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
+{
+	if (transport && transport->unpin_rdma_buffer) {
+		transport->unpin_rdma_buffer(handle);
+	}
+}
+EXPORT_SYMBOL(pcn_kmsg_unpin_rdma_buffer);
+
+
 int __init pcn_kmsg_init(void)
 {
 	return 0;

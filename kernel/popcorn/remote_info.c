@@ -209,7 +209,6 @@ remote_mem_info_response_t *send_remote_mem_info_request(unsigned int nid)
 	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_MEMINFO_REQUEST,
 			nid, &request, sizeof(request));
 	response = wait_at_station(ws);
-	put_wait_station(ws);
 
 	return response;
 }
@@ -327,7 +326,6 @@ void send_remote_cpu_info_request(unsigned int nid)
 			nid, request, sizeof(*request));
 
 	response = wait_at_station(ws);
-	put_wait_station(ws);
 
 	memcpy(saved_cpu_info[nid], &response->cpu_info_data,
 	       sizeof(response->cpu_info_data));

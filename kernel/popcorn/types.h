@@ -210,12 +210,10 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	pid_t remote_pid; \
 	unsigned long addr; \
 	unsigned long fault_flags; \
-	unsigned long instr_addr;
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-DEFINE_PCN_RDMA_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
-#else
+	unsigned long instr_addr; \
+	dma_addr_t rdma_addr; \
+	u32 rdma_key;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
-#endif
 
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	pid_t remote_pid; \
@@ -227,19 +225,11 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 #define REMOTE_PAGE_RESPONSE_FIELDS \
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	unsigned char page[PAGE_SIZE];
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-DEFINE_PCN_RDMA_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
-#else
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
-#endif
 
 #define REMOTE_PAGE_GRANT_FIELDS \
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS
-#ifdef CONFIG_POPCORN_KMSG_IB_RDMA
-DEFINE_PCN_RDMA_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
-#else
 DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
-#endif
 
 
 #define REMOTE_PAGE_FLUSH_COMMON_FIELDS \
@@ -363,6 +353,14 @@ static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 
 #define REGISTER_KMSG_HANDLER(x, y) \
 	pcn_kmsg_register_callback(x, handle_##y)
+
+#define START_KMSG_WORK(type, name, work) \
+	struct pcn_kmsg_work *__pcn_kmsg_work__ = (struct pcn_kmsg_work *)(work); \
+	type *name = __pcn_kmsg_work__->msg
+
+#define END_KMSG_WORK(name) \
+	pcn_kmsg_done(name); \
+	kfree(__pcn_kmsg_work__);
 
 
 #include <linux/sched.h>
