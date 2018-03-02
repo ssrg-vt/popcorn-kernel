@@ -61,14 +61,14 @@ static int __show_stats(struct seq_file *seq, void *v)
 	unsigned long long sent = 0;
 	unsigned long long recv = 0;
 
-	for (i = 0; i < NR_CPUS; i++) {
+	for_each_possible_cpu(i) {
 		sent += per_cpu(bytes_sent, i);
 		recv += per_cpu(bytes_recv, i);
 	}
 	seq_printf(seq, POPCORN_STAT_FMT, sent, recv, "total network I/O");
 
 	recv = sent = 0;
-	for (i = 0; i < NR_CPUS; i++) {
+	for_each_possible_cpu(i) {
 		sent += per_cpu(bytes_rdma_written, i);
 		recv += per_cpu(bytes_rdma_read, i);
 	}
