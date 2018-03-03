@@ -11,8 +11,8 @@
 #define RDMA_PORT 11453
 #define RDMA_ADDR_RESOLVE_TIMEOUT_MS 5000
 
-#define MAX_SEND_DEPTH	((RB_CHUNK_SIZE * RB_MAX_CHUNKS) / PCN_KMSG_MAX_SIZE)
 #define MAX_RECV_DEPTH	((PAGE_SIZE << (MAX_ORDER - 1)) / PCN_KMSG_MAX_SIZE)
+#define MAX_SEND_DEPTH	(MAX_RECV_DEPTH)
 #define RDMA_SLOT_SIZE	(PAGE_SIZE * 2)
 #define NR_RDMA_SLOTS	((PAGE_SIZE << (MAX_ORDER - 1)) / RDMA_SLOT_SIZE)
 
@@ -35,7 +35,8 @@ struct recv_work {
 };
 
 enum {
-	SW_FLAG_OWN_BUFFER = 0,
+	SW_FLAG_MAPPED = 0,
+	SW_FLAG_FROM_BUFFER = 1,
 };
 
 struct send_work {
@@ -127,11 +128,12 @@ static inline void __put_rdma_buffer(int slot) {
 /* Global send buffer */
 struct rb_alloc_header {
 	struct send_work *sw;
+	unsigned int flags;
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	unsigned int magic;
 #endif
 };
-const unsigned int rb_alloc_header_magic = 0xbeefcafe;
+const unsigned int rb_alloc_header_magic = 0xbad7face;
 
 static DEFINE_SPINLOCK(send_work_pool_lock);
 static struct ring_buffer send_buffer = {};
@@ -141,6 +143,8 @@ static struct send_work *__get_send_work_map(struct pcn_kmsg_message *msg, size_
 {
 	unsigned long flags;
 	struct send_work *sw;
+	void *map_start = NULL;
+
 	spin_lock_irqsave(&send_work_pool_lock, flags);
 	BUG_ON(!send_work_pool);
 	sw = send_work_pool;
@@ -151,26 +155,42 @@ static struct send_work *__get_send_work_map(struct pcn_kmsg_message *msg, size_
 	sw->flags = 0;
 
 	if (!msg) {
-		struct rb_alloc_header *rah;
+		struct rb_alloc_header *ah;
 		sw->addr = ring_buffer_get_mapped(&send_buffer,
 				sizeof(struct rb_alloc_header) + size, &sw->sgl.addr);
-		BUG_ON(!sw->addr);
-		sw->sgl.addr += sizeof(struct rb_alloc_header);
-
-		rah = sw->addr;
-		rah->sw = sw;
+		if (likely(sw->addr)) {
+			sw->sgl.addr += sizeof(struct rb_alloc_header);
+		} else {
+			/* Fall back to kmalloc in case of buffer full */
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-		rah->magic = rb_alloc_header_magic;
+			if (WARN_ON_ONCE("ring buffer is full")) {
+				printk(KERN_WARNING"ring buffer utilization: %lu\n",
+					ring_buffer_usage(&send_buffer));
+			}
 #endif
+			sw->addr = kmalloc(
+					sizeof(struct rb_alloc_header) + size, GFP_ATOMIC);
+			BUG_ON(!sw->addr);
+			map_start = sw->addr + sizeof(struct rb_alloc_header);
+		}
+		ah = sw->addr;
+		ah->sw = sw;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		ah->magic = rb_alloc_header_magic;
+#endif
+		set_bit(SW_FLAG_FROM_BUFFER, &sw->flags);
 	} else {
-		int ret;
 		sw->addr = msg;
+		map_start = sw->addr;
+	}
+
+	if (map_start) {
+		int ret;
 		sw->sgl.addr = ib_dma_map_single(
-				rdma_pd->device, msg, size, DMA_TO_DEVICE);
+				rdma_pd->device, map_start, size, DMA_TO_DEVICE);
 		ret = ib_dma_mapping_error(rdma_pd->device, sw->sgl.addr);
 		BUG_ON(ret);
-
-		set_bit(SW_FLAG_OWN_BUFFER, &sw->flags);
+		set_bit(SW_FLAG_MAPPED, &sw->flags);
 	}
 	sw->sgl.length = size;	/* Should be updated before sending out */
 	return sw;
@@ -184,15 +204,21 @@ static struct send_work *__get_send_work(size_t size)
 static void __put_send_work(struct send_work *sw)
 {
 	unsigned long flags;
-	if (!test_bit(SW_FLAG_OWN_BUFFER, &sw->flags)) {
+
+	if (test_bit(SW_FLAG_MAPPED, &sw->flags)) {
+		ib_dma_unmap_single(rdma_pd->device,
+				sw->sgl.addr, sw->sgl.length, DMA_TO_DEVICE);
+	}
+	if (test_bit(SW_FLAG_FROM_BUFFER, &sw->flags)) {
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 		BUG_ON(((struct rb_alloc_header *)sw->addr)->magic !=
 				rb_alloc_header_magic);
 #endif
-		ring_buffer_put(&send_buffer, sw->addr);
-	} else {
-		ib_dma_unmap_single(rdma_pd->device,
-				sw->sgl.addr, sw->sgl.length, DMA_TO_DEVICE);
+		if (unlikely(test_bit(SW_FLAG_MAPPED, &sw->flags))) {
+			kfree(sw->addr);
+		} else {
+			ring_buffer_put(&send_buffer, sw->addr);
+		}
 	}
 
 	spin_lock_irqsave(&send_work_pool_lock, flags);
@@ -285,7 +311,12 @@ static void __put_rdma_work(struct rdma_work *rw)
 struct pcn_kmsg_message *rdma_kmsg_get(size_t size)
 {
 	struct send_work *sw = __get_send_work(size);
-	return sw->addr + sizeof(struct rb_alloc_header);
+	struct rb_alloc_header *ah = sw->addr;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	BUG_ON(!test_bit(SW_FLAG_FROM_BUFFER, &sw->flags));
+	BUG_ON(ah->magic != rb_alloc_header_magic);
+#endif
+	return (struct pcn_kmsg_message *)(ah + 1);
 }
 
 void rdma_kmsg_put(struct pcn_kmsg_message *msg)
@@ -305,7 +336,7 @@ void rdma_kmsg_stat(struct seq_file *seq, void *v)
 #else
 				0ULL,
 #endif
-				"rdma");
+				"Send buffer usage");
 	}
 }
 
@@ -371,7 +402,9 @@ int rdma_kmsg_post(int dst, struct pcn_kmsg_message *msg, size_t size)
 	int ret;
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-	BUG_ON(ah->magic != rb_alloc_header_magic && "send buffer is compromised");
+	if (!test_bit(SW_FLAG_MAPPED, &sw->flags)) {
+		BUG_ON(ah->magic != rb_alloc_header_magic&& "compromised send buffer");
+	}
 #endif
 
 	ret = __send_to(dst, sw, size);
@@ -511,10 +544,10 @@ static void __process_faulty_work(struct ib_wc *wc)
 		struct send_work *w = (struct send_work *)wc->wr_id;
 		struct pcn_kmsg_message *msg;
 		printk("  type: send, %llx + %d\n", w->sgl.addr, w->sgl.length);
-		if (test_bit(SW_FLAG_OWN_BUFFER, &w->flags)) {
-			msg = w->addr;
-		} else {
+		if (test_bit(SW_FLAG_FROM_BUFFER, &w->flags)) {
 			msg = w->addr + sizeof(struct rb_alloc_header);
+		} else {
+			msg = w->addr;
 		}
 		printk("  message: %d %d %ld\n",
 				msg->header.from_nid, msg->header.type, msg->header.size);

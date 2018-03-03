@@ -6,9 +6,9 @@
 #define RB_CHUNK_SIZE	(PAGE_SIZE << RB_CHUNK_ORDER)
 
 struct ring_buffer {
-	unsigned int head_chunk;
+	unsigned short head_chunk;
 	void *head;
-	unsigned int tail_chunk;
+	unsigned short tail_chunk;
 	void *tail;
 	int wraparounded;
 

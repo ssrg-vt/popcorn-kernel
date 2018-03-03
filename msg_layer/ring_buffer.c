@@ -46,9 +46,9 @@ size_t ring_buffer_usage(struct ring_buffer *rb)
 	return used;
 }
 
-static int __init_ring_buffer(struct ring_buffer *rb, const unsigned int nr_chunks, const char *fmt, va_list args)
+static int __init_ring_buffer(struct ring_buffer *rb, const unsigned short nr_chunks, const char *fmt, va_list args)
 {
-	int i;
+	unsigned short i;
 	int ret = 0;
 
 	for (i = 0; i < nr_chunks; i++) {
@@ -135,7 +135,7 @@ static inline void __set_header(struct ring_buffer_header *header, bool reclaim,
 #endif
 }
 
-static inline bool __get_next_chunk(struct ring_buffer *rb, unsigned int *index) {
+static inline bool __get_next_chunk(struct ring_buffer *rb, unsigned short *index) {
 	(*index)++;
 	if (*index >= rb->nr_chunks) {
 		*index = 0;
