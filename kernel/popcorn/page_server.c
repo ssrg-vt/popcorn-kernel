@@ -1373,7 +1373,11 @@ static void process_remote_page_request(struct work_struct *work)
 	enum pcn_kmsg_type res_type;
 	int down_read_retry = 0;
 
-	res = pcn_kmsg_get(sizeof(*res));
+	if (TRANSFER_PAGE_WITH_RDMA) {
+		res = pcn_kmsg_get(sizeof(remote_page_response_short_t));
+	} else {
+		res = pcn_kmsg_get(sizeof(*res));
+	}
 
 again:
 	tsk = __get_task_struct(req->remote_pid);
