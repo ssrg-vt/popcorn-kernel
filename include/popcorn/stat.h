@@ -17,5 +17,6 @@ void account_pcn_rdma_write(size_t size);
 void account_pcn_rdma_read(size_t size);
 
 #define POPCORN_STAT_FMT  "%12llu  %12llu  %s\n"
+#define POPCORN_STAT_FMT2 "%8llu.%03llu  %8llu.%03llu  %s\n"
 
 #endif /* KERNEL_POPCORN_STAT_H_ */

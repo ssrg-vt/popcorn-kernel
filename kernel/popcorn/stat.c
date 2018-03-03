@@ -17,10 +17,16 @@ static DEFINE_PER_CPU(unsigned long long, bytes_recv) = 0;
 static DEFINE_PER_CPU(unsigned long long, bytes_rdma_written) = 0;
 static DEFINE_PER_CPU(unsigned long long, bytes_rdma_read) = 0;
 
+static unsigned long long last_bytes_sent = 0;
+static unsigned long long last_bytes_recv = 0;
+static unsigned long long last_bytes_rdma_written = 0;
+static unsigned long long last_bytes_rdma_read = 0;
+static struct timeval last_stat = {};
+
 const char *pcn_kmsg_type_name[PCN_KMSG_TYPE_MAX] = {
 	[PCN_KMSG_TYPE_TASK_MIGRATE] = "migration",
 	[PCN_KMSG_TYPE_VMA_INFO_REQUEST] = "VMA info",
-	[PCN_KMSG_TYPE_VMA_OP_RESPONSE] = "VMA op",
+	[PCN_KMSG_TYPE_VMA_OP_REQUEST] = "VMA op",
 	[PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST] = "remote page",
 	[PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST] = "invalidate",
 	[PCN_KMSG_TYPE_FUTEX_REQUEST] = "futex",
@@ -61,19 +67,47 @@ static int __show_stats(struct seq_file *seq, void *v)
 	int i;
 	unsigned long long sent = 0;
 	unsigned long long recv = 0;
+	struct timeval now;
+	unsigned long long rate_sent, rate_recv;
+	unsigned long elapsed;
+
+	do_gettimeofday(&now);
+	elapsed = (now.tv_sec * 1000000 + now.tv_usec) -
+			(last_stat.tv_sec * 1000000 + last_stat.tv_usec);
+	last_stat = now;
 
 	for_each_possible_cpu(i) {
 		sent += per_cpu(bytes_sent, i);
 		recv += per_cpu(bytes_recv, i);
 	}
-	seq_printf(seq, POPCORN_STAT_FMT, sent, recv, "total network I/O");
+	seq_printf(seq, POPCORN_STAT_FMT, sent, recv, "Total network I/O");
 
-	recv = sent = 0;
-	for_each_possible_cpu(i) {
-		sent += per_cpu(bytes_rdma_written, i);
-		recv += per_cpu(bytes_rdma_read, i);
+	rate_sent = (sent - last_bytes_sent);
+	rate_recv = (recv - last_bytes_recv);
+	seq_printf(seq, POPCORN_STAT_FMT2,
+			rate_sent / elapsed, (rate_sent % elapsed) * 1000 / elapsed,
+			rate_recv / elapsed, (rate_recv % elapsed) * 1000 / elapsed,
+			"MB/s");
+	last_bytes_sent = sent;
+	last_bytes_recv = recv;
+
+	if (pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA) && elapsed) {
+		recv = sent = 0;
+		for_each_possible_cpu(i) {
+			sent += per_cpu(bytes_rdma_written, i);
+			recv += per_cpu(bytes_rdma_read, i);
+		}
+		seq_printf(seq, POPCORN_STAT_FMT, sent, recv, "RDMA");
+
+		rate_sent = (sent - last_bytes_rdma_written);
+		rate_recv = (recv - last_bytes_rdma_read);
+		seq_printf(seq, POPCORN_STAT_FMT2,
+				rate_sent / elapsed, (rate_sent % elapsed) * 1000 / elapsed,
+				rate_recv / elapsed, (rate_recv % elapsed) * 1000 / elapsed,
+				"MB/s");
+		last_bytes_rdma_written = sent;
+		last_bytes_rdma_read = recv;
 	}
-	seq_printf(seq, POPCORN_STAT_FMT, sent, recv, "RDMA");
 
 	pcn_kmsg_stat(seq, NULL);
 
@@ -82,7 +116,7 @@ static int __show_stats(struct seq_file *seq, void *v)
 		seq_printf(seq, POPCORN_STAT_FMT,
 				sent_stats[i], recv_stats[i], pcn_kmsg_type_name[i] ? : "");
 	}
-	seq_printf(seq, "-----------------------------------------------\n");
+	seq_printf(seq, "---------------------------------------------------------------------------\n");
 
 	fh_action_stat(seq, v);
 	return 0;
