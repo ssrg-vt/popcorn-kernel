@@ -42,7 +42,7 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-static unsigned int __nr_outstanding_process = 0;
+static atomic_t __nr_outstanding_requests[PCN_KMSG_TYPE_MAX] = { ATOMIC_INIT(0) };
 #endif
 
 void pcn_kmsg_process(struct pcn_kmsg_message *msg)
@@ -52,8 +52,11 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
-	WARN_ON_ONCE(__nr_outstanding_process++ > 128 &&
-		"leaking received messages. Ensure to call pcn_kmsg_done() after process");
+	if (atomic_inc_return(__nr_outstanding_requests + msg->header.type) > 64) {
+		if (WARN_ON_ONCE("leaking received messages, ")) {
+			printk("type %d\n", msg->header.type);
+		}
+	}
 #endif
 
 	ftn = pcn_kmsg_cbftns[msg->header.type];
@@ -127,14 +130,17 @@ EXPORT_SYMBOL(pcn_kmsg_put);
 
 void pcn_kmsg_done(void *msg)
 {
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	struct pcn_kmsg_hdr *h = msg;;
+	if (atomic_dec_return(__nr_outstanding_requests + h->type) < 0) {
+		printk(KERN_ERR "Over-release message type %d\n", h->type);
+	}
+#endif
 	if (transport && transport->done) {
 		transport->done(msg);
 	} else {
 		kfree(msg);
 	}
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-	__nr_outstanding_process--;
-#endif
 }
 EXPORT_SYMBOL(pcn_kmsg_done);
 
