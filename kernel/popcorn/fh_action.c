@@ -127,8 +127,17 @@ unsigned short get_fh_action(bool at_remote, unsigned long fh_flags, unsigned fa
 void fh_action_stat(struct seq_file *seq, void *v)
 {
 	int i;
-	for (i = 0; i < ARRAY_SIZE(__fh_action_stat); i++) {
-		seq_printf(seq, "%2d  %lu\n", i, __fh_action_stat[i]);
+	for (i = 0; i < ARRAY_SIZE(__fh_action_stat) / 4; i++) {
+		if (seq) {
+			seq_printf(seq, "%2d  %-12lu   %2d  %-12lu   %2d  %-12lu   %2d  %-12lu\n",
+					i,      __fh_action_stat[i],      i + 16, __fh_action_stat[i + 16],
+					i + 32, __fh_action_stat[i + 32], i + 48, __fh_action_stat[i + 48]);
+		} else {
+			__fh_action_stat[i] = 0;
+			__fh_action_stat[i + 16] = 0;
+			__fh_action_stat[i + 32] = 0;
+			__fh_action_stat[i + 48] = 0;
+		}
 	}
 }
 

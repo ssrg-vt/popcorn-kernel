@@ -41,7 +41,10 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 }
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 static unsigned int __nr_outstanding_process = 0;
+#endif
+
 void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 {
 	pcn_kmsg_cbftn ftn;
@@ -49,7 +52,7 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
-	WARN_ON_ONCE(__nr_outstanding_process++ > 64 &&
+	WARN_ON_ONCE(__nr_outstanding_process++ > 128 &&
 		"leaking received messages. Ensure to call pcn_kmsg_done() after process");
 #endif
 

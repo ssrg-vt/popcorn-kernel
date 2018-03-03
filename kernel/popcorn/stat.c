@@ -75,7 +75,7 @@ static int __show_stats(struct seq_file *seq, void *v)
 	}
 	seq_printf(seq, POPCORN_STAT_FMT, sent, recv, "RDMA");
 
-	pcn_kmsg_stat(seq, v);
+	pcn_kmsg_stat(seq, NULL);
 
 	seq_printf(seq, "-----------------------------------------------\n");
 	for (i = PCN_KMSG_TYPE_STAT_START + 1; i < PCN_KMSG_TYPE_STAT_END; i++) {
@@ -86,6 +86,26 @@ static int __show_stats(struct seq_file *seq, void *v)
 
 	fh_action_stat(seq, v);
 	return 0;
+}
+
+static ssize_t __write_stats(struct file *file, const char __user *buffer, size_t size, loff_t *offset)
+{
+	int i;
+	for_each_possible_cpu(i) {
+		per_cpu(bytes_sent, i) = 0;
+		per_cpu(bytes_recv, i) = 0;
+		per_cpu(bytes_rdma_written, i) = 0;
+		per_cpu(bytes_rdma_read, i) = 0;
+	}
+	pcn_kmsg_stat(NULL, NULL);
+
+	for (i = 0 ; i < PCN_KMSG_TYPE_MAX; i++) {
+		sent_stats[i] = 0;
+		recv_stats[i] = 0;
+	}
+	fh_action_stat(NULL, NULL);
+
+	return size;
 }
 
 static int __open_stats(struct inode *inode, struct file *file)
@@ -99,13 +119,14 @@ static struct file_operations stats_ops = {
 	.read = seq_read,
 	.llseek  = seq_lseek,
 	.release = single_release,
+	.write = __write_stats,
 };
 
 static struct proc_dir_entry *proc_entry = NULL;
 
 int statistics_init(void)
 {
-	proc_entry = proc_create("popcorn_stat", S_IRUGO, NULL, &stats_ops);
+	proc_entry = proc_create("popcorn_stat", S_IRUGO | S_IWUGO, NULL, &stats_ops);
 	if (proc_entry == NULL) {
 		printk(KERN_ERR"cannot create proc_fs entry for popcorn stats\n");
 		return -ENOMEM;

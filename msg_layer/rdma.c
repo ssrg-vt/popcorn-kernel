@@ -297,14 +297,16 @@ void rdma_kmsg_put(struct pcn_kmsg_message *msg)
 
 void rdma_kmsg_stat(struct seq_file *seq, void *v)
 {
-	seq_printf(seq, POPCORN_STAT_FMT,
-			(unsigned long long)ring_buffer_usage(&send_buffer),
+	if (seq) {
+		seq_printf(seq, POPCORN_STAT_FMT,
+				(unsigned long long)ring_buffer_usage(&send_buffer),
 #ifdef CONFIG_POPCORN_STAT
-			(unsigned long long)send_buffer.peak_usage,
+				(unsigned long long)send_buffer.peak_usage,
 #else
-			0ULL,
+				0ULL,
 #endif
-			"rdma");
+				"rdma");
+	}
 }
 
 
