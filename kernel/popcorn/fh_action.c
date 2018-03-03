@@ -72,9 +72,9 @@ static const unsigned short fh_action_table[64] = {
 	/* L - R, L W */	FH_ACTION_RETRY  | FH_ACTION_WAIT,
 	/* L - R, R W */	FH_ACTION_INVALID, /* Same to L-RRR */
 	/* L - W, L R */	FH_ACTION_FOLLOW,
-	/* L - W, R R */	FH_ACTION_RETRY  | FH_ACTION_LOCAL | FH_ACTION_DELAY,
+	/* L - W, R R */	FH_ACTION_RETRY  | FH_ACTION_WAIT | FH_ACTION_LOCAL | FH_ACTION_DELAY,
 	/* L - W, L W */	FH_ACTION_FOLLOW,
-	/* L - W, R W */	FH_ACTION_RETRY  | FH_ACTION_LOCAL | FH_ACTION_DELAY,
+	/* L - W, R W */	FH_ACTION_RETRY  | FH_ACTION_WAIT | FH_ACTION_LOCAL | FH_ACTION_DELAY,
 	/* L i R, L R */	FH_ACTION_FOLLOW | FH_ACTION_RETRY | FH_ACTION_DELAY,
 										   /* Currently no waiter should exist
 											  when finishing ownership
