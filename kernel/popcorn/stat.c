@@ -54,6 +54,7 @@ void account_pcn_rdma_read(size_t size)
 	this_cpu_add(bytes_rdma_read, size);
 }
 
+void fh_action_stat(struct seq_file *seq, void *);
 
 static int __show_stats(struct seq_file *seq, void *v)
 {
@@ -81,6 +82,9 @@ static int __show_stats(struct seq_file *seq, void *v)
 		seq_printf(seq, POPCORN_STAT_FMT,
 				sent_stats[i], recv_stats[i], pcn_kmsg_type_name[i] ? : "");
 	}
+	seq_printf(seq, "-----------------------------------------------\n");
+
+	fh_action_stat(seq, v);
 	return 0;
 }
 

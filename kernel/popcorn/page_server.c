@@ -33,18 +33,9 @@
 #include "pgtable.h"
 #include "wait_station.h"
 #include "page_server.h"
+#include "fh_action.h"
 
 #include "trace_events.h"
-
-static inline bool fault_for_write(unsigned long flags)
-{
-	return !!(flags & FAULT_FLAG_WRITE);
-}
-
-static inline bool fault_for_read(unsigned long flags)
-{
-	return !fault_for_write(flags);
-}
 
 inline void page_server_start_mm_fault(unsigned long address)
 {
@@ -240,12 +231,8 @@ static inline void clear_page_owner(int nid, struct mm_struct *mm, unsigned long
  */
 enum {
 	FAULT_HANDLE_WRITE = 0x01,
-	FAULT_HANDLE_REMOTE = 0x02,
-	FAULT_HANDLE_INVALIDATE = 0x04,
-
-	FAULT_FLAG_REMOTE = 0x100,
-
-	FAULT_COALESCE_MAX = 8,
+	FAULT_HANDLE_INVALIDATE = 0x02,
+	FAULT_HANDLE_REMOTE = 0x04,
 };
 
 static struct kmem_cache *__fault_handle_cache = NULL;
@@ -355,7 +342,6 @@ static void __finish_invalidation(struct fault_handle *fh)
 	}
 }
 
-
 static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, spinlock_t *ptl, bool *leader)
 	__releases(ptl)
 {
@@ -363,7 +349,6 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	struct fault_handle *fh;
 	bool found = false;
 	struct remote_context *rc = get_task_remote(tsk);
-	char *ongoing = NULL;
 	DEFINE_WAIT(wait);
 	int fk = __fault_hash_key(addr);
 
@@ -378,37 +363,24 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	}
 
 	if (found) {
-		/* Invalidation cannot be merged with others */
-		if (fh->flags & FAULT_HANDLE_INVALIDATE) {
-			ongoing = "invalidate";
-			goto out_wait;
-		}
+		unsigned long action =
+				get_fh_action( tsk->at_remote, fh->flags, fault_flags);
 
-		/* Remote fault cannot be coalesced with others */
-		if (fh->flags & FAULT_HANDLE_REMOTE) {
-			ongoing = "remote";
-			if (fault_flags & FAULT_FLAG_REMOTE) {
-				goto out_retry;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		BUG_ON(action == FH_ACTION_INVALID);
+#endif
+		if (action & FH_ACTION_RETRY) {
+			if (action & FH_ACTION_WAIT) {
+				goto out_wait_retry;
 			}
-			goto out_wait;
+			goto out_retry;
 		}
-		if (fault_flags & FAULT_FLAG_REMOTE) {
-			ongoing = "local";
-			if (!tsk->at_remote) {
-				goto out_retry;
-			}
-			goto out_wait;
-		}
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		BUG_ON(action != FH_ACTION_FOLLOW);
+#endif
 
-		/* Different fault types cannot be coalesced */
-		if (fault_for_write(fault_flags) ^ !!(fh->flags & FAULT_HANDLE_WRITE)) {
-			ongoing = (fh->flags & FAULT_HANDLE_WRITE) ? "write" : "read";
-			goto out_wait;
-		}
-
-		if (fh->limit++ > FAULT_COALESCE_MAX) {
-			ongoing = "max";
-			goto out_wait;
+		if (fh->limit++ > FH_ACTION_MAX_FOLLOWER) {
+			goto out_wait_retry;
 		}
 
 		atomic_inc(&fh->pendings);
@@ -422,7 +394,6 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 		put_task_remote(tsk);
 
 		io_schedule();
-		smp_rmb();
 		finish_wait(&fh->waits, &wait);
 
 		fh->pid = tsk->pid;
@@ -440,13 +411,13 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	*leader = true;
 	return fh;
 
-out_wait:
+out_wait_retry:
 	atomic_inc(&fh->pendings_retry);
 	prepare_to_wait(&fh->waits_retry, &wait, TASK_UNINTERRUPTIBLE);
 	spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 	put_task_remote(tsk);
 
-	PGPRINTK("  [%d] %s ongoing. waits %p\n", tsk->pid, ongoing, fh);
+	PGPRINTK("  [%d] waits %p\n", tsk->pid, fh);
 	io_schedule();
 	finish_wait(&fh->waits_retry, &wait);
 	if (atomic_dec_and_test(&fh->pendings_retry)) {
@@ -458,7 +429,7 @@ out_retry:
 	spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 	put_task_remote(tsk);
 
-	PGPRINTK("  [%d] %s locked. retry %p\n", tsk->pid, ongoing, fh);
+	PGPRINTK("  [%d] locked. retry %p\n", tsk->pid, fh);
 	return NULL;
 }
 
