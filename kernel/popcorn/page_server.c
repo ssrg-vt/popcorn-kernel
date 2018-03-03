@@ -953,8 +953,7 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 }
 
 #define TRANSFER_PAGE_WITH_RDMA \
-	   (IS_ENABLED(CONFIG_POPCORN_KMSG_RDMA_PAGES) && \
-		pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA))
+		pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA)
 
 static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh)
 {

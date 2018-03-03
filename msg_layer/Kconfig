@@ -23,12 +23,6 @@ config POPCORN_KMSG_RDMA
 	help
 		Mellanox Connect-X4 and Connect-X5
 
-config POPCORN_KMSG_RDMA_PAGES
-	bool "Use RDMA to transfer pages" if POPCORN_KMSG_RDMA
-	default n
-	help
-		Transfer pages through RDMA. 'N' will transfer pages using IB verb.
-
 # InfiniBand
 #config POPCORN_KMSG_IB
 #	tristate "Over InfiniBand"

@@ -16,7 +16,7 @@
 #define RDMA_SLOT_SIZE	(PAGE_SIZE * 2)
 #define NR_RDMA_SLOTS	((PAGE_SIZE << (MAX_ORDER - 1)) / RDMA_SLOT_SIZE)
 
-static unsigned int use_rb_thr = PAGE_SIZE;
+static unsigned int use_rb_thr = PAGE_SIZE / 2;
 
 struct work_header {
 	enum {
@@ -1145,11 +1145,7 @@ void __exit exit_kmsg_rdma(void)
 
 struct pcn_kmsg_transport transport_rdma = {
 	.name = "rdma",
-#ifdef CONFIG_POPCORN_KMSG_RDMA_PAGES
 	.features = PCN_KMSG_FEATURE_RDMA,
-#else
-	.features = 0,
-#endif
 
 	.get = rdma_kmsg_get,
 	.put = rdma_kmsg_put,
@@ -1196,10 +1192,6 @@ int __init init_kmsg_rdma(void)
 	broadcast_my_node_info(i);
 
 	PCNPRINTK("Popcorn messaging layer over RDMA is ready\n");
-	if (IS_ENABLED(CONFIG_POPCORN_KMSG_RDMA_PAGES) && \
-			pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA)) {
-		PCNPRINTK("Transfer pages using RDMA!\n");
-	}
 	return 0;
 
 out_free:
@@ -1208,10 +1200,11 @@ out_free:
 }
 
 module_param(use_rb_thr, uint, 0644);
-/*
-MODULE_PARAM_DESC(use_rb_thr,
+MODULE_PARM_DESC(use_rb_thr,
 		"Threshold for using pre-allocated and pre-mapped ring buffer");
-*/
+
+module_param_named(features, transport_rdma.features, ulong, 0644);
+MODULE_PARM_DESC(use_rdma, "1: RDMA to transfer pages");
 
 module_init(init_kmsg_rdma);
 module_exit(exit_kmsg_rdma);
