@@ -7,6 +7,7 @@
 #include <linux/errno.h>
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
+#include <linux/err.h>
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/debug.h>

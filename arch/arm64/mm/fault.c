@@ -221,7 +221,7 @@ static int __do_page_fault(struct mm_struct *mm, unsigned long addr,
 	vma = find_vma(mm, addr);
 #ifdef CONFIG_POPCORN
 	/* vma worker should not fault */
-	BUG_ON(tsk->is_vma_worker);
+	BUG_ON(tsk->is_worker);
 
 	if (distributed_remote_process(tsk)) {
 		if (!vma || vma->vm_start > addr) {

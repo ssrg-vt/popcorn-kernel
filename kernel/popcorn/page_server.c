@@ -991,7 +991,7 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 	return 0;
 }
 
-static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, struct page *page)
+static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
 {
 	remote_page_response_t *rp;
 	struct wait_station *ws = get_wait_station(tsk);
@@ -1588,7 +1588,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
-	rp = __fetch_page_from_origin(current, addr, fault_flags, page);
+	rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
 		if (rp->result != VM_FAULT_RETRY)

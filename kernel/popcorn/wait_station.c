@@ -5,6 +5,7 @@
 
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/err.h>
 
 #include "wait_station.h"
 
