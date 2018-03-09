@@ -399,7 +399,8 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 
 	tsk->is_worker = false;
 
-	/* If the new tsk is not in the same thread group as the parent,
+	/*
+	 * If the new tsk is not in the same thread group as the parent,
 	 * then we do not need to propagate the old thread info.
 	 * Otherwise, make sure to keep an accurate record
 	 * of which node and thread group the new thread is a part of.
@@ -413,6 +414,15 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 
 	tsk->migration_target_nid = -1;
 	tsk->backoff_weight = 0;
+
+	/*
+	 * Temporarily boost the priviledge to exploit thread bootstrapping
+	 * in copy_thread_tls() during kernel_thread(). Will be demoted in the
+	 * remote thread context.
+	 */
+	if (orig->is_worker) {
+		tsk->flags |= PF_KTHREAD;
+	}
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	tsk->fault_address = 0;

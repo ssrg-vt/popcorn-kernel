@@ -36,19 +36,13 @@ struct remote_context {
 	spinlock_t vmas_lock;
 	struct list_head vmas;
 
-	/* Auxiliary threads control */
-	bool stop_workers;
+	/* Remote worker */
+	bool stop_remote_worker;
 
-	/* VMA worker */
-	struct task_struct *vma_worker;
-	struct completion vma_works_ready;
-	spinlock_t vma_works_lock;
-	struct list_head vma_works;
-
-	/* Remote thread spawner */
-	struct completion spawn_pended;
-	spinlock_t spawn_requests_lock;
-	struct list_head spawn_requests;
+	struct task_struct *remote_worker;
+	struct completion remote_works_ready;
+	spinlock_t remote_works_lock;
+	struct list_head remote_works;
 
 	pid_t remote_tgids[MAX_POPCORN_NODES];
 };
@@ -191,7 +185,7 @@ DEFINE_PCN_KMSG(vma_op_request_t, VMA_OP_REQUEST_FIELDS);
 	pid_t remote_pid; \
 	int remote_ws; \
 	int operation; \
-	int ret; \
+	long ret; \
 	union { \
 		unsigned long addr; \
 		unsigned long start; \
