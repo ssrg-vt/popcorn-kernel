@@ -111,6 +111,7 @@ static int __show_stats(struct seq_file *seq, void *v)
 
 	pcn_kmsg_stat(seq, NULL);
 
+#ifdef CONFIG_POPCORN_STAT
 	seq_printf(seq, "-----------------------------------------------\n");
 	for (i = PCN_KMSG_TYPE_STAT_START + 1; i < PCN_KMSG_TYPE_STAT_END; i++) {
 		seq_printf(seq, POPCORN_STAT_FMT,
@@ -119,6 +120,7 @@ static int __show_stats(struct seq_file *seq, void *v)
 	seq_printf(seq, "---------------------------------------------------------------------------\n");
 
 	fh_action_stat(seq, v);
+#endif
 	return 0;
 }
 
