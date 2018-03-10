@@ -59,6 +59,9 @@ enum pcn_kmsg_type {
 	/* Schedule server */
 	PCN_KMSG_TYPE_SCHED_PERIODIC,		/* XXX sched requires help!! */
 
+	/* Prefetching page */
+	PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE,
+
 	PCN_KMSG_TYPE_MAX
 };
 

@@ -33,6 +33,7 @@
 #include "pgtable.h"
 #include "wait_station.h"
 #include "page_server.h"
+#include "page_prefetch.h"
 #include "fh_action.h"
 
 #include "trace_events.h"
@@ -997,7 +998,7 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 #define TRANSFER_PAGE_WITH_RDMA \
 		pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA)
 
-static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh)
+static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh, struct prefetch_list* pf_list)
 {
 	remote_page_request_t *req;
 
@@ -1012,6 +1013,8 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 
 	req->remote_pid = from_pid;
 	req->instr_addr = instruction_pointer(current_pt_regs());
+
+	memcpy(&req->pf_list, pf_list, sizeof(*pf_list));
 
 	if (TRANSFER_PAGE_WITH_RDMA) {
 		struct pcn_kmsg_rdma_handle *handle =
@@ -1036,14 +1039,14 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 	return 0;
 }
 
-static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
+static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page, struct prefetch_list* pf_list)
 {
 	remote_page_response_t *rp;
 	struct wait_station *ws = get_wait_station(tsk);
 	struct pcn_kmsg_rdma_handle *rh;
 
 	__request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
-			addr, fault_flags, ws->id, &rh);
+			addr, fault_flags, ws->id, &rh, pf_list);
 
 	rp = wait_at_station(ws);
 	if (rp->result == 0) {
@@ -1101,7 +1104,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 		if (nid == my_nid) continue;
 		if (from-- == 0) {
 			from_nid = nid;
-			__request_remote_page(tsk, nid, pid, addr, fault_flags, ws->id, &rh);
+			__request_remote_page(tsk, nid, pid, addr, fault_flags, ws->id, &rh, NULL);
 		} else {
 			if (fault_for_write(fault_flags)) {
 				clear_bit(nid, pi);
@@ -1601,6 +1604,8 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	bool populated = false;
 	struct mem_cgroup *memcg;
 	int ret = 0;
+	struct prefetch_list *pf_list;
+	struct prefetch_body *pf_body_ptr;
 
 	struct fault_handle *fh;
 	bool leader;
@@ -1646,7 +1651,25 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
-	rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
+	pf_list = alloc_prefetch_list();
+    prefetch_policy(pf_list, addr);
+    pf_list = select_prefetch_pages(pf_list, mm);
+    pf_body_ptr = (struct prefetch_body*)pf_list;
+
+    /* get page frames for pages to be prefetched */
+    while (pf_body_ptr->addr) { // postpond to recevied a new prefetch list //
+        if (pte_none(*pte) ||
+			!(page = vm_normal_page(vma, pf_body_ptr->addr, *pte))) {
+			page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, pf_body_ptr->addr);
+            mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg);
+            pf_body_ptr->populated = true;
+        }
+        get_page(page);
+        pf_body_ptr++;
+    }
+
+	rp = __fetch_page_from_origin(current, vma, addr,
+								fault_flags, page, pf_list);
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
 		if (rp->result != VM_FAULT_RETRY)
@@ -1700,6 +1723,7 @@ out_free:
 	fh->ret = ret;
 
 out_follower:
+	free_prefetch_list(pf_list);
 	__finish_fault_handling(fh);
 	return ret;
 }

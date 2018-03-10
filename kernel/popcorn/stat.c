@@ -30,6 +30,7 @@ const char *pcn_kmsg_type_name[PCN_KMSG_TYPE_MAX] = {
 	[PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST] = "remote page",
 	[PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST] = "invalidate",
 	[PCN_KMSG_TYPE_FUTEX_REQUEST] = "futex",
+	[PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE] = "pf_res",
 };
 
 void account_pcn_message_sent(struct pcn_kmsg_message *msg)

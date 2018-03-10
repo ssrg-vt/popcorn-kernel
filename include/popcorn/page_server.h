@@ -26,7 +26,7 @@ int page_server_handle_pte_fault(
 /*
  * Flush pages in remote to the origin
  */
-int page_server_flush_remote_pages(void);
+int page_server_flush_remote_pages(struct remote_context *rc);
 
 void page_server_zap_pte(
 	struct vm_area_struct *vma, unsigned long addr, pte_t *pte, pte_t *pteval);
