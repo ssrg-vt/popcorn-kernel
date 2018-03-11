@@ -38,6 +38,8 @@
 
 #include "trace_events.h"
 
+extern int prefetch_at_origin(remote_page_request_t *req);
+
 inline void page_server_start_mm_fault(unsigned long address)
 {
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
@@ -1511,6 +1513,8 @@ out:
 
 	pcn_kmsg_post(res_type, from_nid, res, res_size);
 
+	// TODO: problem - leader and followers have their own list
+	prefetch_at_origin(req);
 	END_KMSG_WORK(req);
 }
 

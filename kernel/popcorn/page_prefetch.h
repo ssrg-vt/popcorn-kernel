@@ -21,6 +21,5 @@ struct prefetch_list *alloc_prefetch_list(void);
 void free_prefetch_list(struct prefetch_list* pf_list);
 void prefetch_policy(struct prefetch_list* pf_list, unsigned long fault_addr);
 struct prefetch_list *select_prefetch_pages(
-        struct prefetch_list* pf_list, struct mm_struct *mm);
-
+					struct prefetch_list* pf_list, struct mm_struct *mm);
 #endif /* !PREFETCH_H */

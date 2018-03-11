@@ -11,7 +11,12 @@
 #include "fh_action.h"
 
 #include "page_prefetch.h"
+
+//#include <popcorn/types.h>
 //#include <popcorn/page_server.h>
+
+#define PREFETCH_FAIL 0x0000
+#define PREFETCH_SUCCESS 0x0001
 
 struct fault_handle {
     struct hlist_node list;
@@ -91,6 +96,33 @@ static pte_t *__get_pte_at(struct mm_struct *mm, unsigned long addr, pmd_t **ppm
     return pte_offset_map(pmd, addr);
 }
 
+static struct kmem_cache *__fault_handle_cache = NULL;
+static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsigned long addr)
+{
+    struct fault_handle *fh =
+            kmem_cache_alloc(__fault_handle_cache, GFP_ATOMIC);
+    int fk = __fault_hash_key(addr);
+    BUG_ON(!fh);
+
+    INIT_HLIST_NODE(&fh->list);
+
+    fh->addr = addr;
+    fh->flags = 0;
+
+    init_waitqueue_head(&fh->waits);
+    init_waitqueue_head(&fh->waits_retry);
+    atomic_set(&fh->pendings, 1);
+    atomic_set(&fh->pendings_retry, 0);
+    fh->limit = 0;
+    fh->ret = 0;
+    fh->rc = get_task_remote(tsk);
+    fh->pid = tsk->pid;
+    fh->complete = NULL;
+
+    hlist_add_head(&fh->list, &fh->rc->faults[fk]);
+    return fh;
+}
+
 inline struct prefetch_list *alloc_prefetch_list(void)
 {
 	return kmalloc(sizeof(struct prefetch_list), GFP_KERNEL);
@@ -104,7 +136,8 @@ inline void free_prefetch_list(struct prefetch_list* pf_list)
 inline void add_pf_list_at(struct prefetch_list* pf_list,
 							unsigned long addr, int slot_num)
 {
-	//(struct prefetch_body*)((struct prefetch_body*)(pf_list) + slot_num)->addr = addr;
+	struct prefetch_body *list_ptr = (struct prefetch_body*)pf_list;
+	(list_ptr + slot_num)->addr = addr;
 }
 
 
@@ -174,11 +207,8 @@ struct prefetch_list *select_prefetch_pages(
         if (!found && !page_is_mine(mm, addr)) { //leader
             add_pf_list_at(new_pf_list, addr, slot);
 			slot++;
-			/*
-			fh = __alloc_fault_handle(tsk, addr);
-			fh->flags |= fault_for_write(fault_flags) ? FAULT_HANDLE_WRITE : 0;
-			fh->flags |= (fault_flags & FAULT_FLAG_REMOTE) ? FAULT_HANDLE_REMOTE : 0;
-			*/
+			// remotefault | at origin | read
+			fh = __alloc_fault_handle(current, addr);
         } else { // follower	
 		}
         list_ptr++;
@@ -190,14 +220,119 @@ out:
 }
 
 
+enum {
+    FAULT_HANDLE_WRITE = 0x01,
+    FAULT_HANDLE_INVALIDATE = 0x02,
+    FAULT_HANDLE_REMOTE = 0x04,
+};
+#define TRANSFER_PAGE_WITH_RDMA \
+        pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA)
+int prefetch_at_origin(remote_page_request_t *req)
+{
+	struct task_struct *tsk;
+	struct mm_struct *mm;
+	struct prefetch_body *list_ptr = (struct prefetch_body*)&req->pf_list;
+	//if (!req->is_prefetch) return -1; //problem
+	if(!list_ptr->addr) return -1;
+	
+	tsk = __get_task_struct(req->remote_pid);
+	if (!tsk) return -1;
+	mm = get_task_mm(tsk);
+
+	/* intergrate the following one func  with this function */
+    //list_ptr = (struct prefetch_body*)select_prefetch_pages(&req->pf_list, mm);
+
+    while(list_ptr->addr) {
+		/* fh = __start_fault_handling(current, addr,
+							fault_flags, ptl, &leader); */
+		remote_prefetch_response_t *res;
+
+//		/* pf_list = select_prefetch_pages(pf_list, mm); */
+//		if (page_is_mine(mm, list_ptr->addr)) {
+//			/* send the page back */
+//			res->result = PREFETCH_SUCCESS;
+//		} else {
+//			/* NOT support now */
+//			/* but still reply a NULL */
+//			res->result = PREFETCH_FAIL;
+//		}
+
+		int fk;
+		pmd_t *pmd;
+		spinlock_t *ptl;
+		bool found = false;
+		unsigned long flags;
+		struct fault_handle *fh;
+        struct remote_context *rc;
+        unsigned long addr = list_ptr->addr;
+		
+		if (TRANSFER_PAGE_WITH_RDMA) {
+			res = pcn_kmsg_get(sizeof(remote_page_response_short_t));
+		} else {
+			res = pcn_kmsg_get(sizeof(*res));
+		}
+
+        __get_pte_at(mm, addr, &pmd, &ptl);
+        spin_lock(ptl);
+
+		rc = get_task_remote(current);
+        fk = __fault_hash_key(addr);
+
+		/* fault lock will stop next pte acess as well */
+        spin_lock_irqsave(&rc->faults_lock[fk], flags); // if(!found) 
+        spin_unlock(ptl);
+
+		hlist_for_each_entry(fh, &rc->faults[fk], list) {
+			if (fh->addr == addr) {
+				found = true;
+				break;
+			}
+		}
+
+        if (!found && !page_is_mine(mm, addr)) { //leader
+            //add_pf_list_at(new_pf_list, addr, slot);
+			//slot++;
+
+			/* choose1 A - */
+			// remotefault | at remote | read
+			fh = __alloc_fault_handle(tsk, addr);
+			fh->flags |= FAULT_HANDLE_REMOTE;
+			//fh->flags |= (fault_flags & FAULT_FLAG_REMOTE) ? // remotefault
+			//								FAULT_HANDLE_REMOTE : 0;
+			/* choose1 B - instatead of creating a fh addr,
+									send msg out immediately */
+        } else { // follower or retryer
+		}
+		/* choose1 A - will not block other addresses */
+		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
+
+		res->addr = addr;
+		res->remote_pid = req->remote_pid;
+		res->origin_pid = req->origin_pid;
+
+		//res->populated = from list; //TODO
+		//res->fh = from list; //TODO
+
+		pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE,
+							PCN_KMSG_FROM_NID(req), res, sizeof(*res));
+
+		/* choose1 B - will not casue a resend for the same address */
+		//spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
+		list_ptr++;
+    }
+
+	mmput(mm);
+	put_task_struct(tsk);
+	return 0;
+}
+
 static void process_remote_prefetch_response(struct work_struct *work)
 {
 	//prefetch request
 	START_KMSG_WORK(remote_prefetch_response_t, res, work);
-	res->addr;
-	res->populated;
-	res->fh;
-
+	//res->addr; //TODO
+	//res->populated; //TODO
+	//res->fh; //TODO
 
 }
 
