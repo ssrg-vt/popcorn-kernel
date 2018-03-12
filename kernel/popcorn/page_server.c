@@ -1660,20 +1660,8 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
     pf_list = select_prefetch_pages(pf_list, mm);
     pf_body_ptr = (struct prefetch_body*)pf_list;
 
-    /* get page frames for pages to be prefetched */
-    while (pf_body_ptr->addr) { // postpond to recevied a new prefetch list //
-        if (pte_none(*pte) ||
-			!(page = vm_normal_page(vma, pf_body_ptr->addr, *pte))) {
-			page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, pf_body_ptr->addr);
-            mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg);
-            pf_body_ptr->populated = true;
-        }
-        get_page(page);
-        pf_body_ptr++;
-    }
-
 	rp = __fetch_page_from_origin(current, vma, addr,
-								fault_flags, page, pf_list);
+									fault_flags, page, pf_list);
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
 		if (rp->result != VM_FAULT_RETRY)

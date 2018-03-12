@@ -10,7 +10,7 @@
 struct prefetch_body {
     unsigned long addr;
     int prio;
-	bool populated;
+	struct fault_handle *fh;
 } __attribute__((packed));
 
 struct prefetch_list {

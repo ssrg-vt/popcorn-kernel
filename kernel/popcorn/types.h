@@ -230,16 +230,23 @@ DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS
 DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
 
-#define REMOTE_PREFETCH_RESPONSE_FIELDS \
+#define REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
     pid_t origin_pid; \
     pid_t remote_pid; \
     unsigned long addr; \
     dma_addr_t rdma_addr; \
     u32 rdma_key; \
-	bool populated; \
 	struct fault_handle *fh; \
 	int result;
+
+#define REMOTE_PREFETCH_RESPONSE_FIELDS \
+	REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
+	unsigned char page[PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_prefetch_response_t, REMOTE_PREFETCH_RESPONSE_FIELDS);
+
+#define REMOTE_PREFETCH_FAIL_FIELDS \
+	REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS
+DEFINE_PCN_KMSG(remote_prefetch_fail_t, REMOTE_PREFETCH_FAIL_FIELDS);
 
 #define REMOTE_PAGE_FLUSH_COMMON_FIELDS \
 	pid_t origin_pid; \
