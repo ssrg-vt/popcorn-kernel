@@ -369,8 +369,8 @@ static int __init __connect_to_server(int nid)
 		}
 	} while (ret < 0);
 
-	ret = __start_handlers(nid);
 	sock_handles[nid].sock = sock;
+	ret = __start_handlers(nid);
 	if (ret) return ret;
 
 	return 0;
