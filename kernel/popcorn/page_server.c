@@ -1016,7 +1016,8 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 	req->remote_pid = from_pid;
 	req->instr_addr = instruction_pointer(current_pt_regs());
 
-	memcpy(&req->pf_list, pf_list, sizeof(*pf_list));
+	if (pf_list)
+		memcpy(&req->pf_list, pf_list, sizeof(*pf_list));
 
 	if (TRANSFER_PAGE_WITH_RDMA) {
 		struct pcn_kmsg_rdma_handle *handle =
@@ -1514,7 +1515,8 @@ out:
 	pcn_kmsg_post(res_type, from_nid, res, res_size);
 
 	// TODO: problem - leader and followers have their own list
-	prefetch_at_origin(req);
+	if (!tsk->at_remote)
+		prefetch_at_origin(req);
 	END_KMSG_WORK(req);
 }
 
@@ -1609,7 +1611,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	struct mem_cgroup *memcg;
 	int ret = 0;
 	struct prefetch_list *pf_list;
-	struct prefetch_body *pf_body_ptr;
+	struct prefetch_list *new_pf_list;
 
 	struct fault_handle *fh;
 	bool leader;
@@ -1657,11 +1659,10 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 	pf_list = alloc_prefetch_list();
     prefetch_policy(pf_list, addr);
-    pf_list = select_prefetch_pages(pf_list, mm);
-    pf_body_ptr = (struct prefetch_body*)pf_list;
+    new_pf_list = select_prefetch_pages(pf_list, mm);
 
 	rp = __fetch_page_from_origin(current, vma, addr,
-									fault_flags, page, pf_list);
+									fault_flags, page, new_pf_list);
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
 		if (rp->result != VM_FAULT_RETRY)
@@ -1715,7 +1716,7 @@ out_free:
 	fh->ret = ret;
 
 out_follower:
-	free_prefetch_list(pf_list);
+	free_prefetch_list(new_pf_list);
 	__finish_fault_handling(fh);
 	return ret;
 }
