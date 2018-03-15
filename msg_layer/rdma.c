@@ -1224,7 +1224,7 @@ int __init init_kmsg_rdma(void)
 
 	broadcast_my_node_info(i);
 
-	PCNPRINTK("Popcorn messaging layer over RDMA is ready\n");
+	PCNPRINTK("Ready on InfiniBand RDMA\n");
 	return 0;
 
 out_free:

@@ -391,7 +391,7 @@ static void process_back_migration(back_migration_request_t *req)
 		goto out_free;
 	}
 
-	PRINTK("### BACKMIG [%d] from [%d/%d]\n",
+	PSPRINTK("### BACKMIG [%d] from [%d/%d]\n",
 			current->pid, req->remote_pid, req->remote_nid);
 
 	/* Welcome home */

@@ -4706,7 +4706,7 @@ SYSCALL_DEFINE2(popcorn_get_node_info, int *, _my_nid, struct popcorn_node_info 
 SYSCALL_DEFINE2(popcorn_migrate, int, nid, void __user *, uregs)
 {
 	int ret;
-	PRINTK("####### MIGRATE [%d] to %d\n", current->pid, nid);
+	PSPRINTK("####### MIGRATE [%d] to %d\n", current->pid, nid);
 
 	if (nid == -1) {
 		nid = current->migration_target_nid;

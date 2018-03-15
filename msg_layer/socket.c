@@ -71,7 +71,7 @@ static int ksock_recv(struct socket *sock, char *buf, size_t len)
 static int recv_handler(void* arg0)
 {
 	struct sock_handle *sh = arg0;
-	MSGPRINTK("PCN_RECV handler for %d is ready\n", sh->nid);
+	MSGPRINTK("RECV handler for %d is ready\n", sh->nid);
 
 	while (!kthread_should_stop()) {
 		int len;
@@ -219,7 +219,7 @@ static int deq_send(struct sock_handle *sh)
 static int send_handler(void* arg0)
 {
 	struct sock_handle *sh = arg0;
-	MSGPRINTK("PCN_SEND handler for %d is ready\n", sh->nid);
+	MSGPRINTK("SEND handler for %d is ready\n", sh->nid);
 
 	while (!kthread_should_stop()) {
 		deq_send(sh);
@@ -550,7 +550,7 @@ static int __init init_kmsg_sock(void)
 
 	broadcast_my_node_info(i);
 
-	PCNPRINTK("Popcorn messaging layer over TCP/IP is ready\n");
+	PCNPRINTK("Ready on TCP/IP\n");
 	return 0;
 
 out_exit:
