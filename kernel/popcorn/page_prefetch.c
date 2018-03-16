@@ -257,7 +257,7 @@ struct prefetch_list *select_prefetch_pages(
         struct remote_context *rc;
         unsigned long addr = list_ptr->addr;
         struct vm_area_struct *vma = find_vma(mm, addr);
-        if (!vma || vma->vm_start > addr) { /* ask this causes origin bug_on */
+        if (!vma || vma->vm_start > addr || vma->vm_end < addr) { // xxx: test /* xxx: ASK this causes origin bug_on */
             PFPRINTK("local unselect: %lx no vma/out bound\n", addr);
 			PFPRINTK("\n\n\n\n\n\n\n\n\n\t\t\t\t\t\tI wanna see this \t\t\t\t\t\n\n\n\n\n\n\n\n\n");
             list_ptr++;
@@ -309,6 +309,7 @@ struct prefetch_list *select_prefetch_pages(
         } else { // follower
 			/* TODO - leave? or be a follower, which requires leader to wail it up */
 			//PFPRINTK("unselect %lx %d %d\n", addr, found, page_is_mine(mm, addr));
+			//atomic_inc(&fh->pendings);
 		}
         list_ptr++;
 		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
@@ -389,7 +390,7 @@ int prefetch_at_origin(remote_page_request_t *req)
 	//PFPRINTK("%s(): 0 %lx\n", __func__, list_ptr->addr);
 
 	if(!list_ptr->addr) return -1;
-	
+
 	tsk = __get_task_struct(req->remote_pid);
 	if (!tsk) return -1;
 	mm = get_task_mm(tsk);
@@ -418,11 +419,11 @@ int prefetch_at_origin(remote_page_request_t *req)
 		}
 
 		//BUG_ON(!vma || vma->vm_start > addr);
-		if(!vma || vma->vm_start > addr) {
-			PFPRINTK("origin unselect %lx pte locked\n", addr);
+		if(!vma || vma->vm_start > addr || vma->vm_end < addr) { // xxx: test
+			PFPRINTK("origin unselect %lx no vma/over boundary\n", addr);
 			res->result = PREFETCH_FAIL;
 			res_size = sizeof(remote_prefetch_fail_t);
-			goto out;
+			goto out_post;
 		}
 		
 	
@@ -432,7 +433,7 @@ int prefetch_at_origin(remote_page_request_t *req)
 			PFPRINTK("origin unselect %lx pte locked\n", addr);
 			res->result = PREFETCH_FAIL;
 			res_size = sizeof(remote_prefetch_fail_t);
-			goto out_post;
+			goto out;
 		}
 
         fk = __fault_hash_key(addr);
@@ -444,7 +445,7 @@ int prefetch_at_origin(remote_page_request_t *req)
 			PFPRINTK("origin unselect %lx fh locked\n", addr);
 			res->result = PREFETCH_FAIL;
 			res_size = sizeof(remote_prefetch_fail_t);
-			goto out_post;
+			goto out;
 		}
         spin_unlock(ptl);
 
@@ -456,11 +457,14 @@ int prefetch_at_origin(remote_page_request_t *req)
 		}
 
 		if (found) {
-			/* confliction - follwer case */
+			/* follwer case */
 			res->result = PREFETCH_FAIL;
 			res_size = sizeof(remote_prefetch_fail_t);
 			/* choose1 A - TODO take care of followers */
-			/* TODO */
+			/* TODO - fh? */
+			TODO - fh
+			
+
 			/* choose1 B - Stop execution(B) is more safe for now */
 		} else if (!found && page_is_mine(mm, addr)) {
 			/* no conflict and owner */
@@ -473,18 +477,20 @@ int prefetch_at_origin(remote_page_request_t *req)
 			//fh = __alloc_fault_handle(tsk, addr);
 			//fh->flags |= FAULT_HANDLE_REMOTE;
 			/* choose1 B - instatead of creating a fh addr,
-									send msg out immediately */
+									send msg  immediately */
 			/* none for B */
         } else if (!found && !page_is_mine(mm, addr)){
-			/* send a remote page request TODO: NOT supported yet */
+			/* send a remote page request XXX: NOT supported yet */
+			/* WHAT IF A FOLLOWER WAITING FOR COALESCING - CONSIDER IT */
 			res->result = PREFETCH_FAIL;
 			res_size = sizeof(remote_prefetch_fail_t);
 		} else {
 			BUG();
 		}
 		/* choose1 A - will not block other addresses */
-		//spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
-			
+		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
+		
+		/* till now we either a leader or follower */
 		if (leader) {
 			pte_t entry;
 			spin_lock(ptl);
@@ -511,23 +517,38 @@ int prefetch_at_origin(remote_page_request_t *req)
 		}
 
 		/* choose1 A - will not block other addresses */
-		//__finish_fault_handling(fh); //TODO - check
+		__finish_fault_handling(fh); // no matter leader / follower
 		/* choose1 B - will not casue a resend for the same address */
-		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
-out_post:
-		pte_unmap(pte);
+		/******
+			pte
+			fl   	DEAD_LOCK
+			TODO the plavce of faults_lock
+			TODO move irq_save_lock()
+		******/
+		/******
+		1. Prefetch follower can leave without being a follower!!!!!!!!!!!!!! in fig.3 Follower – PREFETCHED D pass (no fh->pending++)
+		2. Prefetch leader might fail since remote or other resasons - in fig.3 PREFETCHED C leader pass (res->XXX)
+		******/
+		/******
+		1. check get_normal_page and not function impelementation
+		2. move code to page_server
+		3. don't send fh
+		******/
 out:
-		PFPRINTK("handled pf:\t%lx %s\n", addr,
-				res->result & PREFETCH_SUCCESS ? "(O)" : "(X)");
+		pte_unmap(pte);
+out_post:
+		PFPRINTK("handled pf:\t%lx %s %p\n", addr,
+				res->result & PREFETCH_SUCCESS ? "(O)" : "(X)", list_ptr->fh);
+
 		/* msg */
 		res->addr = addr;
 		res->fh = list_ptr->fh;
 		res->remote_pid = req->remote_pid;
 		res->origin_pid = req->origin_pid;
-
 		pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE,
-							PCN_KMSG_FROM_NID(req), res, res_size);
+						PCN_KMSG_FROM_NID(req), res, res_size);
 
+		/* proceed */
 		list_ptr++;
     }
 
@@ -560,7 +581,7 @@ static void process_remote_prefetch_response(struct work_struct *work)
 	}
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, res->addr);
-    BUG_ON(!vma || vma->vm_start > res->addr);
+    BUG_ON(!vma || vma->vm_start > res->addr || vma->vm_end < res->addr); // xxx: test
 
     /* get a page frame for the vma page if needed */
 	if (res->result & PREFETCH_SUCCESS) {

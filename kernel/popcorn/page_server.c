@@ -1016,8 +1016,10 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 	req->remote_pid = from_pid;
 	req->instr_addr = instruction_pointer(current_pt_regs());
 
-	if (pf_list)
-		memcpy(&req->pf_list, pf_list, sizeof(*pf_list));
+	if (pf_list) {
+		//memcpy(&req->pf_list, pf_list, sizeof(*pf_list)); // problem: not clear
+		memcpy(&req->pf_list, pf_list, sizeof(struct prefetch_list));
+	}
 
 	if (TRANSFER_PAGE_WITH_RDMA) {
 		struct pcn_kmsg_rdma_handle *handle =
