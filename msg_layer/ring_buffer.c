@@ -184,6 +184,9 @@ void *ring_buffer_get_mapped(struct ring_buffer *rb, size_t size, dma_addr_t *dm
 	}
 	__set_header(header, false, size);
 	spin_unlock_irqrestore(&rb->lock, flags);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	memset(header + 1, 0xcd, size);
+#endif
 
 	if (dma_addr) {
 		*dma_addr = rb->dma_addr_base[alloc_index] +

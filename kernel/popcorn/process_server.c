@@ -87,7 +87,9 @@ inline bool __put_task_remote(struct remote_context *rc)
 	if (!atomic_dec_and_test(&rc->count)) return false;
 
 	__lock_remote_contexts(rc->for_remote);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(atomic_read(&rc->count));
+#endif
 	list_del(&rc->list);
 	__unlock_remote_contexts(rc->for_remote);
 
@@ -103,6 +105,9 @@ inline bool put_task_remote(struct task_struct *tsk)
 
 void free_remote_context(struct remote_context *rc)
 {
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	BUG_ON(atomic_read(&rc->count) != 1 && atomic_read(&rc->count) != 2);
+#endif
 	__put_task_remote(rc);
 }
 
@@ -714,7 +719,7 @@ static int remote_worker_main(void *data)
 	__terminate_remote_threads(rc);
 
 	put_task_remote(current);
-	return 0;
+	return current->exit_code;
 }
 
 

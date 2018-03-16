@@ -498,6 +498,10 @@ void rdma_kmsg_done(struct pcn_kmsg_message *msg)
 	struct rdma_handle *rh = rdma_handles[from_nid];
 	int index = ((void *)msg - rh->recv_buffer) / PCN_KMSG_MAX_SIZE;
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	BUG_ON(index < 0 || index >= MAX_RECV_DEPTH);
+#endif
+
 	ret = ib_post_recv(rh->qp, &rh->recv_works[index].wr, &bad_wr);
 	BUG_ON(ret || bad_wr);
 }
