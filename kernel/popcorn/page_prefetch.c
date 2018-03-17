@@ -18,7 +18,8 @@
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
 
-#define PFPRINTK(...) printk(KERN_INFO __VA_ARGS__)
+//#define PFPRINTK(...) printk(KERN_INFO __VA_ARGS__)
+#define PFPRINTK(...) 
 ///////////////////////////// TODO test above
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -300,17 +301,13 @@ struct prefetch_list *select_prefetch_pages(
 			}
 		}
 
-        if (!found && !page_is_mine(mm, addr)) { //leader
+        if (!found && !page_is_mine(mm, addr)) {
 			// remotefault | at origin | read
 			fh = __alloc_fault_handle(current, addr);
 			add_pf_list_at(new_pf_list, addr, fh, slot);
 			PFPRINTK("select: [%d] %lx [%d]\n", slot, addr, current->pid);
 			slot++;
-        } else { // follower
-			/* TODO - leave? or be a follower, which requires leader to wail it up */
-			//PFPRINTK("unselect %lx %d %d\n", addr, found, page_is_mine(mm, addr));
-			//atomic_inc(&fh->pendings);
-		}
+        }
         list_ptr++;
 		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
     }
@@ -386,6 +383,7 @@ int prefetch_at_origin(remote_page_request_t *req)
 	struct task_struct *tsk;
     struct remote_context *rc;
 	struct prefetch_body *list_ptr = (struct prefetch_body*)&req->pf_list;
+//struct prefetch_body *list_ptr = NULL;
 	//if (!req->is_prefetch) return -1; //problem: msg size
 	//PFPRINTK("%s(): 0 %lx\n", __func__, list_ptr->addr);
 
@@ -460,12 +458,6 @@ int prefetch_at_origin(remote_page_request_t *req)
 			/* follwer case */
 			res->result = PREFETCH_FAIL;
 			res_size = sizeof(remote_prefetch_fail_t);
-			/* choose1 A - TODO take care of followers */
-			/* TODO - fh? */
-			TODO - fh
-			
-
-			/* choose1 B - Stop execution(B) is more safe for now */
 		} else if (!found && page_is_mine(mm, addr)) {
 			/* no conflict and owner */
 			leader = true;
@@ -474,14 +466,12 @@ int prefetch_at_origin(remote_page_request_t *req)
 
 			/* remotefault | at remote | read */
 			/* choose1 A - */
-			//fh = __alloc_fault_handle(tsk, addr);
-			//fh->flags |= FAULT_HANDLE_REMOTE;
-			/* choose1 B - instatead of creating a fh addr,
-									send msg  immediately */
-			/* none for B */
+			fh = __alloc_fault_handle(tsk, addr);
+			fh->flags |= FAULT_HANDLE_REMOTE;
+
         } else if (!found && !page_is_mine(mm, addr)){
-			/* send a remote page request XXX: NOT supported yet */
-			/* WHAT IF A FOLLOWER WAITING FOR COALESCING - CONSIDER IT */
+			/* send a remote page request XXX: NOT supported yet, merge with upper */
+			/* THIS REMOTE_FETCH MAY FAIL. WHAT IF A FOLLOWER WAITING FOR COALESCING - CONSIDER IT */
 			res->result = PREFETCH_FAIL;
 			res_size = sizeof(remote_prefetch_fail_t);
 		} else {
@@ -514,26 +504,11 @@ int prefetch_at_origin(remote_page_request_t *req)
 			paddr = kmap_atomic(page);
 			copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 			kunmap_atomic(paddr);
+
+			/* choose1 A - will not block other addresses */
+			//__finish_fault_handling(fh); // TODO: check location
 		}
 
-		/* choose1 A - will not block other addresses */
-		__finish_fault_handling(fh); // no matter leader / follower
-		/* choose1 B - will not casue a resend for the same address */
-		/******
-			pte
-			fl   	DEAD_LOCK
-			TODO the plavce of faults_lock
-			TODO move irq_save_lock()
-		******/
-		/******
-		1. Prefetch follower can leave without being a follower!!!!!!!!!!!!!! in fig.3 Follower – PREFETCHED D pass (no fh->pending++)
-		2. Prefetch leader might fail since remote or other resasons - in fig.3 PREFETCHED C leader pass (res->XXX)
-		******/
-		/******
-		1. check get_normal_page and not function impelementation
-		2. move code to page_server
-		3. don't send fh
-		******/
 out:
 		pte_unmap(pte);
 out_post:
@@ -550,6 +525,10 @@ out_post:
 
 		/* proceed */
 		list_ptr++;
+		if (leader) {
+			/* choose1 A - will not block other addresses */
+			__finish_fault_handling(fh); // TODO: check location
+		}
     }
 
 	up_read(&mm->mmap_sem);
@@ -658,6 +637,6 @@ int __init page_prefetch_init(void)
 		PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE, remote_prefetch_response);
 
     __fault_handle_cache = kmem_cache_create("fault_handle",
-	            sizeof(struct fault_handle), 0, 0, NULL);
+							sizeof(struct fault_handle), 0, 0, NULL);
     return 0;
 }

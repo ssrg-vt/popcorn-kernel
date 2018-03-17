@@ -1016,9 +1016,14 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 	req->remote_pid = from_pid;
 	req->instr_addr = instruction_pointer(current_pt_regs());
 
+	/* TODO: use is_pf_list */
+	
 	if (pf_list) {
 		//memcpy(&req->pf_list, pf_list, sizeof(*pf_list)); // problem: not clear
 		memcpy(&req->pf_list, pf_list, sizeof(struct prefetch_list));
+	} else {
+		memset(&req->pf_list, 0, sizeof(struct prefetch_list));
+		//memset(&req->pf_list, 0, sizeof(unsigned long));
 	}
 
 	if (TRANSFER_PAGE_WITH_RDMA) {
@@ -1051,7 +1056,7 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 	struct pcn_kmsg_rdma_handle *rh;
 
 	__request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
-			addr, fault_flags, ws->id, &rh, pf_list);
+						addr, fault_flags, ws->id, &rh, pf_list);
 
 	rp = wait_at_station(ws);
 	if (rp->result == 0) {
@@ -1613,7 +1618,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	struct mem_cgroup *memcg;
 	int ret = 0;
 	struct prefetch_list *pf_list;
-	struct prefetch_list *new_pf_list;
+	struct prefetch_list *new_pf_list = NULL;
 
 	struct fault_handle *fh;
 	bool leader;
