@@ -200,12 +200,10 @@ inline void free_prefetch_list(struct prefetch_list* pf_list)
 
 inline void add_pf_list_at(struct prefetch_list* pf_list,
 							unsigned long addr, 
-							struct fault_handle* fh,
 							int slot_num)
 {
 	struct prefetch_body *list_ptr = (struct prefetch_body*)pf_list;
 	(list_ptr + slot_num)->addr = addr;
-	(list_ptr + slot_num)->fh = fh;
 }
 
 
@@ -304,7 +302,7 @@ struct prefetch_list *select_prefetch_pages(
         if (!found && !page_is_mine(mm, addr)) {
 			// remotefault | at origin | read
 			fh = __alloc_fault_handle(current, addr);
-			add_pf_list_at(new_pf_list, addr, fh, slot);
+			add_pf_list_at(new_pf_list, addr, slot);
 			PFPRINTK("select: [%d] %lx [%d]\n", slot, addr, current->pid);
 			slot++;
         }
@@ -512,12 +510,11 @@ int prefetch_at_origin(remote_page_request_t *req)
 out:
 		pte_unmap(pte);
 out_post:
-		PFPRINTK("handled pf:\t%lx %s %p\n", addr,
-				res->result & PREFETCH_SUCCESS ? "(O)" : "(X)", list_ptr->fh);
+		PFPRINTK("handled pf:\t%lx %s\n", addr,
+				res->result & PREFETCH_SUCCESS ? "(O)" : "(X)");
 
 		/* msg */
 		res->addr = addr;
-		res->fh = list_ptr->fh;
 		res->remote_pid = req->remote_pid;
 		res->origin_pid = req->origin_pid;
 		pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE,
@@ -541,9 +538,13 @@ out_post:
 static void process_remote_prefetch_response(struct work_struct *work)
 {
 	START_KMSG_WORK(remote_prefetch_response_t, res, work);
-	//int ret = 0;
+	int fk;
     struct page *page;
+	bool found = false;
+	unsigned long flags;
     struct mm_struct *mm;
+	struct fault_handle *fh;
+	struct remote_context *rc;
     struct vm_area_struct *vma;
     struct task_struct *tsk = __get_task_struct(res->origin_pid);
     if (!tsk) {
@@ -622,12 +623,26 @@ out_free:
 	mmput(mm);
 out:
 	/* TODO - counter 3 state */
-	PFPRINTK("recv:\t\t>%lx %s %p\n", res->addr,
-				res->result&PREFETCH_SUCCESS?"(O)":"(X)", res->fh);
-	if (res->fh)
-		__finish_fault_handling(res->fh);
+	PFPRINTK("recv:\t\t>%lx %s\n", res->addr,
+				res->result&PREFETCH_SUCCESS?"(O)":"(X)");
+
+	/* release fh */
+	rc = get_task_remote(tsk);
+	fk = __fault_hash_key(res->addr);
+	spin_lock_irqsave(&rc->faults_lock[fk], flags);
+	hlist_for_each_entry(fh, &rc->faults[fk], list) {
+		if (fh->addr == res->addr) {
+			BUG_ON(fh->flags & FAULT_HANDLE_INVALIDATE);
+			found = true;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
+	//PFPRINTK("%s - %s\n", found?"1":"0");
+	BUG_ON(!found);
+	__finish_fault_handling(fh);
+
     END_KMSG_WORK(res);
-	//return ret;
 }
 
 DEFINE_KMSG_WQ_HANDLER(remote_prefetch_response);
