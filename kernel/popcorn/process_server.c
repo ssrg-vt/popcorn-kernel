@@ -89,7 +89,6 @@ inline struct remote_context *get_task_remote(struct task_struct *tsk)
 inline bool __put_task_remote(struct remote_context *rc)
 {
 	if (!atomic_dec_and_test(&rc->count)) return false;
-
 	__lock_remote_contexts(rc->for_remote);
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(atomic_read(&rc->count));

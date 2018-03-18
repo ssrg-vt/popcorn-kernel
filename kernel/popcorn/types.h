@@ -11,9 +11,28 @@
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
-#include "page_prefetch.h"
 
 #define FAULTS_HASH 31
+
+#define MAX_PF_REQ 100 /* max # of prefetching addres(pages) per request */
+
+#define SKIP_NUM_OF_PAGES 1			/* 0 = myself */
+#define PREFETCH_NUM_OF_PAGES 10
+#define PREFETCH_DURATION 1
+
+#define PREFETCH_FAIL 0x0001
+#define PREFETCH_SUCCESS 0x0002
+#define PREFETCH_CONCURRENCY 0x0004 /* impossible: somehow page is mine already */
+
+struct prefetch_body {
+    unsigned long addr;
+    bool is_write;
+    bool is_besteffort;
+} __attribute__((packed));
+
+struct prefetch_list {
+    struct prefetch_body pf_objs[MAX_PF_REQ];
+} __attribute__((packed));
 
 /**
  * Remote execution context
@@ -231,6 +250,7 @@ DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
 
 #define REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
+	pid_t tgid; \
     pid_t origin_pid; \
     pid_t remote_pid; \
     unsigned long addr; \
