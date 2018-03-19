@@ -97,6 +97,8 @@ struct pcn_kmsg_message {
 	unsigned char payload[PCN_KMSG_MAX_PAYLOAD_SIZE];
 } __attribute__((packed));
 
+void pcn_kmsg_dump(struct pcn_kmsg_message *msg);
+
 
 /* SETUP */
 

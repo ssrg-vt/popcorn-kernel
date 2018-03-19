@@ -204,6 +204,15 @@ void pcn_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
 EXPORT_SYMBOL(pcn_kmsg_unpin_rdma_buffer);
 
 
+void pcn_kmsg_dump(struct pcn_kmsg_message *msg)
+{
+	struct pcn_kmsg_hdr *h = &msg->header;
+	printk("MSG %p: from=%d type=%d size=%lu\n",
+			msg, h->from_nid, h->type, h->size);
+}
+EXPORT_SYMBOL(pcn_kmsg_dump);
+
+
 int __init pcn_kmsg_init(void)
 {
 	return 0;
