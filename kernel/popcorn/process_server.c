@@ -616,7 +616,6 @@ static void __terminate_remote_threads(struct remote_context *rc)
 	for_each_thread(current, tsk) {
 		if (tsk->is_worker) continue;
 		force_sig(current->exit_code, tsk);
-		break;
 	}
 	rcu_read_unlock();
 }
