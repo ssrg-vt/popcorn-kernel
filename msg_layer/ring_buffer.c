@@ -166,7 +166,7 @@ void *ring_buffer_get_mapped(struct ring_buffer *rb, size_t size, dma_addr_t *dm
 	/* Is buffer full? */
 	if (rb->wraparounded && rb->head_chunk == rb->tail_chunk) {
 		if (rb->tail + sizeof(*header) + size > rb->head) {
-			spin_unlock(&rb->lock);
+			spin_unlock_irqrestore(&rb->lock, flags);
 			return NULL;
 		}
 	}
