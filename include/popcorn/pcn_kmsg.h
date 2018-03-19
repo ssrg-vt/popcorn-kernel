@@ -74,7 +74,6 @@ struct pcn_kmsg_hdr {
 	int from_nid			:6;
 	enum pcn_kmsg_prio prio	:2;
 	enum pcn_kmsg_type type	:8;
-	int flags				:8;
 	size_t size;
 } __attribute__((packed));
 

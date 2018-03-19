@@ -418,11 +418,11 @@ static int __init __accept_client(int *nid)
 	} while (retry++ < 10 && !found);
 
 	if (!found) return -EAGAIN;
+	sock_handles[*nid].sock = sock;
 
 	ret = __start_handlers(*nid);
 	if (ret) goto out_release;
 
-	sock_handles[*nid].sock = sock;
 	return 0;
 
 out_release:
