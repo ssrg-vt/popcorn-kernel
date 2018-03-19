@@ -946,7 +946,6 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 			res->addr, res->result);
 	ws->private = res;
 
-	smp_mb();
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
 	return 0;
