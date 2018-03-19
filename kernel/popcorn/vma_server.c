@@ -866,9 +866,9 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		list_del(&vi->list);
 		spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
+		pcn_kmsg_free_msg((void *)vi->response);
 		wake_up_all(&vi->pendings_wait);
 
-		pcn_kmsg_free_msg((void *)vi->response);
 		kfree(req);
 	} else {
 		VSPRINTK("  [%d] %lx already pended\n", current->pid, addr);
