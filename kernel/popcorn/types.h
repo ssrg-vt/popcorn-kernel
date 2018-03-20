@@ -321,9 +321,10 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 
 	w->msg = msg;
 	INIT_WORK(&w->work, handler);
+	smp_wmb();
 	queue_work(wq, &w->work);
 
-	return 1;
+	return 0;
 }
 
 int request_remote_work(pid_t pid, struct pcn_kmsg_message *req);

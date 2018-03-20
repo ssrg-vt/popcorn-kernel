@@ -159,7 +159,8 @@ static int enq_send(int dest_nid, struct pcn_kmsg_message *msg, unsigned long fl
 	qi->msg = msg;
 	qi->flags = flags;
 	qi->done = done;
-	up(&sh->q_empty);	/* implicit mb */
+	smp_wmb();
+	up(&sh->q_empty);
 
 	return at;
 }
@@ -192,7 +193,8 @@ static int deq_send(struct sock_handle *sh)
 	msg = qi->msg;
 	flags = qi->flags;
 	done = qi->done;
-	up(&(sh->q_full));	/* implicit mb */
+	smp_wmb();
+	up(&(sh->q_full));
 
 	p = (char *)msg;
 	remaining = msg->header.size;

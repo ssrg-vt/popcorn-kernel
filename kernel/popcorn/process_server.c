@@ -708,7 +708,6 @@ static int remote_worker_main(void *data)
 
 	get_task_remote(current);
 	rc->tgid = current->tgid;
-	smp_mb();
 	
 	__run_remote_worker(rc);
 
@@ -762,7 +761,7 @@ static void clone_remote_thread(struct work_struct *_work)
 		params->rc = rc;
 		params->req = req;
 		__build_task_comm(params->comm, req->exe_path);
-		smp_mb();
+		smp_wmb();
 
 		rc->remote_worker =
 				kthread_run(remote_worker_main, params, params->comm);
