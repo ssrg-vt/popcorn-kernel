@@ -228,10 +228,9 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	unsigned long instr_addr; \
 	dma_addr_t rdma_addr; \
 	u32 rdma_key; \
-	struct prefetch_list pf_list
+	bool is_pf_list; \
+	struct prefetch_list pf_list;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
-
-// problem 2 list?
 
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	pid_t remote_pid; \
@@ -256,7 +255,6 @@ DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
     unsigned long addr; \
     dma_addr_t rdma_addr; \
     u32 rdma_key; \
-	struct fault_handle *fh; \
 	int result;
 
 #define REMOTE_PREFETCH_RESPONSE_FIELDS \

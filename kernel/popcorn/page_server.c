@@ -1028,13 +1028,14 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 	req->remote_pid = from_pid;
 	req->instr_addr = instruction_pointer(current_pt_regs());
 
-	/* TODO: use is_pf_list */
 	if (pf_list) {
-		//memcpy(&req->pf_list, pf_list, sizeof(*pf_list)); // problem: not clear
-		memcpy(&req->pf_list, pf_list, sizeof(struct prefetch_list));
+		req->is_pf_list = true;
+		memcpy(&req->pf_list, pf_list, sizeof(struct prefetch_list)); // problem: too large
+		////memcpy(&req->pf_list, pf_list, sizeof(*pf_list)); // problem: not clear
 	} else {
-		memset(&req->pf_list, 0, sizeof(struct prefetch_list));
-		//memset(&req->pf_list, 0, sizeof(unsigned long));
+		req->is_pf_list = false;
+		//memset(&req->pf_list, 0, sizeof(struct prefetch_list));
+		////memset(&req->pf_list, 0, sizeof(unsigned long));
 	}
 
 	if (TRANSFER_PAGE_WITH_RDMA) {
@@ -2092,10 +2093,8 @@ int prefetch_at_origin(remote_page_request_t *req)
 	struct task_struct *tsk;
     struct remote_context *rc;
 	struct prefetch_body *list_ptr = (struct prefetch_body*)&req->pf_list;
-	//if (!req->is_prefetch) return -1; //problem: msg size
-	//PFPRINTK("%s(): 0 %lx\n", __func__, list_ptr->addr);
-
-	if(!list_ptr->addr) return -1;
+	if (!req->is_pf_list) return -1;
+	if(!list_ptr->addr) return -1; /* impossible */
 
 	tsk = __get_task_struct(req->remote_pid);
 	if (!tsk) return -1;
