@@ -16,13 +16,13 @@
 
 #define MAX_PF_REQ 100 /* max # of prefetching addres(pages) per request */
 
-#define SKIP_NUM_OF_PAGES 1			/* 0 = myself */
-#define PREFETCH_NUM_OF_PAGES 10
-#define PREFETCH_DURATION 1
+#define SKIP_NUM_OF_PAGES 10			/* 0 = myself */
+#define PREFETCH_NUM_OF_PAGES 20
+#define PREFETCH_DURATION 5
 
 #define PREFETCH_FAIL 0x0001
 #define PREFETCH_SUCCESS 0x0002
-#define PREFETCH_CONCURRENCY 0x0004 /* impossible: somehow page is mine already */
+//#define PREFETCH_CONCURRENCY 0x0004 /* impossible: somehow page is mine already */
 
 struct prefetch_body {
     unsigned long addr;
@@ -255,7 +255,8 @@ DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
     unsigned long addr; \
     dma_addr_t rdma_addr; \
     u32 rdma_key; \
-	int result;
+	int result; \
+	bool is_write;
 
 #define REMOTE_PREFETCH_RESPONSE_FIELDS \
 	REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
