@@ -76,7 +76,7 @@ static int __show_stats(struct seq_file *seq, void *v)
 			(last_stat.tv_sec * 1000000 + last_stat.tv_usec);
 	last_stat = now;
 
-	for_each_possible_cpu(i) {
+	for_each_present_cpu(i) {
 		sent += per_cpu(bytes_sent, i);
 		recv += per_cpu(bytes_recv, i);
 	}
@@ -93,7 +93,7 @@ static int __show_stats(struct seq_file *seq, void *v)
 
 	if (pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA) && elapsed) {
 		recv = sent = 0;
-		for_each_possible_cpu(i) {
+		for_each_present_cpu(i) {
 			sent += per_cpu(bytes_rdma_written, i);
 			recv += per_cpu(bytes_rdma_read, i);
 		}
@@ -127,7 +127,7 @@ static int __show_stats(struct seq_file *seq, void *v)
 static ssize_t __write_stats(struct file *file, const char __user *buffer, size_t size, loff_t *offset)
 {
 	int i;
-	for_each_possible_cpu(i) {
+	for_each_present_cpu(i) {
 		per_cpu(bytes_sent, i) = 0;
 		per_cpu(bytes_recv, i) = 0;
 		per_cpu(bytes_rdma_written, i) = 0;
