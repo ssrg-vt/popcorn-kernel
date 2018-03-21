@@ -154,12 +154,11 @@ static int enq_send(int dest_nid, struct pcn_kmsg_message *msg, unsigned long fl
 	at = sh->q_tail;
 	qi = sh->msg_q + at;
 	sh->q_tail = (at + 1) & (MAX_SEND_DEPTH - 1);
-	spin_unlock(&sh->q_lock);
 
 	qi->msg = msg;
 	qi->flags = flags;
 	qi->done = done;
-	smp_wmb();
+	spin_unlock(&sh->q_lock);
 	up(&sh->q_empty);
 
 	return at;
@@ -184,17 +183,12 @@ static int deq_send(struct sock_handle *sh)
 	from = sh->q_head;
 	qi = sh->msg_q + from;
 	sh->q_head = (from + 1) & (MAX_SEND_DEPTH - 1);
-	spin_unlock(&sh->q_lock);
 
-	/**
-	 * qi can be overwritten by subsequent enqueue after the up(), so should
-	 * backup q_item values prior to invoke up().
-	 */
 	msg = qi->msg;
 	flags = qi->flags;
 	done = qi->done;
-	smp_wmb();
-	up(&(sh->q_full));
+	spin_unlock(&sh->q_lock);
+	up(&sh->q_full);
 
 	p = (char *)msg;
 	remaining = msg->header.size;

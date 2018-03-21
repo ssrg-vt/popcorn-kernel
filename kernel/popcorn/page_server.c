@@ -364,7 +364,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 
 	if (found) {
 		unsigned long action =
-				get_fh_action( tsk->at_remote, fh->flags, fault_flags);
+				get_fh_action(tsk->at_remote, fh->flags, fault_flags);
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 		BUG_ON(action == FH_ACTION_INVALID);
@@ -973,7 +973,10 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 	if (TRANSFER_PAGE_WITH_RDMA) {
 		struct pcn_kmsg_rdma_handle *handle =
 				pcn_kmsg_pin_rdma_buffer(NULL, PAGE_SIZE);
-		if (IS_ERR(handle)) return PTR_ERR(handle);
+		if (IS_ERR(handle)) {
+			pcn_kmsg_put(req);
+			return PTR_ERR(handle);
+		}
 		*rh = handle;
 		req->rdma_addr = handle->dma_addr;
 		req->rdma_key = handle->rkey;
