@@ -17,8 +17,8 @@
 #define MAX_PF_REQ 100 /* max # of prefetching addres(pages) per request */
 
 #define SKIP_NUM_OF_PAGES 10			/* 0 = myself */
-#define PREFETCH_NUM_OF_PAGES 20
-#define PREFETCH_DURATION 5
+#define PREFETCH_NUM_OF_PAGES 50
+#define PREFETCH_DURATION 1
 
 #define PREFETCH_FAIL 0x0001
 #define PREFETCH_SUCCESS 0x0002

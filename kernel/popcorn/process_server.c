@@ -811,6 +811,14 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 		goto out_err;
 	}
 
+	mm = get_task_mm(tsk);
+	if (!mm) {
+		printk("mm is gone\n");
+		pcn_kmsg_done(req);
+		put_task_struct(tsk);
+		return -ESRCH;
+	}
+
 	/**
 	 * Origin-initiated remote works are node-wide operations, thus, enqueue
 	 * such requests into the remote work queue.
