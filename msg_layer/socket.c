@@ -164,6 +164,8 @@ static int enq_send(int dest_nid, struct pcn_kmsg_message *msg, unsigned long fl
 	return at;
 }
 
+void sock_kmsg_put(struct pcn_kmsg_message *msg);
+
 static int deq_send(struct sock_handle *sh)
 {
 	int ret;
@@ -205,7 +207,7 @@ static int deq_send(struct sock_handle *sh)
 		//printk("Sent %d remaining %d\n", sent, remaining);
 	}
 	if (test_bit(SEND_FLAG_POSTED, &flags)) {
-		ring_buffer_put(&send_buffer, msg);
+		sock_kmsg_put(msg);
 	}
 	if (done) complete(done);
 
@@ -225,6 +227,7 @@ static int send_handler(void* arg0)
 }
 
 
+#define WORKAROUND_POOL
 /***********************************************
  * Manage send buffer
  ***********************************************/
@@ -233,16 +236,24 @@ struct pcn_kmsg_message *sock_kmsg_get(size_t size)
 	struct pcn_kmsg_message *msg;
 	might_sleep();
 
+#ifdef WORKAROUND_POOL
+	msg = kmalloc(size, GFP_KERNEL);
+#else
 	while (!(msg = ring_buffer_get(&send_buffer, size))) {
 		WARN_ON_ONCE("ring buffer is full\n");
 		schedule();
 	}
+#endif
 	return msg;
 }
 
 void sock_kmsg_put(struct pcn_kmsg_message *msg)
 {
+#ifdef WORKAROUND_POOL
+	kfree(msg);
+#else
 	ring_buffer_put(&send_buffer, msg);
+#endif
 }
 
 
