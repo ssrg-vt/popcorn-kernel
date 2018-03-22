@@ -800,11 +800,18 @@ static int handle_clone_request(struct pcn_kmsg_message *msg)
 int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 {
 	struct task_struct *tsk = __get_task_struct(pid);
+	struct mm_struct *mm;
+	int ret = -ESRCH;
 	if (!tsk) {
 		printk(KERN_INFO"%s: invalid origin task %d for remote work %d\n",
 				__func__, pid, req->header.type);
-		pcn_kmsg_done(req);
-		return -ESRCH;
+		goto out_err;
+	}
+
+	mm = get_task_mm(tsk);
+	if (!mm) {
+		put_task_struct(tsk);
+		goto out_err;
 	}
 
 	/**
@@ -829,8 +836,13 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 		complete(&tsk->remote_work_pended); /* implicit memory barrier */
 	}
 
+	mmput(mm);
 	put_task_struct(tsk);
 	return 0;
+
+out_err:
+	pcn_kmsg_done(req);
+	return ret;
 }
 
 static void __process_remote_works(void)
