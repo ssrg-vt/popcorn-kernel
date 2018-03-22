@@ -12,7 +12,6 @@
 
 struct ring_buffer_header {
 	bool reclaim:1;
-	bool last:1;
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	unsigned int magic:8;
 #endif
@@ -206,6 +205,9 @@ void ring_buffer_put(struct ring_buffer *rb, void *buffer)
 	unsigned long flags;
 
 	header = buffer - sizeof(*header);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	memset(buffer, 0xaf, header->size);	/* put poision */
+#endif
 
 	spin_lock_irqsave(&rb->lock, flags);
 	header->reclaim = true;
