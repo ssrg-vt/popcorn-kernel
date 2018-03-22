@@ -20,6 +20,7 @@
 #include <linux/delay.h>
 #include <linux/random.h>
 #include <linux/radix-tree.h>
+#include <linux/mman.h>
 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
@@ -42,8 +43,12 @@
 //#define PFPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #define PFPRINTK(...)
 
+spinlock_t pf_lock;
+struct list_head pfq_list_head;
+
 struct prefetch_list *alloc_prefetch_list(void);
 void free_prefetch_list(struct prefetch_list* pf_list);
+void prefetch_policy(struct prefetch_list* pf_list);
 void prefetch_dummy_policy(struct prefetch_list* pf_list, unsigned long fault_addr);
 struct prefetch_list *select_prefetch_pages(
 					struct prefetch_list* pf_list, struct mm_struct *mm);
@@ -1189,9 +1194,10 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 static void __claim_local_page_with_rc(struct task_struct *tsk, unsigned long addr, int except_nid, struct mm_struct *mm, struct remote_context *rc)
 {
 	//struct mm_struct *mm = tsk->mm;
-	BUG_ON(!mm);
-	unsigned long *pi = __get_page_info(mm, addr);
 	int peers;
+	unsigned long *pi;
+	BUG_ON(!mm);
+	pi = __get_page_info(mm, addr);
 
 	if (!pi) return; /* skip claiming non-distributed page */
 	peers = bitmap_weight(pi, MAX_POPCORN_NODES);
@@ -1205,9 +1211,10 @@ static void __claim_local_page_with_rc(struct task_struct *tsk, unsigned long ad
 	if (peers > 0) {
 		int nid;
 		//struct remote_context *rc = rc;
+		struct wait_station *ws;
 		BUG_ON(!rc);
 		atomic_inc(&rc->count);
-		struct wait_station *ws = get_wait_station_multiple(tsk, peers);
+		ws = get_wait_station_multiple(tsk, peers);
 
 		for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
 			pid_t pid = rc->remote_tgids[nid];
@@ -1738,7 +1745,8 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	get_page(page);
 
 	pf_list = alloc_prefetch_list();
-    prefetch_dummy_policy(pf_list, addr);
+    prefetch_policy(pf_list);
+    //prefetch_dummy_policy(pf_list, addr);
     new_pf_list = select_prefetch_pages(pf_list, mm);
 
 	rp = __fetch_page_from_origin(current, vma, addr,
@@ -2038,28 +2046,75 @@ inline void add_pf_list_at(struct prefetch_list* pf_list, unsigned long addr,
 	(list_ptr + slot_num)->is_besteffort = besteffort;
 }
 
+
+long madvise_prefetch_rw(struct vm_area_struct *vma, struct vm_area_struct **prev,
+							unsigned long start, unsigned long end, int behavior)
+{
+	int err = 0;
+	unsigned long addr = start;
+	struct prefetch_madvise *curr;
+	*prev = vma;
+
+	PFPRINTK("%s(): %d %lx\n", __func__, current->pid, start);
+
+	/* XXX - sorry origin */
+	if (!current->at_remote) return 0;
+
+	curr = kmalloc(sizeof(*curr), GFP_KERNEL);
+	curr->pid = current->pid;
+	curr->pfb.addr = addr;
+
+	if (behavior == MADV_READ)
+		curr->pfb.is_write = false;
+	else if (behavior == MADV_WRITE)
+		curr->pfb.is_write = true;
+	else
+		BUG();
+
+	//curr->pfb.is_besteffort = i % 2 ? true : false;
+	//curr->pfb.is_besteffort = true;
+	curr->pfb.is_besteffort = false;
+
+	spin_lock(&pf_lock);
+	list_add_tail(&curr->list, &pfq_list_head);
+	spin_unlock(&pf_lock);
+
+	PFPRINTK("%s(): %d %lx w(%s) b(%s) m->q\n", __func__,
+			curr->pid, curr->pfb.addr,
+			curr->pfb.is_write ? "O" : "X",
+			curr->pfb.is_besteffort ? "O" : "X");
+
+	return err;
+}
 /*
  * Get prefetching pages
  */
 void prefetch_policy(struct prefetch_list* pf_list)
 {
 	static uint8_t cnt = 0;
+	struct prefetch_madvise *curr, *next;
 	struct prefetch_body *list_ptr = (struct prefetch_body*)pf_list;
 	/* Get advise from mdivise() */
-/*
-	spin_lock(pf_lock);
-	// while (!list_empty() && cnt < 100)
-	{
-		list_get_del()
-		pf_list->addr = 
-		pf_list->is_write = 
-		pf_list->is_besteffort = 
-		cnt++;
-		list_ptr++;
-	}
-	spin_unlock(pf_lock);
-*/
+	if(list_empty(&pfq_list_head))
+		return;
 
+	spin_lock(&pf_lock);
+	list_for_each_entry_safe(curr, next, &pfq_list_head, list) {
+		if(curr->pid != current->pid) continue;
+		list_ptr->addr = curr->pfb.addr;
+		list_ptr->is_write = curr->pfb.is_write;
+		list_ptr->is_besteffort = curr->pfb.is_besteffort;
+		list_ptr++;
+		list_del(&curr->list);
+		PFPRINTK("%s(): %d %lx w(%s) b(%s) q->l\n", __func__,
+				curr->pid, curr->pfb.addr,
+				curr->pfb.is_write ? "O" : "X",
+				curr->pfb.is_besteffort ? "O" : "X");
+		kfree(curr);
+		if (cnt > 100) break;
+		cnt++;
+	}
+	spin_unlock(&pf_lock);
 }
 
 void prefetch_dummy_policy(struct prefetch_list* pf_list, unsigned long fault_addr)
@@ -2072,12 +2127,13 @@ void prefetch_dummy_policy(struct prefetch_list* pf_list, unsigned long fault_ad
 		list_ptr = (struct prefetch_body*)pf_list;
 		for(i = 0; i < PREFETCH_NUM_OF_PAGES; i++) {
 			list_ptr->addr = fault_addr + ((i + SKIP_NUM_OF_PAGES) * PAGE_SIZE);
-			list_ptr->is_write = i % 2 ? true : false;
+			//list_ptr->is_write = i % 2 ? true : false;
 			//list_ptr->is_write = true;
-			//list_ptr->is_write = false;
-			list_ptr->is_besteffort = i % 2 ? true : false;
+			list_ptr->is_write = false;
+			//list_ptr->is_besteffort = i % 2 ? true : false;
 			//list_ptr->is_besteffort = true;
-			//list_ptr->is_besteffort = false;
+			list_ptr->is_besteffort = false;
+			PFPRINTK("dummy policy: [%d] [%d] %lx\n", current->pid, i, list_ptr->addr);
 			list_ptr++;
 		}
 		cnt = 0;
@@ -2095,6 +2151,7 @@ struct prefetch_list *select_prefetch_pages(
     int slot = 0;
     struct prefetch_list *new_pf_list = NULL;
     struct prefetch_body *list_ptr = (struct prefetch_body*)pf_list;
+    if (!pf_list) return NULL;
     if (!(list_ptr->addr)) goto out;
 
     new_pf_list = alloc_prefetch_list();
@@ -2109,17 +2166,23 @@ struct prefetch_list *select_prefetch_pages(
         struct remote_context *rc;
         unsigned long addr = list_ptr->addr;
         struct vm_area_struct *vma = find_vma(mm, addr);
-        if (!vma || vma->vm_start > addr || vma->vm_end < addr)
+        if (!vma || vma->vm_start > addr || vma->vm_end < addr) {
+			PFPRINTK("%s(): %lx > [!%lx] > %lx\n", __func__,
+							vma->vm_start, addr, vma->vm_end);
 			goto next;
-
+		}
         pte = __get_pte_at(mm, addr, &pmd, &ptl);
-		if (!pte) goto next;
+		if (!pte) {
+			PFPRINTK("%s(): local skip !pte\n", __func__);
+			goto next;
+		}
 
 		if (list_ptr->is_besteffort) {
 			spin_lock(ptl);
 		} else {
 			if(!spin_trylock(ptl)) {
 				pte_unmap(pte);
+				PFPRINTK("%s(): local skip pte locked\n", __func__);
 				goto next;
 			}
 		}
@@ -2133,6 +2196,7 @@ struct prefetch_list *select_prefetch_pages(
 			if(!spin_trylock_irqsave(&rc->faults_lock[fk], flags)) {
 				spin_unlock(ptl);
 				pte_unmap(pte);
+				PFPRINTK("%s(): local skip fh locked\n", __func__);
 				goto next_put;
 			}
 		}
@@ -2162,13 +2226,13 @@ struct prefetch_list *select_prefetch_pages(
 				if (page_is_mine(mm, addr) &&	/* I own */
 					!pte_write(*pte) &&			/* but read-only */
 					list_ptr->is_write ) {		/* pf w/ write */
-					PFPRINTK("%s(): 1 r R->W %lx ", __func__, addr);
+					PFPRINTK("%s(): 1 r R->W. ", __func__);
 					BUG_ON(pte_write(*pte));
 				} else {
-					PFPRINTK("%s(): 2 r X->W %lx ", __func__, addr);
+					PFPRINTK("%s(): 2 r X->W. ", __func__);
 				}	
 #endif
-				PFPRINTK("select: [%d] %lx [%d]\n", slot, addr, current->pid);
+				PFPRINTK("select: [%d] [%d] %lx\n", current->pid, slot, addr);
 				/* XXX: counter like trace_pgfault */
 				slot++;
         	}
@@ -2567,6 +2631,8 @@ int __init page_server_init(void)
     REGISTER_KMSG_WQ_HANDLER(
 		PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE, remote_prefetch_response);
 
+	INIT_LIST_HEAD(&pfq_list_head);
+	spin_lock_init(&pf_lock);
 	__fault_handle_cache = kmem_cache_create("fault_handle",
 			sizeof(struct fault_handle), 0, 0, NULL);
 

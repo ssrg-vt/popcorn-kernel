@@ -16,9 +16,9 @@
 
 #define MAX_PF_REQ 100 /* max # of prefetching addres(pages) per request */
 
-#define SKIP_NUM_OF_PAGES 10			/* 0 = myself */
-#define PREFETCH_NUM_OF_PAGES 50
-#define PREFETCH_DURATION 1
+#define SKIP_NUM_OF_PAGES 20			/* 0 = myself */
+#define PREFETCH_NUM_OF_PAGES 20
+#define PREFETCH_DURATION 10
 
 #define PREFETCH_FAIL 0x0001
 #define PREFETCH_SUCCESS 0x0002
@@ -28,6 +28,12 @@ struct prefetch_body {
     unsigned long addr;
     bool is_write;
     bool is_besteffort;
+} __attribute__((packed));
+
+struct prefetch_madvise {
+	struct list_head list;
+	struct prefetch_body pfb;
+	pid_t pid;
 } __attribute__((packed));
 
 struct prefetch_list {

@@ -41,6 +41,8 @@ static int madvise_need_mmap_write(int behavior)
 	case MADV_DONTNEED:
 #ifdef CONFIG_POPCORN
 	case MADV_RELEASE:
+	case MADV_WRITE:
+	case MADV_READ:
 #endif
 		return 0;
 	default:
@@ -409,8 +411,16 @@ madvise_vma(struct vm_area_struct *vma, struct vm_area_struct **prev,
 	case MADV_DONTNEED:
 		return madvise_dontneed(vma, prev, start, end);
 #ifdef CONFIG_POPCORN
-	case MADV_RELEASE:
-		return madvise_release(vma, start, end);
+	//case MADV_RELEASE:
+	//	return madvise_release(vma, start, end);
+	case MADV_READ:
+	case MADV_WRITE:
+		if (distributed_remote_process(current))
+			return madvise_prefetch_rw(vma, prev, start, end, behavior);
+		else {
+			*prev = vma;
+			return 0;
+		}
 #endif
 	default:
 		return madvise_behavior(vma, prev, start, end, behavior);
@@ -441,6 +451,8 @@ madvise_behavior_valid(int behavior)
 	case MADV_DODUMP:
 #ifdef CONFIG_POPCORN
 	case MADV_RELEASE:
+	case MADV_WRITE:
+	case MADV_READ:
 #endif
 		return true;
 
@@ -503,6 +515,12 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 #ifdef CONFIG_POPCORN
 	unsigned long start_orig = start;
 	size_t len_orig = len_in;
+
+	if(!distributed_process(current))
+		if (behavior & MADV_READ)
+			return -EINVAL;
+		else if (behavior & MADV_WRITE)
+			return -EINVAL;
 #endif
 
 #ifdef CONFIG_MEMORY_FAILURE
@@ -587,8 +605,15 @@ out:
 
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
-		error = vma_server_madvise_remote(start_orig, len_orig, behavior);
-		if (error) return error;
+		//error = vma_server_madvise_remote(start_orig, len_orig, behavior);
+		//if (error) return error;
+//		printk("%s(): %d\n", __func__, behavior);
+		//- Requesting read permissions: 20
+		//- Requesting write permissions: 19
+		//- Requesting releasing of permissions: 18
+	}
+	if (behavior == MADV_REMOVE || behavior == MADV_WRITE) {
+//		printk("%s(): local prediction %d\n", __func__, behavior);
 	}
 #endif
 

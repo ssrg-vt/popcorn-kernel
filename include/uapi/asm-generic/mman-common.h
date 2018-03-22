@@ -59,6 +59,8 @@
 
 #ifdef CONFIG_POPCORN
 #define MADV_RELEASE 18
+#define MADV_WRITE 19
+#define MADV_READ 20
 #endif
 
 /* compatibility flags */
