@@ -2030,18 +2030,26 @@ struct prefetch_list *select_prefetch_pages(
         pte = __get_pte_at(mm, addr, &pmd, &ptl);
 		if (!pte) goto next;
 
-        if(!spin_trylock(ptl)) {
-			pte_unmap(pte);
-			goto next;
+		if (list_ptr->is_besteffort) {
+			spin_lock(ptl);
+		} else {
+			if(!spin_trylock(ptl)) {
+				pte_unmap(pte);
+				goto next;
+			}
 		}
 
 		rc = get_task_remote(current);
         fk = __fault_hash_key(addr);
 
-		if(!spin_trylock_irqsave(&rc->faults_lock[fk], flags)) {
-			spin_unlock(ptl);
-			pte_unmap(pte);
-			goto next_put;
+		if (list_ptr->is_besteffort) {
+			spin_lock_irqsave(&rc->faults_lock[fk], flags);
+		} else {
+			if(!spin_trylock_irqsave(&rc->faults_lock[fk], flags)) {
+				spin_unlock(ptl);
+				pte_unmap(pte);
+				goto next_put;
+			}
 		}
         spin_unlock(ptl);
 
@@ -2137,21 +2145,30 @@ int prefetch_at_origin(remote_page_request_t *req)
 		}
 
         pte = __get_pte_at(mm, addr, &pmd, &ptl);
-        if(!spin_trylock(ptl)) {
-			PFPRINTK("origin unselect %lx pte locked\n", addr);
-			res->result = PREFETCH_FAIL;
-			res_size = sizeof(remote_prefetch_fail_t);
-			goto next;
+
+		if (list_ptr->is_besteffort) {
+			spin_lock(ptl);
+		} else {
+			if(!spin_trylock(ptl)) {
+				PFPRINTK("origin unselect %lx pte locked\n", addr);
+				res->result = PREFETCH_FAIL;
+				res_size = sizeof(remote_prefetch_fail_t);
+				goto next;
+			}
 		}
 
         fk = __fault_hash_key(addr);
-
-		if(!spin_trylock_irqsave(&rc->faults_lock[fk], flags)) {
-			spin_unlock(ptl);
-			PFPRINTK("origin unselect %lx fh locked\n", addr);
-			res->result = PREFETCH_FAIL;
-			res_size = sizeof(remote_prefetch_fail_t);
-			goto next;
+		
+		if (list_ptr->is_besteffort) {
+			spin_lock_irqsave(&rc->faults_lock[fk], flags);
+		} else {
+			if(!spin_trylock_irqsave(&rc->faults_lock[fk], flags)) {
+				spin_unlock(ptl);
+				PFPRINTK("origin unselect %lx fh locked\n", addr);
+				res->result = PREFETCH_FAIL;
+				res_size = sizeof(remote_prefetch_fail_t);
+				goto next;
+			}
 		}
         spin_unlock(ptl);
 
