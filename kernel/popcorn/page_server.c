@@ -95,134 +95,175 @@ static inline void __get_page_info_key(unsigned long addr, unsigned long *key, u
 			(PER_PAGE_INFO_SIZE / sizeof(unsigned long));
 }
 
-static inline unsigned long *__get_page_info(struct mm_struct *mm, unsigned long addr)
+static inline struct page *__get_page_info_page(struct mm_struct *mm, unsigned long addr, unsigned long *offset)
 {
-	unsigned long key, offset;
-	unsigned long *region;
+	unsigned long key;
+	struct page *page;
 	struct remote_context *rc = mm->remote;
-	__get_page_info_key(addr, &key, &offset);
+	__get_page_info_key(addr, &key, offset);
 
-	region = radix_tree_lookup(&rc->pages, key);
-	if (!region) return NULL;
+	page = radix_tree_lookup(&rc->pages, key);
+	if (!page) return NULL;
 
-	return region + offset;
+	return page;
+}
+
+static inline unsigned long *__get_page_info_mapped(struct mm_struct *mm, unsigned long addr, unsigned long *offset)
+{
+	unsigned long key;
+	struct page *page;
+	struct remote_context *rc = mm->remote;
+	__get_page_info_key(addr, &key, offset);
+
+	page = radix_tree_lookup(&rc->pages, key);
+	if (!page) return NULL;
+
+	return (unsigned long *)kmap_atomic(page) + *offset;
 }
 
 void free_remote_context_pages(struct remote_context *rc)
 {
-	int nr_regions;
+	int nr_pages;
 	const int FREE_BATCH = 16;
-	unsigned long regions[FREE_BATCH];
+	struct page *pages[FREE_BATCH];
 
 	do {
 		int i;
-		nr_regions = radix_tree_gang_lookup(&rc->pages,
-				(void **)regions, 0, FREE_BATCH);
+		nr_pages = radix_tree_gang_lookup(&rc->pages,
+				(void **)pages, 0, FREE_BATCH);
 
-		for (i = 0; i < nr_regions; i++) {
-			struct page *page = virt_to_page(regions[i]);
+		for (i = 0; i < nr_pages; i++) {
+			struct page *page = pages[i];
 			radix_tree_delete(&rc->pages, page_private(page));
-			kunmap(page);
 			__free_page(page);
 		}
-	} while (nr_regions == FREE_BATCH);
+	} while (nr_pages == FREE_BATCH);
 }
 
 #define PI_FLAG_COWED 62
 #define PI_FLAG_DISTRIBUTED 63
 
-static unsigned long *__lookup_region(struct remote_context *rc, unsigned long key)
+static struct page *__lookup_page_info_page(struct remote_context *rc, unsigned long key)
 {
-	unsigned long *region = radix_tree_lookup(&rc->pages, key);
-	if (!region) {
+	struct page *page = radix_tree_lookup(&rc->pages, key);
+	if (!page) {
 		int ret;
-		struct page *page = alloc_page(GFP_ATOMIC | __GFP_ZERO);
+		page = alloc_page(GFP_ATOMIC | __GFP_ZERO);
 		BUG_ON(!page);
 		set_page_private(page, key);
 
-		region = kmap(page);
-		ret = radix_tree_insert(&rc->pages, key, region);
+		ret = radix_tree_insert(&rc->pages, key, page);
 		BUG_ON(ret);
 	}
-	return region;
+	return page;
 }
 
 static inline void SetPageDistributed(struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long key, offset;
 	unsigned long *region;
+	struct page *page;
 	struct remote_context *rc = mm->remote;
 	__get_page_info_key(addr, &key, &offset);
 
-	region = __lookup_region(rc, key);
+	page = __lookup_page_info_page(rc, key);
+	region = kmap_atomic(page);
 	set_bit(PI_FLAG_DISTRIBUTED, region + offset);
+	kunmap_atomic(region);
 }
 
 static inline void SetPageCowed(struct mm_struct *mm, unsigned long addr)
 {
 	unsigned long key, offset;
 	unsigned long *region;
+	struct page *page;
 	struct remote_context *rc = mm->remote;
 	__get_page_info_key(addr, &key, &offset);
 
-	region = __lookup_region(rc, key);
+	page = __lookup_page_info_page(rc, key);
+	region = kmap_atomic(page);
 	set_bit(PI_FLAG_COWED, region + offset);
+	kunmap_atomic(region);
 }
 
 static inline void ClearPageInfo(struct mm_struct *mm, unsigned long addr)
 {
-	unsigned long *pi = __get_page_info(mm, addr);
+	unsigned long offset;
+	unsigned long *pi = __get_page_info_mapped(mm, addr, &offset);
 
 	if (!pi) return;
 	clear_bit(PI_FLAG_DISTRIBUTED, pi);
 	clear_bit(PI_FLAG_COWED, pi);
 	bitmap_clear(pi, 0, MAX_POPCORN_NODES);
+	kunmap_atomic(pi - offset);
 }
 
 static inline bool PageDistributed(struct mm_struct *mm, unsigned long addr)
 {
-	unsigned long *pi = __get_page_info(mm, addr);
+	unsigned long offset;
+	unsigned long *pi = __get_page_info_mapped(mm, addr, &offset);
+	bool ret;
 
 	if (!pi) return false;
-	return test_bit(PI_FLAG_DISTRIBUTED, pi);
+	ret = test_bit(PI_FLAG_DISTRIBUTED, pi);
+	kunmap_atomic(pi - offset);
+	return ret;
 }
 
 static inline bool PageCowed(struct mm_struct *mm, unsigned long addr)
 {
-	unsigned long *pi = __get_page_info(mm, addr);
+	unsigned long offset;
+	unsigned long *pi = __get_page_info_mapped(mm, addr, &offset);
+	bool ret;
 
 	if (!pi) return false;
-	return test_bit(PI_FLAG_COWED, pi);
+	ret = test_bit(PI_FLAG_COWED, pi);
+	kunmap_atomic(pi - offset);
+	return ret;
 }
 
 static inline bool page_is_mine(struct mm_struct *mm, unsigned long addr)
 {
-	unsigned long *pi = __get_page_info(mm, addr);
+	unsigned long offset;
+	unsigned long *pi = __get_page_info_mapped(mm, addr, &offset);
+	bool ret = true;
 
-	if (!pi || !test_bit(PI_FLAG_DISTRIBUTED, pi)) return true;
-	return test_bit(my_nid, pi);
+	if (!pi) return true;
+	if (!test_bit(PI_FLAG_DISTRIBUTED, pi)) goto out;
+	ret = test_bit(my_nid, pi);
+out:
+	kunmap_atomic(pi - offset);
+	return ret;
 }
 
 static inline bool test_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
-	unsigned long *pi = __get_page_info(mm, addr);
+	unsigned long offset;
+	unsigned long *pi = __get_page_info_mapped(mm, addr, &offset);
+	bool ret;
 
 	if (!pi) return false;
-	return test_bit(nid, pi);
+	ret = test_bit(nid, pi);
+	kunmap_atomic(pi - offset);
+	return ret;
 }
 
 static inline void set_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
-	unsigned long *pi = __get_page_info(mm, addr);
+	unsigned long offset;
+	unsigned long *pi = __get_page_info_mapped(mm, addr, &offset);
 	set_bit(nid, pi);
+	kunmap_atomic(pi - offset);
 }
 
 static inline void clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 {
-	unsigned long *pi = __get_page_info(mm, addr);
+	unsigned long offset;
+	unsigned long *pi = __get_page_info_mapped(mm, addr, &offset);
 	if (!pi) return;
 
 	clear_bit(nid, pi);
+	kunmap_atomic(pi - offset);
 }
 
 
@@ -558,13 +599,19 @@ out:
 void page_server_panic(bool condition, struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val)
 {
 	unsigned long *pi;
+	unsigned long pi_val = -1;
+	unsigned long offset;
 	if (!condition) return;
 
-	pi = __get_page_info(mm, address);
+	pi = __get_page_info_mapped(mm, address, &offset);
+	if (pi) {
+		pi_val = *pi;
+		kunmap_atomic(pi - offset);
+	}
 
 	printk(KERN_ERR "------------------ Start panicking -----------------\n");
 	printk(KERN_ERR "%s: %lx %p %lx %p %lx\n", __func__,
-			address, pi, pi ? *pi : -1, pte, pte_flags(pte_val));
+			address, pi, pi_val, pte, pte_flags(pte_val));
 	show_regs(current_pt_regs());
 	BUG_ON("Page server panicked!!");
 }
@@ -1030,8 +1077,10 @@ static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *v
 	/* Read when @from becomes zero and save the nid to @from_nid */
 	int nid;
 	struct pcn_kmsg_rdma_handle *rh = NULL;
-	unsigned long *pi = __get_page_info(rc->mm, addr);
-	BUG_ON(!pi);
+	unsigned long offset;
+	struct page *pip = __get_page_info_page(rc->mm, addr, &offset);
+	unsigned long *pi = (unsigned long *)kmap(pip) + offset;
+	BUG_ON(!pip);
 
 	peers = bitmap_weight(pi, MAX_POPCORN_NODES);
 
@@ -1085,6 +1134,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *v
 
 	if (rh) pcn_kmsg_unpin_rdma_buffer(rh);
 	put_task_remote(tsk);
+	kunmap(pip);
 	return 0;
 }
 
@@ -1092,12 +1142,18 @@ static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *v
 static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_nid)
 {
 	struct mm_struct *mm = tsk->mm;
-	unsigned long *pi = __get_page_info(mm, addr);
+	unsigned long offset;
+	struct page *pip = __get_page_info_page(mm, addr, &offset);
+	unsigned long *pi;
 	int peers;
 
-	if (!pi) return; /* skip claiming non-distributed page */
+	if (!pip) return; /* skip claiming non-distributed page */
+	pi = (unsigned long *)kmap(pip) + offset;
 	peers = bitmap_weight(pi, MAX_POPCORN_NODES);
-	if (!peers) return;	/* skip claiming the page that is not distributed */
+	if (!peers) {
+		kunmap(pip);
+		return;	/* skip claiming the page that is not distributed */
+	}
 
 	BUG_ON(!test_bit(except_nid, pi));
 	peers--;	/* exclude except_nid from peers */
@@ -1120,6 +1176,7 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int 
 
 		wait_at_station(ws);
 	}
+	kunmap(pip);
 }
 
 void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *pte, pte_t *pteval)
