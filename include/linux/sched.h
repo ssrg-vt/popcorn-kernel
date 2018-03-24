@@ -1839,6 +1839,9 @@ struct task_struct {
 	int migration_target_nid;
 	int backoff_weight;
 
+	spinlock_t pf_lock;			/* prefetcging list lock */
+	struct list_head pf_list;	/* prefetching list head */
+
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	unsigned long fault_address;
 	int fault_retry;

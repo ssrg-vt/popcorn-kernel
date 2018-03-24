@@ -37,7 +37,7 @@ struct prefetch_madvise {
 } __attribute__((packed));
 
 struct prefetch_list {
-    struct prefetch_body pf_objs[MAX_PF_REQ];
+    struct prefetch_body pf_reqs[MAX_PF_REQ];
 } __attribute__((packed));
 
 /**

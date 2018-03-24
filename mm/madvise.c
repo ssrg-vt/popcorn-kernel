@@ -395,6 +395,51 @@ int madvise_release(struct vm_area_struct *vma, unsigned long start, unsigned lo
 
 	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
 			nr_pages, (end - start) / PAGE_SIZE, start, end);
+
+	return 0;
+}
+
+/* working on!! */
+int madvise_release2(struct vm_area_struct *vma,
+						struct vm_area_struct **prev,
+						unsigned long start, unsigned long end)
+{
+	int nr_pages = 0;
+	unsigned long addr;
+
+	*prev = vma;
+	printk("RELEASE: %lx %lx\n", start, end);
+	/* mmap_sem is held */
+	for (addr = start; addr < end; addr += PAGE_SIZE) {
+		printk("%lx, ", addr);
+		//nr_pages += page_server_release_page_ownership(vma, addr);
+		nr_pages++;
+	}
+	printk("\n");
+
+	//VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
+	printk("  [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
+			nr_pages, (end - start) / PAGE_SIZE, start, end);
+
+	return 0;
+}
+
+long madvise_prefetch(struct vm_area_struct *vma,
+		struct vm_area_struct **prev, unsigned long start,
+						unsigned long end, int behavior)
+{
+	int nr_pages = 0;
+	unsigned long addr;
+	*prev = vma;
+	for (addr = start; addr < end; addr += PAGE_SIZE) {
+		prefetch_enq(addr, behavior);
+		nr_pages++; // XXX: dbg
+	}
+	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n",
+			behavior == MADV_READ ? "R" : "W",
+			current->pid, my_nid,
+			nr_pages, (end - start) / PAGE_SIZE, start, end);
+
 	return 0;
 }
 #endif
@@ -411,12 +456,13 @@ madvise_vma(struct vm_area_struct *vma, struct vm_area_struct **prev,
 	case MADV_DONTNEED:
 		return madvise_dontneed(vma, prev, start, end);
 #ifdef CONFIG_POPCORN
-	//case MADV_RELEASE:
-	//	return madvise_release(vma, start, end);
+	case MADV_RELEASE:
+		//return madvise_release(vma, start, end);
+		return madvise_release2(vma, prev, start, end);
 	case MADV_READ:
 	case MADV_WRITE:
 		if (distributed_remote_process(current))
-			return madvise_prefetch_rw(vma, prev, start, end, behavior);
+			return madvise_prefetch(vma, prev, start, end, behavior);
 		else {
 			*prev = vma;
 			return 0;
@@ -450,7 +496,7 @@ madvise_behavior_valid(int behavior)
 	case MADV_DONTDUMP:
 	case MADV_DODUMP:
 #ifdef CONFIG_POPCORN
-	case MADV_RELEASE:
+//	case MADV_RELEASE:
 	case MADV_WRITE:
 	case MADV_READ:
 #endif
@@ -516,11 +562,12 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	unsigned long start_orig = start;
 	size_t len_orig = len_in;
 
-	if(!distributed_process(current))
-		if (behavior & MADV_READ)
+	if(!distributed_process(current)) {
+		if (behavior ==  MADV_READ)
 			return -EINVAL;
-		else if (behavior & MADV_WRITE)
+		else if (behavior ==  MADV_WRITE)
 			return -EINVAL;
+	}
 #endif
 
 #ifdef CONFIG_MEMORY_FAILURE
@@ -604,17 +651,10 @@ out:
 		up_read(&current->mm->mmap_sem);
 
 #ifdef CONFIG_POPCORN
-	if (distributed_remote_process(current)) {
+	//if (distributed_remote_process(current)) {
 		//error = vma_server_madvise_remote(start_orig, len_orig, behavior);
 		//if (error) return error;
-//		printk("%s(): %d\n", __func__, behavior);
-		//- Requesting read permissions: 20
-		//- Requesting write permissions: 19
-		//- Requesting releasing of permissions: 18
-	}
-	if (behavior == MADV_REMOVE || behavior == MADV_WRITE) {
-//		printk("%s(): local prediction %d\n", __func__, behavior);
-	}
+	//}
 #endif
 
 	return error;

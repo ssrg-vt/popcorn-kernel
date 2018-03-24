@@ -41,7 +41,6 @@ void page_server_panic(bool condition, struct mm_struct *mm, unsigned long addre
 
 int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long addr);
 
-long madvise_prefetch_rw(struct vm_area_struct *vma, struct vm_area_struct **prev,
-							unsigned long start, unsigned long end, int behavior);
+long prefetch_enq(unsigned long addr, int behavior);
 
 #endif /* INCLUDE_POPCORN_PAGE_SERVER_H_ */
