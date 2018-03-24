@@ -61,6 +61,7 @@ static int __init_ring_buffer(struct ring_buffer *rb, const unsigned short nr_ch
 		rb->dma_addr_base[i] = 0;
 	}
 
+	spin_lock_init(&rb->lock);
 	rb->head_chunk = rb->tail_chunk = 0;
 	rb->nr_chunks = nr_chunks;
 	rb->wraparounded = 0;
