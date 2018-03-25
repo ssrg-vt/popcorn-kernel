@@ -432,8 +432,8 @@ long madvise_prefetch(struct vm_area_struct *vma,
 	unsigned long addr;
 	*prev = vma;
 	for (addr = start; addr < end; addr += PAGE_SIZE) {
-		prefetch_enq(addr, behavior);
-		nr_pages++; // XXX: dbg
+		page_server_prefetch_enq(addr, behavior);
+		nr_pages++;
 	}
 	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n",
 			behavior == MADV_READ ? "R" : "W",

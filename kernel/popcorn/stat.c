@@ -62,6 +62,7 @@ void account_pcn_rdma_read(size_t size)
 }
 
 void fh_action_stat(struct seq_file *seq, void *);
+void pf_action_stat(struct seq_file *seq, void *);
 
 static int __show_stats(struct seq_file *seq, void *v)
 {
@@ -113,6 +114,8 @@ static int __show_stats(struct seq_file *seq, void *v)
 	pcn_kmsg_stat(seq, NULL);
 
 #ifdef CONFIG_POPCORN_STAT
+	seq_printf(seq, "-----------------------------------------------\n");
+	pf_action_stat(seq, v);
 	seq_printf(seq, "-----------------------------------------------\n");
 	for (i = PCN_KMSG_TYPE_STAT_START + 1; i < PCN_KMSG_TYPE_STAT_END; i++) {
 		seq_printf(seq, POPCORN_STAT_FMT,
