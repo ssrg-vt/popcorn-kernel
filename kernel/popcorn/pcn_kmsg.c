@@ -59,6 +59,7 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 		}
 	}
 #endif
+	account_pcn_message_recv(msg);
 
 	ftn = pcn_kmsg_cbftns[msg->header.type];
 
@@ -68,8 +69,6 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 		printk(KERN_ERR"No callback registered for %d\n", msg->header.type);
 		pcn_kmsg_done(msg);
 	}
-
-	account_pcn_message_recv(msg);
 }
 EXPORT_SYMBOL(pcn_kmsg_process);
 
