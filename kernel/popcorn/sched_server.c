@@ -203,13 +203,12 @@ static void process_remote_ps_request(struct work_struct *work)
 	if (!tsk) {
 		printk(KERN_INFO"%s: process does not exist %d\n", __func__,
 				req->origin_pid);
-		goto out;
+	} else {
+		popcorn_ps_load(tsk, &res.uload, &res.sload);
+		put_task_struct(tsk);
 	}
-	popcorn_ps_load(tsk, &res.uload, &res.sload);
-	put_task_struct(tsk);
 	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_PROC_PS_RESPONSE,
 			req->nid, &res, sizeof(res));
-out:
 	END_KMSG_WORK(req);
 }
 
