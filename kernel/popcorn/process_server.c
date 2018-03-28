@@ -635,7 +635,6 @@ static void __run_remote_worker(struct remote_context *rc)
 		ret = wait_for_completion_interruptible_timeout(
 					&rc->remote_works_ready, HZ);
 		if (ret == 0) continue;
-		if (ret == -ERESTARTSYS) break;
 
 		spin_lock(&rc->remote_works_lock);
 		if (!list_empty(&rc->remote_works)) {
@@ -644,6 +643,7 @@ static void __run_remote_worker(struct remote_context *rc)
 			list_del(&work->entry);
 		}
 		spin_unlock(&rc->remote_works_lock);
+		if (!work) continue;
 
 		msg = ((struct pcn_kmsg_work *)work)->msg;
 
@@ -856,11 +856,12 @@ static void __process_remote_works(void)
 		ret = wait_for_completion_interruptible_timeout(
 				&current->remote_work_pended, HZ);
 		if (ret == 0) continue; /* timeout */
-		if (ret == -ERESTARTSYS) break;
 
 		req = (struct pcn_kmsg_message *)current->remote_work;
 		current->remote_work = NULL;
 		smp_wmb();
+
+		if (!req) continue;
 
 		switch (req->header.type) {
 		case PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST:
