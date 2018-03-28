@@ -383,42 +383,22 @@ static int madvise_hwpoison(int bhv, unsigned long start, unsigned long end)
 #endif
 
 #ifdef CONFIG_POPCORN
-int madvise_release(struct vm_area_struct *vma, unsigned long start, unsigned long end)
-{
-	int nr_pages = 0;
-	unsigned long addr;
-
-	/* mmap_sem is held */
-	for (addr = start; addr < end; addr += PAGE_SIZE) {
-		nr_pages += page_server_release_page_ownership(vma, addr);
-	}
-
-	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
-			nr_pages, (end - start) / PAGE_SIZE, start, end);
-
-	return 0;
-}
-
-/* working on!! */
-int madvise_release2(struct vm_area_struct *vma,
+int madvise_release(struct vm_area_struct *vma,
 						struct vm_area_struct **prev,
 						unsigned long start, unsigned long end)
 {
 	int nr_pages = 0;
-	unsigned long addr;
+	unsigned long addr = start;
+	if (!distributed_process(current)) return 0;
 
 	*prev = vma;
-	printk("RELEASE: %lx %lx\n", start, end);
 	/* mmap_sem is held */
 	for (addr = start; addr < end; addr += PAGE_SIZE) {
-		printk("%lx, ", addr);
-		//nr_pages += page_server_release_page_ownership(vma, addr);
-		nr_pages++;
+		if(!page_server_release_page_ownership(vma, addr))
+			nr_pages++;
 	}
-	printk("\n");
 
-	//VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
-	printk("  [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
+	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
 			nr_pages, (end - start) / PAGE_SIZE, start, end);
 
 	return 0;
@@ -457,8 +437,7 @@ madvise_vma(struct vm_area_struct *vma, struct vm_area_struct **prev,
 		return madvise_dontneed(vma, prev, start, end);
 #ifdef CONFIG_POPCORN
 	case MADV_RELEASE:
-		//return madvise_release(vma, start, end);
-		return madvise_release2(vma, prev, start, end);
+		return madvise_release(vma, prev, start, end);
 	case MADV_READ:
 	case MADV_WRITE:
 		if (distributed_remote_process(current))
@@ -496,7 +475,7 @@ madvise_behavior_valid(int behavior)
 	case MADV_DONTDUMP:
 	case MADV_DODUMP:
 #ifdef CONFIG_POPCORN
-//	case MADV_RELEASE:
+	case MADV_RELEASE:
 	case MADV_WRITE:
 	case MADV_READ:
 #endif
@@ -558,14 +537,16 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	int write;
 	size_t len;
 	struct blk_plug plug;
-#ifdef CONFIG_POPCORN
-	unsigned long start_orig = start;
-	size_t len_orig = len_in;
+	if (!madvise_behavior_valid(behavior))
+		return error;
 
+#ifdef CONFIG_POPCORN
 	if(!distributed_process(current)) {
 		if (behavior ==  MADV_READ)
 			return -EINVAL;
 		else if (behavior ==  MADV_WRITE)
+			return -EINVAL;
+		else if (behavior ==  MADV_RELEASE)
 			return -EINVAL;
 	}
 #endif
@@ -574,8 +555,6 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	if (behavior == MADV_HWPOISON || behavior == MADV_SOFT_OFFLINE)
 		return madvise_hwpoison(behavior, start, start+len_in);
 #endif
-	if (!madvise_behavior_valid(behavior))
-		return error;
 
 	if (start & ~PAGE_MASK)
 		return error;
@@ -649,13 +628,6 @@ out:
 		up_write(&current->mm->mmap_sem);
 	else
 		up_read(&current->mm->mmap_sem);
-
-#ifdef CONFIG_POPCORN
-	//if (distributed_remote_process(current)) {
-		//error = vma_server_madvise_remote(start_orig, len_orig, behavior);
-		//if (error) return error;
-	//}
-#endif
 
 	return error;
 }

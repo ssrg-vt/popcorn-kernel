@@ -75,6 +75,7 @@ struct remote_context {
 
 struct remote_context *__get_mm_remote(struct mm_struct *mm);
 struct remote_context *get_task_remote(struct task_struct *tsk);
+struct remote_context *get_task_remote_with_mm(struct mm_struct *mm);
 bool put_task_remote(struct task_struct *tsk);
 bool __put_task_remote(struct remote_context *rc);
 
@@ -237,6 +238,8 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	bool is_pf_list; \
 	struct prefetch_list pf_list;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
+/* xxx: optimize msg size */
+// bool is_pf_list; -> u16 is_pf_list;
 
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	pid_t remote_pid; \

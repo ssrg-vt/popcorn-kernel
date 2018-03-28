@@ -62,7 +62,7 @@ void account_pcn_rdma_read(size_t size)
 }
 
 void fh_action_stat(struct seq_file *seq, void *);
-void pf_action_stat(struct seq_file *seq, void *);
+extern void pf_action_stat(struct seq_file *seq, void *);
 
 static int __show_stats(struct seq_file *seq, void *v)
 {

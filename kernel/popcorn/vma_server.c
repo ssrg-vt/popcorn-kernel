@@ -319,6 +319,18 @@ int vma_server_brk_remote(unsigned long brk)
 	return ret;
 }
 
+//at remote				at origin
+//*remote (check if only onwer)
+//			-> process_vma_op_request
+//				__process_vma_op_at_remote (not implemented)
+//				__process_vma_op_at_origin
+//					VMA_OP_MADVISE
+//					process_madvise_release_from_remote
+//			<-__reply_vma_op
+//lock
+//local
+//unlock
+/* remote update */
 int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 {
 	int ret;
@@ -519,8 +531,8 @@ static long __process_vma_op_at_origin(vma_op_request_t *req)
 		break;
 	case VMA_OP_MADVISE:
 		if (req->behavior == MADV_RELEASE) {
-			ret = process_madvise_release_from_remote(
-					from_nid, req->start, req->start + req->len);
+			ret = process_madvise_release_from_remote(req,
+					from_nid, req->start, req->start + req->len); // start=addr 4k
 		} else {
 			ret = sys_madvise(req->start, req->len, req->behavior);
 		}
