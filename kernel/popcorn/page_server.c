@@ -81,7 +81,10 @@ const char *pf_action_type_name[PF_ACTION_TYPE_MAX] = {
 	[PF_READ_RES_FAIL] = "FAIL",
 	[PF_REALEASE_MADV] = "RELEASE",
 };
+#endif
+
 void pf_action_stat(struct seq_file *seq, void *v) {
+#ifdef CONFIG_POPCORN_STAT
     int i, k = 3;
 	if (seq) 
 		seq_printf(seq, "%2s  %-12s   %2s  %-12s   %2s  %-12s\n",
@@ -99,8 +102,8 @@ void pf_action_stat(struct seq_file *seq, void *v) {
             __pf_action_stat[i*k + 2] = 0;
         }
     }
-}
 #endif
+}
 
 /* for pf read/write */
 inline void pf_action_record(bool r, bool m_q, //bool q_l,
@@ -164,7 +167,7 @@ void free_prefetch_list(struct prefetch_list* pf_list);
 bool prefetch_policy(struct prefetch_list* pf_list);
 void prefetch_dummy_policy(struct prefetch_list* pf_list, unsigned long fault_addr);
 struct prefetch_list *select_prefetch_pages(
-					struct prefetch_list* pf_list, struct mm_struct *mm);
+					struct prefetch_list* pf_list, struct mm_struct *mm, int *num);
 int prefetch_at_origin(remote_page_request_t *req);
 
 inline void page_server_start_mm_fault(unsigned long address)
@@ -1351,9 +1354,10 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 #define TRANSFER_PAGE_WITH_RDMA \
 		pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA)
 
-static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh, struct prefetch_list* pf_list)
+static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh, struct prefetch_list* pf_list, int num)
 {
 	remote_page_request_t *req;
+	int size;
 
 	*rh = NULL;
 
@@ -1367,18 +1371,18 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 	req->remote_pid = from_pid;
 	req->instr_addr = instruction_pointer(current_pt_regs());
 
-	if (pf_list) {
-		req->is_pf_list = true;
-		memcpy(&req->pf_list, pf_list, sizeof(struct prefetch_list)); // problem: too large
+	if (pf_list && num > 0) {
+		req->is_pf_list = num;
+		//memcpy(&req->pf_list, pf_list, sizeof(struct prefetch_list)); // problem: too large
 		/* xxx: optimize msg size */
-		//memcpy(&req->pf_list, pf_list, num * sizeof(struct prefetch_body));
-		// size = sizeof(*req) - sizeof(struct prefetch_list) +
+		memcpy(&req->pf_list, pf_list, num * sizeof(struct prefetch_body));
+		//size = sizeof(*req) - sizeof(struct prefetch_list) +
 		//					(num * sizeof(struct prefetch_body));
 	} else {
-		req->is_pf_list = false;
+		req->is_pf_list = 0;
 		//memset(&req->pf_list, 0, sizeof(unsigned long)); /* in case */
 		/* xxx: optimize msg size */
-		// size = sizeof(*req) - sizeof(struct prefetch_list);
+		//size = sizeof(*req) - sizeof(struct prefetch_list);
 	}
 
 	if (TRANSFER_PAGE_WITH_RDMA) {
@@ -1400,19 +1404,20 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 			from_pid, from_nid, addr, req->instr_addr);
 
 	pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
-			from_nid, req, sizeof(*req));
-			/* xxx: optimize msg size */
+					from_nid, req, sizeof(*req));
+					/* xxx: optimize msg size */
+					//from_nid, req, size); /* xxx problem slowdown */
 	return 0;
 }
 
-static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page, struct prefetch_list* pf_list)
+static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page, struct prefetch_list* pf_list, int num)
 {
 	remote_page_response_t *rp;
 	struct wait_station *ws = get_wait_station(tsk);
 	struct pcn_kmsg_rdma_handle *rh;
 
 	__request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
-						addr, fault_flags, ws->id, &rh, pf_list);
+						addr, fault_flags, ws->id, &rh, pf_list, num);
 
 	rp = wait_at_station(ws);
 	if (rp->result == 0) {
@@ -1470,7 +1475,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 		if (nid == my_nid) continue;
 		if (from-- == 0) {
 			from_nid = nid;
-			__request_remote_page(tsk, nid, pid, addr, fault_flags, ws->id, &rh, NULL);
+			__request_remote_page(tsk, nid, pid, addr, fault_flags, ws->id, &rh, NULL, 0);
 		} else {
 			if (fault_for_write(fault_flags)) {
 				clear_bit(nid, pi);
@@ -1970,7 +1975,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	struct page *page;
 	bool populated = false;
 	struct mem_cgroup *memcg;
-	int ret = 0;
+	int ret = 0, num = 0;
 	struct prefetch_list *pf_list;
 	struct prefetch_list *new_pf_list = NULL;
 
@@ -2020,11 +2025,11 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 	pf_list = alloc_prefetch_list();
     if(prefetch_policy(pf_list))
-		new_pf_list = select_prefetch_pages(pf_list, mm);
+		new_pf_list = select_prefetch_pages(pf_list, mm, &num);
 		//prefetch_dummy_policy(pf_list, addr);
 
 	rp = __fetch_page_from_origin(current, vma, addr,
-									fault_flags, page, new_pf_list);
+								fault_flags, page, new_pf_list, num);
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
 		if (rp->result != VM_FAULT_RETRY)
@@ -2435,7 +2440,7 @@ void prefetch_dummy_policy(struct prefetch_list* pf_list, unsigned long fault_ad
  * 		return a new preftechlist
  */
 struct prefetch_list *select_prefetch_pages(
-        struct prefetch_list* pf_list, struct mm_struct *mm)
+        struct prefetch_list* pf_list, struct mm_struct *mm, int *num)
 {
     int slot = 0, cnt = 0;
     struct prefetch_list *new_pf_list = NULL;
@@ -2499,6 +2504,7 @@ struct prefetch_list *select_prefetch_pages(
 		}
 
 		if (!found) {
+			*num += 1;
 			if (!page_is_mine(mm, addr) || (	/* I don't own OR */
 				page_is_mine(mm, addr) && 		/* I own */
 				!pte_write(*pte) &&				/* but read-only */
@@ -2581,7 +2587,7 @@ int prefetch_at_origin(remote_page_request_t *req)
 	rc = get_task_remote_with_mm(mm);
 	down_read(&mm->mmap_sem);
 
-	while(list_ptr->addr) {
+	while(list_ptr->addr && req->is_pf_list > cnt) {
 		int fk;
 		pmd_t *pmd;
 		pte_t *pte;
