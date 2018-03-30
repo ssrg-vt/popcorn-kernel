@@ -14,7 +14,7 @@
 
 #define FAULTS_HASH 31
 
-#define MAX_PF_REQ 100 /* max # of prefetching addres(pages) per request */
+#define MAX_PF_REQ 300 /* max # of prefetching addres(pages) per request */
 
 #define SKIP_NUM_OF_PAGES 20			/* 0 = myself */
 #define PREFETCH_NUM_OF_PAGES 20

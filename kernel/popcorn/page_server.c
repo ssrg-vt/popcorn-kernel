@@ -44,31 +44,65 @@
 #define PFPRINTK(...)
 
 #ifdef CONFIG_POPCORN_STAT
-static unsigned long __pf_action_stat[11] = { 0 }; /* xxx atomic */
+static unsigned long __pf_action_stat[16] = { 0 }; /* xxx atomic */
 enum pf_action_code {
-	READ_MADV = 0,
-	READ_REQ,
-	WRITE_MADV,
-	WRITE_X_REQ,
-	WRITE_O_REQ,
-	READ_RES_SUCCESS,
-	WRITE_X_RES_SUCCCESS,
-	WRITE_O_RES_SUCCCESS,
-	READ_RES_FAIL,
-	WRITE_X_RES_FAIL,
-	WRITE_O_RES_FAIL,
+	/* MADV */
+	PF_READ_MADV = 0,
+	PF_WRITE_MADV,
+	NONE,
+
+	/* REQ */
+	PF_READ_REQ = 3, // redundant
+	PF_WRITE_X_REQ, // redundant
+	PF_WRITE_O_REQ, // redundant
+
+	/* SUCC */
+	PF_READ_RES_SUCCESS = 6,
+	PF_WRITE_X_RES_SUCCCESS,
+	PF_WRITE_O_RES_SUCCCESS,
+
+	/* FAIL */
+	PF_READ_RES_FAIL = 9,
+	PF_WRITE_X_RES_FAIL,
+	PF_WRITE_O_RES_FAIL,
+
+	/* RELEASE */
+	PF_REALEASE_MADV = 12, // redundant
+	PF_RELEASE_RES_SUCCESS,
+	PF_RELEASE_RES_FAIL,
+
+	PF_ACTION_TYPE_MAX
+};
+
+const char *pf_action_type_name[PF_ACTION_TYPE_MAX] = {
+    [PF_READ_MADV] = "MADV",
+    [PF_READ_REQ] = "REQ", // redundant
+	[PF_READ_RES_SUCCESS] = "SUCC",
+	[PF_READ_RES_FAIL] = "FAIL",
+	[PF_REALEASE_MADV] = "RELEASE",
 };
 void pf_action_stat(struct seq_file *seq, void *v) {
-    int i;
-    for (i = 0; i < ARRAY_SIZE(__pf_action_stat); i++) {
-        if (seq) { /* xxx out layout */
-            seq_printf(seq, "%2d  %-12lu\n", i, __pf_action_stat[i]);
+    int i, k = 3;
+	if (seq) 
+		seq_printf(seq, "%2s  %-12s   %2s  %-12s   %2s  %-12s\n",
+							"", "R", "", "WX", "", "WO");
+    for (i = 0; i < ARRAY_SIZE(__pf_action_stat) / k; i++) {
+        if (seq) {
+            seq_printf(seq, "%2d  %-12lu   %2d  %-12lu   %2d  %-12lu   %s\n",
+										i*k + 0, __pf_action_stat[i*k + 0],
+										i*k + 1, __pf_action_stat[i*k + 1],
+										i*k + 2, __pf_action_stat[i*k + 2],
+										pf_action_type_name[i*k + 0]);
         } else {
-            __pf_action_stat[i] = 0;
+            __pf_action_stat[i*k + 0] = 0;
+            __pf_action_stat[i*k + 1] = 0;
+            __pf_action_stat[i*k + 2] = 0;
         }
     }
 }
 #endif
+
+/* for pf read/write */
 inline void pf_action_record(bool r, bool m_q, //bool q_l,
 						bool w_x, bool w_o,
 						bool res, bool success)
@@ -77,36 +111,51 @@ inline void pf_action_record(bool r, bool m_q, //bool q_l,
 	if (!res) {
 		if (m_q) {
 			if (r)
-				__pf_action_stat[READ_MADV]++;
+				__pf_action_stat[PF_READ_MADV]++;
 			else
-				__pf_action_stat[WRITE_MADV]++;
+				__pf_action_stat[PF_WRITE_MADV]++;
 		} else {
 			if (r)
-				__pf_action_stat[READ_REQ]++;
+				__pf_action_stat[PF_READ_REQ]++;
 			else if (w_x)
-				__pf_action_stat[WRITE_X_REQ]++;
+				__pf_action_stat[PF_WRITE_X_REQ]++;
 			else if (w_o)
-				__pf_action_stat[WRITE_O_REQ]++;
+				__pf_action_stat[PF_WRITE_O_REQ]++;
 			else BUG();
 		}
 	} else {
 		if (success) {
 			if (r)
-				__pf_action_stat[READ_RES_SUCCESS]++;
+				__pf_action_stat[PF_READ_RES_SUCCESS]++;
 			else if (w_x)
-				__pf_action_stat[WRITE_X_RES_SUCCCESS]++;
+				__pf_action_stat[PF_WRITE_X_RES_SUCCCESS]++;
 			else if (w_o)
-				__pf_action_stat[WRITE_O_RES_SUCCCESS]++;
+				__pf_action_stat[PF_WRITE_O_RES_SUCCCESS]++;
 			else BUG();
 		} else {
 			if (r)
-				__pf_action_stat[READ_RES_FAIL]++;
+				__pf_action_stat[PF_READ_RES_FAIL]++;
 			else if (w_x)
-				__pf_action_stat[WRITE_X_RES_FAIL]++;
+				__pf_action_stat[PF_WRITE_X_RES_FAIL]++;
 			else if (w_o)
-				__pf_action_stat[WRITE_O_RES_FAIL]++;
+				__pf_action_stat[PF_WRITE_O_RES_FAIL]++;
 			else BUG();
 		}
+	}
+#endif
+}
+
+/* for pf release */
+inline void pf_action_release_record(bool req, bool succ)
+{
+#ifdef CONFIG_POPCORN_STAT
+	if (req) {
+		__pf_action_stat[PF_REALEASE_MADV]++;
+	} else {
+		if (succ)
+			__pf_action_stat[PF_RELEASE_RES_SUCCESS]++;
+		else
+			__pf_action_stat[PF_RELEASE_RES_FAIL]++;
 	}
 #endif
 }
@@ -1226,6 +1275,7 @@ int page_server_release_page_ownership(struct vm_area_struct *vma,
 		goto fail;
 	}
 
+	pf_action_release_record(true, false);
 	if (current->at_remote) {
 		/* 1. Remote */
 		err = vma_server_madvise_remote(addr, PAGE_SIZE, MADV_RELEASE);
@@ -1247,11 +1297,13 @@ int page_server_release_page_ownership(struct vm_area_struct *vma,
 							//res
 							//[return ret]
 		if (err) {
+			pf_action_release_record(false, false);
 			goto fail;
 		}
 		/* 2. Local Origin - lock*/ // prolem with select_prefetch_pages()
 		release_page_ownership_at_local(vma, addr); /* local */ /*page must be mine since origin doone*/
 		ret = 0;
+		pf_action_release_record(false, true);
 	} else {
 		err = 9;
 		// 1. local Origin
@@ -2296,8 +2348,8 @@ long page_server_prefetch_enq(unsigned long addr, int behavior)
 #endif
 
 	//curr->pfb.is_besteffort = (addr / PAGE_SIZE) % 2 ? true : false;
-	//curr->pfb.is_besteffort = true;
-	curr->pfb.is_besteffort = false;
+	curr->pfb.is_besteffort = true;
+	//curr->pfb.is_besteffort = false;
 
 	//PFPRINTK("%s(): %d %lx w(%s) b(%s) m->q\n", __func__,
 	//		curr->pid, curr->pfb.addr,
@@ -2324,6 +2376,7 @@ bool prefetch_policy(struct prefetch_list* pf_list)
 	if (!pf_list) return false;
 
 	if (!spin_trylock(&current->pf_lock)) goto fail;
+	//spin_lock(&current->pf_lock);
 	if (list_empty(&current->pf_list)) {
 		spin_unlock(&current->pf_lock);
 		goto fail;
@@ -2467,9 +2520,11 @@ struct prefetch_list *select_prefetch_pages(
 					PFPRINTK("%s(): 1 r R->W. ", __func__);
 					pf_action_record(false, false, false, true, false, false);
 					BUG_ON(pte_write(*pte));
-				} else {
-					pf_action_record(false, false, true, false, false, false);
-					PFPRINTK("%s(): 2 r X->W. ", __func__);
+				} else { /* read or write + not owner */
+					if (list_ptr->is_write) {
+						pf_action_record(false, false, true, false, false, false);
+						PFPRINTK("%s(): 2 r X->W. ", __func__);
+					}
 				}
 #endif
 				PFPRINTK("select: [%d] [%d] %lx\n", current->pid, slot, addr);
@@ -2556,30 +2611,30 @@ int prefetch_at_origin(remote_page_request_t *req)
 
         pte = __get_pte_at(mm, addr, &pmd, &ptl);
 
-		if (list_ptr->is_besteffort) {
+//		if (list_ptr->is_besteffort) {
 			spin_lock(ptl);
-		} else {
-			if(!spin_trylock(ptl)) {
-				PFPRINTK("origin unselect %lx pte locked\n", addr);
-				res->result = PREFETCH_FAIL;
-				res_size = sizeof(remote_prefetch_fail_t);
-				goto next;
-			}
-		}
+//		} else {
+//			if(!spin_trylock(ptl)) {
+//				PFPRINTK("origin unselect %lx pte locked\n", addr);
+///				res->result = PREFETCH_FAIL;
+//				res_size = sizeof(remote_prefetch_fail_t);
+//				goto next;
+//			}
+//		}
 
         fk = __fault_hash_key(addr);
 
-		if (list_ptr->is_besteffort) {
+//		if (list_ptr->is_besteffort) {
 			spin_lock_irqsave(&rc->faults_lock[fk], flags);
-		} else {
-			if(!spin_trylock_irqsave(&rc->faults_lock[fk], flags)) {
-				spin_unlock(ptl);
-				PFPRINTK("origin unselect %lx fh locked\n", addr);
-				res->result = PREFETCH_FAIL;
-				res_size = sizeof(remote_prefetch_fail_t);
-				goto next;
-			}
-		}
+//		} else {
+//			if(!spin_trylock_irqsave(&rc->faults_lock[fk], flags)) {
+//				spin_unlock(ptl);
+//				PFPRINTK("origin unselect %lx fh locked\n", addr);
+//				res->result = PREFETCH_FAIL;
+//				res_size = sizeof(remote_prefetch_fail_t);
+//				goto next;
+//			}
+//		}
         spin_unlock(ptl);
 
 		hlist_for_each_entry(fh, &rc->faults[fk], list) {

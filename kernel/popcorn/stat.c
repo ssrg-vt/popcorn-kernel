@@ -115,15 +115,14 @@ static int __show_stats(struct seq_file *seq, void *v)
 
 #ifdef CONFIG_POPCORN_STAT
 	seq_printf(seq, "-----------------------------------------------\n");
-	pf_action_stat(seq, v);
-	seq_printf(seq, "-----------------------------------------------\n");
 	for (i = PCN_KMSG_TYPE_STAT_START + 1; i < PCN_KMSG_TYPE_STAT_END; i++) {
 		seq_printf(seq, POPCORN_STAT_FMT,
 				sent_stats[i], recv_stats[i], pcn_kmsg_type_name[i] ? : "");
 	}
 	seq_printf(seq, "---------------------------------------------------------------------------\n");
-
 	fh_action_stat(seq, v);
+	seq_printf(seq, "---------------------------------------------------------------------------\n");
+	pf_action_stat(seq, v);
 #endif
 	return 0;
 }
@@ -144,7 +143,9 @@ static ssize_t __write_stats(struct file *file, const char __user *buffer, size_
 		recv_stats[i] = 0;
 	}
 	fh_action_stat(NULL, NULL);
-
+#ifdef CONFIG_POPCORN_STAT
+	pf_action_stat(NULL, NULL);
+#endif
 	return size;
 }
 
