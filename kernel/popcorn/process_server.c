@@ -829,7 +829,7 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 
 		__schedule_remote_work(rc, work);
 
-		put_task_remote(tsk);
+		__put_task_remote(rc);
 	} else {
 		BUG_ON(tsk->remote_work);
 		tsk->remote_work = req;
