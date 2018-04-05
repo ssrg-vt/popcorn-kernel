@@ -63,6 +63,7 @@ void account_pcn_rdma_read(size_t size)
 
 void fh_action_stat(struct seq_file *seq, void *);
 extern void pf_action_stat(struct seq_file *seq, void *);
+extern void pf_time_stat(struct seq_file *seq, void *v);
 
 static int __show_stats(struct seq_file *seq, void *v)
 {
@@ -123,6 +124,7 @@ static int __show_stats(struct seq_file *seq, void *v)
 	fh_action_stat(seq, v);
 	seq_printf(seq, "---------------------------------------------------------------------------\n");
 	pf_action_stat(seq, v);
+	pf_time_stat(seq, v);
 #endif
 	return 0;
 }
@@ -145,6 +147,7 @@ static ssize_t __write_stats(struct file *file, const char __user *buffer, size_
 	fh_action_stat(NULL, NULL);
 #ifdef CONFIG_POPCORN_STAT
 	pf_action_stat(NULL, NULL);
+	pf_time_stat(NULL, NULL);
 #endif
 	return size;
 }

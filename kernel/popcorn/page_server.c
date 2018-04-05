@@ -42,14 +42,36 @@
 //#define PFPRINTK(...) printk(__VA_ARGS__)
 //#define PFPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #define PFPRINTK(...)
+#define PREFETCH_SUPPORT 0
+
+struct fault_handle {
+	struct hlist_node list;
+
+	unsigned long addr;
+	unsigned long flags;
+
+	unsigned int limit;
+	pid_t pid;
+	int ret;
+
+	atomic_t pendings;
+	atomic_t pendings_retry;
+	wait_queue_head_t waits;
+	wait_queue_head_t waits_retry;
+	struct remote_context *rc;
+
+	struct completion *complete;
+#ifdef CONFIG_POPCORN_STAT
+	struct timeval tv_start;
+#endif
+};
 
 #ifdef CONFIG_POPCORN_STAT
-static unsigned long __pf_action_stat[16] = { 0 }; /* xxx atomic */
 enum pf_action_code {
 	/* MADV */
 	PF_READ_MADV = 0,
 	PF_WRITE_MADV,
-	NONE,
+	NONE,					// -1
 
 	/* REQ */
 	PF_READ_REQ = 3, // redundant
@@ -63,22 +85,35 @@ enum pf_action_code {
 
 	/* FAIL */
 	PF_READ_RES_FAIL = 9,
-	PF_WRITE_X_RES_FAIL,
-	PF_WRITE_O_RES_FAIL,
+	PF_WRITE_X_RES_FAIL,	// = PF_WRITE_RES_FAIL
+	PF_WRITE_O_RES_FAIL,	// xxx + => in 10
+
+	/* REMOTE FAIL */
+	REMOTE_PF_FAIL_NO_VMA = 12,
+	REMOTE_PF_FAIL_NO_PTE,
+	REMOTE_PF_FAIL_BUSY,
+
+	/* ORIGIN FAIL */
+	ORIGIN_PF_FAIL_NO_VMA = 15,
+	ORIGIN_PF_FAIL_BUSY,
+	ORIGIN_PF_FAIL_REMOTE,
 
 	/* RELEASE */
-	PF_REALEASE_MADV = 12, // redundant
+	PF_REALEASE_MADV = 18, // redundant
 	PF_RELEASE_RES_SUCCESS,
 	PF_RELEASE_RES_FAIL,
 
 	PF_ACTION_TYPE_MAX
 };
+static unsigned long __pf_action_stat[PF_ACTION_TYPE_MAX] = { 0 }; /* xxx atomic */
 
 const char *pf_action_type_name[PF_ACTION_TYPE_MAX] = {
     [PF_READ_MADV] = "MADV",
     [PF_READ_REQ] = "REQ", // redundant
 	[PF_READ_RES_SUCCESS] = "SUCC",
 	[PF_READ_RES_FAIL] = "FAIL",
+	[REMOTE_PF_FAIL_NO_VMA] = "FAIL R",
+	[ORIGIN_PF_FAIL_NO_VMA] = "FAIL O",
 	[PF_REALEASE_MADV] = "RELEASE",
 };
 #endif
@@ -92,10 +127,10 @@ void pf_action_stat(struct seq_file *seq, void *v) {
     for (i = 0; i < ARRAY_SIZE(__pf_action_stat) / k; i++) {
         if (seq) {
             seq_printf(seq, "%2d  %-12lu   %2d  %-12lu   %2d  %-12lu   %s\n",
-										i*k + 0, __pf_action_stat[i*k + 0],
-										i*k + 1, __pf_action_stat[i*k + 1],
-										i*k + 2, __pf_action_stat[i*k + 2],
-										pf_action_type_name[i*k + 0]);
+							i*k + 0, __pf_action_stat[i*k + 0],
+							i*k + 1, __pf_action_stat[i*k + 1],
+							i*k + 2, __pf_action_stat[i*k + 2],
+							pf_action_type_name[i*k + 0]);
         } else {
             __pf_action_stat[i*k + 0] = 0;
             __pf_action_stat[i*k + 1] = 0;
@@ -131,9 +166,9 @@ inline void pf_action_record(bool r, bool m_q, //bool q_l,
 			if (r)
 				__pf_action_stat[PF_READ_RES_SUCCESS]++;
 			else if (w_x)
-				__pf_action_stat[PF_WRITE_X_RES_SUCCCESS]++;
+				__pf_action_stat[PF_WRITE_X_RES_SUCCCESS]++; // 0x1x11
 			else if (w_o)
-				__pf_action_stat[PF_WRITE_O_RES_SUCCCESS]++;
+				__pf_action_stat[PF_WRITE_O_RES_SUCCCESS]++; // 0x0111
 			else BUG();
 		} else {
 			if (r)
@@ -146,6 +181,27 @@ inline void pf_action_record(bool r, bool m_q, //bool q_l,
 		}
 	}
 #endif
+}
+inline void pf_fail_action_record(bool remote, bool vma,
+						bool pte, bool busy, bool pg_is_mine)
+{
+	if (remote) {
+		if(!vma)
+			__pf_action_stat[REMOTE_PF_FAIL_NO_VMA]++;
+		else if (!pte)
+			__pf_action_stat[REMOTE_PF_FAIL_NO_PTE]++;
+		else if (busy)
+			__pf_action_stat[REMOTE_PF_FAIL_BUSY]++;
+		else BUG();
+	}else {
+		if(!vma)
+			__pf_action_stat[ORIGIN_PF_FAIL_NO_VMA]++;
+		else if (busy)
+			__pf_action_stat[ORIGIN_PF_FAIL_BUSY]++;
+		else if (!pg_is_mine)
+			__pf_action_stat[ORIGIN_PF_FAIL_REMOTE]++;
+		else BUG();
+	}
 }
 
 /* for pf release */
@@ -162,6 +218,126 @@ inline void pf_action_release_record(bool req, bool succ)
 	}
 #endif
 }
+
+#ifdef CONFIG_POPCORN_STAT
+atomic64_t pf_cnt;
+atomic64_t pf_time_u;
+
+atomic64_t pf_fail_cnt;
+atomic64_t pf_fail_time_u;
+atomic64_t pf_succ_cnt;
+atomic64_t pf_succ_time_u;
+#endif
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+atomic64_t mm_cnt;
+atomic64_t mm_time_u;
+#endif
+
+/* for recording pf time on remote sides */
+/* find a way to mapp (addr) */
+inline void pf_time_start_fh_path(struct fault_handle *fh)
+{
+#ifdef CONFIG_POPCORN_STAT
+	do_gettimeofday(&fh->tv_start);
+	atomic64_inc(&pf_cnt);
+#endif
+}
+
+inline void pf_time_end_fh_path(struct fault_handle *fh, bool succ)
+{
+#ifdef CONFIG_POPCORN_STAT
+	unsigned long dt;
+	struct timeval tv_end;
+	do_gettimeofday(&tv_end);
+	dt = ((tv_end.tv_sec * 1000000) + tv_end.tv_usec)
+		- (fh->tv_start.tv_sec * 1000000)
+		- fh->tv_start.tv_usec;
+	if (dt < 0) BUG();
+	atomic64_add(dt, &pf_time_u);
+
+	if (succ) {
+		atomic64_add(dt, &pf_succ_time_u);
+		atomic64_inc(&pf_succ_cnt);
+	} else {
+		atomic64_add(dt, &pf_fail_time_u);
+		atomic64_inc(&pf_fail_cnt);
+	}
+#endif
+}
+
+/* for recording pf time on remote sides */
+inline void pf_time_start_at_remote(struct timeval* tv_start)
+{
+#ifdef CONFIG_POPCORN_STAT
+	do_gettimeofday(tv_start);
+#endif
+}
+
+inline void pf_time_end_at_remote(struct timeval* tv_start)
+{
+#ifdef CONFIG_POPCORN_STAT
+	unsigned long dt;
+	struct timeval tv_end;
+	do_gettimeofday(&tv_end);
+	dt = ((tv_end.tv_sec * 1000000) + tv_end.tv_usec)
+		- (tv_start->tv_sec * 1000000)
+		- tv_start->tv_usec;
+	atomic64_add(dt, &pf_time_u);
+#endif
+}
+
+/* for recording pf time on remote sides */
+inline void pf_time_start_at_origin(struct timeval* tv_start)
+{
+#ifdef CONFIG_POPCORN_STAT
+	do_gettimeofday(tv_start);
+#endif
+}
+
+inline void pf_time_end_at_origin(struct timeval* tv_start)
+{
+#ifdef CONFIG_POPCORN_STAT
+	unsigned long dt;
+	struct timeval tv_end;
+	do_gettimeofday(&tv_end);
+	dt = ((tv_end.tv_sec * 1000000) + tv_end.tv_usec)
+		- (tv_start->tv_sec * 1000000)
+		- tv_start->tv_usec;
+	atomic64_add(dt, &pf_time_u);
+#endif
+}
+
+#define MILLISECOND 1000000
+extern void pf_time_stat(struct seq_file *seq, void *v);
+void pf_time_stat(struct seq_file *seq, void *v)
+{
+#ifdef CONFIG_POPCORN_STAT
+	if (seq) {
+		seq_printf(seq, "%2s  %5llu,%-6llu   %3s %-12llu   %2s  %-12s\n",
+						"mm", (u64)atomic64_read(&mm_time_u) / MILLISECOND,
+								(u64)atomic64_read(&mm_time_u) % MILLISECOND,
+						"per", atomic64_read(&mm_cnt) ? (u64)atomic64_read(&mm_time_u) / atomic64_read(&mm_cnt) : 0, "us", "(unit)");
+		seq_printf(seq, "%2s  %5llu,%-6llu   %3s %-12llu   %2s  %-12llu   %2s  %-12llu\n",
+						"pf", (u64)atomic64_read(&pf_time_u) / MILLISECOND,
+								(u64)atomic64_read(&pf_time_u) % MILLISECOND,
+						"per",atomic64_read(&pf_cnt) ? (u64)atomic64_read(&pf_time_u) / atomic64_read(&pf_cnt) : 0,
+						"-o", atomic64_read(&pf_succ_cnt) ? (u64)atomic64_read(&pf_succ_time_u) / atomic64_read(&pf_succ_cnt) : 0,
+						"-x", atomic64_read(&pf_fail_cnt) ? (u64)atomic64_read(&pf_fail_time_u) / atomic64_read(&pf_fail_cnt) : 0);
+	} else {
+		atomic64_set(&pf_cnt, 0);
+		atomic64_set(&pf_time_u, 0);
+
+		atomic64_set(&pf_fail_cnt, 0);
+		atomic64_set(&pf_fail_time_u, 0);
+		atomic64_set(&pf_succ_cnt, 0);
+		atomic64_set(&pf_succ_time_u, 0);
+
+		atomic64_set(&mm_cnt, 0);
+		atomic64_set(&mm_time_u, 0);
+	}
+#endif
+}
+
 struct prefetch_list *alloc_prefetch_list(void);
 void free_prefetch_list(struct prefetch_list* pf_list);
 bool prefetch_policy(struct prefetch_list* pf_list);
@@ -192,13 +368,13 @@ inline int page_server_end_mm_fault(int ret)
 	if (ret & VM_FAULT_RETRY) {
 		current->fault_retry++;
 	} else if (!(ret & VM_FAULT_ERROR)) {
-		ktime_t dt, fault_end = ktime_get();
-
 		dt = ktime_sub(fault_end, current->fault_start);
 		trace_pgfault_stat(instruction_pointer(current_pt_regs()),
 				current->fault_address, ret,
 				current->fault_retry, ktime_to_ns(dt));
 		current->fault_address = 0;
+		atomic64_add(dt, &mm_time_u);
+		atomic64_inc(&mm_cnt);
 	}
 #endif
 	return ret;
@@ -409,24 +585,6 @@ enum {
 
 static struct kmem_cache *__fault_handle_cache = NULL;
 
-struct fault_handle {
-	struct hlist_node list;
-
-	unsigned long addr;
-	unsigned long flags;
-
-	unsigned int limit;
-	pid_t pid;
-	int ret;
-
-	atomic_t pendings;
-	atomic_t pendings_retry;
-	wait_queue_head_t waits;
-	wait_queue_head_t waits_retry;
-	struct remote_context *rc;
-
-	struct completion *complete;
-};
 
 static struct fault_handle *__alloc_fault_handle(struct task_struct *tsk, unsigned long addr, struct remote_context *rc)
 {
@@ -1373,9 +1531,9 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 
 	if (pf_list && num > 0) {
 		req->is_pf_list = num;
-		//memcpy(&req->pf_list, pf_list, sizeof(struct prefetch_list)); // problem: too large
+		memcpy(&req->pf_list, pf_list, sizeof(struct prefetch_list)); // problem: too large
 		/* xxx: optimize msg size */
-		memcpy(&req->pf_list, pf_list, num * sizeof(struct prefetch_body));
+		//memcpy(&req->pf_list, pf_list, num * sizeof(struct prefetch_body)); // xxx crash origin begins only on bare not vm
 		//size = sizeof(*req) - sizeof(struct prefetch_list) +
 		//					(num * sizeof(struct prefetch_body));
 	} else {
@@ -1404,9 +1562,10 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 			from_pid, from_nid, addr, req->instr_addr);
 
 	pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
-					from_nid, req, sizeof(*req));
-					/* xxx: optimize msg size */
-					//from_nid, req, size); /* xxx problem slowdown */
+						from_nid, req, sizeof(*req));
+						/* xxx: ??? ask SOMEHOW TIHS SIZE LARGER IS WAY FASTER !!!!!!!!!!!*/
+						/* xxx: optimize msg size */
+						//from_nid, req, size); /* xxx problem slowdown */
 	return 0;
 }
 
@@ -1881,8 +2040,10 @@ out:
 
 	/* xxx: problem - leader and followers have their own list */
 	/* xxx: only support remote prefetch */
+#if PREFETCH_SUPPORT
 	if (!tsk->at_remote)
 		prefetch_at_origin(req);
+#endif
 	END_KMSG_WORK(req);
 }
 
@@ -1976,6 +2137,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	bool populated = false;
 	struct mem_cgroup *memcg;
 	int ret = 0, num = 0;
+//	struct timeval tv_start;
 	struct prefetch_list *pf_list;
 	struct prefetch_list *new_pf_list = NULL;
 
@@ -2023,10 +2185,15 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
+//	pf_time_start_at_remote(&tv_start);
+#if PREFETCH_SUPPORT
 	pf_list = alloc_prefetch_list();
     if(prefetch_policy(pf_list))
 		new_pf_list = select_prefetch_pages(pf_list, mm, &num);
 		//prefetch_dummy_policy(pf_list, addr);
+//	else
+//		pf_time_end_at_remote(&tv_start);
+#endif
 
 	rp = __fetch_page_from_origin(current, vma, addr,
 								fault_flags, page, new_pf_list, num);
@@ -2463,11 +2630,13 @@ struct prefetch_list *select_prefetch_pages(
         if (!vma || vma->vm_start > addr || vma->vm_end < addr) {
 			PFPRINTK("%s(): %lx > [!%lx] > %lx\n", __func__,
 							vma->vm_start, addr, vma->vm_end);
+			pf_fail_action_record(true, false, false, false, false);
 			goto next;
 		}
         pte = __get_pte_at(mm, addr, &pmd, &ptl);
 		if (!pte) {
 			PFPRINTK("%s(): local skip !pte %lx\n", __func__, addr);
+			pf_fail_action_record(true, true, false, false, false);
 			goto next;
 		}
 
@@ -2511,10 +2680,9 @@ struct prefetch_list *select_prefetch_pages(
 				list_ptr->is_write )			/* pf w/ write */
 				) {
 				fh = __alloc_fault_handle(current, addr, rc);
+				pf_time_start_fh_path(fh);
 				if (list_ptr->is_write)
 					fh->flags |= FAULT_HANDLE_WRITE;
-				else
-					pf_action_record(true, false, false, false, false, false);
 
 				add_pf_list_at(new_pf_list, addr, list_ptr->is_write,
 									list_ptr->is_besteffort, slot);
@@ -2524,35 +2692,37 @@ struct prefetch_list *select_prefetch_pages(
 					!pte_write(*pte) &&			/* but read-only */
 					list_ptr->is_write ) {		/* pf w/ write */
 					PFPRINTK("%s(): 1 r R->W. ", __func__);
-					pf_action_record(false, false, false, true, false, false);
+					pf_action_record(false, false, false, true, false, false); // own | w
 					BUG_ON(pte_write(*pte));
 				} else { /* read or write + not owner */
 					if (list_ptr->is_write) {
-						pf_action_record(false, false, true, false, false, false);
+						pf_action_record(false, false, true, false, false, false); // !own | w
 						PFPRINTK("%s(): 2 r X->W. ", __func__);
 					}
+					else
+						pf_action_record(true, false, false, false, false, false); // !own | read
 				}
 #endif
 				PFPRINTK("select: [%d] [%d] %lx\n", current->pid, slot, addr);
 				/* xxx: counter like trace_pgfault */
 				slot++;
         	}
+		} else { /* found */
+			pf_fail_action_record(true, true, true, true, false);
 		}
 		pte_unmap(pte);
 		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 
 next_put:
-		//put_task_remote(current); // EXIT problem
-		__put_task_remote(rc);
+		__put_task_remote(rc); /* cannot use current since EXIT problem */
 next:
         list_ptr++;
 		cnt++;
-		if (cnt >= MAX_PF_REQ) break; /* better way? # in msg */
+		if (cnt >= MAX_PF_REQ) break;
     }
 	if (!slot) {
 		free_prefetch_list(new_pf_list);
 		new_pf_list = NULL;
-		//return NULL;
 	}
 out:
     free_prefetch_list(pf_list);
@@ -2566,6 +2736,7 @@ int prefetch_at_origin(remote_page_request_t *req)
 	int from_nid = PCN_KMSG_FROM_NID(req);
 	int cnt = 0;
 	struct mm_struct *mm;
+	struct timeval tv_start;
 	struct task_struct *tsk;
     struct remote_context *rc;
 	struct prefetch_body *list_ptr = (struct prefetch_body*)&req->pf_list;
@@ -2574,15 +2745,15 @@ int prefetch_at_origin(remote_page_request_t *req)
 	BUG_ON(!list_ptr->addr && "is_list but no content");
 #endif
 
+	pf_time_start_at_origin(&tv_start);
 	tsk = __get_task_struct(req->remote_pid);
-	if (!tsk) return -1;
+	if (!tsk) BUG();
+
 	mm = get_task_mm(tsk);
 	if(!mm) {
 		put_task_struct(tsk);
-		return -1;
-	}
-	if(!mm->remote)
 		BUG();
+	}
 
 	rc = get_task_remote_with_mm(mm);
 	down_read(&mm->mmap_sem);
@@ -2612,6 +2783,7 @@ int prefetch_at_origin(remote_page_request_t *req)
 											addr, vma ? "O" : "X");
 			res->result = PREFETCH_FAIL;
 			res_size = sizeof(remote_prefetch_fail_t);
+			pf_fail_action_record(false, false, false, false, false);
 			goto next_nopte;
 		}
 
@@ -2654,6 +2826,7 @@ int prefetch_at_origin(remote_page_request_t *req)
 			/* follwer case */
 			res->result = PREFETCH_FAIL;
 			res_size = sizeof(remote_prefetch_fail_t);
+			pf_fail_action_record(false, true, false, true, false);
 		} else {
 			if (page_is_mine(mm, addr)) {
 				/* no conflict and owner */
@@ -2671,9 +2844,11 @@ int prefetch_at_origin(remote_page_request_t *req)
 				/* THIS REMOTE_FETCH MAY FAIL. WHAT IF A FOLLOWER WAITING FOR COALESCING - CONSIDER IT */
 				res->result = PREFETCH_FAIL;
 				res_size = sizeof(remote_prefetch_fail_t);
-			} else {
-				BUG();
+				pf_fail_action_record(false, true, false, false, false);
 			}
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+			else { BUG(); }
+#endif
 		}
 		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 
@@ -2758,6 +2933,7 @@ next_nopte:
 	__put_task_remote(rc);
 	mmput(mm);
 	put_task_struct(tsk);
+	pf_time_end_at_origin(&tv_start);
 	return 0;
 }
 
@@ -2773,14 +2949,18 @@ static void process_remote_prefetch_response(struct work_struct *work)
     struct page *page;
 	unsigned long flags;
     struct mm_struct *mm;
+	struct timeval tv_start;
 	struct fault_handle *fh;
 	struct mem_cgroup *memcg;
 	struct remote_context *rc;
     struct vm_area_struct *vma;
 	int fk, ret = VM_FAULT_RETRY;	/* If prefetch fail, followers retry */
 	bool found = false, populated = false;
-    struct task_struct *tsk = __get_task_struct(res->tgid);
+    struct task_struct *tsk;
+
+    tsk = __get_task_struct(res->tgid);
     if (!tsk) {
+		BUG();
         PGPRINTK("%s: no such process %d %d pf_addr %lx\n", __func__,
                 res->origin_pid, res->remote_pid, res->addr);
         goto out_fail;
@@ -2835,7 +3015,7 @@ static void process_remote_prefetch_response(struct work_struct *work)
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 		BUG_ON(!page_is_mine(mm, res->addr));
 #endif
-		pf_action_record(false, false, false, true, true, true);
+		pf_action_record(false, false, false, true, true, true); // WO SUCC 0x0111
 		PFPRINTK("recv:\t\t preown & up-dto-date %lx\n", res->addr);
 
 		spin_lock(ptl);
@@ -2866,13 +3046,13 @@ static void process_remote_prefetch_response(struct work_struct *work)
 			do_set_pte(vma, res->addr, page, pte, res->is_write, true);
 			mem_cgroup_commit_charge(page, memcg, false);
 			lru_cache_add_active_or_unevictable(page, vma);
-			pf_action_record(false, false, false, true, true, true);
+			pf_action_record(false, false, false, true, true, true); // WO SUCC 0x0111
 			PFPRINTK("recv:\t\t not preown %lx\n", res->addr);
 		} else {
 			unsigned fault_flags = res->is_write ? FAULT_FLAG_WRITE : 0;
 			__make_pte_valid(mm, vma, res->addr, fault_flags, pte);
 			if (fault_flags)
-				pf_action_record(false, false, true, false, true, true);
+				pf_action_record(false, false, true, false, true, true); //WX SUCC 0x1x11
 			else
 				pf_action_record(true, false, false, false, true, true);
 			PFPRINTK("recv:\t\t preown but not CONTINUE(up-to-date) %lx\n", res->addr);
@@ -2921,6 +3101,7 @@ out:
 #endif
 	/* xxx: counter like trace_pgfault */
 	fh->ret = ret; /* To followers - done(0) / retry(VM_FAULT_RETRY) */
+	pf_time_end_fh_path(fh, res->result & PREFETCH_SUCCESS);
 	__finish_fault_handling(fh);
 	if (!out)
 		mmput(mm);
@@ -2961,5 +3142,18 @@ int __init page_server_init(void)
 	__fault_handle_cache = kmem_cache_create("fault_handle",
 			sizeof(struct fault_handle), 0, 0, NULL);
 
+#ifdef CONFIG_POPCORN_STAT
+	atomic64_set(&pf_cnt, 0);
+	atomic64_set(&pf_time_u, 0);
+
+	atomic64_set(&pf_fail_cnt, 0);
+	atomic64_set(&pf_fail_time_u, 0);
+	atomic64_set(&pf_succ_cnt, 0);
+	atomic64_set(&pf_succ_time_u, 0);
+#endif
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	atomic64_set(&mm_cnt, 0);
+	atomic64_set(&mm_time_u, 0);
+#endif
 	return 0;
 }
