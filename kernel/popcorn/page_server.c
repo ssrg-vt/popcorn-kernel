@@ -42,7 +42,8 @@
 //#define PFPRINTK(...) printk(__VA_ARGS__)
 //#define PFPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #define PFPRINTK(...)
-#define PREFETCH_SUPPORT 0
+#define PREFETCH_SUPPORT 1
+#define PREFETCH_REMOTE_REMOTE_IMM 0
 
 struct fault_handle {
 	struct hlist_node list;
@@ -64,6 +65,12 @@ struct fault_handle {
 #ifdef CONFIG_POPCORN_STAT
 	struct timeval tv_start;
 #endif
+};
+
+struct remote_remote_prefetch_req {
+	struct list_head list;
+	unsigned long addr;
+	unsigned long flags;
 };
 
 #ifdef CONFIG_POPCORN_STAT
@@ -1666,7 +1673,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 	if (rh) pcn_kmsg_unpin_rdma_buffer(rh);
 	__put_task_remote(rc);
 	kunmap(pip);
-	return 0;
+	return rp->result;
 }
 
 static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_nid, struct mm_struct *mm)
@@ -1902,6 +1909,7 @@ again:
 					__claim_local_page(tsk, addr, my_nid, mm);
 			}
 		}
+
 		spin_lock(ptl);
 
 		SetPageDistributed(mm, addr);
@@ -2736,6 +2744,10 @@ int prefetch_at_origin(remote_page_request_t *req)
 	int from_nid = PCN_KMSG_FROM_NID(req);
 	int cnt = 0;
 	struct mm_struct *mm;
+#if !PREFETCH_REMOTE_REMOTE_IMM
+	struct list_head rr_prefetch_list_head; // remote remote prefeth list head
+	struct remote_remote_prefetch_req *curr, *next;
+#endif
 	struct timeval tv_start;
 	struct task_struct *tsk;
     struct remote_context *rc;
@@ -2744,7 +2756,9 @@ int prefetch_at_origin(remote_page_request_t *req)
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!list_ptr->addr && "is_list but no content");
 #endif
-
+#if !PREFETCH_REMOTE_REMOTE_IMM
+	INIT_LIST_HEAD(&rr_prefetch_list_head);
+#endif
 	pf_time_start_at_origin(&tv_start);
 	tsk = __get_task_struct(req->remote_pid);
 	if (!tsk) BUG();
@@ -2767,11 +2781,17 @@ int prefetch_at_origin(remote_page_request_t *req)
 		spinlock_t *ptl;
 		struct page *page;
 		unsigned long flags;
+		unsigned long fault_flags;
+		bool remote_remote = false;
 		struct fault_handle *fh = NULL;
 		remote_prefetch_response_t *res;
 		bool found = false, leader = false;
         unsigned long addr = list_ptr->addr;
 		struct vm_area_struct *vma = find_vma(mm, addr);
+#if !PREFETCH_REMOTE_REMOTE_IMM
+		bool queue_remote_remote = false;
+#endif
+
 		if (TRANSFER_PAGE_WITH_RDMA) {
 			res = pcn_kmsg_get(sizeof(remote_page_response_short_t));
 		} else {
@@ -2835,20 +2855,32 @@ int prefetch_at_origin(remote_page_request_t *req)
 				res_size = sizeof(remote_prefetch_response_t);
 				fh = __alloc_fault_handle(tsk, addr, rc);
 
-				/* remotefault | at remote | read/wirte */
-				fh->flags |= FAULT_HANDLE_REMOTE;
+				/* remotefault | at remote | read/wirte */ //modulize
+				fh->flags = FAULT_HANDLE_REMOTE;
 				if (list_ptr->is_write)
 					fh->flags |= FAULT_HANDLE_WRITE;
-			} else if (!page_is_mine(mm, addr)){
+			} else { /* !page_is_mine */
 				/* send a remote page request xxx: NOT supported yet, merge with upper */
 				/* THIS REMOTE_FETCH MAY FAIL. WHAT IF A FOLLOWER WAITING FOR COALESCING - CONSIDER IT */
-				res->result = PREFETCH_FAIL;
-				res_size = sizeof(remote_prefetch_fail_t);
-				pf_fail_action_record(false, true, false, false, false);
-			}
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-			else { BUG(); }
+				/* prefetch remote remote - not support */
+				//res->result = PREFETCH_FAIL;
+				//res_size = sizeof(remote_prefetch_fail_t);
+				//pf_fail_action_record(false, true, false, false, false);
+
+#if PREFETCH_REMOTE_REMOTE_IMM
+				/* prefetch remote remote - support */
+				leader = true;
+				res_size = sizeof(remote_prefetch_response_t);
+				fh = __alloc_fault_handle(tsk, addr, rc);
+
+				/* remotefault | at remote | read/wirte */ //modulize
+				fh->flags = FAULT_HANDLE_REMOTE; //remote | r
+				if (list_ptr->is_write)
+					fh->flags |= FAULT_FLAG_WRITE;
+#else
+				queue_remote_remote = true;
 #endif
+			}
 		}
 		spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 
@@ -2866,19 +2898,28 @@ int prefetch_at_origin(remote_page_request_t *req)
 				res->result |= VM_FAULT_CONTINUE;
 				res_size = sizeof(remote_prefetch_fail_t); // fail means: no pg but scucess
 			} else { /* requesting node is not owner */
-				if (list_ptr->is_write) { /* pg_is_mine | remotefault | write */
-					BUG_ON(!rc);
-					__claim_local_page(tsk, addr, my_nid, mm); /* revoke others exp origin */
-					PFPRINTK("%s(): 2 r X->W | o mine %lx granted(X)\n", __func__, addr);
-				} else {
-					PFPRINTK("%s(): 3 r X->R | o mine %lx granted(X)\n", __func__, addr);
+				if (!page_is_mine(mm, addr)) { /* owner = remote remote */
+#if PREFETCH_REMOTE_REMOTE_IMM
+					res->result = PREFETCH_SUCCESS;
+					page = get_normal_page(vma, addr, pte); /* get on-demand */
+					BUG_ON(!page); // if this happen, just detour. TODO ask
+					remote_remote = true;
+					__claim_remote_page(tsk, vma, addr, fh->flags, page, NULL);
+#endif
+				} else { /* owner = me */
+					if (list_ptr->is_write) { /* pg_is_mine | remotefault | write */
+						BUG_ON(!rc);
+						__claim_local_page(tsk, addr, my_nid, mm); /* revoke others exp origin */
+						PFPRINTK("%s(): 2 r X->W | o mine %lx granted(X)\n", __func__, addr);
+					} else { /* no revoke */
+						PFPRINTK("%s(): 3 r X->R | o mine %lx granted(X)\n", __func__, addr);
+					}
 				}
 			}
 
 			spin_lock(ptl);
 			SetPageDistributed(mm, addr);
-			set_page_owner(from_nid, mm, addr); /* good */
-
+			set_page_owner(from_nid, mm, addr);
 			entry = ptep_clear_flush(vma, addr, pte);
 
 			if (list_ptr->is_write) { /* remotefault | write */
@@ -2895,18 +2936,39 @@ int prefetch_at_origin(remote_page_request_t *req)
 
 			/* copy page to msg */
 			if (!grant) {
-				page = get_normal_page(vma, addr, pte); /* get on-demand */
-
-				flush_cache_page(vma, addr, page_to_pfn(page)); // ask???
+				if (!remote_remote) {
+					page = get_normal_page(vma, addr, pte); /* get on-demand */
+					BUG_ON(!page);
+				}
+				flush_cache_page(vma, addr, page_to_pfn(page));
 
 				/* socket */
 				paddr = kmap_atomic(page);
 				copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 				kunmap_atomic(paddr);
+				/* ib */
+				// TODO
 			}
-			fh->ret = 0;
 			__finish_fault_handling(fh);
+		} /* leader done */
+
+
+#if !PREFETCH_REMOTE_REMOTE_IMM
+		if (queue_remote_remote) {
+			struct remote_remote_prefetch_req *rrpf_req =
+							kmalloc(sizeof(*rrpf_req), GFP_KERNEL);
+
+			res->result = PREFETCH_FAIL;
+			res_size = sizeof(remote_prefetch_fail_t);
+
+			rrpf_req->addr = addr;
+			rrpf_req->flags = FAULT_HANDLE_REMOTE;
+			if (list_ptr->is_write)
+				rrpf_req->flags |= FAULT_FLAG_WRITE;
+			list_add_tail(&rrpf_req->list, &rr_prefetch_list_head);
+			//pf_fail_action_record(false, true, false, false, false);
 		}
+#endif
 
 next:
 		pte_unmap(pte);
@@ -2928,6 +2990,86 @@ next_nopte:
 		cnt++;
 		if (cnt >= MAX_PF_REQ) break; /* better way? # in msg */
     }
+
+#if !PREFETCH_REMOTE_REMOTE_IMM
+	if (!list_empty(&rr_prefetch_list_head)) {
+		list_for_each_entry_safe(curr, next, &rr_prefetch_list_head, list) {
+			//goto next_nopte2;
+			/* only read pf pf for read*/
+			unsigned long addr = curr->addr;
+			unsigned long fault_flags = curr->flags;
+			//bool is_write = curr->is_write;
+
+			pmd_t *pmd;
+			struct fault_handle *fh = NULL;
+			bool found = false, leader =false;
+			unsigned long flags;
+			spinlock_t *ptl;
+			int fk;
+			pte_t *pte;
+			struct vm_area_struct *vma = find_vma(mm, addr);
+			if (!vma || vma->vm_start > addr || vma->vm_end < addr) {
+				//PFPRINTK("pfpf: origin %lx is_vma(%s) or wrong addr range\n",
+				//								addr, vma ? "O" : "X");
+				//res->result = PREFETCH_FAIL;
+				//res_size = sizeof(remote_prefetch_fail_t);
+				//pf_fail_action_record(false, false, false, false, false);
+				goto next_nopte2;
+			}
+
+			pte = __get_pte_at(mm, addr, &pmd, &ptl);
+			if (!pte) {
+				BUG(); /* impossible */
+				goto next_nopte2;
+			}
+
+			spin_lock(ptl);
+			fk = __fault_hash_key(addr);
+			spin_lock_irqsave(&rc->faults_lock[fk], flags);
+			spin_unlock(ptl);
+
+			hlist_for_each_entry(fh, &rc->faults[fk], list) {
+				if (fh->addr == addr) {
+					found = true;
+					break;
+				}
+			}
+
+			if (!found) {
+				fh = __alloc_fault_handle(tsk, addr, rc);
+				fh->flags = fault_flags; // check ???
+				leader = true;
+			} /* if found just pass */
+			spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
+
+			if (leader) {
+				/* double check since page status may have been changed */
+				if (!test_page_owner(from_nid, mm, addr)) { /* read->write */
+					if (!page_is_mine(mm, addr)) {
+						int err;
+						struct page *page = vm_normal_page(vma, addr, *pte);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+						BUG_ON(!page);
+#endif
+						err = __claim_remote_page(current, vma, addr, fault_flags, page, mm);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+						BUG_ON(err); // TODO: why 100% success? ask?
+#endif
+						spin_lock(ptl);
+						__make_pte_valid(mm, vma, addr, fault_flags, pte);
+						spin_unlock(ptl);
+					} else { //TODO: record }
+				} else { //TODO: record  }
+				__finish_fault_handling(fh);
+			}
+
+			pte_unmap(pte);
+next_nopte2:
+			list_del(&curr->list);
+			kfree(curr);
+		}
+	}
+#endif
 
 	up_read(&mm->mmap_sem);
 	__put_task_remote(rc);
