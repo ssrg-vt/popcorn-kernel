@@ -631,18 +631,19 @@ static void __run_remote_worker(struct remote_context *rc)
 		struct work_struct *work = NULL;
 		struct pcn_kmsg_message *msg;
 		int ret;
+		unsigned long flags;
 
 		ret = wait_for_completion_interruptible_timeout(
 					&rc->remote_works_ready, HZ);
 		if (ret == 0) continue;
 
-		spin_lock(&rc->remote_works_lock);
+		spin_lock_irqsave(&rc->remote_works_lock, flags);
 		if (!list_empty(&rc->remote_works)) {
 			work = list_first_entry(
 					&rc->remote_works, struct work_struct, entry);
 			list_del(&work->entry);
 		}
-		spin_unlock(&rc->remote_works_lock);
+		spin_unlock_irqrestore(&rc->remote_works_lock, flags);
 		if (!work) continue;
 
 		msg = ((struct pcn_kmsg_work *)work)->msg;
