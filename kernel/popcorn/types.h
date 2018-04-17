@@ -206,7 +206,7 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	unsigned long fault_flags; \
 	unsigned long instr_addr; \
 	dma_addr_t rdma_addr; \
-	u32 rdma_key;
+	u32 rdma_key; \
 	unsigned long aux;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 

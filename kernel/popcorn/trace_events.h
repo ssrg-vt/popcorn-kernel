@@ -5,7 +5,7 @@
 #define _TRACE_EVENTS_POPCORN_H_
 
 #include <linux/tracepoint.h>
-
+#include <popcorn/bundle.h>
 
 TRACE_EVENT(pgfault,
 	TP_PROTO(const int nid, const int pid, const char rw,
@@ -39,6 +39,33 @@ TRACE_EVENT(pgfault,
 		__entry->instr_addr, __entry->addr, __entry->aux, __entry->result)
 );
 
+TRACE_EVENT(pginv,
+	TP_PROTO(const int pid, const unsigned long instr_addr,
+		const unsigned long addr, const unsigned long page_info,
+		const unsigned int except_nid),
+
+	TP_ARGS(pid, instr_addr, addr, page_info, except_nid),
+
+	TP_STRUCT__entry(
+		__field(int, pid)
+		__field(unsigned long, instr_addr)
+		__field(unsigned long, addr)
+		__field(unsigned long, peers)
+	),
+
+	TP_fast_assign(
+		__entry->pid = pid;
+		__entry->instr_addr = instr_addr;
+		__entry->addr = addr;
+		__entry->peers = (MAX_POPCORN_NODES - 1)
+						& ~(1UL << my_nid)
+						& ~(1UL << except_nid);
+		__entry->peers &= page_info;
+	),
+
+	TP_printk("%d %lx %lx %lu\n", __entry->pid, __entry->instr_addr,
+		__entry->addr, __entry->peers)
+);
 
 TRACE_EVENT(pgfault_stat,
 	TP_PROTO(const unsigned long instr_addr, const unsigned long addr,

@@ -1100,13 +1100,9 @@ static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *v
 	}
 	ws = get_wait_station_multiple(tsk, peers);
 
-#ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
 	if (peers) {
-		unsigned long dest_mask = MAX_POPCORN_NODES - 1;
-		dest_mask &= ~(1UL << my_nid);
-		trace_printk("%d %lx %lx %lu\n", tsk->pid, instr_addr, addr, *pi & dest_mask);
+		trace_pginv(tsk->pid, instr_addr, addr, *pi, my_nid);
 	}
-#endif
 
 	for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
 		pid_t pid = rc->remote_tgids[nid];
@@ -1173,14 +1169,7 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int 
 		int nid;
 		struct remote_context *rc = get_task_remote(tsk);
 		struct wait_station *ws = get_wait_station_multiple(tsk, peers);
-#ifdef CONFIG_POPCORN_DEBUG_PAGE_FAULT
-		{
-			unsigned long dest_mask = MAX_POPCORN_NODES - 1;
-			dest_mask &= ~(1UL << my_nid);
-			dest_mask &= ~(1UL << except_nid);
-			trace_printk("%d %lx %lx %lu\n", tsk->pid, instr_addr, addr, *pi & dest_mask);
-		}
-#endif
+		trace_pginv(tsk->pid, instr_addr, addr, *pi, except_nid);
 		for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
 			pid_t pid = rc->remote_tgids[nid];
 			if (nid == except_nid || nid == my_nid) continue;
