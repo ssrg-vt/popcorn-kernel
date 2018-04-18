@@ -47,6 +47,7 @@ struct remote_context {
 	pid_t remote_tgids[MAX_POPCORN_NODES];
 };
 
+struct remote_context *__get_mm_remote(struct mm_struct *mm);
 struct remote_context *get_task_remote(struct task_struct *tsk);
 bool put_task_remote(struct task_struct *tsk);
 bool __put_task_remote(struct remote_context *rc);

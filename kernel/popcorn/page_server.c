@@ -1066,19 +1066,19 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 	return rp;
 }
 
-static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
+static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
 {
 	int peers;
 	unsigned int random = prandom_u32();
 	struct wait_station *ws;
-	struct remote_context *rc = get_task_remote(tsk);
+	struct remote_context *rc = __get_mm_remote(mm);
 	remote_page_response_t *rp;
 	int from, from_nid;
 	/* Read when @from becomes zero and save the nid to @from_nid */
 	int nid;
 	struct pcn_kmsg_rdma_handle *rh = NULL;
 	unsigned long offset;
-	struct page *pip = __get_page_info_page(rc->mm, addr, &offset);
+	struct page *pip = __get_page_info_page(mm, addr, &offset);
 	unsigned long *pi = (unsigned long *)kmap(pip) + offset;
 	BUG_ON(!pip);
 
@@ -1088,7 +1088,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *v
 		peers--;
 	}
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-	page_server_panic(peers == 0, tsk->mm, addr, NULL, __pte(0));
+	page_server_panic(peers == 0, mm, addr, NULL, __pte(0));
 #endif
 	from = random % peers;
 
@@ -1133,7 +1133,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct vm_area_struct *v
 	pcn_kmsg_done(rp);
 
 	if (rh) pcn_kmsg_unpin_rdma_buffer(rh);
-	put_task_remote(tsk);
+	__put_task_remote(rc);
 	kunmap(pip);
 	return 0;
 }
@@ -1367,7 +1367,7 @@ again:
 			grant = true;
 		} else {
 			if (!page_is_mine(mm, addr)) {
-				__claim_remote_page(tsk, vma, addr, fault_flags, page);
+				__claim_remote_page(tsk, mm, vma, addr, fault_flags, page);
 			} else {
 				if (fault_for_write(fault_flags))
 					__claim_local_page(tsk, addr, my_nid);
@@ -1566,7 +1566,7 @@ retry:
 
 	if (leader && !page_is_mine(mm, addr)) {
 		struct page *page = get_normal_page(vma, addr, pte);
-		__claim_remote_page(current, vma, addr, fault_flags, page);
+		__claim_remote_page(current, mm, vma, addr, fault_flags, page);
 
 		spin_lock(ptl);
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
@@ -1814,7 +1814,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		struct page *page = vm_normal_page(vma, addr, pte_val);
 		BUG_ON(!page);
 
-		__claim_remote_page(current, vma, addr, fault_flags, page);
+		__claim_remote_page(current, mm, vma, addr, fault_flags, page);
 
 		spin_lock(ptl);
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
