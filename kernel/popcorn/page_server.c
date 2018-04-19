@@ -1058,6 +1058,7 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 			copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
 		}
 		kunmap(page);
+		flush_dcache_page(page);
 		__SetPageUptodate(page);
 	}
 
@@ -1128,6 +1129,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 			copy_to_user_page(vma, page, addr, paddr, rp->page, PAGE_SIZE);
 		}
 		kunmap(page);
+		flush_dcache_page(page);
 		__SetPageUptodate(page);
 	}
 	pcn_kmsg_done(rp);
@@ -1210,6 +1212,7 @@ static void __make_pte_valid(struct mm_struct *mm,
 	} else {
 		entry = pte_wrprotect(entry);
 	}
+	entry = pte_mkyoung(entry);
 
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
