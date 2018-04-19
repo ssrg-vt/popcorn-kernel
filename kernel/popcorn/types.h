@@ -14,12 +14,18 @@
 
 #define FAULTS_HASH 31
 
-#define MAX_PF_REQ 300 /* max # of prefetching addres(pages) per request */
+/* max # of prefetching addres(pages) per request
+ * batching max size is bounded by msg payload size */
+#define MAX_PF_REQ PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE
+#define ONGOING_PF_REQ_PER_THREAD 99999
+#define MAX_TRY_MADVISE_REQ 99999
 
-/* dummy pf policy */
-#define SKIP_NUM_OF_PAGES 20			/* 0 = myself */
+/* For dummy prefetch testing */
+#if 0
+#define SKIP_NUM_OF_PAGES 20 /* 0 = myself */
 #define PREFETCH_NUM_OF_PAGES 20
 #define PREFETCH_DURATION 10
+#endif
 
 #define PREFETCH_FAIL 0x0001
 #define PREFETCH_SUCCESS 0x0002
@@ -35,8 +41,9 @@ struct prefetch_body {
 
 struct prefetch_madvise {
 	struct list_head list;
-	struct prefetch_body pfb;
+
 	pid_t pid;
+	struct prefetch_body pfb; /* doesn't need rdma feilds */
 } __attribute__((packed));
 
 struct prefetch_list {
@@ -259,18 +266,15 @@ DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
 
 #define REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
-	pid_t tgid; \
     pid_t origin_pid; \
     pid_t remote_pid; \
-    unsigned long addr; \
-    dma_addr_t rdma_addr; \
-    u32 rdma_key; \
-	int result; \
-	bool is_write;
+	unsigned long addr[MAX_PF_REQ]; \
+	int result[MAX_PF_REQ]; \
+	bool is_write[MAX_PF_REQ];
 
 #define REMOTE_PREFETCH_RESPONSE_FIELDS \
 	REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
-	unsigned char page[PAGE_SIZE];
+	unsigned char page[MAX_PF_REQ][PAGE_SIZE];
 DEFINE_PCN_KMSG(remote_prefetch_response_t, REMOTE_PREFETCH_RESPONSE_FIELDS);
 
 #define REMOTE_PREFETCH_RESPONSE_SHORT_FIELDS \

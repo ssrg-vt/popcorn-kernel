@@ -425,8 +425,12 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	}
 
 	/* Prefetching init */
-    INIT_LIST_HEAD(&tsk->pf_list);
-	spin_lock_init(&tsk->pf_lock);
+    INIT_LIST_HEAD(&tsk->pf_req_list);
+	spin_lock_init(&tsk->pf_req_lock);
+
+	tsk->pf_ongoing_cnt = 0;
+	INIT_LIST_HEAD(&tsk->pf_ongoing_list);
+	spin_lock_init(&tsk->pf_ongoing_lock);
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	tsk->fault_address = 0;
