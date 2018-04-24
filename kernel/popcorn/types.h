@@ -249,6 +249,13 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	struct prefetch_list pf_list;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
+#define REMOTE_PREFETCH_REQUEST_FIELDS \
+	pid_t origin_pid; \
+	pid_t remote_pid; \
+	u16 pf_list_size; \
+	struct prefetch_list pf_list;
+DEFINE_PCN_KMSG(remote_prefetch_request_t, REMOTE_PREFETCH_REQUEST_FIELDS);
+
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
 	pid_t remote_pid; \
 	pid_t origin_pid; \
