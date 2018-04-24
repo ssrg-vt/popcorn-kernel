@@ -17,7 +17,7 @@
 /* max # of prefetching addres(pages) per request
  * batching max size is bounded by msg payload size */
 #define MAX_PF_REQ PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE
-#define ONGOING_PF_REQ_PER_THREAD 99999
+#define ONGOING_PF_REQ_PER_THREAD 1
 #define MAX_TRY_MADVISE_REQ 99999
 
 /* For dummy prefetch testing */
