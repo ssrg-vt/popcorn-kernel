@@ -408,17 +408,11 @@ long madvise_prefetch(struct vm_area_struct *vma,
 		struct vm_area_struct **prev, unsigned long start,
 						unsigned long end, int behavior)
 {
-	int nr_pages = 0;
-	unsigned long addr;
 	*prev = vma;
-	for (addr = start; addr < end; addr += PAGE_SIZE) {
-		page_server_prefetch_enq(addr, behavior);
-		nr_pages++;
-	}
-	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n",
+	page_server_prefetch_enq(start, end, behavior);
+	VSPRINTK(" %s [%d] %d / %lx-%lx\n",
 			behavior == MADV_READ ? "R" : "W",
-			current->pid, my_nid,
-			nr_pages, (end - start) / PAGE_SIZE, start, end);
+			current->pid, my_nid, start, end);
 
 	return 0;
 }
@@ -475,8 +469,8 @@ madvise_behavior_valid(int behavior)
 	case MADV_DONTDUMP:
 	case MADV_DODUMP:
 #ifdef CONFIG_POPCORN
-	case MADV_RELEASE:
-	case MADV_WRITE:
+//	case MADV_RELEASE:
+//	case MADV_WRITE:
 	case MADV_READ:
 #endif
 		return true;

@@ -30,20 +30,23 @@
 #define PREFETCH_FAIL 0x0001
 #define PREFETCH_SUCCESS 0x0002
 
-struct prefetch_body {
+struct prefetch_madvise {
+	struct list_head list;
+    unsigned long start_addr;
+    unsigned long end_addr;
+    unsigned long offset;
+	pid_t pid;
+    bool is_write;
+    bool is_besteffort;
+} __attribute__((packed));
+
+struct prefetch_body { /* TODO name it prefetch_list_body */
     unsigned long addr;
     bool is_write;
     bool is_besteffort;
 
 	u64 rdma_addr;
     u32 rdma_key;
-} __attribute__((packed));
-
-struct prefetch_madvise {
-	struct list_head list;
-
-	pid_t pid;
-	struct prefetch_body pfb; /* doesn't need rdma feilds */
 } __attribute__((packed));
 
 struct prefetch_list {
