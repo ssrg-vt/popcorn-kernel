@@ -17,7 +17,7 @@
 /* max # of prefetching addres(pages) per request
  * batching max size is bounded by msg payload size */
 #define MAX_PF_REQ PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE
-#define ONGOING_PF_REQ_PER_THREAD 1
+#define ONGOING_PF_REQ_PER_THREAD 8
 #define MAX_TRY_MADVISE_REQ 99999
 
 /* For dummy prefetch testing */
@@ -248,6 +248,7 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	unsigned long instr_addr; \
 	dma_addr_t rdma_addr; \
 	u32 rdma_key; \
+	unsigned long pf_req_id; \
 	u16 pf_list_size; \
 	struct prefetch_list pf_list;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
@@ -255,6 +256,7 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 #define REMOTE_PREFETCH_REQUEST_FIELDS \
 	pid_t origin_pid; \
 	pid_t remote_pid; \
+	unsigned long pf_req_id; \
 	u16 pf_list_size; \
 	struct prefetch_list pf_list;
 DEFINE_PCN_KMSG(remote_prefetch_request_t, REMOTE_PREFETCH_REQUEST_FIELDS);
@@ -278,6 +280,7 @@ DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
 #define REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
     pid_t origin_pid; \
     pid_t remote_pid; \
+	unsigned long pf_req_id; \
 	unsigned long addr[MAX_PF_REQ]; \
 	int result[MAX_PF_REQ]; \
 	bool is_write[MAX_PF_REQ];
