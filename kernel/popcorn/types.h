@@ -30,6 +30,23 @@
 #define PREFETCH_FAIL 0x0001
 #define PREFETCH_SUCCESS 0x0002
 
+#ifdef CONFIG_POPCORN_STAT
+#define KTIME_START(ktime_start) \
+	ktime_start = ktime_get();
+
+#define KTIME_END(ktime_start, ktime_end, atomic) \
+	ktime_end = ktime_get(); \
+	atomic_add(ktime_to_ns(ktime_sub(ktime_end, ktime_start)), &atomic);
+
+#define KTIME64_END(ktime_start, ktime_end, atomic) \
+	ktime_end = ktime_get(); \
+	atomic64_add(ktime_to_ns(ktime_sub(ktime_end, ktime_start)), &atomic);
+#else
+#define KTIME_START(ktime_start) ;
+#define KTIME_END(ktime_start, ktime_end, atomic) ;
+#define KTIME64_END(ktime_start, ktime_end, atomic) ;
+#endif
+
 struct prefetch_madvise {
 	struct list_head list;
     unsigned long start_addr;

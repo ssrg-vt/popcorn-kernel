@@ -57,7 +57,6 @@ spinlock_t pf_ongoing_lock;     /* ongoing prefetching mapping lock */
 struct list_head pf_ongoing_list;
 unsigned long g_pf_req_id = 0;
 
-
 struct fault_handle {
 	struct hlist_node list;
 
@@ -80,12 +79,10 @@ struct fault_handle {
 #endif
 };
 
-
 /* Ongoing prefetching requests mapping table per batched request */
 struct pf_ongoing_map {
 	struct list_head list;
 	unsigned long pf_req_id;
-	int pid; /* replace this with pf_req_id */
 	int pf_list_size;
 	unsigned long addr[MAX_PF_REQ];
 	struct fault_handle *fh[MAX_PF_REQ];
@@ -105,6 +102,11 @@ atomic_t madv_filtered_pg_cnt;
 atomic_t total;
 atomic_t succ;
 atomic_t fail;
+
+atomic_t a0, a1, a2, a3;
+atomic_t b0, b1, b2;
+atomic_t c0, c1, c3;
+atomic64_t c2;
 
 enum pf_action_code {
 	/* MADV */
@@ -185,6 +187,7 @@ void pf_action_stat(struct seq_file *seq, void *v) {
 #endif
 }
 
+/* Change to use macros directly */
 inline void pf_action_record_remote_res_fail_read(void)
 {
 #ifdef CONFIG_POPCORN_STAT
@@ -361,14 +364,13 @@ inline void pf_time_start_with_fh(struct fault_handle *fh)
 {
 #ifdef CONFIG_POPCORN_STAT
 	do_gettimeofday(&fh->tv_start);
-	atomic64_inc(&pf_cnt);
 #endif
 }
 
 inline void pf_time_end_with_fh(struct fault_handle *fh, bool succ)
 {
 #ifdef CONFIG_POPCORN_STAT
-	unsigned long dt;
+	long int dt;
 	struct timeval tv_end;
 	do_gettimeofday(&tv_end);
 	dt = ((tv_end.tv_sec * 1000000) + tv_end.tv_usec)
@@ -376,6 +378,7 @@ inline void pf_time_end_with_fh(struct fault_handle *fh, bool succ)
 		- fh->tv_start.tv_usec;
 	if (dt < 0) BUG();
 	atomic64_add(dt, &pf_time_u);
+	atomic64_inc(&pf_cnt);
 
 	if (succ) {
 		atomic64_add(dt, &pf_succ_time_u);
@@ -387,6 +390,7 @@ inline void pf_time_end_with_fh(struct fault_handle *fh, bool succ)
 #endif
 }
 
+#if 0
 /* for recording pf time on remote sides */
 inline void pf_time_start_at_remote(struct timeval* tv_start)
 {
@@ -398,15 +402,17 @@ inline void pf_time_start_at_remote(struct timeval* tv_start)
 inline void pf_time_end_at_remote(struct timeval* tv_start)
 {
 #ifdef CONFIG_POPCORN_STAT
-	unsigned long dt;
+	long int dt;
 	struct timeval tv_end;
 	do_gettimeofday(&tv_end);
 	dt = ((tv_end.tv_sec * 1000000) + tv_end.tv_usec)
 		- (tv_start->tv_sec * 1000000)
 		- tv_start->tv_usec;
 	atomic64_add(dt, &pf_time_u);
+	atomic64_inc(&pf_cnt);
 #endif
 }
+#endif
 
 /* for recording pf time on remote sides */
 inline void pf_time_start_at_origin(struct timeval* tv_start)
@@ -426,6 +432,7 @@ inline void pf_time_end_at_origin(struct timeval* tv_start)
 		- (tv_start->tv_sec * 1000000)
 		- tv_start->tv_usec;
 	atomic64_add(dt, &pf_time_u);
+	atomic64_inc(&pf_cnt);
 #endif
 }
 
@@ -435,25 +442,78 @@ void pf_time_stat(struct seq_file *seq, void *v)
 {
 #ifdef CONFIG_POPCORN_STAT
 	if (seq) {
-		seq_printf(seq, "%2s  %5ld,%06ld   %3s %-6ld   %3s %-6ld   %2s  %-6s\n",
+		seq_printf(seq, "%2s  %12ld,%06ld   %3s %-12ld   %3s %-12ld   %2s  %-6s   %3s  %12d\n",
 						"mm", atomic64_read(&mm_time_u) / MILLISECOND,
 								atomic64_read(&mm_time_u) % MILLISECOND,
 						"cnt", atomic64_read(&mm_cnt),
 						"per", atomic64_read(&mm_cnt) ? atomic64_read(&mm_time_u) / atomic64_read(&mm_cnt) : 0,
-						"us", "(unit)");
-		seq_printf(seq, "%2s  %5ld,%06ld   %3s %-6ld   %3s %-6ld   %2s  %-6ld   %2s  %-6ld\n",
+						"us", "(unit)",
+						"cut", atomic_read(&madv_filtered_pg_cnt));
+		seq_printf(seq, "%2s  %12ld,%06ld   %3s %-12ld   %3s %-12ld   %2s  %-12ld   %2s  %-12ld\n",
 						"pf", atomic64_read(&pf_time_u) / MILLISECOND,
 								atomic64_read(&pf_time_u) % MILLISECOND,
 						"cnt", atomic64_read(&pf_cnt),
 						"per", atomic64_read(&pf_cnt) ? atomic64_read(&pf_time_u) / atomic64_read(&pf_cnt) : 0,
 						"-o", atomic64_read(&pf_succ_cnt) ? atomic64_read(&pf_succ_time_u) / atomic64_read(&pf_succ_cnt) : 0,
 						"-x", atomic64_read(&pf_fail_cnt) ? atomic64_read(&pf_fail_time_u) / atomic64_read(&pf_fail_cnt) : 0);
-		seq_printf(seq, "%3s  %12d   %3s %-6d   %3s %-6d   %2s  %-6d   %2s  %-6d\n",
-						"cut", atomic_read(&madv_filtered_pg_cnt),
-						"x", 0,
-						"x", 0,
-						"x", 0,
-						"x", 0);
+
+        seq_printf(seq, "-----------------------------------------------------------\n");
+        seq_printf(seq, "%3s %12d  %3s %-12d  %3s %-12d  %2s %-12d  %2s %-d\n",
+                        "a0", atomic_read(&a0),
+                        "a1", atomic_read(&a1),
+                        "a2", atomic_read(&a2),
+                        "a3", atomic_read(&a3),
+                        "ns", 0);
+		seq_printf(seq, "%3s %12d  %3s %-12d  %3s %-12d  %2s %-12d  %2s %-12d\n",
+						"avg", 0,
+						"a1", atomic_read(&a0) ? atomic_read(&a1) / atomic_read(&a0) : 0,
+						"a2", atomic_read(&a0) ? atomic_read(&a2) / atomic_read(&a0) : 0,
+						"a3", atomic_read(&a0) ? atomic_read(&a3) / atomic_read(&a0) : 0,
+						"ns", 0);
+		seq_printf(seq, "%3s %12d  %3s %-12d  %3s %-12d  %2s %-12d  %2s %-12d\n",
+						"avg", 0,
+						"a1", atomic_read(&a0) ? (atomic_read(&a1) / atomic_read(&a0))/1000 : 0,
+						"a2", atomic_read(&a0) ? (atomic_read(&a2) / atomic_read(&a0))/1000 : 0,
+						"a3", atomic_read(&a0) ? (atomic_read(&a3) / atomic_read(&a0))/1000 : 0,
+						"us", 0);
+
+        seq_printf(seq, "%3s %12d  %3s %-12d  %3s %-12d  %2s %-12d  %2s %-d\n",
+                        "b0", atomic_read(&b0),
+                        "b1", atomic_read(&b1),
+                        "b2", atomic_read(&b2),
+                        "xx", 0,
+                        "ns", 0);
+		seq_printf(seq, "%3s %12d  %3s %-12d  %3s %-12d  %2s %-12d  %2s %-12d\n",
+						"avg", 0,
+						"b1", atomic_read(&b0) ? atomic_read(&b1) / atomic_read(&b0) : 0,
+						"b2", atomic_read(&b0) ? atomic_read(&b2) / atomic_read(&b0) : 0,
+						"xx", 0,
+						"ns", 0);
+		seq_printf(seq, "%3s %12d  %3s %-12d  %3s %-12d  %2s %-12d  %2s %-12d\n",
+						"avg", 0,
+						"b1", atomic_read(&b0) ? (atomic_read(&b1) / atomic_read(&b0))/1000 : 0,
+						"b2", atomic_read(&b0) ? (atomic_read(&b2) / atomic_read(&b0))/1000 : 0,
+						"xx", 0,
+						"us", 0);
+
+		seq_printf(seq, "%3s %12d  %3s %-12d  %3s %-12ld  %2s %-12d  %2s %-d\n",
+                        "c0", atomic_read(&c0),
+                        "c1", atomic_read(&c1),
+                        "c2", atomic64_read(&c2),
+                        "c3", atomic_read(&c3),
+                        "ns", 0);
+		seq_printf(seq, "%3s %12d  %3s %-12d  %3s %-12ld  %2s %-12d  %2s %-12d\n",
+						"avg", 0,
+						"c1", atomic_read(&c0) ? atomic_read(&c1) / atomic_read(&c0) : 0,
+						"c2", atomic_read(&c0) ? atomic64_read(&c2) / atomic_read(&c0) : 0,
+						"c3", atomic_read(&c0) ? atomic_read(&c3) / atomic_read(&c0) : 0,
+						"ns", 0);
+		seq_printf(seq, "%3s %12d  %3s %-12d  %3s %-12ld  %2s %-12d  %2s %-12d\n",
+						"avg", 0,
+						"c1", atomic_read(&c0) ? (atomic_read(&c1) / atomic_read(&c0))/1000 : 0,
+						"c2", atomic_read(&c0) ? (atomic64_read(&c2) / atomic_read(&c0))/1000 : 0,
+						"c3", atomic_read(&c0) ? (atomic_read(&c3) / atomic_read(&c0))/1000 : 0,
+						"us", 0);
 	} else {
 		atomic64_set(&pf_cnt, 0);
 		atomic64_set(&pf_time_u, 0);
@@ -471,6 +531,20 @@ void pf_time_stat(struct seq_file *seq, void *v)
 		atomic_set(&total, 0);
 		atomic_set(&succ, 0);
 		atomic_set(&fail, 0);
+
+		atomic_set(&a0, 0);
+		atomic_set(&a1, 0);
+		atomic_set(&a2, 0);
+		atomic_set(&a3, 0);
+
+		atomic_set(&b0, 0);
+		atomic_set(&b1, 0);
+		atomic_set(&b2, 0);
+
+		atomic_set(&c0, 0);
+		atomic_set(&c1, 0);
+		atomic64_set(&c2, 0);
+		atomic_set(&c3, 0);
 	}
 #endif
 }
@@ -512,15 +586,15 @@ inline int page_server_end_mm_fault(int ret)
 inline void page_is_mine_percent(bool is_mine)
 {
 #ifdef CONFIG_POPCORN_STAT
-	static int i = 0;
+	static atomic_t i;
 	atomic_inc(&total);
 	if (is_mine)
 		atomic_inc(&fail);
 
-	i++;
-	if (i >= 10000) {
+	atomic_inc(&i);
+	if (atomic_read(&i) >= 10000) {
 		printk("pg_mine %d %%\n", (atomic_read(&fail) * 100) / atomic_read(&total));
-		i = 0;
+		atomic_set(&i, 0);
 	}
 #endif
 }
@@ -1674,18 +1748,7 @@ struct prefetch_madvise *prefetch_deq(void)
 
 	/* spining overhead << remote page fault overhead */
 	spin_lock(&pf_req_lock);
-#if 0 // test this implementation
-	if (!list_empty(&pf_req_list)) {
-		found = true;
-		curr = list_first_entry(&pf_req_list, struct prefetch_madvise, list);
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-		BUG_ON(!curr);
-#endif
-		list_del(&curr->list);
-	}
-#endif
 #if 1
-	/* TODO change to container of */ //curr = list_entry(curr, typeof(*curr), list);
 	list_for_each_entry_safe(curr, tmp, &pf_req_list, list) {
 		/* PFPRINTK("%s(): %d %lx w(%s) b(%s) q->l\n", __func__,
 				curr->pid, curr->pfb.addr,
@@ -1703,6 +1766,16 @@ struct prefetch_madvise *prefetch_deq(void)
 	else
 		return NULL;
 }
+#if 0 // test this implementation
+	if (!list_empty(&pf_req_list)) {
+		found = true;
+		curr = list_first_entry(&pf_req_list, struct prefetch_madvise, list);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		BUG_ON(!curr);
+#endif
+		list_del(&curr->list);
+	}
+#endif
 
 /*
  * Maybe on normal page fault path.
@@ -1754,7 +1827,6 @@ void prefetch_req_list_add(struct prefetch_list *pf_list,
 	if (!slot) { /* first one should create a pf ongoing mapping */
 		*pf_map = kzalloc(sizeof(struct pf_ongoing_map), GFP_ATOMIC);
 		BUG_ON(!(*pf_map));
-		(*pf_map)->pid = current->pid; /* xxx */
 		spin_lock(&pf_ongoing_lock);
 		(*pf_map)->pf_req_id = ++g_pf_req_id;
 		list_add_tail(&(*pf_map)->list, &pf_ongoing_list);
@@ -1953,7 +2025,11 @@ unsigned long select_prefetch_pages(struct mm_struct *mm, int *pf_nr_pages, stru
 	bool is_end = false;
 	struct pf_ongoing_map *pf_map = NULL;
 	struct prefetch_madvise *curr_madv, *this_madv, *tmp;
+#ifdef CONFIG_POPCORN_STAT
+	ktime_t start1, end1, start2, end2, start3, end3;
+#endif
 
+	KTIME_START(start1);
 	if (!async) { /* async must do */
 		/* Controlling max request on the fly */
 		if (atomic_read(&pf_ongoing_cnt) >=
@@ -1965,7 +2041,10 @@ unsigned long select_prefetch_pages(struct mm_struct *mm, int *pf_nr_pages, stru
 	if (!curr_madv) {
 		goto out;
 	}
+	KTIME_END(start1, end1, a1);
 
+
+	KTIME_START(start2);
 	while (*pf_nr_pages < MAX_PF_REQ && try_cnt < MAX_TRY_MADVISE_REQ) {
 		if (select_prefetch_page(curr_madv, mm, pf_nr_pages, pf_list, &pf_map)) {
 			is_end = true;
@@ -1974,7 +2053,12 @@ unsigned long select_prefetch_pages(struct mm_struct *mm, int *pf_nr_pages, stru
 		}
 		try_cnt++;
     }
+	KTIME_END(start2, end2, a2);
+#ifdef CONFIG_POPCORN_STAT
+	atomic_inc(&a0); /* overestimate for a1 & underestimate for a3 */
+#endif
 
+	KTIME_START(start3);
 	if (!is_end) { /* leftover */
 		spin_lock(&pf_req_lock);
 		/* double check the list - can use a bit to indicate this is checked */
@@ -2000,6 +2084,7 @@ unsigned long select_prefetch_pages(struct mm_struct *mm, int *pf_nr_pages, stru
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(*pf_nr_pages > MAX_PF_REQ);
 #endif
+	KTIME_END(start3, end3, a3);
 out:
 	return pf_req_id;
 }
@@ -2077,9 +2162,7 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 			from_pid, from_nid, addr, req->instr_addr);
 
 	pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST,
-						//from_nid, req, sizeof(*req));
-						from_nid, req, size);
-//	free_prefetch_list(pf_list);
+								from_nid, req, size);
 	return 0;
 }
 
@@ -2787,12 +2870,17 @@ int __prefetch_at_origin(int from_nid, int remote_pid, int origin_pid,
 	struct vm_area_struct *vma;
 	remote_prefetch_response_t *res;
 	struct list_head preprefetch_list_head;
+#ifdef CONFIG_POPCORN_STAT
+	ktime_t start1, end1, start2, end2, start3, end3;
+	atomic_inc(&c0);
+#endif
 	if (!pf_list_size) return -1;
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!list_curr->addr && "is_list but no content");
 #endif
 	pf_time_start_at_origin(&tv_start);
 
+	KTIME_START(start1);
 //	if (TRANSFER_PAGE_WITH_RDMA) { //ooo
 //		res = pcn_kmsg_get(sizeof(remote_prefetch_response_short_t));
 //	} else {
@@ -2818,7 +2906,9 @@ int __prefetch_at_origin(int from_nid, int remote_pid, int origin_pid,
 								list_curr->addr, vma ? "O" : "X");
 		BUG();
 	}
+	KTIME_END(start1, end1, c1);
 
+	KTIME_START(start2);
 	while (list_curr->addr && cnt < pf_list_size) {
 		__prefetch_each_at_origin(mm, vma, tsk, rc, list_curr, cnt,
 									&res_size, succ_pf_num, from_nid,
@@ -2830,7 +2920,9 @@ int __prefetch_at_origin(int from_nid, int remote_pid, int origin_pid,
 		list_curr++;
     }
 	__do_preprefetch(&preprefetch_list_head, from_nid, tsk, mm, rc);
+	KTIME64_END(start2, end2, c2);
 
+	KTIME_START(start3);
 	PFPRINTK("pf response -> [%d] %d/%d %d", origin_pid,
 					succ_pf_num,  pf_list_size, res_size);
 	res->remote_pid = remote_pid;
@@ -2843,6 +2935,8 @@ int __prefetch_at_origin(int from_nid, int remote_pid, int origin_pid,
 	__put_task_remote(rc);
 	mmput(mm);
 	put_task_struct(tsk);
+	KTIME_END(start3, end3, c3);
+
 	pf_time_end_at_origin(&tv_start);
 	return 0;
 }
@@ -3575,10 +3669,14 @@ static void process_remote_prefetch_response(struct work_struct *work)
 	int pf_num = 0, succ_pf_num = 0;
 	struct pf_ongoing_map *curr = NULL, *tmp;
 	unsigned long first_addr = res->addr[0];
+#ifdef CONFIG_POPCORN_STAT
+	ktime_t start1, end1, start2, end2;
+#endif
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!res || !res->pf_req_id);
 #endif
 
+	KTIME_START(start1);
 	tsk = __get_task_struct(res->origin_pid); /* issuer */
     if (!tsk) goto pf_done;
 
@@ -3594,8 +3692,6 @@ static void process_remote_prefetch_response(struct work_struct *work)
 	spin_lock(&pf_ongoing_lock);
 	list_for_each_entry_safe(curr, tmp, &pf_ongoing_list, list) {
 		if (curr->pf_req_id == res->pf_req_id) {
-			//&& /* use the fist requesting */
-			//curr->addr[0] == first_addr) {  /* addr to locate the map */
 			found = true;
 			list_del(&curr->list);
 			break;
@@ -3613,14 +3709,13 @@ static void process_remote_prefetch_response(struct work_struct *work)
 		BUG(); /* waiting for the implementation in do_exit() */
 		goto pf_done;
 	}
-#endif
-
-	PFPRINTK("response: [%d] [%d]\n",
-			tsk->pid, curr->pf_list_size);
-
-#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!curr->pf_list_size);
 #endif
+	PFPRINTK("response: [%d] [%d]\n",
+			tsk->pid, curr->pf_list_size);
+	KTIME_END(start1, end1, b1);
+
+	KTIME_START(start2);
 	while (pf_num < MAX_PF_REQ && pf_num < curr->pf_list_size) {
 		pte_t *pte;
 		pmd_t *pmd;
@@ -3746,8 +3841,12 @@ next:
 	}
 	up_read(&mm->mmap_sem);
 	kfree(curr);
+	KTIME_END(start2, end2, b2);
 
 pf_done:
+#ifdef CONFIG_POPCORN_STAT
+	atomic_inc(&b0);
+#endif
 #if !PREFETCH_BACKGROUND
 	if (mm) mmput(mm);
 	if (tsk) put_task_struct(tsk);
@@ -3816,6 +3915,20 @@ int __init page_server_init(void)
 	atomic_set(&total, 0);
 	atomic_set(&succ, 0);
 	atomic_set(&fail, 0);
+
+	atomic_set(&a0, 0);
+	atomic_set(&a1, 0);
+	atomic_set(&a2, 0);
+	atomic_set(&a3, 0);
+
+	atomic_set(&b0, 0);
+	atomic_set(&b1, 0);
+	atomic_set(&b2, 0);
+
+	atomic_set(&c0, 0);
+	atomic_set(&c1, 0);
+	atomic64_set(&c2, 0);
+	atomic_set(&c3, 0);
 #endif
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	atomic64_set(&mm_cnt, 0);
