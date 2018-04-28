@@ -17,8 +17,7 @@
 /* max # of prefetching addres(pages) per request
  * batching max size is bounded by msg payload size */
 #define MAX_PF_REQ PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE
-#define ONGOING_PF_REQ_PER_THREAD 8
-#define MAX_TRY_MADVISE_REQ 99999
+#define MAX_TRY_MADVISE_REQ 99999 /* Can be used for detecting page_is_mine rate */
 
 /* For dummy prefetch testing */
 #if 0
@@ -95,6 +94,9 @@ struct remote_context {
 	/* Remote worker */
 	bool stop_remote_worker;
 
+	/* For page preftech */
+	atomic_t max_ongoing_pf_req;
+
 	struct task_struct *remote_worker;
 	struct completion remote_works_ready;
 	spinlock_t remote_works_lock;
@@ -109,6 +111,8 @@ struct remote_context *get_task_remote_with_mm(struct mm_struct *mm);
 bool put_task_remote(struct task_struct *tsk);
 bool __put_task_remote(struct remote_context *rc);
 
+void max_ongoing_pf_req_inc(atomic_t *max_ongoing_pf_req);
+void max_ongoing_pf_req_dec(atomic_t *max_ongoing_pf_req);
 
 /**
  * Process migration

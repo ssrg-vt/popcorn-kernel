@@ -469,9 +469,11 @@ madvise_behavior_valid(int behavior)
 	case MADV_DONTDUMP:
 	case MADV_DODUMP:
 #ifdef CONFIG_POPCORN
+#if CONFIG_POPCORN_PREFETCH
 //	case MADV_RELEASE:
 //	case MADV_WRITE:
 	case MADV_READ:
+#endif
 #endif
 		return true;
 

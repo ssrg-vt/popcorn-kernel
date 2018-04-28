@@ -12,6 +12,11 @@ config POPCORN
 		Enable or disable the Popcorn multi-kernel Linux support.
 
 if POPCORN
+config POPCORN_PREFETCH
+	bool "Prefetching enable"
+	default n
+	help
+		Enable or disable prefetching remote pages.
 
 config POPCORN_DEBUG
 	bool "Log debug messages for Popcorn"

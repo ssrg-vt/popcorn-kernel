@@ -128,6 +128,8 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	rc->tgid = tgid;
 	rc->for_remote = remote;
 
+	atomic_set(&rc->max_ongoing_pf_req, 0);
+
 	for (i = 0; i < FAULTS_HASH; i++) {
 		INIT_HLIST_HEAD(&rc->faults[i]);
 		spin_lock_init(&rc->faults_lock[i]);
@@ -314,6 +316,8 @@ static int __exit_remote_task(struct task_struct *tsk)
 		}
 		put_task_remote(tsk);
 	}
+
+	max_ongoing_pf_req_dec(&tsk->remote->max_ongoing_pf_req);
 
 	put_task_remote(tsk);
 	tsk->remote = NULL;
@@ -549,6 +553,8 @@ static int remote_thread_main(void *_args)
 	PSPRINTK("\n####### MIGRATED - [%d/%d] from [%d/%d]\n",
 			current->pid, my_nid, current->origin_pid, current->origin_nid);
 
+	max_ongoing_pf_req_inc(&current->remote->max_ongoing_pf_req);
+
 	kfree(params);
 	pcn_kmsg_done(req);
 
@@ -717,7 +723,7 @@ static int remote_worker_main(void *data)
 
 	get_task_remote(current);
 	rc->tgid = current->tgid;
-	
+
 	__run_remote_worker(rc);
 
 	__terminate_remote_threads(rc);
