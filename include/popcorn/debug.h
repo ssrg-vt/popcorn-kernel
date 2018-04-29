@@ -34,6 +34,11 @@
 #define PGPRINTK(...)
 #endif
 
+#ifdef CONFIG_POPCORN_DEBUG_PREFETCH
+#define PFPRINTK(...) printk(KERN_INFO __VA_ARGS__)
+#else
+#define PFPRINTK(...)
+#endif
 
 #ifdef CONFIG_POPCORN_DEBUG_MSG_LAYER
 #define MSGPRINTK(...) printk(KERN_INFO __VA_ARGS__)

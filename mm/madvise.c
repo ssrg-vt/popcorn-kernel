@@ -398,7 +398,7 @@ int madvise_release(struct vm_area_struct *vma,
 			nr_pages++;
 	}
 
-	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
+	VSPRINTK(" MADV_X [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
 			nr_pages, (end - start) / PAGE_SIZE, start, end);
 
 	return 0;
@@ -410,9 +410,9 @@ long madvise_prefetch(struct vm_area_struct *vma,
 {
 	*prev = vma;
 	page_server_prefetch_enq(start, end, behavior);
-	VSPRINTK(" %s [%d] %d / %lx-%lx\n",
+	VSPRINTK(" MADV_%s [%d] %d / %ld %lx-%lx\n",
 			behavior == MADV_READ ? "R" : "W",
-			current->pid, my_nid, start, end);
+			current->pid, my_nid, (end - start) / PAGE_SIZE, start, end);
 
 	return 0;
 }

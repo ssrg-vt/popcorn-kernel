@@ -3406,7 +3406,6 @@ unlock:
 }
 
 #ifdef CONFIG_POPCORN
-/* return a page, handle COW case */
 struct page *get_normal_page(struct vm_area_struct *vma, unsigned long addr, pte_t *pte)
 {
 	struct mm_struct *mm = vma->vm_mm;

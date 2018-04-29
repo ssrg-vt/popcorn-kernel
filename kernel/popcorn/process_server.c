@@ -128,7 +128,15 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	rc->tgid = tgid;
 	rc->for_remote = remote;
 
+#ifdef CONFIG_POPCORN_PREFETCH
+    INIT_LIST_HEAD(&rc->pf_req_list);
+    spin_lock_init(&rc->pf_req_lock);
+
+    atomic_set(&rc->pf_ongoing_cnt, 0);
 	atomic_set(&rc->max_ongoing_pf_req, 0);
+    INIT_LIST_HEAD(&rc->pf_ongoing_list);
+    spin_lock_init(&rc->pf_ongoing_lock);
+#endif
 
 	for (i = 0; i < FAULTS_HASH; i++) {
 		INIT_HLIST_HEAD(&rc->faults[i]);
@@ -727,6 +735,10 @@ static int remote_worker_main(void *data)
 	__run_remote_worker(rc);
 
 	__terminate_remote_threads(rc);
+
+#ifdef CONFIG_POPCORN_PREFETCH
+	release_prefetch_meta(rc);
+#endif
 
 	put_task_remote(current);
 	return current->exit_code;

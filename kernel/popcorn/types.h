@@ -95,7 +95,14 @@ struct remote_context {
 	bool stop_remote_worker;
 
 	/* For page preftech */
-	atomic_t max_ongoing_pf_req;
+	spinlock_t pf_req_lock;             /* Prefetcg list lock */
+	struct list_head pf_req_list;       /* Prefetch list head */
+
+	atomic_t pf_ongoing_cnt;            /* Ongoing prefetch cnt */
+	atomic_t max_ongoing_pf_req;		/* Upper bound */
+	spinlock_t pf_ongoing_lock;         /* Ongoing prefetch mapping lock */
+	struct list_head pf_ongoing_list;   /* Ongoing prefetch mapping list head */
+
 
 	struct task_struct *remote_worker;
 	struct completion remote_works_ready;
@@ -113,6 +120,8 @@ bool __put_task_remote(struct remote_context *rc);
 
 void max_ongoing_pf_req_inc(atomic_t *max_ongoing_pf_req);
 void max_ongoing_pf_req_dec(atomic_t *max_ongoing_pf_req);
+
+void release_prefetch_meta(struct remote_context *rc);
 
 /**
  * Process migration
@@ -305,6 +314,7 @@ DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
 	unsigned long addr[MAX_PF_REQ]; \
 	int result[MAX_PF_REQ]; \
 	bool is_write[MAX_PF_REQ];
+//TODO arry to truct
 
 #define REMOTE_PREFETCH_RESPONSE_FIELDS \
 	REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
