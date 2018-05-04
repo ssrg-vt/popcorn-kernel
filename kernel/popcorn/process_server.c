@@ -565,7 +565,7 @@ static int __fork_remote_thread(clone_request_t *req)
 
 	/* The loop deals with signals between concurrent migration */
 	while (kernel_thread(remote_thread_main, params,
-					CLONE_THREAD | CLONE_SIGHAND | SIGCHLD) < 0) {
+					CLONE_THREAD|CLONE_FS|CLONE_FILES|CLONE_SIGHAND | SIGCHLD) < 0) {
 		schedule();
 	}
 	return 0;
