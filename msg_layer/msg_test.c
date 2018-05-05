@@ -495,7 +495,7 @@ static void __run_test(enum test_action action, struct test_params *param)
 	struct test_params thread_params[MAX_THREADS] = {};
 	struct task_struct *tsks[MAX_THREADS] = { NULL };
 	struct test_barrier barrier;
-	struct timeval t_start, t_end;
+	ktime_t t_start, t_end;
 	DECLARE_COMPLETION_ONSTACK(done);
 	unsigned long elapsed;
 	int i;
@@ -518,18 +518,17 @@ static void __run_test(enum test_action action, struct test_params *param)
 	}
 
 	__barrier_wait(&barrier);
-	do_gettimeofday(&t_start);
+	t_start = ktime_get();
 	/* run the test */
 	__barrier_wait(&barrier);
-	do_gettimeofday(&t_end);
+	t_end = ktime_get();
 
 
-	elapsed = (t_end.tv_sec * 1000000 + t_end.tv_usec) -
-			(t_start.tv_sec * 1000000 + t_start.tv_usec);
+	elapsed = ktime_to_ns(ktime_sub(t_end, t_start));
 
 	printk("Done testing %s\n", tests[action].description);
-	printk("  %9lu us in total\n", elapsed);
-	printk("  %3lu.%05lu us per operation\n",
+	printk("  %9lu ns in total\n", elapsed);
+	printk("  %3lu.%05lu ns per operation\n",
 			elapsed / param->nr_iterations,
 			(elapsed % param->nr_iterations) * 1000 /  param->nr_iterations);
 }

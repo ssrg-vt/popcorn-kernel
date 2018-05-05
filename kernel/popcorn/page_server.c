@@ -45,7 +45,7 @@ inline void page_server_start_mm_fault(unsigned long address)
 			current->fault_address != address) {
 		current->fault_address = address;
 		current->fault_retry = 0;
-		do_gettimeofday(&current->fault_start);
+		current->fault_start = ktime_get();
 		current->fault_address = address;
 	}
 #endif
@@ -59,16 +59,12 @@ inline int page_server_end_mm_fault(int ret)
 	if (ret & VM_FAULT_RETRY) {
 		current->fault_retry++;
 	} else if (!(ret & VM_FAULT_ERROR)) {
-		unsigned long dt;
-		struct timeval tv_end;
-		do_gettimeofday(&tv_end);
+		ktime_t dt, fault_end = ktime_get();
 
-		dt = tv_end.tv_sec * 1000000 + tv_end.tv_usec
-			- current->fault_start.tv_sec * 1000000
-			- current->fault_start.tv_usec;
+		dt = ktime_sub(fault_end, current->fault_start);
 		trace_pgfault_stat(instruction_pointer(current_pt_regs()),
 				current->fault_address, ret,
-				current->fault_retry, dt);
+				current->fault_retry, ktime_to_ns(dt));
 		current->fault_address = 0;
 	}
 #endif

@@ -1842,7 +1842,7 @@ struct task_struct {
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	unsigned long fault_address;
 	int fault_retry;
-	struct timeval fault_start;
+	ktime_t fault_start;
 #endif
 
 	/*
