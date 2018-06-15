@@ -14,25 +14,30 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include <asm/arch_timer.h>
-#include <asm/cachetype.h>
-#include <asm/cpu.h>
-#include <asm/cputype.h>
-#include <asm/cpufeature.h>
 
 #include <linux/bitops.h>
-#include <linux/bug.h>
-#include <linux/compat.h>
 #include <linux/elf.h>
-#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/personality.h>
-#include <linux/preempt.h>
-#include <linux/printk.h>
 #include <linux/seq_file.h>
-#include <linux/sched.h>
-#include <linux/smp.h>
 #include <linux/delay.h>
+
+#include <asm/cpu.h>
+
+#include <popcorn/cpuinfo.h>
+
+static struct cpu_global_info {
+	unsigned int remote;
+	unsigned int vpos;
+	unsigned int nid;
+} cpu_global_info;
+
+/*
+ * num_cpus: # of cores of each nodes
+ * num_total_cpus: # of total cpus of all connected nodes
+ */
+static unsigned int num_cpus[MAX_POPCORN_NODES];
+static unsigned int num_total_cpus;
 
 /*
  * In case the boot CPU is hotpluggable, we record its initial state and
@@ -101,7 +106,7 @@ static const char *const compat_hwcap2_str[] = {
 };
 #endif /* CONFIG_COMPAT */
 
-static int c_show(struct seq_file *m, void *v)
+static int c_show_arm64(struct seq_file *m, void *v)
 {
 	int i, j;
 	bool compat = personality(current->personality) == PER_LINUX32;
@@ -159,9 +164,97 @@ static int c_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+static void calc_nid_vpos(loff_t *pos, unsigned int *pnid, unsigned int *vpos)
+{
+	int i = 0;
+
+	*pnid = 0;
+	*vpos = 0;
+
+	for (i = 1; i <= num_total_cpus; i++) {
+		if ((*pnid) == my_nid)
+			(*pnid)++;
+
+		if ((*vpos) == num_cpus[*pnid]) {
+			*vpos = 0;
+			(*pnid)++;
+		}
+
+		if (i == (*pos))
+			break;
+
+		(*vpos)++;
+	}
+}
+
 static void *c_start(struct seq_file *m, loff_t *pos)
 {
-	return *pos < 1 ? (void *)1 : NULL;
+	unsigned int vpos = 0;
+	unsigned int nid = 0;
+
+	if (my_nid == -1 || (*pos) == 0)
+		goto local;
+
+	if ((*pos) == 1) {
+		int i = 0;
+		int j = 0;
+		bool connected = false;
+
+		/* Check the connection with remote nodes */
+		for (i = 0; i < MAX_POPCORN_NODES; i++) {
+			if (get_popcorn_node_online(i)) {
+				connected = true;
+				break;
+			}
+		}
+
+		if (connected == false) {
+			/* No connection */
+			goto local;
+		} else {
+			/* Connection with remote nodes */
+			for (i = 0; i < MAX_POPCORN_NODES; i++) {
+				if (i == my_nid) {
+					num_cpus[i] = 1;
+					j = j + 1;
+					continue;
+				}
+				if (get_popcorn_node_online(i)) {
+					send_remote_cpu_info_request(i);
+					num_cpus[i] = get_number_cpus_from_remote_node(i);
+					j = j + num_cpus[i];
+				} else {
+					num_cpus[i] = 0;
+				}
+			}
+
+			num_total_cpus = j;
+			goto remote;
+		}
+	} else if ((*pos) > 1) {
+		goto remote;
+	}
+local:
+	if ((*pos) < 1) {
+		cpu_global_info.remote = 0;
+
+		return &cpu_global_info;
+	}
+
+	return NULL;
+
+remote:
+	if ((*pos) < num_total_cpus) {
+		calc_nid_vpos(pos, &nid, &vpos);
+
+		cpu_global_info.remote = 1;
+		cpu_global_info.vpos = vpos;
+		cpu_global_info.nid = nid;
+
+		return &cpu_global_info;
+	}
+
+	return NULL;
 }
 
 static void *c_next(struct seq_file *m, void *v, loff_t *pos)
@@ -172,6 +265,19 @@ static void *c_next(struct seq_file *m, void *v, loff_t *pos)
 
 static void c_stop(struct seq_file *m, void *v)
 {
+}
+
+static int c_show(struct seq_file *m, void *v)
+{
+	struct cpu_global_info *cpu_global_info = v;
+
+	if (cpu_global_info->remote == 1) {
+		remote_proc_cpu_info(m, cpu_global_info->nid, cpu_global_info->vpos);
+	} else {
+		c_show_arm64(m, v);
+	}
+
+	return 0;
 }
 
 const struct seq_operations cpuinfo_op = {

@@ -1,0 +1,78 @@
+____________________________________________________________________________________
+
+PCIe messaging layer
+____________________________________________________________________________________
+
+**** Following instructions are outdated. Please refer to with discretion. ****
+
+a. Introduction
+_____________________________________________________
+
+This is the PCI based messaging layer module built on top of dolphin interconnect solution
+
+This can be built as a standalone kernel module on vanilla linux for testing the msg layer or as part of popcorn linux using compile time MACROS
+
+b. Folder Contents
+_____________________________________________________
+
+msg_layer.c
+pcn_kmsg.h < same as kernel linux/pcn_kmsg.h header file >
+Makefile
+
+
+c. MACROS Description
+_____________________________________________________
+
+1. TARGET_NODE:
+	The dolphin solution's node ID for the target machine.
+	The node ID of a dolphin installation can be found by going to /opt/DIS/sbin and running ./dis_status. Look for Local Node ID.
+	In our setup, node ID currently for ARM is 8 and x86 is 4.
+ 
+2. TEST_MSG_LAYER:
+	Macro to enable independent installation and testing.
+	Where TEST_SERVER macro is enabled, this prints the average ping-pong latency and throughput for each message.
+	Each channel sends 25000 messages, set using NUM_MSGS macro
+
+3. TEST_SERVER:
+	When enabled along with TEST_MSG_LAYER, the module acts as server. It send messages and waits for the return reply from client before printing average
+	The other end module should be set as client by setting TEST_SERVER to zero. Then the client will wait for the messages and sends a reply for each message it recieves.
+	The message size set by MSG_LENGTH and NUM_MSGS should be same on both sides.
+
+4. PROF_HISTOGRAM:
+	When TEST_MSG_LAYER and TEST_SERVER macros are set, this macro prints the latency of each message sent to give a profile and not just the average value.
+	Reduce number of messages 
+
+5. ENABLE_DMA:
+	When set, uses DMA instead of PIO for messaging. Default is PIO transfer (as it is faster)
+
+6. MAX_NUM_CHANNELS:
+	Number of dolphin channels used for messaging. Currently set to 4. Set it equal to number of cores.
+ 
+5. NUM_MSGS:
+	Number of messages to be sent per channel
+
+
+d. BUILD
+_______________________________________________________
+
+Ensure that all the header files needed for dolphin APIs are available in place.
+The folders where necessary header files are kept can be found in EXTRA_FLAGS description in the current make file.
+The base folder in current makefile is - /home/ssrg_lab/dolphin/
+
+The above needed header files can be got from the dolphin installation script by getting tarball using the command -
+
+#./script.sh --get-tarball
+
+2. After Makefile is modified, Make the modules using -
+
+#make clean; make
+
+3. Then insert the messaging layer modules using -
+
+#insmod msg_layer.ko
+
+4. while testing independently, you can remove module using -
+
+#rmmod msg_layer.ko
+
+

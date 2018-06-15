@@ -48,6 +48,12 @@
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/bundle.h>
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 #include "internal.h"
 
 #ifndef arch_mmap_check
@@ -292,7 +298,16 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 	unsigned long min_brk;
 	bool populate;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		while (!down_write_trylock(&mm->mmap_sem))
+			schedule();
+	} else {
+		down_write(&mm->mmap_sem);
+	}
+#else
 	down_write(&mm->mmap_sem);
+#endif
 
 #ifdef CONFIG_COMPAT_BRK
 	/*
@@ -347,6 +362,13 @@ set_brk:
 	up_write(&mm->mmap_sem);
 	if (populate)
 		mm_populate(oldbrk, newbrk - oldbrk);
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		if (vma_server_brk_remote(brk)) {
+			return brk;
+		}
+	}
+#endif
 	return brk;
 
 out:
@@ -1498,6 +1520,13 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 	}
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
+
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		retval = vma_server_mmap_remote(file, addr, len, prot, flags, pgoff);
+		goto out_fput;
+	}
+#endif
 
 	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
 out_fput:
@@ -2687,7 +2716,16 @@ int vm_munmap(unsigned long start, size_t len)
 	int ret;
 	struct mm_struct *mm = current->mm;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_process(current)) {
+		while (!down_write_trylock(&mm->mmap_sem))
+			schedule();
+	} else {
+		down_write(&mm->mmap_sem);
+	}
+#else
 	down_write(&mm->mmap_sem);
+#endif
 	ret = do_munmap(mm, start, len);
 	up_write(&mm->mmap_sem);
 	return ret;
@@ -2697,6 +2735,15 @@ EXPORT_SYMBOL(vm_munmap);
 SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 {
 	profile_munmap(addr);
+
+#ifdef CONFIG_POPCORN
+	if (unlikely(distributed_process(current))) {
+		if (current->at_remote) {
+			return vma_server_munmap_remote(addr, len);
+		}
+		return vma_server_munmap_origin(addr, len, my_nid);
+	}
+#endif
 	return vm_munmap(addr, len);
 }
 

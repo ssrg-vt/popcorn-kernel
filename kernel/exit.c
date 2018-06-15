@@ -59,6 +59,10 @@
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
+#endif
+
 static void exit_mm(struct task_struct *tsk);
 
 static void __unhash_process(struct task_struct *p, bool group_dead)
@@ -393,6 +397,11 @@ static void exit_mm(struct task_struct *tsk)
 	if (!mm)
 		return;
 	sync_mm_rss(mm);
+
+#ifdef CONFIG_POPCORN
+	process_server_task_exit(tsk);
+#endif
+
 	/*
 	 * Serialize with any possible pending coredump.
 	 * We must hold mmap_sem around checking core_state

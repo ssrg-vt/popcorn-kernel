@@ -389,5 +389,9 @@
 #define __NR_userfaultfd	364
 #define __NR_membarrier		365
 #define __NR_mlock2		378
+#define __NR_popcorn_migrate	379
+#define __NR_popcorn_propose_migration	380
+#define __NR_popcorn_get_thread_status	381
+#define __NR_popcorn_get_node_info	382
 
 #endif /* _UAPI_ASM_POWERPC_UNISTD_H_ */

@@ -72,6 +72,12 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_POPCORN
+#include <linux/delay.h>
+#include <popcorn/page_server.h>
+#include <popcorn/process_server.h>
+#endif
+
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
 #endif
@@ -106,7 +112,11 @@ int randomize_va_space __read_mostly =
 #ifdef CONFIG_COMPAT_BRK
 					1;
 #else
+#ifdef CONFIG_POPCORN
+					0;	/* Popcorn needs address space randomization to be turned off for the time being */
+#else
 					2;
+#endif
 #endif
 
 static int __init disable_randmaps(char *s)
@@ -1134,6 +1144,10 @@ again:
 		if (pte_none(ptent)) {
 			continue;
 		}
+
+#ifdef CONFIG_POPCORN
+		page_server_zap_pte(vma, addr, pte, &ptent);
+#endif
 
 		if (pte_present(ptent)) {
 			struct page *page;
@@ -3306,6 +3320,24 @@ static int handle_pte_fault(struct mm_struct *mm,
 	 */
 	entry = *pte;
 	barrier();
+#ifdef CONFIG_POPCORN
+	if (distributed_process(current)) {
+		int ret = page_server_handle_pte_fault(
+				mm, vma, address, pmd, pte, entry, flags);
+		if (ret == VM_FAULT_RETRY) {
+			int backoff = ++current->backoff_weight;
+			PGPRINTK("  [%d] backoff %d\n", current->pid, backoff);
+			if (backoff <= 10) {
+				udelay(backoff * 100);
+			} else {
+				msleep(backoff - 10);
+			}
+		} else {
+			current->backoff_weight /= 2;
+		}
+		if (ret != VM_FAULT_CONTINUE) return ret;
+	}
+#endif
 	if (!pte_present(entry)) {
 		if (pte_none(entry)) {
 			if (vma_is_anonymous(vma))
@@ -3315,6 +3347,9 @@ static int handle_pte_fault(struct mm_struct *mm,
 				return do_fault(mm, vma, address, pte, pmd,
 						flags, entry);
 		}
+#ifdef CONFIG_POPCORN
+		page_server_panic(true, mm, address, pte, entry);
+#endif
 		return do_swap_page(mm, vma, address,
 					pte, pmd, flags, entry);
 	}
@@ -3349,6 +3384,156 @@ unlock:
 	pte_unmap_unlock(pte, ptl);
 	return 0;
 }
+
+#ifdef CONFIG_POPCORN
+struct page *get_normal_page(struct vm_area_struct *vma, unsigned long addr, pte_t *pte)
+{
+	struct mm_struct *mm = vma->vm_mm;
+	struct mem_cgroup *memcg;
+	struct page *page;
+	pte_t entry = *pte;
+
+	if ((page = vm_normal_page(vma, addr, entry))) return page;
+
+	BUG_ON(!is_zero_pfn(pte_pfn(entry)) && "Cannot handle this special page");
+
+	page = alloc_zeroed_user_highpage_movable(vma, addr);
+	if (!page) return NULL;
+
+	if (mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg)) {
+		page_cache_release(page);
+		return NULL;
+	}
+
+	__SetPageUptodate(page);
+
+	entry = mk_pte(page, vma->vm_page_prot);
+	if (vma->vm_flags & VM_WRITE)
+		entry = pte_mkwrite(pte_mkdirty(entry));
+
+	inc_mm_counter_fast(mm, MM_ANONPAGES);
+	page_add_new_anon_rmap(page, vma, addr);
+	mem_cgroup_commit_charge(page, memcg, false);
+	lru_cache_add_active_or_unevictable(page, vma);
+
+	set_pte_at_notify(mm, addr, pte, entry);
+	update_mmu_cache(vma, addr, pte);
+	flush_tlb_page(vma, addr);
+
+	return page;
+}
+
+int handle_pte_fault_origin(struct mm_struct *mm,
+		struct vm_area_struct *vma, unsigned long address,
+		pte_t *pte, pmd_t *pmd, unsigned int flags)
+{
+	struct mem_cgroup *memcg;
+	struct page *page;
+	spinlock_t *ptl;
+	pte_t entry = *pte;
+	barrier();
+
+	if (!vma_is_anonymous(vma))
+		return do_fault(mm, vma, address, pte, pmd, flags, entry);
+
+	/**
+	 * Following is for anonymous page. Almost same to do_anonymos_page
+	 * except it allocates page upon read
+	 */
+	pte_unmap(pte);
+
+	if (vma->vm_flags & VM_SHARED) return VM_FAULT_SIGBUS;
+
+	/* Check if we need to add a guard page to the stack */
+	if (check_stack_guard_page(vma, address) < 0)
+		return VM_FAULT_SIGSEGV;
+
+	if (unlikely(anon_vma_prepare(vma)))
+		return VM_FAULT_OOM;
+
+	page = alloc_zeroed_user_highpage_movable(vma, address);
+	if (!page)
+		return VM_FAULT_OOM;
+
+	if (mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg)) {
+		page_cache_release(page);
+		return VM_FAULT_OOM;
+	}
+
+	__SetPageUptodate(page);
+
+	entry = mk_pte(page, vma->vm_page_prot);
+	if (vma->vm_flags & VM_WRITE)
+		entry = pte_mkwrite(pte_mkdirty(entry));
+
+	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
+	if (!pte_none(*pte)) {
+		/* Somebody already attached a page */
+		mem_cgroup_cancel_charge(page, memcg);
+		page_cache_release(page);
+	} else {
+		inc_mm_counter_fast(mm, MM_ANONPAGES);
+		page_add_new_anon_rmap(page, vma, address);
+		mem_cgroup_commit_charge(page, memcg, false);
+		lru_cache_add_active_or_unevictable(page, vma);
+
+		set_pte_at(mm, address, pte, entry);
+		/* No need to invalidate - it was non-present before */
+		update_mmu_cache(vma, address, pte);
+	}
+	pte_unmap_unlock(pte, ptl);
+	return 0;
+}
+
+int cow_file_at_origin(struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, pte_t *pte)
+{
+	struct page *new_page, *old_page;
+	struct mem_cgroup *memcg;
+	pte_t entry;
+
+	/**
+	 * Following is very similar to do_wp_page() and wp_page_copy()
+	 */
+	if (anon_vma_prepare(vma)) return VM_FAULT_OOM;
+
+	new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
+	if (!new_page) return VM_FAULT_OOM;
+
+	if (mem_cgroup_try_charge(new_page, mm, GFP_KERNEL, &memcg)) {
+		page_cache_release(new_page);
+		return VM_FAULT_OOM;
+	}
+
+	old_page = vm_normal_page(vma, addr, *pte);
+	BUG_ON(!old_page);
+	BUG_ON(PageAnon(old_page));
+
+	page_cache_get(old_page);
+
+	copy_user_highpage(new_page, old_page, addr, vma);
+	__SetPageUptodate(new_page);
+
+	dec_mm_counter_fast(mm, MM_FILEPAGES);
+	inc_mm_counter_fast(mm, MM_ANONPAGES);
+
+	flush_cache_page(vma, addr, pte_pfn(*pte));
+	entry = mk_pte(new_page, vma->vm_page_prot);
+	entry = maybe_mkwrite(pte_mkdirty(entry), vma);
+
+	ptep_clear_flush_notify(vma, addr, pte);
+	page_add_new_anon_rmap(new_page, vma, addr);
+	mem_cgroup_commit_charge(new_page, memcg, false);
+	lru_cache_add_active_or_unevictable(new_page, vma);
+
+	set_pte_at_notify(mm, addr, pte, entry);
+	update_mmu_cache(vma, addr, pte);
+
+	page_remove_rmap(old_page);
+	page_cache_release(old_page);
+
+	return 0;
+}
+#endif
 
 /*
  * By the time we get here, we already hold the mm semaphore
@@ -3458,6 +3643,9 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	count_vm_event(PGFAULT);
 	mem_cgroup_count_vm_event(mm, PGFAULT);
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	page_server_start_mm_fault(address);
+#endif
 
 	/* do counter updates before entering really critical section. */
 	check_sync_rss_stat(current);
@@ -3482,6 +3670,10 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
                 if (task_in_memcg_oom(current) && !(ret & VM_FAULT_OOM))
                         mem_cgroup_oom_synchronize(false);
 	}
+
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	ret = page_server_end_mm_fault(ret);
+#endif
 
 	return ret;
 }

@@ -1,0 +1,59 @@
+if POPCORN
+
+config POPCORN_KMSG
+	bool "Inter-kernel messaging layer"
+	default y
+	help
+		Support various inter-kernel message passing implementations
+
+if POPCORN_KMSG
+
+# Socket over Ethernet
+config POPCORN_KMSG_SOCKET
+	tristate "Over TCP/IP"
+	depends on INET && m
+	default m
+	help
+		Communicate through sockets on IP on Ethernet
+
+config POPCORN_KMSG_RDMA
+	tristate "Over InfiniBand RDMA"
+	depends on m && INFINIBAND
+	default n
+	help
+		Mellanox Connect-X4 and Connect-X5
+
+# InfiniBand
+#config POPCORN_KMSG_IB
+#	tristate "Over InfiniBand"
+#	depends on m && INFINIBAND
+#	default n
+#	help
+#		Mellanox Connect-X4 and Connect-X5
+
+# Dolphin PCIe
+#config POPCORN_KMSG_DOLPHIN
+#	tristate "Dolphin PCI-e"
+#	depends on m
+#	default n
+#	help
+#		Dolphin PCI-e PX-810
+#
+#config POPCORN_KMSG_DOLPHIN_DIS_PATH
+#	string "Path to Dolphin software suite"
+#	depends on POPCORN_KMSG_DOLPHIN
+#	default "/opt/source/DIS/"
+
+# Test and debug
+config POPCORN_KMSG_TEST
+	tristate "Build test modules"
+	default n
+
+config POPCORN_DEBUG_MSG_LAYER
+	bool "Print debug message "
+	depends on POPCORN_DEBUG
+	default n
+
+endif # POPCORN_KMSG
+
+endif # POPCORN

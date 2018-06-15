@@ -1831,6 +1831,42 @@ struct task_struct {
 	unsigned long	task_state_change;
 #endif
 	int pagefault_disabled;
+
+#ifdef CONFIG_POPCORN
+	struct remote_context *remote;
+	union {
+		int peer_nid;
+		int remote_nid;
+		int origin_nid;
+	};
+	union {
+		pid_t peer_pid;
+		pid_t remote_pid;
+		pid_t origin_pid;
+	};
+
+	bool is_worker;			/* kernel thread that manages the process*/
+	bool at_remote;			/* Is executing on behalf of another node? */
+
+	volatile void *remote_work;
+	struct completion remote_work_pended;
+
+	int migration_target_nid;
+	int backoff_weight;
+
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	unsigned long fault_address;
+	int fault_retry;
+	ktime_t fault_start;
+#endif
+
+	/*
+	 * scheduling -- antoniob
+	 * in jiffies for load accounting
+	 */
+	unsigned long lutime, lstime, llasttimestamp;
+#endif
+
 /* CPU-specific state of this task */
 	struct thread_struct thread;
 /*

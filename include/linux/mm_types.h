@@ -15,6 +15,10 @@
 #include <asm/page.h>
 #include <asm/mmu.h>
 
+#ifdef CONFIG_POPCORN
+struct remote_context;
+#endif
+
 #ifndef AT_VECTOR_SIZE_ARCH
 #define AT_VECTOR_SIZE_ARCH 0
 #endif
@@ -515,6 +519,10 @@ struct mm_struct {
 #endif
 #ifdef CONFIG_HUGETLB_PAGE
 	atomic_long_t hugetlb_usage;
+#endif
+
+#ifdef CONFIG_POPCORN
+	struct remote_context *remote;
 #endif
 };
 

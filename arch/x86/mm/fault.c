@@ -25,6 +25,11 @@
 #define CREATE_TRACE_POINTS
 #include <asm/trace/exceptions.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 /*
  * Page fault error code bits:
  *
@@ -1199,6 +1204,19 @@ retry:
 	}
 
 	vma = find_vma(mm, address);
+#ifdef CONFIG_POPCORN
+	/* vma worker should not fault */
+	BUG_ON(tsk->is_worker);
+
+	if (distributed_remote_process(tsk)) {
+		if (!vma || vma->vm_start > address) {
+			if (vma_server_fetch_vma(tsk, address) == 0) {
+				/* Replace with updated VMA */
+				vma = find_vma(mm, address);
+			}
+		}
+	}
+#endif
 	if (unlikely(!vma)) {
 		bad_area(regs, error_code, address);
 		return;

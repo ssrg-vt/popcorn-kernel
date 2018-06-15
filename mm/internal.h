@@ -14,6 +14,10 @@
 #include <linux/fs.h>
 #include <linux/mm.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#endif
+
 /*
  * The set of flags that only affect watermark checking and reclaim
  * behaviour. This is used by the MM to obey the caller constraints

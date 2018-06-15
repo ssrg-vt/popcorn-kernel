@@ -89,6 +89,11 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/task.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/process_server.h>
+#endif
+
 /*
  * Minimum number of threads to boot the kernel
  */
@@ -391,6 +396,47 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 
 	account_kernel_stack(ti, 1);
 
+#ifdef CONFIG_POPCORN
+	/*
+	 * Reset variables for tracking remote execution
+	 */
+	tsk->remote = NULL;
+	tsk->remote_nid = tsk->origin_nid = -1;
+	tsk->remote_pid = tsk->origin_pid = -1;
+
+	tsk->is_worker = false;
+
+	/*
+	 * If the new tsk is not in the same thread group as the parent,
+	 * then we do not need to propagate the old thread info.
+	 * Otherwise, make sure to keep an accurate record
+	 * of which node and thread group the new thread is a part of.
+	 */
+	if (orig->tgid != tsk->tgid) {
+		tsk->at_remote = false;
+	}
+
+	tsk->remote_work = NULL;
+	init_completion(&tsk->remote_work_pended);
+
+	tsk->migration_target_nid = -1;
+	tsk->backoff_weight = 0;
+
+	/*
+	 * Temporarily boost the priviledge to exploit thread bootstrapping
+	 * in copy_thread_tls() during kernel_thread(). Will be demoted in the
+	 * remote thread context.
+	 */
+	if (orig->is_worker) {
+		tsk->flags |= PF_KTHREAD;
+	}
+
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	tsk->fault_address = 0;
+	tsk->fault_retry = 0;
+#endif
+#endif
+
 	return tsk;
 
 free_ti:
@@ -619,6 +665,10 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mm->pmd_huge_pte = NULL;
 #endif
 
+#ifdef CONFIG_POPCORN
+	mm->remote = NULL;
+#endif
+
 	if (current->mm) {
 		mm->flags = current->mm->flags & MMF_INIT_MASK;
 		mm->def_flags = current->mm->def_flags & VM_INIT_DEF_MASK;
@@ -720,6 +770,10 @@ void mmput(struct mm_struct *mm)
 		}
 		if (mm->binfmt)
 			module_put(mm->binfmt->module);
+#ifdef CONFIG_POPCORN
+		if (mm->remote)
+			free_remote_context(mm->remote);
+#endif
 		mmdrop(mm);
 	}
 }
@@ -1379,6 +1433,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p->utime = p->stime = p->gtime = 0;
 	p->utimescaled = p->stimescaled = 0;
 	prev_cputime_init(&p->prev_cputime);
+#ifdef CONFIG_POPCORN
+	p->lutime = p->lstime = 0;
+	p->llasttimestamp = get_jiffies_64();
+#endif
 
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
 	seqlock_init(&p->vtime_seqlock);
