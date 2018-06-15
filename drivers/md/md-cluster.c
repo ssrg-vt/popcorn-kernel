@@ -821,6 +821,7 @@ static int leave(struct mddev *mddev)
 	lockres_free(cinfo->no_new_dev_lockres);
 	lockres_free(cinfo->bitmap_lockres);
 	dlm_release_lockspace(cinfo->lockspace, 2);
+	kfree(cinfo);
 	return 0;
 }
 
@@ -944,8 +945,10 @@ static int add_new_disk(struct mddev *mddev, struct md_rdev *rdev)
 	cmsg.raid_slot = cpu_to_le32(rdev->desc_nr);
 	lock_comm(cinfo);
 	ret = __sendmsg(cinfo, &cmsg);
-	if (ret)
+	if (ret) {
+		unlock_comm(cinfo);
 		return ret;
+	}
 	cinfo->no_new_dev_lockres->flags |= DLM_LKF_NOQUEUE;
 	ret = dlm_lock_sync(cinfo->no_new_dev_lockres, DLM_LOCK_EX);
 	cinfo->no_new_dev_lockres->flags &= ~DLM_LKF_NOQUEUE;

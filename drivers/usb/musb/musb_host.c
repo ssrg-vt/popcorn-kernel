@@ -138,6 +138,7 @@ static void musb_h_tx_flush_fifo(struct musb_hw_ep *ep)
 				"Could not flush host TX%d fifo: csr: %04x\n",
 				ep->epnum, csr))
 			return;
+		mdelay(1);
 	}
 }
 
@@ -1047,7 +1048,9 @@ static void musb_bulk_nak_timeout(struct musb *musb, struct musb_hw_ep *ep,
 			/* set tx_reinit and schedule the next qh */
 			ep->tx_reinit = 1;
 		}
-		musb_start_urb(musb, is_in, next_qh);
+
+		if (next_qh)
+			musb_start_urb(musb, is_in, next_qh);
 	}
 }
 

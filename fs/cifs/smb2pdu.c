@@ -361,7 +361,7 @@ assemble_neg_contexts(struct smb2_negotiate_req *req)
 	build_encrypt_ctxt((struct smb2_encryption_neg_context *)pneg_ctxt);
 	req->NegotiateContextOffset = cpu_to_le32(OFFSET_OF_NEG_CONTEXT);
 	req->NegotiateContextCount = cpu_to_le16(2);
-	inc_rfc1001_len(req, 4 + sizeof(struct smb2_preauth_neg_context) + 2
+	inc_rfc1001_len(req, 4 + sizeof(struct smb2_preauth_neg_context)
 			+ sizeof(struct smb2_encryption_neg_context)); /* calculate hash */
 }
 #else
@@ -526,14 +526,21 @@ int smb3_validate_negotiate(const unsigned int xid, struct cifs_tcon *tcon)
 
 	/*
 	 * validation ioctl must be signed, so no point sending this if we
-	 * can not sign it.  We could eventually change this to selectively
+	 * can not sign it (ie are not known user).  Even if signing is not
+	 * required (enabled but not negotiated), in those cases we selectively
 	 * sign just this, the first and only signed request on a connection.
-	 * This is good enough for now since a user who wants better security
-	 * would also enable signing on the mount. Having validation of
-	 * negotiate info for signed connections helps reduce attack vectors
+	 * Having validation of negotiate info  helps reduce attack vectors.
 	 */
-	if (tcon->ses->server->sign == false)
+	if (tcon->ses->session_flags & SMB2_SESSION_FLAG_IS_GUEST)
 		return 0; /* validation requires signing */
+
+	if (tcon->ses->user_name == NULL) {
+		cifs_dbg(FYI, "Can't validate negotiate: null user mount\n");
+		return 0; /* validation requires signing */
+	}
+
+	if (tcon->ses->session_flags & SMB2_SESSION_FLAG_IS_NULL)
+		cifs_dbg(VFS, "Unexpected null user (anonymous) auth flag sent by server\n");
 
 	vneg_inbuf.Capabilities =
 			cpu_to_le32(tcon->ses->server->vals->req_capabilities);
@@ -564,13 +571,16 @@ int smb3_validate_negotiate(const unsigned int xid, struct cifs_tcon *tcon)
 	}
 
 	if (rsplen != sizeof(struct validate_negotiate_info_rsp)) {
-		cifs_dbg(VFS, "invalid size of protocol negotiate response\n");
-		return -EIO;
+		cifs_dbg(VFS, "invalid protocol negotiate response size: %d\n",
+			 rsplen);
+
+		/* relax check since Mac returns max bufsize allowed on ioctl */
+		if (rsplen > CIFSMaxBufSize)
+			return -EIO;
 	}
 
 	/* check validate negotiate info response matches what we got earlier */
-	if (pneg_rsp->Dialect !=
-			cpu_to_le16(tcon->ses->server->vals->protocol_id))
+	if (pneg_rsp->Dialect != cpu_to_le16(tcon->ses->server->dialect))
 		goto vneg_out;
 
 	if (pneg_rsp->SecurityMode != cpu_to_le16(tcon->ses->server->sec_mode))
@@ -822,10 +832,8 @@ ssetup_exit:
 
 	if (!rc) {
 		mutex_lock(&server->srv_mutex);
-		if (server->sign && server->ops->generate_signingkey) {
+		if (server->ops->generate_signingkey) {
 			rc = server->ops->generate_signingkey(ses);
-			kfree(ses->auth_key.response);
-			ses->auth_key.response = NULL;
 			if (rc) {
 				cifs_dbg(FYI,
 					"SMB3 session key generation failed\n");
@@ -847,10 +855,6 @@ ssetup_exit:
 	}
 
 keygen_exit:
-	if (!server->sign) {
-		kfree(ses->auth_key.response);
-		ses->auth_key.response = NULL;
-	}
 	if (spnego_key) {
 		key_invalidate(spnego_key);
 		key_put(spnego_key);
@@ -932,9 +936,6 @@ SMB2_tcon(const unsigned int xid, struct cifs_ses *ses, const char *tree,
 	else
 		return -EIO;
 
-	if (tcon && tcon->bad_network_name)
-		return -ENOENT;
-
 	if ((tcon && tcon->seal) &&
 	    ((ses->server->capabilities & SMB2_GLOBAL_CAP_ENCRYPTION) == 0)) {
 		cifs_dbg(VFS, "encryption requested but no server support");
@@ -951,6 +952,10 @@ SMB2_tcon(const unsigned int xid, struct cifs_ses *ses, const char *tree,
 		kfree(unc_path);
 		return -EINVAL;
 	}
+
+	/* SMB2 TREE_CONNECT request must be called with TreeId == 0 */
+	if (tcon)
+		tcon->tid = 0;
 
 	rc = small_smb2_init(SMB2_TREE_CONNECT, tcon, (void **) &req);
 	if (rc) {
@@ -994,15 +999,19 @@ SMB2_tcon(const unsigned int xid, struct cifs_ses *ses, const char *tree,
 		goto tcon_exit;
 	}
 
-	if (rsp->ShareType & SMB2_SHARE_TYPE_DISK)
+	switch (rsp->ShareType) {
+	case SMB2_SHARE_TYPE_DISK:
 		cifs_dbg(FYI, "connection to disk share\n");
-	else if (rsp->ShareType & SMB2_SHARE_TYPE_PIPE) {
+		break;
+	case SMB2_SHARE_TYPE_PIPE:
 		tcon->ipc = true;
 		cifs_dbg(FYI, "connection to pipe share\n");
-	} else if (rsp->ShareType & SMB2_SHARE_TYPE_PRINT) {
-		tcon->print = true;
+		break;
+	case SMB2_SHARE_TYPE_PRINT:
+		tcon->ipc = true;
 		cifs_dbg(FYI, "connection to printer\n");
-	} else {
+		break;
+	default:
 		cifs_dbg(VFS, "unknown share type %d\n", rsp->ShareType);
 		rc = -EOPNOTSUPP;
 		goto tcon_error_exit;
@@ -1032,8 +1041,6 @@ tcon_exit:
 tcon_error_exit:
 	if (rsp->hdr.Status == STATUS_BAD_NETWORK_NAME) {
 		cifs_dbg(VFS, "BAD_NETWORK_NAME: %s\n", tree);
-		if (tcon)
-			tcon->bad_network_name = true;
 	}
 	goto tcon_exit;
 }
@@ -1519,8 +1526,12 @@ SMB2_ioctl(const unsigned int xid, struct cifs_tcon *tcon, u64 persistent_fid,
 	 * than one credit. Windows typically sets this smaller, but for some
 	 * ioctls it may be useful to allow server to send more. No point
 	 * limiting what the server can send as long as fits in one credit
+	 * Unfortunately - we can not handle more than CIFS_MAX_MSG_SIZE
+	 * (by default, note that it can be overridden to make max larger)
+	 * in responses (except for read responses which can be bigger.
+	 * We may want to bump this limit up
 	 */
-	req->MaxOutputResponse = cpu_to_le32(0xFF00); /* < 64K uses 1 credit */
+	req->MaxOutputResponse = cpu_to_le32(CIFSMaxBufSize);
 
 	if (is_fsctl)
 		req->Flags = cpu_to_le32(SMB2_0_IOCTL_IS_FSCTL);
@@ -1545,6 +1556,9 @@ SMB2_ioctl(const unsigned int xid, struct cifs_tcon *tcon, u64 persistent_fid,
 	} else
 		iov[0].iov_len = get_rfc1002_length(req) + 4;
 
+	/* validate negotiate request must be signed - see MS-SMB2 3.2.5.5 */
+	if (opcode == FSCTL_VALIDATE_NEGOTIATE_INFO)
+		req->hdr.Flags |= SMB2_FLAGS_SIGNED;
 
 	rc = SendReceive2(xid, ses, iov, num_iovecs, &resp_buftype, 0);
 	rsp = (struct smb2_ioctl_rsp *)iov[0].iov_base;
@@ -2761,8 +2775,8 @@ copy_fs_info_to_kstatfs(struct smb2_fs_full_size_info *pfs_inf,
 	kst->f_bsize = le32_to_cpu(pfs_inf->BytesPerSector) *
 			  le32_to_cpu(pfs_inf->SectorsPerAllocationUnit);
 	kst->f_blocks = le64_to_cpu(pfs_inf->TotalAllocationUnits);
-	kst->f_bfree  = le64_to_cpu(pfs_inf->ActualAvailableAllocationUnits);
-	kst->f_bavail = le64_to_cpu(pfs_inf->CallerAvailableAllocationUnits);
+	kst->f_bfree  = kst->f_bavail =
+			le64_to_cpu(pfs_inf->CallerAvailableAllocationUnits);
 	return;
 }
 

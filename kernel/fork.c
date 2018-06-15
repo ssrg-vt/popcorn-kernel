@@ -58,6 +58,7 @@
 #include <linux/tsacct_kern.h>
 #include <linux/cn_proc.h>
 #include <linux/freezer.h>
+#include <linux/kaiser.h>
 #include <linux/delayacct.h>
 #include <linux/taskstats_kern.h>
 #include <linux/random.h>
@@ -169,6 +170,7 @@ static struct thread_info *alloc_thread_info_node(struct task_struct *tsk,
 
 static inline void free_thread_info(struct thread_info *ti)
 {
+	kaiser_unmap_thread_stack(ti);
 	free_kmem_pages((unsigned long)ti, THREAD_SIZE_ORDER);
 }
 # else
@@ -331,13 +333,14 @@ void set_task_stack_end_magic(struct task_struct *tsk)
 	*stackend = STACK_END_MAGIC;	/* for overflow detection */
 }
 
-static struct task_struct *dup_task_struct(struct task_struct *orig)
+static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 {
 	struct task_struct *tsk;
 	struct thread_info *ti;
-	int node = tsk_fork_get_node(orig);
 	int err;
 
+	if (node == NUMA_NO_NODE)
+		node = tsk_fork_get_node(orig);
 	tsk = alloc_task_struct_node(node);
 	if (!tsk)
 		return NULL;
@@ -351,6 +354,10 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 		goto free_ti;
 
 	tsk->stack = ti;
+
+	err = kaiser_map_thread_stack(tsk->stack);
+	if (err)
+		goto free_ti;
 #ifdef CONFIG_SECCOMP
 	/*
 	 * We must handle setting up seccomp filters once we're under
@@ -367,7 +374,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	set_task_stack_end_magic(tsk);
 
 #ifdef CONFIG_CC_STACKPROTECTOR
-	tsk->stack_canary = get_random_int();
+	tsk->stack_canary = get_random_long();
 #endif
 
 	/*
@@ -1270,7 +1277,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 					int __user *child_tidptr,
 					struct pid *pid,
 					int trace,
-					unsigned long tls)
+					unsigned long tls,
+					int node)
 {
 	int retval;
 	struct task_struct *p;
@@ -1323,7 +1331,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	retval = -ENOMEM;
-	p = dup_task_struct(current);
+	p = dup_task_struct(current, node);
 	if (!p)
 		goto fork_out;
 
@@ -1588,9 +1596,11 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	*/
 	recalc_sigpending();
 	if (signal_pending(current)) {
-		spin_unlock(&current->sighand->siglock);
-		write_unlock_irq(&tasklist_lock);
 		retval = -ERESTARTNOINTR;
+		goto bad_fork_cancel_cgroup;
+	}
+	if (unlikely(!(ns_of_pid(pid)->nr_hashed & PIDNS_HASH_ADDING))) {
+		retval = -ENOMEM;
 		goto bad_fork_cancel_cgroup;
 	}
 
@@ -1643,6 +1653,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	return p;
 
 bad_fork_cancel_cgroup:
+	spin_unlock(&current->sighand->siglock);
+	write_unlock_irq(&tasklist_lock);
 	cgroup_cancel_fork(p, cgrp_ss_priv);
 bad_fork_free_pid:
 	threadgroup_change_end(current);
@@ -1699,7 +1711,8 @@ static inline void init_idle_pids(struct pid_link *links)
 struct task_struct *fork_idle(int cpu)
 {
 	struct task_struct *task;
-	task = copy_process(CLONE_VM, 0, 0, NULL, &init_struct_pid, 0, 0);
+	task = copy_process(CLONE_VM, 0, 0, NULL, &init_struct_pid, 0, 0,
+			    cpu_to_node(cpu));
 	if (!IS_ERR(task)) {
 		init_idle_pids(task->pids);
 		init_idle(task, cpu);
@@ -1744,7 +1757,7 @@ long _do_fork(unsigned long clone_flags,
 	}
 
 	p = copy_process(clone_flags, stack_start, stack_size,
-			 child_tidptr, NULL, trace, tls);
+			 child_tidptr, NULL, trace, tls, NUMA_NO_NODE);
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.

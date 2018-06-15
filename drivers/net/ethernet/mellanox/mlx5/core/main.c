@@ -85,7 +85,7 @@ static struct mlx5_profile profile[] = {
 	[2] = {
 		.mask		= MLX5_PROF_MASK_QP_SIZE |
 				  MLX5_PROF_MASK_MR_CACHE,
-		.log_max_qp	= 17,
+		.log_max_qp	= 18,
 		.mr_cache[0]	= {
 			.size	= 500,
 			.limit	= 250
@@ -153,8 +153,9 @@ static struct mlx5_profile profile[] = {
 	},
 };
 
-#define FW_INIT_TIMEOUT_MILI	2000
-#define FW_INIT_WAIT_MS		2
+#define FW_INIT_TIMEOUT_MILI		2000
+#define FW_INIT_WAIT_MS			2
+#define FW_PRE_INIT_TIMEOUT_MILI	10000
 
 static int wait_fw_init(struct mlx5_core_dev *dev, u32 max_wait_mili)
 {
@@ -512,7 +513,6 @@ static int mlx5_irq_set_affinity_hint(struct mlx5_core_dev *mdev, int i)
 	struct mlx5_priv *priv  = &mdev->priv;
 	struct msix_entry *msix = priv->msix_arr;
 	int irq                 = msix[i + MLX5_EQ_VEC_COMP_BASE].vector;
-	int err;
 
 	if (!zalloc_cpumask_var(&priv->irq_info[i].mask, GFP_KERNEL)) {
 		mlx5_core_warn(mdev, "zalloc_cpumask_var failed");
@@ -522,18 +522,11 @@ static int mlx5_irq_set_affinity_hint(struct mlx5_core_dev *mdev, int i)
 	cpumask_set_cpu(cpumask_local_spread(i, priv->numa_node),
 			priv->irq_info[i].mask);
 
-	err = irq_set_affinity_hint(irq, priv->irq_info[i].mask);
-	if (err) {
-		mlx5_core_warn(mdev, "irq_set_affinity_hint failed,irq 0x%.4x",
-			       irq);
-		goto err_clear_mask;
-	}
+	if (IS_ENABLED(CONFIG_SMP) &&
+	    irq_set_affinity_hint(irq, priv->irq_info[i].mask))
+		mlx5_core_warn(mdev, "irq_set_affinity_hint failed, irq 0x%.4x", irq);
 
 	return 0;
-
-err_clear_mask:
-	free_cpumask_var(priv->irq_info[i].mask);
-	return err;
 }
 
 static void mlx5_irq_clear_affinity_hint(struct mlx5_core_dev *mdev, int i)
@@ -933,6 +926,15 @@ static int mlx5_load_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv)
 	 * up
 	 */
 	dev->state = MLX5_DEVICE_STATE_UP;
+
+	/* wait for firmware to accept initialization segments configurations
+	 */
+	err = wait_fw_init(dev, FW_PRE_INIT_TIMEOUT_MILI);
+	if (err) {
+		dev_err(&dev->pdev->dev, "Firmware over %d MS in pre-initializing state, aborting\n",
+			FW_PRE_INIT_TIMEOUT_MILI);
+		goto out;
+	}
 
 	err = mlx5_cmd_init(dev);
 	if (err) {

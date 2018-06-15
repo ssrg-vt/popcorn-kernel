@@ -879,10 +879,10 @@ struct sk_buff *skb_realloc_headroom(struct sk_buff *skb,
 				     unsigned int headroom);
 struct sk_buff *skb_copy_expand(const struct sk_buff *skb, int newheadroom,
 				int newtailroom, gfp_t priority);
-int skb_to_sgvec_nomark(struct sk_buff *skb, struct scatterlist *sg,
-			int offset, int len);
-int skb_to_sgvec(struct sk_buff *skb, struct scatterlist *sg, int offset,
-		 int len);
+int __must_check skb_to_sgvec_nomark(struct sk_buff *skb, struct scatterlist *sg,
+				     int offset, int len);
+int __must_check skb_to_sgvec(struct sk_buff *skb, struct scatterlist *sg,
+			      int offset, int len);
 int skb_cow_data(struct sk_buff *skb, int tailbits, struct sk_buff **trailer);
 int skb_pad(struct sk_buff *skb, int pad);
 #define dev_kfree_skb(a)	consume_skb(a)
@@ -1084,9 +1084,6 @@ static inline void skb_copy_hash(struct sk_buff *to, const struct sk_buff *from)
 
 static inline void skb_sender_cpu_clear(struct sk_buff *skb)
 {
-#ifdef CONFIG_XPS
-	skb->sender_cpu = 0;
-#endif
 }
 
 #ifdef NET_SKBUFF_DATA_USES_OFFSET
@@ -3400,6 +3397,13 @@ static inline void nf_reset_trace(struct sk_buff *skb)
 {
 #if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE) || defined(CONFIG_NF_TABLES)
 	skb->nf_trace = 0;
+#endif
+}
+
+static inline void ipvs_reset(struct sk_buff *skb)
+{
+#if IS_ENABLED(CONFIG_IP_VS)
+	skb->ipvs_property = 0;
 #endif
 }
 

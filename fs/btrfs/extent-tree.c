@@ -3361,13 +3361,6 @@ again:
 		goto again;
 	}
 
-	/* We've already setup this transaction, go ahead and exit */
-	if (block_group->cache_generation == trans->transid &&
-	    i_size_read(inode)) {
-		dcs = BTRFS_DC_SETUP;
-		goto out_put;
-	}
-
 	/*
 	 * We want to set the generation to 0, that way if anything goes wrong
 	 * from here on out we know not to trust this cache when we load up next
@@ -3390,6 +3383,13 @@ again:
 		goto out_put;
 	}
 	WARN_ON(ret);
+
+	/* We've already setup this transaction, go ahead and exit */
+	if (block_group->cache_generation == trans->transid &&
+	    i_size_read(inode)) {
+		dcs = BTRFS_DC_SETUP;
+		goto out_put;
+	}
 
 	if (i_size_read(inode) > 0) {
 		ret = btrfs_check_trunc_cache_free_space(root,
@@ -3854,6 +3854,7 @@ static int update_space_info(struct btrfs_fs_info *info, u64 flags,
 				    info->space_info_kobj, "%s",
 				    alloc_name(found->flags));
 	if (ret) {
+		percpu_counter_destroy(&found->total_bytes_pinned);
 		kfree(found);
 		return ret;
 	}
@@ -4391,6 +4392,7 @@ again:
 	if (wait_for_alloc) {
 		mutex_unlock(&fs_info->chunk_mutex);
 		wait_for_alloc = 0;
+		cond_resched();
 		goto again;
 	}
 
