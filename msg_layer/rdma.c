@@ -763,7 +763,10 @@ static __init int __setup_rdma_buffer(const int nr_chunks)
 	if (ret) goto out_free;
 
 	mr = ib_alloc_mr(rdma_pd, IB_MR_TYPE_MEM_REG, 1 << alloc_order);
-	if (IS_ERR(mr)) goto out_free;
+	if (IS_ERR(mr)) {
+		ret = PTR_ERR(mr);
+		goto out_free;
+	}
 
 	sg_dma_address(&sg) = __rdma_sink_dma_addr;
 	sg_dma_len(&sg) = 1 << (PAGE_SHIFT + alloc_order);
