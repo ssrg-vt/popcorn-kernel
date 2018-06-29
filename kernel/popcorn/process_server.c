@@ -243,7 +243,7 @@ static void process_remote_futex_request(remote_futex_request *req)
 	/*
 	printk(" f[%d] ->[%d/%d] 0x%x %p %ld\n", current->pid,
 			current->remote_pid, current->remote_nid,
-			req->op, req->uaddr, res.ret);
+			req->op, req->uaddr, ret);
 	*/
 	res = pcn_kmsg_get(sizeof(*res));
 	res->remote_ws = req->remote_ws;
