@@ -3444,10 +3444,6 @@ int handle_pte_fault_origin(struct mm_struct *mm,
 
 	if (vma->vm_flags & VM_SHARED) return VM_FAULT_SIGBUS;
 
-	/* Check if we need to add a guard page to the stack */
-	if (check_stack_guard_page(vma, address) < 0)
-		return VM_FAULT_SIGSEGV;
-
 	if (unlikely(anon_vma_prepare(vma)))
 		return VM_FAULT_OOM;
 
