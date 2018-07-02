@@ -51,7 +51,7 @@ int save_thread_info(struct field_arch *arch)
 
 	cpu = get_cpu();
 
-	arch->tls = current->thread.tp_value;
+	asm("mrs %0, tpidr_el0;" : "=r"(arch->tls));
 	arch->fpu_active = test_thread_flag(TIF_FOREIGN_FPSTATE);
 
 	put_cpu();
