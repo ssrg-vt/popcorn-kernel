@@ -223,7 +223,7 @@ static int handle_remote_futex_response(struct pcn_kmsg_message *msg)
 
 static void process_remote_futex_request(remote_futex_request *req)
 {
-	int ret;
+	long ret;
 	remote_futex_response *res;
 	ktime_t t, *tp = NULL;
 
@@ -241,7 +241,7 @@ static void process_remote_futex_request(remote_futex_request *req)
 	ret = do_futex(req->uaddr, req->op, req->val,
 			tp, req->uaddr2, req->val2, req->val3);
 	/*
-	printk(" f[%d] ->[%d/%d] 0x%x %p %ld\n", current->pid,
+	printk(" f[%d] ->[%d/%d] 0x%x %p 0x%lx\n", current->pid,
 			current->remote_pid, current->remote_nid,
 			req->op, req->uaddr, ret);
 	*/
