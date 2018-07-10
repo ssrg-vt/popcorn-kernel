@@ -361,20 +361,20 @@ static void process_remote_task_exit(remote_task_exit_t *req)
 		return;
 	}
 
-	PSPRINTK("%s [%d] 0x%x\n", __func__, tsk->pid, req->exit_code);
+	PSPRINTK("%s [%d] 0x%x\n", __func__, tsk->pid, exit_code);
 
 	tsk->remote = NULL;
 	tsk->remote_nid = -1;
 	tsk->remote_pid = -1;
 	put_task_remote(tsk);
 
-	exit_code = req->exit_code;
 	pcn_kmsg_done(req);
 
 	if (exit_code & CSIGNAL) {
 		force_sig(exit_code & CSIGNAL, tsk);
+	} else {
+		do_exit(exit_code);
 	}
-	do_exit(exit_code);
 }
 
 static void process_origin_task_exit(struct remote_context *rc, origin_task_exit_t *req)
@@ -807,7 +807,7 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 	struct task_struct *tsk = __get_task_struct(pid);
 	int ret = -ESRCH;
 	if (!tsk) {
-		printk(KERN_INFO"%s: invalid origin task %d for remote work %d\n",
+		printk(KERN_INFO"%s: non-existing origin task %d for remote work %d\n",
 				__func__, pid, req->header.type);
 		goto out_err;
 	}
@@ -853,7 +853,16 @@ static void __process_remote_works(void)
 		ret = wait_for_completion_interruptible_timeout(
 				&current->remote_work_pended, HZ);
 		if (ret == 0) continue; /* timeout */
-
+		if (ret == -ERESTARTSYS) {
+			unsigned long flags;
+			spin_lock_irqsave(&current->sighand->siglock, flags);
+			if (current->signal->flags &
+					(SIGNAL_GROUP_COREDUMP | SIGNAL_GROUP_EXIT)) {
+				run = false;
+			}
+			spin_unlock_irqrestore(&current->sighand->siglock, flags);
+			continue;
+		}
 		req = (struct pcn_kmsg_message *)current->remote_work;
 		current->remote_work = NULL;
 		smp_wmb();

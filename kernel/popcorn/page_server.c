@@ -1441,7 +1441,7 @@ again:
 	tsk = __get_task_struct(req->remote_pid);
 	if (!tsk) {
 		res->result = VM_FAULT_SIGBUS;
-		PGPRINTK("  [%d] not found\n", req->remote_pid);
+		PGPRINTK("  [%d] task not found\n", req->remote_pid);
 		goto out;
 	}
 	mm = get_task_mm(tsk);
@@ -1649,11 +1649,13 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
-		if (rp->result != VM_FAULT_RETRY)
-			PGPRINTK("  [%d] failed 0x%x\n", current->pid, rp->result);
 		ret = rp->result;
 		pte_unmap(pte);
-		up_read(&mm->mmap_sem);
+		if (rp->result != VM_FAULT_RETRY) {
+			PGPRINTK("  [%d] failed 0x%x\n", current->pid, rp->result);
+		} else {
+			up_read(&mm->mmap_sem);
+		}
 		goto out_free;
 	}
 
