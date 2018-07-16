@@ -298,7 +298,7 @@ int vma_server_munmap_remote(unsigned long start, size_t len)
 	return ret;
 }
 
-int vma_server_brk_remote(unsigned long brk)
+int vma_server_brk_remote(unsigned long oldbrk, unsigned long brk)
 {
 	int ret;
 	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_BRK);
@@ -306,8 +306,7 @@ int vma_server_brk_remote(unsigned long brk)
 
 	req->brk = brk;
 
-	VSPRINTK("\n## VMA brk-ed [%d] %lx --> %lx\n", current->pid,
-				   current->mm->brk, brk);
+	VSPRINTK("\n## VMA brk-ed [%d] %lx --> %lx\n", current->pid, oldbrk, brk);
 
 	ret = __delegate_vma_op(req, &res);
 
