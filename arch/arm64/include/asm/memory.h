@@ -58,7 +58,12 @@
 #define PCI_IO_END		(MODULES_VADDR - SZ_2M)
 #define PCI_IO_START		(PCI_IO_END - PCI_IO_SIZE)
 #define FIXADDR_TOP		(PCI_IO_START - SZ_2M)
+#ifndef CONFIG_POPCORN
 #define TASK_SIZE_64		(UL(1) << VA_BITS)
+#else
+#include <asm/page.h>
+#define TASK_SIZE_64		((UL(1) << 47) - PAGE_SIZE)
+#endif
 
 #ifdef CONFIG_COMPAT
 #define TASK_SIZE_32		UL(0x100000000)

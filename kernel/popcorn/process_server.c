@@ -416,7 +416,7 @@ static void process_back_migration(back_migration_request_t *req)
 
 	/* mm is not updated here; has been synchronized through vma operations */
 
-	restore_thread_info(&req->arch, false);
+	restore_thread_info(&req->arch, true);
 
 out_free:
 	pcn_kmsg_done(req);
