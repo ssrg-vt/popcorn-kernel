@@ -400,8 +400,9 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 		req->remote_ws = ws->id;
 		req->origin_pid = rc->remote_tgids[nid];
 
-		VSPRINTK("  [%d] ->munmap [%d/%d] %lx+%lx\n", current->pid,
-				req->origin_pid, nid, start, len);
+		VSPRINTK("  [%d] ->munmap [%d/%d] %lx+%lx (%lx)\n", current->pid,
+				req->origin_pid, nid, start, len,
+				instruction_pointer(current_pt_regs()));
 		pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_REQUEST, nid, req, sizeof(*req));
 		res = wait_at_station(ws);
 		pcn_kmsg_done(res);
@@ -534,8 +535,9 @@ static long __process_vma_op_at_origin(vma_op_request_t *req)
 void process_vma_op_request(vma_op_request_t *req)
 {
 	long ret = 0;
-	VSPRINTK("\nVMA_OP_REQUEST [%d] %s %lx %lx\n", current->pid,
-			vma_op_code_sz[req->operation], req->addr, req->len);
+	VSPRINTK("\nVMA_OP_REQUEST [%d] %s %lx %lx %lx\n", current->pid,
+			vma_op_code_sz[req->operation], req->addr, req->len,
+			instruction_pointer(current_pt_regs()));
 
 	if (current->at_remote) {
 		ret = __process_vma_op_at_remote(req);

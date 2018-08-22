@@ -37,6 +37,12 @@
 
 #include "trace_events.h"
 
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+#define MICROSECOND 1000000
+atomic64_t mm_cnt;
+atomic64_t mm_time_ns;
+#endif
+
 inline void page_server_start_mm_fault(unsigned long address)
 {
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
@@ -66,9 +72,31 @@ inline int page_server_end_mm_fault(int ret)
 				current->fault_address, ret,
 				current->fault_retry, ktime_to_ns(dt));
 		current->fault_address = 0;
+        if (ktime_to_ns(dt) < 1000 * MICROSECOND) {
+            atomic64_add(ktime_to_ns(dt), &mm_time_ns);
+            atomic64_inc(&mm_cnt);
+        }
 	}
 #endif
 	return ret;
+}
+
+void pf_time_stat(struct seq_file *seq, void *v)
+{
+#ifdef CONFIG_POPCORN_STAT
+	if (seq) {
+		seq_printf(seq, "%2s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+					"mm", (atomic64_read(&mm_time_ns) / 1000) / MICROSECOND,
+							(atomic64_read(&mm_time_ns) / 1000)  % MICROSECOND,
+					"cnt", atomic64_read(&mm_cnt),
+					"per", atomic64_read(&mm_cnt) ?
+					 atomic64_read(&mm_time_ns)/atomic64_read(&mm_cnt)/1000 : 0,
+					"us", "(unit)");
+	} else {
+        atomic64_set(&mm_cnt, 0);
+        atomic64_set(&mm_time_ns, 0);
+	}
+#endif
 }
 
 static inline int __fault_hash_key(unsigned long address)
@@ -1951,6 +1979,11 @@ int __init page_server_init(void)
 
 	__fault_handle_cache = kmem_cache_create("fault_handle",
 			sizeof(struct fault_handle), 0, 0, NULL);
+
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+    atomic64_set(&mm_cnt, 0);
+    atomic64_set(&mm_time_ns, 0);
+#endif
 
 	return 0;
 }

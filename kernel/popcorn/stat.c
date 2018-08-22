@@ -28,6 +28,8 @@ const char *pcn_kmsg_type_name[PCN_KMSG_TYPE_MAX] = {
 	[PCN_KMSG_TYPE_VMA_INFO_REQUEST] = "VMA info",
 	[PCN_KMSG_TYPE_VMA_OP_REQUEST] = "VMA op",
 	[PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST] = "remote page",
+	[PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE] = "w/ page",
+	[PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT] = "w/o page",
 	[PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST] = "invalidate",
 	[PCN_KMSG_TYPE_FUTEX_REQUEST] = "futex",
 };
@@ -61,6 +63,7 @@ void account_pcn_rdma_read(size_t size)
 }
 
 void fh_action_stat(struct seq_file *seq, void *);
+extern void pf_time_stat(struct seq_file *seq, void *v);
 
 static int __show_stats(struct seq_file *seq, void *v)
 {
@@ -113,13 +116,15 @@ static int __show_stats(struct seq_file *seq, void *v)
 
 #ifdef CONFIG_POPCORN_STAT
 	seq_printf(seq, "-----------------------------------------------\n");
-	for (i = PCN_KMSG_TYPE_STAT_START + 1; i < PCN_KMSG_TYPE_STAT_END; i++) {
+	//for (i = PCN_KMSG_TYPE_STAT_START + 1; i < PCN_KMSG_TYPE_STAT_END; i++) {
+	for (i = PCN_KMSG_TYPE_REMOTE_PAGE_REQUEST; i < PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH; i++) {
 		seq_printf(seq, POPCORN_STAT_FMT,
 				sent_stats[i], recv_stats[i], pcn_kmsg_type_name[i] ? : "");
 	}
 	seq_printf(seq, "---------------------------------------------------------------------------\n");
 
-	fh_action_stat(seq, v);
+	//fh_action_stat(seq, v);
+	pf_time_stat(seq, v);
 #endif
 	return 0;
 }
@@ -140,6 +145,10 @@ static ssize_t __write_stats(struct file *file, const char __user *buffer, size_
 		recv_stats[i] = 0;
 	}
 	fh_action_stat(NULL, NULL);
+
+#ifdef CONFIG_POPCORN_STAT
+	pf_time_stat(NULL, NULL);
+#endif
 
 	return size;
 }
