@@ -74,6 +74,11 @@ bool __put_task_remote(struct remote_context *rc);
 	struct field_arch arch;
 DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 
+typedef struct popcorn_fd {
+    unsigned int idx;
+    char file_path[128];
+} fd_t;
+
 #define CLONE_FIELDS \
 	pid_t origin_tgid;\
 	pid_t origin_pid;\
@@ -92,6 +97,7 @@ DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 	unsigned int personality;\
 	unsigned long def_flags;\
 	char exe_path[512];\
+    fd_t fds[64];\
 	/* \
 	sigset_t remote_blocked;\
 	sigset_t remote_real_blocked;\
@@ -103,7 +109,6 @@ DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 	*/ \
 	struct field_arch arch;
 DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
-
 
 /**
  * This message is sent in response to a clone request.
