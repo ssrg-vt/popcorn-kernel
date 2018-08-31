@@ -18,11 +18,12 @@
 #include <linux/kthread.h>
 #include <linux/slab.h>
 #include <linux/proc_fs.h>
-#include <asm/uaccess.h>
-
+#include <linux/uaccess.h>
+#include <linux/sched/signal.h>
+#include <linux/sched/mm.h>
+#include <asm-generic/cputime_jiffies.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/types.h>
-
 #include "types.h"
 #include "wait_station.h"
 

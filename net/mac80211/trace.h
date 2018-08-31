@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+* Portions of this file
+* Copyright(c) 2016 Intel Deutschland GmbH
+* Copyright (C) 2018 Intel Corporation
+*/
+
 #if !defined(__MAC80211_DRIVER_TRACE) || defined(TRACE_HEADER_MULTI_READ)
 #define __MAC80211_DRIVER_TRACE
 
@@ -85,18 +92,21 @@
 				STA_ENTRY						\
 				__field(u16, tid)					\
 				__field(u16, ssn)					\
-				__field(u8, buf_size)					\
+				__field(u16, buf_size)					\
 				__field(bool, amsdu)					\
-				__field(u16, timeout)
+				__field(u16, timeout)					\
+				__field(u16, action)
 #define AMPDU_ACTION_ASSIGN	STA_NAMED_ASSIGN(params->sta);				\
 				__entry->tid = params->tid;				\
 				__entry->ssn = params->ssn;				\
 				__entry->buf_size = params->buf_size;			\
 				__entry->amsdu = params->amsdu;				\
-				__entry->timeout = params->timeout;
-#define AMPDU_ACTION_PR_FMT	STA_PR_FMT " tid %d, ssn %d, buf_size %u, amsdu %d, timeout %d"
+				__entry->timeout = params->timeout;			\
+				__entry->action = params->action;
+#define AMPDU_ACTION_PR_FMT	STA_PR_FMT " tid %d, ssn %d, buf_size %u, amsdu %d, timeout %d action %d"
 #define AMPDU_ACTION_PR_ARG	STA_PR_ARG, __entry->tid, __entry->ssn,			\
-				__entry->buf_size, __entry->amsdu, __entry->timeout
+				__entry->buf_size, __entry->amsdu, __entry->timeout,	\
+				__entry->action
 
 /*
  * Tracing for driver callbacks.
@@ -396,7 +406,7 @@ TRACE_EVENT(drv_bss_info_changed,
 		__field(u32, sync_device_ts)
 		__field(u8, sync_dtim_count)
 		__field(u32, basic_rates)
-		__array(int, mcast_rate, IEEE80211_NUM_BANDS)
+		__array(int, mcast_rate, NUM_NL80211_BANDS)
 		__field(u16, ht_operation_mode)
 		__field(s32, cqm_rssi_thold);
 		__field(s32, cqm_rssi_hyst);
@@ -899,6 +909,13 @@ DEFINE_EVENT(sta_event, drv_sta_pre_rcu_remove,
 	TP_ARGS(local, sdata, sta)
 );
 
+DEFINE_EVENT(sta_event, drv_sync_rx_queues,
+	TP_PROTO(struct ieee80211_local *local,
+		 struct ieee80211_sub_if_data *sdata,
+		 struct ieee80211_sta *sta),
+	TP_ARGS(local, sdata, sta)
+);
+
 DEFINE_EVENT(sta_event, drv_sta_rate_tbl_update,
 	TP_PROTO(struct ieee80211_local *local,
 		 struct ieee80211_sub_if_data *sdata,
@@ -969,6 +986,32 @@ TRACE_EVENT(drv_set_tsf,
 	TP_printk(
 		LOCAL_PR_FMT  VIF_PR_FMT  " tsf:%llu",
 		LOCAL_PR_ARG, VIF_PR_ARG, (unsigned long long)__entry->tsf
+	)
+);
+
+TRACE_EVENT(drv_offset_tsf,
+	TP_PROTO(struct ieee80211_local *local,
+		 struct ieee80211_sub_if_data *sdata,
+		 s64 offset),
+
+	TP_ARGS(local, sdata, offset),
+
+	TP_STRUCT__entry(
+		LOCAL_ENTRY
+		VIF_ENTRY
+		__field(s64, tsf_offset)
+	),
+
+	TP_fast_assign(
+		LOCAL_ASSIGN;
+		VIF_ASSIGN;
+		__entry->tsf_offset = offset;
+	),
+
+	TP_printk(
+		LOCAL_PR_FMT  VIF_PR_FMT  " tsf offset:%lld",
+		LOCAL_PR_ARG, VIF_PR_ARG,
+		(unsigned long long)__entry->tsf_offset
 	)
 );
 
@@ -1253,8 +1296,8 @@ TRACE_EVENT(drv_set_bitrate_mask,
 	TP_fast_assign(
 		LOCAL_ASSIGN;
 		VIF_ASSIGN;
-		__entry->legacy_2g = mask->control[IEEE80211_BAND_2GHZ].legacy;
-		__entry->legacy_5g = mask->control[IEEE80211_BAND_5GHZ].legacy;
+		__entry->legacy_2g = mask->control[NL80211_BAND_2GHZ].legacy;
+		__entry->legacy_5g = mask->control[NL80211_BAND_5GHZ].legacy;
 	),
 
 	TP_printk(
@@ -1371,11 +1414,29 @@ DEFINE_EVENT(release_evt, drv_allow_buffered_frames,
 	TP_ARGS(local, sta, tids, num_frames, reason, more_data)
 );
 
-DEFINE_EVENT(local_sdata_evt, drv_mgd_prepare_tx,
+TRACE_EVENT(drv_mgd_prepare_tx,
 	TP_PROTO(struct ieee80211_local *local,
-		 struct ieee80211_sub_if_data *sdata),
+		 struct ieee80211_sub_if_data *sdata,
+		 u16 duration),
 
-	TP_ARGS(local, sdata)
+	TP_ARGS(local, sdata, duration),
+
+	TP_STRUCT__entry(
+		LOCAL_ENTRY
+		VIF_ENTRY
+		__field(u32, duration)
+	),
+
+	TP_fast_assign(
+		LOCAL_ASSIGN;
+		VIF_ASSIGN;
+		__entry->duration = duration;
+	),
+
+	TP_printk(
+		LOCAL_PR_FMT VIF_PR_FMT " duration: %u",
+		LOCAL_PR_ARG, VIF_PR_ARG, __entry->duration
+	)
 );
 
 DEFINE_EVENT(local_sdata_evt, drv_mgd_protect_tdls_discover,
@@ -1688,6 +1749,139 @@ TRACE_EVENT(drv_get_expected_throughput,
 	)
 );
 
+TRACE_EVENT(drv_start_nan,
+	TP_PROTO(struct ieee80211_local *local,
+		 struct ieee80211_sub_if_data *sdata,
+		 struct cfg80211_nan_conf *conf),
+
+	TP_ARGS(local, sdata, conf),
+	TP_STRUCT__entry(
+		LOCAL_ENTRY
+		VIF_ENTRY
+		__field(u8, master_pref)
+		__field(u8, bands)
+	),
+
+	TP_fast_assign(
+		LOCAL_ASSIGN;
+		VIF_ASSIGN;
+		__entry->master_pref = conf->master_pref;
+		__entry->bands = conf->bands;
+	),
+
+	TP_printk(
+		LOCAL_PR_FMT  VIF_PR_FMT
+		", master preference: %u, bands: 0x%0x",
+		LOCAL_PR_ARG, VIF_PR_ARG, __entry->master_pref,
+		__entry->bands
+	)
+);
+
+TRACE_EVENT(drv_stop_nan,
+	TP_PROTO(struct ieee80211_local *local,
+		 struct ieee80211_sub_if_data *sdata),
+
+	TP_ARGS(local, sdata),
+
+	TP_STRUCT__entry(
+		LOCAL_ENTRY
+		VIF_ENTRY
+	),
+
+	TP_fast_assign(
+		LOCAL_ASSIGN;
+		VIF_ASSIGN;
+	),
+
+	TP_printk(
+		LOCAL_PR_FMT  VIF_PR_FMT,
+		LOCAL_PR_ARG, VIF_PR_ARG
+	)
+);
+
+TRACE_EVENT(drv_nan_change_conf,
+	TP_PROTO(struct ieee80211_local *local,
+		 struct ieee80211_sub_if_data *sdata,
+		 struct cfg80211_nan_conf *conf,
+		 u32 changes),
+
+	TP_ARGS(local, sdata, conf, changes),
+	TP_STRUCT__entry(
+		LOCAL_ENTRY
+		VIF_ENTRY
+		__field(u8, master_pref)
+		__field(u8, bands)
+		__field(u32, changes)
+	),
+
+	TP_fast_assign(
+		LOCAL_ASSIGN;
+		VIF_ASSIGN;
+		__entry->master_pref = conf->master_pref;
+		__entry->bands = conf->bands;
+		__entry->changes = changes;
+	),
+
+	TP_printk(
+		LOCAL_PR_FMT  VIF_PR_FMT
+		", master preference: %u, bands: 0x%0x, changes: 0x%x",
+		LOCAL_PR_ARG, VIF_PR_ARG, __entry->master_pref,
+		__entry->bands, __entry->changes
+	)
+);
+
+TRACE_EVENT(drv_add_nan_func,
+	TP_PROTO(struct ieee80211_local *local,
+		 struct ieee80211_sub_if_data *sdata,
+		 const struct cfg80211_nan_func *func),
+
+	TP_ARGS(local, sdata, func),
+	TP_STRUCT__entry(
+		LOCAL_ENTRY
+		VIF_ENTRY
+		__field(u8, type)
+		__field(u8, inst_id)
+	),
+
+	TP_fast_assign(
+		LOCAL_ASSIGN;
+		VIF_ASSIGN;
+		__entry->type = func->type;
+		__entry->inst_id = func->instance_id;
+	),
+
+	TP_printk(
+		LOCAL_PR_FMT  VIF_PR_FMT
+		", type: %u, inst_id: %u",
+		LOCAL_PR_ARG, VIF_PR_ARG, __entry->type, __entry->inst_id
+	)
+);
+
+TRACE_EVENT(drv_del_nan_func,
+	TP_PROTO(struct ieee80211_local *local,
+		 struct ieee80211_sub_if_data *sdata,
+		 u8 instance_id),
+
+	TP_ARGS(local, sdata, instance_id),
+	TP_STRUCT__entry(
+		LOCAL_ENTRY
+		VIF_ENTRY
+		__field(u8, instance_id)
+	),
+
+	TP_fast_assign(
+		LOCAL_ASSIGN;
+		VIF_ASSIGN;
+		__entry->instance_id = instance_id;
+	),
+
+	TP_printk(
+		LOCAL_PR_FMT  VIF_PR_FMT
+		", instance_id: %u",
+		LOCAL_PR_ARG, VIF_PR_ARG, __entry->instance_id
+	)
+);
+
 /*
  * Tracing for API calls that drivers call.
  */
@@ -1825,23 +2019,26 @@ TRACE_EVENT(api_connection_loss,
 
 TRACE_EVENT(api_cqm_rssi_notify,
 	TP_PROTO(struct ieee80211_sub_if_data *sdata,
-		 enum nl80211_cqm_rssi_threshold_event rssi_event),
+		 enum nl80211_cqm_rssi_threshold_event rssi_event,
+		 s32 rssi_level),
 
-	TP_ARGS(sdata, rssi_event),
+	TP_ARGS(sdata, rssi_event, rssi_level),
 
 	TP_STRUCT__entry(
 		VIF_ENTRY
 		__field(u32, rssi_event)
+		__field(s32, rssi_level)
 	),
 
 	TP_fast_assign(
 		VIF_ASSIGN;
 		__entry->rssi_event = rssi_event;
+		__entry->rssi_level = rssi_level;
 	),
 
 	TP_printk(
-		VIF_PR_FMT " event:%d",
-		VIF_PR_ARG, __entry->rssi_event
+		VIF_PR_FMT " event:%d rssi:%d",
+		VIF_PR_ARG, __entry->rssi_event, __entry->rssi_level
 	)
 );
 
@@ -2027,6 +2224,31 @@ TRACE_EVENT(api_eosp,
 	TP_printk(
 		LOCAL_PR_FMT STA_PR_FMT,
 		LOCAL_PR_ARG, STA_PR_ARG
+	)
+);
+
+TRACE_EVENT(api_send_eosp_nullfunc,
+	TP_PROTO(struct ieee80211_local *local,
+		 struct ieee80211_sta *sta,
+		 u8 tid),
+
+	TP_ARGS(local, sta, tid),
+
+	TP_STRUCT__entry(
+		LOCAL_ENTRY
+		STA_ENTRY
+		__field(u8, tid)
+	),
+
+	TP_fast_assign(
+		LOCAL_ASSIGN;
+		STA_ASSIGN;
+		__entry->tid = tid;
+	),
+
+	TP_printk(
+		LOCAL_PR_FMT STA_PR_FMT " tid:%d",
+		LOCAL_PR_ARG, STA_PR_ARG, __entry->tid
 	)
 );
 

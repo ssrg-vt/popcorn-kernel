@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * PARISC64 Huge TLB page support.
  *
@@ -8,6 +9,7 @@
 
 #include <linux/fs.h>
 #include <linux/mm.h>
+#include <linux/sched/mm.h>
 #include <linux/hugetlb.h>
 #include <linux/pagemap.h>
 #include <linux/sysctl.h>
@@ -63,12 +65,13 @@ pte_t *huge_pte_alloc(struct mm_struct *mm,
 	if (pud) {
 		pmd = pmd_alloc(mm, pud, addr);
 		if (pmd)
-			pte = pte_alloc_map(mm, NULL, pmd, addr);
+			pte = pte_alloc_map(mm, pmd, addr);
 	}
 	return pte;
 }
 
-pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr)
+pte_t *huge_pte_offset(struct mm_struct *mm,
+		       unsigned long addr, unsigned long sz)
 {
 	pgd_t *pgd;
 	pud_t *pud;

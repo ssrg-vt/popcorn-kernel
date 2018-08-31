@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  Copyright (C) 1991, 1992  Linus Torvalds
  *  Copyright (C) 1997 Martin Mares
@@ -49,7 +50,6 @@ typedef unsigned int   u32;
 
 /* This must be large enough to hold the entire setup */
 u8 buf[SETUP_SECT_MAX*512];
-int is_big_kernel;
 
 #define PECOFF_RELOC_RESERVE 0x20
 

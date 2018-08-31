@@ -331,7 +331,7 @@ static int sunxi_rsb_read(struct sunxi_rsb *rsb, u8 rtaddr, u8 addr,
 		cmd = RSB_CMD_RD32;
 		break;
 	default:
-		dev_err(rsb->dev, "Invalid access width: %d\n", len);
+		dev_err(rsb->dev, "Invalid access width: %zd\n", len);
 		return -EINVAL;
 	}
 
@@ -373,7 +373,7 @@ static int sunxi_rsb_write(struct sunxi_rsb *rsb, u8 rtaddr, u8 addr,
 		cmd = RSB_CMD_WR32;
 		break;
 	default:
-		dev_err(rsb->dev, "Invalid access width: %d\n", len);
+		dev_err(rsb->dev, "Invalid access width: %zd\n", len);
 		return -EINVAL;
 	}
 
@@ -557,20 +557,20 @@ static int of_rsb_register_devices(struct sunxi_rsb *rsb)
 
 	/* Runtime addresses for all slaves should be set first */
 	for_each_available_child_of_node(np, child) {
-		dev_dbg(dev, "setting child %s runtime address\n",
-			child->full_name);
+		dev_dbg(dev, "setting child %pOF runtime address\n",
+			child);
 
 		ret = of_property_read_u32(child, "reg", &hwaddr);
 		if (ret) {
-			dev_err(dev, "%s: invalid 'reg' property: %d\n",
-				child->full_name, ret);
+			dev_err(dev, "%pOF: invalid 'reg' property: %d\n",
+				child, ret);
 			continue;
 		}
 
 		rtaddr = sunxi_rsb_get_rtaddr(hwaddr);
 		if (!rtaddr) {
-			dev_err(dev, "%s: unknown hardware device address\n",
-				child->full_name);
+			dev_err(dev, "%pOF: unknown hardware device address\n",
+				child);
 			continue;
 		}
 
@@ -587,15 +587,15 @@ static int of_rsb_register_devices(struct sunxi_rsb *rsb)
 		/* send command */
 		ret = _sunxi_rsb_run_xfer(rsb);
 		if (ret)
-			dev_warn(dev, "%s: set runtime address failed: %d\n",
-				 child->full_name, ret);
+			dev_warn(dev, "%pOF: set runtime address failed: %d\n",
+				 child, ret);
 	}
 
 	/* Then we start adding devices and probing them */
 	for_each_available_child_of_node(np, child) {
 		struct sunxi_rsb_device *rdev;
 
-		dev_dbg(dev, "adding child %s\n", child->full_name);
+		dev_dbg(dev, "adding child %pOF\n", child);
 
 		ret = of_property_read_u32(child, "reg", &hwaddr);
 		if (ret)
@@ -607,8 +607,8 @@ static int of_rsb_register_devices(struct sunxi_rsb *rsb)
 
 		rdev = sunxi_rsb_device_create(rsb, child, hwaddr, rtaddr);
 		if (IS_ERR(rdev))
-			dev_err(dev, "failed to add child device %s: %ld\n",
-				child->full_name, PTR_ERR(rdev));
+			dev_err(dev, "failed to add child device %pOF: %ld\n",
+				child, PTR_ERR(rdev));
 	}
 
 	return 0;

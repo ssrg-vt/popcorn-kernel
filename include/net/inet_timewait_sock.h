@@ -15,8 +15,6 @@
 #ifndef _INET_TIMEWAIT_SOCK_
 #define _INET_TIMEWAIT_SOCK_
 
-
-#include <linux/kmemcheck.h>
 #include <linux/list.h>
 #include <linux/timer.h>
 #include <linux/types.h>
@@ -28,16 +26,6 @@
 #include <net/timewait_sock.h>
 
 #include <linux/atomic.h>
-
-struct inet_hashinfo;
-
-struct inet_timewait_death_row {
-	atomic_t		tw_count;
-
-	struct inet_hashinfo 	*hashinfo ____cacheline_aligned_in_smp;
-	int			sysctl_tw_recycle;
-	int			sysctl_max_tw_buckets;
-};
 
 struct inet_bind_bucket;
 
@@ -73,21 +61,19 @@ struct inet_timewait_sock {
 #define tw_cookie		__tw_common.skc_cookie
 #define tw_dr			__tw_common.skc_tw_dr
 
-	int			tw_timeout;
+	__u32			tw_mark;
 	volatile unsigned char	tw_substate;
 	unsigned char		tw_rcv_wscale;
 
 	/* Socket demultiplex comparisons on incoming packets. */
 	/* these three are in inet_sock */
 	__be16			tw_sport;
-	kmemcheck_bitfield_begin(flags);
 	/* And these are ours. */
 	unsigned int		tw_kill		: 1,
 				tw_transparent  : 1,
 				tw_flowlabel	: 20,
 				tw_pad		: 2,	/* 2 bits hole */
 				tw_tos		: 8;
-	kmemcheck_bitfield_end(flags);
 	struct timer_list	tw_timer;
 	struct inet_bind_bucket	*tw_tb;
 };
@@ -108,8 +94,8 @@ struct inet_timewait_sock *inet_twsk_alloc(const struct sock *sk,
 					   struct inet_timewait_death_row *dr,
 					   const int state);
 
-void __inet_twsk_hashdance(struct inet_timewait_sock *tw, struct sock *sk,
-			   struct inet_hashinfo *hashinfo);
+void inet_twsk_hashdance(struct inet_timewait_sock *tw, struct sock *sk,
+			 struct inet_hashinfo *hashinfo);
 
 void __inet_twsk_schedule(struct inet_timewait_sock *tw, int timeo,
 			  bool rearm);
@@ -126,8 +112,7 @@ static inline void inet_twsk_reschedule(struct inet_timewait_sock *tw, int timeo
 
 void inet_twsk_deschedule_put(struct inet_timewait_sock *tw);
 
-void inet_twsk_purge(struct inet_hashinfo *hashinfo,
-		     struct inet_timewait_death_row *twdr, int family);
+void inet_twsk_purge(struct inet_hashinfo *hashinfo, int family);
 
 static inline
 struct net *twsk_net(const struct inet_timewait_sock *twsk)

@@ -144,8 +144,7 @@ static void efm32_i2c_send_next_msg(struct efm32_i2c_ddata *ddata)
 	struct i2c_msg *cur_msg = &ddata->msgs[ddata->current_msg];
 
 	efm32_i2c_write32(ddata, REG_CMD, REG_CMD_START);
-	efm32_i2c_write32(ddata, REG_TXDATA, cur_msg->addr << 1 |
-			(cur_msg->flags & I2C_M_RD ? 1 : 0));
+	efm32_i2c_write32(ddata, REG_TXDATA, i2c_8bit_addr_from_msg(cur_msg));
 }
 
 static void efm32_i2c_send_next_byte(struct efm32_i2c_ddata *ddata)
@@ -438,7 +437,6 @@ static int efm32_i2c_probe(struct platform_device *pdev)
 
 	ret = i2c_add_adapter(&ddata->adapter);
 	if (ret) {
-		dev_err(&pdev->dev, "failed to add i2c adapter (%d)\n", ret);
 		free_irq(ddata->irq, ddata);
 
 err_disable_clk:

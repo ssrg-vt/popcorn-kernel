@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * drivers/usb/generic.c - generic driver for USB devices (not interfaces)
  *
@@ -15,6 +16,7 @@
  *		(usb_device_id matching changes by Adam J. Richter)
  *	(C) Copyright Greg Kroah-Hartman 2002-2003
  *
+ * Released under the GPLv2 only.
  */
 
 #include <linux/usb.h>

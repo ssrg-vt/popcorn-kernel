@@ -953,6 +953,19 @@ out:
 }
 EXPORT_SYMBOL(nfc_se_transaction);
 
+int nfc_se_connectivity(struct nfc_dev *dev, u8 se_idx)
+{
+	int rc;
+
+	pr_debug("connectivity: %x\n", se_idx);
+
+	device_lock(&dev->dev);
+	rc = nfc_genl_se_connectivity(dev, se_idx);
+	device_unlock(&dev->dev);
+	return rc;
+}
+EXPORT_SYMBOL(nfc_se_connectivity);
+
 static void nfc_release(struct device *d)
 {
 	struct nfc_dev *dev = to_nfc_dev(d);
@@ -1002,9 +1015,9 @@ exit:
 	device_unlock(&dev->dev);
 }
 
-static void nfc_check_pres_timeout(unsigned long data)
+static void nfc_check_pres_timeout(struct timer_list *t)
 {
-	struct nfc_dev *dev = (struct nfc_dev *)data;
+	struct nfc_dev *dev = from_timer(dev, t, check_pres_timer);
 
 	schedule_work(&dev->check_pres_work);
 }
@@ -1081,10 +1094,7 @@ struct nfc_dev *nfc_allocate_device(struct nfc_ops *ops,
 	dev->targets_generation = 1;
 
 	if (ops->check_presence) {
-		init_timer(&dev->check_pres_timer);
-		dev->check_pres_timer.data = (unsigned long)dev;
-		dev->check_pres_timer.function = nfc_check_pres_timeout;
-
+		timer_setup(&dev->check_pres_timer, nfc_check_pres_timeout, 0);
 		INIT_WORK(&dev->check_pres_work, nfc_check_pres_work);
 	}
 

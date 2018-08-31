@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* arch/sparc/kernel/entry.S:  Sparc trap low-level entry points.
  *
  * Copyright (C) 1995, 2007 David S. Miller (davem@davemloft.net)
@@ -29,6 +30,7 @@
 #include <asm/unistd.h>
 
 #include <asm/asmmacro.h>
+#include <asm/export.h>
 
 #define curptr      g6
 
@@ -799,25 +801,10 @@ SUN_PI_(lda	[%l4] ASI_M_MMUREGS, %l5)	! read sfsr last
 	RESTORE_ALL
 
 	.align	4
-	.globl	sys_nis_syscall
-sys_nis_syscall:
-	mov	%o7, %l5
-	add	%sp, STACKFRAME_SZ, %o0		! pt_regs *regs arg
-	call	c_sys_nis_syscall
-	 mov	%l5, %o7
-
 sunos_execv:
 	.globl	sunos_execv
 	b	sys_execve
 	 clr	%i2
-
-	.align	4
-	.globl	sys_sparc_pipe
-sys_sparc_pipe:
-	mov	%o7, %l5
-	add	%sp, STACKFRAME_SZ, %o0		! pt_regs *regs arg
-	call	sparc_pipe
-	 mov	%l5, %o7
 
 	.align	4
 	.globl	sys_sigstack
@@ -1207,6 +1194,8 @@ delay_continue:
 	
 	ret
 	restore
+EXPORT_SYMBOL(__udelay)
+EXPORT_SYMBOL(__ndelay)
 
 	/* Handle a software breakpoint */
 	/* We have to inform parent that child has stopped */
@@ -1225,20 +1214,18 @@ breakpoint_trap:
 	RESTORE_ALL
 
 #ifdef CONFIG_KGDB
-	.align	4
-	.globl	kgdb_trap_low
-	.type	kgdb_trap_low,#function
-kgdb_trap_low:
+	ENTRY(kgdb_trap_low)
 	rd	%wim,%l3
 	SAVE_ALL
 	wr 	%l0, PSR_ET, %psr
 	WRITE_PAUSE
 
+	mov	%l7, %o0		! trap_level
 	call	kgdb_trap
-	 add	%sp, STACKFRAME_SZ, %o0
+	 add	%sp, STACKFRAME_SZ, %o1	! struct pt_regs *regs
 
 	RESTORE_ALL
-	.size	kgdb_trap_low,.-kgdb_trap_low
+	ENDPROC(kgdb_trap_low)
 #endif
 
 	.align	4
@@ -1255,7 +1242,7 @@ flush_patch_exception:
 kuw_patch1_7win:	sll	%o3, 6, %o3
 
 	/* No matter how much overhead this routine has in the worst
-	 * case scenerio, it is several times better than taking the
+	 * case scenario, it is several times better than taking the
 	 * traps with the old method of just doing flush_user_windows().
 	 */
 kill_user_windows:

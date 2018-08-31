@@ -482,7 +482,7 @@ static void esd_usb2_write_bulk_callback(struct urb *urb)
 	if (urb->status)
 		netdev_info(netdev, "Tx URB aborted (%d)\n", urb->status);
 
-	netdev->trans_start = jiffies;
+	netif_trans_update(netdev);
 }
 
 static ssize_t show_firmware(struct device *d,
@@ -496,7 +496,7 @@ static ssize_t show_firmware(struct device *d,
 		       (dev->version >> 8) & 0xf,
 		       dev->version & 0xff);
 }
-static DEVICE_ATTR(firmware, S_IRUGO, show_firmware, NULL);
+static DEVICE_ATTR(firmware, 0444, show_firmware, NULL);
 
 static ssize_t show_hardware(struct device *d,
 			     struct device_attribute *attr, char *buf)
@@ -509,7 +509,7 @@ static ssize_t show_hardware(struct device *d,
 		       (dev->version >> 24) & 0xf,
 		       (dev->version >> 16) & 0xff);
 }
-static DEVICE_ATTR(hardware, S_IRUGO, show_hardware, NULL);
+static DEVICE_ATTR(hardware, 0444, show_hardware, NULL);
 
 static ssize_t show_nets(struct device *d,
 			 struct device_attribute *attr, char *buf)
@@ -519,7 +519,7 @@ static ssize_t show_nets(struct device *d,
 
 	return sprintf(buf, "%d", dev->net_count);
 }
-static DEVICE_ATTR(nets, S_IRUGO, show_nets, NULL);
+static DEVICE_ATTR(nets, 0444, show_nets, NULL);
 
 static int esd_usb2_send_msg(struct esd_usb2 *dev, struct esd_usb2_msg *msg)
 {
@@ -560,8 +560,6 @@ static int esd_usb2_setup_rx_urbs(struct esd_usb2 *dev)
 		/* create a URB, and a buffer for it */
 		urb = usb_alloc_urb(0, GFP_KERNEL);
 		if (!urb) {
-			dev_warn(dev->udev->dev.parent,
-				 "No memory left for URBs\n");
 			err = -ENOMEM;
 			break;
 		}
@@ -732,7 +730,6 @@ static netdev_tx_t esd_usb2_start_xmit(struct sk_buff *skb,
 	/* create a URB, and a buffer for it, and copy the data to the URB */
 	urb = usb_alloc_urb(0, GFP_ATOMIC);
 	if (!urb) {
-		netdev_err(netdev, "No memory left for URBs\n");
 		stats->tx_dropped++;
 		dev_kfree_skb(skb);
 		goto nourbmem;
@@ -822,7 +819,7 @@ static netdev_tx_t esd_usb2_start_xmit(struct sk_buff *skb,
 		goto releasebuf;
 	}
 
-	netdev->trans_start = jiffies;
+	netif_trans_update(netdev);
 
 	/*
 	 * Release our reference to this URB, the USB core will eventually free

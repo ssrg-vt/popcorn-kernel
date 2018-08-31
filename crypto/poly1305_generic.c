@@ -17,6 +17,7 @@
 #include <linux/crypto.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <asm/unaligned.h>
 
 static inline u64 mlt(u64 a, u64 b)
 {
@@ -31,11 +32,6 @@ static inline u32 sr(u64 v, u_char n)
 static inline u32 and(u32 v, u32 mask)
 {
 	return v & mask;
-}
-
-static inline u32 le32_to_cpuvp(const void *p)
-{
-	return le32_to_cpup(p);
 }
 
 int crypto_poly1305_init(struct shash_desc *desc)
@@ -54,19 +50,19 @@ EXPORT_SYMBOL_GPL(crypto_poly1305_init);
 static void poly1305_setrkey(struct poly1305_desc_ctx *dctx, const u8 *key)
 {
 	/* r &= 0xffffffc0ffffffc0ffffffc0fffffff */
-	dctx->r[0] = (le32_to_cpuvp(key +  0) >> 0) & 0x3ffffff;
-	dctx->r[1] = (le32_to_cpuvp(key +  3) >> 2) & 0x3ffff03;
-	dctx->r[2] = (le32_to_cpuvp(key +  6) >> 4) & 0x3ffc0ff;
-	dctx->r[3] = (le32_to_cpuvp(key +  9) >> 6) & 0x3f03fff;
-	dctx->r[4] = (le32_to_cpuvp(key + 12) >> 8) & 0x00fffff;
+	dctx->r[0] = (get_unaligned_le32(key +  0) >> 0) & 0x3ffffff;
+	dctx->r[1] = (get_unaligned_le32(key +  3) >> 2) & 0x3ffff03;
+	dctx->r[2] = (get_unaligned_le32(key +  6) >> 4) & 0x3ffc0ff;
+	dctx->r[3] = (get_unaligned_le32(key +  9) >> 6) & 0x3f03fff;
+	dctx->r[4] = (get_unaligned_le32(key + 12) >> 8) & 0x00fffff;
 }
 
 static void poly1305_setskey(struct poly1305_desc_ctx *dctx, const u8 *key)
 {
-	dctx->s[0] = le32_to_cpuvp(key +  0);
-	dctx->s[1] = le32_to_cpuvp(key +  4);
-	dctx->s[2] = le32_to_cpuvp(key +  8);
-	dctx->s[3] = le32_to_cpuvp(key + 12);
+	dctx->s[0] = get_unaligned_le32(key +  0);
+	dctx->s[1] = get_unaligned_le32(key +  4);
+	dctx->s[2] = get_unaligned_le32(key +  8);
+	dctx->s[3] = get_unaligned_le32(key + 12);
 }
 
 /*
@@ -131,11 +127,11 @@ static unsigned int poly1305_blocks(struct poly1305_desc_ctx *dctx,
 	while (likely(srclen >= POLY1305_BLOCK_SIZE)) {
 
 		/* h += m[i] */
-		h0 += (le32_to_cpuvp(src +  0) >> 0) & 0x3ffffff;
-		h1 += (le32_to_cpuvp(src +  3) >> 2) & 0x3ffffff;
-		h2 += (le32_to_cpuvp(src +  6) >> 4) & 0x3ffffff;
-		h3 += (le32_to_cpuvp(src +  9) >> 6) & 0x3ffffff;
-		h4 += (le32_to_cpuvp(src + 12) >> 8) | hibit;
+		h0 += (get_unaligned_le32(src +  0) >> 0) & 0x3ffffff;
+		h1 += (get_unaligned_le32(src +  3) >> 2) & 0x3ffffff;
+		h2 += (get_unaligned_le32(src +  6) >> 4) & 0x3ffffff;
+		h3 += (get_unaligned_le32(src +  9) >> 6) & 0x3ffffff;
+		h4 += (get_unaligned_le32(src + 12) >> 8) | hibit;
 
 		/* h *= r */
 		d0 = mlt(h0, r0) + mlt(h1, s4) + mlt(h2, s3) +
@@ -208,7 +204,6 @@ EXPORT_SYMBOL_GPL(crypto_poly1305_update);
 int crypto_poly1305_final(struct shash_desc *desc, u8 *dst)
 {
 	struct poly1305_desc_ctx *dctx = shash_desc_ctx(desc);
-	__le32 *mac = (__le32 *)dst;
 	u32 h0, h1, h2, h3, h4;
 	u32 g0, g1, g2, g3, g4;
 	u32 mask;
@@ -265,10 +260,10 @@ int crypto_poly1305_final(struct shash_desc *desc, u8 *dst)
 	h3 = (h3 >> 18) | (h4 <<  8);
 
 	/* mac = (h + s) % (2^128) */
-	f = (f >> 32) + h0 + dctx->s[0]; mac[0] = cpu_to_le32(f);
-	f = (f >> 32) + h1 + dctx->s[1]; mac[1] = cpu_to_le32(f);
-	f = (f >> 32) + h2 + dctx->s[2]; mac[2] = cpu_to_le32(f);
-	f = (f >> 32) + h3 + dctx->s[3]; mac[3] = cpu_to_le32(f);
+	f = (f >> 32) + h0 + dctx->s[0]; put_unaligned_le32(f, dst +  0);
+	f = (f >> 32) + h1 + dctx->s[1]; put_unaligned_le32(f, dst +  4);
+	f = (f >> 32) + h2 + dctx->s[2]; put_unaligned_le32(f, dst +  8);
+	f = (f >> 32) + h3 + dctx->s[3]; put_unaligned_le32(f, dst + 12);
 
 	return 0;
 }
@@ -284,8 +279,6 @@ static struct shash_alg poly1305_alg = {
 		.cra_name		= "poly1305",
 		.cra_driver_name	= "poly1305-generic",
 		.cra_priority		= 100,
-		.cra_flags		= CRYPTO_ALG_TYPE_SHASH,
-		.cra_alignmask		= sizeof(u32) - 1,
 		.cra_blocksize		= POLY1305_BLOCK_SIZE,
 		.cra_module		= THIS_MODULE,
 	},

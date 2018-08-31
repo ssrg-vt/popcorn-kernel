@@ -266,7 +266,8 @@ snd_pcm_sframes_t snd_pcm_plug_slave_size(struct snd_pcm_substream *plug, snd_pc
 	return frames;
 }
 
-static int snd_pcm_plug_formats(struct snd_mask *mask, snd_pcm_format_t format)
+static int snd_pcm_plug_formats(const struct snd_mask *mask,
+				snd_pcm_format_t format)
 {
 	struct snd_mask formats = *mask;
 	u64 linfmts = (SNDRV_PCM_FMTBIT_U8 | SNDRV_PCM_FMTBIT_S8 |
@@ -280,10 +281,10 @@ static int snd_pcm_plug_formats(struct snd_mask *mask, snd_pcm_format_t format)
 		       SNDRV_PCM_FMTBIT_U32_BE | SNDRV_PCM_FMTBIT_S32_BE);
 	snd_mask_set(&formats, (__force int)SNDRV_PCM_FORMAT_MU_LAW);
 	
-	if (formats.bits[0] & (u32)linfmts)
-		formats.bits[0] |= (u32)linfmts;
-	if (formats.bits[1] & (u32)(linfmts >> 32))
-		formats.bits[1] |= (u32)(linfmts >> 32);
+	if (formats.bits[0] & lower_32_bits(linfmts))
+		formats.bits[0] |= lower_32_bits(linfmts);
+	if (formats.bits[1] & upper_32_bits(linfmts))
+		formats.bits[1] |= upper_32_bits(linfmts);
 	return snd_mask_test(&formats, (__force int)format);
 }
 
@@ -309,7 +310,7 @@ static snd_pcm_format_t preferred_formats[] = {
 };
 
 snd_pcm_format_t snd_pcm_plug_slave_format(snd_pcm_format_t format,
-					   struct snd_mask *format_mask)
+					   const struct snd_mask *format_mask)
 {
 	int i;
 
@@ -352,6 +353,7 @@ snd_pcm_format_t snd_pcm_plug_slave_format(snd_pcm_format_t format,
 				if (snd_mask_test(format_mask, (__force int)format1))
 					return format1;
 			}
+			/* fall through */
 		default:
 			return (__force snd_pcm_format_t)-EINVAL;
 		}

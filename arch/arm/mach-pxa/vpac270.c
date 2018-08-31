@@ -27,19 +27,19 @@
 #include <linux/ata_platform.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/max1586.h>
-#include <linux/i2c/pxa-i2c.h>
+#include <linux/platform_data/i2c-pxa.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include <mach/pxa27x.h>
+#include "pxa27x.h"
 #include <mach/audio.h>
 #include <mach/vpac270.h>
 #include <linux/platform_data/mmc-pxamci.h>
 #include <linux/platform_data/video-pxafb.h>
 #include <linux/platform_data/usb-ohci-pxa27x.h>
-#include <mach/pxa27x-udc.h>
-#include <mach/udc.h>
+#include "pxa27x-udc.h"
+#include "udc.h"
 #include <linux/platform_data/ata-pxa.h>
 
 #include "generic.h"

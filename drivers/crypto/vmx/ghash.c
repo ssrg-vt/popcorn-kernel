@@ -64,8 +64,6 @@ static int p8_ghash_init_tfm(struct crypto_tfm *tfm)
 		       alg, PTR_ERR(fallback));
 		return PTR_ERR(fallback);
 	}
-	printk(KERN_INFO "Using '%s' as fallback implementation.\n",
-	       crypto_tfm_alg_driver_name(crypto_shash_tfm(fallback)));
 
 	crypto_shash_set_flags(fallback,
 			       crypto_shash_get_flags((struct crypto_shash
@@ -118,10 +116,9 @@ static int p8_ghash_setkey(struct crypto_shash *tfm, const u8 *key,
 
 	preempt_disable();
 	pagefault_disable();
-	enable_kernel_altivec();
 	enable_kernel_vsx();
-	enable_kernel_fp();
 	gcm_init_p8(ctx->htable, (const u64 *) key);
+	disable_kernel_vsx();
 	pagefault_enable();
 	preempt_enable();
 	return crypto_shash_setkey(ctx->fallback, key, keylen);
@@ -149,11 +146,10 @@ static int p8_ghash_update(struct shash_desc *desc,
 			       GHASH_DIGEST_SIZE - dctx->bytes);
 			preempt_disable();
 			pagefault_disable();
-			enable_kernel_altivec();
 			enable_kernel_vsx();
-			enable_kernel_fp();
 			gcm_ghash_p8(dctx->shash, ctx->htable,
 				     dctx->buffer, GHASH_DIGEST_SIZE);
+			disable_kernel_vsx();
 			pagefault_enable();
 			preempt_enable();
 			src += GHASH_DIGEST_SIZE - dctx->bytes;
@@ -164,10 +160,9 @@ static int p8_ghash_update(struct shash_desc *desc,
 		if (len) {
 			preempt_disable();
 			pagefault_disable();
-			enable_kernel_altivec();
 			enable_kernel_vsx();
-			enable_kernel_fp();
 			gcm_ghash_p8(dctx->shash, ctx->htable, src, len);
+			disable_kernel_vsx();
 			pagefault_enable();
 			preempt_enable();
 			src += len;
@@ -195,11 +190,10 @@ static int p8_ghash_final(struct shash_desc *desc, u8 *out)
 				dctx->buffer[i] = 0;
 			preempt_disable();
 			pagefault_disable();
-			enable_kernel_altivec();
 			enable_kernel_vsx();
-			enable_kernel_fp();
 			gcm_ghash_p8(dctx->shash, ctx->htable,
 				     dctx->buffer, GHASH_DIGEST_SIZE);
+			disable_kernel_vsx();
 			pagefault_enable();
 			preempt_enable();
 			dctx->bytes = 0;
@@ -221,7 +215,7 @@ struct shash_alg p8_ghash_alg = {
 		 .cra_name = "ghash",
 		 .cra_driver_name = "p8_ghash",
 		 .cra_priority = 1000,
-		 .cra_flags = CRYPTO_ALG_TYPE_SHASH | CRYPTO_ALG_NEED_FALLBACK,
+		 .cra_flags = CRYPTO_ALG_NEED_FALLBACK,
 		 .cra_blocksize = GHASH_BLOCK_SIZE,
 		 .cra_ctxsize = sizeof(struct p8_ghash_ctx),
 		 .cra_module = THIS_MODULE,

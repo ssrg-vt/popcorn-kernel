@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _ASM_X86_KVM_H
 #define _ASM_X86_KVM_H
 
@@ -8,6 +9,9 @@
 
 #include <linux/types.h>
 #include <linux/ioctl.h>
+
+#define KVM_PIO_PAGE_OFFSET 1
+#define KVM_COALESCED_MMIO_PAGE_OFFSET 2
 
 #define DE_VECTOR 0
 #define DB_VECTOR 1
@@ -216,9 +220,9 @@ struct kvm_cpuid_entry2 {
 	__u32 padding[3];
 };
 
-#define KVM_CPUID_FLAG_SIGNIFCANT_INDEX		BIT(0)
-#define KVM_CPUID_FLAG_STATEFUL_FUNC		BIT(1)
-#define KVM_CPUID_FLAG_STATE_READ_NEXT		BIT(2)
+#define KVM_CPUID_FLAG_SIGNIFCANT_INDEX		(1 << 0)
+#define KVM_CPUID_FLAG_STATEFUL_FUNC		(1 << 1)
+#define KVM_CPUID_FLAG_STATE_READ_NEXT		(1 << 2)
 
 /* for KVM_SET_CPUID2 */
 struct kvm_cpuid2 {
@@ -350,11 +354,65 @@ struct kvm_xcrs {
 	__u64 padding[16];
 };
 
-/* definition of registers in kvm_run */
+#define KVM_SYNC_X86_REGS      (1UL << 0)
+#define KVM_SYNC_X86_SREGS     (1UL << 1)
+#define KVM_SYNC_X86_EVENTS    (1UL << 2)
+
+#define KVM_SYNC_X86_VALID_FIELDS \
+	(KVM_SYNC_X86_REGS| \
+	 KVM_SYNC_X86_SREGS| \
+	 KVM_SYNC_X86_EVENTS)
+
+/* kvm_sync_regs struct included by kvm_run struct */
 struct kvm_sync_regs {
+	/* Members of this structure are potentially malicious.
+	 * Care must be taken by code reading, esp. interpreting,
+	 * data fields from them inside KVM to prevent TOCTOU and
+	 * double-fetch types of vulnerabilities.
+	 */
+	struct kvm_regs regs;
+	struct kvm_sregs sregs;
+	struct kvm_vcpu_events events;
 };
 
 #define KVM_X86_QUIRK_LINT0_REENABLED	(1 << 0)
 #define KVM_X86_QUIRK_CD_NW_CLEARED	(1 << 1)
+
+#define KVM_STATE_NESTED_GUEST_MODE	0x00000001
+#define KVM_STATE_NESTED_RUN_PENDING	0x00000002
+
+#define KVM_STATE_NESTED_SMM_GUEST_MODE	0x00000001
+#define KVM_STATE_NESTED_SMM_VMXON	0x00000002
+
+struct kvm_vmx_nested_state {
+	__u64 vmxon_pa;
+	__u64 vmcs_pa;
+
+	struct {
+		__u16 flags;
+	} smm;
+};
+
+/* for KVM_CAP_NESTED_STATE */
+struct kvm_nested_state {
+	/* KVM_STATE_* flags */
+	__u16 flags;
+
+	/* 0 for VMX, 1 for SVM.  */
+	__u16 format;
+
+	/* 128 for SVM, 128 + VMCS size for VMX.  */
+	__u32 size;
+
+	union {
+		/* VMXON, VMCS */
+		struct kvm_vmx_nested_state vmx;
+
+		/* Pad the header to 128 bytes.  */
+		__u8 pad[120];
+	};
+
+	__u8 data[0];
+};
 
 #endif /* _ASM_X86_KVM_H */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * USB Cypress M8 driver
  *
@@ -5,11 +6,6 @@
  * 	    Lonnie Mendez (dignome@gmail.com)
  *	Copyright (C) 2003,2004
  *	    Neil Whelchel (koyama@firstlight.net)
- *
- * 	This program is free software; you can redistribute it and/or modify
- * 	it under the terms of the GNU General Public License as published by
- * 	the Free Software Foundation; either version 2 of the License, or
- * 	(at your option) any later version.
  *
  * See Documentation/usb/usb-serial.txt for more information on using this
  * driver
@@ -1069,7 +1065,6 @@ static void cypress_read_int_callback(struct urb *urb)
 	unsigned char *data = urb->transfer_buffer;
 	unsigned long flags;
 	char tty_flag = TTY_NORMAL;
-	int havedata = 0;
 	int bytes = 0;
 	int result;
 	int i = 0;
@@ -1118,16 +1113,12 @@ static void cypress_read_int_callback(struct urb *urb)
 		priv->current_status = data[0] & 0xF8;
 		bytes = data[1] + 2;
 		i = 2;
-		if (bytes > 2)
-			havedata = 1;
 		break;
 	case packet_format_2:
 		/* This is for the CY7C63743... */
 		priv->current_status = data[0] & 0xF8;
 		bytes = (data[0] & 0x07) + 1;
 		i = 1;
-		if (bytes > 1)
-			havedata = 1;
 		break;
 	}
 	spin_unlock_irqrestore(&priv->lock, flags);
@@ -1164,8 +1155,7 @@ static void cypress_read_int_callback(struct urb *urb)
 
 	/* hangup, as defined in acm.c... this might be a bad place for it
 	 * though */
-	if (tty && !(tty->termios.c_cflag & CLOCAL) &&
-			!(priv->current_status & UART_CD)) {
+	if (tty && !C_CLOCAL(tty) && !(priv->current_status & UART_CD)) {
 		dev_dbg(dev, "%s - calling hangup\n", __func__);
 		tty_hangup(tty);
 		goto continue_read;

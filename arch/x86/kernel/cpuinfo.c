@@ -69,8 +69,8 @@ int fill_cpu_info(struct remote_cpu_info *res)
 		strcpy(core->model_name,
 				c->x86_model_id[0] ? c->x86_model_id : "unknown");
 
-		if (c->x86_mask || c->cpuid_level >= 0)
-			core->stepping = c->x86_mask;
+		if (c->x86_model || c->cpuid_level >= 0)
+			core->stepping = c->x86_model;
 		else
 			core->stepping = -1;
 

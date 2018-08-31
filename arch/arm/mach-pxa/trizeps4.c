@@ -28,7 +28,7 @@
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/partitions.h>
 #include <linux/regulator/machine.h>
-#include <linux/i2c/pxa-i2c.h>
+#include <linux/platform_data/i2c-pxa.h>
 
 #include <asm/types.h>
 #include <asm/setup.h>
@@ -42,7 +42,7 @@
 #include <asm/mach/irq.h>
 #include <asm/mach/flash.h>
 
-#include <mach/pxa27x.h>
+#include "pxa27x.h"
 #include <mach/trizeps4.h>
 #include <mach/audio.h>
 #include <linux/platform_data/video-pxafb.h>

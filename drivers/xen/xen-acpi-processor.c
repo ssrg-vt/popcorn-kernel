@@ -53,6 +53,8 @@ static unsigned long *acpi_ids_done;
 static unsigned long *acpi_id_present;
 /* And if there is an _CST definition (or a PBLK) for the ACPI IDs */
 static unsigned long *acpi_id_cst_present;
+/* Which ACPI P-State dependencies for a enumerated processor */
+static struct acpi_psd_package *acpi_psd;
 
 static int push_cxx_to_hypervisor(struct acpi_processor *_pr)
 {
@@ -116,7 +118,7 @@ static int push_cxx_to_hypervisor(struct acpi_processor *_pr)
 	set_xen_guest_handle(op.u.set_pminfo.power.states, dst_cx_states);
 
 	if (!no_hypercall)
-		ret = HYPERVISOR_dom0_op(&op);
+		ret = HYPERVISOR_platform_op(&op);
 
 	if (!ret) {
 		pr_debug("ACPI CPU%u - C-states uploaded.\n", _pr->acpi_id);
@@ -244,7 +246,7 @@ static int push_pxx_to_hypervisor(struct acpi_processor *_pr)
 	}
 
 	if (!no_hypercall)
-		ret = HYPERVISOR_dom0_op(&op);
+		ret = HYPERVISOR_platform_op(&op);
 
 	if (!ret) {
 		struct acpi_processor_performance *perf;
@@ -302,7 +304,7 @@ static unsigned int __init get_max_acpi_id(void)
 	info = &op.u.pcpu_info;
 	info->xen_cpuid = 0;
 
-	ret = HYPERVISOR_dom0_op(&op);
+	ret = HYPERVISOR_platform_op(&op);
 	if (ret)
 		return NR_CPUS;
 
@@ -310,7 +312,7 @@ static unsigned int __init get_max_acpi_id(void)
 	last_cpu = op.u.pcpu_info.max_present;
 	for (i = 0; i <= last_cpu; i++) {
 		info->xen_cpuid = i;
-		ret = HYPERVISOR_dom0_op(&op);
+		ret = HYPERVISOR_platform_op(&op);
 		if (ret)
 			continue;
 		max_acpi_id = max(info->acpi_id, max_acpi_id);
@@ -360,6 +362,12 @@ read_acpi_id(acpi_handle handle, u32 lvl, void *context, void **rv)
 	default:
 		return AE_OK;
 	}
+	if (invalid_phys_cpuid(acpi_get_phys_id(handle,
+						acpi_type == ACPI_TYPE_DEVICE,
+						acpi_id))) {
+		pr_debug("CPU with ACPI ID %u is unavailable\n", acpi_id);
+		return AE_OK;
+	}
 	/* There are more ACPI Processor objects than in x2APIC or MADT.
 	 * This can happen with incorrect ACPI SSDT declerations. */
 	if (acpi_id >= nr_acpi_bits) {
@@ -371,6 +379,13 @@ read_acpi_id(acpi_handle handle, u32 lvl, void *context, void **rv)
 	__set_bit(acpi_id, acpi_id_present);
 
 	pr_debug("ACPI CPU%u w/ PBLK:0x%lx\n", acpi_id, (unsigned long)pblk);
+
+	/* It has P-state dependencies */
+	if (!acpi_processor_get_psd(handle, &acpi_psd[acpi_id])) {
+		pr_debug("ACPI CPU%u w/ PST:coord_type = %llu domain = %llu\n",
+			 acpi_id, acpi_psd[acpi_id].coord_type,
+			 acpi_psd[acpi_id].domain);
+	}
 
 	status = acpi_evaluate_object(handle, "_CST", NULL, &buffer);
 	if (ACPI_FAILURE(status)) {
@@ -405,10 +420,18 @@ static int check_acpi_ids(struct acpi_processor *pr_backup)
 		return -ENOMEM;
 	}
 
+	acpi_psd = kcalloc(nr_acpi_bits, sizeof(struct acpi_psd_package),
+			   GFP_KERNEL);
+	if (!acpi_psd) {
+		kfree(acpi_id_present);
+		kfree(acpi_id_cst_present);
+		return -ENOMEM;
+	}
+
 	acpi_walk_namespace(ACPI_TYPE_PROCESSOR, ACPI_ROOT_OBJECT,
 			    ACPI_UINT32_MAX,
 			    read_acpi_id, NULL, NULL, NULL);
-	acpi_get_devices("ACPI0007", read_acpi_id, NULL, NULL);
+	acpi_get_devices(ACPI_PROCESSOR_DEVICE_HID, read_acpi_id, NULL, NULL);
 
 upload:
 	if (!bitmap_equal(acpi_id_present, acpi_ids_done, nr_acpi_bits)) {
@@ -417,6 +440,12 @@ upload:
 			pr_backup->acpi_id = i;
 			/* Mask out C-states if there are no _CST or PBLK */
 			pr_backup->flags.power = test_bit(i, acpi_id_cst_present);
+			/* num_entries is non-zero if we evaluated _PSD */
+			if (acpi_psd[i].num_entries) {
+				memcpy(&pr_backup->performance->domain_info,
+				       &acpi_psd[i],
+				       sizeof(struct acpi_psd_package));
+			}
 			(void)upload_pm_data(pr_backup);
 		}
 	}
@@ -566,6 +595,7 @@ static void __exit xen_acpi_processor_exit(void)
 	kfree(acpi_ids_done);
 	kfree(acpi_id_present);
 	kfree(acpi_id_cst_present);
+	kfree(acpi_psd);
 	for_each_possible_cpu(i)
 		acpi_processor_unregister_performance(i);
 

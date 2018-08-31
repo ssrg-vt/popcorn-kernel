@@ -72,9 +72,6 @@ hash_mac4_data_next(struct hash_mac4_elem *next,
 #define IP_SET_PROTO_UNDEF
 #include "ip_set_hash_gen.h"
 
-/* Zero valued element is not supported */
-static const unsigned char invalid_ether[ETH_ALEN] = { 0 };
-
 static int
 hash_mac4_kadt(struct ip_set *set, const struct sk_buff *skb,
 	       const struct xt_action_param *par,
@@ -93,7 +90,7 @@ hash_mac4_kadt(struct ip_set *set, const struct sk_buff *skb,
 		return -EINVAL;
 
 	ether_addr_copy(e.ether, eth_hdr(skb)->h_source);
-	if (memcmp(e.ether, invalid_ether, ETH_ALEN) == 0)
+	if (is_zero_ether_addr(e.ether))
 		return -EINVAL;
 	return adtfn(set, &e, &ext, &opt->ext, opt->cmdflags);
 }
@@ -110,14 +107,15 @@ hash_mac4_uadt(struct ip_set *set, struct nlattr *tb[],
 	if (tb[IPSET_ATTR_LINENO])
 		*lineno = nla_get_u32(tb[IPSET_ATTR_LINENO]);
 
-	if (unlikely(!tb[IPSET_ATTR_ETHER]))
+	if (unlikely(!tb[IPSET_ATTR_ETHER] ||
+		     nla_len(tb[IPSET_ATTR_ETHER]) != ETH_ALEN))
 		return -IPSET_ERR_PROTOCOL;
 
 	ret = ip_set_get_extensions(set, tb, &ext);
 	if (ret)
 		return ret;
 	ether_addr_copy(e.ether, nla_data(tb[IPSET_ATTR_ETHER]));
-	if (memcmp(e.ether, invalid_ether, ETH_ALEN) == 0)
+	if (is_zero_ether_addr(e.ether))
 		return -IPSET_ERR_HASH_ELEM;
 
 	return adtfn(set, &e, &ext, &ext, flags);

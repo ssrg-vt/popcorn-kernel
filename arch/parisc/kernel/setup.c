@@ -36,6 +36,9 @@
 #undef PCI_DEBUG
 #include <linux/proc_fs.h>
 #include <linux/export.h>
+#include <linux/sched.h>
+#include <linux/sched/clock.h>
+#include <linux/start_kernel.h>
 
 #include <asm/processor.h>
 #include <asm/sections.h>
@@ -46,6 +49,7 @@
 #include <asm/io.h>
 #include <asm/setup.h>
 #include <asm/unwind.h>
+#include <asm/smp.h>
 
 static char __initdata command_line[COMMAND_LINE_SIZE];
 
@@ -53,11 +57,6 @@ static char __initdata command_line[COMMAND_LINE_SIZE];
 struct proc_dir_entry * proc_runway_root __read_mostly = NULL;
 struct proc_dir_entry * proc_gsc_root __read_mostly = NULL;
 struct proc_dir_entry * proc_mckinley_root __read_mostly = NULL;
-
-#if !defined(CONFIG_PA20) && (defined(CONFIG_IOMMU_CCIO) || defined(CONFIG_IOMMU_SBA))
-int parisc_bus_is_phys __read_mostly = 1;	/* Assume no IOMMU is present */
-EXPORT_SYMBOL(parisc_bus_is_phys);
-#endif
 
 void __init setup_cmdline(char **cmdline_p)
 {
@@ -98,14 +97,12 @@ void __init dma_ops_init(void)
 		panic(	"PA-RISC Linux currently only supports machines that conform to\n"
 			"the PA-RISC 1.1 or 2.0 architecture specification.\n");
 
-	case pcxs:
-	case pcxt:
-		hppa_dma_ops = &pcx_dma_ops;
-		break;
 	case pcxl2:
 		pa7300lc_init();
 	case pcxl: /* falls through */
-		hppa_dma_ops = &pcxl_dma_ops;
+	case pcxs:
+	case pcxt:
+		hppa_dma_ops = &dma_noncoherent_ops;
 		break;
 	default:
 		break;
@@ -113,7 +110,6 @@ void __init dma_ops_init(void)
 }
 #endif
 
-extern int init_per_cpu(int cpuid);
 extern void collect_boot_cpu_data(void);
 
 void __init setup_arch(char **cmdline_p)
@@ -176,6 +172,7 @@ void __init setup_arch(char **cmdline_p)
 	conswitchp = &dummy_con;	/* we use do_take_over_console() later ! */
 #endif
 
+	clear_sched_clock_stable();
 }
 
 /*
@@ -395,15 +392,16 @@ static int __init parisc_init(void)
 }
 arch_initcall(parisc_init);
 
-void start_parisc(void)
+void __init start_parisc(void)
 {
-	extern void start_kernel(void);
 	extern void early_trap_init(void);
 
 	int ret, cpunum;
 	struct pdc_coproc_cfg coproc_cfg;
 
 	cpunum = smp_processor_id();
+
+	init_cpu_topology();
 
 	set_firmware_width_unlocked();
 

@@ -1,5 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_PAGE_64_DEFS_H
 #define _ASM_X86_PAGE_64_DEFS_H
+
+#ifndef __ASSEMBLY__
+#include <asm/kaslr.h>
+#endif
 
 #ifdef CONFIG_KASAN
 #define KASAN_STACK_ORDER 1
@@ -32,13 +37,26 @@
  * hypervisor to fit.  Choosing 16 slots here is arbitrary, but it's
  * what Xen requires.
  */
-#define __PAGE_OFFSET           _AC(0xffff880000000000, UL)
+#define __PAGE_OFFSET_BASE_L5	_AC(0xff10000000000000, UL)
+#define __PAGE_OFFSET_BASE_L4	_AC(0xffff880000000000, UL)
+
+#ifdef CONFIG_DYNAMIC_MEMORY_LAYOUT
+#define __PAGE_OFFSET           page_offset_base
+#else
+#define __PAGE_OFFSET           __PAGE_OFFSET_BASE_L4
+#endif /* CONFIG_DYNAMIC_MEMORY_LAYOUT */
 
 #define __START_KERNEL_map	_AC(0xffffffff80000000, UL)
 
 /* See Documentation/x86/x86_64/mm.txt for a description of the memory map. */
-#define __PHYSICAL_MASK_SHIFT	46
+
+#define __PHYSICAL_MASK_SHIFT	52
+
+#ifdef CONFIG_X86_5LEVEL
+#define __VIRTUAL_MASK_SHIFT	(pgtable_l5_enabled() ? 56 : 47)
+#else
 #define __VIRTUAL_MASK_SHIFT	47
+#endif
 
 /*
  * Kernel image size is limited to 1GiB due to the fixmap living in the
@@ -47,12 +65,10 @@
  * are fully set up. If kernel ASLR is configured, it can extend the
  * kernel page table mapping, reducing the size of the modules area.
  */
-#define KERNEL_IMAGE_SIZE_DEFAULT      (512 * 1024 * 1024)
-#if defined(CONFIG_RANDOMIZE_BASE) && \
-	CONFIG_RANDOMIZE_BASE_MAX_OFFSET > KERNEL_IMAGE_SIZE_DEFAULT
-#define KERNEL_IMAGE_SIZE   CONFIG_RANDOMIZE_BASE_MAX_OFFSET
+#if defined(CONFIG_RANDOMIZE_BASE)
+#define KERNEL_IMAGE_SIZE	(1024 * 1024 * 1024)
 #else
-#define KERNEL_IMAGE_SIZE      KERNEL_IMAGE_SIZE_DEFAULT
+#define KERNEL_IMAGE_SIZE	(512 * 1024 * 1024)
 #endif
 
 #endif /* _ASM_X86_PAGE_64_DEFS_H */

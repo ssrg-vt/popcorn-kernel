@@ -36,7 +36,7 @@ struct ip_set_net {
 	bool		is_destroyed;	/* all sets are destroyed */
 };
 
-static int ip_set_net_id __read_mostly;
+static unsigned int ip_set_net_id __read_mostly;
 
 static inline struct ip_set_net *ip_set_pernet(struct net *net)
 {
@@ -57,7 +57,7 @@ MODULE_ALIAS_NFNL_SUBSYS(NFNL_SUBSYS_IPSET);
 
 /* When the nfnl mutex is held: */
 #define ip_set_dereference(p)		\
-	rcu_dereference_protected(p, 1)
+	rcu_dereference_protected(p, lockdep_nfnl_is_held(NFNL_SUBSYS_IPSET))
 #define ip_set(inst, id)		\
 	ip_set_dereference((inst)->ip_set_list)[id]
 
@@ -295,7 +295,8 @@ ip_set_get_ipaddr4(struct nlattr *nla,  __be32 *ipaddr)
 
 	if (unlikely(!flag_nested(nla)))
 		return -IPSET_ERR_PROTOCOL;
-	if (nla_parse_nested(tb, IPSET_ATTR_IPADDR_MAX, nla, ipaddr_policy))
+	if (nla_parse_nested(tb, IPSET_ATTR_IPADDR_MAX, nla,
+			     ipaddr_policy, NULL))
 		return -IPSET_ERR_PROTOCOL;
 	if (unlikely(!ip_set_attr_netorder(tb, IPSET_ATTR_IPADDR_IPV4)))
 		return -IPSET_ERR_PROTOCOL;
@@ -313,7 +314,8 @@ ip_set_get_ipaddr6(struct nlattr *nla, union nf_inet_addr *ipaddr)
 	if (unlikely(!flag_nested(nla)))
 		return -IPSET_ERR_PROTOCOL;
 
-	if (nla_parse_nested(tb, IPSET_ATTR_IPADDR_MAX, nla, ipaddr_policy))
+	if (nla_parse_nested(tb, IPSET_ATTR_IPADDR_MAX, nla,
+			     ipaddr_policy, NULL))
 		return -IPSET_ERR_PROTOCOL;
 	if (unlikely(!ip_set_attr_netorder(tb, IPSET_ATTR_IPADDR_IPV6)))
 		return -IPSET_ERR_PROTOCOL;
@@ -324,7 +326,7 @@ ip_set_get_ipaddr6(struct nlattr *nla, union nf_inet_addr *ipaddr)
 }
 EXPORT_SYMBOL_GPL(ip_set_get_ipaddr6);
 
-typedef void (*destroyer)(void *);
+typedef void (*destroyer)(struct ip_set *, void *);
 /* ipset data extension types, in size order */
 
 const struct ip_set_ext_type ip_set_extensions[] = {
@@ -426,20 +428,20 @@ ip_set_get_extensions(struct ip_set *set, struct nlattr *tb[],
 		if (!SET_WITH_SKBINFO(set))
 			return -IPSET_ERR_SKBINFO;
 		fullmark = be64_to_cpu(nla_get_be64(tb[IPSET_ATTR_SKBMARK]));
-		ext->skbmark = fullmark >> 32;
-		ext->skbmarkmask = fullmark & 0xffffffff;
+		ext->skbinfo.skbmark = fullmark >> 32;
+		ext->skbinfo.skbmarkmask = fullmark & 0xffffffff;
 	}
 	if (tb[IPSET_ATTR_SKBPRIO]) {
 		if (!SET_WITH_SKBINFO(set))
 			return -IPSET_ERR_SKBINFO;
-		ext->skbprio = be32_to_cpu(nla_get_be32(
-					    tb[IPSET_ATTR_SKBPRIO]));
+		ext->skbinfo.skbprio =
+			be32_to_cpu(nla_get_be32(tb[IPSET_ATTR_SKBPRIO]));
 	}
 	if (tb[IPSET_ATTR_SKBQUEUE]) {
 		if (!SET_WITH_SKBINFO(set))
 			return -IPSET_ERR_SKBINFO;
-		ext->skbqueue = be16_to_cpu(nla_get_be16(
-					    tb[IPSET_ATTR_SKBQUEUE]));
+		ext->skbinfo.skbqueue =
+			be16_to_cpu(nla_get_be16(tb[IPSET_ATTR_SKBQUEUE]));
 	}
 	return 0;
 }
@@ -470,6 +472,31 @@ ip_set_put_extensions(struct sk_buff *skb, const struct ip_set *set,
 }
 EXPORT_SYMBOL_GPL(ip_set_put_extensions);
 
+bool
+ip_set_match_extensions(struct ip_set *set, const struct ip_set_ext *ext,
+			struct ip_set_ext *mext, u32 flags, void *data)
+{
+	if (SET_WITH_TIMEOUT(set) &&
+	    ip_set_timeout_expired(ext_timeout(data, set)))
+		return false;
+	if (SET_WITH_COUNTER(set)) {
+		struct ip_set_counter *counter = ext_counter(data, set);
+
+		if (flags & IPSET_FLAG_MATCH_COUNTERS &&
+		    !(ip_set_match_counter(ip_set_get_packets(counter),
+				mext->packets, mext->packets_op) &&
+		      ip_set_match_counter(ip_set_get_bytes(counter),
+				mext->bytes, mext->bytes_op)))
+			return false;
+		ip_set_update_counter(counter, ext, flags);
+	}
+	if (SET_WITH_SKBINFO(set))
+		ip_set_get_skbinfo(ext_skbinfo(data, set),
+				   ext, mext, flags);
+	return true;
+}
+EXPORT_SYMBOL_GPL(ip_set_match_extensions);
+
 /* Creating/destroying/renaming/swapping affect the existence and
  * the properties of a set. All of these can be executed from userspace
  * only and serialized by the nfnl mutex indirectly from nfnetlink.
@@ -497,6 +524,18 @@ __ip_set_put(struct ip_set *set)
 	write_unlock_bh(&ip_set_ref_lock);
 }
 
+/* set->ref can be swapped out by ip_set_swap, netlink events (like dump) need
+ * a separate reference counter
+ */
+static inline void
+__ip_set_put_netlink(struct ip_set *set)
+{
+	write_lock_bh(&ip_set_ref_lock);
+	BUG_ON(set->ref_netlink == 0);
+	set->ref_netlink--;
+	write_unlock_bh(&ip_set_ref_lock);
+}
+
 /* Add, del and test set entries from kernel.
  *
  * The set behind the index must exist and must be referenced
@@ -521,7 +560,7 @@ int
 ip_set_test(ip_set_id_t index, const struct sk_buff *skb,
 	    const struct xt_action_param *par, struct ip_set_adt_opt *opt)
 {
-	struct ip_set *set = ip_set_rcu_get(par->net, index);
+	struct ip_set *set = ip_set_rcu_get(xt_net(par), index);
 	int ret = 0;
 
 	BUG_ON(!set);
@@ -559,7 +598,7 @@ int
 ip_set_add(ip_set_id_t index, const struct sk_buff *skb,
 	   const struct xt_action_param *par, struct ip_set_adt_opt *opt)
 {
-	struct ip_set *set = ip_set_rcu_get(par->net, index);
+	struct ip_set *set = ip_set_rcu_get(xt_net(par), index);
 	int ret;
 
 	BUG_ON(!set);
@@ -581,7 +620,7 @@ int
 ip_set_del(ip_set_id_t index, const struct sk_buff *skb,
 	   const struct xt_action_param *par, struct ip_set_adt_opt *opt)
 {
-	struct ip_set *set = ip_set_rcu_get(par->net, index);
+	struct ip_set *set = ip_set_rcu_get(xt_net(par), index);
 	int ret = 0;
 
 	BUG_ON(!set);
@@ -749,7 +788,7 @@ start_msg(struct sk_buff *skb, u32 portid, u32 seq, unsigned int flags,
 	struct nlmsghdr *nlh;
 	struct nfgenmsg *nfmsg;
 
-	nlh = nlmsg_put(skb, portid, seq, cmd | (NFNL_SUBSYS_IPSET << 8),
+	nlh = nlmsg_put(skb, portid, seq, nfnl_msg_type(NFNL_SUBSYS_IPSET, cmd),
 			sizeof(*nfmsg), flags);
 	if (!nlh)
 		return NULL;
@@ -825,20 +864,19 @@ find_free_id(struct ip_set_net *inst, const char *name, ip_set_id_t *index,
 	return 0;
 }
 
-static int
-ip_set_none(struct sock *ctnl, struct sk_buff *skb,
-	    const struct nlmsghdr *nlh,
-	    const struct nlattr * const attr[])
+static int ip_set_none(struct net *net, struct sock *ctnl, struct sk_buff *skb,
+		       const struct nlmsghdr *nlh,
+		       const struct nlattr * const attr[],
+		       struct netlink_ext_ack *extack)
 {
 	return -EOPNOTSUPP;
 }
 
-static int
-ip_set_create(struct sock *ctnl, struct sk_buff *skb,
-	      const struct nlmsghdr *nlh,
-	      const struct nlattr * const attr[])
+static int ip_set_create(struct net *net, struct sock *ctnl,
+			 struct sk_buff *skb, const struct nlmsghdr *nlh,
+			 const struct nlattr * const attr[],
+			 struct netlink_ext_ack *extack)
 {
-	struct net *net = sock_net(ctnl);
 	struct ip_set_net *inst = ip_set_pernet(net);
 	struct ip_set *set, *clash = NULL;
 	ip_set_id_t index = IPSET_INVALID_ID;
@@ -889,7 +927,7 @@ ip_set_create(struct sock *ctnl, struct sk_buff *skb,
 	/* Without holding any locks, create private part. */
 	if (attr[IPSET_ATTR_DATA] &&
 	    nla_parse_nested(tb, IPSET_ATTR_CREATE_MAX, attr[IPSET_ATTR_DATA],
-			     set->type->create_policy)) {
+			     set->type->create_policy, NULL)) {
 		ret = -IPSET_ERR_PROTOCOL;
 		goto put_out;
 	}
@@ -976,18 +1014,21 @@ ip_set_destroy_set(struct ip_set *set)
 	kfree(set);
 }
 
-static int
-ip_set_destroy(struct sock *ctnl, struct sk_buff *skb,
-	       const struct nlmsghdr *nlh,
-	       const struct nlattr * const attr[])
+static int ip_set_destroy(struct net *net, struct sock *ctnl,
+			  struct sk_buff *skb, const struct nlmsghdr *nlh,
+			  const struct nlattr * const attr[],
+			  struct netlink_ext_ack *extack)
 {
-	struct ip_set_net *inst = ip_set_pernet(sock_net(ctnl));
+	struct ip_set_net *inst = ip_set_pernet(net);
 	struct ip_set *s;
 	ip_set_id_t i;
 	int ret = 0;
 
 	if (unlikely(protocol_failed(attr)))
 		return -IPSET_ERR_PROTOCOL;
+
+	/* Must wait for flush to be really finished in list:set */
+	rcu_barrier();
 
 	/* Commands are serialized and references are
 	 * protected by the ip_set_ref_lock.
@@ -1003,7 +1044,7 @@ ip_set_destroy(struct sock *ctnl, struct sk_buff *skb,
 	if (!attr[IPSET_ATTR_SETNAME]) {
 		for (i = 0; i < inst->ip_set_max; i++) {
 			s = ip_set(inst, i);
-			if (s && s->ref) {
+			if (s && (s->ref || s->ref_netlink)) {
 				ret = -IPSET_ERR_BUSY;
 				goto out;
 			}
@@ -1025,7 +1066,7 @@ ip_set_destroy(struct sock *ctnl, struct sk_buff *skb,
 		if (!s) {
 			ret = -ENOENT;
 			goto out;
-		} else if (s->ref) {
+		} else if (s->ref || s->ref_netlink) {
 			ret = -IPSET_ERR_BUSY;
 			goto out;
 		}
@@ -1052,12 +1093,12 @@ ip_set_flush_set(struct ip_set *set)
 	spin_unlock_bh(&set->lock);
 }
 
-static int
-ip_set_flush(struct sock *ctnl, struct sk_buff *skb,
-	     const struct nlmsghdr *nlh,
-	     const struct nlattr * const attr[])
+static int ip_set_flush(struct net *net, struct sock *ctnl, struct sk_buff *skb,
+			const struct nlmsghdr *nlh,
+			const struct nlattr * const attr[],
+			struct netlink_ext_ack *extack)
 {
-	struct ip_set_net *inst = ip_set_pernet(sock_net(ctnl));
+	struct ip_set_net *inst = ip_set_pernet(net);
 	struct ip_set *s;
 	ip_set_id_t i;
 
@@ -1092,12 +1133,12 @@ ip_set_setname2_policy[IPSET_ATTR_CMD_MAX + 1] = {
 				    .len = IPSET_MAXNAMELEN - 1 },
 };
 
-static int
-ip_set_rename(struct sock *ctnl, struct sk_buff *skb,
-	      const struct nlmsghdr *nlh,
-	      const struct nlattr * const attr[])
+static int ip_set_rename(struct net *net, struct sock *ctnl,
+			 struct sk_buff *skb, const struct nlmsghdr *nlh,
+			 const struct nlattr * const attr[],
+			 struct netlink_ext_ack *extack)
 {
-	struct ip_set_net *inst = ip_set_pernet(sock_net(ctnl));
+	struct ip_set_net *inst = ip_set_pernet(net);
 	struct ip_set *set, *s;
 	const char *name2;
 	ip_set_id_t i;
@@ -1142,12 +1183,12 @@ out:
  * so the ip_set_list always contains valid pointers to the sets.
  */
 
-static int
-ip_set_swap(struct sock *ctnl, struct sk_buff *skb,
-	    const struct nlmsghdr *nlh,
-	    const struct nlattr * const attr[])
+static int ip_set_swap(struct net *net, struct sock *ctnl, struct sk_buff *skb,
+		       const struct nlmsghdr *nlh,
+		       const struct nlattr * const attr[],
+		       struct netlink_ext_ack *extack)
 {
-	struct ip_set_net *inst = ip_set_pernet(sock_net(ctnl));
+	struct ip_set_net *inst = ip_set_pernet(net);
 	struct ip_set *from, *to;
 	ip_set_id_t from_id, to_id;
 	char from_name[IPSET_MAXNAMELEN];
@@ -1175,11 +1216,17 @@ ip_set_swap(struct sock *ctnl, struct sk_buff *skb,
 	      from->family == to->family))
 		return -IPSET_ERR_TYPE_MISMATCH;
 
+	write_lock_bh(&ip_set_ref_lock);
+
+	if (from->ref_netlink || to->ref_netlink) {
+		write_unlock_bh(&ip_set_ref_lock);
+		return -EBUSY;
+	}
+
 	strncpy(from_name, from->name, IPSET_MAXNAMELEN);
 	strncpy(from->name, to->name, IPSET_MAXNAMELEN);
 	strncpy(to->name, from_name, IPSET_MAXNAMELEN);
 
-	write_lock_bh(&ip_set_ref_lock);
 	swap(from->ref, to->ref);
 	ip_set(inst, from_id) = to;
 	ip_set(inst, to_id) = from;
@@ -1210,7 +1257,7 @@ ip_set_dump_done(struct netlink_callback *cb)
 		if (set->variant->uref)
 			set->variant->uref(set, cb, false);
 		pr_debug("release set %s\n", set->name);
-		__ip_set_put_byindex(inst, index);
+		__ip_set_put_netlink(set);
 	}
 	return 0;
 }
@@ -1238,8 +1285,8 @@ dump_init(struct netlink_callback *cb, struct ip_set_net *inst)
 	ip_set_id_t index;
 
 	/* Second pass, so parser can't fail */
-	nla_parse(cda, IPSET_ATTR_CMD_MAX,
-		  attr, nlh->nlmsg_len - min_len, ip_set_setname_policy);
+	nla_parse(cda, IPSET_ATTR_CMD_MAX, attr, nlh->nlmsg_len - min_len,
+		  ip_set_setname_policy, NULL);
 
 	if (cda[IPSET_ATTR_SETNAME]) {
 		struct ip_set *set;
@@ -1286,7 +1333,7 @@ ip_set_dump_start(struct sk_buff *skb, struct netlink_callback *cb)
 			 * manually :-(
 			 */
 			if (nlh->nlmsg_flags & NLM_F_ACK)
-				netlink_ack(cb->skb, nlh, ret);
+				netlink_ack(cb->skb, nlh, ret, NULL);
 			return ret;
 		}
 	}
@@ -1332,7 +1379,7 @@ dump_last:
 		if (!cb->args[IPSET_CB_ARG0]) {
 			/* Start listing: make sure set won't be destroyed */
 			pr_debug("reference set\n");
-			set->ref++;
+			set->ref_netlink++;
 		}
 		write_unlock_bh(&ip_set_ref_lock);
 		nlh = start_msg(skb, NETLINK_CB(cb->skb).portid,
@@ -1364,11 +1411,9 @@ dump_last:
 				goto next_set;
 			if (set->variant->uref)
 				set->variant->uref(set, cb, true);
-			/* Fall through and add elements */
+			/* fall through */
 		default:
-			rcu_read_lock_bh();
 			ret = set->variant->list(set, skb, cb);
-			rcu_read_unlock_bh();
 			if (!cb->args[IPSET_CB_ARG0])
 				/* Set is done, proceed with next one */
 				goto next_set;
@@ -1400,7 +1445,7 @@ release_refcount:
 		if (set->variant->uref)
 			set->variant->uref(set, cb, false);
 		pr_debug("release set %s\n", set->name);
-		__ip_set_put_byindex(inst, index);
+		__ip_set_put_netlink(set);
 		cb->args[IPSET_CB_ARG0] = 0;
 	}
 out:
@@ -1413,10 +1458,10 @@ out:
 	return ret < 0 ? ret : skb->len;
 }
 
-static int
-ip_set_dump(struct sock *ctnl, struct sk_buff *skb,
-	    const struct nlmsghdr *nlh,
-	    const struct nlattr * const attr[])
+static int ip_set_dump(struct net *net, struct sock *ctnl, struct sk_buff *skb,
+		       const struct nlmsghdr *nlh,
+		       const struct nlattr * const attr[],
+		       struct netlink_ext_ack *extack)
 {
 	if (unlikely(protocol_failed(attr)))
 		return -IPSET_ERR_PROTOCOL;
@@ -1483,9 +1528,8 @@ call_ad(struct sock *ctnl, struct sk_buff *skb, struct ip_set *set,
 		memcpy(&errmsg->msg, nlh, nlh->nlmsg_len);
 		cmdattr = (void *)&errmsg->msg + min_len;
 
-		nla_parse(cda, IPSET_ATTR_CMD_MAX,
-			  cmdattr, nlh->nlmsg_len - min_len,
-			  ip_set_adt_policy);
+		nla_parse(cda, IPSET_ATTR_CMD_MAX, cmdattr,
+			  nlh->nlmsg_len - min_len, ip_set_adt_policy, NULL);
 
 		errline = nla_data(cda[IPSET_ATTR_LINENO]);
 
@@ -1500,12 +1544,12 @@ call_ad(struct sock *ctnl, struct sk_buff *skb, struct ip_set *set,
 	return ret;
 }
 
-static int
-ip_set_uadd(struct sock *ctnl, struct sk_buff *skb,
-	    const struct nlmsghdr *nlh,
-	    const struct nlattr * const attr[])
+static int ip_set_uadd(struct net *net, struct sock *ctnl, struct sk_buff *skb,
+		       const struct nlmsghdr *nlh,
+		       const struct nlattr * const attr[],
+		       struct netlink_ext_ack *extack)
 {
-	struct ip_set_net *inst = ip_set_pernet(sock_net(ctnl));
+	struct ip_set_net *inst = ip_set_pernet(net);
 	struct ip_set *set;
 	struct nlattr *tb[IPSET_ATTR_ADT_MAX + 1] = {};
 	const struct nlattr *nla;
@@ -1532,7 +1576,7 @@ ip_set_uadd(struct sock *ctnl, struct sk_buff *skb,
 	if (attr[IPSET_ATTR_DATA]) {
 		if (nla_parse_nested(tb, IPSET_ATTR_ADT_MAX,
 				     attr[IPSET_ATTR_DATA],
-				     set->type->adt_policy))
+				     set->type->adt_policy, NULL))
 			return -IPSET_ERR_PROTOCOL;
 		ret = call_ad(ctnl, skb, set, tb, IPSET_ADD, flags,
 			      use_lineno);
@@ -1544,7 +1588,7 @@ ip_set_uadd(struct sock *ctnl, struct sk_buff *skb,
 			if (nla_type(nla) != IPSET_ATTR_DATA ||
 			    !flag_nested(nla) ||
 			    nla_parse_nested(tb, IPSET_ATTR_ADT_MAX, nla,
-					     set->type->adt_policy))
+					     set->type->adt_policy, NULL))
 				return -IPSET_ERR_PROTOCOL;
 			ret = call_ad(ctnl, skb, set, tb, IPSET_ADD,
 				      flags, use_lineno);
@@ -1555,12 +1599,12 @@ ip_set_uadd(struct sock *ctnl, struct sk_buff *skb,
 	return ret;
 }
 
-static int
-ip_set_udel(struct sock *ctnl, struct sk_buff *skb,
-	    const struct nlmsghdr *nlh,
-	    const struct nlattr * const attr[])
+static int ip_set_udel(struct net *net, struct sock *ctnl, struct sk_buff *skb,
+		       const struct nlmsghdr *nlh,
+		       const struct nlattr * const attr[],
+		       struct netlink_ext_ack *extack)
 {
-	struct ip_set_net *inst = ip_set_pernet(sock_net(ctnl));
+	struct ip_set_net *inst = ip_set_pernet(net);
 	struct ip_set *set;
 	struct nlattr *tb[IPSET_ATTR_ADT_MAX + 1] = {};
 	const struct nlattr *nla;
@@ -1587,7 +1631,7 @@ ip_set_udel(struct sock *ctnl, struct sk_buff *skb,
 	if (attr[IPSET_ATTR_DATA]) {
 		if (nla_parse_nested(tb, IPSET_ATTR_ADT_MAX,
 				     attr[IPSET_ATTR_DATA],
-				     set->type->adt_policy))
+				     set->type->adt_policy, NULL))
 			return -IPSET_ERR_PROTOCOL;
 		ret = call_ad(ctnl, skb, set, tb, IPSET_DEL, flags,
 			      use_lineno);
@@ -1599,7 +1643,7 @@ ip_set_udel(struct sock *ctnl, struct sk_buff *skb,
 			if (nla_type(nla) != IPSET_ATTR_DATA ||
 			    !flag_nested(nla) ||
 			    nla_parse_nested(tb, IPSET_ATTR_ADT_MAX, nla,
-					     set->type->adt_policy))
+					     set->type->adt_policy, NULL))
 				return -IPSET_ERR_PROTOCOL;
 			ret = call_ad(ctnl, skb, set, tb, IPSET_DEL,
 				      flags, use_lineno);
@@ -1610,12 +1654,12 @@ ip_set_udel(struct sock *ctnl, struct sk_buff *skb,
 	return ret;
 }
 
-static int
-ip_set_utest(struct sock *ctnl, struct sk_buff *skb,
-	     const struct nlmsghdr *nlh,
-	     const struct nlattr * const attr[])
+static int ip_set_utest(struct net *net, struct sock *ctnl, struct sk_buff *skb,
+			const struct nlmsghdr *nlh,
+			const struct nlattr * const attr[],
+			struct netlink_ext_ack *extack)
 {
-	struct ip_set_net *inst = ip_set_pernet(sock_net(ctnl));
+	struct ip_set_net *inst = ip_set_pernet(net);
 	struct ip_set *set;
 	struct nlattr *tb[IPSET_ATTR_ADT_MAX + 1] = {};
 	int ret = 0;
@@ -1631,7 +1675,7 @@ ip_set_utest(struct sock *ctnl, struct sk_buff *skb,
 		return -ENOENT;
 
 	if (nla_parse_nested(tb, IPSET_ATTR_ADT_MAX, attr[IPSET_ATTR_DATA],
-			     set->type->adt_policy))
+			     set->type->adt_policy, NULL))
 		return -IPSET_ERR_PROTOCOL;
 
 	rcu_read_lock_bh();
@@ -1646,12 +1690,12 @@ ip_set_utest(struct sock *ctnl, struct sk_buff *skb,
 
 /* Get headed data of a set */
 
-static int
-ip_set_header(struct sock *ctnl, struct sk_buff *skb,
-	      const struct nlmsghdr *nlh,
-	      const struct nlattr * const attr[])
+static int ip_set_header(struct net *net, struct sock *ctnl,
+			 struct sk_buff *skb, const struct nlmsghdr *nlh,
+			 const struct nlattr * const attr[],
+			 struct netlink_ext_ack *extack)
 {
-	struct ip_set_net *inst = ip_set_pernet(sock_net(ctnl));
+	struct ip_set_net *inst = ip_set_pernet(net);
 	const struct ip_set *set;
 	struct sk_buff *skb2;
 	struct nlmsghdr *nlh2;
@@ -1703,10 +1747,10 @@ static const struct nla_policy ip_set_type_policy[IPSET_ATTR_CMD_MAX + 1] = {
 	[IPSET_ATTR_FAMILY]	= { .type = NLA_U8 },
 };
 
-static int
-ip_set_type(struct sock *ctnl, struct sk_buff *skb,
-	    const struct nlmsghdr *nlh,
-	    const struct nlattr * const attr[])
+static int ip_set_type(struct net *net, struct sock *ctnl, struct sk_buff *skb,
+		       const struct nlmsghdr *nlh,
+		       const struct nlattr * const attr[],
+		       struct netlink_ext_ack *extack)
 {
 	struct sk_buff *skb2;
 	struct nlmsghdr *nlh2;
@@ -1762,10 +1806,10 @@ ip_set_protocol_policy[IPSET_ATTR_CMD_MAX + 1] = {
 	[IPSET_ATTR_PROTOCOL]	= { .type = NLA_U8 },
 };
 
-static int
-ip_set_protocol(struct sock *ctnl, struct sk_buff *skb,
-		const struct nlmsghdr *nlh,
-		const struct nlattr * const attr[])
+static int ip_set_protocol(struct net *net, struct sock *ctnl,
+			   struct sk_buff *skb, const struct nlmsghdr *nlh,
+			   const struct nlattr * const attr[],
+			   struct netlink_ext_ack *extack)
 {
 	struct sk_buff *skb2;
 	struct nlmsghdr *nlh2;
@@ -1903,7 +1947,7 @@ ip_set_sockfn_get(struct sock *sk, int optval, void __user *user, int *len)
 		ret = -EFAULT;
 		goto done;
 	}
-	op = (unsigned int *)data;
+	op = data;
 
 	if (*op < IP_SET_OP_VERSION) {
 		/* Check the version at the beginning of operations */
@@ -2001,7 +2045,7 @@ static struct nf_sockopt_ops so_set __read_mostly = {
 	.pf		= PF_INET,
 	.get_optmin	= SO_IP_SET,
 	.get_optmax	= SO_IP_SET + 1,
-	.get		= &ip_set_sockfn_get,
+	.get		= ip_set_sockfn_get,
 	.owner		= THIS_MODULE,
 };
 
@@ -2034,6 +2078,7 @@ ip_set_net_exit(struct net *net)
 
 	inst->is_deleted = true; /* flag for ip_set_nfnl_put */
 
+	nfnl_lock(NFNL_SUBSYS_IPSET);
 	for (i = 0; i < inst->ip_set_max; i++) {
 		set = ip_set(inst, i);
 		if (set) {
@@ -2041,6 +2086,7 @@ ip_set_net_exit(struct net *net)
 			ip_set_destroy_set(set);
 		}
 	}
+	nfnl_unlock(NFNL_SUBSYS_IPSET);
 	kfree(rcu_dereference_protected(inst->ip_set_list, 1));
 }
 
@@ -2048,43 +2094,48 @@ static struct pernet_operations ip_set_net_ops = {
 	.init	= ip_set_net_init,
 	.exit   = ip_set_net_exit,
 	.id	= &ip_set_net_id,
-	.size	= sizeof(struct ip_set_net)
+	.size	= sizeof(struct ip_set_net),
 };
 
 static int __init
 ip_set_init(void)
 {
-	int ret = nfnetlink_subsys_register(&ip_set_netlink_subsys);
+	int ret = register_pernet_subsys(&ip_set_net_ops);
 
-	if (ret != 0) {
-		pr_err("ip_set: cannot register with nfnetlink.\n");
+	if (ret) {
+		pr_err("ip_set: cannot register pernet_subsys.\n");
 		return ret;
 	}
+
+	ret = nfnetlink_subsys_register(&ip_set_netlink_subsys);
+	if (ret != 0) {
+		pr_err("ip_set: cannot register with nfnetlink.\n");
+		unregister_pernet_subsys(&ip_set_net_ops);
+		return ret;
+	}
+
 	ret = nf_register_sockopt(&so_set);
 	if (ret != 0) {
 		pr_err("SO_SET registry failed: %d\n", ret);
 		nfnetlink_subsys_unregister(&ip_set_netlink_subsys);
+		unregister_pernet_subsys(&ip_set_net_ops);
 		return ret;
 	}
-	ret = register_pernet_subsys(&ip_set_net_ops);
-	if (ret) {
-		pr_err("ip_set: cannot register pernet_subsys.\n");
-		nf_unregister_sockopt(&so_set);
-		nfnetlink_subsys_unregister(&ip_set_netlink_subsys);
-		return ret;
-	}
-	pr_info("ip_set: protocol %u\n", IPSET_PROTOCOL);
+
 	return 0;
 }
 
 static void __exit
 ip_set_fini(void)
 {
-	unregister_pernet_subsys(&ip_set_net_ops);
 	nf_unregister_sockopt(&so_set);
 	nfnetlink_subsys_unregister(&ip_set_netlink_subsys);
+
+	unregister_pernet_subsys(&ip_set_net_ops);
 	pr_debug("these are the famous last words\n");
 }
 
 module_init(ip_set_init);
 module_exit(ip_set_fini);
+
+MODULE_DESCRIPTION("ip_set: protocol " __stringify(IPSET_PROTOCOL));

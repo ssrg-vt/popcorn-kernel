@@ -25,8 +25,7 @@
 #include <linux/usb.h>
 #include <linux/slab.h>
 
-#include "../w1_int.h"
-#include "../w1.h"
+#include <linux/w1.h>
 
 /* USB Standard */
 /* USB Control request vendor type */
@@ -135,8 +134,7 @@
 #define EP_DATA_OUT			2
 #define EP_DATA_IN			3
 
-struct ds_device
-{
+struct ds_device {
 	struct list_head	ds_entry;
 
 	struct usb_device	*udev;
@@ -159,8 +157,7 @@ struct ds_device
 	struct w1_bus_master	master;
 };
 
-struct ds_status
-{
+struct ds_status {
 	u8			enable;
 	u8			speed;
 	u8			pullup_dur;
@@ -179,27 +176,8 @@ struct ds_status
 	u8			reserved2;
 };
 
-static struct usb_device_id ds_id_table [] = {
-	{ USB_DEVICE(0x04fa, 0x2490) },
-	{ },
-};
-MODULE_DEVICE_TABLE(usb, ds_id_table);
-
-static int ds_probe(struct usb_interface *, const struct usb_device_id *);
-static void ds_disconnect(struct usb_interface *);
-
-static int ds_send_control(struct ds_device *, u16, u16);
-static int ds_send_control_cmd(struct ds_device *, u16, u16);
-
 static LIST_HEAD(ds_devices);
 static DEFINE_MUTEX(ds_mutex);
-
-static struct usb_driver ds_driver = {
-	.name =		"DS9490R",
-	.probe =	ds_probe,
-	.disconnect =	ds_disconnect,
-	.id_table =	ds_id_table,
-};
 
 static int ds_send_control_cmd(struct ds_device *dev, u16 value, u16 index)
 {
@@ -256,7 +234,7 @@ static void ds_dump_status(struct ds_device *dev, unsigned char *buf, int count)
 	int i;
 
 	pr_info("0x%x: count=%d, status: ", dev->ep[EP_STATUS], count);
-	for (i=0; i<count; ++i)
+	for (i = 0; i < count; ++i)
 		pr_info("%02x ", buf[i]);
 	pr_info("\n");
 
@@ -378,7 +356,7 @@ static int ds_recv_data(struct ds_device *dev, unsigned char *buf, int size)
 		int i;
 
 		printk("%s: count=%d: ", __func__, count);
-		for (i=0; i<count; ++i)
+		for (i = 0; i < count; ++i)
 			printk("%02x ", buf[i]);
 		printk("\n");
 	}
@@ -424,7 +402,7 @@ int ds_stop_pulse(struct ds_device *dev, int limit)
 			if (err)
 				break;
 		}
-	} while(++count < limit);
+	} while (++count < limit);
 
 	return err;
 }
@@ -467,7 +445,7 @@ static int ds_wait_status(struct ds_device *dev, struct ds_status *st)
 		if (err >= 0) {
 			int i;
 			printk("0x%x: count=%d, status: ", dev->ep[EP_STATUS], err);
-			for (i=0; i<err; ++i)
+			for (i = 0; i < err; ++i)
 				printk("%02x ", dev->st_buf[i]);
 			printk("\n");
 		}
@@ -633,7 +611,7 @@ static int ds_read_byte(struct ds_device *dev, u8 *byte)
 	int err;
 	struct ds_status st;
 
-	err = ds_send_control(dev, COMM_BYTE_IO | COMM_IM , 0xff);
+	err = ds_send_control(dev, COMM_BYTE_IO | COMM_IM, 0xff);
 	if (err)
 		return err;
 
@@ -909,11 +887,10 @@ static void ds9490r_write_block(void *data, const u8 *buf, int len)
 	if (len <= 0)
 		return;
 
-	tbuf = kmalloc(len, GFP_KERNEL);
+	tbuf = kmemdup(buf, len, GFP_KERNEL);
 	if (!tbuf)
 		return;
 
-	memcpy(tbuf, buf, len);
 	ds_write_block(dev, tbuf, len);
 
 	kfree(tbuf);
@@ -1109,8 +1086,20 @@ static void ds_disconnect(struct usb_interface *intf)
 	kfree(dev);
 }
 
+static const struct usb_device_id ds_id_table[] = {
+	{ USB_DEVICE(0x04fa, 0x2490) },
+	{ },
+};
+MODULE_DEVICE_TABLE(usb, ds_id_table);
+
+static struct usb_driver ds_driver = {
+	.name =		"DS9490R",
+	.probe =	ds_probe,
+	.disconnect =	ds_disconnect,
+	.id_table =	ds_id_table,
+};
 module_usb_driver(ds_driver);
 
-MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Evgeniy Polyakov <zbr@ioremap.net>");
 MODULE_DESCRIPTION("DS2490 USB <-> W1 bus master driver (DS9490*)");
+MODULE_LICENSE("GPL");

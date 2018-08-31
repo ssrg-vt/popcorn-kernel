@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * nvec_ps2: mouse driver for a NVIDIA compliant embedded controller
  *
@@ -6,11 +7,6 @@
  * Authors:  Pierre-Hugues Husson <phhusson@free.fr>
  *           Ilya Petrov <ilya.muromec@gmail.com>
  *           Marc Dietrich <marvin24@gmx.de>
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
- *
  */
 
 #include <linux/module.h>
@@ -78,7 +74,7 @@ static int nvec_ps2_notifier(struct notifier_block *nb,
 			     unsigned long event_type, void *data)
 {
 	int i;
-	unsigned char *msg = (unsigned char *)data;
+	unsigned char *msg = data;
 
 	switch (event_type) {
 	case NVEC_PS2_EVT:
@@ -107,7 +103,7 @@ static int nvec_mouse_probe(struct platform_device *pdev)
 	struct nvec_chip *nvec = dev_get_drvdata(pdev->dev.parent);
 	struct serio *ser_dev;
 
-	ser_dev = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	ser_dev = kzalloc(sizeof(*ser_dev), GFP_KERNEL);
 	if (!ser_dev)
 		return -ENOMEM;
 

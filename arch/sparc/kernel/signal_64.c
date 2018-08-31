@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  arch/sparc64/kernel/signal.c
  *
@@ -8,9 +9,6 @@
  *  Copyright (C) 1997,1998 Jakub Jelinek   (jj@sunsite.mff.cuni.cz)
  */
 
-#ifdef CONFIG_COMPAT
-#include <linux/compat.h>	/* for compat_old_sigset_t */
-#endif
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/signal.h>
@@ -25,7 +23,7 @@
 #include <linux/bitops.h>
 #include <linux/context_tracking.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/ptrace.h>
 #include <asm/pgtable.h>
 #include <asm/fpumacro.h>
@@ -545,6 +543,8 @@ static void do_signal(struct pt_regs *regs, unsigned long orig_i0)
 void do_notify_resume(struct pt_regs *regs, unsigned long orig_i0, unsigned long thread_info_flags)
 {
 	user_exit();
+	if (thread_info_flags & _TIF_UPROBE)
+		uprobe_notify_resume(regs);
 	if (thread_info_flags & _TIF_SIGPENDING)
 		do_signal(regs, orig_i0);
 	if (thread_info_flags & _TIF_NOTIFY_RESUME) {

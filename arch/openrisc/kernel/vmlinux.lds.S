@@ -19,8 +19,8 @@
 
 /* TODO
  *		- clean up __offset & stuff
- *		- change all 8192 aligment to PAGE !!!
- *		- recheck if all aligments are really needed
+ *		- change all 8192 alignment to PAGE !!!
+ *		- recheck if all alignments are really needed
  */
 
 #  define LOAD_OFFSET  PAGE_OFFSET
@@ -28,9 +28,16 @@
 
 #include <asm/page.h>
 #include <asm/cache.h>
+#include <asm/thread_info.h>
 #include <asm-generic/vmlinux.lds.h>
 
-OUTPUT_FORMAT("elf32-or32", "elf32-or32", "elf32-or32")
+#ifdef __OR1K__
+#define __OUTPUT_FORMAT        "elf32-or1k"
+#else
+#define __OUTPUT_FORMAT        "elf32-or32"
+#endif
+
+OUTPUT_FORMAT(__OUTPUT_FORMAT, __OUTPUT_FORMAT, __OUTPUT_FORMAT)
 jiffies = jiffies_64 + 4;
 
 SECTIONS
@@ -49,9 +56,11 @@ SECTIONS
           _stext = .;
 	  TEXT_TEXT
 	  SCHED_TEXT
+	  CPUIDLE_TEXT
 	  LOCK_TEXT
 	  KPROBES_TEXT
 	  IRQENTRY_TEXT
+	  SOFTIRQENTRY_TEXT
 	  *(.fixup)
 	  *(.text.__*)
 	  _etext = .;

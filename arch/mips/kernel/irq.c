@@ -23,7 +23,7 @@
 #include <linux/ftrace.h>
 
 #include <linux/atomic.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 void *irq_stack[NR_CPUS];
 
@@ -55,6 +55,9 @@ void __init init_IRQ(void)
 
 	for (i = 0; i < NR_IRQS; i++)
 		irq_set_noprobe(i);
+
+	if (cpu_has_veic)
+		clear_c0_status(ST0_IM);
 
 	arch_init_irq();
 

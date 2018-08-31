@@ -13,6 +13,7 @@
 #include <linux/f2fs_fs.h>
 
 #include "f2fs.h"
+#include "node.h"
 
 static LIST_HEAD(f2fs_list);
 static DEFINE_SPINLOCK(f2fs_list_lock);
@@ -20,19 +21,22 @@ static unsigned int shrinker_run_no;
 
 static unsigned long __count_nat_entries(struct f2fs_sb_info *sbi)
 {
-	return NM_I(sbi)->nat_cnt - NM_I(sbi)->dirty_nat_cnt;
+	long count = NM_I(sbi)->nat_cnt - NM_I(sbi)->dirty_nat_cnt;
+
+	return count > 0 ? count : 0;
 }
 
 static unsigned long __count_free_nids(struct f2fs_sb_info *sbi)
 {
-	if (NM_I(sbi)->fcnt > NAT_ENTRY_PER_BLOCK)
-		return NM_I(sbi)->fcnt - NAT_ENTRY_PER_BLOCK;
-	return 0;
+	long count = NM_I(sbi)->nid_cnt[FREE_NID] - MAX_FREE_NIDS;
+
+	return count > 0 ? count : 0;
 }
 
 static unsigned long __count_extent_cache(struct f2fs_sb_info *sbi)
 {
-	return sbi->total_ext_tree + atomic_read(&sbi->total_ext_node);
+	return atomic_read(&sbi->total_zombie_tree) +
+				atomic_read(&sbi->total_ext_node);
 }
 
 unsigned long f2fs_shrink_count(struct shrinker *shrink,
@@ -105,11 +109,11 @@ unsigned long f2fs_shrink_scan(struct shrinker *shrink,
 
 		/* shrink clean nat cache entries */
 		if (freed < nr)
-			freed += try_to_free_nats(sbi, nr - freed);
+			freed += f2fs_try_to_free_nats(sbi, nr - freed);
 
 		/* shrink free nids cache entries */
 		if (freed < nr)
-			freed += try_to_free_nids(sbi, nr - freed);
+			freed += f2fs_try_to_free_nids(sbi, nr - freed);
 
 		spin_lock(&f2fs_list_lock);
 		p = p->next;

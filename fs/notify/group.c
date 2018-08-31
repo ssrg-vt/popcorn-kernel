@@ -22,6 +22,7 @@
 #include <linux/srcu.h>
 #include <linux/rculist.h>
 #include <linux/wait.h>
+#include <linux/memcontrol.h>
 
 #include <linux/fsnotify_backend.h>
 #include "fsnotify.h"
@@ -36,6 +37,8 @@ static void fsnotify_final_destroy_group(struct fsnotify_group *group)
 	if (group->ops->free_group_priv)
 		group->ops->free_group_priv(group);
 
+	mem_cgroup_put(group->memcg);
+
 	kfree(group);
 }
 
@@ -45,9 +48,9 @@ static void fsnotify_final_destroy_group(struct fsnotify_group *group)
  */
 void fsnotify_group_stop_queueing(struct fsnotify_group *group)
 {
-	mutex_lock(&group->notification_mutex);
+	spin_lock(&group->notification_lock);
 	group->shutdown = true;
-	mutex_unlock(&group->notification_mutex);
+	spin_unlock(&group->notification_lock);
 }
 
 /*
@@ -66,12 +69,30 @@ void fsnotify_destroy_group(struct fsnotify_group *group)
 	 */
 	fsnotify_group_stop_queueing(group);
 
-	/* clear all inode marks for this group */
-	fsnotify_clear_marks_by_group(group);
+	/* Clear all marks for this group and queue them for destruction */
+	fsnotify_clear_marks_by_group(group, FSNOTIFY_OBJ_ALL_TYPES_MASK);
 
-	synchronize_srcu(&fsnotify_mark_srcu);
+	/*
+	 * Some marks can still be pinned when waiting for response from
+	 * userspace. Wait for those now. fsnotify_prepare_user_wait() will
+	 * not succeed now so this wait is race-free.
+	 */
+	wait_event(group->notification_waitq, !atomic_read(&group->user_waits));
 
-	/* clear the notification queue of all events */
+	/*
+	 * Wait until all marks get really destroyed. We could actually destroy
+	 * them ourselves instead of waiting for worker to do it, however that
+	 * would be racy as worker can already be processing some marks before
+	 * we even entered fsnotify_destroy_group().
+	 */
+	fsnotify_wait_marks_destroyed();
+
+	/*
+	 * Since we have waited for fsnotify_mark_srcu in
+	 * fsnotify_mark_destroy_list() there can be no outstanding event
+	 * notification against this group. So clearing the notification queue
+	 * of all events is reliable now.
+	 */
 	fsnotify_flush_notify(group);
 
 	/*
@@ -89,7 +110,7 @@ void fsnotify_destroy_group(struct fsnotify_group *group)
  */
 void fsnotify_get_group(struct fsnotify_group *group)
 {
-	atomic_inc(&group->refcnt);
+	refcount_inc(&group->refcnt);
 }
 
 /*
@@ -97,7 +118,7 @@ void fsnotify_get_group(struct fsnotify_group *group)
  */
 void fsnotify_put_group(struct fsnotify_group *group)
 {
-	if (atomic_dec_and_test(&group->refcnt))
+	if (refcount_dec_and_test(&group->refcnt))
 		fsnotify_final_destroy_group(group);
 }
 
@@ -113,10 +134,11 @@ struct fsnotify_group *fsnotify_alloc_group(const struct fsnotify_ops *ops)
 		return ERR_PTR(-ENOMEM);
 
 	/* set to 0 when there a no external references to this group */
-	atomic_set(&group->refcnt, 1);
+	refcount_set(&group->refcnt, 1);
 	atomic_set(&group->num_marks, 0);
+	atomic_set(&group->user_waits, 0);
 
-	mutex_init(&group->notification_mutex);
+	spin_lock_init(&group->notification_lock);
 	INIT_LIST_HEAD(&group->notification_list);
 	init_waitqueue_head(&group->notification_waitq);
 	group->max_events = UINT_MAX;

@@ -17,7 +17,7 @@
  * Bi-directional Current/Power Monitor with I2C Interface
  * Datasheet: http://www.ti.com/product/ina230
  *
- * Copyright (C) 2012 Lothar Felten <l-felten@ti.com>
+ * Copyright (C) 2012 Lothar Felten <lothar.felten@gmail.com>
  * Thanks to Jan Volkering
  *
  * This program is free software; you can redistribute it and/or modify
@@ -34,6 +34,7 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/jiffies.h>
+#include <linux/of_device.h>
 #include <linux/of.h>
 #include <linux/delay.h>
 #include <linux/util_macros.h>
@@ -328,6 +329,15 @@ static int ina2xx_set_shunt(struct ina2xx_data *data, long val)
 	return 0;
 }
 
+static ssize_t ina2xx_show_shunt(struct device *dev,
+			      struct device_attribute *da,
+			      char *buf)
+{
+	struct ina2xx_data *data = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%li\n", data->rshunt);
+}
+
 static ssize_t ina2xx_store_shunt(struct device *dev,
 				  struct device_attribute *da,
 				  const char *buf, size_t count)
@@ -402,7 +412,7 @@ static SENSOR_DEVICE_ATTR(power1_input, S_IRUGO, ina2xx_show_value, NULL,
 
 /* shunt resistance */
 static SENSOR_DEVICE_ATTR(shunt_resistor, S_IRUGO | S_IWUSR,
-			  ina2xx_show_value, ina2xx_store_shunt,
+			  ina2xx_show_shunt, ina2xx_store_shunt,
 			  INA2XX_CALIBRATION);
 
 /* update interval (ina226 only) */
@@ -440,13 +450,19 @@ static int ina2xx_probe(struct i2c_client *client,
 	struct device *hwmon_dev;
 	u32 val;
 	int ret, group = 0;
+	enum ina2xx_ids chip;
+
+	if (client->dev.of_node)
+		chip = (enum ina2xx_ids)of_device_get_match_data(&client->dev);
+	else
+		chip = id->driver_data;
 
 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
 	/* set the device type */
-	data->config = &ina2xx_config[id->driver_data];
+	data->config = &ina2xx_config[chip];
 	mutex_init(&data->config_lock);
 
 	if (of_property_read_u32(dev->of_node, "shunt-resistor", &val) < 0) {
@@ -499,9 +515,35 @@ static const struct i2c_device_id ina2xx_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, ina2xx_id);
 
+static const struct of_device_id ina2xx_of_match[] = {
+	{
+		.compatible = "ti,ina219",
+		.data = (void *)ina219
+	},
+	{
+		.compatible = "ti,ina220",
+		.data = (void *)ina219
+	},
+	{
+		.compatible = "ti,ina226",
+		.data = (void *)ina226
+	},
+	{
+		.compatible = "ti,ina230",
+		.data = (void *)ina226
+	},
+	{
+		.compatible = "ti,ina231",
+		.data = (void *)ina226
+	},
+	{ },
+};
+MODULE_DEVICE_TABLE(of, ina2xx_of_match);
+
 static struct i2c_driver ina2xx_driver = {
 	.driver = {
 		.name	= "ina2xx",
+		.of_match_table = of_match_ptr(ina2xx_of_match),
 	},
 	.probe		= ina2xx_probe,
 	.id_table	= ina2xx_id,

@@ -105,6 +105,7 @@ enum wl12xx_role {
 	WL1271_ROLE_DEVICE,
 	WL1271_ROLE_P2P_CL,
 	WL1271_ROLE_P2P_GO,
+	WL1271_ROLE_MESH_POINT,
 
 	WL12XX_INVALID_ROLE_TYPE = 0xff
 };
@@ -300,7 +301,7 @@ struct acx_bt_wlan_coex {
 struct acx_bt_wlan_coex_param {
 	struct acx_header header;
 
-	__le32 params[CONF_SG_PARAMS_MAX];
+	__le32 params[WLCORE_CONF_SG_PARAMS_MAX];
 	u8 param_idx;
 	u8 padding[3];
 } __packed;
@@ -1128,10 +1129,8 @@ int wl12xx_acx_config_hangover(struct wl1271 *wl);
 int wlcore_acx_average_rssi(struct wl1271 *wl, struct wl12xx_vif *wlvif,
 			    s8 *avg_rssi);
 
-#ifdef CONFIG_PM
 int wl1271_acx_default_rx_filter_enable(struct wl1271 *wl, bool enable,
 					enum rx_filter_action action);
 int wl1271_acx_set_rx_filter(struct wl1271 *wl, u8 index, bool enable,
 			     struct wl12xx_rx_filter *filter);
-#endif /* CONFIG_PM */
 #endif /* __WL1271_ACX_H__ */

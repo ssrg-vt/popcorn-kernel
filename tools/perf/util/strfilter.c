@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "util.h"
-#include "string.h"
+#include "string2.h"
 #include "strfilter.h"
+
+#include <errno.h>
+#include "sane_ctype.h"
 
 /* Operators */
 static const char *OP_and	= "&";	/* Logical AND */

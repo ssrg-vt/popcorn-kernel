@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #if !defined(_TRACE_KVM_HV_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_KVM_HV_H
 
@@ -430,6 +431,28 @@ TRACE_EVENT(kvmppc_vcore_blocked,
 	TP_printk("%s runner_vcpu=%d runnable=%d tgid=%d",
 		   __entry->where ? "Exit" : "Enter",
 		   __entry->runner_vcpu, __entry->n_runnable, __entry->tgid)
+);
+
+TRACE_EVENT(kvmppc_vcore_wakeup,
+	TP_PROTO(int do_sleep, __u64 ns),
+
+	TP_ARGS(do_sleep, ns),
+
+	TP_STRUCT__entry(
+		__field(__u64,  ns)
+		__field(int,    waited)
+		__field(pid_t,  tgid)
+	),
+
+	TP_fast_assign(
+		__entry->ns     = ns;
+		__entry->waited = do_sleep;
+		__entry->tgid   = current->tgid;
+	),
+
+	TP_printk("%s time %llu ns, tgid=%d",
+		__entry->waited ? "wait" : "poll",
+		__entry->ns, __entry->tgid)
 );
 
 TRACE_EVENT(kvmppc_run_vcpu_enter,

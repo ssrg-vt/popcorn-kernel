@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * cfg80211 scan result handling
  *
  * Copyright 2008 Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
+ * Copyright 2016	Intel Deutschland GmbH
  */
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -226,7 +228,7 @@ void ___cfg80211_scan_done(struct cfg80211_registered_device *rdev,
 	ASSERT_RTNL();
 
 	if (rdev->scan_msg) {
-		nl80211_send_scan_result(rdev, rdev->scan_msg);
+		nl80211_send_scan_msg(rdev, rdev->scan_msg);
 		rdev->scan_msg = NULL;
 		return;
 	}
@@ -245,7 +247,7 @@ void ___cfg80211_scan_done(struct cfg80211_registered_device *rdev,
 	if (wdev->netdev)
 		cfg80211_sme_scan_done(wdev->netdev);
 
-	if (!request->aborted &&
+	if (!request->info.aborted &&
 	    request->flags & NL80211_SCAN_FLAG_FLUSH) {
 		/* flush entries from previous scans */
 		spin_lock_bh(&rdev->bss_lock);
@@ -253,10 +255,10 @@ void ___cfg80211_scan_done(struct cfg80211_registered_device *rdev,
 		spin_unlock_bh(&rdev->bss_lock);
 	}
 
-	msg = nl80211_build_scan_msg(rdev, wdev, request->aborted);
+	msg = nl80211_build_scan_msg(rdev, wdev, request->info.aborted);
 
 #ifdef CONFIG_CFG80211_WEXT
-	if (wdev->netdev && !request->aborted) {
+	if (wdev->netdev && !request->info.aborted) {
 		memset(&wrqu, 0, sizeof(wrqu));
 
 		wireless_send_event(wdev->netdev, SIOCGIWSCAN, &wrqu, NULL);
@@ -272,7 +274,7 @@ void ___cfg80211_scan_done(struct cfg80211_registered_device *rdev,
 	if (!send_message)
 		rdev->scan_msg = msg;
 	else
-		nl80211_send_scan_result(rdev, msg);
+		nl80211_send_scan_msg(rdev, msg);
 }
 
 void __cfg80211_scan_done(struct work_struct *wk)
@@ -287,101 +289,178 @@ void __cfg80211_scan_done(struct work_struct *wk)
 	rtnl_unlock();
 }
 
-void cfg80211_scan_done(struct cfg80211_scan_request *request, bool aborted)
+void cfg80211_scan_done(struct cfg80211_scan_request *request,
+			struct cfg80211_scan_info *info)
 {
-	trace_cfg80211_scan_done(request, aborted);
+	trace_cfg80211_scan_done(request, info);
 	WARN_ON(request != wiphy_to_rdev(request->wiphy)->scan_req);
 
-	request->aborted = aborted;
+	request->info = *info;
 	request->notified = true;
 	queue_work(cfg80211_wq, &wiphy_to_rdev(request->wiphy)->scan_done_wk);
 }
 EXPORT_SYMBOL(cfg80211_scan_done);
 
-void __cfg80211_sched_scan_results(struct work_struct *wk)
+void cfg80211_add_sched_scan_req(struct cfg80211_registered_device *rdev,
+				 struct cfg80211_sched_scan_request *req)
 {
-	struct cfg80211_registered_device *rdev;
-	struct cfg80211_sched_scan_request *request;
+	ASSERT_RTNL();
 
-	rdev = container_of(wk, struct cfg80211_registered_device,
-			    sched_scan_results_wk);
+	list_add_rcu(&req->list, &rdev->sched_scan_req_list);
+}
 
-	rtnl_lock();
+static void cfg80211_del_sched_scan_req(struct cfg80211_registered_device *rdev,
+					struct cfg80211_sched_scan_request *req)
+{
+	ASSERT_RTNL();
 
-	request = rtnl_dereference(rdev->sched_scan_req);
+	list_del_rcu(&req->list);
+	kfree_rcu(req, rcu_head);
+}
 
-	/* we don't have sched_scan_req anymore if the scan is stopping */
-	if (request) {
-		if (request->flags & NL80211_SCAN_FLAG_FLUSH) {
-			/* flush entries from previous scans */
-			spin_lock_bh(&rdev->bss_lock);
-			__cfg80211_bss_expire(rdev, request->scan_start);
-			spin_unlock_bh(&rdev->bss_lock);
-			request->scan_start = jiffies;
-		}
-		nl80211_send_sched_scan_results(rdev, request->dev);
+static struct cfg80211_sched_scan_request *
+cfg80211_find_sched_scan_req(struct cfg80211_registered_device *rdev, u64 reqid)
+{
+	struct cfg80211_sched_scan_request *pos;
+
+	WARN_ON_ONCE(!rcu_read_lock_held() && !lockdep_rtnl_is_held());
+
+	list_for_each_entry_rcu(pos, &rdev->sched_scan_req_list, list) {
+		if (pos->reqid == reqid)
+			return pos;
+	}
+	return NULL;
+}
+
+/*
+ * Determines if a scheduled scan request can be handled. When a legacy
+ * scheduled scan is running no other scheduled scan is allowed regardless
+ * whether the request is for legacy or multi-support scan. When a multi-support
+ * scheduled scan is running a request for legacy scan is not allowed. In this
+ * case a request for multi-support scan can be handled if resources are
+ * available, ie. struct wiphy::max_sched_scan_reqs limit is not yet reached.
+ */
+int cfg80211_sched_scan_req_possible(struct cfg80211_registered_device *rdev,
+				     bool want_multi)
+{
+	struct cfg80211_sched_scan_request *pos;
+	int i = 0;
+
+	list_for_each_entry(pos, &rdev->sched_scan_req_list, list) {
+		/* request id zero means legacy in progress */
+		if (!i && !pos->reqid)
+			return -EINPROGRESS;
+		i++;
 	}
 
+	if (i) {
+		/* no legacy allowed when multi request(s) are active */
+		if (!want_multi)
+			return -EINPROGRESS;
+
+		/* resource limit reached */
+		if (i == rdev->wiphy.max_sched_scan_reqs)
+			return -ENOSPC;
+	}
+	return 0;
+}
+
+void cfg80211_sched_scan_results_wk(struct work_struct *work)
+{
+	struct cfg80211_registered_device *rdev;
+	struct cfg80211_sched_scan_request *req, *tmp;
+
+	rdev = container_of(work, struct cfg80211_registered_device,
+			   sched_scan_res_wk);
+
+	rtnl_lock();
+	list_for_each_entry_safe(req, tmp, &rdev->sched_scan_req_list, list) {
+		if (req->report_results) {
+			req->report_results = false;
+			if (req->flags & NL80211_SCAN_FLAG_FLUSH) {
+				/* flush entries from previous scans */
+				spin_lock_bh(&rdev->bss_lock);
+				__cfg80211_bss_expire(rdev, req->scan_start);
+				spin_unlock_bh(&rdev->bss_lock);
+				req->scan_start = jiffies;
+			}
+			nl80211_send_sched_scan(req,
+						NL80211_CMD_SCHED_SCAN_RESULTS);
+		}
+	}
 	rtnl_unlock();
 }
 
-void cfg80211_sched_scan_results(struct wiphy *wiphy)
+void cfg80211_sched_scan_results(struct wiphy *wiphy, u64 reqid)
 {
-	trace_cfg80211_sched_scan_results(wiphy);
+	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
+	struct cfg80211_sched_scan_request *request;
+
+	trace_cfg80211_sched_scan_results(wiphy, reqid);
 	/* ignore if we're not scanning */
 
-	if (rcu_access_pointer(wiphy_to_rdev(wiphy)->sched_scan_req))
-		queue_work(cfg80211_wq,
-			   &wiphy_to_rdev(wiphy)->sched_scan_results_wk);
+	rcu_read_lock();
+	request = cfg80211_find_sched_scan_req(rdev, reqid);
+	if (request) {
+		request->report_results = true;
+		queue_work(cfg80211_wq, &rdev->sched_scan_res_wk);
+	}
+	rcu_read_unlock();
 }
 EXPORT_SYMBOL(cfg80211_sched_scan_results);
 
-void cfg80211_sched_scan_stopped_rtnl(struct wiphy *wiphy)
+void cfg80211_sched_scan_stopped_rtnl(struct wiphy *wiphy, u64 reqid)
 {
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
 
 	ASSERT_RTNL();
 
-	trace_cfg80211_sched_scan_stopped(wiphy);
+	trace_cfg80211_sched_scan_stopped(wiphy, reqid);
 
-	__cfg80211_stop_sched_scan(rdev, true);
+	__cfg80211_stop_sched_scan(rdev, reqid, true);
 }
 EXPORT_SYMBOL(cfg80211_sched_scan_stopped_rtnl);
 
-void cfg80211_sched_scan_stopped(struct wiphy *wiphy)
+void cfg80211_sched_scan_stopped(struct wiphy *wiphy, u64 reqid)
 {
 	rtnl_lock();
-	cfg80211_sched_scan_stopped_rtnl(wiphy);
+	cfg80211_sched_scan_stopped_rtnl(wiphy, reqid);
 	rtnl_unlock();
 }
 EXPORT_SYMBOL(cfg80211_sched_scan_stopped);
 
-int __cfg80211_stop_sched_scan(struct cfg80211_registered_device *rdev,
-			       bool driver_initiated)
+int cfg80211_stop_sched_scan_req(struct cfg80211_registered_device *rdev,
+				 struct cfg80211_sched_scan_request *req,
+				 bool driver_initiated)
 {
-	struct cfg80211_sched_scan_request *sched_scan_req;
-	struct net_device *dev;
-
 	ASSERT_RTNL();
 
-	if (!rdev->sched_scan_req)
-		return -ENOENT;
-
-	sched_scan_req = rtnl_dereference(rdev->sched_scan_req);
-	dev = sched_scan_req->dev;
-
 	if (!driver_initiated) {
-		int err = rdev_sched_scan_stop(rdev, dev);
+		int err = rdev_sched_scan_stop(rdev, req->dev, req->reqid);
 		if (err)
 			return err;
 	}
 
-	nl80211_send_sched_scan(rdev, dev, NL80211_CMD_SCHED_SCAN_STOPPED);
+	nl80211_send_sched_scan(req, NL80211_CMD_SCHED_SCAN_STOPPED);
 
-	RCU_INIT_POINTER(rdev->sched_scan_req, NULL);
-	kfree_rcu(sched_scan_req, rcu_head);
+	cfg80211_del_sched_scan_req(rdev, req);
 
 	return 0;
+}
+
+int __cfg80211_stop_sched_scan(struct cfg80211_registered_device *rdev,
+			       u64 reqid, bool driver_initiated)
+{
+	struct cfg80211_sched_scan_request *sched_scan_req;
+
+	ASSERT_RTNL();
+
+	sched_scan_req = cfg80211_find_sched_scan_req(rdev, reqid);
+	if (!sched_scan_req)
+		return -ENOENT;
+
+	return cfg80211_stop_sched_scan_req(rdev, sched_scan_req,
+					    driver_initiated);
 }
 
 void cfg80211_bss_age(struct cfg80211_registered_device *rdev,
@@ -401,48 +480,48 @@ void cfg80211_bss_expire(struct cfg80211_registered_device *rdev)
 	__cfg80211_bss_expire(rdev, jiffies - IEEE80211_SCAN_RESULT_EXPIRE);
 }
 
-const u8 *cfg80211_find_ie(u8 eid, const u8 *ies, int len)
+const u8 *cfg80211_find_ie_match(u8 eid, const u8 *ies, int len,
+				 const u8 *match, int match_len,
+				 int match_offset)
 {
-	while (len > 2 && ies[0] != eid) {
+	/* match_offset can't be smaller than 2, unless match_len is
+	 * zero, in which case match_offset must be zero as well.
+	 */
+	if (WARN_ON((match_len && match_offset < 2) ||
+		    (!match_len && match_offset)))
+		return NULL;
+
+	while (len >= 2 && len >= ies[1] + 2) {
+		if ((ies[0] == eid) &&
+		    (ies[1] + 2 >= match_offset + match_len) &&
+		    !memcmp(ies + match_offset, match, match_len))
+			return ies;
+
 		len -= ies[1] + 2;
 		ies += ies[1] + 2;
 	}
-	if (len < 2)
-		return NULL;
-	if (len < 2 + ies[1])
-		return NULL;
-	return ies;
-}
-EXPORT_SYMBOL(cfg80211_find_ie);
 
-const u8 *cfg80211_find_vendor_ie(unsigned int oui, u8 oui_type,
+	return NULL;
+}
+EXPORT_SYMBOL(cfg80211_find_ie_match);
+
+const u8 *cfg80211_find_vendor_ie(unsigned int oui, int oui_type,
 				  const u8 *ies, int len)
 {
-	struct ieee80211_vendor_ie *ie;
-	const u8 *pos = ies, *end = ies + len;
-	int ie_oui;
+	const u8 *ie;
+	u8 match[] = { oui >> 16, oui >> 8, oui, oui_type };
+	int match_len = (oui_type < 0) ? 3 : sizeof(match);
 
-	while (pos < end) {
-		pos = cfg80211_find_ie(WLAN_EID_VENDOR_SPECIFIC, pos,
-				       end - pos);
-		if (!pos)
-			return NULL;
+	if (WARN_ON(oui_type > 0xff))
+		return NULL;
 
-		ie = (struct ieee80211_vendor_ie *)pos;
+	ie = cfg80211_find_ie_match(WLAN_EID_VENDOR_SPECIFIC, ies, len,
+				    match, match_len, 2);
 
-		/* make sure we can access ie->len */
-		BUILD_BUG_ON(offsetof(struct ieee80211_vendor_ie, len) != 1);
+	if (ie && (ie[1] < 4))
+		return NULL;
 
-		if (ie->len < sizeof(*ie))
-			goto cont;
-
-		ie_oui = ie->oui[0] << 16 | ie->oui[1] << 8 | ie->oui[2];
-		if (ie_oui == oui && ie->oui_type == oui_type)
-			return pos;
-cont:
-		pos += 2 + ie->len;
-	}
-	return NULL;
+	return ie;
 }
 EXPORT_SYMBOL(cfg80211_find_vendor_ie);
 
@@ -582,7 +661,7 @@ static int cmp_bss(struct cfg80211_bss *a,
 }
 
 static bool cfg80211_bss_type_match(u16 capability,
-				    enum ieee80211_band band,
+				    enum nl80211_band band,
 				    enum ieee80211_bss_type bss_type)
 {
 	bool ret = true;
@@ -591,7 +670,7 @@ static bool cfg80211_bss_type_match(u16 capability,
 	if (bss_type == IEEE80211_BSS_TYPE_ANY)
 		return ret;
 
-	if (band == IEEE80211_BAND_60GHZ) {
+	if (band == NL80211_BAND_60GHZ) {
 		mask = WLAN_CAPABILITY_DMG_TYPE_MASK;
 		switch (bss_type) {
 		case IEEE80211_BSS_TYPE_ESS:
@@ -901,6 +980,11 @@ cfg80211_bss_update(struct cfg80211_registered_device *rdev,
 		found->pub.capability = tmp->pub.capability;
 		found->ts = tmp->ts;
 		found->ts_boottime = tmp->ts_boottime;
+		found->parent_tsf = tmp->parent_tsf;
+		found->pub.chains = tmp->pub.chains;
+		memcpy(found->pub.chain_signal, tmp->pub.chain_signal,
+		       IEEE80211_MAX_CHAINS);
+		ether_addr_copy(found->parent_bssid, tmp->parent_bssid);
 	} else {
 		struct cfg80211_internal_bss *new;
 		struct cfg80211_internal_bss *hidden;
@@ -1075,7 +1159,7 @@ cfg80211_inform_bss_data(struct wiphy *wiphy,
 	if (!res)
 		return NULL;
 
-	if (channel->band == IEEE80211_BAND_60GHZ) {
+	if (channel->band == NL80211_BAND_60GHZ) {
 		bss_type = res->pub.capability & WLAN_CAPABILITY_DMG_TYPE_MASK;
 		if (bss_type == WLAN_CAPABILITY_DMG_TYPE_AP ||
 		    bss_type == WLAN_CAPABILITY_DMG_TYPE_PBSS)
@@ -1143,7 +1227,7 @@ cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 	else
 		rcu_assign_pointer(tmp.pub.beacon_ies, ies);
 	rcu_assign_pointer(tmp.pub.ies, ies);
-	
+
 	memcpy(tmp.pub.bssid, mgmt->bssid, ETH_ALEN);
 	tmp.pub.channel = channel;
 	tmp.pub.scan_width = data->scan_width;
@@ -1151,6 +1235,10 @@ cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 	tmp.pub.beacon_interval = le16_to_cpu(mgmt->u.probe_resp.beacon_int);
 	tmp.pub.capability = le16_to_cpu(mgmt->u.probe_resp.capab_info);
 	tmp.ts_boottime = data->boottime_ns;
+	tmp.parent_tsf = data->parent_tsf;
+	tmp.pub.chains = data->chains;
+	memcpy(tmp.pub.chain_signal, data->chain_signal, IEEE80211_MAX_CHAINS);
+	ether_addr_copy(tmp.parent_bssid, data->parent_bssid);
 
 	signal_valid = abs(data->chan->center_freq - channel->center_freq) <=
 		wiphy->max_adj_channel_rssi_comp;
@@ -1158,7 +1246,7 @@ cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 	if (!res)
 		return NULL;
 
-	if (channel->band == IEEE80211_BAND_60GHZ) {
+	if (channel->band == NL80211_BAND_60GHZ) {
 		bss_type = res->pub.capability & WLAN_CAPABILITY_DMG_TYPE_MASK;
 		if (bss_type == WLAN_CAPABILITY_DMG_TYPE_AP ||
 		    bss_type == WLAN_CAPABILITY_DMG_TYPE_PBSS)
@@ -1254,7 +1342,7 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 	struct iw_scan_req *wreq = NULL;
 	struct cfg80211_scan_request *creq = NULL;
 	int i, err, n_channels = 0;
-	enum ieee80211_band band;
+	enum nl80211_band band;
 
 	if (!netif_running(dev))
 		return -ENETDOWN;
@@ -1298,7 +1386,7 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 
 	/* translate "Scan on frequencies" request */
 	i = 0;
-	for (band = 0; band < IEEE80211_NUM_BANDS; band++) {
+	for (band = 0; band < NUM_NL80211_BANDS; band++) {
 		int j;
 
 		if (!wiphy->bands[band])
@@ -1358,9 +1446,11 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 			creq->n_ssids = 0;
 	}
 
-	for (i = 0; i < IEEE80211_NUM_BANDS; i++)
+	for (i = 0; i < NUM_NL80211_BANDS; i++)
 		if (wiphy->bands[i])
 			creq->rates[i] = (1 << wiphy->bands[i]->n_bitrates) - 1;
+
+	eth_broadcast_addr(creq->bssid);
 
 	rdev->scan_req = creq;
 	err = rdev_scan(rdev, creq);

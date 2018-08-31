@@ -119,7 +119,7 @@ void snd_msndmidi_input_read(void *mpuv)
 {
 	unsigned long flags;
 	struct snd_msndmidi *mpu = mpuv;
-	void *pwMIDQData = mpu->dev->mappedbase + MIDQ_DATA_BUFF;
+	void __iomem *pwMIDQData = mpu->dev->mappedbase + MIDQ_DATA_BUFF;
 	u16 head, tail, size;
 
 	spin_lock_irqsave(&mpu->input_lock, flags);
@@ -142,7 +142,7 @@ void snd_msndmidi_input_read(void *mpuv)
 }
 EXPORT_SYMBOL(snd_msndmidi_input_read);
 
-static struct snd_rawmidi_ops snd_msndmidi_input = {
+static const struct snd_rawmidi_ops snd_msndmidi_input = {
 	.open =		snd_msndmidi_input_open,
 	.close =	snd_msndmidi_input_close,
 	.trigger =	snd_msndmidi_input_trigger,

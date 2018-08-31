@@ -40,9 +40,9 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/dmaengine_pcm.h>
-#include <sound/omap-pcm.h>
 
 #include "omap-mcpdm.h"
+#include "sdma-pcm.h"
 
 struct mcpdm_link_config {
 	u32 link_mask; /* channel mask for the direction */
@@ -65,6 +65,9 @@ struct omap_mcpdm {
 
 	/* McPDM needs to be restarted due to runtime reconfiguration */
 	bool restart;
+
+	/* pm state for suspend/resume handling */
+	int pm_active_count;
 
 	struct snd_dmaengine_dai_dma_data dma_data[2];
 };
@@ -173,6 +176,10 @@ static inline int omap_mcpdm_active(struct omap_mcpdm *mcpdm)
  */
 static void omap_mcpdm_open_streams(struct omap_mcpdm *mcpdm)
 {
+	u32 ctrl = omap_mcpdm_read(mcpdm, MCPDM_REG_CTRL);
+
+	omap_mcpdm_write(mcpdm, MCPDM_REG_CTRL, ctrl | MCPDM_WD_EN);
+
 	omap_mcpdm_write(mcpdm, MCPDM_REG_IRQENABLE_SET,
 			MCPDM_DN_IRQ_EMPTY | MCPDM_DN_IRQ_FULL |
 			MCPDM_UP_IRQ_EMPTY | MCPDM_UP_IRQ_FULL);
@@ -258,12 +265,9 @@ static int omap_mcpdm_dai_startup(struct snd_pcm_substream *substream,
 
 	mutex_lock(&mcpdm->mutex);
 
-	if (!dai->active) {
-		u32 ctrl = omap_mcpdm_read(mcpdm, MCPDM_REG_CTRL);
-
-		omap_mcpdm_write(mcpdm, MCPDM_REG_CTRL, ctrl | MCPDM_WD_EN);
+	if (!dai->active)
 		omap_mcpdm_open_streams(mcpdm);
-	}
+
 	mutex_unlock(&mcpdm->mutex);
 
 	return 0;
@@ -306,15 +310,19 @@ static int omap_mcpdm_dai_hw_params(struct snd_pcm_substream *substream,
 			/* up to 3 channels for capture */
 			return -EINVAL;
 		link_mask |= 1 << 4;
+		/* fall through */
 	case 4:
 		if (stream == SNDRV_PCM_STREAM_CAPTURE)
 			/* up to 3 channels for capture */
 			return -EINVAL;
 		link_mask |= 1 << 3;
+		/* fall through */
 	case 3:
 		link_mask |= 1 << 2;
+		/* fall through */
 	case 2:
 		link_mask |= 1 << 1;
+		/* fall through */
 	case 1:
 		link_mask |= 1 << 0;
 		break;
@@ -422,12 +430,55 @@ static int omap_mcpdm_remove(struct snd_soc_dai *dai)
 	return 0;
 }
 
+#ifdef CONFIG_PM_SLEEP
+static int omap_mcpdm_suspend(struct snd_soc_dai *dai)
+{
+	struct omap_mcpdm *mcpdm = snd_soc_dai_get_drvdata(dai);
+
+	if (dai->active) {
+		omap_mcpdm_stop(mcpdm);
+		omap_mcpdm_close_streams(mcpdm);
+	}
+
+	mcpdm->pm_active_count = 0;
+	while (pm_runtime_active(mcpdm->dev)) {
+		pm_runtime_put_sync(mcpdm->dev);
+		mcpdm->pm_active_count++;
+	}
+
+	return 0;
+}
+
+static int omap_mcpdm_resume(struct snd_soc_dai *dai)
+{
+	struct omap_mcpdm *mcpdm = snd_soc_dai_get_drvdata(dai);
+
+	if (mcpdm->pm_active_count) {
+		while (mcpdm->pm_active_count--)
+			pm_runtime_get_sync(mcpdm->dev);
+
+		if (dai->active) {
+			omap_mcpdm_open_streams(mcpdm);
+			omap_mcpdm_start(mcpdm);
+		}
+	}
+
+
+	return 0;
+}
+#else
+#define omap_mcpdm_suspend NULL
+#define omap_mcpdm_resume NULL
+#endif
+
 #define OMAP_MCPDM_RATES	(SNDRV_PCM_RATE_88200 | SNDRV_PCM_RATE_96000)
 #define OMAP_MCPDM_FORMATS	SNDRV_PCM_FMTBIT_S32_LE
 
 static struct snd_soc_dai_driver omap_mcpdm_dai = {
 	.probe = omap_mcpdm_probe,
 	.remove = omap_mcpdm_remove,
+	.suspend = omap_mcpdm_suspend,
+	.resume = omap_mcpdm_resume,
 	.probe_order = SND_SOC_COMP_ORDER_LATE,
 	.remove_order = SND_SOC_COMP_ORDER_EARLY,
 	.playback = {
@@ -501,7 +552,7 @@ static int asoc_mcpdm_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	return omap_pcm_platform_register(&pdev->dev);
+	return sdma_pcm_platform_register(&pdev->dev, "dn_link", "up_link");
 }
 
 static const struct of_device_id omap_mcpdm_of_match[] = {

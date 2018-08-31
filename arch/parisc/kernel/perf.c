@@ -48,7 +48,7 @@
 #include <linux/miscdevice.h>
 #include <linux/spinlock.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/perf.h>
 #include <asm/parisc-device.h>
 #include <asm/processor.h>
@@ -69,7 +69,7 @@ struct rdr_tbl_ent {
 
 static int perf_processor_interface __read_mostly = UNKNOWN_INTF;
 static int perf_enabled __read_mostly;
-static spinlock_t perf_lock;
+static DEFINE_SPINLOCK(perf_lock);
 struct parisc_device *cpu_device __read_mostly;
 
 /* RDRs to write for PCX-W */
@@ -301,7 +301,6 @@ static ssize_t perf_read(struct file *file, char __user *buf, size_t cnt, loff_t
 static ssize_t perf_write(struct file *file, const char __user *buf,
 	size_t count, loff_t *ppos)
 {
-	int err;
 	size_t image_size;
 	uint32_t image_type;
 	uint32_t interface_type;
@@ -320,8 +319,8 @@ static ssize_t perf_write(struct file *file, const char __user *buf,
 	if (count != sizeof(uint32_t))
 		return -EIO;
 
-	if ((err = copy_from_user(&image_type, buf, sizeof(uint32_t))) != 0) 
-		return err;
+	if (copy_from_user(&image_type, buf, sizeof(uint32_t)))
+		return -EFAULT;
 
 	/* Get the interface type and test type */
    	interface_type = (image_type >> 16) & 0xffff;
@@ -533,8 +532,6 @@ static int __init perf_init(void)
 
 	/* Patch the images to match the system */
     	perf_patch_images();
-
-	spin_lock_init(&perf_lock);
 
 	/* TODO: this only lets us access the first cpu.. what to do for SMP? */
 	cpu_device = per_cpu(cpu_data, 0).dev;

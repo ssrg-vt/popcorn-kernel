@@ -122,7 +122,7 @@ static inline void cmtp_add_msgpart(struct cmtp_session *session, int id, const 
 	if (skb && (skb->len > 0))
 		skb_copy_from_linear_data(skb, skb_put(nskb, skb->len), skb->len);
 
-	memcpy(skb_put(nskb, count), buf, count);
+	skb_put_data(nskb, buf, count);
 
 	session->reassembly[id] = nskb;
 
@@ -178,8 +178,7 @@ static inline int cmtp_recv_frame(struct cmtp_session *session, struct sk_buff *
 			cmtp_add_msgpart(session, id, skb->data + hdrlen, len);
 			break;
 		default:
-			if (session->reassembly[id] != NULL)
-				kfree_skb(session->reassembly[id]);
+			kfree_skb(session->reassembly[id]);
 			session->reassembly[id] = NULL;
 			break;
 		}

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_FUTEX_H
 #define _ASM_POWERPC_FUTEX_H
 
@@ -7,7 +8,7 @@
 #include <linux/uaccess.h>
 #include <asm/errno.h>
 #include <asm/synch.h>
-#include <asm/asm-compat.h>
+#include <asm/asm-405.h>
 
 #define __futex_atomic_op(insn, ret, oldval, uaddr, oparg) \
   __asm__ __volatile ( \
@@ -23,10 +24,8 @@
 "4:	li	%1,%3\n" \
 	"b	3b\n" \
 	".previous\n" \
-	".section __ex_table,\"a\"\n" \
-	".align 3\n" \
-	PPC_LONG "1b,4b,2b,4b\n" \
-	".previous" \
+	EX_TABLE(1b, 4b) \
+	EX_TABLE(2b, 4b) \
 	: "=&r" (oldval), "=&r" (ret) \
 	: "b" (uaddr), "i" (-EFAULT), "r" (oparg) \
 	: "cr0", "memory")
@@ -88,11 +87,9 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 "3:	.section .fixup,\"ax\"\n\
 4:	li	%0,%6\n\
 	b	3b\n\
-	.previous\n\
-	.section __ex_table,\"a\"\n\
-	.align 3\n\
-	" PPC_LONG "1b,4b,2b,4b\n\
-	.previous" \
+	.previous\n"
+	EX_TABLE(1b, 4b)
+	EX_TABLE(2b, 4b)
         : "+r" (ret), "=&r" (prev), "+m" (*uaddr)
         : "r" (uaddr), "r" (oldval), "r" (newval), "i" (-EFAULT)
         : "cc", "memory");

@@ -25,7 +25,7 @@
 #include <linux/workqueue.h>
 #include <linux/memstick.h>
 #include <linux/kthread.h>
-#include <linux/mfd/rtsx_usb.h>
+#include <linux/rtsx_usb.h>
 #include <linux/pm_runtime.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
@@ -712,7 +712,7 @@ poll_again:
 		if (host->eject)
 			break;
 
-		msleep(1000);
+		schedule_timeout_idle(HZ);
 	}
 
 	complete(&host->detect_ms_exit);

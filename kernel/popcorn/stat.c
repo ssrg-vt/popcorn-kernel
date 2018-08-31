@@ -1,10 +1,10 @@
 #include <linux/kernel.h>
 #include <linux/ktime.h>
 #include <linux/slab.h>
-#include <asm/uaccess.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/percpu.h>
+#include <asm/uaccess.h>
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/stat.h>

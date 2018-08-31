@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/proc/root.c
  *
@@ -6,7 +7,7 @@
  *  proc root directory handling functions
  */
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include <linux/errno.h>
 #include <linux/time.h>
@@ -14,29 +15,16 @@
 #include <linux/stat.h>
 #include <linux/init.h>
 #include <linux/sched.h>
+#include <linux/sched/stat.h>
 #include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/user_namespace.h>
 #include <linux/mount.h>
 #include <linux/pid_namespace.h>
 #include <linux/parser.h>
+#include <linux/cred.h>
 
 #include "internal.h"
-
-static int proc_test_super(struct super_block *sb, void *data)
-{
-	return sb->s_fs_info == data;
-}
-
-static int proc_set_super(struct super_block *sb, void *data)
-{
-	int err = set_anon_super(sb, NULL);
-	if (!err) {
-		struct pid_namespace *ns = (struct pid_namespace *)data;
-		sb->s_fs_info = get_pid_ns(ns);
-	}
-	return err;
-}
 
 enum {
 	Opt_gid, Opt_hidepid, Opt_err,
@@ -48,7 +36,7 @@ static const match_table_t tokens = {
 	{Opt_err, NULL},
 };
 
-static int proc_parse_options(char *options, struct pid_namespace *pid)
+int proc_parse_options(char *options, struct pid_namespace *pid)
 {
 	char *p;
 	substring_t args[MAX_OPT_ARGS];
@@ -73,7 +61,8 @@ static int proc_parse_options(char *options, struct pid_namespace *pid)
 		case Opt_hidepid:
 			if (match_int(&args[0], &option))
 				return 0;
-			if (option < 0 || option > 2) {
+			if (option < HIDEPID_OFF ||
+			    option > HIDEPID_INVISIBLE) {
 				pr_err("proc: hidepid value must be between 0 and 2.\n");
 				return 0;
 			}
@@ -100,52 +89,16 @@ int proc_remount(struct super_block *sb, int *flags, char *data)
 static struct dentry *proc_mount(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data)
 {
-	int err;
-	struct super_block *sb;
 	struct pid_namespace *ns;
-	char *options;
 
-	if (flags & MS_KERNMOUNT) {
-		ns = (struct pid_namespace *)data;
-		options = NULL;
+	if (flags & SB_KERNMOUNT) {
+		ns = data;
+		data = NULL;
 	} else {
 		ns = task_active_pid_ns(current);
-		options = data;
-
-		/* Does the mounter have privilege over the pid namespace? */
-		if (!ns_capable(ns->user_ns, CAP_SYS_ADMIN))
-			return ERR_PTR(-EPERM);
 	}
 
-	sb = sget(fs_type, proc_test_super, proc_set_super, flags, ns);
-	if (IS_ERR(sb))
-		return ERR_CAST(sb);
-
-	/*
-	 * procfs isn't actually a stacking filesystem; however, there is
-	 * too much magic going on inside it to permit stacking things on
-	 * top of it
-	 */
-	sb->s_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;
-
-	if (!proc_parse_options(options, ns)) {
-		deactivate_locked_super(sb);
-		return ERR_PTR(-EINVAL);
-	}
-
-	if (!sb->s_root) {
-		err = proc_fill_super(sb);
-		if (err) {
-			deactivate_locked_super(sb);
-			return ERR_PTR(err);
-		}
-
-		sb->s_flags |= MS_ACTIVE;
-		/* User space would break if executables appear on proc */
-		sb->s_iflags |= SB_I_NOEXEC;
-	}
-
-	return dget(sb->s_root);
+	return mount_ns(fs_type, flags, data, ns, ns->user_ns, proc_fill_super);
 }
 
 static void proc_kill_sb(struct super_block *sb)
@@ -165,27 +118,18 @@ static struct file_system_type proc_fs_type = {
 	.name		= "proc",
 	.mount		= proc_mount,
 	.kill_sb	= proc_kill_sb,
-	.fs_flags	= FS_USERNS_VISIBLE | FS_USERNS_MOUNT,
+	.fs_flags	= FS_USERNS_MOUNT,
 };
 
 void __init proc_root_init(void)
 {
-	int err;
-
-	proc_init_inodecache();
-	err = register_filesystem(&proc_fs_type);
-	if (err)
-		return;
-
+	proc_init_kmemcache();
+	set_proc_pid_nlink();
 	proc_self_init();
 	proc_thread_self_init();
 	proc_symlink("mounts", NULL, "self/mounts");
 
 	proc_net_init();
-
-#ifdef CONFIG_SYSVIPC
-	proc_mkdir("sysvipc", NULL);
-#endif
 	proc_mkdir("fs", NULL);
 	proc_mkdir("driver", NULL);
 	proc_create_mount_point("fs/nfsd"); /* somewhere for the nfsd filesystem to be mounted */
@@ -196,12 +140,14 @@ void __init proc_root_init(void)
 	proc_tty_init();
 	proc_mkdir("bus", NULL);
 	proc_sys_init();
+
+	register_filesystem(&proc_fs_type);
 }
 
-static int proc_root_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat
-)
+static int proc_root_getattr(const struct path *path, struct kstat *stat,
+			     u32 request_mask, unsigned int query_flags)
 {
-	generic_fillattr(d_inode(dentry), stat);
+	generic_fillattr(d_inode(path->dentry), stat);
 	stat->nlink = proc_root.nlink + nr_processes();
 	return 0;
 }
@@ -233,8 +179,8 @@ static int proc_root_readdir(struct file *file, struct dir_context *ctx)
  */
 static const struct file_operations proc_root_operations = {
 	.read		 = generic_read_dir,
-	.iterate	 = proc_root_readdir,
-	.llseek		= default_llseek,
+	.iterate_shared	 = proc_root_readdir,
+	.llseek		= generic_file_llseek,
 };
 
 /*
@@ -253,7 +199,7 @@ struct proc_dir_entry proc_root = {
 	.namelen	= 5, 
 	.mode		= S_IFDIR | S_IRUGO | S_IXUGO, 
 	.nlink		= 2, 
-	.count		= ATOMIC_INIT(1),
+	.refcnt		= REFCOUNT_INIT(1),
 	.proc_iops	= &proc_root_inode_operations, 
 	.proc_fops	= &proc_root_operations,
 	.parent		= &proc_root,

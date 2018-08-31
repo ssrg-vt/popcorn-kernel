@@ -28,6 +28,7 @@
 #include <crypto/internal/skcipher.h>
 #include <crypto/internal/rng.h>
 #include <crypto/akcipher.h>
+#include <crypto/kpp.h>
 
 #include "internal.h"
 
@@ -82,7 +83,7 @@ static int crypto_report_cipher(struct sk_buff *skb, struct crypto_alg *alg)
 {
 	struct crypto_report_cipher rcipher;
 
-	strncpy(rcipher.type, "cipher", sizeof(rcipher.type));
+	strlcpy(rcipher.type, "cipher", sizeof(rcipher.type));
 
 	rcipher.blocksize = alg->cra_blocksize;
 	rcipher.min_keysize = alg->cra_cipher.cia_min_keysize;
@@ -101,9 +102,24 @@ static int crypto_report_comp(struct sk_buff *skb, struct crypto_alg *alg)
 {
 	struct crypto_report_comp rcomp;
 
-	strncpy(rcomp.type, "compression", sizeof(rcomp.type));
+	strlcpy(rcomp.type, "compression", sizeof(rcomp.type));
 	if (nla_put(skb, CRYPTOCFGA_REPORT_COMPRESS,
 		    sizeof(struct crypto_report_comp), &rcomp))
+		goto nla_put_failure;
+	return 0;
+
+nla_put_failure:
+	return -EMSGSIZE;
+}
+
+static int crypto_report_acomp(struct sk_buff *skb, struct crypto_alg *alg)
+{
+	struct crypto_report_acomp racomp;
+
+	strlcpy(racomp.type, "acomp", sizeof(racomp.type));
+
+	if (nla_put(skb, CRYPTOCFGA_REPORT_ACOMP,
+		    sizeof(struct crypto_report_acomp), &racomp))
 		goto nla_put_failure;
 	return 0;
 
@@ -115,7 +131,7 @@ static int crypto_report_akcipher(struct sk_buff *skb, struct crypto_alg *alg)
 {
 	struct crypto_report_akcipher rakcipher;
 
-	strncpy(rakcipher.type, "akcipher", sizeof(rakcipher.type));
+	strlcpy(rakcipher.type, "akcipher", sizeof(rakcipher.type));
 
 	if (nla_put(skb, CRYPTOCFGA_REPORT_AKCIPHER,
 		    sizeof(struct crypto_report_akcipher), &rakcipher))
@@ -126,26 +142,41 @@ nla_put_failure:
 	return -EMSGSIZE;
 }
 
+static int crypto_report_kpp(struct sk_buff *skb, struct crypto_alg *alg)
+{
+	struct crypto_report_kpp rkpp;
+
+	strlcpy(rkpp.type, "kpp", sizeof(rkpp.type));
+
+	if (nla_put(skb, CRYPTOCFGA_REPORT_KPP,
+		    sizeof(struct crypto_report_kpp), &rkpp))
+		goto nla_put_failure;
+	return 0;
+
+nla_put_failure:
+	return -EMSGSIZE;
+}
+
 static int crypto_report_one(struct crypto_alg *alg,
 			     struct crypto_user_alg *ualg, struct sk_buff *skb)
 {
-	strncpy(ualg->cru_name, alg->cra_name, sizeof(ualg->cru_name));
-	strncpy(ualg->cru_driver_name, alg->cra_driver_name,
+	strlcpy(ualg->cru_name, alg->cra_name, sizeof(ualg->cru_name));
+	strlcpy(ualg->cru_driver_name, alg->cra_driver_name,
 		sizeof(ualg->cru_driver_name));
-	strncpy(ualg->cru_module_name, module_name(alg->cra_module),
+	strlcpy(ualg->cru_module_name, module_name(alg->cra_module),
 		sizeof(ualg->cru_module_name));
 
 	ualg->cru_type = 0;
 	ualg->cru_mask = 0;
 	ualg->cru_flags = alg->cra_flags;
-	ualg->cru_refcnt = atomic_read(&alg->cra_refcnt);
+	ualg->cru_refcnt = refcount_read(&alg->cra_refcnt);
 
 	if (nla_put_u32(skb, CRYPTOCFGA_PRIORITY_VAL, alg->cra_priority))
 		goto nla_put_failure;
 	if (alg->cra_flags & CRYPTO_ALG_LARVAL) {
 		struct crypto_report_larval rl;
 
-		strncpy(rl.type, "larval", sizeof(rl.type));
+		strlcpy(rl.type, "larval", sizeof(rl.type));
 		if (nla_put(skb, CRYPTOCFGA_REPORT_LARVAL,
 			    sizeof(struct crypto_report_larval), &rl))
 			goto nla_put_failure;
@@ -170,11 +201,19 @@ static int crypto_report_one(struct crypto_alg *alg,
 			goto nla_put_failure;
 
 		break;
+	case CRYPTO_ALG_TYPE_ACOMPRESS:
+		if (crypto_report_acomp(skb, alg))
+			goto nla_put_failure;
 
+		break;
 	case CRYPTO_ALG_TYPE_AKCIPHER:
 		if (crypto_report_akcipher(skb, alg))
 			goto nla_put_failure;
 
+		break;
+	case CRYPTO_ALG_TYPE_KPP:
+		if (crypto_report_kpp(skb, alg))
+			goto nla_put_failure;
 		break;
 	}
 
@@ -232,7 +271,7 @@ static int crypto_report(struct sk_buff *in_skb, struct nlmsghdr *in_nlh,
 		return -ENOENT;
 
 	err = -ENOMEM;
-	skb = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_ATOMIC);
+	skb = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
 	if (!skb)
 		goto drop_alg;
 
@@ -348,7 +387,7 @@ static int crypto_del_alg(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto drop_alg;
 
 	err = -EBUSY;
-	if (atomic_read(&alg->cra_refcnt) > 2)
+	if (refcount_read(&alg->cra_refcnt) > 2)
 		goto drop_alg;
 
 	err = crypto_unregister_instance((struct crypto_instance *)alg);
@@ -356,32 +395,6 @@ static int crypto_del_alg(struct sk_buff *skb, struct nlmsghdr *nlh,
 drop_alg:
 	crypto_mod_put(alg);
 	return err;
-}
-
-static struct crypto_alg *crypto_user_skcipher_alg(const char *name, u32 type,
-						   u32 mask)
-{
-	int err;
-	struct crypto_alg *alg;
-
-	type = crypto_skcipher_type(type);
-	mask = crypto_skcipher_mask(mask);
-
-	for (;;) {
-		alg = crypto_lookup_skcipher(name,  type, mask);
-		if (!IS_ERR(alg))
-			return alg;
-
-		err = PTR_ERR(alg);
-		if (err != -EAGAIN)
-			break;
-		if (fatal_signal_pending(current)) {
-			err = -EINTR;
-			break;
-		}
-	}
-
-	return ERR_PTR(err);
 }
 
 static int crypto_add_alg(struct sk_buff *skb, struct nlmsghdr *nlh,
@@ -416,16 +429,7 @@ static int crypto_add_alg(struct sk_buff *skb, struct nlmsghdr *nlh,
 	else
 		name = p->cru_name;
 
-	switch (p->cru_type & p->cru_mask & CRYPTO_ALG_TYPE_MASK) {
-	case CRYPTO_ALG_TYPE_GIVCIPHER:
-	case CRYPTO_ALG_TYPE_BLKCIPHER:
-	case CRYPTO_ALG_TYPE_ABLKCIPHER:
-		alg = crypto_user_skcipher_alg(name, p->cru_type, p->cru_mask);
-		break;
-	default:
-		alg = crypto_alg_mod_lookup(name, p->cru_type, p->cru_mask);
-	}
-
+	alg = crypto_alg_mod_lookup(name, p->cru_type, p->cru_mask);
 	if (IS_ERR(alg))
 		return PTR_ERR(alg);
 
@@ -479,7 +483,8 @@ static const struct crypto_link {
 	[CRYPTO_MSG_DELRNG	- CRYPTO_MSG_BASE] = { .doit = crypto_del_rng },
 };
 
-static int crypto_user_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+static int crypto_user_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
+			       struct netlink_ext_ack *extack)
 {
 	struct nlattr *attrs[CRYPTOCFGA_MAX+1];
 	const struct crypto_link *link;
@@ -518,7 +523,7 @@ static int crypto_user_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	}
 
 	err = nlmsg_parse(nlh, crypto_msg_min[type], attrs, CRYPTOCFGA_MAX,
-			  crypto_policy);
+			  crypto_policy, extack);
 	if (err < 0)
 		return err;
 

@@ -223,8 +223,8 @@ static int omap4_keypad_parse_dt(struct device *dev,
 	struct device_node *np = dev->of_node;
 	int err;
 
-	err = matrix_keypad_parse_of_params(dev, &keypad_data->rows,
-					    &keypad_data->cols);
+	err = matrix_keypad_parse_properties(dev, &keypad_data->rows,
+					     &keypad_data->cols);
 	if (err)
 		return err;
 
@@ -337,7 +337,8 @@ static int omap4_keypad_probe(struct platform_device *pdev)
 
 	keypad_data->row_shift = get_count_order(keypad_data->cols);
 	max_keys = keypad_data->rows << keypad_data->row_shift;
-	keypad_data->keymap = kzalloc(max_keys * sizeof(keypad_data->keymap[0]),
+	keypad_data->keymap = kcalloc(max_keys,
+				      sizeof(keypad_data->keymap[0]),
 				      GFP_KERNEL);
 	if (!keypad_data->keymap) {
 		dev_err(&pdev->dev, "Not enough memory for keymap\n");
@@ -358,7 +359,7 @@ static int omap4_keypad_probe(struct platform_device *pdev)
 				     "omap4-keypad", keypad_data);
 	if (error) {
 		dev_err(&pdev->dev, "failed to register interrupt\n");
-		goto err_free_input;
+		goto err_free_keymap;
 	}
 
 	device_init_wakeup(&pdev->dev, true);
@@ -375,7 +376,6 @@ static int omap4_keypad_probe(struct platform_device *pdev)
 
 err_pm_disable:
 	pm_runtime_disable(&pdev->dev);
-	device_init_wakeup(&pdev->dev, false);
 	free_irq(keypad_data->irq, keypad_data);
 err_free_keymap:
 	kfree(keypad_data->keymap);
@@ -400,8 +400,6 @@ static int omap4_keypad_remove(struct platform_device *pdev)
 	free_irq(keypad_data->irq, keypad_data);
 
 	pm_runtime_disable(&pdev->dev);
-
-	device_init_wakeup(&pdev->dev, false);
 
 	input_unregister_device(keypad_data->input);
 

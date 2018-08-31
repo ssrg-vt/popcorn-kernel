@@ -1907,7 +1907,7 @@ static int ac97_reset_wait(struct snd_ac97 *ac97, int timeout, int with_modem)
  * write).  The other callbacks, wait and reset, are not mandatory.
  * 
  * The clock is set to 48000.  If another clock is needed, set
- * (*rbus)->clock manually.
+ * ``(*rbus)->clock`` manually.
  *
  * The AC97 bus instance is registered as a low-level device, so you don't
  * have to release it manually.
@@ -2941,19 +2941,3 @@ int snd_ac97_tune_hardware(struct snd_ac97 *ac97,
 }
 
 EXPORT_SYMBOL(snd_ac97_tune_hardware);
-
-/*
- *  INIT part
- */
-
-static int __init alsa_ac97_init(void)
-{
-	return 0;
-}
-
-static void __exit alsa_ac97_exit(void)
-{
-}
-
-module_init(alsa_ac97_init)
-module_exit(alsa_ac97_exit)

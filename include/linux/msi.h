@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef LINUX_MSI_H
 #define LINUX_MSI_H
 
@@ -39,12 +40,21 @@ struct platform_msi_desc {
 };
 
 /**
+ * fsl_mc_msi_desc - FSL-MC device specific msi descriptor data
+ * @msi_index:		The index of the MSI descriptor
+ */
+struct fsl_mc_msi_desc {
+	u16				msi_index;
+};
+
+/**
  * struct msi_desc - Descriptor structure for MSI based interrupts
  * @list:	List head for management
  * @irq:	The base interrupt number
  * @nvec_used:	The number of vectors used
  * @dev:	Pointer to the device which uses this descriptor
  * @msg:	The last set MSI message cached for reuse
+ * @affinity:	Optional pointer to a cpu affinity mask for this descriptor
  *
  * @masked:	[PCI MSI/X] Mask bits
  * @is_msix:	[PCI MSI/X] True if MSI-X
@@ -57,6 +67,7 @@ struct platform_msi_desc {
  * @mask_pos:	[PCI MSI]   Mask register position
  * @mask_base:	[PCI MSI-X] Mask register base address
  * @platform:	[platform]  Platform device specific msi descriptor data
+ * @fsl_mc:	[fsl-mc]    FSL MC device specific msi descriptor data
  */
 struct msi_desc {
 	/* Shared device/bus type independent data */
@@ -65,6 +76,7 @@ struct msi_desc {
 	unsigned int			nvec_used;
 	struct device			*dev;
 	struct msi_msg			msg;
+	struct cpumask			*affinity;
 
 	union {
 		/* PCI MSI/X specific data */
@@ -93,6 +105,7 @@ struct msi_desc {
 		 * tree wide cleanup.
 		 */
 		struct platform_msi_desc platform;
+		struct fsl_mc_msi_desc fsl_mc;
 	};
 };
 
@@ -122,7 +135,8 @@ static inline void pci_write_msi_msg(unsigned int irq, struct msi_msg *msg)
 }
 #endif /* CONFIG_PCI_MSI */
 
-struct msi_desc *alloc_msi_entry(struct device *dev);
+struct msi_desc *alloc_msi_entry(struct device *dev, int nvec,
+				 const struct cpumask *affinity);
 void free_msi_entry(struct msi_desc *entry);
 void __pci_read_msi_msg(struct msi_desc *entry, struct msi_msg *msg);
 void __pci_write_msi_msg(struct msi_desc *entry, struct msi_msg *msg);
@@ -183,6 +197,7 @@ struct msi_controller {
 #include <asm/msi.h>
 
 struct irq_domain;
+struct irq_domain_ops;
 struct irq_chip;
 struct device_node;
 struct fwnode_handle;
@@ -195,7 +210,7 @@ struct msi_domain_info;
  * @msi_free:		Domain specific function to free a MSI interrupts
  * @msi_check:		Callback for verification of the domain/info/dev data
  * @msi_prepare:	Prepare the allocation of the interrupts in the domain
- * @msi_finish:		Optional callbacl to finalize the allocation
+ * @msi_finish:		Optional callback to finalize the allocation
  * @set_desc:		Set the msi descriptor for an interrupt
  * @handle_error:	Optional error handler if the allocation fails
  *
@@ -203,7 +218,7 @@ struct msi_domain_info;
  * msi_create_irq_domain() and related interfaces
  *
  * @msi_check, @msi_prepare, @msi_finish, @set_desc and @handle_error
- * are callbacks used by msi_irq_domain_alloc_irqs() and related
+ * are callbacks used by msi_domain_alloc_irqs() and related
  * interfaces which are based on msi_desc.
  */
 struct msi_domain_ops {
@@ -269,6 +284,13 @@ enum {
 	MSI_FLAG_PCI_MSIX		= (1 << 3),
 	/* Needs early activate, required for PCI */
 	MSI_FLAG_ACTIVATE_EARLY		= (1 << 4),
+	/*
+	 * Must reactivate when irq is started even when
+	 * MSI_FLAG_ACTIVATE_EARLY has been set.
+	 */
+	MSI_FLAG_MUST_REACTIVATE	= (1 << 5),
+	/* Is level-triggered capable, using two messages */
+	MSI_FLAG_LEVEL_CAPABLE		= (1 << 6),
 };
 
 int msi_domain_set_affinity(struct irq_data *data, const struct cpumask *mask,
@@ -288,6 +310,23 @@ struct irq_domain *platform_msi_create_irq_domain(struct fwnode_handle *fwnode,
 int platform_msi_domain_alloc_irqs(struct device *dev, unsigned int nvec,
 				   irq_write_msi_msg_t write_msi_msg);
 void platform_msi_domain_free_irqs(struct device *dev);
+
+/* When an MSI domain is used as an intermediate domain */
+int msi_domain_prepare_irqs(struct irq_domain *domain, struct device *dev,
+			    int nvec, msi_alloc_info_t *args);
+int msi_domain_populate_irqs(struct irq_domain *domain, struct device *dev,
+			     int virq, int nvec, msi_alloc_info_t *args);
+struct irq_domain *
+platform_msi_create_device_domain(struct device *dev,
+				  unsigned int nvec,
+				  irq_write_msi_msg_t write_msi_msg,
+				  const struct irq_domain_ops *ops,
+				  void *host_data);
+int platform_msi_domain_alloc(struct irq_domain *domain, unsigned int virq,
+			      unsigned int nr_irqs);
+void platform_msi_domain_free(struct irq_domain *domain, unsigned int virq,
+			      unsigned int nvec);
+void *platform_msi_get_host_data(struct irq_domain *domain);
 #endif /* CONFIG_GENERIC_MSI_IRQ_DOMAIN */
 
 #ifdef CONFIG_PCI_MSI_IRQ_DOMAIN
@@ -295,12 +334,6 @@ void pci_msi_domain_write_msg(struct irq_data *irq_data, struct msi_msg *msg);
 struct irq_domain *pci_msi_create_irq_domain(struct fwnode_handle *fwnode,
 					     struct msi_domain_info *info,
 					     struct irq_domain *parent);
-int pci_msi_domain_alloc_irqs(struct irq_domain *domain, struct pci_dev *dev,
-			      int nvec, int type);
-void pci_msi_domain_free_irqs(struct irq_domain *domain, struct pci_dev *dev);
-struct irq_domain *pci_msi_create_default_irq_domain(struct fwnode_handle *fwnode,
-		 struct msi_domain_info *info, struct irq_domain *parent);
-
 irq_hw_number_t pci_msi_domain_calc_hwirq(struct pci_dev *dev,
 					  struct msi_desc *desc);
 int pci_msi_domain_check_cap(struct irq_domain *domain,

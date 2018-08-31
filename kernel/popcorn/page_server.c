@@ -20,6 +20,9 @@
 #include <linux/delay.h>
 #include <linux/random.h>
 #include <linux/radix-tree.h>
+#include <linux/sched/debug.h>
+#include <linux/sched/task_stack.h>
+#include <linux/sched/mm.h>
 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
@@ -440,7 +443,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 
 	fh = __alloc_fault_handle(tsk, addr);
 	fh->flags |= fault_for_write(fault_flags) ? FAULT_HANDLE_WRITE : 0;
-	fh->flags |= (fault_flags & FAULT_FLAG_REMOTE) ? FAULT_HANDLE_REMOTE : 0;
+	fh->flags |= (fault_flags & PC_FAULT_FLAG_REMOTE) ? FAULT_HANDLE_REMOTE : 0;
 
 	spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 	put_task_remote(tsk);
@@ -513,13 +516,17 @@ static bool __finish_fault_handling(struct fault_handle *fh)
 static pte_t *__get_pte_at(struct mm_struct *mm, unsigned long addr, pmd_t **ppmd, spinlock_t **ptlp)
 {
 	pgd_t *pgd;
+	p4d_t *p4d;	
 	pud_t *pud;
 	pmd_t *pmd;
 
 	pgd = pgd_offset(mm, addr);
 	if (!pgd || pgd_none(*pgd)) return NULL;
 
-	pud = pud_offset(pgd, addr);
+	p4d = p4d_offset(pgd, addr);
+	if (!p4d || p4d_none(*p4d)) return NULL;
+	
+	pud = pud_offset(p4d, addr);
 	if (!pud || pud_none(*pud)) return NULL;
 
 	pmd = pmd_offset(pud, addr);
@@ -534,6 +541,7 @@ static pte_t *__get_pte_at(struct mm_struct *mm, unsigned long addr, pmd_t **ppm
 static pte_t *__get_pte_at_alloc(struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, pmd_t **ppmd, spinlock_t **ptlp)
 {
 	pgd_t *pgd;
+	p4d_t *p4d;	
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
@@ -541,13 +549,16 @@ static pte_t *__get_pte_at_alloc(struct mm_struct *mm, struct vm_area_struct *vm
 	pgd = pgd_offset(mm, addr);
 	if (!pgd) return NULL;
 
-	pud = pud_alloc(mm, pgd, addr);
+	p4d = p4d_alloc(mm, pgd, addr);
+	if (!p4d) return NULL;		
+
+	pud = pud_alloc(mm, p4d, addr);
 	if (!pud) return NULL;
 
 	pmd = pmd_alloc(mm, pud, addr);
 	if (!pmd) return NULL;
 
-	pte = pte_alloc_map(mm, vma, pmd, addr);
+	pte = pte_alloc_map(mm, pmd, addr);
 
 	*ppmd = pmd;
 	*ptlp = pte_lockptr(mm, pmd);
@@ -1225,7 +1236,7 @@ static void __make_pte_valid(struct mm_struct *mm,
 static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, remote_page_request_t *req, remote_page_response_t *res)
 {
 	unsigned long addr = req->addr;
-	unsigned fault_flags = req->fault_flags | FAULT_FLAG_REMOTE;
+	unsigned fault_flags = req->fault_flags | PC_FAULT_FLAG_REMOTE;
 	unsigned char *paddr;
 	struct page *page;
 
@@ -1301,7 +1312,7 @@ static int __handle_remotefault_at_origin(struct task_struct *tsk, struct mm_str
 {
 	int from_nid = PCN_KMSG_FROM_NID(req);
 	unsigned long addr = req->addr;
-	unsigned long fault_flags = req->fault_flags | FAULT_FLAG_REMOTE;
+	unsigned long fault_flags = req->fault_flags | PC_FAULT_FLAG_REMOTE;
 	unsigned char *paddr;
 	struct page *page;
 
@@ -1605,6 +1616,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	struct fault_handle *fh;
 	bool leader;
 	remote_page_response_t *rp;
+	struct vm_fault *vmf;
 
 	if (anon_vma_prepare(vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
@@ -1639,7 +1651,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
 		BUG_ON(!page);
 
-		if (mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg)) {
+		if (mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg, false)) {
 			BUG();
 		}
 		populated = true;
@@ -1682,8 +1694,10 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	} else {
 		spin_lock(ptl);
 		if (populated) {
-			do_set_pte(vma, addr, page, pte, fault_for_write(fault_flags), true);
-			mem_cgroup_commit_charge(page, memcg, false);
+		  // TODO: this will not work, need to populate a struct vm_fault
+		  //do_set_pte(vma, addr, page, pte, fault_for_write(fault_flags), true);
+		  alloc_set_pte(vmf, memcg, page);
+		  mem_cgroup_commit_charge(page, memcg, false, false);
 			lru_cache_add_active_or_unevictable(page, vma);
 		} else {
 			__make_pte_valid(mm, vma, addr, fault_flags, pte);

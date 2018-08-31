@@ -105,6 +105,26 @@ static int hi8435_writew(struct hi8435_priv *priv, u8 reg, u16 val)
 	return spi_write(priv->spi, priv->reg_buffer, 3);
 }
 
+static int hi8435_read_raw(struct iio_dev *idev,
+			   const struct iio_chan_spec *chan,
+			   int *val, int *val2, long mask)
+{
+	struct hi8435_priv *priv = iio_priv(idev);
+	u32 tmp;
+	int ret;
+
+	switch (mask) {
+	case IIO_CHAN_INFO_RAW:
+		ret = hi8435_readl(priv, HI8435_SO31_0_REG, &tmp);
+		if (ret < 0)
+			return ret;
+		*val = !!(tmp & BIT(chan->channel));
+		return IIO_VAL_INT;
+	default:
+		return -EINVAL;
+	}
+}
+
 static int hi8435_read_event_config(struct iio_dev *idev,
 				    const struct iio_chan_spec *chan,
 				    enum iio_event_type type,
@@ -336,6 +356,7 @@ static const struct iio_enum hi8435_sensing_mode = {
 
 static const struct iio_chan_spec_ext_info hi8435_ext_info[] = {
 	IIO_ENUM("sensing_mode", IIO_SEPARATE, &hi8435_sensing_mode),
+	IIO_ENUM_AVAILABLE("sensing_mode", &hi8435_sensing_mode),
 	{},
 };
 
@@ -344,6 +365,7 @@ static const struct iio_chan_spec_ext_info hi8435_ext_info[] = {
 	.type = IIO_VOLTAGE,				\
 	.indexed = 1,					\
 	.channel = num,					\
+	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),	\
 	.event_spec = hi8435_events,			\
 	.num_event_specs = ARRAY_SIZE(hi8435_events),	\
 	.ext_info = hi8435_ext_info,			\
@@ -386,12 +408,12 @@ static const struct iio_chan_spec hi8435_channels[] = {
 };
 
 static const struct iio_info hi8435_info = {
-	.driver_module = THIS_MODULE,
-	.read_event_config = &hi8435_read_event_config,
+	.read_raw = hi8435_read_raw,
+	.read_event_config = hi8435_read_event_config,
 	.write_event_config = hi8435_write_event_config,
-	.read_event_value = &hi8435_read_event_value,
-	.write_event_value = &hi8435_write_event_value,
-	.debugfs_reg_access = &hi8435_debugfs_reg_access,
+	.read_event_value = hi8435_read_event_value,
+	.write_event_value = hi8435_write_event_value,
+	.debugfs_reg_access = hi8435_debugfs_reg_access,
 };
 
 static void hi8435_iio_push_event(struct iio_dev *idev, unsigned int val)
@@ -411,7 +433,7 @@ static void hi8435_iio_push_event(struct iio_dev *idev, unsigned int val)
 			iio_push_event(idev,
 				       IIO_UNMOD_EVENT_CODE(IIO_VOLTAGE, i,
 						    IIO_EV_TYPE_THRESH, dir),
-				       iio_get_time_ns());
+				       iio_get_time_ns(idev));
 		}
 	}
 
@@ -453,21 +475,20 @@ static int hi8435_probe(struct spi_device *spi)
 	priv->spi = spi;
 
 	reset_gpio = devm_gpiod_get(&spi->dev, NULL, GPIOD_OUT_LOW);
-	if (!IS_ERR(reset_gpio)) {
-		/* need >=100ns low pulse to reset chip */
-		gpiod_set_raw_value_cansleep(reset_gpio, 0);
-		udelay(1);
-		gpiod_set_raw_value_cansleep(reset_gpio, 1);
-	} else {
-		/* s/w reset chip if h/w reset is not available */
+	if (IS_ERR(reset_gpio)) {
+		/* chip s/w reset if h/w reset failed */
 		hi8435_writeb(priv, HI8435_CTRL_REG, HI8435_CTRL_SRST);
 		hi8435_writeb(priv, HI8435_CTRL_REG, 0);
+	} else {
+		udelay(5);
+		gpiod_set_value(reset_gpio, 1);
 	}
 
 	spi_set_drvdata(spi, idev);
 	mutex_init(&priv->lock);
 
 	idev->dev.parent	= &spi->dev;
+	idev->dev.of_node	= spi->dev.of_node;
 	idev->name		= spi_get_device_id(spi)->name;
 	idev->modes		= INDIO_DIRECT_MODE;
 	idev->info		= &hi8435_info;

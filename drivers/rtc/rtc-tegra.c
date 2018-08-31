@@ -17,17 +17,19 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
-#include <linux/kernel.h>
+
 #include <linux/clk.h>
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/slab.h>
-#include <linux/irq.h>
-#include <linux/io.h>
 #include <linux/delay.h>
-#include <linux/rtc.h>
+#include <linux/init.h>
+#include <linux/io.h>
+#include <linux/irq.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
+#include <linux/rtc.h>
+#include <linux/slab.h>
 
 /* set to 1 = busy every eight 32kHz clocks during copy of sec+msec to AHB */
 #define TEGRA_RTC_REG_BUSY			0x004
@@ -143,10 +145,6 @@ static int tegra_rtc_set_time(struct device *dev, struct rtc_time *tm)
 	int ret;
 
 	/* convert tm to seconds. */
-	ret = rtc_valid_tm(tm);
-	if (ret)
-		return ret;
-
 	rtc_tm_to_time(tm, &sec);
 
 	dev_vdbg(dev, "time set to %lu. %d/%d/%d %d:%02u:%02u\n",
@@ -181,12 +179,6 @@ static int tegra_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 	if (sec == 0) {
 		/* alarm is disabled. */
 		alarm->enabled = 0;
-		alarm->time.tm_mon = -1;
-		alarm->time.tm_mday = -1;
-		alarm->time.tm_year = -1;
-		alarm->time.tm_hour = -1;
-		alarm->time.tm_min = -1;
-		alarm->time.tm_sec = -1;
 	} else {
 		/* alarm is enabled. */
 		alarm->enabled = 1;
@@ -299,7 +291,7 @@ static irqreturn_t tegra_rtc_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static struct rtc_class_ops tegra_rtc_ops = {
+static const struct rtc_class_ops tegra_rtc_ops = {
 	.read_time	= tegra_rtc_read_time,
 	.set_time	= tegra_rtc_set_time,
 	.read_alarm	= tegra_rtc_read_alarm,

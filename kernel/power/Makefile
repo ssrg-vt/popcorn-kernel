@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0
 
 ccflags-$(CONFIG_PM_DEBUG)	:= -DDEBUG
+
+KASAN_SANITIZE_snapshot.o	:= n
 
 obj-y				+= qos.o
 obj-$(CONFIG_PM)		+= main.o

@@ -19,6 +19,7 @@
 #include <linux/mmu_context.h>
 #include <linux/fs.h>
 #include <linux/futex.h>
+#include <linux/sched/mm.h>
 
 #include <asm/mmu_context.h>
 #include <asm/kdebug.h>
@@ -575,13 +576,17 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 {
 	struct mm_struct *mm;
 	struct file *f;
+	struct rlimit rlim_stack;
 
 	mm = mm_alloc();
 	if (!mm) {
 		return -ENOMEM;
 	}
-
-	arch_pick_mmap_layout(mm);
+	task_lock(current->group_leader);
+	rlim_stack = current->signal->rlim[RLIMIT_STACK];
+	task_unlock(current->group_leader);
+	
+	arch_pick_mmap_layout(mm, &rlim_stack);
 
 	f = filp_open(req->exe_path, O_RDONLY | O_LARGEFILE | O_EXCL, 0);
 	if (IS_ERR(f)) {

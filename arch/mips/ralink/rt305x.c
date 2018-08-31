@@ -7,13 +7,14 @@
  *
  * Copyright (C) 2008-2011 Gabor Juhos <juhosg@openwrt.org>
  * Copyright (C) 2008 Imre Kaloz <kaloz@openwrt.org>
- * Copyright (C) 2013 John Crispin <blogic@openwrt.org>
+ * Copyright (C) 2013 John Crispin <john@phrozen.org>
  */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/module.h>
+#include <linux/bug.h>
 
+#include <asm/io.h>
 #include <asm/mipsregs.h>
 #include <asm/mach-ralink/ralink_regs.h>
 #include <asm/mach-ralink/rt305x.h>
@@ -189,7 +190,10 @@ void __init ralink_clk_init(void)
 
 	ralink_clk_add("cpu", cpu_rate);
 	ralink_clk_add("sys", sys_rate);
+	ralink_clk_add("10000900.i2c", uart_rate);
+	ralink_clk_add("10000a00.i2s", uart_rate);
 	ralink_clk_add("10000b00.spi", sys_rate);
+	ralink_clk_add("10000b40.spi", sys_rate);
 	ralink_clk_add("10000100.timer", wdt_rate);
 	ralink_clk_add("10000120.watchdog", wdt_rate);
 	ralink_clk_add("10000500.uart", uart_rate);

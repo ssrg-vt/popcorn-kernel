@@ -31,7 +31,7 @@
 #include <linux/acpi.h>
 #include <acpi/processor.h>
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #define PREFIX "ACPI: "
 
@@ -375,11 +375,11 @@ int acpi_processor_tstate_has_changed(struct acpi_processor *pr)
  *	3. TSD domain
  */
 void acpi_processor_reevaluate_tstate(struct acpi_processor *pr,
-					unsigned long action)
+					bool is_dead)
 {
 	int result = 0;
 
-	if (action == CPU_DEAD) {
+	if (is_dead) {
 		/* When one CPU is offline, the T-state throttling
 		 * will be invalidated.
 		 */
@@ -534,8 +534,9 @@ static int acpi_processor_get_throttling_states(struct acpi_processor *pr)
 
 	pr->throttling.state_count = tss->package.count;
 	pr->throttling.states_tss =
-	    kmalloc(sizeof(struct acpi_processor_tx_tss) * tss->package.count,
-		    GFP_KERNEL);
+	    kmalloc_array(tss->package.count,
+			  sizeof(struct acpi_processor_tx_tss),
+			  GFP_KERNEL);
 	if (!pr->throttling.states_tss) {
 		result = -ENOMEM;
 		goto end;
@@ -909,6 +910,13 @@ static long __acpi_processor_get_throttling(void *data)
 	return pr->throttling.acpi_processor_get_throttling(pr);
 }
 
+static int call_on_cpu(int cpu, long (*fn)(void *), void *arg, bool direct)
+{
+	if (direct || (is_percpu_thread() && cpu == smp_processor_id()))
+		return fn(arg);
+	return work_on_cpu(cpu, fn, arg);
+}
+
 static int acpi_processor_get_throttling(struct acpi_processor *pr)
 {
 	if (!pr)
@@ -926,7 +934,7 @@ static int acpi_processor_get_throttling(struct acpi_processor *pr)
 	if (!cpu_online(pr->id))
 		return -ENODEV;
 
-	return work_on_cpu(pr->id, __acpi_processor_get_throttling, pr);
+	return call_on_cpu(pr->id, __acpi_processor_get_throttling, pr, false);
 }
 
 static int acpi_processor_get_fadt_info(struct acpi_processor *pr)
@@ -1074,13 +1082,6 @@ static long acpi_processor_throttling_fn(void *data)
 
 	return pr->throttling.acpi_processor_set_throttling(pr,
 			arg->target_state, arg->force);
-}
-
-static int call_on_cpu(int cpu, long (*fn)(void *), void *arg, bool direct)
-{
-	if (direct)
-		return fn(arg);
-	return work_on_cpu(cpu, fn, arg);
 }
 
 static int __acpi_processor_set_throttling(struct acpi_processor *pr,

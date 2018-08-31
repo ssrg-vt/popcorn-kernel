@@ -580,6 +580,7 @@ const char *hda_get_autocfg_input_label(struct hda_codec *codec,
 		has_multiple_pins = 1;
 	if (has_multiple_pins && type == AUTO_PIN_MIC)
 		has_multiple_pins &= check_mic_location_need(codec, cfg, input);
+	has_multiple_pins |= codec->force_pin_prefix;
 	return hda_get_input_pin_label(codec, &cfg->inputs[input],
 				       cfg->inputs[input].pin,
 				       has_multiple_pins);
@@ -792,11 +793,11 @@ EXPORT_SYMBOL_GPL(snd_hda_add_verbs);
  */
 void snd_hda_apply_verbs(struct hda_codec *codec)
 {
+	const struct hda_verb **v;
 	int i;
-	for (i = 0; i < codec->verbs.used; i++) {
-		struct hda_verb **v = snd_array_elem(&codec->verbs, i);
+
+	snd_array_for_each(&codec->verbs, i, v)
 		snd_hda_sequence_write(codec, *v);
-	}
 }
 EXPORT_SYMBOL_GPL(snd_hda_apply_verbs);
 
@@ -889,10 +890,10 @@ EXPORT_SYMBOL_GPL(snd_hda_apply_fixup);
 static bool pin_config_match(struct hda_codec *codec,
 			     const struct hda_pintbl *pins)
 {
+	const struct hda_pincfg *pin;
 	int i;
 
-	for (i = 0; i < codec->init_pins.used; i++) {
-		struct hda_pincfg *pin = snd_array_elem(&codec->init_pins, i);
+	snd_array_for_each(&codec->init_pins, i, pin) {
 		hda_nid_t nid = pin->nid;
 		u32 cfg = pin->cfg;
 		const struct hda_pintbl *t_pins;

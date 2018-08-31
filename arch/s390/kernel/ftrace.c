@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Dynamic function tracer architecture backend.
  *
@@ -17,6 +18,7 @@
 #include <trace/syscall.h>
 #include <asm/asm-offsets.h>
 #include <asm/cacheflush.h>
+#include <asm/set_memory.h>
 #include "entry.h"
 
 /*
@@ -59,7 +61,7 @@ unsigned long ftrace_plt;
 
 static inline void ftrace_generate_orig_insn(struct ftrace_insn *insn)
 {
-#ifdef CC_USING_HOTPATCH
+#if defined(CC_USING_HOTPATCH) || defined(CC_USING_NOP_MCOUNT)
 	/* brcl 0,0 */
 	insn->opc = 0xc004;
 	insn->disp = 0;
@@ -172,6 +174,8 @@ int __init ftrace_dyn_arch_init(void)
 	return 0;
 }
 
+#ifdef CONFIG_MODULES
+
 static int __init ftrace_plt_init(void)
 {
 	unsigned int *ip;
@@ -190,6 +194,8 @@ static int __init ftrace_plt_init(void)
 }
 device_initcall(ftrace_plt_init);
 
+#endif /* CONFIG_MODULES */
+
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 /*
  * Hook the return address and push it in the stack of return addresses
@@ -203,13 +209,14 @@ unsigned long prepare_ftrace_return(unsigned long parent, unsigned long ip)
 		goto out;
 	if (unlikely(atomic_read(&current->tracing_graph_pause)))
 		goto out;
-	ip = (ip & PSW_ADDR_INSN) - MCOUNT_INSN_SIZE;
+	ip -= MCOUNT_INSN_SIZE;
 	trace.func = ip;
 	trace.depth = current->curr_ret_stack + 1;
 	/* Only trace if the calling function expects to. */
 	if (!ftrace_graph_entry(&trace))
 		goto out;
-	if (ftrace_push_return_trace(parent, ip, &trace.depth, 0) == -EBUSY)
+	if (ftrace_push_return_trace(parent, ip, &trace.depth, 0,
+				     NULL) == -EBUSY)
 		goto out;
 	parent = (unsigned long) return_to_handler;
 out:

@@ -23,6 +23,7 @@
 #include <linux/init.h>
 #include <linux/export.h>
 #include <linux/slab.h>
+#include <linux/sched/signal.h>
 #include <linux/vmalloc.h>
 #include <sound/core.h>
 
@@ -117,7 +118,6 @@ int snd_seq_dump_var_event(const struct snd_seq_event *event,
 	}
 	return 0;
 }
-
 EXPORT_SYMBOL(snd_seq_dump_var_event);
 
 
@@ -168,7 +168,6 @@ int snd_seq_expand_var_event(const struct snd_seq_event *event, int count, char 
 				     &buf);
 	return err < 0 ? err : newlen;
 }
-
 EXPORT_SYMBOL(snd_seq_expand_var_event);
 
 /*
@@ -227,7 +226,7 @@ static int snd_seq_cell_alloc(struct snd_seq_pool *pool,
 	struct snd_seq_event_cell *cell;
 	unsigned long flags;
 	int err = -EAGAIN;
-	wait_queue_t wait;
+	wait_queue_entry_t wait;
 
 	if (pool == NULL)
 		return -EINVAL;
@@ -390,7 +389,8 @@ int snd_seq_pool_init(struct snd_seq_pool *pool)
 	if (snd_BUG_ON(!pool))
 		return -EINVAL;
 
-	cellptr = vmalloc(sizeof(struct snd_seq_event_cell) * pool->size);
+	cellptr = vmalloc(array_size(sizeof(struct snd_seq_event_cell),
+				     pool->size));
 	if (!cellptr)
 		return -ENOMEM;
 
@@ -503,18 +503,6 @@ int snd_seq_pool_delete(struct snd_seq_pool **ppool)
 	kfree(pool);
 	return 0;
 }
-
-/* initialize sequencer memory */
-int __init snd_sequencer_memory_init(void)
-{
-	return 0;
-}
-
-/* release sequencer memory */
-void __exit snd_sequencer_memory_done(void)
-{
-}
-
 
 /* exported to seq_clientmgr.c */
 void snd_seq_info_pool(struct snd_info_buffer *buffer,

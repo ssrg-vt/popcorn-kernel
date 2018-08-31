@@ -15,7 +15,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/cma.h>
-
+#include <linux/mmzone.h>
 #include <popcorn/bundle.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/remote_meminfo.h>
@@ -51,13 +51,13 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 	si_swapinfo(&i);
 	committed = percpu_counter_read_positive(&vm_committed_as);
 
-	cached = global_page_state(NR_FILE_PAGES) -
+	cached = global_zone_page_state(NR_FILE_PAGES) -
 			total_swapcache_pages() - i.bufferram;
 	if (cached < 0)
 		cached = 0;
 
 	for (lru = LRU_BASE; lru < NR_LRU_LISTS; lru++)
-		pages[lru] = global_page_state(NR_LRU_BASE + lru);
+		pages[lru] = global_zone_page_state(NR_LRU_BASE + lru);
 
 	for_each_zone(zone)
 		wmark_low += zone->watermark[WMARK_LOW];
@@ -84,8 +84,8 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 	 * Part of the reclaimable slab consists of items that are in use,
 	 * and cannot be freed. Cap this estimate at the low watermark.
 	 */
-	available += global_page_state(NR_SLAB_RECLAIMABLE) -
-		     min(global_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low);
+	available += global_zone_page_state(NR_SLAB_RECLAIMABLE) -
+		     min(global_zone_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low);
 
 	if (available < 0)
 		available = 0;
@@ -104,7 +104,7 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 	res->Active_file = K(pages[LRU_ACTIVE_FILE]);
 	res->Inactive_file = K(pages[LRU_INACTIVE_FILE]);
 	res->Unevictable = K(pages[LRU_UNEVICTABLE]);
-	res->Mlocked = K(global_page_state(NR_MLOCK));
+	res->Mlocked = K(global_zone_page_state(NR_MLOCK));
 #ifdef CONFIG_HIGHMEM
 	res->HighTotal = K(i.totalhigh);
 	res->HighFree = K(i.freehigh);
@@ -116,23 +116,23 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 #endif
 	res->SwapTotal = K(i.totalswap);
 	res->SwapFree = K(i.freeswap);
-	res->Dirty = K(global_page_state(NR_FILE_DIRTY));
-	res->Writeback = K(global_page_state(NR_WRITEBACK));
-	res->AnonPages = K(global_page_state(NR_ANON_PAGES));
-	res->Mapped = K(global_page_state(NR_FILE_MAPPED));
+	res->Dirty = K(global_zone_page_state(NR_FILE_DIRTY));
+	res->Writeback = K(global_zone_page_state(NR_WRITEBACK));
+	res->AnonPages = K(global_zone_page_state(NR_ANON_MAPPED));
+	res->Mapped = K(global_zone_page_state(NR_FILE_MAPPED));
 	res->Shmem = K(i.sharedram);
-	res->Slab = K(global_page_state(NR_SLAB_RECLAIMABLE) +
-				global_page_state(NR_SLAB_UNRECLAIMABLE));
-	res->SReclaimable = K(global_page_state(NR_SLAB_RECLAIMABLE));
-	res->SUnreclaim = K(global_page_state(NR_SLAB_UNRECLAIMABLE));
-	res->KernelStack = global_page_state(NR_KERNEL_STACK) * THREAD_SIZE / 1024;
-	res->PageTables = K(global_page_state(NR_PAGETABLE));
+	res->Slab = K(global_zone_page_state(NR_SLAB_RECLAIMABLE) +
+				global_zone_page_state(NR_SLAB_UNRECLAIMABLE));
+	res->SReclaimable = K(global_zone_page_state(NR_SLAB_RECLAIMABLE));
+	res->SUnreclaim = K(global_zone_page_state(NR_SLAB_UNRECLAIMABLE));
+	res->KernelStack = global_zone_page_state(NR_KERNEL_STACK_KB) * THREAD_SIZE / 1024;
+	res->PageTables = K(global_zone_page_state(NR_PAGETABLE));
 #ifdef CONFIG_QUICKLIST
 	res->Quicklists = K(quicklist_total_size());
 #endif
-	res->NFS_Unstable = K(global_page_state(NR_UNSTABLE_NFS));
-	res->Bounce = K(global_page_state(NR_BOUNCE));
-	res->WritebackTmp = K(global_page_state(NR_WRITEBACK_TEMP));
+	res->NFS_Unstable = K(global_zone_page_state(NR_UNSTABLE_NFS));
+	res->Bounce = K(global_zone_page_state(NR_BOUNCE));
+	res->WritebackTmp = K(global_zone_page_state(NR_WRITEBACK_TEMP));
 	res->CommitLimit = K(vm_commit_limit());
 	res->Committed_AS = K(committed);
 	res->VmallocTotal = (unsigned long)VMALLOC_TOTAL >> 10;
@@ -142,12 +142,12 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 	res->HardwareCorrupted = atomic_long_read(&num_poisoned_pages) << (PAGE_SHIFT - 10);
 #endif
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	res->AnonHugePages = K(global_page_state(NR_ANON_TRANSPARENT_HUGEPAGES) *
+	res->AnonHugePages = K(global_zone_page_state(NR_ANON_TRANSPARENT_HUGEPAGES) *
 		   HPAGE_PMD_NR);
 #endif
 #ifdef CONFIG_CMA
 	res->CmaTotal = K(totalcma_pages);
-	res->CmaFree = K(global_page_state(NR_FREE_CMA_PAGES));
+	res->CmaFree = K(global_zone_page_state(NR_FREE_CMA_PAGES));
 #endif
 
 	return 0;

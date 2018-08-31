@@ -26,12 +26,11 @@
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
 #include <linux/mmc/sd.h>
-#include <linux/mmc/sdio.h>
 #include <linux/mmc/card.h>
 #include <linux/scatterlist.h>
 #include <linux/pm_runtime.h>
 
-#include <linux/mfd/rtsx_usb.h>
+#include <linux/rtsx_usb.h>
 #include <asm/unaligned.h>
 
 #if defined(CONFIG_LEDS_CLASS) || (defined(CONFIG_LEDS_CLASS_MODULE) && \
@@ -324,7 +323,7 @@ static void sd_send_cmd_get_rsp(struct rtsx_usb_sdmmc *host,
 	case MMC_RSP_R1:
 		rsp_type = SD_RSP_TYPE_R1;
 		break;
-	case MMC_RSP_R1 & ~MMC_RSP_CRC:
+	case MMC_RSP_R1_NO_CRC:
 		rsp_type = SD_RSP_TYPE_R1 | SD_NO_CHECK_CRC7;
 		break;
 	case MMC_RSP_R1B:
@@ -343,7 +342,7 @@ static void sd_send_cmd_get_rsp(struct rtsx_usb_sdmmc *host,
 	}
 
 	if (rsp_type == SD_RSP_TYPE_R1b)
-		timeout = 3000;
+		timeout = cmd->busy_timeout ? cmd->busy_timeout : 3000;
 
 	if (cmd->opcode == SD_SWITCH_VOLTAGE) {
 		err = rtsx_usb_write_register(ucr, SD_BUS_STAT,
@@ -682,7 +681,7 @@ static int sd_tuning_rx_cmd(struct rtsx_usb_sdmmc *host,
 		u8 opcode, u8 sample_point)
 {
 	int err;
-	struct mmc_command cmd = {0};
+	struct mmc_command cmd = {};
 
 	err = sd_change_phase(host, sample_point, 0);
 	if (err)
@@ -839,17 +838,6 @@ static void sdmmc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		goto finish_detect_card;
 	}
 
-	/*
-	 * Reject SDIO CMDs to speed up card identification
-	 * since unsupported
-	 */
-	if (cmd->opcode == SD_IO_SEND_OP_COND ||
-	    cmd->opcode == SD_IO_RW_DIRECT ||
-	    cmd->opcode == SD_IO_RW_EXTENDED) {
-		cmd->error = -EINVAL;
-		goto finish;
-	}
-
 	mutex_lock(&ucr->dev_mutex);
 
 	mutex_lock(&host->host_mutex);
@@ -909,7 +897,7 @@ static int sd_set_bus_width(struct rtsx_usb_sdmmc *host,
 		unsigned char bus_width)
 {
 	int err = 0;
-	u8 width[] = {
+	static const u8 width[] = {
 		[MMC_BUS_WIDTH_1] = SD_BUS_WIDTH_1BIT,
 		[MMC_BUS_WIDTH_4] = SD_BUS_WIDTH_4BIT,
 		[MMC_BUS_WIDTH_8] = SD_BUS_WIDTH_8BIT,
@@ -1332,8 +1320,9 @@ static void rtsx_usb_init_host(struct rtsx_usb_sdmmc *host)
 	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED |
 		MMC_CAP_MMC_HIGHSPEED | MMC_CAP_BUS_WIDTH_TEST |
 		MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 | MMC_CAP_UHS_SDR50 |
-		MMC_CAP_NEEDS_POLL;
-	mmc->caps2 = MMC_CAP2_NO_PRESCAN_POWERUP | MMC_CAP2_FULL_PWR_CYCLE;
+		MMC_CAP_NEEDS_POLL | MMC_CAP_ERASE;
+	mmc->caps2 = MMC_CAP2_NO_PRESCAN_POWERUP | MMC_CAP2_FULL_PWR_CYCLE |
+		MMC_CAP2_NO_SDIO;
 
 	mmc->max_current_330 = 400;
 	mmc->max_current_180 = 800;
@@ -1374,6 +1363,8 @@ static int rtsx_usb_sdmmc_drv_probe(struct platform_device *pdev)
 
 	mutex_init(&host->host_mutex);
 	rtsx_usb_init_host(host);
+	pm_runtime_use_autosuspend(&pdev->dev);
+	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
 	pm_runtime_enable(&pdev->dev);
 
 #ifdef RTSX_USB_USE_LEDS_CLASS
@@ -1428,6 +1419,7 @@ static int rtsx_usb_sdmmc_drv_remove(struct platform_device *pdev)
 
 	mmc_free_host(mmc);
 	pm_runtime_disable(&pdev->dev);
+	pm_runtime_dont_use_autosuspend(&pdev->dev);
 	platform_set_drvdata(pdev, NULL);
 
 	dev_dbg(&(pdev->dev),

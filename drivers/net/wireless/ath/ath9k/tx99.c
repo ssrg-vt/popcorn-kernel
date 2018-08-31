@@ -132,7 +132,6 @@ static int ath9k_tx99_init(struct ath_softc *sc)
 	ath9k_ps_wakeup(sc);
 
 	ath9k_hw_disable_interrupts(ah);
-	atomic_set(&ah->intr_ref_cnt, -1);
 	ath_drain_all_txq(sc);
 	ath_stoprecv(sc);
 
@@ -154,7 +153,7 @@ static int ath9k_tx99_init(struct ath_softc *sc)
 		sc->tx99_power,
 		sc->tx99_power / 2);
 
-	/* We leave the harware awake as it will be chugging on */
+	/* We leave the hardware awake as it will be chugging on */
 
 	return 0;
 }
@@ -276,13 +275,13 @@ static const struct file_operations fops_tx99_power = {
 
 void ath9k_tx99_init_debug(struct ath_softc *sc)
 {
-	if (!AR_SREV_9300_20_OR_LATER(sc->sc_ah))
+	if (!AR_SREV_9280_20_OR_LATER(sc->sc_ah))
 		return;
 
-	debugfs_create_file("tx99", S_IRUSR | S_IWUSR,
+	debugfs_create_file("tx99", 0600,
 			    sc->debug.debugfs_phy, sc,
 			    &fops_tx99);
-	debugfs_create_file("tx99_power", S_IRUSR | S_IWUSR,
+	debugfs_create_file("tx99_power", 0600,
 			    sc->debug.debugfs_phy, sc,
 			    &fops_tx99_power);
 }
