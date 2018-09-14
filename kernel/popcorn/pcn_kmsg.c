@@ -46,10 +46,19 @@ EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 static atomic_t __nr_outstanding_requests[PCN_KMSG_TYPE_MAX] = { ATOMIC_INIT(0) };
 #endif
 
+#define ITERS 1000002
+#define ITER 1000000
 void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 {
 	pcn_kmsg_cbftn ftn;
+	static int cnt = 0;
+	//ktime_t dt1, t1e, t1s;
+	ktime_t dt2, t2e, t2s;
+	ktime_t dt3, t3e, t3s;
+	ktime_t dt4, t4e, t4s;
+	static long long t2 = 0, t3 = 0, t4 = 0;
 
+	t2s = ktime_get();
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
@@ -60,15 +69,43 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 	}
 #endif
 	account_pcn_message_recv(msg);
+	t2e = ktime_get();
+	t2 += ktime_to_ns(ktime_sub(t2e, t2s));
 
+	t3s = ktime_get();
 	ftn = pcn_kmsg_cbftns[msg->header.type];
+	t3e = ktime_get();
+	t3 += ktime_to_ns(ktime_sub(t3e, t3s));
 
+	t4s = ktime_get();
 	if (ftn != NULL) {
 		ftn(msg);
 	} else {
 		printk(KERN_ERR"No callback registered for %d\n", msg->header.type);
 		pcn_kmsg_done(msg);
 	}
+	t4e = ktime_get();
+	t4 += ktime_to_ns(ktime_sub(t4e, t4s));
+	if (cnt <= 2 ) {
+		t2 = 0; t3 = 0; t4 = 0;
+	}
+
+	if (cnt >= ITERS) {
+		//printk("%s(): %d\n", __func__, cnt);
+		printk("%s(): t2 %lld ns %lld us!!!\n",
+						__func__,
+						t2 / ITER,
+						t2 / ITER / 1000);
+		printk("%s(): t3 %lld ns %lld us!!!\n",
+						__func__,
+						t3 / ITER,
+						t3 / ITER / 1000);
+		printk("%s(): t4 %lld ns %lld us!!!\n",
+						__func__,
+						t4 / ITER,
+						t4 / ITER / 1000);
+	}
+
 }
 EXPORT_SYMBOL(pcn_kmsg_process);
 

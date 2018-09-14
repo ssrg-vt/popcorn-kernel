@@ -41,6 +41,21 @@
 #define MICROSECOND 1000000
 atomic64_t mm_cnt;
 atomic64_t mm_time_ns;
+
+atomic64_t ptef_ns;
+atomic64_t ptef_cnt; // local origin & it has to bring from remote
+atomic64_t clr_ns;
+atomic64_t clr_cnt; // local_origin & !pg_mine will do __claim_remote_page
+atomic64_t fetch_page_ns;
+atomic64_t fetch_page_cnt; // local_origin & !pg_mine & !send_revoke_msg & is_page
+
+atomic64_t inv_ns;
+atomic64_t inv_cnt; // __claim_local_page & origin
+
+atomic64_t invh_ns;
+atomic64_t invh_cnt; // process_page_invalidate_request
+atomic64_t fph_ns;
+atomic64_t fph_cnt; // full rr fault time
 #endif
 
 inline void page_server_start_mm_fault(unsigned long address)
@@ -85,16 +100,78 @@ void pf_time_stat(struct seq_file *seq, void *v)
 {
 #ifdef CONFIG_POPCORN_STAT
 	if (seq) {
-		seq_printf(seq, "%2s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
 					"mm", (atomic64_read(&mm_time_ns) / 1000) / MICROSECOND,
 							(atomic64_read(&mm_time_ns) / 1000)  % MICROSECOND,
 					"cnt", atomic64_read(&mm_cnt),
 					"per", atomic64_read(&mm_cnt) ?
-					 atomic64_read(&mm_time_ns)/atomic64_read(&mm_cnt)/1000 : 0,
-					"us", "(unit)");
+					 atomic64_read(&mm_time_ns)/atomic64_read(&mm_cnt)/1000 :
+														 0, "us", "(unit)");
+
+		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+					"ptef", (atomic64_read(&ptef_ns) / 1000) / MICROSECOND,
+							(atomic64_read(&ptef_ns) / 1000)  % MICROSECOND,
+					"cnt", atomic64_read(&ptef_cnt),
+					"per", atomic64_read(&ptef_cnt) ?
+					 atomic64_read(&ptef_ns)/atomic64_read(&ptef_cnt)/1000 :
+														 0, "us", "(unit)");
+
+		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+					"clr", (atomic64_read(&clr_ns) / 1000) / MICROSECOND,
+							(atomic64_read(&clr_ns) / 1000)  % MICROSECOND,
+					"cnt", atomic64_read(&clr_cnt),
+					"per", atomic64_read(&clr_cnt) ?
+					 atomic64_read(&clr_ns)/atomic64_read(&clr_cnt)/1000 :
+														 0, "us", "(unit)");
+
+		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+			"fp", (atomic64_read(&fetch_page_ns) / 1000) / MICROSECOND,
+					(atomic64_read(&fetch_page_ns) / 1000)  % MICROSECOND,
+			"cnt", atomic64_read(&fetch_page_cnt),
+			"per", atomic64_read(&fetch_page_cnt) ?
+			 atomic64_read(&fetch_page_ns)/atomic64_read(&fetch_page_cnt)/1000 :
+															0, "us", "(unit)");
+
+		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+			"inv", (atomic64_read(&inv_ns) / 1000) / MICROSECOND,
+					(atomic64_read(&inv_ns) / 1000)  % MICROSECOND,
+			"cnt", atomic64_read(&inv_cnt),
+			"per", atomic64_read(&inv_cnt) ?
+			 atomic64_read(&inv_ns)/atomic64_read(&inv_cnt)/1000 :
+												0, "us", "(unit)");
+
+		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+			"inv", (atomic64_read(&invh_ns) / 1000) / MICROSECOND,
+					(atomic64_read(&invh_ns) / 1000)  % MICROSECOND,
+			"cnt", atomic64_read(&invh_cnt),
+			"per", atomic64_read(&invh_cnt) ?
+			 atomic64_read(&invh_ns)/atomic64_read(&invh_cnt)/1000 :
+												0, "us", "(unit)");
+
+		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+			"fp", (atomic64_read(&fph_ns) / 1000) / MICROSECOND,
+					(atomic64_read(&fph_ns) / 1000)  % MICROSECOND,
+			"cnt", atomic64_read(&fph_cnt),
+			"per", atomic64_read(&fph_cnt) ?
+			 atomic64_read(&fph_ns)/atomic64_read(&fph_cnt)/1000 :
+															0, "us", "(unit)");
 	} else {
         atomic64_set(&mm_cnt, 0);
         atomic64_set(&mm_time_ns, 0);
+
+		atomic64_set(&ptef_cnt, 0);
+		atomic64_set(&ptef_ns, 0);
+		atomic64_set(&clr_cnt, 0);
+		atomic64_set(&clr_ns, 0);
+		atomic64_set(&fetch_page_ns, 0);
+		atomic64_set(&fetch_page_cnt, 0);
+		atomic64_set(&fph_ns, 0);
+		atomic64_set(&fph_cnt, 0);
+
+		atomic64_set(&inv_cnt, 0);
+		atomic64_set(&inv_ns, 0);
+		atomic64_set(&invh_cnt, 0);
+		atomic64_set(&invh_ns, 0);
 	}
 #endif
 }
@@ -887,6 +964,9 @@ out:
 
 static void process_page_invalidate_request(struct work_struct *work)
 {
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	ktime_t dt, invh_end, invh_start = ktime_get();
+#endif
 	START_KMSG_WORK(page_invalidate_request_t, req, work);
 	page_invalidate_response_t *res;
 	struct task_struct *tsk;
@@ -913,6 +993,13 @@ static void process_page_invalidate_request(struct work_struct *work)
 			PCN_KMSG_FROM_NID(req), res, sizeof(*res));
 
 	put_task_struct(tsk);
+
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	invh_end = ktime_get();
+	dt = ktime_sub(invh_end, invh_start);
+	atomic64_add(ktime_to_ns(dt), &invh_ns);
+	atomic64_inc(&invh_cnt);
+#endif
 
 out_free:
 	END_KMSG_WORK(req);
@@ -1091,7 +1178,7 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 	return rp;
 }
 
-static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
+static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page, int log)
 {
 	int peers;
 	unsigned int random = prandom_u32();
@@ -1105,6 +1192,13 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 	unsigned long offset;
 	struct page *pip = __get_page_info_page(mm, addr, &offset);
 	unsigned long *pi = (unsigned long *)kmap(pip) + offset;
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	int revoke = 0;
+	int page_trans = 0;
+	ktime_t fetch_page_start;
+	if (!my_nid && log)
+		fetch_page_start = ktime_get();
+#endif
 	BUG_ON(!pip);
 
 	peers = bitmap_weight(pi, MAX_POPCORN_NODES);
@@ -1134,6 +1228,9 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 			if (fault_for_write(fault_flags)) {
 				clear_bit(nid, pi);
 				__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+				revoke = 1;
+#endif
 			}
 		}
 		if (--peers == 0) break;
@@ -1155,12 +1252,22 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 		kunmap(page);
 		flush_dcache_page(page);
 		__SetPageUptodate(page);
+		page_trans = 1;
 	}
 	pcn_kmsg_done(rp);
 
 	if (rh) pcn_kmsg_unpin_rdma_buffer(rh);
 	__put_task_remote(rc);
 	kunmap(pip);
+
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	if (!my_nid && log && !revoke && page_trans) {
+		ktime_t dt, fetch_page_end = ktime_get();
+		dt = ktime_sub(fetch_page_end, fetch_page_start);
+		atomic64_add(ktime_to_ns(dt), &fetch_page_ns);
+		atomic64_inc(&fetch_page_cnt);
+	}
+#endif
 	return 0;
 }
 
@@ -1172,6 +1279,10 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int 
 	struct page *pip = __get_page_info_page(mm, addr, &offset);
 	unsigned long *pi;
 	int peers;
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	int is_inv = 0;
+	ktime_t dt, inv_end, inv_start;
+#endif
 
 	if (!pip) return; /* skip claiming non-distributed page */
 	pi = (unsigned long *)kmap(pip) + offset;
@@ -1186,6 +1297,10 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int 
 
 	if (test_bit(my_nid, pi) && except_nid != my_nid) peers--;
 
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	inv_start = ktime_get();
+#endif
+
 	if (peers > 0) {
 		int nid;
 		struct remote_context *rc = get_task_remote(tsk);
@@ -1197,11 +1312,24 @@ static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int 
 
 			clear_bit(nid, pi);
 			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+			is_inv = 1;
+#endif
 		}
 		put_task_remote(tsk);
 
 		wait_at_station(ws);
 	}
+
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	if (is_inv) {
+		inv_end = ktime_get();
+		dt = ktime_sub(inv_end, inv_start);
+		atomic64_add(ktime_to_ns(dt), &inv_ns);
+		atomic64_inc(&inv_cnt);
+	}
+#endif
+
 	kunmap(pip);
 }
 
@@ -1394,7 +1522,7 @@ again:
 			grant = true;
 		} else {
 			if (!page_is_mine(mm, addr)) {
-				__claim_remote_page(tsk, mm, vma, addr, fault_flags, page);
+				__claim_remote_page(tsk, mm, vma, addr, fault_flags, page, 0);
 			} else {
 				if (fault_for_write(fault_flags))
 					__claim_local_page(tsk, addr, my_nid);
@@ -1458,6 +1586,10 @@ static void process_remote_page_request(struct work_struct *work)
 	int res_size;
 	enum pcn_kmsg_type res_type;
 	int down_read_retry = 0;
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	int rr = 0;
+	ktime_t fph_start = ktime_get();
+#endif
 
 	if (TRANSFER_PAGE_WITH_RDMA) {
 		res = pcn_kmsg_get(sizeof(remote_page_response_short_t));
@@ -1498,6 +1630,9 @@ again:
 
 	if (tsk->at_remote) {
 		res->result = __handle_remotefault_at_remote(tsk, mm, vma, req, res);
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+		rr = 1;
+#endif
 	} else {
 		res->result = __handle_remotefault_at_origin(tsk, mm, vma, req, res);
 	}
@@ -1517,6 +1652,9 @@ out:
 	if (res->result != 0 || TRANSFER_PAGE_WITH_RDMA) {
 		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT;
 		res_size = sizeof(remote_page_response_short_t);
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+		rr = 0;
+#endif
 	} else {
 		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
 		res_size = sizeof(remote_page_response_t);
@@ -1537,6 +1675,14 @@ out:
 	pcn_kmsg_post(res_type, from_nid, res, res_size);
 
 	END_KMSG_WORK(req);
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	if (rr) {
+		ktime_t dt, fph_end = ktime_get();
+		dt = ktime_sub(fph_end, fph_start);
+		atomic64_add(ktime_to_ns(dt), &fph_ns);
+		atomic64_inc(&fph_cnt);
+	}
+#endif
 }
 
 
@@ -1593,7 +1739,7 @@ retry:
 
 	if (leader && !page_is_mine(mm, addr)) {
 		struct page *page = get_normal_page(vma, addr, pte);
-		__claim_remote_page(current, mm, vma, addr, fault_flags, page);
+		__claim_remote_page(current, mm, vma, addr, fault_flags, page, 0);
 
 		spin_lock(ptl);
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
@@ -1776,6 +1922,10 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 
 	struct fault_handle *fh;
 	bool leader;
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	bool remote_fault = false;
+	ktime_t ptef_start = ktime_get();
+#endif
 
 	ptl = pte_lockptr(mm, pmd);
 	spin_lock(ptl);
@@ -1839,9 +1989,19 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		}
 	} else {
 		struct page *page = vm_normal_page(vma, addr, pte_val);
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+		ktime_t dt, clr_end, clr_start = ktime_get();
+#endif
 		BUG_ON(!page);
 
-		__claim_remote_page(current, mm, vma, addr, fault_flags, page);
+		__claim_remote_page(current, mm, vma, addr, fault_flags, page, 1);
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+		clr_end = ktime_get();
+		dt = ktime_sub(clr_end, clr_start);
+		atomic64_add(ktime_to_ns(dt), &clr_ns);
+		atomic64_inc(&clr_cnt);
+		remote_fault = true;
+#endif
 
 		spin_lock(ptl);
 		__make_pte_valid(mm, vma, addr, fault_flags, pte);
@@ -1853,6 +2013,15 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 
 out_wakeup:
 	__finish_fault_handling(fh);
+
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	if (remote_fault) {
+		ktime_t dt, ptef_end = ktime_get();
+		dt = ktime_sub(ptef_end, ptef_start);
+		atomic64_add(ktime_to_ns(dt), &ptef_ns);
+		atomic64_inc(&ptef_cnt);
+	}
+#endif
 
 	return 0;
 }
@@ -1983,6 +2152,20 @@ int __init page_server_init(void)
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
     atomic64_set(&mm_cnt, 0);
     atomic64_set(&mm_time_ns, 0);
+
+    atomic64_set(&ptef_cnt, 0);
+    atomic64_set(&ptef_ns, 0);
+    atomic64_set(&clr_cnt, 0);
+    atomic64_set(&clr_ns, 0);
+    atomic64_set(&fetch_page_ns, 0);
+    atomic64_set(&fetch_page_cnt, 0);
+	atomic64_set(&fph_ns, 0);
+    atomic64_set(&fph_cnt, 0);
+
+	atomic64_set(&inv_cnt, 0);
+    atomic64_set(&inv_ns, 0);
+	atomic64_set(&invh_cnt, 0);
+    atomic64_set(&invh_ns, 0);
 #endif
 
 	return 0;
