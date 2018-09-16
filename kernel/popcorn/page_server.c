@@ -43,9 +43,9 @@ atomic64_t mm_cnt;
 atomic64_t mm_time_ns;
 
 atomic64_t ptef_ns;
-atomic64_t ptef_cnt; // local origin & it has to bring from remote
+atomic64_t ptef_cnt; /* local origin & it has to bring from remote */
 atomic64_t clr_ns;
-atomic64_t clr_cnt; // local_origin & !pg_mine will do __claim_remote_page
+atomic64_t clr_cnt; /* local_origin & !pg_mine will do __claim_remote_page(1) */
 atomic64_t fetch_page_ns;
 atomic64_t fetch_page_cnt; // local_origin & !pg_mine & !send_revoke_msg & is_page
 
@@ -100,61 +100,54 @@ void pf_time_stat(struct seq_file *seq, void *v)
 {
 #ifdef CONFIG_POPCORN_STAT
 	if (seq) {
-		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 					"mm", (atomic64_read(&mm_time_ns) / 1000) / MICROSECOND,
 							(atomic64_read(&mm_time_ns) / 1000)  % MICROSECOND,
 					"cnt", atomic64_read(&mm_cnt),
 					"per", atomic64_read(&mm_cnt) ?
-					 atomic64_read(&mm_time_ns)/atomic64_read(&mm_cnt)/1000 :
-														 0, "us", "(unit)");
+					 atomic64_read(&mm_time_ns)/atomic64_read(&mm_cnt)/1000 : 0);
 
-		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 					"ptef", (atomic64_read(&ptef_ns) / 1000) / MICROSECOND,
 							(atomic64_read(&ptef_ns) / 1000)  % MICROSECOND,
 					"cnt", atomic64_read(&ptef_cnt),
 					"per", atomic64_read(&ptef_cnt) ?
-					 atomic64_read(&ptef_ns)/atomic64_read(&ptef_cnt)/1000 :
-														 0, "us", "(unit)");
+					 atomic64_read(&ptef_ns)/atomic64_read(&ptef_cnt)/1000 : 0);
 
-		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 					"clr", (atomic64_read(&clr_ns) / 1000) / MICROSECOND,
 							(atomic64_read(&clr_ns) / 1000)  % MICROSECOND,
 					"cnt", atomic64_read(&clr_cnt),
 					"per", atomic64_read(&clr_cnt) ?
-					 atomic64_read(&clr_ns)/atomic64_read(&clr_cnt)/1000 :
-														 0, "us", "(unit)");
+					 atomic64_read(&clr_ns)/atomic64_read(&clr_cnt)/1000 : 0);
 
-		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 			"fp", (atomic64_read(&fetch_page_ns) / 1000) / MICROSECOND,
 					(atomic64_read(&fetch_page_ns) / 1000)  % MICROSECOND,
 			"cnt", atomic64_read(&fetch_page_cnt),
 			"per", atomic64_read(&fetch_page_cnt) ?
-			 atomic64_read(&fetch_page_ns)/atomic64_read(&fetch_page_cnt)/1000 :
-															0, "us", "(unit)");
+			 atomic64_read(&fetch_page_ns)/atomic64_read(&fetch_page_cnt)/1000 : 0);
 
-		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
+		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
+			"fph", (atomic64_read(&fph_ns) / 1000) / MICROSECOND,
+					(atomic64_read(&fph_ns) / 1000)  % MICROSECOND,
+			"cnt", atomic64_read(&fph_cnt),
+			"per", atomic64_read(&fph_cnt) ?
+			 atomic64_read(&fph_ns)/atomic64_read(&fph_cnt)/1000 : 0);
+
+		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 			"inv", (atomic64_read(&inv_ns) / 1000) / MICROSECOND,
 					(atomic64_read(&inv_ns) / 1000)  % MICROSECOND,
 			"cnt", atomic64_read(&inv_cnt),
 			"per", atomic64_read(&inv_cnt) ?
-			 atomic64_read(&inv_ns)/atomic64_read(&inv_cnt)/1000 :
-												0, "us", "(unit)");
+			 atomic64_read(&inv_ns)/atomic64_read(&inv_cnt)/1000 : 0);
 
-		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
-			"inv", (atomic64_read(&invh_ns) / 1000) / MICROSECOND,
+		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
+			"invh", (atomic64_read(&invh_ns) / 1000) / MICROSECOND,
 					(atomic64_read(&invh_ns) / 1000)  % MICROSECOND,
 			"cnt", atomic64_read(&invh_cnt),
 			"per", atomic64_read(&invh_cnt) ?
-			 atomic64_read(&invh_ns)/atomic64_read(&invh_cnt)/1000 :
-												0, "us", "(unit)");
-
-		seq_printf(seq, "%4s  %10ld.%06ld   %3s %-10ld   %3s %-6ld  %2s%-6s\n",
-			"fp", (atomic64_read(&fph_ns) / 1000) / MICROSECOND,
-					(atomic64_read(&fph_ns) / 1000)  % MICROSECOND,
-			"cnt", atomic64_read(&fph_cnt),
-			"per", atomic64_read(&fph_cnt) ?
-			 atomic64_read(&fph_ns)/atomic64_read(&fph_cnt)/1000 :
-															0, "us", "(unit)");
+			 atomic64_read(&invh_ns)/atomic64_read(&invh_cnt)/1000 : 0);
 	} else {
         atomic64_set(&mm_cnt, 0);
         atomic64_set(&mm_time_ns, 0);
@@ -1252,7 +1245,9 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 		kunmap(page);
 		flush_dcache_page(page);
 		__SetPageUptodate(page);
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
 		page_trans = 1;
+#endif
 	}
 	pcn_kmsg_done(rp);
 
@@ -1631,7 +1626,8 @@ again:
 	if (tsk->at_remote) {
 		res->result = __handle_remotefault_at_remote(tsk, mm, vma, req, res);
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
-		rr = 1;
+		if (res->result == 0)
+			rr = 1;
 #endif
 	} else {
 		res->result = __handle_remotefault_at_origin(tsk, mm, vma, req, res);
@@ -1652,9 +1648,6 @@ out:
 	if (res->result != 0 || TRANSFER_PAGE_WITH_RDMA) {
 		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE_SHORT;
 		res_size = sizeof(remote_page_response_short_t);
-#ifdef CONFIG_POPCORN_STAT_PGFAULTS
-		rr = 0;
-#endif
 	} else {
 		res_type = PCN_KMSG_TYPE_REMOTE_PAGE_RESPONSE;
 		res_size = sizeof(remote_page_response_t);

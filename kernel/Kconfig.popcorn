@@ -66,6 +66,10 @@ config POPCORN_STAT_PGFAULTS
 	depends on POPCORN_STAT
 	default n
 
+config POPCORN_STAT_MSG
+	bool "MSG handling"
+	depends on POPCORN_STAT
+	default n
 
 comment "Popcorn is not currently supported on this architecture"
 	depends on !ARCH_SUPPORTS_POPCORN

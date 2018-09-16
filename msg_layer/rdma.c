@@ -326,17 +326,91 @@ void rdma_kmsg_put(struct pcn_kmsg_message *msg)
 	__put_send_work(sw);
 }
 
+#ifdef CONFIG_POPCORN_STAT_MSG
+atomic64_t recv_cq_cnt = ATOMIC64_INIT(0);
+atomic64_t rdma_write_cnt = ATOMIC64_INIT(0);
+
+atomic64_t t_cq_sig_handle = ATOMIC64_INIT(0);
+atomic64_t t_cq_handle_end = ATOMIC64_INIT(0);
+// t_cq_sig_handle = signal to __process_recv // poll_cq
+// t_cq_handle_end = after __process to ib_req_notify_cq end
+
+atomic64_t t_rdma_w_prepare = ATOMIC64_INIT(0);
+atomic64_t t_rdma_w_post = ATOMIC64_INIT(0);
+atomic64_t t_rdma_w_wait = ATOMIC64_INIT(0);
+atomic64_t t_rdma_w_clean = ATOMIC64_INIT(0);
+#define MICROSECOND 1000000
+#define NANOSECOND 1000000000
+#endif
 void rdma_kmsg_stat(struct seq_file *seq, void *v)
 {
 	if (seq) {
 		seq_printf(seq, POPCORN_STAT_FMT,
 				(unsigned long long)ring_buffer_usage(&send_buffer),
-#ifdef CONFIG_POPCORN_STAT
+#ifdef CONFIG_POPCORN_STAT_MSG
 				(unsigned long long)send_buffer.peak_usage,
 #else
 				0ULL,
 #endif
 				"Send buffer usage");
+
+#ifdef CONFIG_POPCORN_STAT_MSG
+		/* rdma_write */
+		seq_printf(seq, "%4s  %7ld.%09ld (s)  %3s %-10ld   %3s %-6ld (ns)\n",
+            "wp", (atomic64_read(&t_rdma_w_prepare)) / NANOSECOND,
+                    (atomic64_read(&t_rdma_w_prepare)) % NANOSECOND,
+            "cnt", atomic64_read(&rdma_write_cnt),
+            "per", atomic64_read(&rdma_write_cnt) ?
+		 atomic64_read(&t_rdma_w_prepare)/atomic64_read(&rdma_write_cnt) : 0);
+		seq_printf(seq, "%4s  %7ld.%09ld (s)  %3s %-10ld   %3s %-6ld (ns)\n",
+            "wpo", (atomic64_read(&t_rdma_w_post)) / NANOSECOND,
+                    (atomic64_read(&t_rdma_w_post)) % NANOSECOND,
+            "cnt", atomic64_read(&rdma_write_cnt),
+            "per", atomic64_read(&rdma_write_cnt) ?
+		 atomic64_read(&t_rdma_w_post)/atomic64_read(&rdma_write_cnt) : 0);
+		seq_printf(seq, "%4s  %7ld.%09ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
+            "wwai", (atomic64_read(&t_rdma_w_wait)) / NANOSECOND,
+                    (atomic64_read(&t_rdma_w_wait)) % NANOSECOND,
+//            "wwai", (atomic64_read(&t_rdma_w_wait) / 1000) / MICROSECOND,
+//                    (atomic64_read(&t_rdma_w_wait) / 1000) % MICROSECOND,
+            "cnt", atomic64_read(&rdma_write_cnt),
+            "per", atomic64_read(&rdma_write_cnt) ?
+	 atomic64_read(&t_rdma_w_wait)/atomic64_read(&rdma_write_cnt) / 1000 : 0);
+		seq_printf(seq, "%4s  %7ld.%09ld (s)  %3s %-10ld   %3s %-6ld (ns)\n",
+            "wcln", (atomic64_read(&t_rdma_w_clean)) / NANOSECOND,
+                    (atomic64_read(&t_rdma_w_clean)) % NANOSECOND,
+            "cnt", atomic64_read(&rdma_write_cnt),
+            "per", atomic64_read(&rdma_write_cnt) ?
+		 atomic64_read(&t_rdma_w_clean)/atomic64_read(&rdma_write_cnt) : 0);
+
+		/* cq */
+		seq_printf(seq, "%4s  %7ld.%09ld (s)  %3s %-10ld   %3s %-6ld (ns)\n",
+            "cqsi", (atomic64_read(&t_cq_sig_handle)) / NANOSECOND,
+                    (atomic64_read(&t_cq_sig_handle)) % NANOSECOND,
+            "cnt", atomic64_read(&recv_cq_cnt),
+            "per", atomic64_read(&recv_cq_cnt) ?
+		atomic64_read(&t_cq_sig_handle)/atomic64_read(&recv_cq_cnt) : 0);
+		seq_printf(seq, "%4s  %7ld.%09ld (s)  %3s %-10ld   %3s %-6ld (ns)\n",
+            "cqed", (atomic64_read(&t_cq_handle_end)) / NANOSECOND,
+                    (atomic64_read(&t_cq_handle_end)) % NANOSECOND,
+            "cnt", atomic64_read(&recv_cq_cnt),
+            "per", atomic64_read(&recv_cq_cnt) ?
+		 atomic64_read(&t_cq_handle_end)/atomic64_read(&recv_cq_cnt) : 0);
+#endif
+	} else {
+#ifdef CONFIG_POPCORN_STAT_MSG
+		atomic64_set(&recv_cq_cnt, 0);
+		atomic64_set(&rdma_write_cnt, 0);
+
+		atomic64_set(&t_cq_sig_handle, 0);
+		atomic64_set(&t_cq_handle_end, 0);
+
+		atomic64_set(&t_rdma_w_prepare, 0);
+		atomic64_set(&t_rdma_w_post, 0);
+		atomic64_set(&t_rdma_w_wait, 0);
+		atomic64_set(&t_rdma_w_clean, 0);
+
+#endif
 	}
 }
 
@@ -448,11 +522,16 @@ void rdma_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
 int rdma_kmsg_write(int to_nid, dma_addr_t rdma_addr, void *addr, size_t size, u32 rdma_key)
 {
 	DECLARE_COMPLETION_ONSTACK(done);
-	struct rdma_work *rw;
 	struct ib_send_wr *bad_wr = NULL;
-
+	struct rdma_work *rw;
 	dma_addr_t dma_addr;
 	int ret;
+#ifdef CONFIG_POPCORN_STAT_MSG
+	ktime_t t5e, t5s;
+	ktime_t t4e, t4s;
+	ktime_t t3e, t3s;
+	ktime_t t2e, t2s = ktime_get();
+#endif
 
 	dma_addr = ib_dma_map_single(rdma_mr->device, addr, size, DMA_TO_DEVICE);
 	ret = ib_dma_mapping_error(rdma_mr->device, dma_addr);
@@ -462,21 +541,46 @@ int rdma_kmsg_write(int to_nid, dma_addr_t rdma_addr, void *addr, size_t size, u
 	BUG_ON(!rw);
 
 	rw->done = &done;
+#ifdef CONFIG_POPCORN_STAT_MSG
+	t2e = ktime_get();
+	atomic64_add(ktime_to_ns(ktime_sub(t2e, t2s)), &t_rdma_w_prepare);
 
+	t3s = ktime_get();
+#endif
 	ret = ib_post_send(rdma_handles[to_nid]->qp, &rw->wr.wr, &bad_wr);
 	if (ret || bad_wr) {
 		printk("Cannot post rdma write, %d, %p\n", ret, bad_wr);
 		if (ret == 0) ret = -EINVAL;
 		goto out;
 	}
+#ifdef CONFIG_POPCORN_STAT_MSG
+	t3e = ktime_get();
+	atomic64_add(ktime_to_ns(ktime_sub(t3e, t3s)), &t_rdma_w_post);
+
+	t4s = ktime_get();
+#endif
 	/* XXX polling??? */
 	if (!try_wait_for_completion(&done)) {
 		wait_for_completion(&done);
 	}
+#ifdef CONFIG_POPCORN_STAT_MSG
+	t4e = ktime_get();
+	atomic64_add(ktime_to_ns(ktime_sub(t4e, t4s)), &t_rdma_w_wait);
+
+	atomic64_inc(&rdma_write_cnt);
+#endif
 
 out:
+#ifdef CONFIG_POPCORN_STAT_MSG
+	t5s = ktime_get();
+#endif
 	ib_dma_unmap_single(rdma_mr->device, dma_addr, size, DMA_TO_DEVICE);
 	__put_rdma_work(rw);
+#ifdef CONFIG_POPCORN_STAT_MSG
+	t5e = ktime_get();
+	atomic64_add(ktime_to_ns(ktime_sub(t5e, t5s)), &t_rdma_w_clean);
+#endif
+
 	return ret;
 }
 
@@ -577,8 +681,13 @@ void cq_comp_handler(struct ib_cq *cq, void *context)
 {
 	int ret;
 	struct ib_wc wc;
+#ifdef CONFIG_POPCORN_STAT_MSG
+	ktime_t t3e, t3s;
+	ktime_t t2e, t2s;
+#endif
 
 retry:
+	t2s = ktime_get();
 	while ((ret = ib_poll_cq(cq, 1, &wc)) > 0) {
 		if (wc.opcode < 0 || wc.status) {
 			__process_faulty_work(&wc);
@@ -589,7 +698,14 @@ retry:
 			__process_sent(&wc);
 			break;
 		case IB_WC_RECV:
+#ifdef CONFIG_POPCORN_STAT_MSG
+			t2e = ktime_get();
+			atomic64_add(ktime_to_ns(ktime_sub(t2e, t2s)), &t_cq_sig_handle);
+#endif
 			__process_recv(&wc);
+#ifdef CONFIG_POPCORN_STAT_MSG
+			t3s = ktime_get();
+#endif
 			break;
 		case IB_WC_RDMA_WRITE:
 		case IB_WC_RDMA_READ:
@@ -604,6 +720,13 @@ retry:
 		}
 	}
 	ret = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS);
+#ifdef CONFIG_POPCORN_STAT_MSG
+	if (wc.opcode == IB_WC_RECV) {
+		t3e = ktime_get();
+		atomic64_add(ktime_to_ns(ktime_sub(t3e, t3s)), &t_cq_handle_end);
+		atomic64_inc(&recv_cq_cnt);
+	}
+#endif
 	if (ret > 0) goto retry;
 }
 
