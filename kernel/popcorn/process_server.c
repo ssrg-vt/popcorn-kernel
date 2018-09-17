@@ -34,6 +34,7 @@
 #include "page_server.h"
 #include "wait_station.h"
 #include "util.h"
+#include "remote_socket.h"
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
@@ -764,8 +765,8 @@ static int remote_worker_main(void *data)
 
 	set_user_nice(current, 0);
 
-    /* restore fds */
-    __restore_fdtable(req->fds);
+	/* restore fds */
+	__restore_fdtable(req->fds);
 
 	/* meaningless for now */
 	/*
@@ -944,6 +945,18 @@ static void __process_remote_works(void)
 			process_back_migration((back_migration_request_t *)req);
 			run = false;
 			break;
+		case PCN_KMSG_TYPE_REMOTE_SOCKET:
+			process_socket_create(req);	// socket()
+			break;
+		case PCN_KMSG_TYPE_REMOTE_SETSOCKOPT:
+			process_setsockopt(req);	// setsockopt()
+			break;
+		case PCN_KMSG_TYPE_REMOTE_BIND:
+			process_bind(req);	// bind()
+			break;
+		case PCN_KMSG_TYPE_REMOTE_LISTEN:
+			process_listen(req);	// listen()
+			break;
 		default:
 			if (WARN_ON("Received unsupported remote work")) {
 				printk("  type: %d\n", req->header.type);
@@ -998,9 +1011,9 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 
 	req->personality = tsk->personality;
 
-    /* copy opened file descriptor table */
-    ret = clone_fdtable(req->fds, tsk->files);
-    BUG_ON(ret != 0);
+	/* copy opened file descriptor table */
+	ret = clone_fdtable(req->fds, tsk->files);
+	BUG_ON(ret != 0);
 
 	/* Signals and handlers
 	req->remote_blocked = tsk->blocked;

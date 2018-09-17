@@ -9,6 +9,7 @@
 #define __POPCORN_PCN_KMSG_H__
 
 #include <linux/types.h>
+#include <linux/seq_file.h>
 
 /* Enumerate message types */
 enum pcn_kmsg_type {
@@ -58,6 +59,13 @@ enum pcn_kmsg_type {
 
 	/* Schedule server */
 	PCN_KMSG_TYPE_SCHED_PERIODIC,		/* XXX sched requires help!! */
+
+	/* Popcorn socket redirection */
+	PCN_KMSG_TYPE_REMOTE_SOCKET,
+	PCN_KMSG_TYPE_REMOTE_SETSOCKOPT,
+	PCN_KMSG_TYPE_REMOTE_SOCKET_RESPONSE,
+	PCN_KMSG_TYPE_REMOTE_BIND,
+	PCN_KMSG_TYPE_REMOTE_LISTEN,
 
 	PCN_KMSG_TYPE_MAX
 };

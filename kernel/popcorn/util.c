@@ -92,44 +92,45 @@ out_unlock:
 
 int clone_fdtable(fd_t *fds, struct files_struct *files)
 {
-    struct fdtable *fdtab;
+	struct fdtable *fdtab;
 	struct file *filep;
 	struct path file_path;
-    int i = 0;
-    char buf[128];
+	int i = 0;
+	char buf[128];
 	char *cwd;
-    unsigned int fd_cnt = 0;
+	unsigned int fd_cnt = 0;
 
-    spin_lock(&files->file_lock);
+	spin_lock(&files->file_lock);
 
-    fdtab = files_fdtable(files);
-    BUG_ON(fdtab == NULL);
+	fdtab = files_fdtable(files);
+	BUG_ON(fdtab == NULL);
 
-    // # of fd table entries
-    fd_cnt = fdtab->max_fds;
-    pr_info("fdtable max_fds: %d, fds size total: %ld. fds size: %ld\n", 
-            fd_cnt, sizeof(*fds)*fd_cnt, sizeof(*fds));
+	// # of fd table entries
+	fd_cnt = fdtab->max_fds;
+	pr_info("fdtable max_fds: %d, fds size total: %ld. fds size: %ld\n",
+		fd_cnt, sizeof(*fds)*fd_cnt, sizeof(*fds));
 
-    // zero out the fds
-    memset(fds, 0, sizeof(*fds)*64);
+	// zero out the fds
+	memset(fds, 0, sizeof(*fds)*64);
 #if 1
 	while (i < 64) {
-	    filep = fdtab->fd[i];
-        //fds[i].idx = -1;
-        //memset(&fds[i], 0, sizeof(*fds));
-        if (filep) {
-		    file_path = filep->f_path;
-		    cwd = d_path(&file_path, buf, 128);	// convert a dentry into an ASCII path name
-            fds[i].idx = i;
-            memcpy(fds[i].file_path, cwd, strlen(cwd));
-		    pr_info("File fd: %d, path: %s, path len: %ld\n", i, cwd, strlen(cwd));
-        }
-        i++;
+		filep = fdtab->fd[i];
+		//fds[i].idx = -1;
+		//memset(&fds[i], 0, sizeof(*fds));
+		if (filep) {
+			file_path = filep->f_path;
+			cwd = d_path(&file_path, buf, 128);	// convert a dentry into an ASCII path name
+			fds[i].idx = i;
+			memcpy(fds[i].file_path, cwd, strlen(cwd));
+			pr_info("File fd: %d, path: %s, path len: %ld\n",
+				i, cwd, strlen(cwd));
+		}
+		i++;
 	}
 #endif
-    spin_unlock(&files->file_lock);
+	spin_unlock(&files->file_lock);
 
-    return 0;
+	return 0;
 }
 
 static const char *__comm_to_trace[] = {

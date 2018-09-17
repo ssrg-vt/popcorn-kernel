@@ -1210,6 +1210,11 @@ int sock_create_kern(struct net *net, int family, int type, int protocol, struct
 }
 EXPORT_SYMBOL(sock_create_kern);
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/remote_socket.h>
+#endif
+
 SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 {
 	int retval;
@@ -1222,6 +1227,18 @@ SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 	BUILD_BUG_ON(SOCK_CLOEXEC & SOCK_TYPE_MASK);
 	BUILD_BUG_ON(SOCK_NONBLOCK & SOCK_TYPE_MASK);
 
+#ifdef CONFIG_POPCORN
+	/* We want to create a remote socket on master node */
+	if (distributed_remote_process(current)) {
+		retval = redirect_socket(family, type, protocol);
+		SKPRINTK("remote socket created. ret fd: %d\n", retval);
+		SKPRINTK("pid: %d, nid: %d\n",
+			 current->origin_pid, current->origin_nid);
+		SKPRINTK("is worker: %d, at remote: %d\n", current->is_worker,
+			 current->at_remote);
+		return retval;
+	}
+#endif
 	flags = type & ~SOCK_TYPE_MASK;
 	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
 		return -EINVAL;
@@ -1366,6 +1383,13 @@ SYSCALL_DEFINE3(bind, int, fd, struct sockaddr __user *, umyaddr, int, addrlen)
 	struct sockaddr_storage address;
 	int err, fput_needed;
 
+#ifdef CONFIG_POPCORN
+	/* We want to redirect setsockopt back to origin */
+	if (distributed_remote_process(current)) {
+		err = redirect_bind(fd, umyaddr, addrlen);
+		return err;
+	}
+#endif
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock) {
 		err = move_addr_to_kernel(umyaddr, addrlen, &address);
@@ -1395,6 +1419,13 @@ SYSCALL_DEFINE2(listen, int, fd, int, backlog)
 	int err, fput_needed;
 	int somaxconn;
 
+#ifdef CONFIG_POPCORN
+	/* We want to redirect setsockopt back to origin */
+	if (distributed_remote_process(current)) {
+		err = redirect_listen(fd, backlog);
+		return err;
+	}
+#endif
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock) {
 		somaxconn = sock_net(sock->sk)->core.sysctl_somaxconn;
@@ -1738,6 +1769,14 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
 	if (optlen < 0)
 		return -EINVAL;
 
+#ifdef CONFIG_POPCORN
+	/* We want to redirect setsockopt back to origin */
+	if (distributed_remote_process(current)) {
+		err = redirect_setsockopt(fd, level, optname, optval,
+					     optlen);
+		return err;
+	}
+#endif
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock != NULL) {
 		err = security_socket_setsockopt(sock, level, optname);

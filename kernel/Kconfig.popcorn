@@ -66,6 +66,11 @@ config POPCORN_STAT_PGFAULTS
 	depends on POPCORN_STAT
 	default n
 
+config POPCORN_DEBUG_SOCKET_SERVER
+	bool "Socket migration"
+	depends on POPCORN_DEBUG
+	default n
+
 
 comment "Popcorn is not currently supported on this architecture"
 	depends on !ARCH_SUPPORTS_POPCORN
