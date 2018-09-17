@@ -895,5 +895,7 @@ asmlinkage long sys_popcorn_migrate(int nid, void __user *uregs);
 asmlinkage long sys_popcorn_propose_migration(pid_t pid, int nid);
 asmlinkage long sys_popcorn_get_thread_status(struct popcorn_thread_status __user *status);
 asmlinkage long sys_popcorn_get_node_info(int * __user _my_nid, struct popcorn_node_info __user *info);
+asmlinkage long sys_popcorn_lock(int a, void __user *b);
+asmlinkage long sys_popcorn_unlock(int a, void __user *b);
 
 #endif

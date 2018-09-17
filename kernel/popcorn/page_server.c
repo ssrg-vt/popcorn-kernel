@@ -1867,6 +1867,23 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
+	//jack TODO function this
+	// original DeX doesn't check page_is_mine or not
+	if (current->tso_region) {
+		if (page_is_mine(mm, addr)) {
+			if (fault_for_write(fault_flags)) {
+				// remote_wr (write fault w/ page)
+				current->tso_wr_cnt++;
+				current->accu_tso_wr_cnt++;
+			} else {
+				// mine + read fault?
+				// looks like default meta data always show "mine"
+				// after a while this disappear
+				//PCNPRINTK_ERR("??? why read fault for page_is_mine ???\n");
+			}
+		}
+	}
+
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	fp_start = fpin_start = inv_start = ktime_get();
 #endif
@@ -2058,6 +2075,13 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 			/* Racy exit */
 			pte_unmap(pte);
 			goto out_wakeup;
+		}
+
+		//jack TODO functionize this
+		// origin_wr (write fault w/ page)
+		if (current->tso_region) {
+			current->tso_wr_cnt++;
+			current->accu_tso_wr_cnt++;
 		}
 
 		__claim_local_page(current, addr, my_nid);

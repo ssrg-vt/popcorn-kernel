@@ -431,6 +431,8 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 		tsk->flags |= PF_KTHREAD;
 	}
 
+	tsk->tso_region = false;
+	tsk->tso_region_cnt = 0;
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	tsk->fault_address = 0;
 	tsk->fault_retry = 0;

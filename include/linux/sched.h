@@ -1860,6 +1860,17 @@ struct task_struct {
 	ktime_t fault_start;
 #endif
 
+	bool tso_region;
+	unsigned long long tso_region_cnt; /* How many regions */
+
+	/* per tso region */
+	unsigned long long tso_wr_cnt; /* write fault & w/ page*/
+	unsigned long long tso_wx_cnt; /* write fault & w/o page*/
+
+	/* Accumulated */
+	unsigned long long accu_tso_wr_cnt; /* write fault & w/ page */
+	unsigned long long accu_tso_wx_cnt; /* write fault & w/o page */
+
 	/*
 	 * scheduling -- antoniob
 	 * in jiffies for load accounting

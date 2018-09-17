@@ -331,6 +331,8 @@ static int __exit_remote_task(struct task_struct *tsk)
 	return 0;
 }
 
+extern void collect_tso_wr(void);
+extern unsigned long long plock_system_tso_wr_cnt;
 int process_server_task_exit(struct task_struct *tsk)
 {
 	WARN_ON(tsk != current);
@@ -345,6 +347,8 @@ int process_server_task_exit(struct task_struct *tsk)
 	// show_regs(task_pt_regs(tsk));
 
 	if (tsk->is_worker) return 0;
+
+	collect_tso_wr();
 
 	if (tsk->at_remote) {
 		return __exit_remote_task(tsk);
