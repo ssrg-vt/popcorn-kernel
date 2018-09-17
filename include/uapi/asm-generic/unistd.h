@@ -723,13 +723,21 @@ __SYSCALL(__NR_popcorn_propose_migration, sys_popcorn_propose_migration)
 __SYSCALL(__NR_popcorn_get_thread_status, sys_popcorn_get_thread_status)
 #define __NR_popcorn_get_node_info 288
 __SYSCALL(__NR_popcorn_get_node_info, sys_popcorn_get_node_info)
-#define __NR_popcorn_lock 300
-__SYSCALL(__NR_popcorn_lock, sys_popcorn_lock)
-#define __NR_popcorn_unlock 301
-__SYSCALL(__NR_popcorn_unlock, sys_popcorn_unlock)
+#define __NR_popcorn_tso_begin 300
+__SYSCALL(__NR_popcorn_tso_begin, sys_popcorn_tso_begin)
+#define __NR_popcorn_tso_fence 301
+__SYSCALL(__NR_popcorn_tso_fence, sys_popcorn_tso_fence)
+#define __NR_popcorn_tso_end 302
+__SYSCALL(__NR_popcorn_tso_end, sys_popcorn_tso_end)
+#define __NR_popcorn_tso_begin_manual 305
+__SYSCALL(__NR_popcorn_tso_begin_manual, sys_popcorn_tso_begin_manual)
+#define __NR_popcorn_tso_fence_manual 306
+__SYSCALL(__NR_popcorn_tso_fence_manual, sys_popcorn_tso_fence_manual)
+#define __NR_popcorn_tso_end_manual 307
+__SYSCALL(__NR_popcorn_tso_end_manual, sys_popcorn_tso_end_manual)
 
 #undef __NR_syscalls
-#define __NR_syscalls 302
+#define __NR_syscalls 310
 
 /*
  * All syscalls below here should go away really,

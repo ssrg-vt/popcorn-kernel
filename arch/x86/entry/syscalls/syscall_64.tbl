@@ -336,8 +336,12 @@
 331 64	popcorn_propose_migration	sys_popcorn_propose_migration
 332 64	popcorn_get_thread_status	sys_popcorn_get_thread_status
 333 64	popcorn_get_node_info	sys_popcorn_get_node_info
-340 64	popcorn_lock		sys_popcorn_lock
-341 64	popcorn_unlock		sys_popcorn_unlock
+340 64	popcorn_tso_begin		sys_popcorn_tso_begin
+341 64	popcorn_tso_fence		sys_popcorn_tso_fence
+342 64	popcorn_tso_end		sys_popcorn_tso_end
+345 64	popcorn_tso_begin_manual		sys_popcorn_tso_begin_manual
+346 64	popcorn_tso_fence_manual		sys_popcorn_tso_fence_manual
+347 64	popcorn_tso_end_manual		sys_popcorn_tso_end_manual
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact
