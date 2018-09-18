@@ -29,6 +29,11 @@ config POPCORN_DEBUG_PAGE_SERVER
 	depends on POPCORN_DEBUG
 	default n
 
+config POPCORN_DEBUG_SYNC
+	bool "Synchronization primitives"
+	depends on POPCORN_DEBUG
+	default n
+
 config POPCORN_DEBUG_VMA_SERVER
 	bool "VMA handling"
 	depends on POPCORN_DEBUG

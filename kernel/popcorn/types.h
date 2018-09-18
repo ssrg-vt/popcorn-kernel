@@ -11,6 +11,7 @@
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
+#include <popcorn/sync.h>
 
 #define FAULTS_HASH 31
 
@@ -262,6 +263,15 @@ DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 	int origin_ws; \
 	pid_t remote_pid;
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
+
+#define PAGE_INVALIDATE_BATCH_REQUEST_FIELDS \
+	pid_t origin_pid; \
+	int origin_ws; \
+	pid_t remote_pid; \
+	unsigned long tso_wr_cnt; \
+	unsigned long addrs[MAX_WRITE_INV_BUFFERS];
+DEFINE_PCN_KMSG(page_invalidate_batch_request_t,
+				PAGE_INVALIDATE_BATCH_REQUEST_FIELDS);
 
 
 /**

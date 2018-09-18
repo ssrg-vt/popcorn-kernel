@@ -898,6 +898,7 @@ asmlinkage long sys_popcorn_get_node_info(int * __user _my_nid, struct popcorn_n
 asmlinkage long sys_popcorn_tso_begin(int a, void __user *b);
 asmlinkage long sys_popcorn_tso_fence(int a, void __user *b);
 asmlinkage long sys_popcorn_tso_end(int a, void __user *b);
+asmlinkage long sys_popcorn_tso_id(int a, void __user *b);
 asmlinkage long sys_popcorn_tso_begin_manual(int a, void __user *b);
 asmlinkage long sys_popcorn_tso_fence_manual(int a, void __user *b);
 asmlinkage long sys_popcorn_tso_end_manual(int a, void __user *b);

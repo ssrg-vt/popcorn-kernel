@@ -11,4 +11,14 @@ int cow_file_at_origin(struct mm_struct *mm, struct vm_area_struct *vma, unsigne
 void free_remote_context_pages(struct remote_context *rc);
 int process_madvise_release_from_remote(int from_nid, unsigned long start, unsigned long end);
 
+
+struct page *__get_page_info_page(struct mm_struct *mm, unsigned long addr, unsigned long *offset);
+
+void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid, unsigned long addr, int ws_id);
+
+struct remote_context *get_task_remote(struct task_struct *tsk);
+
+bool put_task_remote(struct task_struct *tsk);
+
+void __revoke_page_ownerships(struct task_struct *tsk, int nid, pid_t pid, unsigned long *addr, unsigned long tso_wr_cnt);
 #endif

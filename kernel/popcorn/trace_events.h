@@ -65,6 +65,35 @@ TRACE_EVENT(pgfault_stat,
 		__entry->retries, __entry->time_us)
 );
 
+TRACE_EVENT(tso,
+    TP_PROTO(const int nid,
+		const int pid,
+        const unsigned long id,
+		const char bfe),
+
+    TP_ARGS(nid, pid, id, bfe),
+
+    TP_STRUCT__entry(
+        __field(int, nid)
+		__field(int, pid)
+        __field(unsigned long, id)
+		__field(char, bfe)
+    ),
+
+    TP_fast_assign(
+        __entry->nid = nid;
+		__entry->pid = pid;
+        __entry->id = id;
+		__entry->bfe = bfe;
+    ),
+
+    TP_printk("%d %d %lu %c",
+        __entry->nid,
+		__entry->pid,
+        __entry->id,
+		__entry->bfe)
+);
+
 #endif
 
 #undef TRACE_INCLUDE_PATH

@@ -90,6 +90,7 @@
 #include <trace/events/task.h>
 
 #ifdef CONFIG_POPCORN
+#include <popcorn/sync.h>
 #include <popcorn/types.h>
 #include <popcorn/process_server.h>
 #endif
@@ -431,8 +432,22 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 		tsk->flags |= PF_KTHREAD;
 	}
 
+	//printk("[%d] %s():\n", tsk->pid, __func__);
 	tsk->tso_region = false;
 	tsk->tso_region_cnt = 0;
+	tsk->tso_nobenefit_region_cnt = 0;
+
+	tsk->tso_wr_cnt = 0;
+	tsk->tso_wx_cnt = 0;
+
+	tsk->accu_tso_wr_cnt = 0;
+	tsk->accu_tso_wx_cnt = 0;
+
+	memset(&tsk->buffer_inv_addrs, 0,
+			sizeof(*tsk->buffer_inv_addrs) * MAX_WRITE_INV_BUFFERS);
+	memset(&tsk->omp_regions, 0,
+			sizeof(*tsk->omp_regions) * MAX_OMP_REGIONS);
+
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	tsk->fault_address = 0;
 	tsk->fault_retry = 0;

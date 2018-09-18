@@ -6,9 +6,11 @@
  */
 #include <popcorn/debug.h>
 #include <linux/syscalls.h>
+#include <popcorn/bundle.h>
 
 // TODO: take ip into consideration
 unsigned long long system_tso_wr_cnt = 0;
+unsigned long long system_tso_nobenefit_region_cnt = 0;
 spinlock_t tso_lock;
 
 void collect_tso_wr(void)
@@ -16,11 +18,15 @@ void collect_tso_wr(void)
 	if (current->accu_tso_wr_cnt) {
 		spin_lock(&tso_lock);
 		system_tso_wr_cnt += current->accu_tso_wr_cnt;
+		system_tso_nobenefit_region_cnt += current->tso_nobenefit_region_cnt;
 		spin_unlock(&tso_lock);
-		printk("[%d]: exit contributs #%llu %llu -> system %llu\n",
+		printk("[%d]: exit contributs regions %llu accu_tso %llu "
+				"-> system %llu && empty_region %llu -> system %llu\n",
 								current->pid, current->tso_region_cnt,
 								current->accu_tso_wr_cnt,
-								system_tso_wr_cnt);
+								system_tso_wr_cnt,
+								current->tso_nobenefit_region_cnt,
+								system_tso_nobenefit_region_cnt);
 	}
 }
 
@@ -28,6 +34,7 @@ void clean_tso_wr(void)
 {
 	spin_lock(&tso_lock);
 	system_tso_wr_cnt = 0;
+	system_tso_nobenefit_region_cnt = 0;
 	spin_unlock(&tso_lock);
 }
 
@@ -69,25 +76,49 @@ SYSCALL_DEFINE2(popcorn_tso_end, int, a, void __user *, b)
 SYSCALL_DEFINE2(popcorn_tso_begin_manual, int, a, void __user *, b)
 {
 	if (current->tso_region || current->tso_wr_cnt || current->tso_wx_cnt)
-		PCNPRINTK_ERR("BUG tso_region order violation when \"lock\"\n");
+		PCNPRINTK_ERR("[%d] BUG tso_region order violation when \"lock\"\n",
+																current->pid);
 
 	current->tso_region = true;
 
 	return 0;
 }
 
+extern void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_nid);
 SYSCALL_DEFINE2(popcorn_tso_fence_manual, int, a, void __user *, b)
 {
+	int i;
+	unsigned long long tmp;
 	if (!current->tso_region)
-		PCNPRINTK_ERR("BUG tso_region order violation when \"unlock\"\n");
-	if (!current->tso_wr_cnt)
+		PCNPRINTK_ERR("[%d] BUG tso_region order violation when \"unlock\"\n",
+																current->pid);
+	if (!current->tso_wr_cnt) {
 			//|| !current->tso_wx_cnt)
-		PCNPRINTK_ERR("WARNNING no benefits here\n");
+		//PCNPRINTK_ERR("[%d] WARNNING no benefits here\n", current->pid);
+		current->tso_nobenefit_region_cnt++;
+	}
 
 	current->tso_region_cnt++;
 	//printk("[%d] %s(): #%llu tso_wr %llu/%llu\n", current->pid, __func__,
 	//					current->tso_region_cnt, current->tso_wr_cnt,
 	//					current->accu_tso_wr_cnt);
+
+	/* check buffer and invalidate all */
+	if (current->tso_wr_cnt > MAX_WRITE_INV_BUFFERS)
+		tmp = MAX_WRITE_INV_BUFFERS; /* suppresed performance */
+	else
+		tmp = current->tso_wr_cnt;
+
+	for (i = 0; i < tmp; i++) {
+		unsigned long addr = current->buffer_inv_addrs[i];
+		// send inv (addr)
+		if (!my_nid) {
+			//__claim_local_page(current, addr, my_nid);
+		} else {
+			/* TODO: implement since remote cannot issue inv
+								(check __claim_local_page) */
+		}
+	}
 
 	current->tso_wr_cnt = 0;
 	current->tso_wx_cnt = 0;

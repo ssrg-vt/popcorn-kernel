@@ -729,6 +729,8 @@ __SYSCALL(__NR_popcorn_tso_begin, sys_popcorn_tso_begin)
 __SYSCALL(__NR_popcorn_tso_fence, sys_popcorn_tso_fence)
 #define __NR_popcorn_tso_end 302
 __SYSCALL(__NR_popcorn_tso_end, sys_popcorn_tso_end)
+#define __NR_popcorn_tso_id 303
+__SYSCALL(__NR_popcorn_tso_id, sys_popcorn_tso_id)
 #define __NR_popcorn_tso_begin_manual 305
 __SYSCALL(__NR_popcorn_tso_begin_manual, sys_popcorn_tso_begin_manual)
 #define __NR_popcorn_tso_fence_manual 306

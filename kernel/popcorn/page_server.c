@@ -25,6 +25,7 @@
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
 
+#include <popcorn/sync.h>
 #include <popcorn/types.h>
 #include <popcorn/bundle.h>
 #include <popcorn/pcn_kmsg.h>
@@ -1317,7 +1318,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 }
 
 
-static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_nid)
+void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_nid)
 {
 	struct mm_struct *mm = tsk->mm;
 	unsigned long offset;
@@ -1816,6 +1817,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	spinlock_t *ptl;
 	struct page *page;
 	bool populated = false;
+	bool delay_write = false;
 	struct mem_cgroup *memcg;
 	int ret = 0;
 
@@ -1873,9 +1875,20 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		if (page_is_mine(mm, addr)) {
 			if (fault_for_write(fault_flags)) {
 				// remote_wr (write fault w/ page)
+				//jack TODO functionize this
+				/* buffer it */
+				if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS)
+					current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
+				else
+					PCNPRINTK_ERR("increase MAX_WRITE_INV_BUFFERS %ld\n",
+						(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
+
 				current->tso_wr_cnt++;
 				current->accu_tso_wr_cnt++;
+
+				//delay_write = true; // trun on later
 			} else {
+				/* first touch? */
 				// mine + read fault?
 				// looks like default meta data always show "mine"
 				// after a while this disappear
@@ -1889,35 +1902,36 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 #endif
 
 	rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
+	// }
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
-		if (page_is_mine(mm, addr)) {
-			if (fault_for_write(fault_flags)) {
-				if (rp->result == VM_FAULT_CONTINUE) { /* W: inv lat */
-					inv_end = ktime_get();
-					dt = ktime_sub(inv_end, inv_start);
-					atomic64_add(ktime_to_ns(dt), &inv_ns);
-					atomic64_inc(&inv_cnt);
-				} else if (!rp->result) { /* W: inv + page transferred */
-					// X -> W
-					ktime_t dt, fpin_end = ktime_get();
-					dt = ktime_sub(fpin_end, fpin_start);
-					atomic64_add(ktime_to_ns(dt), &fpin_ns);
-					atomic64_inc(&fpin_cnt);
-				}
+	if (page_is_mine(mm, addr)) {
+		if (fault_for_write(fault_flags)) {
+			if (rp->result == VM_FAULT_CONTINUE) { /* W: inv lat */
+				inv_end = ktime_get();
+				dt = ktime_sub(inv_end, inv_start);
+				atomic64_add(ktime_to_ns(dt), &inv_ns);
+				atomic64_inc(&inv_cnt);
+			} else if (!rp->result) { /* W: inv + page transferred */
+				// X -> W
+				ktime_t dt, fpin_end = ktime_get();
+				dt = ktime_sub(fpin_end, fpin_start);
+				atomic64_add(ktime_to_ns(dt), &fpin_ns);
+				atomic64_inc(&fpin_cnt);
 			}
-		} else { /* fp only page */
-			if (fault_for_read(fault_flags)) {
-				ktime_t dt, fp_end = ktime_get();;
-				dt = ktime_sub(fp_end, fp_start);
-				atomic64_add(ktime_to_ns(dt), &fp_ns);
-				atomic64_inc(&fp_cnt);
-			}
-			if (fault_for_write(fault_flags)) { /* W: inv + page transferred */
-					ktime_t dt, fpin_end = ktime_get();
-					dt = ktime_sub(fpin_end, fpin_start);
-					atomic64_add(ktime_to_ns(dt), &fpin_ns);
-					atomic64_inc(&fpin_cnt);
+		}
+	} else { /* fp only page */
+		if (fault_for_read(fault_flags)) {
+			ktime_t dt, fp_end = ktime_get();;
+			dt = ktime_sub(fp_end, fp_start);
+			atomic64_add(ktime_to_ns(dt), &fp_ns);
+			atomic64_inc(&fp_cnt);
+		}
+		if (fault_for_write(fault_flags)) { /* W: inv + page transferred */
+				ktime_t dt, fpin_end = ktime_get();
+				dt = ktime_sub(fpin_end, fpin_start);
+				atomic64_add(ktime_to_ns(dt), &fpin_ns);
+				atomic64_inc(&fpin_cnt);
 		}
 	}
 #endif
@@ -1931,7 +1945,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		goto out_free;
 	}
 
-	if (rp->result == VM_FAULT_CONTINUE) {
+	if (rp->result == VM_FAULT_CONTINUE || delay_write) {
 		/**
 		 * Page ownership is granted without transferring the page data
 		 * since this node already owns the up-to-dated page
@@ -1953,7 +1967,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		if (ptep_set_access_flags(vma, addr, pte, entry, 1)) {
 			update_mmu_cache(vma, addr, pte);
 		}
-	} else {
+	} else { /* !rp->result */
 		spin_lock(ptl);
 		if (populated) {
 			do_set_pte(vma, addr, page, pte, fault_for_write(fault_flags), true);
@@ -1970,7 +1984,8 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 out_free:
 	put_page(page);
-	pcn_kmsg_done(rp);
+	if (!delay_write)
+		pcn_kmsg_done(rp);
 	fh->ret = ret;
 
 out_follower:
@@ -2080,11 +2095,21 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		//jack TODO functionize this
 		// origin_wr (write fault w/ page)
 		if (current->tso_region) {
+			//jack TODO functionize this
+				/* buffer it */
+			if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS)
+				current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
+			else
+				PCNPRINTK_ERR("increase MAX_WRITE_INV_BUFFERS %ld\n",
+					(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
+
 			current->tso_wr_cnt++;
 			current->accu_tso_wr_cnt++;
 		}
-
+		/* skip */
+		// else {
 		__claim_local_page(current, addr, my_nid);
+		// }
 
 		spin_lock(ptl);
 		pte_val = pte_mkwrite(pte_val);

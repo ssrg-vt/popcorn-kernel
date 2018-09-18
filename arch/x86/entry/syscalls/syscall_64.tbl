@@ -339,6 +339,7 @@
 340 64	popcorn_tso_begin		sys_popcorn_tso_begin
 341 64	popcorn_tso_fence		sys_popcorn_tso_fence
 342 64	popcorn_tso_end		sys_popcorn_tso_end
+343 64	popcorn_tso_id		sys_popcorn_tso_id
 345 64	popcorn_tso_begin_manual		sys_popcorn_tso_begin_manual
 346 64	popcorn_tso_fence_manual		sys_popcorn_tso_fence_manual
 347 64	popcorn_tso_end_manual		sys_popcorn_tso_end_manual

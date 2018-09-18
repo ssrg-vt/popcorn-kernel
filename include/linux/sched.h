@@ -62,6 +62,8 @@ struct sched_param {
 
 #include <asm/processor.h>
 
+#include <popcorn/sync.h>
+
 #define SCHED_ATTR_SIZE_VER0	48	/* sizeof first published struct */
 
 /*
@@ -1861,15 +1863,26 @@ struct task_struct {
 #endif
 
 	bool tso_region;
-	unsigned long long tso_region_cnt; /* How many regions */
+	unsigned long tso_region_id; /* Region id */
+	unsigned long long tso_region_cnt; /* Regions */
+	unsigned long long tso_nobenefit_region_cnt; /* No benefits regions */
 
 	/* per tso region */
-	unsigned long long tso_wr_cnt; /* write fault & w/ page*/
-	unsigned long long tso_wx_cnt; /* write fault & w/o page*/
+	unsigned long long tso_wr_cnt; /* write fault & w/ page */ // == inv_cnt
+	unsigned long long tso_wx_cnt; /* write fault & w/o page */
 
 	/* Accumulated */
 	unsigned long long accu_tso_wr_cnt; /* write fault & w/ page */
 	unsigned long long accu_tso_wx_cnt; /* write fault & w/o page */
+
+	/* Buffer invalidations */
+	/* TODO: what data structure? */
+	//unsigned int inv_cnt;
+	unsigned long buffer_inv_addrs[MAX_WRITE_INV_BUFFERS];
+
+	/* Dynamic logs */
+	unsigned int omp_regions[MAX_OMP_REGIONS];
+
 
 	/*
 	 * scheduling -- antoniob
