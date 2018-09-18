@@ -937,3 +937,10 @@ out:
 
 	return error;
 }
+
+#ifdef CONFIG_POPCORN
+long ksys_madvise(unsigned long start, size_t len, int behavior)
+{
+        return __do_sys_madvise(start, len, behavior);
+}
+#endif

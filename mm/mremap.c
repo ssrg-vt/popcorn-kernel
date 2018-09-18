@@ -650,3 +650,12 @@ out:
 	userfaultfd_unmap_complete(mm, &uf_unmap);
 	return ret;
 }
+
+#ifdef CONFIG_POPCORN
+long ksys_mremap(unsigned long addr,
+		 unsigned long old_len, unsigned long new_len,
+		 unsigned long flags, unsigned long new_addr)
+{
+        return __do_sys_mremap(addr, old_len, new_len, flags, new_addr);
+}
+#endif

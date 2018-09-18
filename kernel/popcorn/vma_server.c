@@ -500,7 +500,7 @@ static long __process_vma_op_at_origin(vma_op_request_t *req)
 	}
 	case VMA_OP_BRK: {
 		unsigned long brk = req->brk;
-		//req->brk = sys_brk(req->brk);
+		req->brk = ksys_brk(req->brk);
 		ret = brk != req->brk;
 		break;
 	}
@@ -508,18 +508,18 @@ static long __process_vma_op_at_origin(vma_op_request_t *req)
 		ret = vma_server_munmap_origin(req->addr, req->len, from_nid);
 		break;
 	case VMA_OP_MPROTECT:
-	  //ret = sys_mprotect(req->addr, req->len, req->prot);
+	        ret = ksys_mprotect(req->addr, req->len, req->prot);
 		break;
 	case VMA_OP_MREMAP:
-	  //		ret = sys_mremap(req->addr, req->old_len, req->new_len,
-	  //		req->flags, req->new_addr);
+	        ret = ksys_mremap(req->addr, req->old_len, req->new_len,
+				  req->flags, req->new_addr);
 		break;
 	case VMA_OP_MADVISE:
 		if (req->behavior == MADV_RELEASE) {
 			ret = process_madvise_release_from_remote(
 					from_nid, req->start, req->start + req->len);
 		} else {
-		  //ret = sys_madvise(req->start, req->len, req->behavior);
+		        ret = ksys_madvise(req->start, req->len, req->behavior);
 		}
 		break;
 	default:

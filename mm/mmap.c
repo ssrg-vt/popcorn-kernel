@@ -283,6 +283,13 @@ out:
 	return retval;
 }
 
+#ifdef CONFIG_POPCORN
+long ksys_brk(unsigned long addr)
+{
+        return __do_sys_brk(addr);
+}
+#endif
+
 static long vma_compute_subtree_gap(struct vm_area_struct *vma)
 {
 	unsigned long max, prev_end, subtree_gap;
