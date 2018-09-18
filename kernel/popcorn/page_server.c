@@ -1779,6 +1779,10 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	struct fault_handle *fh;
 	bool leader;
 	remote_page_response_t *rp;
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	ktime_t fp_start;
+	ktime_t dt, inv_end, inv_start;
+#endif
 
 	if (anon_vma_prepare(vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
@@ -1821,6 +1825,29 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	get_page(page);
 
 	rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
+
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	if (page_is_mine(mm, addr)) {
+		if (fault_for_write(fault_flags)) {
+			if (rp->result == VM_FAULT_CONTINUE) {
+				inv_end = ktime_get();
+				dt = ktime_sub(inv_end, inv_start);
+				atomic64_add(ktime_to_ns(dt), &inv_ns);
+				atomic64_inc(&inv_cnt);
+			} else if (!rp->result) { /* page transferred (W/R) */
+				ktime_t dt, fp_end = ktime_get();;
+				dt = ktime_sub(fp_end, fp_start);
+				atomic64_add(ktime_to_ns(dt), &fetch_page_ns);
+				atomic64_inc(&fetch_page_cnt);
+			}
+//#ifdef CONFIG_POPCORN_CHECK_SANITY
+//			if (!rp->result) /* bad */
+//				PCNPRINTK_ERR("WRONG inv latency measurment at remote "
+//									"(page tramnsferring lat included)\n");
+//#endif
+		}
+	}
+#endif
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
 		if (rp->result != VM_FAULT_RETRY)
