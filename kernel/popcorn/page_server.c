@@ -516,7 +516,7 @@ static bool __finish_fault_handling(struct fault_handle *fh)
 static pte_t *__get_pte_at(struct mm_struct *mm, unsigned long addr, pmd_t **ppmd, spinlock_t **ptlp)
 {
 	pgd_t *pgd;
-	p4d_t *p4d;	
+	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 
@@ -525,7 +525,7 @@ static pte_t *__get_pte_at(struct mm_struct *mm, unsigned long addr, pmd_t **ppm
 
 	p4d = p4d_offset(pgd, addr);
 	if (!p4d || p4d_none(*p4d)) return NULL;
-	
+
 	pud = pud_offset(p4d, addr);
 	if (!pud || pud_none(*pud)) return NULL;
 
@@ -541,7 +541,7 @@ static pte_t *__get_pte_at(struct mm_struct *mm, unsigned long addr, pmd_t **ppm
 static pte_t *__get_pte_at_alloc(struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, pmd_t **ppmd, spinlock_t **ptlp)
 {
 	pgd_t *pgd;
-	p4d_t *p4d;	
+	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
@@ -550,7 +550,7 @@ static pte_t *__get_pte_at_alloc(struct mm_struct *mm, struct vm_area_struct *vm
 	if (!pgd) return NULL;
 
 	p4d = p4d_alloc(mm, pgd, addr);
-	if (!p4d) return NULL;		
+	if (!p4d) return NULL;
 
 	pud = pud_alloc(mm, p4d, addr);
 	if (!pud) return NULL;
@@ -1475,6 +1475,7 @@ again:
 		goto out_up;
 	}
 
+
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(vma->vm_flags & VM_EXEC);
 #endif
@@ -1616,7 +1617,14 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	struct fault_handle *fh;
 	bool leader;
 	remote_page_response_t *rp;
-	struct vm_fault *vmf;
+	struct vm_fault vmf = {
+		.vma = vma,
+		.address = addr,
+		.flags = fault_flags,
+		.pgoff = linear_page_index(vma, addr),
+		.gfp_mask = __get_fault_gfp_mask(vma),
+	};
+
 
 	if (anon_vma_prepare(vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
@@ -1694,10 +1702,8 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	} else {
 		spin_lock(ptl);
 		if (populated) {
-		  // TODO: this will not work, need to populate a struct vm_fault
-		  //do_set_pte(vma, addr, page, pte, fault_for_write(fault_flags), true);
-		  alloc_set_pte(vmf, memcg, page);
-		  mem_cgroup_commit_charge(page, memcg, false, false);
+		        alloc_set_pte(&vmf, memcg, page);
+			mem_cgroup_commit_charge(page, memcg, false, false);
 			lru_cache_add_active_or_unevictable(page, vma);
 		} else {
 			__make_pte_valid(mm, vma, addr, fault_flags, pte);

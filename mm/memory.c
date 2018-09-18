@@ -1312,7 +1312,7 @@ again:
 			continue;
 #ifdef CONFIG_POPCORN
 		page_server_zap_pte(vma, addr, pte, &ptent);
-#endif		
+#endif
 
 		if (pte_present(ptent)) {
 			struct page *page;
@@ -1661,7 +1661,7 @@ void zap_vma_ptes(struct vm_area_struct *vma, unsigned long address,
 		unsigned long size)
 {
 	if (address < vma->vm_start || address + size > vma->vm_end ||
-	    		!(vma->vm_flags & VM_PFNMAP))
+			!(vma->vm_flags & VM_PFNMAP))
 		return;
 
 	zap_page_range_single(vma, address, size, NULL);
@@ -2366,7 +2366,7 @@ static inline void cow_user_page(struct page *dst, struct page *src, unsigned lo
 		copy_user_highpage(dst, src, va, vma);
 }
 
-static gfp_t __get_fault_gfp_mask(struct vm_area_struct *vma)
+gfp_t __get_fault_gfp_mask(struct vm_area_struct *vma)
 {
 	struct file *vm_file = vma->vm_file;
 
@@ -4000,8 +4000,8 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	}
 #ifdef CONFIG_POPCORN
 	if (distributed_process(current)) {
-   	        int ret = page_server_handle_pte_fault(mm, vma, address, pmd, pte, entry, flags);
-	  
+		int ret = page_server_handle_pte_fault(mm, vma, address, pmd, pte, entry, flags);
+
 		if (ret == VM_FAULT_RETRY) {
 			int backoff = ++current->backoff_weight;
 			PGPRINTK("  [%d] backoff %d\n", current->pid, backoff);
@@ -4020,7 +4020,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	if (!pte_present(vmf->orig_pte)) {
 #ifdef CONFIG_POPCORN
 		page_server_panic(true, mm, address, pte, entry);
-#endif	  
+#endif
 		return do_swap_page(vmf);
 	}
 
@@ -4102,11 +4102,18 @@ int handle_pte_fault_origin(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct page *page;
 	spinlock_t *ptl;
 	pte_t entry = *pte;
-	struct vm_fault *vmf;
+	struct vm_fault vmf = {
+		.vma = vma,
+		.address = address,
+		.flags = flags,
+		.pgoff = linear_page_index(vma, address),
+		.gfp_mask = __get_fault_gfp_mask(vma),
+	};
+
 	barrier();
 
 	if (!vma_is_anonymous(vma)) // TODO this is broken, vmd is not populated. And cast probably breaks things
-	  return do_fault(vmf);
+	  return do_fault(&vmf);
 
 	/**
 	 * Following is for anonymous page. Almost same to do_anonymos_page
@@ -4137,7 +4144,7 @@ int handle_pte_fault_origin(struct mm_struct *mm, struct vm_area_struct *vma,
 	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
 	if (!pte_none(*pte)) {
 		/* Somebody already attached a page */
- 	        mem_cgroup_cancel_charge(page, memcg, false);
+		mem_cgroup_cancel_charge(page, memcg, false);
 		put_page(page);
 	} else {
 		inc_mm_counter_fast(mm, MM_ANONPAGES);
@@ -4202,7 +4209,7 @@ int cow_file_at_origin(struct mm_struct *mm, struct vm_area_struct *vma, unsigne
 	return 0;
 }
 #endif
-		
+
 /*
  * By the time we get here, we already hold the mm semaphore
  *
@@ -4309,7 +4316,7 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	count_memcg_event_mm(vma->vm_mm, PGFAULT);
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	page_server_start_mm_fault(address);
-#endif	
+#endif
 
 	/* do counter updates before entering really critical section. */
 	check_sync_rss_stat(current);
@@ -4345,7 +4352,7 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	ret = page_server_end_mm_fault(ret);
 #endif
-	
+
 
 	return ret;
 }

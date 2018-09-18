@@ -2800,5 +2800,10 @@ void __init setup_nr_node_ids(void);
 static inline void setup_nr_node_ids(void) {}
 #endif
 
+
+#ifdef CONFIG_POPCORN
+gfp_t __get_fault_gfp_mask(struct vm_area_struct *vma);
+#endif
+
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */
