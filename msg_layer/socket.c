@@ -9,7 +9,7 @@
 
 #include <linux/kthread.h>
 #include <popcorn/stat.h>
-
+#include <linux/module.h>
 #include "ring_buffer.h"
 #include "common.h"
 
@@ -391,7 +391,6 @@ static int __init __accept_client(int *nid)
 	bool found = false;
 	struct socket *sock;
 	struct sockaddr_in addr;
-	int addr_len = sizeof(addr);
 
 	do {
 		ret = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sock);
@@ -406,7 +405,7 @@ static int __init __accept_client(int *nid)
 			goto out_release;
 		}
 
-		ret = kernel_getpeername(sock, (struct sockaddr *)&addr, &addr_len);
+		ret = kernel_getpeername(sock, (struct sockaddr *)&addr);
 		if (ret < 0) {
 			goto out_release;
 		}
