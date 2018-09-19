@@ -718,6 +718,9 @@ retry:
 			printk("Unknown completion op %d\n", wc.opcode);
 			break;
 		}
+#ifdef CONFIG_POPCORN_STAT_MSG
+		t2s = ktime_get();
+#endif
 	}
 	ret = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS);
 #ifdef CONFIG_POPCORN_STAT_MSG
