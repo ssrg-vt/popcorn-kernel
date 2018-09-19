@@ -42,20 +42,22 @@
 atomic64_t mm_cnt = ATOMIC64_INIT(0);
 atomic64_t mm_time_ns = ATOMIC64_INIT(0);
 
-/* local origin & it has to bring from remote */
-atomic64_t ptef_ns = ATOMIC64_INIT(0);
-atomic64_t ptef_cnt = ATOMIC64_INIT(0);
-/* local_origin & __claim_remote_page(1)(!pg_mine) */
+/* local origin & it has to bring from remote (RW)*/
+//atomic64_t ptef_ns = ATOMIC64_INIT(0);
+//atomic64_t ptef_cnt = ATOMIC64_INIT(0);
+/* local_origin & __claim_remote_page(1)(!pg_mine)(RW) */
 atomic64_t clr_ns = ATOMIC64_INIT(0);
 atomic64_t clr_cnt = ATOMIC64_INIT(0);
 
 /* local_origin & !pg_mine & !send_revoke_msg & is_page */
-atomic64_t fetch_page_ns = ATOMIC64_INIT(0);
-atomic64_t fetch_page_cnt = ATOMIC64_INIT(0);
+atomic64_t fp_ns = ATOMIC64_INIT(0);
+atomic64_t fp_cnt = ATOMIC64_INIT(0);
 
 /* local_origin & !pg_mine & !send_revoke_msg & is_page */
 atomic64_t fpin_ns = ATOMIC64_INIT(0);
 atomic64_t fpin_cnt = ATOMIC64_INIT(0);
+atomic64_t fpinh_ns = ATOMIC64_INIT(0);
+atomic64_t fpinh_cnt = ATOMIC64_INIT(0);
 
 /* __claim_local_page(pg_mine) & origin */
 atomic64_t inv_ns = ATOMIC64_INIT(0);
@@ -118,12 +120,12 @@ void pf_time_stat(struct seq_file *seq, void *v)
 					"per", atomic64_read(&mm_cnt) ?
 					 atomic64_read(&mm_time_ns)/atomic64_read(&mm_cnt)/1000 : 0);
 
-		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
-					"ptef", (atomic64_read(&ptef_ns) / 1000) / MICROSECOND,
-							(atomic64_read(&ptef_ns) / 1000)  % MICROSECOND,
-					"cnt", atomic64_read(&ptef_cnt),
-					"per", atomic64_read(&ptef_cnt) ?
-					 atomic64_read(&ptef_ns)/atomic64_read(&ptef_cnt)/1000 : 0);
+		//seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
+		//			"ptef", (atomic64_read(&ptef_ns) / 1000) / MICROSECOND,
+		//					(atomic64_read(&ptef_ns) / 1000)  % MICROSECOND,
+		//			"cnt", atomic64_read(&ptef_cnt),
+		//			"per", atomic64_read(&ptef_cnt) ?
+		//			 atomic64_read(&ptef_ns)/atomic64_read(&ptef_cnt)/1000 : 0);
 
 		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 					"clr", (atomic64_read(&clr_ns) / 1000) / MICROSECOND,
@@ -133,11 +135,11 @@ void pf_time_stat(struct seq_file *seq, void *v)
 					 atomic64_read(&clr_ns)/atomic64_read(&clr_cnt)/1000 : 0);
 
 		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
-			"fp", (atomic64_read(&fetch_page_ns) / 1000) / MICROSECOND,
-					(atomic64_read(&fetch_page_ns) / 1000)  % MICROSECOND,
-			"cnt", atomic64_read(&fetch_page_cnt),
-			"per", atomic64_read(&fetch_page_cnt) ?
-			 atomic64_read(&fetch_page_ns)/atomic64_read(&fetch_page_cnt)/1000 : 0);
+			"fp", (atomic64_read(&fp_ns) / 1000) / MICROSECOND,
+					(atomic64_read(&fp_ns) / 1000)  % MICROSECOND,
+			"cnt", atomic64_read(&fp_cnt),
+			"per", atomic64_read(&fp_cnt) ?
+			 atomic64_read(&fp_ns)/atomic64_read(&fp_cnt)/1000 : 0);
 
 		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 			"fph", (atomic64_read(&fph_ns) / 1000) / MICROSECOND,
@@ -166,18 +168,22 @@ void pf_time_stat(struct seq_file *seq, void *v)
 			"cnt", atomic64_read(&fpin_cnt),
 			"per", atomic64_read(&fpin_cnt) ?
 			 atomic64_read(&fpin_ns)/atomic64_read(&fpin_cnt)/1000 : 0);
+		seq_printf(seq, "%5s  %9ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
+			"fpivh", (atomic64_read(&fpinh_ns) / 1000) / MICROSECOND,
+					(atomic64_read(&fpinh_ns) / 1000)  % MICROSECOND,
+			"cnt", atomic64_read(&fpinh_cnt),
+			"per", atomic64_read(&fpinh_cnt) ?
+			 atomic64_read(&fpinh_ns)/atomic64_read(&fpinh_cnt)/1000 : 0);
 	} else {
         atomic64_set(&mm_cnt, 0);
         atomic64_set(&mm_time_ns, 0);
 
-		atomic64_set(&ptef_cnt, 0);
-		atomic64_set(&ptef_ns, 0);
+		//atomic64_set(&ptef_cnt, 0);
+		//atomic64_set(&ptef_ns, 0);
 		atomic64_set(&clr_cnt, 0);
 		atomic64_set(&clr_ns, 0);
-		atomic64_set(&fetch_page_ns, 0);
-		atomic64_set(&fetch_page_cnt, 0);
-		atomic64_set(&fpin_ns, 0);
-		atomic64_set(&fpin_cnt, 0);
+		atomic64_set(&fp_ns, 0);
+		atomic64_set(&fp_cnt, 0);
 		atomic64_set(&fph_ns, 0);
 		atomic64_set(&fph_cnt, 0);
 
@@ -185,6 +191,11 @@ void pf_time_stat(struct seq_file *seq, void *v)
 		atomic64_set(&inv_ns, 0);
 		atomic64_set(&invh_cnt, 0);
 		atomic64_set(&invh_ns, 0);
+
+		atomic64_set(&fpin_ns, 0);
+		atomic64_set(&fpin_cnt, 0);
+		atomic64_set(&fpinh_ns, 0);
+		atomic64_set(&fpinh_cnt, 0);
 	}
 #endif
 }
@@ -1206,11 +1217,11 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 	struct page *pip = __get_page_info_page(mm, addr, &offset);
 	unsigned long *pi = (unsigned long *)kmap(pip) + offset;
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
-	int revoke = 0;
+	//int revoke = 0;
 	int page_trans = 0;
-	ktime_t fetch_page_start;
+	ktime_t fp_start;
 	if (local_origin) /* aka !pg_mine */
-		fetch_page_start = ktime_get();
+		fp_start = ktime_get();
 #endif
 	BUG_ON(!pip);
 
@@ -1242,7 +1253,9 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 				clear_bit(nid, pi);
 				__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
-				revoke = 1;
+				//revoke = 1;
+				//BUG_ON(revoke && "Two nodes shouldn't send stand along inv");
+				BUG_ON("Two nodes shouldn't send stand along inv");
 #endif
 			}
 		}
@@ -1277,18 +1290,21 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	//if (!my_nid && local_origin && !revoke && page_trans) {
-	if (!my_nid && local_origin && page_trans) {
-		if (fault_for_write(fault_flags)) {
-			/* page + inv */
+	//if (!my_nid && local_origin && page_trans) {
+	if (!my_nid && local_origin) {
+		if (fault_for_write(fault_flags)) { /* page + inv */
+			ktime_t dt, fp_end = ktime_get();
+			dt = ktime_sub(fp_end, fp_start);
+			atomic64_add(ktime_to_ns(dt), &fpin_ns);
+			atomic64_inc(&fpin_cnt);
 		} else { /* page + !inv  */
 		//if (page_trans) {
-			ktime_t dt, fetch_page_end = ktime_get();
-			dt = ktime_sub(fetch_page_end, fetch_page_start);
-			atomic64_add(ktime_to_ns(dt), &fetch_page_ns);
-			atomic64_inc(&fetch_page_cnt);
+			ktime_t dt, fp_end = ktime_get();
+			dt = ktime_sub(fp_end, fp_start);
+			atomic64_add(ktime_to_ns(dt), &fp_ns);
+			atomic64_inc(&fp_cnt);
 		//}
 		}
-		BUG_ON(revoke && "Two nodes shouldn't send stand along inv");
 
 		if (!page_trans)
 			BUG_ON("!pg_mine must transfer page");
@@ -1861,8 +1877,8 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 			} else if (!rp->result) { /* page transferred (W/R) */
 				ktime_t dt, fp_end = ktime_get();;
 				dt = ktime_sub(fp_end, fp_start);
-				atomic64_add(ktime_to_ns(dt), &fetch_page_ns);
-				atomic64_inc(&fetch_page_cnt);
+				atomic64_add(ktime_to_ns(dt), &fp_ns);
+				atomic64_inc(&fp_cnt);
 			}
 //#ifdef CONFIG_POPCORN_CHECK_SANITY
 //			if (!rp->result) /* bad */
@@ -1975,7 +1991,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	bool leader;
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	bool remote_fault = false;
-	ktime_t ptef_start = ktime_get();
+	//ktime_t ptef_start = ktime_get();
 #endif
 
 	ptl = pte_lockptr(mm, pmd);
@@ -2067,10 +2083,10 @@ out_wakeup:
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	if (remote_fault) {
-		ktime_t dt, ptef_end = ktime_get();
-		dt = ktime_sub(ptef_end, ptef_start);
-		atomic64_add(ktime_to_ns(dt), &ptef_ns);
-		atomic64_inc(&ptef_cnt);
+		//ktime_t dt, ptef_end = ktime_get();
+		//dt = ktime_sub(ptef_end, ptef_start);
+		//atomic64_add(ktime_to_ns(dt), &ptef_ns);
+		//atomic64_inc(&ptef_cnt);
 	}
 #endif
 
