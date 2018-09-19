@@ -112,6 +112,32 @@ int redirect_listen(int fd, int backlog)
 	return retval;
 }
 
+int redirect_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
+		     int __user *upeer_addrlen, int flag)
+{
+	int retval;
+	remote_socket_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
+	remote_socket_response_t *reply = NULL;
+	struct wait_station *ws = get_wait_station(current);
+
+	req->origin_pid = current->origin_pid;
+	req->remote_ws = ws->id;
+
+	req->fd = fd;
+	req->umyaddr = upeer_sockaddr;
+	req->upeer_addrlen = upeer_addrlen;
+	req->backlog = flag;	// reuse some fields of REMOTE_SOCKET_FIELDS
+	retval = pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_ACCEPT4, 0, req,
+			    sizeof(*req));
+	kfree(req);
+
+	reply = wait_at_station(ws);
+	retval = reply->retval;
+
+	return retval;
+}
+
+
 static int handle_remote_socket_response(struct pcn_kmsg_message *msg)
 {
 	remote_socket_response_t *res = (remote_socket_response_t *)msg;
@@ -132,6 +158,8 @@ static int handle_remote_socket_response(struct pcn_kmsg_message *msg)
 extern int sys_socket(int family, int type, int protocol);
 extern int sys_bind(int fd, struct sockaddr __user *umyaddr, int addrlen);
 extern int sys_listen(int fd, int backlog);
+extern int sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
+		     int __user *upeer_addrlen, int flag);
 extern int sys_setsockopt(int fd, int level, int optname, char __user *optval,
 			  int optlen);
 /*
@@ -223,6 +251,26 @@ int process_listen(struct pcn_kmsg_message *msg)
 	return retval;
 }
 
+int process_accept4(struct pcn_kmsg_message *msg)
+{
+	int retval;
+	remote_socket_t *req = (remote_socket_t *)msg;
+	remote_socket_response_t *res = kmalloc(sizeof(*res), GFP_KERNEL);
+
+	retval = sys_accept4(req->fd, req->umyaddr, req->upeer_addrlen,
+			     req->backlog);
+
+	res->origin_pid = current->origin_pid;
+	res->remote_ws = req->remote_ws;
+	res->retval = retval;
+
+	pcn_kmsg_send(PCN_KMSG_TYPE_REMOTE_SOCKET_RESPONSE, current->remote_nid,
+		      res, sizeof(*res));
+	kfree(res);
+
+	return retval;
+}
+
 /*
  * complete the waiting task (invoking request_remote_work()), continue execute
  * '__process_remote_works' switch loop
@@ -231,6 +279,7 @@ DEFINE_KMSG_RW_HANDLER(socket_create, remote_socket_t, origin_pid);
 DEFINE_KMSG_RW_HANDLER(setsockopt, remote_setsockopt_t, origin_pid);
 DEFINE_KMSG_RW_HANDLER(bind, remote_socket_t, origin_pid);
 DEFINE_KMSG_RW_HANDLER(listen, remote_socket_t, origin_pid);
+DEFINE_KMSG_RW_HANDLER(accept4, remote_socket_t, origin_pid);
 
 /**
  * Initialize the remote socket server. Register the socket handlers.
@@ -243,6 +292,7 @@ int __init remote_socket_server_init(void)
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_REMOTE_SETSOCKOPT, setsockopt);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_REMOTE_BIND, bind);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_REMOTE_LISTEN, listen);
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_REMOTE_ACCEPT4, accept4);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_REMOTE_SOCKET_RESPONSE,
 			      remote_socket_response);
 	return 0;

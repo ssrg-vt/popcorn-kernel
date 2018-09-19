@@ -89,6 +89,7 @@ out_unlock:
 
 #include "types.h"
 #include <linux/fdtable.h>
+#include <popcorn/debug.h>
 
 int clone_fdtable(fd_t *fds, struct files_struct *files)
 {
@@ -107,7 +108,7 @@ int clone_fdtable(fd_t *fds, struct files_struct *files)
 
 	// # of fd table entries
 	fd_cnt = fdtab->max_fds;
-	pr_info("fdtable max_fds: %d, fds size total: %ld. fds size: %ld\n",
+	PSPRINTK("fdtable max_fds: %d, fds size total: %ld. fds size: %ld\n",
 		fd_cnt, sizeof(*fds)*fd_cnt, sizeof(*fds));
 
 	// zero out the fds
@@ -122,7 +123,7 @@ int clone_fdtable(fd_t *fds, struct files_struct *files)
 			cwd = d_path(&file_path, buf, 128);	// convert a dentry into an ASCII path name
 			fds[i].idx = i;
 			memcpy(fds[i].file_path, cwd, strlen(cwd));
-			pr_info("File fd: %d, path: %s, path len: %ld\n",
+			PSPRINTK("File fd: %d, path: %s, path len: %ld\n",
 				i, cwd, strlen(cwd));
 		}
 		i++;

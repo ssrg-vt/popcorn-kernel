@@ -1461,6 +1461,14 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 	int err, len, newfd, fput_needed;
 	struct sockaddr_storage address;
 
+#ifdef CONFIG_POPCORN
+	/* We want to redirect accept4 back to origin */
+	if (distributed_remote_process(current)) {
+		err = redirect_accept4(fd, upeer_sockaddr, upeer_addrlen,
+				       flags);
+		return err;
+	}
+#endif
 	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
 		return -EINVAL;
 

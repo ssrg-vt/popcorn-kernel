@@ -12,5 +12,6 @@ int process_socket_create(struct pcn_kmsg_message *msg);
 int process_setsockopt(struct pcn_kmsg_message *msg);
 int process_bind(struct pcn_kmsg_message *msg);
 int process_listen(struct pcn_kmsg_message *msg);
+int process_accept4(struct pcn_kmsg_message *msg);
 
 #endif

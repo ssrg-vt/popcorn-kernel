@@ -619,61 +619,62 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 
 static int __restore_fdtable(fd_t *fds)
 {
-    struct files_struct *files = NULL;
-    struct fdtable *fdtab = NULL;
+	struct files_struct *files = NULL;
+	struct fdtable *fdtab = NULL;
 	struct file *filep = NULL;
-    struct path file_path;
-    fd_t src_fd;
-    int i = 0;
-    int err = 0;
-    char *f_path = NULL;
-    char buf[64];
+	struct path file_path;
+	fd_t src_fd;
+	int i = 0;
+	int err = 0;
+	char *f_path = NULL;
+	char buf[64];
 	mm_segment_t oldfs;
 
-    // get the remote fdtable
-    if (current->files)
-        files = current->files;
-    else
-        return -1;
-    fdtab = files_fdtable(files);
-    BUG_ON(fdtab == NULL);
-    pr_info("dst fdtab max_fds: %d\n", fdtab->max_fds);
+	// get the remote fdtable
+	if (current->files)
+		files = current->files;
+	else
+		return -1;
+	fdtab = files_fdtable(files);
+	BUG_ON(fdtab == NULL);
+	PSPRINTK("dst fdtab max_fds: %d\n", fdtab->max_fds);
 
-    // restore up to 64 fd. TODO: should not be the fix #
-    for (i = 0; i < 64; i++) {
-        src_fd = fds[i];
-        f_path = src_fd.file_path;
+	// restore up to 64 fd. TODO: should not be the fix #
+	for (i = 0; i < 64; i++) {
+		src_fd = fds[i];
+		f_path = src_fd.file_path;
 
-        // this is just used for printing some messages.
-        if (fdtab->fd[i] || strlen(f_path)) {
-            if (fdtab->fd[i]) {
-                file_path = fdtab->fd[i]->f_path;
-                pr_info("src fd[%d] path: %s, len: %ld. dst fd[%d]: %s\n", 
-                        src_fd.idx, f_path, strlen(f_path), 
-                        i, d_path(&file_path, buf, 64));
-            } else {
-                pr_info("src fd[%d] path: %s, len: %ld. dst fd[%d]: %p\n", 
-                        src_fd.idx, f_path, strlen(f_path), 
-                        i, fdtab->fd[i]);
-            }
-        }
+		// this is just used for printing some messages.
+	        if (fdtab->fd[i] || strlen(f_path)) {
+		    if (fdtab->fd[i]) {
+			file_path = fdtab->fd[i]->f_path;
+	                PSPRINTK("src fd[%d] path: %s, len: %ld. dst fd[%d]: %s\n",
+		                src_fd.idx, f_path, strlen(f_path),
+			        i, d_path(&file_path, buf, 64));
+	            } else {
+		        PSPRINTK("src fd[%d] path: %s, len: %ld. dst fd[%d]: %p\n",
+			        src_fd.idx, f_path, strlen(f_path),
+				i, fdtab->fd[i]);
+	            }
+		}
 
-        // open a file if src_fd has value. TODO: file permission should from src
-        if (strlen(f_path)) {
-	        oldfs = get_fs();
-	        set_fs(get_ds());
-	        filep = filp_open(f_path, O_RDWR | O_CREAT, 0644);
-	        set_fs(oldfs);
-	        if (IS_ERR(filep)) {
-	 		err = PTR_ERR(filep);
-		        pr_err("filp_open error, ret: %p, err: %d\n", filep, err);
-            }
-            else
-                fdtab->fd[i] = filep;
-        }
-    }
+		// open a file if src_fd has value. TODO: file permission should from src
+		if (strlen(f_path)) {
+			oldfs = get_fs();
+			set_fs(get_ds());
+			filep = filp_open(f_path, O_RDWR | O_CREAT, 0644);
+			set_fs(oldfs);
+			if (IS_ERR(filep)) {
+				err = PTR_ERR(filep);
+				PSPRINTK("filp_open error, ret: %p, err: %d\n",
+					 filep, err);
+		}
+		else
+			fdtab->fd[i] = filep;
+		}
+	}
 
-    return 0;
+	return 0;
 }
 
 static void __terminate_remote_threads(struct remote_context *rc)
@@ -956,6 +957,9 @@ static void __process_remote_works(void)
 			break;
 		case PCN_KMSG_TYPE_REMOTE_LISTEN:
 			process_listen(req);	// listen()
+			break;
+		case PCN_KMSG_TYPE_REMOTE_ACCEPT4:
+			process_accept4(req);	// accept4()
 			break;
 		default:
 			if (WARN_ON("Received unsupported remote work")) {

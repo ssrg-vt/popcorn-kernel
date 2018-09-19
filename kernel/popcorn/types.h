@@ -321,7 +321,8 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
 	int fd; \
 	struct sockaddr __user *umyaddr; \
 	int addrlen; \
-	int backlog;
+	int backlog; \
+	int __user *upeer_addrlen;
 DEFINE_PCN_KMSG(remote_socket_t, REMOTE_SOCKET_FIELDS);
 
 #define REPLY_FROM_ORIGIN_FIELDS \
