@@ -405,7 +405,7 @@ static vm_fault_t __do_page_fault(struct mm_struct *mm, unsigned long addr,
 			}
 		}
 	}
-	
+#endif
 	fault = VM_FAULT_BADMAP;
 	if (unlikely(!vma))
 		goto out;
@@ -560,14 +560,13 @@ retry:
 			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, regs,
 				      addr);
 		}
+	}
 #ifdef CONFIG_POPCORN
 	else if (distributed_process(current) && (fault & VM_FAULT_RETRY))
 		return 0;
 #endif
 	else
 		return 0;
-	}
-		 
 
 	/*
 	 * If we are in kernel mode at this point, we have no context to
@@ -742,7 +741,7 @@ static const struct fault_info fault_info[] = {
 	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 55"			},
 	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 56"			},
 	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 57"			},
-	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 58" 			},
+	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 58"			},
 	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 59"			},
 	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 60"			},
 	{ do_bad,		SIGKILL, SI_KERNEL,	"section domain fault"		},
