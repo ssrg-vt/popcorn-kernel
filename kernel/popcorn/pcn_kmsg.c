@@ -51,7 +51,8 @@ static atomic_t __nr_outstanding_requests[PCN_KMSG_TYPE_MAX] = { ATOMIC_INIT(0) 
 void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 {
 	pcn_kmsg_cbftn ftn;
-	static int cnt = 0;
+//	static int cnt = 0;
+#ifdef CONFIG_POPCORN_STAT
 	//ktime_t dt1, t1e, t1s;
 	ktime_t dt2, t2e, t2s;
 	ktime_t dt3, t3e, t3s;
@@ -59,6 +60,7 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 	static long long t2 = 0, t3 = 0, t4 = 0;
 
 	t2s = ktime_get();
+#endif
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
@@ -69,23 +71,29 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 	}
 #endif
 	account_pcn_message_recv(msg);
+#ifdef CONFIG_POPCORN_STAT
 	t2e = ktime_get();
 	t2 += ktime_to_ns(ktime_sub(t2e, t2s));
 
 	t3s = ktime_get();
+#endif
 	ftn = pcn_kmsg_cbftns[msg->header.type];
+#ifdef CONFIG_POPCORN_STAT
 	t3e = ktime_get();
 	t3 += ktime_to_ns(ktime_sub(t3e, t3s));
 
 	t4s = ktime_get();
+#endif
 	if (ftn != NULL) {
 		ftn(msg);
 	} else {
 		printk(KERN_ERR"No callback registered for %d\n", msg->header.type);
 		pcn_kmsg_done(msg);
 	}
+#ifdef CONFIG_POPCORN_STAT
 	t4e = ktime_get();
 	t4 += ktime_to_ns(ktime_sub(t4e, t4s));
+#if 0
 	if (cnt <= 2 ) {
 		t2 = 0; t3 = 0; t4 = 0;
 	}
@@ -104,7 +112,10 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 						__func__,
 						t4 / ITER,
 						t4 / ITER / 1000);
+		// TODO jack
 	}
+#endif
+#endif
 
 }
 EXPORT_SYMBOL(pcn_kmsg_process);

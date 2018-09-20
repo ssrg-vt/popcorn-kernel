@@ -687,7 +687,9 @@ void cq_comp_handler(struct ib_cq *cq, void *context)
 #endif
 
 retry:
+#ifdef CONFIG_POPCORN_STAT_MSG
 	t2s = ktime_get();
+#endif
 	while ((ret = ib_poll_cq(cq, 1, &wc)) > 0) {
 		if (wc.opcode < 0 || wc.status) {
 			__process_faulty_work(&wc);
