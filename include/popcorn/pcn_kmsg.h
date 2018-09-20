@@ -81,7 +81,7 @@ struct pcn_kmsg_hdr {
 	(((struct pcn_kmsg_message *)x)->header.from_nid)
 #define PCN_KMSG_SIZE(x) (sizeof(struct pcn_kmsg_hdr) + x)
 
-#define PCN_KMSG_MAX_SIZE (64UL << 10)
+#define PCN_KMSG_MAX_SIZE (32UL << 10)
 #define PCN_KMSG_MAX_PAYLOAD_SIZE \
 	(PCN_KMSG_MAX_SIZE - sizeof(struct pcn_kmsg_hdr))
 

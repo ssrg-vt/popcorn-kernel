@@ -53,9 +53,9 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
-	if (atomic_inc_return(__nr_outstanding_requests + msg->header.type) > 64) {
+	if (atomic_inc_return(__nr_outstanding_requests + msg->header.type) > 96) {
 		if (WARN_ON_ONCE("leaking received messages, ")) {
-			printk("type %d\n", msg->header.type);
+			//printk("type %d\n", msg->header.type);
 		}
 	}
 #endif
