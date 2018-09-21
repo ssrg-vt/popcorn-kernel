@@ -134,6 +134,7 @@ void pf_time_stat(struct seq_file *seq, void *v)
 					"per", atomic64_read(&clr_cnt) ?
 					 atomic64_read(&clr_ns)/atomic64_read(&clr_cnt)/1000 : 0);
 
+		/* R: only page (R+!pg_mine) */
 		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 			"fp", (atomic64_read(&fp_ns) / 1000) / MICROSECOND,
 					(atomic64_read(&fp_ns) / 1000)  % MICROSECOND,
@@ -148,6 +149,7 @@ void pf_time_stat(struct seq_file *seq, void *v)
 			"per", atomic64_read(&fph_cnt) ?
 			 atomic64_read(&fph_ns)/atomic64_read(&fph_cnt)/1000 : 0);
 
+		/* W: only inv */
 		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 			"inv", (atomic64_read(&inv_ns) / 1000) / MICROSECOND,
 					(atomic64_read(&inv_ns) / 1000)  % MICROSECOND,
@@ -162,6 +164,7 @@ void pf_time_stat(struct seq_file *seq, void *v)
 			"per", atomic64_read(&invh_cnt) ?
 			 atomic64_read(&invh_ns)/atomic64_read(&invh_cnt)/1000 : 0);
 
+		/* W: page + inv */
 		seq_printf(seq, "%4s  %10ld.%06ld (s)  %3s %-10ld   %3s %-6ld (us)\n",
 			"fpiv", (atomic64_read(&fpin_ns) / 1000) / MICROSECOND,
 					(atomic64_read(&fpin_ns) / 1000)  % MICROSECOND,
@@ -1820,7 +1823,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	bool leader;
 	remote_page_response_t *rp;
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
-	ktime_t fp_start;
+	ktime_t fp_start, fpin_start;
 	ktime_t dt, inv_end, inv_start;
 #endif
 
@@ -1864,27 +1867,40 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	fp_start = fpin_start = inv_start = ktime_get();
+#endif
+
 	rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
-	if (page_is_mine(mm, addr)) {
-		if (fault_for_write(fault_flags)) {
-			if (rp->result == VM_FAULT_CONTINUE) {
-				inv_end = ktime_get();
-				dt = ktime_sub(inv_end, inv_start);
-				atomic64_add(ktime_to_ns(dt), &inv_ns);
-				atomic64_inc(&inv_cnt);
-			} else if (!rp->result) { /* page transferred (W/R) */
+		if (page_is_mine(mm, addr)) {
+			if (fault_for_write(fault_flags)) {
+				if (rp->result == VM_FAULT_CONTINUE) { /* W: inv lat */
+					inv_end = ktime_get();
+					dt = ktime_sub(inv_end, inv_start);
+					atomic64_add(ktime_to_ns(dt), &inv_ns);
+					atomic64_inc(&inv_cnt);
+				} else if (!rp->result) { /* W: inv + page transferred */
+					// X -> W
+					ktime_t dt, fpin_end = ktime_get();
+					dt = ktime_sub(fpin_end, fpin_start);
+					atomic64_add(ktime_to_ns(dt), &fpin_ns);
+					atomic64_inc(&fpin_cnt);
+				}
+			}
+		} else { /* fp only page */
+			if (fault_for_read(fault_flags)) {
 				ktime_t dt, fp_end = ktime_get();;
 				dt = ktime_sub(fp_end, fp_start);
 				atomic64_add(ktime_to_ns(dt), &fp_ns);
 				atomic64_inc(&fp_cnt);
 			}
-//#ifdef CONFIG_POPCORN_CHECK_SANITY
-//			if (!rp->result) /* bad */
-//				PCNPRINTK_ERR("WRONG inv latency measurment at remote "
-//									"(page tramnsferring lat included)\n");
-//#endif
+			if (fault_for_write(fault_flags)) { /* W: inv + page transferred */
+					ktime_t dt, fpin_end = ktime_get();
+					dt = ktime_sub(fpin_end, fpin_start);
+					atomic64_add(ktime_to_ns(dt), &fpin_ns);
+					atomic64_inc(&fpin_cnt);
 		}
 	}
 #endif
