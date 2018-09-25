@@ -35,7 +35,6 @@ struct nitrox_cmdq {
 	/* requests in backlog queues */
 	atomic_t backlog_count;
 
-	int write_idx;
 	/* command size 32B/64B */
 	u8 instr_size;
 	u8 qno;
@@ -88,7 +87,7 @@ struct nitrox_bh {
 	struct bh_data *slc;
 };
 
-/* NITROX-V driver state */
+/* NITROX-5 driver state */
 #define NITROX_UCODE_LOADED	0
 #define NITROX_READY		1
 

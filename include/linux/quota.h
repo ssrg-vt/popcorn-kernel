@@ -408,7 +408,13 @@ struct qc_type_state {
 
 struct qc_state {
 	unsigned int s_incoredqs;	/* Number of dquots in core */
-	struct qc_type_state s_state[MAXQUOTAS];  /* Per quota type information */
+	/*
+	 * Per quota type information. The array should really have
+	 * max(MAXQUOTAS, XQM_MAXQUOTAS) entries. BUILD_BUG_ON in
+	 * quota_getinfo() makes sure XQM_MAXQUOTAS is large enough.  Once VFS
+	 * supports project quotas, this can be changed to MAXQUOTAS
+	 */
+	struct qc_type_state s_state[XQM_MAXQUOTAS];
 };
 
 /* Structure for communicating via ->set_info */

@@ -679,8 +679,10 @@ static int xts_ablkcipher_setkey(struct crypto_ablkcipher *ablkcipher,
 	int ret = 0;
 
 	if (keylen != 2 * AES_MIN_KEY_SIZE  && keylen != 2 * AES_MAX_KEY_SIZE) {
+		crypto_ablkcipher_set_flags(ablkcipher,
+					    CRYPTO_TFM_RES_BAD_KEY_LEN);
 		dev_err(jrdev, "key size mismatch\n");
-		goto badkey;
+		return -EINVAL;
 	}
 
 	ctx->cdata.keylen = keylen;
@@ -713,7 +715,7 @@ static int xts_ablkcipher_setkey(struct crypto_ablkcipher *ablkcipher,
 	return ret;
 badkey:
 	crypto_ablkcipher_set_flags(ablkcipher, CRYPTO_TFM_RES_BAD_KEY_LEN);
-	return -EINVAL;
+	return 0;
 }
 
 /*

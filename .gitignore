@@ -7,38 +7,6 @@
 # command after changing this file, to see if there are
 # any tracked files which get ignored after the change.
 #
-<<<<<<< HEAD
-# Normal rules
-#
-.*
-*.o
-*.o.*
-*.a
-*.s
-*.ko
-*.so
-*.so.dbg
-*.mod.c
-*.i
-*.lst
-*.symtypes
-*.order
-*.elf
-*.bin
-*.tar
-*.gz
-*.bz2
-*.lzma
-*.xz
-*.lz4
-*.lzo
-*.patch
-*.gcno
-modules.builtin
-Module.symvers
-*.dwo
-*.su
-=======
 # Normal rules (sorted alphabetically)
 #
 .*
@@ -76,7 +44,6 @@ Module.symvers
 *.xz
 Module.symvers
 modules.builtin
->>>>>>> linux/master
 
 #
 # Top-level generic files
@@ -92,55 +59,39 @@ modules.builtin
 /Module.markers
 
 #
-<<<<<<< HEAD
-=======
 # RPM spec file (make rpm-pkg)
 #
 /*.spec
 
 #
->>>>>>> linux/master
 # Debian directory (make deb-pkg)
 #
 /debian/
 
 #
-<<<<<<< HEAD
-=======
 # Snap directory (make snap-pkg)
 #
 /snap/
 
 #
->>>>>>> linux/master
 # tar directory (make tar*-pkg)
 #
 /tar-install/
 
 #
-<<<<<<< HEAD
-# git files that we don't want to ignore even it they are dot-files
-#
-!.gitignore
-!.mailmap
-=======
 # git files that we don't want to ignore even if they are dot-files
 #
 !.gitignore
 !.mailmap
 !.cocciconfig
 !.clang-format
->>>>>>> linux/master
 
 #
 # Generated include files
 #
 include/config
 include/generated
-<<<<<<< HEAD
-=======
 include/ksym
->>>>>>> linux/master
 arch/*/include/generated
 
 # stgit generated dirs

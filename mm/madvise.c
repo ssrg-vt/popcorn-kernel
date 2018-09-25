@@ -46,7 +46,6 @@ static int madvise_need_mmap_write(int behavior)
 	case MADV_REMOVE:
 	case MADV_WILLNEED:
 	case MADV_DONTNEED:
-	
 	case MADV_FREE:
 		return 0;
 	default:
@@ -689,7 +688,7 @@ static int madvise_inject_error(int behavior,
 
 	return 0;
 }
-#endif		
+#endif
 
 #ifdef CONFIG_POPCORN
 int madvise_release(struct vm_area_struct *vma, unsigned long start, unsigned long end)
@@ -723,7 +722,7 @@ madvise_vma(struct vm_area_struct *vma, struct vm_area_struct **prev,
 #ifdef CONFIG_POPCORN
 	case MADV_RELEASE:
 		return madvise_release(vma, start, end);
-#endif		
+#endif
 	default:
 		return madvise_behavior(vma, prev, start, end, behavior);
 	}
@@ -843,7 +842,7 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	unsigned long start_orig = start;
 	size_t len_orig = len_in;
 #endif
-	
+
 
 	if (!madvise_behavior_valid(behavior))
 		return error;
@@ -941,6 +940,6 @@ out:
 #ifdef CONFIG_POPCORN
 long ksys_madvise(unsigned long start, size_t len, int behavior)
 {
-        return __do_sys_madvise(start, len, behavior);
+	return __do_sys_madvise(start, len, behavior);
 }
 #endif

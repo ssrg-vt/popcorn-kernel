@@ -202,7 +202,7 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 	struct vm_area_struct *next;
 	unsigned long min_brk;
 	bool populate;
-	LIST_HEAD(uf);	
+	LIST_HEAD(uf);
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
 		while (!down_write_trylock(&mm->mmap_sem))
@@ -210,10 +210,13 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 	} else {
 		down_write(&mm->mmap_sem);
 	}
-#else	  
+#else
+	down_write(&mm->mmap_sem);
+#endif
+
 	if (down_write_killable(&mm->mmap_sem))
 		return -EINTR;
-#endif	
+
 #ifdef CONFIG_COMPAT_BRK
 	/*
 	 * CONFIG_COMPAT_BRK can still be overridden by setting
@@ -274,7 +277,7 @@ set_brk:
 			return brk;
 		}
 	}
-#endif	
+#endif
 	return brk;
 
 out:
@@ -286,7 +289,7 @@ out:
 #ifdef CONFIG_POPCORN
 long ksys_brk(unsigned long addr)
 {
-        return __do_sys_brk(addr);
+	return __do_sys_brk(addr);
 }
 #endif
 
@@ -2825,7 +2828,7 @@ int vm_munmap(unsigned long start, size_t len)
 {
 	int ret;
 	struct mm_struct *mm = current->mm;
-	LIST_HEAD(uf);	
+	LIST_HEAD(uf);
 #ifdef CONFIG_POPCORN
 	if (distributed_process(current)) {
 		while (!down_write_trylock(&mm->mmap_sem))
@@ -2833,11 +2836,11 @@ int vm_munmap(unsigned long start, size_t len)
 	} else {
 		down_write(&mm->mmap_sem);
 	}
-#else	  
+#else
 
 	if (down_write_killable(&mm->mmap_sem))
 		return -EINTR;
-#endif	
+#endif
 	ret = do_munmap(mm, start, len, &uf);
 	up_write(&mm->mmap_sem);
 	userfaultfd_unmap_complete(mm, &uf);

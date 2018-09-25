@@ -22,7 +22,7 @@
 #include <popcorn/process_server.h>
 #include <popcorn/vma_server.h>
 #endif
-	 
+
 #include "internal.h"
 
 static struct page *no_page_table(struct vm_area_struct *vma,
@@ -840,7 +840,7 @@ retry:
 		}
 	}
 #endif
-	
+
 	if (!vma || address < vma->vm_start)
 		return -EFAULT;
 

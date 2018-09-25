@@ -132,7 +132,6 @@ obj-$(CONFIG_EFI)			+= sysfb_efi.o
 
 obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o
 obj-$(CONFIG_TRACING)			+= tracepoint.o
-
 obj-$(CONFIG_POPCORN)		+= cpuinfo.o process_server.o
 obj-$(CONFIG_SCHED_MC_PRIO)		+= itmt.o
 obj-$(CONFIG_X86_INTEL_UMIP)		+= umip.o

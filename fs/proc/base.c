@@ -349,7 +349,7 @@ static ssize_t proc_pid_cmdline_read(struct file *file, char __user *buf,
 		put_task_struct(tsk);
 		return 0;
 	}
-#endif	
+#endif
 	ret = get_task_cmdline(tsk, buf, count, pos);
 	put_task_struct(tsk);
 	if (ret > 0)
@@ -3609,4 +3609,3 @@ void __init set_proc_pid_nlink(void)
 	nlink_tid = pid_entry_nlink(tid_base_stuff, ARRAY_SIZE(tid_base_stuff));
 	nlink_tgid = pid_entry_nlink(tgid_base_stuff, ARRAY_SIZE(tgid_base_stuff));
 }
-

@@ -56,7 +56,6 @@ struct signal_struct;
 struct task_delay_info;
 struct task_group;
 
-
 /*
  * Task state bitmask. NOTE! These bits are also
  * encoded in fs/proc/array.c: get_task_state().
@@ -1210,7 +1209,7 @@ struct task_struct {
 	 */
 	unsigned long lutime, lstime, llasttimestamp;
 #endif
-  
+
 #ifdef CONFIG_MMU
 	struct task_struct		*oom_reaper_list;
 #endif

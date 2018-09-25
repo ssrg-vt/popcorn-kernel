@@ -579,7 +579,7 @@ ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
 	if (WARN_ON(distributed_remote_process(current))) {
 		printk("  file read at remote thread is not supported yet\n");
 	}
-#endif	
+#endif
 	if (f.file) {
 		loff_t pos = file_pos_read(f.file);
 		ret = vfs_read(f.file, buf, count, &pos);
@@ -605,7 +605,7 @@ ssize_t ksys_write(unsigned int fd, const char __user *buf, size_t count)
 		printk("  file write at remote thread is not supported yet\n");
 	}
 #endif
-	  
+
 	if (f.file) {
 		loff_t pos = file_pos_read(f.file);
 		ret = vfs_write(f.file, buf, count, &pos);
@@ -2094,4 +2094,3 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL(vfs_dedupe_file_range);
-

@@ -4925,8 +4925,8 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 }
 
 #ifdef CONFIG_POPCORN
-#include <popcorn/types.h>
 #include <popcorn/bundle.h>
+#include <popcorn/types.h>
 #include <popcorn/process_server.h>
 
 SYSCALL_DEFINE1(popcorn_get_thread_status, struct popcorn_thread_status __user *, status)
@@ -5047,30 +5047,7 @@ SYSCALL_DEFINE2(popcorn_migrate, int, nid, void __user *, uregs)
 	return 0;
 }
 #pragma GCC reset_options
-#else // CONFIG_POPCORN
-SYSCALL_DEFINE2(popcorn_migrate, int, nid, void __user *, uregs)
-{
-	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
-	return -EPERM;
-}
-
-SYSCALL_DEFINE2(popcorn_propose_migration, pid_t, pid, int, nid)
-{
-	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
-	return -EPERM;
-}
-
-SYSCALL_DEFINE1(popcorn_get_thread_status, struct popcorn_node_info __user *, status)
-{
-	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
-	return -EPERM;
-}
-
-SYSCALL_DEFINE2(popcorn_get_node_info, int *, _my_nid, struct popcorn_node_info __user *, info)
-	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
-	return -EPERM;
-}
-#endif
+#endif // CONFIG_POPCORN
 
 /**
  * sys_sched_yield - yield the current processor to other threads.

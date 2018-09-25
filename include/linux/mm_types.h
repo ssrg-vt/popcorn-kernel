@@ -13,7 +13,6 @@
 #include <linux/cpumask.h>
 #include <linux/uprobes.h>
 #include <linux/page-flags-layout.h>
-
 #include <linux/workqueue.h>
 
 #include <asm/mmu.h>
@@ -497,9 +496,9 @@ struct mm_struct {
 		struct hmm *hmm;
 #endif
 #ifdef CONFIG_POPCORN
-	        struct remote_context *remote;
+		struct remote_context *remote;
 #endif
-	  
+
 	} __randomize_layout;
 
 	/*

@@ -29,7 +29,6 @@
  */
 
 /*
-
  * 05.04.94  -  Multi-page memory management added for v1.1.
  *              Idea by Alex Bligh (alex@cconcepts.co.uk)
  *
@@ -1661,7 +1660,7 @@ void zap_vma_ptes(struct vm_area_struct *vma, unsigned long address,
 		unsigned long size)
 {
 	if (address < vma->vm_start || address + size > vma->vm_end ||
-			!(vma->vm_flags & VM_PFNMAP))
+	    		!(vma->vm_flags & VM_PFNMAP))
 		return;
 
 	zap_page_range_single(vma, address, size, NULL);
@@ -3071,7 +3070,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 		mem_cgroup_commit_charge(page, memcg, false, false);
 		lru_cache_add_active_or_unevictable(page, vma);
 	} else {
-	       do_page_add_anon_rmap(page, vma, vmf->address, exclusive);
+		do_page_add_anon_rmap(page, vma, vmf->address, exclusive);
 		mem_cgroup_commit_charge(page, memcg, true, false);
 		activate_page(page);
 	}
@@ -4104,7 +4103,7 @@ int handle_pte_fault_origin(struct mm_struct *mm, struct vm_area_struct *vma,
 	pte_t entry = *pte;
 	struct vm_fault vmf = {
 		.vma = vma,
-		.address = address,
+		.address = address & PAGE_MASK,
 		.flags = flags,
 		.pgoff = linear_page_index(vma, address),
 		.gfp_mask = __get_fault_gfp_mask(vma),

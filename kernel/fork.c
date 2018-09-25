@@ -920,7 +920,8 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 	tsk->fault_address = 0;
 	tsk->fault_retry = 0;
 #endif
-#endif	
+#endif // CONFIG_POPCORN
+
 	return tsk;
 
 free_stack:
@@ -998,7 +999,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 #endif
 #ifdef CONFIG_POPCORN
 	mm->remote = NULL;
-#endif	
+#endif
 	mm_init_uprobes_state(mm);
 
 	if (current->mm) {
@@ -1059,9 +1060,9 @@ static inline void __mmput(struct mm_struct *mm)
 	if (mm->binfmt)
 		module_put(mm->binfmt->module);
 #ifdef CONFIG_POPCORN
-		if (mm->remote)
-			free_remote_context(mm->remote);
-#endif	
+	if (mm->remote)
+		free_remote_context(mm->remote);
+#endif
 	mmdrop(mm);
 }
 

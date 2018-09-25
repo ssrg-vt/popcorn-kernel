@@ -60,28 +60,28 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 
 	available = si_mem_available();
 #ifdef CONFIG_POPCORN_REMOTE_INFO
-        show_val_kb(m, "MemTotal:       ", i.totalram + rem_mem.MemTotal);
-        show_val_kb(m, "MemFree:        ", i.freeram + rem_mem.MemFree);
+	show_val_kb(m, "MemTotal:       ", i.totalram + rem_mem.MemTotal);
+	show_val_kb(m, "MemFree:        ", i.freeram + rem_mem.MemFree);
 	show_val_kb(m, "MemAvailable:   ", available + rem_mem.MemAvailable);
 	show_val_kb(m, "Buffers:        ", i.bufferram + rem_mem.Buffers);
 	show_val_kb(m, "Cached:         ", cached + rem_mem.Cached);
 	show_val_kb(m, "SwapCached:     ", total_swapcache_pages() + rem_mem.SwapCached);
 	show_val_kb(m, "Active:         ", pages[LRU_ACTIVE_ANON] +
 					   pages[LRU_ACTIVE_FILE] +
-		                           rem_mem.Active);
+					   rem_mem.Active);
 	show_val_kb(m, "Inactive:       ", pages[LRU_INACTIVE_ANON] +
 					   pages[LRU_INACTIVE_FILE] +
-		                           rem_mem.InActive);
+					   rem_mem.InActive);
 	show_val_kb(m, "Active(anon):   ", pages[LRU_ACTIVE_ANON] +
-		                           rem_mem.Active_anon);	    
+					   rem_mem.Active_anon);
 	show_val_kb(m, "Inactive(anon): ", pages[LRU_INACTIVE_ANON] +
-		                           rem_mem.Inactive_anon);		    
+					   rem_mem.Inactive_anon);
 	show_val_kb(m, "Active(file):   ", pages[LRU_ACTIVE_FILE] +
-		                           rem_mem.Active_file);
+					   rem_mem.Active_file);
 	show_val_kb(m, "Inactive(file): ", pages[LRU_INACTIVE_FILE] +
-		                           rem_mem.Inactive_file);
+					   rem_mem.Inactive_file);
 	show_val_kb(m, "Unevictable:    ", pages[LRU_UNEVICTABLE] +
-		                           rem_mem.Unevictable);		    
+					   rem_mem.Unevictable);
 	show_val_kb(m, "Mlocked:        ", global_zone_page_state(NR_MLOCK) + rem_mem.Mlocked);
 
 #ifdef CONFIG_HIGHMEM
@@ -117,7 +117,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		    rem_mem.SReclaimable);
 	show_val_kb(m, "SUnreclaim:     ",
 		    global_node_page_state(NR_SLAB_UNRECLAIMABLE) +
-		    rem_mem.SUnReclaim);		    
+		    rem_mem.SUnReclaim);
 	seq_printf(m, "KernelStack:    %8lu kB\n",
 		   global_zone_page_state(NR_KERNEL_STACK_KB) +
 		   rem_mem.KernelStack);
@@ -168,7 +168,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	show_val_kb(m, "CmaTotal:       ", totalcma_pages + rem_mem.CmaTotal);
 	show_val_kb(m, "CmaFree:        ",
 		    global_zone_page_state(NR_FREE_CMA_PAGES) + rem_mem.CmaFree);
-#endif	
+#endif
 #else
 	show_val_kb(m, "MemTotal:       ", i.totalram);
 	show_val_kb(m, "MemFree:        ", i.freeram);
@@ -257,9 +257,8 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 #ifdef CONFIG_CMA
 	show_val_kb(m, "CmaTotal:       ", totalcma_pages);
 	show_val_kb(m, "CmaFree:        ",
-		    global_zone_page_state(NR_FREE_CMA_PAGES));	
+		    global_zone_page_state(NR_FREE_CMA_PAGES));
 #endif
-	
 #endif  // CONFIG_POPCORN_REMOTE_INFO
 
 	hugetlb_report_meminfo(m);
