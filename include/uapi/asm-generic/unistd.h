@@ -736,9 +736,16 @@ __SYSCALL(__NR_statx,     sys_statx)
 __SC_COMP(__NR_io_pgetevents, sys_io_pgetevents, compat_sys_io_pgetevents)
 #define __NR_rseq 293
 __SYSCALL(__NR_rseq, sys_rseq)
-
+#define __NR_popcorn_migrate 294
+__SYSCALL(__NR_popcorn_migrate, sys_popcorn_migrate)
+#define __NR_popcorn_propose_migration 295
+__SYSCALL(__NR_popcorn_propose_migration, sys_popcorn_propose_migration)
+#define __NR_popcorn_get_thread_status 296
+__SYSCALL(__NR_popcorn_get_thread_status, sys_popcorn_get_thread_status)
+#define __NR_popcorn_get_node_info 297
+__SYSCALL(__NR_popcorn_get_node_info, sys_popcorn_get_node_info)
 #undef __NR_syscalls
-#define __NR_syscalls 294
+#define __NR_syscalls 298
 
 /*
  * 32 bit systems traditionally used different
