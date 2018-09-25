@@ -21,7 +21,7 @@
 #include <linux/uaccess.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/mm.h>
-#include <asm-generic/cputime_jiffies.h>
+#include <linux/jiffies.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/types.h>
 #include "types.h"
@@ -143,8 +143,8 @@ DEFINE_PCN_KMSG(remote_ps_response_t, REMOTE_PS_RESPONSE_FIELDS);
 static void popcorn_ps_load(struct task_struct *t, unsigned int *puload, unsigned int *psload)
 {
 	unsigned long delta, now;
-	unsigned long utime = cputime_to_jiffies(t->utime);
-	unsigned long stime = cputime_to_jiffies(t->stime);
+	unsigned long utime = nsecs_to_jiffies(t->utime);
+	unsigned long stime = nsecs_to_jiffies(t->stime);
 	unsigned int uload, sload;
 	delta = now = get_jiffies_64();
 

@@ -22,6 +22,7 @@
 
 #include <asm/compat.h>
 #include <asm/fpsimd.h>
+#include <asm/system_misc.h>
 
 #include <popcorn/regset.h>
 #include <popcorn/debug.h>
@@ -127,7 +128,7 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, current->pid,
 			*task_user_tls(current), arch->fpu_active ? "" : "in");
 #if defined(CONFIG_POPCORN_DEBUG_PROCESS_SERVER)
-	show_regs(regs);
+	__show_regs(regs);
 #endif
 #endif
 

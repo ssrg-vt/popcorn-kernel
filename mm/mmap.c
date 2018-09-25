@@ -206,12 +206,8 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
 		while (!down_write_trylock(&mm->mmap_sem))
-			schedule();
-	} else {
-		down_write(&mm->mmap_sem);
+			schedule();	
 	}
-#else
-	down_write(&mm->mmap_sem);
 #endif
 
 	if (down_write_killable(&mm->mmap_sem))
@@ -2833,14 +2829,12 @@ int vm_munmap(unsigned long start, size_t len)
 	if (distributed_process(current)) {
 		while (!down_write_trylock(&mm->mmap_sem))
 			schedule();
-	} else {
-		down_write(&mm->mmap_sem);
 	}
-#else
+#endif
 
 	if (down_write_killable(&mm->mmap_sem))
 		return -EINTR;
-#endif
+
 	ret = do_munmap(mm, start, len, &uf);
 	up_write(&mm->mmap_sem);
 	userfaultfd_unmap_complete(mm, &uf);

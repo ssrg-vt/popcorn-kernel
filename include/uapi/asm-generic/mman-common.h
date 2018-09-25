@@ -66,7 +66,6 @@
 #define MADV_WIPEONFORK 18		/* Zero memory on fork, child only */
 #define MADV_KEEPONFORK 19		/* Undo MADV_WIPEONFORK */
 
-
 #ifdef CONFIG_POPCORN
 #define MADV_RELEASE 20
 #endif

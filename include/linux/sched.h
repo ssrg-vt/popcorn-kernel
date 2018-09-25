@@ -28,8 +28,9 @@
 #include <linux/mm_types_task.h>
 #include <linux/task_io_accounting.h>
 #include <linux/rseq.h>
+#ifdef CONFIG_POPCORN
 #include <linux/completion.h>
-
+#endif
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
 struct backing_dev_info;

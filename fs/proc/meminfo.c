@@ -71,7 +71,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 					   rem_mem.Active);
 	show_val_kb(m, "Inactive:       ", pages[LRU_INACTIVE_ANON] +
 					   pages[LRU_INACTIVE_FILE] +
-					   rem_mem.InActive);
+					   rem_mem.Inactive);
 	show_val_kb(m, "Active(anon):   ", pages[LRU_ACTIVE_ANON] +
 					   rem_mem.Active_anon);
 	show_val_kb(m, "Inactive(anon): ", pages[LRU_INACTIVE_ANON] +
@@ -117,7 +117,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		    rem_mem.SReclaimable);
 	show_val_kb(m, "SUnreclaim:     ",
 		    global_node_page_state(NR_SLAB_UNRECLAIMABLE) +
-		    rem_mem.SUnReclaim);
+		    rem_mem.SUnreclaim);
 	seq_printf(m, "KernelStack:    %8lu kB\n",
 		   global_zone_page_state(NR_KERNEL_STACK_KB) +
 		   rem_mem.KernelStack);
