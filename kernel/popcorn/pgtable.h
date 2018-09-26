@@ -41,7 +41,7 @@ static inline pte_t pte_make_valid(pte_t entry)
 #elif defined(CONFIG_PPC64)
 static inline unsigned long pte_flags(pte_t entry)
 {
-	return (unsigned long)entry;
+	return (unsigned long)entry.pte;
 }
 
 static inline pte_t pte_make_invalid(pte_t entry)
