@@ -1660,7 +1660,7 @@ void zap_vma_ptes(struct vm_area_struct *vma, unsigned long address,
 		unsigned long size)
 {
 	if (address < vma->vm_start || address + size > vma->vm_end ||
-	    		!(vma->vm_flags & VM_PFNMAP))
+			!(vma->vm_flags & VM_PFNMAP))
 		return;
 
 	zap_page_range_single(vma, address, size, NULL);
@@ -3948,12 +3948,13 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 {
 	pte_t entry;
 #ifdef CONFIG_POPCORN
-	pte_t *pte = vmf->pte;
-	pmd_t *pmd = vmf->pmd;
 	struct vm_area_struct *vma = vmf->vma;
 	struct mm_struct *mm = vma->vm_mm;
+	pte_t *pte = vmf->pte;
+	pmd_t *pmd = vmf->pmd;
 	unsigned long address = vmf->address;
 	unsigned int flags = vmf->flags;
+	entry = *pte;
 #endif
 	if (unlikely(pmd_none(*vmf->pmd))) {
 		/*

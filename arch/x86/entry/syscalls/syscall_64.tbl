@@ -343,10 +343,10 @@
 332	common	statx			__x64_sys_statx
 333	common	io_pgetevents		__x64_sys_io_pgetevents
 334	common	rseq			__x64_sys_rseq
-335 	64	popcorn_migrate		sys_popcorn_migrate
-336 	64	popcorn_propose_migration	sys_popcorn_propose_migration
-337 	64	popcorn_get_thread_status	sys_popcorn_get_thread_status
-338 	64	popcorn_get_node_info	sys_popcorn_get_node_info
+335 	64	popcorn_migrate		__x64_sys_popcorn_migrate
+336 	64	popcorn_propose_migration	__x64_sys_popcorn_propose_migration
+337 	64	popcorn_get_thread_status	__x64_sys_popcorn_get_thread_status
+338 	64	popcorn_get_node_info	__x64_sys_popcorn_get_node_info
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact
