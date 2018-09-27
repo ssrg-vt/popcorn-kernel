@@ -22,6 +22,7 @@
 #define MAX_X86_CORES 32
 
 #include <popcorn/bundle.h>
+#include <linux/seq_file.h>
 
 /* For x86_64 cores */
 struct percore_info_x86 {
@@ -86,11 +87,10 @@ struct remote_cpu_info {
 };
 
 
-struct seq_file;
 
 extern int fill_cpu_info(struct remote_cpu_info *res);
 extern void send_remote_cpu_info_request(unsigned int nid);
 extern unsigned int get_number_cpus_from_remote_node(unsigned int nid);
 extern int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos);
 
-#endif
+#endif //  _LINUX_POPCORN_CPUINFO_H

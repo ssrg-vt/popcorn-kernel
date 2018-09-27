@@ -9,6 +9,7 @@
 #define __POPCORN_PCN_KMSG_H__
 
 #include <linux/types.h>
+#include <linux/seq_file.h>
 
 /* Enumerate message types */
 enum pcn_kmsg_type {
