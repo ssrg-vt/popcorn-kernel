@@ -3954,7 +3954,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	pmd_t *pmd = vmf->pmd;
 	unsigned long address = vmf->address;
 	unsigned int flags = vmf->flags;
-	entry = *pte;
+	// entry = *pte;
 #endif
 	if (unlikely(pmd_none(*vmf->pmd))) {
 		/*
@@ -3998,6 +3998,20 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		else
 			return do_fault(vmf);
 	}
+
+	if (!pte_present(vmf->orig_pte)) {
+#ifdef CONFIG_POPCORN
+		page_server_panic(true, mm, address, pte, entry);
+#endif
+		return do_swap_page(vmf);
+	}
+
+	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
+		return do_numa_page(vmf);
+
+	vmf->ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
+	spin_lock(vmf->ptl);
+	entry = vmf->orig_pte;
 #ifdef CONFIG_POPCORN
 	if (distributed_process(current)) {
 		int ret = page_server_handle_pte_fault(mm, vma, address, pmd, pte, entry, flags);
@@ -4015,21 +4029,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		}
 		if (ret != VM_FAULT_CONTINUE) return ret;
 	}
-#endif
-
-	if (!pte_present(vmf->orig_pte)) {
-#ifdef CONFIG_POPCORN
-		page_server_panic(true, mm, address, pte, entry);
-#endif
-		return do_swap_page(vmf);
-	}
-
-	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
-		return do_numa_page(vmf);
-
-	vmf->ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
-	spin_lock(vmf->ptl);
-	entry = vmf->orig_pte;
+#endif	
 	if (unlikely(!pte_same(*vmf->pte, entry)))
 		goto unlock;
 	if (vmf->flags & FAULT_FLAG_WRITE) {
