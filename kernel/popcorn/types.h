@@ -341,6 +341,30 @@ DEFINE_PCN_KMSG(remote_socket_response_t, REPLY_FROM_ORIGIN_FIELDS);
 	int optlen;
 DEFINE_PCN_KMSG(remote_setsockopt_t, REMOTE_SETSOCKOPT_FIELDS);
 
+#define SYSCALL_FWD_FIELDS			\
+	pid_t origin_pid;			\
+	uint64_t param0;				\
+	uint64_t param1;				\
+	uint64_t param2;				\
+	uint64_t param3;				\
+	uint64_t param4;				\
+	uint64_t param5;				\
+	int remote_ws;				\
+	int ret;
+DEFINE_PCN_KMSG(syscall_fwd_t, SYSCALL_FWD_FIELDS);
+
+#define SYSCALL_REP_FIELDS			\
+	pid_t origin_pid;			\
+	uint64_t param0;				\
+	uint64_t param1;				\
+	uint64_t param2;				\
+	uint64_t param3;				\
+	uint64_t param4;				\
+	uint64_t param5;				\
+	int remote_ws;				\
+	int ret;
+DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
+
 /**
  * Message routing using work queues
  */
