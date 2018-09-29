@@ -1883,6 +1883,8 @@ struct task_struct {
 	/* Dynamic logs */
 	unsigned int omp_regions[MAX_OMP_REGIONS];
 
+	/* Debug */
+	unsigned long begin_m_cnt;
 
 	/*
 	 * scheduling -- antoniob

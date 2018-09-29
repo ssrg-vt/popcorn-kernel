@@ -38,6 +38,28 @@
 
 #include "trace_events.h"
 
+#define ORIGIN_TSO 0
+#define REMOTE_TSO 0
+#define TSO_HEAP_SUPPORT 0
+#define LUD_DEBUG 0
+#define DBG_ADDR_ON 0
+//#define DBG_ADDR 0x7fffb7e56000
+#define DBG_ADDR 0x12345677
+//#define DBG_ADDR 0xad4000 // stream
+//#define DBG_ADDR 0x38cd000 // cg
+//#define DBG_ADDR 0x7ffff5e56000 // cfd
+//#define DBG_ADDR 0x826000 // cfd
+
+#define PERF_DBG 0
+#define BUF_DBG 0
+#define JACK_DEBUG 0
+#if JACK_DEBUG
+//#define SYNCPRINTK2(...) printk(KERN_INFO __VA_ARGS__)
+#define SYNCPRINTK2(...) PCNPRINTK_ERR(KERN_INFO __VA_ARGS__)
+#else
+#define SYNCPRINTK2(...)
+#endif
+
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 #define MICROSECOND 1000000
 atomic64_t mm_cnt = ATOMIC64_INIT(0);
@@ -224,7 +246,8 @@ static inline void __get_page_info_key(unsigned long addr, unsigned long *key, u
 			(PER_PAGE_INFO_SIZE / sizeof(unsigned long));
 }
 
-static inline struct page *__get_page_info_page(struct mm_struct *mm, unsigned long addr, unsigned long *offset)
+//static inline struct page *__get_page_info_page(struct mm_struct *mm, unsigned long addr, unsigned long *offset)
+struct page *__get_page_info_page(struct mm_struct *mm, unsigned long addr, unsigned long *offset)
 {
 	unsigned long key;
 	struct page *page;
@@ -462,13 +485,28 @@ static struct fault_handle *__start_invalidation(struct task_struct *tsk, unsign
 	DECLARE_COMPLETION_ONSTACK(complete);
 	int fk = __fault_hash_key(addr);
 
+wait:
 	spin_lock_irqsave(&rc->faults_lock[fk], flags);
 	hlist_for_each_entry(fh, &rc->faults[fk], list) {
 		if (fh->addr == addr) {
 			PGPRINTK("  [%d] %s %s ongoing, wait\n", tsk->pid,
 				fh->flags & FAULT_HANDLE_REMOTE ? "remote" : "local",
 				fh->flags & FAULT_HANDLE_WRITE ? "write" : "read");
-			BUG_ON(fh->flags & FAULT_HANDLE_INVALIDATE);
+			if (my_nid == 0) {
+				// TODO happens streamcluster // Jack guess: multi-remote-threads sending the same inv addr reqs
+				//BUG_ON(fh->flags & FAULT_HANDLE_INVALIDATE);
+					spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
+					SYNCPRINTK2("%s: inv confiliction %lx wait *dealed* "
+											"(Origin)\n", __func__, addr);
+					goto wait; // stupid wait until "not found"
+			} else { // remote *dealed // wait // better:
+				if (fh->flags & FAULT_HANDLE_INVALIDATE) {
+					spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
+					SYNCPRINTK2("%s: inv confiliction %lx wait *dealed* "
+											"(Remote)\n", __func__, addr);
+					goto wait; // stupid wait until "not found"
+				}
+			}
 			fh->flags |= FAULT_HANDLE_INVALIDATE;
 			fh->complete = &complete;
 			found = true;
@@ -537,7 +575,30 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 				get_fh_action(tsk->at_remote, fh->flags, fault_flags);
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-		BUG_ON(action == FH_ACTION_INVALID);
+		if (action == FH_ACTION_INVALID) {
+			//PCNPRINTK_ERR("%s: no such process %d %d %lx\n", __func__,
+			//		req->origin_pid, req->remote_pid, *req->addrs);
+			unsigned short i;
+			i  = (tsk->at_remote << 5);
+			i |= (fh->flags & 0x07) << 2;
+			i |= !!(fault_for_write(fault_flags)) << 1;
+			i |= !!(fault_flags & FAULT_FLAG_REMOTE) << 0;
+			//FAULT_HANDLE_WRITE = 0x01,
+			//FAULT_HANDLE_INVALIDATE = 0x02,
+			//FAULT_HANDLE_REMOTE = 0x04,
+			PCNPRINTK_ERR("%s: r) rm)inv)wri) wri)rm) %lx\n", __func__, addr);
+			PCNPRINTK_ERR("%s: %c %c%c%c %c%c\n", __func__,
+							i & 0x20?'1':'0',
+							i & 0x10?'1':'0',
+							i & 0x08?'1':'0',
+							i & 0x04?'1':'0',
+							i & 0x02?'1':'0',
+							i & 0x01?'1':'0');
+			if (tsk->at_remote)
+				action = FH_ACTION_RETRY;
+			else
+				BUG();
+		}
 #endif
 		if (action & FH_ACTION_RETRY) {
 			if (action & FH_ACTION_WAIT) {
@@ -725,7 +786,7 @@ out:
 /**************************************************************************
  * Panicked by bug!!!!!
  */
-void page_server_panic(bool condition, struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val)
+void page_server_panic(bool condition, struct mm_struct *mm, unsigned long address, pte_t *pte, pte_t pte_val, int local_origin)
 {
 	unsigned long *pi;
 	unsigned long pi_val = -1;
@@ -739,9 +800,11 @@ void page_server_panic(bool condition, struct mm_struct *mm, unsigned long addre
 	}
 
 	printk(KERN_ERR "------------------ Start panicking -----------------\n");
-	printk(KERN_ERR "%s: %lx %p %lx %p %lx\n", __func__,
-			address, pi, pi_val, pte, pte_flags(pte_val));
+	printk(KERN_ERR "%s: [%d] %lx %p %lx %p %lx LO(%s)\n", __func__,
+			current->pid, address, pi, pi_val, pte,
+				pte_flags(pte_val), local_origin?"O":"X");
 	show_regs(current_pt_regs());
+	dump_stack();
 	BUG_ON("Page server panicked!!");
 }
 
@@ -964,9 +1027,15 @@ static void __do_invalidate_page(struct task_struct *tsk, page_invalidate_reques
 		goto out;
 	}
 
-	PGPRINTK("\nINVALIDATE_PAGE [%d] %lx [%d/%d]\n", tsk->pid, addr,
-			req->origin_pid, PCN_KMSG_FROM_NID(req));
-
+	//PGPRINTK("INVALIDATE_PAGE [%d] %lx [%d %d/%d]\n", tsk->pid, addr,
+	//SYNCPRINTK("- INVALIDATE_PAGE [%d] %lx [%d %d/%d]\n", tsk->pid, addr,
+	//		req->origin_pid, req->remote_pid, PCN_KMSG_FROM_NID(req));
+#if LUD_DEBUG
+	if (addr == DBG_ADDR) {
+		SYNCPRINTK("- INVALIDATE_PAGE [%d] %lx [%d %d/%d]\n", tsk->pid, addr,
+				req->origin_pid, req->remote_pid, PCN_KMSG_FROM_NID(req));
+	}
+#endif
 	pte = __get_pte_at(mm, addr, &pmd, &ptl);
 	if (!pte) goto out;
 
@@ -989,6 +1058,99 @@ out:
 	up_read(&mm->mmap_sem);
 	mmput(mm);
 }
+
+/* no return */
+static void __do_invalidate_pages(struct task_struct *tsk, page_invalidate_batch_request_t *req)
+{
+	struct mm_struct *mm = get_task_mm(tsk);
+	struct vm_area_struct *vma;
+	pmd_t *pmd;
+	pte_t *pte, entry;
+	spinlock_t *ptl;
+	int i;
+	int ret = 0; // redundant
+	struct fault_handle *fh;
+	unsigned long *addrs = req->addrs; // TODO more
+
+	down_read(&mm->mmap_sem);
+	for (i = 0; i < req->tso_wr_cnt; i++) {
+		unsigned long addr = addrs[i];
+		/* TODO: trim this list? currently sending some redundant requests
+							(It may cause bugs as well !!!!!!!!!!!!!!!!!)*/
+#if DBG_ADDR_ON
+		if (addr == DBG_ADDR) {
+			SYNCPRINTK("[p] INVALIDATE_PAGE [%d/%lu] [%d] %lx [%d %d/%d]\n", i,
+							req->tso_wr_cnt, tsk->pid, addr, req->origin_pid,
+									req->remote_pid, PCN_KMSG_FROM_NID(req));
+		}
+#endif
+		BUG_ON(!addr);
+		vma = find_vma(mm, addr);
+		if (!vma || vma->vm_start > addr) {
+			ret = VM_FAULT_SIGBUS; // redundant
+			SYNCPRINTK2("%s(): fail to find vma\n", __func__);
+			continue;
+			//goto out;
+		}
+
+
+#if BUF_DBG
+		SYNCPRINTK("* INVALIDATE_PAGE [%d/%lu] [%d] %lx [%d %d/%d]\n", i,
+						req->tso_wr_cnt, tsk->pid, addr, req->origin_pid,
+								req->remote_pid, PCN_KMSG_FROM_NID(req));
+#endif
+#if DBG_ADDR_ON
+		if (addr == DBG_ADDR) {
+			SYNCPRINTK("* INVALIDATE_PAGE [%d/%lu] [%d] %lx [%d %d/%d]\n", i,
+							req->tso_wr_cnt, tsk->pid, addr, req->origin_pid,
+									req->remote_pid, PCN_KMSG_FROM_NID(req));
+		}
+#endif
+
+		pte = __get_pte_at(mm, addr, &pmd, &ptl);
+		if (!pte) {
+			SYNCPRINTK2("%s(): no pte\n", __func__);
+			continue;
+			//goto out;
+		}
+
+		// TODO: think hard. jack's detour
+		// check before fh is better !!
+		if (!pte_present(*pte)) { // why? not present....
+			if (!pte_none(*pte)) {
+				SYNCPRINTK2("%s: pte_none %lx *dealed*\n", __func__, addr);
+			} else {
+				SYNCPRINTK2("%s: !pte_presenm %lx *dealed*\n", __func__, addr);
+			}
+			pte_unmap(pte);
+			continue;
+			// or TODO: create a pte (better but how?)
+			//goto out;
+		}
+
+		spin_lock(ptl);
+		fh = __start_invalidation(tsk, addr, ptl); // one by one// optimization?
+
+		//BUG_ON(fh); // cannot leave when it's not "leader + no inv"
+		clear_page_owner(my_nid, mm, addr);
+
+
+		//BUG_ON(!pte_present(*pte)); // batch(origin) CG at  remote // *dealed*
+		entry = ptep_clear_flush(vma, addr, pte);
+		entry = pte_make_invalid(entry);
+
+		set_pte_at_notify(mm, addr, pte, entry);
+		update_mmu_cache(vma, addr, pte);
+
+		__finish_invalidation(fh);
+		pte_unmap_unlock(pte, ptl);
+	}
+
+//out:
+	up_read(&mm->mmap_sem);
+	mmput(mm);
+}
+
 
 static void process_page_invalidate_request(struct work_struct *work)
 {
@@ -1034,6 +1196,63 @@ out_free:
 }
 
 
+static void process_page_invalidate_batch_request(struct work_struct *work)
+{
+	/* TODO: match tso_begin_cnt / revoke */
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	//ktime_t dt, invh_end, invh_start = ktime_get();
+#endif
+	START_KMSG_WORK(page_invalidate_batch_request_t, req, work);
+	page_invalidate_response_t *res;
+	struct task_struct *tsk;
+
+	res = pcn_kmsg_get(sizeof(*res));
+	res->origin_pid = req->origin_pid;
+	res->origin_ws = req->origin_ws;
+	res->remote_pid = req->remote_pid;
+
+	if (my_nid) { /* remote: default popcorn case */
+		/* Only home issues invalidate requests. Hence, I am a remote */
+		SYNCPRINTK("%s: [%d] [o %d r (%d)] [0]%lx /%lu\n", __func__, current->pid,
+				req->origin_pid, req->remote_pid, *req->addrs, req->tso_wr_cnt);
+		tsk = __get_task_struct(req->remote_pid);
+	} else { /* origin: */
+		SYNCPRINTK("%s: [%d] [o (%d) r %d] [0]%lx /%lu\n", __func__, current->pid,
+				req->origin_pid, req->remote_pid, *req->addrs, req->tso_wr_cnt);
+		//tsk = __get_task_struct(req->origin_pid); // (x)
+		tsk = __get_task_struct(req->remote_pid); // (o)
+	}
+	if (!tsk) {
+		PCNPRINTK_ERR("%s: no such process %d %d %lx\n", __func__,
+				req->origin_pid, req->remote_pid, *req->addrs);
+		pcn_kmsg_put(res);
+		BUG(); // shouldn't happen - cannot find address space
+		goto out_free;
+	}
+
+	__do_invalidate_pages(tsk, req);
+
+	SYNCPRINTK(">>[%d] ->[%d/%d] /%lu\n", req->remote_pid, res->origin_pid,
+			PCN_KMSG_FROM_NID(req), req->tso_wr_cnt);
+	pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE,
+			PCN_KMSG_FROM_NID(req), res, sizeof(*res));
+
+	put_task_struct(tsk);
+
+#if 0
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
+	invh_end = ktime_get();
+	dt = ktime_sub(invh_end, invh_start);
+	atomic64_add(ktime_to_ns(dt), &invh_ns);
+	atomic64_inc(&invh_cnt);
+#endif
+#endif
+
+out_free:
+	END_KMSG_WORK(req);
+}
+
+
 static int handle_page_invalidate_response(struct pcn_kmsg_message *msg)
 {
 	page_invalidate_response_t *res = (page_invalidate_response_t *)msg;
@@ -1048,7 +1267,7 @@ static int handle_page_invalidate_response(struct pcn_kmsg_message *msg)
 }
 
 
-static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid, unsigned long addr, int ws_id)
+void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid, unsigned long addr, int ws_id)
 {
 	page_invalidate_request_t *req = pcn_kmsg_get(sizeof(*req));
 
@@ -1061,6 +1280,65 @@ static void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid,
 	pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, nid, req, sizeof(*req));
 }
 
+void __revoke_page_ownerships(struct task_struct *tsk, int nid, pid_t pid, unsigned long *addr, unsigned long tso_wr_cnt)
+{
+	int  i;
+	page_invalidate_batch_request_t *req = pcn_kmsg_get(sizeof(*req));
+	struct wait_station *ws = get_wait_station(current);
+	BUG_ON(!tso_wr_cnt);
+
+	req->origin_pid = tsk->pid;
+	req->remote_pid = pid;
+	req->origin_ws = ws->id;
+	req->tso_wr_cnt = tso_wr_cnt;
+	memcpy(&req->addrs, addr, sizeof(*req->addrs) * tso_wr_cnt);
+
+	for (i = 0; i < req->tso_wr_cnt; i++) {
+		int peers;
+		unsigned long offset, *pi, addr = req->addrs[i];
+		struct page *pip = __get_page_info_page(current->mm, addr, &offset);
+
+		BUG_ON(!addr);
+		if (!pip) BUG(); //return; /* skip claiming non-distributed page */
+		pi = (unsigned long *)kmap(pip) + offset;
+		peers = bitmap_weight(pi, MAX_POPCORN_NODES);
+		if (!peers) {
+			kunmap(pip);
+			//BUG(); /* This page is not distributed */ /* if happens, remove from list */
+			// workaround
+			SYNCPRINTK2("%s: [%d] NOT PERFECT WORKAROUND [%d/%lu] %lx skip at "
+						"here. HOPEFULLY another node will also skip it "
+						"(Ithinkso)\n", __func__, current->pid, i,
+											req->tso_wr_cnt, addr);
+			continue;
+		}
+		//peers--;	/* exclude except_nid from peers */
+		//SYNCPRINTK("[%d] peers batch original %d \n", current->pid, peers);
+//		spinlock_t *ptl;
+//		pmd_t *pmd;
+//		pte_t *pte, entry;
+//		pte = __get_pte_at(current->mm, addr, &pmd, &ptl);
+//		if (!pte) {
+//			SYNCPRINTK2("%s(): no pte\n", __func__);
+//			continue;
+//			//goto out;
+//		}
+//		spin_lock(ptl);
+//		////fh = __start_invalidation(tsk, addr, ptl);
+//		////clear_page_owner(nid, mm, addr);
+
+		clear_bit(nid, pi);
+//		////__finish_invalidation(fh);
+//		pte_unmap_unlock(pte, ptl);
+		kunmap(pip);
+	}
+
+	PGPRINTK("  [%d] revoke a batch %lx [%d/%d]\n", tsk->pid, addr, pid, nid);
+	pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_INVALIDATE_BATCH_REQUEST,
+										nid, req, sizeof(*req));
+									//nid, req, sizeof(*req)); // TODO optimize
+	wait_at_station(ws);
+}
 
 /**************************************************************************
  * Voluntarily release page ownership
@@ -1235,7 +1513,8 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 		peers--;
 	}
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-	page_server_panic(peers == 0, mm, addr, NULL, __pte(0));
+	if (!current->tso_region)
+		page_server_panic(peers == 0, mm, addr, NULL, __pte(0), local_origin);
 #endif
 	from = random % peers;
 
@@ -1318,7 +1597,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 }
 
 
-void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_nid)
+static void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_nid)
 {
 	struct mm_struct *mm = tsk->mm;
 	unsigned long offset;
@@ -1368,7 +1647,7 @@ void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_
 	}
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
-	if (is_inv) {
+	if (is_inv) { /* at origin */
 		inv_end = ktime_get();
 		dt = ktime_sub(inv_end, inv_start);
 		atomic64_add(ktime_to_ns(dt), &inv_ns);
@@ -1378,6 +1657,49 @@ void __claim_local_page(struct task_struct *tsk, unsigned long addr, int except_
 
 	kunmap(pip);
 }
+
+#if 0
+static void __clean_bit(struct task_struct *tsk, unsigned long addr, int except_nid)
+{
+	struct mm_struct *mm = tsk->mm;
+	unsigned long offset;
+	struct page *pip = __get_page_info_page(mm, addr, &offset);
+	unsigned long *pi;
+	int peers;
+
+	if (!pip) return; /* skip claiming non-distributed page */
+	pi = (unsigned long *)kmap(pip) + offset;
+	peers = bitmap_weight(pi, MAX_POPCORN_NODES);
+	if (!peers) {
+		kunmap(pip);
+		return;	/* skip claiming the page that is not distributed */
+	}
+
+	BUG_ON(!test_bit(except_nid, pi));
+	peers--;	/* exclude except_nid from peers */
+
+	if (test_bit(my_nid, pi) && except_nid != my_nid) peers--;
+
+	if (peers > 0) {
+		int nid;
+		struct remote_context *rc = get_task_remote(tsk);
+		struct wait_station *ws = get_wait_station_multiple(tsk, peers);
+
+		for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
+			pid_t pid = rc->remote_tgids[nid];
+			if (nid == except_nid || nid == my_nid) continue;
+
+			clear_bit(nid, pi);
+			__revoke_page_ownership(tsk, nid, pid, addr, ws->id);
+		}
+		put_task_remote(tsk);
+
+		wait_at_station(ws);
+	}
+
+	kunmap(pip);
+}
+#endif
 
 void page_server_zap_pte(struct vm_area_struct *vma, unsigned long addr, pte_t *pte, pte_t *pteval)
 {
@@ -1458,7 +1780,13 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	}
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-	BUG_ON(!page_is_mine(mm, addr));
+	if (!page_is_mine(mm, addr)) {
+		PCNPRINTK_ERR("Rmotefault_at_Remote: !pg_mine: addr %lx from [%d] writefault(%s) ins(%lx)\n",
+				addr,
+				req->remote_pid, fault_for_write(fault_flags)?"O":"X",
+				req->instr_addr);
+		BUG();
+	}
 #endif
 
 	spin_lock(ptl);
@@ -1563,12 +1891,27 @@ again:
 				test_page_owner(from_nid, mm, addr) ? "remote": "", fh);
 
 		if (test_page_owner(from_nid, mm, addr)) {
-			BUG_ON(fault_for_read(fault_flags) && "Read fault from owner??");
+			if (fault_for_read(fault_flags)) {
+				PCNPRINTK_ERR("Read fault from owner???: addr %lx pg_mine(%s): "
+								"from [%d] writefault(%s) ins(%lx)\n",
+				addr, page_is_mine(mm, addr)?"O":"X",
+				req->remote_pid, fault_for_write(fault_flags)?"O":"X",
+				req->instr_addr);
+				BUG_ON(fault_for_read(fault_flags) && "Read fault from owner??");
+			}
+			//TODO: bug
 			__claim_local_page(tsk, addr, from_nid);
 			grant = true;
 		} else {
 			if (!page_is_mine(mm, addr)) {
-				__claim_remote_page(tsk, mm, vma, addr, fault_flags, page, 0);
+				// TODO: jack 2 node? how could it be possible (heap happens)(stack?)
+				PCNPRINTK_ERR("RR: addr %lx from [%d] writefault(%s) "
+								"ins(%lx) \n",
+								addr, req->remote_pid,
+								fault_for_write(fault_flags)?"O":"X",
+								req->instr_addr);
+				BUG();
+				__claim_remote_page(tsk, mm, vma, addr, fault_flags, page, 0); // redundant
 			} else {
 				if (fault_for_write(fault_flags))
 					__claim_local_page(tsk, addr, my_nid);
@@ -1828,6 +2171,10 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	ktime_t fp_start, fpin_start;
 	ktime_t dt, inv_end, inv_start;
 #endif
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	int jack_proof= 0;
+#endif
+
 
 	if (anon_vma_prepare(vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
@@ -1869,69 +2216,136 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
-	//jack TODO function this
+#if 0
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	if (current->tso_region) {
+		if (page_is_mine(mm, addr)) {
+			if (fault_for_write(fault_flags)) {
+				if(!pte_present(*pte)) {
+					//PCNPRINTK_ERR("%s: !jack_proof %lx "
+					//			"confliction between pg_mine and "
+					//			"pte_present\n", __func__, addr);
+				}
+				//jack_proof = 1;
+			}
+		}
+	}
+#endif
+#endif
+
+	//jack TODO function this (origin & remote are the same code)
 	// original DeX doesn't check page_is_mine or not
 	if (current->tso_region) {
 		if (page_is_mine(mm, addr)) {
 			if (fault_for_write(fault_flags)) {
-				// remote_wr (write fault w/ page)
-				//jack TODO functionize this
-				/* buffer it */
-				if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS)
-					current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
-				else
-					PCNPRINTK_ERR("increase MAX_WRITE_INV_BUFFERS %ld\n",
-						(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
+					// remote_wr (write fault w/ page)
+				if (!populated) { // will bring page (pg_mine(1) for no-accessed page bug)
+					if(!pte_present(*pte)) { // happens but should have had been covered by populated
+						BUG();
+					} else {
+						/* first touch? */
+						// mine + read fault?
+						// looks like default meta data always show "mine"
+						// after a while this disappear
+						//PCNPRINTK_ERR("??? why read fault for pg_mine ???\n");
+					}
+#if REMOTE_TSO
+					/* tso - inv */
+#if TSO_HEAP_SUPPORT
+					if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
+#else
+					if (addr > 0x7fff70000000 &&
+							current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
+#endif
+						current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
+						current->tso_wr_cnt++;
+#if BUF_DBG
+						SYNCPRINTK("[%d] remote buf %lx \n", current->pid, addr);
+#endif
 
-				current->tso_wr_cnt++;
-				current->accu_tso_wr_cnt++;
-
-				//delay_write = true; // trun on later
-			} else {
-				/* first touch? */
-				// mine + read fault?
-				// looks like default meta data always show "mine"
-				// after a while this disappear
-				//PCNPRINTK_ERR("??? why read fault for page_is_mine ???\n");
+						delay_write = true;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+						jack_proof = 1;
+#endif
+					} else {
+#if PERF_DBG
+						PCNPRINTK_ERR("[%d] increase MAX_WRITE_INV_BUFFERS %ld "
+										"to enjoy\n", current->pid,
+							(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
+#endif
+					}
+					current->accu_tso_wr_cnt++;
+#endif
+				}
 			}
 		}
 	}
+
+#if DBG_ADDR_ON
+	if (addr == DBG_ADDR) {
+		PCNPRINTK_ERR("DBG_ADDR: [%d] writefault(%s) this causes RR"
+						"current->tso_region(%s) "
+						"page_is_mine(%s) "
+						"populated(%s) "
+						"pte_present(%s) "
+						"pte_none(%s) "
+						"ins(%lx) \n",
+						current->pid,
+						fault_for_write(fault_flags)?"O":"X",
+						current->tso_region?"O":"X",
+						page_is_mine(mm, addr)?"O":"X",
+						populated?"O":"X",
+						pte_present(*pte)?"O":"X",
+						pte_none(*pte)?"O":"X",
+						instruction_pointer(current_pt_regs()) );
+	}
+#endif
+
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	fp_start = fpin_start = inv_start = ktime_get();
 #endif
 
-	rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
-	// }
+	/* skip. how?breakdown? */
+	//implement my own inv
+	// rp->result = VM_FAULT_CONTINUE (try to mimic use another flag (popstpone))
+	if (!delay_write) {
+		rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
+	} else { /* tso */
+		rp = kzalloc(sizeof(*rp), GFP_KERNEL);
+		rp->result = VM_FAULT_CONTINUE;
+	}
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
-	if (page_is_mine(mm, addr)) {
-		if (fault_for_write(fault_flags)) {
-			if (rp->result == VM_FAULT_CONTINUE) { /* W: inv lat */
-				inv_end = ktime_get();
-				dt = ktime_sub(inv_end, inv_start);
-				atomic64_add(ktime_to_ns(dt), &inv_ns);
-				atomic64_inc(&inv_cnt);
-			} else if (!rp->result) { /* W: inv + page transferred */
-				// X -> W
-				ktime_t dt, fpin_end = ktime_get();
-				dt = ktime_sub(fpin_end, fpin_start);
-				atomic64_add(ktime_to_ns(dt), &fpin_ns);
-				atomic64_inc(&fpin_cnt);
+	if (!delay_write) {
+		if (page_is_mine(mm, addr)) {
+			if (fault_for_write(fault_flags)) {
+				if (rp->result == VM_FAULT_CONTINUE) { /* W: inv lat */
+					inv_end = ktime_get();
+					dt = ktime_sub(inv_end, inv_start);
+					atomic64_add(ktime_to_ns(dt), &inv_ns);
+					atomic64_inc(&inv_cnt);
+				} else if (!rp->result) { /* W: inv + page transferred */
+					// X -> W
+					ktime_t dt, fpin_end = ktime_get();
+					dt = ktime_sub(fpin_end, fpin_start);
+					atomic64_add(ktime_to_ns(dt), &fpin_ns);
+					atomic64_inc(&fpin_cnt);
+				}
 			}
-		}
-	} else { /* fp only page */
-		if (fault_for_read(fault_flags)) {
-			ktime_t dt, fp_end = ktime_get();;
-			dt = ktime_sub(fp_end, fp_start);
-			atomic64_add(ktime_to_ns(dt), &fp_ns);
-			atomic64_inc(&fp_cnt);
-		}
-		if (fault_for_write(fault_flags)) { /* W: inv + page transferred */
-				ktime_t dt, fpin_end = ktime_get();
-				dt = ktime_sub(fpin_end, fpin_start);
-				atomic64_add(ktime_to_ns(dt), &fpin_ns);
-				atomic64_inc(&fpin_cnt);
+		} else { /* fp only page */
+			if (fault_for_read(fault_flags)) {
+				ktime_t dt, fp_end = ktime_get();;
+				dt = ktime_sub(fp_end, fp_start);
+				atomic64_add(ktime_to_ns(dt), &fp_ns);
+				atomic64_inc(&fp_cnt);
+			}
+			if (fault_for_write(fault_flags)) { /* W: inv + page transferred */
+					ktime_t dt, fpin_end = ktime_get();
+					dt = ktime_sub(fpin_end, fpin_start);
+					atomic64_add(ktime_to_ns(dt), &fpin_ns);
+					atomic64_inc(&fpin_cnt);
+			}
 		}
 	}
 #endif
@@ -1942,6 +2356,13 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		ret = rp->result;
 		pte_unmap(pte);
 		up_read(&mm->mmap_sem);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		if (jack_proof) {
+			PCNPRINTK_ERR("%s: !jack_proof %lx rp->ret error %d popu(%s)\n",
+							__func__, addr, rp->result, populated?"O":"X");
+			BUG();
+		}
+#endif
 		goto out_free;
 	}
 
@@ -1968,6 +2389,23 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 			update_mmu_cache(vma, addr, pte);
 		}
 	} else { /* !rp->result */
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		if (jack_proof) { // lud, cg(first pte_none then here)
+			if (populated) {
+				//PCNPRINTK_ERR("%s: !jack_proof %lx "
+				//				"handle populated case\n", __func__, addr);
+				SYNCPRINTK2("%s: !jack_proof %lx handle populated case "
+							"*dealed*\n", __func__, addr);
+			} else {
+				PCNPRINTK_ERR("%s: !jack_proof %lx (not populated)\n",
+								__func__, addr);
+			}
+			/* pg_min + writefault => still page transferr
+				any oter symptom? or init val of page_is_mine
+				put _ERR addr & other addr in pg_mine() to check
+				am i right about pg_mine() init val on remote is wrong */
+		}
+#endif
 		spin_lock(ptl);
 		if (populated) {
 			do_set_pte(vma, addr, page, pte, fault_for_write(fault_flags), true);
@@ -1986,6 +2424,8 @@ out_free:
 	put_page(page);
 	if (!delay_write)
 		pcn_kmsg_done(rp);
+	else
+		kfree(rp); //TODO: optimize
 	fh->ret = ret;
 
 out_follower:
@@ -2034,6 +2474,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		pmd_t *pmd, pte_t *pte, pte_t pte_val, unsigned int fault_flags)
 {
 	spinlock_t *ptl;
+	bool delay_write = false;
 
 	struct fault_handle *fh;
 	bool leader;
@@ -2092,24 +2533,52 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 			goto out_wakeup;
 		}
 
-		//jack TODO functionize this
+		//jack TODO function this (origin & remote are the same code)
 		// origin_wr (write fault w/ page)
-		if (current->tso_region) {
-			//jack TODO functionize this
-				/* buffer it */
-			if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS)
+#if ORIGIN_TSO
+#if TSO_HEAP_SUPPORT
+		if (current->tso_region && current->tso_region_id) {
+		//if (current->tso_region && addr < 0x7ffff7000000) { // HACK skip stack for just now // because remote doesn't have this stack (I think)
+#else
+		if (current->tso_region && current->tso_region_id && addr > 0x7fff70000000) { // HACK
+#endif
+			/* tso - inv */
+			if (!pte_present(pte_val)) {
+				PCNPRINTK_ERR("%s: origin !pte_present %lx handle it\n",
+								__func__, addr);
+			}
+			if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
 				current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
-			else
-				PCNPRINTK_ERR("increase MAX_WRITE_INV_BUFFERS %ld\n",
-					(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
-
-			current->tso_wr_cnt++;
+				current->tso_wr_cnt++;
+#if BUF_DBG
+				SYNCPRINTK("[%d] origin buf %lx ins %lx\n", current->pid, addr,
+										instruction_pointer(current_pt_regs()));
+#endif
+#if DBG_ADDR_ON
+				if (addr == DBG_ADDR)
+					SYNCPRINTK("[%d] origin buf %lx \n", current->pid, addr);
+#endif
+#if ORIGIN_TSO
+				// make sure remote own the page
+				if (test_page_owner(1, mm, addr)) {
+					delay_write = true;
+				} else {
+					// *dealed* !!
+				}
+#endif
+			} else {
+#if PERF_DBG
+				PCNPRINTK_ERR("[%d] increase MAX_WRITE_INV_BUFFERS %ld to enjoy\n",
+				current->pid, (long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
+#endif
+			}
 			current->accu_tso_wr_cnt++;
 		}
+#endif
+
 		/* skip */
-		// else {
-		__claim_local_page(current, addr, my_nid);
-		// }
+		if (!delay_write)
+			__claim_local_page(current, addr, my_nid);
 
 		spin_lock(ptl);
 		pte_val = pte_mkwrite(pte_val);
@@ -2147,7 +2616,7 @@ out_wakeup:
 	__finish_fault_handling(fh);
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
-	if (remote_fault) {
+	if (remote_fault) { /* this can be used for all/both cases */
 		//ktime_t dt, ptef_end = ktime_get();
 		//dt = ktime_sub(ptef_end, ptef_start);
 		//atomic64_add(ktime_to_ns(dt), &ptef_ns);
@@ -2257,6 +2726,7 @@ out:
  */
 DEFINE_KMSG_WQ_HANDLER(remote_page_request);
 DEFINE_KMSG_WQ_HANDLER(page_invalidate_request);
+DEFINE_KMSG_WQ_HANDLER(page_invalidate_batch_request);
 DEFINE_KMSG_ORDERED_WQ_HANDLER(remote_page_flush);
 
 int __init page_server_init(void)
@@ -2271,6 +2741,8 @@ int __init page_server_init(void)
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, page_invalidate_request);
 	REGISTER_KMSG_HANDLER(
 			PCN_KMSG_TYPE_PAGE_INVALIDATE_RESPONSE, page_invalidate_response);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_PAGE_INVALIDATE_BATCH_REQUEST,
+											page_invalidate_batch_request);
 	REGISTER_KMSG_WQ_HANDLER(
 			PCN_KMSG_TYPE_REMOTE_PAGE_FLUSH, remote_page_flush);
 	REGISTER_KMSG_WQ_HANDLER(
