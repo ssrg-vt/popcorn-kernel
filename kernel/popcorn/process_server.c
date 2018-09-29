@@ -35,6 +35,8 @@
 #include "wait_station.h"
 #include "util.h"
 
+#define FUTEX_DBG 0
+
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
 
@@ -81,7 +83,7 @@ inline struct remote_context *__get_mm_remote(struct mm_struct *mm)
 	return rc;
 }
 
-inline struct remote_context *get_task_remote(struct task_struct *tsk)
+struct remote_context *get_task_remote(struct task_struct *tsk)
 {
 	return __get_mm_remote(tsk->mm);
 }
@@ -102,7 +104,7 @@ inline bool __put_task_remote(struct remote_context *rc)
 	return true;
 }
 
-inline bool put_task_remote(struct task_struct *tsk)
+bool put_task_remote(struct task_struct *tsk)
 {
 	return __put_task_remote(tsk->mm->remote);
 }
@@ -192,20 +194,22 @@ long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
 		req.ts = *ts;
 	}
 
-	/*
+
+#if FUTEX_DBG
 	printk(" f[%d] ->[%d/%d] 0x%x %p 0x%x\n", current->pid,
 			current->origin_pid, current->origin_nid,
 			op, uaddr, val);
-	*/
+#endif
+
 	pcn_kmsg_send(PCN_KMSG_TYPE_FUTEX_REQUEST,
 			current->origin_nid, &req, sizeof(req));
 	res = wait_at_station(ws);
 	ret = res->ret;
-	/*
+#if FUTEX_DBG
 	printk(" f[%d] <-[%d/%d] 0x%x %p %ld\n", current->pid,
 			current->origin_pid, current->origin_nid,
 			op, uaddr, ret);
-	*/
+#endif
 
 	pcn_kmsg_done(res);
 	return ret;
@@ -233,21 +237,25 @@ static void process_remote_futex_request(remote_futex_request *req)
 		tp = &t;
 	}
 
-	/*
+
+#if FUTEX_DBG
 	printk(" f[%d] <-[%d/%d] 0x%x %p 0x%x\n", current->pid,
 			current->remote_pid, current->remote_nid,
 			req->op, req->uaddr, req->val);
-	*/
+#endif
+
 	ret = do_futex(req->uaddr, req->op, req->val,
 			tp, req->uaddr2, req->val2, req->val3);
-	/*
-	printk(" f[%d] ->[%d/%d] 0x%x %p %ld\n", current->pid,
-			current->remote_pid, current->remote_nid,
-			req->op, req->uaddr, res.ret);
-	*/
+
 	res = pcn_kmsg_get(sizeof(*res));
 	res->remote_ws = req->remote_ws;
 	res->ret = ret;
+
+#if FUTEX_DBG
+	printk(" f[%d] ->[%d/%d] 0x%x %p %ld\n", current->pid,
+			current->remote_pid, current->remote_nid,
+			req->op, req->uaddr, res->ret);
+#endif
 
 	pcn_kmsg_post(PCN_KMSG_TYPE_FUTEX_RESPONSE,
 			current->remote_nid, res, sizeof(*res));
@@ -473,7 +481,7 @@ static int __do_back_migration(struct task_struct *tsk, int dst_nid, void __user
 // Remote thread
 ///////////////////////////////////////////////////////////////////////////////
 static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
-{
+{	/* at origin */
 	remote_task_pairing_t *req = (remote_task_pairing_t *)msg;
 	struct task_struct *tsk;
 	int from_nid = PCN_KMSG_FROM_NID(req);
@@ -688,9 +696,9 @@ static int remote_worker_main(void *data)
 	might_sleep();
 	kfree(params);
 
-	PSPRINTK("%s: [%d] for [%d/%d]\n", __func__,
+	PSPRINTK("%s: r[%d] for o[%d/%d]\n", __func__,
 			current->pid, req->origin_tgid, PCN_KMSG_FROM_NID(req));
-	PSPRINTK("%s: [%d] %s\n", __func__,
+	PSPRINTK("%s: r[%d] %s\n", __func__,
 			current->pid, req->exe_path);
 
 	current->flags &= ~PF_RANDOMIZE;	/* Disable ASLR for now*/
