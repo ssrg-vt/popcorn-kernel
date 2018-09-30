@@ -68,7 +68,7 @@ void clean_tso_wr(void)
 int __popcorn_tso_fence(int a, void __user * b)
 {
 	int i;
-	unsigned long tmp;
+	unsigned long tmp; // TODO: change name
 	if (!current->tso_region) {
 		//PCNPRINTK_ERR("[%d] BUG tso_region order violation when \"unlock\"\n",
 		//														current->pid);
@@ -154,11 +154,12 @@ int __popcorn_tso_fence(int a, void __user * b)
 				// 0. inplement inv first
 				// 1. 2.
 			}
+			//TODO clearcurrent->buffer_inv_addrs
 		}
 	} else { // batch
 		if (tmp) {
 			// 2. batch: PCN_KMSG_TYPE_PAGE_INVALIDATE_BATCH_REQUEST
-			int nid = -1;
+			int nid = -1, j;
 			unsigned long *addrs = current->buffer_inv_addrs;
 			struct remote_context *rc = get_task_remote(current);
 #ifdef CONFIG_POPCORN_CHECK_SANITY
@@ -177,37 +178,9 @@ int __popcorn_tso_fence(int a, void __user * b)
 			put_task_remote(current);
 			SYNCPRINTK("[%d] revoking done  addrs[0]=%lx tso_wr_cnt %llu\n",
 								current->pid, addrs[0], current->tso_wr_cnt);
-#if 0
-			if (!my_nid) { /* 1. first deal w/ origin only*/
-				int nid = 1;
-				unsigned long *addrs = current->buffer_inv_addrs;
-				struct remote_context *rc = get_task_remote(current);
 
-				SYNCPRINTK("[%d] revoking [%d] %lx \n",
-								current->pid, nid, *addrs);
-
-				// lock? befor calling this function? check claim_
-				__revoke_page_ownerships(current, nid,
-										rc->remote_tgids[nid], addrs, tmp);
-
-				put_task_remote(current);
-				SYNCPRINTK("[%d] batch fixed (0)%lx \n", current->pid, *addrs);
-			} else {
-				int nid = 0;
-				unsigned long *addrs = current->buffer_inv_addrs;
-				struct remote_context *rc = get_task_remote(current);
-
-				SYNCPRINTK("[%d] revoking [%d] %lx\n",
-								current->pid, nid, *addrs);
-
-				// lock? befor calling this function? check claim_
-				__revoke_page_ownerships(current, nid,
-										rc->remote_tgids[nid], addrs, tmp);
-
-				put_task_remote(current);
-				SYNCPRINTK("[%d] batch fixed (0)%lx \n", current->pid, *addrs);
-			}
-#endif
+			for (j = 0; j < tmp; j++)
+				current->buffer_inv_addrs[i] = 0;
 		}
 	}
 
@@ -219,6 +192,7 @@ out:
 
 SYSCALL_DEFINE2(popcorn_tso_begin, int, a, void __user *, b)
 {
+	// TODO: merge to one
 	if (current->tso_region || current->tso_wr_cnt || current->tso_wx_cnt) {
 		WARN_ON_ONCE("BUG tso_region order violation when \"lock\"");
 		if (!print) {
@@ -226,10 +200,9 @@ SYSCALL_DEFINE2(popcorn_tso_begin, int, a, void __user *, b)
 			print = true;
 #endif
 			PCNPRINTK_ERR("[%d] BUG tso_region order violation when \"lock\" "
-						"region (%s) tso_wr %llu tso_wx %llu\n", current->pid,
-													current->tso_region?"O":"X",
-															current->tso_wr_cnt,
-															current->tso_wx_cnt);
+						"region (%s) tso_wr %llu tso_wx %llu line %d\n",
+									current->pid, current->tso_region?"O":"X",
+									current->tso_wr_cnt, current->tso_wx_cnt, a);
 		}
 		violation++;
 		//__popcorn_tso_fence(a, b); /* weired case..... but we have to fix NMW */
@@ -238,28 +211,22 @@ SYSCALL_DEFINE2(popcorn_tso_begin, int, a, void __user *, b)
 	SYNCPRINTK("[%d] %s(): %lu\n", current->pid,
 				__func__, current->begin_m_cnt++);
 
-    //current->tso_region_id = a;
-	//printk("a %d\n", a);
+    //current->tso_region_id = a; // don't uncomment for now
     trace_tso(my_nid, current->pid, a, 'b');
-
-//	if (current->tso_region || current->tso_wr_cnt || current->tso_wx_cnt)
-//		PCNPRINTK_ERR("BUG tso_region order violation when \"lock\"\n");
-//
-//	current->tso_region = true;
 
 	return 0;
 }
 
 SYSCALL_DEFINE2(popcorn_tso_fence, int, a, void __user *, b)
 {
-	SYNCPRINTK("[%d] %s():\n", current->pid, __func__);
+	SYNCPRINTK("[%d] %s(): id %d\n", current->pid, __func__, a);
     trace_tso(my_nid, current->pid, a, 'f');
 	return __popcorn_tso_fence(a, b);
 }
 
 SYSCALL_DEFINE2(popcorn_tso_end, int, a, void __user *, b)
 {
-	SYNCPRINTK("[%d] %s():\n", current->pid, __func__);
+	SYNCPRINTK("[%d] %s(): id %d\n", current->pid, __func__, a);
     trace_tso(my_nid, current->pid, a, 'e');
 	__popcorn_tso_fence(a, b);
 	current->tso_region = false;
@@ -280,6 +247,7 @@ SYSCALL_DEFINE2(popcorn_tso_id, int, a, void __user *, b)
 
 SYSCALL_DEFINE2(popcorn_tso_begin_manual, int, a, void __user *, b)
 {
+	// TODO: merge to one
 	if (current->tso_region || current->tso_wr_cnt || current->tso_wx_cnt) {
 		WARN_ON_ONCE("BUG tso_region order violation when \"lock\"");
 		if (!print) {
@@ -287,10 +255,9 @@ SYSCALL_DEFINE2(popcorn_tso_begin_manual, int, a, void __user *, b)
 			print = true;
 #endif
 			PCNPRINTK_ERR("[%d] BUG tso_region order violation when \"lock\" "
-						"region (%s) tso_wr %llu tso_wx %llu\n", current->pid,
-													current->tso_region?"O":"X",
-															current->tso_wr_cnt,
-															current->tso_wx_cnt);
+						"region (%s) tso_wr %llu tso_wx %llu line %d\n",
+									current->pid, current->tso_region?"O":"X",
+									current->tso_wr_cnt, current->tso_wx_cnt, a);
 		}
 		violation++;
 		//__popcorn_tso_fence(a, b); /* weired case..... but we have to fix NMW */

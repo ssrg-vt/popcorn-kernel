@@ -38,9 +38,14 @@
 
 #include "trace_events.h"
 
-#define ORIGIN_TSO 0
-#define REMOTE_TSO 0
-#define TSO_HEAP_SUPPORT 0
+#define ORIGIN_TSO 1
+#define REMOTE_TSO 1
+#define TSO_HEAP_SUPPORT 1
+#define PERF_DBG 0
+
+#define BUF_DBG 0
+#define JACK_DEBUG 0
+
 #define LUD_DEBUG 0
 #define DBG_ADDR_ON 0
 //#define DBG_ADDR 0x7fffb7e56000
@@ -50,9 +55,7 @@
 //#define DBG_ADDR 0x7ffff5e56000 // cfd
 //#define DBG_ADDR 0x826000 // cfd
 
-#define PERF_DBG 0
-#define BUF_DBG 0
-#define JACK_DEBUG 0
+
 #if JACK_DEBUG
 //#define SYNCPRINTK2(...) printk(KERN_INFO __VA_ARGS__)
 #define SYNCPRINTK2(...) PCNPRINTK_ERR(KERN_INFO __VA_ARGS__)
@@ -2216,23 +2219,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
-#if 0
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-	if (current->tso_region) {
-		if (page_is_mine(mm, addr)) {
-			if (fault_for_write(fault_flags)) {
-				if(!pte_present(*pte)) {
-					//PCNPRINTK_ERR("%s: !jack_proof %lx "
-					//			"confliction between pg_mine and "
-					//			"pte_present\n", __func__, addr);
-				}
-				//jack_proof = 1;
-			}
-		}
-	}
-#endif
-#endif
-
+#if REMOTE_TSO
 	//jack TODO function this (origin & remote are the same code)
 	// original DeX doesn't check page_is_mine or not
 	if (current->tso_region) {
@@ -2249,9 +2236,8 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 						// after a while this disappear
 						//PCNPRINTK_ERR("??? why read fault for pg_mine ???\n");
 					}
-#if REMOTE_TSO
 					/* tso - inv */
-#if TSO_HEAP_SUPPORT
+#if TSO_HEAP_SUPPORT // TODO re-write
 					if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
 #else
 					if (addr > 0x7fff70000000 &&
@@ -2275,11 +2261,11 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 #endif
 					}
 					current->accu_tso_wr_cnt++;
-#endif
 				}
 			}
 		}
 	}
+#endif
 
 #if DBG_ADDR_ON
 	if (addr == DBG_ADDR) {
@@ -2558,7 +2544,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 				if (addr == DBG_ADDR)
 					SYNCPRINTK("[%d] origin buf %lx \n", current->pid, addr);
 #endif
-#if ORIGIN_TSO
+#if ORIGIN_TSO // redundant
 				// make sure remote own the page
 				if (test_page_owner(1, mm, addr)) {
 					delay_write = true;
