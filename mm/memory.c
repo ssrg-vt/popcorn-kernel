@@ -3943,19 +3943,10 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
  *
  * The mmap_sem may have been released depending on flags and our return value.
  * See filemap_fault() and __lock_page_or_retry().
- */
-static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
+ */static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 {
 	pte_t entry;
-#ifdef CONFIG_POPCORN
-	struct vm_area_struct *vma = vmf->vma;
-	struct mm_struct *mm = vma->vm_mm;
-	pte_t *pte = vmf->pte;
-	pmd_t *pmd = vmf->pmd;
-	unsigned long address = vmf->address;
-	unsigned int flags = vmf->flags;
-	// entry = *pte;
-#endif
+
 	if (unlikely(pmd_none(*vmf->pmd))) {
 		/*
 		 * Leave __pte_alloc() until later: because vm_ops->fault may
@@ -3991,30 +3982,12 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 			vmf->pte = NULL;
 		}
 	}
-
-	if (!vmf->pte) {
-		if (vma_is_anonymous(vmf->vma))
-			return do_anonymous_page(vmf);
-		else
-			return do_fault(vmf);
-	}
-
-	if (!pte_present(vmf->orig_pte)) {
-#ifdef CONFIG_POPCORN
-		page_server_panic(true, mm, address, pte, entry);
-#endif
-		return do_swap_page(vmf);
-	}
-
-	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
-		return do_numa_page(vmf);
-
-	vmf->ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
-	spin_lock(vmf->ptl);
-	entry = vmf->orig_pte;
 #ifdef CONFIG_POPCORN
 	if (distributed_process(current)) {
-		int ret = page_server_handle_pte_fault(mm, vma, address, pmd, pte, entry, flags);
+		int ret = page_server_handle_pte_fault(vmf->vma->vm_mm, vmf->vma,
+						       vmf->address, vmf->pmd,
+						       vmf->pte, vmf->orig_pte,
+						       vmf->flags);
 
 		if (ret == VM_FAULT_RETRY) {
 			int backoff = ++current->backoff_weight;
@@ -4029,7 +4002,29 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		}
 		if (ret != VM_FAULT_CONTINUE) return ret;
 	}
-#endif	
+#endif
+	
+	if (!vmf->pte) {
+		if (vma_is_anonymous(vmf->vma))
+			return do_anonymous_page(vmf);
+		else
+			return do_fault(vmf);
+	}
+	
+	if (!pte_present(vmf->orig_pte)) {
+#ifdef CONFIG_POPCORN
+		page_server_panic(true, vmf->vma->vm_mm,
+				  vmf->address, vmf->pte, entry);
+#endif
+		return do_swap_page(vmf);
+	}
+
+	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
+		return do_numa_page(vmf);
+
+	vmf->ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
+	spin_lock(vmf->ptl);
+	entry = vmf->orig_pte;
 	if (unlikely(!pte_same(*vmf->pte, entry)))
 		goto unlock;
 	if (vmf->flags & FAULT_FLAG_WRITE) {
