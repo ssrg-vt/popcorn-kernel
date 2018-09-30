@@ -1,7 +1,6 @@
 #ifndef __KERNEL_POPCORN_REMOTE_SOCKET_H__
 #define __KERNEL_POPCORN_REMOTE_SOCKET_H__
 
-//struct task_struct;
 
 int redirect_socket(int family, int type, int protocol);
 int redirect_setsockopt(int fd, int level, int optname, char __user * optval,

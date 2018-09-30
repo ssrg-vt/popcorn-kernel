@@ -8,7 +8,6 @@
 #include <linux/signal.h>
 #include <linux/slab.h>
 #include <linux/radix-tree.h>
-
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
 
@@ -341,6 +340,18 @@ DEFINE_PCN_KMSG(remote_socket_response_t, REPLY_FROM_ORIGIN_FIELDS);
 	int optlen;
 DEFINE_PCN_KMSG(remote_setsockopt_t, REMOTE_SETSOCKOPT_FIELDS);
 
+
+/* Enumerate syscall types*/
+enum pcn_syscall_types
+{
+	PCN_SYSCALL_SOCKET_CREATE,
+	PCN_SYSCALL_SETSOCKOPT,
+	PCN_SYSCALL_BIND,
+	PCN_SYSCALL_LISTEN,
+	PCN_SYSCALL_ACCEPT4,
+	PCN_NUM_SYSCALLS
+};
+
 #define SYSCALL_FWD_FIELDS				\
 	pid_t origin_pid;				\
 	uint64_t param0;				\
@@ -350,17 +361,12 @@ DEFINE_PCN_KMSG(remote_setsockopt_t, REMOTE_SETSOCKOPT_FIELDS);
 	uint64_t param4;				\
 	uint64_t param5;				\
 	int remote_ws;					\
+	enum pcn_syscall_types call_type;		\
 	int ret;
 DEFINE_PCN_KMSG(syscall_fwd_t, SYSCALL_FWD_FIELDS);
 
 #define SYSCALL_REP_FIELDS				\
 	pid_t origin_pid;				\
-	uint64_t param0;				\
-	uint64_t param1;				\
-	uint64_t param2;				\
-	uint64_t param3;				\
-	uint64_t param4;				\
-	uint64_t param5;				\
 	int remote_ws;					\
 	int ret;
 DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);

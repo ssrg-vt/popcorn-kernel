@@ -4,8 +4,8 @@
  *     SengMing Yeoh <sengming@vt.edu> 2018
  */
 
-#ifndef __POPCORN_PCN_KMSG_H__
-#define __POPCORN_PCN_KMSG_H__
+#ifndef __POPCORN_SYSCALL_FWD_H__
+#define __POPCORN_SYSCALL_FWD_H__
 
 #include <linux/unistd.h>
 #include <popcorn/pcn_kmsg.h>
@@ -13,6 +13,8 @@
 #include <popcorn/debug.h>
 #include "wait_station.h"
 #include "types.h"
+
+int process_remote_syscall(struct pcn_kmsg_message *msg);
 
 /*This Set of macros allows for forwarding of syscalls of up to 6 arguments,
  *with 12 arguments being input altogether, eg. SET_REQ_PARAMS(int, a, char, b)
@@ -71,20 +73,22 @@
 			)(__VA_ARGS__)
 
 
-#define DEFINE_SYSCALL_REDIRECT(syscall,...)				\
-DEFINE_PCN_KMSG(syscall_fwd_##syscall_t, _REMOTE_SYSCALL_ARGS(__VA_ARGS__)); \
+#define DEFINE_SYSCALL_REDIRECT(syscall, syscall_type,...)				\
 inline int redirect_##syscall(LIST_SYSCALL_ARGS(__VA_ARGS__)) {		\
-	syscall_fwd_t *req = kmalloc(sizeof(syscall_fwd_t));		\
+	int ret = 0;							\
+	syscall_fwd_t *req = kmalloc(sizeof(syscall_fwd_t), GFP_KERNEL);\
 	syscall_rep_t *rep = NULL;					\
 	struct wait_station *ws = get_wait_station(current);		\
 	SET_REQ_PARAMS_ARGS(__VA_ARGS__)				\
-									\
-	retval = pcn_kmsg_send(PCN_KMSG_TYPE_SYSCALL_FWD, 0, req,	\
+	req->call_type = syscall_type;					\
+	ret = pcn_kmsg_send(PCN_KMSG_TYPE_SYSCALL_FWD, 0, req,	\
 			    sizeof(*req));				\
 	kfree(req);							\
-	reply = wait_at_station(ws);					\
-	retval = reply->retval;						\
+	rep = wait_at_station(ws);					\
+	ret = rep->ret;						\
 	/*SKPRINTK("reply from master: %d\n", retval);*/		\
-	return retval;							\
+	return ret;							\
 }
 
+
+#endif

@@ -35,6 +35,7 @@
 #include "wait_station.h"
 #include "util.h"
 #include "remote_socket.h"
+#include "syscall_server.h"
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
@@ -946,20 +947,23 @@ static void __process_remote_works(void)
 			process_back_migration((back_migration_request_t *)req);
 			run = false;
 			break;
-		case PCN_KMSG_TYPE_REMOTE_SOCKET:
-			process_socket_create(req);	// socket()
-			break;
-		case PCN_KMSG_TYPE_REMOTE_SETSOCKOPT:
-			process_setsockopt(req);	// setsockopt()
-			break;
-		case PCN_KMSG_TYPE_REMOTE_BIND:
-			process_bind(req);	// bind()
-			break;
-		case PCN_KMSG_TYPE_REMOTE_LISTEN:
-			process_listen(req);	// listen()
-			break;
-		case PCN_KMSG_TYPE_REMOTE_ACCEPT4:
-			process_accept4(req);	// accept4()
+	//	case PCN_KMSG_TYPE_REMOTE_SOCKET:
+	//		process_socket_create(req);	// socket()
+	//		break;
+	//	case PCN_KMSG_TYPE_REMOTE_SETSOCKOPT:
+	//		process_setsockopt(req);	// setsockopt()
+	//		break;
+	//	case PCN_KMSG_TYPE_REMOTE_BIND:
+	//		process_bind(req);	// bind()
+	//		break;
+	//	case PCN_KMSG_TYPE_REMOTE_LISTEN:
+	//		process_listen(req);	// listen()
+	//		break;
+	//	case PCN_KMSG_TYPE_REMOTE_ACCEPT4:
+	//		process_accept4(req);	// accept4()
+	//		break;
+		case PCN_KMSG_TYPE_SYSCALL_FWD:
+			process_remote_syscall(req);
 			break;
 		default:
 			if (WARN_ON("Received unsupported remote work")) {
