@@ -79,6 +79,8 @@ inline int redirect_##syscall(LIST_SYSCALL_ARGS(__VA_ARGS__)) {		\
 	syscall_fwd_t *req = kmalloc(sizeof(syscall_fwd_t), GFP_KERNEL);\
 	syscall_rep_t *rep = NULL;					\
 	struct wait_station *ws = get_wait_station(current);		\
+	req->origin_pid = current->origin_pid;				\
+	req->remote_ws = ws->id;					\
 	SET_REQ_PARAMS_ARGS(__VA_ARGS__)				\
 	req->call_type = syscall_type;					\
 	ret = pcn_kmsg_send(PCN_KMSG_TYPE_SYSCALL_FWD, 0, req,	\
