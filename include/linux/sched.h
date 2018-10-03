@@ -1885,6 +1885,8 @@ struct task_struct {
 
 	/* Debug */
 	unsigned long begin_m_cnt;
+	unsigned long begin_cnt;
+	unsigned long tso_fence_cnt;
 
 	/*
 	 * scheduling -- antoniob

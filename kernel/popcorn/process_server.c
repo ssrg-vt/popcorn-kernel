@@ -2,7 +2,7 @@
  * @file process_server.c
  *
  * Popcorn Linux thread migration implementation
- * This work was an extension of David Katz MS Thesis, but totally rewritten 
+ * This work was an extension of David Katz MS Thesis, but totally rewritten
  * by Sang-Hoon to support multithread environment.
  *
  * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
@@ -34,6 +34,7 @@
 #include "page_server.h"
 #include "wait_station.h"
 #include "util.h"
+//#include "sync.h"
 
 #define FUTEX_DBG 0
 
@@ -146,6 +147,22 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	spin_lock_init(&rc->remote_works_lock);
 	init_completion(&rc->remote_works_ready);
 
+	rc->addr_cnt = 0;
+	rc->threads_cnt = 0;
+	rc->out_threads = 0;
+	init_waitqueue_head(&rc->waits);
+	init_waitqueue_head(&rc->waits_end);
+	init_completion(&rc->comp);		/* using only one may race condition since the next wait is faster than previous comp */
+	init_completion(&rc->comp_end);
+	spin_lock_init(&rc->pids_lock);
+	atomic_set(&rc->barrier, rc->threads_cnt);
+	atomic_set(&rc->pendings, 0);
+	atomic_set(&rc->barrier_end, rc->threads_cnt);
+	memset(rc->pids, 0, sizeof(*rc->pids) * MAX_ALIVE_THREADS);
+	memset(rc->addrs, 0, sizeof(*rc->addrs) *
+						MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
+
+
 	memset(rc->remote_tgids, 0x00, sizeof(rc->remote_tgids));
 
 	INIT_RADIX_TREE(&rc->pages, GFP_ATOMIC);
@@ -165,6 +182,260 @@ static void __build_task_comm(char *buffer, char *path)
 	buffer[i] = '\0';
 }
 
+/*
+ *
+ */
+static inline void __check_ofs(int ofs)
+{
+	if (ofs > MAX_ALIVE_THREADS) BUG();
+}
+
+/* rc->pids_lock holded */
+int __first_empty_pid_slot(struct remote_context *rc)
+{
+	int ofs;
+	for (ofs = 0; ofs < MAX_ALIVE_THREADS; ofs++) {
+		__check_ofs(ofs);
+		if (!rc->pids[ofs]) {
+			spin_unlock(&rc->pids_lock);
+			return ofs;
+		}
+	}
+	PCNPRINTK_ERR("%s: MAX_ALIVE_THREADS %d\n", __func__, MAX_ALIVE_THREADS);
+	BUG_ON("Must succeed: We currently only support up to MAX_ALIVE_THREADS "
+													"alive threads on a node");
+}
+
+/* rc->pids_lock holded */
+int __pid_slot(struct remote_context *rc, int pid)
+{
+	int ofs;
+	for (ofs = 0; ofs < MAX_ALIVE_THREADS; ofs++) {
+		__check_ofs(ofs);
+		if (rc->pids[ofs] == pid) {
+			spin_unlock(&rc->pids_lock);
+			return ofs;
+		}
+	}
+	BUG_ON("Must succeed: ");
+}
+
+/* dbg utility func  */
+void __print_pids(struct remote_context *rc)
+{
+	int ofs;
+	spin_lock(&rc->pids_lock);
+	for (ofs = 0; ofs < MAX_ALIVE_THREADS; ofs++) {
+		__check_ofs(ofs);
+		if (!rc->pids[ofs]) {
+			printk("\n");
+			spin_unlock(&rc->pids_lock);
+			return;
+		} else
+			printk("[%d] ", rc->pids[ofs]);
+	}
+	spin_unlock(&rc->pids_lock);
+
+	printk("[NULL]\n");
+	return;
+}
+
+/* should also do at fork... if(rc)*/
+void __recreate_pids_list(struct remote_context *rc)
+{
+	struct task_struct *g = current, *p = current;
+	int ofs = 1; /* current */
+
+	spin_lock(&rc->pids_lock);
+	rc->pids[0] = current->pid;
+
+	read_lock(&tasklist_lock);
+	while_each_thread(g, p) {
+		__check_ofs(ofs);
+		rc->pids[ofs] = p->pid;
+		ofs++;
+		//printk("%d ", p->pid);
+	}
+	read_unlock(&tasklist_lock);
+
+	spin_unlock(&rc->pids_lock);
+
+	//__print_pids(rc);
+}
+
+void __add_pid(struct remote_context *rc, int pid)
+{
+	int slot;
+	//if (slot < 0) return -1;
+
+	spin_lock(&rc->pids_lock);
+	slot = __first_empty_pid_slot(rc);
+	rc->pids[slot] = pid;
+	spin_unlock(&rc->pids_lock);
+
+	/* dbg */
+	if (slot == 7)
+		__print_pids(rc); // O
+}
+
+void __del_pid(struct remote_context *rc, int pid)
+{
+	int tail, head;
+
+	spin_lock(&rc->pids_lock);
+	tail = __first_empty_pid_slot(rc);
+	head = __pid_slot(rc, pid);
+
+	rc->pids[head] = 0;
+
+	while (head + 1 < MAX_ALIVE_THREADS) {
+		if (head + 1 != tail) {
+			rc->pids[head] = rc->pids[head + 1];
+			rc->pids[head + 1] = 0;
+		}
+		head++;
+	}
+	spin_unlock(&rc->pids_lock);
+}
+
+static void	__out_thread(void)
+{
+	struct remote_context *rc = get_task_remote(current);
+	rc->out_threads++;
+	__del_pid(rc, current->pid);
+	PSPRINTK("\t\t--[%d]\n", current->pid);
+	__put_task_remote(rc);
+}
+
+static void	__back_thread(void)
+{
+	struct remote_context *rc = get_task_remote(current);
+	rc->out_threads--;
+	__add_pid(rc, current->pid);
+	__put_task_remote(rc);
+}
+
+static int __get_threads_cnt(void)
+{
+	struct task_struct *g = current, *p = current;
+	int cnt = 1; /* current */
+
+	read_lock(&tasklist_lock);
+	while_each_thread(g, p) {
+		cnt++;
+		//printk("%d ", p->pid);
+	}
+	read_unlock(&tasklist_lock);
+
+	return cnt;
+}
+
+static int __get_out_threads_cnt(void)
+{
+	struct remote_context *rc = get_task_remote(current);
+	int cnt = rc->out_threads;
+	__put_task_remote(rc);
+	return cnt;
+}
+
+static void __recalc_thread_cnt(void)
+{
+	struct remote_context *rc = get_task_remote(current);
+
+	//printk("rc->for_remote (%s)\n", rc->for_remote?"O":"X");
+	rc->threads_cnt = __get_threads_cnt() - __get_out_threads_cnt();
+	atomic_set(&rc->barrier, rc->threads_cnt);
+	atomic_set(&rc->barrier_end, rc->threads_cnt);
+	PSPRINTK("\t\t[%d] alive/total %d/%d\n",
+				current->pid, rc->threads_cnt, __get_threads_cnt());
+	__put_task_remote(rc);
+
+	/* dgb */
+	if (rc->threads_cnt == 8)
+		__print_pids(rc);
+}
+
+void __find_conflict_two_threads(unsigned long addr, struct task_struct *target_tsk, struct remote_context *rc, bool *is_saved)
+{
+	int j;
+	for (j = 0; j < target_tsk->tso_wr_cnt; j++) {
+		unsigned long target_addr = target_tsk->buffer_inv_addrs[j];
+		if(!target_addr) continue;
+
+		//printk("addr %lx target_addr %lx\n", addr, target_addr);
+		if (addr == target_addr) { /* conflict */
+			/* remove duplicat */
+			target_tsk->buffer_inv_addrs[j] = 0;
+			/* save i if not saved, and keep looping all j to */
+			if (!*is_saved) {
+				*is_saved = true;
+				rc->addrs[rc->addr_cnt] = addr;
+				rc->addr_cnt++;
+				BUG();
+			}
+		}
+	}
+	//printk("\t\t %llu\n", target_tsk->tso_wr_cnt);
+}
+
+
+void sync_server_local_conflictions(struct remote_context *rc)
+{
+	int i, j;
+    spin_lock(&rc->pids_lock);
+	// O(n^2): all threads compare with all threads
+    for (i = 0; i < MAX_ALIVE_THREADS; i++) {
+		int pid, ii;
+		struct task_struct *tsk;
+
+        __check_ofs(i);
+		pid = rc->pids[i];
+        if (!pid)
+			goto all_done;
+
+		tsk = __get_task_struct(pid);
+		if (!tsk) {
+			__print_pids(rc);
+			BUG();
+		}
+
+		/* addrs_addrs: O(n^2): all addrs compare with all addrs */
+		for (ii = 0; ii < tsk->tso_wr_cnt; ii++) {
+			unsigned long addr = tsk->buffer_inv_addrs[ii];
+			bool is_saved = false;
+			if (!addr)
+				break; /* end of addr */
+
+//			printk("%s(): check %lx\n", __func__, addr);
+
+			/* compaer a addr with all addrs at all threads */
+			for (j = 0; j < MAX_ALIVE_THREADS; j++) {
+				int target_pid;
+				struct task_struct *target_tsk;
+				if (i == j) continue; // TODO: do a sanity check for this, if this happens, we still has to cheat it as a hashset.
+
+				__check_ofs(j);
+				target_pid = rc->pids[j];
+				if (!target_pid)
+					break;
+
+				target_tsk = __get_task_struct(target_pid);
+				if (!target_tsk) {
+					printk("[%d]i %d [%d]j %d\n", pid, i, target_pid, j);
+					BUG();
+				}
+
+				/* for addrs in target_thread */
+				__find_conflict_two_threads(addr, target_tsk, rc, &is_saved);
+			}
+			/* Warnning pids[] is 0/full */
+		}
+		//printk("\t %llu\n", tsk->tso_wr_cnt);
+    }
+	/* Warnning pids[] is 0/full */
+all_done:
+    spin_unlock(&rc->pids_lock);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Distributed mutex
@@ -417,6 +688,9 @@ static void process_back_migration(back_migration_request_t *req)
 
 	/* Welcome home */
 
+	__back_thread();
+	__recalc_thread_cnt();
+
 	current->remote = NULL;
 	current->remote_nid = -1;
 	current->remote_pid = -1;
@@ -445,6 +719,7 @@ static int __do_back_migration(struct task_struct *tsk, int dst_nid, void __user
 {
 	back_migration_request_t *req;
 	int ret;
+	struct remote_context *rc = get_task_remote(current);
 
 	might_sleep();
 
@@ -467,6 +742,14 @@ static int __do_back_migration(struct task_struct *tsk, int dst_nid, void __user
 	req->sas_ss_size = tsk->sas_ss_size;
 	memcpy(req->action, tsk->sighand->action, sizeof(req->action));
 	*/
+
+	/* TODO: see if can be functionlized */
+	rc->threads_cnt--;
+	__del_pid(rc, current->pid);
+	atomic_set(&rc->barrier, rc->threads_cnt);
+	atomic_set(&rc->barrier_end, rc->threads_cnt);
+	PSPRINTK("\t\t--[%d] alive %hu\n", current->pid, rc->threads_cnt);
+	__put_task_remote(rc);
 
 	ret = copy_from_user(&req->arch.regsets, uregs,
 			regset_size(get_popcorn_node_arch(dst_nid)));
@@ -525,10 +808,22 @@ struct remote_thread_params {
 	clone_request_t *req;
 };
 
+/* add a thread at remote (not remote_main_worker) */
 static int remote_thread_main(void *_args)
 {
 	struct remote_thread_params *params = _args;
 	clone_request_t *req = params->req;
+	struct remote_context *rc = get_task_remote(current);
+
+	/* TODO: see if can be functionlized */
+	// TODO: make two functions ++/--
+	//PSPRINTK("rc->for_remote (%s)\n", rc->for_remote?"O":"X");
+	rc->threads_cnt++; /* TODO: check if serialized by sponer */
+	atomic_set(&rc->barrier, rc->threads_cnt);
+	atomic_set(&rc->barrier_end, rc->threads_cnt);
+	__add_pid(rc, current->pid);
+	PSPRINTK("\t\t++[%d] alive %hu\n", current->pid, rc->threads_cnt); /* TODO: check if serialized by sponer */
+	__put_task_remote(rc);
 
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
 	PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
@@ -730,7 +1025,7 @@ static int remote_worker_main(void *data)
 
 	get_task_remote(current);
 	rc->tgid = current->tgid;
-	
+
 	__run_remote_worker(rc);
 
 	__terminate_remote_threads(rc);
@@ -1005,16 +1300,22 @@ static int __do_migration(struct task_struct *tsk, int dst_nid, void __user *ure
 		__lock_remote_contexts_out(dst_nid);
 		list_add(&rc->list, &__remote_contexts_out());
 		__unlock_remote_contexts_out(dst_nid);
+
+		__recreate_pids_list(rc);
 	}
 	/*
 	 * tsk->remote != NULL implies this thread is distributed (migrated away).
 	 */
 	tsk->remote = get_task_remote(tsk);
 
+	/* TODO: see if can be functionlized */
+	__out_thread();
+	__recalc_thread_cnt();
+
 	ret = __request_clone_remote(dst_nid, tsk, uregs);
 	if (ret) return ret;
 
-	__process_remote_works();
+	__process_remote_works(); /* migrate then wait for handling requests */
 	return 0;
 }
 

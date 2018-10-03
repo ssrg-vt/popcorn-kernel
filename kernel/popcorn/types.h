@@ -12,6 +12,7 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
 #include <popcorn/sync.h>
+#include <linux/semaphore.h>
 
 #define FAULTS_HASH 31
 
@@ -46,6 +47,24 @@ struct remote_context {
 	struct list_head remote_works;
 
 	pid_t remote_tgids[MAX_POPCORN_NODES];
+
+	/* Barrier for batch inv sync (for WW case) */
+	atomic_t barrier;
+	atomic_t barrier_end;	/* watch out */
+	struct completion comp;
+	struct completion comp_end; /*watch out */
+	wait_queue_head_t waits;
+	wait_queue_head_t waits_end;
+	atomic_t pendings;	/* watch out */
+	/* Track live threads */
+	unsigned short threads_cnt; /* alive threads */
+	//unsigned short migrated; /* -> out_threads */
+	int out_threads; // TODO renam. keep tracking current on-node thread cnt
+	int pids[MAX_ALIVE_THREADS];
+	spinlock_t pids_lock;
+
+	int addr_cnt;
+	unsigned long addrs[MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS]; /* global array */
 };
 
 struct remote_context *__get_mm_remote(struct mm_struct *mm);
@@ -272,6 +291,32 @@ DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 	unsigned long addrs[MAX_WRITE_INV_BUFFERS];
 DEFINE_PCN_KMSG(page_invalidate_batch_request_t,
 				PAGE_INVALIDATE_BATCH_REQUEST_FIELDS);
+
+#define PAGE_INVALIDATE_BATCH_RESPONSE_FIELDS \
+	pid_t origin_pid; \
+	int origin_ws; \
+	pid_t remote_pid; \
+	unsigned long retry_cnt; \
+	unsigned long retry_addrs[MAX_WRITE_INV_BUFFERS];
+DEFINE_PCN_KMSG(page_invalidate_batch_response_t,
+				PAGE_INVALIDATE_BATCH_RESPONSE_FIELDS);
+
+#define PAGE_MERGE_REQUEST_FIELDS \
+	pid_t origin_pid; \
+	int origin_ws; \
+	pid_t remote_pid; \
+	unsigned long tso_wr_cnt; \
+	unsigned long addrs[MAX_WRITE_INV_BUFFERS];
+DEFINE_PCN_KMSG(page_merge_request_t, PAGE_MERGE_REQUEST_FIELDS);
+
+#define PAGE_MERGE_RESPONSE_FIELDS \
+	pid_t origin_pid; \
+	int origin_ws; \
+	pid_t remote_pid; \
+	int scatters; \
+	int merge_id; \
+	unsigned char diffs[PAGE_SIZE];
+DEFINE_PCN_KMSG(page_merge_response_t, PAGE_MERGE_RESPONSE_FIELDS);
 
 
 /**
