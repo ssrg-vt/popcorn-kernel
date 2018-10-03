@@ -3943,10 +3943,10 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
  *
  * The mmap_sem may have been released depending on flags and our return value.
  * See filemap_fault() and __lock_page_or_retry().
- */static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
+ */
+static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 {
 	pte_t entry;
-
 	if (unlikely(pmd_none(*vmf->pmd))) {
 		/*
 		 * Leave __pte_alloc() until later: because vm_ops->fault may
@@ -3984,11 +3984,7 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 	}
 #ifdef CONFIG_POPCORN
 	if (distributed_process(current)) {
-		int ret = page_server_handle_pte_fault(vmf->vma->vm_mm, vmf->vma,
-						       vmf->address, vmf->pmd,
-						       vmf->pte, vmf->orig_pte,
-						       vmf->flags);
-
+		int ret = page_server_handle_pte_fault(vmf);
 		if (ret == VM_FAULT_RETRY) {
 			int backoff = ++current->backoff_weight;
 			PGPRINTK("  [%d] backoff %d\n", current->pid, backoff);
@@ -4003,14 +3999,13 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 		if (ret != VM_FAULT_CONTINUE) return ret;
 	}
 #endif
-	
 	if (!vmf->pte) {
 		if (vma_is_anonymous(vmf->vma))
 			return do_anonymous_page(vmf);
 		else
 			return do_fault(vmf);
 	}
-	
+
 	if (!pte_present(vmf->orig_pte)) {
 #ifdef CONFIG_POPCORN
 		page_server_panic(true, vmf->vma->vm_mm,

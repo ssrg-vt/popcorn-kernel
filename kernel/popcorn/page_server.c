@@ -1604,9 +1604,7 @@ void page_server_put_userpage(struct fault_handle *fh, char *mode)
 /**************************************************************************
  * Local fault handler at the remote
  */
-static int __handle_localfault_at_remote(struct mm_struct *mm,
-		struct vm_area_struct *vma, unsigned long addr,
-		pmd_t *pmd, pte_t *pte, pte_t pte_val, unsigned int fault_flags)
+static int __handle_localfault_at_remote(struct vm_fault *vmf)
 {
 	spinlock_t *ptl;
 	struct page *page;
@@ -1617,63 +1615,55 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	struct fault_handle *fh;
 	bool leader;
 	remote_page_response_t *rp;
-	struct vm_fault vmf = {
-		.vma = vma,
-		.address = addr,
-		.flags = fault_flags,
-		.pgoff = linear_page_index(vma, addr),
-		.gfp_mask = __get_fault_gfp_mask(vma),
-	};
-
-
-	if (anon_vma_prepare(vma)) {
+	unsigned long addr = vmf->address & PAGE_MASK;
+	if (anon_vma_prepare(vmf->vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
-		pte_unmap(pte);
+		pte_unmap(vmf->pte);
 		return VM_FAULT_SIGBUS;
 	}
 
-	ptl = pte_lockptr(mm, pmd);
+	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
-
-	if (!pte_same(*pte, pte_val)) {
-		pte_unmap_unlock(pte, ptl);
+	// *vmf->pte may be NULL, so this line is problemmatic
+	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
+		pte_unmap_unlock(vmf->pte, ptl);
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
 		return 0;
 	}
-	fh = __start_fault_handling(current, addr, fault_flags, ptl, &leader);
+	fh = __start_fault_handling(current, addr, vmf->flags, ptl, &leader);
 	if (!fh) {
-		pte_unmap(pte);
-		up_read(&mm->mmap_sem);
+		pte_unmap(vmf->pte);
+		up_read(&vmf->vma->vm_mm->mmap_sem);
 		return VM_FAULT_RETRY;
 	}
 
 	PGPRINTK(" %c[%d] %lx %p\n", leader ? '=' : '-', current->pid, addr, fh);
 	if (!leader) {
-		pte_unmap(pte);
+		pte_unmap(vmf->pte);
 		ret = fh->ret;
-		if (ret) up_read(&mm->mmap_sem);
+		if (ret) up_read(&vmf->vma->vm_mm->mmap_sem);
 		goto out_follower;
 	}
-
-	if (pte_none(*pte) || !(page = vm_normal_page(vma, addr, *pte))) {
-		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
+	// *vmf->pte may be NULL, so this line is problemmatic
+	if (pte_none(*vmf->pte) || !(page = vm_normal_page(vmf->vma, addr, *vmf->pte))) {
+		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vmf->vma, addr);
 		BUG_ON(!page);
 
-		if (mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg, false)) {
+		if (mem_cgroup_try_charge(page, vmf->vma->vm_mm, GFP_KERNEL, &memcg, false)) {
 			BUG();
 		}
 		populated = true;
 	}
 	get_page(page);
 
-	rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
+	rp = __fetch_page_from_origin(current, vmf->vma, addr, vmf->flags, page);
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
 		if (rp->result != VM_FAULT_RETRY)
 			PGPRINTK("  [%d] failed 0x%x\n", current->pid, rp->result);
 		ret = rp->result;
-		pte_unmap(pte);
-		up_read(&mm->mmap_sem);
+		pte_unmap(vmf->pte);
+		up_read(&vmf->vma->vm_mm->mmap_sem);
 		goto out_free;
 	}
 
@@ -1686,9 +1676,10 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		BUG_ON(populated);
 
 		spin_lock(ptl);
-		entry = pte_make_valid(*pte);
-
-		if (fault_for_write(fault_flags)) {
+		// pte may be NULL at this point b/c the kernel
+		// has deffered allocation, so this is problematic
+		entry = pte_make_valid(*vmf->pte);
+		if (fault_for_write(vmf->flags)) {
 			entry = pte_mkwrite(entry);
 			entry = pte_mkdirty(entry);
 		} else {
@@ -1696,22 +1687,22 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		}
 		entry = pte_mkyoung(entry);
 
-		if (ptep_set_access_flags(vma, addr, pte, entry, 1)) {
-			update_mmu_cache(vma, addr, pte);
+		if (ptep_set_access_flags(vmf->vma, addr, vmf->pte, entry, 1)) {
+			update_mmu_cache(vmf->vma, addr, vmf->pte);
 		}
 	} else {
 		spin_lock(ptl);
 		if (populated) {
-		        alloc_set_pte(&vmf, memcg, page);
+			alloc_set_pte(&vmf, memcg, page);
 			mem_cgroup_commit_charge(page, memcg, false, false);
-			lru_cache_add_active_or_unevictable(page, vma);
+			lru_cache_add_active_or_unevictable(page, vmf->vma);
 		} else {
-			__make_pte_valid(mm, vma, addr, fault_flags, pte);
+			__make_pte_valid(vmf->vma->vm_mm, vmf->vma, addr, vmf->flags, vmf->pte);
 		}
 	}
-	SetPageDistributed(mm, addr);
-	set_page_owner(my_nid, mm, addr);
-	pte_unmap_unlock(pte, ptl);
+	SetPageDistributed(vmf->vma->vm_mm, addr);
+	set_page_owner(my_nid, vmf->vma->vm_mm, addr);
+	pte_unmap_unlock(vmf->pte, ptl);
 	ret = 0;	/* The leader squashes both 0 and VM_FAULT_CONTINUE to 0 */
 
 out_free:
@@ -1760,88 +1751,87 @@ static bool __handle_copy_on_write(struct mm_struct *mm,
 /**************************************************************************
  * Local fault handler at the origin
  */
-static int __handle_localfault_at_origin(struct mm_struct *mm,
-		struct vm_area_struct *vma, unsigned long addr,
-		pmd_t *pmd, pte_t *pte, pte_t pte_val, unsigned int fault_flags)
+static int __handle_localfault_at_origin(struct vm_fault *vmf)
 {
 	spinlock_t *ptl;
-
+	unsigned long addr = vmf->address & PAGE_MASK;
 	struct fault_handle *fh;
 	bool leader;
 
-	ptl = pte_lockptr(mm, pmd);
+	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
 
-	if (!pte_same(*pte, pte_val)) {
-		pte_unmap_unlock(pte, ptl);
+	// *vmf->pte may be NULL, so this line is problemmatic
+	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
+		pte_unmap_unlock(vmf->pte, ptl);
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
 		return 0;
 	}
 
 	/* Fresh access to the address. Handle locally since we are at the origin */
-	if (pte_none(pte_val)) {
-		BUG_ON(pte_present(pte_val));
+	if (pte_none(vmf->orig_pte)) {
+		BUG_ON(pte_present(vmf->orig_pte));
 		spin_unlock(ptl);
 		PGPRINTK("  [%d] fresh at origin. continue\n", current->pid);
 		return VM_FAULT_CONTINUE;
 	}
 
 	/* Nothing to do with DSM (e.g. COW). Handle locally */
-	if (!PageDistributed(mm, addr)) {
+	if (!PageDistributed(vmf->vma->vm_mm, addr)) {
 		spin_unlock(ptl);
 		PGPRINTK("  [%d] local at origin. continue\n", current->pid);
 		return VM_FAULT_CONTINUE;
 	}
 
-	fh = __start_fault_handling(current, addr, fault_flags, ptl, &leader);
+	fh = __start_fault_handling(current, addr, vmf->flags, ptl, &leader);
 	if (!fh) {
-		pte_unmap(pte);
-		up_read(&mm->mmap_sem);
+		pte_unmap(vmf->pte);
+		up_read(&vmf->vma->vm_mm->mmap_sem);
 		return VM_FAULT_RETRY;
 	}
 
 	/* Handle replicated page via the memory consistency protocol */
 	PGPRINTK(" %c[%d] %lx replicated %smine %p\n",
 			leader ? '=' : ' ', current->pid, addr,
-			page_is_mine(mm, addr) ? "" : "not ", fh);
+			page_is_mine(vmf->vma->vm_mm, addr) ? "" : "not ", fh);
 
 	if (!leader) {
-		pte_unmap(pte);
+		pte_unmap(vmf->pte);
 		goto out_wakeup;
 	}
 
-	__handle_copy_on_write(mm, vma, addr, pte, &pte_val, fault_flags);
+	__handle_copy_on_write(vmf->vma->vm_mm, vmf->vma, addr, vmf->pte, &(vmf->orig_pte), vmf->flags);
 
-	if (page_is_mine(mm, addr)) {
-		if (fault_for_read(fault_flags)) {
+	if (page_is_mine(vmf->vma->vm_mm, addr)) {
+		if (fault_for_read(vmf->flags)) {
 			/* Racy exit */
-			pte_unmap(pte);
+			pte_unmap(vmf->pte);
 			goto out_wakeup;
 		}
 
 		__claim_local_page(current, addr, my_nid);
 
 		spin_lock(ptl);
-		pte_val = pte_mkwrite(pte_val);
-		pte_val = pte_mkdirty(pte_val);
-		pte_val = pte_mkyoung(pte_val);
+		vmf->orig_pte = pte_mkwrite(vmf->orig_pte);
+		vmf->orig_pte = pte_mkdirty(vmf->orig_pte);
+		vmf->orig_pte = pte_mkyoung(vmf->orig_pte);
 
-		if (ptep_set_access_flags(vma, addr, pte, pte_val, 1)) {
-			update_mmu_cache(vma, addr, pte);
+		if (ptep_set_access_flags(vmf->vma, addr, vmf->pte, vmf->orig_pte, 1)) {
+			update_mmu_cache(vmf->vma, addr, vmf->pte);
 		}
 	} else {
-		struct page *page = vm_normal_page(vma, addr, pte_val);
+		struct page *page = vm_normal_page(vmf->vma, addr, vmf->orig_pte);
 		BUG_ON(!page);
 
-		__claim_remote_page(current, mm, vma, addr, fault_flags, page);
+		__claim_remote_page(current, vmf->vma->vm_mm, vmf->vma, addr, vmf->flags, page);
 
 		spin_lock(ptl);
-		__make_pte_valid(mm, vma, addr, fault_flags, pte);
+		__make_pte_valid(vmf->vma->vm_mm, vmf->vma, addr, vmf->flags, vmf->pte);
 	}
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-	BUG_ON(!test_page_owner(my_nid, mm, addr));
+	BUG_ON(!test_page_owner(my_nid, vmf->vma->vm_mm, addr));
 #endif
-	pte_unmap_unlock(pte, ptl);
+	pte_unmap_unlock(vmf->pte, ptl);
 
 out_wakeup:
 	__finish_fault_handling(fh);
@@ -1867,28 +1857,24 @@ out_wakeup:
  *	0 if the fault is fetched remotely and fixed.
  *  ERROR otherwise
  */
-int page_server_handle_pte_fault(
-		struct mm_struct *mm, struct vm_area_struct *vma,
-		unsigned long address, pmd_t *pmd, pte_t *pte, pte_t pte_val,
-		unsigned int fault_flags)
+int page_server_handle_pte_fault(struct vm_fault *vmf)
 {
-	unsigned long addr = address & PAGE_MASK;
+	unsigned long addr = vmf->address & PAGE_MASK;
 	int ret = 0;
 
 	might_sleep();
 
 	PGPRINTK("\n## PAGEFAULT [%d] %lx %c %lx %x %lx\n",
-			current->pid, address,
-			fault_for_write(fault_flags) ? 'W' : 'R',
+			current->pid, addr,
+			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()),
-			fault_flags, pte_flags(pte_val));
+		 vmf->flags, pte_flags(vmf->orig_pte));
 
 	/**
 	 * Thread at the origin
 	 */
 	if (!current->at_remote) {
-		ret = __handle_localfault_at_origin(
-				mm, vma, addr, pmd, pte, pte_val, fault_flags);
+		ret = __handle_localfault_at_origin(vmf);
 		goto out;
 	}
 
@@ -1899,15 +1885,15 @@ int page_server_handle_pte_fault(
 	 * There will be no copy-on-write case at the remote since no thread
 	 * creation is allowed at the remote side.
 	 */
-	if (pte_none(pte_val)) {
+	if (pte_none(vmf->orig_pte)) {
 		/* Can we handle the fault locally? */
-		if (vma->vm_flags & VM_EXEC) {
+		if (vmf->vma->vm_flags & VM_EXEC) {
 			PGPRINTK("  [%d] VM_EXEC. continue\n", current->pid);
 			ret = VM_FAULT_CONTINUE;
 			goto out;
 		}
-		if (!vma_is_anonymous(vma) &&
-				((vma->vm_flags & (VM_WRITE | VM_SHARED)) == 0)) {
+		if (!vma_is_anonymous(vmf->vma) &&
+				((vmf->vma->vm_flags & (VM_WRITE | VM_SHARED)) == 0)) {
 			PGPRINTK("  [%d] locally file-mapped read-only. continue\n",
 					current->pid);
 			ret = VM_FAULT_CONTINUE;
@@ -1915,28 +1901,26 @@ int page_server_handle_pte_fault(
 		}
 	}
 
-	if (!pte_present(pte_val)) {
+	if (!pte_present(vmf->orig_pte)) {
 		/* Remote page fault */
-		ret = __handle_localfault_at_remote(
-				mm, vma, addr, pmd, pte, pte_val, fault_flags);
+		ret = __handle_localfault_at_remote(vmf);
 		goto out;
 	}
 
-	if ((vma->vm_flags & VM_WRITE) &&
-			fault_for_write(fault_flags) && !pte_write(pte_val)) {
+	if ((vmf->vma->vm_flags & VM_WRITE) &&
+			fault_for_write(vmf->flags) && !pte_write(vmf->orig_pte)) {
 		/* wr-protected for keeping page consistency */
-		ret = __handle_localfault_at_remote(
-				mm, vma, addr, pmd, pte, pte_val, fault_flags);
+		ret = __handle_localfault_at_remote(vmf);
 		goto out;
 	}
 
-	pte_unmap(pte);
+	pte_unmap(vmf->pte);
 	PGPRINTK("  [%d] might be fixed by others???\n", current->pid);
 	ret = 0;
 
 out:
 	trace_pgfault(my_nid, current->pid,
-			fault_for_write(fault_flags) ? 'W' : 'R',
+			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
 
 	return ret;

@@ -18,10 +18,7 @@ struct fault_handle;
 /*
  * Entry points for dealing with page fault in Popcorn Rack
  */
-int page_server_handle_pte_fault(
-		struct mm_struct *mm, struct vm_area_struct *vma,
-		unsigned long address, pmd_t *pmd, pte_t *pte, pte_t entry,
-		unsigned int flags);
+int page_server_handle_pte_fault(struct vm_fault *vmf);
 
 /*
  * Flush pages in remote to the origin
