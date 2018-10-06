@@ -35,8 +35,10 @@
 #include "wait_station.h"
 #include "util.h"
 //#include "sync.h"
+#include <linux/vmalloc.h>
 
 #define FUTEX_DBG 0
+#define CONFLICT_DBG 1
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
@@ -147,9 +149,16 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	spin_lock_init(&rc->remote_works_lock);
 	init_completion(&rc->remote_works_ready);
 
-	rc->addr_cnt = 0;
+	memset(rc->remote_tgids, 0x00, sizeof(rc->remote_tgids));
+
+	INIT_RADIX_TREE(&rc->pages, GFP_ATOMIC);
+
+	/* Alive threads */
 	rc->threads_cnt = 0;
 	rc->out_threads = 0;
+	memset(rc->pids, 0, sizeof(*rc->pids) * MAX_ALIVE_THREADS);
+
+	/* Barrier - leader/follower */
 	init_waitqueue_head(&rc->waits);
 	init_waitqueue_head(&rc->waits_end);
 	init_completion(&rc->comp);		/* using only one may race condition since the next wait is faster than previous comp */
@@ -158,14 +167,42 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	atomic_set(&rc->barrier, rc->threads_cnt);
 	atomic_set(&rc->pendings, 0);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
-	memset(rc->pids, 0, sizeof(*rc->pids) * MAX_ALIVE_THREADS);
-	memset(rc->addrs, 0, sizeof(*rc->addrs) *
+
+#if !GLOBAL
+	/* serial phase inv/diff */
+	int j;
+	rc->lconf_cnt = 0; /* local confliction */
+	for (i = 0; i < MAX_ALIVE_THREADS; i++) {
+		spin_lock_init(&rc->inv_lock_t[i]);
+		rc->inv_cnt_t[i] = 0;
+		rc->inv_pages_t[i] = kmalloc(sizeof(*rc->inv_pages_t) *
+							MAX_WRITE_INV_BUFFERS * PAGE_SIZE, GFP_KERNEL);
+		if (!rc->inv_pages_t[i]) BUG();
+
+		for (j = 0;j < MAX_WRITE_INV_BUFFERS; j++)
+			rc->time_t[i][j] = 0;
+	}
+
+#else
+	/* global */
+    spin_lock_init(&rc->inv_lock);
+    rc->inv_cnt = 0;
+	memset(rc->inv_addrs, 0, sizeof(*rc->inv_addrs) *
 						MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
+	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
+	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
+	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
+	//rc->inv_pages = kmalloc(sizeof(*rc->inv_pages) * MAX_ALIVE_THREADS *
+	//						MAX_WRITE_INV_BUFFERS * PAGE_SIZE, GFP_KERNEL);
+	rc->inv_pages = vmalloc(sizeof(*rc->inv_pages) * MAX_ALIVE_THREADS *
+							MAX_WRITE_INV_BUFFERS * PAGE_SIZE);
+	if (!rc->inv_pages) BUG();
+	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
+	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
+	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
+#endif
+	/* backup */
 
-
-	memset(rc->remote_tgids, 0x00, sizeof(rc->remote_tgids));
-
-	INIT_RADIX_TREE(&rc->pages, GFP_ATOMIC);
 
 	return rc;
 }
@@ -217,7 +254,7 @@ int __pid_slot(struct remote_context *rc, int pid)
 			return ofs;
 		}
 	}
-	BUG_ON("Must succeed: ");
+	BUG_ON("Must succeed: "); // TODO: BUG: IT HAPPENS
 }
 
 /* dbg utility func  */
@@ -259,7 +296,6 @@ void __recreate_pids_list(struct remote_context *rc)
 	read_unlock(&tasklist_lock);
 
 	spin_unlock(&rc->pids_lock);
-
 	//__print_pids(rc);
 }
 
@@ -355,6 +391,60 @@ static void __recalc_thread_cnt(void)
 		__print_pids(rc);
 }
 
+#if GLOBAL
+void sort_array(struct remote_context *rc, int ofs)
+{
+	int i = ofs;
+	while (i + 1 < rc->inv_cnt ) {
+		//unsigned long temp = rc->inv_addrs[i];
+		rc->inv_addrs[i] = rc->inv_addrs[i + 1];
+		rc->inv_addrs[i + 1] = 0; /* ith = 0 */
+		memcpy(&rc->inv_pages[i * PAGE_SIZE],
+				&rc->inv_pages[(i + 1) * PAGE_SIZE], PAGE_SIZE);
+		memset(&rc->inv_pages[(i + 1) * PAGE_SIZE], 0, PAGE_SIZE);
+		i++;
+	}
+}
+/*
+ *  global array case - optimize O(N^2) + sorting array(bad mem copy pages)
+ */
+int sync_server_local_serial_conflictions(struct remote_context *rc)
+{
+	int i, j, new_local_wr_cnt = 0, dealed = 0; /* diffs/final cnt */
+	for (i = 0; i < rc->inv_cnt; i++) {
+		unsigned long addr = rc->inv_addrs[i];
+		if(!addr) continue; /* may be removed already */
+		for (j = 0; j < rc->inv_cnt; j++) {
+			unsigned long target_addr = rc->inv_addrs[j];
+			if (i == j) continue;
+			if (addr == target_addr) { /* local conflict - remove late one */
+				rc->inv_addrs[j] = 0;
+				memset(&rc->inv_pages[j * PAGE_SIZE], 0, PAGE_SIZE );
+				new_local_wr_cnt++;
+			}
+		}
+	}
+
+	/* dbg */
+	if (new_local_wr_cnt)
+		PCNPRINTK_ERR("local_conflict_addr_cnt %d/%d\n",
+							new_local_wr_cnt, rc->inv_cnt);
+	BUG_ON(new_local_wr_cnt > MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
+
+	/* sorting array */
+	for (i = 0; i < rc->inv_cnt; i++) {
+		if(!rc->inv_addrs[i]) {
+			sort_array(rc, i);
+			dealed++;
+			if (dealed == new_local_wr_cnt)
+				break;
+		}
+	}
+	new_local_wr_cnt = rc->inv_cnt - new_local_wr_cnt;
+	return new_local_wr_cnt;
+}
+
+#else /* !GLOBAL */
 void __find_conflict_two_threads(unsigned long addr, struct task_struct *target_tsk, struct remote_context *rc, bool *is_saved)
 {
 	int j;
@@ -362,26 +452,26 @@ void __find_conflict_two_threads(unsigned long addr, struct task_struct *target_
 		unsigned long target_addr = target_tsk->buffer_inv_addrs[j];
 		if(!target_addr) continue;
 
-		//printk("addr %lx target_addr %lx\n", addr, target_addr);
-		if (addr == target_addr) { /* conflict */
+		//printk("addr %lx =? target_addr %lx\n", addr, target_addr);
+		if (addr == target_addr) { /* local conflict */
 			/* remove duplicat */
 			target_tsk->buffer_inv_addrs[j] = 0;
 			/* save i if not saved, and keep looping all j to */
 			if (!*is_saved) {
 				*is_saved = true;
-				rc->addrs[rc->addr_cnt] = addr;
-				rc->addr_cnt++;
-				BUG();
+				rc->inv_addrs[rc->lconf_cnt] = addr;
+				rc->lconf_cnt++;
 			}
 		}
 	}
 	//printk("\t\t %llu\n", target_tsk->tso_wr_cnt);
 }
 
-
-void sync_server_local_conflictions(struct remote_context *rc)
+int sync_server_local_conflictions(struct remote_context *rc)
 {
 	int i, j;
+	int local_wr_cnt = 0;
+
     spin_lock(&rc->pids_lock);
 	// O(n^2): all threads compare with all threads
     for (i = 0; i < MAX_ALIVE_THREADS; i++) {
@@ -398,6 +488,8 @@ void sync_server_local_conflictions(struct remote_context *rc)
 			__print_pids(rc);
 			BUG();
 		}
+
+		local_wr_cnt += tsk->tso_wr_cnt;
 
 		/* addrs_addrs: O(n^2): all addrs compare with all addrs */
 		for (ii = 0; ii < tsk->tso_wr_cnt; ii++) {
@@ -434,8 +526,14 @@ void sync_server_local_conflictions(struct remote_context *rc)
     }
 	/* Warnning pids[] is 0/full */
 all_done:
+#if CONFLICT_DBG
+	if (local_wr_cnt > 0)
+		printk("local_wr_cnt %d\n", local_wr_cnt);
+#endif
     spin_unlock(&rc->pids_lock);
+	return local_wr_cnt;
 }
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // Distributed mutex
@@ -747,6 +845,8 @@ static int __do_back_migration(struct task_struct *tsk, int dst_nid, void __user
 	rc->threads_cnt--;
 	__del_pid(rc, current->pid);
 	atomic_set(&rc->barrier, rc->threads_cnt);
+	atomic_set(&rc->pendings, 0);
+	atomic_set(&rc->scatter_pendings, 0);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
 	PSPRINTK("\t\t--[%d] alive %hu\n", current->pid, rc->threads_cnt);
 	__put_task_remote(rc);

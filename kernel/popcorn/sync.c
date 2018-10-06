@@ -24,14 +24,8 @@
 #define POPCORN_BARRIER 1
 #define INVOKE_INV 0
 #define REENTRY_BEGIN_DISABLE 1 // 0: repeat show 1: once
-bool batch = true;
-//bool batch = false;
 static int violation = 0;
 
-//#include "process_server.h"
-//#include "vma_server.h"
-//#include "page_server.h"
-//#include "util.h"
 unsigned long long system_tso_wr_cnt = 0;
 unsigned long long system_tso_nobenefit_region_cnt = 0;
 spinlock_t tso_lock;
@@ -40,13 +34,35 @@ static bool print = false;
 
 /* ugly */
 extern void __print_pids(struct remote_context *rc);
-extern int sync_server_local_conflictions(struct remote_context *rc);
+/*************************
+ * for barriers/fence
+ */
+void __clean_local_inv_buf(int inv_cnt)
+{
+	int j;
+	for (j = 0; j < inv_cnt; j++)
+		current->buffer_inv_addrs[j] = 0;
+}
+
+#if GLOBAL
+void __clean_global_inv(struct remote_context *rc)
+{
+	spin_lock(&rc->inv_lock);
+	memset(rc->inv_addrs, 0, sizeof(*rc->inv_addrs) * rc->inv_cnt);
+	memset(rc->inv_pages, 0, rc->inv_cnt * PAGE_SIZE);
+	rc->inv_cnt = 0;
+	spin_unlock(&rc->inv_lock);
+}
+#endif
+
+
 /* (serial/leader)[Local] -> */
+extern int sync_server_local_conflictions(struct remote_context *rc);
+extern int sync_server_local_serial_conflictions(struct remote_context *rc);
 void __find_conflictions(int nid, struct remote_context *rc)
 {
     page_merge_request_t *req = pcn_kmsg_get(sizeof(*req));
 	struct wait_station *ws = get_wait_station(current);
-	int i;
 	int iter = 0;
 	int sent_cnt = 0;
 	int single_sent = 0;
@@ -54,33 +70,38 @@ void __find_conflictions(int nid, struct remote_context *rc)
 	bool zero_case = true;
 	int local_wr_cnt;
 
-	req->origin_pid = my_nid;
+	req->origin_pid = current->pid;
     req->origin_ws = ws->id;
     req->remote_pid = rc->remote_tgids[nid];
 
-	/* TODO: optimizations
-	 * 1. construct req->addrs[]
-	 *		1.1 hastable local addrs
-	 */
-	local_wr_cnt = sync_server_local_conflictions(rc);
 
-	// move result to the msg
-	// optmization: remove this copy by moving into the func()
+#if !GLOBAL
+	/* implementation - local */
+	local_wr_cnt = sync_server_local_conflictions(rc);
 	/* dbg */
-	//rc->inv_addrs[rc->lconf_cnt];
 	if (rc->lconf_cnt)
 		PCNPRINTK_ERR("local_conflict_addr_cnt %d\n", rc->lconf_cnt);
 	BUG_ON(rc->lconf_cnt > MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
 
-	/* scatters - send */
-	/* even send when 0 */
-	if (local_wr_cnt == 0) {
+#else
+	/* implementation - global */
+	local_wr_cnt = sync_server_local_serial_conflictions(rc);
+	//local_wr_cnt = rc->inv_cnt;
+#endif
+
+
+	/* general */
+	/* scatters - send - even send when 0 */
+	if (local_wr_cnt == 0) { /* special zero case 0/0 */
 		iter = 0; /* total == 0 iter == 0 */
 		total_iter = 0;
+		atomic_set(&rc->scatter_pendings, 1);
 	} else {
 		iter++; /* total > 0 iter start from 1 */
-		total_iter = (local_wr_cnt / MAX_WRITE_INV_BUFFERS) + 1;
+		total_iter = ((local_wr_cnt + MAX_WRITE_INV_BUFFERS - 1) /
+											MAX_WRITE_INV_BUFFERS);
 		zero_case = false;
+		atomic_set(&rc->scatter_pendings, total_iter);
 	}
 
 	do {
@@ -97,9 +118,9 @@ void __find_conflictions(int nid, struct remote_context *rc)
 		req->wr_cnt = single_sent;
 		req->iter = iter;
 		req->total_iter = total_iter;
-		/* can mean */
 
-		/* read from garry */
+		/* optmization: remove this copy by moving into the func() */
+		/* read from "rc->inv_addrs" now. optimize - remove rc->inv_addrs */
 		memcpy(req->addrs, rc->inv_addrs + sent_cnt,
 							sizeof(*req->addrs) * single_sent);
 
@@ -108,9 +129,12 @@ void __find_conflictions(int nid, struct remote_context *rc)
 		 *							(sizeof(*req->addrs) * single_sent)
 		 */
 		/* TODO: potential BUG. better to use pending */
-		printk("single_sent %d / sent_cnt %d / local_wr_cnt %d %d/%d ->\n",
-				single_sent, sent_cnt, local_wr_cnt, iter, total_iter);
-		pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_MERGE_REQUEST, nid, req,
+		printk("\t[%d]/%d: this %d / sent %d / local_wr_cnt %d ->\n",
+				iter, total_iter, single_sent, sent_cnt, local_wr_cnt);
+		/* optimization: these sends can be parallel */
+		/* using pcn_kmsg_post will have problem */
+		/* TODO: be careful of using pcn_kmsg_send() */
+		pcn_kmsg_send(PCN_KMSG_TYPE_PAGE_MERGE_REQUEST, nid, req,
 								sizeof(*req) - sizeof(req->addrs) +
 								(sizeof(*req->addrs) * single_sent));
 								//sizeof(*req));
@@ -122,14 +146,10 @@ void __find_conflictions(int nid, struct remote_context *rc)
 			break;
 	} while (sent_cnt < local_wr_cnt);
 
-	/* optimization: these sends can be parallel */
-	/* send even no diff */
-    //pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_MERGE_REQUEST, nid, req, sizeof(*req));
-
-	/* clean all for each run */
-	for (i = 0; i < local_wr_cnt; i++)
-		rc->inv_addrs[i] = 0;
-	local_wr_cnt = 0;
+#if GLOBAL
+	/* clean all for each barrier/fence */
+	__clean_global_inv(rc);
+#endif
 
 	wait_at_station(ws); // change to consider iters
 }
@@ -151,8 +171,8 @@ bool find_collision_inv(page_merge_request_t *req, page_merge_response_t *res)
 	// find out address first
 	// clear at this point
 
-    put_task_struct(tsk);
 	__put_task_remote(rc);
+    put_task_struct(tsk);
 	return scatters;
 }
 
@@ -195,7 +215,9 @@ static int handle_page_merge_response(struct pcn_kmsg_message *msg)
 {
     page_merge_response_t *res = (page_merge_response_t *)msg;
     struct wait_station *ws = wait_station(res->origin_ws);
-
+	struct task_struct *tsk = __get_task_struct(res->origin_pid);
+	struct remote_context *rc = get_task_remote(tsk);
+	BUG_ON(!rc || !tsk);
 //	if (!res->scatters) /* no need to merge */
 //		goto done;
 
@@ -210,75 +232,22 @@ static int handle_page_merge_response(struct pcn_kmsg_message *msg)
 
 //done:
 	/* TODO: potential BUG. better to use pending */
-	if (res->iter == res->total_iter)
+	//if (res->iter == res->total_iter)
+	if (atomic_dec_return(&rc->scatter_pendings) == 0) {
+		SYNCPRINTK("wake up the handshaking leader\n");
 		complete(&ws->pendings);
+	}
 
+	__put_task_remote(rc);
+    put_task_struct(tsk);
     pcn_kmsg_done(res);
     return 0;
 }
 
 /*
  * put rc and pirnk outsite !!!!!!!!!!1
- * mor general
+ * be mor general
  */
-#if 0
-static bool __popcorn_barrier(struct remote_context *rc, int a)
-{
-	bool leader = false;
-	int left_t = atomic_dec_return(&rc->barrier);
-	BUG_ON(rc->threads_cnt > 96);
-
-	if (left_t == 0) {
-		leader = true;
-		//SYNCPRINTK("[*][%d] left_t %d\n", current->pid, left_t);
-
-		printk("=== +[*%d] BARRIER %5s! line %d mb %lu b %lu f %lu t %d "
-				"Hand Shake done. ===\n",
-				current->pid, "BEGIN", a, current->begin_m_cnt,
-				current->begin_cnt, current->tso_fence_cnt, rc->threads_cnt);
-
-		//__find_conflictions(!my_nid);
-		if (my_nid == 0)
-			__find_conflictions(1, rc);
-		else
-			__find_conflictions(0, rc);
-
-		/* Race Consition !!!!! wait all are in the wq */
-		while (atomic_read(&rc->pendings) != rc->threads_cnt - 1)
-			io_schedule(); // seems important to yield the atomic op bus in VM
-
-		atomic_inc(&rc->pendings);
-
-		atomic_set(&rc->barrier, rc->threads_cnt);
-///////////////////////////////////////////////////
-		wake_up_all(&rc->waits);
-///////////////////////////////////////////////////
-//		complete_all(&rc->comp);
-//		init_completion(&rc->comp); // make sure
-///////////////////////////////////////////////////
-
-		atomic_dec(&rc->pendings);
-		//SYNCPRINTK("[*][%d] done\n", current->pid);
-	} else {
-		DEFINE_WAIT(wait);
-		DEFINE_WAIT(wait_end);
-		//SYNCPRINTK("[ ][%d] left_t %d\n", current->pid, left_t);
-///////////////////////////////////////////////////
-        atomic_inc(&rc->pendings);
-		prepare_to_wait_exclusive(&rc->waits, &wait, TASK_UNINTERRUPTIBLE);
-		io_schedule();
-		finish_wait(&rc->waits, &wait);
-///////////////////////////////////////////////////
-//		wait_for_completion(&rc->comp);
-///////////////////////////////////////////////////
-
-		atomic_dec(&rc->pendings);
-	}
-
-	return leader;
-}
-#endif
-
 static bool __popcorn_barrier_begin(struct remote_context *rc, int a)
 {
 	bool leader = false;
@@ -354,26 +323,18 @@ void clean_tso_wr(void)
 
 static int __popcorn_tso_fence(int a, void __user * b)
 {
-	int i;
 	bool leader = false;
-	unsigned long inv_cnt; // TODO: change name
+	unsigned long inv_cnt;
 	struct remote_context *rc = get_task_remote(current);
 	SYNCPRINTK("\t(maybe implicit) [%d] %s():\n", current->pid, __func__);
 
-	if (!current->tso_region) {
-		//PCNPRINTK_ERR("[%d] BUG tso_region order violation when \"unlock\"\n",
-		//														current->pid);
+	if (!current->tso_region) { /* open to detect errors */
+		//PCNPRINTK_ERR("[%d] BUG tso_region order violation when "
+		//								"\"unlock\"\n", current->pid);
 		goto out;
 	}
 
-	if (!current->tso_wr_cnt) {
-			//|| !current->tso_wx_cnt)
-		//PCNPRINTK_ERR("[%d] WARNNING no benefits here\n", current->pid);
-		current->tso_nobenefit_region_cnt++;
-	}
-
 #if POPCORN_BARRIER
-	//leader = __popcorn_barrier(rc, a);
 	leader = __popcorn_barrier_begin(rc, a);
 
 	if (leader) {
@@ -386,138 +347,38 @@ static int __popcorn_tso_fence(int a, void __user * b)
 	__popcorn_barrier_end(rc, a, leader);
 #endif
 
-	current->tso_fence_cnt++;
-
-	//current->tso_region_cnt++;
-	//SYNCPRINTK("[%d] %s(): #%llu tso_wr %llu/%llu\n", current->pid, __func__,
-	//					current->tso_region_cnt, current->tso_wr_cnt,
-	//					current->accu_tso_wr_cnt);
-
-	/* check buffer and invalidate all */
-	if (current->tso_wr_cnt > MAX_WRITE_INV_BUFFERS) {
-		BUG(); /* should stop in runtime, not here */
-		//inv_cnt = MAX_WRITE_INV_BUFFERS; /* suppresed performance */
-	} else {
-		inv_cnt = current->tso_wr_cnt;
-	}
-
-	if (!batch) {
-		BUG_ON("Not support: wanna have clean code base");
-#if 0
-		for (i = 0; i < inv_cnt; i++) { /* deterministic loop */
-			unsigned long addr = current->buffer_inv_addrs[i];
-			int peers;
-			unsigned long *pi;
-			unsigned long offset;
-			struct page *pip = __get_page_info_page(current->mm, addr, &offset);
-			int except_nid = my_nid;
-
-			// send inv (addr)
-			if (my_nid == 0) { /* 1. first deal w/ origin only*/
-				int nid;
-				struct wait_station *ws = get_wait_station(current);
-				SYNCPRINTK("[%d] fixing %lx \n", current->pid, addr);
-				BUG_ON(!addr);
-
-				if (!pip) BUG(); //return; /* skip claiming non-distributed page */
-				pi = (unsigned long *)kmap(pip) + offset;
-				peers = bitmap_weight(pi, MAX_POPCORN_NODES);
-				if (!peers) {
-					kunmap(pip);
-					BUG(); /* This page is not distributed */
-				}
-				SYNCPRINTK("[%d] peers original %d \n", current->pid, peers);
-				//BUG_ON(!test_bit(except_nid, pi)); /* we two should have, so don't inv */
-				//peers--;	/* exclude except_nid from peers */ // two node case: node true
-
-				/* I have page && falut from other */
-				if (test_bit(my_nid, pi) && except_nid != my_nid) peers--;
-
-				SYNCPRINTK("[%d] peers real %d \n", current->pid, peers);
-				/* peers is not important here, but why sometimes =1(problem), =2? */
-
-				// 1. don't send at page_server.c // send here
-				//__claim_local_page(current, addr, my_nid);
-				for_each_set_bit(nid, pi, MAX_POPCORN_NODES) {
-					if (nid == my_nid) continue;
-
-					BUG_ON(nid != 1);
-					clear_bit(nid, pi);
-					SYNCPRINTK("[%d] revoking->@%d addrs[0]=%lx "
-								"tso_wr_cnt %llu tso_nobenefit_region_cnt %llu\n",
-								current->pid, nid, addr,
-								current->tso_wr_cnt,
-								current->tso_nobenefit_region_cnt);
-
-					__revoke_page_ownership(current, nid,
-										rc->remote_tgids[nid], addr, ws->id);
-											/* ask remote worker */
-					wait_at_station(ws); /* temporally solution for sometimes
-								peer = 1, then skip revoke and wait forever */
-				}
-				SYNCPRINTK("[%d] fixed %lx \n", current->pid, addr);
-
-				kunmap(pip);
-			} else {
-				/* TODO: implement since remote cannot issue inv
-									(check __claim_local_page) */
-				// 0. inplement inv first
-				// 1. 2.
-			}
-			//TODO clearcurrent->buffer_inv_addrs
-		}
-#endif
-	} else { // batch
-		if (inv_cnt) {
-			// 2. batch: PCN_KMSG_TYPE_PAGE_INVALIDATE_BATCH_REQUEST
-			int nid = -1, j;
+	inv_cnt = current->tso_wr_cnt;
+	if (inv_cnt) {
 #if INVOKE_INV
-			unsigned long *addrs;
+		int nid = -1;
+		unsigned long *addrs;
+		if (my_nid == 0) nid = 1; else nid = 0;
+
+		addrs = current->buffer_inv_addrs;
+		SYNCPRINTK("[%d] revoking->@%d addrs[0]=%lx tso_wr_cnt %llu\n",
+						current->pid, nid, addrs[0], current->tso_wr_cnt);
+
+		// lock? befor calling this function? check claim_
+		remote_revoke_page_ownerships(current, nid, /* 2-node assumption */
+								rc->remote_tgids[nid], addrs, inv_cnt);
+
+		SYNCPRINTK("[%d] revoking done  addrs[0]=%lx tso_wr_cnt %llu\n",
+							current->pid, addrs[0], current->tso_wr_cnt);
 #endif
 
-			if (my_nid == 0)
-				nid = 1;
-			else if (my_nid == 1)
-				nid = 0;
-#if INVOKE_INV
-			addrs = current->buffer_inv_addrs;
-			SYNCPRINTK("[%d] revoking->@%d addrs[0]=%lx tso_wr_cnt %llu\n",
-							current->pid, nid, addrs[0], current->tso_wr_cnt);
-
-			// lock? befor calling this function? check claim_
-			remote_revoke_page_ownerships(current, nid, /* 2-node assumption */
-									rc->remote_tgids[nid], addrs, inv_cnt);
-
-			SYNCPRINTK("[%d] revoking done  addrs[0]=%lx tso_wr_cnt %llu\n",
-								current->pid, addrs[0], current->tso_wr_cnt);
-#endif
-			/* important: makke sure the location */
-			for (j = 0; j < inv_cnt; j++)
-				current->buffer_inv_addrs[i] = 0;
-		}
+		/* important: makke sure the location */
+		__clean_local_inv_buf(inv_cnt);
 	}
 
-	/* DEBUG section!!!!!!!! supper bad for performance */
-#if 0
-	leader = false;
-	leader = atomic_dec_and_test(&rc->barrier_end);
-	if (leader) {
-		printk("=== -[%d] BARRIER %5s! "
-				"line %d mb %lu b %lu f %lu t %d ===\n",
-				current->pid, "END", a, current->begin_m_cnt,
-				current->begin_cnt, current->tso_fence_cnt,
-				rc->threads_cnt);
-
-		atomic_set(&rc->barrier_end, rc->threads_cnt);
-		complete_all(&rc->comp_end);
-	} else {
-		wait_for_completion(&rc->comp_end);
+	/* perf statis */
+	if (inv_cnt) { //|| !current->tso_wx_cnt)
+		//PCNPRINTK_ERR("[%d] WARNNING no benefits here\n", current->pid);
+		current->tso_nobenefit_region_cnt++;
 	}
-#endif
-	/* DEBUG section!!!!!!!! supper bad for performance */
 
 	current->tso_wr_cnt = 0;
 	current->tso_wx_cnt = 0;
+	current->tso_fence_cnt++;
 out:
 	put_task_remote(current);
 	return 0;
@@ -670,10 +531,6 @@ DEFINE_KMSG_WQ_HANDLER(page_merge_request);
 int __init popcorn_sync_init(void)
 {
 	spin_lock_init(&tso_lock);
-
-	//sema_init(&rc->threads_sem, rc->threads_cnt);
-	//up(&rc->threads_sem);
-	//down(&rc->threads_sem);
 
 	REGISTER_KMSG_WQ_HANDLER(
             PCN_KMSG_TYPE_PAGE_MERGE_REQUEST, page_merge_request);

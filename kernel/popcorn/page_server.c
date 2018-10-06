@@ -40,11 +40,13 @@
 
 #define ORIGIN_TSO 0
 #define REMOTE_TSO 0
+#define MULTI_WRITER_ORIGIN 1
+#define MULTI_WRITER_REMOTE 1
 #define PERF_DBG 0
 
 #define PROOF_DBG 0
 #define BUF_DBG 0
-#define JACK_DEBUG 0 /*2nd proof */
+#define JACK_DEBUG 1 /*2nd proof */
 
 #define DBG_ADDR_ON 0
 //#define DBG_ADDR 0x7fffb7e56000
@@ -236,6 +238,38 @@ static inline int __fault_hash_key(unsigned long address)
 	return (address >> PAGE_SHIFT) % FAULTS_HASH;
 }
 
+
+/************
+ *  TSO
+ */
+void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *page)
+{
+	void *paddr = kmap(page);
+	int ivn_cnt_tmp;
+	struct remote_context *rc = current->mm->remote;
+	BUG_ON(!rc);
+	BUG_ON(!paddr);
+#if !GLOBAL
+	/* implementation - local */
+	current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
+	current->tso_wr_cnt++;
+#else
+	/* implementation - global */
+    spin_lock(&rc->inv_lock);
+	ivn_cnt_tmp = rc->inv_cnt++;
+    spin_unlock(&rc->inv_lock);
+
+	rc->inv_addrs[ivn_cnt_tmp] = addr;
+	memcpy(rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
+	//copy_from_user_page(vma, page, addr,
+	//		rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
+#endif
+
+	kunmap(page);
+}
+
+
+
 /**************************************************************************
  * Page ownership tracking mechanism
  */
@@ -421,6 +455,15 @@ static inline void clear_page_owner(int nid, struct mm_struct *mm, unsigned long
 
 	clear_bit(nid, pi);
 	kunmap_atomic(pi - offset);
+}
+
+/* implicitely read only */
+/* pte_present: x86 - present, arm - valid */
+static inline bool page_is_mine_at_remote(pte_t pte)
+{
+	if (pte_present(pte) && !pte_write(pte))
+		return true;
+	return false;
 }
 
 
@@ -1441,7 +1484,7 @@ void __revoke_page_ownership(struct task_struct *tsk, int nid, pid_t pid, unsign
 	pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_INVALIDATE_REQUEST, nid, req, sizeof(*req));
 }
 
-void __revoke_page_ownerships(struct task_struct *tsk, int nid, pid_t pid, unsigned long *addr, unsigned long tso_wr_cnt)
+void remote_revoke_page_ownerships(struct task_struct *tsk, int nid, pid_t pid, unsigned long *addr, unsigned long tso_wr_cnt)
 {
 	int  i;
 	page_invalidate_batch_request_t *req = pcn_kmsg_get(sizeof(*req));
@@ -1738,7 +1781,7 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	//if (!my_nid && local_origin && !revoke && page_trans) {
 	//if (!my_nid && local_origin && page_trans) {
-	if (!my_nid && local_origin) {
+	if (my_nid == 0 && local_origin) {
 		if (fault_for_write(fault_flags)) { /* page + inv */
 			ktime_t dt, fp_end = ktime_get();
 			dt = ktime_sub(fp_end, fp_start);
@@ -2335,7 +2378,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	ktime_t fp_start, fpin_start;
 	ktime_t dt, inv_end, inv_start;
 #endif
-#ifdef CONFIG_POPCORN_CHECK_SANITY
+#ifdef CONFIG_POPCORN_CHECK_SANITY || PROOF_DBG
 	int jack_proof= 0;
 #endif
 
@@ -2379,20 +2422,34 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}
 	get_page(page);
 
-#if PROOF_DBG
+#if PROOF_DBG || MULTI_WRITER_REMOTE
 	if (current->tso_region) {
-		if (page_is_mine(mm, addr)) { // TODO: BUG: replace this with pte_xxx
+		//if (page_is_mine(mm, addr)) { // TODO: BUG: replace this with pte_xxx
+		//if (pte_present(*pte) && !pte_write(*pte) ) {
+		if (page_is_mine_at_remote(*pte)) {
 			if (fault_for_write(fault_flags)) {
 				if (!populated) {
+#if PROOF_DBG
 					jack_proof = 1;
+#endif
+
+#if MULTI_WRITER_REMOTE
+					current->accu_tso_wr_cnt++;
+					if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
+						if (!page) BUG();
+						tso_wr_inc(vma, addr, page);
+					}
+#endif
 	}	}	}	}
 #endif
+
 
 #if REMOTE_TSO
 	//jack TODO function this (origin & remote are the same code)
 	// original DeX doesn't check page_is_mine or not
 	if (current->tso_region) {
-		if (page_is_mine(mm, addr)) { // TODO: BUG: replace this with pte_xxx
+		//if (page_is_mine(mm, addr)) { // TODO: BUG: replace this with pte_xxx
+		if (page_is_mine_at_remote(*pte)) {
 			if (fault_for_write(fault_flags)) { // remote_wr (write fault w/ page)
 				if (!populated) { // will bring page (pg_mine(1) for no-accessed page bug)
 
@@ -2437,7 +2494,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	if (addr == DBG_ADDR) {
 		PCNPRINTK_ERR("%lx: [%d] writefault(%s) this causes RR"
 						"current->tso_region(%s) "
-						"page_is_mine(%s) "
+						"page_is_mine_at_remote(%s) "
 						"populated(%s) "
 						"pte_present(%s) "
 						"pte_none(%s) "
@@ -2446,7 +2503,8 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 						current->pid,
 						fault_for_write(fault_flags)?"O":"X",
 						current->tso_region?"O":"X",
-						page_is_mine(mm, addr)?"O":"X", // TODO: BUG: replace this with pte_xxx
+						//page_is_mine(mm, addr)?"O":"X", // TODO: BUG: replace this with pte_xxx
+						page_is_mine_at_remote(*pte)?"O":"X",
 						populated?"O":"X",
 						pte_present(*pte)?"O":"X",
 						pte_none(*pte)?"O":"X",
@@ -2474,7 +2532,8 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	if (!delay_write) {
-		if (page_is_mine(mm, addr)) {  // TODO: BUG: replace this with pte_xxx
+		//if (page_is_mine(mm, addr)) {  // TODO: BUG: replace this with pte_xxx
+		if (page_is_mine_at_remote(*pte)) {
 			if (fault_for_write(fault_flags)) {
 				if (rp->result == VM_FAULT_CONTINUE) { /* W: inv lat */
 					inv_end = ktime_get();
@@ -2700,41 +2759,56 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 			goto out_wakeup;
 		}
 
+#if MULTI_WRITER_ORIGIN
+		if (current->tso_region) {
+		//				&& current->tso_region_id
+		/*full auto currently doesn't have a id*/
+			if (test_page_owner(1, mm, addr)) {
+				current->accu_tso_wr_cnt++;
+				if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
+					struct page *page = vm_normal_page(vma, addr, pte_val);
+					if (!page) BUG();
+					tso_wr_inc(vma, addr, page);
+		}	}	}
+
+#endif
 		//jack TODO function this (origin & remote are the same code)
 		// origin_wr (write fault w/ page)
 #if ORIGIN_TSO
-		if (current->tso_region && current->tso_region_id) {
+		if (current->tso_region) {
+		//				&& current->tso_region_id
 			/* tso - inv */
 			if (!pte_present(pte_val)) {
 				PCNPRINTK_ERR("%s: origin !pte_present %lx handle it\n",
 								__func__, addr);
 			}
-			if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
-				current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
-				current->tso_wr_cnt++;
+
+			// make sure remote own the page
+			if (test_page_owner(1, mm, addr)) {
+
+				if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
+					current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
+					current->tso_wr_cnt++;
+					delay_write = true;
 #if BUF_DBG
-				SYNCPRINTK("[%d] origin buf %lx ins %lx\n", current->pid, addr,
+					SYNCPRINTK("[%d] origin buf %lx ins %lx\n", current->pid, addr,
 										instruction_pointer(current_pt_regs()));
 #endif
 #if DBG_ADDR_ON
-				if (addr == DBG_ADDR)
-					SYNCPRINTK("[%d] origin buf %lx \n", current->pid, addr);
+					if (addr == DBG_ADDR)
+						SYNCPRINTK("[%d] origin buf %lx \n", current->pid, addr);
 #endif
-#if ORIGIN_TSO // redundant
-				// make sure remote own the page
-				if (test_page_owner(1, mm, addr)) {
-					delay_write = true;
 				} else {
-					// *dealed* !!
-				}
-#endif
-			} else {
 #if PERF_DBG
-				PCNPRINTK_ERR("[%d] increase MAX_WRITE_INV_BUFFERS %ld to enjoy\n",
-				current->pid, (long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
+					PCNPRINTK_ERR("[%d] inc MAX_WRITE_INV_BUFFERS %ld to enjoy\n",
+									current->pid,
+							(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
 #endif
+				}
+				current->accu_tso_wr_cnt++;
+			} else {
+				// TODO: THINK: I think we should inv for this case
 			}
-			current->accu_tso_wr_cnt++;
 		}
 #endif
 

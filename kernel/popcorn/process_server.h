@@ -6,5 +6,4 @@ struct field_arch;
 
 int save_thread_info(struct field_arch *arch);
 int restore_thread_info(struct field_arch *arch, bool restore_segments);
-void sync_server_local_conflictions(struct remote_context *rc);
 #endif

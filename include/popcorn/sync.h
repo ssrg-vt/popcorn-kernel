@@ -37,6 +37,4 @@
 #endif
 */
 
-
-#define MAX_ALIVE_THREADS 96
 #endif /* !SYNC_H */
