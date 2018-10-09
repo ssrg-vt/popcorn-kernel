@@ -1255,6 +1255,9 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	}
 
 	spin_lock(ptl);
+	/* setup and populate pte entry */
+	pte_alloc(vma->vm_mm, pmd, addr);
+	pte = pte_offset_map(pmd, addr);
 	fh = __start_fault_handling(tsk, addr, fault_flags, ptl, &leader);
 	if (!fh) {
 		pte_unmap(pte);
@@ -1764,7 +1767,6 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
 
-	// *vmf->pte may be NULL, so this line is problemmatic
 	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
 		pte_unmap_unlock(vmf->pte, ptl);
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
