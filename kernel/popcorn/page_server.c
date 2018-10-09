@@ -1624,7 +1624,10 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 
 	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
-	// *vmf->pte may be NULL, so this line is problemmatic
+
+	/* setup and populate pte entry */
+	pte_alloc(vmf->vma->vm_mm, vmf->pmd, vmf->address);
+	vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
 	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
 		pte_unmap_unlock(vmf->pte, ptl);
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
