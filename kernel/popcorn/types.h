@@ -309,37 +309,8 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
 
 
 /**
- * Socket server. Handles socket, bind, listen operations.
+ * Syscall server. Allows forwarding and handling of remote system calls.
  */
-#define REMOTE_SOCKET_FIELDS \
-	pid_t origin_pid; \
-	int remote_ws; \
-	int family; \
-	int type; \
-	int protocol; \
-	int fd; \
-	struct sockaddr __user *umyaddr; \
-	int addrlen; \
-	int backlog; \
-	int __user *upeer_addrlen;
-DEFINE_PCN_KMSG(remote_socket_t, REMOTE_SOCKET_FIELDS);
-
-#define REPLY_FROM_ORIGIN_FIELDS \
-	pid_t origin_pid; \
-	int remote_ws; \
-	int retval;
-DEFINE_PCN_KMSG(remote_socket_response_t, REPLY_FROM_ORIGIN_FIELDS);
-
-#define REMOTE_SETSOCKOPT_FIELDS \
-	pid_t origin_pid; \
-	int remote_ws; \
-	int fd; \
-	int level; \
-	int optname; \
-	char __user * optval; \
-	int optlen;
-DEFINE_PCN_KMSG(remote_setsockopt_t, REMOTE_SETSOCKOPT_FIELDS);
-
 
 /* Enumerate syscall types*/
 enum pcn_syscall_types

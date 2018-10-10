@@ -73,8 +73,9 @@ int process_remote_syscall(struct pcn_kmsg_message *msg);
 			)(__VA_ARGS__)
 
 
-#define DEFINE_SYSCALL_REDIRECT(syscall, syscall_type,...)				\
-inline int redirect_##syscall(LIST_SYSCALL_ARGS(__VA_ARGS__)) {		\
+#define DEFINE_SYSCALL_REDIRECT(syscall, syscall_type,...)		\
+inline int redirect_##syscall(LIST_SYSCALL_ARGS(__VA_ARGS__))		\
+{									\
 	int ret = 0;							\
 	syscall_fwd_t *req = kmalloc(sizeof(syscall_fwd_t), GFP_KERNEL);\
 	syscall_rep_t *rep = NULL;					\
@@ -83,12 +84,12 @@ inline int redirect_##syscall(LIST_SYSCALL_ARGS(__VA_ARGS__)) {		\
 	req->remote_ws = ws->id;					\
 	SET_REQ_PARAMS_ARGS(__VA_ARGS__)				\
 	req->call_type = syscall_type;					\
-	ret = pcn_kmsg_send(PCN_KMSG_TYPE_SYSCALL_FWD, 0, req,	\
+	ret = pcn_kmsg_send(PCN_KMSG_TYPE_SYSCALL_FWD, 0, req,		\
 			    sizeof(*req));				\
 	kfree(req);							\
 	rep = wait_at_station(ws);					\
-	ret = rep->ret;						\
-	/*SKPRINTK("reply from master: %d\n", retval);*/		\
+	ret = rep->ret;							\
+	/*printk(KERN_INFO "On ORIGIN: syscall redirect called for #syscall");*/\
 	return ret;							\
 }
 

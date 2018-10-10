@@ -3,6 +3,24 @@
 #include "syscall_server.h"
 #include "types.h"
 #include "wait_station.h"
+#include <linux/socket.h>
+#include <linux/unistd.h>
+
+/* Syscall Definitions are put here*/
+
+/* Define redirection functions*/
+DEFINE_SYSCALL_REDIRECT(socket, PCN_SYSCALL_SOCKET_CREATE, int, family, int,
+			type, int, protocol);
+DEFINE_SYSCALL_REDIRECT(setsockopt, PCN_SYSCALL_SETSOCKOPT, int, fd,
+			int, level, int, optname, char __user*, optval, int,
+			optlen);
+DEFINE_SYSCALL_REDIRECT(bind, PCN_SYSCALL_BIND,int, fd, struct sockaddr __user*,
+			umyaddr, int, addrlen);
+DEFINE_SYSCALL_REDIRECT(listen, PCN_SYSCALL_LISTEN, int, fd, int,
+			backlog);
+DEFINE_SYSCALL_REDIRECT(accept4, PCN_SYSCALL_ACCEPT4, int, fd, struct
+			sockaddr __user*, upper_sockaddr, int __user*,
+			upper_addrlen, int, flag);
 
 /**
  * Syscalls needed in the kernel
@@ -28,7 +46,7 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	 * 1st argument, param0 = 2nd argument*/
 	switch(req->call_type) {
 	case PCN_SYSCALL_SOCKET_CREATE:
-		/*int family; int type; int protocol*/
+	/*int family; int type; int protocol*/
 		retval = sys_socket((int)req->param2, (int)req->param1,
 				    (int)req->param0);
 		break;
@@ -39,7 +57,7 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 					(int)req->param0);
 		break;
 	case PCN_SYSCALL_BIND:
-		retval = sys_bind((int)req->param2, (struct sockaddr __user*)
+        retval = sys_bind((int)req->param2, (struct sockaddr __user*)
 				  req->param1, (int)req->param0);
 		break;
 	case PCN_SYSCALL_LISTEN:

@@ -1212,7 +1212,7 @@ EXPORT_SYMBOL(sock_create_kern);
 
 #ifdef CONFIG_POPCORN
 #include <popcorn/types.h>
-#include <popcorn/remote_socket.h>
+#include <popcorn/syscall_server.h>
 #endif
 
 SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
