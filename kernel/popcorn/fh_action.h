@@ -13,7 +13,7 @@ enum {
 								 execution on the node if ongoing handling
 								 brings a page successfully */
 
-	PC_FAULT_FLAG_REMOTE = 0x100,
+	PC_FAULT_FLAG_REMOTE = 0x200,
 
 	FH_ACTION_MAX_FOLLOWER = 8,
 };

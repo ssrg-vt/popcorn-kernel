@@ -1235,7 +1235,8 @@ static void __make_pte_valid(struct mm_struct *mm,
  */
 static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, remote_page_request_t *req, remote_page_response_t *res)
 {
-	unsigned long addr = req->addr;
+	unsigned long addr = req->addr & PAGE_MASK;
+	unsigned long address = req->addr;
 	unsigned fault_flags = req->fault_flags | PC_FAULT_FLAG_REMOTE;
 	unsigned char *paddr;
 	struct page *page;
@@ -1255,9 +1256,6 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	}
 
 	spin_lock(ptl);
-	/* setup and populate pte entry */
-	pte_alloc(vma->vm_mm, pmd, addr);
-	pte = pte_offset_map(pmd, addr);
 	fh = __start_fault_handling(tsk, addr, fault_flags, ptl, &leader);
 	if (!fh) {
 		pte_unmap(pte);
@@ -1628,9 +1626,11 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
 
+	if (!vmf->pte) {
+		pte_alloc(vmf->vma->vm_mm, vmf->pmd, vmf->address);
+		vmf->pte = __get_pte_at(vmf->vma->vm_mm, vmf->address, &vmf->pmd, &ptl);						// vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
+	}
 	/* setup and populate pte entry */
-	pte_alloc(vmf->vma->vm_mm, vmf->pmd, vmf->address);
-	vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
 	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
 		pte_unmap_unlock(vmf->pte, ptl);
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
@@ -1650,7 +1650,7 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 		if (ret) up_read(&vmf->vma->vm_mm->mmap_sem);
 		goto out_follower;
 	}
-	// *vmf->pte may be NULL, so this line is problemmatic
+
 	if (pte_none(*vmf->pte) || !(page = vm_normal_page(vmf->vma, addr, *vmf->pte))) {
 		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vmf->vma, addr);
 		BUG_ON(!page);
@@ -1766,7 +1766,11 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 
 	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
-
+	if (!vmf->pte) {
+		pte_alloc(vmf->vma->vm_mm, vmf->pmd, vmf->address);
+		// vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
+		vmf->pte = __get_pte_at(vmf->vma->vm_mm, vmf->address, &vmf->pmd, &ptl);
+	}
 	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
 		pte_unmap_unlock(vmf->pte, ptl);
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
@@ -1870,7 +1874,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	might_sleep();
 
 	PGPRINTK("\n## PAGEFAULT [%d] %lx %c %lx %x %lx\n",
-			current->pid, addr,
+			current->pid, vmf->address,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()),
 		 vmf->flags, pte_flags(vmf->orig_pte));
