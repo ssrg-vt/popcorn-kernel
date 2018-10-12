@@ -559,8 +559,9 @@ static inline void file_pos_write(struct file *file, loff_t pos)
 	file->f_pos = pos;
 }
 
-#ifdef CONFIG_POPCORN_CHECK_SANITY
+#ifdef CONFIG_POPCORN
 #include <popcorn/types.h>
+#include <popcorn/syscall_server.h>
 #endif
 
 SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
@@ -568,12 +569,12 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
 
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-	if (WARN_ON(distributed_remote_process(current))) {
-		printk("  file read at remote thread is not supported yet\n");
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		ret = redirect_read(fd, buf, count);
+		return ret;
 	}
 #endif
-
 	if (f.file) {
 		loff_t pos = file_pos_read(f.file);
 		ret = vfs_read(f.file, buf, count, &pos);
@@ -590,9 +591,10 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
 
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-	if (WARN_ON(distributed_remote_process(current))) {
-		printk("  file write at remote thread is not supported yet\n");
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		ret = redirect_write(fd, buf, count);
+		return ret;
 	}
 #endif
 

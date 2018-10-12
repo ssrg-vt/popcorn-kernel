@@ -34,6 +34,11 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/syscall_server.h>
+#include <popcorn/types.h>
+#endif
+
 int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	struct file *filp)
 {
@@ -1035,8 +1040,16 @@ long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
 	return fd;
 }
 
+
 SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 {
+	int ret;
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		ret = redirect_open(filename, flags, mode);
+		return ret;
+	}
+#endif
 	if (force_o_largefile())
 		flags |= O_LARGEFILE;
 
@@ -1098,7 +1111,15 @@ EXPORT_SYMBOL(filp_close);
  */
 SYSCALL_DEFINE1(close, unsigned int, fd)
 {
-	int retval = __close_fd(current->files, fd);
+	int retval;
+
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		retval = redirect_close(fd);
+		return retval;
+	}
+#endif
+	retval = __close_fd(current->files, fd);
 
 	/* can't restart close syscall because file table entry was cleared */
 	if (unlikely(retval == -ERESTARTSYS ||

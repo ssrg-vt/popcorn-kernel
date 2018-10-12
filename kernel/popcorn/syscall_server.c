@@ -5,10 +5,14 @@
 #include "wait_station.h"
 #include <linux/socket.h>
 #include <linux/unistd.h>
+#include <linux/eventpoll.h>
+#include <linux/file.h>
 
 /* Syscall Definitions are put here*/
 
 /* Define redirection functions*/
+
+/* Socket related */
 DEFINE_SYSCALL_REDIRECT(socket, PCN_SYSCALL_SOCKET_CREATE, int, family, int,
 			type, int, protocol);
 DEFINE_SYSCALL_REDIRECT(setsockopt, PCN_SYSCALL_SETSOCKOPT, int, fd,
@@ -22,6 +26,24 @@ DEFINE_SYSCALL_REDIRECT(accept4, PCN_SYSCALL_ACCEPT4, int, fd, struct
 			sockaddr __user*, upper_sockaddr, int __user*,
 			upper_addrlen, int, flag);
 
+/* Epoll related */
+DEFINE_SYSCALL_REDIRECT(epoll_wait, PCN_SYSCALL_EPOLL_WAIT, int, epfd,
+			struct epoll_event __user *,
+			events, int, maxevents, int, timeout);
+DEFINE_SYSCALL_REDIRECT(epoll_ctl, PCN_SYSCALL_EPOLL_CTL, int, epfd,
+			int, op, int, fd, struct epoll_event __user *,
+			event);
+
+
+/* General fs/driver read/write/open/close calls */
+DEFINE_SYSCALL_REDIRECT(read, PCN_SYSCALL_READ, unsigned int, fd, char __user*,
+			buf, size_t, count);
+DEFINE_SYSCALL_REDIRECT(write, PCN_SYSCALL_WRITE, unsigned int, fd, const char
+			__user *, buf, size_t, count);
+DEFINE_SYSCALL_REDIRECT(open, PCN_SYSCALL_OPEN, const char __user *, filename,
+			int, flags, umode_t, mode);
+DEFINE_SYSCALL_REDIRECT(close, PCN_SYSCALL_CLOSE, unsigned int, fd);
+
 /**
  * Syscalls needed in the kernel
  * */
@@ -32,6 +54,14 @@ extern int sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 		     int __user *upeer_addrlen, int flag);
 extern int sys_setsockopt(int fd, int level, int optname, char __user *optval,
 			  int optlen);
+extern long sys_epoll_ctl(int epfd, int op, int fd,
+				struct epoll_event __user *event);
+extern long sys_epoll_wait(int epfd, struct epoll_event __user *events,
+				int maxevents, int timeout);
+extern long sys_read(unsigned int fd, char __user *buf, size_t count);
+extern long sys_write(unsigned int fd, const char __user *buf, size_t count);
+extern long sys_open(const char __user *filename, int flags, umode_t mode);
+extern long sys_close(unsigned int fd);
 
 int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
@@ -68,6 +98,36 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				     (struct sockaddr __user*)req->param2,
 				     (int __user*)req->param1,
 				     (int)req->param0);
+		break;
+	case PCN_SYSCALL_EPOLL_WAIT:
+		printk(KERN_INFO "epoll_wait called on host\n");
+		retval = sys_epoll_wait((int)req->param3,
+				(struct epoll_event __user *)req->param2,
+				(int)req->param1, (int)req->param0);
+		printk(KERN_INFO "epoll_wait returned: %d\n", retval);
+		break;
+	case PCN_SYSCALL_EPOLL_CTL:
+		retval = sys_epoll_ctl((int)req->param3, (int)req->param2,
+				       (int)req->param1, (struct epoll_event
+				       __user *)req->param0);
+		break;
+	case PCN_SYSCALL_READ:
+		retval = sys_read((unsigned int)req->param2,
+				  (char __user *)req->param1,
+				  (size_t) req->param0);
+		break;
+	case PCN_SYSCALL_WRITE:
+		retval = sys_write((unsigned int)req->param2,
+				  (const char __user *)req->param1,
+				  (size_t) req->param0);
+		break;
+	case PCN_SYSCALL_OPEN:
+		retval = sys_open((const char __user *)req->param2,
+				  (int)req->param1,
+				  (umode_t)req->param0);
+		break;
+	case PCN_SYSCALL_CLOSE:
+		retval = sys_close((unsigned int)req->param0);
 		break;
 	default:
 		retval = -EINVAL;

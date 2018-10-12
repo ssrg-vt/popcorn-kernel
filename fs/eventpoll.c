@@ -43,6 +43,10 @@
 #include <linux/compat.h>
 #include <linux/rculist.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/syscall_server.h>
+#include <popcorn/types.h>
+#endif
 /*
  * LOCKING:
  * There are three level of locking required by epoll :
@@ -1839,6 +1843,12 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	struct epoll_event epds;
 	struct eventpoll *tep = NULL;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_epoll_ctl(epfd, op, fd, event);
+		return error;
+	}
+#endif
 	error = -EFAULT;
 	if (ep_op_has_event(op) &&
 	    copy_from_user(&epds, event, sizeof(struct epoll_event)))
@@ -1976,6 +1986,12 @@ SYSCALL_DEFINE4(epoll_wait, int, epfd, struct epoll_event __user *, events,
 	struct fd f;
 	struct eventpoll *ep;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_epoll_wait(epfd, events, maxevents, timeout);
+		return error;
+	}
+#endif
 	/* The maximum number of event must be greater than zero */
 	if (maxevents <= 0 || maxevents > EP_MAX_EVENTS)
 		return -EINVAL;
