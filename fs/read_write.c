@@ -566,8 +566,8 @@ static inline void file_pos_write(struct file *file, loff_t pos)
 
 SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 {
-	struct fd f = fdget_pos(fd);
-	ssize_t ret = -EBADF;
+	struct fd f;
+	ssize_t ret;
 
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
@@ -575,6 +575,9 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 		return ret;
 	}
 #endif
+	f = fdget_pos(fd);
+	ret = -EBADF;
+
 	if (f.file) {
 		loff_t pos = file_pos_read(f.file);
 		ret = vfs_read(f.file, buf, count, &pos);
@@ -588,8 +591,8 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		size_t, count)
 {
-	struct fd f = fdget_pos(fd);
-	ssize_t ret = -EBADF;
+	struct fd f;
+	ssize_t ret;
 
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
@@ -597,6 +600,9 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		return ret;
 	}
 #endif
+
+	f = fdget_pos(fd);
+	ret = -EBADF;
 
 	if (f.file) {
 		loff_t pos = file_pos_read(f.file);
