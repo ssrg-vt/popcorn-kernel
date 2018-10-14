@@ -1782,6 +1782,13 @@ SYSCALL_DEFINE1(epoll_create1, int, flags)
 	struct eventpoll *ep = NULL;
 	struct file *file;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_epoll_create1(flags);
+		SKPRINTK("remote epoll_create ret: %d\n", error);
+		return error;
+	}
+#endif
 	/* Check the EPOLL_* constant for consistency.  */
 	BUILD_BUG_ON(EPOLL_CLOEXEC != O_CLOEXEC);
 
@@ -1846,6 +1853,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
 		error = redirect_epoll_ctl(epfd, op, fd, event);
+		SKPRINTK("remote epoll_ctl ret: %d\n", error);
 		return error;
 	}
 #endif
@@ -1989,6 +1997,7 @@ SYSCALL_DEFINE4(epoll_wait, int, epfd, struct epoll_event __user *, events,
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
 		error = redirect_epoll_wait(epfd, events, maxevents, timeout);
+		SKPRINTK("remote epoll_wait ret: %d\n", error);
 		return error;
 	}
 #endif
