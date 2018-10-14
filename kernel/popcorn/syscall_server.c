@@ -27,6 +27,7 @@ DEFINE_SYSCALL_REDIRECT(accept4, PCN_SYSCALL_ACCEPT4, int, fd, struct
 			upper_addrlen, int, flag);
 
 /* Epoll related */
+DEFINE_SYSCALL_REDIRECT(epoll_create1, PCN_SYSCALL_EPOLL_CREATE1, int, flags);
 DEFINE_SYSCALL_REDIRECT(epoll_wait, PCN_SYSCALL_EPOLL_WAIT, int, epfd,
 			struct epoll_event __user *,
 			events, int, maxevents, int, timeout);
@@ -55,6 +56,7 @@ extern int sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 		     int __user *upeer_addrlen, int flag);
 extern int sys_setsockopt(int fd, int level, int optname, char __user *optval,
 			  int optlen);
+extern long sys_epoll_create1(int flags);
 extern long sys_epoll_ctl(int epfd, int op, int fd,
 				struct epoll_event __user *event);
 extern long sys_epoll_wait(int epfd, struct epoll_event __user *events,
@@ -101,6 +103,11 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				     (int __user*)req->param1,
 				     (int)req->param0);
 		break;
+
+	/* Event poll related syscalls */
+	case PCN_SYSCALL_EPOLL_CREATE1:
+		retval = sys_epoll_create1((int)req->param0);
+		break;
 	case PCN_SYSCALL_EPOLL_WAIT:
 		printk(KERN_INFO "epoll_wait called on host\n");
 		retval = sys_epoll_wait((int)req->param3,
@@ -113,6 +120,7 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				       (int)req->param1, (struct epoll_event
 				       __user *)req->param0);
 		break;
+
 	case PCN_SYSCALL_READ:
 		retval = sys_read((unsigned int)req->param2,
 				  (char __user *)req->param1,

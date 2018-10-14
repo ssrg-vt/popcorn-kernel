@@ -1384,9 +1384,10 @@ SYSCALL_DEFINE3(bind, int, fd, struct sockaddr __user *, umyaddr, int, addrlen)
 	int err, fput_needed;
 
 #ifdef CONFIG_POPCORN
-	/* We want to redirect setsockopt back to origin */
+	/* We want to redirect bind back to origin */
 	if (distributed_remote_process(current)) {
 		err = redirect_bind(fd, umyaddr, addrlen);
+		SKPRINTK("remote bind ret: %d\n", err);
 		return err;
 	}
 #endif
@@ -1420,9 +1421,10 @@ SYSCALL_DEFINE2(listen, int, fd, int, backlog)
 	int somaxconn;
 
 #ifdef CONFIG_POPCORN
-	/* We want to redirect setsockopt back to origin */
+	/* We want to redirect listen() back to origin */
 	if (distributed_remote_process(current)) {
 		err = redirect_listen(fd, backlog);
+		SKPRINTK("remote listen ret: %d\n", err);
 		return err;
 	}
 #endif
@@ -1782,6 +1784,7 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
 	if (distributed_remote_process(current)) {
 		err = redirect_setsockopt(fd, level, optname, optval,
 					     optlen);
+		SKPRINTK("setsockopt ret: %d\n", err);
 		return err;
 	}
 #endif
