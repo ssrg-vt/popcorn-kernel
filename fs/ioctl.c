@@ -18,6 +18,11 @@
 
 #include <asm/ioctls.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/syscall_server.h>
+#endif
+
 /* So that the fiemap access checks can't overflow on 32 bit machines. */
 #define FIEMAP_MAX_EXTENTS	(UINT_MAX / sizeof(struct fiemap_extent))
 
@@ -613,7 +618,16 @@ int do_vfs_ioctl(struct file *filp, unsigned int fd, unsigned int cmd,
 SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)
 {
 	int error;
-	struct fd f = fdget(fd);
+	struct fd f;
+
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_ioctl(fd, cmd, arg);
+		return error;
+	}
+#endif
+
+	f = fdget(fd);
 
 	if (!f.file)
 		return -EBADF;

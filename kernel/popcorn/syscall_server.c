@@ -43,7 +43,8 @@ DEFINE_SYSCALL_REDIRECT(write, PCN_SYSCALL_WRITE, unsigned int, fd, const char
 DEFINE_SYSCALL_REDIRECT(open, PCN_SYSCALL_OPEN, const char __user *, filename,
 			int, flags, umode_t, mode);
 DEFINE_SYSCALL_REDIRECT(close, PCN_SYSCALL_CLOSE, unsigned int, fd);
-
+DEFINE_SYSCALL_REDIRECT(ioctl, PCN_SYSCALL_IOCTL, unsigned int, fd,
+			unsigned int, cmd, unsigned long, arg);
 /**
  * Syscalls needed in the kernel
  * */
@@ -62,6 +63,7 @@ extern long sys_read(unsigned int fd, char __user *buf, size_t count);
 extern long sys_write(unsigned int fd, const char __user *buf, size_t count);
 extern long sys_open(const char __user *filename, int flags, umode_t mode);
 extern long sys_close(unsigned int fd);
+extern long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
 
 int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
@@ -128,6 +130,11 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 		break;
 	case PCN_SYSCALL_CLOSE:
 		retval = sys_close((unsigned int)req->param0);
+		break;
+	case PCN_SYSCALL_IOCTL:
+		retval = sys_ioctl((unsigned int)req->param2,
+				   (unsigned int)req->param1,
+				   (unsigned int)req->param0);
 		break;
 	default:
 		retval = -EINVAL;

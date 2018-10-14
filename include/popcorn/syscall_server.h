@@ -17,4 +17,5 @@ long redirect_read(unsigned int fd, char __user *buf, size_t count);
 long redirect_write(unsigned int fd, const char __user *buf, size_t count);
 long redirect_open(const char __user *filename, int flags, umode_t mode);
 long redirect_close(unsigned int fd);
+long redirect_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
 #endif
