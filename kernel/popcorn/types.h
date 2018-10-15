@@ -15,6 +15,10 @@
 #include <linux/semaphore.h>
 
 #define FAULTS_HASH 31
+#define GLOBAL 1 /* 1: 1 list for a system 0: 1 list per thread */
+// !GLOBAL is note working becasue it has old version code
+#define NOCOPY_NODE 0 /* this node doesn't have to generate diff and alway will be the owner if conflicting */
+
 
 /**
  * Remote execution context
@@ -55,7 +59,6 @@ struct remote_context {
 	struct completion comp_end; /*watch out */
 	wait_queue_head_t waits;
 	wait_queue_head_t waits_end;
-	atomic_t pendings;	/* watch out */
 	/* Track live threads */
 	unsigned short threads_cnt; /* alive threads */
 	//unsigned short migrated; /* -> out_threads */
@@ -63,8 +66,39 @@ struct remote_context {
 	int pids[MAX_ALIVE_THREADS];
 	spinlock_t pids_lock;
 
-	int addr_cnt;
-	unsigned long addrs[MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS]; /* global array */
+	atomic_t pendings; /* for leader and follower race condition */
+	atomic_t scatter_pendings; /* for the last scatter to wake up leader */
+
+	bool ready; /* global list prepared */ /* ready for remote to check the confliction (producer/consumer) */
+#if GLOBAL
+	/* global */
+	spinlock_t inv_lock;
+	int inv_cnt;
+	unsigned long inv_addrs[MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS];
+	char *inv_pages; // [MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS][PAGE_SIZE];
+	unsigned long sys_rw_cnt;
+	unsigned long sys_ww_cnt;
+	unsigned long sys_inv_cnt; /* not used */
+
+	unsigned long remote_sys_ww_cnt;
+#else
+	/* per-thread */ // - TODO check the global time is right
+	spinlock_t inv_lock_t[MAX_ALIVE_THREADS];
+	int inv_cnt_t[MAX_ALIVE_THREADS];
+	char *inv_pages_t[MAX_ALIVE_THREADS]; //[MAX_ALIVE_THREADS][MAX_WRITE_INV_BUFFERS][PAGE_SIZE];
+	unsigned long time_t[MAX_ALIVE_THREADS][MAX_WRITE_INV_BUFFERS];
+
+	int lconf_cnt; /* local_conflict_addr_cnt */
+	//int inv_cnt; /* local invalidation addr cnt */ // == local_wr_cnt (local variable now)
+#endif
+	int diffs;
+	bool is_diffed; /* for making sure the remote at lease one time */
+	bool remote_done; /* XXX handshake */
+	int local_done_cnt;
+	int remote_done_cnt;
+	int local_merge_id;
+	int remote_merge_id;
+	/* bool leader back // can cover diffs but conor case? */
 };
 
 struct remote_context *__get_mm_remote(struct mm_struct *mm);
@@ -305,7 +339,10 @@ DEFINE_PCN_KMSG(page_invalidate_batch_response_t,
 	pid_t origin_pid; \
 	int origin_ws; \
 	pid_t remote_pid; \
-	unsigned long tso_wr_cnt; \
+	int iter; \
+	int total_iter; \
+	int merge_id; \
+	unsigned long wr_cnt; \
 	unsigned long addrs[MAX_WRITE_INV_BUFFERS];
 DEFINE_PCN_KMSG(page_merge_request_t, PAGE_MERGE_REQUEST_FIELDS);
 
@@ -313,11 +350,34 @@ DEFINE_PCN_KMSG(page_merge_request_t, PAGE_MERGE_REQUEST_FIELDS);
 	pid_t origin_pid; \
 	int origin_ws; \
 	pid_t remote_pid; \
+	int iter; \
+	int total_iter; \
 	int scatters; \
 	int merge_id; \
-	unsigned char diffs[PAGE_SIZE];
+	unsigned long wr_cnt;
 DEFINE_PCN_KMSG(page_merge_response_t, PAGE_MERGE_RESPONSE_FIELDS);
+/* scatters = total_iter = if(0) = no need to merge */
+/* merge_id = iter*/
+//	char diffs[PAGE_SIZE];
 
+/* more info needed*/
+#define PAGE_DIFF_APPLY_REQUEST_FIELDS \
+	pid_t origin_pid; \
+	pid_t remote_pid; \
+	unsigned long diff_addr; \
+	char diff_page[PAGE_SIZE]; \
+					\
+	int origin_ws; \
+	int iter; \
+	int total_iter; \
+	int scatters; \
+	int merge_id; \
+	unsigned long wr_cnt;
+DEFINE_PCN_KMSG(page_diff_apply_request_t, PAGE_DIFF_APPLY_REQUEST_FIELDS);
+
+#define REMOTE_BARRIER_DONE_REQUEST_FIELDS \
+	pid_t origin_pid;
+DEFINE_PCN_KMSG(remote_baiier_done_request_t, REMOTE_BARRIER_DONE_REQUEST_FIELDS);
 
 /**
  * Futex

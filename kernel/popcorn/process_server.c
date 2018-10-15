@@ -19,6 +19,7 @@
 #include <linux/mmu_context.h>
 #include <linux/fs.h>
 #include <linux/futex.h>
+#include <linux/highmem.h>
 
 #include <asm/mmu_context.h>
 #include <asm/kdebug.h>
@@ -36,9 +37,32 @@
 #include "util.h"
 //#include "sync.h"
 #include <linux/vmalloc.h>
+#include <linux/delay.h>
 
 #define FUTEX_DBG 0
-#define CONFLICT_DBG 1
+#define LOCAL_CONFLICT_DBG 0
+
+#define SYNC_DEBUG_THIS 0
+#if SYNC_DEBUG_THIS
+#define SYNCPRINTK2(...) printk(KERN_INFO __VA_ARGS__)
+#else
+#define SYNCPRINTK2(...)
+#endif
+
+#define BARRIER_INFO_MORE 0
+#if BARRIER_INFO_MORE
+#define BARRMPRINTK(...) printk(KERN_INFO __VA_ARGS__)
+#else
+#define BARRMPRINTK(...)
+#endif
+
+#define PID_INFO 0
+#if PID_INFO
+#define PIDPRINTK(...) printk(KERN_INFO __VA_ARGS__)
+#else
+#define PIDPRINTK(...)
+#endif
+
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
@@ -103,6 +127,7 @@ inline bool __put_task_remote(struct remote_context *rc)
 	__unlock_remote_contexts(rc->for_remote);
 
 	free_remote_context_pages(rc);
+	vfree(rc->inv_pages);
 	kfree(rc);
 	return true;
 }
@@ -118,6 +143,28 @@ void free_remote_context(struct remote_context *rc)
 	BUG_ON(atomic_read(&rc->count) != 1 && atomic_read(&rc->count) != 2);
 #endif
 	__put_task_remote(rc);
+}
+
+static inline void __sync_init(struct remote_context *rc)
+{
+#if GLOBAL
+	/* global */
+    spin_lock_init(&rc->inv_lock);
+    rc->inv_cnt = 0;
+    rc->sys_rw_cnt = 0;
+    rc->sys_ww_cnt = 0;
+    rc->remote_sys_ww_cnt = 0;
+    rc->sys_inv_cnt = 0;
+	memset(rc->inv_addrs, 0, sizeof(*rc->inv_addrs) *
+			MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
+	//rc->inv_pages = kmalloc(sizeof(*rc->inv_pages) * MAX_ALIVE_THREADS *
+	//						MAX_WRITE_INV_BUFFERS * PAGE_SIZE, GFP_KERNEL);
+	rc->inv_pages = vmalloc(sizeof(*rc->inv_pages) * PAGE_SIZE *
+							MAX_WRITE_INV_BUFFERS * MAX_ALIVE_THREADS);
+	if (!rc->inv_pages) BUG();
+	memset(rc->inv_pages, 0, sizeof(*rc->inv_pages) * PAGE_SIZE *
+						MAX_WRITE_INV_BUFFERS * MAX_ALIVE_THREADS);
+#endif
 }
 
 static struct remote_context *__alloc_remote_context(int nid, int tgid, bool remote)
@@ -157,16 +204,26 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	rc->threads_cnt = 0;
 	rc->out_threads = 0;
 	memset(rc->pids, 0, sizeof(*rc->pids) * MAX_ALIVE_THREADS);
+	spin_lock_init(&rc->pids_lock);
 
 	/* Barrier - leader/follower */
 	init_waitqueue_head(&rc->waits);
 	init_waitqueue_head(&rc->waits_end);
 	init_completion(&rc->comp);		/* using only one may race condition since the next wait is faster than previous comp */
 	init_completion(&rc->comp_end);
-	spin_lock_init(&rc->pids_lock);
 	atomic_set(&rc->barrier, rc->threads_cnt);
 	atomic_set(&rc->pendings, 0);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
+
+	/* Per barrier data */
+	rc->ready = false;
+	rc->diffs = 0;
+	rc->is_diffed = false;
+	rc->remote_done = false;
+	rc->local_done_cnt = 0;
+	rc->remote_done_cnt = 0;
+	rc->local_merge_id = 0;
+	rc->remote_merge_id = 0;
 
 #if !GLOBAL
 	/* serial phase inv/diff */
@@ -184,25 +241,9 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	}
 
 #else
-	/* global */
-    spin_lock_init(&rc->inv_lock);
-    rc->inv_cnt = 0;
-	memset(rc->inv_addrs, 0, sizeof(*rc->inv_addrs) *
-						MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
-	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
-	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
-	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
-	//rc->inv_pages = kmalloc(sizeof(*rc->inv_pages) * MAX_ALIVE_THREADS *
-	//						MAX_WRITE_INV_BUFFERS * PAGE_SIZE, GFP_KERNEL);
-	rc->inv_pages = vmalloc(sizeof(*rc->inv_pages) * MAX_ALIVE_THREADS *
-							MAX_WRITE_INV_BUFFERS * PAGE_SIZE);
-	if (!rc->inv_pages) BUG();
-	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
-	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
-	/* TODO: kfree when releasing rc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!*/
+
 #endif
 	/* backup */
-
 
 	return rc;
 }
@@ -231,49 +272,59 @@ static inline void __check_ofs(int ofs)
 int __first_empty_pid_slot(struct remote_context *rc)
 {
 	int ofs;
+again:
 	for (ofs = 0; ofs < MAX_ALIVE_THREADS; ofs++) {
 		__check_ofs(ofs);
 		if (!rc->pids[ofs]) {
-			spin_unlock(&rc->pids_lock);
+			//spin_unlock(&rc->pids_lock);
 			return ofs;
 		}
 	}
 	PCNPRINTK_ERR("%s: MAX_ALIVE_THREADS %d\n", __func__, MAX_ALIVE_THREADS);
-	BUG_ON("Must succeed: We currently only support up to MAX_ALIVE_THREADS "
+	PCNPRINTK_ERR("Must succeed: We currently only support up to MAX_ALIVE_THREADS "
 													"alive threads on a node");
+	BUG();
+	//msleep(5000);
+	//io_schedule();
+	goto again; /* TODO: this is just a workaround..... */
 }
 
 /* rc->pids_lock holded */
 int __pid_slot(struct remote_context *rc, int pid)
 {
 	int ofs;
+again:
 	for (ofs = 0; ofs < MAX_ALIVE_THREADS; ofs++) {
 		__check_ofs(ofs);
 		if (rc->pids[ofs] == pid) {
-			spin_unlock(&rc->pids_lock);
+			//spin_unlock(&rc->pids_lock);
 			return ofs;
 		}
 	}
-	BUG_ON("Must succeed: "); // TODO: BUG: IT HAPPENS
+	PCNPRINTK_ERR("Must succeed: find %d\n", pid); // TODO: BUG: IT HAPPENS
+	BUG();
+	//msleep(5000);
+	//io_schedule();
+	goto again; /* TODO: this is just a workaround..... */
 }
 
 /* dbg utility func  */
 void __print_pids(struct remote_context *rc)
 {
 	int ofs;
-	spin_lock(&rc->pids_lock);
+	//spin_lock(&rc->pids_lock);
 	for (ofs = 0; ofs < MAX_ALIVE_THREADS; ofs++) {
 		__check_ofs(ofs);
 		if (!rc->pids[ofs]) {
-			printk("\n");
-			spin_unlock(&rc->pids_lock);
+			PIDPRINTK(" end!\n");
+			//spin_unlock(&rc->pids_lock);
 			return;
 		} else
-			printk("[%d] ", rc->pids[ofs]);
+			PIDPRINTK("[%d] ", rc->pids[ofs]);
 	}
-	spin_unlock(&rc->pids_lock);
+	//spin_unlock(&rc->pids_lock);
 
-	printk("[NULL]\n");
+	PIDPRINTK("[NULL]\n");
 	return;
 }
 
@@ -295,8 +346,44 @@ void __recreate_pids_list(struct remote_context *rc)
 	}
 	read_unlock(&tasklist_lock);
 
+	__print_pids(rc);
 	spin_unlock(&rc->pids_lock);
-	//__print_pids(rc);
+	PIDPRINTK("First thread cnt %d\n", ofs);
+}
+
+/* only check me */
+void __dynamic_updatepids_list(void)
+{
+	int ofs = 1; /* current */
+	int found = 0;
+	int first_empty = 0;
+	struct remote_context *rc = get_task_remote(current);
+
+	spin_lock(&rc->pids_lock);
+	for (ofs = 0; ofs < MAX_ALIVE_THREADS; ofs++) {
+		__check_ofs(ofs);
+		if (rc->pids[ofs] == current->pid) {
+			BUG_ON(found && "double found!!");
+			found = 1;
+			PIDPRINTK("[%d] found at [%d]\n", current->pid, ofs);
+		}
+		if (!rc->pids[ofs]) {
+			first_empty = ofs;
+			break;
+		}
+	}
+	if (ofs >= MAX_ALIVE_THREADS -1)
+		BUG_ON("cannot append - full array");
+
+	if (!found) {
+		rc->pids[first_empty] = current->pid;
+		PIDPRINTK("dynamically append %d at [%d]\n", current->pid, first_empty);
+	}
+
+	__print_pids(rc);
+	spin_unlock(&rc->pids_lock);
+
+	__put_task_remote(rc);
 }
 
 void __add_pid(struct remote_context *rc, int pid)
@@ -304,13 +391,13 @@ void __add_pid(struct remote_context *rc, int pid)
 	int slot;
 	//if (slot < 0) return -1;
 
-	spin_lock(&rc->pids_lock);
+	//spin_lock(&rc->pids_lock);
 	slot = __first_empty_pid_slot(rc);
 	rc->pids[slot] = pid;
-	spin_unlock(&rc->pids_lock);
+	//spin_unlock(&rc->pids_lock);
 
 	/* dbg */
-	if (slot == 7)
+	//if (slot == 7)
 		__print_pids(rc); // O
 }
 
@@ -318,12 +405,13 @@ void __del_pid(struct remote_context *rc, int pid)
 {
 	int tail, head;
 
-	spin_lock(&rc->pids_lock);
+	//spin_lock(&rc->pids_lock);
 	tail = __first_empty_pid_slot(rc);
 	head = __pid_slot(rc, pid);
 
 	rc->pids[head] = 0;
 
+	/* sort it */
 	while (head + 1 < MAX_ALIVE_THREADS) {
 		if (head + 1 != tail) {
 			rc->pids[head] = rc->pids[head + 1];
@@ -331,14 +419,18 @@ void __del_pid(struct remote_context *rc, int pid)
 		}
 		head++;
 	}
-	spin_unlock(&rc->pids_lock);
+	//spin_unlock(&rc->pids_lock);
 }
 
 static void	__out_thread(void)
 {
 	struct remote_context *rc = get_task_remote(current);
+
+	spin_lock(&rc->pids_lock);
 	rc->out_threads++;
 	__del_pid(rc, current->pid);
+
+	spin_unlock(&rc->pids_lock);
 	PSPRINTK("\t\t--[%d]\n", current->pid);
 	__put_task_remote(rc);
 }
@@ -346,8 +438,10 @@ static void	__out_thread(void)
 static void	__back_thread(void)
 {
 	struct remote_context *rc = get_task_remote(current);
+	spin_lock(&rc->pids_lock);
 	rc->out_threads--;
 	__add_pid(rc, current->pid);
+	spin_unlock(&rc->pids_lock);
 	__put_task_remote(rc);
 }
 
@@ -359,7 +453,7 @@ static int __get_threads_cnt(void)
 	read_lock(&tasklist_lock);
 	while_each_thread(g, p) {
 		cnt++;
-		//printk("%d ", p->pid);
+		//PIDPRINTK("%d ", p->pid);
 	}
 	read_unlock(&tasklist_lock);
 
@@ -369,7 +463,12 @@ static int __get_threads_cnt(void)
 static int __get_out_threads_cnt(void)
 {
 	struct remote_context *rc = get_task_remote(current);
-	int cnt = rc->out_threads;
+	int cnt;
+
+	spin_lock(&rc->pids_lock);
+	cnt = rc->out_threads;
+	spin_unlock(&rc->pids_lock);
+
 	__put_task_remote(rc);
 	return cnt;
 }
@@ -378,34 +477,62 @@ static void __recalc_thread_cnt(void)
 {
 	struct remote_context *rc = get_task_remote(current);
 
-	//printk("rc->for_remote (%s)\n", rc->for_remote?"O":"X");
+	//PIDPRINTK("rc->for_remote (%s)\n", rc->for_remote?"O":"X");
 	rc->threads_cnt = __get_threads_cnt() - __get_out_threads_cnt();
 	atomic_set(&rc->barrier, rc->threads_cnt);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
 	PSPRINTK("\t\t[%d] alive/total %d/%d\n",
 				current->pid, rc->threads_cnt, __get_threads_cnt());
+
 	__put_task_remote(rc);
 
 	/* dgb */
+	spin_lock(&rc->pids_lock);
 	if (rc->threads_cnt == 8)
 		__print_pids(rc);
+	spin_unlock(&rc->pids_lock);
 }
 
 #if GLOBAL
-void sort_array(struct remote_context *rc, int ofs)
+/* perfermance sucks */
+static void __sort_array(struct remote_context *rc, int ofs)
 {
 	int i = ofs;
 	while (i + 1 < rc->inv_cnt ) {
-		//unsigned long temp = rc->inv_addrs[i];
+		/* lock? in serial phase protected by rc->ready */
 		rc->inv_addrs[i] = rc->inv_addrs[i + 1];
-		rc->inv_addrs[i + 1] = 0; /* ith = 0 */
+		rc->inv_addrs[i + 1] = 0; /* (i+1)th = 0 */
 		memcpy(&rc->inv_pages[i * PAGE_SIZE],
 				&rc->inv_pages[(i + 1) * PAGE_SIZE], PAGE_SIZE);
 		memset(&rc->inv_pages[(i + 1) * PAGE_SIZE], 0, PAGE_SIZE);
 		i++;
 	}
 }
-/*
+
+void maintain_origin_table(unsigned long target_addr, int i, int total)
+{
+//	int peers;
+	unsigned long offset, *pi;
+	struct page *pip = __get_page_info_page(current->mm, target_addr, &offset);
+	if (!pip) BUG(); /* non-distributed page */
+	pi = (unsigned long *)kmap(pip) + offset;
+#if 0
+	peers = bitmap_weight(pi, MAX_POPCORN_NODES);
+	if (!peers) { /* skip the page that is not distributed */
+		SYNCPRINTK2("%s: [%d] NOT PERFECT WORKAROUND [%d/%d] 0x%lx "
+			"skip at here. HOPEFULLY another node will also skip it "
+			"(Ithinkso)\n", __func__,
+			current->pid, i, total, target_addr);
+		goto out;
+	}
+#endif /* currently enforce to maintain the bit */
+	clear_bit(1, pi); /* hardcode */
+//out:
+	kunmap(pip);
+}
+
+
+/*	lock free - serial region
  *  global array case - optimize O(N^2) + sorting array(bad mem copy pages)
  */
 int sync_server_local_serial_conflictions(struct remote_context *rc)
@@ -414,33 +541,40 @@ int sync_server_local_serial_conflictions(struct remote_context *rc)
 	for (i = 0; i < rc->inv_cnt; i++) {
 		unsigned long addr = rc->inv_addrs[i];
 		if(!addr) continue; /* may be removed already */
-		for (j = 0; j < rc->inv_cnt; j++) {
+		for (j = i; j < rc->inv_cnt; j++) {
 			unsigned long target_addr = rc->inv_addrs[j];
 			if (i == j) continue;
 			if (addr == target_addr) { /* local conflict - remove late one */
 				rc->inv_addrs[j] = 0;
-				memset(&rc->inv_pages[j * PAGE_SIZE], 0, PAGE_SIZE );
-				new_local_wr_cnt++;
+				memset(&rc->inv_pages[j * PAGE_SIZE], 0, PAGE_SIZE);
+				new_local_wr_cnt++; /* local_conflict */
 			}
 		}
+		maintain_origin_table(addr,i, rc->inv_cnt);
 	}
 
 	/* dbg */
+	BARRMPRINTK("%d local buffered addr checked\n", rc->inv_cnt);
 	if (new_local_wr_cnt)
-		PCNPRINTK_ERR("local_conflict_addr_cnt %d/%d\n",
+		BARRMPRINTK("\tlocal_conflict_addr_cnt %d/%d\n",
 							new_local_wr_cnt, rc->inv_cnt);
+
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(new_local_wr_cnt > MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
+#endif
 
 	/* sorting array */
 	for (i = 0; i < rc->inv_cnt; i++) {
 		if(!rc->inv_addrs[i]) {
-			sort_array(rc, i);
+			__sort_array(rc, i); /* perfermance sucks */
 			dealed++;
-			if (dealed == new_local_wr_cnt)
+			if (dealed >= new_local_wr_cnt)
 				break;
+			i = 0;	/* performance sucks */
 		}
 	}
-	new_local_wr_cnt = rc->inv_cnt - new_local_wr_cnt;
+	new_local_wr_cnt = rc->inv_cnt - new_local_wr_cnt; /* new local_wr_cnt */
+	rc->inv_cnt = new_local_wr_cnt; /* update the rc->list for future usage */
 	return new_local_wr_cnt;
 }
 
@@ -485,11 +619,17 @@ int sync_server_local_conflictions(struct remote_context *rc)
 
 		tsk = __get_task_struct(pid);
 		if (!tsk) {
+			spin_lock(&rc->pids_lock);
 			__print_pids(rc);
+			spin_unlock(&rc->pids_lock);
 			BUG();
 		}
 
+#if !GLOBAL
 		local_wr_cnt += tsk->tso_wr_cnt;
+#else
+
+#endif
 
 		/* addrs_addrs: O(n^2): all addrs compare with all addrs */
 		for (ii = 0; ii < tsk->tso_wr_cnt; ii++) {
@@ -526,7 +666,7 @@ int sync_server_local_conflictions(struct remote_context *rc)
     }
 	/* Warnning pids[] is 0/full */
 all_done:
-#if CONFLICT_DBG
+#if LOCAL_CONFLICT_DBG
 	if (local_wr_cnt > 0)
 		printk("local_wr_cnt %d\n", local_wr_cnt);
 #endif
@@ -700,7 +840,7 @@ static int __exit_remote_task(struct task_struct *tsk)
 	return 0;
 }
 
-extern void collect_tso_wr(void);
+extern void collect_tso_wr(struct task_struct *tsk);
 extern unsigned long long plock_system_tso_wr_cnt;
 int process_server_task_exit(struct task_struct *tsk)
 {
@@ -708,16 +848,16 @@ int process_server_task_exit(struct task_struct *tsk)
 
 	if (!distributed_process(tsk)) return -ESRCH;
 
-	PSPRINTK("EXITED [%d] %s%s / 0x%x\n", tsk->pid,
+	PSPRINTK("EXITED [%d] %s%s / 0x%x BACK_MIGRATE(%s)\n", tsk->pid,
 			tsk->at_remote ? "remote" : "local",
 			tsk->is_worker ? " worker": "",
-			tsk->exit_code);
+			tsk->exit_code, tsk->exit_code == TASK_PARKED ? "O" : "X");
 
 	// show_regs(task_pt_regs(tsk));
 
 	if (tsk->is_worker) return 0;
 
-	collect_tso_wr();
+	collect_tso_wr(tsk);
 
 	if (tsk->at_remote) {
 		return __exit_remote_task(tsk);
@@ -842,8 +982,10 @@ static int __do_back_migration(struct task_struct *tsk, int dst_nid, void __user
 	*/
 
 	/* TODO: see if can be functionlized */
+	spin_lock(&rc->pids_lock);
 	rc->threads_cnt--;
 	__del_pid(rc, current->pid);
+	spin_unlock(&rc->pids_lock);
 	atomic_set(&rc->barrier, rc->threads_cnt);
 	atomic_set(&rc->pendings, 0);
 	atomic_set(&rc->scatter_pendings, 0);
@@ -918,10 +1060,12 @@ static int remote_thread_main(void *_args)
 	/* TODO: see if can be functionlized */
 	// TODO: make two functions ++/--
 	//PSPRINTK("rc->for_remote (%s)\n", rc->for_remote?"O":"X");
+	spin_lock(&rc->pids_lock);
 	rc->threads_cnt++; /* TODO: check if serialized by sponer */
+	__add_pid(rc, current->pid);
 	atomic_set(&rc->barrier, rc->threads_cnt);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
-	__add_pid(rc, current->pid);
+	spin_unlock(&rc->pids_lock);
 	PSPRINTK("\t\t++[%d] alive %hu\n", current->pid, rc->threads_cnt); /* TODO: check if serialized by sponer */
 	__put_task_remote(rc);
 
@@ -1182,6 +1326,7 @@ static void clone_remote_thread(struct work_struct *_work)
 
 		rc->remote_worker =
 				kthread_run(remote_worker_main, params, params->comm);
+		__sync_init(rc);
 	} else {
 		__unlock_remote_contexts_in(nid_from);
 		kfree(rc_new);
@@ -1394,6 +1539,7 @@ static int __do_migration(struct task_struct *tsk, int dst_nid, void __user *ure
 		 * mm->remote, which indicates some threads in this process is
 		 * distributed.
 		 */
+		__recreate_pids_list(rc); /* race condiction with __out_thread() below */
 		rc->mm = tsk->mm;
 		rc->remote_tgids[my_nid] = tsk->tgid;
 
@@ -1401,13 +1547,15 @@ static int __do_migration(struct task_struct *tsk, int dst_nid, void __user *ure
 		list_add(&rc->list, &__remote_contexts_out());
 		__unlock_remote_contexts_out(dst_nid);
 
-		__recreate_pids_list(rc);
+		__sync_init(rc);
 	}
 	/*
 	 * tsk->remote != NULL implies this thread is distributed (migrated away).
 	 */
 	tsk->remote = get_task_remote(tsk);
 
+	/* every time recreate, otherwise race condition - cannot find pid to del */
+	__dynamic_updatepids_list();
 	/* TODO: see if can be functionlized */
 	__out_thread();
 	__recalc_thread_cnt();
