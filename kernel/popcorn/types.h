@@ -19,6 +19,7 @@
 // !GLOBAL is note working becasue it has old version code
 #define NOCOPY_NODE 0 /* this node doesn't have to generate diff and alway will be the owner if conflicting */
 
+#define HASH_GLOBAL 1
 
 /**
  * Remote execution context
@@ -71,16 +72,22 @@ struct remote_context {
 
 	bool ready; /* global list prepared */ /* ready for remote to check the confliction (producer/consumer) */
 #if GLOBAL
-	/* global */
+	/* Global */
 	spinlock_t inv_lock;
-	int inv_cnt;
-	unsigned long inv_addrs[MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS];
-	char *inv_pages; // [MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS][PAGE_SIZE];
+	int inv_cnt; /* Per region */
+	int remote_fence;
+	unsigned long inv_addrs[MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS]; /* for sending */
+#if !HASH_GLOBAL
+	char *inv_pages; // [MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS][PAGE_SIZE]; // will remove
+#endif
+	/* Application wide */
 	unsigned long sys_rw_cnt;
-	unsigned long sys_ww_cnt;
+	atomic_t sys_ww_cnt;
 	unsigned long sys_inv_cnt; /* not used */
 
 	unsigned long remote_sys_ww_cnt;
+
+	unsigned long sys_local_conflict_cnt; /* more details */
 #else
 	/* per-thread */ // - TODO check the global time is right
 	spinlock_t inv_lock_t[MAX_ALIVE_THREADS];
@@ -91,7 +98,9 @@ struct remote_context {
 	int lconf_cnt; /* local_conflict_addr_cnt */
 	//int inv_cnt; /* local invalidation addr cnt */ // == local_wr_cnt (local variable now)
 #endif
-	int diffs;
+	atomic_t diffs;			/* per region + async + concurrent */
+	atomic_t per_barrier_reset_done; /* per region + async + concurrent */
+	atomic_t req_diffs;		/* per region */
 	bool is_diffed; /* for making sure the remote at lease one time */
 	bool remote_done; /* XXX handshake */
 	int local_done_cnt;
@@ -341,6 +350,7 @@ DEFINE_PCN_KMSG(page_invalidate_batch_response_t,
 	pid_t remote_pid; \
 	int iter; \
 	int total_iter; \
+	unsigned long fence; \
 	int merge_id; \
 	unsigned long wr_cnt; \
 	unsigned long addrs[MAX_WRITE_INV_BUFFERS];
@@ -352,7 +362,6 @@ DEFINE_PCN_KMSG(page_merge_request_t, PAGE_MERGE_REQUEST_FIELDS);
 	pid_t remote_pid; \
 	int iter; \
 	int total_iter; \
-	int scatters; \
 	int merge_id; \
 	unsigned long wr_cnt;
 DEFINE_PCN_KMSG(page_merge_response_t, PAGE_MERGE_RESPONSE_FIELDS);
@@ -370,7 +379,6 @@ DEFINE_PCN_KMSG(page_merge_response_t, PAGE_MERGE_RESPONSE_FIELDS);
 	int origin_ws; \
 	int iter; \
 	int total_iter; \
-	int scatters; \
 	int merge_id; \
 	unsigned long wr_cnt;
 DEFINE_PCN_KMSG(page_diff_apply_request_t, PAGE_DIFF_APPLY_REQUEST_FIELDS);

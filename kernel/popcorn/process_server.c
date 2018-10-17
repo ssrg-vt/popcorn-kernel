@@ -40,7 +40,7 @@
 #include <linux/delay.h>
 
 #define FUTEX_DBG 0
-#define LOCAL_CONFLICT_DBG 0
+//#define LOCAL_CONFLICT_DBG 0
 
 #define SYNC_DEBUG_THIS 0
 #if SYNC_DEBUG_THIS
@@ -62,7 +62,6 @@
 #else
 #define PIDPRINTK(...)
 #endif
-
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
@@ -127,7 +126,9 @@ inline bool __put_task_remote(struct remote_context *rc)
 	__unlock_remote_contexts(rc->for_remote);
 
 	free_remote_context_pages(rc);
+#if !HASH_GLOBAL
 	vfree(rc->inv_pages);
+#endif
 	kfree(rc);
 	return true;
 }
@@ -150,20 +151,26 @@ static inline void __sync_init(struct remote_context *rc)
 #if GLOBAL
 	/* global */
     spin_lock_init(&rc->inv_lock);
-    rc->inv_cnt = 0;
-    rc->sys_rw_cnt = 0;
-    rc->sys_ww_cnt = 0;
-    rc->remote_sys_ww_cnt = 0;
-    rc->sys_inv_cnt = 0;
+    rc->inv_cnt = 0;		/* per region */
+    rc->remote_fence = -1;		/* per region */
+    rc->sys_rw_cnt = 0;		/* all rw */
+    atomic_set(&rc->sys_ww_cnt, 0);		/* all ww from concurrent msgs */
+    rc->remote_sys_ww_cnt = 0;	/* all ww */
+    rc->sys_local_conflict_cnt = 0;
+
+    //rc->sys_inv_cnt = 0; // not used = inv_cnt-sys_rw_cnt
+
 	memset(rc->inv_addrs, 0, sizeof(*rc->inv_addrs) *
 			MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
 	//rc->inv_pages = kmalloc(sizeof(*rc->inv_pages) * MAX_ALIVE_THREADS *
 	//						MAX_WRITE_INV_BUFFERS * PAGE_SIZE, GFP_KERNEL);
+#if !HASH_GLOBAL
 	rc->inv_pages = vmalloc(sizeof(*rc->inv_pages) * PAGE_SIZE *
 							MAX_WRITE_INV_BUFFERS * MAX_ALIVE_THREADS);
 	if (!rc->inv_pages) BUG();
 	memset(rc->inv_pages, 0, sizeof(*rc->inv_pages) * PAGE_SIZE *
 						MAX_WRITE_INV_BUFFERS * MAX_ALIVE_THREADS);
+#endif
 #endif
 }
 
@@ -217,7 +224,10 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 
 	/* Per barrier data */
 	rc->ready = false;
-	rc->diffs = 0;
+	//atomic_set(&rc->diffs, 0);
+	atomic_set(&rc->diffs, 0);
+	atomic_set(&rc->per_barrier_reset_done, 0);
+	atomic_set(&rc->req_diffs, 0);
 	rc->is_diffed = false;
 	rc->remote_done = false;
 	rc->local_done_cnt = 0;
@@ -494,6 +504,7 @@ static void __recalc_thread_cnt(void)
 }
 
 #if GLOBAL
+#if !HASH_GLOBAL
 /* perfermance sucks */
 static void __sort_array(struct remote_context *rc, int ofs)
 {
@@ -508,9 +519,37 @@ static void __sort_array(struct remote_context *rc, int ofs)
 		i++;
 	}
 }
+#endif
 
-void maintain_origin_table(unsigned long target_addr, int i, int total)
+/* ugly */
+extern void sync_clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr);
+//void maintain_origin_table(unsigned long target_addr, int i, int total)
+void maintain_origin_table(unsigned long target_addr)
 {
+	/* TODO try to spin_lock(ptl); spin_unlock(ptl); this operations */
+
+
+
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+//owner is oalway origin in my fucking case
+
+
+// but I should now do it here I think......... i should do as normal here and later on do it again in the barrier begin
+
+	if (my_nid == 0)
+		sync_clear_page_owner(1, current->mm, target_addr);
+	else
+		sync_clear_page_owner(0, current->mm, target_addr);
+#if 0
 //	int peers;
 	unsigned long offset, *pi;
 	struct page *pip = __get_page_info_page(current->mm, target_addr, &offset);
@@ -526,12 +565,17 @@ void maintain_origin_table(unsigned long target_addr, int i, int total)
 		goto out;
 	}
 #endif /* currently enforce to maintain the bit */
-	clear_bit(1, pi); /* hardcode */
+	if (my_nid == 0)
+		clear_bit(1, pi); /* hardcode */
+	else
+		clear_bit(0, pi); /* hardcode */
 //out:
 	kunmap(pip);
+#endif
 }
 
 
+#if !HASH_GLOBAL
 /*	lock free - serial region
  *  global array case - optimize O(N^2) + sorting array(bad mem copy pages)
  */
@@ -550,7 +594,13 @@ int sync_server_local_serial_conflictions(struct remote_context *rc)
 				new_local_wr_cnt++; /* local_conflict */
 			}
 		}
-		maintain_origin_table(addr,i, rc->inv_cnt);
+		/////////////////////////////////////////////////////////////////
+		/////////////////////////////////////////////////////////////////
+		/////////////////////////////////////////////////////////////////
+		maintain_origin_table(addr,i, rc->inv_cnt); /* remove or change */
+		/////////////////////////////////////////////////////////////////
+		/////////////////////////////////////////////////////////////////
+		/////////////////////////////////////////////////////////////////
 	}
 
 	/* dbg */
@@ -577,6 +627,7 @@ int sync_server_local_serial_conflictions(struct remote_context *rc)
 	rc->inv_cnt = new_local_wr_cnt; /* update the rc->list for future usage */
 	return new_local_wr_cnt;
 }
+#endif
 
 #else /* !GLOBAL */
 void __find_conflict_two_threads(unsigned long addr, struct task_struct *target_tsk, struct remote_context *rc, bool *is_saved)
@@ -666,10 +717,10 @@ int sync_server_local_conflictions(struct remote_context *rc)
     }
 	/* Warnning pids[] is 0/full */
 all_done:
-#if LOCAL_CONFLICT_DBG
+//#if LOCAL_CONFLICT_DBG
 	if (local_wr_cnt > 0)
 		printk("local_wr_cnt %d\n", local_wr_cnt);
-#endif
+//#endif
     spin_unlock(&rc->pids_lock);
 	return local_wr_cnt;
 }

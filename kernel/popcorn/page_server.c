@@ -30,6 +30,7 @@
 #include <popcorn/bundle.h>
 #include <popcorn/pcn_kmsg.h>
 
+#include "sync.h"
 #include "types.h"
 #include "pgtable.h"
 #include "wait_station.h"
@@ -43,28 +44,20 @@
 //#define MULTI_WRITER_ORIGIN 0 // test
 //#define MULTI_WRITER_REMOTE 0 // test
 #define PERF_DBG 0
-
-#define MULTI_WRITER_ORIGIN_TEST 0
-#define MULTI_WRITER_REMOTE_TEST 0
-
 #define BUF_DBG 0
 #define PROOF_DBG 0
 #define JACK_DEBUG 0 /*2nd proof */
+
+#define MULTI_WRITER_ORIGIN_TEST 0
+#define MULTI_WRITER_REMOTE_TEST 0
 
 #define DBG_ADDR_RANGE_ON 0
 #define DBG_ADDR_LOW 0x1900000
 #define DBG_ADDR_HIGH 0x2000000
 
-#define DBG_ADDR_ON 0
-#define DBG_ADDR 0xad7000
-//#define DBG_ADDR 0x12345677
-//#define DBG_ADDR 0x7fffeb0c3000
-//#define DBG_ADDR 0x7fffeae1a000
-//#define DBG_ADDR 0xad4000 // stream
-//#define DBG_ADDR 0x38cd000 // cg
-//#define DBG_ADDR 0x7ffff5e56000 // cfd
-//#define DBG_ADDR 0x826000 // cfd
-
+#define DBG_ADDR_ON 1
+#define DBG_ADDR 0xad6000
+//#define DBG_ADDR 0xad7000
 
 #if JACK_DEBUG
 //#define SYNCPRINTK2(...) printk(KERN_INFO __VA_ARGS__)
@@ -246,43 +239,6 @@ static inline int __fault_hash_key(unsigned long address)
 }
 
 
-/************
- *  TSO
- */
-void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *page)
-{
-	void *paddr = kmap(page);
-	int ivn_cnt_tmp;
-	struct remote_context *rc = current->mm->remote;
-	BUG_ON(!rc);
-	BUG_ON(!paddr);
-#if !GLOBAL
-	/* implementation - local */
-	current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
-	current->tso_wr_cnt++;
-#else
-	/* implementation - global */
-    spin_lock(&rc->inv_lock);
-	ivn_cnt_tmp = rc->inv_cnt++;
-    spin_unlock(&rc->inv_lock);
-
-	BUG_ON(rc->inv_addrs[ivn_cnt_tmp]);
-	rc->inv_addrs[ivn_cnt_tmp] = addr;
-	if (!NOCOPY_NODE) { /* */
-		BUG_ON(*(rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE))); /* TODO: BUG: WHY? */
-		memcpy(rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
-		//copy_from_user_page(vma, page, addr,
-		//		rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
-	}
-#endif
-
-	kunmap(page);
-#if BUF_DBG
-	SYNCPRINTK("[%d/%d] %s buf 0x%lx ins %lx\n", current->pid, ivn_cnt_tmp,
-					my_nid == 0 ? "origin" : "remote",  addr,
-					instruction_pointer(current_pt_regs()));
-#endif
-}
 
 
 
@@ -471,6 +427,15 @@ static inline void clear_page_owner(int nid, struct mm_struct *mm, unsigned long
 
 	clear_bit(nid, pi);
 	kunmap_atomic(pi - offset);
+}
+
+void sync_set_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
+{
+	set_page_owner(nid, mm, addr);
+}
+void sync_clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
+{
+	clear_page_owner(nid, mm, addr);
 }
 
 /* implicitely read only */
@@ -2636,7 +2601,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 					current->accu_tso_wr_cnt++;
 					if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
 						if (!page) BUG();
-						tso_wr_inc(vma, addr, page);
+						tso_wr_inc(vma, addr, page, ptl);
 					}
 #endif
 	}	}	}	}
@@ -2662,24 +2627,29 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 						// after a while this disappear
 						//PCNPRINTK_ERR("??? why read fault for pg_mine ???\n");
 					}
-					/* tso - inv */
-					if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
-						current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
-						current->tso_wr_cnt++;
-						tso_wr_inc(vma, addr, page);
-						delay_write = true;
-#if PROOF_DBG
-						jack_proof = 1;
-#endif
-					} else {
-#if PERF_DBG
-						PCNPRINTK_ERR("[%d] increase MAX_WRITE_INV_BUFFERS %ld "
-										"to enjoy\n", current->pid,
-							(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
-#endif
-					}
-					current->accu_tso_wr_cnt++;
 
+					// make sure origin own the page
+//					if (test_page_owner(0, mm, addr)) { /* This make really worse.....*/
+						/* tso - inv */
+						if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
+							tso_wr_inc(vma, addr, page, ptl);
+							delay_write = true;
+#if PROOF_DBG
+							jack_proof = 1;
+#endif
+						} else {
+#if PERF_DBG
+							PCNPRINTK_ERR("[%d] increase MAX_WRITE_INV_BUFFERS %ld "
+											"to enjoy\n", current->pid,
+								(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
+#endif
+						}
+						current->accu_tso_wr_cnt++;
+//					} else {
+						// I have handled it. But someone change the permission again.
+
+						//delay_write = true; /* This make really worse.....*/
+//					}
 				}
 			}
 		}
@@ -2942,12 +2912,6 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 
 	__handle_copy_on_write(mm, vma, addr, pte, &pte_val, fault_flags);
 
-#if DBG_ADDR_ON
-	if (addr == DBG_ADDR)
-		SYNCPRINTK("[%d] origin buf %lx W(%s)\n",
-					current->pid, addr, fault_for_write(fault_flags)?"O":"X");
-#endif
-
 	if (page_is_mine(mm, addr)) {
 		if (fault_for_read(fault_flags)) {
 			/* Racy exit */
@@ -2964,7 +2928,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 				if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
 					struct page *page = vm_normal_page(vma, addr, pte_val);
 					if (!page) BUG();
-					tso_wr_inc(vma, addr, page);
+					tso_wr_inc(vma, addr, page, ptl);
 		}	}	}
 
 #endif
@@ -2985,11 +2949,13 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 				if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
 					struct page *page = vm_normal_page(vma, addr, pte_val);
 					if (!page) BUG();
-					tso_wr_inc(vma, addr, page);
+					tso_wr_inc(vma, addr, page, ptl);
 					delay_write = true;
 #if DBG_ADDR_ON
 					if (addr == DBG_ADDR)
-						SYNCPRINTK("[%d] origin buf %lx \n", current->pid, addr);
+						SYNCPRINTK("[%d] origin buf %lx W(%s) just (info)\n",
+									current->pid, addr,
+									fault_for_write(fault_flags)?"O":"X");
 #endif
 				} else {
 #if PERF_DBG
@@ -2999,31 +2965,56 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 #endif
 				}
 			} else {
-				// TODO: THINK: I think we should inv for this case
+				// I have handled it. But someone change the permission again.
+				// we have handled, don't try to put it into hashset again (overheaod)
+				// The remote doesn't use ownership to do this so nothing to do
+				//delay_write = true;
+				/* 10/17 corner case found!!! */
 			}
 		}
 #endif
 
 #if DBG_ADDR_ON
 	if (addr == DBG_ADDR) {
-		PCNPRINTK_ERR("0x%lx: [%d] writefault(%s) "
-						"current->tso_region(%s) "
-						"page_is_mine(%s) "
-						//"populated(%s) "
-						"pte_present(%s) "
-						"pte_none(%s) "
-						"ins(%lx) \n",
-						addr,
-						current->pid,
-						fault_for_write(fault_flags)?"O":"X",
-						current->tso_region?"O":"X",
-						page_is_mine(mm, addr)?"O":"X",
-						//populated?"O":"X",
-						//pte_present(*pte)?"O":"X",
-						//pte_none(*pte)?"O":"X",
-						pte_present(pte_val)?"O":"X",
-						pte_none(pte_val)?"O":"X",
-						instruction_pointer(current_pt_regs()));
+		if (current->tso_region) {
+			PCNPRINTK_ERR("0x%lx: [%d] writefault(%s) "
+							"current->tso_region(%s) "
+							"page_is_mine(%s) "
+							//"populated(%s) "
+							"pte_present(%s) "
+							"pte_none(%s) "
+							"ins(%lx) \n",
+							addr,
+							current->pid,
+							fault_for_write(fault_flags)?"O":"X",
+							current->tso_region?"O":"X",
+							page_is_mine(mm, addr)?"O":"X",
+							//populated?"O":"X",
+							//pte_present(*pte)?"O":"X",
+							//pte_none(*pte)?"O":"X",
+							pte_present(pte_val)?"O":"X",
+							pte_none(pte_val)?"O":"X",
+							instruction_pointer(current_pt_regs()));
+		} else {
+			printk("0x%lx: [%d] writefault(%s) "
+							"current->tso_region(%s) "
+							"page_is_mine(%s) "
+							//"populated(%s) "
+							"pte_present(%s) "
+							"pte_none(%s) "
+							"ins(%lx) \n",
+							addr,
+							current->pid,
+							fault_for_write(fault_flags)?"O":"X",
+							current->tso_region?"O":"X",
+							page_is_mine(mm, addr)?"O":"X",
+							//populated?"O":"X",
+							//pte_present(*pte)?"O":"X",
+							//pte_none(*pte)?"O":"X",
+							pte_present(pte_val)?"O":"X",
+							pte_none(pte_val)?"O":"X",
+							instruction_pointer(current_pt_regs()));
+		}
 	}
 #endif
 

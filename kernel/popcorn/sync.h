@@ -8,7 +8,6 @@
 #ifndef _SYNC_H
 #define _SYNC_H
 #include <popcorn/sync.h>
-
 void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *page, spinlock_t *ptl);
 
 #endif /* !_SYNC_H */
