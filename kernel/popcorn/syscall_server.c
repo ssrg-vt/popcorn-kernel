@@ -25,6 +25,10 @@ DEFINE_SYSCALL_REDIRECT(listen, PCN_SYSCALL_LISTEN, int, fd, int,
 DEFINE_SYSCALL_REDIRECT(accept4, PCN_SYSCALL_ACCEPT4, int, fd, struct
 			sockaddr __user*, upper_sockaddr, int __user*,
 			upper_addrlen, int, flag);
+DEFINE_SYSCALL_REDIRECT(shutdown, PCN_SYSCALL_SHUTDOWN, int, fd, int, how);
+DEFINE_SYSCALL_REDIRECT(recvfrom, PCN_SYSCALL_RECVFROM, int, fd, void __user *,
+			ubuf, size_t, size, unsigned int, flags,
+			struct sockaddr __user *, addr, int __user *, addr_len);
 
 /* Epoll related */
 DEFINE_SYSCALL_REDIRECT(epoll_create1, PCN_SYSCALL_EPOLL_CREATE1, int, flags);
@@ -46,6 +50,10 @@ DEFINE_SYSCALL_REDIRECT(open, PCN_SYSCALL_OPEN, const char __user *, filename,
 DEFINE_SYSCALL_REDIRECT(close, PCN_SYSCALL_CLOSE, unsigned int, fd);
 DEFINE_SYSCALL_REDIRECT(ioctl, PCN_SYSCALL_IOCTL, unsigned int, fd,
 			unsigned int, cmd, unsigned long, arg);
+DEFINE_SYSCALL_REDIRECT(writev, PCN_SYSCALL_WRITEV, unsigned long,
+			fd, const struct iovec __user *, vec,
+			unsigned long, vlen);
+
 /**
  * Syscalls needed in the kernel
  * */
@@ -56,6 +64,9 @@ extern int sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 		     int __user *upeer_addrlen, int flag);
 extern int sys_setsockopt(int fd, int level, int optname, char __user *optval,
 			  int optlen);
+extern long sys_recvfrom(int, void __user *, size_t, unsigned,
+				struct sockaddr __user *, int __user *);
+extern long sys_shutdown(int, int);
 extern long sys_epoll_create1(int flags);
 extern long sys_epoll_ctl(int epfd, int op, int fd,
 				struct epoll_event __user *event);
@@ -66,6 +77,9 @@ extern long sys_write(unsigned int fd, const char __user *buf, size_t count);
 extern long sys_open(const char __user *filename, int flags, umode_t mode);
 extern long sys_close(unsigned int fd);
 extern long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
+extern long sys_writev(unsigned long fd,
+			   const struct iovec __user *vec,
+			   unsigned long vlen);
 
 int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
@@ -103,7 +117,9 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				     (int __user*)req->param1,
 				     (int)req->param0);
 		break;
-
+	case PCN_SYSCALL_SHUTDOWN:
+		retval = sys_shutdown((int)req->param1, (int)req->param0);
+		break;
 	/* Event poll related syscalls */
 	case PCN_SYSCALL_EPOLL_CREATE1:
 		retval = sys_epoll_create1((int)req->param0);
@@ -142,7 +158,20 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	case PCN_SYSCALL_IOCTL:
 		retval = sys_ioctl((unsigned int)req->param2,
 				   (unsigned int)req->param1,
-				   (unsigned int)req->param0);
+				   (unsigned long)req->param0);
+		break;
+	case PCN_SYSCALL_WRITEV:
+		retval = sys_writev((unsigned long)req->param2,
+				   (const struct iovec __user *)req->param1,
+				   (unsigned long)req->param0);
+		break;
+	case PCN_SYSCALL_RECVFROM:
+		retval = sys_recvfrom((int)req->param5,
+				   (void __user *)req->param4,
+				   (size_t)req->param3,
+				   (unsigned)req->param2,
+				   (struct sockaddr __user *)req->param1,
+				   (int __user *)req->param0);
 		break;
 	default:
 		retval = -EINVAL;

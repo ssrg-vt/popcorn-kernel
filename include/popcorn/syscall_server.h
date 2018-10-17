@@ -9,6 +9,9 @@ int redirect_bind(int fd, struct sockaddr __user *umyaddr, int addrlen);
 int redirect_listen(int fd, int backlog);
 int redirect_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 		     int __user *upeer_addrlen, int flag);
+long redirect_shutdown(int, int);
+long redirect_recvfrom(int, void __user *, size_t, unsigned,
+				struct sockaddr __user *, int __user *);
 
 long redirect_epoll_create1(int flags);
 long redirect_epoll_ctl(int epfd, int op, int fd,
@@ -21,4 +24,7 @@ long redirect_write(unsigned int fd, const char __user *buf, size_t count);
 long redirect_open(const char __user *filename, int flags, umode_t mode);
 long redirect_close(unsigned int fd);
 long redirect_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
+long redirect_writev(unsigned long fd,
+			   const struct iovec __user *vec,
+			   unsigned long vlen);
 #endif

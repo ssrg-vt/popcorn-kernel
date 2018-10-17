@@ -108,6 +108,11 @@
 #include <net/busy_poll.h>
 #include <linux/errqueue.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/syscall_server.h>
+#endif
+
 #ifdef CONFIG_NET_RX_BUSY_POLL
 unsigned int sysctl_net_busy_read __read_mostly;
 unsigned int sysctl_net_busy_poll __read_mostly;
@@ -1210,10 +1215,6 @@ int sock_create_kern(struct net *net, int family, int type, int protocol, struct
 }
 EXPORT_SYMBOL(sock_create_kern);
 
-#ifdef CONFIG_POPCORN
-#include <popcorn/types.h>
-#include <popcorn/syscall_server.h>
-#endif
 
 SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 {
@@ -1724,6 +1725,12 @@ SYSCALL_DEFINE6(recvfrom, int, fd, void __user *, ubuf, size_t, size,
 	int err, err2;
 	int fput_needed;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		err = redirect_recvfrom(fd, ubuf, size, flags, addr, addr_len);
+		return err;
+	}
+#endif
 	err = import_single_range(READ, ubuf, size, &iov, &msg.msg_iter);
 	if (unlikely(err))
 		return err;
@@ -1848,6 +1855,12 @@ SYSCALL_DEFINE2(shutdown, int, fd, int, how)
 	int err, fput_needed;
 	struct socket *sock;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		err = redirect_shutdown(fd, how);
+		return err;
+	}
+#endif
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock != NULL) {
 		err = security_socket_shutdown(sock, how);
