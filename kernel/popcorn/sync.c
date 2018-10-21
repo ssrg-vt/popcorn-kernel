@@ -99,7 +99,7 @@ spinlock_t tso_lock;
 static bool print = false;
 static bool print_end = false;
 
-static int violation = 0;
+static int violation_begin = 0;
 static int violation_end = 0;
 
 /****************************
@@ -950,7 +950,7 @@ static void __per_barrier_reset(struct remote_context *rc)
  * put rc and pirnk outsite !!!!!!!!!!1
  * be mor general
  */
-static bool __popcorn_barrier_begin(struct remote_context *rc, int a)
+static bool __popcorn_barrier_begin(struct remote_context *rc, int id)
 {
 	bool leader = false;
 	int left_t = atomic_dec_return(&rc->barrier);
@@ -959,19 +959,19 @@ static bool __popcorn_barrier_begin(struct remote_context *rc, int a)
 		leader = true;
 		BARRPRINTK("=== +++[*%d] BARRIER %5s! line %d mb %lu b %lu f %lu t %d "
 				"Hand Shake done. ===\n",
-				current->pid, "BEGIN", a, current->begin_m_cnt,
+				current->pid, "BEGIN", id, current->begin_m_cnt,
 				current->begin_cnt, current->tso_fence_cnt, rc->threads_cnt);
 	}
 
 	return leader;
 }
 
-static void __popcorn_barrier_end(struct remote_context *rc, int a, bool leader)
+static void __popcorn_barrier_end(struct remote_context *rc, int id, bool leader)
 {
 	if (leader) {
 		BARRPRINTK("=== ---[*%d] BARRIER %5s! line %d mb %lu b %lu f %lu t %d "
 					"Hand Shake done. ===\n\n",
-					current->pid, "END", a, current->begin_m_cnt,
+					current->pid, "END", id, current->begin_m_cnt,
 					current->begin_cnt, current->tso_fence_cnt, rc->threads_cnt);
 
 		/* Race Consition !!!!! wait all are in the wq */
@@ -1006,7 +1006,7 @@ static void __popcorn_barrier_end(struct remote_context *rc, int a, bool leader)
 
 		BARRPRINTK("=== ---[*%d] BARRIER %5s! line %d mb %lu b %lu f %lu t %d "
 				"Hand Shake done. ===\n\n",
-				current->pid, "END*", a, current->begin_m_cnt,
+				current->pid, "END*", id, current->begin_m_cnt,
 				current->begin_cnt, current->tso_fence_cnt, rc->threads_cnt);
 	} else {
 		DEFINE_WAIT(wait);
@@ -1022,36 +1022,19 @@ static void __popcorn_barrier_end(struct remote_context *rc, int a, bool leader)
 void collect_tso_wr(struct task_struct *tsk)
 {
 	struct remote_context *rc = get_task_remote(tsk);
-#if 0
-	if (current->accu_tso_wr_cnt) {
-		spin_lock(&tso_lock);
-		system_tso_wr_cnt += current->accu_tso_wr_cnt;
-		system_tso_nobenefit_region_cnt += current->tso_nobenefit_region_cnt;
-		spin_unlock(&tso_lock);
-		printk("[%d]: exit contributs regions %llu accu_tso %llu "
-				"-> system_tso_pg %llu && "
-				"empty_region %llu -> system_empty_region %llu "
-				"violation %d\n",
-				current->pid, current->tso_region_cnt,
-				current->accu_tso_wr_cnt,
-				system_tso_wr_cnt,
-				current->tso_nobenefit_region_cnt,
-				system_tso_nobenefit_region_cnt,
-				violation);
-	}
-#endif
+
 	printk("[%d]: %s exit sys_rw_cnt %lu "
 						"sys_ww_cnt %d (remote side %lu)  "
 						"sys_inv_cnt %lu "
 						"sys_local_conflict_cnt %lu "
-						"violation %d\n",
+						"violation_begin %d violation_end %d\n",
 						tsk->pid, tsk->comm,
 						rc->sys_rw_cnt,
 						atomic_read(&rc->sys_ww_cnt),
 						rc->remote_sys_ww_cnt,
 		rc->sys_rw_cnt - atomic_read(&rc->sys_ww_cnt) - rc->remote_sys_ww_cnt,
 						rc->sys_local_conflict_cnt,
-						violation);
+						violation_begin, violation_end);
 	__put_task_remote(rc);
 }
 
@@ -1063,20 +1046,22 @@ void clean_tso_wr(void)
 	spin_unlock(&tso_lock);
 }
 
-static int __popcorn_tso_fence(int a, void __user * b)
+static int __popcorn_tso_fence(int id, void __user * file, unsigned long omp_hash, int a, void __user * b)
 {
 	bool leader = false;
 	struct remote_context *rc = get_task_remote(current);
-	RGNPRINTK("\t(maybe implicit) [%d] %s(): id %d\n", current->pid, __func__, a);
-
+	//RGNPRINTK("\t\t(maybe implicit) [%d] %s(): id %d\n", current->pid, __func__, id);
 	if (!current->tso_region) { /* open to detect errors */
-		//PCNPRINTK_ERR("[%d] BUG tso_region order violation when "
+		PCNPRINTK_ERR("[%d] BUG fence in a not-tso region "
+						"tso_region_id %lu line %d omp_hash 0x%lx - IGNORE\n",
+						current->pid, current->tso_region_id, id, omp_hash);
+		//PCNPRINTK_ERR("[%d] BUG order violation when "
 		//								"\"unlock\"\n", current->pid);
 		goto out;
 	}
 
 #if POPCORN_TSO_BARRIER
-	leader = __popcorn_barrier_begin(rc, a);
+	leader = __popcorn_barrier_begin(rc, id);
 
 	if (leader) {
 		if (my_nid == 0)
@@ -1085,7 +1070,7 @@ static int __popcorn_tso_fence(int a, void __user * b)
 			__locally_find_conflictions(0, rc);
 	}
 
-	__popcorn_barrier_end(rc, a, leader);
+	__popcorn_barrier_end(rc, id, leader);
 #endif
 
 #if 0
@@ -1129,156 +1114,170 @@ out:
  * Syscalls
  */
 #ifdef CONFIG_POPCORN
-SYSCALL_DEFINE2(popcorn_tso_begin, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_begin, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
 	// TODO: merge to one
 	if (current->tso_region || current->tso_wr_cnt || current->tso_wx_cnt) {
-		WARN_ON_ONCE("BUG tso_region order violation when \"tso_begin\"");
+		WARN_ON_ONCE("BUG \"tso_begin\" order violation");
 		if (!print) {
 #if REENTRY_BEGIN_DISABLE
 			print = true;
 #endif
-			PCNPRINTK_ERR("[%d] BUG tso_region order violation when \"tso_begin\" "
+			PCNPRINTK_ERR("[%d] BUG \"tso_begin\" order violation "
 						"region (%s) tso_wr %llu tso_wx %llu line %d\n",
 									current->pid, current->tso_region?"O":"X",
-									current->tso_wr_cnt, current->tso_wx_cnt, a);
+									current->tso_wr_cnt, current->tso_wx_cnt, id);
 		}
-		violation++;
-		//__popcorn_tso_fence(a, b); /* weired case..... but we have to fix NMW */
+		violation_begin++;
+		//__popcorn_tso_fence(id, file, omp_hash, a, b); /* weired case..... but we have to fix NMW */
 	}
 	current->tso_region = true;
-	RGNPRINTK("[%d] %s(): id %d cnt %lu\n", current->pid,
-				__func__, a, current->begin_cnt++);
+	RGNPRINTK("[%d] %s(): id %d omp_hash 0x%lx cnt %lu\n", current->pid,
+				__func__, id, omp_hash, current->begin_cnt++);
 
-    //current->tso_region_id = a; // don't uncomment for now
-    trace_tso(my_nid, current->pid, a, 'b');
+    current->tso_region_id = id; // don't uncomment for now
+    trace_tso(my_nid, current->pid, id, 'b');
 
 	return 0;
 }
 
-SYSCALL_DEFINE2(popcorn_tso_fence, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_fence, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
-	RGNPRINTK("[%d] %s(): id %d\n", current->pid, __func__, a);
-    trace_tso(my_nid, current->pid, a, 'f');
-	return __popcorn_tso_fence(a, b);
+	RGNPRINTK("[%d] %s(): id %d omp_hash 0x%lx\n", current->pid, __func__, id, omp_hash);
+    trace_tso(my_nid, current->pid, id, 'f');
+	return __popcorn_tso_fence(id, file, omp_hash, id, b);
 }
 
-SYSCALL_DEFINE2(popcorn_tso_end, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_end, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
-	RGNPRINTK("[%d] %s(): id %d\n", current->pid, __func__, a);
-
-	if (!current->tso_region || current->tso_region || current->tso_region_id) {
-		WARN_ON_ONCE("BUG tso_region order violation when \"tso_end\"");
+	RGNPRINTK("[%d] %s(): id %d omp_hash 0x%lx -> implicit fence\n", current->pid, __func__, id, omp_hash);
+	if (!current->tso_region || !current->tso_region_id) {
+		WARN_ON_ONCE("BUG \"tso_end\" order violation");
 		if (!print_end) {
 #if REENTRY_BEGIN_DISABLE
 			print_end = true;
 #endif
-			PCNPRINTK_ERR("[%d] BUG tso_region order violation when \"tso_end\" "
-						"region (%s) tso_region_id %lu line %d\n",
+			PCNPRINTK_ERR("[%d] BUG \"tso_end\" order violation "
+						"region (%s) tso_region_id %lu line %d omp_hash 0x%lx\n",
 									current->pid, current->tso_region?"O":"X",
-									current->tso_region_id, a);
+									current->tso_region_id, id, omp_hash);
 		}
 		violation_end++;
-		//__popcorn_tso_fence(a, b); /* weired case..... but we have to fix NMW */
+		//__popcorn_tso_fence(id, file, omp_hash, a, b); /* weired case..... but we have to fix NMW */
 	}
 
 	if (!current->tso_region) return 0;
-    trace_tso(my_nid, current->pid, a, 'e');
-	__popcorn_tso_fence(a, b);
+    trace_tso(my_nid, current->pid, id, 'e');
+	__popcorn_tso_fence(id, file, omp_hash, a, b);
 	current->tso_region = false;
 	current->tso_region_id = 0;
 	current->tso_region_cnt++;
 	return 0;
 }
 
-SYSCALL_DEFINE2(popcorn_tso_id, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_id, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
 	if (current->tso_region) {
 		// warnning?
 	}
-	current->tso_region_id = a;
-	RGNPRINTK("[%d] %s(): id %lu\n", current->pid,
-				__func__, current->tso_region_id);
+	current->tso_region_id = id;
+	RGNPRINTK("[%d] %s(): id %lu? omp_hash 0x%lx\n", current->pid,
+				__func__, current->tso_region_id, omp_hash);
 	return 0;
 }
 
-SYSCALL_DEFINE2(popcorn_tso_begin_manual, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_begin_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
 	// TODO: merge to one
 	if (current->tso_region || current->tso_wr_cnt || current->tso_wx_cnt) {
-		WARN_ON_ONCE("BUG tso_region order violation when \"lock\"");
+		WARN_ON_ONCE("BUG \"tso_begin_manual\" order violation");
 		if (!print) {
 #if REENTRY_BEGIN_DISABLE
 			print = true;
 #endif
-			PCNPRINTK_ERR("[%d] BUG tso_region order violation when \"lock\" "
-							"region (%s) tso_wr %llu tso_wx %llu line %d\n",
+			PCNPRINTK_ERR("[%d] BUG \"tso_begin_manual\" order violation "
+							"region (%s) tso_wr %llu tso_wx %llu line %d omp_hash 0x%lx\n",
 							current->pid, current->tso_region?"O":"X",
-							current->tso_wr_cnt, current->tso_wx_cnt, a);
+							current->tso_wr_cnt, current->tso_wx_cnt, id, omp_hash);
 		}
-		violation++;
-		//__popcorn_tso_fence(a, b); /* weired case..... but we have to fix NMW */
+		violation_begin++;
+		//__popcorn_tso_fence(id, file, omp_hash, a, b); /* weired case..... but we have to fix NMW */
 	}
 	current->tso_region = true;
-	RGNPRINTK("[%d] %s(): %lu\n", current->pid,
-				__func__, current->begin_m_cnt++);
+    current->tso_region_id = id; // don't uncomment for now
+	RGNPRINTK("[%d] %s(): omp_hash 0x%lx cnt %lu\n", current->pid,
+				__func__, omp_hash, current->begin_m_cnt++);
 	return 0;
 }
 
-SYSCALL_DEFINE2(popcorn_tso_fence_manual, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
 	RGNPRINTK("[%d] %s():\n", current->pid, __func__);
-	return __popcorn_tso_fence(a, b);
+	return __popcorn_tso_fence(id, file, omp_hash, a, b);
 }
 
-SYSCALL_DEFINE2(popcorn_tso_end_manual, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_end_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
-	// TODO: check remaining like _begin?
-	RGNPRINTK("[%d] %s():\n", current->pid, __func__);
-	__popcorn_tso_fence(a, b);
+	RGNPRINTK("[%d] %s(): id %d omp_hash 0x%lx -> implicit fence\n", current->pid, __func__, id, omp_hash);
+	if (!current->tso_region || !current->tso_region_id) {
+		WARN_ON_ONCE("BUG \"tso_end_manual\" order violation");
+		if (!print_end) {
+#if REENTRY_BEGIN_DISABLE
+			print_end = true;
+#endif
+			PCNPRINTK_ERR("[%d] BUG \"tso_end_manual\" order violation"
+						"region (%s) tso_region_id %lu line %d omp_hash 0x%lx\n",
+									current->pid, current->tso_region?"O":"X",
+									current->tso_region_id, id, omp_hash);
+		}
+		violation_end++;
+		//__popcorn_tso_fence(id, file, omp_hash, a, b); /* weired case..... but we have to fix NMW */
+	}
+
+	__popcorn_tso_fence(id, file, omp_hash, a, b);
 	current->tso_region = false;
 	current->tso_region_cnt++;
 	return 0;
 }
 #else // CONFIG_POPCORN
-SYSCALL_DEFINE2(popcorn_tso_begin, int, a void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_begin, int, id, void __user *, file, unsigned long, omp_hash, iint, a void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE2(popcorn_tso_fence, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_fence, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE2(popcorn_tso_end, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_end, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE2(popcorn_tso_id, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_id, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
 
-SYSCALL_DEFINE2(popcorn_tso_begin_manual, int, a void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_begin_manual, int, id, void __user *, file, unsigned long, omp_hash, iint, a void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE2(popcorn_tso_fence_manual, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE2(popcorn_tso_end_manual, int, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_end_manual, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
