@@ -114,6 +114,7 @@ struct remote_context *get_task_remote(struct task_struct *tsk)
 	return __get_mm_remote(tsk->mm);
 }
 
+extern void clean_omp_region_hash(struct remote_context *rc);
 inline bool __put_task_remote(struct remote_context *rc)
 {
 	if (!atomic_dec_and_test(&rc->count)) return false;
@@ -129,6 +130,7 @@ inline bool __put_task_remote(struct remote_context *rc)
 #if !HASH_GLOBAL
 	vfree(rc->inv_pages);
 #endif
+	clean_omp_region_hash(rc);
 	kfree(rc);
 	return true;
 }
@@ -153,12 +155,13 @@ static inline void __sync_init(struct remote_context *rc)
     spin_lock_init(&rc->inv_lock);
     rc->inv_cnt = 0;		/* per region */
     rc->remote_fence = -1;		/* per region */
-    rc->sys_rw_cnt = 0;		/* all rw */
+    rc->sys_rw_cnt = 0;		/* all rw (old sys_inv_cnt) */
     atomic_set(&rc->sys_ww_cnt, 0);		/* all ww from concurrent msgs */
     rc->remote_sys_ww_cnt = 0;	/* all ww */
     rc->sys_local_conflict_cnt = 0;
 
-    //rc->sys_inv_cnt = 0; // not used = inv_cnt-sys_rw_cnt
+	hash_init(rc->omp_region_hash);
+	rwlock_init(&rc->omp_region_hash_lock);
 
 	memset(rc->inv_addrs, 0, sizeof(*rc->inv_addrs) *
 			MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
@@ -291,8 +294,8 @@ again:
 		}
 	}
 	PCNPRINTK_ERR("%s: MAX_ALIVE_THREADS %d\n", __func__, MAX_ALIVE_THREADS);
-	PCNPRINTK_ERR("Must succeed: We currently only support up to MAX_ALIVE_THREADS "
-													"alive threads on a node");
+	PCNPRINTK_ERR("Must succeed: we currently only support up "
+					"to MAX_ALIVE_THREADS alive threads on a node");
 	BUG();
 	//msleep(5000);
 	//io_schedule();
@@ -441,7 +444,7 @@ static void	__out_thread(void)
 	__del_pid(rc, current->pid);
 
 	spin_unlock(&rc->pids_lock);
-	PSPRINTK("\t\t--[%d]\n", current->pid);
+	PIDPRINTK("\t\t--[%d]\n", current->pid);
 	__put_task_remote(rc);
 }
 
@@ -491,7 +494,7 @@ static void __recalc_thread_cnt(void)
 	rc->threads_cnt = __get_threads_cnt() - __get_out_threads_cnt();
 	atomic_set(&rc->barrier, rc->threads_cnt);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
-	PSPRINTK("\t\t[%d] alive/total %d/%d\n",
+	PIDPRINTK("\t\t[%d] alive/total %d/%d\n",
 				current->pid, rc->threads_cnt, __get_threads_cnt());
 
 	__put_task_remote(rc);
@@ -1041,7 +1044,7 @@ static int __do_back_migration(struct task_struct *tsk, int dst_nid, void __user
 	atomic_set(&rc->pendings, 0);
 	atomic_set(&rc->scatter_pendings, 0);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
-	PSPRINTK("\t\t--[%d] alive %hu\n", current->pid, rc->threads_cnt);
+	PIDPRINTK("\t\t--[%d] alive %hu\n", current->pid, rc->threads_cnt);
 	__put_task_remote(rc);
 
 	ret = copy_from_user(&req->arch.regsets, uregs,
@@ -1117,7 +1120,7 @@ static int remote_thread_main(void *_args)
 	atomic_set(&rc->barrier, rc->threads_cnt);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
 	spin_unlock(&rc->pids_lock);
-	PSPRINTK("\t\t++[%d] alive %hu\n", current->pid, rc->threads_cnt); /* TODO: check if serialized by sponer */
+	PIDPRINTK("\t\t++[%d] alive %hu\n", current->pid, rc->threads_cnt); /* TODO: check if serialized by sponer */
 	__put_task_remote(rc);
 
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE

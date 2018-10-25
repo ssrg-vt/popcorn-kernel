@@ -1876,7 +1876,6 @@ struct task_struct {
 	unsigned long long accu_tso_wx_cnt; /* write fault & w/o page */
 
 	/* Buffer invalidations */
-	/* TODO: what data structure? */
 	//unsigned int inv_cnt;
 	unsigned long buffer_inv_addrs[MAX_WRITE_INV_BUFFERS];
 
@@ -1887,6 +1886,15 @@ struct task_struct {
 	unsigned long begin_m_cnt;
 	unsigned long begin_cnt;
 	unsigned long tso_fence_cnt;
+
+	/* statis */
+	int skip_wr_cnt;
+
+	/* To flip region type */
+	int tso_benefit_cnt;
+	int smart_skip_cnt;
+
+	/* */
 
 	/*
 	 * scheduling -- antoniob

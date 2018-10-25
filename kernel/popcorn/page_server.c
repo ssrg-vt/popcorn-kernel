@@ -41,6 +41,11 @@
 
 #define ORIGIN_TSO 1
 #define REMOTE_TSO 1
+
+/************** working zone *************/
+#define PREFETCH 1
+/************** working zone *************/
+
 //#define MULTI_WRITER_ORIGIN 0 // test
 //#define MULTI_WRITER_REMOTE 0 // test
 #define PERF_DBG 0
@@ -55,9 +60,9 @@
 #define DBG_ADDR_LOW 0x1900000
 #define DBG_ADDR_HIGH 0x2000000
 
-#define DBG_ADDR_ON 1
-#define DBG_ADDR 0xad6000
-//#define DBG_ADDR 0xad7000
+#define DBG_ADDR_ON 0
+//#define DBG_ADDR 0xad6000
+#define DBG_ADDR 0xad7000
 
 #if JACK_DEBUG
 //#define SYNCPRINTK2(...) printk(KERN_INFO __VA_ARGS__)
@@ -240,7 +245,16 @@ static inline int __fault_hash_key(unsigned long address)
 
 
 
+/**************************************************************************
+ * RCSI
+ */
+extern bool rcsi_readfault_collect(struct task_struct *tsk, unsigned long addr);
+bool __rcsi_readfault_collect(struct task_struct *tsk, unsigned long addr)
+{
+	return rcsi_readfault_collect(tsk, addr);
+}
 
+extern bool is_skipped_region(struct task_struct *tsk);
 
 /**************************************************************************
  * Page ownership tracking mechanism
@@ -1781,6 +1795,7 @@ static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t fr
 	return 0;
 }
 
+
 static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk, struct vm_area_struct *vma, unsigned long addr, unsigned long fault_flags, struct page *page)
 {
 	remote_page_response_t *rp;
@@ -1789,6 +1804,12 @@ static remote_page_response_t *__fetch_page_from_origin(struct task_struct *tsk,
 
 	__request_remote_page(tsk, tsk->origin_nid, tsk->origin_pid,
 			addr, fault_flags, ws->id, &rh);
+
+#if PREFETCH
+	/* Use waiting time to collect read-fault data */
+	if (fault_for_read(fault_flags))
+		__rcsi_readfault_collect(tsk, addr);
+#endif
 
 	rp = wait_at_station(ws);
 	if (rp->result == 0) {
@@ -1869,6 +1890,11 @@ static int __claim_remote_page(struct task_struct *tsk, struct mm_struct *mm, st
 		if (--peers == 0) break;
 	}
 
+#if PREFETCH
+	/* Use waiting time to collect read-fault data */
+	if (local_origin && fault_for_read(fault_flags))
+		__rcsi_readfault_collect(tsk, addr);
+#endif
 	rp = wait_at_station(ws);
 
 	if (fault_for_write(fault_flags)) {
@@ -2467,7 +2493,7 @@ retry:
 						current->pid,
 						fault_for_write(fault_flags)?"O":"X",
 						current->tso_region?"O":"X",
-						page_is_mine(mm, addr)?"O":"X", // TODO: BUG: replace this with pte_xxx
+						page_is_mine(mm, addr)?"O":"X",
 						pte_present(*pte)?"O":"X",
 						page_is_mine_at_remote(*pte)?"O":"X",
 						pte_none(*pte)?"O":"X",
@@ -2489,7 +2515,7 @@ retry:
 						current->pid,
 						fault_for_write(fault_flags)?"O":"X",
 						current->tso_region?"O":"X",
-						page_is_mine(mm, addr)?"O":"X", // TODO: BUG: replace this with pte_xxx
+						page_is_mine(mm, addr)?"O":"X",
 						pte_present(*pte)?"O":"X",
 						page_is_mine_at_remote(*pte)?"O":"X",
 						pte_none(*pte)?"O":"X",
@@ -2588,8 +2614,6 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 #if PROOF_DBG || MULTI_WRITER_REMOTE_TEST
 	if (current->tso_region) {
-		//if (page_is_mine(mm, addr)) { // TODO: BUG: replace this with pte_xxx
-		//if (pte_present(*pte) && !pte_write(*pte) ) {
 		if (page_is_mine_at_remote(*pte)) {
 			if (fault_for_write(fault_flags)) {
 				if (!populated) {
@@ -2607,52 +2631,35 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	}	}	}	}
 #endif
 
-
 #if REMOTE_TSO
 	//jack TODO function this (origin & remote are the same code)
-	// original DeX doesn't check page_is_mine or not
 	if (current->tso_region) {
-		//if (page_is_mine(mm, addr)) { // TODO: BUG: replace this with pte_xxx
 		if (page_is_mine_at_remote(*pte)) {
 			if (fault_for_write(fault_flags)) { // remote_wr (write fault w/ page)
 				if (!populated) { // will bring page (pg_mine(1) for no-accessed page bug)
-
-					if(!pte_present(*pte)) { // happens but should have had been covered by populated
-						BUG();
-					} else {
-						/* first touch? */
-						/* first touch probelm has been covered by populated */
-						// mine + read fault?
-						// looks like default meta data always show "mine"
-						// after a while this disappear
-						//PCNPRINTK_ERR("??? why read fault for pg_mine ???\n");
-					}
-
-					// make sure origin own the page
-//					if (test_page_owner(0, mm, addr)) { /* This make really worse.....*/
-						/* tso - inv */
-						if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
-							tso_wr_inc(vma, addr, page, ptl);
-							delay_write = true;
+					BUG_ON(!pte_present(*pte)); // covered by populated
+					/* remote cannot trust test_page_owner(); */
+					if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) { // TODO move
+						tso_wr_inc(vma, addr, page, ptl); //TODO return
+						delay_write = true;
 #if PROOF_DBG
-							jack_proof = 1;
+						jack_proof = 1;
 #endif
-						} else {
+					} else {
 #if PERF_DBG
-							PCNPRINTK_ERR("[%d] increase MAX_WRITE_INV_BUFFERS %ld "
-											"to enjoy\n", current->pid,
-								(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
+						PCNPRINTK_ERR("[%d] increase MAX_WRITE_INV_BUFFERS %ld "
+										"to enjoy\n", current->pid,
+							(long)(MAX_WRITE_INV_BUFFERS - current->tso_wr_cnt));
 #endif
-						}
-						current->accu_tso_wr_cnt++;
-//					} else {
-						// I have handled it. But someone change the permission again.
-
-						//delay_write = true; /* This make really worse.....*/
-//					}
+					}
+					current->accu_tso_wr_cnt++;
 				}
 			}
 		}
+	} else { // still cnt for reverse vain (is_skipped_region)
+		//if (current->tso_region_id)
+		if (is_skipped_region(current))
+			current->skip_wr_cnt++;
 	}
 #endif
 
@@ -2671,7 +2678,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 						current->pid,
 						fault_for_write(fault_flags)?"O":"X",
 						current->tso_region?"O":"X",
-						page_is_mine(mm, addr)?"O":"X", // TODO: BUG: replace this with pte_xxx
+						page_is_mine(mm, addr)?"O":"X",
 						pte_present(*pte)?"O":"X",
 						page_is_mine_at_remote(*pte)?"O":"X",
 						populated?"O":"X",
@@ -2684,13 +2691,10 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 	fp_start = fpin_start = inv_start = ktime_get();
 #endif
 
-	/* skip. how?breakdown? */
-	//implement my own inv
-	// rp->result = VM_FAULT_CONTINUE (try to mimic use another flag (popstpone))
 	if (!delay_write) {
 		rp = __fetch_page_from_origin(current, vma, addr, fault_flags, page);
-			// -> __request_remote_page()
-			// remote doens't clear local meta.............
+			// -> __request_remote_page() (collect read fault inside )
+			// remote doesn't clear local meta.............
 			// check permission
 	} else { /* tso */
 		rp = kzalloc(sizeof(*rp), GFP_KERNEL);
@@ -2699,7 +2703,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	if (!delay_write) {
-		if (pte_present(*pte)) { /* TODO: commit this */
+		if (pte_present(*pte)) { /* TODO: git commit this */
 			if (fault_for_write(fault_flags)) {
 				if (rp->result == VM_FAULT_CONTINUE) { /* W: inv lat */
 					inv_end = ktime_get();
@@ -2747,8 +2751,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 		goto out_free;
 	}
 
-	//if (rp->result == VM_FAULT_CONTINUE || delay_write) { // jack
-	if (rp->result == VM_FAULT_CONTINUE) { // jack
+	if (rp->result == VM_FAULT_CONTINUE) {
 		/**
 		 * Page ownership is granted without transferring the page data
 		 * since this node already owns the up-to-dated page
@@ -2777,8 +2780,6 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 #if PROOF_DBG
 		if (jack_proof) { // lud, cg(first pte_none then here)
 			if (populated) {
-				//PCNPRINTK_ERR("%s: !jack_proof %lx "
-				//				"handle populated case\n", __func__, addr);
 				SYNCPRINTK2("%s: !jack_proof %lx handle populated case "
 							"*dealed*\n", __func__, addr);
 			} else {
@@ -2811,7 +2812,7 @@ out_free:
 	if (!delay_write)
 		pcn_kmsg_done(rp);
 	else
-		kfree(rp); //TODO: optimize
+		kfree(rp); //TODO: optimize int ret = rp->result;
 	fh->ret = ret;
 
 out_follower:
@@ -2936,7 +2937,7 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 		// origin_wr (write fault w/ page)
 #if ORIGIN_TSO
 		if (current->tso_region) {
-		//				&& current->tso_region_id
+		//				&& current->tso_region_id // tso
 			/* tso - inv */
 			if (!pte_present(pte_val)) {
 				PCNPRINTK_ERR("%s: origin !pte_present %lx handle it\n",
@@ -2946,10 +2947,10 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 			// make sure remote own the page
 			if (test_page_owner(1, mm, addr)) {
 				current->accu_tso_wr_cnt++;
-				if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) {
+				if (current->tso_wr_cnt < MAX_WRITE_INV_BUFFERS) { // TODO move
 					struct page *page = vm_normal_page(vma, addr, pte_val);
 					if (!page) BUG();
-					tso_wr_inc(vma, addr, page, ptl);
+					tso_wr_inc(vma, addr, page, ptl); //TODO return
 					delay_write = true;
 #if DBG_ADDR_ON
 					if (addr == DBG_ADDR)
@@ -2971,6 +2972,10 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 				//delay_write = true;
 				/* 10/17 corner case found!!! */
 			}
+		} else { // still cnt for reverse vain (is_skipped_region)
+			//if (current->tso_region_id)
+			if (is_skipped_region(current))
+				current->skip_wr_cnt++;
 		}
 #endif
 
@@ -3018,7 +3023,6 @@ static int __handle_localfault_at_origin(struct mm_struct *mm,
 	}
 #endif
 
-		/* skip */
 		if (!delay_write)
 			__claim_local_page(current, addr, my_nid);
 

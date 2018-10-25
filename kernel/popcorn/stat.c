@@ -129,7 +129,6 @@ static int __show_stats(struct seq_file *seq, void *v)
 	return 0;
 }
 
-extern void clean_tso_wr(void);
 static ssize_t __write_stats(struct file *file, const char __user *buffer, size_t size, loff_t *offset)
 {
 	int i;
@@ -150,9 +149,6 @@ static ssize_t __write_stats(struct file *file, const char __user *buffer, size_
 #ifdef CONFIG_POPCORN_STAT
 	pf_time_stat(NULL, NULL);
 #endif
-
-	clean_tso_wr();
-
 	return size;
 }
 

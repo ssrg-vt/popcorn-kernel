@@ -443,6 +443,12 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 	tsk->accu_tso_wr_cnt = 0;
 	tsk->accu_tso_wx_cnt = 0;
 
+	tsk->tso_benefit_cnt = 0;
+	tsk->smart_skip_cnt = 0;
+
+	/* statis */
+	tsk->skip_wr_cnt = 0;
+
 	memset(&tsk->buffer_inv_addrs, 0,
 			sizeof(*tsk->buffer_inv_addrs) * MAX_WRITE_INV_BUFFERS);
 	memset(&tsk->omp_regions, 0,

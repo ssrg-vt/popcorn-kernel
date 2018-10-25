@@ -13,6 +13,7 @@
 #include <popcorn/regset.h>
 #include <popcorn/sync.h>
 #include <linux/semaphore.h>
+#include <linux/hashtable.h>
 
 #define FAULTS_HASH 31
 #define GLOBAL 1 /* 1: 1 list for a system 0: 1 list per thread */
@@ -20,6 +21,24 @@
 #define NOCOPY_NODE 0 /* this node doesn't have to generate diff and alway will be the owner if conflicting */
 
 #define HASH_GLOBAL 1
+
+#define OMP_REGION_HASH_BITS 10
+
+/**
+ * OMP region
+ */
+//#define VAIN_THRESHOLD (PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE)
+#define VAIN_THRESHOLD 50
+//#define VAIN_REGION_REPEAT_THRESHOLD 5 /* consecutive non-benefit regions then skip forever */
+//#define BENEFIT_REGION_REPEAT_THRESHOLD 2 /* consecutive non-benefit regions then skip forever */
+#define VAIN_REGION_REPEAT_THRESHOLD 10 /* consecutive non-benefit regions then skip forever */
+#define BENEFIT_REGION_REPEAT_THRESHOLD 5 /* consecutive non-benefit regions then skip forever */
+
+/* omp_region_type */
+#define RCSI_UNKNOW 0x00
+#define RCSI_VAIN 0x01
+#define RCSI_REPEAT 0x20
+#define RCSI_SERIAL 0x40
 
 /**
  * Remote execution context
@@ -71,6 +90,11 @@ struct remote_context {
 	atomic_t scatter_pendings; /* for the last scatter to wake up leader */
 
 	bool ready; /* global list prepared */ /* ready for remote to check the confliction (producer/consumer) */
+
+	/* OMP region hash */
+	DECLARE_HASHTABLE(omp_region_hash, OMP_REGION_HASH_BITS);
+	rwlock_t omp_region_hash_lock;
+
 #if GLOBAL
 	/* Global */
 	spinlock_t inv_lock;
@@ -103,6 +127,7 @@ struct remote_context {
 	atomic_t req_diffs;		/* per region */
 	bool is_diffed; /* for making sure the remote at lease one time */
 	bool remote_done; /* XXX handshake */
+	unsigned long remote_type;
 	int local_done_cnt;
 	int remote_done_cnt;
 	int local_merge_id;
@@ -114,7 +139,6 @@ struct remote_context *__get_mm_remote(struct mm_struct *mm);
 struct remote_context *get_task_remote(struct task_struct *tsk);
 bool put_task_remote(struct task_struct *tsk);
 bool __put_task_remote(struct remote_context *rc);
-
 
 /**
  * Process migration
@@ -384,7 +408,8 @@ DEFINE_PCN_KMSG(page_merge_response_t, PAGE_MERGE_RESPONSE_FIELDS);
 DEFINE_PCN_KMSG(page_diff_apply_request_t, PAGE_DIFF_APPLY_REQUEST_FIELDS);
 
 #define REMOTE_BARRIER_DONE_REQUEST_FIELDS \
-	pid_t origin_pid;
+	pid_t origin_pid; \
+	unsigned long remote_region_type;
 DEFINE_PCN_KMSG(remote_baiier_done_request_t, REMOTE_BARRIER_DONE_REQUEST_FIELDS);
 
 /**
