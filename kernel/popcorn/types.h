@@ -133,6 +133,10 @@ struct remote_context {
 	int local_merge_id;
 	int remote_merge_id;
 	/* bool leader back // can cover diffs but conor case? */
+
+	/* for region dbg buffering */
+	char name[256];
+	int line;
 };
 
 struct remote_context *__get_mm_remote(struct mm_struct *mm);

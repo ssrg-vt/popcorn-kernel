@@ -32,7 +32,7 @@
 /************** working zone *************/
 
 #define CPU_RELAX io_schedule()
-//#define CPU_RELAX  
+//#define CPU_RELAX
 
 #define X86_THREADS 16
 #define ARM_THREADS 96
@@ -107,10 +107,16 @@
 #define DVLPRINTK(...)
 #endif
 
-/* rcsi meta/mem hash lock per region */
+/* rcsi meta/mem hash lock per region (sys-wide) */
 #define RCSI_HASH_BITS 10 /* TODO try larger */
 DEFINE_HASHTABLE(rcsi_hash, RCSI_HASH_BITS);
 DEFINE_SPINLOCK(rcsi_hash_lock);
+
+/* God view */
+#define SYS_REGION_HASH_BITS 10 /* TODO try larger */
+DEFINE_HASHTABLE(sys_region_hash, SYS_REGION_HASH_BITS);
+DEFINE_SPINLOCK(sys_region_hash_lock);
+
 
 /* Violation section detecting */
 static bool print = false;
@@ -177,6 +183,10 @@ struct omp_region {
 	// log 1 to determin (needed? pf should use other interface )
 #if SMART_REGION_DBG
 	/* dbg */
+	/* readability */
+	char name[256];
+	int line;
+	/* statis */
 	atomic_t total_cnt; // per thread
 	atomic_t skip_cnt; // per thread
 #endif
@@ -220,6 +230,8 @@ struct omp_region *__add_omp_region_hash(struct remote_context *rc, unsigned lon
 	atomic_set(&region->total_cnt, 1);
 	atomic_set(&region->skip_cnt, 0);
 	region->vain_cnt = 0;
+	region->name[0] = 0;
+	region->line = 0;
 #endif
 	region->read_fault_cnt = 0;
 	region->read_max = 0;
@@ -248,14 +260,66 @@ struct omp_region *__omp_region_hash(struct remote_context *rc, unsigned long om
 	return region;
 }
 
+void inline ______smart_region_debug(struct omp_region *pos)
+{
+	printk("[0x%lx] %s:%d type 0x%lx in_reg_inv_sum %d in_reg_conf_sum %d "
+			" (Regions) %d "
+			"ompr->total_R %d ompr->skip_R %d [ReadFault] cnt %d\n",
+			//"ompr->total_R %d/t %d ompr->skip_R %d/t %d [ReadFaulf] cnt %d\n",
+			pos->id, pos->name, pos->line,
+			pos->type, pos->in_region_inv_sum,
+			pos->in_region_conflict_sum, pos->cnt,
+#ifdef CONFIG_X86_64
+			//atomic_read(&pos->total_cnt),
+			atomic_read(&pos->total_cnt) / X86_THREADS,
+			//atomic_read(&pos->skip_cnt),
+			atomic_read(&pos->skip_cnt) / X86_THREADS,
+#else
+			//atomic_read(&pos->total_cnt),
+			atomic_read(&pos->total_cnt) / ARM_THREADS,
+			//atomic_read(&pos->skip_cnt),
+			atomic_read(&pos->skip_cnt) / ARM_THREADS,
+#endif
+			pos->read_fault_cnt
+			);
+
+}
+
+void ____smart_region_debug(struct remote_context *rc, int larger)
+{
+	int bkt;
+	struct hlist_node *tmp;
+	struct omp_region *pos;
+	hash_for_each_safe(rc->omp_region_hash, bkt, tmp, pos, hentry) {
+		if (larger) {
+			if (pos->in_region_inv_sum >= 100)
+				______smart_region_debug(pos);
+		} else {
+			if (pos->in_region_inv_sum < 100 )
+				______smart_region_debug(pos);
+		}
+	}
+}
+
+void __smart_region_debug(struct remote_context *rc)
+{
+#if SMART_REGION_DBG
+	printk("=============== SMART REGION DBG START ===============\n");
+	____smart_region_debug(rc, 0);
+	printk("============ SMART REGION DBG IMPORTANT START ============\n");
+	____smart_region_debug(rc, 1);
+	printk("=============== SMART REGION DBG END ===============\n");
+#endif
+}
+
 void clean_omp_region_hash(struct remote_context *rc)
 {
 	int bkt;
 	struct hlist_node *tmp;
 	struct omp_region *pos;
-#if SMART_REGION_DBG
-	printk("=============== SMART REGION DBG START ===============\n");
-#endif
+
+	__smart_region_debug(rc);
+
 	hash_for_each_safe(rc->omp_region_hash, bkt, tmp, pos, hentry) {
 #if PREFETCH
 		/* clean read fault */
@@ -270,35 +334,11 @@ void clean_omp_region_hash(struct remote_context *rc)
 		write_unlock(&pos->per_region_hash_lock);
 #endif
 
-#if SMART_REGION_DBG
-		if (pos->in_region_inv_sum > 100) {
-			printk("[0x%lx] type 0x%lx in_reg_inv_sum %d in_reg_conf_sum %d "
-					" (Regions) %d "
-					"ompr->total_R %d ompr->skip_R %d [ReadFault] cnt %d\n",
-					//"ompr->total_R %d/t %d ompr->skip_R %d/t %d [ReadFaulf] cnt %d\n",
-					pos->id, pos->type, pos->in_region_inv_sum,
-					pos->in_region_conflict_sum, pos->cnt,
-#ifdef CONFIG_X86_64
-					//atomic_read(&pos->total_cnt),
-					atomic_read(&pos->total_cnt) / X86_THREADS,
-					//atomic_read(&pos->skip_cnt),
-					atomic_read(&pos->skip_cnt) / X86_THREADS,
-#else
-					//atomic_read(&pos->total_cnt),
-					atomic_read(&pos->total_cnt) / ARM_THREADS,
-					//atomic_read(&pos->skip_cnt),
-					atomic_read(&pos->skip_cnt) / ARM_THREADS,
-#endif
-					pos->read_fault_cnt
-					);
-		}
-#endif
 
 		hlist_del(&pos->hentry);
 		kfree(pos);
 	}
 #if SMART_REGION_DBG
-	printk("=============== SMART REGION DBG END ===============\n");
 #endif
 	BUG_ON(!hash_empty(rc->omp_region_hash));
 }
@@ -309,6 +349,7 @@ struct omp_region *__omp_region_hash_add(struct remote_context *rc, unsigned lon
 	struct omp_region *region = __omp_region_hash(rc, omp_hash);
 	if (!region)
 		region = __add_omp_region_hash(rc, omp_hash);
+
 	/* use region to do something */
 	return region;
 }
@@ -329,10 +370,10 @@ struct omp_region *__analyze_region(struct remote_context *rc)
 			if (region->vain_cnt >= VAIN_REGION_REPEAT_THRESHOLD) {
 				region->type |= RCSI_VAIN; // update local
 #if SMART_REGION_PERF_DBG
-				printk("[0x%lx] %d change to VAIN 0x%lx %d region(%s)\n",
-						region->id, rc->inv_cnt,
-						region->type, region->cnt,
-						current->tso_region?"O":"X");
+//				printk("[0x%lx] %d change to VAIN 0x%lx %d region(%s)\n",
+//						region->id, rc->inv_cnt,
+//						region->type, region->cnt,
+//						current->tso_region?"O":"X");
 #endif
 			}
 			/* will update the remote to double check by handshake */
@@ -1339,9 +1380,11 @@ void __smart_region_handshake(struct remote_context *rc, struct omp_region *regi
 		if (region->type & RCSI_VAIN)  //  optimize code style
 			if (!(rc->remote_type & RCSI_VAIN)) {
 				region->type &= ~RCSI_VAIN; /* roll back - conservative */
-				printk("[0x%lx] %d ROLL BACK to VAIN 0x%lx %d\n",
-										region->id, rc->inv_cnt,
-										region->type, region->cnt);
+#if SMART_REGION_PERF_DBG
+//				printk("[0x%lx] %d ROLL BACK to VAIN 0x%lx %d\n",
+//										region->id, rc->inv_cnt,
+//										region->type, region->cnt);
+#endif
 			}
 	}
 }
@@ -1434,6 +1477,27 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 			__region_skip_cnt_inc(region);
 			return 0;
 		}
+#endif
+
+#if SMART_REGION_DBG
+#include <asm/uaccess.h>
+		/* delaying is fine */
+		if (region->name[0] == '\0') {
+			if (file) {
+				int ofs = 0;
+				while (access_ok(VERIFY_READ, file + ofs, 1)) {
+					if (!((char*)file + ofs)) break;
+					BUG_ON(copy_from_user(region->name + ofs, file + ofs , 1));
+					if (*(region->name + ofs) == ';') break;
+					ofs++;
+				}
+				memset(region->name + ofs, '\0' , 1);
+				//printk("region->name %s\n", region->name);
+			}
+		}
+
+		if (!region->line && id)
+			region->line = id;
 #endif
 		/* read fault */
 		// TODO - barrier __popcorn_barrier_begin(rc, omp_hash)
@@ -1849,6 +1913,22 @@ int __init popcorn_sync_init(void)
 			(PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE) * PAGE_SIZE,
 			(((PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE) * PAGE_SIZE) /
 												sizeof(unsigned long)));
+#if 0
+struct rcsi_work *__sys_region_region_hash(unsigned hash)
+{
+	struct rcsi_work *rcsi_w;
+	hash_for_each_possible(sys_region_region_hash, rcsi_w, hentry, addr)
+		if (rcsi_w->addr == addr)
+			return rcsi_w;
+	return NULL;
+}
 
+	spin_lock(&sys_region_hash_lock);
+	found = __sys_region_region_hash(hash);
+	if (likely(!found))
+		hash_add(sys_region_region_hash, &rcsi_w_new->hentry, addr);
+	spin_unlock(&sys_region_hash_lock);
+
+#endif
 	return 0;
 }
