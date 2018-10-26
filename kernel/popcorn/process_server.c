@@ -385,7 +385,7 @@ void __dynamic_updatepids_list(void)
 			break;
 		}
 	}
-	if (ofs >= MAX_ALIVE_THREADS -1)
+	if (ofs >= MAX_ALIVE_THREADS)
 		BUG_ON("cannot append - full array");
 
 	if (!found) {
