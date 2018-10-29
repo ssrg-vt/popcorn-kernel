@@ -1359,7 +1359,6 @@ again:
 		up_read(&mm->mmap_sem); /* To match the sematic for VM_FAULT_RETRY */
 		return VM_FAULT_RETRY;
 	}
-
 	page = get_normal_page(vma, addr, pte);
 	BUG_ON(!page);
 
@@ -1626,11 +1625,10 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 	spin_lock(ptl);
 	if (!vmf->pte) {
 		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
-		//vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
-		vmf->orig_pte = *vmf->pte;		
+		vmf->orig_pte = *vmf->pte;
 	}
 	/* setup and populate pte entry */
-	if (vmf->pte && (!pte_same(*vmf->pte, vmf->orig_pte))) {
+	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
 		pte_unmap_unlock(vmf->pte, ptl);
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
 		return 0;
@@ -1649,11 +1647,8 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 		if (ret) up_read(&vmf->vma->vm_mm->mmap_sem);
 		goto out_follower;
 	}
-	//if (!vmf->pte) {
-	//	vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
-	//	vmf->orig_pte = *vmf->pte;
-	//}
-	if (vmf->pte && (pte_none(*vmf->pte) || !(page = vm_normal_page(vmf->vma, addr, *vmf->pte)))) {
+
+	if (pte_none(*vmf->pte) || !(page = vm_normal_page(vmf->vma, addr, *vmf->pte))) {
 		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vmf->vma, addr);
 		BUG_ON(!page);
 
@@ -1766,12 +1761,11 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 
 	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
-	if (!vmf->pte) { 
-	vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
-	//vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
-	vmf->orig_pte = *vmf->pte;
+	if (!vmf->pte) {
+		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
+		vmf->orig_pte = *vmf->pte;
 	}
-	if (vmf->pte && !pte_same(*vmf->pte, vmf->orig_pte)) {
+	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
 		pte_unmap_unlock(vmf->pte, ptl);
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
 		return 0;
@@ -1829,7 +1823,10 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 			update_mmu_cache(vmf->vma, addr, vmf->pte);
 		}
 	} else {
-		struct page *page = vm_normal_page(vmf->vma, addr, vmf->orig_pte);
+		struct page *page;
+		vmf->orig_pte.pte = pte_val(vmf->orig_pte) | _PAGE_PRESENT;
+		page = vm_normal_page(vmf->vma, addr, vmf->orig_pte);
+
 		BUG_ON(!page);
 
 		__claim_remote_page(current, vmf->vma->vm_mm, vmf->vma, addr, vmf->flags, page);
