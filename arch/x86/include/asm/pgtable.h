@@ -194,9 +194,13 @@ static inline u64 protnone_mask(u64 val);
 
 static inline unsigned long pte_pfn(pte_t pte)
 {
+#ifdef CONFIG_POPCORN
+	return (pte_val(pte) & PTE_PFN_MASK) >> PAGE_SHIFT;
+#else
 	phys_addr_t pfn = pte_val(pte);
 	pfn ^= protnone_mask(pfn);
 	return (pfn & PTE_PFN_MASK) >> PAGE_SHIFT;
+#endif
 }
 
 static inline unsigned long pmd_pfn(pmd_t pmd)
@@ -594,8 +598,11 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 	 */
 	val &= _PAGE_CHG_MASK;
 	val |= check_pgprot(newprot) & ~_PAGE_CHG_MASK;
+#ifndef CONFIG_POPCORN	
 	val = flip_protnone_guard(oldval, val, PTE_PFN_MASK);
+#endif
 	return __pte(val);
+	
 }
 
 static inline pmd_t pmd_modify(pmd_t pmd, pgprot_t newprot)

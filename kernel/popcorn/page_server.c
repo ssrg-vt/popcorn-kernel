@@ -1828,7 +1828,7 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 		}
 	} else {
 		struct page *page;
-		vmf->orig_pte.pte = pte_val(vmf->orig_pte) | _PAGE_PRESENT;
+		// vmf->orig_pte.pte = pte_val(vmf->orig_pte) | _PAGE_PRESENT;
 		page = vm_normal_page(vmf->vma, addr, vmf->orig_pte);
 
 		BUG_ON(!page);
