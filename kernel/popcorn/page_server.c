@@ -1623,10 +1623,12 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 
 	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
+
 	if (!vmf->pte) {
 		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
 		vmf->orig_pte = *vmf->pte;
 	}
+
 	/* setup and populate pte entry */
 	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
 		pte_unmap_unlock(vmf->pte, ptl);
@@ -1761,10 +1763,12 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 
 	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
+
 	if (!vmf->pte) {
 		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
 		vmf->orig_pte = *vmf->pte;
 	}
+
 	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
 		pte_unmap_unlock(vmf->pte, ptl);
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
