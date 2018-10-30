@@ -1247,6 +1247,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 
 	struct fault_handle *fh;
 	bool leader;
+	bool valid;
 
 	pte = __get_pte_at(mm, addr, &pmd, &ptl);
 	if (!pte) {
@@ -1284,8 +1285,14 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
 	pte_unmap_unlock(pte, ptl);
-
+	valid = (pte_val(*pte) & _PAGE_PRESENT) == _PAGE_PRESENT;
+	if (!valid) {
+		(*pte).pte = pte_val(*pte) | _PAGE_PRESENT;
+	}
 	page = vm_normal_page(vma, addr, *pte);
+	if (!valid) {
+		(*pte).pte = pte_val(*pte) & ~_PAGE_PRESENT;
+	}
 	BUG_ON(!page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
 	if (TRANSFER_PAGE_WITH_RDMA) {
@@ -1615,6 +1622,8 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 	bool leader;
 	remote_page_response_t *rp;
 	unsigned long addr = vmf->address & PAGE_MASK;
+	bool valid;
+
 	if (anon_vma_prepare(vmf->vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
 		pte_unmap(vmf->pte);
@@ -1650,7 +1659,15 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 		goto out_follower;
 	}
 
-	if (pte_none(*vmf->pte) || !(page = vm_normal_page(vmf->vma, addr, *vmf->pte))) {
+	valid = (pte_val(*vmf->pte) & _PAGE_PRESENT) == _PAGE_PRESENT;
+	if (!valid) {
+		(*vmf->pte).pte = pte_val(*vmf->pte) | _PAGE_PRESENT;
+	}
+	page = vm_normal_page(vmf->vma, addr, *vmf->pte);
+	if (!valid) {
+		(*vmf->pte).pte = pte_val(*vmf->pte) & ~_PAGE_PRESENT;
+	}
+	if (pte_none(*vmf->pte) || !page) {
 		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vmf->vma, addr);
 		BUG_ON(!page);
 
@@ -1659,6 +1676,7 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 		}
 		populated = true;
 	}
+
 	get_page(page);
 
 	rp = __fetch_page_from_origin(current, vmf->vma, addr, vmf->flags, page);
@@ -1828,9 +1846,15 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 		}
 	} else {
 		struct page *page;
-		// vmf->orig_pte.pte = pte_val(vmf->orig_pte) | _PAGE_PRESENT;
+		bool valid;
+		valid = (pte_val(vmf->orig_pte) & _PAGE_PRESENT) == _PAGE_PRESENT;
+		if (!valid) {
+			vmf->orig_pte.pte = pte_val(vmf->orig_pte) | _PAGE_PRESENT;
+		}
 		page = vm_normal_page(vmf->vma, addr, vmf->orig_pte);
-
+		if (!valid) {
+			vmf->orig_pte.pte = pte_val(vmf->orig_pte) & ~_PAGE_PRESENT;
+		}
 		BUG_ON(!page);
 
 		__claim_remote_page(current, vmf->vma->vm_mm, vmf->vma, addr, vmf->flags, page);
