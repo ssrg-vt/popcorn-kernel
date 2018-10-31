@@ -155,8 +155,12 @@ DEFINE_PCN_KMSG(vma_info_request_t, VMA_INFO_REQUEST_FIELDS);
 	char vm_file_path[512];
 DEFINE_PCN_KMSG(vma_info_response_t, VMA_INFO_RESPONSE_FIELDS);
 
+#define DEV_ZERO_STRING	"/dev/zero"
+/* -1 because we want to partial match, no inclusion of '\0' */
+#define DEV_ZERO_STRING_LEN (sizeof(DEV_ZERO_STRING) - 1)
 #define vma_info_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
-
+#define vma_info_dev_zero(x) (!strncmp((x)->vm_file_path, DEV_ZERO_STRING,\
+			      DEV_ZERO_STRING_LEN))
 
 #define VMA_OP_REQUEST_FIELDS \
 	pid_t origin_pid; \
