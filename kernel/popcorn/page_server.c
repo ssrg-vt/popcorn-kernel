@@ -459,7 +459,7 @@ void sync_clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr)
 /* implicitely read only */
 /* pte_present: x86 - present, arm - valid */
 /* TODO: RENAME - SO CONFUSING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
-static inline bool page_is_mine_at_remote(pte_t pte)
+static inline bool page_is_mine_at_remote_for_ww(pte_t pte)
 {
 	if (pte_present(pte) && !pte_write(pte))
 		return true;
@@ -2191,7 +2191,6 @@ static void __prefetch_each_at_origin(struct mm_struct *mm,
     pte_t *pte, entry;
     struct page *page;
     unsigned long flags;
-    bool got_remote_page = false;
     struct fault_handle *fh = NULL;
 	struct vm_area_struct *vma;
     bool is_write = false;
@@ -2241,12 +2240,12 @@ static void __prefetch_each_at_origin(struct mm_struct *mm,
 
 	if (found) {
 		is_conflict = true;
-        res->pf_results[pf_num].result = PREFETCH_FAIL;
-        //pf_action_fail_record_origin_busy();
+		res->pf_results[pf_num].result = PREFETCH_FAIL;
+		//pf_action_fail_record_origin_busy();
     } else {
         if (page_is_mine_general(tsk, mm, addr, *pte)) { /* TODO: buffer this */
             leader = true;
-            res->pf_results[pf_num].result = PREFETCH_SUCCESS;
+			res->pf_results[pf_num].result = PREFETCH_SUCCESS;
             *res_size += PAGE_SIZE;
             fh = __alloc_fault_handle(tsk, addr);
 
@@ -2259,7 +2258,7 @@ static void __prefetch_each_at_origin(struct mm_struct *mm,
 			//BUG(); // BUG() happens
 #endif
 			pg_mine = false;
-        	res->pf_results[pf_num].result = PREFETCH_FAIL;
+			res->pf_results[pf_num].result = PREFETCH_FAIL;
 //            if (!__prepare_get_remote_page(&fh, tsk, addr, rc, &leader,
 //                        &prepare_to_get_remote_page, list_curr)) {
 //                *res_size += PAGE_SIZE;
@@ -2328,9 +2327,7 @@ static void __prefetch_each_at_origin(struct mm_struct *mm,
 
 	/* Copy page to msg */
     if (!grant) {
-        if (!got_remote_page) {
-            page = get_normal_page(vma, addr, pte);
-        }
+		page = get_normal_page(vma, addr, pte);
         flush_cache_page(vma, addr, page_to_pfn(page));
 
         paddr = kmap_atomic(page);
@@ -2425,6 +2422,8 @@ void handle_prefetch(remote_prefetch_request_t *req)
     res->origin_pid = origin_pid;
     res->pf_req_id = pf_req_id;
 
+	res->god_omp_hash = req->god_omp_hash;
+
 	down_read(&mm->mmap_sem);
 	while (list_curr->addr && cnt < pf_list_size) {
         __prefetch_each_at_origin(mm, tsk, rc, list_curr, cnt,
@@ -2454,11 +2453,12 @@ void handle_prefetch(remote_prefetch_request_t *req)
         pcn_kmsg_post(PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE,
 									from_nid, res, res_size);
     }
-
-	PFPRINTK("\t\t%d<-sent back #%d-[succ%d/%d] 0x%lx\n", from_nid,
-						res->pf_req_id, succ_pf_num, pf_list_size,
-								req->pf_reqs[pf_list_size - 1].addr);
-
+#if 1
+	PFPRINTK("\t\t%d<-sent back hash 0x%lx #%d-[succ%d/%d] 0x%lx size %d\n",
+						from_nid, req->god_omp_hash, res->pf_req_id,
+						succ_pf_num, pf_list_size,
+						req->pf_reqs[pf_list_size - 1].addr, res_size);
+#endif
 	up_read(&mm->mmap_sem);
     put_task_struct(tsk);
 }
@@ -2488,9 +2488,9 @@ void __fixup_page(remote_prefetch_response_t *res, int pf_num, int *succ_pf_num,
 	BUG_ON(!addr);
 #endif
 
+//printk("\t\t\tfixup start 0x%lx\n", addr);
 	//printk("vma %p mm %p addr 0x%lx\n", vma, mm, addr);
 	BUG_ON(!vma || vma->vm_start > addr);
-
 	if (!(result & PREFETCH_SUCCESS)) {
 		// log
 		goto next;
@@ -2514,13 +2514,13 @@ void __fixup_page(remote_prefetch_response_t *res, int pf_num, int *succ_pf_num,
 		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
 		mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg);
 		populated = true;
-		//PFPRINTK("recv:\t\tpopulated(%s) %lx=====================\n",
-		//          populated ? "O" : "X", addr);
+		PFPRINTK("recv:\t\tpopulated(%s) %lx=====================\n",
+		          populated ? "O" : "X", addr);
 	}
 	get_page(page);
 
-
 	if (result & VM_FAULT_CONTINUE) { /* concurrentcy? */
+		BUG(); /* IMPOSSIBLE */
 		/* Page ownership is granted without transferring the page data
 		 * since this node already owns the up-to-dated page
 		 * this process is similar to last part of localfault_at_remote()
@@ -2576,11 +2576,12 @@ void __fixup_page(remote_prefetch_response_t *res, int pf_num, int *succ_pf_num,
 	ret = 0; /* PREFETCH_SUCCESS */
 
 next:
+//printk("\t\t\tfixup end 0x%lx\n", addr);
 	__pf_finish(result, ret, fh);
 }
 
 //fixup
-struct task_struct *pfpg_fixup(void *msg, struct pcn_kmsg_rdma_handle *pf_handle)
+struct remote_context *pfpg_fixup(void *msg, struct pcn_kmsg_rdma_handle *pf_handle)
 {
     remote_prefetch_response_t *res =
                     (remote_prefetch_response_t*)msg;
@@ -2598,7 +2599,9 @@ struct task_struct *pfpg_fixup(void *msg, struct pcn_kmsg_rdma_handle *pf_handle
 	BUG_ON(!tsk);
 
 	mm = tsk->mm;
+	BUG_ON(!mm);
 	rc = mm->remote;
+	BUG_ON(!rc);
 
 	// optimization, dirrectly buffer pf_map, thne no need to match here
     spin_lock(&rc->pf_ongoing_lock);
@@ -2620,25 +2623,24 @@ struct task_struct *pfpg_fixup(void *msg, struct pcn_kmsg_rdma_handle *pf_handle
     down_read(&mm->mmap_sem);
 	//PFPRINTK("response: [%d] [%d]\n", tsk->pid, pf_map->pf_list_size);
 	while (pf_num < MAX_PF_REQ && pf_num < pf_map->pf_list_size) {
-		if (pf_num + 1 >= pf_map->pf_list_size) {
-			PFPRINTK("\t\t*fixup: %d-%d/%d 0x%lx\n", res->pf_req_id, pf_num,
-						pf_map->pf_list_size, res->pf_results[pf_num].addr);
-		}
+		//if (pf_num + 1 >= pf_map->pf_list_size) {
+//			PFPRINTK("\t\t*fixup: %d-%d/%d 0x%lx hash 0x%lx\n",
+//						res->pf_req_id, pf_num,
+//						pf_map->pf_list_size, res->pf_results[pf_num].addr,
+//						res->god_omp_hash);
+		//}
 		__fixup_page(res, pf_num, &succ_pf_num, tsk, pf_map->fh[pf_num]);
 		pf_num++;
 	}
     up_read(&mm->mmap_sem);
 
 	kfree(pf_map);
-    if (tsk)
-		put_task_struct(tsk);
+	put_task_struct(tsk);
 #if PREFETCH_WRITE
     pcn_kmsg_unpin_rdma_buffer(pf_handle);
 #endif
-	return tsk;
+	return rc;
 }
-
-
 
 
 /**************************************************************************
@@ -3034,7 +3036,7 @@ retry:
 						"current->tso_region(%s) "
 						"page_is_mine(%s)(R) "
 						"pte_present(%s) "
-						"page_is_mine_at_remote(%s)(can R) "
+						"page_is_mine_at_remote_for_ww(%s)(can R) "
 						"pte_none(%s) "
 						"ins(%lx) \n",
 						addr,
@@ -3043,7 +3045,7 @@ retry:
 						current->tso_region?"O":"X",
 						page_is_mine(mm, addr)?"O":"X",
 						pte_present(*pte)?"O":"X",
-						page_is_mine_at_remote(*pte)?"O":"X",
+						page_is_mine_at_remote_for_ww(*pte)?"O":"X",
 						pte_none(*pte)?"O":"X",
 						instruction_pointer(current_pt_regs()) );
 		/* TODO: BUG() cannot be in the tso region - something in my tso implementation is wrong */
@@ -3056,7 +3058,7 @@ retry:
 						"current->tso_region(%s) "
 						"page_is_mine(%s)(R) "
 						"pte_present(%s) "
-						"page_is_mine_at_remote(%s)(can R) "
+						"page_is_mine_at_remote_for_ww(%s)(can R) "
 						"pte_none(%s) "
 						"ins(%lx) \n",
 						addr,
@@ -3065,7 +3067,7 @@ retry:
 						current->tso_region?"O":"X",
 						page_is_mine(mm, addr)?"O":"X",
 						pte_present(*pte)?"O":"X",
-						page_is_mine_at_remote(*pte)?"O":"X",
+						page_is_mine_at_remote_for_ww(*pte)?"O":"X",
 						pte_none(*pte)?"O":"X",
 						instruction_pointer(current_pt_regs()) );
 	}
@@ -3162,7 +3164,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 
 #if PROOF_DBG || MULTI_WRITER_REMOTE_TEST
 	if (current->tso_region) {
-		if (page_is_mine_at_remote(*pte)) {
+		if (page_is_mine_at_remote_for_ww(*pte)) {
 			if (fault_for_write(fault_flags)) {
 				if (!populated) {
 #if PROOF_DBG
@@ -3182,7 +3184,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 #if REMOTE_TSO
 	//jack TODO function this (origin & remote are the same code)
 	if (current->tso_region) {
-		if (page_is_mine_at_remote(*pte)) {
+		if (page_is_mine_at_remote_for_ww(*pte)) {
 			if (fault_for_write(fault_flags)) { // remote_wr (write fault w/ page)
 				if (!populated) { // will bring page (pg_mine(1) for no-accessed page bug)
 					BUG_ON(!pte_present(*pte)); // covered by populated
@@ -3218,7 +3220,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 						"current->tso_region(%s) "
 						"page_is_mine(%s) "
 						"pte_present(%s) "
-						"page_is_mine_at_remote(%s)(can R) "
+						"page_is_mine_at_remote_for_ww(%s)(can R) "
 						"populated(%s) "
 						"pte_none(%s) "
 						"ins(%lx) \n",
@@ -3228,7 +3230,7 @@ static int __handle_localfault_at_remote(struct mm_struct *mm,
 						current->tso_region?"O":"X",
 						page_is_mine(mm, addr)?"O":"X",
 						pte_present(*pte)?"O":"X",
-						page_is_mine_at_remote(*pte)?"O":"X",
+						page_is_mine_at_remote_for_ww(*pte)?"O":"X",
 						populated?"O":"X",
 						pte_none(*pte)?"O":"X",
 						instruction_pointer(current_pt_regs()) );
