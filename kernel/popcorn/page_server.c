@@ -2140,8 +2140,7 @@ struct fault_handle *select_prefetch_page(unsigned long addr)
 
     /* Only for testing local pte permission, read/write */
     pte = __get_pte_at(mm, addr, &pmd, &ptl);
-    if (!pte) { /* means don't prefetch for pages never touched */
-		BUG();
+    if (!pte) { /* never touched */
         goto out;
     }
 
@@ -2482,6 +2481,7 @@ void __fixup_page(remote_prefetch_response_t *res, int pf_num, int *succ_pf_num,
 	char *res_page = &res->page[*succ_pf_num][0];
 #endif
 	bool is_write = false;
+	unsigned fault_flags = is_write ? FAULT_FLAG_WRITE : 0;
 	struct mm_struct *mm = tsk->mm;
 	struct vm_area_struct *vma = find_vma(mm, addr);
 #ifdef CONFIG_POPCORN_CHECK_SANITY
@@ -2516,38 +2516,21 @@ void __fixup_page(remote_prefetch_response_t *res, int pf_num, int *succ_pf_num,
 		populated = true;
 		PFPRINTK("recv:\t\tpopulated(%s) %lx=====================\n",
 		          populated ? "O" : "X", addr);
+		BUG_ON(!tsk->at_remote); /* origin should not populate page here */
 	}
 	get_page(page);
 
-	if (result & VM_FAULT_CONTINUE) { /* concurrentcy? */
-		BUG(); /* IMPOSSIBLE */
-		/* Page ownership is granted without transferring the page data
-		 * since this node already owns the up-to-dated page
-		 * this process is similar to last part of localfault_at_remote()
-		 */
-		pte_t entry;
-		BUG_ON(populated); /* shouldn't be populated since it was there */
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-		BUG_ON(!page_is_mine(mm, addr));
-#endif
-		//pf_action_record_remote_res_succ_write_grant();
-		//PFPRINTK("recv:\t\t preown & up-dto-date %lx\n", addr);
+	/* must be READ */
+	paddr = kmap(page);
+	copy_to_user_page(vma, page, addr, paddr, res_page, PAGE_SIZE);
+	kunmap(page);
+	flush_dcache_page(page);
+	__SetPageUptodate(page);
 
-		spin_lock(ptl);
-		entry = pte_make_valid(*pte);
-		entry = pte_wrprotect(entry);
-		entry = pte_mkyoung(entry);
-		if (ptep_set_access_flags(vma, addr, pte, entry, 1)) {
-			update_mmu_cache(vma, addr, pte);
-		}
-	} else {
-		paddr = kmap(page);
-		copy_to_user_page(vma, page, addr, paddr, res_page, PAGE_SIZE);
-		kunmap(page);
-		__SetPageUptodate(page);
-
-		/* bottom-half of localfault_at_remote */
-		spin_lock(ptl);
+	spin_lock(ptl);
+	if (!tsk->at_remote) {
+		__make_pte_valid(mm, vma, addr, fault_flags, pte);
+	} else  { /* bottom-half of localfault_at_remote */
 		if (populated) {
 			do_set_pte(vma, addr, page, pte, is_write, true);
 			mem_cgroup_commit_charge(page, memcg, false);
@@ -2555,18 +2538,10 @@ void __fixup_page(remote_prefetch_response_t *res, int pf_num, int *succ_pf_num,
 			//pf_action_record_remote_res_succ_write_grant();
 			//PFPRINTK("recv:\t\t not preown %lx\n", addr);
 		} else {
-			unsigned fault_flags = is_write ? FAULT_FLAG_WRITE : 0;
 			__make_pte_valid(mm, vma, addr, fault_flags, pte);
 			// log
-			//if (fault_flags)
-			//    pf_action_record_remote_res_succ_write_not_grant();
-			//else
-			//	pf_action_record_remote_res_succ_read();
-			//PFPRINTK("recv:\t\t preown but not CONTINUE(up-to-date)"
-			//      " %lx\n", addr);
 		}
 	}
-
 	SetPageDistributed(mm, addr);
 	set_page_owner(my_nid, mm, addr);
 
