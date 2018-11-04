@@ -71,6 +71,8 @@ enum {
 	INDEX_INBOUND = 1,
 };
 
+extern void collect_tso_wr(struct task_struct *tsk);
+
 /* Hold the correnponding remote_contexts_lock */
 static struct remote_context *__lookup_remote_contexts_in(int nid, int tgid)
 {
@@ -167,6 +169,19 @@ static inline void __sync_init(struct remote_context *rc)
 			MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
 	//rc->inv_pages = kmalloc(sizeof(*rc->inv_pages) * MAX_ALIVE_THREADS *
 	//						MAX_WRITE_INV_BUFFERS * PAGE_SIZE, GFP_KERNEL);
+
+	// Prefetch
+    atomic_set(&rc->pf_ongoing_cnt, 0);
+    INIT_LIST_HEAD(&rc->pf_ongoing_list);
+    spin_lock_init(&rc->pf_ongoing_lock);
+	rc->wrong_hist = 0;
+	rc->wrong_hist_no_vma = 0;
+    // statis
+	atomic_set(&rc->pf_succ_cnt, 0);
+
+	/* Merge expecting res */
+	atomic_set(&rc->scatter_pendings, 0);
+
 #if !HASH_GLOBAL
 	rc->inv_pages = vmalloc(sizeof(*rc->inv_pages) * PAGE_SIZE *
 							MAX_WRITE_INV_BUFFERS * MAX_ALIVE_THREADS);
@@ -217,13 +232,12 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	spin_lock_init(&rc->pids_lock);
 
 	/* Barrier - leader/follower */
-	init_waitqueue_head(&rc->waits);
+	init_waitqueue_head(&rc->waits_begin);
 	init_waitqueue_head(&rc->waits_end);
-	init_completion(&rc->comp);		/* using only one may race condition since the next wait is faster than previous comp */
-	init_completion(&rc->comp_end);
-	atomic_set(&rc->barrier, rc->threads_cnt);
-	atomic_set(&rc->pendings, 0);
+	atomic_set(&rc->pendings_end, 0);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
+	atomic_set(&rc->pendings_begin, 0);
+	atomic_set(&rc->barrier_begin, rc->threads_cnt);
 
 	/* Per barrier data */
 	rc->ready = false;
@@ -231,12 +245,13 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	atomic_set(&rc->diffs, 0);
 	atomic_set(&rc->per_barrier_reset_done, 0);
 	atomic_set(&rc->req_diffs, 0);
-	rc->is_diffed = false;
 	rc->remote_done = false;
 	rc->local_done_cnt = 0;
 	rc->remote_done_cnt = 0;
 	rc->local_merge_id = 0;
 	rc->remote_merge_id = 0;
+
+	atomic_set(&rc->doing_diff_cnt, 0);
 
 #if !GLOBAL
 	/* serial phase inv/diff */
@@ -492,8 +507,8 @@ static void __recalc_thread_cnt(void)
 
 	//PIDPRINTK("rc->for_remote (%s)\n", rc->for_remote?"O":"X");
 	rc->threads_cnt = __get_threads_cnt() - __get_out_threads_cnt();
-	atomic_set(&rc->barrier, rc->threads_cnt);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
+	atomic_set(&rc->barrier_begin, rc->threads_cnt);
 	PIDPRINTK("\t\t[%d] alive/total %d/%d\n",
 				current->pid, rc->threads_cnt, __get_threads_cnt());
 
@@ -864,6 +879,7 @@ static int __exit_origin_task(struct task_struct *tsk)
 	 */
 	if (atomic_read(&tsk->mm->mm_users) == 1) {
 		__terminate_remotes(rc);
+		collect_tso_wr(tsk);
 	}
 
 	return 0;
@@ -894,7 +910,6 @@ static int __exit_remote_task(struct task_struct *tsk)
 	return 0;
 }
 
-extern void collect_tso_wr(struct task_struct *tsk);
 extern unsigned long long plock_system_tso_wr_cnt;
 int process_server_task_exit(struct task_struct *tsk)
 {
@@ -909,9 +924,11 @@ int process_server_task_exit(struct task_struct *tsk)
 
 	// show_regs(task_pt_regs(tsk));
 
-	if (tsk->is_worker) return 0;
+	if (tsk->is_worker) {
+		collect_tso_wr(tsk);
+		return 0;
+	}
 
-	collect_tso_wr(tsk);
 
 	if (tsk->at_remote) {
 		return __exit_remote_task(tsk);
@@ -1040,10 +1057,13 @@ static int __do_back_migration(struct task_struct *tsk, int dst_nid, void __user
 	rc->threads_cnt--;
 	__del_pid(rc, current->pid);
 	spin_unlock(&rc->pids_lock);
-	atomic_set(&rc->barrier, rc->threads_cnt);
-	atomic_set(&rc->pendings, 0);
-	atomic_set(&rc->scatter_pendings, 0);
+
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
+	atomic_set(&rc->barrier_begin, rc->threads_cnt);
+	atomic_set(&rc->pendings_begin, 0);
+	atomic_set(&rc->pendings_end, 0);
+
+	atomic_set(&rc->scatter_pendings, 0); /* other places? */
 	PIDPRINTK("\t\t--[%d] alive %hu\n", current->pid, rc->threads_cnt);
 	__put_task_remote(rc);
 
@@ -1117,8 +1137,8 @@ static int remote_thread_main(void *_args)
 	spin_lock(&rc->pids_lock);
 	rc->threads_cnt++; /* TODO: check if serialized by sponer */
 	__add_pid(rc, current->pid);
-	atomic_set(&rc->barrier, rc->threads_cnt);
 	atomic_set(&rc->barrier_end, rc->threads_cnt);
+	atomic_set(&rc->barrier_begin, rc->threads_cnt);
 	spin_unlock(&rc->pids_lock);
 	PIDPRINTK("\t\t++[%d] alive %hu\n", current->pid, rc->threads_cnt); /* TODO: check if serialized by sponer */
 	__put_task_remote(rc);
