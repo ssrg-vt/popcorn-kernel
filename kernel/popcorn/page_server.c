@@ -1247,7 +1247,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 
 	struct fault_handle *fh;
 	bool leader;
-	bool valid;
+	bool present;
 
 	pte = __get_pte_at(mm, addr, &pmd, &ptl);
 	if (!pte) {
@@ -1285,13 +1285,13 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	set_pte_at_notify(mm, addr, pte, entry);
 	update_mmu_cache(vma, addr, pte);
 	pte_unmap_unlock(pte, ptl);
-	valid = (pte_val(*pte) & _PAGE_PRESENT) == _PAGE_PRESENT;
-	if (!valid) {
-		(*pte).pte = pte_val(*pte) | _PAGE_PRESENT;
+	present = pte_is_present(*pte);
+	if (!present) {
+		pte_make_valid(*pte);
 	}
 	page = vm_normal_page(vma, addr, *pte);
-	if (!valid) {
-		(*pte).pte = pte_val(*pte) & ~_PAGE_PRESENT;
+	if (!present) {
+		pte_make_invalid(*pte);
 	}
 	BUG_ON(!page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
@@ -1622,7 +1622,7 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 	bool leader;
 	remote_page_response_t *rp;
 	unsigned long addr = vmf->address & PAGE_MASK;
-	bool valid;
+	bool present;
 
 	if (anon_vma_prepare(vmf->vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
@@ -1659,13 +1659,13 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 		goto out_follower;
 	}
 
-	valid = (pte_val(*vmf->pte) & _PAGE_PRESENT) == _PAGE_PRESENT;
-	if (!valid) {
-		(*vmf->pte).pte = pte_val(*vmf->pte) | _PAGE_PRESENT;
+	present = pte_is_present(*vmf->pte);
+	if (!present) {
+		pte_make_valid(*vmf->pte);
 	}
 	page = vm_normal_page(vmf->vma, addr, *vmf->pte);
-	if (!valid) {
-		(*vmf->pte).pte = pte_val(*vmf->pte) & ~_PAGE_PRESENT;
+	if (!present) {
+		pte_make_invalid(*vmf->pte);
 	}
 	if (pte_none(*vmf->pte) || !page) {
 		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vmf->vma, addr);
@@ -1846,14 +1846,14 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 		}
 	} else {
 		struct page *page;
-		bool valid;
-		valid = (pte_val(vmf->orig_pte) & _PAGE_PRESENT) == _PAGE_PRESENT;
-		if (!valid) {
-			vmf->orig_pte.pte = pte_val(vmf->orig_pte) | _PAGE_PRESENT;
+		bool present;
+		present = pte_is_present(vmf->orig_pte);
+		if (!present) {
+			pte_make_valid(vmf->orig_pte);
 		}
 		page = vm_normal_page(vmf->vma, addr, vmf->orig_pte);
-		if (!valid) {
-			vmf->orig_pte.pte = pte_val(vmf->orig_pte) & ~_PAGE_PRESENT;
+		if (!present) {
+			pte_make_invalid(vmf->orig_pte);
 		}
 		BUG_ON(!page);
 

@@ -198,7 +198,7 @@ static int deq_send(struct sock_handle *sh)
 	while (remaining > 0) {
 		int sent = ksock_send(sh->sock, p, remaining);
 		if (sent < 0) {
-			MSGPRINTK("send interrupted, %d\n", sent);
+			//MSGPRINTK("send interrupted, %d\n", sent);
 			io_schedule();
 			continue;
 		}
