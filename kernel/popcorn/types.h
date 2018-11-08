@@ -22,7 +22,20 @@
 
 #define HASH_GLOBAL 1
 
+#define GOD_VIEW 1
+
 #define OMP_REGION_HASH_BITS 10
+
+/* Multiple writer protocol -
+ * by providing postpone inv (batch invs) and merging in the end
+ */
+#define MW 1
+
+/* Prefetch */
+#define PREFETCH 1
+#define MAX_PF_REQ (int)(PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE)	// () is so important!!!
+#define PREFETCH_FAIL 0x0001
+#define PREFETCH_SUCCESS 0x0002
 
 /**
  * OMP region
@@ -39,6 +52,8 @@
 #define RCSI_VAIN 0x01
 #define RCSI_REPEAT 0x20
 #define RCSI_SERIAL 0x40
+
+extern int TO_THE_OTHER_NID(void);
 
 /**
  * Remote execution context
@@ -73,21 +88,20 @@ struct remote_context {
 	pid_t remote_tgids[MAX_POPCORN_NODES];
 
 	/* Barrier for batch inv sync (for WW case) */
-	atomic_t barrier;
-	atomic_t barrier_end;	/* watch out */
-	struct completion comp;
-	struct completion comp_end; /*watch out */
-	wait_queue_head_t waits;
+	wait_queue_head_t waits_begin; /* for tso_begin */
 	wait_queue_head_t waits_end;
+	atomic_t barrier_begin;		/* for tso_begin */
+	atomic_t barrier_end;
+	atomic_t pendings_begin;	/* for tso_begin */
+	atomic_t pendings_end; 		/* for leader and follower race condition */
+	atomic_t scatter_pendings; 	/* for the last scatter to wake up leader */
+
 	/* Track live threads */
 	unsigned short threads_cnt; /* alive threads */
 	//unsigned short migrated; /* -> out_threads */
 	int out_threads; // TODO renam. keep tracking current on-node thread cnt
 	int pids[MAX_ALIVE_THREADS];
 	spinlock_t pids_lock;
-
-	atomic_t pendings; /* for leader and follower race condition */
-	atomic_t scatter_pendings; /* for the last scatter to wake up leader */
 
 	bool ready; /* global list prepared */ /* ready for remote to check the confliction (producer/consumer) */
 
@@ -108,6 +122,7 @@ struct remote_context {
 	unsigned long sys_rw_cnt;
 	atomic_t sys_ww_cnt;
 	unsigned long sys_inv_cnt; /* not used */
+	atomic_t sys_smart_skip_cnt;
 
 	unsigned long remote_sys_ww_cnt;
 
@@ -125,19 +140,75 @@ struct remote_context {
 	atomic_t diffs;			/* per region + async + concurrent */
 	atomic_t per_barrier_reset_done; /* per region + async + concurrent */
 	atomic_t req_diffs;		/* per region */
-	bool is_diffed; /* for making sure the remote at lease one time */
-	bool remote_done; /* XXX handshake */
+	bool remote_done; /* XXX this has been replaced by remote_done_cnt. REMOVE IT */
 	unsigned long remote_type;
 	int local_done_cnt;
 	int remote_done_cnt;
 	int local_merge_id;
 	int remote_merge_id;
 	/* bool leader back // can cover diffs but conor case? */
+	atomic_t doing_diff_cnt;
+
+	// prefetch
+	atomic_t pf_ongoing_cnt;            /* Ongoing prefetch cnt XXXXX BUG XXXXX*/
+	spinlock_t pf_ongoing_lock;         /* Ongoing prefetch mapping lock */
+	struct list_head pf_ongoing_list;   /* Ongoing prefetch mapping list head */
+	int wrong_hist;
+	int wrong_hist_no_vma;
+	// statis
+	atomic_t pf_succ_cnt;
 
 	/* for region dbg buffering */
 	char name[256];
 	int line;
 };
+
+struct fault_handle {
+	struct hlist_node list;
+
+	unsigned long addr;
+	unsigned long flags;
+
+	unsigned int limit;
+	pid_t pid;
+	int ret;
+
+	atomic_t pendings;
+	atomic_t pendings_retry;
+	wait_queue_head_t waits;
+	wait_queue_head_t waits_retry;
+	struct remote_context *rc;
+
+	struct completion *complete;
+};
+
+// prefetch
+struct prefetch_list_body {
+    unsigned long addr;
+    //bool is_write;
+    //bool is_besteffort;
+
+    //dma_addr_t rdma_addr;   /* redundant */ /*change name to addr*/
+    //u32 rdma_key;   /* redundant */
+    //struct pcn_kmsg_rdma_handle *pf_handle; /* move to list head*/
+}__attribute__((packed)); // try to remove
+
+struct prefetch_result {
+    unsigned long addr;
+    //bool is_write;
+    unsigned long result;
+};
+
+struct pf_ongoing_map {
+    struct list_head list;
+    int pf_list_size;
+    int pf_req_id;
+    unsigned long addr[MAX_PF_REQ];
+    struct fault_handle *fh[MAX_PF_REQ];
+    struct pcn_kmsg_rdma_handle *rh[MAX_PF_REQ];
+};
+
+
 
 struct remote_context *__get_mm_remote(struct mm_struct *mm);
 struct remote_context *get_task_remote(struct task_struct *tsk);
@@ -317,6 +388,36 @@ DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS
 DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
 
+// pf
+#define REMOTE_PREFETCH_REQUEST_FIELDS \
+    pid_t origin_pid; \
+    pid_t remote_pid; \
+    int pf_req_id; \
+    int pf_list_size; \
+    unsigned long god_omp_hash; \
+    struct prefetch_list_body pf_reqs[MAX_PF_REQ];
+DEFINE_PCN_KMSG(remote_prefetch_request_t, REMOTE_PREFETCH_REQUEST_FIELDS);
+//    dma_addr_t rdma_addr;   /* redundant */ /*change name to addr*/
+//    u32 rdma_key;   /* redundant */
+//    struct pcn_kmsg_rdma_handle *pf_handle; /* move to list head*/
+
+// god_omp_hash is for debuging
+
+#define REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
+    pid_t origin_pid; \
+    pid_t remote_pid; \
+    int pf_req_id; \
+    unsigned long god_omp_hash; \
+    struct prefetch_result pf_results[MAX_PF_REQ];
+
+#define REMOTE_PREFETCH_RESPONSE_FIELDS \
+    REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS \
+    unsigned char page[MAX_PF_REQ][PAGE_SIZE];
+DEFINE_PCN_KMSG(remote_prefetch_response_t, REMOTE_PREFETCH_RESPONSE_FIELDS);
+
+#define REMOTE_PREFETCH_RESPONSE_SHORT_FIELDS \
+    REMOTE_PREFETCH_RESPONSE_COMMON_FIELDS
+DEFINE_PCN_KMSG(remote_prefetch_response_short_t, REMOTE_PREFETCH_RESPONSE_SHORT_FIELDS);
 
 #define REMOTE_PAGE_FLUSH_COMMON_FIELDS \
 	pid_t origin_pid; \
@@ -391,7 +492,8 @@ DEFINE_PCN_KMSG(page_merge_request_t, PAGE_MERGE_REQUEST_FIELDS);
 	int iter; \
 	int total_iter; \
 	int merge_id; \
-	unsigned long wr_cnt;
+	unsigned long wr_cnt; \
+	int conflict_cnt
 DEFINE_PCN_KMSG(page_merge_response_t, PAGE_MERGE_RESPONSE_FIELDS);
 /* scatters = total_iter = if(0) = no need to merge */
 /* merge_id = iter*/
@@ -460,6 +562,7 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
  * Message routing using work queues
  */
 extern struct workqueue_struct *popcorn_wq;
+extern struct workqueue_struct *popcorn_wq2;
 extern struct workqueue_struct *popcorn_ordered_wq;
 
 struct pcn_kmsg_work {
@@ -471,12 +574,55 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 {
 	struct pcn_kmsg_work *w = kmalloc(sizeof(*w), GFP_ATOMIC);
 	BUG_ON(!w);
+	if (msg->header.type == PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE) {
+		remote_prefetch_response_t *res = (remote_prefetch_response_t *)msg;
+#if 0
+		printk("\t\t  wq: touched 0x%lx #%d\n",
+					res->god_omp_hash, res->pf_req_id);
+#endif
+#if 0
+#define MAX_NAME 255
+		char str[MAX_NAME]; int i, ofs = 0;
+		//memset(str, 0, MAX_NAME);
+		ofs += snprintf(str, MAX_NAME, "%s", "\t\taddrs: ");
+		for (i = 0; i < res->pf_list_size; i++) { // TODO data struct
+			int ret = res->pf_results[i].result;
+			unsigned long addr = res->pf_results[i].addr;
+			ofs += snprintf(str + ofs, MAX_NAME, "%s", "0x");
+			ofs += snprintf(str + ofs, MAX_NAME, "%lx", addr);
+			ofs += snprintf(str + ofs, MAX_NAME, "%s", " ");
+			ofs += snprintf(str + ofs, MAX_NAME, "%s", !ret ? "O":"X");
+			ofs += snprintf(str + ofs, MAX_NAME, "%s", " ");
+		}
+		memset(str + ofs, 0, MAX_NAME);
+		printk("%s\n", str);
+#endif
+
+	}
 
 	w->msg = msg;
 	INIT_WORK(&w->work, handler);
-	smp_wmb();
-	queue_work(wq, &w->work);
+	//smp_wmb();
+	if (msg->header.type != PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE)
+		BUG_ON(!queue_work(wq, &w->work));
+	else {
+		//printk("\t\t1: \n");
+		//show_workqueue_state();
+		BUG_ON(!queue_work(popcorn_wq2, &w->work)); // this makes deadline faster
+		//printk("\t\t2: \n");
+		//show_workqueue_state();
 
+		//show_pwq(pwq = per_cpu_ptr(wq->cpu_pwqs, cpu);
+	}
+	smp_wmb();
+
+#if 0
+	if (msg->header.type == PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE) {
+		remote_prefetch_response_t *res = (remote_prefetch_response_t *)msg;
+		printk("\t\t<-wq: done reqs hash 0x%lx #%d\n",
+					res->god_omp_hash, res->pf_req_id);
+	}
+#endif
 	return 0;
 }
 
@@ -524,5 +670,4 @@ static inline struct task_struct *__get_task_struct(pid_t pid)
 	rcu_read_unlock();
 	return tsk;
 }
-
 #endif /* __TYPES_H__ */
