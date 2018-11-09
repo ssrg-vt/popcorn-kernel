@@ -4236,7 +4236,6 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 			return ret;
 	} else {
 		pud_t orig_pud = *vmf.pud;
-
 		barrier();
 		if (pud_trans_huge(orig_pud) || pud_devmap(orig_pud)) {
 
@@ -4285,6 +4284,11 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 			}
 		}
 	}
+#ifdef CONFIG_POPCORN
+	if (distributed_process(current) && pmd_none(*vmf.pmd) && (!__pte_alloc(mm, vmf.pmd, vmf.address))) {
+		return VM_FAULT_OOM;
+	}
+#endif
 
 	return handle_pte_fault(&vmf);
 }
