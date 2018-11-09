@@ -4,6 +4,7 @@ jobs:
     branches:
       only:
         - master
+        - merge
 
     docker:
       - image: ssrg/popcorn-kernel:circleci-1.0
