@@ -1635,7 +1635,6 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 
 	if (!vmf->pte) {
 		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
-		vmf->orig_pte = *vmf->pte;
 	}
 
 	/* setup and populate pte entry */
@@ -1784,7 +1783,6 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 
 	if (!vmf->pte) {
 		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
-		vmf->orig_pte = *vmf->pte;
 	}
 
 	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
