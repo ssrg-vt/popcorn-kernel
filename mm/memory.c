@@ -3984,12 +3984,13 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	}
 #ifdef CONFIG_POPCORN
 	if (distributed_process(current)) {
+		int ret;
 		if (pmd_none(*vmf->pmd)) {
 			if (__pte_alloc(vmf->vma->vm_mm, vmf->pmd, vmf->address))
 				return VM_FAULT_OOM;
 		}
 
-		int ret = page_server_handle_pte_fault(vmf);
+		ret = page_server_handle_pte_fault(vmf);
 		if (ret == VM_FAULT_RETRY) {
 			int backoff = ++current->backoff_weight;
 			PGPRINTK("  [%d] backoff %d\n", current->pid, backoff);
