@@ -1,0 +1,38 @@
+version: 2
+jobs:
+  build:
+    branches:
+      only:
+        - master
+
+    docker:
+      - image: ssrg/popcorn-kernel:circleci-1.0
+
+    environment:
+      COMPILATION_LOGS: /tmp/compilation_logs
+
+    steps:
+      - checkout
+
+      - run: mkdir -p $COMPILATION_LOGS
+
+      - run:
+          name: Build x86_64
+          command: |
+            set +o pipefail
+            cp kernel/popcorn/configs/config-x86_64-qemu .config
+            make -j2 2>&1 | tee $COMPILATION_LOGS/x86_64.log
+
+      - run:
+          name: Build arm64
+          command: |
+            set +o pipefail
+            cp kernel/popcorn/configs/config-arm64-qemu .config
+            make -j2 2>&1 | tee $COMPILATION_LOGS/arm64.log
+          environment:
+            ARCH: arm64
+            CROSS_COMPILE: aarch64-linux-gnu-
+
+      - store_artifacts:
+          path: /tmp/compilation_logs
+          destination: raw-test-output
