@@ -3984,6 +3984,11 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	}
 #ifdef CONFIG_POPCORN
 	if (distributed_process(current)) {
+		if (pmd_none(*vmf->pmd)) {
+			if (__pte_alloc(vmf->vma->vm_mm, vmf->pmd, vmf->address))
+				return VM_FAULT_OOM;
+		}
+
 		int ret = page_server_handle_pte_fault(vmf);
 		if (ret == VM_FAULT_RETRY) {
 			int backoff = ++current->backoff_weight;
@@ -4284,11 +4289,6 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 			}
 		}
 	}
-#ifdef CONFIG_POPCORN
-	if (distributed_process(current) && pmd_none(*vmf.pmd) && (!__pte_alloc(mm, vmf.pmd, vmf.address))) {
-		return VM_FAULT_OOM;
-	}
-#endif
 
 	return handle_pte_fault(&vmf);
 }
