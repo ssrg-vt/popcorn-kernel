@@ -53,7 +53,8 @@ DEFINE_SYSCALL_REDIRECT(ioctl, PCN_SYSCALL_IOCTL, unsigned int, fd,
 DEFINE_SYSCALL_REDIRECT(writev, PCN_SYSCALL_WRITEV, unsigned long,
 			fd, const struct iovec __user *, vec,
 			unsigned long, vlen);
-
+DEFINE_SYSCALL_REDIRECT(fstat, PCN_SYSCALL_FSTAT, unsigned int, fd,
+			struct __old_kernel_stat __user *, statbuf);
 /**
  * Syscalls needed in the kernel
  * */
@@ -80,6 +81,8 @@ extern long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
 extern long sys_writev(unsigned long fd,
 			   const struct iovec __user *vec,
 			   unsigned long vlen);
+extern long sys_fstat(unsigned int fd,
+			struct __old_kernel_stat __user *statbuf);
 
 int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
@@ -172,6 +175,10 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				   (unsigned)req->param2,
 				   (struct sockaddr __user *)req->param1,
 				   (int __user *)req->param0);
+		break;
+	case PCN_SYSCALL_FSTAT:
+		retval = sys_fstat((unsigned int)req->param1,
+				   (struct __old_kernel_stat __user *)req->param0);
 		break;
 	default:
 		retval = -EINVAL;

@@ -27,4 +27,6 @@ long redirect_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
 long redirect_writev(unsigned long fd,
 			   const struct iovec __user *vec,
 			   unsigned long vlen);
+long redirect_fstat(unsigned int fd,
+			struct __old_kernel_stat __user *statbuf);
 #endif
