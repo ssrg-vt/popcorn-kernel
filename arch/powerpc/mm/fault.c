@@ -46,11 +46,6 @@
 #include <asm/siginfo.h>
 #include <asm/debug.h>
 
-#ifdef CONFIG_POPCORN
-#include <popcorn/types.h>
-#include <popcorn/vma_server.h>
-#endif
-
 static inline bool notify_page_fault(struct pt_regs *regs)
 {
 	bool ret = false;
@@ -511,19 +506,6 @@ retry:
 	}
 
 	vma = find_vma(mm, address);
-#ifdef CONFIG_POPCORN
-	/* vma worker should not fault */
-	BUG_ON(current->is_worker);
-
-	if (distributed_remote_process(current)) {
-		if (!vma || vma->vm_start > address) {
-			if (vma_server_fetch_vma(current, address) == 0) {
-				/* Replace with updated VMA */
-				vma = find_vma(mm, address);
-			}
-		}
-	}
-#endif
 	  
 	if (unlikely(!vma))
 		return bad_area(regs, address);
@@ -600,11 +582,6 @@ good_area:
 		 */
 		return is_user ? 0 : SIGBUS;
 	}
-#ifdef CONFIG_POPCORN
-	else if (distributed_process(current) && fault == VM_FAULT_RETRY) {
-		return 0;
-	}
-#endif
 
 	up_read(&current->mm->mmap_sem);
 

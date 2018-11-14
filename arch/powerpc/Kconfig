@@ -125,7 +125,6 @@ config ARCH_HAS_DMA_SET_COHERENT_MASK
 config PPC
 	bool
 	default y	
-	select ARCH_SUPPORTS_POPCORN if PPC64 && CPU_LITTLE_ENDIAN
 
 
 	#
@@ -152,7 +151,6 @@ config PPC
 	select ARCH_MIGHT_HAVE_PC_SERIO
 	select ARCH_OPTIONAL_KERNEL_RWX		if ARCH_HAS_STRICT_KERNEL_RWX
 	select ARCH_SUPPORTS_ATOMIC_RMW
-	select ARCH_SUPPORTS_POPCORN		if PPC64 && CPU_LITTLE_ENDIAN
 	select ARCH_USE_BUILTIN_BSWAP
 	select ARCH_USE_CMPXCHG_LOCKREF		if PPC64
 	select ARCH_WANT_IPC_PARSE_VERSION
@@ -394,7 +392,6 @@ config PGTABLE_LEVELS
 	default 3 if PPC_64K_PAGES && !PPC_BOOK3S_64
 	default 4
 
-source "kernel/Kconfig.popcorn"
 source "arch/powerpc/sysdev/Kconfig"
 source "arch/powerpc/platforms/Kconfig"
 
