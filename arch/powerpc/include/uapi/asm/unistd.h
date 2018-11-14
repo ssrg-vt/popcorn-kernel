@@ -400,8 +400,4 @@
 #define __NR_pkey_mprotect	386
 #define __NR_rseq		387
 #define __NR_io_pgetevents	388
-#define __NR_popcorn_migrate	389
-#define __NR_popcorn_propose_migration	390
-#define __NR_popcorn_get_thread_status	391
-#define __NR_popcorn_get_node_info	392
 #endif /* _UAPI_ASM_POWERPC_UNISTD_H_ */
