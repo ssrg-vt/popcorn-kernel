@@ -807,9 +807,18 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 	struct task_struct *tsk = __get_task_struct(pid);
 	int ret = -ESRCH;
 	if (!tsk) {
+		int i = 0;
 		printk(KERN_INFO"%s: invalid origin task %d for remote work %d\n",
 				__func__, pid, req->header.type);
-		goto out_err;
+		WARN_ON("trying to fix");
+		while (!tsk) {
+			if (++i > 100) BUG();
+			tsk = __get_task_struct(pid);
+			io_schedule();
+		}
+		printk(KERN_INFO"%s: fixed origin task %d for remote work %d\n",
+										__func__, pid, req->header.type);
+		//goto out_err;
 	}
 
 	/**
@@ -829,7 +838,9 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 
 		__put_task_remote(rc);
 	} else {
-		BUG_ON(tsk->remote_work);
+		WARN_ON(tsk->remote_work);
+		while (tsk->remote_work) // Jack DEX BUG FIX
+			; // Jack DEX BUG FIX
 		tsk->remote_work = req;
 		complete(&tsk->remote_work_pended); /* implicit memory barrier */
 	}
@@ -837,7 +848,7 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 	put_task_struct(tsk);
 	return 0;
 
-out_err:
+//out_err:
 	pcn_kmsg_done(req);
 	return ret;
 }
