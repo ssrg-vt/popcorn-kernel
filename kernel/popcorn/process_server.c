@@ -544,29 +544,25 @@ extern void sync_clear_page_owner(int nid, struct mm_struct *mm, unsigned long a
 //void maintain_origin_table(unsigned long target_addr, int i, int total)
 void maintain_origin_table(unsigned long target_addr)
 {
-	/* TODO try to spin_lock(ptl); spin_unlock(ptl); this operations */
-
-
-
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-//owner is oalway origin in my fucking case
-
+	/* TODO try to spin_lock(ptl); spin_unlock(ptl); this operations should I? */
+	//spin_lock(ptl); // TODO: check TSO_ORIGIN/REMOTE flow
+	//spin_unlock(ptl); //
 
 // but I should now do it here I think......... i should do as normal here and later on do it again in the barrier begin
 
-	if (my_nid == 0)
-		sync_clear_page_owner(1, current->mm, target_addr);
-	else
-		sync_clear_page_owner(0, current->mm, target_addr);
+//	if (my_nid == 0)
+//		sync_clear_page_owner(1, current->mm, target_addr);
+//	else
+//		sync_clear_page_owner(0, current->mm, target_addr);
+
+	// 11/26 TODO trying fixing bugs
+	// just determeinded by NO_COPY definition
+	sync_clear_page_owner(!NOCOPY_NODE, current->mm, target_addr);
+//	if (my_nid == NOCOPY_NODE) {
+//		sync_clear_page_owner(1, current->mm, target_addr);
+//	} else {
+//		sync_clear_page_owner(0, current->mm, target_addr);
+//	}
 #if 0
 //	int peers;
 	unsigned long offset, *pi;
