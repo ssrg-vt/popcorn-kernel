@@ -542,6 +542,8 @@ static void __sort_array(struct remote_context *rc, int ofs)
 /* ugly */
 extern void sync_clear_page_owner(int nid, struct mm_struct *mm, unsigned long addr);
 //void maintain_origin_table(unsigned long target_addr, int i, int total)
+/* rename I own it for this region - will fix the right permission according to NOCOPY in the end of the region */
+/* move this() to sync.c*/
 void maintain_origin_table(unsigned long target_addr)
 {
 	/* TODO try to spin_lock(ptl); spin_unlock(ptl); this operations should I? */
@@ -550,19 +552,23 @@ void maintain_origin_table(unsigned long target_addr)
 
 // but I should now do it here I think......... i should do as normal here and later on do it again in the barrier begin
 
-//	if (my_nid == 0)
-//		sync_clear_page_owner(1, current->mm, target_addr);
-//	else
-//		sync_clear_page_owner(0, current->mm, target_addr);
+	if (my_nid == 0)
+		sync_clear_page_owner(1, current->mm, target_addr);
+	else
+		sync_clear_page_owner(0, current->mm, target_addr);
 
-	// 11/26 TODO trying fixing bugs
-	// just determeinded by NO_COPY definition
-	sync_clear_page_owner(!NOCOPY_NODE, current->mm, target_addr);
-//	if (my_nid == NOCOPY_NODE) {
-//		sync_clear_page_owner(1, current->mm, target_addr);
-//	} else {
-//		sync_clear_page_owner(0, current->mm, target_addr);
-//	}
+	/* TODO - I think original path will set myself as owner nomatter what but still double check again*/
+
+
+//	// 11/26 TODO trying fixing bugs
+//	// just determeinded by NO_COPY definition
+////	sync_clear_page_owner(!NOCOPY_NODE, current->mm, target_addr);
+//
+////	if (my_nid == NOCOPY_NODE) {
+////		sync_clear_page_owner(1, current->mm, target_addr);
+////	} else {
+////		sync_clear_page_owner(0, current->mm, target_addr);
+////	}
 #if 0
 //	int peers;
 	unsigned long offset, *pi;
@@ -1434,7 +1440,7 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 				__func__, pid, req->header.type);
 		WARN_ON("trying to fix");
 		while (!tsk) {
-			if (++i > 100) BUG();
+			if (++i > 10000) BUG();
 			tsk = __get_task_struct(pid);
 			io_schedule();
 		}
