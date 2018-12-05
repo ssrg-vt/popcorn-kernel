@@ -2,7 +2,7 @@
  * @file vma_server.c
  *
  * Popcorn Linux VMA handler implementation
- * This work was an extension of David Katz MS Thesis, but totally rewritten 
+ * This work was an extension of David Katz MS Thesis, but totally rewritten
  * by Sang-Hoon to support multithread environment.
  *
  * @author Sang-Hoon Kim, SSRG Virginia Tech 2016-2017
@@ -402,10 +402,9 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 				req->origin_pid, nid, start, len);
 		pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_REQUEST, nid, req, sizeof(*req));
 		res = wait_at_station(ws);
-		pcn_kmsg_done(res);
 	}
-	put_task_remote(current);
 	kfree(req);
+	put_task_remote(current);
 
 	vm_munmap(start, len);
 	return 0;
@@ -508,10 +507,10 @@ static long __process_vma_op_at_origin(vma_op_request_t *req)
 		ret = vma_server_munmap_origin(req->addr, req->len, from_nid);
 		break;
 	case VMA_OP_MPROTECT:
-	        ret = ksys_mprotect(req->addr, req->len, req->prot);
+		ret = ksys_mprotect(req->addr, req->len, req->prot);
 		break;
 	case VMA_OP_MREMAP:
-	        ret = ksys_mremap(req->addr, req->old_len, req->new_len,
+		ret = ksys_mremap(req->addr, req->old_len, req->new_len,
 				  req->flags, req->new_addr);
 		break;
 	case VMA_OP_MADVISE:
@@ -519,7 +518,7 @@ static long __process_vma_op_at_origin(vma_op_request_t *req)
 			ret = process_madvise_release_from_remote(
 					from_nid, req->start, req->start + req->len);
 		} else {
-		        ret = ksys_madvise(req->start, req->len, req->behavior);
+			ret = ksys_madvise(req->start, req->len, req->behavior);
 		}
 		break;
 	default:
