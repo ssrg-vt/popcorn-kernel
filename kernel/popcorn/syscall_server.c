@@ -35,6 +35,10 @@ DEFINE_SYSCALL_REDIRECT(epoll_create1, PCN_SYSCALL_EPOLL_CREATE1, int, flags);
 DEFINE_SYSCALL_REDIRECT(epoll_wait, PCN_SYSCALL_EPOLL_WAIT, int, epfd,
 			struct epoll_event __user *,
 			events, int, maxevents, int, timeout);
+DEFINE_SYSCALL_REDIRECT(epoll_pwait, PCN_SYSCALL_EPOLL_PWAIT,int, epfd,
+			struct epoll_event __user *, events, int, maxevents,
+			int, timeout, const sigset_t __user *, sigmask,
+			size_t, sigsetsize);
 DEFINE_SYSCALL_REDIRECT(epoll_ctl, PCN_SYSCALL_EPOLL_CTL, int, epfd,
 			int, op, int, fd, struct epoll_event __user *,
 			event);
@@ -54,7 +58,9 @@ DEFINE_SYSCALL_REDIRECT(writev, PCN_SYSCALL_WRITEV, unsigned long,
 			fd, const struct iovec __user *, vec,
 			unsigned long, vlen);
 DEFINE_SYSCALL_REDIRECT(fstat, PCN_SYSCALL_FSTAT, unsigned int, fd,
-			struct __old_kernel_stat __user *, statbuf);
+			struct stat __user *, statbuf);
+DEFINE_SYSCALL_REDIRECT(sendfile64, PCN_SYSCALL_SENDFILE64,int, out_fd, int,
+			in_fd, loff_t __user *, offset, size_t, count);
 /**
  * Syscalls needed in the kernel
  * */
@@ -73,6 +79,10 @@ extern long sys_epoll_ctl(int epfd, int op, int fd,
 				struct epoll_event __user *event);
 extern long sys_epoll_wait(int epfd, struct epoll_event __user *events,
 				int maxevents, int timeout);
+extern long sys_epoll_pwait(int epfd, struct epoll_event __user *events,
+				int maxevents, int timeout,
+				const sigset_t __user *sigmask,
+				size_t sigsetsize);
 extern long sys_read(unsigned int fd, char __user *buf, size_t count);
 extern long sys_write(unsigned int fd, const char __user *buf, size_t count);
 extern long sys_open(const char __user *filename, int flags, umode_t mode);
@@ -81,8 +91,9 @@ extern long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
 extern long sys_writev(unsigned long fd,
 			   const struct iovec __user *vec,
 			   unsigned long vlen);
-extern long sys_fstat(unsigned int fd,
-			struct __old_kernel_stat __user *statbuf);
+extern long sys_newfstat(unsigned int fd, struct stat __user *statbuf);
+extern long sys_sendfile64(int out_fd, int in_fd,
+			       loff_t __user *offset, size_t count);
 
 int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
@@ -128,7 +139,6 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 		retval = sys_epoll_create1((int)req->param0);
 		break;
 	case PCN_SYSCALL_EPOLL_WAIT:
-		printk(KERN_INFO "epoll_wait called on host\n");
 		retval = sys_epoll_wait((int)req->param3,
 				(struct epoll_event __user *)req->param2,
 				(int)req->param1, (int)req->param0);
@@ -177,8 +187,19 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				   (int __user *)req->param0);
 		break;
 	case PCN_SYSCALL_FSTAT:
-		retval = sys_fstat((unsigned int)req->param1,
-				   (struct __old_kernel_stat __user *)req->param0);
+		retval = sys_newfstat((unsigned int)req->param1,
+				   (struct stat __user *)req->param0);
+		break;
+	case PCN_SYSCALL_SENDFILE64:
+		retval = sys_sendfile64((int)req->param3, (int)req->param2,
+			       (loff_t __user *)req->param1, (size_t)req->param0);
+		break;
+	case PCN_SYSCALL_EPOLL_PWAIT:
+		retval = sys_epoll_pwait((int)req->param5, (struct epoll_event
+							    __user *)req->param4,
+				(int)req->param3, (int)req->param2,
+				(const sigset_t __user *)req->param1,
+				(size_t)req->param0);
 		break;
 	default:
 		retval = -EINVAL;

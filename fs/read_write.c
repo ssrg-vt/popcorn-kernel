@@ -1310,6 +1310,13 @@ SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd, loff_t __user *, offset, si
 	loff_t pos;
 	ssize_t ret;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		ret = redirect_sendfile64(out_fd, in_fd, offset, count);
+		return ret;
+	}
+#endif
+
 	if (offset) {
 		if (unlikely(copy_from_user(&pos, offset, sizeof(loff_t))))
 			return -EFAULT;

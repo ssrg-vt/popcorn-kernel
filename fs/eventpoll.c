@@ -2047,6 +2047,14 @@ SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
 	int error;
 	sigset_t ksigmask, sigsaved;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_epoll_pwait(epfd, events, maxevents, timeout,
+					     sigmask, sigsetsize);
+		SKPRINTK("remote epoll_pwait ret: %d\n", error);
+		return error;
+	}
+#endif
 	/*
 	 * If the caller wants a certain signal mask to be set during the wait,
 	 * we apply it here.
