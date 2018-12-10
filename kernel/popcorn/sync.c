@@ -26,9 +26,41 @@
 #include <popcorn/sync.h>
 #include <linux/hashtable.h>
 
+// dbg (perf)
 #define RCSI_IRQ_CPU 1
-unsigned long handle_mw_reqest_cpu[MAX_THREADS];
-unsigned long handle_pf_reqest_cpu[MAX_THREADS];
+#if RCSI_IRQ_CPU
+// msg cnt // not accurate
+unsigned long handle_mw_reqest_cpu[MAX_POPCORN_THREADS];
+unsigned long handle_pf_reqest_cpu[MAX_POPCORN_THREADS];
+#endif
+
+/* Popcorn global barrier */
+//unsigned long popcorn_global_local_cnt = 0; // overflow problem
+//unsigned long popcorn_global_remote_cnt = 0; // overflow problem
+//volatile unsigned long popcorn_global_local_cnt = 0; // overflow problem
+//volatile unsigned long popcorn_global_remote_cnt = 0; // overflow problem
+atomic64_t popcorn_global_local_cnt = ATOMIC64_INIT(0); // can be local? right?
+atomic64_t popcorn_global_remote_cnt = ATOMIC64_INIT(0);
+#define GLOBAL_BARRIER_MANUAL_CLEAN 1
+spinlock_t popcorn_global_lock;
+spinlock_t popcorn_global_lock2;
+/* ATTENTION: this result is from VM not real machine!!!!!! */
+/* all atomic + CPU_RELAX 200s only (fastest) */
+/* TODO spining time to determine good/back design*/
+/* 1. volatile supper slow 940.23 */
+
+atomic64_t popcorn_global_time = ATOMIC64_INIT(0);
+
+/**
+ * make MACRO
+ */
+/* smart skip */
+unsigned long smart_skip_cnt = 0;
+
+/* handle remote req time */
+atomic64_t mw_wait_last_done = ATOMIC64_INIT(0);
+atomic64_t mw_wait_local_list_ready = ATOMIC64_INIT(0);
+atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 
 /************** working zone *************/
 #define SMART_REGION_PERF_DBG 0
@@ -49,7 +81,7 @@ unsigned long handle_pf_reqest_cpu[MAX_THREADS];
 #define MW_CONSIDER_CPU 0
 #define PF_CONSIDER_CPU 0
 #else
-#define MW_CONSIDER_CPU 1
+#define MW_CONSIDER_CPU 1 // TODO: use best ratio to test it
 #define PF_CONSIDER_CPU 1 // TODO: implemente
 #endif
 
@@ -68,6 +100,81 @@ unsigned long handle_pf_reqest_cpu[MAX_THREADS];
 #define CONSERVATIVE 0 // this is BETA 1:safe
 #define PERF_FULL_BULL_WARN 1 // only for prink statis still works and show in the end !!!
 
+/* To debug omp_hash collision between nodes or not
+ *	Usage:
+ * 		no one conflicts with BT
+ *			run BT -> turn on -> run CG -> run SP
+ *		CG SP left
+ *			run CG -> turn on -> run SP
+ *	(turn on = "echo > /proc/popcorn_stat manually")
+ */
+#define DBG_OMP_HASH 0 /* big lock */
+#if DBG_OMP_HASH
+#define OMP_HASH_DBG_CNT 100000
+unsigned long omp_hash_dbg_arr[OMP_HASH_DBG_CNT];
+bool omp_hash_dbg_start_find_conflict = false;
+unsigned long omp_hash_dbg_oft = 0;
+spinlock_t omp_hash_dbg_lock;
+#endif
+void show_omp_hash(unsigned long omp_hash)
+{
+#if DBG_OMP_HASH
+	int i;
+	bool skip = false;
+	bool record = false;
+	bool conflict = false;
+	if (!omp_hash) return; // note sure WTh case
+
+	spin_lock(&omp_hash_dbg_lock);
+	if (!omp_hash_dbg_start_find_conflict) { // record
+
+		for (i = 0; i < OMP_HASH_DBG_CNT; i++) {
+			if (omp_hash_dbg_arr[i]) {
+				if (omp_hash_dbg_arr[i] == omp_hash) {
+					skip = true;
+					break;	// has recorded skip
+				} else {
+					// exist + others
+				}
+			} else {
+				omp_hash_dbg_arr[i] = omp_hash;
+				if (omp_hash_dbg_oft != i) {
+					printk("omp_hash_dbg_oft %lu i %d\n", omp_hash_dbg_oft, i);
+					BUG();
+				}
+				omp_hash_dbg_oft++;
+				record = true;
+				break;
+			}
+		}
+	} else { // start to find
+		for (i = 0; i < omp_hash_dbg_oft; i++) {
+			if (omp_hash_dbg_arr[i]) {
+				if (omp_hash_dbg_arr[i] == omp_hash) {
+					//printk("conflict %lu\n", omp_hash);
+					conflict = true;
+					break;
+				}
+			} else {
+				BUG();
+				break;
+			}
+		}
+	}
+	if (conflict) {
+		printk(KERN_ERR "[%s] record (%s) omp_hash %lu conflict [[%s]] skip (%s)\n",
+				omp_hash_dbg_start_find_conflict ? "O" : "X",
+				record ? "O" : "X",
+				omp_hash,
+				conflict ? "O" : "X",
+				skip ? "O" : "X"
+				);
+	}
+	spin_unlock(&omp_hash_dbg_lock);
+	BUG_ON(i == OMP_HASH_DBG_CNT);
+#endif
+}
+
 
 /*** statis for making pf decisions  ***/
 #define DECISION_PREFETCH_STATIS 0
@@ -79,6 +186,7 @@ unsigned long handle_pf_reqest_cpu[MAX_THREADS];
 
 #define CPU_RELAX io_schedule()
 //#define CPU_RELAX
+
 
 #define PREFETCH_WRITE 0 /* NOT READY */
 
@@ -171,7 +279,7 @@ unsigned long handle_pf_reqest_cpu[MAX_THREADS];
 #endif
 
 /* rcsi meta/mem hash lock per region (sys-wide) */
-#define RCSI_HASH_BITS 10 /* TODO try larger */
+#define RCSI_HASH_BITS 10 /* TODO try larger */ // looks for MW
 DEFINE_HASHTABLE(rcsi_hash, RCSI_HASH_BITS);
 DEFINE_SPINLOCK(rcsi_hash_lock);
 
@@ -254,6 +362,11 @@ atomic64_t mw_log_time = ATOMIC64_INIT(0);
 #define HHB 30 //hierarchy_hybrid_barrier 30
 #define HHCB 31 //hierarchy_hybrid_cancel_barrier 31
 #define HHBF 32 //hierarchy_hybrid_barrier_final 32
+
+#define DISPATCH_NEXT_TO_STATIC_INIT 90
+
+#define STATIC_INIT_TO_STATIC_SKEWED_INIT 80
+#define STATIC_SKEWED_INIT 81
 
 /****************************
  *	memory pool for hashing
@@ -360,8 +473,10 @@ struct sys_omp_region {
 
 	int read_cnt;
 	int writenopg_cnt;
-	unsigned long read_addrs[MAX_READ_BUFFERS * MAX_THREADS / 5]; // hardcode TODO
-	unsigned long writenopg_addrs[MAX_WRITE_NOPAGE_BUFFERS * MAX_THREADS / 5]; // hardcode TODO
+	unsigned long read_addrs[MAX_READ_BUFFERS * MAX_POPCORN_THREADS / 1]; // hardcode TODO
+	unsigned long writenopg_addrs[MAX_WRITE_NOPAGE_BUFFERS * MAX_POPCORN_THREADS / 1]; // hardcode TODO
+	//unsigned long read_addrs[MAX_READ_BUFFERS * MAX_POPCORN_THREADS / 5]; // hardcode TODO
+	//unsigned long writenopg_addrs[MAX_WRITE_NOPAGE_BUFFERS * MAX_POPCORN_THREADS / 5]; // hardcode TODO
 
 	/* two hash tables for addrs */
 	DECLARE_HASHTABLE(every_rregion_hash, EVERY_REGION_HASH_BITS);
@@ -407,7 +522,7 @@ void mw_results(struct remote_context *rc)
 	printk("=== MW results ===\n");
 	printk("======================\n");
 	// TODO other times like mw memcpy
-	printk("mw_time [[%lu]]* s =>\n", mw_time / NANOSECOND);
+	printk("mw_time: [[%lu]]* s =>\n", mw_time / NANOSECOND);
 	printk("\tlocal_find_conf [[%lu]]* wait_diffs %lu wait_merg %lu wait_end %lu "
 										"& wait_remotehs %lu s\n",
 										mw_time_find_conf / NANOSECOND,
@@ -425,17 +540,32 @@ void mw_results(struct remote_context *rc)
 				mw_inv_peak, mw_inv_cnt ? mw_inv_total / mw_inv_cnt : 0);
 	printk("\t\t\tmw req send peak %lu avg %lu\n",
 				mw_send_peak, mw_send_cnt ? mw_send_total / mw_send_cnt : 0);
+	/* TODO: avg length per msg size */
 	printk("mw_log_time %ld ms\n",
 				atomic64_read(&mw_log_time) / MICROSECOND / divider);
-	
+	// handle for remote
+	printk("mw handle remote req (s): wait_last_done %ld "
+				"mw_wait_local_list_ready %ld mw_find_collision_at_remote %ld\n",
+				atomic64_read(&mw_wait_last_done) / NANOSECOND,
+				atomic64_read(&mw_wait_local_list_ready) / NANOSECOND,
+				atomic64_read(&mw_find_collision_at_remote) / NANOSECOND);
+
 	{	int i;
 		printk("handle_mw_reqest_cpu: ");
-		for (i = 0; i < MAX_THREADS; i++) {
+		for (i = 0; i < MAX_POPCORN_THREADS; i++) {
 			if (handle_mw_reqest_cpu[i])
 				printk("[%d] %lu ", i, handle_mw_reqest_cpu[i]);
 		}
 		printk("\n");
 	}
+	printk("(my/tso) begin %lu fence %lu end %lu(always 0)\n",
+				rc->tso_begin_cnt, rc->tso_fence_cnt, rc->tso_end_cnt);
+	printk("(raw) kmpc_dispatch_ini [[%lu]] kmpc_dispatch_fini [[%lu]]\n",
+						rc->kmpc_dispatch_ini, rc->kmpc_dispatch_fini);
+	printk("smart_skip_cnt %ld\n", smart_skip_cnt);
+
+
+
 	printk("TODO: WW merge one by one now -> more \n");
 #endif
 }
@@ -465,7 +595,7 @@ void pf_results(struct remote_context *rc)
 	printk("real prefetch cnt pf_cnt [[%d]]!!\n",
 						atomic_read(&rc->pf_succ_cnt));
 
-	printk("pf_time [[%lu]]* s =>\n", pf_time / NANOSECOND);
+	printk("pf_time: [[%lu]]* s =>\n", pf_time / NANOSECOND);
 	printk("\tpf_wait_send %lu pf_wait_fixup [[%lu]] s\n",
 						pf_time_wait_send / NANOSECOND,
 						pf_time_wait_fixup / NANOSECOND);
@@ -482,7 +612,7 @@ void pf_results(struct remote_context *rc)
 	printk("\t\t\tpf_threshold_skip_pgs %lu (pgs)\n", pf_threshold_skip_pgs);
 	{	int i;
 		printk("handle_pf_reqest_cpu: ");
-		for (i = 0; i < MAX_THREADS; i++) {
+		for (i = 0; i < MAX_POPCORN_THREADS; i++) {
 			if (handle_pf_reqest_cpu[i])
 				printk("[%d] %lu ", i, handle_pf_reqest_cpu[i]);
 		}
@@ -544,14 +674,39 @@ void rcsi_time_stat(struct seq_file *seq, void *v)
 		printk("clean pf_log_time\n");
 #endif
 
-#if RCSI_IRQ_CPU
-	{	int i;
-		for (i = 0; i < MAX_THREADS; i++) {
-			handle_mw_reqest_cpu[i] = 0;
-			handle_pf_reqest_cpu[i] = 0;
-		}
-	}
+#if GLOBAL_BARRIER_MANUAL_CLEAN
+		printk("clean global_barrier cnts \t\t popcorn_global_local_cnt %ld\n"
+									"\t\t popcorn_global_remote_cnt %ld\n"
+									"\t\t and clean popcorn_global_time\n",
+//									popcorn_global_local_cnt,
+//									popcorn_global_remote_cnt);
+									atomic64_read(&popcorn_global_local_cnt),
+									atomic64_read(&popcorn_global_remote_cnt));
+
+//		popcorn_global_local_cnt = 0;
+//		popcorn_global_remote_cnt = 0;
+		atomic64_set(&popcorn_global_local_cnt, 0);
+		atomic64_set(&popcorn_global_remote_cnt, 0);
+
+		atomic64_set(&popcorn_global_time, 0);
 #endif
+
+#if DBG_OMP_HASH
+		omp_hash_dbg_start_find_conflict = !omp_hash_dbg_start_find_conflict;
+		printk("omp_hash_dbg_start_find_conflict (%s)\n",
+						omp_hash_dbg_start_find_conflict ? "O" : "X");
+#endif
+
+#if RCSI_IRQ_CPU
+		{	int i;
+			for (i = 0; i < MAX_POPCORN_THREADS; i++) {
+				handle_mw_reqest_cpu[i] = 0;
+				handle_pf_reqest_cpu[i] = 0;
+			}
+		}
+#endif
+
+		smart_skip_cnt = 0;
 	}
 }
 
@@ -1183,7 +1338,31 @@ void __show_si_addrs(struct remote_context *rc)
 	printk("\t\t\tmistake wrong_hist %d wrong_hist_no_vma %d\n",
 							rc->wrong_hist, rc->wrong_hist_no_vma);
 
+	printk("\n");
+	printk("=========================================\n");
+	printk("=========== global barrier ===============\n");
+	printk("=========================================\n");
+	printk("popcorn_global_time [[ %ld ]] s\n",
+				atomic64_read(&popcorn_global_time) / NANOSECOND);
 
+	printk("\n");
+	printk("================================================\n");
+	printk("======= debuging for new omp behavior  =========\n");
+	printk("================================================\n");
+	printk("dispatch_next_to_static_init [[ %ld ]]\n",
+						rc->dispatch_next_to_static_init);
+	printk("static_init_to_static_skewed_init [[ %ld ]]\n",
+						rc->static_init_to_static_skewed_init++);
+	printk("static_skewed_init [[ %ld ]]\n",
+						rc->static_skewed_init);
+
+#if DBG_OMP_HASH
+	printk("echo > /proc/popcorn_stat\n");
+	printk("echo > /proc/popcorn_stat\n");
+	printk("echo > /proc/popcorn_stat\n");
+	printk("echo > /proc/popcorn_stat\n");
+	printk("echo > /proc/popcorn_stat\n");
+#endif
 	/* TODO */
 	printk("\n");
 	printk("TODO: 123\n");
@@ -1211,6 +1390,7 @@ void __region_skip_cnt_inc(struct omp_region *region)
 #if SMART_REGION_DBG
 	atomic_inc(&region->skip_cnt);
 #endif
+	smart_skip_cnt++;
 }
 
 void inline ______smart_region_debug(struct remote_context *rc, struct omp_region *pos)
@@ -1535,6 +1715,9 @@ struct rcsi_work *__get_rcsi_work(void)
 void __put_rcsi_work(struct rcsi_work *rcsi_w)
 {
     int id = rcsi_w->id;
+#if !SKIP_MEM_CLEAN
+	rcsi_w->addr = 0;
+#endif
 	spin_lock(&rcsi_bmap_lock);
     BUG_ON(!test_bit(id, rcsi_bmap));
     clear_bit(id, rcsi_bmap);
@@ -1543,6 +1726,7 @@ void __put_rcsi_work(struct rcsi_work *rcsi_w)
 
 /************
  *  TSO
+ * Per region. Will reset by __clean_global_rcsi()
  */
 extern void maintain_origin_table(unsigned long target_addr);
 void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *page, spinlock_t *ptl)
@@ -1550,17 +1734,13 @@ void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *pag
 #if TSO_TIME
 	ktime_t mw_log_start = ktime_get();
 #endif
-	void *paddr = kmap(page);
+	void *paddr;
 	int ivn_cnt_tmp;
 	struct remote_context *rc = current->mm->remote;
 #if HASH_GLOBAL
 	struct rcsi_work *found, *rcsi_w_new;
 #endif
-
-#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!rc);
-	BUG_ON(!paddr);
-#endif
 
 #if !GLOBAL /* implementation - local */
 	//current->buffer_inv_addrs[current->tso_wr_cnt] = addr;
@@ -1568,6 +1748,7 @@ void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *pag
 #else /* implementation - global */
 #if HASH_GLOBAL
 	rcsi_w_new = __get_rcsi_work();
+	BUG_ON(!rcsi_w_new);
 
 	spin_lock(&rcsi_hash_lock);
 	found = __rcsi_hash(addr);
@@ -1576,21 +1757,27 @@ void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *pag
 	spin_unlock(&rcsi_hash_lock);
 
 	if (likely(!found)) { /* No local collision */
+#if !SKIP_MEM_CLEAN
 		BUG_ON(rcsi_w_new->addr);
+#endif
 		rcsi_w_new->addr = addr;
+#if !MW_IDEAL
 		if (my_nid != NOCOPY_NODE) { /* check clean? */
+			paddr = kmap(page);
+			BUG_ON(!paddr);
 			memcpy(rcsi_w_new->paddr, paddr, PAGE_SIZE);
+			kunmap(page);
 		}
-
+#endif
 		/* TODO: atomic 1 line - start */
-		spin_lock(&rc->inv_lock);
-		ivn_cnt_tmp = rc->inv_cnt++;
-		spin_unlock(&rc->inv_lock);
+		spin_lock(&rc->inv_lock);		// TODO change to use atomic
+		ivn_cnt_tmp = rc->inv_cnt++;	// TODO change to use atomic
+		spin_unlock(&rc->inv_lock);		// TODO change to use atomic
 #if !SKIP_MEM_CLEAN
 		BUG_ON(rc->inv_addrs[ivn_cnt_tmp]);
 #endif
 		rc->inv_addrs[ivn_cnt_tmp] = addr; /* cnt to know max inv_addrs */
-		/* TODO: atomic 1 line - end */
+
 #if BUF_DBG
 		SYNCPRINTK("[%d/%d] %s buf 0x%lx ins %lx %d\n", current->pid,
 						ivn_cnt_tmp,
@@ -1598,37 +1785,39 @@ void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *pag
 						instruction_pointer(current_pt_regs()),
 						rcsi_w_new->id);
 #endif
-		/* ownership update */
-		//spin_lock(ptl); // TODO: check TSO_ORIGIN/REMOTE flow
+		/* ownership update - from now on I own it */
 		maintain_origin_table(addr);
-		//spin_unlock(ptl); //
 	} else {
 		printk(KERN_ERR "local collision\n");
 		__put_rcsi_work(rcsi_w_new);
 	}
 #else // !HASH_GLOBAL
-    spin_lock(&rc->inv_lock);
-	ivn_cnt_tmp = rc->inv_cnt++; /* TODO: atomic 1 line */
-    spin_unlock(&rc->inv_lock);
+//    spin_lock(&rc->inv_lock);
+//	ivn_cnt_tmp = rc->inv_cnt++; /* TODO: atomic 1 line */
+//    spin_unlock(&rc->inv_lock);
+//
+//	rc->inv_addrs[ivn_cnt_tmp] = addr;
+//#if !MW_IDEAL
+//	if (my_nid != NOCOPY_NODE) {
+//#if STRONG_CHECK_SANITY
+//		BUG_ON(*(rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE)));
+//#endif
+//		memcpy(rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
+//		//copy_from_user_page(vma, page, addr,
+//		//		rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
+//		kunmap(page);
+//	}
+//#endif
 
-	//BUG_ON(rc->inv_addrs[ivn_cnt_tmp]);
-	rc->inv_addrs[ivn_cnt_tmp] = addr;
-	if (my_nid != NOCOPY_NODE) {
-		BUG_ON(*(rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE))); /* TODO: BUG: WHY? */
-		memcpy(rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
-		//copy_from_user_page(vma, page, addr,
-		//		rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
-	}
 #endif
 #endif
-
-	kunmap(page);
 
 #if BUF_DBG
-//	SYNCPRINTK("[%d/%d] %s buf 0x%lx ins %lx\n", current->pid, ivn_cnt_tmp,
-//					my_nid == 0 ? "origin" : "remote",  addr,
-//					instruction_pointer(current_pt_regs()));
+	SYNCPRINTK("[%d/%d] %s buf 0x%lx ins %lx\n", current->pid, ivn_cnt_tmp,
+					my_nid == 0 ? "origin" : "remote",  addr,
+					instruction_pointer(current_pt_regs()));
 #endif
+
 #if TSO_TIME
 	{
 		ktime_t dt, mw_log_end = ktime_get();
@@ -1640,7 +1829,7 @@ void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *pag
 }
 
 /********
- * Duplication
+ * SI / duplication / prefetch
  */
 struct sys_omp_region *__si_inc_common(struct task_struct *tsk)
 {
@@ -1690,7 +1879,7 @@ void si_read_inc(struct task_struct *tsk, unsigned long addr)
 			sizeof(*sys_region->read_addrs)) {
 		sys_region->skip_r_cnt++;
 #if PERF_FULL_BULL_WARN
-		printk("si_r_addrs_buf full\n");
+		WARN_ON_ONCE("godview si_r_addrs_buf full\n");
 #endif
 		goto out;
 	}
@@ -1748,7 +1937,7 @@ void si_writenopg_inc(struct task_struct *tsk, unsigned long addr)
 			sizeof(*sys_region->writenopg_addrs)) {
 		sys_region->skip_w_cnt++;
 #if PERF_FULL_BULL_WARN
-		printk("si_r_addrs_buf full\n");
+		WARN_ON_ONCE("godview si_w_addrs_buf full\n");
 #endif
 		goto out;
 	}
@@ -2333,9 +2522,7 @@ static void __make_diff(char *new, char *origin, page_diff_apply_request_t *req)
 /* Double check this function */
 static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct remote_context *rc, int local_ofs, int nid, unsigned long conflict_addr)
 {
-	//page_diff_apply_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
 	page_diff_apply_request_t *req = pcn_kmsg_get(sizeof(*req)); // testing
-	//unsigned long conflict_addr = rc->inv_addrs[local_ofs]; /* local addr */
 	struct vm_area_struct *vma;
     spinlock_t *ptl;
     pmd_t *pmd;
@@ -2350,7 +2537,7 @@ static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct rem
 #endif
 	BUG_ON(!req);
 	BUG_ON(!conflict_addr);
-#if STRONG_CHECK_SANITY
+#if STRONG_CHECK_SANITY & !MW_IDEAL
 	for (i = 0; i < PAGE_SIZE; i++)
 		*(req->diff_page + i) = 0;
 #endif
@@ -2384,9 +2571,12 @@ static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct rem
 	rcsi_w = __rcsi_hash(conflict_addr);
 	//spin_unlock(&rcsi_hash_lock);
 	BUG_ON(!rcsi_w);
+#if !MW_IDEAL // can extend
 	__make_diff(paddr, rcsi_w->paddr, req);
+#endif
 #else
-	__make_diff(paddr,  rc->inv_pages + (local_ofs * PAGE_SIZE), req);
+//	__make_diff(paddr,  rc->inv_pages + (local_ofs * PAGE_SIZE), req);
+// TODO remove rc->inv_pages
 #endif
 
 #if CONSERVATIVE
@@ -2399,7 +2589,7 @@ static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct rem
 	pte_unmap(pte);
 	up_read(&tsk->mm->mmap_sem);
 
-#if STRONG_CHECK_SANITY
+#if STRONG_CHECK_SANITY && !MW_IDEAL
 	/* immediately remote after working */
 	for (i = 0; i < PAGE_SIZE; i++) {
 		if (*(req->diff_page + i) != 0) { /* any of them is diff */
@@ -2414,11 +2604,13 @@ static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct rem
 	req->remote_pid = current->pid,
 	req->diff_addr = conflict_addr,
 
-	/* (xxx) make sure the send order doesn't matter */
 	/* order issue has been handled by __wait_diffs_done() */
     pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_DIFF_APPLY_REQUEST,
-    //pcn_kmsg_send(PCN_KMSG_TYPE_PAGE_DIFF_APPLY_REQUEST,
+#if !MW_IDEAL
 								nid, req, sizeof(*req));
+#else // MW_IDEAL
+								nid, req, sizeof(*req) - PAGE_SIZE);
+#endif
 	//kfree(req);
 }
 
@@ -2464,7 +2656,9 @@ void __do_apply_diff(page_diff_apply_request_t *req, struct task_struct *tsk)
 #endif
 	BUG_ON(!paddr);
 
+#if !MW_IDEAL // can cover more area
 	__apply_diff(paddr, req->diff_page);
+#endif
 
 #if CONSERVATIVE
 	kunmap(page);
@@ -2642,6 +2836,9 @@ static void process_page_merge_request(struct work_struct *work)
 #if STRONG_CHECK_SANITY
 	BUG_ON(!tsk || !res|| !rc);
 #endif
+	ktime_t mw_process_req_wait_last_done = ktime_get();
+	ktime_t mw_process_req_wait_local_list_ready;
+	ktime_t mw_process_req_find_collision_at_remote;
 
 	/* put more handshake info to detect skew cases */
 	//req->begin =
@@ -2661,8 +2858,13 @@ static void process_page_merge_request(struct work_struct *work)
 
 	/* Barriers */
 	__wait_last_reset_done(rc); /* not going to work - instead use begin */
+
+	mw_process_req_wait_local_list_ready = ktime_get();
+
 	__wait_local_list_ready(rc, wr_cnt);
 
+
+	mw_process_req_find_collision_at_remote = ktime_get();
 	conflict_cnt =
 		__find_collision_btw_nodes_at_remote(req, rc, tsk, wr_cnt, wr_addrs);
 	//printk("remote mg done\n");
@@ -2697,6 +2899,17 @@ static void process_page_merge_request(struct work_struct *work)
 #if RCSI_IRQ_CPU
 	handle_mw_reqest_cpu[raw_smp_processor_id()]++;
 #endif
+
+	{
+		ktime_t pf_end = ktime_get();
+
+		atomic64_add(ktime_to_ns(ktime_sub(mw_process_req_wait_local_list_ready, mw_process_req_wait_last_done)),
+								&mw_wait_last_done);
+		atomic64_add(ktime_to_ns(ktime_sub(mw_process_req_find_collision_at_remote, mw_process_req_wait_local_list_ready)),
+										&mw_wait_local_list_ready);
+		atomic64_add(ktime_to_ns(ktime_sub(pf_end, mw_process_req_find_collision_at_remote)),
+				&mw_find_collision_at_remote);
+	}
 
     put_task_struct(tsk);
     END_KMSG_WORK(req);
@@ -2785,7 +2998,7 @@ static bool __popcorn_start_begin_barrier(struct remote_context *rc, int id)
 {
 	bool leader = false;
 	int left_t = atomic_dec_return(&rc->barrier_end);
-	BUG_ON(rc->threads_cnt > MAX_THREADS);
+	BUG_ON(rc->threads_cnt > MAX_POPCORN_THREADS);
 	if (left_t == 0) {
 		leader = true;
 		BARRPRINTK("=== +++[*%d] BARRIER %5s! line %d mb %lu b %lu f %lu t %d "
@@ -2952,6 +3165,35 @@ void current_info_transfer_to_worker(void)
 	if (rc->kmpc_cancel_barrier_cnt && current->kmpc_cancel_barrier_cnt)
 		BUG_ON(rc->kmpc_cancel_barrier_cnt != current->kmpc_cancel_barrier_cnt);
 
+	if (!rc->dispatch_next_to_static_init && current->dispatch_next_to_static_init)
+		rc->dispatch_next_to_static_init = current->dispatch_next_to_static_init;
+	if (rc->dispatch_next_to_static_init && current->dispatch_next_to_static_init)
+		if (rc->dispatch_next_to_static_init !=
+				current->dispatch_next_to_static_init)
+			printk("rc->dispatch_next_to_static_init %lu != "
+						"current->dispatch_next_to_static_init %lu",
+									rc->dispatch_next_to_static_init,
+									current->dispatch_next_to_static_init);
+
+	if (!rc->static_init_to_static_skewed_init && current->static_init_to_static_skewed_init)
+		rc->static_init_to_static_skewed_init = current->static_init_to_static_skewed_init;
+	if (rc->static_init_to_static_skewed_init && current->static_init_to_static_skewed_init)
+		if (rc->static_init_to_static_skewed_init !=
+				current->static_init_to_static_skewed_init)
+			printk("rc->static_init_to_static_skewed_init %lu != "
+						"current->static_init_to_static_skewed_init %lu",
+									rc->static_init_to_static_skewed_init,
+									current->static_init_to_static_skewed_init);
+
+	if (!rc->static_skewed_init && current->static_skewed_init)
+		rc->static_skewed_init = current->static_skewed_init;
+	if (rc->static_skewed_init && current->static_skewed_init)
+		if (rc->static_skewed_init != current->static_skewed_init)
+			printk("rc->static_skewed_init %lu != "
+						"current->static_skewed_init %lu",
+									rc->static_skewed_init,
+									current->static_skewed_init);
+
 	if (!rc->kmpc_reduce && current->kmpc_reduce)
 		rc->kmpc_reduce = current->kmpc_reduce;
 	if (rc->kmpc_reduce && current->kmpc_reduce)
@@ -3021,20 +3263,23 @@ void collect_tso_wr(struct task_struct *tsk)
 	//printk(" %ld\n", );
 
 	printk("- divider = %ld (my cpu cnt)\n", divider);
-	printk("- MAX_THREADS %d\n", MAX_THREADS);
+	printk("- MAX_POPCORN_THREADS %d = max(X86_T, ARM_T);\n", MAX_POPCORN_THREADS);
 
 	printk("- FAULTS_HASH = %d\n", FAULTS_HASH);
 	printk("- STRONG_CHECK_SANITY (%s)\n", STRONG_CHECK_SANITY ? "O" : "X");
 
 	printk("- MAX_OMP_REGIONS %d\n", MAX_OMP_REGIONS);
-	printk("- OMP_REGION_HASH_BITS %d\n", OMP_REGION_HASH_BITS);
+	printk("- OMP_REGION_HASH_BITS %d in rc\n", OMP_REGION_HASH_BITS);
 	//printk(" (%s)\n",  ? "O" : "X");
+	printk("- struct omp_region = %lu B = %lu pgs\n",
+						sizeof(struct omp_region),
+						sizeof(struct omp_region) / PAGE_SIZE);
 	printk("- struct sys_omp_region = %lu B = %lu pgs\n",
 						sizeof(struct sys_omp_region),
 						sizeof(struct sys_omp_region) / PAGE_SIZE);
 	printk("TODO: \"cat /proc/interrupts\" "
 			"WQ is per thread -> check IRQ if same core "
-								"-> WQ doese auto balance?\n");
+					"-> WQ doese auto balance? (checking)\n");
 	printk("\n");
 
 	printk("===============\n");
@@ -3175,6 +3420,7 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 		}
 #endif
 #if SMART_REGION
+		/* don't affect prefetch */
 		if (region->type & RCSI_VAIN) { /* smart wr */
 			SMRPRINTK("[%d] %s(): omp_hash 0x%lx b_cnt %lu bm_cnt %lu "
 						"no benefit **SKIP**\n", current->pid, __func__,
@@ -3390,11 +3636,13 @@ static int __popcorn_tso_end(int id, void __user * file, unsigned long omp_hash,
 #ifdef CONFIG_POPCORN
 SYSCALL_DEFINE5(popcorn_tso_begin, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+	show_omp_hash(omp_hash);
 	return __popcorn_tso_begin(id, file, omp_hash, a, b);
 }
 
 SYSCALL_DEFINE5(popcorn_tso_fence, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+	show_omp_hash(omp_hash);
 	RGNPRINTK("[%d] %s(): id %d omp_hash 0x%lx\n", current->pid, __func__, id, omp_hash);
 	if (a == KMPC_BARRIER) {
 		current->kmpc_barrier_cnt++;
@@ -3408,6 +3656,7 @@ SYSCALL_DEFINE5(popcorn_tso_fence, int, id, void __user *, file, unsigned long, 
 
 SYSCALL_DEFINE5(popcorn_tso_end, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+	show_omp_hash(omp_hash);
 	return __popcorn_tso_end(id, file, omp_hash, a, b);
 }
 
@@ -3424,6 +3673,7 @@ SYSCALL_DEFINE5(popcorn_tso_id, int, id, void __user *, file, unsigned long, omp
 
 SYSCALL_DEFINE5(popcorn_tso_begin_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+	show_omp_hash(omp_hash);
 	current->tso_begin_m_cnt++;
 	//printk("[%d] %s():\n", current->pid, __func__);
 	//printk("[%d] %s():\n", current->pid, __func__);
@@ -3433,15 +3683,27 @@ SYSCALL_DEFINE5(popcorn_tso_begin_manual, int, id, void __user *, file, unsigned
 
 SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
-	current->tso_fence_m_cnt++;
+	show_omp_hash(omp_hash);
 	RGNPRINTK("[%d] %s():\n", current->pid, __func__);
 
 	if (a == HHB) {
+		current->tso_fence_m_cnt++;
 		current->mm->remote->hhb++;
 	} else if (a == HHCB) {
+		current->tso_fence_m_cnt++;
 		current->mm->remote->hhcb++;
 	} else if (a == HHBF) {
+		current->tso_fence_m_cnt++;
 		current->mm->remote->hhbf++;
+	}
+	else if (a == DISPATCH_NEXT_TO_STATIC_INIT) {
+		current->dispatch_next_to_static_init++;
+	}
+	else if (a == STATIC_INIT_TO_STATIC_SKEWED_INIT) {
+		current->static_init_to_static_skewed_init++;
+	}
+	else if (a == STATIC_SKEWED_INIT) {
+		current->static_skewed_init++;
 	}
 
 	//printk("[%d] %s():\n", current->pid, __func__);
@@ -3451,51 +3713,145 @@ SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned
 
 SYSCALL_DEFINE5(popcorn_tso_end_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+	show_omp_hash(omp_hash);
 	current->tso_end_m_cnt++;
 	//printk("[%d] %s():\n", current->pid, __func__);
 	//printk("[%d] %s():\n", current->pid, __func__);
 	//return __popcorn_tso_end(id, file, omp_hash, a, b);
 	return 0;
 }
+
+/* Popcorn global barrier */
+static int handle_global_barrier_request(struct pcn_kmsg_message *msg)
+{
+	unsigned long flags;
+
+
+	// seems line this update confliction will happen
+	// pretend from reentrying
+	// reader frendly design (no atomic)
+	atomic64_inc(&popcorn_global_remote_cnt); // racecondition?
+
+//	//spin_lock(&popcorn_global_lock);
+//	spin_lock_irqsave(&popcorn_global_lock, flags); // try
+//	popcorn_global_remote_cnt++; // racecondition?
+//	smp_wmb(); // look no need
+//	spin_unlock_irqrestore(&popcorn_global_lock, flags);
+//	//spin_unlock(&popcorn_global_lock);
+
+#if VM_TESTING
+	//printk("\t\t recv remote %lu\n", popcorn_global_remote_cnt);
+	printk("\t\t recv remote %ld\n", atomic64_read(&popcorn_global_remote_cnt));
+#endif
+
+//    remote_popcorn_barrier_request_t *req =
+//				(remote_popcorn_barrier_request_t *)msg;
+	pcn_kmsg_done(msg);
+	return 0;
+}
+
+SYSCALL_DEFINE5(popcorn_global_barrier, unsigned long, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
+{
+#if 0
+	u64 ppp = 0;
+#endif
+	ktime_t start;
+//	unsigned long __popcorn_global_local_cnt;
+	remote_popcorn_barrier_request_t *req = pcn_kmsg_get(sizeof(*req));
+    pcn_kmsg_post(PCN_KMSG_TYPE_GLOBAL_BARRIER_REQUEST,
+					TO_THE_OTHER_NID(), req, sizeof(*req));
+
+//	spin_lock(&popcorn_global_lock2);
+//	__popcorn_global_local_cnt = ++popcorn_global_local_cnt;
+//	smp_wmb();
+//	spin_unlock(&popcorn_global_lock2);
+
+	atomic64_inc(&popcorn_global_local_cnt);
+#if VM_TESTING
+	printk("[%d] coming local (sys) %lu(sent)\n", current->pid,
+//									 __popcorn_global_local_cnt);
+							 atomic64_read(&popcorn_global_local_cnt));
+#endif
+//	static u64 cnt = 0;
+//	if (cnt++ < 100)
+//		printk("TODO: IMPLEMENTING\n");
+
+	start = ktime_get();
+	while (atomic64_read(&popcorn_global_local_cnt) >
+			atomic64_read(&popcorn_global_remote_cnt)) {
+//	while (__popcorn_global_local_cnt >
+//			popcorn_global_remote_cnt) {
+		//;
+//#if VM_TESTING
+#if 0
+		if (ppp++ > 100000000000 && ppp < (100000000000 + 100)) {
+			printk("[%d]WAIT TOO LONG "
+						"local (sys) %lu(sent) remote %lu\n",
+									current->pid,
+									__popcorn_global_local_cnt,
+									//atomic64_read(&popcorn_global_local_cnt),
+									//atomic64_read(&popcorn_global_remote_cnt));
+									popcorn_global_remote_cnt);
+		}
+#endif
+
+//		smp_rmb(); // must need
+		/* only single CPU I think I can spin */
+		CPU_RELAX;
+	}
+
+	{
+		ktime_t end = ktime_get();
+		atomic64_add(ktime_to_ns(ktime_sub(end, start)),
+									&popcorn_global_time);
+	}
+	return 0;
+}
 #else // CONFIG_POPCORN
-SYSCALL_DEFINE5(popcorn_tso_begin, int, id, void __user *, file, unsigned long, omp_hash, iint, a void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_begin, int, id, void __user *, file, unsigned long, omp_hash, int, a void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE5(popcorn_tso_fence, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_fence, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE5(popcorn_tso_end, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_end, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE5(popcorn_tso_id, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_id, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
 
-SYSCALL_DEFINE5(popcorn_tso_begin_manual, int, id, void __user *, file, unsigned long, omp_hash, iint, a void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_begin_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
 }
 
-SYSCALL_DEFINE5(popcorn_tso_end_manual, int, id, void __user *, file, unsigned long, omp_hash, iint, a, void __user *, b)
+SYSCALL_DEFINE5(popcorn_tso_end_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
+{
+	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
+	return -EPERM;
+}
+
+SYSCALL_DEFINE5(popcorn_global_barrier, unsigned long, id, void __user *, file, unsigned long, omp_hash, int, a void __user *, b)
 {
 	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
 	return -EPERM;
@@ -3673,6 +4029,10 @@ int __init popcorn_sync_init(void)
     REGISTER_KMSG_HANDLER(	/* my side all done signal - one way - only one */
             PCN_KMSG_TYPE_PAGE_MERGE_DONE_REQUEST, page_diff_all_done_request);
 
+	/* popcorn kernel barrier */
+    REGISTER_KMSG_HANDLER(
+			PCN_KMSG_TYPE_GLOBAL_BARRIER_REQUEST, global_barrier_request);
+
 #if GOD_VIEW
     //REGISTER_KMSG_HANDLER(	/* msg lost somehow */ /* main scatters */
     REGISTER_KMSG_WQ_HANDLER( // sleep
@@ -3699,12 +4059,26 @@ int __init popcorn_sync_init(void)
 
 #if RCSI_IRQ_CPU
 	{	int i;
-		for (i = 0; i < MAX_THREADS; i++) {
+		for (i = 0; i < MAX_POPCORN_THREADS; i++) {
 			handle_mw_reqest_cpu[i] = 0;
 			handle_pf_reqest_cpu[i] = 0;
 		}
 	}
 #endif
+
+	smart_skip_cnt = 0;
+
+#if DBG_OMP_HASH
+	{	int i;
+		for (i = 0; i < OMP_HASH_DBG_CNT; i++)
+			omp_hash_dbg_arr[i] = 0;
+	}
+	spin_lock_init(&omp_hash_dbg_lock);
+#endif
+
+	spin_lock_init(&popcorn_global_lock);
+	spin_lock_init(&popcorn_global_lock2);
+
 	/* larger MAX_MSG_SIZE -> more inv addr -> larger rc size */
 	printk("sizeof(*rc) %lu\n", sizeof(struct remote_context));
 	WARN_ON(sizeof(struct remote_context) > (PAGE_SIZE << (MAX_ORDER - 1)));
@@ -3731,17 +4105,18 @@ int __init popcorn_sync_init(void)
 			(PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE) * PAGE_SIZE,
 			(((PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE) * PAGE_SIZE) /
 												sizeof(unsigned long)));
-	printk("(1 << MAX_ORDER) * PAGE_SIZE %lu\n", (1 << MAX_ORDER) * PAGE_SIZE);
-	printk("struct sys_omp_region = %lu\n", sizeof(struct sys_omp_region));
-	printk("struct sys_omp_region = %lu\n", sizeof(struct sys_omp_region));
-	printk("struct sys_omp_region = %lu\n", sizeof(struct sys_omp_region));
-	printk("%lu pgs\n", sizeof(struct sys_omp_region) / PAGE_SIZE);
-	printk("%lu pgs\n", sizeof(struct sys_omp_region) / PAGE_SIZE);
-	printk("%lu pgs\n", sizeof(struct sys_omp_region) / PAGE_SIZE);
+	printk("(malloc MAX size = 1 << MAX_ORDER) * PAGE_SIZE = %lu Bytes\n",
+											(1 << MAX_ORDER) * PAGE_SIZE);
+	printk("struct sys_omp_region = %lu Bytes = %lu pgs\n",
+						sizeof(struct sys_omp_region),
+						sizeof(struct sys_omp_region) / PAGE_SIZE);
 	if (sizeof(struct sys_omp_region) > (1 << MAX_ORDER) * PAGE_SIZE) {
+		printk("check sys_omp_region size fail\n");
 		printk("(1 << MAX_ORDER) * PAGE_SIZE %lu > struct sys_omp_region = %lu\n",
 				 (1 << MAX_ORDER) * PAGE_SIZE, sizeof(struct sys_omp_region));
-	}
+		WARN_ON_ONCE("Reduce sys_region size!!\n");
+	} else
+		printk("check sys_omp_region size pass\n");
 	//BUG_ON(sizeof(struct sys_omp_region) > 1 << MAX_ORDER);
 
 	return 0;
