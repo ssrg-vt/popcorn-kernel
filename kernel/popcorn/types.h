@@ -563,6 +563,7 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
  */
 extern struct workqueue_struct *popcorn_wq;
 extern struct workqueue_struct *popcorn_wq2;
+extern struct workqueue_struct *popcorn_wq3;
 extern struct workqueue_struct *popcorn_ordered_wq;
 
 struct pcn_kmsg_work {
@@ -572,11 +573,12 @@ struct pcn_kmsg_work {
 
 static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*handler)(struct work_struct *), struct workqueue_struct *wq)
 {
+//	static u8 mw_cpu = 0;
 	struct pcn_kmsg_work *w = kmalloc(sizeof(*w), GFP_ATOMIC);
 	BUG_ON(!w);
+#if 0
 	if (msg->header.type == PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE) {
 		remote_prefetch_response_t *res = (remote_prefetch_response_t *)msg;
-#if 0
 		printk("\t\t  wq: touched 0x%lx #%d\n",
 					res->god_omp_hash, res->pf_req_id);
 #endif
@@ -596,16 +598,37 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 		}
 		memset(str + ofs, 0, MAX_NAME);
 		printk("%s\n", str);
-#endif
-
 	}
+#endif
 
 	w->msg = msg;
 	INIT_WORK(&w->work, handler);
+
+	/* TODO PERF: currently enque cpu is decided by irq.
+	 * 1. run app and check irq if not balance do 2
+	 * 2. workload balancing by ourself */
 	//smp_wmb();
-	if (msg->header.type != PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE)
+	if (msg->header.type != PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE) {
+//		&& msg->header.type != PCN_KMSG_TYPE_PAGE_MERGE_REQUEST) {
 		BUG_ON(!queue_work(wq, &w->work));
-	else {
+//	} else if (msg->header.type == PCN_KMSG_TYPE_PAGE_MERGE_REQUEST) {
+		//BUG_ON(!queue_work(popcorn_wq3, &w->work)); // this makes deadline faster
+		//BUG_ON(!queue_work_on(mw_cpu, popcorn_wq3, &w->work));
+//		BUG_ON(!queue_work_on(mw_cpu, wq, &w->work));
+#if 0
+		mw_cpu++;
+#if CONFIG_X86_64
+		//if (mw_cpu >= (16/4))
+		//if (mw_cpu >= (16/2)) // numa
+		if (mw_cpu >= 2)
+#else
+		//if (mw_cpu >= (96/4))
+		if (mw_cpu >= 4)
+#endif
+			mw_cpu = 0;
+#endif
+	//} else if (msg->header.type == PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE) {
+	} else { // == PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE
 		//printk("\t\t1: \n");
 		//show_workqueue_state();
 		BUG_ON(!queue_work(popcorn_wq2, &w->work)); // this makes deadline faster
@@ -614,7 +637,9 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 
 		//show_pwq(pwq = per_cpu_ptr(wq->cpu_pwqs, cpu);
 	}
-	smp_wmb();
+	//else {
+	//}
+//	smp_wmb(); // so far so good
 
 #if 0
 	if (msg->header.type == PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE) {

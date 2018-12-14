@@ -17,9 +17,11 @@
 
 struct workqueue_struct *popcorn_wq;
 struct workqueue_struct *popcorn_wq2;
+struct workqueue_struct *popcorn_wq3;
 struct workqueue_struct *popcorn_ordered_wq;
 EXPORT_SYMBOL(popcorn_wq);
 EXPORT_SYMBOL(popcorn_wq2);
+EXPORT_SYMBOL(popcorn_wq3);
 EXPORT_SYMBOL(popcorn_ordered_wq);
 
 extern int pcn_kmsg_init(void);
@@ -43,12 +45,17 @@ static int __init popcorn_init(void)
 	 */
 	popcorn_ordered_wq = create_singlethread_workqueue("pcn_wq_ordered");
 	popcorn_wq = alloc_workqueue("pcn_wq", WQ_MEM_RECLAIM, 0);
-	/* For solving process_page_merge_request() before
+	/**
+	 * For solving process_page_merge_request() enqueued before
 	 * process_remote_prefetch_response() bug -
-	 * somehow process_page_merge_req() is sleeping but the CPU never yeild
-	 * for the following same priority works */
+	 * somehow process_page_merge_req() is sleeping but the CPU never yeilds
+	 * for the following same priority works
+	 */
 	popcorn_wq2 = alloc_workqueue("pcn_wq2", WQ_HIGHPRI | WQ_MEM_RECLAIM, 0);
 	//popcorn_wq = alloc_workqueue("pcn_wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+
+	popcorn_wq3 = alloc_workqueue("pcn_wq3",  WQ_MEM_RECLAIM, 0);
+	BUG_ON(!popcorn_ordered_wq || !popcorn_wq || !popcorn_wq2 || !popcorn_wq3);
 
 	pcn_kmsg_init();
 

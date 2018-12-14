@@ -1334,6 +1334,7 @@ static bool is_chained_work(struct workqueue_struct *wq)
 	return worker && worker->current_pwq->wq == wq;
 }
 
+static void show_pwq(struct pool_workqueue *pwq);
 static void __queue_work(int cpu, struct workqueue_struct *wq,
 			 struct work_struct *work)
 {
@@ -1429,6 +1430,29 @@ retry:
 		work_flags |= WORK_STRUCT_DELAYED;
 		worklist = &pwq->delayed_works;
 	}
+
+#ifdef CONFIG_POPCORN
+#if 0
+	if (!memcmp("pcn_wq2", wq->name, sizeof("pcn_wq2"))) {
+		//show_workqueue_state();
+		//show_workqueue_state();
+		//show_pwq(pwq);
+#if 0
+		struct pool_workqueue *_pwq; // name
+		struct work_struct *_work; // name
+		struct cnt = 0;
+		printk("pcn_wq2 enq\n");
+
+		list_for_each_entry_rcu(wq, &workqueues, list) {
+			worklist = &_pwq->pool->worklist;
+			list_for_each_entry(_work, &worklist, entry) {
+				cnt++; // _work
+			}
+		}
+#endif
+	}
+#endif
+#endif
 
 	insert_work(pwq, work, worklist, work_flags);
 
