@@ -737,9 +737,13 @@ __SYSCALL(__NR_popcorn_tso_begin_manual, sys_popcorn_tso_begin_manual)
 __SYSCALL(__NR_popcorn_tso_fence_manual, sys_popcorn_tso_fence_manual)
 #define __NR_popcorn_tso_end_manual 307
 __SYSCALL(__NR_popcorn_tso_end_manual, sys_popcorn_tso_end_manual)
+#define __NR_popcorn_global_barrier 360
+__SYSCALL(__NR_popcorn_global_barrier, sys_popcorn_global_barrier)
+#define __NR_popcorn_get_tpid_at_remote 390
+__SYSCALL(__NR_popcorn_get_tpid_at_remote, sys_popcorn_get_tpid_at_remote)
 
 #undef __NR_syscalls
-#define __NR_syscalls 310
+#define __NR_syscalls 400
 
 /*
  * All syscalls below here should go away really,
