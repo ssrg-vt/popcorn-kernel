@@ -902,5 +902,7 @@ asmlinkage long sys_popcorn_tso_id(int id, void __user * file, unsigned long has
 asmlinkage long sys_popcorn_tso_begin_manual(int id, void __user * file, unsigned long hash, int a, void __user *b);
 asmlinkage long sys_popcorn_tso_fence_manual(int id, void __user * file, unsigned long hash, int a, void __user *b);
 asmlinkage long sys_popcorn_tso_end_manual(int id, void __user * file, unsigned long hash, int a, void __user *b);
+asmlinkage long sys_popcorn_global_barrier(unsigned long id, void __user * file, unsigned long hash, int a, void __user *b);
+asmlinkage long sys_popcorn_get_tpid_at_remote(pid_t pid);
 
 #endif

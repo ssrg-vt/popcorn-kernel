@@ -343,6 +343,8 @@
 345 64	popcorn_tso_begin_manual		sys_popcorn_tso_begin_manual
 346 64	popcorn_tso_fence_manual		sys_popcorn_tso_fence_manual
 347 64	popcorn_tso_end_manual		sys_popcorn_tso_end_manual
+360 64	popcorn_global_barrier		sys_popcorn_global_barrier
+390 64	popcorn_get_tpid_at_remote		sys_popcorn_get_tpid_at_remote
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact
