@@ -9,7 +9,7 @@
 #define SYNC_H
 #include <popcorn/pcn_kmsg.h>
 
-#define LOG_TIME 0
+#define TSO_LOG_TIME 0
 
 #define MAX_OMP_REGIONS 100
 
