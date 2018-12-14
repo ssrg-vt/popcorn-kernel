@@ -63,6 +63,10 @@ atomic64_t mw_wait_local_list_ready = ATOMIC64_INIT(0);
 atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 
 /************** working zone *************/
+
+#define TRY_TO_FLIP_SMART_REGION 0
+#define REGION_CHECK 0
+
 #define SMART_REGION_PERF_DBG 0
 
 #define SMART_REGION_DBG 0 /* to debug smart region working behaviour */
@@ -75,6 +79,23 @@ atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 #endif
 /************** working zone *************/
 
+#define FINAL_DATA 1
+#if FINAL_DATA
+/*** perf - time statis ***/
+#define PF_TIME 0
+#define MW_TIME 0
+#define TSO_TIME 0 // aka MW log time
+#define GLOBAL_SYS_BAR_TIME 0
+#define OUTSIDE_REGION_DEBUG 0 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#else
+#define PF_TIME 1
+#define MW_TIME 1
+#define TSO_TIME 1 // aka MW log time
+#define GLOBAL_SYS_BAR_TIME 1
+#define OUTSIDE_REGION_DEBUG 1 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#endif
+
+
 /*** cpu oriented req ***/
 /* 1: cpu oriented 0: batch oriented */
 #if VM_TESTING
@@ -85,15 +106,8 @@ atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 #define PF_CONSIDER_CPU 1 // TODO: implemente
 #endif
 
-/*** perf - time statis ***/
-#define PF_TIME 1
-#define MW_TIME 1
-#define TSO_TIME 1 // aka MW log time
-
-
 /*** minor features ****/
 #define REENTRY_BEGIN_DISABLE 1 // 0: repeat show 1: once
-
 
 /*** perf ***/
 #define SKIP_MEM_CLEAN 1 // testing
@@ -367,6 +381,16 @@ atomic64_t mw_log_time = ATOMIC64_INIT(0);
 
 #define STATIC_INIT_TO_STATIC_SKEWED_INIT 80
 #define STATIC_SKEWED_INIT 81
+
+#if OUTSIDE_REGION_DEBUG
+unsigned long longest_inside_region_time = 0;
+unsigned long shortest_inside_region_time = 0;
+bool track_outside_region = false;
+ktime_t first_outside_region = {.tv64 = 0};
+ktime_t last_outside_region = {.tv64 = 0};
+#define OUTSIDE_REGION_START 60
+#define OUTSIDE_REGION_END 61
+#endif
 
 /****************************
  *	memory pool for hashing
@@ -1338,23 +1362,6 @@ void __show_si_addrs(struct remote_context *rc)
 	printk("\t\t\tmistake wrong_hist %d wrong_hist_no_vma %d\n",
 							rc->wrong_hist, rc->wrong_hist_no_vma);
 
-	printk("\n");
-	printk("=========================================\n");
-	printk("=========== global barrier ===============\n");
-	printk("=========================================\n");
-	printk("popcorn_global_time [[ %ld ]] s\n",
-				atomic64_read(&popcorn_global_time) / NANOSECOND);
-
-	printk("\n");
-	printk("================================================\n");
-	printk("======= debuging for new omp behavior  =========\n");
-	printk("================================================\n");
-	printk("dispatch_next_to_static_init [[ %ld ]]\n",
-						rc->dispatch_next_to_static_init);
-	printk("static_init_to_static_skewed_init [[ %ld ]]\n",
-						rc->static_init_to_static_skewed_init++);
-	printk("static_skewed_init [[ %ld ]]\n",
-						rc->static_skewed_init);
 
 #if DBG_OMP_HASH
 	printk("echo > /proc/popcorn_stat\n");
@@ -1374,6 +1381,43 @@ void __show_si_addrs(struct remote_context *rc)
 #endif
 }
 #endif
+
+void __show_other_dbg_info(struct remote_context *rc)
+{
+	// move below to other region
+	printk("\n");
+	printk("=========================================\n");
+	printk("=========== global barrier ===============\n");
+	printk("=========================================\n");
+	printk("popcorn_global_time [[ %ld ]] s\n",
+				atomic64_read(&popcorn_global_time) / NANOSECOND);
+
+	printk("\n");
+	printk("================================================\n");
+	printk("======= debuging for new omp behavior  =========\n");
+	printk("================================================\n");
+	printk("dispatch_next_to_static_init [[ %ld ]]\n",
+						rc->dispatch_next_to_static_init);
+	printk("static_init_to_static_skewed_init [[ %ld ]]\n",
+						rc->static_init_to_static_skewed_init++);
+	printk("static_skewed_init [[ %ld ]]\n",
+						rc->static_skewed_init);
+
+#if OUTSIDE_REGION_DEBUG
+	printk("\n");
+	printk("===========================================\n");
+	printk("===== inside region time (auto reset) =====\n");
+	printk("===========================================\n");
+	printk("longest_inside_region_time [[ %lu ]] s %lu ns\n",
+					longest_inside_region_time/1000/1000/1000,
+									longest_inside_region_time);
+	printk("shortest_inside_region_time [[ %lu ]] s %lu ns\n",
+					shortest_inside_region_time/1000/1000/1000,
+									shortest_inside_region_time);
+	longest_inside_region_time = 0;
+	shortest_inside_region_time = 0;
+#endif
+}
 
 /***************
  * SMART_REGION_DBG
@@ -1457,6 +1501,8 @@ void clean_omp_region_hash(struct remote_context *rc)
 #if GOD_VIEW
 	__show_si_addrs(rc);
 #endif
+
+	__show_other_dbg_info(rc);
 
 	hash_for_each_safe(rc->omp_region_hash, bkt, tmp, pos, hentry) {
 #if DECISION_PREFETCH_STATIS
@@ -1617,9 +1663,6 @@ void __try_flip_region_type(struct remote_context *rc)
 	} else {
 		current->tso_benefit_cnt = 0;
 	}
-	atomic_add(current->skip_wr_per_rw_cnt, &rc->sys_smart_skip_cnt);
-	//current->smart_skip_cnt += current->skip_wr_per_rw_cnt;
-	current->skip_wr_per_rw_cnt = 0;
 }
 
 
@@ -2175,14 +2218,17 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 #if HASH_GLOBAL
 	/* no collistion */
 	local_wr_cnt = rc->inv_cnt;
+#if MW_TIME
 	rc->sys_rw_cnt += rc->inv_cnt;
-
+#endif
 	/* redo ownership maintaining in serial phase for corner cases */
 	__maintain_ownership_serial();
 #else
 	/* implementation - global */
 	local_wr_cnt = sync_server_local_serial_conflictions(rc);
+#if MW_TIME
 	rc->sys_rw_cnt += local_wr_cnt;
+#endif
 #endif
 #endif
 	/* RC: make sure list is ready */
@@ -2697,7 +2743,9 @@ static void process_page_apply_diff_request(struct work_struct *work)
 
 	atomic_dec(&rc->doing_diff_cnt);
 	atomic_inc(&rc->req_diffs);
+#if MW_TIME
 	atomic_inc(&rc->sys_ww_cnt);
+#endif
 	DIFFPRINTK("[%d/%5d] <- locally applying diff 0x%lx\n",
 			tsk->pid, atomic_read(&rc->req_diffs), req->diff_addr);
 
@@ -2782,7 +2830,9 @@ int __find_collision_btw_nodes_at_remote(page_merge_request_t *req, struct remot
 	BUG_ON("Not supprot for PER-THREAD list");
 #endif
 	/* cross check */
+#if MW_TIME
 	rc->remote_sys_ww_cnt += conflict_cnt; /* ww_cnt is a bad name */
+#endif
 	atomic_add(conflict_cnt, &rc->diffs);
 	smp_wmb();
 	// only work at origin
@@ -2836,9 +2886,12 @@ static void process_page_merge_request(struct work_struct *work)
 #if STRONG_CHECK_SANITY
 	BUG_ON(!tsk || !res|| !rc);
 #endif
+
+#if MW_TIME
 	ktime_t mw_process_req_wait_last_done = ktime_get();
 	ktime_t mw_process_req_wait_local_list_ready;
 	ktime_t mw_process_req_find_collision_at_remote;
+#endif
 
 	/* put more handshake info to detect skew cases */
 	//req->begin =
@@ -2859,12 +2912,16 @@ static void process_page_merge_request(struct work_struct *work)
 	/* Barriers */
 	__wait_last_reset_done(rc); /* not going to work - instead use begin */
 
+#if MW_TIME
 	mw_process_req_wait_local_list_ready = ktime_get();
+#endif
 
 	__wait_local_list_ready(rc, wr_cnt);
 
 
+#if MW_TIME
 	mw_process_req_find_collision_at_remote = ktime_get();
+#endif
 	conflict_cnt =
 		__find_collision_btw_nodes_at_remote(req, rc, tsk, wr_cnt, wr_addrs);
 	//printk("remote mg done\n");
@@ -2900,6 +2957,7 @@ static void process_page_merge_request(struct work_struct *work)
 	handle_mw_reqest_cpu[raw_smp_processor_id()]++;
 #endif
 
+#if MW_TIME
 	{
 		ktime_t pf_end = ktime_get();
 
@@ -2910,6 +2968,7 @@ static void process_page_merge_request(struct work_struct *work)
 		atomic64_add(ktime_to_ns(ktime_sub(pf_end, mw_process_req_find_collision_at_remote)),
 				&mw_find_collision_at_remote);
 	}
+#endif
 
     put_task_struct(tsk);
     END_KMSG_WORK(req);
@@ -3224,6 +3283,21 @@ void current_info_transfer_to_worker(void)
 //	if (!rc-> && current->)
 //		rc-> = current->;
 
+#if OUTSIDE_REGION_DEBUG
+	if (current->inside_region_time) {
+		printk("[%d] inside region time %lu s %lu ns\n",
+					current->pid,
+					current->inside_region_time/1000/1000/1000,
+					current->inside_region_time);
+		if (current->inside_region_time > longest_inside_region_time)
+			longest_inside_region_time = current->inside_region_time;
+		if (shortest_inside_region_time == 0)
+			shortest_inside_region_time = current->inside_region_time;
+		if (current->inside_region_time < shortest_inside_region_time)
+			shortest_inside_region_time = current->inside_region_time;
+	}
+#endif
+
 	__put_task_remote(rc);
 }
 
@@ -3359,8 +3433,18 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 	struct remote_context *rc = current->mm->remote;
     current->tso_region_id = omp_hash; /* for detecting as a skipped region */
 
-	current->kmpc_dispatch_ini++;
+#if OUTSIDE_REGION_DEBUG
+	if (track_outside_region) {
+		WARN_ON_ONCE(current->inside_region_start.tv64);
+		current->inside_region_start = ktime_get();
+	}
+#endif
 
+#if TSO_LOG_TIME
+	current->kmpc_dispatch_ini++;
+#endif
+
+#if REGION_CHECK
 	//if (current->tso_region || current->tso_wr_cnt || current->tso_wx_cnt) {
 	if (current->tso_region) {
 		WARN_ON_ONCE("BUG \"tso_begin_manual\" order violation");
@@ -3377,11 +3461,12 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 		}
 		violation_begin++;
 	}
+#endif
 
 	region = __omp_region_hash(rc, omp_hash);
 	if(region) {
 		__region_total_cnt_inc(region);
-		__parse_save_region_info(region, file);
+		__parse_save_region_info(region, file); // debug
 
 		/* If region recorded, try to prefetch */
 #if GOD_VIEW && PREFETCH
@@ -3413,12 +3498,14 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 			if (leader) {
 				ktime_t dt, pf_end = ktime_get();
 				dt = ktime_sub(pf_end, pf_start);
-				BUG_ON(ktime_to_ns(dt) > (unsigned long)((unsigned long)10 * (unsigned long)NANOSECOND));
+				BUG_ON(ktime_to_ns(dt) > (unsigned long)((unsigned long)10 *
+													(unsigned long)NANOSECOND));
 				pf_time += ktime_to_ns(dt);
 			}
 #endif
 		}
 #endif
+
 #if SMART_REGION
 		/* don't affect prefetch */
 		if (region->type & RCSI_VAIN) { /* smart wr */
@@ -3435,7 +3522,9 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 		is costly since it has to stop all threads */
 
 	current->tso_region = true;
+#if TSO_LOG_TIME
 	current->tso_begin_cnt++;
+#endif
 	RGNPRINTK("[%d] %s(): omp_hash 0x%lx b_cnt %lu bm_cnt %lu\n", current->pid,
 				__func__, omp_hash, current->tso_begin_cnt, current->tso_begin_m_cnt);
 	return 0;
@@ -3505,9 +3594,19 @@ static int __popcorn_tso_fence(int id, void __user * file, unsigned long omp_has
 	ktime_t mw_find_conf, mw_wait_diffs, mw_wait_merges;
 #endif
 #if SMART_REGION
-	if(is_skipped_region(current))
+	if(is_skipped_region(current)) {
+#if TRY_TO_FLIP_SMART_REGION
 		__try_flip_region_type(rc);
 #endif
+#if MW_TIME
+		atomic_add(current->skip_wr_per_rw_cnt, &rc->sys_smart_skip_cnt);
+		//current->smart_skip_cnt += current->skip_wr_per_rw_cnt;
+		current->skip_wr_per_rw_cnt = 0;
+#endif
+	}
+#endif
+
+// TODO try to remove __popcorn_tso_fence from end 12/12  remove start
 	if (!current->tso_region) { /* open to detect errors */
 #if !SMART_REGION && !SMART_REGION_DBG
 // uncomment it
@@ -3519,6 +3618,7 @@ static int __popcorn_tso_fence(int id, void __user * file, unsigned long omp_has
 		current->tso_region_id = 0; // the rest of region -> X
 		goto out;
 	}
+// TODO try to remove __popcorn_tso_fence from end 12/12  remove done
 
 #if POPCORN_TSO_BARRIER
 	leader = __popcorn_start_begin_barrier(rc, id);
@@ -3577,7 +3677,9 @@ static int __popcorn_tso_fence(int id, void __user * file, unsigned long omp_has
 	current->tso_wr_cnt = 0;
 	current->tso_wx_cnt = 0;
 	current->tso_region_id = 0; /* s -> f xxxx e */ // the rest of  region -> X
+#if TSO_LOG_TIME
 	current->tso_fence_cnt++;
+#endif
 out:
 	current->read_cnt = 0;
 	current->writenopg_cnt = 0;
@@ -3588,18 +3690,25 @@ static int __popcorn_tso_end(int id, void __user * file, unsigned long omp_hash,
 {
 	RGNPRINTK("[%d] %s(): id %d omp_hash 0x%lx -> implicit fence\n", current->pid, __func__, id, omp_hash);
 
+
+	/* reduce end */
+	if (a == KMPC_REDUCE) {
+		current->kmpc_reduce_nowait++;
+		goto valid_end;
+	}
+
+#if TSO_LOG_TIME
 	if (a == KMPC_REDUCE) {
 		current->kmpc_reduce++;
 	} else if (a == KMPC_END_REDUCE) {
 		current->kmpc_end_reduce++;
 		//TODO try to skip
-	} else if (a == KMPC_REDUCE_NOWAIT) {
-		current->kmpc_reduce_nowait++;
-		return 0;
 	} else if (a == KMPC_DISPATCH_FINI) {
 		current->kmpc_dispatch_fini++;
 	}
+#endif
 
+#if TSO_LOG_TIME
 #if !SMART_REGION
 	if (!current->tso_region || !current->tso_region_id) {
 #if IGNORE_WARN_ON_ONCE
@@ -3620,12 +3729,38 @@ static int __popcorn_tso_end(int id, void __user * file, unsigned long omp_hash,
 		violation_end++;
 	}
 #endif
+#endif
 
 	if (!current->tso_region) return 0;
     trace_tso(my_nid, current->pid, id, 'e');
+// TODO try to merge user space barrier with kernel space barrier
+// TODO rely on compiler auto add barrier latter on which has
+//  leader thread waiting in syscall
+//  followers TODO also have to call syscall
+//  		all try to do __popcorn_tso_fence() plus global_barrier()
+//
+// TODO try to remove __popcorn_tso_fence from end 12/12 remove start
 	__popcorn_tso_fence(id, file, omp_hash, a, b);
+// TODO try to remove __popcorn_tso_fence from end 12/12 remove done
 	current->tso_region = false;
+#if TSO_LOG_TIME
 	current->tso_end_cnt++;
+#endif
+
+valid_end:
+#if OUTSIDE_REGION_DEBUG
+	if (track_outside_region) {
+		WARN_ON_ONCE(!current->inside_region_start.tv64);
+		WARN_ON_ONCE(current->inside_region_end.tv64);
+		ktime_t dt, region_end = ktime_get();
+		dt = ktime_sub(region_end, current->inside_region_start);
+		current->inside_region_time += ktime_to_ns(dt);
+
+		current->inside_region_start.tv64 = 0;
+		current->inside_region_end.tv64 = 0;
+	}
+#endif
+
 	return 0;
 }
 
@@ -3636,14 +3771,18 @@ static int __popcorn_tso_end(int id, void __user * file, unsigned long omp_hash,
 #ifdef CONFIG_POPCORN
 SYSCALL_DEFINE5(popcorn_tso_begin, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+#if TSO_LOG_TIME
 	show_omp_hash(omp_hash);
+#endif
 	return __popcorn_tso_begin(id, file, omp_hash, a, b);
 }
 
 SYSCALL_DEFINE5(popcorn_tso_fence, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+#if TSO_LOG_TIME
 	show_omp_hash(omp_hash);
 	RGNPRINTK("[%d] %s(): id %d omp_hash 0x%lx\n", current->pid, __func__, id, omp_hash);
+
 	if (a == KMPC_BARRIER) {
 		current->kmpc_barrier_cnt++;
 	} else if (a == KMPC_CANCEL_BARRIER) {
@@ -3651,12 +3790,15 @@ SYSCALL_DEFINE5(popcorn_tso_fence, int, id, void __user *, file, unsigned long, 
 	}
 
     trace_tso(my_nid, current->pid, id, 'f');
+#endif
 	return __popcorn_tso_fence(id, file, omp_hash, id, b);
 }
 
 SYSCALL_DEFINE5(popcorn_tso_end, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+#if TSO_LOG_TIME
 	show_omp_hash(omp_hash);
+#endif
 	return __popcorn_tso_end(id, file, omp_hash, a, b);
 }
 
@@ -3673,8 +3815,10 @@ SYSCALL_DEFINE5(popcorn_tso_id, int, id, void __user *, file, unsigned long, omp
 
 SYSCALL_DEFINE5(popcorn_tso_begin_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+#if TSO_LOG_TIME
 	show_omp_hash(omp_hash);
 	current->tso_begin_m_cnt++;
+#endif
 	//printk("[%d] %s():\n", current->pid, __func__);
 	//printk("[%d] %s():\n", current->pid, __func__);
 	//return __popcorn_tso_begin(id, file, omp_hash, a, b);
@@ -3683,6 +3827,7 @@ SYSCALL_DEFINE5(popcorn_tso_begin_manual, int, id, void __user *, file, unsigned
 
 SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+#if TSO_LOG_TIME
 	show_omp_hash(omp_hash);
 	RGNPRINTK("[%d] %s():\n", current->pid, __func__);
 
@@ -3705,6 +3850,30 @@ SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned
 	else if (a == STATIC_SKEWED_INIT) {
 		current->static_skewed_init++;
 	}
+#endif
+
+#if OUTSIDE_REGION_DEBUG
+	if (a == OUTSIDE_REGION_START) {
+		// serial
+		WARN_ON_ONCE(track_outside_region);
+		WARN_ON_ONCE(first_outside_region.tv64);
+		track_outside_region = true;
+		printk("[%d] track_outside_region start\n", current->pid);
+
+		first_outside_region = ktime_get();
+	} else if (a == OUTSIDE_REGION_END) {
+		// serial
+		WARN_ON_ONCE(!track_outside_region);
+		WARN_ON_ONCE(last_outside_region.tv64);
+		track_outside_region = false;
+
+		last_outside_region = ktime_get();
+		printk("[%d] track_outside_region end\n", current->pid);
+
+		first_outside_region.tv64 = 0;
+		last_outside_region.tv64 = 0;
+	}
+#endif
 
 	//printk("[%d] %s():\n", current->pid, __func__);
 	//return __popcorn_tso_fence(id, file, omp_hash, a, b);
@@ -3713,8 +3882,10 @@ SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned
 
 SYSCALL_DEFINE5(popcorn_tso_end_manual, int, id, void __user *, file, unsigned long, omp_hash, int, a, void __user *, b)
 {
+#if TSO_LOG_TIME
 	show_omp_hash(omp_hash);
 	current->tso_end_m_cnt++;
+#endif
 	//printk("[%d] %s():\n", current->pid, __func__);
 	//printk("[%d] %s():\n", current->pid, __func__);
 	//return __popcorn_tso_end(id, file, omp_hash, a, b);
@@ -3740,8 +3911,8 @@ static int handle_global_barrier_request(struct pcn_kmsg_message *msg)
 //	//spin_unlock(&popcorn_global_lock);
 
 #if VM_TESTING
-	//printk("\t\t recv remote %lu\n", popcorn_global_remote_cnt);
-	printk("\t\t recv remote %ld\n", atomic64_read(&popcorn_global_remote_cnt));
+////	//printk("\t\t recv remote %lu\n", popcorn_global_remote_cnt);
+//	printk("\t\t recv remote %ld\n", atomic64_read(&popcorn_global_remote_cnt));
 #endif
 
 //    remote_popcorn_barrier_request_t *req =
@@ -3755,7 +3926,9 @@ SYSCALL_DEFINE5(popcorn_global_barrier, unsigned long, id, void __user *, file, 
 #if 0
 	u64 ppp = 0;
 #endif
+#if GLOBAL_SYS_BAR_TIME
 	ktime_t start;
+#endif
 //	unsigned long __popcorn_global_local_cnt;
 	remote_popcorn_barrier_request_t *req = pcn_kmsg_get(sizeof(*req));
     pcn_kmsg_post(PCN_KMSG_TYPE_GLOBAL_BARRIER_REQUEST,
@@ -3768,15 +3941,17 @@ SYSCALL_DEFINE5(popcorn_global_barrier, unsigned long, id, void __user *, file, 
 
 	atomic64_inc(&popcorn_global_local_cnt);
 #if VM_TESTING
-	printk("[%d] coming local (sys) %lu(sent)\n", current->pid,
-//									 __popcorn_global_local_cnt);
-							 atomic64_read(&popcorn_global_local_cnt));
+//	printk("[%d] coming local (sys) %lu(sent)\n", current->pid,
+//							 atomic64_read(&popcorn_global_local_cnt));
+//////////									 __popcorn_global_local_cnt);
 #endif
 //	static u64 cnt = 0;
 //	if (cnt++ < 100)
 //		printk("TODO: IMPLEMENTING\n");
 
+#if GLOBAL_SYS_BAR_TIME
 	start = ktime_get();
+#endif
 	while (atomic64_read(&popcorn_global_local_cnt) >
 			atomic64_read(&popcorn_global_remote_cnt)) {
 //	while (__popcorn_global_local_cnt >
@@ -3799,12 +3974,13 @@ SYSCALL_DEFINE5(popcorn_global_barrier, unsigned long, id, void __user *, file, 
 		/* only single CPU I think I can spin */
 		CPU_RELAX;
 	}
-
+#if GLOBAL_SYS_BAR_TIME
 	{
 		ktime_t end = ktime_get();
 		atomic64_add(ktime_to_ns(ktime_sub(end, start)),
 									&popcorn_global_time);
 	}
+#endif
 	return 0;
 }
 #else // CONFIG_POPCORN
