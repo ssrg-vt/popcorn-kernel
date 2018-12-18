@@ -111,6 +111,7 @@ struct tipc_node {
 	int action_flags;
 	struct list_head list;
 	int state;
+	bool failover_sent;
 	u16 sync_point;
 	int link_cnt;
 	u16 working_links;
@@ -583,12 +584,15 @@ static void  tipc_node_clear_links(struct tipc_node *node)
 /* tipc_node_cleanup - delete nodes that does not
  * have active links for NODE_CLEANUP_AFTER time
  */
-static int tipc_node_cleanup(struct tipc_node *peer)
+static bool tipc_node_cleanup(struct tipc_node *peer)
 {
 	struct tipc_net *tn = tipc_net(peer->net);
 	bool deleted = false;
 
-	spin_lock_bh(&tn->node_list_lock);
+	/* If lock held by tipc_node_stop() the node will be deleted anyway */
+	if (!spin_trylock_bh(&tn->node_list_lock))
+		return false;
+
 	tipc_node_write_lock(peer);
 
 	if (!node_is_up(peer) && time_after(jiffies, peer->delete_at)) {
@@ -680,6 +684,7 @@ static void __tipc_node_link_up(struct tipc_node *n, int bearer_id,
 		*slot0 = bearer_id;
 		*slot1 = bearer_id;
 		tipc_node_fsm_evt(n, SELF_ESTABL_CONTACT_EVT);
+		n->failover_sent = false;
 		n->action_flags |= TIPC_NOTIFY_NODE_UP;
 		tipc_link_set_active(nl, true);
 		tipc_bcast_add_peer(n->net, nl, xmitq);
@@ -911,6 +916,7 @@ void tipc_node_check_dest(struct net *net, u32 addr,
 	bool reset = true;
 	char *if_name;
 	unsigned long intv;
+	u16 session;
 
 	*dupl_addr = false;
 	*respond = false;
@@ -997,9 +1003,10 @@ void tipc_node_check_dest(struct net *net, u32 addr,
 			goto exit;
 
 		if_name = strchr(b->name, ':') + 1;
+		get_random_bytes(&session, sizeof(u16));
 		if (!tipc_link_create(net, if_name, b->identity, b->tolerance,
 				      b->net_plane, b->mtu, b->priority,
-				      b->window, mod(tipc_net(net)->random),
+				      b->window, session,
 				      tipc_own_addr(net), addr, peer_id,
 				      n->capabilities,
 				      tipc_bc_sndlink(n->net), n->bc_entry.link,
@@ -1614,6 +1621,14 @@ static bool tipc_node_check_state(struct tipc_node *n, struct sk_buff *skb,
 			__tipc_node_link_down(n, &pb_id, xmitq, &maddr);
 			tipc_skb_queue_splice_tail_init(tipc_link_inputq(pl),
 							tipc_link_inputq(l));
+		}
+		/* If parallel link was already down, and this happened before
+		 * the tunnel link came up, FAILOVER was never sent. Ensure that
+		 * FAILOVER is sent to get peer out of NODE_FAILINGOVER state.
+		 */
+		if (n->state != NODE_FAILINGOVER && !n->failover_sent) {
+			tipc_link_create_dummy_tnl_msg(l, xmitq);
+			n->failover_sent = true;
 		}
 		/* If pkts arrive out of order, use lowest calculated syncpt */
 		if (less(syncpt, n->sync_point))
