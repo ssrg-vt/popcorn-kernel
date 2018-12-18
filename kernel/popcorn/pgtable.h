@@ -45,8 +45,7 @@ static inline pte_t pte_make_valid(pte_t entry)
 
 static inline bool pte_is_present(pte_t entry)
 {
-	// (pte_val(entry) & PTE_VALID) == PTE_VALID;
-	return true;
+	return (pte_val(entry) & PTE_VALID) == PTE_VALID;
 }
 #elif defined(CONFIG_PPC64)
 static inline unsigned long pte_flags(pte_t entry)
