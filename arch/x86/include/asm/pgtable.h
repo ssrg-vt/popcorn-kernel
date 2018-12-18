@@ -589,7 +589,11 @@ static inline u64 flip_protnone_guard(u64 oldval, u64 val, u64 mask);
 
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {
+#ifndef CONFIG_POPCORN
 	pteval_t val = pte_val(pte), oldval = val;
+#else
+	pteval_t val = pte_val(pte);
+#endif
 
 	/*
 	 * Chop off the NX bit (if present), and add the NX portion of
@@ -597,11 +601,11 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 	 */
 	val &= _PAGE_CHG_MASK;
 	val |= check_pgprot(newprot) & ~_PAGE_CHG_MASK;
-#ifndef CONFIG_POPCORN	
+#ifndef CONFIG_POPCORN
 	val = flip_protnone_guard(oldval, val, PTE_PFN_MASK);
 #endif
 	return __pte(val);
-	
+
 }
 
 static inline pmd_t pmd_modify(pmd_t pmd, pgprot_t newprot)
