@@ -6,14 +6,14 @@
 #ifdef CONFIG_X86
 static inline pte_t pte_make_invalid(pte_t entry)
 {
-	entry = pte_clear_flags(entry, _PAGE_PRESENT);
+	entry = pte_modify(entry, __pgprot(pte_flags(entry) & ~_PAGE_PRESENT));
 
 	return entry;
 }
 
 static inline pte_t pte_make_valid(pte_t entry)
 {
-	entry = pte_set_flags(entry, _PAGE_PRESENT);
+	entry = pte_modify(entry, __pgprot(pte_flags(entry) | _PAGE_PRESENT));
 
 	return entry;
 }

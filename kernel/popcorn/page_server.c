@@ -1286,13 +1286,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	update_mmu_cache(vma, addr, pte);
 	pte_unmap_unlock(pte, ptl);
 	present = pte_is_present(*pte);
-	if (!present) {
-		pte_make_valid(*pte);
-	}
 	page = vm_normal_page(vma, addr, *pte);
-	if (!present) {
-		pte_make_invalid(*pte);
-	}
 	BUG_ON(!page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
 	if (TRANSFER_PAGE_WITH_RDMA) {
