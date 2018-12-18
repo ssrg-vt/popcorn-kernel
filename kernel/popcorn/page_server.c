@@ -1782,7 +1782,9 @@ static int __handle_localfault_at_origin(struct vm_fault *vmf)
 	spin_lock(ptl);
 
 	if (!vmf->pte) {
-		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
+		spin_unlock(ptl);
+		PGPRINTK("  [%d] %lx fresh at origin, continue\n", current->pid, addr);
+		return VM_FAULT_CONTINUE;
 	}
 
 	if (!pte_same(*vmf->pte, vmf->orig_pte)) {
