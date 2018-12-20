@@ -7,6 +7,7 @@
 #include <linux/workqueue.h>
 #include <linux/signal.h>
 #include <linux/slab.h>
+#include <linux/cred.h>
 #include <linux/radix-tree.h>
 #include <linux/sched/task.h>
 #include <popcorn/pcn_kmsg.h>
@@ -101,7 +102,23 @@ DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 	size_t sas_ss_size;\
 	struct k_sigaction action[_NSIG];\
 	*/ \
-	struct field_arch arch;
+	struct field_arch arch; \
+	kuid_t uid; \
+	kgid_t gid; \
+	kuid_t suid; \
+	kgid_t sgid; \
+	kuid_t euid; \
+	kgid_t egid; \
+	kuid_t fsuid; \
+	kgid_t fsgid; \
+	unsigned securebits; \
+	kernel_cap_t cap_inheritable; \
+	kernel_cap_t cap_permitted; \
+	kernel_cap_t cap_effective; \
+	kernel_cap_t cap_bset; \
+	kernel_cap_t cap_ambient;
+
+
 DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
 
 

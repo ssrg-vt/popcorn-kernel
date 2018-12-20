@@ -2,7 +2,7 @@
  * @file process_server.c
  *
  * Popcorn Linux thread migration implementation
- * This work was an extension of David Katz MS Thesis, but totally rewritten 
+ * This work was an extension of David Katz MS Thesis, but totally rewritten
  * by Sang-Hoon to support multithread environment.
  *
  * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
@@ -586,7 +586,7 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 	task_lock(current->group_leader);
 	rlim_stack = current->signal->rlim[RLIMIT_STACK];
 	task_unlock(current->group_leader);
-	
+
 	arch_pick_mmap_layout(mm, &rlim_stack);
 
 	f = filp_open(req->exe_path, O_RDONLY | O_LARGEFILE | O_EXCL, 0);
@@ -690,6 +690,7 @@ static int remote_worker_main(void *data)
 	struct remote_worker_params *params = (struct remote_worker_params *)data;
 	struct remote_context *rc = params->rc;
 	clone_request_t *req = params->req;
+	struct cred *new_cred;
 
 	might_sleep();
 	kfree(params);
@@ -709,6 +710,24 @@ static int remote_worker_main(void *data)
 	current->origin_pid = req->origin_pid;
 
 	set_user_nice(current, 0);
+	new_cred = prepare_creds();
+	if (!new_cred){
+		return -ENOMEM;
+	}
+	new_cred->uid = req->uid;
+	new_cred->gid = req->gid;
+	new_cred->suid = req->suid;
+	new_cred->sgid = req->sgid;
+	new_cred->euid = req->euid;
+	new_cred->egid = req->egid;
+	new_cred->fsuid = req->fsuid;
+	new_cred->fsgid = req->fsgid;
+	memcpy(&new_cred->cap_permitted, &req->cap_permitted, sizeof(kernel_cap_t));
+	memcpy(&new_cred->cap_effective, &req->cap_effective, sizeof(kernel_cap_t));
+	memcpy(&new_cred->cap_bset, &req->cap_bset, sizeof(kernel_cap_t));
+	memcpy(&new_cred->cap_ambient, &req->cap_ambient, sizeof(kernel_cap_t));
+	commit_creds(new_cred);
+
 
 	/* meaningless for now */
 	/*
@@ -724,7 +743,7 @@ static int remote_worker_main(void *data)
 
 	get_task_remote(current);
 	rc->tgid = current->tgid;
-	
+
 	__run_remote_worker(rc);
 
 	__terminate_remote_threads(rc);
@@ -940,6 +959,21 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 	req->origin_pid = tsk->pid;
 
 	req->personality = tsk->personality;
+
+	/* user ids and capabilities */
+	req->uid = tsk->cred->uid;
+	req->gid = tsk->cred->gid;
+	req->suid = tsk->cred->suid;
+	req->sgid = tsk->cred->sgid;
+	req->euid = tsk->cred->euid;
+	req->egid = tsk->cred->egid;
+	req->fsuid = tsk->cred->fsuid;
+	req->fsgid = tsk->cred->fsgid;
+	req->securebits = tsk->cred->securebits;
+	memcpy(&req->cap_permitted, &tsk->cred->cap_permitted, sizeof(kernel_cap_t));
+	memcpy(&req->cap_effective, &tsk->cred->cap_effective, sizeof(kernel_cap_t));
+	memcpy(&req->cap_bset, &tsk->cred->cap_bset, sizeof(kernel_cap_t));
+	memcpy(&req->cap_ambient, &tsk->cred->cap_ambient, sizeof(kernel_cap_t));
 
 	/* Signals and handlers
 	req->remote_blocked = tsk->blocked;
