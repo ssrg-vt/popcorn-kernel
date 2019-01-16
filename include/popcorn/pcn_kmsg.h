@@ -77,6 +77,19 @@ enum pcn_kmsg_type {
 	PCN_KMSG_TYPE_PAGE_INVALIDATE_BATCH_RESPONSE,
 	PCN_KMSG_TYPE_PAGE_MERGE_REQUEST,
 	PCN_KMSG_TYPE_PAGE_MERGE_RESPONSE,
+	PCN_KMSG_TYPE_PAGE_DIFF_APPLY_REQUEST,
+	PCN_KMSG_TYPE_PAGE_MERGE_DONE_REQUEST,
+
+	/* TSO/RC */
+	PCN_KMSG_TYPE_GLOBAL_BARRIER_REQUEST,
+
+	/* Prefetching page */
+	PCN_KMSG_TYPE_REMOTE_PREFETCH_REQUEST,
+	PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE,
+
+	/* Toggle memory pattern trace */
+	PCN_KMSG_TYPE_TOGGLE_MEMORY_PATTERN_TRACE_REQUEST,
+	PCN_KMSG_TYPE_TOGGLE_MEMORY_PATTERN_TRACE_RESPONSE,
 
 	/* Schedule server */
 	PCN_KMSG_TYPE_SCHED_PERIODIC,		/* XXX sched requires help!! */
@@ -106,7 +119,11 @@ struct pcn_kmsg_hdr {
 	(((struct pcn_kmsg_message *)x)->header.from_nid)
 #define PCN_KMSG_SIZE(x) (sizeof(struct pcn_kmsg_hdr) + x)
 
+#if VM_TESTING
 #define PCN_KMSG_MAX_SIZE (32UL << 10)
+#else
+#define PCN_KMSG_MAX_SIZE (128UL << 10)
+#endif
 #define PCN_KMSG_MAX_PAYLOAD_SIZE \
 	(PCN_KMSG_MAX_SIZE - sizeof(struct pcn_kmsg_hdr))
 

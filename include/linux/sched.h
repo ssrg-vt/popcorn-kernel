@@ -1863,36 +1863,69 @@ struct task_struct {
 #endif
 
 	bool tso_region;
+	bool smart_is_vain;
 	unsigned long tso_region_id; /* Region id */
-	unsigned long long tso_region_cnt; /* Regions */
-	unsigned long long tso_nobenefit_region_cnt; /* No benefits regions */
 
-	/* per tso region */
-	unsigned long long tso_wr_cnt; /* write fault & w/ page */ // == inv_cnt
+	/* Debug */
+	unsigned long tso_begin_cnt;
+	unsigned long tso_fence_cnt;
+	unsigned long tso_end_cnt;
+
+	/* Per tso region */
+	unsigned long long tso_wr_cnt; /* write fault & w/ page (=inv_cnt) */
 	unsigned long long tso_wx_cnt; /* write fault & w/o page */
 
 	/* Accumulated */
 	unsigned long long accu_tso_wr_cnt; /* write fault & w/ page */
 	unsigned long long accu_tso_wx_cnt; /* write fault & w/o page */
 
-	/* Buffer invalidations */
+	/* God view - prefetch */
 	//unsigned int inv_cnt;
-	unsigned long buffer_inv_addrs[MAX_WRITE_INV_BUFFERS];
+	int read_cnt;
+	//int read_skip_cnt; //dbg
+	unsigned long read_addrs[MAX_READ_BUFFERS];
+	int writenopg_cnt;
+	//int writenopg_skip_cnt; //dbg
+	unsigned long writenopg_addrs[MAX_WRITE_NOPAGE_BUFFERS];
+	unsigned long omp_hash;	/* hash per region */
+	int region_cnt;			/* hash per region + cnt */
 
 	/* Dynamic logs */
 	unsigned int omp_regions[MAX_OMP_REGIONS];
 
-	/* Debug */
-	unsigned long begin_m_cnt;
-	unsigned long begin_cnt;
-	unsigned long tso_fence_cnt;
+	/* Statist */
+	unsigned long tso_begin_m_cnt;
+	unsigned long tso_fence_m_cnt;
+	unsigned long tso_end_m_cnt;
 
-	/* statis */
-	int skip_wr_cnt;
+	unsigned long kmpc_barrier_cnt;
+	unsigned long kmpc_cancel_barrier_cnt;
+
+	unsigned long kmpc_reduce;
+	unsigned long kmpc_end_reduce;
+	unsigned long kmpc_reduce_nowait;
+	unsigned long kmpc_dispatch_fini;
+	unsigned long kmpc_dispatch_init;
+
+	unsigned long kmpc_static_init;
+	unsigned long kmpc_static_fini;
+
+	unsigned long dispatch_next_to_static_init;
+
+	unsigned long static_init_to_static_skewed_init;
+	unsigned long static_skewed_init;
+
+	/* Statist */
+	int skip_wr_per_rw_cnt;
 
 	/* To flip region type */
 	int tso_benefit_cnt;
 	int smart_skip_cnt;
+
+	/* outside region debug */
+	ktime_t inside_region_start;
+	ktime_t inside_region_end;
+	unsigned long inside_region_time;
 
 	/* */
 

@@ -9,8 +9,6 @@
 #define SYNC_H
 #include <popcorn/pcn_kmsg.h>
 
-#define TSO_LOG_TIME 0
-
 #define MAX_OMP_REGIONS 100
 
 /* Depends on (PCN_KMSG_MAX_SIZE - 1) pages for msg head + metadata */

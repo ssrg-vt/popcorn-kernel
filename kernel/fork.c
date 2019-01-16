@@ -434,8 +434,11 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 
 	//printk("[%d] %s():\n", tsk->pid, __func__);
 	tsk->tso_region = false;
-	tsk->tso_region_cnt = 0;
-	tsk->tso_nobenefit_region_cnt = 0;
+	tsk->smart_is_vain = false;
+
+	tsk->tso_begin_cnt = 0;
+	tsk->tso_fence_cnt = 0;
+	tsk->tso_end_cnt = 0;
 
 	tsk->tso_wr_cnt = 0;
 	tsk->tso_wx_cnt = 0;
@@ -446,13 +449,52 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 	tsk->tso_benefit_cnt = 0;
 	tsk->smart_skip_cnt = 0;
 
-	/* statis */
-	tsk->skip_wr_cnt = 0;
+	/* Statist */
+	tsk->tso_begin_m_cnt = 0;
+	tsk->tso_fence_m_cnt = 0;
+	tsk->tso_end_m_cnt = 0;
 
-	memset(&tsk->buffer_inv_addrs, 0,
-			sizeof(*tsk->buffer_inv_addrs) * MAX_WRITE_INV_BUFFERS);
+	tsk->kmpc_barrier_cnt = 0;
+	tsk->kmpc_cancel_barrier_cnt = 0;
+
+	tsk->kmpc_reduce = 0;
+	tsk->kmpc_end_reduce = 0;
+	tsk->kmpc_reduce_nowait = 0;
+	tsk->kmpc_dispatch_fini = 0;
+	tsk->kmpc_dispatch_init = 0;
+
+
+	tsk->kmpc_static_fini = 0;
+	tsk->kmpc_static_init= 0;
+
+	tsk->dispatch_next_to_static_init = 0;
+
+	tsk->static_init_to_static_skewed_init = 0;
+	tsk->static_skewed_init = 0;
+
+	/* Statis */
+	tsk->skip_wr_per_rw_cnt = 0;
+
 	memset(&tsk->omp_regions, 0,
 			sizeof(*tsk->omp_regions) * MAX_OMP_REGIONS);
+
+	/* God view - SI */
+	tsk->read_cnt = 0;
+	tsk->writenopg_cnt = 0;
+	//tsk->read_skip_cnt = 0; //gdb
+	//tsk->writenopg_skip_cnt = 0; //dbg
+
+	/* Skip potential performance drops */
+	//memset(&tsk->read_addrs, 0,
+	//		sizeof(*tsk->read_addrs) * MAX_READ_BUFFERS);
+	//memset(&tsk->writenopg_addrs, 0,
+	//		sizeof(*tsk->writenopg_addrs) * MAX_WRITE_NOPAGE_BUFFERS);
+
+	/* outside region debug */
+	tsk->inside_region_start.tv64 = 0;
+	tsk->inside_region_end.tv64 = 0;
+
+	tsk->inside_region_time = 0;
 
 #ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	tsk->fault_address = 0;
