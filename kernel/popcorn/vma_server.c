@@ -642,10 +642,9 @@ void process_vma_info_request(vma_info_request_t *req)
 		goto good;
 	}
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
-		/* TODO Jack BUG TODO Jack BUG TODO Jack BUG TODO Jack BUG TODO Jack BUG */
-		/* TODO Jack BUG TODO Jack BUG TODO Jack BUG TODO Jack BUG TODO Jack BUG */
-		/* TODO Jack BUG TODO Jack BUG TODO Jack BUG TODO Jack BUG TODO Jack BUG */
-		printk("vma_info: vma does not really exist at %lx\n", addr);
+		/* Rare BUG - may be caused by user land */
+		printk("[%d/%d] vma_info: vma does not really exist at %lx\n",
+									current->pid, req->remote_pid, addr);
 		res->result = -ENOENT;
 		goto out_up;
 	}

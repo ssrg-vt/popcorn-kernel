@@ -20,6 +20,9 @@
 #include <linux/fs.h>
 #include <linux/futex.h>
 #include <linux/highmem.h>
+#include <linux/syscalls.h>
+#include <linux/vmalloc.h>
+#include <linux/delay.h>
 
 #include <asm/mmu_context.h>
 #include <asm/kdebug.h>
@@ -35,12 +38,8 @@
 #include "page_server.h"
 #include "wait_station.h"
 #include "util.h"
-//#include "sync.h"
-#include <linux/vmalloc.h>
-#include <linux/delay.h>
 
 #define FUTEX_DBG 0
-//#define LOCAL_CONFLICT_DBG 0
 
 #define SYNC_DEBUG_THIS 0
 #if SYNC_DEBUG_THIS
@@ -72,6 +71,7 @@ enum {
 };
 
 extern void collect_tso_wr(struct task_struct *tsk);
+extern void current_info_transfer_to_worker(void);
 
 /* Hold the correnponding remote_contexts_lock */
 static struct remote_context *__lookup_remote_contexts_in(int nid, int tgid)
@@ -102,6 +102,47 @@ static struct remote_context *__lookup_remote_contexts_in(int nid, int tgid)
 
 #define __remote_contexts_in() remote_contexts[INDEX_INBOUND]
 #define __remote_contexts_out() remote_contexts[INDEX_OUTBOUND]
+
+
+#ifdef CONFIG_POPCORN
+static pid_t __popcorn_get_tpid_at_remote(pid_t pid)
+{
+	pid_t ret = -1;
+	struct task_struct *tsk = __get_task_struct(pid);
+	struct task_struct *p = tsk;
+	if(!tsk) {
+		PCNPRINTK_ERR("Wrong pid / RC? plz retry\n");
+		goto done;
+	}
+	if(!tsk->at_remote) {
+		PCNPRINTK_ERR("This syscall doens't support at origin");
+		goto done;
+	}
+    read_lock(&tasklist_lock);
+    while_each_thread(tsk, p) {
+		ret = p->pid;
+		goto done_free;
+    }
+done_free:
+    read_unlock(&tasklist_lock);
+done:
+	if (tsk)
+		put_task_struct(tsk);
+	return ret;
+}
+
+SYSCALL_DEFINE1(popcorn_get_tpid_at_remote, pid_t, pid)
+{
+	return __popcorn_get_tpid_at_remote(pid);
+}
+
+#else
+SYSCALL_DEFINE1(popcorn_get_tpid_at_remote, pid_t, pid)
+{
+	PCNPRINTK_ERR("Kernel is not configured to use popcorn\n");
+	return -EPERM;
+}
+#endif
 
 
 inline struct remote_context *__get_mm_remote(struct mm_struct *mm)
@@ -161,6 +202,7 @@ static inline void __sync_init(struct remote_context *rc)
     atomic_set(&rc->sys_ww_cnt, 0);		/* all ww from concurrent msgs */
     rc->remote_sys_ww_cnt = 0;	/* all ww */
     rc->sys_local_conflict_cnt = 0;
+    atomic_set(&rc->sys_smart_skip_cnt, 0);
 
 	hash_init(rc->omp_region_hash);
 	rwlock_init(&rc->omp_region_hash_lock);
@@ -197,7 +239,7 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	struct remote_context *rc = kmalloc(sizeof(*rc), GFP_KERNEL);
 	int i;
 
-	if (!rc) return ERR_PTR(-ENOMEM);
+	BUG_ON(!rc);
 
 	INIT_LIST_HEAD(&rc->list);
 	atomic_set(&rc->count, 1); /* Account for mm->remote in a near future */
@@ -230,6 +272,36 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 	rc->out_threads = 0;
 	memset(rc->pids, 0, sizeof(*rc->pids) * MAX_ALIVE_THREADS);
 	spin_lock_init(&rc->pids_lock);
+
+	/* barrier cnt */
+	rc->tso_begin_cnt = 0;
+	rc->tso_fence_cnt = 0;
+	rc->tso_end_cnt = 0;
+
+	rc->tso_begin_m_cnt = 0;
+	rc->tso_fence_m_cnt = 0;
+	rc->tso_end_m_cnt = 0;
+
+	rc->kmpc_barrier_cnt = 0;
+	rc->kmpc_cancel_barrier_cnt = 0;
+
+	rc->kmpc_reduce = 0;
+	rc->kmpc_end_reduce = 0;
+	rc->kmpc_reduce_nowait = 0;
+	rc->kmpc_dispatch_fini = 0;
+	rc->kmpc_dispatch_init = 0;
+
+	rc->kmpc_static_fini = 0;
+	rc->kmpc_static_init = 0;
+
+	rc->hhb= 0;
+	rc->hhcb = 0;
+	rc->hhbf = 0;
+
+	rc->dispatch_next_to_static_init = 0;
+
+	rc->static_init_to_static_skewed_init = 0;
+	rc->static_skewed_init = 0;
 
 	/* Barrier - leader/follower */
 	init_waitqueue_head(&rc->waits_begin);
@@ -366,6 +438,7 @@ void __recreate_pids_list(struct remote_context *rc)
 	rc->pids[0] = current->pid;
 
 	read_lock(&tasklist_lock);
+	/* Replace with goto */
 	while_each_thread(g, p) {
 		__check_ofs(ofs);
 		rc->pids[ofs] = p->pid;
@@ -479,6 +552,7 @@ static int __get_threads_cnt(void)
 	int cnt = 1; /* current */
 
 	read_lock(&tasklist_lock);
+	/* Replace with goto */
 	while_each_thread(g, p) {
 		cnt++;
 		//PIDPRINTK("%d ", p->pid);
@@ -672,78 +746,6 @@ void __find_conflict_two_threads(unsigned long addr, struct task_struct *target_
 	//printk("\t\t %llu\n", target_tsk->tso_wr_cnt);
 }
 
-int sync_server_local_conflictions(struct remote_context *rc)
-{
-	int i, j;
-	int local_wr_cnt = 0;
-
-    spin_lock(&rc->pids_lock);
-	// O(n^2): all threads compare with all threads
-    for (i = 0; i < MAX_ALIVE_THREADS; i++) {
-		int pid, ii;
-		struct task_struct *tsk;
-
-        __check_ofs(i);
-		pid = rc->pids[i];
-        if (!pid)
-			goto all_done;
-
-		tsk = __get_task_struct(pid);
-		if (!tsk) {
-			spin_lock(&rc->pids_lock);
-			__print_pids(rc);
-			spin_unlock(&rc->pids_lock);
-			BUG();
-		}
-
-#if !GLOBAL
-		local_wr_cnt += tsk->tso_wr_cnt;
-#else
-
-#endif
-
-		/* addrs_addrs: O(n^2): all addrs compare with all addrs */
-		for (ii = 0; ii < tsk->tso_wr_cnt; ii++) {
-			unsigned long addr = tsk->buffer_inv_addrs[ii];
-			bool is_saved = false;
-			if (!addr)
-				break; /* end of addr */
-
-//			printk("%s(): check %lx\n", __func__, addr);
-
-			/* compaer a addr with all addrs at all threads */
-			for (j = 0; j < MAX_ALIVE_THREADS; j++) {
-				int target_pid;
-				struct task_struct *target_tsk;
-				if (i == j) continue; // TODO: do a sanity check for this, if this happens, we still has to cheat it as a hashset.
-
-				__check_ofs(j);
-				target_pid = rc->pids[j];
-				if (!target_pid)
-					break;
-
-				target_tsk = __get_task_struct(target_pid);
-				if (!target_tsk) {
-					printk("[%d]i %d [%d]j %d\n", pid, i, target_pid, j);
-					BUG();
-				}
-
-				/* for addrs in target_thread */
-				__find_conflict_two_threads(addr, target_tsk, rc, &is_saved);
-			}
-			/* Warnning pids[] is 0/full */
-		}
-		//printk("\t %llu\n", tsk->tso_wr_cnt);
-    }
-	/* Warnning pids[] is 0/full */
-all_done:
-//#if LOCAL_CONFLICT_DBG
-	if (local_wr_cnt > 0)
-		printk("local_wr_cnt %d\n", local_wr_cnt);
-//#endif
-    spin_unlock(&rc->pids_lock);
-	return local_wr_cnt;
-}
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -926,6 +928,7 @@ int process_server_task_exit(struct task_struct *tsk)
 
 	// show_regs(task_pt_regs(tsk));
 
+	current_info_transfer_to_worker();
 	if (tsk->is_worker) {
 		collect_tso_wr(tsk);
 		return 0;
@@ -1248,6 +1251,7 @@ static void __terminate_remote_threads(struct remote_context *rc)
 
 	/* Terminate userspace threads. Tried to use do_group_exit() but it
 	 * didn't work */
+	//printk("[%d] thread cnt %d\n", current->pid, __get_threads_cnt());
 	rcu_read_lock();
 	for_each_thread(current, tsk) {
 		if (tsk->is_worker) continue;
@@ -1278,6 +1282,8 @@ static void __run_remote_worker(struct remote_context *rc)
 		if (!work) continue;
 
 		msg = ((struct pcn_kmsg_work *)work)->msg;
+		//printk("(remote) pid_to_tid %d\n",
+		//		__popcorn_get_tpid_at_remote(current->pid));
 
 		switch (msg->header.type) {
 		case PCN_KMSG_TYPE_TASK_MIGRATE:
@@ -1493,6 +1499,7 @@ static void __process_remote_works(void)
 				&current->remote_work_pended, HZ);
 		if (ret == 0) continue; /* timeout */
 
+		//smp_rmb(); /* This is not required */
 		req = (struct pcn_kmsg_message *)current->remote_work;
 		current->remote_work = NULL;
 		smp_wmb();

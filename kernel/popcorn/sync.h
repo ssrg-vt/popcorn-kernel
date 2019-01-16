@@ -10,4 +10,14 @@
 #include <popcorn/sync.h>
 void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *page, spinlock_t *ptl);
 
+#if VM_TESTING
+#define X86_THREADS 8
+#define ARM_THREADS 8
+#else
+#define X86_THREADS 16
+#define ARM_THREADS 96
+#endif
+
+#define MAX_POPCORN_THREADS ARM_THREADS
+#define MAX_PF_MSG (ARM_THREADS * 10 * 2) // = (1000msg * 31pg per msg) pages is enough except sp (2000)
 #endif /* !_SYNC_H */

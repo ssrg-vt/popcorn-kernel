@@ -13,6 +13,7 @@
 #include <popcorn/debug.h>
 #include <popcorn/stat.h>
 #include <popcorn/bundle.h>
+#include "sync.h"
 
 static pcn_kmsg_cbftn pcn_kmsg_cbftns[PCN_KMSG_TYPE_MAX] = { NULL };
 
@@ -64,12 +65,14 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
 	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
-	if (atomic_inc_return(__nr_outstanding_requests + msg->header.type) > 96) {
+	if (atomic_inc_return(__nr_outstanding_requests + msg->header.type) >
+																MAX_PF_MSG) {
 		if (WARN_ON_ONCE("leaking received messages, ")) {
-			//printk("type %d\n", msg->header.type);
+			printk("type %d\n", msg->header.type);
 		}
 	}
 #endif
+
 	account_pcn_message_recv(msg);
 #ifdef CONFIG_POPCORN_STAT
 	t2e = ktime_get();
@@ -125,7 +128,11 @@ static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, struct 
 {
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(type < 0 || type >= PCN_KMSG_TYPE_MAX);
-	BUG_ON(size > PCN_KMSG_MAX_SIZE);
+	if (size > PCN_KMSG_MAX_SIZE) {
+		printk("size %lu PCN_KMSG_MAX_SIZE %lu\n", size, PCN_KMSG_MAX_SIZE);
+		dump_stack();
+		BUG();
+	}
 	BUG_ON(to < 0 || to >= MAX_POPCORN_NODES);
 	BUG_ON(to == my_nid);
 #endif

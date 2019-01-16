@@ -9,6 +9,8 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/stat.h>
 
+#include "types.h"
+
 static unsigned long long sent_stats[PCN_KMSG_TYPE_MAX] = {0};
 static unsigned long long recv_stats[PCN_KMSG_TYPE_MAX] = {0};
 
@@ -64,6 +66,8 @@ void account_pcn_rdma_read(size_t size)
 
 void fh_action_stat(struct seq_file *seq, void *);
 extern void pf_time_stat(struct seq_file *seq, void *v);
+extern void rcsi_time_stat(struct seq_file *seq, void *v);
+extern void god_view_flip(struct seq_file *seq, void *v);
 
 static int __show_stats(struct seq_file *seq, void *v)
 {
@@ -126,6 +130,9 @@ static int __show_stats(struct seq_file *seq, void *v)
 	//fh_action_stat(seq, v);
 	pf_time_stat(seq, v);
 #endif
+#if GOD_VIEW
+	god_view_flip(seq, NULL);
+#endif
 	return 0;
 }
 
@@ -149,6 +156,7 @@ static ssize_t __write_stats(struct file *file, const char __user *buffer, size_
 #ifdef CONFIG_POPCORN_STAT
 	pf_time_stat(NULL, NULL);
 #endif
+	rcsi_time_stat(NULL, NULL);
 	return size;
 }
 
