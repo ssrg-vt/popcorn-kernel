@@ -1,6 +1,7 @@
 #include <linux/module.h>
 #include <linux/bitmap.h>
 #include <linux/seq_file.h>
+#include <linux/delay.h>
 
 #include <rdma/rdma_cm.h>
 #include <popcorn/stat.h>
@@ -11,6 +12,7 @@
 #define RDMA_PORT 11453
 #define RDMA_ADDR_RESOLVE_TIMEOUT_MS 5000
 
+/* this is related to rb size */
 #define MAX_RECV_DEPTH	((PAGE_SIZE << (MAX_ORDER - 1)) / PCN_KMSG_MAX_SIZE)
 #define MAX_SEND_DEPTH	(MAX_RECV_DEPTH)
 #define RDMA_SLOT_SIZE	(PAGE_SIZE * 2)
@@ -70,9 +72,10 @@ struct rdma_handle {
 	} state;
 	struct completion cm_done;
 
-	struct recv_work *recv_works;
-	void *recv_buffer;
-	dma_addr_t recv_buffer_dma_addr;
+	/* Support multi continuous phy addr mem regions */
+	struct recv_work *recv_works[MSG_POOL_SIZE];
+	void *recv_buffer[MSG_POOL_SIZE];
+	dma_addr_t recv_buffer_dma_addr[MSG_POOL_SIZE];
 
 	struct rdma_cm_id *cm_id;
 	struct ib_device *device;
@@ -145,8 +148,18 @@ static struct send_work *__get_send_work_map(struct pcn_kmsg_message *msg, size_
 	struct send_work *sw;
 	void *map_start = NULL;
 
+retry:
+	/* get a send work */
 	spin_lock_irqsave(&send_work_pool_lock, flags);
-	BUG_ON(!send_work_pool);
+	if (!send_work_pool) {
+		dump_stack();
+		BUG(); // 64k will triger this bug (req addr more -> get_work more)
+		spin_unlock_irqrestore(&send_work_pool_lock, flags);
+		printk(KERN_WARNING "send_work pool full type %d\n", msg->header.type);
+		//io_schedule();
+		udelay(100); /* rr msg usually takes only xx us */
+		goto retry;
+	}
 	sw = send_work_pool;
 	send_work_pool = sw->next;
 	spin_unlock_irqrestore(&send_work_pool_lock, flags);
@@ -154,6 +167,7 @@ static struct send_work *__get_send_work_map(struct pcn_kmsg_message *msg, size_
 	sw->done = NULL;
 	sw->flags = 0;
 
+	/* Get a buf */
 	if (!msg) {
 		struct rb_alloc_header *ah;
 		sw->addr = ring_buffer_get_mapped(&send_buffer,
@@ -596,17 +610,35 @@ int rdma_kmsg_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size, 
 void rdma_kmsg_done(struct pcn_kmsg_message *msg)
 {
 	/* Put back the receive work */
-	int ret;
+	int ret, i, index;
 	struct ib_recv_wr *bad_wr = NULL;
 	int from_nid = PCN_KMSG_FROM_NID(msg);
 	struct rdma_handle *rh = rdma_handles[from_nid];
-	int index = ((void *)msg - rh->recv_buffer) / PCN_KMSG_MAX_SIZE;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	bool found = false; // remove
+#endif
+	for (i = 0; i < MSG_POOL_SIZE ;i++) {
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		if (!rh->recv_buffer[i]) continue;
+#endif
+		if ((void *)msg >= rh->recv_buffer[i] &&
+			(void *)msg < rh->recv_buffer[i] + (PAGE_SIZE << (MAX_ORDER - 1))) {
+			index = ((void *)msg - rh->recv_buffer[i]) / PCN_KMSG_MAX_SIZE;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+			found = true; // remove
+#endif
+			break;
+		}
+	}
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
+	if (index < 0 || index >= MAX_RECV_DEPTH || !found)
+		printk(KERN_WARNING "i %d idx %d\n", i, index);
+	BUG_ON(!found); // remove
 	BUG_ON(index < 0 || index >= MAX_RECV_DEPTH);
 #endif
 
-	ret = ib_post_recv(rh->qp, &rh->recv_works[index].wr, &bad_wr);
+	ret = ib_post_recv(rh->qp, &rh->recv_works[i][index].wr, &bad_wr);
 	BUG_ON(ret || bad_wr);
 }
 
@@ -753,12 +785,13 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 			rdma_pd = NULL;
 			goto out_err;
 		}
+		printk("ib_alloc_pd pass\n");
 	}
 
 	/* create completion queue */
 	if (!rh->cq) {
 		struct ib_cq_init_attr cq_attr = {
-			.cqe = MAX_SEND_DEPTH + MAX_RECV_DEPTH + NR_RDMA_SLOTS,
+			.cqe = (MAX_SEND_DEPTH) + (MAX_RECV_DEPTH * MSG_POOL_SIZE) + NR_RDMA_SLOTS,
 			.comp_vector = 0,
 		};
 
@@ -768,9 +801,11 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 			ret = PTR_ERR(rh->cq);
 			goto out_err;
 		}
+		printk("ib_create_cq pass\n");
 
 		ret = ib_req_notify_cq(rh->cq, IB_CQ_NEXT_COMP);
 		if (ret < 0) goto out_err;
+		printk("rdma_create_cq pass\n");
 	}
 
 	/* create queue pair */
@@ -779,10 +814,10 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 			.event_handler = NULL, // qp_event_handler,
 			.qp_context = rh,
 			.cap = {
-				.max_send_wr = MAX_SEND_DEPTH,
-				.max_recv_wr = MAX_RECV_DEPTH + NR_RDMA_SLOTS,
-				.max_send_sge = PCN_KMSG_MAX_SIZE >> PAGE_SHIFT,
-				.max_recv_sge = PCN_KMSG_MAX_SIZE >> PAGE_SHIFT,
+				.max_send_wr = (MAX_SEND_DEPTH * MSG_POOL_SIZE),
+				.max_recv_wr = (MAX_RECV_DEPTH * MSG_POOL_SIZE) + NR_RDMA_SLOTS,
+				.max_send_sge = (PCN_KMSG_MAX_SIZE >> PAGE_SHIFT), // per msg
+				.max_recv_sge = (PCN_KMSG_MAX_SIZE >> PAGE_SHIFT), // per msg
 			},
 			.sq_sig_type = IB_SIGNAL_REQ_WR,
 			.qp_type = IB_QPT_RC,
@@ -790,10 +825,30 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 			.recv_cq = rh->cq,
 		};
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+		struct ib_device_attr dev_cap;
+		int rc;
+		rc = ib_query_device(rh->device, &dev_cap);
+		BUG_ON(rc);
+		printk("dev_cap.max_qp_wr %d dev_cap.max_sge %d\n",
+						dev_cap.max_qp_wr, dev_cap.max_sge);
+		printk("DEPTH s %lu r %lu rdma slot %lu kmsg_size %lu\n", MAX_SEND_DEPTH,
+						MAX_RECV_DEPTH, NR_RDMA_SLOTS, PCN_KMSG_MAX_SIZE);
+		printk("s %lu r %lu ssg %lu rsg %lu\n", MAX_SEND_DEPTH * MSG_POOL_SIZE,
+						(MAX_RECV_DEPTH * MSG_POOL_SIZE)+ NR_RDMA_SLOTS,
+						(PCN_KMSG_MAX_SIZE >> PAGE_SHIFT),
+						(PCN_KMSG_MAX_SIZE >> PAGE_SHIFT));
+		BUG_ON(qp_attr.cap.max_send_wr > dev_cap.max_qp_wr ||
+				qp_attr.cap.max_recv_wr  > dev_cap.max_qp_wr ||
+				qp_attr.cap.max_send_sge > dev_cap.max_sge ||
+				qp_attr.cap.max_recv_sge > dev_cap.max_sge);
+#endif
+
 		ret = rdma_create_qp(rh->cm_id, rdma_pd, &qp_attr);
 		if (ret) goto out_err;
 		rh->qp = rh->cm_id->qp;
 	}
+	printk("rdma_create_qp pass\n");
 	return 0;
 
 out_err:
@@ -802,61 +857,69 @@ out_err:
 
 static __init int __setup_buffers_and_pools(struct rdma_handle *rh)
 {
-	int ret = 0, i;
+	int ret = 0, i, j;
 	dma_addr_t dma_addr;
 	char *recv_buffer = NULL;
 	struct recv_work *rws = NULL;
 	const size_t buffer_size = PCN_KMSG_MAX_SIZE * MAX_RECV_DEPTH;
 
-	/* Initalize receive buffers */
-	recv_buffer = kmalloc(buffer_size, GFP_KERNEL);
-	if (!recv_buffer) {
-		return -ENOMEM;
+	BUG_ON(buffer_size > (PAGE_SIZE << (MAX_ORDER - 1)));
+	for (j = 0; j < MSG_POOL_SIZE; j++) {
+		printk("recv pool %d\n", j);
+		/* Initalize receive buffers */
+		recv_buffer = kmalloc(buffer_size, GFP_KERNEL);
+		if (!recv_buffer) {
+			return -ENOMEM;
+		}
+		rh->recv_buffer[j] = recv_buffer;
+
+		rws = kmalloc(sizeof(*rws) * MAX_RECV_DEPTH, GFP_KERNEL);
+		if (!rws) {
+			ret = -ENOMEM;
+			goto out_free;
+		}
+		rh->recv_works[j] = rws;
+
+		/* Populate receive buffer and work requests */
+		dma_addr = ib_dma_map_single(
+				rh->device, recv_buffer, buffer_size, DMA_FROM_DEVICE);
+		ret = ib_dma_mapping_error(rh->device, dma_addr);
+		if (ret) goto out_free;
+		rh->recv_buffer_dma_addr[j] = dma_addr;
+
+		for (i = 0; i < MAX_RECV_DEPTH; i++) {
+			struct recv_work *rw = rws + i;
+			struct ib_recv_wr *wr, *bad_wr = NULL;
+			struct ib_sge *sgl;
+
+			rw->header.type = WORK_TYPE_RECV;
+			rw->dma_addr = dma_addr + PCN_KMSG_MAX_SIZE * i;
+			rw->addr = recv_buffer + PCN_KMSG_MAX_SIZE * i;
+
+			sgl = &rw->sgl;
+			sgl->lkey = rdma_pd->local_dma_lkey;
+			sgl->addr = rw->dma_addr;
+			sgl->length = PCN_KMSG_MAX_SIZE;
+
+			wr = &rw->wr;
+			wr->sg_list = sgl;
+			wr->num_sge = 1;
+			wr->next = NULL;
+			wr->wr_id = (u64)rw;
+
+			ret = ib_post_recv(rh->qp, wr, &bad_wr);
+			if (ret || bad_wr) goto out_free;
+		}
 	}
-	rws = kmalloc(sizeof(*rws) * MAX_RECV_DEPTH, GFP_KERNEL);
-	if (!rws) {
-		ret = -ENOMEM;
-		goto out_free;
-	}
-
-	/* Populate receive buffer and work requests */
-	dma_addr = ib_dma_map_single(
-			rh->device, recv_buffer, buffer_size, DMA_FROM_DEVICE);
-	ret = ib_dma_mapping_error(rh->device, dma_addr);
-	if (ret) goto out_free;
-
-	for (i = 0; i < MAX_RECV_DEPTH; i++) {
-		struct recv_work *rw = rws + i;
-		struct ib_recv_wr *wr, *bad_wr = NULL;
-		struct ib_sge *sgl;
-
-		rw->header.type = WORK_TYPE_RECV;
-		rw->dma_addr = dma_addr + PCN_KMSG_MAX_SIZE * i;
-		rw->addr = recv_buffer + PCN_KMSG_MAX_SIZE * i;
-
-		sgl = &rw->sgl;
-		sgl->lkey = rdma_pd->local_dma_lkey;
-		sgl->addr = rw->dma_addr;
-		sgl->length = PCN_KMSG_MAX_SIZE;
-
-		wr = &rw->wr;
-		wr->sg_list = sgl;
-		wr->num_sge = 1;
-		wr->next = NULL;
-		wr->wr_id = (u64)rw;
-
-		ret = ib_post_recv(rh->qp, wr, &bad_wr);
-		if (ret || bad_wr) goto out_free;
-	}
-	rh->recv_works = rws;
-	rh->recv_buffer = recv_buffer;
-	rh->recv_buffer_dma_addr = dma_addr;
-
 	return ret;
 
 out_free:
-	if (recv_buffer) kfree(recv_buffer);
-	if (rws) kfree(rws);
+	for (j = 0; j < MSG_POOL_SIZE; j++) {
+		if (rh->recv_buffer[j])
+			kfree(rh->recv_buffer[j]);
+		if (rh->recv_works[j])
+			kfree(rh->recv_works[j]);
+	}
 	return ret;
 }
 
@@ -951,9 +1014,8 @@ static int __init __setup_work_request_pools(void)
 		if (ret) goto out_unmap;
 		send_buffer.dma_addr_base[i] = dma_addr;
 	}
-
 	/* Initialize send work request pool */
-	for (i = 0; i < MAX_SEND_DEPTH; i++) {
+	for (i = 0; i < MAX_SEND_DEPTH * MSG_POOL_SIZE; i++) {
 		struct send_work *sw;
 
 		sw = kzalloc(sizeof(*sw), GFP_KERNEL);
@@ -973,11 +1035,11 @@ static int __init __setup_work_request_pools(void)
 		sw->wr.num_sge = 1;
 		sw->wr.opcode = IB_WR_SEND;
 		sw->wr.send_flags = IB_SEND_SIGNALED;
+		//sw->id = j; /* does this matter? if not just for MAX_SEND_DEPTH * MSG_POOL_SIZE here in the beginning (=>remove id) - trying now */
 
 		sw->next = send_work_pool;
 		send_work_pool = sw;
 	}
-
 	/* Initalize rdma work request pool */
 	__refill_rdma_work(NR_RDMA_SLOTS);
 	return 0;
@@ -1258,15 +1320,18 @@ void __exit exit_kmsg_rdma(void)
 	pcn_kmsg_set_transport(NULL);
 
 	for (i = 0; i < MAX_NUM_NODES; i++) {
+		int j;
 		struct rdma_handle *rh = rdma_handles[i];
 		set_popcorn_node_online(i, false);
 		if (!rh) continue;
 
-		if (rh->recv_buffer) {
-			ib_dma_unmap_single(rh->device, rh->recv_buffer_dma_addr,
-					PCN_KMSG_MAX_SIZE * MAX_RECV_DEPTH, DMA_FROM_DEVICE);
-			kfree(rh->recv_buffer);
-			kfree(rh->recv_works);
+		for (j = 0; j < MSG_POOL_SIZE; j++) {
+			if (rh->recv_buffer[j]) {
+				ib_dma_unmap_single(rh->device, rh->recv_buffer_dma_addr[j],
+						PCN_KMSG_MAX_SIZE * MAX_RECV_DEPTH, DMA_FROM_DEVICE);
+				kfree(rh->recv_buffer[j]);
+				kfree(rh->recv_works[j]);
+			}
 		}
 
 		if (rh->qp && !IS_ERR(rh->qp)) rdma_destroy_qp(rh->cm_id);

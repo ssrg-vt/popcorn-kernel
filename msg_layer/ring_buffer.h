@@ -1,7 +1,9 @@
 #ifndef __POPCORN_RING_BUFFER_H__
 #define __POPCORN_RING_BUFFER_H__
 
-#define RB_MAX_CHUNKS	16
+#define MSG_POOL_SIZE (16 * 7) /* send/recv pool */ /* 16*8 doesn't work*/
+#define RB_MAX_CHUNKS	128 /* Max. Actual used size  RB_NR_CHUNKS */
+#define RB_NR_CHUNKS	128 /* Actual used size */
 #define RB_CHUNK_ORDER	(MAX_ORDER - 1)
 #define RB_CHUNK_SIZE	(PAGE_SIZE << RB_CHUNK_ORDER)
 

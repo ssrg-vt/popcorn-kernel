@@ -8,7 +8,6 @@
 #define RB_HEADER_MAGIC 0xa9
 #endif
 #define RB_ALIGN 64
-#define RB_NR_CHUNKS 8
 
 struct ring_buffer_header {
 	bool reclaim:1;
@@ -166,6 +165,8 @@ void *ring_buffer_get_mapped(struct ring_buffer *rb, size_t size, dma_addr_t *dm
 	/* Is buffer full? */
 	if (rb->wraparounded && rb->head_chunk == rb->tail_chunk) {
 		if (rb->tail + sizeof(*header) + size > rb->head) {
+			//printk(KERN_ERR "rb full roll back to kmalloc!!!\n");
+			WARN_ON_ONCE("rb full roll back to kmalloc!!!\n");
 			spin_unlock_irqrestore(&rb->lock, flags);
 			return NULL;
 		}
