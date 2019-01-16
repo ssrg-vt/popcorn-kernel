@@ -15,37 +15,100 @@
 #include <linux/semaphore.h>
 #include <linux/hashtable.h>
 
-#define FAULTS_HASH 31
-#define GLOBAL 1 /* 1: 1 list for a system 0: 1 list per thread */
-// !GLOBAL is note working becasue it has old version code
-#define NOCOPY_NODE 0 /* this node doesn't have to generate diff and alway will be the owner if conflicting */
 
-#define HASH_GLOBAL 1
+/*** tunning knobs ***/
+/* General */
+#if VM_TESTING
+#define FAULTS_HASH 32
+#else
+#if CONFIG_X86_64
+#define FAULTS_HASH 32
+#else
+#define FAULTS_HASH 192
+#endif
+#endif
 
-#define GOD_VIEW 1
+/* this node doesn't have to generate diff and
+ * alway will be the owner if conflicting */
+#define NOCOPY_NODE 0
 
-#define OMP_REGION_HASH_BITS 10
+/* Mimic ideal case - w/o trasffering page */
+#define MW_IDEAL 0
+#define SI_IDEAL 0
+
+/* -- Log time -- */
+// mw tso_wr_inc
+// sir
+// siw
+
+
+/* -- MW -- */
+// per msg
+// int per_inv_batch_max = MAX_WRITE_INV_BUFFERS;
+
+/* -- PF -- */
+/* Prefetch enable thredshold */
+#define PREFETCH_THRESHOLD (((PCN_KMSG_MAX_SIZE / PAGE_SIZE) - 1) / 2)
+/* Upper bound per msg - prefetch pgs per msg */
+#define MAX_PF_REQ (int)(PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE)
+
+/* MW SMART OMP REGION */
+#if CONFIG_X86_64
+#define VAIN_THRESHOLD ARM_THREADS
+#else
+#define VAIN_THRESHOLD X86_THREADS
+#endif
+#define VAIN_REGION_REPEAT_THRESHOLD 10 /* consecutive non-benefit regions */
+#define BENEFIT_REGION_REPEAT_THRESHOLD 5 /* flip threshold */
+/*** tunning knobs ***/
+
+
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+#define STRONG_CHECK_SANITY 1
+#else
+#define STRONG_CHECK_SANITY 0
+#endif
+
+#define OMP_REGION_HASH_BITS 15
+
+
+/* !GLOBAL is note working becasue it has old version code */
+/* TODO: remove everything !GLOBAL */
+#define GLOBAL 1 /* 1: 1 list for the system, 0: 1 list per thread */
+/* TODO: remove everything !HASH_GLOBAL */
+#define HASH_GLOBAL 1	/* hash list to find mw conflictions */
+
 
 /* Multiple writer protocol -
  * by providing postpone inv (batch invs) and merging in the end
  */
-#define MW 1
+#define MW 1 // = sync.c POPCORN_TSO_BARRIER (action) + page_server.c  ORIGIN_TSO & REMOTE_TSO (collect)
+
+#if MW
+#define ORIGIN_TSO 1 // TSO COLLECT ENABLE
+#define REMOTE_TSO 1 // TSO COLLECT ENABLE
+#define POPCORN_TSO_BARRIER 1 // TSO ACTION ENABLE // region create -> pf rely on
+#define SMART_REGION 1 /* PAPER SMART REGION ON/OFF */
+#else
+#define ORIGIN_TSO 0 // TSO COLLECT ENABLE
+#define REMOTE_TSO 0 // TSO COLLECT ENABLE
+#define POPCORN_TSO_BARRIER 1 // TSO ACTION ENABLE // region create -> pf rely on
+#define SMART_REGION 1
+#endif
 
 /* Prefetch */
+#define GOD_VIEW 1
 #define PREFETCH 1
-#define MAX_PF_REQ (int)(PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE)	// () is so important!!!
+
+/* statis */
+#define STATIS 1 /* show in the end */
+
+
 #define PREFETCH_FAIL 0x0001
 #define PREFETCH_SUCCESS 0x0002
 
-/**
- * OMP region
- */
-//#define VAIN_THRESHOLD (PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE)
-#define VAIN_THRESHOLD 50
-//#define VAIN_REGION_REPEAT_THRESHOLD 5 /* consecutive non-benefit regions then skip forever */
-//#define BENEFIT_REGION_REPEAT_THRESHOLD 2 /* consecutive non-benefit regions then skip forever */
-#define VAIN_REGION_REPEAT_THRESHOLD 10 /* consecutive non-benefit regions then skip forever */
-#define BENEFIT_REGION_REPEAT_THRESHOLD 5 /* consecutive non-benefit regions then skip forever */
+#define MICROSECOND (1000 * 1000)
+#define NANOSECOND (1000 * 1000 * 1000)
 
 /* omp_region_type */
 #define RCSI_UNKNOW 0x00
@@ -96,10 +159,40 @@ struct remote_context {
 	atomic_t pendings_end; 		/* for leader and follower race condition */
 	atomic_t scatter_pendings; 	/* for the last scatter to wake up leader */
 
+	/* barrier cnt */
+	unsigned long tso_begin_cnt;
+	unsigned long tso_fence_cnt;
+	unsigned long tso_end_cnt;
+
+	unsigned long tso_begin_m_cnt;
+	unsigned long tso_fence_m_cnt;
+	unsigned long tso_end_m_cnt;
+
+	unsigned long kmpc_barrier_cnt;
+	unsigned long kmpc_cancel_barrier_cnt;
+
+	unsigned long kmpc_reduce;
+	unsigned long kmpc_end_reduce;
+	unsigned long kmpc_reduce_nowait;
+	unsigned long kmpc_dispatch_fini;
+	unsigned long kmpc_dispatch_init;
+
+	unsigned long kmpc_static_fini;
+	unsigned long kmpc_static_init;
+
+	unsigned long hhb;
+	unsigned long hhcb;
+	unsigned long hhbf;
+
+	unsigned long dispatch_next_to_static_init;
+
+	unsigned long static_init_to_static_skewed_init;
+	unsigned long static_skewed_init;
+
 	/* Track live threads */
 	unsigned short threads_cnt; /* alive threads */
-	//unsigned short migrated; /* -> out_threads */
-	int out_threads; // TODO renam. keep tracking current on-node thread cnt
+	//unsigned short migrated; /* == out_threads */
+	int out_threads; /* TODO rename. Keep tracking current on-node thread cnt */
 	int pids[MAX_ALIVE_THREADS];
 	spinlock_t pids_lock;
 
@@ -114,9 +207,11 @@ struct remote_context {
 	spinlock_t inv_lock;
 	int inv_cnt; /* Per region */
 	int remote_fence;
-	unsigned long inv_addrs[MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS]; /* for sending */
+	/* for sending */
+	unsigned long inv_addrs[MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS];
 #if !HASH_GLOBAL
-	char *inv_pages; // [MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS][PAGE_SIZE]; // will remove
+	// remove this TODO
+	char *inv_pages; // [MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS][PAGE_SIZE];
 #endif
 	/* Application wide */
 	unsigned long sys_rw_cnt;
@@ -128,14 +223,12 @@ struct remote_context {
 
 	unsigned long sys_local_conflict_cnt; /* more details */
 #else
-	/* per-thread */ // - TODO check the global time is right
 	spinlock_t inv_lock_t[MAX_ALIVE_THREADS];
 	int inv_cnt_t[MAX_ALIVE_THREADS];
 	char *inv_pages_t[MAX_ALIVE_THREADS]; //[MAX_ALIVE_THREADS][MAX_WRITE_INV_BUFFERS][PAGE_SIZE];
 	unsigned long time_t[MAX_ALIVE_THREADS][MAX_WRITE_INV_BUFFERS];
 
 	int lconf_cnt; /* local_conflict_addr_cnt */
-	//int inv_cnt; /* local invalidation addr cnt */ // == local_wr_cnt (local variable now)
 #endif
 	atomic_t diffs;			/* per region + async + concurrent */
 	atomic_t per_barrier_reset_done; /* per region + async + concurrent */
@@ -149,17 +242,18 @@ struct remote_context {
 	/* bool leader back // can cover diffs but conor case? */
 	atomic_t doing_diff_cnt;
 
-	// prefetch
+	/* Prefetch */
 	atomic_t pf_ongoing_cnt;            /* Ongoing prefetch cnt XXXXX BUG XXXXX*/
 	spinlock_t pf_ongoing_lock;         /* Ongoing prefetch mapping lock */
 	struct list_head pf_ongoing_list;   /* Ongoing prefetch mapping list head */
 	int wrong_hist;
 	int wrong_hist_no_vma;
-	// statis
+
+	/* Statis */
 	atomic_t pf_succ_cnt;
 
 	/* for region dbg buffering */
-	char name[256];
+	char name[80];
 	int line;
 };
 
@@ -182,7 +276,7 @@ struct fault_handle {
 	struct completion *complete;
 };
 
-// prefetch
+/* Prefetch */
 struct prefetch_list_body {
     unsigned long addr;
     //bool is_write;
@@ -518,6 +612,17 @@ DEFINE_PCN_KMSG(page_diff_apply_request_t, PAGE_DIFF_APPLY_REQUEST_FIELDS);
 	unsigned long remote_region_type;
 DEFINE_PCN_KMSG(remote_baiier_done_request_t, REMOTE_BARRIER_DONE_REQUEST_FIELDS);
 
+#define GLOBAL_BARRIER_FIELDS
+DEFINE_PCN_KMSG(remote_popcorn_barrier_request_t, GLOBAL_BARRIER_FIELDS);
+//	pid_t origin_pid;
+//	unsigned long remote_region_type;
+
+#define TOGGLE_MEMORY_PATTERN_TRACE_FIELDS \
+int origin_ws; \
+bool onoff;
+DEFINE_PCN_KMSG(toggle_memory_pattern_trace_request_t, TOGGLE_MEMORY_PATTERN_TRACE_FIELDS);
+DEFINE_PCN_KMSG(toggle_memory_pattern_trace_response_t, TOGGLE_MEMORY_PATTERN_TRACE_FIELDS);
+
 /**
  * Futex
  */
@@ -604,18 +709,13 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 	w->msg = msg;
 	INIT_WORK(&w->work, handler);
 
-	/* TODO PERF: currently enque cpu is decided by irq.
-	 * 1. run app and check irq if not balance do 2
-	 * 2. workload balancing by ourself */
-	//smp_wmb();
+	//smp_wmb(); /* No need */
 	if (msg->header.type != PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE) {
-//		&& msg->header.type != PCN_KMSG_TYPE_PAGE_MERGE_REQUEST) {
 		BUG_ON(!queue_work(wq, &w->work));
-//	} else if (msg->header.type == PCN_KMSG_TYPE_PAGE_MERGE_REQUEST) {
-		//BUG_ON(!queue_work(popcorn_wq3, &w->work)); // this makes deadline faster
-		//BUG_ON(!queue_work_on(mw_cpu, popcorn_wq3, &w->work));
-//		BUG_ON(!queue_work_on(mw_cpu, wq, &w->work));
 #if 0
+		/* TODO PERF: currently enque cpu is decided by irq.
+		 * 1. run app and check irq if not balance do 2
+		 * 2. workload balancing by ourself */
 		mw_cpu++;
 #if CONFIG_X86_64
 		//if (mw_cpu >= (16/4))
@@ -627,7 +727,6 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 #endif
 			mw_cpu = 0;
 #endif
-	//} else if (msg->header.type == PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE) {
 	} else { // == PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE
 		//printk("\t\t1: \n");
 		//show_workqueue_state();
@@ -637,17 +736,8 @@ static inline int __handle_popcorn_work(struct pcn_kmsg_message *msg, void (*han
 
 		//show_pwq(pwq = per_cpu_ptr(wq->cpu_pwqs, cpu);
 	}
-	//else {
-	//}
-//	smp_wmb(); // so far so good
+	//smp_wmb(); /* No need */
 
-#if 0
-	if (msg->header.type == PCN_KMSG_TYPE_REMOTE_PREFETCH_RESPONSE) {
-		remote_prefetch_response_t *res = (remote_prefetch_response_t *)msg;
-		printk("\t\t<-wq: done reqs hash 0x%lx #%d\n",
-					res->god_omp_hash, res->pf_req_id);
-	}
-#endif
 	return 0;
 }
 
