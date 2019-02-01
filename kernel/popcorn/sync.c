@@ -94,6 +94,7 @@ atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 
 /*** Perf critical logs ***/
 #define FINAL_DATA 1
+#define POST_ICDCS19_TESTING 0
 
 #if FINAL_DATA
 /*** perf - time statis ***/
@@ -321,7 +322,10 @@ DEFINE_RWLOCK(sys_region_hash_lock);
 bool is_god = true;
 
 /* Violation section detecting */
+#if REGION_CHECK
 static bool print = false;
+#endif
+
 #if !SMART_REGION
 static bool print_end = false;
 #endif
@@ -542,7 +546,7 @@ int TO_THE_OTHER_NID(void)
 void mw_results(struct remote_context *rc)
 {
 #if MW_TIME
-#if CONFIG_X86_64
+#ifdef CONFIG_X86_64
 	long int divider = X86_THREADS;
 #else
 	long int divider = ARM_THREADS;
@@ -637,12 +641,12 @@ void mw_results(struct remote_context *rc)
 
 void pf_results(struct remote_context *rc)
 {
-#if CONFIG_X86_64
+#if PF_TIME
+#ifdef CONFIG_X86_64
 	long int divider = X86_THREADS;
 #else
 	long int divider = ARM_THREADS;
 #endif
-#if PF_TIME
 	printk("======================\n");
 	printk("=== PF parameters ===\n");
 	printk("======================\n");
@@ -1537,7 +1541,7 @@ void __region_skip_cnt_inc(struct omp_region *region)
 void inline ______smart_region_debug(struct remote_context *rc, struct omp_region *pos)
 {
 #if SMART_REGION_DBG
-#if CONFIG_X86_64
+#ifdef CONFIG_X86_64
 	long int divider = X86_THREADS;
 #else
 	long int divider = ARM_THREADS;
@@ -2252,7 +2256,7 @@ extern void sync_clear_page_owner(int nid, struct mm_struct *mm, unsigned long a
 /******
  * If doing ownership maintain here, more local redunadant hash collision.
  */
-void __maintain_ownership_serial(void)
+void __maintain_local_ownership_serial(void)
 {
 	int bkt;
 	struct rcsi_work *pos;
@@ -2277,11 +2281,18 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 	int sent_cnt = 0; /* aka total_sent_cnt */
 	bool zero_case;
 	int local_wr_cnt;
-#if CONFIG_X86_64
+/* consider remote core cnt (icdcs19 data) */
+#ifdef CONFIG_X86_64
 	int other_node_cpus = ARM_THREADS;
 #else
 	int other_node_cpus = X86_THREADS;
 #endif
+/* consider local core cnt */
+//#ifdef CONFIG_X86_64
+//	int other_node_cpus = X86_THREADS;
+//#else
+//	int other_node_cpus = ARM_THREADS;
+//#endif
 	/* max inv addr per msg */
 #if MW_CONSIDER_CPU
 	int total_sent_cnt = 0; /* aka sent_cnt */
@@ -2300,13 +2311,14 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 	BUG_ON(rc->inv_cnt > MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
 
 #if !GLOBAL
+	#if 0
 	/* implementation - local */
 	local_wr_cnt = sync_server_local_conflictions(rc);
 	/* dbg */
 	if (rc->lconf_cnt)
 		BARRMPRINTK("local_conflict_addr_cnt %d\n", rc->lconf_cnt);
 	BUG_ON(rc->lconf_cnt > MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
-
+	#endif
 #else
 #if HASH_GLOBAL
 	/* no collistion */
@@ -2315,15 +2327,18 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 	rc->sys_rw_cnt += rc->inv_cnt;
 #endif
 	/* redo ownership maintaining in serial phase for corner cases */
-	__maintain_ownership_serial();
+	__maintain_local_ownership_serial();
 #else
+	#if 0
 	/* implementation - global */
 	local_wr_cnt = sync_server_local_serial_conflictions(rc);
 #if MW_TIME
 	rc->sys_rw_cnt += local_wr_cnt;
 #endif
+	#endif
 #endif
 #endif
+
 	/* RC: make sure list is ready */
 	rc->ready = true;
 	rc->local_merge_id++;
@@ -2345,7 +2360,7 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 #endif
 
 	/* general */
-	/* scatters - send - even send when 0 */
+	/* scatters - send - even when 0 */
 	if (local_wr_cnt == 0) { /* special zero case 0/0 */
 		zero_case = true;
 		iter = 0; /* total == 0 iter == 0 */
@@ -2522,7 +2537,7 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 		BUG_ON(sent_cnt != local_wr_cnt);
 	}
 #endif
-#endif
+#endif /** MW_CONSIDER_CPU end **/
 
 
 /** version2 - batch oriented **/
@@ -2592,7 +2607,8 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 		if (zero_case)	/* redundant? */
 			break;
 	} while (sent_cnt < local_wr_cnt);
-#endif
+#endif /** !MW_CONSIDER_CPU end **/
+
 #if MW_TIME
 	mw_find_conf_sends = ktime_get();
 #endif
@@ -2878,13 +2894,13 @@ int __find_collision_btw_nodes_at_remote(page_merge_request_t *req, struct remot
 		if (rcsi_w)
 			conflict = true;
 #else // remove
-		for (j = 0; j < rc->inv_cnt; j++) {
-			unsigned long addr = rc->inv_addrs[j];
-			if (req_addr == addr) {
-				conflict = true;
-				break;
-			}
-		}
+//		for (j = 0; j < rc->inv_cnt; j++) {
+//			unsigned long addr = rc->inv_addrs[j];
+//			if (req_addr == addr) {
+//				conflict = true;
+//				break;
+//			}
+//		}
 #endif //remove
 
 		if (!req_addr) {
@@ -2921,6 +2937,7 @@ int __find_collision_btw_nodes_at_remote(page_merge_request_t *req, struct remot
 #else
 	BUG_ON("Not supprot for PER-THREAD list");
 #endif
+
 	/* cross check */
 #if MW_TIME
 	rc->remote_sys_ww_cnt += conflict_cnt; /* ww_cnt is a bad name */
@@ -3411,7 +3428,7 @@ void current_info_transfer_to_worker(void)
 void collect_tso_wr(struct task_struct *tsk)
 {
 #if STATIS // put for all variables
-#if CONFIG_X86_64
+#ifdef CONFIG_X86_64
 	long int divider = X86_THREADS;
 #else
 	long int divider = ARM_THREADS;
@@ -3781,6 +3798,7 @@ static int __popcorn_tso_fence(int id, void __user * file, unsigned long omp_has
 #if MW_TIME
 		mw_start = ktime_get();
 #endif
+		/* Main MW protocol time */
 		//if (current->tso_region){printk("MERGE wait\n");}
 		__locally_find_conflictions(TO_THE_OTHER_NID(), rc);
 		//if (current->tso_region){printk("MERGE passed\n");}
@@ -3922,7 +3940,11 @@ static int __popcorn_tso_end(int id, void __user * file, unsigned long omp_hash,
 // TODO
 
 // 11/12 testing
-//	__popcorn_tso_fence(id, file, omp_hash, a, b);
+#if POST_ICDCS19_TESTING
+	//__popcorn_tso_fence(id, file, omp_hash, a, b);
+#else
+	__popcorn_tso_fence(id, file, omp_hash, a, b);
+#endif
 
 // TODO
 // TODO try to remove __popcorn_tso_fence from end 12/12 remove done
@@ -4044,7 +4066,7 @@ SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned
 		//printk("kM/BLK: Completed %.6lf\n\n", omp_hash);
 		printk("\n"
 				"==========================================\n"
-				"KM/BLK: Completed %d is_god(%s) pf_cnt %ld\n"
+				"KM/BLK: Completed %lu is_god(%s) pf_cnt %ld\n"
 				"========================================\n\n",
 								omp_hash, is_god ? "O" : "X",
 									atomic64_read(&fp_cnt));
@@ -4168,7 +4190,7 @@ static void process_toggle_memory_pattern_trace_response(struct work_struct *wor
 /* Popcorn global barrier */
 static int handle_global_barrier_request(struct pcn_kmsg_message *msg)
 {
-	unsigned long flags;
+//	unsigned long flags;
 
 
 	// seems line this update confliction will happen
@@ -4549,11 +4571,14 @@ int __init popcorn_sync_init(void)
 	spin_lock_init(&popcorn_global_lock2);
 
 	/* larger MAX_MSG_SIZE -> more inv addr -> larger rc size */
-	printk("sizeof(*rc) %lu\n", sizeof(struct remote_context));
+	printk("sizeof(*rc) %lu >? (PAGE_SIZE << (MAX_ORDER - 1)) %lu\n",
+				sizeof(struct remote_context), (PAGE_SIZE << (MAX_ORDER - 1)));
 	WARN_ON(sizeof(struct remote_context) > (PAGE_SIZE << (MAX_ORDER - 1)));
-	printk("sizeof(*sys_region) %lu\n", sizeof(struct sys_omp_region));
+	printk("sizeof(*sys_region) %lu >? (PAGE_SIZE << (MAX_ORDER - 1))\n",
+				sizeof(struct sys_omp_region));
 	WARN_ON(sizeof(struct sys_omp_region) > (PAGE_SIZE << (MAX_ORDER - 1)));
 
+	printk("MAX_ORDER %d\n", MAX_ORDER);
 	printk("TODO prealloc pf_ongoing_map pool: %lu\n",
 							sizeof(struct pf_ongoing_map));
 
