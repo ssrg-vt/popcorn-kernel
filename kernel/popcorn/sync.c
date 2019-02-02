@@ -103,7 +103,7 @@ atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 #define TSO_TIME 0 // aka MW log time
 #define TSO_LOG_TIME 0 // testing
 #define GLOBAL_SYS_BAR_TIME 0
-#define OUTSIDE_REGION_DEBUG 1 // popcorn_stat - technically overhead free
+#define OUTSIDE_REGION_DEBUG 0 // popcorn_stat - technically overhead free
 #else
 #define PF_TIME 1
 #define MW_TIME 1
@@ -121,7 +121,7 @@ atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 #define PF_CONSIDER_CPU 0
 #else
 #define MW_CONSIDER_CPU 1 // TODO: use best ratio to test it
-#define PF_CONSIDER_CPU 1 // TODO: implemente
+#define PF_CONSIDER_CPU 1 // TODO: implemente (not implemented)
 #endif
 
 /*** minor features ****/
@@ -457,7 +457,6 @@ struct omp_region {
 
 	/* statis */
 	int in_region_inv_sum; // per region
-	int in_region_conflict_sum;
 
 	/* dynamic prefetch - region based
 	   Since this page is recorded, it's impossible to be out-of-boundry */
@@ -471,13 +470,15 @@ struct omp_region {
 
 	// log 1 to determin (needed? pf should use other interface )
 #if SMART_REGION_DBG
+#define MAX_STR 30
 	/* dbg */
 	/* readability */
-	char name[80];
+	char name[MAX_STR];
 	int line;
 	/* statis */
 	atomic_t total_cnt; // per thread
 	atomic_t skip_cnt; // per thread
+	int in_region_conflict_sum;
 #endif
 };
 
@@ -1130,7 +1131,9 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 	int pending_pf_req = 0;
 	struct pf_ongoing_map *pf_map;
 	struct prefetch_list_body pf_reqs[MAX_PF_REQ];
-	int r_cnt = sys_region->read_cnt;		// statis / dbg
+#if STATIS
+	int r_cnt = sys_region->read_cnt;
+#endif
 #if PF_TIME
 	ktime_t pf_kmalloc_start, pf_kmalloc_done, dt;
 #endif
@@ -1141,11 +1144,14 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 
 	hash_for_each_safe(sys_region->every_rregion_hash, bkt, tmp, fi, hentry) {
 		unsigned long addr = fi->addr;
-		struct fault_handle *fh = select_prefetch_page(addr);
+		struct fault_handle *fh = select_prefetch_page(addr); // TODO: post-icdcs removing locks
 #if STRONG_CHECK_SANITY
 		BUG_ON(!addr);
 #endif
+
+#if STATIS
 		r_cnt--;
+#endif
 		if (!fh)
 			continue;
 
@@ -1169,7 +1175,7 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 		}
 #endif
 		BUG_ON(!pf_map);
-		pf_map->fh[pf_nr_pages] = fh;
+		pf_map->fh[pf_nr_pages] = fh; // TODO: post-icdcs removing locks (chage pf response)
 		pf_map->addr[pf_nr_pages] = addr;
 
 		/* preparing msg */
@@ -1198,7 +1204,9 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 	}
 
 	if (pending_pf_req >= MAX_PF_MSG) {
+#if STATIS
 		sys_region->skip_r_cnt_msg_limit += r_cnt;
+#endif
 #if PERF_FULL_BULL_WARN
 		PCNPRINTK_ERR("*** skip - msg limit ***\n");
 #endif
@@ -1410,7 +1418,7 @@ void __dbg_si_addrs(unsigned long omp_hash, int region_cnt)
 
 void __show_si_addrs(struct remote_context *rc)
 {
-#if STATIS // put for all variables
+#if STATIS_END // put for all variables
 	struct hlist_node *tmp;
 	struct sys_omp_region *sys_region;
 	int bkt, pf_region_cnt = 0, r_cnt = 0, w_cnt = 0;
@@ -1648,12 +1656,12 @@ struct omp_region *__add_omp_region_hash(struct remote_context *rc, unsigned lon
 	region->vain_cnt = 0;
 	region->name[0] = 0;
 	region->line = 0;
+	region->in_region_conflict_sum = 0;
 #endif
 	region->read_fault_cnt = 0;
 	region->read_max = 0;
 	region->read_min = 0;
 	region->in_region_inv_sum = 0;
-	region->in_region_conflict_sum = 0;
 	region->ht_selector = false;
 	hash_init(region->per_region_hash);
 	rwlock_init(&region->per_region_hash_lock);
@@ -2643,7 +2651,7 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 #endif
 }
 
-extern int do_locally_inv_page(struct task_struct *tsk, unsigned long addr);
+extern int do_locally_inv_page(struct task_struct *tsk, struct mm_struct *mm, unsigned long addr);
 /* optimize: overwrite the vma buffer for performance */
 static void __make_diff(char *new, char *origin, page_diff_apply_request_t *req)
 {
@@ -2696,7 +2704,7 @@ static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct rem
 		*(req->diff_page + i) = 0;
 #endif
 
-	down_read(&tsk->mm->mmap_sem);
+	down_read(&tsk->mm->mmap_sem); // TODO: post-icdcs removing locks
 
 	vma = find_vma(tsk->mm, conflict_addr);
 	BUG_ON(!vma);
@@ -2741,7 +2749,7 @@ static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct rem
 #endif
 
 	pte_unmap(pte);
-	up_read(&tsk->mm->mmap_sem);
+	up_read(&tsk->mm->mmap_sem); // TODO: post-icdcs removing locks
 
 #if STRONG_CHECK_SANITY && !MW_IDEAL
 	/* immediately remote after working */
@@ -2787,7 +2795,7 @@ void __do_apply_diff(page_diff_apply_request_t *req, struct task_struct *tsk)
 	void *paddr;
 	BUG_ON(!conflict_addr);
 
-	down_read(&tsk->mm->mmap_sem);
+	down_read(&tsk->mm->mmap_sem); // TODO: post-icdcs removing locks
 
 	vma = find_vma(tsk->mm, conflict_addr);
 	BUG_ON(!vma);
@@ -2822,7 +2830,7 @@ void __do_apply_diff(page_diff_apply_request_t *req, struct task_struct *tsk)
 #endif
 
 	pte_unmap(pte);
-	up_read(&tsk->mm->mmap_sem);
+	up_read(&tsk->mm->mmap_sem); // TODO: post-icdcs removing locks
 }
 
 /* diff_req -> back[Local] */
@@ -2886,7 +2894,6 @@ int __find_collision_btw_nodes_at_remote(page_merge_request_t *req, struct remot
 		/* If no collision, inv.
 		 * If collision, if !NOCOPY_NODE, generate diffs + inv + send merge reeq */
 		unsigned long req_addr = wr_addrs[i];
-		int ret;
 		bool conflict = false;
 #if HASH_GLOBAL
 		/* !lock - concurrent read only */
@@ -2904,24 +2911,21 @@ int __find_collision_btw_nodes_at_remote(page_merge_request_t *req, struct remot
 #endif //remove
 
 		if (!req_addr) {
-			printk(KERN_ERR "\t\t\t[ar/%d/%3d] %3s 0x%lx\n", my_nid, i, "inv", req_addr);
+			printk(KERN_ERR "\t\t\t[ar/%d/%3d] %3s 0x%lx\n",
+								my_nid, i, "inv", req_addr);
 			BUG_ON(!req_addr);
 		}
 
 		if (!conflict) {
 			/* optimize: delay */
 			SYNCPRINTK3("\t\t\t[ar/%d/%3d] %3s 0x%lx\n", my_nid, i, "inv", req_addr);
-			ret = do_locally_inv_page(tsk, req_addr);
-			if (ret)
-				BUG();
+			do_locally_inv_page(tsk, tsk->mm, req_addr);
 		} else { /* both will detect the same conflict addrs */
 			conflict_cnt++; /* maintain meta to sync */
 			SYNCPRINTK3("\t\t\t[ar/%d/%3d] %3s 0x%lx\n", my_nid, i, "ww", req_addr);
 			if (my_nid != NOCOPY_NODE) {
 				/* optimize: perf: batch */
-				ret = do_locally_inv_page(tsk, req_addr);
-				if (ret)
-					BUG();
+				do_locally_inv_page(tsk, tsk->mm, req_addr);
 				__make_diffs_send_back_at_remote(tsk, rc, j, from_nid, req_addr);
 			} else { /* I'm the owner */
 				if (my_nid == 0) {
@@ -2946,11 +2950,13 @@ int __find_collision_btw_nodes_at_remote(page_merge_request_t *req, struct remot
 	smp_wmb();
 	// only work at origin
 	//printk("test id %d\n", tsk->tso_region_id);
+#if SMART_REGION_DBG
 	if (tsk->tso_region_id) {
 		struct omp_region *region = __omp_region_hash(rc, tsk->tso_region_id);
 		if (region) // only work for NOCOPY = 0
 			region->in_region_conflict_sum += conflict_cnt;
 	}
+#endif
 	return conflict_cnt;
 }
 
@@ -3427,7 +3433,7 @@ void current_info_transfer_to_worker(void)
 #include "../../msg_layer/ring_buffer.h"
 void collect_tso_wr(struct task_struct *tsk)
 {
-#if STATIS // put for all variables
+#if STATIS_END // put for all variables
 #ifdef CONFIG_X86_64
 	long int divider = X86_THREADS;
 #else
