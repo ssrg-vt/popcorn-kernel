@@ -10,6 +10,9 @@
 
 #include <linux/types.h>
 
+#define VM_TESTING 1
+#define MULTI_CONN_PER_NODE 0
+
 /* Enumerate message types */
 enum pcn_kmsg_type {
 	/* Thread migration */
@@ -73,9 +76,12 @@ enum pcn_kmsg_prio {
 
 /* Message header */
 struct pcn_kmsg_hdr {
-	int from_nid			:6;
+	int from_nid			:6;	///* max node = 15 */
 	enum pcn_kmsg_prio prio	:2;
-	enum pcn_kmsg_type type	:8;
+	enum pcn_kmsg_type type	:8; ///* max type = 127 */
+#if MULTI_CONN_PER_NODE
+	unsigned int channel;		///* max node = */
+#endif
 	size_t size;
 } __attribute__((packed));
 

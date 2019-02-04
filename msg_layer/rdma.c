@@ -19,8 +19,10 @@
 #define DEVPRINTK(...)
 #endif
 
-static atomic_t send_rond_robin[MAX_NUM_NODES] = { ATOMIC_INIT(0) };
-static atomic_t write_rond_robin[MAX_NUM_NODES] = { ATOMIC_INIT(0) };
+#if MULTI_MSG_CANNEL_PER_NODE
+//static atomic_t send_rond_robin[MAX_NUM_NODES] = { ATOMIC_INIT(0) };
+//static atomic_t write_rond_robin[MAX_NUM_NODES] = { ATOMIC_INIT(0) };
+#endif
 
 /* this is related to rb size */
 #define MAX_RECV_DEPTH	((PAGE_SIZE << (MAX_ORDER - 1)) / PCN_KMSG_MAX_SIZE)
@@ -71,7 +73,7 @@ struct rdma_work {
 
 struct rdma_handle {
 	int nid;
-	int iter;
+	unsigned int channel;
 	enum {
 		RDMA_INIT,
 		RDMA_ADDR_RESOLVED,
@@ -100,8 +102,8 @@ static struct rdma_handle *rdma_handles[MAX_NUM_NODES][MAX_CONN_PER_NODE];
 /* Jack TODO: multi conn to a node - rdma_handles[MAX_NUM_NODES][MAX_CONN]*/
 
 /* Global protection domain (pd) and memory region (mr) */
-static struct ib_pd *rdma_pd = NULL;
-static struct ib_mr *rdma_mr = NULL;
+static struct ib_pd *rdma_pd = NULL; // Jack
+static struct ib_mr *rdma_mr = NULL; // Jack
 
 /* Global RDMA sink */
 static DEFINE_SPINLOCK(__rdma_slots_lock);
@@ -451,20 +453,32 @@ static int __send_to(int to_nid, struct send_work *sw, size_t size)
 	struct ib_send_wr *bad_wr = NULL;
 	int channel;
 	struct rdma_handle *rh;
-
+/*
 	if (MAX_CONN_PER_NODE > 1) {
-		int atomic_val = atomic_inc_return(&send_rond_robin[to_nid]);
-		channel = atomic_val % (MAX_CONN_PER_NODE);
-		DEVPRINTK("-> send dbg: atomic_val %d mod this %d channel %d\n", atomic_val, (MAX_CONN_PER_NODE), channel);
-		//channel = atomic_inc_return(&send_rond_robin[to_nid]) %
-		//										MAX_CONN_PER_NODE;
+		//int atomic_val = atomic_inc_return(&send_rond_robin[to_nid]);
+		//channel = atomic_val % (MAX_CONN_PER_NODE);
+		//DEVPRINTK("-> send dbg: atomic_val %d mod this %d channel %d\n", atomic_val, (MAX_CONN_PER_NODE), channel);
+		channel = atomic_inc_return(&send_rond_robin[to_nid]) %
+													MAX_CONN_PER_NODE;
 	} else {
 		channel = 0;
 	}
+*/
+#if MULTI_MSG_CANNEL_PER_NODE
+	// too much overhead
+	//channel = atomic_inc_return(&send_rond_robin[to_nid]) %
+	//											MAX_CONN_PER_NODE;
+	channel = current->pid % MAX_CONN_PER_NODE;
+#else
+	channel = 0;
+#endif
+
 	rh = rdma_handles[to_nid][channel];
+#if MULTI_CONN_PER_NODE
 	((struct pcn_kmsg_message *)sw->addr)->header.channel = channel;
+#endif
 	//msg->header.from_nid = my_nid;
-	DEVPRINTK("-> send: to_nid %d channel %d\n", to_nid, channel);
+	DEVPRINTK("-> send: to_nid %d channel %u\n", to_nid, channel);
 
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
@@ -549,7 +563,7 @@ struct pcn_kmsg_rdma_handle *rdma_kmsg_pin_rdma_buffer(void *msg, size_t size)
 		return ERR_PTR(-EINVAL);
 	}
 #endif
-	rh->rkey = rdma_mr->rkey;
+	rh->rkey = rdma_mr->rkey; // Jack
 	rh->private = (void *)
 		(unsigned long)__get_rdma_buffer(&rh->addr, &rh->dma_addr);
 
@@ -577,21 +591,30 @@ int rdma_kmsg_write(int to_nid, dma_addr_t rdma_addr, void *addr, size_t size, u
 	ktime_t t2e, t2s = ktime_get();
 #endif
 
+/*
 	if (MAX_CONN_PER_NODE > 1) {
-		int atomic_val = atomic_inc_return(&write_rond_robin[to_nid]);
-		channel = atomic_val % (MAX_CONN_PER_NODE);
-		DEVPRINTK("-> write dbg: atomic_val %d mod this %d channel %d\n", atomic_val, (MAX_CONN_PER_NODE), channel);
-		//channel = atomic_inc_return(&write_rond_robin[to_nid]) %
-		//										MAX_CONN_PER_NODE;
-
+		//int atomic_val = atomic_inc_return(&write_rond_robin[to_nid]);
+		//channel = atomic_val % (MAX_CONN_PER_NODE);
+		//DEVPRINTK("-> write dbg: atomic_val %d mod this %d channel %d\n", atomic_val, (MAX_CONN_PER_NODE), channel);
+		channel = atomic_inc_return(&write_rond_robin[to_nid]) %
+													MAX_CONN_PER_NODE;
 	} else {
 		channel = 0;
 	}
+*/
+#if MULTI_MSG_CANNEL_PER_NODE
+	//channel = atomic_inc_return(&write_rond_robin[to_nid]) %
+	//											MAX_CONN_PER_NODE;
+	channel = current->pid % MAX_CONN_PER_NODE;
+#else
+	channel = 0;
+#endif
 
 	dma_addr = ib_dma_map_single(rdma_mr->device, addr, size, DMA_TO_DEVICE);
 	ret = ib_dma_mapping_error(rdma_mr->device, dma_addr);
 	BUG_ON(ret);
 
+	/* rdma_key done by "rdma_kmsg_pin_rdma_buffer()" */
 	rw = __get_rdma_work(dma_addr, size, rdma_addr, rdma_key);
 	BUG_ON(!rw);
 
@@ -654,13 +677,17 @@ void rdma_kmsg_done(struct pcn_kmsg_message *msg)
 	int ret, i, index;
 	struct ib_recv_wr *bad_wr = NULL;
 	int from_nid = PCN_KMSG_FROM_NID(msg);
-	int channel = msg->header.channel;
+#if MULTI_CONN_PER_NODE
+	unsigned int channel = msg->header.channel;
+#else
+	unsigned int channel = 0;
+#endif
 	struct rdma_handle *rh = rdma_handles[from_nid][channel]; // iter
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	bool found = false;
 #endif
 
-	DEVPRINTK("\t<- recv: kmsg_done: from_nid %d channel %d\n",
+	DEVPRINTK("\t<- recv: kmsg_done: from_nid %d channel %u\n",
 												from_nid, channel);
 
 	/* Look for the right pool */
@@ -682,7 +709,7 @@ void rdma_kmsg_done(struct pcn_kmsg_message *msg)
 	if (index < 0 || index >= MAX_RECV_DEPTH || !found) {
 		printk(KERN_WARNING "i %d idx %d\n", i, index);
 		PCNPRINTK_ERR("\t<- (warnning)recv: kmsg_done: "
-								"from_nid %d channel %d\n",
+								"from_nid %d channel %u\n",
 										from_nid, channel);
 	}
 	BUG_ON(!found);
@@ -787,7 +814,10 @@ retry:
 			t2e = ktime_get();
 			atomic64_add(ktime_to_ns(ktime_sub(t2e, t2s)), &t_cq_sig_handle);
 #endif
-			((struct pcn_kmsg_message *)(((struct recv_work *)(wc.wr_id))->addr))->header.channel = *((int *)cq->cq_context);
+
+#if MULTI_CONN_PER_NODE
+			((struct pcn_kmsg_message *)(((struct recv_work *)(wc.wr_id))->addr))->header.channel = *((unsigned int *)cq->cq_context);
+#endif
 //			printk("<- recv: cq->cq_context = %d (%p)\n",
 //					*((int *)cq->cq_context), cq->cq_context);
 			__process_recv(&wc);
@@ -821,201 +851,6 @@ retry:
 	if (ret > 0) goto retry;
 }
 
-void cq_comp_handler1(struct ib_cq *cq, void *context)
-{
-	int ret;
-	struct ib_wc wc;
-#ifdef CONFIG_POPCORN_STAT_MSG
-	ktime_t t3e, t3s;
-	ktime_t t2e, t2s;
-#endif
-
-retry:
-#ifdef CONFIG_POPCORN_STAT_MSG
-	t2s = ktime_get();
-#endif
-	while ((ret = ib_poll_cq(cq, 1, &wc)) > 0) {
-		if (wc.opcode < 0 || wc.status) {
-			__process_faulty_work(&wc);
-			continue;
-		}
-		switch(wc.opcode) {
-		case IB_WC_SEND:
-			__process_sent(&wc);
-			break;
-		case IB_WC_RECV:
-#ifdef CONFIG_POPCORN_STAT_MSG
-			t2e = ktime_get();
-			atomic64_add(ktime_to_ns(ktime_sub(t2e, t2s)), &t_cq_sig_handle);
-#endif
-			((struct pcn_kmsg_message *)(((struct recv_work *)(wc.wr_id))->addr))->header.channel = 1;
-			__process_recv(&wc);
-#ifdef CONFIG_POPCORN_STAT_MSG
-			t3s = ktime_get();
-#endif
-			break;
-		case IB_WC_RDMA_WRITE:
-		case IB_WC_RDMA_READ:
-			__process_rdma_completion(&wc);
-			break;
-		case IB_WC_REG_MR:
-			__process_comp_wakeup(&wc, "mr registered\n");
-			break;
-		default:
-			printk("Unknown completion op %d\n", wc.opcode);
-			break;
-		}
-#ifdef CONFIG_POPCORN_STAT_MSG
-		t2s = ktime_get();
-#endif
-	}
-	ret = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS);
-#ifdef CONFIG_POPCORN_STAT_MSG
-	if (wc.opcode == IB_WC_RECV) {
-		t3e = ktime_get();
-		atomic64_add(ktime_to_ns(ktime_sub(t3e, t3s)), &t_cq_handle_end);
-		atomic64_inc(&recv_cq_cnt);
-	}
-#endif
-	if (ret > 0) goto retry;
-}
-
-void cq_comp_handler2(struct ib_cq *cq, void *context)
-{
-	int ret;
-	struct ib_wc wc;
-#ifdef CONFIG_POPCORN_STAT_MSG
-	ktime_t t3e, t3s;
-	ktime_t t2e, t2s;
-#endif
-
-retry:
-#ifdef CONFIG_POPCORN_STAT_MSG
-	t2s = ktime_get();
-#endif
-	while ((ret = ib_poll_cq(cq, 1, &wc)) > 0) {
-		if (wc.opcode < 0 || wc.status) {
-			__process_faulty_work(&wc);
-			continue;
-		}
-		switch(wc.opcode) {
-		case IB_WC_SEND:
-			__process_sent(&wc);
-			break;
-		case IB_WC_RECV:
-#ifdef CONFIG_POPCORN_STAT_MSG
-			t2e = ktime_get();
-			atomic64_add(ktime_to_ns(ktime_sub(t2e, t2s)), &t_cq_sig_handle);
-#endif
-			((struct pcn_kmsg_message *)(((struct recv_work *)(wc.wr_id))->addr))->header.channel = 2;
-			__process_recv(&wc);
-#ifdef CONFIG_POPCORN_STAT_MSG
-			t3s = ktime_get();
-#endif
-			break;
-		case IB_WC_RDMA_WRITE:
-		case IB_WC_RDMA_READ:
-			__process_rdma_completion(&wc);
-			break;
-		case IB_WC_REG_MR:
-			__process_comp_wakeup(&wc, "mr registered\n");
-			break;
-		default:
-			printk("Unknown completion op %d\n", wc.opcode);
-			break;
-		}
-#ifdef CONFIG_POPCORN_STAT_MSG
-		t2s = ktime_get();
-#endif
-	}
-	ret = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS);
-#ifdef CONFIG_POPCORN_STAT_MSG
-	if (wc.opcode == IB_WC_RECV) {
-		t3e = ktime_get();
-		atomic64_add(ktime_to_ns(ktime_sub(t3e, t3s)), &t_cq_handle_end);
-		atomic64_inc(&recv_cq_cnt);
-	}
-#endif
-	if (ret > 0) goto retry;
-}
-
-void cq_comp_handler3(struct ib_cq *cq, void *context)
-{
-	int ret;
-	struct ib_wc wc;
-#ifdef CONFIG_POPCORN_STAT_MSG
-	ktime_t t3e, t3s;
-	ktime_t t2e, t2s;
-#endif
-
-retry:
-#ifdef CONFIG_POPCORN_STAT_MSG
-	t2s = ktime_get();
-#endif
-	while ((ret = ib_poll_cq(cq, 1, &wc)) > 0) {
-		if (wc.opcode < 0 || wc.status) {
-			__process_faulty_work(&wc);
-			continue;
-		}
-		switch(wc.opcode) {
-		case IB_WC_SEND:
-			__process_sent(&wc);
-			break;
-		case IB_WC_RECV:
-#ifdef CONFIG_POPCORN_STAT_MSG
-			t2e = ktime_get();
-			atomic64_add(ktime_to_ns(ktime_sub(t2e, t2s)), &t_cq_sig_handle);
-#endif
-			((struct pcn_kmsg_message *)(((struct recv_work *)(wc.wr_id))->addr))->header.channel = 3;
-			__process_recv(&wc);
-#ifdef CONFIG_POPCORN_STAT_MSG
-			t3s = ktime_get();
-#endif
-			break;
-		case IB_WC_RDMA_WRITE:
-		case IB_WC_RDMA_READ:
-			__process_rdma_completion(&wc);
-			break;
-		case IB_WC_REG_MR:
-			__process_comp_wakeup(&wc, "mr registered\n");
-			break;
-		default:
-			printk("Unknown completion op %d\n", wc.opcode);
-			break;
-		}
-#ifdef CONFIG_POPCORN_STAT_MSG
-		t2s = ktime_get();
-#endif
-	}
-	ret = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS);
-#ifdef CONFIG_POPCORN_STAT_MSG
-	if (wc.opcode == IB_WC_RECV) {
-		t3e = ktime_get();
-		atomic64_add(ktime_to_ns(ktime_sub(t3e, t3s)), &t_cq_handle_end);
-		atomic64_inc(&recv_cq_cnt);
-	}
-#endif
-	if (ret > 0) goto retry;
-}
-
-struct cq_handle_desc {
-	//void (*cq_handle_fn)(void *);
-	//void (*cq_handle_fn)(struct ib_event *, void *);
-	void (*cq_handle_fn)(struct ib_cq *cq, void *context);
-};
-
-struct cq_handle_desc cq_handles[] = {
-	[0] = { cq_comp_handler },
-	[1] = { cq_comp_handler },
-	[2] = { cq_comp_handler },
-	[3] = { cq_comp_handler },
-//	[4] = { cq_comp_handler4 },
-//	[5] = { cq_comp_handler5 },
-//	[6] = { cq_comp_handler6 },
-//	[7] = { cq_comp_handler7 },
-};
-//cq_handles[channel].cq_handle_fn;
-
 
 /****************************************************************************
  * Setup connections
@@ -1040,54 +875,26 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 	/* create completion queue */
 	if (!rh->cq) {
 		struct ib_cq_init_attr cq_attr = {
-			.cqe = (MAX_SEND_DEPTH) + (MAX_RECV_DEPTH * MSG_POOL_SIZE) + NR_RDMA_SLOTS,
+			.cqe = (MAX_SEND_DEPTH) +
+					(MAX_RECV_DEPTH * MSG_POOL_SIZE) + NR_RDMA_SLOTS,
 			.comp_vector = 0,
 		};
 
-
-		//printk("createing cq rh->iter %d\n", rh->iter);
-		/*
-		if (rh->iter == 0)
-			rh->cq = ib_create_cq(
-					rh->device, cq_comp_handler, NULL, rh, &cq_attr);
-		else if (rh->iter == 1)
-			rh->cq = ib_create_cq(
-					rh->device, cq_comp_handler1, NULL, rh, &cq_attr);
-		else if (rh->iter == 2)
-			rh->cq = ib_create_cq(
-					rh->device, cq_comp_handler2, NULL, rh, &cq_attr);
-		else if (rh->iter == 3)
-			rh->cq = ib_create_cq(
-					rh->device, cq_comp_handler3, NULL, rh, &cq_attr);
-		else { BUG(); }
-		*/
-//		int *int_ptr = kmalloc(sizeof(int), GFP_KERNEL);
-//		int *b = NULL;
-//		BUG_ON(!int_ptr);
-//		*int_ptr = rh->iter;
-//		b = int_ptr;
-		/* save *int_ptr to *cq->cq_context */
-//		printk("(registering cq_handle) rh->iter %d %d (%p) b(%p)\n",
-//									*int_ptr, rh->iter, int_ptr, b);
+		//printk("createing cq rh->channel %d\n", rh->channel);
 		rh->cq = ib_create_cq(rh->device,
-			//cq_handles[rh->iter].cq_handle_fn, (void *)int_ptr, rh, &cq_attr);
-			//cq_handles[0].cq_handle_fn, (void *)int_ptr, rh, &cq_attr);
-			//cq_comp_handler, (void *)int_ptr, rh, &cq_attr);
-			cq_comp_handler, (void *)&(rh->iter), rh, &cq_attr);
+			cq_comp_handler, (void *)&(rh->channel), rh, &cq_attr);
 		if (IS_ERR(rh->cq)) {
 			ret = PTR_ERR(rh->cq);
 			goto out_err;
 		}
-		printk("ib_create_cq pass\n");
+		DEVPRINTK("ib_create_cq pass\n");
 
-		//rh->cq->cq_context = int_ptr;
-		rh->cq->cq_context = &(rh->iter);
-//		printk("check rh->: cq->cq_context = %d (%p)\n",
-//				*((int *)rh->cq->cq_context), rh->cq->cq_context);
+		/* Manually copy channel_id to rh->cq for handler usage */
+		rh->cq->cq_context = &(rh->channel);
 
 		ret = ib_req_notify_cq(rh->cq, IB_CQ_NEXT_COMP);
 		if (ret < 0) goto out_err;
-		printk("rdma_create_cq pass\n");
+		DEVPRINTK("rdma_create_cq pass\n");
 	}
 
 	/* create queue pair */
@@ -1131,7 +938,7 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 		if (ret) goto out_err;
 		rh->qp = rh->cm_id->qp;
 	}
-	printk("rdma_create_qp pass\n");
+	DEVPRINTK("rdma_create_qp pass\n");
 	return 0;
 
 out_err:
@@ -1267,7 +1074,7 @@ static __init int __setup_rdma_buffer(const int nr_chunks)
 		goto out_dereg;
 	}
 
-	rdma_mr = mr;
+	rdma_mr = mr; //Jack
 	//printk("lkey: %x, rkey: %x, length: %x\n", mr->lkey, mr->rkey, mr->length);
 	return 0;
 
@@ -1512,7 +1319,7 @@ static int __on_client_connected(struct rdma_cm_id *cm_id, struct rdma_cm_event 
 	rh->state = RDMA_CONNECTED;
 	complete(&rh->cm_done);
 
-	MSGPRINTK("(Server) connected to %d-%d\n", rh->nid, rh->iter);
+	MSGPRINTK("(Server) connected to %d-%u\n", rh->nid, rh->channel);
 	return 0;
 }
 
@@ -1634,12 +1441,11 @@ void __exit exit_kmsg_rdma(void)
 			if (rh->cq && !IS_ERR(rh->cq)) ib_destroy_cq(rh->cq);
 			if (rh->cm_id && !IS_ERR(rh->cm_id)) rdma_destroy_id(rh->cm_id);
 
-			//kfree(rh->cq->cq_context);
 			kfree(rdma_handles[i][k]);
 		}
 	}
 
-	/* MR is set correctly iff rdma buffer and pd are correctly allocated */
+	/* MR is set correctly if rdma buffer and pd are correctly allocated */
 	if (rdma_mr && !IS_ERR(rdma_mr)) {
 		ib_dereg_mr(rdma_mr);
 		ib_dma_unmap_single(rdma_pd->device, __rdma_sink_dma_addr,
@@ -1695,6 +1501,13 @@ int __init init_kmsg_rdma(void)
 
 	MSGPRINTK("\nLoading Popcorn messaging layer over RDMA...\n");
 
+
+#if MAX_CONN_PER_NODE > 1
+#if !MULTI_CONN_PER_NODE
+	BUG();
+#endif
+#endif
+
 	if (!identify_myself()) return -EINVAL;
 	pcn_kmsg_set_transport(&transport_rdma);
 
@@ -1708,7 +1521,7 @@ int __init init_kmsg_rdma(void)
 			if (!rh) goto out_free;
 
 			rh->nid = i;
-			rh->iter = j;
+			rh->channel = j;
 			rh->state = RDMA_INIT;
 			init_completion(&rh->cm_done);
 		}

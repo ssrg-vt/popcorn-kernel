@@ -14,10 +14,13 @@
 #include "common.h"
 
 #ifdef CONFIG_X86_64
-#define MAX_THREADS 32
+//#define MAX_THREADS 16
 #else
-#define MAX_THREADS 96
+//#define MAX_THREADS 96
 #endif
+#define MAX_THREADS 288
+
+
 #define DEFAULT_PAYLOAD_SIZE_KB	4
 #define DEFAULT_NR_ITERATIONS 1
 
@@ -351,17 +354,22 @@ static int kthread_rdma_farm2_data(void* arg0)
 /**
  * Fundamental performance tests
  */
+char per_t_buf[MAX_THREADS][PCN_KMSG_MAX_SIZE];
 static int test_send(void *arg)
 {
 	struct test_params *param = arg;
 	DECLARE_COMPLETION_ONSTACK(done);
-	test_request_t *req;
+	test_request_t *req = (void *)per_t_buf[param->tid];
+	//test_request_t *req;
+	//char buffer[256];
 	int i;
-	char buffer[256];
 	size_t msg_size = PCN_KMSG_SIZE(param->payload_size);
+
+	printk("pid: %d\n", current->pid);
 
 	__barrier_wait(param->barrier);
 	for (i = 0; i < param->nr_iterations; i++) {
+#if 0
 		if (msg_size > sizeof(buffer)) {
 			//req = kmalloc(sizeof(msg_size), GFP_KERNEL); /* BUG */
 			req = kmalloc(msg_size, GFP_KERNEL);
@@ -369,7 +377,7 @@ static int test_send(void *arg)
 		} else {
 			req = (void *)buffer;
 		}
-
+#endif
 		req->flags = 1;
 //		req->flags = 0;
 //		set_bit(TEST_REQUEST_FLAG_REPLY, &req->flags); // alignment fault on ARM
@@ -379,9 +387,11 @@ static int test_send(void *arg)
 		pcn_kmsg_send(PCN_KMSG_TYPE_TEST_REQUEST, !my_nid, req, msg_size);
 
 		wait_for_completion(&done);
+#if 0
 		if (msg_size > sizeof(buffer)) {
 			kfree(req);
 		}
+#endif
 	}
 	__barrier_wait(param->barrier);
 	return 0;
@@ -850,28 +860,21 @@ static struct test_desc tests[] = {
 static void __run_test(enum test_action action, struct test_params *param)
 {
 	/* Stack frame over 4k */
-//struct test_params thread_params[MAX_THREADS] = {};
-//struct task_struct *tsks[MAX_THREADS] = { NULL };
-struct test_params *thread_params;
-struct task_struct **tsks;
+	struct test_params *thread_params; /* test_params thread_params[MAX_THREADS] */
+	struct task_struct **tsks; /* task_struct *tsks[MAX_THREADS] */
 	struct test_barrier barrier;
 	ktime_t t_start, t_end;
 	DECLARE_COMPLETION_ONSTACK(done);
 	unsigned long elapsed;
 	int i;
 
-thread_params = kzalloc(sizeof(*thread_params) * MAX_THREADS, GFP_KERNEL);
-tsks = kzalloc(sizeof(struct task_struct*) * MAX_THREADS, GFP_KERNEL);
-	/*printk("Starting testing %s with %lu payload, %u thread%s, %lu iteration%s\n",
-			tests[action].description, param->payload_size,
-			param->nr_threads, param->nr_threads == 1 ? "" : "s",
-			param->nr_iterations, param->nr_iterations == 1 ? "" : "s"); */
-	// 0 16384 4 50000
+	thread_params = kzalloc(sizeof(*thread_params) * MAX_THREADS, GFP_KERNEL);
+	tsks = kzalloc(sizeof(struct task_struct*) * MAX_THREADS, GFP_KERNEL);
 	printk("%s: %d %lu %u %lu\n",
 			tests[action].description, action,
 			param->payload_size,
-			param->nr_threads, //param->nr_threads == 1 ? "" : "s",
-			param->nr_iterations); //, param->nr_iterations == 1 ? "" : "s");
+			param->nr_threads,
+			param->nr_iterations);
 
 	__barrier_init(&barrier, param->nr_threads + 1);
 	param->barrier = &barrier;
@@ -891,8 +894,8 @@ tsks = kzalloc(sizeof(struct task_struct*) * MAX_THREADS, GFP_KERNEL);
 	__barrier_wait(&barrier);
 	t_end = ktime_get();
 
-kfree(thread_params);
-kfree(tsks);
+	kfree(thread_params);
+	kfree(tsks);
 
 	elapsed = ktime_to_ns(ktime_sub(t_end, t_start));
 
@@ -960,6 +963,7 @@ static int __parse_cmd(const char __user *buffer, size_t count, struct test_para
 		if (nr_threads > MAX_THREADS) {
 			printk(KERN_ERR "# of threads cannot be larger than %d\n",
 					MAX_THREADS);
+			params->payload_size = 24;
 			kfree(cmd);
 			//return -EINVAL;
 			return 0;

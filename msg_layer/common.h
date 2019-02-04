@@ -19,6 +19,12 @@
 #include "config.h"
 
 #define MAX_NUM_NODES		ARRAY_SIZE(ip_addresses)
+#define MAX_CONN_PER_NODE	1
+#if (MAX_CONN_PER_NODE > 1)
+#define MULTI_MSG_CANNEL_PER_NODE 1
+#else
+#define MULTI_MSG_CANNEL_PER_NODE 0
+#endif
 
 static uint32_t ip_table[MAX_NUM_NODES] = { 0 };
 
