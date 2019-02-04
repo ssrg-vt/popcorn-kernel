@@ -565,14 +565,14 @@ wait:
 				SYNCPRINTK2("%s: inv confiliction %lx wait *dealed* "
 										"(Origin)\n", __func__, addr);
 				io_schedule();
-				goto wait; // stupid wait until "not found"
+				goto wait; // spinnig wait until "not found"
 			} else { // remote *dealed // wait // better:
 				if (fh->flags & FAULT_HANDLE_INVALIDATE) { /* TODO:needed? */
 					spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
 					SYNCPRINTK2("%s: inv confiliction %lx wait *dealed* "
 											"(Remote)\n", __func__, addr);
 					io_schedule();
-					goto wait; // stupid wait until "not found"
+					goto wait; // spinning wait until "not found"
 				}
 			}
 			/* attach to the fh pending list */
@@ -1141,24 +1141,33 @@ out:
 /* multi-writer - inv at remotely */
 /* may be merge with __do_invalidate_page */
 // do_locally_inv_page
-int do_locally_inv_page(struct task_struct *tsk, unsigned long addr)
+/* only return 0, else BUG(); */
+int do_locally_inv_page(struct task_struct *tsk, struct mm_struct *mm ,unsigned long addr)
 {
-	struct mm_struct *mm = get_task_mm(tsk);
+//	struct mm_struct *mm = get_task_mm(tsk);
     struct vm_area_struct *vma;
     pmd_t *pmd;
     pte_t *pte, entry;
     spinlock_t *ptl;
-    int ret = 0;
-    struct fault_handle *fh;
+//    int ret = 0;
+//    struct fault_handle *fh; // TODO: post-icdcs removing locks
 
-    down_read(&mm->mmap_sem);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	BUG_ON(!mm); // TODO: post-icdcs removing locks
+#endif
+
+//    down_read(&mm->mmap_sem); // TODO: post-icdcs removing locks
     vma = find_vma(mm, addr);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
     if (!vma || vma->vm_start > addr) {
-        ret = VM_FAULT_SIGBUS;
+		BUG();
+//		ret = VM_FAULT_SIGBUS;
         goto out;
     }
+#endif
 
-	/* ugly */
+	/* ugly code */
+	/* Fix pte */
 	if (my_nid == 0) {
 again:
 		// [at origin - by Jack ]
@@ -1169,15 +1178,15 @@ again:
 			return VM_FAULT_OOM;
 		}
 
-		spin_lock(ptl);
+//		spin_lock(ptl); // TODO: post-icdcs removing locks
 		if (pte_none(*pte)) {
 			int _ret;
 			unsigned long fault_flags = FAULT_FLAG_WRITE;
-			spin_unlock(ptl);
+//			spin_unlock(ptl); // TODO: post-icdcs removing locks
 			PGPRINTK("  [%d] handle local fault at origin\n", tsk->pid);
 			_ret = handle_pte_fault_origin(mm, vma, addr, pte, pmd, fault_flags);
 			/* returned with pte unmapped */
-			if (_ret & VM_FAULT_RETRY) {
+			if (unlikely(_ret & VM_FAULT_RETRY)) {
 				/* mmap_sem is released during do_fault */
 				BUG(); /* Not support retry for now */
 				return VM_FAULT_RETRY;
@@ -1193,7 +1202,7 @@ again:
 			/* ignore for now.......... or should we handle it? */
 			goto out;
 		}
-		spin_lock(ptl);
+//		spin_lock(ptl); // TODO: post-icdcs removing locks
 
 		// TODO: think hard. Check before fh is better or it must hold the lock?
 		if (!pte_present(*pte)) {
@@ -1202,7 +1211,8 @@ again:
 			} else {
 				SYNCPRINTK2("%s: !pte_present %lx *dealed*\n", __func__, addr);
 			}
-			pte_unmap_unlock(pte, ptl);
+//			pte_unmap_unlock(pte, ptl); // TODO: post-icdcs removing locks
+			pte_unmap(pte); // TODO: post-icdcs removing locks
 			goto out;
 		}
 
@@ -1219,31 +1229,30 @@ again:
 #endif
 	}
 
+	/* If pte exist, must fix permission */
+
 	/* stop the world approach - only conflicts with diff-apply addr */
-	fh = __start_invalidation(tsk, addr, ptl); // one by one// optimization?
+//	fh = __start_invalidation(tsk, addr, ptl); // one by one// optimization? // TODO: post-icdcs removing locks
+
+	/* TODO should check fh....... but it will miss fixing some permission....*/
+	//if (!fh)
+	//	goto out_unmap;
 
 	if (my_nid == 0) { /*  normal remotefault_at_origin */
 		SetPageDistributed(mm, addr);
-		set_page_owner(1, mm, addr); // Hard code // grant permission
+		set_page_owner(1, mm, addr); // Hardcoded - grant permission
 
 		entry = ptep_clear_flush(vma, addr, pte);
 
-		/////////////if (fault_for_write(fault_flags)) {
-			clear_page_owner(my_nid, mm, addr); // exclusive permissuon
-			entry = pte_make_invalid(entry);
-
-		//////////////////////} else {
-		//////////////////////	entry = pte_make_valid(entry); /* For remote-claimed case */
-		//////////////////////	entry = pte_wrprotect(entry);
-		//////////////////////	set_page_owner(my_nid, mm, addr);
-		//////////////////////}
+		/* For write */
+		clear_page_owner(my_nid, mm, addr); // exclusive permissuon
+		entry = pte_make_invalid(entry);
 
 		set_pte_at_notify(mm, addr, pte, entry);
 		update_mmu_cache(vma, addr, pte);
 	} else { /* inv at remote - regular routin */
-/// jack
-		set_page_owner(0, mm, addr);
-///
+		set_page_owner(0, mm, addr); // Hardcoded - grant permission
+
 		clear_page_owner(my_nid, mm, addr);
 
 		BUG_ON(!pte_present(*pte));
@@ -1253,12 +1262,17 @@ again:
 		set_pte_at_notify(mm, addr, pte, entry);
 		update_mmu_cache(vma, addr, pte);
 	}
-	__finish_invalidation(fh);
-	pte_unmap_unlock(pte, ptl);
+
+//	if (fh) // TODO: post-icdcs removing locks
+//		__finish_invalidation(fh); // TODO: post-icdcs removing locks
+
+//out_unmap:
+//	pte_unmap_unlock(pte, ptl); // TODO: post-icdcs removing locks
+	pte_unmap(pte); // TODO: post-icdcs removing locks
 
 out:
-    up_read(&mm->mmap_sem);
-    mmput(mm);
+//	up_read(&mm->mmap_sem); // TODO: post-icdcs removing lock
+//    mmput(mm);
 	return 0;
 }
 
@@ -2194,6 +2208,86 @@ out:
 	return select;
 }
 
+// TODO: post-icdcs removing locks
+struct fault_handle *select_prefetch_page2(unsigned long addr)
+{
+//	bool found = false;
+	struct fault_handle *select = NULL;
+//	int fk;
+    pte_t *pte;
+    pmd_t *pmd;
+    spinlock_t *ptl;
+//    unsigned long flags;
+//    struct fault_handle *fh;
+	struct mm_struct *mm = current->mm;
+    struct remote_context *rc = mm->remote;
+	bool owned;
+
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+    struct vm_area_struct *vma = find_vma(mm, addr);
+    if (!vma || vma->vm_start > addr) {
+		PCNPRINTK_ERR("CANNOT select vma %p mm %p addr 0x%lx\n", vma, mm, addr);
+		rc->wrong_hist_no_vma++;
+		goto out;
+	}
+#endif
+
+	/* TODO try more aggressive __get_pte_at_alloc() */
+    pte = __get_pte_at(mm, addr, &pmd, &ptl);
+    if (!pte) {
+		/* never touched - TODO handle it */
+        goto out;
+	}
+
+
+	/* BUG TODO: do I owned the page? */
+	owned = page_is_mine_general(current, mm, addr, *pte);
+	if (!owned)
+		select = (void*)0x12345678;
+	else
+		rc->wrong_hist++;
+// echo:~/share$ grep -r wrong_hist `ls |grep lava |grep all`
+
+#if 0 /* assume no conflictions ain pf phase (even if both try to prefetch) */
+	spin_lock(ptl);
+    fk = __fault_hash_key(addr);
+	spin_lock_irqsave(&rc->faults_lock[fk], flags);
+	spin_unlock(ptl);
+
+	hlist_for_each_entry(fh, &rc->faults[fk], list) {
+        if (fh->addr == addr) {
+            found = true;
+            break;
+        }
+    }
+#endif
+
+
+#if 0
+	if (!found) { /* bz - concurrency from remote */
+        if (!page_is_mine_general(current, mm, addr, *pte)) {
+			/* Assumptions: rc will not disappear. Must be read */
+			//select = __alloc_fault_handle(current, addr);
+			select = (void*)0x12345678;
+		} else {
+			///* god view history is wrong - I already own - skip */
+			///////////// NO this means duplicated read fault recorded
+			rc->wrong_hist++; // THIS HAPPENS (see: echo:~/share$ grep -r wrong_hist `ls |grep lava |grep all`)
+		}
+	} else {
+		// TODO - record counter here, if always 0 for all the cases
+		// fh checking may be simply skipped
+		// need_lock_for_pf_select_cnt++; (not thread safe)
+		// once we can remove fh, we can also remove the pf_map as well !!
+	}
+	spin_unlock_irqrestore(&rc->faults_lock[fk], flags);
+#endif
+	pte_unmap(pte);
+
+out:
+	return select;
+}
+
 static void __prefetch_each(struct mm_struct *mm,
 				struct task_struct *tsk,
 				struct remote_context *rc,
@@ -2393,6 +2487,7 @@ void handle_prefetch(remote_prefetch_request_t *req)
     res->remote_pid = remote_pid;
     res->origin_pid = origin_pid;
     res->pf_req_id = pf_req_id;
+	res->pf_list_size = pf_list_size; // TODO: post-icdcs removing locks
 
 	res->god_omp_hash = req->god_omp_hash;
 
@@ -2538,6 +2633,105 @@ next:
 	__pf_finish(result, ret, fh);
 }
 
+void __fixup_page2(remote_prefetch_response_t *res, int pf_num, int *succ_pf_num, struct task_struct *tsk)
+{
+	pte_t *pte;
+	pmd_t *pmd;
+	void *paddr;
+	spinlock_t *ptl;
+	struct page *page;
+	struct mem_cgroup *memcg;
+	int ret = VM_FAULT_RETRY;
+	bool populated = false;
+	int result = res->pf_results[pf_num].result;
+	unsigned long addr = res->pf_results[pf_num].addr;
+#if PREFETCH_WRITE
+	char *res_page = pf_handle->addr + (*succ_pf_num * PAGE_SIZE);
+	//char *pf_addr = pf_handle->addr;
+#else
+	char *res_page = &res->page[*succ_pf_num][0];
+#endif
+	bool is_write = false;
+	unsigned fault_flags = is_write ? FAULT_FLAG_WRITE : 0;
+	struct mm_struct *mm = tsk->mm;
+	struct vm_area_struct *vma = find_vma(mm, addr);
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	BUG_ON(!addr);
+#endif
+
+	//printk("\t\t\tfixup start - vma %p mm %p addr 0x%lx\n", vma, mm, addr);
+	BUG_ON(!vma || vma->vm_start > addr);
+	if (!(result & PREFETCH_SUCCESS)) {
+		real_recv_pf_fail++; /* log only */
+		goto next;
+	}
+	real_recv_pf_succ++; /* log only */
+	(*succ_pf_num) += 1;
+
+	pte = __get_pte_at(mm, addr, &pmd, &ptl);
+	if (!pte)
+		BUG_ON(printk("  [%d] No PTE!!\n", tsk->pid));
+
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	BUG_ON(page_is_mine_general(tsk, mm, addr, *pte));
+#endif
+
+	/* get a page frame for the vma page if needed */
+	/* optimization: at lease move to !(result & VM_FAULT_CONTINUE) */
+	/* optimization: then see if we can hide this. Perf it first!! */
+	/* optimization: can I do this while waitng?  */
+	if (pte_none(*pte) || !(page = vm_normal_page(vma, addr, *pte))) {
+		BUG_ON(!tsk->at_remote); /* origin vm_normal_page must succeed */
+		page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, addr);
+		BUG_ON(mem_cgroup_try_charge(page, mm, GFP_KERNEL, &memcg));
+		populated = true;
+		PFPRINTK("recv:\t\tpopulated(%s) %lx=====================\n",
+		          populated ? "O" : "X", addr);
+	}
+	get_page(page); /* origin doesn't need to get_page */
+
+#if !SI_IDEAL
+	/* must be READ */
+	paddr = kmap(page);
+	copy_to_user_page(vma, page, addr, paddr, res_page, PAGE_SIZE);
+	kunmap(page);
+#endif
+	flush_dcache_page(page);
+	__SetPageUptodate(page);
+
+//	spin_lock(ptl); // TODO: post-icdcs removing locks
+	if (!tsk->at_remote) {
+		__make_pte_valid(mm, vma, addr, fault_flags, pte);
+	} else  { /* bottom-half of localfault_at_remote */
+		if (populated) {
+			do_set_pte(vma, addr, page, pte, is_write, true);
+			mem_cgroup_commit_charge(page, memcg, false);
+			lru_cache_add_active_or_unevictable(page, vma);
+			/* pf_action_record_remote_res_succ_write_grant */
+			//PFPRINTK("recv:\t\t not preown %lx\n", addr);
+
+			SetPageDistributed(mm, addr);
+			set_page_owner(my_nid, mm, addr);
+		} else {
+			__make_pte_valid(mm, vma, addr, fault_flags, pte);
+		}
+	}
+	//SetPageDistributed(mm, addr);
+	//set_page_owner(my_nid, mm, addr);
+
+//	pte_unmap_unlock(pte, ptl); // TODO: post-icdcs removing locks
+	pte_unmap(pte); // TODO: post-icdcs removing locks
+
+	put_page(page); /* origin doesn't need to put_page */
+
+	ret = 0; /* PREFETCH_SUCCESS */
+
+next:
+	//printk("\t\t\tfixup end 0x%lx\n", addr);
+	//__pf_finish(result, ret, fh);
+	return;
+}
+
 /* IMPORTANT - int/process context */
 struct remote_context *pfpg_fixup(void *msg, struct pcn_kmsg_rdma_handle *pf_handle)
 {
@@ -2547,7 +2741,7 @@ struct remote_context *pfpg_fixup(void *msg, struct pcn_kmsg_rdma_handle *pf_han
 	struct mm_struct *mm = NULL;
 	struct remote_context *rc;
 	struct task_struct *tsk = NULL;
-	struct pf_ongoing_map *pf_map, *tmp;
+//	struct pf_ongoing_map *pf_map, *tmp; // TODO: post-icdcs removing locks
     int pf_num = 0, succ_pf_num = 0;
 #ifdef CONFIG_POPCORN_CHECK_SANITY
     BUG_ON(!res);
@@ -2557,10 +2751,17 @@ struct remote_context *pfpg_fixup(void *msg, struct pcn_kmsg_rdma_handle *pf_han
 	BUG_ON(!tsk);
 
 	mm = tsk->mm;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!mm);
+#endif
 	rc = mm->remote;
+#ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!rc);
+#endif
 
+
+#if 0 // TODO: post-icdcs removing locks
+	// TODO: think
 	// optimization, dirrectly buffer pf_map, thne no need to match here
     spin_lock(&rc->pf_ongoing_lock);
     list_for_each_entry_safe(pf_map, tmp, &rc->pf_ongoing_list, list) {
@@ -2571,20 +2772,24 @@ struct remote_context *pfpg_fixup(void *msg, struct pcn_kmsg_rdma_handle *pf_han
         }
     }
     spin_unlock(&rc->pf_ongoing_lock);
+#endif // TODO: post-icdcs removing locks
+
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
 	BUG_ON(!found);
-	BUG_ON(!pf_map->pf_list_size || pf_map->pf_list_size > MAX_PF_REQ);
-	BUG_ON(pf_map->pf_req_id != res->pf_req_id);
+//	BUG_ON(!pf_map->pf_list_size || pf_map->pf_list_size > MAX_PF_REQ); // TODO: post-icdcs removing locks
+//	BUG_ON(pf_map->pf_req_id != res->pf_req_id); // TODO: post-icdcs removing locks
 #endif
 
-    down_read(&mm->mmap_sem);
+//    down_read(&mm->mmap_sem); // TODO: post-icdcs removing locks
 	//PFPRINTK("response: [%d] [%d]\n", tsk->pid, pf_map->pf_list_size);
-	while (pf_num < pf_map->pf_list_size) {
-		__fixup_page(res, pf_num, &succ_pf_num, tsk, pf_map->fh[pf_num]);
+//	while (pf_num < pf_map->pf_list_size) { // TODO: post-icdcs removing locks
+	while (pf_num < res->pf_list_size) { // TODO: post-icdcs removing locks
+		//__fixup_page(res, pf_num, &succ_pf_num, tsk, pf_map->fh[pf_num]); // TODO: post-icdcs removing locks
+		__fixup_page2(res, pf_num, &succ_pf_num, tsk); // TODO: post-icdcs removing locks // remove pf_map->fh
 		pf_num++;
 	}
-    up_read(&mm->mmap_sem);
+//    up_read(&mm->mmap_sem); // TODO: post-icdcs removing locks
 
 
 #if STATIS
@@ -2592,7 +2797,7 @@ struct remote_context *pfpg_fixup(void *msg, struct pcn_kmsg_rdma_handle *pf_han
 		atomic_inc(&rc->pf_succ_cnt);
 #endif
 
-	kfree(pf_map);
+//	kfree(pf_map); // TODO: post-icdcs removing locks
 	put_task_struct(tsk);
 #if PREFETCH_WRITE
     pcn_kmsg_unpin_rdma_buffer(pf_handle);

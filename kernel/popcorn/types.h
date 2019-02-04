@@ -21,9 +21,11 @@
 #if VM_TESTING
 #define FAULTS_HASH 32
 #else
-#if CONFIG_X86_64
+#ifdef CONFIG_X86_64
+//#define FAULTS_HASH 48
 #define FAULTS_HASH 32
 #else
+//#define FAULTS_HASH 288
 #define FAULTS_HASH 192
 #endif
 #endif
@@ -53,7 +55,7 @@
 #define MAX_PF_REQ (int)(PCN_KMSG_MAX_PAYLOAD_SIZE / PAGE_SIZE)
 
 /* MW SMART OMP REGION */
-#if CONFIG_X86_64
+#ifdef CONFIG_X86_64
 #define VAIN_THRESHOLD ARM_THREADS
 #else
 #define VAIN_THRESHOLD X86_THREADS
@@ -78,8 +80,9 @@
 /* TODO: remove everything !HASH_GLOBAL */
 #define HASH_GLOBAL 1	/* hash list to find mw conflictions */
 
+#define HOST_NODE 0
 
-/* Multiple writer protocol -
+/* Multiple writer (MW) protocol enable -
  * by providing postpone inv (batch invs) and merging in the end
  */
 #define MW 1 // = sync.c POPCORN_TSO_BARRIER (action) + page_server.c  ORIGIN_TSO & REMOTE_TSO (collect)
@@ -96,12 +99,13 @@
 #define SMART_REGION 1
 #endif
 
-/* Prefetch */
+/* Prefetch (SI) enable */
 #define GOD_VIEW 1
 #define PREFETCH 1
 
 /* statis */
-#define STATIS 1 /* show in the end */
+#define STATIS 1 /* log in the execution time */
+#define STATIS_END 1 /* show in the end */
 
 
 #define PREFETCH_FAIL 0x0001
@@ -208,7 +212,8 @@ struct remote_context {
 	int inv_cnt; /* Per region */
 	int remote_fence;
 	/* for sending */
-	unsigned long inv_addrs[MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS];
+	//unsigned long inv_addrs[MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS];
+	unsigned long inv_addrs[112 * MAX_WRITE_INV_BUFFERS]; // for more than 112t
 #if !HASH_GLOBAL
 	// remove this TODO
 	char *inv_pages; // [MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS][PAGE_SIZE];
@@ -219,7 +224,7 @@ struct remote_context {
 	unsigned long sys_inv_cnt; /* not used */
 	atomic_t sys_smart_skip_cnt;
 
-	unsigned long remote_sys_ww_cnt;
+	unsigned long remote_sys_ww_cnt; // #if MW_TIME in sync.c
 
 	unsigned long sys_local_conflict_cnt; /* more details */
 #else
@@ -501,6 +506,7 @@ DEFINE_PCN_KMSG(remote_prefetch_request_t, REMOTE_PREFETCH_REQUEST_FIELDS);
     pid_t origin_pid; \
     pid_t remote_pid; \
     int pf_req_id; \
+	int pf_list_size; \
     unsigned long god_omp_hash; \
     struct prefetch_result pf_results[MAX_PF_REQ];
 

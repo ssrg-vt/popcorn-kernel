@@ -22,7 +22,15 @@
 #define MAX_READ_BUFFERS 2000
 #define MAX_WRITE_NOPAGE_BUFFERS 2000
 
-#define MAX_PF_MSG (ARM_THREADS * 10 * 2) // = (1000msg * 31pg per msg) pages is enough except sp (2000)
+#if VM_TESTING
+#define X86_THREADS 8
+#define ARM_THREADS 8
+#else
+#define X86_THREADS 16
+#define ARM_THREADS 96
+//#define X86_THREADS 24
+//#define ARM_THREADS 144
+#endif
 
 /* 1 end spot for sorting */
 #define MAX_ALIVE_THREADS (X86_THREADS + ARM_THREADS + 1)
@@ -36,5 +44,4 @@
 // try X86_THREADS + ARM_THREADS
 #endif
 */
-
 #endif /* !SYNC_H */

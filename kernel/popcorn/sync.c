@@ -128,8 +128,8 @@ atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 #define REENTRY_BEGIN_DISABLE 1 // 0: repeat show 1: once
 
 /*** perf ***/
-#define SKIP_MEM_CLEAN 1 // testing
-#define CONSERVATIVE 0 // this is BETA 1:safe
+#define SKIP_MEM_CLEAN 1
+#define CONSERVATIVE 0 // this is BETA 1:safe (icdcs: 0)
 #define PERF_FULL_BULL_WARN 1 // only for prink statis still works and show in the end !!!
 
 /* To debug omp_hash collision between nodes or not
@@ -994,12 +994,14 @@ void __send_pf_req(int pf_nr_pages, int send_id, struct prefetch_list_body *pf_r
 
 	BUG_ON(!req || !pf_nr_pages);
 
+#if 0 // TODO: post-icdcs removing locks
 	/* pf_map */
 	pf_map->pf_req_id = send_id;
 	pf_map->pf_list_size = pf_nr_pages;
     spin_lock(&rc->pf_ongoing_lock);
 	list_add_tail(&pf_map->list, &rc->pf_ongoing_list);
     spin_unlock(&rc->pf_ongoing_lock);
+#endif // TODO: post-icdcs removing locks
 
 	/* msg */
 	req->origin_pid = current->pid;
@@ -1120,7 +1122,10 @@ static void process_remote_prefetch_response(struct work_struct *work)
 }
 
 extern struct fault_handle *select_prefetch_page(unsigned long addr);
-// return: pending_pf_req
+extern struct fault_handle *select_prefetch_page2(unsigned long addr);
+/***
+ * return: pending_pf_req to wait
+ */
 int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 {
 	int bkt;
@@ -1129,7 +1134,7 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 	int sent_cnt = 0;
 	int pf_nr_pages = 0;
 	int pending_pf_req = 0;
-	struct pf_ongoing_map *pf_map;
+//	struct pf_ongoing_map *pf_map = NULL; // TODO: post-icdcs removing locks
 	struct prefetch_list_body pf_reqs[MAX_PF_REQ];
 #if STATIS
 	int r_cnt = sys_region->read_cnt;
@@ -1144,7 +1149,7 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 
 	hash_for_each_safe(sys_region->every_rregion_hash, bkt, tmp, fi, hentry) {
 		unsigned long addr = fi->addr;
-		struct fault_handle *fh = select_prefetch_page(addr); // TODO: post-icdcs removing locks
+		struct fault_handle *fh = select_prefetch_page2(addr); // TODO: post-icdcs removing locks
 #if STRONG_CHECK_SANITY
 		BUG_ON(!addr);
 #endif
@@ -1152,7 +1157,7 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 #if STATIS
 		r_cnt--;
 #endif
-		if (!fh)
+		if (!fh) /* has owned the page */
 			continue;
 
 		sent_cnt++;
@@ -1162,10 +1167,14 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 		if (!pf_nr_pages)
 			pf_kmalloc_start = ktime_get();
 #endif
-		BUG_ON(!pf_map);
+
+
+#if 0 // TODO: post-icdcs removing locks
+//		BUG_ON(!pf_map); // .........BUG
 		/* on going req map */
 		if (!pf_nr_pages)
 			pf_map = kzalloc(sizeof(*pf_map), GFP_KERNEL);
+#endif // TODO: post-icdcs removing locks
 
 #if PF_TIME
 		if (!pf_nr_pages) {
@@ -1174,9 +1183,13 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 			pf_malloc_time += ktime_to_ns(dt);
 		}
 #endif
-		BUG_ON(!pf_map);
-		pf_map->fh[pf_nr_pages] = fh; // TODO: post-icdcs removing locks (chage pf response)
-		pf_map->addr[pf_nr_pages] = addr;
+
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+//		BUG_ON(!pf_map); // TODO: post-icdcs removing locks
+#endif
+		//pf_map->fh[pf_nr_pages] = fh; // TODO: post-icdcs removing locks (chage pf response)
+		// nothing
+//		pf_map->addr[pf_nr_pages] = addr; // TODO: post-icdcs removing locks
 
 		/* preparing msg */
 		pf_reqs[pf_nr_pages].addr = addr;
@@ -1184,7 +1197,8 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 		// load to msg 1 ~ 7 (0-6)
 
 		if (pf_nr_pages >= MAX_PF_REQ) { // >= 7 ([0-6]) send
-			__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, pf_map, sys_region);
+			//__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, pf_map, sys_region);
+			__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, NULL, sys_region); // TODO: post-icdcs removing locks
 			pending_pf_req++;
 			pf_nr_pages = 0;
 #if !SKIP_MEM_CLEAN // testing
@@ -1199,7 +1213,8 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 			break;
 	}
 	if (pf_nr_pages) { // 1 ~ 6
-		__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, pf_map, sys_region);
+		//__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, pf_map, sys_region); // TODO: post-icdcs removing locks
+		__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, NULL, sys_region); // TODO: post-icdcs removing locks
 		pending_pf_req++;
 	}
 
@@ -1528,6 +1543,31 @@ void __show_other_dbg_info(struct remote_context *rc)
 #endif
 }
 
+void __show_mwpf_config(void)
+{
+	printk("===========================================\n");
+	printk("===== inside region time (auto reset) =====\n");
+	printk("===========================================\n");
+#if VM_TESTING
+	printk("VM_TEST = 1\n");
+#else
+	printk("VM_TEST = 0\n");
+#endif
+
+#if MW_CONSIDER_CPU
+	printk("MW_CONSIDER_CPU = 1\n");
+#else
+	printk("MW_CONSIDER_CPU = 0\n");
+#endif
+
+#if PF_CONSIDER_CPU
+	printk("PF_CONSIDER_CPU = 1\n");
+#else
+	printk("PF_CONSIDER_CPU = 0\n");
+#endif
+
+}
+
 /***************
  * SMART_REGION_DBG
  */
@@ -1612,6 +1652,7 @@ void clean_omp_region_hash(struct remote_context *rc)
 #endif
 
 	__show_other_dbg_info(rc);
+	__show_mwpf_config();
 
 	hash_for_each_safe(rc->omp_region_hash, bkt, tmp, pos, hentry) {
 #if DECISION_PREFETCH_STATIS
@@ -2289,6 +2330,8 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 	int sent_cnt = 0; /* aka total_sent_cnt */
 	bool zero_case;
 	int local_wr_cnt;
+
+/* This configure is not showen in the end */
 /* consider remote core cnt (icdcs19 data) */
 #ifdef CONFIG_X86_64
 	int other_node_cpus = ARM_THREADS;
