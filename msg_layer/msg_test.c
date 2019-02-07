@@ -9,7 +9,7 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 
-#include "../../kernel/popcorn/sync.h"
+//#include <popcorn/sync.h>
 #include "../../kernel/popcorn/types.h"
 #include "common.h"
 

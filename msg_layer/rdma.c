@@ -12,12 +12,20 @@
 #define RDMA_PORT 11453
 #define RDMA_ADDR_RESOLVE_TIMEOUT_MS 5000
 
-#define DEVELOP_DBG 0
+#define DEVELOP_DBG 1
 #if DEVELOP_DBG
 #define DEVPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
 #define DEVPRINTK(...)
 #endif
+
+#define SENDRECV_DBG 0
+#if SENDRECV_DBG
+#define SRPRINTK(...) printk(KERN_INFO __VA_ARGS__)
+#else
+#define SRPRINTK(...)
+#endif
+
 
 #if MULTI_MSG_CANNEL_PER_NODE
 //static atomic_t send_rond_robin[MAX_NUM_NODES] = { ATOMIC_INIT(0) };
@@ -472,13 +480,17 @@ static int __send_to(int to_nid, struct send_work *sw, size_t size)
 #else
 	channel = 0;
 #endif
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+    BUG_ON(channel < 0);
+#endif
+
 
 	rh = rdma_handles[to_nid][channel];
 #if MULTI_CONN_PER_NODE
 	((struct pcn_kmsg_message *)sw->addr)->header.channel = channel;
 #endif
 	//msg->header.from_nid = my_nid;
-	DEVPRINTK("-> send: to_nid %d channel %u\n", to_nid, channel);
+	SRPRINTK("-> send: to_nid %d channel %u\n", to_nid, channel);
 
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
@@ -610,6 +622,11 @@ int rdma_kmsg_write(int to_nid, dma_addr_t rdma_addr, void *addr, size_t size, u
 	channel = 0;
 #endif
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+    BUG_ON(channel < 0);
+#endif
+
+
 	dma_addr = ib_dma_map_single(rdma_mr->device, addr, size, DMA_TO_DEVICE);
 	ret = ib_dma_mapping_error(rdma_mr->device, dma_addr);
 	BUG_ON(ret);
@@ -687,7 +704,7 @@ void rdma_kmsg_done(struct pcn_kmsg_message *msg)
 	bool found = false;
 #endif
 
-	DEVPRINTK("\t<- recv: kmsg_done: from_nid %d channel %u\n",
+	SRPRINTK("\t<- recv: kmsg_done: from_nid %d channel %u\n",
 												from_nid, channel);
 
 	/* Look for the right pool */
@@ -869,7 +886,7 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 			rdma_pd = NULL;
 			goto out_err;
 		}
-		printk("ib_alloc_pd pass\n");
+		DEVPRINTK("ib_alloc_pd pass\n");
 	}
 
 	/* create completion queue */
@@ -880,7 +897,7 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 			.comp_vector = 0,
 		};
 
-		//printk("createing cq rh->channel %d\n", rh->channel);
+		DEVPRINTK("createing cq rh->channel %d\n", rh->channel);
 		rh->cq = ib_create_cq(rh->device,
 			cq_comp_handler, (void *)&(rh->channel), rh, &cq_attr);
 		if (IS_ERR(rh->cq)) {

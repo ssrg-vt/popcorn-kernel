@@ -13,6 +13,17 @@
 #define VM_TESTING 1
 #define MULTI_CONN_PER_NODE 0
 
+#if VM_TESTING
+#define X86_THREADS 8
+#define ARM_THREADS 8
+#else
+#define X86_THREADS 16
+#define ARM_THREADS 96
+//#define X86_THREADS 24
+//#define ARM_THREADS 144
+#endif
+#define MAX_POPCORN_THREADS ARM_THREADS
+
 /* Enumerate message types */
 enum pcn_kmsg_type {
 	/* Thread migration */

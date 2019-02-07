@@ -54,9 +54,9 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 //	static int cnt = 0;
 #ifdef CONFIG_POPCORN_STAT
 	//ktime_t dt1, t1e, t1s;
-	ktime_t dt2, t2e, t2s;
-	ktime_t dt3, t3e, t3s;
-	ktime_t dt4, t4e, t4s;
+	ktime_t t2e, t2s;
+	ktime_t t3e, t3s;
+	ktime_t t4e, t4s;
 	static long long t2 = 0, t3 = 0, t4 = 0;
 
 	t2s = ktime_get();

@@ -1,7 +1,8 @@
 #ifndef __POPCORN_RING_BUFFER_H__
 #define __POPCORN_RING_BUFFER_H__
 
-#define MSG_POOL_SIZE (16 * 7) /* send/recv pool */ /* 16*8 doesn't work*/
+#define MSG_POOL_SIZE (16 * 5) /* send/recv pool */ /* 16*8 doesn't work*/
+//#define MSG_POOL_SIZE (16 * 7) /* send/recv pool */ /* 16*6 doesn't work on Jack_sc on fox4*/
 #define RB_MAX_CHUNKS	128 /* Max. Actual used size  RB_NR_CHUNKS */
 #define RB_NR_CHUNKS	128 /* Actual used size */
 #define RB_CHUNK_ORDER	(MAX_ORDER - 1)
