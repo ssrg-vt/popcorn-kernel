@@ -336,7 +336,6 @@
 331 64	popcorn_propose_migration	sys_popcorn_propose_migration
 332 64	popcorn_get_thread_status	sys_popcorn_get_thread_status
 333 64	popcorn_get_node_info	sys_popcorn_get_node_info
-334 64	popcorn_user_printk	sys_popcorn_user_printk
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact

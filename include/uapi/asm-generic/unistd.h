@@ -723,10 +723,8 @@ __SYSCALL(__NR_popcorn_propose_migration, sys_popcorn_propose_migration)
 __SYSCALL(__NR_popcorn_get_thread_status, sys_popcorn_get_thread_status)
 #define __NR_popcorn_get_node_info 288
 __SYSCALL(__NR_popcorn_get_node_info, sys_popcorn_get_node_info)
-#define __NR_popcorn_user_printk 289
-__SYSCALL(__NR_popcorn_user_printk, sys_popcorn_user_printk)
 #undef __NR_syscalls
-#define __NR_syscalls 290
+#define __NR_syscalls 289
 
 /*
  * All syscalls below here should go away really,

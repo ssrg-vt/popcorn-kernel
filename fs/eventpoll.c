@@ -1785,7 +1785,7 @@ SYSCALL_DEFINE1(epoll_create1, int, flags)
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
 		error = redirect_epoll_create1(flags);
-		SKPRINTK("remote epoll_create ret: %d\n", error);
+		SSPRINTK("remote epoll_create ret: %d\n", error);
 		return error;
 	}
 #endif
@@ -1853,7 +1853,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
 		error = redirect_epoll_ctl(epfd, op, fd, event);
-		SKPRINTK("remote epoll_ctl ret: %d\n", error);
+		SSPRINTK("remote epoll_ctl ret: %d\n", error);
 		return error;
 	}
 #endif
@@ -1997,7 +1997,7 @@ SYSCALL_DEFINE4(epoll_wait, int, epfd, struct epoll_event __user *, events,
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
 		error = redirect_epoll_wait(epfd, events, maxevents, timeout);
-		SKPRINTK("remote epoll_wait ret: %d\n", error);
+		SSPRINTK("remote epoll_wait ret: %d\n", error);
 		return error;
 	}
 #endif
@@ -2051,7 +2051,7 @@ SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
 	if (distributed_remote_process(current)) {
 		error = redirect_epoll_pwait(epfd, events, maxevents, timeout,
 					     sigmask, sigsetsize);
-		SKPRINTK("remote epoll_pwait ret: %d\n", error);
+		SSPRINTK("remote epoll_pwait ret: %d\n", error);
 		return error;
 	}
 #endif

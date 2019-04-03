@@ -18,7 +18,13 @@ int process_remote_syscall(struct pcn_kmsg_message *msg);
 
 /*This Set of macros allows for forwarding of syscalls of up to 6 arguments,
  *with 12 arguments being input altogether, eg. SET_REQ_PARAMS(int, a, char, b)
- *This segment will give the  */
+ *This segment will fill in the RPC syscall definitions with the correct
+ *params from 1 to 6. This is filled in backwards due to the way we're
+ *implementing the macros, so when you call SET_REQ_PARAM_ARGS, based on the
+ *VA_ARGS number it offsets into _SET_REQ_PARAMS which will call a particular
+ *_PARAM_X_TYPE which then recursively expands the PARAMS before it. If we have
+ *an odd number of arguments we get a return -EINVAL instead since we need
+ *type-value pairs*/
 #define _PARAM_0_VAL(arg0)	req->param0 = (uint64_t)arg0;
 #define _PARAM_0_TYPE(type, ...) _PARAM_0_VAL(__VA_ARGS__)
 #define _PARAM_1_VAL(arg1, ...) req->param1 = (uint64_t)arg1; _PARAM_0_TYPE(__VA_ARGS__)
@@ -63,6 +69,10 @@ int process_remote_syscall(struct pcn_kmsg_message *msg);
 
 #define _LIST_ARGS(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, \
 			NAME, ...) NAME
+
+/* Counts the number of arguments using an offset into _LIST_ARGS */
+#define NUM_ARGS(...) _LIST_ARGS(__VA_ARGS__,12,11,10,9,8,7,6,5,4,3,2,1,0)
+
 #define LIST_SYSCALL_ARGS(...)						\
 	_LIST_ARGS(__VA_ARGS__, _ARG_5_TYPE, INVALID_ARGUMENTS,		\
 			_ARG_4_TYPE, INVALID_ARGUMENTS,			\
@@ -72,6 +82,21 @@ int process_remote_syscall(struct pcn_kmsg_message *msg);
 			_ARG_0_TYPE, INVALID_ARGUMENTS,			\
 			)(__VA_ARGS__)
 
+/* Reverses arg pairs, so if you call REVERSE(int, a, char, b) it will
+ * return char, b, int, a. We use this to undo the reversing effect of
+ * SET_REQ_PARAMS. REVERSE needs to call REVERSE1 which seemingly does nothing
+ * because of the way macro expansion works. REVERSE takes N as an argument for
+ * the number of arguments to be reversed, but we can only get that by using the
+ * NUM_ARGS macro, so for it to expand correctly we need to call it like so:
+ * REVERSE(NUM_ARGS(__VA_ARGS__), __VA_ARGS__)*/
+#define REVERSE_2(a, b) a, b
+#define REVERSE_4(a,b,...) REVERSE_2(__VA_ARGS__),a, b
+#define REVERSE_6(a,b,...) REVERSE_4(__VA_ARGS__),a, b
+#define REVERSE_8(a,b,...) REVERSE_6(__VA_ARGS__),a, b
+#define REVERSE_10(a,b,...) REVERSE_8(__VA_ARGS__),a, b
+#define REVERSE_12(a,b,...) REVERSE_10(__VA_ARGS__),a, b
+#define REVERSE1(N,...) REVERSE_ ## N(__VA_ARGS__)
+#define REVERSE(N, ...) REVERSE1(N, __VA_ARGS__)
 
 #define DEFINE_SYSCALL_REDIRECT(syscall, syscall_type,...)		\
 inline int redirect_##syscall(LIST_SYSCALL_ARGS(__VA_ARGS__))		\
@@ -82,7 +107,7 @@ inline int redirect_##syscall(LIST_SYSCALL_ARGS(__VA_ARGS__))		\
 	struct wait_station *ws = get_wait_station(current);		\
 	req->origin_pid = current->origin_pid;				\
 	req->remote_ws = ws->id;					\
-	SET_REQ_PARAMS_ARGS(__VA_ARGS__)				\
+	SET_REQ_PARAMS_ARGS(REVERSE(NUM_ARGS(__VA_ARGS__), __VA_ARGS__))\
 	req->call_type = syscall_type;					\
 	ret = pcn_kmsg_send(PCN_KMSG_TYPE_SYSCALL_FWD, 0, req,		\
 			    sizeof(*req));				\

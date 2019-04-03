@@ -1232,10 +1232,10 @@ SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 	/* We want to create a remote socket on master node */
 	if (distributed_remote_process(current)) {
 		retval = redirect_socket(family, type, protocol);
-		SKPRINTK("remote socket created. ret fd: %d\n", retval);
-		SKPRINTK("pid: %d, nid: %d\n",
+		SSPRINTK("remote socket created. ret fd: %d\n", retval);
+		SSPRINTK("pid: %d, nid: %d\n",
 			 current->origin_pid, current->origin_nid);
-		SKPRINTK("is worker: %d, at remote: %d\n", current->is_worker,
+		SSPRINTK("is worker: %d, at remote: %d\n", current->is_worker,
 			 current->at_remote);
 		return retval;
 	}
@@ -1388,7 +1388,7 @@ SYSCALL_DEFINE3(bind, int, fd, struct sockaddr __user *, umyaddr, int, addrlen)
 	/* We want to redirect bind back to origin */
 	if (distributed_remote_process(current)) {
 		err = redirect_bind(fd, umyaddr, addrlen);
-		SKPRINTK("remote bind ret: %d\n", err);
+		SSPRINTK("remote bind ret: %d\n", err);
 		return err;
 	}
 #endif
@@ -1425,7 +1425,7 @@ SYSCALL_DEFINE2(listen, int, fd, int, backlog)
 	/* We want to redirect listen() back to origin */
 	if (distributed_remote_process(current)) {
 		err = redirect_listen(fd, backlog);
-		SKPRINTK("remote listen ret: %d\n", err);
+		SSPRINTK("remote listen ret: %d\n", err);
 		return err;
 	}
 #endif
@@ -1791,7 +1791,7 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
 	if (distributed_remote_process(current)) {
 		err = redirect_setsockopt(fd, level, optname, optval,
 					     optlen);
-		SKPRINTK("setsockopt ret: %d\n", err);
+		SSPRINTK("setsockopt ret: %d\n", err);
 		return err;
 	}
 #endif

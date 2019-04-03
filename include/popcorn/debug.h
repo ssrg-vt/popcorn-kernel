@@ -41,10 +41,10 @@
 #define MSGPRINTK(...)
 #endif
 
-#ifdef CONFIG_POPCORN_DEBUG_SOCKET_SERVER
-#define SKPRINTK(...) printk(KERN_INFO __VA_ARGS__)
+#ifdef CONFIG_POPCORN_DEBUG_SYSCALL_SERVER
+#define SSPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
-#define SKPRINTK(...)
+#define SSPRINTK(...)
 #endif
 
 #endif /*  __INCLUDE_POPCORN_DEBUG_H__ */

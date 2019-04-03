@@ -1086,24 +1086,4 @@ static int __init opt_kgdb_wait(char *str)
 	return 0;
 }
 
-#ifdef CONFIG_POPCORN_DEBUG
-/* System call to aid in debugging by printing on local node where process is
- * running */
-SYSCALL_DEFINE2(popcorn_user_printk, const char __user *, buf,
-		size_t, count)
-{
-	int ret = 0;
-	char print_buf[100];
-
-	if (copy_from_user(print_buf, buf, count)) {
-		ret = -EFAULT;
-		goto out;
-	}
-	printk(KERN_INFO "USR_PRINTK [%d] %s", current->pid, print_buf);
-
-out:
-	return ret;
-}
-#endif
-
 early_param("kgdbwait", opt_kgdb_wait);

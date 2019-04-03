@@ -101,105 +101,99 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	syscall_fwd_t *req = (syscall_fwd_t *)msg;
 	syscall_rep_t *rep = kmalloc(sizeof(*rep), GFP_KERNEL);
 
-	/*Call the original system call and pass in delivered params. Due to the
-	 * way the macro is set up on the remote side, params are filled
-	 * backwards. 3 params, the request will go param2 = 1st argument;
-	 * param1 = 2nd argument, param0 = 3rd argument. For 2 params, param1 =
-	 * 1st argument, param0 = 2nd argument*/
+	/*Call the original system call and pass in delivered params. */
 	switch(req->call_type) {
 	case PCN_SYSCALL_SOCKET_CREATE:
-	/*int family; int type; int protocol*/
-		retval = sys_socket((int)req->param2, (int)req->param1,
-				    (int)req->param0);
+		retval = sys_socket((int)req->param0, (int)req->param1,
+				    (int)req->param2);
 		break;
 	case PCN_SYSCALL_SETSOCKOPT:
-		retval = sys_setsockopt((int)req->param4, (int)req->param3,
+		retval = sys_setsockopt((int)req->param0, (int)req->param1,
 					(int)req->param2,
-					(char __user*)req->param1,
-					(int)req->param0);
+					(char __user*)req->param3,
+					(int)req->param4);
 		break;
 	case PCN_SYSCALL_BIND:
-        retval = sys_bind((int)req->param2, (struct sockaddr __user*)
-				  req->param1, (int)req->param0);
+        retval = sys_bind((int)req->param0, (struct sockaddr __user*)
+				  req->param1, (int)req->param2);
 		break;
 	case PCN_SYSCALL_LISTEN:
-		retval = sys_listen((int)req->param1, (int)req->param0);
+		retval = sys_listen((int)req->param0, (int)req->param1);
 		break;
 	case PCN_SYSCALL_ACCEPT4:
-		retval = sys_accept4((int)req->param3,
-				     (struct sockaddr __user*)req->param2,
-				     (int __user*)req->param1,
-				     (int)req->param0);
+		retval = sys_accept4((int)req->param0,
+				     (struct sockaddr __user*)req->param1,
+				     (int __user*)req->param2,
+				     (int)req->param3);
 		break;
 	case PCN_SYSCALL_SHUTDOWN:
-		retval = sys_shutdown((int)req->param1, (int)req->param0);
+		retval = sys_shutdown((int)req->param0, (int)req->param1);
 		break;
 	/* Event poll related syscalls */
 	case PCN_SYSCALL_EPOLL_CREATE1:
 		retval = sys_epoll_create1((int)req->param0);
 		break;
 	case PCN_SYSCALL_EPOLL_WAIT:
-		retval = sys_epoll_wait((int)req->param3,
-				(struct epoll_event __user *)req->param2,
-				(int)req->param1, (int)req->param0);
-		printk(KERN_INFO "epoll_wait returned: %d\n", retval);
+		retval = sys_epoll_wait((int)req->param0,
+				(struct epoll_event __user *)req->param1,
+				(int)req->param2, (int)req->param3);
 		break;
 	case PCN_SYSCALL_EPOLL_CTL:
-		retval = sys_epoll_ctl((int)req->param3, (int)req->param2,
-				       (int)req->param1, (struct epoll_event
-				       __user *)req->param0);
+		retval = sys_epoll_ctl((int)req->param0, (int)req->param1,
+				       (int)req->param2, (struct epoll_event
+				       __user *)req->param3);
 		break;
 
 	case PCN_SYSCALL_READ:
-		retval = sys_read((unsigned int)req->param2,
+		retval = sys_read((unsigned int)req->param0,
 				  (char __user *)req->param1,
-				  (size_t) req->param0);
+				  (size_t) req->param2);
 		break;
 	case PCN_SYSCALL_WRITE:
-		retval = sys_write((unsigned int)req->param2,
+		retval = sys_write((unsigned int)req->param0,
 				  (const char __user *)req->param1,
-				  (size_t) req->param0);
+				  (size_t) req->param2);
 		break;
 	case PCN_SYSCALL_OPEN:
-		retval = sys_open((const char __user *)req->param2,
+		retval = sys_open((const char __user *)req->param0,
 				  (int)req->param1,
-				  (umode_t)req->param0);
+				  (umode_t)req->param2);
 		break;
 	case PCN_SYSCALL_CLOSE:
 		retval = sys_close((unsigned int)req->param0);
 		break;
 	case PCN_SYSCALL_IOCTL:
-		retval = sys_ioctl((unsigned int)req->param2,
+		retval = sys_ioctl((unsigned int)req->param0,
 				   (unsigned int)req->param1,
-				   (unsigned long)req->param0);
+				   (unsigned long)req->param2);
 		break;
 	case PCN_SYSCALL_WRITEV:
-		retval = sys_writev((unsigned long)req->param2,
+		retval = sys_writev((unsigned long)req->param0,
 				   (const struct iovec __user *)req->param1,
-				   (unsigned long)req->param0);
+				   (unsigned long)req->param2);
 		break;
 	case PCN_SYSCALL_RECVFROM:
-		retval = sys_recvfrom((int)req->param5,
-				   (void __user *)req->param4,
-				   (size_t)req->param3,
-				   (unsigned)req->param2,
-				   (struct sockaddr __user *)req->param1,
-				   (int __user *)req->param0);
+		retval = sys_recvfrom((int)req->param0,
+				   (void __user *)req->param1,
+				   (size_t)req->param2,
+				   (unsigned)req->param3,
+				   (struct sockaddr __user *)req->param4,
+				   (int __user *)req->param5);
 		break;
 	case PCN_SYSCALL_FSTAT:
-		retval = sys_newfstat((unsigned int)req->param1,
-				   (struct stat __user *)req->param0);
+		retval = sys_newfstat((unsigned int)req->param0,
+				   (struct stat __user *)req->param1);
 		break;
 	case PCN_SYSCALL_SENDFILE64:
-		retval = sys_sendfile64((int)req->param3, (int)req->param2,
-			       (loff_t __user *)req->param1, (size_t)req->param0);
+		retval = sys_sendfile64((int)req->param0, (int)req->param1,
+			       (loff_t __user *)req->param2, (size_t)req->param3);
 		break;
 	case PCN_SYSCALL_EPOLL_PWAIT:
-		retval = sys_epoll_pwait((int)req->param5, (struct epoll_event
-							    __user *)req->param4,
-				(int)req->param3, (int)req->param2,
-				(const sigset_t __user *)req->param1,
-				(size_t)req->param0);
+		retval = sys_epoll_pwait((int)req->param0, (struct epoll_event
+							    __user *)req->param1,
+				(int)req->param2, (int)req->param3,
+				(const sigset_t __user *)req->param4,
+				(size_t)req->param5);
 		break;
 	default:
 		retval = -EINVAL;
