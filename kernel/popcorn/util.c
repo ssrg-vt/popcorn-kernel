@@ -87,7 +87,6 @@ out_unlock:
 	return 0;
 }
 
-
 static const char *__comm_to_trace[] = {
 };
 

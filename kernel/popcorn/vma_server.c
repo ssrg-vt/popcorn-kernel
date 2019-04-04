@@ -729,8 +729,12 @@ static int __update_vma(struct task_struct *tsk, vma_info_response_t *res)
 		goto out;
 	}
 
-	if (vma_info_anon(res)) {
+	if (vma_info_anon(res) || vma_info_dev_zero(res)) {
 		flags |= MAP_ANONYMOUS;
+		VSPRINTK("  [%d] anon file path: %u, dev zero backing: %u",
+			 tsk->pid,
+			 (unsigned int)vma_info_anon(res),
+			 (unsigned int)vma_info_dev_zero(res));
 	} else {
 		f = filp_open(res->vm_file_path, O_RDONLY | O_LARGEFILE, 0);
 		if (IS_ERR(f)) {

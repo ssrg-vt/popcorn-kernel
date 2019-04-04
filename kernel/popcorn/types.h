@@ -8,7 +8,6 @@
 #include <linux/signal.h>
 #include <linux/slab.h>
 #include <linux/radix-tree.h>
-
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
 
@@ -74,6 +73,11 @@ bool __put_task_remote(struct remote_context *rc);
 	struct field_arch arch;
 DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 
+typedef struct popcorn_fd {
+    unsigned int idx;
+    char file_path[128];
+} fd_t;
+
 #define CLONE_FIELDS \
 	pid_t origin_tgid;\
 	pid_t origin_pid;\
@@ -92,6 +96,7 @@ DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 	unsigned int personality;\
 	unsigned long def_flags;\
 	char exe_path[512];\
+    fd_t fds[64];\
 	/* \
 	sigset_t remote_blocked;\
 	sigset_t remote_real_blocked;\
@@ -103,7 +108,6 @@ DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
 	*/ \
 	struct field_arch arch;
 DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
-
 
 /**
  * This message is sent in response to a clone request.
@@ -151,8 +155,12 @@ DEFINE_PCN_KMSG(vma_info_request_t, VMA_INFO_REQUEST_FIELDS);
 	char vm_file_path[512];
 DEFINE_PCN_KMSG(vma_info_response_t, VMA_INFO_RESPONSE_FIELDS);
 
+#define DEV_ZERO_STRING	"/dev/zero"
+/* -1 because we want to partial match, no inclusion of '\0' */
+#define DEV_ZERO_STRING_LEN (sizeof(DEV_ZERO_STRING) - 1)
 #define vma_info_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
-
+#define vma_info_dev_zero(x) (!strncmp((x)->vm_file_path, DEV_ZERO_STRING,\
+			      DEV_ZERO_STRING_LEN))
 
 #define VMA_OP_REQUEST_FIELDS \
 	pid_t origin_pid; \
@@ -303,6 +311,54 @@ DEFINE_PCN_KMSG(node_info_t, NODE_INFO_FIELDS);
 	int power_3;
 DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
 
+
+/**
+ * Syscall server. Allows forwarding and handling of remote system calls.
+ */
+
+/* Enumerate syscall types*/
+enum pcn_syscall_types
+{
+	PCN_SYSCALL_SOCKET_CREATE,
+	PCN_SYSCALL_SETSOCKOPT,
+	PCN_SYSCALL_BIND,
+	PCN_SYSCALL_LISTEN,
+	PCN_SYSCALL_ACCEPT4,
+	PCN_SYSCALL_SHUTDOWN,
+	PCN_SYSCALL_RECVFROM,
+	PCN_SYSCALL_EPOLL_CREATE1,
+	PCN_SYSCALL_EPOLL_WAIT,
+	PCN_SYSCALL_EPOLL_PWAIT,
+	PCN_SYSCALL_EPOLL_CTL,
+	PCN_SYSCALL_READ,
+	PCN_SYSCALL_WRITE,
+	PCN_SYSCALL_OPEN,
+	PCN_SYSCALL_CLOSE,
+	PCN_SYSCALL_IOCTL,
+	PCN_SYSCALL_WRITEV,
+	PCN_SYSCALL_FSTAT,
+	PCN_SYSCALL_SENDFILE64,
+	PCN_NUM_SYSCALLS
+};
+
+#define SYSCALL_FWD_FIELDS				\
+	pid_t origin_pid;				\
+	uint64_t param0;				\
+	uint64_t param1;				\
+	uint64_t param2;				\
+	uint64_t param3;				\
+	uint64_t param4;				\
+	uint64_t param5;				\
+	int remote_ws;					\
+	enum pcn_syscall_types call_type;		\
+	int ret;
+DEFINE_PCN_KMSG(syscall_fwd_t, SYSCALL_FWD_FIELDS);
+
+#define SYSCALL_REP_FIELDS				\
+	pid_t origin_pid;				\
+	int remote_ws;					\
+	int ret;
+DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
 
 /**
  * Message routing using work queues

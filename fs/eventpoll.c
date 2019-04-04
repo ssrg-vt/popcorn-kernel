@@ -43,6 +43,10 @@
 #include <linux/compat.h>
 #include <linux/rculist.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/syscall_server.h>
+#include <popcorn/types.h>
+#endif
 /*
  * LOCKING:
  * There are three level of locking required by epoll :
@@ -1778,6 +1782,13 @@ SYSCALL_DEFINE1(epoll_create1, int, flags)
 	struct eventpoll *ep = NULL;
 	struct file *file;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_epoll_create1(flags);
+		SSPRINTK("remote epoll_create ret: %d\n", error);
+		return error;
+	}
+#endif
 	/* Check the EPOLL_* constant for consistency.  */
 	BUILD_BUG_ON(EPOLL_CLOEXEC != O_CLOEXEC);
 
@@ -1839,6 +1850,13 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	struct epoll_event epds;
 	struct eventpoll *tep = NULL;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_epoll_ctl(epfd, op, fd, event);
+		SSPRINTK("remote epoll_ctl ret: %d\n", error);
+		return error;
+	}
+#endif
 	error = -EFAULT;
 	if (ep_op_has_event(op) &&
 	    copy_from_user(&epds, event, sizeof(struct epoll_event)))
@@ -1976,6 +1994,13 @@ SYSCALL_DEFINE4(epoll_wait, int, epfd, struct epoll_event __user *, events,
 	struct fd f;
 	struct eventpoll *ep;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_epoll_wait(epfd, events, maxevents, timeout);
+		SSPRINTK("remote epoll_wait ret: %d\n", error);
+		return error;
+	}
+#endif
 	/* The maximum number of event must be greater than zero */
 	if (maxevents <= 0 || maxevents > EP_MAX_EVENTS)
 		return -EINVAL;
@@ -2022,6 +2047,14 @@ SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
 	int error;
 	sigset_t ksigmask, sigsaved;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_epoll_pwait(epfd, events, maxevents, timeout,
+					     sigmask, sigsetsize);
+		SSPRINTK("remote epoll_pwait ret: %d\n", error);
+		return error;
+	}
+#endif
 	/*
 	 * If the caller wants a certain signal mask to be set during the wait,
 	 * we apply it here.

@@ -8,6 +8,7 @@ void print_page_signature_pid(pid_t pid, unsigned char *addr);
 void print_page_owner(unsigned long addr, unsigned long *owners, pid_t pid);
 
 int get_file_path(struct file *file, char *sz, size_t size);
+int clone_fdtable(fd_t *fds, struct files_struct *files);
 
 void trace_task_status(void);
 #endif

@@ -34,6 +34,7 @@
 #include "page_server.h"
 #include "wait_station.h"
 #include "util.h"
+#include "syscall_server.h"
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
@@ -614,7 +615,6 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 	return 0;
 }
 
-
 static void __terminate_remote_threads(struct remote_context *rc)
 {
 	struct task_struct *tsk;
@@ -880,6 +880,9 @@ static void __process_remote_works(void)
 		case PCN_KMSG_TYPE_TASK_MIGRATE_BACK:
 			process_back_migration((back_migration_request_t *)req);
 			run = false;
+			break;
+		case PCN_KMSG_TYPE_SYSCALL_FWD:
+			process_remote_syscall(req);
 			break;
 		default:
 			if (WARN_ON("Received unsupported remote work")) {

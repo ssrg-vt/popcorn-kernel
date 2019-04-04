@@ -723,7 +723,6 @@ __SYSCALL(__NR_popcorn_propose_migration, sys_popcorn_propose_migration)
 __SYSCALL(__NR_popcorn_get_thread_status, sys_popcorn_get_thread_status)
 #define __NR_popcorn_get_node_info 288
 __SYSCALL(__NR_popcorn_get_node_info, sys_popcorn_get_node_info)
-
 #undef __NR_syscalls
 #define __NR_syscalls 289
 
