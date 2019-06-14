@@ -6,9 +6,13 @@
 #include <linux/types.h>
 #include <linux/ring_buffer.h>
 #include <stdbool.h>
+#ifdef HAVE_AIO_SUPPORT
+#include <aio.h>
+#endif
 #include "auxtrace.h"
 #include "event.h"
 
+struct aiocb;
 /**
  * struct perf_mmap - perf's ring buffer mmap details
  *
@@ -26,6 +30,18 @@ struct perf_mmap {
 	bool		 overwrite;
 	struct auxtrace_mmap auxtrace_mmap;
 	char		 event_copy[PERF_SAMPLE_MAX_SIZE] __aligned(8);
+#ifdef HAVE_AIO_SUPPORT
+	struct {
+		void		 **data;
+		struct aiocb	 *cblocks;
+		struct aiocb	 **aiocb;
+		int		 nr_cblocks;
+	} aio;
+#endif
+	cpu_set_t	affinity_mask;
+	u64		flush;
+	void		*data;
+	int		comp_level;
 };
 
 /*
@@ -57,7 +73,7 @@ enum bkw_mmap_state {
 };
 
 struct mmap_params {
-	int			    prot, mask;
+	int prot, mask, nr_cblocks, affinity, flush, comp_level;
 	struct auxtrace_mmap_params auxtrace_mp;
 };
 

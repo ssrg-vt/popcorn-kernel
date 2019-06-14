@@ -396,10 +396,23 @@ nfsd_setattr(struct svc_rqst *rqstp, struct svc_fh *fhp, struct iattr *iap,
 	bool		get_write_count;
 	bool		size_change = (iap->ia_valid & ATTR_SIZE);
 
-	if (iap->ia_valid & (ATTR_ATIME | ATTR_MTIME | ATTR_SIZE))
+	if (iap->ia_valid & ATTR_SIZE) {
 		accmode |= NFSD_MAY_WRITE|NFSD_MAY_OWNER_OVERRIDE;
-	if (iap->ia_valid & ATTR_SIZE)
 		ftype = S_IFREG;
+	}
+
+	/*
+	 * If utimes(2) and friends are called with times not NULL, we should
+	 * not set NFSD_MAY_WRITE bit. Otherwise fh_verify->nfsd_permission
+	 * will return EACCESS, when the caller's effective UID does not match
+	 * the owner of the file, and the caller is not privileged. In this
+	 * situation, we should return EPERM(notify_change will return this).
+	 */
+	if (iap->ia_valid & (ATTR_ATIME | ATTR_MTIME)) {
+		accmode |= NFSD_MAY_OWNER_OVERRIDE;
+		if (!(iap->ia_valid & (ATTR_ATIME_SET | ATTR_MTIME_SET)))
+			accmode |= NFSD_MAY_WRITE;
+	}
 
 	/* Callers that do fh_verify should do the fh_want_write: */
 	get_write_count = !fhp->fh_dentry;
@@ -544,9 +557,11 @@ __be32 nfsd4_clone_file_range(struct file *src, u64 src_pos, struct file *dst,
 	loff_t cloned;
 
 	cloned = vfs_clone_file_range(src, src_pos, dst, dst_pos, count, 0);
+	if (cloned < 0)
+		return nfserrno(cloned);
 	if (count && cloned != count)
-		cloned = -EINVAL;
-	return nfserrno(cloned < 0 ? cloned : 0);
+		return nfserrno(-EINVAL);
+	return 0;
 }
 
 ssize_t nfsd_copy_file_range(struct file *src, u64 src_pos, struct file *dst,
@@ -1771,12 +1786,12 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 	rdentry = lookup_one_len(fname, dentry, flen);
 	host_err = PTR_ERR(rdentry);
 	if (IS_ERR(rdentry))
-		goto out_nfserr;
+		goto out_drop_write;
 
 	if (d_really_is_negative(rdentry)) {
 		dput(rdentry);
-		err = nfserr_noent;
-		goto out;
+		host_err = -ENOENT;
+		goto out_drop_write;
 	}
 
 	if (!type)
@@ -1790,6 +1805,8 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 		host_err = commit_metadata(fhp);
 	dput(rdentry);
 
+out_drop_write:
+	fh_drop_write(fhp);
 out_nfserr:
 	err = nfserrno(host_err);
 out:

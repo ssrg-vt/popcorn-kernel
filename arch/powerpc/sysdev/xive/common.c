@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2016,2017 IBM Corporation.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) "xive: " fmt
@@ -309,7 +305,7 @@ static void xive_do_queue_eoi(struct xive_cpu *xc)
  * EOI an interrupt at the source. There are several methods
  * to do this depending on the HW version and source type
  */
-void xive_do_source_eoi(u32 hw_irq, struct xive_irq_data *xd)
+static void xive_do_source_eoi(u32 hw_irq, struct xive_irq_data *xd)
 {
 	/* If the XIVE supports the new "store EOI facility, use it */
 	if (xd->flags & XIVE_IRQ_FLAG_STORE_EOI)
@@ -442,7 +438,7 @@ static void xive_dec_target_count(int cpu)
 	struct xive_cpu *xc = per_cpu(xive_cpu, cpu);
 	struct xive_q *q = &xc->queue[xive_irq_priority];
 
-	if (unlikely(WARN_ON(cpu < 0 || !xc))) {
+	if (WARN_ON(cpu < 0 || !xc)) {
 		pr_err("%s: cpu=%d xc=%p\n", __func__, cpu, xc);
 		return;
 	}

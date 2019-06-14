@@ -30,6 +30,7 @@ struct pwm_bl_data {
 	struct device		*dev;
 	unsigned int		lth_brightness;
 	unsigned int		*levels;
+	bool			enabled;
 	struct regulator	*power_supply;
 	struct gpio_desc	*enable_gpio;
 	unsigned int		scale;
@@ -50,7 +51,7 @@ static void pwm_backlight_power_on(struct pwm_bl_data *pb)
 	int err;
 
 	pwm_get_state(pb->pwm, &state);
-	if (state.enabled)
+	if (pb->enabled)
 		return;
 
 	err = regulator_enable(pb->power_supply);
@@ -65,6 +66,8 @@ static void pwm_backlight_power_on(struct pwm_bl_data *pb)
 
 	if (pb->enable_gpio)
 		gpiod_set_value_cansleep(pb->enable_gpio, 1);
+
+	pb->enabled = true;
 }
 
 static void pwm_backlight_power_off(struct pwm_bl_data *pb)
@@ -72,7 +75,7 @@ static void pwm_backlight_power_off(struct pwm_bl_data *pb)
 	struct pwm_state state;
 
 	pwm_get_state(pb->pwm, &state);
-	if (!state.enabled)
+	if (!pb->enabled)
 		return;
 
 	if (pb->enable_gpio)
@@ -86,6 +89,7 @@ static void pwm_backlight_power_off(struct pwm_bl_data *pb)
 	pwm_apply_state(pb->pwm, &state);
 
 	regulator_disable(pb->power_supply);
+	pb->enabled = false;
 }
 
 static int compute_duty_cycle(struct pwm_bl_data *pb, int brightness)
@@ -150,21 +154,6 @@ static const struct backlight_ops pwm_backlight_ops = {
 
 #ifdef CONFIG_OF
 #define PWM_LUMINANCE_SCALE	10000 /* luminance scale */
-
-/* An integer based power function */
-static u64 int_pow(u64 base, int exp)
-{
-	u64 result = 1;
-
-	while (exp) {
-		if (exp & 1)
-			result *= base;
-		exp >>= 1;
-		base *= base;
-	}
-
-	return result;
-}
 
 /*
  * CIE lightness to PWM conversion.
@@ -267,6 +256,16 @@ static int pwm_backlight_parse_dt(struct device *dev,
 		return -ENODEV;
 
 	memset(data, 0, sizeof(*data));
+
+	/*
+	 * These values are optional and set as 0 by default, the out values
+	 * are modified only if a valid u32 value can be decoded.
+	 */
+	of_property_read_u32(node, "post-pwm-on-delay-ms",
+			     &data->post_pwm_on_delay);
+	of_property_read_u32(node, "pwm-off-delay-ms", &data->pwm_off_delay);
+
+	data->enable_gpio = -EINVAL;
 
 	/*
 	 * Determine the number of brightness levels, if this property is not
@@ -380,15 +379,6 @@ static int pwm_backlight_parse_dt(struct device *dev,
 		data->max_brightness--;
 	}
 
-	/*
-	 * These values are optional and set as 0 by default, the out values
-	 * are modified only if a valid u32 value can be decoded.
-	 */
-	of_property_read_u32(node, "post-pwm-on-delay-ms",
-			     &data->post_pwm_on_delay);
-	of_property_read_u32(node, "pwm-off-delay-ms", &data->pwm_off_delay);
-
-	data->enable_gpio = -EINVAL;
 	return 0;
 }
 
@@ -430,7 +420,7 @@ static int pwm_backlight_initial_power_state(const struct pwm_bl_data *pb)
 	 */
 
 	/* if the enable GPIO is disabled, do not enable the backlight */
-	if (pb->enable_gpio && gpiod_get_value(pb->enable_gpio) == 0)
+	if (pb->enable_gpio && gpiod_get_value_cansleep(pb->enable_gpio) == 0)
 		return FB_BLANK_POWERDOWN;
 
 	/* The regulator is disabled, do not enable the backlight */
@@ -483,6 +473,7 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 	pb->check_fb = data->check_fb;
 	pb->exit = data->exit;
 	pb->dev = &pdev->dev;
+	pb->enabled = false;
 	pb->post_pwm_on_delay = data->post_pwm_on_delay;
 	pb->pwm_off_delay = data->pwm_off_delay;
 

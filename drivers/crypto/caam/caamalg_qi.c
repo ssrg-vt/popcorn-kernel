@@ -36,6 +36,7 @@ struct caam_alg_entry {
 	int class2_alg_type;
 	bool rfc3686;
 	bool geniv;
+	bool nodkp;
 };
 
 struct caam_aead_alg {
@@ -290,6 +291,39 @@ badkey:
 	crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
 	memzero_explicit(&keys, sizeof(keys));
 	return -EINVAL;
+}
+
+static int des3_aead_setkey(struct crypto_aead *aead, const u8 *key,
+			    unsigned int keylen)
+{
+	struct crypto_authenc_keys keys;
+	u32 flags;
+	int err;
+
+	err = crypto_authenc_extractkeys(&keys, key, keylen);
+	if (unlikely(err))
+		goto badkey;
+
+	err = -EINVAL;
+	if (keys.enckeylen != DES3_EDE_KEY_SIZE)
+		goto badkey;
+
+	flags = crypto_aead_get_flags(aead);
+	err = __des3_verify_key(&flags, keys.enckey);
+	if (unlikely(err)) {
+		crypto_aead_set_flags(aead, flags);
+		goto out;
+	}
+
+	err = aead_setkey(aead, key, keylen);
+
+out:
+	memzero_explicit(&keys, sizeof(keys));
+	return err;
+
+badkey:
+	crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
+	goto out;
 }
 
 static int gcm_set_sh_desc(struct crypto_aead *aead)
@@ -667,6 +701,13 @@ badkey:
 	return -EINVAL;
 }
 
+static int des3_skcipher_setkey(struct crypto_skcipher *skcipher,
+				const u8 *key, unsigned int keylen)
+{
+	return unlikely(des3_verify_key(skcipher, key)) ?:
+	       skcipher_setkey(skcipher, key, keylen);
+}
+
 static int xts_skcipher_setkey(struct crypto_skcipher *skcipher, const u8 *key,
 			       unsigned int keylen)
 {
@@ -782,7 +823,7 @@ static struct caam_drv_ctx *get_drv_ctx(struct caam_ctx *ctx,
 
 			cpu = smp_processor_id();
 			drv_ctx = caam_drv_ctx_init(ctx->qidev, &cpu, desc);
-			if (likely(!IS_ERR_OR_NULL(drv_ctx)))
+			if (!IS_ERR_OR_NULL(drv_ctx))
 				drv_ctx->op_type = type;
 
 			ctx->drv_ctx[type] = drv_ctx;
@@ -802,7 +843,8 @@ static void caam_unmap(struct device *dev, struct scatterlist *src,
 	if (dst != src) {
 		if (src_nents)
 			dma_unmap_sg(dev, src, src_nents, DMA_TO_DEVICE);
-		dma_unmap_sg(dev, dst, dst_nents, DMA_FROM_DEVICE);
+		if (dst_nents)
+			dma_unmap_sg(dev, dst, dst_nents, DMA_FROM_DEVICE);
 	} else {
 		dma_unmap_sg(dev, src, src_nents, DMA_BIDIRECTIONAL);
 	}
@@ -892,7 +934,7 @@ static struct aead_edesc *aead_edesc_alloc(struct aead_request *req,
 	struct caam_drv_ctx *drv_ctx;
 
 	drv_ctx = get_drv_ctx(ctx, encrypt ? ENCRYPT : DECRYPT);
-	if (unlikely(IS_ERR_OR_NULL(drv_ctx)))
+	if (IS_ERR_OR_NULL(drv_ctx))
 		return (struct aead_edesc *)drv_ctx;
 
 	/* allocate space for base edesc and hw desc commands, link tables */
@@ -955,13 +997,19 @@ static struct aead_edesc *aead_edesc_alloc(struct aead_request *req,
 			mapped_src_nents = 0;
 		}
 
-		mapped_dst_nents = dma_map_sg(qidev, req->dst, dst_nents,
-					      DMA_FROM_DEVICE);
-		if (unlikely(!mapped_dst_nents)) {
-			dev_err(qidev, "unable to map destination\n");
-			dma_unmap_sg(qidev, req->src, src_nents, DMA_TO_DEVICE);
-			qi_cache_free(edesc);
-			return ERR_PTR(-ENOMEM);
+		if (dst_nents) {
+			mapped_dst_nents = dma_map_sg(qidev, req->dst,
+						      dst_nents,
+						      DMA_FROM_DEVICE);
+			if (unlikely(!mapped_dst_nents)) {
+				dev_err(qidev, "unable to map destination\n");
+				dma_unmap_sg(qidev, req->src, src_nents,
+					     DMA_TO_DEVICE);
+				qi_cache_free(edesc);
+				return ERR_PTR(-ENOMEM);
+			}
+		} else {
+			mapped_dst_nents = 0;
 		}
 	}
 
@@ -1184,7 +1232,7 @@ static struct skcipher_edesc *skcipher_edesc_alloc(struct skcipher_request *req,
 	struct caam_drv_ctx *drv_ctx;
 
 	drv_ctx = get_drv_ctx(ctx, encrypt ? ENCRYPT : DECRYPT);
-	if (unlikely(IS_ERR_OR_NULL(drv_ctx)))
+	if (IS_ERR_OR_NULL(drv_ctx))
 		return (struct skcipher_edesc *)drv_ctx;
 
 	src_nents = sg_nents_for_len(req->src, req->cryptlen);
@@ -1375,7 +1423,7 @@ static struct caam_skcipher_alg driver_algs[] = {
 				.cra_driver_name = "cbc-3des-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = skcipher_setkey,
+			.setkey = des3_skcipher_setkey,
 			.encrypt = skcipher_encrypt,
 			.decrypt = skcipher_decrypt,
 			.min_keysize = DES3_EDE_KEY_SIZE,
@@ -1476,6 +1524,7 @@ static struct caam_aead_alg driver_aeads[] = {
 		},
 		.caam = {
 			.class1_alg_type = OP_ALG_ALGSEL_AES | OP_ALG_AAI_GCM,
+			.nodkp = true,
 		},
 	},
 	{
@@ -1494,6 +1543,7 @@ static struct caam_aead_alg driver_aeads[] = {
 		},
 		.caam = {
 			.class1_alg_type = OP_ALG_ALGSEL_AES | OP_ALG_AAI_GCM,
+			.nodkp = true,
 		},
 	},
 	/* Galois Counter Mode */
@@ -1513,6 +1563,7 @@ static struct caam_aead_alg driver_aeads[] = {
 		},
 		.caam = {
 			.class1_alg_type = OP_ALG_ALGSEL_AES | OP_ALG_AAI_GCM,
+			.nodkp = true,
 		}
 	},
 	/* single-pass ipsec_esp descriptor */
@@ -1791,7 +1842,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -1813,7 +1864,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -1836,7 +1887,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -1859,7 +1910,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -1882,7 +1933,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -1905,7 +1956,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -1928,7 +1979,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -1951,7 +2002,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -1974,7 +2025,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -1997,7 +2048,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -2020,7 +2071,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -2043,7 +2094,7 @@ static struct caam_aead_alg driver_aeads[] = {
 						   "cbc-des3_ede-caam-qi",
 				.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			},
-			.setkey = aead_setkey,
+			.setkey = des3_aead_setkey,
 			.setauthsize = aead_setauthsize,
 			.encrypt = aead_encrypt,
 			.decrypt = aead_decrypt,
@@ -2386,8 +2437,7 @@ static int caam_aead_init(struct crypto_aead *tfm)
 						      aead);
 	struct caam_ctx *ctx = crypto_aead_ctx(tfm);
 
-	return caam_init_common(ctx, &caam_alg->caam,
-				alg->setkey == aead_setkey);
+	return caam_init_common(ctx, &caam_alg->caam, !caam_alg->caam.nodkp);
 }
 
 static void caam_exit_common(struct caam_ctx *ctx)
@@ -2462,7 +2512,7 @@ static int __init caam_qi_algapi_init(void)
 	struct device *ctrldev;
 	struct caam_drv_private *priv;
 	int i = 0, err = 0;
-	u32 cha_vid, cha_inst, des_inst, aes_inst, md_inst;
+	u32 aes_vid, aes_inst, des_inst, md_vid, md_inst;
 	unsigned int md_limit = SHA512_DIGEST_SIZE;
 	bool registered = false;
 
@@ -2485,26 +2535,49 @@ static int __init caam_qi_algapi_init(void)
 	 * If priv is NULL, it's probably because the caam driver wasn't
 	 * properly initialized (e.g. RNG4 init failed). Thus, bail out here.
 	 */
-	if (!priv || !priv->qi_present)
-		return -ENODEV;
+	if (!priv || !priv->qi_present) {
+		err = -ENODEV;
+		goto out_put_dev;
+	}
 
 	if (caam_dpaa2) {
 		dev_info(ctrldev, "caam/qi frontend driver not suitable for DPAA 2.x, aborting...\n");
-		return -ENODEV;
+		err = -ENODEV;
+		goto out_put_dev;
 	}
 
 	/*
 	 * Register crypto algorithms the device supports.
 	 * First, detect presence and attributes of DES, AES, and MD blocks.
 	 */
-	cha_vid = rd_reg32(&priv->ctrl->perfmon.cha_id_ls);
-	cha_inst = rd_reg32(&priv->ctrl->perfmon.cha_num_ls);
-	des_inst = (cha_inst & CHA_ID_LS_DES_MASK) >> CHA_ID_LS_DES_SHIFT;
-	aes_inst = (cha_inst & CHA_ID_LS_AES_MASK) >> CHA_ID_LS_AES_SHIFT;
-	md_inst = (cha_inst & CHA_ID_LS_MD_MASK) >> CHA_ID_LS_MD_SHIFT;
+	if (priv->era < 10) {
+		u32 cha_vid, cha_inst;
+
+		cha_vid = rd_reg32(&priv->ctrl->perfmon.cha_id_ls);
+		aes_vid = cha_vid & CHA_ID_LS_AES_MASK;
+		md_vid = (cha_vid & CHA_ID_LS_MD_MASK) >> CHA_ID_LS_MD_SHIFT;
+
+		cha_inst = rd_reg32(&priv->ctrl->perfmon.cha_num_ls);
+		des_inst = (cha_inst & CHA_ID_LS_DES_MASK) >>
+			   CHA_ID_LS_DES_SHIFT;
+		aes_inst = cha_inst & CHA_ID_LS_AES_MASK;
+		md_inst = (cha_inst & CHA_ID_LS_MD_MASK) >> CHA_ID_LS_MD_SHIFT;
+	} else {
+		u32 aesa, mdha;
+
+		aesa = rd_reg32(&priv->ctrl->vreg.aesa);
+		mdha = rd_reg32(&priv->ctrl->vreg.mdha);
+
+		aes_vid = (aesa & CHA_VER_VID_MASK) >> CHA_VER_VID_SHIFT;
+		md_vid = (mdha & CHA_VER_VID_MASK) >> CHA_VER_VID_SHIFT;
+
+		des_inst = rd_reg32(&priv->ctrl->vreg.desa) & CHA_VER_NUM_MASK;
+		aes_inst = aesa & CHA_VER_NUM_MASK;
+		md_inst = mdha & CHA_VER_NUM_MASK;
+	}
 
 	/* If MD is present, limit digest size based on LP256 */
-	if (md_inst && ((cha_vid & CHA_ID_LS_MD_MASK) == CHA_ID_LS_MD_LP256))
+	if (md_inst && md_vid  == CHA_VER_VID_MD_LP256)
 		md_limit = SHA256_DIGEST_SIZE;
 
 	for (i = 0; i < ARRAY_SIZE(driver_algs); i++) {
@@ -2556,8 +2629,7 @@ static int __init caam_qi_algapi_init(void)
 		 * Check support for AES algorithms not available
 		 * on LP devices.
 		 */
-		if (((cha_vid & CHA_ID_LS_AES_MASK) == CHA_ID_LS_AES_LP) &&
-		    (alg_aai == OP_ALG_AAI_GCM))
+		if (aes_vid  == CHA_VER_VID_AES_LP && alg_aai == OP_ALG_AAI_GCM)
 			continue;
 
 		/*
@@ -2584,6 +2656,8 @@ static int __init caam_qi_algapi_init(void)
 	if (registered)
 		dev_info(priv->qidev, "algorithms registered in /proc/crypto\n");
 
+out_put_dev:
+	put_device(ctrldev);
 	return err;
 }
 

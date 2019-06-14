@@ -18,7 +18,6 @@ static inline int printk_get_level(const char *buffer)
 	if (buffer[0] == KERN_SOH_ASCII && buffer[1]) {
 		switch (buffer[1]) {
 		case '0' ... '7':
-		case 'd':	/* KERN_DEFAULT */
 		case 'c':	/* KERN_CONT */
 			return buffer[1];
 		}
@@ -82,6 +81,8 @@ static inline void console_verbose(void)
 #define DEVKMSG_STR_MAX_SIZE 10
 extern char devkmsg_log_str[];
 struct ctl_table;
+
+extern int suppress_printk;
 
 struct va_format {
 	const char *fmt;
@@ -165,11 +166,6 @@ int vprintk_emit(int facility, int level,
 
 asmlinkage __printf(1, 0)
 int vprintk(const char *fmt, va_list args);
-
-asmlinkage __printf(5, 6) __cold
-int printk_emit(int facility, int level,
-		const char *dict, size_t dictlen,
-		const char *fmt, ...);
 
 asmlinkage __printf(1, 2) __cold
 int printk(const char *fmt, ...);
@@ -269,7 +265,7 @@ static inline void show_regs_print_info(const char *log_lvl)
 {
 }
 
-static inline asmlinkage void dump_stack(void)
+static inline void dump_stack(void)
 {
 }
 
@@ -353,7 +349,7 @@ extern int kptr_restrict;
 #ifdef CONFIG_PRINTK
 #define printk_once(fmt, ...)					\
 ({								\
-	static bool __print_once __read_mostly;			\
+	static bool __section(.data.once) __print_once;		\
 	bool __ret_print_once = !__print_once;			\
 								\
 	if (!__print_once) {					\
@@ -364,7 +360,7 @@ extern int kptr_restrict;
 })
 #define printk_deferred_once(fmt, ...)				\
 ({								\
-	static bool __print_once __read_mostly;			\
+	static bool __section(.data.once) __print_once;		\
 	bool __ret_print_once = !__print_once;			\
 								\
 	if (!__print_once) {					\
@@ -466,7 +462,7 @@ do {									\
 				      DEFAULT_RATELIMIT_INTERVAL,	\
 				      DEFAULT_RATELIMIT_BURST);		\
 	DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, pr_fmt(fmt));		\
-	if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT) &&	\
+	if (DYNAMIC_DEBUG_BRANCH(descriptor) &&				\
 	    __ratelimit(&_rs))						\
 		__dynamic_pr_debug(&descriptor, pr_fmt(fmt), ##__VA_ARGS__);	\
 } while (0)

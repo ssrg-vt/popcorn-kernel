@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  Implementation of primary alsa driver code base for Intel HD Audio.
@@ -6,18 +7,6 @@
  *
  *  Copyright (c) 2004 Takashi Iwai <tiwai@suse.de>
  *                     PeiSen Hou <pshou@realtek.com.tw>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the Free
- *  Software Foundation; either version 2 of the License, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
- *
- *
  */
 
 #include <linux/clocksource.h>
@@ -989,20 +978,9 @@ static int azx_get_response(struct hdac_bus *bus, unsigned int addr,
 		return azx_rirb_get_response(bus, addr, res);
 }
 
-static int azx_link_power(struct hdac_bus *bus, bool enable)
-{
-	struct azx *chip = bus_to_azx(bus);
-
-	if (chip->ops->link_power)
-		return chip->ops->link_power(chip, enable);
-	else
-		return -EINVAL;
-}
-
 static const struct hdac_bus_ops bus_core_ops = {
 	.command = azx_send_cmd,
 	.get_response = azx_get_response,
-	.link_power = azx_link_power,
 };
 
 #ifdef CONFIG_SND_HDA_DSP_LOADER

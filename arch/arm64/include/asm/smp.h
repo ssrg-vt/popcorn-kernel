@@ -16,16 +16,23 @@
 #ifndef __ASM_SMP_H
 #define __ASM_SMP_H
 
-/* Values for secondary_data.status */
+#include <linux/const.h>
 
-#define CPU_MMU_OFF		(-1)
-#define CPU_BOOT_SUCCESS	(0)
+/* Values for secondary_data.status */
+#define CPU_STUCK_REASON_SHIFT		(8)
+#define CPU_BOOT_STATUS_MASK		((UL(1) << CPU_STUCK_REASON_SHIFT) - 1)
+
+#define CPU_MMU_OFF			(-1)
+#define CPU_BOOT_SUCCESS		(0)
 /* The cpu invoked ops->cpu_die, synchronise it with cpu_kill */
-#define CPU_KILL_ME		(1)
+#define CPU_KILL_ME			(1)
 /* The cpu couldn't die gracefully and is looping in the kernel */
-#define CPU_STUCK_IN_KERNEL	(2)
+#define CPU_STUCK_IN_KERNEL		(2)
 /* Fatal system error detected by secondary CPU, crash the system */
-#define CPU_PANIC_KERNEL	(3)
+#define CPU_PANIC_KERNEL		(3)
+
+#define CPU_STUCK_REASON_52_BIT_VA	(UL(1) << CPU_STUCK_REASON_SHIFT)
+#define CPU_STUCK_REASON_NO_GRAN	(UL(2) << CPU_STUCK_REASON_SHIFT)
 
 #ifndef __ASSEMBLY__
 
@@ -45,6 +52,12 @@ DECLARE_PER_CPU_READ_MOSTLY(int, cpu_number);
  * here under CONFIG_DEBUG_PREEMPT=y.
  */
 #define raw_smp_processor_id() (*raw_cpu_ptr(&cpu_number))
+
+/*
+ * Logical CPU mapping.
+ */
+extern u64 __cpu_logical_map[NR_CPUS];
+#define cpu_logical_map(cpu)    __cpu_logical_map[cpu]
 
 struct seq_file;
 

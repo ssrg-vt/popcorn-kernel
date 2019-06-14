@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * mm.c - Micro Memory(tm) PCI memory board block device driver - v2.3
  *
@@ -7,10 +8,6 @@
  *
  * This driver for the Micro Memory PCI Memory Module with Battery Backup
  * is Copyright Micro Memory Inc 2001-2002.  All rights reserved.
- *
- * This driver is released to the public under the terms of the
- *  GNU GENERAL PUBLIC LICENSE version 2
- * See the file COPYING for details.
  *
  * This driver provides a standard block device interface for Micro Memory(tm)
  * PCI based RAM boards.
@@ -888,8 +885,7 @@ static int mm_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	card->biotail = &card->bio;
 	spin_lock_init(&card->lock);
 
-	card->queue = blk_alloc_queue_node(GFP_KERNEL, NUMA_NO_NODE,
-					   &card->lock);
+	card->queue = blk_alloc_queue_node(GFP_KERNEL, NUMA_NO_NODE);
 	if (!card->queue)
 		goto failed_alloc;
 

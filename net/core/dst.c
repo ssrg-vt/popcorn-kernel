@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * net/core/dst.c	Protocol independent destination cache.
  *
@@ -26,23 +27,6 @@
 #include <net/dst.h>
 #include <net/dst_metadata.h>
 
-/*
- * Theory of operations:
- * 1) We use a list, protected by a spinlock, to add
- *    new entries from both BH and non-BH context.
- * 2) In order to keep spinlock held for a small delay,
- *    we use a second list where are stored long lived
- *    entries, that are handled by the garbage collect thread
- *    fired by a workqueue.
- * 3) This list is guarded by a mutex,
- *    so that the gc_task and dst_dev_event() can be synchronized.
- */
-
-/*
- * We want to keep lock & list close together
- * to dirty as few cache lines as possible in __dst_free().
- * As this is not a very strong hint, we dont force an alignment on SMP.
- */
 int dst_discard_out(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	kfree_skb(skb);
@@ -98,8 +82,12 @@ void *dst_alloc(struct dst_ops *ops, struct net_device *dev,
 	struct dst_entry *dst;
 
 	if (ops->gc && dst_entries_get_fast(ops) > ops->gc_thresh) {
-		if (ops->gc(ops))
+		if (ops->gc(ops)) {
+			printk_ratelimited(KERN_NOTICE "Route cache is full: "
+					   "consider increasing sysctl "
+					   "net.ipv[4|6].route.max_size.\n");
 			return NULL;
+		}
 	}
 
 	dst = kmem_cache_alloc(ops->kmem_cachep, GFP_ATOMIC);

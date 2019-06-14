@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2005 - 2016 Broadcom
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.  The full GNU General
- * Public License is included in this distribution in the file called COPYING.
  *
  * Contact Information:
  * linux-drivers@emulex.com
@@ -167,8 +163,8 @@ static int be_queue_alloc(struct be_adapter *adapter, struct be_queue_info *q,
 	q->len = len;
 	q->entry_size = entry_size;
 	mem->size = len * entry_size;
-	mem->va = dma_zalloc_coherent(&adapter->pdev->dev, mem->size, &mem->dma,
-				      GFP_KERNEL);
+	mem->va = dma_alloc_coherent(&adapter->pdev->dev, mem->size,
+				     &mem->dma, GFP_KERNEL);
 	if (!mem->va)
 		return -ENOMEM;
 	return 0;
@@ -796,7 +792,7 @@ static inline u16 be_get_tx_vlan_tag(struct be_adapter *adapter,
 	u16 vlan_tag;
 
 	vlan_tag = skb_vlan_tag_get(skb);
-	vlan_prio = (vlan_tag & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT;
+	vlan_prio = skb_vlan_tag_get_prio(skb);
 	/* If vlan priority provided by OS is NOT in available bmap */
 	if (!(adapter->vlan_prio_bmap & (1 << vlan_prio)))
 		vlan_tag = (vlan_tag & ~VLAN_PRIO_MASK) |
@@ -1049,30 +1045,35 @@ static struct sk_buff *be_insert_vlan_in_pkt(struct be_adapter *adapter,
 					     struct be_wrb_params
 					     *wrb_params)
 {
+	bool insert_vlan = false;
 	u16 vlan_tag = 0;
 
 	skb = skb_share_check(skb, GFP_ATOMIC);
 	if (unlikely(!skb))
 		return skb;
 
-	if (skb_vlan_tag_present(skb))
+	if (skb_vlan_tag_present(skb)) {
 		vlan_tag = be_get_tx_vlan_tag(adapter, skb);
+		insert_vlan = true;
+	}
 
 	if (qnq_async_evt_rcvd(adapter) && adapter->pvid) {
-		if (!vlan_tag)
+		if (!insert_vlan) {
 			vlan_tag = adapter->pvid;
+			insert_vlan = true;
+		}
 		/* f/w workaround to set skip_hw_vlan = 1, informs the F/W to
 		 * skip VLAN insertion
 		 */
 		BE_WRB_F_SET(wrb_params->features, VLAN_SKIP_HW, 1);
 	}
 
-	if (vlan_tag) {
+	if (insert_vlan) {
 		skb = vlan_insert_tag_set_proto(skb, htons(ETH_P_8021Q),
 						vlan_tag);
 		if (unlikely(!skb))
 			return skb;
-		skb->vlan_tci = 0;
+		__vlan_hwaccel_clear_tag(skb);
 	}
 
 	/* Insert the outer VLAN, if any */
@@ -1265,10 +1266,6 @@ static void be_xmit_flush(struct be_adapter *adapter, struct be_tx_obj *txo)
 #define is_arp_allowed_on_bmc(adapter, skb)	\
 	(is_arp(skb) && is_arp_filt_enabled(adapter))
 
-#define is_broadcast_packet(eh, adapter)	\
-		(is_multicast_ether_addr(eh->h_dest) && \
-		!compare_ether_addr(eh->h_dest, adapter->netdev->broadcast))
-
 #define is_arp(skb)	(skb->protocol == htons(ETH_P_ARP))
 
 #define is_arp_filt_enabled(adapter)	\
@@ -1375,7 +1372,7 @@ static netdev_tx_t be_xmit(struct sk_buff *skb, struct net_device *netdev)
 	u16 q_idx = skb_get_queue_mapping(skb);
 	struct be_tx_obj *txo = &adapter->tx_obj[q_idx];
 	struct be_wrb_params wrb_params = { 0 };
-	bool flush = !skb->xmit_more;
+	bool flush = !netdev_xmit_more();
 	u16 wrb_cnt;
 
 	skb = be_xmit_workarounds(adapter, skb, &wrb_params);
@@ -4950,7 +4947,7 @@ fw_exit:
 }
 
 static int be_ndo_bridge_setlink(struct net_device *dev, struct nlmsghdr *nlh,
-				 u16 flags)
+				 u16 flags, struct netlink_ext_ack *extack)
 {
 	struct be_adapter *adapter = netdev_priv(dev);
 	struct nlattr *attr, *br_spec;
@@ -5761,9 +5758,9 @@ static int be_drv_init(struct be_adapter *adapter)
 	int status = 0;
 
 	mbox_mem_alloc->size = sizeof(struct be_mcc_mailbox) + 16;
-	mbox_mem_alloc->va = dma_zalloc_coherent(dev, mbox_mem_alloc->size,
-						 &mbox_mem_alloc->dma,
-						 GFP_KERNEL);
+	mbox_mem_alloc->va = dma_alloc_coherent(dev, mbox_mem_alloc->size,
+						&mbox_mem_alloc->dma,
+						GFP_KERNEL);
 	if (!mbox_mem_alloc->va)
 		return -ENOMEM;
 
@@ -5772,8 +5769,8 @@ static int be_drv_init(struct be_adapter *adapter)
 	mbox_mem_align->dma = PTR_ALIGN(mbox_mem_alloc->dma, 16);
 
 	rx_filter->size = sizeof(struct be_cmd_req_rx_filter);
-	rx_filter->va = dma_zalloc_coherent(dev, rx_filter->size,
-					    &rx_filter->dma, GFP_KERNEL);
+	rx_filter->va = dma_alloc_coherent(dev, rx_filter->size,
+					   &rx_filter->dma, GFP_KERNEL);
 	if (!rx_filter->va) {
 		status = -ENOMEM;
 		goto free_mbox;
@@ -5787,8 +5784,8 @@ static int be_drv_init(struct be_adapter *adapter)
 		stats_cmd->size = sizeof(struct be_cmd_req_get_stats_v1);
 	else
 		stats_cmd->size = sizeof(struct be_cmd_req_get_stats_v2);
-	stats_cmd->va = dma_zalloc_coherent(dev, stats_cmd->size,
-					    &stats_cmd->dma, GFP_KERNEL);
+	stats_cmd->va = dma_alloc_coherent(dev, stats_cmd->size,
+					   &stats_cmd->dma, GFP_KERNEL);
 	if (!stats_cmd->va) {
 		status = -ENOMEM;
 		goto free_rx_filter;

@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * HyperV  Detection code.
  *
  * Copyright (C) 2010, Novell, Inc.
  * Author : K. Y. Srinivasan <ksrinivasan@novell.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
  */
 
 #include <linux/types.h>
@@ -328,6 +324,18 @@ static void __init ms_hyperv_init_platform(void)
 # ifdef CONFIG_SMP
 	smp_ops.smp_prepare_boot_cpu = hv_smp_prepare_boot_cpu;
 # endif
+
+	/*
+	 * Hyper-V doesn't provide irq remapping for IO-APIC. To enable x2apic,
+	 * set x2apic destination mode to physcial mode when x2apic is available
+	 * and Hyper-V IOMMU driver makes sure cpus assigned with IO-APIC irqs
+	 * have 8-bit APIC id.
+	 */
+# ifdef CONFIG_X86_X2APIC
+	if (x2apic_supported())
+		x2apic_phys = 1;
+# endif
+
 #endif
 }
 

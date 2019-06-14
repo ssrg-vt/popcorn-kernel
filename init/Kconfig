@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config DEFCONFIG_LIST
 	string
 	depends on !UML
@@ -13,7 +14,7 @@ config CC_IS_GCC
 
 config GCC_VERSION
 	int
-	default $(shell,$(srctree)/scripts/gcc-version.sh -p $(CC) | sed 's/^0*//') if CC_IS_GCC
+	default $(shell,$(srctree)/scripts/gcc-version.sh $(CC)) if CC_IS_GCC
 	default 0
 
 config CC_IS_CLANG
@@ -22,6 +23,25 @@ config CC_IS_CLANG
 config CLANG_VERSION
 	int
 	default $(shell,$(srctree)/scripts/clang-version.sh $(CC))
+
+config CC_HAS_ASM_GOTO
+	def_bool $(success,$(srctree)/scripts/gcc-goto.sh $(CC))
+
+config CC_HAS_WARN_MAYBE_UNINITIALIZED
+	def_bool $(cc-option,-Wmaybe-uninitialized)
+	help
+	  GCC >= 4.7 supports this option.
+
+config CC_DISABLE_WARN_MAYBE_UNINITIALIZED
+	bool
+	depends on CC_HAS_WARN_MAYBE_UNINITIALIZED
+	default CC_IS_GCC && GCC_VERSION < 40900  # unreliable for GCC < 4.9
+	help
+	  GCC's -Wmaybe-uninitialized is not reliable by definition.
+	  Lots of false positive warnings are produced in some cases.
+
+	  If this option is enabled, -Wno-maybe-uninitialzed is passed
+	  to the compiler to suppress maybe-uninitialized warnings.
 
 config CONSTRUCTORS
 	bool
@@ -335,15 +355,6 @@ config HAVE_ARCH_AUDITSYSCALL
 config AUDITSYSCALL
 	def_bool y
 	depends on AUDIT && HAVE_ARCH_AUDITSYSCALL
-
-config AUDIT_WATCH
-	def_bool y
-	depends on AUDITSYSCALL
-	select FSNOTIFY
-
-config AUDIT_TREE
-	def_bool y
-	depends on AUDITSYSCALL
 	select FSNOTIFY
 
 source "kernel/irq/Kconfig"
@@ -388,6 +399,7 @@ config VIRT_CPU_ACCOUNTING_GEN
 	bool "Full dynticks CPU time accounting"
 	depends on HAVE_CONTEXT_TRACKING
 	depends on HAVE_VIRT_CPU_ACCOUNTING_GEN
+	depends on GENERIC_CLOCKEVENTS
 	select VIRT_CPU_ACCOUNTING
 	select CONTEXT_TRACKING
 	help
@@ -518,6 +530,17 @@ config PSI_DEFAULT_DISABLED
 	  per default but can be enabled through passing psi=1 on the
 	  kernel commandline during boot.
 
+	  This feature adds some code to the task wakeup and sleep
+	  paths of the scheduler. The overhead is too low to affect
+	  common scheduling-intense workloads in practice (such as
+	  webservers, memcache), but it does show up in artificial
+	  scheduler stress tests, such as hackbench.
+
+	  If you are paranoid and not sure what the kernel will be
+	  used for, say Y.
+
+	  Say N if unsure.
+
 endmenu # "CPU/Task time and stats accounting"
 
 config CPU_ISOLATION
@@ -540,7 +563,6 @@ config BUILD_BIN2C
 
 config IKCONFIG
 	tristate "Kernel .config support"
-	select BUILD_BIN2C
 	---help---
 	  This option enables the complete Linux kernel ".config" file
 	  contents to be saved in the kernel. It provides documentation
@@ -557,6 +579,15 @@ config IKCONFIG_PROC
 	---help---
 	  This option enables access to the kernel configuration file
 	  through /proc/config.gz.
+
+config IKHEADERS
+	tristate "Enable kernel headers through /sys/kernel/kheaders.tar.xz"
+	depends on SYSFS
+	help
+	  This option enables access to the in-kernel headers that are generated during
+	  the build process. These can be used to build eBPF tracing programs,
+	  or similar programs.  If you build the headers as a module, a module called
+	  kheaders.ko is built which can be loaded on-demand to get access to headers.
 
 config LOG_BUF_SHIFT
 	int "Kernel log buffer size (16 => 64KB, 17 => 128KB)"
@@ -831,7 +862,7 @@ config CGROUP_PIDS
 	  PIDs controller is designed to stop this from happening.
 
 	  It should be noted that organisational operations (such as attaching
-	  to a cgroup hierarchy will *not* be blocked by the PIDs controller),
+	  to a cgroup hierarchy) will *not* be blocked by the PIDs controller,
 	  since the PIDs limit only affects a process's ability to fork, not to
 	  attach to a cgroup.
 
@@ -1108,6 +1139,7 @@ config CC_OPTIMIZE_FOR_PERFORMANCE
 
 config CC_OPTIMIZE_FOR_SIZE
 	bool "Optimize for size"
+	imply CC_DISABLE_WARN_MAYBE_UNINITIALIZED  # avoid false positives
 	help
 	  Enabling this option will pass "-Os" instead of "-O2" to
 	  your compiler resulting in a smaller kernel.
@@ -1130,6 +1162,7 @@ config LD_DEAD_CODE_DATA_ELIMINATION
 	bool "Dead code and data elimination (EXPERIMENTAL)"
 	depends on HAVE_LD_DEAD_CODE_DATA_ELIMINATION
 	depends on EXPERT
+	depends on !(FUNCTION_TRACER && CC_IS_GCC && GCC_VERSION < 40800)
 	depends on $(cc-option,-ffunction-sections -fdata-sections)
 	depends on $(ld-option,--gc-sections)
 	help
@@ -1145,9 +1178,6 @@ config LD_DEAD_CODE_DATA_ELIMINATION
 	  own risk.
 
 config SYSCTL
-	bool
-
-config ANON_INODES
 	bool
 
 config HAVE_UID16
@@ -1354,14 +1384,12 @@ config HAVE_FUTEX_CMPXCHG
 config EPOLL
 	bool "Enable eventpoll support" if EXPERT
 	default y
-	select ANON_INODES
 	help
 	  Disabling this option will cause the kernel to be built without
 	  support for epoll family of system calls.
 
 config SIGNALFD
 	bool "Enable signalfd() system call" if EXPERT
-	select ANON_INODES
 	default y
 	help
 	  Enable the signalfd() system call that allows to receive signals
@@ -1371,7 +1399,6 @@ config SIGNALFD
 
 config TIMERFD
 	bool "Enable timerfd() system call" if EXPERT
-	select ANON_INODES
 	default y
 	help
 	  Enable the timerfd() system call that allows to receive timer
@@ -1381,7 +1408,6 @@ config TIMERFD
 
 config EVENTFD
 	bool "Enable eventfd() system call" if EXPERT
-	select ANON_INODES
 	default y
 	help
 	  Enable the eventfd() system call that allows to receive both
@@ -1407,6 +1433,15 @@ config AIO
 	  This option enables POSIX asynchronous I/O which may by used
 	  by some high performance threaded applications. Disabling
 	  this option saves about 7k.
+
+config IO_URING
+	bool "Enable IO uring support" if EXPERT
+	select ANON_INODES
+	default y
+	help
+	  This option enables support for the io_uring interface, enabling
+	  applications to submit and complete IO through submission and
+	  completion rings that are shared between the kernel and application.
 
 config ADVISE_SYSCALLS
 	bool "Enable madvise/fadvise syscalls" if EXPERT
@@ -1483,7 +1518,6 @@ config KALLSYMS_BASE_RELATIVE
 # syscall, maps, verifier
 config BPF_SYSCALL
 	bool "Enable bpf() system call"
-	select ANON_INODES
 	select BPF
 	select IRQ_WORK
 	default n
@@ -1500,7 +1534,6 @@ config BPF_JIT_ALWAYS_ON
 
 config USERFAULTFD
 	bool "Enable userfaultfd() system call"
-	select ANON_INODES
 	depends on MMU
 	help
 	  Enable the userfaultfd() system call that allows to intercept and
@@ -1567,7 +1600,6 @@ config PERF_EVENTS
 	bool "Kernel performance events and counters"
 	default y if PROFILING
 	depends on HAVE_PERF_EVENTS
-	select ANON_INODES
 	select IRQ_WORK
 	select SRCU
 	help
@@ -1719,6 +1751,30 @@ config SLAB_FREELIST_HARDENED
 	  other infrastructure. This options makes minor performance
 	  sacrifies to harden the kernel slab allocator against common
 	  freelist exploit methods.
+
+config SHUFFLE_PAGE_ALLOCATOR
+	bool "Page allocator randomization"
+	default SLAB_FREELIST_RANDOM && ACPI_NUMA
+	help
+	  Randomization of the page allocator improves the average
+	  utilization of a direct-mapped memory-side-cache. See section
+	  5.2.27 Heterogeneous Memory Attribute Table (HMAT) in the ACPI
+	  6.2a specification for an example of how a platform advertises
+	  the presence of a memory-side-cache. There are also incidental
+	  security benefits as it reduces the predictability of page
+	  allocations to compliment SLAB_FREELIST_RANDOM, but the
+	  default granularity of shuffling on the "MAX_ORDER - 1" i.e,
+	  10th order of pages is selected based on cache utilization
+	  benefits on x86.
+
+	  While the randomization improves cache utilization it may
+	  negatively impact workloads on platforms without a cache. For
+	  this reason, by default, the randomization is enabled only
+	  after runtime detection of a direct-mapped memory-side-cache.
+	  Otherwise, the randomization may be force enabled with the
+	  'page_alloc.shuffle' kernel command line parameter.
+
+	  Say Y if unsure.
 
 config SLUB_CPU_PARTIAL
 	default y

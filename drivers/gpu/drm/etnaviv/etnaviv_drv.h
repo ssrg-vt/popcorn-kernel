@@ -21,7 +21,6 @@
 #include <linux/mm_types.h>
 
 #include <drm/drmP.h>
-#include <drm/drm_crtc_helper.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_gem.h>
 #include <drm/etnaviv_drm.h>
@@ -43,6 +42,7 @@ struct etnaviv_file_private {
 
 struct etnaviv_drm_private {
 	int num_gpus;
+	struct device_dma_parameters dma_parms;
 	struct etnaviv_gpu *gpu[ETNA_MAX_PIPES];
 
 	/* list of GEM objects: */
@@ -61,7 +61,6 @@ void *etnaviv_gem_prime_vmap(struct drm_gem_object *obj);
 void etnaviv_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr);
 int etnaviv_gem_prime_mmap(struct drm_gem_object *obj,
 			   struct vm_area_struct *vma);
-struct reservation_object *etnaviv_gem_prime_res_obj(struct drm_gem_object *obj);
 struct drm_gem_object *etnaviv_gem_prime_import_sg_table(struct drm_device *dev,
 	struct dma_buf_attachment *attach, struct sg_table *sg);
 int etnaviv_gem_prime_pin(struct drm_gem_object *obj);
@@ -105,17 +104,6 @@ static inline size_t size_vstruct(size_t nelem, size_t elem_size, size_t base)
 	if (elem_size && nelem > (SIZE_MAX - base) / elem_size)
 		return 0;
 	return base + nelem * elem_size;
-}
-
-/* returns true if fence a comes after fence b */
-static inline bool fence_after(u32 a, u32 b)
-{
-	return (s32)(a - b) > 0;
-}
-
-static inline bool fence_after_eq(u32 a, u32 b)
-{
-	return (s32)(a - b) >= 0;
 }
 
 /*

@@ -1,21 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * (C) Copyright David Gibson <dwg@au1.ibm.com>, IBM Corporation.  2005.
- *
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
- *                                                                   USA
  */
 
 #include "dtc.h"
@@ -692,7 +677,7 @@ static struct property *flat_read_property(struct inbuf *dtbuf,
 
 	val = flat_read_data(dtbuf, proplen);
 
-	return build_property(name, val);
+	return build_property(name, val, NULL);
 }
 
 
@@ -750,7 +735,7 @@ static struct node *unflatten_tree(struct inbuf *dtbuf,
 	char *flatname;
 	uint32_t val;
 
-	node = build_node(NULL, NULL);
+	node = build_node(NULL, NULL, NULL);
 
 	flatname = flat_read_string(dtbuf);
 

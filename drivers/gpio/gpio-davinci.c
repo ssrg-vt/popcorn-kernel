@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * TI DaVinci GPIO Support
  *
  * Copyright (c) 2006-2007 David Brownell
  * Copyright (c) 2007, MontaVista Software, Inc. <source@mvista.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/gpio/driver.h>
@@ -198,7 +194,6 @@ static int davinci_gpio_probe(struct platform_device *pdev)
 	struct davinci_gpio_controller *chips;
 	struct davinci_gpio_platform_data *pdata;
 	struct device *dev = &pdev->dev;
-	struct resource *res;
 
 	pdata = davinci_gpio_get_pdata(pdev);
 	if (!pdata) {
@@ -236,8 +231,7 @@ static int davinci_gpio_probe(struct platform_device *pdev)
 	if (!chips)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	gpio_base = devm_ioremap_resource(dev, res);
+	gpio_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(gpio_base))
 		return PTR_ERR(gpio_base);
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	RAW sockets for IPv6
  *	Linux INET6 implementation
@@ -11,11 +12,6 @@
  *	Hideaki YOSHIFUJI	:	sin6_scope_id support
  *	YOSHIFUJI,H.@USAGI	:	raw checksum (RFC2292(bis) compliance)
  *	Kazunori MIYAZAWA @USAGI:	change process style to use ip6_append_data
- *
- *	This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
  */
 
 #include <linux/errno.h>
@@ -86,9 +82,8 @@ struct sock *__raw_v6_lookup(struct net *net, struct sock *sk,
 			    !ipv6_addr_equal(&sk->sk_v6_daddr, rmt_addr))
 				continue;
 
-			if (sk->sk_bound_dev_if &&
-			    sk->sk_bound_dev_if != dif &&
-			    sk->sk_bound_dev_if != sdif)
+			if (!raw_sk_bound_dev_eq(net, sk->sk_bound_dev_if,
+						 dif, sdif))
 				continue;
 
 			if (!ipv6_addr_any(&sk->sk_v6_rcv_saddr)) {
@@ -288,7 +283,9 @@ static int rawv6_bind(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 			/* Binding to link-local address requires an interface */
 			if (!sk->sk_bound_dev_if)
 				goto out_unlock;
+		}
 
+		if (sk->sk_bound_dev_if) {
 			err = -ENODEV;
 			dev = dev_get_by_index_rcu(sock_net(sk),
 						   sk->sk_bound_dev_if);
@@ -658,6 +655,8 @@ static int rawv6_send_hdrinc(struct sock *sk, struct msghdr *msg, int length,
 
 	skb->ip_summed = CHECKSUM_NONE;
 
+	skb_setup_tx_timestamp(skb, sockc->tsflags);
+
 	if (flags & MSG_CONFIRM)
 		skb_set_dst_pending_confirm(skb, 1);
 
@@ -780,6 +779,7 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	struct flowi6 fl6;
 	struct ipcm6_cookie ipc6;
 	int addr_len = msg->msg_namelen;
+	int hdrincl;
 	u16 proto;
 	int err;
 
@@ -792,6 +792,13 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	/* Mirror BSD error message compatibility */
 	if (msg->msg_flags & MSG_OOB)
 		return -EOPNOTSUPP;
+
+	/* hdrincl should be READ_ONCE(inet->hdrincl)
+	 * but READ_ONCE() doesn't work with bit fields.
+	 * Doing this indirectly yields the same result.
+	 */
+	hdrincl = inet->hdrincl;
+	hdrincl = READ_ONCE(hdrincl);
 
 	/*
 	 *	Get and verify the address.
@@ -884,11 +891,14 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	opt = ipv6_fixup_options(&opt_space, opt);
 
 	fl6.flowi6_proto = proto;
-	rfv.msg = msg;
-	rfv.hlen = 0;
-	err = rawv6_probe_proto_opt(&rfv, &fl6);
-	if (err)
-		goto out;
+
+	if (!hdrincl) {
+		rfv.msg = msg;
+		rfv.hlen = 0;
+		err = rawv6_probe_proto_opt(&rfv, &fl6);
+		if (err)
+			goto out;
+	}
 
 	if (!ipv6_addr_any(daddr))
 		fl6.daddr = *daddr;
@@ -905,7 +915,7 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		fl6.flowi6_oif = np->ucast_oif;
 	security_sk_classify_flow(sk, flowi6_to_flowi(&fl6));
 
-	if (inet->hdrincl)
+	if (hdrincl)
 		fl6.flowi6_flags |= FLOWI_FLAG_KNOWN_NH;
 
 	if (ipc6.tclass < 0)
@@ -928,7 +938,7 @@ static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		goto do_confirm;
 
 back_from_confirm:
-	if (inet->hdrincl)
+	if (hdrincl)
 		err = rawv6_send_hdrinc(sk, msg, len, &fl6, &dst,
 					msg->msg_flags, &ipc6.sockc);
 	else {
@@ -1355,6 +1365,7 @@ const struct proto_ops inet6_sockraw_ops = {
 	.getname	   = inet6_getname,
 	.poll		   = datagram_poll,		/* ok		*/
 	.ioctl		   = inet6_ioctl,		/* must change  */
+	.gettstamp	   = sock_gettstamp,
 	.listen		   = sock_no_listen,		/* ok		*/
 	.shutdown	   = inet_shutdown,		/* ok		*/
 	.setsockopt	   = sock_common_setsockopt,	/* ok		*/

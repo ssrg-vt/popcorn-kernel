@@ -115,6 +115,7 @@ struct lpfc_sli_ct_request {
 		uint32_t PortID;
 		struct gid {
 			uint8_t PortType;	/* for GID_PT requests */
+#define GID_PT_N_PORT	1
 			uint8_t DomainScope;
 			uint8_t AreaScope;
 			uint8_t Fc4Type;	/* for GID_FT requests */
@@ -559,6 +560,8 @@ struct fc_vft_header {
 #define fc_vft_hdr_hopct_WORD		word1
 };
 
+#include <uapi/scsi/fc/fc_els.h>
+
 /*
  *  Extended Link Service LS_COMMAND codes (Payload Word 0)
  */
@@ -602,6 +605,7 @@ struct fc_vft_header {
 #define ELS_CMD_RNID      0x78000000
 #define ELS_CMD_LIRR      0x7A000000
 #define ELS_CMD_LCB	  0x81000000
+#define ELS_CMD_FPIN	  0x16000000
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
 #define ELS_CMD_MASK      0xffff
 #define ELS_RSP_MASK      0xff
@@ -642,6 +646,7 @@ struct fc_vft_header {
 #define ELS_CMD_RNID      0x78
 #define ELS_CMD_LIRR      0x7A
 #define ELS_CMD_LCB	  0x81
+#define ELS_CMD_FPIN	  ELS_FPIN
 #endif
 
 /*

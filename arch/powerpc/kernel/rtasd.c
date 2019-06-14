@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2001 Anton Blanchard <anton@au.ibm.com>, IBM
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  *
  * Communication to userspace based on kernel/printk.c
  */
@@ -335,7 +331,7 @@ static ssize_t rtas_log_read(struct file * file, char __user * buf,
 
 	count = rtas_error_log_buffer_max;
 
-	if (!access_ok(VERIFY_WRITE, buf, count))
+	if (!access_ok(buf, count))
 		return -EFAULT;
 
 	tmp = kmalloc(count, GFP_KERNEL);

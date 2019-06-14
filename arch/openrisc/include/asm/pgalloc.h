@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * OpenRISC Linux
  *
@@ -9,11 +10,6 @@
  * Copyright (C) 2003 Matjaz Breskvar <phoenix@bsemi.com>
  * Copyright (C) 2010-2011 Jonas Bonn <jonas@southpole.se>
  * et al.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __ASM_OPENRISC_PGALLOC_H
@@ -70,10 +66,9 @@ static inline void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 	free_page((unsigned long)pgd);
 }
 
-extern pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address);
+extern pte_t *pte_alloc_one_kernel(struct mm_struct *mm);
 
-static inline struct page *pte_alloc_one(struct mm_struct *mm,
-					 unsigned long address)
+static inline struct page *pte_alloc_one(struct mm_struct *mm)
 {
 	struct page *pte;
 	pte = alloc_pages(GFP_KERNEL, 0);

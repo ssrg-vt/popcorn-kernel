@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*  linux/drivers/mmc/host/sdhci-pci.c - SDHCI on PCI bus interface
  *
  *  Copyright (C) 2005-2008 Pierre Ossman, All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
  *
  * Thanks to the following companies for their support:
  *
@@ -30,6 +26,10 @@
 #include <linux/mmc/slot-gpio.h>
 #include <linux/mmc/sdhci-pci-data.h>
 #include <linux/acpi.h>
+
+#ifdef CONFIG_X86
+#include <asm/iosf_mbi.h>
+#endif
 
 #include "cqhci.h"
 
@@ -451,6 +451,50 @@ static const struct sdhci_pci_fixes sdhci_intel_pch_sdio = {
 	.probe_slot	= pch_hc_probe_slot,
 };
 
+#ifdef CONFIG_X86
+
+#define BYT_IOSF_SCCEP			0x63
+#define BYT_IOSF_OCP_NETCTRL0		0x1078
+#define BYT_IOSF_OCP_TIMEOUT_BASE	GENMASK(10, 8)
+
+static void byt_ocp_setting(struct pci_dev *pdev)
+{
+	u32 val = 0;
+
+	if (pdev->device != PCI_DEVICE_ID_INTEL_BYT_EMMC &&
+	    pdev->device != PCI_DEVICE_ID_INTEL_BYT_SDIO &&
+	    pdev->device != PCI_DEVICE_ID_INTEL_BYT_SD &&
+	    pdev->device != PCI_DEVICE_ID_INTEL_BYT_EMMC2)
+		return;
+
+	if (iosf_mbi_read(BYT_IOSF_SCCEP, MBI_CR_READ, BYT_IOSF_OCP_NETCTRL0,
+			  &val)) {
+		dev_err(&pdev->dev, "%s read error\n", __func__);
+		return;
+	}
+
+	if (!(val & BYT_IOSF_OCP_TIMEOUT_BASE))
+		return;
+
+	val &= ~BYT_IOSF_OCP_TIMEOUT_BASE;
+
+	if (iosf_mbi_write(BYT_IOSF_SCCEP, MBI_CR_WRITE, BYT_IOSF_OCP_NETCTRL0,
+			   val)) {
+		dev_err(&pdev->dev, "%s write error\n", __func__);
+		return;
+	}
+
+	dev_dbg(&pdev->dev, "%s completed\n", __func__);
+}
+
+#else
+
+static inline void byt_ocp_setting(struct pci_dev *pdev)
+{
+}
+
+#endif
+
 enum {
 	INTEL_DSM_FNS		=  0,
 	INTEL_DSM_V18_SWITCH	=  3,
@@ -710,11 +754,17 @@ static int intel_execute_tuning(struct mmc_host *mmc, u32 opcode)
 static void byt_probe_slot(struct sdhci_pci_slot *slot)
 {
 	struct mmc_host_ops *ops = &slot->host->mmc_host_ops;
+	struct device *dev = &slot->chip->pdev->dev;
+	struct mmc_host *mmc = slot->host->mmc;
 
 	byt_read_dsm(slot);
 
+	byt_ocp_setting(slot->chip->pdev);
+
 	ops->execute_tuning = intel_execute_tuning;
 	ops->start_signal_voltage_switch = intel_start_signal_voltage_switch;
+
+	device_property_read_u32(dev, "max-frequency", &mmc->f_max);
 }
 
 static int byt_emmc_probe_slot(struct sdhci_pci_slot *slot)
@@ -934,10 +984,39 @@ static int byt_sd_probe_slot(struct sdhci_pci_slot *slot)
 	return 0;
 }
 
+#ifdef CONFIG_PM_SLEEP
+
+static int byt_resume(struct sdhci_pci_chip *chip)
+{
+	byt_ocp_setting(chip->pdev);
+
+	return sdhci_pci_resume_host(chip);
+}
+
+#endif
+
+#ifdef CONFIG_PM
+
+static int byt_runtime_resume(struct sdhci_pci_chip *chip)
+{
+	byt_ocp_setting(chip->pdev);
+
+	return sdhci_pci_runtime_resume_host(chip);
+}
+
+#endif
+
 static const struct sdhci_pci_fixes sdhci_intel_byt_emmc = {
+#ifdef CONFIG_PM_SLEEP
+	.resume		= byt_resume,
+#endif
+#ifdef CONFIG_PM
+	.runtime_resume	= byt_runtime_resume,
+#endif
 	.allow_runtime_pm = true,
 	.probe_slot	= byt_emmc_probe_slot,
-	.quirks		= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC,
+	.quirks		= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC |
+			  SDHCI_QUIRK_NO_LED,
 	.quirks2	= SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
 			  SDHCI_QUIRK2_CAPS_BIT63_FOR_HS400 |
 			  SDHCI_QUIRK2_STOP_WITH_TC,
@@ -957,7 +1036,8 @@ static const struct sdhci_pci_fixes sdhci_intel_glk_emmc = {
 	.runtime_suspend	= glk_runtime_suspend,
 	.runtime_resume		= glk_runtime_resume,
 #endif
-	.quirks			= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC,
+	.quirks			= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC |
+				  SDHCI_QUIRK_NO_LED,
 	.quirks2		= SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
 				  SDHCI_QUIRK2_CAPS_BIT63_FOR_HS400 |
 				  SDHCI_QUIRK2_STOP_WITH_TC,
@@ -966,7 +1046,14 @@ static const struct sdhci_pci_fixes sdhci_intel_glk_emmc = {
 };
 
 static const struct sdhci_pci_fixes sdhci_ni_byt_sdio = {
-	.quirks		= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC,
+#ifdef CONFIG_PM_SLEEP
+	.resume		= byt_resume,
+#endif
+#ifdef CONFIG_PM
+	.runtime_resume	= byt_runtime_resume,
+#endif
+	.quirks		= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC |
+			  SDHCI_QUIRK_NO_LED,
 	.quirks2	= SDHCI_QUIRK2_HOST_OFF_CARD_ON |
 			  SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
 	.allow_runtime_pm = true,
@@ -976,7 +1063,14 @@ static const struct sdhci_pci_fixes sdhci_ni_byt_sdio = {
 };
 
 static const struct sdhci_pci_fixes sdhci_intel_byt_sdio = {
-	.quirks		= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC,
+#ifdef CONFIG_PM_SLEEP
+	.resume		= byt_resume,
+#endif
+#ifdef CONFIG_PM
+	.runtime_resume	= byt_runtime_resume,
+#endif
+	.quirks		= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC |
+			  SDHCI_QUIRK_NO_LED,
 	.quirks2	= SDHCI_QUIRK2_HOST_OFF_CARD_ON |
 			SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
 	.allow_runtime_pm = true,
@@ -986,7 +1080,14 @@ static const struct sdhci_pci_fixes sdhci_intel_byt_sdio = {
 };
 
 static const struct sdhci_pci_fixes sdhci_intel_byt_sd = {
-	.quirks		= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC,
+#ifdef CONFIG_PM_SLEEP
+	.resume		= byt_resume,
+#endif
+#ifdef CONFIG_PM
+	.runtime_resume	= byt_runtime_resume,
+#endif
+	.quirks		= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC |
+			  SDHCI_QUIRK_NO_LED,
 	.quirks2	= SDHCI_QUIRK2_CARD_ON_NEEDS_BUS_ON |
 			  SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
 			  SDHCI_QUIRK2_STOP_WITH_TC,
@@ -1247,16 +1348,6 @@ static int jmicron_resume(struct sdhci_pci_chip *chip)
 	return sdhci_pci_resume_host(chip);
 }
 #endif
-
-static const struct sdhci_pci_fixes sdhci_o2 = {
-	.probe = sdhci_pci_o2_probe,
-	.quirks = SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC,
-	.quirks2 = SDHCI_QUIRK2_CLEAR_TRANSFERMODE_REG_BEFORE_CMD,
-	.probe_slot = sdhci_pci_o2_probe_slot,
-#ifdef CONFIG_PM_SLEEP
-	.resume = sdhci_pci_o2_resume,
-#endif
-};
 
 static const struct sdhci_pci_fixes sdhci_jmicron = {
 	.probe		= jmicron_probe,
@@ -1577,6 +1668,8 @@ static const struct pci_device_id pci_ids[] = {
 	SDHCI_PCI_DEVICE(INTEL, CNPH_SD,   intel_byt_sd),
 	SDHCI_PCI_DEVICE(INTEL, ICP_EMMC,  intel_glk_emmc),
 	SDHCI_PCI_DEVICE(INTEL, ICP_SD,    intel_byt_sd),
+	SDHCI_PCI_DEVICE(INTEL, CML_EMMC,  intel_glk_emmc),
+	SDHCI_PCI_DEVICE(INTEL, CML_SD,    intel_byt_sd),
 	SDHCI_PCI_DEVICE(O2, 8120,     o2),
 	SDHCI_PCI_DEVICE(O2, 8220,     o2),
 	SDHCI_PCI_DEVICE(O2, 8221,     o2),

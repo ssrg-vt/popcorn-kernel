@@ -2315,7 +2315,7 @@ again:
 		   (ceph_osdmap_flag(osdc, CEPH_OSDMAP_FULL) ||
 		    pool_full(osdc, req->r_t.base_oloc.pool))) {
 		dout("req %p full/pool_full\n", req);
-		if (osdc->abort_on_full) {
+		if (ceph_test_opt(osdc->client, ABORT_ON_FULL)) {
 			err = -ENOSPC;
 		} else {
 			pr_warn_ratelimited("FULL or reached pool quota\n");
@@ -2398,7 +2398,7 @@ static void finish_request(struct ceph_osd_request *req)
 
 static void __complete_request(struct ceph_osd_request *req)
 {
-	dout("%s req %p tid %llu cb %pf result %d\n", __func__, req,
+	dout("%s req %p tid %llu cb %ps result %d\n", __func__, req,
 	     req->r_tid, req->r_callback, req->r_result);
 
 	if (req->r_callback)
@@ -2545,7 +2545,7 @@ static void ceph_osdc_abort_on_full(struct ceph_osd_client *osdc)
 {
 	bool victims = false;
 
-	if (osdc->abort_on_full &&
+	if (ceph_test_opt(osdc->client, ABORT_ON_FULL) &&
 	    (ceph_osdmap_flag(osdc, CEPH_OSDMAP_FULL) || have_pool_full(osdc)))
 		for_each_request(osdc, abort_on_full_fn, &victims);
 }
@@ -4926,7 +4926,7 @@ static int decode_watcher(void **p, void *end, struct ceph_watch_item *item)
 
 	dout("%s %s%llu cookie %llu addr %s\n", __func__,
 	     ENTITY_NAME(item->name), item->cookie,
-	     ceph_pr_addr(&item->addr.in_addr));
+	     ceph_pr_addr(&item->addr));
 	return 0;
 }
 

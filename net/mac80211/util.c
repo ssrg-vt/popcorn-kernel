@@ -5,7 +5,7 @@
  * Copyright 2007	Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
  * Copyright (C) 2015-2017	Intel Deutschland GmbH
- * Copyright (C) 2018 Intel Corporation
+ * Copyright (C) 2018-2019 Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -299,16 +299,16 @@ out:
 	spin_unlock_bh(&fq->lock);
 }
 
-void ieee80211_wake_txqs(unsigned long data)
+static void
+__releases(&local->queue_stop_reason_lock)
+__acquires(&local->queue_stop_reason_lock)
+_ieee80211_wake_txqs(struct ieee80211_local *local, unsigned long *flags)
 {
-	struct ieee80211_local *local = (struct ieee80211_local *)data;
 	struct ieee80211_sub_if_data *sdata;
 	int n_acs = IEEE80211_NUM_ACS;
-	unsigned long flags;
 	int i;
 
 	rcu_read_lock();
-	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
 
 	if (local->hw.queues < IEEE80211_NUM_ACS)
 		n_acs = 1;
@@ -317,7 +317,7 @@ void ieee80211_wake_txqs(unsigned long data)
 		if (local->queue_stop_reasons[i])
 			continue;
 
-		spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
+		spin_unlock_irqrestore(&local->queue_stop_reason_lock, *flags);
 		list_for_each_entry_rcu(sdata, &local->interfaces, list) {
 			int ac;
 
@@ -329,11 +329,20 @@ void ieee80211_wake_txqs(unsigned long data)
 					__ieee80211_wake_txqs(sdata, ac);
 			}
 		}
-		spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
+		spin_lock_irqsave(&local->queue_stop_reason_lock, *flags);
 	}
 
-	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
 	rcu_read_unlock();
+}
+
+void ieee80211_wake_txqs(unsigned long data)
+{
+	struct ieee80211_local *local = (struct ieee80211_local *)data;
+	unsigned long flags;
+
+	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
+	_ieee80211_wake_txqs(local, &flags);
+	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
 }
 
 void ieee80211_propagate_queue_wake(struct ieee80211_local *local, int queue)
@@ -371,7 +380,8 @@ void ieee80211_propagate_queue_wake(struct ieee80211_local *local, int queue)
 
 static void __ieee80211_wake_queue(struct ieee80211_hw *hw, int queue,
 				   enum queue_stop_reason reason,
-				   bool refcounted)
+				   bool refcounted,
+				   unsigned long *flags)
 {
 	struct ieee80211_local *local = hw_to_local(hw);
 
@@ -405,8 +415,19 @@ static void __ieee80211_wake_queue(struct ieee80211_hw *hw, int queue,
 	} else
 		tasklet_schedule(&local->tx_pending_tasklet);
 
-	if (local->ops->wake_tx_queue)
-		tasklet_schedule(&local->wake_txqs_tasklet);
+	/*
+	 * Calling _ieee80211_wake_txqs here can be a problem because it may
+	 * release queue_stop_reason_lock which has been taken by
+	 * __ieee80211_wake_queue's caller. It is certainly not very nice to
+	 * release someone's lock, but it is fine because all the callers of
+	 * __ieee80211_wake_queue call it right before releasing the lock.
+	 */
+	if (local->ops->wake_tx_queue) {
+		if (reason == IEEE80211_QUEUE_STOP_REASON_DRIVER)
+			tasklet_schedule(&local->wake_txqs_tasklet);
+		else
+			_ieee80211_wake_txqs(local, flags);
+	}
 }
 
 void ieee80211_wake_queue_by_reason(struct ieee80211_hw *hw, int queue,
@@ -417,7 +438,7 @@ void ieee80211_wake_queue_by_reason(struct ieee80211_hw *hw, int queue,
 	unsigned long flags;
 
 	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
-	__ieee80211_wake_queue(hw, queue, reason, refcounted);
+	__ieee80211_wake_queue(hw, queue, reason, refcounted, &flags);
 	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
 }
 
@@ -514,7 +535,7 @@ void ieee80211_add_pending_skb(struct ieee80211_local *local,
 			       false);
 	__skb_queue_tail(&local->pending[queue], skb);
 	__ieee80211_wake_queue(hw, queue, IEEE80211_QUEUE_STOP_REASON_SKB_ADD,
-			       false);
+			       false, &flags);
 	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
 }
 
@@ -547,7 +568,7 @@ void ieee80211_add_pending_skbs(struct ieee80211_local *local,
 	for (i = 0; i < hw->queues; i++)
 		__ieee80211_wake_queue(hw, i,
 			IEEE80211_QUEUE_STOP_REASON_SKB_ADD,
-			false);
+			false, &flags);
 	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
 }
 
@@ -605,7 +626,7 @@ void ieee80211_wake_queues_by_reason(struct ieee80211_hw *hw,
 	spin_lock_irqsave(&local->queue_stop_reason_lock, flags);
 
 	for_each_set_bit(i, &queues, hw->queues)
-		__ieee80211_wake_queue(hw, i, reason, refcounted);
+		__ieee80211_wake_queue(hw, i, reason, refcounted, &flags);
 
 	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
 }
@@ -870,33 +891,29 @@ void ieee80211_queue_delayed_work(struct ieee80211_hw *hw,
 }
 EXPORT_SYMBOL(ieee80211_queue_delayed_work);
 
-u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
-			       struct ieee802_11_elems *elems,
-			       u64 filter, u32 crc)
+static u32
+_ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
+			    struct ieee802_11_elems *elems,
+			    u64 filter, u32 crc,
+			    const struct element *check_inherit)
 {
-	size_t left = len;
-	const u8 *pos = start;
+	const struct element *elem;
 	bool calc_crc = filter != 0;
 	DECLARE_BITMAP(seen_elems, 256);
 	const u8 *ie;
 
 	bitmap_zero(seen_elems, 256);
-	memset(elems, 0, sizeof(*elems));
-	elems->ie_start = start;
-	elems->total_len = len;
 
-	while (left >= 2) {
-		u8 id, elen;
+	for_each_element(elem, start, len) {
 		bool elem_parse_failed;
+		u8 id = elem->id;
+		u8 elen = elem->datalen;
+		const u8 *pos = elem->data;
 
-		id = *pos++;
-		elen = *pos++;
-		left -= 2;
-
-		if (elen > left) {
-			elems->parse_error = true;
-			break;
-		}
+		if (check_inherit &&
+		    !cfg80211_is_element_inherited(elem,
+						   check_inherit))
+			continue;
 
 		switch (id) {
 		case WLAN_EID_SSID:
@@ -939,8 +956,6 @@ u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
 		 */
 			if (test_bit(id, seen_elems)) {
 				elems->parse_error = true;
-				left -= elen;
-				pos += elen;
 				continue;
 			}
 			break;
@@ -1202,6 +1217,8 @@ u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
 			if (pos[0] == WLAN_EID_EXT_HE_MU_EDCA &&
 			    elen >= (sizeof(*elems->mu_edca_param_set) + 1)) {
 				elems->mu_edca_param_set = (void *)&pos[1];
+				if (calc_crc)
+					crc = crc32_be(crc, pos - 2, elen + 2);
 			} else if (pos[0] == WLAN_EID_EXT_HE_CAPABILITY) {
 				elems->he_cap = (void *)&pos[1];
 				elems->he_cap_len = elen - 1;
@@ -1211,6 +1228,14 @@ u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
 				elems->he_operation = (void *)&pos[1];
 			} else if (pos[0] == WLAN_EID_EXT_UORA && elen >= 1) {
 				elems->uora_element = (void *)&pos[1];
+			} else if (pos[0] ==
+				   WLAN_EID_EXT_MAX_CHANNEL_SWITCH_TIME &&
+				   elen == 4) {
+				elems->max_channel_switch_time = pos + 1;
+			} else if (pos[0] ==
+				   WLAN_EID_EXT_MULTIPLE_BSSID_CONFIGURATION &&
+				   elen == 3) {
+				elems->mbssid_config_ie = (void *)&pos[1];
 			}
 			break;
 		default:
@@ -1221,13 +1246,136 @@ u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
 			elems->parse_error = true;
 		else
 			__set_bit(id, seen_elems);
-
-		left -= elen;
-		pos += elen;
 	}
 
-	if (left != 0)
+	if (!for_each_element_completed(elem, start, len))
 		elems->parse_error = true;
+
+	return crc;
+}
+
+static size_t ieee802_11_find_bssid_profile(const u8 *start, size_t len,
+					    struct ieee802_11_elems *elems,
+					    u8 *transmitter_bssid,
+					    u8 *bss_bssid,
+					    u8 *nontransmitted_profile)
+{
+	const struct element *elem, *sub;
+	size_t profile_len = 0;
+	bool found = false;
+
+	if (!bss_bssid || !transmitter_bssid)
+		return profile_len;
+
+	for_each_element_id(elem, WLAN_EID_MULTIPLE_BSSID, start, len) {
+		if (elem->datalen < 2)
+			continue;
+
+		for_each_element(sub, elem->data + 1, elem->datalen - 1) {
+			u8 new_bssid[ETH_ALEN];
+			const u8 *index;
+
+			if (sub->id != 0 || sub->datalen < 4) {
+				/* not a valid BSS profile */
+				continue;
+			}
+
+			if (sub->data[0] != WLAN_EID_NON_TX_BSSID_CAP ||
+			    sub->data[1] != 2) {
+				/* The first element of the
+				 * Nontransmitted BSSID Profile is not
+				 * the Nontransmitted BSSID Capability
+				 * element.
+				 */
+				continue;
+			}
+
+			memset(nontransmitted_profile, 0, len);
+			profile_len = cfg80211_merge_profile(start, len,
+							     elem,
+							     sub,
+							     nontransmitted_profile,
+							     len);
+
+			/* found a Nontransmitted BSSID Profile */
+			index = cfg80211_find_ie(WLAN_EID_MULTI_BSSID_IDX,
+						 nontransmitted_profile,
+						 profile_len);
+			if (!index || index[1] < 1 || index[2] == 0) {
+				/* Invalid MBSSID Index element */
+				continue;
+			}
+
+			cfg80211_gen_new_bssid(transmitter_bssid,
+					       elem->data[0],
+					       index[2],
+					       new_bssid);
+			if (ether_addr_equal(new_bssid, bss_bssid)) {
+				found = true;
+				elems->bssid_index_len = index[1];
+				elems->bssid_index = (void *)&index[2];
+				break;
+			}
+		}
+	}
+
+	return found ? profile_len : 0;
+}
+
+u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
+			       struct ieee802_11_elems *elems,
+			       u64 filter, u32 crc, u8 *transmitter_bssid,
+			       u8 *bss_bssid)
+{
+	const struct element *non_inherit = NULL;
+	u8 *nontransmitted_profile;
+	int nontransmitted_profile_len = 0;
+
+	memset(elems, 0, sizeof(*elems));
+	elems->ie_start = start;
+	elems->total_len = len;
+
+	nontransmitted_profile = kmalloc(len, GFP_ATOMIC);
+	if (nontransmitted_profile) {
+		nontransmitted_profile_len =
+			ieee802_11_find_bssid_profile(start, len, elems,
+						      transmitter_bssid,
+						      bss_bssid,
+						      nontransmitted_profile);
+		non_inherit =
+			cfg80211_find_ext_elem(WLAN_EID_EXT_NON_INHERITANCE,
+					       nontransmitted_profile,
+					       nontransmitted_profile_len);
+	}
+
+	crc = _ieee802_11_parse_elems_crc(start, len, action, elems, filter,
+					  crc, non_inherit);
+
+	/* Override with nontransmitted profile, if found */
+	if (nontransmitted_profile_len)
+		_ieee802_11_parse_elems_crc(nontransmitted_profile,
+					    nontransmitted_profile_len,
+					    action, elems, 0, 0, NULL);
+
+	if (elems->tim && !elems->parse_error) {
+		const struct ieee80211_tim_ie *tim_ie = elems->tim;
+
+		elems->dtim_period = tim_ie->dtim_period;
+		elems->dtim_count = tim_ie->dtim_count;
+	}
+
+	/* Override DTIM period and count if needed */
+	if (elems->bssid_index &&
+	    elems->bssid_index_len >=
+	    offsetofend(struct ieee80211_bssid_index, dtim_period))
+		elems->dtim_period = elems->bssid_index->dtim_period;
+
+	if (elems->bssid_index &&
+	    elems->bssid_index_len >=
+	    offsetofend(struct ieee80211_bssid_index, dtim_count))
+		elems->dtim_count = elems->bssid_index->dtim_count;
+
+	kfree(nontransmitted_profile);
 
 	return crc;
 }
@@ -2123,6 +2271,10 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 		case NL80211_IFTYPE_AP_VLAN:
 		case NL80211_IFTYPE_MONITOR:
 			break;
+		case NL80211_IFTYPE_ADHOC:
+			if (sdata->vif.bss_conf.ibss_joined)
+				WARN_ON(drv_join_ibss(local, sdata));
+			/* fall through */
 		default:
 			ieee80211_reconfig_stations(sdata);
 			/* fall through */

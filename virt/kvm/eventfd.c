@@ -44,6 +44,12 @@
 
 static struct workqueue_struct *irqfd_cleanup_wq;
 
+bool __attribute__((weak))
+kvm_arch_irqfd_allowed(struct kvm *kvm, struct kvm_irqfd *args)
+{
+	return true;
+}
+
 static void
 irqfd_inject(struct work_struct *work)
 {
@@ -214,9 +220,9 @@ irqfd_wakeup(wait_queue_entry_t *wait, unsigned mode, int sync, void *key)
 
 	if (flags & EPOLLHUP) {
 		/* The eventfd is closing, detach from KVM */
-		unsigned long flags;
+		unsigned long iflags;
 
-		spin_lock_irqsave(&kvm->irqfds.lock, flags);
+		spin_lock_irqsave(&kvm->irqfds.lock, iflags);
 
 		/*
 		 * We must check if someone deactivated the irqfd before
@@ -230,7 +236,7 @@ irqfd_wakeup(wait_queue_entry_t *wait, unsigned mode, int sync, void *key)
 		if (irqfd_is_active(irqfd))
 			irqfd_deactivate(irqfd);
 
-		spin_unlock_irqrestore(&kvm->irqfds.lock, flags);
+		spin_unlock_irqrestore(&kvm->irqfds.lock, iflags);
 	}
 
 	return 0;
@@ -297,7 +303,10 @@ kvm_irqfd_assign(struct kvm *kvm, struct kvm_irqfd *args)
 	if (!kvm_arch_intc_initialized(kvm))
 		return -EAGAIN;
 
-	irqfd = kzalloc(sizeof(*irqfd), GFP_KERNEL);
+	if (!kvm_arch_irqfd_allowed(kvm, args))
+		return -EINVAL;
+
+	irqfd = kzalloc(sizeof(*irqfd), GFP_KERNEL_ACCOUNT);
 	if (!irqfd)
 		return -ENOMEM;
 
@@ -345,7 +354,8 @@ kvm_irqfd_assign(struct kvm *kvm, struct kvm_irqfd *args)
 		}
 
 		if (!irqfd->resampler) {
-			resampler = kzalloc(sizeof(*resampler), GFP_KERNEL);
+			resampler = kzalloc(sizeof(*resampler),
+					    GFP_KERNEL_ACCOUNT);
 			if (!resampler) {
 				ret = -ENOMEM;
 				mutex_unlock(&kvm->irqfds.resampler_lock);
@@ -797,7 +807,7 @@ static int kvm_assign_ioeventfd_idx(struct kvm *kvm,
 	if (IS_ERR(eventfd))
 		return PTR_ERR(eventfd);
 
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	p = kzalloc(sizeof(*p), GFP_KERNEL_ACCOUNT);
 	if (!p) {
 		ret = -ENOMEM;
 		goto fail;

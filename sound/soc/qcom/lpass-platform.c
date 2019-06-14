@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2010-2011,2013-2015 The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * lpass-platform.c -- ALSA SoC platform driver for QTi LPASS
  */
@@ -91,7 +83,7 @@ static int lpass_platform_pcmops_open(struct snd_pcm_substream *substream)
 	if (ret) {
 		dev_err(soc_runtime->dev,
 			"error writing to rdmactl reg: %d\n", ret);
-			return ret;
+		return ret;
 	}
 
 	data->dma_ch = dma_ch;

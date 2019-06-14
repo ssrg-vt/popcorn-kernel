@@ -93,6 +93,8 @@ extern struct css_set init_css_set;
 
 bool css_has_online_children(struct cgroup_subsys_state *css);
 struct cgroup_subsys_state *css_from_id(int id, struct cgroup_subsys *ss);
+struct cgroup_subsys_state *cgroup_e_css(struct cgroup *cgroup,
+					 struct cgroup_subsys *ss);
 struct cgroup_subsys_state *cgroup_get_e_css(struct cgroup *cgroup,
 					     struct cgroup_subsys *ss);
 struct cgroup_subsys_state *css_tryget_online_from_dir(struct dentry *dentry,
@@ -119,6 +121,7 @@ extern int cgroup_can_fork(struct task_struct *p);
 extern void cgroup_cancel_fork(struct task_struct *p);
 extern void cgroup_post_fork(struct task_struct *p);
 void cgroup_exit(struct task_struct *p);
+void cgroup_release(struct task_struct *p);
 void cgroup_free(struct task_struct *p);
 
 int cgroup_init_early(void);
@@ -695,6 +698,7 @@ static inline int cgroup_can_fork(struct task_struct *p) { return 0; }
 static inline void cgroup_cancel_fork(struct task_struct *p) {}
 static inline void cgroup_post_fork(struct task_struct *p) {}
 static inline void cgroup_exit(struct task_struct *p) {}
+static inline void cgroup_release(struct task_struct *p) {}
 static inline void cgroup_free(struct task_struct *p) {}
 
 static inline int cgroup_init_early(void) { return 0; }
@@ -876,5 +880,48 @@ static inline void put_cgroup_ns(struct cgroup_namespace *ns)
 	if (ns && refcount_dec_and_test(&ns->count))
 		free_cgroup_ns(ns);
 }
+
+#ifdef CONFIG_CGROUPS
+
+void cgroup_enter_frozen(void);
+void cgroup_leave_frozen(bool always_leave);
+void cgroup_update_frozen(struct cgroup *cgrp);
+void cgroup_freeze(struct cgroup *cgrp, bool freeze);
+void cgroup_freezer_migrate_task(struct task_struct *task, struct cgroup *src,
+				 struct cgroup *dst);
+
+static inline bool cgroup_task_freeze(struct task_struct *task)
+{
+	bool ret;
+
+	if (task->flags & PF_KTHREAD)
+		return false;
+
+	rcu_read_lock();
+	ret = test_bit(CGRP_FREEZE, &task_dfl_cgroup(task)->flags);
+	rcu_read_unlock();
+
+	return ret;
+}
+
+static inline bool cgroup_task_frozen(struct task_struct *task)
+{
+	return task->frozen;
+}
+
+#else /* !CONFIG_CGROUPS */
+
+static inline void cgroup_enter_frozen(void) { }
+static inline void cgroup_leave_frozen(bool always_leave) { }
+static inline bool cgroup_task_freeze(struct task_struct *task)
+{
+	return false;
+}
+static inline bool cgroup_task_frozen(struct task_struct *task)
+{
+	return false;
+}
+
+#endif /* !CONFIG_CGROUPS */
 
 #endif /* _LINUX_CGROUP_H */

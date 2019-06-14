@@ -136,8 +136,9 @@ int amdgpu_fence_emit(struct amdgpu_ring *ring, struct dma_fence **f,
 {
 	struct amdgpu_device *adev = ring->adev;
 	struct amdgpu_fence *fence;
-	struct dma_fence *old, **ptr;
+	struct dma_fence __rcu **ptr;
 	uint32_t seq;
+	int r;
 
 	fence = kmem_cache_alloc(amdgpu_fence_slab, GFP_KERNEL);
 	if (fence == NULL)
@@ -153,15 +154,24 @@ int amdgpu_fence_emit(struct amdgpu_ring *ring, struct dma_fence **f,
 			       seq, flags | AMDGPU_FENCE_FLAG_INT);
 
 	ptr = &ring->fence_drv.fences[seq & ring->fence_drv.num_fences_mask];
+	if (unlikely(rcu_dereference_protected(*ptr, 1))) {
+		struct dma_fence *old;
+
+		rcu_read_lock();
+		old = dma_fence_get_rcu_safe(ptr);
+		rcu_read_unlock();
+
+		if (old) {
+			r = dma_fence_wait(old, false);
+			dma_fence_put(old);
+			if (r)
+				return r;
+		}
+	}
+
 	/* This function can't be called concurrently anyway, otherwise
 	 * emitting the fence would mess up the hardware ring buffer.
 	 */
-	old = rcu_dereference_protected(*ptr, 1);
-	if (old && !dma_fence_is_signaled(old)) {
-		DRM_INFO("rcu slot is busy\n");
-		dma_fence_wait(old, false);
-	}
-
 	rcu_assign_pointer(*ptr, dma_fence_get(&fence->base));
 
 	*f = &fence->base;
@@ -398,9 +408,9 @@ int amdgpu_fence_driver_start_ring(struct amdgpu_ring *ring,
 	ring->fence_drv.irq_type = irq_type;
 	ring->fence_drv.initialized = true;
 
-	dev_dbg(adev->dev, "fence driver on ring %d use gpu addr 0x%016llx, "
-		"cpu addr 0x%p\n", ring->idx,
-		ring->fence_drv.gpu_addr, ring->fence_drv.cpu_addr);
+	DRM_DEV_DEBUG(adev->dev, "fence driver on ring %s use gpu addr "
+		      "0x%016llx, cpu addr 0x%p\n", ring->name,
+		      ring->fence_drv.gpu_addr, ring->fence_drv.cpu_addr);
 	return 0;
 }
 

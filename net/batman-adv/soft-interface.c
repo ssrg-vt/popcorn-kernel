@@ -1,19 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright (C) 2007-2018  B.A.T.M.A.N. contributors:
+/* Copyright (C) 2007-2019  B.A.T.M.A.N. contributors:
  *
  * Marek Lindner, Simon Wunderlich
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of version 2 of the GNU General Public
- * License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "soft-interface.h"
@@ -50,13 +38,13 @@
 #include <linux/string.h>
 #include <linux/types.h>
 #include <uapi/linux/batadv_packet.h>
+#include <uapi/linux/batman_adv.h>
 
 #include "bat_algo.h"
 #include "bridge_loop_avoidance.h"
 #include "debugfs.h"
 #include "distributed-arp-table.h"
 #include "gateway_client.h"
-#include "gateway_common.h"
 #include "hard-interface.h"
 #include "multicast.h"
 #include "network-coding.h"
@@ -209,9 +197,10 @@ static netdev_tx_t batadv_interface_tx(struct sk_buff *skb,
 	unsigned short vid;
 	u32 seqno;
 	int gw_mode;
-	enum batadv_forw_mode forw_mode;
+	enum batadv_forw_mode forw_mode = BATADV_FORW_SINGLE;
 	struct batadv_orig_node *mcast_single_orig = NULL;
 	int network_offset = ETH_HLEN;
+	__be16 proto;
 
 	if (atomic_read(&bat_priv->mesh_state) != BATADV_MESH_ACTIVE)
 		goto dropped;
@@ -221,14 +210,21 @@ static netdev_tx_t batadv_interface_tx(struct sk_buff *skb,
 
 	netif_trans_update(soft_iface);
 	vid = batadv_get_vid(skb, 0);
+
+	skb_reset_mac_header(skb);
 	ethhdr = eth_hdr(skb);
 
-	switch (ntohs(ethhdr->h_proto)) {
+	proto = ethhdr->h_proto;
+
+	switch (ntohs(proto)) {
 	case ETH_P_8021Q:
+		if (!pskb_may_pull(skb, sizeof(*vhdr)))
+			goto dropped;
 		vhdr = vlan_eth_hdr(skb);
+		proto = vhdr->h_vlan_encapsulated_proto;
 
 		/* drop batman-in-batman packets to prevent loops */
-		if (vhdr->h_vlan_encapsulated_proto != htons(ETH_P_BATMAN)) {
+		if (proto != htons(ETH_P_BATMAN)) {
 			network_offset += VLAN_HLEN;
 			break;
 		}
@@ -255,6 +251,9 @@ static netdev_tx_t batadv_interface_tx(struct sk_buff *skb,
 		if (!client_added)
 			goto dropped;
 	}
+
+	/* Snoop address candidates from DHCPACKs for early DAT filling */
+	batadv_dat_snoop_outgoing_dhcp_ack(bat_priv, skb, proto, vid);
 
 	/* don't accept stp packets. STP does not help in meshes.
 	 * better use the bridge loop avoidance ...
@@ -306,7 +305,8 @@ send:
 			if (forw_mode == BATADV_FORW_NONE)
 				goto dropped;
 
-			if (forw_mode == BATADV_FORW_SINGLE)
+			if (forw_mode == BATADV_FORW_SINGLE ||
+			    forw_mode == BATADV_FORW_SOME)
 				do_bcast = false;
 		}
 	}
@@ -366,6 +366,8 @@ send:
 			ret = batadv_send_skb_unicast(bat_priv, skb,
 						      BATADV_UNICAST, 0,
 						      mcast_single_orig, vid);
+		} else if (forw_mode == BATADV_FORW_SOME) {
+			ret = batadv_mcast_forw_send(bat_priv, skb, vid);
 		} else {
 			if (batadv_dat_snoop_outgoing_arp_request(bat_priv,
 								  skb))
@@ -807,6 +809,7 @@ static int batadv_softif_init_late(struct net_device *dev)
 	bat_priv->mcast.querier_ipv6.shadowing = false;
 	bat_priv->mcast.flags = BATADV_NO_FLAGS;
 	atomic_set(&bat_priv->multicast_mode, 1);
+	atomic_set(&bat_priv->multicast_fanout, 16);
 	atomic_set(&bat_priv->mcast.num_want_all_unsnoopables, 0);
 	atomic_set(&bat_priv->mcast.num_want_all_ipv4, 0);
 	atomic_set(&bat_priv->mcast.num_want_all_ipv6, 0);

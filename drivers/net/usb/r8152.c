@@ -129,6 +129,7 @@
 #define USB_UPS_CTRL		0xd800
 #define USB_POWER_CUT		0xd80a
 #define USB_MISC_0		0xd81a
+#define USB_MISC_1		0xd81f
 #define USB_AFE_CTRL2		0xd824
 #define USB_UPS_CFG		0xd842
 #define USB_UPS_FLAGS		0xd848
@@ -555,6 +556,8 @@ enum spd_duplex {
 
 /* MAC PASSTHRU */
 #define AD_MASK			0xfee0
+#define BND_MASK		0x0004
+#define BD_MASK			0x0001
 #define EFUSE			0xcfdb
 #define PASS_THRU_MASK		0x1
 
@@ -1150,7 +1153,7 @@ out1:
 	return ret;
 }
 
-/* Devices containing RTL8153-AD can support a persistent
+/* Devices containing proper chips can support a persistent
  * host system provided MAC address.
  * Examples of this are Dell TB15 and Dell WD15 docks
  */
@@ -1165,13 +1168,23 @@ static int vendor_mac_passthru_addr_read(struct r8152 *tp, struct sockaddr *sa)
 
 	/* test for -AD variant of RTL8153 */
 	ocp_data = ocp_read_word(tp, MCU_TYPE_USB, USB_MISC_0);
-	if ((ocp_data & AD_MASK) != 0x1000)
-		return -ENODEV;
-
-	/* test for MAC address pass-through bit */
-	ocp_data = ocp_read_byte(tp, MCU_TYPE_USB, EFUSE);
-	if ((ocp_data & PASS_THRU_MASK) != 1)
-		return -ENODEV;
+	if ((ocp_data & AD_MASK) == 0x1000) {
+		/* test for MAC address pass-through bit */
+		ocp_data = ocp_read_byte(tp, MCU_TYPE_USB, EFUSE);
+		if ((ocp_data & PASS_THRU_MASK) != 1) {
+			netif_dbg(tp, probe, tp->netdev,
+				  "No efuse for RTL8153-AD MAC pass through\n");
+			return -ENODEV;
+		}
+	} else {
+		/* test for RTL8153-BND and RTL8153-BD */
+		ocp_data = ocp_read_byte(tp, MCU_TYPE_USB, USB_MISC_1);
+		if ((ocp_data & BND_MASK) == 0 && (ocp_data & BD_MASK) == 0) {
+			netif_dbg(tp, probe, tp->netdev,
+				  "Invalid variant for MAC pass through\n");
+			return -ENODEV;
+		}
+	}
 
 	/* returns _AUXMAC_#AABBCCDDEEFF# */
 	status = acpi_evaluate_object(NULL, "\\_SB.AMAC", NULL, &buffer);
@@ -1199,12 +1212,44 @@ static int vendor_mac_passthru_addr_read(struct r8152 *tp, struct sockaddr *sa)
 		goto amacout;
 	}
 	memcpy(sa->sa_data, buf, 6);
-	ether_addr_copy(tp->netdev->dev_addr, sa->sa_data);
 	netif_info(tp, probe, tp->netdev,
 		   "Using pass-thru MAC addr %pM\n", sa->sa_data);
 
 amacout:
 	kfree(obj);
+	return ret;
+}
+
+static int determine_ethernet_addr(struct r8152 *tp, struct sockaddr *sa)
+{
+	struct net_device *dev = tp->netdev;
+	int ret;
+
+	sa->sa_family = dev->type;
+
+	if (tp->version == RTL_VER_01) {
+		ret = pla_ocp_read(tp, PLA_IDR, 8, sa->sa_data);
+	} else {
+		/* if device doesn't support MAC pass through this will
+		 * be expected to be non-zero
+		 */
+		ret = vendor_mac_passthru_addr_read(tp, sa);
+		if (ret < 0)
+			ret = pla_ocp_read(tp, PLA_BACKUP, 8, sa->sa_data);
+	}
+
+	if (ret < 0) {
+		netif_err(tp, probe, dev, "Get ether addr fail\n");
+	} else if (!is_valid_ether_addr(sa->sa_data)) {
+		netif_err(tp, probe, dev, "Invalid ether addr %pM\n",
+			  sa->sa_data);
+		eth_hw_addr_random(dev);
+		ether_addr_copy(sa->sa_data, dev->dev_addr);
+		netif_info(tp, probe, dev, "Random ether addr %pM\n",
+			   sa->sa_data);
+		return 0;
+	}
+
 	return ret;
 }
 
@@ -1214,34 +1259,14 @@ static int set_ethernet_addr(struct r8152 *tp)
 	struct sockaddr sa;
 	int ret;
 
-	if (tp->version == RTL_VER_01) {
-		ret = pla_ocp_read(tp, PLA_IDR, 8, sa.sa_data);
-	} else {
-		/* if this is not an RTL8153-AD, no eFuse mac pass thru set,
-		 * or system doesn't provide valid _SB.AMAC this will be
-		 * be expected to non-zero
-		 */
-		ret = vendor_mac_passthru_addr_read(tp, &sa);
-		if (ret < 0)
-			ret = pla_ocp_read(tp, PLA_BACKUP, 8, sa.sa_data);
-	}
+	ret = determine_ethernet_addr(tp, &sa);
+	if (ret < 0)
+		return ret;
 
-	if (ret < 0) {
-		netif_err(tp, probe, dev, "Get ether addr fail\n");
-	} else if (!is_valid_ether_addr(sa.sa_data)) {
-		netif_err(tp, probe, dev, "Invalid ether addr %pM\n",
-			  sa.sa_data);
-		eth_hw_addr_random(dev);
-		ether_addr_copy(sa.sa_data, dev->dev_addr);
+	if (tp->version == RTL_VER_01)
+		ether_addr_copy(dev->dev_addr, sa.sa_data);
+	else
 		ret = rtl8152_set_mac_address(dev, &sa);
-		netif_info(tp, probe, dev, "Random ether addr %pM\n",
-			   sa.sa_data);
-	} else {
-		if (tp->version == RTL_VER_01)
-			ether_addr_copy(dev->dev_addr, sa.sa_data);
-		else
-			ret = rtl8152_set_mac_address(dev, &sa);
-	}
 
 	return ret;
 }
@@ -4252,9 +4277,17 @@ static int rtl8152_post_reset(struct usb_interface *intf)
 {
 	struct r8152 *tp = usb_get_intfdata(intf);
 	struct net_device *netdev;
+	struct sockaddr sa;
 
 	if (!tp)
 		return 0;
+
+	/* reset the MAC adddress in case of policy change */
+	if (determine_ethernet_addr(tp, &sa) >= 0) {
+		rtnl_lock();
+		dev_set_mac_address (tp->netdev, &sa, NULL);
+		rtnl_unlock();
+	}
 
 	netdev = tp->netdev;
 	if (!netif_running(netdev))

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/net/ethernet/nxp/lpc_eth.c
  *
@@ -5,16 +6,6 @@
  *
  * Copyright (C) 2010 NXP Semiconductors
  * Copyright (C) 2012 Roland Stigge <stigge@antcom.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -280,7 +271,7 @@
 #define LPC_FCCR_MIRRORCOUNTERCURRENT(n)	((n) & 0xFFFF)
 
 /*
- * rxfliterctrl, rxfilterwolstatus, and rxfilterwolclear shared
+ * rxfilterctrl, rxfilterwolstatus, and rxfilterwolclear shared
  * register definitions
  */
 #define LPC_RXFLTRW_ACCEPTUNICAST		(1 << 0)
@@ -291,7 +282,7 @@
 #define LPC_RXFLTRW_ACCEPTPERFECT		(1 << 5)
 
 /*
- * rxfliterctrl register definitions
+ * rxfilterctrl register definitions
  */
 #define LPC_RXFLTRWSTS_MAGICPACKETENWOL		(1 << 12)
 #define LPC_RXFLTRWSTS_RXFILTERENWOL		(1 << 13)
@@ -782,8 +773,6 @@ static int lpc_mii_probe(struct net_device *ndev)
 	}
 
 	phy_set_max_speed(phydev, SPEED_100);
-
-	phydev->advertising = phydev->supported;
 
 	pldat->link = 0;
 	pldat->speed = 0;
@@ -1370,8 +1359,8 @@ static int lpc_eth_drv_probe(struct platform_device *pdev)
 
 	if (!is_valid_ether_addr(ndev->dev_addr)) {
 		const char *macaddr = of_get_mac_address(np);
-		if (macaddr)
-			memcpy(ndev->dev_addr, macaddr, ETH_ALEN);
+		if (!IS_ERR(macaddr))
+			ether_addr_copy(ndev->dev_addr, macaddr);
 	}
 	if (!is_valid_ether_addr(ndev->dev_addr))
 		eth_hw_addr_random(ndev);

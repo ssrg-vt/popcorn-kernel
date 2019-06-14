@@ -310,7 +310,7 @@ xfs_rmapbt_verify(
 	 * from the on disk AGF. Again, we can only check against maximum limits
 	 * in this case.
 	 */
-	if (block->bb_magic != cpu_to_be32(XFS_RMAP_CRC_MAGIC))
+	if (!xfs_verify_magic(bp, block->bb_magic))
 		return __this_address;
 
 	if (!xfs_sb_version_hasrmapbt(&mp->m_sb))
@@ -365,6 +365,7 @@ xfs_rmapbt_write_verify(
 
 const struct xfs_buf_ops xfs_rmapbt_buf_ops = {
 	.name			= "xfs_rmapbt",
+	.magic			= { 0, cpu_to_be32(XFS_RMAP_CRC_MAGIC) },
 	.verify_read		= xfs_rmapbt_read_verify,
 	.verify_write		= xfs_rmapbt_write_verify,
 	.verify_struct		= xfs_rmapbt_verify,
@@ -576,6 +577,15 @@ xfs_rmapbt_calc_reserves(
 	agblocks = be32_to_cpu(agf->agf_length);
 	tree_len = be32_to_cpu(agf->agf_rmap_blocks);
 	xfs_trans_brelse(tp, agbp);
+
+	/*
+	 * The log is permanently allocated, so the space it occupies will
+	 * never be available for the kinds of things that would require btree
+	 * expansion.  We therefore can pretend the space isn't there.
+	 */
+	if (mp->m_sb.sb_logstart &&
+	    XFS_FSB_TO_AGNO(mp, mp->m_sb.sb_logstart) == agno)
+		agblocks -= mp->m_sb.sb_logblocks;
 
 	/* Reserve 1% of the AG or enough for 1 block per record. */
 	*ask += max(agblocks / 100, xfs_rmapbt_max_size(mp, agblocks));

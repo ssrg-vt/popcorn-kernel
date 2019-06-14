@@ -15,6 +15,7 @@
 #include "drm.h"
 #include "gem.h"
 #include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_modeset_helper.h>
 
 #ifdef CONFIG_DRM_FBDEV_EMULATION
 static inline struct tegra_fbdev *to_tegra_fbdev(struct drm_fb_helper *helper)
@@ -254,12 +255,9 @@ static int tegra_fbdev_probe(struct drm_fb_helper *helper,
 	helper->fb = fb;
 	helper->fbdev = info;
 
-	info->par = helper;
-	info->flags = FBINFO_FLAG_DEFAULT;
 	info->fbops = &tegra_fb_ops;
 
-	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->format->depth);
-	drm_fb_helper_fill_var(info, helper, fb->width, fb->height);
+	drm_fb_helper_fill_info(info, helper, sizes);
 
 	offset = info->var.xoffset * bytes_per_pixel +
 		 info->var.yoffset * fb->pitches[0];

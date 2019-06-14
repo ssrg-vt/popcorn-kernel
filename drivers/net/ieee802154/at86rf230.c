@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AT86RF230/RF231 driver
  *
  * Copyright (C) 2009-2012 Siemens AG
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Written by:
  * Dmitry Eremin-Solenikov <dbaryshkov@gmail.com>
@@ -1632,18 +1624,7 @@ static int at86rf230_stats_show(struct seq_file *file, void *offset)
 	seq_printf(file, "INVALID:\t\t%8llu\n", lp->trac.invalid);
 	return 0;
 }
-
-static int at86rf230_stats_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, at86rf230_stats_show, inode->i_private);
-}
-
-static const struct file_operations at86rf230_stats_fops = {
-	.open		= at86rf230_stats_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(at86rf230_stats);
 
 static int at86rf230_debugfs_init(struct at86rf230_local *lp)
 {

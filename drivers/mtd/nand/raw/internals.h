@@ -76,6 +76,7 @@ extern const struct nand_manufacturer_ops toshiba_nand_manuf_ops;
 
 /* Core functions */
 const struct nand_manufacturer *nand_get_manufacturer(u8 id);
+int nand_bbm_get_next_page(struct nand_chip *chip, int page);
 int nand_markbad_bbm(struct nand_chip *chip, loff_t ofs);
 int nand_erase_nand(struct nand_chip *chip, struct erase_info *instr,
 		    int allowbbt);
@@ -94,6 +95,39 @@ int nand_read_param_page_op(struct nand_chip *chip, u8 page, void *buf,
 void nand_decode_ext_id(struct nand_chip *chip);
 void panic_nand_wait(struct nand_chip *chip, unsigned long timeo);
 void sanitize_string(uint8_t *s, size_t len);
+
+static inline bool nand_has_exec_op(struct nand_chip *chip)
+{
+	if (!chip->controller || !chip->controller->ops ||
+	    !chip->controller->ops->exec_op)
+		return false;
+
+	return true;
+}
+
+static inline int nand_exec_op(struct nand_chip *chip,
+			       const struct nand_operation *op)
+{
+	if (!nand_has_exec_op(chip))
+		return -ENOTSUPP;
+
+	if (WARN_ON(op->cs >= nanddev_ntargets(&chip->base)))
+		return -EINVAL;
+
+	return chip->controller->ops->exec_op(chip, op, false);
+}
+
+static inline bool nand_has_setup_data_iface(struct nand_chip *chip)
+{
+	if (!chip->controller || !chip->controller->ops ||
+	    !chip->controller->ops->setup_data_interface)
+		return false;
+
+	if (chip->options & NAND_KEEP_TIMINGS)
+		return false;
+
+	return true;
+}
 
 /* BBT functions */
 int nand_markbad_bbt(struct nand_chip *chip, loff_t offs);

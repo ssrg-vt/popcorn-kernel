@@ -94,6 +94,11 @@ module_param(max_msix_vectors, int, 0);
 MODULE_PARM_DESC(max_msix_vectors,
 	" max msix vectors");
 
+static int irqpoll_weight = -1;
+module_param(irqpoll_weight, int, 0);
+MODULE_PARM_DESC(irqpoll_weight,
+	"irq poll weight (default= one fourth of HBA queue depth)");
+
 static int mpt3sas_fwfault_debug;
 MODULE_PARM_DESC(mpt3sas_fwfault_debug,
 	" enable detection of firmware fault and halt firmware - (default=0)");
@@ -155,6 +160,32 @@ _scsih_set_fwfault_debug(const char *val, const struct kernel_param *kp)
 }
 module_param_call(mpt3sas_fwfault_debug, _scsih_set_fwfault_debug,
 	param_get_int, &mpt3sas_fwfault_debug, 0644);
+
+/**
+ * _base_readl_aero - retry readl for max three times.
+ * @addr - MPT Fusion system interface register address
+ *
+ * Retry the readl() for max three times if it gets zero value
+ * while reading the system interface register.
+ */
+static inline u32
+_base_readl_aero(const volatile void __iomem *addr)
+{
+	u32 i = 0, ret_val;
+
+	do {
+		ret_val = readl(addr);
+		i++;
+	} while (ret_val == 0 && i < 3);
+
+	return ret_val;
+}
+
+static inline u32
+_base_readl(const volatile void __iomem *addr)
+{
+	return readl(addr);
+}
 
 /**
  * _base_clone_reply_to_sys_mem - copies reply to reply free iomem
@@ -716,7 +747,7 @@ mpt3sas_halt_firmware(struct MPT3SAS_ADAPTER *ioc)
 
 	dump_stack();
 
-	doorbell = readl(&ioc->chip->Doorbell);
+	doorbell = ioc->base_readl(&ioc->chip->Doorbell);
 	if ((doorbell & MPI2_IOC_STATE_MASK) == MPI2_IOC_STATE_FAULT)
 		mpt3sas_base_fault_info(ioc , doorbell);
 	else {
@@ -1325,10 +1356,10 @@ _base_mask_interrupts(struct MPT3SAS_ADAPTER *ioc)
 	u32 him_register;
 
 	ioc->mask_interrupts = 1;
-	him_register = readl(&ioc->chip->HostInterruptMask);
+	him_register = ioc->base_readl(&ioc->chip->HostInterruptMask);
 	him_register |= MPI2_HIM_DIM + MPI2_HIM_RIM + MPI2_HIM_RESET_IRQ_MASK;
 	writel(him_register, &ioc->chip->HostInterruptMask);
-	readl(&ioc->chip->HostInterruptMask);
+	ioc->base_readl(&ioc->chip->HostInterruptMask);
 }
 
 /**
@@ -1342,7 +1373,7 @@ _base_unmask_interrupts(struct MPT3SAS_ADAPTER *ioc)
 {
 	u32 him_register;
 
-	him_register = readl(&ioc->chip->HostInterruptMask);
+	him_register = ioc->base_readl(&ioc->chip->HostInterruptMask);
 	him_register &= ~MPI2_HIM_RIM;
 	writel(him_register, &ioc->chip->HostInterruptMask);
 	ioc->mask_interrupts = 0;
@@ -1356,20 +1387,30 @@ union reply_descriptor {
 	} u;
 };
 
-/**
- * _base_interrupt - MPT adapter (IOC) specific interrupt handler.
- * @irq: irq number (not used)
- * @bus_id: bus identifier cookie == pointer to MPT_ADAPTER structure
- *
- * Return: IRQ_HANDLED if processed, else IRQ_NONE.
- */
-static irqreturn_t
-_base_interrupt(int irq, void *bus_id)
+static u32 base_mod64(u64 dividend, u32 divisor)
 {
-	struct adapter_reply_queue *reply_q = bus_id;
+	u32 remainder;
+
+	if (!divisor)
+		pr_err("mpt3sas: DIVISOR is zero, in div fn\n");
+	remainder = do_div(dividend, divisor);
+	return remainder;
+}
+
+/**
+ * _base_process_reply_queue - Process reply descriptors from reply
+ *		descriptor post queue.
+ * @reply_q: per IRQ's reply queue object.
+ *
+ * Return: number of reply descriptors processed from reply
+ *		descriptor queue.
+ */
+static int
+_base_process_reply_queue(struct adapter_reply_queue *reply_q)
+{
 	union reply_descriptor rd;
-	u32 completed_cmds;
-	u8 request_desript_type;
+	u64 completed_cmds;
+	u8 request_descript_type;
 	u16 smid;
 	u8 cb_idx;
 	u32 reply;
@@ -1378,21 +1419,18 @@ _base_interrupt(int irq, void *bus_id)
 	Mpi2ReplyDescriptorsUnion_t *rpf;
 	u8 rc;
 
-	if (ioc->mask_interrupts)
-		return IRQ_NONE;
-
+	completed_cmds = 0;
 	if (!atomic_add_unless(&reply_q->busy, 1, 1))
-		return IRQ_NONE;
+		return completed_cmds;
 
 	rpf = &reply_q->reply_post_free[reply_q->reply_post_host_index];
-	request_desript_type = rpf->Default.ReplyFlags
+	request_descript_type = rpf->Default.ReplyFlags
 	     & MPI2_RPY_DESCRIPT_FLAGS_TYPE_MASK;
-	if (request_desript_type == MPI2_RPY_DESCRIPT_FLAGS_UNUSED) {
+	if (request_descript_type == MPI2_RPY_DESCRIPT_FLAGS_UNUSED) {
 		atomic_dec(&reply_q->busy);
-		return IRQ_NONE;
+		return completed_cmds;
 	}
 
-	completed_cmds = 0;
 	cb_idx = 0xFF;
 	do {
 		rd.word = le64_to_cpu(rpf->Words);
@@ -1400,11 +1438,11 @@ _base_interrupt(int irq, void *bus_id)
 			goto out;
 		reply = 0;
 		smid = le16_to_cpu(rpf->Default.DescriptorTypeDependent1);
-		if (request_desript_type ==
+		if (request_descript_type ==
 		    MPI25_RPY_DESCRIPT_FLAGS_FAST_PATH_SCSI_IO_SUCCESS ||
-		    request_desript_type ==
+		    request_descript_type ==
 		    MPI2_RPY_DESCRIPT_FLAGS_SCSI_IO_SUCCESS ||
-		    request_desript_type ==
+		    request_descript_type ==
 		    MPI26_RPY_DESCRIPT_FLAGS_PCIE_ENCAPSULATED_SUCCESS) {
 			cb_idx = _base_get_cb_idx(ioc, smid);
 			if ((likely(cb_idx < MPT_MAX_CALLBACKS)) &&
@@ -1414,7 +1452,7 @@ _base_interrupt(int irq, void *bus_id)
 				if (rc)
 					mpt3sas_base_free_smid(ioc, smid);
 			}
-		} else if (request_desript_type ==
+		} else if (request_descript_type ==
 		    MPI2_RPY_DESCRIPT_FLAGS_ADDRESS_REPLY) {
 			reply = le32_to_cpu(
 			    rpf->AddressReply.ReplyFrameAddress);
@@ -1460,7 +1498,7 @@ _base_interrupt(int irq, void *bus_id)
 		    (reply_q->reply_post_host_index ==
 		    (ioc->reply_post_queue_depth - 1)) ? 0 :
 		    reply_q->reply_post_host_index + 1;
-		request_desript_type =
+		request_descript_type =
 		    reply_q->reply_post_free[reply_q->reply_post_host_index].
 		    Default.ReplyFlags & MPI2_RPY_DESCRIPT_FLAGS_TYPE_MASK;
 		completed_cmds++;
@@ -1469,7 +1507,7 @@ _base_interrupt(int irq, void *bus_id)
 		 * So that FW can find enough entries to post the Reply
 		 * Descriptors in the reply descriptor post queue.
 		 */
-		if (completed_cmds > ioc->hba_queue_depth/3) {
+		if (!base_mod64(completed_cmds, ioc->thresh_hold)) {
 			if (ioc->combined_reply_queue) {
 				writel(reply_q->reply_post_host_index |
 						((msix_index  & 7) <<
@@ -1481,9 +1519,14 @@ _base_interrupt(int irq, void *bus_id)
 						 MPI2_RPHI_MSIX_INDEX_SHIFT),
 						&ioc->chip->ReplyPostHostIndex);
 			}
-			completed_cmds = 1;
+			if (!reply_q->irq_poll_scheduled) {
+				reply_q->irq_poll_scheduled = true;
+				irq_poll_sched(&reply_q->irqpoll);
+			}
+			atomic_dec(&reply_q->busy);
+			return completed_cmds;
 		}
-		if (request_desript_type == MPI2_RPY_DESCRIPT_FLAGS_UNUSED)
+		if (request_descript_type == MPI2_RPY_DESCRIPT_FLAGS_UNUSED)
 			goto out;
 		if (!reply_q->reply_post_host_index)
 			rpf = reply_q->reply_post_free;
@@ -1495,14 +1538,14 @@ _base_interrupt(int irq, void *bus_id)
 
 	if (!completed_cmds) {
 		atomic_dec(&reply_q->busy);
-		return IRQ_NONE;
+		return completed_cmds;
 	}
 
 	if (ioc->is_warpdrive) {
 		writel(reply_q->reply_post_host_index,
 		ioc->reply_post_host_index[msix_index]);
 		atomic_dec(&reply_q->busy);
-		return IRQ_HANDLED;
+		return completed_cmds;
 	}
 
 	/* Update Reply Post Host Index.
@@ -1529,7 +1572,82 @@ _base_interrupt(int irq, void *bus_id)
 			MPI2_RPHI_MSIX_INDEX_SHIFT),
 			&ioc->chip->ReplyPostHostIndex);
 	atomic_dec(&reply_q->busy);
-	return IRQ_HANDLED;
+	return completed_cmds;
+}
+
+/**
+ * _base_interrupt - MPT adapter (IOC) specific interrupt handler.
+ * @irq: irq number (not used)
+ * @bus_id: bus identifier cookie == pointer to MPT_ADAPTER structure
+ *
+ * Return: IRQ_HANDLED if processed, else IRQ_NONE.
+ */
+static irqreturn_t
+_base_interrupt(int irq, void *bus_id)
+{
+	struct adapter_reply_queue *reply_q = bus_id;
+	struct MPT3SAS_ADAPTER *ioc = reply_q->ioc;
+
+	if (ioc->mask_interrupts)
+		return IRQ_NONE;
+	if (reply_q->irq_poll_scheduled)
+		return IRQ_HANDLED;
+	return ((_base_process_reply_queue(reply_q) > 0) ?
+			IRQ_HANDLED : IRQ_NONE);
+}
+
+/**
+ * _base_irqpoll - IRQ poll callback handler
+ * @irqpoll - irq_poll object
+ * @budget - irq poll weight
+ *
+ * returns number of reply descriptors processed
+ */
+static int
+_base_irqpoll(struct irq_poll *irqpoll, int budget)
+{
+	struct adapter_reply_queue *reply_q;
+	int num_entries = 0;
+
+	reply_q = container_of(irqpoll, struct adapter_reply_queue,
+			irqpoll);
+	if (reply_q->irq_line_enable) {
+		disable_irq(reply_q->os_irq);
+		reply_q->irq_line_enable = false;
+	}
+	num_entries = _base_process_reply_queue(reply_q);
+	if (num_entries < budget) {
+		irq_poll_complete(irqpoll);
+		reply_q->irq_poll_scheduled = false;
+		reply_q->irq_line_enable = true;
+		enable_irq(reply_q->os_irq);
+	}
+
+	return num_entries;
+}
+
+/**
+ * _base_init_irqpolls - initliaze IRQ polls
+ * @ioc: per adapter object
+ *
+ * returns nothing
+ */
+static void
+_base_init_irqpolls(struct MPT3SAS_ADAPTER *ioc)
+{
+	struct adapter_reply_queue *reply_q, *next;
+
+	if (list_empty(&ioc->reply_queue_list))
+		return;
+
+	list_for_each_entry_safe(reply_q, next, &ioc->reply_queue_list, list) {
+		irq_poll_init(&reply_q->irqpoll,
+			ioc->hba_queue_depth/4, _base_irqpoll);
+		reply_q->irq_poll_scheduled = false;
+		reply_q->irq_line_enable = true;
+		reply_q->os_irq = pci_irq_vector(ioc->pdev,
+		    reply_q->msix_index);
+	}
 }
 
 /**
@@ -1570,6 +1688,17 @@ mpt3sas_base_sync_reply_irqs(struct MPT3SAS_ADAPTER *ioc)
 		/* TMs are on msix_index == 0 */
 		if (reply_q->msix_index == 0)
 			continue;
+		if (reply_q->irq_poll_scheduled) {
+			/* Calling irq_poll_disable will wait for any pending
+			 * callbacks to have completed.
+			 */
+			irq_poll_disable(&reply_q->irqpoll);
+			irq_poll_enable(&reply_q->irqpoll);
+			reply_q->irq_poll_scheduled = false;
+			reply_q->irq_line_enable = true;
+			enable_irq(reply_q->os_irq);
+			continue;
+		}
 		synchronize_irq(pci_irq_vector(ioc->pdev, reply_q->msix_index));
 	}
 }
@@ -2731,6 +2860,11 @@ _base_assign_reply_queues(struct MPT3SAS_ADAPTER *ioc)
 
 	if (!_base_is_controller_msix_enabled(ioc))
 		return;
+	ioc->msix_load_balance = false;
+	if (ioc->reply_queue_count < num_online_cpus()) {
+		ioc->msix_load_balance = true;
+		return;
+	}
 
 	memset(ioc->cpu_msix_table, 0, ioc->cpu_msix_table_sz);
 
@@ -2989,6 +3123,8 @@ mpt3sas_base_map_resources(struct MPT3SAS_ADAPTER *ioc)
 	if (r)
 		goto out_fail;
 
+	if (!ioc->is_driver_loading)
+		_base_init_irqpolls(ioc);
 	/* Use the Combined reply queue feature only for SAS3 C0 & higher
 	 * revision HBAs and also only when reply queue count is greater than 8
 	 */
@@ -3132,6 +3268,12 @@ mpt3sas_base_get_reply_virt_addr(struct MPT3SAS_ADAPTER *ioc, u32 phys_addr)
 static inline u8
 _base_get_msix_index(struct MPT3SAS_ADAPTER *ioc)
 {
+	/* Enables reply_queue load balancing */
+	if (ioc->msix_load_balance)
+		return ioc->reply_queue_count ?
+		    base_mod64(atomic64_add_return(1,
+		    &ioc->total_io_cnt), ioc->reply_queue_count) : 0;
+
 	return ioc->cpu_msix_table[raw_smp_processor_id()];
 }
 
@@ -3255,12 +3397,18 @@ mpt3sas_base_free_smid(struct MPT3SAS_ADAPTER *ioc, u16 smid)
 
 	if (smid < ioc->hi_priority_smid) {
 		struct scsiio_tracker *st;
+		void *request;
 
 		st = _get_st_from_smid(ioc, smid);
 		if (!st) {
 			_base_recovery_check(ioc);
 			return;
 		}
+
+		/* Clear MPI request frame */
+		request = mpt3sas_base_get_msg_frame(ioc, smid);
+		memset(request, 0, ioc->request_sz);
+
 		mpt3sas_base_clear_st(ioc, st);
 		_base_recovery_check(ioc);
 		return;
@@ -3301,7 +3449,6 @@ _base_mpi_ep_writeq(__u64 b, volatile void __iomem *addr,
 	spin_lock_irqsave(writeq_lock, flags);
 	__raw_writel((u32)(b), addr);
 	__raw_writel((u32)(b >> 32), (addr + 4));
-	mmiowb();
 	spin_unlock_irqrestore(writeq_lock, flags);
 }
 
@@ -3319,8 +3466,9 @@ _base_mpi_ep_writeq(__u64 b, volatile void __iomem *addr,
 static inline void
 _base_writeq(__u64 b, volatile void __iomem *addr, spinlock_t *writeq_lock)
 {
+	wmb();
 	__raw_writeq(b, addr);
-	mmiowb();
+	barrier();
 }
 #else
 static inline void
@@ -3536,6 +3684,7 @@ _base_display_OEMs_branding(struct MPT3SAS_ADAPTER *ioc)
 					 ioc->pdev->subsystem_device);
 				break;
 			}
+			break;
 		case MPI2_MFGPAGE_DEVID_SAS2308_2:
 			switch (ioc->pdev->subsystem_device) {
 			case MPT2SAS_INTEL_RS25GB008_SSDID:
@@ -3571,6 +3720,7 @@ _base_display_OEMs_branding(struct MPT3SAS_ADAPTER *ioc)
 					 ioc->pdev->subsystem_device);
 				break;
 			}
+			break;
 		case MPI25_MFGPAGE_DEVID_SAS3008:
 			switch (ioc->pdev->subsystem_device) {
 			case MPT3SAS_INTEL_RMS3JC080_SSDID:
@@ -3715,6 +3865,7 @@ _base_display_OEMs_branding(struct MPT3SAS_ADAPTER *ioc)
 					 ioc->pdev->subsystem_device);
 				break;
 			}
+			break;
 		case MPI2_MFGPAGE_DEVID_SAS2308_2:
 			switch (ioc->pdev->subsystem_device) {
 			case MPT2SAS_HP_2_4_INTERNAL_SSDID:
@@ -3738,6 +3889,7 @@ _base_display_OEMs_branding(struct MPT3SAS_ADAPTER *ioc)
 					 ioc->pdev->subsystem_device);
 				break;
 			}
+			break;
 		default:
 			ioc_info(ioc, "HP SAS HBA: Subsystem ID: 0x%X\n",
 				 ioc->pdev->subsystem_device);
@@ -4060,7 +4212,7 @@ _base_static_config_pages(struct MPT3SAS_ADAPTER *ioc)
 	 * flag unset in NVDATA.
 	 */
 	mpt3sas_config_get_manufacturing_pg11(ioc, &mpi_reply, &ioc->manu_pg11);
-	if (ioc->manu_pg11.EEDPTagMode == 0) {
+	if (!ioc->is_gen35_ioc && ioc->manu_pg11.EEDPTagMode == 0) {
 		pr_err("%s: overriding NVDATA EEDPTagMode setting\n",
 		    ioc->name);
 		ioc->manu_pg11.EEDPTagMode &= ~0x3;
@@ -4854,7 +5006,7 @@ mpt3sas_base_get_iocstate(struct MPT3SAS_ADAPTER *ioc, int cooked)
 {
 	u32 s, sc;
 
-	s = readl(&ioc->chip->Doorbell);
+	s = ioc->base_readl(&ioc->chip->Doorbell);
 	sc = s & MPI2_IOC_STATE_MASK;
 	return cooked ? sc : s;
 }
@@ -4910,7 +5062,7 @@ _base_wait_for_doorbell_int(struct MPT3SAS_ADAPTER *ioc, int timeout)
 	count = 0;
 	cntdn = 1000 * timeout;
 	do {
-		int_status = readl(&ioc->chip->HostInterruptStatus);
+		int_status = ioc->base_readl(&ioc->chip->HostInterruptStatus);
 		if (int_status & MPI2_HIS_IOC2SYS_DB_STATUS) {
 			dhsprintk(ioc,
 				  ioc_info(ioc, "%s: successful count(%d), timeout(%d)\n",
@@ -4936,7 +5088,7 @@ _base_spin_on_doorbell_int(struct MPT3SAS_ADAPTER *ioc, int timeout)
 	count = 0;
 	cntdn = 2000 * timeout;
 	do {
-		int_status = readl(&ioc->chip->HostInterruptStatus);
+		int_status = ioc->base_readl(&ioc->chip->HostInterruptStatus);
 		if (int_status & MPI2_HIS_IOC2SYS_DB_STATUS) {
 			dhsprintk(ioc,
 				  ioc_info(ioc, "%s: successful count(%d), timeout(%d)\n",
@@ -4974,14 +5126,14 @@ _base_wait_for_doorbell_ack(struct MPT3SAS_ADAPTER *ioc, int timeout)
 	count = 0;
 	cntdn = 1000 * timeout;
 	do {
-		int_status = readl(&ioc->chip->HostInterruptStatus);
+		int_status = ioc->base_readl(&ioc->chip->HostInterruptStatus);
 		if (!(int_status & MPI2_HIS_SYS2IOC_DB_STATUS)) {
 			dhsprintk(ioc,
 				  ioc_info(ioc, "%s: successful count(%d), timeout(%d)\n",
 					   __func__, count, timeout));
 			return 0;
 		} else if (int_status & MPI2_HIS_IOC2SYS_DB_STATUS) {
-			doorbell = readl(&ioc->chip->Doorbell);
+			doorbell = ioc->base_readl(&ioc->chip->Doorbell);
 			if ((doorbell & MPI2_IOC_STATE_MASK) ==
 			    MPI2_IOC_STATE_FAULT) {
 				mpt3sas_base_fault_info(ioc , doorbell);
@@ -5016,7 +5168,7 @@ _base_wait_for_doorbell_not_used(struct MPT3SAS_ADAPTER *ioc, int timeout)
 	count = 0;
 	cntdn = 1000 * timeout;
 	do {
-		doorbell_reg = readl(&ioc->chip->Doorbell);
+		doorbell_reg = ioc->base_readl(&ioc->chip->Doorbell);
 		if (!(doorbell_reg & MPI2_DOORBELL_USED)) {
 			dhsprintk(ioc,
 				  ioc_info(ioc, "%s: successful count(%d), timeout(%d)\n",
@@ -5078,6 +5230,39 @@ _base_send_ioc_reset(struct MPT3SAS_ADAPTER *ioc, u8 reset_type, int timeout)
 }
 
 /**
+ * mpt3sas_wait_for_ioc - IOC's operational state is checked here.
+ * @ioc: per adapter object
+ * @wait_count: timeout in seconds
+ *
+ * Return: Waits up to timeout seconds for the IOC to
+ * become operational. Returns 0 if IOC is present
+ * and operational; otherwise returns -EFAULT.
+ */
+
+int
+mpt3sas_wait_for_ioc(struct MPT3SAS_ADAPTER *ioc, int timeout)
+{
+	int wait_state_count = 0;
+	u32 ioc_state;
+
+	do {
+		ioc_state = mpt3sas_base_get_iocstate(ioc, 1);
+		if (ioc_state == MPI2_IOC_STATE_OPERATIONAL)
+			break;
+		ssleep(1);
+		ioc_info(ioc, "%s: waiting for operational state(count=%d)\n",
+				__func__, ++wait_state_count);
+	} while (--timeout);
+	if (!timeout) {
+		ioc_err(ioc, "%s: failed due to ioc not operational\n", __func__);
+		return -EFAULT;
+	}
+	if (wait_state_count)
+		ioc_info(ioc, "ioc is operational\n");
+	return 0;
+}
+
+/**
  * _base_handshake_req_reply_wait - send request thru doorbell interface
  * @ioc: per adapter object
  * @request_bytes: request length
@@ -5098,13 +5283,13 @@ _base_handshake_req_reply_wait(struct MPT3SAS_ADAPTER *ioc, int request_bytes,
 	__le32 *mfp;
 
 	/* make sure doorbell is not in use */
-	if ((readl(&ioc->chip->Doorbell) & MPI2_DOORBELL_USED)) {
+	if ((ioc->base_readl(&ioc->chip->Doorbell) & MPI2_DOORBELL_USED)) {
 		ioc_err(ioc, "doorbell is in use (line=%d)\n", __LINE__);
 		return -EFAULT;
 	}
 
 	/* clear pending doorbell interrupts from previous state changes */
-	if (readl(&ioc->chip->HostInterruptStatus) &
+	if (ioc->base_readl(&ioc->chip->HostInterruptStatus) &
 	    MPI2_HIS_IOC2SYS_DB_STATUS)
 		writel(0, &ioc->chip->HostInterruptStatus);
 
@@ -5147,7 +5332,7 @@ _base_handshake_req_reply_wait(struct MPT3SAS_ADAPTER *ioc, int request_bytes,
 	}
 
 	/* read the first two 16-bits, it gives the total length of the reply */
-	reply[0] = le16_to_cpu(readl(&ioc->chip->Doorbell)
+	reply[0] = le16_to_cpu(ioc->base_readl(&ioc->chip->Doorbell)
 	    & MPI2_DOORBELL_DATA_MASK);
 	writel(0, &ioc->chip->HostInterruptStatus);
 	if ((_base_wait_for_doorbell_int(ioc, 5))) {
@@ -5155,7 +5340,7 @@ _base_handshake_req_reply_wait(struct MPT3SAS_ADAPTER *ioc, int request_bytes,
 			__LINE__);
 		return -EFAULT;
 	}
-	reply[1] = le16_to_cpu(readl(&ioc->chip->Doorbell)
+	reply[1] = le16_to_cpu(ioc->base_readl(&ioc->chip->Doorbell)
 	    & MPI2_DOORBELL_DATA_MASK);
 	writel(0, &ioc->chip->HostInterruptStatus);
 
@@ -5166,9 +5351,10 @@ _base_handshake_req_reply_wait(struct MPT3SAS_ADAPTER *ioc, int request_bytes,
 			return -EFAULT;
 		}
 		if (i >=  reply_bytes/2) /* overflow case */
-			readl(&ioc->chip->Doorbell);
+			ioc->base_readl(&ioc->chip->Doorbell);
 		else
-			reply[i] = le16_to_cpu(readl(&ioc->chip->Doorbell)
+			reply[i] = le16_to_cpu(
+			    ioc->base_readl(&ioc->chip->Doorbell)
 			    & MPI2_DOORBELL_DATA_MASK);
 		writel(0, &ioc->chip->HostInterruptStatus);
 	}
@@ -5211,11 +5397,9 @@ mpt3sas_base_sas_iounit_control(struct MPT3SAS_ADAPTER *ioc,
 	Mpi2SasIoUnitControlRequest_t *mpi_request)
 {
 	u16 smid;
-	u32 ioc_state;
 	u8 issue_reset = 0;
 	int rc;
 	void *request;
-	u16 wait_state_count;
 
 	dinitprintk(ioc, ioc_info(ioc, "%s\n", __func__));
 
@@ -5227,20 +5411,9 @@ mpt3sas_base_sas_iounit_control(struct MPT3SAS_ADAPTER *ioc,
 		goto out;
 	}
 
-	wait_state_count = 0;
-	ioc_state = mpt3sas_base_get_iocstate(ioc, 1);
-	while (ioc_state != MPI2_IOC_STATE_OPERATIONAL) {
-		if (wait_state_count++ == 10) {
-			ioc_err(ioc, "%s: failed due to ioc not operational\n",
-				__func__);
-			rc = -EFAULT;
-			goto out;
-		}
-		ssleep(1);
-		ioc_state = mpt3sas_base_get_iocstate(ioc, 1);
-		ioc_info(ioc, "%s: waiting for operational state(count=%d)\n",
-			 __func__, wait_state_count);
-	}
+	rc = mpt3sas_wait_for_ioc(ioc, IOC_OPERATIONAL_WAIT_COUNT);
+	if (rc)
+		goto out;
 
 	smid = mpt3sas_base_get_smid(ioc, ioc->base_cb_idx);
 	if (!smid) {
@@ -5306,11 +5479,9 @@ mpt3sas_base_scsi_enclosure_processor(struct MPT3SAS_ADAPTER *ioc,
 	Mpi2SepReply_t *mpi_reply, Mpi2SepRequest_t *mpi_request)
 {
 	u16 smid;
-	u32 ioc_state;
 	u8 issue_reset = 0;
 	int rc;
 	void *request;
-	u16 wait_state_count;
 
 	dinitprintk(ioc, ioc_info(ioc, "%s\n", __func__));
 
@@ -5322,20 +5493,9 @@ mpt3sas_base_scsi_enclosure_processor(struct MPT3SAS_ADAPTER *ioc,
 		goto out;
 	}
 
-	wait_state_count = 0;
-	ioc_state = mpt3sas_base_get_iocstate(ioc, 1);
-	while (ioc_state != MPI2_IOC_STATE_OPERATIONAL) {
-		if (wait_state_count++ == 10) {
-			ioc_err(ioc, "%s: failed due to ioc not operational\n",
-				__func__);
-			rc = -EFAULT;
-			goto out;
-		}
-		ssleep(1);
-		ioc_state = mpt3sas_base_get_iocstate(ioc, 1);
-		ioc_info(ioc, "%s: waiting for operational state(count=%d)\n",
-			 __func__, wait_state_count);
-	}
+	rc = mpt3sas_wait_for_ioc(ioc, IOC_OPERATIONAL_WAIT_COUNT);
+	if (rc)
+		goto out;
 
 	smid = mpt3sas_base_get_smid(ioc, ioc->base_cb_idx);
 	if (!smid) {
@@ -6020,14 +6180,14 @@ _base_diag_reset(struct MPT3SAS_ADAPTER *ioc)
 		if (count++ > 20)
 			goto out;
 
-		host_diagnostic = readl(&ioc->chip->HostDiagnostic);
+		host_diagnostic = ioc->base_readl(&ioc->chip->HostDiagnostic);
 		drsprintk(ioc,
 			  ioc_info(ioc, "wrote magic sequence: count(%d), host_diagnostic(0x%08x)\n",
 				   count, host_diagnostic));
 
 	} while ((host_diagnostic & MPI2_DIAG_DIAG_WRITE_ENABLE) == 0);
 
-	hcb_size = readl(&ioc->chip->HCBSize);
+	hcb_size = ioc->base_readl(&ioc->chip->HCBSize);
 
 	drsprintk(ioc, ioc_info(ioc, "diag reset: issued\n"));
 	writel(host_diagnostic | MPI2_DIAG_RESET_ADAPTER,
@@ -6040,7 +6200,7 @@ _base_diag_reset(struct MPT3SAS_ADAPTER *ioc)
 	for (count = 0; count < (300000000 /
 		MPI2_HARD_RESET_PCIE_SECOND_READ_DELAY_MICRO_SEC); count++) {
 
-		host_diagnostic = readl(&ioc->chip->HostDiagnostic);
+		host_diagnostic = ioc->base_readl(&ioc->chip->HostDiagnostic);
 
 		if (host_diagnostic == 0xFFFFFFFF)
 			goto out;
@@ -6391,6 +6551,10 @@ mpt3sas_base_attach(struct MPT3SAS_ADAPTER *ioc)
 
 	ioc->rdpq_array_enable_assigned = 0;
 	ioc->dma_mask = 0;
+	if (ioc->is_aero_ioc)
+		ioc->base_readl = &_base_readl_aero;
+	else
+		ioc->base_readl = &_base_readl;
 	r = mpt3sas_base_map_resources(ioc);
 	if (r)
 		goto out_free_resources;
@@ -6458,6 +6622,12 @@ mpt3sas_base_attach(struct MPT3SAS_ADAPTER *ioc)
 	if (r)
 		goto out_free_resources;
 
+	if (irqpoll_weight > 0)
+		ioc->thresh_hold = irqpoll_weight;
+	else
+		ioc->thresh_hold = ioc->hba_queue_depth/4;
+
+	_base_init_irqpolls(ioc);
 	init_waitqueue_head(&ioc->reset_wq);
 
 	/* allocate memory pd handle bitmask list */

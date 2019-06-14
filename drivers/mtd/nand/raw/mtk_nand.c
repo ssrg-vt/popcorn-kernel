@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MTK NAND Flash controller driver.
  * Copyright (C) 2016 MediaTek Inc.
  * Authors:	Xiaolei Li		<xiaolei.li@mediatek.com>
  *		Jorge Ramirez-Ortiz	<jorge.ramirez-ortiz@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/platform_device.h>
@@ -1197,8 +1189,8 @@ static int mtk_nfc_ecc_init(struct device *dev, struct mtd_info *mtd)
 	/* if optional dt settings not present */
 	if (!nand->ecc.size || !nand->ecc.strength) {
 		/* use datasheet requirements */
-		nand->ecc.strength = nand->ecc_strength_ds;
-		nand->ecc.size = nand->ecc_step_ds;
+		nand->ecc.strength = nand->base.eccreq.strength;
+		nand->ecc.size = nand->base.eccreq.step_size;
 
 		/*
 		 * align eccstrength and eccsize
@@ -1288,6 +1280,7 @@ static int mtk_nfc_attach_chip(struct nand_chip *chip)
 
 static const struct nand_controller_ops mtk_nfc_controller_ops = {
 	.attach_chip = mtk_nfc_attach_chip,
+	.setup_data_interface = mtk_nfc_setup_data_interface,
 };
 
 static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
@@ -1333,13 +1326,12 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 
 	nand->options |= NAND_USE_BOUNCE_BUFFER | NAND_SUBPAGE_READ;
 	nand->legacy.dev_ready = mtk_nfc_dev_ready;
-	nand->select_chip = mtk_nfc_select_chip;
+	nand->legacy.select_chip = mtk_nfc_select_chip;
 	nand->legacy.write_byte = mtk_nfc_write_byte;
 	nand->legacy.write_buf = mtk_nfc_write_buf;
 	nand->legacy.read_byte = mtk_nfc_read_byte;
 	nand->legacy.read_buf = mtk_nfc_read_buf;
 	nand->legacy.cmd_ctrl = mtk_nfc_cmd_ctrl;
-	nand->setup_data_interface = mtk_nfc_setup_data_interface;
 
 	/* set default mode in case dt entry is missing */
 	nand->ecc.mode = NAND_ECC_HW;
@@ -1451,8 +1443,7 @@ static int mtk_nfc_probe(struct platform_device *pdev)
 	if (!nfc)
 		return -ENOMEM;
 
-	spin_lock_init(&nfc->controller.lock);
-	init_waitqueue_head(&nfc->controller.wq);
+	nand_controller_init(&nfc->controller);
 	INIT_LIST_HEAD(&nfc->chips);
 	nfc->controller.ops = &mtk_nfc_controller_ops;
 

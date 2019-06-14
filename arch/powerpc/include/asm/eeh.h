@@ -1,20 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2001  Dave Engebretsen & Todd Inglett IBM Corporation.
  * Copyright 2001-2012 IBM Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #ifndef _POWERPC_EEH_H
@@ -219,7 +206,8 @@ struct eeh_ops {
 };
 
 extern int eeh_subsystem_flags;
-extern int eeh_max_freezes;
+extern u32 eeh_max_freezes;
+extern bool eeh_debugfs_no_recover;
 extern struct eeh_ops *eeh_ops;
 extern raw_spinlock_t confirm_error_lock;
 
@@ -293,14 +281,14 @@ void eeh_add_device_late(struct pci_dev *);
 void eeh_add_device_tree_late(struct pci_bus *);
 void eeh_add_sysfs_files(struct pci_bus *);
 void eeh_remove_device(struct pci_dev *);
-int eeh_unfreeze_pe(struct eeh_pe *pe, bool sw_state);
+int eeh_unfreeze_pe(struct eeh_pe *pe);
 int eeh_pe_reset_and_recover(struct eeh_pe *pe);
 int eeh_dev_open(struct pci_dev *pdev);
 void eeh_dev_release(struct pci_dev *pdev);
 struct eeh_pe *eeh_iommu_group_to_pe(struct iommu_group *group);
 int eeh_pe_set_option(struct eeh_pe *pe, int option);
 int eeh_pe_get_state(struct eeh_pe *pe);
-int eeh_pe_reset(struct eeh_pe *pe, int option);
+int eeh_pe_reset(struct eeh_pe *pe, int option, bool include_passed);
 int eeh_pe_configure(struct eeh_pe *pe);
 int eeh_pe_inject_err(struct eeh_pe *pe, int type, int func,
 		      unsigned long addr, unsigned long mask);
@@ -459,6 +447,9 @@ static inline void eeh_readsl(const volatile void __iomem *addr, void * buf,
 	if (EEH_POSSIBLE_ERROR((*(((u32*)buf)+nl-1)), u32))
 		eeh_check_failure(addr);
 }
+
+
+void eeh_cache_debugfs_init(void);
 
 #endif /* CONFIG_PPC64 */
 #endif /* __KERNEL__ */

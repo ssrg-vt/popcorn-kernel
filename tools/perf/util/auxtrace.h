@@ -1,16 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * auxtrace.h: AUX area trace support
  * Copyright (c) 2013-2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #ifndef __PERF_AUXTRACE_H
@@ -39,6 +30,9 @@ struct option;
 struct record_opts;
 struct auxtrace_info_event;
 struct events_stats;
+
+/* Auxtrace records must have the same alignment as perf event records */
+#define PERF_AUXTRACE_RECORD_ALIGNMENT 8
 
 enum auxtrace_type {
 	PERF_AUXTRACE_UNKNOWN,
@@ -516,7 +510,7 @@ void auxtrace_index__free(struct list_head *head);
 
 void auxtrace_synth_error(struct auxtrace_error_event *auxtrace_error, int type,
 			  int code, int cpu, pid_t pid, pid_t tid, u64 ip,
-			  const char *msg);
+			  const char *msg, u64 timestamp);
 
 int perf_event__synthesize_auxtrace_info(struct auxtrace_record *itr,
 					 struct perf_tool *tool,

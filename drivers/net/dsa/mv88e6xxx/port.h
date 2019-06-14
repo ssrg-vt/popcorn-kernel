@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Marvell 88E6xxx Switch Port Registers support
  *
@@ -5,11 +6,6 @@
  *
  * Copyright (c) 2016-2017 Savoir-faire Linux Inc.
  *	Vivien Didelot <vivien.didelot@savoirfairelinux.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef _MV88E6XXX_PORT_H
@@ -251,6 +247,16 @@
 /* Offset 0x19: Port IEEE Priority Remapping Registers (4-7) */
 #define MV88E6095_PORT_IEEE_PRIO_REMAP_4567	0x19
 
+/* Offset 0x1a: Magic undocumented errata register */
+#define PORT_RESERVED_1A			0x1a
+#define PORT_RESERVED_1A_BUSY			BIT(15)
+#define PORT_RESERVED_1A_WRITE			BIT(14)
+#define PORT_RESERVED_1A_READ			0
+#define PORT_RESERVED_1A_PORT_SHIFT		5
+#define PORT_RESERVED_1A_BLOCK			(0xf << 10)
+#define PORT_RESERVED_1A_CTRL_PORT		4
+#define PORT_RESERVED_1A_DATA_PORT		5
+
 int mv88e6xxx_port_read(struct mv88e6xxx_chip *chip, int port, int reg,
 			u16 *val);
 int mv88e6xxx_port_write(struct mv88e6xxx_chip *chip, int port, int reg,
@@ -273,6 +279,10 @@ int mv88e6341_port_set_speed(struct mv88e6xxx_chip *chip, int port, int speed);
 int mv88e6352_port_set_speed(struct mv88e6xxx_chip *chip, int port, int speed);
 int mv88e6390_port_set_speed(struct mv88e6xxx_chip *chip, int port, int speed);
 int mv88e6390x_port_set_speed(struct mv88e6xxx_chip *chip, int port, int speed);
+
+phy_interface_t mv88e6341_port_max_speed_mode(int port);
+phy_interface_t mv88e6390_port_max_speed_mode(int port);
+phy_interface_t mv88e6390x_port_max_speed_mode(int port);
 
 int mv88e6xxx_port_set_state(struct mv88e6xxx_chip *chip, int port, u8 state);
 
@@ -310,6 +320,8 @@ int mv88e6097_port_pause_limit(struct mv88e6xxx_chip *chip, int port, u8 in,
 			       u8 out);
 int mv88e6390_port_pause_limit(struct mv88e6xxx_chip *chip, int port, u8 in,
 			       u8 out);
+int mv88e6390_port_set_cmode(struct mv88e6xxx_chip *chip, int port,
+			     phy_interface_t mode);
 int mv88e6390x_port_set_cmode(struct mv88e6xxx_chip *chip, int port,
 			      phy_interface_t mode);
 int mv88e6185_port_get_cmode(struct mv88e6xxx_chip *chip, int port, u8 *cmode);

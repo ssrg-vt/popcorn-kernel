@@ -15,6 +15,7 @@ nfp-objs := \
 	    nfpcore/nfp_resource.o \
 	    nfpcore/nfp_rtsym.o \
 	    nfpcore/nfp_target.o \
+	    ccm.o \
 	    nfp_asm.o \
 	    nfp_app.o \
 	    nfp_app_nic.o \
@@ -42,7 +43,8 @@ nfp-objs += \
 	    flower/match.o \
 	    flower/metadata.o \
 	    flower/offload.o \
-	    flower/tunnel_conf.o
+	    flower/tunnel_conf.o \
+	    flower/qos_conf.o
 endif
 
 ifeq ($(CONFIG_BPF_SYSCALL),y)
@@ -56,7 +58,9 @@ endif
 
 ifeq ($(CONFIG_NFP_APP_ABM_NIC),y)
 nfp-objs += \
+	    abm/cls.o \
 	    abm/ctrl.o \
+	    abm/qdisc.o \
 	    abm/main.o
 endif
 

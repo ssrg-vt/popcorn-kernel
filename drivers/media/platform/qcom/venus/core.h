@@ -1,16 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  * Copyright (C) 2017 Linaro Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #ifndef __VENUS_CORE_H_
@@ -98,6 +89,7 @@ struct venus_caps {
  * @dev:		convenience struct device pointer
  * @dev_dec:	convenience struct device pointer for decoder device
  * @dev_enc:	convenience struct device pointer for encoder device
+ * @use_tz:	a flag that suggests presence of trustzone
  * @lock:	a lock for this strucure
  * @instances:	a list_head of all instances
  * @insts_count:	num of instances
@@ -129,6 +121,12 @@ struct venus_core {
 	struct device *dev;
 	struct device *dev_dec;
 	struct device *dev_enc;
+	unsigned int use_tz;
+	struct video_firmware {
+		struct device *dev;
+		struct iommu_domain *iommu_domain;
+		size_t mapped_mem_size;
+	} fw;
 	struct mutex lock;
 	struct list_head instances;
 	atomic_t insts_count;
@@ -212,7 +210,7 @@ struct venus_buffer {
 #define to_venus_buffer(ptr)	container_of(ptr, struct venus_buffer, vb)
 
 /**
- * struct venus_inst - holds per instance paramerters
+ * struct venus_inst - holds per instance parameters
  *
  * @list:	used for attach an instance to the core
  * @lock:	instance lock

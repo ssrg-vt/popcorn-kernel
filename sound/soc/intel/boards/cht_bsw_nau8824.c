@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  cht-bsw-nau8824.c - ASoc Machine driver for Intel Cherryview-based
  *          platforms Cherrytrail and Braswell, with nau8824 codec.
@@ -8,15 +9,6 @@
  *  Author: Wang, Joseph C <joequant@gmail.com>
  *  Co-author: John Hsu <KCHSU0@nuvoton.com>
  *  This file is based on cht_bsw_rt5672.c and cht-bsw-max98090.c
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -25,6 +17,7 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include <sound/soc-acpi.h>
 #include <sound/jack.h>
 #include <linux/input.h>
 #include "../atom/sst-atom-controls.h"
@@ -246,6 +239,8 @@ static struct snd_soc_card snd_soc_card_cht = {
 static int snd_cht_mc_probe(struct platform_device *pdev)
 {
 	struct cht_mc_private *drv;
+	struct snd_soc_acpi_mach *mach;
+	const char *platform_name;
 	int ret_val;
 
 	drv = devm_kzalloc(&pdev->dev, sizeof(*drv), GFP_KERNEL);
@@ -253,8 +248,17 @@ static int snd_cht_mc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	snd_soc_card_set_drvdata(&snd_soc_card_cht, drv);
 
-	/* register the soc card */
+	/* override plaform name, if required */
 	snd_soc_card_cht.dev = &pdev->dev;
+	mach = (&pdev->dev)->platform_data;
+	platform_name = mach->mach_params.platform;
+
+	ret_val = snd_soc_fixup_dai_links_platform_name(&snd_soc_card_cht,
+							platform_name);
+	if (ret_val)
+		return ret_val;
+
+	/* register the soc card */
 	ret_val = devm_snd_soc_register_card(&pdev->dev, &snd_soc_card_cht);
 	if (ret_val) {
 		dev_err(&pdev->dev,

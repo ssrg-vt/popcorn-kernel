@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
  * Copyright (C) 2004-2006 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License version 2.
  */
 
 #include <linux/slab.h>
@@ -1199,13 +1196,13 @@ static int do_flock(struct file *file, int cmd, struct file_lock *fl)
 	mutex_lock(&fp->f_fl_mutex);
 
 	if (gfs2_holder_initialized(fl_gh)) {
+		struct file_lock request;
 		if (fl_gh->gh_state == state)
 			goto out;
-		locks_lock_file_wait(file,
-				     &(struct file_lock) {
-					     .fl_type = F_UNLCK,
-					     .fl_flags = FL_FLOCK
-				     });
+		locks_init_lock(&request);
+		request.fl_type = F_UNLCK;
+		request.fl_flags = FL_FLOCK;
+		locks_lock_file_wait(file, &request);
 		gfs2_glock_dq(fl_gh);
 		gfs2_holder_reinit(state, flags, fl_gh);
 	} else {
@@ -1280,6 +1277,7 @@ const struct file_operations gfs2_file_fops = {
 	.llseek		= gfs2_llseek,
 	.read_iter	= gfs2_file_read_iter,
 	.write_iter	= gfs2_file_write_iter,
+	.iopoll		= iomap_dio_iopoll,
 	.unlocked_ioctl	= gfs2_ioctl,
 	.mmap		= gfs2_mmap,
 	.open		= gfs2_open,
@@ -1310,6 +1308,7 @@ const struct file_operations gfs2_file_fops_nolock = {
 	.llseek		= gfs2_llseek,
 	.read_iter	= gfs2_file_read_iter,
 	.write_iter	= gfs2_file_write_iter,
+	.iopoll		= iomap_dio_iopoll,
 	.unlocked_ioctl	= gfs2_ioctl,
 	.mmap		= gfs2_mmap,
 	.open		= gfs2_open,

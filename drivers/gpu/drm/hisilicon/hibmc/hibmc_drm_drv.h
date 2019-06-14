@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Hisilicon Hibmc SoC drm driver
  *
  * Based on the bochs drm driver.
@@ -8,12 +9,6 @@
  *	Rongrong Zou <zourongrong@huawei.com>
  *	Rongrong Zou <zourongrong@gmail.com>
  *	Jianhua Li <lijianhua@huawei.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #ifndef HIBMC_DRM_DRV_H
@@ -31,7 +26,7 @@ struct hibmc_framebuffer {
 };
 
 struct hibmc_fbdev {
-	struct drm_fb_helper helper;
+	struct drm_fb_helper helper; /* must be first */
 	struct hibmc_framebuffer *fb;
 	int size;
 };
@@ -49,8 +44,6 @@ struct hibmc_drm_private {
 	bool mode_config_initialized;
 
 	/* ttm */
-	struct drm_global_reference mem_global_ref;
-	struct ttm_bo_global_ref bo_global_ref;
 	struct ttm_bo_device bdev;
 	bool initialized;
 

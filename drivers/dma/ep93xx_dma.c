@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for the Cirrus Logic EP93xx DMA Controller
  *
@@ -11,11 +12,6 @@
  *   Copyright (C) 2009 Ryan Mallon <rmallon@gmail.com>
  *
  * This driver is based on dw_dmac and amba-pl08x drivers.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/clk.h>
@@ -997,7 +993,7 @@ ep93xx_dma_prep_dma_memcpy(struct dma_chan *chan, dma_addr_t dest,
 	for (offset = 0; offset < len; offset += bytes) {
 		desc = ep93xx_dma_desc_get(edmac);
 		if (!desc) {
-			dev_warn(chan2dev(edmac), "couln't get descriptor\n");
+			dev_warn(chan2dev(edmac), "couldn't get descriptor\n");
 			goto fail;
 		}
 
@@ -1069,7 +1065,7 @@ ep93xx_dma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 
 		desc = ep93xx_dma_desc_get(edmac);
 		if (!desc) {
-			dev_warn(chan2dev(edmac), "couln't get descriptor\n");
+			dev_warn(chan2dev(edmac), "couldn't get descriptor\n");
 			goto fail;
 		}
 
@@ -1149,7 +1145,7 @@ ep93xx_dma_prep_dma_cyclic(struct dma_chan *chan, dma_addr_t dma_addr,
 	for (offset = 0; offset < buf_len; offset += period_len) {
 		desc = ep93xx_dma_desc_get(edmac);
 		if (!desc) {
-			dev_warn(chan2dev(edmac), "couln't get descriptor\n");
+			dev_warn(chan2dev(edmac), "couldn't get descriptor\n");
 			goto fail;
 		}
 

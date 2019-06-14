@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  * Copyright (C) 2017 Linaro Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 #include <linux/clk.h>
 #include <linux/module.h>
@@ -885,10 +876,8 @@ static void vdec_buf_done(struct venus_inst *inst, unsigned int buf_type,
 	vbuf->field = V4L2_FIELD_NONE;
 
 	if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
-		unsigned int opb_sz = venus_helper_get_opb_size(inst);
-
 		vb = &vbuf->vb2_buf;
-		vb2_set_plane_payload(vb, 0, bytesused ? : opb_sz);
+		vb2_set_plane_payload(vb, 0, bytesused);
 		vb->planes[0].data_offset = data_offset;
 		vb->timestamp = timestamp_us * NSEC_PER_USEC;
 		vbuf->sequence = inst->sequence_cap++;

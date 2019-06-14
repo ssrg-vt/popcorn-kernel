@@ -102,9 +102,6 @@ static inline void set_io_port_base(unsigned long base)
 #define iobarrier_w() wmb()
 #define iobarrier_sync() iob()
 
-/* Some callers use this older API instead.  */
-#define mmiowb() iobarrier_w()
-
 /*
  *     virt_to_phys    -       map virtual addresses to physical
  *     @address: address to remap
@@ -215,6 +212,18 @@ static inline void __iomem * __ioremap_mode(phys_addr_t offset, unsigned long si
 	return __ioremap(offset, size, flags);
 
 #undef __IS_LOW512
+}
+
+/*
+ * ioremap_prot     -   map bus memory into CPU space
+ * @offset:    bus address of the memory
+ * @size:      size of the resource to map
+
+ * ioremap_prot gives the caller control over cache coherency attributes (CCA)
+ */
+static inline void __iomem *ioremap_prot(phys_addr_t offset,
+		unsigned long size, unsigned long prot_val) {
+	return __ioremap_mode(offset, size, prot_val & _CACHE_MASK);
 }
 
 /*
@@ -342,13 +351,14 @@ static inline void pfx##write##bwlq(type val,				\
 		if (irq)						\
 			local_irq_save(__flags);			\
 		__asm__ __volatile__(					\
-			".set	arch=r4000"	"\t\t# __writeq""\n\t"	\
+			".set	push"		"\t\t# __writeq""\n\t"	\
+			".set	arch=r4000"			"\n\t"	\
 			"dsll32 %L0, %L0, 0"			"\n\t"	\
 			"dsrl32 %L0, %L0, 0"			"\n\t"	\
 			"dsll32 %M0, %M0, 0"			"\n\t"	\
 			"or	%L0, %L0, %M0"			"\n\t"	\
 			"sd	%L0, %2"			"\n\t"	\
-			".set	mips0"				"\n"	\
+			".set	pop"				"\n"	\
 			: "=r" (__tmp)					\
 			: "0" (__val), "m" (*__mem));			\
 		if (irq)						\
@@ -375,11 +385,12 @@ static inline type pfx##read##bwlq(const volatile void __iomem *mem)	\
 		if (irq)						\
 			local_irq_save(__flags);			\
 		__asm__ __volatile__(					\
-			".set	arch=r4000"	"\t\t# __readq" "\n\t"	\
+			".set	push"		"\t\t# __readq" "\n\t"	\
+			".set	arch=r4000"			"\n\t"	\
 			"ld	%L0, %1"			"\n\t"	\
 			"dsra32 %M0, %L0, 0"			"\n\t"	\
 			"sll	%L0, %L0, 0"			"\n\t"	\
-			".set	mips0"				"\n"	\
+			".set	pop"				"\n"	\
 			: "=r" (__val)					\
 			: "m" (*__mem));				\
 		if (irq)						\

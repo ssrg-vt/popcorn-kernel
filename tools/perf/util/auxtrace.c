@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * auxtrace.c: AUX area trace support
  * Copyright (c) 2013-2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #include <inttypes.h>
@@ -27,6 +18,7 @@
 #include <linux/bitops.h>
 #include <linux/log2.h>
 #include <linux/string.h>
+#include <linux/time64.h>
 
 #include <sys/param.h>
 #include <stdlib.h>
@@ -41,6 +33,7 @@
 #include "pmu.h"
 #include "evsel.h"
 #include "cpumap.h"
+#include "symbol.h"
 #include "thread_map.h"
 #include "asm/bug.h"
 #include "auxtrace.h"
@@ -857,7 +850,7 @@ void auxtrace_buffer__free(struct auxtrace_buffer *buffer)
 
 void auxtrace_synth_error(struct auxtrace_error_event *auxtrace_error, int type,
 			  int code, int cpu, pid_t pid, pid_t tid, u64 ip,
-			  const char *msg)
+			  const char *msg, u64 timestamp)
 {
 	size_t size;
 
@@ -869,7 +862,9 @@ void auxtrace_synth_error(struct auxtrace_error_event *auxtrace_error, int type,
 	auxtrace_error->cpu = cpu;
 	auxtrace_error->pid = pid;
 	auxtrace_error->tid = tid;
+	auxtrace_error->fmt = 1;
 	auxtrace_error->ip = ip;
+	auxtrace_error->time = timestamp;
 	strlcpy(auxtrace_error->msg, msg, MAX_AUXTRACE_ERROR_MSG);
 
 	size = (void *)auxtrace_error->msg - (void *)auxtrace_error +
@@ -1159,12 +1154,27 @@ static const char *auxtrace_error_name(int type)
 size_t perf_event__fprintf_auxtrace_error(union perf_event *event, FILE *fp)
 {
 	struct auxtrace_error_event *e = &event->auxtrace_error;
+	unsigned long long nsecs = e->time;
+	const char *msg = e->msg;
 	int ret;
 
 	ret = fprintf(fp, " %s error type %u",
 		      auxtrace_error_name(e->type), e->type);
+
+	if (e->fmt && nsecs) {
+		unsigned long secs = nsecs / NSEC_PER_SEC;
+
+		nsecs -= secs * NSEC_PER_SEC;
+		ret += fprintf(fp, " time %lu.%09llu", secs, nsecs);
+	} else {
+		ret += fprintf(fp, " time 0");
+	}
+
+	if (!e->fmt)
+		msg = (const char *)&e->time;
+
 	ret += fprintf(fp, " cpu %d pid %d tid %d ip %#"PRIx64" code %u: %s\n",
-		       e->cpu, e->pid, e->tid, e->ip, e->code, e->msg);
+		       e->cpu, e->pid, e->tid, e->ip, e->code, msg);
 	return ret;
 }
 
@@ -1278,9 +1288,9 @@ static int __auxtrace_mmap__read(struct perf_mmap *map,
 	}
 
 	/* padding must be written by fn() e.g. record__process_auxtrace() */
-	padding = size & 7;
+	padding = size & (PERF_AUXTRACE_RECORD_ALIGNMENT - 1);
 	if (padding)
-		padding = 8 - padding;
+		padding = PERF_AUXTRACE_RECORD_ALIGNMENT - padding;
 
 	memset(&ev, 0, sizeof(ev));
 	ev.auxtrace.header.type = PERF_RECORD_AUXTRACE;
@@ -1899,7 +1909,8 @@ static struct dso *load_dso(const char *name)
 	if (!map)
 		return NULL;
 
-	map__load(map);
+	if (map__load(map) < 0)
+		pr_err("File '%s' not found or has no symbols.\n", name);
 
 	dso = dso__get(map->dso);
 
@@ -1983,17 +1994,14 @@ static int find_dso_sym(struct dso *dso, const char *sym_name, u64 *start,
 
 static int addr_filter__entire_dso(struct addr_filter *filt, struct dso *dso)
 {
-	struct symbol *first_sym = dso__first_symbol(dso);
-	struct symbol *last_sym = dso__last_symbol(dso);
-
-	if (!first_sym || !last_sym) {
-		pr_err("Failed to determine filter for %s\nNo symbols found.\n",
+	if (dso__data_file_size(dso, NULL)) {
+		pr_err("Failed to determine filter for %s\nCannot determine file size.\n",
 		       filt->filename);
 		return -EINVAL;
 	}
 
-	filt->addr = first_sym->start;
-	filt->size = last_sym->end - first_sym->start;
+	filt->addr = 0;
+	filt->size = dso->data.file_size;
 
 	return 0;
 }

@@ -346,7 +346,7 @@ static inline void gov_clear_update_util(struct cpufreq_policy *policy)
 	for_each_cpu(i, policy->cpus)
 		cpufreq_remove_update_util_hook(i);
 
-	synchronize_sched();
+	synchronize_rcu();
 }
 
 static struct policy_dbs_info *alloc_policy_dbs_info(struct cpufreq_policy *policy,
@@ -458,6 +458,8 @@ int cpufreq_dbs_governor_init(struct cpufreq_policy *policy)
 
 	/* Failure, so roll back. */
 	pr_err("initialization failed (dbs_data kobject init error %d)\n", ret);
+
+	kobject_put(&dbs_data->attr_set.kobj);
 
 	policy->governor_data = NULL;
 

@@ -161,15 +161,9 @@ static struct inode *udf_alloc_inode(struct super_block *sb)
 	return &ei->vfs_inode;
 }
 
-static void udf_i_callback(struct rcu_head *head)
+static void udf_free_in_core_inode(struct inode *inode)
 {
-	struct inode *inode = container_of(head, struct inode, i_rcu);
 	kmem_cache_free(udf_inode_cachep, UDF_I(inode));
-}
-
-static void udf_destroy_inode(struct inode *inode)
-{
-	call_rcu(&inode->i_rcu, udf_i_callback);
 }
 
 static void init_once(void *foo)
@@ -206,7 +200,7 @@ static void destroy_inodecache(void)
 /* Superblock operations */
 static const struct super_operations udf_sb_ops = {
 	.alloc_inode	= udf_alloc_inode,
-	.destroy_inode	= udf_destroy_inode,
+	.free_inode	= udf_free_in_core_inode,
 	.write_inode	= udf_write_inode,
 	.evict_inode	= udf_evict_inode,
 	.put_super	= udf_put_super,
@@ -572,6 +566,11 @@ static int udf_parse_options(char *options, struct udf_options *uopt,
 			if (!remount) {
 				if (uopt->nls_map)
 					unload_nls(uopt->nls_map);
+				/*
+				 * load_nls() failure is handled later in
+				 * udf_fill_super() after all options are
+				 * parsed.
+				 */
 				uopt->nls_map = load_nls(args[0].from);
 				uopt->flags |= (1 << UDF_FLAG_NLS_MAP);
 			}
@@ -1474,6 +1473,17 @@ static int udf_load_logicalvol(struct super_block *sb, sector_t block,
 	if (lvd->integritySeqExt.extLength)
 		udf_load_logicalvolint(sb, leea_to_cpu(lvd->integritySeqExt));
 	ret = 0;
+
+	if (!sbi->s_lvid_bh) {
+		/* We can't generate unique IDs without a valid LVID */
+		if (sb_rdonly(sb)) {
+			UDF_SET_FLAG(sb, UDF_FLAG_RW_INCOMPAT);
+		} else {
+			udf_warn(sb, "Damaged or missing LVID, forcing "
+				     "readonly mount\n");
+			ret = -EACCES;
+		}
+	}
 out_bh:
 	brelse(bh);
 	return ret;
@@ -1943,13 +1953,24 @@ static int udf_load_vrs(struct super_block *sb, struct udf_options *uopt,
 	return 0;
 }
 
+static void udf_finalize_lvid(struct logicalVolIntegrityDesc *lvid)
+{
+	struct timespec64 ts;
+
+	ktime_get_real_ts64(&ts);
+	udf_time_to_disk_stamp(&lvid->recordingDateAndTime, ts);
+	lvid->descTag.descCRC = cpu_to_le16(
+		crc_itu_t(0, (char *)lvid + sizeof(struct tag),
+			le16_to_cpu(lvid->descTag.descCRCLength)));
+	lvid->descTag.tagChecksum = udf_tag_checksum(&lvid->descTag);
+}
+
 static void udf_open_lvid(struct super_block *sb)
 {
 	struct udf_sb_info *sbi = UDF_SB(sb);
 	struct buffer_head *bh = sbi->s_lvid_bh;
 	struct logicalVolIntegrityDesc *lvid;
 	struct logicalVolIntegrityDescImpUse *lvidiu;
-	struct timespec64 ts;
 
 	if (!bh)
 		return;
@@ -1961,18 +1982,12 @@ static void udf_open_lvid(struct super_block *sb)
 	mutex_lock(&sbi->s_alloc_mutex);
 	lvidiu->impIdent.identSuffix[0] = UDF_OS_CLASS_UNIX;
 	lvidiu->impIdent.identSuffix[1] = UDF_OS_ID_LINUX;
-	ktime_get_real_ts64(&ts);
-	udf_time_to_disk_stamp(&lvid->recordingDateAndTime, ts);
 	if (le32_to_cpu(lvid->integrityType) == LVID_INTEGRITY_TYPE_CLOSE)
 		lvid->integrityType = cpu_to_le32(LVID_INTEGRITY_TYPE_OPEN);
 	else
 		UDF_SET_FLAG(sb, UDF_FLAG_INCONSISTENT);
 
-	lvid->descTag.descCRC = cpu_to_le16(
-		crc_itu_t(0, (char *)lvid + sizeof(struct tag),
-			le16_to_cpu(lvid->descTag.descCRCLength)));
-
-	lvid->descTag.tagChecksum = udf_tag_checksum(&lvid->descTag);
+	udf_finalize_lvid(lvid);
 	mark_buffer_dirty(bh);
 	sbi->s_lvid_dirty = 0;
 	mutex_unlock(&sbi->s_alloc_mutex);
@@ -1986,7 +2001,6 @@ static void udf_close_lvid(struct super_block *sb)
 	struct buffer_head *bh = sbi->s_lvid_bh;
 	struct logicalVolIntegrityDesc *lvid;
 	struct logicalVolIntegrityDescImpUse *lvidiu;
-	struct timespec64 ts;
 
 	if (!bh)
 		return;
@@ -1998,8 +2012,6 @@ static void udf_close_lvid(struct super_block *sb)
 	mutex_lock(&sbi->s_alloc_mutex);
 	lvidiu->impIdent.identSuffix[0] = UDF_OS_CLASS_UNIX;
 	lvidiu->impIdent.identSuffix[1] = UDF_OS_ID_LINUX;
-	ktime_get_real_ts64(&ts);
-	udf_time_to_disk_stamp(&lvid->recordingDateAndTime, ts);
 	if (UDF_MAX_WRITE_VERSION > le16_to_cpu(lvidiu->maxUDFWriteRev))
 		lvidiu->maxUDFWriteRev = cpu_to_le16(UDF_MAX_WRITE_VERSION);
 	if (sbi->s_udfrev > le16_to_cpu(lvidiu->minUDFReadRev))
@@ -2009,17 +2021,13 @@ static void udf_close_lvid(struct super_block *sb)
 	if (!UDF_QUERY_FLAG(sb, UDF_FLAG_INCONSISTENT))
 		lvid->integrityType = cpu_to_le32(LVID_INTEGRITY_TYPE_CLOSE);
 
-	lvid->descTag.descCRC = cpu_to_le16(
-			crc_itu_t(0, (char *)lvid + sizeof(struct tag),
-				le16_to_cpu(lvid->descTag.descCRCLength)));
-
-	lvid->descTag.tagChecksum = udf_tag_checksum(&lvid->descTag);
 	/*
 	 * We set buffer uptodate unconditionally here to avoid spurious
 	 * warnings from mark_buffer_dirty() when previous EIO has marked
 	 * the buffer as !uptodate
 	 */
 	set_buffer_uptodate(bh);
+	udf_finalize_lvid(lvid);
 	mark_buffer_dirty(bh);
 	sbi->s_lvid_dirty = 0;
 	mutex_unlock(&sbi->s_alloc_mutex);
@@ -2048,8 +2056,8 @@ u64 lvid_get_unique_id(struct super_block *sb)
 	if (!(++uniqueID & 0xFFFFFFFF))
 		uniqueID += 16;
 	lvhd->uniqueID = cpu_to_le64(uniqueID);
+	udf_updated_lvid(sb);
 	mutex_unlock(&sbi->s_alloc_mutex);
-	mark_buffer_dirty(bh);
 
 	return ret;
 }
@@ -2320,11 +2328,17 @@ static int udf_sync_fs(struct super_block *sb, int wait)
 
 	mutex_lock(&sbi->s_alloc_mutex);
 	if (sbi->s_lvid_dirty) {
+		struct buffer_head *bh = sbi->s_lvid_bh;
+		struct logicalVolIntegrityDesc *lvid;
+
+		lvid = (struct logicalVolIntegrityDesc *)bh->b_data;
+		udf_finalize_lvid(lvid);
+
 		/*
 		 * Blockdevice will be synced later so we don't have to submit
 		 * the buffer for IO
 		 */
-		mark_buffer_dirty(sbi->s_lvid_bh);
+		mark_buffer_dirty(bh);
 		sbi->s_lvid_dirty = 0;
 	}
 	mutex_unlock(&sbi->s_alloc_mutex);

@@ -1,19 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright (C) 2007-2018  B.A.T.M.A.N. contributors:
+/* Copyright (C) 2007-2019  B.A.T.M.A.N. contributors:
  *
  * Marek Lindner, Simon Wunderlich
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of version 2 of the GNU General Public
- * License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef _NET_BATMAN_ADV_TYPES_H_
@@ -1096,11 +1084,14 @@ struct batadv_priv_gw {
 	/** @gateway_list: list of available gateway nodes */
 	struct hlist_head gateway_list;
 
-	/** @list_lock: lock protecting gateway_list & curr_gw */
+	/** @list_lock: lock protecting gateway_list, curr_gw, generation */
 	spinlock_t list_lock;
 
 	/** @curr_gw: pointer to currently selected gateway node */
 	struct batadv_gw_node __rcu *curr_gw;
+
+	/** @generation: current (generation) sequence number */
+	unsigned int generation;
 
 	/**
 	 * @mode: gateway operation: off, client or server (see batadv_gw_modes)
@@ -1219,6 +1210,11 @@ struct batadv_priv_mcast {
 
 	/** @bridged: whether the soft interface has a bridge on top */
 	unsigned char bridged:1;
+
+	/**
+	 * @mla_lock: a lock protecting mla_list and mla_flags
+	 */
+	spinlock_t mla_lock;
 
 	/**
 	 * @num_want_all_unsnoopables: number of nodes wanting unsnoopable IP
@@ -1562,6 +1558,12 @@ struct batadv_priv {
 	 *  node's sender/originating side
 	 */
 	atomic_t multicast_mode;
+
+	/**
+	 * @multicast_fanout: Maximum number of packet copies to generate for a
+	 *  multicast-to-unicast conversion
+	 */
+	atomic_t multicast_fanout;
 #endif
 
 	/** @orig_interval: OGM broadcast interval in milliseconds */

@@ -172,7 +172,7 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 	rx_bar_off = NFP_PCIE_QUEUE(startq);
 
 	/* Allocate and initialise the netdev */
-	nn = nfp_net_alloc(pdev, true, max_tx_rings, max_rx_rings);
+	nn = nfp_net_alloc(pdev, ctrl_bar, true, max_tx_rings, max_rx_rings);
 	if (IS_ERR(nn)) {
 		err = PTR_ERR(nn);
 		goto err_ctrl_unmap;
@@ -180,7 +180,6 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 	vf->nn = nn;
 
 	nn->fw_ver = fw_ver;
-	nn->dp.ctrl_bar = ctrl_bar;
 	nn->dp.is_vf = 1;
 	nn->stride_tx = stride;
 	nn->stride_rx = stride;
@@ -283,8 +282,14 @@ err_free_vf:
 
 static void nfp_netvf_pci_remove(struct pci_dev *pdev)
 {
-	struct nfp_net_vf *vf = pci_get_drvdata(pdev);
-	struct nfp_net *nn = vf->nn;
+	struct nfp_net_vf *vf;
+	struct nfp_net *nn;
+
+	vf = pci_get_drvdata(pdev);
+	if (!vf)
+		return;
+
+	nn = vf->nn;
 
 	/* Note, the order is slightly different from above as we need
 	 * to keep the nn pointer around till we have freed everything.
@@ -318,4 +323,5 @@ struct pci_driver nfp_netvf_pci_driver = {
 	.id_table    = nfp_netvf_pci_device_ids,
 	.probe       = nfp_netvf_pci_probe,
 	.remove      = nfp_netvf_pci_remove,
+	.shutdown    = nfp_netvf_pci_remove,
 };

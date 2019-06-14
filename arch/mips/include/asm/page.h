@@ -154,6 +154,7 @@ typedef struct { unsigned long pgd; } pgd_t;
 typedef struct { unsigned long pgprot; } pgprot_t;
 #define pgprot_val(x)	((x).pgprot)
 #define __pgprot(x)	((pgprot_t) { (x) } )
+#define pte_pgprot(x)	__pgprot(pte_val(x) & ~_PFN_MASK)
 
 /*
  * On R4000-style MMUs where a TLB entry is mapping a adjacent even / odd
@@ -248,7 +249,7 @@ static inline int pfn_valid(unsigned long pfn)
 #define virt_to_pfn(kaddr)   	PFN_DOWN(virt_to_phys((void *)(kaddr)))
 #define virt_to_page(kaddr)	pfn_to_page(virt_to_pfn(kaddr))
 
-extern int __virt_addr_valid(const volatile void *kaddr);
+extern bool __virt_addr_valid(const volatile void *kaddr);
 #define virt_addr_valid(kaddr)						\
 	__virt_addr_valid((const volatile void *) (kaddr))
 

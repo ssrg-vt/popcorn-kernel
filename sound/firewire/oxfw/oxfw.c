@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * oxfw.c - a part of driver for OXFW970/971 based devices
  *
  * Copyright (c) Clemens Ladisch <clemens@ladisch.de>
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include "oxfw.h"
@@ -20,6 +20,7 @@
 #define VENDOR_LACIE		0x00d04b
 #define VENDOR_TASCAM		0x00022e
 #define OUI_STANTON		0x001260
+#define OUI_APOGEE		0x0003db
 
 #define MODEL_SATELLITE		0x00200f
 
@@ -146,9 +147,6 @@ static int detect_quirks(struct snd_oxfw *oxfw)
 		/* No physical MIDI ports. */
 		oxfw->midi_input_ports = 0;
 		oxfw->midi_output_ports = 0;
-
-		/* Output stream exists but no data channels are useful. */
-		oxfw->has_output = false;
 
 		return snd_oxfw_scs1x_add(oxfw);
 	}
@@ -396,6 +394,13 @@ static const struct ieee1394_device_id oxfw_id_table[] = {
 				  IEEE1394_MATCH_MODEL_ID,
 		.vendor_id	= OUI_STANTON,
 		.model_id	= 0x002000,
+	},
+	// APOGEE, duet FireWire
+	{
+		.match_flags	= IEEE1394_MATCH_VENDOR_ID |
+				  IEEE1394_MATCH_MODEL_ID,
+		.vendor_id	= OUI_APOGEE,
+		.model_id	= 0x01dddd,
 	},
 	{ }
 };

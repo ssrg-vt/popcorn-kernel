@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* exynos_drm_drv.h
  *
  * Copyright (c) 2011 Samsung Electronics Co., Ltd.
@@ -5,11 +6,6 @@
  *	Inki Dae <inki.dae@samsung.com>
  *	Joonyoung Shim <jy0922.shim@samsung.com>
  *	Seung-Woo Kim <sw0312.kim@samsung.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #ifndef _EXYNOS_DRM_DRV_H_
@@ -213,6 +209,17 @@ static inline struct device *to_dma_dev(struct drm_device *dev)
 
 	return priv->dma_dev;
 }
+
+static inline bool is_drm_iommu_supported(struct drm_device *drm_dev)
+{
+	struct exynos_drm_private *priv = drm_dev->dev_private;
+
+	return priv->mapping ? true : false;
+}
+
+int exynos_drm_register_dma(struct drm_device *drm, struct device *dev);
+void exynos_drm_unregister_dma(struct drm_device *drm, struct device *dev);
+void exynos_drm_cleanup_dma(struct drm_device *drm);
 
 #ifdef CONFIG_DRM_EXYNOS_DPI
 struct drm_encoder *exynos_dpi_probe(struct device *dev);

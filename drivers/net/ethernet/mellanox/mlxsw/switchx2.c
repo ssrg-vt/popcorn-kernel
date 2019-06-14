@@ -11,7 +11,6 @@
 #include <linux/device.h>
 #include <linux/skbuff.h>
 #include <linux/if_vlan.h>
-#include <net/switchdev.h>
 
 #include "pci.h"
 #include "core.h"
@@ -380,14 +379,14 @@ mlxsw_sx_port_get_stats64(struct net_device *dev,
 	stats->tx_dropped	= tx_dropped;
 }
 
-static int mlxsw_sx_port_get_phys_port_name(struct net_device *dev, char *name,
-					    size_t len)
+static struct devlink_port *
+mlxsw_sx_port_get_devlink_port(struct net_device *dev)
 {
 	struct mlxsw_sx_port *mlxsw_sx_port = netdev_priv(dev);
+	struct mlxsw_sx *mlxsw_sx = mlxsw_sx_port->mlxsw_sx;
 
-	return mlxsw_core_port_get_phys_port_name(mlxsw_sx_port->mlxsw_sx->core,
-						  mlxsw_sx_port->local_port,
-						  name, len);
+	return mlxsw_core_port_devlink_port_get(mlxsw_sx->core,
+						mlxsw_sx_port->local_port);
 }
 
 static const struct net_device_ops mlxsw_sx_port_netdev_ops = {
@@ -396,7 +395,7 @@ static const struct net_device_ops mlxsw_sx_port_netdev_ops = {
 	.ndo_start_xmit		= mlxsw_sx_port_xmit,
 	.ndo_change_mtu		= mlxsw_sx_port_change_mtu,
 	.ndo_get_stats64	= mlxsw_sx_port_get_stats64,
-	.ndo_get_phys_port_name = mlxsw_sx_port_get_phys_port_name,
+	.ndo_get_devlink_port	= mlxsw_sx_port_get_devlink_port,
 };
 
 static void mlxsw_sx_port_get_drvinfo(struct net_device *dev,
@@ -901,28 +900,6 @@ static const struct ethtool_ops mlxsw_sx_port_ethtool_ops = {
 	.set_link_ksettings	= mlxsw_sx_port_set_link_ksettings,
 };
 
-static int mlxsw_sx_port_attr_get(struct net_device *dev,
-				  struct switchdev_attr *attr)
-{
-	struct mlxsw_sx_port *mlxsw_sx_port = netdev_priv(dev);
-	struct mlxsw_sx *mlxsw_sx = mlxsw_sx_port->mlxsw_sx;
-
-	switch (attr->id) {
-	case SWITCHDEV_ATTR_ID_PORT_PARENT_ID:
-		attr->u.ppid.id_len = sizeof(mlxsw_sx->hw_id);
-		memcpy(&attr->u.ppid.id, &mlxsw_sx->hw_id, attr->u.ppid.id_len);
-		break;
-	default:
-		return -EOPNOTSUPP;
-	}
-
-	return 0;
-}
-
-static const struct switchdev_ops mlxsw_sx_port_switchdev_ops = {
-	.switchdev_port_attr_get	= mlxsw_sx_port_attr_get,
-};
-
 static int mlxsw_sx_hw_id_get(struct mlxsw_sx *mlxsw_sx)
 {
 	char spad_pl[MLXSW_REG_SPAD_LEN] = {0};
@@ -1034,7 +1011,6 @@ static int __mlxsw_sx_port_eth_create(struct mlxsw_sx *mlxsw_sx, u8 local_port,
 
 	dev->netdev_ops = &mlxsw_sx_port_netdev_ops;
 	dev->ethtool_ops = &mlxsw_sx_port_ethtool_ops;
-	dev->switchdev_ops = &mlxsw_sx_port_switchdev_ops;
 
 	err = mlxsw_sx_port_dev_addr_get(mlxsw_sx_port);
 	if (err) {
@@ -1113,7 +1089,7 @@ static int __mlxsw_sx_port_eth_create(struct mlxsw_sx *mlxsw_sx, u8 local_port,
 	}
 
 	mlxsw_core_port_eth_set(mlxsw_sx->core, mlxsw_sx_port->local_port,
-				mlxsw_sx_port, dev, module + 1, false, 0);
+				mlxsw_sx_port, dev);
 	mlxsw_sx->ports[local_port] = mlxsw_sx_port;
 	return 0;
 
@@ -1138,7 +1114,9 @@ static int mlxsw_sx_port_eth_create(struct mlxsw_sx *mlxsw_sx, u8 local_port,
 {
 	int err;
 
-	err = mlxsw_core_port_init(mlxsw_sx->core, local_port);
+	err = mlxsw_core_port_init(mlxsw_sx->core, local_port,
+				   module + 1, false, 0,
+				   mlxsw_sx->hw_id, sizeof(mlxsw_sx->hw_id));
 	if (err) {
 		dev_err(mlxsw_sx->bus_info->dev, "Port %d: Failed to init core port\n",
 			local_port);

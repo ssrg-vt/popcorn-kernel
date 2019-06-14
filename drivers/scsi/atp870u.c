@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* 
  *  Copyright (C) 1997	Wu Ching Chen
  *  2.1.x update (C) 1998  Krzysztof G. Baranowski
@@ -194,12 +195,11 @@ static irqreturn_t atp870u_intr_handle(int irq, void *dev_id)
 				((unsigned char *) &adrcnt)[2] = atp_readb_io(dev, c, 0x12);
 				((unsigned char *) &adrcnt)[1] = atp_readb_io(dev, c, 0x13);
 				((unsigned char *) &adrcnt)[0] = atp_readb_io(dev, c, 0x14);
-				if (dev->id[c][target_id].last_len != adrcnt)
-				{
-			   		k = dev->id[c][target_id].last_len;
+				if (dev->id[c][target_id].last_len != adrcnt) {
+					k = dev->id[c][target_id].last_len;
 			   		k -= adrcnt;
 			   		dev->id[c][target_id].tran_len = k;			   
-			   	dev->id[c][target_id].last_len = adrcnt;			   
+					dev->id[c][target_id].last_len = adrcnt;
 				}
 #ifdef ED_DBGP
 				printk("dev->id[c][target_id].last_len = %d dev->id[c][target_id].tran_len = %d\n",dev->id[c][target_id].last_len,dev->id[c][target_id].tran_len);
@@ -1681,7 +1681,6 @@ static struct scsi_host_template atp870u_template = {
      .can_queue         	= qcnt			/* can_queue */,
      .this_id           	= 7			/* SCSI ID */,
      .sg_tablesize      	= ATP870U_SCATTER	/*SG_ALL*/ /*SG_NONE*/,
-     .use_clustering    	= ENABLE_CLUSTERING,
      .max_sectors		= ATP870U_MAX_SECTORS,
 };
 

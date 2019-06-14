@@ -13,10 +13,8 @@
 	 * The decompressor and also some bootloaders rely on a
 	 * pre-existing /chosen node to be available to insert the
 	 * command line and merge other ATAGS info.
-	 * Also for U-Boot there must be a pre-existing /memory node.
 	 */
 	chosen {};
-	memory { device_type = "memory"; };
 
 	aliases {
 		ethernet0 = &fec;
@@ -25,6 +23,13 @@
 		gpio2 = &gpio3;
 		gpio3 = &gpio4;
 		gpio4 = &gpio5;
+		i2c0 = &i2c1;
+		i2c1 = &i2c2;
+		i2c2 = &i2c3;
+		mmc0 = &usdhc1;
+		mmc1 = &usdhc2;
+		mmc2 = &usdhc3;
+		mmc3 = &usdhc4;
 		serial0 = &uart1;
 		serial1 = &uart2;
 		serial2 = &uart3;
@@ -108,6 +113,11 @@
 		compatible = "arm,cortex-a9-pmu";
 		interrupt-parent = <&gpc>;
 		interrupts = <0 94 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	usbphynop1: usbphynop1 {
+		compatible = "usb-nop-xceiv";
+		#phy-cells = <0>;
 	};
 
 	soc {
@@ -335,7 +345,7 @@
 				compatible = "fsl,imx6sl-pwm", "fsl,imx27-pwm";
 				reg = <0x02080000 0x4000>;
 				interrupts = <0 83 IRQ_TYPE_LEVEL_HIGH>;
-				clocks = <&clks IMX6SL_CLK_PWM1>,
+				clocks = <&clks IMX6SL_CLK_PERCLK>,
 					 <&clks IMX6SL_CLK_PWM1>;
 				clock-names = "ipg", "per";
 			};
@@ -345,7 +355,7 @@
 				compatible = "fsl,imx6sl-pwm", "fsl,imx27-pwm";
 				reg = <0x02084000 0x4000>;
 				interrupts = <0 84 IRQ_TYPE_LEVEL_HIGH>;
-				clocks = <&clks IMX6SL_CLK_PWM2>,
+				clocks = <&clks IMX6SL_CLK_PERCLK>,
 					 <&clks IMX6SL_CLK_PWM2>;
 				clock-names = "ipg", "per";
 			};
@@ -355,7 +365,7 @@
 				compatible = "fsl,imx6sl-pwm", "fsl,imx27-pwm";
 				reg = <0x02088000 0x4000>;
 				interrupts = <0 85 IRQ_TYPE_LEVEL_HIGH>;
-				clocks = <&clks IMX6SL_CLK_PWM3>,
+				clocks = <&clks IMX6SL_CLK_PERCLK>,
 					 <&clks IMX6SL_CLK_PWM3>;
 				clock-names = "ipg", "per";
 			};
@@ -365,7 +375,7 @@
 				compatible = "fsl,imx6sl-pwm", "fsl,imx27-pwm";
 				reg = <0x0208c000 0x4000>;
 				interrupts = <0 86 IRQ_TYPE_LEVEL_HIGH>;
-				clocks = <&clks IMX6SL_CLK_PWM4>,
+				clocks = <&clks IMX6SL_CLK_PERCLK>,
 					 <&clks IMX6SL_CLK_PWM4>;
 				clock-names = "ipg", "per";
 			};
@@ -588,7 +598,6 @@
 					regulator-name = "vddpu";
 					regulator-min-microvolt = <725000>;
 					regulator-max-microvolt = <1450000>;
-					regulator-always-on;
 					anatop-reg-offset = <0x140>;
 					anatop-vol-bit-shift = <9>;
 					anatop-vol-bit-width = <5>;
@@ -739,7 +748,7 @@
 				reg = <0x020ec000 0x4000>;
 				interrupts = <0 2 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clks IMX6SL_CLK_SDMA>,
-					 <&clks IMX6SL_CLK_SDMA>;
+					 <&clks IMX6SL_CLK_AHB>;
 				clock-names = "ipg", "ahb";
 				#dma-cells = <3>;
 				/* imx6sl reuses imx6q sdma firmware */
@@ -815,6 +824,8 @@
 				reg = <0x02184400 0x200>;
 				interrupts = <0 40 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clks IMX6SL_CLK_USBOH3>;
+				fsl,usbphy = <&usbphynop1>;
+				phy_type = "hsic";
 				fsl,usbmisc = <&usbmisc 2>;
 				dr_mode = "host";
 				ahb-burst-config = <0x0>;
@@ -918,9 +929,10 @@
 				status = "disabled";
 			};
 
-			mmdc: mmdc@21b0000 {
+			memory-controller@21b0000 {
 				compatible = "fsl,imx6sl-mmdc", "fsl,imx6q-mmdc";
 				reg = <0x021b0000 0x4000>;
+				clocks = <&clks IMX6SL_CLK_MMDC_P0_IPG>;
 			};
 
 			rngb: rngb@21b4000 {

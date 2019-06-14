@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  * RMNET configuration engine
- *
  */
 
 #include <net/sock.h>
@@ -301,10 +292,13 @@ static int rmnet_changelink(struct net_device *dev, struct nlattr *tb[],
 	struct rmnet_port *port;
 	u16 mux_id;
 
+	if (!dev)
+		return -ENODEV;
+
 	real_dev = __dev_get_by_index(dev_net(dev),
 				      nla_get_u32(tb[IFLA_LINK]));
 
-	if (!real_dev || !dev || !rmnet_is_real_dev_registered(real_dev))
+	if (!real_dev || !rmnet_is_real_dev_registered(real_dev))
 		return -ENODEV;
 
 	port = rmnet_get_port_rtnl(real_dev);

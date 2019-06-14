@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef _ASM_POWERPC_IO_H
 #define _ASM_POWERPC_IO_H
 #ifdef __KERNEL__
@@ -8,10 +9,6 @@
 #endif
 
 /*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 /* Check of existence of legacy devices */
@@ -29,16 +26,15 @@ extern struct pci_dev *isa_bridge_pcidev;
 
 #include <linux/device.h>
 #include <linux/compiler.h>
+#include <linux/mm.h>
 #include <asm/page.h>
 #include <asm/byteorder.h>
 #include <asm/synch.h>
 #include <asm/delay.h>
+#include <asm/mmiowb.h>
 #include <asm/mmu.h>
 #include <asm/ppc_asm.h>
-
-#ifdef CONFIG_PPC64
-#include <asm/paca.h>
-#endif
+#include <asm/pgtable.h>
 
 #define SIO_CONFIG_RA	0x398
 #define SIO_CONFIG_RD	0x399
@@ -105,12 +101,6 @@ extern bool isa_io_special;
  *
  */
 
-#ifdef CONFIG_PPC64
-#define IO_SET_SYNC_FLAG()	do { local_paca->io_sync = 1; } while(0)
-#else
-#define IO_SET_SYNC_FLAG()
-#endif
-
 #define DEF_MMIO_IN_X(name, size, insn)				\
 static inline u##size name(const volatile u##size __iomem *addr)	\
 {									\
@@ -125,7 +115,7 @@ static inline void name(volatile u##size __iomem *addr, u##size val)	\
 {									\
 	__asm__ __volatile__("sync;"#insn" %1,%y0"			\
 		: "=Z" (*addr) : "r" (val) : "memory");			\
-	IO_SET_SYNC_FLAG();						\
+	mmiowb_set_pending();						\
 }
 
 #define DEF_MMIO_IN_D(name, size, insn)				\
@@ -142,7 +132,7 @@ static inline void name(volatile u##size __iomem *addr, u##size val)	\
 {									\
 	__asm__ __volatile__("sync;"#insn"%U0%X0 %1,%0"			\
 		: "=m" (*addr) : "r" (val) : "memory");			\
-	IO_SET_SYNC_FLAG();						\
+	mmiowb_set_pending();						\
 }
 
 DEF_MMIO_IN_D(in_8,     8, lbz);
@@ -650,24 +640,6 @@ static inline void name at					\
 
 #include <asm-generic/iomap.h>
 
-#ifdef CONFIG_PPC32
-#define mmiowb()
-#else
-/*
- * Enforce synchronisation of stores vs. spin_unlock
- * (this does it explicitly, though our implementation of spin_unlock
- * does it implicitely too)
- */
-static inline void mmiowb(void)
-{
-	unsigned long tmp;
-
-	__asm__ __volatile__("sync; li %0,0; stb %0,%1(13)"
-	: "=&r" (tmp) : "i" (offsetof(struct paca_struct, io_sync))
-	: "memory");
-}
-#endif /* !CONFIG_PPC32 */
-
 static inline void iosync(void)
 {
         __asm__ __volatile__ ("sync" : : : "memory");
@@ -781,8 +753,10 @@ extern void __iounmap_at(void *ea, unsigned long size);
 
 #define mmio_read16be(addr)		readw_be(addr)
 #define mmio_read32be(addr)		readl_be(addr)
+#define mmio_read64be(addr)		readq_be(addr)
 #define mmio_write16be(val, addr)	writew_be(val, addr)
 #define mmio_write32be(val, addr)	writel_be(val, addr)
+#define mmio_write64be(val, addr)	writeq_be(val, addr)
 #define mmio_insb(addr, dst, count)	readsb(addr, dst, count)
 #define mmio_insw(addr, dst, count)	readsw(addr, dst, count)
 #define mmio_insl(addr, dst, count)	readsl(addr, dst, count)
@@ -804,6 +778,8 @@ extern void __iounmap_at(void *ea, unsigned long size);
  */
 static inline unsigned long virt_to_phys(volatile void * address)
 {
+	WARN_ON(IS_ENABLED(CONFIG_DEBUG_VIRTUAL) && !virt_addr_valid(address));
+
 	return __pa((unsigned long)address);
 }
 
@@ -827,7 +803,14 @@ static inline void * phys_to_virt(unsigned long address)
 /*
  * Change "struct page" to physical address.
  */
-#define page_to_phys(page)	((phys_addr_t)page_to_pfn(page) << PAGE_SHIFT)
+static inline phys_addr_t page_to_phys(struct page *page)
+{
+	unsigned long pfn = page_to_pfn(page);
+
+	WARN_ON(IS_ENABLED(CONFIG_DEBUG_VIRTUAL) && !pfn_valid(pfn));
+
+	return PFN_PHYS(pfn);
+}
 
 /*
  * 32 bits still uses virt_to_bus() for it's implementation of DMA

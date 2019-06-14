@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 /*
 
@@ -5,14 +6,6 @@
 
   Copyright 1995-1998 by Leonard N. Zubkoff <lnz@dandelion.com>
 
-  This program is free software; you may redistribute and/or modify it under
-  the terms of the GNU General Public License Version 2 as published by the
-  Free Software Foundation.
-
-  This program is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
-  or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-  for complete details.
 
   The author respectfully requests that any modifications to this software be
   sent directly to him for evaluation and testing.
@@ -2641,6 +2634,7 @@ static int blogic_resultcode(struct blogic_adapter *adapter,
 	case BLOGIC_BAD_CMD_PARAM:
 		blogic_warn("BusLogic Driver Protocol Error 0x%02X\n",
 				adapter, adapter_status);
+		/* fall through */
 	case BLOGIC_DATA_UNDERRUN:
 	case BLOGIC_DATA_OVERRUN:
 	case BLOGIC_NOEXPECT_BUSFREE:
@@ -3857,7 +3851,6 @@ static struct scsi_host_template blogic_template = {
 #endif
 	.unchecked_isa_dma = 1,
 	.max_sectors = 128,
-	.use_clustering = ENABLE_CLUSTERING,
 };
 
 /*

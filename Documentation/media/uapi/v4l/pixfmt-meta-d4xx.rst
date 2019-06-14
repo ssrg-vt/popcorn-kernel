@@ -1,4 +1,11 @@
-.. -*- coding: utf-8; mode: rst -*-
+.. Permission is granted to copy, distribute and/or modify this
+.. document under the terms of the GNU Free Documentation License,
+.. Version 1.1 or any later version published by the Free Software
+.. Foundation, with no Invariant Sections, no Front-Cover Texts
+.. and no Back-Cover Texts. A copy of the license is included at
+.. Documentation/media/uapi/fdl-appendix.rst.
+..
+.. TODO: replace it to GFDL-1.1-or-later WITH no-invariant-sections
 
 .. _v4l2-meta-fmt-d4xx:
 
@@ -29,13 +36,16 @@ per frame, therefore their headers cannot be larger than 255 bytes.
 Below are proprietary Microsoft style metadata types, used by D4xx cameras,
 where all fields are in little endian order:
 
+.. tabularcolumns:: |p{5.0cm}|p{12.5cm}|
+
+
 .. flat-table:: D4xx metadata
-    :widths: 1 4
+    :widths: 1 2
     :header-rows:  1
     :stub-columns: 0
 
-    * - Field
-      - Description
+    * - **Field**
+      - **Description**
     * - :cspan:`1` *Depth Control*
     * - __u32 ID
       - 0x80000000

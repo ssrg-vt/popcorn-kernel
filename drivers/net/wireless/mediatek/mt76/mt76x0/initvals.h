@@ -1,17 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * (c) Copyright 2002-2010, Ralink Technology, Inc.
  * Copyright (C) 2015 Jakub Kicinski <kubakici@wp.pl>
  * Copyright (C) 2018 Stanislaw Gruszka <stf_xl@wp.pl>
  * Copyright (C) 2018 Lorenzo Bianconi <lorenzo.bianconi83@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef __MT76X0U_INITVALS_H
@@ -37,16 +29,16 @@ static const struct mt76_reg_pair common_mac_reg_table[] = {
 	{ MT_PBF_RX_MAX_PCNT,		0x0000fe9f },
 	{ MT_TX_RETRY_CFG,		0x47d01f0f },
 	{ MT_AUTO_RSP_CFG,		0x00000013 },
-	{ MT_CCK_PROT_CFG,		0x05740003 },
-	{ MT_OFDM_PROT_CFG,		0x05740003 },
+	{ MT_CCK_PROT_CFG,		0x07f40003 },
+	{ MT_OFDM_PROT_CFG,		0x07f42004 },
 	{ MT_PBF_CFG,			0x00f40006 },
 	{ MT_WPDMA_GLO_CFG,		0x00000030 },
-	{ MT_GF20_PROT_CFG,		0x01744004 },
-	{ MT_GF40_PROT_CFG,		0x03f44084 },
-	{ MT_MM20_PROT_CFG,		0x01744004 },
-	{ MT_MM40_PROT_CFG,		0x03f54084 },
+	{ MT_GF20_PROT_CFG,		0x01742004 },
+	{ MT_GF40_PROT_CFG,		0x03f42084 },
+	{ MT_MM20_PROT_CFG,		0x01742004 },
+	{ MT_MM40_PROT_CFG,		0x03f42084 },
 	{ MT_TXOP_CTRL_CFG,		0x0000583f },
-	{ MT_TX_RTS_CFG,		0x00092b20 },
+	{ MT_TX_RTS_CFG,		0x00ffff20 },
 	{ MT_EXP_ACK_TIME,		0x002400ca },
 	{ MT_TXOP_HLDR_ET,		0x00000002 },
 	{ MT_XIFS_TIME_CFG,		0x33a41010 },
@@ -85,6 +77,10 @@ static const struct mt76_reg_pair mt76x0_mac_reg_table[] = {
 	{ MT_HT_CTRL_CFG,		0x000001FF },
 	{ MT_TXOP_HLDR_ET,		0x00000000 },
 	{ MT_PN_PAD_MODE,		0x00000003 },
+	{ MT_TX_PROT_CFG6,		0xe3f42004 },
+	{ MT_TX_PROT_CFG7,		0xe3f42084 },
+	{ MT_TX_PROT_CFG8,		0xe3f42104 },
+	{ MT_VHT_HT_FBK_CFG1,		0xedcba980 },
 };
 
 static const struct mt76_reg_pair mt76x0_bbp_init_tab[] = {

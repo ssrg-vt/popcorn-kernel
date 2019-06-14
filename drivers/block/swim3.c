@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for the SWIM3 (Super Woz Integrated Machine 3)
  * floppy controller found on Power Macintoshes.
  *
  * Copyright (C) 1996 Paul Mackerras.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 /*
@@ -995,7 +991,11 @@ static void floppy_release(struct gendisk *disk, fmode_t mode)
 	struct swim3 __iomem *sw = fs->swim3;
 
 	mutex_lock(&swim3_mutex);
-	if (fs->ref_count > 0 && --fs->ref_count == 0) {
+	if (fs->ref_count > 0)
+		--fs->ref_count;
+	else if (fs->ref_count == -1)
+		fs->ref_count = 0;
+	if (fs->ref_count == 0) {
 		swim3_action(fs, MOTOR_OFF);
 		out_8(&sw->control_bic, 0xff);
 		swim3_select(fs, RELAX);
@@ -1087,8 +1087,6 @@ static int swim3_add_device(struct macio_dev *mdev, int index)
 	struct floppy_state *fs = &floppy_states[index];
 	int rc = -EBUSY;
 
-	/* Do this first for message macros */
-	memset(fs, 0, sizeof(*fs));
 	fs->mdev = mdev;
 	fs->index = index;
 
@@ -1151,7 +1149,6 @@ static int swim3_add_device(struct macio_dev *mdev, int index)
 		swim3_err("%s", "Couldn't request interrupt\n");
 		pmac_call_feature(PMAC_FTR_SWIM3_ENABLE, swim, 0, 0);
 		goto out_unmap;
-		return -EBUSY;
 	}
 
 	timer_setup(&fs->timeout, NULL, 0);
@@ -1188,13 +1185,14 @@ static int swim3_attach(struct macio_dev *mdev,
 			return rc;
 	}
 
-	fs = &floppy_states[floppy_count];
-
 	disk = alloc_disk(1);
 	if (disk == NULL) {
 		rc = -ENOMEM;
 		goto out_unregister;
 	}
+
+	fs = &floppy_states[floppy_count];
+	memset(fs, 0, sizeof(*fs));
 
 	disk->queue = blk_mq_init_sq_queue(&fs->tag_set, &swim3_mq_ops, 2,
 						BLK_MQ_F_SHOULD_MERGE);
@@ -1214,6 +1212,7 @@ static int swim3_attach(struct macio_dev *mdev,
 	disk->first_minor = floppy_count;
 	disk->fops = &floppy_fops;
 	disk->private_data = fs;
+	disk->events = DISK_EVENT_MEDIA_CHANGE;
 	disk->flags |= GENHD_FL_REMOVABLE;
 	sprintf(disk->disk_name, "fd%d", floppy_count);
 	set_capacity(disk, 2880);

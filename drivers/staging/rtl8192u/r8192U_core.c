@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  * Copyright(c) 2008 - 2010 Realtek Corporation. All rights reserved.
  * Linux device driver for RTL8192U
  *
  * Based on the r8187 driver, which is:
  * Copyright 2004-2005 Andrea Merello <andrea.merello@gmail.com>, et al.
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
  *
  * Contact Information:
  * Jerry chuang <wlanfae@realtek.com>
@@ -4957,20 +4943,18 @@ static void rtl8192_usb_disconnect(struct usb_interface *intf)
 	struct net_device *dev = usb_get_intfdata(intf);
 	struct r8192_priv *priv = ieee80211_priv(dev);
 
-	if (dev) {
-		unregister_netdev(dev);
+	unregister_netdev(dev);
 
-		RT_TRACE(COMP_DOWN,
-			 "=============>wlan driver to be removed\n");
-		rtl8192_proc_remove_one(dev);
+	RT_TRACE(COMP_DOWN, "=============>wlan driver to be removed\n");
+	rtl8192_proc_remove_one(dev);
 
-		rtl8192_down(dev);
-		kfree(priv->pFirmware);
-		priv->pFirmware = NULL;
-		rtl8192_usb_deleteendpoints(dev);
-		usleep_range(10000, 11000);
-	}
+	rtl8192_down(dev);
+	kfree(priv->pFirmware);
+	priv->pFirmware = NULL;
+	rtl8192_usb_deleteendpoints(dev);
+	usleep_range(10000, 11000);
 	free_ieee80211(dev);
+
 	RT_TRACE(COMP_DOWN, "wlan driver removed\n");
 }
 

@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for the Conexant CX23885 PCIe bridge
  *
  *  Copyright (c) 2007 Steven Toth <stoth@linuxtv.org>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- *  GNU General Public License for more details.
  */
 
 #include "cx23885.h"
@@ -668,23 +658,40 @@ static int vidioc_enum_fmt_vid_cap(struct file *file, void  *priv,
 	return 0;
 }
 
-static int vidioc_cropcap(struct file *file, void *priv,
-			  struct v4l2_cropcap *cc)
+static int vidioc_g_pixelaspect(struct file *file, void *priv,
+				int type, struct v4l2_fract *f)
 {
 	struct cx23885_dev *dev = video_drvdata(file);
 	bool is_50hz = dev->tvnorm & V4L2_STD_625_50;
 
-	if (cc->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+	if (type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
 
-	cc->bounds.left = 0;
-	cc->bounds.top = 0;
-	cc->bounds.width = 720;
-	cc->bounds.height = norm_maxh(dev->tvnorm);
-	cc->defrect = cc->bounds;
-	cc->pixelaspect.numerator = is_50hz ? 54 : 11;
-	cc->pixelaspect.denominator = is_50hz ? 59 : 10;
+	f->numerator = is_50hz ? 54 : 11;
+	f->denominator = is_50hz ? 59 : 10;
 
+	return 0;
+}
+
+static int vidioc_g_selection(struct file *file, void *fh,
+			      struct v4l2_selection *sel)
+{
+	struct cx23885_dev *dev = video_drvdata(file);
+
+	if (sel->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		return -EINVAL;
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+		sel->r.top = 0;
+		sel->r.left = 0;
+		sel->r.width = 720;
+		sel->r.height = norm_maxh(dev->tvnorm);
+		break;
+	default:
+		return -EINVAL;
+	}
 	return 0;
 }
 
@@ -1122,7 +1129,8 @@ static const struct v4l2_ioctl_ops video_ioctl_ops = {
 	.vidioc_dqbuf         = vb2_ioctl_dqbuf,
 	.vidioc_streamon      = vb2_ioctl_streamon,
 	.vidioc_streamoff     = vb2_ioctl_streamoff,
-	.vidioc_cropcap       = vidioc_cropcap,
+	.vidioc_g_pixelaspect = vidioc_g_pixelaspect,
+	.vidioc_g_selection   = vidioc_g_selection,
 	.vidioc_s_std         = vidioc_s_std,
 	.vidioc_g_std         = vidioc_g_std,
 	.vidioc_enum_input    = vidioc_enum_input,

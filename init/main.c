@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/init/main.c
  *
@@ -105,7 +106,6 @@
 static int kernel_init(void *);
 
 extern void init_IRQ(void);
-extern void fork_init(void);
 extern void radix_tree_init(void);
 
 /*
@@ -374,12 +374,20 @@ static inline void smp_prepare_cpus(unsigned int maxcpus) { }
  */
 static void __init setup_command_line(char *command_line)
 {
-	saved_command_line =
-		memblock_alloc(strlen(boot_command_line) + 1, SMP_CACHE_BYTES);
-	initcall_command_line =
-		memblock_alloc(strlen(boot_command_line) + 1, SMP_CACHE_BYTES);
-	static_command_line = memblock_alloc(strlen(command_line) + 1,
-					     SMP_CACHE_BYTES);
+	size_t len = strlen(boot_command_line) + 1;
+
+	saved_command_line = memblock_alloc(len, SMP_CACHE_BYTES);
+	if (!saved_command_line)
+		panic("%s: Failed to allocate %zu bytes\n", __func__, len);
+
+	initcall_command_line =	memblock_alloc(len, SMP_CACHE_BYTES);
+	if (!initcall_command_line)
+		panic("%s: Failed to allocate %zu bytes\n", __func__, len);
+
+	static_command_line = memblock_alloc(len, SMP_CACHE_BYTES);
+	if (!static_command_line)
+		panic("%s: Failed to allocate %zu bytes\n", __func__, len);
+
 	strcpy(saved_command_line, boot_command_line);
 	strcpy(static_command_line, command_line);
 }
@@ -497,6 +505,10 @@ void __init __weak thread_stack_cache_init(void)
 
 void __init __weak mem_encrypt_init(void) { }
 
+void __init __weak poking_init(void) { }
+
+void __init __weak pgd_cache_init(void) { }
+
 bool initcall_debug;
 core_param(initcall_debug, initcall_debug, bool, 0644);
 
@@ -521,12 +533,14 @@ static void __init mm_init(void)
 	mem_init();
 	kmem_cache_init();
 	pgtable_init();
+	debug_objects_mem_init();
 	vmalloc_init();
 	ioremap_huge_init();
 	/* Should be run before the first non-init thread is created */
 	init_espfix_bsp();
 	/* Should be run after espfix64 is set up. */
 	pti_init();
+	pgd_cache_init();
 }
 
 void __init __weak arch_call_rest_init(void)
@@ -556,13 +570,6 @@ asmlinkage __visible void __init start_kernel(void)
 	page_address_init();
 	pr_notice("%s", linux_banner);
 	setup_arch(&command_line);
-	/*
-	 * Set up the the initial canary and entropy after arch
-	 * and after adding latent and command line entropy.
-	 */
-	add_latent_entropy();
-	add_device_randomness(command_line, strlen(command_line));
-	boot_init_stack_canary();
 	mm_init_cpumask(&init_mm);
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();
@@ -574,6 +581,8 @@ asmlinkage __visible void __init start_kernel(void)
 	page_alloc_init();
 
 	pr_notice("Kernel command line: %s\n", boot_command_line);
+	/* parameters may set static keys */
+	jump_label_init();
 	parse_early_param();
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
@@ -582,8 +591,6 @@ asmlinkage __visible void __init start_kernel(void)
 	if (!IS_ERR_OR_NULL(after_dashes))
 		parse_args("Setting init args", after_dashes, NULL, 0, -1, -1,
 			   NULL, set_init_arg);
-
-	jump_label_init();
 
 	/*
 	 * These use large bootmem allocations and must precede
@@ -647,6 +654,20 @@ asmlinkage __visible void __init start_kernel(void)
 	hrtimers_init();
 	softirq_init();
 	timekeeping_init();
+
+	/*
+	 * For best initial stack canary entropy, prepare it after:
+	 * - setup_arch() for any UEFI RNG entropy and boot cmdline access
+	 * - timekeeping_init() for ktime entropy used in rand_initialize()
+	 * - rand_initialize() to get any arch-specific entropy like RDRAND
+	 * - add_latent_entropy() to get any latent entropy
+	 * - adding command line entropy
+	 */
+	rand_initialize();
+	add_latent_entropy();
+	add_device_randomness(command_line, strlen(command_line));
+	boot_init_stack_canary();
+
 	time_init();
 	printk_safe_init();
 	perf_event_init();
@@ -695,9 +716,7 @@ asmlinkage __visible void __init start_kernel(void)
 		initrd_start = 0;
 	}
 #endif
-	page_ext_init();
 	kmemleak_init();
-	debug_objects_mem_init();
 	setup_per_cpu_pageset();
 	numa_policy_init();
 	acpi_early_init();
@@ -731,15 +750,12 @@ asmlinkage __visible void __init start_kernel(void)
 	taskstats_init_early();
 	delayacct_init();
 
+	poking_init();
 	check_bugs();
 
 	acpi_subsystem_init();
 	arch_post_acpi_subsys_init();
 	sfi_init_late();
-
-	if (efi_enabled(EFI_RUNTIME_SERVICES)) {
-		efi_free_boot_services();
-	}
 
 	/* Do the rest non-__init'ed, we're now alive */
 	arch_call_rest_init();
@@ -776,8 +792,14 @@ static int __init initcall_blacklist(char *str)
 			pr_debug("blacklisting initcall %s\n", str_entry);
 			entry = memblock_alloc(sizeof(*entry),
 					       SMP_CACHE_BYTES);
+			if (!entry)
+				panic("%s: Failed to allocate %zu bytes\n",
+				      __func__, sizeof(*entry));
 			entry->buf = memblock_alloc(strlen(str_entry) + 1,
 						    SMP_CACHE_BYTES);
+			if (!entry->buf)
+				panic("%s: Failed to allocate %zu bytes\n",
+				      __func__, strlen(str_entry) + 1);
 			strcpy(entry->buf, str_entry);
 			list_add(&entry->next, &blacklisted_initcalls);
 		}
@@ -832,7 +854,7 @@ trace_initcall_start_cb(void *data, initcall_t fn)
 {
 	ktime_t *calltime = (ktime_t *)data;
 
-	printk(KERN_DEBUG "calling  %pF @ %i\n", fn, task_pid_nr(current));
+	printk(KERN_DEBUG "calling  %pS @ %i\n", fn, task_pid_nr(current));
 	*calltime = ktime_get();
 }
 
@@ -846,7 +868,7 @@ trace_initcall_finish_cb(void *data, initcall_t fn, int ret)
 	rettime = ktime_get();
 	delta = ktime_sub(rettime, *calltime);
 	duration = (unsigned long long) ktime_to_ns(delta) >> 10;
-	printk(KERN_DEBUG "initcall %pF returned %d after %lld usecs\n",
+	printk(KERN_DEBUG "initcall %pS returned %d after %lld usecs\n",
 		 fn, ret, duration);
 }
 
@@ -903,7 +925,7 @@ int __init_or_module do_one_initcall(initcall_t fn)
 		strlcat(msgbuf, "disabled interrupts ", sizeof(msgbuf));
 		local_irq_enable();
 	}
-	WARN(msgbuf[0], "initcall %pF returned with %s\n", fn, msgbuf);
+	WARN(msgbuf[0], "initcall %pS returned with %s\n", fn, msgbuf);
 
 	add_latent_entropy();
 	return ret;
@@ -934,7 +956,7 @@ static initcall_entry_t *initcall_levels[] __initdata = {
 };
 
 /* Keep these in sync with initcalls in include/linux/init.h */
-static char *initcall_level_names[] __initdata = {
+static const char *initcall_level_names[] __initdata = {
 	"pure",
 	"core",
 	"postcore",
@@ -996,17 +1018,6 @@ static void __init do_pre_smp_initcalls(void)
 		do_one_initcall(initcall_from_entry(fn));
 }
 
-/*
- * This function requests modules which should be loaded by default and is
- * called twice right after initrd is mounted and right before init is
- * exec'd.  If such modules are on either initrd or rootfs, they will be
- * loaded before control is passed to userland.
- */
-void __init load_default_modules(void)
-{
-	load_default_elevator_module();
-}
-
 static int run_init_process(const char *init_filename)
 {
 	argv_init[0] = init_filename;
@@ -1046,12 +1057,12 @@ static void mark_readonly(void)
 {
 	if (rodata_enabled) {
 		/*
-		 * load_module() results in W+X mappings, which are cleaned up
-		 * with call_rcu_sched().  Let's make sure that queued work is
+		 * load_module() results in W+X mappings, which are cleaned
+		 * up with call_rcu().  Let's make sure that queued work is
 		 * flushed so that we don't hit false positives looking for
 		 * insecure pages which are W+X.
 		 */
-		rcu_barrier_sched();
+		rcu_barrier();
 		mark_rodata_ro();
 		rodata_test();
 	} else
@@ -1063,6 +1074,11 @@ static inline void mark_readonly(void)
 	pr_warn("This architecture does not have kernel memory protection.\n");
 }
 #endif
+
+void __weak free_initmem(void)
+{
+	free_initmem_default(POISON_FREE_INITMEM);
+}
 
 static int __ref kernel_init(void *unused)
 {
@@ -1147,6 +1163,8 @@ static noinline void __init kernel_init_freeable(void)
 	sched_init_smp();
 
 	page_alloc_init_late();
+	/* Initialize page ext after all struct pages are initialized. */
+	page_ext_init();
 
 	do_basic_setup();
 
@@ -1180,5 +1198,4 @@ static noinline void __init kernel_init_freeable(void)
 	 */
 
 	integrity_load_keys();
-	load_default_modules();
 }

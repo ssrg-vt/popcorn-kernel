@@ -170,7 +170,7 @@ static void rtl8723bs_c2h_packet_handler(struct adapter *padapter,
 	/* DBG_871X("+%s() length =%d\n", __func__, length); */
 
 	tmp = rtw_zmalloc(length);
-	if (tmp == NULL)
+	if (!tmp)
 		return;
 
 	memcpy(tmp, pbuf, length);
@@ -262,7 +262,7 @@ static void rtl8723bs_recv_tasklet(void *priv)
 
 		while (ptr < precvbuf->ptail) {
 			precvframe = try_alloc_recvframe(precvpriv, precvbuf);
-			if(!precvframe)
+			if (!precvframe)
 				return;
 
 			/* rx desc parsing */
@@ -271,8 +271,8 @@ static void rtl8723bs_recv_tasklet(void *priv)
 
 			pattrib = &precvframe->u.hdr.attrib;
 
-			if(rx_crc_err(precvpriv, p_hal_data,
-				      pattrib, precvframe))
+			if (rx_crc_err(precvpriv, p_hal_data,
+				       pattrib, precvframe))
 				break;
 
 			rx_report_sz = RXDESC_SIZE + pattrib->drvinfo_sz;
@@ -280,8 +280,8 @@ static void rtl8723bs_recv_tasklet(void *priv)
 				pattrib->shift_sz +
 				pattrib->pkt_len;
 
-			if(pkt_exceeds_tail(precvpriv, ptr + pkt_offset,
-					    precvbuf->ptail, precvframe))
+			if (pkt_exceeds_tail(precvpriv, ptr + pkt_offset,
+					     precvbuf->ptail, precvframe))
 				break;
 
 			if ((pattrib->crc_err) || (pattrib->icv_err)) {
@@ -424,7 +424,7 @@ s32 rtl8723bs_init_recv_priv(struct adapter *padapter)
 
 	n = NR_RECVBUFF * sizeof(struct recv_buf) + 4;
 	precvpriv->pallocated_recv_buf = rtw_zmalloc(n);
-	if (precvpriv->pallocated_recv_buf == NULL) {
+	if (!precvpriv->pallocated_recv_buf) {
 		res = _FAIL;
 		RT_TRACE(_module_rtl871x_recv_c_, _drv_err_, ("alloc recv_buf fail!\n"));
 		goto exit;
@@ -439,7 +439,7 @@ s32 rtl8723bs_init_recv_priv(struct adapter *padapter)
 		if (res == _FAIL)
 			break;
 
-		if (precvbuf->pskb == NULL) {
+		if (!precvbuf->pskb) {
 			SIZE_PTR tmpaddr = 0;
 			SIZE_PTR alignment = 0;
 
@@ -453,7 +453,7 @@ s32 rtl8723bs_init_recv_priv(struct adapter *padapter)
 				skb_reserve(precvbuf->pskb, (RECVBUFF_ALIGN_SZ - alignment));
 			}
 
-			if (precvbuf->pskb == NULL) {
+			if (!precvbuf->pskb) {
 				DBG_871X("%s: alloc_skb fail!\n", __func__);
 			}
 		}

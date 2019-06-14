@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 
     bttv - Bt848 frame grabber driver
@@ -19,19 +20,6 @@
     Copyright (C) 2005, 2006 Michael H. Schimek <mschimek@gmx.at>
     Sponsored by OPQ Systems AB
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -2435,7 +2423,7 @@ static int bttv_s_fmt_vid_cap(struct file *file, void *priv,
 
 	f->fmt.pix.field = field;
 
-	/* update our state informations */
+	/* update our state information */
 	fh->fmt              = fmt;
 	fh->cap.field        = f->fmt.pix.field;
 	fh->cap.last         = V4L2_FIELD_NONE;
@@ -2792,19 +2780,17 @@ static int bttv_g_tuner(struct file *file, void *priv,
 	return 0;
 }
 
-static int bttv_cropcap(struct file *file, void *priv,
-				struct v4l2_cropcap *cap)
+static int bttv_g_pixelaspect(struct file *file, void *priv,
+			      int type, struct v4l2_fract *f)
 {
 	struct bttv_fh *fh = priv;
 	struct bttv *btv = fh->btv;
 
-	if (cap->type != V4L2_BUF_TYPE_VIDEO_CAPTURE &&
-	    cap->type != V4L2_BUF_TYPE_VIDEO_OVERLAY)
+	if (type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
 
 	/* defrect and bounds are set via g_selection */
-	cap->pixelaspect = bttv_tvnorms[btv->tvnorm].cropcap.pixelaspect;
-
+	*f = bttv_tvnorms[btv->tvnorm].cropcap.pixelaspect;
 	return 0;
 }
 
@@ -3066,7 +3052,7 @@ static int bttv_open(struct file *file)
 	   V4L2 apps we now reset the cropping parameters as seen through
 	   this fh, which is to say VIDIOC_G_SELECTION and scaling limit checks
 	   will use btv->crop[0], the default cropping parameters for the
-	   current video standard, and VIDIOC_S_FMT will not implicitely
+	   current video standard, and VIDIOC_S_FMT will not implicitly
 	   change the cropping parameters until VIDIOC_S_SELECTION has been
 	   called. */
 	fh->do_crop = !reset_crop; /* module parameter */
@@ -3162,7 +3148,7 @@ static const struct v4l2_ioctl_ops bttv_ioctl_ops = {
 	.vidioc_g_fmt_vbi_cap           = bttv_g_fmt_vbi_cap,
 	.vidioc_try_fmt_vbi_cap         = bttv_try_fmt_vbi_cap,
 	.vidioc_s_fmt_vbi_cap           = bttv_s_fmt_vbi_cap,
-	.vidioc_cropcap                 = bttv_cropcap,
+	.vidioc_g_pixelaspect           = bttv_g_pixelaspect,
 	.vidioc_reqbufs                 = bttv_reqbufs,
 	.vidioc_querybuf                = bttv_querybuf,
 	.vidioc_qbuf                    = bttv_qbuf,
@@ -3602,9 +3588,7 @@ static void
 bttv_irq_wakeup_video(struct bttv *btv, struct bttv_buffer_set *wakeup,
 		      struct bttv_buffer_set *curr, unsigned int state)
 {
-	struct timeval ts;
-
-	v4l2_get_timestamp(&ts);
+	u64 ts = ktime_get_ns();
 
 	if (wakeup->top == wakeup->bottom) {
 		if (NULL != wakeup->top && curr->top != wakeup->top) {
@@ -3645,7 +3629,7 @@ bttv_irq_wakeup_vbi(struct bttv *btv, struct bttv_buffer *wakeup,
 	if (NULL == wakeup)
 		return;
 
-	v4l2_get_timestamp(&wakeup->vb.ts);
+	wakeup->vb.ts = ktime_get_ns();
 	wakeup->vb.field_count = btv->field_count;
 	wakeup->vb.state = state;
 	wake_up(&wakeup->vb.done);
@@ -3715,7 +3699,7 @@ bttv_irq_wakeup_top(struct bttv *btv)
 	btv->curr.top = NULL;
 	bttv_risc_hook(btv, RISC_SLOT_O_FIELD, NULL, 0);
 
-	v4l2_get_timestamp(&wakeup->vb.ts);
+	wakeup->vb.ts = ktime_get_ns();
 	wakeup->vb.field_count = btv->field_count;
 	wakeup->vb.state = VIDEOBUF_DONE;
 	wake_up(&wakeup->vb.done);

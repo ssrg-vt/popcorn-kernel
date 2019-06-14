@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Zoned block device handling
  *
@@ -421,7 +422,7 @@ int blk_revalidate_disk_zones(struct gendisk *disk)
 	 * BIO based queues do not use a scheduler so only q->nr_zones
 	 * needs to be updated so that the sysfs exposed value is correct.
 	 */
-	if (!queue_is_rq_based(q)) {
+	if (!queue_is_mq(q)) {
 		q->nr_zones = nr_zones;
 		return 0;
 	}

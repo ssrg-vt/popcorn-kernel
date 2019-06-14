@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Updated: Karl MacMillan <kmacmillan@tresys.com>
  *
  *	Added conditional policy language extensions
@@ -9,9 +10,6 @@
  * Copyright (C) 2007 Hewlett-Packard Development Company, L.P.
  * Copyright (C) 2003 - 2004 Tresys Technology, LLC
  * Copyright (C) 2004 Red Hat, Inc., James Morris <jmorris@redhat.com>
- *	This program is free software; you can redistribute it and/or modify
- *	it under the terms of the GNU General Public License as published by
- *	the Free Software Foundation, version 2.
  */
 
 #include <linux/kernel.h>
@@ -1378,7 +1376,7 @@ static int sel_make_bools(struct selinux_fs_info *fsi)
 			goto out;
 		}
 
-		isec = (struct inode_security_struct *)inode->i_security;
+		isec = selinux_inode(inode);
 		ret = security_genfs_sid(fsi->state, "selinuxfs", page,
 					 SECCLASS_FILE, &sid);
 		if (ret) {
@@ -1953,7 +1951,7 @@ static int sel_fill_super(struct super_block *sb, void *data, int silent)
 	}
 
 	inode->i_ino = ++fsi->last_ino;
-	isec = (struct inode_security_struct *)inode->i_security;
+	isec = selinux_inode(inode);
 	isec->sid = SECINITSID_DEVNULL;
 	isec->sclass = SECCLASS_CHR_FILE;
 	isec->initialized = LABEL_INITIALIZED;

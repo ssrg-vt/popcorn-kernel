@@ -4038,15 +4038,14 @@ static void cnic_cm_process_kcqe(struct cnic_dev *dev, struct kcqe *kcqe)
 	case L5CM_RAMROD_CMD_ID_CLOSE: {
 		struct iscsi_kcqe *l5kcqe = (struct iscsi_kcqe *) kcqe;
 
-		if (l4kcqe->status != 0 || l5kcqe->completion_status != 0) {
-			netdev_warn(dev->netdev, "RAMROD CLOSE compl with status 0x%x completion status 0x%x\n",
-				    l4kcqe->status, l5kcqe->completion_status);
-			opcode = L4_KCQE_OPCODE_VALUE_CLOSE_COMP;
-			/* Fall through */
-		} else {
+		if (l4kcqe->status == 0 && l5kcqe->completion_status == 0)
 			break;
-		}
+
+		netdev_warn(dev->netdev, "RAMROD CLOSE compl with status 0x%x completion status 0x%x\n",
+			    l4kcqe->status, l5kcqe->completion_status);
+		opcode = L4_KCQE_OPCODE_VALUE_CLOSE_COMP;
 	}
+		/* Fall through */
 	case L4_KCQE_OPCODE_VALUE_RESET_RECEIVED:
 	case L4_KCQE_OPCODE_VALUE_CLOSE_COMP:
 	case L4_KCQE_OPCODE_VALUE_RESET_COMP:
@@ -5731,7 +5730,7 @@ static int cnic_netdev_event(struct notifier_block *this, unsigned long event,
 		if (realdev) {
 			dev = cnic_from_netdev(realdev);
 			if (dev) {
-				vid |= VLAN_TAG_PRESENT;
+				vid |= VLAN_CFI_MASK;	/* make non-zero */
 				cnic_rcv_netevent(dev->cnic_priv, event, vid);
 				cnic_put(dev);
 			}

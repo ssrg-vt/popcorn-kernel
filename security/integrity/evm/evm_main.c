@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2005-2010 IBM Corporation
  *
  * Author:
  * Mimi Zohar <zohar@us.ibm.com>
  * Kylene Hall <kjhall@us.ibm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 2 of the License.
  *
  * File: evm_main.c
  *	implements evm_inode_setxattr, evm_inode_post_setxattr,
@@ -16,7 +13,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/crypto.h>
 #include <linux/audit.h>
 #include <linux/xattr.h>
@@ -563,7 +560,6 @@ static int __init init_evm(void)
 {
 	int error;
 	struct list_head *pos, *q;
-	struct xattr_list *xattr;
 
 	evm_init_config();
 
@@ -580,11 +576,8 @@ static int __init init_evm(void)
 error:
 	if (error != 0) {
 		if (!list_empty(&evm_config_xattrnames)) {
-			list_for_each_safe(pos, q, &evm_config_xattrnames) {
-				xattr = list_entry(pos, struct xattr_list,
-						   list);
+			list_for_each_safe(pos, q, &evm_config_xattrnames)
 				list_del(pos);
-			}
 		}
 	}
 
@@ -592,6 +585,3 @@ error:
 }
 
 late_initcall(init_evm);
-
-MODULE_DESCRIPTION("Extended Verification Module");
-MODULE_LICENSE("GPL");

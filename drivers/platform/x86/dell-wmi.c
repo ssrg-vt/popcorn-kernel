@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Dell WMI hotkeys
  *
@@ -8,20 +9,6 @@
  * Copyright (C) 2005 Miloslav Trmac <mitr@volny.cz>
  * Copyright (C) 2005 Bernhard Rosenkraenzer <bero@arklinux.org>
  * Copyright (C) 2005 Dmitry Torokhov <dtor@mail.ru>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -49,8 +36,6 @@ MODULE_LICENSE("GPL");
 #define DELL_EVENT_GUID "9DBB5994-A997-11DA-B012-B622A1EF5492"
 
 static bool wmi_requires_smbios_request;
-
-MODULE_ALIAS("wmi:"DELL_EVENT_GUID);
 
 struct dell_wmi_priv {
 	struct input_dev *input_dev;
@@ -266,6 +251,9 @@ static const struct key_entry dell_wmi_keymap_type_0010[] = {
 
 	/* Fn-lock switched to multimedia keys */
 	{ KE_IGNORE, 0x1, { KEY_RESERVED } },
+
+	/* Keyboard backlight change notification */
+	{ KE_IGNORE, 0x3f, { KEY_RESERVED } },
 
 	/* Mic mute */
 	{ KE_KEY, 0x150, { KEY_MICMUTE } },
@@ -738,3 +726,5 @@ static void __exit dell_wmi_exit(void)
 	wmi_driver_unregister(&dell_wmi_driver);
 }
 module_exit(dell_wmi_exit);
+
+MODULE_DEVICE_TABLE(wmi, dell_wmi_id_table);

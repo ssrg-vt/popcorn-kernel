@@ -52,12 +52,8 @@
 
 #define GVT_MAX_VGPU 8
 
-enum {
-	INTEL_GVT_HYPERVISOR_XEN = 0,
-	INTEL_GVT_HYPERVISOR_KVM,
-};
-
 struct intel_gvt_host {
+	struct device *dev;
 	bool initialized;
 	int hypervisor_type;
 	struct intel_gvt_mpt *mpt;
@@ -98,7 +94,6 @@ struct intel_vgpu_fence {
 
 struct intel_vgpu_mmio {
 	void *vreg;
-	void *sreg;
 };
 
 #define INTEL_GVT_MAX_BAR_NUM 4
@@ -115,11 +110,9 @@ struct intel_vgpu_cfg_space {
 
 #define vgpu_cfg_space(vgpu) ((vgpu)->cfg_space.virtual_cfg_space)
 
-#define INTEL_GVT_MAX_PIPE 4
-
 struct intel_vgpu_irq {
 	bool irq_warn_once[INTEL_GVT_EVENT_MAX];
-	DECLARE_BITMAP(flip_done_event[INTEL_GVT_MAX_PIPE],
+	DECLARE_BITMAP(flip_done_event[I915_MAX_PIPES],
 		       INTEL_GVT_EVENT_MAX);
 };
 
@@ -148,9 +141,9 @@ enum {
 
 struct intel_vgpu_submission_ops {
 	const char *name;
-	int (*init)(struct intel_vgpu *vgpu, unsigned long engine_mask);
-	void (*clean)(struct intel_vgpu *vgpu, unsigned long engine_mask);
-	void (*reset)(struct intel_vgpu *vgpu, unsigned long engine_mask);
+	int (*init)(struct intel_vgpu *vgpu, intel_engine_mask_t engine_mask);
+	void (*clean)(struct intel_vgpu *vgpu, intel_engine_mask_t engine_mask);
+	void (*reset)(struct intel_vgpu *vgpu, intel_engine_mask_t engine_mask);
 };
 
 struct intel_vgpu_submission {
@@ -159,6 +152,10 @@ struct intel_vgpu_submission {
 	struct kmem_cache *workloads;
 	atomic_t running_workload_num;
 	struct i915_gem_context *shadow_ctx;
+	union {
+		u64 i915_context_pml4;
+		u64 i915_context_pdps[GEN8_3LVL_PDPES];
+	};
 	DECLARE_BITMAP(shadow_ctx_desc_updated, I915_NUM_ENGINES);
 	DECLARE_BITMAP(tlb_handle_pending, I915_NUM_ENGINES);
 	void *ring_scan_buffer[I915_NUM_ENGINES];
@@ -449,10 +446,6 @@ void intel_vgpu_write_fence(struct intel_vgpu *vgpu,
 	(*(u64 *)(vgpu->mmio.vreg + i915_mmio_reg_offset(reg)))
 #define vgpu_vreg64(vgpu, offset) \
 	(*(u64 *)(vgpu->mmio.vreg + (offset)))
-#define vgpu_sreg_t(vgpu, reg) \
-	(*(u32 *)(vgpu->mmio.sreg + i915_mmio_reg_offset(reg)))
-#define vgpu_sreg(vgpu, offset) \
-	(*(u32 *)(vgpu->mmio.sreg + (offset)))
 
 #define for_each_active_vgpu(gvt, vgpu, id) \
 	idr_for_each_entry((&(gvt)->vgpu_idr), (vgpu), (id)) \
@@ -488,7 +481,7 @@ struct intel_vgpu *intel_gvt_create_vgpu(struct intel_gvt *gvt,
 void intel_gvt_destroy_vgpu(struct intel_vgpu *vgpu);
 void intel_gvt_release_vgpu(struct intel_vgpu *vgpu);
 void intel_gvt_reset_vgpu_locked(struct intel_vgpu *vgpu, bool dmlr,
-				 unsigned int engine_mask);
+				 intel_engine_mask_t engine_mask);
 void intel_gvt_reset_vgpu(struct intel_vgpu *vgpu);
 void intel_gvt_activate_vgpu(struct intel_vgpu *vgpu);
 void intel_gvt_deactivate_vgpu(struct intel_vgpu *vgpu);
@@ -536,6 +529,8 @@ int intel_vgpu_emulate_cfg_read(struct intel_vgpu *vgpu, unsigned int offset,
 int intel_vgpu_emulate_cfg_write(struct intel_vgpu *vgpu, unsigned int offset,
 		void *p_data, unsigned int bytes);
 
+void intel_vgpu_emulate_hotplug(struct intel_vgpu *vgpu, bool connected);
+
 static inline u64 intel_vgpu_get_bar_gpa(struct intel_vgpu *vgpu, int bar)
 {
 	/* We are 64bit bar. */
@@ -577,6 +572,7 @@ struct intel_gvt_ops {
 	int (*vgpu_get_dmabuf)(struct intel_vgpu *vgpu, unsigned int);
 	int (*write_protect_handler)(struct intel_vgpu *, u64, void *,
 				     unsigned int);
+	void (*emulate_hotplug)(struct intel_vgpu *vgpu, bool connected);
 };
 
 
@@ -593,7 +589,7 @@ static inline void mmio_hw_access_pre(struct drm_i915_private *dev_priv)
 
 static inline void mmio_hw_access_post(struct drm_i915_private *dev_priv)
 {
-	intel_runtime_pm_put(dev_priv);
+	intel_runtime_pm_put_unchecked(dev_priv);
 }
 
 /**

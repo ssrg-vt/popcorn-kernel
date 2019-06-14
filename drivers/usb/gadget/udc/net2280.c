@@ -516,8 +516,8 @@ static int net2280_disable(struct usb_ep *_ep)
 	unsigned long		flags;
 
 	ep = container_of(_ep, struct net2280_ep, ep);
-	if (!_ep || !ep->desc || _ep->name == ep0name) {
-		pr_err("%s: Invalid ep=%p or ep->desc\n", __func__, _ep);
+	if (!_ep || _ep->name == ep0name) {
+		pr_err("%s: Invalid ep=%p\n", __func__, _ep);
 		return -EINVAL;
 	}
 	spin_lock_irqsave(&ep->dev->lock, flags);
@@ -789,8 +789,7 @@ static int read_fifo(struct net2280_ep *ep, struct net2280_request *req)
 		(void) readl(&ep->regs->ep_rsp);
 	}
 
-	return is_short || ((req->req.actual == req->req.length) &&
-			!req->req.zero);
+	return is_short || req->req.actual == req->req.length;
 }
 
 /* fill out dma descriptor to match a given request */
@@ -866,9 +865,6 @@ static void start_queue(struct net2280_ep *ep, u32 dmactl, u32 td_dma)
 	(void) readl(&ep->dev->pci->pcimstctl);
 
 	writel(BIT(DMA_START), &dma->dmastat);
-
-	if (!ep->is_in)
-		stop_out_naking(ep);
 }
 
 static void start_dma(struct net2280_ep *ep, struct net2280_request *req)
@@ -907,6 +903,7 @@ static void start_dma(struct net2280_ep *ep, struct net2280_request *req)
 			writel(BIT(DMA_START), &dma->dmastat);
 			return;
 		}
+		stop_out_naking(ep);
 	}
 
 	tmp = dmactl_default;
@@ -1060,7 +1057,7 @@ net2280_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 			/* PIO ... stuff the fifo, or unblock it.  */
 			if (ep->is_in)
 				write_fifo(ep, _req);
-			else if (list_empty(&ep->queue)) {
+			else {
 				u32	s;
 
 				/* OUT FIFO might have packet(s) buffered */
@@ -1275,9 +1272,9 @@ static int net2280_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 			break;
 	}
 	if (&req->req != _req) {
+		ep->stopped = stopped;
 		spin_unlock_irqrestore(&ep->dev->lock, flags);
-		dev_err(&ep->dev->pdev->dev, "%s: Request mismatch\n",
-								__func__);
+		ep_dbg(ep->dev, "%s: Request mismatch\n", __func__);
 		return -EINVAL;
 	}
 
@@ -2279,7 +2276,7 @@ static void usb_reinit_338x(struct net2280 *dev)
 	 * - It is safe to set for all connection speeds; all chip revisions.
 	 * - R-M-W to leave other bits undisturbed.
 	 * - Reference PLX TT-7372
-	*/
+	 */
 	val = readl(&dev->ll_chicken_reg->ll_tsn_chicken_bit);
 	val |= BIT(RECOVERY_IDLE_TO_RECOVER_FMW);
 	writel(val, &dev->ll_chicken_reg->ll_tsn_chicken_bit);

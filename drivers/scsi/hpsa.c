@@ -60,7 +60,7 @@
  * HPSA_DRIVER_VERSION must be 3 byte values (0-255) separated by '.'
  * with an optional trailing '-' followed by a byte value (0-255).
  */
-#define HPSA_DRIVER_VERSION "3.4.20-125"
+#define HPSA_DRIVER_VERSION "3.4.20-160"
 #define DRIVER_NAME "HP HPSA Driver (v " HPSA_DRIVER_VERSION ")"
 #define HPSA "hpsa"
 
@@ -251,10 +251,11 @@ static int number_of_controllers;
 
 static irqreturn_t do_hpsa_intr_intx(int irq, void *dev_id);
 static irqreturn_t do_hpsa_intr_msi(int irq, void *dev_id);
-static int hpsa_ioctl(struct scsi_device *dev, int cmd, void __user *arg);
+static int hpsa_ioctl(struct scsi_device *dev, unsigned int cmd,
+		      void __user *arg);
 
 #ifdef CONFIG_COMPAT
-static int hpsa_compat_ioctl(struct scsi_device *dev, int cmd,
+static int hpsa_compat_ioctl(struct scsi_device *dev, unsigned int cmd,
 	void __user *arg);
 #endif
 
@@ -965,7 +966,6 @@ static struct scsi_host_template hpsa_driver_template = {
 	.scan_finished		= hpsa_scan_finished,
 	.change_queue_depth	= hpsa_change_queue_depth,
 	.this_id		= -1,
-	.use_clustering		= ENABLE_CLUSTERING,
 	.eh_device_reset_handler = hpsa_eh_device_reset_handler,
 	.ioctl			= hpsa_ioctl,
 	.slave_alloc		= hpsa_slave_alloc,
@@ -1328,7 +1328,7 @@ static int hpsa_scsi_add_entry(struct ctlr_info *h,
 		dev_warn(&h->pdev->dev, "physical device with no LUN=0,"
 			" suspect firmware bug or unsupported hardware "
 			"configuration.\n");
-			return -1;
+		return -1;
 	}
 
 lun_assigned:
@@ -2647,8 +2647,19 @@ static void complete_scsi_command(struct CommandList *cp)
 			decode_sense_data(ei->SenseInfo, sense_data_size,
 				&sense_key, &asc, &ascq);
 		if (ei->ScsiStatus == SAM_STAT_CHECK_CONDITION) {
-			if (sense_key == ABORTED_COMMAND) {
+			switch (sense_key) {
+			case ABORTED_COMMAND:
 				cmd->result |= DID_SOFT_ERROR << 16;
+				break;
+			case UNIT_ATTENTION:
+				if (asc == 0x3F && ascq == 0x0E)
+					h->drv_req_rescan = 1;
+				break;
+			case ILLEGAL_REQUEST:
+				if (asc == 0x25 && ascq == 0x00) {
+					dev->removed = 1;
+					cmd->result = DID_NO_CONNECT << 16;
+				}
 				break;
 			}
 			break;
@@ -3956,14 +3967,18 @@ static int hpsa_update_device_info(struct ctlr_info *h,
 	memset(this_device->device_id, 0,
 		sizeof(this_device->device_id));
 	if (hpsa_get_device_id(h, scsi3addr, this_device->device_id, 8,
-		sizeof(this_device->device_id)) < 0)
+		sizeof(this_device->device_id)) < 0) {
 		dev_err(&h->pdev->dev,
-			"hpsa%d: %s: can't get device id for host %d:C0:T%d:L%d\t%s\t%.16s\n",
+			"hpsa%d: %s: can't get device id for [%d:%d:%d:%d]\t%s\t%.16s\n",
 			h->ctlr, __func__,
 			h->scsi_host->host_no,
-			this_device->target, this_device->lun,
+			this_device->bus, this_device->target,
+			this_device->lun,
 			scsi_device_type(this_device->devtype),
 			this_device->model);
+		rc = HPSA_LV_FAILED;
+		goto bail_out;
+	}
 
 	if ((this_device->devtype == TYPE_DISK ||
 		this_device->devtype == TYPE_ZBC) &&
@@ -4111,7 +4126,7 @@ static int hpsa_gather_lun_info(struct ctlr_info *h,
 			"maximum logical LUNs (%d) exceeded.  "
 			"%d LUNs ignored.\n", HPSA_MAX_LUN,
 			*nlogicals - HPSA_MAX_LUN);
-			*nlogicals = HPSA_MAX_LUN;
+		*nlogicals = HPSA_MAX_LUN;
 	}
 	if (*nlogicals + *nphysicals > HPSA_MAX_PHYS_LUN) {
 		dev_warn(&h->pdev->dev,
@@ -4663,6 +4678,7 @@ static int fixup_ioaccel_cdb(u8 *cdb, int *cdb_len)
 	case WRITE_6:
 	case WRITE_12:
 		is_write = 1;
+		/* fall through */
 	case READ_6:
 	case READ_12:
 		if (*cdb_len == 6) {
@@ -5093,6 +5109,7 @@ static int hpsa_scsi_ioaccel_raid_map(struct ctlr_info *h,
 	switch (cmd->cmnd[0]) {
 	case WRITE_6:
 		is_write = 1;
+		/* fall through */
 	case READ_6:
 		first_block = (((cmd->cmnd[1] & 0x1F) << 16) |
 				(cmd->cmnd[2] << 8) |
@@ -5103,6 +5120,7 @@ static int hpsa_scsi_ioaccel_raid_map(struct ctlr_info *h,
 		break;
 	case WRITE_10:
 		is_write = 1;
+		/* fall through */
 	case READ_10:
 		first_block =
 			(((u64) cmd->cmnd[2]) << 24) |
@@ -5115,6 +5133,7 @@ static int hpsa_scsi_ioaccel_raid_map(struct ctlr_info *h,
 		break;
 	case WRITE_12:
 		is_write = 1;
+		/* fall through */
 	case READ_12:
 		first_block =
 			(((u64) cmd->cmnd[2]) << 24) |
@@ -5129,6 +5148,7 @@ static int hpsa_scsi_ioaccel_raid_map(struct ctlr_info *h,
 		break;
 	case WRITE_16:
 		is_write = 1;
+		/* fall through */
 	case READ_16:
 		first_block =
 			(((u64) cmd->cmnd[2]) << 56) |
@@ -5804,7 +5824,7 @@ static int hpsa_send_test_unit_ready(struct ctlr_info *h,
 	/* Send the Test Unit Ready, fill_cmd can't fail, no mapping */
 	(void) fill_cmd(c, TEST_UNIT_READY, h,
 			NULL, 0, 0, lunaddr, TYPE_CMD);
-	rc = hpsa_scsi_do_simple_cmd(h, c, reply_queue, DEFAULT_TIMEOUT);
+	rc = hpsa_scsi_do_simple_cmd(h, c, reply_queue, NO_TIMEOUT);
 	if (rc)
 		return rc;
 	/* no unmap needed here because no data xfer. */
@@ -6123,7 +6143,7 @@ static void cmd_free(struct ctlr_info *h, struct CommandList *c)
 
 #ifdef CONFIG_COMPAT
 
-static int hpsa_ioctl32_passthru(struct scsi_device *dev, int cmd,
+static int hpsa_ioctl32_passthru(struct scsi_device *dev, unsigned int cmd,
 	void __user *arg)
 {
 	IOCTL32_Command_struct __user *arg32 =
@@ -6160,7 +6180,7 @@ static int hpsa_ioctl32_passthru(struct scsi_device *dev, int cmd,
 }
 
 static int hpsa_ioctl32_big_passthru(struct scsi_device *dev,
-	int cmd, void __user *arg)
+	unsigned int cmd, void __user *arg)
 {
 	BIG_IOCTL32_Command_struct __user *arg32 =
 	    (BIG_IOCTL32_Command_struct __user *) arg;
@@ -6197,7 +6217,8 @@ static int hpsa_ioctl32_big_passthru(struct scsi_device *dev,
 	return err;
 }
 
-static int hpsa_compat_ioctl(struct scsi_device *dev, int cmd, void __user *arg)
+static int hpsa_compat_ioctl(struct scsi_device *dev, unsigned int cmd,
+			     void __user *arg)
 {
 	switch (cmd) {
 	case CCISS_GETPCIINFO:
@@ -6517,7 +6538,8 @@ static void check_ioctl_unit_attention(struct ctlr_info *h,
 /*
  * ioctl
  */
-static int hpsa_ioctl(struct scsi_device *dev, int cmd, void __user *arg)
+static int hpsa_ioctl(struct scsi_device *dev, unsigned int cmd,
+		      void __user *arg)
 {
 	struct ctlr_info *h;
 	void __user *argp = (void __user *)arg;

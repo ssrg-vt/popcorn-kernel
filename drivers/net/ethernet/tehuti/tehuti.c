@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Tehuti Networks(R) Network Driver
  * ethtool interface implementation
  * Copyright (C) 2007 Tehuti Networks Ltd. All rights reserved
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 /*
@@ -1739,7 +1735,7 @@ static void bdx_tx_cleanup(struct bdx_priv *priv)
 		tx_level -= db->rptr->len;	/* '-' koz len is negative */
 
 		/* now should come skb pointer - free it */
-		dev_kfree_skb_irq(db->rptr->addr.skb);
+		dev_consume_skb_irq(db->rptr->addr.skb);
 		bdx_tx_db_inc_rptr(db);
 	}
 

@@ -73,10 +73,18 @@ struct hw_asic_id {
 	void *atombios_base_address;
 };
 
+struct dc_perf_trace {
+	unsigned long read_count;
+	unsigned long write_count;
+	unsigned long last_entry_read;
+	unsigned long last_entry_write;
+};
+
 struct dc_context {
 	struct dc *dc;
 
 	void *driver_context; /* e.g. amdgpu_device */
+	struct dc_perf_trace *perf_trace;
 	void *cgs_device;
 
 	enum dce_environment dce_environment;
@@ -89,13 +97,13 @@ struct dc_context {
 	struct dc_bios *dc_bios;
 	bool created_bios;
 	struct gpio_service *gpio_service;
-	struct i2caux *i2caux;
 	uint32_t dc_sink_id_count;
+	uint32_t dc_stream_id_count;
 	uint64_t fbc_gpu_addr;
 };
 
 
-#define DC_MAX_EDID_BUFFER_SIZE 512
+#define DC_MAX_EDID_BUFFER_SIZE 1024
 #define EDID_BLOCK_SIZE 128
 #define MAX_SURFACE_NUM 4
 #define NUM_PIXEL_FORMATS 10
@@ -191,9 +199,9 @@ union display_content_support {
 };
 
 struct dc_panel_patch {
-	unsigned int disconnect_delay;
 	unsigned int dppowerup_delay;
 	unsigned int extra_t12_ms;
+	unsigned int extra_delay_backlight_off;
 };
 
 struct dc_edid_caps {
@@ -387,7 +395,7 @@ struct dc_dongle_caps {
 	bool is_dp_hdmi_ycbcr422_converter;
 	bool is_dp_hdmi_ycbcr420_converter;
 	uint32_t dp_hdmi_max_bpc;
-	uint32_t dp_hdmi_max_pixel_clk;
+	uint32_t dp_hdmi_max_pixel_clk_in_khz;
 };
 /* Scaling format */
 enum scaling_transformation {
@@ -542,9 +550,9 @@ struct psr_config {
 	unsigned char psr_version;
 	unsigned int psr_rfb_setup_time;
 	bool psr_exit_link_training_required;
-
 	bool psr_frame_capture_indication_req;
 	unsigned int psr_sdp_transmit_line_num_deadline;
+	bool allow_smu_optimizations;
 };
 
 union dmcu_psr_level {
@@ -646,6 +654,7 @@ struct psr_context {
 	 * continuing powerd own
 	 */
 	unsigned int frame_delay;
+	bool allow_smu_optimizations;
 };
 
 struct colorspace_transform {

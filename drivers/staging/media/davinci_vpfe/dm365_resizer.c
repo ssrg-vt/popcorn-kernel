@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2012 Texas Instruments Inc
  *
@@ -9,10 +10,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  *
  * Contributors:
  *      Manjunath Hadli <manjunath.hadli@ti.com>
@@ -389,7 +386,7 @@ resizer_calculate_down_scale_f_div_param(struct device *dev,
 	}
 	o = 10 + (two_power << 2);
 	if (((input_width << 7) / rsz) % 2)
-		o += (((CEIL(rsz, 1024)) << 1) << n);
+		o += ((DIV_ROUND_UP(rsz, 1024) << 1) << n);
 	h2 = output_width - h1;
 	/* phi */
 	val = (h1 * rsz) - (((upper_h1 - (o - 10)) / two_power) << 8);
@@ -633,7 +630,7 @@ resizer_calculate_normal_f_div_param(struct device *dev, int input_width,
 		val /= rsz << 1;
 		val <<= 1;
 		val += 2;
-		o += ((CEIL(rsz, 1024)) << 1);
+		o += (DIV_ROUND_UP(rsz, 1024) << 1);
 		h1 = val;
 	}
 	h2 = output_width - h1;
@@ -1287,7 +1284,7 @@ static int resizer_set_stream(struct v4l2_subdev *sd, int enable)
  * @cfg: V4L2 subdev pad config
  * @pad: pad number.
  * @which: wanted subdev format.
- * Retun wanted mbus frame format.
+ * Return wanted mbus frame format.
  */
 static struct v4l2_mbus_framefmt *
 __resizer_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
@@ -1788,7 +1785,7 @@ void vpfe_resizer_unregister_entities(struct vpfe_resizer_device *vpfe_rsz)
 
 /*
  * vpfe_resizer_register_entities() - Register entity
- * @resizer - pointer to resizer devive.
+ * @resizer - pointer to resizer device.
  * @vdev: pointer to v4l2 device structure.
  */
 int vpfe_resizer_register_entities(struct vpfe_resizer_device *resizer,
@@ -1884,7 +1881,7 @@ int vpfe_resizer_init(struct vpfe_resizer_device *vpfe_rsz,
 	struct v4l2_subdev *sd = &vpfe_rsz->crop_resizer.subdev;
 	struct media_pad *pads = &vpfe_rsz->crop_resizer.pads[0];
 	struct media_entity *me = &sd->entity;
-	static resource_size_t  res_len;
+	resource_size_t res_len;
 	struct resource *res;
 	int ret;
 

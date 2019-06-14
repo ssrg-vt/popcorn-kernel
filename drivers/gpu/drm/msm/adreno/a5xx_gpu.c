@@ -1,26 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2016-2017 The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/cpumask.h>
 #include <linux/qcom_scm.h>
-#include <linux/dma-mapping.h>
-#include <linux/of_address.h>
-#include <linux/soc/qcom/mdt_loader.h>
 #include <linux/pm_opp.h>
 #include <linux/nvmem-consumer.h>
-#include <linux/iopoll.h>
 #include <linux/slab.h>
 #include "msm_gem.h"
 #include "msm_mmu.h"
@@ -30,94 +17,6 @@ extern bool hang_debug;
 static void a5xx_dump(struct msm_gpu *gpu);
 
 #define GPU_PAS_ID 13
-
-static int zap_shader_load_mdt(struct msm_gpu *gpu, const char *fwname)
-{
-	struct device *dev = &gpu->pdev->dev;
-	const struct firmware *fw;
-	struct device_node *np;
-	struct resource r;
-	phys_addr_t mem_phys;
-	ssize_t mem_size;
-	void *mem_region = NULL;
-	int ret;
-
-	if (!IS_ENABLED(CONFIG_ARCH_QCOM))
-		return -EINVAL;
-
-	np = of_get_child_by_name(dev->of_node, "zap-shader");
-	if (!np)
-		return -ENODEV;
-
-	np = of_parse_phandle(np, "memory-region", 0);
-	if (!np)
-		return -EINVAL;
-
-	ret = of_address_to_resource(np, 0, &r);
-	if (ret)
-		return ret;
-
-	mem_phys = r.start;
-	mem_size = resource_size(&r);
-
-	/* Request the MDT file for the firmware */
-	fw = adreno_request_fw(to_adreno_gpu(gpu), fwname);
-	if (IS_ERR(fw)) {
-		DRM_DEV_ERROR(dev, "Unable to load %s\n", fwname);
-		return PTR_ERR(fw);
-	}
-
-	/* Figure out how much memory we need */
-	mem_size = qcom_mdt_get_size(fw);
-	if (mem_size < 0) {
-		ret = mem_size;
-		goto out;
-	}
-
-	/* Allocate memory for the firmware image */
-	mem_region = memremap(mem_phys, mem_size,  MEMREMAP_WC);
-	if (!mem_region) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	/*
-	 * Load the rest of the MDT
-	 *
-	 * Note that we could be dealing with two different paths, since
-	 * with upstream linux-firmware it would be in a qcom/ subdir..
-	 * adreno_request_fw() handles this, but qcom_mdt_load() does
-	 * not.  But since we've already gotten thru adreno_request_fw()
-	 * we know which of the two cases it is:
-	 */
-	if (to_adreno_gpu(gpu)->fwloc == FW_LOCATION_LEGACY) {
-		ret = qcom_mdt_load(dev, fw, fwname, GPU_PAS_ID,
-				mem_region, mem_phys, mem_size, NULL);
-	} else {
-		char *newname;
-
-		newname = kasprintf(GFP_KERNEL, "qcom/%s", fwname);
-
-		ret = qcom_mdt_load(dev, fw, newname, GPU_PAS_ID,
-				mem_region, mem_phys, mem_size, NULL);
-		kfree(newname);
-	}
-	if (ret)
-		goto out;
-
-	/* Send the image to the secure world */
-	ret = qcom_scm_pas_auth_and_reset(GPU_PAS_ID);
-	if (ret)
-		DRM_DEV_ERROR(dev, "Unable to authorize the image\n");
-
-out:
-	if (mem_region)
-		memunmap(mem_region);
-
-	release_firmware(fw);
-
-	return ret;
-}
 
 static void a5xx_flush(struct msm_gpu *gpu, struct msm_ringbuffer *ring)
 {
@@ -511,13 +410,16 @@ static int a5xx_ucode_init(struct msm_gpu *gpu)
 		a5xx_gpu->pm4_bo = adreno_fw_create_bo(gpu,
 			adreno_gpu->fw[ADRENO_FW_PM4], &a5xx_gpu->pm4_iova);
 
+
 		if (IS_ERR(a5xx_gpu->pm4_bo)) {
 			ret = PTR_ERR(a5xx_gpu->pm4_bo);
 			a5xx_gpu->pm4_bo = NULL;
-			dev_err(gpu->dev->dev, "could not allocate PM4: %d\n",
+			DRM_DEV_ERROR(gpu->dev->dev, "could not allocate PM4: %d\n",
 				ret);
 			return ret;
 		}
+
+		msm_gem_object_set_name(a5xx_gpu->pm4_bo, "pm4fw");
 	}
 
 	if (!a5xx_gpu->pfp_bo) {
@@ -527,10 +429,12 @@ static int a5xx_ucode_init(struct msm_gpu *gpu)
 		if (IS_ERR(a5xx_gpu->pfp_bo)) {
 			ret = PTR_ERR(a5xx_gpu->pfp_bo);
 			a5xx_gpu->pfp_bo = NULL;
-			dev_err(gpu->dev->dev, "could not allocate PFP: %d\n",
+			DRM_DEV_ERROR(gpu->dev->dev, "could not allocate PFP: %d\n",
 				ret);
 			return ret;
 		}
+
+		msm_gem_object_set_name(a5xx_gpu->pfp_bo, "pfpfw");
 	}
 
 	gpu_write64(gpu, REG_A5XX_CP_ME_INSTR_BASE_LO,
@@ -559,8 +463,6 @@ static int a5xx_zap_shader_resume(struct msm_gpu *gpu)
 static int a5xx_zap_shader_init(struct msm_gpu *gpu)
 {
 	static bool loaded;
-	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
-	struct platform_device *pdev = gpu->pdev;
 	int ret;
 
 	/*
@@ -570,23 +472,9 @@ static int a5xx_zap_shader_init(struct msm_gpu *gpu)
 	if (loaded)
 		return a5xx_zap_shader_resume(gpu);
 
-	/* We need SCM to be able to load the firmware */
-	if (!qcom_scm_is_available()) {
-		DRM_DEV_ERROR(&pdev->dev, "SCM is not available\n");
-		return -EPROBE_DEFER;
-	}
-
-	/* Each GPU has a target specific zap shader firmware name to use */
-	if (!adreno_gpu->info->zapfw) {
-		DRM_DEV_ERROR(&pdev->dev,
-			"Zap shader firmware file not specified for this target\n");
-		return -ENODEV;
-	}
-
-	ret = zap_shader_load_mdt(gpu, adreno_gpu->info->zapfw);
+	ret = adreno_zap_shader_load(gpu, GPU_PAS_ID);
 
 	loaded = !ret;
-
 	return ret;
 }
 
@@ -841,20 +729,17 @@ static void a5xx_destroy(struct msm_gpu *gpu)
 	a5xx_preempt_fini(gpu);
 
 	if (a5xx_gpu->pm4_bo) {
-		if (a5xx_gpu->pm4_iova)
-			msm_gem_put_iova(a5xx_gpu->pm4_bo, gpu->aspace);
+		msm_gem_unpin_iova(a5xx_gpu->pm4_bo, gpu->aspace);
 		drm_gem_object_put_unlocked(a5xx_gpu->pm4_bo);
 	}
 
 	if (a5xx_gpu->pfp_bo) {
-		if (a5xx_gpu->pfp_iova)
-			msm_gem_put_iova(a5xx_gpu->pfp_bo, gpu->aspace);
+		msm_gem_unpin_iova(a5xx_gpu->pfp_bo, gpu->aspace);
 		drm_gem_object_put_unlocked(a5xx_gpu->pfp_bo);
 	}
 
 	if (a5xx_gpu->gpmu_bo) {
-		if (a5xx_gpu->gpmu_iova)
-			msm_gem_put_iova(a5xx_gpu->gpmu_bo, gpu->aspace);
+		msm_gem_unpin_iova(a5xx_gpu->gpmu_bo, gpu->aspace);
 		drm_gem_object_put_unlocked(a5xx_gpu->gpmu_bo);
 	}
 
@@ -1028,7 +913,7 @@ static void a5xx_fault_detect_irq(struct msm_gpu *gpu)
 	struct msm_drm_private *priv = dev->dev_private;
 	struct msm_ringbuffer *ring = gpu->funcs->active_ring(gpu);
 
-	dev_err(dev->dev, "gpu fault ring %d fence %x status %8.8X rb %4.4x/%4.4x ib1 %16.16llX/%4.4x ib2 %16.16llX/%4.4x\n",
+	DRM_DEV_ERROR(dev->dev, "gpu fault ring %d fence %x status %8.8X rb %4.4x/%4.4x ib1 %16.16llX/%4.4x ib2 %16.16llX/%4.4x\n",
 		ring ? ring->id : -1, ring ? ring->seqno : 0,
 		gpu_read(gpu, REG_A5XX_RBBM_STATUS),
 		gpu_read(gpu, REG_A5XX_CP_RB_RPTR),
@@ -1134,7 +1019,7 @@ static const u32 a5xx_registers[] = {
 
 static void a5xx_dump(struct msm_gpu *gpu)
 {
-	dev_info(gpu->dev->dev, "status:   %08x\n",
+	DRM_DEV_INFO(gpu->dev->dev, "status:   %08x\n",
 		gpu_read(gpu, REG_A5XX_RBBM_STATUS));
 	adreno_dump(gpu);
 }
@@ -1211,10 +1096,6 @@ struct a5xx_gpu_state {
 	u32 *hlsqregs;
 };
 
-#define gpu_poll_timeout(gpu, addr, val, cond, interval, timeout) \
-	readl_poll_timeout((gpu)->mmio + ((addr) << 2), val, cond, \
-		interval, timeout)
-
 static int a5xx_crashdumper_init(struct msm_gpu *gpu,
 		struct a5xx_crashdumper *dumper)
 {
@@ -1222,19 +1103,10 @@ static int a5xx_crashdumper_init(struct msm_gpu *gpu,
 		SZ_1M, MSM_BO_UNCACHED, gpu->aspace,
 		&dumper->bo, &dumper->iova);
 
-	if (IS_ERR(dumper->ptr))
-		return PTR_ERR(dumper->ptr);
+	if (!IS_ERR(dumper->ptr))
+		msm_gem_object_set_name(dumper->bo, "crashdump");
 
-	return 0;
-}
-
-static void a5xx_crashdumper_free(struct msm_gpu *gpu,
-		struct a5xx_crashdumper *dumper)
-{
-	msm_gem_put_iova(dumper->bo, gpu->aspace);
-	msm_gem_put_vaddr(dumper->bo);
-
-	drm_gem_object_put(dumper->bo);
+	return PTR_ERR_OR_ZERO(dumper->ptr);
 }
 
 static int a5xx_crashdumper_run(struct msm_gpu *gpu,
@@ -1329,7 +1201,7 @@ static void a5xx_gpu_state_get_hlsq_regs(struct msm_gpu *gpu,
 
 	if (a5xx_crashdumper_run(gpu, &dumper)) {
 		kfree(a5xx_state->hlsqregs);
-		a5xx_crashdumper_free(gpu, &dumper);
+		msm_gem_kernel_put(dumper.bo, gpu->aspace, true);
 		return;
 	}
 
@@ -1337,7 +1209,7 @@ static void a5xx_gpu_state_get_hlsq_regs(struct msm_gpu *gpu,
 	memcpy(a5xx_state->hlsqregs, dumper.ptr + (256 * SZ_1K),
 		count * sizeof(u32));
 
-	a5xx_crashdumper_free(gpu, &dumper);
+	msm_gem_kernel_put(dumper.bo, gpu->aspace, true);
 }
 
 static struct msm_gpu_state *a5xx_gpu_state_get(struct msm_gpu *gpu)
@@ -1508,7 +1380,7 @@ struct msm_gpu *a5xx_gpu_init(struct drm_device *dev)
 	int ret;
 
 	if (!pdev) {
-		dev_err(dev->dev, "No A5XX device is defined\n");
+		DRM_DEV_ERROR(dev->dev, "No A5XX device is defined\n");
 		return ERR_PTR(-ENXIO);
 	}
 

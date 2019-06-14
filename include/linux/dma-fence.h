@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Fence mechanism for dma-buf to allow for asynchronous dma access
  *
@@ -7,15 +8,6 @@
  * Authors:
  * Rob Clark <robdclark@gmail.com>
  * Maarten Lankhorst <maarten.lankhorst@canonical.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #ifndef __LINUX_DMA_FENCE_H
@@ -77,7 +69,7 @@ struct dma_fence {
 	struct list_head cb_list;
 	spinlock_t *lock;
 	u64 context;
-	unsigned seqno;
+	u64 seqno;
 	unsigned long flags;
 	ktime_t timestamp;
 	int error;
@@ -111,6 +103,14 @@ struct dma_fence_cb {
  *
  */
 struct dma_fence_ops {
+	/**
+	 * @use_64bit_seqno:
+	 *
+	 * True if this dma_fence implementation uses 64bit seqno, false
+	 * otherwise.
+	 */
+	bool use_64bit_seqno;
+
 	/**
 	 * @get_driver_name:
 	 *
@@ -244,7 +244,7 @@ struct dma_fence_ops {
 };
 
 void dma_fence_init(struct dma_fence *fence, const struct dma_fence_ops *ops,
-		    spinlock_t *lock, u64 context, unsigned seqno);
+		    spinlock_t *lock, u64 context, u64 seqno);
 
 void dma_fence_release(struct kref *kref);
 void dma_fence_free(struct dma_fence *fence);
@@ -410,13 +410,22 @@ dma_fence_is_signaled(struct dma_fence *fence)
  * __dma_fence_is_later - return if f1 is chronologically later than f2
  * @f1: the first fence's seqno
  * @f2: the second fence's seqno from the same context
+ * @ops: dma_fence_ops associated with the seqno
  *
  * Returns true if f1 is chronologically later than f2. Both fences must be
  * from the same context, since a seqno is not common across contexts.
  */
-static inline bool __dma_fence_is_later(u32 f1, u32 f2)
+static inline bool __dma_fence_is_later(u64 f1, u64 f2,
+					const struct dma_fence_ops *ops)
 {
-	return (int)(f1 - f2) > 0;
+	/* This is for backward compatibility with drivers which can only handle
+	 * 32bit sequence numbers. Use a 64bit compare when the driver says to
+	 * do so.
+	 */
+	if (ops->use_64bit_seqno)
+		return f1 > f2;
+
+	return (int)(lower_32_bits(f1) - lower_32_bits(f2)) > 0;
 }
 
 /**
@@ -433,7 +442,7 @@ static inline bool dma_fence_is_later(struct dma_fence *f1,
 	if (WARN_ON(f1->context != f2->context))
 		return false;
 
-	return __dma_fence_is_later(f1->seqno, f2->seqno);
+	return __dma_fence_is_later(f1->seqno, f2->seqno, f1->ops);
 }
 
 /**
@@ -541,27 +550,28 @@ static inline signed long dma_fence_wait(struct dma_fence *fence, bool intr)
 	return ret < 0 ? ret : 0;
 }
 
+struct dma_fence *dma_fence_get_stub(void);
 u64 dma_fence_context_alloc(unsigned num);
 
 #define DMA_FENCE_TRACE(f, fmt, args...) \
 	do {								\
 		struct dma_fence *__ff = (f);				\
 		if (IS_ENABLED(CONFIG_DMA_FENCE_TRACE))			\
-			pr_info("f %llu#%u: " fmt,			\
+			pr_info("f %llu#%llu: " fmt,			\
 				__ff->context, __ff->seqno, ##args);	\
 	} while (0)
 
 #define DMA_FENCE_WARN(f, fmt, args...) \
 	do {								\
 		struct dma_fence *__ff = (f);				\
-		pr_warn("f %llu#%u: " fmt, __ff->context, __ff->seqno,	\
+		pr_warn("f %llu#%llu: " fmt, __ff->context, __ff->seqno,\
 			 ##args);					\
 	} while (0)
 
 #define DMA_FENCE_ERR(f, fmt, args...) \
 	do {								\
 		struct dma_fence *__ff = (f);				\
-		pr_err("f %llu#%u: " fmt, __ff->context, __ff->seqno,	\
+		pr_err("f %llu#%llu: " fmt, __ff->context, __ff->seqno,	\
 			##args);					\
 	} while (0)
 

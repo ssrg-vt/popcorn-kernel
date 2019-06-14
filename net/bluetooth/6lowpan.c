@@ -1,14 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
    Copyright (c) 2013-2014 Intel Corp.
 
-   This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License version 2 and
-   only version 2 as published by the Free Software Foundation.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
 */
 
 #include <linux/if_arp.h>
@@ -607,7 +600,7 @@ static void ifup(struct net_device *netdev)
 	int err;
 
 	rtnl_lock();
-	err = dev_open(netdev);
+	err = dev_open(netdev, NULL);
 	if (err < 0)
 		BT_INFO("iface %s cannot be opened (%d)", netdev->name, err);
 	rtnl_unlock();
@@ -1108,8 +1101,8 @@ static int lowpan_enable_get(void *data, u64 *val)
 	return 0;
 }
 
-DEFINE_SIMPLE_ATTRIBUTE(lowpan_enable_fops, lowpan_enable_get,
-			lowpan_enable_set, "%llu\n");
+DEFINE_DEBUGFS_ATTRIBUTE(lowpan_enable_fops, lowpan_enable_get,
+			 lowpan_enable_set, "%llu\n");
 
 static ssize_t lowpan_control_write(struct file *fp,
 				    const char __user *user_buffer,
@@ -1278,9 +1271,10 @@ static struct notifier_block bt_6lowpan_dev_notifier = {
 
 static int __init bt_6lowpan_init(void)
 {
-	lowpan_enable_debugfs = debugfs_create_file("6lowpan_enable", 0644,
-						    bt_debugfs, NULL,
-						    &lowpan_enable_fops);
+	lowpan_enable_debugfs = debugfs_create_file_unsafe("6lowpan_enable",
+							   0644, bt_debugfs,
+							   NULL,
+							   &lowpan_enable_fops);
 	lowpan_control_debugfs = debugfs_create_file("6lowpan_control", 0644,
 						     bt_debugfs, NULL,
 						     &lowpan_control_fops);

@@ -29,7 +29,6 @@
 #include <linux/syscalls.h>
 #include <linux/uaccess.h>
 #include <linux/interrupt.h>
-#include <linux/mutex.h>
 #include <linux/cdev.h>
 #include <linux/file.h>
 #include "uapi/vsoc_shm.h"
@@ -260,7 +259,8 @@ do_create_fd_scoped_permission(struct vsoc_device_region *region_p,
 	atomic_t *owner_ptr = NULL;
 	struct vsoc_device_region *managed_region_p;
 
-	if (copy_from_user(&np->permission, &arg->perm, sizeof(*np)) ||
+	if (copy_from_user(&np->permission,
+			   &arg->perm, sizeof(np->permission)) ||
 	    copy_from_user(&managed_fd,
 			   &arg->managed_region_fd, sizeof(managed_fd))) {
 		return -EFAULT;

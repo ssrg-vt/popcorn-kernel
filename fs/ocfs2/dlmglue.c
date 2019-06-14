@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* -*- mode: c; c-basic-offset: 8; -*-
  * vim: noexpandtab sw=8 ts=8 sts=0:
  *
@@ -6,21 +7,6 @@
  * Code which implements an OCFS2 specific interface to our DLM.
  *
  * Copyright (C) 2003, 2004 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  */
 
 #include <linux/types.h>
@@ -686,6 +672,9 @@ void ocfs2_trim_fs_lock_res_init(struct ocfs2_super *osb)
 {
 	struct ocfs2_lock_res *lockres = &osb->osb_trim_fs_lockres;
 
+	/* Only one trimfs thread are allowed to work at the same time. */
+	mutex_lock(&osb->obs_trim_fs_mutex);
+
 	ocfs2_lock_res_init_once(lockres);
 	ocfs2_build_lock_name(OCFS2_LOCK_TYPE_TRIM_FS, 0, 0, lockres->l_name);
 	ocfs2_lock_res_init_common(osb, lockres, OCFS2_LOCK_TYPE_TRIM_FS,
@@ -698,6 +687,8 @@ void ocfs2_trim_fs_lock_res_uninit(struct ocfs2_super *osb)
 
 	ocfs2_simple_drop_lockres(osb, lockres);
 	ocfs2_lock_res_free(lockres);
+
+	mutex_unlock(&osb->obs_trim_fs_mutex);
 }
 
 static void ocfs2_orphan_scan_lock_res_init(struct ocfs2_lock_res *res,

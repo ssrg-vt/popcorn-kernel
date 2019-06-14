@@ -518,10 +518,14 @@ __read_extent_tree_block(const char *function, unsigned int line,
 	}
 	if (buffer_verified(bh) && !(flags & EXT4_EX_FORCE_CACHE))
 		return bh;
-	err = __ext4_ext_check(function, line, inode,
-			       ext_block_hdr(bh), depth, pblk);
-	if (err)
-		goto errout;
+	if (!ext4_has_feature_journal(inode->i_sb) ||
+	    (inode->i_ino !=
+	     le32_to_cpu(EXT4_SB(inode->i_sb)->s_es->s_journal_inum))) {
+		err = __ext4_ext_check(function, line, inode,
+				       ext_block_hdr(bh), depth, pblk);
+		if (err)
+			goto errout;
+	}
 	set_buffer_verified(bh);
 	/*
 	 * If this is a leaf block, cache all of its entries
@@ -1035,6 +1039,7 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 	__le32 border;
 	ext4_fsblk_t *ablocks = NULL; /* array of allocated blocks */
 	int err = 0;
+	size_t ext_size = 0;
 
 	/* make decision: where to split? */
 	/* FIXME: now decision is simplest: at current extent */
@@ -1126,6 +1131,10 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 		le16_add_cpu(&neh->eh_entries, m);
 	}
 
+	/* zero out unused area in the extent block */
+	ext_size = sizeof(struct ext4_extent_header) +
+		sizeof(struct ext4_extent) * le16_to_cpu(neh->eh_entries);
+	memset(bh->b_data + ext_size, 0, inode->i_sb->s_blocksize - ext_size);
 	ext4_extent_block_csum_set(inode, neh);
 	set_buffer_uptodate(bh);
 	unlock_buffer(bh);
@@ -1205,6 +1214,11 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 				sizeof(struct ext4_extent_idx) * m);
 			le16_add_cpu(&neh->eh_entries, m);
 		}
+		/* zero out unused area in the extent block */
+		ext_size = sizeof(struct ext4_extent_header) +
+		   (sizeof(struct ext4_extent) * le16_to_cpu(neh->eh_entries));
+		memset(bh->b_data + ext_size, 0,
+			inode->i_sb->s_blocksize - ext_size);
 		ext4_extent_block_csum_set(inode, neh);
 		set_buffer_uptodate(bh);
 		unlock_buffer(bh);
@@ -1270,6 +1284,7 @@ static int ext4_ext_grow_indepth(handle_t *handle, struct inode *inode,
 	ext4_fsblk_t newblock, goal = 0;
 	struct ext4_super_block *es = EXT4_SB(inode->i_sb)->s_es;
 	int err = 0;
+	size_t ext_size = 0;
 
 	/* Try to prepend new index to old one */
 	if (ext_depth(inode))
@@ -1295,9 +1310,11 @@ static int ext4_ext_grow_indepth(handle_t *handle, struct inode *inode,
 		goto out;
 	}
 
+	ext_size = sizeof(EXT4_I(inode)->i_data);
 	/* move top-level index/leaf into new block */
-	memmove(bh->b_data, EXT4_I(inode)->i_data,
-		sizeof(EXT4_I(inode)->i_data));
+	memmove(bh->b_data, EXT4_I(inode)->i_data, ext_size);
+	/* zero out unused area in the extent block */
+	memset(bh->b_data + ext_size, 0, inode->i_sb->s_blocksize - ext_size);
 
 	/* set size of new block */
 	neh = ext_block_hdr(bh);
@@ -2956,14 +2973,17 @@ again:
 			if (err < 0)
 				goto out;
 
-		} else if (sbi->s_cluster_ratio > 1 && end >= ex_end) {
+		} else if (sbi->s_cluster_ratio > 1 && end >= ex_end &&
+			   partial.state == initial) {
 			/*
-			 * If there's an extent to the right its first cluster
-			 * contains the immediate right boundary of the
-			 * truncated/punched region.  Set partial_cluster to
-			 * its negative value so it won't be freed if shared
-			 * with the current extent.  The end < ee_block case
-			 * is handled in ext4_ext_rm_leaf().
+			 * If we're punching, there's an extent to the right.
+			 * If the partial cluster hasn't been set, set it to
+			 * that extent's first cluster and its state to nofree
+			 * so it won't be freed should it contain blocks to be
+			 * removed. If it's already set (tofree/nofree), we're
+			 * retrying and keep the original partial cluster info
+			 * so a cluster marked tofree as a result of earlier
+			 * extent removal is not lost.
 			 */
 			lblk = ex_end + 1;
 			err = ext4_ext_search_right(inode, path, &lblk, &pblk,
@@ -3631,7 +3651,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 		max_zeroout = sbi->s_extent_max_zeroout_kb >>
 			(inode->i_sb->s_blocksize_bits - 10);
 
-	if (ext4_encrypted_inode(inode))
+	if (IS_ENCRYPTED(inode))
 		max_zeroout = 0;
 
 	/*
@@ -4048,18 +4068,8 @@ out:
 	} else
 		allocated = ret;
 	map->m_flags |= EXT4_MAP_NEW;
-	/*
-	 * if we allocated more blocks than requested
-	 * we need to make sure we unmap the extra block
-	 * allocated. The actual needed block will get
-	 * unmapped later when we find the buffer_head marked
-	 * new.
-	 */
-	if (allocated > map->m_len) {
-		clean_bdev_aliases(inode->i_sb->s_bdev, newblock + map->m_len,
-				   allocated - map->m_len);
+	if (allocated > map->m_len)
 		allocated = map->m_len;
-	}
 	map->m_len = allocated;
 
 map_out:
@@ -4818,7 +4828,7 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	 * leave it disabled for encrypted inodes for now.  This is a
 	 * bug we should fix....
 	 */
-	if (ext4_encrypted_inode(inode) &&
+	if (IS_ENCRYPTED(inode) &&
 	    (mode & (FALLOC_FL_COLLAPSE_RANGE | FALLOC_FL_INSERT_RANGE |
 		     FALLOC_FL_ZERO_RANGE)))
 		return -EOPNOTSUPP;

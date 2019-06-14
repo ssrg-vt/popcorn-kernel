@@ -378,7 +378,7 @@ struct marvell_nfc_caps {
  * @dev:		Parent device (used to print error messages)
  * @regs:		NAND controller registers
  * @core_clk:		Core clock
- * @reg_clk:		Regiters clock
+ * @reg_clk:		Registers clock
  * @complete:		Completion object to wait for NAND controller events
  * @assigned_cs:	Bitmask describing already assigned CS lines
  * @chips:		List containing all the NAND chips attached to
@@ -514,9 +514,14 @@ static void marvell_nfc_enable_int(struct marvell_nfc *nfc, u32 int_mask)
 	writel_relaxed(reg & ~int_mask, nfc->regs + NDCR);
 }
 
-static void marvell_nfc_clear_int(struct marvell_nfc *nfc, u32 int_mask)
+static u32 marvell_nfc_clear_int(struct marvell_nfc *nfc, u32 int_mask)
 {
+	u32 reg;
+
+	reg = readl_relaxed(nfc->regs + NDSR);
 	writel_relaxed(int_mask, nfc->regs + NDSR);
+
+	return reg & int_mask;
 }
 
 static void marvell_nfc_force_byte_access(struct nand_chip *chip,
@@ -683,6 +688,7 @@ static int marvell_nfc_wait_cmdd(struct nand_chip *chip)
 static int marvell_nfc_wait_op(struct nand_chip *chip, unsigned int timeout_ms)
 {
 	struct marvell_nfc *nfc = to_marvell_nfc(chip->controller);
+	u32 pending;
 	int ret;
 
 	/* Timeout is expressed in ms */
@@ -695,8 +701,13 @@ static int marvell_nfc_wait_op(struct nand_chip *chip, unsigned int timeout_ms)
 	ret = wait_for_completion_timeout(&nfc->complete,
 					  msecs_to_jiffies(timeout_ms));
 	marvell_nfc_disable_int(nfc, NDCR_RDYM);
-	marvell_nfc_clear_int(nfc, NDSR_RDY(0) | NDSR_RDY(1));
-	if (!ret) {
+	pending = marvell_nfc_clear_int(nfc, NDSR_RDY(0) | NDSR_RDY(1));
+
+	/*
+	 * In case the interrupt was not served in the required time frame,
+	 * check if the ISR was not served or if something went actually wrong.
+	 */
+	if (ret && !pending) {
 		dev_err(nfc->dev, "Timeout waiting for RB signal\n");
 		return -ETIMEDOUT;
 	}
@@ -704,23 +715,12 @@ static int marvell_nfc_wait_op(struct nand_chip *chip, unsigned int timeout_ms)
 	return 0;
 }
 
-static void marvell_nfc_select_chip(struct nand_chip *chip, int die_nr)
+static void marvell_nfc_select_target(struct nand_chip *chip,
+				      unsigned int die_nr)
 {
 	struct marvell_nand_chip *marvell_nand = to_marvell_nand(chip);
 	struct marvell_nfc *nfc = to_marvell_nfc(chip->controller);
 	u32 ndcr_generic;
-
-	if (chip == nfc->selected_chip && die_nr == marvell_nand->selected_die)
-		return;
-
-	if (die_nr < 0 || die_nr >= marvell_nand->nsels) {
-		nfc->selected_chip = NULL;
-		marvell_nand->selected_die = -1;
-		return;
-	}
-
-	writel_relaxed(marvell_nand->ndtr0, nfc->regs + NDTR0);
-	writel_relaxed(marvell_nand->ndtr1, nfc->regs + NDTR1);
 
 	/*
 	 * Reset the NDCR register to a clean state for this particular chip,
@@ -732,6 +732,12 @@ static void marvell_nfc_select_chip(struct nand_chip *chip, int die_nr)
 
 	/* Also reset the interrupt status register */
 	marvell_nfc_clear_int(nfc, NDCR_ALL_INT);
+
+	if (chip == nfc->selected_chip && die_nr == marvell_nand->selected_die)
+		return;
+
+	writel_relaxed(marvell_nand->ndtr0, nfc->regs + NDTR0);
+	writel_relaxed(marvell_nand->ndtr1, nfc->regs + NDTR1);
 
 	nfc->selected_chip = chip;
 	marvell_nand->selected_die = die_nr;
@@ -1024,13 +1030,13 @@ static int marvell_nfc_hw_ecc_hmg_do_read_page(struct nand_chip *chip,
 	}
 
 	ret = marvell_nfc_wait_cmdd(chip);
-
 	return ret;
 }
 
 static int marvell_nfc_hw_ecc_hmg_read_page_raw(struct nand_chip *chip, u8 *buf,
 						int oob_required, int page)
 {
+	marvell_nfc_select_target(chip, chip->cur_cs);
 	return marvell_nfc_hw_ecc_hmg_do_read_page(chip, buf, chip->oob_poi,
 						   true, page);
 }
@@ -1043,6 +1049,7 @@ static int marvell_nfc_hw_ecc_hmg_read_page(struct nand_chip *chip, u8 *buf,
 	int max_bitflips = 0, ret;
 	u8 *raw_buf;
 
+	marvell_nfc_select_target(chip, chip->cur_cs);
 	marvell_nfc_enable_hw_ecc(chip);
 	marvell_nfc_hw_ecc_hmg_do_read_page(chip, buf, chip->oob_poi, false,
 					    page);
@@ -1076,11 +1083,11 @@ static int marvell_nfc_hw_ecc_hmg_read_page(struct nand_chip *chip, u8 *buf,
  */
 static int marvell_nfc_hw_ecc_hmg_read_oob_raw(struct nand_chip *chip, int page)
 {
-	/* Invalidate page cache */
-	chip->pagebuf = -1;
+	u8 *buf = nand_get_data_buf(chip);
 
-	return marvell_nfc_hw_ecc_hmg_do_read_page(chip, chip->data_buf,
-						   chip->oob_poi, true, page);
+	marvell_nfc_select_target(chip, chip->cur_cs);
+	return marvell_nfc_hw_ecc_hmg_do_read_page(chip, buf, chip->oob_poi,
+						   true, page);
 }
 
 /* Hamming write helpers */
@@ -1142,6 +1149,7 @@ static int marvell_nfc_hw_ecc_hmg_write_page_raw(struct nand_chip *chip,
 						 const u8 *buf,
 						 int oob_required, int page)
 {
+	marvell_nfc_select_target(chip, chip->cur_cs);
 	return marvell_nfc_hw_ecc_hmg_do_write_page(chip, buf, chip->oob_poi,
 						    true, page);
 }
@@ -1152,6 +1160,7 @@ static int marvell_nfc_hw_ecc_hmg_write_page(struct nand_chip *chip,
 {
 	int ret;
 
+	marvell_nfc_select_target(chip, chip->cur_cs);
 	marvell_nfc_enable_hw_ecc(chip);
 	ret = marvell_nfc_hw_ecc_hmg_do_write_page(chip, buf, chip->oob_poi,
 						   false, page);
@@ -1169,14 +1178,13 @@ static int marvell_nfc_hw_ecc_hmg_write_oob_raw(struct nand_chip *chip,
 						int page)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
+	u8 *buf = nand_get_data_buf(chip);
 
-	/* Invalidate page cache */
-	chip->pagebuf = -1;
+	memset(buf, 0xFF, mtd->writesize);
 
-	memset(chip->data_buf, 0xFF, mtd->writesize);
-
-	return marvell_nfc_hw_ecc_hmg_do_write_page(chip, chip->data_buf,
-						    chip->oob_poi, true, page);
+	marvell_nfc_select_target(chip, chip->cur_cs);
+	return marvell_nfc_hw_ecc_hmg_do_write_page(chip, buf, chip->oob_poi,
+						    true, page);
 }
 
 /* BCH read helpers */
@@ -1193,6 +1201,8 @@ static int marvell_nfc_hw_ecc_bch_read_page_raw(struct nand_chip *chip, u8 *buf,
 	int spare_len = lt->spare_bytes;
 	int ecc_len = lt->ecc_bytes;
 	int chunk;
+
+	marvell_nfc_select_target(chip, chip->cur_cs);
 
 	if (oob_required)
 		memset(chip->oob_poi, 0xFF, mtd->oobsize);
@@ -1303,6 +1313,8 @@ static int marvell_nfc_hw_ecc_bch_read_page(struct nand_chip *chip,
 	int max_bitflips = 0;
 	u32 failure_mask = 0;
 	int chunk, ret;
+
+	marvell_nfc_select_target(chip, chip->cur_cs);
 
 	/*
 	 * With BCH, OOB is not fully used (and thus not read entirely), not
@@ -1419,18 +1431,16 @@ static int marvell_nfc_hw_ecc_bch_read_page(struct nand_chip *chip,
 
 static int marvell_nfc_hw_ecc_bch_read_oob_raw(struct nand_chip *chip, int page)
 {
-	/* Invalidate page cache */
-	chip->pagebuf = -1;
+	u8 *buf = nand_get_data_buf(chip);
 
-	return chip->ecc.read_page_raw(chip, chip->data_buf, true, page);
+	return chip->ecc.read_page_raw(chip, buf, true, page);
 }
 
 static int marvell_nfc_hw_ecc_bch_read_oob(struct nand_chip *chip, int page)
 {
-	/* Invalidate page cache */
-	chip->pagebuf = -1;
+	u8 *buf = nand_get_data_buf(chip);
 
-	return chip->ecc.read_page(chip, chip->data_buf, true, page);
+	return chip->ecc.read_page(chip, buf, true, page);
 }
 
 /* BCH write helpers */
@@ -1447,6 +1457,8 @@ static int marvell_nfc_hw_ecc_bch_write_page_raw(struct nand_chip *chip,
 	int ecc_offset = (lt->full_chunk_cnt * lt->spare_bytes) +
 		lt->last_spare_bytes;
 	int chunk;
+
+	marvell_nfc_select_target(chip, chip->cur_cs);
 
 	nand_prog_page_begin_op(chip, page, 0, NULL, 0);
 
@@ -1559,6 +1571,8 @@ static int marvell_nfc_hw_ecc_bch_write_page(struct nand_chip *chip,
 	int spare_len = lt->spare_bytes;
 	int chunk, ret;
 
+	marvell_nfc_select_target(chip, chip->cur_cs);
+
 	/* Spare data will be written anyway, so clear it to avoid garbage */
 	if (!oob_required)
 		memset(chip->oob_poi, 0xFF, mtd->oobsize);
@@ -1600,25 +1614,21 @@ static int marvell_nfc_hw_ecc_bch_write_oob_raw(struct nand_chip *chip,
 						int page)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
+	u8 *buf = nand_get_data_buf(chip);
 
-	/* Invalidate page cache */
-	chip->pagebuf = -1;
+	memset(buf, 0xFF, mtd->writesize);
 
-	memset(chip->data_buf, 0xFF, mtd->writesize);
-
-	return chip->ecc.write_page_raw(chip, chip->data_buf, true, page);
+	return chip->ecc.write_page_raw(chip, buf, true, page);
 }
 
 static int marvell_nfc_hw_ecc_bch_write_oob(struct nand_chip *chip, int page)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
+	u8 *buf = nand_get_data_buf(chip);
 
-	/* Invalidate page cache */
-	chip->pagebuf = -1;
+	memset(buf, 0xFF, mtd->writesize);
 
-	memset(chip->data_buf, 0xFF, mtd->writesize);
-
-	return chip->ecc.write_page(chip, chip->data_buf, true, page);
+	return chip->ecc.write_page(chip, buf, true, page);
 }
 
 /* NAND framework ->exec_op() hooks and related helpers */
@@ -2097,6 +2107,8 @@ static int marvell_nfc_exec_op(struct nand_chip *chip,
 {
 	struct marvell_nfc *nfc = to_marvell_nfc(chip->controller);
 
+	marvell_nfc_select_target(chip, op->cs);
+
 	if (nfc->caps->is_nfcv2)
 		return nand_op_parser_exec_op(chip, &marvell_nfcv2_op_parser,
 					      op, check_only);
@@ -2236,9 +2248,9 @@ static int marvell_nand_ecc_init(struct mtd_info *mtd,
 	int ret;
 
 	if (ecc->mode != NAND_ECC_NONE && (!ecc->size || !ecc->strength)) {
-		if (chip->ecc_step_ds && chip->ecc_strength_ds) {
-			ecc->size = chip->ecc_step_ds;
-			ecc->strength = chip->ecc_strength_ds;
+		if (chip->base.eccreq.step_size && chip->base.eccreq.strength) {
+			ecc->size = chip->base.eccreq.step_size;
+			ecc->strength = chip->base.eccreq.strength;
 		} else {
 			dev_info(nfc->dev,
 				 "No minimum ECC strength, using 1b/512B\n");
@@ -2495,6 +2507,8 @@ static int marvell_nand_attach_chip(struct nand_chip *chip)
 
 static const struct nand_controller_ops marvell_nand_controller_ops = {
 	.attach_chip = marvell_nand_attach_chip,
+	.exec_op = marvell_nfc_exec_op,
+	.setup_data_interface = marvell_nfc_setup_data_interface,
 };
 
 static int marvell_nand_chip_init(struct device *dev, struct marvell_nfc *nfc,
@@ -2527,9 +2541,8 @@ static int marvell_nand_chip_init(struct device *dev, struct marvell_nfc *nfc,
 	}
 
 	/* Alloc the nand chip structure */
-	marvell_nand = devm_kzalloc(dev, sizeof(*marvell_nand) +
-				    (nsels *
-				     sizeof(struct marvell_nand_chip_sel)),
+	marvell_nand = devm_kzalloc(dev,
+				    struct_size(marvell_nand, sels, nsels),
 				    GFP_KERNEL);
 	if (!marvell_nand) {
 		dev_err(dev, "could not allocate chip structure\n");
@@ -2617,10 +2630,8 @@ static int marvell_nand_chip_init(struct device *dev, struct marvell_nfc *nfc,
 	chip->controller = &nfc->controller;
 	nand_set_flash_node(chip, np);
 
-	chip->exec_op = marvell_nfc_exec_op;
-	chip->select_chip = marvell_nfc_select_chip;
 	if (!of_property_read_bool(np, "marvell,nand-keep-config"))
-		chip->setup_data_interface = marvell_nfc_setup_data_interface;
+		chip->options |= NAND_KEEP_TIMINGS;
 
 	mtd = nand_to_mtd(chip);
 	mtd->dev.parent = dev;
@@ -2969,7 +2980,7 @@ static int __maybe_unused marvell_nfc_resume(struct device *dev)
 
 	/*
 	 * Reset nfc->selected_chip so the next command will cause the timing
-	 * registers to be restored in marvell_nfc_select_chip().
+	 * registers to be restored in marvell_nfc_select_target().
 	 */
 	nfc->selected_chip = NULL;
 

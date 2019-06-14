@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Network block device - make block devices work over TCP
  *
@@ -6,8 +7,6 @@
  * 
  * Copyright 1997-2000, 2008 Pavel Machek <pavel@ucw.cz>
  * Parts copyright 2001 Steven Whitehouse <steve@chygwyn.com>
- *
- * This file is released under GPLv2 or later.
  *
  * (part of code stolen from loop.c)
  */
@@ -43,6 +42,9 @@
 #include <linux/nbd.h>
 #include <linux/nbd-netlink.h>
 #include <net/genetlink.h>
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/nbd.h>
 
 static DEFINE_IDR(nbd_index_idr);
 static DEFINE_MUTEX(nbd_index_mutex);
@@ -288,9 +290,10 @@ static void nbd_size_update(struct nbd_device *nbd)
 	blk_queue_physical_block_size(nbd->disk->queue, config->blksize);
 	set_capacity(nbd->disk, config->bytesize >> 9);
 	if (bdev) {
-		if (bdev->bd_disk)
+		if (bdev->bd_disk) {
 			bd_set_size(bdev, config->bytesize);
-		else
+			set_blocksize(bdev, config->blksize);
+		} else
 			bdev->bd_invalidated = 1;
 		bdput(bdev);
 	}
@@ -509,6 +512,10 @@ static int nbd_send_cmd(struct nbd_device *nbd, struct nbd_cmd *cmd, int index)
 	if (sent) {
 		if (sent >= sizeof(request)) {
 			skip = sent - sizeof(request);
+
+			/* initialize handle for tracing purposes */
+			handle = nbd_cmd_handle(cmd);
+
 			goto send_pages;
 		}
 		iov_iter_advance(&from, sent);
@@ -525,11 +532,14 @@ static int nbd_send_cmd(struct nbd_device *nbd, struct nbd_cmd *cmd, int index)
 	handle = nbd_cmd_handle(cmd);
 	memcpy(request.handle, &handle, sizeof(handle));
 
+	trace_nbd_send_request(&request, nbd->index, blk_mq_rq_from_pdu(cmd));
+
 	dev_dbg(nbd_to_dev(nbd), "request %p: sending control (%s@%llu,%uB)\n",
 		req, nbdcmd_to_ascii(type),
 		(unsigned long long)blk_rq_pos(req) << 9, blk_rq_bytes(req));
 	result = sock_xmit(nbd, index, 1, &from,
 			(type == NBD_CMD_WRITE) ? MSG_MORE : 0, &sent);
+	trace_nbd_header_sent(req, handle);
 	if (result <= 0) {
 		if (was_interrupted(result)) {
 			/* If we havne't sent anything we can just return BUSY,
@@ -602,6 +612,7 @@ send_pages:
 		bio = next;
 	}
 out:
+	trace_nbd_payload_sent(req, handle);
 	nsock->pending = NULL;
 	nsock->sent = 0;
 	return 0;
@@ -649,6 +660,7 @@ static struct nbd_cmd *nbd_read_stat(struct nbd_device *nbd, int index)
 			tag, req);
 		return ERR_PTR(-ENOENT);
 	}
+	trace_nbd_header_received(req, handle);
 	cmd = blk_mq_rq_to_pdu(req);
 
 	mutex_lock(&cmd->lock);
@@ -702,6 +714,7 @@ static struct nbd_cmd *nbd_read_stat(struct nbd_device *nbd, int index)
 		}
 	}
 out:
+	trace_nbd_payload_received(req, handle);
 	mutex_unlock(&cmd->lock);
 	return ret ? ERR_PTR(ret) : cmd;
 }
@@ -734,12 +747,13 @@ static void recv_work(struct work_struct *work)
 	kfree(args);
 }
 
-static void nbd_clear_req(struct request *req, void *data, bool reserved)
+static bool nbd_clear_req(struct request *req, void *data, bool reserved)
 {
 	struct nbd_cmd *cmd = blk_mq_rq_to_pdu(req);
 
 	cmd->status = BLK_STS_IOERR;
 	blk_mq_complete_request(req);
+	return true;
 }
 
 static void nbd_clear_que(struct nbd_device *nbd)
@@ -1569,7 +1583,7 @@ static int nbd_dev_add(int index)
 	nbd->tag_set.numa_node = NUMA_NO_NODE;
 	nbd->tag_set.cmd_size = sizeof(struct nbd_cmd);
 	nbd->tag_set.flags = BLK_MQ_F_SHOULD_MERGE |
-		BLK_MQ_F_SG_MERGE | BLK_MQ_F_BLOCKING;
+		BLK_MQ_F_BLOCKING;
 	nbd->tag_set.driver_data = nbd;
 
 	err = blk_mq_alloc_tag_set(&nbd->tag_set);
@@ -1795,8 +1809,10 @@ again:
 				ret = -EINVAL;
 				goto out;
 			}
-			ret = nla_parse_nested(socks, NBD_SOCK_MAX, attr,
-					       nbd_sock_policy, info->extack);
+			ret = nla_parse_nested_deprecated(socks, NBD_SOCK_MAX,
+							  attr,
+							  nbd_sock_policy,
+							  info->extack);
 			if (ret != 0) {
 				printk(KERN_ERR "nbd: error processing sock list\n");
 				ret = -EINVAL;
@@ -1966,8 +1982,10 @@ static int nbd_genl_reconfigure(struct sk_buff *skb, struct genl_info *info)
 				ret = -EINVAL;
 				goto out;
 			}
-			ret = nla_parse_nested(socks, NBD_SOCK_MAX, attr,
-					       nbd_sock_policy, info->extack);
+			ret = nla_parse_nested_deprecated(socks, NBD_SOCK_MAX,
+							  attr,
+							  nbd_sock_policy,
+							  info->extack);
 			if (ret != 0) {
 				printk(KERN_ERR "nbd: error processing sock list\n");
 				ret = -EINVAL;
@@ -1997,22 +2015,22 @@ out:
 static const struct genl_ops nbd_connect_genl_ops[] = {
 	{
 		.cmd	= NBD_CMD_CONNECT,
-		.policy	= nbd_attr_policy,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit	= nbd_genl_connect,
 	},
 	{
 		.cmd	= NBD_CMD_DISCONNECT,
-		.policy	= nbd_attr_policy,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit	= nbd_genl_disconnect,
 	},
 	{
 		.cmd	= NBD_CMD_RECONFIGURE,
-		.policy	= nbd_attr_policy,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit	= nbd_genl_reconfigure,
 	},
 	{
 		.cmd	= NBD_CMD_STATUS,
-		.policy	= nbd_attr_policy,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit	= nbd_genl_status,
 	},
 };
@@ -2029,6 +2047,7 @@ static struct genl_family nbd_genl_family __ro_after_init = {
 	.ops		= nbd_connect_genl_ops,
 	.n_ops		= ARRAY_SIZE(nbd_connect_genl_ops),
 	.maxattr	= NBD_ATTR_MAX,
+	.policy = nbd_attr_policy,
 	.mcgrps		= nbd_mcast_grps,
 	.n_mcgrps	= ARRAY_SIZE(nbd_mcast_grps),
 };
@@ -2048,7 +2067,7 @@ static int populate_nbd_status(struct nbd_device *nbd, struct sk_buff *reply)
 	 */
 	if (refcount_read(&nbd->config_refs))
 		connected = 1;
-	dev_opt = nla_nest_start(reply, NBD_DEVICE_ITEM);
+	dev_opt = nla_nest_start_noflag(reply, NBD_DEVICE_ITEM);
 	if (!dev_opt)
 		return -EMSGSIZE;
 	ret = nla_put_u32(reply, NBD_DEVICE_INDEX, nbd->index);
@@ -2096,7 +2115,7 @@ static int nbd_genl_status(struct sk_buff *skb, struct genl_info *info)
 		goto out;
 	}
 
-	dev_list = nla_nest_start(reply, NBD_ATTR_DEVICE_LIST);
+	dev_list = nla_nest_start_noflag(reply, NBD_ATTR_DEVICE_LIST);
 	if (index == -1) {
 		ret = idr_for_each(&nbd_index_idr, &status_cb, reply);
 		if (ret) {
@@ -2116,8 +2135,7 @@ static int nbd_genl_status(struct sk_buff *skb, struct genl_info *info)
 	}
 	nla_nest_end(reply, dev_list);
 	genlmsg_end(reply, reply_head);
-	genlmsg_reply(reply, info);
-	ret = 0;
+	ret = genlmsg_reply(reply, info);
 out:
 	mutex_unlock(&nbd_index_mutex);
 	return ret;

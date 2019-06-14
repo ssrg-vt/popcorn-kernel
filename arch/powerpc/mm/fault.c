@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  PowerPC version
  *    Copyright (C) 1995-1996 Gary Thomas (gdt@linuxppc.org)
@@ -8,11 +9,6 @@
  *  Modified by Cort Dougan and Paul Mackerras.
  *
  *  Modified for PPC64 by Dave Engebretsen (engebret@ibm.com)
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
  */
 
 #include <linux/signal.h>
@@ -45,6 +41,7 @@
 
 #include <asm/siginfo.h>
 #include <asm/debug.h>
+#include <asm/kup.h>
 
 static inline bool notify_page_fault(struct pt_regs *regs)
 {
@@ -224,17 +221,46 @@ static int mm_fault_error(struct pt_regs *regs, unsigned long addr,
 }
 
 /* Is this a bad kernel fault ? */
-static bool bad_kernel_fault(bool is_exec, unsigned long error_code,
-			     unsigned long address)
+static bool bad_kernel_fault(struct pt_regs *regs, unsigned long error_code,
+			     unsigned long address, bool is_write)
 {
-	if (is_exec && (error_code & (DSISR_NOEXEC_OR_G | DSISR_KEYFAULT))) {
-		printk_ratelimited(KERN_CRIT "kernel tried to execute"
-				   " exec-protected page (%lx) -"
-				   "exploit attempt? (uid: %d)\n",
-				   address, from_kuid(&init_user_ns,
-						      current_uid()));
+	int is_exec = TRAP(regs) == 0x400;
+
+	/* NX faults set DSISR_PROTFAULT on the 8xx, DSISR_NOEXEC_OR_G on others */
+	if (is_exec && (error_code & (DSISR_NOEXEC_OR_G | DSISR_KEYFAULT |
+				      DSISR_PROTFAULT))) {
+		pr_crit_ratelimited("kernel tried to execute %s page (%lx) - exploit attempt? (uid: %d)\n",
+				    address >= TASK_SIZE ? "exec-protected" : "user",
+				    address,
+				    from_kuid(&init_user_ns, current_uid()));
+
+		// Kernel exec fault is always bad
+		return true;
 	}
-	return is_exec || (address >= TASK_SIZE);
+
+	if (!is_exec && address < TASK_SIZE && (error_code & DSISR_PROTFAULT) &&
+	    !search_exception_tables(regs->nip)) {
+		pr_crit_ratelimited("Kernel attempted to access user page (%lx) - exploit attempt? (uid: %d)\n",
+				    address,
+				    from_kuid(&init_user_ns, current_uid()));
+	}
+
+	// Kernel fault on kernel address is bad
+	if (address >= TASK_SIZE)
+		return true;
+
+	// Fault on user outside of certain regions (eg. copy_tofrom_user()) is bad
+	if (!search_exception_tables(regs->nip))
+		return true;
+
+	// Read/write fault in a valid region (the exception table search passed
+	// above), but blocked by KUAP is bad, it can never succeed.
+	if (bad_kuap_fault(regs, is_write))
+		return true;
+
+	// What's left? Kernel fault on user in well defined regions (extable
+	// matched), and allowed by KUAP in the faulting context.
+	return false;
 }
 
 static bool bad_stack_expansion(struct pt_regs *regs, unsigned long address,
@@ -273,7 +299,7 @@ static bool bad_stack_expansion(struct pt_regs *regs, unsigned long address,
 			return false;
 
 		if ((flags & FAULT_FLAG_WRITE) && (flags & FAULT_FLAG_USER) &&
-		    access_ok(VERIFY_READ, nip, sizeof(*nip))) {
+		    access_ok(nip, sizeof(*nip))) {
 			unsigned int inst;
 			int res;
 
@@ -342,9 +368,20 @@ static inline void cmo_account_page_fault(void)
 static inline void cmo_account_page_fault(void) { }
 #endif /* CONFIG_PPC_SMLPAR */
 
-#ifdef CONFIG_PPC_STD_MMU
-static void sanity_check_fault(bool is_write, unsigned long error_code)
+#ifdef CONFIG_PPC_BOOK3S
+static void sanity_check_fault(bool is_write, bool is_user,
+			       unsigned long error_code, unsigned long address)
 {
+	/*
+	 * Userspace trying to access kernel address, we get PROTFAULT for that.
+	 */
+	if (is_user && address >= TASK_SIZE) {
+		pr_crit_ratelimited("%s[%d]: User access of kernel address (%lx) - exploit attempt? (uid: %d)\n",
+				   current->comm, current->pid, address,
+				   from_kuid(&init_user_ns, current_uid()));
+		return;
+	}
+
 	/*
 	 * For hash translation mode, we should never get a
 	 * PROTFAULT. Any update to pte to reduce access will result in us
@@ -374,12 +411,15 @@ static void sanity_check_fault(bool is_write, unsigned long error_code)
 	 * For radix, we can get prot fault for autonuma case, because radix
 	 * page table will have them marked noaccess for user.
 	 */
-	if (!radix_enabled() && !is_write)
-		WARN_ON_ONCE(error_code & DSISR_PROTFAULT);
+	if (radix_enabled() || is_write)
+		return;
+
+	WARN_ON_ONCE(error_code & DSISR_PROTFAULT);
 }
 #else
-static void sanity_check_fault(bool is_write, unsigned long error_code) { }
-#endif /* CONFIG_PPC_STD_MMU */
+static void sanity_check_fault(bool is_write, bool is_user,
+			       unsigned long error_code, unsigned long address) { }
+#endif /* CONFIG_PPC_BOOK3S */
 
 /*
  * Define the correct "is_write" bit in error_code based
@@ -436,13 +476,14 @@ static int __do_page_fault(struct pt_regs *regs, unsigned long address,
 	}
 
 	/* Additional sanity check(s) */
-	sanity_check_fault(is_write, error_code);
+	sanity_check_fault(is_write, is_user, error_code, address);
 
 	/*
 	 * The kernel should never take an execute fault nor should it
-	 * take a page fault to a kernel address.
+	 * take a page fault to a kernel address or a page fault to a user
+	 * address outside of dedicated places
 	 */
-	if (unlikely(!is_user && bad_kernel_fault(is_exec, error_code, address)))
+	if (unlikely(!is_user && bad_kernel_fault(regs, error_code, address, is_write)))
 		return SIGSEGV;
 
 	/*
@@ -638,21 +679,23 @@ void bad_page_fault(struct pt_regs *regs, unsigned long address, int sig)
 	switch (TRAP(regs)) {
 	case 0x300:
 	case 0x380:
-		printk(KERN_ALERT "Unable to handle kernel paging request for "
-			"data at address 0x%08lx\n", regs->dar);
+	case 0xe00:
+		pr_alert("BUG: %s at 0x%08lx\n",
+			 regs->dar < PAGE_SIZE ? "Kernel NULL pointer dereference" :
+			 "Unable to handle kernel data access", regs->dar);
 		break;
 	case 0x400:
 	case 0x480:
-		printk(KERN_ALERT "Unable to handle kernel paging request for "
-			"instruction fetch\n");
+		pr_alert("BUG: Unable to handle kernel instruction fetch%s",
+			 regs->nip < PAGE_SIZE ? " (NULL pointer?)\n" : "\n");
 		break;
 	case 0x600:
-		printk(KERN_ALERT "Unable to handle kernel paging request for "
-			"unaligned access at address 0x%08lx\n", regs->dar);
+		pr_alert("BUG: Unable to handle kernel unaligned access at 0x%08lx\n",
+			 regs->dar);
 		break;
 	default:
-		printk(KERN_ALERT "Unable to handle kernel paging request for "
-			"unknown fault\n");
+		pr_alert("BUG: Unable to handle unknown paging fault at 0x%08lx\n",
+			 regs->dar);
 		break;
 	}
 	printk(KERN_ALERT "Faulting instruction address: 0x%08lx\n",

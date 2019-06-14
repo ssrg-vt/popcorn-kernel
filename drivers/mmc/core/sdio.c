@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  linux/drivers/mmc/sdio.c
  *
  *  Copyright 2006-2007 Pierre Ossman
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
  */
 
 #include <linux/err.h>
@@ -617,6 +613,8 @@ try_again:
 		if (oldcard && (oldcard->type != MMC_TYPE_SD_COMBO ||
 		    memcmp(card->raw_cid, oldcard->raw_cid, sizeof(card->raw_cid)) != 0)) {
 			mmc_remove_card(card);
+			pr_debug("%s: Perhaps the card was replaced\n",
+				mmc_hostname(host));
 			return -ENOENT;
 		}
 	} else {
@@ -624,6 +622,8 @@ try_again:
 
 		if (oldcard && oldcard->type != MMC_TYPE_SDIO) {
 			mmc_remove_card(card);
+			pr_debug("%s: Perhaps the card was replaced\n",
+				mmc_hostname(host));
 			return -ENOENT;
 		}
 	}
@@ -736,8 +736,11 @@ try_again:
 		int same = (card->cis.vendor == oldcard->cis.vendor &&
 			    card->cis.device == oldcard->cis.device);
 		mmc_remove_card(card);
-		if (!same)
+		if (!same) {
+			pr_debug("%s: Perhaps the card was replaced\n",
+				mmc_hostname(host));
 			return -ENOENT;
+		}
 
 		card = oldcard;
 	}

@@ -1,16 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * db-export.h: Support for exporting data suitable for import to a database
  * Copyright (c) 2014, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #ifndef __PERF_DB_EXPORT_H
@@ -104,6 +95,7 @@ int db_export__sample(struct db_export *dbe, union perf_event *event,
 int db_export__branch_types(struct db_export *dbe);
 
 int db_export__call_path(struct db_export *dbe, struct call_path *cp);
-int db_export__call_return(struct db_export *dbe, struct call_return *cr);
+int db_export__call_return(struct db_export *dbe, struct call_return *cr,
+			   u64 *parent_db_id);
 
 #endif

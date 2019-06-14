@@ -11,6 +11,9 @@
  *               Jason J. Herne <jjherne@us.ibm.com>
  */
 
+#define KMSG_COMPONENT "kvm-s390"
+#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+
 #include <linux/compiler.h>
 #include <linux/err.h>
 #include <linux/fs.h>
@@ -44,10 +47,6 @@
 #include "kvm-s390.h"
 #include "gaccess.h"
 
-#define KMSG_COMPONENT "kvm-s390"
-#undef pr_fmt
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
-
 #define CREATE_TRACE_POINTS
 #include "trace.h"
 #include "trace-s390.h"
@@ -76,6 +75,7 @@ struct kvm_stats_debugfs_item debugfs_entries[] = {
 	{ "halt_successful_poll", VCPU_STAT(halt_successful_poll) },
 	{ "halt_attempted_poll", VCPU_STAT(halt_attempted_poll) },
 	{ "halt_poll_invalid", VCPU_STAT(halt_poll_invalid) },
+	{ "halt_no_poll_steal", VCPU_STAT(halt_no_poll_steal) },
 	{ "halt_wakeup", VCPU_STAT(halt_wakeup) },
 	{ "instruction_lctlg", VCPU_STAT(instruction_lctlg) },
 	{ "instruction_lctl", VCPU_STAT(instruction_lctl) },
@@ -177,6 +177,11 @@ MODULE_PARM_DESC(nested, "Nested virtualization support");
 static int hpage;
 module_param(hpage, int, 0444);
 MODULE_PARM_DESC(hpage, "1m huge page backing support");
+
+/* maximum percentage of steal time for polling.  >100 is treated like 100 */
+static u8 halt_poll_max_steal = 10;
+module_param(halt_poll_max_steal, byte, 0644);
+MODULE_PARM_DESC(halt_poll_max_steal, "Maximum percentage of steal time to allow polling");
 
 /*
  * For now we handle at most 16 double words as this is what the s390 base
@@ -322,6 +327,22 @@ static inline int plo_test_bit(unsigned char nr)
 	return cc == 0;
 }
 
+static inline void __insn32_query(unsigned int opcode, u8 query[32])
+{
+	register unsigned long r0 asm("0") = 0;	/* query function */
+	register unsigned long r1 asm("1") = (unsigned long) query;
+
+	asm volatile(
+		/* Parameter regs are ignored */
+		"	.insn	rrf,%[opc] << 16,2,4,6,0\n"
+		: "=m" (*query)
+		: "d" (r0), "a" (r1), [opc] "i" (opcode)
+		: "cc");
+}
+
+#define INSN_SORTL 0xb938
+#define INSN_DFLTCC 0xb939
+
 static void kvm_s390_cpu_feat_init(void)
 {
 	int i;
@@ -368,6 +389,16 @@ static void kvm_s390_cpu_feat_init(void)
 	if (test_facility(146)) /* MSA8 */
 		__cpacf_query(CPACF_KMA, (cpacf_mask_t *)
 			      kvm_s390_available_subfunc.kma);
+
+	if (test_facility(155)) /* MSA9 */
+		__cpacf_query(CPACF_KDSA, (cpacf_mask_t *)
+			      kvm_s390_available_subfunc.kdsa);
+
+	if (test_facility(150)) /* SORTL */
+		__insn32_query(INSN_SORTL, kvm_s390_available_subfunc.sortl);
+
+	if (test_facility(151)) /* DFLTCC */
+		__insn32_query(INSN_DFLTCC, kvm_s390_available_subfunc.dfltcc);
 
 	if (MACHINE_HAS_ESOP)
 		allow_cpu_feat(KVM_S390_VM_CPU_FEAT_ESOP);
@@ -417,23 +448,42 @@ static void kvm_s390_cpu_feat_init(void)
 
 int kvm_arch_init(void *opaque)
 {
+	int rc;
+
 	kvm_s390_dbf = debug_register("kvm-trace", 32, 1, 7 * sizeof(long));
 	if (!kvm_s390_dbf)
 		return -ENOMEM;
 
 	if (debug_register_view(kvm_s390_dbf, &debug_sprintf_view)) {
-		debug_unregister(kvm_s390_dbf);
-		return -ENOMEM;
+		rc = -ENOMEM;
+		goto out_debug_unreg;
 	}
 
 	kvm_s390_cpu_feat_init();
 
 	/* Register floating interrupt controller interface. */
-	return kvm_register_device_ops(&kvm_flic_ops, KVM_DEV_TYPE_FLIC);
+	rc = kvm_register_device_ops(&kvm_flic_ops, KVM_DEV_TYPE_FLIC);
+	if (rc) {
+		pr_err("A FLIC registration call failed with rc=%d\n", rc);
+		goto out_debug_unreg;
+	}
+
+	rc = kvm_s390_gib_init(GAL_ISC);
+	if (rc)
+		goto out_gib_destroy;
+
+	return 0;
+
+out_gib_destroy:
+	kvm_s390_gib_destroy();
+out_debug_unreg:
+	debug_unregister(kvm_s390_dbf);
+	return rc;
 }
 
 void kvm_arch_exit(void)
 {
+	kvm_s390_gib_destroy();
 	debug_unregister(kvm_s390_dbf);
 }
 
@@ -464,7 +514,6 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 	case KVM_CAP_S390_CSS_SUPPORT:
 	case KVM_CAP_IOEVENTFD:
 	case KVM_CAP_DEVICE_CTRL:
-	case KVM_CAP_ENABLE_CAP_VM:
 	case KVM_CAP_S390_IRQCHIP:
 	case KVM_CAP_VM_ATTRIBUTES:
 	case KVM_CAP_MP_STATE:
@@ -490,14 +539,12 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 		break;
 	case KVM_CAP_NR_VCPUS:
 	case KVM_CAP_MAX_VCPUS:
+	case KVM_CAP_MAX_VCPU_ID:
 		r = KVM_S390_BSCA_CPU_SLOTS;
 		if (!kvm_s390_use_sca_entries())
 			r = KVM_MAX_VCPUS;
 		else if (sclp.has_esca && sclp.has_64bscao)
 			r = KVM_S390_ESCA_CPU_SLOTS;
-		break;
-	case KVM_CAP_NR_MEMSLOTS:
-		r = KVM_USER_MEM_SLOTS;
 		break;
 	case KVM_CAP_S390_COW:
 		r = MACHINE_HAS_ESOP;
@@ -607,7 +654,7 @@ static void icpt_operexc_on_all_vcpus(struct kvm *kvm)
 	}
 }
 
-static int kvm_vm_ioctl_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
+int kvm_vm_ioctl_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 {
 	int r;
 
@@ -639,6 +686,14 @@ static int kvm_vm_ioctl_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 			if (test_facility(135)) {
 				set_kvm_facility(kvm->arch.model.fac_mask, 135);
 				set_kvm_facility(kvm->arch.model.fac_list, 135);
+			}
+			if (test_facility(148)) {
+				set_kvm_facility(kvm->arch.model.fac_mask, 148);
+				set_kvm_facility(kvm->arch.model.fac_list, 148);
+			}
+			if (test_facility(152)) {
+				set_kvm_facility(kvm->arch.model.fac_mask, 152);
+				set_kvm_facility(kvm->arch.model.fac_list, 152);
 			}
 			r = 0;
 		} else
@@ -1249,11 +1304,78 @@ static int kvm_s390_set_processor_feat(struct kvm *kvm,
 static int kvm_s390_set_processor_subfunc(struct kvm *kvm,
 					  struct kvm_device_attr *attr)
 {
-	/*
-	 * Once supported by kernel + hw, we have to store the subfunctions
-	 * in kvm->arch and remember that user space configured them.
-	 */
-	return -ENXIO;
+	mutex_lock(&kvm->lock);
+	if (kvm->created_vcpus) {
+		mutex_unlock(&kvm->lock);
+		return -EBUSY;
+	}
+
+	if (copy_from_user(&kvm->arch.model.subfuncs, (void __user *)attr->addr,
+			   sizeof(struct kvm_s390_vm_cpu_subfunc))) {
+		mutex_unlock(&kvm->lock);
+		return -EFAULT;
+	}
+	mutex_unlock(&kvm->lock);
+
+	VM_EVENT(kvm, 3, "SET: guest PLO    subfunc 0x%16.16lx.%16.16lx.%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.plo)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.plo)[1],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.plo)[2],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.plo)[3]);
+	VM_EVENT(kvm, 3, "SET: guest PTFF   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.ptff)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.ptff)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KMAC   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmac)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmac)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KMC    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmc)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmc)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KM     subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.km)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.km)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KIMD   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kimd)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kimd)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KLMD   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.klmd)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.klmd)[1]);
+	VM_EVENT(kvm, 3, "SET: guest PCKMO  subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.pckmo)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.pckmo)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KMCTR  subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmctr)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmctr)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KMF    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmf)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmf)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KMO    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmo)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmo)[1]);
+	VM_EVENT(kvm, 3, "SET: guest PCC    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.pcc)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.pcc)[1]);
+	VM_EVENT(kvm, 3, "SET: guest PPNO   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.ppno)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.ppno)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KMA    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kma)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kma)[1]);
+	VM_EVENT(kvm, 3, "SET: guest KDSA   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kdsa)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kdsa)[1]);
+	VM_EVENT(kvm, 3, "SET: guest SORTL  subfunc 0x%16.16lx.%16.16lx.%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.sortl)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.sortl)[1],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.sortl)[2],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.sortl)[3]);
+	VM_EVENT(kvm, 3, "SET: guest DFLTCC subfunc 0x%16.16lx.%16.16lx.%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.dfltcc)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.dfltcc)[1],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.dfltcc)[2],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.dfltcc)[3]);
+
+	return 0;
 }
 
 static int kvm_s390_set_cpu_model(struct kvm *kvm, struct kvm_device_attr *attr)
@@ -1372,12 +1494,69 @@ static int kvm_s390_get_machine_feat(struct kvm *kvm,
 static int kvm_s390_get_processor_subfunc(struct kvm *kvm,
 					  struct kvm_device_attr *attr)
 {
-	/*
-	 * Once we can actually configure subfunctions (kernel + hw support),
-	 * we have to check if they were already set by user space, if so copy
-	 * them from kvm->arch.
-	 */
-	return -ENXIO;
+	if (copy_to_user((void __user *)attr->addr, &kvm->arch.model.subfuncs,
+	    sizeof(struct kvm_s390_vm_cpu_subfunc)))
+		return -EFAULT;
+
+	VM_EVENT(kvm, 3, "GET: guest PLO    subfunc 0x%16.16lx.%16.16lx.%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.plo)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.plo)[1],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.plo)[2],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.plo)[3]);
+	VM_EVENT(kvm, 3, "GET: guest PTFF   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.ptff)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.ptff)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KMAC   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmac)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmac)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KMC    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmc)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmc)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KM     subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.km)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.km)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KIMD   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kimd)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kimd)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KLMD   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.klmd)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.klmd)[1]);
+	VM_EVENT(kvm, 3, "GET: guest PCKMO  subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.pckmo)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.pckmo)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KMCTR  subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmctr)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmctr)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KMF    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmf)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmf)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KMO    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmo)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kmo)[1]);
+	VM_EVENT(kvm, 3, "GET: guest PCC    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.pcc)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.pcc)[1]);
+	VM_EVENT(kvm, 3, "GET: guest PPNO   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.ppno)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.ppno)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KMA    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kma)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kma)[1]);
+	VM_EVENT(kvm, 3, "GET: guest KDSA   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kdsa)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.kdsa)[1]);
+	VM_EVENT(kvm, 3, "GET: guest SORTL  subfunc 0x%16.16lx.%16.16lx.%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.sortl)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.sortl)[1],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.sortl)[2],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.sortl)[3]);
+	VM_EVENT(kvm, 3, "GET: guest DFLTCC subfunc 0x%16.16lx.%16.16lx.%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm->arch.model.subfuncs.dfltcc)[0],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.dfltcc)[1],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.dfltcc)[2],
+		 ((unsigned long *) &kvm->arch.model.subfuncs.dfltcc)[3]);
+
+	return 0;
 }
 
 static int kvm_s390_get_machine_subfunc(struct kvm *kvm,
@@ -1386,8 +1565,68 @@ static int kvm_s390_get_machine_subfunc(struct kvm *kvm,
 	if (copy_to_user((void __user *)attr->addr, &kvm_s390_available_subfunc,
 	    sizeof(struct kvm_s390_vm_cpu_subfunc)))
 		return -EFAULT;
+
+	VM_EVENT(kvm, 3, "GET: host  PLO    subfunc 0x%16.16lx.%16.16lx.%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.plo)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.plo)[1],
+		 ((unsigned long *) &kvm_s390_available_subfunc.plo)[2],
+		 ((unsigned long *) &kvm_s390_available_subfunc.plo)[3]);
+	VM_EVENT(kvm, 3, "GET: host  PTFF   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.ptff)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.ptff)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KMAC   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmac)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmac)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KMC    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmc)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmc)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KM     subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.km)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.km)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KIMD   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.kimd)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.kimd)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KLMD   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.klmd)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.klmd)[1]);
+	VM_EVENT(kvm, 3, "GET: host  PCKMO  subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.pckmo)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.pckmo)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KMCTR  subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmctr)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmctr)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KMF    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmf)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmf)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KMO    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmo)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.kmo)[1]);
+	VM_EVENT(kvm, 3, "GET: host  PCC    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.pcc)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.pcc)[1]);
+	VM_EVENT(kvm, 3, "GET: host  PPNO   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.ppno)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.ppno)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KMA    subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.kma)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.kma)[1]);
+	VM_EVENT(kvm, 3, "GET: host  KDSA   subfunc 0x%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.kdsa)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.kdsa)[1]);
+	VM_EVENT(kvm, 3, "GET: host  SORTL  subfunc 0x%16.16lx.%16.16lx.%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.sortl)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.sortl)[1],
+		 ((unsigned long *) &kvm_s390_available_subfunc.sortl)[2],
+		 ((unsigned long *) &kvm_s390_available_subfunc.sortl)[3]);
+	VM_EVENT(kvm, 3, "GET: host  DFLTCC subfunc 0x%16.16lx.%16.16lx.%16.16lx.%16.16lx",
+		 ((unsigned long *) &kvm_s390_available_subfunc.dfltcc)[0],
+		 ((unsigned long *) &kvm_s390_available_subfunc.dfltcc)[1],
+		 ((unsigned long *) &kvm_s390_available_subfunc.dfltcc)[2],
+		 ((unsigned long *) &kvm_s390_available_subfunc.dfltcc)[3]);
+
 	return 0;
 }
+
 static int kvm_s390_get_cpu_model(struct kvm *kvm, struct kvm_device_attr *attr)
 {
 	int ret = -ENXIO;
@@ -1505,10 +1744,9 @@ static int kvm_s390_vm_has_attr(struct kvm *kvm, struct kvm_device_attr *attr)
 		case KVM_S390_VM_CPU_PROCESSOR_FEAT:
 		case KVM_S390_VM_CPU_MACHINE_FEAT:
 		case KVM_S390_VM_CPU_MACHINE_SUBFUNC:
+		case KVM_S390_VM_CPU_PROCESSOR_SUBFUNC:
 			ret = 0;
 			break;
-		/* configuring subfunctions is not supported yet */
-		case KVM_S390_VM_CPU_PROCESSOR_SUBFUNC:
 		default:
 			ret = -ENXIO;
 			break;
@@ -1933,14 +2171,6 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		r = kvm_s390_inject_vm(kvm, &s390int);
 		break;
 	}
-	case KVM_ENABLE_CAP: {
-		struct kvm_enable_cap cap;
-		r = -EFAULT;
-		if (copy_from_user(&cap, argp, sizeof(cap)))
-			break;
-		r = kvm_vm_ioctl_enable_cap(kvm, &cap);
-		break;
-	}
 	case KVM_CREATE_IRQCHIP: {
 		struct kvm_irq_routing_entry routing;
 
@@ -2208,6 +2438,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	if (!kvm->arch.sie_page2)
 		goto out_err;
 
+	kvm->arch.sie_page2->kvm = kvm;
 	kvm->arch.model.fac_list = kvm->arch.sie_page2->fac_list;
 
 	for (i = 0; i < kvm_s390_fac_size(); i++) {
@@ -2217,6 +2448,7 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 		kvm->arch.model.fac_list[i] = S390_lowcore.stfle_fac_list[i] &
 					      kvm_s390_fac_base[i];
 	}
+	kvm->arch.model.subfuncs = kvm_s390_available_subfunc;
 
 	/* we are always in czam mode - even on pre z14 machines */
 	set_kvm_facility(kvm->arch.model.fac_mask, 138);
@@ -2662,6 +2894,25 @@ void kvm_arch_vcpu_postcreate(struct kvm_vcpu *vcpu)
 	vcpu->arch.enabled_gmap = vcpu->arch.gmap;
 }
 
+static bool kvm_has_pckmo_subfunc(struct kvm *kvm, unsigned long nr)
+{
+	if (test_bit_inv(nr, (unsigned long *)&kvm->arch.model.subfuncs.pckmo) &&
+	    test_bit_inv(nr, (unsigned long *)&kvm_s390_available_subfunc.pckmo))
+		return true;
+	return false;
+}
+
+static bool kvm_has_pckmo_ecc(struct kvm *kvm)
+{
+	/* At least one ECC subfunction must be present */
+	return kvm_has_pckmo_subfunc(kvm, 32) ||
+	       kvm_has_pckmo_subfunc(kvm, 33) ||
+	       kvm_has_pckmo_subfunc(kvm, 34) ||
+	       kvm_has_pckmo_subfunc(kvm, 40) ||
+	       kvm_has_pckmo_subfunc(kvm, 41);
+
+}
+
 static void kvm_s390_vcpu_crypto_setup(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -2674,13 +2925,19 @@ static void kvm_s390_vcpu_crypto_setup(struct kvm_vcpu *vcpu)
 	vcpu->arch.sie_block->crycbd = vcpu->kvm->arch.crypto.crycbd;
 	vcpu->arch.sie_block->ecb3 &= ~(ECB3_AES | ECB3_DEA);
 	vcpu->arch.sie_block->eca &= ~ECA_APIE;
+	vcpu->arch.sie_block->ecd &= ~ECD_ECC;
 
 	if (vcpu->kvm->arch.crypto.apie)
 		vcpu->arch.sie_block->eca |= ECA_APIE;
 
 	/* Set up protected key support */
-	if (vcpu->kvm->arch.crypto.aes_kw)
+	if (vcpu->kvm->arch.crypto.aes_kw) {
 		vcpu->arch.sie_block->ecb3 |= ECB3_AES;
+		/* ecc is also wrapped with AES key */
+		if (kvm_has_pckmo_ecc(vcpu->kvm))
+			vcpu->arch.sie_block->ecd |= ECD_ECC;
+	}
+
 	if (vcpu->kvm->arch.crypto.dea_kw)
 		vcpu->arch.sie_block->ecb3 |= ECB3_DEA;
 }
@@ -2811,7 +3068,7 @@ struct kvm_vcpu *kvm_arch_vcpu_create(struct kvm *kvm,
 
 	vcpu->arch.sie_block->icpua = id;
 	spin_lock_init(&vcpu->arch.local_int.lock);
-	vcpu->arch.sie_block->gd = (u32)(u64)kvm->arch.gisa;
+	vcpu->arch.sie_block->gd = (u32)(u64)kvm->arch.gisa_int.origin;
 	if (vcpu->arch.sie_block->gd && sclp.has_gisaf)
 		vcpu->arch.sie_block->gd |= GISA_FORMAT1;
 	seqcount_init(&vcpu->arch.cputm_seqcount);
@@ -2911,6 +3168,17 @@ static void kvm_gmap_notifier(struct gmap *gmap, unsigned long start,
 			kvm_s390_sync_request(KVM_REQ_MMU_RELOAD, vcpu);
 		}
 	}
+}
+
+bool kvm_arch_no_poll(struct kvm_vcpu *vcpu)
+{
+	/* do not poll with more than halt_poll_max_steal percent of steal time */
+	if (S390_lowcore.avg_steal_timer * 100 / (TICK_USEC << 12) >=
+	    halt_poll_max_steal) {
+		vcpu->stat.halt_no_poll_steal++;
+		return true;
+	}
+	return false;
 }
 
 int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu)
@@ -3456,6 +3724,8 @@ static int vcpu_pre_run(struct kvm_vcpu *vcpu)
 		kvm_s390_backup_guest_per_regs(vcpu);
 		kvm_s390_patch_guest_per_regs(vcpu);
 	}
+
+	clear_bit(vcpu->vcpu_id, vcpu->kvm->arch.gisa_int.kicked_mask);
 
 	vcpu->arch.sie_block->icptcode = 0;
 	cpuflags = atomic_read(&vcpu->arch.sie_block->cpuflags);
@@ -4255,21 +4525,28 @@ void kvm_arch_commit_memory_region(struct kvm *kvm,
 				const struct kvm_memory_slot *new,
 				enum kvm_mr_change change)
 {
-	int rc;
+	int rc = 0;
 
-	/* If the basics of the memslot do not change, we do not want
-	 * to update the gmap. Every update causes several unnecessary
-	 * segment translation exceptions. This is usually handled just
-	 * fine by the normal fault handler + gmap, but it will also
-	 * cause faults on the prefix page of running guest CPUs.
-	 */
-	if (old->userspace_addr == mem->userspace_addr &&
-	    old->base_gfn * PAGE_SIZE == mem->guest_phys_addr &&
-	    old->npages * PAGE_SIZE == mem->memory_size)
-		return;
-
-	rc = gmap_map_segment(kvm->arch.gmap, mem->userspace_addr,
-		mem->guest_phys_addr, mem->memory_size);
+	switch (change) {
+	case KVM_MR_DELETE:
+		rc = gmap_unmap_segment(kvm->arch.gmap, old->base_gfn * PAGE_SIZE,
+					old->npages * PAGE_SIZE);
+		break;
+	case KVM_MR_MOVE:
+		rc = gmap_unmap_segment(kvm->arch.gmap, old->base_gfn * PAGE_SIZE,
+					old->npages * PAGE_SIZE);
+		if (rc)
+			break;
+		/* FALLTHROUGH */
+	case KVM_MR_CREATE:
+		rc = gmap_map_segment(kvm->arch.gmap, mem->userspace_addr,
+				      mem->guest_phys_addr, mem->memory_size);
+		break;
+	case KVM_MR_FLAGS_ONLY:
+		break;
+	default:
+		WARN(1, "Unknown KVM MR CHANGE: %d\n", change);
+	}
 	if (rc)
 		pr_warn("failed to commit memory region\n");
 	return;
@@ -4292,12 +4569,12 @@ static int __init kvm_s390_init(void)
 	int i;
 
 	if (!sclp.has_sief2) {
-		pr_info("SIE not available\n");
+		pr_info("SIE is not available\n");
 		return -ENODEV;
 	}
 
 	if (nested && hpage) {
-		pr_info("nested (vSIE) and hpage (huge page backing) can currently not be activated concurrently");
+		pr_info("A KVM host that supports nesting cannot back its KVM guests with huge pages\n");
 		return -EINVAL;
 	}
 

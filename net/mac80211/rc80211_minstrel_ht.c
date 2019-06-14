@@ -51,8 +51,13 @@
 	MINSTREL_MAX_STREAMS * _sgi +	\
 	_streams - 1
 
+#define _MAX(a, b) (((a)>(b))?(a):(b))
+
+#define GROUP_SHIFT(duration)						\
+	_MAX(0, 16 - __builtin_clz(duration))
+
 /* MCS rate information for an MCS group */
-#define MCS_GROUP(_streams, _sgi, _ht40, _s)				\
+#define __MCS_GROUP(_streams, _sgi, _ht40, _s)				\
 	[GROUP_IDX(_streams, _sgi, _ht40)] = {				\
 	.streams = _streams,						\
 	.shift = _s,							\
@@ -72,6 +77,13 @@
 	}								\
 }
 
+#define MCS_GROUP_SHIFT(_streams, _sgi, _ht40)				\
+	GROUP_SHIFT(MCS_DURATION(_streams, _sgi, _ht40 ? 54 : 26))
+
+#define MCS_GROUP(_streams, _sgi, _ht40)				\
+	__MCS_GROUP(_streams, _sgi, _ht40,				\
+		    MCS_GROUP_SHIFT(_streams, _sgi, _ht40))
+
 #define VHT_GROUP_IDX(_streams, _sgi, _bw)				\
 	(MINSTREL_VHT_GROUP_0 +						\
 	 MINSTREL_MAX_STREAMS * 2 * (_bw) +				\
@@ -81,7 +93,7 @@
 #define BW2VBPS(_bw, r3, r2, r1)					\
 	(_bw == BW_80 ? r3 : _bw == BW_40 ? r2 : r1)
 
-#define VHT_GROUP(_streams, _sgi, _bw, _s)				\
+#define __VHT_GROUP(_streams, _sgi, _bw, _s)				\
 	[VHT_GROUP_IDX(_streams, _sgi, _bw)] = {			\
 	.streams = _streams,						\
 	.shift = _s,							\
@@ -114,6 +126,14 @@
 	}								\
 }
 
+#define VHT_GROUP_SHIFT(_streams, _sgi, _bw)				\
+	GROUP_SHIFT(MCS_DURATION(_streams, _sgi,			\
+				 BW2VBPS(_bw,  117,  54,  26)))
+
+#define VHT_GROUP(_streams, _sgi, _bw)					\
+	__VHT_GROUP(_streams, _sgi, _bw,				\
+		    VHT_GROUP_SHIFT(_streams, _sgi, _bw))
+
 #define CCK_DURATION(_bitrate, _short, _len)		\
 	(1000 * (10 /* SIFS */ +			\
 	 (_short ? 72 + 24 : 144 + 48) +		\
@@ -129,7 +149,7 @@
 	CCK_ACK_DURATION(55, _short) >> _s,		\
 	CCK_ACK_DURATION(110, _short) >> _s
 
-#define CCK_GROUP(_s)					\
+#define __CCK_GROUP(_s)					\
 	[MINSTREL_CCK_GROUP] = {			\
 		.streams = 1,				\
 		.flags = 0,				\
@@ -139,6 +159,12 @@
 			CCK_DURATION_LIST(true, _s)	\
 		}					\
 	}
+
+#define CCK_GROUP_SHIFT					\
+	GROUP_SHIFT(CCK_ACK_DURATION(10, false))
+
+#define CCK_GROUP __CCK_GROUP(CCK_GROUP_SHIFT)
+
 
 static bool minstrel_vht_only = true;
 module_param(minstrel_vht_only, bool, 0644);
@@ -154,47 +180,57 @@ MODULE_PARM_DESC(minstrel_vht_only,
  * BW -> SGI -> #streams
  */
 const struct mcs_group minstrel_mcs_groups[] = {
-	MCS_GROUP(1, 0, BW_20, 5),
-	MCS_GROUP(2, 0, BW_20, 4),
-	MCS_GROUP(3, 0, BW_20, 4),
+	MCS_GROUP(1, 0, BW_20),
+	MCS_GROUP(2, 0, BW_20),
+	MCS_GROUP(3, 0, BW_20),
+	MCS_GROUP(4, 0, BW_20),
 
-	MCS_GROUP(1, 1, BW_20, 5),
-	MCS_GROUP(2, 1, BW_20, 4),
-	MCS_GROUP(3, 1, BW_20, 4),
+	MCS_GROUP(1, 1, BW_20),
+	MCS_GROUP(2, 1, BW_20),
+	MCS_GROUP(3, 1, BW_20),
+	MCS_GROUP(4, 1, BW_20),
 
-	MCS_GROUP(1, 0, BW_40, 4),
-	MCS_GROUP(2, 0, BW_40, 4),
-	MCS_GROUP(3, 0, BW_40, 4),
+	MCS_GROUP(1, 0, BW_40),
+	MCS_GROUP(2, 0, BW_40),
+	MCS_GROUP(3, 0, BW_40),
+	MCS_GROUP(4, 0, BW_40),
 
-	MCS_GROUP(1, 1, BW_40, 4),
-	MCS_GROUP(2, 1, BW_40, 4),
-	MCS_GROUP(3, 1, BW_40, 4),
+	MCS_GROUP(1, 1, BW_40),
+	MCS_GROUP(2, 1, BW_40),
+	MCS_GROUP(3, 1, BW_40),
+	MCS_GROUP(4, 1, BW_40),
 
-	CCK_GROUP(8),
+	CCK_GROUP,
 
-	VHT_GROUP(1, 0, BW_20, 5),
-	VHT_GROUP(2, 0, BW_20, 4),
-	VHT_GROUP(3, 0, BW_20, 4),
+	VHT_GROUP(1, 0, BW_20),
+	VHT_GROUP(2, 0, BW_20),
+	VHT_GROUP(3, 0, BW_20),
+	VHT_GROUP(4, 0, BW_20),
 
-	VHT_GROUP(1, 1, BW_20, 5),
-	VHT_GROUP(2, 1, BW_20, 4),
-	VHT_GROUP(3, 1, BW_20, 4),
+	VHT_GROUP(1, 1, BW_20),
+	VHT_GROUP(2, 1, BW_20),
+	VHT_GROUP(3, 1, BW_20),
+	VHT_GROUP(4, 1, BW_20),
 
-	VHT_GROUP(1, 0, BW_40, 4),
-	VHT_GROUP(2, 0, BW_40, 4),
-	VHT_GROUP(3, 0, BW_40, 4),
+	VHT_GROUP(1, 0, BW_40),
+	VHT_GROUP(2, 0, BW_40),
+	VHT_GROUP(3, 0, BW_40),
+	VHT_GROUP(4, 0, BW_40),
 
-	VHT_GROUP(1, 1, BW_40, 4),
-	VHT_GROUP(2, 1, BW_40, 4),
-	VHT_GROUP(3, 1, BW_40, 4),
+	VHT_GROUP(1, 1, BW_40),
+	VHT_GROUP(2, 1, BW_40),
+	VHT_GROUP(3, 1, BW_40),
+	VHT_GROUP(4, 1, BW_40),
 
-	VHT_GROUP(1, 0, BW_80, 4),
-	VHT_GROUP(2, 0, BW_80, 4),
-	VHT_GROUP(3, 0, BW_80, 4),
+	VHT_GROUP(1, 0, BW_80),
+	VHT_GROUP(2, 0, BW_80),
+	VHT_GROUP(3, 0, BW_80),
+	VHT_GROUP(4, 0, BW_80),
 
-	VHT_GROUP(1, 1, BW_80, 4),
-	VHT_GROUP(2, 1, BW_80, 4),
-	VHT_GROUP(3, 1, BW_80, 4),
+	VHT_GROUP(1, 1, BW_80),
+	VHT_GROUP(2, 1, BW_80),
+	VHT_GROUP(3, 1, BW_80),
+	VHT_GROUP(4, 1, BW_80),
 };
 
 static u8 sample_table[SAMPLE_COLUMNS][MCS_GROUP_RATES] __read_mostly;
@@ -294,6 +330,15 @@ minstrel_get_ratestats(struct minstrel_ht_sta *mi, int index)
 	return &mi->groups[index / MCS_GROUP_RATES].rates[index % MCS_GROUP_RATES];
 }
 
+static unsigned int
+minstrel_ht_avg_ampdu_len(struct minstrel_ht_sta *mi)
+{
+	if (!mi->avg_ampdu_len)
+		return AVG_AMPDU_SIZE;
+
+	return MINSTREL_TRUNC(mi->avg_ampdu_len);
+}
+
 /*
  * Return current throughput based on the average A-MPDU length, taking into
  * account the expected number of retransmissions and their expected length
@@ -309,7 +354,7 @@ minstrel_ht_get_tp_avg(struct minstrel_ht_sta *mi, int group, int rate,
 		return 0;
 
 	if (group != MINSTREL_CCK_GROUP)
-		nsecs = 1000 * mi->overhead / MINSTREL_TRUNC(mi->avg_ampdu_len);
+		nsecs = 1000 * mi->overhead / minstrel_ht_avg_ampdu_len(mi);
 
 	nsecs += minstrel_mcs_groups[group].duration[rate] <<
 		 minstrel_mcs_groups[group].shift;
@@ -503,8 +548,12 @@ minstrel_ht_update_stats(struct minstrel_priv *mp, struct minstrel_ht_sta *mi)
 	u16 tmp_cck_tp_rate[MAX_THR_RATES], index;
 
 	if (mi->ampdu_packets > 0) {
-		mi->avg_ampdu_len = minstrel_ewma(mi->avg_ampdu_len,
-			MINSTREL_FRAC(mi->ampdu_len, mi->ampdu_packets), EWMA_LEVEL);
+		if (!ieee80211_hw_check(mp->hw, TX_STATUS_NO_AMPDU_LEN))
+			mi->avg_ampdu_len = minstrel_ewma(mi->avg_ampdu_len,
+				MINSTREL_FRAC(mi->ampdu_len, mi->ampdu_packets),
+					      EWMA_LEVEL);
+		else
+			mi->avg_ampdu_len = 0;
 		mi->ampdu_len = 0;
 		mi->ampdu_packets = 0;
 	}
@@ -709,7 +758,9 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	mi->ampdu_len += info->status.ampdu_len;
 
 	if (!mi->sample_wait && !mi->sample_tries && mi->sample_count > 0) {
-		mi->sample_wait = 16 + 2 * MINSTREL_TRUNC(mi->avg_ampdu_len);
+		int avg_ampdu_len = minstrel_ht_avg_ampdu_len(mi);
+
+		mi->sample_wait = 16 + 2 * avg_ampdu_len;
 		mi->sample_tries = 1;
 		mi->sample_count--;
 	}
@@ -777,7 +828,7 @@ minstrel_calc_retransmit(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
 	unsigned int cw = mp->cw_min;
 	unsigned int ctime = 0;
 	unsigned int t_slot = 9; /* FIXME */
-	unsigned int ampdu_len = MINSTREL_TRUNC(mi->avg_ampdu_len);
+	unsigned int ampdu_len = minstrel_ht_avg_ampdu_len(mi);
 	unsigned int overhead = 0, overhead_rtscts = 0;
 
 	mrs = minstrel_get_ratestats(mi, index);

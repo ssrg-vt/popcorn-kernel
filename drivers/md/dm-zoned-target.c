@@ -643,7 +643,8 @@ static int dmz_get_zoned_device(struct dm_target *ti, char *path)
 
 	q = bdev_get_queue(dev->bdev);
 	dev->capacity = i_size_read(dev->bdev->bd_inode) >> SECTOR_SHIFT;
-	aligned_capacity = dev->capacity & ~(blk_queue_zone_sectors(q) - 1);
+	aligned_capacity = dev->capacity &
+				~((sector_t)blk_queue_zone_sectors(q) - 1);
 	if (ti->begin ||
 	    ((ti->len != dev->capacity) && (ti->len != aligned_capacity))) {
 		ti->error = "Partial mapping not supported";
@@ -727,7 +728,6 @@ static int dmz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ti->per_io_data_size = sizeof(struct dmz_bioctx);
 	ti->flush_supported = true;
 	ti->discards_supported = true;
-	ti->split_discard_bios = true;
 
 	/* The exposed capacity is the number of chunks that can be mapped */
 	ti->len = (sector_t)dmz_nr_chunks(dmz->metadata) << dev->zone_nr_sectors_shift;

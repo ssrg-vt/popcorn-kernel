@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Common framework for low-level network console, dump, and debugger code
  *
@@ -149,7 +150,7 @@ static void poll_one_napi(struct napi_struct *napi)
 	 * indicate that we are clearing the Tx path only.
 	 */
 	work = napi->poll(napi, 0);
-	WARN_ONCE(work, "%pF exceeded budget in poll\n", napi->poll);
+	WARN_ONCE(work, "%pS exceeded budget in poll\n", napi->poll);
 	trace_napi_poll(napi, work, 0);
 
 	clear_bit(NAPI_STATE_NPSVC, &napi->state);
@@ -323,7 +324,7 @@ void netpoll_send_skb_on_dev(struct netpoll *np, struct sk_buff *skb,
 	if (skb_queue_len(&npinfo->txq) == 0 && !netpoll_owner_active(dev)) {
 		struct netdev_queue *txq;
 
-		txq = netdev_pick_tx(dev, skb, NULL);
+		txq = netdev_core_pick_tx(dev, skb, NULL);
 
 		/* try until next clock tick */
 		for (tries = jiffies_to_usecs(1)/USEC_PER_POLL;
@@ -346,7 +347,7 @@ void netpoll_send_skb_on_dev(struct netpoll *np, struct sk_buff *skb,
 		}
 
 		WARN_ONCE(!irqs_disabled(),
-			"netpoll_send_skb_on_dev(): %s enabled interrupts in poll (%pF)\n",
+			"netpoll_send_skb_on_dev(): %s enabled interrupts in poll (%pS)\n",
 			dev->name, dev->netdev_ops->ndo_start_xmit);
 
 	}
@@ -663,7 +664,7 @@ int netpoll_setup(struct netpoll *np)
 
 		np_info(np, "device %s not up yet, forcing it\n", np->dev_name);
 
-		err = dev_open(ndev);
+		err = dev_open(ndev, NULL);
 
 		if (err) {
 			np_err(np, "failed to open %s\n", ndev->name);
@@ -801,7 +802,7 @@ void __netpoll_cleanup(struct netpoll *np)
 			ops->ndo_netpoll_cleanup(np->dev);
 
 		RCU_INIT_POINTER(np->dev->npinfo, NULL);
-		call_rcu_bh(&npinfo->rcu, rcu_cleanup_netpoll_info);
+		call_rcu(&npinfo->rcu, rcu_cleanup_netpoll_info);
 	} else
 		RCU_INIT_POINTER(np->dev->npinfo, NULL);
 }
@@ -812,7 +813,7 @@ void __netpoll_free(struct netpoll *np)
 	ASSERT_RTNL();
 
 	/* Wait for transmitting packets to finish before freeing. */
-	synchronize_rcu_bh();
+	synchronize_rcu();
 	__netpoll_cleanup(np);
 	kfree(np);
 }

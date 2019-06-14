@@ -273,13 +273,13 @@ static void sh_veu_process(struct sh_veu_dev *veu,
 static void sh_veu_device_run(void *priv)
 {
 	struct sh_veu_dev *veu = priv;
-	struct vb2_buffer *src_buf, *dst_buf;
+	struct vb2_v4l2_buffer *src_buf, *dst_buf;
 
 	src_buf = v4l2_m2m_next_src_buf(veu->m2m_ctx);
 	dst_buf = v4l2_m2m_next_dst_buf(veu->m2m_ctx);
 
 	if (src_buf && dst_buf)
-		sh_veu_process(veu, src_buf, dst_buf);
+		sh_veu_process(veu, &src_buf->vb2_buf, &dst_buf->vb2_buf);
 }
 
 		/* ========== video ioctls ========== */
@@ -493,9 +493,6 @@ static int sh_veu_try_fmt_vid_cap(struct file *file, void *priv,
 	const struct sh_veu_format *fmt;
 
 	fmt = sh_veu_find_fmt(f);
-	if (!fmt)
-		/* wrong buffer type */
-		return -EINVAL;
 
 	return sh_veu_try_fmt(f, fmt);
 }
@@ -506,9 +503,6 @@ static int sh_veu_try_fmt_vid_out(struct file *file, void *priv,
 	const struct sh_veu_format *fmt;
 
 	fmt = sh_veu_find_fmt(f);
-	if (!fmt)
-		/* wrong buffer type */
-		return -EINVAL;
 
 	return sh_veu_try_fmt(f, fmt);
 }

@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Huawei HiNIC PCI Express Linux driver
  * Copyright(c) 2017 Huawei Technologies Co., Ltd
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
- *
  */
 
 #include <linux/kernel.h>
@@ -518,7 +509,7 @@ process_sq_wqe:
 
 flush_skbs:
 	netdev_txq = netdev_get_tx_queue(netdev, q_id);
-	if ((!skb->xmit_more) || (netif_xmit_stopped(netdev_txq)))
+	if ((!netdev_xmit_more()) || (netif_xmit_stopped(netdev_txq)))
 		hinic_sq_write_db(txq->sq, prod_idx, wqe_size, 0);
 
 	return err;
@@ -655,7 +646,9 @@ static int free_tx_poll(struct napi_struct *napi, int budget)
 
 	if (pkts < budget) {
 		napi_complete(napi);
-		enable_irq(sq->irq);
+		hinic_hwdev_set_msix_state(nic_dev->hwdev,
+					   sq->msix_entry,
+					   HINIC_MSIX_ENABLE);
 		return pkts;
 	}
 
@@ -682,7 +675,9 @@ static irqreturn_t tx_irq(int irq, void *data)
 	nic_dev = netdev_priv(txq->netdev);
 
 	/* Disable the interrupt until napi will be completed */
-	disable_irq_nosync(txq->sq->irq);
+	hinic_hwdev_set_msix_state(nic_dev->hwdev,
+				   txq->sq->msix_entry,
+				   HINIC_MSIX_DISABLE);
 
 	hinic_hwdev_msix_cnt_set(nic_dev->hwdev, txq->sq->msix_entry);
 

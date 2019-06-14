@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ipr.c -- driver for IBM Power Linux RAID adapters
  *
  * Written By: Brian King <brking@us.ibm.com>, IBM Corporation
  *
  * Copyright (C) 2003, 2004 IBM Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  */
 
 /*
@@ -6696,7 +6682,8 @@ err_nodev:
  * Return value:
  * 	0 on success / other on failure
  **/
-static int ipr_ioctl(struct scsi_device *sdev, int cmd, void __user *arg)
+static int ipr_ioctl(struct scsi_device *sdev, unsigned int cmd,
+		     void __user *arg)
 {
 	struct ipr_resource_entry *res;
 
@@ -6754,7 +6741,6 @@ static struct scsi_host_template driver_template = {
 	.sg_tablesize = IPR_MAX_SGLIST,
 	.max_sectors = IPR_IOA_MAX_SECTORS,
 	.cmd_per_lun = IPR_MAX_CMD_PER_LUN,
-	.use_clustering = ENABLE_CLUSTERING,
 	.shost_attrs = ipr_ioa_attrs,
 	.sdev_attrs = ipr_dev_attrs,
 	.proc_name = IPR_NAME,

@@ -332,7 +332,6 @@
 		__start_rodata = .;					\
 		*(.rodata) *(.rodata.*)					\
 		RO_AFTER_INIT_DATA	/* Read only after init */	\
-		KEEP(*(__vermagic))	/* Kernel version magic */	\
 		. = ALIGN(8);						\
 		__start___tracepoints_ptrs = .;				\
 		KEEP(*(__tracepoints_ptrs)) /* Tracepoints: pointer array */ \
@@ -733,7 +732,7 @@
 		KEEP(*(.orc_unwind_ip))					\
 		__stop_orc_unwind_ip = .;				\
 	}								\
-	. = ALIGN(6);							\
+	. = ALIGN(2);							\
 	.orc_unwind : AT(ADDR(.orc_unwind) - LOAD_OFFSET) {		\
 		__start_orc_unwind = .;					\
 		KEEP(*(.orc_unwind))					\
@@ -844,6 +843,7 @@
 	EXIT_CALL							\
 	*(.discard)							\
 	*(.discard.*)							\
+	*(.modinfo)							\
 	}
 
 /**

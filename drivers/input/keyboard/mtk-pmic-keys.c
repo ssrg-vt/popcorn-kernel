@@ -1,31 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2017 MediaTek, Inc.
  *
  * Author: Chen Zhong <chen.zhong@mediatek.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
-#include <linux/module.h>
-#include <linux/kernel.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
-#include <linux/platform_device.h>
 #include <linux/kernel.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
-#include <linux/regmap.h>
 #include <linux/mfd/mt6323/registers.h>
-#include <linux/mfd/mt6397/registers.h>
 #include <linux/mfd/mt6397/core.h>
+#include <linux/mfd/mt6397/registers.h>
+#include <linux/module.h>
+#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
+#include <linux/regmap.h>
 
 #define MTK_PMIC_PWRKEY_RST_EN_MASK	0x1
 #define MTK_PMIC_PWRKEY_RST_EN_SHIFT	6

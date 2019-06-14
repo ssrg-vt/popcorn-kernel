@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2017 Samsung Electronics Co.Ltd
  * Author:
- *	Andrzej Pietrasiewicz <andrzej.p@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundationr
+ *	Andrzej Pietrasiewicz <andrzejtp2010@gmail.com>
  */
 
 #include <linux/kernel.h>
@@ -23,7 +20,6 @@
 #include "regs-scaler.h"
 #include "exynos_drm_fb.h"
 #include "exynos_drm_drv.h"
-#include "exynos_drm_iommu.h"
 #include "exynos_drm_ipp.h"
 
 #define scaler_read(offset)		readl(scaler->regs + (offset))
@@ -452,9 +448,10 @@ static int scaler_bind(struct device *dev, struct device *master, void *data)
 	struct exynos_drm_ipp *ipp = &scaler->ipp;
 
 	scaler->drm_dev = drm_dev;
-	drm_iommu_attach_device(drm_dev, dev);
+	ipp->drm_dev = drm_dev;
+	exynos_drm_register_dma(drm_dev, dev);
 
-	exynos_drm_ipp_register(drm_dev, ipp, &ipp_funcs,
+	exynos_drm_ipp_register(dev, ipp, &ipp_funcs,
 			DRM_EXYNOS_IPP_CAP_CROP | DRM_EXYNOS_IPP_CAP_ROTATE |
 			DRM_EXYNOS_IPP_CAP_SCALE | DRM_EXYNOS_IPP_CAP_CONVERT,
 			scaler->scaler_data->formats,
@@ -469,11 +466,10 @@ static void scaler_unbind(struct device *dev, struct device *master,
 			void *data)
 {
 	struct scaler_context *scaler = dev_get_drvdata(dev);
-	struct drm_device *drm_dev = data;
 	struct exynos_drm_ipp *ipp = &scaler->ipp;
 
-	exynos_drm_ipp_unregister(drm_dev, ipp);
-	drm_iommu_detach_device(scaler->drm_dev, scaler->dev);
+	exynos_drm_ipp_unregister(dev, ipp);
+	exynos_drm_unregister_dma(scaler->drm_dev, scaler->dev);
 }
 
 static const struct component_ops scaler_component_ops = {

@@ -47,7 +47,7 @@ static int rtw_hw_suspend(struct adapter *padapter)
 		if (check_fwstate(pmlmepriv, _FW_LINKED)) {
 			_clr_fwstate_(pmlmepriv, _FW_LINKED);
 
-			LedControl8188eu(padapter, LED_CTL_NO_LINK);
+			led_control_8188eu(padapter, LED_CTL_NO_LINK);
 
 			rtw_os_indicate_disconnect(padapter);
 
@@ -374,7 +374,7 @@ void rtw_set_ps_mode(struct adapter *padapter, u8 ps_mode, u8 smart_ps, u8 bcn_a
 	}
 
 	if (pwrpriv->pwr_mode == ps_mode) {
-		if (PS_MODE_ACTIVE == ps_mode)
+		if (ps_mode == PS_MODE_ACTIVE)
 			return;
 
 		if ((pwrpriv->smart_ps == smart_ps) &&

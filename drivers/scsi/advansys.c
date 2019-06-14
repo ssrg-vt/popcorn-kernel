@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * advansys.c - Linux Host Driver for AdvanSys SCSI Adapters
  *
@@ -6,11 +7,6 @@
  * Copyright (c) 2007 Matthew Wilcox <matthew@wil.cx>
  * Copyright (c) 2014 Hannes Reinecke <hare@suse.de>
  * All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 /*
@@ -3192,8 +3188,8 @@ static void asc_prt_driver_conf(struct seq_file *m, struct Scsi_Host *shost)
 		   shost->sg_tablesize, shost->cmd_per_lun);
 
 	seq_printf(m,
-		   " unchecked_isa_dma %d, use_clustering %d\n",
-		   shost->unchecked_isa_dma, shost->use_clustering);
+		   " unchecked_isa_dma %d\n",
+		   shost->unchecked_isa_dma);
 
 	seq_printf(m,
 		   " flags 0x%x, last_reset 0x%lx, jiffies 0x%lx, asc_n_io_port 0x%x\n",
@@ -10808,14 +10804,6 @@ static struct scsi_host_template advansys_template = {
 	 * for non-ISA adapters.
 	 */
 	.unchecked_isa_dma = true,
-	/*
-	 * All adapters controlled by this driver are capable of large
-	 * scatter-gather lists. According to the mid-level SCSI documentation
-	 * this obviates any performance gain provided by setting
-	 * 'use_clustering'. But empirically while CPU utilization is increased
-	 * by enabling clustering, I/O throughput increases as well.
-	 */
-	.use_clustering = ENABLE_CLUSTERING,
 };
 
 static int advansys_wide_init_chip(struct Scsi_Host *shost)

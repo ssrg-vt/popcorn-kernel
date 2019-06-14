@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * dwmac-sun8i.c - Allwinner sun8i DWMAC specific glue layer
  *
  * Copyright (C) 2017 Corentin Labbe <clabbe.montjoie@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
@@ -1015,6 +1006,8 @@ static struct mac_device_info *sun8i_dwmac_setup(void *ppriv)
 	mac->mac = &sun8i_dwmac_ops;
 	mac->dma = &sun8i_dwmac_dma_ops;
 
+	priv->dev->priv_flags |= IFF_UNICAST_FLT;
+
 	/* The loopback bit seems to be re-set when link change
 	 * Simply mask it each time
 	 * Speed 10/100/1000 are set in BIT(2)/BIT(3)
@@ -1147,7 +1140,10 @@ static int sun8i_dwmac_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	plat_dat->interface = of_get_phy_mode(dev->of_node);
+	ret = of_get_phy_mode(dev->of_node);
+	if (ret < 0)
+		return -EINVAL;
+	plat_dat->interface = ret;
 
 	/* platform data specifying hardware features and callbacks.
 	 * hardware features were copied from Allwinner drivers.

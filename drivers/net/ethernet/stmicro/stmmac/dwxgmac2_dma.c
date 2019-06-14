@@ -147,6 +147,52 @@ static void dwxgmac2_dma_rx_mode(void __iomem *ioaddr, int mode,
 	value &= ~XGMAC_RQS;
 	value |= (rqs << XGMAC_RQS_SHIFT) & XGMAC_RQS;
 
+	if ((fifosz >= 4096) && (qmode != MTL_QUEUE_AVB)) {
+		u32 flow = readl(ioaddr + XGMAC_MTL_RXQ_FLOW_CONTROL(channel));
+		unsigned int rfd, rfa;
+
+		value |= XGMAC_EHFC;
+
+		/* Set Threshold for Activating Flow Control to min 2 frames,
+		 * i.e. 1500 * 2 = 3000 bytes.
+		 *
+		 * Set Threshold for Deactivating Flow Control to min 1 frame,
+		 * i.e. 1500 bytes.
+		 */
+		switch (fifosz) {
+		case 4096:
+			/* This violates the above formula because of FIFO size
+			 * limit therefore overflow may occur in spite of this.
+			 */
+			rfd = 0x03; /* Full-2.5K */
+			rfa = 0x01; /* Full-1.5K */
+			break;
+
+		case 8192:
+			rfd = 0x06; /* Full-4K */
+			rfa = 0x0a; /* Full-6K */
+			break;
+
+		case 16384:
+			rfd = 0x06; /* Full-4K */
+			rfa = 0x12; /* Full-10K */
+			break;
+
+		default:
+			rfd = 0x06; /* Full-4K */
+			rfa = 0x1e; /* Full-16K */
+			break;
+		}
+
+		flow &= ~XGMAC_RFD;
+		flow |= rfd << XGMAC_RFD_SHIFT;
+
+		flow &= ~XGMAC_RFA;
+		flow |= rfa << XGMAC_RFA_SHIFT;
+
+		writel(flow, ioaddr + XGMAC_MTL_RXQ_FLOW_CONTROL(channel));
+	}
+
 	writel(value, ioaddr + XGMAC_MTL_RXQ_OPMODE(channel));
 
 	/* Enable MTL RX overflow */
@@ -263,6 +309,7 @@ static int dwxgmac2_dma_interrupt(void __iomem *ioaddr,
 				  struct stmmac_extra_stats *x, u32 chan)
 {
 	u32 intr_status = readl(ioaddr + XGMAC_DMA_CH_STATUS(chan));
+	u32 intr_en = readl(ioaddr + XGMAC_DMA_CH_INT_EN(chan));
 	int ret = 0;
 
 	/* ABNORMAL interrupts */
@@ -282,20 +329,17 @@ static int dwxgmac2_dma_interrupt(void __iomem *ioaddr,
 		x->normal_irq_n++;
 
 		if (likely(intr_status & XGMAC_RI)) {
-			u32 value = readl(ioaddr + XGMAC_DMA_CH_INT_EN(chan));
-			if (likely(value & XGMAC_RIE)) {
-				x->rx_normal_irq_n++;
-				ret |= handle_rx;
-			}
+			x->rx_normal_irq_n++;
+			ret |= handle_rx;
 		}
-		if (likely(intr_status & XGMAC_TI)) {
+		if (likely(intr_status & (XGMAC_TI | XGMAC_TBU))) {
 			x->tx_normal_irq_n++;
 			ret |= handle_tx;
 		}
 	}
 
 	/* Clear interrupts */
-	writel(~0x0, ioaddr + XGMAC_DMA_CH_STATUS(chan));
+	writel(intr_en & intr_status, ioaddr + XGMAC_DMA_CH_STATUS(chan));
 
 	return ret;
 }

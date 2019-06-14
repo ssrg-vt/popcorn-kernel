@@ -1,21 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * USB USBVISION Video device driver 0.9.10
- *
- *
  *
  * Copyright (c) 1999-2005 Joerg Heckenbach <joerg@heckenbach-aw.de>
  *
  * This module is part of usbvision driver project.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Let's call the version 0.... until compression decoding is completely
  * implemented.
@@ -27,7 +16,6 @@
  * Gerd Knorr and zoran 36120/36125 driver by Pauline Middelink
  * Updates to driver completed by Dwaine P. Garden
  *
- *
  * TODO:
  *     - use submit_urb for all setup packets
  *     - Fix memory settings for nt1004. It is 4 times as big as the
@@ -38,7 +26,6 @@
  *     - optimization for performance.
  *     - Add Videotext capability (VBI).  Working on it.....
  *     - Check audio for other devices
- *
  */
 
 #include <linux/kernel.h>
@@ -706,7 +693,7 @@ static int vidioc_querybuf(struct file *file,
 	vb->length = usbvision->curwidth *
 		usbvision->curheight *
 		usbvision->palette.bytes_per_pixel;
-	vb->timestamp = usbvision->frame[vb->index].timestamp;
+	vb->timestamp = ns_to_timeval(usbvision->frame[vb->index].ts);
 	vb->sequence = usbvision->frame[vb->index].sequence;
 	return 0;
 }
@@ -775,7 +762,7 @@ static int vidioc_dqbuf(struct file *file, void *priv, struct v4l2_buffer *vb)
 		V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	vb->index = f->index;
 	vb->sequence = f->sequence;
-	vb->timestamp = f->timestamp;
+	vb->timestamp = ns_to_timeval(f->ts);
 	vb->field = V4L2_FIELD_NONE;
 	vb->bytesused = f->scanlength;
 

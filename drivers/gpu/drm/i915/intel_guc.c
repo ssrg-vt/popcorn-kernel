@@ -50,10 +50,11 @@ void intel_guc_init_send_regs(struct intel_guc *guc)
 	unsigned int i;
 
 	guc->send_regs.base = i915_mmio_reg_offset(SOFT_SCRATCH(0));
-	guc->send_regs.count = SOFT_SCRATCH_COUNT - 1;
+	guc->send_regs.count = GUC_MAX_MMIO_MSG_LEN;
+	BUILD_BUG_ON(GUC_MAX_MMIO_MSG_LEN > SOFT_SCRATCH_COUNT);
 
 	for (i = 0; i < guc->send_regs.count; i++) {
-		fw_domains |= intel_uncore_forcewake_for_reg(dev_priv,
+		fw_domains |= intel_uncore_forcewake_for_reg(&dev_priv->uncore,
 					guc_send_reg(guc, i),
 					FW_REG_READ | FW_REG_WRITE);
 	}
@@ -202,11 +203,19 @@ int intel_guc_init(struct intel_guc *guc)
 		goto err_log;
 	GEM_BUG_ON(!guc->ads_vma);
 
+	if (HAS_GUC_CT(dev_priv)) {
+		ret = intel_guc_ct_init(&guc->ct);
+		if (ret)
+			goto err_ads;
+	}
+
 	/* We need to notify the guc whenever we change the GGTT */
 	i915_ggtt_enable_guc(dev_priv);
 
 	return 0;
 
+err_ads:
+	intel_guc_ads_destroy(guc);
 err_log:
 	intel_guc_log_destroy(&guc->log);
 err_shared:
@@ -221,6 +230,10 @@ void intel_guc_fini(struct intel_guc *guc)
 	struct drm_i915_private *dev_priv = guc_to_i915(guc);
 
 	i915_ggtt_disable_guc(dev_priv);
+
+	if (HAS_GUC_CT(dev_priv))
+		intel_guc_ct_fini(&guc->ct);
+
 	intel_guc_ads_destroy(guc);
 	intel_guc_log_destroy(&guc->log);
 	guc_shared_data_destroy(guc);
@@ -356,14 +369,14 @@ void intel_guc_init_params(struct intel_guc *guc)
 	 * they are power context saved so it's ok to release forcewake
 	 * when we are done here and take it again at xfer time.
 	 */
-	intel_uncore_forcewake_get(dev_priv, FORCEWAKE_BLITTER);
+	intel_uncore_forcewake_get(&dev_priv->uncore, FORCEWAKE_BLITTER);
 
 	I915_WRITE(SOFT_SCRATCH(0), 0);
 
 	for (i = 0; i < GUC_CTL_MAX_DWORDS; i++)
 		I915_WRITE(SOFT_SCRATCH(1 + i), params[i]);
 
-	intel_uncore_forcewake_put(dev_priv, FORCEWAKE_BLITTER);
+	intel_uncore_forcewake_put(&dev_priv->uncore, FORCEWAKE_BLITTER);
 }
 
 int intel_guc_send_nop(struct intel_guc *guc, const u32 *action, u32 len,
@@ -385,6 +398,7 @@ int intel_guc_send_mmio(struct intel_guc *guc, const u32 *action, u32 len,
 			u32 *response_buf, u32 response_buf_size)
 {
 	struct drm_i915_private *dev_priv = guc_to_i915(guc);
+	struct intel_uncore *uncore = &dev_priv->uncore;
 	u32 status;
 	int i;
 	int ret;
@@ -401,12 +415,12 @@ int intel_guc_send_mmio(struct intel_guc *guc, const u32 *action, u32 len,
 		*action != INTEL_GUC_ACTION_DEREGISTER_COMMAND_TRANSPORT_BUFFER);
 
 	mutex_lock(&guc->send_mutex);
-	intel_uncore_forcewake_get(dev_priv, guc->send_regs.fw_domains);
+	intel_uncore_forcewake_get(uncore, guc->send_regs.fw_domains);
 
 	for (i = 0; i < len; i++)
-		I915_WRITE(guc_send_reg(guc, i), action[i]);
+		intel_uncore_write(uncore, guc_send_reg(guc, i), action[i]);
 
-	POSTING_READ(guc_send_reg(guc, i - 1));
+	intel_uncore_posting_read(uncore, guc_send_reg(guc, i - 1));
 
 	intel_guc_notify(guc);
 
@@ -414,7 +428,7 @@ int intel_guc_send_mmio(struct intel_guc *guc, const u32 *action, u32 len,
 	 * No GuC command should ever take longer than 10ms.
 	 * Fast commands should still complete in 10us.
 	 */
-	ret = __intel_wait_for_register_fw(dev_priv,
+	ret = __intel_wait_for_register_fw(uncore,
 					   guc_send_reg(guc, 0),
 					   INTEL_GUC_MSG_TYPE_MASK,
 					   INTEL_GUC_MSG_TYPE_RESPONSE <<
@@ -441,7 +455,7 @@ int intel_guc_send_mmio(struct intel_guc *guc, const u32 *action, u32 len,
 	ret = INTEL_GUC_MSG_TO_DATA(status);
 
 out:
-	intel_uncore_forcewake_put(dev_priv, guc->send_regs.fw_domains);
+	intel_uncore_forcewake_put(uncore, guc->send_regs.fw_domains);
 	mutex_unlock(&guc->send_mutex);
 
 	return ret;
@@ -471,17 +485,25 @@ void intel_guc_to_host_event_handler_mmio(struct intel_guc *guc)
 	spin_unlock(&guc->irq_lock);
 	enable_rpm_wakeref_asserts(dev_priv);
 
-	intel_guc_to_host_process_recv_msg(guc, msg);
+	intel_guc_to_host_process_recv_msg(guc, &msg, 1);
 }
 
-void intel_guc_to_host_process_recv_msg(struct intel_guc *guc, u32 msg)
+int intel_guc_to_host_process_recv_msg(struct intel_guc *guc,
+				       const u32 *payload, u32 len)
 {
+	u32 msg;
+
+	if (unlikely(!len))
+		return -EPROTO;
+
 	/* Make sure to handle only enabled messages */
-	msg &= guc->msg_enabled_mask;
+	msg = payload[0] & guc->msg_enabled_mask;
 
 	if (msg & (INTEL_GUC_RECV_MSG_FLUSH_LOG_BUFFER |
 		   INTEL_GUC_RECV_MSG_CRASH_DUMP_POSTED))
 		intel_guc_log_handle_flush_event(&guc->log);
+
+	return 0;
 }
 
 int intel_guc_sample_forcewake(struct intel_guc *guc)
@@ -521,6 +543,44 @@ int intel_guc_auth_huc(struct intel_guc *guc, u32 rsa_offset)
 	return intel_guc_send(guc, action, ARRAY_SIZE(action));
 }
 
+/*
+ * The ENTER/EXIT_S_STATE actions queue the save/restore operation in GuC FW and
+ * then return, so waiting on the H2G is not enough to guarantee GuC is done.
+ * When all the processing is done, GuC writes INTEL_GUC_SLEEP_STATE_SUCCESS to
+ * scratch register 14, so we can poll on that. Note that GuC does not ensure
+ * that the value in the register is different from
+ * INTEL_GUC_SLEEP_STATE_SUCCESS while the action is in progress so we need to
+ * take care of that ourselves as well.
+ */
+static int guc_sleep_state_action(struct intel_guc *guc,
+				  const u32 *action, u32 len)
+{
+	struct drm_i915_private *dev_priv = guc_to_i915(guc);
+	int ret;
+	u32 status;
+
+	I915_WRITE(SOFT_SCRATCH(14), INTEL_GUC_SLEEP_STATE_INVALID_MASK);
+
+	ret = intel_guc_send(guc, action, len);
+	if (ret)
+		return ret;
+
+	ret = __intel_wait_for_register(&dev_priv->uncore, SOFT_SCRATCH(14),
+					INTEL_GUC_SLEEP_STATE_INVALID_MASK,
+					0, 0, 10, &status);
+	if (ret)
+		return ret;
+
+	if (status != INTEL_GUC_SLEEP_STATE_SUCCESS) {
+		DRM_ERROR("GuC failed to change sleep state. "
+			  "action=0x%x, err=%u\n",
+			  action[0], status);
+		return -EIO;
+	}
+
+	return 0;
+}
+
 /**
  * intel_guc_suspend() - notify GuC entering suspend state
  * @guc:	the guc
@@ -533,7 +593,7 @@ int intel_guc_suspend(struct intel_guc *guc)
 		intel_guc_ggtt_offset(guc, guc->shared_data)
 	};
 
-	return intel_guc_send(guc, data, ARRAY_SIZE(data));
+	return guc_sleep_state_action(guc, data, ARRAY_SIZE(data));
 }
 
 /**
@@ -571,7 +631,7 @@ int intel_guc_resume(struct intel_guc *guc)
 		intel_guc_ggtt_offset(guc, guc->shared_data)
 	};
 
-	return intel_guc_send(guc, data, ARRAY_SIZE(data));
+	return guc_sleep_state_action(guc, data, ARRAY_SIZE(data));
 }
 
 /**

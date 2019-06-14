@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  skl.h - HD Audio skylake defintions.
  *
@@ -5,17 +6,7 @@
  *  Author: Jeeja KP <jeeja.kp@intel.com>
  *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
  */
 
 #ifndef __SOUND_SOC_SKL_H
@@ -119,10 +110,7 @@ struct skl_dma_params {
 };
 
 struct skl_machine_pdata {
-	u32 dmic_num;
 	bool use_tplg_pcm; /* use dais and dai links from topology */
-	const char *platform;
-	u32 codec_mask;
 };
 
 struct skl_dsp_ops {

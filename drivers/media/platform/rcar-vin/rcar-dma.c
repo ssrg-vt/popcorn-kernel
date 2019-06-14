@@ -486,7 +486,7 @@ static void rvin_set_coeff(struct rvin_dev *vin, unsigned short xs)
 	}
 
 	/* Use previous value if its XS value is closer */
-	if (p_prev_set && p_set &&
+	if (p_prev_set &&
 	    xs - p_prev_set->xs_value < p_set->xs_value - xs)
 		p_set = p_prev_set;
 
@@ -681,7 +681,7 @@ static int rvin_setup(struct rvin_dev *vin)
 		break;
 	}
 
-	/* Enable VSYNC Field Toogle mode after one VSYNC input */
+	/* Enable VSYNC Field Toggle mode after one VSYNC input */
 	if (vin->info->model == RCAR_GEN3)
 		dmr2 = VNDMR2_FTEV;
 	else
@@ -1341,5 +1341,5 @@ int rvin_set_channel_routing(struct rvin_dev *vin, u8 chsel)
 
 	pm_runtime_put(vin->dev);
 
-	return ret;
+	return 0;
 }

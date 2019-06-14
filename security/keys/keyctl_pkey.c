@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Public-key operation keyctls
  *
  * Copyright (C) 2016 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #include <linux/slab.h>
@@ -50,6 +46,8 @@ static int keyctl_pkey_params_parse(struct kernel_pkey_params *params)
 		if (*p == '\0' || *p == ' ' || *p == '\t')
 			continue;
 		token = match_token(p, param_keys, args);
+		if (token == Opt_err)
+			return -EINVAL;
 		if (__test_and_set_bit(token, &token_mask))
 			return -EINVAL;
 		q = args[0].from;

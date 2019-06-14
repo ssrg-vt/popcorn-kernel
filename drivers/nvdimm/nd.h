@@ -1,14 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright(c) 2013-2015 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 #ifndef __ND_H__
 #define __ND_H__
@@ -113,8 +105,12 @@ struct nd_percpu_lane {
 	spinlock_t lock;
 };
 
+enum nd_label_flags {
+	ND_LABEL_REAP,
+};
 struct nd_label_ent {
 	struct list_head list;
+	unsigned long flags;
 	struct nd_namespace_label *label;
 };
 
@@ -153,7 +149,7 @@ struct nd_region {
 	u16 ndr_mappings;
 	u64 ndr_size;
 	u64 ndr_start;
-	int id, num_lanes, ro, numa_node;
+	int id, num_lanes, ro, numa_node, target_node;
 	void *provider_data;
 	struct kernfs_node *bb_state;
 	struct badblocks bb;
@@ -250,6 +246,15 @@ long nvdimm_clear_poison(struct device *dev, phys_addr_t phys,
 void nvdimm_set_aliasing(struct device *dev);
 void nvdimm_set_locked(struct device *dev);
 void nvdimm_clear_locked(struct device *dev);
+int nvdimm_security_setup_events(struct device *dev);
+#if IS_ENABLED(CONFIG_NVDIMM_KEYS)
+int nvdimm_security_unlock(struct device *dev);
+#else
+static inline int nvdimm_security_unlock(struct device *dev)
+{
+	return 0;
+}
+#endif
 struct nd_btt *to_nd_btt(struct device *dev);
 
 struct nd_gen_sb {

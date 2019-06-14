@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config DRM_BRIDGE
 	def_bool y
 	depends on DRM
@@ -30,6 +31,7 @@ config DRM_CDNS_DSI
 	select DRM_KMS_HELPER
 	select DRM_MIPI_DSI
 	select DRM_PANEL_BRIDGE
+	select GENERIC_PHY_MIPI_DPHY
 	depends on OF
 	help
 	  Support Cadence DPI to DSI bridge. This is an internal
@@ -75,7 +77,6 @@ config DRM_PARADE_PS8622
 	depends on OF
 	select DRM_PANEL
 	select DRM_KMS_HELPER
-	select BACKLIGHT_LCD_SUPPORT
 	select BACKLIGHT_CLASS_DEVICE
 	---help---
 	  Parade eDP-LVDS bridge chip driver.
@@ -95,6 +96,7 @@ config DRM_SII902X
 	depends on OF
 	select DRM_KMS_HELPER
 	select REGMAP_I2C
+	select I2C_MUX
 	---help---
 	  Silicon Image sii902x bridge chip driver.
 

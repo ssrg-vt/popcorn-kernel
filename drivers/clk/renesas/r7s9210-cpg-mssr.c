@@ -11,6 +11,7 @@
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <dt-bindings/clock/r7s9210-cpg-mssr.h>
 #include "renesas-cpg-mssr.h"
 
@@ -87,6 +88,8 @@ static const struct mssr_mod_clk r7s9210_mod_clks[] __initconst = {
 	DEF_MOD_STB("scif1",	 46,	R7S9210_CLK_P1C),
 	DEF_MOD_STB("scif0",	 47,	R7S9210_CLK_P1C),
 
+	DEF_MOD_STB("usb1",	 60,	R7S9210_CLK_B),
+	DEF_MOD_STB("usb0",	 61,	R7S9210_CLK_B),
 	DEF_MOD_STB("ether1",	 64,	R7S9210_CLK_B),
 	DEF_MOD_STB("ether0",	 65,	R7S9210_CLK_B),
 
@@ -98,6 +101,11 @@ static const struct mssr_mod_clk r7s9210_mod_clks[] __initconst = {
 	DEF_MOD_STB("spi2",	 95,	R7S9210_CLK_P1),
 	DEF_MOD_STB("spi1",	 96,	R7S9210_CLK_P1),
 	DEF_MOD_STB("spi0",	 97,	R7S9210_CLK_P1),
+
+	DEF_MOD_STB("sdhi11",	100,	R7S9210_CLK_B),
+	DEF_MOD_STB("sdhi10",	101,	R7S9210_CLK_B),
+	DEF_MOD_STB("sdhi01",	102,	R7S9210_CLK_B),
+	DEF_MOD_STB("sdhi00",	103,	R7S9210_CLK_B),
 };
 
 /* The clock dividers in the table vary based on DT and register settings */
@@ -112,7 +120,7 @@ static void __init r7s9210_update_clk_table(struct clk *extal_clk,
 	if (clk_get_rate(extal_clk) > 12000000)
 		cpg_mode = 1;
 
-	frqcr = clk_readl(base + CPG_FRQCR) & 0xFFF;
+	frqcr = readl(base + CPG_FRQCR) & 0xFFF;
 	if (frqcr == 0x012)
 		index = 0;
 	else if (frqcr == 0x112)
@@ -148,7 +156,7 @@ static void __init r7s9210_update_clk_table(struct clk *extal_clk,
 	}
 }
 
-struct clk * __init rza2_cpg_clk_register(struct device *dev,
+static struct clk * __init rza2_cpg_clk_register(struct device *dev,
 	const struct cpg_core_clk *core, const struct cpg_mssr_info *info,
 	struct clk **clks, void __iomem *base,
 	struct raw_notifier_head *notifiers)

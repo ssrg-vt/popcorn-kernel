@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * HID Sensors Driver
  * Copyright (c) 2012, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- *
  */
 #include <linux/device.h>
 #include <linux/platform_device.h>
@@ -336,7 +323,7 @@ static void adjust_exponent_nano(int *val0, int *val1, int scale0,
 			scale1 = scale1 % pow_10(8 - i);
 		}
 		*val0 += res;
-			*val1 = scale1 * pow_10(exp);
+		*val1 = scale1 * pow_10(exp);
 	} else if (exp < 0) {
 		exp = abs(exp);
 		if (exp > 9) {

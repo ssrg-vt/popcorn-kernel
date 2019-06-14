@@ -9,17 +9,7 @@
 
 #include <linux/slab.h>
 
-struct i915_wa {
-	i915_reg_t	  reg;
-	u32		  mask;
-	u32		  val;
-};
-
-struct i915_wa_list {
-	const char	*name;
-	struct i915_wa	*list;
-	unsigned int	count;
-};
+#include "intel_workarounds_types.h"
 
 static inline void intel_wa_list_free(struct i915_wa_list *wal)
 {
@@ -27,13 +17,16 @@ static inline void intel_wa_list_free(struct i915_wa_list *wal)
 	memset(wal, 0, sizeof(*wal));
 }
 
-int intel_ctx_workarounds_init(struct drm_i915_private *dev_priv);
-int intel_ctx_workarounds_emit(struct i915_request *rq);
+void intel_engine_init_ctx_wa(struct intel_engine_cs *engine);
+int intel_engine_emit_ctx_wa(struct i915_request *rq);
 
-void intel_gt_init_workarounds(struct drm_i915_private *dev_priv);
-void intel_gt_apply_workarounds(struct drm_i915_private *dev_priv);
+void intel_gt_init_workarounds(struct drm_i915_private *i915);
+void intel_gt_apply_workarounds(struct drm_i915_private *i915);
+bool intel_gt_verify_workarounds(struct drm_i915_private *i915,
+				 const char *from);
 
-void intel_whitelist_workarounds_apply(struct intel_engine_cs *engine);
+void intel_engine_init_whitelist(struct intel_engine_cs *engine);
+void intel_engine_apply_whitelist(struct intel_engine_cs *engine);
 
 void intel_engine_init_workarounds(struct intel_engine_cs *engine);
 void intel_engine_apply_workarounds(struct intel_engine_cs *engine);

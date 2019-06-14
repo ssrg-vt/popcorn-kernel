@@ -1,16 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* cx25840 internal API header
  *
  * Copyright (C) 2003-2004 Chris Kennedy
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef _CX25840_CORE_H_
@@ -40,7 +31,6 @@ enum cx25840_model {
 enum cx25840_media_pads {
 	CX25840_PAD_INPUT,
 	CX25840_PAD_VID_OUT,
-	CX25840_PAD_VBI_OUT,
 
 	CX25840_NUM_PADS
 };
@@ -67,7 +57,7 @@ enum cx25840_media_pads {
  * @is_initialized:	whether we have already loaded firmware into the chip
  *			and initialized it
  * @vbi_regs_offset:	offset of vbi regs
- * @fw_wait:		wait queue to wake an initalization function up when
+ * @fw_wait:		wait queue to wake an initialization function up when
  *			firmware loading (on a separate workqueue) finishes
  * @fw_work:		a work that actually loads the firmware on a separate
  *			workqueue

@@ -940,7 +940,7 @@ static int safexcel_des_setkey(struct crypto_skcipher *ctfm, const u8 *key,
 	}
 
 	ret = des_ekey(tmp, key);
-	if (!ret && (tfm->crt_flags & CRYPTO_TFM_REQ_WEAK_KEY)) {
+	if (!ret && (tfm->crt_flags & CRYPTO_TFM_REQ_FORBID_WEAK_KEYS)) {
 		tfm->crt_flags |= CRYPTO_TFM_RES_WEAK_KEY;
 		return -EINVAL;
 	}
@@ -970,7 +970,7 @@ struct safexcel_alg_template safexcel_alg_cbc_des = {
 			.cra_name = "cbc(des)",
 			.cra_driver_name = "safexcel-cbc-des",
 			.cra_priority = 300,
-			.cra_flags = CRYPTO_ALG_TYPE_SKCIPHER | CRYPTO_ALG_ASYNC |
+			.cra_flags = CRYPTO_ALG_ASYNC |
 				     CRYPTO_ALG_KERN_DRIVER_ONLY,
 			.cra_blocksize = DES_BLOCK_SIZE,
 			.cra_ctxsize = sizeof(struct safexcel_cipher_ctx),
@@ -1010,7 +1010,7 @@ struct safexcel_alg_template safexcel_alg_ecb_des = {
 			.cra_name = "ecb(des)",
 			.cra_driver_name = "safexcel-ecb-des",
 			.cra_priority = 300,
-			.cra_flags = CRYPTO_ALG_TYPE_SKCIPHER | CRYPTO_ALG_ASYNC |
+			.cra_flags = CRYPTO_ALG_ASYNC |
 				     CRYPTO_ALG_KERN_DRIVER_ONLY,
 			.cra_blocksize = DES_BLOCK_SIZE,
 			.cra_ctxsize = sizeof(struct safexcel_cipher_ctx),
@@ -1039,13 +1039,12 @@ static int safexcel_cbc_des3_ede_decrypt(struct skcipher_request *req)
 static int safexcel_des3_ede_setkey(struct crypto_skcipher *ctfm,
 				   const u8 *key, unsigned int len)
 {
-	struct crypto_tfm *tfm = crypto_skcipher_tfm(ctfm);
-	struct safexcel_cipher_ctx *ctx = crypto_tfm_ctx(tfm);
+	struct safexcel_cipher_ctx *ctx = crypto_skcipher_ctx(ctfm);
+	int err;
 
-	if (len != DES3_EDE_KEY_SIZE) {
-		crypto_skcipher_set_flags(ctfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
-		return -EINVAL;
-	}
+	err = des3_verify_key(ctfm, key);
+	if (unlikely(err))
+		return err;
 
 	/* if context exits and key changed, need to invalidate it */
 	if (ctx->base.ctxr_dma) {
@@ -1074,7 +1073,7 @@ struct safexcel_alg_template safexcel_alg_cbc_des3_ede = {
 			.cra_name = "cbc(des3_ede)",
 			.cra_driver_name = "safexcel-cbc-des3_ede",
 			.cra_priority = 300,
-			.cra_flags = CRYPTO_ALG_TYPE_SKCIPHER | CRYPTO_ALG_ASYNC |
+			.cra_flags = CRYPTO_ALG_ASYNC |
 				     CRYPTO_ALG_KERN_DRIVER_ONLY,
 			.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			.cra_ctxsize = sizeof(struct safexcel_cipher_ctx),
@@ -1114,7 +1113,7 @@ struct safexcel_alg_template safexcel_alg_ecb_des3_ede = {
 			.cra_name = "ecb(des3_ede)",
 			.cra_driver_name = "safexcel-ecb-des3_ede",
 			.cra_priority = 300,
-			.cra_flags = CRYPTO_ALG_TYPE_SKCIPHER | CRYPTO_ALG_ASYNC |
+			.cra_flags = CRYPTO_ALG_ASYNC |
 				     CRYPTO_ALG_KERN_DRIVER_ONLY,
 			.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 			.cra_ctxsize = sizeof(struct safexcel_cipher_ctx),

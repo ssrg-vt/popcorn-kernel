@@ -116,13 +116,13 @@ nfp_net_pf_alloc_vnic(struct nfp_pf *pf, bool needs_netdev,
 	n_rx_rings = readl(ctrl_bar + NFP_NET_CFG_MAX_RXRINGS);
 
 	/* Allocate and initialise the vNIC */
-	nn = nfp_net_alloc(pf->pdev, needs_netdev, n_tx_rings, n_rx_rings);
+	nn = nfp_net_alloc(pf->pdev, ctrl_bar, needs_netdev,
+			   n_tx_rings, n_rx_rings);
 	if (IS_ERR(nn))
 		return nn;
 
 	nn->app = pf->app;
 	nfp_net_get_fw_version(&nn->fw_ver, ctrl_bar);
-	nn->dp.ctrl_bar = ctrl_bar;
 	nn->tx_bar = qc_bar + tx_base * NFP_QCP_QUEUE_ADDR_SZ;
 	nn->rx_bar = qc_bar + rx_base * NFP_QCP_QUEUE_ADDR_SZ;
 	nn->dp.is_vf = 0;
@@ -150,34 +150,39 @@ nfp_net_pf_init_vnic(struct nfp_pf *pf, struct nfp_net *nn, unsigned int id)
 
 	nn->id = id;
 
-	err = nfp_net_init(nn);
-	if (err)
-		return err;
-
-	nfp_net_debugfs_vnic_add(nn, pf->ddir);
-
 	if (nn->port) {
 		err = nfp_devlink_port_register(pf->app, nn->port);
 		if (err)
-			goto err_dfs_clean;
+			return err;
 	}
+
+	err = nfp_net_init(nn);
+	if (err)
+		goto err_devlink_port_clean;
+
+	nfp_net_debugfs_vnic_add(nn, pf->ddir);
+
+	if (nn->port)
+		nfp_devlink_port_type_eth_set(nn->port);
 
 	nfp_net_info(nn);
 
 	if (nfp_net_is_data_vnic(nn)) {
 		err = nfp_app_vnic_init(pf->app, nn);
 		if (err)
-			goto err_devlink_port_clean;
+			goto err_devlink_port_type_clean;
 	}
 
 	return 0;
 
+err_devlink_port_type_clean:
+	if (nn->port)
+		nfp_devlink_port_type_clear(nn->port);
+	nfp_net_debugfs_dir_clean(&nn->debugfs_dir);
+	nfp_net_clean(nn);
 err_devlink_port_clean:
 	if (nn->port)
 		nfp_devlink_port_unregister(nn->port);
-err_dfs_clean:
-	nfp_net_debugfs_dir_clean(&nn->debugfs_dir);
-	nfp_net_clean(nn);
 	return err;
 }
 
@@ -221,9 +226,11 @@ static void nfp_net_pf_clean_vnic(struct nfp_pf *pf, struct nfp_net *nn)
 	if (nfp_net_is_data_vnic(nn))
 		nfp_app_vnic_clean(pf->app, nn);
 	if (nn->port)
-		nfp_devlink_port_unregister(nn->port);
+		nfp_devlink_port_type_clear(nn->port);
 	nfp_net_debugfs_dir_clean(&nn->debugfs_dir);
 	nfp_net_clean(nn);
+	if (nn->port)
+		nfp_devlink_port_unregister(nn->port);
 }
 
 static int nfp_net_pf_alloc_irqs(struct nfp_pf *pf)

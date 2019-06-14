@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * stk-webcam.c : Driver for Syntek 1125 USB webcam controller
  *
@@ -6,16 +7,6 @@
  *
  * Some parts are inspired from cafe_ccic.c
  * Copyright 2006-2007 Jonathan Corbet
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -116,6 +107,13 @@ static const struct dmi_system_id stk_upside_down_dmi_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "T12Rg-H")
 		}
 	},
+	{
+		.ident = "ASUS A6VM",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK Computer Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "A6VM")
+		}
+	},
 	{}
 };
 
@@ -164,7 +162,11 @@ int stk_camera_read_reg(struct stk_camera *dev, u16 index, u8 *value)
 		*value = *buf;
 
 	kfree(buf);
-	return ret;
+
+	if (ret < 0)
+		return ret;
+	else
+		return 0;
 }
 
 static int stk_start_stream(struct stk_camera *dev)
@@ -995,7 +997,7 @@ static int stk_setup_format(struct stk_camera *dev)
 		stk_camera_write_reg(dev, 0x001c, 0x46);
 	/*
 	 * Registers 0x0115 0x0114 are the size of each line (bytes),
-	 * regs 0x0117 0x0116 are the heigth of the image.
+	 * regs 0x0117 0x0116 are the height of the image.
 	 */
 	stk_camera_write_reg(dev, 0x0115,
 		((stk_sizes[i].w * depth) >> 8) & 0xff);
@@ -1133,7 +1135,7 @@ static int stk_vidioc_dqbuf(struct file *filp,
 	sbuf->v4lbuf.flags &= ~V4L2_BUF_FLAG_QUEUED;
 	sbuf->v4lbuf.flags |= V4L2_BUF_FLAG_DONE;
 	sbuf->v4lbuf.sequence = ++dev->sequence;
-	v4l2_get_timestamp(&sbuf->v4lbuf.timestamp);
+	sbuf->v4lbuf.timestamp = ns_to_timeval(ktime_get_ns());
 
 	*buf = sbuf->v4lbuf;
 	return 0;

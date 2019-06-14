@@ -84,7 +84,7 @@
 		#size-cells = <0>;
 
 		cpu0: cpu@0 {
-			compatible = "arm,cortex-a53", "arm,armv8";
+			compatible = "arm,cortex-a53";
 			device_type = "cpu";
 			reg = <0>;
 			enable-method = "psci";
@@ -92,7 +92,7 @@
 		};
 
 		cpu1: cpu@1 {
-			compatible = "arm,cortex-a53", "arm,armv8";
+			compatible = "arm,cortex-a53";
 			device_type = "cpu";
 			reg = <1>;
 			enable-method = "psci";
@@ -100,7 +100,7 @@
 		};
 
 		cpu2: cpu@2 {
-			compatible = "arm,cortex-a53", "arm,armv8";
+			compatible = "arm,cortex-a53";
 			device_type = "cpu";
 			reg = <2>;
 			enable-method = "psci";
@@ -108,7 +108,7 @@
 		};
 
 		cpu3: cpu@3 {
-			compatible = "arm,cortex-a53", "arm,armv8";
+			compatible = "arm,cortex-a53";
 			device_type = "cpu";
 			reg = <3>;
 			enable-method = "psci";
@@ -139,20 +139,45 @@
 		#clock-cells = <0>;
 		compatible = "fixed-clock";
 		clock-frequency = <32768>;
-		clock-output-names = "osc32k";
+		clock-output-names = "ext-osc32k";
 	};
 
-	iosc: internal-osc-clk {
-		#clock-cells = <0>;
-		compatible = "fixed-clock";
-		clock-frequency = <16000000>;
-		clock-accuracy = <300000000>;
-		clock-output-names = "iosc";
+	pmu {
+		compatible = "arm,cortex-a53-pmu";
+		interrupts = <GIC_SPI 152 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 153 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 154 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 155 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-affinity = <&cpu0>, <&cpu1>, <&cpu2>, <&cpu3>;
 	};
 
 	psci {
 		compatible = "arm,psci-0.2";
 		method = "smc";
+	};
+
+	sound: sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "sun50i-a64-audio";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,frame-master = <&cpudai>;
+		simple-audio-card,bitclock-master = <&cpudai>;
+		simple-audio-card,mclk-fs = <128>;
+		simple-audio-card,aux-devs = <&codec_analog>;
+		simple-audio-card,routing =
+				"Left DAC", "AIF1 Slot 0 Left",
+				"Right DAC", "AIF1 Slot 0 Right",
+				"AIF1 Slot 0 Left ADC", "Left ADC",
+				"AIF1 Slot 0 Right ADC", "Right ADC";
+		status = "disabled";
+
+		cpudai: simple-audio-card,cpu {
+			sound-dai = <&dai>;
+		};
+
+		link_codec: simple-audio-card,codec {
+			sound-dai = <&codec>;
+		};
 	};
 
 	sound_spdif {
@@ -175,6 +200,7 @@
 
 	timer {
 		compatible = "arm,armv8-timer";
+		allwinner,erratum-unknown1;
 		interrupts = <GIC_PPI 13
 			(GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>,
 			     <GIC_PPI 14
@@ -191,7 +217,7 @@
 		#size-cells = <1>;
 		ranges;
 
-		de2@1000000 {
+		bus@1000000 {
 			compatible = "allwinner,sun50i-a64-de2";
 			reg = <0x1000000 0x400000>;
 			allwinner,sram = <&de2_sram 1>;
@@ -225,10 +251,18 @@
 					#size-cells = <0>;
 
 					mixer0_out: port@1 {
+						#address-cells = <1>;
+						#size-cells = <0>;
 						reg = <1>;
 
-						mixer0_out_tcon0: endpoint {
+						mixer0_out_tcon0: endpoint@0 {
+							reg = <0>;
 							remote-endpoint = <&tcon0_in_mixer0>;
+						};
+
+						mixer0_out_tcon1: endpoint@1 {
+							reg = <1>;
+							remote-endpoint = <&tcon1_in_mixer0>;
 						};
 					};
 				};
@@ -248,9 +282,17 @@
 					#size-cells = <0>;
 
 					mixer1_out: port@1 {
+						#address-cells = <1>;
+						#size-cells = <0>;
 						reg = <1>;
 
-						mixer1_out_tcon1: endpoint {
+						mixer1_out_tcon0: endpoint@0 {
+							reg = <0>;
+							remote-endpoint = <&tcon0_in_mixer1>;
+						};
+
+						mixer1_out_tcon1: endpoint@1 {
+							reg = <1>;
 							remote-endpoint = <&tcon1_in_mixer1>;
 						};
 					};
@@ -277,6 +319,20 @@
 					reg = <0x0000 0x28000>;
 				};
 			};
+
+			sram_c1: sram@1d00000 {
+				compatible = "mmio-sram";
+				reg = <0x01d00000 0x40000>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0 0x01d00000 0x40000>;
+
+				ve_sram: sram-section@0 {
+					compatible = "allwinner,sun50i-a64-sram-c1",
+						     "allwinner,sun4i-a10-sram-c1";
+					reg = <0x000000 0x40000>;
+				};
+			};
 		};
 
 		dma: dma-controller@1c02000 {
@@ -298,6 +354,7 @@
 			clocks = <&ccu CLK_BUS_TCON0>, <&ccu CLK_TCON0>;
 			clock-names = "ahb", "tcon-ch0";
 			clock-output-names = "tcon-pixel-clock";
+			#clock-cells = <0>;
 			resets = <&ccu RST_BUS_TCON0>, <&ccu RST_BUS_LVDS>;
 			reset-names = "lcd", "lvds";
 
@@ -313,6 +370,11 @@
 					tcon0_in_mixer0: endpoint@0 {
 						reg = <0>;
 						remote-endpoint = <&mixer0_out_tcon0>;
+					};
+
+					tcon0_in_mixer1: endpoint@1 {
+						reg = <1>;
+						remote-endpoint = <&mixer1_out_tcon0>;
 					};
 				};
 
@@ -339,9 +401,17 @@
 				#size-cells = <0>;
 
 				tcon1_in: port@0 {
+					#address-cells = <1>;
+					#size-cells = <0>;
 					reg = <0>;
 
-					tcon1_in_mixer1: endpoint {
+					tcon1_in_mixer0: endpoint@0 {
+						reg = <0>;
+						remote-endpoint = <&mixer0_out_tcon1>;
+					};
+
+					tcon1_in_mixer1: endpoint@1 {
+						reg = <1>;
 						remote-endpoint = <&mixer1_out_tcon1>;
 					};
 				};
@@ -357,6 +427,17 @@
 					};
 				};
 			};
+		};
+
+		video-codec@1c0e000 {
+			compatible = "allwinner,sun50i-a64-video-engine";
+			reg = <0x01c0e000 0x1000>;
+			clocks = <&ccu CLK_BUS_VE>, <&ccu CLK_VE>,
+				 <&ccu CLK_DRAM_VE>;
+			clock-names = "ahb", "mod", "ram";
+			resets = <&ccu RST_BUS_VE>;
+			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
+			allwinner,sram = <&ve_sram 1>;
 		};
 
 		mmc0: mmc@1c0f000 {
@@ -416,6 +497,7 @@
 			phys = <&usbphy 0>;
 			phy-names = "usb";
 			extcon = <&usbphy 0>;
+			dr_mode = "otg";
 			status = "disabled";
 		};
 
@@ -471,7 +553,6 @@
 			resets = <&ccu RST_BUS_OHCI1>,
 				 <&ccu RST_BUS_EHCI1>;
 			phys = <&usbphy 1>;
-			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -483,14 +564,13 @@
 				 <&ccu CLK_USB_OHCI1>;
 			resets = <&ccu RST_BUS_OHCI1>;
 			phys = <&usbphy 1>;
-			phy-names = "usb";
 			status = "disabled";
 		};
 
 		ccu: clock@1c20000 {
 			compatible = "allwinner,sun50i-a64-ccu";
 			reg = <0x01c20000 0x400>;
-			clocks = <&osc24M>, <&osc32k>;
+			clocks = <&osc24M>, <&rtc 0>;
 			clock-names = "hosc", "losc";
 			#clock-cells = <1>;
 			#reset-cells = <1>;
@@ -502,18 +582,31 @@
 			interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 17 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&ccu 58>;
+			clocks = <&ccu 58>, <&osc24M>, <&rtc 0>;
+			clock-names = "apb", "hosc", "losc";
 			gpio-controller;
 			#gpio-cells = <3>;
 			interrupt-controller;
 			#interrupt-cells = <3>;
 
-			i2c0_pins: i2c0_pins {
+			csi_pins: csi-pins {
+				pins = "PE0", "PE2", "PE3", "PE4", "PE5", "PE6",
+				       "PE7", "PE8", "PE9", "PE10", "PE11";
+				function = "csi";
+			};
+
+			/omit-if-no-ref/
+			csi_mclk_pin: csi-mclk-pin {
+				pins = "PE1";
+				function = "csi";
+			};
+
+			i2c0_pins: i2c0-pins {
 				pins = "PH0", "PH1";
 				function = "i2c0";
 			};
 
-			i2c1_pins: i2c1_pins {
+			i2c1_pins: i2c1-pins {
 				pins = "PH2", "PH3";
 				function = "i2c1";
 			};
@@ -550,19 +643,19 @@
 				bias-pull-up;
 			};
 
-			pwm_pin: pwm_pin {
+			pwm_pin: pwm-pin {
 				pins = "PD22";
 				function = "pwm";
 			};
 
-			rmii_pins: rmii_pins {
+			rmii_pins: rmii-pins {
 				pins = "PD10", "PD11", "PD13", "PD14", "PD17",
 				       "PD18", "PD19", "PD20", "PD22", "PD23";
 				function = "emac";
 				drive-strength = <40>;
 			};
 
-			rgmii_pins: rgmii_pins {
+			rgmii_pins: rgmii-pins {
 				pins = "PD8", "PD9", "PD10", "PD11", "PD12",
 				       "PD13", "PD15", "PD16", "PD17", "PD18",
 				       "PD19", "PD20", "PD21", "PD22", "PD23";
@@ -570,17 +663,17 @@
 				drive-strength = <40>;
 			};
 
-			spdif_tx_pin: spdif {
+			spdif_tx_pin: spdif-tx-pin {
 				pins = "PH8";
 				function = "spdif";
 			};
 
-			spi0_pins: spi0 {
+			spi0_pins: spi0-pins {
 				pins = "PC0", "PC1", "PC2", "PC3";
 				function = "spi0";
 			};
 
-			spi1_pins: spi1 {
+			spi1_pins: spi1-pins {
 				pins = "PD0", "PD1", "PD2", "PD3";
 				function = "spi1";
 			};
@@ -590,12 +683,12 @@
 				function = "uart0";
 			};
 
-			uart1_pins: uart1_pins {
+			uart1_pins: uart1-pins {
 				pins = "PG6", "PG7";
 				function = "uart1";
 			};
 
-			uart1_rts_cts_pins: uart1_rts_cts_pins {
+			uart1_rts_cts_pins: uart1-rts-cts-pins {
 				pins = "PG8", "PG9";
 				function = "uart1";
 			};
@@ -662,6 +755,29 @@
 			resets = <&ccu RST_BUS_I2S1>;
 			dma-names = "rx", "tx";
 			dmas = <&dma 4>, <&dma 4>;
+			status = "disabled";
+		};
+
+		dai: dai@1c22c00 {
+			#sound-dai-cells = <0>;
+			compatible = "allwinner,sun50i-a64-codec-i2s";
+			reg = <0x01c22c00 0x200>;
+			interrupts = <GIC_SPI 29 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_CODEC>, <&ccu CLK_AC_DIG>;
+			clock-names = "apb", "mod";
+			resets = <&ccu RST_BUS_CODEC>;
+			dmas = <&dma 15>, <&dma 15>;
+			dma-names = "rx", "tx";
+			status = "disabled";
+		};
+
+		codec: codec@1c22e00 {
+			#sound-dai-cells = <0>;
+			compatible = "allwinner,sun8i-a33-codec";
+			reg = <0x01c22e00 0x600>;
+			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_CODEC>, <&ccu CLK_AC_DIG>;
+			clock-names = "bus", "mod";
 			status = "disabled";
 		};
 
@@ -807,6 +923,28 @@
 			};
 		};
 
+		mali: gpu@1c40000 {
+			compatible = "allwinner,sun50i-a64-mali", "arm,mali-400";
+			reg = <0x01c40000 0x10000>;
+			interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 99 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 100 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 102 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 103 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 101 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "gp",
+					  "gpmmu",
+					  "pp0",
+					  "ppmmu0",
+					  "pp1",
+					  "ppmmu1",
+					  "pmu";
+			clocks = <&ccu CLK_BUS_GPU>, <&ccu CLK_GPU>;
+			clock-names = "bus", "core";
+			resets = <&ccu RST_BUS_GPU>;
+		};
+
 		gic: interrupt-controller@1c81000 {
 			compatible = "arm,gic-400";
 			reg = <0x01c81000 0x1000>,
@@ -826,6 +964,20 @@
 			pinctrl-names = "default";
 			pinctrl-0 = <&pwm_pin>;
 			#pwm-cells = <3>;
+			status = "disabled";
+		};
+
+		csi: csi@1cb0000 {
+			compatible = "allwinner,sun50i-a64-csi";
+			reg = <0x01cb0000 0x1000>;
+			interrupts = <GIC_SPI 84 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_CSI>,
+				 <&ccu CLK_CSI_SCLK>,
+				 <&ccu CLK_DRAM_CSI>;
+			clock-names = "bus", "mod", "ram";
+			resets = <&ccu RST_BUS_CSI>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&csi_pins>;
 			status = "disabled";
 		};
 
@@ -874,11 +1026,12 @@
 		};
 
 		rtc: rtc@1f00000 {
-			compatible = "allwinner,sun6i-a31-rtc";
-			reg = <0x01f00000 0x54>;
+			compatible = "allwinner,sun50i-a64-rtc",
+				     "allwinner,sun8i-h3-rtc";
+			reg = <0x01f00000 0x400>;
 			interrupts = <GIC_SPI 40 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 41 IRQ_TYPE_LEVEL_HIGH>;
-			clock-output-names = "rtc-osc32k", "rtc-osc32k-out";
+			clock-output-names = "osc32k", "osc32k-out", "iosc";
 			clocks = <&osc32k>;
 			#clock-cells = <1>;
 		};
@@ -895,11 +1048,16 @@
 		r_ccu: clock@1f01400 {
 			compatible = "allwinner,sun50i-a64-r-ccu";
 			reg = <0x01f01400 0x100>;
-			clocks = <&osc24M>, <&osc32k>, <&iosc>,
-				 <&ccu 11>;
+			clocks = <&osc24M>, <&rtc 0>, <&rtc 2>, <&ccu 11>;
 			clock-names = "hosc", "losc", "iosc", "pll-periph";
 			#clock-cells = <1>;
 			#reset-cells = <1>;
+		};
+
+		codec_analog: codec-analog@1f015c0 {
+			compatible = "allwinner,sun50i-a64-codec-analog";
+			reg = <0x01f015c0 0x4>;
+			status = "disabled";
 		};
 
 		r_i2c: i2c@1f02400 {
@@ -941,12 +1099,12 @@
 				function = "s_i2c";
 			};
 
-			r_pwm_pin: pwm {
+			r_pwm_pin: r-pwm-pin {
 				pins = "PL10";
 				function = "s_pwm";
 			};
 
-			r_rsb_pins: rsb {
+			r_rsb_pins: r-rsb-pins {
 				pins = "PL0", "PL1";
 				function = "s_rsb";
 			};

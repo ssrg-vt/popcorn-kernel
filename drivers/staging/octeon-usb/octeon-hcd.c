@@ -50,6 +50,7 @@
 #include <linux/module.h>
 #include <linux/usb/hcd.h>
 #include <linux/prefetch.h>
+#include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
 
 #include <asm/octeon/octeon.h>
@@ -2384,13 +2385,11 @@ static int cvmx_usb_close_pipe(struct octeon_hcd *usb,
  */
 static int cvmx_usb_get_frame_number(struct octeon_hcd *usb)
 {
-	int frame_number;
 	union cvmx_usbcx_hfnum usbc_hfnum;
 
 	usbc_hfnum.u32 = cvmx_usb_read_csr32(usb, CVMX_USBCX_HFNUM(usb->index));
-	frame_number = usbc_hfnum.s.frnum;
 
-	return frame_number;
+	return usbc_hfnum.s.frnum;
 }
 
 static void cvmx_usb_transfer_control(struct octeon_hcd *usb,
@@ -3606,8 +3605,9 @@ static int octeon_usb_probe(struct platform_device *pdev)
 	 * Set the DMA mask to 64bits so we get buffers already translated for
 	 * DMA.
 	 */
-	dev->coherent_dma_mask = ~0;
-	dev->dma_mask = &dev->coherent_dma_mask;
+	i = dma_coerce_mask_and_coherent(dev, DMA_BIT_MASK(64));
+	if (i)
+		return i;
 
 	/*
 	 * Only cn52XX and cn56XX have DWC_OTG USB hardware and the

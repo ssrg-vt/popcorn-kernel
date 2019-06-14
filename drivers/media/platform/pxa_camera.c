@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * V4L2 Driver for PXA camera host
  *
  * Copyright (C) 2006, Sascha Hauer, Pengutronix
  * Copyright (C) 2008, Guennadi Liakhovetski <kernel@pengutronix.de>
  * Copyright (C) 2016, Robert Jarzmik <robert.jarzmik@free.fr>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/init.h>
@@ -1631,7 +1627,7 @@ static int pxa_camera_set_bus_param(struct pxa_camera_dev *pcdev)
 
 	pcdev->channels = 1;
 
-	/* Make choises, based on platform preferences */
+	/* Make choices, based on platform preferences */
 	if ((common_flags & V4L2_MBUS_HSYNC_ACTIVE_HIGH) &&
 	    (common_flags & V4L2_MBUS_HSYNC_ACTIVE_LOW)) {
 		if (pcdev->platform_flags & PXA_CAMERA_HSP)
@@ -2350,7 +2346,7 @@ static int pxa_camera_pdata_from_dt(struct device *dev,
 		pcdev->platform_flags |= PXA_CAMERA_PCLK_EN;
 
 	asd->match_type = V4L2_ASYNC_MATCH_FWNODE;
-	remote = of_graph_get_remote_port(np);
+	remote = of_graph_get_remote_port_parent(np);
 	if (remote)
 		asd->match.fwnode = of_fwnode_handle(remote);
 	else
@@ -2394,15 +2390,17 @@ static int pxa_camera_probe(struct platform_device *pdev)
 	pcdev->res = res;
 
 	pcdev->pdata = pdev->dev.platform_data;
-	if (pdev->dev.of_node && !pcdev->pdata) {
-		err = pxa_camera_pdata_from_dt(&pdev->dev, pcdev, &pcdev->asd);
-	} else {
+	if (pcdev->pdata) {
 		pcdev->platform_flags = pcdev->pdata->flags;
 		pcdev->mclk = pcdev->pdata->mclk_10khz * 10000;
 		pcdev->asd.match_type = V4L2_ASYNC_MATCH_I2C;
 		pcdev->asd.match.i2c.adapter_id =
 			pcdev->pdata->sensor_i2c_adapter_id;
 		pcdev->asd.match.i2c.address = pcdev->pdata->sensor_i2c_address;
+	} else if (pdev->dev.of_node) {
+		err = pxa_camera_pdata_from_dt(&pdev->dev, pcdev, &pcdev->asd);
+	} else {
+		return -ENODEV;
 	}
 	if (err < 0)
 		return err;

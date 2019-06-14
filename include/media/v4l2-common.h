@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
     v4l2 common internal API header
 
@@ -8,19 +9,6 @@
 
     Copyright (C) 2005  Hans Verkuil <hverkuil@xs4all.nl>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef V4L2_COMMON_H_
@@ -362,15 +350,6 @@ __v4l2_find_nearest_size(const void *array, size_t array_size,
 			 size_t height_offset, s32 width, s32 height);
 
 /**
- * v4l2_get_timestamp - helper routine to get a timestamp to be used when
- *	filling streaming metadata. Internally, it uses ktime_get_ts(),
- *	which is the recommended way to get it.
- *
- * @tv: pointer to &struct timeval to be filled.
- */
-void v4l2_get_timestamp(struct timeval *tv);
-
-/**
  * v4l2_g_parm_cap - helper routine for vidioc_g_parm to fill this in by
  *      calling the g_frame_interval op of the given subdev. It only works
  *      for V4L2_BUF_TYPE_VIDEO_CAPTURE(_MPLANE), hence the _cap in the
@@ -395,5 +374,43 @@ int v4l2_g_parm_cap(struct video_device *vdev,
  */
 int v4l2_s_parm_cap(struct video_device *vdev,
 		    struct v4l2_subdev *sd, struct v4l2_streamparm *a);
+
+/* Compare two v4l2_fract structs */
+#define V4L2_FRACT_COMPARE(a, OP, b)			\
+	((u64)(a).numerator * (b).denominator OP	\
+	(u64)(b).numerator * (a).denominator)
+
+/* ------------------------------------------------------------------------- */
+
+/* Pixel format and FourCC helpers */
+
+/**
+ * struct v4l2_format_info - information about a V4L2 format
+ * @format: 4CC format identifier (V4L2_PIX_FMT_*)
+ * @mem_planes: Number of memory planes, which includes the alpha plane (1 to 4).
+ * @comp_planes: Number of component planes, which includes the alpha plane (1 to 4).
+ * @bpp: Array of per-plane bytes per pixel
+ * @hdiv: Horizontal chroma subsampling factor
+ * @vdiv: Vertical chroma subsampling factor
+ * @block_w: Per-plane macroblock pixel width (optional)
+ * @block_h: Per-plane macroblock pixel height (optional)
+ */
+struct v4l2_format_info {
+	u32 format;
+	u8 mem_planes;
+	u8 comp_planes;
+	u8 bpp[4];
+	u8 hdiv;
+	u8 vdiv;
+	u8 block_w[4];
+	u8 block_h[4];
+};
+
+const struct v4l2_format_info *v4l2_format_info(u32 format);
+
+int v4l2_fill_pixfmt(struct v4l2_pix_format *pixfmt, int pixelformat,
+		     int width, int height);
+int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt, int pixelformat,
+			int width, int height);
 
 #endif /* V4L2_COMMON_H_ */

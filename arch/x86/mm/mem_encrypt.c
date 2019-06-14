@@ -301,9 +301,13 @@ static int __init early_set_memory_enc_dec(unsigned long vaddr,
 		else
 			split_page_size_mask = 1 << PG_LEVEL_2M;
 
-		kernel_physical_mapping_init(__pa(vaddr & pmask),
-					     __pa((vaddr_end & pmask) + psize),
-					     split_page_size_mask);
+		/*
+		 * kernel_physical_mapping_change() does not flush the TLBs, so
+		 * a TLB flush is required after we exit from the for loop.
+		 */
+		kernel_physical_mapping_change(__pa(vaddr & pmask),
+					       __pa((vaddr_end & pmask) + psize),
+					       split_page_size_mask);
 	}
 
 	ret = 0;
@@ -379,13 +383,6 @@ void __init mem_encrypt_init(void)
 
 	/* Call into SWIOTLB to update the SWIOTLB DMA buffers */
 	swiotlb_update_mem_attributes();
-
-	/*
-	 * With SEV, DMA operations cannot use encryption, we need to use
-	 * SWIOTLB to bounce buffer DMA operation.
-	 */
-	if (sev_active())
-		dma_ops = &swiotlb_dma_ops;
 
 	/*
 	 * With SEV, we need to unroll the rep string I/O instructions.

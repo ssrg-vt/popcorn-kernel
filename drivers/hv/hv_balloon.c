@@ -1,19 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012, Microsoft Corporation.
  *
  * Author:
  *   K. Y. Srinivasan <kys@microsoft.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
- * NON INFRINGEMENT.  See the GNU General Public License for more
- * details.
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -681,8 +671,13 @@ static struct notifier_block hv_memory_nb = {
 /* Check if the particular page is backed and can be onlined and online it. */
 static void hv_page_online_one(struct hv_hotadd_state *has, struct page *pg)
 {
-	if (!has_pfn_is_backed(has, page_to_pfn(pg)))
+	if (!has_pfn_is_backed(has, page_to_pfn(pg))) {
+		if (!PageOffline(pg))
+			__SetPageOffline(pg);
 		return;
+	}
+	if (PageOffline(pg))
+		__ClearPageOffline(pg);
 
 	/* This frame is currently backed; online the page. */
 	__online_page_set_limits(pg);
@@ -771,7 +766,7 @@ static void hv_mem_hot_add(unsigned long start, unsigned long size,
 	}
 }
 
-static void hv_online_page(struct page *pg)
+static void hv_online_page(struct page *pg, unsigned int order)
 {
 	struct hv_hotadd_state *has;
 	unsigned long flags;
@@ -780,10 +775,11 @@ static void hv_online_page(struct page *pg)
 	spin_lock_irqsave(&dm_device.ha_lock, flags);
 	list_for_each_entry(has, &dm_device.ha_region_list, list) {
 		/* The page belongs to a different HAS. */
-		if ((pfn < has->start_pfn) || (pfn >= has->end_pfn))
+		if ((pfn < has->start_pfn) ||
+				(pfn + (1UL << order) > has->end_pfn))
 			continue;
 
-		hv_page_online_one(has, pg);
+		hv_bring_pgs_online(has, pfn, 1UL << order);
 		break;
 	}
 	spin_unlock_irqrestore(&dm_device.ha_lock, flags);
@@ -888,12 +884,14 @@ static unsigned long handle_pg_range(unsigned long pg_start,
 			pfn_cnt -= pgs_ol;
 			/*
 			 * Check if the corresponding memory block is already
-			 * online by checking its last previously backed page.
-			 * In case it is we need to bring rest (which was not
-			 * backed previously) online too.
+			 * online. It is possible to observe struct pages still
+			 * being uninitialized here so check section instead.
+			 * In case the section is online we need to bring the
+			 * rest of pfns (which were not backed previously)
+			 * online too.
 			 */
 			if (start_pfn > has->start_pfn &&
-			    !PageReserved(pfn_to_page(start_pfn - 1)))
+			    online_section_nr(pfn_to_section_nr(start_pfn)))
 				hv_bring_pgs_online(has, start_pfn, pgs_ol);
 
 		}
@@ -1090,6 +1088,7 @@ static void process_info(struct hv_dynmem_device *dm, struct dm_info_msg *msg)
 static unsigned long compute_balloon_floor(void)
 {
 	unsigned long min_pages;
+	unsigned long nr_pages = totalram_pages();
 #define MB2PAGES(mb) ((mb) << (20 - PAGE_SHIFT))
 	/* Simple continuous piecewiese linear function:
 	 *  max MiB -> min MiB  gradient
@@ -1102,16 +1101,16 @@ static unsigned long compute_balloon_floor(void)
 	 *    8192       744    (1/16)
 	 *   32768      1512	(1/32)
 	 */
-	if (totalram_pages < MB2PAGES(128))
-		min_pages = MB2PAGES(8) + (totalram_pages >> 1);
-	else if (totalram_pages < MB2PAGES(512))
-		min_pages = MB2PAGES(40) + (totalram_pages >> 2);
-	else if (totalram_pages < MB2PAGES(2048))
-		min_pages = MB2PAGES(104) + (totalram_pages >> 3);
-	else if (totalram_pages < MB2PAGES(8192))
-		min_pages = MB2PAGES(232) + (totalram_pages >> 4);
+	if (nr_pages < MB2PAGES(128))
+		min_pages = MB2PAGES(8) + (nr_pages >> 1);
+	else if (nr_pages < MB2PAGES(512))
+		min_pages = MB2PAGES(40) + (nr_pages >> 2);
+	else if (nr_pages < MB2PAGES(2048))
+		min_pages = MB2PAGES(104) + (nr_pages >> 3);
+	else if (nr_pages < MB2PAGES(8192))
+		min_pages = MB2PAGES(232) + (nr_pages >> 4);
 	else
-		min_pages = MB2PAGES(488) + (totalram_pages >> 5);
+		min_pages = MB2PAGES(488) + (nr_pages >> 5);
 #undef MB2PAGES
 	return min_pages;
 }
@@ -1198,6 +1197,7 @@ static void free_balloon_pages(struct hv_dynmem_device *dm,
 
 	for (i = 0; i < num_pages; i++) {
 		pg = pfn_to_page(i + start_frame);
+		__ClearPageOffline(pg);
 		__free_page(pg);
 		dm->num_pages_ballooned--;
 	}
@@ -1210,7 +1210,7 @@ static unsigned int alloc_balloon_pages(struct hv_dynmem_device *dm,
 					struct dm_balloon_response *bl_resp,
 					int alloc_unit)
 {
-	unsigned int i = 0;
+	unsigned int i, j;
 	struct page *pg;
 
 	if (num_pages < alloc_unit)
@@ -1241,6 +1241,10 @@ static unsigned int alloc_balloon_pages(struct hv_dynmem_device *dm,
 
 		if (alloc_unit != 1)
 			split_page(pg, get_order(alloc_unit << PAGE_SHIFT));
+
+		/* mark all pages offline */
+		for (j = 0; j < (1 << get_order(alloc_unit << PAGE_SHIFT)); j++)
+			__SetPageOffline(pg + j);
 
 		bl_resp->range_count++;
 		bl_resp->range_array[i].finfo.start_page =

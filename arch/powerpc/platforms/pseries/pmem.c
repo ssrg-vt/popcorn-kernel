@@ -52,8 +52,8 @@ static ssize_t pmem_drc_add_node(u32 drc_index)
 	/* NB: The of reconfig notifier creates platform device from the node */
 	rc = dlpar_attach_node(dn, pmem_node);
 	if (rc) {
-		pr_err("Failed to attach node %s, rc: %d, drc index: %x\n",
-			dn->name, rc, drc_index);
+		pr_err("Failed to attach node %pOF, rc: %d, drc index: %x\n",
+			dn, rc, drc_index);
 
 		if (dlpar_release_drc(drc_index))
 			dlpar_free_cc_nodes(dn);
@@ -93,8 +93,8 @@ static ssize_t pmem_drc_remove_node(u32 drc_index)
 
 	rc = dlpar_release_drc(drc_index);
 	if (rc) {
-		pr_err("Failed to release drc (%x) for CPU %s, rc: %d\n",
-			drc_index, dn->name, rc);
+		pr_err("Failed to release drc (%x) for CPU %pOFn, rc: %d\n",
+			drc_index, dn, rc);
 		dlpar_attach_node(dn, pmem_node);
 		return rc;
 	}
@@ -106,7 +106,7 @@ static ssize_t pmem_drc_remove_node(u32 drc_index)
 
 int dlpar_hp_pmem(struct pseries_hp_errorlog *hp_elog)
 {
-	u32 count, drc_index;
+	u32 drc_index;
 	int rc;
 
 	/* slim chance, but we might get a hotplug event while booting */
@@ -123,7 +123,6 @@ int dlpar_hp_pmem(struct pseries_hp_errorlog *hp_elog)
 		return -EINVAL;
 	}
 
-	count = hp_elog->_drc_u.drc_count;
 	drc_index = hp_elog->_drc_u.drc_index;
 
 	lock_device_hotplug();

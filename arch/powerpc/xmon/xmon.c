@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Routines providing a simple monitor for use on the PowerMac.
  *
  * Copyright (C) 1996-2005 Paul Mackerras.
  * Copyright (C) 2001 PPC64 Team, IBM Corp
  * Copyrignt (C) 2006 Michael Ellerman, IBM Corp
- *
- *      This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -75,8 +71,12 @@ static int xmon_gate;
 #define xmon_owner 0
 #endif /* CONFIG_SMP */
 
+#ifdef CONFIG_PPC_PSERIES
+static int set_indicator_token = RTAS_UNKNOWN_SERVICE;
+#endif
 static unsigned long in_xmon __read_mostly = 0;
 static int xmon_on = IS_ENABLED(CONFIG_XMON_DEFAULT);
+static bool xmon_is_ro = IS_ENABLED(CONFIG_XMON_DEFAULT_RO_MODE);
 
 static unsigned long adrs;
 static int size = 1;
@@ -199,6 +199,8 @@ static void dump_tlb_book3e(void);
 #define GETWORD(v)	(((v)[0] << 24) + ((v)[1] << 16) + ((v)[2] << 8) + (v)[3])
 #endif
 
+static const char *xmon_ro_msg = "Operation disabled: xmon in read-only mode\n";
+
 static char *help_string = "\
 Commands:\n\
   b	show breakpoints\n\
@@ -273,7 +275,7 @@ Commands:\n\
   X	exit monitor and don't recover\n"
 #if defined(CONFIG_PPC64) && !defined(CONFIG_PPC_BOOK3E)
 "  u	dump segment table or SLB\n"
-#elif defined(CONFIG_PPC_STD_MMU_32)
+#elif defined(CONFIG_PPC_BOOK3S_32)
 "  u	dump segment registers\n"
 #elif defined(CONFIG_44x) || defined(CONFIG_PPC_BOOK3E)
 "  u	dump TLB\n"
@@ -358,7 +360,6 @@ static inline void disable_surveillance(void)
 #ifdef CONFIG_PPC_PSERIES
 	/* Since this can't be a module, args should end up below 4GB. */
 	static struct rtas_args args;
-	int token;
 
 	/*
 	 * At this point we have got all the cpus we can into
@@ -367,11 +368,11 @@ static inline void disable_surveillance(void)
 	 * If we did try to take rtas.lock there would be a
 	 * real possibility of deadlock.
 	 */
-	token = rtas_token("set-indicator");
-	if (token == RTAS_UNKNOWN_SERVICE)
+	if (set_indicator_token == RTAS_UNKNOWN_SERVICE)
 		return;
 
-	rtas_call_unlocked(&args, token, 3, 1, NULL, SURVEILLANCE_TOKEN, 0, 0);
+	rtas_call_unlocked(&args, set_indicator_token, 3, 1, NULL,
+			   SURVEILLANCE_TOKEN, 0, 0);
 
 #endif /* CONFIG_PPC_PSERIES */
 }
@@ -987,6 +988,10 @@ cmds(struct pt_regs *excp)
 				memlocate();
 				break;
 			case 'z':
+				if (xmon_is_ro) {
+					printf(xmon_ro_msg);
+					break;
+				}
 				memzcan();
 				break;
 			case 'i':
@@ -1040,6 +1045,10 @@ cmds(struct pt_regs *excp)
 			set_lpp_cmd();
 			break;
 		case 'b':
+			if (xmon_is_ro) {
+				printf(xmon_ro_msg);
+				break;
+			}
 			bpt_cmds();
 			break;
 		case 'C':
@@ -1053,12 +1062,16 @@ cmds(struct pt_regs *excp)
 			bootcmds();
 			break;
 		case 'p':
+			if (xmon_is_ro) {
+				printf(xmon_ro_msg);
+				break;
+			}
 			proccall();
 			break;
 		case 'P':
 			show_tasks();
 			break;
-#ifdef CONFIG_PPC_STD_MMU
+#ifdef CONFIG_PPC_BOOK3S
 		case 'u':
 			dump_segments();
 			break;
@@ -1775,6 +1788,11 @@ read_spr(int n, unsigned long *vp)
 static void
 write_spr(int n, unsigned long val)
 {
+	if (xmon_is_ro) {
+		printf(xmon_ro_msg);
+		return;
+	}
+
 	if (setjmp(bus_error_jmp) == 0) {
 		catch_spr_faults = 1;
 		sync();
@@ -2014,6 +2032,12 @@ mwrite(unsigned long adrs, void *buf, int size)
 	char *p, *q;
 
 	n = 0;
+
+	if (xmon_is_ro) {
+		printf(xmon_ro_msg);
+		return n;
+	}
+
 	if (setjmp(bus_error_jmp) == 0) {
 		catch_memory_errors = 1;
 		sync();
@@ -2427,9 +2451,11 @@ static void dump_one_paca(int cpu)
 	DUMP(p, trap_save, "%#-*x");
 	DUMP(p, irq_soft_mask, "%#-*x");
 	DUMP(p, irq_happened, "%#-*x");
-	DUMP(p, io_sync, "%#-*x");
+#ifdef CONFIG_MMIOWB
+	DUMP(p, mmiowb_state.nesting_count, "%#-*x");
+	DUMP(p, mmiowb_state.mmiowb_pending, "%#-*x");
+#endif
 	DUMP(p, irq_work_pending, "%#-*x");
-	DUMP(p, nap_state_lost, "%#-*x");
 	DUMP(p, sprg_vdso, "%#-*llx");
 
 #ifdef CONFIG_PPC_TRANSACTIONAL_MEM
@@ -2437,19 +2463,16 @@ static void dump_one_paca(int cpu)
 #endif
 
 #ifdef CONFIG_PPC_POWERNV
-	DUMP(p, core_idle_state_ptr, "%-*px");
-	DUMP(p, thread_idle_state, "%#-*x");
-	DUMP(p, thread_mask, "%#-*x");
-	DUMP(p, subcore_sibling_mask, "%#-*x");
-	DUMP(p, requested_psscr, "%#-*llx");
-	DUMP(p, stop_sprs.pid, "%#-*llx");
-	DUMP(p, stop_sprs.ldbar, "%#-*llx");
-	DUMP(p, stop_sprs.fscr, "%#-*llx");
-	DUMP(p, stop_sprs.hfscr, "%#-*llx");
-	DUMP(p, stop_sprs.mmcr1, "%#-*llx");
-	DUMP(p, stop_sprs.mmcr2, "%#-*llx");
-	DUMP(p, stop_sprs.mmcra, "%#-*llx");
-	DUMP(p, dont_stop.counter, "%#-*x");
+	DUMP(p, idle_state, "%#-*lx");
+	if (!early_cpu_has_feature(CPU_FTR_ARCH_300)) {
+		DUMP(p, thread_idle_state, "%#-*x");
+		DUMP(p, subcore_sibling_mask, "%#-*x");
+	} else {
+#ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
+		DUMP(p, requested_psscr, "%#-*llx");
+		DUMP(p, dont_stop.counter, "%#-*x");
+#endif
+	}
 #endif
 
 	DUMP(p, accounting.utime, "%#-*lx");
@@ -2793,7 +2816,7 @@ print_address(unsigned long addr)
 	xmon_print_symbol(addr, "\t# ", "");
 }
 
-void
+static void
 dump_log_buf(void)
 {
 	struct kmsg_dumper dumper = { .active = 1 };
@@ -2882,9 +2905,17 @@ memops(int cmd)
 	scanhex((void *)&mcount);
 	switch( cmd ){
 	case 'm':
+		if (xmon_is_ro) {
+			printf(xmon_ro_msg);
+			break;
+		}
 		memmove((void *)mdest, (void *)msrc, mcount);
 		break;
 	case 's':
+		if (xmon_is_ro) {
+			printf(xmon_ro_msg);
+			break;
+		}
 		memset((void *)mdest, mval, mcount);
 		break;
 	case 'd':
@@ -2994,13 +3025,13 @@ static void show_task(struct task_struct *tsk)
 
 	printf("%px %016lx %6d %6d %c %2d %s\n", tsk,
 		tsk->thread.ksp,
-		tsk->pid, tsk->parent->pid,
-		state, task_thread_info(tsk)->cpu,
+		tsk->pid, rcu_dereference(tsk->parent)->pid,
+		state, task_cpu(tsk),
 		tsk->comm);
 }
 
 #ifdef CONFIG_PPC_BOOK3S_64
-void format_pte(void *ptep, unsigned long pte)
+static void format_pte(void *ptep, unsigned long pte)
 {
 	pte_t entry = __pte(pte);
 
@@ -3495,14 +3526,14 @@ void dump_segments(void)
 }
 #endif
 
-#ifdef CONFIG_PPC_STD_MMU_32
+#ifdef CONFIG_PPC_BOOK3S_32
 void dump_segments(void)
 {
 	int i;
 
 	printf("sr0-15 =");
 	for (i = 0; i < 16; ++i)
-		printf(" %x", mfsrin(i));
+		printf(" %x", mfsrin(i << 28));
 	printf("\n");
 }
 #endif
@@ -3688,6 +3719,14 @@ static void xmon_init(int enable)
 		__debugger_iabr_match = xmon_iabr_match;
 		__debugger_break_match = xmon_break_match;
 		__debugger_fault_handler = xmon_fault_handler;
+
+#ifdef CONFIG_PPC_PSERIES
+		/*
+		 * Get the token here to avoid trying to get a lock
+		 * during the crash, causing a deadlock.
+		 */
+		set_indicator_token = rtas_token("set-indicator");
+#endif
 	} else {
 		__debugger = NULL;
 		__debugger_ipi = NULL;
@@ -3786,6 +3825,14 @@ static int __init early_parse_xmon(char *p)
 	} else if (strncmp(p, "on", 2) == 0) {
 		xmon_init(1);
 		xmon_on = 1;
+	} else if (strncmp(p, "rw", 2) == 0) {
+		xmon_init(1);
+		xmon_on = 1;
+		xmon_is_ro = false;
+	} else if (strncmp(p, "ro", 2) == 0) {
+		xmon_init(1);
+		xmon_on = 1;
+		xmon_is_ro = true;
 	} else if (strncmp(p, "off", 3) == 0)
 		xmon_on = 0;
 	else
@@ -4033,6 +4080,7 @@ static int do_spu_cmd(void)
 		subcmd = inchar();
 		if (isxdigit(subcmd) || subcmd == '\n')
 			termch = subcmd;
+		/* fall through */
 	case 'f':
 		scanhex(&num);
 		if (num >= XMON_NUM_SPUS || !spu_info[num].spu) {

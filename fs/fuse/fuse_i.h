@@ -9,6 +9,10 @@
 #ifndef _FS_FUSE_I_H
 #define _FS_FUSE_I_H
 
+#ifndef pr_fmt
+# define pr_fmt(fmt) "fuse: " fmt
+#endif
+
 #include <linux/fuse.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
@@ -96,7 +100,7 @@ struct fuse_inode {
 	union {
 		/* Write related fields (regular file only) */
 		struct {
-			/* Files usable in writepage.  Protected by fc->lock */
+			/* Files usable in writepage.  Protected by fi->lock */
 			struct list_head write_files;
 
 			/* Writepages pending on truncate or fsync */
@@ -144,6 +148,9 @@ struct fuse_inode {
 
 	/** Lock for serializing lookup and readdir for back compatibility*/
 	struct mutex mutex;
+
+	/** Lock to protect write related fields */
+	spinlock_t lock;
 };
 
 /** FUSE inode state bits */
@@ -163,7 +170,10 @@ struct fuse_file {
 	/** Fuse connection for this file */
 	struct fuse_conn *fc;
 
-	/** Request reserved for flush and release */
+	/*
+	 * Request reserved for flush and release.
+	 * Modified under relative fuse_inode::lock.
+	 */
 	struct fuse_req *reserved_req;
 
 	/** Kernel file handle guaranteed to be unique */
@@ -538,7 +548,7 @@ struct fuse_conn {
 	struct fuse_iqueue iq;
 
 	/** The next unique kernel file handle */
-	u64 khctr;
+	atomic64_t khctr;
 
 	/** rbtree of fuse_files waiting for poll events indexed by ph */
 	struct rb_root polled_files;
@@ -624,6 +634,9 @@ struct fuse_conn {
 	/** Is open/release not implemented by fs? */
 	unsigned no_open:1;
 
+	/** Is opendir/releasedir not implemented by fs? */
+	unsigned no_opendir:1;
+
 	/** Is fsync not implemented by fs? */
 	unsigned no_fsync:1;
 
@@ -681,6 +694,9 @@ struct fuse_conn {
 	/** Use enhanced/automatic page cache invalidation. */
 	unsigned auto_inval_data:1;
 
+	/** Filesystem is fully reponsible for page cache invalidation. */
+	unsigned explicit_inval_data:1;
+
 	/** Does the filesystem support readdirplus? */
 	unsigned do_readdirplus:1;
 
@@ -730,7 +746,7 @@ struct fuse_conn {
 	struct fuse_req *destroy_req;
 
 	/** Version counter for attribute changes */
-	u64 attr_version;
+	atomic64_t attr_version;
 
 	/** Called on final put */
 	void (*release)(struct fuse_conn *);
@@ -768,6 +784,11 @@ static inline u64 get_node_id(struct inode *inode)
 static inline int invalid_nodeid(u64 nodeid)
 {
 	return !nodeid || nodeid == FUSE_ROOT_ID;
+}
+
+static inline u64 fuse_get_attr_version(struct fuse_conn *fc)
+{
+	return atomic64_read(&fc->attr_version);
 }
 
 /** Device operations */
@@ -817,7 +838,7 @@ struct fuse_file *fuse_file_alloc(struct fuse_conn *fc);
 void fuse_file_free(struct fuse_file *ff);
 void fuse_finish_open(struct inode *inode, struct file *file);
 
-void fuse_sync_release(struct fuse_file *ff, int flags);
+void fuse_sync_release(struct fuse_inode *fi, struct fuse_file *ff, int flags);
 
 /**
  * Send RELEASE or RELEASEDIR request
@@ -936,7 +957,7 @@ void fuse_request_send_background(struct fuse_conn *fc, struct fuse_req *req);
 bool fuse_request_queue_background(struct fuse_conn *fc, struct fuse_req *req);
 
 /* Abort all requests */
-void fuse_abort_conn(struct fuse_conn *fc, bool is_abort);
+void fuse_abort_conn(struct fuse_conn *fc);
 void fuse_wait_aborted(struct fuse_conn *fc);
 
 /**
@@ -999,8 +1020,6 @@ void fuse_flush_writepages(struct inode *inode);
 
 void fuse_set_nowrite(struct inode *inode);
 void fuse_release_nowrite(struct inode *inode);
-
-u64 fuse_get_attr_version(struct fuse_conn *fc);
 
 /**
  * File-system tells the kernel to invalidate cache for the given node id.

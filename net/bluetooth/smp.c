@@ -183,7 +183,6 @@ static int aes_cmac(struct crypto_shash *tfm, const u8 k[16], const u8 *m,
 	}
 
 	desc->tfm = tfm;
-	desc->flags = 0;
 
 	/* Swap key and message from LSB to MSB */
 	swap_buf(k, tmp, 16);
@@ -1390,7 +1389,7 @@ static struct smp_chan *smp_chan_create(struct l2cap_conn *conn)
 	if (!smp)
 		return NULL;
 
-	smp->tfm_aes = crypto_alloc_cipher("aes", 0, CRYPTO_ALG_ASYNC);
+	smp->tfm_aes = crypto_alloc_cipher("aes", 0, 0);
 	if (IS_ERR(smp->tfm_aes)) {
 		BT_ERR("Unable to create AES crypto context");
 		goto zfree_smp;
@@ -3233,7 +3232,7 @@ static struct l2cap_chan *smp_add_cid(struct hci_dev *hdev, u16 cid)
 	if (!smp)
 		return ERR_PTR(-ENOMEM);
 
-	tfm_aes = crypto_alloc_cipher("aes", 0, CRYPTO_ALG_ASYNC);
+	tfm_aes = crypto_alloc_cipher("aes", 0, 0);
 	if (IS_ERR(tfm_aes)) {
 		BT_ERR("Unable to create AES crypto context");
 		kzfree(smp);
@@ -3906,13 +3905,13 @@ int __init bt_selftest_smp(void)
 	struct crypto_kpp *tfm_ecdh;
 	int err;
 
-	tfm_aes = crypto_alloc_cipher("aes", 0, CRYPTO_ALG_ASYNC);
+	tfm_aes = crypto_alloc_cipher("aes", 0, 0);
 	if (IS_ERR(tfm_aes)) {
 		BT_ERR("Unable to create AES crypto context");
 		return PTR_ERR(tfm_aes);
 	}
 
-	tfm_cmac = crypto_alloc_shash("cmac(aes)", 0, CRYPTO_ALG_ASYNC);
+	tfm_cmac = crypto_alloc_shash("cmac(aes)", 0, 0);
 	if (IS_ERR(tfm_cmac)) {
 		BT_ERR("Unable to create CMAC crypto context");
 		crypto_free_cipher(tfm_aes);

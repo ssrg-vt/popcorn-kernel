@@ -1,18 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Ingenic SoC CGU driver
  *
  * Copyright (c) 2013-2015 Imagination Technologies
  * Author: Paul Burton <paul.burton@mips.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef __DRIVERS_CLK_INGENIC_CGU_H__
@@ -80,7 +71,7 @@ struct ingenic_cgu_mux_info {
  * @reg: offset of the divider control register within the CGU
  * @shift: number of bits to left shift the divide value by (ie. the index of
  *         the lowest bit of the divide value within its control register)
- * @div: number of bits to divide the divider value by (i.e. if the
+ * @div: number to divide the divider value by (i.e. if the
  *	 effective divider value is the value written to the register
  *	 multiplied by some constant)
  * @bits: the size of the divide value in bits

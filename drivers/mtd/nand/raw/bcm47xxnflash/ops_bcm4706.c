@@ -383,7 +383,7 @@ int bcm47xxnflash_ops_bcm4706_init(struct bcm47xxnflash *b47n)
 	u8 tbits, col_bits, col_size, row_bits, row_bsize;
 	u32 val;
 
-	b47n->nand_chip.select_chip = bcm47xxnflash_ops_bcm4706_select_chip;
+	nand_chip->legacy.select_chip = bcm47xxnflash_ops_bcm4706_select_chip;
 	nand_chip->legacy.cmd_ctrl = bcm47xxnflash_ops_bcm4706_cmd_ctrl;
 	nand_chip->legacy.dev_ready = bcm47xxnflash_ops_bcm4706_dev_ready;
 	b47n->nand_chip.legacy.cmdfunc = bcm47xxnflash_ops_bcm4706_cmdfunc;
@@ -428,7 +428,7 @@ int bcm47xxnflash_ops_bcm4706_init(struct bcm47xxnflash *b47n)
 	}
 
 	/* Configure FLASH */
-	chipsize = b47n->nand_chip.chipsize >> 20;
+	chipsize = nanddev_target_size(&b47n->nand_chip.base) >> 20;
 	tbits = ffs(chipsize); /* find first bit set */
 	if (!tbits || tbits != fls(chipsize)) {
 		pr_err("Invalid flash size: 0x%lX\n", chipsize);

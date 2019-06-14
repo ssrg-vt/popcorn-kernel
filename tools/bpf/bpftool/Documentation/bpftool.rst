@@ -16,7 +16,7 @@ SYNOPSIS
 
 	**bpftool** **version**
 
-	*OBJECT* := { **map** | **program** | **cgroup** | **perf** | **net** }
+	*OBJECT* := { **map** | **program** | **cgroup** | **perf** | **net** | **feature** }
 
 	*OPTIONS* := { { **-V** | **--version** } | { **-h** | **--help** }
 	| { **-j** | **--json** } [{ **-p** | **--pretty** }] }
@@ -34,6 +34,8 @@ SYNOPSIS
 
 	*NET-COMMANDS* := { **show** | **list** | **help** }
 
+	*FEATURE-COMMANDS* := { **probe** | **help** }
+
 DESCRIPTION
 ===========
 	*bpftool* allows for inspection and simple modification of BPF objects
@@ -47,7 +49,7 @@ OPTIONS
 	-h, --help
 		  Print short help message (similar to **bpftool help**).
 
-	-v, --version
+	-V, --version
 		  Print version number (similar to **bpftool version**).
 
 	-j, --json
@@ -60,6 +62,10 @@ OPTIONS
 	-m, --mapcompat
 		  Allow loading maps with unknown map definitions.
 
+	-n, --nomount
+		  Do not automatically attempt to mount any virtual file system
+		  (such as tracefs or BPF virtual file system) when necessary.
+
 
 SEE ALSO
 ========
@@ -68,5 +74,7 @@ SEE ALSO
 	**bpftool-prog**\ (8),
 	**bpftool-map**\ (8),
 	**bpftool-cgroup**\ (8),
+	**bpftool-feature**\ (8),
 	**bpftool-net**\ (8),
-	**bpftool-perf**\ (8)
+	**bpftool-perf**\ (8),
+	**bpftool-btf**\ (8)

@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright(c) 2013-2015 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 #include <linux/module.h>
 #include <linux/device.h>
@@ -138,6 +130,7 @@ bool nd_is_uuid_unique(struct device *dev, u8 *uuid)
 bool pmem_should_map_pages(struct device *dev)
 {
 	struct nd_region *nd_region = to_nd_region(dev->parent);
+	struct nd_namespace_common *ndns = to_ndns(dev);
 	struct nd_namespace_io *nsio;
 
 	if (!IS_ENABLED(CONFIG_ZONE_DEVICE))
@@ -147,6 +140,9 @@ bool pmem_should_map_pages(struct device *dev)
 		return false;
 
 	if (is_nd_pfn(dev) || is_nd_btt(dev))
+		return false;
+
+	if (ndns->force_raw)
 		return false;
 
 	nsio = to_nd_namespace_io(dev);
@@ -270,11 +266,10 @@ static ssize_t __alt_name_store(struct device *dev, const char *buf,
 	if (dev->driver || to_ndns(dev)->claim)
 		return -EBUSY;
 
-	input = kmemdup(buf, len + 1, GFP_KERNEL);
+	input = kstrndup(buf, len, GFP_KERNEL);
 	if (!input)
 		return -ENOMEM;
 
-	input[len] = '\0';
 	pos = strim(input);
 	if (strlen(pos) + 1 > NSLABEL_NAME_LEN) {
 		rc = -EINVAL;
@@ -1244,12 +1239,27 @@ static int namespace_update_uuid(struct nd_region *nd_region,
 	for (i = 0; i < nd_region->ndr_mappings; i++) {
 		struct nd_mapping *nd_mapping = &nd_region->mapping[i];
 		struct nvdimm_drvdata *ndd = to_ndd(nd_mapping);
+		struct nd_label_ent *label_ent;
 		struct resource *res;
 
 		for_each_dpa_resource(ndd, res)
 			if (strcmp(res->name, old_label_id.id) == 0)
 				sprintf((void *) res->name, "%s",
 						new_label_id.id);
+
+		mutex_lock(&nd_mapping->lock);
+		list_for_each_entry(label_ent, &nd_mapping->labels, list) {
+			struct nd_namespace_label *nd_label = label_ent->label;
+			struct nd_label_id label_id;
+
+			if (!nd_label)
+				continue;
+			nd_label_gen_id(&label_id, nd_label->uuid,
+					__le32_to_cpu(nd_label->flags));
+			if (strcmp(old_label_id.id, label_id.id) == 0)
+				set_bit(ND_LABEL_REAP, &label_ent->flags);
+		}
+		mutex_unlock(&nd_mapping->lock);
 	}
 	kfree(*old_uuid);
  out:
@@ -1507,13 +1517,13 @@ static ssize_t __holder_class_store(struct device *dev, const char *buf)
 	if (dev->driver || ndns->claim)
 		return -EBUSY;
 
-	if (strcmp(buf, "btt") == 0 || strcmp(buf, "btt\n") == 0)
+	if (sysfs_streq(buf, "btt"))
 		ndns->claim_class = btt_claim_class(dev);
-	else if (strcmp(buf, "pfn") == 0 || strcmp(buf, "pfn\n") == 0)
+	else if (sysfs_streq(buf, "pfn"))
 		ndns->claim_class = NVDIMM_CCLASS_PFN;
-	else if (strcmp(buf, "dax") == 0 || strcmp(buf, "dax\n") == 0)
+	else if (sysfs_streq(buf, "dax"))
 		ndns->claim_class = NVDIMM_CCLASS_DAX;
-	else if (strcmp(buf, "") == 0 || strcmp(buf, "\n") == 0)
+	else if (sysfs_streq(buf, ""))
 		ndns->claim_class = NVDIMM_CCLASS_NONE;
 	else
 		return -EINVAL;
@@ -2246,9 +2256,12 @@ static struct device *create_namespace_blk(struct nd_region *nd_region,
 	if (!nsblk->uuid)
 		goto blk_err;
 	memcpy(name, nd_label->name, NSLABEL_NAME_LEN);
-	if (name[0])
+	if (name[0]) {
 		nsblk->alt_name = kmemdup(name, NSLABEL_NAME_LEN,
 				GFP_KERNEL);
+		if (!nsblk->alt_name)
+			goto blk_err;
+	}
 	res = nsblk_add_resource(nd_region, ndd, nsblk,
 			__le64_to_cpu(nd_label->dpa));
 	if (!res)
@@ -2493,6 +2506,12 @@ static int init_active_labels(struct nd_region *nd_region)
 			if (!label_ent)
 				break;
 			label = nd_label_active(ndd, j);
+			if (test_bit(NDD_NOBLK, &nvdimm->flags)) {
+				u32 flags = __le32_to_cpu(label->flags);
+
+				flags &= ~NSLABEL_FLAG_LOCAL;
+				label->flags = __cpu_to_le32(flags);
+			}
 			label_ent->label = label;
 
 			mutex_lock(&nd_mapping->lock);

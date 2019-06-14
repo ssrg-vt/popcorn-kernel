@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 1997-1998 Transmeta Corporation -- All Rights Reserved
  * Copyright 1999-2000 Jeremy Fitzhardinge <jeremy@goop.org>
  * Copyright 2001-2006 Ian Kent <raven@themaw.net>
- *
- * This file is part of the Linux kernel and is made available under
- * the terms of the GNU General Public License, version 2, or at your
- * option, any later version, incorporated herein by reference.
  */
 
 #include "autofs_i.h"
@@ -596,7 +593,6 @@ int autofs_expire_run(struct super_block *sb,
 	pkt.len = dentry->d_name.len;
 	memcpy(pkt.name, dentry->d_name.name, pkt.len);
 	pkt.name[pkt.len] = '\0';
-	dput(dentry);
 
 	if (copy_to_user(pkt_p, &pkt, sizeof(struct autofs_packet_expire)))
 		ret = -EFAULT;
@@ -608,6 +604,8 @@ int autofs_expire_run(struct super_block *sb,
 	ino->flags &= ~(AUTOFS_INF_EXPIRING|AUTOFS_INF_WANT_EXPIRE);
 	complete_all(&ino->expire_complete);
 	spin_unlock(&sbi->fs_lock);
+
+	dput(dentry);
 
 	return ret;
 }

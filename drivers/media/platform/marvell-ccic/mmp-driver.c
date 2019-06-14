@@ -1,11 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Support for the camera device found on Marvell MMP processors; known
  * to work with the Armada 610 as used in the OLPC 1.75 system.
  *
  * Copyright 2011 Jonathan Corbet <corbet@lwn.net>
- *
- * This file may be distributed under the terms of the GNU General
- * Public License, version 2.
  */
 
 #include <linux/init.h>
@@ -240,8 +238,8 @@ static void mmpcam_calc_dphy(struct mcam_camera *mcam)
 	 *  bit 8 ~ bit 15: HS_SETTLE
 	 *   Time interval during which the HS
 	 *   receiver shall ignore any Data Lane
-	 *   HS transistions.
-	 *   The vaule has been calibrated on
+	 *   HS transitions.
+	 *   The value has been calibrated on
 	 *   different boards. It seems to work well.
 	 *
 	 *  More detail please refer

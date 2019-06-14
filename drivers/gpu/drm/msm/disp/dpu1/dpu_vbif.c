@@ -1,13 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
@@ -191,7 +183,7 @@ void dpu_vbif_set_ot_limit(struct dpu_kms *dpu_kms,
 	ot_lim = _dpu_vbif_get_ot_limit(vbif, params) & 0xFF;
 
 	if (ot_lim == 0)
-		goto exit;
+		return;
 
 	trace_dpu_perf_set_ot(params->num, params->xin_id, ot_lim,
 		params->vbif_idx);
@@ -210,8 +202,6 @@ void dpu_vbif_set_ot_limit(struct dpu_kms *dpu_kms,
 
 	if (forced_on)
 		mdp->ops.setup_clk_force_ctrl(mdp, params->clk_ctrl, false);
-exit:
-	return;
 }
 
 void dpu_vbif_set_qos_remap(struct dpu_kms *dpu_kms,
@@ -312,31 +302,25 @@ void dpu_vbif_init_memtypes(struct dpu_kms *dpu_kms)
 }
 
 #ifdef CONFIG_DEBUG_FS
-void dpu_debugfs_vbif_destroy(struct dpu_kms *dpu_kms)
-{
-	debugfs_remove_recursive(dpu_kms->debugfs_vbif);
-	dpu_kms->debugfs_vbif = NULL;
-}
 
-int dpu_debugfs_vbif_init(struct dpu_kms *dpu_kms, struct dentry *debugfs_root)
+void dpu_debugfs_vbif_init(struct dpu_kms *dpu_kms, struct dentry *debugfs_root)
 {
 	char vbif_name[32];
-	struct dentry *debugfs_vbif;
+	struct dentry *entry, *debugfs_vbif;
 	int i, j;
 
-	dpu_kms->debugfs_vbif = debugfs_create_dir("vbif", debugfs_root);
-	if (!dpu_kms->debugfs_vbif) {
-		DPU_ERROR("failed to create vbif debugfs\n");
-		return -EINVAL;
-	}
+	entry = debugfs_create_dir("vbif", debugfs_root);
+	if (IS_ERR_OR_NULL(entry))
+		return;
 
 	for (i = 0; i < dpu_kms->catalog->vbif_count; i++) {
 		struct dpu_vbif_cfg *vbif = &dpu_kms->catalog->vbif[i];
 
 		snprintf(vbif_name, sizeof(vbif_name), "%d", vbif->id);
 
-		debugfs_vbif = debugfs_create_dir(vbif_name,
-				dpu_kms->debugfs_vbif);
+		debugfs_vbif = debugfs_create_dir(vbif_name, entry);
+		if (IS_ERR_OR_NULL(debugfs_vbif))
+			continue;
 
 		debugfs_create_u32("features", 0600, debugfs_vbif,
 			(u32 *)&vbif->features);
@@ -378,7 +362,5 @@ int dpu_debugfs_vbif_init(struct dpu_kms *dpu_kms, struct dentry *debugfs_root)
 					(u32 *)&cfg->ot_limit);
 		}
 	}
-
-	return 0;
 }
 #endif

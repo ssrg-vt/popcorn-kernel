@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * builtin-stat.c
  *
@@ -37,8 +38,6 @@
  *   Mike Galbraith <efault@gmx.de>
  *   Paul Mackerras <paulus@samba.org>
  *   Jaswinder Singh Rajput <jaswinder@kernel.org>
- *
- * Released under the GPL v2. (and only v2, not any later version)
  */
 
 #include "perf.h"
@@ -52,7 +51,6 @@
 #include "util/evlist.h"
 #include "util/evsel.h"
 #include "util/debug.h"
-#include "util/drv_configs.h"
 #include "util/color.h"
 #include "util/stat.h"
 #include "util/header.h"
@@ -83,7 +81,6 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-#include <sys/wait.h>
 
 #include "sane_ctype.h"
 
@@ -246,11 +243,25 @@ perf_evsel__write_stat_event(struct perf_evsel *counter, u32 cpu, u32 thread,
 					   process_synthesized_event, NULL);
 }
 
+static int read_single_counter(struct perf_evsel *counter, int cpu,
+			       int thread, struct timespec *rs)
+{
+	if (counter->tool_event == PERF_TOOL_DURATION_TIME) {
+		u64 val = rs->tv_nsec + rs->tv_sec*1000000000ULL;
+		struct perf_counts_values *count =
+			perf_counts(counter->counts, cpu, thread);
+		count->ena = count->run = val;
+		count->val = val;
+		return 0;
+	}
+	return perf_evsel__read_counter(counter, cpu, thread);
+}
+
 /*
  * Read out the results of a single counter:
  * do not aggregate counts across CPUs in system-wide mode
  */
-static int read_counter(struct perf_evsel *counter)
+static int read_counter(struct perf_evsel *counter, struct timespec *rs)
 {
 	int nthreads = thread_map__nr(evsel_list->threads);
 	int ncpus, cpu, thread;
@@ -277,7 +288,7 @@ static int read_counter(struct perf_evsel *counter)
 			 * (via perf_evsel__read_counter) and sets threir count->loaded.
 			 */
 			if (!count->loaded &&
-			    perf_evsel__read_counter(counter, cpu, thread)) {
+			    read_single_counter(counter, cpu, thread, rs)) {
 				counter->counts->scaled = -1;
 				perf_counts(counter->counts, cpu, thread)->ena = 0;
 				perf_counts(counter->counts, cpu, thread)->run = 0;
@@ -306,13 +317,13 @@ static int read_counter(struct perf_evsel *counter)
 	return 0;
 }
 
-static void read_counters(void)
+static void read_counters(struct timespec *rs)
 {
 	struct perf_evsel *counter;
 	int ret;
 
 	evlist__for_each_entry(evsel_list, counter) {
-		ret = read_counter(counter);
+		ret = read_counter(counter, rs);
 		if (ret)
 			pr_debug("failed to read counter %s\n", counter->name);
 
@@ -325,10 +336,10 @@ static void process_interval(void)
 {
 	struct timespec ts, rs;
 
-	read_counters();
-
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	diff_timespec(&rs, &ts, &ref_time);
+
+	read_counters(&rs);
 
 	if (STAT_RECORD) {
 		if (WRITE_STAT_ROUND_EVENT(rs.tv_sec * NSEC_PER_SEC + rs.tv_nsec, INTERVAL))
@@ -418,7 +429,6 @@ static int __run_perf_stat(int argc, const char **argv, int run_idx)
 	int status = 0;
 	const bool forks = (argc > 0);
 	bool is_pipe = STAT_RECORD ? perf_stat.data.is_pipe : false;
-	struct perf_evsel_config_term *err_term;
 
 	if (interval) {
 		ts.tv_sec  = interval / USEC_PER_MSEC;
@@ -515,13 +525,6 @@ try_again:
 		return -1;
 	}
 
-	if (perf_evlist__apply_drv_configs(evsel_list, &counter, &err_term)) {
-		pr_err("failed to set config \"%s\" on event %s with %d (%s)\n",
-		      err_term->val.drv_cfg, perf_evsel__name(counter), errno,
-		      str_error_r(errno, msg, sizeof(msg)));
-		return -1;
-	}
-
 	if (STAT_RECORD) {
 		int err, fd = perf_data__fd(&perf_stat.data);
 
@@ -561,7 +564,8 @@ try_again:
 					break;
 			}
 		}
-		wait4(child_pid, &status, 0, &stat_config.ru_data);
+		if (child_pid != -1)
+			wait4(child_pid, &status, 0, &stat_config.ru_data);
 
 		if (workload_exec_errno) {
 			const char *emsg = str_error_r(workload_exec_errno, msg, sizeof(msg));
@@ -602,7 +606,7 @@ try_again:
 	 * avoid arbitrary skew, we must read all counters before closing any
 	 * group leaders.
 	 */
-	read_counters();
+	read_counters(&(struct timespec) { .tv_nsec = t1-t0 });
 	perf_evlist__close(evsel_list);
 
 	return WEXITSTATUS(status);
@@ -709,7 +713,7 @@ static int parse_metric_groups(const struct option *opt,
 	return metricgroup__parse_groups(opt, str, &stat_config.metric_events);
 }
 
-static const struct option stat_options[] = {
+static struct option stat_options[] = {
 	OPT_BOOLEAN('T', "transaction", &transaction_run,
 		    "hardware transaction statistics"),
 	OPT_CALLBACK('e', "event", &evsel_list, "event",
@@ -727,7 +731,8 @@ static const struct option stat_options[] = {
 		    "system-wide collection from all CPUs"),
 	OPT_BOOLEAN('g', "group", &group,
 		    "put the counters into a counter group"),
-	OPT_BOOLEAN('c', "scale", &stat_config.scale, "scale/normalize counters"),
+	OPT_BOOLEAN(0, "scale", &stat_config.scale,
+		    "Use --no-scale to disable counter scaling for multiplexing"),
 	OPT_INCR('v', "verbose", &verbose,
 		    "be more verbose (show counter open errors, etc)"),
 	OPT_INTEGER('r', "repeat", &stat_config.run_count,
@@ -841,6 +846,18 @@ static int perf_stat__get_core_cached(struct perf_stat_config *config,
 	return perf_stat__get_aggr(config, perf_stat__get_core, map, idx);
 }
 
+static bool term_percore_set(void)
+{
+	struct perf_evsel *counter;
+
+	evlist__for_each_entry(evsel_list, counter) {
+		if (counter->percore)
+			return true;
+	}
+
+	return false;
+}
+
 static int perf_stat_init_aggr_mode(void)
 {
 	int nr;
@@ -861,6 +878,15 @@ static int perf_stat_init_aggr_mode(void)
 		stat_config.aggr_get_id = perf_stat__get_core_cached;
 		break;
 	case AGGR_NONE:
+		if (term_percore_set()) {
+			if (cpu_map__build_core_map(evsel_list->cpus,
+						    &stat_config.aggr_map)) {
+				perror("cannot build core map");
+				return -1;
+			}
+			stat_config.aggr_get_id = perf_stat__get_core_cached;
+		}
+		break;
 	case AGGR_GLOBAL:
 	case AGGR_THREAD:
 	case AGGR_UNSET:
@@ -1316,6 +1342,7 @@ static void init_features(struct perf_session *session)
 	for (feat = HEADER_FIRST_FEATURE; feat < HEADER_LAST_FEATURE; feat++)
 		perf_header__set_feat(&session->header, feat);
 
+	perf_header__clear_feat(&session->header, HEADER_DIR_FORMAT);
 	perf_header__clear_feat(&session->header, HEADER_BUILD_ID);
 	perf_header__clear_feat(&session->header, HEADER_TRACING_DATA);
 	perf_header__clear_feat(&session->header, HEADER_BRANCH_STACK);
@@ -1331,7 +1358,7 @@ static int __cmd_record(int argc, const char **argv)
 			     PARSE_OPT_STOP_AT_NON_OPTION);
 
 	if (output_name)
-		data->file.path = output_name;
+		data->path = output_name;
 
 	if (stat_config.run_count != 1 || forever) {
 		pr_err("Cannot use -r option with perf stat record.\n");
@@ -1532,8 +1559,8 @@ static int __cmd_report(int argc, const char **argv)
 			input_name = "perf.data";
 	}
 
-	perf_stat.data.file.path = input_name;
-	perf_stat.data.mode      = PERF_DATA_MODE_READ;
+	perf_stat.data.path = input_name;
+	perf_stat.data.mode = PERF_DATA_MODE_READ;
 
 	session = perf_session__new(&perf_stat.data, false, &perf_stat.tool);
 	if (session == NULL)
@@ -1599,6 +1626,12 @@ int cmd_stat(int argc, const char **argv)
 		return -ENOMEM;
 
 	parse_events__shrink_config_terms();
+
+	/* String-parsing callback-based options would segfault when negated */
+	set_option_flag(stat_options, 'e', "event", PARSE_OPT_NONEG);
+	set_option_flag(stat_options, 'M', "metrics", PARSE_OPT_NONEG);
+	set_option_flag(stat_options, 'G', "cgroup", PARSE_OPT_NONEG);
+
 	argc = parse_options_subcommand(argc, argv, stat_options, stat_subcommands,
 					(const char **) stat_usage,
 					PARSE_OPT_STOP_AT_NON_OPTION);

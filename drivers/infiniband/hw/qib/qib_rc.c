@@ -45,12 +45,7 @@ static u32 restart_sge(struct rvt_sge_state *ss, struct rvt_swqe *wqe,
 	u32 len;
 
 	len = ((psn - wqe->psn) & QIB_PSN_MASK) * pmtu;
-	ss->sge = wqe->sg_list[0];
-	ss->sg_list = wqe->sg_list + 1;
-	ss->num_sge = wqe->wr.num_sge;
-	ss->total_len = wqe->length;
-	rvt_skip_sge(ss, len, false);
-	return wqe->length - len;
+	return rvt_restart_sge(ss, wqe, len);
 }
 
 /**
@@ -938,7 +933,7 @@ void qib_rc_send_complete(struct rvt_qp *qp, struct ib_header *hdr)
 		qp->s_last = s_last;
 		/* see post_send() */
 		barrier();
-		rvt_put_swqe(wqe);
+		rvt_put_qp_swqe(qp, wqe);
 		rvt_qp_swqe_complete(qp,
 				     wqe,
 				     ib_qib_wc_opcode[wqe->wr.opcode],
@@ -980,7 +975,7 @@ static struct rvt_swqe *do_rc_completion(struct rvt_qp *qp,
 	    qib_cmp24(qp->s_sending_psn, qp->s_sending_hpsn) > 0) {
 		u32 s_last;
 
-		rvt_put_swqe(wqe);
+		rvt_put_qp_swqe(qp, wqe);
 		s_last = qp->s_last;
 		if (++s_last >= qp->s_size)
 			s_last = 0;

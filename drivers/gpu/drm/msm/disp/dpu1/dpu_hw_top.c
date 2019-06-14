@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include "dpu_hwio.h"
 #include "dpu_hw_catalog.h"
 #include "dpu_hw_top.h"
-#include "dpu_dbg.h"
 #include "dpu_kms.h"
 
 #define SSPP_SPARE                        0x28
@@ -322,10 +313,7 @@ static const struct dpu_mdp_cfg *_top_offset(enum dpu_mdp mdp,
 	return ERR_PTR(-EINVAL);
 }
 
-static struct dpu_hw_blk_ops dpu_hw_ops = {
-	.start = NULL,
-	.stop = NULL,
-};
+static struct dpu_hw_blk_ops dpu_hw_ops;
 
 struct dpu_hw_mdp *dpu_hw_mdptop_init(enum dpu_mdp idx,
 		void __iomem *addr,
@@ -333,7 +321,6 @@ struct dpu_hw_mdp *dpu_hw_mdptop_init(enum dpu_mdp idx,
 {
 	struct dpu_hw_mdp *mdp;
 	const struct dpu_mdp_cfg *cfg;
-	int rc;
 
 	if (!addr || !m)
 		return ERR_PTR(-EINVAL);
@@ -355,20 +342,9 @@ struct dpu_hw_mdp *dpu_hw_mdptop_init(enum dpu_mdp idx,
 	mdp->caps = cfg;
 	_setup_mdp_ops(&mdp->ops, mdp->caps->features);
 
-	rc = dpu_hw_blk_init(&mdp->base, DPU_HW_BLK_TOP, idx, &dpu_hw_ops);
-	if (rc) {
-		DPU_ERROR("failed to init hw blk %d\n", rc);
-		goto blk_init_error;
-	}
-
-	dpu_dbg_set_dpu_top_offset(mdp->hw.blk_off);
+	dpu_hw_blk_init(&mdp->base, DPU_HW_BLK_TOP, idx, &dpu_hw_ops);
 
 	return mdp;
-
-blk_init_error:
-	kzfree(mdp);
-
-	return ERR_PTR(rc);
 }
 
 void dpu_hw_mdp_destroy(struct dpu_hw_mdp *mdp)

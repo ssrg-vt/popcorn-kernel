@@ -80,6 +80,14 @@ config SCSI_UFSHCD_PLATFORM
 
 	  If unsure, say N.
 
+config SCSI_UFS_CDNS_PLATFORM
+	tristate "Cadence UFS Controller platform driver"
+	depends on SCSI_UFSHCD_PLATFORM
+	help
+	This selects the Cadence-specific additions to UFSHCD platform driver.
+
+	  If unsure, say N.
+
 config SCSI_UFS_DWC_TC_PLATFORM
 	tristate "DesignWare platform support using a G210 Test Chip"
 	depends on SCSI_UFSHCD_PLATFORM
@@ -91,7 +99,7 @@ config SCSI_UFS_DWC_TC_PLATFORM
 config SCSI_UFS_QCOM
 	tristate "QCOM specific hooks to UFS controller platform driver"
 	depends on SCSI_UFSHCD_PLATFORM && ARCH_QCOM
-	select PHY_QCOM_UFS
+	select RESET_CONTROLLER
 	help
 	  This selects the QCOM specific additions to UFSHCD platform driver.
 	  UFS host on QCOM needs some vendor specific configuration before
@@ -99,6 +107,20 @@ config SCSI_UFS_QCOM
 	  specific registers.
 
 	  Select this if you have UFS controller on QCOM chipset.
+	  If unsure, say N.
+
+config SCSI_UFS_MEDIATEK
+	tristate "Mediatek specific hooks to UFS controller platform driver"
+	depends on SCSI_UFSHCD_PLATFORM && ARCH_MEDIATEK
+	select PHY_MTK_UFS
+	help
+	  This selects the Mediatek specific additions to UFSHCD platform driver.
+	  UFS host on Mediatek needs some vendor specific configuration before
+	  accessing the hardware which includes PHY configuration and vendor
+	  specific registers.
+
+	  Select this if you have UFS controller on Mediatek chipset.
+
 	  If unsure, say N.
 
 config SCSI_UFS_HISI

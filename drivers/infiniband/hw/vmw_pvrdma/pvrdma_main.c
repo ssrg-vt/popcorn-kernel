@@ -143,23 +143,53 @@ static int pvrdma_port_immutable(struct ib_device *ibdev, u8 port_num,
 	return 0;
 }
 
-static struct net_device *pvrdma_get_netdev(struct ib_device *ibdev,
-					    u8 port_num)
-{
-	struct net_device *netdev;
-	struct pvrdma_dev *dev = to_vdev(ibdev);
+static const struct ib_device_ops pvrdma_dev_ops = {
+	.add_gid = pvrdma_add_gid,
+	.alloc_mr = pvrdma_alloc_mr,
+	.alloc_pd = pvrdma_alloc_pd,
+	.alloc_ucontext = pvrdma_alloc_ucontext,
+	.create_ah = pvrdma_create_ah,
+	.create_cq = pvrdma_create_cq,
+	.create_qp = pvrdma_create_qp,
+	.dealloc_pd = pvrdma_dealloc_pd,
+	.dealloc_ucontext = pvrdma_dealloc_ucontext,
+	.del_gid = pvrdma_del_gid,
+	.dereg_mr = pvrdma_dereg_mr,
+	.destroy_ah = pvrdma_destroy_ah,
+	.destroy_cq = pvrdma_destroy_cq,
+	.destroy_qp = pvrdma_destroy_qp,
+	.get_dev_fw_str = pvrdma_get_fw_ver_str,
+	.get_dma_mr = pvrdma_get_dma_mr,
+	.get_link_layer = pvrdma_port_link_layer,
+	.get_port_immutable = pvrdma_port_immutable,
+	.map_mr_sg = pvrdma_map_mr_sg,
+	.mmap = pvrdma_mmap,
+	.modify_port = pvrdma_modify_port,
+	.modify_qp = pvrdma_modify_qp,
+	.poll_cq = pvrdma_poll_cq,
+	.post_recv = pvrdma_post_recv,
+	.post_send = pvrdma_post_send,
+	.query_device = pvrdma_query_device,
+	.query_gid = pvrdma_query_gid,
+	.query_pkey = pvrdma_query_pkey,
+	.query_port = pvrdma_query_port,
+	.query_qp = pvrdma_query_qp,
+	.reg_user_mr = pvrdma_reg_user_mr,
+	.req_notify_cq = pvrdma_req_notify_cq,
 
-	if (port_num != 1)
-		return NULL;
+	INIT_RDMA_OBJ_SIZE(ib_ah, pvrdma_ah, ibah),
+	INIT_RDMA_OBJ_SIZE(ib_pd, pvrdma_pd, ibpd),
+	INIT_RDMA_OBJ_SIZE(ib_ucontext, pvrdma_ucontext, ibucontext),
+};
 
-	rcu_read_lock();
-	netdev = dev->netdev;
-	if (netdev)
-		dev_hold(netdev);
-	rcu_read_unlock();
+static const struct ib_device_ops pvrdma_dev_srq_ops = {
+	.create_srq = pvrdma_create_srq,
+	.destroy_srq = pvrdma_destroy_srq,
+	.modify_srq = pvrdma_modify_srq,
+	.query_srq = pvrdma_query_srq,
 
-	return netdev;
-}
+	INIT_RDMA_OBJ_SIZE(ib_srq, pvrdma_srq, ibsrq),
+};
 
 static int pvrdma_register_device(struct pvrdma_dev *dev)
 {
@@ -197,39 +227,7 @@ static int pvrdma_register_device(struct pvrdma_dev *dev)
 	dev->ib_dev.node_type = RDMA_NODE_IB_CA;
 	dev->ib_dev.phys_port_cnt = dev->dsr->caps.phys_port_cnt;
 
-	dev->ib_dev.query_device = pvrdma_query_device;
-	dev->ib_dev.query_port = pvrdma_query_port;
-	dev->ib_dev.query_gid = pvrdma_query_gid;
-	dev->ib_dev.query_pkey = pvrdma_query_pkey;
-	dev->ib_dev.modify_port	= pvrdma_modify_port;
-	dev->ib_dev.alloc_ucontext = pvrdma_alloc_ucontext;
-	dev->ib_dev.dealloc_ucontext = pvrdma_dealloc_ucontext;
-	dev->ib_dev.mmap = pvrdma_mmap;
-	dev->ib_dev.alloc_pd = pvrdma_alloc_pd;
-	dev->ib_dev.dealloc_pd = pvrdma_dealloc_pd;
-	dev->ib_dev.create_ah = pvrdma_create_ah;
-	dev->ib_dev.destroy_ah = pvrdma_destroy_ah;
-	dev->ib_dev.create_qp = pvrdma_create_qp;
-	dev->ib_dev.modify_qp = pvrdma_modify_qp;
-	dev->ib_dev.query_qp = pvrdma_query_qp;
-	dev->ib_dev.destroy_qp = pvrdma_destroy_qp;
-	dev->ib_dev.post_send = pvrdma_post_send;
-	dev->ib_dev.post_recv = pvrdma_post_recv;
-	dev->ib_dev.create_cq = pvrdma_create_cq;
-	dev->ib_dev.destroy_cq = pvrdma_destroy_cq;
-	dev->ib_dev.poll_cq = pvrdma_poll_cq;
-	dev->ib_dev.req_notify_cq = pvrdma_req_notify_cq;
-	dev->ib_dev.get_dma_mr = pvrdma_get_dma_mr;
-	dev->ib_dev.reg_user_mr	= pvrdma_reg_user_mr;
-	dev->ib_dev.dereg_mr = pvrdma_dereg_mr;
-	dev->ib_dev.alloc_mr = pvrdma_alloc_mr;
-	dev->ib_dev.map_mr_sg = pvrdma_map_mr_sg;
-	dev->ib_dev.add_gid = pvrdma_add_gid;
-	dev->ib_dev.del_gid = pvrdma_del_gid;
-	dev->ib_dev.get_netdev = pvrdma_get_netdev;
-	dev->ib_dev.get_port_immutable = pvrdma_port_immutable;
-	dev->ib_dev.get_link_layer = pvrdma_port_link_layer;
-	dev->ib_dev.get_dev_fw_str = pvrdma_get_fw_ver_str;
+	ib_set_device_ops(&dev->ib_dev, &pvrdma_dev_ops);
 
 	mutex_init(&dev->port_mutex);
 	spin_lock_init(&dev->desc_lock);
@@ -255,10 +253,7 @@ static int pvrdma_register_device(struct pvrdma_dev *dev)
 			(1ull << IB_USER_VERBS_CMD_DESTROY_SRQ)	|
 			(1ull << IB_USER_VERBS_CMD_POST_SRQ_RECV);
 
-		dev->ib_dev.create_srq = pvrdma_create_srq;
-		dev->ib_dev.modify_srq = pvrdma_modify_srq;
-		dev->ib_dev.query_srq = pvrdma_query_srq;
-		dev->ib_dev.destroy_srq = pvrdma_destroy_srq;
+		ib_set_device_ops(&dev->ib_dev, &pvrdma_dev_srq_ops);
 
 		dev->srq_tbl = kcalloc(dev->dsr->caps.max_srq,
 				       sizeof(struct pvrdma_srq *),
@@ -267,10 +262,13 @@ static int pvrdma_register_device(struct pvrdma_dev *dev)
 			goto err_qp_free;
 	}
 	dev->ib_dev.driver_id = RDMA_DRIVER_VMW_PVRDMA;
+	ret = ib_device_set_netdev(&dev->ib_dev, dev->netdev, 1);
+	if (ret)
+		return ret;
 	spin_lock_init(&dev->srq_tbl_lock);
 	rdma_set_device_sysfs_group(&dev->ib_dev, &pvrdma_attr_group);
 
-	ret = ib_register_device(&dev->ib_dev, "vmw_pvrdma%d", NULL);
+	ret = ib_register_device(&dev->ib_dev, "vmw_pvrdma%d");
 	if (ret)
 		goto err_srq_free;
 
@@ -710,6 +708,7 @@ static void pvrdma_netdevice_event_handle(struct pvrdma_dev *dev,
 			pvrdma_dispatch_event(dev, 1, IB_EVENT_PORT_ACTIVE);
 		break;
 	case NETDEV_UNREGISTER:
+		ib_device_set_netdev(&dev->ib_dev, NULL, 1);
 		dev_put(dev->netdev);
 		dev->netdev = NULL;
 		break;
@@ -721,6 +720,7 @@ static void pvrdma_netdevice_event_handle(struct pvrdma_dev *dev,
 		if ((dev->netdev == NULL) &&
 		    (pci_get_drvdata(pdev_net) == ndev)) {
 			/* this is our netdev */
+			ib_device_set_netdev(&dev->ib_dev, ndev, 1);
 			dev->netdev = ndev;
 			dev_hold(ndev);
 		}
@@ -787,7 +787,7 @@ static int pvrdma_pci_probe(struct pci_dev *pdev,
 	dev_dbg(&pdev->dev, "initializing driver %s\n", pci_name(pdev));
 
 	/* Allocate zero-out device */
-	dev = (struct pvrdma_dev *)ib_alloc_device(sizeof(*dev));
+	dev = ib_alloc_device(pvrdma_dev, ib_dev);
 	if (!dev) {
 		dev_err(&pdev->dev, "failed to allocate IB device\n");
 		return -ENOMEM;
@@ -882,8 +882,8 @@ static int pvrdma_pci_probe(struct pci_dev *pdev,
 	dev_info(&pdev->dev, "device version %d, driver version %d\n",
 		 dev->dsr_version, PVRDMA_VERSION);
 
-	dev->dsr = dma_zalloc_coherent(&pdev->dev, sizeof(*dev->dsr),
-				       &dev->dsrbase, GFP_KERNEL);
+	dev->dsr = dma_alloc_coherent(&pdev->dev, sizeof(*dev->dsr),
+				      &dev->dsrbase, GFP_KERNEL);
 	if (!dev->dsr) {
 		dev_err(&pdev->dev, "failed to allocate shared region\n");
 		ret = -ENOMEM;
@@ -897,7 +897,11 @@ static int pvrdma_pci_probe(struct pci_dev *pdev,
 		PVRDMA_GOS_BITS_64;
 	dev->dsr->gos_info.gos_type = PVRDMA_GOS_TYPE_LINUX;
 	dev->dsr->gos_info.gos_ver = 1;
-	dev->dsr->uar_pfn = dev->driver_uar.pfn;
+
+	if (dev->dsr_version < PVRDMA_PPN64_VERSION)
+		dev->dsr->uar_pfn = dev->driver_uar.pfn;
+	else
+		dev->dsr->uar_pfn64 = dev->driver_uar.pfn;
 
 	/* Command slot. */
 	dev->cmd_slot = dma_alloc_coherent(&pdev->dev, PAGE_SIZE,
@@ -1117,6 +1121,8 @@ static void pvrdma_pci_remove(struct pci_dev *pdev)
 	pvrdma_page_dir_cleanup(dev, &dev->cq_pdir);
 	pvrdma_page_dir_cleanup(dev, &dev->async_pdir);
 	pvrdma_free_slots(dev);
+	dma_free_coherent(&pdev->dev, sizeof(*dev->dsr), dev->dsr,
+			  dev->dsrbase);
 
 	iounmap(dev->regs);
 	kfree(dev->sgid_tbl);

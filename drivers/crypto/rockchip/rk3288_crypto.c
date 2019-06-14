@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Crypto acceleration support for Rockchip RK3288
  *
  * Copyright (c) 2015, Fuzhou Rockchip Electronics Co., Ltd
  *
  * Author: Zain Wang <zain.wang@rock-chips.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  *
  * Some ideas are from marvell-cesa.c and s5p-sss.c driver.
  */
@@ -119,7 +116,7 @@ static int rk_load_data(struct rk_crypto_info *dev,
 		count = (dev->left_bytes > PAGE_SIZE) ?
 			PAGE_SIZE : dev->left_bytes;
 
-		if (!sg_pcopy_to_buffer(dev->first, dev->nents,
+		if (!sg_pcopy_to_buffer(dev->first, dev->src_nents,
 					dev->addr_vir, count,
 					dev->total - dev->left_bytes)) {
 			dev_err(dev->dev, "[%s:%d] pcopy err\n",

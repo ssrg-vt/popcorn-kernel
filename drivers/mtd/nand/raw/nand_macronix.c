@@ -1,18 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2017 Free Electrons
  * Copyright (C) 2017 NextThing Co
  *
  * Author: Boris Brezillon <boris.brezillon@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include "internals.h"
@@ -33,6 +24,13 @@ static void macronix_nand_fix_broken_get_timings(struct nand_chip *chip)
 		"MX30LF4G18AC",
 		"MX30LF4G28AC",
 		"MX60LF8G18AC",
+		"MX30UF1G18AC",
+		"MX30UF1G16AC",
+		"MX30UF2G18AC",
+		"MX30UF2G16AC",
+		"MX30UF4G18AC",
+		"MX30UF4G16AC",
+		"MX30UF4G28AC",
 	};
 
 	if (!chip->parameters.supports_set_get_features)
@@ -55,7 +53,7 @@ static void macronix_nand_fix_broken_get_timings(struct nand_chip *chip)
 static int macronix_nand_init(struct nand_chip *chip)
 {
 	if (nand_is_slc(chip))
-		chip->bbt_options |= NAND_BBT_SCAN2NDPAGE;
+		chip->options |= NAND_BBM_FIRSTPAGE | NAND_BBM_SECONDPAGE;
 
 	macronix_nand_fix_broken_get_timings(chip);
 

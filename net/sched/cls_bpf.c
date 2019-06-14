@@ -157,8 +157,7 @@ static int cls_bpf_offload_cmd(struct tcf_proto *tp, struct cls_bpf_prog *prog,
 	skip_sw = prog && tc_skip_sw(prog->gen_flags);
 	obj = prog ?: oldprog;
 
-	tc_cls_common_offload_init(&cls_bpf.common, tp, obj->gen_flags,
-				   extack);
+	tc_cls_common_offload_init(&cls_bpf.common, tp, obj->gen_flags, extack);
 	cls_bpf.command = TC_CLSBPF_OFFLOAD;
 	cls_bpf.exts = &obj->exts;
 	cls_bpf.prog = prog ? prog->filter : NULL;
@@ -169,7 +168,7 @@ static int cls_bpf_offload_cmd(struct tcf_proto *tp, struct cls_bpf_prog *prog,
 	if (oldprog)
 		tcf_block_offload_dec(block, &oldprog->gen_flags);
 
-	err = tc_setup_cb_call(block, NULL, TC_SETUP_CLSBPF, &cls_bpf, skip_sw);
+	err = tc_setup_cb_call(block, TC_SETUP_CLSBPF, &cls_bpf, skip_sw);
 	if (prog) {
 		if (err < 0) {
 			cls_bpf_offload_cmd(tp, oldprog, prog, extack);
@@ -234,7 +233,7 @@ static void cls_bpf_offload_update_stats(struct tcf_proto *tp,
 	cls_bpf.name = prog->bpf_name;
 	cls_bpf.exts_integrated = prog->exts_integrated;
 
-	tc_setup_cb_call(block, NULL, TC_SETUP_CLSBPF, &cls_bpf, false);
+	tc_setup_cb_call(block, TC_SETUP_CLSBPF, &cls_bpf, false);
 }
 
 static int cls_bpf_init(struct tcf_proto *tp)
@@ -298,7 +297,7 @@ static void __cls_bpf_delete(struct tcf_proto *tp, struct cls_bpf_prog *prog,
 }
 
 static int cls_bpf_delete(struct tcf_proto *tp, void *arg, bool *last,
-			  struct netlink_ext_ack *extack)
+			  bool rtnl_held, struct netlink_ext_ack *extack)
 {
 	struct cls_bpf_head *head = rtnl_dereference(tp->root);
 
@@ -307,7 +306,7 @@ static int cls_bpf_delete(struct tcf_proto *tp, void *arg, bool *last,
 	return 0;
 }
 
-static void cls_bpf_destroy(struct tcf_proto *tp,
+static void cls_bpf_destroy(struct tcf_proto *tp, bool rtnl_held,
 			    struct netlink_ext_ack *extack)
 {
 	struct cls_bpf_head *head = rtnl_dereference(tp->root);
@@ -417,7 +416,8 @@ static int cls_bpf_set_parms(struct net *net, struct tcf_proto *tp,
 	if ((!is_bpf && !is_ebpf) || (is_bpf && is_ebpf))
 		return -EINVAL;
 
-	ret = tcf_exts_validate(net, tp, tb, est, &prog->exts, ovr, extack);
+	ret = tcf_exts_validate(net, tp, tb, est, &prog->exts, ovr, true,
+				extack);
 	if (ret < 0)
 		return ret;
 
@@ -455,7 +455,8 @@ static int cls_bpf_set_parms(struct net *net, struct tcf_proto *tp,
 static int cls_bpf_change(struct net *net, struct sk_buff *in_skb,
 			  struct tcf_proto *tp, unsigned long base,
 			  u32 handle, struct nlattr **tca,
-			  void **arg, bool ovr, struct netlink_ext_ack *extack)
+			  void **arg, bool ovr, bool rtnl_held,
+			  struct netlink_ext_ack *extack)
 {
 	struct cls_bpf_head *head = rtnl_dereference(tp->root);
 	struct cls_bpf_prog *oldprog = *arg;
@@ -466,8 +467,8 @@ static int cls_bpf_change(struct net *net, struct sk_buff *in_skb,
 	if (tca[TCA_OPTIONS] == NULL)
 		return -EINVAL;
 
-	ret = nla_parse_nested(tb, TCA_BPF_MAX, tca[TCA_OPTIONS], bpf_policy,
-			       NULL);
+	ret = nla_parse_nested_deprecated(tb, TCA_BPF_MAX, tca[TCA_OPTIONS],
+					  bpf_policy, NULL);
 	if (ret < 0)
 		return ret;
 
@@ -475,7 +476,7 @@ static int cls_bpf_change(struct net *net, struct sk_buff *in_skb,
 	if (!prog)
 		return -ENOBUFS;
 
-	ret = tcf_exts_init(&prog->exts, TCA_BPF_ACT, TCA_BPF_POLICE);
+	ret = tcf_exts_init(&prog->exts, net, TCA_BPF_ACT, TCA_BPF_POLICE);
 	if (ret < 0)
 		goto errout;
 
@@ -575,7 +576,7 @@ static int cls_bpf_dump_ebpf_info(const struct cls_bpf_prog *prog,
 }
 
 static int cls_bpf_dump(struct net *net, struct tcf_proto *tp, void *fh,
-			struct sk_buff *skb, struct tcmsg *tm)
+			struct sk_buff *skb, struct tcmsg *tm, bool rtnl_held)
 {
 	struct cls_bpf_prog *prog = fh;
 	struct nlattr *nest;
@@ -589,7 +590,7 @@ static int cls_bpf_dump(struct net *net, struct tcf_proto *tp, void *fh,
 
 	cls_bpf_offload_update_stats(tp, prog);
 
-	nest = nla_nest_start(skb, TCA_OPTIONS);
+	nest = nla_nest_start_noflag(skb, TCA_OPTIONS);
 	if (nest == NULL)
 		goto nla_put_failure;
 
@@ -635,7 +636,8 @@ static void cls_bpf_bind_class(void *fh, u32 classid, unsigned long cl)
 		prog->res.class = cl;
 }
 
-static void cls_bpf_walk(struct tcf_proto *tp, struct tcf_walker *arg)
+static void cls_bpf_walk(struct tcf_proto *tp, struct tcf_walker *arg,
+			 bool rtnl_held)
 {
 	struct cls_bpf_head *head = rtnl_dereference(tp->root);
 	struct cls_bpf_prog *prog;

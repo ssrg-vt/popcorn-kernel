@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for NAND MLC Controller in LPC32xx
  *
@@ -5,17 +6,6 @@
  *
  * Copyright © 2011 WORK Microwave GmbH
  * Copyright © 2011, 2012 Roland Stigge
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  *
  * NAND Flash Controller Operation:
  * - Read: Auto Decode
@@ -799,7 +789,7 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	 * Scan to find existence of the device and get the type of NAND device:
 	 * SMALL block or LARGE block.
 	 */
-	nand_chip->dummy_controller.ops = &lpc32xx_nand_controller_ops;
+	nand_chip->legacy.dummy_controller.ops = &lpc32xx_nand_controller_ops;
 	res = nand_scan(nand_chip, 1);
 	if (res)
 		goto free_irq;

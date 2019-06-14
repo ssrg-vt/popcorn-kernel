@@ -13,6 +13,7 @@
 #ifndef _LINUX_PROPERTY_H_
 #define _LINUX_PROPERTY_H_
 
+#include <linux/bits.h>
 #include <linux/fwnode.h>
 #include <linux/types.h>
 
@@ -258,7 +259,7 @@ struct property_entry {
 #define PROPERTY_ENTRY_STRING(_name_, _val_)		\
 (struct property_entry) {				\
 	.name = _name_,					\
-	.length = sizeof(_val_),			\
+	.length = sizeof(const char *),			\
 	.type = DEV_PROP_STRING,			\
 	{ .value = { .str = _val_ } },			\
 }
@@ -304,11 +305,40 @@ struct fwnode_handle *
 fwnode_graph_get_remote_node(const struct fwnode_handle *fwnode, u32 port,
 			     u32 endpoint);
 
+/*
+ * Fwnode lookup flags
+ *
+ * @FWNODE_GRAPH_ENDPOINT_NEXT: In the case of no exact match, look for the
+ *				closest endpoint ID greater than the specified
+ *				one.
+ * @FWNODE_GRAPH_DEVICE_DISABLED: That the device to which the remote
+ *				  endpoint of the given endpoint belongs to,
+ *				  may be disabled.
+ */
+#define FWNODE_GRAPH_ENDPOINT_NEXT	BIT(0)
+#define FWNODE_GRAPH_DEVICE_DISABLED	BIT(1)
+
+struct fwnode_handle *
+fwnode_graph_get_endpoint_by_id(const struct fwnode_handle *fwnode,
+				u32 port, u32 endpoint, unsigned long flags);
+
 #define fwnode_graph_for_each_endpoint(fwnode, child)			\
 	for (child = NULL;						\
 	     (child = fwnode_graph_get_next_endpoint(fwnode, child)); )
 
 int fwnode_graph_parse_endpoint(const struct fwnode_handle *fwnode,
 				struct fwnode_endpoint *endpoint);
+
+/* -------------------------------------------------------------------------- */
+/* Software fwnode support - when HW description is incomplete or missing */
+
+bool is_software_node(const struct fwnode_handle *fwnode);
+
+int software_node_notify(struct device *dev, unsigned long action);
+
+struct fwnode_handle *
+fwnode_create_software_node(const struct property_entry *properties,
+			    const struct fwnode_handle *parent);
+void fwnode_remove_software_node(struct fwnode_handle *fwnode);
 
 #endif /* _LINUX_PROPERTY_H_ */

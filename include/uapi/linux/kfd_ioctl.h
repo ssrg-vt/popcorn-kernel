@@ -211,6 +211,11 @@ struct kfd_ioctl_dbg_wave_control_args {
 #define KFD_HW_EXCEPTION_GPU_HANG	0
 #define KFD_HW_EXCEPTION_ECC		1
 
+/* For kfd_hsa_memory_exception_data.ErrorType */
+#define KFD_MEM_ERR_NO_RAS		0
+#define KFD_MEM_ERR_SRAM_ECC		1
+#define KFD_MEM_ERR_POISON_CONSUMED	2
+#define KFD_MEM_ERR_GPU_HANG		3
 
 struct kfd_ioctl_create_event_args {
 	__u64 event_page_offset;	/* from KFD */
@@ -250,7 +255,12 @@ struct kfd_hsa_memory_exception_data {
 	struct kfd_memory_exception_failure failure;
 	__u64 va;
 	__u32 gpu_id;
-	__u32 pad;
+	__u32 ErrorType; /* 0 = no RAS error,
+			  * 1 = ECC_SRAM,
+			  * 2 = Link_SYNFLOOD (poison),
+			  * 3 = GPU hang (not attributable to a specific cause),
+			  * other values reserved
+			  */
 };
 
 /* hw exception data */
@@ -398,6 +408,24 @@ struct kfd_ioctl_unmap_memory_from_gpu_args {
 	__u32 n_success;		/* to/from KFD */
 };
 
+struct kfd_ioctl_get_dmabuf_info_args {
+	__u64 size;		/* from KFD */
+	__u64 metadata_ptr;	/* to KFD */
+	__u32 metadata_size;	/* to KFD (space allocated by user)
+				 * from KFD (actual metadata size)
+				 */
+	__u32 gpu_id;	/* from KFD */
+	__u32 flags;		/* from KFD (KFD_IOC_ALLOC_MEM_FLAGS) */
+	__u32 dmabuf_fd;	/* to KFD */
+};
+
+struct kfd_ioctl_import_dmabuf_args {
+	__u64 va_addr;	/* to KFD */
+	__u64 handle;	/* from KFD */
+	__u32 gpu_id;	/* to KFD */
+	__u32 dmabuf_fd;	/* to KFD */
+};
+
 #define AMDKFD_IOCTL_BASE 'K'
 #define AMDKFD_IO(nr)			_IO(AMDKFD_IOCTL_BASE, nr)
 #define AMDKFD_IOR(nr, type)		_IOR(AMDKFD_IOCTL_BASE, nr, type)
@@ -486,7 +514,13 @@ struct kfd_ioctl_unmap_memory_from_gpu_args {
 #define AMDKFD_IOC_GET_QUEUE_WAVE_STATE		\
 		AMDKFD_IOWR(0x1B, struct kfd_ioctl_get_queue_wave_state_args)
 
+#define AMDKFD_IOC_GET_DMABUF_INFO		\
+		AMDKFD_IOWR(0x1C, struct kfd_ioctl_get_dmabuf_info_args)
+
+#define AMDKFD_IOC_IMPORT_DMABUF		\
+		AMDKFD_IOWR(0x1D, struct kfd_ioctl_import_dmabuf_args)
+
 #define AMDKFD_COMMAND_START		0x01
-#define AMDKFD_COMMAND_END		0x1C
+#define AMDKFD_COMMAND_END		0x1E
 
 #endif

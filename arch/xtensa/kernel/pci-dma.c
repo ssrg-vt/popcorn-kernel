@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * DMA coherent memory allocation.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  *
  * Copyright (C) 2002 - 2005 Tensilica Inc.
  * Copyright (C) 2015 Cadence Design Systems Inc.
@@ -160,7 +156,7 @@ void *arch_dma_alloc(struct device *dev, size_t size, dma_addr_t *handle,
 						 flag & __GFP_NOWARN);
 
 	if (!page)
-		page = alloc_pages(flag, get_order(size));
+		page = alloc_pages(flag | __GFP_ZERO, get_order(size));
 
 	if (!page)
 		return NULL;

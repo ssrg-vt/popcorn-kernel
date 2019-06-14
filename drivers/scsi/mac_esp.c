@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* mac_esp.c: ESP front-end for Macintosh Quadra systems.
  *
  * Adapted from jazz_esp.c and the old mac_esp.c.
@@ -307,7 +308,7 @@ static int esp_mac_probe(struct platform_device *dev)
 		goto fail;
 
 	host->max_id = 8;
-	host->use_clustering = DISABLE_CLUSTERING;
+	host->dma_boundary = PAGE_SIZE - 1;
 	esp = shost_priv(host);
 
 	esp->host = host;

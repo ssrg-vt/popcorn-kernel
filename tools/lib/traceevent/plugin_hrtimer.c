@@ -27,7 +27,7 @@
 
 static int timer_expire_handler(struct trace_seq *s,
 				struct tep_record *record,
-				struct tep_event_format *event, void *context)
+				struct tep_event *event, void *context)
 {
 	trace_seq_printf(s, "hrtimer=");
 
@@ -47,7 +47,7 @@ static int timer_expire_handler(struct trace_seq *s,
 
 static int timer_start_handler(struct trace_seq *s,
 			       struct tep_record *record,
-			       struct tep_event_format *event, void *context)
+			       struct tep_event *event, void *context)
 {
 	trace_seq_printf(s, "hrtimer=");
 
@@ -67,23 +67,23 @@ static int timer_start_handler(struct trace_seq *s,
 	return 0;
 }
 
-int TEP_PLUGIN_LOADER(struct tep_handle *pevent)
+int TEP_PLUGIN_LOADER(struct tep_handle *tep)
 {
-	tep_register_event_handler(pevent, -1,
+	tep_register_event_handler(tep, -1,
 				   "timer", "hrtimer_expire_entry",
 				   timer_expire_handler, NULL);
 
-	tep_register_event_handler(pevent, -1, "timer", "hrtimer_start",
+	tep_register_event_handler(tep, -1, "timer", "hrtimer_start",
 				   timer_start_handler, NULL);
 	return 0;
 }
 
-void TEP_PLUGIN_UNLOADER(struct tep_handle *pevent)
+void TEP_PLUGIN_UNLOADER(struct tep_handle *tep)
 {
-	tep_unregister_event_handler(pevent, -1,
+	tep_unregister_event_handler(tep, -1,
 				     "timer", "hrtimer_expire_entry",
 				     timer_expire_handler, NULL);
 
-	tep_unregister_event_handler(pevent, -1, "timer", "hrtimer_start",
+	tep_unregister_event_handler(tep, -1, "timer", "hrtimer_start",
 				     timer_start_handler, NULL);
 }

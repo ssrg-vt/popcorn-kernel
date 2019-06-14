@@ -12,6 +12,7 @@
 #define __BCM_SYSPORT_H
 
 #include <linux/bitmap.h>
+#include <linux/ethtool.h>
 #include <linux/if_vlan.h>
 #include <linux/net_dim.h>
 
@@ -515,12 +516,6 @@ struct bcm_rsb {
 
 #define TDMA_DEBUG			0x64c
 
-/* Transmit/Receive descriptor */
-struct dma_desc {
-	u32	addr_status_len;
-	u32	addr_lo;
-};
-
 /* Number of Receive hardware descriptor words */
 #define SP_NUM_HW_RX_DESC_WORDS		1024
 #define SP_LT_NUM_HW_RX_DESC_WORDS	256
@@ -529,7 +524,7 @@ struct dma_desc {
 #define SP_NUM_TX_DESC			1536
 #define SP_LT_NUM_TX_DESC		256
 
-#define WORDS_PER_DESC			(sizeof(struct dma_desc) / sizeof(u32))
+#define WORDS_PER_DESC			2
 
 /* Rx/Tx common counter group.*/
 struct bcm_sysport_pkt_counters {
@@ -717,7 +712,6 @@ struct bcm_sysport_net_dim {
 struct bcm_sysport_tx_ring {
 	spinlock_t	lock;		/* Ring lock for tx reclaim/xmit */
 	struct napi_struct napi;	/* NAPI per tx queue */
-	dma_addr_t	desc_dma;	/* DMA cookie */
 	unsigned int	index;		/* Ring index */
 	unsigned int	size;		/* Ring current size */
 	unsigned int	alloc_size;	/* Ring one-time allocated size */
@@ -726,7 +720,6 @@ struct bcm_sysport_tx_ring {
 	unsigned int	c_index;	/* Last consumer index */
 	unsigned int	clean_index;	/* Current clean index */
 	struct bcm_sysport_cb *cbs;	/* Transmit control blocks */
-	struct dma_desc	*desc_cpu;	/* CPU view of the descriptor */
 	struct bcm_sysport_priv *priv;	/* private context backpointer */
 	unsigned long	packets;	/* packets statistics */
 	unsigned long	bytes;		/* bytes statistics */
@@ -778,6 +771,7 @@ struct bcm_sysport_priv {
 	unsigned int		crc_fwd:1;
 	u16			rev;
 	u32			wolopts;
+	u8			sopass[SOPASS_MAX];
 	unsigned int		wol_irq_disabled:1;
 
 	/* MIB related fields */
@@ -786,6 +780,7 @@ struct bcm_sysport_priv {
 	/* Ethtool */
 	u32			msg_enable;
 	DECLARE_BITMAP(filters, RXCHK_BRCM_TAG_MAX);
+	u32			filters_loc[RXCHK_BRCM_TAG_MAX];
 
 	struct bcm_sysport_stats64	stats64;
 
@@ -795,7 +790,6 @@ struct bcm_sysport_priv {
 	/* map information between switch port queues and local queues */
 	struct notifier_block	dsa_notifier;
 	unsigned int		per_port_num_tx_queues;
-	unsigned long		queue_bitmap;
 	struct bcm_sysport_tx_ring *ring_map[DSA_MAX_PORTS * 8];
 
 };

@@ -110,7 +110,7 @@ xfs_dqblk_verify(
 /*
  * Do some primitive error checking on ondisk dquot data structures.
  */
-int
+void
 xfs_dqblk_repair(
 	struct xfs_mount	*mp,
 	struct xfs_dqblk	*dqb,
@@ -133,8 +133,6 @@ xfs_dqblk_repair(
 		xfs_update_cksum((char *)dqb, sizeof(struct xfs_dqblk),
 				 XFS_DQUOT_CRC_OFF);
 	}
-
-	return 0;
 }
 
 STATIC bool
@@ -277,6 +275,8 @@ xfs_dquot_buf_write_verify(
 
 const struct xfs_buf_ops xfs_dquot_buf_ops = {
 	.name = "xfs_dquot",
+	.magic16 = { cpu_to_be16(XFS_DQUOT_MAGIC),
+		     cpu_to_be16(XFS_DQUOT_MAGIC) },
 	.verify_read = xfs_dquot_buf_read_verify,
 	.verify_write = xfs_dquot_buf_write_verify,
 	.verify_struct = xfs_dquot_buf_verify_struct,
@@ -284,6 +284,8 @@ const struct xfs_buf_ops xfs_dquot_buf_ops = {
 
 const struct xfs_buf_ops xfs_dquot_buf_ra_ops = {
 	.name = "xfs_dquot_ra",
+	.magic16 = { cpu_to_be16(XFS_DQUOT_MAGIC),
+		     cpu_to_be16(XFS_DQUOT_MAGIC) },
 	.verify_read = xfs_dquot_buf_readahead_verify,
 	.verify_write = xfs_dquot_buf_write_verify,
 };

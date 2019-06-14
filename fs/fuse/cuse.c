@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * CUSE: Character device in Userspace
  *
  * Copyright (C) 2008-2009  SUSE Linux Products GmbH
  * Copyright (C) 2008-2009  Tejun Heo <tj@kernel.org>
- *
- * This file is released under the GPLv2.
  *
  * CUSE enables character devices to be implemented from userland much
  * like FUSE allows filesystems.  On initialization /dev/cuse is
@@ -32,6 +31,8 @@
  * additional reference is taken which is released when the file is
  * closed.
  */
+
+#define pr_fmt(fmt) "CUSE: " fmt
 
 #include <linux/fuse.h>
 #include <linux/cdev.h>
@@ -141,10 +142,11 @@ static int cuse_open(struct inode *inode, struct file *file)
 
 static int cuse_release(struct inode *inode, struct file *file)
 {
+	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_file *ff = file->private_data;
 	struct fuse_conn *fc = ff->fc;
 
-	fuse_sync_release(ff, file->f_flags);
+	fuse_sync_release(fi, ff, file->f_flags);
 	fuse_conn_put(fc);
 
 	return 0;
@@ -224,7 +226,7 @@ static int cuse_parse_one(char **pp, char *end, char **keyp, char **valp)
 		return 0;
 
 	if (end[-1] != '\0') {
-		printk(KERN_ERR "CUSE: info not properly terminated\n");
+		pr_err("info not properly terminated\n");
 		return -EINVAL;
 	}
 
@@ -241,7 +243,7 @@ static int cuse_parse_one(char **pp, char *end, char **keyp, char **valp)
 		key = strstrip(key);
 
 	if (!strlen(key)) {
-		printk(KERN_ERR "CUSE: zero length info key specified\n");
+		pr_err("zero length info key specified\n");
 		return -EINVAL;
 	}
 
@@ -281,12 +283,11 @@ static int cuse_parse_devinfo(char *p, size_t len, struct cuse_devinfo *devinfo)
 		if (strcmp(key, "DEVNAME") == 0)
 			devinfo->name = val;
 		else
-			printk(KERN_WARNING "CUSE: unknown device info \"%s\"\n",
-			       key);
+			pr_warn("unknown device info \"%s\"\n", key);
 	}
 
 	if (!devinfo->name || !strlen(devinfo->name)) {
-		printk(KERN_ERR "CUSE: DEVNAME unspecified\n");
+		pr_err("DEVNAME unspecified\n");
 		return -EINVAL;
 	}
 
@@ -340,7 +341,7 @@ static void cuse_process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 	else
 		rc = register_chrdev_region(devt, 1, devinfo.name);
 	if (rc) {
-		printk(KERN_ERR "CUSE: failed to register chrdev region\n");
+		pr_err("failed to register chrdev region\n");
 		goto err;
 	}
 
@@ -407,7 +408,7 @@ err_unlock:
 err_region:
 	unregister_chrdev_region(devt, 1);
 err:
-	fuse_abort_conn(fc, false);
+	fuse_abort_conn(fc);
 	goto out;
 }
 
@@ -586,7 +587,7 @@ static ssize_t cuse_class_abort_store(struct device *dev,
 {
 	struct cuse_conn *cc = dev_get_drvdata(dev);
 
-	fuse_abort_conn(&cc->fc, false);
+	fuse_abort_conn(&cc->fc);
 	return count;
 }
 static DEVICE_ATTR(abort, 0200, NULL, cuse_class_abort_store);

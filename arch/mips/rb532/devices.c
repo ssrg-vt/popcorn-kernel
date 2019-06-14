@@ -1,18 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  RouterBoard 500 Platform devices
  *
  *  Copyright (C) 2006 Felix Fietkau <nbd@openwrt.org>
  *  Copyright (C) 2007 Florian Fainelli <florian@openwrt.org>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *  GNU General Public License for more details.
  */
 #include <linux/kernel.h>
 #include <linux/export.h>
@@ -23,6 +14,7 @@
 #include <linux/mtd/platnand.h>
 #include <linux/mtd/mtd.h>
 #include <linux/gpio.h>
+#include <linux/gpio/machine.h>
 #include <linux/gpio_keys.h>
 #include <linux/input.h>
 #include <linux/serial_8250.h>
@@ -127,14 +119,18 @@ static struct resource cf_slot0_res[] = {
 	}
 };
 
-static struct cf_device cf_slot0_data = {
-	.gpio_pin = CF_GPIO_NUM
+static struct gpiod_lookup_table cf_slot0_gpio_table = {
+	.dev_id = "pata-rb532-cf",
+	.table = {
+		GPIO_LOOKUP("gpio0", CF_GPIO_NUM,
+			    NULL, GPIO_ACTIVE_HIGH),
+		{ },
+	},
 };
 
 static struct platform_device cf_slot0 = {
 	.id = -1,
 	.name = "pata-rb532-cf",
-	.dev.platform_data = &cf_slot0_data,
 	.resource = cf_slot0_res,
 	.num_resources = ARRAY_SIZE(cf_slot0_res),
 };
@@ -305,6 +301,7 @@ static int __init plat_setup_devices(void)
 
 	dev_set_drvdata(&korina_dev0.dev, &korina_dev0_data);
 
+	gpiod_add_lookup_table(&cf_slot0_gpio_table);
 	return platform_add_devices(rb532_devs, ARRAY_SIZE(rb532_devs));
 }
 

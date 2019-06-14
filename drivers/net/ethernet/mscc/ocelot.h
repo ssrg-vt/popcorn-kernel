@@ -441,10 +441,6 @@ struct ocelot_port {
 	struct phy_device *phy;
 	void __iomem *regs;
 	u8 chip_port;
-	/* Keep a track of the mc addresses added to the mac table, so that they
-	 * can be removed when needed.
-	 */
-	struct list_head mc;
 
 	/* Ingress default VLAN (pvid) */
 	u16 pvid;
@@ -499,5 +495,7 @@ int ocelot_probe_port(struct ocelot *ocelot, u8 port,
 		      struct phy_device *phy);
 
 extern struct notifier_block ocelot_netdevice_nb;
+extern struct notifier_block ocelot_switchdev_nb;
+extern struct notifier_block ocelot_switchdev_blocking_nb;
 
 #endif

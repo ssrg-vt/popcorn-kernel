@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2017-2018 Broadcom. All Rights Reserved. The term *
+ * Copyright (C) 2017-2019 Broadcom. All Rights Reserved. The term *
  * “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.     *
  * Copyright (C) 2009-2015 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
@@ -1968,14 +1968,17 @@ link_diag_state_set_out:
 }
 
 /**
- * lpfc_sli4_bsg_set_internal_loopback - set sli4 internal loopback diagnostic
+ * lpfc_sli4_bsg_set_loopback_mode - set sli4 internal loopback diagnostic
  * @phba: Pointer to HBA context object.
+ * @mode: loopback mode to set
+ * @link_no: link number for loopback mode to set
  *
  * This function is responsible for issuing a sli4 mailbox command for setting
- * up internal loopback diagnostic.
+ * up loopback diagnostic for a link.
  */
 static int
-lpfc_sli4_bsg_set_internal_loopback(struct lpfc_hba *phba)
+lpfc_sli4_bsg_set_loopback_mode(struct lpfc_hba *phba, int mode,
+				uint32_t link_no)
 {
 	LPFC_MBOXQ_t *pmboxq;
 	uint32_t req_len, alloc_len;
@@ -1996,11 +1999,19 @@ lpfc_sli4_bsg_set_internal_loopback(struct lpfc_hba *phba)
 	}
 	link_diag_loopback = &pmboxq->u.mqe.un.link_diag_loopback;
 	bf_set(lpfc_mbx_set_diag_state_link_num,
-	       &link_diag_loopback->u.req, phba->sli4_hba.lnk_info.lnk_no);
-	bf_set(lpfc_mbx_set_diag_state_link_type,
-	       &link_diag_loopback->u.req, phba->sli4_hba.lnk_info.lnk_tp);
+	       &link_diag_loopback->u.req, link_no);
+
+	if (phba->sli4_hba.conf_trunk & (1 << link_no)) {
+		bf_set(lpfc_mbx_set_diag_state_link_type,
+		       &link_diag_loopback->u.req, LPFC_LNK_FC_TRUNKED);
+	} else {
+		bf_set(lpfc_mbx_set_diag_state_link_type,
+		       &link_diag_loopback->u.req,
+		       phba->sli4_hba.lnk_info.lnk_tp);
+	}
+
 	bf_set(lpfc_mbx_set_diag_lpbk_type, &link_diag_loopback->u.req,
-	       LPFC_DIAG_LOOPBACK_TYPE_INTERNAL);
+	       mode);
 
 	mbxstatus = lpfc_sli_issue_mbox_wait(phba, pmboxq, LPFC_MBOX_TMO);
 	if ((mbxstatus != MBX_SUCCESS) || (pmboxq->u.mb.mbxStatus)) {
@@ -2054,7 +2065,7 @@ lpfc_sli4_bsg_diag_loopback_mode(struct lpfc_hba *phba, struct bsg_job *job)
 	struct fc_bsg_request *bsg_request = job->request;
 	struct fc_bsg_reply *bsg_reply = job->reply;
 	struct diag_mode_set *loopback_mode;
-	uint32_t link_flags, timeout;
+	uint32_t link_flags, timeout, link_no;
 	int i, rc = 0;
 
 	/* no data to return just the return code */
@@ -2069,12 +2080,39 @@ lpfc_sli4_bsg_diag_loopback_mode(struct lpfc_hba *phba, struct bsg_job *job)
 				(int)(sizeof(struct fc_bsg_request) +
 				sizeof(struct diag_mode_set)));
 		rc = -EINVAL;
-		goto job_error;
+		goto job_done;
+	}
+
+	loopback_mode = (struct diag_mode_set *)
+		bsg_request->rqst_data.h_vendor.vendor_cmd;
+	link_flags = loopback_mode->type;
+	timeout = loopback_mode->timeout * 100;
+
+	if (loopback_mode->physical_link == -1)
+		link_no = phba->sli4_hba.lnk_info.lnk_no;
+	else
+		link_no = loopback_mode->physical_link;
+
+	if (link_flags == DISABLE_LOOP_BACK) {
+		rc = lpfc_sli4_bsg_set_loopback_mode(phba,
+					LPFC_DIAG_LOOPBACK_TYPE_DISABLE,
+					link_no);
+		if (!rc) {
+			/* Unset the need disable bit */
+			phba->sli4_hba.conf_trunk &= ~((1 << link_no) << 4);
+		}
+		goto job_done;
+	} else {
+		/* Check if we need to disable the loopback state */
+		if (phba->sli4_hba.conf_trunk & ((1 << link_no) << 4)) {
+			rc = -EPERM;
+			goto job_done;
+		}
 	}
 
 	rc = lpfc_bsg_diag_mode_enter(phba);
 	if (rc)
-		goto job_error;
+		goto job_done;
 
 	/* indicate we are in loobpack diagnostic mode */
 	spin_lock_irq(&phba->hbalock);
@@ -2084,15 +2122,11 @@ lpfc_sli4_bsg_diag_loopback_mode(struct lpfc_hba *phba, struct bsg_job *job)
 	/* reset port to start frome scratch */
 	rc = lpfc_selective_reset(phba);
 	if (rc)
-		goto job_error;
+		goto job_done;
 
 	/* bring the link to diagnostic mode */
 	lpfc_printf_log(phba, KERN_INFO, LOG_LIBDFC,
 			"3129 Bring link to diagnostic state.\n");
-	loopback_mode = (struct diag_mode_set *)
-		bsg_request->rqst_data.h_vendor.vendor_cmd;
-	link_flags = loopback_mode->type;
-	timeout = loopback_mode->timeout * 100;
 
 	rc = lpfc_sli4_bsg_set_link_diag_state(phba, 1);
 	if (rc) {
@@ -2120,13 +2154,54 @@ lpfc_sli4_bsg_diag_loopback_mode(struct lpfc_hba *phba, struct bsg_job *job)
 	lpfc_printf_log(phba, KERN_INFO, LOG_LIBDFC,
 			"3132 Set up loopback mode:x%x\n", link_flags);
 
-	if (link_flags == INTERNAL_LOOP_BACK)
-		rc = lpfc_sli4_bsg_set_internal_loopback(phba);
-	else if (link_flags == EXTERNAL_LOOP_BACK)
-		rc = lpfc_hba_init_link_fc_topology(phba,
-						    FLAGS_TOPOLOGY_MODE_PT_PT,
-						    MBX_NOWAIT);
-	else {
+	switch (link_flags) {
+	case INTERNAL_LOOP_BACK:
+		if (phba->sli4_hba.conf_trunk & (1 << link_no)) {
+			rc = lpfc_sli4_bsg_set_loopback_mode(phba,
+					LPFC_DIAG_LOOPBACK_TYPE_INTERNAL,
+					link_no);
+		} else {
+			/* Trunk is configured, but link is not in this trunk */
+			if (phba->sli4_hba.conf_trunk) {
+				rc = -ELNRNG;
+				goto loopback_mode_exit;
+			}
+
+			rc = lpfc_sli4_bsg_set_loopback_mode(phba,
+					LPFC_DIAG_LOOPBACK_TYPE_INTERNAL,
+					link_no);
+		}
+
+		if (!rc) {
+			/* Set the need disable bit */
+			phba->sli4_hba.conf_trunk |= (1 << link_no) << 4;
+		}
+
+		break;
+	case EXTERNAL_LOOP_BACK:
+		if (phba->sli4_hba.conf_trunk & (1 << link_no)) {
+			rc = lpfc_sli4_bsg_set_loopback_mode(phba,
+				LPFC_DIAG_LOOPBACK_TYPE_EXTERNAL_TRUNKED,
+				link_no);
+		} else {
+			/* Trunk is configured, but link is not in this trunk */
+			if (phba->sli4_hba.conf_trunk) {
+				rc = -ELNRNG;
+				goto loopback_mode_exit;
+			}
+
+			rc = lpfc_sli4_bsg_set_loopback_mode(phba,
+						LPFC_DIAG_LOOPBACK_TYPE_SERDES,
+						link_no);
+		}
+
+		if (!rc) {
+			/* Set the need disable bit */
+			phba->sli4_hba.conf_trunk |= (1 << link_no) << 4;
+		}
+
+		break;
+	default:
 		rc = -EINVAL;
 		lpfc_printf_log(phba, KERN_ERR, LOG_LIBDFC,
 				"3141 Loopback mode:x%x not supported\n",
@@ -2185,7 +2260,7 @@ loopback_mode_exit:
 	}
 	lpfc_bsg_diag_mode_exit(phba);
 
-job_error:
+job_done:
 	/* make error code available to userspace */
 	bsg_reply->result = rc;
 	/* complete the job back to userspace if no error */
@@ -2222,7 +2297,7 @@ lpfc_bsg_diag_loopback_mode(struct bsg_job *job)
 
 	if (phba->sli_rev < LPFC_SLI_REV4)
 		rc = lpfc_sli3_bsg_diag_loopback_mode(phba, job);
-	else if (bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf) ==
+	else if (bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf) >=
 		 LPFC_SLI_INTF_IF_TYPE_2)
 		rc = lpfc_sli4_bsg_diag_loopback_mode(phba, job);
 	else
@@ -2262,7 +2337,7 @@ lpfc_sli4_bsg_diag_mode_end(struct bsg_job *job)
 
 	if (phba->sli_rev < LPFC_SLI_REV4)
 		return -ENODEV;
-	if (bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf) !=
+	if (bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf) <
 	    LPFC_SLI_INTF_IF_TYPE_2)
 		return -ENODEV;
 
@@ -2354,7 +2429,7 @@ lpfc_sli4_bsg_link_diag_test(struct bsg_job *job)
 		rc = -ENODEV;
 		goto job_error;
 	}
-	if (bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf) !=
+	if (bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf) <
 	    LPFC_SLI_INTF_IF_TYPE_2) {
 		rc = -ENODEV;
 		goto job_error;
@@ -2501,9 +2576,9 @@ static int lpfcdiag_loop_self_reg(struct lpfc_hba *phba, uint16_t *rpi)
 		return -ENOMEM;
 	}
 
-	dmabuff = (struct lpfc_dmabuf *) mbox->context1;
-	mbox->context1 = NULL;
-	mbox->context2 = NULL;
+	dmabuff = (struct lpfc_dmabuf *)mbox->ctx_buf;
+	mbox->ctx_buf = NULL;
+	mbox->ctx_ndlp = NULL;
 	status = lpfc_sli_issue_mbox_wait(phba, mbox, LPFC_MBOX_TMO);
 
 	if ((status != MBX_SUCCESS) || (mbox->u.mb.mbxStatus)) {
@@ -2730,8 +2805,8 @@ lpfc_bsg_dma_page_alloc(struct lpfc_hba *phba)
 	INIT_LIST_HEAD(&dmabuf->list);
 
 	/* now, allocate dma buffer */
-	dmabuf->virt = dma_zalloc_coherent(&pcidev->dev, BSG_MBOX_SIZE,
-					   &(dmabuf->phys), GFP_KERNEL);
+	dmabuf->virt = dma_alloc_coherent(&pcidev->dev, BSG_MBOX_SIZE,
+					  &(dmabuf->phys), GFP_KERNEL);
 
 	if (!dmabuf->virt) {
 		kfree(dmabuf);
@@ -2947,7 +3022,7 @@ static int lpfcdiag_loop_post_rxbufs(struct lpfc_hba *phba, uint16_t rxxri,
 			cmd->un.cont64[i].addrLow = putPaddrLow(mp[i]->phys);
 			cmd->un.cont64[i].tus.f.bdeSize =
 				((struct lpfc_dmabufext *)mp[i])->size;
-					cmd->ulpBdeCount = ++i;
+			cmd->ulpBdeCount = ++i;
 
 			if ((--num_bde > 0) && (i < 2))
 				continue;
@@ -3388,7 +3463,7 @@ lpfc_bsg_issue_mbox_cmpl(struct lpfc_hba *phba, LPFC_MBOXQ_t *pmboxq)
 	unsigned long flags;
 	uint8_t *pmb, *pmb_buf;
 
-	dd_data = pmboxq->context1;
+	dd_data = pmboxq->ctx_ndlp;
 
 	/*
 	 * The outgoing buffer is readily referred from the dma buffer,
@@ -3573,7 +3648,7 @@ lpfc_bsg_issue_mbox_ext_handle_job(struct lpfc_hba *phba, LPFC_MBOXQ_t *pmboxq)
 	struct lpfc_sli_config_mbox *sli_cfg_mbx;
 	uint8_t *pmbx;
 
-	dd_data = pmboxq->context1;
+	dd_data = pmboxq->ctx_buf;
 
 	/* Determine if job has been aborted */
 	spin_lock_irqsave(&phba->ct_ev_lock, flags);
@@ -3960,7 +4035,7 @@ lpfc_bsg_sli_cfg_read_cmd_ext(struct lpfc_hba *phba, struct bsg_job *job,
 	pmboxq->mbox_cmpl = lpfc_bsg_issue_read_mbox_ext_cmpl;
 
 	/* context fields to callback function */
-	pmboxq->context1 = dd_data;
+	pmboxq->ctx_buf = dd_data;
 	dd_data->type = TYPE_MBOX;
 	dd_data->set_job = job;
 	dd_data->context_un.mbox.pmboxq = pmboxq;
@@ -4131,7 +4206,7 @@ lpfc_bsg_sli_cfg_write_cmd_ext(struct lpfc_hba *phba, struct bsg_job *job,
 		pmboxq->mbox_cmpl = lpfc_bsg_issue_write_mbox_ext_cmpl;
 
 		/* context fields to callback function */
-		pmboxq->context1 = dd_data;
+		pmboxq->ctx_buf = dd_data;
 		dd_data->type = TYPE_MBOX;
 		dd_data->set_job = job;
 		dd_data->context_un.mbox.pmboxq = pmboxq;
@@ -4476,7 +4551,7 @@ lpfc_bsg_write_ebuf_set(struct lpfc_hba *phba, struct bsg_job *job,
 		pmboxq->mbox_cmpl = lpfc_bsg_issue_write_mbox_ext_cmpl;
 
 		/* context fields to callback function */
-		pmboxq->context1 = dd_data;
+		pmboxq->ctx_buf = dd_data;
 		dd_data->type = TYPE_MBOX;
 		dd_data->set_job = job;
 		dd_data->context_un.mbox.pmboxq = pmboxq;
@@ -4682,7 +4757,7 @@ lpfc_bsg_issue_mbox(struct lpfc_hba *phba, struct bsg_job *job,
 	 * Don't allow mailbox commands to be sent when blocked or when in
 	 * the middle of discovery
 	 */
-	 if (phba->sli.sli_flag & LPFC_BLOCK_MGMT_IO) {
+	if (phba->sli.sli_flag & LPFC_BLOCK_MGMT_IO) {
 		rc = -EAGAIN;
 		goto job_done;
 	}
@@ -4761,7 +4836,7 @@ lpfc_bsg_issue_mbox(struct lpfc_hba *phba, struct bsg_job *job,
 	if (mbox_req->inExtWLen || mbox_req->outExtWLen) {
 		from = pmbx;
 		ext = from + sizeof(MAILBOX_t);
-		pmboxq->context2 = ext;
+		pmboxq->ctx_buf = ext;
 		pmboxq->in_ext_byte_len =
 			mbox_req->inExtWLen * sizeof(uint32_t);
 		pmboxq->out_ext_byte_len =
@@ -4889,7 +4964,7 @@ lpfc_bsg_issue_mbox(struct lpfc_hba *phba, struct bsg_job *job,
 	pmboxq->mbox_cmpl = lpfc_bsg_issue_mbox_cmpl;
 
 	/* setup context field to pass wait_queue pointer to wake function */
-	pmboxq->context1 = dd_data;
+	pmboxq->ctx_ndlp = dd_data;
 	dd_data->type = TYPE_MBOX;
 	dd_data->set_job = job;
 	dd_data->context_un.mbox.pmboxq = pmboxq;
@@ -5348,7 +5423,7 @@ lpfc_bsg_get_ras_config(struct bsg_job *job)
 	    sizeof(struct fc_bsg_request) +
 	    sizeof(struct lpfc_bsg_ras_req)) {
 		lpfc_printf_log(phba, KERN_ERR, LOG_LIBDFC,
-				"6181 Received RAS_LOG request "
+				"6192 FW_LOG request received "
 				"below minimum size\n");
 		rc = -EINVAL;
 		goto ras_job_error;
@@ -5356,7 +5431,7 @@ lpfc_bsg_get_ras_config(struct bsg_job *job)
 
 	/* Check FW log status */
 	rc = lpfc_check_fwlog_support(phba);
-	if (rc == -EACCES || rc == -EPERM)
+	if (rc)
 		goto ras_job_error;
 
 	ras_reply = (struct lpfc_bsg_get_ras_config_reply *)
@@ -5381,25 +5456,6 @@ ras_job_error:
 }
 
 /**
- * lpfc_ras_stop_fwlog: Disable FW logging by the adapter
- * @phba: Pointer to HBA context object.
- *
- * Disable FW logging into host memory on the adapter. To
- * be done before reading logs from the host memory.
- **/
-static void
-lpfc_ras_stop_fwlog(struct lpfc_hba *phba)
-{
-	struct lpfc_ras_fwlog *ras_fwlog = &phba->ras_fwlog;
-
-	ras_fwlog->ras_active = false;
-
-	/* Disable FW logging to host memory */
-	writel(LPFC_CTL_PDEV_CTL_DDL_RAS,
-	       phba->sli4_hba.conf_regs_memmap_p + LPFC_CTL_PDEV_CTL_OFFSET);
-}
-
-/**
  * lpfc_bsg_set_ras_config: Set FW logging parameters
  * @job: fc_bsg_job to handle
  *
@@ -5416,7 +5472,7 @@ lpfc_bsg_set_ras_config(struct bsg_job *job)
 	struct lpfc_ras_fwlog *ras_fwlog = &phba->ras_fwlog;
 	struct fc_bsg_reply *bsg_reply = job->reply;
 	uint8_t action = 0, log_level = 0;
-	int rc = 0;
+	int rc = 0, action_status = 0;
 
 	if (job->request_len <
 	    sizeof(struct fc_bsg_request) +
@@ -5430,7 +5486,7 @@ lpfc_bsg_set_ras_config(struct bsg_job *job)
 
 	/* Check FW log status */
 	rc = lpfc_check_fwlog_support(phba);
-	if (rc == -EACCES || rc == -EPERM)
+	if (rc)
 		goto ras_job_error;
 
 	ras_req = (struct lpfc_bsg_set_ras_config_req *)
@@ -5449,16 +5505,25 @@ lpfc_bsg_set_ras_config(struct bsg_job *job)
 		lpfc_ras_stop_fwlog(phba);
 	} else {
 		/*action = LPFC_RASACTION_START_LOGGING*/
-		if (ras_fwlog->ras_active == true) {
-			rc = -EINPROGRESS;
-			goto ras_job_error;
-		}
+
+		/* Even though FW-logging is active re-initialize
+		 * FW-logging with new log-level. Return status
+		 * "Logging already Running" to caller.
+		 **/
+		if (ras_fwlog->ras_active)
+			action_status = -EINPROGRESS;
 
 		/* Enable logging */
 		rc = lpfc_sli4_ras_fwlog_init(phba, log_level,
 					      LPFC_RAS_ENABLE_LOGGING);
-		if (rc)
+		if (rc) {
 			rc = -EINVAL;
+			goto ras_job_error;
+		}
+
+		/* Check if FW-logging is re-initialized */
+		if (action_status == -EINPROGRESS)
+			rc = action_status;
 	}
 ras_job_error:
 	/* make error code available to userspace */
@@ -5487,12 +5552,11 @@ lpfc_bsg_get_ras_lwpd(struct bsg_job *job)
 	struct lpfc_hba *phba = vport->phba;
 	struct lpfc_ras_fwlog *ras_fwlog = &phba->ras_fwlog;
 	struct fc_bsg_reply *bsg_reply = job->reply;
-	uint32_t lwpd_offset = 0;
-	uint64_t wrap_value = 0;
+	u32 *lwpd_ptr = NULL;
 	int rc = 0;
 
 	rc = lpfc_check_fwlog_support(phba);
-	if (rc == -EACCES || rc == -EPERM)
+	if (rc)
 		goto ras_job_error;
 
 	if (job->request_len <
@@ -5508,11 +5572,19 @@ lpfc_bsg_get_ras_lwpd(struct bsg_job *job)
 	ras_reply = (struct lpfc_bsg_get_ras_lwpd *)
 		bsg_reply->reply_data.vendor_reply.vendor_rsp;
 
-	lwpd_offset = *((uint32_t *)ras_fwlog->lwpd.virt) & 0xffffffff;
-	ras_reply->offset = be32_to_cpu(lwpd_offset);
+	if (!ras_fwlog->lwpd.virt) {
+		lpfc_printf_log(phba, KERN_ERR, LOG_LIBDFC,
+				"6193 Restart FW Logging\n");
+		rc = -EINVAL;
+		goto ras_job_error;
+	}
 
-	wrap_value = *((uint64_t *)ras_fwlog->lwpd.virt);
-	ras_reply->wrap_count = be32_to_cpu((wrap_value >> 32) & 0xffffffff);
+	/* Get lwpd offset */
+	lwpd_ptr = (uint32_t *)(ras_fwlog->lwpd.virt);
+	ras_reply->offset = be32_to_cpu(*lwpd_ptr & 0xffffffff);
+
+	/* Get wrap count */
+	ras_reply->wrap_count = be32_to_cpu(*(++lwpd_ptr) & 0xffffffff);
 
 ras_job_error:
 	/* make error code available to userspace */
@@ -5539,9 +5611,8 @@ lpfc_bsg_get_ras_fwlog(struct bsg_job *job)
 	struct fc_bsg_request *bsg_request = job->request;
 	struct fc_bsg_reply *bsg_reply = job->reply;
 	struct lpfc_bsg_get_fwlog_req *ras_req;
-	uint32_t rd_offset, rd_index, offset, pending_wlen;
-	uint32_t boundary = 0, align_len = 0, write_len = 0;
-	void *dest, *src, *fwlog_buff;
+	u32 rd_offset, rd_index, offset;
+	void *src, *fwlog_buff;
 	struct lpfc_ras_fwlog *ras_fwlog = NULL;
 	struct lpfc_dmabuf *dmabuf, *next;
 	int rc = 0;
@@ -5549,7 +5620,7 @@ lpfc_bsg_get_ras_fwlog(struct bsg_job *job)
 	ras_fwlog = &phba->ras_fwlog;
 
 	rc = lpfc_check_fwlog_support(phba);
-	if (rc == -EACCES || rc == -EPERM)
+	if (rc)
 		goto ras_job_error;
 
 	/* Logging to be stopped before reading */
@@ -5581,8 +5652,6 @@ lpfc_bsg_get_ras_fwlog(struct bsg_job *job)
 
 	rd_index = (rd_offset / LPFC_RAS_MAX_ENTRY_SIZE);
 	offset = (rd_offset % LPFC_RAS_MAX_ENTRY_SIZE);
-	pending_wlen = ras_req->read_size;
-	dest = fwlog_buff;
 
 	list_for_each_entry_safe(dmabuf, next,
 			      &ras_fwlog->fwlog_buff_list, list) {
@@ -5590,29 +5659,9 @@ lpfc_bsg_get_ras_fwlog(struct bsg_job *job)
 		if (dmabuf->buffer_tag < rd_index)
 			continue;
 
-		/* Align read to buffer size */
-		if (offset) {
-			boundary = ((dmabuf->buffer_tag + 1) *
-				    LPFC_RAS_MAX_ENTRY_SIZE);
-
-			align_len = (boundary - offset);
-			write_len = min_t(u32, align_len,
-					  LPFC_RAS_MAX_ENTRY_SIZE);
-		} else {
-			write_len = min_t(u32, pending_wlen,
-					  LPFC_RAS_MAX_ENTRY_SIZE);
-			align_len = 0;
-			boundary = 0;
-		}
 		src = dmabuf->virt + offset;
-		memcpy(dest, src, write_len);
-
-		pending_wlen -= write_len;
-		if (!pending_wlen)
-			break;
-
-		dest += write_len;
-		offset = (offset + write_len) % LPFC_RAS_MAX_ENTRY_SIZE;
+		memcpy(fwlog_buff, src, ras_req->read_size);
+		break;
 	}
 
 	bsg_reply->reply_payload_rcv_len =
@@ -5629,6 +5678,77 @@ ras_job_error:
 	return rc;
 }
 
+static int
+lpfc_get_trunk_info(struct bsg_job *job)
+{
+	struct lpfc_vport *vport = shost_priv(fc_bsg_to_shost(job));
+	struct lpfc_hba *phba = vport->phba;
+	struct fc_bsg_reply *bsg_reply = job->reply;
+	struct lpfc_trunk_info *event_reply;
+	int rc = 0;
+
+	if (job->request_len <
+	    sizeof(struct fc_bsg_request) + sizeof(struct get_trunk_info_req)) {
+		lpfc_printf_log(phba, KERN_ERR, LOG_LIBDFC,
+				"2744 Received GET TRUNK _INFO request below "
+				"minimum size\n");
+		rc = -EINVAL;
+		goto job_error;
+	}
+
+	event_reply = (struct lpfc_trunk_info *)
+		bsg_reply->reply_data.vendor_reply.vendor_rsp;
+
+	if (job->reply_len <
+	    sizeof(struct fc_bsg_request) + sizeof(struct lpfc_trunk_info)) {
+		lpfc_printf_log(phba, KERN_WARNING, LOG_LIBDFC,
+				"2728 Received GET TRUNK _INFO reply below "
+				"minimum size\n");
+		rc = -EINVAL;
+		goto job_error;
+	}
+	if (event_reply == NULL) {
+		rc = -EINVAL;
+		goto job_error;
+	}
+
+	bsg_bf_set(lpfc_trunk_info_link_status, event_reply,
+		   (phba->link_state >= LPFC_LINK_UP) ? 1 : 0);
+
+	bsg_bf_set(lpfc_trunk_info_trunk_active0, event_reply,
+		   (phba->trunk_link.link0.state == LPFC_LINK_UP) ? 1 : 0);
+
+	bsg_bf_set(lpfc_trunk_info_trunk_active1, event_reply,
+		   (phba->trunk_link.link1.state == LPFC_LINK_UP) ? 1 : 0);
+
+	bsg_bf_set(lpfc_trunk_info_trunk_active2, event_reply,
+		   (phba->trunk_link.link2.state == LPFC_LINK_UP) ? 1 : 0);
+
+	bsg_bf_set(lpfc_trunk_info_trunk_active3, event_reply,
+		   (phba->trunk_link.link3.state == LPFC_LINK_UP) ? 1 : 0);
+
+	bsg_bf_set(lpfc_trunk_info_trunk_config0, event_reply,
+		   bf_get(lpfc_conf_trunk_port0, &phba->sli4_hba));
+
+	bsg_bf_set(lpfc_trunk_info_trunk_config1, event_reply,
+		   bf_get(lpfc_conf_trunk_port1, &phba->sli4_hba));
+
+	bsg_bf_set(lpfc_trunk_info_trunk_config2, event_reply,
+		   bf_get(lpfc_conf_trunk_port2, &phba->sli4_hba));
+
+	bsg_bf_set(lpfc_trunk_info_trunk_config3, event_reply,
+		   bf_get(lpfc_conf_trunk_port3, &phba->sli4_hba));
+
+	event_reply->port_speed = phba->sli4_hba.link_state.speed / 1000;
+	event_reply->logical_speed =
+				phba->sli4_hba.link_state.logical_speed / 100;
+job_error:
+	bsg_reply->result = rc;
+	bsg_job_done(job, bsg_reply->result,
+		       bsg_reply->reply_payload_rcv_len);
+	return rc;
+
+}
 
 /**
  * lpfc_bsg_hst_vendor - process a vendor-specific fc_bsg_job
@@ -5688,6 +5808,9 @@ lpfc_bsg_hst_vendor(struct bsg_job *job)
 		break;
 	case LPFC_BSG_VENDOR_RAS_SET_CONFIG:
 		rc = lpfc_bsg_set_ras_config(job);
+		break;
+	case LPFC_BSG_VENDOR_GET_TRUNK_INFO:
+		rc = lpfc_get_trunk_info(job);
 		break;
 	default:
 		rc = -EINVAL;

@@ -1,16 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2012 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com
  *
  * Copyright (C) 2010 Samsung Electronics Co. Ltd.
  *	Jaswinder Singh <jassi.brar@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
+#include <linux/debugfs.h>
 #include <linux/kernel.h>
 #include <linux/io.h>
 #include <linux/init.h>
@@ -448,6 +445,7 @@ struct dma_pl330_chan {
 	/* DMA-mapped view of the FIFO; may differ if an IOMMU is present */
 	dma_addr_t fifo_dma;
 	enum dma_data_direction dir;
+	struct dma_slave_config slave_config;
 
 	/* for cyclic capability */
 	bool cyclic;
@@ -541,6 +539,10 @@ struct _xfer_spec {
 	u32 ccr;
 	struct dma_pl330_desc *desc;
 };
+
+static int pl330_config_write(struct dma_chan *chan,
+			struct dma_slave_config *slave_config,
+			enum dma_transfer_direction direction);
 
 static inline bool _queue_full(struct pl330_thread *thrd)
 {
@@ -961,6 +963,7 @@ static void _stop(struct pl330_thread *thrd)
 {
 	void __iomem *regs = thrd->dmac->base;
 	u8 insn[6] = {0, 0, 0, 0, 0, 0};
+	u32 inten = readl(regs + INTEN);
 
 	if (_state(thrd) == PL330_STATE_FAULT_COMPLETING)
 		UNTIL(thrd, PL330_STATE_FAULTING | PL330_STATE_KILLING);
@@ -973,10 +976,13 @@ static void _stop(struct pl330_thread *thrd)
 
 	_emit_KILL(0, insn);
 
-	/* Stop generating interrupts for SEV */
-	writel(readl(regs + INTEN) & ~(1 << thrd->ev), regs + INTEN);
-
 	_execute_DBGINSN(thrd, insn, is_manager(thrd));
+
+	/* clear the event */
+	if (inten & (1 << thrd->ev))
+		writel(1 << thrd->ev, regs + INTCLR);
+	/* Stop generating interrupts for SEV */
+	writel(inten & ~(1 << thrd->ev), regs + INTEN);
 }
 
 /* Start doing req 'idx' of thread 'thrd' */
@@ -2220,20 +2226,21 @@ static int fixup_burst_len(int max_burst_len, int quirks)
 		return max_burst_len;
 }
 
-static int pl330_config(struct dma_chan *chan,
-			struct dma_slave_config *slave_config)
+static int pl330_config_write(struct dma_chan *chan,
+			struct dma_slave_config *slave_config,
+			enum dma_transfer_direction direction)
 {
 	struct dma_pl330_chan *pch = to_pchan(chan);
 
 	pl330_unprep_slave_fifo(pch);
-	if (slave_config->direction == DMA_MEM_TO_DEV) {
+	if (direction == DMA_MEM_TO_DEV) {
 		if (slave_config->dst_addr)
 			pch->fifo_addr = slave_config->dst_addr;
 		if (slave_config->dst_addr_width)
 			pch->burst_sz = __ffs(slave_config->dst_addr_width);
 		pch->burst_len = fixup_burst_len(slave_config->dst_maxburst,
 			pch->dmac->quirks);
-	} else if (slave_config->direction == DMA_DEV_TO_MEM) {
+	} else if (direction == DMA_DEV_TO_MEM) {
 		if (slave_config->src_addr)
 			pch->fifo_addr = slave_config->src_addr;
 		if (slave_config->src_addr_width)
@@ -2245,13 +2252,22 @@ static int pl330_config(struct dma_chan *chan,
 	return 0;
 }
 
+static int pl330_config(struct dma_chan *chan,
+			struct dma_slave_config *slave_config)
+{
+	struct dma_pl330_chan *pch = to_pchan(chan);
+
+	memcpy(&pch->slave_config, slave_config, sizeof(*slave_config));
+
+	return 0;
+}
+
 static int pl330_terminate_all(struct dma_chan *chan)
 {
 	struct dma_pl330_chan *pch = to_pchan(chan);
 	struct dma_pl330_desc *desc;
 	unsigned long flags;
 	struct pl330_dmac *pl330 = pch->dmac;
-	LIST_HEAD(list);
 	bool power_down = false;
 
 	pm_runtime_get_sync(pl330->ddma.dev);
@@ -2661,6 +2677,8 @@ static struct dma_async_tx_descriptor *pl330_prep_dma_cyclic(
 		return NULL;
 	}
 
+	pl330_config_write(chan, &pch->slave_config, direction);
+
 	if (!pl330_prep_slave_fifo(pch, direction))
 		return NULL;
 
@@ -2815,6 +2833,8 @@ pl330_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 	if (unlikely(!pch || !sgl || !sg_len))
 		return NULL;
 
+	pl330_config_write(chan, &pch->slave_config, direction);
+
 	if (!pl330_prep_slave_fifo(pch, direction))
 		return NULL;
 
@@ -2876,6 +2896,55 @@ static irqreturn_t pl330_irq_handler(int irq, void *data)
 	BIT(DMA_SLAVE_BUSWIDTH_2_BYTES) | \
 	BIT(DMA_SLAVE_BUSWIDTH_4_BYTES) | \
 	BIT(DMA_SLAVE_BUSWIDTH_8_BYTES)
+
+#ifdef CONFIG_DEBUG_FS
+static int pl330_debugfs_show(struct seq_file *s, void *data)
+{
+	struct pl330_dmac *pl330 = s->private;
+	int chans, pchs, ch, pr;
+
+	chans = pl330->pcfg.num_chan;
+	pchs = pl330->num_peripherals;
+
+	seq_puts(s, "PL330 physical channels:\n");
+	seq_puts(s, "THREAD:\t\tCHANNEL:\n");
+	seq_puts(s, "--------\t-----\n");
+	for (ch = 0; ch < chans; ch++) {
+		struct pl330_thread *thrd = &pl330->channels[ch];
+		int found = -1;
+
+		for (pr = 0; pr < pchs; pr++) {
+			struct dma_pl330_chan *pch = &pl330->peripherals[pr];
+
+			if (!pch->thread || thrd->id != pch->thread->id)
+				continue;
+
+			found = pr;
+		}
+
+		seq_printf(s, "%d\t\t", thrd->id);
+		if (found == -1)
+			seq_puts(s, "--\n");
+		else
+			seq_printf(s, "%d\n", found);
+	}
+
+	return 0;
+}
+
+DEFINE_SHOW_ATTRIBUTE(pl330_debugfs);
+
+static inline void init_pl330_debugfs(struct pl330_dmac *pl330)
+{
+	debugfs_create_file(dev_name(pl330->ddma.dev),
+			    S_IFREG | 0444, NULL, pl330,
+			    &pl330_debugfs_fops);
+}
+#else
+static inline void init_pl330_debugfs(struct pl330_dmac *pl330)
+{
+}
+#endif
 
 /*
  * Runtime PM callbacks are provided by amba/bus.c driver.
@@ -3063,6 +3132,7 @@ pl330_probe(struct amba_device *adev, const struct amba_id *id)
 		dev_err(&adev->dev, "unable to set the seg size\n");
 
 
+	init_pl330_debugfs(pl330);
 	dev_info(&adev->dev,
 		"Loaded driver for PL330 DMAC-%x\n", adev->periphid);
 	dev_info(&adev->dev,

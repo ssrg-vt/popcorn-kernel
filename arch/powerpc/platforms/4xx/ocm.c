@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PowerPC 4xx OCM memory allocation support
  *
@@ -6,21 +7,6 @@
  *
  * See file CREDITS for list of people who contributed to this
  * project.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
  */
 
 #include <linux/kernel.h>
@@ -179,7 +165,7 @@ static void __init ocm_init_node(int count, struct device_node *node)
 	/* ioremap the non-cached region */
 	if (ocm->nc.memtotal) {
 		ocm->nc.virt = __ioremap(ocm->nc.phys, ocm->nc.memtotal,
-					 _PAGE_EXEC | PAGE_KERNEL_NCG);
+			_PAGE_EXEC | pgprot_val(PAGE_KERNEL_NCG));
 
 		if (!ocm->nc.virt) {
 			printk(KERN_ERR
@@ -194,7 +180,7 @@ static void __init ocm_init_node(int count, struct device_node *node)
 
 	if (ocm->c.memtotal) {
 		ocm->c.virt = __ioremap(ocm->c.phys, ocm->c.memtotal,
-					_PAGE_EXEC | PAGE_KERNEL);
+					_PAGE_EXEC | pgprot_val(PAGE_KERNEL));
 
 		if (!ocm->c.virt) {
 			printk(KERN_ERR
@@ -223,8 +209,6 @@ static void __init ocm_init_node(int count, struct device_node *node)
 	INIT_LIST_HEAD(&ocm->c.list);
 
 	ocm->ready = 1;
-
-	return;
 }
 
 static int ocm_debugfs_show(struct seq_file *m, void *v)
@@ -239,14 +223,12 @@ static int ocm_debugfs_show(struct seq_file *m, void *v)
 			continue;
 
 		seq_printf(m, "PPC4XX OCM   : %d\n", ocm->index);
-		seq_printf(m, "PhysAddr     : 0x%llx\n", ocm->phys);
+		seq_printf(m, "PhysAddr     : %pa\n", &(ocm->phys));
 		seq_printf(m, "MemTotal     : %d Bytes\n", ocm->memtotal);
 		seq_printf(m, "MemTotal(NC) : %d Bytes\n", ocm->nc.memtotal);
-		seq_printf(m, "MemTotal(C)  : %d Bytes\n", ocm->c.memtotal);
+		seq_printf(m, "MemTotal(C)  : %d Bytes\n\n", ocm->c.memtotal);
 
-		seq_printf(m, "\n");
-
-		seq_printf(m, "NC.PhysAddr  : 0x%llx\n", ocm->nc.phys);
+		seq_printf(m, "NC.PhysAddr  : %pa\n", &(ocm->nc.phys));
 		seq_printf(m, "NC.VirtAddr  : 0x%p\n", ocm->nc.virt);
 		seq_printf(m, "NC.MemTotal  : %d Bytes\n", ocm->nc.memtotal);
 		seq_printf(m, "NC.MemFree   : %d Bytes\n", ocm->nc.memfree);
@@ -256,9 +238,7 @@ static int ocm_debugfs_show(struct seq_file *m, void *v)
 							blk->size, blk->owner);
 		}
 
-		seq_printf(m, "\n");
-
-		seq_printf(m, "C.PhysAddr   : 0x%llx\n", ocm->c.phys);
+		seq_printf(m, "\nC.PhysAddr   : %pa\n", &(ocm->c.phys));
 		seq_printf(m, "C.VirtAddr   : 0x%p\n", ocm->c.virt);
 		seq_printf(m, "C.MemTotal   : %d Bytes\n", ocm->c.memtotal);
 		seq_printf(m, "C.MemFree    : %d Bytes\n", ocm->c.memfree);
@@ -268,7 +248,7 @@ static int ocm_debugfs_show(struct seq_file *m, void *v)
 						blk->size, blk->owner);
 		}
 
-		seq_printf(m, "\n");
+		seq_putc(m, '\n');
 	}
 
 	return 0;
@@ -338,7 +318,6 @@ void *ppc4xx_ocm_alloc(phys_addr_t *phys, int size, int align,
 
 		ocm_blk = kzalloc(sizeof(*ocm_blk), GFP_KERNEL);
 		if (!ocm_blk) {
-			printk(KERN_ERR "PPC4XX OCM: could not allocate ocm block");
 			rh_free(ocm_reg->rh, offset);
 			break;
 		}
@@ -392,10 +371,8 @@ static int __init ppc4xx_ocm_init(void)
 		return 0;
 
 	ocm_nodes = kzalloc((count * sizeof(struct ocm_info)), GFP_KERNEL);
-	if (!ocm_nodes) {
-		printk(KERN_ERR "PPC4XX OCM: failed to allocate OCM nodes!\n");
+	if (!ocm_nodes)
 		return -ENOMEM;
-	}
 
 	ocm_count = count;
 	count = 0;

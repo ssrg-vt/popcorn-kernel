@@ -1,16 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Arch specific functions for perf kvm stat.
  *
  * Copyright 2014 IBM Corp.
  * Author(s): Alexander Yarygin <yarygin@linux.vnet.ibm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License (version 2 only)
- * as published by the Free Software Foundation.
  */
 
 #include <errno.h>
 #include "../../util/kvm-stat.h"
+#include "../../util/evsel.h"
 #include <asm/sie.h>
 
 define_exit_reasons_table(sie_exit_reasons, sie_intercept_code);

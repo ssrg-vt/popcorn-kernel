@@ -1,23 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * bio-integrity.c - bio data integrity extensions
  *
  * Copyright (C) 2007, 2008, 2009 Oracle Corporation
  * Written by: Martin K. Petersen <martin.petersen@oracle.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; see the file COPYING.  If not, write to
- * the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139,
- * USA.
- *
  */
 
 #include <linux/blkdev.h>
@@ -57,8 +43,7 @@ struct bio_integrity_payload *bio_integrity_alloc(struct bio *bio,
 	unsigned inline_vecs;
 
 	if (!bs || !mempool_initialized(&bs->bio_integrity_pool)) {
-		bip = kmalloc(sizeof(struct bio_integrity_payload) +
-			      sizeof(struct bio_vec) * nr_vecs, gfp_mask);
+		bip = kmalloc(struct_size(bip, bip_inline_vecs, nr_vecs), gfp_mask);
 		inline_vecs = nr_vecs;
 	} else {
 		bip = mempool_alloc(&bs->bio_integrity_pool, gfp_mask);
@@ -390,7 +375,6 @@ void bio_integrity_advance(struct bio *bio, unsigned int bytes_done)
 	bip->bip_iter.bi_sector += bytes_done >> 9;
 	bvec_iter_advance(bip->bip_vec, &bip->bip_iter, bytes);
 }
-EXPORT_SYMBOL(bio_integrity_advance);
 
 /**
  * bio_integrity_trim - Trim integrity vector
@@ -460,7 +444,6 @@ void bioset_integrity_free(struct bio_set *bs)
 	mempool_exit(&bs->bio_integrity_pool);
 	mempool_exit(&bs->bvec_integrity_pool);
 }
-EXPORT_SYMBOL(bioset_integrity_free);
 
 void __init bio_integrity_init(void)
 {

@@ -42,7 +42,7 @@
 
 	v_5v0_usb3_hst_vbus: regulator-usb3-vbus0 {
 		compatible = "regulator-fixed";
-		gpio = <&cp0_gpio2 15 GPIO_ACTIVE_HIGH>;
+		gpio = <&cp0_gpio2 15 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&cp0_xhci_vbus_pins>;
 		regulator-name = "v_5v0_usb3_hst_vbus";
@@ -226,6 +226,11 @@
 		marvell,function = "gpio";
 	};
 
+	cp0_wlan_disable_pins: wlan-disable-pins {
+		marvell,pins = "mpp51";
+		marvell,function = "gpio";
+	};
+
 	cp0_sdhci_pins: sdhci-pins {
 		marvell,pins = "mpp55", "mpp56", "mpp57", "mpp58", "mpp59",
 			       "mpp60", "mpp61";
@@ -235,7 +240,7 @@
 
 &cp0_pcie0 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&cp0_pci0_reset_pins>;
+	pinctrl-0 = <&cp0_pci0_reset_pins &cp0_wlan_disable_pins>;
 	reset-gpios = <&cp0_gpio2 0 GPIO_ACTIVE_LOW>;
 	status = "okay";
 };
@@ -245,6 +250,24 @@
 		gpio-hog;
 		gpios = <1 GPIO_ACTIVE_HIGH>;
 		output-high;
+	};
+
+	lte_reset {
+		gpio-hog;
+		gpios = <2 GPIO_ACTIVE_LOW>;
+		output-low;
+	};
+
+	wlan_disable {
+		gpio-hog;
+		gpios = <19 GPIO_ACTIVE_LOW>;
+		output-low;
+	};
+
+	lte_disable {
+		gpio-hog;
+		gpios = <21 GPIO_ACTIVE_LOW>;
+		output-low;
 	};
 };
 
@@ -268,6 +291,10 @@
 	pinctrl-0 = <&cp0_sdhci_pins>;
 	status = "okay";
 	vqmmc-supply = <&v_3_3>;
+};
+
+&cp0_usb3_1 {
+	status = "okay";
 };
 
 &cp1_pinctrl {
@@ -333,6 +360,10 @@
 		 */
 		marvell,reg-init = <3 16 0 0x1017>;
 		reg = <0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&cp0_copper_eth_phy_reset>;
+		reset-gpios = <&cp0_gpio2 11 GPIO_ACTIVE_LOW>;
+		reset-assert-us = <10000>;
 	};
 
 	switch0: switch0@4 {

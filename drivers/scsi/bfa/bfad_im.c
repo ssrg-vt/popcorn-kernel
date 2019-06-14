@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
  * Copyright (c) 2014- QLogic Corporation.
@@ -5,15 +6,6 @@
  * www.qlogic.com
  *
  * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License (GPL) Version 2 as
- * published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 /*
@@ -817,7 +809,6 @@ struct scsi_host_template bfad_im_scsi_host_template = {
 	.this_id = -1,
 	.sg_tablesize = BFAD_IO_MAX_SGE,
 	.cmd_per_lun = 3,
-	.use_clustering = ENABLE_CLUSTERING,
 	.shost_attrs = bfad_im_host_attrs,
 	.max_sectors = BFAD_MAX_SECTORS,
 	.vendor_id = BFA_PCI_VENDOR_ID_BROCADE,
@@ -840,7 +831,6 @@ struct scsi_host_template bfad_im_vport_template = {
 	.this_id = -1,
 	.sg_tablesize = BFAD_IO_MAX_SGE,
 	.cmd_per_lun = 3,
-	.use_clustering = ENABLE_CLUSTERING,
 	.shost_attrs = bfad_im_vport_attrs,
 	.max_sectors = BFAD_MAX_SECTORS,
 };

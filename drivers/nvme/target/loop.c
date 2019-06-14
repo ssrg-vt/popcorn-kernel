@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * NVMe over Fabrics loopback device.
  * Copyright (c) 2015-2016 HGST, a Western Digital Company.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/scatterlist.h>
@@ -26,7 +18,7 @@
 struct nvme_loop_iod {
 	struct nvme_request	nvme_req;
 	struct nvme_command	cmd;
-	struct nvme_completion	rsp;
+	struct nvme_completion	cqe;
 	struct nvmet_req	req;
 	struct nvme_loop_queue	*queue;
 	struct work_struct	work;
@@ -102,7 +94,7 @@ static void nvme_loop_queue_response(struct nvmet_req *req)
 {
 	struct nvme_loop_queue *queue =
 		container_of(req->sq, struct nvme_loop_queue, nvme_sq);
-	struct nvme_completion *cqe = req->rsp;
+	struct nvme_completion *cqe = req->cqe;
 
 	/*
 	 * AEN requests are special as they don't time out and can
@@ -135,20 +127,6 @@ static void nvme_loop_execute_work(struct work_struct *work)
 		container_of(work, struct nvme_loop_iod, work);
 
 	nvmet_req_execute(&iod->req);
-}
-
-static enum blk_eh_timer_return
-nvme_loop_timeout(struct request *rq, bool reserved)
-{
-	struct nvme_loop_iod *iod = blk_mq_rq_to_pdu(rq);
-
-	/* queue error recovery */
-	nvme_reset_ctrl(&iod->queue->ctrl->ctrl);
-
-	/* fail with DNR on admin cmd timeout */
-	nvme_req(rq)->status = NVME_SC_ABORT_REQ | NVME_SC_DNR;
-
-	return BLK_EH_DONE;
 }
 
 static blk_status_t nvme_loop_queue_rq(struct blk_mq_hw_ctx *hctx,
@@ -215,7 +193,7 @@ static int nvme_loop_init_iod(struct nvme_loop_ctrl *ctrl,
 		struct nvme_loop_iod *iod, unsigned int queue_idx)
 {
 	iod->req.cmd = &iod->cmd;
-	iod->req.rsp = &iod->rsp;
+	iod->req.cqe = &iod->cqe;
 	iod->queue = &ctrl->queues[queue_idx];
 	INIT_WORK(&iod->work, nvme_loop_execute_work);
 	return 0;
@@ -261,7 +239,6 @@ static const struct blk_mq_ops nvme_loop_mq_ops = {
 	.complete	= nvme_loop_complete_rq,
 	.init_request	= nvme_loop_init_request,
 	.init_hctx	= nvme_loop_init_hctx,
-	.timeout	= nvme_loop_timeout,
 };
 
 static const struct blk_mq_ops nvme_loop_admin_mq_ops = {
@@ -269,7 +246,6 @@ static const struct blk_mq_ops nvme_loop_admin_mq_ops = {
 	.complete	= nvme_loop_complete_rq,
 	.init_request	= nvme_loop_init_request,
 	.init_hctx	= nvme_loop_init_admin_hctx,
-	.timeout	= nvme_loop_timeout,
 };
 
 static void nvme_loop_destroy_admin_queue(struct nvme_loop_ctrl *ctrl)
@@ -345,7 +321,7 @@ static int nvme_loop_connect_io_queues(struct nvme_loop_ctrl *ctrl)
 	int i, ret;
 
 	for (i = 1; i < ctrl->ctrl.queue_count; i++) {
-		ret = nvmf_connect_io_queue(&ctrl->ctrl, i);
+		ret = nvmf_connect_io_queue(&ctrl->ctrl, i, false);
 		if (ret)
 			return ret;
 		set_bit(NVME_LOOP_Q_LIVE, &ctrl->queues[i].flags);

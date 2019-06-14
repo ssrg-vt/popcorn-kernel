@@ -876,7 +876,7 @@ static int set_srcdst_params(struct vpe_ctx *ctx)
 		/*
 		 * we make sure that the source image has a 16 byte aligned
 		 * stride, we need to do the same for the motion vector buffer
-		 * by aligning it's stride to the next 16 byte boundry. this
+		 * by aligning it's stride to the next 16 byte boundary. this
 		 * extra space will not be used by the de-interlacer, but will
 		 * ensure that vpdma operates correctly
 		 */
@@ -1491,8 +1491,8 @@ handled:
 static int vpe_querycap(struct file *file, void *priv,
 			struct v4l2_capability *cap)
 {
-	strncpy(cap->driver, VPE_MODULE_NAME, sizeof(cap->driver) - 1);
-	strncpy(cap->card, VPE_MODULE_NAME, sizeof(cap->card) - 1);
+	strscpy(cap->driver, VPE_MODULE_NAME, sizeof(cap->driver));
+	strscpy(cap->card, VPE_MODULE_NAME, sizeof(cap->card));
 	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s",
 		VPE_MODULE_NAME);
 	cap->device_caps  = V4L2_CAP_VIDEO_M2M_MPLANE | V4L2_CAP_STREAMING;
@@ -1519,7 +1519,7 @@ static int __enum_fmt(struct v4l2_fmtdesc *f, u32 type)
 	if (!fmt)
 		return -EINVAL;
 
-	strncpy(f->description, fmt->name, sizeof(f->description) - 1);
+	strscpy(f->description, fmt->name, sizeof(f->description));
 	f->pixelformat = fmt->fourcc;
 	return 0;
 }

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
   drbd_int.h
 
@@ -7,19 +8,6 @@
   Copyright (C) 1999-2008, Philipp Reisner <philipp.reisner@linbit.com>.
   Copyright (C) 2002-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
 
-  drbd is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2, or (at your option)
-  any later version.
-
-  drbd is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with drbd; see the file COPYING.  If not, write to
-  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
 
 */
 
@@ -430,7 +418,11 @@ enum {
 	__EE_MAY_SET_IN_SYNC,
 
 	/* is this a TRIM aka REQ_OP_DISCARD? */
-	__EE_IS_TRIM,
+	__EE_TRIM,
+	/* explicit zero-out requested, or
+	 * our lower level cannot handle trim,
+	 * and we want to fall back to zeroout instead */
+	__EE_ZEROOUT,
 
 	/* In case a barrier failed,
 	 * we need to resubmit without the barrier flag. */
@@ -472,7 +464,8 @@ enum {
 };
 #define EE_CALL_AL_COMPLETE_IO (1<<__EE_CALL_AL_COMPLETE_IO)
 #define EE_MAY_SET_IN_SYNC     (1<<__EE_MAY_SET_IN_SYNC)
-#define EE_IS_TRIM             (1<<__EE_IS_TRIM)
+#define EE_TRIM                (1<<__EE_TRIM)
+#define EE_ZEROOUT             (1<<__EE_ZEROOUT)
 #define EE_RESUBMITTED         (1<<__EE_RESUBMITTED)
 #define EE_WAS_ERROR           (1<<__EE_WAS_ERROR)
 #define EE_HAS_DIGEST          (1<<__EE_HAS_DIGEST)
@@ -1312,10 +1305,6 @@ struct bm_extent {
 
 #define DRBD_MAX_SECTORS_FIXED_BM \
 	  ((MD_128MB_SECT - MD_32kB_SECT - MD_4kB_SECT) * (1LL<<(BM_EXT_SHIFT-9)))
-#if !defined(CONFIG_LBDAF) && BITS_PER_LONG == 32
-#define DRBD_MAX_SECTORS      DRBD_MAX_SECTORS_32
-#define DRBD_MAX_SECTORS_FLEX DRBD_MAX_SECTORS_32
-#else
 #define DRBD_MAX_SECTORS      DRBD_MAX_SECTORS_FIXED_BM
 /* 16 TB in units of sectors */
 #if BITS_PER_LONG == 32
@@ -1327,7 +1316,6 @@ struct bm_extent {
 /* we allow up to 1 PiB now on 64bit architecture with "flexible" meta data */
 #define DRBD_MAX_SECTORS_FLEX (1UL << 51)
 /* corresponds to (1UL << 38) bits right now. */
-#endif
 #endif
 
 /* Estimate max bio size as 256 * PAGE_SIZE,
@@ -1556,6 +1544,8 @@ extern void start_resync_timer_fn(struct timer_list *t);
 extern void drbd_endio_write_sec_final(struct drbd_peer_request *peer_req);
 
 /* drbd_receiver.c */
+extern int drbd_issue_discard_or_zero_out(struct drbd_device *device,
+		sector_t start, unsigned int nr_sectors, int flags);
 extern int drbd_receiver(struct drbd_thread *thi);
 extern int drbd_ack_receiver(struct drbd_thread *thi);
 extern void drbd_send_ping_wf(struct work_struct *ws);
@@ -1609,13 +1599,7 @@ static inline void drbd_tcp_quickack(struct socket *sock)
 }
 
 /* sets the number of 512 byte sectors of our virtual device */
-static inline void drbd_set_my_capacity(struct drbd_device *device,
-					sector_t size)
-{
-	/* set_capacity(device->this_bdev->bd_disk, size); */
-	set_capacity(device->vdisk, size);
-	device->this_bdev->bd_inode->i_size = (loff_t)size << 9;
-}
+void drbd_set_my_capacity(struct drbd_device *device, sector_t size);
 
 /*
  * used to submit our private bio
@@ -1777,7 +1761,7 @@ static inline void __drbd_chk_io_error_(struct drbd_device *device,
 				_drbd_set_state(_NS(device, disk, D_INCONSISTENT), CS_HARD, NULL);
 			break;
 		}
-		/* NOTE fall through for DRBD_META_IO_ERROR or DRBD_FORCE_DETACH */
+		/* fall through - for DRBD_META_IO_ERROR or DRBD_FORCE_DETACH */
 	case EP_DETACH:
 	case EP_CALL_HELPER:
 		/* Remember whether we saw a READ or WRITE error.

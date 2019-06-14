@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * fixed.c
  *
@@ -7,11 +8,6 @@
  *
  * Copyright (c) 2009 Nokia Corporation
  * Roger Quadros <ext-roger.quadros@nokia.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
  *
  * This is useful for systems with mixed controllable and
  * non-controllable regulators, as well as for allowing testing on
@@ -79,15 +75,6 @@ of_get_fixed_voltage_config(struct device *dev,
 
 	of_property_read_u32(np, "startup-delay-us", &config->startup_delay);
 
-	/*
-	 * FIXME: we pulled active low/high and open drain handling into
-	 * gpiolib so it will be handled there. Delete this in the second
-	 * step when we also remove the custom inversion handling for all
-	 * legacy boardfiles.
-	 */
-	config->enable_high = 1;
-	config->gpio_is_open_drain = 0;
-
 	if (of_find_property(np, "vin-supply", NULL))
 		config->input_supply = "vin";
 
@@ -151,24 +138,14 @@ static int reg_fixed_voltage_probe(struct platform_device *pdev)
 
 	drvdata->desc.fixed_uV = config->microvolts;
 
-	cfg.ena_gpio_invert = !config->enable_high;
-	if (config->enabled_at_boot) {
-		if (config->enable_high)
-			gflags = GPIOD_OUT_HIGH;
-		else
-			gflags = GPIOD_OUT_LOW;
-	} else {
-		if (config->enable_high)
-			gflags = GPIOD_OUT_LOW;
-		else
-			gflags = GPIOD_OUT_HIGH;
-	}
-	if (config->gpio_is_open_drain) {
-		if (gflags == GPIOD_OUT_HIGH)
-			gflags = GPIOD_OUT_HIGH_OPEN_DRAIN;
-		else
-			gflags = GPIOD_OUT_LOW_OPEN_DRAIN;
-	}
+	/*
+	 * The signal will be inverted by the GPIO core if flagged so in the
+	 * decriptor.
+	 */
+	if (config->enabled_at_boot)
+		gflags = GPIOD_OUT_HIGH;
+	else
+		gflags = GPIOD_OUT_LOW;
 
 	/*
 	 * Some fixed regulators share the enable line between two
@@ -183,7 +160,11 @@ static int reg_fixed_voltage_probe(struct platform_device *pdev)
 	 */
 	gflags |= GPIOD_FLAGS_BIT_NONEXCLUSIVE;
 
-	cfg.ena_gpiod = devm_gpiod_get_optional(&pdev->dev, NULL, gflags);
+	/*
+	 * Do not use devm* here: the regulator core takes over the
+	 * lifecycle management of the GPIO descriptor.
+	 */
+	cfg.ena_gpiod = gpiod_get_optional(&pdev->dev, NULL, gflags);
 	if (IS_ERR(cfg.ena_gpiod))
 		return PTR_ERR(cfg.ena_gpiod);
 

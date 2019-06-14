@@ -478,6 +478,11 @@ static inline int regulator_is_supported_voltage(struct regulator *regulator,
 	return 0;
 }
 
+static inline unsigned int regulator_get_linear_step(struct regulator *regulator)
+{
+	return 0;
+}
+
 static inline int regulator_set_current_limit(struct regulator *regulator,
 					     int min_uA, int max_uA)
 {
@@ -508,7 +513,7 @@ static inline int regulator_get_error_flags(struct regulator *regulator,
 
 static inline int regulator_set_load(struct regulator *regulator, int load_uA)
 {
-	return REGULATOR_MODE_NORMAL;
+	return 0;
 }
 
 static inline int regulator_allow_bypass(struct regulator *regulator,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  Support for a cx23417 mpeg encoder via cx23885 host port.
@@ -8,16 +9,6 @@
  *      - CX23885/7/8 support
  *
  *  Includes parts from the ivtv driver <http://sourceforge.net/projects/ivtv/>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include "cx23885.h"
@@ -1561,7 +1552,7 @@ int cx23885_417_register(struct cx23885_dev *dev)
 	pr_info("%s: registered device %s [mpeg]\n",
 	       dev->name, video_device_node_name(dev->v4l_device));
 
-	/* ST: Configure the encoder paramaters, but don't begin
+	/* ST: Configure the encoder parameters, but don't begin
 	 * encoding, this resolves an issue where the first time the
 	 * encoder is started video can be choppy.
 	 */

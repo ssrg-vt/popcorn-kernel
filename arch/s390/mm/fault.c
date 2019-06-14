@@ -81,35 +81,10 @@ static inline int notify_page_fault(struct pt_regs *regs)
 	return ret;
 }
 
-
-/*
- * Unlock any spinlocks which will prevent us from getting the
- * message out.
- */
-void bust_spinlocks(int yes)
-{
-	if (yes) {
-		oops_in_progress = 1;
-	} else {
-		int loglevel_save = console_loglevel;
-		console_unblank();
-		oops_in_progress = 0;
-		/*
-		 * OK, the message is on the console.  Now we call printk()
-		 * without oops_in_progress set so that printk will give klogd
-		 * a poke.  Hold onto your hats...
-		 */
-		console_loglevel = 15;
-		printk(" ");
-		console_loglevel = loglevel_save;
-	}
-}
-
 /*
  * Find out which address space caused the exception.
- * Access register mode is impossible, ignore space == 3.
  */
-static inline enum fault_type get_fault_type(struct pt_regs *regs)
+static enum fault_type get_fault_type(struct pt_regs *regs)
 {
 	unsigned long trans_exc_code;
 
@@ -131,6 +106,10 @@ static inline enum fault_type get_fault_type(struct pt_regs *regs)
 			return KERNEL_FAULT;
 		}
 		return VDSO_FAULT;
+	}
+	if (trans_exc_code == 1) {
+		/* access register mode, not used in the kernel */
+		return USER_FAULT;
 	}
 	/* home space exception -> access via kernel ASCE */
 	return KERNEL_FAULT;
@@ -235,6 +214,8 @@ static void dump_fault_info(struct pt_regs *regs)
 		asce = S390_lowcore.kernel_asce;
 		pr_cont("kernel ");
 		break;
+	default:
+		unreachable();
 	}
 	pr_cont("ASCE.\n");
 	dump_pagetable(asce, regs->int_parm_long & __FAIL_ADDR_MASK);
@@ -271,12 +252,24 @@ static noinline void do_sigsegv(struct pt_regs *regs, int si_code)
 			current);
 }
 
+const struct exception_table_entry *s390_search_extables(unsigned long addr)
+{
+	const struct exception_table_entry *fixup;
+
+	fixup = search_extable(__start_dma_ex_table,
+			       __stop_dma_ex_table - __start_dma_ex_table,
+			       addr);
+	if (!fixup)
+		fixup = search_exception_tables(addr);
+	return fixup;
+}
+
 static noinline void do_no_context(struct pt_regs *regs)
 {
 	const struct exception_table_entry *fixup;
 
 	/* Are we prepared to handle this kernel fault?  */
-	fixup = search_exception_tables(regs->psw.addr);
+	fixup = s390_search_extables(regs->psw.addr);
 	if (fixup) {
 		regs->psw.addr = extable_fixup(fixup);
 		return;

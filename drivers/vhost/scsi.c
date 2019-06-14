@@ -57,6 +57,12 @@
 #define VHOST_SCSI_PREALLOC_UPAGES 2048
 #define VHOST_SCSI_PREALLOC_PROT_SGLS 2048
 
+/* Max number of requests before requeueing the job.
+ * Using this limit prevents one virtqueue from starving others with
+ * request.
+ */
+#define VHOST_SCSI_WEIGHT 256
+
 struct vhost_scsi_inflight {
 	/* Wait for the flush operation to finish */
 	struct completion comp;
@@ -285,11 +291,6 @@ static int vhost_scsi_check_false(struct se_portal_group *se_tpg)
 	return 0;
 }
 
-static char *vhost_scsi_get_fabric_name(void)
-{
-	return "vhost";
-}
-
 static char *vhost_scsi_get_fabric_wwn(struct se_portal_group *se_tpg)
 {
 	struct vhost_scsi_tpg *tpg = container_of(se_tpg,
@@ -348,11 +349,6 @@ static int vhost_scsi_write_pending(struct se_cmd *se_cmd)
 {
 	/* Go ahead and process the write immediately */
 	target_execute_cmd(se_cmd);
-	return 0;
-}
-
-static int vhost_scsi_write_pending_status(struct se_cmd *se_cmd)
-{
 	return 0;
 }
 
@@ -889,7 +885,7 @@ vhost_scsi_get_req(struct vhost_virtqueue *vq, struct vhost_scsi_ctx *vc,
 
 	if (unlikely(!copy_from_iter_full(vc->req, vc->req_size,
 					  &vc->out_iter))) {
-		vq_err(vq, "Faulted on copy_from_iter\n");
+		vq_err(vq, "Faulted on copy_from_iter_full\n");
 	} else if (unlikely(*vc->lunp != 1)) {
 		/* virtio-scsi spec requires byte 0 of the lun to be 1 */
 		vq_err(vq, "Illegal virtio-scsi lun: %u\n", *vc->lunp);
@@ -922,7 +918,7 @@ vhost_scsi_handle_vq(struct vhost_scsi *vs, struct vhost_virtqueue *vq)
 	struct iov_iter in_iter, prot_iter, data_iter;
 	u64 tag;
 	u32 exp_data_len, data_direction;
-	int ret, prot_bytes;
+	int ret, prot_bytes, c = 0;
 	u16 lun;
 	u8 task_attr;
 	bool t10_pi = vhost_has_feature(vq, VIRTIO_SCSI_F_T10_PI);
@@ -942,7 +938,7 @@ vhost_scsi_handle_vq(struct vhost_scsi *vs, struct vhost_virtqueue *vq)
 
 	vhost_disable_notify(&vs->dev, vq);
 
-	for (;;) {
+	do {
 		ret = vhost_scsi_get_desc(vs, vq, &vc);
 		if (ret)
 			goto err;
@@ -1122,7 +1118,7 @@ err:
 			break;
 		else if (ret == -EIO)
 			vhost_scsi_send_bad_target(vs, vq, vc.head, vc.out);
-	}
+	} while (likely(!vhost_exceeds_weight(vq, ++c, 0)));
 out:
 	mutex_unlock(&vq->mutex);
 }
@@ -1132,16 +1128,18 @@ vhost_scsi_send_tmf_reject(struct vhost_scsi *vs,
 			   struct vhost_virtqueue *vq,
 			   struct vhost_scsi_ctx *vc)
 {
-	struct virtio_scsi_ctrl_tmf_resp __user *resp;
 	struct virtio_scsi_ctrl_tmf_resp rsp;
+	struct iov_iter iov_iter;
 	int ret;
 
 	pr_debug("%s\n", __func__);
 	memset(&rsp, 0, sizeof(rsp));
 	rsp.response = VIRTIO_SCSI_S_FUNCTION_REJECTED;
-	resp = vq->iov[vc->out].iov_base;
-	ret = __copy_to_user(resp, &rsp, sizeof(rsp));
-	if (!ret)
+
+	iov_iter_init(&iov_iter, READ, &vq->iov[vc->out], vc->in, sizeof(rsp));
+
+	ret = copy_to_iter(&rsp, sizeof(rsp), &iov_iter);
+	if (likely(ret == sizeof(rsp)))
 		vhost_add_used_and_signal(&vs->dev, vq, vc->head, 0);
 	else
 		pr_err("Faulted on virtio_scsi_ctrl_tmf_resp\n");
@@ -1152,16 +1150,18 @@ vhost_scsi_send_an_resp(struct vhost_scsi *vs,
 			struct vhost_virtqueue *vq,
 			struct vhost_scsi_ctx *vc)
 {
-	struct virtio_scsi_ctrl_an_resp __user *resp;
 	struct virtio_scsi_ctrl_an_resp rsp;
+	struct iov_iter iov_iter;
 	int ret;
 
 	pr_debug("%s\n", __func__);
 	memset(&rsp, 0, sizeof(rsp));	/* event_actual = 0 */
 	rsp.response = VIRTIO_SCSI_S_OK;
-	resp = vq->iov[vc->out].iov_base;
-	ret = __copy_to_user(resp, &rsp, sizeof(rsp));
-	if (!ret)
+
+	iov_iter_init(&iov_iter, READ, &vq->iov[vc->out], vc->in, sizeof(rsp));
+
+	ret = copy_to_iter(&rsp, sizeof(rsp), &iov_iter);
+	if (likely(ret == sizeof(rsp)))
 		vhost_add_used_and_signal(&vs->dev, vq, vc->head, 0);
 	else
 		pr_err("Faulted on virtio_scsi_ctrl_an_resp\n");
@@ -1177,7 +1177,7 @@ vhost_scsi_ctl_handle_vq(struct vhost_scsi *vs, struct vhost_virtqueue *vq)
 	} v_req;
 	struct vhost_scsi_ctx vc;
 	size_t typ_size;
-	int ret;
+	int ret, c = 0;
 
 	mutex_lock(&vq->mutex);
 	/*
@@ -1191,7 +1191,7 @@ vhost_scsi_ctl_handle_vq(struct vhost_scsi *vs, struct vhost_virtqueue *vq)
 
 	vhost_disable_notify(&vs->dev, vq);
 
-	for (;;) {
+	do {
 		ret = vhost_scsi_get_desc(vs, vq, &vc);
 		if (ret)
 			goto err;
@@ -1270,7 +1270,7 @@ err:
 			break;
 		else if (ret == -EIO)
 			vhost_scsi_send_bad_target(vs, vq, vc.head, vc.out);
-	}
+	} while (likely(!vhost_exceeds_weight(vq, ++c, 0)));
 out:
 	mutex_unlock(&vq->mutex);
 }
@@ -1441,7 +1441,7 @@ vhost_scsi_set_endpoint(struct vhost_scsi *vs,
 			se_tpg = &tpg->se_tpg;
 			ret = target_depend_item(&se_tpg->tpg_group.cg_item);
 			if (ret) {
-				pr_warn("configfs_depend_item() failed: %d\n", ret);
+				pr_warn("target_depend_item() failed: %d\n", ret);
 				kfree(vs_tpg);
 				mutex_unlock(&tpg->tv_tpg_mutex);
 				goto out;
@@ -1449,7 +1449,6 @@ vhost_scsi_set_endpoint(struct vhost_scsi *vs,
 			tpg->tv_tpg_vhost_count++;
 			tpg->vhost_scsi = vs;
 			vs_tpg[tpg->tport_tpgt] = tpg;
-			smp_mb__after_atomic();
 			match = true;
 		}
 		mutex_unlock(&tpg->tv_tpg_mutex);
@@ -1628,7 +1627,8 @@ static int vhost_scsi_open(struct inode *inode, struct file *f)
 		vqs[i] = &vs->vqs[i].vq;
 		vs->vqs[i].vq.handle_kick = vhost_scsi_handle_kick;
 	}
-	vhost_dev_init(&vs->dev, vqs, VHOST_SCSI_MAX_VQ);
+	vhost_dev_init(&vs->dev, vqs, VHOST_SCSI_MAX_VQ, UIO_MAXIOV,
+		       VHOST_SCSI_WEIGHT, 0);
 
 	vhost_scsi_init_inflight(vs, NULL);
 
@@ -2289,8 +2289,7 @@ static struct configfs_attribute *vhost_scsi_wwn_attrs[] = {
 
 static const struct target_core_fabric_ops vhost_scsi_ops = {
 	.module				= THIS_MODULE,
-	.name				= "vhost",
-	.get_fabric_name		= vhost_scsi_get_fabric_name,
+	.fabric_name			= "vhost",
 	.tpg_get_wwn			= vhost_scsi_get_fabric_wwn,
 	.tpg_get_tag			= vhost_scsi_get_tpgt,
 	.tpg_check_demo_mode		= vhost_scsi_check_true,
@@ -2304,7 +2303,6 @@ static const struct target_core_fabric_ops vhost_scsi_ops = {
 	.sess_get_index			= vhost_scsi_sess_get_index,
 	.sess_get_initiator_sid		= NULL,
 	.write_pending			= vhost_scsi_write_pending,
-	.write_pending_status		= vhost_scsi_write_pending_status,
 	.set_default_node_attributes	= vhost_scsi_set_default_node_attrs,
 	.get_cmd_state			= vhost_scsi_get_cmd_state,
 	.queue_data_in			= vhost_scsi_queue_data_in,

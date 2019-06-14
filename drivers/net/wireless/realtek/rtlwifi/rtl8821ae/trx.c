@@ -1,27 +1,5 @@
-/******************************************************************************
- *
- * Copyright(c) 2009-2010  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
- * Realtek Corporation, No. 2, Innovation Road II, Hsinchu Science Park,
- * Hsinchu 300, Taiwan.
- *
- * Larry Finger <Larry.Finger@lwfinger.net>
- *
- *****************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2009-2010  Realtek Corporation.*/
 
 #include "../wifi.h"
 #include "../pci.h"
@@ -29,7 +7,6 @@
 #include "../stats.h"
 #include "reg.h"
 #include "def.h"
-#include "phy.h"
 #include "trx.h"
 #include "led.h"
 #include "dm.h"
@@ -307,14 +284,12 @@ static void translate_rx_signal_stuff(struct ieee80211_hw *hw,
 	u8 *praddr;
 	u8 *psaddr;
 	__le16 fc;
-	u16 type;
 	bool packet_matchbssid, packet_toself, packet_beacon;
 
 	tmp_buf = skb->data + pstatus->rx_drvinfo_size + pstatus->rx_bufshift;
 
 	hdr = (struct ieee80211_hdr *)tmp_buf;
 	fc = hdr->frame_control;
-	type = WLAN_FC_GET_TYPE(hdr->frame_control);
 	praddr = hdr->addr1;
 	psaddr = ieee80211_get_SA(hdr);
 	ether_addr_copy(pstatus->psaddr, psaddr);
@@ -461,7 +436,7 @@ bool rtl8821ae_rx_query_desc(struct ieee80211_hw *hw,
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct rx_fwinfo_8821ae *p_drvinfo;
 	struct ieee80211_hdr *hdr;
-
+	u8 wake_match;
 	u32 phystatus = GET_RX_DESC_PHYST(pdesc);
 
 	status->length = (u16)GET_RX_DESC_PKT_LEN(pdesc);
@@ -498,18 +473,18 @@ bool rtl8821ae_rx_query_desc(struct ieee80211_hw *hw,
 		status->packet_report_type = NORMAL_RX;
 
 	if (GET_RX_STATUS_DESC_PATTERN_MATCH(pdesc))
-		status->wake_match = BIT(2);
+		wake_match = BIT(2);
 	else if (GET_RX_STATUS_DESC_MAGIC_MATCH(pdesc))
-		status->wake_match = BIT(1);
+		wake_match = BIT(1);
 	else if (GET_RX_STATUS_DESC_UNICAST_MATCH(pdesc))
-		status->wake_match = BIT(0);
+		wake_match = BIT(0);
 	else
-		status->wake_match = 0;
+		wake_match = 0;
 
-	if (status->wake_match)
+	if (wake_match)
 		RT_TRACE(rtlpriv, COMP_RXDESC, DBG_LOUD,
 			 "GGGGGGGGGGGGGet Wakeup Packet!! WakeMatch=%d\n",
-			 status->wake_match);
+			 wake_match);
 	rx_status->freq = hw->conf.chandef.chan->center_freq;
 	rx_status->band = hw->conf.chandef.chan->band;
 

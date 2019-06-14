@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2009 Sunplus Core Technology Co., Ltd.
  *  Chen Liqin <liqin.chen@sunplusct.com>
  *  Lennox Wu <lennox.wu@sunplusct.com>
  * Copyright (C) 2012 Regents of the University of California
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see the file COPYING, or write
- * to the Free Software Foundation, Inc.,
  */
 
 #include <linux/signal.h>
@@ -115,7 +102,7 @@ SYSCALL_DEFINE0(rt_sigreturn)
 
 	frame = (struct rt_sigframe __user *)regs->sp;
 
-	if (!access_ok(VERIFY_READ, frame, sizeof(*frame)))
+	if (!access_ok(frame, sizeof(*frame)))
 		goto badframe;
 
 	if (__copy_from_user(&set, &frame->uc.uc_sigmask, sizeof(set)))
@@ -187,7 +174,7 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	long err = 0;
 
 	frame = get_sigframe(ksig, regs, sizeof(*frame));
-	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
+	if (!access_ok(frame, sizeof(*frame)))
 		return -EFAULT;
 
 	err |= copy_siginfo_to_user(&frame->info, &ksig->info);
@@ -234,6 +221,9 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 
 	/* Are we from a system call? */
 	if (regs->scause == EXC_SYSCALL) {
+		/* Avoid additional syscall restarting via ret_from_exception */
+		regs->scause = -1UL;
+
 		/* If so, check system call restarting.. */
 		switch (regs->a0) {
 		case -ERESTART_RESTARTBLOCK:
@@ -272,6 +262,9 @@ static void do_signal(struct pt_regs *regs)
 
 	/* Did we come from a system call? */
 	if (regs->scause == EXC_SYSCALL) {
+		/* Avoid additional syscall restarting via ret_from_exception */
+		regs->scause = -1UL;
+
 		/* Restart the system call - no handlers present */
 		switch (regs->a0) {
 		case -ERESTARTNOHAND:

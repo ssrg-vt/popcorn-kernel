@@ -1498,6 +1498,14 @@ static void check_preempt_curr_rt(struct rq *rq, struct task_struct *p, int flag
 #endif
 }
 
+static inline void set_next_task(struct rq *rq, struct task_struct *p)
+{
+	p->se.exec_start = rq_clock_task(rq);
+
+	/* The running task is never eligible for pushing */
+	dequeue_pushable_task(rq, p);
+}
+
 static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 						   struct rt_rq *rt_rq)
 {
@@ -1518,7 +1526,6 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 static struct task_struct *_pick_next_task_rt(struct rq *rq)
 {
 	struct sched_rt_entity *rt_se;
-	struct task_struct *p;
 	struct rt_rq *rt_rq  = &rq->rt;
 
 	do {
@@ -1527,10 +1534,7 @@ static struct task_struct *_pick_next_task_rt(struct rq *rq)
 		rt_rq = group_rt_rq(rt_se);
 	} while (rt_rq);
 
-	p = rt_task_of(rt_se);
-	p->se.exec_start = rq_clock_task(rq);
-
-	return p;
+	return rt_task_of(rt_se);
 }
 
 static struct task_struct *
@@ -1573,8 +1577,7 @@ pick_next_task_rt(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 
 	p = _pick_next_task_rt(rq);
 
-	/* The running task is never eligible for pushing */
-	dequeue_pushable_task(rq, p);
+	set_next_task(rq, p);
 
 	rt_queue_push_tasks(rq);
 
@@ -1584,7 +1587,7 @@ pick_next_task_rt(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 	 * rt task
 	 */
 	if (rq->curr->sched_class != &rt_sched_class)
-		update_rt_rq_load_avg(rq_clock_task(rq), rq, 0);
+		update_rt_rq_load_avg(rq_clock_pelt(rq), rq, 0);
 
 	return p;
 }
@@ -1593,7 +1596,7 @@ static void put_prev_task_rt(struct rq *rq, struct task_struct *p)
 {
 	update_curr_rt(rq);
 
-	update_rt_rq_load_avg(rq_clock_task(rq), rq, 1);
+	update_rt_rq_load_avg(rq_clock_pelt(rq), rq, 1);
 
 	/*
 	 * The previous task needs to be made eligible for pushing
@@ -1810,10 +1813,8 @@ static int push_rt_task(struct rq *rq)
 		return 0;
 
 retry:
-	if (unlikely(next_task == rq->curr)) {
-		WARN_ON(1);
+	if (WARN_ON(next_task == rq->curr))
 		return 0;
-	}
 
 	/*
 	 * It's possible that the next_task slipped in of
@@ -2324,7 +2325,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 	struct sched_rt_entity *rt_se = &p->rt;
 
 	update_curr_rt(rq);
-	update_rt_rq_load_avg(rq_clock_task(rq), rq, 1);
+	update_rt_rq_load_avg(rq_clock_pelt(rq), rq, 1);
 
 	watchdog(rq, p);
 
@@ -2355,12 +2356,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 
 static void set_curr_task_rt(struct rq *rq)
 {
-	struct task_struct *p = rq->curr;
-
-	p->se.exec_start = rq_clock_task(rq);
-
-	/* The running task is never eligible for pushing */
-	dequeue_pushable_task(rq, p);
+	set_next_task(rq, rq->curr);
 }
 
 static unsigned int get_rr_interval_rt(struct rq *rq, struct task_struct *task)
@@ -2559,6 +2555,8 @@ int sched_group_set_rt_runtime(struct task_group *tg, long rt_runtime_us)
 	rt_runtime = (u64)rt_runtime_us * NSEC_PER_USEC;
 	if (rt_runtime_us < 0)
 		rt_runtime = RUNTIME_INF;
+	else if ((u64)rt_runtime_us > U64_MAX / NSEC_PER_USEC)
+		return -EINVAL;
 
 	return tg_set_rt_bandwidth(tg, rt_period, rt_runtime);
 }
@@ -2578,6 +2576,9 @@ long sched_group_rt_runtime(struct task_group *tg)
 int sched_group_set_rt_period(struct task_group *tg, u64 rt_period_us)
 {
 	u64 rt_runtime, rt_period;
+
+	if (rt_period_us > U64_MAX / NSEC_PER_USEC)
+		return -EINVAL;
 
 	rt_period = rt_period_us * NSEC_PER_USEC;
 	rt_runtime = tg->rt_bandwidth.rt_runtime;

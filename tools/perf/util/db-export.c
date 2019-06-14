@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * db-export.c: Support for exporting data suitable for import to a database
  * Copyright (c) 2014, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #include <errno.h>
@@ -20,6 +11,7 @@
 #include "thread.h"
 #include "comm.h"
 #include "symbol.h"
+#include "map.h"
 #include "event.h"
 #include "util.h"
 #include "thread-stack.h"
@@ -509,18 +501,23 @@ int db_export__call_path(struct db_export *dbe, struct call_path *cp)
 	return 0;
 }
 
-int db_export__call_return(struct db_export *dbe, struct call_return *cr)
+int db_export__call_return(struct db_export *dbe, struct call_return *cr,
+			   u64 *parent_db_id)
 {
 	int err;
-
-	if (cr->db_id)
-		return 0;
 
 	err = db_export__call_path(dbe, cr->cp);
 	if (err)
 		return err;
 
-	cr->db_id = ++dbe->call_return_last_db_id;
+	if (!cr->db_id)
+		cr->db_id = ++dbe->call_return_last_db_id;
+
+	if (parent_db_id) {
+		if (!*parent_db_id)
+			*parent_db_id = ++dbe->call_return_last_db_id;
+		cr->parent_db_id = *parent_db_id;
+	}
 
 	if (dbe->export_call_return)
 		return dbe->export_call_return(dbe, cr);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 **	DINO manager
 **
@@ -7,10 +8,6 @@
 **	(c) Copyright 2000 Grant Grundler
 **	(c) Copyright 2006 Helge Deller
 **
-**	This program is free software; you can redistribute it and/or modify
-**	it under the terms of the GNU General Public License as published by
-**      the Free Software Foundation; either version 2 of the License, or
-**      (at your option) any later version.
 **
 **	This module provides access to Dino PCI bus (config/IOport spaces)
 **	and helps manage Dino IRQ lines.
@@ -59,6 +56,7 @@
 #include <asm/hardware.h>
 
 #include "gsc.h"
+#include "iommu.h"
 
 #undef DINO_DEBUG
 
@@ -153,12 +151,10 @@ struct dino_device
 #endif
 };
 
-/* Looks nice and keeps the compiler happy */
-#define DINO_DEV(d) ({				\
-	void *__pdata = d;			\
-	BUG_ON(!__pdata);			\
-	(struct dino_device *)__pdata; })
-
+static inline struct dino_device *DINO_DEV(struct pci_hba_data *hba)
+{
+	return container_of(hba, struct dino_device, hba);
+}
 
 /*
  * Dino Configuration Space Accessor Functions

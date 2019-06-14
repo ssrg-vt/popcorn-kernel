@@ -1,24 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *
  * Copyright (c) 2011, Microsoft Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * Authors:
  *   Haiyang Zhang <haiyangz@microsoft.com>
  *   Hank Janssen  <hjanssen@microsoft.com>
  *   K. Y. Srinivasan <kys@microsoft.com>
- *
  */
 
 #ifndef _HYPERV_NET_H
@@ -144,6 +132,8 @@ struct hv_netvsc_packet {
 	u32 total_data_buflen;
 };
 
+#define NETVSC_HASH_KEYLEN 40
+
 struct netvsc_device_info {
 	unsigned char mac_adr[ETH_ALEN];
 	u32  num_chn;
@@ -151,6 +141,8 @@ struct netvsc_device_info {
 	u32  recv_sections;
 	u32  send_section_size;
 	u32  recv_section_size;
+
+	u8 rss_key[NETVSC_HASH_KEYLEN];
 };
 
 enum rndis_device_state {
@@ -159,8 +151,6 @@ enum rndis_device_state {
 	RNDIS_DEV_INITIALIZED,
 	RNDIS_DEV_DATAINITIALIZED,
 };
-
-#define NETVSC_HASH_KEYLEN 40
 
 struct rndis_device {
 	struct net_device *ndev;
@@ -209,7 +199,9 @@ int netvsc_recv_callback(struct net_device *net,
 void netvsc_channel_cb(void *context);
 int netvsc_poll(struct napi_struct *napi, int budget);
 
-int rndis_set_subchannel(struct net_device *ndev, struct netvsc_device *nvdev);
+int rndis_set_subchannel(struct net_device *ndev,
+			 struct netvsc_device *nvdev,
+			 struct netvsc_device_info *dev_info);
 int rndis_filter_open(struct netvsc_device *nvdev);
 int rndis_filter_close(struct netvsc_device *nvdev);
 struct netvsc_device *rndis_filter_device_add(struct hv_device *dev,
@@ -983,6 +975,7 @@ struct netvsc_device {
 
 	wait_queue_head_t wait_drain;
 	bool destroy;
+	bool tx_disable; /* if true, do not wake up queue again */
 
 	/* Receive buffer allocated by us but manages by NetVSP */
 	void *recv_buf;
@@ -1177,7 +1170,7 @@ enum ndis_per_pkt_info_type {
 
 enum rndis_per_pkt_info_interal_type {
 	RNDIS_PKTINFO_ID = 1,
-	/* Add more memebers here */
+	/* Add more members here */
 
 	RNDIS_PKTINFO_MAX
 };

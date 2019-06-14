@@ -12,6 +12,7 @@
 #include <linux/slab.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/module.h>
 #include "clk.h"
@@ -105,7 +106,7 @@ static struct clk_hw *s3c24xx_register_clkout(struct device *dev,
 
 	init.name = name;
 	init.ops = &s3c24xx_clkout_ops;
-	init.flags = CLK_IS_BASIC;
+	init.flags = 0;
 	init.parent_names = parent_names;
 	init.num_parents = num_parents;
 

@@ -1,23 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) Fuzhou Rockchip Electronics Co.Ltd
  * Author: Chris Zhong <zyw@rock-chips.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <drm/drmP.h>
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_crtc_helper.h>
 #include <drm/drm_dp_helper.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_of.h>
+#include <drm/drm_probe_helper.h>
 
 #include <linux/clk.h>
 #include <linux/component.h>

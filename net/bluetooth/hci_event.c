@@ -3404,6 +3404,12 @@ static void hci_cmd_complete_evt(struct hci_dev *hdev, struct sk_buff *skb,
 	hci_req_cmd_complete(hdev, *opcode, *status, req_complete,
 			     req_complete_skb);
 
+	if (hci_dev_test_flag(hdev, HCI_CMD_PENDING)) {
+		bt_dev_err(hdev,
+			   "unexpected event for opcode 0x%4.4x", *opcode);
+		return;
+	}
+
 	if (atomic_read(&hdev->cmd_cnt) && !skb_queue_empty(&hdev->cmd_q))
 		queue_work(hdev->workqueue, &hdev->cmd_work);
 }
@@ -3511,6 +3517,12 @@ static void hci_cmd_status_evt(struct hci_dev *hdev, struct sk_buff *skb,
 		hci_req_cmd_complete(hdev, *opcode, ev->status, req_complete,
 				     req_complete_skb);
 
+	if (hci_dev_test_flag(hdev, HCI_CMD_PENDING)) {
+		bt_dev_err(hdev,
+			   "unexpected event for opcode 0x%4.4x", *opcode);
+		return;
+	}
+
 	if (atomic_read(&hdev->cmd_cnt) && !skb_queue_empty(&hdev->cmd_q))
 		queue_work(hdev->workqueue, &hdev->cmd_work);
 }
@@ -3556,8 +3568,8 @@ static void hci_num_comp_pkts_evt(struct hci_dev *hdev, struct sk_buff *skb)
 		return;
 	}
 
-	if (skb->len < sizeof(*ev) || skb->len < sizeof(*ev) +
-	    ev->num_hndl * sizeof(struct hci_comp_pkts_info)) {
+	if (skb->len < sizeof(*ev) ||
+	    skb->len < struct_size(ev, handles, ev->num_hndl)) {
 		BT_DBG("%s bad parameters", hdev->name);
 		return;
 	}
@@ -3644,8 +3656,8 @@ static void hci_num_comp_blocks_evt(struct hci_dev *hdev, struct sk_buff *skb)
 		return;
 	}
 
-	if (skb->len < sizeof(*ev) || skb->len < sizeof(*ev) +
-	    ev->num_hndl * sizeof(struct hci_comp_blocks_info)) {
+	if (skb->len < sizeof(*ev) ||
+	    skb->len < struct_size(ev, handles, ev->num_hndl)) {
 		BT_DBG("%s bad parameters", hdev->name);
 		return;
 	}
@@ -5433,7 +5445,7 @@ static void hci_le_ext_adv_report_evt(struct hci_dev *hdev, struct sk_buff *skb)
 					   ev->data, ev->length);
 		}
 
-		ptr += sizeof(*ev) + ev->length + 1;
+		ptr += sizeof(*ev) + ev->length;
 	}
 
 	hci_dev_unlock(hdev);
@@ -5710,6 +5722,12 @@ static bool hci_get_cmd_complete(struct hci_dev *hdev, u16 opcode,
 			return false;
 		return true;
 	}
+
+	/* Check if request ended in Command Status - no way to retreive
+	 * any extra parameters in this case.
+	 */
+	if (hdr->evt == HCI_EV_CMD_STATUS)
+		return false;
 
 	if (hdr->evt != HCI_EV_CMD_COMPLETE) {
 		bt_dev_err(hdev, "last event is not cmd complete (0x%2.2x)",

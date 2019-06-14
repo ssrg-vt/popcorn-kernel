@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Bluetooth support for Realtek devices
  *
  *  Copyright (C) 2015 Endless Mobile, Inc.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
  */
 
 #include <linux/module.h>
@@ -552,10 +542,9 @@ struct btrtl_device_info *btrtl_initialize(struct hci_dev *hdev,
 					    hdev->bus);
 
 	if (!btrtl_dev->ic_info) {
-		rtl_dev_err(hdev, "rtl: unknown IC info, lmp subver %04x, hci rev %04x, hci ver %04x",
+		rtl_dev_info(hdev, "rtl: unknown IC info, lmp subver %04x, hci rev %04x, hci ver %04x",
 			    lmp_subver, hci_rev, hci_ver);
-		ret = -EINVAL;
-		goto err_free;
+		return btrtl_dev;
 	}
 
 	if (btrtl_dev->ic_info->has_rom_version) {
@@ -610,6 +599,11 @@ int btrtl_download_firmware(struct hci_dev *hdev,
 	 * standard btusb. Once that firmware is uploaded, the subver changes
 	 * to a different value.
 	 */
+	if (!btrtl_dev->ic_info) {
+		rtl_dev_info(hdev, "rtl: assuming no firmware upload needed\n");
+		return 0;
+	}
+
 	switch (btrtl_dev->ic_info->lmp_subver) {
 	case RTL_ROM_LMP_8723A:
 	case RTL_ROM_LMP_3499:

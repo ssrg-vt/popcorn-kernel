@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright © 2004-2008 Simtec Electronics
  *	http://armlinux.simtec.co.uk/
  *	Ben Dooks <ben@simtec.co.uk>
  *
  * Samsung S3C2410/S3C2440/S3C2412 NAND driver
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
 #define pr_fmt(fmt) "nand-s3c2410: " fmt
@@ -866,7 +853,7 @@ static void s3c2410_nand_init_chip(struct s3c2410_nand_info *info,
 
 	chip->legacy.write_buf    = s3c2410_nand_write_buf;
 	chip->legacy.read_buf     = s3c2410_nand_read_buf;
-	chip->select_chip  = s3c2410_nand_select_chip;
+	chip->legacy.select_chip  = s3c2410_nand_select_chip;
 	chip->legacy.chip_delay   = 50;
 	nand_set_controller_data(chip, nmtd);
 	chip->options	   = set->options;
@@ -876,8 +863,8 @@ static void s3c2410_nand_init_chip(struct s3c2410_nand_info *info,
 	 * let's keep behavior unchanged for legacy boards booting via pdata and
 	 * auto-detect timings only when booting with a device tree.
 	 */
-	if (np)
-		chip->setup_data_interface = s3c2410_nand_setup_data_interface;
+	if (!np)
+		chip->options |= NAND_KEEP_TIMINGS;
 
 	switch (info->cpu_type) {
 	case TYPE_S3C2410:
@@ -1011,6 +998,7 @@ static int s3c2410_nand_attach_chip(struct nand_chip *chip)
 
 static const struct nand_controller_ops s3c24xx_nand_controller_ops = {
 	.attach_chip = s3c2410_nand_attach_chip,
+	.setup_data_interface = s3c2410_nand_setup_data_interface,
 };
 
 static const struct of_device_id s3c24xx_nand_dt_ids[] = {

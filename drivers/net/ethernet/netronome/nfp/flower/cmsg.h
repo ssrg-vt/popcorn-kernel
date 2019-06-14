@@ -8,6 +8,7 @@
 #include <linux/skbuff.h>
 #include <linux/types.h>
 #include <net/geneve.h>
+#include <net/vxlan.h>
 
 #include "../nfp_app.h"
 #include "../nfpcore/nfp_cpp.h"
@@ -25,7 +26,7 @@
 #define NFP_FLOWER_LAYER2_GENEVE_OP	BIT(6)
 
 #define NFP_FLOWER_MASK_VLAN_PRIO	GENMASK(15, 13)
-#define NFP_FLOWER_MASK_VLAN_CFI	BIT(12)
+#define NFP_FLOWER_MASK_VLAN_PRESENT	BIT(12)
 #define NFP_FLOWER_MASK_VLAN_VID	GENMASK(11, 0)
 
 #define NFP_FLOWER_MASK_MPLS_LB		GENMASK(31, 12)
@@ -65,8 +66,10 @@
 #define NFP_FL_ACTION_OPCODE_SET_IPV4_TUNNEL	6
 #define NFP_FL_ACTION_OPCODE_SET_ETHERNET	7
 #define NFP_FL_ACTION_OPCODE_SET_IPV4_ADDRS	9
+#define NFP_FL_ACTION_OPCODE_SET_IPV4_TTL_TOS	10
 #define NFP_FL_ACTION_OPCODE_SET_IPV6_SRC	11
 #define NFP_FL_ACTION_OPCODE_SET_IPV6_DST	12
+#define NFP_FL_ACTION_OPCODE_SET_IPV6_TC_HL_FL	13
 #define NFP_FL_ACTION_OPCODE_SET_UDP		14
 #define NFP_FL_ACTION_OPCODE_SET_TCP		15
 #define NFP_FL_ACTION_OPCODE_PRE_LAG		16
@@ -79,8 +82,9 @@
 #define NFP_FL_OUT_FLAGS_TYPE_IDX	GENMASK(2, 0)
 
 #define NFP_FL_PUSH_VLAN_PRIO		GENMASK(15, 13)
-#define NFP_FL_PUSH_VLAN_CFI		BIT(12)
 #define NFP_FL_PUSH_VLAN_VID		GENMASK(11, 0)
+
+#define IPV6_FLOW_LABEL_MASK		cpu_to_be32(0x000fffff)
 
 /* LAG ports */
 #define NFP_FL_LAG_OUT			0xC0DE0000
@@ -91,6 +95,9 @@
 #define NFP_FL_IPV4_PRE_TUN_INDEX	GENMASK(2, 0)
 
 #define NFP_FLOWER_WORKQ_MAX_SKBS	30000
+
+/* Cmesg reply (empirical) timeout*/
+#define NFP_FL_REPLY_TIMEOUT		msecs_to_jiffies(40)
 
 #define nfp_flower_cmsg_warn(app, fmt, args...)                         \
 	do {                                                            \
@@ -123,6 +130,26 @@ struct nfp_fl_set_ip4_addrs {
 	__be32 ipv4_src;
 	__be32 ipv4_dst_mask;
 	__be32 ipv4_dst;
+};
+
+struct nfp_fl_set_ip4_ttl_tos {
+	struct nfp_fl_act_head head;
+	u8 ipv4_ttl_mask;
+	u8 ipv4_tos_mask;
+	u8 ipv4_ttl;
+	u8 ipv4_tos;
+	__be16 reserved;
+};
+
+struct nfp_fl_set_ipv6_tc_hl_fl {
+	struct nfp_fl_act_head head;
+	u8 ipv6_tc_mask;
+	u8 ipv6_hop_limit_mask;
+	__be16 reserved;
+	u8 ipv6_tc;
+	u8 ipv6_hop_limit;
+	__be32 ipv6_label_mask;
+	__be32 ipv6_label;
 };
 
 struct nfp_fl_set_ipv6_addr {
@@ -375,11 +402,13 @@ struct nfp_flower_cmsg_hdr {
 /* Types defined for port related control messages  */
 enum nfp_flower_cmsg_type_port {
 	NFP_FLOWER_CMSG_TYPE_FLOW_ADD =		0,
+	NFP_FLOWER_CMSG_TYPE_FLOW_MOD =		1,
 	NFP_FLOWER_CMSG_TYPE_FLOW_DEL =		2,
 	NFP_FLOWER_CMSG_TYPE_LAG_CONFIG =	4,
 	NFP_FLOWER_CMSG_TYPE_PORT_REIFY =	6,
 	NFP_FLOWER_CMSG_TYPE_MAC_REPR =		7,
 	NFP_FLOWER_CMSG_TYPE_PORT_MOD =		8,
+	NFP_FLOWER_CMSG_TYPE_MERGE_HINT =	9,
 	NFP_FLOWER_CMSG_TYPE_NO_NEIGH =		10,
 	NFP_FLOWER_CMSG_TYPE_TUN_MAC =		11,
 	NFP_FLOWER_CMSG_TYPE_ACTIVE_TUNS =	12,
@@ -387,6 +416,9 @@ enum nfp_flower_cmsg_type_port {
 	NFP_FLOWER_CMSG_TYPE_TUN_IPS =		14,
 	NFP_FLOWER_CMSG_TYPE_FLOW_STATS =	15,
 	NFP_FLOWER_CMSG_TYPE_PORT_ECHO =	16,
+	NFP_FLOWER_CMSG_TYPE_QOS_MOD =		18,
+	NFP_FLOWER_CMSG_TYPE_QOS_DEL =		19,
+	NFP_FLOWER_CMSG_TYPE_QOS_STATS =	20,
 	NFP_FLOWER_CMSG_TYPE_MAX =		32,
 };
 
@@ -424,6 +456,16 @@ struct nfp_flower_cmsg_portreify {
 
 #define NFP_FLOWER_CMSG_PORTREIFY_INFO_EXIST	BIT(0)
 
+/* NFP_FLOWER_CMSG_TYPE_FLOW_MERGE_HINT */
+struct nfp_flower_cmsg_merge_hint {
+	u8 reserved[3];
+	u8 count;
+	struct {
+		__be32 host_ctx;
+		__be64 host_cookie;
+	} __packed flow[0];
+};
+
 enum nfp_flower_cmsg_port_type {
 	NFP_FLOWER_CMSG_PORT_TYPE_UNSPEC =	0x0,
 	NFP_FLOWER_CMSG_PORT_TYPE_PHYS_PORT =	0x1,
@@ -445,6 +487,13 @@ enum nfp_flower_cmsg_port_vnic_type {
 #define NFP_FLOWER_CMSG_PORT_VNIC		GENMASK(11, 6)
 #define NFP_FLOWER_CMSG_PORT_PCIE_Q		GENMASK(5, 0)
 #define NFP_FLOWER_CMSG_PORT_PHYS_PORT_NUM	GENMASK(7, 0)
+
+static inline u32 nfp_flower_internal_port_get_port_id(u8 internal_port)
+{
+	return FIELD_PREP(NFP_FLOWER_CMSG_PORT_PHYS_PORT_NUM, internal_port) |
+		FIELD_PREP(NFP_FLOWER_CMSG_PORT_TYPE,
+			   NFP_FLOWER_CMSG_PORT_TYPE_OTHER_PORT);
+}
 
 static inline u32 nfp_flower_cmsg_phys_port(u8 phys_port)
 {
@@ -473,6 +522,32 @@ static inline void *nfp_flower_cmsg_get_data(struct sk_buff *skb)
 static inline int nfp_flower_cmsg_get_data_len(struct sk_buff *skb)
 {
 	return skb->len - NFP_FLOWER_CMSG_HLEN;
+}
+
+static inline bool
+nfp_fl_netdev_is_tunnel_type(struct net_device *netdev,
+			     enum nfp_flower_tun_type tun_type)
+{
+	if (netif_is_vxlan(netdev))
+		return tun_type == NFP_FL_TUNNEL_VXLAN;
+	if (netif_is_geneve(netdev))
+		return tun_type == NFP_FL_TUNNEL_GENEVE;
+
+	return false;
+}
+
+static inline bool nfp_fl_is_netdev_to_offload(struct net_device *netdev)
+{
+	if (!netdev->rtnl_link_ops)
+		return false;
+	if (!strcmp(netdev->rtnl_link_ops->kind, "openvswitch"))
+		return true;
+	if (netif_is_vxlan(netdev))
+		return true;
+	if (netif_is_geneve(netdev))
+		return true;
+
+	return false;
 }
 
 struct sk_buff *

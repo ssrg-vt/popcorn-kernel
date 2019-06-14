@@ -158,9 +158,6 @@ static int  amdgpu_debugfs_process_reg_op(bool read, struct file *f,
 	while (size) {
 		uint32_t value;
 
-		if (*pos > adev->rmmio_size)
-			goto end;
-
 		if (read) {
 			value = RREG32(*pos >> 2);
 			r = put_user(value, (uint32_t *)buf);
@@ -571,10 +568,9 @@ static ssize_t amdgpu_debugfs_sensor_read(struct file *f, char __user *buf,
 	idx = *pos >> 2;
 
 	valuesize = sizeof(values);
-	if (adev->powerplay.pp_funcs && adev->powerplay.pp_funcs->read_sensor)
-		r = amdgpu_dpm_read_sensor(adev, idx, &values[0], &valuesize);
-	else
-		return -EINVAL;
+	r = amdgpu_dpm_read_sensor(adev, idx, &values[0], &valuesize);
+	if (r)
+		return r;
 
 	if (size > valuesize)
 		return -EINVAL;

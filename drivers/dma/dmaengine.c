@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright(c) 2004 - 2006 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called COPYING.
  */
 
 /*
@@ -63,6 +51,7 @@
 #include <linux/acpi_dma.h>
 #include <linux/of_dma.h>
 #include <linux/mempool.h>
+#include <linux/numa.h>
 
 static DEFINE_MUTEX(dma_list_mutex);
 static DEFINE_IDA(dma_ida);
@@ -386,7 +375,8 @@ EXPORT_SYMBOL(dma_issue_pending_all);
 static bool dma_chan_is_local(struct dma_chan *chan, int cpu)
 {
 	int node = dev_to_node(chan->device->dev);
-	return node == -1 || cpumask_test_cpu(cpu, cpumask_of_node(node));
+	return node == NUMA_NO_NODE ||
+		cpumask_test_cpu(cpu, cpumask_of_node(node));
 }
 
 /**

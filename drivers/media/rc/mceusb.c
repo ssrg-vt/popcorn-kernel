@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for USB Windows Media Center Ed. eHome Infrared Transceivers
  *
@@ -19,18 +20,6 @@
  * remote/transceiver requirements and specification document, found at
  * download.microsoft.com, title
  * Windows-Media-Center-RC-IR-Collection-Green-Button-Specification-03-08-2011-V2.pdf
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/device.h>
@@ -79,7 +68,7 @@
 #define MCE_CMD			0x1f
 #define MCE_PORT_IR		0x4	/* (0x4 << 5) | MCE_CMD = 0x9f */
 #define MCE_PORT_SYS		0x7	/* (0x7 << 5) | MCE_CMD = 0xff */
-#define MCE_PORT_SER		0x6	/* 0xc0 thru 0xdf flush & 0x1f bytes */
+#define MCE_PORT_SER		0x6	/* 0xc0 through 0xdf flush & 0x1f bytes */
 #define MCE_PORT_MASK		0xe0	/* Mask out command bits */
 
 /* Command port headers */
@@ -431,6 +420,15 @@ static const struct usb_device_id mceusb_dev_table[] = {
 	{ USB_DEVICE(VENDOR_HAUPPAUGE, 0xb138),
 	  .driver_info = HAUPPAUGE_CX_HYBRID_TV },
 	{ USB_DEVICE(VENDOR_HAUPPAUGE, 0xb139),
+	  .driver_info = HAUPPAUGE_CX_HYBRID_TV },
+	/* Hauppauge WinTV-HVR-935C - based on cx231xx */
+	{ USB_DEVICE(VENDOR_HAUPPAUGE, 0xb151),
+	  .driver_info = HAUPPAUGE_CX_HYBRID_TV },
+	/* Hauppauge WinTV-HVR-955Q - based on cx231xx */
+	{ USB_DEVICE(VENDOR_HAUPPAUGE, 0xb123),
+	  .driver_info = HAUPPAUGE_CX_HYBRID_TV },
+	/* Hauppauge WinTV-HVR-975 - based on cx231xx */
+	{ USB_DEVICE(VENDOR_HAUPPAUGE, 0xb150),
 	  .driver_info = HAUPPAUGE_CX_HYBRID_TV },
 	{ USB_DEVICE(VENDOR_PCTV, 0x0259),
 	  .driver_info = HAUPPAUGE_CX_HYBRID_TV },

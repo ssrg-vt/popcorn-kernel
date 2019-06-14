@@ -1,14 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2016 The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/pm_opp.h>
@@ -298,7 +289,9 @@ void a5xx_gpmu_ucode_init(struct msm_gpu *gpu)
 		MSM_BO_UNCACHED | MSM_BO_GPU_READONLY, gpu->aspace,
 		&a5xx_gpu->gpmu_bo, &a5xx_gpu->gpmu_iova);
 	if (IS_ERR(ptr))
-		goto err;
+		return;
+
+	msm_gem_object_set_name(a5xx_gpu->gpmu_bo, "gpmufw");
 
 	while (cmds_size > 0) {
 		int i;
@@ -317,15 +310,4 @@ void a5xx_gpmu_ucode_init(struct msm_gpu *gpu)
 
 	msm_gem_put_vaddr(a5xx_gpu->gpmu_bo);
 	a5xx_gpu->gpmu_dwords = dwords;
-
-	return;
-err:
-	if (a5xx_gpu->gpmu_iova)
-		msm_gem_put_iova(a5xx_gpu->gpmu_bo, gpu->aspace);
-	if (a5xx_gpu->gpmu_bo)
-		drm_gem_object_put(a5xx_gpu->gpmu_bo);
-
-	a5xx_gpu->gpmu_bo = NULL;
-	a5xx_gpu->gpmu_iova = 0;
-	a5xx_gpu->gpmu_dwords = 0;
 }

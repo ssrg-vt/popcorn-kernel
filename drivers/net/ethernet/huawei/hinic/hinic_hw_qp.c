@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Huawei HiNIC PCI Express Linux driver
  * Copyright(c) 2017 Huawei Technologies Co., Ltd
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
- *
  */
 
 #include <linux/kernel.h>
@@ -336,9 +327,9 @@ static int alloc_rq_cqe(struct hinic_rq *rq)
 		goto err_cqe_dma_arr_alloc;
 
 	for (i = 0; i < wq->q_depth; i++) {
-		rq->cqe[i] = dma_zalloc_coherent(&pdev->dev,
-						 sizeof(*rq->cqe[i]),
-						 &rq->cqe_dma[i], GFP_KERNEL);
+		rq->cqe[i] = dma_alloc_coherent(&pdev->dev,
+						sizeof(*rq->cqe[i]),
+						&rq->cqe_dma[i], GFP_KERNEL);
 		if (!rq->cqe[i])
 			goto err_cqe_alloc;
 	}
@@ -415,8 +406,8 @@ int hinic_init_rq(struct hinic_rq *rq, struct hinic_hwif *hwif,
 
 	/* HW requirements: Must be at least 32 bit */
 	pi_size = ALIGN(sizeof(*rq->pi_virt_addr), sizeof(u32));
-	rq->pi_virt_addr = dma_zalloc_coherent(&pdev->dev, pi_size,
-					       &rq->pi_dma_addr, GFP_KERNEL);
+	rq->pi_virt_addr = dma_alloc_coherent(&pdev->dev, pi_size,
+					      &rq->pi_dma_addr, GFP_KERNEL);
 	if (!rq->pi_virt_addr) {
 		dev_err(&pdev->dev, "Failed to allocate PI address\n");
 		err = -ENOMEM;

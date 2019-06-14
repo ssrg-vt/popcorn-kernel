@@ -11,6 +11,7 @@
 #include <linux/err.h>
 #include <linux/export.h>
 #include <linux/slab.h>
+#include <linux/stringhash.h>
 #include <linux/mutex.h>
 #include <linux/clk.h>
 #include <linux/coresight.h>
@@ -18,6 +19,7 @@
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
 
+#include "coresight-etm-perf.h"
 #include "coresight-priv.h"
 
 static DEFINE_MUTEX(coresight_mutex);
@@ -223,26 +225,28 @@ static int coresight_enable_sink(struct coresight_device *csdev,
 	 * We need to make sure the "new" session is compatible with the
 	 * existing "mode" of operation.
 	 */
-	if (sink_ops(csdev)->enable) {
-		ret = sink_ops(csdev)->enable(csdev, mode, data);
-		if (ret)
-			return ret;
-		csdev->enable = true;
-	}
+	if (!sink_ops(csdev)->enable)
+		return -EINVAL;
 
-	atomic_inc(csdev->refcnt);
+	ret = sink_ops(csdev)->enable(csdev, mode, data);
+	if (ret)
+		return ret;
+	csdev->enable = true;
 
 	return 0;
 }
 
 static void coresight_disable_sink(struct coresight_device *csdev)
 {
-	if (atomic_dec_return(csdev->refcnt) == 0) {
-		if (sink_ops(csdev)->disable) {
-			sink_ops(csdev)->disable(csdev);
-			csdev->enable = false;
-		}
-	}
+	int ret;
+
+	if (!sink_ops(csdev)->disable)
+		return;
+
+	ret = sink_ops(csdev)->disable(csdev);
+	if (ret)
+		return;
+	csdev->enable = false;
 }
 
 static int coresight_enable_link(struct coresight_device *csdev,
@@ -536,6 +540,47 @@ struct coresight_device *coresight_get_enabled_sink(bool deactivate)
 
 	dev = bus_find_device(&coresight_bustype, NULL, &deactivate,
 			      coresight_enabled_sink);
+
+	return dev ? to_coresight_device(dev) : NULL;
+}
+
+static int coresight_sink_by_id(struct device *dev, void *data)
+{
+	struct coresight_device *csdev = to_coresight_device(dev);
+	unsigned long hash;
+
+	if (csdev->type == CORESIGHT_DEV_TYPE_SINK ||
+	     csdev->type == CORESIGHT_DEV_TYPE_LINKSINK) {
+
+		if (!csdev->ea)
+			return 0;
+		/*
+		 * See function etm_perf_add_symlink_sink() to know where
+		 * this comes from.
+		 */
+		hash = (unsigned long)csdev->ea->var;
+
+		if ((u32)hash == *(u32 *)data)
+			return 1;
+	}
+
+	return 0;
+}
+
+/**
+ * coresight_get_sink_by_id - returns the sink that matches the id
+ * @id: Id of the sink to match
+ *
+ * The name of a sink is unique, whether it is found on the AMBA bus or
+ * otherwise.  As such the hash of that name can easily be used to identify
+ * a sink.
+ */
+struct coresight_device *coresight_get_sink_by_id(u32 id)
+{
+	struct device *dev = NULL;
+
+	dev = bus_find_device(&coresight_bustype, NULL, &id,
+			      coresight_sink_by_id);
 
 	return dev ? to_coresight_device(dev) : NULL;
 }
@@ -930,7 +975,6 @@ static void coresight_device_release(struct device *dev)
 {
 	struct coresight_device *csdev = to_coresight_device(dev);
 
-	kfree(csdev->conns);
 	kfree(csdev->refcnt);
 	kfree(csdev);
 }
@@ -1167,6 +1211,22 @@ struct coresight_device *coresight_register(struct coresight_desc *desc)
 		goto err_out;
 	}
 
+	if (csdev->type == CORESIGHT_DEV_TYPE_SINK ||
+	    csdev->type == CORESIGHT_DEV_TYPE_LINKSINK) {
+		ret = etm_perf_add_symlink_sink(csdev);
+
+		if (ret) {
+			device_unregister(&csdev->dev);
+			/*
+			 * As with the above, all resources are free'd
+			 * explicitly via coresight_device_release() triggered
+			 * from put_device(), which is in turn called from
+			 * function device_unregister().
+			 */
+			goto err_out;
+		}
+	}
+
 	mutex_lock(&coresight_mutex);
 
 	coresight_fixup_device_conns(csdev);
@@ -1185,6 +1245,7 @@ EXPORT_SYMBOL_GPL(coresight_register);
 
 void coresight_unregister(struct coresight_device *csdev)
 {
+	etm_perf_del_symlink_sink(csdev);
 	/* Remove references of that device in the topology */
 	coresight_remove_conns(csdev);
 	device_unregister(&csdev->dev);

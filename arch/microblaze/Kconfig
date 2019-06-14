@@ -1,5 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config MICROBLAZE
 	def_bool y
+	select ARCH_32BIT_OFF_T
 	select ARCH_NO_SWAP
 	select ARCH_HAS_DMA_COHERENT_TO_PFN if MMU
 	select ARCH_HAS_GCOV_PROFILE_ALL
@@ -12,7 +14,6 @@ config MICROBLAZE
 	select TIMER_OF
 	select CLONE_BACKWARDS3
 	select COMMON_CLK
-	select DMA_DIRECT_OPS
 	select GENERIC_ATOMIC64
 	select GENERIC_CLOCKEVENTS
 	select GENERIC_CPU_DEVICES
@@ -30,14 +31,18 @@ config MICROBLAZE
 	select HAVE_FUNCTION_TRACER
 	select HAVE_MEMBLOCK_NODE_MAP
 	select HAVE_OPROFILE
+	select HAVE_PCI
 	select IRQ_DOMAIN
 	select XILINX_INTC
 	select MODULES_USE_ELF_RELA
 	select OF
 	select OF_EARLY_FLATTREE
+	select PCI_DOMAINS_GENERIC if PCI
+	select PCI_SYSCALL if PCI
 	select TRACING_SUPPORT
 	select VIRT_TO_BUS
 	select CPU_NO_EFFICIENT_FFS
+	select MMU_GATHER_NO_RANGE if MMU
 
 # Endianness selection
 choice
@@ -55,14 +60,8 @@ config CPU_LITTLE_ENDIAN
 
 endchoice
 
-config RWSEM_GENERIC_SPINLOCK
-	def_bool y
-
 config ZONE_DMA
 	def_bool y
-
-config RWSEM_XCHGADD_ALGORITHM
-	bool
 
 config ARCH_HAS_ILOG2_U32
 	def_bool n
@@ -266,22 +265,8 @@ endmenu
 
 menu "Bus Options"
 
-config PCI
-	bool "PCI support"
-
-config PCI_DOMAINS
-	def_bool PCI
-
-config PCI_DOMAINS_GENERIC
-	def_bool PCI_DOMAINS
-
-config PCI_SYSCALL
-	def_bool PCI
-
 config PCI_XILINX
 	bool "Xilinx PCI host bridge support"
 	depends on PCI
-
-source "drivers/pci/Kconfig"
 
 endmenu

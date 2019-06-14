@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2005,2006,2007,2008 IBM Corporation
  *
@@ -6,18 +7,13 @@
  * Leendert van Doorn <leendert@watson.ibm.com>
  * Mimi Zohar         <zohar@us.ibm.com>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2 of the
- * License.
- *
  * File: ima_init.c
  *             initialization and cleanup functions
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/err.h>
@@ -123,8 +119,12 @@ int __init ima_init(void)
 	if (rc != 0)
 		return rc;
 
+	/* It can be called before ima_init_digests(), it does not use TPM. */
 	ima_load_kexec_buffer();
 
+	rc = ima_init_digests();
+	if (rc != 0)
+		return rc;
 	rc = ima_add_boot_aggregate();	/* boot aggregate must be first entry */
 	if (rc != 0)
 		return rc;

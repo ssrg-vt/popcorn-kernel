@@ -84,7 +84,6 @@ static struct scsi_host_template pm8001_sht = {
 	.this_id		= -1,
 	.sg_tablesize		= SG_ALL,
 	.max_sectors		= SCSI_DEFAULT_MAX_SECTORS,
-	.use_clustering		= ENABLE_CLUSTERING,
 	.eh_device_reset_handler = sas_eh_device_reset_handler,
 	.eh_target_reset_handler = sas_eh_target_reset_handler,
 	.target_destroy		= sas_target_destroy,
@@ -202,7 +201,7 @@ static irqreturn_t pm8001_interrupt_handler_msix(int irq, void *opaque)
 
 	if (unlikely(!pm8001_ha))
 		return IRQ_NONE;
-	if (!PM8001_CHIP_DISP->is_our_interupt(pm8001_ha))
+	if (!PM8001_CHIP_DISP->is_our_interrupt(pm8001_ha))
 		return IRQ_NONE;
 #ifdef PM8001_USE_TASKLET
 	tasklet_schedule(&pm8001_ha->tasklet[irq_vector->irq_id]);
@@ -225,7 +224,7 @@ static irqreturn_t pm8001_interrupt_handler_intx(int irq, void *dev_id)
 	pm8001_ha = sha->lldd_ha;
 	if (unlikely(!pm8001_ha))
 		return IRQ_NONE;
-	if (!PM8001_CHIP_DISP->is_our_interupt(pm8001_ha))
+	if (!PM8001_CHIP_DISP->is_our_interrupt(pm8001_ha))
 		return IRQ_NONE;
 
 #ifdef PM8001_USE_TASKLET

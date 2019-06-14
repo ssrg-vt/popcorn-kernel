@@ -1072,6 +1072,8 @@ static void log_state_transition(struct hfi1_pportdata *ppd, u32 state);
 static void log_physical_state(struct hfi1_pportdata *ppd, u32 state);
 static int wait_physical_linkstate(struct hfi1_pportdata *ppd, u32 state,
 				   int msecs);
+static int wait_phys_link_out_of_offline(struct hfi1_pportdata *ppd,
+					 int msecs);
 static void read_planned_down_reason_code(struct hfi1_devdata *dd, u8 *pdrrc);
 static void read_link_down_reason(struct hfi1_devdata *dd, u8 *ldr);
 static void handle_temp_err(struct hfi1_devdata *dd);
@@ -4102,6 +4104,9 @@ def_access_ibp_counter(seq_naks);
 
 static struct cntr_entry dev_cntrs[DEV_CNTR_LAST] = {
 [C_RCV_OVF] = RXE32_DEV_CNTR_ELEM(RcvOverflow, RCV_BUF_OVFL_CNT, CNTR_SYNTH),
+[C_RX_LEN_ERR] = RXE32_DEV_CNTR_ELEM(RxLenErr, RCV_LENGTH_ERR_CNT, CNTR_SYNTH),
+[C_RX_ICRC_ERR] = RXE32_DEV_CNTR_ELEM(RxICrcErr, RCV_ICRC_ERR_CNT, CNTR_SYNTH),
+[C_RX_EBP] = RXE32_DEV_CNTR_ELEM(RxEbpCnt, RCV_EBP_CNT, CNTR_SYNTH),
 [C_RX_TID_FULL] = RXE32_DEV_CNTR_ELEM(RxTIDFullEr, RCV_TID_FULL_ERR_CNT,
 			CNTR_NORMAL),
 [C_RX_TID_INVALID] = RXE32_DEV_CNTR_ELEM(RxTIDInvalid, RCV_TID_VALID_ERR_CNT,
@@ -4251,6 +4256,8 @@ static struct cntr_entry dev_cntrs[DEV_CNTR_LAST] = {
 			    access_sw_pio_drain),
 [C_SW_KMEM_WAIT] = CNTR_ELEM("KmemWait", 0, 0, CNTR_NORMAL,
 			    access_sw_kmem_wait),
+[C_SW_TID_WAIT] = CNTR_ELEM("TidWait", 0, 0, CNTR_NORMAL,
+			    hfi1_access_sw_tid_wait),
 [C_SW_SEND_SCHED] = CNTR_ELEM("SendSched", 0, 0, CNTR_NORMAL,
 			    access_sw_send_schedule),
 [C_SDMA_DESC_FETCHED_CNT] = CNTR_ELEM("SDEDscFdCn",
@@ -5218,6 +5225,17 @@ int is_bx(struct hfi1_devdata *dd)
 		dd->revision >> CCE_REVISION_CHIP_REV_MINOR_SHIFT
 			& CCE_REVISION_CHIP_REV_MINOR_MASK;
 	return (chip_rev_minor & 0xF0) == 0x10;
+}
+
+/* return true is kernel urg disabled for rcd */
+bool is_urg_masked(struct hfi1_ctxtdata *rcd)
+{
+	u64 mask;
+	u32 is = IS_RCVURGENT_START + rcd->ctxt;
+	u8 bit = is % 64;
+
+	mask = read_csr(rcd->dd, CCE_INT_MASK + (8 * (is / 64)));
+	return !(mask & BIT_ULL(bit));
 }
 
 /*
@@ -8350,7 +8368,6 @@ static inline void clear_recv_intr(struct hfi1_ctxtdata *rcd)
 	struct hfi1_devdata *dd = rcd->dd;
 	u32 addr = CCE_INT_CLEAR + (8 * rcd->ireg);
 
-	mmiowb();	/* make sure everything before is written */
 	write_csr(dd, addr, rcd->imask);
 	/* force the above write on the chip and get a value back */
 	(void)read_csr(dd, addr);
@@ -9833,6 +9850,7 @@ void hfi1_quiet_serdes(struct hfi1_pportdata *ppd)
 
 	/* disable the port */
 	clear_rcvctrl(dd, RCV_CTRL_RCV_PORT_ENABLE_SMASK);
+	cancel_work_sync(&ppd->freeze_work);
 }
 
 static inline int init_cpu_counters(struct hfi1_devdata *dd)
@@ -10770,13 +10788,15 @@ int set_link_state(struct hfi1_pportdata *ppd, u32 state)
 			break;
 
 		ppd->port_error_action = 0;
-		ppd->host_link_state = HLS_DN_POLL;
 
 		if (quick_linkup) {
 			/* quick linkup does not go into polling */
 			ret = do_quick_linkup(dd);
 		} else {
 			ret1 = set_physical_link_state(dd, PLS_POLLING);
+			if (!ret1)
+				ret1 = wait_phys_link_out_of_offline(ppd,
+								     3000);
 			if (ret1 != HCMD_SUCCESS) {
 				dd_dev_err(dd,
 					   "Failed to transition to Polling link state, return 0x%x\n",
@@ -10784,6 +10804,14 @@ int set_link_state(struct hfi1_pportdata *ppd, u32 state)
 				ret = -EINVAL;
 			}
 		}
+
+		/*
+		 * Change the host link state after requesting DC8051 to
+		 * change its physical state so that we can ignore any
+		 * interrupt with stale LNI(XX) error, which will not be
+		 * cleared until DC8051 transitions to Polling state.
+		 */
+		ppd->host_link_state = HLS_DN_POLL;
 		ppd->offline_disabled_reason =
 			HFI1_ODR_MASK(OPA_LINKDOWN_REASON_NONE);
 		/*
@@ -11778,12 +11806,10 @@ void update_usrhead(struct hfi1_ctxtdata *rcd, u32 hd, u32 updegr, u32 egrhd,
 			<< RCV_EGR_INDEX_HEAD_HEAD_SHIFT;
 		write_uctxt_csr(dd, ctxt, RCV_EGR_INDEX_HEAD, reg);
 	}
-	mmiowb();
 	reg = ((u64)rcv_intr_count << RCV_HDR_HEAD_COUNTER_SHIFT) |
 		(((u64)hd & RCV_HDR_HEAD_HEAD_MASK)
 			<< RCV_HDR_HEAD_HEAD_SHIFT);
 	write_uctxt_csr(dd, ctxt, RCV_HDR_HEAD, reg);
-	mmiowb();
 }
 
 u32 hdrqempty(struct hfi1_ctxtdata *rcd)
@@ -12928,6 +12954,39 @@ static int wait_phys_link_offline_substates(struct hfi1_pportdata *ppd,
 	return read_state;
 }
 
+/*
+ * wait_phys_link_out_of_offline - wait for any out of offline state
+ * @ppd: port device
+ * @msecs: the number of milliseconds to wait
+ *
+ * Wait up to msecs milliseconds for any out of offline physical link
+ * state change to occur.
+ * Returns 0 if at least one state is reached, otherwise -ETIMEDOUT.
+ */
+static int wait_phys_link_out_of_offline(struct hfi1_pportdata *ppd,
+					 int msecs)
+{
+	u32 read_state;
+	unsigned long timeout;
+
+	timeout = jiffies + msecs_to_jiffies(msecs);
+	while (1) {
+		read_state = read_physical_state(ppd->dd);
+		if ((read_state & 0xF0) != PLS_OFFLINE)
+			break;
+		if (time_after(jiffies, timeout)) {
+			dd_dev_err(ppd->dd,
+				   "timeout waiting for phy link out of offline. Read state 0x%x, %dms\n",
+				   read_state, msecs);
+			return -ETIMEDOUT;
+		}
+		usleep_range(1950, 2050); /* sleep 2ms-ish */
+	}
+
+	log_state_transition(ppd, read_state);
+	return read_state;
+}
+
 #define CLEAR_STATIC_RATE_CONTROL_SMASK(r) \
 (r &= ~SEND_CTXT_CHECK_ENABLE_DISALLOW_PBC_STATIC_RATE_CONTROL_SMASK)
 
@@ -13174,7 +13233,7 @@ static int set_up_context_variables(struct hfi1_devdata *dd)
 	int total_contexts;
 	int ret;
 	unsigned ngroups;
-	int qos_rmt_count;
+	int rmt_count;
 	int user_rmt_reduced;
 	u32 n_usr_ctxts;
 	u32 send_contexts = chip_send_contexts(dd);
@@ -13236,10 +13295,23 @@ static int set_up_context_variables(struct hfi1_devdata *dd)
 		n_usr_ctxts = rcv_contexts - total_contexts;
 	}
 
-	/* each user context requires an entry in the RMT */
-	qos_rmt_count = qos_rmt_entries(dd, NULL, NULL);
-	if (qos_rmt_count + n_usr_ctxts > NUM_MAP_ENTRIES) {
-		user_rmt_reduced = NUM_MAP_ENTRIES - qos_rmt_count;
+	/*
+	 * The RMT entries are currently allocated as shown below:
+	 * 1. QOS (0 to 128 entries);
+	 * 2. FECN (num_kernel_context - 1 + num_user_contexts +
+	 *    num_vnic_contexts);
+	 * 3. VNIC (num_vnic_contexts).
+	 * It should be noted that FECN oversubscribe num_vnic_contexts
+	 * entries of RMT because both VNIC and PSM could allocate any receive
+	 * context between dd->first_dyn_alloc_text and dd->num_rcv_contexts,
+	 * and PSM FECN must reserve an RMT entry for each possible PSM receive
+	 * context.
+	 */
+	rmt_count = qos_rmt_entries(dd, NULL, NULL) + (num_vnic_contexts * 2);
+	if (HFI1_CAP_IS_KSET(TID_RDMA))
+		rmt_count += num_kernel_contexts - 1;
+	if (rmt_count + n_usr_ctxts > NUM_MAP_ENTRIES) {
+		user_rmt_reduced = NUM_MAP_ENTRIES - rmt_count;
 		dd_dev_err(dd,
 			   "RMT size is reducing the number of user receive contexts from %u to %d\n",
 			   n_usr_ctxts,
@@ -14220,35 +14292,43 @@ bail:
 	init_qpmap_table(dd, FIRST_KERNEL_KCTXT, dd->n_krcv_queues - 1);
 }
 
-static void init_user_fecn_handling(struct hfi1_devdata *dd,
-				    struct rsm_map_table *rmt)
+static void init_fecn_handling(struct hfi1_devdata *dd,
+			       struct rsm_map_table *rmt)
 {
 	struct rsm_rule_data rrd;
 	u64 reg;
-	int i, idx, regoff, regidx;
+	int i, idx, regoff, regidx, start;
 	u8 offset;
+	u32 total_cnt;
+
+	if (HFI1_CAP_IS_KSET(TID_RDMA))
+		/* Exclude context 0 */
+		start = 1;
+	else
+		start = dd->first_dyn_alloc_ctxt;
+
+	total_cnt = dd->num_rcv_contexts - start;
 
 	/* there needs to be enough room in the map table */
-	if (rmt->used + dd->num_user_contexts >= NUM_MAP_ENTRIES) {
-		dd_dev_err(dd, "User FECN handling disabled - too many user contexts allocated\n");
+	if (rmt->used + total_cnt >= NUM_MAP_ENTRIES) {
+		dd_dev_err(dd, "FECN handling disabled - too many contexts allocated\n");
 		return;
 	}
 
 	/*
 	 * RSM will extract the destination context as an index into the
 	 * map table.  The destination contexts are a sequential block
-	 * in the range first_dyn_alloc_ctxt...num_rcv_contexts-1 (inclusive).
+	 * in the range start...num_rcv_contexts-1 (inclusive).
 	 * Map entries are accessed as offset + extracted value.  Adjust
 	 * the added offset so this sequence can be placed anywhere in
 	 * the table - as long as the entries themselves do not wrap.
 	 * There are only enough bits in offset for the table size, so
 	 * start with that to allow for a "negative" offset.
 	 */
-	offset = (u8)(NUM_MAP_ENTRIES + (int)rmt->used -
-						(int)dd->first_dyn_alloc_ctxt);
+	offset = (u8)(NUM_MAP_ENTRIES + rmt->used - start);
 
-	for (i = dd->first_dyn_alloc_ctxt, idx = rmt->used;
-				i < dd->num_rcv_contexts; i++, idx++) {
+	for (i = start, idx = rmt->used; i < dd->num_rcv_contexts;
+	     i++, idx++) {
 		/* replace with identity mapping */
 		regoff = (idx % 8) * 8;
 		regidx = idx / 8;
@@ -14283,7 +14363,7 @@ static void init_user_fecn_handling(struct hfi1_devdata *dd,
 	/* add rule 1 */
 	add_rsm_rule(dd, RSM_INS_FECN, &rrd);
 
-	rmt->used += dd->num_user_contexts;
+	rmt->used += total_cnt;
 }
 
 /* Initialize RSM for VNIC */
@@ -14370,7 +14450,7 @@ static void init_rxe(struct hfi1_devdata *dd)
 	rmt = alloc_rsm_map_table(dd);
 	/* set up QOS, including the QPN map table */
 	init_qos(dd, rmt);
-	init_user_fecn_handling(dd, rmt);
+	init_fecn_handling(dd, rmt);
 	complete_rsm_map_table(dd, rmt);
 	/* record number of used rsm map entries for vnic */
 	dd->vnic.rmt_start = rmt->used;
@@ -14596,8 +14676,8 @@ void hfi1_start_cleanup(struct hfi1_devdata *dd)
  */
 static int init_asic_data(struct hfi1_devdata *dd)
 {
-	unsigned long flags;
-	struct hfi1_devdata *tmp, *peer = NULL;
+	unsigned long index;
+	struct hfi1_devdata *peer;
 	struct hfi1_asic_data *asic_data;
 	int ret = 0;
 
@@ -14606,14 +14686,12 @@ static int init_asic_data(struct hfi1_devdata *dd)
 	if (!asic_data)
 		return -ENOMEM;
 
-	spin_lock_irqsave(&hfi1_devs_lock, flags);
+	xa_lock_irq(&hfi1_dev_table);
 	/* Find our peer device */
-	list_for_each_entry(tmp, &hfi1_dev_list, list) {
-		if ((HFI_BASE_GUID(dd) == HFI_BASE_GUID(tmp)) &&
-		    dd->unit != tmp->unit) {
-			peer = tmp;
+	xa_for_each(&hfi1_dev_table, index, peer) {
+		if ((HFI_BASE_GUID(dd) == HFI_BASE_GUID(peer)) &&
+		    dd->unit != peer->unit)
 			break;
-		}
 	}
 
 	if (peer) {
@@ -14625,7 +14703,7 @@ static int init_asic_data(struct hfi1_devdata *dd)
 		mutex_init(&dd->asic_data->asic_resource_mutex);
 	}
 	dd->asic_data->dds[dd->hfi1_id] = dd; /* self back-pointer */
-	spin_unlock_irqrestore(&hfi1_devs_lock, flags);
+	xa_unlock_irq(&hfi1_dev_table);
 
 	/* first one through - set up i2c devices */
 	if (!peer)

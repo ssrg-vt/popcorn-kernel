@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  * device driver for philips saa7134 based TV cards
  * driver core
  *
  * (c) 2001-03 Gerd Knorr <kraxel@bytesex.org> [SuSE Labs]
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include "saa7134.h"
@@ -1419,8 +1410,8 @@ static int saa7134_suspend(struct pci_dev *pci_dev , pm_message_t state)
 	del_timer(&dev->vbi_q.timeout);
 	del_timer(&dev->ts_q.timeout);
 
-	if (dev->remote)
-		saa7134_ir_stop(dev);
+	if (dev->remote && dev->remote->dev->users)
+		saa7134_ir_close(dev->remote->dev);
 
 	pci_save_state(pci_dev);
 	pci_set_power_state(pci_dev, pci_choose_state(pci_dev, state));
@@ -1447,8 +1438,8 @@ static int saa7134_resume(struct pci_dev *pci_dev)
 		saa7134_videoport_init(dev);
 	if (card_has_mpeg(dev))
 		saa7134_ts_init_hw(dev);
-	if (dev->remote)
-		saa7134_ir_start(dev);
+	if (dev->remote && dev->remote->dev->users)
+		saa7134_ir_open(dev->remote->dev);
 	saa7134_hw_enable1(dev);
 
 	msleep(100);

@@ -880,13 +880,17 @@ void dm_table_set_type(struct dm_table *t, enum dm_queue_mode type)
 }
 EXPORT_SYMBOL_GPL(dm_table_set_type);
 
+/* validate the dax capability of the target device span */
 static int device_supports_dax(struct dm_target *ti, struct dm_dev *dev,
-			       sector_t start, sector_t len, void *data)
+				       sector_t start, sector_t len, void *data)
 {
-	return bdev_dax_supported(dev->bdev, PAGE_SIZE);
+	int blocksize = *(int *) data;
+
+	return generic_fsdax_supported(dev->dax_dev, dev->bdev, blocksize,
+			start, len);
 }
 
-static bool dm_table_supports_dax(struct dm_table *t)
+bool dm_table_supports_dax(struct dm_table *t, int blocksize)
 {
 	struct dm_target *ti;
 	unsigned i;
@@ -899,7 +903,8 @@ static bool dm_table_supports_dax(struct dm_table *t)
 			return false;
 
 		if (!ti->type->iterate_devices ||
-		    !ti->type->iterate_devices(ti, device_supports_dax, NULL))
+		    !ti->type->iterate_devices(ti, device_supports_dax,
+			    &blocksize))
 			return false;
 	}
 
@@ -919,12 +924,12 @@ static int device_is_rq_based(struct dm_target *ti, struct dm_dev *dev,
 	struct request_queue *q = bdev_get_queue(dev->bdev);
 	struct verify_rq_based_data *v = data;
 
-	if (q->mq_ops)
+	if (queue_is_mq(q))
 		v->mq_count++;
 	else
 		v->sq_count++;
 
-	return queue_is_rq_based(q);
+	return queue_is_mq(q);
 }
 
 static int dm_table_determine_type(struct dm_table *t)
@@ -979,7 +984,7 @@ static int dm_table_determine_type(struct dm_table *t)
 verify_bio_based:
 		/* We must use this table as bio-based */
 		t->type = DM_TYPE_BIO_BASED;
-		if (dm_table_supports_dax(t) ||
+		if (dm_table_supports_dax(t, PAGE_SIZE) ||
 		    (list_empty(devices) && live_md_type == DM_TYPE_DAX_BIO_BASED)) {
 			t->type = DM_TYPE_DAX_BIO_BASED;
 		} else {
@@ -1698,14 +1703,6 @@ static int device_is_not_random(struct dm_target *ti, struct dm_dev *dev,
 	return q && !blk_queue_add_random(q);
 }
 
-static int queue_supports_sg_merge(struct dm_target *ti, struct dm_dev *dev,
-				   sector_t start, sector_t len, void *data)
-{
-	struct request_queue *q = bdev_get_queue(dev->bdev);
-
-	return q && !test_bit(QUEUE_FLAG_NO_SG_MERGE, &q->queue_flags);
-}
-
 static bool dm_table_all_devices_attribute(struct dm_table *t,
 					   iterate_devices_callout_fn func)
 {
@@ -1852,6 +1849,36 @@ static bool dm_table_supports_secure_erase(struct dm_table *t)
 	return true;
 }
 
+static int device_requires_stable_pages(struct dm_target *ti,
+					struct dm_dev *dev, sector_t start,
+					sector_t len, void *data)
+{
+	struct request_queue *q = bdev_get_queue(dev->bdev);
+
+	return q && bdi_cap_stable_pages_required(q->backing_dev_info);
+}
+
+/*
+ * If any underlying device requires stable pages, a table must require
+ * them as well.  Only targets that support iterate_devices are considered:
+ * don't want error, zero, etc to require stable pages.
+ */
+static bool dm_table_requires_stable_pages(struct dm_table *t)
+{
+	struct dm_target *ti;
+	unsigned i;
+
+	for (i = 0; i < dm_table_get_num_targets(t); i++) {
+		ti = dm_table_get_target(t, i);
+
+		if (ti->type->iterate_devices &&
+		    ti->type->iterate_devices(ti, device_requires_stable_pages, NULL))
+			return true;
+	}
+
+	return false;
+}
+
 void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 			       struct queue_limits *limits)
 {
@@ -1883,7 +1910,7 @@ void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 	}
 	blk_queue_write_cache(q, wc, fua);
 
-	if (dm_table_supports_dax(t))
+	if (dm_table_supports_dax(t, PAGE_SIZE))
 		blk_queue_flag_set(QUEUE_FLAG_DAX, q);
 	else
 		blk_queue_flag_clear(QUEUE_FLAG_DAX, q);
@@ -1902,12 +1929,16 @@ void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 	if (!dm_table_supports_write_zeroes(t))
 		q->limits.max_write_zeroes_sectors = 0;
 
-	if (dm_table_all_devices_attribute(t, queue_supports_sg_merge))
-		blk_queue_flag_clear(QUEUE_FLAG_NO_SG_MERGE, q);
-	else
-		blk_queue_flag_set(QUEUE_FLAG_NO_SG_MERGE, q);
-
 	dm_table_verify_integrity(t);
+
+	/*
+	 * Some devices don't use blk_integrity but still want stable pages
+	 * because they do their own checksumming.
+	 */
+	if (dm_table_requires_stable_pages(t))
+		q->backing_dev_info->capabilities |= BDI_CAP_STABLE_WRITES;
+	else
+		q->backing_dev_info->capabilities &= ~BDI_CAP_STABLE_WRITES;
 
 	/*
 	 * Determine whether or not this queue's I/O timings contribute
@@ -1927,6 +1958,9 @@ void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 	 */
 	if (blk_queue_is_zoned(q))
 		blk_revalidate_disk_zones(t->md->disk);
+
+	/* Allow reads to exceed readahead limits */
+	q->backing_dev_info->io_pages = limits->max_sectors >> (PAGE_SHIFT - 9);
 }
 
 unsigned int dm_table_get_num_targets(struct dm_table *t)

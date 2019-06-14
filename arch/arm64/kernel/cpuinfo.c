@@ -82,6 +82,16 @@ static const char *const hwcap_str[] = {
 	"ilrcpc",
 	"flagm",
 	"ssbs",
+	"sb",
+	"paca",
+	"pacg",
+	"dcpodp",
+	"sve2",
+	"sveaes",
+	"svepmull",
+	"svebitperm",
+	"svesha3",
+	"svesm4",
 	NULL
 };
 
@@ -164,7 +174,7 @@ static int c_show(struct seq_file *m, void *v)
 #endif /* CONFIG_COMPAT */
 		} else {
 			for (j = 0; hwcap_str[j]; j++)
-				if (elf_hwcap & (1 << j))
+				if (cpu_have_feature(j))
 					seq_printf(m, " %s", hwcap_str[j]);
 		}
 		seq_puts(m, "\n");

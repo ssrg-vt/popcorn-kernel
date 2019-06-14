@@ -1,18 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2008 IBM Corporation
  *
  * Author: Mimi Zohar <zohar@us.ibm.com>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2 of the
- * License.
- *
  * File: ima_api.c
  *	Implements must_appraise_or_measure, collect_measurement,
  *	appraise_measurement, store_measurement and store_template.
  */
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/file.h>
 #include <linux/fs.h>
@@ -336,7 +331,7 @@ void ima_audit_measurement(struct integrity_iint_cache *iint,
 	audit_log_untrustedstring(ab, filename);
 	audit_log_format(ab, " hash=\"%s:%s\"", algo_name, hash);
 
-	audit_log_task_info(ab, current);
+	audit_log_task_info(ab);
 	audit_log_end(ab);
 
 	iint->flags |= IMA_AUDITED;

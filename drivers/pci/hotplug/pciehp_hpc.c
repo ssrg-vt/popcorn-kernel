@@ -12,6 +12,8 @@
  * Send feedback to <greg@kroah.com>,<kristen.c.accardi@intel.com>
  */
 
+#define dev_fmt(fmt) "pciehp: " fmt
+
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/jiffies.h>
@@ -46,7 +48,7 @@ static inline int pciehp_request_irq(struct controller *ctrl)
 
 	/* Installs the interrupt handler */
 	retval = request_threaded_irq(irq, pciehp_isr, pciehp_ist,
-				      IRQF_SHARED, MY_NAME, ctrl);
+				      IRQF_SHARED, "pciehp", ctrl);
 	if (retval)
 		ctrl_err(ctrl, "Cannot get irq %d for the hotplug controller\n",
 			 irq);
@@ -156,9 +158,9 @@ static void pcie_do_write_cmd(struct controller *ctrl, u16 cmd,
 	slot_ctrl |= (cmd & mask);
 	ctrl->cmd_busy = 1;
 	smp_mb();
+	ctrl->slot_ctrl = slot_ctrl;
 	pcie_capability_write_word(pdev, PCI_EXP_SLTCTL, slot_ctrl);
 	ctrl->cmd_started = jiffies;
-	ctrl->slot_ctrl = slot_ctrl;
 
 	/*
 	 * Controllers with the Intel CF118 and similar errata advertise
@@ -232,8 +234,8 @@ static bool pci_bus_check_dev(struct pci_bus *bus, int devfn)
 		delay -= step;
 	} while (delay > 0);
 
-	if (count > 1 && pciehp_debug)
-		printk(KERN_DEBUG "pci %04x:%02x:%02x.%d id reading try %d times with interval %d ms to get %08x\n",
+	if (count > 1)
+		pr_debug("pci %04x:%02x:%02x.%d id reading try %d times with interval %d ms to get %08x\n",
 			pci_domain_nr(bus), bus->number, PCI_SLOT(devfn),
 			PCI_FUNC(devfn), count, step, l);
 
@@ -736,12 +738,25 @@ void pcie_clear_hotplug_events(struct controller *ctrl)
 
 void pcie_enable_interrupt(struct controller *ctrl)
 {
-	pcie_write_cmd(ctrl, PCI_EXP_SLTCTL_HPIE, PCI_EXP_SLTCTL_HPIE);
+	u16 mask;
+
+	mask = PCI_EXP_SLTCTL_HPIE | PCI_EXP_SLTCTL_DLLSCE;
+	pcie_write_cmd(ctrl, mask, mask);
 }
 
 void pcie_disable_interrupt(struct controller *ctrl)
 {
-	pcie_write_cmd(ctrl, 0, PCI_EXP_SLTCTL_HPIE);
+	u16 mask;
+
+	/*
+	 * Mask hot-plug interrupt to prevent it triggering immediately
+	 * when the link goes inactive (we still get PME when any of the
+	 * enabled events is detected). Same goes with Link Layer State
+	 * changed event which generates PME immediately when the link goes
+	 * inactive so mask it as well.
+	 */
+	mask = PCI_EXP_SLTCTL_HPIE | PCI_EXP_SLTCTL_DLLSCE;
+	pcie_write_cmd(ctrl, 0, mask);
 }
 
 /*
@@ -809,14 +824,11 @@ static inline void dbg_ctrl(struct controller *ctrl)
 	struct pci_dev *pdev = ctrl->pcie->port;
 	u16 reg16;
 
-	if (!pciehp_debug)
-		return;
-
-	ctrl_info(ctrl, "Slot Capabilities      : 0x%08x\n", ctrl->slot_cap);
+	ctrl_dbg(ctrl, "Slot Capabilities      : 0x%08x\n", ctrl->slot_cap);
 	pcie_capability_read_word(pdev, PCI_EXP_SLTSTA, &reg16);
-	ctrl_info(ctrl, "Slot Status            : 0x%04x\n", reg16);
+	ctrl_dbg(ctrl, "Slot Status            : 0x%04x\n", reg16);
 	pcie_capability_read_word(pdev, PCI_EXP_SLTCTL, &reg16);
-	ctrl_info(ctrl, "Slot Control           : 0x%04x\n", reg16);
+	ctrl_dbg(ctrl, "Slot Control           : 0x%04x\n", reg16);
 }
 
 #define FLAG(x, y)	(((x) & (y)) ? '+' : '-')
@@ -919,4 +931,6 @@ DECLARE_PCI_FIXUP_CLASS_EARLY(PCI_VENDOR_ID_INTEL, PCI_ANY_ID,
 DECLARE_PCI_FIXUP_CLASS_EARLY(PCI_VENDOR_ID_QCOM, 0x0400,
 			      PCI_CLASS_BRIDGE_PCI, 8, quirk_cmd_compl);
 DECLARE_PCI_FIXUP_CLASS_EARLY(PCI_VENDOR_ID_QCOM, 0x0401,
+			      PCI_CLASS_BRIDGE_PCI, 8, quirk_cmd_compl);
+DECLARE_PCI_FIXUP_CLASS_EARLY(PCI_VENDOR_ID_HXT, 0x0401,
 			      PCI_CLASS_BRIDGE_PCI, 8, quirk_cmd_compl);

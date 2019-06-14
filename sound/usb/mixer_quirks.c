@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   USB Audio Driver for ALSA
  *
@@ -11,20 +12,6 @@
  *
  *   Audio Advantage Micro II support added by:
  *	    Przemek Rudy (prudy1@o2.pl)
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/hid.h>
@@ -2195,7 +2182,6 @@ static int snd_rme_controls_create(struct usb_mixer_interface *mixer)
 int snd_usb_mixer_apply_create_quirk(struct usb_mixer_interface *mixer)
 {
 	int err = 0;
-	struct snd_info_entry *entry;
 
 	err = snd_usb_soundblaster_remote_init(mixer);
 	if (err < 0)
@@ -2214,9 +2200,8 @@ int snd_usb_mixer_apply_create_quirk(struct usb_mixer_interface *mixer)
 		err = snd_audigy2nx_controls_create(mixer);
 		if (err < 0)
 			break;
-		if (!snd_card_proc_new(mixer->chip->card, "audigy2nx", &entry))
-			snd_info_set_text_ops(entry, mixer,
-					      snd_audigy2nx_proc_read);
+		snd_card_ro_proc_new(mixer->chip->card, "audigy2nx",
+				     mixer, snd_audigy2nx_proc_read);
 		break;
 
 	/* EMU0204 */

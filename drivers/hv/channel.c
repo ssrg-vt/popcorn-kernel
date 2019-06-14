@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2009, Microsoft Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
- * Place - Suite 330, Boston, MA 02111-1307 USA.
  *
  * Authors:
  *   Haiyang Zhang <haiyangz@microsoft.com>
@@ -282,8 +270,8 @@ int vmbus_open(struct vmbus_channel *newchannel,
 EXPORT_SYMBOL_GPL(vmbus_open);
 
 /* Used for Hyper-V Socket: a guest client's connect() to the host */
-int vmbus_send_tl_connect_request(const uuid_le *shv_guest_servie_id,
-				  const uuid_le *shv_host_servie_id)
+int vmbus_send_tl_connect_request(const guid_t *shv_guest_servie_id,
+				  const guid_t *shv_host_servie_id)
 {
 	struct vmbus_channel_tl_connect_request conn_msg;
 	int ret;
@@ -701,20 +689,12 @@ static int vmbus_close_internal(struct vmbus_channel *channel)
 int vmbus_disconnect_ring(struct vmbus_channel *channel)
 {
 	struct vmbus_channel *cur_channel, *tmp;
-	unsigned long flags;
-	LIST_HEAD(list);
 	int ret;
 
 	if (channel->primary_channel != NULL)
 		return -EINVAL;
 
-	/* Snapshot the list of subchannels */
-	spin_lock_irqsave(&channel->lock, flags);
-	list_splice_init(&channel->sc_list, &list);
-	channel->num_sc = 0;
-	spin_unlock_irqrestore(&channel->lock, flags);
-
-	list_for_each_entry_safe(cur_channel, tmp, &list, sc_list) {
+	list_for_each_entry_safe(cur_channel, tmp, &channel->sc_list, sc_list) {
 		if (cur_channel->rescind)
 			wait_for_completion(&cur_channel->rescind_event);
 

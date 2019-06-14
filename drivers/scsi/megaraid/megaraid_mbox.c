@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *			Linux MegaRAID device driver
  *
  * Copyright (c) 2003-2004  LSI Logic Corporation.
- *
- *	   This program is free software; you can redistribute it and/or
- *	   modify it under the terms of the GNU General Public License
- *	   as published by the Free Software Foundation; either version
- *	   2 of the License, or (at your option) any later version.
  *
  * FILE		: megaraid_mbox.c
  * Version	: v2.20.5.1 (Nov 16 2006)
@@ -37,7 +33,6 @@
  * Dell PERC 4e/Di			1028	0013	1028	0170
  * Dell PERC 4e/DC			1000	0408	1028	0002
  * Dell PERC 4e/SC			1000	0408	1028	0001
- *
  *
  * LSI MegaRAID SCSI 320-0		1000	1960	1000	A520
  * LSI MegaRAID SCSI 320-1		1000	1960	1000	0520
@@ -336,7 +331,6 @@ static struct scsi_host_template megaraid_template_g = {
 	.eh_abort_handler		= megaraid_abort_handler,
 	.eh_host_reset_handler		= megaraid_reset_handler,
 	.change_queue_depth		= scsi_change_queue_depth,
-	.use_clustering			= ENABLE_CLUSTERING,
 	.no_write_same			= 1,
 	.sdev_attrs			= megaraid_sdev_attrs,
 	.shost_attrs			= megaraid_shost_attrs,
@@ -968,9 +962,10 @@ megaraid_alloc_cmd_packets(adapter_t *adapter)
 	 * Allocate the common 16-byte aligned memory for the handshake
 	 * mailbox.
 	 */
-	raid_dev->una_mbox64 = dma_zalloc_coherent(&adapter->pdev->dev,
-			sizeof(mbox64_t), &raid_dev->una_mbox64_dma,
-			GFP_KERNEL);
+	raid_dev->una_mbox64 = dma_alloc_coherent(&adapter->pdev->dev,
+						  sizeof(mbox64_t),
+						  &raid_dev->una_mbox64_dma,
+						  GFP_KERNEL);
 
 	if (!raid_dev->una_mbox64) {
 		con_log(CL_ANN, (KERN_WARNING
@@ -996,8 +991,8 @@ megaraid_alloc_cmd_packets(adapter_t *adapter)
 			align;
 
 	// Allocate memory for commands issued internally
-	adapter->ibuf = dma_zalloc_coherent(&pdev->dev, MBOX_IBUF_SIZE,
-			&adapter->ibuf_dma_h, GFP_KERNEL);
+	adapter->ibuf = dma_alloc_coherent(&pdev->dev, MBOX_IBUF_SIZE,
+					   &adapter->ibuf_dma_h, GFP_KERNEL);
 	if (!adapter->ibuf) {
 
 		con_log(CL_ANN, (KERN_WARNING
@@ -1243,8 +1238,7 @@ megaraid_mbox_teardown_dma_pools(adapter_t *adapter)
 		dma_pool_free(raid_dev->sg_pool_handle, sg_pci_blk[i].vaddr,
 			sg_pci_blk[i].dma_addr);
 	}
-	if (raid_dev->sg_pool_handle)
-		dma_pool_destroy(raid_dev->sg_pool_handle);
+	dma_pool_destroy(raid_dev->sg_pool_handle);
 
 
 	epthru_pci_blk = raid_dev->epthru_pool;
@@ -1252,8 +1246,7 @@ megaraid_mbox_teardown_dma_pools(adapter_t *adapter)
 		dma_pool_free(raid_dev->epthru_pool_handle,
 			epthru_pci_blk[i].vaddr, epthru_pci_blk[i].dma_addr);
 	}
-	if (raid_dev->epthru_pool_handle)
-		dma_pool_destroy(raid_dev->epthru_pool_handle);
+	dma_pool_destroy(raid_dev->epthru_pool_handle);
 
 
 	mbox_pci_blk = raid_dev->mbox_pool;
@@ -1261,8 +1254,7 @@ megaraid_mbox_teardown_dma_pools(adapter_t *adapter)
 		dma_pool_free(raid_dev->mbox_pool_handle,
 			mbox_pci_blk[i].vaddr, mbox_pci_blk[i].dma_addr);
 	}
-	if (raid_dev->mbox_pool_handle)
-		dma_pool_destroy(raid_dev->mbox_pool_handle);
+	dma_pool_destroy(raid_dev->mbox_pool_handle);
 
 	return;
 }
@@ -2901,8 +2893,8 @@ megaraid_mbox_product_info(adapter_t *adapter)
 	 * Issue an ENQUIRY3 command to find out certain adapter parameters,
 	 * e.g., max channels, max commands etc.
 	 */
-	pinfo = dma_zalloc_coherent(&adapter->pdev->dev, sizeof(mraid_pinfo_t),
-			&pinfo_dma_h, GFP_KERNEL);
+	pinfo = dma_alloc_coherent(&adapter->pdev->dev, sizeof(mraid_pinfo_t),
+				   &pinfo_dma_h, GFP_KERNEL);
 	if (pinfo == NULL) {
 		con_log(CL_ANN, (KERN_WARNING
 			"megaraid: out of memory, %s %d\n", __func__,

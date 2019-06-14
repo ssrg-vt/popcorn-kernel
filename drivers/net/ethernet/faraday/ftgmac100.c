@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Faraday FTGMAC100 Gigabit Ethernet
  *
  * (C) Copyright 2009-2011 Faraday Technology
  * Po-Yu Chuang <ratbert@faraday-tech.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
@@ -935,16 +922,14 @@ static int ftgmac100_alloc_rings(struct ftgmac100 *priv)
 		return -ENOMEM;
 
 	/* Allocate descriptors */
-	priv->rxdes = dma_zalloc_coherent(priv->dev,
-					  MAX_RX_QUEUE_ENTRIES *
-					  sizeof(struct ftgmac100_rxdes),
-					  &priv->rxdes_dma, GFP_KERNEL);
+	priv->rxdes = dma_alloc_coherent(priv->dev,
+					 MAX_RX_QUEUE_ENTRIES * sizeof(struct ftgmac100_rxdes),
+					 &priv->rxdes_dma, GFP_KERNEL);
 	if (!priv->rxdes)
 		return -ENOMEM;
-	priv->txdes = dma_zalloc_coherent(priv->dev,
-					  MAX_TX_QUEUE_ENTRIES *
-					  sizeof(struct ftgmac100_txdes),
-					  &priv->txdes_dma, GFP_KERNEL);
+	priv->txdes = dma_alloc_coherent(priv->dev,
+					 MAX_TX_QUEUE_ENTRIES * sizeof(struct ftgmac100_txdes),
+					 &priv->txdes_dma, GFP_KERNEL);
 	if (!priv->txdes)
 		return -ENOMEM;
 
@@ -1639,7 +1624,7 @@ static int ftgmac100_setup_mdio(struct net_device *netdev)
 		reg = ioread32(priv->base + FTGMAC100_OFFSET_REVR);
 		reg &= ~FTGMAC100_REVR_NEW_MDIO_INTERFACE;
 		iowrite32(reg, priv->base + FTGMAC100_OFFSET_REVR);
-	};
+	}
 
 	/* Get PHY mode from device-tree */
 	if (np) {

@@ -1,22 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  FUJITSU Extended Socket Network Device driver
  *  Copyright (c) 2015-2016 FUJITSU LIMITED
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
  */
 
 /* debugfs support for fjes driver */
@@ -62,19 +47,7 @@ static int fjes_dbg_status_show(struct seq_file *m, void *v)
 
 	return 0;
 }
-
-static int fjes_dbg_status_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, fjes_dbg_status_show, inode->i_private);
-}
-
-static const struct file_operations fjes_dbg_status_fops = {
-	.owner		= THIS_MODULE,
-	.open		= fjes_dbg_status_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(fjes_dbg_status);
 
 void fjes_dbg_adapter_init(struct fjes_adapter *adapter)
 {

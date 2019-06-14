@@ -309,9 +309,6 @@ static uint loadparam(struct adapter *padapter, _nic_hdl pnetdev)
 	registry_par->hw_wps_pbc = (u8)rtw_hw_wps_pbc;
 
 	registry_par->max_roaming_times = (u8)rtw_max_roaming_times;
-#ifdef CONFIG_INTEL_WIDI
-	registry_par->max_roaming_times = (u8)rtw_max_roaming_times + 2;
-#endif /*  CONFIG_INTEL_WIDI */
 
 	registry_par->enable80211d = (u8)rtw_80211d;
 
@@ -404,8 +401,7 @@ static unsigned int rtw_classify8021d(struct sk_buff *skb)
 
 
 static u16 rtw_select_queue(struct net_device *dev, struct sk_buff *skb,
-			    struct net_device *sb_dev,
-			    select_queue_fallback_t fallback)
+			    struct net_device *sb_dev)
 {
 	struct adapter	*padapter = rtw_netdev_priv(dev);
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
@@ -585,7 +581,7 @@ u32 rtw_start_drv_threads(struct adapter *padapter)
 	if (IS_ERR(padapter->cmdThread))
 		_status = _FAIL;
 	else
-		down(&padapter->cmdpriv.terminate_cmdthread_sema); /* wait for cmd_thread to run */
+		wait_for_completion(&padapter->cmdpriv.terminate_cmdthread_comp); /* wait for cmd_thread to run */
 
 	rtw_hal_start_thread(padapter);
 	return _status;
@@ -598,8 +594,8 @@ void rtw_stop_drv_threads (struct adapter *padapter)
 	rtw_stop_cmd_thread(padapter);
 
 	/*  Below is to termindate tx_thread... */
-	up(&padapter->xmitpriv.xmit_sema);
-	down(&padapter->xmitpriv.terminate_xmitthread_sema);
+	complete(&padapter->xmitpriv.xmit_comp);
+	wait_for_completion(&padapter->xmitpriv.terminate_xmitthread_comp);
 	RT_TRACE(_module_os_intfs_c_, _drv_info_, ("\n drv_halt: rtw_xmit_thread can be terminated !\n"));
 
 	rtw_hal_stop_thread(padapter);
@@ -757,7 +753,7 @@ u8 rtw_init_drv_sw(struct adapter *padapter)
 
 	rtw_init_hal_com_default_value(padapter);
 
-	if ((rtw_init_cmd_priv(&padapter->cmdpriv)) == _FAIL) {
+	if (rtw_init_cmd_priv(&padapter->cmdpriv)) {
 		RT_TRACE(_module_os_intfs_c_, _drv_err_, ("\n Can't init cmd_priv\n"));
 		ret8 = _FAIL;
 		goto exit;
@@ -765,7 +761,7 @@ u8 rtw_init_drv_sw(struct adapter *padapter)
 
 	padapter->cmdpriv.padapter = padapter;
 
-	if ((rtw_init_evt_priv(&padapter->evtpriv)) == _FAIL) {
+	if (rtw_init_evt_priv(&padapter->evtpriv)) {
 		RT_TRACE(_module_os_intfs_c_, _drv_err_, ("\n Can't init evt_priv\n"));
 		ret8 = _FAIL;
 		goto exit;
@@ -816,14 +812,6 @@ u8 rtw_init_drv_sw(struct adapter *padapter)
 
 	rtw_hal_dm_init(padapter);
 
-#ifdef CONFIG_INTEL_WIDI
-	if (rtw_init_intel_widi(padapter) == _FAIL) {
-		DBG_871X("Can't rtw_init_intel_widi\n");
-		ret8 = _FAIL;
-		goto exit;
-	}
-#endif /* CONFIG_INTEL_WIDI */
-
 exit:
 
 	RT_TRACE(_module_os_intfs_c_, _drv_info_, ("-rtw_init_drv_sw\n"));
@@ -859,10 +847,6 @@ void rtw_cancel_all_timer(struct adapter *padapter)
 u8 rtw_free_drv_sw(struct adapter *padapter)
 {
 	RT_TRACE(_module_os_intfs_c_, _drv_info_, ("==>rtw_free_drv_sw"));
-
-#ifdef CONFIG_INTEL_WIDI
-	rtw_free_intel_widi(padapter);
-#endif /* CONFIG_INTEL_WIDI */
 
 	free_mlme_ext_priv(&padapter->mlmeextpriv);
 

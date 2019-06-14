@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2017 Qualcomm Atheros, Inc.
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -27,7 +27,7 @@ bool wil_has_other_active_ifaces(struct wil6210_priv *wil,
 	struct wil6210_vif *vif;
 	struct net_device *ndev_i;
 
-	for (i = 0; i < wil->max_vifs; i++) {
+	for (i = 0; i < GET_MAX_VIFS(wil); i++) {
 		vif = wil->vifs[i];
 		if (vif) {
 			ndev_i = vif_to_ndev(vif);
@@ -155,7 +155,7 @@ static int wil6210_netdev_poll_tx(struct napi_struct *napi, int budget)
 		struct wil6210_vif *vif;
 
 		if (!ring->va || !txdata->enabled ||
-		    txdata->mid >= wil->max_vifs)
+		    txdata->mid >= GET_MAX_VIFS(wil))
 			continue;
 
 		vif = wil->vifs[txdata->mid];
@@ -294,7 +294,7 @@ static u8 wil_vif_find_free_mid(struct wil6210_priv *wil)
 {
 	u8 i;
 
-	for (i = 0; i < wil->max_vifs; i++) {
+	for (i = 0; i < GET_MAX_VIFS(wil); i++) {
 		if (!wil->vifs[i])
 			return i;
 	}
@@ -345,8 +345,7 @@ wil_vif_alloc(struct wil6210_priv *wil, const char *name,
 	ndev->ieee80211_ptr = wdev;
 	ndev->hw_features = NETIF_F_HW_CSUM | NETIF_F_RXCSUM |
 			    NETIF_F_SG | NETIF_F_GRO |
-			    NETIF_F_TSO | NETIF_F_TSO6 |
-			    NETIF_F_RXHASH;
+			    NETIF_F_TSO | NETIF_F_TSO6;
 
 	ndev->features |= ndev->hw_features;
 	SET_NETDEV_DEV(ndev, wiphy_dev(wdev->wiphy));
@@ -501,7 +500,7 @@ void wil_vif_remove(struct wil6210_priv *wil, u8 mid)
 	bool any_active = wil_has_active_ifaces(wil, true, false);
 
 	ASSERT_RTNL();
-	if (mid >= wil->max_vifs) {
+	if (mid >= GET_MAX_VIFS(wil)) {
 		wil_err(wil, "invalid MID: %d\n", mid);
 		return;
 	}
@@ -513,7 +512,7 @@ void wil_vif_remove(struct wil6210_priv *wil, u8 mid)
 	}
 
 	mutex_lock(&wil->mutex);
-	wil6210_disconnect(vif, NULL, WLAN_REASON_DEAUTH_LEAVING, false);
+	wil6210_disconnect(vif, NULL, WLAN_REASON_DEAUTH_LEAVING);
 	mutex_unlock(&wil->mutex);
 
 	ndev = vif_to_ndev(vif);

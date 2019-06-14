@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017, Linaro Ltd
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -91,7 +83,7 @@ static int qcom_apcs_ipc_probe(struct platform_device *pdev)
 	apcs->mbox.chans = apcs->mbox_chans;
 	apcs->mbox.num_chans = ARRAY_SIZE(apcs->mbox_chans);
 
-	ret = mbox_controller_register(&apcs->mbox);
+	ret = devm_mbox_controller_register(&pdev->dev, &apcs->mbox);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register APCS IPC controller\n");
 		return ret;
@@ -115,7 +107,6 @@ static int qcom_apcs_ipc_remove(struct platform_device *pdev)
 	struct qcom_apcs_ipc *apcs = platform_get_drvdata(pdev);
 	struct platform_device *clk = apcs->clk;
 
-	mbox_controller_unregister(&apcs->mbox);
 	platform_device_unregister(clk);
 
 	return 0;

@@ -1,13 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef _DPU_HW_CATALOG_H
@@ -252,17 +244,6 @@ struct dpu_pp_blk {
 };
 
 /**
- * struct dpu_format_extended - define dpu specific pixel format+modifier
- * @fourcc_format: Base FOURCC pixel format code
- * @modifier: 64-bit drm format modifier, same modifier must be applied to all
- *            framebuffer planes
- */
-struct dpu_format_extended {
-	uint32_t fourcc_format;
-	uint64_t modifier;
-};
-
-/**
  * enum dpu_qos_lut_usage - define QoS LUT use cases
  */
 enum dpu_qos_lut_usage {
@@ -348,7 +329,9 @@ struct dpu_sspp_blks_common {
  * @pcc_blk:
  * @igc_blk:
  * @format_list: Pointer to list of supported formats
+ * @num_formats: Number of supported formats
  * @virt_format_list: Pointer to list of supported formats for virtual planes
+ * @virt_num_formats: Number of supported formats for virtual planes
  */
 struct dpu_sspp_sub_blks {
 	const struct dpu_sspp_blks_common *common;
@@ -366,8 +349,10 @@ struct dpu_sspp_sub_blks {
 	struct dpu_pp_blk pcc_blk;
 	struct dpu_pp_blk igc_blk;
 
-	const struct dpu_format_extended *format_list;
-	const struct dpu_format_extended *virt_format_list;
+	const u32 *format_list;
+	u32 num_formats;
+	const u32 *virt_format_list;
+	u32 virt_num_formats;
 };
 
 /**
@@ -736,13 +721,4 @@ struct dpu_mdss_cfg *dpu_hw_catalog_init(u32 hw_rev);
  */
 void dpu_hw_catalog_deinit(struct dpu_mdss_cfg *dpu_cfg);
 
-/**
- * dpu_hw_sspp_multirect_enabled - check multirect enabled for the sspp
- * @cfg:          pointer to sspp cfg
- */
-static inline bool dpu_hw_sspp_multirect_enabled(const struct dpu_sspp_cfg *cfg)
-{
-	return test_bit(DPU_SSPP_SMART_DMA_V1, &cfg->features) ||
-			 test_bit(DPU_SSPP_SMART_DMA_V2, &cfg->features);
-}
 #endif /* _DPU_HW_CATALOG_H */

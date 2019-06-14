@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2017 Linus Walleij <linus.walleij@linaro.org>
  * Parts of this file were based on sources as follows:
@@ -7,11 +8,6 @@
  * Copyright (C) 2007 Dave Airlie <airlied@linux.ie>
  * Copyright (C) 2011 Texas Instruments
  * Copyright (C) 2017 Eric Anholt
- *
- * This program is free software and is provided to you under the terms of the
- * GNU General Public License version 2 as published by the Free Software
- * Foundation, and any use by you of this program is subject to the terms of
- * such GNU licence.
  */
 
 /**
@@ -43,14 +39,14 @@
 
 #include <drm/drmP.h>
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_bridge.h>
+#include <drm/drm_fb_cma_helper.h>
+#include <drm/drm_fb_helper.h>
 #include <drm/drm_gem_cma_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
-#include <drm/drm_fb_helper.h>
-#include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_panel.h>
 #include <drm/drm_of.h>
-#include <drm/drm_bridge.h>
+#include <drm/drm_panel.h>
+#include <drm/drm_probe_helper.h>
 
 #include "tve200_drm.h"
 
@@ -249,7 +245,7 @@ static int tve200_probe(struct platform_device *pdev)
 clk_disable:
 	clk_disable_unprepare(priv->pclk);
 dev_unref:
-	drm_dev_unref(drm);
+	drm_dev_put(drm);
 	return ret;
 }
 
@@ -263,7 +259,7 @@ static int tve200_remove(struct platform_device *pdev)
 		drm_panel_bridge_remove(priv->bridge);
 	drm_mode_config_cleanup(drm);
 	clk_disable_unprepare(priv->pclk);
-	drm_dev_unref(drm);
+	drm_dev_put(drm);
 
 	return 0;
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * raid5.c : Multiple Devices driver for Linux
  *	   Copyright (C) 1996, 1997 Ingo Molnar, Miguel de Icaza, Gadi Oxman
@@ -7,15 +8,6 @@
  * RAID-4/5/6 management functions.
  * Thanks to Penguin Computing for making the RAID-6 development possible
  * by donating a test server!
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * You should have received a copy of the GNU General Public License
- * (for example /usr/src/linux/COPYING); if not, write to the Free
- * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /*
@@ -54,7 +46,6 @@
 #include <linux/slab.h>
 #include <linux/ratelimit.h>
 #include <linux/nodemask.h>
-#include <linux/flex_array.h>
 
 #include <trace/events/block.h>
 #include <linux/list_sort.h>
@@ -712,6 +703,8 @@ static bool is_full_stripe_write(struct stripe_head *sh)
 }
 
 static void lock_two_stripes(struct stripe_head *sh1, struct stripe_head *sh2)
+		__acquires(&sh1->stripe_lock)
+		__acquires(&sh2->stripe_lock)
 {
 	if (sh1 > sh2) {
 		spin_lock_irq(&sh2->stripe_lock);
@@ -723,6 +716,8 @@ static void lock_two_stripes(struct stripe_head *sh1, struct stripe_head *sh2)
 }
 
 static void unlock_two_stripes(struct stripe_head *sh1, struct stripe_head *sh2)
+		__releases(&sh1->stripe_lock)
+		__releases(&sh2->stripe_lock)
 {
 	spin_unlock(&sh1->stripe_lock);
 	spin_unlock_irq(&sh2->stripe_lock);
@@ -1394,22 +1389,16 @@ static void ops_complete_compute(void *stripe_head_ref)
 }
 
 /* return a pointer to the address conversion region of the scribble buffer */
-static addr_conv_t *to_addr_conv(struct stripe_head *sh,
-				 struct raid5_percpu *percpu, int i)
+static struct page **to_addr_page(struct raid5_percpu *percpu, int i)
 {
-	void *addr;
-
-	addr = flex_array_get(percpu->scribble, i);
-	return addr + sizeof(struct page *) * (sh->disks + 2);
+	return percpu->scribble + i * percpu->scribble_obj_size;
 }
 
 /* return a pointer to the address conversion region of the scribble buffer */
-static struct page **to_addr_page(struct raid5_percpu *percpu, int i)
+static addr_conv_t *to_addr_conv(struct stripe_head *sh,
+				 struct raid5_percpu *percpu, int i)
 {
-	void *addr;
-
-	addr = flex_array_get(percpu->scribble, i);
-	return addr;
+	return (void *) (to_addr_page(percpu, i) + sh->disks + 2);
 }
 
 static struct dma_async_tx_descriptor *
@@ -2238,21 +2227,23 @@ static int grow_stripes(struct r5conf *conf, int num)
  * calculate over all devices (not just the data blocks), using zeros in place
  * of the P and Q blocks.
  */
-static struct flex_array *scribble_alloc(int num, int cnt, gfp_t flags)
+static int scribble_alloc(struct raid5_percpu *percpu,
+			  int num, int cnt, gfp_t flags)
 {
-	struct flex_array *ret;
-	size_t len;
+	size_t obj_size =
+		sizeof(struct page *) * (num+2) +
+		sizeof(addr_conv_t) * (num+2);
+	void *scribble;
 
-	len = sizeof(struct page *) * (num+2) + sizeof(addr_conv_t) * (num+2);
-	ret = flex_array_alloc(len, cnt, flags);
-	if (!ret)
-		return NULL;
-	/* always prealloc all elements, so no locking is required */
-	if (flex_array_prealloc(ret, 0, cnt, flags)) {
-		flex_array_free(ret);
-		return NULL;
-	}
-	return ret;
+	scribble = kvmalloc_array(cnt, obj_size, flags);
+	if (!scribble)
+		return -ENOMEM;
+
+	kvfree(percpu->scribble);
+
+	percpu->scribble = scribble;
+	percpu->scribble_obj_size = obj_size;
+	return 0;
 }
 
 static int resize_chunks(struct r5conf *conf, int new_disks, int new_sectors)
@@ -2270,23 +2261,18 @@ static int resize_chunks(struct r5conf *conf, int new_disks, int new_sectors)
 		return 0;
 	mddev_suspend(conf->mddev);
 	get_online_cpus();
+
 	for_each_present_cpu(cpu) {
 		struct raid5_percpu *percpu;
-		struct flex_array *scribble;
 
 		percpu = per_cpu_ptr(conf->percpu, cpu);
-		scribble = scribble_alloc(new_disks,
-					  new_sectors / STRIPE_SECTORS,
-					  GFP_NOIO);
-
-		if (scribble) {
-			flex_array_free(percpu->scribble);
-			percpu->scribble = scribble;
-		} else {
-			err = -ENOMEM;
+		err = scribble_alloc(percpu, new_disks,
+				     new_sectors / STRIPE_SECTORS,
+				     GFP_NOIO);
+		if (err)
 			break;
-		}
 	}
+
 	put_online_cpus();
 	mddev_resume(conf->mddev);
 	if (!err) {
@@ -4197,7 +4183,7 @@ static void handle_parity_checks6(struct r5conf *conf, struct stripe_head *sh,
 		/* now write out any block on a failed drive,
 		 * or P or Q if they were recomputed
 		 */
-		BUG_ON(s->uptodate < disks - 1); /* We don't need Q to recover */
+		dev = NULL;
 		if (s->failed == 2) {
 			dev = &sh->dev[s->failed_num[1]];
 			s->locked++;
@@ -4221,6 +4207,14 @@ static void handle_parity_checks6(struct r5conf *conf, struct stripe_head *sh,
 			s->locked++;
 			set_bit(R5_LOCKED, &dev->flags);
 			set_bit(R5_Wantwrite, &dev->flags);
+		}
+		if (WARN_ONCE(dev && !test_bit(R5_UPTODATE, &dev->flags),
+			      "%s: disk%td not up to date\n",
+			      mdname(conf->mddev),
+			      dev - (struct r5dev *) &sh->dev)) {
+			clear_bit(R5_LOCKED, &dev->flags);
+			clear_bit(R5_Wantwrite, &dev->flags);
+			s->locked--;
 		}
 		clear_bit(STRIPE_DEGRADED, &sh->state);
 
@@ -6176,6 +6170,8 @@ static int  retry_aligned_read(struct r5conf *conf, struct bio *raid_bio,
 static int handle_active_stripes(struct r5conf *conf, int group,
 				 struct r5worker *worker,
 				 struct list_head *temp_inactive_list)
+		__releases(&conf->device_lock)
+		__acquires(&conf->device_lock)
 {
 	struct stripe_head *batch[MAX_STRIPE_BATCH], *sh;
 	int i, batch_size = 0, hash;
@@ -6369,6 +6365,7 @@ raid5_show_stripe_cache_size(struct mddev *mddev, char *page)
 int
 raid5_set_cache_size(struct mddev *mddev, int size)
 {
+	int result = 0;
 	struct r5conf *conf = mddev->private;
 
 	if (size <= 16 || size > 32768)
@@ -6385,11 +6382,14 @@ raid5_set_cache_size(struct mddev *mddev, int size)
 
 	mutex_lock(&conf->cache_size_mutex);
 	while (size > conf->max_nr_stripes)
-		if (!grow_one_stripe(conf, GFP_KERNEL))
+		if (!grow_one_stripe(conf, GFP_KERNEL)) {
+			conf->min_nr_stripes = conf->max_nr_stripes;
+			result = -ENOMEM;
 			break;
+		}
 	mutex_unlock(&conf->cache_size_mutex);
 
-	return 0;
+	return result;
 }
 EXPORT_SYMBOL(raid5_set_cache_size);
 
@@ -6656,6 +6656,7 @@ static struct attribute *raid5_attrs[] =  {
 	&raid5_skip_copy.attr,
 	&raid5_rmw_level.attr,
 	&r5c_journal_mode.attr,
+	&ppl_write_hint.attr,
 	NULL,
 };
 static struct attribute_group raid5_attrs_group = {
@@ -6738,25 +6739,26 @@ raid5_size(struct mddev *mddev, sector_t sectors, int raid_disks)
 static void free_scratch_buffer(struct r5conf *conf, struct raid5_percpu *percpu)
 {
 	safe_put_page(percpu->spare_page);
-	if (percpu->scribble)
-		flex_array_free(percpu->scribble);
 	percpu->spare_page = NULL;
+	kvfree(percpu->scribble);
 	percpu->scribble = NULL;
 }
 
 static int alloc_scratch_buffer(struct r5conf *conf, struct raid5_percpu *percpu)
 {
-	if (conf->level == 6 && !percpu->spare_page)
+	if (conf->level == 6 && !percpu->spare_page) {
 		percpu->spare_page = alloc_page(GFP_KERNEL);
-	if (!percpu->scribble)
-		percpu->scribble = scribble_alloc(max(conf->raid_disks,
-						      conf->previous_raid_disks),
-						  max(conf->chunk_sectors,
-						      conf->prev_chunk_sectors)
-						   / STRIPE_SECTORS,
-						  GFP_KERNEL);
+		if (!percpu->spare_page)
+			return -ENOMEM;
+	}
 
-	if (!percpu->scribble || (conf->level == 6 && !percpu->spare_page)) {
+	if (scribble_alloc(percpu,
+			   max(conf->raid_disks,
+			       conf->previous_raid_disks),
+			   max(conf->chunk_sectors,
+			       conf->prev_chunk_sectors)
+			   / STRIPE_SECTORS,
+			   GFP_KERNEL)) {
 		free_scratch_buffer(conf, percpu);
 		return -ENOMEM;
 	}
@@ -7398,6 +7400,8 @@ static int raid5_run(struct mddev *mddev)
 		set_bit(MD_RECOVERY_RUNNING, &mddev->recovery);
 		mddev->sync_thread = md_register_thread(md_do_sync, mddev,
 							"reshape");
+		if (!mddev->sync_thread)
+			goto abort;
 	}
 
 	/* Ok, everything is just fine now */

@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * intel_pt_insn_decoder.c: Intel Processor Trace support
  * Copyright (c) 2013-2014, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #include <stdio.h>
@@ -178,6 +169,14 @@ int intel_pt_get_insn(const unsigned char *buf, size_t len, int x86_64,
 	else
 		memcpy(intel_pt_insn->buf, buf, INTEL_PT_INSN_BUF_SZ);
 	return 0;
+}
+
+int arch_is_branch(const unsigned char *buf, size_t len, int x86_64)
+{
+	struct intel_pt_insn in;
+	if (intel_pt_get_insn(buf, len, x86_64, &in) < 0)
+		return -1;
+	return in.branch != INTEL_PT_BR_NO_BRANCH;
 }
 
 const char *dump_insn(struct perf_insn *x, uint64_t ip __maybe_unused,

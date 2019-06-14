@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Powermac setup and early boot code plus other random bits.
  *
@@ -11,12 +12,6 @@
  *    Copyright (C) 1995 Linus Torvalds
  *
  *  Maintained by Benjamin Herrenschmidt (benh@kernel.crashing.org)
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
- *
  */
 
 /*
@@ -316,8 +311,7 @@ static void __init pmac_setup_arch(void)
 	find_via_pmu();
 	smu_init();
 
-#if defined(CONFIG_NVRAM) || defined(CONFIG_NVRAM_MODULE) || \
-    defined(CONFIG_PPC64)
+#if IS_ENABLED(CONFIG_NVRAM)
 	pmac_nvram_init();
 #endif
 #ifdef CONFIG_PPC32
@@ -560,15 +554,9 @@ static int __init check_pmac_serial_console(void)
 	}
 	pr_debug("stdout is %pOF\n", prom_stdout);
 
-	name = of_get_property(prom_stdout, "name", NULL);
-	if (!name) {
-		pr_debug(" stdout package has no name !\n");
-		goto not_found;
-	}
-
-	if (strcmp(name, "ch-a") == 0)
+	if (of_node_name_eq(prom_stdout, "ch-a"))
 		offset = 0;
-	else if (strcmp(name, "ch-b") == 0)
+	else if (of_node_name_eq(prom_stdout, "ch-b"))
 		offset = 1;
 	else
 		goto not_found;

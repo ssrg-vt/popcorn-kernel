@@ -19,7 +19,10 @@
 
 #include "fwserial.h"
 
-#define be32_to_u64(hi, lo)  ((u64)be32_to_cpu(hi) << 32 | be32_to_cpu(lo))
+inline u64 be32_to_u64(__be32 hi, __be32 lo)
+{
+	return ((u64)be32_to_cpu(hi) << 32 | be32_to_cpu(lo));
+}
 
 #define LINUX_VENDOR_ID   0xd00d1eU  /* same id used in card root directory   */
 #define FWSERIAL_VERSION  0x00e81cU  /* must be unique within LINUX_VENDOR_ID */
@@ -1213,6 +1216,7 @@ static int get_serial_info(struct tty_struct *tty,
 			   struct serial_struct *ss)
 {
 	struct fwtty_port *port = tty->driver_data;
+
 	mutex_lock(&port->port.mutex);
 	ss->type =  PORT_UNKNOWN;
 	ss->line =  port->port.tty->index;
@@ -1458,7 +1462,7 @@ static int fwtty_proc_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int fwtty_debugfs_stats_show(struct seq_file *m, void *v)
+static int fwtty_stats_show(struct seq_file *m, void *v)
 {
 	struct fw_serial *serial = m->private;
 	struct fwtty_port *port;
@@ -1476,8 +1480,9 @@ static int fwtty_debugfs_stats_show(struct seq_file *m, void *v)
 	}
 	return 0;
 }
+DEFINE_SHOW_ATTRIBUTE(fwtty_stats);
 
-static int fwtty_debugfs_peers_show(struct seq_file *m, void *v)
+static int fwtty_peers_show(struct seq_file *m, void *v)
 {
 	struct fw_serial *serial = m->private;
 	struct fwtty_peer *peer;
@@ -1491,32 +1496,7 @@ static int fwtty_debugfs_peers_show(struct seq_file *m, void *v)
 	rcu_read_unlock();
 	return 0;
 }
-
-static int fwtty_stats_open(struct inode *inode, struct file *fp)
-{
-	return single_open(fp, fwtty_debugfs_stats_show, inode->i_private);
-}
-
-static int fwtty_peers_open(struct inode *inode, struct file *fp)
-{
-	return single_open(fp, fwtty_debugfs_peers_show, inode->i_private);
-}
-
-static const struct file_operations fwtty_stats_fops = {
-	.owner =	THIS_MODULE,
-	.open =		fwtty_stats_open,
-	.read =		seq_read,
-	.llseek =	seq_lseek,
-	.release =	single_release,
-};
-
-static const struct file_operations fwtty_peers_fops = {
-	.owner =	THIS_MODULE,
-	.open =		fwtty_peers_open,
-	.read =		seq_read,
-	.llseek =	seq_lseek,
-	.release =	single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(fwtty_peers);
 
 static const struct tty_port_operations fwtty_port_ops = {
 	.dtr_rts =		fwtty_port_dtr_rts,

@@ -1,27 +1,5 @@
-/******************************************************************************
- *
- * Copyright(c) 2009-2014  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
- * Realtek Corporation, No. 2, Innovation Road II, Hsinchu Science Park,
- * Hsinchu 300, Taiwan.
- *
- * Larry Finger <Larry.Finger@lwfinger.net>
- *
- *****************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2009-2014  Realtek Corporation.*/
 
 #include "../wifi.h"
 #include "../pci.h"
@@ -353,6 +331,7 @@ bool rtl92ee_rx_query_desc(struct ieee80211_hw *hw,
 	struct rx_fwinfo *p_drvinfo;
 	struct ieee80211_hdr *hdr;
 	u32 phystatus = GET_RX_DESC_PHYST(pdesc);
+	u8 wake_match;
 
 	if (GET_RX_STATUS_DESC_RPT_SEL(pdesc) == 0)
 		status->packet_report_type = NORMAL_RX;
@@ -372,18 +351,18 @@ bool rtl92ee_rx_query_desc(struct ieee80211_hw *hw,
 	status->is_cck = RTL92EE_RX_HAL_IS_CCK_RATE(status->rate);
 
 	status->macid = GET_RX_DESC_MACID(pdesc);
-	if (GET_RX_STATUS_DESC_MAGIC_MATCH(pdesc))
-		status->wake_match = BIT(2);
+	if (GET_RX_STATUS_DESC_PATTERN_MATCH(pdesc))
+		wake_match = BIT(2);
 	else if (GET_RX_STATUS_DESC_MAGIC_MATCH(pdesc))
-		status->wake_match = BIT(1);
+		wake_match = BIT(1);
 	else if (GET_RX_STATUS_DESC_UNICAST_MATCH(pdesc))
-		status->wake_match = BIT(0);
+		wake_match = BIT(0);
 	else
-		status->wake_match = 0;
-	if (status->wake_match)
+		wake_match = 0;
+	if (wake_match)
 		RT_TRACE(rtlpriv, COMP_RXDESC, DBG_LOUD,
 			 "GGGGGGGGGGGGGet Wakeup Packet!! WakeMatch=%d\n",
-			 status->wake_match);
+			 wake_match);
 	rx_status->freq = hw->conf.chandef.chan->center_freq;
 	rx_status->band = hw->conf.chandef.chan->band;
 
@@ -393,7 +372,7 @@ bool rtl92ee_rx_query_desc(struct ieee80211_hw *hw,
 	if (status->crc)
 		rx_status->flag |= RX_FLAG_FAILED_FCS_CRC;
 
-	if (status->rx_is40Mhzpacket)
+	if (status->rx_is40mhzpacket)
 		rx_status->bw = RATE_INFO_BW_40;
 
 	if (status->is_ht)

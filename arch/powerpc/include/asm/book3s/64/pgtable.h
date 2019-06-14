@@ -277,9 +277,11 @@ extern unsigned long __vmalloc_end;
 extern unsigned long __kernel_virt_start;
 extern unsigned long __kernel_virt_size;
 extern unsigned long __kernel_io_start;
+extern unsigned long __kernel_io_end;
 #define KERN_VIRT_START __kernel_virt_start
-#define KERN_VIRT_SIZE  __kernel_virt_size
 #define KERN_IO_START  __kernel_io_start
+#define KERN_IO_END __kernel_io_end
+
 extern struct page *vmemmap;
 extern unsigned long ioremap_bot;
 extern unsigned long pci_io_base;
@@ -296,8 +298,7 @@ extern unsigned long pci_io_base;
 
 #include <asm/barrier.h>
 /*
- * The second half of the kernel virtual space is used for IO mappings,
- * it's itself carved into the PIO region (ISA and PHB IO space) and
+ * IO space itself carved into the PIO region (ISA and PHB IO space) and
  * the ioremap space
  *
  *  ISA_IO_BASE = KERN_IO_START, 64K reserved area
@@ -310,7 +311,7 @@ extern unsigned long pci_io_base;
 #define  PHB_IO_BASE	(ISA_IO_END)
 #define  PHB_IO_END	(KERN_IO_START + FULL_IO_SIZE)
 #define IOREMAP_BASE	(PHB_IO_END)
-#define IOREMAP_END	(KERN_VIRT_START + KERN_VIRT_SIZE)
+#define IOREMAP_END	(KERN_IO_END)
 
 /* Advertise special mapping type for AGP */
 #define HAVE_PAGE_AGP
@@ -811,7 +812,7 @@ static inline void __set_pte_at(struct mm_struct *mm, unsigned long addr,
 	return hash__set_pte_at(mm, addr, ptep, pte, percpu);
 }
 
-#define _PAGE_CACHE_CTL	(_PAGE_NON_IDEMPOTENT | _PAGE_TOLERANT)
+#define _PAGE_CACHE_CTL	(_PAGE_SAO | _PAGE_NON_IDEMPOTENT | _PAGE_TOLERANT)
 
 #define pgprot_noncached pgprot_noncached
 static inline pgprot_t pgprot_noncached(pgprot_t prot)
@@ -851,11 +852,6 @@ static inline bool pte_ci(pte_t pte)
 	return false;
 }
 
-static inline void pmd_set(pmd_t *pmdp, unsigned long val)
-{
-	*pmdp = __pmd(val);
-}
-
 static inline void pmd_clear(pmd_t *pmdp)
 {
 	*pmdp = __pmd(0);
@@ -887,11 +883,6 @@ static inline int pmd_bad(pmd_t pmd)
 	return hash__pmd_bad(pmd);
 }
 
-static inline void pud_set(pud_t *pudp, unsigned long val)
-{
-	*pudp = __pud(val);
-}
-
 static inline void pud_clear(pud_t *pudp)
 {
 	*pudp = __pud(0);
@@ -904,7 +895,7 @@ static inline int pud_none(pud_t pud)
 
 static inline int pud_present(pud_t pud)
 {
-	return (pud_raw(pud) & cpu_to_be64(_PAGE_PRESENT));
+	return !!(pud_raw(pud) & cpu_to_be64(_PAGE_PRESENT));
 }
 
 extern struct page *pud_page(pud_t pud);
@@ -934,10 +925,6 @@ static inline bool pud_access_permitted(pud_t pud, bool write)
 }
 
 #define pgd_write(pgd)		pte_write(pgd_pte(pgd))
-static inline void pgd_set(pgd_t *pgdp, unsigned long val)
-{
-	*pgdp = __pgd(val);
-}
 
 static inline void pgd_clear(pgd_t *pgdp)
 {
@@ -951,7 +938,7 @@ static inline int pgd_none(pgd_t pgd)
 
 static inline int pgd_present(pgd_t pgd)
 {
-	return (pgd_raw(pgd) & cpu_to_be64(_PAGE_PRESENT));
+	return !!(pgd_raw(pgd) & cpu_to_be64(_PAGE_PRESENT));
 }
 
 static inline pte_t pgd_pte(pgd_t pgd)
@@ -1006,7 +993,8 @@ extern struct page *pgd_page(pgd_t pgd);
 	(((pte_t *) pmd_page_vaddr(*(dir))) + pte_index(addr))
 
 #define pte_offset_map(dir,addr)	pte_offset_kernel((dir), (addr))
-#define pte_unmap(pte)			do { } while(0)
+
+static inline void pte_unmap(pte_t *pte) { }
 
 /* to find an entry in a kernel page-table-directory */
 /* This now only contains the vmalloc pages */
@@ -1258,21 +1246,13 @@ extern pmd_t pmdp_invalidate(struct vm_area_struct *vma, unsigned long address,
 
 #define pmd_move_must_withdraw pmd_move_must_withdraw
 struct spinlock;
-static inline int pmd_move_must_withdraw(struct spinlock *new_pmd_ptl,
-					 struct spinlock *old_pmd_ptl,
-					 struct vm_area_struct *vma)
-{
-	if (radix_enabled())
-		return false;
-	/*
-	 * Archs like ppc64 use pgtable to store per pmd
-	 * specific information. So when we switch the pmd,
-	 * we should also withdraw and deposit the pgtable
-	 */
-	return true;
-}
-
-
+extern int pmd_move_must_withdraw(struct spinlock *new_pmd_ptl,
+				  struct spinlock *old_pmd_ptl,
+				  struct vm_area_struct *vma);
+/*
+ * Hash translation mode use the deposited table to store hash pte
+ * slot information.
+ */
 #define arch_needs_pgtable_deposit arch_needs_pgtable_deposit
 static inline bool arch_needs_pgtable_deposit(void)
 {
@@ -1304,7 +1284,7 @@ static inline int pgd_devmap(pgd_t pgd)
 }
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 
-static inline const int pud_pfn(pud_t pud)
+static inline int pud_pfn(pud_t pud)
 {
 	/*
 	 * Currently all calls to pud_pfn() are gated around a pud_devmap()
@@ -1313,6 +1293,24 @@ static inline const int pud_pfn(pud_t pud)
 	 */
 	BUILD_BUG();
 	return 0;
+}
+#define __HAVE_ARCH_PTEP_MODIFY_PROT_TRANSACTION
+pte_t ptep_modify_prot_start(struct vm_area_struct *, unsigned long, pte_t *);
+void ptep_modify_prot_commit(struct vm_area_struct *, unsigned long,
+			     pte_t *, pte_t, pte_t);
+
+/*
+ * Returns true for a R -> RW upgrade of pte
+ */
+static inline bool is_pte_rw_upgrade(unsigned long old_val, unsigned long new_val)
+{
+	if (!(old_val & _PAGE_READ))
+		return false;
+
+	if ((!(old_val & _PAGE_WRITE)) && (new_val & _PAGE_WRITE))
+		return true;
+
+	return false;
 }
 
 #endif /* __ASSEMBLY__ */

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # DMA engine configuration
 #
@@ -99,7 +100,7 @@ config AT_XDMAC
 
 config AXI_DMAC
 	tristate "Analog Devices AXI-DMAC DMA support"
-	depends on MICROBLAZE || NIOS2 || ARCH_ZYNQ || ARCH_SOCFPGA || COMPILE_TEST
+	depends on MICROBLAZE || NIOS2 || ARCH_ZYNQ || ARCH_ZYNQMP || ARCH_SOCFPGA || COMPILE_TEST
 	select DMA_ENGINE
 	select DMA_VIRTUAL_CHANNELS
 	help
@@ -217,6 +218,20 @@ config FSL_EDMA
 	  Support the Freescale eDMA engine with programmable channel
 	  multiplexing capability for DMA request sources(slot).
 	  This module can be found on Freescale Vybrid and LS-1 SoCs.
+
+config FSL_QDMA
+       tristate "NXP Layerscape qDMA engine support"
+       depends on ARM || ARM64
+       select DMA_ENGINE
+       select DMA_VIRTUAL_CHANNELS
+       select DMA_ENGINE_RAID
+       select ASYNC_TX_ENABLE_CHANNEL_SWITCH
+       help
+         Support the NXP Layerscape qDMA engine with command queue and legacy mode.
+         Channel virtualization is supported through enqueuing of DMA jobs to,
+         or dequeuing DMA jobs from, different work queues.
+         This module can be found on NXP Layerscape SoCs.
+	  The qdma driver only work on  SoCs with a DPAA hardware block.
 
 config FSL_RAID
         tristate "Freescale RAID engine Support"
@@ -586,6 +601,17 @@ config TIMB_DMA
 	select DMA_ENGINE
 	help
 	  Enable support for the Timberdale FPGA DMA engine.
+
+config UNIPHIER_MDMAC
+	tristate "UniPhier MIO DMAC"
+	depends on ARCH_UNIPHIER || COMPILE_TEST
+	depends on OF
+	select DMA_ENGINE
+	select DMA_VIRTUAL_CHANNELS
+	help
+	  Enable support for the MIO DMAC (Media I/O DMA controller) on the
+	  UniPhier platform.  This DMA controller is used as the external
+	  DMA engine of the SD/eMMC controllers of the LD4, Pro4, sLD8 SoCs.
 
 config XGENE_DMA
 	tristate "APM X-Gene DMA support"

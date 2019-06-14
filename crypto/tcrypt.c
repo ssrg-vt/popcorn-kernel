@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Quick & dirty crypto testing module.
  *
@@ -14,12 +15,6 @@
  *             Gabriele Paoloni <gabriele.paoloni@intel.com>
  *             Tadeusz Struk (tadeusz.struk@intel.com)
  *             Copyright (c) 2010, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -76,10 +71,12 @@ static char *check[] = {
 	"cast6", "arc4", "michael_mic", "deflate", "crc32c", "tea", "xtea",
 	"khazad", "wp512", "wp384", "wp256", "tnepres", "xeta",  "fcrypt",
 	"camellia", "seed", "salsa20", "rmd128", "rmd160", "rmd256", "rmd320",
-	"lzo", "cts", "sha3-224", "sha3-256", "sha3-384", "sha3-512", NULL
+	"lzo", "lzo-rle", "cts", "sha3-224", "sha3-256", "sha3-384",
+	"sha3-512", "streebog256", "streebog512",
+	NULL
 };
 
-static u32 block_sizes[] = { 16, 64, 256, 1024, 8192, 0 };
+static u32 block_sizes[] = { 16, 64, 256, 1024, 1472, 8192, 0 };
 static u32 aead_sizes[] = { 16, 64, 256, 512, 1024, 2048, 4096, 8192, 0 };
 
 #define XBUFSIZE 8
@@ -1736,6 +1733,7 @@ static int do_test(const char *alg, u32 type, u32 mask, int m, u32 num_mb)
 		ret += tcrypt_test("ctr(aes)");
 		ret += tcrypt_test("rfc3686(ctr(aes))");
 		ret += tcrypt_test("ofb(aes)");
+		ret += tcrypt_test("cfb(aes)");
 		break;
 
 	case 11:
@@ -1913,6 +1911,14 @@ static int do_test(const char *alg, u32 type, u32 mask, int m, u32 num_mb)
 		ret += tcrypt_test("sm3");
 		break;
 
+	case 53:
+		ret += tcrypt_test("streebog256");
+		break;
+
+	case 54:
+		ret += tcrypt_test("streebog512");
+		break;
+
 	case 100:
 		ret += tcrypt_test("hmac(md5)");
 		break;
@@ -1967,6 +1973,14 @@ static int do_test(const char *alg, u32 type, u32 mask, int m, u32 num_mb)
 
 	case 114:
 		ret += tcrypt_test("hmac(sha3-512)");
+		break;
+
+	case 115:
+		ret += tcrypt_test("hmac(streebog256)");
+		break;
+
+	case 116:
+		ret += tcrypt_test("hmac(streebog512)");
 		break;
 
 	case 150:
@@ -2059,6 +2073,10 @@ static int do_test(const char *alg, u32 type, u32 mask, int m, u32 num_mb)
 		test_cipher_speed("ctr(aes)", ENCRYPT, sec, NULL, 0,
 				speed_template_16_24_32);
 		test_cipher_speed("ctr(aes)", DECRYPT, sec, NULL, 0,
+				speed_template_16_24_32);
+		test_cipher_speed("cfb(aes)", ENCRYPT, sec, NULL, 0,
+				speed_template_16_24_32);
+		test_cipher_speed("cfb(aes)", DECRYPT, sec, NULL, 0,
 				speed_template_16_24_32);
 		break;
 
@@ -2297,6 +2315,18 @@ static int do_test(const char *alg, u32 type, u32 mask, int m, u32 num_mb)
 		test_cipher_speed("ctr(sm4)", DECRYPT, sec, NULL, 0,
 				speed_template_16);
 		break;
+
+	case 219:
+		test_cipher_speed("adiantum(xchacha12,aes)", ENCRYPT, sec, NULL,
+				  0, speed_template_32);
+		test_cipher_speed("adiantum(xchacha12,aes)", DECRYPT, sec, NULL,
+				  0, speed_template_32);
+		test_cipher_speed("adiantum(xchacha20,aes)", ENCRYPT, sec, NULL,
+				  0, speed_template_32);
+		test_cipher_speed("adiantum(xchacha20,aes)", DECRYPT, sec, NULL,
+				  0, speed_template_32);
+		break;
+
 	case 300:
 		if (alg) {
 			test_hash_speed(alg, sec, generic_hash_speed_template);
@@ -2405,6 +2435,16 @@ static int do_test(const char *alg, u32 type, u32 mask, int m, u32 num_mb)
 		/* fall through */
 	case 326:
 		test_hash_speed("sm3", sec, generic_hash_speed_template);
+		if (mode > 300 && mode < 400) break;
+		/* fall through */
+	case 327:
+		test_hash_speed("streebog256", sec,
+				generic_hash_speed_template);
+		if (mode > 300 && mode < 400) break;
+		/* fall through */
+	case 328:
+		test_hash_speed("streebog512", sec,
+				generic_hash_speed_template);
 		if (mode > 300 && mode < 400) break;
 		/* fall through */
 	case 399:
@@ -2518,6 +2558,16 @@ static int do_test(const char *alg, u32 type, u32 mask, int m, u32 num_mb)
 	case 425:
 		test_mb_ahash_speed("sm3", sec, generic_hash_speed_template,
 				    num_mb);
+		if (mode > 400 && mode < 500) break;
+		/* fall through */
+	case 426:
+		test_mb_ahash_speed("streebog256", sec,
+				    generic_hash_speed_template, num_mb);
+		if (mode > 400 && mode < 500) break;
+		/* fall through */
+	case 427:
+		test_mb_ahash_speed("streebog512", sec,
+				    generic_hash_speed_template, num_mb);
 		if (mode > 400 && mode < 500) break;
 		/* fall through */
 	case 499:
@@ -2998,7 +3048,7 @@ err_free_tv:
  */
 static void __exit tcrypt_mod_fini(void) { }
 
-module_init(tcrypt_mod_init);
+subsys_initcall(tcrypt_mod_init);
 module_exit(tcrypt_mod_fini);
 
 module_param(alg, charp, 0);

@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2010 Texas Instruments Incorporated - http://www.ti.com/
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -759,18 +751,18 @@ static int vpbe_display_g_selection(struct file *file, void *priv,
 	return 0;
 }
 
-static int vpbe_display_cropcap(struct file *file, void *priv,
-			      struct v4l2_cropcap *cropcap)
+static int vpbe_display_g_pixelaspect(struct file *file, void *priv,
+				      int type, struct v4l2_fract *f)
 {
 	struct vpbe_layer *layer = video_drvdata(file);
 	struct vpbe_device *vpbe_dev = layer->disp_dev->vpbe_dev;
 
 	v4l2_dbg(1, debug, &vpbe_dev->v4l2_dev, "VIDIOC_CROPCAP ioctl\n");
 
-	if (cropcap->type != V4L2_BUF_TYPE_VIDEO_OUTPUT)
+	if (type != V4L2_BUF_TYPE_VIDEO_OUTPUT)
 		return -EINVAL;
 
-	cropcap->pixelaspect = vpbe_dev->current_timings.aspect;
+	*f = vpbe_dev->current_timings.aspect;
 	return 0;
 }
 
@@ -1263,7 +1255,7 @@ static const struct v4l2_ioctl_ops vpbe_ioctl_ops = {
 	.vidioc_streamoff	 = vb2_ioctl_streamoff,
 	.vidioc_expbuf		 = vb2_ioctl_expbuf,
 
-	.vidioc_cropcap		 = vpbe_display_cropcap,
+	.vidioc_g_pixelaspect	 = vpbe_display_g_pixelaspect,
 	.vidioc_g_selection	 = vpbe_display_g_selection,
 	.vidioc_s_selection	 = vpbe_display_s_selection,
 

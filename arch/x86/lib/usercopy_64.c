@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* 
  * User address space access functions.
  *
@@ -48,31 +49,11 @@ EXPORT_SYMBOL(__clear_user);
 
 unsigned long clear_user(void __user *to, unsigned long n)
 {
-	if (access_ok(VERIFY_WRITE, to, n))
+	if (access_ok(to, n))
 		return __clear_user(to, n);
 	return n;
 }
 EXPORT_SYMBOL(clear_user);
-
-/*
- * Try to copy last bytes and clear the rest if needed.
- * Since protection fault in copy_from/to_user is not a normal situation,
- * it is not necessary to optimize tail handling.
- */
-__visible unsigned long
-copy_user_handle_tail(char *to, char *from, unsigned len)
-{
-	for (; len; --len, to++) {
-		char c;
-
-		if (__get_user_nocheck(c, from++, sizeof(char)))
-			break;
-		if (__put_user_nocheck(c, to, sizeof(char)))
-			break;
-	}
-	clac();
-	return len;
-}
 
 /*
  * Similar to copy_user_handle_tail, probe for the write fault point,

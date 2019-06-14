@@ -1,4 +1,11 @@
-.. -*- coding: utf-8; mode: rst -*-
+.. Permission is granted to copy, distribute and/or modify this
+.. document under the terms of the GNU Free Documentation License,
+.. Version 1.1 or any later version published by the Free Software
+.. Foundation, with no Invariant Sections, no Front-Cover Texts
+.. and no Back-Cover Texts. A copy of the license is included at
+.. Documentation/media/uapi/fdl-appendix.rst.
+..
+.. TODO: replace it to GFDL-1.1-or-later WITH no-invariant-sections
 
 .. _VIDIOC_QBUF:
 
@@ -104,7 +111,7 @@ in use. Setting it means that the buffer will not be passed to the driver
 until the request itself is queued. Also, the driver will apply any
 settings associated with the request for this buffer. This field will
 be ignored unless the ``V4L2_BUF_FLAG_REQUEST_FD`` flag is set.
-If the device does not support requests, then ``EACCES`` will be returned.
+If the device does not support requests, then ``EBADR`` will be returned.
 If requests are supported but an invalid request file descriptor is given,
 then ``EINVAL`` will be returned.
 
@@ -116,9 +123,9 @@ then ``EINVAL`` will be returned.
    :ref:`VIDIOC_STREAMOFF <VIDIOC_STREAMON>` or calling :ref:`VIDIOC_REQBUFS`
    the check for this will be reset.
 
-   For :ref:`memory-to-memory devices <codec>` you can specify the
+   For :ref:`memory-to-memory devices <mem2mem>` you can specify the
    ``request_fd`` only for output buffers, not for capture buffers. Attempting
-   to specify this for a capture buffer will result in an ``EACCES`` error.
+   to specify this for a capture buffer will result in an ``EBADR`` error.
 
 Applications call the ``VIDIOC_DQBUF`` ioctl to dequeue a filled
 (capturing) or displayed (output) buffer from the driver's outgoing
@@ -178,9 +185,11 @@ EPIPE
     codecs if a buffer with the ``V4L2_BUF_FLAG_LAST`` was already
     dequeued and no new buffers are expected to become available.
 
-EACCES
+EBADR
     The ``V4L2_BUF_FLAG_REQUEST_FD`` flag was set but the device does not
-    support requests for the given buffer type.
+    support requests for the given buffer type, or
+    the ``V4L2_BUF_FLAG_REQUEST_FD`` flag was not set but the device requires
+    that the buffer is part of a request.
 
 EBUSY
     The first buffer was queued via a request, but the application now tries

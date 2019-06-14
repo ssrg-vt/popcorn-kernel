@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for sunxi SD/MMC host controllers
  * (C) Copyright 2007-2011 Reuuimlla Technology Co., Ltd.
@@ -6,11 +7,6 @@
  * (C) Copyright 2013-2014 David Lanzendörfer <david.lanzendoerfer@o2s.ch>
  * (C) Copyright 2013-2014 Hans de Goede <hdegoede@redhat.com>
  * (C) Copyright 2017 Sootech SA
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  */
 
 #include <linux/clk.h>
@@ -19,7 +15,6 @@
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
@@ -32,7 +27,6 @@
 #include <linux/mmc/slot-gpio.h>
 #include <linux/module.h>
 #include <linux/of_address.h>
-#include <linux/of_gpio.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
@@ -1399,12 +1393,36 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 	mmc->caps	       |= MMC_CAP_MMC_HIGHSPEED | MMC_CAP_SD_HIGHSPEED |
 				  MMC_CAP_ERASE | MMC_CAP_SDIO_IRQ;
 
-	if (host->cfg->clk_delays || host->use_new_timings)
+	/*
+	 * Some H5 devices do not have signal traces precise enough to
+	 * use HS DDR mode for their eMMC chips.
+	 *
+	 * We still enable HS DDR modes for all the other controller
+	 * variants that support them.
+	 */
+	if ((host->cfg->clk_delays || host->use_new_timings) &&
+	    !of_device_is_compatible(pdev->dev.of_node,
+				     "allwinner,sun50i-h5-emmc"))
 		mmc->caps      |= MMC_CAP_1_8V_DDR | MMC_CAP_3_3V_DDR;
 
 	ret = mmc_of_parse(mmc);
 	if (ret)
 		goto error_free_dma;
+
+	/*
+	 * If we don't support delay chains in the SoC, we can't use any
+	 * of the higher speed modes. Mask them out in case the device
+	 * tree specifies the properties for them, which gets added to
+	 * the caps by mmc_of_parse() above.
+	 */
+	if (!(host->cfg->clk_delays || host->use_new_timings)) {
+		mmc->caps &= ~(MMC_CAP_3_3V_DDR | MMC_CAP_1_8V_DDR |
+			       MMC_CAP_1_2V_DDR | MMC_CAP_UHS);
+		mmc->caps2 &= ~MMC_CAP2_HS200;
+	}
+
+	/* TODO: This driver doesn't support HS400 mode yet */
+	mmc->caps2 &= ~MMC_CAP2_HS400;
 
 	ret = sunxi_mmc_init_host(host);
 	if (ret)

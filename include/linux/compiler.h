@@ -53,23 +53,24 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
  * "Define 'is'", Bill Clinton
  * "Define 'if'", Steven Rostedt
  */
-#define if(cond, ...) __trace_if( (cond , ## __VA_ARGS__) )
-#define __trace_if(cond) \
-	if (__builtin_constant_p(!!(cond)) ? !!(cond) :			\
-	({								\
-		int ______r;						\
-		static struct ftrace_branch_data			\
-			__aligned(4)					\
-			__section("_ftrace_branch")			\
-			______f = {					\
-				.func = __func__,			\
-				.file = __FILE__,			\
-				.line = __LINE__,			\
-			};						\
-		______r = !!(cond);					\
-		______f.miss_hit[______r]++;					\
-		______r;						\
-	}))
+#define if(cond, ...) if ( __trace_if_var( !!(cond , ## __VA_ARGS__) ) )
+
+#define __trace_if_var(cond) (__builtin_constant_p(cond) ? (cond) : __trace_if_value(cond))
+
+#define __trace_if_value(cond) ({			\
+	static struct ftrace_branch_data		\
+		__aligned(4)				\
+		__section("_ftrace_branch")		\
+		__if_trace = {				\
+			.func = __func__,		\
+			.file = __FILE__,		\
+			.line = __LINE__,		\
+		};					\
+	(cond) ?					\
+		(__if_trace.miss_hit[1]++,1) :		\
+		(__if_trace.miss_hit[0]++,0);		\
+})
+
 #endif /* CONFIG_PROFILE_ALL_BRANCHES */
 
 #else
@@ -99,13 +100,22 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
  * unique, to convince GCC not to merge duplicate inline asm statements.
  */
 #define annotate_reachable() ({						\
-	asm volatile("ANNOTATE_REACHABLE counter=%c0"			\
-		     : : "i" (__COUNTER__));				\
+	asm volatile("%c0:\n\t"						\
+		     ".pushsection .discard.reachable\n\t"		\
+		     ".long %c0b - .\n\t"				\
+		     ".popsection\n\t" : : "i" (__COUNTER__));		\
 })
 #define annotate_unreachable() ({					\
-	asm volatile("ANNOTATE_UNREACHABLE counter=%c0"			\
-		     : : "i" (__COUNTER__));				\
+	asm volatile("%c0:\n\t"						\
+		     ".pushsection .discard.unreachable\n\t"		\
+		     ".long %c0b - .\n\t"				\
+		     ".popsection\n\t" : : "i" (__COUNTER__));		\
 })
+#define ASM_UNREACHABLE							\
+	"999:\n\t"							\
+	".pushsection .discard.unreachable\n\t"				\
+	".long 999b - .\n\t"						\
+	".popsection\n\t"
 #else
 #define annotate_reachable()
 #define annotate_unreachable()
@@ -152,7 +162,9 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 #endif
 
 #ifndef OPTIMIZER_HIDE_VAR
-#define OPTIMIZER_HIDE_VAR(var) barrier()
+/* Make the optimizer believe the variable can be manipulated arbitrarily. */
+#define OPTIMIZER_HIDE_VAR(var)						\
+	__asm__ ("" : "=r" (var) : "0" (var))
 #endif
 
 /* Not-quite-unique ID. */
@@ -293,45 +305,6 @@ static inline void *offset_to_ptr(const int *off)
 	return (void *)((unsigned long)off + *off);
 }
 
-#else /* __ASSEMBLY__ */
-
-#ifdef __KERNEL__
-#ifndef LINKER_SCRIPT
-
-#ifdef CONFIG_STACK_VALIDATION
-.macro ANNOTATE_UNREACHABLE counter:req
-\counter:
-	.pushsection .discard.unreachable
-	.long \counter\()b -.
-	.popsection
-.endm
-
-.macro ANNOTATE_REACHABLE counter:req
-\counter:
-	.pushsection .discard.reachable
-	.long \counter\()b -.
-	.popsection
-.endm
-
-.macro ASM_UNREACHABLE
-999:
-	.pushsection .discard.unreachable
-	.long 999b - .
-	.popsection
-.endm
-#else /* CONFIG_STACK_VALIDATION */
-.macro ANNOTATE_UNREACHABLE counter:req
-.endm
-
-.macro ANNOTATE_REACHABLE counter:req
-.endm
-
-.macro ASM_UNREACHABLE
-.endm
-#endif /* CONFIG_STACK_VALIDATION */
-
-#endif /* LINKER_SCRIPT */
-#endif /* __KERNEL__ */
 #endif /* __ASSEMBLY__ */
 
 /* Compile time object size, -1 for unknown */

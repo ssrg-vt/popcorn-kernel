@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
  * Copyright (C) 2004-2008 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License version 2.
  */
 
 #include <linux/spinlock.h>
@@ -28,6 +25,7 @@
 #include "util.h"
 #include "trans.h"
 #include "dir.h"
+#include "lops.h"
 
 struct workqueue_struct *gfs2_freeze_wq;
 
@@ -466,17 +464,25 @@ static int inode_go_lock(struct gfs2_holder *gh)
  *
  */
 
-static void inode_go_dump(struct seq_file *seq, const struct gfs2_glock *gl)
+static void inode_go_dump(struct seq_file *seq, struct gfs2_glock *gl)
 {
-	const struct gfs2_inode *ip = gl->gl_object;
+	struct gfs2_inode *ip = gl->gl_object;
+	struct inode *inode = &ip->i_inode;
+	unsigned long nrpages;
+
 	if (ip == NULL)
 		return;
-	gfs2_print_dbg(seq, " I: n:%llu/%llu t:%u f:0x%02lx d:0x%08x s:%llu\n",
+
+	xa_lock_irq(&inode->i_data.i_pages);
+	nrpages = inode->i_data.nrpages;
+	xa_unlock_irq(&inode->i_data.i_pages);
+
+	gfs2_print_dbg(seq, " I: n:%llu/%llu t:%u f:0x%02lx d:0x%08x s:%llu p:%lu\n",
 		  (unsigned long long)ip->i_no_formal_ino,
 		  (unsigned long long)ip->i_no_addr,
 		  IF2DT(ip->i_inode.i_mode), ip->i_flags,
 		  (unsigned int)ip->i_diskflags,
-		  (unsigned long long)i_size_read(&ip->i_inode));
+		  (unsigned long long)i_size_read(inode), nrpages);
 }
 
 /**
@@ -523,7 +529,7 @@ static int freeze_go_xmote_bh(struct gfs2_glock *gl, struct gfs2_holder *gh)
 	if (test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags)) {
 		j_gl->gl_ops->go_inval(j_gl, DIO_METADATA);
 
-		error = gfs2_find_jhead(sdp->sd_jdesc, &head);
+		error = gfs2_find_jhead(sdp->sd_jdesc, &head, false);
 		if (error)
 			gfs2_consist(sdp);
 		if (!(head.lh_flags & GFS2_LOG_HEAD_UNMOUNT))

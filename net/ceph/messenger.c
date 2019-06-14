@@ -186,17 +186,18 @@ static atomic_t addr_str_seq = ATOMIC_INIT(0);
 
 static struct page *zero_page;		/* used in certain error cases */
 
-const char *ceph_pr_addr(const struct sockaddr_storage *ss)
+const char *ceph_pr_addr(const struct ceph_entity_addr *addr)
 {
 	int i;
 	char *s;
-	struct sockaddr_in *in4 = (struct sockaddr_in *) ss;
-	struct sockaddr_in6 *in6 = (struct sockaddr_in6 *) ss;
+	struct sockaddr_storage ss = addr->in_addr; /* align */
+	struct sockaddr_in *in4 = (struct sockaddr_in *)&ss;
+	struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)&ss;
 
 	i = atomic_inc_return(&addr_str_seq) & ADDR_STR_COUNT_MASK;
 	s = addr_str[i];
 
-	switch (ss->ss_family) {
+	switch (ss.ss_family) {
 	case AF_INET:
 		snprintf(s, MAX_ADDR_STR_LEN, "%pI4:%hu", &in4->sin_addr,
 			 ntohs(in4->sin_port));
@@ -209,7 +210,7 @@ const char *ceph_pr_addr(const struct sockaddr_storage *ss)
 
 	default:
 		snprintf(s, MAX_ADDR_STR_LEN, "(unknown sockaddr family %hu)",
-			 ss->ss_family);
+			 ss.ss_family);
 	}
 
 	return s;
@@ -449,7 +450,7 @@ static void set_sock_callbacks(struct socket *sock,
  */
 static int ceph_tcp_connect(struct ceph_connection *con)
 {
-	struct sockaddr_storage *paddr = &con->peer_addr.in_addr;
+	struct sockaddr_storage ss = con->peer_addr.in_addr; /* align */
 	struct socket *sock;
 	unsigned int noio_flag;
 	int ret;
@@ -458,7 +459,7 @@ static int ceph_tcp_connect(struct ceph_connection *con)
 
 	/* sock_create_kern() allocates with GFP_KERNEL */
 	noio_flag = memalloc_noio_save();
-	ret = sock_create_kern(read_pnet(&con->msgr->net), paddr->ss_family,
+	ret = sock_create_kern(read_pnet(&con->msgr->net), ss.ss_family,
 			       SOCK_STREAM, IPPROTO_TCP, &sock);
 	memalloc_noio_restore(noio_flag);
 	if (ret)
@@ -471,18 +472,18 @@ static int ceph_tcp_connect(struct ceph_connection *con)
 
 	set_sock_callbacks(sock, con);
 
-	dout("connect %s\n", ceph_pr_addr(&con->peer_addr.in_addr));
+	dout("connect %s\n", ceph_pr_addr(&con->peer_addr));
 
 	con_sock_state_connecting(con);
-	ret = sock->ops->connect(sock, (struct sockaddr *)paddr, sizeof(*paddr),
+	ret = sock->ops->connect(sock, (struct sockaddr *)&ss, sizeof(ss),
 				 O_NONBLOCK);
 	if (ret == -EINPROGRESS) {
 		dout("connect %s EINPROGRESS sk_state = %u\n",
-		     ceph_pr_addr(&con->peer_addr.in_addr),
+		     ceph_pr_addr(&con->peer_addr),
 		     sock->sk->sk_state);
 	} else if (ret < 0) {
 		pr_err("connect %s error %d\n",
-		       ceph_pr_addr(&con->peer_addr.in_addr), ret);
+		       ceph_pr_addr(&con->peer_addr), ret);
 		sock_release(sock);
 		return ret;
 	}
@@ -544,7 +545,7 @@ static int ceph_tcp_recvpage(struct socket *sock, struct page *page,
  * shortly.
  */
 static int ceph_tcp_sendmsg(struct socket *sock, struct kvec *iov,
-		     size_t kvlen, size_t len, int more)
+			    size_t kvlen, size_t len, bool more)
 {
 	struct msghdr msg = { .msg_flags = MSG_DONTWAIT | MSG_NOSIGNAL };
 	int r;
@@ -560,24 +561,15 @@ static int ceph_tcp_sendmsg(struct socket *sock, struct kvec *iov,
 	return r;
 }
 
-static int __ceph_tcp_sendpage(struct socket *sock, struct page *page,
-		     int offset, size_t size, bool more)
-{
-	int flags = MSG_DONTWAIT | MSG_NOSIGNAL | (more ? MSG_MORE : MSG_EOR);
-	int ret;
-
-	ret = kernel_sendpage(sock, page, offset, size, flags);
-	if (ret == -EAGAIN)
-		ret = 0;
-
-	return ret;
-}
-
+/*
+ * @more: either or both of MSG_MORE and MSG_SENDPAGE_NOTLAST
+ */
 static int ceph_tcp_sendpage(struct socket *sock, struct page *page,
-		     int offset, size_t size, bool more)
+			     int offset, size_t size, int more)
 {
-	struct msghdr msg = { .msg_flags = MSG_DONTWAIT | MSG_NOSIGNAL };
-	struct bio_vec bvec;
+	ssize_t (*sendpage)(struct socket *sock, struct page *page,
+			    int offset, size_t size, int flags);
+	int flags = MSG_DONTWAIT | MSG_NOSIGNAL | more;
 	int ret;
 
 	/*
@@ -589,19 +581,11 @@ static int ceph_tcp_sendpage(struct socket *sock, struct page *page,
 	 * triggers one of hardened usercopy checks.
 	 */
 	if (page_count(page) >= 1 && !PageSlab(page))
-		return __ceph_tcp_sendpage(sock, page, offset, size, more);
-
-	bvec.bv_page = page;
-	bvec.bv_offset = offset;
-	bvec.bv_len = size;
-
-	if (more)
-		msg.msg_flags |= MSG_MORE;
+		sendpage = sock->ops->sendpage;
 	else
-		msg.msg_flags |= MSG_EOR;  /* superfluous, but what the hell */
+		sendpage = sock_no_sendpage;
 
-	iov_iter_bvec(&msg.msg_iter, WRITE, &bvec, 1, size);
-	ret = sock_sendmsg(sock, &msg);
+	ret = sendpage(sock, page, offset, size, flags);
 	if (ret == -EAGAIN)
 		ret = 0;
 
@@ -686,8 +670,7 @@ static void reset_connection(struct ceph_connection *con)
 void ceph_con_close(struct ceph_connection *con)
 {
 	mutex_lock(&con->mutex);
-	dout("con_close %p peer %s\n", con,
-	     ceph_pr_addr(&con->peer_addr.in_addr));
+	dout("con_close %p peer %s\n", con, ceph_pr_addr(&con->peer_addr));
 	con->state = CON_STATE_CLOSED;
 
 	con_flag_clear(con, CON_FLAG_LOSSYTX);	/* so we retry next connect */
@@ -711,7 +694,7 @@ void ceph_con_open(struct ceph_connection *con,
 		   struct ceph_entity_addr *addr)
 {
 	mutex_lock(&con->mutex);
-	dout("con_open %p %s\n", con, ceph_pr_addr(&addr->in_addr));
+	dout("con_open %p %s\n", con, ceph_pr_addr(addr));
 
 	WARN_ON(con->state != CON_STATE_CLOSED);
 	con->state = CON_STATE_PREOPEN;
@@ -857,6 +840,7 @@ static bool ceph_msg_data_bio_advance(struct ceph_msg_data_cursor *cursor,
 					size_t bytes)
 {
 	struct ceph_bio_iter *it = &cursor->bio_iter;
+	struct page *page = bio_iter_page(it->bio, it->iter);
 
 	BUG_ON(bytes > cursor->resid);
 	BUG_ON(bytes > bio_iter_len(it->bio, it->iter));
@@ -868,7 +852,8 @@ static bool ceph_msg_data_bio_advance(struct ceph_msg_data_cursor *cursor,
 		return false;   /* no more data */
 	}
 
-	if (!bytes || (it->iter.bi_size && it->iter.bi_bvec_done))
+	if (!bytes || (it->iter.bi_size && it->iter.bi_bvec_done &&
+		       page == bio_iter_page(it->bio, it->iter)))
 		return false;	/* more bytes to process in this segment */
 
 	if (!it->iter.bi_size) {
@@ -916,6 +901,7 @@ static bool ceph_msg_data_bvecs_advance(struct ceph_msg_data_cursor *cursor,
 					size_t bytes)
 {
 	struct bio_vec *bvecs = cursor->data->bvec_pos.bvecs;
+	struct page *page = bvec_iter_page(bvecs, cursor->bvec_iter);
 
 	BUG_ON(bytes > cursor->resid);
 	BUG_ON(bytes > bvec_iter_len(bvecs, cursor->bvec_iter));
@@ -927,7 +913,8 @@ static bool ceph_msg_data_bvecs_advance(struct ceph_msg_data_cursor *cursor,
 		return false;   /* no more data */
 	}
 
-	if (!bytes || cursor->bvec_iter.bi_bvec_done)
+	if (!bytes || (cursor->bvec_iter.bi_bvec_done &&
+		       page == bvec_iter_page(bvecs, cursor->bvec_iter)))
 		return false;	/* more bytes to process in this segment */
 
 	BUG_ON(cursor->last_piece);
@@ -1572,6 +1559,7 @@ static int write_partial_message_data(struct ceph_connection *con)
 	struct ceph_msg *msg = con->out_msg;
 	struct ceph_msg_data_cursor *cursor = &msg->cursor;
 	bool do_datacrc = !ceph_test_opt(from_msgr(con->msgr), NOCRC);
+	int more = MSG_MORE | MSG_SENDPAGE_NOTLAST;
 	u32 crc;
 
 	dout("%s %p msg %p\n", __func__, con, msg);
@@ -1592,7 +1580,6 @@ static int write_partial_message_data(struct ceph_connection *con)
 		struct page *page;
 		size_t page_offset;
 		size_t length;
-		bool last_piece;
 		int ret;
 
 		if (!cursor->resid) {
@@ -1600,10 +1587,11 @@ static int write_partial_message_data(struct ceph_connection *con)
 			continue;
 		}
 
-		page = ceph_msg_data_next(cursor, &page_offset, &length,
-					  &last_piece);
-		ret = ceph_tcp_sendpage(con->sock, page, page_offset,
-					length, !last_piece);
+		page = ceph_msg_data_next(cursor, &page_offset, &length, NULL);
+		if (length == cursor->total_resid)
+			more = MSG_MORE;
+		ret = ceph_tcp_sendpage(con->sock, page, page_offset, length,
+					more);
 		if (ret <= 0) {
 			if (do_datacrc)
 				msg->footer.data_crc = cpu_to_le32(crc);
@@ -1633,13 +1621,16 @@ static int write_partial_message_data(struct ceph_connection *con)
  */
 static int write_partial_skip(struct ceph_connection *con)
 {
+	int more = MSG_MORE | MSG_SENDPAGE_NOTLAST;
 	int ret;
 
 	dout("%s %p %d left\n", __func__, con, con->out_skip);
 	while (con->out_skip > 0) {
 		size_t size = min(con->out_skip, (int) PAGE_SIZE);
 
-		ret = ceph_tcp_sendpage(con->sock, zero_page, 0, size, true);
+		if (size == con->out_skip)
+			more = MSG_MORE;
+		ret = ceph_tcp_sendpage(con->sock, zero_page, 0, size, more);
 		if (ret <= 0)
 			goto out;
 		con->out_skip -= ret;
@@ -1797,21 +1788,22 @@ static int verify_hello(struct ceph_connection *con)
 {
 	if (memcmp(con->in_banner, CEPH_BANNER, strlen(CEPH_BANNER))) {
 		pr_err("connect to %s got bad banner\n",
-		       ceph_pr_addr(&con->peer_addr.in_addr));
+		       ceph_pr_addr(&con->peer_addr));
 		con->error_msg = "protocol error, bad banner";
 		return -1;
 	}
 	return 0;
 }
 
-static bool addr_is_blank(struct sockaddr_storage *ss)
+static bool addr_is_blank(struct ceph_entity_addr *addr)
 {
-	struct in_addr *addr = &((struct sockaddr_in *)ss)->sin_addr;
-	struct in6_addr *addr6 = &((struct sockaddr_in6 *)ss)->sin6_addr;
+	struct sockaddr_storage ss = addr->in_addr; /* align */
+	struct in_addr *addr4 = &((struct sockaddr_in *)&ss)->sin_addr;
+	struct in6_addr *addr6 = &((struct sockaddr_in6 *)&ss)->sin6_addr;
 
-	switch (ss->ss_family) {
+	switch (ss.ss_family) {
 	case AF_INET:
-		return addr->s_addr == htonl(INADDR_ANY);
+		return addr4->s_addr == htonl(INADDR_ANY);
 	case AF_INET6:
 		return ipv6_addr_any(addr6);
 	default:
@@ -1819,25 +1811,25 @@ static bool addr_is_blank(struct sockaddr_storage *ss)
 	}
 }
 
-static int addr_port(struct sockaddr_storage *ss)
+static int addr_port(struct ceph_entity_addr *addr)
 {
-	switch (ss->ss_family) {
+	switch (get_unaligned(&addr->in_addr.ss_family)) {
 	case AF_INET:
-		return ntohs(((struct sockaddr_in *)ss)->sin_port);
+		return ntohs(get_unaligned(&((struct sockaddr_in *)&addr->in_addr)->sin_port));
 	case AF_INET6:
-		return ntohs(((struct sockaddr_in6 *)ss)->sin6_port);
+		return ntohs(get_unaligned(&((struct sockaddr_in6 *)&addr->in_addr)->sin6_port));
 	}
 	return 0;
 }
 
-static void addr_set_port(struct sockaddr_storage *ss, int p)
+static void addr_set_port(struct ceph_entity_addr *addr, int p)
 {
-	switch (ss->ss_family) {
+	switch (get_unaligned(&addr->in_addr.ss_family)) {
 	case AF_INET:
-		((struct sockaddr_in *)ss)->sin_port = htons(p);
+		put_unaligned(htons(p), &((struct sockaddr_in *)&addr->in_addr)->sin_port);
 		break;
 	case AF_INET6:
-		((struct sockaddr_in6 *)ss)->sin6_port = htons(p);
+		put_unaligned(htons(p), &((struct sockaddr_in6 *)&addr->in_addr)->sin6_port);
 		break;
 	}
 }
@@ -1845,21 +1837,18 @@ static void addr_set_port(struct sockaddr_storage *ss, int p)
 /*
  * Unlike other *_pton function semantics, zero indicates success.
  */
-static int ceph_pton(const char *str, size_t len, struct sockaddr_storage *ss,
+static int ceph_pton(const char *str, size_t len, struct ceph_entity_addr *addr,
 		char delim, const char **ipend)
 {
-	struct sockaddr_in *in4 = (struct sockaddr_in *) ss;
-	struct sockaddr_in6 *in6 = (struct sockaddr_in6 *) ss;
+	memset(&addr->in_addr, 0, sizeof(addr->in_addr));
 
-	memset(ss, 0, sizeof(*ss));
-
-	if (in4_pton(str, len, (u8 *)&in4->sin_addr.s_addr, delim, ipend)) {
-		ss->ss_family = AF_INET;
+	if (in4_pton(str, len, (u8 *)&((struct sockaddr_in *)&addr->in_addr)->sin_addr.s_addr, delim, ipend)) {
+		put_unaligned(AF_INET, &addr->in_addr.ss_family);
 		return 0;
 	}
 
-	if (in6_pton(str, len, (u8 *)&in6->sin6_addr.s6_addr, delim, ipend)) {
-		ss->ss_family = AF_INET6;
+	if (in6_pton(str, len, (u8 *)&((struct sockaddr_in6 *)&addr->in_addr)->sin6_addr.s6_addr, delim, ipend)) {
+		put_unaligned(AF_INET6, &addr->in_addr.ss_family);
 		return 0;
 	}
 
@@ -1871,7 +1860,7 @@ static int ceph_pton(const char *str, size_t len, struct sockaddr_storage *ss,
  */
 #ifdef CONFIG_CEPH_LIB_USE_DNS_RESOLVER
 static int ceph_dns_resolve_name(const char *name, size_t namelen,
-		struct sockaddr_storage *ss, char delim, const char **ipend)
+		struct ceph_entity_addr *addr, char delim, const char **ipend)
 {
 	const char *end, *delim_p;
 	char *colon_p, *ip_addr = NULL;
@@ -1898,9 +1887,9 @@ static int ceph_dns_resolve_name(const char *name, size_t namelen,
 		return -EINVAL;
 
 	/* do dns_resolve upcall */
-	ip_len = dns_query(NULL, name, end - name, NULL, &ip_addr, NULL);
+	ip_len = dns_query(NULL, name, end - name, NULL, &ip_addr, NULL, false);
 	if (ip_len > 0)
-		ret = ceph_pton(ip_addr, ip_len, ss, -1, NULL);
+		ret = ceph_pton(ip_addr, ip_len, addr, -1, NULL);
 	else
 		ret = -ESRCH;
 
@@ -1909,13 +1898,13 @@ static int ceph_dns_resolve_name(const char *name, size_t namelen,
 	*ipend = end;
 
 	pr_info("resolve '%.*s' (ret=%d): %s\n", (int)(end - name), name,
-			ret, ret ? "failed" : ceph_pr_addr(ss));
+			ret, ret ? "failed" : ceph_pr_addr(addr));
 
 	return ret;
 }
 #else
 static inline int ceph_dns_resolve_name(const char *name, size_t namelen,
-		struct sockaddr_storage *ss, char delim, const char **ipend)
+		struct ceph_entity_addr *addr, char delim, const char **ipend)
 {
 	return -EINVAL;
 }
@@ -1926,13 +1915,13 @@ static inline int ceph_dns_resolve_name(const char *name, size_t namelen,
  * then try to extract a hostname to resolve using userspace DNS upcall.
  */
 static int ceph_parse_server_name(const char *name, size_t namelen,
-			struct sockaddr_storage *ss, char delim, const char **ipend)
+		struct ceph_entity_addr *addr, char delim, const char **ipend)
 {
 	int ret;
 
-	ret = ceph_pton(name, namelen, ss, delim, ipend);
+	ret = ceph_pton(name, namelen, addr, delim, ipend);
 	if (ret)
-		ret = ceph_dns_resolve_name(name, namelen, ss, delim, ipend);
+		ret = ceph_dns_resolve_name(name, namelen, addr, delim, ipend);
 
 	return ret;
 }
@@ -1951,7 +1940,6 @@ int ceph_parse_ips(const char *c, const char *end,
 	dout("parse_ips on '%.*s'\n", (int)(end-c), c);
 	for (i = 0; i < max_count; i++) {
 		const char *ipend;
-		struct sockaddr_storage *ss = &addr[i].in_addr;
 		int port;
 		char delim = ',';
 
@@ -1960,7 +1948,7 @@ int ceph_parse_ips(const char *c, const char *end,
 			p++;
 		}
 
-		ret = ceph_parse_server_name(p, end - p, ss, delim, &ipend);
+		ret = ceph_parse_server_name(p, end - p, &addr[i], delim, &ipend);
 		if (ret)
 			goto bad;
 		ret = -EINVAL;
@@ -1991,9 +1979,9 @@ int ceph_parse_ips(const char *c, const char *end,
 			port = CEPH_MON_PORT;
 		}
 
-		addr_set_port(ss, port);
+		addr_set_port(&addr[i], port);
 
-		dout("parse_ips got %s\n", ceph_pr_addr(ss));
+		dout("parse_ips got %s\n", ceph_pr_addr(&addr[i]));
 
 		if (p == end)
 			break;
@@ -2032,12 +2020,12 @@ static int process_banner(struct ceph_connection *con)
 	 */
 	if (memcmp(&con->peer_addr, &con->actual_peer_addr,
 		   sizeof(con->peer_addr)) != 0 &&
-	    !(addr_is_blank(&con->actual_peer_addr.in_addr) &&
+	    !(addr_is_blank(&con->actual_peer_addr) &&
 	      con->actual_peer_addr.nonce == con->peer_addr.nonce)) {
 		pr_warn("wrong peer, want %s/%d, got %s/%d\n",
-			ceph_pr_addr(&con->peer_addr.in_addr),
+			ceph_pr_addr(&con->peer_addr),
 			(int)le32_to_cpu(con->peer_addr.nonce),
-			ceph_pr_addr(&con->actual_peer_addr.in_addr),
+			ceph_pr_addr(&con->actual_peer_addr),
 			(int)le32_to_cpu(con->actual_peer_addr.nonce));
 		con->error_msg = "wrong peer at address";
 		return -1;
@@ -2046,16 +2034,16 @@ static int process_banner(struct ceph_connection *con)
 	/*
 	 * did we learn our address?
 	 */
-	if (addr_is_blank(&con->msgr->inst.addr.in_addr)) {
-		int port = addr_port(&con->msgr->inst.addr.in_addr);
+	if (addr_is_blank(&con->msgr->inst.addr)) {
+		int port = addr_port(&con->msgr->inst.addr);
 
 		memcpy(&con->msgr->inst.addr.in_addr,
 		       &con->peer_addr_for_me.in_addr,
 		       sizeof(con->peer_addr_for_me.in_addr));
-		addr_set_port(&con->msgr->inst.addr.in_addr, port);
+		addr_set_port(&con->msgr->inst.addr, port);
 		encode_my_addr(con->msgr);
 		dout("process_banner learned my addr is %s\n",
-		     ceph_pr_addr(&con->msgr->inst.addr.in_addr));
+		     ceph_pr_addr(&con->msgr->inst.addr));
 	}
 
 	return 0;
@@ -2071,6 +2059,8 @@ static int process_connect(struct ceph_connection *con)
 	dout("process_connect on %p tag %d\n", con, (int)con->in_tag);
 
 	if (con->auth) {
+		int len = le32_to_cpu(con->in_reply.authorizer_len);
+
 		/*
 		 * Any connection that defines ->get_authorizer()
 		 * should also define ->add_authorizer_challenge() and
@@ -2080,8 +2070,7 @@ static int process_connect(struct ceph_connection *con)
 		 */
 		if (con->in_reply.tag == CEPH_MSGR_TAG_CHALLENGE_AUTHORIZER) {
 			ret = con->ops->add_authorizer_challenge(
-				    con, con->auth->authorizer_reply_buf,
-				    le32_to_cpu(con->in_reply.authorizer_len));
+				    con, con->auth->authorizer_reply_buf, len);
 			if (ret < 0)
 				return ret;
 
@@ -2091,10 +2080,12 @@ static int process_connect(struct ceph_connection *con)
 			return 0;
 		}
 
-		ret = con->ops->verify_authorizer_reply(con);
-		if (ret < 0) {
-			con->error_msg = "bad authorize reply";
-			return ret;
+		if (len) {
+			ret = con->ops->verify_authorizer_reply(con);
+			if (ret < 0) {
+				con->error_msg = "bad authorize reply";
+				return ret;
+			}
 		}
 	}
 
@@ -2103,7 +2094,7 @@ static int process_connect(struct ceph_connection *con)
 		pr_err("%s%lld %s feature set mismatch,"
 		       " my %llx < server's %llx, missing %llx\n",
 		       ENTITY_NAME(con->peer_name),
-		       ceph_pr_addr(&con->peer_addr.in_addr),
+		       ceph_pr_addr(&con->peer_addr),
 		       sup_feat, server_feat, server_feat & ~sup_feat);
 		con->error_msg = "missing required protocol features";
 		reset_connection(con);
@@ -2113,7 +2104,7 @@ static int process_connect(struct ceph_connection *con)
 		pr_err("%s%lld %s protocol version mismatch,"
 		       " my %d != server's %d\n",
 		       ENTITY_NAME(con->peer_name),
-		       ceph_pr_addr(&con->peer_addr.in_addr),
+		       ceph_pr_addr(&con->peer_addr),
 		       le32_to_cpu(con->out_connect.protocol_version),
 		       le32_to_cpu(con->in_reply.protocol_version));
 		con->error_msg = "protocol version mismatch";
@@ -2147,7 +2138,7 @@ static int process_connect(struct ceph_connection *con)
 		     le32_to_cpu(con->in_reply.connect_seq));
 		pr_err("%s%lld %s connection reset\n",
 		       ENTITY_NAME(con->peer_name),
-		       ceph_pr_addr(&con->peer_addr.in_addr));
+		       ceph_pr_addr(&con->peer_addr));
 		reset_connection(con);
 		con_out_kvec_reset(con);
 		ret = prepare_write_connect(con);
@@ -2204,7 +2195,7 @@ static int process_connect(struct ceph_connection *con)
 			pr_err("%s%lld %s protocol feature mismatch,"
 			       " my required %llx > server's %llx, need %llx\n",
 			       ENTITY_NAME(con->peer_name),
-			       ceph_pr_addr(&con->peer_addr.in_addr),
+			       ceph_pr_addr(&con->peer_addr),
 			       req_feat, server_feat, req_feat & ~server_feat);
 			con->error_msg = "missing required protocol features";
 			reset_connection(con);
@@ -2411,7 +2402,7 @@ static int read_partial_message(struct ceph_connection *con)
 	if ((s64)seq - (s64)con->in_seq < 1) {
 		pr_info("skipping %s%lld %s seq %lld expected %lld\n",
 			ENTITY_NAME(con->peer_name),
-			ceph_pr_addr(&con->peer_addr.in_addr),
+			ceph_pr_addr(&con->peer_addr),
 			seq, con->in_seq + 1);
 		con->in_base_pos = -front_len - middle_len - data_len -
 			sizeof_footer(con);
@@ -2990,10 +2981,10 @@ static void ceph_con_workfn(struct work_struct *work)
 static void con_fault(struct ceph_connection *con)
 {
 	dout("fault %p state %lu to peer %s\n",
-	     con, con->state, ceph_pr_addr(&con->peer_addr.in_addr));
+	     con, con->state, ceph_pr_addr(&con->peer_addr));
 
 	pr_warn("%s%lld %s %s\n", ENTITY_NAME(con->peer_name),
-		ceph_pr_addr(&con->peer_addr.in_addr), con->error_msg);
+		ceph_pr_addr(&con->peer_addr), con->error_msg);
 	con->error_msg = NULL;
 
 	WARN_ON(con->state != CON_STATE_CONNECTING &&
@@ -3219,9 +3210,10 @@ void ceph_con_keepalive(struct ceph_connection *con)
 	dout("con_keepalive %p\n", con);
 	mutex_lock(&con->mutex);
 	clear_standby(con);
+	con_flag_set(con, CON_FLAG_KEEPALIVE_PENDING);
 	mutex_unlock(&con->mutex);
-	if (con_flag_test_and_set(con, CON_FLAG_KEEPALIVE_PENDING) == 0 &&
-	    con_flag_test_and_set(con, CON_FLAG_WRITE_PENDING) == 0)
+
+	if (con_flag_test_and_set(con, CON_FLAG_WRITE_PENDING) == 0)
 		queue_con(con);
 }
 EXPORT_SYMBOL(ceph_con_keepalive);

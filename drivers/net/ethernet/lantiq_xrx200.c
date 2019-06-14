@@ -335,7 +335,6 @@ static const struct net_device_ops xrx200_netdev_ops = {
 	.ndo_start_xmit		= xrx200_start_xmit,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
-	.ndo_change_mtu		= eth_change_mtu,
 };
 
 static irqreturn_t xrx200_dma_irq(int irq, void *ptr)
@@ -479,7 +478,7 @@ static int xrx200_probe(struct platform_device *pdev)
 	}
 
 	mac = of_get_mac_address(np);
-	if (mac && is_valid_ether_addr(mac))
+	if (!IS_ERR(mac))
 		ether_addr_copy(net_dev->dev_addr, mac);
 	else
 		eth_hw_addr_random(net_dev);

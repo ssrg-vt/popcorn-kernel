@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/kernel/signal.c
  *
@@ -19,7 +20,9 @@
 #include <linux/sched/task.h>
 #include <linux/sched/task_stack.h>
 #include <linux/sched/cputime.h>
+#include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/proc_fs.h>
 #include <linux/tty.h>
 #include <linux/binfmts.h>
 #include <linux/coredump.h>
@@ -41,6 +44,7 @@
 #include <linux/compiler.h>
 #include <linux/posix-timers.h>
 #include <linux/livepatch.h>
+#include <linux/cgroup.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
@@ -144,9 +148,10 @@ static inline bool has_pending_signals(sigset_t *signal, sigset_t *blocked)
 
 static bool recalc_sigpending_tsk(struct task_struct *t)
 {
-	if ((t->jobctl & JOBCTL_PENDING_MASK) ||
+	if ((t->jobctl & (JOBCTL_PENDING_MASK | JOBCTL_TRAP_FREEZE)) ||
 	    PENDING(&t->pending, &t->blocked) ||
-	    PENDING(&t->signal->shared_pending, &t->blocked)) {
+	    PENDING(&t->signal->shared_pending, &t->blocked) ||
+	    cgroup_task_frozen(t)) {
 		set_tsk_thread_flag(t, TIF_SIGPENDING);
 		return true;
 	}
@@ -688,6 +693,48 @@ int dequeue_signal(struct task_struct *tsk, sigset_t *mask, kernel_siginfo_t *in
 }
 EXPORT_SYMBOL_GPL(dequeue_signal);
 
+static int dequeue_synchronous_signal(kernel_siginfo_t *info)
+{
+	struct task_struct *tsk = current;
+	struct sigpending *pending = &tsk->pending;
+	struct sigqueue *q, *sync = NULL;
+
+	/*
+	 * Might a synchronous signal be in the queue?
+	 */
+	if (!((pending->signal.sig[0] & ~tsk->blocked.sig[0]) & SYNCHRONOUS_MASK))
+		return 0;
+
+	/*
+	 * Return the first synchronous signal in the queue.
+	 */
+	list_for_each_entry(q, &pending->list, list) {
+		/* Synchronous signals have a postive si_code */
+		if ((q->info.si_code > SI_USER) &&
+		    (sigmask(q->info.si_signo) & SYNCHRONOUS_MASK)) {
+			sync = q;
+			goto next;
+		}
+	}
+	return 0;
+next:
+	/*
+	 * Check if there is another siginfo for the same signal.
+	 */
+	list_for_each_entry_continue(q, &pending->list, list) {
+		if (q->info.si_signo == sync->info.si_signo)
+			goto still_pending;
+	}
+
+	sigdelset(&pending->signal, sync->info.si_signo);
+	recalc_sigpending();
+still_pending:
+	list_del_init(&sync->list);
+	copy_siginfo(info, &sync->info);
+	__sigqueue_free(sync);
+	return info->si_signo;
+}
+
 /*
  * Tell a process that it has a new active signal..
  *
@@ -794,6 +841,7 @@ static int check_kill_permission(int sig, struct kernel_siginfo *info,
 			 */
 			if (!sid || sid == task_session(current))
 				break;
+			/* fall through */
 		default:
 			return -EPERM;
 		}
@@ -1057,10 +1105,9 @@ static int __send_signal(int sig, struct kernel_siginfo *info, struct task_struc
 
 	result = TRACE_SIGNAL_DELIVERED;
 	/*
-	 * Skip useless siginfo allocation for SIGKILL SIGSTOP,
-	 * and kernel threads.
+	 * Skip useless siginfo allocation for SIGKILL and kernel threads.
 	 */
-	if (sig_kernel_only(sig) || (t->flags & PF_KTHREAD))
+	if ((sig == SIGKILL) || (t->flags & PF_KTHREAD))
 		goto out_set;
 
 	/*
@@ -2065,7 +2112,9 @@ static void ptrace_stop(int exit_code, int why, int clear_code, kernel_siginfo_t
 		preempt_disable();
 		read_unlock(&tasklist_lock);
 		preempt_enable_no_resched();
+		cgroup_enter_frozen();
 		freezable_schedule();
+		cgroup_leave_frozen(true);
 	} else {
 		/*
 		 * By the time we got the lock, our tracer went away.
@@ -2243,6 +2292,7 @@ static bool do_signal_stop(int signr)
 		}
 
 		/* Now we don't run again until woken by SIGCONT or SIGKILL */
+		cgroup_enter_frozen();
 		freezable_schedule();
 		return true;
 	} else {
@@ -2287,6 +2337,43 @@ static void do_jobctl_trap(void)
 		ptrace_stop(signr, CLD_STOPPED, 0, NULL);
 		current->exit_code = 0;
 	}
+}
+
+/**
+ * do_freezer_trap - handle the freezer jobctl trap
+ *
+ * Puts the task into frozen state, if only the task is not about to quit.
+ * In this case it drops JOBCTL_TRAP_FREEZE.
+ *
+ * CONTEXT:
+ * Must be called with @current->sighand->siglock held,
+ * which is always released before returning.
+ */
+static void do_freezer_trap(void)
+	__releases(&current->sighand->siglock)
+{
+	/*
+	 * If there are other trap bits pending except JOBCTL_TRAP_FREEZE,
+	 * let's make another loop to give it a chance to be handled.
+	 * In any case, we'll return back.
+	 */
+	if ((current->jobctl & (JOBCTL_PENDING_MASK | JOBCTL_TRAP_FREEZE)) !=
+	     JOBCTL_TRAP_FREEZE) {
+		spin_unlock_irq(&current->sighand->siglock);
+		return;
+	}
+
+	/*
+	 * Now we're sure that there is no pending fatal signal and no
+	 * pending traps. Clear TIF_SIGPENDING to not get out of schedule()
+	 * immediately (if there is a non-fatal signal pending), and
+	 * put the task into sleep.
+	 */
+	__set_current_state(TASK_INTERRUPTIBLE);
+	clear_thread_flag(TIF_SIGPENDING);
+	spin_unlock_irq(&current->sighand->siglock);
+	cgroup_enter_frozen();
+	freezable_schedule();
 }
 
 static int ptrace_signal(int signr, kernel_siginfo_t *info)
@@ -2394,6 +2481,16 @@ relock:
 		goto relock;
 	}
 
+	/* Has this task already been marked for death? */
+	if (signal_group_exit(signal)) {
+		ksig->info.si_signo = signr = SIGKILL;
+		sigdelset(&current->pending.signal, SIGKILL);
+		trace_signal_deliver(SIGKILL, SEND_SIG_NOINFO,
+				&sighand->action[SIGKILL - 1]);
+		recalc_sigpending();
+		goto fatal;
+	}
+
 	for (;;) {
 		struct k_sigaction *ka;
 
@@ -2401,13 +2498,36 @@ relock:
 		    do_signal_stop(0))
 			goto relock;
 
-		if (unlikely(current->jobctl & JOBCTL_TRAP_MASK)) {
-			do_jobctl_trap();
-			spin_unlock_irq(&sighand->siglock);
+		if (unlikely(current->jobctl &
+			     (JOBCTL_TRAP_MASK | JOBCTL_TRAP_FREEZE))) {
+			if (current->jobctl & JOBCTL_TRAP_MASK) {
+				do_jobctl_trap();
+				spin_unlock_irq(&sighand->siglock);
+			} else if (current->jobctl & JOBCTL_TRAP_FREEZE)
+				do_freezer_trap();
+
 			goto relock;
 		}
 
-		signr = dequeue_signal(current, &current->blocked, &ksig->info);
+		/*
+		 * If the task is leaving the frozen state, let's update
+		 * cgroup counters and reset the frozen bit.
+		 */
+		if (unlikely(cgroup_task_frozen(current))) {
+			spin_unlock_irq(&sighand->siglock);
+			cgroup_leave_frozen(false);
+			goto relock;
+		}
+
+		/*
+		 * Signals generated by the execution of an instruction
+		 * need to be delivered before any other pending signals
+		 * so that the instruction pointer in the signal stack
+		 * frame points to the faulting instruction.
+		 */
+		signr = dequeue_synchronous_signal(&ksig->info);
+		if (!signr)
+			signr = dequeue_signal(current, &current->blocked, &ksig->info);
 
 		if (!signr)
 			break; /* will return 0 */
@@ -2489,7 +2609,10 @@ relock:
 			continue;
 		}
 
+	fatal:
 		spin_unlock_irq(&sighand->siglock);
+		if (unlikely(cgroup_task_frozen(current)))
+			cgroup_leave_frozen(true);
 
 		/*
 		 * Anything else is fatal, maybe with a core dump.
@@ -2734,6 +2857,84 @@ int sigprocmask(int how, sigset_t *set, sigset_t *oldset)
 	return 0;
 }
 EXPORT_SYMBOL(sigprocmask);
+
+/*
+ * The api helps set app-provided sigmasks.
+ *
+ * This is useful for syscalls such as ppoll, pselect, io_pgetevents and
+ * epoll_pwait where a new sigmask is passed from userland for the syscalls.
+ */
+int set_user_sigmask(const sigset_t __user *usigmask, sigset_t *set,
+		     sigset_t *oldset, size_t sigsetsize)
+{
+	if (!usigmask)
+		return 0;
+
+	if (sigsetsize != sizeof(sigset_t))
+		return -EINVAL;
+	if (copy_from_user(set, usigmask, sizeof(sigset_t)))
+		return -EFAULT;
+
+	*oldset = current->blocked;
+	set_current_blocked(set);
+
+	return 0;
+}
+EXPORT_SYMBOL(set_user_sigmask);
+
+#ifdef CONFIG_COMPAT
+int set_compat_user_sigmask(const compat_sigset_t __user *usigmask,
+			    sigset_t *set, sigset_t *oldset,
+			    size_t sigsetsize)
+{
+	if (!usigmask)
+		return 0;
+
+	if (sigsetsize != sizeof(compat_sigset_t))
+		return -EINVAL;
+	if (get_compat_sigset(set, usigmask))
+		return -EFAULT;
+
+	*oldset = current->blocked;
+	set_current_blocked(set);
+
+	return 0;
+}
+EXPORT_SYMBOL(set_compat_user_sigmask);
+#endif
+
+/*
+ * restore_user_sigmask:
+ * usigmask: sigmask passed in from userland.
+ * sigsaved: saved sigmask when the syscall started and changed the sigmask to
+ *           usigmask.
+ *
+ * This is useful for syscalls such as ppoll, pselect, io_pgetevents and
+ * epoll_pwait where a new sigmask is passed in from userland for the syscalls.
+ */
+void restore_user_sigmask(const void __user *usigmask, sigset_t *sigsaved)
+{
+
+	if (!usigmask)
+		return;
+	/*
+	 * When signals are pending, do not restore them here.
+	 * Restoring sigmask here can lead to delivering signals that the above
+	 * syscalls are intended to block because of the sigmask passed in.
+	 */
+	if (signal_pending(current)) {
+		current->saved_sigmask = *sigsaved;
+		set_restore_sigmask();
+		return;
+	}
+
+	/*
+	 * This is needed because the fast syscall return path does not restore
+	 * saved_sigmask when signals are not pending.
+	 */
+	set_current_blocked(sigsaved);
+}
+EXPORT_SYMBOL(restore_user_sigmask);
 
 /**
  *  sys_rt_sigprocmask - change the list of currently blocked signals
@@ -3254,8 +3455,72 @@ SYSCALL_DEFINE4(rt_sigtimedwait, const sigset_t __user *, uthese,
 	return ret;
 }
 
+#ifdef CONFIG_COMPAT_32BIT_TIME
+SYSCALL_DEFINE4(rt_sigtimedwait_time32, const sigset_t __user *, uthese,
+		siginfo_t __user *, uinfo,
+		const struct old_timespec32 __user *, uts,
+		size_t, sigsetsize)
+{
+	sigset_t these;
+	struct timespec64 ts;
+	kernel_siginfo_t info;
+	int ret;
+
+	if (sigsetsize != sizeof(sigset_t))
+		return -EINVAL;
+
+	if (copy_from_user(&these, uthese, sizeof(these)))
+		return -EFAULT;
+
+	if (uts) {
+		if (get_old_timespec32(&ts, uts))
+			return -EFAULT;
+	}
+
+	ret = do_sigtimedwait(&these, &info, uts ? &ts : NULL);
+
+	if (ret > 0 && uinfo) {
+		if (copy_siginfo_to_user(uinfo, &info))
+			ret = -EFAULT;
+	}
+
+	return ret;
+}
+#endif
+
 #ifdef CONFIG_COMPAT
-COMPAT_SYSCALL_DEFINE4(rt_sigtimedwait, compat_sigset_t __user *, uthese,
+COMPAT_SYSCALL_DEFINE4(rt_sigtimedwait_time64, compat_sigset_t __user *, uthese,
+		struct compat_siginfo __user *, uinfo,
+		struct __kernel_timespec __user *, uts, compat_size_t, sigsetsize)
+{
+	sigset_t s;
+	struct timespec64 t;
+	kernel_siginfo_t info;
+	long ret;
+
+	if (sigsetsize != sizeof(sigset_t))
+		return -EINVAL;
+
+	if (get_compat_sigset(&s, uthese))
+		return -EFAULT;
+
+	if (uts) {
+		if (get_timespec64(&t, uts))
+			return -EFAULT;
+	}
+
+	ret = do_sigtimedwait(&s, &info, uts ? &t : NULL);
+
+	if (ret > 0 && uinfo) {
+		if (copy_siginfo_to_user32(uinfo, &info))
+			ret = -EFAULT;
+	}
+
+	return ret;
+}
+
+#ifdef CONFIG_COMPAT_32BIT_TIME
+COMPAT_SYSCALL_DEFINE4(rt_sigtimedwait_time32, compat_sigset_t __user *, uthese,
 		struct compat_siginfo __user *, uinfo,
 		struct old_timespec32 __user *, uts, compat_size_t, sigsetsize)
 {
@@ -3285,6 +3550,17 @@ COMPAT_SYSCALL_DEFINE4(rt_sigtimedwait, compat_sigset_t __user *, uthese,
 	return ret;
 }
 #endif
+#endif
+
+static inline void prepare_kill_siginfo(int sig, struct kernel_siginfo *info)
+{
+	clear_siginfo(info);
+	info->si_signo = sig;
+	info->si_errno = 0;
+	info->si_code = SI_USER;
+	info->si_pid = task_tgid_vnr(current);
+	info->si_uid = from_kuid_munged(current_user_ns(), current_uid());
+}
 
 /**
  *  sys_kill - send a signal to a process
@@ -3295,14 +3571,123 @@ SYSCALL_DEFINE2(kill, pid_t, pid, int, sig)
 {
 	struct kernel_siginfo info;
 
-	clear_siginfo(&info);
-	info.si_signo = sig;
-	info.si_errno = 0;
-	info.si_code = SI_USER;
-	info.si_pid = task_tgid_vnr(current);
-	info.si_uid = from_kuid_munged(current_user_ns(), current_uid());
+	prepare_kill_siginfo(sig, &info);
 
 	return kill_something_info(sig, &info, pid);
+}
+
+/*
+ * Verify that the signaler and signalee either are in the same pid namespace
+ * or that the signaler's pid namespace is an ancestor of the signalee's pid
+ * namespace.
+ */
+static bool access_pidfd_pidns(struct pid *pid)
+{
+	struct pid_namespace *active = task_active_pid_ns(current);
+	struct pid_namespace *p = ns_of_pid(pid);
+
+	for (;;) {
+		if (!p)
+			return false;
+		if (p == active)
+			break;
+		p = p->parent;
+	}
+
+	return true;
+}
+
+static int copy_siginfo_from_user_any(kernel_siginfo_t *kinfo, siginfo_t *info)
+{
+#ifdef CONFIG_COMPAT
+	/*
+	 * Avoid hooking up compat syscalls and instead handle necessary
+	 * conversions here. Note, this is a stop-gap measure and should not be
+	 * considered a generic solution.
+	 */
+	if (in_compat_syscall())
+		return copy_siginfo_from_user32(
+			kinfo, (struct compat_siginfo __user *)info);
+#endif
+	return copy_siginfo_from_user(kinfo, info);
+}
+
+static struct pid *pidfd_to_pid(const struct file *file)
+{
+	if (file->f_op == &pidfd_fops)
+		return file->private_data;
+
+	return tgid_pidfd_to_pid(file);
+}
+
+/**
+ * sys_pidfd_send_signal - Signal a process through a pidfd
+ * @pidfd:  file descriptor of the process
+ * @sig:    signal to send
+ * @info:   signal info
+ * @flags:  future flags
+ *
+ * The syscall currently only signals via PIDTYPE_PID which covers
+ * kill(<positive-pid>, <signal>. It does not signal threads or process
+ * groups.
+ * In order to extend the syscall to threads and process groups the @flags
+ * argument should be used. In essence, the @flags argument will determine
+ * what is signaled and not the file descriptor itself. Put in other words,
+ * grouping is a property of the flags argument not a property of the file
+ * descriptor.
+ *
+ * Return: 0 on success, negative errno on failure
+ */
+SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
+		siginfo_t __user *, info, unsigned int, flags)
+{
+	int ret;
+	struct fd f;
+	struct pid *pid;
+	kernel_siginfo_t kinfo;
+
+	/* Enforce flags be set to 0 until we add an extension. */
+	if (flags)
+		return -EINVAL;
+
+	f = fdget(pidfd);
+	if (!f.file)
+		return -EBADF;
+
+	/* Is this a pidfd? */
+	pid = pidfd_to_pid(f.file);
+	if (IS_ERR(pid)) {
+		ret = PTR_ERR(pid);
+		goto err;
+	}
+
+	ret = -EINVAL;
+	if (!access_pidfd_pidns(pid))
+		goto err;
+
+	if (info) {
+		ret = copy_siginfo_from_user_any(&kinfo, info);
+		if (unlikely(ret))
+			goto err;
+
+		ret = -EINVAL;
+		if (unlikely(sig != kinfo.si_signo))
+			goto err;
+
+		/* Only allow sending arbitrary signals to yourself. */
+		ret = -EPERM;
+		if ((task_pid(current) != pid) &&
+		    (kinfo.si_code >= 0 || kinfo.si_code == SI_TKILL))
+			goto err;
+	} else {
+		prepare_kill_siginfo(sig, &kinfo);
+	}
+
+	ret = kill_pid_info(sig, &kinfo, pid);
+
+err:
+	fdput(f);
+	return ret;
 }
 
 static int
@@ -3854,7 +4239,7 @@ SYSCALL_DEFINE3(sigaction, int, sig,
 
 	if (act) {
 		old_sigset_t mask;
-		if (!access_ok(VERIFY_READ, act, sizeof(*act)) ||
+		if (!access_ok(act, sizeof(*act)) ||
 		    __get_user(new_ka.sa.sa_handler, &act->sa_handler) ||
 		    __get_user(new_ka.sa.sa_restorer, &act->sa_restorer) ||
 		    __get_user(new_ka.sa.sa_flags, &act->sa_flags) ||
@@ -3869,7 +4254,7 @@ SYSCALL_DEFINE3(sigaction, int, sig,
 	ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
 
 	if (!ret && oact) {
-		if (!access_ok(VERIFY_WRITE, oact, sizeof(*oact)) ||
+		if (!access_ok(oact, sizeof(*oact)) ||
 		    __put_user(old_ka.sa.sa_handler, &oact->sa_handler) ||
 		    __put_user(old_ka.sa.sa_restorer, &oact->sa_restorer) ||
 		    __put_user(old_ka.sa.sa_flags, &oact->sa_flags) ||
@@ -3891,7 +4276,7 @@ COMPAT_SYSCALL_DEFINE3(sigaction, int, sig,
 	compat_uptr_t handler, restorer;
 
 	if (act) {
-		if (!access_ok(VERIFY_READ, act, sizeof(*act)) ||
+		if (!access_ok(act, sizeof(*act)) ||
 		    __get_user(handler, &act->sa_handler) ||
 		    __get_user(restorer, &act->sa_restorer) ||
 		    __get_user(new_ka.sa.sa_flags, &act->sa_flags) ||
@@ -3909,7 +4294,7 @@ COMPAT_SYSCALL_DEFINE3(sigaction, int, sig,
 	ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
 
 	if (!ret && oact) {
-		if (!access_ok(VERIFY_WRITE, oact, sizeof(*oact)) ||
+		if (!access_ok(oact, sizeof(*oact)) ||
 		    __put_user(ptr_to_compat(old_ka.sa.sa_handler),
 			       &oact->sa_handler) ||
 		    __put_user(ptr_to_compat(old_ka.sa.sa_restorer),

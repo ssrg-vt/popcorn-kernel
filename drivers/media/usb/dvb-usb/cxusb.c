@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* DVB USB compliant linux driver for Conexant USB reference design.
  *
  * The Conexant reference design I saw on their website was only for analogue
@@ -16,10 +17,6 @@
  * Copyright (C) 2005 Patrick Boettcher (patrick.boettcher@posteo.de)
  * Copyright (C) 2006 Michael Krufky (mkrufky@linuxtv.org)
  * Copyright (C) 2006, 2007 Chris Pascoe (c.pascoe@itee.uq.edu.au)
- *
- *   This program is free software; you can redistribute it and/or modify it
- *   under the terms of the GNU General Public License as published by the Free
- *   Software Foundation, version 2.
  *
  * see Documentation/media/dvb-drivers/dvb-usb.rst for more information
  */
@@ -1016,7 +1013,7 @@ static int cxusb_dualdig4_rev2_tuner_attach(struct dvb_usb_adapter *adap)
 	/*
 	 * No need to call dvb7000p_attach here, as it was called
 	 * already, as frontend_attach method is called first, and
-	 * tuner_attach is only called on sucess.
+	 * tuner_attach is only called on success.
 	 */
 	tun_i2c = st->dib7000p_ops.get_i2c_master(adap->fe_adap[0].fe,
 					DIBX000_I2C_INTERFACE_TUNER, 1);

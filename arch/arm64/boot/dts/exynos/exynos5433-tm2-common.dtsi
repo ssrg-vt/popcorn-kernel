@@ -289,6 +289,12 @@
 	assigned-clock-parents = <&cmu_top CLK_ACLK_MFC_400>;
 };
 
+&cmu_mif {
+	assigned-clocks = <&cmu_mif CLK_MOUT_SCLK_DSD_A>, <&cmu_mif CLK_DIV_SCLK_DSD>;
+	assigned-clock-parents = <&cmu_mif CLK_MOUT_MFC_PLL_DIV2>;
+	assigned-clock-rates = <0>, <333000000>;
+};
+
 &cmu_mscl {
 	assigned-clocks = <&cmu_mscl CLK_MOUT_ACLK_MSCL_400_USER>,
 			  <&cmu_mscl CLK_MOUT_SCLK_JPEG_USER>,
@@ -1200,6 +1206,20 @@
 
 &serial_1 {
 	status = "okay";
+};
+
+&serial_3 {
+	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm43438-bt";
+		max-speed = <3000000>;
+		shutdown-gpios = <&gpd4 0 GPIO_ACTIVE_HIGH>;
+		device-wakeup-gpios = <&gpr3 7 GPIO_ACTIVE_HIGH>;
+		host-wakeup-gpios = <&gpa2 2 GPIO_ACTIVE_HIGH>;
+		clocks = <&s2mps13_osc S2MPS11_CLK_BT>;
+		clock-names = "extclk";
+	};
 };
 
 &spi_1 {

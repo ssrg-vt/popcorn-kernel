@@ -1,18 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * nct7904.c - driver for Nuvoton NCT7904D.
  *
  * Copyright (c) 2015 Kontron
  * Author: Vadim V. Vlasov <vvlasov@dev.rtsoft.ru>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -182,7 +173,7 @@ static umode_t nct7904_fan_is_visible(const void *_data, u32 attr, int channel)
 	const struct nct7904_data *data = _data;
 
 	if (attr == hwmon_fan_input && data->fanin_mask & (1 << channel))
-		return S_IRUGO;
+		return 0444;
 	return 0;
 }
 
@@ -225,7 +216,7 @@ static umode_t nct7904_in_is_visible(const void *_data, u32 attr, int channel)
 
 	if (channel > 0 && attr == hwmon_in_input &&
 	    (data->vsen_mask & BIT(index)))
-		return S_IRUGO;
+		return 0444;
 
 	return 0;
 }
@@ -260,10 +251,10 @@ static umode_t nct7904_temp_is_visible(const void *_data, u32 attr, int channel)
 	if (attr == hwmon_temp_input) {
 		if (channel == 0) {
 			if (data->vsen_mask & BIT(17))
-				return S_IRUGO;
+				return 0444;
 		} else {
 			if (data->tcpu_mask & BIT(channel - 1))
-				return S_IRUGO;
+				return 0444;
 		}
 	}
 
@@ -325,7 +316,7 @@ static umode_t nct7904_pwm_is_visible(const void *_data, u32 attr, int channel)
 	switch (attr) {
 	case hwmon_pwm_input:
 	case hwmon_pwm_enable:
-		return S_IRUGO | S_IWUSR;
+		return 0644;
 	default:
 		return 0;
 	}
@@ -400,89 +391,53 @@ static int nct7904_detect(struct i2c_client *client,
 	return 0;
 }
 
-static const u32 nct7904_in_config[] = {
-	HWMON_I_INPUT,                  /* dummy, skipped in is_visible */
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	HWMON_I_INPUT,
-	0
-};
-
-static const struct hwmon_channel_info nct7904_in = {
-	.type = hwmon_in,
-	.config = nct7904_in_config,
-};
-
-static const u32 nct7904_fan_config[] = {
-	HWMON_F_INPUT,
-	HWMON_F_INPUT,
-	HWMON_F_INPUT,
-	HWMON_F_INPUT,
-	HWMON_F_INPUT,
-	HWMON_F_INPUT,
-	HWMON_F_INPUT,
-	HWMON_F_INPUT,
-	0
-};
-
-static const struct hwmon_channel_info nct7904_fan = {
-	.type = hwmon_fan,
-	.config = nct7904_fan_config,
-};
-
-static const u32 nct7904_pwm_config[] = {
-	HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
-	HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
-	HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
-	HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
-	0
-};
-
-static const struct hwmon_channel_info nct7904_pwm = {
-	.type = hwmon_pwm,
-	.config = nct7904_pwm_config,
-};
-
-static const u32 nct7904_temp_config[] = {
-	HWMON_T_INPUT,
-	HWMON_T_INPUT,
-	HWMON_T_INPUT,
-	HWMON_T_INPUT,
-	HWMON_T_INPUT,
-	HWMON_T_INPUT,
-	HWMON_T_INPUT,
-	HWMON_T_INPUT,
-	HWMON_T_INPUT,
-	0
-};
-
-static const struct hwmon_channel_info nct7904_temp = {
-	.type = hwmon_temp,
-	.config = nct7904_temp_config,
-};
-
 static const struct hwmon_channel_info *nct7904_info[] = {
-	&nct7904_in,
-	&nct7904_fan,
-	&nct7904_pwm,
-	&nct7904_temp,
+	HWMON_CHANNEL_INFO(in,
+			   HWMON_I_INPUT, /* dummy, skipped in is_visible */
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT),
+	HWMON_CHANNEL_INFO(fan,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT,
+			   HWMON_F_INPUT),
+	HWMON_CHANNEL_INFO(pwm,
+			   HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
+			   HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
+			   HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
+			   HWMON_PWM_INPUT | HWMON_PWM_ENABLE),
+	HWMON_CHANNEL_INFO(temp,
+			   HWMON_T_INPUT,
+			   HWMON_T_INPUT,
+			   HWMON_T_INPUT,
+			   HWMON_T_INPUT,
+			   HWMON_T_INPUT,
+			   HWMON_T_INPUT,
+			   HWMON_T_INPUT,
+			   HWMON_T_INPUT,
+			   HWMON_T_INPUT),
 	NULL
 };
 

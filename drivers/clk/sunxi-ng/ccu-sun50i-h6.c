@@ -4,6 +4,7 @@
  */
 
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
 
@@ -120,6 +121,8 @@ static struct ccu_nm pll_video0_clk = {
 	.n		= _SUNXI_CCU_MULT_MIN(8, 8, 12),
 	.m		= _SUNXI_CCU_DIV(1, 1), /* input divider */
 	.fixed_post_div	= 4,
+	.min_rate	= 288000000,
+	.max_rate	= 2400000000UL,
 	.common		= {
 		.reg		= 0x040,
 		.features	= CCU_FEATURE_FIXED_POSTDIV,
@@ -136,6 +139,8 @@ static struct ccu_nm pll_video1_clk = {
 	.n		= _SUNXI_CCU_MULT_MIN(8, 8, 12),
 	.m		= _SUNXI_CCU_DIV(1, 1), /* input divider */
 	.fixed_post_div	= 4,
+	.min_rate	= 288000000,
+	.max_rate	= 2400000000UL,
 	.common		= {
 		.reg		= 0x048,
 		.features	= CCU_FEATURE_FIXED_POSTDIV,
@@ -262,7 +267,7 @@ static SUNXI_CCU_M_WITH_MUX_GATE(de_clk, "de", de_parents, 0x600,
 				       0, 4,	/* M */
 				       24, 1,	/* mux */
 				       BIT(31),	/* gate */
-				       0);
+				       CLK_SET_RATE_PARENT);
 
 static SUNXI_CCU_GATE(bus_de_clk, "bus-de", "psi-ahb1-ahb2",
 		      0x60c, BIT(0), 0);
@@ -307,7 +312,7 @@ static SUNXI_CCU_M_WITH_MUX_GATE(ve_clk, "ve", ve_parents, 0x690,
 				       0, 3,	/* M */
 				       24, 1,	/* mux */
 				       BIT(31),	/* gate */
-				       0);
+				       CLK_SET_RATE_PARENT);
 
 static SUNXI_CCU_GATE(bus_ve_clk, "bus-ve", "psi-ahb1-ahb2",
 		      0x69c, BIT(0), 0);
@@ -411,7 +416,7 @@ static const char * const mmc_parents[] = { "osc24M", "pll-periph0-2x",
 static SUNXI_CCU_MP_WITH_MUX_GATE_POSTDIV(mmc0_clk, "mmc0", mmc_parents, 0x830,
 					  0, 4,		/* M */
 					  8, 2,		/* N */
-					  24, 3,	/* mux */
+					  24, 2,	/* mux */
 					  BIT(31),	/* gate */
 					  2,		/* post-div */
 					  0);
@@ -419,7 +424,7 @@ static SUNXI_CCU_MP_WITH_MUX_GATE_POSTDIV(mmc0_clk, "mmc0", mmc_parents, 0x830,
 static SUNXI_CCU_MP_WITH_MUX_GATE_POSTDIV(mmc1_clk, "mmc1", mmc_parents, 0x834,
 					  0, 4,		/* M */
 					  8, 2,		/* N */
-					  24, 3,	/* mux */
+					  24, 2,	/* mux */
 					  BIT(31),	/* gate */
 					  2,		/* post-div */
 					  0);
@@ -427,7 +432,7 @@ static SUNXI_CCU_MP_WITH_MUX_GATE_POSTDIV(mmc1_clk, "mmc1", mmc_parents, 0x834,
 static SUNXI_CCU_MP_WITH_MUX_GATE_POSTDIV(mmc2_clk, "mmc2", mmc_parents, 0x838,
 					  0, 4,		/* M */
 					  8, 2,		/* N */
-					  24, 3,	/* mux */
+					  24, 2,	/* mux */
 					  BIT(31),	/* gate */
 					  2,		/* post-div */
 					  0);
@@ -652,6 +657,8 @@ static const char * const hdmi_cec_parents[] = { "osc32k", "pll-periph0-2x" };
 static const struct ccu_mux_fixed_prediv hdmi_cec_predivs[] = {
 	{ .index = 1, .div = 36621 },
 };
+
+#define SUN50I_H6_HDMI_CEC_CLK_REG		0xb10
 static struct ccu_mux hdmi_cec_clk = {
 	.enable		= BIT(31),
 
@@ -685,7 +692,7 @@ static SUNXI_CCU_MUX_WITH_GATE(tcon_lcd0_clk, "tcon-lcd0",
 			       tcon_lcd0_parents, 0xb60,
 			       24, 3,	/* mux */
 			       BIT(31),	/* gate */
-			       0);
+			       CLK_SET_RATE_PARENT);
 
 static SUNXI_CCU_GATE(bus_tcon_lcd0_clk, "bus-tcon-lcd0", "ahb3",
 		      0xb7c, BIT(0), 0);
@@ -700,7 +707,7 @@ static SUNXI_CCU_MP_WITH_MUX_GATE(tcon_tv0_clk, "tcon-tv0",
 				  8, 2,		/* P */
 				  24, 3,	/* mux */
 				  BIT(31),	/* gate */
-				  0);
+				  CLK_SET_RATE_PARENT);
 
 static SUNXI_CCU_GATE(bus_tcon_tv0_clk, "bus-tcon-tv0", "ahb3",
 		      0xb9c, BIT(0), 0);
@@ -1195,6 +1202,15 @@ static int sun50i_h6_ccu_probe(struct platform_device *pdev)
 	val = readl(reg + SUN50I_H6_PLL_AUDIO_REG);
 	val &= ~(GENMASK(21, 16) | BIT(0));
 	writel(val | (7 << 16), reg + SUN50I_H6_PLL_AUDIO_REG);
+
+	/*
+	 * First clock parent (osc32K) is unusable for CEC. But since there
+	 * is no good way to force parent switch (both run with same frequency),
+	 * just set second clock parent here.
+	 */
+	val = readl(reg + SUN50I_H6_HDMI_CEC_CLK_REG);
+	val |= BIT(24);
+	writel(val, reg + SUN50I_H6_HDMI_CEC_CLK_REG);
 
 	return sunxi_ccu_probe(pdev->dev.of_node, reg, &sun50i_h6_ccu_desc);
 }

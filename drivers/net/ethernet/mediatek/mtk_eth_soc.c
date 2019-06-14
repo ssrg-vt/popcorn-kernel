@@ -1,11 +1,5 @@
-/*   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; version 2 of the License
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
+// SPDX-License-Identifier: GPL-2.0-only
+/*
  *
  *   Copyright (C) 2009-2016 John Crispin <blogic@openwrt.org>
  *   Copyright (C) 2009-2016 Felix Fietkau <nbd@openwrt.org>
@@ -226,7 +220,7 @@ static void mtk_phy_link_adjust(struct net_device *dev)
 	case SPEED_100:
 		mcr |= MAC_MCR_SPEED_100;
 		break;
-	};
+	}
 
 	if (MTK_HAS_CAPS(mac->hw->soc->caps, MTK_GMAC1_TRGMII) &&
 	    !mac->id && !mac->trgmii)
@@ -243,7 +237,7 @@ static void mtk_phy_link_adjust(struct net_device *dev)
 		if (dev->phydev->asym_pause)
 			rmt_adv |= LPA_PAUSE_ASYM;
 
-		lcl_adv = ethtool_adv_to_lcl_adv_t(dev->phydev->advertising);
+		lcl_adv = linkmode_adv_to_lcl_adv_t(dev->phydev->advertising);
 		flowctrl = mii_resolve_flowctrl_fdx(lcl_adv, rmt_adv);
 
 		if (flowctrl & FLOW_CTRL_TX)
@@ -257,11 +251,6 @@ static void mtk_phy_link_adjust(struct net_device *dev)
 	}
 
 	mtk_w32(mac->hw, mcr, MTK_MAC_MCR(mac->id));
-
-	if (dev->phydev->link)
-		netif_carrier_on(dev);
-	else
-		netif_carrier_off(dev);
 
 	if (!of_phy_is_fixed_link(mac->of_node))
 		phy_print_status(dev->phydev);
@@ -346,16 +335,6 @@ static int mtk_phy_connect(struct net_device *dev)
 	/* couple phydev to net_device */
 	if (mtk_phy_connect_node(eth, mac, np))
 		goto err_phy;
-
-	dev->phydev->autoneg = AUTONEG_ENABLE;
-	dev->phydev->speed = 0;
-	dev->phydev->duplex = 0;
-
-	phy_set_max_speed(dev->phydev, SPEED_1000);
-	phy_support_asym_pause(dev->phydev);
-	dev->phydev->advertising = dev->phydev->supported |
-				    ADVERTISED_Autoneg;
-	phy_start_aneg(dev->phydev);
 
 	of_node_put(np);
 
@@ -597,10 +576,10 @@ static int mtk_init_fq_dma(struct mtk_eth *eth)
 	dma_addr_t dma_addr;
 	int i;
 
-	eth->scratch_ring = dma_zalloc_coherent(eth->dev,
-						cnt * sizeof(struct mtk_tx_dma),
-						&eth->phy_scratch_ring,
-						GFP_ATOMIC);
+	eth->scratch_ring = dma_alloc_coherent(eth->dev,
+					       cnt * sizeof(struct mtk_tx_dma),
+					       &eth->phy_scratch_ring,
+					       GFP_ATOMIC);
 	if (unlikely(!eth->scratch_ring))
 		return -ENOMEM;
 
@@ -782,7 +761,8 @@ static int mtk_tx_map(struct sk_buff *skb, struct net_device *dev,
 	 */
 	wmb();
 
-	if (netif_xmit_stopped(netdev_get_tx_queue(dev, 0)) || !skb->xmit_more)
+	if (netif_xmit_stopped(netdev_get_tx_queue(dev, 0)) ||
+	    !netdev_xmit_more())
 		mtk_w32(eth, txd->txd2, MTK_QTX_CTX_PTR);
 
 	return 0;
@@ -1212,8 +1192,8 @@ static int mtk_tx_alloc(struct mtk_eth *eth)
 	if (!ring->buf)
 		goto no_tx_mem;
 
-	ring->dma = dma_zalloc_coherent(eth->dev, MTK_DMA_SIZE * sz,
-					&ring->phys, GFP_ATOMIC);
+	ring->dma = dma_alloc_coherent(eth->dev, MTK_DMA_SIZE * sz,
+				       &ring->phys, GFP_ATOMIC);
 	if (!ring->dma)
 		goto no_tx_mem;
 
@@ -1309,9 +1289,9 @@ static int mtk_rx_alloc(struct mtk_eth *eth, int ring_no, int rx_flag)
 			return -ENOMEM;
 	}
 
-	ring->dma = dma_zalloc_coherent(eth->dev,
-					rx_dma_size * sizeof(*ring->dma),
-					&ring->phys, GFP_ATOMIC);
+	ring->dma = dma_alloc_coherent(eth->dev,
+				       rx_dma_size * sizeof(*ring->dma),
+				       &ring->phys, GFP_ATOMIC);
 	if (!ring->dma)
 		return -ENOMEM;
 
@@ -1760,6 +1740,22 @@ static irqreturn_t mtk_handle_irq_tx(int irq, void *_eth)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t mtk_handle_irq(int irq, void *_eth)
+{
+	struct mtk_eth *eth = _eth;
+
+	if (mtk_r32(eth, MTK_PDMA_INT_MASK) & MTK_RX_DONE_INT) {
+		if (mtk_r32(eth, MTK_PDMA_INT_STATUS) & MTK_RX_DONE_INT)
+			mtk_handle_irq_rx(irq, _eth);
+	}
+	if (mtk_r32(eth, MTK_QDMA_INT_MASK) & MTK_TX_DONE_INT) {
+		if (mtk_r32(eth, MTK_QMTK_INT_STATUS) & MTK_TX_DONE_INT)
+			mtk_handle_irq_tx(irq, _eth);
+	}
+
+	return IRQ_HANDLED;
+}
+
 #ifdef CONFIG_NET_POLL_CONTROLLER
 static void mtk_poll_controller(struct net_device *dev)
 {
@@ -1776,6 +1772,7 @@ static void mtk_poll_controller(struct net_device *dev)
 
 static int mtk_start_dma(struct mtk_eth *eth)
 {
+	u32 rx_2b_offset = (NET_IP_ALIGN == 2) ? MTK_RX_2B_OFFSET : 0;
 	int err;
 
 	err = mtk_dma_init(eth);
@@ -1792,7 +1789,7 @@ static int mtk_start_dma(struct mtk_eth *eth)
 		MTK_QDMA_GLO_CFG);
 
 	mtk_w32(eth,
-		MTK_RX_DMA_EN | MTK_RX_2B_OFFSET |
+		MTK_RX_DMA_EN | rx_2b_offset |
 		MTK_RX_BT_32DWORDS | MTK_MULTI_EN,
 		MTK_PDMA_GLO_CFG);
 
@@ -2026,7 +2023,7 @@ static int __init mtk_init(struct net_device *dev)
 	const char *mac_addr;
 
 	mac_addr = of_get_mac_address(mac->of_node);
-	if (mac_addr)
+	if (!IS_ERR(mac_addr))
 		ether_addr_copy(dev->dev_addr, mac_addr);
 
 	/* If the mac address is invalid, use random mac address  */
@@ -2296,13 +2293,13 @@ static int mtk_get_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
 
 	switch (cmd->cmd) {
 	case ETHTOOL_GRXRINGS:
-		if (dev->features & NETIF_F_LRO) {
+		if (dev->hw_features & NETIF_F_LRO) {
 			cmd->data = MTK_MAX_RX_RING_NUM;
 			ret = 0;
 		}
 		break;
 	case ETHTOOL_GRXCLSRLCNT:
-		if (dev->features & NETIF_F_LRO) {
+		if (dev->hw_features & NETIF_F_LRO) {
 			struct mtk_mac *mac = netdev_priv(dev);
 
 			cmd->rule_cnt = mac->hwlro_ip_cnt;
@@ -2310,11 +2307,11 @@ static int mtk_get_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
 		}
 		break;
 	case ETHTOOL_GRXCLSRULE:
-		if (dev->features & NETIF_F_LRO)
+		if (dev->hw_features & NETIF_F_LRO)
 			ret = mtk_hwlro_get_fdir_entry(dev, cmd);
 		break;
 	case ETHTOOL_GRXCLSRLALL:
-		if (dev->features & NETIF_F_LRO)
+		if (dev->hw_features & NETIF_F_LRO)
 			ret = mtk_hwlro_get_fdir_all(dev, cmd,
 						     rule_locs);
 		break;
@@ -2331,11 +2328,11 @@ static int mtk_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
 
 	switch (cmd->cmd) {
 	case ETHTOOL_SRXCLSRLINS:
-		if (dev->features & NETIF_F_LRO)
+		if (dev->hw_features & NETIF_F_LRO)
 			ret = mtk_hwlro_add_ipaddr(dev, cmd);
 		break;
 	case ETHTOOL_SRXCLSRLDEL:
-		if (dev->features & NETIF_F_LRO)
+		if (dev->hw_features & NETIF_F_LRO)
 			ret = mtk_hwlro_del_ipaddr(dev, cmd);
 		break;
 	default:
@@ -2500,7 +2497,10 @@ static int mtk_probe(struct platform_device *pdev)
 	}
 
 	for (i = 0; i < 3; i++) {
-		eth->irq[i] = platform_get_irq(pdev, i);
+		if (MTK_HAS_CAPS(eth->soc->caps, MTK_SHARED_INT) && i > 0)
+			eth->irq[i] = eth->irq[0];
+		else
+			eth->irq[i] = platform_get_irq(pdev, i);
 		if (eth->irq[i] < 0) {
 			dev_err(&pdev->dev, "no IRQ%d resource found\n", i);
 			return -ENXIO;
@@ -2543,13 +2543,21 @@ static int mtk_probe(struct platform_device *pdev)
 			goto err_deinit_hw;
 	}
 
-	err = devm_request_irq(eth->dev, eth->irq[1], mtk_handle_irq_tx, 0,
-			       dev_name(eth->dev), eth);
-	if (err)
-		goto err_free_dev;
+	if (MTK_HAS_CAPS(eth->soc->caps, MTK_SHARED_INT)) {
+		err = devm_request_irq(eth->dev, eth->irq[0],
+				       mtk_handle_irq, 0,
+				       dev_name(eth->dev), eth);
+	} else {
+		err = devm_request_irq(eth->dev, eth->irq[1],
+				       mtk_handle_irq_tx, 0,
+				       dev_name(eth->dev), eth);
+		if (err)
+			goto err_free_dev;
 
-	err = devm_request_irq(eth->dev, eth->irq[2], mtk_handle_irq_rx, 0,
-			       dev_name(eth->dev), eth);
+		err = devm_request_irq(eth->dev, eth->irq[2],
+				       mtk_handle_irq_rx, 0,
+				       dev_name(eth->dev), eth);
+	}
 	if (err)
 		goto err_free_dev;
 
@@ -2622,6 +2630,12 @@ static const struct mtk_soc_data mt2701_data = {
 	.required_pctl = true,
 };
 
+static const struct mtk_soc_data mt7621_data = {
+	.caps = MTK_SHARED_INT,
+	.required_clks = MT7621_CLKS_BITMAP,
+	.required_pctl = false,
+};
+
 static const struct mtk_soc_data mt7622_data = {
 	.caps = MTK_DUAL_GMAC_SHARED_SGMII | MTK_GMAC1_ESW | MTK_HWLRO,
 	.required_clks = MT7622_CLKS_BITMAP,
@@ -2636,6 +2650,7 @@ static const struct mtk_soc_data mt7623_data = {
 
 const struct of_device_id of_mtk_match[] = {
 	{ .compatible = "mediatek,mt2701-eth", .data = &mt2701_data},
+	{ .compatible = "mediatek,mt7621-eth", .data = &mt7621_data},
 	{ .compatible = "mediatek,mt7622-eth", .data = &mt7622_data},
 	{ .compatible = "mediatek,mt7623-eth", .data = &mt7623_data},
 	{},

@@ -705,7 +705,7 @@ static const struct byt_pinctrl_soc_data *byt_soc_data[] = {
 	&byt_score_soc_data,
 	&byt_sus_soc_data,
 	&byt_ncore_soc_data,
-	NULL,
+	NULL
 };
 
 static struct byt_community *byt_get_community(struct byt_gpio *vg,
@@ -1710,6 +1710,8 @@ static int byt_gpio_probe(struct byt_gpio *vg)
 #ifdef CONFIG_PM_SLEEP
 	vg->saved_context = devm_kcalloc(&vg->pdev->dev, gc->ngpio,
 				       sizeof(*vg->saved_context), GFP_KERNEL);
+	if (!vg->saved_context)
+		return -ENOMEM;
 #endif
 	ret = devm_gpiochip_add_data(&vg->pdev->dev, gc, vg);
 	if (ret) {
@@ -1838,8 +1840,7 @@ static int byt_pinctrl_probe(struct platform_device *pdev)
 #ifdef CONFIG_PM_SLEEP
 static int byt_gpio_suspend(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct byt_gpio *vg = platform_get_drvdata(pdev);
+	struct byt_gpio *vg = dev_get_drvdata(dev);
 	int i;
 
 	for (i = 0; i < vg->soc_data->npins; i++) {
@@ -1867,8 +1868,7 @@ static int byt_gpio_suspend(struct device *dev)
 
 static int byt_gpio_resume(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct byt_gpio *vg = platform_get_drvdata(pdev);
+	struct byt_gpio *vg = dev_get_drvdata(dev);
 	int i;
 
 	for (i = 0; i < vg->soc_data->npins; i++) {

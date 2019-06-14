@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Altera Passive Serial SPI Driver
  *
  *  Copyright (c) 2017 United Western Technologies, Corporation
  *
  *  Joshua Clayton <stillcompiling@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  *
  * Manage Altera FPGA firmware that is loaded over SPI using the passive
  * serial configuration method.
@@ -73,6 +70,12 @@ static struct altera_ps_data a10_data = {
 	.status_wait_max_us = 3000, /* max(t_CF2ST1) */
 	.t_cfg_us = 2,    /* max { min(t_CFG), max(tCF2ST0) } */
 	.t_st2ck_us = 10, /* min(t_ST2CK) */
+};
+
+/* Array index is enum altera_ps_devtype */
+static const struct altera_ps_data *altera_ps_data_map[] = {
+	&c5_data,
+	&a10_data,
 };
 
 static const struct of_device_id of_ef_match[] = {
@@ -199,7 +202,7 @@ static int altera_ps_write_complete(struct fpga_manager *mgr,
 				    struct fpga_image_info *info)
 {
 	struct altera_ps_conf *conf = mgr->priv;
-	const char dummy[] = {0};
+	static const char dummy[] = {0};
 	int ret;
 
 	if (gpiod_get_value_cansleep(conf->status)) {
@@ -234,6 +237,22 @@ static const struct fpga_manager_ops altera_ps_ops = {
 	.write_complete = altera_ps_write_complete,
 };
 
+static const struct altera_ps_data *id_to_data(const struct spi_device_id *id)
+{
+	kernel_ulong_t devtype = id->driver_data;
+	const struct altera_ps_data *data;
+
+	/* someone added a altera_ps_devtype without adding to the map array */
+	if (devtype >= ARRAY_SIZE(altera_ps_data_map))
+		return NULL;
+
+	data = altera_ps_data_map[devtype];
+	if (!data || data->devtype != devtype)
+		return NULL;
+
+	return data;
+}
+
 static int altera_ps_probe(struct spi_device *spi)
 {
 	struct altera_ps_conf *conf;
@@ -244,11 +263,17 @@ static int altera_ps_probe(struct spi_device *spi)
 	if (!conf)
 		return -ENOMEM;
 
-	of_id = of_match_device(of_ef_match, &spi->dev);
-	if (!of_id)
-		return -ENODEV;
+	if (spi->dev.of_node) {
+		of_id = of_match_device(of_ef_match, &spi->dev);
+		if (!of_id)
+			return -ENODEV;
+		conf->data = of_id->data;
+	} else {
+		conf->data = id_to_data(spi_get_device_id(spi));
+		if (!conf->data)
+			return -ENODEV;
+	}
 
-	conf->data = of_id->data;
 	conf->spi = spi;
 	conf->config = devm_gpiod_get(&spi->dev, "nconfig", GPIOD_OUT_LOW);
 	if (IS_ERR(conf->config)) {
@@ -294,7 +319,9 @@ static int altera_ps_remove(struct spi_device *spi)
 }
 
 static const struct spi_device_id altera_ps_spi_ids[] = {
-	{"cyclone-ps-spi", 0},
+	{ "cyclone-ps-spi", CYCLONE5 },
+	{ "fpga-passive-serial", CYCLONE5 },
+	{ "fpga-arria10-passive-serial", ARRIA10 },
 	{}
 };
 MODULE_DEVICE_TABLE(spi, altera_ps_spi_ids);

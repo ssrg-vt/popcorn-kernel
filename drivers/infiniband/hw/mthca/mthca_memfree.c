@@ -472,7 +472,8 @@ int mthca_map_user_db(struct mthca_dev *dev, struct mthca_uar *uar,
 		goto out;
 	}
 
-	ret = get_user_pages_fast(uaddr & PAGE_MASK, 1, FOLL_WRITE, pages);
+	ret = get_user_pages_fast(uaddr & PAGE_MASK, 1,
+				  FOLL_WRITE | FOLL_LONGTERM, pages);
 	if (ret < 0)
 		goto out;
 
@@ -623,8 +624,9 @@ int mthca_alloc_db(struct mthca_dev *dev, enum mthca_db_type type,
 	page = dev->db_tab->page + end;
 
 alloc:
-	page->db_rec = dma_zalloc_coherent(&dev->pdev->dev, MTHCA_ICM_PAGE_SIZE,
-					   &page->mapping, GFP_KERNEL);
+	page->db_rec = dma_alloc_coherent(&dev->pdev->dev,
+					  MTHCA_ICM_PAGE_SIZE, &page->mapping,
+					  GFP_KERNEL);
 	if (!page->db_rec) {
 		ret = -ENOMEM;
 		goto out;

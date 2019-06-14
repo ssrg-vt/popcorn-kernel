@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * vxcan.c - Virtual CAN Tunnel for cross namespace communication
  *
@@ -6,18 +7,6 @@
  * for network interface pairs in a common and established way.
  *
  * Copyright (c) 2017 Oliver Hartkopp <socketcan@hartkopp.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the version 2 of the GNU General Public License
- * as published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/module.h>
@@ -207,7 +196,7 @@ static int vxcan_newlink(struct net *net, struct net_device *dev,
 		return PTR_ERR(peer_net);
 
 	peer = rtnl_create_link(peer_net, ifname, name_assign_type,
-				&vxcan_link_ops, tbp);
+				&vxcan_link_ops, tbp, extack);
 	if (IS_ERR(peer)) {
 		put_net(peer_net);
 		return PTR_ERR(peer);

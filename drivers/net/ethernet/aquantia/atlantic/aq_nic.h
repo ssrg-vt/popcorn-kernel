@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * aQuantia Corporation Network Driver
  * Copyright (C) 2014-2017 aQuantia Corporation. All rights reserved
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 /* File aq_nic.h: Declaration of common code for NIC. */
@@ -26,16 +23,17 @@ struct aq_nic_cfg_s {
 	u64 features;
 	u32 rxds;		/* rx ring size, descriptors # */
 	u32 txds;		/* tx ring size, descriptors # */
-	u32 vecs;		/* vecs==allocated irqs */
+	u32 vecs;		/* allocated rx/tx vectors */
+	u32 link_irq_vec;
 	u32 irq_type;
 	u32 itr;
 	u16 rx_itr;
 	u16 tx_itr;
+	u32 rxpageorder;
 	u32 num_rss_queues;
 	u32 mtu;
 	u32 flow_control;
 	u32 link_speed_msk;
-	u32 vlan_id;
 	u32 wol;
 	u16 is_mc_list_enabled;
 	u16 mc_list_count;
@@ -61,6 +59,23 @@ struct aq_nic_cfg_s {
 #define AQ_NIC_TCVEC2RING(_NIC_, _TC_, _VEC_) \
 	((_TC_) * AQ_CFG_TCS_MAX + (_VEC_))
 
+struct aq_hw_rx_fl2 {
+	struct aq_rx_filter_vlan aq_vlans[AQ_VLAN_MAX_FILTERS];
+};
+
+struct aq_hw_rx_fl3l4 {
+	u8   active_ipv4;
+	u8   active_ipv6:2;
+	u8 is_ipv6;
+};
+
+struct aq_hw_rx_fltrs_s {
+	struct hlist_head     filter_list;
+	u16                   active_filters;
+	struct aq_hw_rx_fl2   fl2;
+	struct aq_hw_rx_fl3l4 fl3l4;
+};
+
 struct aq_nic_s {
 	atomic_t flags;
 	struct aq_vec_s *aq_vec[AQ_CFG_VECS_MAX];
@@ -75,16 +90,22 @@ struct aq_nic_s {
 	const struct aq_fw_ops *aq_fw_ops;
 	struct aq_nic_cfg_s aq_nic_cfg;
 	struct timer_list service_timer;
+	struct work_struct service_task;
 	struct timer_list polling_timer;
 	struct aq_hw_link_status_s link_status;
 	struct {
 		u32 count;
 		u8 ar[AQ_HW_MULTICAST_ADDRESS_MAX][ETH_ALEN];
 	} mc_list;
+	/* Bitmask of currently assigned vlans from linux */
+	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
 
 	struct pci_dev *pdev;
 	unsigned int msix_entry_mask;
 	u32 irqvecs;
+	/* mutex to serialize FW interface access operations */
+	struct mutex fwreq_mutex;
+	struct aq_hw_rx_fltrs_s aq_hw_rx_fltrs;
 };
 
 static inline struct device *aq_nic_get_dev(struct aq_nic_s *self)

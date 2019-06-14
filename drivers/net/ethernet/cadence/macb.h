@@ -643,6 +643,7 @@
 #define MACB_CAPS_JUMBO				0x00000020
 #define MACB_CAPS_GEM_HAS_PTP			0x00000040
 #define MACB_CAPS_BD_RD_PREFETCH		0x00000080
+#define MACB_CAPS_NEEDS_RSTONUBR		0x00000100
 #define MACB_CAPS_FIFO_MODE			0x10000000
 #define MACB_CAPS_GIGABIT_MODE_AVAILABLE	0x20000000
 #define MACB_CAPS_SG_DISABLED			0x40000000
@@ -713,6 +714,8 @@
 			__v = macb_readl((__bp), __reg); \
 		__v; \
 	})
+
+#define MACB_READ_NSR(bp)	macb_readl(bp, NSR)
 
 /* struct macb_dma_desc - Hardware DMA descriptor
  * @addr: DMA address of data buffer
@@ -1077,12 +1080,17 @@ struct macb_ptp_info {
 			 struct ifreq *ifr, int cmd);
 };
 
+struct macb_pm_data {
+	u32 scrt2;
+	u32 usrio;
+};
+
 struct macb_config {
 	u32			caps;
 	unsigned int		dma_burst_length;
 	int	(*clk_init)(struct platform_device *pdev, struct clk **pclk,
 			    struct clk **hclk, struct clk **tx_clk,
-			    struct clk **rx_clk);
+			    struct clk **rx_clk, struct clk **tsu_clk);
 	int	(*init)(struct platform_device *pdev);
 	int	jumbo_max_len;
 };
@@ -1162,6 +1170,7 @@ struct macb {
 	struct clk		*hclk;
 	struct clk		*tx_clk;
 	struct clk		*rx_clk;
+	struct clk		*tsu_clk;
 	struct net_device	*dev;
 	union {
 		struct macb_stats	macb;
@@ -1214,6 +1223,10 @@ struct macb {
 
 	int	rx_bd_rd_prefetch;
 	int	tx_bd_rd_prefetch;
+
+	u32	rx_intr_mask;
+
+	struct macb_pm_data pm_data;
 };
 
 #ifdef CONFIG_MACB_USE_HWSTAMP

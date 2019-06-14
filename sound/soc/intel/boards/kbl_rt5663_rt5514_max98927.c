@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel Kabylake I2S Machine Driver with MAXIM98927
  * RT5514 and RT5663 Codecs
@@ -7,15 +8,6 @@
  * Modified from:
  *   Intel Kabylake I2S Machine driver supporting MAXIM98927 and
  *   RT5663 codecs
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/input.h>
@@ -26,10 +18,10 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include <sound/soc-acpi.h>
 #include "../../codecs/rt5514.h"
 #include "../../codecs/rt5663.h"
 #include "../../codecs/hdac_hdmi.h"
-#include "../skylake/skl.h"
 
 #define KBL_REALTEK_CODEC_DAI "rt5663-aif"
 #define KBL_REALTEK_DMIC_CODEC_DAI "rt5514-aif1"
@@ -405,7 +397,7 @@ static const struct snd_pcm_hw_constraint_list constraints_dmic_channels = {
 };
 
 static const unsigned int dmic_2ch[] = {
-	4,
+	2,
 };
 
 static const struct snd_pcm_hw_constraint_list constraints_dmic_2ch = {
@@ -648,7 +640,7 @@ static struct snd_soc_card kabylake_audio_card = {
 static int kabylake_audio_probe(struct platform_device *pdev)
 {
 	struct kbl_codec_private *ctx;
-	struct skl_machine_pdata *pdata;
+	struct snd_soc_acpi_mach *mach;
 
 	ctx = devm_kzalloc(&pdev->dev, sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -659,9 +651,9 @@ static int kabylake_audio_probe(struct platform_device *pdev)
 	kabylake_audio_card.dev = &pdev->dev;
 	snd_soc_card_set_drvdata(&kabylake_audio_card, ctx);
 
-	pdata = dev_get_drvdata(&pdev->dev);
-	if (pdata)
-		dmic_constraints = pdata->dmic_num == 2 ?
+	mach = (&pdev->dev)->platform_data;
+	if (mach)
+		dmic_constraints = mach->mach_params.dmic_num == 2 ?
 			&constraints_dmic_2ch : &constraints_dmic_channels;
 
 	return devm_snd_soc_register_card(&pdev->dev, &kabylake_audio_card);

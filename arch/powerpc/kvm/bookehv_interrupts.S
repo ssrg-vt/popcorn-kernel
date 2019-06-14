@@ -1,16 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
  *
@@ -74,6 +63,10 @@
 	PPC_STL	r2, VCPU_GPR(R2)(r4)
 	PPC_LL	r1, VCPU_HOST_STACK(r4)
 	PPC_LL	r2, HOST_R2(r1)
+
+START_BTB_FLUSH_SECTION
+	BTB_FLUSH(r10)
+END_BTB_FLUSH_SECTION
 
 	mfspr	r10, SPRN_PID
 	lwz	r8, VCPU_HOST_PID(r4)

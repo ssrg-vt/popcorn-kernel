@@ -349,10 +349,15 @@ static struct attribute *port_default_attrs[] = {
 
 static size_t print_ndev(const struct ib_gid_attr *gid_attr, char *buf)
 {
-	if (!gid_attr->ndev)
-		return -EINVAL;
+	struct net_device *ndev;
+	size_t ret = -EINVAL;
 
-	return sprintf(buf, "%s\n", gid_attr->ndev->name);
+	rcu_read_lock();
+	ndev = rcu_dereference(gid_attr->ndev);
+	if (ndev)
+		ret = sprintf(buf, "%s\n", ndev->name);
+	rcu_read_unlock();
+	return ret;
 }
 
 static size_t print_gid_type(const struct ib_gid_attr *gid_attr, char *buf)
@@ -462,7 +467,7 @@ static int get_perf_mad(struct ib_device *dev, int port_num, __be16 attr,
 	u16 out_mad_pkey_index = 0;
 	ssize_t ret;
 
-	if (!dev->process_mad)
+	if (!dev->ops.process_mad)
 		return -ENOSYS;
 
 	in_mad  = kzalloc(sizeof *in_mad, GFP_KERNEL);
@@ -481,11 +486,11 @@ static int get_perf_mad(struct ib_device *dev, int port_num, __be16 attr,
 	if (attr != IB_PMA_CLASS_PORT_INFO)
 		in_mad->data[41] = port_num;	/* PortSelect field */
 
-	if ((dev->process_mad(dev, IB_MAD_IGNORE_MKEY,
-		 port_num, NULL, NULL,
-		 (const struct ib_mad_hdr *)in_mad, mad_size,
-		 (struct ib_mad_hdr *)out_mad, &mad_size,
-		 &out_mad_pkey_index) &
+	if ((dev->ops.process_mad(dev, IB_MAD_IGNORE_MKEY,
+				  port_num, NULL, NULL,
+				  (const struct ib_mad_hdr *)in_mad, mad_size,
+				  (struct ib_mad_hdr *)out_mad, &mad_size,
+				  &out_mad_pkey_index) &
 	     (IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_REPLY)) !=
 	    (IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_REPLY)) {
 		ret = -EINVAL;
@@ -786,7 +791,7 @@ static int update_hw_stats(struct ib_device *dev, struct rdma_hw_stats *stats,
 
 	if (time_is_after_eq_jiffies(stats->timestamp + stats->lifespan))
 		return 0;
-	ret = dev->get_hw_stats(dev, stats, port_num, index);
+	ret = dev->ops.get_hw_stats(dev, stats, port_num, index);
 	if (ret < 0)
 		return ret;
 	if (ret == stats->num_counters)
@@ -946,7 +951,7 @@ static void setup_hw_stats(struct ib_device *device, struct ib_port *port,
 	struct rdma_hw_stats *stats;
 	int i, ret;
 
-	stats = device->alloc_hw_stats(device, port_num);
+	stats = device->ops.alloc_hw_stats(device, port_num);
 
 	if (!stats)
 		return;
@@ -964,8 +969,8 @@ static void setup_hw_stats(struct ib_device *device, struct ib_port *port,
 	if (!hsag)
 		goto err_free_stats;
 
-	ret = device->get_hw_stats(device, stats, port_num,
-				   stats->num_counters);
+	ret = device->ops.get_hw_stats(device, stats, port_num,
+				       stats->num_counters);
 	if (ret != stats->num_counters)
 		goto err_free_hsag;
 
@@ -1015,10 +1020,10 @@ err_free_stats:
 	return;
 }
 
-static int add_port(struct ib_device *device, int port_num,
-		    int (*port_callback)(struct ib_device *,
-					 u8, struct kobject *))
+static int add_port(struct ib_core_device *coredev, int port_num)
 {
+	struct ib_device *device = rdma_device_to_ibdev(&coredev->dev);
+	bool is_full_dev = &device->coredev == coredev;
 	struct ib_port *p;
 	struct ib_port_attr attr;
 	int i;
@@ -1036,7 +1041,7 @@ static int add_port(struct ib_device *device, int port_num,
 	p->port_num   = port_num;
 
 	ret = kobject_init_and_add(&p->kobj, &port_type,
-				   device->ports_kobj,
+				   coredev->ports_kobj,
 				   "%d", port_num);
 	if (ret) {
 		kfree(p);
@@ -1057,7 +1062,7 @@ static int add_port(struct ib_device *device, int port_num,
 		goto err_put;
 	}
 
-	if (device->process_mad) {
+	if (device->ops.process_mad && is_full_dev) {
 		p->pma_table = get_counter_table(device, port_num);
 		ret = sysfs_create_group(&p->kobj, p->pma_table);
 		if (ret)
@@ -1113,8 +1118,8 @@ static int add_port(struct ib_device *device, int port_num,
 	if (ret)
 		goto err_free_pkey;
 
-	if (port_callback) {
-		ret = port_callback(device, port_num, &p->kobj);
+	if (device->ops.init_port && is_full_dev) {
+		ret = device->ops.init_port(device, port_num, &p->kobj);
 		if (ret)
 			goto err_remove_pkey;
 	}
@@ -1124,10 +1129,10 @@ static int add_port(struct ib_device *device, int port_num,
 	 * port, so holder should be device. Therefore skip per port conunter
 	 * initialization.
 	 */
-	if (device->alloc_hw_stats && port_num)
+	if (device->ops.alloc_hw_stats && port_num && is_full_dev)
 		setup_hw_stats(device, p, port_num);
 
-	list_add_tail(&p->kobj.entry, &device->port_list);
+	list_add_tail(&p->kobj.entry, &coredev->port_list);
 
 	kobject_uevent(&p->kobj, KOBJ_ADD);
 	return 0;
@@ -1189,13 +1194,14 @@ err_put:
 static ssize_t node_type_show(struct device *device,
 			      struct device_attribute *attr, char *buf)
 {
-	struct ib_device *dev = container_of(device, struct ib_device, dev);
+	struct ib_device *dev = rdma_device_to_ibdev(device);
 
 	switch (dev->node_type) {
 	case RDMA_NODE_IB_CA:	  return sprintf(buf, "%d: CA\n", dev->node_type);
 	case RDMA_NODE_RNIC:	  return sprintf(buf, "%d: RNIC\n", dev->node_type);
 	case RDMA_NODE_USNIC:	  return sprintf(buf, "%d: usNIC\n", dev->node_type);
 	case RDMA_NODE_USNIC_UDP: return sprintf(buf, "%d: usNIC UDP\n", dev->node_type);
+	case RDMA_NODE_UNSPECIFIED: return sprintf(buf, "%d: unspecified\n", dev->node_type);
 	case RDMA_NODE_IB_SWITCH: return sprintf(buf, "%d: switch\n", dev->node_type);
 	case RDMA_NODE_IB_ROUTER: return sprintf(buf, "%d: router\n", dev->node_type);
 	default:		  return sprintf(buf, "%d: <unknown>\n", dev->node_type);
@@ -1206,7 +1212,7 @@ static DEVICE_ATTR_RO(node_type);
 static ssize_t sys_image_guid_show(struct device *device,
 				   struct device_attribute *dev_attr, char *buf)
 {
-	struct ib_device *dev = container_of(device, struct ib_device, dev);
+	struct ib_device *dev = rdma_device_to_ibdev(device);
 
 	return sprintf(buf, "%04x:%04x:%04x:%04x\n",
 		       be16_to_cpu(((__be16 *) &dev->attrs.sys_image_guid)[0]),
@@ -1219,7 +1225,7 @@ static DEVICE_ATTR_RO(sys_image_guid);
 static ssize_t node_guid_show(struct device *device,
 			      struct device_attribute *attr, char *buf)
 {
-	struct ib_device *dev = container_of(device, struct ib_device, dev);
+	struct ib_device *dev = rdma_device_to_ibdev(device);
 
 	return sprintf(buf, "%04x:%04x:%04x:%04x\n",
 		       be16_to_cpu(((__be16 *) &dev->node_guid)[0]),
@@ -1232,7 +1238,7 @@ static DEVICE_ATTR_RO(node_guid);
 static ssize_t node_desc_show(struct device *device,
 			      struct device_attribute *attr, char *buf)
 {
-	struct ib_device *dev = container_of(device, struct ib_device, dev);
+	struct ib_device *dev = rdma_device_to_ibdev(device);
 
 	return sprintf(buf, "%.64s\n", dev->node_desc);
 }
@@ -1241,11 +1247,11 @@ static ssize_t node_desc_store(struct device *device,
 			       struct device_attribute *attr,
 			       const char *buf, size_t count)
 {
-	struct ib_device *dev = container_of(device, struct ib_device, dev);
+	struct ib_device *dev = rdma_device_to_ibdev(device);
 	struct ib_device_modify desc = {};
 	int ret;
 
-	if (!dev->modify_device)
+	if (!dev->ops.modify_device)
 		return -EIO;
 
 	memcpy(desc.node_desc, buf, min_t(int, count, IB_DEVICE_NODE_DESC_MAX));
@@ -1260,7 +1266,7 @@ static DEVICE_ATTR_RW(node_desc);
 static ssize_t fw_ver_show(struct device *device, struct device_attribute *attr,
 			   char *buf)
 {
-	struct ib_device *dev = container_of(device, struct ib_device, dev);
+	struct ib_device *dev = rdma_device_to_ibdev(device);
 
 	ib_get_device_fw_str(dev, buf);
 	strlcat(buf, "\n", IB_FW_VERSION_NAME_MAX);
@@ -1277,21 +1283,21 @@ static struct attribute *ib_dev_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group dev_attr_group = {
+const struct attribute_group ib_dev_attr_group = {
 	.attrs = ib_dev_attrs,
 };
 
-static void free_port_list_attributes(struct ib_device *device)
+void ib_free_port_attrs(struct ib_core_device *coredev)
 {
 	struct kobject *p, *t;
 
-	list_for_each_entry_safe(p, t, &device->port_list, entry) {
+	list_for_each_entry_safe(p, t, &coredev->port_list, entry) {
 		struct ib_port *port = container_of(p, struct ib_port, kobj);
+
 		list_del(&p->entry);
-		if (port->hw_stats) {
-			kfree(port->hw_stats);
+		if (port->hw_stats_ag)
 			free_hsag(&port->kobj, port->hw_stats_ag);
-		}
+		kfree(port->hw_stats);
 
 		if (port->pma_table)
 			sysfs_remove_group(p, port->pma_table);
@@ -1305,65 +1311,95 @@ static void free_port_list_attributes(struct ib_device *device)
 		kobject_put(p);
 	}
 
-	kobject_put(device->ports_kobj);
+	kobject_put(coredev->ports_kobj);
 }
 
-int ib_device_register_sysfs(struct ib_device *device,
-			     int (*port_callback)(struct ib_device *,
-						  u8, struct kobject *))
+int ib_setup_port_attrs(struct ib_core_device *coredev)
 {
-	struct device *class_dev = &device->dev;
+	struct ib_device *device = rdma_device_to_ibdev(&coredev->dev);
+	unsigned int port;
 	int ret;
-	int i;
 
-	device->groups[0] = &dev_attr_group;
-	class_dev->groups = device->groups;
+	coredev->ports_kobj = kobject_create_and_add("ports",
+						     &coredev->dev.kobj);
+	if (!coredev->ports_kobj)
+		return -ENOMEM;
 
-	ret = device_add(class_dev);
-	if (ret)
-		goto err;
-
-	device->ports_kobj = kobject_create_and_add("ports", &class_dev->kobj);
-	if (!device->ports_kobj) {
-		ret = -ENOMEM;
-		goto err_put;
-	}
-
-	if (rdma_cap_ib_switch(device)) {
-		ret = add_port(device, 0, port_callback);
+	rdma_for_each_port (device, port) {
+		ret = add_port(coredev, port);
 		if (ret)
 			goto err_put;
-	} else {
-		for (i = 1; i <= device->phys_port_cnt; ++i) {
-			ret = add_port(device, i, port_callback);
-			if (ret)
-				goto err_put;
-		}
 	}
-
-	if (device->alloc_hw_stats)
-		setup_hw_stats(device, NULL, 0);
 
 	return 0;
 
 err_put:
-	free_port_list_attributes(device);
-	device_del(class_dev);
-err:
+	ib_free_port_attrs(coredev);
 	return ret;
+}
+
+int ib_device_register_sysfs(struct ib_device *device)
+{
+	int ret;
+
+	ret = ib_setup_port_attrs(&device->coredev);
+	if (ret)
+		return ret;
+
+	if (device->ops.alloc_hw_stats)
+		setup_hw_stats(device, NULL, 0);
+
+	return 0;
 }
 
 void ib_device_unregister_sysfs(struct ib_device *device)
 {
-	/* Hold device until ib_dealloc_device() */
-	get_device(&device->dev);
-
-	free_port_list_attributes(device);
-
-	if (device->hw_stats) {
-		kfree(device->hw_stats);
+	if (device->hw_stats_ag)
 		free_hsag(&device->dev.kobj, device->hw_stats_ag);
+	kfree(device->hw_stats);
+
+	ib_free_port_attrs(&device->coredev);
+}
+
+/**
+ * ib_port_register_module_stat - add module counters under relevant port
+ *  of IB device.
+ *
+ * @device: IB device to add counters
+ * @port_num: valid port number
+ * @kobj: pointer to the kobject to initialize
+ * @ktype: pointer to the ktype for this kobject.
+ * @name: the name of the kobject
+ */
+int ib_port_register_module_stat(struct ib_device *device, u8 port_num,
+				 struct kobject *kobj, struct kobj_type *ktype,
+				 const char *name)
+{
+	struct kobject *p, *t;
+	int ret;
+
+	list_for_each_entry_safe(p, t, &device->coredev.port_list, entry) {
+		struct ib_port *port = container_of(p, struct ib_port, kobj);
+
+		if (port->port_num != port_num)
+			continue;
+
+		ret = kobject_init_and_add(kobj, ktype, &port->kobj, "%s",
+					   name);
+		if (ret)
+			return ret;
 	}
 
-	device_unregister(&device->dev);
+	return 0;
 }
+EXPORT_SYMBOL(ib_port_register_module_stat);
+
+/**
+ * ib_port_unregister_module_stat - release module counters
+ * @kobj: pointer to the kobject to release
+ */
+void ib_port_unregister_module_stat(struct kobject *kobj)
+{
+	kobject_put(kobj);
+}
+EXPORT_SYMBOL(ib_port_unregister_module_stat);

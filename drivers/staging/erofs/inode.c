@@ -25,7 +25,7 @@ static int read_inode(struct inode *inode, void *data)
 
 	if (unlikely(vi->data_mapping_mode >= EROFS_INODE_LAYOUT_MAX)) {
 		errln("unknown data mapping mode %u of nid %llu",
-			vi->data_mapping_mode, vi->nid);
+		      vi->data_mapping_mode, vi->nid);
 		DBG_BUGON(1);
 		return -EIO;
 	}
@@ -38,7 +38,7 @@ static int read_inode(struct inode *inode, void *data)
 
 		inode->i_mode = le16_to_cpu(v2->i_mode);
 		if (S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
-						S_ISLNK(inode->i_mode)) {
+		    S_ISLNK(inode->i_mode)) {
 			vi->raw_blkaddr = le32_to_cpu(v2->i_u.raw_blkaddr);
 		} else if (S_ISCHR(inode->i_mode) || S_ISBLK(inode->i_mode)) {
 			inode->i_rdev =
@@ -68,7 +68,7 @@ static int read_inode(struct inode *inode, void *data)
 
 		inode->i_mode = le16_to_cpu(v1->i_mode);
 		if (S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
-						S_ISLNK(inode->i_mode)) {
+		    S_ISLNK(inode->i_mode)) {
 			vi->raw_blkaddr = le32_to_cpu(v1->i_u.raw_blkaddr);
 		} else if (S_ISCHR(inode->i_mode) || S_ISBLK(inode->i_mode)) {
 			inode->i_rdev =
@@ -92,7 +92,7 @@ static int read_inode(struct inode *inode, void *data)
 		inode->i_size = le32_to_cpu(v1->i_size);
 	} else {
 		errln("unsupported on-disk inode version %u of nid %llu",
-			__inode_version(advise), vi->nid);
+		      __inode_version(advise), vi->nid);
 		DBG_BUGON(1);
 		return -EIO;
 	}
@@ -129,11 +129,17 @@ static int fill_inline_data(struct inode *inode, void *data,
 	if (S_ISLNK(inode->i_mode) && inode->i_size < PAGE_SIZE) {
 		char *lnk = erofs_kmalloc(sbi, inode->i_size + 1, GFP_KERNEL);
 
-		if (unlikely(lnk == NULL))
+		if (unlikely(!lnk))
 			return -ENOMEM;
 
 		m_pofs += vi->inode_isize + vi->xattr_isize;
-		BUG_ON(m_pofs + inode->i_size > PAGE_SIZE);
+
+		/* inline symlink data shouldn't across page boundary as well */
+		if (unlikely(m_pofs + inode->i_size > PAGE_SIZE)) {
+			DBG_BUGON(1);
+			kfree(lnk);
+			return -EIO;
+		}
 
 		/* get in-page inline data */
 		memcpy(lnk, data + m_pofs, inode->i_size);
@@ -167,43 +173,29 @@ static int fill_inode(struct inode *inode, int isdir)
 
 	if (IS_ERR(page)) {
 		errln("failed to get inode (nid: %llu) page, err %ld",
-			vi->nid, PTR_ERR(page));
+		      vi->nid, PTR_ERR(page));
 		return PTR_ERR(page);
 	}
 
-	BUG_ON(!PageUptodate(page));
+	DBG_BUGON(!PageUptodate(page));
 	data = page_address(page);
 
 	err = read_inode(inode, data + ofs);
 	if (!err) {
 		/* setup the new inode */
 		if (S_ISREG(inode->i_mode)) {
-#ifdef CONFIG_EROFS_FS_XATTR
-			if (vi->xattr_isize)
-				inode->i_op = &erofs_generic_xattr_iops;
-#endif
+			inode->i_op = &erofs_generic_iops;
 			inode->i_fop = &generic_ro_fops;
 		} else if (S_ISDIR(inode->i_mode)) {
-			inode->i_op =
-#ifdef CONFIG_EROFS_FS_XATTR
-				vi->xattr_isize ? &erofs_dir_xattr_iops :
-#endif
-				&erofs_dir_iops;
+			inode->i_op = &erofs_dir_iops;
 			inode->i_fop = &erofs_dir_fops;
 		} else if (S_ISLNK(inode->i_mode)) {
 			/* by default, page_get_link is used for symlink */
-			inode->i_op =
-#ifdef CONFIG_EROFS_FS_XATTR
-				&erofs_symlink_xattr_iops,
-#else
-				&page_symlink_inode_operations;
-#endif
+			inode->i_op = &erofs_symlink_iops;
 			inode_nohighmem(inode);
 		} else if (S_ISCHR(inode->i_mode) || S_ISBLK(inode->i_mode) ||
 			S_ISFIFO(inode->i_mode) || S_ISSOCK(inode->i_mode)) {
-#ifdef CONFIG_EROFS_FS_XATTR
-			inode->i_op = &erofs_special_inode_operations;
-#endif
+			inode->i_op = &erofs_generic_iops;
 			init_special_inode(inode, inode->i_mode, inode->i_rdev);
 		} else {
 			err = -EIO;
@@ -268,16 +260,18 @@ static inline struct inode *erofs_iget_locked(struct super_block *sb,
 }
 
 struct inode *erofs_iget(struct super_block *sb,
-	erofs_nid_t nid, bool isdir)
+			 erofs_nid_t nid,
+			 bool isdir)
 {
 	struct inode *inode = erofs_iget_locked(sb, nid);
 
-	if (unlikely(inode == NULL))
+	if (unlikely(!inode))
 		return ERR_PTR(-ENOMEM);
 
 	if (inode->i_state & I_NEW) {
 		int err;
 		struct erofs_vnode *vi = EROFS_V(inode);
+
 		vi->nid = nid;
 
 		err = fill_inode(inode, isdir);
@@ -291,23 +285,26 @@ struct inode *erofs_iget(struct super_block *sb,
 	return inode;
 }
 
+const struct inode_operations erofs_generic_iops = {
 #ifdef CONFIG_EROFS_FS_XATTR
-const struct inode_operations erofs_generic_xattr_iops = {
 	.listxattr = erofs_listxattr,
-};
-
-const struct inode_operations erofs_symlink_xattr_iops = {
-	.get_link = page_get_link,
-	.listxattr = erofs_listxattr,
-};
-
-const struct inode_operations erofs_special_inode_operations = {
-	.listxattr = erofs_listxattr,
-};
-
-const struct inode_operations erofs_fast_symlink_xattr_iops = {
-	.get_link = simple_get_link,
-	.listxattr = erofs_listxattr,
-};
 #endif
+	.get_acl = erofs_get_acl,
+};
+
+const struct inode_operations erofs_symlink_iops = {
+	.get_link = page_get_link,
+#ifdef CONFIG_EROFS_FS_XATTR
+	.listxattr = erofs_listxattr,
+#endif
+	.get_acl = erofs_get_acl,
+};
+
+const struct inode_operations erofs_fast_symlink_iops = {
+	.get_link = simple_get_link,
+#ifdef CONFIG_EROFS_FS_XATTR
+	.listxattr = erofs_listxattr,
+#endif
+	.get_acl = erofs_get_acl,
+};
 

@@ -294,10 +294,54 @@ static int nfp_pcie_sriov_disable(struct pci_dev *pdev)
 
 static int nfp_pcie_sriov_configure(struct pci_dev *pdev, int num_vfs)
 {
+	if (!pci_get_drvdata(pdev))
+		return -ENOENT;
+
 	if (num_vfs == 0)
 		return nfp_pcie_sriov_disable(pdev);
 	else
 		return nfp_pcie_sriov_enable(pdev, num_vfs);
+}
+
+int nfp_flash_update_common(struct nfp_pf *pf, const char *path,
+			    struct netlink_ext_ack *extack)
+{
+	struct device *dev = &pf->pdev->dev;
+	const struct firmware *fw;
+	struct nfp_nsp *nsp;
+	int err;
+
+	nsp = nfp_nsp_open(pf->cpp);
+	if (IS_ERR(nsp)) {
+		err = PTR_ERR(nsp);
+		if (extack)
+			NL_SET_ERR_MSG_MOD(extack, "can't access NSP");
+		else
+			dev_err(dev, "Failed to access the NSP: %d\n", err);
+		return err;
+	}
+
+	err = request_firmware_direct(&fw, path, dev);
+	if (err) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "unable to read flash file from disk");
+		goto exit_close_nsp;
+	}
+
+	dev_info(dev, "Please be patient while writing flash image: %s\n",
+		 path);
+
+	err = nfp_nsp_write_flash(nsp, fw);
+	if (err < 0)
+		goto exit_release_fw;
+	dev_info(dev, "Finished writing flash image\n");
+	err = 0;
+
+exit_release_fw:
+	release_firmware(fw);
+exit_close_nsp:
+	nfp_nsp_close(nsp);
+	return err;
 }
 
 static const struct firmware *
@@ -679,9 +723,13 @@ err_pci_disable:
 	return err;
 }
 
-static void nfp_pci_remove(struct pci_dev *pdev)
+static void __nfp_pci_shutdown(struct pci_dev *pdev, bool unload_fw)
 {
-	struct nfp_pf *pf = pci_get_drvdata(pdev);
+	struct nfp_pf *pf;
+
+	pf = pci_get_drvdata(pdev);
+	if (!pf)
+		return;
 
 	nfp_hwmon_unregister(pf);
 
@@ -692,7 +740,7 @@ static void nfp_pci_remove(struct pci_dev *pdev)
 	vfree(pf->dumpspec);
 	kfree(pf->rtbl);
 	nfp_mip_close(pf->mip);
-	if (pf->fw_loaded)
+	if (unload_fw && pf->fw_loaded)
 		nfp_fw_unload(pf);
 
 	destroy_workqueue(pf->wq);
@@ -708,11 +756,22 @@ static void nfp_pci_remove(struct pci_dev *pdev)
 	pci_disable_device(pdev);
 }
 
+static void nfp_pci_remove(struct pci_dev *pdev)
+{
+	__nfp_pci_shutdown(pdev, true);
+}
+
+static void nfp_pci_shutdown(struct pci_dev *pdev)
+{
+	__nfp_pci_shutdown(pdev, false);
+}
+
 static struct pci_driver nfp_pci_driver = {
 	.name			= nfp_driver_name,
 	.id_table		= nfp_pci_device_ids,
 	.probe			= nfp_pci_probe,
 	.remove			= nfp_pci_remove,
+	.shutdown		= nfp_pci_shutdown,
 	.sriov_configure	= nfp_pcie_sriov_configure,
 };
 

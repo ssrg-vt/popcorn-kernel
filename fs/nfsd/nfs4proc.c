@@ -427,6 +427,7 @@ nfsd4_open(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 				goto out;
 			open->op_openowner->oo_flags |= NFS4_OO_CONFIRMED;
 			reclaim = true;
+			/* fall through */
 		case NFS4_OPEN_CLAIM_FH:
 		case NFS4_OPEN_CLAIM_DELEG_CUR_FH:
 			status = do_open_fhandle(rqstp, cstate, open);
@@ -863,8 +864,7 @@ nfsd4_rename(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	struct nfsd4_rename *rename = &u->rename;
 	__be32 status;
 
-	if (opens_in_grace(SVC_NET(rqstp)) &&
-		!(cstate->save_fh.fh_export->ex_flags & NFSEXP_NOSUBTREECHECK))
+	if (opens_in_grace(SVC_NET(rqstp)))
 		return nfserr_grace;
 	status = nfsd_rename(rqstp, &cstate->save_fh, rename->rn_sname,
 			     rename->rn_snamelen, &cstate->current_fh,
@@ -1016,8 +1016,6 @@ nfsd4_write(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 
 	nvecs = svc_fill_write_vector(rqstp, write->wr_pagelist,
 				      &write->wr_head, write->wr_buflen);
-	if (!nvecs)
-		return nfserr_io;
 	WARN_ON_ONCE(nvecs > ARRAY_SIZE(rqstp->rq_vec));
 
 	status = nfsd_vfs_write(rqstp, &cstate->current_fh, filp,
@@ -1348,7 +1346,7 @@ static __be32
 nfsd4_fallocate(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		struct nfsd4_fallocate *fallocate, int flags)
 {
-	__be32 status = nfserr_notsupp;
+	__be32 status;
 	struct file *file;
 
 	status = nfs4_preprocess_stateid_op(rqstp, cstate, &cstate->current_fh,
@@ -1929,6 +1927,7 @@ nfsd4_proc_compound(struct svc_rqst *rqstp)
 	struct nfsd4_compound_state *cstate = &resp->cstate;
 	struct svc_fh *current_fh = &cstate->current_fh;
 	struct svc_fh *save_fh = &cstate->save_fh;
+	struct nfsd_net *nn = net_generic(SVC_NET(rqstp), nfsd_net_id);
 	__be32		status;
 
 	svcxdr_init_encode(rqstp, resp);
@@ -1951,7 +1950,7 @@ nfsd4_proc_compound(struct svc_rqst *rqstp)
 	 * According to RFC3010, this takes precedence over all other errors.
 	 */
 	status = nfserr_minor_vers_mismatch;
-	if (nfsd_minorversion(args->minorversion, NFSD_TEST) <= 0)
+	if (nfsd_minorversion(nn, args->minorversion, NFSD_TEST) <= 0)
 		goto out;
 	status = nfserr_resource;
 	if (args->opcnt > NFSD_MAX_OPS_PER_COMPOUND)
@@ -2682,25 +2681,25 @@ static const struct nfsd4_operation nfsd4_ops[] = {
 	/* NFSv4.2 operations */
 	[OP_ALLOCATE] = {
 		.op_func = nfsd4_allocate,
-		.op_flags = OP_MODIFIES_SOMETHING | OP_CACHEME,
+		.op_flags = OP_MODIFIES_SOMETHING,
 		.op_name = "OP_ALLOCATE",
 		.op_rsize_bop = nfsd4_only_status_rsize,
 	},
 	[OP_DEALLOCATE] = {
 		.op_func = nfsd4_deallocate,
-		.op_flags = OP_MODIFIES_SOMETHING | OP_CACHEME,
+		.op_flags = OP_MODIFIES_SOMETHING,
 		.op_name = "OP_DEALLOCATE",
 		.op_rsize_bop = nfsd4_only_status_rsize,
 	},
 	[OP_CLONE] = {
 		.op_func = nfsd4_clone,
-		.op_flags = OP_MODIFIES_SOMETHING | OP_CACHEME,
+		.op_flags = OP_MODIFIES_SOMETHING,
 		.op_name = "OP_CLONE",
 		.op_rsize_bop = nfsd4_only_status_rsize,
 	},
 	[OP_COPY] = {
 		.op_func = nfsd4_copy,
-		.op_flags = OP_MODIFIES_SOMETHING | OP_CACHEME,
+		.op_flags = OP_MODIFIES_SOMETHING,
 		.op_name = "OP_COPY",
 		.op_rsize_bop = nfsd4_copy_rsize,
 	},

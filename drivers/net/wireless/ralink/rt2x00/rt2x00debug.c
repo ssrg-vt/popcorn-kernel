@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 	Copyright (C) 2004 - 2009 Ivo van Doorn <IvDoorn@gmail.com>
 	<http://rt2x00.serialmonkey.com>
 
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 /*
@@ -656,36 +645,24 @@ void rt2x00debug_register(struct rt2x00_dev *rt2x00dev)
 	intf->driver_folder =
 	    debugfs_create_dir(intf->rt2x00dev->ops->name,
 			       rt2x00dev->hw->wiphy->debugfsdir);
-	if (IS_ERR(intf->driver_folder) || !intf->driver_folder)
-		goto exit;
 
 	intf->driver_entry =
 	    rt2x00debug_create_file_driver("driver", intf, &intf->driver_blob);
-	if (IS_ERR(intf->driver_entry) || !intf->driver_entry)
-		goto exit;
 
 	intf->chipset_entry =
 	    rt2x00debug_create_file_chipset("chipset",
 					    intf, &intf->chipset_blob);
-	if (IS_ERR(intf->chipset_entry) || !intf->chipset_entry)
-		goto exit;
 
 	intf->dev_flags = debugfs_create_file("dev_flags", 0400,
 					      intf->driver_folder, intf,
 					      &rt2x00debug_fop_dev_flags);
-	if (IS_ERR(intf->dev_flags) || !intf->dev_flags)
-		goto exit;
 
 	intf->cap_flags = debugfs_create_file("cap_flags", 0400,
 					      intf->driver_folder, intf,
 					      &rt2x00debug_fop_cap_flags);
-	if (IS_ERR(intf->cap_flags) || !intf->cap_flags)
-		goto exit;
 
 	intf->register_folder =
 	    debugfs_create_dir("register", intf->driver_folder);
-	if (IS_ERR(intf->register_folder) || !intf->register_folder)
-		goto exit;
 
 #define RT2X00DEBUGFS_CREATE_REGISTER_ENTRY(__intf, __name)		\
 ({									\
@@ -695,9 +672,6 @@ void rt2x00debug_register(struct rt2x00_dev *rt2x00dev)
 					   0600,			\
 					   (__intf)->register_folder,	\
 					   &(__intf)->offset_##__name);	\
-		if (IS_ERR((__intf)->__name##_off_entry) ||		\
-		    !(__intf)->__name##_off_entry)			\
-			goto exit;					\
 									\
 		(__intf)->__name##_val_entry =				\
 			debugfs_create_file(__stringify(__name) "_value", \
@@ -705,9 +679,6 @@ void rt2x00debug_register(struct rt2x00_dev *rt2x00dev)
 					    (__intf)->register_folder,	\
 					    (__intf),			\
 					    &rt2x00debug_fop_##__name); \
-		if (IS_ERR((__intf)->__name##_val_entry) ||		\
-		    !(__intf)->__name##_val_entry)			\
-			goto exit;					\
 	}								\
 })
 
@@ -721,15 +692,10 @@ void rt2x00debug_register(struct rt2x00_dev *rt2x00dev)
 
 	intf->queue_folder =
 	    debugfs_create_dir("queue", intf->driver_folder);
-	if (IS_ERR(intf->queue_folder) || !intf->queue_folder)
-		goto exit;
 
 	intf->queue_frame_dump_entry =
 		debugfs_create_file("dump", 0400, intf->queue_folder,
 				    intf, &rt2x00debug_fop_queue_dump);
-	if (IS_ERR(intf->queue_frame_dump_entry)
-		|| !intf->queue_frame_dump_entry)
-		goto exit;
 
 	skb_queue_head_init(&intf->frame_dump_skbqueue);
 	init_waitqueue_head(&intf->frame_dump_waitqueue);
@@ -747,10 +713,6 @@ void rt2x00debug_register(struct rt2x00_dev *rt2x00dev)
 #endif
 
 	return;
-
-exit:
-	rt2x00debug_deregister(rt2x00dev);
-	rt2x00_err(rt2x00dev, "Failed to register debug handler\n");
 }
 
 void rt2x00debug_deregister(struct rt2x00_dev *rt2x00dev)

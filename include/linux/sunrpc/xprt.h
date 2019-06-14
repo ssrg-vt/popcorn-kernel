@@ -143,7 +143,7 @@ struct rpc_xprt_ops {
 	void		(*buf_free)(struct rpc_task *task);
 	void		(*prepare_request)(struct rpc_rqst *req);
 	int		(*send_request)(struct rpc_rqst *req);
-	void		(*set_retrans_timeout)(struct rpc_task *task);
+	void		(*wait_for_reply_request)(struct rpc_task *task);
 	void		(*timer)(struct rpc_xprt *xprt, struct rpc_task *task);
 	void		(*release_request)(struct rpc_task *task);
 	void		(*close)(struct rpc_xprt *xprt);
@@ -157,7 +157,6 @@ struct rpc_xprt_ops {
 	void		(*inject_disconnect)(struct rpc_xprt *xprt);
 	int		(*bc_setup)(struct rpc_xprt *xprt,
 				    unsigned int min_reqs);
-	int		(*bc_up)(struct svc_serv *serv, struct net *net);
 	size_t		(*bc_maxpayload)(struct rpc_xprt *xprt);
 	void		(*bc_free_rqst)(struct rpc_rqst *rqst);
 	void		(*bc_destroy)(struct rpc_xprt *xprt,
@@ -197,8 +196,6 @@ struct rpc_xprt {
 
 	size_t			max_payload;	/* largest RPC payload size,
 						   in bytes */
-	unsigned int		tsh_size;	/* size of transport specific
-						   header */
 
 	struct rpc_wait_queue	binding;	/* requests waiting on rpcbind */
 	struct rpc_wait_queue	sending;	/* requests waiting to send */
@@ -363,11 +360,6 @@ struct rpc_xprt *	xprt_alloc(struct net *net, size_t size,
 				unsigned int max_req);
 void			xprt_free(struct rpc_xprt *);
 
-static inline __be32 *xprt_skip_transport_header(struct rpc_xprt *xprt, __be32 *p)
-{
-	return p + xprt->tsh_size;
-}
-
 static inline int
 xprt_enable_swap(struct rpc_xprt *xprt)
 {
@@ -386,8 +378,8 @@ xprt_disable_swap(struct rpc_xprt *xprt)
 int			xprt_register_transport(struct xprt_class *type);
 int			xprt_unregister_transport(struct xprt_class *type);
 int			xprt_load_transport(const char *);
-void			xprt_set_retrans_timeout_def(struct rpc_task *task);
-void			xprt_set_retrans_timeout_rtt(struct rpc_task *task);
+void			xprt_wait_for_reply_request_def(struct rpc_task *task);
+void			xprt_wait_for_reply_request_rtt(struct rpc_task *task);
 void			xprt_wake_pending_tasks(struct rpc_xprt *xprt, int status);
 void			xprt_wait_for_buffer_space(struct rpc_xprt *xprt);
 bool			xprt_write_space(struct rpc_xprt *xprt);

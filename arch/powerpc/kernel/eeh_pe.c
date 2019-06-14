@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * The file intends to implement PE based on the information from
  * platforms. Basically, there have 3 types of PEs: PHB/Bus/Device.
@@ -6,20 +7,6 @@
  * PE is only meaningful in one PHB domain.
  *
  * Copyright Benjamin Herrenschmidt & Gavin Shan, IBM Corporation 2012.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/delay.h>
@@ -657,62 +644,52 @@ void eeh_pe_dev_mode_mark(struct eeh_pe *pe, int mode)
 }
 
 /**
- * __eeh_pe_state_clear - Clear state for the PE
+ * eeh_pe_state_clear - Clear state for the PE
  * @data: EEH PE
- * @flag: state
+ * @state: state
+ * @include_passed: include passed-through devices?
  *
  * The function is used to clear the indicated state from the
  * given PE. Besides, we also clear the check count of the PE
  * as well.
  */
-static void *__eeh_pe_state_clear(struct eeh_pe *pe, void *flag)
+void eeh_pe_state_clear(struct eeh_pe *root, int state, bool include_passed)
 {
-	int state = *((int *)flag);
+	struct eeh_pe *pe;
 	struct eeh_dev *edev, *tmp;
 	struct pci_dev *pdev;
 
-	/* Keep the state of permanently removed PE intact */
-	if (pe->state & EEH_PE_REMOVED)
-		return NULL;
-
-	pe->state &= ~state;
-
-	/*
-	 * Special treatment on clearing isolated state. Clear
-	 * check count since last isolation and put all affected
-	 * devices to normal state.
-	 */
-	if (!(state & EEH_PE_ISOLATED))
-		return NULL;
-
-	pe->check_count = 0;
-	eeh_pe_for_each_dev(pe, edev, tmp) {
-		pdev = eeh_dev_to_pci_dev(edev);
-		if (!pdev)
+	eeh_for_each_pe(root, pe) {
+		/* Keep the state of permanently removed PE intact */
+		if (pe->state & EEH_PE_REMOVED)
 			continue;
 
-		pdev->error_state = pci_channel_io_normal;
+		if (!include_passed && eeh_pe_passed(pe))
+			continue;
+
+		pe->state &= ~state;
+
+		/*
+		 * Special treatment on clearing isolated state. Clear
+		 * check count since last isolation and put all affected
+		 * devices to normal state.
+		 */
+		if (!(state & EEH_PE_ISOLATED))
+			continue;
+
+		pe->check_count = 0;
+		eeh_pe_for_each_dev(pe, edev, tmp) {
+			pdev = eeh_dev_to_pci_dev(edev);
+			if (!pdev)
+				continue;
+
+			pdev->error_state = pci_channel_io_normal;
+		}
+
+		/* Unblock PCI config access if required */
+		if (pe->state & EEH_PE_CFG_RESTRICTED)
+			pe->state &= ~EEH_PE_CFG_BLOCKED;
 	}
-
-	/* Unblock PCI config access if required */
-	if (pe->state & EEH_PE_CFG_RESTRICTED)
-		pe->state &= ~EEH_PE_CFG_BLOCKED;
-
-	return NULL;
-}
-
-/**
- * eeh_pe_state_clear - Clear state for the PE and its children
- * @pe: PE
- * @state: state to be cleared
- *
- * When the PE and its children has been recovered from error,
- * we need clear the error state for that. The function is used
- * for the purpose.
- */
-void eeh_pe_state_clear(struct eeh_pe *pe, int state)
-{
-	eeh_pe_traverse(pe, __eeh_pe_state_clear, &state);
 }
 
 /*

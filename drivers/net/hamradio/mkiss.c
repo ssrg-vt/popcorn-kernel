@@ -1,15 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *  This program is free software; you can distribute it and/or modify it
- *  under the terms of the GNU General Public License (Version 2) as
- *  published by the Free Software Foundation.
- *
- *  This program is distributed in the hope it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * Copyright (C) Hans Alblas PE1AYX <hans@esrac.ele.tue.nl>
  * Copyright (C) 2004, 05 Ralf Baechle DL5RB <ralf@linux-mips.org>
@@ -81,7 +71,7 @@ struct mkiss {
 #define CRC_MODE_SMACK_TEST	4
 
 	atomic_t		refcnt;
-	struct semaphore	dead_sem;
+	struct completion	dead;
 };
 
 /*---------------------------------------------------------------------------*/
@@ -687,7 +677,7 @@ static struct mkiss *mkiss_get(struct tty_struct *tty)
 static void mkiss_put(struct mkiss *ax)
 {
 	if (atomic_dec_and_test(&ax->refcnt))
-		up(&ax->dead_sem);
+		complete(&ax->dead);
 }
 
 static int crc_force = 0;	/* Can be overridden with insmod */
@@ -715,7 +705,7 @@ static int mkiss_open(struct tty_struct *tty)
 
 	spin_lock_init(&ax->buflock);
 	atomic_set(&ax->refcnt, 1);
-	sema_init(&ax->dead_sem, 0);
+	init_completion(&ax->dead);
 
 	ax->tty = tty;
 	tty->disc_data = ax;
@@ -795,7 +785,7 @@ static void mkiss_close(struct tty_struct *tty)
 	 * we have to wait for all existing users to finish.
 	 */
 	if (!atomic_dec_and_test(&ax->refcnt))
-		down(&ax->dead_sem);
+		wait_for_completion(&ax->dead);
 	/*
 	 * Halt the transmit queue so that a new transmit cannot scribble
 	 * on our buffers

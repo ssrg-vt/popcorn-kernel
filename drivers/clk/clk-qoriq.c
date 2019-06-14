@@ -34,6 +34,7 @@
 #define CGA_PLL4	4	/* only on clockgen-1.0, which lacks CGB */
 #define CGB_PLL1	4
 #define CGB_PLL2	5
+#define MAX_PLL_DIV	16
 
 struct clockgen_pll_div {
 	struct clk *clk;
@@ -41,7 +42,7 @@ struct clockgen_pll_div {
 };
 
 struct clockgen_pll {
-	struct clockgen_pll_div div[8];
+	struct clockgen_pll_div div[MAX_PLL_DIV];
 };
 
 #define CLKSEL_VALID	1
@@ -79,7 +80,7 @@ struct clockgen_chipinfo {
 	const struct clockgen_muxinfo *cmux_groups[2];
 	const struct clockgen_muxinfo *hwaccel[NUM_HWACCEL];
 	void (*init_periph)(struct clockgen *cg);
-	int cmux_to_group[NUM_CMUX]; /* -1 terminates if fewer than NUM_CMUX */
+	int cmux_to_group[NUM_CMUX + 1]; /* array should be -1 terminated */
 	u32 pll_mask;	/* 1 << n bit set if PLL n is valid */
 	u32 flags;	/* CG_xxx */
 };
@@ -242,6 +243,58 @@ static const struct clockgen_muxinfo clockgen2_cmux_cgb = {
 		{ CLKSEL_VALID, CGB_PLL2, PLL_DIV1 },
 		{ CLKSEL_VALID, CGB_PLL2, PLL_DIV2 },
 		{ CLKSEL_VALID, CGB_PLL2, PLL_DIV4 },
+	},
+};
+
+static const struct clockgen_muxinfo ls1028a_hwa1 = {
+	{
+		{ CLKSEL_VALID, PLATFORM_PLL, PLL_DIV1 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV1 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV2 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV3 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV4 },
+		{},
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV2 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV3 },
+	},
+};
+
+static const struct clockgen_muxinfo ls1028a_hwa2 = {
+	{
+		{ CLKSEL_VALID, PLATFORM_PLL, PLL_DIV1 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV1 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV2 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV3 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV4 },
+		{},
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV2 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV3 },
+	},
+};
+
+static const struct clockgen_muxinfo ls1028a_hwa3 = {
+	{
+		{ CLKSEL_VALID, PLATFORM_PLL, PLL_DIV1 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV1 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV2 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV3 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV4 },
+		{},
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV2 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV3 },
+	},
+};
+
+static const struct clockgen_muxinfo ls1028a_hwa4 = {
+	{
+		{ CLKSEL_VALID, PLATFORM_PLL, PLL_DIV1 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV1 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV2 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV3 },
+		{ CLKSEL_VALID, CGA_PLL2, PLL_DIV4 },
+		{},
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV2 },
+		{ CLKSEL_VALID, CGA_PLL1, PLL_DIV3 },
 	},
 };
 
@@ -508,6 +561,21 @@ static const struct clockgen_chipinfo chipinfo[] = {
 		.pll_mask = 0x03,
 	},
 	{
+		.compat = "fsl,ls1028a-clockgen",
+		.cmux_groups = {
+			&clockgen2_cmux_cga12
+		},
+		.hwaccel = {
+			&ls1028a_hwa1, &ls1028a_hwa2,
+			&ls1028a_hwa3, &ls1028a_hwa4
+		},
+		.cmux_to_group = {
+			0, 0, 0, 0, -1
+		},
+		.pll_mask = 0x07,
+		.flags = CG_VER3 | CG_LITTLE_ENDIAN,
+	},
+	{
 		.compat = "fsl,ls1043a-clockgen",
 		.init_periph = t2080_init_periph,
 		.cmux_groups = {
@@ -601,7 +669,7 @@ static const struct clockgen_chipinfo chipinfo[] = {
 			&p4080_cmux_grp1, &p4080_cmux_grp2
 		},
 		.cmux_to_group = {
-			0, 0, 0, 0, 1, 1, 1, 1
+			0, 0, 0, 0, 1, 1, 1, 1, -1
 		},
 		.pll_mask = 0x1f,
 	},
@@ -1128,7 +1196,7 @@ static void __init create_one_pll(struct clockgen *cg, int idx)
 		int ret;
 
 		/*
-		 * For platform PLL, there are 8 divider clocks.
+		 * For platform PLL, there are MAX_PLL_DIV divider clocks.
 		 * For core PLL, there are 4 divider clocks at most.
 		 */
 		if (idx != PLATFORM_PLL && i >= 4)
@@ -1148,8 +1216,8 @@ static void __init create_one_pll(struct clockgen *cg, int idx)
 		pll->div[i].clk = clk;
 		ret = clk_register_clkdev(clk, pll->div[i].name, NULL);
 		if (ret != 0)
-			pr_err("%s: %s: register to lookup table failed %ld\n",
-			       __func__, pll->div[i].name, PTR_ERR(clk));
+			pr_err("%s: %s: register to lookup table failed %d\n",
+			       __func__, pll->div[i].name, ret);
 
 	}
 }
@@ -1389,6 +1457,7 @@ static void __init clockgen_init(struct device_node *np)
 				pr_err("%s: Couldn't map %pOF regs\n", __func__,
 				       guts);
 			}
+			of_node_put(guts);
 		}
 
 	}
@@ -1418,12 +1487,24 @@ err:
 
 CLK_OF_DECLARE(qoriq_clockgen_1, "fsl,qoriq-clockgen-1.0", clockgen_init);
 CLK_OF_DECLARE(qoriq_clockgen_2, "fsl,qoriq-clockgen-2.0", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_b4420, "fsl,b4420-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_b4860, "fsl,b4860-clockgen", clockgen_init);
 CLK_OF_DECLARE(qoriq_clockgen_ls1012a, "fsl,ls1012a-clockgen", clockgen_init);
 CLK_OF_DECLARE(qoriq_clockgen_ls1021a, "fsl,ls1021a-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_ls1028a, "fsl,ls1028a-clockgen", clockgen_init);
 CLK_OF_DECLARE(qoriq_clockgen_ls1043a, "fsl,ls1043a-clockgen", clockgen_init);
 CLK_OF_DECLARE(qoriq_clockgen_ls1046a, "fsl,ls1046a-clockgen", clockgen_init);
 CLK_OF_DECLARE(qoriq_clockgen_ls1088a, "fsl,ls1088a-clockgen", clockgen_init);
 CLK_OF_DECLARE(qoriq_clockgen_ls2080a, "fsl,ls2080a-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_p2041, "fsl,p2041-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_p3041, "fsl,p3041-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_p4080, "fsl,p4080-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_p5020, "fsl,p5020-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_p5040, "fsl,p5040-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_t1023, "fsl,t1023-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_t1040, "fsl,t1040-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_t2080, "fsl,t2080-clockgen", clockgen_init);
+CLK_OF_DECLARE(qoriq_clockgen_t4240, "fsl,t4240-clockgen", clockgen_init);
 
 /* Legacy nodes */
 CLK_OF_DECLARE(qoriq_sysclk_1, "fsl,qoriq-sysclk-1.0", sysclk_init);

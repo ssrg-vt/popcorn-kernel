@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * (C) COPYRIGHT 2016 ARM Limited. All rights reserved.
  * Author: Liviu Dudau <Liviu.Dudau@arm.com>
- *
- * This program is free software and is provided to you under the terms of the
- * GNU General Public License version 2 as published by the Free Software
- * Foundation, and any use by you of this program is subject to the terms
- * of such GNU licence.
  *
  * ARM Mali DP500/DP550/DP650 driver (crtc operations)
  */
@@ -14,7 +10,7 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_probe_helper.h>
 #include <linux/clk.h>
 #include <linux/pm_runtime.h>
 #include <video/videomode.h>

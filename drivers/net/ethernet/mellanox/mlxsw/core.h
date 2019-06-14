@@ -28,6 +28,8 @@ unsigned int mlxsw_core_max_ports(const struct mlxsw_core *mlxsw_core);
 
 void *mlxsw_core_driver_priv(struct mlxsw_core *mlxsw_core);
 
+bool mlxsw_core_res_query_enabled(const struct mlxsw_core *mlxsw_core);
+
 int mlxsw_core_driver_register(struct mlxsw_driver *mlxsw_driver);
 void mlxsw_core_driver_unregister(struct mlxsw_driver *mlxsw_driver);
 
@@ -164,24 +166,29 @@ void mlxsw_core_lag_mapping_clear(struct mlxsw_core *mlxsw_core,
 				  u16 lag_id, u8 local_port);
 
 void *mlxsw_core_port_driver_priv(struct mlxsw_core_port *mlxsw_core_port);
-int mlxsw_core_port_init(struct mlxsw_core *mlxsw_core, u8 local_port);
+int mlxsw_core_port_init(struct mlxsw_core *mlxsw_core, u8 local_port,
+			 u32 port_number, bool split,
+			 u32 split_port_subnumber,
+			 const unsigned char *switch_id,
+			 unsigned char switch_id_len);
 void mlxsw_core_port_fini(struct mlxsw_core *mlxsw_core, u8 local_port);
 void mlxsw_core_port_eth_set(struct mlxsw_core *mlxsw_core, u8 local_port,
-			     void *port_driver_priv, struct net_device *dev,
-			     u32 port_number, bool split,
-			     u32 split_port_subnumber);
+			     void *port_driver_priv, struct net_device *dev);
 void mlxsw_core_port_ib_set(struct mlxsw_core *mlxsw_core, u8 local_port,
 			    void *port_driver_priv);
 void mlxsw_core_port_clear(struct mlxsw_core *mlxsw_core, u8 local_port,
 			   void *port_driver_priv);
 enum devlink_port_type mlxsw_core_port_type_get(struct mlxsw_core *mlxsw_core,
 						u8 local_port);
-int mlxsw_core_port_get_phys_port_name(struct mlxsw_core *mlxsw_core,
-				       u8 local_port, char *name, size_t len);
+struct devlink_port *
+mlxsw_core_port_devlink_port_get(struct mlxsw_core *mlxsw_core,
+				 u8 local_port);
 
 int mlxsw_core_schedule_dw(struct delayed_work *dwork, unsigned long delay);
 bool mlxsw_core_schedule_work(struct work_struct *work);
 void mlxsw_core_flush_owq(void);
+int mlxsw_core_resources_query(struct mlxsw_core *mlxsw_core, char *mbox,
+			       struct mlxsw_res *res);
 
 #define MLXSW_CONFIG_PROFILE_SWID_COUNT 8
 
@@ -249,13 +256,14 @@ struct mlxsw_driver {
 			   struct devlink_sb_pool_info *pool_info);
 	int (*sb_pool_set)(struct mlxsw_core *mlxsw_core,
 			   unsigned int sb_index, u16 pool_index, u32 size,
-			   enum devlink_sb_threshold_type threshold_type);
+			   enum devlink_sb_threshold_type threshold_type,
+			   struct netlink_ext_ack *extack);
 	int (*sb_port_pool_get)(struct mlxsw_core_port *mlxsw_core_port,
 				unsigned int sb_index, u16 pool_index,
 				u32 *p_threshold);
 	int (*sb_port_pool_set)(struct mlxsw_core_port *mlxsw_core_port,
 				unsigned int sb_index, u16 pool_index,
-				u32 threshold);
+				u32 threshold, struct netlink_ext_ack *extack);
 	int (*sb_tc_pool_bind_get)(struct mlxsw_core_port *mlxsw_core_port,
 				   unsigned int sb_index, u16 tc_index,
 				   enum devlink_sb_pool_type pool_type,
@@ -263,7 +271,8 @@ struct mlxsw_driver {
 	int (*sb_tc_pool_bind_set)(struct mlxsw_core_port *mlxsw_core_port,
 				   unsigned int sb_index, u16 tc_index,
 				   enum devlink_sb_pool_type pool_type,
-				   u16 pool_index, u32 threshold);
+				   u16 pool_index, u32 threshold,
+				   struct netlink_ext_ack *extack);
 	int (*sb_occ_snapshot)(struct mlxsw_core *mlxsw_core,
 			       unsigned int sb_index);
 	int (*sb_occ_max_clear)(struct mlxsw_core *mlxsw_core,
@@ -282,6 +291,8 @@ struct mlxsw_driver {
 			     const struct mlxsw_config_profile *profile,
 			     u64 *p_single_size, u64 *p_double_size,
 			     u64 *p_linear_size);
+	int (*params_register)(struct mlxsw_core *mlxsw_core);
+	void (*params_unregister)(struct mlxsw_core *mlxsw_core);
 	u8 txhdr_len;
 	const struct mlxsw_config_profile *profile;
 	bool res_query_enabled;
@@ -291,6 +302,9 @@ int mlxsw_core_kvd_sizes_get(struct mlxsw_core *mlxsw_core,
 			     const struct mlxsw_config_profile *profile,
 			     u64 *p_single_size, u64 *p_double_size,
 			     u64 *p_linear_size);
+
+void mlxsw_core_fw_flash_start(struct mlxsw_core *mlxsw_core);
+void mlxsw_core_fw_flash_end(struct mlxsw_core *mlxsw_core);
 
 bool mlxsw_core_res_valid(struct mlxsw_core *mlxsw_core,
 			  enum mlxsw_res_id res_id);
@@ -339,6 +353,7 @@ struct mlxsw_bus_info {
 	struct mlxsw_fw_rev fw_rev;
 	u8 vsd[MLXSW_CMD_BOARDINFO_VSD_LEN];
 	u8 psid[MLXSW_CMD_BOARDINFO_PSID_LEN];
+	u8 low_frequency;
 };
 
 struct mlxsw_hwmon;
@@ -388,5 +403,10 @@ static inline void mlxsw_thermal_fini(struct mlxsw_thermal *thermal)
 }
 
 #endif
+
+enum mlxsw_devlink_param_id {
+	MLXSW_DEVLINK_PARAM_ID_BASE = DEVLINK_PARAM_GENERIC_ID_MAX,
+	MLXSW_DEVLINK_PARAM_ID_ACL_REGION_REHASH_INTERVAL,
+};
 
 #endif

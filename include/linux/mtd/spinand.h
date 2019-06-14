@@ -194,8 +194,10 @@ struct spinand_manufacturer {
 };
 
 /* SPI NAND manufacturers */
+extern const struct spinand_manufacturer gigadevice_spinand_manufacturer;
 extern const struct spinand_manufacturer macronix_spinand_manufacturer;
 extern const struct spinand_manufacturer micron_spinand_manufacturer;
+extern const struct spinand_manufacturer toshiba_spinand_manufacturer;
 extern const struct spinand_manufacturer winbond_spinand_manufacturer;
 
 /**
@@ -300,6 +302,11 @@ struct spinand_info {
 		__VA_ARGS__						\
 	}
 
+struct spinand_dirmap {
+	struct spi_mem_dirmap_desc *wdesc;
+	struct spi_mem_dirmap_desc *rdesc;
+};
+
 /**
  * struct spinand_device - SPI NAND device instance
  * @base: NAND device instance
@@ -338,6 +345,8 @@ struct spinand_device {
 		const struct spi_mem_op *write_cache;
 		const struct spi_mem_op *update_cache;
 	} op_templates;
+
+	struct spinand_dirmap *dirmaps;
 
 	int (*select_target)(struct spinand_device *spinand,
 			     unsigned int target);

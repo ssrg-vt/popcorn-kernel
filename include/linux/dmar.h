@@ -1,18 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2006, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
- * Place - Suite 330, Boston, MA 02111-1307 USA.
  *
  * Copyright (C) Ashok Raj <ashok.raj@intel.com>
  * Copyright (C) Shaohua Li <shaohua.li@intel.com>
@@ -39,6 +27,7 @@ struct acpi_dmar_header;
 /* DMAR Flags */
 #define DMAR_INTR_REMAP		0x1
 #define DMAR_X2APIC_OPT_OUT	0x2
+#define DMAR_PLATFORM_OPT_IN	0x4
 
 struct intel_iommu;
 
@@ -170,6 +159,8 @@ static inline int dmar_ir_hotplug(struct dmar_drhd_unit *dmaru, bool insert)
 { return 0; }
 #endif /* CONFIG_IRQ_REMAP */
 
+extern bool dmar_platform_optin(void);
+
 #else /* CONFIG_DMAR_TABLE */
 
 static inline int dmar_device_add(void *handle)
@@ -180,6 +171,11 @@ static inline int dmar_device_add(void *handle)
 static inline int dmar_device_remove(void *handle)
 {
 	return 0;
+}
+
+static inline bool dmar_platform_optin(void)
+{
+	return false;
 }
 
 #endif /* CONFIG_DMAR_TABLE */

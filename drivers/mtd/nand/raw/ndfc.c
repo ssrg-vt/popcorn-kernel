@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Overview:
  *   Platform independent driver for NDFC (NanD Flash Controller)
@@ -14,12 +15,6 @@
  *  Copyright 2006 IBM
  *  Copyright 2008 PIKA Technologies
  *    Sean MacLennan <smaclennan@pikatech.com>
- *
- *  This program is free software; you can redistribute	 it and/or modify it
- *  under  the terms of	 the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the	License, or (at your
- *  option) any later version.
- *
  */
 #include <linux/module.h>
 #include <linux/mtd/rawnand.h>
@@ -146,7 +141,7 @@ static int ndfc_chip_init(struct ndfc_controller *ndfc,
 	chip->legacy.IO_ADDR_W = ndfc->ndfcbase + NDFC_DATA;
 	chip->legacy.cmd_ctrl = ndfc_hwcontrol;
 	chip->legacy.dev_ready = ndfc_ready;
-	chip->select_chip = ndfc_select_chip;
+	chip->legacy.select_chip = ndfc_select_chip;
 	chip->legacy.chip_delay = 50;
 	chip->controller = &ndfc->ndfc_control;
 	chip->legacy.read_buf = ndfc_read_buf;

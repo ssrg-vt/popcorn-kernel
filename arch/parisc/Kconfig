@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 config PARISC
 	def_bool y
+	select ARCH_32BIT_OFF_T if !64BIT
 	select ARCH_MIGHT_HAVE_PC_PARPORT
 	select HAVE_IDE
 	select HAVE_OPROFILE
@@ -11,12 +12,14 @@ config PARISC
 	select ARCH_HAS_ELF_RANDOMIZE
 	select ARCH_HAS_STRICT_KERNEL_RWX
 	select ARCH_HAS_UBSAN_SANITIZE_ALL
+	select ARCH_NO_SG_CHAIN
 	select ARCH_SUPPORTS_MEMORY_FAILURE
 	select RTC_CLASS
 	select RTC_DRV_GENERIC
 	select INIT_ALL_POSSIBLE
 	select BUG
 	select BUILDTIME_EXTABLE_SORT
+	select HAVE_PCI
 	select HAVE_PERF_EVENTS
 	select HAVE_KERNEL_BZIP2
 	select HAVE_KERNEL_GZIP
@@ -41,6 +44,8 @@ config PARISC
 	select HAVE_DEBUG_STACKOVERFLOW
 	select HAVE_ARCH_AUDITSYSCALL
 	select HAVE_ARCH_HASH
+	select HAVE_ARCH_JUMP_LABEL
+	select HAVE_ARCH_JUMP_LABEL_RELATIVE
 	select HAVE_ARCH_SECCOMP_FILTER
 	select HAVE_ARCH_TRACEHOOK
 	select HAVE_REGS_AND_STACK_ACCESS_API
@@ -51,6 +56,9 @@ config PARISC
 	select CPU_NO_EFFICIENT_FFS
 	select NEED_DMA_MAP_STATE
 	select NEED_SG_DMA_LENGTH
+	select HAVE_ARCH_KGDB
+	select HAVE_KPROBES
+	select HAVE_KRETPROBES
 
 	help
 	  The PA-RISC microprocessor is designed by Hewlett-Packard and used
@@ -71,12 +79,6 @@ config GENERIC_LOCKBREAK
 	bool
 	default y
 	depends on SMP && PREEMPT
-
-config RWSEM_GENERIC_SPINLOCK
-	def_bool y
-
-config RWSEM_XCHGADD_ALGORITHM
-	bool
 
 config ARCH_HAS_ILOG2_U32
 	bool
@@ -184,7 +186,6 @@ config PA11
 	depends on PA7000 || PA7100LC || PA7200 || PA7300LC
 	select ARCH_HAS_SYNC_DMA_FOR_CPU
 	select ARCH_HAS_SYNC_DMA_FOR_DEVICE
-	select DMA_DIRECT_OPS
 	select DMA_NONCOHERENT_CACHE_SYNC
 
 config PREFETCH
@@ -193,7 +194,8 @@ config PREFETCH
 
 config MLONGCALLS
 	bool "Enable the -mlong-calls compiler option for big kernels"
-	default y
+	default y if !MODULES || UBSAN || FTRACE
+	default n
 	depends on PA8X00
 	help
 	  If you configure the kernel to include many drivers built-in instead
@@ -309,21 +311,16 @@ config ARCH_SELECT_MEMORY_MODEL
 	def_bool y
 	depends on 64BIT
 
-config ARCH_DISCONTIGMEM_ENABLE
+config ARCH_SPARSEMEM_ENABLE
 	def_bool y
 	depends on 64BIT
 
 config ARCH_FLATMEM_ENABLE
 	def_bool y
 
-config ARCH_DISCONTIGMEM_DEFAULT
+config ARCH_SPARSEMEM_DEFAULT
 	def_bool y
-	depends on ARCH_DISCONTIGMEM_ENABLE
-
-config NODES_SHIFT
-	int
-	default "3"
-	depends on NEED_MULTIPLE_NODES
+	depends on ARCH_SPARSEMEM_ENABLE
 
 source "kernel/Kconfig.hz"
 

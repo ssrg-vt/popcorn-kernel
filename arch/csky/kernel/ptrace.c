@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (C) 2018 Hangzhou C-SKY Microsystems co.,ltd.
 
+#include <linux/audit.h>
 #include <linux/elf.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
@@ -8,8 +9,10 @@
 #include <linux/ptrace.h>
 #include <linux/regset.h>
 #include <linux/sched.h>
+#include <linux/sched/task_stack.h>
 #include <linux/signal.h>
 #include <linux/smp.h>
+#include <linux/tracehook.h>
 #include <linux/uaccess.h>
 #include <linux/user.h>
 
@@ -20,6 +23,9 @@
 #include <asm/asm-offsets.h>
 
 #include <abi/regdef.h>
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/syscalls.h>
 
 /* sets the trace bits. */
 #define TRACE_MODE_SI      (1 << 14)
@@ -50,15 +56,11 @@ static void singlestep_enable(struct task_struct *tsk)
  */
 void user_enable_single_step(struct task_struct *child)
 {
-	if (child->thread.esp0 == 0)
-		return;
 	singlestep_enable(child);
 }
 
 void user_disable_single_step(struct task_struct *child)
 {
-	if (child->thread.esp0 == 0)
-		return;
 	singlestep_disable(child);
 }
 
@@ -95,7 +97,9 @@ static int gpr_set(struct task_struct *target,
 		return ret;
 
 	regs.sr = task_pt_regs(target)->sr;
-
+#ifdef CONFIG_CPU_HAS_HILO
+	regs.dcsr = task_pt_regs(target)->dcsr;
+#endif
 	task_thread_info(target)->tp_value = regs.tls;
 
 	*task_pt_regs(target) = regs;
@@ -161,7 +165,7 @@ static int fpr_set(struct task_struct *target,
 static const struct user_regset csky_regsets[] = {
 	[REGSET_GPR] = {
 		.core_note_type = NT_PRSTATUS,
-		.n = ELF_NGREG,
+		.n = sizeof(struct pt_regs) / sizeof(u32),
 		.size = sizeof(u32),
 		.align = sizeof(u32),
 		.get = &gpr_get,
@@ -208,37 +212,30 @@ long arch_ptrace(struct task_struct *child, long request,
 	return ret;
 }
 
-/*
- * If process's system calls is traces, do some corresponding handles in this
- * function before entering system call function and after exiting system call
- * function.
- */
-asmlinkage void syscall_trace(int why, struct pt_regs *regs)
+asmlinkage void syscall_trace_enter(struct pt_regs *regs)
 {
-	long saved_why;
-	/*
-	 * Save saved_why, why is used to denote syscall entry/exit;
-	 * why = 0:entry, why = 1: exit
-	 */
-	saved_why = regs->regs[SYSTRACE_SAVENUM];
-	regs->regs[SYSTRACE_SAVENUM] = why;
+	if (test_thread_flag(TIF_SYSCALL_TRACE))
+		if (tracehook_report_syscall_entry(regs))
+			syscall_set_nr(current, regs, -1);
 
-	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
-					? 0x80 : 0));
+	if (test_thread_flag(TIF_SYSCALL_TRACEPOINT))
+		trace_sys_enter(regs, syscall_get_nr(current, regs));
 
-	/*
-	 * this isn't the same as continuing with a signal, but it will do
-	 * for normal use.  strace only continues with a signal if the
-	 * stopping signal is not SIGTRAP.  -brl
-	 */
-	if (current->exit_code) {
-		send_sig(current->exit_code, current, 1);
-		current->exit_code = 0;
-	}
-
-	regs->regs[SYSTRACE_SAVENUM] = saved_why;
+	audit_syscall_entry(regs_syscallid(regs), regs->a0, regs->a1, regs->a2, regs->a3);
 }
 
+asmlinkage void syscall_trace_exit(struct pt_regs *regs)
+{
+	audit_syscall_exit(regs);
+
+	if (test_thread_flag(TIF_SYSCALL_TRACE))
+		tracehook_report_syscall_exit(regs, 0);
+
+	if (test_thread_flag(TIF_SYSCALL_TRACEPOINT))
+		trace_sys_exit(regs, syscall_get_return_value(current, regs));
+}
+
+extern void show_stack(struct task_struct *task, unsigned long *stack);
 void show_regs(struct pt_regs *fp)
 {
 	unsigned long   *sp;
@@ -261,35 +258,37 @@ void show_regs(struct pt_regs *fp)
 		       (int) (((unsigned long) current) + 2 * PAGE_SIZE));
 	}
 
-	pr_info("PC: 0x%08lx\n", (long)fp->pc);
+	pr_info("PC: 0x%08lx (%pS)\n", (long)fp->pc, (void *)fp->pc);
+	pr_info("LR: 0x%08lx (%pS)\n", (long)fp->lr, (void *)fp->lr);
+	pr_info("SP: 0x%08lx\n", (long)fp);
 	pr_info("orig_a0: 0x%08lx\n", fp->orig_a0);
 	pr_info("PSR: 0x%08lx\n", (long)fp->sr);
 
-	pr_info("a0: 0x%08lx  a1: 0x%08lx  a2: 0x%08lx  a3: 0x%08lx\n",
-	       fp->a0, fp->a1, fp->a2, fp->a3);
+	pr_info(" a0: 0x%08lx   a1: 0x%08lx   a2: 0x%08lx   a3: 0x%08lx\n",
+		fp->a0, fp->a1, fp->a2, fp->a3);
 #if defined(__CSKYABIV2__)
-	pr_info("r4: 0x%08lx  r5: 0x%08lx    r6: 0x%08lx    r7: 0x%08lx\n",
+	pr_info(" r4: 0x%08lx   r5: 0x%08lx   r6: 0x%08lx   r7: 0x%08lx\n",
 		fp->regs[0], fp->regs[1], fp->regs[2], fp->regs[3]);
-	pr_info("r8: 0x%08lx  r9: 0x%08lx   r10: 0x%08lx   r11: 0x%08lx\n",
+	pr_info(" r8: 0x%08lx   r9: 0x%08lx  r10: 0x%08lx  r11: 0x%08lx\n",
 		fp->regs[4], fp->regs[5], fp->regs[6], fp->regs[7]);
-	pr_info("r12 0x%08lx  r13: 0x%08lx   r15: 0x%08lx\n",
+	pr_info("r12: 0x%08lx  r13: 0x%08lx  r15: 0x%08lx\n",
 		fp->regs[8], fp->regs[9], fp->lr);
-	pr_info("r16:0x%08lx   r17: 0x%08lx   r18: 0x%08lx    r19: 0x%08lx\n",
+	pr_info("r16: 0x%08lx  r17: 0x%08lx  r18: 0x%08lx  r19: 0x%08lx\n",
 		fp->exregs[0], fp->exregs[1], fp->exregs[2], fp->exregs[3]);
-	pr_info("r20 0x%08lx   r21: 0x%08lx   r22: 0x%08lx    r23: 0x%08lx\n",
+	pr_info("r20: 0x%08lx  r21: 0x%08lx  r22: 0x%08lx  r23: 0x%08lx\n",
 		fp->exregs[4], fp->exregs[5], fp->exregs[6], fp->exregs[7]);
-	pr_info("r24 0x%08lx   r25: 0x%08lx   r26: 0x%08lx    r27: 0x%08lx\n",
+	pr_info("r24: 0x%08lx  r25: 0x%08lx  r26: 0x%08lx  r27: 0x%08lx\n",
 		fp->exregs[8], fp->exregs[9], fp->exregs[10], fp->exregs[11]);
-	pr_info("r28 0x%08lx   r29: 0x%08lx   r30: 0x%08lx    tls: 0x%08lx\n",
+	pr_info("r28: 0x%08lx  r29: 0x%08lx  r30: 0x%08lx  tls: 0x%08lx\n",
 		fp->exregs[12], fp->exregs[13], fp->exregs[14], fp->tls);
-	pr_info("hi 0x%08lx    lo: 0x%08lx\n",
+	pr_info(" hi: 0x%08lx   lo: 0x%08lx\n",
 		fp->rhi, fp->rlo);
 #else
-	pr_info("r6: 0x%08lx   r7: 0x%08lx   r8: 0x%08lx   r9: 0x%08lx\n",
+	pr_info(" r6: 0x%08lx   r7: 0x%08lx   r8: 0x%08lx   r9: 0x%08lx\n",
 		fp->regs[0], fp->regs[1], fp->regs[2], fp->regs[3]);
-	pr_info("r10: 0x%08lx   r11: 0x%08lx   r12: 0x%08lx   r13: 0x%08lx\n",
+	pr_info("r10: 0x%08lx  r11: 0x%08lx  r12: 0x%08lx  r13: 0x%08lx\n",
 		fp->regs[4], fp->regs[5], fp->regs[6], fp->regs[7]);
-	pr_info("r14 0x%08lx   r1: 0x%08lx   r15: 0x%08lx\n",
+	pr_info("r14: 0x%08lx   r1: 0x%08lx  r15: 0x%08lx\n",
 		fp->regs[8], fp->regs[9], fp->lr);
 #endif
 
@@ -311,4 +310,7 @@ void show_regs(struct pt_regs *fp)
 		pr_cont("%08x ", (int) *sp++);
 	}
 	pr_cont("\n");
+
+	show_stack(NULL, (unsigned long *)fp->regs[4]);
+	return;
 }

@@ -53,6 +53,9 @@ EXPORT_SYMBOL(registered_fb);
 int num_registered_fb __read_mostly;
 EXPORT_SYMBOL(num_registered_fb);
 
+bool fb_center_logo __read_mostly;
+EXPORT_SYMBOL(fb_center_logo);
+
 static struct fb_info *get_fb_info(unsigned int idx)
 {
 	struct fb_info *fb_info;
@@ -428,6 +431,9 @@ static void fb_do_show_logo(struct fb_info *info, struct fb_image *image,
 {
 	unsigned int x;
 
+	if (image->width > info->var.xres || image->height > info->var.yres)
+		return;
+
 	if (rotate == FB_ROTATE_UR) {
 		for (x = 0;
 		     x < num && image->dx + image->width <= info->var.xres;
@@ -436,7 +442,9 @@ static void fb_do_show_logo(struct fb_info *info, struct fb_image *image,
 			image->dx += image->width + 8;
 		}
 	} else if (rotate == FB_ROTATE_UD) {
-		for (x = 0; x < num; x++) {
+		u32 dx = image->dx;
+
+		for (x = 0; x < num && image->dx <= dx; x++) {
 			info->fbops->fb_imageblit(info, image);
 			image->dx -= image->width + 8;
 		}
@@ -448,7 +456,9 @@ static void fb_do_show_logo(struct fb_info *info, struct fb_image *image,
 			image->dy += image->height + 8;
 		}
 	} else if (rotate == FB_ROTATE_CCW) {
-		for (x = 0; x < num; x++) {
+		u32 dy = image->dy;
+
+		for (x = 0; x < num && image->dy <= dy; x++) {
 			info->fbops->fb_imageblit(info, image);
 			image->dy -= image->height + 8;
 		}
@@ -502,8 +512,24 @@ static int fb_show_logo_line(struct fb_info *info, int rotate,
 		fb_set_logo(info, logo, logo_new, fb_logo.depth);
 	}
 
-	image.dx = 0;
-	image.dy = y;
+	if (fb_center_logo) {
+		int xres = info->var.xres;
+		int yres = info->var.yres;
+
+		if (rotate == FB_ROTATE_CW || rotate == FB_ROTATE_CCW) {
+			xres = info->var.yres;
+			yres = info->var.xres;
+		}
+
+		while (n && (n * (logo->width + 8) - 8 > xres))
+			--n;
+		image.dx = (xres - n * (logo->width + 8) - 8) / 2;
+		image.dy = y ?: (yres - logo->height) / 2;
+	} else {
+		image.dx = 0;
+		image.dy = y;
+	}
+
 	image.width = logo->width;
 	image.height = logo->height;
 
@@ -521,7 +547,7 @@ static int fb_show_logo_line(struct fb_info *info, int rotate,
 		info->pseudo_palette = saved_pseudo_palette;
 	kfree(logo_new);
 	kfree(logo_rotate);
-	return logo->height;
+	return image.dy + logo->height;
 }
 
 
@@ -573,8 +599,8 @@ static int fb_show_extra_logos(struct fb_info *info, int y, int rotate)
 	unsigned int i;
 
 	for (i = 0; i < fb_logo_ex_num; i++)
-		y += fb_show_logo_line(info, rotate,
-				       fb_logo_ex[i].logo, y, fb_logo_ex[i].n);
+		y = fb_show_logo_line(info, rotate,
+				      fb_logo_ex[i].logo, y, fb_logo_ex[i].n);
 
 	return y;
 }
@@ -600,6 +626,7 @@ int fb_prepare_logo(struct fb_info *info, int rotate)
 {
 	int depth = fb_get_color_depth(&info->var, &info->fix);
 	unsigned int yres;
+	int height;
 
 	memset(&fb_logo, 0, sizeof(struct logo_data));
 
@@ -661,7 +688,11 @@ int fb_prepare_logo(struct fb_info *info, int rotate)
  		}
  	}
 
-	return fb_prepare_extra_logos(info, fb_logo.logo->height, yres);
+	height = fb_logo.logo->height;
+	if (fb_center_logo)
+		height += (yres - fb_logo.logo->height) / 2;
+
+	return fb_prepare_extra_logos(info, height, yres);
 }
 
 int fb_show_logo(struct fb_info *info, int rotate)
@@ -1851,14 +1882,35 @@ int remove_conflicting_pci_framebuffers(struct pci_dev *pdev, int res_id, const 
 {
 	struct apertures_struct *ap;
 	bool primary = false;
-	int err;
+	int err, idx, bar;
+	bool res_id_found = false;
 
-	ap = alloc_apertures(1);
+	for (idx = 0, bar = 0; bar < PCI_ROM_RESOURCE; bar++) {
+		if (!(pci_resource_flags(pdev, bar) & IORESOURCE_MEM))
+			continue;
+		idx++;
+	}
+
+	ap = alloc_apertures(idx);
 	if (!ap)
 		return -ENOMEM;
 
-	ap->ranges[0].base = pci_resource_start(pdev, res_id);
-	ap->ranges[0].size = pci_resource_len(pdev, res_id);
+	for (idx = 0, bar = 0; bar < PCI_ROM_RESOURCE; bar++) {
+		if (!(pci_resource_flags(pdev, bar) & IORESOURCE_MEM))
+			continue;
+		ap->ranges[idx].base = pci_resource_start(pdev, bar);
+		ap->ranges[idx].size = pci_resource_len(pdev, bar);
+		pci_info(pdev, "%s: bar %d: 0x%lx -> 0x%lx\n", __func__, bar,
+			 (unsigned long)pci_resource_start(pdev, bar),
+			 (unsigned long)pci_resource_end(pdev, bar));
+		idx++;
+		if (res_id == bar)
+			res_id_found = true;
+	}
+	if (!res_id_found)
+		pci_warn(pdev, "%s: passed res_id (%d) is not a memory bar\n",
+			 __func__, res_id);
+
 #ifdef CONFIG_X86
 	primary = pdev->resource[PCI_ROM_RESOURCE].flags &
 					IORESOURCE_ROM_SHADOW;

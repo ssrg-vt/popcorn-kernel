@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NETLINK      Kernel-user communication protocol.
  *
  * 		Authors:	Alan Cox <alan@lxorguk.ukuu.org.uk>
  * 				Alexey Kuznetsov <kuznet@ms2.inr.ac.ru>
  * 				Patrick McHardy <kaber@trash.net>
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Tue Jun 26 14:36:48 MEST 2001 Herbert "herp" Rosmanith
  *                               added netlink_proto_exit
@@ -988,7 +984,7 @@ static int netlink_bind(struct socket *sock, struct sockaddr *addr,
 	struct netlink_sock *nlk = nlk_sk(sk);
 	struct sockaddr_nl *nladdr = (struct sockaddr_nl *)addr;
 	int err = 0;
-	unsigned long groups = nladdr->nl_groups;
+	unsigned long groups;
 	bool bound;
 
 	if (addr_len < sizeof(struct sockaddr_nl))
@@ -996,6 +992,7 @@ static int netlink_bind(struct socket *sock, struct sockaddr *addr,
 
 	if (nladdr->nl_family != AF_NETLINK)
 		return -EINVAL;
+	groups = nladdr->nl_groups;
 
 	/* Only superuser is allowed to listen multicasts */
 	if (groups) {
@@ -1371,6 +1368,14 @@ int netlink_has_listeners(struct sock *sk, unsigned int group)
 }
 EXPORT_SYMBOL_GPL(netlink_has_listeners);
 
+bool netlink_strict_get_check(struct sk_buff *skb)
+{
+	const struct netlink_sock *nlk = nlk_sk(NETLINK_CB(skb).sk);
+
+	return nlk->flags & NETLINK_F_STRICT_CHK;
+}
+EXPORT_SYMBOL_GPL(netlink_strict_get_check);
+
 static int netlink_broadcast_deliver(struct sock *sk, struct sk_buff *skb)
 {
 	struct netlink_sock *nlk = nlk_sk(sk);
@@ -1706,7 +1711,7 @@ static int netlink_setsockopt(struct socket *sock, int level, int optname,
 			nlk->flags &= ~NETLINK_F_EXT_ACK;
 		err = 0;
 		break;
-	case NETLINK_DUMP_STRICT_CHK:
+	case NETLINK_GET_STRICT_CHK:
 		if (val)
 			nlk->flags |= NETLINK_F_STRICT_CHK;
 		else
@@ -1806,7 +1811,7 @@ static int netlink_getsockopt(struct socket *sock, int level, int optname,
 			return -EFAULT;
 		err = 0;
 		break;
-	case NETLINK_DUMP_STRICT_CHK:
+	case NETLINK_GET_STRICT_CHK:
 		if (len < sizeof(int))
 			return -EINVAL;
 		len = sizeof(int);
@@ -2541,15 +2546,7 @@ struct nl_seq_iter {
 
 static int netlink_walk_start(struct nl_seq_iter *iter)
 {
-	int err;
-
-	err = rhashtable_walk_init(&nl_table[iter->link].hash, &iter->hti,
-				   GFP_KERNEL);
-	if (err) {
-		iter->link = MAX_LINKS;
-		return err;
-	}
-
+	rhashtable_walk_enter(&nl_table[iter->link].hash, &iter->hti);
 	rhashtable_walk_start(&iter->hti);
 
 	return 0;
@@ -2641,7 +2638,7 @@ static int netlink_seq_show(struct seq_file *seq, void *v)
 		struct sock *s = v;
 		struct netlink_sock *nlk = nlk_sk(s);
 
-		seq_printf(seq, "%pK %-3d %-10u %08x %-8d %-8d %-5d %-8d %-8d %-8lu\n",
+		seq_printf(seq, "%pK %-3d %-10u %08x %-8d %-8d %-5d %-8d %-8u %-8lu\n",
 			   s,
 			   s->sk_protocol,
 			   nlk->portid,

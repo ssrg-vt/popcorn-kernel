@@ -147,10 +147,10 @@ Division Functions
 .. kernel-doc:: include/linux/math64.h
    :internal:
 
-.. kernel-doc:: lib/div64.c
+.. kernel-doc:: lib/math/div64.c
    :functions: div_s64_rem div64_u64_rem div64_u64 div64_s64
 
-.. kernel-doc:: lib/gcd.c
+.. kernel-doc:: lib/math/gcd.c
    :export:
 
 UUID/GUID
@@ -291,12 +291,6 @@ Block Devices
 .. kernel-doc:: block/blk-lib.c
    :export:
 
-.. kernel-doc:: block/blk-tag.c
-   :export:
-
-.. kernel-doc:: block/blk-tag.c
-   :internal:
-
 .. kernel-doc:: block/blk-integrity.c
    :export:
 
@@ -361,10 +355,6 @@ Read-Copy Update (RCU)
 ----------------------
 
 .. kernel-doc:: include/linux/rcupdate.h
-
-.. kernel-doc:: include/linux/rcupdate_wait.h
-
-.. kernel-doc:: include/linux/rcutree.h
 
 .. kernel-doc:: kernel/rcu/tree.c
 

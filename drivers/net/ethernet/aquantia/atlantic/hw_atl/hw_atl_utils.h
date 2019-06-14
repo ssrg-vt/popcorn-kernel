@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * aQuantia Corporation Network Driver
  * Copyright (C) 2014-2017 aQuantia Corporation. All rights reserved
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 /* File hw_atl_utils.h: Declaration of common functions for Atlantic hardware
@@ -239,6 +236,64 @@ struct __packed offload_info {
 	struct offload_rr_info rrs;
 	u8 buf[0];
 };
+
+enum hw_atl_rx_action_with_traffic {
+	HW_ATL_RX_DISCARD,
+	HW_ATL_RX_HOST,
+};
+
+struct aq_rx_filter_vlan {
+	u8 enable;
+	u8 location;
+	u16 vlan_id;
+	u8 queue;
+};
+
+struct aq_rx_filter_l2 {
+	s8 queue;
+	u8 location;
+	u8 user_priority_en;
+	u8 user_priority;
+	u16 ethertype;
+};
+
+struct aq_rx_filter_l3l4 {
+	u32 cmd;
+	u8 location;
+	u32 ip_dst[4];
+	u32 ip_src[4];
+	u16 p_dst;
+	u16 p_src;
+	u8 is_ipv6;
+};
+
+enum hw_atl_rx_protocol_value_l3l4 {
+	HW_ATL_RX_TCP,
+	HW_ATL_RX_UDP,
+	HW_ATL_RX_SCTP,
+	HW_ATL_RX_ICMP
+};
+
+enum hw_atl_rx_ctrl_registers_l3l4 {
+	HW_ATL_RX_ENABLE_MNGMNT_QUEUE_L3L4 = BIT(22),
+	HW_ATL_RX_ENABLE_QUEUE_L3L4        = BIT(23),
+	HW_ATL_RX_ENABLE_ARP_FLTR_L3       = BIT(24),
+	HW_ATL_RX_ENABLE_CMP_PROT_L4       = BIT(25),
+	HW_ATL_RX_ENABLE_CMP_DEST_PORT_L4  = BIT(26),
+	HW_ATL_RX_ENABLE_CMP_SRC_PORT_L4   = BIT(27),
+	HW_ATL_RX_ENABLE_CMP_DEST_ADDR_L3  = BIT(28),
+	HW_ATL_RX_ENABLE_CMP_SRC_ADDR_L3   = BIT(29),
+	HW_ATL_RX_ENABLE_L3_IPV6           = BIT(30),
+	HW_ATL_RX_ENABLE_FLTR_L3L4         = BIT(31)
+};
+
+#define HW_ATL_RX_QUEUE_FL3L4_SHIFT       8U
+#define HW_ATL_RX_ACTION_FL3F4_SHIFT      16U
+
+#define HW_ATL_RX_CNT_REG_ADDR_IPV6       4U
+
+#define HW_ATL_GET_REG_LOCATION_FL3L4(location) \
+	((location) - AQ_RX_FIRST_LOC_FL3L4)
 
 #define HAL_ATLANTIC_UTILS_CHIP_MIPS         0x00000001U
 #define HAL_ATLANTIC_UTILS_CHIP_TPO2         0x00000002U

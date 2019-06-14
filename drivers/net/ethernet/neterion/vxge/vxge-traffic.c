@@ -1399,11 +1399,7 @@ static void __vxge_hw_non_offload_db_post(struct __vxge_hw_fifo *fifo,
 		VXGE_HW_NODBW_GET_NO_SNOOP(no_snoop),
 		&fifo->nofl_db->control_0);
 
-	mmiowb();
-
 	writeq(txdl_ptr, &fifo->nofl_db->txdl_ptr);
-
-	mmiowb();
 }
 
 /**
@@ -1695,16 +1691,9 @@ exit:
  */
 void vxge_hw_fifo_txdl_free(struct __vxge_hw_fifo *fifo, void *txdlh)
 {
-	struct __vxge_hw_fifo_txdl_priv *txdl_priv;
-	u32 max_frags;
 	struct __vxge_hw_channel *channel;
 
 	channel = &fifo->channel;
-
-	txdl_priv = __vxge_hw_fifo_txdl_priv(fifo,
-			(struct vxge_hw_fifo_txd *)txdlh);
-
-	max_frags = fifo->config->max_frags;
 
 	vxge_hw_channel_dtr_free(channel, txdlh);
 }

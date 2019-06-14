@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/etherdevice.h>
 #include <linux/if_tap.h>
 #include <linux/if_vlan.h>
@@ -712,7 +713,7 @@ static ssize_t tap_get_user(struct tap_queue *q, void *msg_control,
 			goto err_kfree;
 	}
 
-	skb_probe_transport_header(skb, ETH_HLEN);
+	skb_probe_transport_header(skb);
 
 	/* Move network header to the right position for VLAN tagged packets */
 	if ((skb->protocol == htons(ETH_P_8021Q) ||
@@ -1113,7 +1114,7 @@ static long tap_ioctl(struct file *file, unsigned int cmd,
 			rtnl_unlock();
 			return -ENOLINK;
 		}
-		ret = dev_set_mac_address(tap->dev, &sa);
+		ret = dev_set_mac_address(tap->dev, &sa, NULL);
 		tap_put_tap_dev(tap);
 		rtnl_unlock();
 		return ret;
@@ -1177,8 +1178,6 @@ static int tap_get_user_xdp(struct tap_queue *q, struct xdp_buff *xdp)
 			goto err_kfree;
 	}
 
-	skb_probe_transport_header(skb, ETH_HLEN);
-
 	/* Move network header to the right position for VLAN tagged packets */
 	if ((skb->protocol == htons(ETH_P_8021Q) ||
 	     skb->protocol == htons(ETH_P_8021AD)) &&
@@ -1189,6 +1188,7 @@ static int tap_get_user_xdp(struct tap_queue *q, struct xdp_buff *xdp)
 	tap = rcu_dereference(q->tap);
 	if (tap) {
 		skb->dev = tap->dev;
+		skb_probe_transport_header(skb);
 		dev_queue_xmit(skb);
 	} else {
 		kfree_skb(skb);

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2007 Andi Kleen, SUSE Labs.
- * Subject to the GPL, v.2
  *
  * This contains most of the x86 vDSO kernel-side code.
  */
@@ -261,7 +261,7 @@ int map_vdso_once(const struct vdso_image *image, unsigned long addr)
 	 * abusing from userspace install_speciall_mapping, which may
 	 * not do accounting and rlimit right.
 	 * We could search vma near context.vdso, but it's a slowpath,
-	 * so let's explicitely check all VMAs to be completely sure.
+	 * so let's explicitly check all VMAs to be completely sure.
 	 */
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		if (vma_is_special_mapping(vma, &vdso_mapping) ||

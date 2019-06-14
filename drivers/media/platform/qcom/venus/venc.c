@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  * Copyright (C) 2017 Linaro Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 #include <linux/clk.h>
 #include <linux/module.h>
@@ -651,6 +642,8 @@ static int venc_set_properties(struct venus_inst *inst)
 	struct hfi_framerate frate;
 	struct hfi_bitrate brate;
 	struct hfi_idr_period idrp;
+	struct hfi_quantization quant;
+	struct hfi_quantization_range quant_range;
 	u32 ptype, rate_control, bitrate, profile = 0, level = 0;
 	int ret;
 
@@ -767,6 +760,23 @@ static int venc_set_properties(struct venus_inst *inst)
 	brate.layer_id = 0;
 
 	ret = hfi_session_set_property(inst, ptype, &brate);
+	if (ret)
+		return ret;
+
+	ptype = HFI_PROPERTY_PARAM_VENC_SESSION_QP;
+	quant.qp_i = ctr->h264_i_qp;
+	quant.qp_p = ctr->h264_p_qp;
+	quant.qp_b = ctr->h264_b_qp;
+	quant.layer_id = 0;
+	ret = hfi_session_set_property(inst, ptype, &quant);
+	if (ret)
+		return ret;
+
+	ptype = HFI_PROPERTY_PARAM_VENC_SESSION_QP_RANGE;
+	quant_range.min_qp = ctr->h264_min_qp;
+	quant_range.max_qp = ctr->h264_max_qp;
+	quant_range.layer_id = 0;
+	ret = hfi_session_set_property(inst, ptype, &quant_range);
 	if (ret)
 		return ret;
 
@@ -1074,7 +1084,7 @@ static int m2m_queue_init(void *priv, struct vb2_queue *src_vq,
 	int ret;
 
 	src_vq->type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
-	src_vq->io_modes = VB2_MMAP | VB2_DMABUF;
+	src_vq->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF;
 	src_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	src_vq->ops = &venc_vb2_ops;
 	src_vq->mem_ops = &vb2_dma_sg_memops;
@@ -1090,7 +1100,7 @@ static int m2m_queue_init(void *priv, struct vb2_queue *src_vq,
 		return ret;
 
 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-	dst_vq->io_modes = VB2_MMAP | VB2_DMABUF;
+	dst_vq->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF;
 	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	dst_vq->ops = &venc_vb2_ops;
 	dst_vq->mem_ops = &vb2_dma_sg_memops;

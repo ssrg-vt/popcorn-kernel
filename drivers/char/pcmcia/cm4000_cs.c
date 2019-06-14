@@ -1445,11 +1445,11 @@ static long cmm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	      _IOC_DIR(cmd), _IOC_READ, _IOC_WRITE, size, cmd);
 
 	if (_IOC_DIR(cmd) & _IOC_READ) {
-		if (!access_ok(VERIFY_WRITE, argp, size))
+		if (!access_ok(argp, size))
 			goto out;
 	}
 	if (_IOC_DIR(cmd) & _IOC_WRITE) {
-		if (!access_ok(VERIFY_READ, argp, size))
+		if (!access_ok(argp, size))
 			goto out;
 	}
 	rc = 0;
@@ -1682,7 +1682,7 @@ static int cmm_open(struct inode *inode, struct file *filp)
 	link->open = 1;		/* only one open per device */
 
 	DEBUGP(2, dev, "<- cmm_open\n");
-	ret = nonseekable_open(inode, filp);
+	ret = stream_open(inode, filp);
 out:
 	mutex_unlock(&cmm_mutex);
 	return ret;

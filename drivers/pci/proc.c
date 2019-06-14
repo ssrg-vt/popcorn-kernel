@@ -52,7 +52,7 @@ static ssize_t proc_bus_pci_read(struct file *file, char __user *buf,
 		nbytes = size - pos;
 	cnt = nbytes;
 
-	if (!access_ok(VERIFY_WRITE, buf, cnt))
+	if (!access_ok(buf, cnt))
 		return -EINVAL;
 
 	pci_config_pm_runtime_get(dev);
@@ -125,7 +125,7 @@ static ssize_t proc_bus_pci_write(struct file *file, const char __user *buf,
 		nbytes = size - pos;
 	cnt = nbytes;
 
-	if (!access_ok(VERIFY_READ, buf, cnt))
+	if (!access_ok(buf, cnt))
 		return -EINVAL;
 
 	pci_config_pm_runtime_get(dev);
@@ -222,6 +222,7 @@ static long proc_bus_pci_ioctl(struct file *file, unsigned int cmd,
 		}
 		/* If arch decided it can't, fall through... */
 #endif /* HAVE_PCI_MMAP */
+		/* fall through */
 	default:
 		ret = -EINVAL;
 		break;

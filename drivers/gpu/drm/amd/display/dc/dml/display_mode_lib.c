@@ -26,39 +26,41 @@
 #include "display_mode_lib.h"
 #include "dc_features.h"
 
-extern const struct _vcs_dpi_ip_params_st dcn1_0_ip;
-extern const struct _vcs_dpi_soc_bounding_box_st dcn1_0_soc;
-
-static void set_soc_bounding_box(struct _vcs_dpi_soc_bounding_box_st *soc, enum dml_project project)
+void dml_init_instance(struct display_mode_lib *lib,
+		const struct _vcs_dpi_soc_bounding_box_st *soc_bb,
+		const struct _vcs_dpi_ip_params_st *ip_params,
+		enum dml_project project)
 {
-	switch (project) {
-	case DML_PROJECT_RAVEN1:
-		*soc = dcn1_0_soc;
-		break;
-	default:
-		ASSERT(0);
-		break;
-	}
+	lib->soc = *soc_bb;
+	lib->ip = *ip_params;
+	lib->project = project;
 }
 
-static void set_ip_params(struct _vcs_dpi_ip_params_st *ip, enum dml_project project)
+const char *dml_get_status_message(enum dm_validation_status status)
 {
-	switch (project) {
-	case DML_PROJECT_RAVEN1:
-		*ip = dcn1_0_ip;
-		break;
-	default:
-		ASSERT(0);
-		break;
+	switch (status) {
+	case DML_VALIDATION_OK:                   return "Validation OK";
+	case DML_FAIL_SCALE_RATIO_TAP:            return "Scale ratio/tap";
+	case DML_FAIL_SOURCE_PIXEL_FORMAT:        return "Source pixel format";
+	case DML_FAIL_VIEWPORT_SIZE:              return "Viewport size";
+	case DML_FAIL_TOTAL_V_ACTIVE_BW:          return "Total vertical active bandwidth";
+	case DML_FAIL_DIO_SUPPORT:                return "DIO support";
+	case DML_FAIL_NOT_ENOUGH_DSC:             return "Not enough DSC Units";
+	case DML_FAIL_DSC_CLK_REQUIRED:           return "DSC clock required";
+	case DML_FAIL_URGENT_LATENCY:             return "Urgent latency";
+	case DML_FAIL_REORDERING_BUFFER:          return "Re-ordering buffer";
+	case DML_FAIL_DISPCLK_DPPCLK:             return "Dispclk and Dppclk";
+	case DML_FAIL_TOTAL_AVAILABLE_PIPES:      return "Total available pipes";
+	case DML_FAIL_NUM_OTG:                    return "Number of OTG";
+	case DML_FAIL_WRITEBACK_MODE:             return "Writeback mode";
+	case DML_FAIL_WRITEBACK_LATENCY:          return "Writeback latency";
+	case DML_FAIL_WRITEBACK_SCALE_RATIO_TAP:  return "Writeback scale ratio/tap";
+	case DML_FAIL_CURSOR_SUPPORT:             return "Cursor support";
+	case DML_FAIL_PITCH_SUPPORT:              return "Pitch support";
+	case DML_FAIL_PTE_BUFFER_SIZE:            return "PTE buffer size";
+	case DML_FAIL_DSC_INPUT_BPC:              return "DSC input bpc";
+	case DML_FAIL_PREFETCH_SUPPORT:           return "Prefetch support";
+	case DML_FAIL_V_RATIO_PREFETCH:           return "Vertical ratio prefetch";
+	default:                                  return "Unknown Status";
 	}
 }
-
-void dml_init_instance(struct display_mode_lib *lib, enum dml_project project)
-{
-	if (lib->project != project) {
-		set_soc_bounding_box(&lib->soc, project);
-		set_ip_params(&lib->ip, project);
-		lib->project = project;
-	}
-}
-

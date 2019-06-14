@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AD9523 SPI Low Jitter Clock Generator
  *
  * Copyright 2012 Analog Devices Inc.
- *
- * Licensed under the GPL-2.
  */
 
 #include <linux/device.h>
@@ -872,22 +871,22 @@ static int ad9523_setup(struct iio_dev *indio_dev)
 		return ret;
 
 	ret = ad9523_write(indio_dev, AD9523_PLL2_VCO_DIVIDER,
-		AD9523_PLL2_VCO_DIV_M1(pdata->pll2_vco_diff_m1) |
-		AD9523_PLL2_VCO_DIV_M2(pdata->pll2_vco_diff_m2) |
-		AD_IFE(pll2_vco_diff_m1, 0,
+		AD9523_PLL2_VCO_DIV_M1(pdata->pll2_vco_div_m1) |
+		AD9523_PLL2_VCO_DIV_M2(pdata->pll2_vco_div_m2) |
+		AD_IFE(pll2_vco_div_m1, 0,
 		       AD9523_PLL2_VCO_DIV_M1_PWR_DOWN_EN) |
-		AD_IFE(pll2_vco_diff_m2, 0,
+		AD_IFE(pll2_vco_div_m2, 0,
 		       AD9523_PLL2_VCO_DIV_M2_PWR_DOWN_EN));
 	if (ret < 0)
 		return ret;
 
-	if (pdata->pll2_vco_diff_m1)
+	if (pdata->pll2_vco_div_m1)
 		st->vco_out_freq[AD9523_VCO1] =
-			st->vco_freq / pdata->pll2_vco_diff_m1;
+			st->vco_freq / pdata->pll2_vco_div_m1;
 
-	if (pdata->pll2_vco_diff_m2)
+	if (pdata->pll2_vco_div_m2)
 		st->vco_out_freq[AD9523_VCO2] =
-			st->vco_freq / pdata->pll2_vco_diff_m2;
+			st->vco_freq / pdata->pll2_vco_div_m2;
 
 	st->vco_out_freq[AD9523_VCXO] = pdata->vcxo_freq;
 
@@ -943,11 +942,14 @@ static int ad9523_setup(struct iio_dev *indio_dev)
 		}
 	}
 
-	for_each_clear_bit(i, &active_mask, AD9523_NUM_CHAN)
-		ad9523_write(indio_dev,
+	for_each_clear_bit(i, &active_mask, AD9523_NUM_CHAN) {
+		ret = ad9523_write(indio_dev,
 			     AD9523_CHANNEL_CLOCK_DIST(i),
 			     AD9523_CLK_DIST_DRIVER_MODE(TRISTATE) |
 			     AD9523_CLK_DIST_PWR_DOWN_EN);
+		if (ret < 0)
+			return ret;
+	}
 
 	ret = ad9523_write(indio_dev, AD9523_POWER_DOWN_CTRL, 0);
 	if (ret < 0)

@@ -282,7 +282,7 @@ void test_ni_sort_device_routes(void)
 
 void test_ni_find_route_set(void)
 {
-	unittest(ni_find_route_set(bad_dest, &DR) == NULL,
+	unittest(!ni_find_route_set(bad_dest, &DR),
 		 "check for nonexistent route_set\n");
 	unittest(ni_find_route_set(dest0, &DR) == &DR.routes[0],
 		 "find first route_set\n");
@@ -372,7 +372,7 @@ void test_ni_lookup_route_register(void)
 	unittest(ni_lookup_route_register(O(8), O(9), T) == 8,
 		 "validate last destination\n");
 	unittest(ni_lookup_route_register(O(10), O(9), T) == -EINVAL,
-		 "lookup invalid desination\n");
+		 "lookup invalid destination\n");
 
 	unittest(ni_lookup_route_register(rgout0_src0, TRIGGER_LINE(0), T) ==
 		 -EINVAL,

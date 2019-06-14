@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * hid-cp2112.c - Silicon Labs HID USB to SMBus master bridge
  * Copyright (c) 2013,2014 Uplogix, Inc.
  * David Barksdale <dbarksdale@uplogix.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 /*
@@ -1203,7 +1195,7 @@ static int __maybe_unused cp2112_allocate_irq(struct cp2112_device *dev,
 		return -EINVAL;
 
 	dev->desc[pin] = gpiochip_request_own_desc(&dev->gc, pin,
-						   "HID/I2C:Event");
+						   "HID/I2C:Event", 0);
 	if (IS_ERR(dev->desc[pin])) {
 		dev_err(dev->gc.parent, "Failed to request GPIO\n");
 		return PTR_ERR(dev->desc[pin]);

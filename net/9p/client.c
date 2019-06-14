@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * net/9p/clnt.c
  *
@@ -5,22 +6,6 @@
  *
  *  Copyright (C) 2008 by Eric Van Hensbergen <ericvh@gmail.com>
  *  Copyright (C) 2007 by Latchesar Ionkov <lucho@ionkov.net>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to:
- *  Free Software Foundation
- *  51 Franklin Street, Fifth Floor
- *  Boston, MA  02111-1301  USA
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -179,6 +164,12 @@ static int parse_opts(char *opts, struct p9_client *clnt)
 				p9_debug(P9_DEBUG_ERROR,
 					 "integer field, but no integer?\n");
 				ret = r;
+				continue;
+			}
+			if (option < 4096) {
+				p9_debug(P9_DEBUG_ERROR,
+					 "msize should be at least 4k\n");
+				ret = -EINVAL;
 				continue;
 			}
 			clnt->msize = option;
@@ -983,10 +974,18 @@ static int p9_client_version(struct p9_client *c)
 	else if (!strncmp(version, "9P2000", 6))
 		c->proto_version = p9_proto_legacy;
 	else {
+		p9_debug(P9_DEBUG_ERROR,
+			 "server returned an unknown version: %s\n", version);
 		err = -EREMOTEIO;
 		goto error;
 	}
 
+	if (msize < 4096) {
+		p9_debug(P9_DEBUG_ERROR,
+			 "server returned a msize < 4096: %d\n", msize);
+		err = -EREMOTEIO;
+		goto error;
+	}
 	if (msize < c->msize)
 		c->msize = msize;
 
@@ -1042,6 +1041,13 @@ struct p9_client *p9_client_create(const char *dev_name, char *options)
 
 	if (clnt->msize > clnt->trans_mod->maxsize)
 		clnt->msize = clnt->trans_mod->maxsize;
+
+	if (clnt->msize < 4096) {
+		p9_debug(P9_DEBUG_ERROR,
+			 "Please specify a msize of at least 4k\n");
+		err = -EINVAL;
+		goto close_trans;
+	}
 
 	err = p9_client_version(clnt);
 	if (err)

@@ -45,7 +45,12 @@
 #define ICE_TX_FLAGS_HW_VLAN	BIT(1)
 #define ICE_TX_FLAGS_SW_VLAN	BIT(2)
 #define ICE_TX_FLAGS_VLAN_M	0xffff0000
+#define ICE_TX_FLAGS_VLAN_PR_M	0xe0000000
+#define ICE_TX_FLAGS_VLAN_PR_S	29
 #define ICE_TX_FLAGS_VLAN_S	16
+
+#define ICE_RX_DMA_ATTR \
+	(DMA_ATTR_SKIP_CPU_SYNC | DMA_ATTR_WEAK_ORDERING)
 
 struct ice_tx_buf {
 	struct ice_tx_desc *next_to_watch;
@@ -73,6 +78,7 @@ struct ice_rx_buf {
 	dma_addr_t dma;
 	struct page *page;
 	unsigned int page_offset;
+	u16 pagecnt_bias;
 };
 
 struct ice_q_stats {
@@ -116,18 +122,27 @@ enum ice_rx_dtype {
 /* indices into GLINT_ITR registers */
 #define ICE_RX_ITR	ICE_IDX_ITR0
 #define ICE_TX_ITR	ICE_IDX_ITR1
-#define ICE_ITR_DYNAMIC	0x8000  /* use top bit as a flag */
-#define ICE_ITR_8K	125
+#define ICE_ITR_8K	124
 #define ICE_ITR_20K	50
-#define ICE_DFLT_TX_ITR	ICE_ITR_20K
-#define ICE_DFLT_RX_ITR	ICE_ITR_20K
-/* apply ITR granularity translation to program the register. itr_gran is either
- * 2 or 4 usecs so we need to divide by 2 first then shift by that value
- */
-#define ITR_TO_REG(val, itr_gran) (((val) & ~ICE_ITR_DYNAMIC) >> \
-				   ((itr_gran) / 2))
+#define ICE_ITR_MAX	8160
+#define ICE_DFLT_TX_ITR	(ICE_ITR_20K | ICE_ITR_DYNAMIC)
+#define ICE_DFLT_RX_ITR	(ICE_ITR_20K | ICE_ITR_DYNAMIC)
+#define ICE_ITR_DYNAMIC	0x8000  /* used as flag for itr_setting */
+#define ITR_IS_DYNAMIC(setting) (!!((setting) & ICE_ITR_DYNAMIC))
+#define ITR_TO_REG(setting)	((setting) & ~ICE_ITR_DYNAMIC)
+#define ICE_ITR_GRAN_S		1	/* ITR granularity is always 2us */
+#define ICE_ITR_GRAN_US		BIT(ICE_ITR_GRAN_S)
+#define ICE_ITR_MASK		0x1FFE	/* ITR register value alignment mask */
+#define ITR_REG_ALIGN(setting)	__ALIGN_MASK(setting, ~ICE_ITR_MASK)
+
+#define ICE_ITR_ADAPTIVE_MIN_INC	0x0002
+#define ICE_ITR_ADAPTIVE_MIN_USECS	0x0002
+#define ICE_ITR_ADAPTIVE_MAX_USECS	0x00FA
+#define ICE_ITR_ADAPTIVE_LATENCY	0x8000
+#define ICE_ITR_ADAPTIVE_BULK		0x0000
 
 #define ICE_DFLT_INTRL	0
+#define ICE_MAX_INTRL	236
 
 /* Legacy or Advanced Mode Queue */
 #define ICE_TX_ADVANCED	0
@@ -148,6 +163,9 @@ struct ice_ring {
 	};
 	u16 q_index;			/* Queue number of ring */
 	u32 txq_teid;			/* Added Tx queue TEID */
+#ifdef CONFIG_DCB
+	u8 dcb_tc;		/* Traffic class of ring */
+#endif /* CONFIG_DCB */
 
 	u16 count;			/* Number of descriptors */
 	u16 reg_idx;			/* HW register index of the ring */
@@ -172,21 +190,20 @@ struct ice_ring {
 	u16 next_to_alloc;
 } ____cacheline_internodealigned_in_smp;
 
-enum ice_latency_range {
-	ICE_LOWEST_LATENCY = 0,
-	ICE_LOW_LATENCY = 1,
-	ICE_BULK_LATENCY = 2,
-	ICE_ULTRA_LATENCY = 3,
-};
-
 struct ice_ring_container {
-	/* array of pointers to rings */
+	/* head of linked-list of rings */
 	struct ice_ring *ring;
+	unsigned long next_update;	/* jiffies value of next queue update */
 	unsigned int total_bytes;	/* total bytes processed this int */
 	unsigned int total_pkts;	/* total packets processed this int */
-	enum ice_latency_range latency_range;
-	int itr_idx;	/* index in the interrupt vector */
-	u16 itr;
+	u16 itr_idx;		/* index in the interrupt vector */
+	u16 target_itr;		/* value in usecs divided by the hw->itr_gran */
+	u16 current_itr;	/* value in usecs divided by the hw->itr_gran */
+	/* high bit set means dynamic ITR, rest is used to store user
+	 * readable ITR value in usecs and must be converted before programming
+	 * to a register.
+	 */
+	u16 itr_setting;
 };
 
 /* iterator for handling rings in ring container */

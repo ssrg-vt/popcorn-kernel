@@ -8,6 +8,7 @@
 #ifndef __NETNS_IPV6_H__
 #define __NETNS_IPV6_H__
 #include <net/dst_ops.h>
+#include <uapi/linux/icmpv6.h>
 
 struct ctl_table_header;
 
@@ -33,6 +34,10 @@ struct netns_sysctl_ipv6 {
 	int auto_flowlabels;
 	int icmpv6_time;
 	int icmpv6_echo_ignore_all;
+	int icmpv6_echo_ignore_multicast;
+	int icmpv6_echo_ignore_anycast;
+	DECLARE_BITMAP(icmpv6_ratemask, ICMPV6_MSG_MAX + 1);
+	unsigned long *icmpv6_ratemask_ptr;
 	int anycast_src_echo_reply;
 	int ip_nonlocal_bind;
 	int fwmark_reflect;
@@ -83,7 +88,7 @@ struct netns_ipv6 {
 	struct fib6_table       *fib6_local_tbl;
 	struct fib_rules_ops    *fib6_rules_ops;
 #endif
-	struct sock		**icmp_sk;
+	struct sock * __percpu	*icmp_sk;
 	struct sock             *ndisc_sk;
 	struct sock             *tcp_sk;
 	struct sock             *igmp_sk;

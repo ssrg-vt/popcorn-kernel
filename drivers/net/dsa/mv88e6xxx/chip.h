@@ -1,12 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Marvell 88E6xxx Ethernet switch single-chip definition
  *
  * Copyright (c) 2008 Marvell Semiconductor
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef _MV88E6XXX_CHIP_H
@@ -20,17 +16,6 @@
 #include <linux/ptp_clock_kernel.h>
 #include <linux/timecounter.h>
 #include <net/dsa.h>
-
-#define SMI_CMD			0x00
-#define SMI_CMD_BUSY		BIT(15)
-#define SMI_CMD_CLAUSE_22	BIT(12)
-#define SMI_CMD_OP_22_WRITE	((1 << 10) | SMI_CMD_BUSY | SMI_CMD_CLAUSE_22)
-#define SMI_CMD_OP_22_READ	((2 << 10) | SMI_CMD_BUSY | SMI_CMD_CLAUSE_22)
-#define SMI_CMD_OP_45_WRITE_ADDR	((0 << 10) | SMI_CMD_BUSY)
-#define SMI_CMD_OP_45_WRITE_DATA	((1 << 10) | SMI_CMD_BUSY)
-#define SMI_CMD_OP_45_READ_DATA		((2 << 10) | SMI_CMD_BUSY)
-#define SMI_CMD_OP_45_READ_DATA_INC	((3 << 10) | SMI_CMD_BUSY)
-#define SMI_DATA		0x01
 
 #define MV88E6XXX_N_FID		4096
 
@@ -300,6 +285,11 @@ struct mv88e6xxx_mdio_bus {
 };
 
 struct mv88e6xxx_ops {
+	/* Switch Setup Errata, called early in the switch setup to
+	 * allow any errata actions to be performed
+	 */
+	int (*setup_errata)(struct mv88e6xxx_chip *chip);
+
 	int (*ieee_pri_map)(struct mv88e6xxx_chip *chip);
 	int (*ip_pri_map)(struct mv88e6xxx_chip *chip);
 
@@ -371,6 +361,9 @@ struct mv88e6xxx_ops {
 	 * Use SPEED_UNFORCED for normal detection, SPEED_MAX for max value.
 	 */
 	int (*port_set_speed)(struct mv88e6xxx_chip *chip, int port, int speed);
+
+	/* What interface mode should be used for maximum speed? */
+	phy_interface_t (*port_max_speed_mode)(int port);
 
 	int (*port_tag_remap)(struct mv88e6xxx_chip *chip, int port);
 
@@ -574,6 +567,9 @@ int mv88e6xxx_write(struct mv88e6xxx_chip *chip, int addr, int reg, u16 val);
 int mv88e6xxx_update(struct mv88e6xxx_chip *chip, int addr, int reg,
 		     u16 update);
 int mv88e6xxx_wait(struct mv88e6xxx_chip *chip, int addr, int reg, u16 mask);
+int mv88e6xxx_port_setup_mac(struct mv88e6xxx_chip *chip, int port, int link,
+			     int speed, int duplex, int pause,
+			     phy_interface_t mode);
 struct mii_bus *mv88e6xxx_default_mdio_bus(struct mv88e6xxx_chip *chip);
 
 #endif /* _MV88E6XXX_CHIP_H */

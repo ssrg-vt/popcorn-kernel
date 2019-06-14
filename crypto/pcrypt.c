@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * pcrypt - Parallel crypto wrapper.
  *
  * Copyright (C) 2009 secunet Security Networks AG
  * Copyright (C) 2009 Steffen Klassert <steffen.klassert@secunet.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <crypto/algapi.h>
@@ -382,7 +370,7 @@ static int pcrypt_cpumask_change_notify(struct notifier_block *self,
 
 	cpumask_copy(new_mask->mask, cpumask->cbcpu);
 	rcu_assign_pointer(pcrypt->cb_cpumask, new_mask);
-	synchronize_rcu_bh();
+	synchronize_rcu();
 
 	free_cpumask_var(old_mask->mask);
 	kfree(old_mask);
@@ -394,7 +382,7 @@ static int pcrypt_sysfs_add(struct padata_instance *pinst, const char *name)
 	int ret;
 
 	pinst->kobj.kset = pcrypt_kset;
-	ret = kobject_add(&pinst->kobj, NULL, name);
+	ret = kobject_add(&pinst->kobj, NULL, "%s", name);
 	if (!ret)
 		kobject_uevent(&pinst->kobj, KOBJ_ADD);
 
@@ -512,7 +500,7 @@ static void __exit pcrypt_exit(void)
 	crypto_unregister_template(&pcrypt_tmpl);
 }
 
-module_init(pcrypt_init);
+subsys_initcall(pcrypt_init);
 module_exit(pcrypt_exit);
 
 MODULE_LICENSE("GPL");

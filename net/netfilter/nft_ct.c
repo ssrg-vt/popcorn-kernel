@@ -178,6 +178,11 @@ static void nft_ct_get_eval(const struct nft_expr *expr,
 		return;
 	}
 #endif
+	case NFT_CT_ID:
+		if (!nf_ct_is_confirmed(ct))
+			goto err;
+		*dest = nf_ct_get_id(ct);
+		return;
 	default:
 		break;
 	}
@@ -479,6 +484,9 @@ static int nft_ct_get_init(const struct nft_ctx *ctx,
 		len = sizeof(u16);
 		break;
 #endif
+	case NFT_CT_ID:
+		len = sizeof(u32);
+		break;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -797,9 +805,11 @@ nft_ct_timeout_parse_policy(void *timeouts,
 	if (!tb)
 		return -ENOMEM;
 
-	ret = nla_parse_nested(tb, l4proto->ctnl_timeout.nlattr_max,
-			       attr, l4proto->ctnl_timeout.nla_policy,
-			       NULL);
+	ret = nla_parse_nested_deprecated(tb,
+					  l4proto->ctnl_timeout.nlattr_max,
+					  attr,
+					  l4proto->ctnl_timeout.nla_policy,
+					  NULL);
 	if (ret < 0)
 		goto err;
 
@@ -870,7 +880,7 @@ static int nft_ct_timeout_obj_init(const struct nft_ctx *ctx,
 	l4num = nla_get_u8(tb[NFTA_CT_TIMEOUT_L4PROTO]);
 	priv->l4proto = l4num;
 
-	l4proto = nf_ct_l4proto_find_get(l4num);
+	l4proto = nf_ct_l4proto_find(l4num);
 
 	if (l4proto->l4proto != l4num) {
 		ret = -EOPNOTSUPP;
@@ -902,7 +912,6 @@ static int nft_ct_timeout_obj_init(const struct nft_ctx *ctx,
 err_free_timeout:
 	kfree(timeout);
 err_proto_put:
-	nf_ct_l4proto_put(l4proto);
 	return ret;
 }
 
@@ -913,7 +922,6 @@ static void nft_ct_timeout_obj_destroy(const struct nft_ctx *ctx,
 	struct nf_ct_timeout *timeout = priv->timeout;
 
 	nf_ct_untimeout(ctx->net, timeout);
-	nf_ct_l4proto_put(timeout->l4proto);
 	nf_ct_netns_put(ctx->net, ctx->family);
 	kfree(priv->timeout);
 }
@@ -930,7 +938,7 @@ static int nft_ct_timeout_obj_dump(struct sk_buff *skb,
 	    nla_put_be16(skb, NFTA_CT_TIMEOUT_L3PROTO, htons(timeout->l3num)))
 		return -1;
 
-	nest_params = nla_nest_start(skb, NFTA_CT_TIMEOUT_DATA | NLA_F_NESTED);
+	nest_params = nla_nest_start(skb, NFTA_CT_TIMEOUT_DATA);
 	if (!nest_params)
 		return -1;
 

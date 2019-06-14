@@ -24,6 +24,15 @@
 		};
 	};
 
+	timer {
+		compatible = "arm,armv7-timer";
+		interrupt-parent = <&intc>;
+		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>;
+	};
+
 	cpu0_opp_table: opp-table {
 		compatible = "operating-points-v2";
 		opp-shared;
@@ -72,6 +81,26 @@
 				};
 			};
 		};
+
+		intc: interrupt-controller@31001000 {
+			compatible = "arm,cortex-a7-gic";
+			interrupts = <GIC_PPI 9 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_HIGH)>;
+			#interrupt-cells = <3>;
+			interrupt-controller;
+			interrupt-parent = <&intc>;
+			reg = <0x31001000 0x1000>,
+			      <0x31002000 0x2000>,
+			      <0x31004000 0x2000>,
+			      <0x31006000 0x2000>;
+		};
+	};
+};
+
+&aips2 {
+	pcie_phy: pcie-phy@306d0000 {
+		  compatible = "fsl,imx7d-pcie-phy";
+		  reg = <0x306d0000 0x10000>;
+		  status = "disabled";
 	};
 };
 
@@ -125,6 +154,7 @@
 		ranges = <0x81000000 0 0          0x4ff80000 0 0x00010000   /* downstream I/O */
 			  0x82000000 0 0x40000000 0x40000000 0 0x0ff00000>; /* non-prefetchable memory */
 		num-lanes = <1>;
+		num-viewport = <4>;
 		interrupts = <GIC_SPI 122 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "msi";
 		#interrupt-cells = <1>;
@@ -152,6 +182,7 @@
 			 <&src IMX7_RESET_PCIE_CTRL_APPS_EN>,
 			 <&src IMX7_RESET_PCIE_CTRL_APPS_TURNOFF>;
 		reset-names = "pciephy", "apps", "turnoff";
+		fsl,imx7d-pcie-phy = <&pcie_phy>;
 		status = "disabled";
 	};
 };

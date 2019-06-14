@@ -1,15 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/input/tablet/wacom_wac.c
  *
  *  USB Wacom tablet support - Wacom specific code
- *
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include "wacom_wac.h"
@@ -626,6 +622,7 @@ static int wacom_intuos_get_tool_type(int tool_id)
 	case 0x8e2: /* IntuosHT2 pen */
 	case 0x022:
 	case 0x10804: /* Intuos4/5 13HD/24HD Art Pen */
+	case 0x10842: /* MobileStudio Pro Pro Pen slim */
 	case 0x14802: /* Intuos4/5 13HD/24HD Classic Pen */
 	case 0x16802: /* Cintiq 13HD Pro Pen */
 	case 0x18802: /* DTH2242 Pen */
@@ -667,6 +664,7 @@ static int wacom_intuos_get_tool_type(int tool_id)
 	case 0x1480a: /* Intuos4/5 13HD/24HD Classic Pen Eraser */
 	case 0x1090a: /* Intuos4/5 13HD/24HD Airbrush Eraser */
 	case 0x1080c: /* Intuos4/5 13HD/24HD Art Pen Eraser */
+	case 0x1084a: /* MobileStudio Pro Pro Pen slim Eraser */
 	case 0x1680a: /* Cintiq 13HD Pro Pen Eraser */
 	case 0x1880a: /* DTH2242 Eraser */
 	case 0x1080a: /* Intuos4/5 13HD/24HD General Pen Eraser */
@@ -1234,13 +1232,13 @@ static void wacom_intuos_pro2_bt_pen(struct wacom_wac *wacom)
 		/* Add back in missing bits of ID for non-USI pens */
 		wacom->id[0] |= (wacom->serial[0] >> 32) & 0xFFFFF;
 	}
-	wacom->tool[0]   = wacom_intuos_get_tool_type(wacom_intuos_id_mangle(wacom->id[0]));
 
 	for (i = 0; i < pen_frames; i++) {
 		unsigned char *frame = &data[i*pen_frame_len + 1];
 		bool valid = frame[0] & 0x80;
 		bool prox = frame[0] & 0x40;
 		bool range = frame[0] & 0x20;
+		bool invert = frame[0] & 0x10;
 
 		if (!valid)
 			continue;
@@ -1249,9 +1247,24 @@ static void wacom_intuos_pro2_bt_pen(struct wacom_wac *wacom)
 			wacom->shared->stylus_in_proximity = false;
 			wacom_exit_report(wacom);
 			input_sync(pen_input);
+
+			wacom->tool[0] = 0;
+			wacom->id[0] = 0;
+			wacom->serial[0] = 0;
 			return;
 		}
+
 		if (range) {
+			if (!wacom->tool[0]) { /* first in range */
+				/* Going into range select tool */
+				if (invert)
+					wacom->tool[0] = BTN_TOOL_RUBBER;
+				else if (wacom->id[0])
+					wacom->tool[0] = wacom_intuos_get_tool_type(wacom->id[0]);
+				else
+					wacom->tool[0] = BTN_TOOL_PEN;
+			}
+
 			input_report_abs(pen_input, ABS_X, get_unaligned_le16(&frame[1]));
 			input_report_abs(pen_input, ABS_Y, get_unaligned_le16(&frame[3]));
 
@@ -1273,23 +1286,26 @@ static void wacom_intuos_pro2_bt_pen(struct wacom_wac *wacom)
 						 get_unaligned_le16(&frame[11]));
 			}
 		}
-		input_report_abs(pen_input, ABS_PRESSURE, get_unaligned_le16(&frame[5]));
-		if (wacom->features.type == INTUOSP2_BT) {
-			input_report_abs(pen_input, ABS_DISTANCE,
-					 range ? frame[13] : wacom->features.distance_max);
-		} else {
-			input_report_abs(pen_input, ABS_DISTANCE,
-					 range ? frame[7] : wacom->features.distance_max);
+
+		if (wacom->tool[0]) {
+			input_report_abs(pen_input, ABS_PRESSURE, get_unaligned_le16(&frame[5]));
+			if (wacom->features.type == INTUOSP2_BT) {
+				input_report_abs(pen_input, ABS_DISTANCE,
+						 range ? frame[13] : wacom->features.distance_max);
+			} else {
+				input_report_abs(pen_input, ABS_DISTANCE,
+						 range ? frame[7] : wacom->features.distance_max);
+			}
+
+			input_report_key(pen_input, BTN_TOUCH, frame[0] & 0x09);
+			input_report_key(pen_input, BTN_STYLUS, frame[0] & 0x02);
+			input_report_key(pen_input, BTN_STYLUS2, frame[0] & 0x04);
+
+			input_report_key(pen_input, wacom->tool[0], prox);
+			input_event(pen_input, EV_MSC, MSC_SERIAL, wacom->serial[0]);
+			input_report_abs(pen_input, ABS_MISC,
+					 wacom_intuos_id_mangle(wacom->id[0])); /* report tool id */
 		}
-
-		input_report_key(pen_input, BTN_TOUCH, frame[0] & 0x01);
-		input_report_key(pen_input, BTN_STYLUS, frame[0] & 0x02);
-		input_report_key(pen_input, BTN_STYLUS2, frame[0] & 0x04);
-
-		input_report_key(pen_input, wacom->tool[0], prox);
-		input_event(pen_input, EV_MSC, MSC_SERIAL, wacom->serial[0]);
-		input_report_abs(pen_input, ABS_MISC,
-				 wacom_intuos_id_mangle(wacom->id[0])); /* report tool id */
 
 		wacom->shared->stylus_in_proximity = prox;
 
@@ -1351,11 +1367,17 @@ static void wacom_intuos_pro2_bt_touch(struct wacom_wac *wacom)
 		if (wacom->num_contacts_left <= 0) {
 			wacom->num_contacts_left = 0;
 			wacom->shared->touch_down = wacom_wac_finger_count_touches(wacom);
+			input_sync(touch_input);
 		}
 	}
 
-	input_report_switch(touch_input, SW_MUTE_DEVICE, !(data[281] >> 7));
-	input_sync(touch_input);
+	if (wacom->num_contacts_left == 0) {
+		// Be careful that we don't accidentally call input_sync with
+		// only a partial set of fingers of processed
+		input_report_switch(touch_input, SW_MUTE_DEVICE, !(data[281] >> 7));
+		input_sync(touch_input);
+	}
+
 }
 
 static void wacom_intuos_pro2_bt_pad(struct wacom_wac *wacom)
@@ -1363,7 +1385,7 @@ static void wacom_intuos_pro2_bt_pad(struct wacom_wac *wacom)
 	struct input_dev *pad_input = wacom->pad_input;
 	unsigned char *data = wacom->data;
 
-	int buttons = (data[282] << 1) | ((data[281] >> 6) & 0x01);
+	int buttons = data[282] | ((data[281] & 0x40) << 2);
 	int ring = data[285] & 0x7F;
 	bool ringstatus = data[285] & 0x80;
 	bool prox = buttons || ringstatus;
@@ -2159,27 +2181,6 @@ static void wacom_wac_pen_usage_mapping(struct hid_device *hdev,
 	case HID_DG_TOOLSERIALNUMBER:
 		features->quirks |= WACOM_QUIRK_TOOLSERIAL;
 		wacom_map_usage(input, usage, field, EV_MSC, MSC_SERIAL, 0);
-
-		/* Adjust AES usages to match modern convention */
-		if (usage->hid == WACOM_HID_WT_SERIALNUMBER && field->report_size == 16) {
-			if (field->index + 2 < field->report->maxfield) {
-				struct hid_field *a = field->report->field[field->index + 1];
-				struct hid_field *b = field->report->field[field->index + 2];
-
-				if (a->maxusage > 0 && a->usage[0].hid == HID_DG_TOOLSERIALNUMBER && a->report_size == 32 &&
-				    b->maxusage > 0 && b->usage[0].hid == 0xFF000000 && b->report_size == 8) {
-					features->quirks |= WACOM_QUIRK_AESPEN;
-					usage->hid = WACOM_HID_WD_TOOLTYPE;
-					field->logical_minimum = S16_MIN;
-					field->logical_maximum = S16_MAX;
-					a->logical_minimum = S32_MIN;
-					a->logical_maximum = S32_MAX;
-					b->usage[0].hid = WACOM_HID_WD_SERIALHI;
-					b->logical_minimum = 0;
-					b->logical_maximum = U8_MAX;
-				}
-			}
-		}
 		break;
 	case WACOM_HID_WD_SENSE:
 		features->quirks |= WACOM_QUIRK_SENSE;
@@ -3525,6 +3526,7 @@ int wacom_setup_pen_input_capabilities(struct input_dev *input_dev,
 	switch (features->type) {
 	case GRAPHIRE_BT:
 		__clear_bit(ABS_MISC, input_dev->absbit);
+		/* fall through */
 
 	case WACOM_MO:
 	case WACOM_G4:
@@ -3832,7 +3834,7 @@ static void wacom_24hd_update_leds(struct wacom *wacom, int mask, int group)
 static bool wacom_is_led_toggled(struct wacom *wacom, int button_count,
 				 int mask, int group)
 {
-	int button_per_group;
+	int group_button;
 
 	/*
 	 * 21UX2 has LED group 1 to the left and LED group 0
@@ -3842,9 +3844,12 @@ static bool wacom_is_led_toggled(struct wacom *wacom, int button_count,
 	if (wacom->wacom_wac.features.type == WACOM_21UX2)
 		group = 1 - group;
 
-	button_per_group = button_count/wacom->led.count;
+	group_button = group * (button_count/wacom->led.count);
 
-	return mask & (1 << (group * button_per_group));
+	if (wacom->wacom_wac.features.type == INTUOSP2_BT)
+		group_button = 8;
+
+	return mask & (1 << group_button);
 }
 
 static void wacom_update_led(struct wacom *wacom, int button_count, int mask,

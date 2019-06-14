@@ -30,6 +30,7 @@
 #include "xfs_refcount_btree.h"
 #include "xfs_da_format.h"
 #include "xfs_da_btree.h"
+#include "xfs_health.h"
 
 /*
  * Physical superblock buffer manipulations. Shared with libxfs in userspace.
@@ -225,10 +226,11 @@ xfs_validate_sb_common(
 	struct xfs_buf		*bp,
 	struct xfs_sb		*sbp)
 {
+	struct xfs_dsb		*dsb = XFS_BUF_TO_SBP(bp);
 	uint32_t		agcount = 0;
 	uint32_t		rem;
 
-	if (sbp->sb_magicnum != XFS_SB_MAGIC) {
+	if (!xfs_verify_magic(bp, dsb->sb_magicnum)) {
 		xfs_warn(mp, "bad magic number");
 		return -EWRONGFS;
 	}
@@ -781,12 +783,14 @@ out_error:
 
 const struct xfs_buf_ops xfs_sb_buf_ops = {
 	.name = "xfs_sb",
+	.magic = { cpu_to_be32(XFS_SB_MAGIC), cpu_to_be32(XFS_SB_MAGIC) },
 	.verify_read = xfs_sb_read_verify,
 	.verify_write = xfs_sb_write_verify,
 };
 
 const struct xfs_buf_ops xfs_sb_quiet_buf_ops = {
 	.name = "xfs_sb_quiet",
+	.magic = { cpu_to_be32(XFS_SB_MAGIC), cpu_to_be32(XFS_SB_MAGIC) },
 	.verify_read = xfs_sb_quiet_read_verify,
 	.verify_write = xfs_sb_write_verify,
 };
@@ -874,7 +878,7 @@ xfs_initialize_perag_data(
 	uint64_t	bfreelst = 0;
 	uint64_t	btree = 0;
 	uint64_t	fdblocks;
-	int		error;
+	int		error = 0;
 
 	for (index = 0; index < agcount; index++) {
 		/*
@@ -902,7 +906,7 @@ xfs_initialize_perag_data(
 	/*
 	 * If the new summary counts are obviously incorrect, fail the
 	 * mount operation because that implies the AGFs are also corrupt.
-	 * Clear BAD_SUMMARY so that we don't unmount with a dirty log, which
+	 * Clear FS_COUNTERS so that we don't unmount with a dirty log, which
 	 * will prevent xfs_repair from fixing anything.
 	 */
 	if (fdblocks > sbp->sb_dblocks || ifree > ialloc) {
@@ -920,7 +924,7 @@ xfs_initialize_perag_data(
 
 	xfs_reinit_percpu_counters(mp);
 out:
-	mp->m_flags &= ~XFS_MOUNT_BAD_SUMMARY;
+	xfs_fs_mark_healthy(mp, XFS_SICK_FS_COUNTERS);
 	return error;
 }
 
@@ -1081,7 +1085,7 @@ out:
 	return error;
 }
 
-int
+void
 xfs_fs_geometry(
 	struct xfs_sb		*sbp,
 	struct xfs_fsop_geom	*geo,
@@ -1105,13 +1109,13 @@ xfs_fs_geometry(
 	memcpy(geo->uuid, &sbp->sb_uuid, sizeof(sbp->sb_uuid));
 
 	if (struct_version < 2)
-		return 0;
+		return;
 
 	geo->sunit = sbp->sb_unit;
 	geo->swidth = sbp->sb_width;
 
 	if (struct_version < 3)
-		return 0;
+		return;
 
 	geo->version = XFS_FSOP_GEOM_VERSION;
 	geo->flags = XFS_FSOP_GEOM_FLAGS_NLINK |
@@ -1155,14 +1159,17 @@ xfs_fs_geometry(
 	geo->dirblocksize = xfs_dir2_dirblock_bytes(sbp);
 
 	if (struct_version < 4)
-		return 0;
+		return;
 
 	if (xfs_sb_version_haslogv2(sbp))
 		geo->flags |= XFS_FSOP_GEOM_FLAGS_LOGV2;
 
 	geo->logsunit = sbp->sb_logsunit;
 
-	return 0;
+	if (struct_version < 5)
+		return;
+
+	geo->version = XFS_FSOP_GEOM_VERSION_V5;
 }
 
 /* Read a secondary superblock. */

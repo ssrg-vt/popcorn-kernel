@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013, Sony Mobile Communications AB.
  * Copyright (c) 2013, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/delay.h>
@@ -1071,6 +1063,25 @@ static void msm_pinctrl_setup_pm_reset(struct msm_pinctrl *pctrl)
 			break;
 		}
 }
+
+static __maybe_unused int msm_pinctrl_suspend(struct device *dev)
+{
+	struct msm_pinctrl *pctrl = dev_get_drvdata(dev);
+
+	return pinctrl_force_sleep(pctrl->pctrl);
+}
+
+static __maybe_unused int msm_pinctrl_resume(struct device *dev)
+{
+	struct msm_pinctrl *pctrl = dev_get_drvdata(dev);
+
+	return pinctrl_force_default(pctrl->pctrl);
+}
+
+SIMPLE_DEV_PM_OPS(msm_pinctrl_dev_pm_ops, msm_pinctrl_suspend,
+		  msm_pinctrl_resume);
+
+EXPORT_SYMBOL(msm_pinctrl_dev_pm_ops);
 
 int msm_pinctrl_probe(struct platform_device *pdev,
 		      const struct msm_pinctrl_soc_data *soc_data)

@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Copyright (c) 2014 Linaro Ltd.
  * Copyright (c) 2014 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/module.h>
@@ -1006,8 +1002,8 @@ static int hix5hd2_init_hw_desc_queue(struct hix5hd2_priv *priv)
 
 	for (i = 0; i < QUEUE_NUMS; i++) {
 		size = priv->pool[i].count * sizeof(struct hix5hd2_desc);
-		virt_addr = dma_zalloc_coherent(dev, size, &phys_addr,
-						GFP_KERNEL);
+		virt_addr = dma_alloc_coherent(dev, size, &phys_addr,
+					       GFP_KERNEL);
 		if (virt_addr == NULL)
 			goto error_free_pool;
 
@@ -1229,7 +1225,7 @@ static int hix5hd2_dev_probe(struct platform_device *pdev)
 	}
 
 	mac_addr = of_get_mac_address(node);
-	if (mac_addr)
+	if (!IS_ERR(mac_addr))
 		ether_addr_copy(ndev->dev_addr, mac_addr);
 	if (!is_valid_ether_addr(ndev->dev_addr)) {
 		eth_hw_addr_random(ndev);

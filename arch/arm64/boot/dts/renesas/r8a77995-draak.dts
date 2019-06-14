@@ -20,8 +20,19 @@
 	};
 
 	chosen {
-		bootargs = "ignore_loglevel";
+		bootargs = "ignore_loglevel rw root=/dev/nfs ip=dhcp";
 		stdout-path = "serial0:115200n8";
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm1 0 50000>;
+
+		brightness-levels = <512 511 505 494 473 440 392 327 241 133 0>;
+		default-brightness-level = <10>;
+
+		power-supply = <&reg_12p0v>;
+		enable-gpios = <&gpio4 0 GPIO_ACTIVE_HIGH>;
 	};
 
 	composite-in {
@@ -104,6 +115,15 @@
 		regulator-always-on;
 	};
 
+	reg_12p0v: regulator1 {
+		compatible = "regulator-fixed";
+		regulator-name = "D12.0V";
+		regulator-min-microvolt = <12000000>;
+		regulator-max-microvolt = <12000000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
 	vga {
 		compatible = "vga-connector";
 
@@ -148,7 +168,6 @@
 	pinctrl-names = "default";
 	renesas,no-ether-link;
 	phy-handle = <&phy0>;
-	phy-mode = "rgmii-txid";
 	status = "okay";
 
 	phy0: ethernet-phy@0 {
@@ -157,6 +176,18 @@
 		interrupt-parent = <&gpio5>;
 		interrupts = <19 IRQ_TYPE_LEVEL_LOW>;
 	};
+};
+
+&can0 {
+	pinctrl-0 = <&can0_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&can1 {
+	pinctrl-0 = <&can1_pins>;
+	pinctrl-names = "default";
+	status = "okay";
 };
 
 &du {
@@ -179,11 +210,17 @@
 };
 
 &ehci0 {
+	dr_mode = "host";
 	status = "okay";
 };
 
 &extal_clk {
 	clock-frequency = <48000000>;
+};
+
+&hsusb {
+	dr_mode = "host";
+	status = "okay";
 };
 
 &i2c0 {
@@ -195,7 +232,7 @@
 		compatible = "adi,adv7180cp";
 		reg = <0x20>;
 
-		port {
+		ports {
 			#address-cells = <1>;
 			#size-cells = <0>;
 
@@ -330,6 +367,13 @@
 };
 
 &lvds1 {
+	/*
+	 * Even though the LVDS1 output is not connected, the encoder must be
+	 * enabled to supply a pixel clock to the DU for the DPAD output when
+	 * LVDS0 is in use.
+	 */
+	status = "okay";
+
 	clocks = <&cpg CPG_MOD 727>,
 		 <&x12_clk>,
 		 <&extal_clk>;
@@ -337,6 +381,7 @@
 };
 
 &ohci0 {
+	dr_mode = "host";
 	status = "okay";
 };
 
@@ -346,6 +391,16 @@
 			groups = "avb0_link", "avb0_mdio", "avb0_mii";
 			function = "avb0";
 		};
+	};
+
+	can0_pins: can0 {
+		groups = "can0_data_a";
+		function = "can0";
+	};
+
+	can1_pins: can1 {
+		groups = "can1_data_a";
+		function = "can1";
 	};
 
 	du_pins: du {
@@ -445,6 +500,7 @@
 	pinctrl-0 = <&usb0_pins>;
 	pinctrl-names = "default";
 
+	renesas,no-otg-pins;
 	status = "okay";
 };
 

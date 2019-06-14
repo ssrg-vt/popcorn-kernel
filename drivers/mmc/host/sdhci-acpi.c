@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Secure Digital Host Controller Interface ACPI driver.
  *
  * Copyright (c) 2012, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- *
  */
 
 #include <linux/init.h>
@@ -437,7 +424,8 @@ static const struct sdhci_acpi_slot sdhci_acpi_slot_int_emmc = {
 		   MMC_CAP_HW_RESET | MMC_CAP_1_8V_DDR |
 		   MMC_CAP_CMD_DURING_TFR | MMC_CAP_WAIT_WHILE_BUSY,
 	.flags   = SDHCI_ACPI_RUNTIME_PM,
-	.quirks  = SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC,
+	.quirks  = SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC |
+		   SDHCI_QUIRK_NO_LED,
 	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
 		   SDHCI_QUIRK2_STOP_WITH_TC |
 		   SDHCI_QUIRK2_CAPS_BIT63_FOR_HS400,
@@ -448,6 +436,7 @@ static const struct sdhci_acpi_slot sdhci_acpi_slot_int_emmc = {
 
 static const struct sdhci_acpi_slot sdhci_acpi_slot_int_sdio = {
 	.quirks  = SDHCI_QUIRK_BROKEN_CARD_DETECTION |
+		   SDHCI_QUIRK_NO_LED |
 		   SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC,
 	.quirks2 = SDHCI_QUIRK2_HOST_OFF_CARD_ON,
 	.caps    = MMC_CAP_NONREMOVABLE | MMC_CAP_POWER_OFF_CARD |
@@ -462,7 +451,8 @@ static const struct sdhci_acpi_slot sdhci_acpi_slot_int_sdio = {
 static const struct sdhci_acpi_slot sdhci_acpi_slot_int_sd = {
 	.flags   = SDHCI_ACPI_SD_CD | SDHCI_ACPI_SD_CD_OVERRIDE_LEVEL |
 		   SDHCI_ACPI_RUNTIME_PM,
-	.quirks  = SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC,
+	.quirks  = SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC |
+		   SDHCI_QUIRK_NO_LED,
 	.quirks2 = SDHCI_QUIRK2_CARD_ON_NEEDS_BUS_ON |
 		   SDHCI_QUIRK2_STOP_WITH_TC,
 	.caps    = MMC_CAP_WAIT_WHILE_BUSY | MMC_CAP_AGGRESSIVE_PM,

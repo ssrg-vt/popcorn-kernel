@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * intel_idle.c - native hardware idle loop for modern Intel processors
  *
  * Copyright (c) 2013, Intel Corporation.
  * Len Brown <len.brown@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 /*
@@ -1103,6 +1091,7 @@ static const struct x86_cpu_id intel_idle_ids[] __initconst = {
 	INTEL_CPU_FAM6(ATOM_GOLDMONT,		idle_cpu_bxt),
 	INTEL_CPU_FAM6(ATOM_GOLDMONT_PLUS,	idle_cpu_bxt),
 	INTEL_CPU_FAM6(ATOM_GOLDMONT_X,		idle_cpu_dnv),
+	INTEL_CPU_FAM6(ATOM_TREMONT_X,		idle_cpu_dnv),
 	{}
 };
 

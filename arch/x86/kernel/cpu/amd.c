@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/export.h>
 #include <linux/bitops.h>
 #include <linux/elf.h>
@@ -15,6 +16,7 @@
 #include <asm/smp.h>
 #include <asm/pci-direct.h>
 #include <asm/delay.h>
+#include <asm/debugreg.h>
 
 #ifdef CONFIG_X86_64
 # include <asm/mmconfig.h>
@@ -81,11 +83,14 @@ static inline int wrmsrl_amd_safe(unsigned msr, unsigned long long val)
  *	performance at the same time..
  */
 
+#ifdef CONFIG_X86_32
 extern __visible void vide(void);
-__asm__(".globl vide\n"
+__asm__(".text\n"
+	".globl vide\n"
 	".type vide, @function\n"
 	".align 4\n"
 	"vide: ret\n");
+#endif
 
 static void init_amd_k5(struct cpuinfo_x86 *c)
 {
@@ -818,11 +823,12 @@ static void init_amd_bd(struct cpuinfo_x86 *c)
 static void init_amd_zn(struct cpuinfo_x86 *c)
 {
 	set_cpu_cap(c, X86_FEATURE_ZEN);
+
 	/*
-	 * Fix erratum 1076: CPB feature bit not being set in CPUID. It affects
-	 * all up to and including B1.
+	 * Fix erratum 1076: CPB feature bit not being set in CPUID.
+	 * Always set it, except when running under a hypervisor.
 	 */
-	if (c->x86_model <= 1 && c->x86_stepping <= 1)
+	if (!cpu_has(c, X86_FEATURE_HYPERVISOR) && !cpu_has(c, X86_FEATURE_CPB))
 		set_cpu_cap(c, X86_FEATURE_CPB);
 }
 

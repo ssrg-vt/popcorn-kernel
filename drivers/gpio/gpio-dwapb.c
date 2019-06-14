@@ -655,7 +655,6 @@ MODULE_DEVICE_TABLE(acpi, dwapb_acpi_match);
 static int dwapb_gpio_probe(struct platform_device *pdev)
 {
 	unsigned int i;
-	struct resource *res;
 	struct dwapb_gpio *gpio;
 	int err;
 	struct device *dev = &pdev->dev;
@@ -688,8 +687,7 @@ static int dwapb_gpio_probe(struct platform_device *pdev)
 	if (!gpio->ports)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	gpio->regs = devm_ioremap_resource(&pdev->dev, res);
+	gpio->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(gpio->regs))
 		return PTR_ERR(gpio->regs);
 
@@ -748,8 +746,7 @@ static int dwapb_gpio_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM_SLEEP
 static int dwapb_gpio_suspend(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dwapb_gpio *gpio = platform_get_drvdata(pdev);
+	struct dwapb_gpio *gpio = dev_get_drvdata(dev);
 	struct gpio_chip *gc	= &gpio->ports[0].gc;
 	unsigned long flags;
 	int i;
@@ -793,8 +790,7 @@ static int dwapb_gpio_suspend(struct device *dev)
 
 static int dwapb_gpio_resume(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct dwapb_gpio *gpio = platform_get_drvdata(pdev);
+	struct dwapb_gpio *gpio = dev_get_drvdata(dev);
 	struct gpio_chip *gc	= &gpio->ports[0].gc;
 	unsigned long flags;
 	int i;

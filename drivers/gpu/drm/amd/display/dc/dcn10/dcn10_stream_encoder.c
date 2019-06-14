@@ -245,7 +245,8 @@ static void enc1_update_hdmi_info_packet(
 void enc1_stream_encoder_dp_set_stream_attribute(
 	struct stream_encoder *enc,
 	struct dc_crtc_timing *crtc_timing,
-	enum dc_color_space output_color_space)
+	enum dc_color_space output_color_space,
+	uint32_t enable_sdp_splitting)
 {
 	uint32_t h_active_start;
 	uint32_t v_active_start;
@@ -261,17 +262,29 @@ void enc1_stream_encoder_dp_set_stream_attribute(
 	uint8_t dp_component_depth = 0;
 
 	struct dcn10_stream_encoder *enc1 = DCN10STRENC_FROM_STRENC(enc);
+	struct dc_crtc_timing hw_crtc_timing = *crtc_timing;
+
+	if (hw_crtc_timing.flags.INTERLACE) {
+		/*the input timing is in VESA spec format with Interlace flag =1*/
+		hw_crtc_timing.v_total /= 2;
+		hw_crtc_timing.v_border_top /= 2;
+		hw_crtc_timing.v_addressable /= 2;
+		hw_crtc_timing.v_border_bottom /= 2;
+		hw_crtc_timing.v_front_porch /= 2;
+		hw_crtc_timing.v_sync_width /= 2;
+	}
+
 
 	/* set pixel encoding */
-	switch (crtc_timing->pixel_encoding) {
+	switch (hw_crtc_timing.pixel_encoding) {
 	case PIXEL_ENCODING_YCBCR422:
 		dp_pixel_encoding = DP_PIXEL_ENCODING_TYPE_YCBCR422;
 		break;
 	case PIXEL_ENCODING_YCBCR444:
 		dp_pixel_encoding = DP_PIXEL_ENCODING_TYPE_YCBCR444;
 
-		if (crtc_timing->flags.Y_ONLY)
-			if (crtc_timing->display_color_depth != COLOR_DEPTH_666)
+		if (hw_crtc_timing.flags.Y_ONLY)
+			if (hw_crtc_timing.display_color_depth != COLOR_DEPTH_666)
 				/* HW testing only, no use case yet.
 				 * Color depth of Y-only could be
 				 * 8, 10, 12, 16 bits
@@ -286,7 +299,6 @@ void enc1_stream_encoder_dp_set_stream_attribute(
 		break;
 	case PIXEL_ENCODING_YCBCR420:
 		dp_pixel_encoding = DP_PIXEL_ENCODING_TYPE_YCBCR420;
-		REG_UPDATE(DP_VID_TIMING, DP_VID_N_MUL, 1);
 		break;
 	default:
 		dp_pixel_encoding = DP_PIXEL_ENCODING_TYPE_RGB444;
@@ -299,7 +311,7 @@ void enc1_stream_encoder_dp_set_stream_attribute(
 	 * Pixel Encoding/Colorimetry Format and that a Sink device shall ignore MISC1, bit 7,
 	 * and MISC0, bits 7:1 (MISC1, bit 7, and MISC0, bits 7:1, become "don't care").
 	 */
-	if ((crtc_timing->pixel_encoding == PIXEL_ENCODING_YCBCR420) ||
+	if ((hw_crtc_timing.pixel_encoding == PIXEL_ENCODING_YCBCR420) ||
 			(output_color_space == COLOR_SPACE_2020_YCBCR) ||
 			(output_color_space == COLOR_SPACE_2020_RGB_FULLRANGE) ||
 			(output_color_space == COLOR_SPACE_2020_RGB_LIMITEDRANGE))
@@ -308,7 +320,7 @@ void enc1_stream_encoder_dp_set_stream_attribute(
 		misc1 = misc1 & ~0x40;
 
 	/* set color depth */
-	switch (crtc_timing->display_color_depth) {
+	switch (hw_crtc_timing.display_color_depth) {
 	case COLOR_DEPTH_666:
 		dp_component_depth = DP_COMPONENT_PIXEL_DEPTH_6BPC;
 		break;
@@ -336,7 +348,7 @@ void enc1_stream_encoder_dp_set_stream_attribute(
 
 	/* set dynamic range and YCbCr range */
 
-	switch (crtc_timing->display_color_depth) {
+	switch (hw_crtc_timing.display_color_depth) {
 	case COLOR_DEPTH_666:
 		colorimetry_bpc = 0;
 		break;
@@ -372,9 +384,9 @@ void enc1_stream_encoder_dp_set_stream_attribute(
 		misc0 = misc0 | 0x8; /* bit3=1, bit4=0 */
 		misc1 = misc1 & ~0x80; /* bit7 = 0*/
 		dynamic_range_ycbcr = 0; /*bt601*/
-		if (crtc_timing->pixel_encoding == PIXEL_ENCODING_YCBCR422)
+		if (hw_crtc_timing.pixel_encoding == PIXEL_ENCODING_YCBCR422)
 			misc0 = misc0 | 0x2; /* bit2=0, bit1=1 */
-		else if (crtc_timing->pixel_encoding == PIXEL_ENCODING_YCBCR444)
+		else if (hw_crtc_timing.pixel_encoding == PIXEL_ENCODING_YCBCR444)
 			misc0 = misc0 | 0x4; /* bit2=1, bit1=0 */
 		break;
 	case COLOR_SPACE_YCBCR709:
@@ -382,9 +394,9 @@ void enc1_stream_encoder_dp_set_stream_attribute(
 		misc0 = misc0 | 0x18; /* bit3=1, bit4=1 */
 		misc1 = misc1 & ~0x80; /* bit7 = 0*/
 		dynamic_range_ycbcr = 1; /*bt709*/
-		if (crtc_timing->pixel_encoding == PIXEL_ENCODING_YCBCR422)
+		if (hw_crtc_timing.pixel_encoding == PIXEL_ENCODING_YCBCR422)
 			misc0 = misc0 | 0x2; /* bit2=0, bit1=1 */
-		else if (crtc_timing->pixel_encoding == PIXEL_ENCODING_YCBCR444)
+		else if (hw_crtc_timing.pixel_encoding == PIXEL_ENCODING_YCBCR444)
 			misc0 = misc0 | 0x4; /* bit2=1, bit1=0 */
 		break;
 	case COLOR_SPACE_2020_RGB_LIMITEDRANGE:
@@ -414,26 +426,26 @@ void enc1_stream_encoder_dp_set_stream_attribute(
 	 * dc_crtc_timing is vesa dmt struct. data from edid
 	 */
 	REG_SET_2(DP_MSA_TIMING_PARAM1, 0,
-			DP_MSA_HTOTAL, crtc_timing->h_total,
-			DP_MSA_VTOTAL, crtc_timing->v_total);
+			DP_MSA_HTOTAL, hw_crtc_timing.h_total,
+			DP_MSA_VTOTAL, hw_crtc_timing.v_total);
 
 	/* calculate from vesa timing parameters
 	 * h_active_start related to leading edge of sync
 	 */
 
-	h_blank = crtc_timing->h_total - crtc_timing->h_border_left -
-			crtc_timing->h_addressable - crtc_timing->h_border_right;
+	h_blank = hw_crtc_timing.h_total - hw_crtc_timing.h_border_left -
+			hw_crtc_timing.h_addressable - hw_crtc_timing.h_border_right;
 
-	h_back_porch = h_blank - crtc_timing->h_front_porch -
-			crtc_timing->h_sync_width;
+	h_back_porch = h_blank - hw_crtc_timing.h_front_porch -
+			hw_crtc_timing.h_sync_width;
 
 	/* start at beginning of left border */
-	h_active_start = crtc_timing->h_sync_width + h_back_porch;
+	h_active_start = hw_crtc_timing.h_sync_width + h_back_porch;
 
 
-	v_active_start = crtc_timing->v_total - crtc_timing->v_border_top -
-			crtc_timing->v_addressable - crtc_timing->v_border_bottom -
-			crtc_timing->v_front_porch;
+	v_active_start = hw_crtc_timing.v_total - hw_crtc_timing.v_border_top -
+			hw_crtc_timing.v_addressable - hw_crtc_timing.v_border_bottom -
+			hw_crtc_timing.v_front_porch;
 
 
 	/* start at beginning of left border */
@@ -443,20 +455,20 @@ void enc1_stream_encoder_dp_set_stream_attribute(
 
 	REG_SET_4(DP_MSA_TIMING_PARAM3, 0,
 			DP_MSA_HSYNCWIDTH,
-			crtc_timing->h_sync_width,
+			hw_crtc_timing.h_sync_width,
 			DP_MSA_HSYNCPOLARITY,
-			!crtc_timing->flags.HSYNC_POSITIVE_POLARITY,
+			!hw_crtc_timing.flags.HSYNC_POSITIVE_POLARITY,
 			DP_MSA_VSYNCWIDTH,
-			crtc_timing->v_sync_width,
+			hw_crtc_timing.v_sync_width,
 			DP_MSA_VSYNCPOLARITY,
-			!crtc_timing->flags.VSYNC_POSITIVE_POLARITY);
+			!hw_crtc_timing.flags.VSYNC_POSITIVE_POLARITY);
 
 	/* HWDITH include border or overscan */
 	REG_SET_2(DP_MSA_TIMING_PARAM4, 0,
-		DP_MSA_HWIDTH, crtc_timing->h_border_left +
-		crtc_timing->h_addressable + crtc_timing->h_border_right,
-		DP_MSA_VHEIGHT, crtc_timing->v_border_top +
-		crtc_timing->v_addressable + crtc_timing->v_border_bottom);
+		DP_MSA_HWIDTH, hw_crtc_timing.h_border_left +
+		hw_crtc_timing.h_addressable + hw_crtc_timing.h_border_right,
+		DP_MSA_VHEIGHT, hw_crtc_timing.v_border_top +
+		hw_crtc_timing.v_addressable + hw_crtc_timing.v_border_bottom);
 }
 
 static void enc1_stream_encoder_set_stream_attribute_helper(
@@ -594,7 +606,7 @@ void enc1_stream_encoder_dvi_set_stream_attribute(
 	cntl.signal = is_dual_link ?
 			SIGNAL_TYPE_DVI_DUAL_LINK : SIGNAL_TYPE_DVI_SINGLE_LINK;
 	cntl.enable_dp_audio = false;
-	cntl.pixel_clock = crtc_timing->pix_clk_khz;
+	cntl.pixel_clock = crtc_timing->pix_clk_100hz / 10;
 	cntl.lanes_number = (is_dual_link) ? LANE_COUNT_EIGHT : LANE_COUNT_FOUR;
 
 	if (enc1->base.bp->funcs->encoder_control(
@@ -714,13 +726,19 @@ void enc1_stream_encoder_update_dp_info_packets(
 				3,  /* packetIndex */
 				&info_frame->hdrsmd);
 
+	if (info_frame->dpsdp.valid)
+		enc1_update_generic_info_packet(
+				enc1,
+				4,/* packetIndex */
+				&info_frame->dpsdp);
+
 	/* enable/disable transmission of packet(s).
 	 * If enabled, packet transmission begins on the next frame
 	 */
 	REG_UPDATE(DP_SEC_CNTL, DP_SEC_GSP0_ENABLE, info_frame->vsc.valid);
 	REG_UPDATE(DP_SEC_CNTL, DP_SEC_GSP2_ENABLE, info_frame->spd.valid);
 	REG_UPDATE(DP_SEC_CNTL, DP_SEC_GSP3_ENABLE, info_frame->hdrsmd.valid);
-
+	REG_UPDATE(DP_SEC_CNTL, DP_SEC_GSP4_ENABLE, info_frame->dpsdp.valid);
 
 	/* This bit is the master enable bit.
 	 * When enabling secondary stream engine,
@@ -766,7 +784,6 @@ void enc1_stream_encoder_dp_blank(
 	struct stream_encoder *enc)
 {
 	struct dcn10_stream_encoder *enc1 = DCN10STRENC_FROM_STRENC(enc);
-	uint32_t retries = 0;
 	uint32_t  reg1 = 0;
 	uint32_t max_retries = DP_BLANK_MAX_RETRY * 10;
 
@@ -786,10 +803,10 @@ void enc1_stream_encoder_dp_blank(
 	 */
 	REG_UPDATE(DP_VID_STREAM_CNTL, DP_VID_STREAM_DIS_DEFER, 2);
 	/* Larger delay to wait until VBLANK - use max retry of
-	 * 10us*3000=30ms. This covers 16.6ms of typical 60 Hz mode +
+	 * 10us*5000=50ms. This covers 41.7ms of minimum 24 Hz mode +
 	 * a little more because we may not trust delay accuracy.
 	 */
-	max_retries = DP_BLANK_MAX_RETRY * 150;
+	max_retries = DP_BLANK_MAX_RETRY * 250;
 
 	/* disable DP stream */
 	REG_UPDATE(DP_VID_STREAM_CNTL, DP_VID_STREAM_ENABLE, 0);
@@ -802,8 +819,6 @@ void enc1_stream_encoder_dp_blank(
 	REG_WAIT(DP_VID_STREAM_CNTL, DP_VID_STREAM_STATUS,
 			0,
 			10, max_retries);
-
-	ASSERT(retries <= max_retries);
 
 	/* Tell the DP encoder to ignore timing from CRTC, must be done after
 	 * the polling. If we set DP_STEER_FIFO_RESET before DP stream blank is
@@ -824,14 +839,19 @@ void enc1_stream_encoder_dp_unblank(
 	if (param->link_settings.link_rate != LINK_RATE_UNKNOWN) {
 		uint32_t n_vid = 0x8000;
 		uint32_t m_vid;
+		uint32_t n_multiply = 0;
+		uint64_t m_vid_l = n_vid;
 
+		/* YCbCr 4:2:0 : Computed VID_M will be 2X the input rate */
+		if (param->timing.pixel_encoding == PIXEL_ENCODING_YCBCR420) {
+			/*this param->pixel_clk_khz is half of 444 rate for 420 already*/
+			n_multiply = 1;
+		}
 		/* M / N = Fstream / Flink
 		 * m_vid / n_vid = pixel rate / link rate
 		 */
 
-		uint64_t m_vid_l = n_vid;
-
-		m_vid_l *= param->pixel_clk_khz;
+		m_vid_l *= param->timing.pix_clk_100hz / 10;
 		m_vid_l = div_u64(m_vid_l,
 			param->link_settings.link_rate
 				* LINK_RATE_REF_FREQ_IN_KHZ);
@@ -850,7 +870,9 @@ void enc1_stream_encoder_dp_unblank(
 
 		REG_UPDATE(DP_VID_M, DP_VID_M, m_vid);
 
-		REG_UPDATE(DP_VID_TIMING, DP_VID_M_N_GEN_EN, 1);
+		REG_UPDATE_2(DP_VID_TIMING,
+				DP_VID_M_N_GEN_EN, 1,
+				DP_VID_N_MUL, n_multiply);
 	}
 
 	/* set DIG_START to 0x1 to resync FIFO */
@@ -1416,6 +1438,14 @@ void enc1_setup_stereo_sync(
 	REG_UPDATE(DIG_FE_CNTL, DIG_STEREOSYNC_GATE_EN, !enable);
 }
 
+void enc1_dig_connect_to_otg(
+	struct stream_encoder *enc,
+	int tg_inst)
+{
+	struct dcn10_stream_encoder *enc1 = DCN10STRENC_FROM_STRENC(enc);
+
+	REG_UPDATE(DIG_FE_CNTL, DIG_SOURCE_SELECT, tg_inst);
+}
 
 static const struct stream_encoder_funcs dcn10_str_enc_funcs = {
 	.dp_set_stream_attribute =
@@ -1448,6 +1478,7 @@ static const struct stream_encoder_funcs dcn10_str_enc_funcs = {
 	.hdmi_audio_disable = enc1_se_hdmi_audio_disable,
 	.setup_stereo_sync  = enc1_setup_stereo_sync,
 	.set_avmute = enc1_stream_encoder_set_avmute,
+	.dig_connect_to_otg  = enc1_dig_connect_to_otg,
 };
 
 void dcn10_stream_encoder_construct(

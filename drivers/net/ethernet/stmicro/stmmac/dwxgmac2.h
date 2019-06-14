@@ -143,6 +143,11 @@
 #define XGMAC_RSF			BIT(5)
 #define XGMAC_RTC			GENMASK(1, 0)
 #define XGMAC_RTC_SHIFT			0
+#define XGMAC_MTL_RXQ_FLOW_CONTROL(x)	(0x00001150 + (0x80 * (x)))
+#define XGMAC_RFD			GENMASK(31, 17)
+#define XGMAC_RFD_SHIFT			17
+#define XGMAC_RFA			GENMASK(15, 1)
+#define XGMAC_RFA_SHIFT			1
 #define XGMAC_MTL_QINTEN(x)		(0x00001170 + (0x80 * (x)))
 #define XGMAC_RXOIE			BIT(16)
 #define XGMAC_MTL_QINT_STATUS(x)	(0x00001174 + (0x80 * (x)))
@@ -193,9 +198,10 @@
 #define XGMAC_AIE			BIT(14)
 #define XGMAC_RBUE			BIT(7)
 #define XGMAC_RIE			BIT(6)
+#define XGMAC_TBUE			BIT(2)
 #define XGMAC_TIE			BIT(0)
 #define XGMAC_DMA_INT_DEFAULT_EN	(XGMAC_NIE | XGMAC_AIE | XGMAC_RBUE | \
-					XGMAC_RIE | XGMAC_TIE)
+					XGMAC_RIE | XGMAC_TBUE | XGMAC_TIE)
 #define XGMAC_DMA_CH_Rx_WATCHDOG(x)	(0x0000313c + (0x80 * (x)))
 #define XGMAC_RWT			GENMASK(7, 0)
 #define XGMAC_DMA_CH_STATUS(x)		(0x00003160 + (0x80 * (x)))
@@ -204,6 +210,7 @@
 #define XGMAC_FBE			BIT(12)
 #define XGMAC_RBU			BIT(7)
 #define XGMAC_RI			BIT(6)
+#define XGMAC_TBU			BIT(2)
 #define XGMAC_TPS			BIT(1)
 #define XGMAC_TI			BIT(0)
 

@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
  * Copyright (C) 2004-2006 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License version 2.
  */
 
 #include <linux/spinlock.h>
@@ -14,6 +11,7 @@
 #include <linux/gfs2_ondisk.h>
 #include <linux/crc32.h>
 #include <linux/iomap.h>
+#include <linux/ktime.h>
 
 #include "gfs2.h"
 #include "incore.h"
@@ -141,7 +139,7 @@ int gfs2_unstuff_dinode(struct gfs2_inode *ip, struct page *page)
 		if (error)
 			goto out_brelse;
 		if (isdir) {
-			gfs2_trans_add_unrevoke(GFS2_SB(&ip->i_inode), block, 1);
+			gfs2_trans_remove_revoke(GFS2_SB(&ip->i_inode), block, 1);
 			error = gfs2_dir_get_new_buffer(ip, block, &bh);
 			if (error)
 				goto out_brelse;
@@ -675,7 +673,7 @@ static int gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 			goto out;
 		alloced += n;
 		if (state != ALLOC_DATA || gfs2_is_jdata(ip))
-			gfs2_trans_add_unrevoke(sdp, bn, n);
+			gfs2_trans_remove_revoke(sdp, bn, n);
 		switch (state) {
 		/* Growing height of tree */
 		case ALLOC_GROW_HEIGHT:
@@ -709,7 +707,7 @@ static int gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 			}
 			if (n == 0)
 				break;
-		/* Branching from existing tree */
+		/* fall through - To branching from existing tree */
 		case ALLOC_GROW_DEPTH:
 			if (i > 1 && i < mp->mp_fheight)
 				gfs2_trans_add_meta(ip->i_gl, mp->mp_bh[i-1]);
@@ -720,7 +718,7 @@ static int gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 				state = ALLOC_DATA;
 			if (n == 0)
 				break;
-		/* Tree complete, adding data blocks */
+		/* fall through - To tree complete, adding data blocks */
 		case ALLOC_DATA:
 			BUG_ON(n > dblks);
 			BUG_ON(mp->mp_bh[end_of_metadata] == NULL);
@@ -924,6 +922,32 @@ do_alloc:
 	goto out;
 }
 
+/**
+ * gfs2_lblk_to_dblk - convert logical block to disk block
+ * @inode: the inode of the file we're mapping
+ * @lblock: the block relative to the start of the file
+ * @dblock: the returned dblock, if no error
+ *
+ * This function maps a single block from a file logical block (relative to
+ * the start of the file) to a file system absolute block using iomap.
+ *
+ * Returns: the absolute file system block, or an error
+ */
+int gfs2_lblk_to_dblk(struct inode *inode, u32 lblock, u64 *dblock)
+{
+	struct iomap iomap = { };
+	struct metapath mp = { .mp_aheight = 1, };
+	loff_t pos = (loff_t)lblock << inode->i_blkbits;
+	int ret;
+
+	ret = gfs2_iomap_get(inode, pos, i_blocksize(inode), 0, &iomap, &mp);
+	release_metapath(&mp);
+	if (ret == 0)
+		*dblock = iomap.addr >> inode->i_blkbits;
+
+	return ret;
+}
+
 static int gfs2_write_lock(struct inode *inode)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
@@ -964,14 +988,30 @@ static void gfs2_write_unlock(struct inode *inode)
 	gfs2_glock_dq_uninit(&ip->i_gh);
 }
 
-static void gfs2_iomap_journaled_page_done(struct inode *inode, loff_t pos,
-				unsigned copied, struct page *page,
-				struct iomap *iomap)
+static int gfs2_iomap_page_prepare(struct inode *inode, loff_t pos,
+				   unsigned len, struct iomap *iomap)
+{
+	struct gfs2_sbd *sdp = GFS2_SB(inode);
+
+	return gfs2_trans_begin(sdp, RES_DINODE + (len >> inode->i_blkbits), 0);
+}
+
+static void gfs2_iomap_page_done(struct inode *inode, loff_t pos,
+				 unsigned copied, struct page *page,
+				 struct iomap *iomap)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
+	struct gfs2_sbd *sdp = GFS2_SB(inode);
 
-	gfs2_page_add_databufs(ip, page, offset_in_page(pos), copied);
+	if (page && !gfs2_is_stuffed(ip))
+		gfs2_page_add_databufs(ip, page, offset_in_page(pos), copied);
+	gfs2_trans_end(sdp);
 }
+
+static const struct iomap_page_ops gfs2_iomap_page_ops = {
+	.page_prepare = gfs2_iomap_page_prepare,
+	.page_done = gfs2_iomap_page_done,
+};
 
 static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 				  loff_t length, unsigned flags,
@@ -1025,32 +1065,46 @@ static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 	if (alloc_required)
 		rblocks += gfs2_rg_blocks(ip, data_blocks + ind_blocks);
 
-	ret = gfs2_trans_begin(sdp, rblocks, iomap->length >> inode->i_blkbits);
-	if (ret)
-		goto out_trans_fail;
+	if (unstuff || iomap->type == IOMAP_HOLE) {
+		struct gfs2_trans *tr;
 
-	if (unstuff) {
-		ret = gfs2_unstuff_dinode(ip, NULL);
+		ret = gfs2_trans_begin(sdp, rblocks,
+				       iomap->length >> inode->i_blkbits);
 		if (ret)
-			goto out_trans_end;
-		release_metapath(mp);
-		ret = gfs2_iomap_get(inode, iomap->offset, iomap->length,
-				     flags, iomap, mp);
-		if (ret)
-			goto out_trans_end;
-	}
+			goto out_trans_fail;
 
-	if (iomap->type == IOMAP_HOLE) {
-		ret = gfs2_iomap_alloc(inode, iomap, flags, mp);
-		if (ret) {
-			gfs2_trans_end(sdp);
-			gfs2_inplace_release(ip);
-			punch_hole(ip, iomap->offset, iomap->length);
-			goto out_qunlock;
+		if (unstuff) {
+			ret = gfs2_unstuff_dinode(ip, NULL);
+			if (ret)
+				goto out_trans_end;
+			release_metapath(mp);
+			ret = gfs2_iomap_get(inode, iomap->offset,
+					     iomap->length, flags, iomap, mp);
+			if (ret)
+				goto out_trans_end;
 		}
+
+		if (iomap->type == IOMAP_HOLE) {
+			ret = gfs2_iomap_alloc(inode, iomap, flags, mp);
+			if (ret) {
+				gfs2_trans_end(sdp);
+				gfs2_inplace_release(ip);
+				punch_hole(ip, iomap->offset, iomap->length);
+				goto out_qunlock;
+			}
+		}
+
+		tr = current->journal_info;
+		if (tr->tr_num_buf_new)
+			__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
+		else
+			gfs2_trans_add_meta(ip->i_gl, mp->mp_bh[0]);
+
+		gfs2_trans_end(sdp);
 	}
-	if (!gfs2_is_stuffed(ip) && gfs2_is_jdata(ip))
-		iomap->page_done = gfs2_iomap_journaled_page_done;
+
+	if (gfs2_is_stuffed(ip) || gfs2_is_jdata(ip))
+		iomap->page_ops = &gfs2_iomap_page_ops;
 	return 0;
 
 out_trans_end:
@@ -1089,10 +1143,6 @@ static int gfs2_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 		    iomap->type != IOMAP_MAPPED)
 			ret = -ENOTBLK;
 	}
-	if (!ret) {
-		get_bh(mp.mp_bh[0]);
-		iomap->private = mp.mp_bh[0];
-	}
 	release_metapath(&mp);
 	trace_gfs2_iomap_end(ip, iomap, ret);
 	return ret;
@@ -1103,27 +1153,16 @@ static int gfs2_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	struct gfs2_trans *tr = current->journal_info;
-	struct buffer_head *dibh = iomap->private;
 
 	if ((flags & (IOMAP_WRITE | IOMAP_DIRECT)) != IOMAP_WRITE)
 		goto out;
 
-	if (iomap->type != IOMAP_INLINE) {
+	if (!gfs2_is_stuffed(ip))
 		gfs2_ordered_add_inode(ip);
 
-		if (tr->tr_num_buf_new)
-			__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
-		else
-			gfs2_trans_add_meta(ip->i_gl, dibh);
-	}
-
-	if (inode == sdp->sd_rindex) {
+	if (inode == sdp->sd_rindex)
 		adjust_fs_space(inode);
-		sdp->sd_rindex_uptodate = 0;
-	}
 
-	gfs2_trans_end(sdp);
 	gfs2_inplace_release(ip);
 
 	if (length != written && (iomap->flags & IOMAP_F_NEW)) {
@@ -1143,8 +1182,6 @@ static int gfs2_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 	gfs2_write_unlock(inode);
 
 out:
-	if (dibh)
-		brelse(dibh);
 	return 0;
 }
 
@@ -2083,6 +2120,8 @@ static int do_grow(struct inode *inode, u64 size)
 	}
 
 	error = gfs2_trans_begin(sdp, RES_DINODE + RES_STATFS + RES_RG_BIT +
+				 (unstuff &&
+				  gfs2_is_jdata(ip) ? RES_JDATA : 0) +
 				 (sdp->sd_args.ar_quota == GFS2_QUOTA_OFF ?
 				  0 : RES_QUOTA), 0);
 	if (error)
@@ -2248,7 +2287,9 @@ int gfs2_map_journal_extents(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd)
 	unsigned int shift = sdp->sd_sb.sb_bsize_shift;
 	u64 size;
 	int rc;
+	ktime_t start, end;
 
+	start = ktime_get();
 	lblock_stop = i_size_read(jd->jd_inode) >> shift;
 	size = (lblock_stop - lblock) << shift;
 	jd->nr_extents = 0;
@@ -2268,8 +2309,9 @@ int gfs2_map_journal_extents(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd)
 		lblock += (bh.b_size >> ip->i_inode.i_blkbits);
 	} while(size > 0);
 
-	fs_info(sdp, "journal %d mapped with %u extents\n", jd->jd_jid,
-		jd->nr_extents);
+	end = ktime_get();
+	fs_info(sdp, "journal %d mapped with %u extents in %lldms\n", jd->jd_jid,
+		jd->nr_extents, ktime_ms_delta(end, start));
 	return 0;
 
 fail:

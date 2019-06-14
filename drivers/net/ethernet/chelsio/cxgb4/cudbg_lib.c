@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2017 Chelsio Communications.  All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms and conditions of the GNU General Public License,
- *  version 2, as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
- *
- *  The full GNU General Public License is included in this distribution in
- *  the file called "COPYING".
- *
  */
 
 #include <linux/sort.h>
@@ -81,7 +69,7 @@ static int is_fw_attached(struct cudbg_init *pdbg_init)
 {
 	struct adapter *padap = pdbg_init->adap;
 
-	if (!(padap->flags & FW_OK) || padap->use_bd)
+	if (!(padap->flags & CXGB4_FW_OK) || padap->use_bd)
 		return 0;
 
 	return 1;
@@ -1229,6 +1217,10 @@ int cudbg_collect_hw_sched(struct cudbg_init *pdbg_init,
 
 	rc = cudbg_get_buff(pdbg_init, dbg_buff, sizeof(struct cudbg_hw_sched),
 			    &temp_buff);
+
+	if (rc)
+		return rc;
+
 	hw_sched_buff = (struct cudbg_hw_sched *)temp_buff.data;
 	hw_sched_buff->map = t4_read_reg(padap, TP_TX_MOD_QUEUE_REQ_MAP_A);
 	hw_sched_buff->mode = TIMERMODE_G(t4_read_reg(padap, TP_MOD_CONFIG_A));

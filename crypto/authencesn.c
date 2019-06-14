@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * authencesn.c - AEAD wrapper for IPsec with extended sequence numbers,
  *                 derived from authenc.c
@@ -5,12 +6,6 @@
  * Copyright (C) 2010 secunet Security Networks AG
  * Copyright (C) 2010 Steffen Klassert <steffen.klassert@secunet.com>
  * Copyright (c) 2015 Herbert Xu <herbert@gondor.apana.org.au>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #include <crypto/internal/aead.h>
@@ -279,7 +274,7 @@ static void authenc_esn_verify_ahash_done(struct crypto_async_request *areq,
 	struct aead_request *req = areq->data;
 
 	err = err ?: crypto_authenc_esn_decrypt_tail(req, 0);
-	aead_request_complete(req, err);
+	authenc_esn_request_complete(req, err);
 }
 
 static int crypto_authenc_esn_decrypt(struct aead_request *req)
@@ -523,7 +518,7 @@ static void __exit crypto_authenc_esn_module_exit(void)
 	crypto_unregister_template(&crypto_authenc_esn_tmpl);
 }
 
-module_init(crypto_authenc_esn_module_init);
+subsys_initcall(crypto_authenc_esn_module_init);
 module_exit(crypto_authenc_esn_module_exit);
 
 MODULE_LICENSE("GPL");

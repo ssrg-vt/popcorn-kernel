@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Line 6 Linux USB driver
  *
  * Copyright (C) 2004-2010 Markus Grabner (grabner@icg.tugraz.at)
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License as
- *	published by the Free Software Foundation, version 2.
- *
  */
 
 #include <linux/slab.h>
@@ -320,7 +316,8 @@ static void pod_startup4(struct work_struct *work)
 	line6_read_serial_number(&pod->line6, &pod->serial_number);
 
 	/* ALSA audio interface: */
-	snd_card_register(line6->card);
+	if (snd_card_register(line6->card))
+		dev_err(line6->ifcdev, "Failed to register POD card.\n");
 }
 
 /* POD special files: */

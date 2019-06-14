@@ -274,7 +274,8 @@ static int pin_user_pages(unsigned long first_page,
 		*iter_last_page_size = last_page_size;
 	}
 
-	ret = get_user_pages_fast(first_page, requested_pages, !is_write,
+	ret = get_user_pages_fast(first_page, requested_pages,
+				  !is_write ? FOLL_WRITE : 0,
 				  pages);
 	if (ret <= 0)
 		return -EFAULT;
@@ -416,8 +417,7 @@ static ssize_t goldfish_pipe_read_write(struct file *filp,
 	if (unlikely(bufflen == 0))
 		return 0;
 	/* Check the buffer range for access */
-	if (unlikely(!access_ok(is_write ? VERIFY_WRITE : VERIFY_READ,
-				buffer, bufflen)))
+	if (unlikely(!access_ok(buffer, bufflen)))
 		return -EFAULT;
 
 	address = (unsigned long)buffer;

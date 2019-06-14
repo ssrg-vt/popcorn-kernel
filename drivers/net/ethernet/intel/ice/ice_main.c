@@ -7,8 +7,9 @@
 
 #include "ice.h"
 #include "ice_lib.h"
+#include "ice_dcb_lib.h"
 
-#define DRV_VERSION	"0.7.2-k"
+#define DRV_VERSION	"0.7.4-k"
 #define DRV_SUMMARY	"Intel(R) Ethernet Connection E800 Series Linux Driver"
 const char ice_drv_ver[] = DRV_VERSION;
 static const char ice_driver_string[] = DRV_SUMMARY;
@@ -30,7 +31,6 @@ MODULE_PARM_DESC(debug, "netif level (0=none,...,16=all)");
 static struct workqueue_struct *ice_wq;
 static const struct net_device_ops ice_netdev_ops;
 
-static void ice_pf_dis_all_vsi(struct ice_pf *pf);
 static void ice_rebuild(struct ice_pf *pf);
 
 static void ice_vsi_release_all(struct ice_pf *pf);
@@ -113,14 +113,14 @@ static void ice_check_for_hang_subtask(struct ice_pf *pf)
 }
 
 /**
- * ice_add_mac_to_sync_list - creates list of mac addresses to be synced
+ * ice_add_mac_to_sync_list - creates list of MAC addresses to be synced
  * @netdev: the net device on which the sync is happening
- * @addr: mac address to sync
+ * @addr: MAC address to sync
  *
  * This is a callback function which is called by the in kernel device sync
  * functions (like __dev_uc_sync, __dev_mc_sync, etc). This function only
  * populates the tmp_sync_list, which is later used by ice_add_mac to add the
- * mac filters from the hardware.
+ * MAC filters from the hardware.
  */
 static int ice_add_mac_to_sync_list(struct net_device *netdev, const u8 *addr)
 {
@@ -134,14 +134,14 @@ static int ice_add_mac_to_sync_list(struct net_device *netdev, const u8 *addr)
 }
 
 /**
- * ice_add_mac_to_unsync_list - creates list of mac addresses to be unsynced
+ * ice_add_mac_to_unsync_list - creates list of MAC addresses to be unsynced
  * @netdev: the net device on which the unsync is happening
- * @addr: mac address to unsync
+ * @addr: MAC address to unsync
  *
  * This is a callback function which is called by the in kernel device unsync
  * functions (like __dev_uc_unsync, __dev_mc_unsync, etc). This function only
  * populates the tmp_unsync_list, which is later used by ice_remove_mac to
- * delete the mac filters from the hardware.
+ * delete the MAC filters from the hardware.
  */
 static int ice_add_mac_to_unsync_list(struct net_device *netdev, const u8 *addr)
 {
@@ -168,6 +168,39 @@ static bool ice_vsi_fltr_changed(struct ice_vsi *vsi)
 }
 
 /**
+ * ice_cfg_promisc - Enable or disable promiscuous mode for a given PF
+ * @vsi: the VSI being configured
+ * @promisc_m: mask of promiscuous config bits
+ * @set_promisc: enable or disable promisc flag request
+ *
+ */
+static int ice_cfg_promisc(struct ice_vsi *vsi, u8 promisc_m, bool set_promisc)
+{
+	struct ice_hw *hw = &vsi->back->hw;
+	enum ice_status status = 0;
+
+	if (vsi->type != ICE_VSI_PF)
+		return 0;
+
+	if (vsi->vlan_ena) {
+		status = ice_set_vlan_vsi_promisc(hw, vsi->idx, promisc_m,
+						  set_promisc);
+	} else {
+		if (set_promisc)
+			status = ice_set_vsi_promisc(hw, vsi->idx, promisc_m,
+						     0);
+		else
+			status = ice_clear_vsi_promisc(hw, vsi->idx, promisc_m,
+						       0);
+	}
+
+	if (status)
+		return -EIO;
+
+	return 0;
+}
+
+/**
  * ice_vsi_sync_fltr - Update the VSI filter list to the HW
  * @vsi: ptr to the VSI
  *
@@ -182,6 +215,7 @@ static int ice_vsi_sync_fltr(struct ice_vsi *vsi)
 	struct ice_hw *hw = &pf->hw;
 	enum ice_status status = 0;
 	u32 changed_flags = 0;
+	u8 promisc_m;
 	int err = 0;
 
 	if (!vsi->netdev)
@@ -211,7 +245,7 @@ static int ice_vsi_sync_fltr(struct ice_vsi *vsi)
 		netif_addr_unlock_bh(netdev);
 	}
 
-	/* Remove mac addresses in the unsync list */
+	/* Remove MAC addresses in the unsync list */
 	status = ice_remove_mac(hw, &vsi->tmp_unsync_list);
 	ice_free_fltr_list(dev, &vsi->tmp_unsync_list);
 	if (status) {
@@ -223,12 +257,16 @@ static int ice_vsi_sync_fltr(struct ice_vsi *vsi)
 		}
 	}
 
-	/* Add mac addresses in the sync list */
+	/* Add MAC addresses in the sync list */
 	status = ice_add_mac(hw, &vsi->tmp_sync_list);
 	ice_free_fltr_list(dev, &vsi->tmp_sync_list);
-	if (status) {
+	/* If filter is added successfully or already exists, do not go into
+	 * 'if' condition and report it as error. Instead continue processing
+	 * rest of the function.
+	 */
+	if (status && status != ICE_ERR_ALREADY_EXISTS) {
 		netdev_err(netdev, "Failed to add MAC filters\n");
-		/* If there is no more space for new umac filters, vsi
+		/* If there is no more space for new umac filters, VSI
 		 * should go into promiscuous mode. There should be some
 		 * space reserved for promiscuous filters.
 		 */
@@ -245,49 +283,56 @@ static int ice_vsi_sync_fltr(struct ice_vsi *vsi)
 		}
 	}
 	/* check for changes in promiscuous modes */
-	if (changed_flags & IFF_ALLMULTI)
-		netdev_warn(netdev, "Unsupported configuration\n");
+	if (changed_flags & IFF_ALLMULTI) {
+		if (vsi->current_netdev_flags & IFF_ALLMULTI) {
+			if (vsi->vlan_ena)
+				promisc_m = ICE_MCAST_VLAN_PROMISC_BITS;
+			else
+				promisc_m = ICE_MCAST_PROMISC_BITS;
+
+			err = ice_cfg_promisc(vsi, promisc_m, true);
+			if (err) {
+				netdev_err(netdev, "Error setting Multicast promiscuous mode on VSI %i\n",
+					   vsi->vsi_num);
+				vsi->current_netdev_flags &= ~IFF_ALLMULTI;
+				goto out_promisc;
+			}
+		} else if (!(vsi->current_netdev_flags & IFF_ALLMULTI)) {
+			if (vsi->vlan_ena)
+				promisc_m = ICE_MCAST_VLAN_PROMISC_BITS;
+			else
+				promisc_m = ICE_MCAST_PROMISC_BITS;
+
+			err = ice_cfg_promisc(vsi, promisc_m, false);
+			if (err) {
+				netdev_err(netdev, "Error clearing Multicast promiscuous mode on VSI %i\n",
+					   vsi->vsi_num);
+				vsi->current_netdev_flags |= IFF_ALLMULTI;
+				goto out_promisc;
+			}
+		}
+	}
 
 	if (((changed_flags & IFF_PROMISC) || promisc_forced_on) ||
 	    test_bit(ICE_VSI_FLAG_PROMISC_CHANGED, vsi->flags)) {
 		clear_bit(ICE_VSI_FLAG_PROMISC_CHANGED, vsi->flags);
 		if (vsi->current_netdev_flags & IFF_PROMISC) {
-			/* Apply TX filter rule to get traffic from VMs */
-			status = ice_cfg_dflt_vsi(hw, vsi->idx, true,
-						  ICE_FLTR_TX);
-			if (status) {
-				netdev_err(netdev, "Error setting default VSI %i tx rule\n",
-					   vsi->vsi_num);
-				vsi->current_netdev_flags &= ~IFF_PROMISC;
-				err = -EIO;
-				goto out_promisc;
-			}
-			/* Apply RX filter rule to get traffic from wire */
+			/* Apply Rx filter rule to get traffic from wire */
 			status = ice_cfg_dflt_vsi(hw, vsi->idx, true,
 						  ICE_FLTR_RX);
 			if (status) {
-				netdev_err(netdev, "Error setting default VSI %i rx rule\n",
+				netdev_err(netdev, "Error setting default VSI %i Rx rule\n",
 					   vsi->vsi_num);
 				vsi->current_netdev_flags &= ~IFF_PROMISC;
 				err = -EIO;
 				goto out_promisc;
 			}
 		} else {
-			/* Clear TX filter rule to stop traffic from VMs */
-			status = ice_cfg_dflt_vsi(hw, vsi->idx, false,
-						  ICE_FLTR_TX);
-			if (status) {
-				netdev_err(netdev, "Error clearing default VSI %i tx rule\n",
-					   vsi->vsi_num);
-				vsi->current_netdev_flags |= IFF_PROMISC;
-				err = -EIO;
-				goto out_promisc;
-			}
-			/* Clear RX filter to remove traffic from wire */
+			/* Clear Rx filter to remove traffic from wire */
 			status = ice_cfg_dflt_vsi(hw, vsi->idx, false,
 						  ICE_FLTR_RX);
 			if (status) {
-				netdev_err(netdev, "Error clearing default VSI %i rx rule\n",
+				netdev_err(netdev, "Error clearing default VSI %i Rx rule\n",
 					   vsi->vsi_num);
 				vsi->current_netdev_flags |= IFF_PROMISC;
 				err = -EIO;
@@ -322,13 +367,58 @@ static void ice_sync_fltr_subtask(struct ice_pf *pf)
 
 	clear_bit(ICE_FLAG_FLTR_SYNC, pf->flags);
 
-	for (v = 0; v < pf->num_alloc_vsi; v++)
+	ice_for_each_vsi(pf, v)
 		if (pf->vsi[v] && ice_vsi_fltr_changed(pf->vsi[v]) &&
 		    ice_vsi_sync_fltr(pf->vsi[v])) {
 			/* come back and try again later */
 			set_bit(ICE_FLAG_FLTR_SYNC, pf->flags);
 			break;
 		}
+}
+
+/**
+ * ice_dis_vsi - pause a VSI
+ * @vsi: the VSI being paused
+ * @locked: is the rtnl_lock already held
+ */
+static void ice_dis_vsi(struct ice_vsi *vsi, bool locked)
+{
+	if (test_bit(__ICE_DOWN, vsi->state))
+		return;
+
+	set_bit(__ICE_NEEDS_RESTART, vsi->state);
+
+	if (vsi->type == ICE_VSI_PF && vsi->netdev) {
+		if (netif_running(vsi->netdev)) {
+			if (!locked) {
+				rtnl_lock();
+				vsi->netdev->netdev_ops->ndo_stop(vsi->netdev);
+				rtnl_unlock();
+			} else {
+				vsi->netdev->netdev_ops->ndo_stop(vsi->netdev);
+			}
+		} else {
+			ice_vsi_close(vsi);
+		}
+	}
+}
+
+/**
+ * ice_pf_dis_all_vsi - Pause all VSIs on a PF
+ * @pf: the PF
+ * @locked: is the rtnl_lock already held
+ */
+#ifdef CONFIG_DCB
+void ice_pf_dis_all_vsi(struct ice_pf *pf, bool locked)
+#else
+static void ice_pf_dis_all_vsi(struct ice_pf *pf, bool locked)
+#endif /* CONFIG_DCB */
+{
+	int v;
+
+	ice_for_each_vsi(pf, v)
+		if (pf->vsi[v])
+			ice_dis_vsi(pf->vsi[v], locked);
 }
 
 /**
@@ -342,12 +432,19 @@ ice_prepare_for_reset(struct ice_pf *pf)
 {
 	struct ice_hw *hw = &pf->hw;
 
+	/* already prepared for reset */
+	if (test_bit(__ICE_PREPARED_FOR_RESET, pf->state))
+		return;
+
 	/* Notify VFs of impending reset */
 	if (ice_check_sq_alive(hw, &hw->mailboxq))
 		ice_vc_notify_reset(pf);
 
 	/* disable the VSIs and their queues that are not already DOWN */
-	ice_pf_dis_all_vsi(pf);
+	ice_pf_dis_all_vsi(pf, false);
+
+	if (hw->port_info)
+		ice_sched_clear_port(hw->port_info);
 
 	ice_shutdown_all_ctrlq(hw);
 
@@ -391,6 +488,7 @@ static void ice_do_reset(struct ice_pf *pf, enum ice_reset_req reset_type)
 		ice_rebuild(pf);
 		clear_bit(__ICE_PREPARED_FOR_RESET, pf->state);
 		clear_bit(__ICE_PFR_REQ, pf->state);
+		ice_reset_all_vfs(pf, true);
 	}
 }
 
@@ -405,7 +503,7 @@ static void ice_reset_subtask(struct ice_pf *pf)
 	/* When a CORER/GLOBR/EMPR is about to happen, the hardware triggers an
 	 * OICR interrupt. The OICR handler (ice_misc_intr) determines what type
 	 * of reset is pending and sets bits in pf->state indicating the reset
-	 * type and __ICE_RESET_OICR_RECV.  So, if the latter bit is set
+	 * type and __ICE_RESET_OICR_RECV. So, if the latter bit is set
 	 * prepare for pending reset if not already (for PF software-initiated
 	 * global resets the software should already be prepared for it as
 	 * indicated by __ICE_PREPARED_FOR_RESET; for global resets initiated
@@ -413,10 +511,15 @@ static void ice_reset_subtask(struct ice_pf *pf)
 	 * for the reset now), poll for reset done, rebuild and return.
 	 */
 	if (test_bit(__ICE_RESET_OICR_RECV, pf->state)) {
-		clear_bit(__ICE_GLOBR_RECV, pf->state);
-		clear_bit(__ICE_CORER_RECV, pf->state);
-		if (!test_bit(__ICE_PREPARED_FOR_RESET, pf->state))
-			ice_prepare_for_reset(pf);
+		/* Perform the largest reset requested */
+		if (test_and_clear_bit(__ICE_CORER_RECV, pf->state))
+			reset_type = ICE_RESET_CORER;
+		if (test_and_clear_bit(__ICE_GLOBR_RECV, pf->state))
+			reset_type = ICE_RESET_GLOBR;
+		/* return if no valid reset type requested */
+		if (reset_type == ICE_RESET_INVAL)
+			return;
+		ice_prepare_for_reset(pf);
 
 		/* make sure we are ready to rebuild */
 		if (ice_check_reset(&pf->hw)) {
@@ -426,13 +529,14 @@ static void ice_reset_subtask(struct ice_pf *pf)
 			pf->hw.reset_ongoing = false;
 			ice_rebuild(pf);
 			/* clear bit to resume normal operations, but
-			 * ICE_NEEDS_RESTART bit is set incase rebuild failed
+			 * ICE_NEEDS_RESTART bit is set in case rebuild failed
 			 */
 			clear_bit(__ICE_RESET_OICR_RECV, pf->state);
 			clear_bit(__ICE_PREPARED_FOR_RESET, pf->state);
 			clear_bit(__ICE_PFR_REQ, pf->state);
 			clear_bit(__ICE_CORER_REQ, pf->state);
 			clear_bit(__ICE_GLOBR_REQ, pf->state);
+			ice_reset_all_vfs(pf, true);
 		}
 
 		return;
@@ -465,6 +569,9 @@ void ice_print_link_msg(struct ice_vsi *vsi, bool isup)
 {
 	const char *speed;
 	const char *fc;
+
+	if (!vsi)
+		return;
 
 	if (vsi->current_isup == isup)
 		return;
@@ -516,6 +623,9 @@ void ice_print_link_msg(struct ice_vsi *vsi, bool isup)
 	case ICE_FC_RX_PAUSE:
 		fc = "RX";
 		break;
+	case ICE_FC_NONE:
+		fc = "None";
+		break;
 	default:
 		fc = "Unknown";
 		break;
@@ -526,21 +636,22 @@ void ice_print_link_msg(struct ice_vsi *vsi, bool isup)
 }
 
 /**
- * ice_vsi_link_event - update the vsi's netdev
- * @vsi: the vsi on which the link event occurred
- * @link_up: whether or not the vsi needs to be set up or down
+ * ice_vsi_link_event - update the VSI's netdev
+ * @vsi: the VSI on which the link event occurred
+ * @link_up: whether or not the VSI needs to be set up or down
  */
 static void ice_vsi_link_event(struct ice_vsi *vsi, bool link_up)
 {
-	if (!vsi || test_bit(__ICE_DOWN, vsi->state))
+	if (!vsi)
+		return;
+
+	if (test_bit(__ICE_DOWN, vsi->state) || !vsi->netdev)
 		return;
 
 	if (vsi->type == ICE_VSI_PF) {
-		if (!vsi->netdev) {
-			dev_dbg(&vsi->back->pdev->dev,
-				"vsi->netdev is not initialized!\n");
+		if (link_up == netif_carrier_ok(vsi->netdev))
 			return;
-		}
+
 		if (link_up) {
 			netif_carrier_on(vsi->netdev);
 			netif_tx_wake_all_queues(vsi->netdev);
@@ -555,60 +666,51 @@ static void ice_vsi_link_event(struct ice_vsi *vsi, bool link_up)
  * ice_link_event - process the link event
  * @pf: pf that the link event is associated with
  * @pi: port_info for the port that the link event is associated with
+ * @link_up: true if the physical link is up and false if it is down
+ * @link_speed: current link speed received from the link event
  *
- * Returns -EIO if ice_get_link_status() fails
- * Returns 0 on success
+ * Returns 0 on success and negative on failure
  */
 static int
-ice_link_event(struct ice_pf *pf, struct ice_port_info *pi)
+ice_link_event(struct ice_pf *pf, struct ice_port_info *pi, bool link_up,
+	       u16 link_speed)
 {
-	u8 new_link_speed, old_link_speed;
 	struct ice_phy_info *phy_info;
-	bool new_link_same_as_old;
-	bool new_link, old_link;
-	u8 lport;
-	u16 v;
+	struct ice_vsi *vsi;
+	u16 old_link_speed;
+	bool old_link;
+	int result;
 
 	phy_info = &pi->phy;
 	phy_info->link_info_old = phy_info->link_info;
-	/* Force ice_get_link_status() to update link info */
-	phy_info->get_link_info = true;
 
-	old_link = (phy_info->link_info_old.link_info & ICE_AQ_LINK_UP);
+	old_link = !!(phy_info->link_info_old.link_info & ICE_AQ_LINK_UP);
 	old_link_speed = phy_info->link_info_old.link_speed;
 
-	lport = pi->lport;
-	if (ice_get_link_status(pi, &new_link)) {
+	/* update the link info structures and re-enable link events,
+	 * don't bail on failure due to other book keeping needed
+	 */
+	result = ice_update_link_info(pi);
+	if (result)
 		dev_dbg(&pf->pdev->dev,
-			"Could not get link status for port %d\n", lport);
-		return -EIO;
-	}
+			"Failed to update link status and re-enable link events for port %d\n",
+			pi->lport);
 
-	new_link_speed = phy_info->link_info.link_speed;
+	/* if the old link up/down and speed is the same as the new */
+	if (link_up == old_link && link_speed == old_link_speed)
+		return result;
 
-	new_link_same_as_old = (new_link == old_link &&
-				new_link_speed == old_link_speed);
+	vsi = ice_find_vsi_by_type(pf, ICE_VSI_PF);
+	if (!vsi || !vsi->port_info)
+		return -EINVAL;
 
-	ice_for_each_vsi(pf, v) {
-		struct ice_vsi *vsi = pf->vsi[v];
+	ice_vsi_link_event(vsi, link_up);
+	ice_print_link_msg(vsi, link_up);
 
-		if (!vsi || !vsi->port_info)
-			continue;
+	if (pf->num_alloc_vfs)
+		ice_vc_notify_link_state(pf);
 
-		if (new_link_same_as_old &&
-		    (test_bit(__ICE_DOWN, vsi->state) ||
-		    new_link == netif_carrier_ok(vsi->netdev)))
-			continue;
-
-		if (vsi->port_info->lport == lport) {
-			ice_print_link_msg(vsi, new_link);
-			ice_vsi_link_event(vsi, new_link);
-		}
-	}
-
-	ice_vc_notify_link_state(pf);
-
-	return 0;
+	return result;
 }
 
 /**
@@ -631,16 +733,70 @@ static void ice_watchdog_subtask(struct ice_pf *pf)
 
 	pf->serv_tmr_prev = jiffies;
 
-	if (ice_link_event(pf, pf->hw.port_info))
-		dev_dbg(&pf->pdev->dev, "ice_link_event failed\n");
-
 	/* Update the stats for active netdevs so the network stack
 	 * can look at updated numbers whenever it cares to
 	 */
 	ice_update_pf_stats(pf);
-	for (i = 0; i < pf->num_alloc_vsi; i++)
+	ice_for_each_vsi(pf, i)
 		if (pf->vsi[i] && pf->vsi[i]->netdev)
 			ice_update_vsi_stats(pf->vsi[i]);
+}
+
+/**
+ * ice_init_link_events - enable/initialize link events
+ * @pi: pointer to the port_info instance
+ *
+ * Returns -EIO on failure, 0 on success
+ */
+static int ice_init_link_events(struct ice_port_info *pi)
+{
+	u16 mask;
+
+	mask = ~((u16)(ICE_AQ_LINK_EVENT_UPDOWN | ICE_AQ_LINK_EVENT_MEDIA_NA |
+		       ICE_AQ_LINK_EVENT_MODULE_QUAL_FAIL));
+
+	if (ice_aq_set_event_mask(pi->hw, pi->lport, mask, NULL)) {
+		dev_dbg(ice_hw_to_dev(pi->hw),
+			"Failed to set link event mask for port %d\n",
+			pi->lport);
+		return -EIO;
+	}
+
+	if (ice_aq_get_link_info(pi, true, NULL, NULL)) {
+		dev_dbg(ice_hw_to_dev(pi->hw),
+			"Failed to enable link events for port %d\n",
+			pi->lport);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+/**
+ * ice_handle_link_event - handle link event via ARQ
+ * @pf: pf that the link event is associated with
+ * @event: event structure containing link status info
+ */
+static int
+ice_handle_link_event(struct ice_pf *pf, struct ice_rq_event_info *event)
+{
+	struct ice_aqc_get_link_status_data *link_data;
+	struct ice_port_info *port_info;
+	int status;
+
+	link_data = (struct ice_aqc_get_link_status_data *)event->msg_buf;
+	port_info = pf->hw.port_info;
+	if (!port_info)
+		return -EINVAL;
+
+	status = ice_link_event(pf, port_info,
+				!!(link_data->link_info & ICE_AQ_LINK_UP),
+				le16_to_cpu(link_data->link_speed));
+	if (status)
+		dev_dbg(&pf->pdev->dev,
+			"Could not process link event, error %d\n", status);
+
+	return status;
 }
 
 /**
@@ -746,11 +902,19 @@ static int __ice_clean_ctrlq(struct ice_pf *pf, enum ice_ctl_q q_type)
 		opcode = le16_to_cpu(event.desc.opcode);
 
 		switch (opcode) {
+		case ice_aqc_opc_get_link_status:
+			if (ice_handle_link_event(pf, &event))
+				dev_err(&pf->pdev->dev,
+					"Could not handle link event\n");
+			break;
 		case ice_mbx_opc_send_msg_to_pf:
 			ice_vc_process_vf_msg(pf, &event);
 			break;
 		case ice_aqc_opc_fw_logging:
 			ice_output_fw_log(hw, &event.desc, event.msg_buf);
+			break;
+		case ice_aqc_opc_lldp_set_mib_change:
+			ice_dcb_process_lldp_set_mib_change(pf, &event);
 			break;
 		default:
 			dev_dbg(&pf->pdev->dev,
@@ -873,6 +1037,18 @@ static void ice_service_task_stop(struct ice_pf *pf)
 }
 
 /**
+ * ice_service_task_restart - restart service task and schedule works
+ * @pf: board private structure
+ *
+ * This function is needed for suspend and resume works (e.g WoL scenario)
+ */
+static void ice_service_task_restart(struct ice_pf *pf)
+{
+	clear_bit(__ICE_SERVICE_DIS, pf->state);
+	ice_service_task_schedule(pf);
+}
+
+/**
  * ice_service_timer - timer callback to schedule service task
  * @t: pointer to timer_list
  */
@@ -897,7 +1073,7 @@ static void ice_handle_mdd_event(struct ice_pf *pf)
 	u32 reg;
 	int i;
 
-	if (!test_bit(__ICE_MDD_EVENT_PENDING, pf->state))
+	if (!test_and_clear_bit(__ICE_MDD_EVENT_PENDING, pf->state))
 		return;
 
 	/* find what triggered the MDD event */
@@ -989,10 +1165,12 @@ static void ice_handle_mdd_event(struct ice_pf *pf)
 	for (i = 0; i < pf->num_alloc_vfs && mdd_detected; i++) {
 		struct ice_vf *vf = &pf->vf[i];
 
+		mdd_detected = false;
+
 		reg = rd32(hw, VP_MDET_TX_PQM(i));
 		if (reg & VP_MDET_TX_PQM_VALID_M) {
 			wr32(hw, VP_MDET_TX_PQM(i), 0xFFFF);
-			vf->num_mdd_events++;
+			mdd_detected = true;
 			dev_info(&pf->pdev->dev, "TX driver issue detected on VF %d\n",
 				 i);
 		}
@@ -1000,7 +1178,7 @@ static void ice_handle_mdd_event(struct ice_pf *pf)
 		reg = rd32(hw, VP_MDET_TX_TCLAN(i));
 		if (reg & VP_MDET_TX_TCLAN_VALID_M) {
 			wr32(hw, VP_MDET_TX_TCLAN(i), 0xFFFF);
-			vf->num_mdd_events++;
+			mdd_detected = true;
 			dev_info(&pf->pdev->dev, "TX driver issue detected on VF %d\n",
 				 i);
 		}
@@ -1008,7 +1186,7 @@ static void ice_handle_mdd_event(struct ice_pf *pf)
 		reg = rd32(hw, VP_MDET_TX_TDPU(i));
 		if (reg & VP_MDET_TX_TDPU_VALID_M) {
 			wr32(hw, VP_MDET_TX_TDPU(i), 0xFFFF);
-			vf->num_mdd_events++;
+			mdd_detected = true;
 			dev_info(&pf->pdev->dev, "TX driver issue detected on VF %d\n",
 				 i);
 		}
@@ -1016,26 +1194,19 @@ static void ice_handle_mdd_event(struct ice_pf *pf)
 		reg = rd32(hw, VP_MDET_RX(i));
 		if (reg & VP_MDET_RX_VALID_M) {
 			wr32(hw, VP_MDET_RX(i), 0xFFFF);
-			vf->num_mdd_events++;
+			mdd_detected = true;
 			dev_info(&pf->pdev->dev, "RX driver issue detected on VF %d\n",
 				 i);
 		}
 
-		if (vf->num_mdd_events > ICE_DFLT_NUM_MDD_EVENTS_ALLOWED) {
-			dev_info(&pf->pdev->dev,
-				 "Too many MDD events on VF %d, disabled\n", i);
+		if (mdd_detected) {
+			vf->num_mdd_events++;
 			dev_info(&pf->pdev->dev,
 				 "Use PF Control I/F to re-enable the VF\n");
 			set_bit(ICE_VF_STATE_DIS, vf->vf_states);
 		}
 	}
 
-	/* re-enable MDD interrupt cause */
-	clear_bit(__ICE_MDD_EVENT_PENDING, pf->state);
-	reg = rd32(hw, PFINT_OICR_ENA);
-	reg |= PFINT_OICR_MAL_DETECT_M;
-	wr32(hw, PFINT_OICR_ENA, reg);
-	ice_flush(hw);
 }
 
 /**
@@ -1085,7 +1256,7 @@ static void ice_service_task(struct work_struct *work)
 
 /**
  * ice_set_ctrlq_len - helper function to set controlq length
- * @hw: pointer to the hw instance
+ * @hw: pointer to the HW instance
  */
 static void ice_set_ctrlq_len(struct ice_hw *hw)
 {
@@ -1107,8 +1278,9 @@ static void ice_set_ctrlq_len(struct ice_hw *hw)
  * This is a callback function used by the irq_set_affinity_notifier function
  * so that we may register to receive changes to the irq affinity masks.
  */
-static void ice_irq_affinity_notify(struct irq_affinity_notify *notify,
-				    const cpumask_t *mask)
+static void
+ice_irq_affinity_notify(struct irq_affinity_notify *notify,
+			const cpumask_t *mask)
 {
 	struct ice_q_vector *q_vector =
 		container_of(notify, struct ice_q_vector, affinity_notify);
@@ -1138,7 +1310,7 @@ static int ice_vsi_ena_irq(struct ice_vsi *vsi)
 	if (test_bit(ICE_FLAG_MSIX_ENA, pf->flags)) {
 		int i;
 
-		for (i = 0; i < vsi->num_q_vectors; i++)
+		ice_for_each_q_vector(vsi, i)
 			ice_irq_dynamic_ena(hw, vsi, vsi->q_vectors[i]);
 	}
 
@@ -1180,10 +1352,9 @@ static int ice_vsi_req_irq_msix(struct ice_vsi *vsi, char *basename)
 			/* skip this unused q_vector */
 			continue;
 		}
-		err = devm_request_irq(&pf->pdev->dev,
-				       pf->msix_entries[base + vector].vector,
-				       vsi->irq_handler, 0, q_vector->name,
-				       q_vector);
+		err = devm_request_irq(&pf->pdev->dev, irq_num,
+				       vsi->irq_handler, 0,
+				       q_vector->name, q_vector);
 		if (err) {
 			netdev_err(vsi->netdev,
 				   "MSIX request_irq failed, error: %d\n", err);
@@ -1324,7 +1495,7 @@ static irqreturn_t ice_misc_intr(int __always_unused irq, void *data)
 			rd32(hw, PFHMC_ERRORDATA));
 	}
 
-	/* Report and mask off any remaining unexpected interrupts */
+	/* Report any remaining unexpected interrupts */
 	oicr &= ena_mask;
 	if (oicr) {
 		dev_dbg(&pf->pdev->dev, "unhandled interrupt oicr=0x%08x\n",
@@ -1338,12 +1509,9 @@ static irqreturn_t ice_misc_intr(int __always_unused irq, void *data)
 			set_bit(__ICE_PFR_REQ, pf->state);
 			ice_service_task_schedule(pf);
 		}
-		ena_mask &= ~oicr;
 	}
 	ret = IRQ_HANDLED;
 
-	/* re-enable interrupt causes that are not handled during this pass */
-	wr32(hw, PFINT_OICR_ENA, ena_mask);
 	if (!test_bit(__ICE_DOWN, pf->state)) {
 		ice_service_task_schedule(pf);
 		ice_irq_dynamic_ena(hw, NULL, NULL);
@@ -1353,14 +1521,39 @@ static irqreturn_t ice_misc_intr(int __always_unused irq, void *data)
 }
 
 /**
+ * ice_dis_ctrlq_interrupts - disable control queue interrupts
+ * @hw: pointer to HW structure
+ */
+static void ice_dis_ctrlq_interrupts(struct ice_hw *hw)
+{
+	/* disable Admin queue Interrupt causes */
+	wr32(hw, PFINT_FW_CTL,
+	     rd32(hw, PFINT_FW_CTL) & ~PFINT_FW_CTL_CAUSE_ENA_M);
+
+	/* disable Mailbox queue Interrupt causes */
+	wr32(hw, PFINT_MBX_CTL,
+	     rd32(hw, PFINT_MBX_CTL) & ~PFINT_MBX_CTL_CAUSE_ENA_M);
+
+	/* disable Control queue Interrupt causes */
+	wr32(hw, PFINT_OICR_CTL,
+	     rd32(hw, PFINT_OICR_CTL) & ~PFINT_OICR_CTL_CAUSE_ENA_M);
+
+	ice_flush(hw);
+}
+
+/**
  * ice_free_irq_msix_misc - Unroll misc vector setup
  * @pf: board private structure
  */
 static void ice_free_irq_msix_misc(struct ice_pf *pf)
 {
+	struct ice_hw *hw = &pf->hw;
+
+	ice_dis_ctrlq_interrupts(hw);
+
 	/* disable OICR interrupt */
-	wr32(&pf->hw, PFINT_OICR_ENA, 0);
-	ice_flush(&pf->hw);
+	wr32(hw, PFINT_OICR_ENA, 0);
+	ice_flush(hw);
 
 	if (test_bit(ICE_FLAG_MSIX_ENA, pf->flags) && pf->msix_entries) {
 		synchronize_irq(pf->msix_entries[pf->sw_oicr_idx].vector);
@@ -1375,19 +1568,43 @@ static void ice_free_irq_msix_misc(struct ice_pf *pf)
 }
 
 /**
+ * ice_ena_ctrlq_interrupts - enable control queue interrupts
+ * @hw: pointer to HW structure
+ * @reg_idx: HW vector index to associate the control queue interrupts with
+ */
+static void ice_ena_ctrlq_interrupts(struct ice_hw *hw, u16 reg_idx)
+{
+	u32 val;
+
+	val = ((reg_idx & PFINT_OICR_CTL_MSIX_INDX_M) |
+	       PFINT_OICR_CTL_CAUSE_ENA_M);
+	wr32(hw, PFINT_OICR_CTL, val);
+
+	/* enable Admin queue Interrupt causes */
+	val = ((reg_idx & PFINT_FW_CTL_MSIX_INDX_M) |
+	       PFINT_FW_CTL_CAUSE_ENA_M);
+	wr32(hw, PFINT_FW_CTL, val);
+
+	/* enable Mailbox queue Interrupt causes */
+	val = ((reg_idx & PFINT_MBX_CTL_MSIX_INDX_M) |
+	       PFINT_MBX_CTL_CAUSE_ENA_M);
+	wr32(hw, PFINT_MBX_CTL, val);
+
+	ice_flush(hw);
+}
+
+/**
  * ice_req_irq_msix_misc - Setup the misc vector to handle non queue events
  * @pf: board private structure
  *
  * This sets up the handler for MSIX 0, which is used to manage the
- * non-queue interrupts, e.g. AdminQ and errors.  This is not used
+ * non-queue interrupts, e.g. AdminQ and errors. This is not used
  * when in MSI or Legacy interrupt mode.
  */
 static int ice_req_irq_msix_misc(struct ice_pf *pf)
 {
 	struct ice_hw *hw = &pf->hw;
 	int oicr_idx, err = 0;
-	u8 itr_gran;
-	u32 val;
 
 	if (!pf->int_name[0])
 		snprintf(pf->int_name, sizeof(pf->int_name) - 1, "%s-%s:misc",
@@ -1436,24 +1653,9 @@ static int ice_req_irq_msix_misc(struct ice_pf *pf)
 skip_req_irq:
 	ice_ena_misc_vector(pf);
 
-	val = ((pf->hw_oicr_idx & PFINT_OICR_CTL_MSIX_INDX_M) |
-	       PFINT_OICR_CTL_CAUSE_ENA_M);
-	wr32(hw, PFINT_OICR_CTL, val);
-
-	/* This enables Admin queue Interrupt causes */
-	val = ((pf->hw_oicr_idx & PFINT_FW_CTL_MSIX_INDX_M) |
-	       PFINT_FW_CTL_CAUSE_ENA_M);
-	wr32(hw, PFINT_FW_CTL, val);
-
-	/* This enables Mailbox queue Interrupt causes */
-	val = ((pf->hw_oicr_idx & PFINT_MBX_CTL_MSIX_INDX_M) |
-	       PFINT_MBX_CTL_CAUSE_ENA_M);
-	wr32(hw, PFINT_MBX_CTL, val);
-
-	itr_gran = hw->itr_gran;
-
+	ice_ena_ctrlq_interrupts(hw, pf->hw_oicr_idx);
 	wr32(hw, GLINT_ITR(ICE_RX_ITR, pf->hw_oicr_idx),
-	     ITR_TO_REG(ICE_ITR_8K, itr_gran));
+	     ITR_REG_ALIGN(ICE_ITR_8K) >> ICE_ITR_GRAN_S);
 
 	ice_flush(hw);
 	ice_irq_dynamic_ena(hw, NULL, NULL);
@@ -1472,7 +1674,7 @@ void ice_napi_del(struct ice_vsi *vsi)
 	if (!vsi->netdev)
 		return;
 
-	for (v_idx = 0; v_idx < vsi->num_q_vectors; v_idx++)
+	ice_for_each_q_vector(vsi, v_idx)
 		netif_napi_del(&vsi->q_vectors[v_idx]->napi);
 }
 
@@ -1491,7 +1693,7 @@ static void ice_napi_add(struct ice_vsi *vsi)
 	if (!vsi->netdev)
 		return;
 
-	for (v_idx = 0; v_idx < vsi->num_q_vectors; v_idx++)
+	ice_for_each_q_vector(vsi, v_idx)
 		netif_napi_add(vsi->netdev, &vsi->q_vectors[v_idx]->napi,
 			       ice_napi_poll, NAPI_POLL_WEIGHT);
 }
@@ -1513,8 +1715,8 @@ static int ice_cfg_netdev(struct ice_vsi *vsi)
 	u8 mac_addr[ETH_ALEN];
 	int err;
 
-	netdev = alloc_etherdev_mqs(sizeof(struct ice_netdev_priv),
-				    vsi->alloc_txq, vsi->alloc_rxq);
+	netdev = alloc_etherdev_mqs(sizeof(*np), vsi->alloc_txq,
+				    vsi->alloc_rxq);
 	if (!netdev)
 		return -ENOMEM;
 
@@ -1528,6 +1730,7 @@ static int ice_cfg_netdev(struct ice_vsi *vsi)
 
 	csumo_features = NETIF_F_RXCSUM	  |
 			 NETIF_F_IP_CSUM  |
+			 NETIF_F_SCTP_CRC |
 			 NETIF_F_IPV6_CSUM;
 
 	vlano_features = NETIF_F_HW_VLAN_CTAG_FILTER |
@@ -1610,18 +1813,20 @@ ice_pf_vsi_setup(struct ice_pf *pf, struct ice_port_info *pi)
 }
 
 /**
- * ice_vlan_rx_add_vid - Add a vlan id filter to HW offload
+ * ice_vlan_rx_add_vid - Add a VLAN ID filter to HW offload
  * @netdev: network interface to be adjusted
  * @proto: unused protocol
- * @vid: vlan id to be added
+ * @vid: VLAN ID to be added
  *
- * net_device_ops implementation for adding vlan ids
+ * net_device_ops implementation for adding VLAN IDs
  */
-static int ice_vlan_rx_add_vid(struct net_device *netdev,
-			       __always_unused __be16 proto, u16 vid)
+static int
+ice_vlan_rx_add_vid(struct net_device *netdev, __always_unused __be16 proto,
+		    u16 vid)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
 	struct ice_vsi *vsi = np->vsi;
+	int ret;
 
 	if (vid >= VLAN_N_VID) {
 		netdev_err(netdev, "VLAN id requested %d is out of range %d\n",
@@ -1634,33 +1839,39 @@ static int ice_vlan_rx_add_vid(struct net_device *netdev,
 
 	/* Enable VLAN pruning when VLAN 0 is added */
 	if (unlikely(!vid)) {
-		int ret = ice_cfg_vlan_pruning(vsi, true);
-
+		ret = ice_cfg_vlan_pruning(vsi, true, false);
 		if (ret)
 			return ret;
 	}
 
-	/* Add all VLAN ids including 0 to the switch filter. VLAN id 0 is
+	/* Add all VLAN IDs including 0 to the switch filter. VLAN ID 0 is
 	 * needed to continue allowing all untagged packets since VLAN prune
 	 * list is applied to all packets by the switch
 	 */
-	return ice_vsi_add_vlan(vsi, vid);
+	ret = ice_vsi_add_vlan(vsi, vid);
+	if (!ret) {
+		vsi->vlan_ena = true;
+		set_bit(ICE_VSI_FLAG_VLAN_FLTR_CHANGED, vsi->flags);
+	}
+
+	return ret;
 }
 
 /**
- * ice_vlan_rx_kill_vid - Remove a vlan id filter from HW offload
+ * ice_vlan_rx_kill_vid - Remove a VLAN ID filter from HW offload
  * @netdev: network interface to be adjusted
  * @proto: unused protocol
- * @vid: vlan id to be removed
+ * @vid: VLAN ID to be removed
  *
- * net_device_ops implementation for removing vlan ids
+ * net_device_ops implementation for removing VLAN IDs
  */
-static int ice_vlan_rx_kill_vid(struct net_device *netdev,
-				__always_unused __be16 proto, u16 vid)
+static int
+ice_vlan_rx_kill_vid(struct net_device *netdev, __always_unused __be16 proto,
+		     u16 vid)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
 	struct ice_vsi *vsi = np->vsi;
-	int status;
+	int ret;
 
 	if (vsi->info.pvid)
 		return -EINVAL;
@@ -1668,15 +1879,17 @@ static int ice_vlan_rx_kill_vid(struct net_device *netdev,
 	/* Make sure ice_vsi_kill_vlan is successful before updating VLAN
 	 * information
 	 */
-	status = ice_vsi_kill_vlan(vsi, vid);
-	if (status)
-		return status;
+	ret = ice_vsi_kill_vlan(vsi, vid);
+	if (ret)
+		return ret;
 
 	/* Disable VLAN pruning when VLAN 0 is removed */
 	if (unlikely(!vid))
-		status = ice_cfg_vlan_pruning(vsi, false);
+		ret = ice_cfg_vlan_pruning(vsi, false, false);
 
-	return status;
+	vsi->vlan_ena = false;
+	set_bit(ICE_VSI_FLAG_VLAN_FLTR_CHANGED, vsi->flags);
+	return ret;
 }
 
 /**
@@ -1783,7 +1996,7 @@ static void ice_determine_q_usage(struct ice_pf *pf)
 
 	pf->num_lan_tx = min_t(int, q_left_tx, num_online_cpus());
 
-	/* only 1 rx queue unless RSS is enabled */
+	/* only 1 Rx queue unless RSS is enabled */
 	if (!test_bit(ICE_FLAG_RSS_ENA, pf->flags))
 		pf->num_lan_rx = 1;
 	else
@@ -1866,7 +2079,7 @@ static int ice_ena_msix_range(struct ice_pf *pf)
 	v_left -= pf->num_lan_msix;
 
 	pf->msix_entries = devm_kcalloc(&pf->pdev->dev, v_budget,
-					sizeof(struct msix_entry), GFP_KERNEL);
+					sizeof(*pf->msix_entries), GFP_KERNEL);
 
 	if (!pf->msix_entries) {
 		err = -ENOMEM;
@@ -1954,7 +2167,6 @@ static void ice_clear_interrupt_scheme(struct ice_pf *pf)
 static int ice_init_interrupt_scheme(struct ice_pf *pf)
 {
 	int vectors = 0, hw_vectors = 0;
-	ssize_t size;
 
 	if (test_bit(ICE_FLAG_MSIX_ENA, pf->flags))
 		vectors = ice_ena_msix_range(pf);
@@ -1965,9 +2177,9 @@ static int ice_init_interrupt_scheme(struct ice_pf *pf)
 		return vectors;
 
 	/* set up vector assignment tracking */
-	size = sizeof(struct ice_res_tracker) + (sizeof(u16) * vectors);
-
-	pf->sw_irq_tracker = devm_kzalloc(&pf->pdev->dev, size, GFP_KERNEL);
+	pf->sw_irq_tracker =
+		devm_kzalloc(&pf->pdev->dev, sizeof(*pf->sw_irq_tracker) +
+			     (sizeof(u16) * vectors), GFP_KERNEL);
 	if (!pf->sw_irq_tracker) {
 		ice_dis_msix(pf);
 		return -ENOMEM;
@@ -1979,9 +2191,9 @@ static int ice_init_interrupt_scheme(struct ice_pf *pf)
 
 	/* set up HW vector assignment tracking */
 	hw_vectors = pf->hw.func_caps.common_cap.num_msix_vectors;
-	size = sizeof(struct ice_res_tracker) + (sizeof(u16) * hw_vectors);
-
-	pf->hw_irq_tracker = devm_kzalloc(&pf->pdev->dev, size, GFP_KERNEL);
+	pf->hw_irq_tracker =
+		devm_kzalloc(&pf->pdev->dev, sizeof(*pf->hw_irq_tracker) +
+			     (sizeof(u16) * hw_vectors), GFP_KERNEL);
 	if (!pf->hw_irq_tracker) {
 		ice_clear_interrupt_scheme(pf);
 		return -ENOMEM;
@@ -2017,9 +2229,10 @@ static void ice_verify_cacheline_size(struct ice_pf *pf)
  *
  * Returns 0 on success, negative on failure
  */
-static int ice_probe(struct pci_dev *pdev,
-		     const struct pci_device_id __always_unused *ent)
+static int
+ice_probe(struct pci_dev *pdev, const struct pci_device_id __always_unused *ent)
 {
+	struct device *dev = &pdev->dev;
 	struct ice_pf *pf;
 	struct ice_hw *hw;
 	int err;
@@ -2031,20 +2244,20 @@ static int ice_probe(struct pci_dev *pdev,
 
 	err = pcim_iomap_regions(pdev, BIT(ICE_BAR0), pci_name(pdev));
 	if (err) {
-		dev_err(&pdev->dev, "BAR0 I/O map error %d\n", err);
+		dev_err(dev, "BAR0 I/O map error %d\n", err);
 		return err;
 	}
 
-	pf = devm_kzalloc(&pdev->dev, sizeof(*pf), GFP_KERNEL);
+	pf = devm_kzalloc(dev, sizeof(*pf), GFP_KERNEL);
 	if (!pf)
 		return -ENOMEM;
 
 	/* set up for high or low dma */
-	err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
 	if (err)
-		err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+		err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (err) {
-		dev_err(&pdev->dev, "DMA configuration failed: 0x%x\n", err);
+		dev_err(dev, "DMA configuration failed: 0x%x\n", err);
 		return err;
 	}
 
@@ -2078,28 +2291,36 @@ static int ice_probe(struct pci_dev *pdev,
 
 	err = ice_init_hw(hw);
 	if (err) {
-		dev_err(&pdev->dev, "ice_init_hw failed: %d\n", err);
+		dev_err(dev, "ice_init_hw failed: %d\n", err);
 		err = -EIO;
 		goto err_exit_unroll;
 	}
 
-	dev_info(&pdev->dev, "firmware %d.%d.%05d api %d.%d\n",
+	dev_info(dev, "firmware %d.%d.%05d api %d.%d\n",
 		 hw->fw_maj_ver, hw->fw_min_ver, hw->fw_build,
 		 hw->api_maj_ver, hw->api_min_ver);
 
 	ice_init_pf(pf);
 
+	err = ice_init_pf_dcb(pf);
+	if (err) {
+		clear_bit(ICE_FLAG_DCB_CAPABLE, pf->flags);
+		clear_bit(ICE_FLAG_DCB_ENA, pf->flags);
+
+		/* do not fail overall init if DCB init fails */
+		err = 0;
+	}
+
 	ice_determine_q_usage(pf);
 
-	pf->num_alloc_vsi = min_t(u16, ICE_MAX_VSI_ALLOC,
-				  hw->func_caps.guaranteed_num_vsi);
+	pf->num_alloc_vsi = hw->func_caps.guar_num_vsi;
 	if (!pf->num_alloc_vsi) {
 		err = -EIO;
 		goto err_init_pf_unroll;
 	}
 
-	pf->vsi = devm_kcalloc(&pdev->dev, pf->num_alloc_vsi,
-			       sizeof(struct ice_vsi *), GFP_KERNEL);
+	pf->vsi = devm_kcalloc(dev, pf->num_alloc_vsi, sizeof(*pf->vsi),
+			       GFP_KERNEL);
 	if (!pf->vsi) {
 		err = -ENOMEM;
 		goto err_init_pf_unroll;
@@ -2107,8 +2328,7 @@ static int ice_probe(struct pci_dev *pdev,
 
 	err = ice_init_interrupt_scheme(pf);
 	if (err) {
-		dev_err(&pdev->dev,
-			"ice_init_interrupt_scheme failed: %d\n", err);
+		dev_err(dev, "ice_init_interrupt_scheme failed: %d\n", err);
 		err = -EIO;
 		goto err_init_interrupt_unroll;
 	}
@@ -2124,15 +2344,13 @@ static int ice_probe(struct pci_dev *pdev,
 	if (test_bit(ICE_FLAG_MSIX_ENA, pf->flags)) {
 		err = ice_req_irq_msix_misc(pf);
 		if (err) {
-			dev_err(&pdev->dev,
-				"setup of misc vector failed: %d\n", err);
+			dev_err(dev, "setup of misc vector failed: %d\n", err);
 			goto err_init_interrupt_unroll;
 		}
 	}
 
 	/* create switch struct for the switch element created by FW on boot */
-	pf->first_sw = devm_kzalloc(&pdev->dev, sizeof(struct ice_sw),
-				    GFP_KERNEL);
+	pf->first_sw = devm_kzalloc(dev, sizeof(*pf->first_sw), GFP_KERNEL);
 	if (!pf->first_sw) {
 		err = -ENOMEM;
 		goto err_msix_misc_unroll;
@@ -2150,8 +2368,7 @@ static int ice_probe(struct pci_dev *pdev,
 
 	err = ice_setup_pf_sw(pf);
 	if (err) {
-		dev_err(&pdev->dev,
-			"probe failed due to setup pf switch:%d\n", err);
+		dev_err(dev, "probe failed due to setup pf switch:%d\n", err);
 		goto err_alloc_sw_unroll;
 	}
 
@@ -2159,6 +2376,12 @@ static int ice_probe(struct pci_dev *pdev,
 
 	/* since everything is good, start the service timer */
 	mod_timer(&pf->serv_tmr, round_jiffies(jiffies + pf->serv_tmr_period));
+
+	err = ice_init_link_events(pf->hw.port_info);
+	if (err) {
+		dev_err(dev, "ice_init_link_events failed: %d\n", err);
+		goto err_alloc_sw_unroll;
+	}
 
 	ice_verify_cacheline_size(pf);
 
@@ -2172,7 +2395,7 @@ err_msix_misc_unroll:
 	ice_free_irq_msix_misc(pf);
 err_init_interrupt_unroll:
 	ice_clear_interrupt_scheme(pf);
-	devm_kfree(&pdev->dev, pf->vsi);
+	devm_kfree(dev, pf->vsi);
 err_init_pf_unroll:
 	ice_deinit_pf(pf);
 	ice_deinit_hw(hw);
@@ -2217,6 +2440,136 @@ static void ice_remove(struct pci_dev *pdev)
 	pci_disable_pcie_error_reporting(pdev);
 }
 
+/**
+ * ice_pci_err_detected - warning that PCI error has been detected
+ * @pdev: PCI device information struct
+ * @err: the type of PCI error
+ *
+ * Called to warn that something happened on the PCI bus and the error handling
+ * is in progress.  Allows the driver to gracefully prepare/handle PCI errors.
+ */
+static pci_ers_result_t
+ice_pci_err_detected(struct pci_dev *pdev, enum pci_channel_state err)
+{
+	struct ice_pf *pf = pci_get_drvdata(pdev);
+
+	if (!pf) {
+		dev_err(&pdev->dev, "%s: unrecoverable device error %d\n",
+			__func__, err);
+		return PCI_ERS_RESULT_DISCONNECT;
+	}
+
+	if (!test_bit(__ICE_SUSPENDED, pf->state)) {
+		ice_service_task_stop(pf);
+
+		if (!test_bit(__ICE_PREPARED_FOR_RESET, pf->state)) {
+			set_bit(__ICE_PFR_REQ, pf->state);
+			ice_prepare_for_reset(pf);
+		}
+	}
+
+	return PCI_ERS_RESULT_NEED_RESET;
+}
+
+/**
+ * ice_pci_err_slot_reset - a PCI slot reset has just happened
+ * @pdev: PCI device information struct
+ *
+ * Called to determine if the driver can recover from the PCI slot reset by
+ * using a register read to determine if the device is recoverable.
+ */
+static pci_ers_result_t ice_pci_err_slot_reset(struct pci_dev *pdev)
+{
+	struct ice_pf *pf = pci_get_drvdata(pdev);
+	pci_ers_result_t result;
+	int err;
+	u32 reg;
+
+	err = pci_enable_device_mem(pdev);
+	if (err) {
+		dev_err(&pdev->dev,
+			"Cannot re-enable PCI device after reset, error %d\n",
+			err);
+		result = PCI_ERS_RESULT_DISCONNECT;
+	} else {
+		pci_set_master(pdev);
+		pci_restore_state(pdev);
+		pci_save_state(pdev);
+		pci_wake_from_d3(pdev, false);
+
+		/* Check for life */
+		reg = rd32(&pf->hw, GLGEN_RTRIG);
+		if (!reg)
+			result = PCI_ERS_RESULT_RECOVERED;
+		else
+			result = PCI_ERS_RESULT_DISCONNECT;
+	}
+
+	err = pci_cleanup_aer_uncorrect_error_status(pdev);
+	if (err)
+		dev_dbg(&pdev->dev,
+			"pci_cleanup_aer_uncorrect_error_status failed, error %d\n",
+			err);
+		/* non-fatal, continue */
+
+	return result;
+}
+
+/**
+ * ice_pci_err_resume - restart operations after PCI error recovery
+ * @pdev: PCI device information struct
+ *
+ * Called to allow the driver to bring things back up after PCI error and/or
+ * reset recovery have finished
+ */
+static void ice_pci_err_resume(struct pci_dev *pdev)
+{
+	struct ice_pf *pf = pci_get_drvdata(pdev);
+
+	if (!pf) {
+		dev_err(&pdev->dev,
+			"%s failed, device is unrecoverable\n", __func__);
+		return;
+	}
+
+	if (test_bit(__ICE_SUSPENDED, pf->state)) {
+		dev_dbg(&pdev->dev, "%s failed to resume normal operations!\n",
+			__func__);
+		return;
+	}
+
+	ice_do_reset(pf, ICE_RESET_PFR);
+	ice_service_task_restart(pf);
+	mod_timer(&pf->serv_tmr, round_jiffies(jiffies + pf->serv_tmr_period));
+}
+
+/**
+ * ice_pci_err_reset_prepare - prepare device driver for PCI reset
+ * @pdev: PCI device information struct
+ */
+static void ice_pci_err_reset_prepare(struct pci_dev *pdev)
+{
+	struct ice_pf *pf = pci_get_drvdata(pdev);
+
+	if (!test_bit(__ICE_SUSPENDED, pf->state)) {
+		ice_service_task_stop(pf);
+
+		if (!test_bit(__ICE_PREPARED_FOR_RESET, pf->state)) {
+			set_bit(__ICE_PFR_REQ, pf->state);
+			ice_prepare_for_reset(pf);
+		}
+	}
+}
+
+/**
+ * ice_pci_err_reset_done - PCI reset done, device driver reset can begin
+ * @pdev: PCI device information struct
+ */
+static void ice_pci_err_reset_done(struct pci_dev *pdev)
+{
+	ice_pci_err_resume(pdev);
+}
+
 /* ice_pci_tbl - PCI Device ID Table
  *
  * Wildcard entries (PCI_ANY_ID) should come last
@@ -2234,12 +2587,21 @@ static const struct pci_device_id ice_pci_tbl[] = {
 };
 MODULE_DEVICE_TABLE(pci, ice_pci_tbl);
 
+static const struct pci_error_handlers ice_pci_err_handler = {
+	.error_detected = ice_pci_err_detected,
+	.slot_reset = ice_pci_err_slot_reset,
+	.reset_prepare = ice_pci_err_reset_prepare,
+	.reset_done = ice_pci_err_reset_done,
+	.resume = ice_pci_err_resume
+};
+
 static struct pci_driver ice_driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = ice_pci_tbl,
 	.probe = ice_probe,
 	.remove = ice_remove,
 	.sriov_configure = ice_sriov_configure,
+	.err_handler = &ice_pci_err_handler
 };
 
 /**
@@ -2286,7 +2648,7 @@ static void __exit ice_module_exit(void)
 module_exit(ice_module_exit);
 
 /**
- * ice_set_mac_address - NDO callback to set mac address
+ * ice_set_mac_address - NDO callback to set MAC address
  * @netdev: network interface device structure
  * @pi: pointer to an address structure
  *
@@ -2323,14 +2685,14 @@ static int ice_set_mac_address(struct net_device *netdev, void *pi)
 		return -EBUSY;
 	}
 
-	/* When we change the mac address we also have to change the mac address
-	 * based filter rules that were created previously for the old mac
+	/* When we change the MAC address we also have to change the MAC address
+	 * based filter rules that were created previously for the old MAC
 	 * address. So first, we remove the old filter rule using ice_remove_mac
 	 * and then create a new filter rule using ice_add_mac. Note that for
-	 * both these operations, we first need to form a "list" of mac
-	 * addresses (even though in this case, we have only 1 mac address to be
+	 * both these operations, we first need to form a "list" of MAC
+	 * addresses (even though in this case, we have only 1 MAC address to be
 	 * added/removed) and this done using ice_add_mac_to_list. Depending on
-	 * the ensuing operation this "list" of mac addresses is either to be
+	 * the ensuing operation this "list" of MAC addresses is either to be
 	 * added or removed from the filter.
 	 */
 	err = ice_add_mac_to_list(vsi, &r_mac_list, netdev->dev_addr);
@@ -2368,12 +2730,12 @@ free_lists:
 		return err;
 	}
 
-	/* change the netdev's mac address */
+	/* change the netdev's MAC address */
 	memcpy(netdev->dev_addr, mac, netdev->addr_len);
 	netdev_dbg(vsi->netdev, "updated mac address to %pM\n",
 		   netdev->dev_addr);
 
-	/* write new mac address to the firmware */
+	/* write new MAC address to the firmware */
 	flags = ICE_AQC_MAN_MAC_UPDATE_LAA_WOL;
 	status = ice_aq_manage_mac_write(hw, mac, flags, NULL);
 	if (status) {
@@ -2415,12 +2777,14 @@ static void ice_set_rx_mode(struct net_device *netdev)
  * @tb: pointer to array of nladdr (unused)
  * @dev: the net device pointer
  * @addr: the MAC address entry being added
- * @vid: VLAN id
+ * @vid: VLAN ID
  * @flags: instructions from stack about fdb operation
+ * @extack: netlink extended ack
  */
-static int ice_fdb_add(struct ndmsg *ndm, struct nlattr __always_unused *tb[],
-		       struct net_device *dev, const unsigned char *addr,
-		       u16 vid, u16 flags)
+static int
+ice_fdb_add(struct ndmsg *ndm, struct nlattr __always_unused *tb[],
+	    struct net_device *dev, const unsigned char *addr, u16 vid,
+	    u16 flags, struct netlink_ext_ack __always_unused *extack)
 {
 	int err;
 
@@ -2453,11 +2817,12 @@ static int ice_fdb_add(struct ndmsg *ndm, struct nlattr __always_unused *tb[],
  * @tb: pointer to array of nladdr (unused)
  * @dev: the net device pointer
  * @addr: the MAC address entry being added
- * @vid: VLAN id
+ * @vid: VLAN ID
  */
-static int ice_fdb_del(struct ndmsg *ndm, __always_unused struct nlattr *tb[],
-		       struct net_device *dev, const unsigned char *addr,
-		       __always_unused u16 vid)
+static int
+ice_fdb_del(struct ndmsg *ndm, __always_unused struct nlattr *tb[],
+	    struct net_device *dev, const unsigned char *addr,
+	    __always_unused u16 vid)
 {
 	int err;
 
@@ -2481,13 +2846,16 @@ static int ice_fdb_del(struct ndmsg *ndm, __always_unused struct nlattr *tb[],
  * @netdev: ptr to the netdev being adjusted
  * @features: the feature set that the stack is suggesting
  */
-static int ice_set_features(struct net_device *netdev,
-			    netdev_features_t features)
+static int
+ice_set_features(struct net_device *netdev, netdev_features_t features)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
 	struct ice_vsi *vsi = np->vsi;
 	int ret = 0;
 
+	/* Multiple features can be changed in one call so keep features in
+	 * separate if/else statements to guarantee each feature is checked
+	 */
 	if (features & NETIF_F_RXHASH && !(netdev->features & NETIF_F_RXHASH))
 		ret = ice_vsi_manage_rss_lut(vsi, true);
 	else if (!(features & NETIF_F_RXHASH) &&
@@ -2500,8 +2868,9 @@ static int ice_set_features(struct net_device *netdev,
 	else if (!(features & NETIF_F_HW_VLAN_CTAG_RX) &&
 		 (netdev->features & NETIF_F_HW_VLAN_CTAG_RX))
 		ret = ice_vsi_manage_vlan_stripping(vsi, false);
-	else if ((features & NETIF_F_HW_VLAN_CTAG_TX) &&
-		 !(netdev->features & NETIF_F_HW_VLAN_CTAG_TX))
+
+	if ((features & NETIF_F_HW_VLAN_CTAG_TX) &&
+	    !(netdev->features & NETIF_F_HW_VLAN_CTAG_TX))
 		ret = ice_vsi_manage_vlan_insertion(vsi);
 	else if (!(features & NETIF_F_HW_VLAN_CTAG_TX) &&
 		 (netdev->features & NETIF_F_HW_VLAN_CTAG_TX))
@@ -2511,8 +2880,8 @@ static int ice_set_features(struct net_device *netdev,
 }
 
 /**
- * ice_vsi_vlan_setup - Setup vlan offload properties on a VSI
- * @vsi: VSI to setup vlan properties for
+ * ice_vsi_vlan_setup - Setup VLAN offload properties on a VSI
+ * @vsi: VSI to setup VLAN properties for
  */
 static int ice_vsi_vlan_setup(struct ice_vsi *vsi)
 {
@@ -2544,8 +2913,9 @@ static int ice_vsi_cfg(struct ice_vsi *vsi)
 		if (err)
 			return err;
 	}
+	ice_vsi_cfg_dcb_rings(vsi);
 
-	err = ice_vsi_cfg_txqs(vsi);
+	err = ice_vsi_cfg_lan_txqs(vsi);
 	if (!err)
 		err = ice_vsi_cfg_rxqs(vsi);
 
@@ -2563,8 +2933,12 @@ static void ice_napi_enable_all(struct ice_vsi *vsi)
 	if (!vsi->netdev)
 		return;
 
-	for (q_idx = 0; q_idx < vsi->num_q_vectors; q_idx++)
-		napi_enable(&vsi->q_vectors[q_idx]->napi);
+	ice_for_each_q_vector(vsi, q_idx)  {
+		struct ice_q_vector *q_vector = vsi->q_vectors[q_idx];
+
+		if (q_vector->rx.ring || q_vector->tx.ring)
+			napi_enable(&q_vector->napi);
+	}
 }
 
 /**
@@ -2605,7 +2979,7 @@ static int ice_up_complete(struct ice_vsi *vsi)
 
 	ice_service_task_schedule(pf);
 
-	return err;
+	return 0;
 }
 
 /**
@@ -2632,8 +3006,8 @@ int ice_up(struct ice_vsi *vsi)
  * This function fetches stats from the ring considering the atomic operations
  * that needs to be performed to read u64 values in 32 bit machine.
  */
-static void ice_fetch_u64_stats_per_ring(struct ice_ring *ring, u64 *pkts,
-					 u64 *bytes)
+static void
+ice_fetch_u64_stats_per_ring(struct ice_ring *ring, u64 *pkts, u64 *bytes)
 {
 	unsigned int start;
 	*pkts = 0;
@@ -2850,6 +3224,8 @@ static void ice_update_pf_stats(struct ice_pf *pf)
 	ice_stat_update32(hw, GLPRT_LXOFFTXC(pf_id), pf->stat_prev_loaded,
 			  &prev_ps->link_xoff_tx, &cur_ps->link_xoff_tx);
 
+	ice_update_dcb_stats(pf);
+
 	ice_stat_update32(hw, GLPRT_CRCERRS(pf_id), pf->stat_prev_loaded,
 			  &prev_ps->crc_errors, &cur_ps->crc_errors);
 
@@ -2931,8 +3307,91 @@ static void ice_napi_disable_all(struct ice_vsi *vsi)
 	if (!vsi->netdev)
 		return;
 
-	for (q_idx = 0; q_idx < vsi->num_q_vectors; q_idx++)
-		napi_disable(&vsi->q_vectors[q_idx]->napi);
+	ice_for_each_q_vector(vsi, q_idx) {
+		struct ice_q_vector *q_vector = vsi->q_vectors[q_idx];
+
+		if (q_vector->rx.ring || q_vector->tx.ring)
+			napi_disable(&q_vector->napi);
+	}
+}
+
+/**
+ * ice_force_phys_link_state - Force the physical link state
+ * @vsi: VSI to force the physical link state to up/down
+ * @link_up: true/false indicates to set the physical link to up/down
+ *
+ * Force the physical link state by getting the current PHY capabilities from
+ * hardware and setting the PHY config based on the determined capabilities. If
+ * link changes a link event will be triggered because both the Enable Automatic
+ * Link Update and LESM Enable bits are set when setting the PHY capabilities.
+ *
+ * Returns 0 on success, negative on failure
+ */
+static int ice_force_phys_link_state(struct ice_vsi *vsi, bool link_up)
+{
+	struct ice_aqc_get_phy_caps_data *pcaps;
+	struct ice_aqc_set_phy_cfg_data *cfg;
+	struct ice_port_info *pi;
+	struct device *dev;
+	int retcode;
+
+	if (!vsi || !vsi->port_info || !vsi->back)
+		return -EINVAL;
+	if (vsi->type != ICE_VSI_PF)
+		return 0;
+
+	dev = &vsi->back->pdev->dev;
+
+	pi = vsi->port_info;
+
+	pcaps = devm_kzalloc(dev, sizeof(*pcaps), GFP_KERNEL);
+	if (!pcaps)
+		return -ENOMEM;
+
+	retcode = ice_aq_get_phy_caps(pi, false, ICE_AQC_REPORT_SW_CFG, pcaps,
+				      NULL);
+	if (retcode) {
+		dev_err(dev,
+			"Failed to get phy capabilities, VSI %d error %d\n",
+			vsi->vsi_num, retcode);
+		retcode = -EIO;
+		goto out;
+	}
+
+	/* No change in link */
+	if (link_up == !!(pcaps->caps & ICE_AQC_PHY_EN_LINK) &&
+	    link_up == !!(pi->phy.link_info.link_info & ICE_AQ_LINK_UP))
+		goto out;
+
+	cfg = devm_kzalloc(dev, sizeof(*cfg), GFP_KERNEL);
+	if (!cfg) {
+		retcode = -ENOMEM;
+		goto out;
+	}
+
+	cfg->phy_type_low = pcaps->phy_type_low;
+	cfg->phy_type_high = pcaps->phy_type_high;
+	cfg->caps = pcaps->caps | ICE_AQ_PHY_ENA_AUTO_LINK_UPDT;
+	cfg->low_power_ctrl = pcaps->low_power_ctrl;
+	cfg->eee_cap = pcaps->eee_cap;
+	cfg->eeer_value = pcaps->eeer_value;
+	cfg->link_fec_opt = pcaps->link_fec_options;
+	if (link_up)
+		cfg->caps |= ICE_AQ_PHY_ENA_LINK;
+	else
+		cfg->caps &= ~ICE_AQ_PHY_ENA_LINK;
+
+	retcode = ice_aq_set_phy_cfg(&vsi->back->hw, pi->lport, cfg, NULL);
+	if (retcode) {
+		dev_err(dev, "Failed to set phy config, VSI %d error %d\n",
+			vsi->vsi_num, retcode);
+		retcode = -EIO;
+	}
+
+	devm_kfree(dev, cfg);
+out:
+	devm_kfree(dev, pcaps);
+	return retcode;
 }
 
 /**
@@ -2941,7 +3400,7 @@ static void ice_napi_disable_all(struct ice_vsi *vsi)
  */
 int ice_down(struct ice_vsi *vsi)
 {
-	int i, tx_err, rx_err;
+	int i, tx_err, rx_err, link_err = 0;
 
 	/* Caller of this function is expected to set the
 	 * vsi->state __ICE_DOWN bit
@@ -2952,7 +3411,8 @@ int ice_down(struct ice_vsi *vsi)
 	}
 
 	ice_vsi_dis_irq(vsi);
-	tx_err = ice_vsi_stop_tx_rings(vsi, ICE_NO_RESET, 0);
+
+	tx_err = ice_vsi_stop_lan_tx_rings(vsi, ICE_NO_RESET, 0);
 	if (tx_err)
 		netdev_err(vsi->netdev,
 			   "Failed stop Tx rings, VSI %d error %d\n",
@@ -2966,13 +3426,21 @@ int ice_down(struct ice_vsi *vsi)
 
 	ice_napi_disable_all(vsi);
 
+	if (test_bit(ICE_FLAG_LINK_DOWN_ON_CLOSE_ENA, vsi->back->flags)) {
+		link_err = ice_force_phys_link_state(vsi, false);
+		if (link_err)
+			netdev_err(vsi->netdev,
+				   "Failed to set physical link down, VSI %d error %d\n",
+				   vsi->vsi_num, link_err);
+	}
+
 	ice_for_each_txq(vsi, i)
 		ice_clean_tx_ring(vsi->tx_rings[i]);
 
 	ice_for_each_rxq(vsi, i)
 		ice_clean_rx_ring(vsi->rx_rings[i]);
 
-	if (tx_err || rx_err) {
+	if (tx_err || rx_err || link_err) {
 		netdev_err(vsi->netdev,
 			   "Failed to close VSI 0x%04X on switch 0x%04X\n",
 			   vsi->vsi_num, vsi->vsw->sw_id);
@@ -3123,7 +3591,7 @@ static void ice_vsi_release_all(struct ice_pf *pf)
 	if (!pf->vsi)
 		return;
 
-	for (i = 0; i < pf->num_alloc_vsi; i++) {
+	ice_for_each_vsi(pf, i) {
 		if (!pf->vsi[i])
 			continue;
 
@@ -3136,41 +3604,30 @@ static void ice_vsi_release_all(struct ice_pf *pf)
 }
 
 /**
- * ice_dis_vsi - pause a VSI
- * @vsi: the VSI being paused
- */
-static void ice_dis_vsi(struct ice_vsi *vsi)
-{
-	if (test_bit(__ICE_DOWN, vsi->state))
-		return;
-
-	set_bit(__ICE_NEEDS_RESTART, vsi->state);
-
-	if (vsi->type == ICE_VSI_PF && vsi->netdev) {
-		if (netif_running(vsi->netdev)) {
-			rtnl_lock();
-			vsi->netdev->netdev_ops->ndo_stop(vsi->netdev);
-			rtnl_unlock();
-		} else {
-			ice_vsi_close(vsi);
-		}
-	}
-}
-
-/**
  * ice_ena_vsi - resume a VSI
  * @vsi: the VSI being resume
+ * @locked: is the rtnl_lock already held
  */
-static int ice_ena_vsi(struct ice_vsi *vsi)
+static int ice_ena_vsi(struct ice_vsi *vsi, bool locked)
 {
 	int err = 0;
 
-	if (test_and_clear_bit(__ICE_NEEDS_RESTART, vsi->state) &&
-	    vsi->netdev) {
+	if (!test_bit(__ICE_NEEDS_RESTART, vsi->state))
+		return err;
+
+	clear_bit(__ICE_NEEDS_RESTART, vsi->state);
+
+	if (vsi->netdev && vsi->type == ICE_VSI_PF) {
+		struct net_device *netd = vsi->netdev;
+
 		if (netif_running(vsi->netdev)) {
-			rtnl_lock();
-			err = vsi->netdev->netdev_ops->ndo_open(vsi->netdev);
-			rtnl_unlock();
+			if (locked) {
+				err = netd->netdev_ops->ndo_open(netd);
+			} else {
+				rtnl_lock();
+				err = netd->netdev_ops->ndo_open(netd);
+				rtnl_unlock();
+			}
 		} else {
 			err = ice_vsi_open(vsi);
 		}
@@ -3180,29 +3637,21 @@ static int ice_ena_vsi(struct ice_vsi *vsi)
 }
 
 /**
- * ice_pf_dis_all_vsi - Pause all VSIs on a PF
- * @pf: the PF
- */
-static void ice_pf_dis_all_vsi(struct ice_pf *pf)
-{
-	int v;
-
-	ice_for_each_vsi(pf, v)
-		if (pf->vsi[v])
-			ice_dis_vsi(pf->vsi[v]);
-}
-
-/**
  * ice_pf_ena_all_vsi - Resume all VSIs on a PF
  * @pf: the PF
+ * @locked: is the rtnl_lock already held
  */
-static int ice_pf_ena_all_vsi(struct ice_pf *pf)
+#ifdef CONFIG_DCB
+int ice_pf_ena_all_vsi(struct ice_pf *pf, bool locked)
+#else
+static int ice_pf_ena_all_vsi(struct ice_pf *pf, bool locked)
+#endif /* CONFIG_DCB */
 {
 	int v;
 
 	ice_for_each_vsi(pf, v)
 		if (pf->vsi[v])
-			if (ice_ena_vsi(pf->vsi[v]))
+			if (ice_ena_vsi(pf->vsi[v], locked))
 				return -EIO;
 
 	return 0;
@@ -3217,14 +3666,10 @@ static int ice_vsi_rebuild_all(struct ice_pf *pf)
 	int i;
 
 	/* loop through pf->vsi array and reinit the VSI if found */
-	for (i = 0; i < pf->num_alloc_vsi; i++) {
+	ice_for_each_vsi(pf, i) {
 		int err;
 
 		if (!pf->vsi[i])
-			continue;
-
-		/* VF VSI rebuild isn't supported yet */
-		if (pf->vsi[i]->type == ICE_VSI_VF)
 			continue;
 
 		err = ice_vsi_rebuild(pf->vsi[i]);
@@ -3254,7 +3699,7 @@ static int ice_vsi_replay_all(struct ice_pf *pf)
 	int i;
 
 	/* loop through pf->vsi array and replay the VSI if found */
-	for (i = 0; i < pf->num_alloc_vsi; i++) {
+	ice_for_each_vsi(pf, i) {
 		if (!pf->vsi[i])
 			continue;
 
@@ -3321,6 +3766,8 @@ static void ice_rebuild(struct ice_pf *pf)
 	if (err)
 		goto err_sched_init_port;
 
+	ice_dcb_rebuild(pf);
+
 	/* reset search_hint of irq_trackers to 0 since interrupts are
 	 * reclaimed and could be allocated from beginning during VSI rebuild
 	 */
@@ -3354,7 +3801,7 @@ static void ice_rebuild(struct ice_pf *pf)
 	}
 
 	/* restart the VSIs that were rebuilt and running before the reset */
-	err = ice_pf_ena_all_vsi(pf);
+	err = ice_pf_ena_all_vsi(pf, false);
 	if (err) {
 		dev_err(&pf->pdev->dev, "error enabling VSIs\n");
 		/* no need to disable VSIs in tear down path in ice_rebuild()
@@ -3363,9 +3810,7 @@ static void ice_rebuild(struct ice_pf *pf)
 		goto err_vsi_rebuild;
 	}
 
-	ice_reset_all_vfs(pf, true);
-
-	for (i = 0; i < pf->num_alloc_vsi; i++) {
+	ice_for_each_vsi(pf, i) {
 		bool link_up;
 
 		if (!pf->vsi[i] || pf->vsi[i]->type != ICE_VSI_PF)
@@ -3552,7 +3997,7 @@ int ice_get_rss(struct ice_vsi *vsi, u8 *seed, u8 *lut, u16 lut_size)
 /**
  * ice_bridge_getlink - Get the hardware bridge mode
  * @skb: skb buff
- * @pid: process id
+ * @pid: process ID
  * @seq: RTNL message seq
  * @dev: the netdev being configured
  * @filter_mask: filter mask passed in
@@ -3587,30 +4032,39 @@ static int ice_vsi_update_bridge_mode(struct ice_vsi *vsi, u16 bmode)
 	struct device *dev = &vsi->back->pdev->dev;
 	struct ice_aqc_vsi_props *vsi_props;
 	struct ice_hw *hw = &vsi->back->hw;
-	struct ice_vsi_ctx ctxt = { 0 };
+	struct ice_vsi_ctx *ctxt;
 	enum ice_status status;
+	int ret = 0;
 
 	vsi_props = &vsi->info;
-	ctxt.info = vsi->info;
+
+	ctxt = devm_kzalloc(dev, sizeof(*ctxt), GFP_KERNEL);
+	if (!ctxt)
+		return -ENOMEM;
+
+	ctxt->info = vsi->info;
 
 	if (bmode == BRIDGE_MODE_VEB)
 		/* change from VEPA to VEB mode */
-		ctxt.info.sw_flags |= ICE_AQ_VSI_SW_FLAG_ALLOW_LB;
+		ctxt->info.sw_flags |= ICE_AQ_VSI_SW_FLAG_ALLOW_LB;
 	else
 		/* change from VEB to VEPA mode */
-		ctxt.info.sw_flags &= ~ICE_AQ_VSI_SW_FLAG_ALLOW_LB;
-	ctxt.info.valid_sections = cpu_to_le16(ICE_AQ_VSI_PROP_SW_VALID);
+		ctxt->info.sw_flags &= ~ICE_AQ_VSI_SW_FLAG_ALLOW_LB;
+	ctxt->info.valid_sections = cpu_to_le16(ICE_AQ_VSI_PROP_SW_VALID);
 
-	status = ice_update_vsi(hw, vsi->idx, &ctxt, NULL);
+	status = ice_update_vsi(hw, vsi->idx, ctxt, NULL);
 	if (status) {
 		dev_err(dev, "update VSI for bridge mode failed, bmode = %d err %d aq_err %d\n",
 			bmode, status, hw->adminq.sq_last_status);
-		return -EIO;
+		ret = -EIO;
+		goto out;
 	}
 	/* Update sw flags for book keeping */
-	vsi_props->sw_flags = ctxt.info.sw_flags;
+	vsi_props->sw_flags = ctxt->info.sw_flags;
 
-	return 0;
+out:
+	devm_kfree(dev, ctxt);
+	return ret;
 }
 
 /**
@@ -3618,6 +4072,7 @@ static int ice_vsi_update_bridge_mode(struct ice_vsi *vsi, u16 bmode)
  * @dev: the netdev being configured
  * @nlh: RTNL message
  * @flags: bridge setlink flags
+ * @extack: netlink extended ack
  *
  * Sets the bridge mode (VEB/VEPA) of the switch to which the netdev (VSI) is
  * hooked up to. Iterates through the PF VSI list and sets the loopback mode (if
@@ -3626,7 +4081,8 @@ static int ice_vsi_update_bridge_mode(struct ice_vsi *vsi, u16 bmode)
  */
 static int
 ice_bridge_setlink(struct net_device *dev, struct nlmsghdr *nlh,
-		   u16 __always_unused flags)
+		   u16 __always_unused flags,
+		   struct netlink_ext_ack __always_unused *extack)
 {
 	struct ice_netdev_priv *np = netdev_priv(dev);
 	struct ice_pf *pf = np->vsi->back;
@@ -3668,7 +4124,7 @@ ice_bridge_setlink(struct net_device *dev, struct nlmsghdr *nlh,
 		 */
 		status = ice_update_sw_rule_bridge_mode(hw);
 		if (status) {
-			netdev_err(dev, "update SW_RULE for bridge mode failed,  = %d err %d aq_err %d\n",
+			netdev_err(dev, "switch rule update failed, mode = %d err %d aq_err %d\n",
 				   mode, status, hw->adminq.sq_last_status);
 			/* revert hw->evb_veb */
 			hw->evb_veb = (pf_sw->bridge_mode == BRIDGE_MODE_VEB);
@@ -3691,40 +4147,36 @@ static void ice_tx_timeout(struct net_device *netdev)
 	struct ice_ring *tx_ring = NULL;
 	struct ice_vsi *vsi = np->vsi;
 	struct ice_pf *pf = vsi->back;
-	u32 head, val = 0, i;
 	int hung_queue = -1;
+	u32 i;
 
 	pf->tx_timeout_count++;
 
-	/* find the stopped queue the same way the stack does */
+	/* find the stopped queue the same way dev_watchdog() does */
 	for (i = 0; i < netdev->num_tx_queues; i++) {
-		struct netdev_queue *q;
 		unsigned long trans_start;
+		struct netdev_queue *q;
 
 		q = netdev_get_tx_queue(netdev, i);
 		trans_start = q->trans_start;
 		if (netif_xmit_stopped(q) &&
 		    time_after(jiffies,
-			       (trans_start + netdev->watchdog_timeo))) {
+			       trans_start + netdev->watchdog_timeo)) {
 			hung_queue = i;
 			break;
 		}
 	}
 
-	if (i == netdev->num_tx_queues) {
+	if (i == netdev->num_tx_queues)
 		netdev_info(netdev, "tx_timeout: no netdev hung queue found\n");
-	} else {
+	else
 		/* now that we have an index, find the tx_ring struct */
-		for (i = 0; i < vsi->num_txq; i++) {
-			if (vsi->tx_rings[i] && vsi->tx_rings[i]->desc) {
-				if (hung_queue ==
-				    vsi->tx_rings[i]->q_index) {
+		for (i = 0; i < vsi->num_txq; i++)
+			if (vsi->tx_rings[i] && vsi->tx_rings[i]->desc)
+				if (hung_queue == vsi->tx_rings[i]->q_index) {
 					tx_ring = vsi->tx_rings[i];
 					break;
 				}
-			}
-		}
-	}
 
 	/* Reset recovery level if enough time has elapsed after last timeout.
 	 * Also ensure no new reset action happens before next timeout period.
@@ -3736,17 +4188,19 @@ static void ice_tx_timeout(struct net_device *netdev)
 		return;
 
 	if (tx_ring) {
-		head = tx_ring->next_to_clean;
+		struct ice_hw *hw = &pf->hw;
+		u32 head, val = 0;
+
+		head = (rd32(hw, QTX_COMM_HEAD(vsi->txq_map[hung_queue])) &
+			QTX_COMM_HEAD_HEAD_M) >> QTX_COMM_HEAD_HEAD_S;
 		/* Read interrupt register */
 		if (test_bit(ICE_FLAG_MSIX_ENA, pf->flags))
-			val = rd32(&pf->hw,
-				   GLINT_DYN_CTL(tx_ring->q_vector->v_idx +
-					tx_ring->vsi->hw_base_vector));
+			val = rd32(hw,
+				   GLINT_DYN_CTL(tx_ring->q_vector->reg_idx));
 
-		netdev_info(netdev, "tx_timeout: VSI_num: %d, Q %d, NTC: 0x%x, HWB: 0x%x, NTU: 0x%x, TAIL: 0x%x, INT: 0x%x\n",
+		netdev_info(netdev, "tx_timeout: VSI_num: %d, Q %d, NTC: 0x%x, HW_HEAD: 0x%x, NTU: 0x%x, INT: 0x%x\n",
 			    vsi->vsi_num, hung_queue, tx_ring->next_to_clean,
-			    head, tx_ring->next_to_use,
-			    readl(tx_ring->tail), val);
+			    head, tx_ring->next_to_use, val);
 	}
 
 	pf->tx_timeout_last_recovery = jiffies;
@@ -3780,7 +4234,7 @@ static void ice_tx_timeout(struct net_device *netdev)
  * @netdev: network interface device structure
  *
  * The open entry point is called when a network interface is made
- * active by the system (IFF_UP).  At this point all resources needed
+ * active by the system (IFF_UP). At this point all resources needed
  * for transmit and receive operations are allocated, the interrupt
  * handler is registered with the OS, the netdev watchdog is enabled,
  * and the stack is notified that the interface is ready.
@@ -3800,8 +4254,14 @@ static int ice_open(struct net_device *netdev)
 
 	netif_carrier_off(netdev);
 
-	err = ice_vsi_open(vsi);
+	err = ice_force_phys_link_state(vsi, true);
+	if (err) {
+		netdev_err(netdev,
+			   "Failed to set physical link up, error %d\n", err);
+		return err;
+	}
 
+	err = ice_vsi_open(vsi);
 	if (err)
 		netdev_err(netdev, "Failed to open VSI 0x%04X on switch 0x%04X\n",
 			   vsi->vsi_num, vsi->vsw->sw_id);
@@ -3813,7 +4273,7 @@ static int ice_open(struct net_device *netdev)
  * @netdev: network interface device structure
  *
  * The stop entry point is called when an interface is de-activated by the OS,
- * and the netdevice enters the DOWN state.  The hardware is still under the
+ * and the netdevice enters the DOWN state. The hardware is still under the
  * driver's control, but the netdev interface is disabled.
  *
  * Returns success only - not allowed to fail
@@ -3842,14 +4302,14 @@ ice_features_check(struct sk_buff *skb,
 	size_t len;
 
 	/* No point in doing any of this if neither checksum nor GSO are
-	 * being requested for this frame.  We can rule out both by just
+	 * being requested for this frame. We can rule out both by just
 	 * checking for CHECKSUM_PARTIAL
 	 */
 	if (skb->ip_summed != CHECKSUM_PARTIAL)
 		return features;
 
 	/* We cannot support GSO if the MSS is going to be less than
-	 * 64 bytes.  If it is then we need to drop support for GSO.
+	 * 64 bytes. If it is then we need to drop support for GSO.
 	 */
 	if (skb_is_gso(skb) && (skb_shinfo(skb)->gso_size < 64))
 		features &= ~NETIF_F_GSO_MASK;

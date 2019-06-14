@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * aQuantia Corporation Network Driver
  * Copyright (C) 2014-2017 aQuantia Corporation. All rights reserved
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 /* File hw_atl_b0.c: Definition of Atlantic hardware specific functions. */
@@ -21,7 +18,7 @@
 
 #define DEFAULT_B0_BOARD_BASIC_CAPABILITIES \
 	.is_64_dma = true,		  \
-	.msix_irqs = 4U,		  \
+	.msix_irqs = 8U,		  \
 	.irq_mask = ~0U,		  \
 	.vecs = HW_ATL_B0_RSS_MAX,	  \
 	.tcs = HW_ATL_B0_TC_MAX,	  \
@@ -41,7 +38,9 @@
 			NETIF_F_RXHASH |  \
 			NETIF_F_SG |      \
 			NETIF_F_TSO |     \
-			NETIF_F_LRO,      \
+			NETIF_F_LRO |     \
+			NETIF_F_NTUPLE |  \
+			NETIF_F_HW_VLAN_CTAG_FILTER, \
 	.hw_priv_flags = IFF_UNICAST_FLT, \
 	.flow_control = true,		  \
 	.mtu = HW_ATL_B0_MTU_JUMBO,	  \
@@ -171,6 +170,7 @@ static int hw_atl_b0_hw_rss_hash_set(struct aq_hw_s *self,
 	int err = 0;
 	unsigned int i = 0U;
 	unsigned int addr = 0U;
+	u32 val;
 
 	for (i = 10, addr = 0U; i--; ++addr) {
 		u32 key_data = cfg->is_rss ?
@@ -178,8 +178,9 @@ static int hw_atl_b0_hw_rss_hash_set(struct aq_hw_s *self,
 		hw_atl_rpf_rss_key_wr_data_set(self, key_data);
 		hw_atl_rpf_rss_key_addr_set(self, addr);
 		hw_atl_rpf_rss_key_wr_en_set(self, 1U);
-		AQ_HW_WAIT_FOR(hw_atl_rpf_rss_key_wr_en_get(self) == 0,
-			       1000U, 10U);
+		err = readx_poll_timeout_atomic(hw_atl_rpf_rss_key_wr_en_get,
+						self, val, val == 0,
+						1000U, 10000U);
 		if (err < 0)
 			goto err_exit;
 	}
@@ -197,8 +198,9 @@ static int hw_atl_b0_hw_rss_set(struct aq_hw_s *self,
 	u32 i = 0U;
 	u32 num_rss_queues = max(1U, self->aq_nic_cfg->num_rss_queues);
 	int err = 0;
-	u16 bitary[(HW_ATL_B0_RSS_REDIRECTION_MAX *
-					HW_ATL_B0_RSS_REDIRECTION_BITS / 16U)];
+	u16 bitary[1 + (HW_ATL_B0_RSS_REDIRECTION_MAX *
+		   HW_ATL_B0_RSS_REDIRECTION_BITS / 16U)];
+	u32 val;
 
 	memset(bitary, 0, sizeof(bitary));
 
@@ -212,8 +214,9 @@ static int hw_atl_b0_hw_rss_set(struct aq_hw_s *self,
 		hw_atl_rpf_rss_redir_tbl_wr_data_set(self, bitary[i]);
 		hw_atl_rpf_rss_redir_tbl_addr_set(self, i);
 		hw_atl_rpf_rss_redir_wr_en_set(self, 1U);
-		AQ_HW_WAIT_FOR(hw_atl_rpf_rss_redir_wr_en_get(self) == 0,
-			       1000U, 10U);
+		err = readx_poll_timeout_atomic(hw_atl_rpf_rss_redir_wr_en_get,
+						self, val, val == 0,
+						1000U, 10000U);
 		if (err < 0)
 			goto err_exit;
 	}
@@ -253,13 +256,18 @@ static int hw_atl_b0_hw_offload_set(struct aq_hw_s *self,
 
 		hw_atl_rpo_lro_time_base_divider_set(self, 0x61AU);
 		hw_atl_rpo_lro_inactive_interval_set(self, 0);
-		hw_atl_rpo_lro_max_coalescing_interval_set(self, 2);
+		/* the LRO timebase divider is 5 uS (0x61a),
+		 * which is multiplied by 50(0x32)
+		 * to get a maximum coalescing interval of 250 uS,
+		 * which is the default value
+		 */
+		hw_atl_rpo_lro_max_coalescing_interval_set(self, 50);
 
 		hw_atl_rpo_lro_qsessions_lim_set(self, 1U);
 
 		hw_atl_rpo_lro_total_desc_lim_set(self, 2U);
 
-		hw_atl_rpo_lro_patch_optimization_en_set(self, 0U);
+		hw_atl_rpo_lro_patch_optimization_en_set(self, 1U);
 
 		hw_atl_rpo_lro_min_pay_of_first_pkt_set(self, 10U);
 
@@ -267,12 +275,19 @@ static int hw_atl_b0_hw_offload_set(struct aq_hw_s *self,
 
 		hw_atl_rpo_lro_en_set(self,
 				      aq_nic_cfg->is_lro ? 0xFFFFFFFFU : 0U);
+		hw_atl_itr_rsc_en_set(self,
+				      aq_nic_cfg->is_lro ? 0xFFFFFFFFU : 0U);
+
+		hw_atl_itr_rsc_delay_set(self, 1U);
 	}
 	return aq_hw_err_from_flags(self);
 }
 
 static int hw_atl_b0_hw_init_tx_path(struct aq_hw_s *self)
 {
+	/* Tx TC/Queue number config */
+	hw_atl_rpb_tps_tx_tc_mode_set(self, 1U);
+
 	hw_atl_thm_lso_tcp_flag_of_first_pkt_set(self, 0x0FF6U);
 	hw_atl_thm_lso_tcp_flag_of_middle_pkt_set(self, 0x0FF6U);
 	hw_atl_thm_lso_tcp_flag_of_last_pkt_set(self, 0x0F7FU);
@@ -319,20 +334,11 @@ static int hw_atl_b0_hw_init_rx_path(struct aq_hw_s *self)
 	hw_atl_rpf_vlan_outer_etht_set(self, 0x88A8U);
 	hw_atl_rpf_vlan_inner_etht_set(self, 0x8100U);
 
-	if (cfg->vlan_id) {
-		hw_atl_rpf_vlan_flr_act_set(self, 1U, 0U);
-		hw_atl_rpf_vlan_id_flr_set(self, 0U, 0U);
-		hw_atl_rpf_vlan_flr_en_set(self, 0U, 0U);
+	hw_atl_rpf_vlan_prom_mode_en_set(self, 1);
 
-		hw_atl_rpf_vlan_accept_untagged_packets_set(self, 1U);
-		hw_atl_rpf_vlan_untagged_act_set(self, 1U);
-
-		hw_atl_rpf_vlan_flr_act_set(self, 1U, 1U);
-		hw_atl_rpf_vlan_id_flr_set(self, cfg->vlan_id, 0U);
-		hw_atl_rpf_vlan_flr_en_set(self, 1U, 1U);
-	} else {
-		hw_atl_rpf_vlan_prom_mode_en_set(self, 1);
-	}
+	// Always accept untagged packets
+	hw_atl_rpf_vlan_accept_untagged_packets_set(self, 1U);
+	hw_atl_rpf_vlan_untagged_act_set(self, 1U);
 
 	/* Rx Interrupts */
 	hw_atl_rdm_rx_desc_wr_wb_irq_en_set(self, 1U);
@@ -378,10 +384,10 @@ err_exit:
 static int hw_atl_b0_hw_init(struct aq_hw_s *self, u8 *mac_addr)
 {
 	static u32 aq_hw_atl_igcr_table_[4][2] = {
-		{ 0x20000000U, 0x20000000U }, /* AQ_IRQ_INVALID */
-		{ 0x20000080U, 0x20000080U }, /* AQ_IRQ_LEGACY */
-		{ 0x20000021U, 0x20000025U }, /* AQ_IRQ_MSI */
-		{ 0x20000022U, 0x20000026U }  /* AQ_IRQ_MSIX */
+		[AQ_HW_IRQ_INVALID] = { 0x20000000U, 0x20000000U },
+		[AQ_HW_IRQ_LEGACY]  = { 0x20000080U, 0x20000080U },
+		[AQ_HW_IRQ_MSI]     = { 0x20000021U, 0x20000025U },
+		[AQ_HW_IRQ_MSIX]    = { 0x20000022U, 0x20000026U },
 	};
 
 	int err = 0;
@@ -432,6 +438,11 @@ static int hw_atl_b0_hw_init(struct aq_hw_s *self, u8 *mac_addr)
 	hw_atl_reg_gen_irq_map_set(self,
 				   ((HW_ATL_B0_ERR_INT << 0x18) | (1U << 0x1F)) |
 			    ((HW_ATL_B0_ERR_INT << 0x10) | (1U << 0x17)), 0U);
+
+	/* Enable link interrupt */
+	if (aq_nic_cfg->link_irq_vec)
+		hw_atl_reg_gen_irq_map_set(self, BIT(7) |
+					   aq_nic_cfg->link_irq_vec, 3U);
 
 	hw_atl_b0_hw_offload_set(self, aq_nic_cfg);
 
@@ -654,8 +665,6 @@ err_exit:
 static int hw_atl_b0_hw_ring_rx_receive(struct aq_hw_s *self,
 					struct aq_ring_s *ring)
 {
-	struct device *ndev = aq_nic_get_dev(ring->aq_nic);
-
 	for (; ring->hw_head != ring->sw_tail;
 		ring->hw_head = aq_ring_next_dx(ring, ring->hw_head)) {
 		struct aq_ring_buff_s *buff = NULL;
@@ -697,43 +706,44 @@ static int hw_atl_b0_hw_ring_rx_receive(struct aq_hw_s *self,
 			buff->is_cso_err = 0U;
 		}
 
-		dma_unmap_page(ndev, buff->pa, buff->len, DMA_FROM_DEVICE);
-
 		if ((rx_stat & BIT(0)) || rxd_wb->type & 0x1000U) {
 			/* MAC error or DMA error */
 			buff->is_error = 1U;
-		} else {
-			if (self->aq_nic_cfg->is_rss) {
-				/* last 4 byte */
-				u16 rss_type = rxd_wb->type & 0xFU;
+		}
+		if (self->aq_nic_cfg->is_rss) {
+			/* last 4 byte */
+			u16 rss_type = rxd_wb->type & 0xFU;
 
-				if (rss_type && rss_type < 0x8U) {
-					buff->is_hash_l4 = (rss_type == 0x4 ||
-					rss_type == 0x5);
-					buff->rss_hash = rxd_wb->rss_hash;
-				}
+			if (rss_type && rss_type < 0x8U) {
+				buff->is_hash_l4 = (rss_type == 0x4 ||
+				rss_type == 0x5);
+				buff->rss_hash = rxd_wb->rss_hash;
 			}
+		}
 
-			if (HW_ATL_B0_RXD_WB_STAT2_EOP & rxd_wb->status) {
-				buff->len = rxd_wb->pkt_len %
-					AQ_CFG_RX_FRAME_MAX;
-				buff->len = buff->len ?
-					buff->len : AQ_CFG_RX_FRAME_MAX;
-				buff->next = 0U;
-				buff->is_eop = 1U;
+		if (HW_ATL_B0_RXD_WB_STAT2_EOP & rxd_wb->status) {
+			buff->len = rxd_wb->pkt_len %
+				AQ_CFG_RX_FRAME_MAX;
+			buff->len = buff->len ?
+				buff->len : AQ_CFG_RX_FRAME_MAX;
+			buff->next = 0U;
+			buff->is_eop = 1U;
+		} else {
+			buff->len =
+				rxd_wb->pkt_len > AQ_CFG_RX_FRAME_MAX ?
+				AQ_CFG_RX_FRAME_MAX : rxd_wb->pkt_len;
+
+			if (HW_ATL_B0_RXD_WB_STAT2_RSCCNT &
+				rxd_wb->status) {
+				/* LRO */
+				buff->next = rxd_wb->next_desc_ptr;
+				++ring->stats.rx.lro_packets;
 			} else {
-				if (HW_ATL_B0_RXD_WB_STAT2_RSCCNT &
-					rxd_wb->status) {
-					/* LRO */
-					buff->next = rxd_wb->next_desc_ptr;
-					++ring->stats.rx.lro_packets;
-				} else {
-					/* jumbo */
-					buff->next =
-						aq_ring_next_dx(ring,
-								ring->hw_head);
-					++ring->stats.rx.jumbo_packets;
-				}
+				/* jumbo */
+				buff->next =
+					aq_ring_next_dx(ring,
+							ring->hw_head);
+				++ring->stats.rx.jumbo_packets;
 			}
 		}
 	}
@@ -945,6 +955,142 @@ static int hw_atl_b0_hw_ring_rx_stop(struct aq_hw_s *self,
 	return aq_hw_err_from_flags(self);
 }
 
+static int hw_atl_b0_hw_fl3l4_clear(struct aq_hw_s *self,
+				    struct aq_rx_filter_l3l4 *data)
+{
+	u8 location = data->location;
+
+	if (!data->is_ipv6) {
+		hw_atl_rpfl3l4_cmd_clear(self, location);
+		hw_atl_rpf_l4_spd_set(self, 0U, location);
+		hw_atl_rpf_l4_dpd_set(self, 0U, location);
+		hw_atl_rpfl3l4_ipv4_src_addr_clear(self, location);
+		hw_atl_rpfl3l4_ipv4_dest_addr_clear(self, location);
+	} else {
+		int i;
+
+		for (i = 0; i < HW_ATL_RX_CNT_REG_ADDR_IPV6; ++i) {
+			hw_atl_rpfl3l4_cmd_clear(self, location + i);
+			hw_atl_rpf_l4_spd_set(self, 0U, location + i);
+			hw_atl_rpf_l4_dpd_set(self, 0U, location + i);
+		}
+		hw_atl_rpfl3l4_ipv6_src_addr_clear(self, location);
+		hw_atl_rpfl3l4_ipv6_dest_addr_clear(self, location);
+	}
+
+	return aq_hw_err_from_flags(self);
+}
+
+static int hw_atl_b0_hw_fl3l4_set(struct aq_hw_s *self,
+				  struct aq_rx_filter_l3l4 *data)
+{
+	u8 location = data->location;
+
+	hw_atl_b0_hw_fl3l4_clear(self, data);
+
+	if (data->cmd) {
+		if (!data->is_ipv6) {
+			hw_atl_rpfl3l4_ipv4_dest_addr_set(self,
+							  location,
+							  data->ip_dst[0]);
+			hw_atl_rpfl3l4_ipv4_src_addr_set(self,
+							 location,
+							 data->ip_src[0]);
+		} else {
+			hw_atl_rpfl3l4_ipv6_dest_addr_set(self,
+							  location,
+							  data->ip_dst);
+			hw_atl_rpfl3l4_ipv6_src_addr_set(self,
+							 location,
+							 data->ip_src);
+		}
+	}
+	hw_atl_rpf_l4_dpd_set(self, data->p_dst, location);
+	hw_atl_rpf_l4_spd_set(self, data->p_src, location);
+	hw_atl_rpfl3l4_cmd_set(self, location, data->cmd);
+
+	return aq_hw_err_from_flags(self);
+}
+
+static int hw_atl_b0_hw_fl2_set(struct aq_hw_s *self,
+				struct aq_rx_filter_l2 *data)
+{
+	hw_atl_rpf_etht_flr_en_set(self, 1U, data->location);
+	hw_atl_rpf_etht_flr_set(self, data->ethertype, data->location);
+	hw_atl_rpf_etht_user_priority_en_set(self,
+					     !!data->user_priority_en,
+					     data->location);
+	if (data->user_priority_en)
+		hw_atl_rpf_etht_user_priority_set(self,
+						  data->user_priority,
+						  data->location);
+
+	if (data->queue < 0) {
+		hw_atl_rpf_etht_flr_act_set(self, 0U, data->location);
+		hw_atl_rpf_etht_rx_queue_en_set(self, 0U, data->location);
+	} else {
+		hw_atl_rpf_etht_flr_act_set(self, 1U, data->location);
+		hw_atl_rpf_etht_rx_queue_en_set(self, 1U, data->location);
+		hw_atl_rpf_etht_rx_queue_set(self, data->queue, data->location);
+	}
+
+	return aq_hw_err_from_flags(self);
+}
+
+static int hw_atl_b0_hw_fl2_clear(struct aq_hw_s *self,
+				  struct aq_rx_filter_l2 *data)
+{
+	hw_atl_rpf_etht_flr_en_set(self, 0U, data->location);
+	hw_atl_rpf_etht_flr_set(self, 0U, data->location);
+	hw_atl_rpf_etht_user_priority_en_set(self, 0U, data->location);
+
+	return aq_hw_err_from_flags(self);
+}
+
+/**
+ * @brief Set VLAN filter table
+ * @details Configure VLAN filter table to accept (and assign the queue) traffic
+ *  for the particular vlan ids.
+ * Note: use this function under vlan promisc mode not to lost the traffic
+ *
+ * @param aq_hw_s
+ * @param aq_rx_filter_vlan VLAN filter configuration
+ * @return 0 - OK, <0 - error
+ */
+static int hw_atl_b0_hw_vlan_set(struct aq_hw_s *self,
+				 struct aq_rx_filter_vlan *aq_vlans)
+{
+	int i;
+
+	for (i = 0; i < AQ_VLAN_MAX_FILTERS; i++) {
+		hw_atl_rpf_vlan_flr_en_set(self, 0U, i);
+		hw_atl_rpf_vlan_rxq_en_flr_set(self, 0U, i);
+		if (aq_vlans[i].enable) {
+			hw_atl_rpf_vlan_id_flr_set(self,
+						   aq_vlans[i].vlan_id,
+						   i);
+			hw_atl_rpf_vlan_flr_act_set(self, 1U, i);
+			hw_atl_rpf_vlan_flr_en_set(self, 1U, i);
+			if (aq_vlans[i].queue != 0xFF) {
+				hw_atl_rpf_vlan_rxq_flr_set(self,
+							    aq_vlans[i].queue,
+							    i);
+				hw_atl_rpf_vlan_rxq_en_flr_set(self, 1U, i);
+			}
+		}
+	}
+
+	return aq_hw_err_from_flags(self);
+}
+
+static int hw_atl_b0_hw_vlan_ctrl(struct aq_hw_s *self, bool enable)
+{
+	/* set promisc in case of disabing the vland filter */
+	hw_atl_rpf_vlan_prom_mode_en_set(self, !!!enable);
+
+	return aq_hw_err_from_flags(self);
+}
+
 const struct aq_hw_ops hw_atl_ops_b0 = {
 	.hw_set_mac_address   = hw_atl_b0_hw_mac_addr_set,
 	.hw_init              = hw_atl_b0_hw_init,
@@ -969,6 +1115,11 @@ const struct aq_hw_ops hw_atl_ops_b0 = {
 	.hw_ring_rx_init             = hw_atl_b0_hw_ring_rx_init,
 	.hw_ring_tx_init             = hw_atl_b0_hw_ring_tx_init,
 	.hw_packet_filter_set        = hw_atl_b0_hw_packet_filter_set,
+	.hw_filter_l2_set            = hw_atl_b0_hw_fl2_set,
+	.hw_filter_l2_clear          = hw_atl_b0_hw_fl2_clear,
+	.hw_filter_l3l4_set          = hw_atl_b0_hw_fl3l4_set,
+	.hw_filter_vlan_set          = hw_atl_b0_hw_vlan_set,
+	.hw_filter_vlan_ctrl         = hw_atl_b0_hw_vlan_ctrl,
 	.hw_multicast_list_set       = hw_atl_b0_hw_multicast_list_set,
 	.hw_interrupt_moderation_set = hw_atl_b0_hw_interrupt_moderation_set,
 	.hw_rss_set                  = hw_atl_b0_hw_rss_set,

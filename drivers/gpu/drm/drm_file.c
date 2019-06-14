@@ -128,7 +128,6 @@ struct drm_file *drm_file_alloc(struct drm_minor *minor)
 
 	/* for compatibility root is always authenticated */
 	file->authenticated = capable(CAP_SYS_ADMIN);
-	file->lock_count = 0;
 
 	INIT_LIST_HEAD(&file->lhead);
 	INIT_LIST_HEAD(&file->fbs);
@@ -262,6 +261,18 @@ void drm_file_free(struct drm_file *file)
 	kfree(file);
 }
 
+static void drm_close_helper(struct file *filp)
+{
+	struct drm_file *file_priv = filp->private_data;
+	struct drm_device *dev = file_priv->minor->dev;
+
+	mutex_lock(&dev->filelist_mutex);
+	list_del(&file_priv->lhead);
+	mutex_unlock(&dev->filelist_mutex);
+
+	drm_file_free(file_priv);
+}
+
 static int drm_setup(struct drm_device * dev)
 {
 	int ret;
@@ -318,8 +329,10 @@ int drm_open(struct inode *inode, struct file *filp)
 		goto err_undo;
 	if (need_setup) {
 		retcode = drm_setup(dev);
-		if (retcode)
+		if (retcode) {
+			drm_close_helper(filp);
 			goto err_undo;
+		}
 	}
 	return 0;
 
@@ -411,30 +424,6 @@ static int drm_open_helper(struct file *filp, struct drm_minor *minor)
 	return 0;
 }
 
-static void drm_legacy_dev_reinit(struct drm_device *dev)
-{
-	if (dev->irq_enabled)
-		drm_irq_uninstall(dev);
-
-	mutex_lock(&dev->struct_mutex);
-
-	drm_legacy_agp_clear(dev);
-
-	drm_legacy_sg_cleanup(dev);
-	drm_legacy_vma_flush(dev);
-	drm_legacy_dma_takedown(dev);
-
-	mutex_unlock(&dev->struct_mutex);
-
-	dev->sigdata.lock = NULL;
-
-	dev->context_flag = 0;
-	dev->last_context = 0;
-	dev->if_version = 0;
-
-	DRM_DEBUG("lastclose completed\n");
-}
-
 void drm_lastclose(struct drm_device * dev)
 {
 	DRM_DEBUG("\n");
@@ -473,17 +462,11 @@ int drm_release(struct inode *inode, struct file *filp)
 
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
 
-	mutex_lock(&dev->filelist_mutex);
-	list_del(&file_priv->lhead);
-	mutex_unlock(&dev->filelist_mutex);
+	drm_close_helper(filp);
 
-	drm_file_free(file_priv);
-
-	if (!--dev->open_count) {
+	if (!--dev->open_count)
 		drm_lastclose(dev);
-		if (drm_dev_is_unplugged(dev))
-			drm_put_dev(dev);
-	}
+
 	mutex_unlock(&drm_global_mutex);
 
 	drm_minor_release(minor);
@@ -525,7 +508,7 @@ ssize_t drm_read(struct file *filp, char __user *buffer,
 	struct drm_device *dev = file_priv->minor->dev;
 	ssize_t ret;
 
-	if (!access_ok(VERIFY_WRITE, buffer, count))
+	if (!access_ok(buffer, count))
 		return -EFAULT;
 
 	ret = mutex_lock_interruptible(&file_priv->event_read_lock);
@@ -569,6 +552,7 @@ put_back_event:
 				file_priv->event_space -= length;
 				list_add(&e->link, &file_priv->event_list);
 				spin_unlock_irq(&dev->event_lock);
+				wake_up_interruptible(&file_priv->event_wait);
 				break;
 			}
 
@@ -701,7 +685,7 @@ int drm_event_reserve_init(struct drm_device *dev,
 EXPORT_SYMBOL(drm_event_reserve_init);
 
 /**
- * drm_event_cancel_free - free a DRM event and release it's space
+ * drm_event_cancel_free - free a DRM event and release its space
  * @dev: DRM device
  * @p: tracking structure for the pending event
  *

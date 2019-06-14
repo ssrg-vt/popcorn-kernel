@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
  *
  * Copyright(c) 2008 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2018 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
  *
  * Contact Information:
  *  Intel Linux Wireless <linuxwifi@intel.com>
@@ -57,7 +46,7 @@
 #define IWL135_MODULE_FIRMWARE(api) IWL135_FW_PRE __stringify(api) ".ucode"
 
 static const struct iwl_base_params iwl2000_base_params = {
-	.eeprom_size = OTP_LOW_IMAGE_SIZE,
+	.eeprom_size = OTP_LOW_IMAGE_SIZE_2K,
 	.num_of_queues = IWLAGN_NUM_QUEUES,
 	.max_tfd_queue_size = 256,
 	.max_ll_items = OTP_MAX_LL_ITEMS_2x00,
@@ -71,7 +60,7 @@ static const struct iwl_base_params iwl2000_base_params = {
 
 
 static const struct iwl_base_params iwl2030_base_params = {
-	.eeprom_size = OTP_LOW_IMAGE_SIZE,
+	.eeprom_size = OTP_LOW_IMAGE_SIZE_2K,
 	.num_of_queues = IWLAGN_NUM_QUEUES,
 	.max_tfd_queue_size = 256,
 	.max_ll_items = OTP_MAX_LL_ITEMS_2x00,

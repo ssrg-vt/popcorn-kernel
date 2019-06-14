@@ -1,21 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Universal Interface for Intel High Definition Audio Codec
  *
  * Copyright (c) 2004 Takashi Iwai <tiwai@suse.de>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the Free
- *  Software Foundation; either version 2 of the License, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
- *
- *  You should have received a copy of the GNU General Public License along with
- *  this program; if not, write to the Free Software Foundation, Inc., 59
- *  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
 #ifndef __SOUND_HDA_CODEC_H
@@ -68,6 +55,7 @@ struct hda_bus {
 	unsigned int response_reset:1;	/* controller was reset */
 	unsigned int in_reset:1;	/* during reset operation */
 	unsigned int no_response_fallback:1; /* don't fallback at RIRB error */
+	unsigned int bus_probing :1;	/* during probing process */
 
 	int primary_dig_out_type;	/* primary digital out PCM type */
 	unsigned int mixer_assigned;	/* codec addr for mixer name */
@@ -236,6 +224,7 @@ struct hda_codec {
 	/* misc flags */
 	unsigned int in_freeing:1; /* being released */
 	unsigned int registered:1; /* codec was registered */
+	unsigned int display_power_control:1; /* needs display power */
 	unsigned int spdif_status_reset :1; /* needs to toggle SPDIF for each
 					     * status change
 					     * (e.g. Realtek codecs)

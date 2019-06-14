@@ -1,16 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  * Copyright SUSE Linux Products GmbH 2010
  *
@@ -55,6 +44,7 @@ struct kvm_nested_guest {
 	cpumask_t need_tlb_flush;
 	cpumask_t cpu_in_guest;
 	short prev_cpu[NR_CPUS];
+	u8 radix;			/* is this nested guest radix */
 };
 
 /*
@@ -148,6 +138,18 @@ static inline void svcpu_put(struct kvmppc_book3s_shadow_vcpu *svcpu)
 static inline bool kvm_is_radix(struct kvm *kvm)
 {
 	return kvm->arch.radix;
+}
+
+static inline bool kvmhv_vcpu_is_radix(struct kvm_vcpu *vcpu)
+{
+	bool radix;
+
+	if (vcpu->arch.nested)
+		radix = vcpu->arch.nested->radix;
+	else
+		radix = kvm_is_radix(vcpu->kvm);
+
+	return radix;
 }
 
 #define KVM_DEFAULT_HPT_ORDER	24	/* 16MB HPT by default */
@@ -624,8 +626,11 @@ extern int kvmppc_create_pte(struct kvm *kvm, pgd_t *pgtable, pte_t pte,
 			     unsigned long *rmapp, struct rmap_nested **n_rmap);
 extern void kvmhv_insert_nest_rmap(struct kvm *kvm, unsigned long *rmapp,
 				   struct rmap_nested **n_rmap);
+extern void kvmhv_update_nest_rmap_rc_list(struct kvm *kvm, unsigned long *rmapp,
+					   unsigned long clr, unsigned long set,
+					   unsigned long hpa, unsigned long nbytes);
 extern void kvmhv_remove_nest_rmap_range(struct kvm *kvm,
-				struct kvm_memory_slot *memslot,
+				const struct kvm_memory_slot *memslot,
 				unsigned long gpa, unsigned long hpa,
 				unsigned long nbytes);
 

@@ -1,14 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Marvell 88E6xxx SERDES manipulation, via SMI bus
  *
  * Copyright (c) 2008 Marvell Semiconductor
  *
  * Copyright (c) 2016 Andrew Lunn <andrew@lunn.ch>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef _MV88E6XXX_SERDES_H
@@ -69,6 +65,14 @@
 #define MV88E6390_SGMII_INT_SYMBOL_ERROR	BIT(8)
 #define MV88E6390_SGMII_INT_FALSE_CARRIER	BIT(7)
 #define MV88E6390_SGMII_INT_STATUS	0xa002
+#define MV88E6390_SGMII_PHY_STATUS	0xa003
+#define MV88E6390_SGMII_PHY_STATUS_SPEED_MASK	GENMASK(15, 14)
+#define MV88E6390_SGMII_PHY_STATUS_SPEED_1000	0x8000
+#define MV88E6390_SGMII_PHY_STATUS_SPEED_100	0x4000
+#define MV88E6390_SGMII_PHY_STATUS_SPEED_10	0x0000
+#define MV88E6390_SGMII_PHY_STATUS_DUPLEX_FULL	BIT(13)
+#define MV88E6390_SGMII_PHY_STATUS_SPD_DPL_VALID BIT(11)
+#define MV88E6390_SGMII_PHY_STATUS_LINK		BIT(10)
 
 int mv88e6390x_serdes_get_lane(struct mv88e6xxx_chip *chip, int port);
 int mv88e6341_serdes_power(struct mv88e6xxx_chip *chip, int port, bool on);
@@ -77,6 +81,8 @@ int mv88e6390_serdes_power(struct mv88e6xxx_chip *chip, int port, bool on);
 int mv88e6390x_serdes_power(struct mv88e6xxx_chip *chip, int port, bool on);
 int mv88e6390_serdes_irq_setup(struct mv88e6xxx_chip *chip, int port);
 void mv88e6390_serdes_irq_free(struct mv88e6xxx_chip *chip, int port);
+int mv88e6390x_serdes_irq_setup(struct mv88e6xxx_chip *chip, int port);
+void mv88e6390x_serdes_irq_free(struct mv88e6xxx_chip *chip, int port);
 int mv88e6352_serdes_get_sset_count(struct mv88e6xxx_chip *chip, int port);
 int mv88e6352_serdes_get_strings(struct mv88e6xxx_chip *chip,
 				 int port, uint8_t *data);

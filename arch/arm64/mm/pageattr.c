@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -24,6 +16,8 @@ struct page_change_data {
 	pgprot_t set_mask;
 	pgprot_t clear_mask;
 };
+
+bool rodata_full __ro_after_init = IS_ENABLED(CONFIG_RODATA_FULL_DEFAULT_ENABLED);
 
 static int change_page_range(pte_t *ptep, pgtable_t token, unsigned long addr,
 			void *data)
@@ -64,6 +58,7 @@ static int change_memory_common(unsigned long addr, int numpages,
 	unsigned long size = PAGE_SIZE*numpages;
 	unsigned long end = start + size;
 	struct vm_struct *area;
+	int i;
 
 	if (!PAGE_ALIGNED(addr)) {
 		start &= PAGE_MASK;
@@ -92,6 +87,24 @@ static int change_memory_common(unsigned long addr, int numpages,
 
 	if (!numpages)
 		return 0;
+
+	/*
+	 * If we are manipulating read-only permissions, apply the same
+	 * change to the linear mapping of the pages that back this VM area.
+	 */
+	if (rodata_full && (pgprot_val(set_mask) == PTE_RDONLY ||
+			    pgprot_val(clear_mask) == PTE_RDONLY)) {
+		for (i = 0; i < area->nr_pages; i++) {
+			__change_memory_common((u64)page_address(area->pages[i]),
+					       PAGE_SIZE, set_mask, clear_mask);
+		}
+	}
+
+	/*
+	 * Get rid of potentially aliasing lazily unmapped vm areas that may
+	 * have permissions set that deviate from the ones we are setting here.
+	 */
+	vm_unmap_aliases();
 
 	return __change_memory_common(start, size, set_mask, clear_mask);
 }

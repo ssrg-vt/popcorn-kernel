@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This file is part of UBIFS.
  *
  * Copyright (C) 2006-2008 Nokia Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 51
- * Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  *
  * Authors: Adrian Hunter
  *          Artem Bityutskiy (Битюцкий Артём)
@@ -1675,6 +1663,12 @@ int ubifs_lpt_calc_hash(struct ubifs_info *c, u8 *hash)
 	if (!ubifs_authenticated(c))
 		return 0;
 
+	if (!c->nroot) {
+		err = ubifs_read_nnode(c, NULL, 0);
+		if (err)
+			return err;
+	}
+
 	desc = ubifs_hash_get_desc(c);
 	if (IS_ERR(desc))
 		return PTR_ERR(desc);
@@ -1683,12 +1677,6 @@ int ubifs_lpt_calc_hash(struct ubifs_info *c, u8 *hash)
 	if (!buf) {
 		err = -ENOMEM;
 		goto out;
-	}
-
-	if (!c->nroot) {
-		err = ubifs_read_nnode(c, NULL, 0);
-		if (err)
-			return err;
 	}
 
 	cnode = (struct ubifs_cnode *)c->nroot;

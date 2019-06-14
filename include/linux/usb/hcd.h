@@ -72,6 +72,12 @@ struct giveback_urb_bh {
 	struct usb_host_endpoint *completing_ep;
 };
 
+enum usb_dev_authorize_policy {
+	USB_DEVICE_AUTHORIZE_NONE	= 0,
+	USB_DEVICE_AUTHORIZE_ALL	= 1,
+	USB_DEVICE_AUTHORIZE_INTERNAL	= 2,
+};
+
 struct usb_hcd {
 
 	/*
@@ -92,6 +98,7 @@ struct usb_hcd {
 #ifdef CONFIG_PM
 	struct work_struct	wakeup_work;	/* for remote wakeup */
 #endif
+	struct work_struct	died_work;	/* for when the device dies */
 
 	/*
 	 * hardware info/state
@@ -117,7 +124,6 @@ struct usb_hcd {
 #define HCD_FLAG_RH_RUNNING		5	/* root hub is running? */
 #define HCD_FLAG_DEAD			6	/* controller has died? */
 #define HCD_FLAG_INTF_AUTHORIZED	7	/* authorize interfaces? */
-#define HCD_FLAG_DEV_AUTHORIZED		8	/* authorize devices? */
 
 	/* The flags can be tested using these macros; they are likely to
 	 * be slightly faster than test_bit().
@@ -142,8 +148,7 @@ struct usb_hcd {
 	 * or they require explicit user space authorization; this bit is
 	 * settable through /sys/class/usb_host/X/authorized_default
 	 */
-#define HCD_DEV_AUTHORIZED(hcd) \
-	((hcd)->flags & (1U << HCD_FLAG_DEV_AUTHORIZED))
+	enum usb_dev_authorize_policy dev_policy;
 
 	/* Flags that get set only during HCD registration or removal. */
 	unsigned		rh_registered:1;/* is root hub registered? */
@@ -234,11 +239,6 @@ static inline struct usb_hcd *bus_to_hcd(struct usb_bus *bus)
 {
 	return container_of(bus, struct usb_hcd, self);
 }
-
-struct hcd_timeout {	/* timeouts we allocate */
-	struct list_head	timeout_list;
-	struct timer_list	timer;
-};
 
 /*-------------------------------------------------------------------------*/
 
@@ -653,11 +653,16 @@ extern wait_queue_head_t usb_kill_urb_queue;
 #define usb_endpoint_out(ep_dir)	(!((ep_dir) & USB_DIR_IN))
 
 #ifdef CONFIG_PM
+extern unsigned usb_wakeup_enabled_descendants(struct usb_device *udev);
 extern void usb_root_hub_lost_power(struct usb_device *rhdev);
 extern int hcd_bus_suspend(struct usb_device *rhdev, pm_message_t msg);
 extern int hcd_bus_resume(struct usb_device *rhdev, pm_message_t msg);
 extern void usb_hcd_resume_root_hub(struct usb_hcd *hcd);
 #else
+static inline unsigned usb_wakeup_enabled_descendants(struct usb_device *udev)
+{
+	return 0;
+}
 static inline void usb_hcd_resume_root_hub(struct usb_hcd *hcd)
 {
 	return;

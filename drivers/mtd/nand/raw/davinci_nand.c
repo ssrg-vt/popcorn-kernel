@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * davinci_nand.c - NAND Flash Driver for DaVinci family chips
  *
@@ -7,20 +8,6 @@
  *   Sander Huijsen <Shuijsen@optelecom-nkf.com>
  *   Troy Kisky <troy.kisky@boundarydevices.com>
  *   Dirk Behme <Dirk.Behme@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/kernel.h>
@@ -762,7 +749,7 @@ static int nand_davinci_probe(struct platform_device *pdev)
 	info->chip.legacy.IO_ADDR_R	= vaddr;
 	info->chip.legacy.IO_ADDR_W	= vaddr;
 	info->chip.legacy.chip_delay	= 0;
-	info->chip.select_chip	= nand_davinci_select_chip;
+	info->chip.legacy.select_chip	= nand_davinci_select_chip;
 
 	/* options such as NAND_BBT_USE_FLASH */
 	info->chip.bbt_options	= pdata->bbt_options;
@@ -801,7 +788,7 @@ static int nand_davinci_probe(struct platform_device *pdev)
 	spin_unlock_irq(&davinci_nand_lock);
 
 	/* Scan to find existence of the device(s) */
-	info->chip.dummy_controller.ops = &davinci_nand_controller_ops;
+	info->chip.legacy.dummy_controller.ops = &davinci_nand_controller_ops;
 	ret = nand_scan(&info->chip, pdata->mask_chipsel ? 2 : 1);
 	if (ret < 0) {
 		dev_dbg(&pdev->dev, "no NAND chip(s) found\n");

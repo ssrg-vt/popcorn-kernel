@@ -4,6 +4,8 @@
 /* ethtool support for ice */
 
 #include "ice.h"
+#include "ice_lib.h"
+#include "ice_dcb_lib.h"
 
 struct ice_stats {
 	char stat_string[ETH_GSTRING_LEN];
@@ -33,8 +35,14 @@ static int ice_q_stats_len(struct net_device *netdev)
 #define ICE_PF_STATS_LEN	ARRAY_SIZE(ice_gstrings_pf_stats)
 #define ICE_VSI_STATS_LEN	ARRAY_SIZE(ice_gstrings_vsi_stats)
 
-#define ICE_ALL_STATS_LEN(n)	(ICE_PF_STATS_LEN + ICE_VSI_STATS_LEN + \
-				 ice_q_stats_len(n))
+#define ICE_PFC_STATS_LEN ( \
+		(FIELD_SIZEOF(struct ice_pf, stats.priority_xoff_rx) + \
+		 FIELD_SIZEOF(struct ice_pf, stats.priority_xon_rx) + \
+		 FIELD_SIZEOF(struct ice_pf, stats.priority_xoff_tx) + \
+		 FIELD_SIZEOF(struct ice_pf, stats.priority_xon_tx)) \
+		 / sizeof(u64))
+#define ICE_ALL_STATS_LEN(n)	(ICE_PF_STATS_LEN + ICE_PFC_STATS_LEN + \
+				 ICE_VSI_STATS_LEN + ice_q_stats_len(n))
 
 static const struct ice_stats ice_gstrings_vsi_stats[] = {
 	ICE_VSI_STAT("tx_unicast", eth_stats.tx_unicast),
@@ -62,49 +70,49 @@ static const struct ice_stats ice_gstrings_vsi_stats[] = {
  * The PF_STATs are appended to the netdev stats only when ethtool -S
  * is queried on the base PF netdev.
  */
-static struct ice_stats ice_gstrings_pf_stats[] = {
-	ICE_PF_STAT("tx_bytes", stats.eth.tx_bytes),
-	ICE_PF_STAT("rx_bytes", stats.eth.rx_bytes),
-	ICE_PF_STAT("tx_unicast", stats.eth.tx_unicast),
-	ICE_PF_STAT("rx_unicast", stats.eth.rx_unicast),
-	ICE_PF_STAT("tx_multicast", stats.eth.tx_multicast),
-	ICE_PF_STAT("rx_multicast", stats.eth.rx_multicast),
-	ICE_PF_STAT("tx_broadcast", stats.eth.tx_broadcast),
-	ICE_PF_STAT("rx_broadcast", stats.eth.rx_broadcast),
-	ICE_PF_STAT("tx_errors", stats.eth.tx_errors),
-	ICE_PF_STAT("tx_size_64", stats.tx_size_64),
-	ICE_PF_STAT("rx_size_64", stats.rx_size_64),
-	ICE_PF_STAT("tx_size_127", stats.tx_size_127),
-	ICE_PF_STAT("rx_size_127", stats.rx_size_127),
-	ICE_PF_STAT("tx_size_255", stats.tx_size_255),
-	ICE_PF_STAT("rx_size_255", stats.rx_size_255),
-	ICE_PF_STAT("tx_size_511", stats.tx_size_511),
-	ICE_PF_STAT("rx_size_511", stats.rx_size_511),
-	ICE_PF_STAT("tx_size_1023", stats.tx_size_1023),
-	ICE_PF_STAT("rx_size_1023", stats.rx_size_1023),
-	ICE_PF_STAT("tx_size_1522", stats.tx_size_1522),
-	ICE_PF_STAT("rx_size_1522", stats.rx_size_1522),
-	ICE_PF_STAT("tx_size_big", stats.tx_size_big),
-	ICE_PF_STAT("rx_size_big", stats.rx_size_big),
-	ICE_PF_STAT("link_xon_tx", stats.link_xon_tx),
-	ICE_PF_STAT("link_xon_rx", stats.link_xon_rx),
-	ICE_PF_STAT("link_xoff_tx", stats.link_xoff_tx),
-	ICE_PF_STAT("link_xoff_rx", stats.link_xoff_rx),
-	ICE_PF_STAT("tx_dropped_link_down", stats.tx_dropped_link_down),
-	ICE_PF_STAT("rx_undersize", stats.rx_undersize),
-	ICE_PF_STAT("rx_fragments", stats.rx_fragments),
-	ICE_PF_STAT("rx_oversize", stats.rx_oversize),
-	ICE_PF_STAT("rx_jabber", stats.rx_jabber),
-	ICE_PF_STAT("rx_csum_bad", hw_csum_rx_error),
-	ICE_PF_STAT("rx_length_errors", stats.rx_len_errors),
-	ICE_PF_STAT("rx_dropped", stats.eth.rx_discards),
-	ICE_PF_STAT("rx_crc_errors", stats.crc_errors),
-	ICE_PF_STAT("illegal_bytes", stats.illegal_bytes),
-	ICE_PF_STAT("mac_local_faults", stats.mac_local_faults),
-	ICE_PF_STAT("mac_remote_faults", stats.mac_remote_faults),
+static const struct ice_stats ice_gstrings_pf_stats[] = {
+	ICE_PF_STAT("port.tx_bytes", stats.eth.tx_bytes),
+	ICE_PF_STAT("port.rx_bytes", stats.eth.rx_bytes),
+	ICE_PF_STAT("port.tx_unicast", stats.eth.tx_unicast),
+	ICE_PF_STAT("port.rx_unicast", stats.eth.rx_unicast),
+	ICE_PF_STAT("port.tx_multicast", stats.eth.tx_multicast),
+	ICE_PF_STAT("port.rx_multicast", stats.eth.rx_multicast),
+	ICE_PF_STAT("port.tx_broadcast", stats.eth.tx_broadcast),
+	ICE_PF_STAT("port.rx_broadcast", stats.eth.rx_broadcast),
+	ICE_PF_STAT("port.tx_errors", stats.eth.tx_errors),
+	ICE_PF_STAT("port.tx_size_64", stats.tx_size_64),
+	ICE_PF_STAT("port.rx_size_64", stats.rx_size_64),
+	ICE_PF_STAT("port.tx_size_127", stats.tx_size_127),
+	ICE_PF_STAT("port.rx_size_127", stats.rx_size_127),
+	ICE_PF_STAT("port.tx_size_255", stats.tx_size_255),
+	ICE_PF_STAT("port.rx_size_255", stats.rx_size_255),
+	ICE_PF_STAT("port.tx_size_511", stats.tx_size_511),
+	ICE_PF_STAT("port.rx_size_511", stats.rx_size_511),
+	ICE_PF_STAT("port.tx_size_1023", stats.tx_size_1023),
+	ICE_PF_STAT("port.rx_size_1023", stats.rx_size_1023),
+	ICE_PF_STAT("port.tx_size_1522", stats.tx_size_1522),
+	ICE_PF_STAT("port.rx_size_1522", stats.rx_size_1522),
+	ICE_PF_STAT("port.tx_size_big", stats.tx_size_big),
+	ICE_PF_STAT("port.rx_size_big", stats.rx_size_big),
+	ICE_PF_STAT("port.link_xon_tx", stats.link_xon_tx),
+	ICE_PF_STAT("port.link_xon_rx", stats.link_xon_rx),
+	ICE_PF_STAT("port.link_xoff_tx", stats.link_xoff_tx),
+	ICE_PF_STAT("port.link_xoff_rx", stats.link_xoff_rx),
+	ICE_PF_STAT("port.tx_dropped_link_down", stats.tx_dropped_link_down),
+	ICE_PF_STAT("port.rx_undersize", stats.rx_undersize),
+	ICE_PF_STAT("port.rx_fragments", stats.rx_fragments),
+	ICE_PF_STAT("port.rx_oversize", stats.rx_oversize),
+	ICE_PF_STAT("port.rx_jabber", stats.rx_jabber),
+	ICE_PF_STAT("port.rx_csum_bad", hw_csum_rx_error),
+	ICE_PF_STAT("port.rx_length_errors", stats.rx_len_errors),
+	ICE_PF_STAT("port.rx_dropped", stats.eth.rx_discards),
+	ICE_PF_STAT("port.rx_crc_errors", stats.crc_errors),
+	ICE_PF_STAT("port.illegal_bytes", stats.illegal_bytes),
+	ICE_PF_STAT("port.mac_local_faults", stats.mac_local_faults),
+	ICE_PF_STAT("port.mac_remote_faults", stats.mac_remote_faults),
 };
 
-static u32 ice_regs_dump_list[] = {
+static const u32 ice_regs_dump_list[] = {
 	PFGEN_STATE,
 	PRTGEN_STATUS,
 	QRX_CTRL(0),
@@ -113,6 +121,23 @@ static u32 ice_regs_dump_list[] = {
 	PFINT_OICR_ENA,
 	QRX_ITR(0),
 };
+
+struct ice_priv_flag {
+	char name[ETH_GSTRING_LEN];
+	u32 bitno;			/* bit position in pf->flags */
+};
+
+#define ICE_PRIV_FLAG(_name, _bitno) { \
+	.name = _name, \
+	.bitno = _bitno, \
+}
+
+static const struct ice_priv_flag ice_gstrings_priv_flags[] = {
+	ICE_PRIV_FLAG("link-down-on-close", ICE_FLAG_LINK_DOWN_ON_CLOSE_ENA),
+	ICE_PRIV_FLAG("disable-fw-lldp", ICE_FLAG_DISABLE_FW_LLDP),
+};
+
+#define ICE_PRIV_FLAG_ARRAY_SIZE	ARRAY_SIZE(ice_gstrings_priv_flags)
 
 /**
  * ice_nvm_version_str - format the NVM version strings
@@ -152,6 +177,7 @@ ice_get_drvinfo(struct net_device *netdev, struct ethtool_drvinfo *drvinfo)
 		sizeof(drvinfo->fw_version));
 	strlcpy(drvinfo->bus_info, pci_name(pf->pdev),
 		sizeof(drvinfo->bus_info));
+	drvinfo->n_priv_flags = ICE_PRIV_FLAG_ARRAY_SIZE;
 }
 
 static int ice_get_regs_len(struct net_device __always_unused *netdev)
@@ -203,6 +229,55 @@ static void ice_set_msglevel(struct net_device *netdev, u32 data)
 #endif /* !CONFIG_DYNAMIC_DEBUG */
 }
 
+static int ice_get_eeprom_len(struct net_device *netdev)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+	struct ice_pf *pf = np->vsi->back;
+
+	return (int)(pf->hw.nvm.sr_words * sizeof(u16));
+}
+
+static int
+ice_get_eeprom(struct net_device *netdev, struct ethtool_eeprom *eeprom,
+	       u8 *bytes)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+	u16 first_word, last_word, nwords;
+	struct ice_vsi *vsi = np->vsi;
+	struct ice_pf *pf = vsi->back;
+	struct ice_hw *hw = &pf->hw;
+	enum ice_status status;
+	struct device *dev;
+	int ret = 0;
+	u16 *buf;
+
+	dev = &pf->pdev->dev;
+
+	eeprom->magic = hw->vendor_id | (hw->device_id << 16);
+
+	first_word = eeprom->offset >> 1;
+	last_word = (eeprom->offset + eeprom->len - 1) >> 1;
+	nwords = last_word - first_word + 1;
+
+	buf = devm_kcalloc(dev, nwords, sizeof(u16), GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	status = ice_read_sr_buf(hw, first_word, &nwords, buf);
+	if (status) {
+		dev_err(dev, "ice_read_sr_buf failed, err %d aq_err %d\n",
+			status, hw->adminq.sq_last_status);
+		eeprom->len = sizeof(u16) * nwords;
+		ret = -EIO;
+		goto out;
+	}
+
+	memcpy(bytes, (u8 *)buf + (eeprom->offset & 1), eeprom->len);
+out:
+	devm_kfree(dev, buf);
+	return ret;
+}
+
 static void ice_get_strings(struct net_device *netdev, u32 stringset, u8 *data)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
@@ -238,15 +313,197 @@ static void ice_get_strings(struct net_device *netdev, u32 stringset, u8 *data)
 			return;
 
 		for (i = 0; i < ICE_PF_STATS_LEN; i++) {
-			snprintf(p, ETH_GSTRING_LEN, "port.%s",
+			snprintf(p, ETH_GSTRING_LEN, "%s",
 				 ice_gstrings_pf_stats[i].stat_string);
 			p += ETH_GSTRING_LEN;
 		}
 
+		for (i = 0; i < ICE_MAX_USER_PRIORITY; i++) {
+			snprintf(p, ETH_GSTRING_LEN,
+				 "port.tx-priority-%u-xon", i);
+			p += ETH_GSTRING_LEN;
+			snprintf(p, ETH_GSTRING_LEN,
+				 "port.tx-priority-%u-xoff", i);
+			p += ETH_GSTRING_LEN;
+		}
+		for (i = 0; i < ICE_MAX_USER_PRIORITY; i++) {
+			snprintf(p, ETH_GSTRING_LEN,
+				 "port.rx-priority-%u-xon", i);
+			p += ETH_GSTRING_LEN;
+			snprintf(p, ETH_GSTRING_LEN,
+				 "port.rx-priority-%u-xoff", i);
+			p += ETH_GSTRING_LEN;
+		}
+		break;
+	case ETH_SS_PRIV_FLAGS:
+		for (i = 0; i < ICE_PRIV_FLAG_ARRAY_SIZE; i++) {
+			snprintf(p, ETH_GSTRING_LEN, "%s",
+				 ice_gstrings_priv_flags[i].name);
+			p += ETH_GSTRING_LEN;
+		}
 		break;
 	default:
 		break;
 	}
+}
+
+static int
+ice_set_phys_id(struct net_device *netdev, enum ethtool_phys_id_state state)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+	bool led_active;
+
+	switch (state) {
+	case ETHTOOL_ID_ACTIVE:
+		led_active = true;
+		break;
+	case ETHTOOL_ID_INACTIVE:
+		led_active = false;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (ice_aq_set_port_id_led(np->vsi->port_info, !led_active, NULL))
+		return -EIO;
+
+	return 0;
+}
+
+/**
+ * ice_get_priv_flags - report device private flags
+ * @netdev: network interface device structure
+ *
+ * The get string set count and the string set should be matched for each
+ * flag returned.  Add new strings for each flag to the ice_gstrings_priv_flags
+ * array.
+ *
+ * Returns a u32 bitmap of flags.
+ */
+static u32 ice_get_priv_flags(struct net_device *netdev)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+	struct ice_vsi *vsi = np->vsi;
+	struct ice_pf *pf = vsi->back;
+	u32 i, ret_flags = 0;
+
+	for (i = 0; i < ICE_PRIV_FLAG_ARRAY_SIZE; i++) {
+		const struct ice_priv_flag *priv_flag;
+
+		priv_flag = &ice_gstrings_priv_flags[i];
+
+		if (test_bit(priv_flag->bitno, pf->flags))
+			ret_flags |= BIT(i);
+	}
+
+	return ret_flags;
+}
+
+/**
+ * ice_set_priv_flags - set private flags
+ * @netdev: network interface device structure
+ * @flags: bit flags to be set
+ */
+static int ice_set_priv_flags(struct net_device *netdev, u32 flags)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+	DECLARE_BITMAP(change_flags, ICE_PF_FLAGS_NBITS);
+	DECLARE_BITMAP(orig_flags, ICE_PF_FLAGS_NBITS);
+	struct ice_vsi *vsi = np->vsi;
+	struct ice_pf *pf = vsi->back;
+	int ret = 0;
+	u32 i;
+
+	if (flags > BIT(ICE_PRIV_FLAG_ARRAY_SIZE))
+		return -EINVAL;
+
+	set_bit(ICE_FLAG_ETHTOOL_CTXT, pf->flags);
+
+	bitmap_copy(orig_flags, pf->flags, ICE_PF_FLAGS_NBITS);
+	for (i = 0; i < ICE_PRIV_FLAG_ARRAY_SIZE; i++) {
+		const struct ice_priv_flag *priv_flag;
+
+		priv_flag = &ice_gstrings_priv_flags[i];
+
+		if (flags & BIT(i))
+			set_bit(priv_flag->bitno, pf->flags);
+		else
+			clear_bit(priv_flag->bitno, pf->flags);
+	}
+
+	bitmap_xor(change_flags, pf->flags, orig_flags, ICE_PF_FLAGS_NBITS);
+
+	if (test_bit(ICE_FLAG_DISABLE_FW_LLDP, change_flags)) {
+		if (test_bit(ICE_FLAG_DISABLE_FW_LLDP, pf->flags)) {
+			enum ice_status status;
+
+			status = ice_aq_cfg_lldp_mib_change(&pf->hw, false,
+							    NULL);
+			/* If unregistering for LLDP events fails, this is
+			 * not an error state, as there shouldn't be any
+			 * events to respond to.
+			 */
+			if (status)
+				dev_info(&pf->pdev->dev,
+					 "Failed to unreg for LLDP events\n");
+
+			/* The AQ call to stop the FW LLDP agent will generate
+			 * an error if the agent is already stopped.
+			 */
+			status = ice_aq_stop_lldp(&pf->hw, true, NULL);
+			if (status)
+				dev_warn(&pf->pdev->dev,
+					 "Fail to stop LLDP agent\n");
+			/* Use case for having the FW LLDP agent stopped
+			 * will likely not need DCB, so failure to init is
+			 * not a concern of ethtool
+			 */
+			status = ice_init_pf_dcb(pf);
+			if (status)
+				dev_warn(&pf->pdev->dev, "Fail to init DCB\n");
+		} else {
+			enum ice_status status;
+			bool dcbx_agent_status;
+
+			/* AQ command to start FW LLDP agent will return an
+			 * error if the agent is already started
+			 */
+			status = ice_aq_start_lldp(&pf->hw, NULL);
+			if (status)
+				dev_warn(&pf->pdev->dev,
+					 "Fail to start LLDP Agent\n");
+
+			/* AQ command to start FW DCBx agent will fail if
+			 * the agent is already started
+			 */
+			status = ice_aq_start_stop_dcbx(&pf->hw, true,
+							&dcbx_agent_status,
+							NULL);
+			if (status)
+				dev_dbg(&pf->pdev->dev,
+					"Failed to start FW DCBX\n");
+
+			dev_info(&pf->pdev->dev, "FW DCBX agent is %s\n",
+				 dcbx_agent_status ? "ACTIVE" : "DISABLED");
+
+			/* Failure to configure MIB change or init DCB is not
+			 * relevant to ethtool.  Print notification that
+			 * registration/init failed but do not return error
+			 * state to ethtool
+			 */
+			status = ice_aq_cfg_lldp_mib_change(&pf->hw, false,
+							    NULL);
+			if (status)
+				dev_dbg(&pf->pdev->dev,
+					"Fail to reg for MIB change\n");
+
+			status = ice_init_pf_dcb(pf);
+			if (status)
+				dev_dbg(&pf->pdev->dev, "Fail to init DCB\n");
+		}
+	}
+	clear_bit(ICE_FLAG_ETHTOOL_CTXT, pf->flags);
+	return ret;
 }
 
 static int ice_get_sset_count(struct net_device *netdev, int sset)
@@ -260,10 +517,10 @@ static int ice_get_sset_count(struct net_device *netdev, int sset)
 		 * a private ethtool flag). This is due to the nature of the
 		 * ethtool stats API.
 		 *
-		 * User space programs such as ethtool must make 3 separate
+		 * Userspace programs such as ethtool must make 3 separate
 		 * ioctl requests, one for size, one for the strings, and
 		 * finally one for the stats. Since these cross into
-		 * user space, changes to the number or size could result in
+		 * userspace, changes to the number or size could result in
 		 * undefined memory access or incorrect string<->value
 		 * correlations for statistics.
 		 *
@@ -272,6 +529,8 @@ static int ice_get_sset_count(struct net_device *netdev, int sset)
 		 * not safe.
 		 */
 		return ICE_ALL_STATS_LEN(netdev);
+	case ETH_SS_PRIV_FLAGS:
+		return ICE_PRIV_FLAG_ARRAY_SIZE;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -330,6 +589,16 @@ ice_get_ethtool_stats(struct net_device *netdev,
 		data[i++] = (ice_gstrings_pf_stats[j].sizeof_stat ==
 			     sizeof(u64)) ? *(u64 *)p : *(u32 *)p;
 	}
+
+	for (j = 0; j < ICE_MAX_USER_PRIORITY; j++) {
+		data[i++] = pf->stats.priority_xon_tx[j];
+		data[i++] = pf->stats.priority_xoff_tx[j];
+	}
+
+	for (j = 0; j < ICE_MAX_USER_PRIORITY; j++) {
+		data[i++] = pf->stats.priority_xon_rx[j];
+		data[i++] = pf->stats.priority_xoff_rx[j];
+	}
 }
 
 /**
@@ -337,16 +606,20 @@ ice_get_ethtool_stats(struct net_device *netdev,
  * @netdev: network interface device structure
  * @ks: ethtool link ksettings struct to fill out
  */
-static void ice_phy_type_to_ethtool(struct net_device *netdev,
-				    struct ethtool_link_ksettings *ks)
+static void
+ice_phy_type_to_ethtool(struct net_device *netdev,
+			struct ethtool_link_ksettings *ks)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
 	struct ice_link_status *hw_link_info;
+	bool need_add_adv_mode = false;
 	struct ice_vsi *vsi = np->vsi;
+	u64 phy_types_high;
 	u64 phy_types_low;
 
 	hw_link_info = &vsi->port_info->phy.link_info;
 	phy_types_low = vsi->port_info->phy.phy_type_low;
+	phy_types_high = vsi->port_info->phy.phy_type_high;
 
 	ethtool_link_ksettings_zero_link_mode(ks, supported);
 	ethtool_link_ksettings_zero_link_mode(ks, advertising);
@@ -495,6 +768,95 @@ static void ice_phy_type_to_ethtool(struct net_device *netdev,
 			ethtool_link_ksettings_add_link_mode(ks, advertising,
 							     40000baseLR4_Full);
 	}
+	if (phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_CR2 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50G_LAUI2_AOC_ACC ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50G_LAUI2 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50G_AUI2_AOC_ACC ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50G_AUI2 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_CP ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_SR ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50G_AUI1_AOC_ACC ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50G_AUI1) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     50000baseCR2_Full);
+		if (hw_link_info->req_speeds & ICE_AQ_LINK_SPEED_50GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     50000baseCR2_Full);
+	}
+	if (phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_KR2 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_KR_PAM4) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     50000baseKR2_Full);
+		if (hw_link_info->req_speeds & ICE_AQ_LINK_SPEED_50GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     50000baseKR2_Full);
+	}
+	if (phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_SR2 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_LR2 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_FR ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_LR) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     50000baseSR2_Full);
+		if (hw_link_info->req_speeds & ICE_AQ_LINK_SPEED_50GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     50000baseSR2_Full);
+	}
+	if (phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_CR4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100G_CAUI4_AOC_ACC ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100G_CAUI4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100G_AUI4_AOC_ACC ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100G_AUI4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_CR_PAM4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_CP2  ||
+	    phy_types_high & ICE_PHY_TYPE_HIGH_100G_CAUI2_AOC_ACC ||
+	    phy_types_high & ICE_PHY_TYPE_HIGH_100G_CAUI2 ||
+	    phy_types_high & ICE_PHY_TYPE_HIGH_100G_AUI2_AOC_ACC ||
+	    phy_types_high & ICE_PHY_TYPE_HIGH_100G_AUI2) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseCR4_Full);
+		if (hw_link_info->req_speeds & ICE_AQ_LINK_SPEED_100GB)
+			need_add_adv_mode = true;
+	}
+	if (need_add_adv_mode) {
+		need_add_adv_mode = false;
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     100000baseCR4_Full);
+	}
+	if (phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_SR4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_SR2) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseSR4_Full);
+		if (hw_link_info->req_speeds & ICE_AQ_LINK_SPEED_100GB)
+			need_add_adv_mode = true;
+	}
+	if (need_add_adv_mode) {
+		need_add_adv_mode = false;
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     100000baseSR4_Full);
+	}
+	if (phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_LR4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_DR) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseLR4_ER4_Full);
+		if (hw_link_info->req_speeds & ICE_AQ_LINK_SPEED_100GB)
+			need_add_adv_mode = true;
+	}
+	if (need_add_adv_mode) {
+		need_add_adv_mode = false;
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     100000baseLR4_ER4_Full);
+	}
+	if (phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_KR4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_KR_PAM4 ||
+	    phy_types_high & ICE_PHY_TYPE_HIGH_100GBASE_KR2_PAM4) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseKR4_Full);
+		if (hw_link_info->req_speeds & ICE_AQ_LINK_SPEED_100GB)
+			need_add_adv_mode = true;
+	}
+	if (need_add_adv_mode)
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     100000baseKR4_Full);
 
 	/* Autoneg PHY types */
 	if (phy_types_low & ICE_PHY_TYPE_LOW_100BASE_TX ||
@@ -520,6 +882,24 @@ static void ice_phy_type_to_ethtool(struct net_device *netdev,
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
 						     Autoneg);
 	}
+	if (phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_CR2 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_KR2 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_CP ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_50GBASE_KR_PAM4) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     Autoneg);
+	}
+	if (phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_CR4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_KR4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_KR_PAM4 ||
+	    phy_types_low & ICE_PHY_TYPE_LOW_100GBASE_CP2) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     Autoneg);
+	}
 }
 
 #define TEST_SET_BITS_TIMEOUT	50
@@ -531,18 +911,20 @@ static void ice_phy_type_to_ethtool(struct net_device *netdev,
  * @ks: ethtool ksettings to fill in
  * @netdev: network interface device structure
  */
-static void ice_get_settings_link_up(struct ethtool_link_ksettings *ks,
-				     struct net_device *netdev)
+static void
+ice_get_settings_link_up(struct ethtool_link_ksettings *ks,
+			 struct net_device *netdev)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
 	struct ethtool_link_ksettings cap_ksettings;
 	struct ice_link_status *link_info;
 	struct ice_vsi *vsi = np->vsi;
+	bool unrecog_phy_high = false;
 	bool unrecog_phy_low = false;
 
 	link_info = &vsi->port_info->phy.link_info;
 
-	/* Initialize supported and advertised settings based on phy settings */
+	/* Initialize supported and advertised settings based on PHY settings */
 	switch (link_info->phy_type_low) {
 	case ICE_PHY_TYPE_LOW_100BASE_TX:
 		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
@@ -652,6 +1034,7 @@ static void ice_get_settings_link_up(struct ethtool_link_ksettings *ks,
 						     25000baseCR_Full);
 		break;
 	case ICE_PHY_TYPE_LOW_25G_AUI_AOC_ACC:
+	case ICE_PHY_TYPE_LOW_25G_AUI_C2C:
 		ethtool_link_ksettings_add_link_mode(ks, supported,
 						     25000baseCR_Full);
 		break;
@@ -699,25 +1082,133 @@ static void ice_get_settings_link_up(struct ethtool_link_ksettings *ks,
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
 						     40000baseKR4_Full);
 		break;
+	case ICE_PHY_TYPE_LOW_50GBASE_CR2:
+	case ICE_PHY_TYPE_LOW_50GBASE_CP:
+		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     50000baseCR2_Full);
+		ethtool_link_ksettings_add_link_mode(ks, advertising, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     50000baseCR2_Full);
+		break;
+	case ICE_PHY_TYPE_LOW_50G_LAUI2_AOC_ACC:
+	case ICE_PHY_TYPE_LOW_50G_LAUI2:
+	case ICE_PHY_TYPE_LOW_50G_AUI2_AOC_ACC:
+	case ICE_PHY_TYPE_LOW_50G_AUI2:
+	case ICE_PHY_TYPE_LOW_50GBASE_SR:
+	case ICE_PHY_TYPE_LOW_50G_AUI1_AOC_ACC:
+	case ICE_PHY_TYPE_LOW_50G_AUI1:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     50000baseCR2_Full);
+		break;
+	case ICE_PHY_TYPE_LOW_50GBASE_KR2:
+	case ICE_PHY_TYPE_LOW_50GBASE_KR_PAM4:
+		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     50000baseKR2_Full);
+		ethtool_link_ksettings_add_link_mode(ks, advertising, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     50000baseKR2_Full);
+		break;
+	case ICE_PHY_TYPE_LOW_50GBASE_SR2:
+	case ICE_PHY_TYPE_LOW_50GBASE_LR2:
+	case ICE_PHY_TYPE_LOW_50GBASE_FR:
+	case ICE_PHY_TYPE_LOW_50GBASE_LR:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     50000baseSR2_Full);
+		break;
+	case ICE_PHY_TYPE_LOW_100GBASE_CR4:
+		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseCR4_Full);
+		ethtool_link_ksettings_add_link_mode(ks, advertising, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     100000baseCR4_Full);
+		break;
+	case ICE_PHY_TYPE_LOW_100G_CAUI4_AOC_ACC:
+	case ICE_PHY_TYPE_LOW_100G_CAUI4:
+	case ICE_PHY_TYPE_LOW_100G_AUI4_AOC_ACC:
+	case ICE_PHY_TYPE_LOW_100G_AUI4:
+	case ICE_PHY_TYPE_LOW_100GBASE_CR_PAM4:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseCR4_Full);
+		break;
+	case ICE_PHY_TYPE_LOW_100GBASE_CP2:
+		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseCR4_Full);
+		ethtool_link_ksettings_add_link_mode(ks, advertising, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     100000baseCR4_Full);
+		break;
+	case ICE_PHY_TYPE_LOW_100GBASE_SR4:
+	case ICE_PHY_TYPE_LOW_100GBASE_SR2:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseSR4_Full);
+		break;
+	case ICE_PHY_TYPE_LOW_100GBASE_LR4:
+	case ICE_PHY_TYPE_LOW_100GBASE_DR:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseLR4_ER4_Full);
+		break;
+	case ICE_PHY_TYPE_LOW_100GBASE_KR4:
+	case ICE_PHY_TYPE_LOW_100GBASE_KR_PAM4:
+		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseKR4_Full);
+		ethtool_link_ksettings_add_link_mode(ks, advertising, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     100000baseKR4_Full);
+		break;
 	default:
 		unrecog_phy_low = true;
 	}
 
-	if (unrecog_phy_low) {
+	switch (link_info->phy_type_high) {
+	case ICE_PHY_TYPE_HIGH_100GBASE_KR2_PAM4:
+		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseKR4_Full);
+		ethtool_link_ksettings_add_link_mode(ks, advertising, Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     100000baseKR4_Full);
+		break;
+	case ICE_PHY_TYPE_HIGH_100G_CAUI2_AOC_ACC:
+	case ICE_PHY_TYPE_HIGH_100G_CAUI2:
+	case ICE_PHY_TYPE_HIGH_100G_AUI2_AOC_ACC:
+	case ICE_PHY_TYPE_HIGH_100G_AUI2:
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100000baseCR4_Full);
+		break;
+	default:
+		unrecog_phy_high = true;
+	}
+
+	if (unrecog_phy_low && unrecog_phy_high) {
 		/* if we got here and link is up something bad is afoot */
-		netdev_info(netdev, "WARNING: Unrecognized PHY_Low (0x%llx).\n",
+		netdev_info(netdev,
+			    "WARNING: Unrecognized PHY_Low (0x%llx).\n",
 			    (u64)link_info->phy_type_low);
+		netdev_info(netdev,
+			    "WARNING: Unrecognized PHY_High (0x%llx).\n",
+			    (u64)link_info->phy_type_high);
 	}
 
 	/* Now that we've worked out everything that could be supported by the
 	 * current PHY type, get what is supported by the NVM and intersect
 	 * them to get what is truly supported
 	 */
-	memset(&cap_ksettings, 0, sizeof(struct ethtool_link_ksettings));
+	memset(&cap_ksettings, 0, sizeof(cap_ksettings));
 	ice_phy_type_to_ethtool(netdev, &cap_ksettings);
 	ethtool_intersect_link_masks(ks, &cap_ksettings);
 
 	switch (link_info->link_speed) {
+	case ICE_AQ_LINK_SPEED_100GB:
+		ks->base.speed = SPEED_100000;
+		break;
+	case ICE_AQ_LINK_SPEED_50GB:
+		ks->base.speed = SPEED_50000;
+		break;
 	case ICE_AQ_LINK_SPEED_40GB:
 		ks->base.speed = SPEED_40000;
 		break;
@@ -760,10 +1251,10 @@ static void ice_get_settings_link_up(struct ethtool_link_ksettings *ks,
  */
 static void
 ice_get_settings_link_down(struct ethtool_link_ksettings *ks,
-			   struct net_device __always_unused *netdev)
+			   struct net_device *netdev)
 {
 	/* link is down and the driver needs to fall back on
-	 * supported phy types to figure out what info to display
+	 * supported PHY types to figure out what info to display
 	 */
 	ice_phy_type_to_ethtool(netdev, ks);
 
@@ -779,8 +1270,9 @@ ice_get_settings_link_down(struct ethtool_link_ksettings *ks,
  *
  * Reports speed/duplex settings based on media_type
  */
-static int ice_get_link_ksettings(struct net_device *netdev,
-				  struct ethtool_link_ksettings *ks)
+static int
+ice_get_link_ksettings(struct net_device *netdev,
+		       struct ethtool_link_ksettings *ks)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
 	struct ice_link_status *hw_link_info;
@@ -911,6 +1403,23 @@ ice_ksettings_find_adv_link_speed(const struct ethtool_link_ksettings *ks)
 	    ethtool_link_ksettings_test_link_mode(ks, advertising,
 						  40000baseKR4_Full))
 		adv_link_speed |= ICE_AQ_LINK_SPEED_40GB;
+	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  50000baseCR2_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  50000baseKR2_Full))
+		adv_link_speed |= ICE_AQ_LINK_SPEED_50GB;
+	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  50000baseSR2_Full))
+		adv_link_speed |= ICE_AQ_LINK_SPEED_50GB;
+	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  100000baseCR4_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  100000baseSR4_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  100000baseLR4_ER4_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  100000baseKR4_Full))
+		adv_link_speed |= ICE_AQ_LINK_SPEED_100GB;
 
 	return adv_link_speed;
 }
@@ -955,7 +1464,7 @@ ice_setup_autoneg(struct ice_port_info *p, struct ethtool_link_ksettings *ks,
 	} else {
 		/* If autoneg is currently enabled */
 		if (p->phy.link_info.an_info & ICE_AQ_AN_COMPLETED) {
-			/* If autoneg is supported 10GBASE_T is the only phy
+			/* If autoneg is supported 10GBASE_T is the only PHY
 			 * that can disable it, so otherwise return error
 			 */
 			if (ethtool_link_ksettings_test_link_mode(ks,
@@ -981,8 +1490,9 @@ ice_setup_autoneg(struct ice_port_info *p, struct ethtool_link_ksettings *ks,
  *
  * Set speed/duplex per media_types advertised/forced
  */
-static int ice_set_link_ksettings(struct net_device *netdev,
-				  const struct ethtool_link_ksettings *ks)
+static int
+ice_set_link_ksettings(struct net_device *netdev,
+		       const struct ethtool_link_ksettings *ks)
 {
 	u8 autoneg, timeout = TEST_SET_BITS_TIMEOUT, lport = 0;
 	struct ice_netdev_priv *np = netdev_priv(netdev);
@@ -994,6 +1504,7 @@ static int ice_set_link_ksettings(struct net_device *netdev,
 	struct ice_port_info *p;
 	u8 autoneg_changed = 0;
 	enum ice_status status;
+	u64 phy_type_high;
 	u64 phy_type_low;
 	int err = 0;
 	bool linkup;
@@ -1003,14 +1514,13 @@ static int ice_set_link_ksettings(struct net_device *netdev,
 	if (!p)
 		return -EOPNOTSUPP;
 
-	/* Check if this is lan vsi */
-	for (idx = 0 ; idx <  pf->num_alloc_vsi ; idx++) {
+	/* Check if this is LAN VSI */
+	ice_for_each_vsi(pf, idx)
 		if (pf->vsi[idx]->type == ICE_VSI_PF) {
 			if (np->vsi != pf->vsi[idx])
 				return -EOPNOTSUPP;
 			break;
 		}
-	}
 
 	if (p->phy.media_type != ICE_MEDIA_BASET &&
 	    p->phy.media_type != ICE_MEDIA_FIBER &&
@@ -1020,7 +1530,7 @@ static int ice_set_link_ksettings(struct net_device *netdev,
 		return -EOPNOTSUPP;
 
 	/* copy the ksettings to copy_ks to avoid modifying the original */
-	memcpy(&copy_ks, ks, sizeof(struct ethtool_link_ksettings));
+	memcpy(&copy_ks, ks, sizeof(copy_ks));
 
 	/* save autoneg out of ksettings */
 	autoneg = copy_ks.base.autoneg;
@@ -1039,7 +1549,7 @@ static int ice_set_link_ksettings(struct net_device *netdev,
 		return -EINVAL;
 
 	/* get our own copy of the bits to check against */
-	memset(&safe_ks, 0, sizeof(struct ethtool_link_ksettings));
+	memset(&safe_ks, 0, sizeof(safe_ks));
 	safe_ks.base.cmd = copy_ks.base.cmd;
 	safe_ks.base.link_mode_masks_nwords =
 		copy_ks.base.link_mode_masks_nwords;
@@ -1053,8 +1563,7 @@ static int ice_set_link_ksettings(struct net_device *netdev,
 	/* If copy_ks.base and safe_ks.base are not the same now, then they are
 	 * trying to set something that we do not support.
 	 */
-	if (memcmp(&copy_ks.base, &safe_ks.base,
-		   sizeof(struct ethtool_link_settings)))
+	if (memcmp(&copy_ks.base, &safe_ks.base, sizeof(copy_ks.base)))
 		return -EOPNOTSUPP;
 
 	while (test_and_set_bit(__ICE_CFG_BUSY, pf->state)) {
@@ -1069,7 +1578,7 @@ static int ice_set_link_ksettings(struct net_device *netdev,
 	if (!abilities)
 		return -ENOMEM;
 
-	/* Get the current phy config */
+	/* Get the current PHY config */
 	status = ice_aq_get_phy_caps(p, false, ICE_AQC_REPORT_SW_CFG, abilities,
 				     NULL);
 	if (status) {
@@ -1078,7 +1587,7 @@ static int ice_set_link_ksettings(struct net_device *netdev,
 	}
 
 	/* Copy abilities to config in case autoneg is not set below */
-	memset(&config, 0, sizeof(struct ice_aqc_set_phy_cfg_data));
+	memset(&config, 0, sizeof(config));
 	config.caps = abilities->caps & ~ICE_AQC_PHY_AN_MODE;
 	if (abilities->caps & ICE_AQC_PHY_AN_MODE)
 		config.caps |= ICE_AQ_PHY_ENA_AUTO_LINK_UPDT;
@@ -1109,7 +1618,7 @@ static int ice_set_link_ksettings(struct net_device *netdev,
 		adv_link_speed = curr_link_speed;
 
 	/* Convert the advertise link speeds to their corresponded PHY_TYPE */
-	ice_update_phy_type(&phy_type_low, adv_link_speed);
+	ice_update_phy_type(&phy_type_low, &phy_type_high, adv_link_speed);
 
 	if (!autoneg_changed && adv_link_speed == curr_link_speed) {
 		netdev_info(netdev, "Nothing changed, exiting without setting anything.\n");
@@ -1128,7 +1637,9 @@ static int ice_set_link_ksettings(struct net_device *netdev,
 	/* set link and auto negotiation so changes take effect */
 	config.caps |= ICE_AQ_PHY_ENA_LINK;
 
-	if (phy_type_low) {
+	if (phy_type_low || phy_type_high) {
+		config.phy_type_high = cpu_to_le64(phy_type_high) &
+			abilities->phy_type_high;
 		config.phy_type_low = cpu_to_le64(phy_type_low) &
 			abilities->phy_type_low;
 	} else {
@@ -1162,15 +1673,16 @@ done:
 }
 
 /**
- * ice_get_rxnfc - command to get RX flow classification rules
+ * ice_get_rxnfc - command to get Rx flow classification rules
  * @netdev: network interface device structure
  * @cmd: ethtool rxnfc command
  * @rule_locs: buffer to rturn Rx flow classification rules
  *
  * Returns Success if the command is supported.
  */
-static int ice_get_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd,
-			 u32 __always_unused *rule_locs)
+static int
+ice_get_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd,
+	      u32 __always_unused *rule_locs)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
 	struct ice_vsi *vsi = np->vsi;
@@ -1270,7 +1782,7 @@ ice_set_ringparam(struct net_device *netdev, struct ethtool_ringparam *ring)
 		    vsi->tx_rings[0]->count, new_tx_cnt);
 
 	tx_rings = devm_kcalloc(&pf->pdev->dev, vsi->alloc_txq,
-				sizeof(struct ice_ring), GFP_KERNEL);
+				sizeof(*tx_rings), GFP_KERNEL);
 	if (!tx_rings) {
 		err = -ENOMEM;
 		goto done;
@@ -1302,7 +1814,7 @@ process_rx:
 		    vsi->rx_rings[0]->count, new_rx_cnt);
 
 	rx_rings = devm_kcalloc(&pf->pdev->dev, vsi->alloc_rxq,
-				sizeof(struct ice_ring), GFP_KERNEL);
+				sizeof(*rx_rings), GFP_KERNEL);
 	if (!rx_rings) {
 		err = -ENOMEM;
 		goto done;
@@ -1392,17 +1904,17 @@ static int ice_nway_reset(struct net_device *netdev)
 {
 	/* restart autonegotiation */
 	struct ice_netdev_priv *np = netdev_priv(netdev);
-	struct ice_link_status *hw_link_info;
 	struct ice_vsi *vsi = np->vsi;
 	struct ice_port_info *pi;
 	enum ice_status status;
-	bool link_up;
 
 	pi = vsi->port_info;
-	hw_link_info = &pi->phy.link_info;
-	link_up = hw_link_info->link_info & ICE_AQ_LINK_UP;
+	/* If VSI state is up, then restart autoneg with link up */
+	if (!test_bit(__ICE_DOWN, vsi->back->state))
+		status = ice_aq_set_link_restart_an(pi, true, NULL);
+	else
+		status = ice_aq_set_link_restart_an(pi, false, NULL);
 
-	status = ice_aq_set_link_restart_an(pi, link_up, NULL);
 	if (status) {
 		netdev_info(netdev, "link restart failed, err %d aq_err %d\n",
 			    status, pi->hw->adminq.sq_last_status);
@@ -1421,27 +1933,49 @@ static void
 ice_get_pauseparam(struct net_device *netdev, struct ethtool_pauseparam *pause)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
-	struct ice_port_info *pi;
+	struct ice_port_info *pi = np->vsi->port_info;
+	struct ice_aqc_get_phy_caps_data *pcaps;
+	struct ice_vsi *vsi = np->vsi;
+	struct ice_dcbx_cfg *dcbx_cfg;
+	enum ice_status status;
 
-	pi = np->vsi->port_info;
-	pause->autoneg =
-		((pi->phy.link_info.an_info & ICE_AQ_AN_COMPLETED) ?
-		 AUTONEG_ENABLE : AUTONEG_DISABLE);
+	/* Initialize pause params */
+	pause->rx_pause = 0;
+	pause->tx_pause = 0;
 
-	if (pi->fc.current_mode == ICE_FC_RX_PAUSE) {
-		pause->rx_pause = 1;
-	} else if (pi->fc.current_mode == ICE_FC_TX_PAUSE) {
+	dcbx_cfg = &pi->local_dcbx_cfg;
+
+	pcaps = devm_kzalloc(&vsi->back->pdev->dev, sizeof(*pcaps),
+			     GFP_KERNEL);
+	if (!pcaps)
+		return;
+
+	/* Get current PHY config */
+	status = ice_aq_get_phy_caps(pi, false, ICE_AQC_REPORT_SW_CFG, pcaps,
+				     NULL);
+	if (status)
+		goto out;
+
+	pause->autoneg = ((pcaps->caps & ICE_AQC_PHY_AN_MODE) ?
+			AUTONEG_ENABLE : AUTONEG_DISABLE);
+
+	if (dcbx_cfg->pfc.pfcena)
+		/* PFC enabled so report LFC as off */
+		goto out;
+
+	if (pcaps->caps & ICE_AQC_PHY_EN_TX_LINK_PAUSE)
 		pause->tx_pause = 1;
-	} else if (pi->fc.current_mode == ICE_FC_FULL) {
+	if (pcaps->caps & ICE_AQC_PHY_EN_RX_LINK_PAUSE)
 		pause->rx_pause = 1;
-		pause->tx_pause = 1;
-	}
+
+out:
+	devm_kfree(&vsi->back->pdev->dev, pcaps);
 }
 
 /**
  * ice_set_pauseparam - Set Flow Control parameter
  * @netdev: network interface device structure
- * @pause: return tx/rx flow control status
+ * @pause: return Tx/Rx flow control status
  */
 static int
 ice_set_pauseparam(struct net_device *netdev, struct ethtool_pauseparam *pause)
@@ -1449,6 +1983,7 @@ ice_set_pauseparam(struct net_device *netdev, struct ethtool_pauseparam *pause)
 	struct ice_netdev_priv *np = netdev_priv(netdev);
 	struct ice_link_status *hw_link_info;
 	struct ice_pf *pf = np->vsi->back;
+	struct ice_dcbx_cfg *dcbx_cfg;
 	struct ice_vsi *vsi = np->vsi;
 	struct ice_hw *hw = &pf->hw;
 	struct ice_port_info *pi;
@@ -1459,6 +1994,7 @@ ice_set_pauseparam(struct net_device *netdev, struct ethtool_pauseparam *pause)
 
 	pi = vsi->port_info;
 	hw_link_info = &pi->phy.link_info;
+	dcbx_cfg = &pi->local_dcbx_cfg;
 	link_up = hw_link_info->link_info & ICE_AQ_LINK_UP;
 
 	/* Changing the port's flow control is not supported if this isn't the
@@ -1481,6 +2017,10 @@ ice_set_pauseparam(struct net_device *netdev, struct ethtool_pauseparam *pause)
 		netdev_info(netdev, "Autoneg did not complete so changing settings may not result in an actual change.\n");
 	}
 
+	if (dcbx_cfg->pfc.pfcena) {
+		netdev_info(netdev, "Priority flow control enabled. Cannot set link flow control.\n");
+		return -EOPNOTSUPP;
+	}
 	if (pause->rx_pause && pause->tx_pause)
 		pi->fc.req_mode = ICE_FC_FULL;
 	else if (pause->rx_pause && !pause->tx_pause)
@@ -1543,7 +2083,7 @@ static u32 ice_get_rxfh_key_size(struct net_device __always_unused *netdev)
 }
 
 /**
- * ice_get_rxfh_indir_size - get the rx flow hash indirection table size
+ * ice_get_rxfh_indir_size - get the Rx flow hash indirection table size
  * @netdev: network interface device structure
  *
  * Returns the table size.
@@ -1556,7 +2096,7 @@ static u32 ice_get_rxfh_indir_size(struct net_device *netdev)
 }
 
 /**
- * ice_get_rxfh - get the rx flow hash indirection table
+ * ice_get_rxfh - get the Rx flow hash indirection table
  * @netdev: network interface device structure
  * @indir: indirection table
  * @key: hash key
@@ -1603,17 +2143,18 @@ out:
 }
 
 /**
- * ice_set_rxfh - set the rx flow hash indirection table
+ * ice_set_rxfh - set the Rx flow hash indirection table
  * @netdev: network interface device structure
  * @indir: indirection table
  * @key: hash key
  * @hfunc: hash function
  *
- * Returns -EINVAL if the table specifies an invalid queue id, otherwise
+ * Returns -EINVAL if the table specifies an invalid queue ID, otherwise
  * returns 0 after programming the table.
  */
-static int ice_set_rxfh(struct net_device *netdev, const u32 *indir,
-			const u8 *key, const u8 hfunc)
+static int
+ice_set_rxfh(struct net_device *netdev, const u32 *indir, const u8 *key,
+	     const u8 hfunc)
 {
 	struct ice_netdev_priv *np = netdev_priv(netdev);
 	struct ice_vsi *vsi = np->vsi;
@@ -1667,6 +2208,323 @@ static int ice_set_rxfh(struct net_device *netdev, const u32 *indir,
 	return 0;
 }
 
+enum ice_container_type {
+	ICE_RX_CONTAINER,
+	ICE_TX_CONTAINER,
+};
+
+/**
+ * ice_get_rc_coalesce - get ITR values for specific ring container
+ * @ec: ethtool structure to fill with driver's coalesce settings
+ * @c_type: container type, Rx or Tx
+ * @rc: ring container that the ITR values will come from
+ *
+ * Query the device for ice_ring_container specific ITR values. This is
+ * done per ice_ring_container because each q_vector can have 1 or more rings
+ * and all of said ring(s) will have the same ITR values.
+ *
+ * Returns 0 on success, negative otherwise.
+ */
+static int
+ice_get_rc_coalesce(struct ethtool_coalesce *ec, enum ice_container_type c_type,
+		    struct ice_ring_container *rc)
+{
+	struct ice_pf *pf;
+
+	if (!rc->ring)
+		return -EINVAL;
+
+	pf = rc->ring->vsi->back;
+
+	switch (c_type) {
+	case ICE_RX_CONTAINER:
+		ec->use_adaptive_rx_coalesce = ITR_IS_DYNAMIC(rc->itr_setting);
+		ec->rx_coalesce_usecs = rc->itr_setting & ~ICE_ITR_DYNAMIC;
+		ec->rx_coalesce_usecs_high = rc->ring->q_vector->intrl;
+		break;
+	case ICE_TX_CONTAINER:
+		ec->use_adaptive_tx_coalesce = ITR_IS_DYNAMIC(rc->itr_setting);
+		ec->tx_coalesce_usecs = rc->itr_setting & ~ICE_ITR_DYNAMIC;
+		break;
+	default:
+		dev_dbg(&pf->pdev->dev, "Invalid c_type %d\n", c_type);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+/**
+ * ice_get_q_coalesce - get a queue's ITR/INTRL (coalesce) settings
+ * @vsi: VSI associated to the queue for getting ITR/INTRL (coalesce) settings
+ * @ec: coalesce settings to program the device with
+ * @q_num: update ITR/INTRL (coalesce) settings for this queue number/index
+ *
+ * Return 0 on success, and negative under the following conditions:
+ * 1. Getting Tx or Rx ITR/INTRL (coalesce) settings failed.
+ * 2. The q_num passed in is not a valid number/index for Tx and Rx rings.
+ */
+static int
+ice_get_q_coalesce(struct ice_vsi *vsi, struct ethtool_coalesce *ec, int q_num)
+{
+	if (q_num < vsi->num_rxq && q_num < vsi->num_txq) {
+		if (ice_get_rc_coalesce(ec, ICE_RX_CONTAINER,
+					&vsi->rx_rings[q_num]->q_vector->rx))
+			return -EINVAL;
+		if (ice_get_rc_coalesce(ec, ICE_TX_CONTAINER,
+					&vsi->tx_rings[q_num]->q_vector->tx))
+			return -EINVAL;
+	} else if (q_num < vsi->num_rxq) {
+		if (ice_get_rc_coalesce(ec, ICE_RX_CONTAINER,
+					&vsi->rx_rings[q_num]->q_vector->rx))
+			return -EINVAL;
+	} else if (q_num < vsi->num_txq) {
+		if (ice_get_rc_coalesce(ec, ICE_TX_CONTAINER,
+					&vsi->tx_rings[q_num]->q_vector->tx))
+			return -EINVAL;
+	} else {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+/**
+ * __ice_get_coalesce - get ITR/INTRL values for the device
+ * @netdev: pointer to the netdev associated with this query
+ * @ec: ethtool structure to fill with driver's coalesce settings
+ * @q_num: queue number to get the coalesce settings for
+ *
+ * If the caller passes in a negative q_num then we return coalesce settings
+ * based on queue number 0, else use the actual q_num passed in.
+ */
+static int
+__ice_get_coalesce(struct net_device *netdev, struct ethtool_coalesce *ec,
+		   int q_num)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+	struct ice_vsi *vsi = np->vsi;
+
+	if (q_num < 0)
+		q_num = 0;
+
+	if (ice_get_q_coalesce(vsi, ec, q_num))
+		return -EINVAL;
+
+	if (q_num < vsi->num_txq)
+		ec->tx_max_coalesced_frames_irq = vsi->work_lmt;
+
+	if (q_num < vsi->num_rxq)
+		ec->rx_max_coalesced_frames_irq = vsi->work_lmt;
+
+	return 0;
+}
+
+static int
+ice_get_coalesce(struct net_device *netdev, struct ethtool_coalesce *ec)
+{
+	return __ice_get_coalesce(netdev, ec, -1);
+}
+
+static int
+ice_get_per_q_coalesce(struct net_device *netdev, u32 q_num,
+		       struct ethtool_coalesce *ec)
+{
+	return __ice_get_coalesce(netdev, ec, q_num);
+}
+
+/**
+ * ice_set_rc_coalesce - set ITR values for specific ring container
+ * @c_type: container type, Rx or Tx
+ * @ec: ethtool structure from user to update ITR settings
+ * @rc: ring container that the ITR values will come from
+ * @vsi: VSI associated to the ring container
+ *
+ * Set specific ITR values. This is done per ice_ring_container because each
+ * q_vector can have 1 or more rings and all of said ring(s) will have the same
+ * ITR values.
+ *
+ * Returns 0 on success, negative otherwise.
+ */
+static int
+ice_set_rc_coalesce(enum ice_container_type c_type, struct ethtool_coalesce *ec,
+		    struct ice_ring_container *rc, struct ice_vsi *vsi)
+{
+	struct ice_pf *pf = vsi->back;
+	u16 itr_setting;
+
+	if (!rc->ring)
+		return -EINVAL;
+
+	itr_setting = rc->itr_setting & ~ICE_ITR_DYNAMIC;
+
+	switch (c_type) {
+	case ICE_RX_CONTAINER:
+		if (ec->rx_coalesce_usecs_high > ICE_MAX_INTRL ||
+		    (ec->rx_coalesce_usecs_high &&
+		     ec->rx_coalesce_usecs_high < pf->hw.intrl_gran)) {
+			netdev_info(vsi->netdev,
+				    "Invalid value, rx-usecs-high valid values are 0 (disabled), %d-%d\n",
+				    pf->hw.intrl_gran, ICE_MAX_INTRL);
+			return -EINVAL;
+		}
+
+		if (ec->rx_coalesce_usecs_high != rc->ring->q_vector->intrl) {
+			rc->ring->q_vector->intrl = ec->rx_coalesce_usecs_high;
+			wr32(&pf->hw, GLINT_RATE(vsi->hw_base_vector +
+						 rc->ring->q_vector->v_idx),
+			     ice_intrl_usec_to_reg(ec->rx_coalesce_usecs_high,
+						   pf->hw.intrl_gran));
+		}
+
+		if (ec->rx_coalesce_usecs != itr_setting &&
+		    ec->use_adaptive_rx_coalesce) {
+			netdev_info(vsi->netdev,
+				    "Rx interrupt throttling cannot be changed if adaptive-rx is enabled\n");
+			return -EINVAL;
+		}
+
+		if (ec->rx_coalesce_usecs > ICE_ITR_MAX) {
+			netdev_info(vsi->netdev,
+				    "Invalid value, rx-usecs range is 0-%d\n",
+				   ICE_ITR_MAX);
+			return -EINVAL;
+		}
+
+		if (ec->use_adaptive_rx_coalesce) {
+			rc->itr_setting |= ICE_ITR_DYNAMIC;
+		} else {
+			rc->itr_setting = ITR_REG_ALIGN(ec->rx_coalesce_usecs);
+			rc->target_itr = ITR_TO_REG(rc->itr_setting);
+		}
+		break;
+	case ICE_TX_CONTAINER:
+		if (ec->tx_coalesce_usecs_high) {
+			netdev_info(vsi->netdev,
+				    "setting tx-usecs-high is not supported\n");
+			return -EINVAL;
+		}
+
+		if (ec->tx_coalesce_usecs != itr_setting &&
+		    ec->use_adaptive_tx_coalesce) {
+			netdev_info(vsi->netdev,
+				    "Tx interrupt throttling cannot be changed if adaptive-tx is enabled\n");
+			return -EINVAL;
+		}
+
+		if (ec->tx_coalesce_usecs > ICE_ITR_MAX) {
+			netdev_info(vsi->netdev,
+				    "Invalid value, tx-usecs range is 0-%d\n",
+				   ICE_ITR_MAX);
+			return -EINVAL;
+		}
+
+		if (ec->use_adaptive_tx_coalesce) {
+			rc->itr_setting |= ICE_ITR_DYNAMIC;
+		} else {
+			rc->itr_setting = ITR_REG_ALIGN(ec->tx_coalesce_usecs);
+			rc->target_itr = ITR_TO_REG(rc->itr_setting);
+		}
+		break;
+	default:
+		dev_dbg(&pf->pdev->dev, "Invalid container type %d\n", c_type);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+/**
+ * ice_set_q_coalesce - set a queue's ITR/INTRL (coalesce) settings
+ * @vsi: VSI associated to the queue that need updating
+ * @ec: coalesce settings to program the device with
+ * @q_num: update ITR/INTRL (coalesce) settings for this queue number/index
+ *
+ * Return 0 on success, and negative under the following conditions:
+ * 1. Setting Tx or Rx ITR/INTRL (coalesce) settings failed.
+ * 2. The q_num passed in is not a valid number/index for Tx and Rx rings.
+ */
+static int
+ice_set_q_coalesce(struct ice_vsi *vsi, struct ethtool_coalesce *ec, int q_num)
+{
+	if (q_num < vsi->num_rxq && q_num < vsi->num_txq) {
+		if (ice_set_rc_coalesce(ICE_RX_CONTAINER, ec,
+					&vsi->rx_rings[q_num]->q_vector->rx,
+					vsi))
+			return -EINVAL;
+
+		if (ice_set_rc_coalesce(ICE_TX_CONTAINER, ec,
+					&vsi->tx_rings[q_num]->q_vector->tx,
+					vsi))
+			return -EINVAL;
+	} else if (q_num < vsi->num_rxq) {
+		if (ice_set_rc_coalesce(ICE_RX_CONTAINER, ec,
+					&vsi->rx_rings[q_num]->q_vector->rx,
+					vsi))
+			return -EINVAL;
+	} else if (q_num < vsi->num_txq) {
+		if (ice_set_rc_coalesce(ICE_TX_CONTAINER, ec,
+					&vsi->tx_rings[q_num]->q_vector->tx,
+					vsi))
+			return -EINVAL;
+	} else {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+/**
+ * __ice_set_coalesce - set ITR/INTRL values for the device
+ * @netdev: pointer to the netdev associated with this query
+ * @ec: ethtool structure to fill with driver's coalesce settings
+ * @q_num: queue number to get the coalesce settings for
+ *
+ * If the caller passes in a negative q_num then we set the coalesce settings
+ * for all Tx/Rx queues, else use the actual q_num passed in.
+ */
+static int
+__ice_set_coalesce(struct net_device *netdev, struct ethtool_coalesce *ec,
+		   int q_num)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+	struct ice_vsi *vsi = np->vsi;
+
+	if (q_num < 0) {
+		int i;
+
+		ice_for_each_q_vector(vsi, i) {
+			if (ice_set_q_coalesce(vsi, ec, i))
+				return -EINVAL;
+		}
+		goto set_work_lmt;
+	}
+
+	if (ice_set_q_coalesce(vsi, ec, q_num))
+		return -EINVAL;
+
+set_work_lmt:
+
+	if (ec->tx_max_coalesced_frames_irq || ec->rx_max_coalesced_frames_irq)
+		vsi->work_lmt = max(ec->tx_max_coalesced_frames_irq,
+				    ec->rx_max_coalesced_frames_irq);
+
+	return 0;
+}
+
+static int
+ice_set_coalesce(struct net_device *netdev, struct ethtool_coalesce *ec)
+{
+	return __ice_set_coalesce(netdev, ec, -1);
+}
+
+static int
+ice_set_per_q_coalesce(struct net_device *netdev, u32 q_num,
+		       struct ethtool_coalesce *ec)
+{
+	return __ice_set_coalesce(netdev, ec, q_num);
+}
+
 static const struct ethtool_ops ice_ethtool_ops = {
 	.get_link_ksettings	= ice_get_link_ksettings,
 	.set_link_ksettings	= ice_set_link_ksettings,
@@ -1676,8 +2534,15 @@ static const struct ethtool_ops ice_ethtool_ops = {
 	.get_msglevel           = ice_get_msglevel,
 	.set_msglevel           = ice_set_msglevel,
 	.get_link		= ethtool_op_get_link,
+	.get_eeprom_len		= ice_get_eeprom_len,
+	.get_eeprom		= ice_get_eeprom,
+	.get_coalesce		= ice_get_coalesce,
+	.set_coalesce		= ice_set_coalesce,
 	.get_strings		= ice_get_strings,
+	.set_phys_id		= ice_set_phys_id,
 	.get_ethtool_stats      = ice_get_ethtool_stats,
+	.get_priv_flags		= ice_get_priv_flags,
+	.set_priv_flags		= ice_set_priv_flags,
 	.get_sset_count		= ice_get_sset_count,
 	.get_rxnfc		= ice_get_rxnfc,
 	.get_ringparam		= ice_get_ringparam,
@@ -1689,6 +2554,9 @@ static const struct ethtool_ops ice_ethtool_ops = {
 	.get_rxfh_indir_size	= ice_get_rxfh_indir_size,
 	.get_rxfh		= ice_get_rxfh,
 	.set_rxfh		= ice_set_rxfh,
+	.get_ts_info		= ethtool_op_get_ts_info,
+	.get_per_queue_coalesce = ice_get_per_q_coalesce,
+	.set_per_queue_coalesce = ice_set_per_q_coalesce,
 };
 
 /**
