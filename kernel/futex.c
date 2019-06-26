@@ -3655,7 +3655,7 @@ long do_futex(u32 __user *uaddr, int op, u32 val, ktime_t *timeout,
 				cmd != FUTEX_WAKE_BITSET);
 	}
 #endif
-		  
+
 	switch (cmd) {
 	case FUTEX_WAIT:
 		val3 = FUTEX_BITSET_MATCH_ANY;

@@ -60,7 +60,7 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 		pages[lru] = global_zone_page_state(NR_LRU_BASE + lru);
 
 	for_each_zone(zone)
-		wmark_low += zone->watermark[WMARK_LOW];
+		wmark_low += low_wmark_pages(zone);
 
 	/*
 	 * Estimate the amount of memory available for userspace allocations,

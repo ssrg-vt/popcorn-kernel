@@ -4931,7 +4931,7 @@ SYSCALL_DEFINE1(popcorn_get_thread_status, struct popcorn_thread_status __user *
 		.peer_pid = current->peer_pid,
 	};
 
-	if (!access_ok(VERIFY_WRITE, status, sizeof(*status))) {
+	if (!access_ok(status, sizeof(*status))) {
 		return -EINVAL;
 	}
 
@@ -4971,14 +4971,14 @@ SYSCALL_DEFINE2(popcorn_get_node_info, int *, _my_nid, struct popcorn_node_info 
 {
 	int i;
 
-	if (!access_ok(VERIFY_WRITE, _my_nid, sizeof(*_my_nid))) {
+	if (!access_ok(_my_nid, sizeof(*_my_nid))) {
 		return -EINVAL;
 	}
 	if (copy_to_user(_my_nid, &my_nid, sizeof(my_nid))) {
 		return -EINVAL;
 	}
 
-	if (!access_ok(VERIFY_WRITE, info, sizeof(*info) * MAX_POPCORN_NODES)) {
+	if (!access_ok(info, sizeof(*info) * MAX_POPCORN_NODES)) {
 		return -EINVAL;
 	}
 	for (i = 0; i < MAX_POPCORN_NODES; i++) {

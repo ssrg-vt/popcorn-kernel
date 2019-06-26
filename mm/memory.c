@@ -3900,7 +3900,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	if (distributed_process(current)) {
 		int ret;
 		if (pmd_none(*vmf->pmd)) {
-			if (__pte_alloc(vmf->vma->vm_mm, vmf->pmd, vmf->address))
+			if (__pte_alloc(vmf->vma->vm_mm, vmf->pmd))
 				return VM_FAULT_OOM;
 		}
 

@@ -272,7 +272,7 @@ DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 	int remote_ws; \
 	int op; \
 	u32 val; \
-	struct timespec ts; \
+	struct timespec64 ts; \
 	void *uaddr; \
 	void *uaddr2; \
 	u32 val2; \

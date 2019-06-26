@@ -2,7 +2,7 @@
  * @file process_server.c
  *
  * Popcorn Linux thread migration implementation
- * This work was an extension of David Katz MS Thesis, but totally rewritten 
+ * This work was an extension of David Katz MS Thesis, but totally rewritten
  * by Sang-Hoon to support multithread environment.
  *
  * @author Sang-Hoon Kim, SSRG Virginia Tech 2017
@@ -170,7 +170,7 @@ static void __build_task_comm(char *buffer, char *path)
 // Distributed mutex
 ///////////////////////////////////////////////////////////////////////////////
 long process_server_do_futex_at_remote(u32 __user *uaddr, int op, u32 val,
-		bool valid_ts, struct timespec *ts,
+		bool valid_ts, struct timespec64 *ts,
 		u32 __user *uaddr2,u32 val2, u32 val3)
 {
 	struct wait_station *ws = get_wait_station(current);
@@ -229,8 +229,8 @@ static void process_remote_futex_request(remote_futex_request *req)
 	remote_futex_response *res;
 	ktime_t t, *tp = NULL;
 
-	if (timespec_valid(&req->ts)) {
-		t = timespec_to_ktime(req->ts);
+	if (timespec64_valid(&req->ts)) {
+		t = timespec64_to_ktime(req->ts);
 		t = ktime_add_safe(ktime_get(), t);
 		tp = &t;
 	}
@@ -586,7 +586,7 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 	task_lock(current->group_leader);
 	rlim_stack = current->signal->rlim[RLIMIT_STACK];
 	task_unlock(current->group_leader);
-	
+
 	arch_pick_mmap_layout(mm, &rlim_stack);
 
 	f = filp_open(req->exe_path, O_RDONLY | O_LARGEFILE | O_EXCL, 0);
@@ -724,7 +724,7 @@ static int remote_worker_main(void *data)
 
 	get_task_remote(current);
 	rc->tgid = current->tgid;
-	
+
 	__run_remote_worker(rc);
 
 	__terminate_remote_threads(rc);

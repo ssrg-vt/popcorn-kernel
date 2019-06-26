@@ -84,14 +84,11 @@ int save_thread_info(struct field_arch *arch)
 	WARN_ON(es);
 	WARN_ON(gs);
 	arch->tls = fs;
-	arch->fpu_active = !!current->thread.fpu.initialized;
 
 	put_cpu();
 
 	/*
 	PSPRINTK("%s [%d] tls %lx\n", __func__, current->pid, arch->tls);
-	PSPRINTK("%s [%d] fpu %sactive\n", __func__, current->pid,
-			arch->fpu_active ? "" : "in");
 	*/
 
 	return 0;
@@ -168,9 +165,6 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 			do_arch_prctl_64(current, ARCH_SET_GS, arch->thread_gs);
 		}
 		*/
-		if (arch->fpu_active) {
-			fpu__initialize(&current->thread.fpu);
-		}
 	}
 
 	put_cpu();
@@ -180,8 +174,6 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 			regs->ip);
 	PSPRINTK("%s [%d] sp %lx bp %lx\n", __func__, current->pid,
 			regs->sp, regs->bp);
-	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, current->pid,
-			arch->tls, arch->fpu_active ? "" : "in");
 #endif
 	return 0;
 }

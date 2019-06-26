@@ -70,7 +70,7 @@ config POPCORN_STAT_PGFAULTS
 comment "Popcorn is not currently supported on this architecture"
 	depends on !ARCH_SUPPORTS_POPCORN
 
-source msg_layer/Kconfig
+source "msg_layer/Kconfig"
 
 endif # POPCORN
 
