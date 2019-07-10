@@ -357,10 +357,22 @@ static int check_fcntl_cmd(unsigned cmd)
 	return 0;
 }
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/syscall_server.h>
+#endif
+
 SYSCALL_DEFINE3(fcntl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)
-{	
-	struct fd f = fdget_raw(fd);
+{
+	struct fd f;
 	long err = -EBADF;
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		err = redirect_fcntl(fd, cmd, arg);
+		return err;
+	}
+#endif
+	f = fdget_raw(fd);
 
 	if (!f.file)
 		goto out;

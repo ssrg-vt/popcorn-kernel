@@ -7,6 +7,7 @@
 #include <linux/unistd.h>
 #include <linux/eventpoll.h>
 #include <linux/file.h>
+#include <linux/types.h>
 
 /* Syscall Definitions are put here*/
 
@@ -42,6 +43,9 @@ DEFINE_SYSCALL_REDIRECT(epoll_pwait, PCN_SYSCALL_EPOLL_PWAIT,int, epfd,
 DEFINE_SYSCALL_REDIRECT(epoll_ctl, PCN_SYSCALL_EPOLL_CTL, int, epfd,
 			int, op, int, fd, struct epoll_event __user *,
 			event);
+DEFINE_SYSCALL_REDIRECT(select, PCN_SYSCALL_SELECT, int, n, fd_set __user *,
+			inp, fd_set __user *, outp, fd_set __user *, exp,
+			struct timeval __user *, tvp);
 
 
 /* General fs/driver read/write/open/close calls */
@@ -61,6 +65,8 @@ DEFINE_SYSCALL_REDIRECT(fstat, PCN_SYSCALL_FSTAT, unsigned int, fd,
 			struct stat __user *, statbuf);
 DEFINE_SYSCALL_REDIRECT(sendfile64, PCN_SYSCALL_SENDFILE64,int, out_fd, int,
 			in_fd, loff_t __user *, offset, size_t, count);
+DEFINE_SYSCALL_REDIRECT(fcntl, PCN_SYSCALL_FCNTL, unsigned int, fd,
+			unsigned int, cmd, unsigned long, arg);
 /**
  * Syscalls needed in the kernel
  * */
@@ -94,6 +100,9 @@ extern long sys_writev(unsigned long fd,
 extern long sys_newfstat(unsigned int fd, struct stat __user *statbuf);
 extern long sys_sendfile64(int out_fd, int in_fd,
 			       loff_t __user *offset, size_t count);
+extern long sys_select(int n, fd_set __user *inp, fd_set __user *outp,
+			fd_set __user *exp, struct timeval __user *tvp);
+extern long sys_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg);
 
 int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
@@ -195,6 +204,14 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				(const sigset_t __user *)req->param4,
 				(size_t)req->param5);
 		break;
+	case PCN_SYSCALL_SELECT:
+		retval = sys_select((int) req->param0, (fd_set __user*)
+				req->param1, (fd_set __user *)req->param2,
+				(fd_set __user *)req->param3,
+				(struct timeval __user *)req->param4);
+	case PCN_SYSCALL_FCNTL:
+		retval = sys_fcntl((unsigned int) req->param0, (unsigned int)
+				req->param1, (unsigned long)req->param2);
 	default:
 		retval = -EINVAL;
 	}
