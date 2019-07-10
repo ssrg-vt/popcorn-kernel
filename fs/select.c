@@ -33,6 +33,11 @@
 
 #include <asm/uaccess.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/syscall_server.h>
+#include <popcorn/types.h>
+#endif
+
 
 /*
  * Estimate expected accuracy in ns from a timeval.
@@ -632,7 +637,17 @@ SYSCALL_DEFINE5(select, int, n, fd_set __user *, inp, fd_set __user *, outp,
 {
 	struct timespec end_time, *to = NULL;
 	struct timeval tv;
-	int ret;
+	int ret, error;
+
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		printk("Before redirect select");
+		error = redirect_select(n, inp, outp, exp, tvp);
+		printk("After redirect select");
+		SSPRINTK("Remote select return: %d\n", error);
+		return error;
+	}
+#endif
 
 	if (tvp) {
 		if (copy_from_user(&tv, tvp, sizeof(tv)))

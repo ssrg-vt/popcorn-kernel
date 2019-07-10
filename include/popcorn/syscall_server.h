@@ -22,6 +22,8 @@ long redirect_epoll_pwait(int epfd, struct epoll_event __user *events,
 				int maxevents, int timeout,
 				const sigset_t __user *sigmask,
 				size_t sigsetsize);
+long redirect_select(int n, fd_set __user *inp, fd_set __user *outp,
+			fd_set __user *exp, struct timeval __user *tvp);
 
 long redirect_read(unsigned int fd, char __user *buf, size_t count);
 long redirect_write(unsigned int fd, const char __user *buf, size_t count);
@@ -35,4 +37,5 @@ long redirect_fstat(unsigned int fd,
 			struct stat __user *statbuf);
 long redirect_sendfile64(int out_fd, int in_fd,
 			       loff_t __user *offset, size_t count);
+long redirect_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg);
 #endif
