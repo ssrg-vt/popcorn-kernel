@@ -67,6 +67,10 @@ DEFINE_SYSCALL_REDIRECT(sendfile64, PCN_SYSCALL_SENDFILE64,int, out_fd, int,
 			in_fd, loff_t __user *, offset, size_t, count);
 DEFINE_SYSCALL_REDIRECT(fcntl, PCN_SYSCALL_FCNTL, unsigned int, fd,
 			unsigned int, cmd, unsigned long, arg);
+DEFINE_SYSCALL_REDIRECT(fstatat, PCN_SYSCALL_FSTATAT, int, dfd, const char
+			__user *, filename, struct stat __user*, statbud, int,
+			flag);
+
 /**
  * Syscalls needed in the kernel
  * */
@@ -103,6 +107,8 @@ extern long sys_sendfile64(int out_fd, int in_fd,
 extern long sys_select(int n, fd_set __user *inp, fd_set __user *outp,
 			fd_set __user *exp, struct timeval __user *tvp);
 extern long sys_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg);
+extern long sys_newfstatat(int dfd, const char __user *filename,
+			       struct stat __user *statbuf, int flag);
 
 int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
@@ -212,6 +218,11 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	case PCN_SYSCALL_FCNTL:
 		retval = sys_fcntl((unsigned int) req->param0, (unsigned int)
 				req->param1, (unsigned long)req->param2);
+	case PCN_SYSCALL_FSTATAT:
+		retval = sys_newfstatat((int) req->param0, (const char __user*)
+				req->param1,
+			       (struct stat __user *)req->param2, (int)
+			       req->param3);
 	default:
 		retval = -EINVAL;
 	}
