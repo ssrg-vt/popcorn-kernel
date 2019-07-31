@@ -114,7 +114,7 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
 	int retval = 0;
 	syscall_fwd_t *req = (syscall_fwd_t *)msg;
-	syscall_rep_t *rep = kmalloc(sizeof(*rep), GFP_KERNEL);
+	syscall_rep_t *rep = pcn_kmsg_get(sizeof(*rep));
 
 	/*Call the original system call and pass in delivered params. */
 	switch(req->call_type) {
@@ -229,9 +229,9 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	rep->origin_pid = current->origin_pid;
 	rep->remote_ws = req->remote_ws;
 	rep->ret = retval;
-	pcn_kmsg_send(PCN_KMSG_TYPE_SYSCALL_REP, current->remote_nid, rep,
+	pcn_kmsg_post(PCN_KMSG_TYPE_SYSCALL_REP, current->remote_nid, rep,
 		      sizeof(*rep));
-	kfree(rep);
+	pcn_kmsg_done(req);
 	return retval;
 }
 
