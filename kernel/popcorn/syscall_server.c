@@ -13,6 +13,9 @@
 
 /* Define redirection functions*/
 
+/* Process related */
+DEFINE_SYSCALL_REDIRECT(getpid, PCN_SYSCALL_GETPID, int, dummy);
+
 /* Socket related */
 DEFINE_SYSCALL_REDIRECT(socket, PCN_SYSCALL_SOCKET_CREATE, int, family, int,
 			type, int, protocol);
@@ -109,6 +112,7 @@ extern long sys_select(int n, fd_set __user *inp, fd_set __user *outp,
 extern long sys_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg);
 extern long sys_newfstatat(int dfd, const char __user *filename,
 			       struct stat __user *statbuf, int flag);
+extern long sys_getpid(void);
 
 int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
@@ -223,6 +227,8 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				req->param1,
 			       (struct stat __user *)req->param2, (int)
 			       req->param3);
+	case PCN_SYSCALL_GETPID:
+		retval = sys_getpid();
 	default:
 		retval = -EINVAL;
 	}
