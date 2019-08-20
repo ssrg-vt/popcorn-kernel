@@ -355,6 +355,8 @@ static unsigned long elf_map(struct file *filep, unsigned long addr,
 	addr = ELF_PAGESTART(addr);
 	size = ELF_PAGEALIGN(size);
 
+	//printk ("%s: addr = %lx\n", __FUNCTION__, addr);
+
 	/* mmap() will return -EINVAL if given a zero size, but a
 	 * segment with zero filesize is perfectly valid */
 	if (!size)
@@ -713,6 +715,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	struct pt_regs *regs;
 
 	loc = kmalloc(sizeof(*loc), GFP_KERNEL);
+	//printk ("%s: kmalloc = %d\n", __FUNCTION__, loc);
 	if (!loc) {
 		retval = -ENOMEM;
 		goto out_ret;
@@ -895,6 +898,9 @@ out_free_interp:
 	start_data = 0;
 	end_data = 0;
 
+	// CJP: The -ENOMEM is returned here somewhere, maybe.
+	//dump_stack();
+
 	/* Now we do a little grungy work by mmapping the ELF image into
 	   the correct location in memory. */
 	for(i = 0, elf_ppnt = elf_phdata;
@@ -915,6 +921,7 @@ out_free_interp:
 			retval = set_brk(elf_bss + load_bias,
 					 elf_brk + load_bias,
 					 bss_prot);
+			//printk ("%s: set_brk %d\n", __FUNCTION__, retval);
 			if (retval)
 				goto out_free_dentry;
 			nbyte = ELF_PAGEOFFSET(elf_bss);
@@ -997,21 +1004,25 @@ out_free_interp:
 			 * ELF vaddrs will be correctly offset. The result
 			 * is then page aligned.
 			 */
+			//printk ("%s: load_bias = %lx\n", __FUNCTION__, load_bias);
 			load_bias = ELF_PAGESTART(load_bias - vaddr);
 
 			total_size = total_mapping_size(elf_phdata,
-							loc->elf_ex.e_phnum);
+							loc->elf_ex.e_phnum);\
+			//printk ("%s: total_mapping_size %d\n", __FUNCTION__, total_mapping_size);
 			if (!total_size) {
 				retval = -EINVAL;
 				goto out_free_dentry;
 			}
 		}
 
+		//printk ("%s: load_bias = %lx, vaddr = %lx, ELF_ET_DYN_BASE = %lx\n", __FUNCTION__, load_bias, vaddr, ELF_ET_DYN_BASE);
 		error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt,
 				elf_prot, elf_flags, total_size);
 		if (BAD_ADDR(error)) {
 			retval = IS_ERR((void *)error) ?
 				PTR_ERR((void*)error) : -EINVAL;
+			//printk ("%s: elf_map %d\n", __FUNCTION__, retval);
 			goto out_free_dentry;
 		}
 
@@ -1073,6 +1084,7 @@ out_free_interp:
 	 * up getting placed where the bss needs to go.
 	 */
 	retval = set_brk(elf_bss, elf_brk, bss_prot);
+	//printk ("%s: set_brk %d\n", __FUNCTION__, retval);
 	if (retval)
 		goto out_free_dentry;
 	if (likely(elf_bss != elf_brk) && unlikely(padzero(elf_bss))) {
@@ -1119,8 +1131,10 @@ out_free_interp:
 
 #ifdef ARCH_HAS_SETUP_ADDITIONAL_PAGES
 	retval = arch_setup_additional_pages(bprm, !!interpreter);
-	if (retval < 0)
+	if (retval < 0) {
+		//printk ("%s: arch_setup_additional_pages %d\n", __FUNCTION__, retval);
 		goto out;
+	}
 #endif /* ARCH_HAS_SETUP_ADDITIONAL_PAGES */
 
 	retval = create_elf_tables(bprm, &loc->elf_ex,

@@ -864,7 +864,7 @@ static inline void spin_lock_prefetch(const void *x)
  */
 #define TASK_SIZE_MAX	((1UL << __VIRTUAL_MASK_SHIFT) - PAGE_SIZE)
 
-#define DEFAULT_MAP_WINDOW	((1UL << 47) - PAGE_SIZE)
+#define DEFAULT_MAP_WINDOW	((1UL << 38) - PAGE_SIZE)
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.

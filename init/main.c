@@ -1123,6 +1123,7 @@ static int __ref kernel_init(void *unused)
 		panic("Requested init %s failed (error %d).",
 		      execute_command, ret);
 	}
+	//printk (">>> TASK_SIZE = %0lx, DEFAULT_MAP_WINDOW = %lx, PAGE_OFFSET = %lx, TASK_SIZE_LOW = %lx, STACK_TOP_MAX = %lx, STACK_TOP = %lx, VIRTUAL_MASK_SHIFT = %d, TASK_SIZE_MAX = %lx\n", TASK_SIZE, DEFAULT_MAP_WINDOW, PAGE_OFFSET, TASK_SIZE_LOW, STACK_TOP_MAX, STACK_TOP, __VIRTUAL_MASK_SHIFT, TASK_SIZE_MAX);
 	if (!try_to_run_init_process("/sbin/init") ||
 	    !try_to_run_init_process("/etc/init") ||
 	    !try_to_run_init_process("/bin/init") ||
