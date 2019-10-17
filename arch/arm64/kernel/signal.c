@@ -315,7 +315,6 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 	 */
 	if (!ret)
 		user_fastforward_single_step(tsk);
-
 	signal_setup_done(ret, ksig, 0);
 }
 
@@ -368,11 +367,14 @@ static void do_signal(struct pt_regs *regs)
 	 * the debugger may change all of our registers.
 	 */
 	if (get_signal(&ksig)) {
-		/*
+		if(ksig.sig==35)
+		printk("%s %d",__func__, ksig.sig);	
+	/*
 		 * Depending on the signal settings, we may need to revert the
 		 * decision to restart the system call, but skip this if a
 		 * debugger has chosen to restart at a different PC.
 		 */
+		
 		if (regs->pc == restart_addr &&
 		    (retval == -ERESTARTNOHAND ||
 		     retval == -ERESTART_RESTARTBLOCK ||
@@ -398,7 +400,6 @@ static void do_signal(struct pt_regs *regs)
 
 	restore_saved_sigmask();
 }
-
 asmlinkage void do_notify_resume(struct pt_regs *regs,
 				 unsigned int thread_flags)
 {
