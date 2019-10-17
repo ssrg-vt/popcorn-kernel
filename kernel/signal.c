@@ -68,7 +68,6 @@ static int sig_handler_ignored(void __user *handler, int sig)
 static int sig_task_ignored(struct task_struct *t, int sig, bool force)
 {
 	void __user *handler;
-
 	handler = sig_handler(t, sig);
 
 	if (unlikely(t->signal->flags & SIGNAL_UNKILLABLE) &&
@@ -87,7 +86,6 @@ static int sig_ignored(struct task_struct *t, int sig, bool force)
 	 */
 	if (sigismember(&t->blocked, sig) || sigismember(&t->real_blocked, sig))
 		return 0;
-
 	/*
 	 * Tracers may want to know about even ignored signal unless it
 	 * is SIGKILL which can't be reported anyway but can be ignored
@@ -177,7 +175,6 @@ int next_signal(struct sigpending *pending, sigset_t *mask)
 
 	s = pending->signal.sig;
 	m = mask->sig;
-
 	/*
 	 * Handle the first word specially: it contains the
 	 * synchronous signals that need to be dequeued first.
@@ -212,7 +209,6 @@ int next_signal(struct sigpending *pending, sigset_t *mask)
 		/* Nothing to do */
 		break;
 	}
-
 	return sig;
 }
 
@@ -373,7 +369,7 @@ __sigqueue_alloc(int sig, struct task_struct *t, gfp_t flags, int override_rlimi
 	user = get_uid(__task_cred(t)->user);
 	atomic_inc(&user->sigpending);
 	rcu_read_unlock();
-
+	if (sig==35) printk("%s %d %d %d\n", __func__, override_rlimit,  atomic_read(&user->sigpending), task_rlimit(t, RLIMIT_SIGPENDING) );
 	if (override_rlimit ||
 	    atomic_read(&user->sigpending) <=
 			task_rlimit(t, RLIMIT_SIGPENDING)) {
@@ -466,7 +462,6 @@ void flush_itimer_signals(void)
 void ignore_signals(struct task_struct *t)
 {
 	int i;
-
 	for (i = 0; i < _NSIG; ++i)
 		t->sighand->action[i].sa.sa_handler = SIG_IGN;
 
@@ -508,16 +503,17 @@ int unhandled_signal(struct task_struct *tsk, int sig)
 static void collect_signal(int sig, struct sigpending *list, siginfo_t *info,
 			   bool *resched_timer)
 {
+	if(sig == 35)
+	printk("%s collect sig: %d \n", __func__, sig);
 	struct sigqueue *q, *first = NULL;
-
 	/*
 	 * Collect the siginfo appropriate to this signal.  Check if
 	 * there is another siginfo for the same signal.
 	*/
 	list_for_each_entry(q, &list->list, list) {
 		if (q->info.si_signo == sig) {
-			if (first)
-				goto still_pending;
+			if (first){
+				goto still_pending;}
 			first = q;
 		}
 	}
@@ -553,7 +549,6 @@ static int __dequeue_signal(struct sigpending *pending, sigset_t *mask,
 			siginfo_t *info, bool *resched_timer)
 {
 	int sig = next_signal(pending, mask);
-
 	if (sig)
 		collect_signal(sig, pending, info, resched_timer);
 	return sig;
@@ -574,6 +569,7 @@ int dequeue_signal(struct task_struct *tsk, sigset_t *mask, siginfo_t *info)
 	 * signalfd steal them
 	 */
 	signr = __dequeue_signal(&tsk->pending, mask, info, &resched_timer);
+	printk("%s %d\n",__func__,signr);
 	if (!signr) {
 		signr = __dequeue_signal(&tsk->signal->shared_pending,
 					 mask, info, &resched_timer);
@@ -888,6 +884,7 @@ static void complete_signal(int sig, struct task_struct *p, int group)
 	 * If the main thread wants the signal, it gets first crack.
 	 * Probably the least surprising to the average bear.
 	 */
+	if (sig==35) printk("%s %d %x %d %d %d %d\n", __func__, sig, sigismember(&p->blocked, sig), (p->flags & PF_EXITING),  (sig == SIGKILL), task_is_stopped_or_traced(p), !signal_pending(p)  );
 	if (wants_signal(sig, p))
 		t = p;
 	else if (!group || thread_group_empty(p))
@@ -1028,10 +1025,12 @@ static int __send_signal(int sig, struct siginfo *info, struct task_struct *t,
 
 	q = __sigqueue_alloc(sig, t, GFP_ATOMIC | __GFP_NOTRACK_FALSE_POSITIVE,
 		override_rlimit);
+	if (sig==35) printk("%s %lx %d %d %d %d\n", __func__, q, (!is_si_special(info)), SIGRTMIN, info->si_code, SI_USER );
 	if (q) {
 		list_add_tail(&q->list, &pending->list);
 		switch ((unsigned long) info) {
 		case (unsigned long) SEND_SIG_NOINFO:
+			if (sig==35) printk("%s USER\n",__func__);
 			q->info.si_signo = sig;
 			q->info.si_errno = 0;
 			q->info.si_code = SI_USER;
@@ -1040,6 +1039,7 @@ static int __send_signal(int sig, struct siginfo *info, struct task_struct *t,
 			q->info.si_uid = from_kuid_munged(current_user_ns(), current_uid());
 			break;
 		case (unsigned long) SEND_SIG_PRIV:
+			if (sig==35) printk("%s KERNEL\n",__func__);
 			q->info.si_signo = sig;
 			q->info.si_errno = 0;
 			q->info.si_code = SI_KERNEL;
@@ -1047,6 +1047,7 @@ static int __send_signal(int sig, struct siginfo *info, struct task_struct *t,
 			q->info.si_uid = 0;
 			break;
 		default:
+			if (sig==35) printk("%s default \n",__func__);
 			copy_siginfo(&q->info, info);
 			if (from_ancestor_ns)
 				q->info.si_pid = 0;
@@ -1054,14 +1055,16 @@ static int __send_signal(int sig, struct siginfo *info, struct task_struct *t,
 		}
 
 		userns_fixup_signal_uid(&q->info, t);
-
+		
 	} else if (!is_si_special(info)) {
+		 if (sig==35) printk("%s FUCKED UP\n",__func__);
 		if (sig >= SIGRTMIN && info->si_code != SI_USER) {
 			/*
 			 * Queue overflow, abort.  We may abort if the
 			 * signal was rt and sent by user using something
 			 * other than kill().
 			 */
+			 if (sig==35) printk("%s overflow \n",__func__);
 			result = TRACE_SIGNAL_OVERFLOW_FAIL;
 			ret = -EAGAIN;
 			goto ret;
@@ -1070,6 +1073,7 @@ static int __send_signal(int sig, struct siginfo *info, struct task_struct *t,
 			 * This is a silent loss of information.  We still
 			 * send the signal, but the *info bits are lost.
 			 */
+			 if (sig==35) printk("%s TRACE_SIGNAL_LOSE_INFO\n",__func__);
 			result = TRACE_SIGNAL_LOSE_INFO;
 		}
 	}
@@ -1132,7 +1136,9 @@ __setup("print-fatal-signals=", setup_print_fatal_signals);
 int
 __group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 {
-	return send_signal(sig, info, p, 1);
+	int i = send_signal(sig, info, p, 1);
+	if(i==35)
+	return i;
 }
 
 static int
@@ -1151,7 +1157,6 @@ int do_send_sig_info(int sig, struct siginfo *info, struct task_struct *p,
 		ret = send_signal(sig, info, p, group);
 		unlock_task_sighand(p, &flags);
 	}
-
 	return ret;
 }
 
@@ -1432,8 +1437,9 @@ int send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 	 */
 	if (!valid_signal(sig))
 		return -EINVAL;
-
-	return do_send_sig_info(sig, info, p, false);
+	int i = do_send_sig_info(sig, info, p, false);
+	 if(sig==35)  printk("%s have %d \n",__func__,i);
+	return i;
 }
 
 #define __si_special(priv) \
@@ -1442,7 +1448,9 @@ int send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 int
 send_sig(int sig, struct task_struct *p, int priv)
 {
-	return send_sig_info(sig, __si_special(priv), p);
+	int i= send_sig_info(sig, __si_special(priv), p);
+	if(sig==35)  printk("%s have %d \n",__func__,i);
+	return i;
 }
 
 void
@@ -1669,7 +1677,6 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 		__group_send_sig_info(sig, &info, tsk->parent);
 	__wake_up_parent(tsk, tsk->parent);
 	spin_unlock_irqrestore(&psig->siglock, flags);
-
 	return autoreap;
 }
 
@@ -2146,13 +2153,11 @@ int get_signal(struct ksignal *ksig)
 	struct sighand_struct *sighand = current->sighand;
 	struct signal_struct *signal = current->signal;
 	int signr;
-
 	if (unlikely(current->task_works))
 		task_work_run();
 
 	if (unlikely(uprobe_deny_signal()))
 		return 0;
-
 	/*
 	 * Do this once, we can't return to user-mode if freezing() == T.
 	 * do_signal_stop() and ptrace_stop() do freezable_schedule() and
@@ -2200,7 +2205,6 @@ relock:
 
 	for (;;) {
 		struct k_sigaction *ka;
-
 		if (unlikely(current->jobctl & JOBCTL_STOP_PENDING) &&
 		    do_signal_stop(0))
 			goto relock;
@@ -2212,10 +2216,11 @@ relock:
 		}
 
 		signr = dequeue_signal(current, &current->blocked, &ksig->info);
-
+		printk("%s after dequeue %d\n",__func__,signr);
 		if (!signr)
+			{
 			break; /* will return 0 */
-
+			}
 		if (unlikely(current->ptrace) && signr != SIGKILL) {
 			signr = ptrace_signal(signr, &ksig->info);
 			if (!signr)
@@ -2322,7 +2327,8 @@ relock:
 		/* NOTREACHED */
 	}
 	spin_unlock_irq(&sighand->siglock);
-
+	if (signr == 35)
+    		printk("%s %d\n", __func__, signr);
 	ksig->sig = signr;
 	return ksig->sig > 0;
 }
