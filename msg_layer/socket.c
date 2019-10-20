@@ -2,7 +2,7 @@
  * msg_socket.c
  * Messaging transport layer over TCP/IP
  *
- * Authors: 
+ * Authors:
  *  Ho-Ren (Jack) Chuang <horenc@vt.edu>
  *  Sang-Hoon Kim <sanghoon@vt.edu>
  */
@@ -537,16 +537,19 @@ static bool load_config_file(char *file)
 			str_len = strlen(ip_addr);
 			while (str_off < bytes_read) {
 				str_len = strlen(ip_addr + str_off);
-
+				
 				/* Make sure IP address is a valid IPv4 address */
-				ret = in4_pton(ip_addr + str_off, -1, i4_addr, -1, &end);
-				if (!ret) {
-					MSGPRINTK("invalid IP address in config file\n");
-					retval = false;
-					goto done;
+				if(str_len > 0){
+					ret = in4_pton(ip_addr + str_off, -1, i4_addr, -1, &end);
+					if (!ret) {
+						MSGPRINTK("invalid IP address in config file\n");
+						retval = false;
+						goto done;
+					}
+
+					ip_table[num_nodes++] = *((uint32_t *) i4_addr);
 				}
 
-				ip_table[num_nodes++] = *((uint32_t *) i4_addr);
 				str_off += str_len + 1;
 			}
 		} else {
