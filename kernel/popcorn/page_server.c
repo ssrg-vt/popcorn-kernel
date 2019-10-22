@@ -1708,8 +1708,6 @@ static int __handle_localfault_at_remote(struct vm_fault *vmf)
 		spin_lock(ptl);
 		if (populated) {
 			alloc_set_pte(vmf, memcg, page);
-			mem_cgroup_commit_charge(page, memcg, false, false);
-			lru_cache_add_active_or_unevictable(page, vmf->vma);
 		} else {
 			__make_pte_valid(vmf->vma->vm_mm, vmf->vma, addr, vmf->flags, vmf->pte);
 		}
