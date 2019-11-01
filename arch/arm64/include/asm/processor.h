@@ -54,7 +54,12 @@
  */
 
 #define DEFAULT_MAP_WINDOW_64	(UL(1) << VA_BITS)
+#ifndef CONFIG_POPCORN
 #define TASK_SIZE_64		(UL(1) << vabits_user)
+#else
+#include <asm/page.h>
+#define TASK_SIZE_64		((UL(1) << 47) - PAGE_SIZE)
+#endif
 
 #ifdef CONFIG_COMPAT
 #if defined(CONFIG_ARM64_64K_PAGES) && defined(CONFIG_KUSER_HELPERS)
