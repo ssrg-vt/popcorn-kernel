@@ -119,7 +119,7 @@ int fill_cpu_info(struct remote_cpu_info *res)
 #endif /* CONFIG_COMPAT */
 		} else {
 			for (j = 0; hwcap_str[j]; j++) {
-				if (elf_hwcap & (1 << j)) {
+				if (cpu_have_feature(j)) {
 					strcat(core->flags, hwcap_str[j]);
 					strcat(core->flags, " ");
 				}
