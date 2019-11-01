@@ -60,6 +60,7 @@ obj-$(CONFIG_CRASH_CORE)		+= crash_core.o
 obj-$(CONFIG_ARM_SDE_INTERFACE)		+= sdei.o
 obj-$(CONFIG_ARM64_SSBD)		+= ssbd.o
 obj-$(CONFIG_ARM64_PTR_AUTH)		+= pointer_auth.o
+obj-$(CONFIG_POPCORN)			+= cpuinfo_popcorn.o process_server.o
 
 obj-y					+= vdso/ probes/
 head-y					:= head.o
