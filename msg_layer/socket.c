@@ -537,7 +537,7 @@ static bool load_config_file(char *file)
 			str_len = strlen(ip_addr);
 			while (str_off < bytes_read) {
 				str_len = strlen(ip_addr + str_off);
-				
+
 				/* Make sure IP address is a valid IPv4 address */
 				if(str_len > 0){
 					ret = in4_pton(ip_addr + str_off, -1, i4_addr, -1, &end);
@@ -565,7 +565,7 @@ done:
 	return retval;
 }
 
-static void __exit exit_kmsg_sock(void)
+static void exit_kmsg_sock(void)
 {
 	int i;
 	if (sock_listen) sock_release(sock_listen);
