@@ -359,7 +359,7 @@ static struct task_struct * __init __start_handler(const int nid, const char *ty
 	return tsk;
 }
 
-static int __start_handlers(const int nid)
+static int __init __start_handlers(const int nid)
 {
 	struct task_struct *tsk_send, *tsk_recv;
 	tsk_send = __start_handler(nid, "send", send_handler);
@@ -565,7 +565,31 @@ done:
 	return retval;
 }
 
-static void exit_kmsg_sock(void)
+static void bail_early(void)
+{
+        int i;
+        if (sock_listen) sock_release(sock_listen);
+        for (i = 0; i < max_nodes; i++) {
+                struct sock_handle *sh = sock_handles + i;
+                if (sh->send_handler) {
+                        wake_up_process(sh->send_handler);
+                } else {
+                        if (sh->msg_q) kfree(sh->msg_q);
+                }
+                if (sh->recv_handler) {
+                        wake_up_process(sh->recv_handler);
+                }
+                if (sh->sock) {
+                        sock_release(sh->sock);
+                }
+        }
+        ring_buffer_destroy(&send_buffer);
+
+        MSGPRINTK("Successfully unloaded module!\n");
+
+}
+
+static void __exit exit_kmsg_sock(void)
 {
 	int i;
 	if (sock_listen) sock_release(sock_listen);
@@ -654,7 +678,7 @@ static int __init init_kmsg_sock(void)
 	return 0;
 
 out_exit:
-	exit_kmsg_sock();
+	bail_early();
 	return ret;
 }
 
