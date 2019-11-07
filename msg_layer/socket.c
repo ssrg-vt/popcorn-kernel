@@ -565,7 +565,7 @@ done:
 	return retval;
 }
 
-static void bail_early(void)
+static void __init bail_early(void)
 {
         int i;
         if (sock_listen) sock_release(sock_listen);
