@@ -844,6 +844,8 @@ __SYSCALL(__NR_fsconfig, sys_fsconfig)
 __SYSCALL(__NR_fsmount, sys_fsmount)
 #define __NR_fspick 433
 __SYSCALL(__NR_fspick, sys_fspick)
+
+#ifdef CONFIG_POPCORN
 #define __NR_popcorn_migrate 434
 __SYSCALL(__NR_popcorn_migrate, sys_popcorn_migrate)
 #define __NR_popcorn_propose_migration 435
@@ -854,6 +856,11 @@ __SYSCALL(__NR_popcorn_get_thread_status, sys_popcorn_get_thread_status)
 __SYSCALL(__NR_popcorn_get_node_info, sys_popcorn_get_node_info)
 #undef __NR_syscalls
 #define __NR_syscalls 438
+
+#else
+#undef __NR_syscalls
+#define __NR_syscalls 434
+#endif
 
 /*
  * 32 bit systems traditionally used different

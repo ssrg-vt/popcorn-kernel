@@ -51,9 +51,6 @@ config POPCORN_REMOTE_INFO
 #config POPCORN_POWER_SENSOR_X86
 #	bool "Power sensor for x86"
 #	depends on X86
-#config POPCORN_POWER_SENSOR_ARM
-#	bool "Power sensor for ARM"
-#	depends on (ARM || ARM64)
 
 config POPCORN_STAT
 	bool "Collect performance statistics"
