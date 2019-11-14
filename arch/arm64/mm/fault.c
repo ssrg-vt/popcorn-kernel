@@ -47,12 +47,6 @@
 #include <asm/system_misc.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
-
-#ifdef CONFIG_POPCORN
-#include <popcorn/types.h>
-#include <popcorn/vma_server.h>
-#endif
-
 #include <asm/traps.h>
 
 struct fault_info {
@@ -408,19 +402,6 @@ static vm_fault_t __do_page_fault(struct mm_struct *mm, unsigned long addr,
 	vm_fault_t fault;
 
 	vma = find_vma(mm, addr);
-#ifdef CONFIG_POPCORN
-	/* vma worker should not fault */
-	BUG_ON(tsk->is_worker);
-
-	if (distributed_remote_process(tsk)) {
-		if (!vma || vma->vm_start > addr) {
-			if (vma_server_fetch_vma(tsk, addr) == 0) {
-				/* Replace with updated VMA */
-				vma = find_vma(mm, addr);
-			}
-		}
-	}
-#endif
 	fault = VM_FAULT_BADMAP;
 	if (unlikely(!vma))
 		goto out;
@@ -553,11 +534,6 @@ retry:
 			goto retry;
 		}
 	}
-#ifdef CONFIG_POPCORN
-	if (distributed_process(current) && (fault & VM_FAULT_RETRY))
-		return 0;
-#endif
-
 	up_read(&mm->mmap_sem);
 
 	/*

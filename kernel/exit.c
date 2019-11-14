@@ -511,7 +511,7 @@ static void exit_mm(void)
 #ifdef CONFIG_POPCORN
 	process_server_task_exit(current);
 #endif
-	
+
 	/*
 	 * Serialize with any possible pending coredump.
 	 * We must hold mmap_sem around checking core_state
