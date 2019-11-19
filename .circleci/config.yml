@@ -7,7 +7,7 @@ jobs:
         - merge
 
     docker:
-      - image: ssrg/popcorn-kernel:circleci-1.0
+      - image: ahughes12/popcorn-base:latest
 
     environment:
       COMPILATION_LOGS: /tmp/compilation_logs
@@ -18,6 +18,16 @@ jobs:
       - run: mkdir -p $COMPILATION_LOGS
 
       - run:
+          name: Build arm64
+          command: |
+            set +o pipefail
+            make -j2 defconfig 2>&1 | tee $COMPILATION_LOGS/arm64.log
+            make -j2 2>&1 | tee $COMPILATION_LOGS/arm64.log
+          environment:
+            ARCH: arm64
+            CROSS_COMPILE: aarch64-linux-gnu-
+
+      - run:
           name: Build x86_64
           command: |
             set +o pipefail
@@ -25,14 +35,20 @@ jobs:
             make -j2 2>&1 | tee $COMPILATION_LOGS/x86_64.log
 
       - run:
-          name: Build arm64
+          name: Build x86_64_gcc_4_8
           command: |
             set +o pipefail
-            cp kernel/popcorn/configs/config-arm64-qemu .config
-            make -j2 2>&1 | tee $COMPILATION_LOGS/arm64.log
-          environment:
-            ARCH: arm64
-            CROSS_COMPILE: aarch64-linux-gnu-
+            update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.8 60
+            cp kernel/popcorn/configs/config-x86_64-qemu .config
+            make -j2 2>&1 | tee $COMPILATION_LOGS/x86_64.log
+
+      - run:
+          name: Build x86_64_gcc_9
+          command: |
+            set +o pipefail
+            update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60
+            cp kernel/popcorn/configs/config-x86_64-qemu .config
+            make -j2 2>&1 | tee $COMPILATION_LOGS/x86_64.log
 
       - store_artifacts:
           path: /tmp/compilation_logs
