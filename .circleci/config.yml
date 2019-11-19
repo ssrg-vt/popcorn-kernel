@@ -21,7 +21,7 @@ jobs:
           name: Build arm64
           command: |
             set +o pipefail
-            make -j2 defconfig 2>&1 | tee $COMPILATION_LOGS/arm64.log
+            make -j2 defconfig
             make -j2 2>&1 | tee $COMPILATION_LOGS/arm64.log
           environment:
             ARCH: arm64
@@ -32,6 +32,8 @@ jobs:
           command: |
             set +o pipefail
             cp kernel/popcorn/configs/config-x86_64-qemu .config
+            make clean
+            make -j2 olddefconfig
             make -j2 2>&1 | tee $COMPILATION_LOGS/x86_64.log
 
       - run:
@@ -40,7 +42,9 @@ jobs:
             set +o pipefail
             update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.8 60
             cp kernel/popcorn/configs/config-x86_64-qemu .config
-            make -j2 2>&1 | tee $COMPILATION_LOGS/x86_64.log
+            make clean
+            make -j2 olddefconfig
+            make -j2 2>&1 | tee $COMPILATION_LOGS/x86_64_4.8.log
 
       - run:
           name: Build x86_64_gcc_9
@@ -48,7 +52,9 @@ jobs:
             set +o pipefail
             update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60
             cp kernel/popcorn/configs/config-x86_64-qemu .config
-            make -j2 2>&1 | tee $COMPILATION_LOGS/x86_64.log
+            make clean
+            make -j2 olddefconfig
+            make -j2 2>&1 | tee $COMPILATION_LOGS/x86_64_9.log
 
       - store_artifacts:
           path: /tmp/compilation_logs
