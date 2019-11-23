@@ -37,16 +37,7 @@ EXPORT_SYMBOL(set_popcorn_node_online);
 int my_nid __read_mostly = -1;
 EXPORT_SYMBOL(my_nid);
 
-const enum popcorn_arch my_arch =
-#ifdef CONFIG_X86_64
-	POPCORN_ARCH_X86;
-#elif defined(CONFIG_ARM64)
-	POPCORN_ARCH_ARM;
-#elif defined(CONFIG_PPC64)
-	POPCORN_ARCH_PPC;
-#else
-	POPCORN_ARCH_UNKNOWN;
-#endif
+const enum popcorn_arch my_arch = POPCORN_ARCH_X86;
 EXPORT_SYMBOL(my_arch);
 
 int get_popcorn_node_arch(int nid)
