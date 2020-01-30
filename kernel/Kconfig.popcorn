@@ -6,7 +6,7 @@ config ARCH_SUPPORTS_POPCORN
 
 config POPCORN
 	bool "Popcorn Distributed Execution Support"
-	depends on ARCH_SUPPORTS_POPCORN && !TRNASPARENT_HUGEPAGE && !SWAP && !CMA && !KSM && !MEM_SOFT_DIRTY && !MIGRATION && !COMPACTION
+	depends on ARCH_SUPPORTS_POPCORN && !TRANSPARENT_HUGEPAGE && !SWAP && !CMA && !KSM && !MEM_SOFT_DIRTY && !MIGRATION && !COMPACTION
 	default y
 	help
 		Enable or disable the Popcorn multi-kernel Linux support.
