@@ -1043,13 +1043,17 @@ static int mlx5_ib_query_device(struct ib_device *ibdev,
 	}
 
 	if (MLX5_CAP_GEN(mdev, tag_matching)) {
-		props->tm_caps.max_rndv_hdr_size = MLX5_TM_MAX_RNDV_MSG_SIZE;
 		props->tm_caps.max_num_tags =
 			(1 << MLX5_CAP_GEN(mdev, log_tag_matching_list_sz)) - 1;
-		props->tm_caps.flags = IB_TM_CAP_RC;
 		props->tm_caps.max_ops =
 			1 << MLX5_CAP_GEN(mdev, log_max_qp_sz);
 		props->tm_caps.max_sge = MLX5_TM_MAX_SGE;
+	}
+
+	if (MLX5_CAP_GEN(mdev, tag_matching) &&
+	    MLX5_CAP_GEN(mdev, rndv_offload_rc)) {
+		props->tm_caps.flags = IB_TM_CAP_RNDV_RC;
+		props->tm_caps.max_rndv_hdr_size = MLX5_TM_MAX_RNDV_MSG_SIZE;
 	}
 
 	if (MLX5_CAP_GEN(dev->mdev, cq_moderation)) {
@@ -5683,13 +5687,12 @@ static void mlx5_ib_unbind_slave_port(struct mlx5_ib_dev *ibdev,
 		return;
 	}
 
-	if (mpi->mdev_events.notifier_call)
-		mlx5_notifier_unregister(mpi->mdev, &mpi->mdev_events);
-	mpi->mdev_events.notifier_call = NULL;
-
 	mpi->ibdev = NULL;
 
 	spin_unlock(&port->mp.mpi_lock);
+	if (mpi->mdev_events.notifier_call)
+		mlx5_notifier_unregister(mpi->mdev, &mpi->mdev_events);
+	mpi->mdev_events.notifier_call = NULL;
 	mlx5_remove_netdev_notifier(ibdev, port_num);
 	spin_lock(&port->mp.mpi_lock);
 
@@ -6826,6 +6829,7 @@ static void mlx5_ib_remove(struct mlx5_core_dev *mdev, void *context)
 			mlx5_ib_unbind_slave_port(mpi->ibdev, mpi);
 		list_del(&mpi->list);
 		mutex_unlock(&mlx5_ib_multiport_mutex);
+		kfree(mpi);
 		return;
 	}
 

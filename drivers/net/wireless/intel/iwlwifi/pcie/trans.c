@@ -1698,10 +1698,40 @@ static int iwl_pcie_init_msix_handler(struct pci_dev *pdev,
 	return 0;
 }
 
+static int iwl_trans_pcie_clear_persistence_bit(struct iwl_trans *trans)
+{
+	u32 hpm, wprot;
+
+	switch (trans->cfg->device_family) {
+	case IWL_DEVICE_FAMILY_9000:
+		wprot = PREG_PRPH_WPROT_9000;
+		break;
+	case IWL_DEVICE_FAMILY_22000:
+		wprot = PREG_PRPH_WPROT_22000;
+		break;
+	default:
+		return 0;
+	}
+
+	hpm = iwl_read_umac_prph_no_grab(trans, HPM_DEBUG);
+	if (hpm != 0xa5a5a5a0 && (hpm & PERSISTENCE_BIT)) {
+		u32 wprot_val = iwl_read_umac_prph_no_grab(trans, wprot);
+
+		if (wprot_val & PREG_WFPM_ACCESS) {
+			IWL_ERR(trans,
+				"Error, can not clear persistence bit\n");
+			return -EPERM;
+		}
+		iwl_write_umac_prph_no_grab(trans, HPM_DEBUG,
+					    hpm & ~PERSISTENCE_BIT);
+	}
+
+	return 0;
+}
+
 static int _iwl_trans_pcie_start_hw(struct iwl_trans *trans, bool low_power)
 {
 	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
-	u32 hpm;
 	int err;
 
 	lockdep_assert_held(&trans_pcie->mutex);
@@ -1712,19 +1742,9 @@ static int _iwl_trans_pcie_start_hw(struct iwl_trans *trans, bool low_power)
 		return err;
 	}
 
-	hpm = iwl_read_umac_prph_no_grab(trans, HPM_DEBUG);
-	if (hpm != 0xa5a5a5a0 && (hpm & PERSISTENCE_BIT)) {
-		int wfpm_val = iwl_read_umac_prph_no_grab(trans,
-							  PREG_PRPH_WPROT_0);
-
-		if (wfpm_val & PREG_WFPM_ACCESS) {
-			IWL_ERR(trans,
-				"Error, can not clear persistence bit\n");
-			return -EPERM;
-		}
-		iwl_write_umac_prph_no_grab(trans, HPM_DEBUG,
-					    hpm & ~PERSISTENCE_BIT);
-	}
+	err = iwl_trans_pcie_clear_persistence_bit(trans);
+	if (err)
+		return err;
 
 	iwl_trans_pcie_sw_reset(trans);
 
@@ -3526,7 +3546,8 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 			hw_step |= ENABLE_WFPM;
 			iwl_write_umac_prph_no_grab(trans, WFPM_CTRL_REG,
 						    hw_step);
-			hw_step = iwl_read_prph_no_grab(trans, AUX_MISC_REG);
+			hw_step = iwl_read_prph_no_grab(trans,
+							CNVI_AUX_MISC_CHIP);
 			hw_step = (hw_step >> HW_STEP_LOCATION_BITS) & 0xF;
 			if (hw_step == 0x3)
 				trans->hw_rev = (trans->hw_rev & 0xFFFFFFF3) |
@@ -3548,15 +3569,17 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 			trans->cfg = &iwlax210_2ax_cfg_so_jf_a0;
 		} else if (CSR_HW_RF_ID_TYPE_CHIP_ID(trans->hw_rf_id) ==
 			   CSR_HW_RF_ID_TYPE_CHIP_ID(CSR_HW_RF_ID_TYPE_GF)) {
-			trans->cfg = &iwlax210_2ax_cfg_so_gf_a0;
+			trans->cfg = &iwlax211_2ax_cfg_so_gf_a0;
 		} else if (CSR_HW_RF_ID_TYPE_CHIP_ID(trans->hw_rf_id) ==
 			   CSR_HW_RF_ID_TYPE_CHIP_ID(CSR_HW_RF_ID_TYPE_GF4)) {
-			trans->cfg = &iwlax210_2ax_cfg_so_gf4_a0;
+			trans->cfg = &iwlax411_2ax_cfg_so_gf4_a0;
 		}
 	} else if (cfg == &iwl_ax101_cfg_qu_hr) {
-		if (CSR_HW_RF_ID_TYPE_CHIP_ID(trans->hw_rf_id) ==
-		    CSR_HW_RF_ID_TYPE_CHIP_ID(CSR_HW_RF_ID_TYPE_HR) &&
-		    trans->hw_rev == CSR_HW_REV_TYPE_QNJ_B0) {
+		if ((CSR_HW_RF_ID_TYPE_CHIP_ID(trans->hw_rf_id) ==
+		     CSR_HW_RF_ID_TYPE_CHIP_ID(CSR_HW_RF_ID_TYPE_HR) &&
+		     trans->hw_rev == CSR_HW_REV_TYPE_QNJ_B0) ||
+		    (CSR_HW_RF_ID_TYPE_CHIP_ID(trans->hw_rf_id) ==
+		     CSR_HW_RF_ID_TYPE_CHIP_ID(CSR_HW_RF_ID_TYPE_HR1))) {
 			trans->cfg = &iwl22000_2ax_cfg_qnj_hr_b0;
 		} else if (CSR_HW_RF_ID_TYPE_CHIP_ID(trans->hw_rf_id) ==
 		    CSR_HW_RF_ID_TYPE_CHIP_ID(CSR_HW_RF_ID_TYPE_HR)) {
@@ -3577,8 +3600,7 @@ struct iwl_trans *iwl_trans_pcie_alloc(struct pci_dev *pdev,
 		}
 	} else if (CSR_HW_RF_ID_TYPE_CHIP_ID(trans->hw_rf_id) ==
 		   CSR_HW_RF_ID_TYPE_CHIP_ID(CSR_HW_RF_ID_TYPE_HR) &&
-		   (trans->cfg != &iwl_ax200_cfg_cc ||
-		    trans->hw_rev == CSR_HW_REV_TYPE_QNJ_B0)) {
+		   trans->hw_rev == CSR_HW_REV_TYPE_QNJ_B0) {
 		u32 hw_status;
 
 		hw_status = iwl_read_prph(trans, UMAG_GEN_HW_STATUS);

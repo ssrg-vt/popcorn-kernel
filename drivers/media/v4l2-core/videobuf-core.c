@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * generic helper functions for handling video4linux capture buffers
  *
@@ -7,10 +8,6 @@
  * (c) 2001,02 Gerd Knorr <kraxel@bytesex.org>
  * (c) 2006 Mauro Carvalho Chehab, <mchehab@kernel.org>
  * (c) 2006 Ted Walther and John Sokol
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2
  */
 
 #include <linux/init.h>
@@ -1126,7 +1123,6 @@ __poll_t videobuf_poll_stream(struct file *file,
 	struct videobuf_buffer *buf = NULL;
 	__poll_t rc = 0;
 
-	poll_wait(file, &buf->done, wait);
 	videobuf_queue_lock(q);
 	if (q->streaming) {
 		if (!list_empty(&q->stream))
@@ -1146,7 +1142,9 @@ __poll_t videobuf_poll_stream(struct file *file,
 		}
 		buf = q->read_buf;
 	}
-	if (!buf)
+	if (buf)
+		poll_wait(file, &buf->done, wait);
+	else
 		rc = EPOLLERR;
 
 	if (0 == rc) {

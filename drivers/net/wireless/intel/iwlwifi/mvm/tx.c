@@ -726,6 +726,9 @@ int iwl_mvm_tx_skb_non_sta(struct iwl_mvm *mvm, struct sk_buff *skb)
 
 	memcpy(&info, skb->cb, sizeof(info));
 
+	if (WARN_ON_ONCE(skb->len > IEEE80211_MAX_DATA_LEN + hdrlen))
+		return -1;
+
 	if (WARN_ON_ONCE(info.flags & IEEE80211_TX_CTL_AMPDU))
 		return -1;
 
@@ -828,6 +831,7 @@ iwl_mvm_tx_tso_segment(struct sk_buff *skb, unsigned int num_subframes,
 	unsigned int tcp_payload_len;
 	unsigned int mss = skb_shinfo(skb)->gso_size;
 	bool ipv4 = (skb->protocol == htons(ETH_P_IP));
+	bool qos = ieee80211_is_data_qos(hdr->frame_control);
 	u16 ip_base_id = ipv4 ? ntohs(ip_hdr(skb)->id) : 0;
 
 	skb_shinfo(skb)->gso_size = num_subframes * mss;
@@ -861,7 +865,7 @@ iwl_mvm_tx_tso_segment(struct sk_buff *skb, unsigned int num_subframes,
 		if (tcp_payload_len > mss) {
 			skb_shinfo(tmp)->gso_size = mss;
 		} else {
-			if (ieee80211_is_data_qos(hdr->frame_control)) {
+			if (qos) {
 				u8 *qc;
 
 				if (ipv4)

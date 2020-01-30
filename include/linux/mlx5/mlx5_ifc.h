@@ -749,7 +749,8 @@ struct mlx5_ifc_per_protocol_networking_offload_caps_bits {
 	u8         swp[0x1];
 	u8         swp_csum[0x1];
 	u8         swp_lso[0x1];
-	u8         reserved_at_23[0xd];
+	u8         cqe_checksum_full[0x1];
+	u8         reserved_at_24[0xc];
 	u8         max_vxlan_udp_ports[0x8];
 	u8         reserved_at_38[0x6];
 	u8         max_geneve_opt_len[0x1];
@@ -5864,10 +5865,12 @@ struct mlx5_ifc_modify_cq_in_bits {
 
 	struct mlx5_ifc_cqc_bits cq_context;
 
-	u8         reserved_at_280[0x40];
+	u8         reserved_at_280[0x60];
 
 	u8         cq_umem_valid[0x1];
-	u8         reserved_at_2c1[0x5bf];
+	u8         reserved_at_2e1[0x1f];
+
+	u8         reserved_at_300[0x580];
 
 	u8         pas[0][0x40];
 };

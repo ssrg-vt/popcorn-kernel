@@ -1624,8 +1624,7 @@ static bool decide_edp_link_settings(struct dc_link *link, struct dc_link_settin
 	uint32_t link_bw;
 
 	if (link->dpcd_caps.dpcd_rev.raw < DPCD_REV_14 ||
-			link->dpcd_caps.edp_supported_link_rates_count == 0 ||
-			link->dc->config.optimize_edp_link_rate == false) {
+			link->dpcd_caps.edp_supported_link_rates_count == 0) {
 		*link_setting = link->verified_link_cap;
 		return true;
 	}
@@ -2219,11 +2218,18 @@ static void get_active_converter_info(
 		link->dpcd_caps.dongle_type = DISPLAY_DONGLE_NONE;
 		ddc_service_set_dongle_type(link->ddc,
 				link->dpcd_caps.dongle_type);
+		link->dpcd_caps.is_branch_dev = false;
 		return;
 	}
 
 	/* DPCD 0x5 bit 0 = 1, it indicate it's branch device */
-	link->dpcd_caps.is_branch_dev = ds_port.fields.PORT_PRESENT;
+	if (ds_port.fields.PORT_TYPE == DOWNSTREAM_DP) {
+		link->dpcd_caps.is_branch_dev = false;
+	}
+
+	else {
+		link->dpcd_caps.is_branch_dev = ds_port.fields.PORT_PRESENT;
+	}
 
 	switch (ds_port.fields.PORT_TYPE) {
 	case DOWNSTREAM_VGA:
@@ -2597,7 +2603,8 @@ void detect_edp_sink_caps(struct dc_link *link)
 	memset(supported_link_rates, 0, sizeof(supported_link_rates));
 
 	if (link->dpcd_caps.dpcd_rev.raw >= DPCD_REV_14 &&
-			link->dc->config.optimize_edp_link_rate) {
+			(link->dc->config.optimize_edp_link_rate ||
+			link->reported_link_cap.link_rate == LINK_RATE_UNKNOWN)) {
 		// Read DPCD 00010h - 0001Fh 16 bytes at one shot
 		core_link_read_dpcd(link, DP_SUPPORTED_LINK_RATES,
 							supported_link_rates, sizeof(supported_link_rates));
@@ -2612,6 +2619,9 @@ void detect_edp_sink_caps(struct dc_link *link)
 				link_rate = linkRateInKHzToLinkRateMultiplier(link_rate_in_khz);
 				link->dpcd_caps.edp_supported_link_rates[link->dpcd_caps.edp_supported_link_rates_count] = link_rate;
 				link->dpcd_caps.edp_supported_link_rates_count++;
+
+				if (link->reported_link_cap.link_rate < link_rate)
+					link->reported_link_cap.link_rate = link_rate;
 			}
 		}
 	}

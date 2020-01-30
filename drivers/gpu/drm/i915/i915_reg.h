@@ -1062,6 +1062,7 @@ static inline bool i915_mmio_reg_valid(i915_reg_t reg)
 
 #define NOA_DATA	    _MMIO(0x986C)
 #define NOA_WRITE	    _MMIO(0x9888)
+#define GEN10_NOA_WRITE_HIGH _MMIO(0x9884)
 
 #define _GEN7_PIPEA_DE_LOAD_SL	0x70068
 #define _GEN7_PIPEB_DE_LOAD_SL	0x71068
@@ -2509,6 +2510,13 @@ enum i915_power_well_id {
 #define   RING_WAIT_SEMAPHORE	(1 << 10) /* gen6+ */
 
 #define RING_FORCE_TO_NONPRIV(base, i) _MMIO(((base) + 0x4D0) + (i) * 4)
+#define   RING_FORCE_TO_NONPRIV_RW		(0 << 28)    /* CFL+ & Gen11+ */
+#define   RING_FORCE_TO_NONPRIV_RD		(1 << 28)
+#define   RING_FORCE_TO_NONPRIV_WR		(2 << 28)
+#define   RING_FORCE_TO_NONPRIV_RANGE_1		(0 << 0)     /* CFL+ & Gen11+ */
+#define   RING_FORCE_TO_NONPRIV_RANGE_4		(1 << 0)
+#define   RING_FORCE_TO_NONPRIV_RANGE_16	(2 << 0)
+#define   RING_FORCE_TO_NONPRIV_RANGE_64	(3 << 0)
 #define   RING_MAX_NONPRIV_SLOTS  12
 
 #define GEN7_TLB_RD_ADDR	_MMIO(0x4700)

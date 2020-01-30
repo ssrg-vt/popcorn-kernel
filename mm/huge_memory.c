@@ -1,8 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2009  Red Hat, Inc.
- *
- *  This work is licensed under the terms of the GNU GPL, version 2. See
- *  the COPYING file in the top-level directory.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -34,6 +32,7 @@
 #include <linux/shmem_fs.h>
 #include <linux/oom.h>
 #include <linux/numa.h>
+#include <linux/page_owner.h>
 
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>
@@ -2498,13 +2497,13 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 			if (IS_ENABLED(CONFIG_SHMEM) && PageSwapBacked(head))
 				shmem_uncharge(head->mapping->host, 1);
 			put_page(head + i);
-		} else if (!PageAnon(page)) {
-			__xa_store(&head->mapping->i_pages, head[i].index,
-					head + i, 0);
 		}
 	}
 
 	ClearPageCompound(head);
+
+	split_page_owner(head, HPAGE_PMD_ORDER);
+
 	/* See comment in __split_huge_page_tail() */
 	if (PageAnon(head)) {
 		/* Additional pin to swap cache */

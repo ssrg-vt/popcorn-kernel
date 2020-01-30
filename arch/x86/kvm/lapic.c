@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 /*
  * Local APIC virtualization
@@ -13,9 +14,6 @@
  *   Yaozu (Eddie) Dong <eddie.dong@intel.com>
  *
  * Based on Xen 3.1 code, Copyright (c) 2004, Intel Corporation.
- *
- * This work is licensed under the terms of the GNU GPL, version 2.  See
- * the COPYING file in the top-level directory.
  */
 
 #include <linux/kvm_host.h>
@@ -214,6 +212,9 @@ static void recalculate_apic_map(struct kvm *kvm)
 		if (!apic_x2apic_mode(apic) && !new->phys_map[xapic_id])
 			new->phys_map[xapic_id] = apic;
 
+		if (!kvm_apic_sw_enabled(apic))
+			continue;
+
 		ldr = kvm_lapic_get_reg(apic, APIC_LDR);
 
 		if (apic_x2apic_mode(apic)) {
@@ -256,6 +257,8 @@ static inline void apic_set_spiv(struct kvm_lapic *apic, u32 val)
 			static_key_slow_dec_deferred(&apic_sw_disabled);
 		else
 			static_key_slow_inc(&apic_sw_disabled.key);
+
+		recalculate_apic_map(apic->vcpu->kvm);
 	}
 }
 
@@ -2341,7 +2344,7 @@ int kvm_apic_has_interrupt(struct kvm_vcpu *vcpu)
 	struct kvm_lapic *apic = vcpu->arch.apic;
 	u32 ppr;
 
-	if (!apic_enabled(apic))
+	if (!kvm_apic_hw_enabled(apic))
 		return -1;
 
 	__apic_update_ppr(apic, &ppr);

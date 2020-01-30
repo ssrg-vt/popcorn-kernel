@@ -1,9 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * kexec.c - kexec system call core code.
  * Copyright (C) 2002-2004 Eric Biederman  <ebiederm@xmission.com>
- *
- * This source code is licensed under the GNU General Public License,
- * Version 2.  See the file COPYING for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -302,6 +300,8 @@ static struct page *kimage_alloc_pages(gfp_t gfp_mask, unsigned int order)
 {
 	struct page *pages;
 
+	if (fatal_signal_pending(current))
+		return NULL;
 	pages = alloc_pages(gfp_mask & ~__GFP_ZERO, order);
 	if (pages) {
 		unsigned int count, i;

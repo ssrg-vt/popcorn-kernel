@@ -218,7 +218,8 @@ static struct neighbour *ip6_dst_neigh_lookup(const struct dst_entry *dst,
 {
 	const struct rt6_info *rt = container_of(dst, struct rt6_info, dst);
 
-	return ip6_neigh_lookup(&rt->rt6i_gateway, dst->dev, skb, daddr);
+	return ip6_neigh_lookup(rt6_nexthop(rt, &in6addr_any),
+				dst->dev, skb, daddr);
 }
 
 static void ip6_confirm_neigh(const struct dst_entry *dst, const void *daddr)
@@ -2214,7 +2215,7 @@ static struct dst_entry *rt6_check(struct rt6_info *rt,
 {
 	u32 rt_cookie = 0;
 
-	if ((from && !fib6_get_cookie_safe(from, &rt_cookie)) ||
+	if (!from || !fib6_get_cookie_safe(from, &rt_cookie) ||
 	    rt_cookie != cookie)
 		return NULL;
 
@@ -3184,7 +3185,7 @@ static struct fib6_info *ip6_route_info_create(struct fib6_config *cfg,
 
 	rt->fib6_table = table;
 	rt->fib6_metric = cfg->fc_metric;
-	rt->fib6_type = cfg->fc_type;
+	rt->fib6_type = cfg->fc_type ? : RTN_UNICAST;
 	rt->fib6_flags = cfg->fc_flags & ~RTF_GATEWAY;
 
 	ipv6_addr_prefix(&rt->fib6_dst.addr, &cfg->fc_dst, cfg->fc_dst_len);
@@ -3840,13 +3841,14 @@ struct fib6_info *addrconf_f6i_alloc(struct net *net,
 	struct fib6_config cfg = {
 		.fc_table = l3mdev_fib_table(idev->dev) ? : RT6_TABLE_LOCAL,
 		.fc_ifindex = idev->dev->ifindex,
-		.fc_flags = RTF_UP | RTF_ADDRCONF | RTF_NONEXTHOP,
+		.fc_flags = RTF_UP | RTF_NONEXTHOP,
 		.fc_dst = *addr,
 		.fc_dst_len = 128,
 		.fc_protocol = RTPROT_KERNEL,
 		.fc_nlinfo.nl_net = net,
 		.fc_ignore_dev_down = true,
 	};
+	struct fib6_info *f6i;
 
 	if (anycast) {
 		cfg.fc_type = RTN_ANYCAST;
@@ -3856,7 +3858,10 @@ struct fib6_info *addrconf_f6i_alloc(struct net *net,
 		cfg.fc_flags |= RTF_LOCAL;
 	}
 
-	return ip6_route_info_create(&cfg, gfp_flags, NULL);
+	f6i = ip6_route_info_create(&cfg, gfp_flags, NULL);
+	if (!IS_ERR(f6i))
+		f6i->dst_nocount = true;
+	return f6i;
 }
 
 /* remove deleted ip from prefsrc entries */
@@ -5281,7 +5286,7 @@ static struct ctl_table ipv6_route_table_template[] = {
 		.data		=	&init_net.ipv6.sysctl.skip_notify_on_dev_down,
 		.maxlen		=	sizeof(int),
 		.mode		=	0644,
-		.proc_handler	=	proc_dointvec,
+		.proc_handler	=	proc_dointvec_minmax,
 		.extra1		=	&zero,
 		.extra2		=	&one,
 	},

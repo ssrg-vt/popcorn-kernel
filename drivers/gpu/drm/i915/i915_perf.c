@@ -3005,6 +3005,7 @@ static bool gen8_is_valid_mux_addr(struct drm_i915_private *dev_priv, u32 addr)
 static bool gen10_is_valid_mux_addr(struct drm_i915_private *dev_priv, u32 addr)
 {
 	return gen8_is_valid_mux_addr(dev_priv, addr) ||
+		addr == i915_mmio_reg_offset(GEN10_NOA_WRITE_HIGH) ||
 		(addr >= i915_mmio_reg_offset(OA_PERFCNT3_LO) &&
 		 addr <= i915_mmio_reg_offset(OA_PERFCNT4_HI));
 }
@@ -3456,9 +3457,13 @@ void i915_perf_init(struct drm_i915_private *dev_priv)
 			dev_priv->perf.oa.ops.enable_metric_set = gen8_enable_metric_set;
 			dev_priv->perf.oa.ops.disable_metric_set = gen10_disable_metric_set;
 
-			dev_priv->perf.oa.ctx_oactxctrl_offset = 0x128;
-			dev_priv->perf.oa.ctx_flexeu0_offset = 0x3de;
-
+			if (IS_GEN(dev_priv, 10)) {
+				dev_priv->perf.oa.ctx_oactxctrl_offset = 0x128;
+				dev_priv->perf.oa.ctx_flexeu0_offset = 0x3de;
+			} else {
+				dev_priv->perf.oa.ctx_oactxctrl_offset = 0x124;
+				dev_priv->perf.oa.ctx_flexeu0_offset = 0x78e;
+			}
 			dev_priv->perf.oa.gen8_valid_ctx_bit = (1<<16);
 		}
 	}

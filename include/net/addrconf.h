@@ -206,7 +206,7 @@ static inline int ipv6_mc_may_pull(struct sk_buff *skb,
 				   unsigned int len)
 {
 	if (skb_transport_offset(skb) + ipv6_transport_len(skb) < len)
-		return -EINVAL;
+		return 0;
 
 	return pskb_may_pull(skb, len);
 }
@@ -307,6 +307,22 @@ void inet6_netconf_notify_devconf(struct net *net, int event, int type,
 static inline struct inet6_dev *__in6_dev_get(const struct net_device *dev)
 {
 	return rcu_dereference_rtnl(dev->ip6_ptr);
+}
+
+/**
+ * __in6_dev_stats_get - get inet6_dev pointer for stats
+ * @dev: network device
+ * @skb: skb for original incoming interface if neeeded
+ *
+ * Caller must hold rcu_read_lock or RTNL, because this function
+ * does not take a reference on the inet6_dev.
+ */
+static inline struct inet6_dev *__in6_dev_stats_get(const struct net_device *dev,
+						    const struct sk_buff *skb)
+{
+	if (netif_is_l3_master(dev))
+		dev = dev_get_by_index_rcu(dev_net(dev), inet6_iif(skb));
+	return __in6_dev_get(dev);
 }
 
 /**

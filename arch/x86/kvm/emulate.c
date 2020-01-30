@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
  * emulate.c
  *
@@ -13,9 +14,6 @@
  *
  *   Avi Kivity <avi@qumranet.com>
  *   Yaniv Kamay <yaniv@qumranet.com>
- *
- * This work is licensed under the terms of the GNU GPL, version 2.  See
- * the COPYING file in the top-level directory.
  *
  * From: xen-unstable 10676:af9809f51f81a3c43f276f00c81a52ef558afda4
  */
@@ -5379,6 +5377,8 @@ done_prefixes:
 					ctxt->memopp->addr.mem.ea + ctxt->_eip);
 
 done:
+	if (rc == X86EMUL_PROPAGATE_FAULT)
+		ctxt->have_exception = true;
 	return (rc != X86EMUL_CONTINUE) ? EMULATION_FAILED : EMULATION_OK;
 }
 

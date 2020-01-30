@@ -254,19 +254,17 @@ bool resource_construct(
 		 * PORT_CONNECTIVITY == 1 (as instructed by HW team).
 		 */
 		update_num_audio(&straps, &num_audio, &pool->audio_support);
-		for (i = 0; i < pool->pipe_count && i < num_audio; i++) {
+		for (i = 0; i < caps->num_audio; i++) {
 			struct audio *aud = create_funcs->create_audio(ctx, i);
 
 			if (aud == NULL) {
 				DC_ERR("DC: failed to create audio!\n");
 				return false;
 			}
-
 			if (!aud->funcs->endpoint_valid(aud)) {
 				aud->funcs->destroy(&aud);
 				break;
 			}
-
 			pool->audios[i] = aud;
 			pool->audio_count++;
 		}
@@ -1692,18 +1690,25 @@ static struct audio *find_first_free_audio(
 		const struct resource_pool *pool,
 		enum engine_id id)
 {
-	int i;
-	for (i = 0; i < pool->audio_count; i++) {
+	int i, available_audio_count;
+
+	available_audio_count = pool->audio_count;
+
+	for (i = 0; i < available_audio_count; i++) {
 		if ((res_ctx->is_audio_acquired[i] == false) && (res_ctx->is_stream_enc_acquired[i] == true)) {
 			/*we have enough audio endpoint, find the matching inst*/
 			if (id != i)
 				continue;
-
 			return pool->audios[i];
 		}
 	}
+
+	/* use engine id to find free audio */
+	if ((id < available_audio_count) && (res_ctx->is_audio_acquired[id] == false)) {
+		return pool->audios[id];
+	}
 	/*not found the matching one, first come first serve*/
-	for (i = 0; i < pool->audio_count; i++) {
+	for (i = 0; i < available_audio_count; i++) {
 		if (res_ctx->is_audio_acquired[i] == false) {
 			return pool->audios[i];
 		}
@@ -1866,6 +1871,7 @@ static int get_norm_pix_clk(const struct dc_crtc_timing *timing)
 		pix_clk /= 2;
 	if (timing->pixel_encoding != PIXEL_ENCODING_YCBCR422) {
 		switch (timing->display_color_depth) {
+		case COLOR_DEPTH_666:
 		case COLOR_DEPTH_888:
 			normalized_pix_clk = pix_clk;
 			break;
@@ -2012,7 +2018,7 @@ enum dc_status resource_map_pool_resources(
 	/* TODO: Add check if ASIC support and EDID audio */
 	if (!stream->converter_disable_audio &&
 	    dc_is_audio_capable_signal(pipe_ctx->stream->signal) &&
-	    stream->audio_info.mode_count) {
+	    stream->audio_info.mode_count && stream->audio_info.flags.all) {
 		pipe_ctx->stream_res.audio = find_first_free_audio(
 		&context->res_ctx, pool, pipe_ctx->stream_res.stream_enc->id);
 
@@ -2034,6 +2040,9 @@ enum dc_status resource_map_pool_resources(
 		if (context->streams[i] == stream) {
 			context->stream_status[i].primary_otg_inst = pipe_ctx->stream_res.tg->inst;
 			context->stream_status[i].stream_enc_inst = pipe_ctx->stream_res.stream_enc->id;
+			context->stream_status[i].audio_inst =
+				pipe_ctx->stream_res.audio ? pipe_ctx->stream_res.audio->inst : -1;
+
 			return DC_OK;
 		}
 

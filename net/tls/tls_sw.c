@@ -1143,7 +1143,6 @@ static int tls_sw_do_sendpage(struct sock *sk, struct page *page,
 
 		full_record = false;
 		record_room = TLS_MAX_PAYLOAD_SIZE - msg_pl->sg.size;
-		copied = 0;
 		copy = size;
 		if (copy >= record_room) {
 			copy = record_room;
@@ -1959,7 +1958,8 @@ bool tls_sw_stream_read(const struct sock *sk)
 		ingress_empty = list_empty(&psock->ingress_msg);
 	rcu_read_unlock();
 
-	return !ingress_empty || ctx->recv_pkt;
+	return !ingress_empty || ctx->recv_pkt ||
+		!skb_queue_empty(&ctx->rx_list);
 }
 
 static int tls_read_size(struct strparser *strp, struct sk_buff *skb)

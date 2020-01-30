@@ -546,9 +546,13 @@ void f2fs_balance_fs_bg(struct f2fs_sb_info *sbi)
 		if (test_opt(sbi, DATA_FLUSH)) {
 			struct blk_plug plug;
 
+			mutex_lock(&sbi->flush_lock);
+
 			blk_start_plug(&plug);
 			f2fs_sync_dirty_inodes(sbi, FILE_INODE);
 			blk_finish_plug(&plug);
+
+			mutex_unlock(&sbi->flush_lock);
 		}
 		f2fs_sync_fs(sbi->sb, true);
 		stat_inc_bg_cp_count(sbi->stat_info);
@@ -872,7 +876,9 @@ void f2fs_dirty_to_prefree(struct f2fs_sb_info *sbi)
 int f2fs_disable_cp_again(struct f2fs_sb_info *sbi)
 {
 	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
-	block_t ovp = overprovision_segments(sbi) << sbi->log_blocks_per_seg;
+	int ovp_hole_segs =
+		(overprovision_segments(sbi) - reserved_segments(sbi));
+	block_t ovp_holes = ovp_hole_segs << sbi->log_blocks_per_seg;
 	block_t holes[2] = {0, 0};	/* DATA and NODE */
 	struct seg_entry *se;
 	unsigned int segno;
@@ -887,10 +893,10 @@ int f2fs_disable_cp_again(struct f2fs_sb_info *sbi)
 	}
 	mutex_unlock(&dirty_i->seglist_lock);
 
-	if (holes[DATA] > ovp || holes[NODE] > ovp)
+	if (holes[DATA] > ovp_holes || holes[NODE] > ovp_holes)
 		return -EAGAIN;
 	if (is_sbi_flag_set(sbi, SBI_CP_DISABLED_QUICK) &&
-		dirty_segments(sbi) > overprovision_segments(sbi))
+		dirty_segments(sbi) > ovp_hole_segs)
 		return -EAGAIN;
 	return 0;
 }
@@ -1479,6 +1485,10 @@ static int __issue_discard_cmd(struct f2fs_sb_info *sbi,
 		blk_start_plug(&plug);
 		list_for_each_entry_safe(dc, tmp, pend_list, list) {
 			f2fs_bug_on(sbi, dc->state != D_PREP);
+
+			if (dpolicy->timeout != 0 &&
+				f2fs_time_over(sbi, dpolicy->timeout))
+				break;
 
 			if (dpolicy->io_aware && i < dpolicy->io_aware_gran &&
 						!is_idle(sbi, DISCARD_TIME)) {
@@ -2774,7 +2784,7 @@ int f2fs_trim_fs(struct f2fs_sb_info *sbi, struct fstrim_range *range)
 	if (is_sbi_flag_set(sbi, SBI_NEED_FSCK)) {
 		f2fs_msg(sbi->sb, KERN_WARNING,
 			"Found FS corruption, run fsck to fix.");
-		return -EIO;
+		return -EFSCORRUPTED;
 	}
 
 	/* start/end segment number in main_area */
@@ -3197,7 +3207,7 @@ int f2fs_inplace_write_data(struct f2fs_io_info *fio)
 
 	if (!IS_DATASEG(get_seg_entry(sbi, segno)->type)) {
 		set_sbi_flag(sbi, SBI_NEED_FSCK);
-		return -EFAULT;
+		return -EFSCORRUPTED;
 	}
 
 	stat_inc_inplace_blocks(fio->sbi);
@@ -4100,7 +4110,7 @@ static int build_sit_entries(struct f2fs_sb_info *sbi)
 					"Wrong journal entry on segno %u",
 					start);
 			set_sbi_flag(sbi, SBI_NEED_FSCK);
-			err = -EINVAL;
+			err = -EFSCORRUPTED;
 			break;
 		}
 
@@ -4141,7 +4151,7 @@ static int build_sit_entries(struct f2fs_sb_info *sbi)
 			"SIT is corrupted node# %u vs %u",
 			total_node_blocks, valid_node_count(sbi));
 		set_sbi_flag(sbi, SBI_NEED_FSCK);
-		err = -EINVAL;
+		err = -EFSCORRUPTED;
 	}
 
 	return err;
@@ -4230,6 +4240,41 @@ static int build_dirty_segmap(struct f2fs_sb_info *sbi)
 
 	init_dirty_segmap(sbi);
 	return init_victim_secmap(sbi);
+}
+
+static int sanity_check_curseg(struct f2fs_sb_info *sbi)
+{
+	int i;
+
+	/*
+	 * In LFS/SSR curseg, .next_blkoff should point to an unused blkaddr;
+	 * In LFS curseg, all blkaddr after .next_blkoff should be unused.
+	 */
+	for (i = 0; i < NO_CHECK_TYPE; i++) {
+		struct curseg_info *curseg = CURSEG_I(sbi, i);
+		struct seg_entry *se = get_seg_entry(sbi, curseg->segno);
+		unsigned int blkofs = curseg->next_blkoff;
+
+		if (f2fs_test_bit(blkofs, se->cur_valid_map))
+			goto out;
+
+		if (curseg->alloc_type == SSR)
+			continue;
+
+		for (blkofs += 1; blkofs < sbi->blocks_per_seg; blkofs++) {
+			if (!f2fs_test_bit(blkofs, se->cur_valid_map))
+				continue;
+out:
+			f2fs_msg(sbi->sb, KERN_ERR,
+				"Current segment's next free block offset is "
+				"inconsistent with bitmap, logtype:%u, "
+				"segno:%u, type:%u, next_blkoff:%u, blkofs:%u",
+				i, curseg->segno, curseg->alloc_type,
+				curseg->next_blkoff, blkofs);
+			return -EFSCORRUPTED;
+		}
+	}
+	return 0;
 }
 
 /*
@@ -4324,6 +4369,10 @@ int f2fs_build_segment_manager(struct f2fs_sb_info *sbi)
 
 	init_free_segmap(sbi);
 	err = build_dirty_segmap(sbi);
+	if (err)
+		return err;
+
+	err = sanity_check_curseg(sbi);
 	if (err)
 		return err;
 

@@ -337,7 +337,7 @@ static int dst_fetch_ha(const struct dst_entry *dst,
 		neigh_event_send(n, NULL);
 		ret = -ENODATA;
 	} else {
-		memcpy(dev_addr->dst_dev_addr, n->ha, MAX_ADDR_LEN);
+		neigh_ha_snapshot(dev_addr->dst_dev_addr, n, dst->dev);
 	}
 
 	neigh_release(n);
@@ -352,7 +352,7 @@ static bool has_gateway(const struct dst_entry *dst, sa_family_t family)
 
 	if (family == AF_INET) {
 		rt = container_of(dst, struct rtable, dst);
-		return rt->rt_gw_family == AF_INET;
+		return rt->rt_uses_gateway;
 	}
 
 	rt6 = container_of(dst, struct rt6_info, dst);

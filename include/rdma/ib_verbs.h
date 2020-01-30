@@ -327,8 +327,8 @@ struct ib_rss_caps {
 };
 
 enum ib_tm_cap_flags {
-	/*  Support tag matching on RC transport */
-	IB_TM_CAP_RC		    = 1 << 0,
+	/*  Support tag matching with rendezvous offload for RC transport */
+	IB_TM_CAP_RNDV_RC = 1 << 0,
 };
 
 struct ib_tm_caps {
@@ -2722,6 +2722,9 @@ struct ib_client {
 			const union ib_gid *gid,
 			const struct sockaddr *addr,
 			void *client_data);
+
+	refcount_t uses;
+	struct completion uses_zero;
 	struct list_head list;
 	u32 client_id;
 

@@ -1463,12 +1463,14 @@ static inline void sk_mem_uncharge(struct sock *sk, int size)
 		__sk_mem_reclaim(sk, 1 << 20);
 }
 
+DECLARE_STATIC_KEY_FALSE(tcp_tx_skb_cache_key);
 static inline void sk_wmem_free_skb(struct sock *sk, struct sk_buff *skb)
 {
 	sock_set_flag(sk, SOCK_QUEUE_SHRUNK);
 	sk->sk_wmem_queued -= skb->truesize;
 	sk_mem_uncharge(sk, skb->truesize);
-	if (!sk->sk_tx_skb_cache && !skb_cloned(skb)) {
+	if (static_branch_unlikely(&tcp_tx_skb_cache_key) &&
+	    !sk->sk_tx_skb_cache && !skb_cloned(skb)) {
 		skb_zcopy_clear(skb, true);
 		sk->sk_tx_skb_cache = skb;
 		return;
@@ -2433,13 +2435,11 @@ static inline void skb_setup_tx_timestamp(struct sk_buff *skb, __u16 tsflags)
  * This routine must be called with interrupts disabled or with the socket
  * locked so that the sk_buff queue operation is ok.
 */
+DECLARE_STATIC_KEY_FALSE(tcp_rx_skb_cache_key);
 static inline void sk_eat_skb(struct sock *sk, struct sk_buff *skb)
 {
 	__skb_unlink(skb, &sk->sk_receive_queue);
-	if (
-#ifdef CONFIG_RPS
-	    !static_branch_unlikely(&rps_needed) &&
-#endif
+	if (static_branch_unlikely(&tcp_rx_skb_cache_key) &&
 	    !sk->sk_rx_skb_cache) {
 		sk->sk_rx_skb_cache = skb;
 		skb_orphan(skb);
@@ -2482,6 +2482,7 @@ static inline bool sk_fullsock(const struct sock *sk)
 
 /* Checks if this SKB belongs to an HW offloaded socket
  * and whether any SW fallbacks are required based on dev.
+ * Check decrypted mark in case skb_orphan() cleared socket.
  */
 static inline struct sk_buff *sk_validate_xmit_skb(struct sk_buff *skb,
 						   struct net_device *dev)
@@ -2489,8 +2490,15 @@ static inline struct sk_buff *sk_validate_xmit_skb(struct sk_buff *skb,
 #ifdef CONFIG_SOCK_VALIDATE_XMIT
 	struct sock *sk = skb->sk;
 
-	if (sk && sk_fullsock(sk) && sk->sk_validate_xmit_skb)
+	if (sk && sk_fullsock(sk) && sk->sk_validate_xmit_skb) {
 		skb = sk->sk_validate_xmit_skb(sk, dev, skb);
+#ifdef CONFIG_TLS_DEVICE
+	} else if (unlikely(skb->decrypted)) {
+		pr_warn_ratelimited("unencrypted skb with no associated socket - dropping\n");
+		kfree_skb(skb);
+		skb = NULL;
+#endif
+	}
 #endif
 
 	return skb;
@@ -2533,6 +2541,8 @@ extern int sysctl_optmem_max;
 
 extern __u32 sysctl_wmem_default;
 extern __u32 sysctl_rmem_default;
+
+DECLARE_STATIC_KEY_FALSE(net_high_order_alloc_disable_key);
 
 static inline int sk_get_wmem0(const struct sock *sk, const struct proto *proto)
 {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Simplified MAC Kernel (smack) security module
  *
@@ -12,10 +13,6 @@
  *                Paul Moore <paul@paul-moore.com>
  *  Copyright (C) 2010 Nokia Corporation
  *  Copyright (C) 2011 Intel Corporation.
- *
- *	This program is free software; you can redistribute it and/or modify
- *	it under the terms of the GNU General Public License version 2,
- *      as published by the Free Software Foundation.
  */
 
 #include <linux/xattr.h>
@@ -68,6 +65,7 @@ static struct {
 	int len;
 	int opt;
 } smk_mount_opts[] = {
+	{"smackfsdef", sizeof("smackfsdef") - 1, Opt_fsdefault},
 	A(fsdefault), A(fsfloor), A(fshat), A(fsroot), A(fstransmute)
 };
 #undef A
@@ -290,7 +288,7 @@ static struct smack_known *smk_fetch(const char *name, struct inode *ip,
 	if (!(ip->i_opflags & IOP_XATTR))
 		return ERR_PTR(-EOPNOTSUPP);
 
-	buffer = kzalloc(SMK_LONGLABEL, GFP_KERNEL);
+	buffer = kzalloc(SMK_LONGLABEL, GFP_NOFS);
 	if (buffer == NULL)
 		return ERR_PTR(-ENOMEM);
 
@@ -682,11 +680,12 @@ static int smack_fs_context_dup(struct fs_context *fc,
 }
 
 static const struct fs_parameter_spec smack_param_specs[] = {
-	fsparam_string("fsdefault",	Opt_fsdefault),
-	fsparam_string("fsfloor",	Opt_fsfloor),
-	fsparam_string("fshat",		Opt_fshat),
-	fsparam_string("fsroot",	Opt_fsroot),
-	fsparam_string("fstransmute",	Opt_fstransmute),
+	fsparam_string("smackfsdef",		Opt_fsdefault),
+	fsparam_string("smackfsdefault",	Opt_fsdefault),
+	fsparam_string("smackfsfloor",		Opt_fsfloor),
+	fsparam_string("smackfshat",		Opt_fshat),
+	fsparam_string("smackfsroot",		Opt_fsroot),
+	fsparam_string("smackfstransmute",	Opt_fstransmute),
 	{}
 };
 
@@ -938,7 +937,8 @@ static int smack_bprm_set_creds(struct linux_binprm *bprm)
 
 		if (rc != 0)
 			return rc;
-	} else if (bprm->unsafe)
+	}
+	if (bprm->unsafe & ~LSM_UNSAFE_PTRACE)
 		return -EPERM;
 
 	bsp->smk_task = isp->smk_task;
@@ -3926,6 +3926,8 @@ access_check:
 			skp = smack_ipv6host_label(&sadd);
 		if (skp == NULL)
 			skp = smack_net_ambient;
+		if (skb == NULL)
+			break;
 #ifdef CONFIG_AUDIT
 		smk_ad_init_net(&ad, __func__, LSM_AUDIT_DATA_NET, &net);
 		ad.a.u.net->family = family;

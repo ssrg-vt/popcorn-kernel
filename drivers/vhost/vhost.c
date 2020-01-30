@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (C) 2009 Red Hat, Inc.
  * Copyright (C) 2006 Rusty Russell IBM Corporation
  *
@@ -5,8 +6,6 @@
  *
  * Inspiration, some code, and most witty comments come from
  * Documentation/virtual/lguest/lguest.c, by Rusty Russell
- *
- * This work is licensed under the terms of the GNU GPL, version 2.
  *
  * Generic code for virtio server in host kernel.
  */
@@ -2073,7 +2072,7 @@ static int get_indirect(struct vhost_virtqueue *vq,
 		/* If this is an input descriptor, increment that count. */
 		if (access == VHOST_ACCESS_WO) {
 			*in_num += ret;
-			if (unlikely(log)) {
+			if (unlikely(log && ret)) {
 				log[*log_num].addr = vhost64_to_cpu(vq, desc.addr);
 				log[*log_num].len = vhost32_to_cpu(vq, desc.len);
 				++*log_num;
@@ -2216,7 +2215,7 @@ int vhost_get_vq_desc(struct vhost_virtqueue *vq,
 			/* If this is an input descriptor,
 			 * increment that count. */
 			*in_num += ret;
-			if (unlikely(log)) {
+			if (unlikely(log && ret)) {
 				log[*log_num].addr = vhost64_to_cpu(vq, desc.addr);
 				log[*log_num].len = vhost32_to_cpu(vq, desc.len);
 				++*log_num;

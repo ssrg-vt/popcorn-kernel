@@ -187,6 +187,7 @@ enum {
 	VIDEO_STREAMING,
 	VIDEO_FRAME_INPRG,
 	VIDEO_STOPPED,
+	VIDEO_CLOCKS_ON,
 };
 
 struct aspeed_video_addr {
@@ -483,19 +484,29 @@ static void aspeed_video_enable_mode_detect(struct aspeed_video *video)
 
 static void aspeed_video_off(struct aspeed_video *video)
 {
+	if (!test_bit(VIDEO_CLOCKS_ON, &video->flags))
+		return;
+
 	/* Disable interrupts */
 	aspeed_video_write(video, VE_INTERRUPT_CTRL, 0);
 
 	/* Turn off the relevant clocks */
 	clk_disable_unprepare(video->vclk);
 	clk_disable_unprepare(video->eclk);
+
+	clear_bit(VIDEO_CLOCKS_ON, &video->flags);
 }
 
 static void aspeed_video_on(struct aspeed_video *video)
 {
+	if (test_bit(VIDEO_CLOCKS_ON, &video->flags))
+		return;
+
 	/* Turn on the relevant clocks */
 	clk_prepare_enable(video->eclk);
 	clk_prepare_enable(video->vclk);
+
+	set_bit(VIDEO_CLOCKS_ON, &video->flags);
 }
 
 static void aspeed_video_bufs_done(struct aspeed_video *video,
@@ -621,7 +632,7 @@ static void aspeed_video_check_and_set_polarity(struct aspeed_video *video)
 	}
 
 	if (hsync_counter < 0 || vsync_counter < 0) {
-		u32 ctrl;
+		u32 ctrl = 0;
 
 		if (hsync_counter < 0) {
 			ctrl = VE_CTRL_HSYNC_POL;
@@ -641,7 +652,8 @@ static void aspeed_video_check_and_set_polarity(struct aspeed_video *video)
 				V4L2_DV_VSYNC_POS_POL;
 		}
 
-		aspeed_video_update(video, VE_CTRL, 0, ctrl);
+		if (ctrl)
+			aspeed_video_update(video, VE_CTRL, 0, ctrl);
 	}
 }
 
@@ -1589,8 +1601,9 @@ static int aspeed_video_init(struct aspeed_video *video)
 		return -ENODEV;
 	}
 
-	rc = devm_request_irq(dev, irq, aspeed_video_irq, IRQF_SHARED,
-			      DEVICE_NAME, video);
+	rc = devm_request_threaded_irq(dev, irq, NULL, aspeed_video_irq,
+				       IRQF_ONESHOT | IRQF_SHARED, DEVICE_NAME,
+				       video);
 	if (rc < 0) {
 		dev_err(dev, "Unable to request IRQ %d\n", irq);
 		return rc;

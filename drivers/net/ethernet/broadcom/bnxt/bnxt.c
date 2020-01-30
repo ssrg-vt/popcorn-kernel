@@ -2015,9 +2015,9 @@ static void __bnxt_poll_work_done(struct bnxt *bp, struct bnxt_napi *bnapi)
 	if (bnapi->events & BNXT_RX_EVENT) {
 		struct bnxt_rx_ring_info *rxr = bnapi->rx_ring;
 
-		bnxt_db_write(bp, &rxr->rx_db, rxr->rx_prod);
 		if (bnapi->events & BNXT_AGG_EVENT)
 			bnxt_db_write(bp, &rxr->rx_agg_db, rxr->rx_agg_prod);
+		bnxt_db_write(bp, &rxr->rx_db, rxr->rx_prod);
 	}
 	bnapi->events = 0;
 }
@@ -3022,7 +3022,7 @@ static int bnxt_alloc_vnics(struct bnxt *bp)
 	int num_vnics = 1;
 
 #ifdef CONFIG_RFS_ACCEL
-	if (bp->flags & BNXT_FLAG_RFS)
+	if ((bp->flags & (BNXT_FLAG_RFS | BNXT_FLAG_CHIP_P5)) == BNXT_FLAG_RFS)
 		num_vnics += bp->rx_nr_rings;
 #endif
 
@@ -5011,6 +5011,7 @@ static void bnxt_set_db(struct bnxt *bp, struct bnxt_db_info *db, u32 ring_type,
 
 static int bnxt_hwrm_ring_alloc(struct bnxt *bp)
 {
+	bool agg_rings = !!(bp->flags & BNXT_FLAG_AGG_RINGS);
 	int i, rc = 0;
 	u32 type;
 
@@ -5086,7 +5087,9 @@ static int bnxt_hwrm_ring_alloc(struct bnxt *bp)
 		if (rc)
 			goto err_out;
 		bnxt_set_db(bp, &rxr->rx_db, type, map_idx, ring->fw_ring_id);
-		bnxt_db_write(bp, &rxr->rx_db, rxr->rx_prod);
+		/* If we have agg rings, post agg buffers first. */
+		if (!agg_rings)
+			bnxt_db_write(bp, &rxr->rx_db, rxr->rx_prod);
 		bp->grp_info[map_idx].rx_fw_ring_id = ring->fw_ring_id;
 		if (bp->flags & BNXT_FLAG_CHIP_P5) {
 			struct bnxt_cp_ring_info *cpr = &bnapi->cp_ring;
@@ -5105,7 +5108,7 @@ static int bnxt_hwrm_ring_alloc(struct bnxt *bp)
 		}
 	}
 
-	if (bp->flags & BNXT_FLAG_AGG_RINGS) {
+	if (agg_rings) {
 		type = HWRM_RING_ALLOC_AGG;
 		for (i = 0; i < bp->rx_nr_rings; i++) {
 			struct bnxt_rx_ring_info *rxr = &bp->rx_ring[i];
@@ -5121,6 +5124,7 @@ static int bnxt_hwrm_ring_alloc(struct bnxt *bp)
 			bnxt_set_db(bp, &rxr->rx_agg_db, type, map_idx,
 				    ring->fw_ring_id);
 			bnxt_db_write(bp, &rxr->rx_agg_db, rxr->rx_agg_prod);
+			bnxt_db_write(bp, &rxr->rx_db, rxr->rx_prod);
 			bp->grp_info[grp_idx].agg_fw_ring_id = ring->fw_ring_id;
 		}
 	}
@@ -5508,7 +5512,16 @@ static int bnxt_cp_rings_in_use(struct bnxt *bp)
 
 static int bnxt_get_func_stat_ctxs(struct bnxt *bp)
 {
-	return bp->cp_nr_rings + bnxt_get_ulp_stat_ctxs(bp);
+	int ulp_stat = bnxt_get_ulp_stat_ctxs(bp);
+	int cp = bp->cp_nr_rings;
+
+	if (!ulp_stat)
+		return cp;
+
+	if (bnxt_nq_rings_in_use(bp) > cp + bnxt_get_ulp_msix_num(bp))
+		return bnxt_get_ulp_msix_base(bp) + ulp_stat;
+
+	return cp + ulp_stat;
 }
 
 static bool bnxt_need_reserve_rings(struct bnxt *bp)
@@ -6954,19 +6967,29 @@ static void bnxt_hwrm_clear_vnic_rss(struct bnxt *bp)
 		bnxt_hwrm_vnic_set_rss(bp, i, false);
 }
 
-static void bnxt_hwrm_resource_free(struct bnxt *bp, bool close_path,
-				    bool irq_re_init)
+static void bnxt_clear_vnic(struct bnxt *bp)
 {
-	if (bp->vnic_info) {
-		bnxt_hwrm_clear_vnic_filter(bp);
+	if (!bp->vnic_info)
+		return;
+
+	bnxt_hwrm_clear_vnic_filter(bp);
+	if (!(bp->flags & BNXT_FLAG_CHIP_P5)) {
 		/* clear all RSS setting before free vnic ctx */
 		bnxt_hwrm_clear_vnic_rss(bp);
 		bnxt_hwrm_vnic_ctx_free(bp);
-		/* before free the vnic, undo the vnic tpa settings */
-		if (bp->flags & BNXT_FLAG_TPA)
-			bnxt_set_tpa(bp, false);
-		bnxt_hwrm_vnic_free(bp);
 	}
+	/* before free the vnic, undo the vnic tpa settings */
+	if (bp->flags & BNXT_FLAG_TPA)
+		bnxt_set_tpa(bp, false);
+	bnxt_hwrm_vnic_free(bp);
+	if (bp->flags & BNXT_FLAG_CHIP_P5)
+		bnxt_hwrm_vnic_ctx_free(bp);
+}
+
+static void bnxt_hwrm_resource_free(struct bnxt *bp, bool close_path,
+				    bool irq_re_init)
+{
+	bnxt_clear_vnic(bp);
 	bnxt_hwrm_ring_free(bp, close_path);
 	bnxt_hwrm_ring_grp_free(bp);
 	if (irq_re_init) {
@@ -7123,6 +7146,9 @@ static int bnxt_alloc_rfs_vnics(struct bnxt *bp)
 {
 #ifdef CONFIG_RFS_ACCEL
 	int i, rc = 0;
+
+	if (bp->flags & BNXT_FLAG_CHIP_P5)
+		return 0;
 
 	for (i = 0; i < bp->rx_nr_rings; i++) {
 		struct bnxt_vnic_info *vnic;
@@ -7477,11 +7503,7 @@ unsigned int bnxt_get_avail_cp_rings_for_en(struct bnxt *bp)
 
 unsigned int bnxt_get_avail_stat_ctxs_for_en(struct bnxt *bp)
 {
-	unsigned int stat;
-
-	stat = bnxt_get_max_func_stat_ctxs(bp) - bnxt_get_ulp_stat_ctxs(bp);
-	stat -= bp->cp_nr_rings;
-	return stat;
+	return bnxt_get_max_func_stat_ctxs(bp) - bnxt_get_func_stat_ctxs(bp);
 }
 
 int bnxt_get_avail_msix(struct bnxt *bp, int num)
@@ -9587,7 +9609,7 @@ int bnxt_check_rings(struct bnxt *bp, int tx, int rx, bool sh, int tcs,
 		return -ENOMEM;
 
 	vnics = 1;
-	if (bp->flags & BNXT_FLAG_RFS)
+	if ((bp->flags & (BNXT_FLAG_RFS | BNXT_FLAG_CHIP_P5)) == BNXT_FLAG_RFS)
 		vnics += rx_rings;
 
 	if (bp->flags & BNXT_FLAG_AGG_RINGS)
@@ -10262,10 +10284,10 @@ static void bnxt_remove_one(struct pci_dev *pdev)
 	bnxt_dcb_free(bp);
 	kfree(bp->edev);
 	bp->edev = NULL;
+	bnxt_cleanup_pci(bp);
 	bnxt_free_ctx_mem(bp);
 	kfree(bp->ctx);
 	bp->ctx = NULL;
-	bnxt_cleanup_pci(bp);
 	bnxt_free_port_stats(bp);
 	free_netdev(dev);
 }
@@ -10859,6 +10881,7 @@ static void bnxt_shutdown(struct pci_dev *pdev)
 
 	if (system_state == SYSTEM_POWER_OFF) {
 		bnxt_clear_int_mode(bp);
+		pci_disable_device(pdev);
 		pci_wake_from_d3(pdev, bp->wol);
 		pci_set_power_state(pdev, PCI_D3hot);
 	}

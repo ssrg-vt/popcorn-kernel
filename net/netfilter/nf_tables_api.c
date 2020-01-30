@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2007-2009 Patrick McHardy <kaber@trash.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Development of this code funded by Astaro AG (http://www.astaro.com/)
  */
@@ -139,9 +136,14 @@ static void nft_set_trans_bind(const struct nft_ctx *ctx, struct nft_set *set)
 		return;
 
 	list_for_each_entry_reverse(trans, &net->nft.commit_list, list) {
-		if (trans->msg_type == NFT_MSG_NEWSET &&
-		    nft_trans_set(trans) == set) {
-			set->bound = true;
+		switch (trans->msg_type) {
+		case NFT_MSG_NEWSET:
+			if (nft_trans_set(trans) == set)
+				nft_trans_set_bound(trans) = true;
+			break;
+		case NFT_MSG_NEWSETELEM:
+			if (nft_trans_elem_set(trans) == set)
+				nft_trans_elem_set_bound(trans) = true;
 			break;
 		}
 	}
@@ -6852,7 +6854,7 @@ static int __nf_tables_abort(struct net *net)
 			break;
 		case NFT_MSG_NEWSET:
 			trans->ctx.table->use--;
-			if (nft_trans_set(trans)->bound) {
+			if (nft_trans_set_bound(trans)) {
 				nft_trans_destroy(trans);
 				break;
 			}
@@ -6864,7 +6866,7 @@ static int __nf_tables_abort(struct net *net)
 			nft_trans_destroy(trans);
 			break;
 		case NFT_MSG_NEWSETELEM:
-			if (nft_trans_elem_set(trans)->bound) {
+			if (nft_trans_elem_set_bound(trans)) {
 				nft_trans_destroy(trans);
 				break;
 			}

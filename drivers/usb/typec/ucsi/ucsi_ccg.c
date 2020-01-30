@@ -862,8 +862,10 @@ static int do_flash(struct ucsi_ccg *uc, enum enum_flash_mode mode)
 
 not_signed_fw:
 	wr_buf = kzalloc(CCG4_ROW_SIZE + 4, GFP_KERNEL);
-	if (!wr_buf)
-		return -ENOMEM;
+	if (!wr_buf) {
+		err = -ENOMEM;
+		goto release_fw;
+	}
 
 	err = ccg_cmd_enter_flashing(uc);
 	if (err)
@@ -961,7 +963,7 @@ release_fw:
  ******************************************************************************/
 static int ccg_fw_update(struct ucsi_ccg *uc, enum enum_flash_mode flash_mode)
 {
-	int err;
+	int err = 0;
 
 	while (flash_mode != FLASH_NOT_NEEDED) {
 		err = do_flash(uc, flash_mode);

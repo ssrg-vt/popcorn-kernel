@@ -896,6 +896,9 @@ static int init_kfd_vm(struct amdgpu_vm *vm, void **process_info,
 				  AMDGPU_FENCE_OWNER_KFD, false);
 	if (ret)
 		goto wait_pd_fail;
+	ret = reservation_object_reserve_shared(vm->root.base.bo->tbo.resv, 1);
+	if (ret)
+		goto reserve_shared_fail;
 	amdgpu_bo_fence(vm->root.base.bo,
 			&vm->process_info->eviction_fence->base, true);
 	amdgpu_bo_unreserve(vm->root.base.bo);
@@ -909,6 +912,7 @@ static int init_kfd_vm(struct amdgpu_vm *vm, void **process_info,
 
 	return 0;
 
+reserve_shared_fail:
 wait_pd_fail:
 validate_pd_fail:
 	amdgpu_bo_unreserve(vm->root.base.bo);
@@ -1144,7 +1148,8 @@ int amdgpu_amdkfd_gpuvm_alloc_memory_of_gpu(
 			adev->asic_type != CHIP_FIJI &&
 			adev->asic_type != CHIP_POLARIS10 &&
 			adev->asic_type != CHIP_POLARIS11 &&
-			adev->asic_type != CHIP_POLARIS12) ?
+			adev->asic_type != CHIP_POLARIS12 &&
+			adev->asic_type != CHIP_VEGAM) ?
 			VI_BO_SIZE_ALIGN : 1;
 
 	mapping_flags = AMDGPU_VM_PAGE_READABLE;

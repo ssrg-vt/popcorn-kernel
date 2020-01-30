@@ -7875,6 +7875,14 @@ search:
 			 */
 			if ((flags & extra) && !(block_group->flags & extra))
 				goto loop;
+
+			/*
+			 * This block group has different flags than we want.
+			 * It's possible that we have MIXED_GROUP flag but no
+			 * block group is mixed.  Just skip such block group.
+			 */
+			btrfs_release_block_group(block_group, delalloc);
+			continue;
 		}
 
 have_block_group:
@@ -10831,17 +10839,6 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
 	remove_em = (atomic_read(&block_group->trimming) == 0);
 	spin_unlock(&block_group->lock);
 
-	if (remove_em) {
-		struct extent_map_tree *em_tree;
-
-		em_tree = &fs_info->mapping_tree.map_tree;
-		write_lock(&em_tree->lock);
-		remove_extent_mapping(em_tree, em);
-		write_unlock(&em_tree->lock);
-		/* once for the tree */
-		free_extent_map(em);
-	}
-
 	mutex_unlock(&fs_info->chunk_mutex);
 
 	ret = remove_block_group_free_space(trans, block_group);
@@ -10858,6 +10855,19 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
 		goto out;
 
 	ret = btrfs_del_item(trans, root, path);
+	if (ret)
+		goto out;
+
+	if (remove_em) {
+		struct extent_map_tree *em_tree;
+
+		em_tree = &fs_info->mapping_tree.map_tree;
+		write_lock(&em_tree->lock);
+		remove_extent_mapping(em_tree, em);
+		write_unlock(&em_tree->lock);
+		/* once for the tree */
+		free_extent_map(em);
+	}
 out:
 	if (remove_rsv)
 		btrfs_delayed_refs_rsv_release(fs_info, 1);
@@ -11224,6 +11234,7 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
 	struct btrfs_device *device;
 	struct list_head *devices;
 	u64 group_trimmed;
+	u64 range_end = U64_MAX;
 	u64 start;
 	u64 end;
 	u64 trimmed = 0;
@@ -11233,16 +11244,23 @@ int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range)
 	int dev_ret = 0;
 	int ret = 0;
 
+	/*
+	 * Check range overflow if range->len is set.
+	 * The default range->len is U64_MAX.
+	 */
+	if (range->len != U64_MAX &&
+	    check_add_overflow(range->start, range->len, &range_end))
+		return -EINVAL;
+
 	cache = btrfs_lookup_first_block_group(fs_info, range->start);
 	for (; cache; cache = next_block_group(cache)) {
-		if (cache->key.objectid >= (range->start + range->len)) {
+		if (cache->key.objectid >= range_end) {
 			btrfs_put_block_group(cache);
 			break;
 		}
 
 		start = max(range->start, cache->key.objectid);
-		end = min(range->start + range->len,
-				cache->key.objectid + cache->key.offset);
+		end = min(range_end, cache->key.objectid + cache->key.offset);
 
 		if (end - start >= range->minlen) {
 			if (!block_group_cache_done(cache)) {

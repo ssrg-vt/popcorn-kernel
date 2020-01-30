@@ -241,6 +241,7 @@ struct perf_event;
 #define PERF_PMU_CAP_NO_INTERRUPT		0x01
 #define PERF_PMU_CAP_NO_NMI			0x02
 #define PERF_PMU_CAP_AUX_NO_SG			0x04
+#define PERF_PMU_CAP_EXTENDED_REGS		0x08
 #define PERF_PMU_CAP_EXCLUSIVE			0x10
 #define PERF_PMU_CAP_ITRACE			0x20
 #define PERF_PMU_CAP_HETEROGENEOUS_CPUS		0x40
@@ -1046,6 +1047,11 @@ static inline int is_software_event(struct perf_event *event)
 static inline int in_software_context(struct perf_event *event)
 {
 	return event->ctx->pmu->task_ctx_nr == perf_sw_context;
+}
+
+static inline int is_exclusive_pmu(struct pmu *pmu)
+{
+	return pmu->capabilities & PERF_PMU_CAP_EXCLUSIVE;
 }
 
 extern struct static_key perf_swevent_enabled[PERF_COUNT_SW_MAX];

@@ -4332,7 +4332,7 @@ BPF_CALL_5(bpf_setsockopt, struct bpf_sock_ops_kern *, bpf_sock,
 						    TCP_CA_NAME_MAX-1));
 			name[TCP_CA_NAME_MAX-1] = 0;
 			ret = tcp_set_congestion_control(sk, name, false,
-							 reinit);
+							 reinit, true);
 		} else {
 			struct tcp_sock *tp = tcp_sk(sk);
 
@@ -5300,7 +5300,13 @@ __bpf_skc_lookup(struct sk_buff *skb, struct bpf_sock_tuple *tuple, u32 len,
 	struct net *net;
 	int sdif;
 
-	family = len == sizeof(tuple->ipv4) ? AF_INET : AF_INET6;
+	if (len == sizeof(tuple->ipv4))
+		family = AF_INET;
+	else if (len == sizeof(tuple->ipv6))
+		family = AF_INET6;
+	else
+		return NULL;
+
 	if (unlikely(family == AF_UNSPEC || flags ||
 		     !((s32)netns_id < 0 || netns_id <= S32_MAX)))
 		goto out;
@@ -5333,8 +5339,14 @@ __bpf_sk_lookup(struct sk_buff *skb, struct bpf_sock_tuple *tuple, u32 len,
 	struct sock *sk = __bpf_skc_lookup(skb, tuple, len, caller_net,
 					   ifindex, proto, netns_id, flags);
 
-	if (sk)
+	if (sk) {
 		sk = sk_to_full_sk(sk);
+		if (!sk_fullsock(sk)) {
+			if (!sock_flag(sk, SOCK_RCU_FREE))
+				sock_gen_put(sk);
+			return NULL;
+		}
+	}
 
 	return sk;
 }
@@ -5365,8 +5377,14 @@ bpf_sk_lookup(struct sk_buff *skb, struct bpf_sock_tuple *tuple, u32 len,
 	struct sock *sk = bpf_skc_lookup(skb, tuple, len, proto, netns_id,
 					 flags);
 
-	if (sk)
+	if (sk) {
 		sk = sk_to_full_sk(sk);
+		if (!sk_fullsock(sk)) {
+			if (!sock_flag(sk, SOCK_RCU_FREE))
+				sock_gen_put(sk);
+			return NULL;
+		}
+	}
 
 	return sk;
 }
@@ -6726,6 +6744,7 @@ static bool sock_addr_is_valid_access(int off, int size,
 		case BPF_CGROUP_INET4_BIND:
 		case BPF_CGROUP_INET4_CONNECT:
 		case BPF_CGROUP_UDP4_SENDMSG:
+		case BPF_CGROUP_UDP4_RECVMSG:
 			break;
 		default:
 			return false;
@@ -6736,6 +6755,7 @@ static bool sock_addr_is_valid_access(int off, int size,
 		case BPF_CGROUP_INET6_BIND:
 		case BPF_CGROUP_INET6_CONNECT:
 		case BPF_CGROUP_UDP6_SENDMSG:
+		case BPF_CGROUP_UDP6_RECVMSG:
 			break;
 		default:
 			return false;
@@ -7305,12 +7325,12 @@ static u32 bpf_convert_ctx_access(enum bpf_access_type type,
 	case offsetof(struct __sk_buff, gso_segs):
 		/* si->dst_reg = skb_shinfo(SKB); */
 #ifdef NET_SKBUFF_DATA_USES_OFFSET
-		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sk_buff, head),
-				      si->dst_reg, si->src_reg,
-				      offsetof(struct sk_buff, head));
 		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sk_buff, end),
 				      BPF_REG_AX, si->src_reg,
 				      offsetof(struct sk_buff, end));
+		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sk_buff, head),
+				      si->dst_reg, si->src_reg,
+				      offsetof(struct sk_buff, head));
 		*insn++ = BPF_ALU64_REG(BPF_ADD, si->dst_reg, BPF_REG_AX);
 #else
 		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sk_buff, end),
@@ -8533,13 +8553,13 @@ sk_reuseport_is_valid_access(int off, int size,
 		return size == size_default;
 
 	/* Fields that allow narrowing */
-	case offsetof(struct sk_reuseport_md, eth_protocol):
+	case bpf_ctx_range(struct sk_reuseport_md, eth_protocol):
 		if (size < FIELD_SIZEOF(struct sk_buff, protocol))
 			return false;
 		/* fall through */
-	case offsetof(struct sk_reuseport_md, ip_protocol):
-	case offsetof(struct sk_reuseport_md, bind_inany):
-	case offsetof(struct sk_reuseport_md, len):
+	case bpf_ctx_range(struct sk_reuseport_md, ip_protocol):
+	case bpf_ctx_range(struct sk_reuseport_md, bind_inany):
+	case bpf_ctx_range(struct sk_reuseport_md, len):
 		bpf_ctx_record_field_size(info, size_default);
 		return bpf_ctx_narrow_access_ok(off, size, size_default);
 

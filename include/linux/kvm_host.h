@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef __KVM_HOST_H
 #define __KVM_HOST_H
 
-/*
- * This work is licensed under the terms of the GNU GPL, version 2.  See
- * the COPYING file in the top-level directory.
- */
 
 #include <linux/types.h>
 #include <linux/hardirq.h>
@@ -874,6 +871,7 @@ void kvm_arch_check_processor_compat(void *rtn);
 int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu);
 bool kvm_arch_vcpu_in_kernel(struct kvm_vcpu *vcpu);
 int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu);
+bool kvm_arch_dy_runnable(struct kvm_vcpu *vcpu);
 
 #ifndef __KVM_HAVE_ARCH_VM_ALLOC
 /*

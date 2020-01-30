@@ -1,20 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Texas Instruments Incorporated - http://www.ti.com/
  * Author: Archit Taneja <archit@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -31,7 +21,8 @@ int omapdss_device_init_output(struct omap_dss_device *out)
 {
 	struct device_node *remote_node;
 
-	remote_node = of_graph_get_remote_node(out->dev->of_node, 0, 0);
+	remote_node = of_graph_get_remote_node(out->dev->of_node,
+					       ffs(out->of_ports) - 1, 0);
 	if (!remote_node) {
 		dev_dbg(out->dev, "failed to find video sink\n");
 		return 0;

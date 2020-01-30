@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Common code for mac80211 Prism54 drivers
  *
@@ -10,10 +11,6 @@
  *   Copyright 2004-2006 Jean-Baptiste Note <jbnote@gmail.com>, et al.
  * - stlc45xx driver
  *   Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies).
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/export.h>
@@ -142,7 +139,10 @@ static int p54_assign_address(struct p54_common *priv, struct sk_buff *skb)
 	    unlikely(GET_HW_QUEUE(skb) == P54_QUEUE_BEACON))
 		priv->beacon_req_id = data->req_id;
 
-	__skb_queue_after(&priv->tx_queue, target_skb, skb);
+	if (target_skb)
+		__skb_queue_after(&priv->tx_queue, target_skb, skb);
+	else
+		__skb_queue_head(&priv->tx_queue, skb);
 	spin_unlock_irqrestore(&priv->tx_queue.lock, flags);
 	return 0;
 }

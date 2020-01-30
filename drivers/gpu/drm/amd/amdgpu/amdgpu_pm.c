@@ -144,12 +144,16 @@ static ssize_t amdgpu_get_dpm_state(struct device *dev,
 	struct amdgpu_device *adev = ddev->dev_private;
 	enum amd_pm_state_type pm;
 
-	if (is_support_sw_smu(adev) && adev->smu.ppt_funcs->get_current_power_state)
-		pm = amdgpu_smu_get_current_power_state(adev);
-	else if (adev->powerplay.pp_funcs->get_current_power_state)
+	if (is_support_sw_smu(adev)) {
+		if (adev->smu.ppt_funcs->get_current_power_state)
+			pm = amdgpu_smu_get_current_power_state(adev);
+		else
+			pm = adev->pm.dpm.user_state;
+	} else if (adev->powerplay.pp_funcs->get_current_power_state) {
 		pm = amdgpu_dpm_get_current_power_state(adev);
-	else
+	} else {
 		pm = adev->pm.dpm.user_state;
+	}
 
 	return snprintf(buf, PAGE_SIZE, "%s\n",
 			(pm == POWER_STATE_TYPE_BATTERY) ? "battery" :
@@ -176,7 +180,11 @@ static ssize_t amdgpu_set_dpm_state(struct device *dev,
 		goto fail;
 	}
 
-	if (adev->powerplay.pp_funcs->dispatch_tasks) {
+	if (is_support_sw_smu(adev)) {
+		mutex_lock(&adev->pm.mutex);
+		adev->pm.dpm.user_state = state;
+		mutex_unlock(&adev->pm.mutex);
+	} else if (adev->powerplay.pp_funcs->dispatch_tasks) {
 		amdgpu_dpm_dispatch_task(adev, AMD_PP_TASK_ENABLE_USER_STATE, &state);
 	} else {
 		mutex_lock(&adev->pm.mutex);
@@ -2492,7 +2500,7 @@ void amdgpu_pm_print_power_states(struct amdgpu_device *adev)
 
 int amdgpu_pm_load_smu_firmware(struct amdgpu_device *adev, uint32_t *smu_version)
 {
-	int r = -EINVAL;
+	int r;
 
 	if (adev->powerplay.pp_funcs && adev->powerplay.pp_funcs->load_firmware) {
 		r = adev->powerplay.pp_funcs->load_firmware(adev->powerplay.pp_handle);
@@ -2502,7 +2510,7 @@ int amdgpu_pm_load_smu_firmware(struct amdgpu_device *adev, uint32_t *smu_versio
 		}
 		*smu_version = adev->pm.fw_version;
 	}
-	return r;
+	return 0;
 }
 
 int amdgpu_pm_sysfs_init(struct amdgpu_device *adev)

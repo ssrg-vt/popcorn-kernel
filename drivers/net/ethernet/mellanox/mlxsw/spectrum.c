@@ -4280,13 +4280,16 @@ static void mlxsw_sp_traps_fini(struct mlxsw_sp *mlxsw_sp)
 	}
 }
 
+#define MLXSW_SP_LAG_SEED_INIT 0xcafecafe
+
 static int mlxsw_sp_lag_init(struct mlxsw_sp *mlxsw_sp)
 {
 	char slcr_pl[MLXSW_REG_SLCR_LEN];
 	u32 seed;
 	int err;
 
-	seed = jhash(mlxsw_sp->base_mac, sizeof(mlxsw_sp->base_mac), 0);
+	seed = jhash(mlxsw_sp->base_mac, sizeof(mlxsw_sp->base_mac),
+		     MLXSW_SP_LAG_SEED_INIT);
 	mlxsw_reg_slcr_pack(slcr_pl, MLXSW_REG_SLCR_LAG_HASH_SMAC |
 				     MLXSW_REG_SLCR_LAG_HASH_DMAC |
 				     MLXSW_REG_SLCR_LAG_HASH_ETHERTYPE |
@@ -5986,7 +5989,7 @@ static int __init mlxsw_sp_module_init(void)
 	return 0;
 
 err_sp2_pci_driver_register:
-	mlxsw_pci_driver_unregister(&mlxsw_sp2_pci_driver);
+	mlxsw_pci_driver_unregister(&mlxsw_sp1_pci_driver);
 err_sp1_pci_driver_register:
 	mlxsw_core_driver_unregister(&mlxsw_sp2_driver);
 err_sp2_core_driver_register:

@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SMP initialisation and IPI support
  * Based on arch/arm/kernel/smp.c
  *
  * Copyright (C) 2012 ARM Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/acpi.h>
@@ -192,11 +181,13 @@ static void init_gic_priority_masking(void)
 
 	WARN_ON(!(cpuflags & PSR_I_BIT));
 
-	gic_write_pmr(GIC_PRIO_IRQOFF);
-
 	/* We can only unmask PSR.I if we can take aborts */
-	if (!(cpuflags & PSR_A_BIT))
+	if (!(cpuflags & PSR_A_BIT)) {
+		gic_write_pmr(GIC_PRIO_IRQOFF);
 		write_sysreg(cpuflags & ~PSR_I_BIT, daif);
+	} else {
+		gic_write_pmr(GIC_PRIO_IRQON | GIC_PRIO_PSR_I_SET);
+	}
 }
 
 /*

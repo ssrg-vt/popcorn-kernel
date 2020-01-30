@@ -202,9 +202,12 @@ struct request {
 #ifdef CONFIG_BLK_WBT
 	unsigned short wbt_flags;
 #endif
-#ifdef CONFIG_BLK_DEV_THROTTLING_LOW
-	unsigned short throtl_size;
-#endif
+	/*
+	 * rq sectors used for blk stats. It has the same value
+	 * with blk_rq_sectors(rq), except that it never be zeroed
+	 * by completion.
+	 */
+	unsigned short stats_sectors;
 
 	/*
 	 * Number of scatter-gather DMA addr+len pairs after
@@ -343,6 +346,11 @@ struct queue_limits {
 };
 
 #ifdef CONFIG_BLK_DEV_ZONED
+
+/*
+ * Maximum number of zones to report with a single report zones command.
+ */
+#define BLK_ZONED_REPORT_MAX_ZONES	8192U
 
 extern unsigned int blkdev_nr_zones(struct block_device *bdev);
 extern int blkdev_report_zones(struct block_device *bdev,
@@ -681,7 +689,7 @@ static inline bool blk_queue_is_zoned(struct request_queue *q)
 	}
 }
 
-static inline unsigned int blk_queue_zone_sectors(struct request_queue *q)
+static inline sector_t blk_queue_zone_sectors(struct request_queue *q)
 {
 	return blk_queue_is_zoned(q) ? q->limits.chunk_sectors : 0;
 }
@@ -897,6 +905,7 @@ static inline struct request_queue *bdev_get_queue(struct block_device *bdev)
  * blk_rq_err_bytes()		: bytes left till the next error boundary
  * blk_rq_sectors()		: sectors left in the entire request
  * blk_rq_cur_sectors()		: sectors left in the current segment
+ * blk_rq_stats_sectors()	: sectors of the entire request used for stats
  */
 static inline sector_t blk_rq_pos(const struct request *rq)
 {
@@ -923,6 +932,11 @@ static inline unsigned int blk_rq_sectors(const struct request *rq)
 static inline unsigned int blk_rq_cur_sectors(const struct request *rq)
 {
 	return blk_rq_cur_bytes(rq) >> SECTOR_SHIFT;
+}
+
+static inline unsigned int blk_rq_stats_sectors(const struct request *rq)
+{
+	return rq->stats_sectors;
 }
 
 #ifdef CONFIG_BLK_DEV_ZONED
@@ -1429,7 +1443,7 @@ static inline bool bdev_is_zoned(struct block_device *bdev)
 	return false;
 }
 
-static inline unsigned int bdev_zone_sectors(struct block_device *bdev)
+static inline sector_t bdev_zone_sectors(struct block_device *bdev)
 {
 	struct request_queue *q = bdev_get_queue(bdev);
 

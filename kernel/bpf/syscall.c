@@ -1573,6 +1573,8 @@ bpf_prog_load_check_attach_type(enum bpf_prog_type prog_type,
 		case BPF_CGROUP_INET6_CONNECT:
 		case BPF_CGROUP_UDP4_SENDMSG:
 		case BPF_CGROUP_UDP6_SENDMSG:
+		case BPF_CGROUP_UDP4_RECVMSG:
+		case BPF_CGROUP_UDP6_RECVMSG:
 			return 0;
 		default:
 			return -EINVAL;
@@ -1684,20 +1686,26 @@ static int bpf_prog_load(union bpf_attr *attr, union bpf_attr __user *uattr)
 	if (err)
 		goto free_used_maps;
 
-	err = bpf_prog_new_fd(prog);
-	if (err < 0) {
-		/* failed to allocate fd.
-		 * bpf_prog_put() is needed because the above
-		 * bpf_prog_alloc_id() has published the prog
-		 * to the userspace and the userspace may
-		 * have refcnt-ed it through BPF_PROG_GET_FD_BY_ID.
-		 */
-		bpf_prog_put(prog);
-		return err;
-	}
-
+	/* Upon success of bpf_prog_alloc_id(), the BPF prog is
+	 * effectively publicly exposed. However, retrieving via
+	 * bpf_prog_get_fd_by_id() will take another reference,
+	 * therefore it cannot be gone underneath us.
+	 *
+	 * Only for the time /after/ successful bpf_prog_new_fd()
+	 * and before returning to userspace, we might just hold
+	 * one reference and any parallel close on that fd could
+	 * rip everything out. Hence, below notifications must
+	 * happen before bpf_prog_new_fd().
+	 *
+	 * Also, any failure handling from this point onwards must
+	 * be using bpf_prog_put() given the program is exposed.
+	 */
 	bpf_prog_kallsyms_add(prog);
 	perf_event_bpf_event(prog, PERF_BPF_EVENT_PROG_LOAD, 0);
+
+	err = bpf_prog_new_fd(prog);
+	if (err < 0)
+		bpf_prog_put(prog);
 	return err;
 
 free_used_maps:
@@ -1867,6 +1875,8 @@ static int bpf_prog_attach(const union bpf_attr *attr)
 	case BPF_CGROUP_INET6_CONNECT:
 	case BPF_CGROUP_UDP4_SENDMSG:
 	case BPF_CGROUP_UDP6_SENDMSG:
+	case BPF_CGROUP_UDP4_RECVMSG:
+	case BPF_CGROUP_UDP6_RECVMSG:
 		ptype = BPF_PROG_TYPE_CGROUP_SOCK_ADDR;
 		break;
 	case BPF_CGROUP_SOCK_OPS:
@@ -1952,6 +1962,8 @@ static int bpf_prog_detach(const union bpf_attr *attr)
 	case BPF_CGROUP_INET6_CONNECT:
 	case BPF_CGROUP_UDP4_SENDMSG:
 	case BPF_CGROUP_UDP6_SENDMSG:
+	case BPF_CGROUP_UDP4_RECVMSG:
+	case BPF_CGROUP_UDP6_RECVMSG:
 		ptype = BPF_PROG_TYPE_CGROUP_SOCK_ADDR;
 		break;
 	case BPF_CGROUP_SOCK_OPS:
@@ -2003,6 +2015,8 @@ static int bpf_prog_query(const union bpf_attr *attr,
 	case BPF_CGROUP_INET6_CONNECT:
 	case BPF_CGROUP_UDP4_SENDMSG:
 	case BPF_CGROUP_UDP6_SENDMSG:
+	case BPF_CGROUP_UDP4_RECVMSG:
+	case BPF_CGROUP_UDP6_RECVMSG:
 	case BPF_CGROUP_SOCK_OPS:
 	case BPF_CGROUP_DEVICE:
 	case BPF_CGROUP_SYSCTL:

@@ -1958,6 +1958,7 @@ static int amdgpu_dm_backlight_get_brightness(struct backlight_device *bd)
 }
 
 static const struct backlight_ops amdgpu_dm_backlight_ops = {
+	.options = BL_CORE_SUSPENDRESUME,
 	.get_brightness = amdgpu_dm_backlight_get_brightness,
 	.update_status	= amdgpu_dm_backlight_update_status,
 };
@@ -2592,7 +2593,7 @@ fill_plane_buffer_attributes(struct amdgpu_device *adev,
 		address->type = PLN_ADDR_TYPE_GRAPHICS;
 		address->grph.addr.low_part = lower_32_bits(afb->address);
 		address->grph.addr.high_part = upper_32_bits(afb->address);
-	} else {
+	} else if (format < SURFACE_PIXEL_FORMAT_INVALID) {
 		uint64_t chroma_addr = afb->address + fb->offsets[1];
 
 		plane_size->video.luma_size.x = 0;
@@ -4209,18 +4210,8 @@ static int dm_plane_atomic_check(struct drm_plane *plane,
 static int dm_plane_atomic_async_check(struct drm_plane *plane,
 				       struct drm_plane_state *new_plane_state)
 {
-	struct drm_plane_state *old_plane_state =
-		drm_atomic_get_old_plane_state(new_plane_state->state, plane);
-
 	/* Only support async updates on cursor planes. */
 	if (plane->type != DRM_PLANE_TYPE_CURSOR)
-		return -EINVAL;
-
-	/*
-	 * DRM calls prepare_fb and cleanup_fb on new_plane_state for
-	 * async commits so don't allow fb changes.
-	 */
-	if (old_plane_state->fb != new_plane_state->fb)
 		return -EINVAL;
 
 	return 0;
@@ -4627,6 +4618,13 @@ void amdgpu_dm_connector_init_helper(struct amdgpu_display_manager *dm,
 {
 	struct amdgpu_device *adev = dm->ddev->dev_private;
 
+	/*
+	 * Some of the properties below require access to state, like bpc.
+	 * Allocate some default initial connector state with our reset helper.
+	 */
+	if (aconnector->base.funcs->reset)
+		aconnector->base.funcs->reset(&aconnector->base);
+
 	aconnector->connector_id = link_index;
 	aconnector->dc_link = link;
 	aconnector->base.interlace_allowed = false;
@@ -4809,9 +4807,6 @@ static int amdgpu_dm_connector_init(struct amdgpu_display_manager *dm,
 			&aconnector->base,
 			&amdgpu_dm_connector_helper_funcs);
 
-	if (aconnector->base.funcs->reset)
-		aconnector->base.funcs->reset(&aconnector->base);
-
 	amdgpu_dm_connector_init_helper(
 		dm,
 		aconnector,
@@ -4952,12 +4947,12 @@ static int get_cursor_position(struct drm_plane *plane, struct drm_crtc *crtc,
 	int x, y;
 	int xorigin = 0, yorigin = 0;
 
-	if (!crtc || !plane->state->fb) {
-		position->enable = false;
-		position->x = 0;
-		position->y = 0;
+	position->enable = false;
+	position->x = 0;
+	position->y = 0;
+
+	if (!crtc || !plane->state->fb)
 		return 0;
-	}
 
 	if ((plane->state->crtc_w > amdgpu_crtc->max_cursor_width) ||
 	    (plane->state->crtc_h > amdgpu_crtc->max_cursor_height)) {
@@ -4970,6 +4965,10 @@ static int get_cursor_position(struct drm_plane *plane, struct drm_crtc *crtc,
 
 	x = plane->state->crtc_x;
 	y = plane->state->crtc_y;
+
+	if (x <= -amdgpu_crtc->max_cursor_width ||
+	    y <= -amdgpu_crtc->max_cursor_height)
+		return 0;
 
 	if (crtc->primary->state) {
 		/* avivo cursor are offset into the total surface */
@@ -6327,6 +6326,10 @@ static bool should_reset_plane(struct drm_atomic_state *state,
 	if (!new_crtc_state)
 		return true;
 
+	/* CRTC Degamma changes currently require us to recreate planes. */
+	if (new_crtc_state->color_mgmt_changed)
+		return true;
+
 	if (drm_atomic_crtc_needs_modeset(new_crtc_state))
 		return true;
 
@@ -6786,6 +6789,26 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 	if (ret)
 		goto fail;
 
+	if (state->legacy_cursor_update) {
+		/*
+		 * This is a fast cursor update coming from the plane update
+		 * helper, check if it can be done asynchronously for better
+		 * performance.
+		 */
+		state->async_update =
+			!drm_atomic_helper_async_check(dev, state);
+
+		/*
+		 * Skip the remaining global validation if this is an async
+		 * update. Cursor updates can be done without affecting
+		 * state or bandwidth calcs and this avoids the performance
+		 * penalty of locking the private state object and
+		 * allocating a new dc_state.
+		 */
+		if (state->async_update)
+			return 0;
+	}
+
 	/* Check scaling and underscan changes*/
 	/* TODO Removed scaling changes validation due to inability to commit
 	 * new stream into context w\o causing full reset. Need to
@@ -6838,13 +6861,29 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 			ret = -EINVAL;
 			goto fail;
 		}
-	} else if (state->legacy_cursor_update) {
+	} else {
 		/*
-		 * This is a fast cursor update coming from the plane update
-		 * helper, check if it can be done asynchronously for better
-		 * performance.
+		 * The commit is a fast update. Fast updates shouldn't change
+		 * the DC context, affect global validation, and can have their
+		 * commit work done in parallel with other commits not touching
+		 * the same resource. If we have a new DC context as part of
+		 * the DM atomic state from validation we need to free it and
+		 * retain the existing one instead.
 		 */
-		state->async_update = !drm_atomic_helper_async_check(dev, state);
+		struct dm_atomic_state *new_dm_state, *old_dm_state;
+
+		new_dm_state = dm_atomic_get_new_state(state);
+		old_dm_state = dm_atomic_get_old_state(state);
+
+		if (new_dm_state && old_dm_state) {
+			if (new_dm_state->context)
+				dc_release_state(new_dm_state->context);
+
+			new_dm_state->context = old_dm_state->context;
+
+			if (old_dm_state->context)
+				dc_retain_state(old_dm_state->context);
+		}
 	}
 
 	/* Must be success */

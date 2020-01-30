@@ -312,8 +312,6 @@ static int btrfs_ioctl_setflags(struct file *file, void __user *arg)
 			btrfs_abort_transaction(trans, ret);
 			goto out_end_trans;
 		}
-		set_bit(BTRFS_INODE_COPY_EVERYTHING,
-			&BTRFS_I(inode)->runtime_flags);
 	} else {
 		ret = btrfs_set_prop(trans, inode, "btrfs.compression", NULL,
 				     0, 0);
@@ -4000,6 +3998,27 @@ static int btrfs_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 	inode_dio_wait(inode_in);
 	if (!same_inode)
 		inode_dio_wait(inode_out);
+
+	/*
+	 * Workaround to make sure NOCOW buffered write reach disk as NOCOW.
+	 *
+	 * Btrfs' back references do not have a block level granularity, they
+	 * work at the whole extent level.
+	 * NOCOW buffered write without data space reserved may not be able
+	 * to fall back to CoW due to lack of data space, thus could cause
+	 * data loss.
+	 *
+	 * Here we take a shortcut by flushing the whole inode, so that all
+	 * nocow write should reach disk as nocow before we increase the
+	 * reference of the extent. We could do better by only flushing NOCOW
+	 * data, but that needs extra accounting.
+	 *
+	 * Also we don't need to check ASYNC_EXTENT, as async extent will be
+	 * CoWed anyway, not affecting nocow part.
+	 */
+	ret = filemap_flush(inode_in->i_mapping);
+	if (ret < 0)
+		return ret;
 
 	ret = btrfs_wait_ordered_range(inode_in, ALIGN_DOWN(pos_in, bs),
 				       wb_len);

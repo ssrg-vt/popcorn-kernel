@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Kernel-based Virtual Machine driver for Linux
  *
  * This header defines architecture specific interfaces, x86 version
- *
- * This work is licensed under the terms of the GNU GPL, version 2.  See
- * the COPYING file in the top-level directory.
- *
  */
 
 #ifndef _ASM_X86_KVM_HOST_H
@@ -336,6 +333,7 @@ struct kvm_mmu_page {
 	int root_count;          /* Currently serving as active root */
 	unsigned int unsync_children;
 	struct kvm_rmap_head parent_ptes; /* rmap pointers to parent sptes */
+	unsigned long mmu_valid_gen;
 	DECLARE_BITMAP(unsync_child_bitmap, 512);
 
 #ifdef CONFIG_X86_32
@@ -610,15 +608,16 @@ struct kvm_vcpu_arch {
 
 	/*
 	 * QEMU userspace and the guest each have their own FPU state.
-	 * In vcpu_run, we switch between the user, maintained in the
-	 * task_struct struct, and guest FPU contexts. While running a VCPU,
-	 * the VCPU thread will have the guest FPU context.
+	 * In vcpu_run, we switch between the user and guest FPU contexts.
+	 * While running a VCPU, the VCPU thread will have the guest FPU
+	 * context.
 	 *
 	 * Note that while the PKRU state lives inside the fpu registers,
 	 * it is switched out separately at VMENTER and VMEXIT time. The
 	 * "guest_fpu" state here contains the guest FPU context, with the
 	 * host PRKU bits.
 	 */
+	struct fpu user_fpu;
 	struct fpu *guest_fpu;
 
 	u64 xcr0;
@@ -853,6 +852,7 @@ struct kvm_arch {
 	unsigned long n_requested_mmu_pages;
 	unsigned long n_max_mmu_pages;
 	unsigned int indirect_shadow_pages;
+	unsigned long mmu_valid_gen;
 	struct hlist_head mmu_page_hash[KVM_NUM_MMU_PAGES];
 	/*
 	 * Hash table of struct kvm_mmu_page.
@@ -1171,6 +1171,7 @@ struct kvm_x86_ops {
 	int (*update_pi_irte)(struct kvm *kvm, unsigned int host_irq,
 			      uint32_t guest_irq, bool set);
 	void (*apicv_post_state_restore)(struct kvm_vcpu *vcpu);
+	bool (*dy_apicv_has_pending_interrupt)(struct kvm_vcpu *vcpu);
 
 	int (*set_hv_timer)(struct kvm_vcpu *vcpu, u64 guest_deadline_tsc,
 			    bool *expired);
@@ -1493,25 +1494,29 @@ enum {
 #define kvm_arch_vcpu_memslots_id(vcpu) ((vcpu)->arch.hflags & HF_SMM_MASK ? 1 : 0)
 #define kvm_memslots_for_spte_role(kvm, role) __kvm_memslots(kvm, (role).smm)
 
+asmlinkage void __noreturn kvm_spurious_fault(void);
+
 /*
  * Hardware virtualization extension instructions may fault if a
  * reboot turns off virtualization while processes are running.
- * Trap the fault and ignore the instruction if that happens.
+ * Usually after catching the fault we just panic; during reboot
+ * instead the instruction is ignored.
  */
-asmlinkage void kvm_spurious_fault(void);
-
-#define ____kvm_handle_fault_on_reboot(insn, cleanup_insn)	\
-	"666: " insn "\n\t" \
-	"668: \n\t"                           \
-	".pushsection .fixup, \"ax\" \n" \
-	"667: \n\t" \
-	cleanup_insn "\n\t"		      \
-	"cmpb $0, kvm_rebooting \n\t"	      \
-	"jne 668b \n\t"      		      \
-	__ASM_SIZE(push) " $666b \n\t"	      \
-	"jmp kvm_spurious_fault \n\t"	      \
-	".popsection \n\t" \
-	_ASM_EXTABLE(666b, 667b)
+#define ____kvm_handle_fault_on_reboot(insn, cleanup_insn)		\
+	"666: \n\t"							\
+	insn "\n\t"							\
+	"jmp	668f \n\t"						\
+	"667: \n\t"							\
+	"call	kvm_spurious_fault \n\t"				\
+	"668: \n\t"							\
+	".pushsection .fixup, \"ax\" \n\t"				\
+	"700: \n\t"							\
+	cleanup_insn "\n\t"						\
+	"cmpb	$0, kvm_rebooting\n\t"					\
+	"je	667b \n\t"						\
+	"jmp	668b \n\t"						\
+	".popsection \n\t"						\
+	_ASM_EXTABLE(666b, 700b)
 
 #define __kvm_handle_fault_on_reboot(insn)		\
 	____kvm_handle_fault_on_reboot(insn, "")
@@ -1570,6 +1575,13 @@ bool kvm_intr_is_single_vcpu(struct kvm *kvm, struct kvm_lapic_irq *irq,
 
 void kvm_set_msi_irq(struct kvm *kvm, struct kvm_kernel_irq_routing_entry *e,
 		     struct kvm_lapic_irq *irq);
+
+static inline bool kvm_irq_is_postable(struct kvm_lapic_irq *irq)
+{
+	/* We can only post Fixed and LowPrio IRQs */
+	return (irq->delivery_mode == dest_Fixed ||
+		irq->delivery_mode == dest_LowestPrio);
+}
 
 static inline void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu)
 {

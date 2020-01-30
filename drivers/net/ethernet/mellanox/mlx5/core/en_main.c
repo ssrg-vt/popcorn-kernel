@@ -340,12 +340,11 @@ static inline u64 mlx5e_get_mpwqe_offset(struct mlx5e_rq *rq, u16 wqe_ix)
 
 static void mlx5e_init_frags_partition(struct mlx5e_rq *rq)
 {
-	struct mlx5e_wqe_frag_info next_frag, *prev;
+	struct mlx5e_wqe_frag_info next_frag = {};
+	struct mlx5e_wqe_frag_info *prev = NULL;
 	int i;
 
 	next_frag.di = &rq->wqe.di[0];
-	next_frag.offset = 0;
-	prev = NULL;
 
 	for (i = 0; i < mlx5_wq_cyc_get_size(&rq->wqe.wq); i++) {
 		struct mlx5e_rq_frag_info *frag_info = &rq->wqe.info.arr[0];
@@ -855,6 +854,9 @@ static int mlx5e_open_rq(struct mlx5e_channel *c,
 	if (err)
 		goto err_destroy_rq;
 
+	if (MLX5_CAP_ETH(c->mdev, cqe_checksum_full))
+		__set_bit(MLX5E_RQ_STATE_CSUM_FULL, &c->rq.state);
+
 	if (params->rx_dim_enabled)
 		__set_bit(MLX5E_RQ_STATE_AM, &c->rq.state);
 
@@ -1082,6 +1084,7 @@ static int mlx5e_alloc_txqsq(struct mlx5e_channel *c,
 	sq->clock     = &mdev->clock;
 	sq->mkey_be   = c->mkey_be;
 	sq->channel   = c;
+	sq->ch_ix     = c->ix;
 	sq->txq_ix    = txq_ix;
 	sq->uar_map   = mdev->mlx5e_res.bfreg.map;
 	sq->min_inline_mode = params->tx_min_inline_mode;
@@ -1276,7 +1279,6 @@ err_free_txqsq:
 void mlx5e_activate_txqsq(struct mlx5e_txqsq *sq)
 {
 	sq->txq = netdev_get_tx_queue(sq->channel->netdev, sq->txq_ix);
-	clear_bit(MLX5E_SQ_STATE_RECOVERING, &sq->state);
 	set_bit(MLX5E_SQ_STATE_ENABLED, &sq->state);
 	netdev_tx_reset_queue(sq->txq);
 	netif_tx_start_queue(sq->txq);
@@ -3635,8 +3637,7 @@ static int mlx5e_handle_feature(struct net_device *netdev,
 	return 0;
 }
 
-static int mlx5e_set_features(struct net_device *netdev,
-			      netdev_features_t features)
+int mlx5e_set_features(struct net_device *netdev, netdev_features_t features)
 {
 	netdev_features_t oper_features = netdev->features;
 	int err = 0;
@@ -4192,8 +4193,6 @@ static int mlx5e_xdp_set(struct net_device *netdev, struct bpf_prog *prog)
 	/* no need for full reset when exchanging programs */
 	reset = (!priv->channels.params.xdp_prog || !prog);
 
-	if (was_opened && reset)
-		mlx5e_close_locked(netdev);
 	if (was_opened && !reset) {
 		/* num_channels is invariant here, so we can take the
 		 * batched reference right upfront.
@@ -4205,20 +4204,31 @@ static int mlx5e_xdp_set(struct net_device *netdev, struct bpf_prog *prog)
 		}
 	}
 
-	/* exchange programs, extra prog reference we got from caller
-	 * as long as we don't fail from this point onwards.
-	 */
-	old_prog = xchg(&priv->channels.params.xdp_prog, prog);
+	if (was_opened && reset) {
+		struct mlx5e_channels new_channels = {};
+
+		new_channels.params = priv->channels.params;
+		new_channels.params.xdp_prog = prog;
+		mlx5e_set_rq_type(priv->mdev, &new_channels.params);
+		old_prog = priv->channels.params.xdp_prog;
+
+		err = mlx5e_safe_switch_channels(priv, &new_channels, NULL);
+		if (err)
+			goto unlock;
+	} else {
+		/* exchange programs, extra prog reference we got from caller
+		 * as long as we don't fail from this point onwards.
+		 */
+		old_prog = xchg(&priv->channels.params.xdp_prog, prog);
+	}
+
 	if (old_prog)
 		bpf_prog_put(old_prog);
 
-	if (reset) /* change RQ type according to priv->xdp_prog */
+	if (!was_opened && reset) /* change RQ type according to priv->xdp_prog */
 		mlx5e_set_rq_type(priv->mdev, &priv->channels.params);
 
-	if (was_opened && reset)
-		err = mlx5e_open_locked(netdev);
-
-	if (!test_bit(MLX5E_STATE_OPENED, &priv->state) || reset)
+	if (!was_opened || reset)
 		goto unlock;
 
 	/* exchanging programs w/o reset, we update ref counts on behalf
@@ -5107,6 +5117,11 @@ static void mlx5e_detach(struct mlx5_core_dev *mdev, void *vpriv)
 {
 	struct mlx5e_priv *priv = vpriv;
 	struct net_device *netdev = priv->netdev;
+
+#ifdef CONFIG_MLX5_ESWITCH
+	if (MLX5_ESWITCH_MANAGER(mdev) && vpriv == mdev)
+		return;
+#endif
 
 	if (!netif_device_present(netdev))
 		return;

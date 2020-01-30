@@ -5353,9 +5353,12 @@ static int check_return_code(struct bpf_verifier_env *env)
 	struct tnum range = tnum_range(0, 1);
 
 	switch (env->prog->type) {
+	case BPF_PROG_TYPE_CGROUP_SOCK_ADDR:
+		if (env->prog->expected_attach_type == BPF_CGROUP_UDP4_RECVMSG ||
+		    env->prog->expected_attach_type == BPF_CGROUP_UDP6_RECVMSG)
+			range = tnum_range(1, 1);
 	case BPF_PROG_TYPE_CGROUP_SKB:
 	case BPF_PROG_TYPE_CGROUP_SOCK:
-	case BPF_PROG_TYPE_CGROUP_SOCK_ADDR:
 	case BPF_PROG_TYPE_SOCK_OPS:
 	case BPF_PROG_TYPE_CGROUP_DEVICE:
 	case BPF_PROG_TYPE_CGROUP_SYSCTL:
@@ -5372,16 +5375,17 @@ static int check_return_code(struct bpf_verifier_env *env)
 	}
 
 	if (!tnum_in(range, reg->var_off)) {
+		char tn_buf[48];
+
 		verbose(env, "At program exit the register R0 ");
 		if (!tnum_is_unknown(reg->var_off)) {
-			char tn_buf[48];
-
 			tnum_strn(tn_buf, sizeof(tn_buf), reg->var_off);
 			verbose(env, "has value %s", tn_buf);
 		} else {
 			verbose(env, "has unknown scalar value");
 		}
-		verbose(env, " should have been 0 or 1\n");
+		tnum_strn(tn_buf, sizeof(tn_buf), range);
+		verbose(env, " should have been in %s\n", tn_buf);
 		return -EINVAL;
 	}
 	return 0;
@@ -6452,17 +6456,18 @@ static int is_state_visited(struct bpf_verifier_env *env, int insn_idx)
 	 * the state of the call instruction (with WRITTEN set), and r0 comes
 	 * from callee with its full parentage chain, anyway.
 	 */
-	for (j = 0; j <= cur->curframe; j++)
-		for (i = j < cur->curframe ? BPF_REG_6 : 0; i < BPF_REG_FP; i++)
-			cur->frame[j]->regs[i].parent = &new->frame[j]->regs[i];
 	/* clear write marks in current state: the writes we did are not writes
 	 * our child did, so they don't screen off its reads from us.
 	 * (There are no read marks in current state, because reads always mark
 	 * their parent and current state never has children yet.  Only
 	 * explored_states can get read marks.)
 	 */
-	for (i = 0; i < BPF_REG_FP; i++)
-		cur->frame[cur->curframe]->regs[i].live = REG_LIVE_NONE;
+	for (j = 0; j <= cur->curframe; j++) {
+		for (i = j < cur->curframe ? BPF_REG_6 : 0; i < BPF_REG_FP; i++)
+			cur->frame[j]->regs[i].parent = &new->frame[j]->regs[i];
+		for (i = 0; i < BPF_REG_FP; i++)
+			cur->frame[j]->regs[i].live = REG_LIVE_NONE;
+	}
 
 	/* all stack frames are accessible from callee, clear them all */
 	for (j = 0; j <= cur->curframe; j++) {

@@ -30,6 +30,7 @@
 
 #define REPORT_ID_HIDPP_SHORT			0x10
 #define REPORT_ID_HIDPP_LONG			0x11
+#define REPORT_ID_HIDPP_VERY_LONG		0x12
 
 #define HIDPP_REPORT_SHORT_LENGTH		7
 #define HIDPP_REPORT_LONG_LENGTH		20
@@ -1242,7 +1243,8 @@ static int logi_dj_ll_raw_request(struct hid_device *hid,
 	int ret;
 
 	if ((buf[0] == REPORT_ID_HIDPP_SHORT) ||
-	    (buf[0] == REPORT_ID_HIDPP_LONG)) {
+	    (buf[0] == REPORT_ID_HIDPP_LONG) ||
+	    (buf[0] == REPORT_ID_HIDPP_VERY_LONG)) {
 		if (count < 2)
 			return -EINVAL;
 
@@ -1730,14 +1732,14 @@ static int logi_dj_probe(struct hid_device *hdev,
 		if (retval < 0) {
 			hid_err(hdev, "%s: logi_dj_recv_query_paired_devices error:%d\n",
 				__func__, retval);
-			goto logi_dj_recv_query_paired_devices_failed;
+			/*
+			 * This can happen with a KVM, let the probe succeed,
+			 * logi_dj_recv_queue_unknown_work will retry later.
+			 */
 		}
 	}
 
-	return retval;
-
-logi_dj_recv_query_paired_devices_failed:
-	hid_hw_close(hdev);
+	return 0;
 
 llopen_failed:
 switch_to_dj_mode_fail:

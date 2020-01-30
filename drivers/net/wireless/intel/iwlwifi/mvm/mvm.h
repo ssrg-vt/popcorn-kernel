@@ -501,6 +501,9 @@ struct iwl_mvm_vif {
 	netdev_features_t features;
 
 	struct iwl_probe_resp_data __rcu *probe_resp_data;
+
+	/* we can only have 2 GTK + 2 IGTK active at a time */
+	struct ieee80211_key_conf *ap_early_keys[4];
 };
 
 static inline struct iwl_mvm_vif *
@@ -880,7 +883,7 @@ struct iwl_mvm {
 	struct iwl_mvm_vif *bf_allowed_vif;
 
 	bool hw_registered;
-	bool calibrating;
+	bool rfkill_safe_init_done;
 	bool support_umac_log;
 
 	u32 ampdu_ref;
@@ -1039,8 +1042,6 @@ struct iwl_mvm {
 #ifdef CONFIG_IWLWIFI_DEBUGFS
 	bool d3_wake_sysassert;
 	bool d3_test_active;
-	bool store_d3_resume_sram;
-	void *d3_resume_sram;
 	u32 d3_test_pme_ptr;
 	struct ieee80211_vif *keep_vif;
 	u32 last_netdetect_scans; /* no. of scans in the last net-detect wake */
@@ -1183,6 +1184,7 @@ struct iwl_mvm {
 #ifdef CONFIG_ACPI
 	struct iwl_mvm_sar_profile sar_profiles[ACPI_SAR_PROFILE_NUM];
 	struct iwl_mvm_geo_profile geo_profiles[ACPI_NUM_GEO_PROFILES];
+	u32 geo_rev;
 #endif
 };
 
@@ -1805,7 +1807,7 @@ iwl_mvm_vif_dbgfs_clean(struct iwl_mvm *mvm, struct ieee80211_vif *vif)
 #endif /* CONFIG_IWLWIFI_DEBUGFS */
 
 /* rate scaling */
-int iwl_mvm_send_lq_cmd(struct iwl_mvm *mvm, struct iwl_lq_cmd *lq, bool sync);
+int iwl_mvm_send_lq_cmd(struct iwl_mvm *mvm, struct iwl_lq_cmd *lq);
 void iwl_mvm_update_frame_stats(struct iwl_mvm *mvm, u32 rate, bool agg);
 int rs_pretty_print_rate(char *buf, int bufsz, const u32 rate);
 void rs_update_last_rssi(struct iwl_mvm *mvm,
