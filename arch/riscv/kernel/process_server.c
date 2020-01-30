@@ -97,8 +97,3 @@ int dump_processor_regs(struct pt_regs *regs)
 {
 	return 0;
 }
-
-unsigned long futex_atomic_add(unsigned long ptr, unsigned long val)
-{
-	return 0;
-}
