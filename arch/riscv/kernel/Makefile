@@ -40,4 +40,6 @@ obj-$(CONFIG_DYNAMIC_FTRACE)	+= mcount-dyn.o
 
 obj-$(CONFIG_PERF_EVENTS)      += perf_event.o
 
+obj-$(CONFIG_POPCORN)		+= cpuinfo_popcorn.o process_server.o
+
 clean:

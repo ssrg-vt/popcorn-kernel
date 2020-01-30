@@ -116,6 +116,7 @@ config ARCH_RV64I
 	bool "RV64I"
 	select 64BIT
 	select ARCH_SUPPORTS_INT128 if GCC_VERSION >= 50000
+	select ARCH_SUPPORTS_POPCORN
 	select HAVE_FUNCTION_TRACER
 	select HAVE_FUNCTION_GRAPH_TRACER
 	select HAVE_FTRACE_MCOUNT_RECORD
@@ -218,6 +219,8 @@ config FPU
 	  If you don't know what to do here, say Y.
 
 endmenu
+
+source "kernel/Kconfig.popcorn"
 
 menu "Kernel features"
 

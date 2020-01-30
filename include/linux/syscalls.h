@@ -996,6 +996,15 @@ asmlinkage long sys_pidfd_send_signal(int pidfd, int sig,
 				       siginfo_t __user *info,
 				       unsigned int flags);
 
+/* Popcorn Linux syscalls */
+#include <popcorn/bundle.h>
+asmlinkage long sys_popcorn_migrate(int nid, void __user * uregs);
+asmlinkage long sys_popcorn_propose_migration(pid_t pid, int nid);
+asmlinkage long sys_popcorn_get_thread_status(struct popcorn_thread_status __user *
+					      status);
+asmlinkage long sys_popcorn_get_node_info(int * _my_nid,
+					  struct popcorn_node_info __user * info);
+
 /*
  * Architecture-specific system calls
  */
