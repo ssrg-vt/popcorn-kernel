@@ -209,9 +209,11 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				req->param1, (fd_set __user *)req->param2,
 				(fd_set __user *)req->param3,
 				(struct timeval __user *)req->param4);
+		break;
 	case PCN_SYSCALL_FCNTL:
 		retval = sys_fcntl((unsigned int) req->param0, (unsigned int)
 				req->param1, (unsigned long)req->param2);
+		break;
 	default:
 		retval = -EINVAL;
 	}
