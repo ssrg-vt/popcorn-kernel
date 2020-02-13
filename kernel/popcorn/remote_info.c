@@ -343,6 +343,9 @@ unsigned int get_number_cpus_from_remote_node(unsigned int nid)
 	case POPCORN_ARCH_ARM:
 		num_cpus = saved_cpu_info[nid]->arm64.num_cpus;
 		break;
+	case POPCORN_ARCH_RISCV:
+		num_cpus = saved_cpu_info[nid]->riscv.num_cpus;
+		break;
 	default:
 		RIPRINTK("%s: Unknown CPU\n", __func__);
 		num_cpus = 0;
@@ -464,6 +467,20 @@ static void print_arm_cpuinfo(struct seq_file *m,
 	return;
 }
 
+static void print_riscv_cpuinfo(struct seq_file *m,
+		       struct remote_cpu_info *data,
+		       int count)
+{
+	struct percore_info_riscv *cpu = &data->riscv.cores[count];
+
+	seq_printf(m, "processor\t: %u\n", cpu->cpu_id);
+	seq_printf(m, "hart\t\t: %u\n", cpu->hart);
+	seq_printf(m, "isa\t\t: %s\n", cpu->isa);
+	seq_printf(m, "mmu\t\t: %s\n", cpu->mmu);
+
+	return;
+}
+
 static void print_unknown_cpuinfo(struct seq_file *m)
 {
 	seq_puts(m, "processor\t: Unknown\n");
@@ -483,6 +500,9 @@ int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos
 		break;
 	case POPCORN_ARCH_ARM:
 		print_arm_cpuinfo(m, saved_cpu_info[nid], vpos);
+		break;
+	case POPCORN_ARCH_RISCV:
+		print_riscv_cpuinfo(m, saved_cpu_info[nid], vpos);
 		break;
 	default:
 		print_unknown_cpuinfo(m);

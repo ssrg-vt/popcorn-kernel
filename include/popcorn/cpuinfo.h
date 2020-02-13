@@ -78,11 +78,26 @@ struct cpuinfo_arch_arm64 {
 };
 
 
+/* For riscv cores */
+struct percore_info_riscv {
+	unsigned int cpu_id;
+	unsigned int hart;
+	char isa[64];
+	char mmu[8];
+};
+
+struct cpuinfo_arch_riscv {
+	unsigned int num_cpus;
+	struct percore_info_riscv cores[MAX_ARM_CORES];
+};
+
+
 struct remote_cpu_info {
 	enum popcorn_arch arch_type;
 	union {
 		struct cpuinfo_arch_x86 x86;
 		struct cpuinfo_arch_arm64 arm64;
+		struct cpuinfo_arch_riscv riscv;
 	};
 };
 
