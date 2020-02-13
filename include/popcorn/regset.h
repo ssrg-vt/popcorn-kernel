@@ -72,6 +72,20 @@ struct regset_powerpc {
 	unsigned long softe;		/* Soft enabled/disabled */
 };
 
+/* lib/stack_transformation/include/arch/riscv64  */
+struct regset_riscv64
+{
+	/* Stack pointer & program counter */
+	uint64_t sp; // x2
+	uint64_t pc;
+
+	/* General purpose registers */
+	uint64_t x[32];
+
+	/* FPU/SIMD registers */
+	uint64_t f[32];
+};
+
 struct field_arch {
 	unsigned long tls;
 	unsigned long oob[4];
@@ -82,6 +96,7 @@ struct field_arch {
 		struct regset_x86_64 regs_x86;
 		struct regset_aarch64 regs_aarch;
 		struct regset_powerpc regs_ppc;
+		struct regset_riscv64 regs_riscv;
 	};
 };
 
@@ -90,6 +105,7 @@ static inline size_t regset_size(int arch) {
 		sizeof(struct regset_aarch64),
 		sizeof(struct regset_x86_64),
 		sizeof(struct regset_powerpc),
+		sizeof(struct regset_riscv64),
 	};
 	BUG_ON(arch <= POPCORN_ARCH_UNKNOWN || arch >= POPCORN_ARCH_MAX);
 	return sizes[arch];
