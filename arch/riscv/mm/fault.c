@@ -18,6 +18,11 @@
 #include <asm/ptrace.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 /*
  * This routine handles page faults.  It determines the address and the
  * problem, and then passes it off to one of the appropriate routines.
@@ -69,6 +74,21 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 retry:
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
+
+#ifdef CONFIG_POPCORN
+	/* vma worker should not fault */
+	BUG_ON(tsk->is_worker);
+
+	if (distributed_remote_process(tsk)) {
+		if (!vma || vma->vm_start > addr) {
+			if (vma_server_fetch_vma(tsk, addr) == 0) {
+				/* Replace with updated VMA */
+				vma = find_vma(mm, addr);
+			}
+		}
+	}
+#endif
+
 	if (unlikely(!vma))
 		goto bad_area;
 	if (likely(vma->vm_start <= addr))
@@ -157,6 +177,11 @@ good_area:
 			goto retry;
 		}
 	}
+
+#ifdef CONFIG_POPCORN
+	if (distributed_process(current) && (fault & VM_FAULT_RETRY))
+		return;
+#endif
 
 	up_read(&mm->mmap_sem);
 	return;
