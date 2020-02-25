@@ -61,6 +61,7 @@ const char *archs_sz[] = {
 	"aarch64",
 	"x86_64",
 	"ppc64le",
+	"riscv64",
 };
 
 
