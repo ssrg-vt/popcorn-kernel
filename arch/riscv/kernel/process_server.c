@@ -80,6 +80,9 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 {
 	struct pt_regs *regs = current_pt_regs();
 	struct regset_riscv64 *regset = &arch->regs_riscv;
+	int cpu;
+
+	cpu = get_cpu();
 
 	regs->sp = regset->sp;
 	regs->sepc = regset->pc;
@@ -119,6 +122,8 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 	if (restore_segments) {
 		regs->tp = arch->tls;
 	}
+
+	put_cpu();
 
 	return 0;
 }
