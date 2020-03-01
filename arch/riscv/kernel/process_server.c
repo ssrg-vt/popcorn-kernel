@@ -121,6 +121,8 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 
 	if (restore_segments) {
 		regs->tp = arch->tls;
+		regs->sstatus = 0;
+		//fstate_retore(current, regs);
 	}
 
 	put_cpu();
