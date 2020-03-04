@@ -85,11 +85,10 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 
 	cpu = get_cpu();
 
-	regs->sp = regset->sp;
 	regs->sepc = regset->pc;
 
 	regs->ra = regset->x[1];
-	//regs->sp = regset->x[2];
+	regs->sp = regset->x[2];
 	regs->gp = regset->x[3];
 	//regs->tp = regset->x[4];
 	regs->t0 = regset->x[5];

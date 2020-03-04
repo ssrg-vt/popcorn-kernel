@@ -75,14 +75,13 @@ struct regset_powerpc {
 /* lib/stack_transformation/include/arch/riscv64  */
 struct regset_riscv64
 {
-	/* Stack pointer & program counter */
-	uint64_t sp; // x2
-	uint64_t pc;
+	/* Program counter */
+	void* pc;
 
 	/* General purpose registers */
 	uint64_t x[32];
 
-	/* FPU/SIMD registers */
+	/* FPU registers */
 	uint64_t f[32];
 };
 
