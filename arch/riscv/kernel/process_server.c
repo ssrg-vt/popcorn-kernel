@@ -15,6 +15,7 @@
 #include <linux/sched/task_stack.h>
 
 #include <asm/compat.h>
+#include <asm/switch_to.h>
 
 #include <popcorn/regset.h>
 #include <popcorn/debug.h>
@@ -122,7 +123,8 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 	if (restore_segments) {
 		regs->tp = arch->tls;
 		regs->sstatus = 0;
-		//fstate_retore(current, regs);
+		regs->sstatus |= SR_FS_INITIAL;
+		fstate_restore(current, regs);
 	}
 
 	put_cpu();
