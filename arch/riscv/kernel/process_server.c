@@ -42,11 +42,13 @@
  */
 int save_thread_info(struct field_arch *arch)
 {
+	struct pt_regs *regs = current_pt_regs();
 	int cpu;
 
 	cpu = get_cpu();
 
-	asm("mv %0, tp;" : "=r"(arch->tls));
+	arch->tls = regs->tp;
+	//asm("mv %0, tp;" : "=r"(arch->tls));
 
 	put_cpu();
 
@@ -127,6 +129,10 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 	}
 
 	put_cpu();
+
+#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
+	PSPRINTK("%s [%d]\n", __func__, current->pid);
+#endif
 
 	return 0;
 }
