@@ -87,9 +87,7 @@ int save_thread_info(struct field_arch *arch)
 
 	put_cpu();
 
-	/*
 	PSPRINTK("%s [%d] tls %lx\n", __func__, current->pid, arch->tls);
-	*/
 
 	return 0;
 }

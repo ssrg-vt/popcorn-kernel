@@ -131,7 +131,11 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 	put_cpu();
 
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
-	PSPRINTK("%s [%d]\n", __func__, current->pid);
+	PSPRINTK("%s [%d] tls %lx\n", __func__, current->pid, arch->tls);
+	PSPRINTK("%s [%d] ip %lx\n", __func__, current->pid,
+			regs->sepc);
+	PSPRINTK("%s [%d] sp %lx bp %lx\n", __func__, current->pid,
+			regs->sp, regs->s0);
 #endif
 
 	return 0;
