@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Rockchip Successive Approximation Register (SAR) A/D Converter
  * Copyright (C) 2014 ROCKCHIP, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -109,7 +100,7 @@ static int rockchip_saradc_read_raw(struct iio_dev *indio_dev,
 
 static irqreturn_t rockchip_saradc_isr(int irq, void *dev_id)
 {
-	struct rockchip_saradc *info = (struct rockchip_saradc *)dev_id;
+	struct rockchip_saradc *info = dev_id;
 
 	/* Read value */
 	info->last_val = readl_relaxed(info->regs + SARADC_DATA);
@@ -125,7 +116,6 @@ static irqreturn_t rockchip_saradc_isr(int irq, void *dev_id)
 
 static const struct iio_info rockchip_saradc_iio_info = {
 	.read_raw = rockchip_saradc_read_raw,
-	.driver_module = THIS_MODULE,
 };
 
 #define ADC_CHANNEL(_index, _id) {				\
@@ -162,6 +152,22 @@ static const struct rockchip_saradc_data rk3066_tsadc_data = {
 	.clk_rate = 50000,
 };
 
+static const struct iio_chan_spec rockchip_rk3399_saradc_iio_channels[] = {
+	ADC_CHANNEL(0, "adc0"),
+	ADC_CHANNEL(1, "adc1"),
+	ADC_CHANNEL(2, "adc2"),
+	ADC_CHANNEL(3, "adc3"),
+	ADC_CHANNEL(4, "adc4"),
+	ADC_CHANNEL(5, "adc5"),
+};
+
+static const struct rockchip_saradc_data rk3399_saradc_data = {
+	.num_bits = 10,
+	.channels = rockchip_rk3399_saradc_iio_channels,
+	.num_channels = ARRAY_SIZE(rockchip_rk3399_saradc_iio_channels),
+	.clk_rate = 1000000,
+};
+
 static const struct of_device_id rockchip_saradc_match[] = {
 	{
 		.compatible = "rockchip,saradc",
@@ -169,6 +175,9 @@ static const struct of_device_id rockchip_saradc_match[] = {
 	}, {
 		.compatible = "rockchip,rk3066-tsadc",
 		.data = &rk3066_tsadc_data,
+	}, {
+		.compatible = "rockchip,rk3399-saradc",
+		.data = &rk3399_saradc_data,
 	},
 	{},
 };
@@ -205,6 +214,11 @@ static int rockchip_saradc_probe(struct platform_device *pdev)
 	info = iio_priv(indio_dev);
 
 	match = of_match_device(rockchip_saradc_match, &pdev->dev);
+	if (!match) {
+		dev_err(&pdev->dev, "failed to match device\n");
+		return -ENODEV;
+	}
+
 	info->data = match->data;
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -216,7 +230,8 @@ static int rockchip_saradc_probe(struct platform_device *pdev)
 	 * The reset should be an optional property, as it should work
 	 * with old devicetrees as well
 	 */
-	info->reset = devm_reset_control_get(&pdev->dev, "saradc-apb");
+	info->reset = devm_reset_control_get_exclusive(&pdev->dev,
+						       "saradc-apb");
 	if (IS_ERR(info->reset)) {
 		ret = PTR_ERR(info->reset);
 		if (ret != -ENOENT)

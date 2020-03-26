@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP Remote Processor driver
  *
@@ -10,15 +11,6 @@
  * Mark Grosen <mgrosen@ti.com>
  * Suman Anna <s-anna@ti.com>
  * Hari Kanigeri <h-kanigeri2@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -96,7 +88,8 @@ static void omap_rproc_kick(struct rproc *rproc, int vqid)
 	/* send the index of the triggered virtqueue in the mailbox payload */
 	ret = mbox_send_message(oproc->mbox, (void *)vqid);
 	if (ret < 0)
-		dev_err(dev, "omap_mbox_msg_send failed: %d\n", ret);
+		dev_err(dev, "failed to send mailbox message, status = %d\n",
+			ret);
 }
 
 /*
@@ -176,7 +169,7 @@ static int omap_rproc_stop(struct rproc *rproc)
 	return 0;
 }
 
-static struct rproc_ops omap_rproc_ops = {
+static const struct rproc_ops omap_rproc_ops = {
 	.start		= omap_rproc_start,
 	.stop		= omap_rproc_stop,
 	.kick		= omap_rproc_kick,
@@ -196,7 +189,7 @@ static int omap_rproc_probe(struct platform_device *pdev)
 	}
 
 	rproc = rproc_alloc(&pdev->dev, pdata->name, &omap_rproc_ops,
-				pdata->firmware, sizeof(*oproc));
+			    pdata->firmware, sizeof(*oproc));
 	if (!rproc)
 		return -ENOMEM;
 
@@ -214,7 +207,7 @@ static int omap_rproc_probe(struct platform_device *pdev)
 	return 0;
 
 free_rproc:
-	rproc_put(rproc);
+	rproc_free(rproc);
 	return ret;
 }
 
@@ -223,7 +216,7 @@ static int omap_rproc_remove(struct platform_device *pdev)
 	struct rproc *rproc = platform_get_drvdata(pdev);
 
 	rproc_del(rproc);
-	rproc_put(rproc);
+	rproc_free(rproc);
 
 	return 0;
 }

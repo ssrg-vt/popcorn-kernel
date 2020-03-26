@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/acpi.h>
+#include <linux/property.h>
 #include <linux/mfd/core.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
@@ -106,7 +107,7 @@ static void mfd_acpi_add_device(const struct mfd_cell *cell,
 
 			strlcpy(ids[0].id, match->pnpid, sizeof(ids[0].id));
 			list_for_each_entry(child, &parent->children, node) {
-				if (acpi_match_device_ids(child, ids)) {
+				if (!acpi_match_device_ids(child, ids)) {
 					adev = child;
 					break;
 				}
@@ -157,7 +158,7 @@ static int mfd_add_device(struct device *parent, int id,
 	if (!pdev)
 		goto fail_alloc;
 
-	res = kzalloc(sizeof(*res) * cell->num_resources, GFP_KERNEL);
+	res = kcalloc(cell->num_resources, sizeof(*res), GFP_KERNEL);
 	if (!res)
 		goto fail_device;
 
@@ -188,6 +189,12 @@ static int mfd_add_device(struct device *parent, int id,
 	if (cell->pdata_size) {
 		ret = platform_device_add_data(pdev,
 					cell->platform_data, cell->pdata_size);
+		if (ret)
+			goto fail_alias;
+	}
+
+	if (cell->properties) {
+		ret = platform_device_add_properties(pdev, cell->properties);
 		if (ret)
 			goto fail_alias;
 	}
@@ -262,6 +269,19 @@ fail_alloc:
 	return ret;
 }
 
+/**
+ * mfd_add_devices - register child devices
+ *
+ * @parent:	Pointer to parent device.
+ * @id:		Can be PLATFORM_DEVID_AUTO to let the Platform API take care
+ *		of device numbering, or will be added to a device's cell_id.
+ * @cells:	Array of (struct mfd_cell)s describing child devices.
+ * @n_devs:	Number of child devices to register.
+ * @mem_base:	Parent register range resource for child devices.
+ * @irq_base:	Base of the range of virtual interrupt numbers allocated for
+ *		this MFD device. Unused if @domain is specified.
+ * @domain:	Interrupt domain to create mappings for hardware interrupts.
+ */
 int mfd_add_devices(struct device *parent, int id,
 		    const struct mfd_cell *cells, int n_devs,
 		    struct resource *mem_base,
@@ -326,6 +346,44 @@ void mfd_remove_devices(struct device *parent)
 	kfree(cnts);
 }
 EXPORT_SYMBOL(mfd_remove_devices);
+
+static void devm_mfd_dev_release(struct device *dev, void *res)
+{
+	mfd_remove_devices(dev);
+}
+
+/**
+ * devm_mfd_add_devices - Resource managed version of mfd_add_devices()
+ *
+ * Returns 0 on success or an appropriate negative error number on failure.
+ * All child-devices of the MFD will automatically be removed when it gets
+ * unbinded.
+ */
+int devm_mfd_add_devices(struct device *dev, int id,
+			 const struct mfd_cell *cells, int n_devs,
+			 struct resource *mem_base,
+			 int irq_base, struct irq_domain *domain)
+{
+	struct device **ptr;
+	int ret;
+
+	ptr = devres_alloc(devm_mfd_dev_release, sizeof(*ptr), GFP_KERNEL);
+	if (!ptr)
+		return -ENOMEM;
+
+	ret = mfd_add_devices(dev, id, cells, n_devs, mem_base,
+			      irq_base, domain);
+	if (ret < 0) {
+		devres_free(ptr);
+		return ret;
+	}
+
+	*ptr = dev;
+	devres_add(dev, ptr);
+
+	return ret;
+}
+EXPORT_SYMBOL(devm_mfd_add_devices);
 
 int mfd_clone_cell(const char *cell, const char **clones, size_t n_clones)
 {

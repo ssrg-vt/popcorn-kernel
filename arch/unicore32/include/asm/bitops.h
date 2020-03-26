@@ -22,7 +22,7 @@
  * the cntlz instruction for much better code efficiency.
  */
 
-static inline int fls(int x)
+static inline int fls(unsigned int x)
 {
 	int ret;
 
@@ -43,5 +43,7 @@ static inline int fls(int x)
 #define find_next_zero_bit	find_next_zero_bit
 #define find_first_bit		find_first_bit
 #define find_first_zero_bit	find_first_zero_bit
+
+#include <asm-generic/bitops/find.h>
 
 #endif /* __UNICORE_BITOPS_H__ */

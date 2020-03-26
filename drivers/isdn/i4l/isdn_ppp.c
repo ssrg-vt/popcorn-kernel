@@ -50,7 +50,7 @@ static struct ippp_ccp_reset *isdn_ppp_ccp_reset_alloc(struct ippp_struct *is);
 static void isdn_ppp_ccp_reset_free(struct ippp_struct *is);
 static void isdn_ppp_ccp_reset_free_state(struct ippp_struct *is,
 					  unsigned char id);
-static void isdn_ppp_ccp_timer_callback(unsigned long closure);
+static void isdn_ppp_ccp_timer_callback(struct timer_list *t);
 static struct ippp_ccp_reset_state *isdn_ppp_ccp_reset_alloc_state(struct ippp_struct *is,
 								   unsigned char id);
 static void isdn_ppp_ccp_reset_trans(struct ippp_struct *is,
@@ -685,10 +685,10 @@ isdn_ppp_ioctl(int min, struct file *file, unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
-unsigned int
+__poll_t
 isdn_ppp_poll(struct file *file, poll_table *wait)
 {
-	u_int mask;
+	__poll_t mask;
 	struct ippp_buf_queue *bf, *bl;
 	u_long flags;
 	struct ippp_struct *is;
@@ -704,12 +704,12 @@ isdn_ppp_poll(struct file *file, poll_table *wait)
 
 	if (!(is->state & IPPP_OPEN)) {
 		if (is->state == IPPP_CLOSEWAIT)
-			return POLLHUP;
+			return EPOLLHUP;
 		printk(KERN_DEBUG "isdn_ppp: device not open\n");
-		return POLLERR;
+		return EPOLLERR;
 	}
 	/* we're always ready to send .. */
-	mask = POLLOUT | POLLWRNORM;
+	mask = EPOLLOUT | EPOLLWRNORM;
 
 	spin_lock_irqsave(&is->buflock, flags);
 	bl = is->last;
@@ -719,7 +719,7 @@ isdn_ppp_poll(struct file *file, poll_table *wait)
 	 */
 	if (bf->next != bl || (is->state & IPPP_NOBLOCK)) {
 		is->state &= ~IPPP_NOBLOCK;
-		mask |= POLLIN | POLLRDNORM;
+		mask |= EPOLLIN | EPOLLRDNORM;
 	}
 	spin_unlock_irqrestore(&is->buflock, flags);
 	return mask;
@@ -794,9 +794,6 @@ isdn_ppp_read(int min, struct file *file, char __user *buf, int count)
 
 	if (!(is->state & IPPP_OPEN))
 		return 0;
-
-	if (!access_ok(VERIFY_WRITE, buf, count))
-		return -EFAULT;
 
 	spin_lock_irqsave(&is->buflock, flags);
 	b = is->first->next;
@@ -1325,7 +1322,7 @@ isdn_ppp_xmit(struct sk_buff *skb, struct net_device *netdev)
 	/* check if we should pass this packet
 	 * the filter instructions are constructed assuming
 	 * a four-byte PPP header on each packet */
-	*skb_push(skb, 4) = 1; /* indicate outbound */
+	*(u8 *)skb_push(skb, 4) = 1; /* indicate outbound */
 
 	{
 		__be16 *p = (__be16 *)skb->data;
@@ -1522,7 +1519,7 @@ int isdn_ppp_autodial_filter(struct sk_buff *skb, isdn_net_local *lp)
 	 * temporarily remove part of the fake header stuck on
 	 * earlier.
 	 */
-	*skb_pull(skb, IPPP_MAX_HEADER - 4) = 1; /* indicate outbound */
+	*(u8 *)skb_pull(skb, IPPP_MAX_HEADER - 4) = 1; /* indicate outbound */
 
 	{
 		__be16 *p = (__be16 *)skb->data;
@@ -1891,8 +1888,9 @@ static u32 isdn_ppp_mp_get_seq(int short_seq,
 	return seq;
 }
 
-struct sk_buff *isdn_ppp_mp_discard(ippp_bundle *mp,
-				    struct sk_buff *from, struct sk_buff *to)
+static struct sk_buff *isdn_ppp_mp_discard(ippp_bundle *mp,
+					   struct sk_buff *from,
+					   struct sk_buff *to)
 {
 	if (from)
 		while (from != to) {
@@ -1903,8 +1901,8 @@ struct sk_buff *isdn_ppp_mp_discard(ippp_bundle *mp,
 	return from;
 }
 
-void isdn_ppp_mp_reassembly(isdn_net_dev *net_dev, isdn_net_local *lp,
-			    struct sk_buff *from, struct sk_buff *to)
+static void isdn_ppp_mp_reassembly(isdn_net_dev *net_dev, isdn_net_local *lp,
+				   struct sk_buff *from, struct sk_buff *to)
 {
 	ippp_bundle *mp = net_dev->pb;
 	int proto;
@@ -2026,9 +2024,6 @@ isdn_ppp_dev_ioctl_stats(int slot, struct ifreq *ifr, struct net_device *dev)
 	struct ppp_stats __user *res = ifr->ifr_data;
 	struct ppp_stats t;
 	isdn_net_local *lp = netdev_priv(dev);
-
-	if (!access_ok(VERIFY_WRITE, res, sizeof(struct ppp_stats)))
-		return -EFAULT;
 
 	/* build a temporary stat struct and copy it to user space */
 
@@ -2271,8 +2266,7 @@ static void isdn_ppp_ccp_xmit_reset(struct ippp_struct *is, int proto,
 
 	/* Now stuff remaining bytes */
 	if (len) {
-		p = skb_put(skb, len);
-		memcpy(p, data, len);
+		skb_put_data(skb, data, len);
 	}
 
 	/* skb is now ready for xmit */
@@ -2334,10 +2328,10 @@ static void isdn_ppp_ccp_reset_free_state(struct ippp_struct *is,
 
 /* The timer callback function which is called when a ResetReq has timed out,
    aka has never been answered by a ResetAck */
-static void isdn_ppp_ccp_timer_callback(unsigned long closure)
+static void isdn_ppp_ccp_timer_callback(struct timer_list *t)
 {
 	struct ippp_ccp_reset_state *rs =
-		(struct ippp_ccp_reset_state *)closure;
+		from_timer(rs, t, timer);
 
 	if (!rs) {
 		printk(KERN_ERR "ippp_ccp: timer cb with zero closure.\n");
@@ -2383,9 +2377,7 @@ static struct ippp_ccp_reset_state *isdn_ppp_ccp_reset_alloc_state(struct ippp_s
 		rs->state = CCPResetIdle;
 		rs->is = is;
 		rs->id = id;
-		init_timer(&rs->timer);
-		rs->timer.data = (unsigned long)rs;
-		rs->timer.function = isdn_ppp_ccp_timer_callback;
+		timer_setup(&rs->timer, isdn_ppp_ccp_timer_callback, 0);
 		is->reset->rs[id] = rs;
 	}
 	return rs;

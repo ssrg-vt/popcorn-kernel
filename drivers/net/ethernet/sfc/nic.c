@@ -34,8 +34,8 @@
 int efx_nic_alloc_buffer(struct efx_nic *efx, struct efx_buffer *buffer,
 			 unsigned int len, gfp_t gfp_flags)
 {
-	buffer->addr = dma_zalloc_coherent(&efx->pci_dev->dev, len,
-					   &buffer->dma_addr, gfp_flags);
+	buffer->addr = dma_alloc_coherent(&efx->pci_dev->dev, len,
+					  &buffer->dma_addr, gfp_flags);
 	if (!buffer->addr)
 		return -ENOMEM;
 	buffer->len = len;
@@ -66,11 +66,11 @@ void efx_nic_event_test_start(struct efx_channel *channel)
 	channel->efx->type->ev_test_generate(channel);
 }
 
-void efx_nic_irq_test_start(struct efx_nic *efx)
+int efx_nic_irq_test_start(struct efx_nic *efx)
 {
 	efx->last_irq_cpu = -1;
 	smp_wmb();
-	efx->type->irq_test_generate(efx);
+	return efx->type->irq_test_generate(efx);
 }
 
 /* Hook interrupt handler(s)

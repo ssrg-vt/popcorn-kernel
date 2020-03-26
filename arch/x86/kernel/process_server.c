@@ -68,14 +68,14 @@ int save_thread_info(struct field_arch *arch)
 
 	savesegment(fs, fsindex);
 	if (fsindex) {
-		fs = get_desc_base(current->thread.tls_array + FS_TLS);
+		fs = get_desc_base(current->thread.tls_array + current->thread.fsbase);
 	} else {
 		rdmsrl(MSR_FS_BASE, fs);
 	}
 
 	savesegment(gs, gsindex);
 	if (gsindex) {
-		gs = get_desc_base(current->thread.tls_array + GS_TLS);
+		gs = get_desc_base(current->thread.tls_array + current->thread.gsbase);
 	} else {
 		rdmsrl(MSR_KERNEL_GS_BASE, gs);
 	}
@@ -84,14 +84,11 @@ int save_thread_info(struct field_arch *arch)
 	WARN_ON(es);
 	WARN_ON(gs);
 	arch->tls = fs;
-	arch->fpu_active = !!current->thread.fpu.fpstate_active;
 
 	put_cpu();
 
 	/*
 	PSPRINTK("%s [%d] tls %lx\n", __func__, current->pid, arch->tls);
-	PSPRINTK("%s [%d] fpu %sactive\n", __func__, current->pid,
-			arch->fpu_active ? "" : "in");
 	*/
 
 	return 0;
@@ -161,27 +158,20 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 		*/
 
 		if (arch->tls) {
-			do_arch_prctl(current, ARCH_SET_FS, arch->tls);
+			do_arch_prctl_64(current, ARCH_SET_FS, arch->tls);
 		}
 		/*
 		if (arch->thread_gs) {
-			do_arch_prctl(current, ARCH_SET_GS, arch->thread_gs);
+			do_arch_prctl_64(current, ARCH_SET_GS, arch->thread_gs);
 		}
 		*/
-		if (arch->fpu_active) {
-			fpu__activate_curr(&current->thread.fpu);
-		}
 	}
 
 	put_cpu();
 
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
-	PSPRINTK("%s [%d] ip %lx\n", __func__, current->pid,
-			regs->ip);
-	PSPRINTK("%s [%d] sp %lx bp %lx\n", __func__, current->pid,
-			regs->sp, regs->bp);
-	PSPRINTK("%s [%d] fs %lx fpu %sactive\n", __func__, current->pid,
-			arch->tls, arch->fpu_active ? "" : "in");
+	PSPRINTK("%s [%d] ip %lx\n", __func__, current->pid, regs->ip);
+	PSPRINTK("%s [%d] sp %lx bp %lx\n", __func__, current->pid, regs->sp, regs->bp);
 #endif
 	return 0;
 }
@@ -190,7 +180,7 @@ int restore_thread_info(struct field_arch *arch, bool restore_segments)
 noinline_for_stack void update_frame_pointer(void)
 {
 	unsigned long *rbp;
-	get_bp(rbp); /* update_frame_pointer */
+	rbp = __builtin_frame_address(0); /* update_frame_pointer */
 
 	/* User rbp is at one stack frames below */
 	*rbp = current_pt_regs()->bp;	/* sched_migrate */
@@ -249,8 +239,8 @@ void dump_processor_regs(struct pt_regs* regs)
 	}
 	rdmsrl(MSR_FS_BASE, fs);
 	rdmsrl(MSR_GS_BASE, gs);
-	printk(KERN_ALERT"fs{%lx} - %lx content %lx\n",fs, current->thread.fs, fs ? * (unsigned long*)fs : 0x1234567l);
-	printk(KERN_ALERT"gs{%lx} - %lx content %lx\n",gs, current->thread.gs, fs ? * (unsigned long*)gs : 0x1234567l);
+	printk(KERN_ALERT"fs{%lx} - %lx content %lx\n",fs, current->thread.fsbase, fs ? * (unsigned long*)fs : 0x1234567l);
+	printk(KERN_ALERT"gs{%lx} - %lx content %lx\n",gs, current->thread.gsbase, fs ? * (unsigned long*)gs : 0x1234567l);
 
 	savesegment(fs, fsindex);
 	savesegment(gs, gsindex);

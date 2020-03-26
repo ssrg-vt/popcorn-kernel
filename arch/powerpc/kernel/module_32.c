@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*  Kernel module help for PPC.
     Copyright (C) 2001 Rusty Russell.
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -109,12 +97,12 @@ static unsigned long get_plt_size(const Elf32_Ehdr *hdr,
 	for (i = 1; i < hdr->e_shnum; i++) {
 		/* If it's called *.init*, and we're not init, we're
                    not interested */
-		if ((strstr(secstrings + sechdrs[i].sh_name, ".init") != 0)
+		if ((strstr(secstrings + sechdrs[i].sh_name, ".init") != NULL)
 		    != is_init)
 			continue;
 
 		/* We don't want to look at debug sections. */
-		if (strstr(secstrings + sechdrs[i].sh_name, ".debug") != 0)
+		if (strstr(secstrings + sechdrs[i].sh_name, ".debug"))
 			continue;
 
 		if (sechdrs[i].sh_type == SHT_RELA) {
@@ -181,15 +169,15 @@ static inline int entry_matches(struct ppc_plt_entry *entry, Elf32_Addr val)
 /* Set up a trampoline in the PLT to bounce us to the distant function */
 static uint32_t do_plt_call(void *location,
 			    Elf32_Addr val,
-			    Elf32_Shdr *sechdrs,
+			    const Elf32_Shdr *sechdrs,
 			    struct module *mod)
 {
 	struct ppc_plt_entry *entry;
 
 	pr_debug("Doing plt for call to 0x%x at 0x%x\n", val, (unsigned int)location);
 	/* Init, or core PLT? */
-	if (location >= mod->module_core
-	    && location < mod->module_core + mod->core_size)
+	if (location >= mod->core_layout.base
+	    && location < mod->core_layout.base + mod->core_layout.size)
 		entry = (void *)sechdrs[mod->arch.core_plt_section].sh_addr;
 	else
 		entry = (void *)sechdrs[mod->arch.init_plt_section].sh_addr;
@@ -294,11 +282,19 @@ int apply_relocate_add(Elf32_Shdr *sechdrs,
 			return -ENOEXEC;
 		}
 	}
-#ifdef CONFIG_DYNAMIC_FTRACE
-	module->arch.tramp =
-		do_plt_call(module->module_core,
-			    (unsigned long)ftrace_caller,
-			    sechdrs, module);
-#endif
+
 	return 0;
 }
+
+#ifdef CONFIG_DYNAMIC_FTRACE
+int module_finalize_ftrace(struct module *module, const Elf_Shdr *sechdrs)
+{
+	module->arch.tramp = do_plt_call(module->core_layout.base,
+					 (unsigned long)ftrace_caller,
+					 sechdrs, module);
+	if (!module->arch.tramp)
+		return -ENOENT;
+
+	return 0;
+}
+#endif

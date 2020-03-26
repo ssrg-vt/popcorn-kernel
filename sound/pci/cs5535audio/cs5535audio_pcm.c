@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for audio on multifunction CS5535 companion device
  * Copyright (C) Jaya Kumar
  *
  * Based on Jaroslav Kysela and Takashi Iwai's examples.
  * This work was sponsored by CIS(M) Sdn Bhd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  *
  * todo: add be fmt support, spdif, pm
  */
@@ -33,7 +20,7 @@
 #include <sound/ac97_codec.h>
 #include "cs5535audio.h"
 
-static struct snd_pcm_hardware snd_cs5535audio_playback =
+static const struct snd_pcm_hardware snd_cs5535audio_playback =
 {
 	.info =			(
 				SNDRV_PCM_INFO_MMAP |
@@ -62,7 +49,7 @@ static struct snd_pcm_hardware snd_cs5535audio_playback =
 	.fifo_size =		0,
 };
 
-static struct snd_pcm_hardware snd_cs5535audio_capture =
+static const struct snd_pcm_hardware snd_cs5535audio_capture =
 {
 	.info =			(
 				SNDRV_PCM_INFO_MMAP |
@@ -158,8 +145,8 @@ static int cs5535audio_build_dma_packets(struct cs5535audio *cs5535au,
 	lastdesc->addr = cpu_to_le32((u32) dma->desc_buf.addr);
 	lastdesc->size = 0;
 	lastdesc->ctlreserved = cpu_to_le16(PRD_JMP);
-	jmpprd_addr = cpu_to_le32(lastdesc->addr +
-				  (sizeof(struct cs5535audio_dma_desc)*periods));
+	jmpprd_addr = (u32)dma->desc_buf.addr +
+		sizeof(struct cs5535audio_dma_desc) * periods;
 
 	dma->substream = substream;
 	dma->period_bytes = period_bytes;
@@ -380,7 +367,7 @@ static int snd_cs5535audio_capture_prepare(struct snd_pcm_substream *substream)
 				 substream->runtime->rate);
 }
 
-static struct snd_pcm_ops snd_cs5535audio_playback_ops = {
+static const struct snd_pcm_ops snd_cs5535audio_playback_ops = {
 	.open =		snd_cs5535audio_playback_open,
 	.close =	snd_cs5535audio_playback_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -391,7 +378,7 @@ static struct snd_pcm_ops snd_cs5535audio_playback_ops = {
 	.pointer =	snd_cs5535audio_pcm_pointer,
 };
 
-static struct snd_pcm_ops snd_cs5535audio_capture_ops = {
+static const struct snd_pcm_ops snd_cs5535audio_capture_ops = {
 	.open =		snd_cs5535audio_capture_open,
 	.close =	snd_cs5535audio_capture_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -402,7 +389,7 @@ static struct snd_pcm_ops snd_cs5535audio_capture_ops = {
 	.pointer =	snd_cs5535audio_pcm_pointer,
 };
 
-static struct cs5535audio_dma_ops snd_cs5535audio_playback_dma_ops = {
+static const struct cs5535audio_dma_ops snd_cs5535audio_playback_dma_ops = {
         .type = CS5535AUDIO_DMA_PLAYBACK,
         .enable_dma = cs5535audio_playback_enable_dma,
         .disable_dma = cs5535audio_playback_disable_dma,
@@ -412,7 +399,7 @@ static struct cs5535audio_dma_ops snd_cs5535audio_playback_dma_ops = {
         .read_dma_pntr = cs5535audio_playback_read_dma_pntr,
 };
 
-static struct cs5535audio_dma_ops snd_cs5535audio_capture_dma_ops = {
+static const struct cs5535audio_dma_ops snd_cs5535audio_capture_dma_ops = {
         .type = CS5535AUDIO_DMA_CAPTURE,
         .enable_dma = cs5535audio_capture_enable_dma,
         .disable_dma = cs5535audio_capture_disable_dma,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for the SGS-Thomson M48T35 Timekeeper RAM chip
  *
@@ -7,11 +8,6 @@
  * Copyright (C) 2008 Thomas Bogendoerfer
  *
  * Based on code written by Paul Gortmaker.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #include <linux/module.h>
@@ -21,8 +17,6 @@
 #include <linux/bcd.h>
 #include <linux/io.h>
 #include <linux/err.h>
-
-#define DRV_VERSION		"1.0"
 
 struct m48t35_rtc {
 	u8	pad[0x7ff8];    /* starts at 0x7ff8 */
@@ -86,7 +80,7 @@ static int m48t35_read_time(struct device *dev, struct rtc_time *tm)
 		tm->tm_year += 100;
 
 	tm->tm_mon--;
-	return rtc_valid_tm(tm);
+	return 0;
 }
 
 static int m48t35_set_time(struct device *dev, struct rtc_time *tm)
@@ -190,5 +184,4 @@ module_platform_driver(m48t35_platform_driver);
 MODULE_AUTHOR("Thomas Bogendoerfer <tsbogend@alpha.franken.de>");
 MODULE_DESCRIPTION("M48T35 RTC driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(DRV_VERSION);
 MODULE_ALIAS("platform:rtc-m48t35");

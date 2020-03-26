@@ -18,14 +18,18 @@
 #include <linux/clk-provider.h>
 #include <linux/debugfs.h>
 #include <linux/idr.h>
+#include <linux/io.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mfd/core.h>
 #include <linux/pm_qos.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/seq_file.h>
 #include <linux/io-64-nonatomic-lo-hi.h>
+
+#include <linux/dma/idma64.h>
 
 #include "intel-lpss.h"
 
@@ -39,8 +43,8 @@
 
 /* Offsets from lpss->priv */
 #define LPSS_PRIV_RESETS		0x04
-#define LPSS_PRIV_RESETS_FUNC		BIT(2)
-#define LPSS_PRIV_RESETS_IDMA		0x3
+#define LPSS_PRIV_RESETS_IDMA		BIT(2)
+#define LPSS_PRIV_RESETS_FUNC		0x3
 
 #define LPSS_PRIV_ACTIVELTR		0x10
 #define LPSS_PRIV_IDLELTR		0x14
@@ -73,7 +77,7 @@ struct intel_lpss {
 	enum intel_lpss_dev_type type;
 	struct clk *clk;
 	struct clk_lookup *clock;
-	const struct mfd_cell *cell;
+	struct mfd_cell *cell;
 	struct device *dev;
 	void __iomem *priv;
 	u32 priv_ctx[LPSS_PRIV_REG_COUNT];
@@ -94,8 +98,6 @@ static const struct resource intel_lpss_idma64_resources[] = {
 	DEFINE_RES_MEM(LPSS_IDMA64_OFFSET, LPSS_IDMA64_SIZE),
 	DEFINE_RES_IRQ(0),
 };
-
-#define LPSS_IDMA64_DRIVER_NAME		"idma64"
 
 /*
  * Cells needs to be ordered so that the iDMA is created first. This is
@@ -219,6 +221,7 @@ static void intel_lpss_ltr_hide(struct intel_lpss *lpss)
 
 static int intel_lpss_assign_devs(struct intel_lpss *lpss)
 {
+	const struct mfd_cell *cell;
 	unsigned int type;
 
 	type = lpss->caps & LPSS_PRIV_CAPS_TYPE_MASK;
@@ -226,17 +229,21 @@ static int intel_lpss_assign_devs(struct intel_lpss *lpss)
 
 	switch (type) {
 	case LPSS_DEV_I2C:
-		lpss->cell = &intel_lpss_i2c_cell;
+		cell = &intel_lpss_i2c_cell;
 		break;
 	case LPSS_DEV_UART:
-		lpss->cell = &intel_lpss_uart_cell;
+		cell = &intel_lpss_uart_cell;
 		break;
 	case LPSS_DEV_SPI:
-		lpss->cell = &intel_lpss_spi_cell;
+		cell = &intel_lpss_spi_cell;
 		break;
 	default:
 		return -ENODEV;
 	}
+
+	lpss->cell = devm_kmemdup(lpss->dev, cell, sizeof(*cell), GFP_KERNEL);
+	if (!lpss->cell)
+		return -ENOMEM;
 
 	lpss->type = type;
 
@@ -267,12 +274,15 @@ static void intel_lpss_init_dev(const struct intel_lpss *lpss)
 {
 	u32 value = LPSS_PRIV_SSP_REG_DIS_DMA_FIN;
 
+	/* Set the device in reset state */
+	writel(0, lpss->priv + LPSS_PRIV_RESETS);
+
 	intel_lpss_deassert_reset(lpss);
+
+	intel_lpss_set_remap_addr(lpss);
 
 	if (!intel_lpss_has_idma(lpss))
 		return;
-
-	intel_lpss_set_remap_addr(lpss);
 
 	/* Make sure that SPI multiblock DMA transfers are re-enabled */
 	if (lpss->type == LPSS_DEV_SPI)
@@ -332,8 +342,8 @@ static int intel_lpss_register_clock(struct intel_lpss *lpss)
 		return 0;
 
 	/* Root clock */
-	clk = clk_register_fixed_rate(NULL, dev_name(lpss->dev), NULL,
-				      CLK_IS_ROOT, lpss->info->clk_rate);
+	clk = clk_register_fixed_rate(NULL, dev_name(lpss->dev), NULL, 0,
+				      lpss->info->clk_rate);
 	if (IS_ERR(clk))
 		return PTR_ERR(clk);
 
@@ -403,6 +413,8 @@ int intel_lpss_probe(struct device *dev,
 	if (ret)
 		return ret;
 
+	lpss->cell->properties = info->properties;
+
 	intel_lpss_init_dev(lpss);
 
 	lpss->devid = ida_simple_get(&intel_lpss_devid_ida, 0, 0, GFP_KERNEL);
@@ -442,6 +454,8 @@ int intel_lpss_probe(struct device *dev,
 	if (ret)
 		goto err_remove_ltr;
 
+	dev_pm_set_driver_flags(dev, DPM_FLAG_SMART_SUSPEND);
+
 	return 0;
 
 err_remove_ltr:
@@ -470,7 +484,9 @@ EXPORT_SYMBOL_GPL(intel_lpss_remove);
 
 static int resume_lpss_device(struct device *dev, void *data)
 {
-	pm_runtime_resume(dev);
+	if (!dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_SUSPEND))
+		pm_runtime_resume(dev);
+
 	return 0;
 }
 
@@ -493,6 +509,14 @@ int intel_lpss_suspend(struct device *dev)
 	/* Save device context */
 	for (i = 0; i < LPSS_PRIV_REG_COUNT; i++)
 		lpss->priv_ctx[i] = readl(lpss->priv + i * 4);
+
+	/*
+	 * If the device type is not UART, then put the controller into
+	 * reset. UART cannot be put into reset since S3/S0ix fail when
+	 * no_console_suspend flag is enabled.
+	 */
+	if (lpss->type != LPSS_DEV_UART)
+		writel(0, lpss->priv + LPSS_PRIV_RESETS);
 
 	return 0;
 }

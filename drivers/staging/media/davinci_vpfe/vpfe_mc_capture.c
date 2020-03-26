@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2012 Texas Instruments Inc
  *
@@ -9,10 +10,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  *
  * Contributors:
  *      Manjunath Hadli <manjunath.hadli@ti.com>
@@ -74,10 +71,10 @@
 static bool debug;
 static bool interface;
 
-module_param(interface, bool, S_IRUGO);
+module_param(interface, bool, 0444);
 module_param(debug, bool, 0644);
 
-/**
+/*
  * VPFE capture can be used for capturing video such as from TVP5146 or TVP7002
  * and for capture raw bayer data from camera sensors such as mt9p031. At this
  * point there is problem in co-existence of mt9p031 and tvp5146 due to i2c
@@ -227,8 +224,8 @@ static int vpfe_enable_clock(struct vpfe_device *vpfe_dev)
 		return 0;
 
 	vpfe_dev->clks = kcalloc(vpfe_cfg->num_clocks,
-				 sizeof(struct clock *), GFP_KERNEL);
-	if (vpfe_dev->clks == NULL)
+				 sizeof(*vpfe_dev->clks), GFP_KERNEL);
+	if (!vpfe_dev->clks)
 		return -ENOMEM;
 
 	for (i = 0; i < vpfe_cfg->num_clocks; i++) {
@@ -348,7 +345,7 @@ static int register_i2c_devices(struct vpfe_device *vpfe_dev)
 	vpfe_dev->sd =
 		  kcalloc(num_subdevs, sizeof(struct v4l2_subdev *),
 			  GFP_KERNEL);
-	if (vpfe_dev->sd == NULL)
+	if (!vpfe_dev->sd)
 		return -ENOMEM;
 
 	for (i = 0, k = 0; i < num_subdevs; i++) {
@@ -442,35 +439,37 @@ static int vpfe_register_entities(struct vpfe_device *vpfe_dev)
 
 	/* create links now, starting with external(i2c) entities */
 	for (i = 0; i < vpfe_dev->num_ext_subdevs; i++)
-		/* if entity has no pads (ex: amplifier),
-		   cant establish link */
+		/*
+		 * if entity has no pads (ex: amplifier),
+		 * can't establish link
+		 */
 		if (vpfe_dev->sd[i]->entity.num_pads) {
-			ret = media_entity_create_link(&vpfe_dev->sd[i]->entity,
+			ret = media_create_pad_link(&vpfe_dev->sd[i]->entity,
 				0, &vpfe_dev->vpfe_isif.subdev.entity,
 				0, flags);
 			if (ret < 0)
 				goto out_resizer_register;
 		}
 
-	ret = media_entity_create_link(&vpfe_dev->vpfe_isif.subdev.entity, 1,
+	ret = media_create_pad_link(&vpfe_dev->vpfe_isif.subdev.entity, 1,
 				       &vpfe_dev->vpfe_ipipeif.subdev.entity,
 				       0, flags);
 	if (ret < 0)
 		goto out_resizer_register;
 
-	ret = media_entity_create_link(&vpfe_dev->vpfe_ipipeif.subdev.entity, 1,
+	ret = media_create_pad_link(&vpfe_dev->vpfe_ipipeif.subdev.entity, 1,
 				       &vpfe_dev->vpfe_ipipe.subdev.entity,
 				       0, flags);
 	if (ret < 0)
 		goto out_resizer_register;
 
-	ret = media_entity_create_link(&vpfe_dev->vpfe_ipipe.subdev.entity,
+	ret = media_create_pad_link(&vpfe_dev->vpfe_ipipe.subdev.entity,
 			1, &vpfe_dev->vpfe_resizer.crop_resizer.subdev.entity,
 			0, flags);
 	if (ret < 0)
 		goto out_resizer_register;
 
-	ret = media_entity_create_link(&vpfe_dev->vpfe_ipipeif.subdev.entity, 1,
+	ret = media_create_pad_link(&vpfe_dev->vpfe_ipipeif.subdev.entity, 1,
 			&vpfe_dev->vpfe_resizer.crop_resizer.subdev.entity,
 			0, flags);
 	if (ret < 0)
@@ -529,7 +528,7 @@ static void vpfe_cleanup_modules(struct vpfe_device *vpfe_dev,
  * @vpfe_dev - ptr to vpfe capture device
  * @pdev - pointer to platform device
  *
- * intialize all v4l2 subdevs and media entities
+ * initialize all v4l2 subdevs and media entities
  */
 static int vpfe_initialize_modules(struct vpfe_device *vpfe_dev,
 				   struct platform_device *pdev)
@@ -637,7 +636,8 @@ static int vpfe_probe(struct platform_device *pdev)
 		goto probe_disable_clock;
 
 	vpfe_dev->media_dev.dev = vpfe_dev->pdev;
-	strcpy((char *)&vpfe_dev->media_dev.model, "davinci-media");
+	strscpy((char *)&vpfe_dev->media_dev.model, "davinci-media",
+		sizeof(vpfe_dev->media_dev.model));
 
 	ret = media_device_register(&vpfe_dev->media_dev);
 	if (ret) {

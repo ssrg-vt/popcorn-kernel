@@ -1,5 +1,5 @@
-#ifndef __POPCORN_TYPES_H__
-#define __POPCORN_TYPES_H__
+#ifndef __INTERNAL_POPCORN_TYPES_H__
+#define __INTERNAL_POPCORN_TYPES_H__
 
 #include <linux/list.h>
 #include <linux/spinlock.h>
@@ -8,8 +8,11 @@
 #include <linux/signal.h>
 #include <linux/slab.h>
 #include <linux/radix-tree.h>
+#include <linux/sched/task.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
+#include <linux/sched.h>
+#include <popcorn/types.h>
 
 #define FAULTS_HASH 31
 
@@ -60,23 +63,8 @@ bool __put_task_remote(struct remote_context *rc);
 	pid_t remote_pid;\
 	pid_t origin_pid;\
 	unsigned int personality;\
-	/* \
-	unsigned long def_flags;\
-	sigset_t remote_blocked;\
-	sigset_t remote_real_blocked;\
-	sigset_t remote_saved_sigmask;\
-	struct sigpending remote_pending;\
-	unsigned long sas_ss_sp;\
-	size_t sas_ss_size;\
-	struct k_sigaction action[_NSIG]; \
-	*/ \
 	struct field_arch arch;
 DEFINE_PCN_KMSG(back_migration_request_t, BACK_MIGRATION_FIELDS);
-
-typedef struct popcorn_fd {
-    unsigned int idx;
-    char file_path[128];
-} fd_t;
 
 #define CLONE_FIELDS \
 	pid_t origin_tgid;\
@@ -96,18 +84,9 @@ typedef struct popcorn_fd {
 	unsigned int personality;\
 	unsigned long def_flags;\
 	char exe_path[512];\
-    fd_t fds[64];\
-	/* \
-	sigset_t remote_blocked;\
-	sigset_t remote_real_blocked;\
-	sigset_t remote_saved_sigmask;\
-	struct sigpending remote_pending;\
-	unsigned long sas_ss_sp;\
-	size_t sas_ss_size;\
-	struct k_sigaction action[_NSIG];\
-	*/ \
 	struct field_arch arch;
 DEFINE_PCN_KMSG(clone_request_t, CLONE_FIELDS);
+
 
 /**
  * This message is sent in response to a clone request.
@@ -155,12 +134,8 @@ DEFINE_PCN_KMSG(vma_info_request_t, VMA_INFO_REQUEST_FIELDS);
 	char vm_file_path[512];
 DEFINE_PCN_KMSG(vma_info_response_t, VMA_INFO_RESPONSE_FIELDS);
 
-#define DEV_ZERO_STRING	"/dev/zero"
-/* -1 because we want to partial match, no inclusion of '\0' */
-#define DEV_ZERO_STRING_LEN (sizeof(DEV_ZERO_STRING) - 1)
 #define vma_info_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
-#define vma_info_dev_zero(x) (!strncmp((x)->vm_file_path, DEV_ZERO_STRING,\
-			      DEV_ZERO_STRING_LEN))
+
 
 #define VMA_OP_REQUEST_FIELDS \
 	pid_t origin_pid; \
@@ -280,7 +255,7 @@ DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 	int remote_ws; \
 	int op; \
 	u32 val; \
-	struct timespec ts; \
+	struct timespec64 ts; \
 	void *uaddr; \
 	void *uaddr2; \
 	u32 val2; \
@@ -311,56 +286,6 @@ DEFINE_PCN_KMSG(node_info_t, NODE_INFO_FIELDS);
 	int power_3;
 DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
 
-
-/**
- * Syscall server. Allows forwarding and handling of remote system calls.
- */
-
-/* Enumerate syscall types*/
-enum pcn_syscall_types
-{
-	PCN_SYSCALL_SOCKET_CREATE,
-	PCN_SYSCALL_SETSOCKOPT,
-	PCN_SYSCALL_BIND,
-	PCN_SYSCALL_LISTEN,
-	PCN_SYSCALL_ACCEPT4,
-	PCN_SYSCALL_SHUTDOWN,
-	PCN_SYSCALL_RECVFROM,
-	PCN_SYSCALL_EPOLL_CREATE1,
-	PCN_SYSCALL_EPOLL_WAIT,
-	PCN_SYSCALL_EPOLL_PWAIT,
-	PCN_SYSCALL_EPOLL_CTL,
-	PCN_SYSCALL_READ,
-	PCN_SYSCALL_WRITE,
-	PCN_SYSCALL_OPEN,
-	PCN_SYSCALL_CLOSE,
-	PCN_SYSCALL_IOCTL,
-	PCN_SYSCALL_WRITEV,
-	PCN_SYSCALL_FSTAT,
-	PCN_SYSCALL_SENDFILE64,
-	PCN_SYSCALL_SELECT,
-	PCN_SYSCALL_FCNTL,
-	PCN_NUM_SYSCALLS
-};
-
-#define SYSCALL_FWD_FIELDS				\
-	pid_t origin_pid;				\
-	uint64_t param0;				\
-	uint64_t param1;				\
-	uint64_t param2;				\
-	uint64_t param3;				\
-	uint64_t param4;				\
-	uint64_t param5;				\
-	int remote_ws;					\
-	enum pcn_syscall_types call_type;		\
-	int ret;
-DEFINE_PCN_KMSG(syscall_fwd_t, SYSCALL_FWD_FIELDS);
-
-#define SYSCALL_REP_FIELDS				\
-	pid_t origin_pid;				\
-	int remote_ws;					\
-	int ret;
-DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
 
 /**
  * Message routing using work queues
@@ -416,9 +341,6 @@ static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 	pcn_kmsg_done(name); \
 	kfree(__pcn_kmsg_work__);
 
-
-#include <linux/sched.h>
-
 static inline struct task_struct *__get_task_struct(pid_t pid)
 {
 	struct task_struct *tsk = NULL;
@@ -431,4 +353,5 @@ static inline struct task_struct *__get_task_struct(pid_t pid)
 	return tsk;
 }
 
-#endif /* __TYPES_H__ */
+#endif /* __INTERNAL_POPCORN_
+ * TYPES_H__ */

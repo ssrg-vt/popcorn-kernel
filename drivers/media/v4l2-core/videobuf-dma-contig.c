@@ -7,7 +7,7 @@
  * Copyright (c) 2008 Magnus Damm
  *
  * Based on videobuf-vmalloc.c,
- * (c) 2007 Mauro Carvalho Chehab, <mchehab@infradead.org>
+ * (c) 2007 Mauro Carvalho Chehab, <mchehab@kernel.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -248,7 +248,7 @@ static int __videobuf_iolock(struct videobuf_queue *q,
 
 		/* All handling should be done by __videobuf_mmap_mapper() */
 		if (!mem->vaddr) {
-			dev_err(q->dev, "memory is not alloced/mmapped.\n");
+			dev_err(q->dev, "memory is not allocated/mmapped.\n");
 			return -EINVAL;
 		}
 		break;

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * recordmcount.h
  *
@@ -15,8 +16,6 @@
  *
  * This conversion to macros was done by:
  * Copyright 2010 Steven Rostedt <srostedt@redhat.com>, Red Hat Inc.
- *
- * Licensed under the GNU General Public License, version 2 (GPLv2).
  */
 #undef append_func
 #undef is_fake_mcount
@@ -441,7 +440,7 @@ static unsigned find_secsym_ndx(unsigned const txtndx,
 			return symp - sym0;
 		}
 	}
-	fprintf(stderr, "Cannot find symbol for section %d: %s.\n",
+	fprintf(stderr, "Cannot find symbol for section %u: %s.\n",
 		txtndx, txtname);
 	fail_file();
 }

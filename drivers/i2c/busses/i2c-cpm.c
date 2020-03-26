@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Freescale CPM1/CPM2 I2C interface.
  * Copyright (c) 1999 Dan Malek (dmalek@jlc.net).
@@ -13,16 +14,6 @@
  *
  * Converted to of_platform_device. Renamed to i2c-cpm.c.
  * (C) 2007,2008 Jochen Friedrich <jochen@scram.de>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -197,9 +188,7 @@ static void cpm_i2c_parse_message(struct i2c_adapter *adap,
 	tbdf = cpm->tbase + tx;
 	rbdf = cpm->rbase + rx;
 
-	addr = pmsg->addr << 1;
-	if (pmsg->flags & I2C_M_RD)
-		addr |= 1;
+	addr = i2c_8bit_addr_from_msg(pmsg);
 
 	tb = cpm->txbuf[tx];
 	rb = cpm->rxbuf[rx];
@@ -415,7 +404,7 @@ static const struct i2c_algorithm cpm_i2c_algo = {
 };
 
 /* CPM_MAX_READ is also limiting writes according to the code! */
-static struct i2c_adapter_quirks cpm_i2c_quirks = {
+static const struct i2c_adapter_quirks cpm_i2c_quirks = {
 	.max_num_msgs = CPM_MAXBD,
 	.max_read_len = CPM_MAX_READ,
 	.max_write_len = CPM_MAX_READ,
@@ -667,10 +656,8 @@ static int cpm_i2c_probe(struct platform_device *ofdev)
 	cpm->adap.nr = (data && len == 4) ? be32_to_cpup(data) : -1;
 	result = i2c_add_numbered_adapter(&cpm->adap);
 
-	if (result < 0) {
-		dev_err(&ofdev->dev, "Unable to register with I2C\n");
+	if (result < 0)
 		goto out_shut;
-	}
 
 	dev_dbg(&ofdev->dev, "hw routines for %s registered.\n",
 		cpm->adap.name);

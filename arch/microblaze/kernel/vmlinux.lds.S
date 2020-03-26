@@ -33,9 +33,11 @@ SECTIONS {
 		EXIT_TEXT
 		EXIT_CALL
 		SCHED_TEXT
+		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		IRQENTRY_TEXT
+		SOFTIRQENTRY_TEXT
 		. = ALIGN (4) ;
 		_etext = . ;
 	}
@@ -114,8 +116,6 @@ SECTIONS {
 	.con_initcall.init : AT(ADDR(.con_initcall.init) - LOAD_OFFSET) {
 		CON_INITCALL
 	}
-
-	SECURITY_INIT
 
 	__init_end_before_initramfs = .;
 

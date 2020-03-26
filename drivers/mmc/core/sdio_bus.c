@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  linux/drivers/mmc/core/sdio_bus.c
  *
  *  Copyright 2007 Pierre Ossman
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
  *
  * SDIO function driver model
  */
@@ -25,6 +21,7 @@
 #include <linux/of.h>
 
 #include "core.h"
+#include "card.h"
 #include "sdio_cis.h"
 #include "sdio_bus.h"
 
@@ -138,7 +135,7 @@ static int sdio_bus_probe(struct device *dev)
 		return -ENODEV;
 
 	ret = dev_pm_domain_attach(dev, false);
-	if (ret == -EPROBE_DEFER)
+	if (ret)
 		return ret;
 
 	/* Unbound SDIO functions are always suspended.
@@ -178,7 +175,6 @@ static int sdio_bus_remove(struct device *dev)
 {
 	struct sdio_driver *drv = to_sdio_driver(dev->driver);
 	struct sdio_func *func = dev_to_sdio_func(dev);
-	int ret = 0;
 
 	/* Make sure card is powered before invoking ->remove() */
 	if (func->card->host->caps & MMC_CAP_POWER_OFF_CARD)
@@ -204,7 +200,7 @@ static int sdio_bus_remove(struct device *dev)
 
 	dev_pm_domain_detach(dev, false);
 
-	return ret;
+	return 0;
 }
 
 static const struct dev_pm_ops sdio_bus_pm_ops = {
@@ -332,6 +328,7 @@ int sdio_add_func(struct sdio_func *func)
 
 	sdio_set_of_node(func);
 	sdio_acpi_set_handle(func);
+	device_enable_async_suspend(&func->dev);
 	ret = device_add(&func->dev);
 	if (ret == 0)
 		sdio_func_set_present(func);

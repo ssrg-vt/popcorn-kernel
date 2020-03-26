@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
 /*
  * PTP 1588 clock support - user space interface
  *
@@ -51,7 +52,9 @@ struct ptp_clock_caps {
 	int n_per_out; /* Number of programmable periodic signals. */
 	int pps;       /* Whether the clock supports a PPS callback. */
 	int n_pins;    /* Number of input/output pins. */
-	int rsv[14];   /* Reserved for future use. */
+	/* Whether the clock supports precise system-device cross timestamps */
+	int cross_timestamping;
+	int rsv[13];   /* Reserved for future use. */
 };
 
 struct ptp_extts_request {
@@ -79,6 +82,23 @@ struct ptp_sys_offset {
 	 * one as a system time stamp.
 	 */
 	struct ptp_clock_time ts[2 * PTP_MAX_SAMPLES + 1];
+};
+
+struct ptp_sys_offset_extended {
+	unsigned int n_samples; /* Desired number of measurements. */
+	unsigned int rsv[3];    /* Reserved for future use. */
+	/*
+	 * Array of [system, phc, system] time stamps. The kernel will provide
+	 * 3*n_samples time stamps.
+	 */
+	struct ptp_clock_time ts[PTP_MAX_SAMPLES][3];
+};
+
+struct ptp_sys_offset_precise {
+	struct ptp_clock_time device;
+	struct ptp_clock_time sys_realtime;
+	struct ptp_clock_time sys_monoraw;
+	unsigned int rsv[4];    /* Reserved for future use. */
 };
 
 enum ptp_pin_function {
@@ -124,6 +144,10 @@ struct ptp_pin_desc {
 #define PTP_SYS_OFFSET     _IOW(PTP_CLK_MAGIC, 5, struct ptp_sys_offset)
 #define PTP_PIN_GETFUNC    _IOWR(PTP_CLK_MAGIC, 6, struct ptp_pin_desc)
 #define PTP_PIN_SETFUNC    _IOW(PTP_CLK_MAGIC, 7, struct ptp_pin_desc)
+#define PTP_SYS_OFFSET_PRECISE \
+	_IOWR(PTP_CLK_MAGIC, 8, struct ptp_sys_offset_precise)
+#define PTP_SYS_OFFSET_EXTENDED \
+	_IOWR(PTP_CLK_MAGIC, 9, struct ptp_sys_offset_extended)
 
 struct ptp_extts_event {
 	struct ptp_clock_time t; /* Time event occured. */

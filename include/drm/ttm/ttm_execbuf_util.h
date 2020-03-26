@@ -31,21 +31,22 @@
 #ifndef _TTM_EXECBUF_UTIL_H_
 #define _TTM_EXECBUF_UTIL_H_
 
-#include <ttm/ttm_bo_api.h>
 #include <linux/list.h>
+
+#include "ttm_bo_api.h"
 
 /**
  * struct ttm_validate_buffer
  *
  * @head:           list head for thread-private list.
  * @bo:             refcounted buffer object pointer.
- * @shared:         should the fence be added shared?
+ * @num_shared:     How many shared fences we want to add.
  */
 
 struct ttm_validate_buffer {
 	struct list_head head;
 	struct ttm_buffer_object *bo;
-	bool shared;
+	unsigned int num_shared;
 };
 
 /**
@@ -114,6 +115,6 @@ extern int ttm_eu_reserve_buffers(struct ww_acquire_ctx *ticket,
 
 extern void ttm_eu_fence_buffer_objects(struct ww_acquire_ctx *ticket,
 					struct list_head *list,
-					struct fence *fence);
+					struct dma_fence *fence);
 
 #endif

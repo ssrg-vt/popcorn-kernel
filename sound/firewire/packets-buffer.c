@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * helpers for managing a buffer for many packets
  *
  * Copyright (c) Clemens Ladisch <clemens@ladisch.de>
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include <linux/firewire.h>
@@ -27,7 +27,7 @@ int iso_packets_buffer_init(struct iso_packets_buffer *b, struct fw_unit *unit,
 	void *p;
 	int err;
 
-	b->packets = kmalloc(count * sizeof(*b->packets), GFP_KERNEL);
+	b->packets = kmalloc_array(count, sizeof(*b->packets), GFP_KERNEL);
 	if (!b->packets) {
 		err = -ENOMEM;
 		goto error;

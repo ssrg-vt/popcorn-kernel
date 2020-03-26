@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * cs5535-mfd.c - core MFD driver for CS5535/CS5536 southbridges
  *
@@ -7,19 +8,6 @@
  * hardcoded in the CS553x specifications.
  *
  * Copyright (c) 2010  Andres Salomon <dilinger@queued.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/kernel.h>
@@ -60,6 +48,7 @@ static int cs5535_mfd_res_enable(struct platform_device *pdev)
 static int cs5535_mfd_res_disable(struct platform_device *pdev)
 {
 	struct resource *res;
+
 	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "can't fetch device resource info\n");
@@ -114,7 +103,10 @@ static struct mfd_cell cs5535_mfd_cells[] = {
 #ifdef CONFIG_OLPC
 static void cs5535_clone_olpc_cells(void)
 {
-	const char *acpi_clones[] = { "olpc-xo1-pm-acpi", "olpc-xo1-sci-acpi" };
+	static const char *acpi_clones[] = {
+		"olpc-xo1-pm-acpi",
+		"olpc-xo1-sci-acpi"
+	};
 
 	if (!machine_is_olpc())
 		return;

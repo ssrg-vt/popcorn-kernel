@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
  * Copyright (C) 2004-2006 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License version 2.
  */
 
 #include <linux/spinlock.h>
@@ -117,7 +114,7 @@ static int gfs2_dentry_delete(const struct dentry *dentry)
 		return 0;
 
 	ginode = GFS2_I(d_inode(dentry));
-	if (!ginode->i_iopen_gh.gh_gl)
+	if (!gfs2_holder_initialized(&ginode->i_iopen_gh))
 		return 0;
 
 	if (test_bit(GLF_DEMOTE, &ginode->i_iopen_gh.gh_gl->gl_flags))

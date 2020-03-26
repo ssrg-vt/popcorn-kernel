@@ -33,6 +33,7 @@
 
 #define GSC_SHUTDOWN_TIMEOUT		((100*HZ)/1000)
 #define GSC_MAX_DEVS			4
+#define GSC_MAX_CLOCKS			4
 #define GSC_M2M_BUF_NUM			0
 #define GSC_MAX_CTRL_NUM		10
 #define GSC_SC_ALIGN_4			4
@@ -48,9 +49,6 @@
 #define	GSC_CTX_ABORT			(1 << 7)
 
 enum gsc_dev_flags {
-	/* for global */
-	ST_SUSPEND,
-
 	/* for m2m node */
 	ST_M2M_OPEN,
 	ST_M2M_RUN,
@@ -306,12 +304,12 @@ struct gsc_variant {
  * struct gsc_driverdata - per device type driver data for init time.
  *
  * @variant: the variant information for this driver.
- * @lclk_frequency: G-Scaler clock frequency
  * @num_entities: the number of g-scalers
  */
 struct gsc_driverdata {
 	struct gsc_variant *variant[GSC_MAX_DEVS];
-	unsigned long	lclk_frequency;
+	const char	*clk_names[GSC_MAX_CLOCKS];
+	int		num_clocks;
 	int		num_entities;
 };
 
@@ -327,7 +325,6 @@ struct gsc_driverdata {
  * @irq_queue:	interrupt handler waitqueue
  * @m2m:	memory-to-memory V4L2 device information
  * @state:	flags used to synchronize m2m and capture mode operation
- * @alloc_ctx:	videobuf2 memory allocator context
  * @vdev:	video device for G-Scaler instance
  */
 struct gsc_dev {
@@ -336,13 +333,12 @@ struct gsc_dev {
 	struct platform_device		*pdev;
 	struct gsc_variant		*variant;
 	u16				id;
-	struct clk			*clock;
+	int				num_clocks;
+	struct clk			*clock[GSC_MAX_CLOCKS];
 	void __iomem			*regs;
 	wait_queue_head_t		irq_queue;
 	struct gsc_m2m_device		m2m;
-	struct exynos_platform_gscaler	*pdata;
 	unsigned long			state;
-	struct vb2_alloc_ctx		*alloc_ctx;
 	struct video_device		vdev;
 	struct v4l2_device		v4l2_dev;
 };
@@ -380,6 +376,7 @@ struct gsc_ctx {
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct gsc_ctrls	gsc_ctrls;
 	bool			ctrls_rdy;
+	enum v4l2_colorspace out_colorspace;
 };
 
 void gsc_set_prefbuf(struct gsc_dev *gsc, struct gsc_frame *frm);
@@ -395,8 +392,7 @@ int gsc_try_fmt_mplane(struct gsc_ctx *ctx, struct v4l2_format *f);
 void gsc_set_frame_size(struct gsc_frame *frame, int width, int height);
 int gsc_g_fmt_mplane(struct gsc_ctx *ctx, struct v4l2_format *f);
 void gsc_check_crop_change(u32 tmp_w, u32 tmp_h, u32 *w, u32 *h);
-int gsc_g_crop(struct gsc_ctx *ctx, struct v4l2_crop *cr);
-int gsc_try_crop(struct gsc_ctx *ctx, struct v4l2_crop *cr);
+int gsc_try_selection(struct gsc_ctx *ctx, struct v4l2_selection *s);
 int gsc_cal_prescaler_ratio(struct gsc_variant *var, u32 src, u32 dst,
 							u32 *ratio);
 void gsc_get_prescaler_shfactor(u32 hratio, u32 vratio, u32 *sh);

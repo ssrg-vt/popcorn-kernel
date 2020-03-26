@@ -37,10 +37,6 @@
 #define AR5008_11NG_HT_SS_SHIFT		12
 #define AR5008_11NG_HT_DS_SHIFT		20
 
-static const int firstep_table[] =
-/* level:  0   1   2   3   4   5   6   7   8  */
-	{ -4, -2,  0,  2,  4,  6,  8, 10, 12 }; /* lvl 0-8, default 2 */
-
 /*
  * register values to turn OFDM weak signal detection OFF
  */
@@ -260,8 +256,8 @@ void ar5008_hw_cmn_spur_mitigate(struct ath_hw *ah,
 	int cur_bin;
 	int upper, lower, cur_vit_mask;
 	int i;
-	int8_t mask_m[123];
-	int8_t mask_p[123];
+	int8_t mask_m[123] = {0};
+	int8_t mask_p[123] = {0};
 	int8_t mask_amt;
 	int tmp_mask;
 	static const int pilot_mask_reg[4] = {
@@ -273,9 +269,6 @@ void ar5008_hw_cmn_spur_mitigate(struct ath_hw *ah,
 		AR_PHY_CHANNEL_MASK_01_30, AR_PHY_CHANNEL_MASK_31_60
 	};
 	static const int inc[4] = { 0, 100, 0, 0 };
-
-	memset(&mask_m, 0, sizeof(int8_t) * 123);
-	memset(&mask_p, 0, sizeof(int8_t) * 123);
 
 	cur_bin = -6000;
 	upper = bin + 100;
@@ -302,7 +295,7 @@ void ar5008_hw_cmn_spur_mitigate(struct ath_hw *ah,
 	upper = bin + 120;
 	lower = bin - 120;
 
-	for (i = 0; i < 123; i++) {
+	for (i = 0; i < ARRAY_SIZE(mask_m); i++) {
 		if ((cur_vit_mask > lower) && (cur_vit_mask < upper)) {
 			/* workaround for gcc bug #37014 */
 			volatile int tmp_v = abs(cur_vit_mask - bin);
@@ -527,7 +520,7 @@ static bool ar5008_hw_set_rf_regs(struct ath_hw *ah,
 		return true;
 
 	/* Setup rf parameters */
-	eepMinorRev = ah->eep_ops->get_eeprom(ah, EEP_MINOR_REV);
+	eepMinorRev = ah->eep_ops->get_eeprom_rev(ah);
 
 	for (i = 0; i < ah->iniBank6.ia_rows; i++)
 		ah->analogBank6Data[i] = INI_RA(&ah->iniBank6, i, modesIndex);
@@ -586,12 +579,14 @@ static void ar5008_hw_init_chain_masks(struct ath_hw *ah)
 	case 0x5:
 		REG_SET_BIT(ah, AR_PHY_ANALOG_SWAP,
 			    AR_PHY_SWAP_ALT_CHAIN);
+		/* fall through */
 	case 0x3:
 		if (ah->hw_version.macVersion == AR_SREV_REVISION_5416_10) {
 			REG_WRITE(ah, AR_PHY_RX_CHAINMASK, 0x7);
 			REG_WRITE(ah, AR_PHY_CAL_CHAINMASK, 0x7);
 			break;
 		}
+		/* fall through */
 	case 0x1:
 	case 0x2:
 	case 0x7:

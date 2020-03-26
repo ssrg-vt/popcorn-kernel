@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _XEN_EVENTS_H
 #define _XEN_EVENTS_H
 
@@ -58,6 +59,7 @@ void evtchn_put(unsigned int evtchn);
 
 void xen_send_IPI_one(unsigned int cpu, enum ipi_vector vector);
 void rebind_evtchn_irq(int evtchn, int irq);
+int xen_rebind_evtchn_to_cpu(int evtchn, unsigned tcpu);
 
 static inline void notify_remote_via_evtchn(int port)
 {
@@ -87,10 +89,12 @@ unsigned irq_from_evtchn(unsigned int evtchn);
 int irq_from_virq(unsigned int cpu, unsigned int virq);
 unsigned int evtchn_from_irq(unsigned irq);
 
+#ifdef CONFIG_XEN_PVHVM
 /* Xen HVM evtchn vector callback */
 void xen_hvm_callback_vector(void);
 #ifdef CONFIG_TRACING
 #define trace_xen_hvm_callback_vector xen_hvm_callback_vector
+#endif
 #endif
 int xen_set_callback_via(uint64_t via);
 void xen_evtchn_do_upcall(struct pt_regs *regs);

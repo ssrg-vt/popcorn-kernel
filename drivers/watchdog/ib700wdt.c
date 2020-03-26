@@ -218,7 +218,7 @@ static long ibwdt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (ibwdt_set_heartbeat(new_margin))
 			return -EINVAL;
 		ibwdt_ping();
-		/* Fall */
+		/* fall through */
 
 	case WDIOC_GETTIMEOUT:
 		return put_user(timeout, p);
@@ -238,7 +238,7 @@ static int ibwdt_open(struct inode *inode, struct file *file)
 
 	/* Activate */
 	ibwdt_ping();
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int ibwdt_close(struct inode *inode, struct file *file)

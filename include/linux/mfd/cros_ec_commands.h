@@ -1,16 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Host communication command constants for ChromeOS EC
  *
  * Copyright (C) 2012 Google, Inc
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * The ChromeOS EC multi function device is used to mux all the requests
  * to the EC device for its multiple features: keyboard controller,
@@ -285,6 +277,14 @@ enum host_event_code {
 	EC_HOST_EVENT_HANG_DETECT = 20,
 	/* Hang detect logic detected a hang and warm rebooted the AP */
 	EC_HOST_EVENT_HANG_REBOOT = 21,
+	/* PD MCU triggering host event */
+	EC_HOST_EVENT_PD_MCU = 22,
+
+	/* EC desires to change state of host-controlled USB mux */
+	EC_HOST_EVENT_USB_MUX = 28,
+
+	/* EC RTC event occurred */
+	EC_HOST_EVENT_RTC = 26,
 
 	/*
 	 * The high bit of the event mask is not used as a host event code.  If
@@ -298,15 +298,18 @@ enum host_event_code {
 /* Host event mask */
 #define EC_HOST_EVENT_MASK(event_code) (1UL << ((event_code) - 1))
 
-/* Arguments at EC_LPC_ADDR_HOST_ARGS */
+/**
+ * struct ec_lpc_host_args - Arguments at EC_LPC_ADDR_HOST_ARGS
+ * @flags: The host argument flags.
+ * @command_version: Command version.
+ * @data_size: The length of data.
+ * @checksum: Checksum; sum of command + flags + command_version + data_size +
+ *            all params/response data bytes.
+ */
 struct ec_lpc_host_args {
 	uint8_t flags;
 	uint8_t command_version;
 	uint8_t data_size;
-	/*
-	 * Checksum; sum of command + flags + command_version + data_size +
-	 * all params/response data bytes.
-	 */
 	uint8_t checksum;
 } __packed;
 
@@ -460,54 +463,43 @@ struct ec_lpc_host_args {
 
 #define EC_HOST_REQUEST_VERSION 3
 
-/* Version 3 request from host */
+/**
+ * struct ec_host_request - Version 3 request from host.
+ * @struct_version: Should be 3. The EC will return EC_RES_INVALID_HEADER if it
+ *                  receives a header with a version it doesn't know how to
+ *                  parse.
+ * @checksum: Checksum of request and data; sum of all bytes including checksum
+ *            should total to 0.
+ * @command: Command to send (EC_CMD_...)
+ * @command_version: Command version.
+ * @reserved: Unused byte in current protocol version; set to 0.
+ * @data_len: Length of data which follows this header.
+ */
 struct ec_host_request {
-	/* Struct version (=3)
-	 *
-	 * EC will return EC_RES_INVALID_HEADER if it receives a header with a
-	 * version it doesn't know how to parse.
-	 */
 	uint8_t struct_version;
-
-	/*
-	 * Checksum of request and data; sum of all bytes including checksum
-	 * should total to 0.
-	 */
 	uint8_t checksum;
-
-	/* Command code */
 	uint16_t command;
-
-	/* Command version */
 	uint8_t command_version;
-
-	/* Unused byte in current protocol version; set to 0 */
 	uint8_t reserved;
-
-	/* Length of data which follows this header */
 	uint16_t data_len;
 } __packed;
 
 #define EC_HOST_RESPONSE_VERSION 3
 
-/* Version 3 response from EC */
+/**
+ * struct ec_host_response - Version 3 response from EC.
+ * @struct_version: Struct version (=3).
+ * @checksum: Checksum of response and data; sum of all bytes including
+ *            checksum should total to 0.
+ * @result: EC's response to the command (separate from communication failure)
+ * @data_len: Length of data which follows this header.
+ * @reserved: Unused bytes in current protocol version; set to 0.
+ */
 struct ec_host_response {
-	/* Struct version (=3) */
 	uint8_t struct_version;
-
-	/*
-	 * Checksum of response and data; sum of all bytes including checksum
-	 * should total to 0.
-	 */
 	uint8_t checksum;
-
-	/* Result code (EC_RES_*) */
 	uint16_t result;
-
-	/* Length of data which follows this header */
 	uint16_t data_len;
-
-	/* Unused bytes in current protocol version; set to 0 */
 	uint16_t reserved;
 } __packed;
 
@@ -532,6 +524,10 @@ struct ec_host_response {
  */
 #define EC_CMD_PROTO_VERSION 0x00
 
+/**
+ * struct ec_response_proto_version - Response to the proto version command.
+ * @version: The protocol version.
+ */
 struct ec_response_proto_version {
 	uint32_t version;
 } __packed;
@@ -542,12 +538,20 @@ struct ec_response_proto_version {
  */
 #define EC_CMD_HELLO 0x01
 
+/**
+ * struct ec_params_hello - Parameters to the hello command.
+ * @in_data: Pass anything here.
+ */
 struct ec_params_hello {
-	uint32_t in_data;  /* Pass anything here */
+	uint32_t in_data;
 } __packed;
 
+/**
+ * struct ec_response_hello - Response to the hello command.
+ * @out_data: Output will be in_data + 0x01020304.
+ */
 struct ec_response_hello {
-	uint32_t out_data;  /* Output will be in_data + 0x01020304 */
+	uint32_t out_data;
 } __packed;
 
 /* Get version number */
@@ -559,22 +563,37 @@ enum ec_current_image {
 	EC_IMAGE_RW
 };
 
+/**
+ * struct ec_response_get_version - Response to the get version command.
+ * @version_string_ro: Null-terminated RO firmware version string.
+ * @version_string_rw: Null-terminated RW firmware version string.
+ * @reserved: Unused bytes; was previously RW-B firmware version string.
+ * @current_image: One of ec_current_image.
+ */
 struct ec_response_get_version {
-	/* Null-terminated version strings for RO, RW */
 	char version_string_ro[32];
 	char version_string_rw[32];
-	char reserved[32];       /* Was previously RW-B string */
-	uint32_t current_image;  /* One of ec_current_image */
+	char reserved[32];
+	uint32_t current_image;
 } __packed;
 
 /* Read test */
 #define EC_CMD_READ_TEST 0x03
 
+/**
+ * struct ec_params_read_test - Parameters for the read test command.
+ * @offset: Starting value for read buffer.
+ * @size: Size to read in bytes.
+ */
 struct ec_params_read_test {
-	uint32_t offset;   /* Starting value for read buffer */
-	uint32_t size;     /* Size to read in bytes */
+	uint32_t offset;
+	uint32_t size;
 } __packed;
 
+/**
+ * struct ec_response_read_test - Response to the read test command.
+ * @data: Data returned by the read test command.
+ */
 struct ec_response_read_test {
 	uint32_t data[32];
 } __packed;
@@ -589,18 +608,27 @@ struct ec_response_read_test {
 /* Get chip info */
 #define EC_CMD_GET_CHIP_INFO 0x05
 
+/**
+ * struct ec_response_get_chip_info - Response to the get chip info command.
+ * @vendor: Null-terminated string for chip vendor.
+ * @name: Null-terminated string for chip name.
+ * @revision: Null-terminated string for chip mask version.
+ */
 struct ec_response_get_chip_info {
-	/* Null-terminated strings */
 	char vendor[32];
 	char name[32];
-	char revision[32];  /* Mask version */
+	char revision[32];
 } __packed;
 
 /* Get board HW version */
 #define EC_CMD_GET_BOARD_VERSION 0x06
 
+/**
+ * struct ec_response_board_version - Response to the board version command.
+ * @board_version: A monotonously incrementing number.
+ */
 struct ec_response_board_version {
-	uint16_t board_version;  /* A monotonously incrementing number. */
+	uint16_t board_version;
 } __packed;
 
 /*
@@ -613,23 +641,42 @@ struct ec_response_board_version {
  */
 #define EC_CMD_READ_MEMMAP 0x07
 
+/**
+ * struct ec_params_read_memmap - Parameters for the read memory map command.
+ * @offset: Offset in memmap (EC_MEMMAP_*).
+ * @size: Size to read in bytes.
+ */
 struct ec_params_read_memmap {
-	uint8_t offset;   /* Offset in memmap (EC_MEMMAP_*) */
-	uint8_t size;     /* Size to read in bytes */
+	uint8_t offset;
+	uint8_t size;
 } __packed;
 
 /* Read versions supported for a command */
 #define EC_CMD_GET_CMD_VERSIONS 0x08
 
+/**
+ * struct ec_params_get_cmd_versions - Parameters for the get command versions.
+ * @cmd: Command to check.
+ */
 struct ec_params_get_cmd_versions {
-	uint8_t cmd;      /* Command to check */
+	uint8_t cmd;
 } __packed;
 
+/**
+ * struct ec_params_get_cmd_versions_v1 - Parameters for the get command
+ *         versions (v1)
+ * @cmd: Command to check.
+ */
+struct ec_params_get_cmd_versions_v1 {
+	uint16_t cmd;
+} __packed;
+
+/**
+ * struct ec_response_get_cmd_version - Response to the get command versions.
+ * @version_mask: Mask of supported versions; use EC_VER_MASK() to compare with
+ *                a desired version.
+ */
 struct ec_response_get_cmd_versions {
-	/*
-	 * Mask of supported versions; use EC_VER_MASK() to compare with a
-	 * desired version.
-	 */
 	uint32_t version_mask;
 } __packed;
 
@@ -647,6 +694,11 @@ enum ec_comms_status {
 	EC_COMMS_STATUS_PROCESSING	= 1 << 0,	/* Processing cmd */
 };
 
+/**
+ * struct ec_response_get_comms_status - Response to the get comms status
+ *         command.
+ * @flags: Mask of enum ec_comms_status.
+ */
 struct ec_response_get_comms_status {
 	uint32_t flags;		/* Mask of enum ec_comms_status */
 } __packed;
@@ -673,19 +725,19 @@ struct ec_response_test_protocol {
 /* EC_RES_IN_PROGRESS may be returned if a command is slow */
 #define EC_PROTOCOL_INFO_IN_PROGRESS_SUPPORTED (1 << 0)
 
+/**
+ * struct ec_response_get_protocol_info - Response to the get protocol info.
+ * @protocol_versions: Bitmask of protocol versions supported (1 << n means
+ *                     version n).
+ * @max_request_packet_size: Maximum request packet size in bytes.
+ * @max_response_packet_size: Maximum response packet size in bytes.
+ * @flags: see EC_PROTOCOL_INFO_*
+ */
 struct ec_response_get_protocol_info {
 	/* Fields which exist if at least protocol version 3 supported */
-
-	/* Bitmask of protocol versions supported (1 << n means version n)*/
 	uint32_t protocol_versions;
-
-	/* Maximum request packet size, in bytes */
 	uint16_t max_request_packet_size;
-
-	/* Maximum response packet size, in bytes */
 	uint16_t max_response_packet_size;
-
-	/* Flags; see EC_PROTOCOL_INFO_* */
 	uint32_t flags;
 } __packed;
 
@@ -696,8 +748,10 @@ struct ec_response_get_protocol_info {
 /* The upper byte of .flags tells what to do (nothing means "get") */
 #define EC_GSV_SET        0x80000000
 
-/* The lower three bytes of .flags identifies the parameter, if that has
-   meaning for an individual command. */
+/*
+ * The lower three bytes of .flags identifies the parameter, if that has
+ * meaning for an individual command.
+ */
 #define EC_GSV_PARAM_MASK 0x00ffffff
 
 struct ec_params_get_set_value {
@@ -713,6 +767,127 @@ struct ec_response_get_set_value {
 /* More than one command can use these structs to get/set paramters. */
 #define EC_CMD_GSV_PAUSE_IN_S5	0x0c
 
+/*****************************************************************************/
+/* List the features supported by the firmware */
+#define EC_CMD_GET_FEATURES  0x0d
+
+/* Supported features */
+enum ec_feature_code {
+	/*
+	 * This image contains a limited set of features. Another image
+	 * in RW partition may support more features.
+	 */
+	EC_FEATURE_LIMITED = 0,
+	/*
+	 * Commands for probing/reading/writing/erasing the flash in the
+	 * EC are present.
+	 */
+	EC_FEATURE_FLASH = 1,
+	/*
+	 * Can control the fan speed directly.
+	 */
+	EC_FEATURE_PWM_FAN = 2,
+	/*
+	 * Can control the intensity of the keyboard backlight.
+	 */
+	EC_FEATURE_PWM_KEYB = 3,
+	/*
+	 * Support Google lightbar, introduced on Pixel.
+	 */
+	EC_FEATURE_LIGHTBAR = 4,
+	/* Control of LEDs  */
+	EC_FEATURE_LED = 5,
+	/* Exposes an interface to control gyro and sensors.
+	 * The host goes through the EC to access these sensors.
+	 * In addition, the EC may provide composite sensors, like lid angle.
+	 */
+	EC_FEATURE_MOTION_SENSE = 6,
+	/* The keyboard is controlled by the EC */
+	EC_FEATURE_KEYB = 7,
+	/* The AP can use part of the EC flash as persistent storage. */
+	EC_FEATURE_PSTORE = 8,
+	/* The EC monitors BIOS port 80h, and can return POST codes. */
+	EC_FEATURE_PORT80 = 9,
+	/*
+	 * Thermal management: include TMP specific commands.
+	 * Higher level than direct fan control.
+	 */
+	EC_FEATURE_THERMAL = 10,
+	/* Can switch the screen backlight on/off */
+	EC_FEATURE_BKLIGHT_SWITCH = 11,
+	/* Can switch the wifi module on/off */
+	EC_FEATURE_WIFI_SWITCH = 12,
+	/* Monitor host events, through for example SMI or SCI */
+	EC_FEATURE_HOST_EVENTS = 13,
+	/* The EC exposes GPIO commands to control/monitor connected devices. */
+	EC_FEATURE_GPIO = 14,
+	/* The EC can send i2c messages to downstream devices. */
+	EC_FEATURE_I2C = 15,
+	/* Command to control charger are included */
+	EC_FEATURE_CHARGER = 16,
+	/* Simple battery support. */
+	EC_FEATURE_BATTERY = 17,
+	/*
+	 * Support Smart battery protocol
+	 * (Common Smart Battery System Interface Specification)
+	 */
+	EC_FEATURE_SMART_BATTERY = 18,
+	/* EC can detect when the host hangs. */
+	EC_FEATURE_HANG_DETECT = 19,
+	/* Report power information, for pit only */
+	EC_FEATURE_PMU = 20,
+	/* Another Cros EC device is present downstream of this one */
+	EC_FEATURE_SUB_MCU = 21,
+	/* Support USB Power delivery (PD) commands */
+	EC_FEATURE_USB_PD = 22,
+	/* Control USB multiplexer, for audio through USB port for instance. */
+	EC_FEATURE_USB_MUX = 23,
+	/* Motion Sensor code has an internal software FIFO */
+	EC_FEATURE_MOTION_SENSE_FIFO = 24,
+	/* Support temporary secure vstore */
+	EC_FEATURE_VSTORE = 25,
+	/* EC decides on USB-C SS mux state, muxes configured by host */
+	EC_FEATURE_USBC_SS_MUX_VIRTUAL = 26,
+	/* EC has RTC feature that can be controlled by host commands */
+	EC_FEATURE_RTC = 27,
+	/* The MCU exposes a Fingerprint sensor */
+	EC_FEATURE_FINGERPRINT = 28,
+	/* The MCU exposes a Touchpad */
+	EC_FEATURE_TOUCHPAD = 29,
+	/* The MCU has RWSIG task enabled */
+	EC_FEATURE_RWSIG = 30,
+	/* EC has device events support */
+	EC_FEATURE_DEVICE_EVENT = 31,
+	/* EC supports the unified wake masks for LPC/eSPI systems */
+	EC_FEATURE_UNIFIED_WAKE_MASKS = 32,
+	/* EC supports 64-bit host events */
+	EC_FEATURE_HOST_EVENT64 = 33,
+	/* EC runs code in RAM (not in place, a.k.a. XIP) */
+	EC_FEATURE_EXEC_IN_RAM = 34,
+	/* EC supports CEC commands */
+	EC_FEATURE_CEC = 35,
+	/* EC supports tight sensor timestamping. */
+	EC_FEATURE_MOTION_SENSE_TIGHT_TIMESTAMPS = 36,
+	/*
+	 * EC supports tablet mode detection aligned to Chrome and allows
+	 * setting of threshold by host command using
+	 * MOTIONSENSE_CMD_TABLET_MODE_LID_ANGLE.
+	 */
+	EC_FEATURE_REFINED_TABLET_MODE_HYSTERESIS = 37,
+	/* EC supports audio codec. */
+	EC_FEATURE_AUDIO_CODEC = 38,
+	/* EC Supports SCP. */
+	EC_FEATURE_SCP = 39,
+	/* The MCU is an Integrated Sensor Hub */
+	EC_FEATURE_ISH = 40,
+};
+
+#define EC_FEATURE_MASK_0(event_code) (1UL << (event_code % 32))
+#define EC_FEATURE_MASK_1(event_code) (1UL << (event_code - 32))
+
+struct ec_response_get_features {
+	uint32_t flags[2];
+} __packed;
 
 /*****************************************************************************/
 /* Flash commands */
@@ -720,24 +895,22 @@ struct ec_response_get_set_value {
 /* Get flash info */
 #define EC_CMD_FLASH_INFO 0x10
 
-/* Version 0 returns these fields */
+/**
+ * struct ec_response_flash_info - Response to the flash info command.
+ * @flash_size: Usable flash size in bytes.
+ * @write_block_size: Write block size. Write offset and size must be a
+ *                    multiple of this.
+ * @erase_block_size: Erase block size. Erase offset and size must be a
+ *                    multiple of this.
+ * @protect_block_size: Protection block size. Protection offset and size
+ *                      must be a multiple of this.
+ *
+ * Version 0 returns these fields.
+ */
 struct ec_response_flash_info {
-	/* Usable flash size, in bytes */
 	uint32_t flash_size;
-	/*
-	 * Write block size.  Write offset and size must be a multiple
-	 * of this.
-	 */
 	uint32_t write_block_size;
-	/*
-	 * Erase block size.  Erase offset and size must be a multiple
-	 * of this.
-	 */
 	uint32_t erase_block_size;
-	/*
-	 * Protection block size.  Protection offset and size must be a
-	 * multiple of this.
-	 */
 	uint32_t protect_block_size;
 } __packed;
 
@@ -745,7 +918,22 @@ struct ec_response_flash_info {
 /* EC flash erases bits to 0 instead of 1 */
 #define EC_FLASH_INFO_ERASE_TO_0 (1 << 0)
 
-/*
+/**
+ * struct ec_response_flash_info_1 - Response to the flash info v1 command.
+ * @flash_size: Usable flash size in bytes.
+ * @write_block_size: Write block size. Write offset and size must be a
+ *                    multiple of this.
+ * @erase_block_size: Erase block size. Erase offset and size must be a
+ *                    multiple of this.
+ * @protect_block_size: Protection block size. Protection offset and size
+ *                      must be a multiple of this.
+ * @write_ideal_size: Ideal write size in bytes.  Writes will be fastest if
+ *                    size is exactly this and offset is a multiple of this.
+ *                    For example, an EC may have a write buffer which can do
+ *                    half-page operations if data is aligned, and a slower
+ *                    word-at-a-time write mode.
+ * @flags: Flags; see EC_FLASH_INFO_*
+ *
  * Version 1 returns the same initial fields as version 0, with additional
  * fields following.
  *
@@ -760,15 +948,7 @@ struct ec_response_flash_info_1 {
 	uint32_t protect_block_size;
 
 	/* Version 1 adds these fields: */
-	/*
-	 * Ideal write size in bytes.  Writes will be fastest if size is
-	 * exactly this and offset is a multiple of this.  For example, an EC
-	 * may have a write buffer which can do half-page operations if data is
-	 * aligned, and a slower word-at-a-time write mode.
-	 */
 	uint32_t write_ideal_size;
-
-	/* Flags; see EC_FLASH_INFO_* */
 	uint32_t flags;
 } __packed;
 
@@ -779,9 +959,14 @@ struct ec_response_flash_info_1 {
  */
 #define EC_CMD_FLASH_READ 0x11
 
+/**
+ * struct ec_params_flash_read - Parameters for the flash read command.
+ * @offset: Byte offset to read.
+ * @size: Size to read in bytes.
+ */
 struct ec_params_flash_read {
-	uint32_t offset;   /* Byte offset to read */
-	uint32_t size;     /* Size to read in bytes */
+	uint32_t offset;
+	uint32_t size;
 } __packed;
 
 /* Write flash */
@@ -791,18 +976,28 @@ struct ec_params_flash_read {
 /* Version 0 of the flash command supported only 64 bytes of data */
 #define EC_FLASH_WRITE_VER0_SIZE 64
 
+/**
+ * struct ec_params_flash_write - Parameters for the flash write command.
+ * @offset: Byte offset to write.
+ * @size: Size to write in bytes.
+ */
 struct ec_params_flash_write {
-	uint32_t offset;   /* Byte offset to write */
-	uint32_t size;     /* Size to write in bytes */
+	uint32_t offset;
+	uint32_t size;
 	/* Followed by data to write */
 } __packed;
 
 /* Erase flash */
 #define EC_CMD_FLASH_ERASE 0x13
 
+/**
+ * struct ec_params_flash_erase - Parameters for the flash erase command.
+ * @offset: Byte offset to erase.
+ * @size: Size to erase in bytes.
+ */
 struct ec_params_flash_erase {
-	uint32_t offset;   /* Byte offset to erase */
-	uint32_t size;     /* Size to erase in bytes */
+	uint32_t offset;
+	uint32_t size;
 } __packed;
 
 /*
@@ -841,21 +1036,28 @@ struct ec_params_flash_erase {
 /* Entile flash code protected when the EC boots */
 #define EC_FLASH_PROTECT_ALL_AT_BOOT        (1 << 6)
 
+/**
+ * struct ec_params_flash_protect - Parameters for the flash protect command.
+ * @mask: Bits in flags to apply.
+ * @flags: New flags to apply.
+ */
 struct ec_params_flash_protect {
-	uint32_t mask;   /* Bits in flags to apply */
-	uint32_t flags;  /* New flags to apply */
+	uint32_t mask;
+	uint32_t flags;
 } __packed;
 
+/**
+ * struct ec_response_flash_protect - Response to the flash protect command.
+ * @flags: Current value of flash protect flags.
+ * @valid_flags: Flags which are valid on this platform. This allows the
+ *               caller to distinguish between flags which aren't set vs. flags
+ *               which can't be set on this platform.
+ * @writable_flags: Flags which can be changed given the current protection
+ *                  state.
+ */
 struct ec_response_flash_protect {
-	/* Current value of flash protect flags */
 	uint32_t flags;
-	/*
-	 * Flags which are valid on this platform.  This allows the caller
-	 * to distinguish between flags which aren't set vs. flags which can't
-	 * be set on this platform.
-	 */
 	uint32_t valid_flags;
-	/* Flags which can be changed given the current protection state */
 	uint32_t writable_flags;
 } __packed;
 
@@ -882,8 +1084,13 @@ enum ec_flash_region {
 	EC_FLASH_REGION_COUNT,
 };
 
+/**
+ * struct ec_params_flash_region_info - Parameters for the flash region info
+ *         command.
+ * @region: Flash region; see EC_FLASH_REGION_*
+ */
 struct ec_params_flash_region_info {
-	uint32_t region;  /* enum ec_flash_region */
+	uint32_t region;
 } __packed;
 
 struct ec_response_flash_region_info {
@@ -949,6 +1156,37 @@ struct ec_params_pwm_set_fan_duty {
 	uint32_t percent;
 } __packed;
 
+#define EC_CMD_PWM_SET_DUTY 0x25
+/* 16 bit duty cycle, 0xffff = 100% */
+#define EC_PWM_MAX_DUTY 0xffff
+
+enum ec_pwm_type {
+	/* All types, indexed by board-specific enum pwm_channel */
+	EC_PWM_TYPE_GENERIC = 0,
+	/* Keyboard backlight */
+	EC_PWM_TYPE_KB_LIGHT,
+	/* Display backlight */
+	EC_PWM_TYPE_DISPLAY_LIGHT,
+	EC_PWM_TYPE_COUNT,
+};
+
+struct ec_params_pwm_set_duty {
+	uint16_t duty;     /* Duty cycle, EC_PWM_MAX_DUTY = 100% */
+	uint8_t pwm_type;  /* ec_pwm_type */
+	uint8_t index;     /* Type-specific index, or 0 if unique */
+} __packed;
+
+#define EC_CMD_PWM_GET_DUTY 0x26
+
+struct ec_params_pwm_get_duty {
+	uint8_t pwm_type;  /* ec_pwm_type */
+	uint8_t index;     /* Type-specific index, or 0 if unique */
+} __packed;
+
+struct ec_response_pwm_get_duty {
+	uint16_t duty;     /* Duty cycle, EC_PWM_MAX_DUTY = 100% */
+} __packed;
+
 /*****************************************************************************/
 /*
  * Lightbar commands. This looks worse than it is. Since we only use one HOST
@@ -963,7 +1201,9 @@ struct rgb_s {
 };
 
 #define LB_BATTERY_LEVELS 4
-/* List of tweakable parameters. NOTE: It's __packed so it can be sent in a
+
+/*
+ * List of tweakable parameters. NOTE: It's __packed so it can be sent in a
  * host command, but the alignment is the same regardless. Keep it that way.
  */
 struct lightbar_params_v0 {
@@ -1043,13 +1283,20 @@ struct lightbar_params_v1 {
 	struct rgb_s color[8];			/* 0-3 are Google colors */
 } __packed;
 
+/* Lightbar program */
+#define EC_LB_PROG_LEN 192
+struct lightbar_program {
+	uint8_t size;
+	uint8_t data[EC_LB_PROG_LEN];
+};
+
 struct ec_params_lightbar {
 	uint8_t cmd;		      /* Command (see enum lightbar_command) */
 	union {
 		struct {
 			/* no args */
 		} dump, off, on, init, get_seq, get_params_v0, get_params_v1,
-			version, get_brightness, get_demo;
+			version, get_brightness, get_demo, suspend, resume;
 
 		struct {
 			uint8_t num;
@@ -1067,8 +1314,13 @@ struct ec_params_lightbar {
 			uint8_t led;
 		} get_rgb;
 
+		struct {
+			uint8_t enable;
+		} manual_suspend_ctrl;
+
 		struct lightbar_params_v0 set_params_v0;
 		struct lightbar_params_v1 set_params_v1;
+		struct lightbar_program set_program;
 	};
 } __packed;
 
@@ -1101,7 +1353,8 @@ struct ec_response_lightbar {
 		struct {
 			/* no return params */
 		} off, on, init, set_brightness, seq, reg, set_rgb,
-			demo, set_params_v0, set_params_v1;
+			demo, set_params_v0, set_params_v1,
+			set_program, manual_suspend_ctrl, suspend, resume;
 	};
 } __packed;
 
@@ -1125,6 +1378,10 @@ enum lightbar_command {
 	LIGHTBAR_CMD_GET_DEMO = 15,
 	LIGHTBAR_CMD_GET_PARAMS_V1 = 16,
 	LIGHTBAR_CMD_SET_PARAMS_V1 = 17,
+	LIGHTBAR_CMD_SET_PROGRAM = 18,
+	LIGHTBAR_CMD_MANUAL_SUSPEND_CTRL = 19,
+	LIGHTBAR_CMD_SUSPEND = 20,
+	LIGHTBAR_CMD_RESUME = 21,
 	LIGHTBAR_NUM_CMDS
 };
 
@@ -1284,6 +1541,24 @@ enum motionsense_command {
 	 */
 	MOTIONSENSE_CMD_KB_WAKE_ANGLE = 5,
 
+	/*
+	 * Returns a single sensor data.
+	 */
+	MOTIONSENSE_CMD_DATA = 6,
+
+	/*
+	 * Perform low level calibration.. On sensors that support it, ask to
+	 * do offset calibration.
+	 */
+	MOTIONSENSE_CMD_PERFORM_CALIB = 10,
+
+	/*
+	 * Sensor Offset command is a setter/getter command for the offset used
+	 * for calibration. The offsets can be calculated by the host, or via
+	 * PERFORM_CALIB command.
+	 */
+	MOTIONSENSE_CMD_SENSOR_OFFSET = 11,
+
 	/* Number of motionsense sub-commands. */
 	MOTIONSENSE_NUM_CMDS
 };
@@ -1304,12 +1579,19 @@ enum motionsensor_id {
 enum motionsensor_type {
 	MOTIONSENSE_TYPE_ACCEL = 0,
 	MOTIONSENSE_TYPE_GYRO = 1,
+	MOTIONSENSE_TYPE_MAG = 2,
+	MOTIONSENSE_TYPE_PROX = 3,
+	MOTIONSENSE_TYPE_LIGHT = 4,
+	MOTIONSENSE_TYPE_ACTIVITY = 5,
+	MOTIONSENSE_TYPE_BARO = 6,
+	MOTIONSENSE_TYPE_MAX,
 };
 
 /* List of motion sensor locations. */
 enum motionsensor_location {
 	MOTIONSENSE_LOC_BASE = 0,
 	MOTIONSENSE_LOC_LID = 1,
+	MOTIONSENSE_LOC_MAX,
 };
 
 /* List of motion sensor chips. */
@@ -1330,6 +1612,31 @@ enum motionsensor_chip {
  */
 #define EC_MOTION_SENSE_NO_VALUE -1
 
+#define EC_MOTION_SENSE_INVALID_CALIB_TEMP 0x8000
+
+/* Set Calibration information */
+#define MOTION_SENSE_SET_OFFSET	1
+
+struct ec_response_motion_sensor_data {
+	/* Flags for each sensor. */
+	uint8_t flags;
+	/* Sensor number the data comes from */
+	uint8_t sensor_num;
+	/* Each sensor is up to 3-axis. */
+	union {
+		int16_t             data[3];
+		struct {
+			uint16_t    rsvd;
+			uint32_t    timestamp;
+		} __packed;
+		struct {
+			uint8_t     activity; /* motionsensor_activity */
+			uint8_t     state;
+			int16_t     add_info[2];
+		};
+	};
+} __packed;
+
 struct ec_params_motion_sense {
 	uint8_t cmd;
 	union {
@@ -1347,9 +1654,37 @@ struct ec_params_motion_sense {
 			int16_t data;
 		} ec_rate, kb_wake_angle;
 
+		/* Used for MOTIONSENSE_CMD_SENSOR_OFFSET */
+		struct {
+			uint8_t sensor_num;
+
+			/*
+			 * bit 0: If set (MOTION_SENSE_SET_OFFSET), set
+			 * the calibration information in the EC.
+			 * If unset, just retrieve calibration information.
+			 */
+			uint16_t flags;
+
+			/*
+			 * Temperature at calibration, in units of 0.01 C
+			 * 0x8000: invalid / unknown.
+			 * 0x0: 0C
+			 * 0x7fff: +327.67C
+			 */
+			int16_t temp;
+
+			/*
+			 * Offset for calibration.
+			 * Unit:
+			 * Accelerometer: 1/1024 g
+			 * Gyro:          1/1024 deg/s
+			 * Compass:       1/16 uT
+			 */
+			int16_t offset[3];
+		} __packed sensor_offset;
+
 		/* Used for MOTIONSENSE_CMD_INFO. */
 		struct {
-			/* Should be element of enum motionsensor_id. */
 			uint8_t sensor_num;
 		} info;
 
@@ -1379,11 +1714,14 @@ struct ec_response_motion_sense {
 			/* Flags representing the motion sensor module. */
 			uint8_t module_flags;
 
-			/* Flags for each sensor in enum motionsensor_id. */
-			uint8_t sensor_flags[EC_MOTION_SENSOR_COUNT];
+			/* Number of sensors managed directly by the EC. */
+			uint8_t sensor_count;
 
-			/* Array of all sensor data. Each sensor is 3-axis. */
-			int16_t data[3*EC_MOTION_SENSOR_COUNT];
+			/*
+			 * Sensor data is truncated if response_max is too small
+			 * for holding all the data.
+			 */
+			struct ec_response_motion_sensor_data sensor[0];
 		} dump;
 
 		/* Used for MOTIONSENSE_CMD_INFO. */
@@ -1398,6 +1736,9 @@ struct ec_response_motion_sense {
 			uint8_t chip;
 		} info;
 
+		/* Used for MOTIONSENSE_CMD_DATA */
+		struct ec_response_motion_sensor_data data;
+
 		/*
 		 * Used for MOTIONSENSE_CMD_EC_RATE, MOTIONSENSE_CMD_SENSOR_ODR,
 		 * MOTIONSENSE_CMD_SENSOR_RANGE, and
@@ -1407,6 +1748,12 @@ struct ec_response_motion_sense {
 			/* Current value of the parameter queried. */
 			int32_t ret;
 		} ec_rate, sensor_odr, sensor_range, kb_wake_angle;
+
+		/* Used for MOTIONSENSE_CMD_SENSOR_OFFSET */
+		struct {
+			int16_t temp;
+			int16_t offset[3];
+		} sensor_offset, perform_calib;
 	};
 } __packed;
 
@@ -1477,6 +1824,9 @@ struct ec_response_rtc {
 /* These all use ec_params_rtc */
 #define EC_CMD_RTC_SET_VALUE 0x46
 #define EC_CMD_RTC_SET_ALARM 0x47
+
+/* Pass as param to SET_ALARM to clear the current alarm */
+#define EC_RTC_ALARM_CLEAR 0
 
 /*****************************************************************************/
 /* Port80 log access */
@@ -1635,17 +1985,68 @@ struct ec_response_tmp006_get_raw {
  *
  * Returns raw data for keyboard cols; see ec_response_mkbp_info.cols for
  * expected response size.
+ *
+ * NOTE: This has been superseded by EC_CMD_MKBP_GET_NEXT_EVENT.  If you wish
+ * to obtain the instantaneous state, use EC_CMD_MKBP_INFO with the type
+ * EC_MKBP_INFO_CURRENT and event EC_MKBP_EVENT_KEY_MATRIX.
  */
 #define EC_CMD_MKBP_STATE 0x60
 
-/* Provide information about the matrix : number of rows and columns */
+/*
+ * Provide information about various MKBP things.  See enum ec_mkbp_info_type.
+ */
 #define EC_CMD_MKBP_INFO 0x61
 
 struct ec_response_mkbp_info {
 	uint32_t rows;
 	uint32_t cols;
-	uint8_t switches;
+	/* Formerly "switches", which was 0. */
+	uint8_t reserved;
 } __packed;
+
+struct ec_params_mkbp_info {
+	uint8_t info_type;
+	uint8_t event_type;
+} __packed;
+
+enum ec_mkbp_info_type {
+	/*
+	 * Info about the keyboard matrix: number of rows and columns.
+	 *
+	 * Returns struct ec_response_mkbp_info.
+	 */
+	EC_MKBP_INFO_KBD = 0,
+
+	/*
+	 * For buttons and switches, info about which specifically are
+	 * supported.  event_type must be set to one of the values in enum
+	 * ec_mkbp_event.
+	 *
+	 * For EC_MKBP_EVENT_BUTTON and EC_MKBP_EVENT_SWITCH, returns a 4 byte
+	 * bitmask indicating which buttons or switches are present.  See the
+	 * bit inidices below.
+	 */
+	EC_MKBP_INFO_SUPPORTED = 1,
+
+	/*
+	 * Instantaneous state of buttons and switches.
+	 *
+	 * event_type must be set to one of the values in enum ec_mkbp_event.
+	 *
+	 * For EC_MKBP_EVENT_KEY_MATRIX, returns uint8_t key_matrix[13]
+	 * indicating the current state of the keyboard matrix.
+	 *
+	 * For EC_MKBP_EVENT_HOST_EVENT, return uint32_t host_event, the raw
+	 * event state.
+	 *
+	 * For EC_MKBP_EVENT_BUTTON, returns uint32_t buttons, indicating the
+	 * state of supported buttons.
+	 *
+	 * For EC_MKBP_EVENT_SWITCH, returns uint32_t switches, indicating the
+	 * state of supported switches.
+	 */
+	EC_MKBP_INFO_CURRENT = 2,
+};
 
 /* Simulate key press */
 #define EC_CMD_MKBP_SIMULATE_KEY 0x62
@@ -1761,6 +2162,86 @@ struct ec_result_keyscan_seq_ctrl {
 		} collect;
 	};
 } __packed;
+
+/*
+ * Command for retrieving the next pending MKBP event from the EC device
+ *
+ * The device replies with UNAVAILABLE if there aren't any pending events.
+ */
+#define EC_CMD_GET_NEXT_EVENT 0x67
+
+enum ec_mkbp_event {
+	/* Keyboard matrix changed. The event data is the new matrix state. */
+	EC_MKBP_EVENT_KEY_MATRIX = 0,
+
+	/* New host event. The event data is 4 bytes of host event flags. */
+	EC_MKBP_EVENT_HOST_EVENT = 1,
+
+	/* New Sensor FIFO data. The event data is fifo_info structure. */
+	EC_MKBP_EVENT_SENSOR_FIFO = 2,
+
+	/* The state of the non-matrixed buttons have changed. */
+	EC_MKBP_EVENT_BUTTON = 3,
+
+	/* The state of the switches have changed. */
+	EC_MKBP_EVENT_SWITCH = 4,
+
+	/* EC sent a sysrq command */
+	EC_MKBP_EVENT_SYSRQ = 6,
+
+	/* Notify the AP that something happened on CEC */
+	EC_MKBP_EVENT_CEC_EVENT = 8,
+
+	/* Send an incoming CEC message to the AP */
+	EC_MKBP_EVENT_CEC_MESSAGE = 9,
+
+	/* Number of MKBP events */
+	EC_MKBP_EVENT_COUNT,
+};
+
+union ec_response_get_next_data {
+	uint8_t   key_matrix[13];
+
+	/* Unaligned */
+	uint32_t  host_event;
+
+	uint32_t   buttons;
+	uint32_t   switches;
+	uint32_t   sysrq;
+} __packed;
+
+union ec_response_get_next_data_v1 {
+	uint8_t key_matrix[16];
+	uint32_t host_event;
+	uint32_t buttons;
+	uint32_t switches;
+	uint32_t sysrq;
+	uint32_t cec_events;
+	uint8_t cec_message[16];
+} __packed;
+
+struct ec_response_get_next_event {
+	uint8_t event_type;
+	/* Followed by event data if any */
+	union ec_response_get_next_data data;
+} __packed;
+
+struct ec_response_get_next_event_v1 {
+	uint8_t event_type;
+	/* Followed by event data if any */
+	union ec_response_get_next_data_v1 data;
+} __packed;
+
+/* Bit indices for buttons and switches.*/
+/* Buttons */
+#define EC_MKBP_POWER_BUTTON	0
+#define EC_MKBP_VOL_UP		1
+#define EC_MKBP_VOL_DOWN	2
+
+/* Switches */
+#define EC_MKBP_LID_OPEN	0
+#define EC_MKBP_TABLET_MODE	1
+#define EC_MKBP_BASE_ATTACHED	2
 
 /*****************************************************************************/
 /* Temperature sensor commands */
@@ -1972,12 +2453,27 @@ struct ec_params_charge_control {
 #define EC_CMD_CONSOLE_SNAPSHOT 0x97
 
 /*
- * Read next chunk of data from saved snapshot.
+ * Read data from the saved snapshot. If the subcmd parameter is
+ * CONSOLE_READ_NEXT, this will return data starting from the beginning of
+ * the latest snapshot. If it is CONSOLE_READ_RECENT, it will start from the
+ * end of the previous snapshot.
+ *
+ * The params are only looked at in version >= 1 of this command. Prior
+ * versions will just default to CONSOLE_READ_NEXT behavior.
  *
  * Response is null-terminated string.  Empty string, if there is no more
  * remaining output.
  */
 #define EC_CMD_CONSOLE_READ 0x98
+
+enum ec_console_read_subcmd {
+	CONSOLE_READ_NEXT = 0,
+	CONSOLE_READ_RECENT
+};
+
+struct ec_params_console_read_v1 {
+	uint8_t subcmd; /* enum ec_console_read_subcmd */
+} __packed;
 
 /*****************************************************************************/
 
@@ -2231,12 +2727,87 @@ struct ec_params_current_limit {
 } __packed;
 
 /*
- * Set maximum external power current.
+ * Set maximum external voltage / current.
  */
-#define EC_CMD_EXT_POWER_CURRENT_LIMIT 0xa2
+#define EC_CMD_EXTERNAL_POWER_LIMIT 0x00A2
 
-struct ec_params_ext_power_current_limit {
-	uint32_t limit; /* in mA */
+/* Command v0 is used only on Spring and is obsolete + unsupported */
+struct ec_params_external_power_limit_v1 {
+	uint16_t current_lim; /* in mA, or EC_POWER_LIMIT_NONE to clear limit */
+	uint16_t voltage_lim; /* in mV, or EC_POWER_LIMIT_NONE to clear limit */
+} __packed;
+
+#define EC_POWER_LIMIT_NONE 0xffff
+
+/* Inform the EC when entering a sleep state */
+#define EC_CMD_HOST_SLEEP_EVENT 0xa9
+
+enum host_sleep_event {
+	HOST_SLEEP_EVENT_S3_SUSPEND   = 1,
+	HOST_SLEEP_EVENT_S3_RESUME    = 2,
+	HOST_SLEEP_EVENT_S0IX_SUSPEND = 3,
+	HOST_SLEEP_EVENT_S0IX_RESUME  = 4
+};
+
+struct ec_params_host_sleep_event {
+	uint8_t sleep_event;
+} __packed;
+
+/*
+ * Use a default timeout value (CONFIG_SLEEP_TIMEOUT_MS) for detecting sleep
+ * transition failures
+ */
+#define EC_HOST_SLEEP_TIMEOUT_DEFAULT 0
+
+/* Disable timeout detection for this sleep transition */
+#define EC_HOST_SLEEP_TIMEOUT_INFINITE 0xFFFF
+
+struct ec_params_host_sleep_event_v1 {
+	/* The type of sleep being entered or exited. */
+	uint8_t sleep_event;
+
+	/* Padding */
+	uint8_t reserved;
+	union {
+		/* Parameters that apply for suspend messages. */
+		struct {
+			/*
+			 * The timeout in milliseconds between when this message
+			 * is received and when the EC will declare sleep
+			 * transition failure if the sleep signal is not
+			 * asserted.
+			 */
+			uint16_t sleep_timeout_ms;
+		} suspend_params;
+
+		/* No parameters for non-suspend messages. */
+	};
+} __packed;
+
+/* A timeout occurred when this bit is set */
+#define EC_HOST_RESUME_SLEEP_TIMEOUT 0x80000000
+
+/*
+ * The mask defining which bits correspond to the number of sleep transitions,
+ * as well as the maximum number of suspend line transitions that will be
+ * reported back to the host.
+ */
+#define EC_HOST_RESUME_SLEEP_TRANSITIONS_MASK 0x7FFFFFFF
+
+struct ec_response_host_sleep_event_v1 {
+	union {
+		/* Response fields that apply for resume messages. */
+		struct {
+			/*
+			 * The number of sleep power signal transitions that
+			 * occurred since the suspend message. The high bit
+			 * indicates a timeout occurred.
+			 */
+			uint32_t sleep_transitions;
+		} resume_response;
+
+		/* No response fields for non-resume messages. */
+	};
 } __packed;
 
 /*****************************************************************************/
@@ -2298,6 +2869,100 @@ struct ec_params_battery_vendor_param {
 
 struct ec_response_battery_vendor_param {
 	uint32_t value;
+} __packed;
+
+/*****************************************************************************/
+/* Commands for I2S recording on audio codec. */
+
+#define EC_CMD_CODEC_I2S 0x00BC
+
+enum ec_codec_i2s_subcmd {
+	EC_CODEC_SET_SAMPLE_DEPTH = 0x0,
+	EC_CODEC_SET_GAIN = 0x1,
+	EC_CODEC_GET_GAIN = 0x2,
+	EC_CODEC_I2S_ENABLE = 0x3,
+	EC_CODEC_I2S_SET_CONFIG = 0x4,
+	EC_CODEC_I2S_SET_TDM_CONFIG = 0x5,
+	EC_CODEC_I2S_SET_BCLK = 0x6,
+};
+
+enum ec_sample_depth_value {
+	EC_CODEC_SAMPLE_DEPTH_16 = 0,
+	EC_CODEC_SAMPLE_DEPTH_24 = 1,
+};
+
+enum ec_i2s_config {
+	EC_DAI_FMT_I2S = 0,
+	EC_DAI_FMT_RIGHT_J = 1,
+	EC_DAI_FMT_LEFT_J = 2,
+	EC_DAI_FMT_PCM_A = 3,
+	EC_DAI_FMT_PCM_B = 4,
+	EC_DAI_FMT_PCM_TDM = 5,
+};
+
+struct ec_param_codec_i2s {
+	/*
+	 * enum ec_codec_i2s_subcmd
+	 */
+	uint8_t cmd;
+	union {
+		/*
+		 * EC_CODEC_SET_SAMPLE_DEPTH
+		 * Value should be one of ec_sample_depth_value.
+		 */
+		uint8_t depth;
+
+		/*
+		 * EC_CODEC_SET_GAIN
+		 * Value should be 0~43 for both channels.
+		 */
+		struct ec_param_codec_i2s_set_gain {
+			uint8_t left;
+			uint8_t right;
+		} __packed gain;
+
+		/*
+		 * EC_CODEC_I2S_ENABLE
+		 * 1 to enable, 0 to disable.
+		 */
+		uint8_t i2s_enable;
+
+		/*
+		 * EC_CODEC_I2S_SET_COFNIG
+		 * Value should be one of ec_i2s_config.
+		 */
+		uint8_t i2s_config;
+
+		/*
+		 * EC_CODEC_I2S_SET_TDM_CONFIG
+		 * Value should be one of ec_i2s_config.
+		 */
+		struct ec_param_codec_i2s_tdm {
+			/*
+			 * 0 to 496
+			 */
+			int16_t ch0_delay;
+			/*
+			 * -1 to 496
+			 */
+			int16_t ch1_delay;
+			uint8_t adjacent_to_ch0;
+			uint8_t adjacent_to_ch1;
+		} __packed tdm_param;
+
+		/*
+		 * EC_CODEC_I2S_SET_BCLK
+		 */
+		uint32_t bclk;
+	};
+} __packed;
+
+/*
+ * For subcommand EC_CODEC_GET_GAIN.
+ */
+struct ec_response_codec_gain {
+	uint8_t left;
+	uint8_t right;
 } __packed;
 
 /*****************************************************************************/
@@ -2455,6 +3120,79 @@ struct ec_params_reboot_ec {
 
 /*****************************************************************************/
 /*
+ * HDMI CEC commands
+ *
+ * These commands are for sending and receiving message via HDMI CEC
+ */
+#define EC_MAX_CEC_MSG_LEN 16
+
+/* CEC message from the AP to be written on the CEC bus */
+#define EC_CMD_CEC_WRITE_MSG 0x00B8
+
+/**
+ * struct ec_params_cec_write - Message to write to the CEC bus
+ * @msg: message content to write to the CEC bus
+ */
+struct ec_params_cec_write {
+	uint8_t msg[EC_MAX_CEC_MSG_LEN];
+} __packed;
+
+/* Set various CEC parameters */
+#define EC_CMD_CEC_SET 0x00BA
+
+/**
+ * struct ec_params_cec_set - CEC parameters set
+ * @cmd: parameter type, can be CEC_CMD_ENABLE or CEC_CMD_LOGICAL_ADDRESS
+ * @val: in case cmd is CEC_CMD_ENABLE, this field can be 0 to disable CEC
+ *	or 1 to enable CEC functionality, in case cmd is CEC_CMD_LOGICAL_ADDRESS,
+ *	this field encodes the requested logical address between 0 and 15
+ *	or 0xff to unregister
+ */
+struct ec_params_cec_set {
+	uint8_t cmd; /* enum cec_command */
+	uint8_t val;
+} __packed;
+
+/* Read various CEC parameters */
+#define EC_CMD_CEC_GET 0x00BB
+
+/**
+ * struct ec_params_cec_get - CEC parameters get
+ * @cmd: parameter type, can be CEC_CMD_ENABLE or CEC_CMD_LOGICAL_ADDRESS
+ */
+struct ec_params_cec_get {
+	uint8_t cmd; /* enum cec_command */
+} __packed;
+
+/**
+ * struct ec_response_cec_get - CEC parameters get response
+ * @val: in case cmd was CEC_CMD_ENABLE, this field will 0 if CEC is
+ *	disabled or 1 if CEC functionality is enabled,
+ *	in case cmd was CEC_CMD_LOGICAL_ADDRESS, this will encode the
+ *	configured logical address between 0 and 15 or 0xff if unregistered
+ */
+struct ec_response_cec_get {
+	uint8_t val;
+} __packed;
+
+/* CEC parameters command */
+enum ec_cec_command {
+	/* CEC reading, writing and events enable */
+	CEC_CMD_ENABLE,
+	/* CEC logical address  */
+	CEC_CMD_LOGICAL_ADDRESS,
+};
+
+/* Events from CEC to AP */
+enum mkbp_cec_event {
+	/* Outgoing message was acknowledged by a follower */
+	EC_MKBP_CEC_SEND_OK			= BIT(0),
+	/* Outgoing message was not acknowledged */
+	EC_MKBP_CEC_SEND_FAILED			= BIT(1),
+};
+
+/*****************************************************************************/
+/*
  * Special commands
  *
  * These do not follow the normal rules for commands.  See each command for
@@ -2536,10 +3274,230 @@ enum usb_pd_control_mux {
 	USB_PD_CTRL_MUX_AUTO = 5,
 };
 
+enum usb_pd_control_swap {
+	USB_PD_CTRL_SWAP_NONE = 0,
+	USB_PD_CTRL_SWAP_DATA = 1,
+	USB_PD_CTRL_SWAP_POWER = 2,
+	USB_PD_CTRL_SWAP_VCONN = 3,
+	USB_PD_CTRL_SWAP_COUNT
+};
+
 struct ec_params_usb_pd_control {
 	uint8_t port;
 	uint8_t role;
 	uint8_t mux;
+	uint8_t swap;
+} __packed;
+
+#define PD_CTRL_RESP_ENABLED_COMMS      (1 << 0) /* Communication enabled */
+#define PD_CTRL_RESP_ENABLED_CONNECTED  (1 << 1) /* Device connected */
+#define PD_CTRL_RESP_ENABLED_PD_CAPABLE (1 << 2) /* Partner is PD capable */
+
+#define PD_CTRL_RESP_ROLE_POWER         BIT(0) /* 0=SNK/1=SRC */
+#define PD_CTRL_RESP_ROLE_DATA          BIT(1) /* 0=UFP/1=DFP */
+#define PD_CTRL_RESP_ROLE_VCONN         BIT(2) /* Vconn status */
+#define PD_CTRL_RESP_ROLE_DR_POWER      BIT(3) /* Partner is dualrole power */
+#define PD_CTRL_RESP_ROLE_DR_DATA       BIT(4) /* Partner is dualrole data */
+#define PD_CTRL_RESP_ROLE_USB_COMM      BIT(5) /* Partner USB comm capable */
+#define PD_CTRL_RESP_ROLE_EXT_POWERED   BIT(6) /* Partner externally powerd */
+
+struct ec_response_usb_pd_control_v1 {
+	uint8_t enabled;
+	uint8_t role;
+	uint8_t polarity;
+	char state[32];
+} __packed;
+
+#define EC_CMD_USB_PD_PORTS 0x102
+
+/* Maximum number of PD ports on a device, num_ports will be <= this */
+#define EC_USB_PD_MAX_PORTS 8
+
+struct ec_response_usb_pd_ports {
+	uint8_t num_ports;
+} __packed;
+
+#define EC_CMD_USB_PD_POWER_INFO 0x103
+
+#define PD_POWER_CHARGING_PORT 0xff
+struct ec_params_usb_pd_power_info {
+	uint8_t port;
+} __packed;
+
+enum usb_chg_type {
+	USB_CHG_TYPE_NONE,
+	USB_CHG_TYPE_PD,
+	USB_CHG_TYPE_C,
+	USB_CHG_TYPE_PROPRIETARY,
+	USB_CHG_TYPE_BC12_DCP,
+	USB_CHG_TYPE_BC12_CDP,
+	USB_CHG_TYPE_BC12_SDP,
+	USB_CHG_TYPE_OTHER,
+	USB_CHG_TYPE_VBUS,
+	USB_CHG_TYPE_UNKNOWN,
+};
+enum usb_power_roles {
+	USB_PD_PORT_POWER_DISCONNECTED,
+	USB_PD_PORT_POWER_SOURCE,
+	USB_PD_PORT_POWER_SINK,
+	USB_PD_PORT_POWER_SINK_NOT_CHARGING,
+};
+
+struct usb_chg_measures {
+	uint16_t voltage_max;
+	uint16_t voltage_now;
+	uint16_t current_max;
+	uint16_t current_lim;
+} __packed;
+
+struct ec_response_usb_pd_power_info {
+	uint8_t role;
+	uint8_t type;
+	uint8_t dualrole;
+	uint8_t reserved1;
+	struct usb_chg_measures meas;
+	uint32_t max_power;
+} __packed;
+
+struct ec_params_usb_pd_info_request {
+	uint8_t port;
+} __packed;
+
+/*
+ * This command will return the number of USB PD charge port + the number
+ * of dedicated port present.
+ * EC_CMD_USB_PD_PORTS does NOT include the dedicated ports
+ */
+#define EC_CMD_CHARGE_PORT_COUNT 0x0105
+struct ec_response_charge_port_count {
+	uint8_t port_count;
+} __packed;
+
+/* Read USB-PD Device discovery info */
+#define EC_CMD_USB_PD_DISCOVERY 0x0113
+struct ec_params_usb_pd_discovery_entry {
+	uint16_t vid;  /* USB-IF VID */
+	uint16_t pid;  /* USB-IF PID */
+	uint8_t ptype; /* product type (hub,periph,cable,ama) */
+} __packed;
+
+/* Override default charge behavior */
+#define EC_CMD_PD_CHARGE_PORT_OVERRIDE 0x0114
+
+/* Negative port parameters have special meaning */
+enum usb_pd_override_ports {
+	OVERRIDE_DONT_CHARGE = -2,
+	OVERRIDE_OFF = -1,
+	/* [0, CONFIG_USB_PD_PORT_COUNT): Port# */
+};
+
+struct ec_params_charge_port_override {
+	int16_t override_port; /* Override port# */
+} __packed;
+
+/* Read (and delete) one entry of PD event log */
+#define EC_CMD_PD_GET_LOG_ENTRY 0x0115
+
+struct ec_response_pd_log {
+	uint32_t timestamp; /* relative timestamp in milliseconds */
+	uint8_t type;       /* event type : see PD_EVENT_xx below */
+	uint8_t size_port;  /* [7:5] port number [4:0] payload size in bytes */
+	uint16_t data;      /* type-defined data payload */
+	uint8_t payload[0]; /* optional additional data payload: 0..16 bytes */
+} __packed;
+
+/* The timestamp is the microsecond counter shifted to get about a ms. */
+#define PD_LOG_TIMESTAMP_SHIFT 10 /* 1 LSB = 1024us */
+
+#define PD_LOG_SIZE_MASK  0x1f
+#define PD_LOG_PORT_MASK  0xe0
+#define PD_LOG_PORT_SHIFT    5
+#define PD_LOG_PORT_SIZE(port, size) (((port) << PD_LOG_PORT_SHIFT) | \
+				      ((size) & PD_LOG_SIZE_MASK))
+#define PD_LOG_PORT(size_port) ((size_port) >> PD_LOG_PORT_SHIFT)
+#define PD_LOG_SIZE(size_port) ((size_port) & PD_LOG_SIZE_MASK)
+
+/* PD event log : entry types */
+/* PD MCU events */
+#define PD_EVENT_MCU_BASE       0x00
+#define PD_EVENT_MCU_CHARGE             (PD_EVENT_MCU_BASE+0)
+#define PD_EVENT_MCU_CONNECT            (PD_EVENT_MCU_BASE+1)
+/* Reserved for custom board event */
+#define PD_EVENT_MCU_BOARD_CUSTOM       (PD_EVENT_MCU_BASE+2)
+/* PD generic accessory events */
+#define PD_EVENT_ACC_BASE       0x20
+#define PD_EVENT_ACC_RW_FAIL   (PD_EVENT_ACC_BASE+0)
+#define PD_EVENT_ACC_RW_ERASE  (PD_EVENT_ACC_BASE+1)
+/* PD power supply events */
+#define PD_EVENT_PS_BASE        0x40
+#define PD_EVENT_PS_FAULT      (PD_EVENT_PS_BASE+0)
+/* PD video dongles events */
+#define PD_EVENT_VIDEO_BASE     0x60
+#define PD_EVENT_VIDEO_DP_MODE (PD_EVENT_VIDEO_BASE+0)
+#define PD_EVENT_VIDEO_CODEC   (PD_EVENT_VIDEO_BASE+1)
+/* Returned in the "type" field, when there is no entry available */
+#define PD_EVENT_NO_ENTRY       0xff
+
+/*
+ * PD_EVENT_MCU_CHARGE event definition :
+ * the payload is "struct usb_chg_measures"
+ * the data field contains the port state flags as defined below :
+ */
+/* Port partner is a dual role device */
+#define CHARGE_FLAGS_DUAL_ROLE         BIT(15)
+/* Port is the pending override port */
+#define CHARGE_FLAGS_DELAYED_OVERRIDE  BIT(14)
+/* Port is the override port */
+#define CHARGE_FLAGS_OVERRIDE          BIT(13)
+/* Charger type */
+#define CHARGE_FLAGS_TYPE_SHIFT               3
+#define CHARGE_FLAGS_TYPE_MASK       (0xf << CHARGE_FLAGS_TYPE_SHIFT)
+/* Power delivery role */
+#define CHARGE_FLAGS_ROLE_MASK         (7 <<  0)
+
+/*
+ * PD_EVENT_PS_FAULT data field flags definition :
+ */
+#define PS_FAULT_OCP                          1
+#define PS_FAULT_FAST_OCP                     2
+#define PS_FAULT_OVP                          3
+#define PS_FAULT_DISCH                        4
+
+/*
+ * PD_EVENT_VIDEO_CODEC payload is "struct mcdp_info".
+ */
+struct mcdp_version {
+	uint8_t major;
+	uint8_t minor;
+	uint16_t build;
+} __packed;
+
+struct mcdp_info {
+	uint8_t family[2];
+	uint8_t chipid[2];
+	struct mcdp_version irom;
+	struct mcdp_version fw;
+} __packed;
+
+/* struct mcdp_info field decoding */
+#define MCDP_CHIPID(chipid) ((chipid[0] << 8) | chipid[1])
+#define MCDP_FAMILY(family) ((family[0] << 8) | family[1])
+
+/* Get info about USB-C SS muxes */
+#define EC_CMD_USB_PD_MUX_INFO 0x11a
+
+struct ec_params_usb_pd_mux_info {
+	uint8_t port; /* USB-C port number */
+} __packed;
+
+/* Flags representing mux state */
+#define USB_PD_MUX_USB_ENABLED       (1 << 0)
+#define USB_PD_MUX_DP_ENABLED        (1 << 1)
+#define USB_PD_MUX_POLARITY_INVERTED (1 << 2)
+#define USB_PD_MUX_HPD_IRQ           (1 << 3)
+
+struct ec_response_usb_pd_mux_info {
+	uint8_t flags; /* USB_PD_MUX_*-encoded USB mux state */
 } __packed;
 
 /*****************************************************************************/

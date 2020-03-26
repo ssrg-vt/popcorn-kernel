@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * SnapStream Firefly X10 RF remote keytable
  *
  * Copyright (C) 2011 Anssi Hannula <anssi.hannula@?ki.fi>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <linux/module.h>
@@ -83,10 +70,10 @@ static struct rc_map_table snapstream_firefly[] = {
 
 static struct rc_map_list snapstream_firefly_map = {
 	.map = {
-		.scan    = snapstream_firefly,
-		.size    = ARRAY_SIZE(snapstream_firefly),
-		.rc_type = RC_TYPE_OTHER,
-		.name    = RC_MAP_SNAPSTREAM_FIREFLY,
+		.scan     = snapstream_firefly,
+		.size     = ARRAY_SIZE(snapstream_firefly),
+		.rc_proto = RC_PROTO_OTHER,
+		.name     = RC_MAP_SNAPSTREAM_FIREFLY,
 	}
 };
 

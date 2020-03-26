@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Glue code for AES implementation for SPE instructions (PPC)
  *
@@ -5,12 +6,6 @@
  * about the SPE registers so it can run from interrupt context.
  *
  * Copyright (c) 2015 Markus Stockhausen <stockhausen@collogia.de>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #include <crypto/aes.h>
@@ -22,6 +17,7 @@
 #include <asm/byteorder.h>
 #include <asm/switch_to.h>
 #include <crypto/algapi.h>
+#include <crypto/xts.h>
 
 /*
  * MAX_BYTES defines the number of bytes that are allowed to be processed
@@ -32,7 +28,7 @@
  * 16 byte block block or 25 cycles per byte. Thus 768 bytes of input data
  * will need an estimated maximum of 20,000 cycles. Headroom for cache misses
  * included. Even with the low end model clocked at 667 MHz this equals to a
- * critical time window of less than 30us. The value has been choosen to
+ * critical time window of less than 30us. The value has been chosen to
  * process a 512 byte disk block in one or a large 1400 bytes IPsec network
  * packet in two runs.
  *
@@ -85,6 +81,7 @@ static void spe_begin(void)
 
 static void spe_end(void)
 {
+	disable_kernel_spe();
 	/* reenable preemption */
 	preempt_enable();
 }
@@ -125,6 +122,11 @@ static int ppc_xts_setkey(struct crypto_tfm *tfm, const u8 *in_key,
 		   unsigned int key_len)
 {
 	struct ppc_xts_ctx *ctx = crypto_tfm_ctx(tfm);
+	int err;
+
+	err = xts_check_key(tfm, in_key, key_len);
+	if (err)
+		return err;
 
 	key_len >>= 1;
 

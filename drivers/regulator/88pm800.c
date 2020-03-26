@@ -77,11 +77,6 @@ struct pm800_regulator_info {
 	int max_ua;
 };
 
-struct pm800_regulators {
-	struct pm80x_chip *chip;
-	struct regmap *map;
-};
-
 /*
  * vreg - the buck regs string.
  * ereg - the string for the enable register.
@@ -180,7 +175,7 @@ static int pm800_get_current_limit(struct regulator_dev *rdev)
 	return info->max_ua;
 }
 
-static struct regulator_ops pm800_volt_range_ops = {
+static const struct regulator_ops pm800_volt_range_ops = {
 	.list_voltage		= regulator_list_voltage_linear_range,
 	.map_voltage		= regulator_map_voltage_linear_range,
 	.set_voltage_sel	= regulator_set_voltage_sel_regmap,
@@ -191,7 +186,7 @@ static struct regulator_ops pm800_volt_range_ops = {
 	.get_current_limit	= pm800_get_current_limit,
 };
 
-static struct regulator_ops pm800_volt_table_ops = {
+static const struct regulator_ops pm800_volt_table_ops = {
 	.list_voltage		= regulator_list_voltage_table,
 	.map_voltage		= regulator_map_voltage_iterate,
 	.set_voltage_sel	= regulator_set_voltage_sel_regmap,
@@ -235,7 +230,6 @@ static int pm800_regulator_probe(struct platform_device *pdev)
 {
 	struct pm80x_chip *chip = dev_get_drvdata(pdev->dev.parent);
 	struct pm80x_platform_data *pdata = dev_get_platdata(pdev->dev.parent);
-	struct pm800_regulators *pm800_data;
 	struct regulator_config config = { };
 	struct regulator_init_data *init_data;
 	int i, ret;
@@ -252,18 +246,8 @@ static int pm800_regulator_probe(struct platform_device *pdev)
 			return -EINVAL;
 	}
 
-	pm800_data = devm_kzalloc(&pdev->dev, sizeof(*pm800_data),
-					GFP_KERNEL);
-	if (!pm800_data)
-		return -ENOMEM;
-
-	pm800_data->map = chip->subchip->regmap_power;
-	pm800_data->chip = chip;
-
-	platform_set_drvdata(pdev, pm800_data);
-
 	config.dev = chip->dev;
-	config.regmap = pm800_data->map;
+	config.regmap = chip->subchip->regmap_power;
 	for (i = 0; i < PM800_ID_RG_MAX; i++) {
 		struct regulator_dev *regulator;
 

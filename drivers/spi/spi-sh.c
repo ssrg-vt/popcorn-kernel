@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SH SPI bus driver
  *
@@ -5,15 +6,6 @@
  *
  * Based on pxa2xx_spi.c:
  * Copyright (C) 2005 Stephen Street / StreetFire Sound Labs
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -82,7 +74,6 @@ struct spi_sh_data {
 	int irq;
 	struct spi_master *master;
 	struct list_head queue;
-	struct workqueue_struct *workqueue;
 	struct work_struct ws;
 	unsigned long cr1;
 	wait_queue_head_t wait;
@@ -380,7 +371,7 @@ static int spi_sh_transfer(struct spi_device *spi, struct spi_message *mesg)
 	spi_sh_clear_bit(ss, SPI_SH_SSA, SPI_SH_CR1);
 
 	list_add_tail(&mesg->queue, &ss->queue);
-	queue_work(ss->workqueue, &ss->ws);
+	schedule_work(&ss->ws);
 
 	spin_unlock_irqrestore(&ss->lock, flags);
 
@@ -425,7 +416,7 @@ static int spi_sh_remove(struct platform_device *pdev)
 	struct spi_sh_data *ss = platform_get_drvdata(pdev);
 
 	spi_unregister_master(ss->master);
-	destroy_workqueue(ss->workqueue);
+	flush_work(&ss->ws);
 	free_irq(ss->irq, ss);
 
 	return 0;
@@ -447,8 +438,8 @@ static int spi_sh_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
-		dev_err(&pdev->dev, "platform_get_irq error\n");
-		return -ENODEV;
+		dev_err(&pdev->dev, "platform_get_irq error: %d\n", irq);
+		return irq;
 	}
 
 	master = spi_alloc_master(&pdev->dev, sizeof(struct spi_sh_data));
@@ -484,18 +475,11 @@ static int spi_sh_probe(struct platform_device *pdev)
 	spin_lock_init(&ss->lock);
 	INIT_WORK(&ss->ws, spi_sh_work);
 	init_waitqueue_head(&ss->wait);
-	ss->workqueue = create_singlethread_workqueue(
-					dev_name(master->dev.parent));
-	if (ss->workqueue == NULL) {
-		dev_err(&pdev->dev, "create workqueue error\n");
-		ret = -EBUSY;
-		goto error1;
-	}
 
 	ret = request_irq(irq, spi_sh_irq, 0, "spi_sh", ss);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "request_irq error\n");
-		goto error2;
+		goto error1;
 	}
 
 	master->num_chipselect = 2;
@@ -514,8 +498,6 @@ static int spi_sh_probe(struct platform_device *pdev)
 
  error3:
 	free_irq(irq, ss);
- error2:
-	destroy_workqueue(ss->workqueue);
  error1:
 	spi_master_put(master);
 
@@ -532,6 +514,6 @@ static struct platform_driver spi_sh_driver = {
 module_platform_driver(spi_sh_driver);
 
 MODULE_DESCRIPTION("SH SPI bus driver");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Yoshihiro Shimoda");
 MODULE_ALIAS("platform:sh_spi");

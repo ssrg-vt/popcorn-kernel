@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *      	An implementation of a loadable kernel mode driver providing
  *		multiple kernel/user space bidirectional communications links.
  *
  * 		Author: 	Alan Cox <alan@lxorguk.ukuu.org.uk>
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  * 
  *              Adapted to become the Linux 2.0 Coda pseudo device
  *              Peter  Braam  <braam@maths.ox.ac.uk> 
@@ -22,7 +18,7 @@
 #include <linux/kernel.h>
 #include <linux/major.h>
 #include <linux/time.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/slab.h>
 #include <linux/ioport.h>
 #include <linux/fcntl.h>
@@ -39,7 +35,6 @@
 #include <linux/device.h>
 #include <linux/pid_namespace.h>
 #include <asm/io.h>
-#include <asm/poll.h>
 #include <linux/uaccess.h>
 
 #include <linux/coda.h>
@@ -61,15 +56,15 @@ static struct class *coda_psdev_class;
  * Device operations
  */
 
-static unsigned int coda_psdev_poll(struct file *file, poll_table * wait)
+static __poll_t coda_psdev_poll(struct file *file, poll_table * wait)
 {
         struct venus_comm *vcp = (struct venus_comm *) file->private_data;
-	unsigned int mask = POLLOUT | POLLWRNORM;
+	__poll_t mask = EPOLLOUT | EPOLLWRNORM;
 
 	poll_wait(file, &vcp->vc_waitq, wait);
 	mutex_lock(&vcp->vc_mutex);
 	if (!list_empty(&vcp->vc_pending))
-                mask |= POLLIN | POLLRDNORM;
+                mask |= EPOLLIN | EPOLLRDNORM;
 	mutex_unlock(&vcp->vc_mutex);
 
 	return mask;

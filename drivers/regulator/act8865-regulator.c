@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * act8865-regulator.c - Voltage regulation for active-semi ACT88xx PMUs
  *
  * http://www.active-semi.com/products/power-management-units/act88xx/
  *
  * Copyright (C) 2013 Atmel Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -131,12 +122,80 @@
  * ACT8865 voltage number
  */
 #define	ACT8865_VOLTAGE_NUM	64
-#define ACT8600_SUDCDC_VOLTAGE_NUM	255
+#define ACT8600_SUDCDC_VOLTAGE_NUM	256
 
 struct act8865 {
 	struct regmap *regmap;
 	int off_reg;
 	int off_mask;
+};
+
+static const struct regmap_range act8600_reg_ranges[] = {
+	regmap_reg_range(0x00, 0x01),
+	regmap_reg_range(0x10, 0x10),
+	regmap_reg_range(0x12, 0x12),
+	regmap_reg_range(0x20, 0x20),
+	regmap_reg_range(0x22, 0x22),
+	regmap_reg_range(0x30, 0x30),
+	regmap_reg_range(0x32, 0x32),
+	regmap_reg_range(0x40, 0x41),
+	regmap_reg_range(0x50, 0x51),
+	regmap_reg_range(0x60, 0x61),
+	regmap_reg_range(0x70, 0x71),
+	regmap_reg_range(0x80, 0x81),
+	regmap_reg_range(0x91, 0x91),
+	regmap_reg_range(0xA1, 0xA1),
+	regmap_reg_range(0xA8, 0xAA),
+	regmap_reg_range(0xB0, 0xB0),
+	regmap_reg_range(0xB2, 0xB2),
+	regmap_reg_range(0xC1, 0xC1),
+};
+
+static const struct regmap_range act8600_reg_ro_ranges[] = {
+	regmap_reg_range(0xAA, 0xAA),
+	regmap_reg_range(0xC1, 0xC1),
+};
+
+static const struct regmap_range act8600_reg_volatile_ranges[] = {
+	regmap_reg_range(0x00, 0x01),
+	regmap_reg_range(0x12, 0x12),
+	regmap_reg_range(0x22, 0x22),
+	regmap_reg_range(0x32, 0x32),
+	regmap_reg_range(0x41, 0x41),
+	regmap_reg_range(0x51, 0x51),
+	regmap_reg_range(0x61, 0x61),
+	regmap_reg_range(0x71, 0x71),
+	regmap_reg_range(0x81, 0x81),
+	regmap_reg_range(0xA8, 0xA8),
+	regmap_reg_range(0xAA, 0xAA),
+	regmap_reg_range(0xB0, 0xB0),
+	regmap_reg_range(0xC1, 0xC1),
+};
+
+static const struct regmap_access_table act8600_write_ranges_table = {
+	.yes_ranges	= act8600_reg_ranges,
+	.n_yes_ranges	= ARRAY_SIZE(act8600_reg_ranges),
+	.no_ranges	= act8600_reg_ro_ranges,
+	.n_no_ranges	= ARRAY_SIZE(act8600_reg_ro_ranges),
+};
+
+static const struct regmap_access_table act8600_read_ranges_table = {
+	.yes_ranges	= act8600_reg_ranges,
+	.n_yes_ranges	= ARRAY_SIZE(act8600_reg_ranges),
+};
+
+static const struct regmap_access_table act8600_volatile_ranges_table = {
+	.yes_ranges	= act8600_reg_volatile_ranges,
+	.n_yes_ranges	= ARRAY_SIZE(act8600_reg_volatile_ranges),
+};
+
+static const struct regmap_config act8600_regmap_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+	.max_register = 0xFF,
+	.wr_table = &act8600_write_ranges_table,
+	.rd_table = &act8600_read_ranges_table,
+	.volatile_table = &act8600_volatile_ranges_table,
 };
 
 static const struct regmap_config act8865_regmap_config = {
@@ -154,10 +213,11 @@ static const struct regulator_linear_range act8600_sudcdc_voltage_ranges[] = {
 	REGULATOR_LINEAR_RANGE(3000000, 0, 63, 0),
 	REGULATOR_LINEAR_RANGE(3000000, 64, 159, 100000),
 	REGULATOR_LINEAR_RANGE(12600000, 160, 191, 200000),
-	REGULATOR_LINEAR_RANGE(19000000, 191, 255, 400000),
+	REGULATOR_LINEAR_RANGE(19000000, 192, 247, 400000),
+	REGULATOR_LINEAR_RANGE(41400000, 248, 255, 0),
 };
 
-static struct regulator_ops act8865_ops = {
+static const struct regulator_ops act8865_ops = {
 	.list_voltage		= regulator_list_voltage_linear_range,
 	.map_voltage		= regulator_map_voltage_linear_range,
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
@@ -167,7 +227,7 @@ static struct regulator_ops act8865_ops = {
 	.is_enabled		= regulator_is_enabled_regmap,
 };
 
-static struct regulator_ops act8865_ldo_ops = {
+static const struct regulator_ops act8865_ldo_ops = {
 	.enable			= regulator_enable_regmap,
 	.disable		= regulator_disable_regmap,
 	.is_enabled		= regulator_is_enabled_regmap,
@@ -176,6 +236,8 @@ static struct regulator_ops act8865_ldo_ops = {
 #define ACT88xx_REG(_name, _family, _id, _vsel_reg, _supply)		\
 	[_family##_ID_##_id] = {					\
 		.name			= _name,			\
+		.of_match		= of_match_ptr(_name),		\
+		.regulators_node	= of_match_ptr("regulators"),	\
 		.supply_name		= _supply,			\
 		.id			= _family##_ID_##_id,		\
 		.type			= REGULATOR_VOLTAGE,		\
@@ -196,6 +258,8 @@ static const struct regulator_desc act8600_regulators[] = {
 	ACT88xx_REG("DCDC3", ACT8600, DCDC3, VSET, "vp3"),
 	{
 		.name = "SUDCDC_REG4",
+		.of_match = of_match_ptr("SUDCDC_REG4"),
+		.regulators_node = of_match_ptr("regulators"),
 		.id = ACT8600_ID_SUDCDC4,
 		.ops = &act8865_ops,
 		.type = REGULATOR_VOLTAGE,
@@ -214,17 +278,21 @@ static const struct regulator_desc act8600_regulators[] = {
 	ACT88xx_REG("LDO8", ACT8600, LDO8, VSET, "inl"),
 	{
 		.name = "LDO_REG9",
+		.of_match = of_match_ptr("LDO_REG9"),
+		.regulators_node = of_match_ptr("regulators"),
 		.id = ACT8600_ID_LDO9,
 		.ops = &act8865_ldo_ops,
 		.type = REGULATOR_VOLTAGE,
 		.n_voltages = 1,
-		.fixed_uV = 1800000,
+		.fixed_uV = 3300000,
 		.enable_reg = ACT8600_LDO910_CTRL,
 		.enable_mask = ACT8865_ENA,
 		.owner = THIS_MODULE,
 	},
 	{
 		.name = "LDO_REG10",
+		.of_match = of_match_ptr("LDO_REG10"),
+		.regulators_node = of_match_ptr("regulators"),
 		.id = ACT8600_ID_LDO10,
 		.ops = &act8865_ldo_ops,
 		.type = REGULATOR_VOLTAGE,
@@ -279,124 +347,16 @@ static const struct of_device_id act8865_dt_ids[] = {
 	{ }
 };
 MODULE_DEVICE_TABLE(of, act8865_dt_ids);
-
-static struct of_regulator_match act8846_matches[] = {
-	[ACT8846_ID_REG1]	= { .name = "REG1" },
-	[ACT8846_ID_REG2]	= { .name = "REG2" },
-	[ACT8846_ID_REG3]	= { .name = "REG3" },
-	[ACT8846_ID_REG4]	= { .name = "REG4" },
-	[ACT8846_ID_REG5]	= { .name = "REG5" },
-	[ACT8846_ID_REG6]	= { .name = "REG6" },
-	[ACT8846_ID_REG7]	= { .name = "REG7" },
-	[ACT8846_ID_REG8]	= { .name = "REG8" },
-	[ACT8846_ID_REG9]	= { .name = "REG9" },
-	[ACT8846_ID_REG10]	= { .name = "REG10" },
-	[ACT8846_ID_REG11]	= { .name = "REG11" },
-	[ACT8846_ID_REG12]	= { .name = "REG12" },
-};
-
-static struct of_regulator_match act8865_matches[] = {
-	[ACT8865_ID_DCDC1]	= { .name = "DCDC_REG1"},
-	[ACT8865_ID_DCDC2]	= { .name = "DCDC_REG2"},
-	[ACT8865_ID_DCDC3]	= { .name = "DCDC_REG3"},
-	[ACT8865_ID_LDO1]	= { .name = "LDO_REG1"},
-	[ACT8865_ID_LDO2]	= { .name = "LDO_REG2"},
-	[ACT8865_ID_LDO3]	= { .name = "LDO_REG3"},
-	[ACT8865_ID_LDO4]	= { .name = "LDO_REG4"},
-};
-
-static struct of_regulator_match act8600_matches[] = {
-	[ACT8600_ID_DCDC1]	= { .name = "DCDC_REG1"},
-	[ACT8600_ID_DCDC2]	= { .name = "DCDC_REG2"},
-	[ACT8600_ID_DCDC3]	= { .name = "DCDC_REG3"},
-	[ACT8600_ID_SUDCDC4]	= { .name = "SUDCDC_REG4"},
-	[ACT8600_ID_LDO5]	= { .name = "LDO_REG5"},
-	[ACT8600_ID_LDO6]	= { .name = "LDO_REG6"},
-	[ACT8600_ID_LDO7]	= { .name = "LDO_REG7"},
-	[ACT8600_ID_LDO8]	= { .name = "LDO_REG8"},
-	[ACT8600_ID_LDO9]	= { .name = "LDO_REG9"},
-	[ACT8600_ID_LDO10]	= { .name = "LDO_REG10"},
-};
-
-static int act8865_pdata_from_dt(struct device *dev,
-				 struct device_node **of_node,
-				 struct act8865_platform_data *pdata,
-				 unsigned long type)
-{
-	int matched, i, num_matches;
-	struct device_node *np;
-	struct act8865_regulator_data *regulator;
-	struct of_regulator_match *matches;
-
-	np = of_get_child_by_name(dev->of_node, "regulators");
-	if (!np) {
-		dev_err(dev, "missing 'regulators' subnode in DT\n");
-		return -EINVAL;
-	}
-
-	switch (type) {
-	case ACT8600:
-		matches = act8600_matches;
-		num_matches = ARRAY_SIZE(act8600_matches);
-		break;
-	case ACT8846:
-		matches = act8846_matches;
-		num_matches = ARRAY_SIZE(act8846_matches);
-		break;
-	case ACT8865:
-		matches = act8865_matches;
-		num_matches = ARRAY_SIZE(act8865_matches);
-		break;
-	default:
-		dev_err(dev, "invalid device id %lu\n", type);
-		return -EINVAL;
-	}
-
-	matched = of_regulator_match(dev, np, matches, num_matches);
-	of_node_put(np);
-	if (matched <= 0)
-		return matched;
-
-	pdata->regulators = devm_kzalloc(dev,
-					 sizeof(struct act8865_regulator_data) *
-					 num_matches, GFP_KERNEL);
-	if (!pdata->regulators)
-		return -ENOMEM;
-
-	pdata->num_regulators = num_matches;
-	regulator = pdata->regulators;
-
-	for (i = 0; i < num_matches; i++) {
-		regulator->id = i;
-		regulator->name = matches[i].name;
-		regulator->platform_data = matches[i].init_data;
-		of_node[i] = matches[i].of_node;
-		regulator++;
-	}
-
-	return 0;
-}
-#else
-static inline int act8865_pdata_from_dt(struct device *dev,
-					struct device_node **of_node,
-					struct act8865_platform_data *pdata,
-					unsigned long type)
-{
-	return 0;
-}
 #endif
 
-static struct regulator_init_data
-*act8865_get_init_data(int id, struct act8865_platform_data *pdata)
+static struct act8865_regulator_data *act8865_get_regulator_data(
+		int id, struct act8865_platform_data *pdata)
 {
 	int i;
 
-	if (!pdata)
-		return NULL;
-
 	for (i = 0; i < pdata->num_regulators; i++) {
 		if (pdata->regulators[i].id == id)
-			return pdata->regulators[i].platform_data;
+			return &pdata->regulators[i];
 	}
 
 	return NULL;
@@ -415,19 +375,17 @@ static void act8865_power_off(void)
 static int act8865_pmic_probe(struct i2c_client *client,
 			      const struct i2c_device_id *i2c_id)
 {
-	static const struct regulator_desc *regulators;
-	struct act8865_platform_data pdata_of, *pdata;
+	const struct regulator_desc *regulators;
+	struct act8865_platform_data *pdata = NULL;
 	struct device *dev = &client->dev;
-	struct device_node **of_node;
 	int i, ret, num_regulators;
 	struct act8865 *act8865;
+	const struct regmap_config *regmap_config;
 	unsigned long type;
 	int off_reg, off_mask;
 	int voltage_select = 0;
 
-	pdata = dev_get_platdata(dev);
-
-	if (dev->of_node && !pdata) {
+	if (dev->of_node) {
 		const struct of_device_id *id;
 
 		id = of_match_device(of_match_ptr(act8865_dt_ids), dev);
@@ -441,18 +399,21 @@ static int act8865_pmic_probe(struct i2c_client *client,
 						   NULL);
 	} else {
 		type = i2c_id->driver_data;
+		pdata = dev_get_platdata(dev);
 	}
 
 	switch (type) {
 	case ACT8600:
 		regulators = act8600_regulators;
 		num_regulators = ARRAY_SIZE(act8600_regulators);
+		regmap_config = &act8600_regmap_config;
 		off_reg = -1;
 		off_mask = -1;
 		break;
 	case ACT8846:
 		regulators = act8846_regulators;
 		num_regulators = ARRAY_SIZE(act8846_regulators);
+		regmap_config = &act8865_regmap_config;
 		off_reg = ACT8846_GLB_OFF_CTRL;
 		off_mask = ACT8846_OFF_SYSMASK;
 		break;
@@ -464,6 +425,7 @@ static int act8865_pmic_probe(struct i2c_client *client,
 			regulators = act8865_regulators;
 			num_regulators = ARRAY_SIZE(act8865_regulators);
 		}
+		regmap_config = &act8865_regmap_config;
 		off_reg = ACT8865_SYS_CTRL;
 		off_mask = ACT8865_MSTROFF;
 		break;
@@ -472,34 +434,14 @@ static int act8865_pmic_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
-	of_node = devm_kzalloc(dev, sizeof(struct device_node *) *
-			       num_regulators, GFP_KERNEL);
-	if (!of_node)
-		return -ENOMEM;
-
-	if (dev->of_node && !pdata) {
-		ret = act8865_pdata_from_dt(dev, of_node, &pdata_of, type);
-		if (ret < 0)
-			return ret;
-
-		pdata = &pdata_of;
-	}
-
-	if (pdata->num_regulators > num_regulators) {
-		dev_err(dev, "too many regulators: %d\n",
-			pdata->num_regulators);
-		return -EINVAL;
-	}
-
 	act8865 = devm_kzalloc(dev, sizeof(struct act8865), GFP_KERNEL);
 	if (!act8865)
 		return -ENOMEM;
 
-	act8865->regmap = devm_regmap_init_i2c(client, &act8865_regmap_config);
+	act8865->regmap = devm_regmap_init_i2c(client, regmap_config);
 	if (IS_ERR(act8865->regmap)) {
 		ret = PTR_ERR(act8865->regmap);
-		dev_err(&client->dev, "Failed to allocate register map: %d\n",
-			ret);
+		dev_err(dev, "Failed to allocate register map: %d\n", ret);
 		return ret;
 	}
 
@@ -521,12 +463,20 @@ static int act8865_pmic_probe(struct i2c_client *client,
 		struct regulator_dev *rdev;
 
 		config.dev = dev;
-		config.init_data = act8865_get_init_data(desc->id, pdata);
-		config.of_node = of_node[i];
 		config.driver_data = act8865;
 		config.regmap = act8865->regmap;
 
-		rdev = devm_regulator_register(&client->dev, desc, &config);
+		if (pdata) {
+			struct act8865_regulator_data *rdata;
+
+			rdata = act8865_get_regulator_data(desc->id, pdata);
+			if (rdata) {
+				config.init_data = rdata->init_data;
+				config.of_node = rdata->of_node;
+			}
+		}
+
+		rdev = devm_regulator_register(dev, desc, &config);
 		if (IS_ERR(rdev)) {
 			dev_err(dev, "failed to register %s\n", desc->name);
 			return PTR_ERR(rdev);
@@ -534,7 +484,6 @@ static int act8865_pmic_probe(struct i2c_client *client,
 	}
 
 	i2c_set_clientdata(client, act8865);
-	devm_kfree(dev, of_node);
 
 	return 0;
 }

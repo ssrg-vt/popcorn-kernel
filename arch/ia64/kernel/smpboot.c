@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SMP boot-related support
  *
@@ -24,7 +25,7 @@
 
 #include <linux/module.h>
 #include <linux/acpi.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/cpu.h>
 #include <linux/delay.h>
 #include <linux/init.h>
@@ -454,7 +455,7 @@ start_secondary (void *unused)
 	preempt_disable();
 	smp_callin();
 
-	cpu_startup_entry(CPUHP_ONLINE);
+	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
 	return 0;
 }
 

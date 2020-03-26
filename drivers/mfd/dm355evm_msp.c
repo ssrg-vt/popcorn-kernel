@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * dm355evm_msp.c - driver for MSP430 firmware on DM355EVM board
  *
  * Copyright (C) 2008 David Brownell
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/init.h>
@@ -18,7 +14,7 @@
 #include <linux/gpio.h>
 #include <linux/leds.h>
 #include <linux/i2c.h>
-#include <linux/i2c/dm355evm_msp.h>
+#include <linux/mfd/dm355evm_msp.h>
 
 
 /*
@@ -33,25 +29,25 @@
  * This driver was tested with firmware revision A4.
  */
 
-#if defined(CONFIG_INPUT_DM355EVM) || defined(CONFIG_INPUT_DM355EVM_MODULE)
+#if IS_ENABLED(CONFIG_INPUT_DM355EVM)
 #define msp_has_keyboard()	true
 #else
 #define msp_has_keyboard()	false
 #endif
 
-#if defined(CONFIG_LEDS_GPIO) || defined(CONFIG_LEDS_GPIO_MODULE)
+#if IS_ENABLED(CONFIG_LEDS_GPIO)
 #define msp_has_leds()		true
 #else
 #define msp_has_leds()		false
 #endif
 
-#if defined(CONFIG_RTC_DRV_DM355EVM) || defined(CONFIG_RTC_DRV_DM355EVM_MODULE)
+#if IS_ENABLED(CONFIG_RTC_DRV_DM355EVM)
 #define msp_has_rtc()		true
 #else
 #define msp_has_rtc()		false
 #endif
 
-#if defined(CONFIG_VIDEO_TVP514X) || defined(CONFIG_VIDEO_TVP514X_MODULE)
+#if IS_ENABLED(CONFIG_VIDEO_TVP514X)
 #define msp_has_tvp()		true
 #else
 #define msp_has_tvp()		false
@@ -147,7 +143,7 @@ static int msp_gpio_get(struct gpio_chip *chip, unsigned offset)
 		return status;
 	if (reg == DM355EVM_MSP_LED)
 		msp_led_cache = status;
-	return status & MSP_GPIO_MASK(offset);
+	return !!(status & MSP_GPIO_MASK(offset));
 }
 
 static int msp_gpio_out(struct gpio_chip *chip, unsigned offset, int value)
@@ -199,11 +195,8 @@ static struct device *add_child(struct i2c_client *client, const char *name,
 	int			status;
 
 	pdev = platform_device_alloc(name, -1);
-	if (!pdev) {
-		dev_dbg(&client->dev, "can't alloc dev\n");
-		status = -ENOMEM;
-		goto err;
-	}
+	if (!pdev)
+		return ERR_PTR(-ENOMEM);
 
 	device_init_wakeup(&pdev->dev, can_wakeup);
 	pdev->dev.parent = &client->dev;
@@ -212,7 +205,7 @@ static struct device *add_child(struct i2c_client *client, const char *name,
 		status = platform_device_add_data(pdev, pdata, pdata_len);
 		if (status < 0) {
 			dev_dbg(&pdev->dev, "can't add platform_data\n");
-			goto err;
+			goto put_device;
 		}
 	}
 
@@ -225,19 +218,20 @@ static struct device *add_child(struct i2c_client *client, const char *name,
 		status = platform_device_add_resources(pdev, &r, 1);
 		if (status < 0) {
 			dev_dbg(&pdev->dev, "can't add irq\n");
-			goto err;
+			goto put_device;
 		}
 	}
 
 	status = platform_device_add(pdev);
+	if (status)
+		goto put_device;
 
-err:
-	if (status < 0) {
-		platform_device_put(pdev);
-		dev_err(&client->dev, "can't add %s dev\n", name);
-		return ERR_PTR(status);
-	}
 	return &pdev->dev;
+
+put_device:
+	platform_device_put(pdev);
+	dev_err(&client->dev, "failed to add device %s\n", name);
+	return ERR_PTR(status);
 }
 
 static int add_children(struct i2c_client *client)
@@ -259,8 +253,8 @@ static int add_children(struct i2c_client *client)
 	int		i;
 
 	/* GPIO-ish stuff */
-	dm355evm_msp_gpio.dev = &client->dev;
-	status = gpiochip_add(&dm355evm_msp_gpio);
+	dm355evm_msp_gpio.parent = &client->dev;
+	status = gpiochip_add_data(&dm355evm_msp_gpio, NULL);
 	if (status < 0)
 		return status;
 

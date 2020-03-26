@@ -11,7 +11,6 @@
 #ifndef _XTENSA_IO_H
 #define _XTENSA_IO_H
 
-#ifdef __KERNEL__
 #include <asm/byteorder.h>
 #include <asm/page.h>
 #include <asm/vectors.h>
@@ -25,9 +24,12 @@
 
 #ifdef CONFIG_MMU
 
+void __iomem *xtensa_ioremap_nocache(unsigned long addr, unsigned long size);
+void __iomem *xtensa_ioremap_cache(unsigned long addr, unsigned long size);
+void xtensa_iounmap(volatile void __iomem *addr);
+
 /*
  * Return the virtual address for the specified bus memory.
- * Note that we currently don't support any address outside the KIO segment.
  */
 static inline void __iomem *ioremap_nocache(unsigned long offset,
 		unsigned long size)
@@ -36,7 +38,7 @@ static inline void __iomem *ioremap_nocache(unsigned long offset,
 	    && offset - XCHAL_KIO_PADDR < XCHAL_KIO_SIZE)
 		return (void*)(offset-XCHAL_KIO_PADDR+XCHAL_KIO_BYPASS_VADDR);
 	else
-		BUG();
+		return xtensa_ioremap_nocache(offset, size);
 }
 
 static inline void __iomem *ioremap_cache(unsigned long offset,
@@ -46,9 +48,10 @@ static inline void __iomem *ioremap_cache(unsigned long offset,
 	    && offset - XCHAL_KIO_PADDR < XCHAL_KIO_SIZE)
 		return (void*)(offset-XCHAL_KIO_PADDR+XCHAL_KIO_CACHED_VADDR);
 	else
-		BUG();
+		return xtensa_ioremap_cache(offset, size);
 }
 #define ioremap_cache ioremap_cache
+#define ioremap_nocache ioremap_nocache
 
 #define ioremap_wc ioremap_nocache
 #define ioremap_wt ioremap_nocache
@@ -60,14 +63,19 @@ static inline void __iomem *ioremap(unsigned long offset, unsigned long size)
 
 static inline void iounmap(volatile void __iomem *addr)
 {
+	unsigned long va = (unsigned long) addr;
+
+	if (!(va >= XCHAL_KIO_CACHED_VADDR &&
+	      va - XCHAL_KIO_CACHED_VADDR < XCHAL_KIO_SIZE) &&
+	    !(va >= XCHAL_KIO_BYPASS_VADDR &&
+	      va - XCHAL_KIO_BYPASS_VADDR < XCHAL_KIO_SIZE))
+		xtensa_iounmap(addr);
 }
 
 #define virt_to_bus     virt_to_phys
 #define bus_to_virt     phys_to_virt
 
 #endif /* CONFIG_MMU */
-
-#endif	/* __KERNEL__ */
 
 #include <asm-generic/io.h>
 

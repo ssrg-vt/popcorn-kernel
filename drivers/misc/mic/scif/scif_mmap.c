@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel MIC Platform Software Stack (MPSS)
  *
  * Copyright(c) 2015 Intel Corporation.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
  * Intel SCIF driver.
- *
  */
 #include "scif_main.h"
 
@@ -552,7 +543,7 @@ static void scif_munmap(struct vm_area_struct *vma)
 {
 	struct scif_endpt *ep;
 	struct vma_pvt *vmapvt = vma->vm_private_data;
-	int nr_pages = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
+	int nr_pages = vma_pages(vma);
 	s64 offset;
 	struct scif_rma_req req;
 	struct scif_window *window = NULL;
@@ -614,7 +605,7 @@ int scif_mmap(struct vm_area_struct *vma, scif_epd_t epd)
 	struct scif_window *window = NULL;
 	struct scif_endpt *ep = (struct scif_endpt *)epd;
 	s64 start_offset = vma->vm_pgoff << PAGE_SHIFT;
-	int nr_pages = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
+	int nr_pages = vma_pages(vma);
 	int err;
 	struct vma_pvt *vmapvt;
 

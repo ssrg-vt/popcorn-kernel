@@ -1,24 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 1999,2000 Arm Limited
  *  Copyright (C) 2000 Deep Blue Solutions Ltd
  *  Copyright (C) 2002 Shane Nay (shane@minirl.com)
  *  Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
  *    - add MX31 specific definitions
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/mm.h>
 #include <linux/init.h>
 #include <linux/err.h>
+#include <linux/io.h>
 #include <linux/pinctrl/machine.h>
 
 #include <asm/pgtable.h>
@@ -37,8 +29,6 @@ void __iomem *mx3_ccm_base;
 static void imx3_idle(void)
 {
 	unsigned long reg = 0;
-
-	mx3_cpu_lp_set(MX3_WAIT);
 
 	__asm__ __volatile__(
 		/* disable I and D cache */
@@ -135,11 +125,20 @@ void __init mx31_map_io(void)
 	iotable_init(mx31_io_desc, ARRAY_SIZE(mx31_io_desc));
 }
 
+static void imx31_idle(void)
+{
+	int reg = imx_readl(mx3_ccm_base + MXC_CCM_CCMR);
+	reg &= ~MXC_CCM_CCMR_LPM_MASK;
+	imx_writel(reg, mx3_ccm_base + MXC_CCM_CCMR);
+
+	imx3_idle();
+}
+
 void __init imx31_init_early(void)
 {
 	mxc_set_cpu_type(MXC_CPU_MX31);
 	arch_ioremap_caller = imx3_ioremap_caller;
-	arm_pm_idle = imx3_idle;
+	arm_pm_idle = imx31_idle;
 	mx3_ccm_base = MX31_IO_ADDRESS(MX31_CCM_BASE_ADDR);
 }
 
@@ -165,6 +164,10 @@ static struct sdma_platform_data imx31_sdma_pdata __initdata = {
 
 static const struct resource imx31_audmux_res[] __initconst = {
 	DEFINE_RES_MEM(MX31_AUDMUX_BASE_ADDR, SZ_16K),
+};
+
+static const struct resource imx31_rnga_res[] __initconst = {
+	DEFINE_RES_MEM(MX31_RNGA_BASE_ADDR, SZ_16K),
 };
 
 void __init imx31_soc_init(void)
@@ -195,6 +198,8 @@ void __init imx31_soc_init(void)
 
 	platform_device_register_simple("imx31-audmux", 0, imx31_audmux_res,
 					ARRAY_SIZE(imx31_audmux_res));
+	platform_device_register_simple("mxc_rnga", -1, imx31_rnga_res,
+					ARRAY_SIZE(imx31_rnga_res));
 }
 #endif /* ifdef CONFIG_SOC_IMX31 */
 
@@ -212,11 +217,21 @@ void __init mx35_map_io(void)
 	iotable_init(mx35_io_desc, ARRAY_SIZE(mx35_io_desc));
 }
 
+static void imx35_idle(void)
+{
+	int reg = imx_readl(mx3_ccm_base + MXC_CCM_CCMR);
+	reg &= ~MXC_CCM_CCMR_LPM_MASK;
+	reg |= MXC_CCM_CCMR_LPM_WAIT_MX35;
+	imx_writel(reg, mx3_ccm_base + MXC_CCM_CCMR);
+
+	imx3_idle();
+}
+
 void __init imx35_init_early(void)
 {
 	mxc_set_cpu_type(MXC_CPU_MX35);
 	mxc_iomux_v3_init(MX35_IO_ADDRESS(MX35_IOMUXC_BASE_ADDR));
-	arm_pm_idle = imx3_idle;
+	arm_pm_idle = imx35_idle;
 	arch_ioremap_caller = imx3_ioremap_caller;
 	mx3_ccm_base = MX35_IO_ADDRESS(MX35_CCM_BASE_ADDR);
 }

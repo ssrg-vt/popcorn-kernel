@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  pci_root.c - ACPI PCI Root Bridge Driver ($Revision: 40 $)
  *
  *  Copyright (C) 2001, 2002 Andy Grover <andrew.grover@intel.com>
  *  Copyright (C) 2001, 2002 Paul Diefenbaugh <paul.s.diefenbaugh@intel.com>
- *
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or (at
- *  your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
 #include <linux/kernel.h>
@@ -33,6 +20,7 @@
 #include <linux/acpi.h>
 #include <linux/slab.h>
 #include <linux/dmi.h>
+#include <linux/platform_data/x86/apple.h>
 #include <acpi/apei.h>	/* for acpi_hest_init() */
 
 #include "internal.h"
@@ -144,6 +132,7 @@ static struct pci_osc_bit_struct pci_osc_support_bit[] = {
 	{ OSC_PCI_CLOCK_PM_SUPPORT, "ClockPM" },
 	{ OSC_PCI_SEGMENT_GROUPS_SUPPORT, "Segments" },
 	{ OSC_PCI_MSI_SUPPORT, "MSI" },
+	{ OSC_PCI_HPX_TYPE_3_SUPPORT, "HPX-Type3" },
 };
 
 static struct pci_osc_bit_struct pci_osc_control_bit[] = {
@@ -152,6 +141,7 @@ static struct pci_osc_bit_struct pci_osc_control_bit[] = {
 	{ OSC_PCI_EXPRESS_PME_CONTROL, "PME" },
 	{ OSC_PCI_EXPRESS_AER_CONTROL, "AER" },
 	{ OSC_PCI_EXPRESS_CAPABILITY_CONTROL, "PCIeCapability" },
+	{ OSC_PCI_EXPRESS_LTR_CONTROL, "LTR" },
 };
 
 static void decode_osc_bits(struct acpi_pci_root *root, char *msg, u32 word,
@@ -419,7 +409,8 @@ out:
 }
 EXPORT_SYMBOL(acpi_pci_osc_control_set);
 
-static void negotiate_os_control(struct acpi_pci_root *root, int *no_aspm)
+static void negotiate_os_control(struct acpi_pci_root *root, int *no_aspm,
+				 bool is_pcie)
 {
 	u32 support, control, requested;
 	acpi_status status;
@@ -431,8 +422,7 @@ static void negotiate_os_control(struct acpi_pci_root *root, int *no_aspm)
 	 * been called successfully. We know the feature set supported by the
 	 * platform, so avoid calling _OSC at all
 	 */
-
-	if (dmi_match(DMI_SYS_VENDOR, "Apple Inc.")) {
+	if (x86_apple_machine) {
 		root->osc_control_set = ~OSC_PCI_EXPRESS_PME_CONTROL;
 		decode_osc_control(root, "OS assumes control of",
 				   root->osc_control_set);
@@ -444,6 +434,7 @@ static void negotiate_os_control(struct acpi_pci_root *root, int *no_aspm)
 	 * PCI domains, so we indicate this in _OSC support capabilities.
 	 */
 	support = OSC_PCI_SEGMENT_GROUPS_SUPPORT;
+	support |= OSC_PCI_HPX_TYPE_3_SUPPORT;
 	if (pci_ext_cfg_avail())
 		support |= OSC_PCI_EXT_CONFIG_SUPPORT;
 	if (pcie_aspm_support_enabled())
@@ -454,9 +445,15 @@ static void negotiate_os_control(struct acpi_pci_root *root, int *no_aspm)
 	decode_osc_support(root, "OS supports", support);
 	status = acpi_pci_osc_support(root, support);
 	if (ACPI_FAILURE(status)) {
-		dev_info(&device->dev, "_OSC failed (%s); disabling ASPM\n",
-			 acpi_format_exception(status));
 		*no_aspm = 1;
+
+		/* _OSC is optional for PCI host bridges */
+		if ((status == AE_NOT_FOUND) && !is_pcie)
+			return;
+
+		dev_info(&device->dev, "_OSC failed (%s)%s\n",
+			 acpi_format_exception(status),
+			 pcie_aspm_support_enabled() ? "; disabling ASPM" : "");
 		return;
 	}
 
@@ -472,8 +469,16 @@ static void negotiate_os_control(struct acpi_pci_root *root, int *no_aspm)
 	}
 
 	control = OSC_PCI_EXPRESS_CAPABILITY_CONTROL
-		| OSC_PCI_EXPRESS_NATIVE_HP_CONTROL
 		| OSC_PCI_EXPRESS_PME_CONTROL;
+
+	if (IS_ENABLED(CONFIG_PCIEASPM))
+		control |= OSC_PCI_EXPRESS_LTR_CONTROL;
+
+	if (IS_ENABLED(CONFIG_HOTPLUG_PCI_PCIE))
+		control |= OSC_PCI_EXPRESS_NATIVE_HP_CONTROL;
+
+	if (IS_ENABLED(CONFIG_HOTPLUG_PCI_SHPC))
+		control |= OSC_PCI_SHPC_NATIVE_HP_CONTROL;
 
 	if (pci_aer_available()) {
 		if (aer_acpi_firmware_first())
@@ -523,7 +528,8 @@ static int acpi_pci_root_add(struct acpi_device *device,
 	struct acpi_pci_root *root;
 	acpi_handle handle = device->handle;
 	int no_aspm = 0;
-	bool hotadd = system_state != SYSTEM_BOOTING;
+	bool hotadd = system_state == SYSTEM_RUNNING;
+	bool is_pcie;
 
 	root = kzalloc(sizeof(struct acpi_pci_root), GFP_KERNEL);
 	if (!root)
@@ -581,7 +587,8 @@ static int acpi_pci_root_add(struct acpi_device *device,
 
 	root->mcfg_addr = acpi_pci_root_get_mcfg_addr(handle);
 
-	negotiate_os_control(root, &no_aspm);
+	is_pcie = strcmp(acpi_device_hid(device), "PNP0A08") == 0;
+	negotiate_os_control(root, &no_aspm, is_pcie);
 
 	/*
 	 * TBD: Need PCI interface for enumeration/configuration of roots.
@@ -608,13 +615,22 @@ static int acpi_pci_root_add(struct acpi_device *device,
 		pcie_no_aspm();
 
 	pci_acpi_add_bus_pm_notifier(device);
-	if (device->wakeup.flags.run_wake)
-		device_set_run_wake(root->bus->bridge, true);
+	device_set_wakeup_capable(root->bus->bridge, device->wakeup.flags.valid);
 
 	if (hotadd) {
 		pcibios_resource_survey_bus(root->bus);
 		pci_assign_unassigned_root_bus_resources(root->bus);
-		acpi_ioapic_add(root);
+		/*
+		 * This is only called for the hotadd case. For the boot-time
+		 * case, we need to wait until after PCI initialization in
+		 * order to deal with IOAPICs mapped in on a PCI BAR.
+		 *
+		 * This is currently x86-specific, because acpi_ioapic_add()
+		 * is an empty function without CONFIG_ACPI_HOTPLUG_IOAPIC.
+		 * And CONFIG_ACPI_HOTPLUG_IOAPIC depends on CONFIG_X86_IO_APIC
+		 * (see drivers/acpi/Kconfig).
+		 */
+		acpi_ioapic_add(root->device->handle);
 	}
 
 	pci_lock_rescan_remove();
@@ -638,12 +654,12 @@ static void acpi_pci_root_remove(struct acpi_device *device)
 
 	pci_stop_root_bus(root->bus);
 
-	WARN_ON(acpi_ioapic_remove(root));
-
-	device_set_run_wake(root->bus->bridge, false);
+	pci_ioapic_remove(root);
+	device_set_wakeup_capable(root->bus->bridge, false);
 	pci_acpi_remove_bus_pm_notifier(device);
 
 	pci_remove_root_bus(root->bus);
+	WARN_ON(acpi_ioapic_remove(root));
 
 	dmar_device_remove(device->handle);
 
@@ -720,6 +736,37 @@ next:
 	}
 }
 
+static void acpi_pci_root_remap_iospace(struct fwnode_handle *fwnode,
+			struct resource_entry *entry)
+{
+#ifdef PCI_IOBASE
+	struct resource *res = entry->res;
+	resource_size_t cpu_addr = res->start;
+	resource_size_t pci_addr = cpu_addr - entry->offset;
+	resource_size_t length = resource_size(res);
+	unsigned long port;
+
+	if (pci_register_io_range(fwnode, cpu_addr, length))
+		goto err;
+
+	port = pci_address_to_pio(cpu_addr);
+	if (port == (unsigned long)-1)
+		goto err;
+
+	res->start = port;
+	res->end = port + length - 1;
+	entry->offset = port - pci_addr;
+
+	if (pci_remap_iospace(res, cpu_addr) < 0)
+		goto err;
+
+	pr_info("Remapped I/O %pa to %pR\n", &cpu_addr, res);
+	return;
+err:
+	res->flags |= IORESOURCE_DISABLED;
+#endif
+}
+
 int acpi_pci_probe_root_resources(struct acpi_pci_root_info *info)
 {
 	int ret;
@@ -740,6 +787,10 @@ int acpi_pci_probe_root_resources(struct acpi_pci_root_info *info)
 			"no IO and memory resources present in _CRS\n");
 	else {
 		resource_list_for_each_entry_safe(entry, tmp, list) {
+			if (entry->res->flags & IORESOURCE_IO)
+				acpi_pci_root_remap_iospace(&device->fwnode,
+						entry);
+
 			if (entry->res->flags & IORESOURCE_DISABLED)
 				resource_list_destroy_entry(entry);
 			else
@@ -811,6 +862,8 @@ static void acpi_pci_root_release_info(struct pci_host_bridge *bridge)
 
 	resource_list_for_each_entry(entry, &bridge->windows) {
 		res = entry->res;
+		if (res->flags & IORESOURCE_IO)
+			pci_unmap_iospace(res);
 		if (res->parent &&
 		    (res->flags & (IORESOURCE_MEM | IORESOURCE_IO)))
 			release_resource(res);
@@ -827,6 +880,7 @@ struct pci_bus *acpi_pci_root_create(struct acpi_pci_root *root,
 	struct acpi_device *device = root->device;
 	int node = acpi_get_node(device->handle);
 	struct pci_bus *bus;
+	struct pci_host_bridge *host_bridge;
 
 	info->root = root;
 	info->bridge = device;
@@ -851,9 +905,21 @@ struct pci_bus *acpi_pci_root_create(struct acpi_pci_root *root,
 	if (!bus)
 		goto out_release_info;
 
+	host_bridge = to_pci_host_bridge(bus->bridge);
+	if (!(root->osc_control_set & OSC_PCI_EXPRESS_NATIVE_HP_CONTROL))
+		host_bridge->native_pcie_hotplug = 0;
+	if (!(root->osc_control_set & OSC_PCI_SHPC_NATIVE_HP_CONTROL))
+		host_bridge->native_shpc_hotplug = 0;
+	if (!(root->osc_control_set & OSC_PCI_EXPRESS_AER_CONTROL))
+		host_bridge->native_aer = 0;
+	if (!(root->osc_control_set & OSC_PCI_EXPRESS_PME_CONTROL))
+		host_bridge->native_pme = 0;
+	if (!(root->osc_control_set & OSC_PCI_EXPRESS_LTR_CONTROL))
+		host_bridge->native_ltr = 0;
+
 	pci_scan_child_bus(bus);
-	pci_set_host_bridge_release(to_pci_host_bridge(bus->bridge),
-				    acpi_pci_root_release_info, info);
+	pci_set_host_bridge_release(host_bridge, acpi_pci_root_release_info,
+				    info);
 	if (node != NUMA_NO_NODE)
 		dev_printk(KERN_DEBUG, &bus->dev, "on NUMA node %d\n", node);
 	return bus;

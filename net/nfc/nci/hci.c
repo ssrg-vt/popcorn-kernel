@@ -170,7 +170,7 @@ static int nci_hci_send_data(struct nci_dev *ndev, u8 pipe,
 		return -ENOMEM;
 
 	skb_reserve(skb, NCI_DATA_HDR_SIZE + 2);
-	*skb_push(skb, 1) = data_type;
+	*(u8 *)skb_push(skb, 1) = data_type;
 
 	do {
 		len = conn_info->max_pkt_payload_len;
@@ -184,10 +184,10 @@ static int nci_hci_send_data(struct nci_dev *ndev, u8 pipe,
 			len = conn_info->max_pkt_payload_len - skb->len - 1;
 		}
 
-		*skb_push(skb, 1) = cb;
+		*(u8 *)skb_push(skb, 1) = cb;
 
 		if (len > 0)
-			memcpy(skb_put(skb, len), data + i, len);
+			skb_put_data(skb, data + i, len);
 
 		r = nci_send_data(ndev, conn_info->conn_id, skb);
 		if (r < 0)
@@ -312,6 +312,10 @@ static void nci_hci_cmd_received(struct nci_dev *ndev, u8 pipe,
 		create_info = (struct nci_hci_create_pipe_resp *)skb->data;
 		dest_gate = create_info->dest_gate;
 		new_pipe = create_info->pipe;
+		if (new_pipe >= NCI_HCI_MAX_PIPES) {
+			status = NCI_HCI_ANY_E_NOK;
+			goto exit;
+		}
 
 		/* Save the new created pipe and bind with local gate,
 		 * the description for skb->data[3] is destination gate id
@@ -336,6 +340,10 @@ static void nci_hci_cmd_received(struct nci_dev *ndev, u8 pipe,
 			goto exit;
 		}
 		delete_info = (struct nci_hci_delete_pipe_noti *)skb->data;
+		if (delete_info->pipe >= NCI_HCI_MAX_PIPES) {
+			status = NCI_HCI_ANY_E_NOK;
+			goto exit;
+		}
 
 		ndev->hci_dev->pipes[delete_info->pipe].gate =
 						NCI_HCI_INVALID_GATE;
@@ -472,12 +480,13 @@ void nci_hci_data_received_cb(void *context,
 			return;
 		}
 
-		*skb_put(hcp_skb, NCI_HCI_HCP_PACKET_HEADER_LEN) = pipe;
+		skb_put_u8(hcp_skb, pipe);
 
 		skb_queue_walk(&ndev->hci_dev->rx_hcp_frags, frag_skb) {
 			msg_len = frag_skb->len - NCI_HCI_HCP_PACKET_HEADER_LEN;
-			memcpy(skb_put(hcp_skb, msg_len), frag_skb->data +
-			       NCI_HCI_HCP_PACKET_HEADER_LEN, msg_len);
+			skb_put_data(hcp_skb,
+				     frag_skb->data + NCI_HCI_HCP_PACKET_HEADER_LEN,
+				     msg_len);
 		}
 
 		skb_queue_purge(&ndev->hci_dev->rx_hcp_frags);
@@ -676,7 +685,7 @@ int nci_hci_connect_gate(struct nci_dev *ndev,
 	break;
 	default:
 		pipe = nci_hci_create_pipe(ndev, dest_host, dest_gate, &r);
-		if (pipe < 0)
+		if (pipe == NCI_HCI_INVALID_PIPE)
 			return r;
 		pipe_created = true;
 		break;

@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * The generic setup file for PMC-Sierra MSP processors
  *
  * Copyright 2005-2007 PMC-Sierra, Inc,
  * Author: Jun Sun, jsun@mvista.com or jsun@junsun.net
- *
- * This program is free software; you can redistribute	it and/or modify it
- * under  the terms of	the GNU General	 Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/delay.h>
@@ -118,7 +114,7 @@ void msp_restart(char *command)
 	/* No chip-specific reset code, just jump to the ROM reset vector */
 	set_c0_status(ST0_BEV | ST0_ERL);
 	change_c0_config(CONF_CM_CMASK, CONF_CM_UNCACHED);
-	flush_cache_all();
+	__flush_cache_all();
 	write_c0_wired(0);
 
 	__asm__ __volatile__("jr\t%0"::"r"(0xbfc00000));

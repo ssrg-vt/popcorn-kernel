@@ -1,27 +1,6 @@
-/******************************************************************************
- *
- * Copyright(c) 2009-2012  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
- * Realtek Corporation, No. 2, Innovation Road II, Hsinchu Science Park,
- * Hsinchu 300, Taiwan.
- *
- * Larry Finger <Larry.Finger@lwfinger.net>
- *
- *****************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2009-2012  Realtek Corporation.*/
+
 #include "hal_btc.h"
 #include "../pci.h"
 #include "phy.h"
@@ -134,9 +113,9 @@ static bool rtl8723e_dm_bt_need_to_dec_bt_pwr(struct ieee80211_hw *hw)
 	if (mgnt_link_status_query(hw) == RT_MEDIA_CONNECT) {
 		RT_TRACE(rtlpriv, COMP_BT_COEXIST, DBG_DMESG,
 			"Need to decrease bt power\n");
-			rtlpriv->btcoexist.cstate |=
-			BT_COEX_STATE_DEC_BT_POWER;
-			return true;
+		rtlpriv->btcoexist.cstate |=
+		BT_COEX_STATE_DEC_BT_POWER;
+		return true;
 	}
 
 	rtlpriv->btcoexist.cstate &= ~BT_COEX_STATE_DEC_BT_POWER;
@@ -185,7 +164,7 @@ static void rtl8723e_dm_bt_set_hw_pta_mode(struct ieee80211_hw *hw, bool b_mode)
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 
 	if (BT_PTA_MODE_ON == b_mode) {
-		RT_TRACE(rtlpriv, COMP_BT_COEXIST, DBG_TRACE, "PTA mode on, ");
+		RT_TRACE(rtlpriv, COMP_BT_COEXIST, DBG_TRACE, "PTA mode on\n");
 		/*  Enable GPIO 0/1/2/3/8 pins for bt */
 		rtl_write_byte(rtlpriv, 0x40, 0x20);
 		rtlpriv->btcoexist.hw_coexist_all_off = false;
@@ -1401,7 +1380,7 @@ static void rtl8723e_dm_bt_inq_page_monitor(struct ieee80211_hw *hw)
 			(long)hal_coex_8723.bt_inq_page_start_time) / HZ)
 			>= 10) {
 			RT_TRACE(rtlpriv, COMP_BT_COEXIST, DBG_DMESG,
-				"[BTCoex], BT Inquiry/page >= 10sec!!!");
+				"[BTCoex], BT Inquiry/page >= 10sec!!!\n");
 			hal_coex_8723.bt_inq_page_start_time = 0;
 			rtlpriv->btcoexist.cstate &=
 				~BT_COEX_STATE_BT_INQ_PAGE;
@@ -1426,7 +1405,6 @@ static void rtl8723e_dm_bt_reset_action_profile_state(struct ieee80211_hw *hw)
 static void _rtl8723e_dm_bt_coexist_2_ant(struct ieee80211_hw *hw)
 {
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
-	u8 bt_retry_cnt;
 	u8 bt_info_original;
 	RT_TRACE(rtlpriv, COMP_BT_COEXIST, DBG_DMESG,
 		"[BTCoex] Get bt info by fw!!\n");
@@ -1438,7 +1416,6 @@ static void _rtl8723e_dm_bt_coexist_2_ant(struct ieee80211_hw *hw)
 				"[BTCoex] c2h for bt_info not rcvd yet!!\n");
 	}
 
-	bt_retry_cnt = hal_coex_8723.bt_retry_cnt;
 	bt_info_original = hal_coex_8723.c2h_bt_info_original;
 
 	/* when bt inquiry or page scan, we have to set h2c 0x25 */
@@ -1749,13 +1726,13 @@ void rtl_8723e_c2h_command_handle(struct ieee80211_hw *hw)
 
 
 	switch (c2h_event.cmd_id) {
-	case C2H_BT_RSSI:
+	case C2H_V0_BT_RSSI:
 			break;
 
-	case C2H_BT_OP_MODE:
+	case C2H_V0_BT_OP_MODE:
 			break;
 
-	case BT_INFO:
+	case C2H_V0_BT_INFO:
 		RT_TRACE(rtlpriv, COMP_FW, DBG_TRACE,
 			"BT info Byte[0] (ID) is 0x%x\n",
 			c2h_event.cmd_id);

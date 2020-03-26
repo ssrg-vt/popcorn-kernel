@@ -1,19 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Intel MIC Platform Software Stack (MPSS)
  *
  * Copyright(c) 2013 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
  *
  * Disclaimer: The codes contained in these modules may be specific to
  * the Intel Software Development Platform codenamed: Knights Ferry, and
@@ -22,7 +11,6 @@
  * support the codes or instruction set in future products.
  *
  * Intel MIC Card driver.
- *
  */
 #ifndef _MIC_CARD_DEVICE_H_
 #define _MIC_CARD_DEVICE_H_
@@ -32,6 +20,7 @@
 #include <linux/interrupt.h>
 #include <linux/mic_bus.h>
 #include "../bus/scif_bus.h"
+#include "../bus/vop_bus.h"
 
 /**
  * struct mic_intr_info - Contains h/w specific interrupt sources info
@@ -76,6 +65,7 @@ struct mic_device {
  * @dma_ch - Array of DMA channels
  * @num_dma_ch - Number of DMA channels available
  * @scdev: SCIF device on the SCIF virtual bus.
+ * @vpdev: Virtio over PCIe device on the VOP virtual bus.
  */
 struct mic_driver {
 	char name[20];
@@ -90,6 +80,7 @@ struct mic_driver {
 	struct dma_chan *dma_ch[MIC_MAX_DMA_CHAN];
 	int num_dma_ch;
 	struct scif_hw_dev *scdev;
+	struct vop_device *vpdev;
 };
 
 /**

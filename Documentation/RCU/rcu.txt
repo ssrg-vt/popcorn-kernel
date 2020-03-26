@@ -52,10 +52,10 @@ o	If I am running on a uniprocessor kernel, which can only do one
 o	How can I see where RCU is currently used in the Linux kernel?
 
 	Search for "rcu_read_lock", "rcu_read_unlock", "call_rcu",
-	"rcu_read_lock_bh", "rcu_read_unlock_bh", "call_rcu_bh",
-	"srcu_read_lock", "srcu_read_unlock", "synchronize_rcu",
-	"synchronize_net", "synchronize_srcu", and the other RCU
-	primitives.  Or grab one of the cscope databases from:
+	"rcu_read_lock_bh", "rcu_read_unlock_bh", "srcu_read_lock",
+	"srcu_read_unlock", "synchronize_rcu", "synchronize_net",
+	"synchronize_srcu", and the other RCU primitives.  Or grab one
+	of the cscope databases from:
 
 	http://www.rdrop.com/users/paulmck/RCU/linuxusage/rculocktab.html
 
@@ -76,21 +76,14 @@ o	I hear that RCU is patented?  What is with that?
 	Of these, one was allowed to lapse by the assignee, and the
 	others have been contributed to the Linux kernel under GPL.
 	There are now also LGPL implementations of user-level RCU
-	available (http://lttng.org/?q=node/18).
+	available (http://liburcu.org/).
 
 o	I hear that RCU needs work in order to support realtime kernels?
 
-	This work is largely completed.  Realtime-friendly RCU can be
-	enabled via the CONFIG_PREEMPT_RCU kernel configuration
-	parameter.  However, work is in progress for enabling priority
-	boosting of preempted RCU read-side critical sections.	This is
-	needed if you have CPU-bound realtime threads.
+	Realtime-friendly RCU can be enabled via the CONFIG_PREEMPT_RCU
+	kernel configuration parameter.
 
 o	Where can I find more information on RCU?
 
 	See the RTFP.txt file in this directory.
 	Or point your browser at http://www.rdrop.com/users/paulmck/RCU/.
-
-o	What are all these files in this directory?
-
-	See 00-INDEX for the list.

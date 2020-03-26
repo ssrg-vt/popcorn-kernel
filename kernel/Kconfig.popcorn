@@ -34,11 +34,6 @@ config POPCORN_DEBUG_VMA_SERVER
 	depends on POPCORN_DEBUG
 	default n
 
-config POPCORN_DEBUG_SYSCALL_SERVER
-	bool "Syscall server"
-	depends on POPCORN_DEBUG
-	default n
-
 config POPCORN_DEBUG_VERBOSE
 	bool "Log more debug messages"
 	depends on POPCORN_DEBUG
@@ -56,9 +51,6 @@ config POPCORN_REMOTE_INFO
 #config POPCORN_POWER_SENSOR_X86
 #	bool "Power sensor for x86"
 #	depends on X86
-#config POPCORN_POWER_SENSOR_ARM
-#	bool "Power sensor for ARM"
-#	depends on (ARM || ARM64)
 
 config POPCORN_STAT
 	bool "Collect performance statistics"
@@ -75,7 +67,7 @@ config POPCORN_STAT_PGFAULTS
 comment "Popcorn is not currently supported on this architecture"
 	depends on !ARCH_SUPPORTS_POPCORN
 
-source msg_layer/Kconfig
+source "msg_layer/Kconfig"
 
 endif # POPCORN
 

@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * linux/sound/soc/pxa/ttc_dkb.c
  *
  * Copyright (C) 2012 Marvell International Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  */
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -75,7 +61,7 @@ static const struct snd_soc_dapm_route ttc_audio_map[] = {
 
 static int ttc_pm860x_init(struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_component *component = rtd->codec_dai->component;
 
 	/* Headset jack detection */
 	snd_soc_card_jack_new(rtd->card, "Headphone Jack", SND_JACK_HEADPHONE |
@@ -86,9 +72,9 @@ static int ttc_pm860x_init(struct snd_soc_pcm_runtime *rtd)
 			      ARRAY_SIZE(mic_jack_pins));
 
 	/* headphone, microphone detection & headset short detection */
-	pm860x_hs_jack_detect(codec, &hs_jack, SND_JACK_HEADPHONE,
+	pm860x_hs_jack_detect(component, &hs_jack, SND_JACK_HEADPHONE,
 			      SND_JACK_BTN_0, SND_JACK_BTN_1, SND_JACK_BTN_2);
-	pm860x_mic_jack_detect(codec, &hs_jack, SND_JACK_MICROPHONE);
+	pm860x_mic_jack_detect(component, &hs_jack, SND_JACK_MICROPHONE);
 
 	return 0;
 }

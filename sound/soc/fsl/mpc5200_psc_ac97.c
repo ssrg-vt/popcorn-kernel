@@ -1,18 +1,15 @@
-/*
- * linux/sound/mpc5200-ac97.c -- AC97 support for the Freescale MPC52xx chip.
- *
- * Copyright (C) 2009 Jon Smirl, Digispeaker
- * Author: Jon Smirl <jonsmirl@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// linux/sound/mpc5200-ac97.c -- AC97 support for the Freescale MPC52xx chip.
+//
+// Copyright (C) 2009 Jon Smirl, Digispeaker
+// Author: Jon Smirl <jonsmirl@gmail.com>
 
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/delay.h>
+#include <linux/time.h>
 
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -24,7 +21,6 @@
 #include <asm/mpc52xx_psc.h>
 
 #include "mpc5200_dma.h"
-#include "mpc5200_psc_ac97.h"
 
 #define DRV_NAME "mpc5200-psc-ac97"
 
@@ -127,7 +123,7 @@ static void psc_ac97_cold_reset(struct snd_ac97 *ac97)
 
 	mutex_unlock(&psc_dma->mutex);
 
-	msleep(1);
+	usleep_range(1000, 2000);
 	psc_ac97_warm_reset(ac97);
 }
 

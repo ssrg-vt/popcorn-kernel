@@ -2,7 +2,7 @@
  * @file vma_server.c
  *
  * Popcorn Linux VMA handler implementation
- * This work was an extension of David Katz MS Thesis, but totally rewritten 
+ * This work was an extension of David Katz MS Thesis, but totally rewritten
  * by Sang-Hoon to support multithread environment.
  *
  * @author Sang-Hoon Kim, SSRG Virginia Tech 2016-2017
@@ -11,7 +11,6 @@
  * @author Marina Sadini, Antonio Barbalace, SSRG Virginia Tech 2014
  * @author Marina Sadini, SSRG Virginia Tech 2013
  */
-
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/kthread.h>
@@ -19,11 +18,9 @@
 #include <linux/mman.h>
 #include <linux/highmem.h>
 #include <linux/ptrace.h>
-#include <linux/syscalls.h>
-
+#include <linux/sched/mm.h>
 #include <linux/elf.h>
-
-#include <popcorn/types.h>
+#include <linux/syscalls.h>
 #include <popcorn/bundle.h>
 
 #include "types.h"
@@ -32,22 +29,14 @@
 #include "page_server.h"
 #include "wait_station.h"
 
-enum vma_op_code {
-	VMA_OP_NOP = -1,
-	VMA_OP_MMAP,
-	VMA_OP_MUNMAP,
-	VMA_OP_MPROTECT,
-	VMA_OP_MREMAP,
-	VMA_OP_MADVISE,
-	VMA_OP_BRK,
-	VMA_OP_MAX,
-};
 
 const char *vma_op_code_sz[] = {
 	"mmap", "munmap", "mprotect", "mremap", "madvise", "brk"
 };
 
-
+/**
+ *   This function performs a diff between all VMA's pcorand the current VMA
+ */
 static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 		unsigned long start, unsigned long end,
 		unsigned long prot, unsigned long flags, unsigned long pgoff)
@@ -55,17 +44,11 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 	unsigned long ret = start;
 	unsigned long error;
 	unsigned long populate = 0;
-	struct vm_area_struct* vma;
+	struct vm_area_struct *vma;
 
-	/**
-	 * Go through ALL VMAs, looking for overlapping with this space.
-	 */
 	VSPRINTK("  [%d] map+ %lx %lx\n", current->pid, start, end);
 	for (vma = current->mm->mmap; start < end; vma = vma->vm_next) {
-		/*
-		VSPRINTK("  [%d] vma  %lx -- %lx\n", current->pid,
-				vma ? vma->vm_start : 0, vma ? vma->vm_end : 0);
-		*/
+
 		if (vma == NULL || end <= vma->vm_start) {
 			/**
 			 * We've reached the end of the list, or the VMA is fully
@@ -74,7 +57,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			VSPRINTK("  [%d] map0 %lx -- %lx @ %lx, %lx\n", current->pid,
 					start, end, pgoff, prot);
 			error = do_mmap_pgoff(file, start, end - start,
-					prot, flags, pgoff, &populate);
+					      prot, flags, pgoff, &populate, NULL);
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;
 			}
@@ -101,7 +84,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			VSPRINTK("  [%d] map1 %lx -- %lx @ %lx\n", current->pid,
 					start, vma->vm_start, pgoff);
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
-					prot, flags, pgoff, &populate);
+					      prot, flags, pgoff, &populate, NULL);
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;;
 			}
@@ -111,7 +94,7 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			VSPRINTK("  [%d] map2 %lx -- %lx @ %lx\n", current->pid,
 					start, vma->vm_start, pgoff);
 			error = do_mmap_pgoff(file, start, vma->vm_start - start,
-					prot, flags, pgoff, &populate);
+					      prot, flags, pgoff, &populate, NULL);
 			if (error != start) {
 				ret = VM_FAULT_SIGBUS;
 				break;
@@ -124,70 +107,9 @@ static unsigned long map_difference(struct mm_struct *mm, struct file *file,
 			start = vma->vm_end;
 		}
 	}
-	BUG_ON(populate);
+	WARN_ON(populate);
 	return ret;
 }
-
-
-#if 0
-/**
- * Heterogeneous binary support
- *
- * Handle misaligned ELF sections in the heterogeneous binary.
- * However, recent alignment tool updates makes ELF sections aligned,
- * so this is not required anymore
- * Should be paried to fs/binfmt_elf.c
- */
-static unsigned long __get_file_offset(struct file *file, unsigned long vm_start)
-{
-	struct elfhdr elf_ex;
-	struct elf_phdr *elf_eppnt = NULL, *elf_eppnt_start = NULL;
-	int size, retval, i;
-
-	retval = kernel_read(file, 0, (char *)&elf_ex, sizeof(elf_ex));
-	if (retval != sizeof(elf_ex)) {
-		printk("%s: ERROR in Kernel read of ELF file\n", __func__);
-		retval = -1;
-		goto out;
-	}
-
-	size = elf_ex.e_phnum * sizeof(struct elf_phdr);
-
-	elf_eppnt = kmalloc(size, GFP_KERNEL);
-	if (elf_eppnt == NULL) {
-		printk("%s: ERROR: kmalloc failed in\n", __func__);
-		retval = -1;
-		goto out;
-	}
-
-	elf_eppnt_start = elf_eppnt;
-	retval = kernel_read(file, elf_ex.e_phoff, (char *)elf_eppnt, size);
-	if (retval != size) {
-		printk("%s: ERROR: during kernel read of ELF file\n", __func__);
-		retval = -1;
-		goto out;
-	}
-	retval = 0;
-	for (i = 0; i < elf_ex.e_phnum; i++, elf_eppnt++) {
-		if (elf_eppnt->p_type != PT_LOAD) continue;
-
-		if ((vm_start >= elf_eppnt->p_vaddr) &&
-				(vm_start <= (elf_eppnt->p_vaddr + elf_eppnt->p_memsz))) {
-			retval = elf_eppnt->p_offset +
-				(vm_start & PAGE_MASK) - (elf_eppnt->p_vaddr & PAGE_MASK);
-			retval >>= PAGE_SHIFT;
-			break;
-		}
-	}
-
-out:
-	if (elf_eppnt_start != NULL)
-		kfree(elf_eppnt_start);
-
-	return retval;
-}
-#endif
-
 
 /**
  * VMA operation delegators at remotes
@@ -195,6 +117,9 @@ out:
 static vma_op_request_t *__alloc_vma_op_request(enum vma_op_code opcode)
 {
 	vma_op_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
+
+	if(!req)
+		return req;
 
 	req->origin_pid = current->origin_pid,
 	req->remote_pid = current->pid,
@@ -213,7 +138,7 @@ static int __delegate_vma_op(vma_op_request_t *req, vma_op_response_t **resp)
 	pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_REQUEST,
 			current->origin_nid, req, sizeof(*req));
 	res = wait_at_station(ws);
-	BUG_ON(res->operation != req->operation);
+	WARN_ON(res->operation != req->operation);
 
 	*resp = res;
 	return res->ret;
@@ -235,8 +160,11 @@ unsigned long vma_server_mmap_remote(struct file *file,
 		unsigned long prot, unsigned long flags, unsigned long pgoff)
 {
 	unsigned long ret = 0;
-	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_MMAP);
+	vma_op_request_t *req;
 	vma_op_response_t *res;
+
+	if(!(req = __alloc_vma_op_request(VMA_OP_MMAP)))
+		return -ENOMEM;
 
 	req->addr = addr;
 	req->len = len;
@@ -256,7 +184,8 @@ unsigned long vma_server_mmap_remote(struct file *file,
 	VSPRINTK("  [%d] %ld %lx -- %lx\n", current->pid,
 			ret, res->addr, res->addr + res->len);
 
-	if (ret) goto out_free;
+	if (ret)
+		goto out_free;
 
 	while (!down_write_trylock(&current->mm->mmap_sem)) {
 		schedule();
@@ -281,9 +210,12 @@ int vma_server_munmap_remote(unsigned long start, size_t len)
 	VSPRINTK("\n## VMA munmap [%d] %lx %lx\n", current->pid, start, len);
 
 	ret = vm_munmap(start, len);
-	if (ret) return ret;
+	if (ret)
+		return ret;
 
-	req = __alloc_vma_op_request(VMA_OP_MUNMAP);
+	if(!(req = __alloc_vma_op_request(VMA_OP_MUNMAP)))
+		return -ENOMEM;
+
 	req->addr = start;
 	req->len = len;
 
@@ -301,8 +233,11 @@ int vma_server_munmap_remote(unsigned long start, size_t len)
 int vma_server_brk_remote(unsigned long oldbrk, unsigned long brk)
 {
 	int ret;
-	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_BRK);
+	vma_op_request_t *req;
 	vma_op_response_t *res;
+
+	if(!(req = __alloc_vma_op_request(VMA_OP_BRK)))
+		return -ENOMEM;
 
 	req->brk = brk;
 
@@ -321,8 +256,11 @@ int vma_server_brk_remote(unsigned long oldbrk, unsigned long brk)
 int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 {
 	int ret;
-	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_MADVISE);
+	vma_op_request_t *req;
 	vma_op_response_t *res;
+
+	if(!(req = __alloc_vma_op_request(VMA_OP_MADVISE)))
+		return -ENOMEM;
 
 	req->addr = start;
 	req->len = len;
@@ -345,8 +283,11 @@ int vma_server_madvise_remote(unsigned long start, size_t len, int behavior)
 int vma_server_mprotect_remote(unsigned long start, size_t len, unsigned long prot)
 {
 	int ret;
-	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_MPROTECT);
+	vma_op_request_t *req;
 	vma_op_response_t *res;
+
+	if(!(req = __alloc_vma_op_request(VMA_OP_MPROTECT)))
+		return -ENOMEM;
 
 	req->start = start;
 	req->len = len;
@@ -382,8 +323,11 @@ int vma_server_mremap_remote(unsigned long addr, unsigned long old_len,
 int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 {
 	int nid;
-	vma_op_request_t *req = __alloc_vma_op_request(VMA_OP_MUNMAP);
+	vma_op_request_t *req;
 	struct remote_context *rc = get_task_remote(current);
+
+	if(!(req = __alloc_vma_op_request(VMA_OP_MUNMAP)))
+		return -ENOMEM;
 
 	req->start = start;
 	req->len = len;
@@ -392,9 +336,11 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 		struct wait_station *ws;
 		vma_op_response_t *res;
 
-		if (!get_popcorn_node_online(nid) || !rc->remote_tgids[nid]) continue;
+		if (!get_popcorn_node_online(nid) || !rc->remote_tgids[nid])
+			continue;
 
-		if (nid == my_nid || nid == nid_except) continue;
+		if (nid == my_nid || nid == nid_except)
+			continue;
 
 		ws = get_wait_station(current);
 		req->remote_ws = ws->id;
@@ -404,10 +350,9 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 				req->origin_pid, nid, start, len);
 		pcn_kmsg_send(PCN_KMSG_TYPE_VMA_OP_REQUEST, nid, req, sizeof(*req));
 		res = wait_at_station(ws);
-		pcn_kmsg_done(res);
 	}
-	put_task_remote(current);
 	kfree(req);
+	put_task_remote(current);
 
 	vm_munmap(start, len);
 	return 0;
@@ -455,11 +400,10 @@ static long __process_vma_op_at_remote(vma_op_request_t *req)
 	case VMA_OP_MREMAP:
 	case VMA_OP_BRK:
 	case VMA_OP_MADVISE:
-		BUG_ON("Not implemented yet");
+		WARN_ON("Not implemented yet");
 		break;
 	default:
-		BUG_ON("unreachable");
-
+		WARN_ON("unreachable");
 	}
 	return ret;
 }
@@ -487,22 +431,24 @@ static long __process_vma_op_at_origin(vma_op_request_t *req)
 		}
 		down_write(&mm->mmap_sem);
 		raddr = do_mmap_pgoff(f, req->addr, req->len, req->prot,
-				req->flags, req->pgoff, &populate);
+				      req->flags, req->pgoff, &populate, NULL);
 		up_write(&mm->mmap_sem);
-		if (populate) mm_populate(raddr, populate);
+		if (populate)
+			mm_populate(raddr, populate);
 
 		ret = IS_ERR_VALUE(raddr) ? raddr : 0;
 		req->addr = raddr;
 		VSPRINTK("  [%d] %lx %lx -- %lx %lx %lx\n", current->pid,
 				ret, req->addr, req->addr + req->len, req->prot, req->flags);
 
-		if (f) filp_close(f, NULL);
+		if (f)
+			filp_close(f, NULL);
 		mmput(mm);
 		break;
 	}
 	case VMA_OP_BRK: {
 		unsigned long brk = req->brk;
-		req->brk = sys_brk(req->brk);
+		req->brk = ksys_brk(req->brk);
 		ret = brk != req->brk;
 		break;
 	}
@@ -510,22 +456,22 @@ static long __process_vma_op_at_origin(vma_op_request_t *req)
 		ret = vma_server_munmap_origin(req->addr, req->len, from_nid);
 		break;
 	case VMA_OP_MPROTECT:
-		ret = sys_mprotect(req->addr, req->len, req->prot);
+		ret = ksys_mprotect(req->addr, req->len, req->prot);
 		break;
 	case VMA_OP_MREMAP:
-		ret = sys_mremap(req->addr, req->old_len, req->new_len,
-			req->flags, req->new_addr);
+		ret = ksys_mremap(req->addr, req->old_len, req->new_len,
+				  req->flags, req->new_addr);
 		break;
 	case VMA_OP_MADVISE:
 		if (req->behavior == MADV_RELEASE) {
 			ret = process_madvise_release_from_remote(
 					from_nid, req->start, req->start + req->len);
 		} else {
-			ret = sys_madvise(req->start, req->len, req->behavior);
+			ret = ksys_madvise(req->start, req->len, req->behavior);
 		}
 		break;
 	default:
-		BUG_ON("unreachable");
+		WARN_ON("unreachable");
 	}
 
 	return ret;
@@ -682,17 +628,16 @@ static struct vma_info *__alloc_vma_info_request(struct task_struct *tsk, unsign
 	struct vma_info *vi = kmalloc(sizeof(*vi), GFP_KERNEL);
 	vma_info_request_t *req = kmalloc(sizeof(*req), GFP_KERNEL);
 
-	BUG_ON(!vi || !req);
+	if(!vi || !req)
+		return vi;
 
-	/* vma_info */
 	INIT_LIST_HEAD(&vi->list);
 	vi->addr = addr;
-	vi->response = (volatile vma_info_response_t *)0xdeadbeaf; /* poision */
+	vi->response = (volatile vma_info_response_t *)0xdeadbeaf;
 	atomic_set(&vi->pendings, 0);
 	init_completion(&vi->complete);
 	init_waitqueue_head(&vi->pendings_wait);
 
-	/* req */
 	req->origin_pid = tsk->origin_pid;
 	req->remote_pid = tsk->pid;
 	req->addr = addr;
@@ -724,17 +669,12 @@ static int __update_vma(struct task_struct *tsk, vma_info_response_t *res)
 	}
 	vma = find_vma(mm, addr);
 	VSPRINTK("  [%d] %lx %lx\n", tsk->pid, vma ? vma->vm_start : 0, addr);
-	if (vma && vma->vm_start <= addr) {
-		/* somebody already done for me. */
-		goto out;
-	}
 
-	if (vma_info_anon(res) || vma_info_dev_zero(res)) {
+	if (vma && vma->vm_start <= addr)
+		goto out;
+
+	if (vma_info_anon(res)) {
 		flags |= MAP_ANONYMOUS;
-		VSPRINTK("  [%d] anon file path: %u, dev zero backing: %u",
-			 tsk->pid,
-			 (unsigned int)vma_info_anon(res),
-			 (unsigned int)vma_info_dev_zero(res));
 	} else {
 		f = filp_open(res->vm_file_path, O_RDONLY | O_LARGEFILE, 0);
 		if (IS_ERR(f)) {
@@ -743,11 +683,7 @@ static int __update_vma(struct task_struct *tsk, vma_info_response_t *res)
 			ret = -EIO;
 			goto out;
 		}
-		/*
-		unsigned long orig_pgoff = res->vm_pgoff;
-		res->vm_pgoff = __get_file_offset(f, res->vm_start);
-		BUG_ON(res->vm_pgoff == -1);
-		*/
+
 		VSPRINTK("  [%d] %s + %lx\n", tsk->pid,
 				res->vm_file_path, res->vm_pgoff);
 	}
@@ -766,11 +702,6 @@ static int __update_vma(struct task_struct *tsk, vma_info_response_t *res)
 
 	if (f) filp_close(f, NULL);
 
-	/*
-	vma = find_vma(mm, addr);
-	BUG_ON(!vma || vma->vm_start > addr);
-	if (res->vm_flags & VM_FETCH_LOCAL) vma->vm_flags |= VM_FETCH_LOCAL;
-	*/
 out:
 	downgrade_write(&mm->mmap_sem);
 	return ret;
@@ -783,7 +714,7 @@ out:
  */
 int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 {
-	struct vma_info *vi;
+	struct vma_info *vi = NULL;
 	unsigned long flags;
 	DEFINE_WAIT(wait);
 	int ret = 0;
@@ -803,6 +734,9 @@ int vma_server_fetch_vma(struct task_struct *tsk, unsigned long address)
 		spin_unlock_irqrestore(&rc->vmas_lock, flags);
 
 		vi = __alloc_vma_info_request(tsk, addr, &req);
+
+		if(!vi || !req)
+			return -ENOMEM;
 
 		spin_lock_irqsave(&rc->vmas_lock, flags);
 		v = __lookup_pending_vma_request(rc, addr);

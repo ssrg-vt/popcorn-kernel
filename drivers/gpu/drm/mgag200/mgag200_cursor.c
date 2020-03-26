@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2013 Matrox Graphics
- *
- * This file is subject to the terms and conditions of the GNU General
- * Public License version 2. See the file COPYING in the main
- * directory of this archive for more details.
  *
  * Author: Christopher Harvey <charvey@matrox.com>
  */
@@ -75,7 +72,7 @@ int mga_crtc_cursor_set(struct drm_crtc *crtc,
 		return 0;
 	}
 
-	obj = drm_gem_object_lookup(dev, file_priv, handle);
+	obj = drm_gem_object_lookup(file_priv, handle);
 	if (!obj)
 		return -ENOENT;
 
@@ -248,7 +245,7 @@ int mga_crtc_cursor_set(struct drm_crtc *crtc,
 out_unreserve1:
 	mgag200_bo_unreserve(pixels_2);
 out_unref:
-	drm_gem_object_unreference_unlocked(obj);
+	drm_gem_object_put_unlocked(obj);
 
 	return ret;
 }

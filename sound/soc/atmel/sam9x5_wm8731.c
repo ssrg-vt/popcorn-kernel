@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * sam9x5_wm8731   --	SoC audio for AT91SAM9X5-based boards
  *			that are using WM8731 as codec.
@@ -10,12 +11,6 @@
  *
  * Based on sam9g20_wm8731.c by:
  * Sedji Gaouaou <sedji.gaouaou@atmel.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 #include <linux/of.h>
 #include <linux/export.h>
@@ -49,13 +44,13 @@ static int sam9x5_wm8731_init(struct snd_soc_pcm_runtime *rtd)
 	struct device *dev = rtd->dev;
 	int ret;
 
-	dev_dbg(dev, "ASoC: %s called\n", __func__);
+	dev_dbg(dev, "%s called\n", __func__);
 
 	/* set the codec system clock for DAC and ADC */
 	ret = snd_soc_dai_set_sysclk(codec_dai, WM8731_SYSCLK_XTAL,
 				     MCLK_RATE, SND_SOC_CLOCK_IN);
 	if (ret < 0) {
-		dev_err(dev, "ASoC: Failed to set WM8731 SYSCLK: %d\n", ret);
+		dev_err(dev, "Failed to set WM8731 SYSCLK: %d\n", ret);
 		return ret;
 	}
 
@@ -146,8 +141,7 @@ static int sam9x5_wm8731_driver_probe(struct platform_device *pdev)
 
 	ret = atmel_ssc_set_audio(priv->ssc_id);
 	if (ret != 0) {
-		dev_err(&pdev->dev,
-			"ASoC: Failed to set SSC %d for audio: %d\n",
+		dev_err(&pdev->dev, "Failed to set SSC %d for audio: %d\n",
 			ret, priv->ssc_id);
 		goto out;
 	}
@@ -157,12 +151,11 @@ static int sam9x5_wm8731_driver_probe(struct platform_device *pdev)
 
 	ret = snd_soc_register_card(card);
 	if (ret) {
-		dev_err(&pdev->dev,
-			"ASoC: Platform device allocation failed\n");
+		dev_err(&pdev->dev, "Platform device allocation failed\n");
 		goto out_put_audio;
 	}
 
-	dev_dbg(&pdev->dev, "ASoC: %s ok\n", __func__);
+	dev_dbg(&pdev->dev, "%s ok\n", __func__);
 
 	return ret;
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * db8500_thermal.c - DB8500 Thermal Management Implementation
  *
@@ -5,16 +6,6 @@
  * Copyright (C) 2012 Linaro Ltd.
  *
  * Author: Hongbo Zhang <hongbo.zhang@linaro.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/cpu_cooling.h>
@@ -306,7 +297,7 @@ static void db8500_thermal_work(struct work_struct *work)
 	if (cur_mode == THERMAL_DEVICE_DISABLED)
 		return;
 
-	thermal_zone_device_update(pzone->therm_dev);
+	thermal_zone_device_update(pzone->therm_dev, THERMAL_EVENT_UNSPECIFIED);
 	dev_dbg(&pzone->therm_dev->device, "thermal work finished.\n");
 }
 
@@ -512,6 +503,7 @@ static const struct of_device_id db8500_thermal_match[] = {
 	{ .compatible = "stericsson,db8500-thermal" },
 	{},
 };
+MODULE_DEVICE_TABLE(of, db8500_thermal_match);
 #endif
 
 static struct platform_driver db8500_thermal_driver = {

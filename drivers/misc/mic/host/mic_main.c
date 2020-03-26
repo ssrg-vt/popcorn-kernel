@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel MIC Platform Software Stack (MPSS)
  *
  * Copyright(c) 2013 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
  *
  * Intel MIC Host driver.
  */
@@ -27,8 +16,6 @@
 #include "mic_device.h"
 #include "mic_x100.h"
 #include "mic_smpt.h"
-#include "mic_fops.h"
-#include "mic_virtio.h"
 
 static const char mic_driver_name[] = "mic";
 
@@ -57,17 +44,6 @@ MODULE_DEVICE_TABLE(pci, mic_pci_tbl);
 
 /* ID allocator for MIC devices */
 static struct ida g_mic_ida;
-/* Base device node number for MIC devices */
-static dev_t g_mic_devno;
-
-static const struct file_operations mic_fops = {
-	.open = mic_open,
-	.release = mic_release,
-	.unlocked_ioctl = mic_ioctl,
-	.poll = mic_poll,
-	.mmap = mic_mmap,
-	.owner = THIS_MODULE,
-};
 
 /* Initialize the device page */
 static int mic_dp_init(struct mic_device *mdev)
@@ -169,7 +145,6 @@ mic_device_init(struct mic_device *mdev, struct pci_dev *pdev)
 	mic_ops_init(mdev);
 	mutex_init(&mdev->mic_mutex);
 	mdev->irq_info.next_avail_src = 0;
-	INIT_LIST_HEAD(&mdev->vdev_list);
 }
 
 /**
@@ -259,30 +234,15 @@ static int mic_probe(struct pci_dev *pdev,
 		goto smpt_uninit;
 	}
 	mic_bootparam_init(mdev);
-
 	mic_create_debug_dir(mdev);
-
-	mdev->miscdev.minor = MISC_DYNAMIC_MINOR;
-	snprintf(mdev->name, sizeof(mdev->name), "mic%d", mdev->id);
-	mdev->miscdev.name = mdev->name;
-	mdev->miscdev.fops = &mic_fops;
-	mdev->miscdev.parent = &mdev->pdev->dev;
-	rc = misc_register(&mdev->miscdev);
-	if (rc) {
-		dev_err(&pdev->dev, "misc_register err id %d rc %d\n",
-			mdev->id, rc);
-		goto cleanup_debug_dir;
-	}
 
 	mdev->cosm_dev = cosm_register_device(&mdev->pdev->dev, &cosm_hw_ops);
 	if (IS_ERR(mdev->cosm_dev)) {
 		rc = PTR_ERR(mdev->cosm_dev);
 		dev_err(&pdev->dev, "cosm_add_device failed rc %d\n", rc);
-		goto misc_dereg;
+		goto cleanup_debug_dir;
 	}
 	return 0;
-misc_dereg:
-	misc_deregister(&mdev->miscdev);
 cleanup_debug_dir:
 	mic_delete_debug_dir(mdev);
 	mic_dp_uninit(mdev);
@@ -323,7 +283,6 @@ static void mic_remove(struct pci_dev *pdev)
 		return;
 
 	cosm_unregister_device(mdev->cosm_dev);
-	misc_deregister(&mdev->miscdev);
 	mic_delete_debug_dir(mdev);
 	mic_dp_uninit(mdev);
 	mic_smpt_uninit(mdev);
@@ -347,26 +306,18 @@ static int __init mic_init(void)
 {
 	int ret;
 
-	ret = alloc_chrdev_region(&g_mic_devno, 0,
-				  MIC_MAX_NUM_DEVS, mic_driver_name);
-	if (ret) {
-		pr_err("alloc_chrdev_region failed ret %d\n", ret);
-		goto error;
-	}
-
+	request_module("mic_x100_dma");
 	mic_init_debugfs();
 	ida_init(&g_mic_ida);
 	ret = pci_register_driver(&mic_driver);
 	if (ret) {
 		pr_err("pci_register_driver failed ret %d\n", ret);
-		goto cleanup_chrdev;
+		goto cleanup_debugfs;
 	}
-	return ret;
-cleanup_chrdev:
+	return 0;
+cleanup_debugfs:
 	ida_destroy(&g_mic_ida);
 	mic_exit_debugfs();
-	unregister_chrdev_region(g_mic_devno, MIC_MAX_NUM_DEVS);
-error:
 	return ret;
 }
 
@@ -375,7 +326,6 @@ static void __exit mic_exit(void)
 	pci_unregister_driver(&mic_driver);
 	ida_destroy(&g_mic_ida);
 	mic_exit_debugfs();
-	unregister_chrdev_region(g_mic_devno, MIC_MAX_NUM_DEVS);
 }
 
 module_init(mic_init);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for ESS Maestro 1/2/2E Sound Card (started 21.8.99)
  *  Copyright (c) by Matze Braun <MatzeBraun@gmx.de>.
@@ -9,21 +10,6 @@
  *
  *  TODO:
  *   Perhaps Synth
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  *
  *  Notes from Zach Brown about the driver code
  *
@@ -113,7 +99,7 @@
 #include <sound/initval.h>
 
 #ifdef CONFIG_SND_ES1968_RADIO
-#include <media/tea575x.h>
+#include <media/drv-intf/tea575x.h>
 #endif
 
 #define CARD_NAME "ESS Maestro1/2"
@@ -126,7 +112,7 @@ MODULE_SUPPORTED_DEVICE("{{ESS,Maestro 2e},"
 		"{ESS,Maestro 1},"
 		"{TerraTec,DMX}}");
 
-#if defined(CONFIG_GAMEPORT) || (defined(MODULE) && defined(CONFIG_GAMEPORT_MODULE))
+#if IS_REACHABLE(CONFIG_GAMEPORT)
 #define SUPPORT_JOYSTICK 1
 #endif
 
@@ -1290,7 +1276,7 @@ static snd_pcm_uframes_t snd_es1968_pcm_pointer(struct snd_pcm_substream *substr
 	return bytes_to_frames(substream->runtime, ptr % es->dma_size);
 }
 
-static struct snd_pcm_hardware snd_es1968_playback = {
+static const struct snd_pcm_hardware snd_es1968_playback = {
 	.info =			(SNDRV_PCM_INFO_MMAP |
                		         SNDRV_PCM_INFO_MMAP_VALID |
 				 SNDRV_PCM_INFO_INTERLEAVED |
@@ -1311,7 +1297,7 @@ static struct snd_pcm_hardware snd_es1968_playback = {
 	.fifo_size =		0,
 };
 
-static struct snd_pcm_hardware snd_es1968_capture = {
+static const struct snd_pcm_hardware snd_es1968_capture = {
 	.info =			(SNDRV_PCM_INFO_NONINTERLEAVED |
 				 SNDRV_PCM_INFO_MMAP |
 				 SNDRV_PCM_INFO_MMAP_VALID |
@@ -1677,7 +1663,7 @@ static int snd_es1968_capture_close(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static struct snd_pcm_ops snd_es1968_playback_ops = {
+static const struct snd_pcm_ops snd_es1968_playback_ops = {
 	.open =		snd_es1968_playback_open,
 	.close =	snd_es1968_playback_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -1688,7 +1674,7 @@ static struct snd_pcm_ops snd_es1968_playback_ops = {
 	.pointer =	snd_es1968_pcm_pointer,
 };
 
-static struct snd_pcm_ops snd_es1968_capture_ops = {
+static const struct snd_pcm_ops snd_es1968_capture_ops = {
 	.open =		snd_es1968_capture_open,
 	.close =	snd_es1968_capture_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -2392,7 +2378,6 @@ static int es1968_suspend(struct device *dev)
 	chip->in_suspend = 1;
 	cancel_work_sync(&chip->hwvol_work);
 	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
-	snd_pcm_suspend_all(chip->pcm);
 	snd_ac97_suspend(chip->ac97);
 	snd_es1968_bob_stop(chip);
 	return 0;
@@ -2605,7 +2590,7 @@ static void snd_es1968_tea575x_set_direction(struct snd_tea575x *tea, bool outpu
 	}
 }
 
-static struct snd_tea575x_ops snd_es1968_tea_ops = {
+static const struct snd_tea575x_ops snd_es1968_tea_ops = {
 	.set_pins = snd_es1968_tea575x_set_pins,
 	.get_pins = snd_es1968_tea575x_get_pins,
 	.set_direction = snd_es1968_tea575x_set_direction,

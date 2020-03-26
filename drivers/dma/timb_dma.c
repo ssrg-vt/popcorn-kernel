@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * timb_dma.c timberdale FPGA DMA driver
  * Copyright (c) 2010 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /* Supports:
@@ -226,8 +218,7 @@ static void __td_start_dma(struct timb_dma_chan *td_chan)
 
 static void __td_finish(struct timb_dma_chan *td_chan)
 {
-	dma_async_tx_callback		callback;
-	void				*param;
+	struct dmaengine_desc_callback	cb;
 	struct dma_async_tx_descriptor	*txd;
 	struct timb_dma_desc		*td_desc;
 
@@ -252,8 +243,7 @@ static void __td_finish(struct timb_dma_chan *td_chan)
 	dma_cookie_complete(txd);
 	td_chan->ongoing = false;
 
-	callback = txd->callback;
-	param = txd->callback_param;
+	dmaengine_desc_get_callback(txd, &cb);
 
 	list_move(&td_desc->desc_node, &td_chan->free_list);
 
@@ -262,8 +252,7 @@ static void __td_finish(struct timb_dma_chan *td_chan)
 	 * The API requires that no submissions are done from a
 	 * callback, so we don't need to drop the lock here
 	 */
-	if (callback)
-		callback(param);
+	dmaengine_desc_callback_invoke(&cb, NULL);
 }
 
 static u32 __td_ier_mask(struct timb_dma *td)
@@ -337,18 +326,14 @@ static struct timb_dma_desc *td_alloc_init_desc(struct timb_dma_chan *td_chan)
 	int err;
 
 	td_desc = kzalloc(sizeof(struct timb_dma_desc), GFP_KERNEL);
-	if (!td_desc) {
-		dev_err(chan2dev(chan), "Failed to alloc descriptor\n");
+	if (!td_desc)
 		goto out;
-	}
 
 	td_desc->desc_list_len = td_chan->desc_elems * TIMB_DMA_DESC_SIZE;
 
 	td_desc->desc_list = kzalloc(td_desc->desc_list_len, GFP_KERNEL);
-	if (!td_desc->desc_list) {
-		dev_err(chan2dev(chan), "Failed to alloc descriptor\n");
+	if (!td_desc->desc_list)
 		goto err;
-	}
 
 	dma_async_tx_descriptor_init(&td_desc->txd, chan);
 	td_desc->txd.tx_submit = td_tx_submit;
@@ -429,7 +414,7 @@ static int td_alloc_chan_resources(struct dma_chan *chan)
 				break;
 			else {
 				dev_err(chan2dev(chan),
-					"Couldnt allocate any descriptors\n");
+					"Couldn't allocate any descriptors\n");
 				return -ENOMEM;
 			}
 		}
@@ -552,7 +537,7 @@ static struct dma_async_tx_descriptor *td_prep_slave_sg(struct dma_chan *chan,
 	}
 
 	dma_sync_single_for_device(chan2dmadev(chan), td_desc->txd.phys,
-		td_desc->desc_list_len, DMA_MEM_TO_DEV);
+		td_desc->desc_list_len, DMA_TO_DEVICE);
 
 	return &td_desc->txd;
 }
@@ -650,8 +635,8 @@ static int td_probe(struct platform_device *pdev)
 		DRIVER_NAME))
 		return -EBUSY;
 
-	td  = kzalloc(sizeof(struct timb_dma) +
-		sizeof(struct timb_dma_chan) * pdata->nr_channels, GFP_KERNEL);
+	td  = kzalloc(struct_size(td, channels, pdata->nr_channels),
+		      GFP_KERNEL);
 	if (!td) {
 		err = -ENOMEM;
 		goto err_release_region;

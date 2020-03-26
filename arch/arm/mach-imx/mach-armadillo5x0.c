@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * armadillo5x0.c
  *
@@ -6,21 +7,6 @@
  *
  * Based on Atmark Techno, Inc. armadillo 500 BSP 2008
  * Based on mx31ads.c and pcm037.c Great Work!
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
- * MA 02110-1301, USA.
  */
 
 #include <linux/types.h>
@@ -493,23 +479,11 @@ static void __init armadillo5x0_init(void)
 
 	regulator_register_fixed(0, dummy_supplies, ARRAY_SIZE(dummy_supplies));
 
-	armadillo5x0_smc911x_resources[1].start =
-			gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_0));
-	armadillo5x0_smc911x_resources[1].end =
-			gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_0));
-	platform_add_devices(devices, ARRAY_SIZE(devices));
-	imx_add_gpio_keys(&armadillo5x0_button_data);
 	imx31_add_imx_i2c1(NULL);
 
 	/* Register UART */
 	imx31_add_imx_uart0(&uart_pdata);
 	imx31_add_imx_uart1(&uart_pdata);
-
-	/* SMSC9118 IRQ pin */
-	gpio_direction_input(MX31_PIN_GPIO1_0);
-
-	/* Register SDHC */
-	imx31_add_mxc_mmc(0, &sdhc_pdata);
 
 	/* Register FB */
 	imx31_add_ipu_core();
@@ -525,23 +499,41 @@ static void __init armadillo5x0_init(void)
 	imx31_add_mxc_nand(&armadillo5x0_nand_board_info);
 
 	/* set NAND page size to 2k if not configured via boot mode pins */
-	__raw_writel(__raw_readl(mx3_ccm_base + MXC_CCM_RCSR) |
-					(1 << 30), mx3_ccm_base + MXC_CCM_RCSR);
+	imx_writel(imx_readl(mx3_ccm_base + MXC_CCM_RCSR) | (1 << 30),
+		   mx3_ccm_base + MXC_CCM_RCSR);
+}
+
+static void __init armadillo5x0_late(void)
+{
+	armadillo5x0_smc911x_resources[1].start =
+		gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_0));
+	armadillo5x0_smc911x_resources[1].end =
+		gpio_to_irq(IOMUX_TO_GPIO(MX31_PIN_GPIO1_0));
+	platform_add_devices(devices, ARRAY_SIZE(devices));
+
+	imx_add_gpio_keys(&armadillo5x0_button_data);
+
+	/* SMSC9118 IRQ pin */
+	gpio_direction_input(MX31_PIN_GPIO1_0);
+
+	/* Register SDHC */
+	imx31_add_mxc_mmc(0, &sdhc_pdata);
 
 	/* RTC */
 	/* Get RTC IRQ and register the chip */
-	if (gpio_request(ARMADILLO5X0_RTC_GPIO, "rtc") == 0) {
-		if (gpio_direction_input(ARMADILLO5X0_RTC_GPIO) == 0)
-			armadillo5x0_i2c_rtc.irq = gpio_to_irq(ARMADILLO5X0_RTC_GPIO);
+	if (!gpio_request(ARMADILLO5X0_RTC_GPIO, "rtc")) {
+		if (!gpio_direction_input(ARMADILLO5X0_RTC_GPIO))
+			armadillo5x0_i2c_rtc.irq =
+				gpio_to_irq(ARMADILLO5X0_RTC_GPIO);
 		else
 			gpio_free(ARMADILLO5X0_RTC_GPIO);
 	}
+
 	if (armadillo5x0_i2c_rtc.irq == 0)
 		pr_warn("armadillo5x0_init: failed to get RTC IRQ\n");
 	i2c_register_board_info(1, &armadillo5x0_i2c_rtc, 1);
 
 	/* USB */
-
 	usbotg_pdata.otg = imx_otg_ulpi_create(ULPI_OTG_DRVVBUS |
 			ULPI_OTG_DRVVBUS_EXT);
 	if (usbotg_pdata.otg)
@@ -565,5 +557,6 @@ MACHINE_START(ARMADILLO5X0, "Armadillo-500")
 	.init_irq = mx31_init_irq,
 	.init_time	= armadillo5x0_timer_init,
 	.init_machine = armadillo5x0_init,
+	.init_late	= armadillo5x0_late,
 	.restart	= mxc_restart,
 MACHINE_END

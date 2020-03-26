@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Serpent Cipher 8-way parallel algorithm (x86_64/AVX)
  *
@@ -5,34 +6,20 @@
  *     <Johannes.Goetzfried@informatik.stud.uni-erlangen.de>
  *
  * Copyright © 2011-2013 Jussi Kivilinna <jussi.kivilinna@iki.fi>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
- * USA
- *
  */
 
 #include <linux/linkage.h>
+#include <asm/frame.h>
 #include "glue_helper-asm-avx.S"
 
 .file "serpent-avx-x86_64-asm_64.S"
 
-.data
+.section	.rodata.cst16.bswap128_mask, "aM", @progbits, 16
 .align 16
-
 .Lbswap128_mask:
 	.byte 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
+.section	.rodata.cst16.xts_gf128mul_and_shl1_mask, "aM", @progbits, 16
+.align 16
 .Lxts_gf128mul_and_shl1_mask:
 	.byte 0x87, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0
 
@@ -681,6 +668,7 @@ ENTRY(serpent_ecb_enc_8way_avx)
 	 *	%rsi: dst
 	 *	%rdx: src
 	 */
+	FRAME_BEGIN
 
 	load_8way(%rdx, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2);
 
@@ -688,6 +676,7 @@ ENTRY(serpent_ecb_enc_8way_avx)
 
 	store_8way(%rsi, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2);
 
+	FRAME_END
 	ret;
 ENDPROC(serpent_ecb_enc_8way_avx)
 
@@ -697,6 +686,7 @@ ENTRY(serpent_ecb_dec_8way_avx)
 	 *	%rsi: dst
 	 *	%rdx: src
 	 */
+	FRAME_BEGIN
 
 	load_8way(%rdx, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2);
 
@@ -704,6 +694,7 @@ ENTRY(serpent_ecb_dec_8way_avx)
 
 	store_8way(%rsi, RC1, RD1, RB1, RE1, RC2, RD2, RB2, RE2);
 
+	FRAME_END
 	ret;
 ENDPROC(serpent_ecb_dec_8way_avx)
 
@@ -713,6 +704,7 @@ ENTRY(serpent_cbc_dec_8way_avx)
 	 *	%rsi: dst
 	 *	%rdx: src
 	 */
+	FRAME_BEGIN
 
 	load_8way(%rdx, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2);
 
@@ -720,6 +712,7 @@ ENTRY(serpent_cbc_dec_8way_avx)
 
 	store_cbc_8way(%rdx, %rsi, RC1, RD1, RB1, RE1, RC2, RD2, RB2, RE2);
 
+	FRAME_END
 	ret;
 ENDPROC(serpent_cbc_dec_8way_avx)
 
@@ -730,6 +723,7 @@ ENTRY(serpent_ctr_8way_avx)
 	 *	%rdx: src
 	 *	%rcx: iv (little endian, 128bit)
 	 */
+	FRAME_BEGIN
 
 	load_ctr_8way(%rcx, .Lbswap128_mask, RA1, RB1, RC1, RD1, RA2, RB2, RC2,
 		      RD2, RK0, RK1, RK2);
@@ -738,6 +732,7 @@ ENTRY(serpent_ctr_8way_avx)
 
 	store_ctr_8way(%rdx, %rsi, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2);
 
+	FRAME_END
 	ret;
 ENDPROC(serpent_ctr_8way_avx)
 
@@ -748,6 +743,7 @@ ENTRY(serpent_xts_enc_8way_avx)
 	 *	%rdx: src
 	 *	%rcx: iv (t ⊕ αⁿ ∈ GF(2¹²⁸))
 	 */
+	FRAME_BEGIN
 
 	/* regs <= src, dst <= IVs, regs <= regs xor IVs */
 	load_xts_8way(%rcx, %rdx, %rsi, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2,
@@ -758,6 +754,7 @@ ENTRY(serpent_xts_enc_8way_avx)
 	/* dst <= regs xor IVs(in dst) */
 	store_xts_8way(%rsi, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2);
 
+	FRAME_END
 	ret;
 ENDPROC(serpent_xts_enc_8way_avx)
 
@@ -768,6 +765,7 @@ ENTRY(serpent_xts_dec_8way_avx)
 	 *	%rdx: src
 	 *	%rcx: iv (t ⊕ αⁿ ∈ GF(2¹²⁸))
 	 */
+	FRAME_BEGIN
 
 	/* regs <= src, dst <= IVs, regs <= regs xor IVs */
 	load_xts_8way(%rcx, %rdx, %rsi, RA1, RB1, RC1, RD1, RA2, RB2, RC2, RD2,
@@ -778,5 +776,6 @@ ENTRY(serpent_xts_dec_8way_avx)
 	/* dst <= regs xor IVs(in dst) */
 	store_xts_8way(%rsi, RC1, RD1, RB1, RE1, RC2, RD2, RB2, RE2);
 
+	FRAME_END
 	ret;
 ENDPROC(serpent_xts_dec_8way_avx)

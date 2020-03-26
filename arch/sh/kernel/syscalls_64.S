@@ -1,13 +1,10 @@
-/*
+/* SPDX-License-Identifier: GPL-2.0
+ *
  * arch/sh/kernel/syscalls_64.S
  *
  * Copyright (C) 2000, 2001  Paolo Alberelli
  * Copyright (C) 2004 - 2007  Paul Mundt
  * Copyright (C) 2003, 2004 Richard Curnow
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 
 #include <linux/sys.h>
@@ -406,3 +403,17 @@ sys_call_table:
 	.long sys_process_vm_writev
 	.long sys_kcmp
 	.long sys_finit_module
+	.long sys_sched_getattr		/* 380 */
+	.long sys_sched_setattr
+	.long sys_renameat2
+	.long sys_seccomp
+	.long sys_getrandom
+	.long sys_memfd_create		/* 385 */
+	.long sys_bpf
+	.long sys_execveat
+	.long sys_userfaultfd
+	.long sys_membarrier
+	.long sys_mlock2		/* 390 */
+	.long sys_copy_file_range
+	.long sys_preadv2
+	.long sys_pwritev2

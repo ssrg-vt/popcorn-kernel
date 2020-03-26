@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * AEAD: Authenticated Encryption with Associated Data
  * 
  * Copyright (c) 2007-2015 Herbert Xu <herbert@gondor.apana.org.au>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option) 
- * any later version.
- *
  */
 
 #ifndef _CRYPTO_INTERNAL_AEAD_H
@@ -78,6 +73,12 @@ static inline void aead_request_complete(struct aead_request *req, int err)
 static inline u32 aead_request_flags(struct aead_request *req)
 {
 	return req->base.flags;
+}
+
+static inline struct aead_request *aead_request_cast(
+	struct crypto_async_request *req)
+{
+	return container_of(req, struct aead_request, base);
 }
 
 static inline void crypto_set_aead_spawn(
@@ -151,6 +152,27 @@ static inline struct aead_request *aead_get_backlog(struct aead_queue *queue)
 	req = crypto_get_backlog(&queue->base);
 
 	return req ? container_of(req, struct aead_request, base) : NULL;
+}
+
+static inline unsigned int crypto_aead_alg_chunksize(struct aead_alg *alg)
+{
+	return alg->chunksize;
+}
+
+/**
+ * crypto_aead_chunksize() - obtain chunk size
+ * @tfm: cipher handle
+ *
+ * The block size is set to one for ciphers such as CCM.  However,
+ * you still need to provide incremental updates in multiples of
+ * the underlying block size as the IV does not have sub-block
+ * granularity.  This is known in this API as the chunk size.
+ *
+ * Return: chunk size in bytes
+ */
+static inline unsigned int crypto_aead_chunksize(struct crypto_aead *tfm)
+{
+	return crypto_aead_alg_chunksize(crypto_aead_alg(tfm));
 }
 
 int crypto_register_aead(struct aead_alg *alg);

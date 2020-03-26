@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PTP 1588 clock using the IXP46X
  *
  * Copyright (C) 2010 OMICRON electronics GmbH
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 #include <linux/device.h>
 #include <linux/err.h>
@@ -178,7 +165,6 @@ static int ptp_ixp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 static int ptp_ixp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
 {
 	u64 ns;
-	u32 remainder;
 	unsigned long flags;
 	struct ixp_clock *ixp_clock = container_of(ptp, struct ixp_clock, caps);
 	struct ixp46x_ts_regs *regs = ixp_clock->regs;
@@ -189,8 +175,7 @@ static int ptp_ixp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
 
 	spin_unlock_irqrestore(&register_lock, flags);
 
-	ts->tv_sec = div_u64_rem(ns, 1000000000, &remainder);
-	ts->tv_nsec = remainder;
+	*ts = ns_to_timespec64(ns);
 	return 0;
 }
 
@@ -202,8 +187,7 @@ static int ptp_ixp_settime(struct ptp_clock_info *ptp,
 	struct ixp_clock *ixp_clock = container_of(ptp, struct ixp_clock, caps);
 	struct ixp46x_ts_regs *regs = ixp_clock->regs;
 
-	ns = ts->tv_sec * 1000000000ULL;
-	ns += ts->tv_nsec;
+	ns = timespec64_to_ns(ts);
 
 	spin_lock_irqsave(&register_lock, flags);
 
@@ -239,7 +223,7 @@ static int ptp_ixp_enable(struct ptp_clock_info *ptp,
 	return -EOPNOTSUPP;
 }
 
-static struct ptp_clock_info ptp_ixp_caps = {
+static const struct ptp_clock_info ptp_ixp_caps = {
 	.owner		= THIS_MODULE,
 	.name		= "IXP46X timer",
 	.max_adj	= 66666655,
@@ -271,18 +255,19 @@ static int setup_interrupt(int gpio)
 		return err;
 
 	irq = gpio_to_irq(gpio);
+	if (irq < 0)
+		return irq;
 
-	if (NO_IRQ == irq)
-		return NO_IRQ;
-
-	if (irq_set_irq_type(irq, IRQF_TRIGGER_FALLING)) {
+	err = irq_set_irq_type(irq, IRQF_TRIGGER_FALLING);
+	if (err) {
 		pr_err("cannot set trigger type for irq %d\n", irq);
-		return NO_IRQ;
+		return err;
 	}
 
-	if (request_irq(irq, isr, 0, DRIVER, &ixp_clock)) {
+	err = request_irq(irq, isr, 0, DRIVER, &ixp_clock);
+	if (err) {
 		pr_err("request_irq failed for irq %d\n", irq);
-		return NO_IRQ;
+		return err;
 	}
 
 	return irq;

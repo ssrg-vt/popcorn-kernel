@@ -102,7 +102,7 @@ struct mcast_group {
 	struct list_head	pending_list;
 	struct list_head	active_list;
 	struct mcast_member	*last_join;
-	int			members[3];
+	int			members[NUM_JOIN_MEMBERSHIP_TYPES];
 	atomic_t		refcount;
 	enum mcast_group_state	state;
 	struct ib_sa_query	*query;
@@ -219,8 +219,9 @@ static void queue_join(struct mcast_member *member)
 }
 
 /*
- * A multicast group has three types of members: full member, non member, and
- * send only member.  We need to keep track of the number of members of each
+ * A multicast group has four types of members: full member, non member,
+ * sendonly non member and sendonly full member.
+ * We need to keep track of the number of members of each
  * type based on their join state.  Adjust the number of members the belong to
  * the specified join states.
  */
@@ -228,7 +229,7 @@ static void adjust_membership(struct mcast_group *group, u8 join_state, int inc)
 {
 	int i;
 
-	for (i = 0; i < 3; i++, join_state >>= 1)
+	for (i = 0; i < NUM_JOIN_MEMBERSHIP_TYPES; i++, join_state >>= 1)
 		if (join_state & 0x1)
 			group->members[i] += inc;
 }
@@ -244,7 +245,7 @@ static u8 get_leave_state(struct mcast_group *group)
 	u8 leave_state = 0;
 	int i;
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < NUM_JOIN_MEMBERSHIP_TYPES; i++)
 		if (!group->members[i])
 			leave_state |= (0x1 << i);
 
@@ -715,33 +716,53 @@ int ib_sa_get_mcmember_rec(struct ib_device *device, u8 port_num,
 }
 EXPORT_SYMBOL(ib_sa_get_mcmember_rec);
 
+/**
+ * ib_init_ah_from_mcmember - Initialize AH attribute from multicast
+ * member record and gid of the device.
+ * @device:	RDMA device
+ * @port_num:	Port of the rdma device to consider
+ * @ndev:	Optional netdevice, applicable only for RoCE
+ * @gid_type:	GID type to consider
+ * @ah_attr:	AH attribute to fillup on successful completion
+ *
+ * ib_init_ah_from_mcmember() initializes AH attribute based on multicast
+ * member record and other device properties. On success the caller is
+ * responsible to call rdma_destroy_ah_attr on the ah_attr. Returns 0 on
+ * success or appropriate error code.
+ *
+ */
 int ib_init_ah_from_mcmember(struct ib_device *device, u8 port_num,
 			     struct ib_sa_mcmember_rec *rec,
-			     struct ib_ah_attr *ah_attr)
+			     struct net_device *ndev,
+			     enum ib_gid_type gid_type,
+			     struct rdma_ah_attr *ah_attr)
 {
-	int ret;
-	u16 gid_index;
-	u8 p;
+	const struct ib_gid_attr *sgid_attr;
 
-	ret = ib_find_cached_gid(device, &rec->port_gid,
-				 NULL, &p, &gid_index);
-	if (ret)
-		return ret;
+	/* GID table is not based on the netdevice for IB link layer,
+	 * so ignore ndev during search.
+	 */
+	if (rdma_protocol_ib(device, port_num))
+		ndev = NULL;
+	else if (!rdma_protocol_roce(device, port_num))
+		return -EINVAL;
 
-	memset(ah_attr, 0, sizeof *ah_attr);
-	ah_attr->dlid = be16_to_cpu(rec->mlid);
-	ah_attr->sl = rec->sl;
-	ah_attr->port_num = port_num;
-	ah_attr->static_rate = rec->rate;
+	sgid_attr = rdma_find_gid_by_port(device, &rec->port_gid,
+					  gid_type, port_num, ndev);
+	if (IS_ERR(sgid_attr))
+		return PTR_ERR(sgid_attr);
 
-	ah_attr->ah_flags = IB_AH_GRH;
-	ah_attr->grh.dgid = rec->mgid;
+	memset(ah_attr, 0, sizeof(*ah_attr));
+	ah_attr->type = rdma_ah_find_type(device, port_num);
 
-	ah_attr->grh.sgid_index = (u8) gid_index;
-	ah_attr->grh.flow_label = be32_to_cpu(rec->flow_label);
-	ah_attr->grh.hop_limit = rec->hop_limit;
-	ah_attr->grh.traffic_class = rec->traffic_class;
-
+	rdma_ah_set_dlid(ah_attr, be16_to_cpu(rec->mlid));
+	rdma_ah_set_sl(ah_attr, rec->sl);
+	rdma_ah_set_port_num(ah_attr, port_num);
+	rdma_ah_set_static_rate(ah_attr, rec->rate);
+	rdma_move_grh_sgid_attr(ah_attr, &rec->mgid,
+				be32_to_cpu(rec->flow_label),
+				rec->hop_limit,	rec->traffic_class,
+				sgid_attr);
 	return 0;
 }
 EXPORT_SYMBOL(ib_init_ah_from_mcmember);
@@ -783,7 +804,6 @@ static void mcast_event_handler(struct ib_event_handler *handler,
 	switch (event->event) {
 	case IB_EVENT_PORT_ERR:
 	case IB_EVENT_LID_CHANGE:
-	case IB_EVENT_SM_CHANGE:
 	case IB_EVENT_CLIENT_REREGISTER:
 		mcast_groups_event(&dev->port[index], MCAST_GROUP_ERROR);
 		break;
@@ -802,7 +822,7 @@ static void mcast_add_one(struct ib_device *device)
 	int i;
 	int count = 0;
 
-	dev = kmalloc(sizeof *dev + device->phys_port_cnt * sizeof *port,
+	dev = kmalloc(struct_size(dev, port, device->phys_port_cnt),
 		      GFP_KERNEL);
 	if (!dev)
 		return;
@@ -862,7 +882,7 @@ int mcast_init(void)
 {
 	int ret;
 
-	mcast_wq = create_singlethread_workqueue("ib_mcast");
+	mcast_wq = alloc_ordered_workqueue("ib_mcast", WQ_MEM_RECLAIM);
 	if (!mcast_wq)
 		return -ENOMEM;
 

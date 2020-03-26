@@ -703,7 +703,7 @@ struct hfcPCI_hw {
 	unsigned char nt_mode;
 	int nt_timer;
 	struct pci_dev *dev;
-	unsigned char *pci_io; /* start of PCI IO memory */
+	void __iomem *pci_io; /* start of PCI IO memory */
 	dma_addr_t dma; /* dma handle for Fifos */
 	void *fifos; /* FIFO memory */
 	int last_bfifo_cnt[2]; /* marker saving last b-fifo frame count */
@@ -1288,9 +1288,9 @@ int jiftime(char *s, long mark);
 int HiSax_command(isdn_ctrl *ic);
 int HiSax_writebuf_skb(int id, int chan, int ack, struct sk_buff *skb);
 __printf(3, 4)
-void HiSax_putstatus(struct IsdnCardState *cs, char *head, char *fmt, ...);
+void HiSax_putstatus(struct IsdnCardState *cs, char *head, const char *fmt, ...);
 __printf(3, 0)
-void VHiSax_putstatus(struct IsdnCardState *cs, char *head, char *fmt, va_list args);
+void VHiSax_putstatus(struct IsdnCardState *cs, char *head, const char *fmt, va_list args);
 void HiSax_reportcard(int cardnr, int sel);
 int QuickHex(char *txt, u_char *p, int cnt);
 void LogFrame(struct IsdnCardState *cs, u_char *p, int size);

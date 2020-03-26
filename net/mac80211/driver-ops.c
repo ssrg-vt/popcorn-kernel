@@ -62,7 +62,7 @@ int drv_add_interface(struct ieee80211_local *local,
 	if (WARN_ON(sdata->vif.type == NL80211_IFTYPE_AP_VLAN ||
 		    (sdata->vif.type == NL80211_IFTYPE_MONITOR &&
 		     !ieee80211_hw_check(&local->hw, WANT_MONITOR_VIF) &&
-		     !(sdata->u.mntr_flags & MONITOR_FLAG_ACTIVE))))
+		     !(sdata->u.mntr.flags & MONITOR_FLAG_ACTIVE))))
 		return -EINVAL;
 
 	trace_drv_add_interface(local, sdata);
@@ -134,6 +134,27 @@ int drv_sta_state(struct ieee80211_local *local,
 		   new_state == IEEE80211_STA_AUTH) {
 		drv_sta_remove(local, sdata, &sta->sta);
 	}
+	trace_drv_return_int(local, ret);
+	return ret;
+}
+
+__must_check
+int drv_sta_set_txpwr(struct ieee80211_local *local,
+		      struct ieee80211_sub_if_data *sdata,
+		      struct sta_info *sta)
+{
+	int ret = -EOPNOTSUPP;
+
+	might_sleep();
+
+	sdata = get_bss_sdata(sdata);
+	if (!check_sdata_in_driver(sdata))
+		return -EIO;
+
+	trace_drv_sta_set_txpwr(local, sdata, &sta->sta);
+	if (local->ops->sta_set_txpwr)
+		ret = local->ops->sta_set_txpwr(&local->hw, &sdata->vif,
+						&sta->sta);
 	trace_drv_return_int(local, ret);
 	return ret;
 }
@@ -212,6 +233,21 @@ void drv_set_tsf(struct ieee80211_local *local,
 	trace_drv_set_tsf(local, sdata, tsf);
 	if (local->ops->set_tsf)
 		local->ops->set_tsf(&local->hw, &sdata->vif, tsf);
+	trace_drv_return_void(local);
+}
+
+void drv_offset_tsf(struct ieee80211_local *local,
+		    struct ieee80211_sub_if_data *sdata,
+		    s64 offset)
+{
+	might_sleep();
+
+	if (!check_sdata_in_driver(sdata))
+		return;
+
+	trace_drv_offset_tsf(local, sdata, offset);
+	if (local->ops->offset_tsf)
+		local->ops->offset_tsf(&local->hw, &sdata->vif, offset);
 	trace_drv_return_void(local);
 }
 

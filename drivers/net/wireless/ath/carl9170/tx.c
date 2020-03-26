@@ -246,8 +246,8 @@ static void carl9170_release_dev_space(struct ar9170 *ar, struct sk_buff *skb)
 	 *    of available memory blocks, so the number can
 	 *    never execeed the mem_blocks count.
 	 */
-	if (unlikely(WARN_ON_ONCE(cookie == 0) ||
-	    WARN_ON_ONCE(cookie > ar->fw.mem_blocks)))
+	if (WARN_ON_ONCE(cookie == 0) ||
+	    WARN_ON_ONCE(cookie > ar->fw.mem_blocks))
 		return;
 
 	atomic_add(DIV_ROUND_UP(skb->len, ar->fw.mem_block_size),
@@ -720,12 +720,12 @@ static void carl9170_tx_rate_tpc_chains(struct ar9170 *ar,
 			/* +1 dBm for HT40 */
 			*tpc += 2;
 
-			if (info->band == IEEE80211_BAND_2GHZ)
+			if (info->band == NL80211_BAND_2GHZ)
 				txpower = ar->power_2G_ht40;
 			else
 				txpower = ar->power_5G_ht40;
 		} else {
-			if (info->band == IEEE80211_BAND_2GHZ)
+			if (info->band == NL80211_BAND_2GHZ)
 				txpower = ar->power_2G_ht20;
 			else
 				txpower = ar->power_5G_ht20;
@@ -734,7 +734,7 @@ static void carl9170_tx_rate_tpc_chains(struct ar9170 *ar,
 		*phyrate = txrate->idx;
 		*tpc += txpower[idx & 7];
 	} else {
-		if (info->band == IEEE80211_BAND_2GHZ) {
+		if (info->band == NL80211_BAND_2GHZ) {
 			if (idx < 4)
 				txpower = ar->power_2G_cck;
 			else
@@ -797,7 +797,7 @@ static __le32 carl9170_tx_physet(struct ar9170 *ar,
 		 * tmp |= cpu_to_le32(AR9170_TX_PHY_GREENFIELD);
 		 */
 	} else {
-		if (info->band == IEEE80211_BAND_2GHZ) {
+		if (info->band == NL80211_BAND_2GHZ) {
 			if (txrate->idx <= AR9170_TX_PHY_RATE_CCK_11M)
 				tmp |= cpu_to_le32(AR9170_TX_PHY_MOD_CCK);
 			else
@@ -830,10 +830,12 @@ static bool carl9170_tx_rts_check(struct ar9170 *ar,
 	case CARL9170_ERP_AUTO:
 		if (ampdu)
 			break;
+		/* fall through */
 
 	case CARL9170_ERP_MAC80211:
 		if (!(rate->flags & IEEE80211_TX_RC_USE_RTS_CTS))
 			break;
+		/* fall through */
 
 	case CARL9170_ERP_RTS:
 		if (likely(!multi))
@@ -854,6 +856,7 @@ static bool carl9170_tx_cts_check(struct ar9170 *ar,
 	case CARL9170_ERP_MAC80211:
 		if (!(rate->flags & IEEE80211_TX_RC_USE_CTS_PROTECT))
 			break;
+		/* fall through */
 
 	case CARL9170_ERP_CTS:
 		return true;
@@ -991,7 +994,7 @@ static int carl9170_tx_prepare(struct ar9170 *ar,
 	else
 		cvif = NULL;
 
-	txc = (void *)skb_push(skb, sizeof(*txc));
+	txc = skb_push(skb, sizeof(*txc));
 	memset(txc, 0, sizeof(*txc));
 
 	SET_VAL(CARL9170_TX_SUPER_MISC_QUEUE, txc->s.misc, hw_queue);

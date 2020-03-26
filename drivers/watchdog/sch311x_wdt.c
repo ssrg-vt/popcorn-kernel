@@ -299,7 +299,7 @@ static long sch311x_wdt_ioctl(struct file *file, unsigned int cmd,
 		if (sch311x_wdt_set_heartbeat(new_timeout))
 			return -EINVAL;
 		sch311x_wdt_keepalive();
-		/* Fall */
+		/* Fall through */
 	case WDIOC_GETTIMEOUT:
 		return put_user(timeout, p);
 	default:
@@ -316,7 +316,7 @@ static int sch311x_wdt_open(struct inode *inode, struct file *file)
 	 *	Activate
 	 */
 	sch311x_wdt_start();
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int sch311x_wdt_close(struct inode *inode, struct file *file)

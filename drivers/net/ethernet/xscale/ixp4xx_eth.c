@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel IXP4xx Ethernet driver for Linux
  *
  * Copyright (C) 2007 Krzysztof Halasa <khc@pm.waw.pl>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
  *
  * Ethernet port config (0x00 is not present on IXP42X):
  *
@@ -15,7 +12,6 @@
  * TX queue		23		24		25
  * RX-free queue	26		27		28
  * TX-done queue is always 31, per-port RX and TX-ready queues are configurable
- *
  *
  * Queue entries:
  * bits 0 -> 1	- NPE ID (RX and TX-done)
@@ -31,14 +27,15 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/net_tstamp.h>
+#include <linux/of.h>
 #include <linux/phy.h>
 #include <linux/platform_device.h>
 #include <linux/ptp_classify.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <mach/ixp46x_ts.h>
-#include <mach/npe.h>
-#include <mach/qmgr.h>
+#include <linux/soc/ixp4xx/npe.h>
+#include <linux/soc/ixp4xx/qmgr.h>
 
 #define DEBUG_DESC		0
 #define DEBUG_RX		0
@@ -139,7 +136,7 @@
 #ifdef __ARMEB__
 typedef struct sk_buff buffer_t;
 #define free_buffer dev_kfree_skb
-#define free_buffer_irq dev_kfree_skb_irq
+#define free_buffer_irq dev_consume_skb_irq
 #else
 typedef void buffer_t;
 #define free_buffer kfree
@@ -171,7 +168,6 @@ struct port {
 	struct npe *npe;
 	struct net_device *netdev;
 	struct napi_struct napi;
-	struct phy_device *phydev;
 	struct eth_plat_info *plat;
 	buffer_t *rx_buff_tab[RX_DESCS], *tx_buff_tab[TX_DESCS];
 	struct desc *desc_tab;	/* coherent */
@@ -562,7 +558,7 @@ static void ixp4xx_mdio_remove(void)
 static void ixp4xx_adjust_link(struct net_device *dev)
 {
 	struct port *port = netdev_priv(dev);
-	struct phy_device *phydev = port->phydev;
+	struct phy_device *phydev = dev->phydev;
 
 	if (!phydev->link) {
 		if (port->speed) {
@@ -709,8 +705,7 @@ static int eth_poll(struct napi_struct *napi, int budget)
 			if (!qmgr_stat_below_low_watermark(rxq) &&
 			    napi_reschedule(napi)) { /* not empty again */
 #if DEBUG_RX
-				printk(KERN_DEBUG "%s: eth_poll"
-				       " napi_reschedule successed\n",
+				printk(KERN_DEBUG "%s: eth_poll napi_reschedule succeeded\n",
 				       dev->name);
 #endif
 				qmgr_disable_irq(rxq);
@@ -976,8 +971,6 @@ static void eth_set_mcast_list(struct net_device *dev)
 
 static int eth_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
 {
-	struct port *port = netdev_priv(dev);
-
 	if (!netif_running(dev))
 		return -EINVAL;
 
@@ -988,7 +981,7 @@ static int eth_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
 			return hwtstamp_get(dev, req);
 	}
 
-	return phy_mii_ioctl(port->phydev, req, cmd);
+	return phy_mii_ioctl(dev->phydev, req, cmd);
 }
 
 /* ethtool support */
@@ -1003,24 +996,6 @@ static void ixp4xx_get_drvinfo(struct net_device *dev,
 		 port->firmware[0], port->firmware[1],
 		 port->firmware[2], port->firmware[3]);
 	strlcpy(info->bus_info, "internal", sizeof(info->bus_info));
-}
-
-static int ixp4xx_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
-{
-	struct port *port = netdev_priv(dev);
-	return phy_ethtool_gset(port->phydev, cmd);
-}
-
-static int ixp4xx_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
-{
-	struct port *port = netdev_priv(dev);
-	return phy_ethtool_sset(port->phydev, cmd);
-}
-
-static int ixp4xx_nway_reset(struct net_device *dev)
-{
-	struct port *port = netdev_priv(dev);
-	return phy_start_aneg(port->phydev);
 }
 
 int ixp46x_phc_index = -1;
@@ -1054,11 +1029,11 @@ static int ixp4xx_get_ts_info(struct net_device *dev,
 
 static const struct ethtool_ops ixp4xx_ethtool_ops = {
 	.get_drvinfo = ixp4xx_get_drvinfo,
-	.get_settings = ixp4xx_get_settings,
-	.set_settings = ixp4xx_set_settings,
-	.nway_reset = ixp4xx_nway_reset,
+	.nway_reset = phy_ethtool_nway_reset,
 	.get_link = ethtool_op_get_link,
 	.get_ts_info = ixp4xx_get_ts_info,
+	.get_link_ksettings = phy_ethtool_get_link_ksettings,
+	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
 
 
@@ -1259,7 +1234,7 @@ static int eth_open(struct net_device *dev)
 	}
 
 	port->speed = 0;	/* force "link up" message */
-	phy_start(port->phydev);
+	phy_start(dev->phydev);
 
 	for (i = 0; i < ETH_ALEN; i++)
 		__raw_writel(dev->dev_addr[i], &port->regs->hw_addr[i]);
@@ -1380,7 +1355,7 @@ static int eth_close(struct net_device *dev)
 		printk(KERN_CRIT "%s: unable to disable loopback\n",
 		       dev->name);
 
-	phy_stop(port->phydev);
+	phy_stop(dev->phydev);
 
 	if (!ports_open)
 		qmgr_disable_irq(TXDONE_QUEUE);
@@ -1395,7 +1370,6 @@ static const struct net_device_ops ixp4xx_netdev_ops = {
 	.ndo_start_xmit = eth_xmit,
 	.ndo_set_rx_mode = eth_set_mcast_list,
 	.ndo_do_ioctl = eth_ioctl,
-	.ndo_change_mtu = eth_change_mtu,
 	.ndo_set_mac_address = eth_mac_addr,
 	.ndo_validate_addr = eth_validate_addr,
 };
@@ -1405,6 +1379,7 @@ static int eth_init_one(struct platform_device *pdev)
 	struct port *port;
 	struct net_device *dev;
 	struct eth_plat_info *plat = dev_get_platdata(&pdev->dev);
+	struct phy_device *phydev = NULL;
 	u32 regs_phys;
 	char phy_id[MII_BUS_ID_SIZE + 3];
 	int err;
@@ -1466,14 +1441,14 @@ static int eth_init_one(struct platform_device *pdev)
 
 	snprintf(phy_id, MII_BUS_ID_SIZE + 3, PHY_ID_FMT,
 		mdio_bus->id, plat->phy);
-	port->phydev = phy_connect(dev, phy_id, &ixp4xx_adjust_link,
-				   PHY_INTERFACE_MODE_MII);
-	if (IS_ERR(port->phydev)) {
-		err = PTR_ERR(port->phydev);
+	phydev = phy_connect(dev, phy_id, &ixp4xx_adjust_link,
+			     PHY_INTERFACE_MODE_MII);
+	if (IS_ERR(phydev)) {
+		err = PTR_ERR(phydev);
 		goto err_free_mem;
 	}
 
-	port->phydev->irq = PHY_POLL;
+	phydev->irq = PHY_POLL;
 
 	if ((err = register_netdev(dev)))
 		goto err_phy_dis;
@@ -1484,7 +1459,7 @@ static int eth_init_one(struct platform_device *pdev)
 	return 0;
 
 err_phy_dis:
-	phy_disconnect(port->phydev);
+	phy_disconnect(phydev);
 err_free_mem:
 	npe_port_tab[NPE_ID(port->id)] = NULL;
 	release_resource(port->mem_res);
@@ -1498,10 +1473,11 @@ err_free:
 static int eth_remove_one(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
+	struct phy_device *phydev = dev->phydev;
 	struct port *port = netdev_priv(dev);
 
 	unregister_netdev(dev);
-	phy_disconnect(port->phydev);
+	phy_disconnect(phydev);
 	npe_port_tab[NPE_ID(port->id)] = NULL;
 	npe_release(port->npe);
 	release_resource(port->mem_res);
@@ -1518,6 +1494,15 @@ static struct platform_driver ixp4xx_eth_driver = {
 static int __init eth_init_module(void)
 {
 	int err;
+
+	/*
+	 * FIXME: we bail out on device tree boot but this really needs
+	 * to be fixed in a nicer way: this registers the MDIO bus before
+	 * even matching the driver infrastructure, we should only probe
+	 * detected hardware.
+	 */
+	if (of_have_populated_dt())
+		return -ENODEV;
 	if ((err = ixp4xx_mdio_register()))
 		return err;
 	return platform_driver_register(&ixp4xx_eth_driver);

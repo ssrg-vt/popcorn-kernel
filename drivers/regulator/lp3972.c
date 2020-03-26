@@ -211,8 +211,8 @@ static int lp3972_set_bits(struct lp3972 *lp3972, u8 reg, u16 mask, u16 val)
 	mutex_lock(&lp3972->io_lock);
 
 	ret = lp3972_i2c_read(lp3972->i2c, reg, 1, &tmp);
-	tmp = (tmp & ~mask) | val;
 	if (ret == 0) {
+		tmp = (tmp & ~mask) | val;
 		ret = lp3972_i2c_write(lp3972->i2c, reg, 1, &tmp);
 		dev_dbg(lp3972->dev, "reg write 0x%02x -> 0x%02x\n", (int)reg,
 			(unsigned)val & 0xff);
@@ -305,7 +305,7 @@ static int lp3972_ldo_set_voltage_sel(struct regulator_dev *dev,
 	return ret;
 }
 
-static struct regulator_ops lp3972_ldo_ops = {
+static const struct regulator_ops lp3972_ldo_ops = {
 	.list_voltage = regulator_list_voltage_table,
 	.map_voltage = regulator_map_voltage_ascend,
 	.is_enabled = lp3972_ldo_is_enabled,
@@ -386,7 +386,7 @@ static int lp3972_dcdc_set_voltage_sel(struct regulator_dev *dev,
 				LP3972_VOL_CHANGE_FLAG_MASK, 0);
 }
 
-static struct regulator_ops lp3972_dcdc_ops = {
+static const struct regulator_ops lp3972_dcdc_ops = {
 	.list_voltage = regulator_list_voltage_table,
 	.map_voltage = regulator_map_voltage_ascend,
 	.is_enabled = lp3972_dcdc_is_enabled,

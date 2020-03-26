@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  * rtl871x_mp_ioctl.c
  *
  * Copyright(c) 2007 - 2010 Realtek Corporation. All rights reserved.
  * Linux device driver for RTL8192SU
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
  *
  * Modifications for inclusion into the Linux staging tree are
  * Copyright(c) 2010 Larry Finger. All rights reserved.
@@ -202,7 +190,7 @@ static int mp_start_test(struct _adapter *padapter)
 		res = _FAIL;
 		goto end_of_mp_start_test;
 	}
-	/* 3 3. join psudo AdHoc */
+	/* 3 3. join pseudo AdHoc */
 	tgt_network->join_res = 1;
 	tgt_network->aid = psta->aid = 1;
 	memcpy(&tgt_network->network, &bssid, length);
@@ -227,7 +215,7 @@ static int mp_stop_test(struct _adapter *padapter)
 	spin_lock_irqsave(&pmlmepriv->lock, irqL);
 	if (!check_fwstate(pmlmepriv, WIFI_MP_STATE))
 		goto end_of_mp_stop_test;
-	/* 3 1. disconnect psudo AdHoc */
+	/* 3 1. disconnect pseudo AdHoc */
 	r8712_os_indicate_disconnect(padapter);
 	/* 3 2. clear psta used in mp test mode. */
 	psta = r8712_get_stainfo(&padapter->stapriv,

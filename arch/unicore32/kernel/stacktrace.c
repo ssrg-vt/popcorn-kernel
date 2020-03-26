@@ -11,6 +11,7 @@
  */
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
 #include <linux/stacktrace.h>
 
 #include <asm/stacktrace.h>
@@ -119,8 +120,6 @@ void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
 	}
 
 	walk_stackframe(&frame, save_trace, &data);
-	if (trace->nr_entries < trace->max_entries)
-		trace->entries[trace->nr_entries++] = ULONG_MAX;
 }
 
 void save_stack_trace(struct stack_trace *trace)

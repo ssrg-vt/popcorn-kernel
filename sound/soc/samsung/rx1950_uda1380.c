@@ -1,21 +1,15 @@
-/*
- * rx1950.c  --  ALSA Soc Audio Layer
- *
- * Copyright (c) 2010 Vasily Khoruzhick <anarsoul@gmail.com>
- *
- * Based on smdk2440.c and magician.c
- *
- * Authors: Graeme Gregory graeme.gregory@wolfsonmicro.com
- *          Philipp Zabel <philipp.zabel@gmail.com>
- *          Denis Grigoriev <dgreenday@gmail.com>
- *          Vasily Khoruzhick <anarsoul@gmail.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// rx1950.c - ALSA SoC Audio Layer
+//
+// Copyright (c) 2010 Vasily Khoruzhick <anarsoul@gmail.com>
+//
+// Based on smdk2440.c and magician.c
+//
+// Authors: Graeme Gregory graeme.gregory@wolfsonmicro.com
+//          Philipp Zabel <philipp.zabel@gmail.com>
+//          Denis Grigoriev <dgreenday@gmail.com>
+//          Vasily Khoruzhick <anarsoul@gmail.com>
 
 #include <linux/types.h>
 #include <linux/gpio.h>
@@ -31,7 +25,6 @@
 #include "s3c24xx-i2s.h"
 
 static int rx1950_uda1380_init(struct snd_soc_pcm_runtime *rtd);
-static int rx1950_uda1380_card_remove(struct snd_soc_card *card);
 static int rx1950_startup(struct snd_pcm_substream *substream);
 static int rx1950_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params);
@@ -118,7 +111,6 @@ static const struct snd_soc_dapm_route audio_map[] = {
 static struct snd_soc_card rx1950_asoc = {
 	.name = "rx1950",
 	.owner = THIS_MODULE,
-	.remove = rx1950_uda1380_card_remove,
 	.dai_link = rx1950_uda1380_dai,
 	.num_links = ARRAY_SIZE(rx1950_uda1380_dai),
 
@@ -214,14 +206,6 @@ static int rx1950_uda1380_init(struct snd_soc_pcm_runtime *rtd)
 		&hp_jack, hp_jack_pins, ARRAY_SIZE(hp_jack_pins));
 
 	snd_soc_jack_add_gpios(&hp_jack, ARRAY_SIZE(hp_jack_gpios),
-		hp_jack_gpios);
-
-	return 0;
-}
-
-static int rx1950_uda1380_card_remove(struct snd_soc_card *card)
-{
-	snd_soc_jack_free_gpios(&hp_jack, ARRAY_SIZE(hp_jack_gpios),
 		hp_jack_gpios);
 
 	return 0;

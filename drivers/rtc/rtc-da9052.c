@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Real time clock driver for DA9052
  *
  * Copyright(c) 2012 Dialog Semiconductor Ltd.
  *
  * Author: Dajun Dajun Chen <dajun.chen@diasemi.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/module.h>
@@ -85,6 +80,7 @@ static int da9052_read_alarm(struct da9052_rtc *rtc, struct rtc_time *rtc_tm)
 			rtc_tm->tm_mday = v[0][2] & DA9052_RTC_DAY;
 			rtc_tm->tm_hour = v[0][1] & DA9052_RTC_HOUR;
 			rtc_tm->tm_min  = v[0][0] & DA9052_RTC_MIN;
+			rtc_tm->tm_sec = 0;
 
 			ret = rtc_valid_tm(rtc_tm);
 			return ret;
@@ -186,8 +182,7 @@ static int da9052_rtc_read_time(struct device *dev, struct rtc_time *rtc_tm)
 			rtc_tm->tm_min  = v[0][1] & DA9052_RTC_MIN;
 			rtc_tm->tm_sec  = v[0][0] & DA9052_RTC_SEC;
 
-			ret = rtc_valid_tm(rtc_tm);
-			return ret;
+			return 0;
 		}
 
 		idx = (1-idx);
@@ -302,6 +297,13 @@ static int da9052_rtc_probe(struct platform_device *pdev)
 	if (ret != 0)
 		rtc_err(rtc, "Failed to disable TICKS: %d\n", ret);
 
+	device_init_wakeup(&pdev->dev, true);
+	rtc->rtc = devm_rtc_device_register(&pdev->dev, pdev->name,
+				       &da9052_rtc_ops, THIS_MODULE);
+
+	if (IS_ERR(rtc->rtc))
+		return PTR_ERR(rtc->rtc);
+
 	ret = da9052_request_irq(rtc->da9052, DA9052_IRQ_ALARM, "ALM",
 				da9052_rtc_irq, rtc);
 	if (ret != 0) {
@@ -309,11 +311,7 @@ static int da9052_rtc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	device_init_wakeup(&pdev->dev, true);
-
-	rtc->rtc = devm_rtc_device_register(&pdev->dev, pdev->name,
-				       &da9052_rtc_ops, THIS_MODULE);
-	return PTR_ERR_OR_ZERO(rtc->rtc);
+	return 0;
 }
 
 static struct platform_driver da9052_rtc_driver = {

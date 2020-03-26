@@ -82,14 +82,17 @@ static struct device_node *get_gpio(char *name,
 			if (altname && (strcmp(audio_gpio, altname) == 0))
 				break;
 		}
+		of_node_put(gpio);
 		/* still not found, assume not there */
 		if (!np)
 			return NULL;
 	}
 
 	reg = of_get_property(np, "reg", NULL);
-	if (!reg)
+	if (!reg) {
+		of_node_put(np);
 		return NULL;
+	}
 
 	*gpioptr = *reg;
 
@@ -118,7 +121,7 @@ static void get_irq(struct device_node * np, int *irqptr)
 	if (np)
 		*irqptr = irq_of_parse_and_map(np, 0);
 	else
-		*irqptr = NO_IRQ;
+		*irqptr = 0;
 }
 
 /* 0x4 is outenable, 0x1 is out, thus 4 or 5 */
@@ -336,7 +339,7 @@ static int ftr_set_notify(struct gpio_runtime *rt,
 		return -EINVAL;
 	}
 
-	if (irq == NO_IRQ)
+	if (!irq)
 		return -ENODEV;
 
 	mutex_lock(&notif->mutex);

@@ -75,7 +75,7 @@ static void *lib80211_ccmp_init(int key_idx)
 		goto fail;
 	priv->key_idx = key_idx;
 
-	priv->tfm = crypto_alloc_cipher("aes", 0, CRYPTO_ALG_ASYNC);
+	priv->tfm = crypto_alloc_cipher("aes", 0, 0);
 	if (IS_ERR(priv->tfm)) {
 		priv->tfm = NULL;
 		goto fail;
@@ -311,8 +311,8 @@ static int lib80211_ccmp_decrypt(struct sk_buff *skb, int hdr_len, void *priv)
 	}
 	keyidx >>= 6;
 	if (key->key_idx != keyidx) {
-		printk(KERN_DEBUG "CCMP: RX tkey->key_idx=%d frame "
-		       "keyidx=%d priv=%p\n", key->key_idx, keyidx, priv);
+		net_dbg_ratelimited("CCMP: RX tkey->key_idx=%d frame keyidx=%d\n",
+				    key->key_idx, keyidx);
 		return -6;
 	}
 	if (!key->key_set) {

@@ -1,10 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * User-space helper to sort the output of /sys/kernel/debug/page_owner
  *
  * Example use:
  * cat /sys/kernel/debug/page_owner > page_owner_full.txt
  * grep -v ^PFN page_owner_full.txt > page_owner.txt
- * ./sort page_owner.txt sorted_page_owner.txt
+ * ./page_owner_sort page_owner.txt sorted_page_owner.txt
+ *
+ * See Documentation/vm/page_owner.rst
 */
 
 #include <stdio.h>
@@ -79,12 +82,12 @@ static void add_list(char *buf, int len)
 	}
 }
 
-#define BUF_SIZE	1024
+#define BUF_SIZE	(128 * 1024)
 
 int main(int argc, char **argv)
 {
 	FILE *fin, *fout;
-	char buf[BUF_SIZE];
+	char *buf;
 	int ret, i, count;
 	struct block_list *list2;
 	struct stat st;
@@ -107,6 +110,11 @@ int main(int argc, char **argv)
 	max_size = st.st_size / 100; /* hack ... */
 
 	list = malloc(max_size * sizeof(*list));
+	buf = malloc(BUF_SIZE);
+	if (!list || !buf) {
+		printf("Out of memory\n");
+		exit(1);
+	}
 
 	for ( ; ; ) {
 		ret = read_block(buf, BUF_SIZE, fin);

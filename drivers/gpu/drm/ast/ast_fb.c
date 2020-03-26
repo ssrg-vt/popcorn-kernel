@@ -33,14 +33,15 @@
 #include <linux/tty.h>
 #include <linux/sysrq.h>
 #include <linux/delay.h>
-#include <linux/fb.h>
 #include <linux/init.h>
 
 
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_fb_helper.h>
+#include <drm/drm_util.h>
 #include <drm/drm_crtc_helper.h>
+
 #include "ast_drv.h"
 
 static void ast_dirty_update(struct ast_fbdev *afbdev,
@@ -50,7 +51,7 @@ static void ast_dirty_update(struct ast_fbdev *afbdev,
 	struct drm_gem_object *obj;
 	struct ast_bo *bo;
 	int src_offset, dst_offset;
-	int bpp = (afbdev->afb.base.bits_per_pixel + 7)/8;
+	int bpp = afbdev->afb.base.format->cpp[0];
 	int ret = -EBUSY;
 	bool unmap = false;
 	bool store_for_later = false;
@@ -163,16 +164,13 @@ static struct fb_ops astfb_ops = {
 };
 
 static int astfb_create_object(struct ast_fbdev *afbdev,
-			       struct drm_mode_fb_cmd2 *mode_cmd,
+			       const struct drm_mode_fb_cmd2 *mode_cmd,
 			       struct drm_gem_object **gobj_p)
 {
 	struct drm_device *dev = afbdev->helper.dev;
-	u32 bpp, depth;
 	u32 size;
 	struct drm_gem_object *gobj;
-
 	int ret = 0;
-	drm_fb_get_bpp_depth(mode_cmd->pixel_format, &depth, &bpp);
 
 	size = mode_cmd->pitches[0] * mode_cmd->height;
 	ret = ast_gem_create(dev, size, true, &gobj);
@@ -195,7 +193,6 @@ static int astfb_create(struct drm_fb_helper *helper,
 	int size, ret;
 	void *sysram;
 	struct drm_gem_object *gobj = NULL;
-	struct ast_bo *bo = NULL;
 	mode_cmd.width = sizes->surface_width;
 	mode_cmd.height = sizes->surface_height;
 	mode_cmd.pitches[0] = mode_cmd.width * ((sizes->surface_bpp + 7)/8);
@@ -210,7 +207,6 @@ static int astfb_create(struct drm_fb_helper *helper,
 		DRM_ERROR("failed to create fbcon backing object %d\n", ret);
 		return ret;
 	}
-	bo = gem_to_ast_bo(gobj);
 
 	sysram = vmalloc(size);
 	if (!sysram)
@@ -219,13 +215,11 @@ static int astfb_create(struct drm_fb_helper *helper,
 	info = drm_fb_helper_alloc_fbi(helper);
 	if (IS_ERR(info)) {
 		ret = PTR_ERR(info);
-		goto err_free_vram;
+		goto out;
 	}
-	info->par = afbdev;
-
 	ret = ast_framebuffer_init(dev, &afbdev->afb, &mode_cmd, gobj);
 	if (ret)
-		goto err_release_fbi;
+		goto out;
 
 	afbdev->sysram = sysram;
 	afbdev->size = size;
@@ -233,16 +227,12 @@ static int astfb_create(struct drm_fb_helper *helper,
 	fb = &afbdev->afb.base;
 	afbdev->helper.fb = fb;
 
-	strcpy(info->fix.id, "astdrmfb");
-
-	info->flags = FBINFO_DEFAULT | FBINFO_CAN_FORCE_OUTPUT;
 	info->fbops = &astfb_ops;
 
 	info->apertures->ranges[0].base = pci_resource_start(dev->pdev, 0);
 	info->apertures->ranges[0].size = pci_resource_len(dev->pdev, 0);
 
-	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->depth);
-	drm_fb_helper_fill_var(info, &afbdev->helper, sizes->fb_width, sizes->fb_height);
+	drm_fb_helper_fill_info(info, &afbdev->helper, sizes);
 
 	info->screen_base = sysram;
 	info->screen_size = size;
@@ -254,34 +244,12 @@ static int astfb_create(struct drm_fb_helper *helper,
 
 	return 0;
 
-err_release_fbi:
-	drm_fb_helper_release_fbi(helper);
-err_free_vram:
-	vfree(afbdev->sysram);
+out:
+	vfree(sysram);
 	return ret;
 }
 
-static void ast_fb_gamma_set(struct drm_crtc *crtc, u16 red, u16 green,
-			       u16 blue, int regno)
-{
-	struct ast_crtc *ast_crtc = to_ast_crtc(crtc);
-	ast_crtc->lut_r[regno] = red >> 8;
-	ast_crtc->lut_g[regno] = green >> 8;
-	ast_crtc->lut_b[regno] = blue >> 8;
-}
-
-static void ast_fb_gamma_get(struct drm_crtc *crtc, u16 *red, u16 *green,
-			       u16 *blue, int regno)
-{
-	struct ast_crtc *ast_crtc = to_ast_crtc(crtc);
-	*red = ast_crtc->lut_r[regno] << 8;
-	*green = ast_crtc->lut_g[regno] << 8;
-	*blue = ast_crtc->lut_b[regno] << 8;
-}
-
 static const struct drm_fb_helper_funcs ast_fb_helper_funcs = {
-	.gamma_set = ast_fb_gamma_set,
-	.gamma_get = ast_fb_gamma_get,
 	.fb_probe = astfb_create,
 };
 
@@ -290,11 +258,11 @@ static void ast_fbdev_destroy(struct drm_device *dev,
 {
 	struct ast_framebuffer *afb = &afbdev->afb;
 
+	drm_helper_force_disable_all(dev);
 	drm_fb_helper_unregister_fbi(&afbdev->helper);
-	drm_fb_helper_release_fbi(&afbdev->helper);
 
 	if (afb->obj) {
-		drm_gem_object_unreference_unlocked(afb->obj);
+		drm_gem_object_put_unlocked(afb->obj);
 		afb->obj = NULL;
 	}
 	drm_fb_helper_fini(&afbdev->helper);
@@ -319,8 +287,7 @@ int ast_fbdev_init(struct drm_device *dev)
 
 	drm_fb_helper_prepare(dev, &afbdev->helper, &ast_fb_helper_funcs);
 
-	ret = drm_fb_helper_init(dev, &afbdev->helper,
-				 1, 1);
+	ret = drm_fb_helper_init(dev, &afbdev->helper, 1);
 	if (ret)
 		goto free;
 

@@ -47,7 +47,7 @@
 #define MEMSTICK_OV_PG_NORMAL \
 	(MEMSTICK_OVERWRITE_PGST1 | MEMSTICK_OVERWRITE_PGST0)
 
-#define MEMSTICK_MANAGMENT_FLAG_NORMAL \
+#define MEMSTICK_MANAGEMENT_FLAG_NORMAL \
 	(MEMSTICK_MANAGEMENT_SYSFLG |  \
 	MEMSTICK_MANAGEMENT_SCMS1   |  \
 	MEMSTICK_MANAGEMENT_SCMS0)     \
@@ -152,6 +152,7 @@ struct msb_data {
 	struct gendisk			*disk;
 	struct request_queue		*queue;
 	spinlock_t			q_lock;
+	struct blk_mq_tag_set		tag_set;
 	struct hd_geometry		geometry;
 	struct attribute_group		attr_group;
 	struct request			*req;

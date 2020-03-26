@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * e800-wm9712.c  --  SoC audio for e800
  *
  * Copyright 2007 (c) Ian Molton <spyro@f2s.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation; version 2 ONLY.
- *
  */
 
 #include <linux/module.h>
@@ -20,9 +16,6 @@
 #include <asm/mach-types.h>
 #include <mach/audio.h>
 #include <mach/eseries-gpio.h>
-
-#include "../codecs/wm9712.h"
-#include "pxa2xx-ac97.h"
 
 static int e800_spk_amp_event(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *kcontrol, int event)
@@ -84,7 +77,7 @@ static struct snd_soc_dai_link e800_dai[] = {
 		.name = "AC97 Aux",
 		.stream_name = "AC97 Aux",
 		.cpu_dai_name = "pxa2xx-ac97-aux",
-		.codec_dai_name ="wm9712-aux",
+		.codec_dai_name = "wm9712-aux",
 		.platform_name = "pxa-pcm-audio",
 		.codec_name = "wm9712-codec",
 	},

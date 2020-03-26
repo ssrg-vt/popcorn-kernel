@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Slabinfo: Tool to get reports about slabs
  *
@@ -29,8 +30,8 @@ struct slabinfo {
 	int alias;
 	int refs;
 	int aliases, align, cache_dma, cpu_slabs, destroy_by_rcu;
-	int hwcache_align, object_size, objs_per_slab;
-	int sanity_checks, slab_size, store_user, trace;
+	unsigned int hwcache_align, object_size, objs_per_slab;
+	unsigned int sanity_checks, slab_size, store_user, trace;
 	int order, poison, reclaim_account, red_zone;
 	unsigned long partial, objects, slabs, objects_partial, objects_total;
 	unsigned long alloc_fastpath, alloc_slowpath;
@@ -83,6 +84,7 @@ int output_lines = -1;
 int sort_loss;
 int extended_totals;
 int show_bytes;
+int unreclaim_only;
 
 /* Debug options */
 int sanity;
@@ -108,38 +110,42 @@ static void fatal(const char *x, ...)
 static void usage(void)
 {
 	printf("slabinfo 4/15/2011. (c) 2007 sgi/(c) 2011 Linux Foundation.\n\n"
-		"slabinfo [-ahnpvtsz] [-d debugopts] [slab-regexp]\n"
+		"slabinfo [-aADefhilnosrStTvz1LXBU] [N=K] [-dafzput] [slab-regexp]\n"
 		"-a|--aliases           Show aliases\n"
 		"-A|--activity          Most active slabs first\n"
-		"-d<options>|--debug=<options> Set/Clear Debug options\n"
+		"-B|--Bytes             Show size in bytes\n"
 		"-D|--display-active    Switch line format to activity\n"
 		"-e|--empty             Show empty slabs\n"
 		"-f|--first-alias       Show first alias\n"
 		"-h|--help              Show usage information\n"
 		"-i|--inverted          Inverted list\n"
 		"-l|--slabs             Show slabs\n"
+		"-L|--Loss              Sort by loss\n"
 		"-n|--numa              Show NUMA information\n"
-		"-o|--ops		Show kmem_cache_ops\n"
+		"-N|--lines=K           Show the first K slabs\n"
+		"-o|--ops               Show kmem_cache_ops\n"
+		"-r|--report            Detailed report on single slabs\n"
 		"-s|--shrink            Shrink slabs\n"
-		"-r|--report		Detailed report on single slabs\n"
 		"-S|--Size              Sort by size\n"
 		"-t|--tracking          Show alloc/free information\n"
 		"-T|--Totals            Show summary information\n"
+		"-U|--Unreclaim         Show unreclaimable slabs only\n"
 		"-v|--validate          Validate slabs\n"
 		"-z|--zero              Include empty slabs\n"
 		"-1|--1ref              Single reference\n"
-		"-N|--lines=K           Show the first K slabs\n"
-		"-L|--Loss              Sort by loss\n"
 		"-X|--Xtotals           Show extended summary information\n"
-		"-B|--Bytes             Show size in bytes\n"
-		"\nValid debug options (FZPUT may be combined)\n"
-		"a / A          Switch on all debug options (=FZUP)\n"
-		"-              Switch off all debug options\n"
-		"f / F          Sanity Checks (SLAB_DEBUG_FREE)\n"
-		"z / Z          Redzoning\n"
-		"p / P          Poisoning\n"
-		"u / U          Tracking\n"
-		"t / T          Tracing\n"
+
+		"\n"
+		"-d  | --debug          Switch off all debug options\n"
+		"-da | --debug=a        Switch on all debug options (--debug=FZPU)\n"
+
+		"\n"
+		"-d[afzput] | --debug=[afzput]\n"
+		"    f | F              Sanity Checks (SLAB_CONSISTENCY_CHECKS)\n"
+		"    z | Z              Redzoning\n"
+		"    p | P              Poisoning\n"
+		"    u | U              Tracking\n"
+		"    t | T              Tracing\n"
 	);
 }
 
@@ -492,7 +498,7 @@ static void slab_stats(struct slabinfo *s)
 			s->deactivate_to_head + s->deactivate_to_tail + s->deactivate_bypass;
 
 	if (total) {
-		printf("\nSlab Deactivation             Ocurrences  %%\n");
+		printf("\nSlab Deactivation             Occurrences %%\n");
 		printf("-------------------------------------------------\n");
 		printf("Slab full                     %7lu  %3lu%%\n",
 			s->deactivate_full, (s->deactivate_full * 100) / total);
@@ -566,6 +572,9 @@ static void slabcache(struct slabinfo *s)
 	char *p = flags;
 
 	if (strcmp(s->name, "*") == 0)
+		return;
+
+	if (unreclaim_only && s->reclaim_account)
 		return;
 
 	if (actual_slabs == 1) {
@@ -1346,6 +1355,7 @@ struct option opts[] = {
 	{ "Loss", no_argument, NULL, 'L'},
 	{ "Xtotals", no_argument, NULL, 'X'},
 	{ "Bytes", no_argument, NULL, 'B'},
+	{ "Unreclaim", no_argument, NULL, 'U'},
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -1357,7 +1367,7 @@ int main(int argc, char *argv[])
 
 	page_size = getpagesize();
 
-	while ((c = getopt_long(argc, argv, "aAd::Defhil1noprstvzTSN:LXB",
+	while ((c = getopt_long(argc, argv, "aAd::Defhil1noprstvzTSN:LXBU",
 						opts, NULL)) != -1)
 		switch (c) {
 		case '1':
@@ -1437,6 +1447,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'B':
 			show_bytes = 1;
+			break;
+		case 'U':
+			unreclaim_only = 1;
 			break;
 		default:
 			fatal("%s: Invalid option '%c'\n", argv[0], optopt);

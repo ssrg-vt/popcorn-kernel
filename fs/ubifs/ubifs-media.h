@@ -1,20 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * This file is part of UBIFS.
  *
  * Copyright (C) 2006-2008 Nokia Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 51
- * Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  *
  * Authors: Artem Bityutskiy (Битюцкий Артём)
  *          Adrian Hunter
@@ -46,7 +34,7 @@
  * UBIFS went into mainline kernel with format version 4. The older formats
  * were development formats.
  */
-#define UBIFS_FORMAT_VERSION 4
+#define UBIFS_FORMAT_VERSION 5
 
 /*
  * Read-only compatibility version. If the UBIFS format is changed, older UBIFS
@@ -286,6 +274,7 @@ enum {
 #define UBIFS_IDX_NODE_SZ  sizeof(struct ubifs_idx_node)
 #define UBIFS_CS_NODE_SZ   sizeof(struct ubifs_cs_node)
 #define UBIFS_ORPH_NODE_SZ sizeof(struct ubifs_orph_node)
+#define UBIFS_AUTH_NODE_SZ sizeof(struct ubifs_auth_node)
 /* Extended attribute entry nodes are identical to directory entry nodes */
 #define UBIFS_XENT_NODE_SZ UBIFS_DENT_NODE_SZ
 /* Only this does not have to be multiple of 8 bytes */
@@ -300,6 +289,19 @@ enum {
 /* The largest UBIFS node */
 #define UBIFS_MAX_NODE_SZ UBIFS_MAX_INO_NODE_SZ
 
+/* The maxmimum size of a hash, enough for sha512 */
+#define UBIFS_MAX_HASH_LEN 64
+
+/* The maxmimum size of a hmac, enough for hmac(sha512) */
+#define UBIFS_MAX_HMAC_LEN 64
+
+/*
+ * xattr name of UBIFS encryption context, we don't use a prefix
+ * nor a long name to not waste space on the flash.
+ */
+#define UBIFS_XATTR_NAME_ENCRYPTION_CONTEXT "c"
+
+
 /*
  * On-flash inode flags.
  *
@@ -309,6 +311,7 @@ enum {
  * UBIFS_APPEND_FL: writes to the inode may only append data
  * UBIFS_DIRSYNC_FL: I/O on this directory inode has to be synchronous
  * UBIFS_XATTR_FL: this inode is the inode for an extended attribute value
+ * UBIFS_CRYPT_FL: use encryption for this inode
  *
  * Note, these are on-flash flags which correspond to ioctl flags
  * (@FS_COMPR_FL, etc). They have the same values now, but generally, do not
@@ -321,6 +324,7 @@ enum {
 	UBIFS_APPEND_FL    = 0x08,
 	UBIFS_DIRSYNC_FL   = 0x10,
 	UBIFS_XATTR_FL     = 0x20,
+	UBIFS_CRYPT_FL     = 0x40,
 };
 
 /* Inode flag bits used by UBIFS */
@@ -356,6 +360,7 @@ enum {
  * UBIFS_IDX_NODE: index node
  * UBIFS_CS_NODE: commit start node
  * UBIFS_ORPH_NODE: orphan node
+ * UBIFS_AUTH_NODE: authentication node
  * UBIFS_NODE_TYPES_CNT: count of supported node types
  *
  * Note, we index arrays by these numbers, so keep them low and contiguous.
@@ -375,6 +380,7 @@ enum {
 	UBIFS_IDX_NODE,
 	UBIFS_CS_NODE,
 	UBIFS_ORPH_NODE,
+	UBIFS_AUTH_NODE,
 	UBIFS_NODE_TYPES_CNT,
 };
 
@@ -409,11 +415,22 @@ enum {
  *
  * UBIFS_FLG_BIGLPT: if "big" LPT model is used if set
  * UBIFS_FLG_SPACE_FIXUP: first-mount "fixup" of free space within LEBs needed
+ * UBIFS_FLG_DOUBLE_HASH: store a 32bit cookie in directory entry nodes to
+ *			  support 64bit cookies for lookups by hash
+ * UBIFS_FLG_ENCRYPTION: this filesystem contains encrypted files
+ * UBIFS_FLG_AUTHENTICATION: this filesystem contains hashes for authentication
  */
 enum {
 	UBIFS_FLG_BIGLPT = 0x02,
 	UBIFS_FLG_SPACE_FIXUP = 0x04,
+	UBIFS_FLG_DOUBLE_HASH = 0x08,
+	UBIFS_FLG_ENCRYPTION = 0x10,
+	UBIFS_FLG_AUTHENTICATION = 0x20,
 };
+
+#define UBIFS_FLG_MASK (UBIFS_FLG_BIGLPT | UBIFS_FLG_SPACE_FIXUP | \
+		UBIFS_FLG_DOUBLE_HASH | UBIFS_FLG_ENCRYPTION | \
+		UBIFS_FLG_AUTHENTICATION)
 
 /**
  * struct ubifs_ch - common header node.
@@ -521,7 +538,8 @@ struct ubifs_ino_node {
  * @padding1: reserved for future, zeroes
  * @type: type of the target inode (%UBIFS_ITYPE_REG, %UBIFS_ITYPE_DIR, etc)
  * @nlen: name length
- * @padding2: reserved for future, zeroes
+ * @cookie: A 32bits random number, used to construct a 64bits
+ *          identifier.
  * @name: zero-terminated name
  *
  * Note, do not forget to amend 'zero_dent_node_unused()' function when
@@ -534,7 +552,7 @@ struct ubifs_dent_node {
 	__u8 padding1;
 	__u8 type;
 	__le16 nlen;
-	__u8 padding2[4]; /* Watch 'zero_dent_node_unused()' if changing! */
+	__le32 cookie;
 	__u8 name[];
 } __packed;
 
@@ -544,18 +562,16 @@ struct ubifs_dent_node {
  * @key: node key
  * @size: uncompressed data size in bytes
  * @compr_type: compression type (%UBIFS_COMPR_NONE, %UBIFS_COMPR_LZO, etc)
- * @padding: reserved for future, zeroes
+ * @compr_size: compressed data size in bytes, only valid when data is encrypted
  * @data: data
  *
- * Note, do not forget to amend 'zero_data_node_unused()' function when
- * changing the padding fields.
  */
 struct ubifs_data_node {
 	struct ubifs_ch ch;
 	__u8 key[UBIFS_MAX_KEY_LEN];
 	__le32 size;
 	__le16 compr_type;
-	__u8 padding[2]; /* Watch 'zero_data_node_unused()' if changing! */
+	__le16 compr_size;
 	__u8 data[];
 } __packed;
 
@@ -618,6 +634,10 @@ struct ubifs_pad_node {
  * @time_gran: time granularity in nanoseconds
  * @uuid: UUID generated when the file system image was created
  * @ro_compat_version: UBIFS R/O compatibility version
+ * @hmac: HMAC to authenticate the superblock node
+ * @hmac_wkm: HMAC of a well known message (the string "UBIFS") as a convenience
+ *            to the user to check if the correct key is passed.
+ * @hash_algo: The hash algo used for this filesystem (one of enum hash_algo)
  */
 struct ubifs_sb_node {
 	struct ubifs_ch ch;
@@ -645,7 +665,10 @@ struct ubifs_sb_node {
 	__le32 time_gran;
 	__u8 uuid[16];
 	__le32 ro_compat_version;
-	__u8 padding2[3968];
+	__u8 hmac[UBIFS_MAX_HMAC_LEN];
+	__u8 hmac_wkm[UBIFS_MAX_HMAC_LEN];
+	__le16 hash_algo;
+	__u8 padding2[3838];
 } __packed;
 
 /**
@@ -680,6 +703,9 @@ struct ubifs_sb_node {
  * @empty_lebs: number of empty logical eraseblocks
  * @idx_lebs: number of indexing logical eraseblocks
  * @leb_cnt: count of LEBs used by file-system
+ * @hash_root_idx: the hash of the root index node
+ * @hash_lpt: the hash of the LPT
+ * @hmac: HMAC to authenticate the master node
  * @padding: reserved for future, zeroes
  */
 struct ubifs_mst_node {
@@ -712,7 +738,10 @@ struct ubifs_mst_node {
 	__le32 empty_lebs;
 	__le32 idx_lebs;
 	__le32 leb_cnt;
-	__u8 padding[344];
+	__u8 hash_root_idx[UBIFS_MAX_HASH_LEN];
+	__u8 hash_lpt[UBIFS_MAX_HASH_LEN];
+	__u8 hmac[UBIFS_MAX_HMAC_LEN];
+	__u8 padding[152];
 } __packed;
 
 /**
@@ -732,11 +761,25 @@ struct ubifs_ref_node {
 } __packed;
 
 /**
+ * struct ubifs_auth_node - node for authenticating other nodes
+ * @ch: common header
+ * @hmac: The HMAC
+ */
+struct ubifs_auth_node {
+	struct ubifs_ch ch;
+	__u8 hmac[];
+} __packed;
+
+/**
  * struct ubifs_branch - key/reference/length branch
  * @lnum: LEB number of the target node
  * @offs: offset within @lnum
  * @len: target node length
  * @key: key
+ *
+ * In an authenticated UBIFS we have the hash of the referenced node after @key.
+ * This can't be added to the struct type definition because @key is a
+ * dynamically sized element already.
  */
 struct ubifs_branch {
 	__le32 lnum;

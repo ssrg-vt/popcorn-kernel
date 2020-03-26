@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * e740-wm9705.c  --  SoC audio for e740
  *
  * Copyright 2007 (c) Ian Molton <spyro@f2s.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation; version 2 ONLY.
- *
  */
 
 #include <linux/module.h>
@@ -21,10 +17,6 @@
 #include <mach/eseries-gpio.h>
 
 #include <asm/mach-types.h>
-
-#include "../codecs/wm9705.h"
-#include "pxa2xx-ac97.h"
-
 
 #define E740_AUDIO_OUT 1
 #define E740_AUDIO_IN  2

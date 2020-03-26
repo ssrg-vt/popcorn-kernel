@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* avermedia-m733a-rm-k6.h - Keytable for avermedia_m733a_rm_k6 Remote Controller
  *
  * Copyright (c) 2010 by Herton Ronaldo Krzesinski <herton@mandriva.com.br>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <media/rc-map.h>
@@ -72,10 +68,10 @@ static struct rc_map_table avermedia_m733a_rm_k6[] = {
 
 static struct rc_map_list avermedia_m733a_rm_k6_map = {
 	.map = {
-		.scan    = avermedia_m733a_rm_k6,
-		.size    = ARRAY_SIZE(avermedia_m733a_rm_k6),
-		.rc_type = RC_TYPE_NEC,
-		.name    = RC_MAP_AVERMEDIA_M733A_RM_K6,
+		.scan     = avermedia_m733a_rm_k6,
+		.size     = ARRAY_SIZE(avermedia_m733a_rm_k6),
+		.rc_proto = RC_PROTO_NEC,
+		.name     = RC_MAP_AVERMEDIA_M733A_RM_K6,
 	}
 };
 

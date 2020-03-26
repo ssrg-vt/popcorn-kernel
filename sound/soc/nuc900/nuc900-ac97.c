@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2009-2010 Nuvoton technology corporation.
  *
  * Wan ZongShun <mcuos.com@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation;version 2 of the License.
- *
  */
 
 #include <linux/init.h>
@@ -345,11 +341,10 @@ static int nuc900_ac97_drvprobe(struct platform_device *pdev)
 		goto out;
 	}
 
-	nuc900_audio->irq_num = platform_get_irq(pdev, 0);
-	if (!nuc900_audio->irq_num) {
-		ret = -EBUSY;
+	ret = platform_get_irq(pdev, 0);
+	if (ret < 0)
 		goto out;
-	}
+	nuc900_audio->irq_num = ret;
 
 	nuc900_ac97_data = nuc900_audio;
 
@@ -357,7 +352,7 @@ static int nuc900_ac97_drvprobe(struct platform_device *pdev)
 	if (ret)
 		goto out;
 
-	ret = snd_soc_register_component(&pdev->dev, &nuc900_ac97_component,
+	ret = devm_snd_soc_register_component(&pdev->dev, &nuc900_ac97_component,
 					 &nuc900_ac97_dai, 1);
 	if (ret)
 		goto out;
@@ -374,8 +369,6 @@ out:
 
 static int nuc900_ac97_drvremove(struct platform_device *pdev)
 {
-	snd_soc_unregister_component(&pdev->dev);
-
 	nuc900_ac97_data = NULL;
 	snd_soc_set_ac97_ops(NULL);
 

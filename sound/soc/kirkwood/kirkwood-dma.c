@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * kirkwood-dma.c
  *
  * (c) 2010 Arnaud Patard <apatard@mandriva.com>
  * (c) 2010 Arnaud Patard <arnaud.patard@rtp-net.org>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
  */
 
 #include <linux/init.h>
@@ -27,7 +23,7 @@ static struct kirkwood_dma_data *kirkwood_priv(struct snd_pcm_substream *subs)
 	return snd_soc_dai_get_drvdata(soc_runtime->cpu_dai);
 }
 
-static struct snd_pcm_hardware kirkwood_dma_snd_hw = {
+static const struct snd_pcm_hardware kirkwood_dma_snd_hw = {
 	.info = SNDRV_PCM_INFO_INTERLEAVED |
 		SNDRV_PCM_INFO_MMAP |
 		SNDRV_PCM_INFO_MMAP_VALID |
@@ -242,7 +238,7 @@ static snd_pcm_uframes_t kirkwood_dma_pointer(struct snd_pcm_substream
 	return count;
 }
 
-static struct snd_pcm_ops kirkwood_dma_ops = {
+static const struct snd_pcm_ops kirkwood_dma_ops = {
 	.open =		kirkwood_dma_open,
 	.close =        kirkwood_dma_close,
 	.ioctl =	snd_pcm_lib_ioctl,
@@ -318,7 +314,8 @@ static void kirkwood_dma_free_dma_buffers(struct snd_pcm *pcm)
 	}
 }
 
-struct snd_soc_platform_driver kirkwood_soc_platform = {
+const struct snd_soc_component_driver kirkwood_soc_component = {
+	.name		= DRV_NAME,
 	.ops		= &kirkwood_dma_ops,
 	.pcm_new	= kirkwood_dma_new,
 	.pcm_free	= kirkwood_dma_free_dma_buffers,

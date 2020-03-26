@@ -1,4 +1,4 @@
-/// Use ARRAY_SIZE instead of dividing sizeof array with sizeof an element
+/// Correct the size argument to alloc functions
 ///
 //# This makes an effort to find cases where the argument to sizeof is wrong
 //# in memory allocation functions by checking the type of the allocated memory
@@ -50,7 +50,7 @@ T **x;
 //  For org and report mode
 //----------------------------------------------------------
 
-@r disable sizeof_type_expr@
+@r depends on (org || report) disable sizeof_type_expr@
 type T;
 T **x;
 position p;

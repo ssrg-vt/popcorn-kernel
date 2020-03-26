@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/media/i2c/smiapp/smiapp-regs.c
  *
@@ -5,15 +6,6 @@
  *
  * Copyright (C) 2011--2012 Nokia Corporation
  * Contact: Sakari Ailus <sakari.ailus@iki.fi>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #include <linux/delay.h>
@@ -188,7 +180,8 @@ int smiapp_read_no_quirk(struct smiapp_sensor *sensor, u32 reg, u32 *val)
 				   SMIAPP_QUIRK_FLAG_8BIT_READ_ONLY));
 }
 
-int smiapp_read(struct smiapp_sensor *sensor, u32 reg, u32 *val)
+static int smiapp_read_quirk(struct smiapp_sensor *sensor, u32 reg, u32 *val,
+			     bool force8)
 {
 	int rval;
 
@@ -198,22 +191,21 @@ int smiapp_read(struct smiapp_sensor *sensor, u32 reg, u32 *val)
 		return 0;
 	if (rval < 0)
 		return rval;
+
+	if (force8)
+		return __smiapp_read(sensor, reg, val, true);
 
 	return smiapp_read_no_quirk(sensor, reg, val);
 }
 
+int smiapp_read(struct smiapp_sensor *sensor, u32 reg, u32 *val)
+{
+	return smiapp_read_quirk(sensor, reg, val, false);
+}
+
 int smiapp_read_8only(struct smiapp_sensor *sensor, u32 reg, u32 *val)
 {
-	int rval;
-
-	*val = 0;
-	rval = smiapp_call_quirk(sensor, reg_access, false, &reg, val);
-	if (rval == -ENOIOCTLCMD)
-		return 0;
-	if (rval < 0)
-		return rval;
-
-	return __smiapp_read(sensor, reg, val, true);
+	return smiapp_read_quirk(sensor, reg, val, true);
 }
 
 int smiapp_write_no_quirk(struct smiapp_sensor *sensor, u32 reg, u32 val)
@@ -230,6 +222,9 @@ int smiapp_write_no_quirk(struct smiapp_sensor *sensor, u32 reg, u32 val)
 	if ((len != SMIAPP_REG_8BIT && len != SMIAPP_REG_16BIT &&
 	     len != SMIAPP_REG_32BIT) || flags)
 		return -EINVAL;
+
+	if (!sensor->active)
+		return 0;
 
 	msg.addr = client->addr;
 	msg.flags = 0; /* Write */
@@ -268,8 +263,8 @@ int smiapp_write_no_quirk(struct smiapp_sensor *sensor, u32 reg, u32 val)
 		if (r == 1) {
 			if (retries)
 				dev_err(&client->dev,
-					"sensor i2c stall encountered. "
-					"retries: %d\n", retries);
+					"sensor i2c stall encountered. retries: %d\n",
+					retries);
 			return 0;
 		}
 

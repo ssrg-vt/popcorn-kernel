@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Helpers for controlling modem lines via GPIO
  *
  * Copyright (C) 2014 Paratronic S.A.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/err.h>
@@ -43,24 +34,26 @@ static const struct {
 	{ "rng", TIOCM_RNG, false, },
 	{ "rts", TIOCM_RTS, true, },
 	{ "dtr", TIOCM_DTR, true, },
-	{ "out1", TIOCM_OUT1, true, },
-	{ "out2", TIOCM_OUT2, true, },
 };
 
 void mctrl_gpio_set(struct mctrl_gpios *gpios, unsigned int mctrl)
 {
 	enum mctrl_gpio_idx i;
 	struct gpio_desc *desc_array[UART_GPIO_MAX];
-	int value_array[UART_GPIO_MAX];
+	DECLARE_BITMAP(values, UART_GPIO_MAX);
 	unsigned int count = 0;
+
+	if (gpios == NULL)
+		return;
 
 	for (i = 0; i < UART_GPIO_MAX; i++)
 		if (gpios->gpio[i] && mctrl_gpios_desc[i].dir_out) {
 			desc_array[count] = gpios->gpio[i];
-			value_array[count] = !!(mctrl & mctrl_gpios_desc[i].mctrl);
+			__assign_bit(count, values,
+				     mctrl & mctrl_gpios_desc[i].mctrl);
 			count++;
 		}
-	gpiod_set_array_value(count, desc_array, value_array);
+	gpiod_set_array_value(count, desc_array, NULL, values);
 }
 EXPORT_SYMBOL_GPL(mctrl_gpio_set);
 
@@ -75,6 +68,9 @@ unsigned int mctrl_gpio_get(struct mctrl_gpios *gpios, unsigned int *mctrl)
 {
 	enum mctrl_gpio_idx i;
 
+	if (gpios == NULL)
+		return *mctrl;
+
 	for (i = 0; i < UART_GPIO_MAX; i++) {
 		if (gpios->gpio[i] && !mctrl_gpios_desc[i].dir_out) {
 			if (gpiod_get_value(gpios->gpio[i]))
@@ -87,6 +83,27 @@ unsigned int mctrl_gpio_get(struct mctrl_gpios *gpios, unsigned int *mctrl)
 	return *mctrl;
 }
 EXPORT_SYMBOL_GPL(mctrl_gpio_get);
+
+unsigned int
+mctrl_gpio_get_outputs(struct mctrl_gpios *gpios, unsigned int *mctrl)
+{
+	enum mctrl_gpio_idx i;
+
+	if (gpios == NULL)
+		return *mctrl;
+
+	for (i = 0; i < UART_GPIO_MAX; i++) {
+		if (gpios->gpio[i] && mctrl_gpios_desc[i].dir_out) {
+			if (gpiod_get_value(gpios->gpio[i]))
+				*mctrl |= mctrl_gpios_desc[i].mctrl;
+			else
+				*mctrl &= ~mctrl_gpios_desc[i].mctrl;
+		}
+	}
+
+	return *mctrl;
+}
+EXPORT_SYMBOL_GPL(mctrl_gpio_get_outputs);
 
 struct mctrl_gpios *mctrl_gpio_init_noauto(struct device *dev, unsigned int idx)
 {
@@ -125,8 +142,11 @@ static irqreturn_t mctrl_gpio_irq_handle(int irq, void *context)
 	struct uart_port *port = gpios->port;
 	u32 mctrl = gpios->mctrl_prev;
 	u32 mctrl_diff;
+	unsigned long flags;
 
 	mctrl_gpio_get(gpios, &mctrl);
+
+	spin_lock_irqsave(&port->lock, flags);
 
 	mctrl_diff = mctrl ^ gpios->mctrl_prev;
 	gpios->mctrl_prev = mctrl;
@@ -146,6 +166,8 @@ static irqreturn_t mctrl_gpio_irq_handle(int irq, void *context)
 
 		wake_up_interruptible(&port->state->port.delta_msr_wait);
 	}
+
+	spin_unlock_irqrestore(&port->lock, flags);
 
 	return IRQ_HANDLED;
 }
@@ -200,6 +222,9 @@ void mctrl_gpio_free(struct device *dev, struct mctrl_gpios *gpios)
 {
 	enum mctrl_gpio_idx i;
 
+	if (gpios == NULL)
+		return;
+
 	for (i = 0; i < UART_GPIO_MAX; i++) {
 		if (gpios->irq[i])
 			devm_free_irq(gpios->port->dev, gpios->irq[i], gpios);
@@ -214,6 +239,9 @@ EXPORT_SYMBOL_GPL(mctrl_gpio_free);
 void mctrl_gpio_enable_ms(struct mctrl_gpios *gpios)
 {
 	enum mctrl_gpio_idx i;
+
+	if (gpios == NULL)
+		return;
 
 	/* .enable_ms may be called multiple times */
 	if (gpios->mctrl_on)
@@ -236,6 +264,9 @@ EXPORT_SYMBOL_GPL(mctrl_gpio_enable_ms);
 void mctrl_gpio_disable_ms(struct mctrl_gpios *gpios)
 {
 	enum mctrl_gpio_idx i;
+
+	if (gpios == NULL)
+		return;
 
 	if (!gpios->mctrl_on)
 		return;

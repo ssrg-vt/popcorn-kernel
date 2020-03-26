@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * SiRF audio card driver
  *
  * Copyright (c) 2011 Cambridge Silicon Radio Limited, a CSR plc group company.
- *
- * Licensed under GPLv2 or later.
  */
 
 #include <linux/platform_device.h>
@@ -27,6 +26,7 @@ static int sirf_audio_hp_event(struct snd_soc_dapm_widget *w,
 	struct snd_soc_card *card = dapm->card;
 	struct sirf_audio_card *sirf_audio_card = snd_soc_card_get_drvdata(card);
 	int on = !SND_SOC_DAPM_EVENT_OFF(event);
+
 	if (gpio_is_valid(sirf_audio_card->gpio_hp_pa))
 		gpio_set_value(sirf_audio_card->gpio_hp_pa, on);
 	return 0;

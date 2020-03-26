@@ -3,7 +3,7 @@
  * under the terms of the GNU General Public License version 2 as published
  * by the Free Software Foundation.
  *
- * Copyright (C) 2013 John Crispin <blogic@openwrt.org>
+ * Copyright (C) 2013 John Crispin <john@phrozen.org>
  */
 
 #include <linux/interrupt.h>
@@ -62,7 +62,7 @@ static int __init ill_acc_of_setup(void)
 
 	pdev = of_find_device_by_node(np);
 	if (!pdev) {
-		pr_err("%s: failed to lookup pdev\n", np->name);
+		pr_err("%pOFn: failed to lookup pdev\n", np);
 		return -EINVAL;
 	}
 

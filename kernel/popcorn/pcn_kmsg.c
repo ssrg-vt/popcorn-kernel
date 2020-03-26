@@ -42,23 +42,22 @@ int pcn_kmsg_unregister_callback(enum pcn_kmsg_type type)
 }
 EXPORT_SYMBOL(pcn_kmsg_unregister_callback);
 
-#ifdef CONFIG_POPCORN_CHECK_SANITY
+
 static atomic_t __nr_outstanding_requests[PCN_KMSG_TYPE_MAX] = { ATOMIC_INIT(0) };
-#endif
 
 void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 {
 	pcn_kmsg_cbftn ftn;
 
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-	BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
-	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
-	if (atomic_inc_return(__nr_outstanding_requests + msg->header.type) > 64) {
-		if (WARN_ON_ONCE("leaking received messages, ")) {
-			printk("type %d\n", msg->header.type);
+	if(IS_ENABLED(CONFIG_POPCORN_CHECK_SANITY)) {
+		BUG_ON(msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX);
+		BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
+		if (atomic_inc_return(__nr_outstanding_requests + msg->header.type) > 64) {
+			if (WARN_ON_ONCE("leaking received messages, ")) {
+				printk("type %d\n", msg->header.type);
+			}
 		}
 	}
-#endif
 	account_pcn_message_recv(msg);
 
 	ftn = pcn_kmsg_cbftns[msg->header.type];
@@ -75,12 +74,13 @@ EXPORT_SYMBOL(pcn_kmsg_process);
 
 static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, struct pcn_kmsg_message *msg, size_t size)
 {
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-	BUG_ON(type < 0 || type >= PCN_KMSG_TYPE_MAX);
-	BUG_ON(size > PCN_KMSG_MAX_SIZE);
-	BUG_ON(to < 0 || to >= MAX_POPCORN_NODES);
-	BUG_ON(to == my_nid);
-#endif
+
+	if(IS_ENABLED(CONFIG_POPCORN_CHECK_SANITY)) {
+		BUG_ON(type < 0 || type >= PCN_KMSG_TYPE_MAX);
+		BUG_ON(size > PCN_KMSG_MAX_SIZE);
+		BUG_ON(to < 0 || to >= MAX_POPCORN_NODES);
+		BUG_ON(to == my_nid);
+	}
 
 	msg->header.type = type;
 	msg->header.prio = PCN_KMSG_PRIO_NORMAL;
@@ -92,7 +92,8 @@ static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, struct 
 int pcn_kmsg_send(enum pcn_kmsg_type type, int to, void *msg, size_t size)
 {
 	int ret;
-	if ((ret = __build_and_check_msg(type, to, msg, size))) return ret;
+	if ((ret = __build_and_check_msg(type, to, msg, size)))
+		return ret;
 
 	account_pcn_message_sent(msg);
 	return transport->send(to, msg, size);
@@ -102,7 +103,8 @@ EXPORT_SYMBOL(pcn_kmsg_send);
 int pcn_kmsg_post(enum pcn_kmsg_type type, int to, void *msg, size_t size)
 {
 	int ret;
-	if ((ret = __build_and_check_msg(type, to, msg, size))) return ret;
+	if ((ret = __build_and_check_msg(type, to, msg, size)))
+		return ret;
 
 	account_pcn_message_sent(msg);
 	return transport->post(to, msg, size);
@@ -130,12 +132,13 @@ EXPORT_SYMBOL(pcn_kmsg_put);
 
 void pcn_kmsg_done(void *msg)
 {
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-	struct pcn_kmsg_hdr *h = msg;;
-	if (atomic_dec_return(__nr_outstanding_requests + h->type) < 0) {
-		printk(KERN_ERR "Over-release message type %d\n", h->type);
+	if(IS_ENABLED(CONFIG_POPCORN_CHECK_SANITY)) {
+		struct pcn_kmsg_hdr *h = msg;;
+		if (atomic_dec_return(__nr_outstanding_requests + h->type) < 0) {
+			printk(KERN_ERR
+			"Over-release message type %d\n", h->type);
+		}
 	}
-#endif
 	if (transport && transport->done) {
 		transport->done(msg);
 	} else {
@@ -155,7 +158,8 @@ EXPORT_SYMBOL(pcn_kmsg_stat);
 
 bool pcn_kmsg_has_features(unsigned int features)
 {
-	if (!transport) return false;
+	if (!transport)
+		return false;
 
 	return (transport->features & features) == features;
 }
@@ -164,9 +168,10 @@ EXPORT_SYMBOL(pcn_kmsg_has_features);
 
 int pcn_kmsg_rdma_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size, u32 rdma_key)
 {
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-	if (!transport || !transport->rdma_read) return -EPERM;
-#endif
+	if(IS_ENABLED(CONFIG_POPCORN_CHECK_SANITY)) {
+		if (!transport || !transport->rdma_read)
+			return -EPERM;
+	}
 
 	account_pcn_rdma_read(size);
 	return transport->rdma_read(from_nid, addr, rdma_addr, size, rdma_key);
@@ -175,9 +180,10 @@ EXPORT_SYMBOL(pcn_kmsg_rdma_read);
 
 int pcn_kmsg_rdma_write(int dest_nid, dma_addr_t rdma_addr, void *addr, size_t size, u32 rdma_key)
 {
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-	if (!transport || !transport->rdma_write) return -EPERM;
-#endif
+	if(IS_ENABLED(CONFIG_POPCORN_CHECK_SANITY)) {
+		if (!transport || !transport->rdma_write)
+			return -EPERM;
+	}
 
 	account_pcn_rdma_write(size);
     return transport->rdma_write(dest_nid, rdma_addr, addr, size, rdma_key);

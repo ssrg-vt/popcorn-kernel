@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 #include <linux/module.h>
 #include <sound/soc.h>
@@ -42,7 +43,7 @@ static int imote2_asoc_hw_params(struct snd_pcm_substream *substream,
 	return ret;
 }
 
-static struct snd_soc_ops imote2_asoc_ops = {
+static const struct snd_soc_ops imote2_asoc_ops = {
 	.hw_params = imote2_asoc_hw_params,
 };
 

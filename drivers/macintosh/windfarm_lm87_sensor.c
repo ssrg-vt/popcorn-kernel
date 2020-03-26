@@ -91,7 +91,7 @@ static void wf_lm87_release(struct wf_sensor *sr)
 	kfree(lm);
 }
 
-static struct wf_sensor_ops wf_lm87_ops = {
+static const struct wf_sensor_ops wf_lm87_ops = {
 	.get_value	= wf_lm87_get,
 	.release	= wf_lm87_release,
 	.owner		= THIS_MODULE,
@@ -110,8 +110,8 @@ static int wf_lm87_probe(struct i2c_client *client,
 	 * the Xserve G5 has several lm87's. However, for now we only
 	 * care about the internal temperature sensor
 	 */
-	while ((np = of_get_next_child(client->dev.of_node, np)) != NULL) {
-		if (strcmp(np->name, "int-temp"))
+	for_each_child_of_node(client->dev.of_node, np) {
+		if (!of_node_name_eq(np, "int-temp"))
 			continue;
 		loc = of_get_property(np, "location", NULL);
 		if (!loc)
@@ -126,8 +126,8 @@ static int wf_lm87_probe(struct i2c_client *client,
 		}
 	}
 	if (!name) {
-		pr_warning("wf_lm87: Unsupported sensor %s\n",
-			   client->dev.of_node->full_name);
+		pr_warning("wf_lm87: Unsupported sensor %pOF\n",
+			   client->dev.of_node);
 		return -ENODEV;
 	}
 

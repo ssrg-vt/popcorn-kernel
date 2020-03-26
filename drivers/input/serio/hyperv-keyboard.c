@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (c) 2013, Microsoft Corporation.
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms and conditions of the GNU General Public License,
- *  version 2, as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
  */
 
 #include <linux/init.h>
@@ -177,7 +169,7 @@ static void hv_kbd_on_receive(struct hv_device *hv_dev,
 		 * state because the Enter-UP can trigger a wakeup at once.
 		 */
 		if (!(info & IS_BREAK))
-			pm_wakeup_event(&hv_dev->device, 0);
+			pm_wakeup_hard_event(&hv_dev->device);
 
 		break;
 
@@ -402,7 +394,6 @@ static int hv_kbd_remove(struct hv_device *hv_dev)
 {
 	struct hv_kbd_dev *kbd_dev = hv_get_drvdata(hv_dev);
 
-	device_init_wakeup(&hv_dev->device, false);
 	serio_unregister_port(kbd_dev->hv_serio);
 	vmbus_close(hv_dev->channel);
 	kfree(kbd_dev);
@@ -411,16 +402,6 @@ static int hv_kbd_remove(struct hv_device *hv_dev)
 
 	return 0;
 }
-
-/*
- * Keyboard GUID
- * {f912ad6d-2b17-48ea-bd65-f927a61c7684}
- */
-#define HV_KBD_GUID \
-	.guid = { \
-			0x6d, 0xad, 0x12, 0xf9, 0x17, 0x2b, 0xea, 0x48, \
-			0xbd, 0x65, 0xf9, 0x27, 0xa6, 0x1c, 0x76, 0x84 \
-	}
 
 static const struct hv_vmbus_device_id id_table[] = {
 	/* Keyboard guid */
@@ -435,6 +416,9 @@ static struct  hv_driver hv_kbd_drv = {
 	.id_table = id_table,
 	.probe = hv_kbd_probe,
 	.remove = hv_kbd_remove,
+	.driver = {
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+	},
 };
 
 static int __init hv_kbd_init(void)
@@ -448,5 +432,7 @@ static void __exit hv_kbd_exit(void)
 }
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Microsoft Hyper-V Synthetic Keyboard Driver");
+
 module_init(hv_kbd_init);
 module_exit(hv_kbd_exit);

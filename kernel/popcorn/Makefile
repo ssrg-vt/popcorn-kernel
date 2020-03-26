@@ -6,9 +6,7 @@ obj-$(CONFIG_POPCORN)	+= bundle.o
 obj-$(CONFIG_POPCORN)	+= remote_info.o
 obj-$(CONFIG_POPCORN)	+= pcn_kmsg.o
 obj-$(CONFIG_POPCORN)	+= stat.o
-obj-$(CONFIG_POPCORN)	+= syscall_server.o
 
 obj-$(CONFIG_POPCORN_POWER_SENSOR_X86) += power_sensor_x86.o
-obj-$(CONFIG_POPCORN_POWER_SENSOR_ARM) += power_sensor_arm.o
 
 #obj-$(CONFIG_POPCORN) +=  futex_remote.o global_spinlock.o remote_file.o

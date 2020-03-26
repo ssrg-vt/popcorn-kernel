@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* rc-technisat-ts35.c - Keytable for TechniSat TS35 remote
  *
  * Copyright (c) 2013 by Jan Klötzke <jan@kloetzke.net>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
  */
 
 #include <media/rc-map.h>
@@ -53,10 +49,10 @@ static struct rc_map_table technisat_ts35[] = {
 
 static struct rc_map_list technisat_ts35_map = {
 	.map = {
-		.scan    = technisat_ts35,
-		.size    = ARRAY_SIZE(technisat_ts35),
-		.rc_type = RC_TYPE_UNKNOWN,
-		.name    = RC_MAP_TECHNISAT_TS35,
+		.scan     = technisat_ts35,
+		.size     = ARRAY_SIZE(technisat_ts35),
+		.rc_proto = RC_PROTO_UNKNOWN,
+		.name     = RC_MAP_TECHNISAT_TS35,
 	}
 };
 

@@ -30,8 +30,8 @@
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
-#include <mach/pxa27x.h>
-#include <mach/pcm027.h>
+#include "pxa27x.h"
+#include "pcm027.h"
 #include "generic.h"
 
 /*
@@ -132,7 +132,7 @@ static struct platform_device smc91x_device = {
 /*
  * SPI host and devices
  */
-static struct pxa2xx_spi_master pxa_ssp_master_info = {
+static struct pxa2xx_spi_controller pxa_ssp_master_info = {
 	.num_chipselect	= 1,
 };
 

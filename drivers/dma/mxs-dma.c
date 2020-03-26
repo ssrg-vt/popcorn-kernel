@@ -1,12 +1,8 @@
-/*
- * Copyright 2011 Freescale Semiconductor, Inc. All Rights Reserved.
- *
- * Refer to drivers/dma/imx-sdma.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// Copyright 2011 Freescale Semiconductor, Inc. All Rights Reserved.
+//
+// Refer to drivers/dma/imx-sdma.c
 
 #include <linux/init.h>
 #include <linux/types.h>
@@ -326,8 +322,7 @@ static void mxs_dma_tasklet(unsigned long data)
 {
 	struct mxs_dma_chan *mxs_chan = (struct mxs_dma_chan *) data;
 
-	if (mxs_chan->desc.callback)
-		mxs_chan->desc.callback(mxs_chan->desc.callback_param);
+	dmaengine_desc_get_callback_invoke(&mxs_chan->desc, NULL);
 }
 
 static int mxs_dma_irq_to_chan(struct mxs_dma_engine *mxs_dma, int irq)
@@ -421,20 +416,18 @@ static int mxs_dma_alloc_chan_resources(struct dma_chan *chan)
 	struct mxs_dma_engine *mxs_dma = mxs_chan->mxs_dma;
 	int ret;
 
-	mxs_chan->ccw = dma_zalloc_coherent(mxs_dma->dma_device.dev,
-					    CCW_BLOCK_SIZE,
-					    &mxs_chan->ccw_phys, GFP_KERNEL);
+	mxs_chan->ccw = dma_alloc_coherent(mxs_dma->dma_device.dev,
+					   CCW_BLOCK_SIZE,
+					   &mxs_chan->ccw_phys, GFP_KERNEL);
 	if (!mxs_chan->ccw) {
 		ret = -ENOMEM;
 		goto err_alloc;
 	}
 
-	if (mxs_chan->chan_irq != NO_IRQ) {
-		ret = request_irq(mxs_chan->chan_irq, mxs_dma_int_handler,
-					0, "mxs-dma", mxs_dma);
-		if (ret)
-			goto err_irq;
-	}
+	ret = request_irq(mxs_chan->chan_irq, mxs_dma_int_handler,
+			  0, "mxs-dma", mxs_dma);
+	if (ret)
+		goto err_irq;
 
 	ret = clk_prepare_enable(mxs_dma->clk);
 	if (ret)
@@ -620,7 +613,7 @@ static struct dma_async_tx_descriptor *mxs_dma_prep_dma_cyclic(
 
 	if (period_len > MAX_XFER_BYTES) {
 		dev_err(mxs_dma->dma_device.dev,
-				"maximum period size exceeded: %d > %d\n",
+				"maximum period size exceeded: %zu > %d\n",
 				period_len, MAX_XFER_BYTES);
 		goto err_out;
 	}
@@ -854,7 +847,7 @@ static int __init mxs_dma_probe(struct platform_device *pdev)
 	mxs_dma->dma_device.residue_granularity = DMA_RESIDUE_GRANULARITY_BURST;
 	mxs_dma->dma_device.device_issue_pending = mxs_dma_enable_chan;
 
-	ret = dma_async_device_register(&mxs_dma->dma_device);
+	ret = dmaenginem_async_device_register(&mxs_dma->dma_device);
 	if (ret) {
 		dev_err(mxs_dma->dma_device.dev, "unable to register\n");
 		return ret;
@@ -864,7 +857,6 @@ static int __init mxs_dma_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(mxs_dma->dma_device.dev,
 			"failed to register controller\n");
-		dma_async_device_unregister(&mxs_dma->dma_device);
 	}
 
 	dev_info(mxs_dma->dma_device.dev, "initialized\n");

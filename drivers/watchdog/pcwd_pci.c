@@ -545,8 +545,8 @@ static long pcipcwd_ioctl(struct file *file, unsigned int cmd,
 			return -EINVAL;
 
 		pcipcwd_keepalive();
-		/* Fall */
 	}
+		/* fall through */
 
 	case WDIOC_GETTIMEOUT:
 		return put_user(heartbeat, p);
@@ -578,7 +578,7 @@ static int pcipcwd_open(struct inode *inode, struct file *file)
 	/* Activate */
 	pcipcwd_start();
 	pcipcwd_keepalive();
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int pcipcwd_release(struct inode *inode, struct file *file)
@@ -620,7 +620,7 @@ static int pcipcwd_temp_open(struct inode *inode, struct file *file)
 	if (!pcipcwd_private.supports_temp)
 		return -ENODEV;
 
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int pcipcwd_temp_release(struct inode *inode, struct file *file)

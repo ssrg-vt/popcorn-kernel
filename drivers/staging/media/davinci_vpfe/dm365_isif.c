@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2012 Texas Instruments Inc
  *
@@ -9,10 +10,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  *
  * Contributors:
  *      Manjunath Hadli <manjunath.hadli@ti.com>
@@ -146,9 +143,8 @@ enum v4l2_field vpfe_isif_get_fid(struct vpfe_device *vpfe_dev)
 	u32 field_status;
 
 	field_status = isif_read(isif->isif_cfg.base_addr, MODESET);
-	field_status = (field_status >> DM365_ISIF_MDFS_OFFSET) &
-			DM365_ISIF_MDFS_MASK;
-	return field_status;
+	return (field_status >> DM365_ISIF_MDFS_OFFSET) &
+		DM365_ISIF_MDFS_MASK;
 }
 
 static int
@@ -282,7 +278,8 @@ isif_config_format(struct vpfe_device *vpfe_dev, unsigned int pad)
  * @fmt: pointer to v4l2 subdev format structure
  */
 static void
-isif_try_format(struct vpfe_isif_device *isif, struct v4l2_subdev_pad_config *cfg,
+isif_try_format(struct vpfe_isif_device *isif,
+		struct v4l2_subdev_pad_config *cfg,
 		struct v4l2_subdev_format *fmt)
 {
 	unsigned int width = fmt->format.width;
@@ -436,9 +433,9 @@ static int isif_get_params(struct v4l2_subdev *sd, void *params)
 	return 0;
 }
 
-static int isif_validate_df_csc_params(struct vpfe_isif_df_csc *df_csc)
+static int isif_validate_df_csc_params(const struct vpfe_isif_df_csc *df_csc)
 {
-	struct vpfe_isif_color_space_conv *csc;
+	const struct vpfe_isif_color_space_conv *csc;
 	int err = -EINVAL;
 	int i;
 
@@ -484,7 +481,7 @@ static int isif_validate_df_csc_params(struct vpfe_isif_df_csc *df_csc)
 #define DM365_ISIF_MAX_DFCMEM0		0x1fff
 #define DM365_ISIF_MAX_DFCMEM1		0x1fff
 
-static int isif_validate_dfc_params(struct vpfe_isif_dfc *dfc)
+static int isif_validate_dfc_params(const struct vpfe_isif_dfc *dfc)
 {
 	int err = -EINVAL;
 	int i;
@@ -535,7 +532,7 @@ static int isif_validate_dfc_params(struct vpfe_isif_dfc *dfc)
 #define DM365_ISIF_MAX_CLVSV			0x1fff
 #define DM365_ISIF_MAX_HEIGHT_BLACK_REGION	0x1fff
 
-static int isif_validate_bclamp_params(struct vpfe_isif_black_clamp *bclamp)
+static int isif_validate_bclamp_params(const struct vpfe_isif_black_clamp *bclamp)
 {
 	int err = -EINVAL;
 
@@ -583,7 +580,7 @@ static int isif_validate_bclamp_params(struct vpfe_isif_black_clamp *bclamp)
 }
 
 static int
-isif_validate_raw_params(struct vpfe_isif_raw_config *params)
+isif_validate_raw_params(const struct vpfe_isif_raw_config *params)
 {
 	int ret;
 
@@ -593,24 +590,21 @@ isif_validate_raw_params(struct vpfe_isif_raw_config *params)
 	ret = isif_validate_dfc_params(&params->dfc);
 	if (ret)
 		return ret;
-	ret = isif_validate_bclamp_params(&params->bclamp);
-	return ret;
+	return isif_validate_bclamp_params(&params->bclamp);
 }
 
-static int isif_set_params(struct v4l2_subdev *sd, void *params)
+static int isif_set_params(struct v4l2_subdev *sd, const struct vpfe_isif_raw_config *params)
 {
 	struct vpfe_isif_device *isif = v4l2_get_subdevdata(sd);
-	struct vpfe_isif_raw_config isif_raw_params;
 	int ret = -EINVAL;
 
 	/* only raw module parameters can be set through the IOCTL */
 	if (isif->formats[ISIF_PAD_SINK].code != MEDIA_BUS_FMT_SGRBG12_1X12)
 		return ret;
 
-	memcpy(&isif_raw_params, params, sizeof(isif_raw_params));
-	if (!isif_validate_raw_params(&isif_raw_params)) {
-		memcpy(&isif->isif_cfg.bayer.config_params, &isif_raw_params,
-			sizeof(isif_raw_params));
+	if (!isif_validate_raw_params(params)) {
+		memcpy(&isif->isif_cfg.bayer.config_params, params,
+			sizeof(*params));
 		ret = 0;
 	}
 	return ret;
@@ -625,21 +619,16 @@ static int isif_set_params(struct v4l2_subdev *sd, void *params)
  */
 static long isif_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
-	int ret;
-
 	switch (cmd) {
 	case VIDIOC_VPFE_ISIF_S_RAW_PARAMS:
-		ret = isif_set_params(sd, arg);
-		break;
+		return isif_set_params(sd, arg);
 
 	case VIDIOC_VPFE_ISIF_G_RAW_PARAMS:
-		ret = isif_get_params(sd, arg);
-		break;
+		return isif_get_params(sd, arg);
 
 	default:
-		ret = -ENOIOCTLCMD;
+		return -ENOIOCTLCMD;
 	}
-	return ret;
 }
 
 static void isif_config_gain_offset(struct vpfe_isif_device *isif)
@@ -684,7 +673,7 @@ static void isif_config_bclamp(struct vpfe_isif_device *isif,
 	val = (bc->bc_mode_color & ISIF_BC_MODE_COLOR_MASK) <<
 		ISIF_BC_MODE_COLOR_SHIFT;
 
-	/* Enable BC and horizontal clamp calculation paramaters */
+	/* Enable BC and horizontal clamp calculation parameters */
 	val = val | 1 | ((bc->horz.mode & ISIF_HORZ_BC_MODE_MASK) <<
 	      ISIF_HORZ_BC_MODE_SHIFT);
 
@@ -721,7 +710,7 @@ static void isif_config_bclamp(struct vpfe_isif_device *isif,
 		isif_write(isif->isif_cfg.base_addr, val, CLHWIN2);
 	}
 
-	/* vertical clamp calculation paramaters */
+	/* vertical clamp calculation parameters */
 	/* OB H Valid */
 	val = bc->vert.ob_h_sz_calc & ISIF_VERT_BC_OB_H_SZ_MASK;
 
@@ -1239,7 +1228,8 @@ static int isif_config_ycbcr(struct v4l2_subdev *sd, int mode)
 	 * a lot of registers that we didn't touch
 	 */
 	/* start with all bits zero */
-	ccdcfg = modeset = 0;
+	ccdcfg = 0;
+	modeset = 0;
 	pix_fmt = isif_get_pix_fmt(format->code);
 	if (pix_fmt < 0) {
 		pr_debug("Invalid pix_fmt(input mode)\n");
@@ -1398,17 +1388,13 @@ static int isif_set_stream(struct v4l2_subdev *sd, int enable)
  * @which: wanted subdev format.
  */
 static struct v4l2_mbus_framefmt *
-__isif_get_format(struct vpfe_isif_device *isif, struct v4l2_subdev_pad_config *cfg,
-		  unsigned int pad, enum v4l2_subdev_format_whence which)
+__isif_get_format(struct vpfe_isif_device *isif,
+		  struct v4l2_subdev_pad_config *cfg, unsigned int pad,
+		  enum v4l2_subdev_format_whence which)
 {
-	if (which == V4L2_SUBDEV_FORMAT_TRY) {
-		struct v4l2_subdev_format fmt;
-
-		fmt.pad = pad;
-		fmt.which = which;
-
+	if (which == V4L2_SUBDEV_FORMAT_TRY)
 		return v4l2_subdev_get_try_format(&isif->subdev, cfg, pad);
-	}
+
 	return &isif->formats[pad];
 }
 
@@ -1570,7 +1556,7 @@ isif_pad_set_selection(struct v4l2_subdev *sd,
 		sel->r.height = format->height;
 	}
 	/* adjust the width to 16 pixel boundary */
-	sel->r.width = ((sel->r.width + 15) & ~0xf);
+	sel->r.width = (sel->r.width + 15) & ~0xf;
 	vpfe_isif->crop = sel->r;
 	if (sel->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
 		isif_set_image_window(vpfe_isif);
@@ -1707,9 +1693,14 @@ isif_link_setup(struct media_entity *entity, const struct media_pad *local,
 {
 	struct v4l2_subdev *sd = media_entity_to_v4l2_subdev(entity);
 	struct vpfe_isif_device *isif = v4l2_get_subdevdata(sd);
+	unsigned int index = local->index;
 
-	switch (local->index | media_entity_type(remote->entity)) {
-	case ISIF_PAD_SINK | MEDIA_ENT_T_V4L2_SUBDEV:
+	/* FIXME: this is actually a hack! */
+	if (is_media_entity_v4l2_subdev(remote->entity))
+		index |= 2 << 16;
+
+	switch (index) {
+	case ISIF_PAD_SINK | 2 << 16:
 		/* read from decoder/sensor */
 		if (!(flags & MEDIA_LNK_FL_ENABLED)) {
 			isif->input = ISIF_INPUT_NONE;
@@ -1720,7 +1711,7 @@ isif_link_setup(struct media_entity *entity, const struct media_pad *local,
 		isif->input = ISIF_INPUT_PARALLEL;
 		break;
 
-	case ISIF_PAD_SOURCE | MEDIA_ENT_T_DEVNODE:
+	case ISIF_PAD_SOURCE:
 		/* write to memory */
 		if (flags & MEDIA_LNK_FL_ENABLED)
 			isif->output = ISIF_OUTPUT_MEMORY;
@@ -1728,7 +1719,7 @@ isif_link_setup(struct media_entity *entity, const struct media_pad *local,
 			isif->output = ISIF_OUTPUT_NONE;
 		break;
 
-	case ISIF_PAD_SOURCE | MEDIA_ENT_T_V4L2_SUBDEV:
+	case ISIF_PAD_SOURCE | 2 << 16:
 		if (flags & MEDIA_LNK_FL_ENABLED)
 			isif->output = ISIF_OUTPUT_IPIPEIF;
 		else
@@ -1817,7 +1808,7 @@ int vpfe_isif_register_entities(struct vpfe_isif_device *isif,
 	isif->video_out.vpfe_dev = vpfe_dev;
 	flags = 0;
 	/* connect isif to video node */
-	ret = media_entity_create_link(&isif->subdev.entity, 1,
+	ret = media_create_pad_link(&isif->subdev.entity, 1,
 				       &isif->video_out.video_dev.entity,
 				       0, flags);
 	if (ret < 0)
@@ -2042,7 +2033,7 @@ int vpfe_isif_init(struct vpfe_isif_device *isif, struct platform_device *pdev)
 	isif->video_out.ops = &isif_video_ops;
 	v4l2_subdev_init(sd, &isif_v4l2_ops);
 	sd->internal_ops = &isif_v4l2_internal_ops;
-	strlcpy(sd->name, "DAVINCI ISIF", sizeof(sd->name));
+	strscpy(sd->name, "DAVINCI ISIF", sizeof(sd->name));
 	sd->grp_id = 1 << 16;	/* group ID for davinci subdevs */
 	v4l2_set_subdevdata(sd, isif);
 	sd->flags |= V4L2_SUBDEV_FL_HAS_EVENTS | V4L2_SUBDEV_FL_HAS_DEVNODE;
@@ -2052,7 +2043,7 @@ int vpfe_isif_init(struct vpfe_isif_device *isif, struct platform_device *pdev)
 	isif->input = ISIF_INPUT_NONE;
 	isif->output = ISIF_OUTPUT_NONE;
 	me->ops = &isif_media_ops;
-	status = media_entity_init(me, ISIF_PADS_NUM, pads, 0);
+	status = media_entity_pads_init(me, ISIF_PADS_NUM, pads);
 	if (status)
 		goto isif_fail;
 	isif->video_out.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;

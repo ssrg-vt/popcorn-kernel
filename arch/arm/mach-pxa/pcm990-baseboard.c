@@ -23,20 +23,20 @@
 #include <linux/irq.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
-#include <linux/i2c/pxa-i2c.h>
+#include <linux/platform_data/i2c-pxa.h>
 #include <linux/pwm.h>
 #include <linux/pwm_backlight.h>
 
-#include <media/mt9v022.h>
+#include <media/i2c/mt9v022.h>
 #include <media/soc_camera.h>
 
-#include <linux/platform_data/camera-pxa.h>
+#include <linux/platform_data/media/camera-pxa.h>
 #include <asm/mach/map.h>
-#include <mach/pxa27x.h>
+#include "pxa27x.h"
 #include <mach/audio.h>
 #include <linux/platform_data/mmc-pxamci.h>
 #include <linux/platform_data/usb-ohci-pxa27x.h>
-#include <mach/pcm990_baseboard.h>
+#include "pcm990_baseboard.h"
 #include <linux/platform_data/video-pxafb.h>
 
 #include "devices.h"
@@ -370,9 +370,6 @@ static struct pxamci_platform_data pcm990_mci_platform_data = {
 	.init 			= pcm990_mci_init,
 	.setpower 		= pcm990_mci_setpower,
 	.exit			= pcm990_mci_exit,
-	.gpio_card_detect	= -1,
-	.gpio_card_ro		= -1,
-	.gpio_power		= -1,
 };
 
 static struct pxaohci_platform_data pcm990_ohci_platform_data = {

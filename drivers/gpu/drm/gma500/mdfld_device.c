@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /**************************************************************************
  * Copyright (c) 2011, Intel Corporation.
  * All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  *
  **************************************************************************/
 
@@ -546,6 +534,8 @@ const struct psb_ops mdfld_chip_ops = {
 
 	.save_regs = mdfld_save_registers,
 	.restore_regs = mdfld_restore_registers,
+	.save_crtc = gma_crtc_save,
+	.restore_crtc = gma_crtc_restore,
 	.power_down = mdfld_power_down,
 	.power_up = mdfld_power_up,
 };

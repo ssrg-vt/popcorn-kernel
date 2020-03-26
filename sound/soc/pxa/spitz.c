@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * spitz.c  --  SoC audio for Sharp SL-Cxx00 models Spitz, Borzoi and Akita
  *
@@ -6,12 +7,6 @@
  *
  * Authors: Liam Girdwood <lrg@slimlogic.co.uk>
  *          Richard Purdie <richard@openedhand.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
 #include <linux/module.h>
@@ -156,7 +151,7 @@ static int spitz_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static struct snd_soc_ops spitz_ops = {
+static const struct snd_soc_ops spitz_ops = {
 	.startup = spitz_startup,
 	.hw_params = spitz_hw_params,
 };
@@ -164,7 +159,7 @@ static struct snd_soc_ops spitz_ops = {
 static int spitz_get_jack(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	ucontrol->value.integer.value[0] = spitz_jack_func;
+	ucontrol->value.enumerated.item[0] = spitz_jack_func;
 	return 0;
 }
 
@@ -173,10 +168,10 @@ static int spitz_set_jack(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
 
-	if (spitz_jack_func == ucontrol->value.integer.value[0])
+	if (spitz_jack_func == ucontrol->value.enumerated.item[0])
 		return 0;
 
-	spitz_jack_func = ucontrol->value.integer.value[0];
+	spitz_jack_func = ucontrol->value.enumerated.item[0];
 	spitz_ext_control(&card->dapm);
 	return 1;
 }
@@ -184,7 +179,7 @@ static int spitz_set_jack(struct snd_kcontrol *kcontrol,
 static int spitz_get_spk(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	ucontrol->value.integer.value[0] = spitz_spk_func;
+	ucontrol->value.enumerated.item[0] = spitz_spk_func;
 	return 0;
 }
 
@@ -193,10 +188,10 @@ static int spitz_set_spk(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
 
-	if (spitz_spk_func == ucontrol->value.integer.value[0])
+	if (spitz_spk_func == ucontrol->value.enumerated.item[0])
 		return 0;
 
-	spitz_spk_func = ucontrol->value.integer.value[0];
+	spitz_spk_func = ucontrol->value.enumerated.item[0];
 	spitz_ext_control(&card->dapm);
 	return 1;
 }
@@ -230,8 +225,8 @@ static const struct snd_soc_dapm_route spitz_audio_map[] = {
 	{"Headset Jack", NULL, "ROUT1"},
 
 	/* ext speaker connected to LOUT2, ROUT2  */
-	{"Ext Spk", NULL , "ROUT2"},
-	{"Ext Spk", NULL , "LOUT2"},
+	{"Ext Spk", NULL, "ROUT2"},
+	{"Ext Spk", NULL, "LOUT2"},
 
 	/* mic is connected to input 1 - with bias */
 	{"LINPUT1", NULL, "Mic Bias"},
@@ -241,9 +236,9 @@ static const struct snd_soc_dapm_route spitz_audio_map[] = {
 	{"LINPUT1", NULL, "Line Jack"},
 };
 
-static const char *jack_function[] = {"Headphone", "Mic", "Line", "Headset",
-	"Off"};
-static const char *spk_function[] = {"On", "Off"};
+static const char * const jack_function[] = {"Headphone", "Mic", "Line",
+	"Headset", "Off"};
+static const char * const spk_function[] = {"On", "Off"};
 static const struct soc_enum spitz_enum[] = {
 	SOC_ENUM_SINGLE_EXT(5, jack_function),
 	SOC_ENUM_SINGLE_EXT(2, spk_function),

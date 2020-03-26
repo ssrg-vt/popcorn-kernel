@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /**
  * Copyright (C) 2008, Creative Technology Ltd. All Rights Reserved.
- *
- * This source file is released under GPL v2 license (no other versions).
- * See the COPYING file included in the main directory of this source
- * distribution for the license terms and conditions.
  *
  * @File    ctvmem.c
  *
@@ -166,11 +163,7 @@ static void ct_vm_unmap(struct ct_vm *vm, struct ct_vm_block *block)
 static dma_addr_t
 ct_get_ptp_phys(struct ct_vm *vm, int index)
 {
-	dma_addr_t addr;
-
-	addr = (index >= CT_PTP_NUM) ? ~0UL : vm->ptp[index].addr;
-
-	return addr;
+	return (index >= CT_PTP_NUM) ? ~0UL : vm->ptp[index].addr;
 }
 
 int ct_vm_create(struct ct_vm **rvm, struct pci_dev *pci)

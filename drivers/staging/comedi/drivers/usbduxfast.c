@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  *  Copyright (C) 2004-2014 Bernd Porr, mail@berndporr.me.uk
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -70,7 +61,7 @@
 #define USBDUXFASTSUB_CPUCS	0xE600
 
 /*
- * max lenghth of the transfer-buffer for software upload
+ * max length of the transfer-buffer for software upload
  */
 #define TB_LEN	0x2000
 
@@ -946,10 +937,8 @@ static int usbduxfast_auto_attach(struct comedi_device *dev,
 	}
 
 	devpriv->urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!devpriv->urb) {
-		dev_err(dev->class_dev, "Could not alloc. urb\n");
+	if (!devpriv->urb)
 		return -ENOMEM;
-	}
 
 	devpriv->inbuf = kmalloc(SIZEINBUF, GFP_KERNEL);
 	if (!devpriv->inbuf)
@@ -1004,6 +993,8 @@ static void usbduxfast_detach(struct comedi_device *dev)
 	kfree(devpriv->duxbuf);
 
 	mutex_unlock(&devpriv->mut);
+
+	mutex_destroy(&devpriv->mut);
 }
 
 static struct comedi_driver usbduxfast_driver = {

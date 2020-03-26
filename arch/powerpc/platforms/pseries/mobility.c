@@ -17,6 +17,7 @@
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/stringify.h>
 
 #include <asm/machdep.h>
 #include <asm/rtas.h>
@@ -39,6 +40,7 @@ struct update_props_workarea {
 #define ADD_DT_NODE	0x03000000
 
 #define MIGRATION_SCOPE	(1)
+#define PRRN_SCOPE -2
 
 static int mobility_rtas_call(int token, char *buf, s32 scope)
 {
@@ -191,8 +193,8 @@ static int update_dt_node(__be32 phandle, s32 scope)
 				break;
 
 			case 0x80000000:
-				prop = of_find_property(dn, prop_name, NULL);
-				of_remove_property(dn, prop);
+				of_remove_property(dn, of_find_property(dn,
+							prop_name, NULL));
 				prop = NULL;
 				break;
 
@@ -230,12 +232,35 @@ static int add_dt_node(__be32 parent_phandle, __be32 drc_index)
 		return -ENOENT;
 	}
 
-	rc = dlpar_attach_node(dn);
+	rc = dlpar_attach_node(dn, parent_dn);
 	if (rc)
 		dlpar_free_cc_nodes(dn);
 
 	of_node_put(parent_dn);
 	return rc;
+}
+
+static void prrn_update_node(__be32 phandle)
+{
+	struct pseries_hp_errorlog hp_elog;
+	struct device_node *dn;
+
+	/*
+	 * If a node is found from a the given phandle, the phandle does not
+	 * represent the drc index of an LMB and we can ignore.
+	 */
+	dn = of_find_node_by_phandle(be32_to_cpu(phandle));
+	if (dn) {
+		of_node_put(dn);
+		return;
+	}
+
+	hp_elog.resource = PSERIES_HP_ELOG_RESOURCE_MEM;
+	hp_elog.action = PSERIES_HP_ELOG_ACTION_READD;
+	hp_elog.id_type = PSERIES_HP_ELOG_ID_DRC_INDEX;
+	hp_elog._drc_u.drc_index = phandle;
+
+	handle_dlpar_errorlog(&hp_elog);
 }
 
 int pseries_devicetree_update(s32 scope)
@@ -276,6 +301,10 @@ int pseries_devicetree_update(s32 scope)
 					break;
 				case UPDATE_DT_NODE:
 					update_dt_node(phandle, scope);
+
+					if (scope == PRRN_SCOPE)
+						prrn_update_node(phandle);
+
 					break;
 				case ADD_DT_NODE:
 					drc_index = *data++;
@@ -314,11 +343,15 @@ void post_mobility_fixup(void)
 		printk(KERN_ERR "Post-mobility device tree update "
 			"failed: %d\n", rc);
 
+	/* Possibly switch to a new RFI flush type */
+	pseries_setup_rfi_flush();
+
 	return;
 }
 
-static ssize_t migrate_store(struct class *class, struct class_attribute *attr,
-			     const char *buf, size_t count)
+static ssize_t migration_store(struct class *class,
+			       struct class_attribute *attr, const char *buf,
+			       size_t count)
 {
 	u64 streamid;
 	int rc;
@@ -326,6 +359,8 @@ static ssize_t migrate_store(struct class *class, struct class_attribute *attr,
 	rc = kstrtou64(buf, 0, &streamid);
 	if (rc)
 		return rc;
+
+	stop_topology_update();
 
 	do {
 		rc = rtas_ibm_suspend_me(streamid);
@@ -337,6 +372,9 @@ static ssize_t migrate_store(struct class *class, struct class_attribute *attr,
 		return rc;
 
 	post_mobility_fixup();
+
+	start_topology_update();
+
 	return count;
 }
 
@@ -348,8 +386,8 @@ static ssize_t migrate_store(struct class *class, struct class_attribute *attr,
  */
 #define MIGRATION_API_VERSION	1
 
-static CLASS_ATTR(migration, S_IWUSR, NULL, migrate_store);
-static CLASS_ATTR_STRING(api_version, S_IRUGO, __stringify(MIGRATION_API_VERSION));
+static CLASS_ATTR_WO(migration);
+static CLASS_ATTR_STRING(api_version, 0444, __stringify(MIGRATION_API_VERSION));
 
 static int __init mobility_sysfs_init(void)
 {

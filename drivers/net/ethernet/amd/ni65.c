@@ -407,7 +407,6 @@ static const struct net_device_ops ni65_netdev_ops = {
 	.ndo_start_xmit		= ni65_send_packet,
 	.ndo_tx_timeout		= ni65_timeout,
 	.ndo_set_rx_mode	= set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -436,10 +435,8 @@ static int __init ni65_probe1(struct net_device *dev,int ioaddr)
 		}
 		if(cards[i].vendor_id) {
 			for(j=0;j<3;j++)
-				if(inb(ioaddr+cards[i].addr_offset+j) != cards[i].vendor_id[j]) {
+				if(inb(ioaddr+cards[i].addr_offset+j) != cards[i].vendor_id[j])
 					release_region(ioaddr, cards[i].total_size);
-					continue;
-			  }
 		}
 		break;
 	}
@@ -782,7 +779,7 @@ static void ni65_stop_start(struct net_device *dev,struct priv *p)
 		if(!p->lock)
 			if (p->tmdnum || !p->xmit_queued)
 				netif_wake_queue(dev);
-		dev->trans_start = jiffies; /* prevent tx timeout */
+		netif_trans_update(dev); /* prevent tx timeout */
 	}
 	else
 		writedatareg(CSR0_STRT | csr0);
@@ -1031,7 +1028,7 @@ static void ni65_xmit_intr(struct net_device *dev,int csr0)
 
 #ifdef XMT_VIA_SKB
 		if(p->tmd_skb[p->tmdlast]) {
-			 dev_kfree_skb_irq(p->tmd_skb[p->tmdlast]);
+			 dev_consume_skb_irq(p->tmd_skb[p->tmdlast]);
 			 p->tmd_skb[p->tmdlast] = NULL;
 		}
 #endif
@@ -1148,7 +1145,7 @@ static void ni65_timeout(struct net_device *dev)
 		printk("%02x ",p->tmdhead[i].u.s.status);
 	printk("\n");
 	ni65_lance_reinit(dev);
-	dev->trans_start = jiffies; /* prevent tx timeout */
+	netif_trans_update(dev); /* prevent tx timeout */
 	netif_wake_queue(dev);
 }
 
@@ -1228,9 +1225,9 @@ static void set_multicast_list(struct net_device *dev)
 #ifdef MODULE
 static struct net_device *dev_ni65;
 
-module_param(irq, int, 0);
-module_param(io, int, 0);
-module_param(dma, int, 0);
+module_param_hw(irq, int, irq, 0);
+module_param_hw(io, int, ioport, 0);
+module_param_hw(dma, int, dma, 0);
 MODULE_PARM_DESC(irq, "ni6510 IRQ number (ignored for some cards)");
 MODULE_PARM_DESC(io, "ni6510 I/O base address");
 MODULE_PARM_DESC(dma, "ni6510 ISA DMA channel (ignored for some cards)");

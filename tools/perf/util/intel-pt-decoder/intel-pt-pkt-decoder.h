@@ -1,16 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * intel_pt_pkt_decoder.h: Intel Processor Trace support
  * Copyright (c) 2013-2014, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #ifndef INCLUDE__INTEL_PT_PKT_DECODER_H__
@@ -52,6 +43,13 @@ enum intel_pt_pkt_type {
 	INTEL_PT_PIP,
 	INTEL_PT_OVF,
 	INTEL_PT_MNT,
+	INTEL_PT_PTWRITE,
+	INTEL_PT_PTWRITE_IP,
+	INTEL_PT_EXSTOP,
+	INTEL_PT_EXSTOP_IP,
+	INTEL_PT_MWAIT,
+	INTEL_PT_PWRE,
+	INTEL_PT_PWRX,
 };
 
 struct intel_pt_pkt {

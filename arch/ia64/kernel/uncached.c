@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2001-2008 Silicon Graphics, Inc.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
  *
  * A simple uncached page allocator using the generic allocator. This
  * allocator first utilizes the spare (spill) pages found in the EFI
@@ -19,6 +16,7 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/efi.h>
+#include <linux/nmi.h>
 #include <linux/genalloc.h>
 #include <linux/gfp.h>
 #include <asm/page.h>

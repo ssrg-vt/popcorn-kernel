@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel MIC Platform Software Stack (MPSS)
  *
  * Copyright(c) 2013 Intel Corporation.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
  * Intel MIC Host driver.
- *
  */
 #include <linux/fs.h>
 #include <linux/pci.h>
@@ -450,26 +438,29 @@ mic_x100_load_firmware(struct mic_device *mdev, const char *buf)
 
 	rc = mic_x100_get_boot_addr(mdev);
 	if (rc)
-		goto error;
+		return rc;
 	/* load OS */
 	rc = request_firmware(&fw, mdev->cosm_dev->firmware, &mdev->pdev->dev);
 	if (rc < 0) {
 		dev_err(&mdev->pdev->dev,
 			"ramdisk request_firmware failed: %d %s\n",
 			rc, mdev->cosm_dev->firmware);
-		goto error;
+		return rc;
 	}
 	if (mdev->bootaddr > mdev->aper.len - fw->size) {
 		rc = -EINVAL;
 		dev_err(&mdev->pdev->dev, "%s %d rc %d bootaddr 0x%x\n",
 			__func__, __LINE__, rc, mdev->bootaddr);
-		release_firmware(fw);
 		goto error;
 	}
 	memcpy_toio(mdev->aper.va + mdev->bootaddr, fw->data, fw->size);
 	mdev->ops->write_spad(mdev, MIC_X100_FW_SIZE, fw->size);
-	if (!strcmp(mdev->cosm_dev->bootmode, "flash"))
-		goto done;
+	if (!strcmp(mdev->cosm_dev->bootmode, "flash")) {
+		rc = -EINVAL;
+		dev_err(&mdev->pdev->dev, "%s %d rc %d\n",
+			__func__, __LINE__, rc);
+		goto error;
+	}
 	/* load command line */
 	rc = mic_x100_load_command_line(mdev, fw);
 	if (rc) {
@@ -481,9 +472,11 @@ mic_x100_load_firmware(struct mic_device *mdev, const char *buf)
 	/* load ramdisk */
 	if (mdev->cosm_dev->ramdisk)
 		rc = mic_x100_load_ramdisk(mdev);
+
+	return rc;
+
 error:
-	dev_dbg(&mdev->pdev->dev, "%s %d rc %d\n", __func__, __LINE__, rc);
-done:
+	release_firmware(fw);
 	return rc;
 }
 

@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Emma Mobile GPIO Support - GIO
  *
  *  Copyright (C) 2012 Magnus Damm
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/init.h>
@@ -27,7 +15,7 @@
 #include <linux/irqdomain.h>
 #include <linux/bitops.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/pinctrl/consumer.h>
@@ -101,12 +89,14 @@ static void em_gio_irq_enable(struct irq_data *d)
 static int em_gio_irq_reqres(struct irq_data *d)
 {
 	struct em_gio_priv *p = irq_data_get_irq_chip_data(d);
+	int ret;
 
-	if (gpiochip_lock_as_irq(&p->gpio_chip, irqd_to_hwirq(d))) {
-		dev_err(p->gpio_chip.dev,
+	ret = gpiochip_lock_as_irq(&p->gpio_chip, irqd_to_hwirq(d));
+	if (ret) {
+		dev_err(p->gpio_chip.parent,
 			"unable to lock HW IRQ %lu for IRQ\n",
 			irqd_to_hwirq(d));
-		return -EINVAL;
+		return ret;
 	}
 	return 0;
 }
@@ -192,7 +182,7 @@ static irqreturn_t em_gio_irq_handler(int irq, void *dev_id)
 
 static inline struct em_gio_priv *gpio_to_priv(struct gpio_chip *chip)
 {
-	return container_of(chip, struct em_gio_priv, gpio_chip);
+	return gpiochip_get_data(chip);
 }
 
 static int em_gio_direction_input(struct gpio_chip *chip, unsigned offset)
@@ -203,7 +193,7 @@ static int em_gio_direction_input(struct gpio_chip *chip, unsigned offset)
 
 static int em_gio_get(struct gpio_chip *chip, unsigned offset)
 {
-	return (int)(em_gio_read(gpio_to_priv(chip), GIO_I) & BIT(offset));
+	return !!(em_gio_read(gpio_to_priv(chip), GIO_I) & BIT(offset));
 }
 
 static void __em_gio_set(struct gpio_chip *chip, unsigned int reg,
@@ -239,12 +229,12 @@ static int em_gio_to_irq(struct gpio_chip *chip, unsigned offset)
 
 static int em_gio_request(struct gpio_chip *chip, unsigned offset)
 {
-	return pinctrl_request_gpio(chip->base + offset);
+	return pinctrl_gpio_request(chip->base + offset);
 }
 
 static void em_gio_free(struct gpio_chip *chip, unsigned offset)
 {
-	pinctrl_free_gpio(chip->base + offset);
+	pinctrl_gpio_free(chip->base + offset);
 
 	/* Set the GPIO as an input to ensure that the next GPIO request won't
 	* drive the GPIO pin as an output.
@@ -332,7 +322,7 @@ static int em_gio_probe(struct platform_device *pdev)
 	gpio_chip->request = em_gio_request;
 	gpio_chip->free = em_gio_free;
 	gpio_chip->label = name;
-	gpio_chip->dev = &pdev->dev;
+	gpio_chip->parent = &pdev->dev;
 	gpio_chip->owner = THIS_MODULE;
 	gpio_chip->base = -1;
 	gpio_chip->ngpio = ngpios;
@@ -368,7 +358,7 @@ static int em_gio_probe(struct platform_device *pdev)
 		goto err1;
 	}
 
-	ret = gpiochip_add(gpio_chip);
+	ret = gpiochip_add_data(gpio_chip, p);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to add GPIO controller\n");
 		goto err1;

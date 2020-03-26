@@ -1,12 +1,4 @@
-/* This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0-only
 
 #include <linux/if_arp.h>
 
@@ -262,7 +254,7 @@ static inline bool lowpan_rx_h_check(struct sk_buff *skb)
 
 	/* check on ieee802154 conform 6LoWPAN header */
 	if (!ieee802154_is_data(fc) ||
-	    !ieee802154_is_intra_pan(fc))
+	    !ieee802154_skb_is_intra_pan_addressing(fc, skb))
 		return false;
 
 	/* check if we can dereference the dispatch */

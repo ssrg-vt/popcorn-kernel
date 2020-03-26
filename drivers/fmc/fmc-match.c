@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2012 CERN (www.cern.ch)
  * Author: Alessandro Rubini <rubini@gnudd.com>
- *
- * Released according to the GNU GPL, version 2 or any later version.
  *
  * This work is part of the White Rabbit project, a research effort led
  * by CERN, the European Institute for Nuclear Research.
@@ -63,7 +62,7 @@ int fmc_fill_id_info(struct fmc_device *fmc)
 		if (!fmc->eeprom)
 			return -ENOMEM;
 		allocated = 1;
-		ret = fmc->op->read_ee(fmc, 0, fmc->eeprom, fmc->eeprom_len);
+		ret = fmc_read_ee(fmc, 0, fmc->eeprom, fmc->eeprom_len);
 		if (ret < 0)
 			goto out;
 	}

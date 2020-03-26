@@ -14,7 +14,6 @@
 #include <linux/clk-provider.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/syscore_ops.h>
 
 #include "clk.h"
 #include "clk-pll.h"
@@ -83,9 +82,6 @@ enum {
 
 static void __iomem *reg_base;
 
-#ifdef CONFIG_PM_SLEEP
-static struct samsung_clk_reg_dump *s5pv210_clk_dump;
-
 /* List of registers that need to be preserved across suspend/resume. */
 static unsigned long s5pv210_clk_regs[] __initdata = {
 	CLK_SRC0,
@@ -131,40 +127,6 @@ static unsigned long s5pv210_clk_regs[] __initdata = {
 	VPLL_CON,
 	CLK_OUT,
 };
-
-static int s5pv210_clk_suspend(void)
-{
-	samsung_clk_save(reg_base, s5pv210_clk_dump,
-				ARRAY_SIZE(s5pv210_clk_regs));
-	return 0;
-}
-
-static void s5pv210_clk_resume(void)
-{
-	samsung_clk_restore(reg_base, s5pv210_clk_dump,
-				ARRAY_SIZE(s5pv210_clk_regs));
-}
-
-static struct syscore_ops s5pv210_clk_syscore_ops = {
-	.suspend = s5pv210_clk_suspend,
-	.resume = s5pv210_clk_resume,
-};
-
-static void s5pv210_clk_sleep_init(void)
-{
-	s5pv210_clk_dump =
-		samsung_clk_alloc_reg_dump(s5pv210_clk_regs,
-					   ARRAY_SIZE(s5pv210_clk_regs));
-	if (!s5pv210_clk_dump) {
-		pr_warn("%s: Failed to allocate sleep save data\n", __func__);
-		return;
-	}
-
-	register_syscore_ops(&s5pv210_clk_syscore_ops);
-}
-#else
-static inline void s5pv210_clk_sleep_init(void) { }
-#endif
 
 /* Mux parent lists. */
 static const char *const fin_pll_p[] __initconst = {
@@ -503,15 +465,15 @@ static const struct samsung_mux_clock s5p6442_mux_clks[] __initconst = {
 
 /* S5PV210-specific fixed rate clocks generated inside the SoC. */
 static const struct samsung_fixed_rate_clock s5pv210_frate_clks[] __initconst = {
-	FRATE(SCLK_HDMI27M, "sclk_hdmi27m", NULL, CLK_IS_ROOT, 27000000),
-	FRATE(SCLK_HDMIPHY, "sclk_hdmiphy", NULL, CLK_IS_ROOT, 27000000),
-	FRATE(SCLK_USBPHY0, "sclk_usbphy0", NULL, CLK_IS_ROOT, 48000000),
-	FRATE(SCLK_USBPHY1, "sclk_usbphy1", NULL, CLK_IS_ROOT, 48000000),
+	FRATE(SCLK_HDMI27M, "sclk_hdmi27m", NULL, 0, 27000000),
+	FRATE(SCLK_HDMIPHY, "sclk_hdmiphy", NULL, 0, 27000000),
+	FRATE(SCLK_USBPHY0, "sclk_usbphy0", NULL, 0, 48000000),
+	FRATE(SCLK_USBPHY1, "sclk_usbphy1", NULL, 0, 48000000),
 };
 
 /* S5P6442-specific fixed rate clocks generated inside the SoC. */
 static const struct samsung_fixed_rate_clock s5p6442_frate_clks[] __initconst = {
-	FRATE(SCLK_USBPHY0, "sclk_usbphy0", NULL, CLK_IS_ROOT, 30000000),
+	FRATE(SCLK_USBPHY0, "sclk_usbphy0", NULL, 0, 30000000),
 };
 
 /* Common clock dividers. */
@@ -784,8 +746,6 @@ static void __init __s5pv210_clk_init(struct device_node *np,
 	struct samsung_clk_provider *ctx;
 
 	ctx = samsung_clk_init(np, reg_base, NR_CLKS);
-	if (!ctx)
-		panic("%s: unable to allocate context.\n", __func__);
 
 	samsung_clk_register_mux(ctx, early_mux_clks,
 					ARRAY_SIZE(early_mux_clks));
@@ -824,7 +784,8 @@ static void __init __s5pv210_clk_init(struct device_node *np,
 	samsung_clk_register_alias(ctx, s5pv210_aliases,
 						ARRAY_SIZE(s5pv210_aliases));
 
-	s5pv210_clk_sleep_init();
+	samsung_clk_sleep_init(reg_base, s5pv210_clk_regs,
+			       ARRAY_SIZE(s5pv210_clk_regs));
 
 	samsung_clk_of_add_provider(np, ctx);
 

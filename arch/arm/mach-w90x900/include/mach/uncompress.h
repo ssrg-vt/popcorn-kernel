@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * arch/arm/mach-w90x900/include/mach/uncompress.h
  *
@@ -7,12 +8,6 @@
  * Wan ZongShun <mcuos.com@gmail.com>
  *
  * Based on arch/arm/mach-s3c2410/include/mach/uncompress.h
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #ifndef __ASM_ARCH_UNCOMPRESS_H
@@ -27,7 +22,7 @@
 #define TX_DONE	(UART_LSR_TEMT | UART_LSR_THRE)
 static volatile u32 * const uart_base = (u32 *)UART0_PA;
 
-static void putc(int ch)
+static inline void putc(int ch)
 {
 	/* Check THRE and TEMT bits before we transmit the character.
 	 */

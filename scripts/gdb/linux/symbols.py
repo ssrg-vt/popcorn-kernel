@@ -108,7 +108,7 @@ lx-symbols command."""
 
     def load_module_symbols(self, module):
         module_name = module['name'].string()
-        module_addr = str(module['module_core']).split()[0]
+        module_addr = str(module['core_layout']['base']).split()[0]
 
         module_file = self._get_module_file(module_name)
         if not module_file and not self.module_files_updated:
@@ -139,8 +139,12 @@ lx-symbols command."""
                 saved_states.append({'breakpoint': bp, 'enabled': bp.enabled})
 
         # drop all current symbols and reload vmlinux
+        orig_vmlinux = 'vmlinux'
+        for obj in gdb.objfiles():
+            if obj.filename.endswith('vmlinux'):
+                orig_vmlinux = obj.filename
         gdb.execute("symbol-file", to_string=True)
-        gdb.execute("symbol-file vmlinux")
+        gdb.execute("symbol-file {0}".format(orig_vmlinux))
 
         self.loaded_modules = []
         module_list = modules.module_list()
@@ -153,7 +157,7 @@ lx-symbols command."""
             saved_state['breakpoint'].enabled = saved_state['enabled']
 
     def invoke(self, arg, from_tty):
-        self.module_paths = arg.split()
+        self.module_paths = [os.path.expanduser(p) for p in arg.split()]
         self.module_paths.append(os.getcwd())
 
         # enforce update

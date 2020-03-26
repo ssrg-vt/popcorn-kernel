@@ -1,18 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* miscellaneous bits
  *
  * Copyright (C) 2002, 2007 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/errno.h>
-#include <rxrpc/packet.h>
 #include "internal.h"
 #include "afs_fs.h"
 
@@ -22,12 +17,12 @@
 int afs_abort_to_error(u32 abort_code)
 {
 	switch (abort_code) {
-	/* low errno codes inserted into abort namespace */
+		/* Low errno codes inserted into abort namespace */
 	case 13:		return -EACCES;
 	case 27:		return -EFBIG;
 	case 30:		return -EROFS;
 
-	/* VICE "special error" codes; 101 - 111 */
+		/* VICE "special error" codes; 101 - 111 */
 	case VSALVAGE:		return -EIO;
 	case VNOVNODE:		return -ENOENT;
 	case VNOVOL:		return -ENOMEDIUM;
@@ -40,7 +35,37 @@ int afs_abort_to_error(u32 abort_code)
 	case VBUSY:		return -EBUSY;
 	case VMOVED:		return -ENXIO;
 
-	/* Unified AFS error table; ET "uae" == 0x2f6df00 */
+		/* Volume Location server errors */
+	case AFSVL_IDEXIST:		return -EEXIST;
+	case AFSVL_IO:			return -EREMOTEIO;
+	case AFSVL_NAMEEXIST:		return -EEXIST;
+	case AFSVL_CREATEFAIL:		return -EREMOTEIO;
+	case AFSVL_NOENT:		return -ENOMEDIUM;
+	case AFSVL_EMPTY:		return -ENOMEDIUM;
+	case AFSVL_ENTDELETED:		return -ENOMEDIUM;
+	case AFSVL_BADNAME:		return -EINVAL;
+	case AFSVL_BADINDEX:		return -EINVAL;
+	case AFSVL_BADVOLTYPE:		return -EINVAL;
+	case AFSVL_BADSERVER:		return -EINVAL;
+	case AFSVL_BADPARTITION:	return -EINVAL;
+	case AFSVL_REPSFULL:		return -EFBIG;
+	case AFSVL_NOREPSERVER:		return -ENOENT;
+	case AFSVL_DUPREPSERVER:	return -EEXIST;
+	case AFSVL_RWNOTFOUND:		return -ENOENT;
+	case AFSVL_BADREFCOUNT:		return -EINVAL;
+	case AFSVL_SIZEEXCEEDED:	return -EINVAL;
+	case AFSVL_BADENTRY:		return -EINVAL;
+	case AFSVL_BADVOLIDBUMP:	return -EINVAL;
+	case AFSVL_IDALREADYHASHED:	return -EINVAL;
+	case AFSVL_ENTRYLOCKED:		return -EBUSY;
+	case AFSVL_BADVOLOPER:		return -EBADRQC;
+	case AFSVL_BADRELLOCKTYPE:	return -EINVAL;
+	case AFSVL_RERELEASE:		return -EREMOTEIO;
+	case AFSVL_BADSERVERFLAG:	return -EINVAL;
+	case AFSVL_PERM:		return -EACCES;
+	case AFSVL_NOMEM:		return -EREMOTEIO;
+
+		/* Unified AFS error table; ET "uae" == 0x2f6df00 */
 	case 0x2f6df00:		return -EPERM;
 	case 0x2f6df01:		return -ENOENT;
 	case 0x2f6df04:		return -EIO;
@@ -69,7 +94,7 @@ int afs_abort_to_error(u32 abort_code)
 	case 0x2f6df6c:		return -ETIMEDOUT;
 	case 0x2f6df78:		return -EDQUOT;
 
-	/* RXKAD abort codes; from include/rxrpc/packet.h.  ET "RXK" == 0x1260B00 */
+		/* RXKAD abort codes; from include/rxrpc/packet.h.  ET "RXK" == 0x1260B00 */
 	case RXKADINCONSISTENCY: return -EPROTO;
 	case RXKADPACKETSHORT:	return -EPROTO;
 	case RXKADLEVELFAIL:	return -EKEYREJECTED;
@@ -84,6 +109,69 @@ int afs_abort_to_error(u32 abort_code)
 	case RXKADDATALEN:	return -EKEYREJECTED;
 	case RXKADILLEGALLEVEL:	return -EKEYREJECTED;
 
+	case RXGEN_OPCODE:	return -ENOTSUPP;
+
 	default:		return -EREMOTEIO;
+	}
+}
+
+/*
+ * Select the error to report from a set of errors.
+ */
+void afs_prioritise_error(struct afs_error *e, int error, u32 abort_code)
+{
+	switch (error) {
+	case 0:
+		return;
+	default:
+		if (e->error == -ETIMEDOUT ||
+		    e->error == -ETIME)
+			return;
+		/* Fall through */
+	case -ETIMEDOUT:
+	case -ETIME:
+		if (e->error == -ENOMEM ||
+		    e->error == -ENONET)
+			return;
+		/* Fall through */
+	case -ENOMEM:
+	case -ENONET:
+		if (e->error == -ERFKILL)
+			return;
+		/* Fall through */
+	case -ERFKILL:
+		if (e->error == -EADDRNOTAVAIL)
+			return;
+		/* Fall through */
+	case -EADDRNOTAVAIL:
+		if (e->error == -ENETUNREACH)
+			return;
+		/* Fall through */
+	case -ENETUNREACH:
+		if (e->error == -EHOSTUNREACH)
+			return;
+		/* Fall through */
+	case -EHOSTUNREACH:
+		if (e->error == -EHOSTDOWN)
+			return;
+		/* Fall through */
+	case -EHOSTDOWN:
+		if (e->error == -ECONNREFUSED)
+			return;
+		/* Fall through */
+	case -ECONNREFUSED:
+		if (e->error == -ECONNRESET)
+			return;
+		/* Fall through */
+	case -ECONNRESET: /* Responded, but call expired. */
+		if (e->responded)
+			return;
+		e->error = error;
+		return;
+
+	case -ECONNABORTED:
+		e->responded = true;
+		e->error = afs_abort_to_error(abort_code);
+		return;
 	}
 }

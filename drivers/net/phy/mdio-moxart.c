@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /* MOXA ART Ethernet (RTL8201CP) MDIO interface driver
  *
  * Copyright (C) 2013 Jonas Jensen <jonas.jensen@gmail.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2.  This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/delay.h>
@@ -130,13 +127,6 @@ static int moxart_mdio_probe(struct platform_device *pdev)
 	snprintf(bus->id, MII_BUS_ID_SIZE, "%s-%d-mii", pdev->name, pdev->id);
 	bus->parent = &pdev->dev;
 
-	bus->irq = devm_kzalloc(&pdev->dev, sizeof(int) * PHY_MAX_ADDR,
-			GFP_KERNEL);
-	if (!bus->irq) {
-		ret = -ENOMEM;
-		goto err_out_free_mdiobus;
-	}
-
 	/* Setting PHY_IGNORE_INTERRUPT here even if it has no effect,
 	 * of_mdiobus_register() sets these PHY_POLL.
 	 * Ideally, the interrupt from MAC controller could be used to
@@ -197,4 +187,4 @@ module_platform_driver(moxart_mdio_driver);
 
 MODULE_DESCRIPTION("MOXA ART MDIO interface driver");
 MODULE_AUTHOR("Jonas Jensen <jonas.jensen@gmail.com>");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

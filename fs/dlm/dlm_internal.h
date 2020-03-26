@@ -1,12 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /******************************************************************************
 *******************************************************************************
 **
 **  Copyright (C) Sistina Software, Inc.  1997-2003  All rights reserved.
 **  Copyright (C) 2004-2011 Red Hat, Inc.  All rights reserved.
 **
-**  This copyrighted material is made available to anyone wishing to use,
-**  modify, copy, or redistribute it subject to the terms and conditions
-**  of the GNU General Public License v.2.
 **
 *******************************************************************************
 ******************************************************************************/
@@ -18,7 +16,6 @@
  * This is the main header file to be included in each DLM source file.
  */
 
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/types.h>
@@ -39,7 +36,7 @@
 #include <linux/mutex.h>
 #include <linux/idr.h>
 #include <linux/ratelimit.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include <linux/dlm.h>
 #include "config.h"
@@ -65,8 +62,16 @@ struct dlm_mhandle;
 	printk(KERN_ERR "dlm: "fmt"\n" , ##args)
 #define log_error(ls, fmt, args...) \
 	printk(KERN_ERR "dlm: %s: " fmt "\n", (ls)->ls_name , ##args)
+
 #define log_rinfo(ls, fmt, args...) \
-	printk(KERN_INFO "dlm: %s: " fmt "\n", (ls)->ls_name , ##args);
+do { \
+	if (dlm_config.ci_log_info) \
+		printk(KERN_INFO "dlm: %s: " fmt "\n", \
+			(ls)->ls_name, ##args); \
+	else if (dlm_config.ci_log_debug) \
+		printk(KERN_DEBUG "dlm: %s: " fmt "\n", \
+		       (ls)->ls_name , ##args); \
+} while (0)
 
 #define log_debug(ls, fmt, args...) \
 do { \

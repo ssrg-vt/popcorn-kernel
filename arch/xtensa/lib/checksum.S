@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * INET		An implementation of the TCP/IP protocol suite for the LINUX
  *		operating system.  INET is implemented using the  BSD Socket
@@ -7,16 +8,12 @@
  *
  * Xtensa version:  Copyright (C) 2001 Tensilica, Inc. by Kevin Chea
  *                  Optimized by Joe Taylor
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  */
 
-#include <asm/errno.h>
+#include <linux/errno.h>
 #include <linux/linkage.h>
-#include <variant/core.h>
+#include <asm/asmmacro.h>
+#include <asm/core.h>
 
 /*
  * computes a partial checksum, e.g. for TCP/UDP fragments
@@ -175,22 +172,7 @@ ENDPROC(csum_partial)
 
 /*
  * Copy from ds while checksumming, otherwise like csum_partial
- *
- * The macros SRC and DST specify the type of access for the instruction.
- * thus we can call a custom exception handler for each access type.
  */
-
-#define SRC(y...)			\
-	9999: y;			\
-	.section __ex_table, "a";	\
-	.long 9999b, 6001f	;	\
-	.previous
-
-#define DST(y...)			\
-	9999: y;			\
-	.section __ex_table, "a";	\
-	.long 9999b, 6002f	;	\
-	.previous
 
 /*
 unsigned int csum_partial_copy_generic (const char *src, char *dst, int len,
@@ -244,28 +226,28 @@ ENTRY(csum_partial_copy_generic)
 	add	a10, a10, a2	/* a10 = end of last 32-byte src chunk */
 .Loop5:
 #endif
-SRC(	l32i	a9, a2, 0	)
-SRC(	l32i	a8, a2, 4	)
-DST(	s32i	a9, a3, 0	)
-DST(	s32i	a8, a3, 4	)
+EX(10f)	l32i	a9, a2, 0
+EX(10f)	l32i	a8, a2, 4
+EX(11f)	s32i	a9, a3, 0
+EX(11f)	s32i	a8, a3, 4
 	ONES_ADD(a5, a9)
 	ONES_ADD(a5, a8)
-SRC(	l32i	a9, a2, 8	)
-SRC(	l32i	a8, a2, 12	)
-DST(	s32i	a9, a3, 8	)
-DST(	s32i	a8, a3, 12	)
+EX(10f)	l32i	a9, a2, 8
+EX(10f)	l32i	a8, a2, 12
+EX(11f)	s32i	a9, a3, 8
+EX(11f)	s32i	a8, a3, 12
 	ONES_ADD(a5, a9)
 	ONES_ADD(a5, a8)
-SRC(	l32i	a9, a2, 16	)
-SRC(	l32i	a8, a2, 20	)
-DST(	s32i	a9, a3, 16	)
-DST(	s32i	a8, a3, 20	)
+EX(10f)	l32i	a9, a2, 16
+EX(10f)	l32i	a8, a2, 20
+EX(11f)	s32i	a9, a3, 16
+EX(11f)	s32i	a8, a3, 20
 	ONES_ADD(a5, a9)
 	ONES_ADD(a5, a8)
-SRC(	l32i	a9, a2, 24	)
-SRC(	l32i	a8, a2, 28	)
-DST(	s32i	a9, a3, 24	)
-DST(	s32i	a8, a3, 28	)
+EX(10f)	l32i	a9, a2, 24
+EX(10f)	l32i	a8, a2, 28
+EX(11f)	s32i	a9, a3, 24
+EX(11f)	s32i	a8, a3, 28
 	ONES_ADD(a5, a9)
 	ONES_ADD(a5, a8)
 	addi	a2, a2, 32
@@ -284,8 +266,8 @@ DST(	s32i	a8, a3, 28	)
 	add	a10, a10, a2	/* a10 = end of last 4-byte src chunk */
 .Loop6:
 #endif
-SRC(	l32i	a9, a2, 0	)
-DST(	s32i	a9, a3, 0	)
+EX(10f)	l32i	a9, a2, 0
+EX(11f)	s32i	a9, a3, 0
 	ONES_ADD(a5, a9)
 	addi	a2, a2, 4
 	addi	a3, a3, 4
@@ -315,8 +297,8 @@ DST(	s32i	a9, a3, 0	)
 	add	a10, a10, a2	/* a10 = end of last 2-byte src chunk */
 .Loop7:
 #endif
-SRC(	l16ui	a9, a2, 0	)
-DST(	s16i	a9, a3, 0	)
+EX(10f)	l16ui	a9, a2, 0
+EX(11f)	s16i	a9, a3, 0
 	ONES_ADD(a5, a9)
 	addi	a2, a2, 2
 	addi	a3, a3, 2
@@ -326,8 +308,8 @@ DST(	s16i	a9, a3, 0	)
 4:
 	/* This section processes a possible trailing odd byte. */
 	_bbci.l	a4, 0, 8f	/* 1-byte chunk */
-SRC(	l8ui	a9, a2, 0	)
-DST(	s8i	a9, a3, 0	)
+EX(10f)	l8ui	a9, a2, 0
+EX(11f)	s8i	a9, a3, 0
 #ifdef __XTENSA_EB__
 	slli	a9, a9, 8	/* shift byte to bits 8..15 */
 #endif
@@ -350,10 +332,10 @@ DST(	s8i	a9, a3, 0	)
 	add	a10, a10, a2	/* a10 = end of last odd-aligned, 2-byte src chunk */
 .Loop8:
 #endif
-SRC(	l8ui	a9, a2, 0	)
-SRC(	l8ui	a8, a2, 1	)
-DST(	s8i	a9, a3, 0	)
-DST(	s8i	a8, a3, 1	)
+EX(10f)	l8ui	a9, a2, 0
+EX(10f)	l8ui	a8, a2, 1
+EX(11f)	s8i	a9, a3, 0
+EX(11f)	s8i	a8, a3, 1
 #ifdef __XTENSA_EB__
 	slli	a9, a9, 8	/* combine into a single 16-bit value */
 #else				/* for checksum computation */
@@ -381,7 +363,7 @@ ENDPROC(csum_partial_copy_generic)
 	a12 = original dst for exception handling
 */
 
-6001:
+10:
 	_movi	a2, -EFAULT
 	s32i	a2, a6, 0	/* src_err_ptr */
 
@@ -403,7 +385,7 @@ ENDPROC(csum_partial_copy_generic)
 2:
 	retw
 
-6002:
+11:
 	movi	a2, -EFAULT
 	s32i	a2, a7, 0	/* dst_err_ptr */
 	movi	a2, 0

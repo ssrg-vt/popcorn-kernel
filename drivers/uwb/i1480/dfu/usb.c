@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel Wireless UWB Link 1480
  * USB SKU firmware upload implementation
  *
  * Copyright (C) 2005-2006 Intel Corporation
  * Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
- *
  *
  * This driver will prepare the i1480 device to behave as a real
  * Wireless USB HWA adaptor by uploading the firmware.
@@ -309,7 +295,7 @@ int i1480_usb_cmd(struct i1480 *i1480, const char *cmd_name, size_t cmd_size)
 	if (result < 0) {
 		dev_err(dev, "%s: cannot submit NEEP read: %d\n",
 			cmd_name, result);
-			goto error_submit_ep1;
+		goto error_submit_ep1;
 	}
 	/* Now post the command on EP0 */
 	result = usb_control_msg(
@@ -376,7 +362,7 @@ int i1480_usb_probe(struct usb_interface *iface, const struct usb_device_id *id)
 
 	i1480 = &i1480_usb->i1480;
 	i1480->buf_size = 512;
-	i1480->cmd_buf = kmalloc(2 * i1480->buf_size, GFP_KERNEL);
+	i1480->cmd_buf = kmalloc_array(2, i1480->buf_size, GFP_KERNEL);
 	if (i1480->cmd_buf == NULL) {
 		dev_err(dev, "Cannot allocate transfer buffers\n");
 		result = -ENOMEM;

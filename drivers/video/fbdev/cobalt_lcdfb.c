@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Cobalt/SEAD3 LCD frame buffer driver.
  *
  *  Copyright (C) 2008  Yoichi Yuasa <yuasa@linux-mips.org>
  *  Copyright (C) 2012  MIPS Technologies, Inc.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include <linux/delay.h>
 #include <linux/fb.h>
@@ -26,6 +13,7 @@
 #include <linux/uaccess.h>
 #include <linux/platform_device.h>
 #include <linux/module.h>
+#include <linux/sched/signal.h>
 
 /*
  * Cursor position address
@@ -63,7 +51,6 @@
 #define LCD_CUR_POS(x)		((x) & LCD_CUR_POS_MASK)
 #define LCD_TEXT_POS(x)		((x) | LCD_TEXT_MODE)
 
-#ifdef CONFIG_MIPS_COBALT
 static inline void lcd_write_control(struct fb_info *info, u8 control)
 {
 	writel((u32)control << 24, info->screen_base);
@@ -83,47 +70,6 @@ static inline u8 lcd_read_data(struct fb_info *info)
 {
 	return readl(info->screen_base + LCD_DATA_REG_OFFSET) >> 24;
 }
-#else
-
-#define LCD_CTL			0x00
-#define LCD_DATA		0x08
-#define CPLD_STATUS		0x10
-#define CPLD_DATA		0x18
-
-static inline void cpld_wait(struct fb_info *info)
-{
-	do {
-	} while (readl(info->screen_base + CPLD_STATUS) & 1);
-}
-
-static inline void lcd_write_control(struct fb_info *info, u8 control)
-{
-	cpld_wait(info);
-	writel(control, info->screen_base + LCD_CTL);
-}
-
-static inline u8 lcd_read_control(struct fb_info *info)
-{
-	cpld_wait(info);
-	readl(info->screen_base + LCD_CTL);
-	cpld_wait(info);
-	return readl(info->screen_base + CPLD_DATA) & 0xff;
-}
-
-static inline void lcd_write_data(struct fb_info *info, u8 data)
-{
-	cpld_wait(info);
-	writel(data, info->screen_base + LCD_DATA);
-}
-
-static inline u8 lcd_read_data(struct fb_info *info)
-{
-	cpld_wait(info);
-	readl(info->screen_base + LCD_DATA);
-	cpld_wait(info);
-	return readl(info->screen_base + CPLD_DATA) & 0xff;
-}
-#endif
 
 static int lcd_busy_wait(struct fb_info *info)
 {
@@ -167,7 +113,7 @@ static void lcd_clear(struct fb_info *info)
 	lcd_write_control(info, LCD_RESET);
 }
 
-static struct fb_fix_screeninfo cobalt_lcdfb_fix = {
+static const struct fb_fix_screeninfo cobalt_lcdfb_fix = {
 	.id		= "cobalt-lcd",
 	.type		= FB_TYPE_TEXT,
 	.type_aux	= FB_AUX_TEXT_MDA,

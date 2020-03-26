@@ -1,22 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Atomic operations for the Hexagon architecture
  *
  * Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
  */
 
 #ifndef _ASM_ATOMIC_H
@@ -41,6 +27,8 @@ static inline void atomic_set(atomic_t *v, int new)
 		: "memory", "p0", "r6"
 	);
 }
+
+#define atomic_set_release(v, i)	atomic_set((v), (i))
 
 /**
  * atomic_read - reads a word, atomically
@@ -110,7 +98,7 @@ static inline void atomic_##op(int i, atomic_t *v)			\
 	);								\
 }									\
 
-#define ATOMIC_OP_RETURN(op)							\
+#define ATOMIC_OP_RETURN(op)						\
 static inline int atomic_##op##_return(int i, atomic_t *v)		\
 {									\
 	int output;							\
@@ -127,21 +115,42 @@ static inline int atomic_##op##_return(int i, atomic_t *v)		\
 	return output;							\
 }
 
-#define ATOMIC_OPS(op) ATOMIC_OP(op) ATOMIC_OP_RETURN(op)
+#define ATOMIC_FETCH_OP(op)						\
+static inline int atomic_fetch_##op(int i, atomic_t *v)			\
+{									\
+	int output, val;						\
+									\
+	__asm__ __volatile__ (						\
+		"1:	%0 = memw_locked(%2);\n"			\
+		"	%1 = "#op "(%0,%3);\n"				\
+		"	memw_locked(%2,P3)=%1;\n"			\
+		"	if !P3 jump 1b;\n"				\
+		: "=&r" (output), "=&r" (val)				\
+		: "r" (&v->counter), "r" (i)				\
+		: "memory", "p3"					\
+	);								\
+	return output;							\
+}
+
+#define ATOMIC_OPS(op) ATOMIC_OP(op) ATOMIC_OP_RETURN(op) ATOMIC_FETCH_OP(op)
 
 ATOMIC_OPS(add)
 ATOMIC_OPS(sub)
 
-ATOMIC_OP(and)
-ATOMIC_OP(or)
-ATOMIC_OP(xor)
+#undef ATOMIC_OPS
+#define ATOMIC_OPS(op) ATOMIC_OP(op) ATOMIC_FETCH_OP(op)
+
+ATOMIC_OPS(and)
+ATOMIC_OPS(or)
+ATOMIC_OPS(xor)
 
 #undef ATOMIC_OPS
+#undef ATOMIC_FETCH_OP
 #undef ATOMIC_OP_RETURN
 #undef ATOMIC_OP
 
 /**
- * __atomic_add_unless - add unless the number is a given value
+ * atomic_fetch_add_unless - add unless the number is a given value
  * @v: pointer to value
  * @a: amount to add
  * @u: unless value is equal to u
@@ -150,7 +159,7 @@ ATOMIC_OP(xor)
  *
  */
 
-static inline int __atomic_add_unless(atomic_t *v, int a, int u)
+static inline int atomic_fetch_add_unless(atomic_t *v, int a, int u)
 {
 	int __oldval;
 	register int tmp;
@@ -173,18 +182,6 @@ static inline int __atomic_add_unless(atomic_t *v, int a, int u)
 	);
 	return __oldval;
 }
-
-#define atomic_inc_not_zero(v) atomic_add_unless((v), 1, 0)
-
-#define atomic_inc(v) atomic_add(1, (v))
-#define atomic_dec(v) atomic_sub(1, (v))
-
-#define atomic_inc_and_test(v) (atomic_add_return(1, (v)) == 0)
-#define atomic_dec_and_test(v) (atomic_sub_return(1, (v)) == 0)
-#define atomic_sub_and_test(i, v) (atomic_sub_return(i, (v)) == 0)
-#define atomic_add_negative(i, v) (atomic_add_return(i, (v)) < 0)
-
-#define atomic_inc_return(v) (atomic_add_return(1, v))
-#define atomic_dec_return(v) (atomic_sub_return(1, v))
+#define atomic_fetch_add_unless atomic_fetch_add_unless
 
 #endif

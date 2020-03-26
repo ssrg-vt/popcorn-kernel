@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * trimslice.c - TrimSlice machine ASoC driver
  *
@@ -7,21 +8,6 @@
  * Based on code copyright/by:
  * Author: Stephen Warren <swarren@nvidia.com>
  * Copyright (C) 2010-2011 - NVIDIA, Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include <linux/module.h>
@@ -74,7 +60,7 @@ static int trimslice_asoc_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static struct snd_soc_ops trimslice_asoc_ops = {
+static const struct snd_soc_ops trimslice_asoc_ops = {
 	.hw_params = trimslice_asoc_hw_params,
 };
 
@@ -123,13 +109,10 @@ static int tegra_snd_trimslice_probe(struct platform_device *pdev)
 
 	trimslice = devm_kzalloc(&pdev->dev, sizeof(struct tegra_trimslice),
 				 GFP_KERNEL);
-	if (!trimslice) {
-		dev_err(&pdev->dev, "Can't allocate tegra_trimslice\n");
+	if (!trimslice)
 		return -ENOMEM;
-	}
 
 	card->dev = &pdev->dev;
-	platform_set_drvdata(pdev, card);
 	snd_soc_card_set_drvdata(card, trimslice);
 
 	trimslice_tlv320aic23_dai.codec_of_node = of_parse_phandle(np,

@@ -1,11 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * drivers/net/bond/bond_options.h - bonding options
  * Copyright (c) 2013 Nikolay Aleksandrov <nikolay@redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef _NET_BOND_OPTIONS_H
@@ -104,6 +100,8 @@ struct bond_option {
 
 int __bond_opt_set(struct bonding *bond, unsigned int option,
 		   struct bond_opt_value *val);
+int __bond_opt_set_notify(struct bonding *bond, unsigned int option,
+			  struct bond_opt_value *val);
 int bond_opt_tryset_rtnl(struct bonding *bond, unsigned int option, char *buf);
 
 const struct bond_opt_value *bond_opt_parse(const struct bond_option *opt,

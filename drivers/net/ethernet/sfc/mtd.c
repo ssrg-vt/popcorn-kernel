@@ -24,17 +24,8 @@
 static int efx_mtd_erase(struct mtd_info *mtd, struct erase_info *erase)
 {
 	struct efx_nic *efx = mtd->priv;
-	int rc;
 
-	rc = efx->type->mtd_erase(mtd, erase->addr, erase->len);
-	if (rc == 0) {
-		erase->state = MTD_ERASE_DONE;
-	} else {
-		erase->state = MTD_ERASE_FAILED;
-		erase->fail_addr = MTD_FAIL_ADDR_UNKNOWN;
-	}
-	mtd_erase_callback(erase);
-	return rc;
+	return efx->type->mtd_erase(mtd, erase->addr, erase->len);
 }
 
 static void efx_mtd_sync(struct mtd_info *mtd)
@@ -74,6 +65,9 @@ int efx_mtd_add(struct efx_nic *efx, struct efx_mtd_partition *parts,
 						    i * sizeof_part);
 
 		part->mtd.writesize = 1;
+
+		if (!(part->mtd.flags & MTD_NO_ERASE))
+			part->mtd.flags |= MTD_WRITEABLE;
 
 		part->mtd.owner = THIS_MODULE;
 		part->mtd.priv = efx;

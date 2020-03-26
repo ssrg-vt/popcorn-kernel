@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * oxfw_stream.c - a part of driver for OXFW970/971 based devices
  *
  * Copyright (c) 2014 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include "oxfw.h"
@@ -242,8 +241,7 @@ int snd_oxfw_stream_init_simplex(struct snd_oxfw *oxfw,
 	 * blocks than IEC 61883-6 defines.
 	 */
 	if (stream == &oxfw->tx_stream) {
-		oxfw->tx_stream.flags |= CIP_SKIP_INIT_DBC_CHECK |
-					 CIP_JUMBO_PAYLOAD;
+		oxfw->tx_stream.flags |= CIP_JUMBO_PAYLOAD;
 		if (oxfw->wrong_dbs)
 			oxfw->tx_stream.flags |= CIP_WRONG_DBS;
 	}
@@ -518,8 +516,9 @@ assume_stream_formats(struct snd_oxfw *oxfw, enum avc_general_plug_dir dir,
 	if (err < 0)
 		goto end;
 
-	formats[eid] = kmemdup(buf, *len, GFP_KERNEL);
-	if (formats[eid] == NULL) {
+	formats[eid] = devm_kmemdup(&oxfw->card->card_dev, buf, *len,
+				    GFP_KERNEL);
+	if (!formats[eid]) {
 		err = -ENOMEM;
 		goto end;
 	}
@@ -536,7 +535,8 @@ assume_stream_formats(struct snd_oxfw *oxfw, enum avc_general_plug_dir dir,
 			continue;
 
 		eid++;
-		formats[eid] = kmemdup(buf, *len, GFP_KERNEL);
+		formats[eid] = devm_kmemdup(&oxfw->card->card_dev, buf, *len,
+					    GFP_KERNEL);
 		if (formats[eid] == NULL) {
 			err = -ENOMEM;
 			goto end;
@@ -598,8 +598,9 @@ static int fill_stream_formats(struct snd_oxfw *oxfw,
 		if (err < 0)
 			break;
 
-		formats[eid] = kmemdup(buf, len, GFP_KERNEL);
-		if (formats[eid] == NULL) {
+		formats[eid] = devm_kmemdup(&oxfw->card->card_dev, buf, len,
+					    GFP_KERNEL);
+		if (!formats[eid]) {
 			err = -ENOMEM;
 			break;
 		}

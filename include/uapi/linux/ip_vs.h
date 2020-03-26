@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *      IP Virtual Server
  *      data structure and functionality definitions
@@ -122,6 +123,13 @@
 #define IP_VS_IFNAME_MAXLEN	16
 
 #define IP_VS_PEDATA_MAXLEN     255
+
+/* Tunnel types */
+enum {
+	IP_VS_CONN_F_TUNNEL_TYPE_IPIP = 0,	/* IPIP */
+	IP_VS_CONN_F_TUNNEL_TYPE_GUE,		/* GUE */
+	IP_VS_CONN_F_TUNNEL_TYPE_MAX,
+};
 
 /*
  *	The struct ip_vs_service_user and struct ip_vs_dest_user are
@@ -391,6 +399,10 @@ enum {
 
 	IPVS_DEST_ATTR_STATS64,		/* nested attribute for dest stats */
 
+	IPVS_DEST_ATTR_TUN_TYPE,	/* tunnel type */
+
+	IPVS_DEST_ATTR_TUN_PORT,	/* tunnel port */
+
 	__IPVS_DEST_ATTR_MAX,
 };
 
@@ -435,6 +447,7 @@ enum {
 	IPVS_STATS_ATTR_OUTPPS,		/* current out packet rate */
 	IPVS_STATS_ATTR_INBPS,		/* current in byte rate */
 	IPVS_STATS_ATTR_OUTBPS,		/* current out byte rate */
+	IPVS_STATS_ATTR_PAD,
 	__IPVS_STATS_ATTR_MAX,
 };
 

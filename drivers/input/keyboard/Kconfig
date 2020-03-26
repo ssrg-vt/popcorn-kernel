@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Input core configuration
 #
@@ -11,6 +12,21 @@ menuconfig INPUT_KEYBOARD
 	  If unsure, say Y.
 
 if INPUT_KEYBOARD
+
+config KEYBOARD_ADC
+	tristate "ADC Ladder Buttons"
+	depends on IIO
+	select INPUT_POLLDEV
+	help
+	  This driver implements support for buttons connected
+	  to an ADC using a resistor ladder.
+
+	  Say Y here if your device has such buttons connected to an ADC.  Your
+	  board-specific setup logic must also provide a configuration data
+	  for mapping voltages to buttons.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called adc_keys.
 
 config KEYBOARD_ADP5520
 	tristate "Keypad Support for ADP5520 PMIC"
@@ -122,6 +138,17 @@ config KEYBOARD_ATKBD_RDI_KEYCODES
 	  right-hand column will be interpreted as the key shown in the
 	  left-hand column.
 
+config KEYBOARD_QT1050
+	tristate "Microchip AT42QT1050 Touch Sensor Chip"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Say Y here if you want to use Microchip AT42QT1050 QTouch
+	  Sensor chip as input device.
+
+	  To compile this driver as a module, choose M here:
+	  the module will be called qt1050
+
 config KEYBOARD_QT1070
        tristate "Atmel AT42QT1070 Touch Sensor Chip"
        depends on I2C
@@ -142,15 +169,6 @@ config KEYBOARD_QT2160
 	  This driver can also be built as a module. If so, the module
 	  will be called qt2160.
 
-config KEYBOARD_BFIN
-	tristate "Blackfin BF54x keypad support"
-	depends on (BF54x && !BF544)
-	help
-	  Say Y here if you want to use the BF54x keypad.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called bf54x-keys.
-
 config KEYBOARD_CLPS711X
 	tristate "CLPS711X Keypad support"
 	depends on OF_GPIO && (ARCH_CLPS711X || COMPILE_TEST)
@@ -162,6 +180,17 @@ config KEYBOARD_CLPS711X
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called clps711x-keypad.
+
+config KEYBOARD_DLINK_DIR685
+	tristate "D-Link DIR-685 touchkeys support"
+	depends on I2C
+	default ARCH_GEMINI
+	help
+	  If you say yes here you get support for the D-Link DIR-685
+	  touchkeys.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called dlink-dir685-touchkeys.
 
 config KEYBOARD_LKKBD
 	tristate "DECstation/VAXstation LK201/LK401 keyboard"
@@ -177,7 +206,7 @@ config KEYBOARD_LKKBD
 
 config KEYBOARD_EP93XX
 	tristate "EP93xx Matrix Keypad support"
-	depends on ARCH_EP93XX
+	depends on ARCH_EP93XX || COMPILE_TEST
 	select INPUT_MATRIXKMAP
 	help
 	  Say Y here to enable the matrix keypad on the Cirrus EP93XX.
@@ -403,7 +432,7 @@ config KEYBOARD_MPR121
 
 config KEYBOARD_SNVS_PWRKEY
 	tristate "IMX SNVS Power Key Driver"
-	depends on SOC_IMX6SX
+	depends on ARCH_MXC || COMPILE_TEST
 	depends on OF
 	help
 	  This is the snvs powerkey driver for the Freescale i.MX application
@@ -560,7 +589,7 @@ config KEYBOARD_SUNKBD
 
 config KEYBOARD_SH_KEYSC
 	tristate "SuperH KEYSC keypad support"
-	depends on SUPERH || ARCH_SHMOBILE || COMPILE_TEST
+	depends on ARCH_SHMOBILE || COMPILE_TEST
 	help
 	  Say Y here if you want to use a keypad attached to the KEYSC block
 	  on SuperH processors such as sh7722 and sh7343.
@@ -651,6 +680,17 @@ config KEYBOARD_TC3589X
 	  To compile this driver as a module, choose M here: the
 	  module will be called tc3589x-keypad.
 
+config KEYBOARD_TM2_TOUCHKEY
+	tristate "TM2 touchkey support"
+	depends on I2C
+	depends on LEDS_CLASS
+	help
+	  Say Y here to enable device driver for tm2-touchkey with
+	  LED control for the Exynos5433 TM2 board.
+
+	  To compile this driver as a module, choose M here.
+	  module will be called tm2-touchkey.
+
 config KEYBOARD_TWL4030
 	tristate "TI TWL4030/TWL5030/TPS659x0 keypad support"
 	depends on TWL4030_CORE
@@ -693,7 +733,7 @@ config KEYBOARD_CROS_EC
 	help
 	  Say Y here to enable the matrix keyboard used by ChromeOS devices
 	  and implemented on the ChromeOS EC. You must enable one bus option
-	  (MFD_CROS_EC_I2C or MFD_CROS_EC_SPI) to use this.
+	  (CROS_EC_I2C or CROS_EC_SPI) to use this.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called cros_ec_keyb.
@@ -718,5 +758,14 @@ config KEYBOARD_BCM
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called bcm-keypad.
+
+config KEYBOARD_MTK_PMIC
+	tristate "MediaTek PMIC keys support"
+	depends on MFD_MT6397
+	help
+	  Say Y here if you want to use the pmic keys (powerkey/homekey).
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called pmic-keys.
 
 endif

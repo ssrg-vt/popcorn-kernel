@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014, Red Hat Inc, Arnaldo Carvalho de Melo <acme@redhat.com>
- *
- * Released under the GPL v2. (and only v2, not any later version)
  */
 #include "array.h"
 #include <errno.h>
@@ -85,7 +84,8 @@ int fdarray__add(struct fdarray *fda, int fd, short revents)
 }
 
 int fdarray__filter(struct fdarray *fda, short revents,
-		    void (*entry_destructor)(struct fdarray *fda, int fd))
+		    void (*entry_destructor)(struct fdarray *fda, int fd, void *arg),
+		    void *arg)
 {
 	int fd, nr = 0;
 
@@ -95,7 +95,7 @@ int fdarray__filter(struct fdarray *fda, short revents,
 	for (fd = 0; fd < fda->nr; ++fd) {
 		if (fda->entries[fd].revents & revents) {
 			if (entry_destructor)
-				entry_destructor(fda, fd);
+				entry_destructor(fda, fd, arg);
 
 			continue;
 		}

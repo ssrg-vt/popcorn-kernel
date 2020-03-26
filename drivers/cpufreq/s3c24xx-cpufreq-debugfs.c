@@ -10,6 +10,8 @@
  * published by the Free Software Foundation.
 */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/init.h>
 #include <linux/export.h>
 #include <linux/interrupt.h>
@@ -61,18 +63,7 @@ static int board_show(struct seq_file *seq, void *p)
 	return 0;
 }
 
-static int fops_board_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, board_show, NULL);
-}
-
-static const struct file_operations fops_board = {
-	.open		= fops_board_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.owner		= THIS_MODULE,
-};
+DEFINE_SHOW_ATTRIBUTE(board);
 
 static int info_show(struct seq_file *seq, void *p)
 {
@@ -103,18 +94,7 @@ static int info_show(struct seq_file *seq, void *p)
 	return 0;
 }
 
-static int fops_info_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, info_show, NULL);
-}
-
-static const struct file_operations fops_info = {
-	.open		= fops_info_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.owner		= THIS_MODULE,
-};
+DEFINE_SHOW_ATTRIBUTE(info);
 
 static int io_show(struct seq_file *seq, void *p)
 {
@@ -160,36 +140,24 @@ static int io_show(struct seq_file *seq, void *p)
 	return 0;
 }
 
-static int fops_io_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, io_show, NULL);
-}
-
-static const struct file_operations fops_io = {
-	.open		= fops_io_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.owner		= THIS_MODULE,
-};
-
+DEFINE_SHOW_ATTRIBUTE(io);
 
 static int __init s3c_freq_debugfs_init(void)
 {
 	dbgfs_root = debugfs_create_dir("s3c-cpufreq", NULL);
 	if (IS_ERR(dbgfs_root)) {
-		printk(KERN_ERR "%s: error creating debugfs root\n", __func__);
+		pr_err("%s: error creating debugfs root\n", __func__);
 		return PTR_ERR(dbgfs_root);
 	}
 
 	dbgfs_file_io = debugfs_create_file("io-timing", S_IRUGO, dbgfs_root,
-					    NULL, &fops_io);
+					    NULL, &io_fops);
 
 	dbgfs_file_info = debugfs_create_file("info", S_IRUGO, dbgfs_root,
-					      NULL, &fops_info);
+					      NULL, &info_fops);
 
 	dbgfs_file_board = debugfs_create_file("board", S_IRUGO, dbgfs_root,
-					       NULL, &fops_board);
+					       NULL, &board_fops);
 
 	return 0;
 }

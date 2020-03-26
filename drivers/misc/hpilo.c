@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for the HP iLO management processor.
  *
  * Copyright (C) 2008 Hewlett-Packard Development Company, L.P.
  *	David Altobelli <david.altobelli@hpe.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -32,6 +29,13 @@ static struct class *ilo_class;
 static unsigned int ilo_major;
 static unsigned int max_ccb = 16;
 static char ilo_hwdev[MAX_ILO_DEV];
+static const struct pci_device_id ilo_blacklist[] = {
+	/* auxiliary iLO */
+	{PCI_DEVICE_SUB(PCI_VENDOR_ID_HP, 0x3307, PCI_VENDOR_ID_HP, 0x1979)},
+	/* CL */
+	{PCI_DEVICE_SUB(PCI_VENDOR_ID_HP, 0x3307, PCI_VENDOR_ID_HP_3PAR, 0x0289)},
+	{}
+};
 
 static inline int get_entry_id(int entry)
 {
@@ -514,7 +518,7 @@ static ssize_t ilo_write(struct file *fp, const char __user *buf,
 	return err ? -EFAULT : len;
 }
 
-static unsigned int ilo_poll(struct file *fp, poll_table *wait)
+static __poll_t ilo_poll(struct file *fp, poll_table *wait)
 {
 	struct ccb_data *data = fp->private_data;
 	struct ccb *driver_ccb = &data->driver_ccb;
@@ -522,9 +526,9 @@ static unsigned int ilo_poll(struct file *fp, poll_table *wait)
 	poll_wait(fp, &data->ccb_waitq, wait);
 
 	if (is_channel_reset(driver_ccb))
-		return POLLERR;
+		return EPOLLERR;
 	else if (ilo_pkt_recv(data->ilo_hw, driver_ccb))
-		return POLLIN | POLLRDNORM;
+		return EPOLLIN | EPOLLRDNORM;
 
 	return 0;
 }
@@ -688,7 +692,8 @@ static void ilo_unmap_device(struct pci_dev *pdev, struct ilo_hwinfo *hw)
 
 static int ilo_map_device(struct pci_dev *pdev, struct ilo_hwinfo *hw)
 {
-	int error = -ENOMEM;
+	int bar;
+	unsigned long off;
 
 	/* map the memory mapped i/o registers */
 	hw->mmio_vaddr = pci_iomap(pdev, 1, 0);
@@ -698,7 +703,15 @@ static int ilo_map_device(struct pci_dev *pdev, struct ilo_hwinfo *hw)
 	}
 
 	/* map the adapter shared memory region */
-	hw->ram_vaddr = pci_iomap(pdev, 2, max_ccb * ILOHW_CCB_SZ);
+	if (pdev->subsystem_device == 0x00E4) {
+		bar = 5;
+		/* Last 8k is reserved for CCBs */
+		off = pci_resource_len(pdev, bar) - 0x2000;
+	} else {
+		bar = 2;
+		off = 0;
+	}
+	hw->ram_vaddr = pci_iomap_range(pdev, bar, off, max_ccb * ILOHW_CCB_SZ);
 	if (hw->ram_vaddr == NULL) {
 		dev_err(&pdev->dev, "Error mapping shared mem\n");
 		goto mmio_free;
@@ -717,7 +730,7 @@ ram_free:
 mmio_free:
 	pci_iounmap(pdev, hw->mmio_vaddr);
 out:
-	return error;
+	return -ENOMEM;
 }
 
 static void ilo_remove(struct pci_dev *pdev)
@@ -757,9 +770,10 @@ static int ilo_probe(struct pci_dev *pdev,
 	int devnum, minor, start, error = 0;
 	struct ilo_hwinfo *ilo_hw;
 
-	/* Ignore subsystem_device = 0x1979 (set by BIOS)  */
-	if (pdev->subsystem_device == 0x1979)
-		return 0;
+	if (pci_match_id(ilo_blacklist, pdev)) {
+		dev_dbg(&pdev->dev, "Not supported on this device\n");
+		return -ENODEV;
+	}
 
 	if (max_ccb > MAX_CCB)
 		max_ccb = MAX_CCB;
@@ -848,7 +862,7 @@ out:
 	return error;
 }
 
-static struct pci_device_id ilo_devices[] = {
+static const struct pci_device_id ilo_devices[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_COMPAQ, 0xB204) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_HP, 0x3307) },
 	{ }
@@ -899,7 +913,7 @@ static void __exit ilo_exit(void)
 	class_destroy(ilo_class);
 }
 
-MODULE_VERSION("1.4.1");
+MODULE_VERSION("1.5.0");
 MODULE_ALIAS(ILO_NAME);
 MODULE_DESCRIPTION(ILO_NAME);
 MODULE_AUTHOR("David Altobelli <david.altobelli@hpe.com>");

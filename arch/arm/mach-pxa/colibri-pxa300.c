@@ -18,12 +18,12 @@
 #include <linux/interrupt.h>
 
 #include <asm/mach-types.h>
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/irq.h>
 
-#include <mach/pxa300.h>
-#include <mach/colibri.h>
+#include "pxa300.h"
+#include "colibri.h"
 #include <linux/platform_data/usb-ohci-pxa27x.h>
 #include <linux/platform_data/video-pxafb.h>
 #include <mach/audio.h>

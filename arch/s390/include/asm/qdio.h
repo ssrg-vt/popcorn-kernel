@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright IBM Corp. 2000, 2008
  * Author(s): Utz Bacher <utz.bacher@de.ibm.com>
@@ -80,7 +81,7 @@ struct qdr {
 	u32 qkey   : 4;
 	u32	   : 28;
 	struct qdesfmt0 qdf0[126];
-} __attribute__ ((packed, aligned(4096)));
+} __packed __aligned(PAGE_SIZE);
 
 #define QIB_AC_OUTBOUND_PCI_SUPPORTED	0x40
 #define QIB_RFLAGS_ENABLE_QEBSM		0x80
@@ -251,17 +252,14 @@ struct slsb {
  *   (for communication with upper layer programs)
  *   (only required for use with completion queues)
  * @flags: flags indicating state of buffer
- * @aob: pointer to QAOB used for the particular SBAL
  * @user: pointer to upper layer program's state information related to SBAL
  *        (stored in user1 data of QAOB)
  */
 struct qdio_outbuf_state {
 	u8 flags;
-	struct qaob *aob;
 	void *user;
 };
 
-#define QDIO_OUTBUF_STATE_FLAG_NONE	0x00
 #define QDIO_OUTBUF_STATE_FLAG_PENDING	0x01
 
 #define CHSC_AC1_INITIATE_INPUTQ	0x80
@@ -363,8 +361,8 @@ struct qdio_initialize {
 					  unsigned long);
 	int scan_threshold;
 	unsigned long int_parm;
-	void **input_sbal_addr_array;
-	void **output_sbal_addr_array;
+	struct qdio_buffer **input_sbal_addr_array;
+	struct qdio_buffer **output_sbal_addr_array;
 	struct qdio_outbuf_state *output_sbal_state_array;
 };
 

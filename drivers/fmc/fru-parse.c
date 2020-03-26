@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2012 CERN (www.cern.ch)
  * Author: Alessandro Rubini <rubini@gnudd.com>
- *
- * Released according to the GNU GPL, version 2 or any later version.
  *
  * This work is part of the White Rabbit project, a research effort led
  * by CERN, the European Institute for Nuclear Research.
@@ -31,12 +30,11 @@ static char *__fru_alloc_get_tl(struct fru_common_header *header, int nr)
 {
 	struct fru_type_length *tl;
 	char *res;
-	int len;
 
 	tl = __fru_get_board_tl(header, nr);
 	if (!tl)
 		return NULL;
-	len = fru_strlen(tl);
+
 	res = fru_alloc(fru_strlen(tl) + 1);
 	if (!res)
 		return NULL;

@@ -20,7 +20,7 @@
 #include <linux/console.h>
 #include <linux/mm.h>
 
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 #include <asm/pgtable.h>
 #include <mach/hardware.h>
 
@@ -69,7 +69,7 @@ static const struct fb_videomode unifb_modes[] = {
 	  0, FB_VMODE_NONINTERLACED, FB_MODE_IS_VESA },
 };
 
-static struct fb_var_screeninfo unifb_default = {
+static const struct fb_var_screeninfo unifb_default = {
 	.xres =		640,
 	.yres =		480,
 	.xres_virtual =	640,

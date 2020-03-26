@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /**
  * timer-ti-32k.c - OMAP2 32k Timer Support
  *
@@ -21,18 +22,6 @@
  * Added OMAP4 support - Santosh Shilimkar <santosh.shilimkar@ti.com>
  *
  * Copyright (C) 2015 Texas Instruments Incorporated - http://www.ti.com
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2  of
- * the License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/init.h>
@@ -65,11 +54,11 @@ static inline struct ti_32k *to_ti_32k(struct clocksource *cs)
 	return container_of(cs, struct ti_32k, cs);
 }
 
-static cycle_t ti_32k_read_cycles(struct clocksource *cs)
+static u64 notrace ti_32k_read_cycles(struct clocksource *cs)
 {
 	struct ti_32k *ti = to_ti_32k(cs);
 
-	return (cycle_t)readl_relaxed(ti->counter);
+	return (u64)readl_relaxed(ti->counter);
 }
 
 static struct ti_32k ti_32k_timer = {
@@ -78,8 +67,7 @@ static struct ti_32k ti_32k_timer = {
 		.rating		= 250,
 		.read		= ti_32k_read_cycles,
 		.mask		= CLOCKSOURCE_MASK(32),
-		.flags		= CLOCK_SOURCE_IS_CONTINUOUS |
-				CLOCK_SOURCE_SUSPEND_NONSTOP,
+		.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 	},
 };
 
@@ -88,15 +76,18 @@ static u64 notrace omap_32k_read_sched_clock(void)
 	return ti_32k_read_cycles(&ti_32k_timer.cs);
 }
 
-static void __init ti_32k_timer_init(struct device_node *np)
+static int __init ti_32k_timer_init(struct device_node *np)
 {
 	int ret;
 
 	ti_32k_timer.base = of_iomap(np, 0);
 	if (!ti_32k_timer.base) {
 		pr_err("Can't ioremap 32k timer base\n");
-		return;
+		return -ENXIO;
 	}
+
+	if (!of_machine_is_compatible("ti,am43"))
+		ti_32k_timer.cs.flags |= CLOCK_SOURCE_SUSPEND_NONSTOP;
 
 	ti_32k_timer.counter = ti_32k_timer.base;
 
@@ -116,11 +107,13 @@ static void __init ti_32k_timer_init(struct device_node *np)
 	ret = clocksource_register_hz(&ti_32k_timer.cs, 32768);
 	if (ret) {
 		pr_err("32k_counter: can't register clocksource\n");
-		return;
+		return ret;
 	}
 
 	sched_clock_register(omap_32k_read_sched_clock, 32, 32768);
 	pr_info("OMAP clocksource: 32k_counter at 32768 Hz\n");
+
+	return 0;
 }
-CLOCKSOURCE_OF_DECLARE(ti_32k_timer, "ti,omap-counter32k",
+TIMER_OF_DECLARE(ti_32k_timer, "ti,omap-counter32k",
 		ti_32k_timer_init);

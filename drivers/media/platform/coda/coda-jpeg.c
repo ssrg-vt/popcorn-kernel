@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Coda multi-standard codec IP - JPEG support functions
  *
  * Copyright (C) 2014 Philipp Zabel, Pengutronix
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -103,7 +99,7 @@ static const unsigned char chroma_ac_value[162 + 2] = {
 
 /*
  * Quantization tables for luminance and chrominance components in
- * zig-zag scan order from the Freescale i.MX VPU libaries
+ * zig-zag scan order from the Freescale i.MX VPU libraries
  */
 
 static unsigned char luma_q[64] = {
@@ -178,14 +174,28 @@ int coda_jpeg_write_tables(struct coda_ctx *ctx)
 	return 0;
 }
 
-bool coda_jpeg_check_buffer(struct coda_ctx *ctx, struct vb2_v4l2_buffer *vb)
+bool coda_jpeg_check_buffer(struct coda_ctx *ctx, struct vb2_buffer *vb)
 {
-	void *vaddr = vb2_plane_vaddr(&vb->vb2_buf, 0);
-	u16 soi = be16_to_cpup((__be16 *)vaddr);
-	u16 eoi = be16_to_cpup((__be16 *)(vaddr +
-			  vb2_get_plane_payload(&vb->vb2_buf, 0) - 2));
+	void *vaddr = vb2_plane_vaddr(vb, 0);
+	u16 soi, eoi;
+	int len, i;
 
-	return soi == SOI_MARKER && eoi == EOI_MARKER;
+	soi = be16_to_cpup((__be16 *)vaddr);
+	if (soi != SOI_MARKER)
+		return false;
+
+	len = vb2_get_plane_payload(vb, 0);
+	vaddr += len - 2;
+	for (i = 0; i < 32; i++) {
+		eoi = be16_to_cpup((__be16 *)(vaddr - i));
+		if (eoi == EOI_MARKER) {
+			if (i > 0)
+				vb2_set_plane_payload(vb, 0, len - i);
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /*

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # MIPS Platform Specific Drivers
 #
@@ -14,10 +15,6 @@ menuconfig MIPS_PLATFORM_DEVICES
 	  If you say N, all options in this submenu will be skipped and disabled.
 
 if MIPS_PLATFORM_DEVICES
-
-config MIPS_ACPI
-	bool
-	default y if LOONGSON_MACH3X
 
 config CPU_HWMON
 	tristate "Loongson CPU HWMon Driver"

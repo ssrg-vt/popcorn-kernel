@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-w90x900/cpu.c
  *
@@ -6,11 +7,6 @@
  * Wan ZongShun <mcuos.com@gmail.com>
  *
  * NUC900 series cpu common support
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation;version 2 of the License.
- *
  */
 
 #include <linux/kernel.h>
@@ -33,8 +29,8 @@
 #include <mach/hardware.h>
 #include <mach/regs-serial.h>
 #include <mach/regs-clock.h>
-#include <mach/regs-ebi.h>
-#include <mach/regs-timer.h>
+#include "regs-ebi.h"
+#include "regs-timer.h"
 
 #include "cpu.h"
 #include "clock.h"

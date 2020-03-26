@@ -1,18 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Ingenic JZ4780 I2C bus driver
  *
  * Copyright (C) 2006 - 2009 Ingenic Semiconductor Inc.
  * Copyright (C) 2015 Imagination Technologies
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/bitops.h>
@@ -729,6 +720,7 @@ static const struct of_device_id jz4780_i2c_of_matches[] = {
 	{ .compatible = "ingenic,jz4780-i2c", },
 	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, jz4780_i2c_of_matches);
 
 static int jz4780_i2c_probe(struct platform_device *pdev)
 {
@@ -771,11 +763,16 @@ static int jz4780_i2c_probe(struct platform_device *pdev)
 	ret = of_property_read_u32(pdev->dev.of_node, "clock-frequency",
 				   &clk_freq);
 	if (ret) {
-		dev_err(&pdev->dev, "clock-frequency not specified in DT");
+		dev_err(&pdev->dev, "clock-frequency not specified in DT\n");
 		goto err;
 	}
 
 	i2c->speed = clk_freq / 1000;
+	if (i2c->speed == 0) {
+		ret = -EINVAL;
+		dev_err(&pdev->dev, "clock-frequency minimum is 1000\n");
+		goto err;
+	}
 	jz4780_i2c_set_speed(i2c);
 
 	dev_info(&pdev->dev, "Bus frequency is %d KHz\n", i2c->speed);
@@ -793,10 +790,8 @@ static int jz4780_i2c_probe(struct platform_device *pdev)
 		goto err;
 
 	ret = i2c_add_adapter(&i2c->adap);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to add bus\n");
+	if (ret < 0)
 		goto err;
-	}
 
 	return 0;
 

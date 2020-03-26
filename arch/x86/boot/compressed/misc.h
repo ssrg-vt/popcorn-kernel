@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef BOOT_COMPRESSED_MISC_H
 #define BOOT_COMPRESSED_MISC_H
 
@@ -8,9 +9,12 @@
  * paravirt and debugging variants are added.)
  */
 #undef CONFIG_PARAVIRT
+#undef CONFIG_PARAVIRT_XXL
 #undef CONFIG_PARAVIRT_SPINLOCKS
-#undef CONFIG_PAGE_TABLE_ISOLATION
 #undef CONFIG_KASAN
+
+/* cpu_feature_enabled() cannot be used this early */
+#define USE_EARLY_PGTABLE_L5
 
 #include <linux/linkage.h>
 #include <linux/screen_info.h>
@@ -20,6 +24,9 @@
 #include <asm/boot.h>
 #include <asm/bootparam.h>
 #include <asm/bootparam_utils.h>
+
+#define BOOT_CTYPE_H
+#include <linux/acpi.h>
 
 #define BOOT_BOOT_H
 #include "../ctype.h"
@@ -33,7 +40,7 @@
 /* misc.c */
 extern memptr free_mem_ptr;
 extern memptr free_mem_end_ptr;
-extern struct boot_params *real_mode;		/* Pointer to real-mode data */
+extern struct boot_params *boot_params;
 void __putstr(const char *s);
 void __puthex(unsigned long value);
 #define error_putstr(__x)  __putstr(__x)
@@ -59,32 +66,46 @@ static inline void debug_puthex(const char *s)
 
 #endif
 
-#if CONFIG_EARLY_PRINTK || CONFIG_RANDOMIZE_BASE
 /* cmdline.c */
 int cmdline_find_option(const char *option, char *buffer, int bufsize);
 int cmdline_find_option_bool(const char *option);
-#endif
 
+struct mem_vector {
+	unsigned long long start;
+	unsigned long long size;
+};
 
 #if CONFIG_RANDOMIZE_BASE
-/* aslr.c */
-unsigned char *choose_kernel_location(struct boot_params *boot_params,
-				      unsigned char *input,
-				      unsigned long input_size,
-				      unsigned char *output,
-				      unsigned long output_size);
+/* kaslr.c */
+void choose_random_location(unsigned long input,
+			    unsigned long input_size,
+			    unsigned long *output,
+			    unsigned long output_size,
+			    unsigned long *virt_addr);
 /* cpuflags.c */
 bool has_cpuflag(int flag);
 #else
-static inline
-unsigned char *choose_kernel_location(struct boot_params *boot_params,
-				      unsigned char *input,
-				      unsigned long input_size,
-				      unsigned char *output,
-				      unsigned long output_size)
+static inline void choose_random_location(unsigned long input,
+					  unsigned long input_size,
+					  unsigned long *output,
+					  unsigned long output_size,
+					  unsigned long *virt_addr)
 {
-	return output;
 }
+#endif
+
+#ifdef CONFIG_X86_64
+void initialize_identity_maps(void);
+void add_identity_map(unsigned long start, unsigned long size);
+void finalize_identity_maps(void);
+extern unsigned char _pgtable[];
+#else
+static inline void initialize_identity_maps(void)
+{ }
+static inline void add_identity_map(unsigned long start, unsigned long size)
+{ }
+static inline void finalize_identity_maps(void)
+{ }
 #endif
 
 #ifdef CONFIG_EARLY_PRINTK
@@ -97,4 +118,20 @@ static inline void console_init(void)
 { }
 #endif
 
+void set_sev_encryption_mask(void);
+
+/* acpi.c */
+#ifdef CONFIG_ACPI
+acpi_physical_address get_rsdp_addr(void);
+#else
+static inline acpi_physical_address get_rsdp_addr(void) { return 0; }
 #endif
+
+#if defined(CONFIG_RANDOMIZE_BASE) && defined(CONFIG_MEMORY_HOTREMOVE) && defined(CONFIG_ACPI)
+extern struct mem_vector immovable_mem[MAX_NUMNODES*2];
+int count_immovable_mem_regions(void);
+#else
+static inline int count_immovable_mem_regions(void) { return 0; }
+#endif
+
+#endif /* BOOT_COMPRESSED_MISC_H */

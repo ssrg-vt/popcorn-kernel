@@ -73,7 +73,7 @@ __irq_entry:
 	@ correctness they don't need to be restored. So only r8-r11 must be
 	@ restored here. The easiest way to do so is to restore r0-r7, too.
 	ldmia	sp!, {r0-r11}
-	add	sp, #S_FRAME_SIZE-S_IP
+	add	sp, #PT_REGS_SIZE-S_IP
 	cpsie	i
 	bx	lr
 ENDPROC(__irq_entry)
@@ -88,7 +88,7 @@ __pendsv_entry:
 	@ execute the pending work, including reschedule
 	get_thread_info tsk
 	mov	why, #0
-	b	ret_to_user
+	b	ret_to_user_from_irq
 ENDPROC(__pendsv_entry)
 
 /*
@@ -146,3 +146,7 @@ ENTRY(vector_table)
 	.rept	CONFIG_CPU_V7M_NUM_IRQ
 	.long	__irq_entry		@ External Interrupts
 	.endr
+	.align	2
+	.globl	exc_ret
+exc_ret:
+	.space	4

@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MEN 16z188 Analog to Digial Converter
  *
  * Copyright (C) 2014 MEN Mikroelektronik GmbH (www.men.de)
  * Author: Johannes Thumshirn <johannes.thumshirn@men.de>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; version 2 of the License.
  */
 
 #include <linux/kernel.h>
@@ -78,9 +75,8 @@ static int z188_iio_read_raw(struct iio_dev *iio_dev,
 	return ret;
 }
 
-static struct iio_info z188_adc_info = {
+static const struct iio_info z188_adc_info = {
 	.read_raw = &z188_iio_read_raw,
-	.driver_module = THIS_MODULE,
 };
 
 static void men_z188_config_channels(void __iomem *addr)

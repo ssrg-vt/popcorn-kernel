@@ -16,11 +16,10 @@
 #include <linux/inetdevice.h>
 #include <linux/netdevice.h>
 
-#include "config.h"
-
-#define MAX_NUM_NODES		ARRAY_SIZE(ip_addresses)
+#define MAX_NUM_NODES	32
 
 static uint32_t ip_table[MAX_NUM_NODES] = { 0 };
+static uint32_t max_nodes = MAX_NUM_NODES;
 
 static uint32_t __init __get_host_ip(void)
 {
@@ -31,7 +30,7 @@ static uint32_t __init __get_host_ip(void)
 		for (ifaddr = d->ip_ptr->ifa_list; ifaddr; ifaddr = ifaddr->ifa_next) {
 			int i;
 			uint32_t addr = ifaddr->ifa_local;
-			for (i = 0; i < MAX_NUM_NODES; i++) {
+			for (i = 0; i < max_nodes; i++) {
 				if (addr == ip_table[i]) {
 					return addr;
 				}
@@ -48,13 +47,9 @@ bool __init identify_myself(void)
 
 	PCNPRINTK("Loading node configuration...");
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-		ip_table[i] = in_aton(ip_addresses[i]);
-	}
-
 	my_ip = __get_host_ip();
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
+	for (i = 0; i < max_nodes; i++) {
 		char *me = " ";
 		if (my_ip == ip_table[i]) {
 			my_nid = i;

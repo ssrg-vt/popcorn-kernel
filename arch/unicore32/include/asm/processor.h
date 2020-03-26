@@ -13,12 +13,6 @@
 #ifndef __UNICORE_PROCESSOR_H__
 #define __UNICORE_PROCESSOR_H__
 
-/*
- * Default implementation of macro that returns current
- * instruction pointer ("program counter").
- */
-#define current_text_addr() ({ __label__ _l; _l: &&_l; })
-
 #ifdef __KERNEL__
 
 #include <asm/ptrace.h>
@@ -71,7 +65,6 @@ extern void release_thread(struct task_struct *);
 unsigned long get_wchan(struct task_struct *p);
 
 #define cpu_relax()			barrier()
-#define cpu_relax_lowlatency()                cpu_relax()
 
 #define task_pt_regs(p) \
 	((struct pt_regs *)(THREAD_START_SP + task_stack_page(p)) - 1)

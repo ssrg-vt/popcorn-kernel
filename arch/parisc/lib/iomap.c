@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * iomap.c - Implement iomap interface for PA-RISC
  * Copyright (c) 2004 Matthew Wilcox
@@ -47,11 +48,15 @@ struct iomap_ops {
 	unsigned int (*read16be)(void __iomem *);
 	unsigned int (*read32)(void __iomem *);
 	unsigned int (*read32be)(void __iomem *);
+	u64 (*read64)(void __iomem *);
+	u64 (*read64be)(void __iomem *);
 	void (*write8)(u8, void __iomem *);
 	void (*write16)(u16, void __iomem *);
 	void (*write16be)(u16, void __iomem *);
 	void (*write32)(u32, void __iomem *);
 	void (*write32be)(u32, void __iomem *);
+	void (*write64)(u64, void __iomem *);
+	void (*write64be)(u64, void __iomem *);
 	void (*read8r)(void __iomem *, void *, unsigned long);
 	void (*read16r)(void __iomem *, void *, unsigned long);
 	void (*read32r)(void __iomem *, void *, unsigned long);
@@ -125,22 +130,22 @@ static void ioport_write32r(void __iomem *addr, const void *s, unsigned long n)
 }
 
 static const struct iomap_ops ioport_ops = {
-	ioport_read8,
-	ioport_read16,
-	ioport_read16,
-	ioport_read32,
-	ioport_read32,
-	ioport_write8,
-	ioport_write16,
-	ioport_write16,
-	ioport_write32,
-	ioport_write32,
-	ioport_read8r,
-	ioport_read16r,
-	ioport_read32r,
-	ioport_write8r,
-	ioport_write16r,
-	ioport_write32r,
+	.read8 = ioport_read8,
+	.read16 = ioport_read16,
+	.read16be = ioport_read16,
+	.read32 = ioport_read32,
+	.read32be = ioport_read32,
+	.write8 = ioport_write8,
+	.write16 = ioport_write16,
+	.write16be = ioport_write16,
+	.write32 = ioport_write32,
+	.write32be = ioport_write32,
+	.read8r = ioport_read8r,
+	.read16r = ioport_read16r,
+	.read32r = ioport_read32r,
+	.write8r = ioport_write8r,
+	.write16r = ioport_write16r,
+	.write32r = ioport_write32r,
 };
 
 /* Legacy I/O memory ops */
@@ -170,6 +175,16 @@ static unsigned int iomem_read32be(void __iomem *addr)
 	return __raw_readl(addr);
 }
 
+static u64 iomem_read64(void __iomem *addr)
+{
+	return readq(addr);
+}
+
+static u64 iomem_read64be(void __iomem *addr)
+{
+	return __raw_readq(addr);
+}
+
 static void iomem_write8(u8 datum, void __iomem *addr)
 {
 	writeb(datum, addr);
@@ -191,6 +206,16 @@ static void iomem_write32(u32 datum, void __iomem *addr)
 }
 
 static void iomem_write32be(u32 datum, void __iomem *addr)
+{
+	__raw_writel(datum, addr);
+}
+
+static void iomem_write64(u64 datum, void __iomem *addr)
+{
+	writel(datum, addr);
+}
+
+static void iomem_write64be(u64 datum, void __iomem *addr)
 {
 	__raw_writel(datum, addr);
 }
@@ -244,22 +269,26 @@ static void iomem_write32r(void __iomem *addr, const void *s, unsigned long n)
 }
 
 static const struct iomap_ops iomem_ops = {
-	iomem_read8,
-	iomem_read16,
-	iomem_read16be,
-	iomem_read32,
-	iomem_read32be,
-	iomem_write8,
-	iomem_write16,
-	iomem_write16be,
-	iomem_write32,
-	iomem_write32be,
-	iomem_read8r,
-	iomem_read16r,
-	iomem_read32r,
-	iomem_write8r,
-	iomem_write16r,
-	iomem_write32r,
+	.read8 = iomem_read8,
+	.read16 = iomem_read16,
+	.read16be = iomem_read16be,
+	.read32 = iomem_read32,
+	.read32be = iomem_read32be,
+	.read64 = iomem_read64,
+	.read64be = iomem_read64be,
+	.write8 = iomem_write8,
+	.write16 = iomem_write16,
+	.write16be = iomem_write16be,
+	.write32 = iomem_write32,
+	.write32be = iomem_write32be,
+	.write64 = iomem_write64,
+	.write64be = iomem_write64be,
+	.read8r = iomem_read8r,
+	.read16r = iomem_read16r,
+	.read32r = iomem_read32r,
+	.write8r = iomem_write8r,
+	.write16r = iomem_write16r,
+	.write32r = iomem_write32r,
 };
 
 static const struct iomap_ops *iomap_ops[8] = {
@@ -301,6 +330,20 @@ unsigned int ioread32be(void __iomem *addr)
 	if (unlikely(INDIRECT_ADDR(addr)))
 		return iomap_ops[ADDR_TO_REGION(addr)]->read32be(addr);
 	return *((u32 *)addr);
+}
+
+u64 ioread64(void __iomem *addr)
+{
+	if (unlikely(INDIRECT_ADDR(addr)))
+		return iomap_ops[ADDR_TO_REGION(addr)]->read64(addr);
+	return le64_to_cpup((u64 *)addr);
+}
+
+u64 ioread64be(void __iomem *addr)
+{
+	if (unlikely(INDIRECT_ADDR(addr)))
+		return iomap_ops[ADDR_TO_REGION(addr)]->read64be(addr);
+	return *((u64 *)addr);
 }
 
 void iowrite8(u8 datum, void __iomem *addr)
@@ -345,6 +388,24 @@ void iowrite32be(u32 datum, void __iomem *addr)
 		iomap_ops[ADDR_TO_REGION(addr)]->write32be(datum, addr);
 	} else {
 		*((u32 *)addr) = datum;
+	}
+}
+
+void iowrite64(u64 datum, void __iomem *addr)
+{
+	if (unlikely(INDIRECT_ADDR(addr))) {
+		iomap_ops[ADDR_TO_REGION(addr)]->write64(datum, addr);
+	} else {
+		*((u64 *)addr) = cpu_to_le64(datum);
+	}
+}
+
+void iowrite64be(u64 datum, void __iomem *addr)
+{
+	if (unlikely(INDIRECT_ADDR(addr))) {
+		iomap_ops[ADDR_TO_REGION(addr)]->write64be(datum, addr);
+	} else {
+		*((u64 *)addr) = datum;
 	}
 }
 
@@ -448,11 +509,15 @@ EXPORT_SYMBOL(ioread16);
 EXPORT_SYMBOL(ioread16be);
 EXPORT_SYMBOL(ioread32);
 EXPORT_SYMBOL(ioread32be);
+EXPORT_SYMBOL(ioread64);
+EXPORT_SYMBOL(ioread64be);
 EXPORT_SYMBOL(iowrite8);
 EXPORT_SYMBOL(iowrite16);
 EXPORT_SYMBOL(iowrite16be);
 EXPORT_SYMBOL(iowrite32);
 EXPORT_SYMBOL(iowrite32be);
+EXPORT_SYMBOL(iowrite64);
+EXPORT_SYMBOL(iowrite64be);
 EXPORT_SYMBOL(ioread8_rep);
 EXPORT_SYMBOL(ioread16_rep);
 EXPORT_SYMBOL(ioread32_rep);

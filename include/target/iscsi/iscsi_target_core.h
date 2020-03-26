@@ -1,12 +1,16 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef ISCSI_TARGET_CORE_H
 #define ISCSI_TARGET_CORE_H
 
-#include <linux/in.h>
-#include <linux/configfs.h>
-#include <net/sock.h>
-#include <net/tcp.h>
-#include <scsi/iscsi_proto.h>
-#include <target/target_core_base.h>
+#include <linux/dma-direction.h>     /* enum dma_data_direction */
+#include <linux/list.h>              /* struct list_head */
+#include <linux/sched.h>
+#include <linux/socket.h>            /* struct sockaddr_storage */
+#include <linux/types.h>             /* u8 */
+#include <scsi/iscsi_proto.h>        /* itt_t */
+#include <target/target_core_base.h> /* struct se_cmd */
+
+struct sock;
 
 #define ISCSIT_VERSION			"v4.1.0"
 #define ISCSI_MAX_DATASN_MISSING_COUNT	16
@@ -21,6 +25,7 @@
 #define ISCSIT_TCP_BACKLOG		256
 #define ISCSI_RX_THREAD_NAME		"iscsi_trx"
 #define ISCSI_TX_THREAD_NAME		"iscsi_ttx"
+#define ISCSI_IQN_LEN			224
 
 /* struct iscsi_node_attrib sanity values */
 #define NA_DATAOUT_TIMEOUT		3
@@ -82,6 +87,7 @@ enum iscsit_transport_type {
 	ISCSI_IWARP_TCP				= 3,
 	ISCSI_IWARP_SCTP			= 4,
 	ISCSI_INFINIBAND			= 5,
+	ISCSI_CXGBIT				= 6,
 };
 
 /* RFC-3720 7.1.4  Standard Connection State Diagram for a Target */
@@ -265,9 +271,9 @@ struct iscsi_conn_ops {
 };
 
 struct iscsi_sess_ops {
-	char	InitiatorName[224];
+	char	InitiatorName[ISCSI_IQN_LEN];
 	char	InitiatorAlias[256];
-	char	TargetName[224];
+	char	TargetName[ISCSI_IQN_LEN];
 	char	TargetAlias[256];
 	char	TargetAddress[256];
 	u16	TargetPortalGroupTag;		/* [0..65535] */
@@ -467,6 +473,7 @@ struct iscsi_cmd {
 	struct timer_list	dataout_timer;
 	/* Iovecs for SCSI data payload RX/TX w/ kernel level sockets */
 	struct kvec		*iov_data;
+	void			*overflow_buf;
 	/* Iovecs for miscellaneous purposes */
 #define ISCSI_MISC_IOVECS			5
 	struct kvec		iov_misc[ISCSI_MISC_IOVECS];
@@ -565,7 +572,6 @@ struct iscsi_conn {
 #define LOGIN_FLAGS_INITIAL_PDU		8
 	unsigned long		login_flags;
 	struct delayed_work	login_work;
-	struct delayed_work	login_cleanup_work;
 	struct iscsi_login	*login;
 	struct timer_list	nopin_timer;
 	struct timer_list	nopin_response_timer;
@@ -579,8 +585,8 @@ struct iscsi_conn {
 	spinlock_t		response_queue_lock;
 	spinlock_t		state_lock;
 	/* libcrypto RX and TX contexts for crc32c */
-	struct hash_desc	conn_rx_hash;
-	struct hash_desc	conn_tx_hash;
+	struct ahash_request	*conn_rx_hash;
+	struct ahash_request	*conn_tx_hash;
 	/* Used for scheduling TX and RX connection kthreads */
 	cpumask_var_t		conn_cpumask;
 	unsigned int		conn_rx_reset_cpumask:1;
@@ -851,7 +857,6 @@ struct iscsi_wwn_stat_grps {
 };
 
 struct iscsi_tiqn {
-#define ISCSI_IQN_LEN				224
 	unsigned char		tiqn[ISCSI_IQN_LEN];
 	enum tiqn_state_table	tiqn_state;
 	int			tiqn_access_count;
@@ -901,4 +906,30 @@ static inline u32 session_get_next_ttt(struct iscsi_session *session)
 }
 
 extern struct iscsi_cmd *iscsit_find_cmd_from_itt(struct iscsi_conn *, itt_t);
+
+static inline void iscsit_thread_check_cpumask(
+	struct iscsi_conn *conn,
+	struct task_struct *p,
+	int mode)
+{
+	/*
+	 * mode == 1 signals iscsi_target_tx_thread() usage.
+	 * mode == 0 signals iscsi_target_rx_thread() usage.
+	 */
+	if (mode == 1) {
+		if (!conn->conn_tx_reset_cpumask)
+			return;
+		conn->conn_tx_reset_cpumask = 0;
+	} else {
+		if (!conn->conn_rx_reset_cpumask)
+			return;
+		conn->conn_rx_reset_cpumask = 0;
+	}
+	/*
+	 * Update the CPU mask for this single kthread so that
+	 * both TX and RX kthreads are scheduled to run on the
+	 * same CPU.
+	 */
+	set_cpus_allowed_ptr(p, conn->conn_cpumask);
+}
 #endif /* ISCSI_TARGET_CORE_H */

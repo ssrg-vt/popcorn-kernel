@@ -52,7 +52,7 @@ MODULE_LICENSE("GPL");
  * TYPEDEFS
  ********************************/
   /* hardware definition */
-static struct snd_pcm_hardware snd_aw2_playback_hw = {
+static const struct snd_pcm_hardware snd_aw2_playback_hw = {
 	.info = (SNDRV_PCM_INFO_MMAP |
 		 SNDRV_PCM_INFO_INTERLEAVED |
 		 SNDRV_PCM_INFO_BLOCK_TRANSFER | SNDRV_PCM_INFO_MMAP_VALID),
@@ -69,7 +69,7 @@ static struct snd_pcm_hardware snd_aw2_playback_hw = {
 	.periods_max = 1024,
 };
 
-static struct snd_pcm_hardware snd_aw2_capture_hw = {
+static const struct snd_pcm_hardware snd_aw2_capture_hw = {
 	.info = (SNDRV_PCM_INFO_MMAP |
 		 SNDRV_PCM_INFO_INTERLEAVED |
 		 SNDRV_PCM_INFO_BLOCK_TRANSFER | SNDRV_PCM_INFO_MMAP_VALID),
@@ -179,7 +179,7 @@ static struct pci_driver aw2_driver = {
 module_pci_driver(aw2_driver);
 
 /* operators for playback PCM alsa interface */
-static struct snd_pcm_ops snd_aw2_playback_ops = {
+static const struct snd_pcm_ops snd_aw2_playback_ops = {
 	.open = snd_aw2_pcm_playback_open,
 	.close = snd_aw2_pcm_playback_close,
 	.ioctl = snd_pcm_lib_ioctl,
@@ -191,7 +191,7 @@ static struct snd_pcm_ops snd_aw2_playback_ops = {
 };
 
 /* operators for capture PCM alsa interface */
-static struct snd_pcm_ops snd_aw2_capture_ops = {
+static const struct snd_pcm_ops snd_aw2_capture_ops = {
 	.open = snd_aw2_pcm_capture_open,
 	.close = snd_aw2_pcm_capture_close,
 	.ioctl = snd_pcm_lib_ioctl,
@@ -202,7 +202,7 @@ static struct snd_pcm_ops snd_aw2_capture_ops = {
 	.pointer = snd_aw2_pcm_pointer_capture,
 };
 
-static struct snd_kcontrol_new aw2_control = {
+static const struct snd_kcontrol_new aw2_control = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "PCM Capture Route",
 	.index = 0,
@@ -624,15 +624,10 @@ static int snd_aw2_new_pcm(struct aw2 *chip)
 
 	/* pre-allocation of buffers */
 	/* Preallocate continuous pages. */
-	err = snd_pcm_lib_preallocate_pages_for_all(pcm_playback_ana,
-						    SNDRV_DMA_TYPE_DEV,
-						    snd_dma_pci_data
-						    (chip->pci),
-						    64 * 1024, 64 * 1024);
-	if (err)
-		dev_err(chip->card->dev,
-			"snd_pcm_lib_preallocate_pages_for_all error (0x%X)\n",
-			err);
+	snd_pcm_lib_preallocate_pages_for_all(pcm_playback_ana,
+					      SNDRV_DMA_TYPE_DEV,
+					      snd_dma_pci_data(chip->pci),
+					      64 * 1024, 64 * 1024);
 
 	err = snd_pcm_new(chip->card, "Audiowerk2 digital playback", 1, 1, 0,
 			  &pcm_playback_num);
@@ -661,15 +656,10 @@ static int snd_aw2_new_pcm(struct aw2 *chip)
 
 	/* pre-allocation of buffers */
 	/* Preallocate continuous pages. */
-	err = snd_pcm_lib_preallocate_pages_for_all(pcm_playback_num,
-						    SNDRV_DMA_TYPE_DEV,
-						    snd_dma_pci_data
-						    (chip->pci),
-						    64 * 1024, 64 * 1024);
-	if (err)
-		dev_err(chip->card->dev,
-			"snd_pcm_lib_preallocate_pages_for_all error (0x%X)\n",
-			err);
+	snd_pcm_lib_preallocate_pages_for_all(pcm_playback_num,
+					      SNDRV_DMA_TYPE_DEV,
+					      snd_dma_pci_data(chip->pci),
+					      64 * 1024, 64 * 1024);
 
 	err = snd_pcm_new(chip->card, "Audiowerk2 capture", 2, 0, 1,
 			  &pcm_capture);
@@ -699,16 +689,10 @@ static int snd_aw2_new_pcm(struct aw2 *chip)
 
 	/* pre-allocation of buffers */
 	/* Preallocate continuous pages. */
-	err = snd_pcm_lib_preallocate_pages_for_all(pcm_capture,
-						    SNDRV_DMA_TYPE_DEV,
-						    snd_dma_pci_data
-						    (chip->pci),
-						    64 * 1024, 64 * 1024);
-	if (err)
-		dev_err(chip->card->dev,
-			"snd_pcm_lib_preallocate_pages_for_all error (0x%X)\n",
-			err);
-
+	snd_pcm_lib_preallocate_pages_for_all(pcm_capture,
+					      SNDRV_DMA_TYPE_DEV,
+					      snd_dma_pci_data(chip->pci),
+					      64 * 1024, 64 * 1024);
 
 	/* Create control */
 	err = snd_ctl_add(chip->card, snd_ctl_new1(&aw2_control, chip));

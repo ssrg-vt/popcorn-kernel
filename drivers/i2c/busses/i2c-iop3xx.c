@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* ------------------------------------------------------------------------- */
 /* i2c-iop3xx.c i2c driver algorithms for Intel XScale IOP3xx & IXP46x       */
 /* ------------------------------------------------------------------------- */
@@ -23,10 +24,6 @@
  *
  * - writing to slave address causes latchup on iop331.
  *	fix: driver refuses to address self.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 2.
  */
 
 #include <linux/interrupt.h>
@@ -50,10 +47,7 @@ iic_cook_addr(struct i2c_msg *msg)
 {
 	unsigned char addr;
 
-	addr = (msg->addr << 1);
-
-	if (msg->flags & I2C_M_RD)
-		addr |= 1;
+	addr = i2c_8bit_addr_from_msg(msg);
 
 	return addr;
 }
@@ -474,6 +468,7 @@ iop3xx_i2c_probe(struct platform_device *pdev)
 	new_adapter->owner = THIS_MODULE;
 	new_adapter->class = I2C_CLASS_HWMON | I2C_CLASS_SPD;
 	new_adapter->dev.parent = &pdev->dev;
+	new_adapter->dev.of_node = pdev->dev.of_node;
 	new_adapter->nr = pdev->id;
 
 	/*
@@ -511,12 +506,19 @@ out:
 	return ret;
 }
 
+static const struct of_device_id i2c_iop3xx_match[] = {
+	{ .compatible = "intel,iop3xx-i2c", },
+	{ .compatible = "intel,ixp4xx-i2c", },
+	{},
+};
+MODULE_DEVICE_TABLE(of, i2c_iop3xx_match);
 
 static struct platform_driver iop3xx_i2c_driver = {
 	.probe		= iop3xx_i2c_probe,
 	.remove		= iop3xx_i2c_remove,
 	.driver		= {
 		.name	= "IOP3xx-I2C",
+		.of_match_table = i2c_iop3xx_match,
 	},
 };
 

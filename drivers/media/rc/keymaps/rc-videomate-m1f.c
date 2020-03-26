@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* videomate-k100.h - Keytable for videomate_k100 Remote Controller
  *
  * keymap imported from ir-keymaps.c
  *
  * Copyright (c) 2010 by Pavel Osnova <pvosnova@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <media/rc-map.h>
@@ -69,10 +65,10 @@ static struct rc_map_table videomate_k100[] = {
 
 static struct rc_map_list videomate_k100_map = {
 	.map = {
-		.scan    = videomate_k100,
-		.size    = ARRAY_SIZE(videomate_k100),
-		.rc_type = RC_TYPE_UNKNOWN,     /* Legacy IR type */
-		.name    = RC_MAP_VIDEOMATE_K100,
+		.scan     = videomate_k100,
+		.size     = ARRAY_SIZE(videomate_k100),
+		.rc_proto = RC_PROTO_UNKNOWN,     /* Legacy IR type */
+		.name     = RC_MAP_VIDEOMATE_K100,
 	}
 };
 

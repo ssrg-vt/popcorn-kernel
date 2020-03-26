@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * STMicroelectronics pressures driver
  *
  * Copyright 2013 STMicroelectronics Inc.
  *
  * Denis Ciocca <denis.ciocca@st.com>
- *
- * Licensed under the GPL-2.
  */
 
 #include <linux/module.h>
@@ -82,7 +81,7 @@ static const struct iio_buffer_setup_ops st_press_buffer_setup_ops = {
 
 int st_press_allocate_ring(struct iio_dev *indio_dev)
 {
-	return iio_triggered_buffer_setup(indio_dev, &iio_pollfunc_store_time,
+	return iio_triggered_buffer_setup(indio_dev, NULL,
 		&st_sensors_trigger_handler, &st_press_buffer_setup_ops);
 }
 

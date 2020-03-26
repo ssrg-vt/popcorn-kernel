@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * offload engine driver for the Intel Xscale series of i/o processors
  * Copyright © 2006, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 /*
@@ -71,8 +62,7 @@ iop_adma_run_tx_complete_actions(struct iop_adma_desc_slot *desc,
 		/* call the callback (must not sleep or submit new
 		 * operations to this channel)
 		 */
-		if (tx->callback)
-			tx->callback(tx->callback_param);
+		dmaengine_desc_get_callback_invoke(tx, NULL);
 
 		dma_descriptor_unmap(tx);
 		if (desc->group_head)
@@ -1300,10 +1290,10 @@ static int iop_adma_probe(struct platform_device *pdev)
 	 * note: writecombine gives slightly better performance, but
 	 * requires that we explicitly flush the writes
 	 */
-	adev->dma_desc_pool_virt = dma_alloc_writecombine(&pdev->dev,
-							  plat_data->pool_size,
-							  &adev->dma_desc_pool,
-							  GFP_KERNEL);
+	adev->dma_desc_pool_virt = dma_alloc_wc(&pdev->dev,
+						plat_data->pool_size,
+						&adev->dma_desc_pool,
+						GFP_KERNEL);
 	if (!adev->dma_desc_pool_virt) {
 		ret = -ENOMEM;
 		goto err_free_adev;

@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Generic HDLC support routines for Linux
  * Cisco HDLC support
  *
  * Copyright (C) 2000 - 2006 Krzysztof Halasa <khc@pm.waw.pl>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
  */
 
 #include <linux/errno.h>
@@ -54,6 +51,7 @@ struct cisco_state {
 	cisco_proto settings;
 
 	struct timer_list timer;
+	struct net_device *dev;
 	spinlock_t lock;
 	unsigned long last_poll;
 	int up;
@@ -257,11 +255,10 @@ rx_error:
 
 
 
-static void cisco_timer(unsigned long arg)
+static void cisco_timer(struct timer_list *t)
 {
-	struct net_device *dev = (struct net_device *)arg;
-	hdlc_device *hdlc = dev_to_hdlc(dev);
-	struct cisco_state *st = state(hdlc);
+	struct cisco_state *st = from_timer(st, t, timer);
+	struct net_device *dev = st->dev;
 
 	spin_lock(&st->lock);
 	if (st->up &&
@@ -276,8 +273,6 @@ static void cisco_timer(unsigned long arg)
 	spin_unlock(&st->lock);
 
 	st->timer.expires = jiffies + st->settings.interval * HZ;
-	st->timer.function = cisco_timer;
-	st->timer.data = arg;
 	add_timer(&st->timer);
 }
 
@@ -293,10 +288,9 @@ static void cisco_start(struct net_device *dev)
 	st->up = st->txseq = st->rxseq = 0;
 	spin_unlock_irqrestore(&st->lock, flags);
 
-	init_timer(&st->timer);
+	st->dev = dev;
+	timer_setup(&st->timer, cisco_timer, 0);
 	st->timer.expires = jiffies + HZ; /* First poll after 1 s */
-	st->timer.function = cisco_timer;
-	st->timer.data = (unsigned long)dev;
 	add_timer(&st->timer);
 }
 
@@ -378,6 +372,7 @@ static int cisco_ioctl(struct net_device *dev, struct ifreq *ifr)
 		spin_lock_init(&state(hdlc)->lock);
 		dev->header_ops = &cisco_header_ops;
 		dev->type = ARPHRD_CISCO;
+		call_netdevice_notifiers(NETDEV_POST_TYPE_CHANGE, dev);
 		netif_dormant_on(dev);
 		return 0;
 	}

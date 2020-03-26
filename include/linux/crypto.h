@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Scatterlist Cryptographic API.
  *
@@ -7,12 +8,6 @@
  *
  * Portions derived from Cryptoapi, by Alexander Kjeldaas <astor@fast.no>
  * and Nettle, by Niels Möller.
- * 
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option) 
- * any later version.
- *
  */
 #ifndef _LINUX_CRYPTO_H
 #define _LINUX_CRYPTO_H
@@ -24,6 +19,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
+#include <linux/completion.h>
 
 /*
  * Autoloaded crypto modules should only use a prefixed name to avoid allowing
@@ -47,18 +43,21 @@
 #define CRYPTO_ALG_TYPE_AEAD		0x00000003
 #define CRYPTO_ALG_TYPE_BLKCIPHER	0x00000004
 #define CRYPTO_ALG_TYPE_ABLKCIPHER	0x00000005
-#define CRYPTO_ALG_TYPE_GIVCIPHER	0x00000006
-#define CRYPTO_ALG_TYPE_DIGEST		0x00000008
-#define CRYPTO_ALG_TYPE_HASH		0x00000008
-#define CRYPTO_ALG_TYPE_SHASH		0x00000009
-#define CRYPTO_ALG_TYPE_AHASH		0x0000000a
+#define CRYPTO_ALG_TYPE_SKCIPHER	0x00000005
+#define CRYPTO_ALG_TYPE_KPP		0x00000008
+#define CRYPTO_ALG_TYPE_ACOMPRESS	0x0000000a
+#define CRYPTO_ALG_TYPE_SCOMPRESS	0x0000000b
 #define CRYPTO_ALG_TYPE_RNG		0x0000000c
 #define CRYPTO_ALG_TYPE_AKCIPHER	0x0000000d
-#define CRYPTO_ALG_TYPE_PCOMPRESS	0x0000000f
+#define CRYPTO_ALG_TYPE_DIGEST		0x0000000e
+#define CRYPTO_ALG_TYPE_HASH		0x0000000e
+#define CRYPTO_ALG_TYPE_SHASH		0x0000000e
+#define CRYPTO_ALG_TYPE_AHASH		0x0000000f
 
 #define CRYPTO_ALG_TYPE_HASH_MASK	0x0000000e
-#define CRYPTO_ALG_TYPE_AHASH_MASK	0x0000000c
+#define CRYPTO_ALG_TYPE_AHASH_MASK	0x0000000e
 #define CRYPTO_ALG_TYPE_BLKCIPHER_MASK	0x0000000c
+#define CRYPTO_ALG_TYPE_ACOMPRESS_MASK	0x0000000e
 
 #define CRYPTO_ALG_LARVAL		0x00000010
 #define CRYPTO_ALG_DEAD			0x00000020
@@ -72,12 +71,6 @@
 #define CRYPTO_ALG_NEED_FALLBACK	0x00000100
 
 /*
- * This bit is set for symmetric key ciphers that have already been wrapped
- * with a generic IV generator to prevent them from being wrapped again.
- */
-#define CRYPTO_ALG_GENIV		0x00000200
-
-/*
  * Set if the algorithm has passed automated run-time testing.  Note that
  * if there is no run-time testing for a given algorithm it is considered
  * to have passed.
@@ -86,7 +79,7 @@
 #define CRYPTO_ALG_TESTED		0x00000400
 
 /*
- * Set if the algorithm is an instance that is build from templates.
+ * Set if the algorithm is an instance that is built from templates.
  */
 #define CRYPTO_ALG_INSTANCE		0x00000800
 
@@ -102,12 +95,25 @@
 #define CRYPTO_ALG_INTERNAL		0x00002000
 
 /*
+ * Set if the algorithm has a ->setkey() method but can be used without
+ * calling it first, i.e. there is a default key.
+ */
+#define CRYPTO_ALG_OPTIONAL_KEY		0x00004000
+
+/*
+ * Don't trigger module loading
+ */
+#define CRYPTO_NOLOAD			0x00008000
+
+/*
  * Transform masks and values (for crt_flags).
  */
+#define CRYPTO_TFM_NEED_KEY		0x00000001
+
 #define CRYPTO_TFM_REQ_MASK		0x000fff00
 #define CRYPTO_TFM_RES_MASK		0xfff00000
 
-#define CRYPTO_TFM_REQ_WEAK_KEY		0x00000100
+#define CRYPTO_TFM_REQ_FORBID_WEAK_KEYS	0x00000100
 #define CRYPTO_TFM_REQ_MAY_SLEEP	0x00000200
 #define CRYPTO_TFM_REQ_MAY_BACKLOG	0x00000400
 #define CRYPTO_TFM_RES_WEAK_KEY		0x00100000
@@ -119,7 +125,7 @@
 /*
  * Miscellaneous stuff.
  */
-#define CRYPTO_MAX_ALG_NAME		64
+#define CRYPTO_MAX_ALG_NAME		128
 
 /*
  * The macro CRYPTO_MINALIGN_ATTR (along with the void * type in the actual
@@ -137,10 +143,8 @@ struct scatterlist;
 struct crypto_ablkcipher;
 struct crypto_async_request;
 struct crypto_blkcipher;
-struct crypto_hash;
 struct crypto_tfm;
 struct crypto_type;
-struct skcipher_givcrypt_request;
 
 typedef void (*crypto_completion_t)(struct crypto_async_request *req, int err);
 
@@ -176,19 +180,6 @@ struct ablkcipher_request {
 struct blkcipher_desc {
 	struct crypto_blkcipher *tfm;
 	void *info;
-	u32 flags;
-};
-
-struct cipher_desc {
-	struct crypto_tfm *tfm;
-	void (*crfn)(struct crypto_tfm *tfm, u8 *dst, const u8 *src);
-	unsigned int (*prfn)(const struct cipher_desc *desc, u8 *dst,
-			     const u8 *src, unsigned int nbytes);
-	void *info;
-};
-
-struct hash_desc {
-	struct crypto_hash *tfm;
 	u32 flags;
 };
 
@@ -234,31 +225,16 @@ struct hash_desc {
  *	     be called in parallel with the same transformation object.
  * @decrypt: Decrypt a single block. This is a reverse counterpart to @encrypt
  *	     and the conditions are exactly the same.
- * @givencrypt: Update the IV for encryption. With this function, a cipher
- *	        implementation may provide the function on how to update the IV
- *	        for encryption.
- * @givdecrypt: Update the IV for decryption. This is the reverse of
- *	        @givencrypt .
- * @geniv: The transformation implementation may use an "IV generator" provided
- *	   by the kernel crypto API. Several use cases have a predefined
- *	   approach how IVs are to be updated. For such use cases, the kernel
- *	   crypto API provides ready-to-use implementations that can be
- *	   referenced with this variable.
  * @ivsize: IV size applicable for transformation. The consumer must provide an
  *	    IV of exactly that size to perform the encrypt or decrypt operation.
  *
- * All fields except @givencrypt , @givdecrypt , @geniv and @ivsize are
- * mandatory and must be filled.
+ * All fields except @ivsize are mandatory and must be filled.
  */
 struct ablkcipher_alg {
 	int (*setkey)(struct crypto_ablkcipher *tfm, const u8 *key,
 	              unsigned int keylen);
 	int (*encrypt)(struct ablkcipher_request *req);
 	int (*decrypt)(struct ablkcipher_request *req);
-	int (*givencrypt)(struct skcipher_givcrypt_request *req);
-	int (*givdecrypt)(struct skcipher_givcrypt_request *req);
-
-	const char *geniv;
 
 	unsigned int min_keysize;
 	unsigned int max_keysize;
@@ -272,10 +248,9 @@ struct ablkcipher_alg {
  * @setkey: see struct ablkcipher_alg
  * @encrypt: see struct ablkcipher_alg
  * @decrypt: see struct ablkcipher_alg
- * @geniv: see struct ablkcipher_alg
  * @ivsize: see struct ablkcipher_alg
  *
- * All fields except @geniv and @ivsize are mandatory and must be filled.
+ * All fields except @ivsize are mandatory and must be filled.
  */
 struct blkcipher_alg {
 	int (*setkey)(struct crypto_tfm *tfm, const u8 *key,
@@ -286,8 +261,6 @@ struct blkcipher_alg {
 	int (*decrypt)(struct blkcipher_desc *desc,
 		       struct scatterlist *dst, struct scatterlist *src,
 		       unsigned int nbytes);
-
-	const char *geniv;
 
 	unsigned int min_keysize;
 	unsigned int max_keysize;
@@ -357,6 +330,115 @@ struct compress_alg {
 			      unsigned int slen, u8 *dst, unsigned int *dlen);
 };
 
+#ifdef CONFIG_CRYPTO_STATS
+/*
+ * struct crypto_istat_aead - statistics for AEAD algorithm
+ * @encrypt_cnt:	number of encrypt requests
+ * @encrypt_tlen:	total data size handled by encrypt requests
+ * @decrypt_cnt:	number of decrypt requests
+ * @decrypt_tlen:	total data size handled by decrypt requests
+ * @err_cnt:		number of error for AEAD requests
+ */
+struct crypto_istat_aead {
+	atomic64_t encrypt_cnt;
+	atomic64_t encrypt_tlen;
+	atomic64_t decrypt_cnt;
+	atomic64_t decrypt_tlen;
+	atomic64_t err_cnt;
+};
+
+/*
+ * struct crypto_istat_akcipher - statistics for akcipher algorithm
+ * @encrypt_cnt:	number of encrypt requests
+ * @encrypt_tlen:	total data size handled by encrypt requests
+ * @decrypt_cnt:	number of decrypt requests
+ * @decrypt_tlen:	total data size handled by decrypt requests
+ * @verify_cnt:		number of verify operation
+ * @sign_cnt:		number of sign requests
+ * @err_cnt:		number of error for akcipher requests
+ */
+struct crypto_istat_akcipher {
+	atomic64_t encrypt_cnt;
+	atomic64_t encrypt_tlen;
+	atomic64_t decrypt_cnt;
+	atomic64_t decrypt_tlen;
+	atomic64_t verify_cnt;
+	atomic64_t sign_cnt;
+	atomic64_t err_cnt;
+};
+
+/*
+ * struct crypto_istat_cipher - statistics for cipher algorithm
+ * @encrypt_cnt:	number of encrypt requests
+ * @encrypt_tlen:	total data size handled by encrypt requests
+ * @decrypt_cnt:	number of decrypt requests
+ * @decrypt_tlen:	total data size handled by decrypt requests
+ * @err_cnt:		number of error for cipher requests
+ */
+struct crypto_istat_cipher {
+	atomic64_t encrypt_cnt;
+	atomic64_t encrypt_tlen;
+	atomic64_t decrypt_cnt;
+	atomic64_t decrypt_tlen;
+	atomic64_t err_cnt;
+};
+
+/*
+ * struct crypto_istat_compress - statistics for compress algorithm
+ * @compress_cnt:	number of compress requests
+ * @compress_tlen:	total data size handled by compress requests
+ * @decompress_cnt:	number of decompress requests
+ * @decompress_tlen:	total data size handled by decompress requests
+ * @err_cnt:		number of error for compress requests
+ */
+struct crypto_istat_compress {
+	atomic64_t compress_cnt;
+	atomic64_t compress_tlen;
+	atomic64_t decompress_cnt;
+	atomic64_t decompress_tlen;
+	atomic64_t err_cnt;
+};
+
+/*
+ * struct crypto_istat_hash - statistics for has algorithm
+ * @hash_cnt:		number of hash requests
+ * @hash_tlen:		total data size hashed
+ * @err_cnt:		number of error for hash requests
+ */
+struct crypto_istat_hash {
+	atomic64_t hash_cnt;
+	atomic64_t hash_tlen;
+	atomic64_t err_cnt;
+};
+
+/*
+ * struct crypto_istat_kpp - statistics for KPP algorithm
+ * @setsecret_cnt:		number of setsecrey operation
+ * @generate_public_key_cnt:	number of generate_public_key operation
+ * @compute_shared_secret_cnt:	number of compute_shared_secret operation
+ * @err_cnt:			number of error for KPP requests
+ */
+struct crypto_istat_kpp {
+	atomic64_t setsecret_cnt;
+	atomic64_t generate_public_key_cnt;
+	atomic64_t compute_shared_secret_cnt;
+	atomic64_t err_cnt;
+};
+
+/*
+ * struct crypto_istat_rng: statistics for RNG algorithm
+ * @generate_cnt:	number of RNG generate requests
+ * @generate_tlen:	total data size of generated data by the RNG
+ * @seed_cnt:		number of times the RNG was seeded
+ * @err_cnt:		number of error for RNG requests
+ */
+struct crypto_istat_rng {
+	atomic64_t generate_cnt;
+	atomic64_t generate_tlen;
+	atomic64_t seed_cnt;
+	atomic64_t err_cnt;
+};
+#endif /* CONFIG_CRYPTO_STATS */
 
 #define cra_ablkcipher	cra_u.ablkcipher
 #define cra_blkcipher	cra_u.blkcipher
@@ -428,11 +510,28 @@ struct compress_alg {
  * @cra_exit: Deinitialize the cryptographic transformation object. This is a
  *	      counterpart to @cra_init, used to remove various changes set in
  *	      @cra_init.
+ * @cra_u.ablkcipher: Union member which contains an asynchronous block cipher
+ *		      definition. See @struct @ablkcipher_alg.
+ * @cra_u.blkcipher: Union member which contains a synchronous block cipher
+ * 		     definition See @struct @blkcipher_alg.
+ * @cra_u.cipher: Union member which contains a single-block symmetric cipher
+ *		  definition. See @struct @cipher_alg.
+ * @cra_u.compress: Union member which contains a (de)compression algorithm.
+ *		    See @struct @compress_alg.
  * @cra_module: Owner of this transformation implementation. Set to THIS_MODULE
  * @cra_list: internally used
  * @cra_users: internally used
  * @cra_refcnt: internally used
  * @cra_destroy: internally used
+ *
+ * @stats: union of all possible crypto_istat_xxx structures
+ * @stats.aead:		statistics for AEAD algorithm
+ * @stats.akcipher:	statistics for akcipher algorithm
+ * @stats.cipher:	statistics for cipher algorithm
+ * @stats.compress:	statistics for compress algorithm
+ * @stats.hash:		statistics for hash algorithm
+ * @stats.rng:		statistics for rng algorithm
+ * @stats.kpp:		statistics for KPP algorithm
  *
  * The struct crypto_alg describes a generic Crypto API algorithm and is common
  * for all of the transformations. Any variable not documented here shall not
@@ -448,7 +547,7 @@ struct crypto_alg {
 	unsigned int cra_alignmask;
 
 	int cra_priority;
-	atomic_t cra_refcnt;
+	refcount_t cra_refcnt;
 
 	char cra_name[CRYPTO_MAX_ALG_NAME];
 	char cra_driver_name[CRYPTO_MAX_ALG_NAME];
@@ -467,7 +566,125 @@ struct crypto_alg {
 	void (*cra_destroy)(struct crypto_alg *alg);
 	
 	struct module *cra_module;
+
+#ifdef CONFIG_CRYPTO_STATS
+	union {
+		struct crypto_istat_aead aead;
+		struct crypto_istat_akcipher akcipher;
+		struct crypto_istat_cipher cipher;
+		struct crypto_istat_compress compress;
+		struct crypto_istat_hash hash;
+		struct crypto_istat_rng rng;
+		struct crypto_istat_kpp kpp;
+	} stats;
+#endif /* CONFIG_CRYPTO_STATS */
+
 } CRYPTO_MINALIGN_ATTR;
+
+#ifdef CONFIG_CRYPTO_STATS
+void crypto_stats_init(struct crypto_alg *alg);
+void crypto_stats_get(struct crypto_alg *alg);
+void crypto_stats_ablkcipher_encrypt(unsigned int nbytes, int ret, struct crypto_alg *alg);
+void crypto_stats_ablkcipher_decrypt(unsigned int nbytes, int ret, struct crypto_alg *alg);
+void crypto_stats_aead_encrypt(unsigned int cryptlen, struct crypto_alg *alg, int ret);
+void crypto_stats_aead_decrypt(unsigned int cryptlen, struct crypto_alg *alg, int ret);
+void crypto_stats_ahash_update(unsigned int nbytes, int ret, struct crypto_alg *alg);
+void crypto_stats_ahash_final(unsigned int nbytes, int ret, struct crypto_alg *alg);
+void crypto_stats_akcipher_encrypt(unsigned int src_len, int ret, struct crypto_alg *alg);
+void crypto_stats_akcipher_decrypt(unsigned int src_len, int ret, struct crypto_alg *alg);
+void crypto_stats_akcipher_sign(int ret, struct crypto_alg *alg);
+void crypto_stats_akcipher_verify(int ret, struct crypto_alg *alg);
+void crypto_stats_compress(unsigned int slen, int ret, struct crypto_alg *alg);
+void crypto_stats_decompress(unsigned int slen, int ret, struct crypto_alg *alg);
+void crypto_stats_kpp_set_secret(struct crypto_alg *alg, int ret);
+void crypto_stats_kpp_generate_public_key(struct crypto_alg *alg, int ret);
+void crypto_stats_kpp_compute_shared_secret(struct crypto_alg *alg, int ret);
+void crypto_stats_rng_seed(struct crypto_alg *alg, int ret);
+void crypto_stats_rng_generate(struct crypto_alg *alg, unsigned int dlen, int ret);
+void crypto_stats_skcipher_encrypt(unsigned int cryptlen, int ret, struct crypto_alg *alg);
+void crypto_stats_skcipher_decrypt(unsigned int cryptlen, int ret, struct crypto_alg *alg);
+#else
+static inline void crypto_stats_init(struct crypto_alg *alg)
+{}
+static inline void crypto_stats_get(struct crypto_alg *alg)
+{}
+static inline void crypto_stats_ablkcipher_encrypt(unsigned int nbytes, int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_ablkcipher_decrypt(unsigned int nbytes, int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_aead_encrypt(unsigned int cryptlen, struct crypto_alg *alg, int ret)
+{}
+static inline void crypto_stats_aead_decrypt(unsigned int cryptlen, struct crypto_alg *alg, int ret)
+{}
+static inline void crypto_stats_ahash_update(unsigned int nbytes, int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_ahash_final(unsigned int nbytes, int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_akcipher_encrypt(unsigned int src_len, int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_akcipher_decrypt(unsigned int src_len, int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_akcipher_sign(int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_akcipher_verify(int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_compress(unsigned int slen, int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_decompress(unsigned int slen, int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_kpp_set_secret(struct crypto_alg *alg, int ret)
+{}
+static inline void crypto_stats_kpp_generate_public_key(struct crypto_alg *alg, int ret)
+{}
+static inline void crypto_stats_kpp_compute_shared_secret(struct crypto_alg *alg, int ret)
+{}
+static inline void crypto_stats_rng_seed(struct crypto_alg *alg, int ret)
+{}
+static inline void crypto_stats_rng_generate(struct crypto_alg *alg, unsigned int dlen, int ret)
+{}
+static inline void crypto_stats_skcipher_encrypt(unsigned int cryptlen, int ret, struct crypto_alg *alg)
+{}
+static inline void crypto_stats_skcipher_decrypt(unsigned int cryptlen, int ret, struct crypto_alg *alg)
+{}
+#endif
+/*
+ * A helper struct for waiting for completion of async crypto ops
+ */
+struct crypto_wait {
+	struct completion completion;
+	int err;
+};
+
+/*
+ * Macro for declaring a crypto op async wait object on stack
+ */
+#define DECLARE_CRYPTO_WAIT(_wait) \
+	struct crypto_wait _wait = { \
+		COMPLETION_INITIALIZER_ONSTACK((_wait).completion), 0 }
+
+/*
+ * Async ops completion helper functioons
+ */
+void crypto_req_done(struct crypto_async_request *req, int err);
+
+static inline int crypto_wait_req(int err, struct crypto_wait *wait)
+{
+	switch (err) {
+	case -EINPROGRESS:
+	case -EBUSY:
+		wait_for_completion(&wait->completion);
+		reinit_completion(&wait->completion);
+		err = wait->err;
+		break;
+	};
+
+	return err;
+}
+
+static inline void crypto_init_wait(struct crypto_wait *wait)
+{
+	init_completion(&wait->completion);
+}
 
 /*
  * Algorithm registration interface.
@@ -493,8 +710,6 @@ struct ablkcipher_tfm {
 	              unsigned int keylen);
 	int (*encrypt)(struct ablkcipher_request *req);
 	int (*decrypt)(struct ablkcipher_request *req);
-	int (*givencrypt)(struct skcipher_givcrypt_request *req);
-	int (*givdecrypt)(struct skcipher_givcrypt_request *req);
 
 	struct crypto_ablkcipher *base;
 
@@ -519,18 +734,6 @@ struct cipher_tfm {
 	void (*cit_decrypt_one)(struct crypto_tfm *tfm, u8 *dst, const u8 *src);
 };
 
-struct hash_tfm {
-	int (*init)(struct hash_desc *desc);
-	int (*update)(struct hash_desc *desc,
-		      struct scatterlist *sg, unsigned int nsg);
-	int (*final)(struct hash_desc *desc, u8 *out);
-	int (*digest)(struct hash_desc *desc, struct scatterlist *sg,
-		      unsigned int nsg, u8 *out);
-	int (*setkey)(struct crypto_hash *tfm, const u8 *key,
-		      unsigned int keylen);
-	unsigned int digestsize;
-};
-
 struct compress_tfm {
 	int (*cot_compress)(struct crypto_tfm *tfm,
 	                    const u8 *src, unsigned int slen,
@@ -543,7 +746,6 @@ struct compress_tfm {
 #define crt_ablkcipher	crt_u.ablkcipher
 #define crt_blkcipher	crt_u.blkcipher
 #define crt_cipher	crt_u.cipher
-#define crt_hash	crt_u.hash
 #define crt_compress	crt_u.compress
 
 struct crypto_tfm {
@@ -554,7 +756,6 @@ struct crypto_tfm {
 		struct ablkcipher_tfm ablkcipher;
 		struct blkcipher_tfm blkcipher;
 		struct cipher_tfm cipher;
-		struct hash_tfm hash;
 		struct compress_tfm compress;
 	} crt_u;
 
@@ -578,10 +779,6 @@ struct crypto_cipher {
 };
 
 struct crypto_comp {
-	struct crypto_tfm base;
-};
-
-struct crypto_hash {
 	struct crypto_tfm base;
 };
 
@@ -695,14 +892,14 @@ static inline struct crypto_ablkcipher *__crypto_ablkcipher_cast(
 
 static inline u32 crypto_skcipher_type(u32 type)
 {
-	type &= ~(CRYPTO_ALG_TYPE_MASK | CRYPTO_ALG_GENIV);
+	type &= ~CRYPTO_ALG_TYPE_MASK;
 	type |= CRYPTO_ALG_TYPE_BLKCIPHER;
 	return type;
 }
 
 static inline u32 crypto_skcipher_mask(u32 mask)
 {
-	mask &= ~(CRYPTO_ALG_TYPE_MASK | CRYPTO_ALG_GENIV);
+	mask &= ~CRYPTO_ALG_TYPE_MASK;
 	mask |= CRYPTO_ALG_TYPE_BLKCIPHER_MASK;
 	return mask;
 }
@@ -736,23 +933,6 @@ static inline u32 crypto_skcipher_mask(u32 mask)
  * which operation just finished if it invoked multiple in parallel. This
  * state information is unused by the kernel crypto API.
  */
-
-/**
- * crypto_alloc_ablkcipher() - allocate asynchronous block cipher handle
- * @alg_name: is the cra_name / name or cra_driver_name / driver name of the
- *	      ablkcipher cipher
- * @type: specifies the type of the cipher
- * @mask: specifies the mask for the cipher
- *
- * Allocate a cipher handle for an ablkcipher. The returned struct
- * crypto_ablkcipher is the cipher handle that is required for any subsequent
- * API invocation for that ablkcipher.
- *
- * Return: allocated cipher handle in case of success; IS_ERR() is true in case
- *	   of an error, PTR_ERR() returns the error code.
- */
-struct crypto_ablkcipher *crypto_alloc_ablkcipher(const char *alg_name,
-						  u32 type, u32 mask);
 
 static inline struct crypto_tfm *crypto_ablkcipher_tfm(
 	struct crypto_ablkcipher *tfm)
@@ -900,7 +1080,14 @@ static inline int crypto_ablkcipher_encrypt(struct ablkcipher_request *req)
 {
 	struct ablkcipher_tfm *crt =
 		crypto_ablkcipher_crt(crypto_ablkcipher_reqtfm(req));
-	return crt->encrypt(req);
+	struct crypto_alg *alg = crt->base->base.__crt_alg;
+	unsigned int nbytes = req->nbytes;
+	int ret;
+
+	crypto_stats_get(alg);
+	ret = crt->encrypt(req);
+	crypto_stats_ablkcipher_encrypt(nbytes, ret, alg);
+	return ret;
 }
 
 /**
@@ -918,7 +1105,14 @@ static inline int crypto_ablkcipher_decrypt(struct ablkcipher_request *req)
 {
 	struct ablkcipher_tfm *crt =
 		crypto_ablkcipher_crt(crypto_ablkcipher_reqtfm(req));
-	return crt->decrypt(req);
+	struct crypto_alg *alg = crt->base->base.__crt_alg;
+	unsigned int nbytes = req->nbytes;
+	int ret;
+
+	crypto_stats_get(alg);
+	ret = crt->decrypt(req);
+	crypto_stats_ablkcipher_decrypt(nbytes, ret, alg);
+	return ret;
 }
 
 /**
@@ -973,8 +1167,7 @@ static inline struct ablkcipher_request *ablkcipher_request_cast(
  * encrypt and decrypt API calls. During the allocation, the provided ablkcipher
  * handle is registered in the request data structure.
  *
- * Return: allocated request handle in case of success; IS_ERR() is true in case
- *	   of an error, PTR_ERR() returns the error code.
+ * Return: allocated request handle in case of success, or NULL if out of memory
  */
 static inline struct ablkcipher_request *ablkcipher_request_alloc(
 	struct crypto_ablkcipher *tfm, gfp_t gfp)
@@ -1003,7 +1196,7 @@ static inline void ablkcipher_request_free(struct ablkcipher_request *req)
  * ablkcipher_request_set_callback() - set asynchronous callback function
  * @req: request handle
  * @flags: specify zero or an ORing of the flags
- *         CRYPTO_TFM_REQ_MAY_BACKLOG the request queue may back log and
+ *	   CRYPTO_TFM_REQ_MAY_BACKLOG the request queue may back log and
  *	   increase the wait queue beyond the initial maximum size;
  *	   CRYPTO_TFM_REQ_MAY_SLEEP the request processing may sleep
  * @compl: callback function pointer to be registered with the request handle
@@ -1020,7 +1213,7 @@ static inline void ablkcipher_request_free(struct ablkcipher_request *req)
  * cipher operation completes.
  *
  * The callback function is registered with the ablkcipher_request handle and
- * must comply with the following template
+ * must comply with the following template::
  *
  *	void callback_function(struct crypto_async_request *req, int error)
  */
@@ -1575,233 +1768,6 @@ static inline void crypto_cipher_decrypt_one(struct crypto_cipher *tfm,
 {
 	crypto_cipher_crt(tfm)->cit_decrypt_one(crypto_cipher_tfm(tfm),
 						dst, src);
-}
-
-/**
- * DOC: Synchronous Message Digest API
- *
- * The synchronous message digest API is used with the ciphers of type
- * CRYPTO_ALG_TYPE_HASH (listed as type "hash" in /proc/crypto)
- */
-
-static inline struct crypto_hash *__crypto_hash_cast(struct crypto_tfm *tfm)
-{
-	return (struct crypto_hash *)tfm;
-}
-
-static inline struct crypto_hash *crypto_hash_cast(struct crypto_tfm *tfm)
-{
-	BUG_ON((crypto_tfm_alg_type(tfm) ^ CRYPTO_ALG_TYPE_HASH) &
-	       CRYPTO_ALG_TYPE_HASH_MASK);
-	return __crypto_hash_cast(tfm);
-}
-
-/**
- * crypto_alloc_hash() - allocate synchronous message digest handle
- * @alg_name: is the cra_name / name or cra_driver_name / driver name of the
- *	      message digest cipher
- * @type: specifies the type of the cipher
- * @mask: specifies the mask for the cipher
- *
- * Allocate a cipher handle for a message digest. The returned struct
- * crypto_hash is the cipher handle that is required for any subsequent
- * API invocation for that message digest.
- *
- * Return: allocated cipher handle in case of success; IS_ERR() is true in case
- * of an error, PTR_ERR() returns the error code.
- */
-static inline struct crypto_hash *crypto_alloc_hash(const char *alg_name,
-						    u32 type, u32 mask)
-{
-	type &= ~CRYPTO_ALG_TYPE_MASK;
-	mask &= ~CRYPTO_ALG_TYPE_MASK;
-	type |= CRYPTO_ALG_TYPE_HASH;
-	mask |= CRYPTO_ALG_TYPE_HASH_MASK;
-
-	return __crypto_hash_cast(crypto_alloc_base(alg_name, type, mask));
-}
-
-static inline struct crypto_tfm *crypto_hash_tfm(struct crypto_hash *tfm)
-{
-	return &tfm->base;
-}
-
-/**
- * crypto_free_hash() - zeroize and free message digest handle
- * @tfm: cipher handle to be freed
- */
-static inline void crypto_free_hash(struct crypto_hash *tfm)
-{
-	crypto_free_tfm(crypto_hash_tfm(tfm));
-}
-
-/**
- * crypto_has_hash() - Search for the availability of a message digest
- * @alg_name: is the cra_name / name or cra_driver_name / driver name of the
- *	      message digest cipher
- * @type: specifies the type of the cipher
- * @mask: specifies the mask for the cipher
- *
- * Return: true when the message digest cipher is known to the kernel crypto
- *	   API; false otherwise
- */
-static inline int crypto_has_hash(const char *alg_name, u32 type, u32 mask)
-{
-	type &= ~CRYPTO_ALG_TYPE_MASK;
-	mask &= ~CRYPTO_ALG_TYPE_MASK;
-	type |= CRYPTO_ALG_TYPE_HASH;
-	mask |= CRYPTO_ALG_TYPE_HASH_MASK;
-
-	return crypto_has_alg(alg_name, type, mask);
-}
-
-static inline struct hash_tfm *crypto_hash_crt(struct crypto_hash *tfm)
-{
-	return &crypto_hash_tfm(tfm)->crt_hash;
-}
-
-/**
- * crypto_hash_blocksize() - obtain block size for message digest
- * @tfm: cipher handle
- *
- * The block size for the message digest cipher referenced with the cipher
- * handle is returned.
- *
- * Return: block size of cipher
- */
-static inline unsigned int crypto_hash_blocksize(struct crypto_hash *tfm)
-{
-	return crypto_tfm_alg_blocksize(crypto_hash_tfm(tfm));
-}
-
-static inline unsigned int crypto_hash_alignmask(struct crypto_hash *tfm)
-{
-	return crypto_tfm_alg_alignmask(crypto_hash_tfm(tfm));
-}
-
-/**
- * crypto_hash_digestsize() - obtain message digest size
- * @tfm: cipher handle
- *
- * The size for the message digest created by the message digest cipher
- * referenced with the cipher handle is returned.
- *
- * Return: message digest size
- */
-static inline unsigned int crypto_hash_digestsize(struct crypto_hash *tfm)
-{
-	return crypto_hash_crt(tfm)->digestsize;
-}
-
-static inline u32 crypto_hash_get_flags(struct crypto_hash *tfm)
-{
-	return crypto_tfm_get_flags(crypto_hash_tfm(tfm));
-}
-
-static inline void crypto_hash_set_flags(struct crypto_hash *tfm, u32 flags)
-{
-	crypto_tfm_set_flags(crypto_hash_tfm(tfm), flags);
-}
-
-static inline void crypto_hash_clear_flags(struct crypto_hash *tfm, u32 flags)
-{
-	crypto_tfm_clear_flags(crypto_hash_tfm(tfm), flags);
-}
-
-/**
- * crypto_hash_init() - (re)initialize message digest handle
- * @desc: cipher request handle that to be filled by caller --
- *	  desc.tfm is filled with the hash cipher handle;
- *	  desc.flags is filled with either CRYPTO_TFM_REQ_MAY_SLEEP or 0.
- *
- * The call (re-)initializes the message digest referenced by the hash cipher
- * request handle. Any potentially existing state created by previous
- * operations is discarded.
- *
- * Return: 0 if the message digest initialization was successful; < 0 if an
- *	   error occurred
- */
-static inline int crypto_hash_init(struct hash_desc *desc)
-{
-	return crypto_hash_crt(desc->tfm)->init(desc);
-}
-
-/**
- * crypto_hash_update() - add data to message digest for processing
- * @desc: cipher request handle
- * @sg: scatter / gather list pointing to the data to be added to the message
- *      digest
- * @nbytes: number of bytes to be processed from @sg
- *
- * Updates the message digest state of the cipher handle pointed to by the
- * hash cipher request handle with the input data pointed to by the
- * scatter/gather list.
- *
- * Return: 0 if the message digest update was successful; < 0 if an error
- *	   occurred
- */
-static inline int crypto_hash_update(struct hash_desc *desc,
-				     struct scatterlist *sg,
-				     unsigned int nbytes)
-{
-	return crypto_hash_crt(desc->tfm)->update(desc, sg, nbytes);
-}
-
-/**
- * crypto_hash_final() - calculate message digest
- * @desc: cipher request handle
- * @out: message digest output buffer -- The caller must ensure that the out
- *	 buffer has a sufficient size (e.g. by using the crypto_hash_digestsize
- *	 function).
- *
- * Finalize the message digest operation and create the message digest
- * based on all data added to the cipher handle. The message digest is placed
- * into the output buffer.
- *
- * Return: 0 if the message digest creation was successful; < 0 if an error
- *	   occurred
- */
-static inline int crypto_hash_final(struct hash_desc *desc, u8 *out)
-{
-	return crypto_hash_crt(desc->tfm)->final(desc, out);
-}
-
-/**
- * crypto_hash_digest() - calculate message digest for a buffer
- * @desc: see crypto_hash_final()
- * @sg: see crypto_hash_update()
- * @nbytes:  see crypto_hash_update()
- * @out: see crypto_hash_final()
- *
- * This function is a "short-hand" for the function calls of crypto_hash_init,
- * crypto_hash_update and crypto_hash_final. The parameters have the same
- * meaning as discussed for those separate three functions.
- *
- * Return: 0 if the message digest creation was successful; < 0 if an error
- *	   occurred
- */
-static inline int crypto_hash_digest(struct hash_desc *desc,
-				     struct scatterlist *sg,
-				     unsigned int nbytes, u8 *out)
-{
-	return crypto_hash_crt(desc->tfm)->digest(desc, sg, nbytes, out);
-}
-
-/**
- * crypto_hash_setkey() - set key for message digest
- * @hash: cipher handle
- * @key: buffer holding the key
- * @keylen: length of the key in bytes
- *
- * The caller provided key is set for the message digest cipher. The cipher
- * handle must point to a keyed hash in order for this function to succeed.
- *
- * Return: 0 if the setting of the key was successful; < 0 if an error occurred
- */
-static inline int crypto_hash_setkey(struct crypto_hash *hash,
-				     const u8 *key, unsigned int keylen)
-{
-	return crypto_hash_crt(hash)->setkey(hash, key, keylen);
 }
 
 static inline struct crypto_comp *__crypto_comp_cast(struct crypto_tfm *tfm)

@@ -1,22 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Intel MIC Platform Software Stack (MPSS)
  *
  * Copyright(c) 2013 Intel Corporation.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
  * Intel MIC Host driver.
- *
  */
 #ifndef _MIC_DEVICE_H_
 #define _MIC_DEVICE_H_
@@ -29,6 +17,7 @@
 #include <linux/miscdevice.h>
 #include <linux/mic_bus.h>
 #include "../bus/scif_bus.h"
+#include "../bus/vop_bus.h"
 #include "../bus/cosm_bus.h"
 #include "mic_intr.h"
 
@@ -64,13 +53,11 @@ extern struct cosm_hw_ops cosm_hw_ops;
  * @bootaddr: MIC boot address.
  * @dp: virtio device page
  * @dp_dma_addr: virtio device page DMA address.
- * @name: name for the misc char device
- * @miscdev: registered misc char device
- * @vdev_list: list of virtio devices.
  * @dma_mbdev: MIC BUS DMA device.
  * @dma_ch - Array of DMA channels
  * @num_dma_ch - Number of DMA channels available
  * @scdev: SCIF device on the SCIF virtual bus.
+ * @vpdev: Virtio over PCIe device on the VOP virtual bus.
  * @cosm_dev: COSM device
  */
 struct mic_device {
@@ -91,13 +78,11 @@ struct mic_device {
 	u32 bootaddr;
 	void *dp;
 	dma_addr_t dp_dma_addr;
-	char name[16];
-	struct miscdevice miscdev;
-	struct list_head vdev_list;
 	struct mbus_device *dma_mbdev;
 	struct dma_chan *dma_ch[MIC_MAX_DMA_CHAN];
 	int num_dma_ch;
 	struct scif_hw_dev *scdev;
+	struct vop_device *vpdev;
 	struct cosm_device *cosm_dev;
 };
 

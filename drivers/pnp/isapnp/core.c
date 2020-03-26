@@ -1,21 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  ISA Plug & Play support
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  *  Changelog:
  *  2000-01-01	Added quirks handling for buggy hardware
@@ -34,7 +20,7 @@
  *  2003-08-11	Resource Management Updates - Adam Belay <ambx1@neo.rr.com>
  */
 
-#include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/delay.h>
@@ -54,8 +40,6 @@ static int isapnp_rdp;		/* Read Data Port */
 static int isapnp_reset = 1;	/* reset all PnP cards (deactivate) */
 static int isapnp_verbose = 1;	/* verbose mode */
 
-MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>");
-MODULE_DESCRIPTION("Generic ISA Plug & Play support");
 module_param(isapnp_disable, int, 0);
 MODULE_PARM_DESC(isapnp_disable, "ISA Plug & Play disable");
 module_param(isapnp_rdp, int, 0);
@@ -64,7 +48,6 @@ module_param(isapnp_reset, int, 0);
 MODULE_PARM_DESC(isapnp_reset, "ISA Plug & Play reset all cards");
 module_param(isapnp_verbose, int, 0);
 MODULE_PARM_DESC(isapnp_verbose, "ISA Plug & Play verbose mode");
-MODULE_LICENSE("GPL");
 
 #define _PIDXR		0x279
 #define _PNPWRP		0xa79

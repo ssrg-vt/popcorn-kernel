@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # CAIF physical drivers
 #
@@ -52,5 +53,5 @@ config CAIF_VIRTIO
 	The caif driver for CAIF over Virtio.
 
 if CAIF_VIRTIO
-source "drivers/vhost/Kconfig"
+source "drivers/vhost/Kconfig.vringh"
 endif

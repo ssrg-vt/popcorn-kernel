@@ -33,17 +33,17 @@
 #include <asm/mach-types.h>
 #include <mach/hardware.h>
 #include <asm/irq.h>
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
 #include <asm/mach/flash.h>
 
-#include <mach/pxa25x.h>
+#include "pxa25x.h"
 #include <linux/platform_data/mmc-pxamci.h>
-#include <mach/udc.h>
-#include <mach/gumstix.h>
+#include "udc.h"
+#include "gumstix.h"
 
 #include "generic.h"
 
@@ -90,9 +90,6 @@ static struct platform_device *devices[] __initdata = {
 #ifdef CONFIG_MMC_PXA
 static struct pxamci_platform_data gumstix_mci_platform_data = {
 	.ocr_mask		= MMC_VDD_32_33|MMC_VDD_33_34,
-	.gpio_card_detect 	= -1,
-	.gpio_card_ro		= -1,
-	.gpio_power		= -1,
 };
 
 static void __init gumstix_mmc_init(void)
@@ -139,14 +136,14 @@ static void gumstix_setup_bt_clock(void)
 {
 	int timeout = 500;
 
-	if (!(OSCC & OSCC_OOK))
+	if (!(readl(OSCC) & OSCC_OOK))
 		pr_warn("32kHz clock was not on. Bootloader may need to be updated\n");
 	else
 		return;
 
-	OSCC |= OSCC_OON;
+	writel(readl(OSCC) | OSCC_OON, OSCC);
 	do {
-		if (OSCC & OSCC_OOK)
+		if (readl(OSCC) & OSCC_OOK)
 			break;
 		udelay(1);
 	} while (--timeout);

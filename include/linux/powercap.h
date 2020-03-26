@@ -1,19 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * powercap.h: Data types and headers for sysfs power capping interface
  * Copyright (c) 2013, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.
- *
  */
 
 #ifndef __POWERCAP_H__
@@ -208,7 +196,7 @@ struct powercap_zone_constraint_ops {
 struct powercap_zone_constraint {
 	int id;
 	struct powercap_zone *power_zone;
-	struct powercap_zone_constraint_ops *ops;
+	const struct powercap_zone_constraint_ops *ops;
 };
 
 
@@ -309,7 +297,7 @@ struct powercap_zone *powercap_register_zone(
 			struct powercap_zone *parent,
 			const struct powercap_zone_ops *ops,
 			int nr_constraints,
-			struct powercap_zone_constraint_ops *const_ops);
+			const struct powercap_zone_constraint_ops *const_ops);
 
 /**
 * powercap_unregister_zone() - Unregister a zone device

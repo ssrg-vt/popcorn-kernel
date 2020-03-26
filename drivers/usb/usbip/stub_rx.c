@@ -1,20 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2003-2008 Takahiro Hirofuchi
- *
- * This is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
- * USA.
  */
 
 #include <asm/byteorder.h>
@@ -31,9 +17,9 @@ static int is_clear_halt_cmd(struct urb *urb)
 
 	req = (struct usb_ctrlrequest *) urb->setup_packet;
 
-	 return (req->bRequest == USB_REQ_CLEAR_FEATURE) &&
-		 (req->bRequestType == USB_RECIP_ENDPOINT) &&
-		 (req->wValue == USB_ENDPOINT_HALT);
+	return (req->bRequest == USB_REQ_CLEAR_FEATURE) &&
+	       (req->bRequestType == USB_RECIP_ENDPOINT) &&
+	       (req->wValue == USB_ENDPOINT_HALT);
 }
 
 static int is_set_interface_cmd(struct urb *urb)
@@ -165,12 +151,7 @@ static int tweak_reset_device_cmd(struct urb *urb)
 
 	dev_info(&urb->dev->dev, "usb_queue_reset_device\n");
 
-	/*
-	 * With the implementation of pre_reset and post_reset the driver no
-	 * longer unbinds. This allows the use of synchronous reset.
-	 */
-
-	if (usb_lock_device_for_reset(sdev->udev, sdev->interface) < 0) {
+	if (usb_lock_device_for_reset(sdev->udev, NULL) < 0) {
 		dev_err(&urb->dev->dev, "could not obtain lock to reset device\n");
 		return 0;
 	}
@@ -318,7 +299,7 @@ static struct stub_priv *stub_priv_alloc(struct stub_device *sdev,
 
 	priv = kmem_cache_zalloc(stub_priv_cache, GFP_ATOMIC);
 	if (!priv) {
-		dev_err(&sdev->interface->dev, "alloc stub_priv\n");
+		dev_err(&sdev->udev->dev, "alloc stub_priv\n");
 		spin_unlock_irqrestore(&sdev->priv_lock, flags);
 		usbip_event_add(ud, SDEV_EVENT_ERROR_MALLOC);
 		return NULL;
@@ -380,22 +361,10 @@ static int get_pipe(struct stub_device *sdev, struct usbip_header *pdu)
 	}
 
 	if (usb_endpoint_xfer_isoc(epd)) {
-		/* validate packet size and number of packets */
-		unsigned int maxp, packets, bytes;
-
-#define USB_EP_MAXP_MULT_SHIFT  11
-#define USB_EP_MAXP_MULT_MASK   (3 << USB_EP_MAXP_MULT_SHIFT)
-#define USB_EP_MAXP_MULT(m) \
-	(((m) & USB_EP_MAXP_MULT_MASK) >> USB_EP_MAXP_MULT_SHIFT)
-
-		maxp = usb_endpoint_maxp(epd);
-		maxp *= (USB_EP_MAXP_MULT(
-				__le16_to_cpu(epd->wMaxPacketSize)) + 1);
-		bytes = pdu->u.cmd_submit.transfer_buffer_length;
-		packets = DIV_ROUND_UP(bytes, maxp);
-
+		/* validate number of packets */
 		if (pdu->u.cmd_submit.number_of_packets < 0 ||
-		    pdu->u.cmd_submit.number_of_packets > packets) {
+		    pdu->u.cmd_submit.number_of_packets >
+		    USBIP_MAX_ISO_PACKETS) {
 			dev_err(&sdev->udev->dev,
 				"CMD_SUBMIT: isoc invalid num packets %d\n",
 				pdu->u.cmd_submit.number_of_packets);
@@ -453,9 +422,6 @@ static void masking_bogus_flags(struct urb *urb)
 		if (is_out)
 			allowed |= URB_ZERO_PACKET;
 		/* FALLTHROUGH */
-	case USB_ENDPOINT_XFER_CONTROL:
-		allowed |= URB_NO_FSBR;	/* only affects UHCI */
-		/* FALLTHROUGH */
 	default:			/* all non-iso endpoints */
 		if (!is_out)
 			allowed |= URB_SHORT_NOT_OK;
@@ -491,7 +457,6 @@ static void stub_recv_cmd_submit(struct stub_device *sdev,
 		priv->urb = usb_alloc_urb(0, GFP_KERNEL);
 
 	if (!priv->urb) {
-		dev_err(&sdev->interface->dev, "malloc urb\n");
 		usbip_event_add(ud, SDEV_EVENT_ERROR_MALLOC);
 		return;
 	}
@@ -511,7 +476,7 @@ static void stub_recv_cmd_submit(struct stub_device *sdev,
 	priv->urb->setup_packet = kmemdup(&pdu->u.cmd_submit.setup, 8,
 					  GFP_KERNEL);
 	if (!priv->urb->setup_packet) {
-		dev_err(&sdev->interface->dev, "allocate setup_packet\n");
+		dev_err(&udev->dev, "allocate setup_packet\n");
 		usbip_event_add(ud, SDEV_EVENT_ERROR_MALLOC);
 		return;
 	}
@@ -542,7 +507,7 @@ static void stub_recv_cmd_submit(struct stub_device *sdev,
 		usbip_dbg_stub_rx("submit urb ok, seqnum %u\n",
 				  pdu->base.seqnum);
 	else {
-		dev_err(&sdev->interface->dev, "submit_urb error, %d\n", ret);
+		dev_err(&udev->dev, "submit_urb error, %d\n", ret);
 		usbip_dump_header(pdu);
 		usbip_dump_urb(priv->urb);
 

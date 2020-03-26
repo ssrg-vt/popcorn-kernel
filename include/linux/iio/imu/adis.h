@@ -1,10 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Common library for ADIS16XXX devices
  *
  * Copyright 2012 Analog Devices Inc.
  *   Author: Lars-Peter Clausen <lars@metafoo.de>
- *
- * Licensed under the GPL-2 or later.
  */
 
 #ifndef __IIO_ADIS_H__
@@ -21,6 +20,7 @@
 #define ADIS_REG_PAGE_ID 0x00
 
 struct adis;
+struct adis_burst;
 
 /**
  * struct adis_data - ADIS chip variant specific data
@@ -41,6 +41,7 @@ struct adis_data {
 	unsigned int diag_stat_reg;
 
 	unsigned int self_test_mask;
+	bool self_test_no_autoclear;
 	unsigned int startup_delay;
 
 	const char * const *status_error_msgs;
@@ -56,6 +57,7 @@ struct adis {
 	struct iio_trigger	*trig;
 
 	const struct adis_data	*data;
+	struct adis_burst	*burst;
 
 	struct mutex		txrx_lock;
 	struct spi_message	msg;
@@ -230,6 +232,18 @@ int adis_single_conversion(struct iio_dev *indio_dev,
 	ADIS_MOD_CHAN(IIO_ROT, mod, addr, si, info_sep, info_all, bits)
 
 #ifdef CONFIG_IIO_ADIS_LIB_BUFFER
+
+/**
+ * struct adis_burst - ADIS data for burst transfers
+ * @en			burst mode enabled
+ * @reg_cmd		register command that triggers burst
+ * @extra_len		extra length to account in the SPI RX buffer
+ */
+struct adis_burst {
+	bool		en;
+	unsigned int	reg_cmd;
+	unsigned int	extra_len;
+};
 
 int adis_setup_buffer_and_trigger(struct adis *adis,
 	struct iio_dev *indio_dev, irqreturn_t (*trigger_handler)(int, void *));

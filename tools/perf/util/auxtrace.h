@@ -1,27 +1,20 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * auxtrace.h: AUX area trace support
  * Copyright (c) 2013-2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #ifndef __PERF_AUXTRACE_H
 #define __PERF_AUXTRACE_H
 
 #include <sys/types.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <linux/list.h>
 #include <linux/perf_event.h>
 #include <linux/types.h>
+#include <asm/bitsperlong.h>
 
 #include "../perf.h"
 #include "event.h"
@@ -32,15 +25,22 @@ union perf_event;
 struct perf_session;
 struct perf_evlist;
 struct perf_tool;
+struct perf_mmap;
 struct option;
 struct record_opts;
 struct auxtrace_info_event;
 struct events_stats;
 
+/* Auxtrace records must have the same alignment as perf event records */
+#define PERF_AUXTRACE_RECORD_ALIGNMENT 8
+
 enum auxtrace_type {
 	PERF_AUXTRACE_UNKNOWN,
 	PERF_AUXTRACE_INTEL_PT,
 	PERF_AUXTRACE_INTEL_BTS,
+	PERF_AUXTRACE_CS_ETM,
+	PERF_AUXTRACE_ARM_SPE,
+	PERF_AUXTRACE_S390_CPUMSF,
 };
 
 enum itrace_period_type {
@@ -52,40 +52,52 @@ enum itrace_period_type {
 /**
  * struct itrace_synth_opts - AUX area tracing synthesis options.
  * @set: indicates whether or not options have been set
+ * @default_no_sample: Default to no sampling.
  * @inject: indicates the event (not just the sample) must be fully synthesized
  *          because 'perf inject' will write it out
  * @instructions: whether to synthesize 'instructions' events
  * @branches: whether to synthesize 'branches' events
  * @transactions: whether to synthesize events for transactions
+ * @ptwrites: whether to synthesize events for ptwrites
+ * @pwr_events: whether to synthesize power events
  * @errors: whether to synthesize decoder error events
  * @dont_decode: whether to skip decoding entirely
  * @log: write a decoding log
  * @calls: limit branch samples to calls (can be combined with @returns)
  * @returns: limit branch samples to returns (can be combined with @calls)
  * @callchain: add callchain to 'instructions' events
+ * @thread_stack: feed branches to the thread_stack
  * @last_branch: add branch context to 'instruction' events
  * @callchain_sz: maximum callchain size
  * @last_branch_sz: branch context size
  * @period: 'instructions' events period
  * @period_type: 'instructions' events period type
+ * @initial_skip: skip N events at the beginning.
+ * @cpu_bitmap: CPUs for which to synthesize events, or NULL for all
  */
 struct itrace_synth_opts {
 	bool			set;
+	bool			default_no_sample;
 	bool			inject;
 	bool			instructions;
 	bool			branches;
 	bool			transactions;
+	bool			ptwrites;
+	bool			pwr_events;
 	bool			errors;
 	bool			dont_decode;
 	bool			log;
 	bool			calls;
 	bool			returns;
 	bool			callchain;
+	bool			thread_stack;
 	bool			last_branch;
 	unsigned int		callchain_sz;
 	unsigned int		last_branch_sz;
 	unsigned long long	period;
 	enum itrace_period_type	period_type;
+	unsigned long		initial_skip;
+	unsigned long		*cpu_bitmap;
 };
 
 /**
@@ -117,6 +129,7 @@ struct auxtrace_index {
 /**
  * struct auxtrace - session callbacks to allow AUX area data decoding.
  * @process_event: lets the decoder see all session events
+ * @process_auxtrace_event: process a PERF_RECORD_AUXTRACE event
  * @flush_events: process any remaining data
  * @free_events: free resources associated with event processing
  * @free: free resources associated with the session
@@ -288,12 +301,14 @@ struct auxtrace_mmap_params {
  * @parse_snapshot_options: parse snapshot options
  * @reference: provide a 64-bit reference number for auxtrace_event
  * @read_finish: called after reading from an auxtrace mmap
+ * @alignment: alignment (if any) for AUX area data
  */
 struct auxtrace_record {
 	int (*recording_options)(struct auxtrace_record *itr,
 				 struct perf_evlist *evlist,
 				 struct record_opts *opts);
-	size_t (*info_priv_size)(struct auxtrace_record *itr);
+	size_t (*info_priv_size)(struct auxtrace_record *itr,
+				 struct perf_evlist *evlist);
 	int (*info_fill)(struct auxtrace_record *itr,
 			 struct perf_session *session,
 			 struct auxtrace_info_event *auxtrace_info,
@@ -312,6 +327,48 @@ struct auxtrace_record {
 	unsigned int alignment;
 };
 
+/**
+ * struct addr_filter - address filter.
+ * @list: list node
+ * @range: true if it is a range filter
+ * @start: true if action is 'filter' or 'start'
+ * @action: 'filter', 'start' or 'stop' ('tracestop' is accepted but converted
+ *          to 'stop')
+ * @sym_from: symbol name for the filter address
+ * @sym_to: symbol name that determines the filter size
+ * @sym_from_idx: selects n'th from symbols with the same name (0 means global
+ *                and less than 0 means symbol must be unique)
+ * @sym_to_idx: same as @sym_from_idx but for @sym_to
+ * @addr: filter address
+ * @size: filter region size (for range filters)
+ * @filename: DSO file name or NULL for the kernel
+ * @str: allocated string that contains the other string members
+ */
+struct addr_filter {
+	struct list_head	list;
+	bool			range;
+	bool			start;
+	const char		*action;
+	const char		*sym_from;
+	const char		*sym_to;
+	int			sym_from_idx;
+	int			sym_to_idx;
+	u64			addr;
+	u64			size;
+	const char		*filename;
+	char			*str;
+};
+
+/**
+ * struct addr_filters - list of address filters.
+ * @head: list of address filters
+ * @cnt: number of address filters
+ */
+struct addr_filters {
+	struct list_head	head;
+	int			cnt;
+};
+
 #ifdef HAVE_AUXTRACE_SUPPORT
 
 /*
@@ -323,7 +380,7 @@ struct auxtrace_record {
 static inline u64 auxtrace_mmap__read_snapshot_head(struct auxtrace_mmap *mm)
 {
 	struct perf_event_mmap_page *pc = mm->userpg;
-	u64 head = ACCESS_ONCE(pc->aux_head);
+	u64 head = READ_ONCE(pc->aux_head);
 
 	/* Ensure all reads are done after we read the head */
 	rmb();
@@ -334,7 +391,7 @@ static inline u64 auxtrace_mmap__read_head(struct auxtrace_mmap *mm)
 {
 	struct perf_event_mmap_page *pc = mm->userpg;
 #if BITS_PER_LONG == 64 || !defined(HAVE_SYNC_COMPARE_AND_SWAP_SUPPORT)
-	u64 head = ACCESS_ONCE(pc->aux_head);
+	u64 head = READ_ONCE(pc->aux_head);
 #else
 	u64 head = __sync_val_compare_and_swap(&pc->aux_head, 0, 0);
 #endif
@@ -375,13 +432,14 @@ void auxtrace_mmap_params__set_idx(struct auxtrace_mmap_params *mp,
 				   bool per_cpu);
 
 typedef int (*process_auxtrace_t)(struct perf_tool *tool,
+				  struct perf_mmap *map,
 				  union perf_event *event, void *data1,
 				  size_t len1, void *data2, size_t len2);
 
-int auxtrace_mmap__read(struct auxtrace_mmap *mm, struct auxtrace_record *itr,
+int auxtrace_mmap__read(struct perf_mmap *map, struct auxtrace_record *itr,
 			struct perf_tool *tool, process_auxtrace_t fn);
 
-int auxtrace_mmap__read_snapshot(struct auxtrace_mmap *mm,
+int auxtrace_mmap__read_snapshot(struct perf_mmap *map,
 				 struct auxtrace_record *itr,
 				 struct perf_tool *tool, process_auxtrace_t fn,
 				 size_t snapshot_size);
@@ -429,7 +487,8 @@ int auxtrace_parse_snapshot_options(struct auxtrace_record *itr,
 int auxtrace_record__options(struct auxtrace_record *itr,
 			     struct perf_evlist *evlist,
 			     struct record_opts *opts);
-size_t auxtrace_record__info_priv_size(struct auxtrace_record *itr);
+size_t auxtrace_record__info_priv_size(struct auxtrace_record *itr,
+				       struct perf_evlist *evlist);
 int auxtrace_record__info_fill(struct auxtrace_record *itr,
 			       struct perf_session *session,
 			       struct auxtrace_info_event *auxtrace_info,
@@ -451,29 +510,33 @@ void auxtrace_index__free(struct list_head *head);
 
 void auxtrace_synth_error(struct auxtrace_error_event *auxtrace_error, int type,
 			  int code, int cpu, pid_t pid, pid_t tid, u64 ip,
-			  const char *msg);
+			  const char *msg, u64 timestamp);
 
 int perf_event__synthesize_auxtrace_info(struct auxtrace_record *itr,
 					 struct perf_tool *tool,
 					 struct perf_session *session,
 					 perf_event__handler_t process);
-int perf_event__process_auxtrace_info(struct perf_tool *tool,
-				      union perf_event *event,
-				      struct perf_session *session);
-s64 perf_event__process_auxtrace(struct perf_tool *tool,
-				 union perf_event *event,
-				 struct perf_session *session);
-int perf_event__process_auxtrace_error(struct perf_tool *tool,
-				       union perf_event *event,
-				       struct perf_session *session);
+int perf_event__process_auxtrace_info(struct perf_session *session,
+				      union perf_event *event);
+s64 perf_event__process_auxtrace(struct perf_session *session,
+				 union perf_event *event);
+int perf_event__process_auxtrace_error(struct perf_session *session,
+				       union perf_event *event);
 int itrace_parse_synth_opts(const struct option *opt, const char *str,
 			    int unset);
-void itrace_synth_opts__set_default(struct itrace_synth_opts *synth_opts);
+void itrace_synth_opts__set_default(struct itrace_synth_opts *synth_opts,
+				    bool no_sample);
 
 size_t perf_event__fprintf_auxtrace_error(union perf_event *event, FILE *fp);
 void perf_session__auxtrace_error_inc(struct perf_session *session,
 				      union perf_event *event);
 void events_stats__auxtrace_error_warn(const struct events_stats *stats);
+
+void addr_filters__init(struct addr_filters *filts);
+void addr_filters__exit(struct addr_filters *filts);
+int addr_filters__parse_bare_filter(struct addr_filters *filts,
+				    const char *filter);
+int auxtrace_parse_filters(struct perf_evlist *evlist);
 
 static inline int auxtrace__process_event(struct perf_session *session,
 					  union perf_event *event,
@@ -511,11 +574,28 @@ static inline void auxtrace__free(struct perf_session *session)
 	return session->auxtrace->free(session);
 }
 
+#define ITRACE_HELP \
+"				i:	    		synthesize instructions events\n"		\
+"				b:	    		synthesize branches events\n"		\
+"				c:	    		synthesize branches events (calls only)\n"	\
+"				r:	    		synthesize branches events (returns only)\n" \
+"				x:	    		synthesize transactions events\n"		\
+"				w:	    		synthesize ptwrite events\n"		\
+"				p:	    		synthesize power events\n"			\
+"				e:	    		synthesize error events\n"			\
+"				d:	    		create a debug log\n"			\
+"				g[len]:     		synthesize a call chain (use with i or x)\n" \
+"				l[len]:     		synthesize last branch entries (use with i or x)\n" \
+"				sNUMBER:    		skip initial number of events\n"		\
+"				PERIOD[ns|us|ms|i|t]:   specify period to sample stream\n" \
+"				concatenate multiple options. Default is ibxwpe or cewp\n"
+
+
 #else
 
 static inline struct auxtrace_record *
 auxtrace_record__init(struct perf_evlist *evlist __maybe_unused,
-		      int *err __maybe_unused)
+		      int *err)
 {
 	*err = 0;
 	return NULL;
@@ -633,6 +713,12 @@ void auxtrace_index__free(struct list_head *head __maybe_unused)
 {
 }
 
+static inline
+int auxtrace_parse_filters(struct perf_evlist *evlist __maybe_unused)
+{
+	return 0;
+}
+
 int auxtrace_mmap__mmap(struct auxtrace_mmap *mm,
 			struct auxtrace_mmap_params *mp,
 			void *userpg, int fd);
@@ -644,6 +730,8 @@ void auxtrace_mmap_params__init(struct auxtrace_mmap_params *mp,
 void auxtrace_mmap_params__set_idx(struct auxtrace_mmap_params *mp,
 				   struct perf_evlist *evlist, int idx,
 				   bool per_cpu);
+
+#define ITRACE_HELP ""
 
 #endif
 

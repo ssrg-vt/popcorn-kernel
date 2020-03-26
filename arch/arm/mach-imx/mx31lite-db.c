@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  LogicPD i.MX31 SOM-LV development board support
  *
@@ -8,16 +9,6 @@
  *    Copyright 2005-2007 Freescale Semiconductor
  *    Copyright (c) 2009 Alberto Panizzo <maramaopercheseimorto@gmail.com>
  *    Copyright (C) 2009 Valentin Longchamp, EPFL Mobots group
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -45,19 +36,6 @@
  */
 
 static unsigned int litekit_db_board_pins[] __initdata = {
-	/* UART1 */
-	MX31_PIN_CTS1__CTS1,
-	MX31_PIN_RTS1__RTS1,
-	MX31_PIN_TXD1__TXD1,
-	MX31_PIN_RXD1__RXD1,
-	/* SPI 0 */
-	MX31_PIN_CSPI1_SCLK__SCLK,
-	MX31_PIN_CSPI1_MOSI__MOSI,
-	MX31_PIN_CSPI1_MISO__MISO,
-	MX31_PIN_CSPI1_SPI_RDY__SPI_RDY,
-	MX31_PIN_CSPI1_SS0__SS0,
-	MX31_PIN_CSPI1_SS1__SS1,
-	MX31_PIN_CSPI1_SS2__SS2,
 	/* SDHC1 */
 	MX31_PIN_SD1_DATA0__SD1_DATA0,
 	MX31_PIN_SD1_DATA1__SD1_DATA1,
@@ -65,11 +43,6 @@ static unsigned int litekit_db_board_pins[] __initdata = {
 	MX31_PIN_SD1_DATA3__SD1_DATA3,
 	MX31_PIN_SD1_CLK__SD1_CLK,
 	MX31_PIN_SD1_CMD__SD1_CMD,
-};
-
-/* UART */
-static const struct imxuart_platform_data uart_pdata __initconst = {
-	.flags = IMXUART_HAVE_RTSCTS,
 };
 
 /* MMC */
@@ -146,19 +119,6 @@ static const struct imxmmc_platform_data mmc_pdata __initconst = {
 	.exit	   = mxc_mmc1_exit,
 };
 
-/* SPI */
-
-static int spi_internal_chipselect[] = {
-	MXC_SPI_CS(0),
-	MXC_SPI_CS(1),
-	MXC_SPI_CS(2),
-};
-
-static const struct spi_imx_master spi0_pdata __initconst = {
-	.chipselect	= spi_internal_chipselect,
-	.num_chipselect	= ARRAY_SIZE(spi_internal_chipselect),
-};
-
 /* GPIO LEDs */
 
 static const struct gpio_led litekit_leds[] __initconst = {
@@ -187,9 +147,7 @@ void __init mx31lite_db_init(void)
 	mxc_iomux_setup_multiple_pins(litekit_db_board_pins,
 					ARRAY_SIZE(litekit_db_board_pins),
 					"development board pins");
-	imx31_add_imx_uart0(&uart_pdata);
 	imx31_add_mxc_mmc(0, &mmc_pdata);
-	imx31_add_spi_imx0(&spi0_pdata);
 	gpio_led_register_device(-1, &litekit_led_platform_data);
 	imx31_add_imx2_wdt();
 	imx31_add_mxc_rtc();

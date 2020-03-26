@@ -248,8 +248,6 @@ static int pm860x_touch_probe(struct platform_device *pdev)
 	if (!touch)
 		return -ENOMEM;
 
-	platform_set_drvdata(pdev, touch);
-
 	touch->idev = devm_input_allocate_device(&pdev->dev);
 	if (!touch->idev) {
 		dev_err(&pdev->dev, "Failed to allocate input device!\n");
@@ -293,7 +291,6 @@ static int pm860x_touch_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	platform_set_drvdata(pdev, touch);
 	return 0;
 }
 

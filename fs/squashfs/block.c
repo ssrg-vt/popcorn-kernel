@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Squashfs - a compressed read only filesystem for Linux
  *
  * Copyright (c) 2002, 2003, 2004, 2005, 2006, 2007, 2008
  * Phillip Lougher <phillip@squashfs.org.uk>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2,
- * or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  * block.c
  */
@@ -31,6 +18,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/buffer_head.h>
+#include <linux/bio.h>
 
 #include "squashfs_fs.h"
 #include "squashfs_fs_sb.h"
@@ -124,7 +112,7 @@ int squashfs_read_data(struct super_block *sb, u64 index, int length,
 				goto block_release;
 			bytes += msblk->devblksize;
 		}
-		ll_rw_block(READ, b, bh);
+		ll_rw_block(REQ_OP_READ, 0, b, bh);
 	} else {
 		/*
 		 * Metadata block.
@@ -156,7 +144,7 @@ int squashfs_read_data(struct super_block *sb, u64 index, int length,
 				goto block_release;
 			bytes += msblk->devblksize;
 		}
-		ll_rw_block(READ, b - 1, bh + 1);
+		ll_rw_block(REQ_OP_READ, 0, b - 1, bh + 1);
 	}
 
 	for (i = 0; i < b; i++) {
@@ -166,6 +154,8 @@ int squashfs_read_data(struct super_block *sb, u64 index, int length,
 	}
 
 	if (compressed) {
+		if (!msblk->stream)
+			goto read_failure;
 		length = squashfs_decompress(msblk, bh, b, offset, length,
 			output);
 		if (length < 0)
@@ -181,11 +171,11 @@ int squashfs_read_data(struct super_block *sb, u64 index, int length,
 			in = min(bytes, msblk->devblksize - offset);
 			bytes -= in;
 			while (in) {
-				if (pg_offset == PAGE_CACHE_SIZE) {
+				if (pg_offset == PAGE_SIZE) {
 					data = squashfs_next_page(output);
 					pg_offset = 0;
 				}
-				avail = min_t(int, in, PAGE_CACHE_SIZE -
+				avail = min_t(int, in, PAGE_SIZE -
 						pg_offset);
 				memcpy(data + pg_offset, bh[k]->b_data + offset,
 						avail);

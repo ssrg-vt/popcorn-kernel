@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2010-2013 Bluecherry, LLC <http://www.bluecherrydvr.com>
  *
@@ -6,16 +7,6 @@
  *
  * Additional work by:
  * John Brooks <john.brooks@bluecherry.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -225,7 +216,7 @@ finish_buf:
 		vb2_set_plane_payload(vb, 0,
 			solo_vlines(solo_dev) * solo_bytesperline(solo_dev));
 		vbuf->sequence = solo_dev->sequence++;
-		v4l2_get_timestamp(&vbuf->timestamp);
+		vb->timestamp = ktime_get_ns();
 	}
 
 	vb2_buffer_done(vb, error ? VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
@@ -313,14 +304,13 @@ static void solo_stop_thread(struct solo_dev *solo_dev)
 	solo_dev->kthread = NULL;
 }
 
-static int solo_queue_setup(struct vb2_queue *q, const void *parg,
+static int solo_queue_setup(struct vb2_queue *q,
 			   unsigned int *num_buffers, unsigned int *num_planes,
-			   unsigned int sizes[], void *alloc_ctxs[])
+			   unsigned int sizes[], struct device *alloc_devs[])
 {
 	struct solo_dev *solo_dev = vb2_get_drv_priv(q);
 
 	sizes[0] = solo_image_size(solo_dev);
-	alloc_ctxs[0] = solo_dev->alloc_ctx;
 	*num_planes = 1;
 
 	if (*num_buffers < MIN_VID_BUFFERS)
@@ -384,8 +374,8 @@ static int solo_querycap(struct file *file, void  *priv,
 {
 	struct solo_dev *solo_dev = video_drvdata(file);
 
-	strcpy(cap->driver, SOLO6X10_NAME);
-	strcpy(cap->card, "Softlogic 6x10");
+	strscpy(cap->driver, SOLO6X10_NAME, sizeof(cap->driver));
+	strscpy(cap->card, "Softlogic 6x10", sizeof(cap->card));
 	snprintf(cap->bus_info, sizeof(cap->bus_info), "PCI:%s",
 		 pci_name(solo_dev->pdev));
 	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE |
@@ -397,26 +387,24 @@ static int solo_querycap(struct file *file, void  *priv,
 static int solo_enum_ext_input(struct solo_dev *solo_dev,
 			       struct v4l2_input *input)
 {
-	static const char * const dispnames_1[] = { "4UP" };
-	static const char * const dispnames_2[] = { "4UP-1", "4UP-2" };
-	static const char * const dispnames_5[] = {
-		"4UP-1", "4UP-2", "4UP-3", "4UP-4", "16UP"
-	};
-	const char * const *dispnames;
+	int ext = input->index - solo_dev->nr_chans;
+	unsigned int nup, first;
 
-	if (input->index >= (solo_dev->nr_chans + solo_dev->nr_ext))
+	if (ext >= solo_dev->nr_ext)
 		return -EINVAL;
 
-	if (solo_dev->nr_ext == 5)
-		dispnames = dispnames_5;
-	else if (solo_dev->nr_ext == 2)
-		dispnames = dispnames_2;
-	else
-		dispnames = dispnames_1;
-
-	snprintf(input->name, sizeof(input->name), "Multi %s",
-		 dispnames[input->index - solo_dev->nr_chans]);
-
+	nup   = (ext == 4) ? 16 : 4;
+	first = (ext & 3) << 2; /* first channel in the n-up */
+	snprintf(input->name, sizeof(input->name),
+		 "Multi %d-up (cameras %d-%d)",
+		 nup, first + 1, first + nup);
+	/* Possible outputs:
+	 *  Multi 4-up (cameras 1-4)
+	 *  Multi 4-up (cameras 5-8)
+	 *  Multi 4-up (cameras 9-12)
+	 *  Multi 4-up (cameras 13-16)
+	 *  Multi 16-up (cameras 1-16)
+	 */
 	return 0;
 }
 
@@ -473,7 +461,7 @@ static int solo_enum_fmt_cap(struct file *file, void *priv,
 		return -EINVAL;
 
 	f->pixelformat = V4L2_PIX_FMT_UYVY;
-	strlcpy(f->description, "UYUV 4:2:2 Packed", sizeof(f->description));
+	strscpy(f->description, "UYUV 4:2:2 Packed", sizeof(f->description));
 
 	return 0;
 }
@@ -633,7 +621,7 @@ static const struct v4l2_ioctl_ops solo_v4l2_ioctl_ops = {
 	.vidioc_unsubscribe_event	= v4l2_event_unsubscribe,
 };
 
-static struct video_device solo_v4l2_template = {
+static const struct video_device solo_v4l2_template = {
 	.name			= SOLO6X10_NAME,
 	.fops			= &solo_v4l2_fops,
 	.ioctl_ops		= &solo_v4l2_ioctl_ops,
@@ -692,15 +680,10 @@ int solo_v4l2_init(struct solo_dev *solo_dev, unsigned nr)
 	solo_dev->vidq.gfp_flags = __GFP_DMA32 | __GFP_KSWAPD_RECLAIM;
 	solo_dev->vidq.buf_struct_size = sizeof(struct solo_vb2_buf);
 	solo_dev->vidq.lock = &solo_dev->lock;
+	solo_dev->vidq.dev = &solo_dev->pdev->dev;
 	ret = vb2_queue_init(&solo_dev->vidq);
 	if (ret < 0)
 		goto fail;
-
-	solo_dev->alloc_ctx = vb2_dma_contig_init_ctx(&solo_dev->pdev->dev);
-	if (IS_ERR(solo_dev->alloc_ctx)) {
-		dev_err(&solo_dev->pdev->dev, "Can't allocate buffer context");
-		return PTR_ERR(solo_dev->alloc_ctx);
-	}
 
 	/* Cycle all the channels and clear */
 	for (i = 0; i < solo_dev->nr_chans; i++) {
@@ -721,15 +704,14 @@ int solo_v4l2_init(struct solo_dev *solo_dev, unsigned nr)
 	snprintf(solo_dev->vfd->name, sizeof(solo_dev->vfd->name), "%s (%i)",
 		 SOLO6X10_NAME, solo_dev->vfd->num);
 
-	dev_info(&solo_dev->pdev->dev, "Display as /dev/video%d with "
-		 "%d inputs (%d extended)\n", solo_dev->vfd->num,
+	dev_info(&solo_dev->pdev->dev, "Display as /dev/video%d with %d inputs (%d extended)\n",
+		 solo_dev->vfd->num,
 		 solo_dev->nr_chans, solo_dev->nr_ext);
 
 	return 0;
 
 fail:
 	video_device_release(solo_dev->vfd);
-	vb2_dma_contig_cleanup_ctx(solo_dev->alloc_ctx);
 	v4l2_ctrl_handler_free(&solo_dev->disp_hdl);
 	solo_dev->vfd = NULL;
 	return ret;
@@ -741,7 +723,6 @@ void solo_v4l2_exit(struct solo_dev *solo_dev)
 		return;
 
 	video_unregister_device(solo_dev->vfd);
-	vb2_dma_contig_cleanup_ctx(solo_dev->alloc_ctx);
 	v4l2_ctrl_handler_free(&solo_dev->disp_hdl);
 	solo_dev->vfd = NULL;
 }

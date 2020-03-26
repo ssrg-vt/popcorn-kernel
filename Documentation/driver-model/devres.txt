@@ -132,6 +132,13 @@ devres.  Complexity is shifted from less maintained low level drivers
 to better maintained higher layer.  Also, as init failure path is
 shared with exit path, both can get more testing.
 
+Note though that when converting current calls or assignments to
+managed devm_* versions it is up to you to check if internal operations
+like allocating memory, have failed. Managed resources pertains to the
+freeing of these resources *only* - all other checks needed are still
+on you. In some cases this may mean introducing checks that were not
+necessary before moving to the managed devm_* calls.
+
 
   3. Devres group
   ---------------
@@ -235,16 +242,22 @@ certainly invest a bit more effort into libata core layer).
 
 CLOCK
   devm_clk_get()
+  devm_clk_get_optional()
   devm_clk_put()
+  devm_clk_hw_register()
+  devm_of_clk_add_hw_provider()
+  devm_clk_hw_register_clkdev()
 
 DMA
+  dmaenginem_async_device_register()
   dmam_alloc_coherent()
-  dmam_alloc_noncoherent()
-  dmam_declare_coherent_memory()
+  dmam_alloc_attrs()
   dmam_free_coherent()
-  dmam_free_noncoherent()
   dmam_pool_create()
   dmam_pool_destroy()
+
+DRM
+  devm_drm_dev_init()
 
 GPIO
   devm_gpiod_get()
@@ -252,6 +265,14 @@ GPIO
   devm_gpiod_get_index_optional()
   devm_gpiod_get_optional()
   devm_gpiod_put()
+  devm_gpiod_unhinge()
+  devm_gpiochip_add_data()
+  devm_gpio_request()
+  devm_gpio_request_one()
+  devm_gpio_free()
+
+I2C
+  devm_i2c_new_dummy_device()
 
 IIO
   devm_iio_device_alloc()
@@ -260,8 +281,19 @@ IIO
   devm_iio_device_unregister()
   devm_iio_kfifo_allocate()
   devm_iio_kfifo_free()
+  devm_iio_triggered_buffer_setup()
+  devm_iio_triggered_buffer_cleanup()
   devm_iio_trigger_alloc()
   devm_iio_trigger_free()
+  devm_iio_trigger_register()
+  devm_iio_trigger_unregister()
+  devm_iio_channel_get()
+  devm_iio_channel_release()
+  devm_iio_channel_get_all()
+  devm_iio_channel_release_all()
+
+INPUT
+  devm_input_allocate_device()
 
 IO region
   devm_release_mem_region()
@@ -289,6 +321,14 @@ IRQ
   devm_request_any_context_irq()
   devm_request_irq()
   devm_request_threaded_irq()
+  devm_irq_alloc_descs()
+  devm_irq_alloc_desc()
+  devm_irq_alloc_desc_at()
+  devm_irq_alloc_desc_from()
+  devm_irq_alloc_descs_from()
+  devm_irq_alloc_generic_chip()
+  devm_irq_setup_generic_chip()
+  devm_irq_sim_init()
 
 LED
   devm_led_classdev_register()
@@ -312,9 +352,24 @@ MEM
   devm_kvasprintf()
   devm_kzalloc()
 
+MFD
+  devm_mfd_add_devices()
+
+MUX
+  devm_mux_chip_alloc()
+  devm_mux_chip_register()
+  devm_mux_control_get()
+
+PER-CPU MEM
+  devm_alloc_percpu()
+  devm_free_percpu()
+
 PCI
-  pcim_enable_device()	: after success, all PCI ops become managed
-  pcim_pin_device()	: keep PCI device enabled after release
+  devm_pci_alloc_host_bridge()  : managed PCI host bridge allocation
+  devm_pci_remap_cfgspace()	: ioremap PCI configuration space
+  devm_pci_remap_cfg_resource()	: ioremap PCI configuration space resource
+  pcim_enable_device()		: after success, all PCI ops become managed
+  pcim_pin_device()		: keep PCI device enabled after release
 
 PHY
   devm_usb_get_phy()
@@ -323,6 +378,12 @@ PHY
 PINCTRL
   devm_pinctrl_get()
   devm_pinctrl_put()
+  devm_pinctrl_register()
+  devm_pinctrl_unregister()
+
+POWER
+  devm_reboot_mode_register()
+  devm_reboot_mode_unregister()
 
 PWM
   devm_pwm_get()
@@ -334,8 +395,18 @@ REGULATOR
   devm_regulator_put()
   devm_regulator_register()
 
+RESET
+  devm_reset_control_get()
+  devm_reset_controller_register()
+
+SERDEV
+  devm_serdev_device_open()
+
 SLAVE DMA ENGINE
   devm_acpi_dma_controller_register()
 
 SPI
   devm_spi_register_master()
+
+WATCHDOG
+  devm_watchdog_register_device()

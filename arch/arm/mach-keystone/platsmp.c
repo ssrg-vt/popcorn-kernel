@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Keystone SOC SMP platform code
  *
@@ -6,10 +7,6 @@
  *	Santosh Shilimkar <santosh.shillimkar@ti.com>
  *
  * Based on platsmp.c, Copyright (C) 2002 ARM Ltd.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -39,6 +36,6 @@ static int keystone_smp_boot_secondary(unsigned int cpu,
 	return error;
 }
 
-struct smp_operations keystone_smp_ops __initdata = {
+const struct smp_operations keystone_smp_ops __initconst = {
 	.smp_boot_secondary	= keystone_smp_boot_secondary,
 };

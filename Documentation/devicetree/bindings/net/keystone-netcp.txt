@@ -2,7 +2,7 @@ This document describes the device tree bindings associated with the
 keystone network coprocessor(NetCP) driver support.
 
 The network coprocessor (NetCP) is a hardware accelerator that processes
-Ethernet packets. NetCP has a gigabit Ethernet (GbE) subsytem with a ethernet
+Ethernet packets. NetCP has a gigabit Ethernet (GbE) subsystem with a ethernet
 switch sub-module to send and receive packets. NetCP also includes a packet
 accelerator (PA) module to perform packet classification operations such as
 header matching, and packet modification operations such as checksum
@@ -135,13 +135,13 @@ Optional properties:
 		are swapped.  The netcp driver will swap the two DWORDs
 		back to the proper order when this property is set to 2
 		when it obtains the mac address from efuse.
-- local-mac-address:	the driver is designed to use the of_get_mac_address api
-			only if efuse-mac is 0. When efuse-mac is 0, the MAC
-			address is obtained from local-mac-address. If this
-			attribute is not present, then the driver will use a
-			random MAC address.
 - "netcp-device label":	phandle to the device specification for each of NetCP
 			sub-module attached to this interface.
+
+The MAC address will be determined using the optional properties defined in
+ethernet.txt and only if efuse-mac is set to 0. If all of the optional MAC
+address properties are not present, then the driver will use a random MAC
+address.
 
 Example binding:
 

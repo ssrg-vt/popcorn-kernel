@@ -18,6 +18,7 @@
 
 #define NUM_DEFAULT_KEYS 4
 #define NUM_DEFAULT_MGMT_KEYS 2
+#define INVALID_PTK_KEYIDX 2 /* Keyidx always pointing to a NULL key for PTK */
 
 struct ieee80211_local;
 struct ieee80211_sub_if_data;
@@ -44,11 +45,15 @@ enum ieee80211_internal_tkip_state {
 };
 
 struct tkip_ctx {
-	u32 iv32;	/* current iv32 */
-	u16 iv16;	/* current iv16 */
 	u16 p1k[5];	/* p1k cache */
 	u32 p1k_iv32;	/* iv32 for which p1k computed */
 	enum ieee80211_internal_tkip_state state;
+};
+
+struct tkip_ctx_rx {
+	struct tkip_ctx ctx;
+	u32 iv32;	/* current iv32 */
+	u16 iv16;	/* current iv16 */
 };
 
 struct ieee80211_key {
@@ -71,7 +76,7 @@ struct ieee80211_key {
 			struct tkip_ctx tx;
 
 			/* last received RSC */
-			struct tkip_ctx rx[IEEE80211_NUM_TIDS];
+			struct tkip_ctx_rx rx[IEEE80211_NUM_TIDS];
 
 			/* number of mic failures */
 			u32 mic_failures;
@@ -89,7 +94,7 @@ struct ieee80211_key {
 		} ccmp;
 		struct {
 			u8 rx_pn[IEEE80211_CMAC_PN_LEN];
-			struct crypto_cipher *tfm;
+			struct crypto_shash *tfm;
 			u32 replays; /* dot11RSNAStatsCMACReplays */
 			u32 icverrors; /* dot11RSNAStatsCMACICVErrors */
 		} aes_cmac;
@@ -142,6 +147,7 @@ ieee80211_key_alloc(u32 cipher, int idx, size_t key_len,
 int ieee80211_key_link(struct ieee80211_key *key,
 		       struct ieee80211_sub_if_data *sdata,
 		       struct sta_info *sta);
+int ieee80211_set_tx_key(struct ieee80211_key *key);
 void ieee80211_key_free(struct ieee80211_key *key, bool delay_tailroom);
 void ieee80211_key_free_unused(struct ieee80211_key *key);
 void ieee80211_set_default_key(struct ieee80211_sub_if_data *sdata, int idx,

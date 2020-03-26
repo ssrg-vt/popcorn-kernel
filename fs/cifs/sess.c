@@ -398,6 +398,12 @@ int build_ntlmssp_auth_blob(unsigned char **pbuffer,
 		goto setup_ntlmv2_ret;
 	}
 	*pbuffer = kmalloc(size_of_ntlmssp_blob(ses), GFP_KERNEL);
+	if (!*pbuffer) {
+		rc = -ENOMEM;
+		cifs_dbg(VFS, "Error %d during NTLMSSP allocation\n", rc);
+		*buflen = 0;
+		goto setup_ntlmv2_ret;
+	}
 	sec_blob = (AUTHENTICATE_MESSAGE *)*pbuffer;
 
 	memcpy(sec_blob->Signature, NTLMSSP_SIGNATURE, 8);
@@ -448,7 +454,7 @@ int build_ntlmssp_auth_blob(unsigned char **pbuffer,
 	} else {
 		int len;
 		len = cifs_strtoUTF16((__le16 *)tmp, ses->domainName,
-				      CIFS_MAX_USERNAME_LEN, nls_cp);
+				      CIFS_MAX_DOMAINNAME_LEN, nls_cp);
 		len *= 2; /* unicode is 2 bytes each */
 		sec_blob->DomainName.BufferOffset = cpu_to_le32(tmp - *pbuffer);
 		sec_blob->DomainName.Length = cpu_to_le16(len);
@@ -498,7 +504,7 @@ setup_ntlmv2_ret:
 }
 
 enum securityEnum
-select_sectype(struct TCP_Server_Info *server, enum securityEnum requested)
+cifs_select_sectype(struct TCP_Server_Info *server, enum securityEnum requested)
 {
 	switch (server->negflavor) {
 	case CIFS_NEGFLAVOR_EXTENDED:
@@ -528,9 +534,9 @@ select_sectype(struct TCP_Server_Info *server, enum securityEnum requested)
 			if (global_secflags & CIFSSEC_MAY_NTLM)
 				return NTLM;
 		default:
-			/* Fallthrough to attempt LANMAN authentication next */
 			break;
 		}
+		/* Fallthrough - to attempt LANMAN authentication next */
 	case CIFS_NEGFLAVOR_LANMAN:
 		switch (requested) {
 		case LANMAN:
@@ -650,6 +656,7 @@ sess_sendreceive(struct sess_data *sess_data)
 	int rc;
 	struct smb_hdr *smb_buf = (struct smb_hdr *) sess_data->iov[0].iov_base;
 	__u16 count;
+	struct kvec rsp_iov = { NULL, 0 };
 
 	count = sess_data->iov[1].iov_len + sess_data->iov[2].iov_len;
 	smb_buf->smb_buf_length =
@@ -659,7 +666,9 @@ sess_sendreceive(struct sess_data *sess_data)
 	rc = SendReceive2(sess_data->xid, sess_data->ses,
 			  sess_data->iov, 3 /* num_iovecs */,
 			  &sess_data->buf0_type,
-			  CIFS_LOG_ERROR);
+			  CIFS_LOG_ERROR, &rsp_iov);
+	cifs_small_buf_release(sess_data->iov[0].iov_base);
+	memcpy(&sess_data->iov[0], &rsp_iov, sizeof(struct kvec));
 
 	return rc;
 }
@@ -708,6 +717,8 @@ sess_auth_lanman(struct sess_data *sess_data)
 		rc = calc_lanman_hash(ses->password, ses->server->cryptkey,
 				      ses->server->sec_mode & SECMODE_PW_ENCRYPT ?
 				      true : false, lnm_session_key);
+		if (rc)
+			goto out;
 
 		memcpy(bcc_ptr, (char *)lnm_session_key, CIFS_AUTH_RESP_SIZE);
 		bcc_ptr += CIFS_AUTH_RESP_SIZE;
@@ -1143,14 +1154,12 @@ out:
 static int
 _sess_auth_rawntlmssp_assemble_req(struct sess_data *sess_data)
 {
-	struct smb_hdr *smb_buf;
 	SESSION_SETUP_ANDX *pSMB;
 	struct cifs_ses *ses = sess_data->ses;
 	__u32 capabilities;
 	char *bcc_ptr;
 
 	pSMB = (SESSION_SETUP_ANDX *)sess_data->iov[0].iov_base;
-	smb_buf = (struct smb_hdr *)pSMB;
 
 	capabilities = cifs_ssetup_hdr(ses, pSMB);
 	if ((pSMB->req.hdr.Flags2 & SMBFLG2_UNICODE) == 0) {
@@ -1386,7 +1395,7 @@ static int select_sec(struct cifs_ses *ses, struct sess_data *sess_data)
 {
 	int type;
 
-	type = select_sectype(ses->server, ses->sectype);
+	type = cifs_select_sectype(ses->server, ses->sectype);
 	cifs_dbg(FYI, "sess setup type %d\n", type);
 	if (type == Unspecified) {
 		cifs_dbg(VFS,

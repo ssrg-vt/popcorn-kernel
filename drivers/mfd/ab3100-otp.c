@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/mfd/ab3100_otp.c
  *
  * Copyright (C) 2007-2009 ST-Ericsson AB
- * License terms: GNU General Public License (GPL) version 2
  * Driver to read out OTP from the AB3100 Mixed-signal circuit
  * Author: Linus Walleij <linus.walleij@stericsson.com>
  */
@@ -188,10 +188,9 @@ static int __init ab3100_otp_probe(struct platform_device *pdev)
 	int i;
 
 	otp = devm_kzalloc(&pdev->dev, sizeof(struct ab3100_otp), GFP_KERNEL);
-	if (!otp) {
-		dev_err(&pdev->dev, "could not allocate AB3100 OTP device\n");
+	if (!otp)
 		return -ENOMEM;
-	}
+
 	otp->dev = &pdev->dev;
 
 	/* Replace platform data coming in with a local struct */

@@ -1,8 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config INFINIBAND_NES
 	tristate "NetEffect RNIC Driver"
-	depends on PCI && INET && INFINIBAND
+	depends on PCI && INET
 	select LIBCRC32C
-	select INET_LRO
 	---help---
 	  This is the RDMA Network Interface Card (RNIC) driver for
 	  NetEffect Ethernet Cluster Server Adapters.

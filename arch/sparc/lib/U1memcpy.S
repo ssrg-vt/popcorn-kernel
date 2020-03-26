@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* U1memcpy.S: UltraSPARC-I/II/IIi/IIe optimized memcpy.
  *
  * Copyright (C) 1997, 2004 David S. Miller (davem@redhat.com)
@@ -8,6 +9,7 @@
 #include <linux/linkage.h>
 #include <asm/visasm.h>
 #include <asm/asi.h>
+#include <asm/export.h>
 #define GLOBAL_SPARE	g7
 #else
 #define GLOBAL_SPARE	g5
@@ -680,3 +682,4 @@ FUNC_NAME:		/* %o0=dst, %o1=src, %o2=len */
 	 mov		EX_RETVAL(%o4), %o0
 
 	.size		FUNC_NAME, .-FUNC_NAME
+EXPORT_SYMBOL(FUNC_NAME)

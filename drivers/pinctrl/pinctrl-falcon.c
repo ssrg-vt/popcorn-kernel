@@ -7,10 +7,10 @@
  *  by the Free Software Foundation.
  *
  *  Copyright (C) 2012 Thomas Langer <thomas.langer@lantiq.com>
- *  Copyright (C) 2012 John Crispin <blogic@openwrt.org>
+ *  Copyright (C) 2012 John Crispin <john@phrozen.org>
  */
 
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/export.h>

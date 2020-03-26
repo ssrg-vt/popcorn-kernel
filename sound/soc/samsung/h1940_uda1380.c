@@ -1,17 +1,11 @@
-/*
- * h1940-uda1380.c  --  ALSA Soc Audio Layer
- *
- * Copyright (c) 2010 Arnaud Patard <arnaud.patard@rtp-net.org>
- * Copyright (c) 2010 Vasily Khoruzhick <anarsoul@gmail.com>
- *
- * Based on version from Arnaud Patard <arnaud.patard@rtp-net.org>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// h1940_uda1380.c - ALSA SoC Audio Layer
+//
+// Copyright (c) 2010 Arnaud Patard <arnaud.patard@rtp-net.org>
+// Copyright (c) 2010 Vasily Khoruzhick <anarsoul@gmail.com>
+//
+// Based on version from Arnaud Patard <arnaud.patard@rtp-net.org>
 
 #include <linux/types.h>
 #include <linux/gpio.h>
@@ -170,14 +164,6 @@ static int h1940_uda1380_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
-static int h1940_uda1380_card_remove(struct snd_soc_card *card)
-{
-	snd_soc_jack_free_gpios(&hp_jack, ARRAY_SIZE(hp_jack_gpios),
-		hp_jack_gpios);
-
-	return 0;
-}
-
 /* s3c24xx digital audio interface glue - connects codec <--> CPU */
 static struct snd_soc_dai_link h1940_uda1380_dai[] = {
 	{
@@ -197,7 +183,6 @@ static struct snd_soc_dai_link h1940_uda1380_dai[] = {
 static struct snd_soc_card h1940_asoc = {
 	.name = "h1940",
 	.owner = THIS_MODULE,
-	.remove = h1940_uda1380_card_remove,
 	.dai_link = h1940_uda1380_dai,
 	.num_links = ARRAY_SIZE(h1940_uda1380_dai),
 

@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/gpio/gpio-mb86s7x.c
  *
  *  Copyright (C) 2015 Fujitsu Semiconductor Limited
  *  Copyright (C) 2015 Linaro Ltd.
- *
- *  This program is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include <linux/io.h>
@@ -44,25 +36,15 @@ struct mb86s70_gpio_chip {
 	spinlock_t lock;
 };
 
-static inline struct mb86s70_gpio_chip *chip_to_mb86s70(struct gpio_chip *gc)
-{
-	return container_of(gc, struct mb86s70_gpio_chip, gc);
-}
-
 static int mb86s70_gpio_request(struct gpio_chip *gc, unsigned gpio)
 {
-	struct mb86s70_gpio_chip *gchip = chip_to_mb86s70(gc);
+	struct mb86s70_gpio_chip *gchip = gpiochip_get_data(gc);
 	unsigned long flags;
 	u32 val;
 
 	spin_lock_irqsave(&gchip->lock, flags);
 
 	val = readl(gchip->base + PFR(gpio));
-	if (!(val & OFFSET(gpio))) {
-		spin_unlock_irqrestore(&gchip->lock, flags);
-		return -EINVAL;
-	}
-
 	val &= ~OFFSET(gpio);
 	writel(val, gchip->base + PFR(gpio));
 
@@ -73,7 +55,7 @@ static int mb86s70_gpio_request(struct gpio_chip *gc, unsigned gpio)
 
 static void mb86s70_gpio_free(struct gpio_chip *gc, unsigned gpio)
 {
-	struct mb86s70_gpio_chip *gchip = chip_to_mb86s70(gc);
+	struct mb86s70_gpio_chip *gchip = gpiochip_get_data(gc);
 	unsigned long flags;
 	u32 val;
 
@@ -88,7 +70,7 @@ static void mb86s70_gpio_free(struct gpio_chip *gc, unsigned gpio)
 
 static int mb86s70_gpio_direction_input(struct gpio_chip *gc, unsigned gpio)
 {
-	struct mb86s70_gpio_chip *gchip = chip_to_mb86s70(gc);
+	struct mb86s70_gpio_chip *gchip = gpiochip_get_data(gc);
 	unsigned long flags;
 	unsigned char val;
 
@@ -106,7 +88,7 @@ static int mb86s70_gpio_direction_input(struct gpio_chip *gc, unsigned gpio)
 static int mb86s70_gpio_direction_output(struct gpio_chip *gc,
 					 unsigned gpio, int value)
 {
-	struct mb86s70_gpio_chip *gchip = chip_to_mb86s70(gc);
+	struct mb86s70_gpio_chip *gchip = gpiochip_get_data(gc);
 	unsigned long flags;
 	unsigned char val;
 
@@ -130,14 +112,14 @@ static int mb86s70_gpio_direction_output(struct gpio_chip *gc,
 
 static int mb86s70_gpio_get(struct gpio_chip *gc, unsigned gpio)
 {
-	struct mb86s70_gpio_chip *gchip = chip_to_mb86s70(gc);
+	struct mb86s70_gpio_chip *gchip = gpiochip_get_data(gc);
 
 	return !!(readl(gchip->base + PDR(gpio)) & OFFSET(gpio));
 }
 
 static void mb86s70_gpio_set(struct gpio_chip *gc, unsigned gpio, int value)
 {
-	struct mb86s70_gpio_chip *gchip = chip_to_mb86s70(gc);
+	struct mb86s70_gpio_chip *gchip = gpiochip_get_data(gc);
 	unsigned long flags;
 	unsigned char val;
 
@@ -156,7 +138,6 @@ static void mb86s70_gpio_set(struct gpio_chip *gc, unsigned gpio, int value)
 static int mb86s70_gpio_probe(struct platform_device *pdev)
 {
 	struct mb86s70_gpio_chip *gchip;
-	struct resource *res;
 	int ret;
 
 	gchip = devm_kzalloc(&pdev->dev, sizeof(*gchip), GFP_KERNEL);
@@ -165,8 +146,7 @@ static int mb86s70_gpio_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, gchip);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	gchip->base = devm_ioremap_resource(&pdev->dev, res);
+	gchip->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(gchip->base))
 		return PTR_ERR(gchip->base);
 
@@ -174,7 +154,9 @@ static int mb86s70_gpio_probe(struct platform_device *pdev)
 	if (IS_ERR(gchip->clk))
 		return PTR_ERR(gchip->clk);
 
-	clk_prepare_enable(gchip->clk);
+	ret = clk_prepare_enable(gchip->clk);
+	if (ret)
+		return ret;
 
 	spin_lock_init(&gchip->lock);
 
@@ -187,12 +169,10 @@ static int mb86s70_gpio_probe(struct platform_device *pdev)
 	gchip->gc.label = dev_name(&pdev->dev);
 	gchip->gc.ngpio = 32;
 	gchip->gc.owner = THIS_MODULE;
-	gchip->gc.dev = &pdev->dev;
+	gchip->gc.parent = &pdev->dev;
 	gchip->gc.base = -1;
 
-	platform_set_drvdata(pdev, gchip);
-
-	ret = gpiochip_add(&gchip->gc);
+	ret = gpiochip_add_data(&gchip->gc, gchip);
 	if (ret) {
 		dev_err(&pdev->dev, "couldn't register gpio driver\n");
 		clk_disable_unprepare(gchip->clk);
@@ -225,12 +205,7 @@ static struct platform_driver mb86s70_gpio_driver = {
 	.probe = mb86s70_gpio_probe,
 	.remove = mb86s70_gpio_remove,
 };
-
-static int __init mb86s70_gpio_init(void)
-{
-	return platform_driver_register(&mb86s70_gpio_driver);
-}
-module_init(mb86s70_gpio_init);
+module_platform_driver(mb86s70_gpio_driver);
 
 MODULE_DESCRIPTION("MB86S7x GPIO Driver");
 MODULE_ALIAS("platform:mb86s70-gpio");

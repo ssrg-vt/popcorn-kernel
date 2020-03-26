@@ -149,20 +149,19 @@ static int r128_cce_load_microcode(drm_r128_private_t *dev_priv)
 
 	pdev = platform_device_register_simple("r128_cce", 0, NULL, 0);
 	if (IS_ERR(pdev)) {
-		printk(KERN_ERR "r128_cce: Failed to register firmware\n");
+		pr_err("r128_cce: Failed to register firmware\n");
 		return PTR_ERR(pdev);
 	}
 	rc = request_firmware(&fw, FIRMWARE_NAME, &pdev->dev);
 	platform_device_unregister(pdev);
 	if (rc) {
-		printk(KERN_ERR "r128_cce: Failed to load firmware \"%s\"\n",
+		pr_err("r128_cce: Failed to load firmware \"%s\"\n",
 		       FIRMWARE_NAME);
 		return rc;
 	}
 
 	if (fw->size != 256 * 8) {
-		printk(KERN_ERR
-		       "r128_cce: Bogus length %zu in firmware \"%s\"\n",
+		pr_err("r128_cce: Bogus length %zu in firmware \"%s\"\n",
 		       fw->size, FIRMWARE_NAME);
 		rc = -EINVAL;
 		goto out_release;
@@ -561,11 +560,12 @@ static int r128_do_init_cce(struct drm_device *dev, drm_r128_init_t *init)
 		dev_priv->gart_info.addr = NULL;
 		dev_priv->gart_info.bus_addr = 0;
 		dev_priv->gart_info.gart_reg_if = DRM_ATI_GART_PCI;
-		if (!drm_ati_pcigart_init(dev, &dev_priv->gart_info)) {
+		rc = drm_ati_pcigart_init(dev, &dev_priv->gart_info);
+		if (rc) {
 			DRM_ERROR("failed to init PCI GART!\n");
 			dev->dev_private = (void *)dev_priv;
 			r128_do_cleanup_cce(dev);
-			return -ENOMEM;
+			return rc;
 		}
 		R128_WRITE(R128_PCI_GART_PAGE, dev_priv->gart_info.bus_addr);
 #if IS_ENABLED(CONFIG_AGP)

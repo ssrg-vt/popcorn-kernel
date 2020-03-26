@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* irq.c: UltraSparc IRQ handling/init/registry.
  *
  * Copyright (C) 1997, 2007, 2008 David S. Miller (davem@davemloft.net)
@@ -21,7 +22,6 @@
 #include <linux/seq_file.h>
 #include <linux/ftrace.h>
 #include <linux/irq.h>
-#include <linux/kmemleak.h>
 
 #include <asm/ptrace.h>
 #include <asm/processor.h>
@@ -35,7 +35,7 @@
 #include <asm/timer.h>
 #include <asm/smp.h>
 #include <asm/starfire.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/cache.h>
 #include <asm/cpudata.h>
 #include <asm/auxio.h>
@@ -242,7 +242,7 @@ unsigned int irq_alloc(unsigned int dev_handle, unsigned int dev_ino)
 {
 	int irq;
 
-	irq = __irq_alloc_descs(-1, 1, 1, numa_node_id(), NULL);
+	irq = __irq_alloc_descs(-1, 1, 1, numa_node_id(), NULL, NULL);
 	if (irq <= 0)
 		goto out;
 
@@ -915,7 +915,7 @@ static void map_prom_timers(void)
 	dp = of_find_node_by_path("/");
 	dp = dp->child;
 	while (dp) {
-		if (!strcmp(dp->name, "counter-timer"))
+		if (of_node_name_eq(dp, "counter-timer"))
 			break;
 		dp = dp->sibling;
 	}
@@ -1021,7 +1021,7 @@ static void __init alloc_one_queue(unsigned long *pa_ptr, unsigned long qmask)
 	unsigned long order = get_order(size);
 	unsigned long p;
 
-	p = __get_free_pages(GFP_KERNEL, order);
+	p = __get_free_pages(GFP_KERNEL | __GFP_ZERO, order);
 	if (!p) {
 		prom_printf("SUN4V: Error, cannot allocate queue.\n");
 		prom_halt();

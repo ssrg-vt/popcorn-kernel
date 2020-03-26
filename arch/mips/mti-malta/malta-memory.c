@@ -12,7 +12,7 @@
  *          Steven J. Hill <sjhill@mips.com>
  */
 #include <linux/init.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/string.h>
 
 #include <asm/bootinfo.h>
@@ -32,7 +32,7 @@ static void free_init_pages_eva_malta(void *begin, void *end)
 
 void __init fw_meminit(void)
 {
-	bool eva = config_enabled(CONFIG_EVA);
+	bool eva = IS_ENABLED(CONFIG_EVA);
 
 	free_init_pages_eva = eva ? free_init_pages_eva_malta : NULL;
 }

@@ -78,9 +78,9 @@ static int irq = 11;
 
 static DEFINE_SPINLOCK(wdt_lock);
 
-module_param(io, int, 0);
+module_param_hw(io, int, ioport, 0);
 MODULE_PARM_DESC(io, "WDT io port (default=0x240)");
-module_param(irq, int, 0);
+module_param_hw(irq, int, irq, 0);
 MODULE_PARM_DESC(irq, "WDT irq (default=11)");
 
 /* Support for the Fan Tachometer on the WDT501-P */
@@ -421,7 +421,7 @@ static int wdt_open(struct inode *inode, struct file *file)
 	 *	Activate
 	 */
 	wdt_start();
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 /**
@@ -481,7 +481,7 @@ static ssize_t wdt_temp_read(struct file *file, char __user *buf,
 
 static int wdt_temp_open(struct inode *inode, struct file *file)
 {
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 /**

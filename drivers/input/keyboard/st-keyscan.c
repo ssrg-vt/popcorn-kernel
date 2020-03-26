@@ -106,8 +106,8 @@ static int keypad_matrix_key_parse_dt(struct st_keyscan *keypad_data)
 	struct device_node *np = dev->of_node;
 	int error;
 
-	error = matrix_keypad_parse_of_params(dev, &keypad_data->n_rows,
-					      &keypad_data->n_cols);
+	error = matrix_keypad_parse_properties(dev, &keypad_data->n_rows,
+					       &keypad_data->n_cols);
 	if (error) {
 		dev_err(dev, "failed to parse keypad params\n");
 		return error;
@@ -153,6 +153,8 @@ static int keyscan_probe(struct platform_device *pdev)
 
 	input_dev->id.bustype = BUS_HOST;
 
+	keypad_data->input_dev = input_dev;
+
 	error = keypad_matrix_key_parse_dt(keypad_data);
 	if (error)
 		return error;
@@ -167,8 +169,6 @@ static int keyscan_probe(struct platform_device *pdev)
 	}
 
 	input_set_drvdata(input_dev, keypad_data);
-
-	keypad_data->input_dev = input_dev;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	keypad_data->base = devm_ioremap_resource(&pdev->dev, res);

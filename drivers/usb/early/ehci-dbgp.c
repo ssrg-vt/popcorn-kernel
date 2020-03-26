@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Standalone EHCI usb debug driver
  *
@@ -13,14 +14,13 @@
 
 #include <linux/console.h>
 #include <linux/errno.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/pci_regs.h>
 #include <linux/pci_ids.h>
 #include <linux/usb/ch9.h>
 #include <linux/usb/ehci_def.h>
 #include <linux/delay.h>
 #include <linux/serial_core.h>
-#include <linux/kconfig.h>
 #include <linux/kgdb.h>
 #include <linux/kthread.h>
 #include <asm/io.h>
@@ -581,7 +581,6 @@ try_again:
 				USB_DEBUG_DEVNUM);
 			goto err;
 		}
-		devnum = USB_DEBUG_DEVNUM;
 		dbgp_printk("debug device renamed to 127\n");
 	}
 
@@ -632,28 +631,28 @@ static int ehci_reset_port(int port)
 		if (!(portsc & PORT_RESET))
 			break;
 	}
-		if (portsc & PORT_RESET) {
-			/* force reset to complete */
-			loop = 100 * 1000;
-			writel(portsc & ~(PORT_RWC_BITS | PORT_RESET),
-				&ehci_regs->port_status[port - 1]);
-			do {
-				udelay(1);
-				portsc = readl(&ehci_regs->port_status[port-1]);
-			} while ((portsc & PORT_RESET) && (--loop > 0));
-		}
+	if (portsc & PORT_RESET) {
+		/* force reset to complete */
+		loop = 100 * 1000;
+		writel(portsc & ~(PORT_RWC_BITS | PORT_RESET),
+			&ehci_regs->port_status[port - 1]);
+		do {
+			udelay(1);
+			portsc = readl(&ehci_regs->port_status[port-1]);
+		} while ((portsc & PORT_RESET) && (--loop > 0));
+	}
 
-		/* Device went away? */
-		if (!(portsc & PORT_CONNECT))
-			return -ENOTCONN;
+	/* Device went away? */
+	if (!(portsc & PORT_CONNECT))
+		return -ENOTCONN;
 
-		/* bomb out completely if something weird happened */
-		if ((portsc & PORT_CSC))
-			return -EINVAL;
+	/* bomb out completely if something weird happened */
+	if ((portsc & PORT_CSC))
+		return -EINVAL;
 
-		/* If we've finished resetting, then break out of the loop */
-		if (!(portsc & PORT_RESET) && (portsc & PORT_PE))
-			return 0;
+	/* If we've finished resetting, then break out of the loop */
+	if (!(portsc & PORT_RESET) && (portsc & PORT_PE))
+		return 0;
 	return -EBUSY;
 }
 
@@ -1093,5 +1092,5 @@ static int __init kgdbdbgp_start_thread(void)
 
 	return 0;
 }
-module_init(kgdbdbgp_start_thread);
+device_initcall(kgdbdbgp_start_thread);
 #endif /* CONFIG_KGDB */

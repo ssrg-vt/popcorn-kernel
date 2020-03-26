@@ -14,30 +14,26 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+#include <asm/arch_timer.h>
+#include <asm/cache.h>
+#include <asm/cpu.h>
+#include <asm/cputype.h>
+#include <asm/cpufeature.h>
+#include <asm/fpsimd.h>
 
 #include <linux/bitops.h>
+#include <linux/bug.h>
+#include <linux/compat.h>
 #include <linux/elf.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/personality.h>
+#include <linux/preempt.h>
+#include <linux/printk.h>
 #include <linux/seq_file.h>
+#include <linux/sched.h>
+#include <linux/smp.h>
 #include <linux/delay.h>
-
-#include <asm/cpu.h>
-
-#include <popcorn/cpuinfo.h>
-
-static struct cpu_global_info {
-	unsigned int remote;
-	unsigned int vpos;
-	unsigned int nid;
-} cpu_global_info;
-
-/*
- * num_cpus: # of cores of each nodes
- * num_total_cpus: # of total cpus of all connected nodes
- */
-static unsigned int num_cpus[MAX_POPCORN_NODES];
-static unsigned int num_total_cpus;
 
 /*
  * In case the boot CPU is hotpluggable, we record its initial state and
@@ -48,10 +44,10 @@ DEFINE_PER_CPU(struct cpuinfo_arm64, cpu_data);
 static struct cpuinfo_arm64 boot_cpu_data;
 
 static char *icache_policy_str[] = {
-	[ICACHE_POLICY_RESERVED] = "RESERVED/UNKNOWN",
-	[ICACHE_POLICY_AIVIVT] = "AIVIVT",
-	[ICACHE_POLICY_VIPT] = "VIPT",
-	[ICACHE_POLICY_PIPT] = "PIPT",
+	[0 ... ICACHE_POLICY_PIPT]	= "RESERVED/UNKNOWN",
+	[ICACHE_POLICY_VIPT]		= "VIPT",
+	[ICACHE_POLICY_PIPT]		= "PIPT",
+	[ICACHE_POLICY_VPIPT]		= "VPIPT",
 };
 
 unsigned long __icache_flags;
@@ -66,6 +62,36 @@ static const char *const hwcap_str[] = {
 	"sha2",
 	"crc32",
 	"atomics",
+	"fphp",
+	"asimdhp",
+	"cpuid",
+	"asimdrdm",
+	"jscvt",
+	"fcma",
+	"lrcpc",
+	"dcpop",
+	"sha3",
+	"sm3",
+	"sm4",
+	"asimddp",
+	"sha512",
+	"sve",
+	"asimdfhm",
+	"dit",
+	"uscat",
+	"ilrcpc",
+	"flagm",
+	"ssbs",
+	"sb",
+	"paca",
+	"pacg",
+	"dcpodp",
+	"sve2",
+	"sveaes",
+	"svepmull",
+	"svebitperm",
+	"svesha3",
+	"svesm4",
 	NULL
 };
 
@@ -106,7 +132,7 @@ static const char *const compat_hwcap2_str[] = {
 };
 #endif /* CONFIG_COMPAT */
 
-static int c_show_arm64(struct seq_file *m, void *v)
+static int c_show(struct seq_file *m, void *v)
 {
 	int i, j;
 	bool compat = personality(current->personality) == PER_LINUX32;
@@ -148,7 +174,7 @@ static int c_show_arm64(struct seq_file *m, void *v)
 #endif /* CONFIG_COMPAT */
 		} else {
 			for (j = 0; hwcap_str[j]; j++)
-				if (elf_hwcap & (1 << j))
+				if (cpu_have_feature(j))
 					seq_printf(m, " %s", hwcap_str[j]);
 		}
 		seq_puts(m, "\n");
@@ -164,97 +190,9 @@ static int c_show_arm64(struct seq_file *m, void *v)
 	return 0;
 }
 
-static void calc_nid_vpos(loff_t *pos, unsigned int *pnid, unsigned int *vpos)
-{
-	int i = 0;
-
-	*pnid = 0;
-	*vpos = 0;
-
-	for (i = 1; i <= num_total_cpus; i++) {
-		if ((*pnid) == my_nid)
-			(*pnid)++;
-
-		if ((*vpos) == num_cpus[*pnid]) {
-			*vpos = 0;
-			(*pnid)++;
-		}
-
-		if (i == (*pos))
-			break;
-
-		(*vpos)++;
-	}
-}
-
 static void *c_start(struct seq_file *m, loff_t *pos)
 {
-	unsigned int vpos = 0;
-	unsigned int nid = 0;
-
-	if (my_nid == -1 || (*pos) == 0)
-		goto local;
-
-	if ((*pos) == 1) {
-		int i = 0;
-		int j = 0;
-		bool connected = false;
-
-		/* Check the connection with remote nodes */
-		for (i = 0; i < MAX_POPCORN_NODES; i++) {
-			if (get_popcorn_node_online(i)) {
-				connected = true;
-				break;
-			}
-		}
-
-		if (connected == false) {
-			/* No connection */
-			goto local;
-		} else {
-			/* Connection with remote nodes */
-			for (i = 0; i < MAX_POPCORN_NODES; i++) {
-				if (i == my_nid) {
-					num_cpus[i] = 1;
-					j = j + 1;
-					continue;
-				}
-				if (get_popcorn_node_online(i)) {
-					send_remote_cpu_info_request(i);
-					num_cpus[i] = get_number_cpus_from_remote_node(i);
-					j = j + num_cpus[i];
-				} else {
-					num_cpus[i] = 0;
-				}
-			}
-
-			num_total_cpus = j;
-			goto remote;
-		}
-	} else if ((*pos) > 1) {
-		goto remote;
-	}
-local:
-	if ((*pos) < 1) {
-		cpu_global_info.remote = 0;
-
-		return &cpu_global_info;
-	}
-
-	return NULL;
-
-remote:
-	if ((*pos) < num_total_cpus) {
-		calc_nid_vpos(pos, &nid, &vpos);
-
-		cpu_global_info.remote = 1;
-		cpu_global_info.vpos = vpos;
-		cpu_global_info.nid = nid;
-
-		return &cpu_global_info;
-	}
-
-	return NULL;
+	return *pos < 1 ? (void *)1 : NULL;
 }
 
 static void *c_next(struct seq_file *m, void *v, loff_t *pos)
@@ -267,19 +205,6 @@ static void c_stop(struct seq_file *m, void *v)
 {
 }
 
-static int c_show(struct seq_file *m, void *v)
-{
-	struct cpu_global_info *cpu_global_info = v;
-
-	if (cpu_global_info->remote == 1) {
-		remote_proc_cpu_info(m, cpu_global_info->nid, cpu_global_info->vpos);
-	} else {
-		c_show_arm64(m, v);
-	}
-
-	return 0;
-}
-
 const struct seq_operations cpuinfo_op = {
 	.start	= c_start,
 	.next	= c_next,
@@ -287,25 +212,122 @@ const struct seq_operations cpuinfo_op = {
 	.show	= c_show
 };
 
+
+static struct kobj_type cpuregs_kobj_type = {
+	.sysfs_ops = &kobj_sysfs_ops,
+};
+
+/*
+ * The ARM ARM uses the phrase "32-bit register" to describe a register
+ * whose upper 32 bits are RES0 (per C5.1.1, ARM DDI 0487A.i), however
+ * no statement is made as to whether the upper 32 bits will or will not
+ * be made use of in future, and between ARM DDI 0487A.c and ARM DDI
+ * 0487A.d CLIDR_EL1 was expanded from 32-bit to 64-bit.
+ *
+ * Thus, while both MIDR_EL1 and REVIDR_EL1 are described as 32-bit
+ * registers, we expose them both as 64 bit values to cater for possible
+ * future expansion without an ABI break.
+ */
+#define kobj_to_cpuinfo(kobj)	container_of(kobj, struct cpuinfo_arm64, kobj)
+#define CPUREGS_ATTR_RO(_name, _field)						\
+	static ssize_t _name##_show(struct kobject *kobj,			\
+			struct kobj_attribute *attr, char *buf)			\
+	{									\
+		struct cpuinfo_arm64 *info = kobj_to_cpuinfo(kobj);		\
+										\
+		if (info->reg_midr)						\
+			return sprintf(buf, "0x%016x\n", info->reg_##_field);	\
+		else								\
+			return 0;						\
+	}									\
+	static struct kobj_attribute cpuregs_attr_##_name = __ATTR_RO(_name)
+
+CPUREGS_ATTR_RO(midr_el1, midr);
+CPUREGS_ATTR_RO(revidr_el1, revidr);
+
+static struct attribute *cpuregs_id_attrs[] = {
+	&cpuregs_attr_midr_el1.attr,
+	&cpuregs_attr_revidr_el1.attr,
+	NULL
+};
+
+static const struct attribute_group cpuregs_attr_group = {
+	.attrs = cpuregs_id_attrs,
+	.name = "identification"
+};
+
+static int cpuid_cpu_online(unsigned int cpu)
+{
+	int rc;
+	struct device *dev;
+	struct cpuinfo_arm64 *info = &per_cpu(cpu_data, cpu);
+
+	dev = get_cpu_device(cpu);
+	if (!dev) {
+		rc = -ENODEV;
+		goto out;
+	}
+	rc = kobject_add(&info->kobj, &dev->kobj, "regs");
+	if (rc)
+		goto out;
+	rc = sysfs_create_group(&info->kobj, &cpuregs_attr_group);
+	if (rc)
+		kobject_del(&info->kobj);
+out:
+	return rc;
+}
+
+static int cpuid_cpu_offline(unsigned int cpu)
+{
+	struct device *dev;
+	struct cpuinfo_arm64 *info = &per_cpu(cpu_data, cpu);
+
+	dev = get_cpu_device(cpu);
+	if (!dev)
+		return -ENODEV;
+	if (info->kobj.parent) {
+		sysfs_remove_group(&info->kobj, &cpuregs_attr_group);
+		kobject_del(&info->kobj);
+	}
+
+	return 0;
+}
+
+static int __init cpuinfo_regs_init(void)
+{
+	int cpu, ret;
+
+	for_each_possible_cpu(cpu) {
+		struct cpuinfo_arm64 *info = &per_cpu(cpu_data, cpu);
+
+		kobject_init(&info->kobj, &cpuregs_kobj_type);
+	}
+
+	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "arm64/cpuinfo:online",
+				cpuid_cpu_online, cpuid_cpu_offline);
+	if (ret < 0) {
+		pr_err("cpuinfo: failed to register hotplug callbacks.\n");
+		return ret;
+	}
+	return 0;
+}
 static void cpuinfo_detect_icache_policy(struct cpuinfo_arm64 *info)
 {
 	unsigned int cpu = smp_processor_id();
 	u32 l1ip = CTR_L1IP(info->reg_ctr);
 
-	if (l1ip != ICACHE_POLICY_PIPT) {
-		/*
-		 * VIPT caches are non-aliasing if the VA always equals the PA
-		 * in all bit positions that are covered by the index. This is
-		 * the case if the size of a way (# of sets * line size) does
-		 * not exceed PAGE_SIZE.
-		 */
-		u32 waysize = icache_get_numsets() * icache_get_linesize();
-
-		if (l1ip != ICACHE_POLICY_VIPT || waysize > PAGE_SIZE)
-			set_bit(ICACHEF_ALIASING, &__icache_flags);
+	switch (l1ip) {
+	case ICACHE_POLICY_PIPT:
+		break;
+	case ICACHE_POLICY_VPIPT:
+		set_bit(ICACHEF_VPIPT, &__icache_flags);
+		break;
+	default:
+		/* Fallthrough */
+	case ICACHE_POLICY_VIPT:
+		/* Assume aliasing */
+		set_bit(ICACHEF_ALIASING, &__icache_flags);
 	}
-	if (l1ip == ICACHE_POLICY_AIVIVT)
-		set_bit(ICACHEF_AIVIVT, &__icache_flags);
 
 	pr_info("Detected %s I-cache on CPU%d\n", icache_policy_str[l1ip], cpu);
 }
@@ -313,9 +335,18 @@ static void cpuinfo_detect_icache_policy(struct cpuinfo_arm64 *info)
 static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
 {
 	info->reg_cntfrq = arch_timer_get_cntfrq();
-	info->reg_ctr = read_cpuid_cachetype();
+	/*
+	 * Use the effective value of the CTR_EL0 than the raw value
+	 * exposed by the CPU. CTR_E0.IDC field value must be interpreted
+	 * with the CLIDR_EL1 fields to avoid triggering false warnings
+	 * when there is a mismatch across the CPUs. Keep track of the
+	 * effective value of the CTR_EL0 in our internal records for
+	 * acurate sanity check and feature enablement.
+	 */
+	info->reg_ctr = read_cpuid_effective_cachetype();
 	info->reg_dczid = read_cpuid(DCZID_EL0);
 	info->reg_midr = read_cpuid_id();
+	info->reg_revidr = read_cpuid(REVIDR_EL1);
 
 	info->reg_id_aa64dfr0 = read_cpuid(ID_AA64DFR0_EL1);
 	info->reg_id_aa64dfr1 = read_cpuid(ID_AA64DFR1_EL1);
@@ -323,30 +354,37 @@ static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
 	info->reg_id_aa64isar1 = read_cpuid(ID_AA64ISAR1_EL1);
 	info->reg_id_aa64mmfr0 = read_cpuid(ID_AA64MMFR0_EL1);
 	info->reg_id_aa64mmfr1 = read_cpuid(ID_AA64MMFR1_EL1);
+	info->reg_id_aa64mmfr2 = read_cpuid(ID_AA64MMFR2_EL1);
 	info->reg_id_aa64pfr0 = read_cpuid(ID_AA64PFR0_EL1);
 	info->reg_id_aa64pfr1 = read_cpuid(ID_AA64PFR1_EL1);
+	info->reg_id_aa64zfr0 = read_cpuid(ID_AA64ZFR0_EL1);
 
-	info->reg_id_dfr0 = read_cpuid(ID_DFR0_EL1);
-	info->reg_id_isar0 = read_cpuid(ID_ISAR0_EL1);
-	info->reg_id_isar1 = read_cpuid(ID_ISAR1_EL1);
-	info->reg_id_isar2 = read_cpuid(ID_ISAR2_EL1);
-	info->reg_id_isar3 = read_cpuid(ID_ISAR3_EL1);
-	info->reg_id_isar4 = read_cpuid(ID_ISAR4_EL1);
-	info->reg_id_isar5 = read_cpuid(ID_ISAR5_EL1);
-	info->reg_id_mmfr0 = read_cpuid(ID_MMFR0_EL1);
-	info->reg_id_mmfr1 = read_cpuid(ID_MMFR1_EL1);
-	info->reg_id_mmfr2 = read_cpuid(ID_MMFR2_EL1);
-	info->reg_id_mmfr3 = read_cpuid(ID_MMFR3_EL1);
-	info->reg_id_pfr0 = read_cpuid(ID_PFR0_EL1);
-	info->reg_id_pfr1 = read_cpuid(ID_PFR1_EL1);
+	/* Update the 32bit ID registers only if AArch32 is implemented */
+	if (id_aa64pfr0_32bit_el0(info->reg_id_aa64pfr0)) {
+		info->reg_id_dfr0 = read_cpuid(ID_DFR0_EL1);
+		info->reg_id_isar0 = read_cpuid(ID_ISAR0_EL1);
+		info->reg_id_isar1 = read_cpuid(ID_ISAR1_EL1);
+		info->reg_id_isar2 = read_cpuid(ID_ISAR2_EL1);
+		info->reg_id_isar3 = read_cpuid(ID_ISAR3_EL1);
+		info->reg_id_isar4 = read_cpuid(ID_ISAR4_EL1);
+		info->reg_id_isar5 = read_cpuid(ID_ISAR5_EL1);
+		info->reg_id_mmfr0 = read_cpuid(ID_MMFR0_EL1);
+		info->reg_id_mmfr1 = read_cpuid(ID_MMFR1_EL1);
+		info->reg_id_mmfr2 = read_cpuid(ID_MMFR2_EL1);
+		info->reg_id_mmfr3 = read_cpuid(ID_MMFR3_EL1);
+		info->reg_id_pfr0 = read_cpuid(ID_PFR0_EL1);
+		info->reg_id_pfr1 = read_cpuid(ID_PFR1_EL1);
 
-	info->reg_mvfr0 = read_cpuid(MVFR0_EL1);
-	info->reg_mvfr1 = read_cpuid(MVFR1_EL1);
-	info->reg_mvfr2 = read_cpuid(MVFR2_EL1);
+		info->reg_mvfr0 = read_cpuid(MVFR0_EL1);
+		info->reg_mvfr1 = read_cpuid(MVFR1_EL1);
+		info->reg_mvfr2 = read_cpuid(MVFR2_EL1);
+	}
+
+	if (IS_ENABLED(CONFIG_ARM64_SVE) &&
+	    id_aa64pfr0_sve(info->reg_id_aa64pfr0))
+		info->reg_zcr = read_zcr_features();
 
 	cpuinfo_detect_icache_policy(info);
-
-	check_local_cpu_errata();
 }
 
 void cpuinfo_store_cpu(void)
@@ -364,3 +402,5 @@ void __init cpuinfo_store_boot_cpu(void)
 	boot_cpu_data = *info;
 	init_cpu_features(&boot_cpu_data);
 }
+
+device_initcall(cpuinfo_regs_init);

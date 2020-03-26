@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * PC Watchdog Driver
  * by Ken Hollis (khollis@bitgate.com)
@@ -367,7 +368,7 @@ static void pcwd_show_card_info(void)
 		pr_info("No previous trip detected - Cold boot or reset\n");
 }
 
-static void pcwd_timer_ping(unsigned long data)
+static void pcwd_timer_ping(struct timer_list *unused)
 {
 	int wdrst_stat;
 
@@ -695,7 +696,7 @@ static int pcwd_open(struct inode *inode, struct file *file)
 	/* Activate */
 	pcwd_start();
 	pcwd_keepalive();
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int pcwd_close(struct inode *inode, struct file *file)
@@ -734,7 +735,7 @@ static int pcwd_temp_open(struct inode *inode, struct file *file)
 	if (!pcwd_private.supports_temp)
 		return -ENODEV;
 
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int pcwd_temp_close(struct inode *inode, struct file *file)
@@ -893,7 +894,7 @@ static int pcwd_isa_probe(struct device *dev, unsigned int id)
 	/* clear the "card caused reboot" flag */
 	pcwd_clear_status();
 
-	setup_timer(&pcwd_private.timer, pcwd_timer_ping, 0);
+	timer_setup(&pcwd_private.timer, pcwd_timer_ping, 0);
 
 	/*  Disable the board  */
 	pcwd_stop();
@@ -992,19 +993,7 @@ static struct isa_driver pcwd_isa_driver = {
 	},
 };
 
-static int __init pcwd_init_module(void)
-{
-	return isa_register_driver(&pcwd_isa_driver, PCWD_ISA_NR_CARDS);
-}
-
-static void __exit pcwd_cleanup_module(void)
-{
-	isa_unregister_driver(&pcwd_isa_driver);
-	pr_info("Watchdog Module Unloaded\n");
-}
-
-module_init(pcwd_init_module);
-module_exit(pcwd_cleanup_module);
+module_isa_driver(pcwd_isa_driver, PCWD_ISA_NR_CARDS);
 
 MODULE_AUTHOR("Ken Hollis <kenji@bitgate.com>, "
 		"Wim Van Sebroeck <wim@iguana.be>");

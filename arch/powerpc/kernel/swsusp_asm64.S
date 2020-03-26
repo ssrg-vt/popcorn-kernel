@@ -13,6 +13,7 @@
 #include <asm/thread_info.h>
 #include <asm/ppc_asm.h>
 #include <asm/asm-offsets.h>
+#include <asm/feature-fixups.h>
 
 /*
  * Structure for storing CPU registers on the save area.
@@ -179,7 +180,7 @@ nothing_to_copy:
 	sld	r3, r3, r0
 	li	r0, 0
 1:
-	dcbf	r0,r3
+	dcbf	0,r3
 	addi	r3,r3,0x20
 	bdnz	1b
 
@@ -261,7 +262,7 @@ END_FW_FTR_SECTION_IFCLR(FW_FEATURE_LPAR)
 
 	addi	r1,r1,-128
 #ifdef CONFIG_PPC_BOOK3S_64
-	bl	slb_flush_and_rebolt
+	bl	slb_flush_and_restore_bolted
 #endif
 	bl	do_after_copyback
 	addi	r1,r1,128

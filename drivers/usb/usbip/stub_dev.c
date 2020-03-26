@@ -1,20 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2003-2008 Takahiro Hirofuchi
- *
- * This is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
- * USA.
  */
 
 #include <linux/device.h>
@@ -53,7 +39,7 @@ static DEVICE_ATTR_RO(usbip_status);
  * is used to transfer usbip requests by kernel threads. -1 is a magic number
  * by which usbip connection is finished.
  */
-static ssize_t store_sockfd(struct device *dev, struct device_attribute *attr,
+static ssize_t usbip_sockfd_store(struct device *dev, struct device_attribute *attr,
 			    const char *buf, size_t count)
 {
 	struct stub_device *sdev = dev_get_drvdata(dev);
@@ -118,7 +104,7 @@ err:
 	spin_unlock_irq(&sdev->ud.lock);
 	return -EINVAL;
 }
-static DEVICE_ATTR(usbip_sockfd, S_IWUSR, NULL, store_sockfd);
+static DEVICE_ATTR_WO(usbip_sockfd);
 
 static int stub_add_files(struct device *dev)
 {
@@ -220,7 +206,7 @@ static void stub_device_reset(struct usbip_device *ud)
 
 	dev_dbg(&udev->dev, "device reset");
 
-	ret = usb_lock_device_for_reset(udev, sdev->interface);
+	ret = usb_lock_device_for_reset(udev, NULL);
 	if (ret < 0) {
 		dev_err(&udev->dev, "lock for reset\n");
 		spin_lock_irq(&ud->lock);
@@ -253,7 +239,7 @@ static void stub_device_unusable(struct usbip_device *ud)
 
 /**
  * stub_device_alloc - allocate a new stub_device struct
- * @interface: usb_interface of a new device
+ * @udev: usb_device of a new device
  *
  * Allocates and initializes a new stub_device struct.
  */
@@ -315,8 +301,16 @@ static int stub_probe(struct usb_device *udev)
 	const char *udev_busid = dev_name(&udev->dev);
 	struct bus_id_priv *busid_priv;
 	int rc = 0;
+	char save_status;
 
 	dev_dbg(&udev->dev, "Enter probe\n");
+
+	/* Not sure if this is our device. Allocate here to avoid
+	 * calling alloc while holding busid_table lock.
+	 */
+	sdev = stub_device_alloc(udev);
+	if (!sdev)
+		return -ENOMEM;
 
 	/* check we should claim or not by busid_table */
 	busid_priv = get_busid_priv(udev_busid);
@@ -332,6 +326,9 @@ static int stub_probe(struct usb_device *udev)
 		 * See driver_probe_device() in driver/base/dd.c
 		 */
 		rc = -ENODEV;
+		if (!busid_priv)
+			goto sdev_free;
+
 		goto call_put_busid_priv;
 	}
 
@@ -351,12 +348,6 @@ static int stub_probe(struct usb_device *udev)
 		goto call_put_busid_priv;
 	}
 
-	/* ok, this is my device */
-	sdev = stub_device_alloc(udev);
-	if (!sdev) {
-		rc = -ENOMEM;
-		goto call_put_busid_priv;
-	}
 
 	dev_info(&udev->dev,
 		"usbip-host: register new device (bus %u dev %u)\n",
@@ -366,8 +357,15 @@ static int stub_probe(struct usb_device *udev)
 
 	/* set private data to usb_device */
 	dev_set_drvdata(&udev->dev, sdev);
+
 	busid_priv->sdev = sdev;
 	busid_priv->udev = udev;
+
+	save_status = busid_priv->status;
+	busid_priv->status = STUB_BUSID_ALLOC;
+
+	/* release the busid_lock */
+	put_busid_priv(busid_priv);
 
 	/*
 	 * Claim this hub port.
@@ -386,10 +384,8 @@ static int stub_probe(struct usb_device *udev)
 		dev_err(&udev->dev, "stub_add_files for %s\n", udev_busid);
 		goto err_files;
 	}
-	busid_priv->status = STUB_BUSID_ALLOC;
 
-	rc = 0;
-	goto call_put_busid_priv;
+	return 0;
 
 err_files:
 	usb_hub_release_port(udev->parent, udev->portnum,
@@ -397,25 +393,31 @@ err_files:
 err_port:
 	dev_set_drvdata(&udev->dev, NULL);
 	usb_put_dev(udev);
-	kthread_stop_put(sdev->ud.eh);
 
+	/* we already have busid_priv, just lock busid_lock */
+	spin_lock(&busid_priv->busid_lock);
 	busid_priv->sdev = NULL;
-	stub_device_free(sdev);
+	busid_priv->status = save_status;
+	spin_unlock(&busid_priv->busid_lock);
+	/* lock is released - go to free */
+	goto sdev_free;
 
 call_put_busid_priv:
+	/* release the busid_lock */
 	put_busid_priv(busid_priv);
+
+sdev_free:
+	stub_device_free(sdev);
+
 	return rc;
 }
 
 static void shutdown_busid(struct bus_id_priv *busid_priv)
 {
-	if (busid_priv->sdev && !busid_priv->shutdown_busid) {
-		busid_priv->shutdown_busid = 1;
-		usbip_event_add(&busid_priv->sdev->ud, SDEV_EVENT_REMOVED);
+	usbip_event_add(&busid_priv->sdev->ud, SDEV_EVENT_REMOVED);
 
-		/* wait for the stop of the event handler */
-		usbip_stop_eh(&busid_priv->sdev->ud);
-	}
+	/* wait for the stop of the event handler */
+	usbip_stop_eh(&busid_priv->sdev->ud);
 }
 
 /*
@@ -442,10 +444,15 @@ static void stub_disconnect(struct usb_device *udev)
 	/* get stub_device */
 	if (!sdev) {
 		dev_err(&udev->dev, "could not get device");
-		goto call_put_busid_priv;
+		/* release busid_lock */
+		put_busid_priv(busid_priv);
+		return;
 	}
 
 	dev_set_drvdata(&udev->dev, NULL);
+
+	/* release busid_lock before call to remove device files */
+	put_busid_priv(busid_priv);
 
 	/*
 	 * NOTE: rx/tx threads are invoked for each usb_device.
@@ -457,27 +464,36 @@ static void stub_disconnect(struct usb_device *udev)
 				  (struct usb_dev_state *) udev);
 	if (rc) {
 		dev_dbg(&udev->dev, "unable to release port\n");
-		goto call_put_busid_priv;
+		return;
 	}
 
 	/* If usb reset is called from event handler */
-	if (busid_priv->sdev->ud.eh == current)
-		goto call_put_busid_priv;
+	if (usbip_in_eh(current))
+		return;
+
+	/* we already have busid_priv, just lock busid_lock */
+	spin_lock(&busid_priv->busid_lock);
+	if (!busid_priv->shutdown_busid)
+		busid_priv->shutdown_busid = 1;
+	/* release busid_lock */
+	spin_unlock(&busid_priv->busid_lock);
 
 	/* shutdown the current connection */
 	shutdown_busid(busid_priv);
 
 	usb_put_dev(sdev->udev);
 
+	/* we already have busid_priv, just lock busid_lock */
+	spin_lock(&busid_priv->busid_lock);
 	/* free sdev */
 	busid_priv->sdev = NULL;
 	stub_device_free(sdev);
 
 	if (busid_priv->status == STUB_BUSID_ALLOC)
 		busid_priv->status = STUB_BUSID_ADDED;
-
-call_put_busid_priv:
-	put_busid_priv(busid_priv);
+	/* release busid_lock */
+	spin_unlock(&busid_priv->busid_lock);
+	return;
 }
 
 #ifdef CONFIG_PM

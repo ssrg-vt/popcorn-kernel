@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2003-2008 Takahiro Hirofuchi
- *
- * This is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
- * USA.
+ * Copyright (C) 2015-2016 Samsung Electronics
+ *               Krzysztof Opasiak <k.opasiak@samsung.com>
  */
 
 #include <asm/byteorder.h>
@@ -314,36 +302,26 @@ EXPORT_SYMBOL_GPL(usbip_dump_header);
 int usbip_recv(struct socket *sock, void *buf, int size)
 {
 	int result;
-	struct msghdr msg;
-	struct kvec iov;
+	struct kvec iov = {.iov_base = buf, .iov_len = size};
+	struct msghdr msg = {.msg_flags = MSG_NOSIGNAL};
 	int total = 0;
-	/* for blocks of if (usbip_dbg_flag_xmit) */
-	char *bp = buf;
-	int osize = size;
 
 	if (!sock || !buf || !size)
 		return -EINVAL;
+
+	iov_iter_kvec(&msg.msg_iter, READ, &iov, 1, size);
 
 	usbip_dbg_xmit("enter\n");
 
 	do {
 		sock->sk->sk_allocation = GFP_NOIO;
-		iov.iov_base    = buf;
-		iov.iov_len     = size;
-		msg.msg_name    = NULL;
-		msg.msg_namelen = 0;
-		msg.msg_control = NULL;
-		msg.msg_controllen = 0;
-		msg.msg_flags      = MSG_NOSIGNAL;
 
-		result = kernel_recvmsg(sock, &msg, &iov, 1, size, MSG_WAITALL);
+		result = sock_recvmsg(sock, &msg, MSG_WAITALL);
 		if (result <= 0)
 			goto err;
 
-		size -= result;
-		buf += result;
 		total += result;
-	} while (size > 0);
+	} while (msg_data_left(&msg));
 
 	if (usbip_dbg_flag_xmit) {
 		if (!in_interrupt())
@@ -352,9 +330,9 @@ int usbip_recv(struct socket *sock, void *buf, int size)
 			pr_debug("interrupt  :");
 
 		pr_debug("receiving....\n");
-		usbip_dump_buffer(bp, osize);
-		pr_debug("received, osize %d ret %d size %d total %d\n",
-			 osize, result, size, total);
+		usbip_dump_buffer(buf, size);
+		pr_debug("received, osize %d ret %d size %zd total %d\n",
+			 size, result, msg_data_left(&msg), total);
 	}
 
 	return total;
@@ -625,7 +603,7 @@ int usbip_recv_iso(struct usbip_device *ud, struct urb *urb)
 			ret);
 		kfree(buff);
 
-		if (ud->side == USBIP_STUB)
+		if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC)
 			usbip_event_add(ud, SDEV_EVENT_ERROR_TCP);
 		else
 			usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
@@ -647,7 +625,7 @@ int usbip_recv_iso(struct usbip_device *ud, struct urb *urb)
 			"total length of iso packets %d not equal to actual length of buffer %d\n",
 			total_length, urb->actual_length);
 
-		if (ud->side == USBIP_STUB)
+		if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC)
 			usbip_event_add(ud, SDEV_EVENT_ERROR_TCP);
 		else
 			usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
@@ -687,7 +665,7 @@ void usbip_pad_iso(struct usbip_device *ud, struct urb *urb)
 		return;
 
 	/*
-	 * loop over all packets from last to first (to prevent overwritting
+	 * loop over all packets from last to first (to prevent overwriting
 	 * memory when padding) and move them into the proper place
 	 */
 	for (i = np-1; i > 0; i--) {
@@ -705,7 +683,7 @@ int usbip_recv_xbuff(struct usbip_device *ud, struct urb *urb)
 	int ret;
 	int size;
 
-	if (ud->side == USBIP_STUB) {
+	if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC) {
 		/* the direction of urb must be OUT. */
 		if (usb_pipein(urb->pipe))
 			return 0;
@@ -737,7 +715,7 @@ int usbip_recv_xbuff(struct usbip_device *ud, struct urb *urb)
 	ret = usbip_recv(ud->tcp_socket, urb->transfer_buffer, size);
 	if (ret != size) {
 		dev_err(&urb->dev->dev, "recv xbuf, %d\n", ret);
-		if (ud->side == USBIP_STUB) {
+		if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC) {
 			usbip_event_add(ud, SDEV_EVENT_ERROR_TCP);
 		} else {
 			usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
@@ -751,12 +729,18 @@ EXPORT_SYMBOL_GPL(usbip_recv_xbuff);
 
 static int __init usbip_core_init(void)
 {
-	pr_info(DRIVER_DESC " v" USBIP_VERSION "\n");
+	int ret;
+
+	ret = usbip_init_eh();
+	if (ret)
+		return ret;
+
 	return 0;
 }
 
 static void __exit usbip_core_exit(void)
 {
+	usbip_finish_eh();
 	return;
 }
 
@@ -766,4 +750,3 @@ module_exit(usbip_core_exit);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
-MODULE_VERSION(USBIP_VERSION);

@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  PS3 Platform spu routines.
  *
  *  Copyright (C) 2006 Sony Computer Entertainment Inc.
  *  Copyright 2006 Sony Corp.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/kernel.h>
@@ -205,7 +193,7 @@ static void spu_unmap(struct spu *spu)
 static int __init setup_areas(struct spu *spu)
 {
 	struct table {char* name; unsigned long addr; unsigned long size;};
-	static const unsigned long shadow_flags = _PAGE_NO_CACHE | 3;
+	unsigned long shadow_flags = pgprot_val(pgprot_noncached_wc(PAGE_KERNEL_RO));
 
 	spu_pdata(spu)->shadow = __ioremap(spu_pdata(spu)->shadow_addr,
 					   sizeof(struct spe_shadow),
@@ -215,8 +203,7 @@ static int __init setup_areas(struct spu *spu)
 		goto fail_ioremap;
 	}
 
-	spu->local_store = (__force void *)ioremap_prot(spu->local_store_phys,
-		LS_SIZE, _PAGE_NO_CACHE);
+	spu->local_store = (__force void *)ioremap_wc(spu->local_store_phys, LS_SIZE);
 
 	if (!spu->local_store) {
 		pr_debug("%s:%d: ioremap local_store failed\n",
@@ -284,7 +271,7 @@ fail_alloc_2:
 fail_alloc_1:
 	ps3_spe_irq_destroy(spu->irqs[0]);
 fail_alloc_0:
-	spu->irqs[0] = spu->irqs[1] = spu->irqs[2] = NO_IRQ;
+	spu->irqs[0] = spu->irqs[1] = spu->irqs[2] = 0;
 	return result;
 }
 
@@ -334,7 +321,7 @@ static int ps3_destroy_spu(struct spu *spu)
 	ps3_spe_irq_destroy(spu->irqs[1]);
 	ps3_spe_irq_destroy(spu->irqs[0]);
 
-	spu->irqs[0] = spu->irqs[1] = spu->irqs[2] = NO_IRQ;
+	spu->irqs[0] = spu->irqs[1] = spu->irqs[2] = 0;
 
 	spu_unmap(spu);
 

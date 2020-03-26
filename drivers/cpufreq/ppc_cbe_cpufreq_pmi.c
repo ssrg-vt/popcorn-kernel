@@ -1,29 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * pmi backend for the cbe_cpufreq driver
  *
  * (C) Copyright IBM Deutschland Entwicklung GmbH 2005-2007
  *
  * Author: Christian Krafft <krafft@de.ibm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/timer.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/of_platform.h>
 
 #include <asm/processor.h>
@@ -94,16 +81,12 @@ static int pmi_notifier(struct notifier_block *nb,
 				       unsigned long event, void *data)
 {
 	struct cpufreq_policy *policy = data;
-	struct cpufreq_frequency_table *cbe_freqs;
+	struct cpufreq_frequency_table *cbe_freqs = policy->freq_table;
 	u8 node;
 
 	/* Should this really be called for CPUFREQ_ADJUST and CPUFREQ_NOTIFY
 	 * policy events?)
 	 */
-	if (event == CPUFREQ_START)
-		return 0;
-
-	cbe_freqs = cpufreq_frequency_get_table(policy->cpu);
 	node = cbe_cpu_to_node(policy->cpu);
 
 	pr_debug("got notified, event=%lu, node=%u\n", event, node);
@@ -142,15 +125,4 @@ static int __init cbe_cpufreq_pmi_init(void)
 
 	return 0;
 }
-
-static void __exit cbe_cpufreq_pmi_exit(void)
-{
-	cpufreq_unregister_notifier(&pmi_notifier_block, CPUFREQ_POLICY_NOTIFIER);
-	pmi_unregister_handler(&cbe_pmi_handler);
-}
-
-module_init(cbe_cpufreq_pmi_init);
-module_exit(cbe_cpufreq_pmi_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Christian Krafft <krafft@de.ibm.com>");
+device_initcall(cbe_cpufreq_pmi_init);

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* (C) 1999-2003 Nemosoft Unv.
    (C) 2004-2006 Luc Saillard (luc@saillard.org)
 
@@ -7,19 +8,6 @@
    The decompression routines have been implemented by reverse-engineering the
    Nemosoft binary pwcx module. Caveat emptor.
 
-   This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 2 of the License, or
-   (at your option) any later version.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
 #ifndef PWC_H
@@ -50,7 +38,7 @@
 
 /* Version block */
 #define PWC_VERSION	"10.0.15"
-#define PWC_NAME 	"pwc"
+#define PWC_NAME	"pwc"
 #define PFX		PWC_NAME ": "
 
 
@@ -120,10 +108,10 @@
 #define MAX_ISO_BUFS		3
 #define ISO_FRAMES_PER_DESC	10
 #define ISO_MAX_FRAME_SIZE	960
-#define ISO_BUFFER_SIZE 	(ISO_FRAMES_PER_DESC * ISO_MAX_FRAME_SIZE)
+#define ISO_BUFFER_SIZE		(ISO_FRAMES_PER_DESC * ISO_MAX_FRAME_SIZE)
 
 /* Maximum size after decompression is 640x480 YUV data, 1.5 * 640 * 480 */
-#define PWC_FRAME_SIZE 		(460800 + TOUCAM_HEADER_SIZE + TOUCAM_TRAILER_SIZE)
+#define PWC_FRAME_SIZE		(460800 + TOUCAM_HEADER_SIZE + TOUCAM_TRAILER_SIZE)
 
 /* Absolute minimum and maximum number of buffers available for mmap() */
 #define MIN_FRAMES		2

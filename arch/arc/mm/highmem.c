@@ -7,7 +7,7 @@
  *
  */
 
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/export.h>
 #include <linux/highmem.h>
 #include <asm/processor.h>
@@ -18,7 +18,7 @@
 /*
  * HIGHMEM API:
  *
- * kmap() API provides sleep semantics hence refered to as "permanent maps"
+ * kmap() API provides sleep semantics hence referred to as "permanent maps"
  * It allows mapping LAST_PKMAP pages, using @last_pkmap_nr as the cursor
  * for book-keeping
  *
@@ -61,6 +61,7 @@ void *kmap(struct page *page)
 
 	return kmap_high(page);
 }
+EXPORT_SYMBOL(kmap);
 
 void *kmap_atomic(struct page *page)
 {
@@ -122,7 +123,11 @@ static noinline pte_t * __init alloc_kmap_pgtable(unsigned long kvaddr)
 	pud_k = pud_offset(pgd_k, kvaddr);
 	pmd_k = pmd_offset(pud_k, kvaddr);
 
-	pte_k = (pte_t *)alloc_bootmem_low_pages(PAGE_SIZE);
+	pte_k = (pte_t *)memblock_alloc_low(PAGE_SIZE, PAGE_SIZE);
+	if (!pte_k)
+		panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
+		      __func__, PAGE_SIZE, PAGE_SIZE);
+
 	pmd_populate_kernel(&init_mm, pmd_k, pte_k);
 	return pte_k;
 }

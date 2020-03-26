@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2010 Juergen Beisert, Pengutronix
  *
@@ -6,15 +7,6 @@
  *
  * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
  * Copyright 2008 Embedded Alley Solutions, Inc All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #define DRIVER_NAME "mxsfb"
@@ -150,7 +142,7 @@
 #define STMLCDIF_24BIT 3 /** pixel data bus to the display is of 24 bit width */
 
 #define MXSFB_SYNC_DATA_ENABLE_HIGH_ACT	(1 << 6)
-#define MXSFB_SYNC_DOTCLK_FALLING_ACT	(1 << 7) /* negtive edge sampling */
+#define MXSFB_SYNC_DOTCLK_FALLING_ACT	(1 << 7) /* negative edge sampling */
 
 enum mxsfb_devtype {
 	MXSFB_V3,
@@ -169,7 +161,6 @@ struct mxsfb_devdata {
 };
 
 struct mxsfb_info {
-	struct fb_info fb_info;
 	struct platform_device *pdev;
 	struct clk *clk;
 	struct clk *clk_axi;
@@ -182,6 +173,7 @@ struct mxsfb_info {
 	const struct mxsfb_devdata *devdata;
 	u32 sync;
 	struct regulator *reg_lcd;
+	int pre_init;
 };
 
 #define mxsfb_is_v3(host) (host->devdata->ipversion == 3)
@@ -207,8 +199,6 @@ static const struct mxsfb_devdata mxsfb_devdata[] = {
 		.ipversion = 4,
 	},
 };
-
-#define to_imxfb_host(x) (container_of(x, struct mxsfb_info, fb_info))
 
 /* mask and shift depends on architecture */
 static inline u32 set_hsync_pulse_width(struct mxsfb_info *host, unsigned val)
@@ -269,7 +259,7 @@ static inline unsigned chan_to_field(unsigned chan, struct fb_bitfield *bf)
 static int mxsfb_check_var(struct fb_var_screeninfo *var,
 		struct fb_info *fb_info)
 {
-	struct mxsfb_info *host = to_imxfb_host(fb_info);
+	struct mxsfb_info *host = fb_info->par;
 	const struct fb_bitfield *rgb = NULL;
 
 	if (var->xres < MIN_XRES)
@@ -330,7 +320,7 @@ static inline void mxsfb_disable_axi_clk(struct mxsfb_info *host)
 
 static void mxsfb_enable_controller(struct fb_info *fb_info)
 {
-	struct mxsfb_info *host = to_imxfb_host(fb_info);
+	struct mxsfb_info *host = fb_info->par;
 	u32 reg;
 	int ret;
 
@@ -367,7 +357,7 @@ static void mxsfb_enable_controller(struct fb_info *fb_info)
 
 static void mxsfb_disable_controller(struct fb_info *fb_info)
 {
-	struct mxsfb_info *host = to_imxfb_host(fb_info);
+	struct mxsfb_info *host = fb_info->par;
 	unsigned loop;
 	u32 reg;
 	int ret;
@@ -409,7 +399,7 @@ static void mxsfb_disable_controller(struct fb_info *fb_info)
 
 static int mxsfb_set_par(struct fb_info *fb_info)
 {
-	struct mxsfb_info *host = to_imxfb_host(fb_info);
+	struct mxsfb_info *host = fb_info->par;
 	u32 ctrl, vdctrl0, vdctrl4;
 	int line_size, fb_size;
 	int reenable = 0;
@@ -421,6 +411,12 @@ static int mxsfb_set_par(struct fb_info *fb_info)
 		return -ENOMEM;
 
 	fb_info->fix.line_length = line_size;
+
+	if (host->pre_init) {
+		mxsfb_enable_controller(fb_info);
+		host->pre_init = 0;
+		return 0;
+	}
 
 	/*
 	 * It seems, you can't re-program the controller if it is still running.
@@ -569,7 +565,7 @@ static int mxsfb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 
 static int mxsfb_blank(int blank, struct fb_info *fb_info)
 {
-	struct mxsfb_info *host = to_imxfb_host(fb_info);
+	struct mxsfb_info *host = fb_info->par;
 
 	switch (blank) {
 	case FB_BLANK_POWERDOWN:
@@ -591,7 +587,7 @@ static int mxsfb_blank(int blank, struct fb_info *fb_info)
 static int mxsfb_pan_display(struct fb_var_screeninfo *var,
 		struct fb_info *fb_info)
 {
-	struct mxsfb_info *host = to_imxfb_host(fb_info);
+	struct mxsfb_info *host = fb_info->par;
 	unsigned offset;
 
 	if (var->xoffset != 0)
@@ -622,11 +618,10 @@ static struct fb_ops mxsfb_ops = {
 	.fb_imageblit = cfb_imageblit,
 };
 
-static int mxsfb_restore_mode(struct mxsfb_info *host,
+static int mxsfb_restore_mode(struct fb_info *fb_info,
 			struct fb_videomode *vmode)
 {
-	struct fb_info *fb_info = &host->fb_info;
-	unsigned line_count;
+	struct mxsfb_info *host = fb_info->par;
 	unsigned period;
 	unsigned long pa, fbsize;
 	int bits_per_pixel, ofs, ret = 0;
@@ -713,7 +708,6 @@ static int mxsfb_restore_mode(struct mxsfb_info *host,
 		writel(fb_info->fix.smem_start, host->base + host->devdata->next_buf);
 	}
 
-	line_count = fb_info->fix.smem_len / fb_info->fix.line_length;
 	fb_info->fix.ypanstep = 1;
 
 	clk_prepare_enable(host->clk);
@@ -726,10 +720,10 @@ err:
 	return ret;
 }
 
-static int mxsfb_init_fbinfo_dt(struct mxsfb_info *host,
+static int mxsfb_init_fbinfo_dt(struct fb_info *fb_info,
 				struct fb_videomode *vmode)
 {
-	struct fb_info *fb_info = &host->fb_info;
+	struct mxsfb_info *host = fb_info->par;
 	struct fb_var_screeninfo *var = &fb_info->var;
 	struct device *dev = &host->pdev->dev;
 	struct device_node *np = host->pdev->dev.of_node;
@@ -788,7 +782,16 @@ static int mxsfb_init_fbinfo_dt(struct mxsfb_info *host,
 
 	if (vm.flags & DISPLAY_FLAGS_DE_HIGH)
 		host->sync |= MXSFB_SYNC_DATA_ENABLE_HIGH_ACT;
-	if (vm.flags & DISPLAY_FLAGS_PIXDATA_NEGEDGE)
+
+	/*
+	 * The PIXDATA flags of the display_flags enum are controller
+	 * centric, e.g. NEGEDGE means drive data on negative edge.
+	 * However, the drivers flag is display centric: Sample the
+	 * data on negative (falling) edge. Therefore, check for the
+	 * POSEDGE flag:
+	 * drive on positive edge => sample on negative edge
+	 */
+	if (vm.flags & DISPLAY_FLAGS_PIXDATA_POSEDGE)
 		host->sync |= MXSFB_SYNC_DOTCLK_FALLING_ACT;
 
 put_display_node:
@@ -796,11 +799,12 @@ put_display_node:
 	return ret;
 }
 
-static int mxsfb_init_fbinfo(struct mxsfb_info *host,
+static int mxsfb_init_fbinfo(struct fb_info *fb_info,
 			struct fb_videomode *vmode)
 {
 	int ret;
-	struct fb_info *fb_info = &host->fb_info;
+	struct mxsfb_info *host = fb_info->par;
+	struct device *dev = &host->pdev->dev;
 	struct fb_var_screeninfo *var = &fb_info->var;
 	dma_addr_t fb_phys;
 	void *fb_virt;
@@ -814,7 +818,7 @@ static int mxsfb_init_fbinfo(struct mxsfb_info *host,
 	fb_info->fix.visual = FB_VISUAL_TRUECOLOR,
 	fb_info->fix.accel = FB_ACCEL_NONE;
 
-	ret = mxsfb_init_fbinfo_dt(host, vmode);
+	ret = mxsfb_init_fbinfo_dt(fb_info, vmode);
 	if (ret)
 		return ret;
 
@@ -825,27 +829,27 @@ static int mxsfb_init_fbinfo(struct mxsfb_info *host,
 
 	/* Memory allocation for framebuffer */
 	fb_size = SZ_2M;
-	fb_virt = alloc_pages_exact(fb_size, GFP_DMA);
+	fb_virt = dma_alloc_wc(dev, PAGE_ALIGN(fb_size), &fb_phys, GFP_KERNEL);
 	if (!fb_virt)
 		return -ENOMEM;
-
-	fb_phys = virt_to_phys(fb_virt);
 
 	fb_info->fix.smem_start = fb_phys;
 	fb_info->screen_base = fb_virt;
 	fb_info->screen_size = fb_info->fix.smem_len = fb_size;
 
-	if (mxsfb_restore_mode(host, vmode))
+	if (mxsfb_restore_mode(fb_info, vmode))
 		memset(fb_virt, 0, fb_size);
 
 	return 0;
 }
 
-static void mxsfb_free_videomem(struct mxsfb_info *host)
+static void mxsfb_free_videomem(struct fb_info *fb_info)
 {
-	struct fb_info *fb_info = &host->fb_info;
+	struct mxsfb_info *host = fb_info->par;
+	struct device *dev = &host->pdev->dev;
 
-	free_pages_exact(fb_info->screen_base, fb_info->fix.smem_len);
+	dma_free_wc(dev, fb_info->screen_size, fb_info->screen_base,
+		    fb_info->fix.smem_start);
 }
 
 static const struct platform_device_id mxsfb_devtype[] = {
@@ -892,7 +896,7 @@ static int mxsfb_probe(struct platform_device *pdev)
 	if (mode == NULL)
 		return -ENOMEM;
 
-	host = to_imxfb_host(fb_info);
+	host = fb_info->par;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	host->base = devm_ioremap_resource(&pdev->dev, res);
@@ -924,14 +928,18 @@ static int mxsfb_probe(struct platform_device *pdev)
 	if (IS_ERR(host->reg_lcd))
 		host->reg_lcd = NULL;
 
-	fb_info->pseudo_palette = devm_kzalloc(&pdev->dev, sizeof(u32) * 16,
+#if defined(CONFIG_FB_PRE_INIT_FB)
+	host->pre_init = 1;
+#endif
+
+	fb_info->pseudo_palette = devm_kcalloc(&pdev->dev, 16, sizeof(u32),
 					       GFP_KERNEL);
 	if (!fb_info->pseudo_palette) {
 		ret = -ENOMEM;
 		goto fb_release;
 	}
 
-	ret = mxsfb_init_fbinfo(host, mode);
+	ret = mxsfb_init_fbinfo(fb_info, mode);
 	if (ret != 0)
 		goto fb_release;
 
@@ -956,6 +964,7 @@ static int mxsfb_probe(struct platform_device *pdev)
 		mxsfb_enable_controller(fb_info);
 	}
 
+	host->pre_init = 0;
 	dev_info(&pdev->dev, "initialized\n");
 
 	return 0;
@@ -972,13 +981,13 @@ fb_release:
 static int mxsfb_remove(struct platform_device *pdev)
 {
 	struct fb_info *fb_info = platform_get_drvdata(pdev);
-	struct mxsfb_info *host = to_imxfb_host(fb_info);
+	struct mxsfb_info *host = fb_info->par;
 
 	if (host->enabled)
 		mxsfb_disable_controller(fb_info);
 
 	unregister_framebuffer(fb_info);
-	mxsfb_free_videomem(host);
+	mxsfb_free_videomem(fb_info);
 
 	framebuffer_release(fb_info);
 
@@ -988,7 +997,7 @@ static int mxsfb_remove(struct platform_device *pdev)
 static void mxsfb_shutdown(struct platform_device *pdev)
 {
 	struct fb_info *fb_info = platform_get_drvdata(pdev);
-	struct mxsfb_info *host = to_imxfb_host(fb_info);
+	struct mxsfb_info *host = fb_info->par;
 
 	mxsfb_enable_axi_clk(host);
 

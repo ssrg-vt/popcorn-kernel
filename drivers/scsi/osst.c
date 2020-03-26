@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
   SCSI Tape Driver for Linux version 1.1 and newer. See the accompanying
   file Documentation/scsi/st.txt for more information.
@@ -35,7 +36,7 @@ static const char * osst_version = "0.99.4";
 
 #include <linux/fs.h>
 #include <linux/kernel.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/proc_fs.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -52,7 +53,7 @@ static const char * osst_version = "0.99.4";
 #include <linux/delay.h>
 #include <linux/jiffies.h>
 #include <linux/mutex.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/dma.h>
 
 /* The driver prints some debugging information on the console if DEBUG
@@ -139,7 +140,7 @@ static int debugging = 1;
 #define OSST_TIMEOUT (200 * HZ)
 #define OSST_LONG_TIMEOUT (1800 * HZ)
 
-#define TAPE_NR(x) (iminor(x) & ~(-1 << ST_MODE_SHIFT))
+#define TAPE_NR(x) (iminor(x) & ((1 << ST_MODE_SHIFT)-1))
 #define TAPE_MODE(x) ((iminor(x) & ST_MODE_MASK) >> ST_MODE_SHIFT)
 #define TAPE_REWIND(x) ((iminor(x) & 0x80) == 0)
 #define TAPE_IS_RAW(x) (TAPE_MODE(x) & (ST_NBR_MODES >> 1))
@@ -216,12 +217,14 @@ static void osst_analyze_sense(struct osst_request *SRpnt, struct st_cmdstatus *
 		switch (sense[0] & 0x7f) {
 		case 0x71:
 			s->deferred = 1;
+			/* fall through */
 		case 0x70:
 			s->fixed_format = 1;
 			s->flags = sense[2] & 0xe0;
 			break;
 		case 0x73:
 			s->deferred = 1;
+			/* fall through */
 		case 0x72:
 			s->fixed_format = 0;
 			ucp = scsi_sense_desc_find(sense, SCSI_SENSE_BUFFERSIZE, 4);
@@ -320,16 +323,19 @@ static int osst_chk_result(struct osst_tape * STp, struct osst_request * SRpnt)
 
 
 /* Wakeup from interrupt */
-static void osst_end_async(struct request *req, int update)
+static void osst_end_async(struct request *req, blk_status_t status)
 {
+	struct scsi_request *rq = scsi_req(req);
 	struct osst_request *SRpnt = req->end_io_data;
 	struct osst_tape *STp = SRpnt->stp;
 	struct rq_map_data *mdata = &SRpnt->stp->buffer->map_data;
 
-	STp->buffer->cmdstat.midlevel_result = SRpnt->result = req->errors;
+	STp->buffer->cmdstat.midlevel_result = SRpnt->result = rq->result;
 #if DEBUG
 	STp->write_pending = 0;
 #endif
+	if (rq->sense_len)
+		memcpy(SRpnt->sense, rq->sense, SCSI_SENSE_BUFFERSIZE);
 	if (SRpnt->waiting)
 		complete(SRpnt->waiting);
 
@@ -338,7 +344,7 @@ static void osst_end_async(struct request *req, int update)
 		blk_rq_unmap_user(SRpnt->bio);
 	}
 
-	__blk_put_request(req->q, req);
+	blk_put_request(req);
 }
 
 /* osst_request memory management */
@@ -357,18 +363,20 @@ static int osst_execute(struct osst_request *SRpnt, const unsigned char *cmd,
 			int use_sg, int timeout, int retries)
 {
 	struct request *req;
+	struct scsi_request *rq;
 	struct page **pages = NULL;
 	struct rq_map_data *mdata = &SRpnt->stp->buffer->map_data;
 
 	int err = 0;
 	int write = (data_direction == DMA_TO_DEVICE);
 
-	req = blk_get_request(SRpnt->stp->device->request_queue, write, GFP_KERNEL);
+	req = blk_get_request(SRpnt->stp->device->request_queue,
+			write ? REQ_OP_SCSI_OUT : REQ_OP_SCSI_IN, 0);
 	if (IS_ERR(req))
 		return DRIVER_ERROR << 24;
 
-	blk_rq_set_block_pc(req);
-	req->cmd_flags |= REQ_QUIET;
+	rq = scsi_req(req);
+	req->rq_flags |= RQF_QUIET;
 
 	SRpnt->bio = NULL;
 
@@ -376,7 +384,7 @@ static int osst_execute(struct osst_request *SRpnt, const unsigned char *cmd,
 		struct scatterlist *sg, *sgl = (struct scatterlist *)buffer;
 		int i;
 
-		pages = kzalloc(use_sg * sizeof(struct page *), GFP_KERNEL);
+		pages = kcalloc(use_sg, sizeof(struct page *), GFP_KERNEL);
 		if (!pages)
 			goto free_req;
 
@@ -404,13 +412,11 @@ static int osst_execute(struct osst_request *SRpnt, const unsigned char *cmd,
 			goto free_req;
 	}
 
-	req->cmd_len = cmd_len;
-	memset(req->cmd, 0, BLK_MAX_CDB); /* ATAPI hates garbage after CDB */
-	memcpy(req->cmd, cmd, req->cmd_len);
-	req->sense = SRpnt->sense;
-	req->sense_len = 0;
+	rq->cmd_len = cmd_len;
+	memset(rq->cmd, 0, BLK_MAX_CDB); /* ATAPI hates garbage after CDB */
+	memcpy(rq->cmd, cmd, rq->cmd_len);
 	req->timeout = timeout;
-	req->retries = retries;
+	rq->retries = retries;
 	req->end_io_data = SRpnt;
 
 	blk_execute_rq_nowait(req->q, NULL, req, 1, osst_end_async);
@@ -588,6 +594,7 @@ static void osst_init_aux(struct osst_tape * STp, int frame_type, int frame_seq_
 		dat->dat_list[0].flags    = frame_type==OS_FRAME_TYPE_MARKER?
 							OS_DAT_FLAGS_MARK:OS_DAT_FLAGS_DATA;
 		dat->dat_list[0].reserved = 0;
+		/* fall through */
 	  case	OS_FRAME_TYPE_EOD:
 		aux->update_frame_cntr    = htonl(0);
 		par->partition_num        = OS_DATA_PARTITION;
@@ -616,7 +623,7 @@ static int osst_verify_frame(struct osst_tape * STp, int frame_seq_number, int q
 	os_aux_t           * aux  = STp->buffer->aux;
 	os_partition_t     * par  = &(aux->partition);
 	struct st_partstat * STps = &(STp->ps[STp->partition]);
-	int		     blk_cnt, blk_sz, i;
+	unsigned int	     blk_cnt, blk_sz, i;
 
 	if (STp->raw) {
 		if (STp->buffer->syscall_result) {
@@ -1485,7 +1492,7 @@ static int osst_read_back_buffer_and_rewrite(struct osst_tape * STp, struct osst
 	int			dbg              = debugging;
 #endif
 
-	if ((buffer = vmalloc((nframes + 1) * OS_DATA_SIZE)) == NULL)
+	if ((buffer = vmalloc(array_size((nframes + 1), OS_DATA_SIZE))) == NULL)
 		return (-EIO);
 
 	printk(KERN_INFO "%s:I: Reading back %d frames from drive buffer%s\n",
@@ -3431,7 +3438,7 @@ static ssize_t osst_write(struct file * filp, const char __user * buf, size_t co
 
 	/* Write must be integral number of blocks */
 	if (STp->block_size != 0 && (count % STp->block_size) != 0) {
-		printk(KERN_ERR "%s:E: Write (%Zd bytes) not multiple of tape block size (%d%c).\n",
+		printk(KERN_ERR "%s:E: Write (%zd bytes) not multiple of tape block size (%d%c).\n",
 				       name, count, STp->block_size<1024?
 				       STp->block_size:STp->block_size/1024, STp->block_size<1024?'b':'k');
 		retval = (-EINVAL);
@@ -3752,7 +3759,7 @@ static ssize_t osst_read(struct file * filp, char __user * buf, size_t count, lo
 
 	if ((count % STp->block_size) != 0) {
 		printk(KERN_WARNING
-		    "%s:W: Read (%Zd bytes) not multiple of tape block size (%d%c).\n", name, count,
+		    "%s:W: Read (%zd bytes) not multiple of tape block size (%d%c).\n", name, count,
 		    STp->block_size<1024?STp->block_size:STp->block_size/1024, STp->block_size<1024?'b':'k');
 	}
 
@@ -3811,7 +3818,7 @@ static ssize_t osst_read(struct file * filp, char __user * buf, size_t count, lo
 
 			if (transfer == 0) {
 				printk(KERN_WARNING
-				  "%s:W: Nothing can be transferred, requested %Zd, tape block size (%d%c).\n",
+				  "%s:W: Nothing can be transferred, requested %zd, tape block size (%d%c).\n",
 			   		name, count, STp->block_size < 1024?
 					STp->block_size:STp->block_size/1024,
 				       	STp->block_size<1024?'b':'k');
@@ -4083,6 +4090,7 @@ static int osst_int_ioctl(struct osst_tape * STp, struct osst_request ** aSRpnt,
 	switch (cmd_in) {
 	 case MTFSFM:
 		chg_eof = 0; /* Changed from the FSF after this */
+		/* fall through */
 	 case MTFSF:
 		if (STp->raw)
 		   return (-EIO);
@@ -4098,6 +4106,7 @@ static int osst_int_ioctl(struct osst_tape * STp, struct osst_request ** aSRpnt,
 
 	 case MTBSF:
 		chg_eof = 0; /* Changed from the FSF after this */
+		/* fall through */
 	 case MTBSFM:
 		if (STp->raw)
 		   return (-EIO);
@@ -4309,6 +4318,7 @@ static int osst_int_ioctl(struct osst_tape * STp, struct osst_request ** aSRpnt,
 					   name, STp->block_size);
 			 return 0;
 		 }
+		/* fall through */
 	 case MTSETDENSITY:       /* Set tape density */
 	 case MTSETDRVBUFFER:     /* Set drive buffering */
 	 case SET_DENS_AND_BLK:   /* Set density and block size */
@@ -5431,7 +5441,7 @@ static int append_to_buffer(const char __user *ubp, struct osst_buffer *st_bp, i
 
 	for (i=0, offset=st_bp->buffer_bytes;
 	     i < st_bp->sg_segs && offset >= st_bp->sg[i].length; i++)
-	offset -= st_bp->sg[i].length;
+		offset -= st_bp->sg[i].length;
 	if (i == st_bp->sg_segs) {  /* Should never happen */
 		printk(KERN_WARNING "osst :A: Append_to_buffer offset overflow.\n");
 		return (-EIO);
@@ -5664,12 +5674,12 @@ static	struct	osst_support_data support_list[] = {
  * sysfs support for osst driver parameter information
  */
 
-static ssize_t osst_version_show(struct device_driver *ddd, char *buf)
+static ssize_t version_show(struct device_driver *ddd, char *buf)
 {
 	return snprintf(buf, PAGE_SIZE, "%s\n", osst_version);
 }
 
-static DRIVER_ATTR(version, S_IRUGO, osst_version_show, NULL);
+static DRIVER_ATTR_RO(version);
 
 static int osst_create_sysfs_files(struct device_driver *sysfs)
 {
@@ -5853,7 +5863,9 @@ static int osst_probe(struct device *dev)
 	/* if this is the first attach, build the infrastructure */
 	write_lock(&os_scsi_tapes_lock);
 	if (os_scsi_tapes == NULL) {
-		os_scsi_tapes = kmalloc(osst_max_dev * sizeof(struct osst_tape *), GFP_ATOMIC);
+		os_scsi_tapes = kmalloc_array(osst_max_dev,
+                                              sizeof(struct osst_tape *),
+                                              GFP_ATOMIC);
 		if (os_scsi_tapes == NULL) {
 			write_unlock(&os_scsi_tapes_lock);
 			printk(KERN_ERR "osst :E: Unable to allocate array for OnStream SCSI tapes.\n");

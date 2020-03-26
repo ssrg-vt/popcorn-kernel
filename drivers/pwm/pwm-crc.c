@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Author: Shobhit Kumar <shobhit.kumar@intel.com>
  */
@@ -75,7 +67,7 @@ static int crc_pwm_config(struct pwm_chip *c, struct pwm_device *pwm,
 		return -EINVAL;
 	}
 
-	if (pwm->period != period_ns) {
+	if (pwm_get_period(pwm) != period_ns) {
 		int clk_div;
 
 		/* changing the clk divisor, need to disable fisrt */

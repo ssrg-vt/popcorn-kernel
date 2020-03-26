@@ -1,21 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * auxtrace.c: AUX area trace support
  * Copyright (c) 2013-2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
+#include <inttypes.h>
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <stdbool.h>
+#include <string.h>
+#include <limits.h>
+#include <errno.h>
 
 #include <linux/kernel.h>
 #include <linux/perf_event.h>
@@ -23,19 +18,22 @@
 #include <linux/bitops.h>
 #include <linux/log2.h>
 #include <linux/string.h>
+#include <linux/time64.h>
 
 #include <sys/param.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
-#include <limits.h>
-#include <errno.h>
 #include <linux/list.h>
 
 #include "../perf.h"
 #include "util.h"
 #include "evlist.h"
+#include "dso.h"
+#include "map.h"
+#include "pmu.h"
+#include "evsel.h"
 #include "cpumap.h"
+#include "symbol.h"
 #include "thread_map.h"
 #include "asm/bug.h"
 #include "auxtrace.h"
@@ -45,10 +43,22 @@
 #include "event.h"
 #include "session.h"
 #include "debug.h"
-#include "parse-options.h"
+#include <subcmd/parse-options.h>
 
+#include "cs-etm.h"
 #include "intel-pt.h"
 #include "intel-bts.h"
+#include "arm-spe.h"
+#include "s390-cpumsf.h"
+
+#include "sane_ctype.h"
+#include "symbol/kallsyms.h"
+
+static bool auxtrace__dont_decode(struct perf_session *session)
+{
+	return !session->itrace_synth_opts ||
+	       session->itrace_synth_opts->dont_decode;
+}
 
 int auxtrace_mmap__mmap(struct auxtrace_mmap *mm,
 			struct auxtrace_mmap_params *mp,
@@ -186,6 +196,9 @@ static int auxtrace_queues__grow(struct auxtrace_queues *queues,
 	for (i = 0; i < queues->nr_queues; i++) {
 		list_splice_tail(&queues->queue_array[i].head,
 				 &queue_array[i].head);
+		queue_array[i].tid = queues->queue_array[i].tid;
+		queue_array[i].cpu = queues->queue_array[i].cpu;
+		queue_array[i].set = queues->queue_array[i].set;
 		queue_array[i].priv = queues->queue_array[i].priv;
 	}
 
@@ -197,7 +210,7 @@ static int auxtrace_queues__grow(struct auxtrace_queues *queues,
 
 static void *auxtrace_copy_data(u64 size, struct perf_session *session)
 {
-	int fd = perf_data_file__fd(session->file);
+	int fd = perf_data__fd(session->data);
 	void *p;
 	ssize_t ret;
 
@@ -217,9 +230,9 @@ static void *auxtrace_copy_data(u64 size, struct perf_session *session)
 	return p;
 }
 
-static int auxtrace_queues__add_buffer(struct auxtrace_queues *queues,
-				       unsigned int idx,
-				       struct auxtrace_buffer *buffer)
+static int auxtrace_queues__queue_buffer(struct auxtrace_queues *queues,
+					 unsigned int idx,
+					 struct auxtrace_buffer *buffer)
 {
 	struct auxtrace_queue *queue;
 	int err;
@@ -270,7 +283,7 @@ static int auxtrace_queues__split_buffer(struct auxtrace_queues *queues,
 			return -ENOMEM;
 		b->size = BUFFER_LIMIT_FOR_32_BIT;
 		b->consecutive = consecutive;
-		err = auxtrace_queues__add_buffer(queues, idx, b);
+		err = auxtrace_queues__queue_buffer(queues, idx, b);
 		if (err) {
 			auxtrace_buffer__free(b);
 			return err;
@@ -286,29 +299,56 @@ static int auxtrace_queues__split_buffer(struct auxtrace_queues *queues,
 	return 0;
 }
 
-static int auxtrace_queues__add_event_buffer(struct auxtrace_queues *queues,
-					     struct perf_session *session,
-					     unsigned int idx,
-					     struct auxtrace_buffer *buffer)
+static bool filter_cpu(struct perf_session *session, int cpu)
 {
+	unsigned long *cpu_bitmap = session->itrace_synth_opts->cpu_bitmap;
+
+	return cpu_bitmap && cpu != -1 && !test_bit(cpu, cpu_bitmap);
+}
+
+static int auxtrace_queues__add_buffer(struct auxtrace_queues *queues,
+				       struct perf_session *session,
+				       unsigned int idx,
+				       struct auxtrace_buffer *buffer,
+				       struct auxtrace_buffer **buffer_ptr)
+{
+	int err = -ENOMEM;
+
+	if (filter_cpu(session, buffer->cpu))
+		return 0;
+
+	buffer = memdup(buffer, sizeof(*buffer));
+	if (!buffer)
+		return -ENOMEM;
+
 	if (session->one_mmap) {
 		buffer->data = buffer->data_offset - session->one_mmap_offset +
 			       session->one_mmap_addr;
-	} else if (perf_data_file__is_pipe(session->file)) {
+	} else if (perf_data__is_pipe(session->data)) {
 		buffer->data = auxtrace_copy_data(buffer->size, session);
 		if (!buffer->data)
-			return -ENOMEM;
+			goto out_free;
 		buffer->data_needs_freeing = true;
 	} else if (BITS_PER_LONG == 32 &&
 		   buffer->size > BUFFER_LIMIT_FOR_32_BIT) {
-		int err;
-
 		err = auxtrace_queues__split_buffer(queues, idx, buffer);
 		if (err)
-			return err;
+			goto out_free;
 	}
 
-	return auxtrace_queues__add_buffer(queues, idx, buffer);
+	err = auxtrace_queues__queue_buffer(queues, idx, buffer);
+	if (err)
+		goto out_free;
+
+	/* FIXME: Doesn't work for split buffer */
+	if (buffer_ptr)
+		*buffer_ptr = buffer;
+
+	return 0;
+
+out_free:
+	auxtrace_buffer__free(buffer);
+	return err;
 }
 
 int auxtrace_queues__add_event(struct auxtrace_queues *queues,
@@ -316,35 +356,19 @@ int auxtrace_queues__add_event(struct auxtrace_queues *queues,
 			       union perf_event *event, off_t data_offset,
 			       struct auxtrace_buffer **buffer_ptr)
 {
-	struct auxtrace_buffer *buffer;
-	unsigned int idx;
-	int err;
+	struct auxtrace_buffer buffer = {
+		.pid = -1,
+		.tid = event->auxtrace.tid,
+		.cpu = event->auxtrace.cpu,
+		.data_offset = data_offset,
+		.offset = event->auxtrace.offset,
+		.reference = event->auxtrace.reference,
+		.size = event->auxtrace.size,
+	};
+	unsigned int idx = event->auxtrace.idx;
 
-	buffer = zalloc(sizeof(struct auxtrace_buffer));
-	if (!buffer)
-		return -ENOMEM;
-
-	buffer->pid = -1;
-	buffer->tid = event->auxtrace.tid;
-	buffer->cpu = event->auxtrace.cpu;
-	buffer->data_offset = data_offset;
-	buffer->offset = event->auxtrace.offset;
-	buffer->reference = event->auxtrace.reference;
-	buffer->size = event->auxtrace.size;
-	idx = event->auxtrace.idx;
-
-	err = auxtrace_queues__add_event_buffer(queues, session, idx, buffer);
-	if (err)
-		goto out_err;
-
-	if (buffer_ptr)
-		*buffer_ptr = buffer;
-
-	return 0;
-
-out_err:
-	auxtrace_buffer__free(buffer);
-	return err;
+	return auxtrace_queues__add_buffer(queues, session, idx, &buffer,
+					   buffer_ptr);
 }
 
 static int auxtrace_queues__add_indexed_event(struct auxtrace_queues *queues,
@@ -478,10 +502,11 @@ void auxtrace_heap__pop(struct auxtrace_heap *heap)
 			 heap_array[last].ordinal);
 }
 
-size_t auxtrace_record__info_priv_size(struct auxtrace_record *itr)
+size_t auxtrace_record__info_priv_size(struct auxtrace_record *itr,
+				       struct perf_evlist *evlist)
 {
 	if (itr)
-		return itr->info_priv_size(itr);
+		return itr->info_priv_size(itr, evlist);
 	return 0;
 }
 
@@ -741,6 +766,9 @@ int auxtrace_queues__process_index(struct auxtrace_queues *queues,
 	size_t i;
 	int err;
 
+	if (auxtrace__dont_decode(session))
+		return 0;
+
 	list_for_each_entry(auxtrace_index, &session->auxtrace_index, list) {
 		for (i = 0; i < auxtrace_index->nr; i++) {
 			ent = &auxtrace_index->entries[i];
@@ -822,7 +850,7 @@ void auxtrace_buffer__free(struct auxtrace_buffer *buffer)
 
 void auxtrace_synth_error(struct auxtrace_error_event *auxtrace_error, int type,
 			  int code, int cpu, pid_t pid, pid_t tid, u64 ip,
-			  const char *msg)
+			  const char *msg, u64 timestamp)
 {
 	size_t size;
 
@@ -834,7 +862,9 @@ void auxtrace_synth_error(struct auxtrace_error_event *auxtrace_error, int type,
 	auxtrace_error->cpu = cpu;
 	auxtrace_error->pid = pid;
 	auxtrace_error->tid = tid;
+	auxtrace_error->fmt = 1;
 	auxtrace_error->ip = ip;
+	auxtrace_error->time = timestamp;
 	strlcpy(auxtrace_error->msg, msg, MAX_AUXTRACE_ERROR_MSG);
 
 	size = (void *)auxtrace_error->msg - (void *)auxtrace_error +
@@ -852,7 +882,7 @@ int perf_event__synthesize_auxtrace_info(struct auxtrace_record *itr,
 	int err;
 
 	pr_debug2("Synthesizing auxtrace information\n");
-	priv_size = auxtrace_record__info_priv_size(itr);
+	priv_size = auxtrace_record__info_priv_size(itr, session->evlist);
 	ev = zalloc(sizeof(struct auxtrace_info_event) + priv_size);
 	if (!ev)
 		return -ENOMEM;
@@ -871,15 +901,8 @@ out_free:
 	return err;
 }
 
-static bool auxtrace__dont_decode(struct perf_session *session)
-{
-	return !session->itrace_synth_opts ||
-	       session->itrace_synth_opts->dont_decode;
-}
-
-int perf_event__process_auxtrace_info(struct perf_tool *tool __maybe_unused,
-				      union perf_event *event,
-				      struct perf_session *session)
+int perf_event__process_auxtrace_info(struct perf_session *session,
+				      union perf_event *event)
 {
 	enum auxtrace_type type = event->auxtrace_info.type;
 
@@ -891,15 +914,20 @@ int perf_event__process_auxtrace_info(struct perf_tool *tool __maybe_unused,
 		return intel_pt_process_auxtrace_info(event, session);
 	case PERF_AUXTRACE_INTEL_BTS:
 		return intel_bts_process_auxtrace_info(event, session);
+	case PERF_AUXTRACE_ARM_SPE:
+		return arm_spe_process_auxtrace_info(event, session);
+	case PERF_AUXTRACE_CS_ETM:
+		return cs_etm__process_auxtrace_info(event, session);
+	case PERF_AUXTRACE_S390_CPUMSF:
+		return s390_cpumsf_process_auxtrace_info(event, session);
 	case PERF_AUXTRACE_UNKNOWN:
 	default:
 		return -EINVAL;
 	}
 }
 
-s64 perf_event__process_auxtrace(struct perf_tool *tool,
-				 union perf_event *event,
-				 struct perf_session *session)
+s64 perf_event__process_auxtrace(struct perf_session *session,
+				 union perf_event *event)
 {
 	s64 err;
 
@@ -915,7 +943,7 @@ s64 perf_event__process_auxtrace(struct perf_tool *tool,
 	if (!session->auxtrace || event->header.type != PERF_RECORD_AUXTRACE)
 		return -EINVAL;
 
-	err = session->auxtrace->process_auxtrace_event(session, event, tool);
+	err = session->auxtrace->process_auxtrace_event(session, event, session->tool);
 	if (err < 0)
 		return err;
 
@@ -929,16 +957,26 @@ s64 perf_event__process_auxtrace(struct perf_tool *tool,
 #define PERF_ITRACE_DEFAULT_LAST_BRANCH_SZ	64
 #define PERF_ITRACE_MAX_LAST_BRANCH_SZ		1024
 
-void itrace_synth_opts__set_default(struct itrace_synth_opts *synth_opts)
+void itrace_synth_opts__set_default(struct itrace_synth_opts *synth_opts,
+				    bool no_sample)
 {
-	synth_opts->instructions = true;
 	synth_opts->branches = true;
 	synth_opts->transactions = true;
+	synth_opts->ptwrites = true;
+	synth_opts->pwr_events = true;
 	synth_opts->errors = true;
-	synth_opts->period_type = PERF_ITRACE_DEFAULT_PERIOD_TYPE;
-	synth_opts->period = PERF_ITRACE_DEFAULT_PERIOD;
+	if (no_sample) {
+		synth_opts->period_type = PERF_ITRACE_PERIOD_INSTRUCTIONS;
+		synth_opts->period = 1;
+		synth_opts->calls = true;
+	} else {
+		synth_opts->instructions = true;
+		synth_opts->period_type = PERF_ITRACE_DEFAULT_PERIOD_TYPE;
+		synth_opts->period = PERF_ITRACE_DEFAULT_PERIOD;
+	}
 	synth_opts->callchain_sz = PERF_ITRACE_DEFAULT_CALLCHAIN_SZ;
 	synth_opts->last_branch_sz = PERF_ITRACE_DEFAULT_LAST_BRANCH_SZ;
+	synth_opts->initial_skip = 0;
 }
 
 /*
@@ -963,7 +1001,7 @@ int itrace_parse_synth_opts(const struct option *opt, const char *str,
 	}
 
 	if (!str) {
-		itrace_synth_opts__set_default(synth_opts);
+		itrace_synth_opts__set_default(synth_opts, false);
 		return 0;
 	}
 
@@ -1016,6 +1054,12 @@ int itrace_parse_synth_opts(const struct option *opt, const char *str,
 		case 'x':
 			synth_opts->transactions = true;
 			break;
+		case 'w':
+			synth_opts->ptwrites = true;
+			break;
+		case 'p':
+			synth_opts->pwr_events = true;
+			break;
 		case 'e':
 			synth_opts->errors = true;
 			break;
@@ -1063,6 +1107,12 @@ int itrace_parse_synth_opts(const struct option *opt, const char *str,
 				synth_opts->last_branch_sz = val;
 			}
 			break;
+		case 's':
+			synth_opts->initial_skip = strtoul(p, &endptr, 10);
+			if (p == endptr)
+				goto out_err;
+			p = endptr;
+			break;
 		case ' ':
 		case ',':
 			break;
@@ -1104,12 +1154,27 @@ static const char *auxtrace_error_name(int type)
 size_t perf_event__fprintf_auxtrace_error(union perf_event *event, FILE *fp)
 {
 	struct auxtrace_error_event *e = &event->auxtrace_error;
+	unsigned long long nsecs = e->time;
+	const char *msg = e->msg;
 	int ret;
 
 	ret = fprintf(fp, " %s error type %u",
 		      auxtrace_error_name(e->type), e->type);
+
+	if (e->fmt && nsecs) {
+		unsigned long secs = nsecs / NSEC_PER_SEC;
+
+		nsecs -= secs * NSEC_PER_SEC;
+		ret += fprintf(fp, " time %lu.%09llu", secs, nsecs);
+	} else {
+		ret += fprintf(fp, " time 0");
+	}
+
+	if (!e->fmt)
+		msg = (const char *)&e->time;
+
 	ret += fprintf(fp, " cpu %d pid %d tid %d ip %#"PRIx64" code %u: %s\n",
-		       e->cpu, e->pid, e->tid, e->ip, e->code, e->msg);
+		       e->cpu, e->pid, e->tid, e->ip, e->code, msg);
 	return ret;
 }
 
@@ -1135,9 +1200,8 @@ void events_stats__auxtrace_error_warn(const struct events_stats *stats)
 	}
 }
 
-int perf_event__process_auxtrace_error(struct perf_tool *tool __maybe_unused,
-				       union perf_event *event,
-				       struct perf_session *session)
+int perf_event__process_auxtrace_error(struct perf_session *session,
+				       union perf_event *event)
 {
 	if (auxtrace__dont_decode(session))
 		return 0;
@@ -1146,11 +1210,12 @@ int perf_event__process_auxtrace_error(struct perf_tool *tool __maybe_unused,
 	return 0;
 }
 
-static int __auxtrace_mmap__read(struct auxtrace_mmap *mm,
+static int __auxtrace_mmap__read(struct perf_mmap *map,
 				 struct auxtrace_record *itr,
 				 struct perf_tool *tool, process_auxtrace_t fn,
 				 bool snapshot, size_t snapshot_size)
 {
+	struct auxtrace_mmap *mm = &map->auxtrace_mmap;
 	u64 head, old = mm->prev, offset, ref;
 	unsigned char *data = mm->base;
 	size_t size, head_off, old_off, len1, len2, padding;
@@ -1223,9 +1288,9 @@ static int __auxtrace_mmap__read(struct auxtrace_mmap *mm,
 	}
 
 	/* padding must be written by fn() e.g. record__process_auxtrace() */
-	padding = size & 7;
+	padding = size & (PERF_AUXTRACE_RECORD_ALIGNMENT - 1);
 	if (padding)
-		padding = 8 - padding;
+		padding = PERF_AUXTRACE_RECORD_ALIGNMENT - padding;
 
 	memset(&ev, 0, sizeof(ev));
 	ev.auxtrace.header.type = PERF_RECORD_AUXTRACE;
@@ -1237,7 +1302,7 @@ static int __auxtrace_mmap__read(struct auxtrace_mmap *mm,
 	ev.auxtrace.tid = mm->tid;
 	ev.auxtrace.cpu = mm->cpu;
 
-	if (fn(tool, &ev, data1, len1, data2, len2))
+	if (fn(tool, map, &ev, data1, len1, data2, len2))
 		return -1;
 
 	mm->prev = head;
@@ -1256,18 +1321,18 @@ static int __auxtrace_mmap__read(struct auxtrace_mmap *mm,
 	return 1;
 }
 
-int auxtrace_mmap__read(struct auxtrace_mmap *mm, struct auxtrace_record *itr,
+int auxtrace_mmap__read(struct perf_mmap *map, struct auxtrace_record *itr,
 			struct perf_tool *tool, process_auxtrace_t fn)
 {
-	return __auxtrace_mmap__read(mm, itr, tool, fn, false, 0);
+	return __auxtrace_mmap__read(map, itr, tool, fn, false, 0);
 }
 
-int auxtrace_mmap__read_snapshot(struct auxtrace_mmap *mm,
+int auxtrace_mmap__read_snapshot(struct perf_mmap *map,
 				 struct auxtrace_record *itr,
 				 struct perf_tool *tool, process_auxtrace_t fn,
 				 size_t snapshot_size)
 {
-	return __auxtrace_mmap__read(mm, itr, tool, fn, true, snapshot_size);
+	return __auxtrace_mmap__read(map, itr, tool, fn, true, snapshot_size);
 }
 
 /**
@@ -1389,4 +1454,730 @@ void *auxtrace_cache__lookup(struct auxtrace_cache *c, u32 key)
 	}
 
 	return NULL;
+}
+
+static void addr_filter__free_str(struct addr_filter *filt)
+{
+	free(filt->str);
+	filt->action   = NULL;
+	filt->sym_from = NULL;
+	filt->sym_to   = NULL;
+	filt->filename = NULL;
+	filt->str      = NULL;
+}
+
+static struct addr_filter *addr_filter__new(void)
+{
+	struct addr_filter *filt = zalloc(sizeof(*filt));
+
+	if (filt)
+		INIT_LIST_HEAD(&filt->list);
+
+	return filt;
+}
+
+static void addr_filter__free(struct addr_filter *filt)
+{
+	if (filt)
+		addr_filter__free_str(filt);
+	free(filt);
+}
+
+static void addr_filters__add(struct addr_filters *filts,
+			      struct addr_filter *filt)
+{
+	list_add_tail(&filt->list, &filts->head);
+	filts->cnt += 1;
+}
+
+static void addr_filters__del(struct addr_filters *filts,
+			      struct addr_filter *filt)
+{
+	list_del_init(&filt->list);
+	filts->cnt -= 1;
+}
+
+void addr_filters__init(struct addr_filters *filts)
+{
+	INIT_LIST_HEAD(&filts->head);
+	filts->cnt = 0;
+}
+
+void addr_filters__exit(struct addr_filters *filts)
+{
+	struct addr_filter *filt, *n;
+
+	list_for_each_entry_safe(filt, n, &filts->head, list) {
+		addr_filters__del(filts, filt);
+		addr_filter__free(filt);
+	}
+}
+
+static int parse_num_or_str(char **inp, u64 *num, const char **str,
+			    const char *str_delim)
+{
+	*inp += strspn(*inp, " ");
+
+	if (isdigit(**inp)) {
+		char *endptr;
+
+		if (!num)
+			return -EINVAL;
+		errno = 0;
+		*num = strtoull(*inp, &endptr, 0);
+		if (errno)
+			return -errno;
+		if (endptr == *inp)
+			return -EINVAL;
+		*inp = endptr;
+	} else {
+		size_t n;
+
+		if (!str)
+			return -EINVAL;
+		*inp += strspn(*inp, " ");
+		*str = *inp;
+		n = strcspn(*inp, str_delim);
+		if (!n)
+			return -EINVAL;
+		*inp += n;
+		if (**inp) {
+			**inp = '\0';
+			*inp += 1;
+		}
+	}
+	return 0;
+}
+
+static int parse_action(struct addr_filter *filt)
+{
+	if (!strcmp(filt->action, "filter")) {
+		filt->start = true;
+		filt->range = true;
+	} else if (!strcmp(filt->action, "start")) {
+		filt->start = true;
+	} else if (!strcmp(filt->action, "stop")) {
+		filt->start = false;
+	} else if (!strcmp(filt->action, "tracestop")) {
+		filt->start = false;
+		filt->range = true;
+		filt->action += 5; /* Change 'tracestop' to 'stop' */
+	} else {
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int parse_sym_idx(char **inp, int *idx)
+{
+	*idx = -1;
+
+	*inp += strspn(*inp, " ");
+
+	if (**inp != '#')
+		return 0;
+
+	*inp += 1;
+
+	if (**inp == 'g' || **inp == 'G') {
+		*inp += 1;
+		*idx = 0;
+	} else {
+		unsigned long num;
+		char *endptr;
+
+		errno = 0;
+		num = strtoul(*inp, &endptr, 0);
+		if (errno)
+			return -errno;
+		if (endptr == *inp || num > INT_MAX)
+			return -EINVAL;
+		*inp = endptr;
+		*idx = num;
+	}
+
+	return 0;
+}
+
+static int parse_addr_size(char **inp, u64 *num, const char **str, int *idx)
+{
+	int err = parse_num_or_str(inp, num, str, " ");
+
+	if (!err && *str)
+		err = parse_sym_idx(inp, idx);
+
+	return err;
+}
+
+static int parse_one_filter(struct addr_filter *filt, const char **filter_inp)
+{
+	char *fstr;
+	int err;
+
+	filt->str = fstr = strdup(*filter_inp);
+	if (!fstr)
+		return -ENOMEM;
+
+	err = parse_num_or_str(&fstr, NULL, &filt->action, " ");
+	if (err)
+		goto out_err;
+
+	err = parse_action(filt);
+	if (err)
+		goto out_err;
+
+	err = parse_addr_size(&fstr, &filt->addr, &filt->sym_from,
+			      &filt->sym_from_idx);
+	if (err)
+		goto out_err;
+
+	fstr += strspn(fstr, " ");
+
+	if (*fstr == '/') {
+		fstr += 1;
+		err = parse_addr_size(&fstr, &filt->size, &filt->sym_to,
+				      &filt->sym_to_idx);
+		if (err)
+			goto out_err;
+		filt->range = true;
+	}
+
+	fstr += strspn(fstr, " ");
+
+	if (*fstr == '@') {
+		fstr += 1;
+		err = parse_num_or_str(&fstr, NULL, &filt->filename, " ,");
+		if (err)
+			goto out_err;
+	}
+
+	fstr += strspn(fstr, " ,");
+
+	*filter_inp += fstr - filt->str;
+
+	return 0;
+
+out_err:
+	addr_filter__free_str(filt);
+
+	return err;
+}
+
+int addr_filters__parse_bare_filter(struct addr_filters *filts,
+				    const char *filter)
+{
+	struct addr_filter *filt;
+	const char *fstr = filter;
+	int err;
+
+	while (*fstr) {
+		filt = addr_filter__new();
+		err = parse_one_filter(filt, &fstr);
+		if (err) {
+			addr_filter__free(filt);
+			addr_filters__exit(filts);
+			return err;
+		}
+		addr_filters__add(filts, filt);
+	}
+
+	return 0;
+}
+
+struct sym_args {
+	const char	*name;
+	u64		start;
+	u64		size;
+	int		idx;
+	int		cnt;
+	bool		started;
+	bool		global;
+	bool		selected;
+	bool		duplicate;
+	bool		near;
+};
+
+static bool kern_sym_match(struct sym_args *args, const char *name, char type)
+{
+	/* A function with the same name, and global or the n'th found or any */
+	return kallsyms__is_function(type) &&
+	       !strcmp(name, args->name) &&
+	       ((args->global && isupper(type)) ||
+		(args->selected && ++(args->cnt) == args->idx) ||
+		(!args->global && !args->selected));
+}
+
+static int find_kern_sym_cb(void *arg, const char *name, char type, u64 start)
+{
+	struct sym_args *args = arg;
+
+	if (args->started) {
+		if (!args->size)
+			args->size = start - args->start;
+		if (args->selected) {
+			if (args->size)
+				return 1;
+		} else if (kern_sym_match(args, name, type)) {
+			args->duplicate = true;
+			return 1;
+		}
+	} else if (kern_sym_match(args, name, type)) {
+		args->started = true;
+		args->start = start;
+	}
+
+	return 0;
+}
+
+static int print_kern_sym_cb(void *arg, const char *name, char type, u64 start)
+{
+	struct sym_args *args = arg;
+
+	if (kern_sym_match(args, name, type)) {
+		pr_err("#%d\t0x%"PRIx64"\t%c\t%s\n",
+		       ++args->cnt, start, type, name);
+		args->near = true;
+	} else if (args->near) {
+		args->near = false;
+		pr_err("\t\twhich is near\t\t%s\n", name);
+	}
+
+	return 0;
+}
+
+static int sym_not_found_error(const char *sym_name, int idx)
+{
+	if (idx > 0) {
+		pr_err("N'th occurrence (N=%d) of symbol '%s' not found.\n",
+		       idx, sym_name);
+	} else if (!idx) {
+		pr_err("Global symbol '%s' not found.\n", sym_name);
+	} else {
+		pr_err("Symbol '%s' not found.\n", sym_name);
+	}
+	pr_err("Note that symbols must be functions.\n");
+
+	return -EINVAL;
+}
+
+static int find_kern_sym(const char *sym_name, u64 *start, u64 *size, int idx)
+{
+	struct sym_args args = {
+		.name = sym_name,
+		.idx = idx,
+		.global = !idx,
+		.selected = idx > 0,
+	};
+	int err;
+
+	*start = 0;
+	*size = 0;
+
+	err = kallsyms__parse("/proc/kallsyms", &args, find_kern_sym_cb);
+	if (err < 0) {
+		pr_err("Failed to parse /proc/kallsyms\n");
+		return err;
+	}
+
+	if (args.duplicate) {
+		pr_err("Multiple kernel symbols with name '%s'\n", sym_name);
+		args.cnt = 0;
+		kallsyms__parse("/proc/kallsyms", &args, print_kern_sym_cb);
+		pr_err("Disambiguate symbol name by inserting #n after the name e.g. %s #2\n",
+		       sym_name);
+		pr_err("Or select a global symbol by inserting #0 or #g or #G\n");
+		return -EINVAL;
+	}
+
+	if (!args.started) {
+		pr_err("Kernel symbol lookup: ");
+		return sym_not_found_error(sym_name, idx);
+	}
+
+	*start = args.start;
+	*size = args.size;
+
+	return 0;
+}
+
+static int find_entire_kern_cb(void *arg, const char *name __maybe_unused,
+			       char type, u64 start)
+{
+	struct sym_args *args = arg;
+
+	if (!kallsyms__is_function(type))
+		return 0;
+
+	if (!args->started) {
+		args->started = true;
+		args->start = start;
+	}
+	/* Don't know exactly where the kernel ends, so we add a page */
+	args->size = round_up(start, page_size) + page_size - args->start;
+
+	return 0;
+}
+
+static int addr_filter__entire_kernel(struct addr_filter *filt)
+{
+	struct sym_args args = { .started = false };
+	int err;
+
+	err = kallsyms__parse("/proc/kallsyms", &args, find_entire_kern_cb);
+	if (err < 0 || !args.started) {
+		pr_err("Failed to parse /proc/kallsyms\n");
+		return err;
+	}
+
+	filt->addr = args.start;
+	filt->size = args.size;
+
+	return 0;
+}
+
+static int check_end_after_start(struct addr_filter *filt, u64 start, u64 size)
+{
+	if (start + size >= filt->addr)
+		return 0;
+
+	if (filt->sym_from) {
+		pr_err("Symbol '%s' (0x%"PRIx64") comes before '%s' (0x%"PRIx64")\n",
+		       filt->sym_to, start, filt->sym_from, filt->addr);
+	} else {
+		pr_err("Symbol '%s' (0x%"PRIx64") comes before address 0x%"PRIx64")\n",
+		       filt->sym_to, start, filt->addr);
+	}
+
+	return -EINVAL;
+}
+
+static int addr_filter__resolve_kernel_syms(struct addr_filter *filt)
+{
+	bool no_size = false;
+	u64 start, size;
+	int err;
+
+	if (symbol_conf.kptr_restrict) {
+		pr_err("Kernel addresses are restricted. Unable to resolve kernel symbols.\n");
+		return -EINVAL;
+	}
+
+	if (filt->sym_from && !strcmp(filt->sym_from, "*"))
+		return addr_filter__entire_kernel(filt);
+
+	if (filt->sym_from) {
+		err = find_kern_sym(filt->sym_from, &start, &size,
+				    filt->sym_from_idx);
+		if (err)
+			return err;
+		filt->addr = start;
+		if (filt->range && !filt->size && !filt->sym_to) {
+			filt->size = size;
+			no_size = !size;
+		}
+	}
+
+	if (filt->sym_to) {
+		err = find_kern_sym(filt->sym_to, &start, &size,
+				    filt->sym_to_idx);
+		if (err)
+			return err;
+
+		err = check_end_after_start(filt, start, size);
+		if (err)
+			return err;
+		filt->size = start + size - filt->addr;
+		no_size = !size;
+	}
+
+	/* The very last symbol in kallsyms does not imply a particular size */
+	if (no_size) {
+		pr_err("Cannot determine size of symbol '%s'\n",
+		       filt->sym_to ? filt->sym_to : filt->sym_from);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static struct dso *load_dso(const char *name)
+{
+	struct map *map;
+	struct dso *dso;
+
+	map = dso__new_map(name);
+	if (!map)
+		return NULL;
+
+	if (map__load(map) < 0)
+		pr_err("File '%s' not found or has no symbols.\n", name);
+
+	dso = dso__get(map->dso);
+
+	map__put(map);
+
+	return dso;
+}
+
+static bool dso_sym_match(struct symbol *sym, const char *name, int *cnt,
+			  int idx)
+{
+	/* Same name, and global or the n'th found or any */
+	return !arch__compare_symbol_names(name, sym->name) &&
+	       ((!idx && sym->binding == STB_GLOBAL) ||
+		(idx > 0 && ++*cnt == idx) ||
+		idx < 0);
+}
+
+static void print_duplicate_syms(struct dso *dso, const char *sym_name)
+{
+	struct symbol *sym;
+	bool near = false;
+	int cnt = 0;
+
+	pr_err("Multiple symbols with name '%s'\n", sym_name);
+
+	sym = dso__first_symbol(dso);
+	while (sym) {
+		if (dso_sym_match(sym, sym_name, &cnt, -1)) {
+			pr_err("#%d\t0x%"PRIx64"\t%c\t%s\n",
+			       ++cnt, sym->start,
+			       sym->binding == STB_GLOBAL ? 'g' :
+			       sym->binding == STB_LOCAL  ? 'l' : 'w',
+			       sym->name);
+			near = true;
+		} else if (near) {
+			near = false;
+			pr_err("\t\twhich is near\t\t%s\n", sym->name);
+		}
+		sym = dso__next_symbol(sym);
+	}
+
+	pr_err("Disambiguate symbol name by inserting #n after the name e.g. %s #2\n",
+	       sym_name);
+	pr_err("Or select a global symbol by inserting #0 or #g or #G\n");
+}
+
+static int find_dso_sym(struct dso *dso, const char *sym_name, u64 *start,
+			u64 *size, int idx)
+{
+	struct symbol *sym;
+	int cnt = 0;
+
+	*start = 0;
+	*size = 0;
+
+	sym = dso__first_symbol(dso);
+	while (sym) {
+		if (*start) {
+			if (!*size)
+				*size = sym->start - *start;
+			if (idx > 0) {
+				if (*size)
+					return 1;
+			} else if (dso_sym_match(sym, sym_name, &cnt, idx)) {
+				print_duplicate_syms(dso, sym_name);
+				return -EINVAL;
+			}
+		} else if (dso_sym_match(sym, sym_name, &cnt, idx)) {
+			*start = sym->start;
+			*size = sym->end - sym->start;
+		}
+		sym = dso__next_symbol(sym);
+	}
+
+	if (!*start)
+		return sym_not_found_error(sym_name, idx);
+
+	return 0;
+}
+
+static int addr_filter__entire_dso(struct addr_filter *filt, struct dso *dso)
+{
+	if (dso__data_file_size(dso, NULL)) {
+		pr_err("Failed to determine filter for %s\nCannot determine file size.\n",
+		       filt->filename);
+		return -EINVAL;
+	}
+
+	filt->addr = 0;
+	filt->size = dso->data.file_size;
+
+	return 0;
+}
+
+static int addr_filter__resolve_syms(struct addr_filter *filt)
+{
+	u64 start, size;
+	struct dso *dso;
+	int err = 0;
+
+	if (!filt->sym_from && !filt->sym_to)
+		return 0;
+
+	if (!filt->filename)
+		return addr_filter__resolve_kernel_syms(filt);
+
+	dso = load_dso(filt->filename);
+	if (!dso) {
+		pr_err("Failed to load symbols from: %s\n", filt->filename);
+		return -EINVAL;
+	}
+
+	if (filt->sym_from && !strcmp(filt->sym_from, "*")) {
+		err = addr_filter__entire_dso(filt, dso);
+		goto put_dso;
+	}
+
+	if (filt->sym_from) {
+		err = find_dso_sym(dso, filt->sym_from, &start, &size,
+				   filt->sym_from_idx);
+		if (err)
+			goto put_dso;
+		filt->addr = start;
+		if (filt->range && !filt->size && !filt->sym_to)
+			filt->size = size;
+	}
+
+	if (filt->sym_to) {
+		err = find_dso_sym(dso, filt->sym_to, &start, &size,
+				   filt->sym_to_idx);
+		if (err)
+			goto put_dso;
+
+		err = check_end_after_start(filt, start, size);
+		if (err)
+			return err;
+
+		filt->size = start + size - filt->addr;
+	}
+
+put_dso:
+	dso__put(dso);
+
+	return err;
+}
+
+static char *addr_filter__to_str(struct addr_filter *filt)
+{
+	char filename_buf[PATH_MAX];
+	const char *at = "";
+	const char *fn = "";
+	char *filter;
+	int err;
+
+	if (filt->filename) {
+		at = "@";
+		fn = realpath(filt->filename, filename_buf);
+		if (!fn)
+			return NULL;
+	}
+
+	if (filt->range) {
+		err = asprintf(&filter, "%s 0x%"PRIx64"/0x%"PRIx64"%s%s",
+			       filt->action, filt->addr, filt->size, at, fn);
+	} else {
+		err = asprintf(&filter, "%s 0x%"PRIx64"%s%s",
+			       filt->action, filt->addr, at, fn);
+	}
+
+	return err < 0 ? NULL : filter;
+}
+
+static int parse_addr_filter(struct perf_evsel *evsel, const char *filter,
+			     int max_nr)
+{
+	struct addr_filters filts;
+	struct addr_filter *filt;
+	int err;
+
+	addr_filters__init(&filts);
+
+	err = addr_filters__parse_bare_filter(&filts, filter);
+	if (err)
+		goto out_exit;
+
+	if (filts.cnt > max_nr) {
+		pr_err("Error: number of address filters (%d) exceeds maximum (%d)\n",
+		       filts.cnt, max_nr);
+		err = -EINVAL;
+		goto out_exit;
+	}
+
+	list_for_each_entry(filt, &filts.head, list) {
+		char *new_filter;
+
+		err = addr_filter__resolve_syms(filt);
+		if (err)
+			goto out_exit;
+
+		new_filter = addr_filter__to_str(filt);
+		if (!new_filter) {
+			err = -ENOMEM;
+			goto out_exit;
+		}
+
+		if (perf_evsel__append_addr_filter(evsel, new_filter)) {
+			err = -ENOMEM;
+			goto out_exit;
+		}
+	}
+
+out_exit:
+	addr_filters__exit(&filts);
+
+	if (err) {
+		pr_err("Failed to parse address filter: '%s'\n", filter);
+		pr_err("Filter format is: filter|start|stop|tracestop <start symbol or address> [/ <end symbol or size>] [@<file name>]\n");
+		pr_err("Where multiple filters are separated by space or comma.\n");
+	}
+
+	return err;
+}
+
+static struct perf_pmu *perf_evsel__find_pmu(struct perf_evsel *evsel)
+{
+	struct perf_pmu *pmu = NULL;
+
+	while ((pmu = perf_pmu__scan(pmu)) != NULL) {
+		if (pmu->type == evsel->attr.type)
+			break;
+	}
+
+	return pmu;
+}
+
+static int perf_evsel__nr_addr_filter(struct perf_evsel *evsel)
+{
+	struct perf_pmu *pmu = perf_evsel__find_pmu(evsel);
+	int nr_addr_filters = 0;
+
+	if (!pmu)
+		return 0;
+
+	perf_pmu__scan_file(pmu, "nr_addr_filters", "%d", &nr_addr_filters);
+
+	return nr_addr_filters;
+}
+
+int auxtrace_parse_filters(struct perf_evlist *evlist)
+{
+	struct perf_evsel *evsel;
+	char *filter;
+	int err, max_nr;
+
+	evlist__for_each_entry(evlist, evsel) {
+		filter = evsel->filter;
+		max_nr = perf_evsel__nr_addr_filter(evsel);
+		if (!filter || !max_nr)
+			continue;
+		evsel->filter = NULL;
+		err = parse_addr_filter(evsel, filter, max_nr);
+		free(filter);
+		if (err)
+			return err;
+		pr_debug("Address filter: %s\n", evsel->filter);
+	}
+
+	return 0;
 }

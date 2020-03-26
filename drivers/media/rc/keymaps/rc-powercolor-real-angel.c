@@ -1,14 +1,9 @@
-/* powercolor-real-angel.h - Keytable for powercolor_real_angel Remote Controller
- *
- * keymap imported from ir-keymaps.c
- *
- * Copyright (c) 2010 by Mauro Carvalho Chehab
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+// SPDX-License-Identifier: GPL-2.0+
+// powercolor-real-angel.h - Keytable for powercolor_real_angel Remote Controller
+//
+// keymap imported from ir-keymaps.c
+//
+// Copyright (c) 2010 by Mauro Carvalho Chehab
 
 #include <media/rc-map.h>
 #include <linux/module.h>
@@ -31,7 +26,7 @@ static struct rc_map_table powercolor_real_angel[] = {
 	{ 0x07, KEY_7 },
 	{ 0x08, KEY_8 },
 	{ 0x09, KEY_9 },
-	{ 0x0a, KEY_DIGITS },		/* single, double, tripple digit */
+	{ 0x0a, KEY_DIGITS },		/* single, double, triple digit */
 	{ 0x29, KEY_PREVIOUS },		/* previous channel */
 	{ 0x12, KEY_BRIGHTNESSUP },
 	{ 0x13, KEY_BRIGHTNESSDOWN },
@@ -58,10 +53,10 @@ static struct rc_map_table powercolor_real_angel[] = {
 
 static struct rc_map_list powercolor_real_angel_map = {
 	.map = {
-		.scan    = powercolor_real_angel,
-		.size    = ARRAY_SIZE(powercolor_real_angel),
-		.rc_type = RC_TYPE_UNKNOWN,	/* Legacy IR type */
-		.name    = RC_MAP_POWERCOLOR_REAL_ANGEL,
+		.scan     = powercolor_real_angel,
+		.size     = ARRAY_SIZE(powercolor_real_angel),
+		.rc_proto = RC_PROTO_UNKNOWN,	/* Legacy IR type */
+		.name     = RC_MAP_POWERCOLOR_REAL_ANGEL,
 	}
 };
 

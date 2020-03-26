@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * atmel_wm8904 - Atmel ASoC driver for boards with WM8904 codec.
  *
  * Copyright (C) 2012 Atmel
  *
  * Author: Bo Shen <voice.shen@atmel.com>
- *
- * GPLv2 or later
  */
 
 #include <linux/clk.h>
@@ -53,7 +52,7 @@ static int atmel_asoc_wm8904_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static struct snd_soc_ops atmel_asoc_wm8904_ops = {
+static const struct snd_soc_ops atmel_asoc_wm8904_ops = {
 	.hw_params = atmel_asoc_wm8904_hw_params,
 };
 
@@ -183,6 +182,7 @@ static struct platform_driver atmel_asoc_wm8904_driver = {
 	.driver = {
 		.name = "atmel-wm8904-audio",
 		.of_match_table = of_match_ptr(atmel_asoc_wm8904_dt_ids),
+		.pm		= &snd_soc_pm_ops,
 	},
 	.probe = atmel_asoc_wm8904_probe,
 	.remove = atmel_asoc_wm8904_remove,

@@ -1,24 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Manage a process's keyrings
  *
  * Copyright (C) 2004-2005, 2008 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
-#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/sched.h>
+#include <linux/sched/user.h>
 #include <linux/keyctl.h>
 #include <linux/fs.h>
 #include <linux/err.h>
 #include <linux/mutex.h>
 #include <linux/security.h>
 #include <linux/user_namespace.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
+#include <keys/request_key_auth-type.h>
 #include "internal.h"
 
 /* Session keyring create vs join semaphore */
@@ -29,7 +26,7 @@ static DEFINE_MUTEX(key_user_keyring_mutex);
 
 /* The root user's tracking struct */
 struct key_user root_key_user = {
-	.usage		= ATOMIC_INIT(3),
+	.usage		= REFCOUNT_INIT(3),
 	.cons_lock	= __MUTEX_INITIALIZER(root_key_user.cons_lock),
 	.lock		= __SPIN_LOCK_UNLOCKED(root_key_user.lock),
 	.nkeys		= ATOMIC_INIT(2),
@@ -57,7 +54,7 @@ int install_user_keyrings(void)
 
 	kenter("%p{%u}", user, uid);
 
-	if (user->uid_keyring && user->session_keyring) {
+	if (READ_ONCE(user->uid_keyring) && READ_ONCE(user->session_keyring)) {
 		kleave(" = 0 [exist]");
 		return 0;
 	}
@@ -78,7 +75,7 @@ int install_user_keyrings(void)
 						    cred, user_keyring_perm,
 						    KEY_ALLOC_UID_KEYRING |
 							KEY_ALLOC_IN_QUOTA,
-						    NULL);
+						    NULL, NULL);
 			if (IS_ERR(uid_keyring)) {
 				ret = PTR_ERR(uid_keyring);
 				goto error;
@@ -96,7 +93,7 @@ int install_user_keyrings(void)
 					      cred, user_keyring_perm,
 					      KEY_ALLOC_UID_KEYRING |
 						  KEY_ALLOC_IN_QUOTA,
-					      NULL);
+					      NULL, NULL);
 			if (IS_ERR(session_keyring)) {
 				ret = PTR_ERR(session_keyring);
 				goto error_release;
@@ -110,8 +107,10 @@ int install_user_keyrings(void)
 		}
 
 		/* install the keyrings */
-		user->uid_keyring = uid_keyring;
-		user->session_keyring = session_keyring;
+		/* paired with READ_ONCE() */
+		smp_store_release(&user->uid_keyring, uid_keyring);
+		/* paired with READ_ONCE() */
+		smp_store_release(&user->session_keyring, session_keyring);
 	}
 
 	mutex_unlock(&key_user_keyring_mutex);
@@ -143,7 +142,8 @@ int install_thread_keyring_to_cred(struct cred *new)
 
 	keyring = keyring_alloc("_tid", new->uid, new->gid, new,
 				KEY_POS_ALL | KEY_USR_VIEW,
-				KEY_ALLOC_QUOTA_OVERRUN, NULL);
+				KEY_ALLOC_QUOTA_OVERRUN,
+				NULL, NULL);
 	if (IS_ERR(keyring))
 		return PTR_ERR(keyring);
 
@@ -189,7 +189,8 @@ int install_process_keyring_to_cred(struct cred *new)
 
 	keyring = keyring_alloc("_pid", new->uid, new->gid, new,
 				KEY_POS_ALL | KEY_USR_VIEW,
-				KEY_ALLOC_QUOTA_OVERRUN, NULL);
+				KEY_ALLOC_QUOTA_OVERRUN,
+				NULL, NULL);
 	if (IS_ERR(keyring))
 		return PTR_ERR(keyring);
 
@@ -224,6 +225,7 @@ static int install_process_keyring(void)
  * Install the given keyring as the session keyring of the given credentials
  * struct, replacing the existing one if any.  If the given keyring is NULL,
  * then install a new anonymous session keyring.
+ * @cred can not be in use by any task yet.
  *
  * Return: 0 on success; -errno on failure.
  */
@@ -242,7 +244,7 @@ int install_session_keyring_to_cred(struct cred *cred, struct key *keyring)
 
 		keyring = keyring_alloc("_ses", cred->uid, cred->gid, cred,
 					KEY_POS_ALL | KEY_USR_VIEW | KEY_USR_READ,
-					flags, NULL);
+					flags, NULL, NULL);
 		if (IS_ERR(keyring))
 			return PTR_ERR(keyring);
 	} else {
@@ -251,7 +253,7 @@ int install_session_keyring_to_cred(struct cred *cred, struct key *keyring)
 
 	/* install the keyring */
 	old = cred->session_keyring;
-	rcu_assign_pointer(cred->session_keyring, keyring);
+	cred->session_keyring = keyring;
 
 	if (old)
 		key_put(old);
@@ -336,6 +338,7 @@ void key_fsgid_changed(struct task_struct *tsk)
 key_ref_t search_my_process_keyrings(struct keyring_search_context *ctx)
 {
 	key_ref_t key_ref, ret, err;
+	const struct cred *cred = ctx->cred;
 
 	/* we want to return -EAGAIN or -ENOKEY if any of the keyrings were
 	 * searchable, but we failed to find a key or we found a negative key;
@@ -349,9 +352,9 @@ key_ref_t search_my_process_keyrings(struct keyring_search_context *ctx)
 	err = ERR_PTR(-EAGAIN);
 
 	/* search the thread keyring first */
-	if (ctx->cred->thread_keyring) {
+	if (cred->thread_keyring) {
 		key_ref = keyring_search_aux(
-			make_key_ref(ctx->cred->thread_keyring, 1), ctx);
+			make_key_ref(cred->thread_keyring, 1), ctx);
 		if (!IS_ERR(key_ref))
 			goto found;
 
@@ -367,9 +370,9 @@ key_ref_t search_my_process_keyrings(struct keyring_search_context *ctx)
 	}
 
 	/* search the process keyring second */
-	if (ctx->cred->process_keyring) {
+	if (cred->process_keyring) {
 		key_ref = keyring_search_aux(
-			make_key_ref(ctx->cred->process_keyring, 1), ctx);
+			make_key_ref(cred->process_keyring, 1), ctx);
 		if (!IS_ERR(key_ref))
 			goto found;
 
@@ -377,6 +380,7 @@ key_ref_t search_my_process_keyrings(struct keyring_search_context *ctx)
 		case -EAGAIN: /* no key */
 			if (ret)
 				break;
+			/* fall through */
 		case -ENOKEY: /* negative key */
 			ret = key_ref;
 			break;
@@ -387,12 +391,9 @@ key_ref_t search_my_process_keyrings(struct keyring_search_context *ctx)
 	}
 
 	/* search the session keyring */
-	if (ctx->cred->session_keyring) {
-		rcu_read_lock();
+	if (cred->session_keyring) {
 		key_ref = keyring_search_aux(
-			make_key_ref(rcu_dereference(ctx->cred->session_keyring), 1),
-			ctx);
-		rcu_read_unlock();
+			make_key_ref(cred->session_keyring, 1), ctx);
 
 		if (!IS_ERR(key_ref))
 			goto found;
@@ -401,6 +402,7 @@ key_ref_t search_my_process_keyrings(struct keyring_search_context *ctx)
 		case -EAGAIN: /* no key */
 			if (ret)
 				break;
+			/* fall through */
 		case -ENOKEY: /* negative key */
 			ret = key_ref;
 			break;
@@ -410,9 +412,9 @@ key_ref_t search_my_process_keyrings(struct keyring_search_context *ctx)
 		}
 	}
 	/* or search the user-session keyring */
-	else if (ctx->cred->user->session_keyring) {
+	else if (READ_ONCE(cred->user->session_keyring)) {
 		key_ref = keyring_search_aux(
-			make_key_ref(ctx->cred->user->session_keyring, 1),
+			make_key_ref(READ_ONCE(cred->user->session_keyring), 1),
 			ctx);
 		if (!IS_ERR(key_ref))
 			goto found;
@@ -421,6 +423,7 @@ key_ref_t search_my_process_keyrings(struct keyring_search_context *ctx)
 		case -EAGAIN: /* no key */
 			if (ret)
 				break;
+			/* fall through */
 		case -ENOKEY: /* negative key */
 			ret = key_ref;
 			break;
@@ -598,7 +601,7 @@ try_again:
 				goto error;
 			goto reget_creds;
 		} else if (ctx.cred->session_keyring ==
-			   ctx.cred->user->session_keyring &&
+			   READ_ONCE(ctx.cred->user->session_keyring) &&
 			   lflags & KEY_LOOKUP_CREATE) {
 			ret = join_session_keyring(NULL);
 			if (ret < 0)
@@ -606,15 +609,13 @@ try_again:
 			goto reget_creds;
 		}
 
-		rcu_read_lock();
-		key = rcu_dereference(ctx.cred->session_keyring);
+		key = ctx.cred->session_keyring;
 		__key_get(key);
-		rcu_read_unlock();
 		key_ref = make_key_ref(key, 1);
 		break;
 
 	case KEY_SPEC_USER_KEYRING:
-		if (!ctx.cred->user->uid_keyring) {
+		if (!READ_ONCE(ctx.cred->user->uid_keyring)) {
 			ret = install_user_keyrings();
 			if (ret < 0)
 				goto error;
@@ -626,7 +627,7 @@ try_again:
 		break;
 
 	case KEY_SPEC_USER_SESSION_KEYRING:
-		if (!ctx.cred->user->session_keyring) {
+		if (!READ_ONCE(ctx.cred->user->session_keyring)) {
 			ret = install_user_keyrings();
 			if (ret < 0)
 				goto error;
@@ -735,7 +736,7 @@ try_again:
 	if (ret < 0)
 		goto invalid_key;
 
-	key->last_used_at = current_kernel_time().tv_sec;
+	key->last_used_at = ktime_get_real_seconds();
 
 error:
 	put_cred(ctx.cred);
@@ -752,6 +753,7 @@ reget_creds:
 	put_cred(ctx.cred);
 	goto try_again;
 }
+EXPORT_SYMBOL(lookup_user_key);
 
 /*
  * Join the named keyring as the session keyring if possible else attempt to
@@ -799,7 +801,7 @@ long join_session_keyring(const char *name)
 		keyring = keyring_alloc(
 			name, old->uid, old->gid, old,
 			KEY_POS_ALL | KEY_USR_VIEW | KEY_USR_READ | KEY_USR_LINK,
-			KEY_ALLOC_IN_QUOTA, NULL);
+			KEY_ALLOC_IN_QUOTA, NULL, NULL);
 		if (IS_ERR(keyring)) {
 			ret = PTR_ERR(keyring);
 			goto error2;
@@ -808,15 +810,14 @@ long join_session_keyring(const char *name)
 		ret = PTR_ERR(keyring);
 		goto error2;
 	} else if (keyring == new->session_keyring) {
-		key_put(keyring);
 		ret = 0;
-		goto error2;
+		goto error3;
 	}
 
 	/* we've got a keyring - now to install it */
 	ret = install_session_keyring_to_cred(new, keyring);
 	if (ret < 0)
-		goto error2;
+		goto error3;
 
 	commit_creds(new);
 	mutex_unlock(&key_session_mutex);
@@ -826,6 +827,8 @@ long join_session_keyring(const char *name)
 okay:
 	return ret;
 
+error3:
+	key_put(keyring);
 error2:
 	mutex_unlock(&key_session_mutex);
 error:

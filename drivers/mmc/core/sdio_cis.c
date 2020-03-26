@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * linux/drivers/mmc/core/sdio_cis.c
  *
@@ -6,11 +7,6 @@
  * Copyright:	MontaVista Software Inc.
  *
  * Copyright 2007 Pierre Ossman
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -177,8 +173,13 @@ static int cistpl_funce_func(struct mmc_card *card, struct sdio_func *func,
 	vsn = func->card->cccr.sdio_vsn;
 	min_size = (vsn == SDIO_SDIO_REV_1_00) ? 28 : 42;
 
-	if (size < min_size)
+	if (size == 28 && vsn == SDIO_SDIO_REV_1_10) {
+		pr_warn("%s: card has broken SDIO 1.1 CIS, forcing SDIO 1.0\n",
+			mmc_hostname(card->host));
+		vsn = SDIO_SDIO_REV_1_00;
+	} else if (size < min_size) {
 		return -EINVAL;
+	}
 
 	/* TPLFE_MAX_BLK_SIZE */
 	func->max_blksize = buf[12] | (buf[13] << 8);
@@ -223,6 +224,7 @@ static const struct cis_tpl cis_tpl_list[] = {
 	{	0x20,	4,	cistpl_manfid		},
 	{	0x21,	2,	/* cistpl_funcid */	},
 	{	0x22,	0,	cistpl_funce		},
+	{	0x91,	2,	/* cistpl_sdio_std */	},
 };
 
 static int sdio_read_cis(struct mmc_card *card, struct sdio_func *func)
@@ -256,7 +258,8 @@ static int sdio_read_cis(struct mmc_card *card, struct sdio_func *func)
 	else
 		prev = &card->tuples;
 
-	BUG_ON(*prev);
+	if (*prev)
+		return -EINVAL;
 
 	do {
 		unsigned char tpl_code, tpl_link;

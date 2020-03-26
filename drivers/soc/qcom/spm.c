@@ -1,18 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  * Copyright (c) 2014,2015, Linaro Ltd.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * SAW power controller driver
  */
 
-#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/io.h>
@@ -116,7 +109,7 @@ static const struct spm_reg_data spm_reg_8064_cpu = {
 
 static DEFINE_PER_CPU(struct spm_driver_data *, cpu_spm_drv);
 
-typedef int (*idle_fn)(int);
+typedef int (*idle_fn)(void);
 static DEFINE_PER_CPU(idle_fn*, qcom_idle_ops);
 
 static inline void spm_register_write(struct spm_driver_data *drv,
@@ -179,10 +172,10 @@ static int qcom_pm_collapse(unsigned long int unused)
 	return -1;
 }
 
-static int qcom_cpu_spc(int cpu)
+static int qcom_cpu_spc(void)
 {
 	int ret;
-	struct spm_driver_data *drv = per_cpu(cpu_spm_drv, cpu);
+	struct spm_driver_data *drv = __this_cpu_read(cpu_spm_drv);
 
 	spm_set_low_power_mode(drv, PM_SLEEP_MODE_SPC);
 	ret = cpu_suspend(0, qcom_pm_collapse);
@@ -197,9 +190,9 @@ static int qcom_cpu_spc(int cpu)
 	return ret;
 }
 
-static int qcom_idle_enter(int cpu, unsigned long index)
+static int qcom_idle_enter(unsigned long index)
 {
-	return per_cpu(qcom_idle_ops, cpu)[index](cpu);
+	return __this_cpu_read(qcom_idle_ops)[index]();
 }
 
 static const struct of_device_id qcom_idle_state_match[] __initconst = {
@@ -217,6 +210,9 @@ static int __init qcom_cpuidle_init(struct device_node *cpu_node, int cpu)
 	idle_fn *fns;
 	cpumask_t mask;
 	bool use_scm_power_down = false;
+
+	if (!qcom_scm_is_available())
+		return -EPROBE_DEFER;
 
 	for (i = 0; ; i++) {
 		state_node = of_parse_phandle(cpu_node, "cpu-idle-states", i);
@@ -274,7 +270,7 @@ check_spm:
 	return per_cpu(cpu_spm_drv, cpu) ? 0 : -ENXIO;
 }
 
-static struct cpuidle_ops qcom_cpuidle_ops __initdata = {
+static const struct cpuidle_ops qcom_cpuidle_ops __initconst = {
 	.suspend = qcom_idle_enter,
 	.init = qcom_cpuidle_init,
 };
@@ -378,8 +374,5 @@ static struct platform_driver spm_driver = {
 		.of_match_table = spm_match_table,
 	},
 };
-module_platform_driver(spm_driver);
 
-MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("SAW power controller driver");
-MODULE_ALIAS("platform:saw");
+builtin_platform_driver(spm_driver);

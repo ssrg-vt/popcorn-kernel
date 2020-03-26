@@ -18,7 +18,6 @@ struct popcorn_node {
 	bool is_connected;
 };
 
-
 static struct popcorn_node popcorn_nodes[MAX_POPCORN_NODES];
 
 bool get_popcorn_node_online(int nid)
@@ -29,24 +28,14 @@ EXPORT_SYMBOL(get_popcorn_node_online);
 
 void set_popcorn_node_online(int nid, bool online)
 {
-    popcorn_nodes[nid].is_connected = online;
+        popcorn_nodes[nid].is_connected = online;
 }
 EXPORT_SYMBOL(set_popcorn_node_online);
-
 
 int my_nid __read_mostly = -1;
 EXPORT_SYMBOL(my_nid);
 
-const enum popcorn_arch my_arch =
-#ifdef CONFIG_X86_64
-	POPCORN_ARCH_X86;
-#elif defined(CONFIG_ARM64)
-	POPCORN_ARCH_ARM;
-#elif defined(CONFIG_PPC64)
-	POPCORN_ARCH_PPC;
-#else
-	POPCORN_ARCH_UNKNOWN;
-#endif
+const enum popcorn_arch my_arch = POPCORN_ARCH_X86;
 EXPORT_SYMBOL(my_arch);
 
 int get_popcorn_node_arch(int nid)
@@ -61,7 +50,6 @@ const char *archs_sz[] = {
 	"ppc64le",
 };
 
-
 void broadcast_my_node_info(int nr_nodes)
 {
 	int i;
@@ -70,7 +58,8 @@ void broadcast_my_node_info(int nr_nodes)
 		.arch = my_arch,
 	};
 	for (i = 0; i < nr_nodes; i++) {
-		if (i == my_nid) continue;
+		if (i == my_nid)
+                        continue;
 		pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, i, &info, sizeof(info));
 	}
 }

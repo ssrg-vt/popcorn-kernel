@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Fraunhofer ITWM
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Written by:
  * Phoebe Buckheister <phoebe.buckheister@itwm.fraunhofer.de>
@@ -17,9 +9,11 @@
 #include <linux/err.h>
 #include <linux/bug.h>
 #include <linux/completion.h>
-#include <linux/crypto.h>
 #include <linux/ieee802154.h>
+#include <linux/rculist.h>
+
 #include <crypto/aead.h>
+#include <crypto/skcipher.h>
 
 #include "ieee802154_i.h"
 #include "llsec.h"
@@ -144,18 +138,18 @@ llsec_key_alloc(const struct ieee802154_llsec_key *template)
 			goto err_tfm;
 	}
 
-	key->tfm0 = crypto_alloc_blkcipher("ctr(aes)", 0, CRYPTO_ALG_ASYNC);
+	key->tfm0 = crypto_alloc_sync_skcipher("ctr(aes)", 0, 0);
 	if (IS_ERR(key->tfm0))
 		goto err_tfm;
 
-	if (crypto_blkcipher_setkey(key->tfm0, template->key,
-				    IEEE802154_LLSEC_KEY_SIZE))
+	if (crypto_sync_skcipher_setkey(key->tfm0, template->key,
+				   IEEE802154_LLSEC_KEY_SIZE))
 		goto err_tfm0;
 
 	return key;
 
 err_tfm0:
-	crypto_free_blkcipher(key->tfm0);
+	crypto_free_sync_skcipher(key->tfm0);
 err_tfm:
 	for (i = 0; i < ARRAY_SIZE(key->tfm); i++)
 		if (key->tfm[i])
@@ -175,7 +169,7 @@ static void llsec_key_release(struct kref *ref)
 	for (i = 0; i < ARRAY_SIZE(key->tfm); i++)
 		crypto_free_aead(key->tfm[i]);
 
-	crypto_free_blkcipher(key->tfm0);
+	crypto_free_sync_skcipher(key->tfm0);
 	kzfree(key);
 }
 
@@ -620,15 +614,22 @@ llsec_do_encrypt_unauth(struct sk_buff *skb, const struct mac802154_llsec *sec,
 {
 	u8 iv[16];
 	struct scatterlist src;
-	struct blkcipher_desc req = {
-		.tfm = key->tfm0,
-		.info = iv,
-		.flags = 0,
-	};
+	SYNC_SKCIPHER_REQUEST_ON_STACK(req, key->tfm0);
+	int err, datalen;
+	unsigned char *data;
 
 	llsec_geniv(iv, sec->params.hwaddr, &hdr->sec);
-	sg_init_one(&src, skb->data, skb->len);
-	return crypto_blkcipher_encrypt_iv(&req, &src, &src, skb->len);
+	/* Compute data payload offset and data length */
+	data = skb_mac_header(skb) + skb->mac_len;
+	datalen = skb_tail_pointer(skb) - data;
+	sg_init_one(&src, data, datalen);
+
+	skcipher_request_set_sync_tfm(req, key->tfm0);
+	skcipher_request_set_callback(req, 0, NULL, NULL);
+	skcipher_request_set_crypt(req, &src, &src, datalen, iv);
+	err = crypto_skcipher_encrypt(req);
+	skcipher_request_zero(req);
+	return err;
 }
 
 static struct crypto_aead*
@@ -709,7 +710,8 @@ int mac802154_llsec_encrypt(struct mac802154_llsec *sec, struct sk_buff *skb)
 	if (hlen < 0 || hdr.fc.type != IEEE802154_FC_TYPE_DATA)
 		return -EINVAL;
 
-	if (!hdr.fc.security_enabled || hdr.sec.level == 0) {
+	if (!hdr.fc.security_enabled ||
+	    (hdr.sec.level == IEEE802154_SCF_SECLEVEL_NONE)) {
 		skb_push(skb, hlen);
 		return 0;
 	}
@@ -830,11 +832,8 @@ llsec_do_decrypt_unauth(struct sk_buff *skb, const struct mac802154_llsec *sec,
 	unsigned char *data;
 	int datalen;
 	struct scatterlist src;
-	struct blkcipher_desc req = {
-		.tfm = key->tfm0,
-		.info = iv,
-		.flags = 0,
-	};
+	SYNC_SKCIPHER_REQUEST_ON_STACK(req, key->tfm0);
+	int err;
 
 	llsec_geniv(iv, dev_addr, &hdr->sec);
 	data = skb_mac_header(skb) + skb->mac_len;
@@ -842,7 +841,13 @@ llsec_do_decrypt_unauth(struct sk_buff *skb, const struct mac802154_llsec *sec,
 
 	sg_init_one(&src, data, datalen);
 
-	return crypto_blkcipher_decrypt_iv(&req, &src, &src, datalen);
+	skcipher_request_set_sync_tfm(req, key->tfm0);
+	skcipher_request_set_callback(req, 0, NULL, NULL);
+	skcipher_request_set_crypt(req, &src, &src, datalen, iv);
+
+	err = crypto_skcipher_decrypt(req);
+	skcipher_request_zero(req);
+	return err;
 }
 
 static int

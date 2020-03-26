@@ -1,12 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Helper functions for handling target threads/cpus
  *
  * Copyright (C) 2012, LG Electronics, Namhyung Kim <namhyung.kim@lge.com>
- *
- * Released under the GPL v2.
  */
 
 #include "target.h"
+#include "util.h"
 #include "debug.h"
 
 #include <pwd.h>
@@ -121,11 +121,7 @@ int target__strerror(struct target *target, int errnum,
 	BUG_ON(buflen == 0);
 
 	if (errnum >= 0) {
-		const char *err = strerror_r(errnum, buf, buflen);
-
-		if (err != buf)
-			scnprintf(buf, buflen, "%s", err);
-
+		str_error_r(errnum, buf, buflen);
 		return 0;
 	}
 

@@ -1,20 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * lppaca.h
  * Copyright (C) 2001  Mike Corrigan IBM Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 #ifndef _ASM_POWERPC_LPPACA_H
 #define _ASM_POWERPC_LPPACA_H
@@ -34,16 +21,19 @@
 #include <linux/threads.h>
 #include <asm/types.h>
 #include <asm/mmu.h>
+#include <asm/firmware.h>
 
 /*
- * We only have to have statically allocated lppaca structs on
- * legacy iSeries, which supports at most 64 cpus.
- */
-#define NR_LPPACAS	1
-
-/*
- * The Hypervisor barfs if the lppaca crosses a page boundary.  A 1k
- * alignment is sufficient to prevent this
+ * The lppaca is the "virtual processor area" registered with the hypervisor,
+ * H_REGISTER_VPA etc.
+ *
+ * According to PAPR, the structure is 640 bytes long, must be L1 cache line
+ * aligned, and must not cross a 4kB boundary. Its size field must be at
+ * least 640 bytes (but may be more).
+ *
+ * Pre-v4.14 KVM hypervisors reject the VPA if its size field is smaller than
+ * 1kB, so we dynamically allocate 1kB and advertise size as 1kB, but keep
+ * this structure as the canonical 640 byte size.
  */
 struct lppaca {
 	/* cacheline 1 contains read-only data */
@@ -97,13 +87,11 @@ struct lppaca {
 
 	__be32	page_ins;		/* CMO Hint - # page ins by OS */
 	u8	reserved11[148];
-	volatile __be64 dtl_idx;		/* Dispatch Trace Log head index */
+	volatile __be64 dtl_idx;	/* Dispatch Trace Log head index */
 	u8	reserved12[96];
-} __attribute__((__aligned__(0x400)));
+} ____cacheline_aligned;
 
-extern struct lppaca lppaca[];
-
-#define lppaca_of(cpu)	(*paca[cpu].lppaca_ptr)
+#define lppaca_of(cpu)	(*paca_ptrs[cpu]->lppaca_ptr)
 
 /*
  * We are using a non architected field to determine if a partition is
@@ -114,6 +102,8 @@ extern struct lppaca lppaca[];
 
 static inline bool lppaca_shared_proc(struct lppaca *l)
 {
+	if (!firmware_has_feature(FW_FEATURE_SPLPAR))
+		return false;
 	return !!(l->__old_status & LPPACA_OLD_SHARED_PROC);
 }
 

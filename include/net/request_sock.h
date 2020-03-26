@@ -1,16 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * NET		Generic infrastructure for Network protocols.
  *
- *		Definitions for request_sock 
+ *		Definitions for request_sock
  *
  * Authors:	Arnaldo Carvalho de Melo <acme@conectiva.com.br>
  *
  * 		From code originally in include/net/tcp.h
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  */
 #ifndef _REQUEST_SOCK_H
 #define _REQUEST_SOCK_H
@@ -19,6 +15,7 @@
 #include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/bug.h>
+#include <linux/refcount.h>
 
 #include <net/sock.h>
 
@@ -29,7 +26,7 @@ struct proto;
 
 struct request_sock_ops {
 	int		family;
-	int		obj_size;
+	unsigned int	obj_size;
 	struct kmem_cache	*slab;
 	char		*slab_name;
 	int		(*rtx_syn_ack)(const struct sock *sk,
@@ -68,7 +65,7 @@ struct request_sock {
 	u32				peer_secid;
 };
 
-static inline struct request_sock *inet_reqsk(struct sock *sk)
+static inline struct request_sock *inet_reqsk(const struct sock *sk)
 {
 	return (struct request_sock *)sk;
 }
@@ -85,32 +82,28 @@ reqsk_alloc(const struct request_sock_ops *ops, struct sock *sk_listener,
 	struct request_sock *req;
 
 	req = kmem_cache_alloc(ops->slab, GFP_ATOMIC | __GFP_NOWARN);
-
-	if (req) {
-		req->rsk_ops = ops;
-		if (attach_listener) {
-			sock_hold(sk_listener);
-			req->rsk_listener = sk_listener;
-		} else {
-			req->rsk_listener = NULL;
+	if (!req)
+		return NULL;
+	req->rsk_listener = NULL;
+	if (attach_listener) {
+		if (unlikely(!refcount_inc_not_zero(&sk_listener->sk_refcnt))) {
+			kmem_cache_free(ops->slab, req);
+			return NULL;
 		}
-		req_to_sk(req)->sk_prot = sk_listener->sk_prot;
-		sk_node_init(&req_to_sk(req)->sk_node);
-		sk_tx_queue_clear(req_to_sk(req));
-		req->saved_syn = NULL;
-		/* Following is temporary. It is coupled with debugging
-		 * helpers in reqsk_put() & reqsk_free()
-		 */
-		atomic_set(&req->rsk_refcnt, 0);
+		req->rsk_listener = sk_listener;
 	}
+	req->rsk_ops = ops;
+	req_to_sk(req)->sk_prot = sk_listener->sk_prot;
+	sk_node_init(&req_to_sk(req)->sk_node);
+	sk_tx_queue_clear(req_to_sk(req));
+	req->saved_syn = NULL;
+	refcount_set(&req->rsk_refcnt, 0);
+
 	return req;
 }
 
-static inline void reqsk_free(struct request_sock *req)
+static inline void __reqsk_free(struct request_sock *req)
 {
-	/* temporary debugging */
-	WARN_ON_ONCE(atomic_read(&req->rsk_refcnt) != 0);
-
 	req->rsk_ops->destructor(req);
 	if (req->rsk_listener)
 		sock_put(req->rsk_listener);
@@ -118,13 +111,17 @@ static inline void reqsk_free(struct request_sock *req)
 	kmem_cache_free(req->rsk_ops->slab, req);
 }
 
-static inline void reqsk_put(struct request_sock *req)
+static inline void reqsk_free(struct request_sock *req)
 {
-	if (atomic_dec_and_test(&req->rsk_refcnt))
-		reqsk_free(req);
+	WARN_ON_ONCE(refcount_read(&req->rsk_refcnt) != 0);
+	__reqsk_free(req);
 }
 
-extern int sysctl_max_syn_backlog;
+static inline void reqsk_put(struct request_sock *req)
+{
+	if (refcount_dec_and_test(&req->rsk_refcnt))
+		reqsk_free(req);
+}
 
 /*
  * For a TCP Fast Open listener -
@@ -152,6 +149,8 @@ struct fastopen_queue {
 	spinlock_t	lock;
 	int		qlen;		/* # of pending (TCP_SYN_RECV) reqs */
 	int		max_qlen;	/* != 0 iff TFO is currently enabled */
+
+	struct tcp_fastopen_context __rcu *ctx; /* cipher context for cookie */
 };
 
 /** struct request_sock_queue - queue of request_socks

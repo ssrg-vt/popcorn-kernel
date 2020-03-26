@@ -1,2 +1,2 @@
-obj-$(CONFIG_MIPS_ACPI) += acpi_init.o
+# SPDX-License-Identifier: GPL-2.0-only
 obj-$(CONFIG_CPU_HWMON) += cpu_hwmon.o

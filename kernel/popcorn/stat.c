@@ -1,10 +1,10 @@
 #include <linux/kernel.h>
 #include <linux/ktime.h>
 #include <linux/slab.h>
-#include <asm/uaccess.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/percpu.h>
+#include <asm/uaccess.h>
 
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/stat.h>
@@ -21,7 +21,7 @@ static unsigned long long last_bytes_sent = 0;
 static unsigned long long last_bytes_recv = 0;
 static unsigned long long last_bytes_rdma_written = 0;
 static unsigned long long last_bytes_rdma_read = 0;
-static struct timeval last_stat = {};
+static ktime_t last_stat = 0;
 
 const char *pcn_kmsg_type_name[PCN_KMSG_TYPE_MAX] = {
 	[PCN_KMSG_TYPE_TASK_MIGRATE] = "migration",
@@ -67,13 +67,12 @@ static int __show_stats(struct seq_file *seq, void *v)
 	int i;
 	unsigned long long sent = 0;
 	unsigned long long recv = 0;
-	struct timeval now;
+	ktime_t now;
 	unsigned long long rate_sent, rate_recv;
 	unsigned long elapsed;
 
-	do_gettimeofday(&now);
-	elapsed = (now.tv_sec * 1000000 + now.tv_usec) -
-			(last_stat.tv_sec * 1000000 + last_stat.tv_usec);
+	now = ktime_get_real();
+	elapsed = last_stat - now;
 	last_stat = now;
 
 	for_each_present_cpu(i) {

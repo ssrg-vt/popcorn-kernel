@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * OnKey device driver for DA9063 and DA9062 PMICs
+ * OnKey device driver for DA9063, DA9062 and DA9061 PMICs
  * Copyright (C) 2015  Dialog Semiconductor Ltd.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -87,6 +78,7 @@ static const struct of_device_id da9063_compatible_reg_id_table[] = {
 	{ .compatible = "dlg,da9062-onkey", .data = &da9062_regs },
 	{ },
 };
+MODULE_DEVICE_TABLE(of, da9063_compatible_reg_id_table);
 
 static void da9063_poll_on(struct work_struct *work)
 {
@@ -149,13 +141,13 @@ static void da9063_poll_on(struct work_struct *work)
 			 * and then send shutdown command
 			 */
 			dev_dbg(&onkey->input->dev,
-				"Sending SHUTDOWN to DA9063 ...\n");
+				"Sending SHUTDOWN to PMIC ...\n");
 			error = regmap_write(onkey->regmap,
 					     config->onkey_shutdown,
 					     config->onkey_shutdown_mask);
 			if (error)
 				dev_err(&onkey->input->dev,
-					"Cannot SHUTDOWN DA9063: %d\n",
+					"Cannot SHUTDOWN PMIC: %d\n",
 					error);
 		}
 	}
@@ -179,13 +171,13 @@ static irqreturn_t da9063_onkey_irq_handler(int irq, void *data)
 		input_report_key(onkey->input, KEY_POWER, 1);
 		input_sync(onkey->input);
 		schedule_delayed_work(&onkey->work, 0);
-		dev_dbg(onkey->dev, "KEY_POWER pressed.\n");
+		dev_dbg(onkey->dev, "KEY_POWER long press.\n");
 	} else {
-		input_report_key(onkey->input, KEY_SLEEP, 1);
+		input_report_key(onkey->input, KEY_POWER, 1);
 		input_sync(onkey->input);
-		input_report_key(onkey->input, KEY_SLEEP, 0);
+		input_report_key(onkey->input, KEY_POWER, 0);
 		input_sync(onkey->input);
-		dev_dbg(onkey->dev, "KEY_SLEEP pressed.\n");
+		dev_dbg(onkey->dev, "KEY_POWER short press.\n");
 	}
 
 	return IRQ_HANDLED;
@@ -286,7 +278,6 @@ static int da9063_onkey_probe(struct platform_device *pdev)
 		return error;
 	}
 
-	platform_set_drvdata(pdev, onkey);
 	return 0;
 }
 
@@ -300,6 +291,6 @@ static struct platform_driver da9063_onkey_driver = {
 module_platform_driver(da9063_onkey_driver);
 
 MODULE_AUTHOR("S Twiss <stwiss.opensource@diasemi.com>");
-MODULE_DESCRIPTION("Onkey device driver for Dialog DA9063 and DA9062");
+MODULE_DESCRIPTION("Onkey device driver for Dialog DA9063, DA9062 and DA9061");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:" DA9063_DRVNAME_ONKEY);

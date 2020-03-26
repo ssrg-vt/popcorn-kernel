@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AD7291 8-Channel, I2C, 12-Bit SAR ADC with Temperature Sensor
  *
  * Copyright 2010-2011 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/device.h>
@@ -115,7 +114,7 @@ static irqreturn_t ad7291_event_handler(int irq, void *private)
 	u16 t_status, v_status;
 	u16 command;
 	int i;
-	s64 timestamp = iio_get_time_ns();
+	s64 timestamp = iio_get_time_ns(indio_dev);
 
 	if (ad7291_i2c_read(chip, AD7291_T_ALERT_STATUS, &t_status))
 		return IRQ_HANDLED;
@@ -461,7 +460,6 @@ static const struct iio_info ad7291_info = {
 	.write_event_config = &ad7291_write_event_config,
 	.read_event_value = &ad7291_read_event_value,
 	.write_event_value = &ad7291_write_event_value,
-	.driver_module = THIS_MODULE,
 };
 
 static int ad7291_probe(struct i2c_client *client,
@@ -505,6 +503,7 @@ static int ad7291_probe(struct i2c_client *client,
 	indio_dev->num_channels = ARRAY_SIZE(ad7291_channels);
 
 	indio_dev->dev.parent = &client->dev;
+	indio_dev->dev.of_node = client->dev.of_node;
 	indio_dev->info = &ad7291_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 

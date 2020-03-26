@@ -1,8 +1,6 @@
-# arch/arm/plat-samsung/Kconfig
+# SPDX-License-Identifier: GPL-2.0
 #
 # Copyright 2009 Simtec Electronics
-#
-# Licensed under GPLv2
 
 config PLAT_SAMSUNG
 	bool
@@ -39,7 +37,6 @@ config S3C_LOWLEVEL_UART_PORT
 
 config SAMSUNG_ATAGS
 	def_bool n
-	depends on !ARCH_MULTIPLATFORM
 	depends on ATAGS
 	help
 	   This option enables ATAGS based boot support code for
@@ -70,6 +67,7 @@ config S3C_GPIO_TRACK
 
 config S3C_ADC
 	bool "ADC common driver support"
+	depends on !ARCH_MULTIPLATFORM
 	help
 	  Core support for the ADC block found in the Samsung SoC systems
 	  for drivers such as the touchscreen and hwmon to use to share
@@ -225,6 +223,9 @@ config S3C24XX_PWM
 	  Support for exporting the PWM timer blocks via the pwm device
 	  system
 
+config GPIO_SAMSUNG
+	def_bool y
+
 config SAMSUNG_PM_GPIO
 	bool
 	default y if GPIO_SAMSUNG && PM
@@ -238,6 +239,7 @@ comment "Power management"
 config SAMSUNG_PM_DEBUG
 	bool "Samsung PM Suspend debug"
 	depends on PM && DEBUG_KERNEL
+	depends on PLAT_S3C24XX || ARCH_S3C64XX || ARCH_S5PV210
 	depends on DEBUG_EXYNOS_UART || DEBUG_S3C24XX_UART || DEBUG_S3C2410_UART
 	help
 	  Say Y here if you want verbose debugging from the PM Suspend and
@@ -255,7 +257,7 @@ config S3C_PM_DEBUG_LED_SMDK
 
 config SAMSUNG_PM_CHECK
 	bool "S3C2410 PM Suspend Memory CRC"
-	depends on PM
+	depends on PM && (PLAT_S3C24XX || ARCH_S3C64XX || ARCH_S5PV210)
 	select CRC32
 	help
 	  Enable the PM code's memory area checksum over sleep. This option
@@ -275,7 +277,7 @@ config SAMSUNG_PM_CHECK_CHUNKSIZE
 	help
 	  Set the chunksize in Kilobytes of the CRC for checking memory
 	  corruption over suspend and resume. A smaller value will mean that
-	  the CRC data block will take more memory, but wil identify any
+	  the CRC data block will take more memory, but will identify any
 	  faults with better precision.
 
 	  See <file:Documentation/arm/Samsung-S3C24XX/Suspend.txt>

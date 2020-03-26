@@ -48,13 +48,20 @@ size_t ring_buffer_usage(struct ring_buffer *rb)
 static int __init_ring_buffer(struct ring_buffer *rb, const unsigned short nr_chunks, const char *fmt, va_list args)
 {
 	unsigned short i;
+	unsigned short j;
 	int ret = 0;
 
 	for (i = 0; i < nr_chunks; i++) {
 		void *buffer = (void *)__get_free_pages(GFP_KERNEL, RB_CHUNK_ORDER);
 		if (!buffer) {
 			ret = -ENOMEM;
-			goto out_free;
+			for (j = 0; j < nr_chunks; j++) {
+				if (rb->chunk_start[j]) {
+					free_pages((unsigned long)rb->chunk_start[j], RB_CHUNK_ORDER);
+					rb->chunk_start[j] = NULL;
+				}
+			}
+			return ret;
 		}
 		rb->chunk_start[i] = buffer;
 		rb->chunk_end[i] = buffer + RB_CHUNK_SIZE;
@@ -73,15 +80,6 @@ static int __init_ring_buffer(struct ring_buffer *rb, const unsigned short nr_ch
 
 	vsnprintf(rb->name, sizeof(rb->name), fmt, args);
 	return 0;
-
-out_free:
-	for (i = 0; i < nr_chunks; i++) {
-		if (rb->chunk_start[i]) {
-			free_pages((unsigned long)rb->chunk_start[i], RB_CHUNK_ORDER);
-			rb->chunk_start[i] = NULL;
-		}
-	}
-	return ret;
 }
 
 int ring_buffer_init(struct ring_buffer *rb, const char *namefmt, ...)

@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel Haswell Lynxpoint SST Audio
  *
  * Copyright (C) 2013, Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/module.h>
@@ -19,6 +10,7 @@
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/soc.h>
+#include <sound/soc-acpi.h>
 #include <sound/pcm_params.h>
 
 #include "../common/sst-dsp.h"
@@ -76,18 +68,19 @@ static int haswell_rt5640_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* set correct codec filter for DAI format and clock config */
-	snd_soc_update_bits(rtd->codec, 0x83, 0xffff, 0x8000);
+	snd_soc_component_update_bits(codec_dai->component, 0x83, 0xffff, 0x8000);
 
 	return ret;
 }
 
-static struct snd_soc_ops haswell_rt5640_ops = {
+static const struct snd_soc_ops haswell_rt5640_ops = {
 	.hw_params = haswell_rt5640_hw_params,
 };
 
 static int haswell_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
-	struct sst_pdata *pdata = dev_get_platdata(rtd->platform->dev);
+	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, DRV_NAME);
+	struct sst_pdata *pdata = dev_get_platdata(component->dev);
 	struct sst_hsw *haswell = pdata->dsp;
 	int ret;
 
@@ -145,7 +138,7 @@ static struct snd_soc_dai_link haswell_rt5640_dais[] = {
 		.stream_name = "Loopback",
 		.cpu_dai_name = "Loopback Pin",
 		.platform_name = "haswell-pcm-audio",
-		.dynamic = 0,
+		.dynamic = 1,
 		.codec_name = "snd-soc-dummy",
 		.codec_dai_name = "snd-soc-dummy-dai",
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
@@ -156,7 +149,7 @@ static struct snd_soc_dai_link haswell_rt5640_dais[] = {
 	{
 		/* SSP0 - Codec */
 		.name = "Codec",
-		.be_id = 0,
+		.id = 0,
 		.cpu_dai_name = "snd-soc-dummy-dai",
 		.platform_name = "snd-soc-dummy",
 		.no_pcm = 1,
@@ -188,7 +181,21 @@ static struct snd_soc_card haswell_rt5640 = {
 
 static int haswell_audio_probe(struct platform_device *pdev)
 {
+	struct snd_soc_acpi_mach *mach;
+	const char *platform_name = NULL;
+	int ret;
+
 	haswell_rt5640.dev = &pdev->dev;
+
+	/* override plaform name, if required */
+	mach = (&pdev->dev)->platform_data;
+	if (mach) /* extra check since legacy does not pass parameters */
+		platform_name = mach->mach_params.platform;
+
+	ret = snd_soc_fixup_dai_links_platform_name(&haswell_rt5640,
+						    platform_name);
+	if (ret)
+		return ret;
 
 	return devm_snd_soc_register_card(&pdev->dev, &haswell_rt5640);
 }

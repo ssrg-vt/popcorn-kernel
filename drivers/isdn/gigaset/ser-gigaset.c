@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* This is the serial hardware link layer (HLL) for the Gigaset 307x isdn
  * DECT base (aka Sinus 45 isdn) using the RS232 DECT data module M101,
  * written as a line discipline.
  *
  * =====================================================================
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  * =====================================================================
  */
 
@@ -373,13 +370,7 @@ static void gigaset_freecshw(struct cardstate *cs)
 
 static void gigaset_device_release(struct device *dev)
 {
-	struct cardstate *cs = dev_get_drvdata(dev);
-
-	if (!cs)
-		return;
-	dev_set_drvdata(dev, NULL);
-	kfree(cs->hw.ser);
-	cs->hw.ser = NULL;
+	kfree(container_of(dev, struct ser_cardstate, dev.dev));
 }
 
 /*
@@ -408,7 +399,6 @@ static int gigaset_initcshw(struct cardstate *cs)
 		cs->hw.ser = NULL;
 		return rc;
 	}
-	dev_set_drvdata(&cs->hw.ser->dev.dev, cs);
 
 	tasklet_init(&cs->write_tasklet,
 		     gigaset_modem_fill, (unsigned long) cs);
@@ -452,22 +442,22 @@ static int gigaset_set_line_ctrl(struct cardstate *cs, unsigned cflag)
 }
 
 static const struct gigaset_ops ops = {
-	gigaset_write_cmd,
-	gigaset_write_room,
-	gigaset_chars_in_buffer,
-	gigaset_brkchars,
-	gigaset_init_bchannel,
-	gigaset_close_bchannel,
-	gigaset_initbcshw,
-	gigaset_freebcshw,
-	gigaset_reinitbcshw,
-	gigaset_initcshw,
-	gigaset_freecshw,
-	gigaset_set_modem_ctrl,
-	gigaset_baud_rate,
-	gigaset_set_line_ctrl,
-	gigaset_m10x_send_skb,	/* asyncdata.c */
-	gigaset_m10x_input,	/* asyncdata.c */
+	.write_cmd = gigaset_write_cmd,
+	.write_room = gigaset_write_room,
+	.chars_in_buffer = gigaset_chars_in_buffer,
+	.brkchars = gigaset_brkchars,
+	.init_bchannel = gigaset_init_bchannel,
+	.close_bchannel = gigaset_close_bchannel,
+	.initbcshw = gigaset_initbcshw,
+	.freebcshw = gigaset_freebcshw,
+	.reinitbcshw = gigaset_reinitbcshw,
+	.initcshw = gigaset_initcshw,
+	.freecshw = gigaset_freecshw,
+	.set_modem_ctrl = gigaset_set_modem_ctrl,
+	.baud_rate = gigaset_baud_rate,
+	.set_line_ctrl = gigaset_set_line_ctrl,
+	.send_skb = gigaset_m10x_send_skb,	/* asyncdata.c */
+	.handle_input = gigaset_m10x_input,	/* asyncdata.c */
 };
 
 
@@ -640,7 +630,7 @@ gigaset_tty_ioctl(struct tty_struct *tty, struct file *file,
 			flush_send_queue(cs);
 			break;
 		}
-		/* Pass through */
+		/* fall through */
 
 	default:
 		/* pass through to underlying serial device */

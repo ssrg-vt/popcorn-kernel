@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  * rtl8712_xmit.c
  *
  * Copyright(c) 2007 - 2010 Realtek Corporation. All rights reserved.
  * Linux device driver for RTL8192SU
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
  *
  * Modifications for inclusion into the Linux staging tree are
  * Copyright(c) 2010 Larry Finger. All rights reserved.
@@ -72,20 +60,20 @@ int r8712_txframes_sta_ac_pending(struct _adapter *padapter,
 	switch (priority) {
 	case 1:
 	case 2:
-		ptxservq = &(psta->sta_xmitpriv.bk_q);
+		ptxservq = &psta->sta_xmitpriv.bk_q;
 		break;
 	case 4:
 	case 5:
-		ptxservq = &(psta->sta_xmitpriv.vi_q);
+		ptxservq = &psta->sta_xmitpriv.vi_q;
 		break;
 	case 6:
 	case 7:
-		ptxservq = &(psta->sta_xmitpriv.vo_q);
+		ptxservq = &psta->sta_xmitpriv.vo_q;
 		break;
 	case 0:
 	case 3:
 	default:
-		ptxservq = &(psta->sta_xmitpriv.be_q);
+		ptxservq = &psta->sta_xmitpriv.be_q;
 	break;
 	}
 	return ptxservq->qcnt;
@@ -169,8 +157,8 @@ static struct xmit_frame *dequeue_one_xmitframe(struct xmit_priv *pxmitpriv,
 	xmitframe_phead = &pframe_queue->queue;
 	xmitframe_plist = xmitframe_phead->next;
 	if (!end_of_queue_search(xmitframe_phead, xmitframe_plist)) {
-		pxmitframe = LIST_CONTAINOR(xmitframe_plist,
-			     struct xmit_frame, list);
+		pxmitframe = container_of(xmitframe_plist,
+					  struct xmit_frame, list);
 		list_del_init(&pxmitframe->list);
 		ptxservq->qcnt--;
 		phwxmit->txcmdcnt++;
@@ -209,8 +197,8 @@ static struct xmit_frame *dequeue_xframe_ex(struct xmit_priv *pxmitpriv,
 		sta_phead = &phwxmit->sta_queue->queue;
 		sta_plist = sta_phead->next;
 		while (!end_of_queue_search(sta_phead, sta_plist)) {
-			ptxservq = LIST_CONTAINOR(sta_plist, struct tx_servq,
-				  tx_pending);
+			ptxservq = container_of(sta_plist, struct tx_servq,
+						tx_pending);
 			pframe_queue = &ptxservq->sta_pending;
 			pxmitframe = dequeue_one_xmitframe(pxmitpriv, phwxmit,
 				     ptxservq, pframe_queue);
@@ -281,7 +269,7 @@ u8 r8712_construct_txaggr_cmd_hdr(struct xmit_buf *pxmitbuf)
 	struct xmit_frame *pxmitframe = (struct xmit_frame *)
 		pxmitbuf->priv_data;
 	struct _adapter *padapter = pxmitframe->padapter;
-	struct cmd_priv *pcmdpriv = &(padapter->cmdpriv);
+	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
 	struct cmd_hdr *pcmd_hdr = (struct cmd_hdr  *)
 		(pxmitbuf->pbuf + TXDESC_SIZE);
 
@@ -302,7 +290,7 @@ u8 r8712_append_mpdu_unit(struct xmit_buf *pxmitbuf,
 	int last_txcmdsz = 0;
 	int padding_sz = 0;
 
-	/* 802.3->802.11 convertor */
+	/* 802.3->802.11 converter */
 	r8712_xmitframe_coalesce(padapter, pxmitframe->pkt, pxmitframe);
 	/* free skb struct */
 	r8712_xmit_complete(padapter, pxmitframe);
@@ -535,7 +523,8 @@ static void update_txdesc(struct xmit_frame *pxmitframe, uint *pmem, int sz)
 		 * seqnum per tid. about usb using 4-endpoint, qsel points out
 		 * the correct mapping between AC&Endpoint,
 		 * the purpose is that correct mapping lets the MAC release
-		 * the AC Queue list correctly. */
+		 * the AC Queue list correctly.
+		 */
 		ptxdesc->txdw3 = cpu_to_le32((pattrib->priority << SEQ_SHT) &
 				 0x0fff0000);
 		if ((pattrib->ether_type != 0x888e) &&
@@ -543,7 +532,7 @@ static void update_txdesc(struct xmit_frame *pxmitframe, uint *pmem, int sz)
 		    (pattrib->dhcp_pkt != 1)) {
 			/*Not EAP & ARP type data packet*/
 			if (phtpriv->ht_option == 1) { /*B/G/N Mode*/
-				if (phtpriv->ampdu_enable != true)
+				if (!phtpriv->ampdu_enable)
 					ptxdesc->txdw2 |= cpu_to_le32(BK);
 			}
 		} else {
@@ -560,19 +549,20 @@ static void update_txdesc(struct xmit_frame *pxmitframe, uint *pmem, int sz)
 
 			ptxdesc_mp = &txdesc_mp;
 			/* offset 8 */
-			ptxdesc->txdw2 = cpu_to_le32(ptxdesc_mp->txdw2);
+			ptxdesc->txdw2 = ptxdesc_mp->txdw2;
 			if (bmcst)
 				ptxdesc->txdw2 |= cpu_to_le32(BMC);
 			ptxdesc->txdw2 |= cpu_to_le32(BK);
 			/* offset 16 */
-			ptxdesc->txdw4 = cpu_to_le32(ptxdesc_mp->txdw4);
+			ptxdesc->txdw4 = ptxdesc_mp->txdw4;
 			/* offset 20 */
-			ptxdesc->txdw5 = cpu_to_le32(ptxdesc_mp->txdw5);
+			ptxdesc->txdw5 = ptxdesc_mp->txdw5;
 			pattrib->pctrl = 0;/* reset to zero; */
 		}
 	} else if (pxmitframe->frame_tag == MGNT_FRAMETAG) {
 		/* offset 4 */
-		ptxdesc->txdw1 |= (0x05) & 0x1f;/*CAM_ID(MAC_ID), default=5;*/
+		/* CAM_ID(MAC_ID), default=5; */
+		ptxdesc->txdw1 |= cpu_to_le32((0x05) & 0x1f);
 		qsel = (uint)(pattrib->qsel & 0x0000001f);
 		ptxdesc->txdw1 |= cpu_to_le32((qsel << QSEL_SHT) & 0x00001f00);
 		ptxdesc->txdw1 |= cpu_to_le32(BIT(16));/* Non-QoS */
@@ -586,7 +576,8 @@ static void update_txdesc(struct xmit_frame *pxmitframe, uint *pmem, int sz)
 		 * per tid. about usb using 4-endpoint, qsel points out the
 		 * correct mapping between AC&Endpoint,
 		 * the purpose is that correct mapping let the MAC releases
-		 * the AC Queue list correctly. */
+		 * the AC Queue list correctly.
+		 */
 		ptxdesc->txdw3 = cpu_to_le32((pattrib->priority << SEQ_SHT) &
 					      0x0fff0000);
 		/* offset 16 */
@@ -627,7 +618,7 @@ int r8712_xmitframe_complete(struct _adapter *padapter,
 
 	phwxmits = pxmitpriv->hwxmits;
 	hwentry = pxmitpriv->hwxmit_entry;
-	if (pxmitbuf == NULL) {
+	if (!pxmitbuf) {
 		pxmitbuf = r8712_alloc_xmitbuf(pxmitpriv);
 		if (!pxmitbuf)
 			return false;
@@ -638,7 +629,7 @@ int r8712_xmitframe_complete(struct _adapter *padapter,
 	/* 1st frame dequeued */
 	pxmitframe = dequeue_xframe_ex(pxmitpriv, phwxmits, hwentry);
 	/* need to remember the 1st frame */
-	if (pxmitframe != NULL) {
+	if (pxmitframe) {
 
 #ifdef CONFIG_R8712_TX_AGGR
 		/* 1. dequeue 2nd frame
@@ -651,13 +642,13 @@ int r8712_xmitframe_complete(struct _adapter *padapter,
 			r8712_free_xmitbuf(pxmitpriv, pxmitbuf);
 			return false;
 		}
-		if (p2ndxmitframe != NULL)
+		if (p2ndxmitframe)
 			if (p2ndxmitframe->frame_tag != DATA_FRAMETAG) {
 				r8712_free_xmitbuf(pxmitpriv, pxmitbuf);
 				return false;
 			}
 		r8712_xmitframe_aggr_1st(pxmitbuf, pxmitframe);
-		if (p2ndxmitframe != NULL) {
+		if (p2ndxmitframe) {
 			u16 total_length;
 
 			total_length = r8712_xmitframe_aggr_next(
@@ -665,7 +656,7 @@ int r8712_xmitframe_complete(struct _adapter *padapter,
 			do {
 				p2ndxmitframe = dequeue_xframe_ex(
 					pxmitpriv, phwxmits, hwentry);
-				if (p2ndxmitframe != NULL)
+				if (p2ndxmitframe)
 					total_length =
 						r8712_xmitframe_aggr_next(
 							pxmitbuf,
@@ -686,7 +677,8 @@ int r8712_xmitframe_complete(struct _adapter *padapter,
 				res = r8712_xmitframe_coalesce(padapter,
 					pxmitframe->pkt, pxmitframe);
 			/* always return ndis_packet after
-			 * r8712_xmitframe_coalesce */
+			 * r8712_xmitframe_coalesce
+			 */
 			r8712_xmit_complete(padapter, pxmitframe);
 		}
 		if (res == _SUCCESS)

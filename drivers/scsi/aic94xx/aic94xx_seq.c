@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Aic94xx SAS/SATA driver sequencer interface.
  *
@@ -5,25 +6,6 @@
  * Copyright (C) 2005 Luben Tuikov <luben_tuikov@adaptec.com>
  *
  * Parts of this code adapted from David Chaw's adp94xx_seq.c.
- *
- * This file is licensed under GPLv2.
- *
- * This file is part of the aic94xx driver.
- *
- * The aic94xx driver is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
- *
- * The aic94xx driver is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with the aic94xx driver; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
  */
 
 #include <linux/delay.h>
@@ -1352,7 +1334,7 @@ int asd_start_seqs(struct asd_ha_struct *asd_ha)
 	for_each_sequencer(lseq_mask, lseq_mask, lseq) {
 		err = asd_seq_start_lseq(asd_ha, lseq);
 		if (err) {
-			asd_printk("coudln't start LSEQ %d for %s\n", lseq,
+			asd_printk("couldn't start LSEQ %d for %s\n", lseq,
 				   pci_name(asd_ha->pcidev));
 			return err;
 		}

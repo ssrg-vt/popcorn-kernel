@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel I/OAT DMA Linux driver
  * Copyright(c) 2007 - 2009 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
  */
 
 #include <linux/kernel.h>
@@ -224,7 +212,7 @@ static u8 ioat_dca_get_tag(struct dca_provider *dca,
 	return tag;
 }
 
-static struct dca_ops ioat_dca_ops = {
+static const struct dca_ops ioat_dca_ops = {
 	.add_requester		= ioat_dca_add_requester,
 	.remove_requester	= ioat_dca_remove_requester,
 	.get_tag		= ioat_dca_get_tag,
@@ -336,10 +324,10 @@ struct dca_provider *ioat_dca_init(struct pci_dev *pdev, void __iomem *iobase)
 	}
 
 	if (dca3_tag_map_invalid(ioatdca->tag_map)) {
-		WARN_TAINT_ONCE(1, TAINT_FIRMWARE_WORKAROUND,
-				"%s %s: APICID_TAG_MAP set incorrectly by BIOS, disabling DCA\n",
-				dev_driver_string(&pdev->dev),
-				dev_name(&pdev->dev));
+		add_taint(TAINT_FIRMWARE_WORKAROUND, LOCKDEP_STILL_OK);
+		pr_warn_once("%s %s: APICID_TAG_MAP set incorrectly by BIOS, disabling DCA\n",
+			     dev_driver_string(&pdev->dev),
+			     dev_name(&pdev->dev));
 		free_dca_provider(dca);
 		return NULL;
 	}

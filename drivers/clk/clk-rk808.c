@@ -1,18 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Clkout driver for Rockchip RK808
  *
  * Copyright (c) 2014, Fuzhou Rockchip Electronics Co., Ltd
  *
  * Author:Chris Zhong <zyw@rock-chips.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/clk-provider.h>
@@ -22,11 +14,8 @@
 #include <linux/mfd/rk808.h>
 #include <linux/i2c.h>
 
-#define RK808_NR_OUTPUT 2
-
 struct rk808_clkout {
 	struct rk808 *rk808;
-	struct clk_onecell_data clk_data;
 	struct clk_hw		clkout1_hw;
 	struct clk_hw		clkout2_hw;
 };
@@ -85,14 +74,28 @@ static const struct clk_ops rk808_clkout2_ops = {
 	.recalc_rate = rk808_clkout_recalc_rate,
 };
 
+static struct clk_hw *
+of_clk_rk808_get(struct of_phandle_args *clkspec, void *data)
+{
+	struct rk808_clkout *rk808_clkout = data;
+	unsigned int idx = clkspec->args[0];
+
+	if (idx >= 2) {
+		pr_err("%s: invalid index %u\n", __func__, idx);
+		return ERR_PTR(-EINVAL);
+	}
+
+	return idx ? &rk808_clkout->clkout2_hw : &rk808_clkout->clkout1_hw;
+}
+
 static int rk808_clkout_probe(struct platform_device *pdev)
 {
 	struct rk808 *rk808 = dev_get_drvdata(pdev->dev.parent);
 	struct i2c_client *client = rk808->i2c;
 	struct device_node *node = client->dev.of_node;
 	struct clk_init_data init = {};
-	struct clk **clk_table;
 	struct rk808_clkout *rk808_clkout;
+	int ret;
 
 	rk808_clkout = devm_kzalloc(&client->dev,
 				    sizeof(*rk808_clkout), GFP_KERNEL);
@@ -101,12 +104,6 @@ static int rk808_clkout_probe(struct platform_device *pdev)
 
 	rk808_clkout->rk808 = rk808;
 
-	clk_table = devm_kcalloc(&client->dev, RK808_NR_OUTPUT,
-				 sizeof(struct clk *), GFP_KERNEL);
-	if (!clk_table)
-		return -ENOMEM;
-
-	init.flags = CLK_IS_ROOT;
 	init.parent_names = NULL;
 	init.num_parents = 0;
 	init.name = "rk808-clkout1";
@@ -117,10 +114,9 @@ static int rk808_clkout_probe(struct platform_device *pdev)
 	of_property_read_string_index(node, "clock-output-names",
 				      0, &init.name);
 
-	clk_table[0] = devm_clk_register(&client->dev,
-					 &rk808_clkout->clkout1_hw);
-	if (IS_ERR(clk_table[0]))
-		return PTR_ERR(clk_table[0]);
+	ret = devm_clk_hw_register(&client->dev, &rk808_clkout->clkout1_hw);
+	if (ret)
+		return ret;
 
 	init.name = "rk808-clkout2";
 	init.ops = &rk808_clkout2_ops;
@@ -130,32 +126,16 @@ static int rk808_clkout_probe(struct platform_device *pdev)
 	of_property_read_string_index(node, "clock-output-names",
 				      1, &init.name);
 
-	clk_table[1] = devm_clk_register(&client->dev,
-					 &rk808_clkout->clkout2_hw);
-	if (IS_ERR(clk_table[1]))
-		return PTR_ERR(clk_table[1]);
+	ret = devm_clk_hw_register(&client->dev, &rk808_clkout->clkout2_hw);
+	if (ret)
+		return ret;
 
-	rk808_clkout->clk_data.clks = clk_table;
-	rk808_clkout->clk_data.clk_num = RK808_NR_OUTPUT;
-
-	return of_clk_add_provider(node, of_clk_src_onecell_get,
-				   &rk808_clkout->clk_data);
-}
-
-static int rk808_clkout_remove(struct platform_device *pdev)
-{
-	struct rk808 *rk808 = dev_get_drvdata(pdev->dev.parent);
-	struct i2c_client *client = rk808->i2c;
-	struct device_node *node = client->dev.of_node;
-
-	of_clk_del_provider(node);
-
-	return 0;
+	return devm_of_clk_add_hw_provider(&pdev->dev, of_clk_rk808_get,
+					   rk808_clkout);
 }
 
 static struct platform_driver rk808_clkout_driver = {
 	.probe = rk808_clkout_probe,
-	.remove = rk808_clkout_remove,
 	.driver		= {
 		.name	= "rk808-clkout",
 	},

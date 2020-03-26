@@ -1,13 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2012-2014 Mentor Graphics Inc.
  * Copyright 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
 #include <linux/types.h>
@@ -17,6 +11,7 @@
 #include <linux/bitrev.h>
 #include <linux/io.h>
 #include <linux/err.h>
+#include <linux/sizes.h>
 #include "ipu-prv.h"
 
 /* IC Register Offsets */
@@ -160,6 +155,7 @@ struct ipu_ic_priv {
 	spinlock_t lock;
 	struct ipu_soc *ipu;
 	int use_count;
+	int irt_use_count;
 	struct ipu_ic task[IC_NUM_TASKS];
 };
 
@@ -379,8 +375,6 @@ void ipu_ic_task_disable(struct ipu_ic *ic)
 
 	ipu_ic_write(ic, ic_conf, IC_CONF);
 
-	ic->rotation = ic->graphics = false;
-
 	spin_unlock_irqrestore(&priv->lock, flags);
 }
 EXPORT_SYMBOL_GPL(ipu_ic_task_disable);
@@ -442,36 +436,40 @@ unlock:
 }
 EXPORT_SYMBOL_GPL(ipu_ic_task_graphics_init);
 
-int ipu_ic_task_init(struct ipu_ic *ic,
-		     int in_width, int in_height,
-		     int out_width, int out_height,
-		     enum ipu_color_space in_cs,
-		     enum ipu_color_space out_cs)
+int ipu_ic_task_init_rsc(struct ipu_ic *ic,
+			 int in_width, int in_height,
+			 int out_width, int out_height,
+			 enum ipu_color_space in_cs,
+			 enum ipu_color_space out_cs,
+			 u32 rsc)
 {
 	struct ipu_ic_priv *priv = ic->priv;
-	u32 reg, downsize_coeff, resize_coeff;
+	u32 downsize_coeff, resize_coeff;
 	unsigned long flags;
 	int ret = 0;
 
-	/* Setup vertical resizing */
-	ret = calc_resize_coeffs(ic, in_height, out_height,
-				 &resize_coeff, &downsize_coeff);
-	if (ret)
-		return ret;
+	if (!rsc) {
+		/* Setup vertical resizing */
 
-	reg = (downsize_coeff << 30) | (resize_coeff << 16);
+		ret = calc_resize_coeffs(ic, in_height, out_height,
+					 &resize_coeff, &downsize_coeff);
+		if (ret)
+			return ret;
 
-	/* Setup horizontal resizing */
-	ret = calc_resize_coeffs(ic, in_width, out_width,
-				 &resize_coeff, &downsize_coeff);
-	if (ret)
-		return ret;
+		rsc = (downsize_coeff << 30) | (resize_coeff << 16);
 
-	reg |= (downsize_coeff << 14) | resize_coeff;
+		/* Setup horizontal resizing */
+		ret = calc_resize_coeffs(ic, in_width, out_width,
+					 &resize_coeff, &downsize_coeff);
+		if (ret)
+			return ret;
+
+		rsc |= (downsize_coeff << 14) | resize_coeff;
+	}
 
 	spin_lock_irqsave(&priv->lock, flags);
 
-	ipu_ic_write(ic, reg, ic->reg->rsc);
+	ipu_ic_write(ic, rsc, ic->reg->rsc);
 
 	/* Setup color space conversion */
 	ic->in_cs = in_cs;
@@ -486,6 +484,16 @@ int ipu_ic_task_init(struct ipu_ic *ic,
 unlock:
 	spin_unlock_irqrestore(&priv->lock, flags);
 	return ret;
+}
+
+int ipu_ic_task_init(struct ipu_ic *ic,
+		     int in_width, int in_height,
+		     int out_width, int out_height,
+		     enum ipu_color_space in_cs,
+		     enum ipu_color_space out_cs)
+{
+	return ipu_ic_task_init_rsc(ic, in_width, in_height, out_width,
+				    out_height, in_cs, out_cs, 0);
 }
 EXPORT_SYMBOL_GPL(ipu_ic_task_init);
 
@@ -620,7 +628,7 @@ int ipu_ic_task_idma_init(struct ipu_ic *ic, struct ipuv3_channel *channel,
 	ipu_ic_write(ic, ic_idmac_2, IC_IDMAC_2);
 	ipu_ic_write(ic, ic_idmac_3, IC_IDMAC_3);
 
-	if (rot >= IPU_ROTATE_90_RIGHT)
+	if (ipu_rot_mode_is_irt(rot))
 		ic->rotation = true;
 
 unlock:
@@ -629,21 +637,40 @@ unlock:
 }
 EXPORT_SYMBOL_GPL(ipu_ic_task_idma_init);
 
+static void ipu_irt_enable(struct ipu_ic *ic)
+{
+	struct ipu_ic_priv *priv = ic->priv;
+
+	if (!priv->irt_use_count)
+		ipu_module_enable(priv->ipu, IPU_CONF_ROT_EN);
+
+	priv->irt_use_count++;
+}
+
+static void ipu_irt_disable(struct ipu_ic *ic)
+{
+	struct ipu_ic_priv *priv = ic->priv;
+
+	if (priv->irt_use_count) {
+		if (!--priv->irt_use_count)
+			ipu_module_disable(priv->ipu, IPU_CONF_ROT_EN);
+	}
+}
+
 int ipu_ic_enable(struct ipu_ic *ic)
 {
 	struct ipu_ic_priv *priv = ic->priv;
 	unsigned long flags;
-	u32 module = IPU_CONF_IC_EN;
 
 	spin_lock_irqsave(&priv->lock, flags);
 
-	if (ic->rotation)
-		module |= IPU_CONF_ROT_EN;
-
 	if (!priv->use_count)
-		ipu_module_enable(priv->ipu, module);
+		ipu_module_enable(priv->ipu, IPU_CONF_IC_EN);
 
 	priv->use_count++;
+
+	if (ic->rotation)
+		ipu_irt_enable(ic);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 
@@ -655,17 +682,21 @@ int ipu_ic_disable(struct ipu_ic *ic)
 {
 	struct ipu_ic_priv *priv = ic->priv;
 	unsigned long flags;
-	u32 module = IPU_CONF_IC_EN | IPU_CONF_ROT_EN;
 
 	spin_lock_irqsave(&priv->lock, flags);
 
 	priv->use_count--;
 
 	if (!priv->use_count)
-		ipu_module_disable(priv->ipu, module);
+		ipu_module_disable(priv->ipu, IPU_CONF_IC_EN);
 
 	if (priv->use_count < 0)
 		priv->use_count = 0;
+
+	if (ic->rotation)
+		ipu_irt_disable(ic);
+
+	ic->rotation = ic->graphics = false;
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 

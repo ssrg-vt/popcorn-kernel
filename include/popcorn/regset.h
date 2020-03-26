@@ -91,7 +91,10 @@ static inline size_t regset_size(int arch) {
 		sizeof(struct regset_x86_64),
 		sizeof(struct regset_powerpc),
 	};
-	BUG_ON(arch <= POPCORN_ARCH_UNKNOWN || arch >= POPCORN_ARCH_MAX);
+
+	if(arch <= POPCORN_ARCH_UNKNOWN || arch >= POPCORN_ARCH_MAX)
+		return -EINVAL;
+
 	return sizes[arch];
 }
 

@@ -34,7 +34,7 @@
  *  -ViXS were still seeing crashes when using insmod to load drivers.
  *   It turned out that the code to change Execute permssions for TLB entries
  *   of user was not guarded for interrupts (mod_tlb_permission)
- *   This was cauing TLB entries to be overwritten on unrelated indexes
+ *   This was causing TLB entries to be overwritten on unrelated indexes
  *
  * Vineetg: July 15th 2008: Bug #94183
  *  -Exception happens in Delay slot of a JMP, and before user space resumes,
@@ -53,6 +53,8 @@
 #include <linux/uaccess.h>
 #include <linux/syscalls.h>
 #include <linux/tracehook.h>
+#include <linux/sched/task_stack.h>
+
 #include <asm/ucontext.h>
 
 struct rt_sigframe {
@@ -167,7 +169,7 @@ SYSCALL_DEFINE0(rt_sigreturn)
 
 	sf = (struct rt_sigframe __force __user *)(regs->sp);
 
-	if (!access_ok(VERIFY_READ, sf, sizeof(*sf)))
+	if (!access_ok(sf, sizeof(*sf)))
 		goto badframe;
 
 	if (__get_user(magic, &sf->sigret_magic))
@@ -217,7 +219,7 @@ static inline void __user *get_sigframe(struct ksignal *ksig,
 	frame = (void __user *)((sp - framesize) & ~7);
 
 	/* Check that we can actually write to the signal frame */
-	if (!access_ok(VERIFY_WRITE, frame, framesize))
+	if (!access_ok(frame, framesize))
 		frame = NULL;
 
 	return frame;

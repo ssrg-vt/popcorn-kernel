@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/pipe.c
  *
@@ -21,8 +22,9 @@
 #include <linux/audit.h>
 #include <linux/syscalls.h>
 #include <linux/fcntl.h>
+#include <linux/memcontrol.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/ioctls.h>
 
 #include "internal.h"
@@ -32,11 +34,6 @@
  * be set by root in /proc/sys/fs/pipe-max-size
  */
 unsigned int pipe_max_size = 1048576;
-
-/*
- * Minimum pipe size, as required by POSIX
- */
-unsigned int pipe_min_size = PAGE_SIZE;
 
 /* Maximum allocatable pages per user. Hard limit is unset by default, soft
  * matches default values.
@@ -134,7 +131,20 @@ static void anon_pipe_buf_release(struct pipe_inode_info *pipe,
 	if (page_count(page) == 1 && !pipe->tmp_page)
 		pipe->tmp_page = page;
 	else
-		page_cache_release(page);
+		put_page(page);
+}
+
+static int anon_pipe_buf_steal(struct pipe_inode_info *pipe,
+			       struct pipe_buffer *buf)
+{
+	struct page *page = buf->page;
+
+	if (page_count(page) == 1) {
+		memcg_kmem_uncharge(page, 0);
+		__SetPageLocked(page);
+		return 0;
+	}
+	return 1;
 }
 
 /**
@@ -178,9 +188,9 @@ EXPORT_SYMBOL(generic_pipe_buf_steal);
  *	in the tee() system call, when we duplicate the buffers in one
  *	pipe into another.
  */
-void generic_pipe_buf_get(struct pipe_inode_info *pipe, struct pipe_buffer *buf)
+bool generic_pipe_buf_get(struct pipe_inode_info *pipe, struct pipe_buffer *buf)
 {
-	page_cache_get(buf->page);
+	return try_get_page(buf->page);
 }
 EXPORT_SYMBOL(generic_pipe_buf_get);
 
@@ -211,25 +221,51 @@ EXPORT_SYMBOL(generic_pipe_buf_confirm);
 void generic_pipe_buf_release(struct pipe_inode_info *pipe,
 			      struct pipe_buffer *buf)
 {
-	page_cache_release(buf->page);
+	put_page(buf->page);
 }
 EXPORT_SYMBOL(generic_pipe_buf_release);
 
+/* New data written to a pipe may be appended to a buffer with this type. */
 static const struct pipe_buf_operations anon_pipe_buf_ops = {
-	.can_merge = 1,
 	.confirm = generic_pipe_buf_confirm,
 	.release = anon_pipe_buf_release,
-	.steal = generic_pipe_buf_steal,
+	.steal = anon_pipe_buf_steal,
+	.get = generic_pipe_buf_get,
+};
+
+static const struct pipe_buf_operations anon_pipe_buf_nomerge_ops = {
+	.confirm = generic_pipe_buf_confirm,
+	.release = anon_pipe_buf_release,
+	.steal = anon_pipe_buf_steal,
 	.get = generic_pipe_buf_get,
 };
 
 static const struct pipe_buf_operations packet_pipe_buf_ops = {
-	.can_merge = 0,
 	.confirm = generic_pipe_buf_confirm,
 	.release = anon_pipe_buf_release,
-	.steal = generic_pipe_buf_steal,
+	.steal = anon_pipe_buf_steal,
 	.get = generic_pipe_buf_get,
 };
+
+/**
+ * pipe_buf_mark_unmergeable - mark a &struct pipe_buffer as unmergeable
+ * @buf:	the buffer to mark
+ *
+ * Description:
+ *	This function ensures that no future writes will be merged into the
+ *	given &struct pipe_buffer. This is necessary when multiple pipe buffers
+ *	share the same backing page.
+ */
+void pipe_buf_mark_unmergeable(struct pipe_buffer *buf)
+{
+	if (buf->ops == &anon_pipe_buf_ops)
+		buf->ops = &anon_pipe_buf_nomerge_ops;
+}
+
+static bool pipe_buf_can_merge(struct pipe_buffer *buf)
+{
+	return buf->ops == &anon_pipe_buf_ops;
+}
 
 static ssize_t
 pipe_read(struct kiocb *iocb, struct iov_iter *to)
@@ -252,7 +288,6 @@ pipe_read(struct kiocb *iocb, struct iov_iter *to)
 		if (bufs) {
 			int curbuf = pipe->curbuf;
 			struct pipe_buffer *buf = pipe->bufs + curbuf;
-			const struct pipe_buf_operations *ops = buf->ops;
 			size_t chars = buf->len;
 			size_t written;
 			int error;
@@ -260,7 +295,7 @@ pipe_read(struct kiocb *iocb, struct iov_iter *to)
 			if (chars > total_len)
 				chars = total_len;
 
-			error = ops->confirm(pipe, buf);
+			error = pipe_buf_confirm(pipe, buf);
 			if (error) {
 				if (!ret)
 					ret = error;
@@ -284,8 +319,7 @@ pipe_read(struct kiocb *iocb, struct iov_iter *to)
 			}
 
 			if (!buf->len) {
-				buf->ops = NULL;
-				ops->release(pipe, buf);
+				pipe_buf_release(pipe, buf);
 				curbuf = (curbuf + 1) & (pipe->buffers - 1);
 				pipe->curbuf = curbuf;
 				pipe->nrbufs = --bufs;
@@ -318,7 +352,7 @@ pipe_read(struct kiocb *iocb, struct iov_iter *to)
 			break;
 		}
 		if (do_wakeup) {
-			wake_up_interruptible_sync_poll(&pipe->wait, POLLOUT | POLLWRNORM);
+			wake_up_interruptible_sync_poll(&pipe->wait, EPOLLOUT | EPOLLWRNORM);
  			kill_fasync(&pipe->fasync_writers, SIGIO, POLL_OUT);
 		}
 		pipe_wait(pipe);
@@ -327,7 +361,7 @@ pipe_read(struct kiocb *iocb, struct iov_iter *to)
 
 	/* Signal writers asynchronously that there is more room. */
 	if (do_wakeup) {
-		wake_up_interruptible_sync_poll(&pipe->wait, POLLOUT | POLLWRNORM);
+		wake_up_interruptible_sync_poll(&pipe->wait, EPOLLOUT | EPOLLWRNORM);
 		kill_fasync(&pipe->fasync_writers, SIGIO, POLL_OUT);
 	}
 	if (ret > 0)
@@ -368,11 +402,10 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
 		int lastbuf = (pipe->curbuf + pipe->nrbufs - 1) &
 							(pipe->buffers - 1);
 		struct pipe_buffer *buf = pipe->bufs + lastbuf;
-		const struct pipe_buf_operations *ops = buf->ops;
 		int offset = buf->offset + buf->len;
 
-		if (ops->can_merge && offset + chars <= PAGE_SIZE) {
-			ret = ops->confirm(pipe, buf);
+		if (pipe_buf_can_merge(buf) && offset + chars <= PAGE_SIZE) {
+			ret = pipe_buf_confirm(pipe, buf);
 			if (ret)
 				goto out;
 
@@ -405,7 +438,7 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			int copied;
 
 			if (!page) {
-				page = alloc_page(GFP_HIGHUSER);
+				page = alloc_page(GFP_HIGHUSER | __GFP_ACCOUNT);
 				if (unlikely(!page)) {
 					ret = ret ? : -ENOMEM;
 					break;
@@ -455,7 +488,7 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
 			break;
 		}
 		if (do_wakeup) {
-			wake_up_interruptible_sync_poll(&pipe->wait, POLLIN | POLLRDNORM);
+			wake_up_interruptible_sync_poll(&pipe->wait, EPOLLIN | EPOLLRDNORM);
 			kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
 			do_wakeup = 0;
 		}
@@ -466,7 +499,7 @@ pipe_write(struct kiocb *iocb, struct iov_iter *from)
 out:
 	__pipe_unlock(pipe);
 	if (do_wakeup) {
-		wake_up_interruptible_sync_poll(&pipe->wait, POLLIN | POLLRDNORM);
+		wake_up_interruptible_sync_poll(&pipe->wait, EPOLLIN | EPOLLRDNORM);
 		kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
 	}
 	if (ret > 0 && sb_start_write_trylock(file_inode(filp)->i_sb)) {
@@ -502,10 +535,10 @@ static long pipe_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 }
 
 /* No kernel lock held - fine */
-static unsigned int
+static __poll_t
 pipe_poll(struct file *filp, poll_table *wait)
 {
-	unsigned int mask;
+	__poll_t mask;
 	struct pipe_inode_info *pipe = filp->private_data;
 	int nrbufs;
 
@@ -515,19 +548,19 @@ pipe_poll(struct file *filp, poll_table *wait)
 	nrbufs = pipe->nrbufs;
 	mask = 0;
 	if (filp->f_mode & FMODE_READ) {
-		mask = (nrbufs > 0) ? POLLIN | POLLRDNORM : 0;
+		mask = (nrbufs > 0) ? EPOLLIN | EPOLLRDNORM : 0;
 		if (!pipe->writers && filp->f_version != pipe->w_counter)
-			mask |= POLLHUP;
+			mask |= EPOLLHUP;
 	}
 
 	if (filp->f_mode & FMODE_WRITE) {
-		mask |= (nrbufs < pipe->buffers) ? POLLOUT | POLLWRNORM : 0;
+		mask |= (nrbufs < pipe->buffers) ? EPOLLOUT | EPOLLWRNORM : 0;
 		/*
-		 * Most Unices do not set POLLERR for FIFOs but on Linux they
+		 * Most Unices do not set EPOLLERR for FIFOs but on Linux they
 		 * behave exactly like pipes for poll().
 		 */
 		if (!pipe->readers)
-			mask |= POLLERR;
+			mask |= EPOLLERR;
 	}
 
 	return mask;
@@ -560,7 +593,7 @@ pipe_release(struct inode *inode, struct file *file)
 		pipe->writers--;
 
 	if (pipe->readers || pipe->writers) {
-		wake_up_interruptible_sync_poll(&pipe->wait, POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM | POLLERR | POLLHUP);
+		wake_up_interruptible_sync_poll(&pipe->wait, EPOLLIN | EPOLLOUT | EPOLLRDNORM | EPOLLWRNORM | EPOLLERR | EPOLLHUP);
 		kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
 		kill_fasync(&pipe->fasync_writers, SIGIO, POLL_OUT);
 	}
@@ -589,55 +622,73 @@ pipe_fasync(int fd, struct file *filp, int on)
 	return retval;
 }
 
-static void account_pipe_buffers(struct pipe_inode_info *pipe,
+static unsigned long account_pipe_buffers(struct user_struct *user,
                                  unsigned long old, unsigned long new)
 {
-	atomic_long_add(new - old, &pipe->user->pipe_bufs);
+	return atomic_long_add_return(new - old, &user->pipe_bufs);
 }
 
-static bool too_many_pipe_buffers_soft(struct user_struct *user)
+static bool too_many_pipe_buffers_soft(unsigned long user_bufs)
 {
-	return pipe_user_pages_soft &&
-	       atomic_long_read(&user->pipe_bufs) >= pipe_user_pages_soft;
+	unsigned long soft_limit = READ_ONCE(pipe_user_pages_soft);
+
+	return soft_limit && user_bufs > soft_limit;
 }
 
-static bool too_many_pipe_buffers_hard(struct user_struct *user)
+static bool too_many_pipe_buffers_hard(unsigned long user_bufs)
 {
-	return pipe_user_pages_hard &&
-	       atomic_long_read(&user->pipe_bufs) >= pipe_user_pages_hard;
+	unsigned long hard_limit = READ_ONCE(pipe_user_pages_hard);
+
+	return hard_limit && user_bufs > hard_limit;
+}
+
+static bool is_unprivileged_user(void)
+{
+	return !capable(CAP_SYS_RESOURCE) && !capable(CAP_SYS_ADMIN);
 }
 
 struct pipe_inode_info *alloc_pipe_info(void)
 {
 	struct pipe_inode_info *pipe;
+	unsigned long pipe_bufs = PIPE_DEF_BUFFERS;
+	struct user_struct *user = get_current_user();
+	unsigned long user_bufs;
+	unsigned int max_size = READ_ONCE(pipe_max_size);
 
-	pipe = kzalloc(sizeof(struct pipe_inode_info), GFP_KERNEL);
-	if (pipe) {
-		unsigned long pipe_bufs = PIPE_DEF_BUFFERS;
-		struct user_struct *user = get_current_user();
+	pipe = kzalloc(sizeof(struct pipe_inode_info), GFP_KERNEL_ACCOUNT);
+	if (pipe == NULL)
+		goto out_free_uid;
 
-		if (pipe_bufs * PAGE_SIZE > pipe_max_size && !capable(CAP_SYS_RESOURCE))
-			pipe_bufs = pipe_max_size >> PAGE_SHIFT;
+	if (pipe_bufs * PAGE_SIZE > max_size && !capable(CAP_SYS_RESOURCE))
+		pipe_bufs = max_size >> PAGE_SHIFT;
 
-		if (!too_many_pipe_buffers_hard(user)) {
-			if (too_many_pipe_buffers_soft(user))
-				pipe_bufs = 1;
-			pipe->bufs = kzalloc(sizeof(struct pipe_buffer) * pipe_bufs, GFP_KERNEL);
-		}
+	user_bufs = account_pipe_buffers(user, 0, pipe_bufs);
 
-		if (pipe->bufs) {
-			init_waitqueue_head(&pipe->wait);
-			pipe->r_counter = pipe->w_counter = 1;
-			pipe->buffers = pipe_bufs;
-			pipe->user = user;
-			account_pipe_buffers(pipe, 0, pipe_bufs);
-			mutex_init(&pipe->mutex);
-			return pipe;
-		}
-		free_uid(user);
-		kfree(pipe);
+	if (too_many_pipe_buffers_soft(user_bufs) && is_unprivileged_user()) {
+		user_bufs = account_pipe_buffers(user, pipe_bufs, 1);
+		pipe_bufs = 1;
 	}
 
+	if (too_many_pipe_buffers_hard(user_bufs) && is_unprivileged_user())
+		goto out_revert_acct;
+
+	pipe->bufs = kcalloc(pipe_bufs, sizeof(struct pipe_buffer),
+			     GFP_KERNEL_ACCOUNT);
+
+	if (pipe->bufs) {
+		init_waitqueue_head(&pipe->wait);
+		pipe->r_counter = pipe->w_counter = 1;
+		pipe->buffers = pipe_bufs;
+		pipe->user = user;
+		mutex_init(&pipe->mutex);
+		return pipe;
+	}
+
+out_revert_acct:
+	(void) account_pipe_buffers(user, pipe_bufs, 0);
+	kfree(pipe);
+out_free_uid:
+	free_uid(user);
 	return NULL;
 }
 
@@ -645,12 +696,12 @@ void free_pipe_info(struct pipe_inode_info *pipe)
 {
 	int i;
 
-	account_pipe_buffers(pipe, pipe->buffers, 0);
+	(void) account_pipe_buffers(pipe->user, pipe->buffers, 0);
 	free_uid(pipe->user);
 	for (i = 0; i < pipe->buffers; i++) {
 		struct pipe_buffer *buf = pipe->bufs + i;
 		if (buf->ops)
-			buf->ops->release(pipe, buf);
+			pipe_buf_release(pipe, buf);
 	}
 	if (pipe->tmp_page)
 		__free_page(pipe->tmp_page);
@@ -702,7 +753,7 @@ static struct inode * get_pipe_inode(void)
 	inode->i_mode = S_IFIFO | S_IRUSR | S_IWUSR;
 	inode->i_uid = current_fsuid();
 	inode->i_gid = current_fsgid();
-	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
 
 	return inode;
 
@@ -715,55 +766,33 @@ fail_inode:
 
 int create_pipe_files(struct file **res, int flags)
 {
-	int err;
 	struct inode *inode = get_pipe_inode();
 	struct file *f;
-	struct path path;
-	static struct qstr name = { .name = "" };
 
 	if (!inode)
 		return -ENFILE;
 
-	err = -ENOMEM;
-	path.dentry = d_alloc_pseudo(pipe_mnt->mnt_sb, &name);
-	if (!path.dentry)
-		goto err_inode;
-	path.mnt = mntget(pipe_mnt);
-
-	d_instantiate(path.dentry, inode);
-
-	f = alloc_file(&path, FMODE_WRITE, &pipefifo_fops);
+	f = alloc_file_pseudo(inode, pipe_mnt, "",
+				O_WRONLY | (flags & (O_NONBLOCK | O_DIRECT)),
+				&pipefifo_fops);
 	if (IS_ERR(f)) {
-		err = PTR_ERR(f);
-		goto err_dentry;
+		free_pipe_info(inode->i_pipe);
+		iput(inode);
+		return PTR_ERR(f);
 	}
 
-	f->f_flags = O_WRONLY | (flags & (O_NONBLOCK | O_DIRECT));
 	f->private_data = inode->i_pipe;
 
-	res[0] = alloc_file(&path, FMODE_READ, &pipefifo_fops);
+	res[0] = alloc_file_clone(f, O_RDONLY | (flags & O_NONBLOCK),
+				  &pipefifo_fops);
 	if (IS_ERR(res[0])) {
-		err = PTR_ERR(res[0]);
-		goto err_file;
+		put_pipe_info(inode, inode->i_pipe);
+		fput(f);
+		return PTR_ERR(res[0]);
 	}
-
-	path_get(&path);
 	res[0]->private_data = inode->i_pipe;
-	res[0]->f_flags = O_RDONLY | (flags & O_NONBLOCK);
 	res[1] = f;
 	return 0;
-
-err_file:
-	put_filp(f);
-err_dentry:
-	free_pipe_info(inode->i_pipe);
-	path_put(&path);
-	return err;
-
-err_inode:
-	free_pipe_info(inode->i_pipe);
-	iput(inode);
-	return err;
 }
 
 static int __do_pipe_flags(int *fd, struct file **files, int flags)
@@ -816,7 +845,7 @@ int do_pipe_flags(int *fd, int flags)
  * sys_pipe() is the normal C calling standard for creating
  * a pipe. It's not the way Unix traditionally does this, though.
  */
-SYSCALL_DEFINE2(pipe2, int __user *, fildes, int, flags)
+static int do_pipe2(int __user *fildes, int flags)
 {
 	struct file *files[2];
 	int fd[2];
@@ -838,9 +867,14 @@ SYSCALL_DEFINE2(pipe2, int __user *, fildes, int, flags)
 	return error;
 }
 
+SYSCALL_DEFINE2(pipe2, int __user *, fildes, int, flags)
+{
+	return do_pipe2(fildes, flags);
+}
+
 SYSCALL_DEFINE1(pipe, int __user *, fildes)
 {
-	return sys_pipe2(fildes, 0);
+	return do_pipe2(fildes, 0);
 }
 
 static int wait_for_partner(struct pipe_inode_info *pipe, unsigned int *cnt)
@@ -911,7 +945,7 @@ static int fifo_open(struct inode *inode, struct file *filp)
 
 		if (!is_pipe && !pipe->writers) {
 			if ((filp->f_flags & O_NONBLOCK)) {
-				/* suppress POLLHUP until we have
+				/* suppress EPOLLHUP until we have
 				 * seen a writer */
 				filp->f_version = pipe->w_counter;
 			} else {
@@ -997,15 +1031,58 @@ const struct file_operations pipefifo_fops = {
 };
 
 /*
+ * Currently we rely on the pipe array holding a power-of-2 number
+ * of pages. Returns 0 on error.
+ */
+unsigned int round_pipe_size(unsigned long size)
+{
+	if (size > (1U << 31))
+		return 0;
+
+	/* Minimum pipe size, as required by POSIX */
+	if (size < PAGE_SIZE)
+		return PAGE_SIZE;
+
+	return roundup_pow_of_two(size);
+}
+
+/*
  * Allocate a new array of pipe buffers and copy the info over. Returns the
  * pipe size if successful, or return -ERROR on error.
  */
-static long pipe_set_size(struct pipe_inode_info *pipe, unsigned long nr_pages)
+static long pipe_set_size(struct pipe_inode_info *pipe, unsigned long arg)
 {
 	struct pipe_buffer *bufs;
+	unsigned int size, nr_pages;
+	unsigned long user_bufs;
+	long ret = 0;
+
+	size = round_pipe_size(arg);
+	nr_pages = size >> PAGE_SHIFT;
 
 	if (!nr_pages)
 		return -EINVAL;
+
+	/*
+	 * If trying to increase the pipe capacity, check that an
+	 * unprivileged user is not trying to exceed various limits
+	 * (soft limit check here, hard limit check just below).
+	 * Decreasing the pipe capacity is always permitted, even
+	 * if the user is currently over a limit.
+	 */
+	if (nr_pages > pipe->buffers &&
+			size > pipe_max_size && !capable(CAP_SYS_RESOURCE))
+		return -EPERM;
+
+	user_bufs = account_pipe_buffers(pipe->user, pipe->buffers, nr_pages);
+
+	if (nr_pages > pipe->buffers &&
+			(too_many_pipe_buffers_hard(user_bufs) ||
+			 too_many_pipe_buffers_soft(user_bufs)) &&
+			is_unprivileged_user()) {
+		ret = -EPERM;
+		goto out_revert_acct;
+	}
 
 	/*
 	 * We can shrink the pipe, if arg >= pipe->nrbufs. Since we don't
@@ -1013,12 +1090,17 @@ static long pipe_set_size(struct pipe_inode_info *pipe, unsigned long nr_pages)
 	 * again like we would do for growing. If the pipe currently
 	 * contains more buffers than arg, then return busy.
 	 */
-	if (nr_pages < pipe->nrbufs)
-		return -EBUSY;
+	if (nr_pages < pipe->nrbufs) {
+		ret = -EBUSY;
+		goto out_revert_acct;
+	}
 
-	bufs = kcalloc(nr_pages, sizeof(*bufs), GFP_KERNEL | __GFP_NOWARN);
-	if (unlikely(!bufs))
-		return -ENOMEM;
+	bufs = kcalloc(nr_pages, sizeof(*bufs),
+		       GFP_KERNEL_ACCOUNT | __GFP_NOWARN);
+	if (unlikely(!bufs)) {
+		ret = -ENOMEM;
+		goto out_revert_acct;
+	}
 
 	/*
 	 * The pipe array wraps around, so just start the new one at zero
@@ -1041,51 +1123,14 @@ static long pipe_set_size(struct pipe_inode_info *pipe, unsigned long nr_pages)
 			memcpy(bufs + head, pipe->bufs, tail * sizeof(struct pipe_buffer));
 	}
 
-	account_pipe_buffers(pipe, pipe->buffers, nr_pages);
 	pipe->curbuf = 0;
 	kfree(pipe->bufs);
 	pipe->bufs = bufs;
 	pipe->buffers = nr_pages;
 	return nr_pages * PAGE_SIZE;
-}
 
-/*
- * Currently we rely on the pipe array holding a power-of-2 number
- * of pages. Returns 0 on error.
- */
-static inline unsigned int round_pipe_size(unsigned int size)
-{
-	unsigned long nr_pages;
-
-	if (size < pipe_min_size)
-		size = pipe_min_size;
-
-	nr_pages = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
-	if (nr_pages == 0)
-		return 0;
-
-	return roundup_pow_of_two(nr_pages) << PAGE_SHIFT;
-}
-
-/*
- * This should work even if CONFIG_PROC_FS isn't set, as proc_dointvec_minmax
- * will return an error.
- */
-int pipe_proc_fn(struct ctl_table *table, int write, void __user *buf,
-		 size_t *lenp, loff_t *ppos)
-{
-	unsigned int rounded_pipe_max_size;
-	int ret;
-
-	ret = proc_dointvec_minmax(table, write, buf, lenp, ppos);
-	if (ret < 0 || !write)
-		return ret;
-
-	rounded_pipe_max_size = round_pipe_size(pipe_max_size);
-	if (rounded_pipe_max_size == 0)
-		return -EINVAL;
-
-	pipe_max_size = rounded_pipe_max_size;
+out_revert_acct:
+	(void) account_pipe_buffers(pipe->user, nr_pages, pipe->buffers);
 	return ret;
 }
 
@@ -1111,28 +1156,9 @@ long pipe_fcntl(struct file *file, unsigned int cmd, unsigned long arg)
 	__pipe_lock(pipe);
 
 	switch (cmd) {
-	case F_SETPIPE_SZ: {
-		unsigned int size, nr_pages;
-
-		size = round_pipe_size(arg);
-		nr_pages = size >> PAGE_SHIFT;
-
-		ret = -EINVAL;
-		if (!nr_pages)
-			goto out;
-
-		if (!capable(CAP_SYS_RESOURCE) && size > pipe_max_size) {
-			ret = -EPERM;
-			goto out;
-		} else if ((too_many_pipe_buffers_hard(pipe->user) ||
-			    too_many_pipe_buffers_soft(pipe->user)) &&
-		           !capable(CAP_SYS_RESOURCE) && !capable(CAP_SYS_ADMIN)) {
-			ret = -EPERM;
-			goto out;
-		}
-		ret = pipe_set_size(pipe, nr_pages);
+	case F_SETPIPE_SZ:
+		ret = pipe_set_size(pipe, arg);
 		break;
-		}
 	case F_GETPIPE_SZ:
 		ret = pipe->buffers * PAGE_SIZE;
 		break;
@@ -1141,7 +1167,6 @@ long pipe_fcntl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 	}
 
-out:
 	__pipe_unlock(pipe);
 	return ret;
 }

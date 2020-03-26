@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * net/core/netprio_cgroup.c	Priority Control Group
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Neil Horman <nhorman@tuxdriver.com>
  */
@@ -20,12 +16,20 @@
 #include <linux/cgroup.h>
 #include <linux/rcupdate.h>
 #include <linux/atomic.h>
+#include <linux/sched/task.h>
+
 #include <net/rtnetlink.h>
 #include <net/pkt_cls.h>
 #include <net/sock.h>
 #include <net/netprio_cgroup.h>
 
 #include <linux/fdtable.h>
+
+/*
+ * netprio allocates per-net_device priomap array which is indexed by
+ * css->id.  Limiting css ID to 16bits doesn't lose anything.
+ */
+#define NETPRIO_ID_MAX		USHRT_MAX
 
 #define PRIOMAP_MIN_SZ		128
 
@@ -144,6 +148,9 @@ static int cgrp_css_online(struct cgroup_subsys_state *css)
 	struct net_device *dev;
 	int ret = 0;
 
+	if (css->id > NETPRIO_ID_MAX)
+		return -ENOSPC;
+
 	if (!parent_css)
 		return 0;
 
@@ -200,6 +207,8 @@ static ssize_t write_priomap(struct kernfs_open_file *of,
 	if (!dev)
 		return -ENODEV;
 
+	cgroup_sk_alloc_disable();
+
 	rtnl_lock();
 
 	ret = netprio_set_prio(of_css(of), dev, prio);
@@ -213,8 +222,12 @@ static int update_netprio(const void *v, struct file *file, unsigned n)
 {
 	int err;
 	struct socket *sock = sock_from_file(file, &err);
-	if (sock)
-		sock->sk->sk_cgrp_prioidx = (u32)(unsigned long)v;
+	if (sock) {
+		spin_lock(&cgroup_sk_update_lock);
+		sock_cgroup_set_prioidx(&sock->sk->sk_cgrp_data,
+					(unsigned long)v);
+		spin_unlock(&cgroup_sk_update_lock);
+	}
 	return 0;
 }
 
@@ -284,6 +297,4 @@ static int __init init_cgroup_netprio(void)
 	register_netdevice_notifier(&netprio_device_notifier);
 	return 0;
 }
-
 subsys_initcall(init_cgroup_netprio);
-MODULE_LICENSE("GPL v2");

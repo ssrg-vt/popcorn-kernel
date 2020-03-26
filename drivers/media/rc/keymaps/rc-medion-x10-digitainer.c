@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Medion X10 RF remote keytable (Digitainer variant)
  *
@@ -7,20 +8,6 @@
  * up/down buttons (tested with P/N 40009936 / 20018268), reportedly
  * originally shipped with Medion Digitainer but now sold separately simply as
  * an "X10" remote.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <linux/module.h>
@@ -98,10 +85,10 @@ static struct rc_map_table medion_x10_digitainer[] = {
 
 static struct rc_map_list medion_x10_digitainer_map = {
 	.map = {
-		.scan    = medion_x10_digitainer,
-		.size    = ARRAY_SIZE(medion_x10_digitainer),
-		.rc_type = RC_TYPE_OTHER,
-		.name    = RC_MAP_MEDION_X10_DIGITAINER,
+		.scan     = medion_x10_digitainer,
+		.size     = ARRAY_SIZE(medion_x10_digitainer),
+		.rc_proto = RC_PROTO_OTHER,
+		.name     = RC_MAP_MEDION_X10_DIGITAINER,
 	}
 };
 

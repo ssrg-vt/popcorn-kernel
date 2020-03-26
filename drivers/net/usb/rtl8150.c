@@ -14,7 +14,7 @@
 #include <linux/mii.h>
 #include <linux/ethtool.h>
 #include <linux/usb.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 /* Version Information */
 #define DRIVER_VERSION "v0.6.2 (2004/08/27)"
@@ -112,7 +112,7 @@
 #undef	EEPROM_WRITE
 
 /* table of devices that work with this driver */
-static struct usb_device_id rtl8150_table[] = {
+static const struct usb_device_id rtl8150_table[] = {
 	{USB_DEVICE(VENDOR_ID_REALTEK, PRODUCT_ID_RTL8150)},
 	{USB_DEVICE(VENDOR_ID_MELCO, PRODUCT_ID_LUAKTX)},
 	{USB_DEVICE(VENDOR_ID_MICRONET, PRODUCT_ID_SP128AR)},
@@ -388,9 +388,9 @@ static void read_bulk_callback(struct urb *urb)
 	unsigned pkt_len, res;
 	struct sk_buff *skb;
 	struct net_device *netdev;
-	u16 rx_stat;
 	int status = urb->status;
 	int result;
+	unsigned long flags;
 
 	dev = urb->context;
 	if (!dev)
@@ -423,7 +423,6 @@ static void read_bulk_callback(struct urb *urb)
 		goto goon;
 
 	res = urb->actual_length;
-	rx_stat = le16_to_cpu(*(__le16 *)(urb->transfer_buffer + res - 4));
 	pkt_len = res - 4;
 
 	skb_put(dev->rx_skb, pkt_len);
@@ -432,9 +431,9 @@ static void read_bulk_callback(struct urb *urb)
 	netdev->stats.rx_packets++;
 	netdev->stats.rx_bytes += pkt_len;
 
-	spin_lock(&dev->rx_pool_lock);
+	spin_lock_irqsave(&dev->rx_pool_lock, flags);
 	skb = pull_skb(dev);
-	spin_unlock(&dev->rx_pool_lock);
+	spin_unlock_irqrestore(&dev->rx_pool_lock, flags);
 	if (!skb)
 		goto resched;
 
@@ -471,7 +470,7 @@ static void write_bulk_callback(struct urb *urb)
 	if (status)
 		dev_info(&urb->dev->dev, "%s: Tx status %d\n",
 			 dev->netdev->name, status);
-	dev->netdev->trans_start = jiffies;
+	netif_trans_update(dev->netdev);
 	netif_wake_queue(dev->netdev);
 }
 
@@ -681,7 +680,7 @@ static void rtl8150_set_multicast(struct net_device *netdev)
 		   (netdev->flags & IFF_ALLMULTI)) {
 		rx_creg &= 0xfffe;
 		rx_creg |= 0x0002;
-		dev_info(&netdev->dev, "%s: allmulti set\n", netdev->name);
+		dev_dbg(&netdev->dev, "%s: allmulti set\n", netdev->name);
 	} else {
 		/* ~RX_MULTICAST, ~RX_PROMISCUOUS */
 		rx_creg &= 0x00fc;
@@ -714,7 +713,7 @@ static netdev_tx_t rtl8150_start_xmit(struct sk_buff *skb,
 	} else {
 		netdev->stats.tx_packets++;
 		netdev->stats.tx_bytes += skb->len;
-		netdev->trans_start = jiffies;
+		netif_trans_update(netdev);
 	}
 
 	return NETDEV_TX_OK;
@@ -791,47 +790,52 @@ static void rtl8150_get_drvinfo(struct net_device *netdev, struct ethtool_drvinf
 	usb_make_path(dev->udev, info->bus_info, sizeof(info->bus_info));
 }
 
-static int rtl8150_get_settings(struct net_device *netdev, struct ethtool_cmd *ecmd)
+static int rtl8150_get_link_ksettings(struct net_device *netdev,
+				      struct ethtool_link_ksettings *ecmd)
 {
 	rtl8150_t *dev = netdev_priv(netdev);
 	short lpa, bmcr;
+	u32 supported;
 
-	ecmd->supported = (SUPPORTED_10baseT_Half |
+	supported = (SUPPORTED_10baseT_Half |
 			  SUPPORTED_10baseT_Full |
 			  SUPPORTED_100baseT_Half |
 			  SUPPORTED_100baseT_Full |
 			  SUPPORTED_Autoneg |
 			  SUPPORTED_TP | SUPPORTED_MII);
-	ecmd->port = PORT_TP;
-	ecmd->transceiver = XCVR_INTERNAL;
-	ecmd->phy_address = dev->phy;
+	ecmd->base.port = PORT_TP;
+	ecmd->base.phy_address = dev->phy;
 	get_registers(dev, BMCR, 2, &bmcr);
 	get_registers(dev, ANLP, 2, &lpa);
 	if (bmcr & BMCR_ANENABLE) {
 		u32 speed = ((lpa & (LPA_100HALF | LPA_100FULL)) ?
 			     SPEED_100 : SPEED_10);
-		ethtool_cmd_speed_set(ecmd, speed);
-		ecmd->autoneg = AUTONEG_ENABLE;
+		ecmd->base.speed = speed;
+		ecmd->base.autoneg = AUTONEG_ENABLE;
 		if (speed == SPEED_100)
-			ecmd->duplex = (lpa & LPA_100FULL) ?
+			ecmd->base.duplex = (lpa & LPA_100FULL) ?
 			    DUPLEX_FULL : DUPLEX_HALF;
 		else
-			ecmd->duplex = (lpa & LPA_10FULL) ?
+			ecmd->base.duplex = (lpa & LPA_10FULL) ?
 			    DUPLEX_FULL : DUPLEX_HALF;
 	} else {
-		ecmd->autoneg = AUTONEG_DISABLE;
-		ethtool_cmd_speed_set(ecmd, ((bmcr & BMCR_SPEED100) ?
-					     SPEED_100 : SPEED_10));
-		ecmd->duplex = (bmcr & BMCR_FULLDPLX) ?
+		ecmd->base.autoneg = AUTONEG_DISABLE;
+		ecmd->base.speed = ((bmcr & BMCR_SPEED100) ?
+					     SPEED_100 : SPEED_10);
+		ecmd->base.duplex = (bmcr & BMCR_FULLDPLX) ?
 		    DUPLEX_FULL : DUPLEX_HALF;
 	}
+
+	ethtool_convert_legacy_u32_to_link_mode(ecmd->link_modes.supported,
+						supported);
+
 	return 0;
 }
 
 static const struct ethtool_ops ops = {
 	.get_drvinfo = rtl8150_get_drvinfo,
-	.get_settings = rtl8150_get_settings,
-	.get_link = ethtool_op_get_link
+	.get_link = ethtool_op_get_link,
+	.get_link_ksettings = rtl8150_get_link_ksettings,
 };
 
 static int rtl8150_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
@@ -843,6 +847,7 @@ static int rtl8150_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	switch (cmd) {
 	case SIOCDEVPRIVATE:
 		data[0] = dev->phy;
+		/* fall through */
 	case SIOCDEVPRIVATE + 1:
 		read_mii_word(dev, dev->phy, (data[1] & 0x1f), &data[3]);
 		break;
@@ -867,7 +872,6 @@ static const struct net_device_ops rtl8150_netdev_ops = {
 	.ndo_set_rx_mode	= rtl8150_set_multicast,
 	.ndo_set_mac_address	= rtl8150_set_mac_address,
 
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 };
 

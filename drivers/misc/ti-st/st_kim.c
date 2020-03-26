@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Shared Transport Line discipline driver Core
  *	Init Manager module responsible for GPIO control
  *	and firmware download
  *  Copyright (C) 2009-2010 Texas Instruments
  *  Author: Pavan Savoy <pavan_savoy@ti.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  */
 
 #define pr_fmt(fmt) "(stk) :" fmt
@@ -78,7 +65,6 @@ static void validate_firmware_response(struct kim_data_s *kim_gdata)
 		memcpy(kim_gdata->resp_buffer,
 				kim_gdata->rx_skb->data,
 				kim_gdata->rx_skb->len);
-		complete_all(&kim_gdata->kim_rcvd);
 		kim_gdata->rx_state = ST_W4_PACKET_TYPE;
 		kim_gdata->rx_skb = NULL;
 		kim_gdata->rx_count = 0;
@@ -139,7 +125,7 @@ static void kim_int_recv(struct kim_data_s *kim_gdata,
 	const unsigned char *data, long count)
 {
 	const unsigned char *ptr;
-	int len = 0, type = 0;
+	int len = 0;
 	unsigned char *plen;
 
 	pr_debug("%s", __func__);
@@ -153,7 +139,7 @@ static void kim_int_recv(struct kim_data_s *kim_gdata,
 	while (count) {
 		if (kim_gdata->rx_count) {
 			len = min_t(unsigned int, kim_gdata->rx_count, count);
-			memcpy(skb_put(kim_gdata->rx_skb, len), ptr, len);
+			skb_put_data(kim_gdata->rx_skb, ptr, len);
 			kim_gdata->rx_count -= len;
 			count -= len;
 			ptr += len;
@@ -184,7 +170,6 @@ static void kim_int_recv(struct kim_data_s *kim_gdata,
 		case 0x04:
 			kim_gdata->rx_state = ST_W4_HEADER;
 			kim_gdata->rx_count = 2;
-			type = *ptr;
 			break;
 		default:
 			pr_info("unknown packet");
@@ -213,7 +198,7 @@ static void kim_int_recv(struct kim_data_s *kim_gdata,
 static long read_local_version(struct kim_data_s *kim_gdata, char *bts_scr_name)
 {
 	unsigned short version = 0, chip = 0, min_ver = 0, maj_ver = 0;
-	const char read_ver_cmd[] = { 0x01, 0x01, 0x10, 0x00 };
+	static const char read_ver_cmd[] = { 0x01, 0x01, 0x10, 0x00 };
 	long timeout;
 
 	pr_debug("%s", __func__);
@@ -566,7 +551,7 @@ long st_kim_stop(void *kim_data)
 /* functions called from subsystems */
 /* called when debugfs entry is read from */
 
-static int show_version(struct seq_file *s, void *unused)
+static int version_show(struct seq_file *s, void *unused)
 {
 	struct kim_data_s *kim_gdata = (struct kim_data_s *)s->private;
 	seq_printf(s, "%04X %d.%d.%d\n", kim_gdata->version.full,
@@ -575,7 +560,7 @@ static int show_version(struct seq_file *s, void *unused)
 	return 0;
 }
 
-static int show_list(struct seq_file *s, void *unused)
+static int list_show(struct seq_file *s, void *unused)
 {
 	struct kim_data_s *kim_gdata = (struct kim_data_s *)s->private;
 	kim_st_list_protocols(kim_gdata->core_data, s);
@@ -661,7 +646,7 @@ static struct attribute *uim_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group uim_attr_grp = {
+static const struct attribute_group uim_attr_grp = {
 	.attrs = uim_attrs,
 };
 
@@ -690,30 +675,8 @@ err:
 	*core_data = NULL;
 }
 
-static int kim_version_open(struct inode *i, struct file *f)
-{
-	return single_open(f, show_version, i->i_private);
-}
-
-static int kim_list_open(struct inode *i, struct file *f)
-{
-	return single_open(f, show_list, i->i_private);
-}
-
-static const struct file_operations version_debugfs_fops = {
-	/* version info */
-	.open = kim_version_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
-static const struct file_operations list_debugfs_fops = {
-	/* protocols info */
-	.open = kim_list_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(version);
+DEFINE_SHOW_ATTRIBUTE(list);
 
 /**********************************************************************/
 /* functions called from platform device driver subsystem
@@ -736,7 +699,7 @@ static int kim_probe(struct platform_device *pdev)
 		st_kim_devices[0] = pdev;
 	}
 
-	kim_gdata = kzalloc(sizeof(struct kim_data_s), GFP_ATOMIC);
+	kim_gdata = kzalloc(sizeof(struct kim_data_s), GFP_KERNEL);
 	if (!kim_gdata) {
 		pr_err("no mem to allocate");
 		return -ENOMEM;
@@ -757,14 +720,14 @@ static int kim_probe(struct platform_device *pdev)
 	err = gpio_request(kim_gdata->nshutdown, "kim");
 	if (unlikely(err)) {
 		pr_err(" gpio %d request failed ", kim_gdata->nshutdown);
-		return err;
+		goto err_sysfs_group;
 	}
 
 	/* Configure nShutdown GPIO as output=0 */
 	err = gpio_direction_output(kim_gdata->nshutdown, 0);
 	if (unlikely(err)) {
 		pr_err(" unable to configure gpio %d", kim_gdata->nshutdown);
-		return err;
+		goto err_sysfs_group;
 	}
 	/* get reference of pdev for request_firmware
 	 */
@@ -791,9 +754,9 @@ static int kim_probe(struct platform_device *pdev)
 	}
 
 	debugfs_create_file("version", S_IRUGO, kim_debugfs_dir,
-				kim_gdata, &version_debugfs_fops);
+				kim_gdata, &version_fops);
 	debugfs_create_file("protocols", S_IRUGO, kim_debugfs_dir,
-				kim_gdata, &list_debugfs_fops);
+				kim_gdata, &list_fops);
 	return 0;
 
 err_sysfs_group:

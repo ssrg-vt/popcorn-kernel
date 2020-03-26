@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * MDIO bus driver for the Xilinx Axi Ethernet device
  *
@@ -10,6 +11,7 @@
 #include <linux/of_address.h>
 #include <linux/of_mdio.h>
 #include <linux/jiffies.h>
+#include <linux/iopoll.h>
 
 #include "xilinx_axienet.h"
 
@@ -19,16 +21,11 @@
 /* Wait till MDIO interface is ready to accept a new transaction.*/
 int axienet_mdio_wait_until_ready(struct axienet_local *lp)
 {
-	unsigned long end = jiffies + 2;
-	while (!(axienet_ior(lp, XAE_MDIO_MCR_OFFSET) &
-		 XAE_MDIO_MCR_READY_MASK)) {
-		if (time_before_eq(end, jiffies)) {
-			WARN_ON(1);
-			return -ETIMEDOUT;
-		}
-		udelay(1);
-	}
-	return 0;
+	u32 val;
+
+	return readx_poll_timeout(axinet_ior_read_mcr, lp,
+				  val, val & XAE_MDIO_MCR_READY_MASK,
+				  1, 20000);
 }
 
 /**
@@ -212,12 +209,12 @@ issue:
 	bus->read = axienet_mdio_read;
 	bus->write = axienet_mdio_write;
 	bus->parent = lp->dev;
-	bus->irq = lp->mdio_irqs; /* preallocated IRQ table */
 	lp->mii_bus = bus;
 
 	ret = of_mdiobus_register(bus, np1);
 	if (ret) {
 		mdiobus_free(bus);
+		lp->mii_bus = NULL;
 		return ret;
 	}
 	return 0;
@@ -232,7 +229,6 @@ issue:
 void axienet_mdio_teardown(struct axienet_local *lp)
 {
 	mdiobus_unregister(lp->mii_bus);
-	kfree(lp->mii_bus->irq);
 	mdiobus_free(lp->mii_bus);
 	lp->mii_bus = NULL;
 }

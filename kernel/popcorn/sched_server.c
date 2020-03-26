@@ -18,113 +18,30 @@
 #include <linux/kthread.h>
 #include <linux/slab.h>
 #include <linux/proc_fs.h>
-#include <asm/uaccess.h>
-
+#include <linux/uaccess.h>
+#include <linux/sched/signal.h>
+#include <linux/sched/mm.h>
+#include <linux/jiffies.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/types.h>
-
 #include "types.h"
 #include "wait_station.h"
 
-///////////////////////////////////////////////////////////////////////////////
-// Vincent's scheduling infrasrtucture based on Antonio's power/pmu readings
-///////////////////////////////////////////////////////////////////////////////
+/*
+ *  Vincent's scheduling infrasrtucture based on Antonio's power/pmu readings
+*/
+
 #define POWER_N_VALUES 10
 int *popcorn_power_x86_1;
 int *popcorn_power_x86_2;
-int *popcorn_power_arm_1;
-int *popcorn_power_arm_2;
-int *popcorn_power_arm_3;
 EXPORT_SYMBOL_GPL(popcorn_power_x86_1);
 EXPORT_SYMBOL_GPL(popcorn_power_x86_2);
-EXPORT_SYMBOL_GPL(popcorn_power_arm_1);
-EXPORT_SYMBOL_GPL(popcorn_power_arm_2);
-EXPORT_SYMBOL_GPL(popcorn_power_arm_3);
 
 
-///////////////////////////////////////////////////////////////////////////////
-// scheduling stuff
-///////////////////////////////////////////////////////////////////////////////
 
 /*
-static int popcorn_sched_sync(void *_param)
-{
-	sched_periodic_req req;
-
-	while (!kthread_should_stop()) {
-		// total time on ARM is currently around 100ms (not busy waiting)
-		usleep_range(200000, 250000);
-
-		req.header.type = PCN_KMSG_TYPE_SCHED_PERIODIC;
-		req.header.prio = PCN_KMSG_PRIO_NORMAL;
-
-#ifdef CONFIG_POPCORN_POWER_SENSOR_ARM
-		req.power_1 = popcorn_power_arm_1[POWER_N_VALUES - 1];
-		req.power_2 = popcorn_power_arm_2[POWER_N_VALUES - 1];
-		req.power_3 = popcorn_power_arm_3[POWER_N_VALUES - 1];
-#endif
-#ifdef CONFIG_POPCORN_POWER_SENSOR_X86
-		req.power_1 = popcorn_power_x86_1[POWER_N_VALUES - 1];
-		req.power_2 = popcorn_power_x86_2[POWER_N_VALUES - 1];
-		req.power_3 = 0;
-#endif
-	}
-	return 0;
-}
-
-static int handle_sched_periodic(struct pcn_kmsg_message *msg)
-{
-	sched_periodic_req *req = (sched_periodic_req *)msg;
-
-#ifdef CONFIG_POPCORN_POWER_SENSOR_ARM
-	popcorn_power_x86_1[POWER_N_VALUES - 1] = req->power_1;
-	popcorn_power_x86_2[POWER_N_VALUES - 1] = req->power_2;
-#endif
-#ifdef CONFIG_POPCORN_POWER_SENSOR_X86
-	popcorn_power_arm_1[POWER_N_VALUES - 1] = req->power_1;
-	popcorn_power_arm_2[POWER_N_VALUES - 1] = req->power_2;
-	popcorn_power_arm_3[POWER_N_VALUES - 1] = req->power_3;
-#endif
-
-	pcn_kmsg_done(req);
-	return 0;
-}
-
-static ssize_t power_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
-{
-	int ret, len = 0;
-	char buffer[256] = {0};
-	if (*ppos > 0)
-		return 0; //EOF
-
-	len += snprintf(buffer, sizeof(buffer),
-			"ARM\t%d\t%d\t%d\n",
-			popcorn_power_arm_1[POWER_N_VALUES - 1],
-			popcorn_power_arm_2[POWER_N_VALUES - 1],
-			popcorn_power_arm_3[POWER_N_VALUES - 1]);
-	len += snprintf((buffer + len), sizeof(buffer) - len,
-			"x86\t%d\t%d\n",
-			popcorn_power_x86_1[POWER_N_VALUES - 1],
-			popcorn_power_x86_2[POWER_N_VALUES - 1]);
-
-	if (count < len)
-		len = count;
-	ret = copy_to_user(buf, buffer, len);
-
-	*ppos += len;
-	return len;
-}
-
-static const struct file_operations power_fops = {
-	.owner = THIS_MODULE,
-	.read = power_read,
-};
+* List of Popcorn processes
 */
-
-
-///////////////////////////////////////////////////////////////////////////////
-// List of Popcorn processes
-///////////////////////////////////////////////////////////////////////////////
 
 #define REMOTE_PS_REQUEST_FIELDS \
 	int nid; \
@@ -138,12 +55,14 @@ DEFINE_PCN_KMSG(remote_ps_request_t, REMOTE_PS_REQUEST_FIELDS);
 	unsigned int sload;
 DEFINE_PCN_KMSG(remote_ps_response_t, REMOTE_PS_RESPONSE_FIELDS);
 
-// CPU load per thread
+/*
+ * CPU load per thread
+*/
 static void popcorn_ps_load(struct task_struct *t, unsigned int *puload, unsigned int *psload)
 {
 	unsigned long delta, now;
-	unsigned long utime = cputime_to_jiffies(t->utime);
-	unsigned long stime = cputime_to_jiffies(t->stime);
+	unsigned long utime = nsecs_to_jiffies(t->utime);
+	unsigned long stime = nsecs_to_jiffies(t->stime);
 	unsigned int uload, sload;
 	delta = now = get_jiffies_64();
 
@@ -309,22 +228,13 @@ int __init sched_server_init(void)
 	int i;
 
 	/* Collect power consumption */
-	popcorn_power_arm_1 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
-	popcorn_power_arm_2 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
-	popcorn_power_arm_3 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
 	popcorn_power_x86_1 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
 	popcorn_power_x86_2 = kmalloc(POWER_N_VALUES * sizeof(int), GFP_KERNEL);
 
-	if (!popcorn_power_x86_1 || !popcorn_power_x86_1 ||
-		!popcorn_power_arm_1 || !popcorn_power_arm_2 || !popcorn_power_arm_3)
-		return -ENOMEM;
 
 	for (i = 0; i < POWER_N_VALUES; i++) {
 		popcorn_power_x86_1[i] = 0;
 		popcorn_power_x86_2[i] = 0;
-		popcorn_power_arm_1[i] = 0;
-		popcorn_power_arm_2[i] = 0;
-		popcorn_power_arm_3[i] = 0;
 	}
 
 	/**

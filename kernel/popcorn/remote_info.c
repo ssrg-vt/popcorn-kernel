@@ -15,7 +15,8 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/cma.h>
-
+#include <linux/mmzone.h>
+#include <linux/quicklist.h>
 #include <popcorn/bundle.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/remote_meminfo.h>
@@ -24,7 +25,7 @@
 #include "types.h"
 #include "wait_station.h"
 
-//#define REMOTE_INFO_VERBOSE
+
 #ifdef REMOTE_INFO_VERBOSE
 #define RIPRINTK(...) printk(__VA_ARGS__)
 #else
@@ -51,16 +52,16 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 	si_swapinfo(&i);
 	committed = percpu_counter_read_positive(&vm_committed_as);
 
-	cached = global_page_state(NR_FILE_PAGES) -
+	cached = global_zone_page_state(NR_FILE_PAGES) -
 			total_swapcache_pages() - i.bufferram;
 	if (cached < 0)
 		cached = 0;
 
 	for (lru = LRU_BASE; lru < NR_LRU_LISTS; lru++)
-		pages[lru] = global_page_state(NR_LRU_BASE + lru);
+		pages[lru] = global_zone_page_state(NR_LRU_BASE + lru);
 
 	for_each_zone(zone)
-		wmark_low += zone->watermark[WMARK_LOW];
+		wmark_low += low_wmark_pages(zone);
 
 	/*
 	 * Estimate the amount of memory available for userspace allocations,
@@ -84,13 +85,13 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 	 * Part of the reclaimable slab consists of items that are in use,
 	 * and cannot be freed. Cap this estimate at the low watermark.
 	 */
-	available += global_page_state(NR_SLAB_RECLAIMABLE) -
-		     min(global_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low);
+	available += global_zone_page_state(NR_SLAB_RECLAIMABLE) -
+		     min(global_zone_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low);
 
 	if (available < 0)
 		available = 0;
 
-	/* Fill the mem information for response */
+	// Fill the mem information for response
 	res->MemTotal = K(i.totalram);
 	res->MemFree = K(i.freeram);
 	res->MemAvailable = K(available);
@@ -104,51 +105,51 @@ int fill_meminfo_response(remote_mem_info_response_t *res)
 	res->Active_file = K(pages[LRU_ACTIVE_FILE]);
 	res->Inactive_file = K(pages[LRU_INACTIVE_FILE]);
 	res->Unevictable = K(pages[LRU_UNEVICTABLE]);
-	res->Mlocked = K(global_page_state(NR_MLOCK));
-#ifdef CONFIG_HIGHMEM
-	res->HighTotal = K(i.totalhigh);
-	res->HighFree = K(i.freehigh);
-	res->LowTotal = K(i.totalram-i.totalhigh);
-	res->LowFree = K(i.freeram-i.freehigh);
-#endif
+	res->Mlocked = K(global_zone_page_state(NR_MLOCK));
+	if(IS_ENABLED(CONFIG_HIGHMEM)) {
+		res->HighTotal = K(i.totalhigh);
+		res->HighFree = K(i.freehigh);
+		res->LowTotal = K(i.totalram - i.totalhigh);
+		res->LowFree = K(i.freeram - i.freehigh);
+	}
 #ifndef CONFIG_MMU
-	res->rem_mem.MmapCopy = K((unsigned long) atomic_long_read(&mmap_pages_allocated));
+		res->rem_mem.MmapCopy = K((unsigned long) atomic_long_read(&mmap_pages_allocated));
 #endif
 	res->SwapTotal = K(i.totalswap);
 	res->SwapFree = K(i.freeswap);
-	res->Dirty = K(global_page_state(NR_FILE_DIRTY));
-	res->Writeback = K(global_page_state(NR_WRITEBACK));
-	res->AnonPages = K(global_page_state(NR_ANON_PAGES));
-	res->Mapped = K(global_page_state(NR_FILE_MAPPED));
+	res->Dirty = K(global_zone_page_state(NR_FILE_DIRTY));
+	res->Writeback = K(global_zone_page_state(NR_WRITEBACK));
+	res->AnonPages = K(global_zone_page_state(NR_ANON_MAPPED));
+	res->Mapped = K(global_zone_page_state(NR_FILE_MAPPED));
 	res->Shmem = K(i.sharedram);
-	res->Slab = K(global_page_state(NR_SLAB_RECLAIMABLE) +
-				global_page_state(NR_SLAB_UNRECLAIMABLE));
-	res->SReclaimable = K(global_page_state(NR_SLAB_RECLAIMABLE));
-	res->SUnreclaim = K(global_page_state(NR_SLAB_UNRECLAIMABLE));
-	res->KernelStack = global_page_state(NR_KERNEL_STACK) * THREAD_SIZE / 1024;
-	res->PageTables = K(global_page_state(NR_PAGETABLE));
-#ifdef CONFIG_QUICKLIST
-	res->Quicklists = K(quicklist_total_size());
-#endif
-	res->NFS_Unstable = K(global_page_state(NR_UNSTABLE_NFS));
-	res->Bounce = K(global_page_state(NR_BOUNCE));
-	res->WritebackTmp = K(global_page_state(NR_WRITEBACK_TEMP));
+	res->Slab = K(global_zone_page_state(NR_SLAB_RECLAIMABLE) +
+				global_zone_page_state(NR_SLAB_UNRECLAIMABLE));
+	res->SReclaimable = K(global_zone_page_state(NR_SLAB_RECLAIMABLE));
+	res->SUnreclaim = K(global_zone_page_state(NR_SLAB_UNRECLAIMABLE));
+	res->KernelStack = global_zone_page_state(NR_KERNEL_STACK_KB) * THREAD_SIZE / 1024;
+	res->PageTables = K(global_zone_page_state(NR_PAGETABLE));
+	if(IS_ENABLED(CONFIG_QUICKLIST)) {
+		res->Quicklists = K(quicklist_total_size());
+	}
+	res->NFS_Unstable = K(global_zone_page_state(NR_UNSTABLE_NFS));
+	res->Bounce = K(global_zone_page_state(NR_BOUNCE));
+	res->WritebackTmp = K(global_zone_page_state(NR_WRITEBACK_TEMP));
 	res->CommitLimit = K(vm_commit_limit());
 	res->Committed_AS = K(committed);
 	res->VmallocTotal = (unsigned long)VMALLOC_TOTAL >> 10;
 	res->VmallocUsed = 0ul;
 	res->VmallocChunk = 0ul;
-#ifdef CONFIG_MEMORY_FAILURE
-	res->HardwareCorrupted = atomic_long_read(&num_poisoned_pages) << (PAGE_SHIFT - 10);
-#endif
+	if(IS_ENABLED(CONFIG_MEMORY_FAILURE)) {
+		res->HardwareCorrupted = atomic_long_read(&num_poisoned_pages) << (PAGE_SHIFT - 10);
+	}
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	res->AnonHugePages = K(global_page_state(NR_ANON_TRANSPARENT_HUGEPAGES) *
-		   HPAGE_PMD_NR);
+		res->AnonHugePages = K(global_zone_page_state(NR_ANON_TRANSPARENT_HUGEPAGES) *
+				       HPAGE_PMD_NR);
 #endif
-#ifdef CONFIG_CMA
-	res->CmaTotal = K(totalcma_pages);
-	res->CmaFree = K(global_page_state(NR_FREE_CMA_PAGES));
-#endif
+	if(IS_ENABLED(CONFIG_CMA)) {
+		res->CmaTotal = K(totalcma_pages);
+		res->CmaFree = K(global_zone_page_state(NR_FREE_CMA_PAGES));
+	}
 
 	return 0;
 }
@@ -244,15 +245,15 @@ int remote_proc_mem_info(remote_mem_info_response_t *total)
 		total->Unevictable += res->Unevictable;
 		total->Mlocked += res->Mlocked;
 
-#ifdef CONFIG_HIGHMEM
-		total->HighTotal += res->HighTotal;
-		total->HighFre += res->HighFree;
-		total->LowTotal += res->LowTotal;
-		total->LowFree += res->LowFree;
-#endif
+		if(IS_ENABLED(CONFIG_HIGHMEM)) {
+			total->HighTotal += res->HighTotal;
+			total->HighFree += res->HighFree;
+			total->LowTotal += res->LowTotal;
+			total->LowFree += res->LowFree;
+		}
 
 #ifndef CONFIG_MMU
-		total->MmapCopy += res->MmapCopy;
+			total->MmapCopy += res->MmapCopy;
 #endif
 
 		total->SwapTotal += res->SwapTotal;
@@ -267,9 +268,9 @@ int remote_proc_mem_info(remote_mem_info_response_t *total)
 		total->SUnreclaim += res->SUnreclaim;
 		total->KernelStack += res->KernelStack;
 		total->PageTables += res->PageTables;
-#ifdef CONFIG_QUICKLIST
-		total->Quicklists += res->Quicklists;
-#endif
+		if(IS_ENABLED(CONFIG_QUICKLIST)) {
+			total->Quicklists += res->Quicklists;
+		}
 
 		total->NFS_Unstable += res->NFS_Unstable;
 		total->Bounce += res->Bounce;
@@ -279,16 +280,16 @@ int remote_proc_mem_info(remote_mem_info_response_t *total)
 		total->VmallocTotal += res->VmallocTotal;
 		total->VmallocUsed += 0ul;
 		total->VmallocChunk += 0ul;
-#ifdef CONFIG_MEMORY_FAILURE
-		total->HardwareCorrupted += res->HardwareCorrupted;
-#endif
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-		total->AnonHugePages += res->AnonHugePages;
-#endif
-#ifdef CONFIG_CMA
-		total->CmaTotal += res->CmaTotal;
-		total->CmaFree += res->CmaFree;
-#endif
+		if(IS_ENABLED(CONFIG_MEMORY_FAILURE)) {
+			total->HardwareCorrupted += res->HardwareCorrupted;
+		}
+		if(IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE)) {
+			total->AnonHugePages += res->AnonHugePages;
+		}
+		if(IS_ENABLED(CONFIG_CMA)) {
+			total->CmaTotal += res->CmaTotal;
+			total->CmaFree += res->CmaFree;
+		}
 
 		pcn_kmsg_done(res);
 	}
@@ -339,9 +340,6 @@ unsigned int get_number_cpus_from_remote_node(unsigned int nid)
 	switch (saved_cpu_info[nid]->arch_type) {
 	case POPCORN_ARCH_X86:
 		num_cpus = saved_cpu_info[nid]->x86.num_cpus;
-		break;
-	case POPCORN_ARCH_ARM:
-		num_cpus = saved_cpu_info[nid]->arm64.num_cpus;
 		break;
 	default:
 		RIPRINTK("%s: Unknown CPU\n", __func__);
@@ -431,39 +429,6 @@ static void print_x86_cpuinfo(struct seq_file *m,
 		   cpu->bits_virtual);
 }
 
-static void print_arm_cpuinfo(struct seq_file *m,
-		       struct remote_cpu_info *data,
-		       int count)
-{
-	struct percore_info_arm64 *cpu = &data->arm64.cores[count];
-
-	seq_printf(m, "processor\t: %u\n", cpu->processor_id);
-
-	if (cpu->compat)
-		 seq_printf(m, "model name\t: %s %d (%s)\n",
-			    cpu->model_name,
-			    cpu->model_rev,
-			    cpu->model_elf);
-	else
-		 seq_printf(m, "model name\t: %s\n",
-			    cpu->model_name);
-
-	seq_printf(m, "BogoMIPS\t: %lu.%02lu\n",
-		   cpu->bogo_mips,
-		   cpu->bogo_mips_fraction);
-	seq_puts(m, "Features\t:");
-	seq_printf(m, " %s", cpu->flags);
-	seq_puts(m, "\n");
-
-	seq_printf(m, "CPU implementer\t: 0x%02x\n", cpu->cpu_implementer);
-	seq_printf(m, "CPU architecture: %d\n", cpu->cpu_archtecture);
-	seq_printf(m, "CPU variant\t: 0x%x\n", cpu->cpu_variant);
-	seq_printf(m, "CPU part\t: 0x%03x\n", cpu->cpu_part);
-	seq_printf(m, "CPU revision\t: %d\n", cpu->cpu_revision);
-
-	return;
-}
-
 static void print_unknown_cpuinfo(struct seq_file *m)
 {
 	seq_puts(m, "processor\t: Unknown\n");
@@ -481,9 +446,6 @@ int remote_proc_cpu_info(struct seq_file *m, unsigned int nid, unsigned int vpos
 	case POPCORN_ARCH_X86:
 		print_x86_cpuinfo(m, saved_cpu_info[nid], vpos);
 		break;
-	case POPCORN_ARCH_ARM:
-		print_arm_cpuinfo(m, saved_cpu_info[nid], vpos);
-		break;
 	default:
 		print_unknown_cpuinfo(m);
 		break;
@@ -500,7 +462,7 @@ int remote_info_init(void)
 {
 	int i = 0;
 
-	/* Allocate the buffer for saving remote CPU info */
+	// Allocate the buffer for saving remote CPU info
 	for (i = 0; i < MAX_POPCORN_NODES; i++)
 		saved_cpu_info[i] = kzalloc(sizeof(struct remote_cpu_info), GFP_KERNEL);
 

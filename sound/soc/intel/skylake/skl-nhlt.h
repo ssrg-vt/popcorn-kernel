@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  skl-nhlt.h - Intel HDA Platform NHLT header
  *
@@ -5,17 +6,7 @@
  *  Author: Sanjiv Kumar <sanjiv.kumar@intel.com>
  *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
  */
 #ifndef __SKL_NHLT_H__
 #define __SKL_NHLT_H__
@@ -102,5 +93,27 @@ struct nhlt_resource_desc  {
 	u64 addr_trans_offset;
 	u64 length;
 } __packed;
+
+#define MIC_ARRAY_2CH 2
+#define MIC_ARRAY_4CH 4
+
+struct nhlt_tdm_config {
+	u8 virtual_slot;
+	u8 config_type;
+} __packed;
+
+struct nhlt_dmic_array_config {
+	struct nhlt_tdm_config tdm_config;
+	u8 array_type;
+} __packed;
+
+enum {
+	NHLT_MIC_ARRAY_2CH_SMALL = 0xa,
+	NHLT_MIC_ARRAY_2CH_BIG = 0xb,
+	NHLT_MIC_ARRAY_4CH_1ST_GEOM = 0xc,
+	NHLT_MIC_ARRAY_4CH_L_SHAPED = 0xd,
+	NHLT_MIC_ARRAY_4CH_2ND_GEOM = 0xe,
+	NHLT_MIC_ARRAY_VENDOR_DEFINED = 0xf,
+};
 
 #endif

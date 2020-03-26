@@ -60,9 +60,7 @@ void *wait_at_station(struct wait_station *ws)
 {
 	void *ret;
 	if (!try_wait_for_completion(&ws->pendings)) {
-		//if (wait_for_completion_io_timeout(&ws->pendings, 300 * HZ) == 0) {
-		if (wait_for_completion_io_timeout(&ws->pendings,
-						   MAX_SCHEDULE_TIMEOUT) == 0) {
+		if (wait_for_completion_io_timeout(&ws->pendings, 300 * HZ) == 0) {
 			ret = ERR_PTR(-ETIMEDOUT);
 			goto out;
 		}

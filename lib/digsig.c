@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2011 Nokia Corporation
  * Copyright (C) 2011 Intel Corporation
@@ -5,10 +6,6 @@
  * Author:
  * Dmitry Kasatkin <dmitry.kasatkin@nokia.com>
  *                 <dmitry.kasatkin@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 2 of the License.
  *
  * File: sign.c
  *	implements signature (RSA) verification
@@ -85,7 +82,7 @@ static int digsig_verify_rsa(struct key *key,
 	struct pubkey_hdr *pkh;
 
 	down_read(&key->sem);
-	ukp = user_key_payload(key);
+	ukp = user_key_payload_locked(key);
 
 	if (!ukp) {
 		/* key was revoked before we acquired its semaphore */
@@ -110,21 +107,25 @@ static int digsig_verify_rsa(struct key *key,
 	datap = pkh->mpi;
 	endp = ukp->data + ukp->datalen;
 
-	err = -ENOMEM;
-
 	for (i = 0; i < pkh->nmpi; i++) {
 		unsigned int remaining = endp - datap;
 		pkey[i] = mpi_read_from_buffer(datap, &remaining);
-		if (!pkey[i])
+		if (IS_ERR(pkey[i])) {
+			err = PTR_ERR(pkey[i]);
 			goto err;
+		}
 		datap += remaining;
 	}
 
 	mblen = mpi_get_nbits(pkey[0]);
 	mlen = DIV_ROUND_UP(mblen, 8);
 
-	if (mlen == 0)
+	if (mlen == 0) {
+		err = -EINVAL;
 		goto err;
+	}
+
+	err = -ENOMEM;
 
 	out1 = kzalloc(mlen, GFP_KERNEL);
 	if (!out1)
@@ -132,8 +133,10 @@ static int digsig_verify_rsa(struct key *key,
 
 	nret = siglen;
 	in = mpi_read_from_buffer(sig, &nret);
-	if (!in)
+	if (IS_ERR(in)) {
+		err = PTR_ERR(in);
 		goto err;
+	}
 
 	res = mpi_alloc(mpi_get_nlimbs(in) * 2);
 	if (!res)
@@ -234,7 +237,6 @@ int digsig_verify(struct key *keyring, const char *sig, int siglen,
 		goto err;
 
 	desc->tfm = shash;
-	desc->flags = CRYPTO_TFM_REQ_MAY_SLEEP;
 
 	crypto_shash_init(desc);
 	crypto_shash_update(desc, data, datalen);

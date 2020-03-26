@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
  * Copyright (C) 2009 Marc Kleine-Budde, Pengutronix
@@ -5,16 +6,6 @@
  *
  * Derived from mx35 3stack.
  * Original author: Fabio Estevam <fabio.estevam@freescale.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/types.h>
@@ -29,7 +20,6 @@
 #include <asm/mach/time.h>
 
 #include <linux/i2c.h>
-#include <linux/platform_data/at24.h>
 #include <linux/mfd/mc13xxx.h>
 
 #include "common.h"
@@ -145,15 +135,9 @@ static const struct imxi2c_platform_data vpr200_i2c0_data __initconst = {
 	.bitrate = 50000,
 };
 
-static struct at24_platform_data vpr200_eeprom = {
-	.byte_len = 2048 / 8,
-	.page_size = 1,
-};
-
 static struct i2c_board_info vpr200_i2c_devices[] = {
 	{
-		I2C_BOARD_INFO("at24", 0x50), /* E0=0, E1=0, E2=0 */
-		.platform_data = &vpr200_eeprom,
+		I2C_BOARD_INFO("24c02", 0x50), /* E0=0, E1=0, E2=0 */
 	}, {
 		I2C_BOARD_INFO("mc13892", 0x08),
 		.platform_data = &vpr200_pmic,
@@ -268,6 +252,22 @@ static void __init vpr200_board_init(void)
 
 	imx35_add_fec(NULL);
 	imx35_add_imx2_wdt();
+
+	imx35_add_imx_uart0(NULL);
+	imx35_add_imx_uart2(NULL);
+
+	imx35_add_ipu_core();
+	imx35_add_mx3_sdc_fb(&mx3fb_pdata);
+
+	imx35_add_fsl_usb2_udc(&otg_device_pdata);
+	imx35_add_mxc_ehci_hs(&usb_host_pdata);
+
+	imx35_add_mxc_nand(&vpr200_nand_board_info);
+	imx35_add_sdhci_esdhc_imx(0, NULL);
+}
+
+static void __init vpr200_late_init(void)
+{
 	imx_add_gpio_keys(&vpr200_gpio_keys_data);
 
 	platform_add_devices(devices, ARRAY_SIZE(devices));
@@ -281,18 +281,6 @@ static void __init vpr200_board_init(void)
 		printk(KERN_WARNING "vpr200: Couldn't get PMIC_INT gpio\n");
 	else
 		gpio_direction_input(GPIO_PMIC_INT);
-
-	imx35_add_imx_uart0(NULL);
-	imx35_add_imx_uart2(NULL);
-
-	imx35_add_ipu_core();
-	imx35_add_mx3_sdc_fb(&mx3fb_pdata);
-
-	imx35_add_fsl_usb2_udc(&otg_device_pdata);
-	imx35_add_mxc_ehci_hs(&usb_host_pdata);
-
-	imx35_add_mxc_nand(&vpr200_nand_board_info);
-	imx35_add_sdhci_esdhc_imx(0, NULL);
 
 	vpr200_i2c_devices[1].irq = gpio_to_irq(GPIO_PMIC_INT);
 	i2c_register_board_info(0, vpr200_i2c_devices,
@@ -313,5 +301,6 @@ MACHINE_START(VPR200, "VPR200")
 	.init_irq = mx35_init_irq,
 	.init_time = vpr200_timer_init,
 	.init_machine = vpr200_board_init,
+	.init_late	= vpr200_late_init,
 	.restart	= mxc_restart,
 MACHINE_END

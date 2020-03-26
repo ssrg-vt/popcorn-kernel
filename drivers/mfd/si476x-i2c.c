@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/mfd/si476x-i2c.c -- Core device driver for si476x MFD
  * device
@@ -6,16 +7,6 @@
  * Copyright (C) 2013 Andrey Smirnov
  *
  * Author: Andrey Smirnov <andrew.smirnov@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
  */
 #include <linux/module.h>
 
@@ -600,7 +591,7 @@ static int si476x_core_fwver_to_revision(struct si476x_core *core,
 unknown_revision:
 	dev_err(&core->client->dev,
 		"Unsupported version of the firmware: %d.%d.%d, "
-		"reverting to A10 comptible functions\n",
+		"reverting to A10 compatible functions\n",
 		major, minor1, minor2);
 
 	return SI476X_REVISION_A10;
@@ -697,11 +688,9 @@ static int si476x_core_probe(struct i2c_client *client,
 	int              cell_num;
 
 	core = devm_kzalloc(&client->dev, sizeof(*core), GFP_KERNEL);
-	if (!core) {
-		dev_err(&client->dev,
-			"failed to allocate 'struct si476x_core'\n");
+	if (!core)
 		return -ENOMEM;
-	}
+
 	core->client = client;
 
 	core->regmap = devm_regmap_init_si476x(core);
@@ -753,7 +742,7 @@ static int si476x_core_probe(struct i2c_client *client,
 				       ARRAY_SIZE(core->supplies),
 				       core->supplies);
 	if (rval) {
-		dev_err(&client->dev, "Failet to gett all of the regulators\n");
+		dev_err(&client->dev, "Failed to get all of the regulators\n");
 		goto free_gpio;
 	}
 

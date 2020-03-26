@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/arch/arm/mach-sa1100/clock.c
  */
@@ -34,6 +35,31 @@ struct clk clk_##_name = {				\
 	}
 
 static DEFINE_SPINLOCK(clocks_lock);
+
+/* Dummy clk routine to build generic kernel parts that may be using them */
+long clk_round_rate(struct clk *clk, unsigned long rate)
+{
+	return clk_get_rate(clk);
+}
+EXPORT_SYMBOL(clk_round_rate);
+
+int clk_set_rate(struct clk *clk, unsigned long rate)
+{
+	return 0;
+}
+EXPORT_SYMBOL(clk_set_rate);
+
+int clk_set_parent(struct clk *clk, struct clk *parent)
+{
+	return 0;
+}
+EXPORT_SYMBOL(clk_set_parent);
+
+struct clk *clk_get_parent(struct clk *clk)
+{
+	return NULL;
+}
+EXPORT_SYMBOL(clk_get_parent);
 
 static void clk_gpio27_enable(struct clk *clk)
 {
@@ -137,6 +163,8 @@ static struct clk_lookup sa11xx_clkregs[] = {
 	CLKDEV_INIT("sa1100-rtc", NULL, NULL),
 	CLKDEV_INIT("sa11x0-fb", NULL, &clk_cpu),
 	CLKDEV_INIT("sa11x0-pcmcia", NULL, &clk_cpu),
+	CLKDEV_INIT("sa11x0-pcmcia.0", NULL, &clk_cpu),
+	CLKDEV_INIT("sa11x0-pcmcia.1", NULL, &clk_cpu),
 	/* sa1111 names devices using internal offsets, PCMCIA is at 0x1800 */
 	CLKDEV_INIT("1800", NULL, &clk_cpu),
 	CLKDEV_INIT(NULL, "OSTIMER0", &clk_36864),

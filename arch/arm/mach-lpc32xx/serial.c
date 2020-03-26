@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * arch/arm/mach-lpc32xx/serial.c
  *
  * Author: Kevin Wells <kevin.wells@nxp.com>
  *
  * Copyright (C) 2010 NXP Semiconductors
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -75,9 +66,6 @@ void __init lpc32xx_serial_init(void)
 	struct clk *clk;
 	unsigned int puart;
 	int i, j;
-
-	/* UART clocks are off, let clock driver manage them */
-	__raw_writel(0, LPC32XX_CLKPWR_UART_CLK_CTRL);
 
 	for (i = 0; i < ARRAY_SIZE(uartinit_data); i++) {
 		clk = clk_get(NULL, uartinit_data[i].uart_ck_name);

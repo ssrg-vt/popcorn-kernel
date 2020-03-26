@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2012 CERN (www.cern.ch)
  * Author: Alessandro Rubini <rubini@gnudd.com>
- *
- * Released according to the GNU GPL, version 2 or any later version.
  *
  * This work is part of the White Rabbit project, a research effort led
  * by CERN, the European Institute for Nuclear Research.
@@ -50,7 +49,7 @@ static int fwe_run_tlv(struct fmc_device *fmc, const struct firmware *fw,
 		if (write) {
 			dev_info(&fmc->dev, "write %i bytes at 0x%04x\n",
 				 thislen, thisaddr);
-			err = fmc->op->write_ee(fmc, thisaddr, p + 5, thislen);
+			err = fmc_write_ee(fmc, thisaddr, p + 5, thislen);
 		}
 		if (err < 0) {
 			dev_err(&fmc->dev, "write failure @0x%04x\n",
@@ -70,7 +69,7 @@ static int fwe_run_bin(struct fmc_device *fmc, const struct firmware *fw)
 	int ret;
 
 	dev_info(&fmc->dev, "programming %zi bytes\n", fw->size);
-	ret = fmc->op->write_ee(fmc, 0, (void *)fw->data, fw->size);
+	ret = fmc_write_ee(fmc, 0, (void *)fw->data, fw->size);
 	if (ret < 0) {
 		dev_info(&fmc->dev, "write_eeprom: error %i\n", ret);
 		return ret;
@@ -115,8 +114,8 @@ static int fwe_probe(struct fmc_device *fmc)
 			KBUILD_MODNAME);
 		return -ENODEV;
 	}
-	if (fmc->op->validate)
-		index = fmc->op->validate(fmc, &fwe_drv);
+
+	index = fmc_validate(fmc, &fwe_drv);
 	if (index < 0) {
 		pr_err("%s: refusing device \"%s\"\n", KBUILD_MODNAME,
 		       dev_name(dev));

@@ -58,7 +58,7 @@ pos		.req	x11
 limit_wd	.req	x12
 mask		.req	x13
 
-ENTRY(memcmp)
+WEAK(memcmp)
 	cbz	limit, .Lret0
 	eor	tmp1, src1, src2
 	tst	tmp1, #7
@@ -211,7 +211,7 @@ CPU_LE( lsr	tmp2, tmp2, tmp1 )
 .Lunequal_proc:
 	cbz	diff, .Lremain8
 
-/*There is differnence occured in the latest comparison.*/
+/* There is difference occurred in the latest comparison. */
 .Lnot_limit:
 /*
 * For little endian,reverse the low significant equal bits into MSB,then
@@ -256,3 +256,4 @@ CPU_LE( rev	data2, data2 )
 	mov	result, #0
 	ret
 ENDPIPROC(memcmp)
+EXPORT_SYMBOL_NOKASAN(memcmp)

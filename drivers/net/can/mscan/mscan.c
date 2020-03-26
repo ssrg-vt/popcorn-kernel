@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * CAN bus driver for the alone generic (as possible as) MSCAN controller.
  *
@@ -5,18 +6,6 @@
  *                         Varma Electronics Oy
  * Copyright (C) 2008-2009 Wolfgang Grandegger <wg@grandegger.com>
  * Copyright (C) 2008-2009 Pengutronix <kernel@pengutronix.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the version 2 of the GNU General Public License
- * as published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/kernel.h>
@@ -276,7 +265,7 @@ static netdev_tx_t mscan_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	out_8(&regs->cantflg, 1 << buf_id);
 
 	if (!test_bit(F_TX_PROGRESS, &priv->flags))
-		dev->trans_start = jiffies;
+		netif_trans_update(dev);
 
 	list_add_tail(&priv->tx_queue[buf_id].list, &priv->tx_head);
 
@@ -469,7 +458,7 @@ static irqreturn_t mscan_isr(int irq, void *dev_id)
 			clear_bit(F_TX_PROGRESS, &priv->flags);
 			priv->cur_pri = 0;
 		} else {
-			dev->trans_start = jiffies;
+			netif_trans_update(dev);
 		}
 
 		if (!test_bit(F_TX_WAIT_ALL, &priv->flags))
