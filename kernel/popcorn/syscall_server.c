@@ -219,16 +219,20 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 				req->param1, (fd_set __user *)req->param2,
 				(fd_set __user *)req->param3,
 				(struct timeval __user *)req->param4);
+		break;
 	case PCN_SYSCALL_FCNTL:
 		retval = sys_fcntl((unsigned int) req->param0, (unsigned int)
 				req->param1, (unsigned long)req->param2);
+		break;
 	case PCN_SYSCALL_FSTATAT:
 		retval = sys_newfstatat((int) req->param0, (const char __user*)
 				req->param1,
 			       (struct stat __user *)req->param2, (int)
 			       req->param3);
+		break;
 	case PCN_SYSCALL_GETPID:
 		retval = sys_getpid();
+		break;
 	default:
 		retval = -EINVAL;
 	}
