@@ -29,11 +29,11 @@
 #include <popcorn/cpuinfo.h>
 
 #include "types.h"
+#include "process_server.h"
 #include "vma_server.h"
 #include "page_server.h"
 #include "wait_station.h"
 #include "util.h"
-#include "process_server.h"
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
@@ -200,6 +200,7 @@ static int handle_remote_futex_response(struct pcn_kmsg_message *msg)
 static int process_remote_futex_request(remote_futex_request *req)
 {
 	int ret;
+	int err = 0;
 	remote_futex_response *res;
 	ktime_t t, *tp = NULL;
 
@@ -216,7 +217,8 @@ static int process_remote_futex_request(remote_futex_request *req)
 	res = pcn_kmsg_get(sizeof(*res));
 
 	if(!res) {
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto out;
 	}
 
 	res->remote_ws = req->remote_ws;
@@ -224,8 +226,10 @@ static int process_remote_futex_request(remote_futex_request *req)
 
 	pcn_kmsg_post(PCN_KMSG_TYPE_FUTEX_RESPONSE,
 			current->remote_nid, res, sizeof(*res));
+
+out:
 	pcn_kmsg_done(req);
-	return 0;
+	return err;
 }
 
 /*
@@ -367,22 +371,29 @@ static void process_back_migration(back_migration_request_t *req)
 	if (current->remote_pid != req->remote_pid) {
 		printk(KERN_INFO"%s: pid mismatch during back migration (%d != %d)\n",
 				__func__, current->remote_pid, req->remote_pid);
-
-		pcn_kmsg_done(req);
-
-	} else {
-		PSPRINTK("### BACKMIG [%d] from [%d/%d]\n",
-			 current->pid, req->remote_pid, req->remote_nid);
-
-		current->remote = NULL;
-		current->remote_nid = -1;
-		current->remote_pid = -1;
-		put_task_remote(current);
-
-		current->personality = req->personality;
-
-		restore_thread_info(&req->arch, true);
+		goto out_free;
 	}
+
+	PSPRINTK("### BACKMIG [%d] from [%d/%d]\n",
+			current->pid, req->remote_pid, req->remote_nid);
+
+	/* Welcome home */
+
+	current->remote = NULL;
+	current->remote_nid = -1;
+	current->remote_pid = -1;
+	put_task_remote(current);
+
+	current->personality = req->personality;
+
+	/* XXX signals */
+
+	/* mm is not updated here; has been synchronized through vma operations */
+
+	restore_thread_info(&req->arch, true);
+
+out_free:
+	pcn_kmsg_done(req);
 }
 
 /*
@@ -420,6 +431,7 @@ static int __do_back_migration(struct task_struct *tsk, int dst_nid, void __user
 	}
 	ret = copy_from_user(&req->arch.regsets, uregs,
 			size);
+
 	save_thread_info(&req->arch);
 
 	ret = pcn_kmsg_post(
@@ -438,22 +450,24 @@ static int handle_remote_task_pairing(struct pcn_kmsg_message *msg)
 	remote_task_pairing_t *req = (remote_task_pairing_t *)msg;
 	struct task_struct *tsk;
 	int from_nid = PCN_KMSG_FROM_NID(req);
+	int ret = 0;
 
 	tsk = __get_task_struct(req->your_pid);
 	if (!tsk) {
-		return -ESRCH;
-	} else {
-		BUG_ON(tsk->at_remote);
-		BUG_ON(!tsk->remote);
-
-		tsk->remote_nid = from_nid;
-		tsk->remote_pid = req->my_pid;
-		tsk->remote->remote_tgids[from_nid] = req->my_tgid;
-
-		put_task_struct(tsk);
-		pcn_kmsg_done(req);
-		return 0;
+		ret = -ESRCH;
+		goto out;
 	}
+	BUG_ON(tsk->at_remote);
+	BUG_ON(!tsk->remote);
+
+	tsk->remote_nid = from_nid;
+	tsk->remote_pid = req->my_pid;
+	tsk->remote->remote_tgids[from_nid] = req->my_tgid;
+
+	put_task_struct(tsk);
+out:
+	pcn_kmsg_done(req);
+	return ret;
 }
 
 static int __pair_remote_task(void)
@@ -711,7 +725,7 @@ static void clone_remote_thread(struct work_struct *_work)
 
 	BUG_ON(!rc_new);
 
-	__lock_remote_contexts(remote_contexts_lock, nid_from);
+	__lock_remote_contexts(remote_contexts_lock, INDEX_INBOUND);
 	rc = __lookup_remote_contexts_in(nid_from, tgid_from);
 	if (!rc) {
 		struct remote_worker_params *params;
@@ -719,7 +733,7 @@ static void clone_remote_thread(struct work_struct *_work)
 		rc = rc_new;
 		rc->remote_tgids[nid_from] = tgid_from;
 		list_add(&rc->list, remote_contexts + INDEX_INBOUND);
-		__unlock_remote_contexts(remote_contexts_lock, nid_from);
+		__unlock_remote_contexts(remote_contexts_lock, INDEX_INBOUND);
 
 		params = kmalloc(sizeof(*params), GFP_KERNEL);
 		BUG_ON(!params);
@@ -732,7 +746,7 @@ static void clone_remote_thread(struct work_struct *_work)
 		rc->remote_worker =
 				kthread_run(remote_worker_main, params, params->comm);
 	} else {
-		__unlock_remote_contexts(remote_contexts_lock, nid_from);
+		__unlock_remote_contexts(remote_contexts_lock, INDEX_INBOUND);
 		kfree(rc_new);
 	}
 
@@ -799,12 +813,11 @@ static int __process_remote_works(void)
 {
 	bool run = true;
 	BUG_ON(current->at_remote);
-
+	int err = 0;
 
 	while (run) {
 		struct pcn_kmsg_message *req;
 		long ret;
-		int err = 0;
 		ret = wait_for_completion_interruptible_timeout(
 				&current->remote_work_pended, HZ);
 		if (ret == 0)
@@ -826,9 +839,6 @@ static int __process_remote_works(void)
 			break;
 		case PCN_KMSG_TYPE_FUTEX_REQUEST:
 			err = process_remote_futex_request((remote_futex_request *)req);
-			if(!err) {
-				return err;
-			}
 			break;
 		case PCN_KMSG_TYPE_TASK_EXIT_REMOTE:
 			process_remote_task_exit((remote_task_exit_t *)req);
@@ -844,7 +854,7 @@ static int __process_remote_works(void)
 			}
 		}
 	}
-	return 0;
+	return err;
 }
 
 /**
@@ -902,6 +912,7 @@ static int __request_clone_remote(int dst_nid, struct task_struct *tsk, void __u
 	}
 	ret = copy_from_user(&req->arch.regsets, uregs,
 			     size);
+
 	save_thread_info(&req->arch);
 
 	ret = pcn_kmsg_post(PCN_KMSG_TYPE_TASK_MIGRATE, dst_nid, req, sizeof(*req));
@@ -938,9 +949,9 @@ static int __do_migration(struct task_struct *tsk, int dst_nid, void __user *ure
 		rc->mm = tsk->mm;
 		rc->remote_tgids[my_nid] = tsk->tgid;
 
-		__lock_remote_contexts(remote_contexts_lock, dst_nid);
+		__lock_remote_contexts(remote_contexts_lock, INDEX_OUTBOUND);
 		list_add(&rc->list, remote_contexts + INDEX_OUTBOUND);
-		__unlock_remote_contexts(remote_contexts_lock, dst_nid);
+		__unlock_remote_contexts(remote_contexts_lock, INDEX_OUTBOUND);
 	}
 
 	tsk->remote = get_task_remote(tsk);
