@@ -302,7 +302,6 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
 		error = redirect_fstatat(dfd,filename,statbuf,flag);
-	printk(KERN_INFO "\nnewfstat called by Ash\n");
 		return error;
 	}
 #endif
