@@ -1,5 +1,5 @@
 /**
- * Waiting stations allows threads to be waited for a given 
+ * Waiting stations allows threads to be waited for a given
  * number of events are completed
  */
 

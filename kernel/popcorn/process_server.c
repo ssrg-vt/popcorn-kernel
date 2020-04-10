@@ -811,9 +811,9 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 
 static int __process_remote_works(void)
 {
+	int err = 0;
 	bool run = true;
 	BUG_ON(current->at_remote);
-	int err = 0;
 
 	while (run) {
 		struct pcn_kmsg_message *req;

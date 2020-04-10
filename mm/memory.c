@@ -4215,8 +4215,9 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	count_vm_event(PGFAULT);
 	count_memcg_event_mm(vma->vm_mm, PGFAULT);
 
-	/* CONFIG_POPCORN_STAT_PGFAULTS */
+#ifdef CONFIG_POPCORN
 	page_server_start_mm_fault(address);
+#endif
 
 	/* do counter updates before entering really critical section. */
 	check_sync_rss_stat(current);
@@ -4249,8 +4250,10 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 		if (task_in_memcg_oom(current) && !(ret & VM_FAULT_OOM))
 			mem_cgroup_oom_synchronize(false);
 	}
-	/* CONFIG_POPCORN_STAT_PGFAULTS */
+
+#ifdef CONFIG_POPCORN
 	ret = page_server_end_mm_fault(ret);
+#endif
 
 	return ret;
 }

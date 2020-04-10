@@ -166,6 +166,9 @@ COND_SYSCALL(syslog);
 /* kernel/ptrace.c */
 
 /* kernel/sched/core.c */
+COND_SYSCALL(popcorn_migrate);
+COND_SYSCALL(popcorn_get_node_info);
+COND_SYSCALL(popcorn_get_thread_status);
 
 /* kernel/sys.c */
 COND_SYSCALL(setregid);

@@ -39,9 +39,9 @@
 
 #include "trace_events.h"
 
-#ifdef CONFIG_POPCORN_STAT_PGFAULTS
-void page_server_start_mm_fault(unsigned long address)
+inline void page_server_start_mm_fault(unsigned long address)
 {
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	if (!distributed_process(current))
 		return;
 	if (current->fault_address == 0 ||
@@ -51,10 +51,12 @@ void page_server_start_mm_fault(unsigned long address)
 		current->fault_start = ktime_get();
 		current->fault_address = address;
 	}
+#endif
 }
 
-int page_server_end_mm_fault(int ret)
+inline int page_server_end_mm_fault(int ret)
 {
+#ifdef CONFIG_POPCORN_STAT_PGFAULTS
 	if (!distributed_process(current))
 		return ret;
 
@@ -69,16 +71,9 @@ int page_server_end_mm_fault(int ret)
 				current->fault_retry, ktime_to_ns(dt));
 		current->fault_address = 0;
 	}
+#endif
 	return ret;
 }
-#else
-void page_server_start_mm_fault(unsigned long address){}
-
-int page_server_end_mm_fault(int ret)
-{
-	return ret;
-}
-#endif /*CONFIG_POPCORN_STAT_PGFAULTS */
 
 static inline int __fault_hash_key(unsigned long address)
 {
@@ -128,10 +123,10 @@ static inline unsigned long *__get_page_info_mapped(struct mm_struct *mm, unsign
 	return (unsigned long *)kmap_atomic(page) + *offset;
 }
 
+#define FREE_BATCH 16
 void free_remote_context_pages(struct remote_context *rc)
 {
 	int nr_pages;
-	const int FREE_BATCH = 16;
 	struct page *pages[FREE_BATCH];
 
 	do {

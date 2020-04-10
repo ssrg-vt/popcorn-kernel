@@ -4,17 +4,18 @@ config POPCORN_KMSG
 	bool "Inter-kernel messaging layer"
 	default y
 	help
-		Support various inter-kernel message passing implementations
+	  Enable support for various inter-kernel message passing
+	  implementations
 
 if POPCORN_KMSG
 
 # Socket over Ethernet
 config POPCORN_KMSG_SOCKET
-	tristate "Over TCP/IP"
+	tristate "Over TCP/IP (DANGEROUS)"
 	depends on INET && m
 	default m
 	help
-		Communicate through sockets on IP on Ethernet
+	  Send Popcorn messages through TCP/IP sockets
 
 # Test and debug
 config POPCORN_KMSG_TEST
@@ -22,7 +23,7 @@ config POPCORN_KMSG_TEST
 	default n
 
 config POPCORN_DEBUG_MSG_LAYER
-	bool "Print debug message "
+	bool "Print debug messages"
 	depends on POPCORN_DEBUG
 	default n
 

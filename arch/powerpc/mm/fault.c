@@ -38,7 +38,6 @@
 #include <asm/pgtable.h>
 #include <asm/mmu.h>
 #include <asm/mmu_context.h>
-
 #include <asm/siginfo.h>
 #include <asm/debug.h>
 #include <asm/kup.h>
@@ -552,7 +551,6 @@ retry:
 	}
 
 	vma = find_vma(mm, address);
-	  
 	if (unlikely(!vma))
 		return bad_area(regs, address);
 	if (likely(vma->vm_start <= address))

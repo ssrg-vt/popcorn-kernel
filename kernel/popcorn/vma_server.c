@@ -362,7 +362,7 @@ int vma_server_munmap_origin(unsigned long start, size_t len, int nid_except)
 /**
  * VMA worker
  *
- * We do this stupid thing because functions related to meomry mapping operate
+ * We do this because functions related to memory mapping operate
  * on "current". Thus, we need mmap/munmap/madvise in our process
  */
 static void __reply_vma_op(vma_op_request_t *req, long ret)

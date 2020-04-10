@@ -844,12 +844,14 @@ __SYSCALL(__NR_fsconfig, sys_fsconfig)
 __SYSCALL(__NR_fsmount, sys_fsmount)
 #define __NR_fspick 433
 __SYSCALL(__NR_fspick, sys_fspick)
+#ifdef CONFIG_POPCORN
 #define __NR_popcorn_migrate 434
 __SYSCALL(__NR_popcorn_migrate, sys_popcorn_migrate)
 #define __NR_popcorn_get_thread_status 435
 __SYSCALL(__NR_popcorn_get_thread_status, sys_popcorn_get_thread_status)
 #define __NR_popcorn_get_node_info 436
 __SYSCALL(__NR_popcorn_get_node_info, sys_popcorn_get_node_info)
+#endif
 #undef __NR_syscalls
 #define __NR_syscalls 437
 

@@ -178,7 +178,6 @@ config ARM64
 	select SWIOTLB
 	select SYSCTL_EXCEPTION_TRACE
 	select THREAD_INFO_IN_TASK
-	select ARCH_SUPPORTS_POPCORN
 	help
 	  ARM 64-bit (AArch64) Linux support.
 
@@ -292,8 +291,6 @@ config ARCH_SUPPORTS_UPROBES
 
 config ARCH_PROC_KCORE_TEXT
 	def_bool y
-
-source "kernel/Kconfig.popcorn"
 
 source "arch/arm64/Kconfig.platforms"
 
@@ -697,14 +694,14 @@ config ARM64_4K_PAGES
 	  This feature enables 4KB pages support.
 
 config ARM64_16K_PAGES
-	bool "16KB" if !POPCORN
+	bool "16KB"
 	help
 	  The system will use 16KB pages support. AArch32 emulation
 	  requires applications compiled with 16K (or a multiple of 16K)
 	  aligned segments.
 
 config ARM64_64K_PAGES
-	bool "64KB" if !POPCORN
+	bool "64KB"
 	help
 	  This feature enables 64KB pages support (4KB by default)
 	  allowing only two levels of page tables and faster TLB
@@ -718,7 +715,6 @@ choice
 	default ARM64_VA_BITS_39 if ARM64_4K_PAGES
 	default ARM64_VA_BITS_47 if ARM64_16K_PAGES
 	default ARM64_VA_BITS_42 if ARM64_64K_PAGES
-	default ARM64_VA_BITS_48 if POPCORN
 	help
 	  Allows choosing one of multiple possible virtual address
 	  space sizes. The level of translation table is determined by
@@ -726,19 +722,19 @@ choice
 
 config ARM64_VA_BITS_36
 	bool "36-bit" if EXPERT
-	depends on ARM64_16K_PAGES && !POPCORN
+	depends on ARM64_16K_PAGES
 
 config ARM64_VA_BITS_39
 	bool "39-bit"
-	depends on ARM64_4K_PAGES && !POPCORN
+	depends on ARM64_4K_PAGES
 
 config ARM64_VA_BITS_42
 	bool "42-bit"
-	depends on ARM64_64K_PAGES && !POPCORN
+	depends on ARM64_64K_PAGES
 
 config ARM64_VA_BITS_47
 	bool "47-bit"
-	depends on ARM64_16K_PAGES && !POPCORN
+	depends on ARM64_16K_PAGES
 
 config ARM64_VA_BITS_48
 	bool "48-bit"

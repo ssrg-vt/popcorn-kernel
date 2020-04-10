@@ -671,7 +671,7 @@ static int __init init_kmsg_sock(void)
 	set_popcorn_node_online(my_nid, true);
 
 	for (i = my_nid + 1; i < max_nodes; i++) {
-		int nid;
+		int nid = 0;
 		if ((ret = __accept_client(&nid)))
 			goto out_exit;
 		set_popcorn_node_online(nid, true);

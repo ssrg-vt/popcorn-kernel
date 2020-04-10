@@ -475,7 +475,7 @@ static int __init msg_test_init(void)
 	return 0;
 }
 
-static void __exit msg_test_exit(void) 
+static void __exit msg_test_exit(void)
 {
 	if (kmsg_test_proc) proc_remove(kmsg_test_proc);
 

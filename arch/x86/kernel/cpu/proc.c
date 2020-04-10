@@ -4,8 +4,9 @@
 #include <linux/string.h>
 #include <linux/seq_file.h>
 #include <linux/cpufreq.h>
+#ifdef CONFIG_POPCORN
 #include <popcorn/bundle.h>
-
+#endif
 #include "cpu.h"
 
 extern void send_remote_cpu_info_request(unsigned int nid);
@@ -13,21 +14,7 @@ extern unsigned int get_number_cpus_from_remote_node(unsigned int nid);
 extern int remote_proc_cpu_info(struct seq_file *m, unsigned int nid,
 				unsigned int vpos);
 
-static struct cpu_global_info {
-	unsigned int remote;
-	struct cpuinfo_x86 *c;
-	unsigned int vpos;
-	unsigned int nid;
-} cpu_global_info;
 
-static struct cpuinfo_x86 c;
-
-/*
- * num_cpus: # of cores of each nodes
- * num_total_cpus: # of total cpus of all connected nodes
- */
-static unsigned int num_cpus[MAX_POPCORN_NODES];
-static unsigned int num_total_cpus;
 
 /*
  *	Get CPU information for use by the procfs.
@@ -163,6 +150,23 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	return 0;
 }
 
+#ifdef CONFIG_POPCORN
+static struct cpu_global_info {
+	unsigned int remote;
+	struct cpuinfo_x86 *c;
+	unsigned int vpos;
+	unsigned int nid;
+} cpu_global_info;
+
+static struct cpuinfo_x86 c;
+
+/*
+ * num_cpus: # of cores of each nodes
+ * num_total_cpus: # of total cpus of all connected nodes
+ */
+static unsigned int num_cpus[MAX_POPCORN_NODES];
+static unsigned int num_total_cpus;
+
 static void calc_nid_vpos(loff_t *pos, unsigned int *pnid, unsigned int *vpos)
 {
 	int i = 0;
@@ -186,8 +190,27 @@ static void calc_nid_vpos(loff_t *pos, unsigned int *pnid, unsigned int *vpos)
 	}
 }
 
+static int c_show(struct seq_file *m, void *v)
+{
+	struct cpu_global_info *cpu_global_info = v;
+	struct cpuinfo_x86 *c;
+
+	if (cpu_global_info->remote == 1) {
+		remote_proc_cpu_info(m,
+			cpu_global_info->nid,
+			cpu_global_info->vpos);
+	} else {
+		c = cpu_global_info->c;
+		show_cpuinfo(m, c);
+	}
+
+	return 0;
+}
+#endif /* CONFIG_POPCORN */
+
 static void *c_start(struct seq_file *m, loff_t *pos)
 {
+#ifdef CONFIG_POPCORN
 	unsigned int vpos = 0;
 	unsigned int nid = 0;
 
@@ -260,6 +283,12 @@ remote:
 	}
 
 	return NULL;
+#else
+	*pos = cpumask_next(*pos - 1, cpu_online_mask);
+	if ((*pos) < nr_cpu_ids)
+		return &cpu_data(*pos);
+	return NULL;
+#endif /* CONFIG_POPCORN */
 }
 
 static void *c_next(struct seq_file *m, void *v, loff_t *pos)
@@ -272,26 +301,13 @@ static void c_stop(struct seq_file *m, void *v)
 {
 }
 
-static int c_show(struct seq_file *m, void *v)
-{
-	struct cpu_global_info *cpu_global_info = v;
-	struct cpuinfo_x86 *c;
-
-	if (cpu_global_info->remote == 1) {
-		remote_proc_cpu_info(m,
-			cpu_global_info->nid,
-			cpu_global_info->vpos);
-	} else {
-		c = cpu_global_info->c;
-		show_cpuinfo(m, c);
-	}
-
-	return 0;
-}
-
 const struct seq_operations cpuinfo_op = {
 	.start	= c_start,
 	.next	= c_next,
 	.stop	= c_stop,
+#ifdef CONFIG_POPCORN
 	.show	= c_show,
+#else
+	.show = show_cpuinfo,
+#endif /* CONFIG_POPCORN */
 };
