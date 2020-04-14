@@ -964,10 +964,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 		tsk->flags |= PF_KTHREAD;
 	}
 
-#ifdef CONFIG_POPCORN_STAT_PGFAULTS
-	tsk->fault_address = 0;
-	tsk->fault_retry = 0;
-#endif
 #endif // CONFIG_POPCORN
 
 	return tsk;
@@ -1981,11 +1977,6 @@ static __latent_entropy struct task_struct *copy_process(
 	p->utimescaled = p->stimescaled = 0;
 #endif
 	prev_cputime_init(&p->prev_cputime);
-#ifdef CONFIG_POPCORN
-	p->lutime = p->lstime = 0;
-	p->llasttimestamp = get_jiffies_64();
-#endif
-
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
 	seqcount_init(&p->vtime.seqcount);
 	p->vtime.starttime = 0;

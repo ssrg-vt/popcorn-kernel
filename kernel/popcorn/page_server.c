@@ -39,42 +39,6 @@
 
 #include "trace_events.h"
 
-inline void page_server_start_mm_fault(unsigned long address)
-{
-#ifdef CONFIG_POPCORN_STAT_PGFAULTS
-	if (!distributed_process(current))
-		return;
-	if (current->fault_address == 0 ||
-			current->fault_address != address) {
-		current->fault_address = address;
-		current->fault_retry = 0;
-		current->fault_start = ktime_get();
-		current->fault_address = address;
-	}
-#endif
-}
-
-inline int page_server_end_mm_fault(int ret)
-{
-#ifdef CONFIG_POPCORN_STAT_PGFAULTS
-	if (!distributed_process(current))
-		return ret;
-
-	if (ret & VM_FAULT_RETRY) {
-		current->fault_retry++;
-	} else if (!(ret & VM_FAULT_ERROR)) {
-		ktime_t dt, fault_end = ktime_get();
-
-		dt = ktime_sub(fault_end, current->fault_start);
-		trace_pgfault_stat(instruction_pointer(current_pt_regs()),
-				current->fault_address, ret,
-				current->fault_retry, ktime_to_ns(dt));
-		current->fault_address = 0;
-	}
-#endif
-	return ret;
-}
-
 static inline int __fault_hash_key(unsigned long address)
 {
 	return (address >> PAGE_SHIFT) % FAULTS_HASH;

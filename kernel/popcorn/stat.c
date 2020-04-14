@@ -36,18 +36,12 @@ void account_pcn_message_sent(struct pcn_kmsg_message *msg)
 {
 	struct pcn_kmsg_hdr *h = (struct pcn_kmsg_hdr *)msg;
 	this_cpu_add(bytes_sent, h->size);
-#ifdef CONFIG_POPCORN_STAT
-	sent_stats[h->type]++;
-#endif
 }
 
 void account_pcn_message_recv(struct pcn_kmsg_message *msg)
 {
 	struct pcn_kmsg_hdr *h = (struct pcn_kmsg_hdr *)msg;
 	this_cpu_add(bytes_recv, h->size);
-#ifdef CONFIG_POPCORN_STAT
-	recv_stats[h->type]++;
-#endif
 }
 
 void account_pcn_rdma_write(size_t size)
@@ -110,16 +104,6 @@ static int __show_stats(struct seq_file *seq, void *v)
 
 	pcn_kmsg_stat(seq, NULL);
 
-#ifdef CONFIG_POPCORN_STAT
-	seq_printf(seq, "-----------------------------------------------\n");
-	for (i = PCN_KMSG_TYPE_STAT_START + 1; i < PCN_KMSG_TYPE_STAT_END; i++) {
-		seq_printf(seq, POPCORN_STAT_FMT,
-				sent_stats[i], recv_stats[i], pcn_kmsg_type_name[i] ? : "");
-	}
-	seq_printf(seq, "---------------------------------------------------------------------------\n");
-
-	fh_action_stat(seq, v);
-#endif
 	return 0;
 }
 

@@ -39,25 +39,10 @@ config POPCORN_DEBUG_VERBOSE
 	depends on POPCORN_DEBUG
 	default n
 
-
 config POPCORN_CHECK_SANITY
 	bool "Perform extra-sanity checks"
 	default y
 
-config POPCORN_REMOTE_INFO
-	bool "Single system image over multiple nodes"
-	default n
-
-config POPCORN_STAT
-	bool "Collect performance statistics"
-	default n
-	help
-	  Collect basic performance metrics. The statistics are accessible from /proc/popcorn_stat
-
-config POPCORN_STAT_PGFAULTS
-	bool "Page faults handling"
-	depends on POPCORN_STAT
-	default n
 
 comment "Popcorn is not currently supported on this architecture"
 	depends on !ARCH_SUPPORTS_POPCORN
