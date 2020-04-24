@@ -45,6 +45,10 @@ unsigned long handle_mw_reqest_cpu[MAX_POPCORN_THREADS];
 unsigned long handle_pf_reqest_cpu[MAX_POPCORN_THREADS];
 #endif
 
+/* Brutal loging */
+unsigned long mw_local_dispatch_calc_time = 0;
+unsigned long mw_local_work_time = 0;
+
 /* Popcorn global barrier */
 atomic64_t popcorn_global_local_cnt = ATOMIC64_INIT(0); // can be local? right?
 atomic64_t popcorn_global_remote_cnt = ATOMIC64_INIT(0);
@@ -117,12 +121,14 @@ atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 /*** cpu oriented req ***/
 /* 1: cpu oriented 0: batch oriented */
 #if VM_TESTING
-#define MW_CONSIDER_CPU 0
+#define MW_CONSIDER_CPU 1
 #define PF_CONSIDER_CPU 0
 #else
 #define MW_CONSIDER_CPU 1 // TODO: use best ratio to test it
 #define PF_CONSIDER_CPU 1 // TODO: implemente (not implemented)
 #endif
+
+#define CONSIDER_LOCAL_CPU 1
 
 /*** minor features ****/
 #define REENTRY_BEGIN_DISABLE 1 // 0: repeat show 1: once
@@ -131,6 +137,30 @@ atomic64_t mw_find_collision_at_remote = ATOMIC64_INIT(0);
 #define SKIP_MEM_CLEAN 1
 #define CONSERVATIVE 0 // this is BETA 1:safe (icdcs: 0)
 #define PERF_FULL_BULL_WARN 1 // only for prink statis still works and show in the end !!!
+
+/* For mw workers */
+struct workqueue_struct *mw_wq;
+struct mw_work {
+	struct work_struct work;
+	void *my_work;
+	int iter;
+	int local_wr_cnt;
+	struct remote_context *rc;
+	int pgs_to_send;
+	int send_ofs;
+	int other_node_cpus;
+	int nid;
+	int total_iter; /* dry run require */
+
+	/* from current (leader thread) */
+	int pid;
+	int tso_fence_cnt;
+
+	struct wait_station *ws;
+
+	int per_inv_batch_max;
+};
+
 
 /* To debug omp_hash collision between nodes or not
  *	Usage:
@@ -231,7 +261,7 @@ void show_omp_hash(unsigned long omp_hash)
 #endif
 
 //#define WW_SYNC_VERBOSE_DBG 1
-#define WW_SYNC_VERBOSE_DBG 0
+#define WW_SYNC_VERBOSE_DBG 0 //
 #if WW_SYNC_VERBOSE_DBG
 #define WSYPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
@@ -240,7 +270,7 @@ void show_omp_hash(unsigned long omp_hash)
 
 
 //#define MWCPU_DEBUG 1
-#define MWCPU_DEBUG 0
+#define MWCPU_DEBUG 0 //
 #if MWCPU_DEBUG
 #define MWCPUPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
@@ -264,7 +294,7 @@ void show_omp_hash(unsigned long omp_hash)
 #endif
 
 //#define BARRIER_INFO_MORE 1
-#define BARRIER_INFO_MORE 0
+#define BARRIER_INFO_MORE 0 //
 #if BARRIER_INFO_MORE
 #define BARRMPRINTK(...) printk(KERN_INFO __VA_ARGS__)
 #else
@@ -302,7 +332,9 @@ void show_omp_hash(unsigned long omp_hash)
 #define RGNPRINTK(...)
 #endif
 
-/* !perf */
+/***
+ * !perf
+ */
 #define DEVELOPE_DEBUG 1
 #if DEVELOPE_DEBUG
 #define DVLPRINTK(...) printk(KERN_INFO __VA_ARGS__)
@@ -319,7 +351,7 @@ DEFINE_SPINLOCK(rcsi_hash_lock);
 #define SYS_REGION_HASH_BITS 10 /* TODO TODO TODO try larger */
 DEFINE_HASHTABLE(sys_region_hash, SYS_REGION_HASH_BITS);
 DEFINE_RWLOCK(sys_region_hash_lock);
-bool is_god = true;
+bool is_god = true; /* 1: record 0: pf */
 
 /* Violation section detecting */
 #if REGION_CHECK
@@ -1566,6 +1598,32 @@ void __show_mwpf_config(void)
 	printk("PF_CONSIDER_CPU = 0\n");
 #endif
 
+#if GOD_VIEW
+	printk("GOD_VIEW = 1\n");
+#else
+	printk("GOD_VIEW = 0\n");
+#endif
+#if PREFETCH
+	printk("PREFETCH = 1\n");
+#else
+	printk("PREFETCH = 0\n");
+#endif
+
+#if FINAL_DATA
+	printk("FINAL_DATA = 1\n");
+#else
+	printk("FINAL_DATA = 0\n");
+#endif
+
+	printk("TODO printk CONN\n");
+
+	/* Move to other place*/
+	printk("mw_local_dispatch_calc_time = %lu ns\n", mw_local_dispatch_calc_time);
+	printk("mw_local_work_time = %lu ns\n", mw_local_work_time);
+	printk("mw_local_dispatch_calc_time = %lu ms\n", mw_local_dispatch_calc_time/1000/1000);
+	printk("mw_local_work_time = %lu ms\n", mw_local_work_time/1000/1000);
+	mw_local_dispatch_calc_time = 0;
+	mw_local_work_time = 0;
 }
 
 /***************
@@ -2354,11 +2412,15 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 #endif
 	int new_outer_iter;
 #if MW_TIME
-	ktime_t mw_find_conf_wait_scatters, mw_find_conf_start_t = ktime_get();
 	ktime_t mw_find_conf_sends;
 	ktime_t mw_find_conf_wait_res;
 	ktime_t mw_find_conf_wait_applys;
+	ktime_t mw_find_conf_wait_scatters, mw_find_conf_start_t = ktime_get();
 #endif
+	ktime_t mw_dispatch_calc_time_start;
+	ktime_t mw_dispatch_calc_time_end;
+	ktime_t mw_work_time_start;
+	ktime_t mw_work_time_end;
 	BUG_ON(rc->inv_cnt > MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
 
 #if !GLOBAL
@@ -2410,9 +2472,10 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 	mw_find_conf_wait_scatters = ktime_get();
 #endif
 
-	/* general */
-	/* scatters - send - even when 0 */
-	if (local_wr_cnt == 0) { /* special zero case 0/0 */
+	/* Check inv reqs */
+	if (local_wr_cnt == 0) {
+		/* Case 1: I don't have any inv req (special zero case 0/0) */
+		/* Send even when 0 inv req */
 		zero_case = true;
 		iter = 0; /* total == 0 iter == 0 */
 		total_iter = 0;
@@ -2420,6 +2483,11 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 		atomic_inc(&rc->scatter_pendings);
 		MWCPUPRINTK("msg %d notifying\n", total_iter);
 	} else if (local_wr_cnt > 0) {
+		/* Case 2: I have inv reqs */
+		/***
+		 * Work dispatch: dicide how many req/res to send/recv
+		 */
+		mw_dispatch_calc_time_start = ktime_get();
 		zero_case = false;
 		iter++; /* total > 0 iter start from 1 */
 
@@ -2428,13 +2496,14 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 			BUG_ON(!rc->inv_addrs[i]);
 #endif
 
+/** work dispatch version2 - batch oriented part1 **/
 #if !MW_CONSIDER_CPU
 		total_iter = ((local_wr_cnt - 1) / per_inv_batch_max) + 1;
 		for (i = 0; i < total_iter; i++)
 			atomic_inc(&rc->scatter_pendings);
 #endif
 
-/** version1 - cpu oriented part1 **/
+/** work dispatch version1 - cpu oriented part1 **/
 #if MW_CONSIDER_CPU
 		/* new machanism */
 		// calculate every should send pgs and msgs
@@ -2493,9 +2562,18 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 		mw_send_cnt++;
 #endif
 		// not zero case done
+		mw_dispatch_calc_time_end = ktime_get();
+		mw_local_dispatch_calc_time +=
+			ktime_to_ns(ktime_sub(mw_dispatch_calc_time_end,
+									mw_dispatch_calc_time_start));
 	} else { BUG(); }
 
-/** version1 - cpu oriented part2 **/
+
+/***
+ * Real Work - v1 or v2
+ */
+
+/** Real work version1 - cpu oriented part2 **/
 #if MW_CONSIDER_CPU
 	// do real run (see if merge code)
 	//sent_cnt = 0
@@ -2509,6 +2587,8 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 		int pgs_to_send, ongo_pgs_to_send;
 		int per_sent_cnt = 0;
 		int reminder = 0;
+
+		mw_work_time_start = ktime_get();
 		if (i < local_wr_cnt % other_node_cpus)
 			reminder = 1;
 		pgs_to_send = ongo_pgs_to_send = (new_outer_iter * per_inv_batch_max) +
@@ -2557,6 +2637,10 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 			}
 #endif
 
+			mw_work_time_end = ktime_get();
+			mw_local_work_time +=
+					ktime_to_ns(ktime_sub(mw_work_time_end,
+											mw_work_time_start));
 			pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_MERGE_REQUEST, nid, req,
 									sizeof(*req) - sizeof(req->addrs) +
 									(sizeof(*req->addrs) * single_sent));
@@ -2591,7 +2675,7 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 #endif /** MW_CONSIDER_CPU end **/
 
 
-/** version2 - batch oriented **/
+/** Real work version2 - batch oriented **/
 #if !MW_CONSIDER_CPU
 	do {
 		// lud arm 	mw_inv peak 210465 (in the begining 2nd region) avg 479
@@ -2659,6 +2743,396 @@ void __locally_find_conflictions(int nid, struct remote_context *rc)
 			break;
 	} while (sent_cnt < local_wr_cnt);
 #endif /** !MW_CONSIDER_CPU end **/
+
+#if MW_TIME
+	mw_find_conf_sends = ktime_get();
+#endif
+
+	WSYPRINTK("\t  -> MERGE sent go to sleep l id %d - wait %d mg res msgs "
+							"- ws %p\n", rc->local_merge_id, total_iter, ws);
+
+	/* wait until the last scatter requestion done + diff_req__from_remote done */
+	//kfree(req);
+	wait_at_station(ws);
+#if MW_TIME
+	mw_find_conf_wait_res = ktime_get();
+#endif
+
+	/* wait all on going apply_diffs done (make msg handler clean) */
+	if (my_nid == NOCOPY_NODE)
+		while (atomic_read(&rc->doing_diff_cnt))
+			CPU_RELAX;
+#if MW_TIME
+	mw_find_conf_wait_applys = ktime_get();
+#endif
+
+#if MW_TIME
+	mw_time_find_conf_wait_scatters += ktime_to_ns(ktime_sub(
+						mw_find_conf_wait_scatters, mw_find_conf_start_t));
+	mw_time_find_conf_wait_sends += ktime_to_ns(ktime_sub(
+						mw_find_conf_sends, mw_find_conf_wait_scatters));
+	mw_time_find_conf_wait_res += ktime_to_ns(ktime_sub(
+						mw_find_conf_wait_res, mw_find_conf_sends));
+	mw_time_find_conf_wait_applys += ktime_to_ns(ktime_sub(
+						mw_find_conf_wait_applys, mw_find_conf_wait_res));
+#endif
+}
+
+static void mw_parallel_func(struct work_struct *work)
+{
+	struct mw_work *mw_w = (struct mw_work *)(work);
+//	mw_w->my_work;
+//	mw_w->iter;
+	/* per region */
+	int local_wr_cnt = mw_w->local_wr_cnt;
+	int total_iter = mw_w->total_iter; /* dry run required */
+
+	struct remote_context *rc = mw_w->rc;
+	int pgs_to_send = mw_w->pgs_to_send;
+	int ongo_pgs_to_send = mw_w->pgs_to_send;
+	int per_t_accu_sent_cnt = 0;
+	int reminder = 0;
+	int other_node_cpus = mw_w->other_node_cpus;
+	int nid = mw_w->nid;
+	int per_inv_batch_max = mw_w->per_inv_batch_max; // important
+	/* dynamically changed */
+	int iter = mw_w->iter; // iter = req_base // important // NEW // last guy's last #
+	int per_t_sent_ofs = mw_w->send_ofs; // important
+
+	if (iter < local_wr_cnt % other_node_cpus)
+		reminder = 1;
+
+	MWCPUPRINTK("from wq base_iter[%d] - per_t_sent_ofs %d - total %d invs",
+									iter, per_t_sent_ofs, pgs_to_send);
+
+#if STRONG_CHECK_SANITY
+	BUG_ON(pgs_to_send <= 0);
+	BUG_ON(per_t_sent_ofs > local_wr_cnt);
+#endif
+
+	while (ongo_pgs_to_send) { // may skip directly aka !pgs_to_send continue
+		page_merge_request_t *req = pcn_kmsg_get(sizeof(*req));
+		int single_sent = ongo_pgs_to_send;
+		if (single_sent > per_inv_batch_max)
+			single_sent = per_inv_batch_max;
+
+	MWCPUPRINTK("\t\titer[%d] - sending per_t_sent_ofs %d total  %d invs",
+									iter, per_t_sent_ofs, pgs_to_send);
+#if STRONG_CHECK_SANITY
+		BUG_ON(!req || single_sent > PCN_KMSG_MAX_PAYLOAD_SIZE ||
+												single_sent <= 0);
+#endif
+
+		/* common */
+		req->origin_pid = mw_w->pid;		// TODO // important //NEW
+		req->origin_ws = mw_w->ws->id;
+		req->remote_pid = rc->remote_tgids[nid];
+
+		/* put more handshake info to detect skew cases */
+		//req->begin =
+		//req->end =
+		req->merge_id = rc->local_merge_id;
+		req->fence = mw_w->tso_fence_cnt; // important //NEW // TODO
+
+		/* specific */
+		req->wr_cnt = single_sent;
+		req->iter = iter; /* start from 1 */
+		req->total_iter = total_iter; /* required all done */
+
+		memcpy(req->addrs, rc->inv_addrs + per_t_sent_ofs,
+							sizeof(*req->addrs) * single_sent);
+
+#if STRONG_CHECK_SANITY
+		{ 	int k;
+			for (k = 0; k < single_sent; k++)
+				BUG_ON(!req->addrs[k]);
+		/* local_wr and rc->inv_addrs are correct BUT req->addrs WRONG!! */
+		}
+#endif
+
+		pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_MERGE_REQUEST, nid, req,
+								sizeof(*req) - sizeof(req->addrs) +
+								(sizeof(*req->addrs) * single_sent));
+
+		per_t_accu_sent_cnt += single_sent;
+		per_t_sent_ofs += single_sent; // per region global ofs
+		ongo_pgs_to_send -= single_sent;
+
+		BARRMPRINTK("[%d]/%d: (mw_parallel) this sent %d this accu sent %d "
+						"per_t_sent_ofs %d <- global -> "
+						"sent(g_ofs) %d/ %d(per t)/ local_wr_cnt %d(per phase) - "
+						"%d left  MERGE req ->\n",
+						iter, total_iter, single_sent, per_t_accu_sent_cnt,
+						per_t_sent_ofs,
+						per_t_sent_ofs, pgs_to_send, local_wr_cnt, ongo_pgs_to_send);
+		iter++;
+	}
+	MWCPUPRINTK("iter[%d]@DONE@ - this thread has to_send %d invs",
+											iter, pgs_to_send);
+	kfree(work);
+}
+
+void __locally_find_conflictions2(int nid, struct remote_context *rc)
+{
+	struct wait_station *ws = get_wait_station(current);
+	int i;
+	int iter = 0;
+	int total_iter = 0;
+	bool zero_case;
+	int local_wr_cnt;
+#if !CONSIDER_LOCAL_CPU
+#ifdef CONFIG_X86_64
+	int other_node_cpus = ARM_THREADS;
+#else
+	int other_node_cpus = X86_THREADS;
+#endif
+#else
+#ifdef CONFIG_X86_64
+	int other_node_cpus = X86_THREADS;
+#else
+	int other_node_cpus = ARM_THREADS;
+#endif
+#endif
+	/* max inv addr per msg */
+#if MW_CONSIDER_CPU
+	int per_inv_batch_max = MAX_WRITE_INV_BUFFERS;
+#else
+	int single_sent = 0;
+	int per_inv_batch_max = 2000 / other_node_cpus; // 2000 is from SP huristic //testing
+#endif
+	int new_outer_iter;
+#if MW_TIME
+	ktime_t mw_find_conf_wait_scatters, mw_find_conf_start_t = ktime_get();
+	ktime_t mw_find_conf_sends;
+	ktime_t mw_find_conf_wait_res;
+	ktime_t mw_find_conf_wait_applys;
+#endif
+	BUG_ON(rc->inv_cnt > MAX_ALIVE_THREADS * MAX_WRITE_INV_BUFFERS);
+
+	/* no collistion */
+	local_wr_cnt = rc->inv_cnt;
+#if MW_TIME
+	rc->sys_rw_cnt += rc->inv_cnt;
+#endif
+	/* redo ownership maintaining in serial phase for corner cases */
+	__maintain_local_ownership_serial();
+
+	/* RC: make sure list is ready */
+	rc->ready = true;
+	rc->local_merge_id++;
+	smp_wmb(); /* different cpu */
+
+//	req->merge_id = rc->local_merge_id;
+	SYNCPRINTK2("mg: wait l lr(%d/%d) scatter_pendings %d\n", rc->local_merge_id,
+					rc->remote_merge_id, atomic_read(&rc->scatter_pendings));
+
+	while (atomic_read(&rc->scatter_pendings))
+		CPU_RELAX;
+
+#if STRONG_CHECK_SANITY
+	BUG_ON(atomic_read(&rc->scatter_pendings)); // remove
+#endif
+	SYNCPRINTK2("mg: pass* l lr(%d/%d) scatter_pendings %d\n", rc->local_merge_id,
+					rc->remote_merge_id, atomic_read(&rc->scatter_pendings));
+#if MW_TIME
+	mw_find_conf_wait_scatters = ktime_get();
+#endif
+
+	/* Check inv reqs */
+	if (local_wr_cnt == 0) {
+		/* Case 1: I don't have any inv req (special zero case 0/0) */
+		/* Send even when 0 inv req */
+		page_merge_request_t *req = pcn_kmsg_get(sizeof(*req));
+		int single_sent = 0;
+		int ongo_pgs_to_send = 0;
+
+		zero_case = true;
+		iter = 0; /* zero case - total == 0 iter == 0 */
+		total_iter = 0; /* zero case */
+		new_outer_iter = 0;
+		atomic_inc(&rc->scatter_pendings);
+		MWCPUPRINTK("msg %d notifying\n", total_iter);
+
+		/* common */
+		req->origin_pid = current->pid;
+		req->origin_ws = ws->id;
+		req->remote_pid = rc->remote_tgids[nid];
+
+		/* put more handshake info to detect skew cases */
+		//req->begin =
+		//req->end =
+		req->merge_id = rc->local_merge_id;
+		req->fence = current->tso_fence_cnt;
+
+		/* specific - zero case / not zero case */
+		req->wr_cnt = single_sent;
+		req->iter = iter;
+		req->total_iter = total_iter; /* if not zero case - required dry run */
+
+		pcn_kmsg_post(PCN_KMSG_TYPE_PAGE_MERGE_REQUEST, nid, req,
+								sizeof(*req) - sizeof(req->addrs) +
+								(sizeof(*req->addrs) * single_sent));
+
+		//per_sent_cnt += single_sent;
+		//per_t_sent_ofs += single_sent; // per region cnt
+		//ongo_pgs_to_send -= single_sent;
+
+		BARRMPRINTK("[%d]/%d: (%s) cpu %d / this %d / per_sent *%d / to_send %d "
+						"<- global -> "
+						"sent(ofs) *%d / local_wr_cnt %d MERGE req ->\n",
+						iter, total_iter, "zero inv case",
+						i, single_sent, single_sent,
+						ongo_pgs_to_send, single_sent, local_wr_cnt);
+
+	} else if (local_wr_cnt > 0) {
+		/* Case 2: I have inv reqs */
+		/***
+		 * Work dispatch: dicide how many req/res to send/recv
+		 */
+		int total_sent_cnt = 0; /* aka sent_cnt - for accumulating */
+		int total_sent_cnt_ofs[other_node_cpus]; /* aka sent_cnt ofs per t*/
+		int pgs_to_send[other_node_cpus];
+		int iter_ofs[other_node_cpus];
+		for (i = 0; i < other_node_cpus; i++) {
+			total_sent_cnt_ofs[i] = 0;
+			pgs_to_send[i] = 0;
+			iter_ofs[i] = 0;
+		}
+
+		zero_case = false;
+		iter++; /* total > 0 iter start from 1 */
+		//total_iter = 1; /* total > 0 iter start from 1 */ /* trick: [1] guy shold start from iter# 2*/
+
+#if STRONG_CHECK_SANITY
+		for (i = 0; i < local_wr_cnt; i++)
+			BUG_ON(!rc->inv_addrs[i]);
+#endif
+
+/** work dispatch version1 - cpu oriented part1 dry run **/
+#if MW_CONSIDER_CPU
+		/* new machanism */
+		// calculate every should send pgs and msgs
+		new_outer_iter = local_wr_cnt / (per_inv_batch_max * other_node_cpus);
+
+		// do dry run (see if merge code)
+		for (i = 0; i < other_node_cpus; i++) {
+			int ongo_pgs_to_send; // dynamically check - decreasing
+			int per_sent_cnt = 0;
+			int reminder = 0;
+			if (i < local_wr_cnt % other_node_cpus)
+				reminder = 1;
+			pgs_to_send[i] = ongo_pgs_to_send = (new_outer_iter * per_inv_batch_max) +
+					((local_wr_cnt % ((per_inv_batch_max * other_node_cpus))) /
+												other_node_cpus) + reminder;
+			MWCPUPRINTK("\tdispatching++ pgs_to_send[%d] %d / total mw %d\n",
+									i, pgs_to_send[i], local_wr_cnt);
+			if (!pgs_to_send[i]) break;
+			while (ongo_pgs_to_send) {
+				int single_sent = ongo_pgs_to_send;
+				//pgs_to_send[i] - per_sent_cnt;
+				if (single_sent > per_inv_batch_max)
+					single_sent = per_inv_batch_max;
+
+				atomic_inc(&rc->scatter_pendings);
+				total_iter++;
+
+				iter_ofs[i] = total_iter; /* NEW: my last iter # for the next guy */ /* 2nd guy should see 2 asumming 1st guy sent only 1 req */
+
+				per_sent_cnt += single_sent;
+				total_sent_cnt += single_sent;
+				total_sent_cnt_ofs[i] = total_sent_cnt;
+				ongo_pgs_to_send -= single_sent;
+#if STRONG_CHECK_SANITY
+				MWCPUPRINTK("\t\titer_ofs[%d] %d - "
+							"single_sent %d ongo_pgs_to_send %d / "
+							"pgs_to_send[%d] %d per parallel thread - "
+							"generating total_sent_cnt_ofs[%d] %d\n",
+							i, iter_ofs[i],
+							single_sent, ongo_pgs_to_send,
+							i, pgs_to_send[i],
+							i, total_sent_cnt_ofs[i]);
+				BUG_ON(ongo_pgs_to_send < 0);
+#endif
+			}
+		}
+#if STRONG_CHECK_SANITY
+//		if (total_sent_cnt_ofs[i] != local_wr_cnt) {
+//			MWCPUPRINTK("total_sent_cnt_ofs[i] %d != local_wr_cnt %d",
+//							total_sent_cnt_ofs[i], local_wr_cnt);
+//			BUG_ON(total_sent_cnt_ofs[i] != local_wr_cnt);
+//		}
+#endif
+		MWCPUPRINTK("msg %d aka scatter_pendings\n", total_iter);
+#endif
+
+#if MW_TIME
+		if (local_wr_cnt > mw_inv_peak)
+			mw_inv_peak = local_wr_cnt;
+		mw_inv_total += local_wr_cnt;
+		mw_inv_cnt++;
+
+		if (total_iter > mw_send_peak)
+			mw_send_peak = total_iter;
+		mw_send_total += total_iter;
+		mw_send_cnt++;
+#endif
+		// not zero case done
+
+		for (i = 0; i < other_node_cpus; i++) {
+			struct mw_work *mw_w;
+			if (!pgs_to_send[i]) continue;
+#if STRONG_CHECK_SANITY
+			BUG_ON(pgs_to_send[i] < 0);
+#endif
+
+			mw_w = kmalloc(sizeof(*mw_w), GFP_KERNEL);
+
+			mw_w->my_work = NULL;
+			// each one has it's offset
+			mw_w->rc = rc;
+			mw_w->ws = ws;
+
+			mw_w->nid = nid;
+			mw_w->total_iter = total_iter; /* dry run required */
+			mw_w->local_wr_cnt = local_wr_cnt;
+			mw_w->other_node_cpus = other_node_cpus;
+			mw_w->pid = current->pid; // always the leader
+			mw_w->tso_fence_cnt = current->tso_fence_cnt; // TOD
+
+			// mw_w->tid for dbg
+
+			/* NEW */
+			mw_w->per_inv_batch_max = per_inv_batch_max;
+			mw_w->pgs_to_send = pgs_to_send[i];
+			if (i) { /* NEW */
+//			mw_w->iter = i; // TODO; starts from 1 and should not conflict
+				//mw_w->iter = iter_ofs[i-1]; // = req_base // = iters I will handle
+				mw_w->iter = iter_ofs[i]; // = req_base // = iters I will handle
+				mw_w->send_ofs = total_sent_cnt_ofs[i-1]; // send cnt ofs
+			} else {
+				mw_w->iter = 1; // start from 1
+				mw_w->send_ofs = 0;
+			}
+
+#if STRONG_CHECK_SANITY
+			{
+				int handle_reqs;
+				if (i) {
+					handle_reqs = iter_ofs[i] - iter_ofs[i-1];
+				} else {
+					handle_reqs = iter_ofs[1] - 1; // req is from 1
+				}
+				MWCPUPRINTK("wq[%d] - iter base %d send pg base %d "
+							"handles %d reqs\n",
+							i, mw_w->iter, mw_w->send_ofs, handle_reqs);
+			}
+#endif
+
+			INIT_WORK(&mw_w->work, mw_parallel_func);
+			BUG_ON(!queue_work(mw_wq, &mw_w->work)); // shared starting addr
+		}
+
+	} else { BUG(); }
 
 #if MW_TIME
 	mw_find_conf_sends = ktime_get();
@@ -3041,14 +3515,14 @@ static void process_page_merge_request(struct work_struct *work)
 	int conflict_cnt;
 	int wr_cnt = req->wr_cnt;
 	unsigned long *wr_addrs = req->addrs;
-#if STRONG_CHECK_SANITY
-	BUG_ON(!tsk || !res|| !rc);
-#endif
-
 #if MW_TIME
 	ktime_t mw_process_req_wait_last_done = ktime_get();
 	ktime_t mw_process_req_wait_local_list_ready;
 	ktime_t mw_process_req_find_collision_at_remote;
+#endif
+
+#if STRONG_CHECK_SANITY
+	BUG_ON(!tsk || !res|| !rc);
 #endif
 
 	/* put more handshake info to detect skew cases */
@@ -3849,7 +4323,8 @@ static int __popcorn_tso_fence(int id, void __user * file, unsigned long omp_has
 #endif
 		/* Main MW protocol time */
 		//if (current->tso_region){printk("MERGE wait\n");}
-		__locally_find_conflictions(TO_THE_OTHER_NID(), rc);
+		//__locally_find_conflictions(TO_THE_OTHER_NID(), rc);
+		__locally_find_conflictions2(TO_THE_OTHER_NID(), rc);
 		//if (current->tso_region){printk("MERGE passed\n");}
 #if MW_TIME
 		mw_find_conf = ktime_get();
@@ -4115,7 +4590,8 @@ SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned
 		//printk("kM/BLK: Completed %.6lf\n\n", omp_hash);
 		printk("\n"
 				"==========================================\n"
-				"KM/BLK: Completed %lu is_god(%s) pf_cnt %ld\n"
+				"KM/BLK: Completed %lu is_god(%s - 1: record 0: pf ) "
+				"pf_cnt %ld(TODO: don't trust)\n"
 				"========================================\n\n",
 								omp_hash, is_god ? "O" : "X",
 									atomic64_read(&fp_cnt));
@@ -4538,6 +5014,9 @@ int __init popcorn_sync_init(void)
 {
 	//__rcsi_hash_test();
 	__rcsi_mem_alloc();
+
+	mw_wq = alloc_workqueue("mw_wq", WQ_MEM_RECLAIM, 0);
+	BUG_ON(!mw_wq);
 
 	REGISTER_KMSG_WQ_HANDLER(
             PCN_KMSG_TYPE_PAGE_MERGE_REQUEST, page_merge_request);
