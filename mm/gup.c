@@ -22,6 +22,11 @@
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/process_server.h>
+#include <popcorn/vma_server.h>
+#endif
+
 #include "internal.h"
 
 struct follow_page_context {
@@ -969,6 +974,19 @@ int fixup_user_fault(struct task_struct *tsk, struct mm_struct *mm,
 
 retry:
 	vma = find_extend_vma(mm, address);
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(tsk)) {
+		if (!vma || address < vma->vm_start) {
+			if (vma_server_fetch_vma(tsk, address) == 0) {
+				/* Replace with updated VMA */
+				vma = find_extend_vma(mm, address);
+			} else {
+				return -ENOMEM;
+			}
+		}
+	}
+#endif
+
 	if (!vma || address < vma->vm_start)
 		return -EFAULT;
 

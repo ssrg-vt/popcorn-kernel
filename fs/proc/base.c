@@ -88,6 +88,9 @@
 #include <linux/user_namespace.h>
 #include <linux/fs_struct.h>
 #include <linux/slab.h>
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#endif
 #include <linux/sched/autogroup.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/coredump.h>
@@ -345,6 +348,12 @@ static ssize_t proc_pid_cmdline_read(struct file *file, char __user *buf,
 	tsk = get_proc_task(file_inode(file));
 	if (!tsk)
 		return -ESRCH;
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(tsk)) {
+		put_task_struct(tsk);
+		return 0;
+	}
+#endif
 	ret = get_task_cmdline(tsk, buf, count, pos);
 	put_task_struct(tsk);
 	if (ret > 0)

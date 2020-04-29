@@ -28,6 +28,12 @@
 #include <asm/tlb.h>
 
 #include "internal.h"
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#include <popcorn/page_server.h>
+#include <popcorn/bundle.h>
+#endif
 
 /*
  * Any behaviour which results in changes to the vma->vm_flags needs to
@@ -686,6 +692,23 @@ static int madvise_inject_error(int behavior,
 }
 #endif
 
+#ifdef CONFIG_POPCORN
+int madvise_release(struct vm_area_struct *vma, unsigned long start, unsigned long end)
+{
+	int nr_pages = 0;
+	unsigned long addr;
+
+	/* mmap_sem is held */
+	for (addr = start; addr < end; addr += PAGE_SIZE) {
+		nr_pages += page_server_release_page_ownership(vma, addr);
+	}
+
+	VSPRINTK("  [%d] %d %d / %ld %lx-%lx\n", current->pid, my_nid,
+			nr_pages, (end - start) / PAGE_SIZE, start, end);
+	return 0;
+}
+#endif
+
 static long
 madvise_vma(struct vm_area_struct *vma, struct vm_area_struct **prev,
 		unsigned long start, unsigned long end, int behavior)
@@ -698,6 +721,10 @@ madvise_vma(struct vm_area_struct *vma, struct vm_area_struct **prev,
 	case MADV_FREE:
 	case MADV_DONTNEED:
 		return madvise_dontneed_free(vma, prev, start, end, behavior);
+#ifdef CONFIG_POPCORN
+	case MADV_RELEASE:
+		return madvise_release(vma, start, end);
+#endif
 	default:
 		return madvise_behavior(vma, prev, start, end, behavior);
 	}
@@ -726,6 +753,10 @@ madvise_behavior_valid(int behavior)
 #endif
 	case MADV_DONTDUMP:
 	case MADV_DODUMP:
+
+#ifdef CONFIG_POPCORN
+	case MADV_RELEASE:
+#endif
 	case MADV_WIPEONFORK:
 	case MADV_KEEPONFORK:
 #ifdef CONFIG_MEMORY_FAILURE
@@ -809,6 +840,11 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	int write;
 	size_t len;
 	struct blk_plug plug;
+#ifdef CONFIG_POPCORN
+	unsigned long start_orig = start;
+	size_t len_orig = len_in;
+#endif
+
 
 	if (!madvise_behavior_valid(behavior))
 		return error;
@@ -893,5 +929,20 @@ out:
 	else
 		up_read(&current->mm->mmap_sem);
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = vma_server_madvise_remote(start_orig, len_orig, behavior);
+		if (error)
+			return error;
+	}
+#endif
+
 	return error;
 }
+
+#ifdef CONFIG_POPCORN
+long ksys_madvise(unsigned long start, size_t len, int behavior)
+{
+	return __do_sys_madvise(start, len, behavior);
+}
+#endif

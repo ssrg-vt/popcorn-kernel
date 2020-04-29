@@ -17,6 +17,10 @@
 
 #include <asm/mmu.h>
 
+#ifdef CONFIG_POPCORN
+struct remote_context;
+#endif
+
 #ifndef AT_VECTOR_SIZE_ARCH
 #define AT_VECTOR_SIZE_ARCH 0
 #endif
@@ -505,6 +509,10 @@ struct mm_struct {
 		/* HMM needs to track a few things per mm */
 		struct hmm *hmm;
 #endif
+#ifdef CONFIG_POPCORN
+		struct remote_context *remote;
+#endif
+
 	} __randomize_layout;
 
 	/*
@@ -670,6 +678,10 @@ enum vm_fault_reason {
 	VM_FAULT_DONE_COW       = (__force vm_fault_t)0x001000,
 	VM_FAULT_NEEDDSYNC      = (__force vm_fault_t)0x002000,
 	VM_FAULT_HINDEX_MASK    = (__force vm_fault_t)0x0f0000,
+#ifdef CONFIG_POPCORN
+	VM_FAULT_CONTINUE       = (__force vm_fault_t)0x004000,
+	VM_FAULT_KILLED         = (__force vm_fault_t)0x008000,
+#endif
 };
 
 /* Encode hstate index for a hwpoisoned large page */

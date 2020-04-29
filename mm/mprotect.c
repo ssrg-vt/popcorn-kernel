@@ -24,6 +24,11 @@
 #include <linux/mmu_notifier.h>
 #include <linux/migrate.h>
 #include <linux/perf_event.h>
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 #include <linux/pkeys.h>
 #include <linux/ksm.h>
 #include <linux/uaccess.h>
@@ -479,7 +484,13 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 		return -ENOMEM;
 	if (!arch_validate_prot(prot, start))
 		return -EINVAL;
-
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = vma_server_mprotect_remote(start, len, prot);
+		if (error)
+			return error;
+	}
+#endif
 	reqprot = prot;
 
 	if (down_write_killable(&current->mm->mmap_sem))
@@ -581,6 +592,14 @@ SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
 {
 	return do_mprotect_pkey(start, len, prot, -1);
 }
+
+#ifdef CONFIG_POPCORN
+long ksys_mprotect(unsigned long start, size_t len,
+		  unsigned long prot)
+{
+        return __do_sys_mprotect(start, len, prot);
+}
+#endif
 
 #ifdef CONFIG_ARCH_HAS_PKEYS
 

@@ -573,11 +573,18 @@ static inline loff_t *file_ppos(struct file *file)
 	return file->f_mode & FMODE_STREAM ? NULL : &file->f_pos;
 }
 
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+#include <popcorn/types.h>
+#endif
 ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
 {
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
-
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	if (WARN_ON(distributed_remote_process(current))) {
+		printk("  file read at remote thread is not supported yet\n");
+	}
+#endif
 	if (f.file) {
 		loff_t pos, *ppos = file_ppos(f.file);
 		if (ppos) {
@@ -601,6 +608,12 @@ ssize_t ksys_write(unsigned int fd, const char __user *buf, size_t count)
 {
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
+
+#ifdef CONFIG_POPCORN_CHECK_SANITY
+	if (WARN_ON(distributed_remote_process(current))) {
+		printk("  file write at remote thread is not supported yet\n");
+	}
+#endif
 
 	if (f.file) {
 		loff_t pos, *ppos = file_ppos(f.file);

@@ -9,6 +9,10 @@
 
 #include <linux/fs.h>
 #include <linux/mm.h>
+
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#endif
 #include <linux/pagemap.h>
 #include <linux/tracepoint-defs.h>
 

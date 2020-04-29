@@ -2770,6 +2770,9 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 
 	calculate_sigpending();
 }
+#ifdef CONFIG_POPCORN_DEBUG
+extern void trace_task_status(void);
+#endif
 
 /*
  * context_switch - switch to the new MM and the new thread's register state.
@@ -2779,7 +2782,9 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	       struct task_struct *next, struct rq_flags *rf)
 {
 	struct mm_struct *mm, *oldmm;
-
+#ifdef CONFIG_POPCORN_DEBUG
+	trace_task_status();
+#endif
 	prepare_task_switch(rq, prev, next);
 
 	mm = next->mm;
@@ -4911,6 +4916,105 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 
 	return ret;
 }
+
+#ifdef CONFIG_POPCORN
+#include <popcorn/bundle.h>
+#include <popcorn/types.h>
+#include <popcorn/process_server.h>
+
+SYSCALL_DEFINE1(popcorn_get_thread_status, struct popcorn_thread_status __user *, status)
+{
+	struct popcorn_thread_status st = {
+		.current_nid = my_nid,
+		.peer_nid = current->peer_nid,
+		.peer_pid = current->peer_pid,
+	};
+
+	if (!access_ok(status, sizeof(*status))) {
+		return -EINVAL;
+	}
+
+	if (copy_to_user(status, &st, sizeof(st))) {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+SYSCALL_DEFINE3(popcorn_get_node_info, int *, _my_nid, struct popcorn_node_info __user *, info, int, len)
+{
+	int i;
+
+	if (!access_ok(_my_nid, sizeof(*_my_nid))) {
+		return -EINVAL;
+	}
+	if (copy_to_user(_my_nid, &my_nid, sizeof(my_nid))) {
+		return -EINVAL;
+	}
+
+	if (!access_ok(info, sizeof(*info) * MAX_POPCORN_NODES)) {
+		return -EINVAL;
+	}
+	for (i = 0; i < len; i++) {
+		struct popcorn_node_info res = {
+			.status = 0,
+			.arch = POPCORN_ARCH_UNKNOWN,
+			.distance = 0,
+		};
+		struct popcorn_node_info __user *ni = info + i;
+
+		if (get_popcorn_node_online(i)) {
+			res.status = 1;
+			res.arch = get_popcorn_node_arch(i);
+		}
+
+		if (copy_to_user(ni, &res, sizeof(res))) {
+			return -EINVAL;
+		}
+	}
+	return 0;
+}
+
+#pragma GCC optimize ("no-omit-frame-pointer")
+#pragma GCC optimize ("no-optimize-sibling-calls")
+SYSCALL_DEFINE2(popcorn_migrate, int, nid, void __user *, uregs)
+{
+	int ret;
+	PSPRINTK("####### MIGRATE [%d] to %d\n", current->pid, nid);
+
+	if (nid == -1) {
+		nid = current->migration_target_nid;
+	}
+	if (nid < 0 || nid >= MAX_POPCORN_NODES) {
+		PSPRINTK("  [%d] invalid migration destination %d\n",
+				current->pid, nid);
+		return -EINVAL;
+	}
+	if (nid == my_nid) {
+		PSPRINTK("  [%d] already running at the destination %d\n",
+				current->pid, nid);
+		return -EBUSY;
+	}
+
+	if (!get_popcorn_node_online(nid)) {
+		PSPRINTK("  [%d] destination node %d is offline\n",
+				current->pid, nid);
+		return -EAGAIN;
+	}
+
+	ret = process_server_do_migration(current, nid, uregs);
+	if (ret) return ret;
+
+	current->migration_target_nid = -1;
+
+	update_frame_pointer();
+#ifdef CONFIG_POPCORN_DEBUG_VERBOSE
+	PSPRINTK("  [%d] resume execution\n", current->pid);
+#endif
+	return 0;
+}
+#pragma GCC reset_options
+#endif // CONFIG_POPCORN
 
 /**
  * sys_sched_yield - yield the current processor to other threads.
