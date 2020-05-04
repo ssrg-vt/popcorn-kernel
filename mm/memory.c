@@ -4005,7 +4005,20 @@ int handle_pte_fault_origin(struct mm_struct *mm, struct vm_area_struct *vma,
 		.flags = flags,
 		.pgoff = linear_page_index(vma, address),
 		.gfp_mask = __get_fault_gfp_mask(vma),
+		.pmd = pmd,
+		.orig_pte = pte,
 	};
+
+	pgd_t *pgd;
+	p4d_t *p4d;
+
+	pgd = pgd_offset(mm, address);
+	if (!pgd) return NULL;
+
+	p4d = p4d_alloc(mm, pgd, address);
+	if (!p4d) return NULL;
+
+	vmf.pud = pud_alloc(mm, p4d, address);
 
 	barrier();
 
