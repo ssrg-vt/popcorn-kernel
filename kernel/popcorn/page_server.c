@@ -1927,7 +1927,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 		}
 	}
 
-	if (!pte_present(vmf->orig_pte)) {
+	if (!pte_is_present(vmf->orig_pte)) {
 		/* Remote page fault */
 		ret = __handle_localfault_at_remote(vmf);
 		goto out;
