@@ -115,6 +115,7 @@ inline int redirect_##syscall(LIST_SYSCALL_ARGS(__VA_ARGS__))		\
 	ret = rep->ret;							\
 	pcn_kmsg_done(rep);						\
 	/*printk(KERN_INFO "On ORIGIN: syscall redirect called for #syscall");*/\
+	if (ret == -ERESTARTSYS) do_exit(130); \
 	return ret;							\
 }
 

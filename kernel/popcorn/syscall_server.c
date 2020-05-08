@@ -242,6 +242,10 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	pcn_kmsg_post(PCN_KMSG_TYPE_SYSCALL_REP, current->remote_nid, rep,
 		      sizeof(*rep));
 	pcn_kmsg_done(req);
+
+	/* Exit the process on pending interrupts (e.g., ctrl-c); not a complete solution. */
+	if (retval == -ERESTARTSYS) do_exit(130);
+
 	return retval;
 }
 
