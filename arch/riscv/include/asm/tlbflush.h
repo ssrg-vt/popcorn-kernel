@@ -49,7 +49,7 @@ static inline void remote_sfence_vma(struct cpumask *cmask, unsigned long start,
 
 	cpumask_clear(&hmask);
 	riscv_cpuid_to_hartid_mask(cmask, &hmask);
-	sbi_remote_sfence_vma(hmask.bits, start, size);
+	sbi_remote_sfence_vma(hmask.bits, 0, -1);
 }
 
 #define flush_tlb_all() sbi_remote_sfence_vma(NULL, 0, -1)
