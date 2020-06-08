@@ -68,10 +68,6 @@ int fill_cpu_info(struct remote_cpu_info *res)
 		core->hart = cpuid_to_hartid_map(i);
 		core->isa[0] = '\0';
 		core->mmu[0] = '\0';
-
-		core->bogo_mips = loops_per_jiffy / (500000UL/HZ);
-		core->bogo_mips_fraction = loops_per_jiffy / (5000UL/HZ) % 100;
-
 		copy_isa(core, node);
 		copy_mmu(core, node);
 		count++;
