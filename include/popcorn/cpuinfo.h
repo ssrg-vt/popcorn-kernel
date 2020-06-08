@@ -84,6 +84,8 @@ struct percore_info_riscv {
 	unsigned int hart;
 	char isa[64];
 	char mmu[8];
+	unsigned long bogo_mips;
+	unsigned long bogo_mips_fraction;
 };
 
 struct cpuinfo_arch_riscv {

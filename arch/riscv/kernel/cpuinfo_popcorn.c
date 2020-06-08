@@ -25,7 +25,7 @@ static void copy_isa(struct percore_info_riscv *core,
 	const char *isa;
 	int i = 5;
 
-	strncat(core->isa, "rv64i", 5);
+	strcat(core->isa, "rv64i");
 
 	if (!of_property_read_string(node, "riscv,isa", &isa)) {
 		isa += 5; // skip rv64i prefix
@@ -37,6 +37,7 @@ static void copy_isa(struct percore_info_riscv *core,
 				isa++;
 			}
 		}
+		core->isa[i] = '\0';
 	}
 }
 
@@ -57,6 +58,8 @@ int fill_cpu_info(struct remote_cpu_info *res)
 	unsigned int count = 0;
 	struct cpuinfo_arch_riscv *arch = &res->riscv;
 
+	res->arch_type = POPCORN_ARCH_RISCV;
+
 	for_each_online_cpu(i) {
 		struct percore_info_riscv *core = &arch->cores[count];
 		struct device_node *node = of_get_cpu_node(i, NULL);
@@ -66,9 +69,14 @@ int fill_cpu_info(struct remote_cpu_info *res)
 		core->isa[0] = '\0';
 		core->mmu[0] = '\0';
 
+		core->bogo_mips = loops_per_jiffy / (500000UL/HZ);
+		core->bogo_mips_fraction = loops_per_jiffy / (5000UL/HZ) % 100;
+
 		copy_isa(core, node);
 		copy_mmu(core, node);
+		count++;
 	}
+	arch->num_cpus = count;
 
 	return 0;
 }

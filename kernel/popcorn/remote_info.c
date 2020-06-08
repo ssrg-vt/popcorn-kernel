@@ -474,6 +474,9 @@ static void print_riscv_cpuinfo(struct seq_file *m,
 	struct percore_info_riscv *cpu = &data->riscv.cores[count];
 
 	seq_printf(m, "processor\t: %u\n", cpu->cpu_id);
+	seq_printf(m, "BogoMIPS\t: %lu.%02lu\n",
+		   cpu->bogo_mips,
+		   cpu->bogo_mips_fraction);
 	seq_printf(m, "hart\t\t: %u\n", cpu->hart);
 	seq_printf(m, "isa\t\t: %s\n", cpu->isa);
 	seq_printf(m, "mmu\t\t: %s\n", cpu->mmu);
