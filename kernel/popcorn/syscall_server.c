@@ -114,6 +114,43 @@ extern long sys_newfstatat(int dfd, const char __user *filename,
 			       struct stat __user *statbuf, int flag);
 extern long sys_getpid(void);
 
+/*
+ * Handling the signal sent from origin node to remote node
+ * We manually force the signal in the destination PID
+ */
+int handle_signal_remotes(struct pcn_kmsg_message *msg)
+{
+       signal_trans_t * recv = (signal_trans_t*)msg;
+       struct task_struct * tgt_tsk = find_task_by_vpid(recv->remote_pid);
+       printk(KERN_INFO"received the signal %d for task %d \n\n",
+                       recv->sig,recv->remote_pid);
+       force_sig(recv->sig, tgt_tsk);
+       tgt_tsk->remote->stop_remote_worker = false;
+       return 0;
+}
+EXPORT_SYMBOL(handle_signal_remotes);
+
+/*
+ * A signal arrived at the origin node for a process that is currently
+ * migrated.We are sending the request to remote node that the process is
+ * currently stationed.
+ */
+int remote_signalling(int sig ,struct task_struct * tsk , int group )
+{
+       int re;
+       signal_trans_t *sigreq = pcn_kmsg_get(sizeof(*sigreq));
+       sigreq->origin_pid = tsk->pid;
+       sigreq->remote_pid = tsk->remote_pid;
+       sigreq->remote_nid = tsk->remote_nid;
+       sigreq->sig        = sig;
+       sigreq->group      = group ? 1:0;
+       re = pcn_kmsg_post(PCN_KMSG_TYPE_SIGNAL_FWD,
+                       tsk->remote_nid, sigreq, sizeof(*sigreq));
+       return 0;
+}
+EXPORT_SYMBOL(remote_signalling);
+
+
 int process_remote_syscall(struct pcn_kmsg_message *msg)
 {
 	int retval = 0;
@@ -243,9 +280,6 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 		      sizeof(*rep));
 	pcn_kmsg_done(req);
 
-	/* Exit the process on pending interrupts (e.g., ctrl-c); not a complete solution. */
-	if (retval == -ERESTARTSYS) do_exit(130);
-
 	return retval;
 }
 
@@ -267,5 +301,7 @@ int __init syscall_server_init(void)
 			      syscall_fwd);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SYSCALL_REP,
 			      syscall_reply);
+        REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SIGNAL_FWD,
+                              signal_remotes);
 	return 0;
 }

@@ -15,7 +15,7 @@
 #include "types.h"
 
 int process_remote_syscall(struct pcn_kmsg_message *msg);
-
+int handle_signal_remotes(struct pcn_kmsg_message *msg);
 /*This Set of macros allows for forwarding of syscalls of up to 6 arguments,
  *with 12 arguments being input altogether, eg. SET_REQ_PARAMS(int, a, char, b)
  *This segment will fill in the RPC syscall definitions with the correct

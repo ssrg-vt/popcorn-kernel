@@ -364,6 +364,15 @@ DEFINE_PCN_KMSG(syscall_fwd_t, SYSCALL_FWD_FIELDS);
 	int ret;
 DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
 
+#define SIGNAL_TRANSMIT_FIELDS 				\
+       pid_t origin_pid;                                \
+       pid_t remote_pid;                                \
+       int   remote_nid;                                \
+       int sig;                                         \
+       bool group;
+DEFINE_PCN_KMSG(signal_trans_t , SIGNAL_TRANSMIT_FIELDS);
+
+
 /**
  * Message routing using work queues
  */
