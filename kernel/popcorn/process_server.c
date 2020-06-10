@@ -663,7 +663,7 @@ static void __run_remote_worker(struct remote_context *rc)
 			process_origin_task_exit(rc, (origin_task_exit_t *)msg);
 			break;
 		case PCN_KMSG_TYPE_SIGNAL_FWD :
-                       handle_signal_remotes((signal_trans_t *)msg);
+                       handle_signal_remotes(msg);
                        break;
 		default:
 			printk("Unknown remote work type %d\n", msg->header.type);
@@ -872,7 +872,6 @@ static void __process_remote_works(void)
 					(SIGNAL_GROUP_COREDUMP| SIGNAL_GROUP_EXIT))
 			{
 				remote_signalling(SIGINT , current , 1);
-				terminal_sig_rec = true;
 				run = false;
 			}
 			spin_unlock_irqrestore(

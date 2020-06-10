@@ -118,7 +118,7 @@ extern long sys_getpid(void);
  * Handling the signal sent from origin node to remote node
  * We manually force the signal in the destination PID
  */
-int handle_signal_remotes(struct pcn_kmsg_message *msg)
+int handle_signal_remotes(struct pcn_kmsg_message  *msg)
 {
        signal_trans_t * recv = (signal_trans_t*)msg;
        struct task_struct * tgt_tsk = find_task_by_vpid(recv->remote_pid);
