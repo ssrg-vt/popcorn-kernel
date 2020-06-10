@@ -662,6 +662,9 @@ static void __run_remote_worker(struct remote_context *rc)
 		case PCN_KMSG_TYPE_TASK_EXIT_ORIGIN:
 			process_origin_task_exit(rc, (origin_task_exit_t *)msg);
 			break;
+		case PCN_KMSG_TYPE_SIGNAL_FWD:
+                       handle_signal_remotes(msg);
+                       break;
 		default:
 			printk("Unknown remote work type %d\n", msg->header.type);
 			break;
@@ -856,6 +859,25 @@ static void __process_remote_works(void)
 
 		req = (struct pcn_kmsg_message *)current->remote_work;
 		current->remote_work = NULL;
+		/*
+                *Check if a restart is triggered for systemcall
+                *If yes trigger the signal to remote node
+                *For now only SIGINT is handled
+                */
+		if (ret == -ERESTARTSYS)
+		{
+			unsigned long flags;
+			spin_lock_irqsave(&current->sighand->siglock, flags);
+			if (current->signal->flags &
+					(SIGNAL_GROUP_COREDUMP| SIGNAL_GROUP_EXIT))
+			{
+				remote_signalling(SIGINT , current , 1);
+				run = false;
+			}
+			spin_unlock_irqrestore(
+					&current->sighand->siglock, flags);
+			continue;
+               }
 		smp_wmb();
 
 		if (!req) continue;

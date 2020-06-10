@@ -1059,6 +1059,13 @@ SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 SYSCALL_DEFINE4(openat, int, dfd, const char __user *, filename, int, flags,
 		umode_t, mode)
 {
+	int ret;
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		ret = redirect_open(filename, flags, mode);
+		return ret;
+	}
+#endif
 	if (force_o_largefile())
 		flags |= O_LARGEFILE;
 

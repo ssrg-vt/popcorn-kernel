@@ -15,7 +15,7 @@
 #include "types.h"
 
 int process_remote_syscall(struct pcn_kmsg_message *msg);
-
+int handle_signal_remotes(struct pcn_kmsg_message  *msg);
 /*This Set of macros allows for forwarding of syscalls of up to 6 arguments,
  *with 12 arguments being input altogether, eg. SET_REQ_PARAMS(int, a, char, b)
  *This segment will fill in the RPC syscall definitions with the correct
@@ -102,19 +102,20 @@ int process_remote_syscall(struct pcn_kmsg_message *msg);
 inline int redirect_##syscall(LIST_SYSCALL_ARGS(__VA_ARGS__))		\
 {									\
 	int ret = 0;							\
-	syscall_fwd_t *req = kmalloc(sizeof(syscall_fwd_t), GFP_KERNEL);\
+	syscall_fwd_t *req = pcn_kmsg_get(sizeof(syscall_fwd_t));	\
 	syscall_rep_t *rep = NULL;					\
 	struct wait_station *ws = get_wait_station(current);		\
 	req->origin_pid = current->origin_pid;				\
 	req->remote_ws = ws->id;					\
 	SET_REQ_PARAMS_ARGS(REVERSE(NUM_ARGS(__VA_ARGS__), __VA_ARGS__))\
 	req->call_type = syscall_type;					\
-	ret = pcn_kmsg_send(PCN_KMSG_TYPE_SYSCALL_FWD, 0, req,		\
+	ret = pcn_kmsg_post(PCN_KMSG_TYPE_SYSCALL_FWD, 0, req,		\
 			    sizeof(*req));				\
-	kfree(req);							\
 	rep = wait_at_station(ws);					\
 	ret = rep->ret;							\
+	pcn_kmsg_done(rep);						\
 	/*printk(KERN_INFO "On ORIGIN: syscall redirect called for #syscall");*/\
+	if (ret == -ERESTARTSYS) do_exit(130); \
 	return ret;							\
 }
 

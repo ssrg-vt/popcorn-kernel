@@ -299,7 +299,12 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 {
 	struct kstat stat;
 	int error;
-
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = redirect_fstatat(dfd,filename,statbuf,flag);
+		return error;
+	}
+#endif
 	error = vfs_fstatat(dfd, filename, &stat, flag);
 	if (error)
 		return error;

@@ -319,27 +319,29 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
 /* Enumerate syscall types*/
 enum pcn_syscall_types
 {
-	PCN_SYSCALL_SOCKET_CREATE,
+	PCN_SYSCALL_SOCKET_CREATE,	// 0
 	PCN_SYSCALL_SETSOCKOPT,
 	PCN_SYSCALL_BIND,
 	PCN_SYSCALL_LISTEN,
 	PCN_SYSCALL_ACCEPT4,
-	PCN_SYSCALL_SHUTDOWN,
+	PCN_SYSCALL_SHUTDOWN,		// 5
 	PCN_SYSCALL_RECVFROM,
 	PCN_SYSCALL_EPOLL_CREATE1,
 	PCN_SYSCALL_EPOLL_WAIT,
 	PCN_SYSCALL_EPOLL_PWAIT,
-	PCN_SYSCALL_EPOLL_CTL,
+	PCN_SYSCALL_EPOLL_CTL,		// 10
 	PCN_SYSCALL_READ,
 	PCN_SYSCALL_WRITE,
 	PCN_SYSCALL_OPEN,
 	PCN_SYSCALL_CLOSE,
-	PCN_SYSCALL_IOCTL,
+	PCN_SYSCALL_IOCTL,		// 15
 	PCN_SYSCALL_WRITEV,
 	PCN_SYSCALL_FSTAT,
 	PCN_SYSCALL_SENDFILE64,
 	PCN_SYSCALL_SELECT,
-	PCN_SYSCALL_FCNTL,
+	PCN_SYSCALL_FCNTL,		// 20
+	PCN_SYSCALL_FSTATAT,
+	PCN_SYSCALL_GETPID,
 	PCN_NUM_SYSCALLS
 };
 
@@ -361,6 +363,15 @@ DEFINE_PCN_KMSG(syscall_fwd_t, SYSCALL_FWD_FIELDS);
 	int remote_ws;					\
 	int ret;
 DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
+
+#define SIGNAL_TRANSMIT_FIELDS 				\
+       pid_t origin_pid;                                \
+       pid_t remote_pid;                                \
+       int   remote_nid;                                \
+       int sig;                                         \
+       bool group;
+DEFINE_PCN_KMSG(signal_trans_t , SIGNAL_TRANSMIT_FIELDS);
+
 
 /**
  * Message routing using work queues

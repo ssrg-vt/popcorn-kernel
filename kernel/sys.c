@@ -820,6 +820,11 @@ change_okay:
 }
 #endif /* CONFIG_MULTIUSER */
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/syscall_server.h>
+#endif
+
 /**
  * sys_getpid - return the thread group id of the current process
  *
@@ -831,6 +836,12 @@ change_okay:
  */
 SYSCALL_DEFINE0(getpid)
 {
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		return redirect_getpid(0);
+	}
+#endif
+
 	return task_tgid_vnr(current);
 }
 

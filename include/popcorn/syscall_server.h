@@ -38,4 +38,7 @@ long redirect_fstat(unsigned int fd,
 long redirect_sendfile64(int out_fd, int in_fd,
 			       loff_t __user *offset, size_t count);
 long redirect_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg);
+long redirect_fstatat(int dfd, const char __user *filename,
+			       struct stat __user *statbuf, int flag);
+long redirect_getpid(int dummy);
 #endif
