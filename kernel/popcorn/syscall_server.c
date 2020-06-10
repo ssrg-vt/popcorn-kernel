@@ -301,7 +301,7 @@ int __init syscall_server_init(void)
 			      syscall_fwd);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SYSCALL_REP,
 			      syscall_reply);
-        REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SIGNAL_FWD,
+	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SIGNAL_FWD,
                               signal_remotes);
 	return 0;
 }

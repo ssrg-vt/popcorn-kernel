@@ -662,7 +662,7 @@ static void __run_remote_worker(struct remote_context *rc)
 		case PCN_KMSG_TYPE_TASK_EXIT_ORIGIN:
 			process_origin_task_exit(rc, (origin_task_exit_t *)msg);
 			break;
-		case PCN_KMSG_TYPE_SIGNAL_FWD :
+		case PCN_KMSG_TYPE_SIGNAL_FWD:
                        handle_signal_remotes(msg);
                        break;
 		default:

@@ -6,6 +6,6 @@ struct field_arch;
 
 int save_thread_info(struct field_arch *arch);
 int restore_thread_info(struct field_arch *arch, bool restore_segments);
-int remote_signalling(int sig , struct task_struct * tsk, int group );
+int remote_signalling(int sig , struct task_struct * tsk, int group);
 int signal_remotes(struct pcn_kmsg_message *msg);
 #endif
