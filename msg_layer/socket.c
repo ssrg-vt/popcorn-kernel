@@ -16,6 +16,7 @@
 #define PORT 30467
 #define MAX_SEND_DEPTH	1024
 
+
 enum {
 	SEND_FLAG_POSTED = 0,
 };
@@ -47,6 +48,7 @@ static struct sock_handle sock_handles[MAX_NUM_NODES] = {};
 static struct socket *sock_listen = NULL;
 static struct ring_buffer send_buffer = {};
 
+static char config_file_path[CONFIG_FILE_LEN];
 
 /**
  * Handle inbound messages
@@ -412,7 +414,7 @@ static int __init __accept_client(int *nid)
 		}
 
 		/* Identify incoming peer nid */
-		for (i = 0; i < MAX_NUM_NODES; i++) {
+		for (i = 0; i < max_nodes; i++) {
 			if (addr.sin_addr.s_addr == ip_table[i]) {
 				*nid = i;
 				found = true;
@@ -458,7 +460,7 @@ static int __init __listen_to_connection(void)
 		goto out_release;
 	}
 
-	ret = kernel_listen(sock_listen, MAX_NUM_NODES);
+	ret = kernel_listen(sock_listen, max_nodes);
 	if (ret < 0) {
 		printk(KERN_ERR "Failed to listen to connections, %d\n", ret);
 		goto out_release;
@@ -479,7 +481,7 @@ static void __exit exit_kmsg_sock(void)
 
 	if (sock_listen) sock_release(sock_listen);
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
+	for (i = 0; i < max_nodes; i++) {
 		struct sock_handle *sh = sock_handles + i;
 		if (sh->send_handler) {
 			kthread_stop(sh->send_handler);
@@ -504,10 +506,13 @@ static int __init init_kmsg_sock(void)
 
 	MSGPRINTK("Loading Popcorn messaging layer over TCP/IP...\n");
 
+	/* Load node configuration */
+    if (!load_config_file(config_file_path)) return -EINVAL;
+
 	if (!identify_myself()) return -EINVAL;
 	pcn_kmsg_set_transport(&transport_socket);
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
+	for (i = 0; i < max_nodes; i++) {
 		struct sock_handle *sh = sock_handles + i;
 
 		sh->msg_q = kmalloc(sizeof(*sh->msg_q) * MAX_SEND_DEPTH, GFP_KERNEL);
@@ -549,7 +554,7 @@ static int __init init_kmsg_sock(void)
 
 	set_popcorn_node_online(my_nid, true);
 
-	for (i = my_nid + 1; i < MAX_NUM_NODES; i++) {
+	for (i = my_nid + 1; i < max_nodes; i++) {
 		int nid;
 		if ((ret = __accept_client(&nid))) goto out_exit;
 		set_popcorn_node_online(nid, true);
@@ -564,6 +569,9 @@ out_exit:
 	exit_kmsg_sock();
 	return ret;
 }
+
+module_param_string(config_file, config_file_path, CONFIG_FILE_LEN, 0400);
+MODULE_PARM_DESC(config_file, "Configuration file path");
 
 module_init(init_kmsg_sock);
 module_exit(exit_kmsg_sock);

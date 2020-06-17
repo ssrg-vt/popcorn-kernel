@@ -1051,12 +1051,16 @@ SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 		return ret;
 	}
 	if (mvx_process(current)) {
+		char buf[256];
+		int ret = 0;
 		mvx_args[0] = (int64_t)filename;
 		mvx_args[1] = flags;
 		mvx_args[2] = mode;
+		ret = copy_from_user(buf, filename, 256);
+		pr_info("%s: filename %s, ret %d\n", __func__, buf, ret);
 		if (mvx_follower(current)) {
 #ifdef __x86_64__
-			if (!mvx_follower_wait_exec(current, master_nid, __NR_open,
+			if (!mvx_follower_wait_exec(current, MASTER_NID, __NR_open,
 						  mvx_args, &ret, sizeof(int)))
 			{
 				MVXPRINTK("%s: ret %d\n", __func__, ret);
@@ -1073,13 +1077,14 @@ SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 #ifdef CONFIG_POPCORN
 #ifdef __x86_64__
 	if (mvx_process(current)) {
+		pr_info("%s: ret %d (0x%x)\n", __func__, ret, ret);
 		if (!mvx_follower(current)) {
 			// Master forwards syscall params to follower(s)
-			mvx_master_sync(current, follower_nid,
+			mvx_master_sync(current, FOLLOWER_NID,
 					__NR_open, mvx_args, ret);
 			MVXPRINTK("%s: ret %d\n", __func__, ret);
 		} else {
-			mvx_follower_post_syscall(current, master_nid,
+			mvx_follower_post_syscall(current, MASTER_NID,
 				__NR_open, mvx_args, &ret);
 		}
 	}
@@ -1101,7 +1106,7 @@ SYSCALL_DEFINE4(openat, int, dfd, const char __user *, filename, int, flags,
 	if (mvx_process(current)) {
 		mvx_args[1] = (int64_t)filename;
 		if (mvx_follower(current)) {
-			if (!mvx_follower_wait_exec(current, master_nid, __NR_openat,
+			if (!mvx_follower_wait_exec(current, MASTER_NID, __NR_openat,
 						  mvx_args, &ret, sizeof(int)))
 			{
 				// returns 0 means NOT a real fd
@@ -1118,10 +1123,10 @@ SYSCALL_DEFINE4(openat, int, dfd, const char __user *, filename, int, flags,
 #ifdef CONFIG_POPCORN
 	if (mvx_process(current)) {
 		if (mvx_follower(current))
-			mvx_follower_post_syscall(current, master_nid,
+			mvx_follower_post_syscall(current, MASTER_NID,
 				__NR_openat, mvx_args, &ret);
 		else
-			mvx_master_sync(current, follower_nid,
+			mvx_master_sync(current, FOLLOWER_NID,
 					__NR_openat, mvx_args, ret);
 	}
 #endif
@@ -1187,7 +1192,7 @@ SYSCALL_DEFINE1(close, unsigned int, fd)
 		if (mvx_follower(current)) {
 			// return directly when it is a virtual fd
 			// real fd: 1 ; SIM fd: 0
-			if (!mvx_follower_wait_exec(current, master_nid, __NR_close,
+			if (!mvx_follower_wait_exec(current, MASTER_NID, __NR_close,
 					       mvx_args, &retval, sizeof(int)))
 				return retval;
 			//MVXPRINTK("%s: fd %u, ret %d\n", __func__, fd, retval);
@@ -1207,10 +1212,10 @@ SYSCALL_DEFINE1(close, unsigned int, fd)
 	if (mvx_process(current)) {
 		if (!mvx_follower(current)) {
 			// Master forwards syscall params to follower(s)
-			mvx_master_sync(current, follower_nid, __NR_close,
+			mvx_master_sync(current, FOLLOWER_NID, __NR_close,
 					mvx_args, retval);
 		} else {
-			mvx_follower_post_syscall(current, master_nid,
+			mvx_follower_post_syscall(current, MASTER_NID,
 				__NR_close, mvx_args, &retval);
 		}
 		MVXPRINTK("%s: fd %u, ret %d\n", __func__, fd, retval);

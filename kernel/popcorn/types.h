@@ -11,8 +11,10 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/regset.h>
 
-#define FAULTS_HASH 31
-#define	MVX_MSG_SIZE	1024
+#define FAULTS_HASH 		31
+#define MVX_MSG_SIZE		1024
+#define MVX_EXE_PATH_SIZE	1024
+#define MVX_CMDLINE_SIZE	1024
 
 /**
  * Remote execution context
@@ -373,12 +375,20 @@ DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
        bool group;
 DEFINE_PCN_KMSG(signal_trans_t , SIGNAL_TRANSMIT_FIELDS);
 
+/* Command line struct */
+typedef struct _cmd {
+	int argc;
+	int cmdline_size;
+	char cmdline[MVX_CMDLINE_SIZE];
+	char exe_path[MVX_EXE_PATH_SIZE];
+} cmd_t;
+
 /**
  * MVX message.
  * */
 #define MVX_INIT_FIELDS				\
 	pid_t origin_pid;			\
-	char exe_path[1024];
+	cmd_t cmd;
 DEFINE_PCN_KMSG(mvx_init_t, MVX_INIT_FIELDS);
 
 #define MVX_MSG_FIELDS				\

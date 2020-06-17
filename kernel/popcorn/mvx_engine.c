@@ -79,8 +79,10 @@ static void follower_epoll_pwait(int64_t args[], int32_t *retval)
 	/* No need to copy buffer. Epoll_pwait failed. */
 	*retval = mvx_follower_msg.retval;
 	if (*retval < 0) {
-		if (*retval == -EINTR)	// ctrl-c
+		if (*retval == -EINTR)	{// ctrl-c
+			stop_mvx_process(current);
 			do_exit(130);
+		}
 		else
 			return;
 	}
@@ -215,15 +217,54 @@ static void follower_writev(int32_t *retval, unsigned int dst_nid)
 	MVXPRINTK("Follower waits msg on\n[%2ld] syscall: <SYS_writev>\n",
 		  mvx_index++);
 	/* Follower waits for a message from master. */
-	wait_for_completion_interruptible(&follower_wait);
+	if (current->is_mvx_process)
+		wait_for_completion_interruptible(&follower_wait);
+	else
+		goto out;
+
 	MVX_WARN_ON(mvx_follower_msg.syscall != __NR_writev);
 
 	MVXPRINTK("syscall %d: <%s>. flag %d. master msg syscall %d\n",
 		  __NR_writev, syscall_name[__NR_writev],
 		  mvx_follower_msg.flag, mvx_follower_msg.syscall);
 
+	if (*retval != (ssize_t)mvx_follower_msg.retval)
+		pr_info("follower ret %d != %ld from master\n",
+			*retval, (ssize_t)mvx_follower_msg.retval);
+
 	*(ssize_t *)retval = (ssize_t)mvx_follower_msg.retval;
 	mvx_send_reply(*(ssize_t *)retval, __NR_writev, dst_nid);
+out:
+	return;
+}
+
+static void follower_write(int32_t *retval, unsigned int dst_nid)
+{
+	extern struct completion follower_wait;
+
+	MVXPRINTK("\n");
+	MVXPRINTK("Follower waits msg on\n[%2ld] syscall: <SYS_write>\n",
+		  mvx_index++);
+	/* Follower waits for a message from master. */
+	if (current->is_mvx_process)
+		wait_for_completion_interruptible(&follower_wait);
+	else
+		goto out;
+
+	MVX_WARN_ON(mvx_follower_msg.syscall != __NR_write);
+
+	MVXPRINTK("syscall %d: <%s>. flag %d. master msg syscall %d\n",
+		  __NR_write, syscall_name[__NR_write],
+		  mvx_follower_msg.flag, mvx_follower_msg.syscall);
+
+	if (*retval != (ssize_t)mvx_follower_msg.retval)
+		pr_info("follower ret %d != %ld from master\n",
+			*retval, (ssize_t)mvx_follower_msg.retval);
+
+	*(ssize_t *)retval = (ssize_t)mvx_follower_msg.retval;
+	mvx_send_reply(*(ssize_t *)retval, __NR_write, dst_nid);
+out:
+	return;
 }
 
 /**
@@ -268,7 +309,11 @@ int mvx_follower_wait_exec(struct task_struct *tsk, unsigned int dst_nid,
 		  mvx_index++, syscall, syscall_name[syscall], retsz);
 wait:
 	/* Follower waits for a message. */
-	wait_for_completion_interruptible(&follower_wait);
+	if (current->is_mvx_process)
+		wait_for_completion_interruptible(&follower_wait);
+	else
+		goto out;
+
 
 	/* Corner case for master's extra epoll_pwait. */
 	if (mvx_follower_msg.syscall == __NR_epoll_pwait) {
@@ -328,7 +373,7 @@ wait:
 		mvx_send_reply(*((int64_t *)retval), syscall, dst_nid);
 	if (retsz == 4)
 		mvx_send_reply(*((int32_t *)retval), syscall, dst_nid);
-
+out:
 	return ret;
 }
 
@@ -350,6 +395,9 @@ int mvx_follower_post_syscall(struct task_struct *tsk, unsigned int dst_nid,
 	/* This syscall only in post, but have to send reply. */
 	case __NR_writev:
 		follower_writev(retval, dst_nid);
+		break;
+	case __NR_write:
+		follower_write(retval, dst_nid);
 		break;
 
 	/* These 3 syscall was in pre procedure. */
@@ -411,7 +459,6 @@ static void master_read(mvx_message_t *msg, int64_t args[], int64_t retval)
 	}
 	MVXPRINTK("%s: fd %lld, flag %d, len %d, retval %lld.\n",
 		  __func__, args[0], msg->flag, msg->len, retval);
-
 }
 
 /**
@@ -441,6 +488,7 @@ static void master_epoll_pwait(mvx_message_t *msg, int64_t args[],
 		msg->len = 0;
 		msg->retval = retval;
 		msg->syscall = syscall_tbl[__NR_epoll_pwait];
+		if (retval == -EINTR) stop_mvx_process(current);
 		return;
 	}
 
@@ -649,7 +697,8 @@ int mvx_master_sync(struct task_struct *tsk, unsigned int dst_nid,
 			master_close(msg, args, retval);
 		}
 	case __NR_writev:
-		if (syscall == __NR_writev) {
+	case __NR_write:
+		if (syscall == __NR_writev || syscall == __NR_write) {
 			if (mvx_is_real_fd(args[0])) {
 				msg->flag = MVX_REAL;
 			} else {

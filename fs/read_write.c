@@ -583,7 +583,7 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 	}
 	if (mvx_process(current) && mvx_follower(current)) {
 		// Follower waits for master syscall execution
-		if (!mvx_follower_wait_exec(current, master_nid, __NR_read,
+		if (!mvx_follower_wait_exec(current, MASTER_NID, __NR_read,
 				mvx_args, (void *)&ret, sizeof(ssize_t)))
 		{
 			MVXPRINTK("%s: ret %ld\n", __func__, ret);
@@ -605,10 +605,10 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 	if (mvx_process(current)) {
 		if (!mvx_follower(current)) {
 			// Master forwards syscall params to follower(s)
-			mvx_master_sync(current, follower_nid,
+			mvx_master_sync(current, FOLLOWER_NID,
 					__NR_read, mvx_args, ret);
 		} else {
-			mvx_follower_post_syscall(current, master_nid,
+			mvx_follower_post_syscall(current, MASTER_NID,
 				__NR_read, mvx_args, (int *)&ret);// TODO: type
 		}
 		MVXPRINTK_POST("%s: ret %ld\n", __func__, ret);
@@ -628,6 +628,31 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		ret = redirect_write(fd, buf, count);
 		return ret;
 	}
+#endif
+
+	f = fdget_pos(fd);
+	ret = -EBADF;
+
+	if (f.file) {
+		loff_t pos = file_pos_read(f.file);
+		ret = vfs_write(f.file, buf, count, &pos);
+		if (ret >= 0)
+			file_pos_write(f.file, pos);
+		fdput_pos(f);
+	}
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		mvx_print_fd_vtab();
+		pr_info("fd %d, count %ld, ret %ld\n", fd, count, ret);
+		if (!mvx_follower(current)) {
+			mvx_master_sync(current, FOLLOWER_NID,
+					__NR_write, mvx_args, ret);
+		} else {
+			mvx_follower_post_syscall(current, MASTER_NID,
+				__NR_write, mvx_args, (int *)&ret);
+		}
+	}
+#if 1
 	if (mvx_process(current)) {
 		char kbuf[128];
 		size_t len = count<128 ? count : 127;
@@ -641,18 +666,7 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		MVXPRINTK("Not support %s yet.\n", __func__);
 	}
 #endif
-
-	f = fdget_pos(fd);
-	ret = -EBADF;
-
-	if (f.file) {
-		loff_t pos = file_pos_read(f.file);
-		ret = vfs_write(f.file, buf, count, &pos);
-		if (ret >= 0)
-			file_pos_write(f.file, pos);
-		fdput_pos(f);
-	}
-
+#endif
 	return ret;
 }
 
@@ -945,7 +959,34 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 		ret = redirect_writev(fd, vec, vlen);
 		return ret;
 	}
-#if 0
+#endif
+
+	f = fdget_pos(fd);
+	ret = -EBADF;
+
+	if (f.file) {
+		loff_t pos = file_pos_read(f.file);
+		ret = vfs_writev(f.file, vec, vlen, &pos);
+		if (ret >= 0)
+			file_pos_write(f.file, pos);
+		fdput_pos(f);
+	}
+
+	if (ret > 0)
+		add_wchar(current, ret);
+	inc_syscw(current);
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		mvx_print_fd_vtab();
+		if (!mvx_follower(current)) {
+			mvx_master_sync(current, FOLLOWER_NID,
+					__NR_writev, mvx_args, ret);
+		} else {
+			mvx_follower_post_syscall(current, MASTER_NID,
+				__NR_writev, mvx_args, (int *)&ret);
+		}
+	}
+#if 1
 	if (mvx_process(current)) {
 		char kbuf[128];
 		int ret = 0, i;
@@ -970,33 +1011,6 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 		kfree(kvec);
 	}
 #endif
-#endif
-
-	f = fdget_pos(fd);
-	ret = -EBADF;
-
-	if (f.file) {
-		loff_t pos = file_pos_read(f.file);
-		ret = vfs_writev(f.file, vec, vlen, &pos);
-		if (ret >= 0)
-			file_pos_write(f.file, pos);
-		fdput_pos(f);
-	}
-
-	if (ret > 0)
-		add_wchar(current, ret);
-	inc_syscw(current);
-#ifdef CONFIG_POPCORN
-	if (mvx_process(current)) {
-		mvx_print_fd_vtab();
-		if (!mvx_follower(current)) {
-			mvx_master_sync(current, follower_nid,
-					__NR_writev, mvx_args, ret);
-		} else {
-			mvx_follower_post_syscall(current, master_nid,
-				__NR_writev, mvx_args, (int *)&ret);
-		}
-	}
 #endif
 	return ret;
 }
@@ -1398,7 +1412,7 @@ SYSCALL_DEFINE4(sendfile, int, out_fd, int, in_fd, off_t __user *, offset, size_
 		mvx_args[3] = count;
 
 		if (!mvx_follower(current)) {
-			mvx_follower_wait_exec(current, master_nid, __NR_sendfile,
+			mvx_follower_wait_exec(current, MASTER_NID, __NR_sendfile,
 				mvx_args, (int32_t *)&ret, sizeof(ssize_t));
 		}
 	}
@@ -1424,7 +1438,7 @@ out:
 	if (mvx_process(current)) {
 		if (!mvx_follower(current)) {
 			// Master forwards syscall params to follower(s)
-			mvx_master_sync(current, follower_nid,
+			mvx_master_sync(current, FOLLOWER_NID,
 					__NR_sendfile, mvx_args, ret);
 			MVXPRINTK("%s: ret %ld\n", __func__, ret);
 		}
@@ -1476,7 +1490,7 @@ SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd, loff_t __user *, offset, si
 		mvx_args[3] = count;
 
 		if (mvx_follower(current)) {
-			mvx_follower_wait_exec(current, master_nid, __NR_sendfile,
+			mvx_follower_wait_exec(current, MASTER_NID, __NR_sendfile,
 				mvx_args, (int32_t *)&ret, sizeof(ssize_t));
 			return ret;
 		}
@@ -1502,7 +1516,7 @@ out:
 	if (mvx_process(current)) {
 		if (!mvx_follower(current)) {
 			// Master forwards syscall params to follower(s)
-			mvx_master_sync(current, follower_nid,
+			mvx_master_sync(current, FOLLOWER_NID,
 					__NR_sendfile, mvx_args, ret);
 			MVXPRINTK("%s: ret %ld\n", __func__, ret);
 		}

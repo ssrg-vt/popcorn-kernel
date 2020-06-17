@@ -1261,11 +1261,11 @@ SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 	if (mvx_process(current)) {
 		if (!mvx_follower(current)) {
 			// Master intercepts syscall params and retval.
-			mvx_master_sync(current, follower_nid, __NR_socket,
+			mvx_master_sync(current, FOLLOWER_NID, __NR_socket,
 					mvx_args, retval);
 		} else {
 			// We want to create a socket on the follower.
-			mvx_follower_post_syscall(current, master_nid, __NR_socket,
+			mvx_follower_post_syscall(current, MASTER_NID, __NR_socket,
 						  mvx_args, &retval);
 		}
 		MVXPRINTK("%s: ret %d\n", __func__, retval);
@@ -1494,7 +1494,7 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 
 		if (mvx_follower(current)) {
 			// Follower waits for master syscall execution
-			mvx_follower_wait_exec(current, master_nid, __NR_accept4,
+			mvx_follower_wait_exec(current, MASTER_NID, __NR_accept4,
 					       mvx_args, &err, sizeof(int));
 			MVXPRINTK("%s: ret %d\n", __func__, err);
 			return err;
@@ -1570,7 +1570,7 @@ out:
 #ifdef CONFIG_POPCORN
 	if (mvx_process(current) && !mvx_follower(current)) {
 		// Master forwards syscall params to follower(s)
-		mvx_master_sync(current, follower_nid, __NR_accept4, mvx_args, err);
+		mvx_master_sync(current, FOLLOWER_NID, __NR_accept4, mvx_args, err);
 		MVXPRINTK("%s: ret %d\n", __func__, err);
 	}
 #endif
@@ -1815,7 +1815,7 @@ out:
 	if (mvx_process(current)) {
 		if (!mvx_follower(current))
 			// Master intercepts syscall params and retval.
-			mvx_master_sync(current, follower_nid, __NR_recvfrom,
+			mvx_master_sync(current, FOLLOWER_NID, __NR_recvfrom,
 					mvx_args, err);
 		MVXPRINTK("%s: ret %d\n", __func__, err);
 	}
@@ -1857,7 +1857,7 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
 	}
 	if (mvx_process(current)) {
 		if (mvx_follower(current)) {
-			mvx_follower_wait_exec(current, master_nid, __NR_setsockopt,
+			mvx_follower_wait_exec(current, MASTER_NID, __NR_setsockopt,
 						  mvx_args, &err, sizeof(int));
 			MVXPRINTK("%s: ret %d\n", __func__, err);
 			return err;
@@ -1885,7 +1885,7 @@ out_put:
 	if (mvx_process(current)) {
 		if (!mvx_follower(current))
 			// Master intercepts syscall params and retval.
-			mvx_master_sync(current, follower_nid, __NR_setsockopt,
+			mvx_master_sync(current, FOLLOWER_NID, __NR_setsockopt,
 					mvx_args, err);
 	//	else
 	//		mvx_follower_wait_exec(current, 0, __NR_setsockopt,
@@ -1917,7 +1917,7 @@ SYSCALL_DEFINE5(getsockopt, int, fd, int, level, int, optname,
 
 		// follower update params and return
 		if (mvx_follower(current)) {
-			mvx_follower_wait_exec(current, master_nid, __NR_getsockopt,
+			mvx_follower_wait_exec(current, MASTER_NID, __NR_getsockopt,
 						  mvx_args, &err, sizeof(int));
 			MVXPRINTK("%s: ret %d\n", __func__, err);
 			return err;
@@ -1945,7 +1945,7 @@ out_put:
 	if (mvx_process(current)) {
 		// Master intercepts syscall params and retval.
 		if (!mvx_follower(current))
-			mvx_master_sync(current, follower_nid, __NR_getsockopt,
+			mvx_master_sync(current, FOLLOWER_NID, __NR_getsockopt,
 					mvx_args, err);
 	}
 #endif

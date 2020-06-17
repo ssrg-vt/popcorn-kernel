@@ -1,9 +1,9 @@
 /**
  * @file include/popcorn/mvx.h
  *
- * MVX related functions
+ * MVX related configuration and functions.
  *
- * @author Xiaoguang Wang, SSRG Virginia Tech, 2019
+ * @author Xiaoguang Wang, SSRG Virginia Tech, 2019-2020
  */
 
 #ifndef __INCLUDE_POPCORN_MVX_H__
@@ -13,28 +13,24 @@
 #include <popcorn/debug.h>
 
 /* MVX master/follower node id. */
-extern int master_nid;
-extern int follower_nid;
+#define MASTER_NID			1		/* ARM64 node as master */
+#define FOLLOWER_NID		0		/* x86_64 node as follower */
+
+/* MVX follower process UID/GID. */
+#define MVX_FOLLOWER_UID	1000
+#define MVX_FOLLOWER_GID	1000
 
 /* MVX Virtual Descriptor Table size. */
 #define VDT_SIZE	512
 
-//typedef struct _vdt_entry {
-//	int id;
-//	int real;
-//} vdt_entry_t;
-
-enum mvx_variant_role {
-	MVX_MASTER = 0,
-	MVX_FOLLOWER = 1,
-};
-
+/* VFD types: Read FD, simulated FD. Used in `mvx_message_t.flag`. */
 enum mvx_vfd_type {
 	MVX_EMPTY = 0,		// empty entry
 	MVX_REAL = 1,		// real fd
 	MVX_SIM = 2,		// simulated fd
 //	MVX_SIM_CLOSE = 3,	// simulated, need close
 				// e.g., epoll_create1, socket
+	MVX_VFD_MAX			// Maximum number of the VFD state
 };
 
 enum mvx_fd_operate {
@@ -45,6 +41,10 @@ enum mvx_fd_operate {
 /* The Virtual Descriptor Table and the Index (next available fd). */
 extern int fd_vtab[VDT_SIZE];
 extern int vtab_count;
+
+/* Stopping MVX. Used in `mvx_message_t.flag`. */
+#define MVX_OFF			1
+#define MVX_OFF_OFFSET	7
 
 extern int64_t mvx_args[6];
 extern const char* dir_whitelist[];
@@ -66,7 +66,13 @@ struct epoll_event_x86 {
 
 #define MVX_WARN_ON(condition) {\
 	if(unlikely(condition)) \
-		pr_err("[MVX Violation] %s:%d %s\n", __FILE__, __LINE__, __func__); \
+		pr_err("[**MVX Violation**] %s:%d %s\n", __FILE__, __LINE__, __func__); \
+}
+
+static inline void stop_mvx_process(struct task_struct *tsk)
+{
+	tsk->is_mvx_process = 0;
+	MVXPRINTK("Stop MVX variant ...\n");
 }
 
 static inline bool mvx_process(struct task_struct *tsk)
@@ -91,13 +97,7 @@ static inline void mvx_print(struct task_struct *tsk)
 	       mvx_process(tsk), mvx_follower(tsk));
 }
 
-//static inline void mvx_print_msg(mvx_core_msg_t *msg)
-//{
-//	MVXPRINTK("syscall %d, flag %d, len %d, ret %ld. buf %s\n",
-//		  msg->syscall, msg->flag, msg->len, msg->retval,
-//		  (msg->len == 0) ? "" : msg->buf);
-//}
-
+#if 0
 static inline void mvx_print_fd_vtab(void)
 {
 	int i;
@@ -109,6 +109,9 @@ static inline void mvx_print_fd_vtab(void)
 		}
 	}
 }
+#else
+static inline void mvx_print_fd_vtab(void) {}
+#endif
 
 /**
  * Update fd_vtab entry.
