@@ -414,7 +414,7 @@ static int __init __accept_client(int *nid)
 		}
 
 		/* Identify incoming peer nid */
-		for (i = 0; i < MAX_NUM_NODES; i++) {
+		for (i = 0; i < max_nodes; i++) {
 			if (addr.sin_addr.s_addr == ip_table[i]) {
 				*nid = i;
 				found = true;
@@ -460,7 +460,7 @@ static int __init __listen_to_connection(void)
 		goto out_release;
 	}
 
-	ret = kernel_listen(sock_listen, MAX_NUM_NODES);
+	ret = kernel_listen(sock_listen, max_nodes);
 	if (ret < 0) {
 		printk(KERN_ERR "Failed to listen to connections, %d\n", ret);
 		goto out_release;
@@ -481,7 +481,7 @@ static void __exit exit_kmsg_sock(void)
 
 	if (sock_listen) sock_release(sock_listen);
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
+	for (i = 0; i < max_nodes; i++) {
 		struct sock_handle *sh = sock_handles + i;
 		if (sh->send_handler) {
 			kthread_stop(sh->send_handler);
@@ -512,7 +512,7 @@ static int __init init_kmsg_sock(void)
 	if (!identify_myself()) return -EINVAL;
 	pcn_kmsg_set_transport(&transport_socket);
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
+	for (i = 0; i < max_nodes; i++) {
 		struct sock_handle *sh = sock_handles + i;
 
 		sh->msg_q = kmalloc(sizeof(*sh->msg_q) * MAX_SEND_DEPTH, GFP_KERNEL);
@@ -554,7 +554,7 @@ static int __init init_kmsg_sock(void)
 
 	set_popcorn_node_online(my_nid, true);
 
-	for (i = my_nid + 1; i < MAX_NUM_NODES; i++) {
+	for (i = my_nid + 1; i < max_nodes; i++) {
 		int nid;
 		if ((ret = __accept_client(&nid))) goto out_exit;
 		set_popcorn_node_online(nid, true);
