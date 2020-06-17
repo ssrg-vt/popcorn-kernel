@@ -562,6 +562,7 @@ static inline void file_pos_write(struct file *file, loff_t pos)
 #ifdef CONFIG_POPCORN
 #include <popcorn/types.h>
 #include <popcorn/syscall_server.h>
+#include <popcorn/mvx.h>
 #endif
 
 SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
@@ -574,6 +575,21 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 		ret = redirect_read(fd, buf, count);
 		return ret;
 	}
+	if (mvx_process(current)) {
+		//mvx_print(current);
+		mvx_args[0] = fd;
+		mvx_args[1] = (uint64_t)buf;
+		mvx_args[2] = count;
+	}
+	if (mvx_process(current) && mvx_follower(current)) {
+		// Follower waits for master syscall execution
+		if (!mvx_follower_wait_exec(current, master_nid, __NR_read,
+				mvx_args, (void *)&ret, sizeof(ssize_t)))
+		{
+			MVXPRINTK("%s: ret %ld\n", __func__, ret);
+			return ret;
+		}
+	}
 #endif
 	f = fdget_pos(fd);
 	ret = -EBADF;
@@ -585,6 +601,19 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 			file_pos_write(f.file, pos);
 		fdput_pos(f);
 	}
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		if (!mvx_follower(current)) {
+			// Master forwards syscall params to follower(s)
+			mvx_master_sync(current, follower_nid,
+					__NR_read, mvx_args, ret);
+		} else {
+			mvx_follower_post_syscall(current, master_nid,
+				__NR_read, mvx_args, (int *)&ret);// TODO: type
+		}
+		MVXPRINTK_POST("%s: ret %ld\n", __func__, ret);
+	}
+#endif
 	return ret;
 }
 
@@ -598,6 +627,18 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 	if (distributed_remote_process(current)) {
 		ret = redirect_write(fd, buf, count);
 		return ret;
+	}
+	if (mvx_process(current)) {
+		char kbuf[128];
+		size_t len = count<128 ? count : 127;
+		int ret = 0;
+
+		ret = copy_from_user(kbuf, buf, len);
+		kbuf[len] = 0;
+
+		MVXPRINTK("%s: mvx [%d] %s\n", __func__,
+		       current->pid, kbuf);
+		MVXPRINTK("Not support %s yet.\n", __func__);
 	}
 #endif
 
@@ -904,6 +945,31 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 		ret = redirect_writev(fd, vec, vlen);
 		return ret;
 	}
+#if 0
+	if (mvx_process(current)) {
+		char kbuf[128];
+		int ret = 0, i;
+		size_t len;
+		struct iovec *kvec;	// SMAP will not allow access user memory directly.
+
+		MVXPRINTK("\n%s: mvx [%d]. fd %lu, vlen %lu. MVX %s.\n",
+			  __func__, current->pid, fd, vlen,
+			  (mvx_follower(current) ? "follower":"master"));
+
+		kvec = kmalloc(vlen*sizeof(struct iovec), GFP_KERNEL);
+		ret = copy_from_user(kvec, vec, vlen*sizeof(struct iovec));
+		BUG_ON(ret);
+
+		for (i = 0; i < vlen; i++) {
+			len = (kvec[i].iov_len < 128) ? kvec[i].iov_len : 127;
+			ret = copy_from_user(kbuf, kvec[i].iov_base, len);
+			BUG_ON(ret);
+			kbuf[len] = 0;
+			MVXPRINTK("%s: buf: %s", __func__, kbuf);
+		}
+		kfree(kvec);
+	}
+#endif
 #endif
 
 	f = fdget_pos(fd);
@@ -920,6 +986,18 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 	if (ret > 0)
 		add_wchar(current, ret);
 	inc_syscw(current);
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		mvx_print_fd_vtab();
+		if (!mvx_follower(current)) {
+			mvx_master_sync(current, follower_nid,
+					__NR_writev, mvx_args, ret);
+		} else {
+			mvx_follower_post_syscall(current, master_nid,
+				__NR_writev, mvx_args, (int *)&ret);
+		}
+	}
+#endif
 	return ret;
 }
 
@@ -1286,6 +1364,7 @@ out:
 	return retval;
 }
 
+#if 0
 SYSCALL_DEFINE4(sendfile, int, out_fd, int, in_fd, off_t __user *, offset, size_t, count)
 {
 	loff_t pos;
@@ -1304,7 +1383,57 @@ SYSCALL_DEFINE4(sendfile, int, out_fd, int, in_fd, off_t __user *, offset, size_
 
 	return do_sendfile(out_fd, in_fd, NULL, count, 0);
 }
+#endif
+SYSCALL_DEFINE4(sendfile, int, out_fd, int, in_fd, off_t __user *, offset, size_t, count)
+{
+	loff_t pos;
+	off_t off;
+	ssize_t ret;
 
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		mvx_args[0] = out_fd;
+		mvx_args[1] = in_fd;
+		mvx_args[2] = (int64_t)offset;
+		mvx_args[3] = count;
+
+		if (!mvx_follower(current)) {
+			mvx_follower_wait_exec(current, master_nid, __NR_sendfile,
+				mvx_args, (int32_t *)&ret, sizeof(ssize_t));
+		}
+	}
+#endif
+	if (offset) {
+		if (unlikely(get_user(off, offset))) {
+			ret = -EFAULT;
+			goto out;
+		}
+		pos = off;
+		ret = do_sendfile(out_fd, in_fd, &pos, count, MAX_NON_LFS);
+		if (unlikely(put_user(pos, offset))) {
+			ret = -EFAULT;
+			goto out;
+		}
+		goto out;
+	}
+
+	ret = do_sendfile(out_fd, in_fd, NULL, count, 0);
+
+out:
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		if (!mvx_follower(current)) {
+			// Master forwards syscall params to follower(s)
+			mvx_master_sync(current, follower_nid,
+					__NR_sendfile, mvx_args, ret);
+			MVXPRINTK("%s: ret %ld\n", __func__, ret);
+		}
+	}
+#endif
+	return ret;
+}
+
+#if 0
 SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd, loff_t __user *, offset, size_t, count)
 {
 	loff_t pos;
@@ -1327,6 +1456,59 @@ SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd, loff_t __user *, offset, si
 	}
 
 	return do_sendfile(out_fd, in_fd, NULL, count, 0);
+}
+#endif
+
+SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd, loff_t __user *, offset, size_t, count)
+{
+	loff_t pos;
+	ssize_t ret;
+
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		ret = redirect_sendfile64(out_fd, in_fd, offset, count);
+		return ret;
+	}
+	if (mvx_process(current)) {
+		mvx_args[0] = out_fd;
+		mvx_args[1] = in_fd;
+		mvx_args[2] = (int64_t)offset;
+		mvx_args[3] = count;
+
+		if (mvx_follower(current)) {
+			mvx_follower_wait_exec(current, master_nid, __NR_sendfile,
+				mvx_args, (int32_t *)&ret, sizeof(ssize_t));
+			return ret;
+		}
+	}
+#endif
+
+	if (offset) {
+		if (unlikely(copy_from_user(&pos, offset, sizeof(loff_t)))) {
+			ret = -EFAULT;
+			goto out;
+		}
+		ret = do_sendfile(out_fd, in_fd, &pos, count, 0);
+		if (unlikely(put_user(pos, offset))) {
+			ret = -EFAULT;
+			goto out;
+		}
+		goto out;
+	}
+
+	ret = do_sendfile(out_fd, in_fd, NULL, count, 0);
+out:
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		if (!mvx_follower(current)) {
+			// Master forwards syscall params to follower(s)
+			mvx_master_sync(current, follower_nid,
+					__NR_sendfile, mvx_args, ret);
+			MVXPRINTK("%s: ret %ld\n", __func__, ret);
+		}
+	}
+#endif
+	return ret;
 }
 
 #ifdef CONFIG_COMPAT

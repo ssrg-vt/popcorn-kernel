@@ -111,6 +111,7 @@
 #ifdef CONFIG_POPCORN
 #include <popcorn/types.h>
 #include <popcorn/syscall_server.h>
+#include <popcorn/mvx.h>
 #endif
 
 #ifdef CONFIG_NET_RX_BUSY_POLL
@@ -1256,6 +1257,20 @@ SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 	if (retval < 0)
 		goto out_release;
 
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		if (!mvx_follower(current)) {
+			// Master intercepts syscall params and retval.
+			mvx_master_sync(current, follower_nid, __NR_socket,
+					mvx_args, retval);
+		} else {
+			// We want to create a socket on the follower.
+			mvx_follower_post_syscall(current, master_nid, __NR_socket,
+						  mvx_args, &retval);
+		}
+		MVXPRINTK("%s: ret %d\n", __func__, retval);
+	}
+#endif
 out:
 	/* It may be already another descriptor 8) Not kernel problem. */
 	return retval;
@@ -1471,6 +1486,20 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 				       flags);
 		return err;
 	}
+	if (mvx_process(current)) {
+		mvx_args[0] = fd;
+		mvx_args[1] = (int64_t)upeer_sockaddr;
+		mvx_args[2] = (int64_t)upeer_addrlen;
+		mvx_args[3] = flags;
+
+		if (mvx_follower(current)) {
+			// Follower waits for master syscall execution
+			mvx_follower_wait_exec(current, master_nid, __NR_accept4,
+					       mvx_args, &err, sizeof(int));
+			MVXPRINTK("%s: ret %d\n", __func__, err);
+			return err;
+		}
+	}
 #endif
 	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
 		return -EINVAL;
@@ -1538,6 +1567,13 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 out_put:
 	fput_light(sock->file, fput_needed);
 out:
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current) && !mvx_follower(current)) {
+		// Master forwards syscall params to follower(s)
+		mvx_master_sync(current, follower_nid, __NR_accept4, mvx_args, err);
+		MVXPRINTK("%s: ret %d\n", __func__, err);
+	}
+#endif
 	return err;
 out_fd:
 	fput(newfile);
@@ -1730,10 +1766,26 @@ SYSCALL_DEFINE6(recvfrom, int, fd, void __user *, ubuf, size_t, size,
 		err = redirect_recvfrom(fd, ubuf, size, flags, addr, addr_len);
 		return err;
 	}
+	if (mvx_process(current)) {
+		mvx_args[0] = fd;
+		mvx_args[1] = (int64_t)ubuf;
+		mvx_args[2] = size;
+		mvx_args[3] = flags;
+		mvx_args[4] = (int64_t)addr;
+		mvx_args[5] = (int64_t)addr_len;
+
+//		if (mvx_follower(current)) {
+//			mvx_follower_wait_exec(current, 0, __NR_recvfrom,
+//						  mvx_args, &err, sizeof(int));
+//			MVXPRINTK("%s: ret %d\n", __func__, err);
+//			return err;
+//		}
+	}
 #endif
 	err = import_single_range(READ, ubuf, size, &iov, &msg.msg_iter);
 	if (unlikely(err))
-		return err;
+		goto out;
+		//return err;
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (!sock)
 		goto out;
@@ -1759,6 +1811,15 @@ SYSCALL_DEFINE6(recvfrom, int, fd, void __user *, ubuf, size_t, size,
 
 	fput_light(sock->file, fput_needed);
 out:
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		if (!mvx_follower(current))
+			// Master intercepts syscall params and retval.
+			mvx_master_sync(current, follower_nid, __NR_recvfrom,
+					mvx_args, err);
+		MVXPRINTK("%s: ret %d\n", __func__, err);
+	}
+#endif
 	return err;
 }
 
@@ -1794,6 +1855,14 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
 		SSPRINTK("setsockopt ret: %d\n", err);
 		return err;
 	}
+	if (mvx_process(current)) {
+		if (mvx_follower(current)) {
+			mvx_follower_wait_exec(current, master_nid, __NR_setsockopt,
+						  mvx_args, &err, sizeof(int));
+			MVXPRINTK("%s: ret %d\n", __func__, err);
+			return err;
+		}
+	}
 #endif
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock != NULL) {
@@ -1812,6 +1881,18 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
 out_put:
 		fput_light(sock->file, fput_needed);
 	}
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		if (!mvx_follower(current))
+			// Master intercepts syscall params and retval.
+			mvx_master_sync(current, follower_nid, __NR_setsockopt,
+					mvx_args, err);
+	//	else
+	//		mvx_follower_wait_exec(current, 0, __NR_setsockopt,
+	//					  mvx_args, &err);
+		MVXPRINTK("%s: ret %d\n", __func__, err);
+	}
+#endif
 	return err;
 }
 
@@ -1826,6 +1907,23 @@ SYSCALL_DEFINE5(getsockopt, int, fd, int, level, int, optname,
 	int err, fput_needed;
 	struct socket *sock;
 
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		mvx_args[0] = fd;
+		mvx_args[1] = level;
+		mvx_args[2] = optname;
+		mvx_args[3] = (int64_t)optval;
+		mvx_args[4] = (int64_t)optlen;
+
+		// follower update params and return
+		if (mvx_follower(current)) {
+			mvx_follower_wait_exec(current, master_nid, __NR_getsockopt,
+						  mvx_args, &err, sizeof(int));
+			MVXPRINTK("%s: ret %d\n", __func__, err);
+			return err;
+		}
+	}
+#endif
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock != NULL) {
 		err = security_socket_getsockopt(sock, level, optname);
@@ -1843,6 +1941,14 @@ SYSCALL_DEFINE5(getsockopt, int, fd, int, level, int, optname,
 out_put:
 		fput_light(sock->file, fput_needed);
 	}
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		// Master intercepts syscall params and retval.
+		if (!mvx_follower(current))
+			mvx_master_sync(current, follower_nid, __NR_getsockopt,
+					mvx_args, err);
+	}
+#endif
 	return err;
 }
 

@@ -12,6 +12,7 @@
 #include <popcorn/regset.h>
 
 #define FAULTS_HASH 31
+#define	MVX_MSG_SIZE	1024
 
 /**
  * Remote execution context
@@ -372,6 +373,31 @@ DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
        bool group;
 DEFINE_PCN_KMSG(signal_trans_t , SIGNAL_TRANSMIT_FIELDS);
 
+/**
+ * MVX message.
+ * */
+#define MVX_INIT_FIELDS				\
+	pid_t origin_pid;			\
+	char exe_path[1024];
+DEFINE_PCN_KMSG(mvx_init_t, MVX_INIT_FIELDS);
+
+#define MVX_MSG_FIELDS				\
+	short syscall;				\
+	short flag;				\
+	unsigned int len;			\
+	long retval;				\
+	char buf[MVX_MSG_SIZE];
+DEFINE_PCN_KMSG(mvx_message_t, MVX_MSG_FIELDS);
+
+#define MVX_MSG_REPLY_FIELDS			\
+	long retval;				\
+	long syscall;
+DEFINE_PCN_KMSG(mvx_reply_t, MVX_MSG_REPLY_FIELDS);
+
+/* MVX core message. */
+typedef struct {
+	MVX_MSG_FIELDS;		/* kernel/popcorn/types.h */
+} __attribute__((packed)) mvx_core_msg_t;
 
 /**
  * Message routing using work queues

@@ -39,6 +39,11 @@ config POPCORN_DEBUG_SYSCALL_SERVER
 	depends on POPCORN_DEBUG
 	default n
 
+config POPCORN_DEBUG_MVX_SERVER
+	bool "MVX engine"
+	depends on POPCORN_DEBUG
+	default n
+
 config POPCORN_DEBUG_VERBOSE
 	bool "Log more debug messages"
 	depends on POPCORN_DEBUG

@@ -360,15 +360,29 @@ static int check_fcntl_cmd(unsigned cmd)
 #ifdef CONFIG_POPCORN
 #include <popcorn/types.h>
 #include <popcorn/syscall_server.h>
+#include <popcorn/mvx.h>
 #endif
 
 SYSCALL_DEFINE3(fcntl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)
 {
 	struct fd f;
 	long err = -EBADF;
+
 #ifdef CONFIG_POPCORN
 	if (distributed_remote_process(current)) {
 		err = redirect_fcntl(fd, cmd, arg);
+		return err;
+	}
+	if (mvx_process(current)) {
+		mvx_args[0] = fd;
+		mvx_args[1] = cmd;
+		mvx_args[2] = arg;
+	}
+	if (mvx_process(current) && mvx_follower(current)) {
+		mvx_follower_wait_exec(current, master_nid, __NR_fcntl, mvx_args,
+				       (int32_t*)&err, sizeof(long));
+		MVXPRINTK("%s: fd %d, cmd %u, arg %lu. ret: %lx\n",
+			  __func__, fd, cmd, arg, err);
 		return err;
 	}
 #endif
@@ -389,6 +403,14 @@ SYSCALL_DEFINE3(fcntl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)
 out1:
  	fdput(f);
 out:
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current) && !mvx_follower(current)) {
+		// Master forwards syscall params/retval to follower(s)
+		mvx_master_sync(current, follower_nid, __NR_fcntl, mvx_args, err);
+		MVXPRINTK("%s: fd %d, cmd %u, arg %lu. ret: %ld\n",
+			  __func__, fd, cmd, arg, err);
+	}
+#endif
 	return err;
 }
 

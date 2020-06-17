@@ -61,6 +61,8 @@
 
 #ifdef CONFIG_POPCORN
 #include <popcorn/process_server.h>
+#include <popcorn/types.h>
+#include <popcorn/mvx.h>
 #endif
 
 static void exit_mm(struct task_struct *tsk);
@@ -853,6 +855,20 @@ EXPORT_SYMBOL(complete_and_exit);
 
 SYSCALL_DEFINE1(exit, int, error_code)
 {
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		mvx_args[0] = error_code;
+		if (mvx_follower(current)) {
+			mvx_follower_wait_exec(current, master_nid,
+					       __NR_exit,
+					mvx_args, NULL, 0);
+		} else {
+			mvx_master_sync(current, follower_nid,
+					__NR_exit, mvx_args, 0);
+		}
+		MVXPRINTK("%s: error_code %d\n", __func__, error_code);
+	}
+#endif
 	do_exit((error_code&0xff)<<8);
 }
 
@@ -895,6 +911,22 @@ do_group_exit(int exit_code)
  */
 SYSCALL_DEFINE1(exit_group, int, error_code)
 {
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		mvx_args[0] = error_code;
+		if (mvx_follower(current)) {
+			//mvx_follower_post_syscall(current, 0,
+			//		__NR_exit_group, mvx_args, NULL);
+			mvx_follower_wait_exec(current, master_nid,
+					       __NR_exit_group,
+					mvx_args, NULL, 0);
+		} else {
+			mvx_master_sync(current, follower_nid,
+					__NR_exit_group, mvx_args, 0);
+		}
+		MVXPRINTK("%s: error_code %d\n", __func__, error_code);
+	}
+#endif
 	do_group_exit((error_code & 0xff) << 8);
 	/* NOTREACHED */
 	return 0;

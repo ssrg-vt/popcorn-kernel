@@ -46,6 +46,7 @@
 #ifdef CONFIG_POPCORN
 #include <popcorn/syscall_server.h>
 #include <popcorn/types.h>
+#include <popcorn/mvx.h>
 #endif
 /*
  * LOCKING:
@@ -1817,6 +1818,19 @@ SYSCALL_DEFINE1(epoll_create1, int, flags)
 	}
 	ep->file = file;
 	fd_install(fd, file);
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		if (!mvx_follower(current))
+			// Master intercepts syscall params and retval.
+			mvx_master_sync(current, follower_nid,
+					__NR_epoll_create1, mvx_args, fd);
+		else
+			mvx_follower_post_syscall(current, master_nid,
+						  __NR_epoll_create1,
+						  mvx_args, &fd);
+		MVXPRINTK("%s: ret %d\n", __func__, fd);
+	}
+#endif
 	return fd;
 
 out_free_fd:
@@ -1855,6 +1869,21 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 		error = redirect_epoll_ctl(epfd, op, fd, event);
 		SSPRINTK("remote epoll_ctl ret: %d\n", error);
 		return error;
+	}
+	if (mvx_process(current)) {
+		mvx_args[0] = epfd;
+		mvx_args[1] = op;
+		mvx_args[2] = fd;
+		mvx_args[3] = (int64_t)event;
+
+		if (mvx_follower(current)) {
+			// Follower waits for master syscall execution
+			mvx_follower_wait_exec(current, master_nid,
+					       __NR_epoll_ctl,
+					       mvx_args, &error, sizeof(int));
+			MVXPRINTK("%s: ret %d\n", __func__, error);
+			return error;
+		}
 	}
 #endif
 	error = -EFAULT;
@@ -1979,6 +2008,14 @@ error_tgt_fput:
 error_fput:
 	fdput(f);
 error_return:
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current) && !mvx_follower(current)) {
+		// Master forwards syscall params to follower(s)
+		mvx_master_sync(current, follower_nid, __NR_epoll_ctl,
+				mvx_args, error);
+		MVXPRINTK("%s: ret %d\n", __func__, error);
+	}
+#endif
 
 	return error;
 }
@@ -2054,16 +2091,38 @@ SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
 		SSPRINTK("remote epoll_pwait ret: %d\n", error);
 		return error;
 	}
+	if (mvx_process(current)) {
+		mvx_args[0] = (int64_t)epfd;
+		mvx_args[1] = (int64_t)events;
+		mvx_args[2] = (int64_t)maxevents;
+		mvx_args[3] = (int64_t)timeout;
+		mvx_args[4] = (int64_t)sigmask;
+		mvx_args[5] = (int64_t)sigsetsize;
+
+		if (mvx_follower(current)) {
+			mvx_follower_wait_exec(current, master_nid,
+					       __NR_epoll_pwait,
+					       mvx_args, &error, sizeof(int));
+			MVXPRINTK("%s: ret %d\n", __func__, error);
+			return error;
+		}
+	}
 #endif
 	/*
 	 * If the caller wants a certain signal mask to be set during the wait,
 	 * we apply it here.
 	 */
 	if (sigmask) {
-		if (sigsetsize != sizeof(sigset_t))
-			return -EINVAL;
-		if (copy_from_user(&ksigmask, sigmask, sizeof(ksigmask)))
-			return -EFAULT;
+		if (sigsetsize != sizeof(sigset_t)) {
+			error = -EINVAL;
+			goto out;
+		}
+			//return -EINVAL;
+		if (copy_from_user(&ksigmask, sigmask, sizeof(ksigmask))) {
+			error = -EINVAL;
+			goto out;
+		}
+			//return -EFAULT;
 		sigsaved = current->blocked;
 		set_current_blocked(&ksigmask);
 	}
@@ -2084,6 +2143,15 @@ SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
 		} else
 			set_current_blocked(&sigsaved);
 	}
+out:
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current) && !mvx_follower(current)) {
+		// Master forwards syscall params to follower(s)
+		mvx_master_sync(current, follower_nid,
+				__NR_epoll_pwait, mvx_args, error);
+		MVXPRINTK("%s: ret %d\n", __func__, error);
+	}
+#endif
 
 	return error;
 }

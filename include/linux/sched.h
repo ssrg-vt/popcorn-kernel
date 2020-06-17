@@ -1847,6 +1847,8 @@ struct task_struct {
 
 	bool is_worker;			/* kernel thread that manages the process*/
 	bool at_remote;			/* Is executing on behalf of another node? */
+	bool is_mvx_process;		/* Xiaoguang: a flag indicates a MVX process */
+	bool is_follower;		/* Xiaoguang: a flag indicates a follower */
 
 	volatile void *remote_work;
 	struct completion remote_work_pended;

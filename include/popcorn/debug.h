@@ -47,4 +47,14 @@
 #define SSPRINTK(...)
 #endif
 
+#ifdef CONFIG_POPCORN_DEBUG_MVX_SERVER
+#define MVXPRINTK(...) printk(KERN_INFO "[MVX] "__VA_ARGS__)
+#define MVXPRINTK_PRE(...) printk(KERN_INFO "[MVX pre syscall] "__VA_ARGS__)
+#define MVXPRINTK_POST(...) printk(KERN_INFO "[MVX post syscall] "__VA_ARGS__)
+#else
+#define MVXPRINTK(...)
+#define MVXPRINTK_PRE(...)
+#define MVXPRINTK_POST(...)
+#endif
+
 #endif /*  __INCLUDE_POPCORN_DEBUG_H__ */

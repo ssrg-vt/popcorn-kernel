@@ -336,6 +336,8 @@
 331 64	popcorn_propose_migration	sys_popcorn_propose_migration
 332 64	popcorn_get_thread_status	sys_popcorn_get_thread_status
 333 64	popcorn_get_node_info	sys_popcorn_get_node_info
+334 64  popcorn_mvx             sys_popcorn_mvx
+335 64  hscall        sys_hscall
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact

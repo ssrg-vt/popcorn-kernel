@@ -715,16 +715,21 @@ __SYSCALL(__NR_userfaultfd, sys_userfaultfd)
 __SYSCALL(__NR_membarrier, sys_membarrier)
 #define __NR_mlock2 284
 __SYSCALL(__NR_mlock2, sys_mlock2)
-#define __NR_popcorn_migrate 285
+#define __NR_popcorn_migrate 294
 __SYSCALL(__NR_popcorn_migrate, sys_popcorn_migrate)
-#define __NR_popcorn_propose_migration 286
+#define __NR_popcorn_propose_migration 295
 __SYSCALL(__NR_popcorn_propose_migration, sys_popcorn_propose_migration)
-#define __NR_popcorn_get_thread_status 287
+#define __NR_popcorn_get_thread_status 296
 __SYSCALL(__NR_popcorn_get_thread_status, sys_popcorn_get_thread_status)
-#define __NR_popcorn_get_node_info 288
+#define __NR_popcorn_get_node_info 297
 __SYSCALL(__NR_popcorn_get_node_info, sys_popcorn_get_node_info)
+#define __NR_popcorn_mvx 334
+__SYSCALL(__NR_popcorn_mvx, sys_popcorn_mvx)
+#define __NR_hscall 335
+__SYSCALL(__NR_hscall, sys_hscall)
+
 #undef __NR_syscalls
-#define __NR_syscalls 289
+#define __NR_syscalls 336
 
 /*
  * All syscalls below here should go away really,
