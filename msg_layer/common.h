@@ -53,13 +53,9 @@ bool __init identify_myself(void)
 
 	PCNPRINTK("Loading node configuration...");
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
-		ip_table[i] = in_aton(ip_addresses[i]);
-	}
-
 	my_ip = __get_host_ip();
 
-	for (i = 0; i < MAX_NUM_NODES; i++) {
+	for (i = 0; i < max_nodes; i++) {
 		char *me = " ";
 		if (my_ip == ip_table[i]) {
 			my_nid = i;
@@ -114,7 +110,7 @@ static bool load_config_file(char *file)
 			str_len = strlen(ip_addr);
 			while (str_off < bytes_read) {
 				str_len = strlen(ip_addr + str_off);
-				
+
 				/* Make sure IP address is a valid IPv4 address */
 				if(str_len > 0){
 					ret = in4_pton(ip_addr + str_off, -1, i4_addr, -1, &end);
