@@ -20,7 +20,12 @@
 
 #define MAX_NUM_NODES		ARRAY_SIZE(ip_addresses)
 
+#define CONFIG_FILE_LEN 256
+#define CONFIG_FILE_PATH    "/etc/popcorn/nodes"
+#define CONFIG_FILE_CHUNK_SIZE  512
+
 static uint32_t ip_table[MAX_NUM_NODES] = { 0 };
+static uint32_t max_nodes = MAX_NUM_NODES;
 
 static uint32_t __init __get_host_ip(void)
 {
@@ -69,5 +74,71 @@ bool __init identify_myself(void)
 	}
 
 	return true;
+}
+
+static bool load_config_file(char *file)
+{
+	struct file *fp;
+	int bytes_read, ret;
+	int num_nodes = 0;
+	bool retval = true;
+	char ip_addr[CONFIG_FILE_CHUNK_SIZE];
+	u8 i4_addr[4];
+	loff_t offset = 0;
+	const char *end;
+
+	/* If no path was passed in, use hard coded default */
+	if (file[0] == '\0') {
+		strlcpy(file, CONFIG_FILE_PATH, CONFIG_FILE_LEN);
+	}
+
+	fp = filp_open(file, O_RDONLY, 0);
+	if (IS_ERR(fp)) {
+		MSGPRINTK("Cannot open config file %ld\n", PTR_ERR(fp));
+		return false;
+	}
+
+	while (num_nodes < (max_nodes - 1)) {
+		bytes_read = kernel_read(fp, offset, ip_addr, CONFIG_FILE_CHUNK_SIZE);
+		if (bytes_read > 0) {
+			int str_off, str_len, j;
+
+			/* Replace \n, \r with \0 */
+			for (j = 0; j < CONFIG_FILE_CHUNK_SIZE; j++) {
+				if (ip_addr[j] == '\n' || ip_addr[j] == '\r') {
+					ip_addr[j] = '\0';
+				}
+			}
+
+			str_off = 0;
+			str_len = strlen(ip_addr);
+			while (str_off < bytes_read) {
+				str_len = strlen(ip_addr + str_off);
+				
+				/* Make sure IP address is a valid IPv4 address */
+				if(str_len > 0){
+					ret = in4_pton(ip_addr + str_off, -1, i4_addr, -1, &end);
+					if (!ret) {
+						MSGPRINTK("invalid IP address in config file\n");
+						retval = false;
+						goto done;
+					}
+
+					ip_table[num_nodes++] = *((uint32_t *) i4_addr);
+				}
+
+				str_off += str_len + 1;
+			}
+		} else {
+			break;
+		}
+	}
+
+	/* Update max_nodes with number of nodes read in from config file */
+	max_nodes = num_nodes;
+
+done:
+	filp_close(fp, NULL);
+	return retval;
 }
 #endif

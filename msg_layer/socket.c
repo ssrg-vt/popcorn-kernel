@@ -16,6 +16,7 @@
 #define PORT 30467
 #define MAX_SEND_DEPTH	1024
 
+
 enum {
 	SEND_FLAG_POSTED = 0,
 };
@@ -47,6 +48,7 @@ static struct sock_handle sock_handles[MAX_NUM_NODES] = {};
 static struct socket *sock_listen = NULL;
 static struct ring_buffer send_buffer = {};
 
+static char config_file_path[CONFIG_FILE_LEN];
 
 /**
  * Handle inbound messages
@@ -504,6 +506,9 @@ static int __init init_kmsg_sock(void)
 
 	MSGPRINTK("Loading Popcorn messaging layer over TCP/IP...\n");
 
+	/* Load node configuration */
+    if (!load_config_file(config_file_path)) return -EINVAL;
+
 	if (!identify_myself()) return -EINVAL;
 	pcn_kmsg_set_transport(&transport_socket);
 
@@ -564,6 +569,9 @@ out_exit:
 	exit_kmsg_sock();
 	return ret;
 }
+
+module_param_string(config_file, config_file_path, CONFIG_FILE_LEN, 0400);
+MODULE_PARM_DESC(config_file, "Configuration file path");
 
 module_init(init_kmsg_sock);
 module_exit(exit_kmsg_sock);
