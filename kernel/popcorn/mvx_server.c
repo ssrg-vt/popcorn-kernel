@@ -26,6 +26,10 @@ EXPORT_SYMBOL(master_wait);
 DECLARE_COMPLETION(follower_wait);	// The completion used by follower to sync
 EXPORT_SYMBOL(follower_wait);
 
+/* Flags to enable/disable MVX mode process execution. */
+bool master_mvx_on;
+bool follower_mvx_on;
+
 /* The Virtual Descriptor Table */
 int fd_vtab[VDT_SIZE];
 /* Points to the next available fd. */
@@ -98,6 +102,7 @@ SYSCALL_DEFINE1(popcorn_mvx, int, mvx_leader)
 	pr_info("=== Popcorn MVX ===\n");
 	pr_info("Using LD_PRELOAD=./loader.so <bin>");
 	pr_info(" 1) Start on master and 2) on follower\n");
+	pr_info("%d %d\n", MVX_VFD_MAX, MVX_OFF);
 
 	init_mvx_proc_syscall(current, mvx_leader);
 	init_mvx_vtab();

@@ -79,8 +79,10 @@ static void follower_epoll_pwait(int64_t args[], int32_t *retval)
 	/* No need to copy buffer. Epoll_pwait failed. */
 	*retval = mvx_follower_msg.retval;
 	if (*retval < 0) {
-		if (*retval == -EINTR)	// ctrl-c
+		if (*retval == -EINTR)	{// ctrl-c
+			stop_mvx_process(current);
 			do_exit(130);
+		}
 		else
 			return;
 	}
@@ -215,7 +217,11 @@ static void follower_writev(int32_t *retval, unsigned int dst_nid)
 	MVXPRINTK("Follower waits msg on\n[%2ld] syscall: <SYS_writev>\n",
 		  mvx_index++);
 	/* Follower waits for a message from master. */
-	wait_for_completion_interruptible(&follower_wait);
+	if (current->is_mvx_process)
+		wait_for_completion_interruptible(&follower_wait);
+	else
+		goto out;
+
 	MVX_WARN_ON(mvx_follower_msg.syscall != __NR_writev);
 
 	MVXPRINTK("syscall %d: <%s>. flag %d. master msg syscall %d\n",
@@ -224,6 +230,8 @@ static void follower_writev(int32_t *retval, unsigned int dst_nid)
 
 	*(ssize_t *)retval = (ssize_t)mvx_follower_msg.retval;
 	mvx_send_reply(*(ssize_t *)retval, __NR_writev, dst_nid);
+out:
+	return;
 }
 
 /**
@@ -268,7 +276,11 @@ int mvx_follower_wait_exec(struct task_struct *tsk, unsigned int dst_nid,
 		  mvx_index++, syscall, syscall_name[syscall], retsz);
 wait:
 	/* Follower waits for a message. */
-	wait_for_completion_interruptible(&follower_wait);
+	if (current->is_mvx_process)
+		wait_for_completion_interruptible(&follower_wait);
+	else
+		goto out;
+
 
 	/* Corner case for master's extra epoll_pwait. */
 	if (mvx_follower_msg.syscall == __NR_epoll_pwait) {
@@ -328,7 +340,7 @@ wait:
 		mvx_send_reply(*((int64_t *)retval), syscall, dst_nid);
 	if (retsz == 4)
 		mvx_send_reply(*((int32_t *)retval), syscall, dst_nid);
-
+out:
 	return ret;
 }
 
@@ -411,7 +423,6 @@ static void master_read(mvx_message_t *msg, int64_t args[], int64_t retval)
 	}
 	MVXPRINTK("%s: fd %lld, flag %d, len %d, retval %lld.\n",
 		  __func__, args[0], msg->flag, msg->len, retval);
-
 }
 
 /**
@@ -441,6 +452,7 @@ static void master_epoll_pwait(mvx_message_t *msg, int64_t args[],
 		msg->len = 0;
 		msg->retval = retval;
 		msg->syscall = syscall_tbl[__NR_epoll_pwait];
+		if (retval == -EINTR) stop_mvx_process(current);
 		return;
 	}
 

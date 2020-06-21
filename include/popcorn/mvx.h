@@ -29,12 +29,14 @@ enum mvx_variant_role {
 	MVX_FOLLOWER = 1,
 };
 
+/* VFD types: Read FD, simulated FD. Used in `mvx_message_t.flag`. */
 enum mvx_vfd_type {
 	MVX_EMPTY = 0,		// empty entry
 	MVX_REAL = 1,		// real fd
 	MVX_SIM = 2,		// simulated fd
 //	MVX_SIM_CLOSE = 3,	// simulated, need close
 				// e.g., epoll_create1, socket
+	MVX_VFD_MAX			// Maximum number of the VFD state
 };
 
 enum mvx_fd_operate {
@@ -45,6 +47,10 @@ enum mvx_fd_operate {
 /* The Virtual Descriptor Table and the Index (next available fd). */
 extern int fd_vtab[VDT_SIZE];
 extern int vtab_count;
+
+/* Stopping MVX. Used in `mvx_message_t.flag`. */
+#define MVX_OFF			1
+#define MVX_OFF_OFFSET	7
 
 extern int64_t mvx_args[6];
 extern const char* dir_whitelist[];
@@ -67,6 +73,12 @@ struct epoll_event_x86 {
 #define MVX_WARN_ON(condition) {\
 	if(unlikely(condition)) \
 		pr_err("[MVX Violation] %s:%d %s\n", __FILE__, __LINE__, __func__); \
+}
+
+static inline void stop_mvx_process(struct task_struct *tsk)
+{
+	tsk->is_mvx_process = 0;
+	MVXPRINTK("Stop MVX variant ...\n");
 }
 
 static inline bool mvx_process(struct task_struct *tsk)
