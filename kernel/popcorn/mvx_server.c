@@ -1,7 +1,11 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>		// getname_kernel()
+#include <linux/fdtable.h>
 #include <linux/completion.h>	// completion
 #include <linux/syscalls.h>
+#include <linux/module.h>	// call_usermodehelper_*
+#include <linux/cred.h>
+#include <linux/uidgid.h>
 
 #include <popcorn/mvx.h>
 #include <popcorn/debug.h>	// MVXPRINTK()
@@ -26,14 +30,14 @@ EXPORT_SYMBOL(master_wait);
 DECLARE_COMPLETION(follower_wait);	// The completion used by follower to sync
 EXPORT_SYMBOL(follower_wait);
 
-/* Flags to enable/disable MVX mode process execution. */
-bool master_mvx_on;
-bool follower_mvx_on;
-
 /* The Virtual Descriptor Table */
 int fd_vtab[VDT_SIZE];
 /* Points to the next available fd. */
 int vtab_count = 0;	// not include 0, 1, 2.
+
+/* Pseudo file locations for follower fd 0, 1 and 2. */
+#define MVX_STDIN_LOC		"/dev/pts/0"
+#define MVX_STDOUT_LOC		"/dev/pts/0"
 
 /* The syscall translation table. */
 const int syscall_tbl_a2x[512] = {
@@ -68,7 +72,7 @@ static inline void init_mvx_vtab(void)
 	fd_vtab[1] = fd_vtab[2] = MVX_REAL;
 	vtab_count = 0;
 
-	mvx_index = 0;	// This is not vtab, but we need to clear it up on initialization
+	mvx_index = 0;	// This is not for vtab, but for syscall seq log.
 }
 
 /* Initialize the MVX process flags and the syscall translation table. */
@@ -117,92 +121,106 @@ asmlinkage long sys_hscall(unsigned long arg0, unsigned long arg1,
                                unsigned long arg2, unsigned long arg3,
                                unsigned long arg4, unsigned long arg5)
 {
-	pr_info("=== Popcorn MVX ===\n");
-	pr_info("Using LD_PRELOAD=./loader.so <bin>");
-	pr_info("Args: 0x%lx(%ld), 0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx\n",
-	       arg0, arg0, arg1, arg2, arg3, arg4, arg5);
+	pr_info("\n=== HeterSec syscall ===\n");
+	pr_info("Arg0: 0x%lx(%ld)\n", arg0, arg0);
 
 	/* arg0 == 0x1 indicates a MVX process (master). */
 	if (arg0 == 0x1) {
+		/* Get the process info and message follower to start. */
 		mvx_server_start_mvx(current, 0);	// TODO: dst node
-
+		/* Setup the MVX process info. */
 		init_mvx_proc_syscall(current, 1);
+		/* Init FD vtab. */
 		init_mvx_vtab();
-		//MVXPRINTK("Master variant [PID:%d] Init ...\n", current->pid);
 	}
-
-#if 0
-	/* arg1 indicates a master (0) or a follower (non-0). */
-	if (arg1 == 0x0) {
-		// This is master.
-		current->is_follower = 0;
-		MVXPRINTK("Master Init ...\n");
-
-		/* Only master needs the syscall translation table. */
-#ifdef __x86_64__
-		memcpy(syscall_tbl, syscall_tbl_x2a, 512*sizeof(int));
-#endif
-#ifdef __aarch64__
-		memcpy(syscall_tbl, syscall_tbl_a2x, 512*sizeof(int));
-#endif
-	}
-	else {
-		// This is follower.
-		current->is_follower = 1;
-		MVXPRINTK("Follower Init ...\n");
-	}
-
-	init_mvx_vtab();
-#endif
 
 	return 0;
 }
 
 /* ========= Code executed on Follower ========= */
-static DEFINE_SPINLOCK(mvx_lock);
+/**
+ * Setup and install the pseudo FDs (STDIN, STDOUT, STDERR).
+ * */
+static bool install_pseudo_fd(char *stdin, char *stdout)
+{
+	struct file *fp_stdin, *fp_stdout;
+	struct files_struct *files = current->files;
+	struct fdtable *fdtab = NULL;
+
+	if (files == NULL) {
+		MVXPRINTK("Cannot find open file table struct.\n");
+		goto out;
+	}
+	/* Alloc and open fd 0, 1 and 2. */
+	fdtab = files_fdtable(files);
+	if ((__alloc_fd(files, 0, rlimit(RLIMIT_NOFILE), 0) < 0)
+		|| (__alloc_fd(files, 1, rlimit(RLIMIT_NOFILE), 0) < 0)
+		|| (__alloc_fd(files, 2, rlimit(RLIMIT_NOFILE), 0) < 0)) {
+		MVXPRINTK("%s: __alloc_fd error.\n", __func__);
+		goto out;
+	}
+
+	fp_stdin = filp_open(stdin, O_RDONLY|O_CREAT, 0644);
+	if (IS_ERR(fp_stdin)) {
+		MVXPRINTK("Cannot open STDIN file %ld.\n", PTR_ERR(fp_stdin));
+		return false;
+	}
+	fdtab->fd[0] = fp_stdin;
+
+	fp_stdout = filp_open(stdout, O_WRONLY|O_CREAT|O_TRUNC, 0644);
+	if (IS_ERR(fp_stdin)) {
+		MVXPRINTK("Cannot open STDOUT (STDERR) files %ld.\n", PTR_ERR(fp_stdout));
+		return false;
+	}
+	fdtab->fd[1] = fdtab->fd[2] = fp_stdout;
+
+	MVXPRINTK("[%d] %s: Init pseudo FDs (STDIN|STDOUT|STDERR) success.\n",
+			current->pid, __func__);
+	return true;
+out:
+	return false;
+}
+
+/**
+ * Callback routine to init the MVX follower variant process.
+ * - Mark the process as MVX follower process
+ * - Init the fd vtab
+ * - Install the pseudo fds.
+ * */
+static int init_follower_mvx_process(struct subprocess_info *info, struct cred *new)
+{
+	init_mvx_proc_syscall(current, 0);
+	init_mvx_vtab();
+	install_pseudo_fd(MVX_STDIN_LOC, MVX_STDOUT_LOC);
+	MVXPRINTK("[%d] %s: Finished the Follower MVX process initialization.\n",
+		current->pid, __func__);
+	return 0;
+}
+
 /**
  * This function initiates the MVX follower process.
- * Some code are from 'call_usermodehelper', 'do_execve' will replace 
- * the current thread context with the binary provided as the 1st param.
+ * It launches the follower process by calling 'call_usermodehelper'.
+ * The init_func initiates the vtab, fake fd, etc.
  * */
 static int mvx_process_fork(void *data)
 {
+	struct subprocess_info *sub_info;
+	int ret = 0;
 	char *path = (char *)data;
 	char *argv[] = {path, NULL};
 	static char *envp[] = {"HOME=/", "TERM=linux",
 		"PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
 
-	struct cred *new;
-	int retval = -ENOMEM;
+	/* Prepare the userspace follower variant. */
+	sub_info = call_usermodehelper_setup(argv[0], argv, envp, GFP_ATOMIC,
+			init_follower_mvx_process, NULL, NULL);
+	if (sub_info == NULL) return -ENOMEM;
 
-	spin_lock_irq(&current->sighand->siglock);
-	flush_signal_handlers(current, 1);
-	spin_unlock_irq(&current->sighand->siglock);
-
-	set_user_nice(current, 0);
-
-	new = prepare_kernel_cred(current);
-	if (!new)
-		goto out;
-	spin_lock(&mvx_lock);
-	new->cap_bset = cap_intersect(CAP_FULL_SET, new->cap_bset);
-	new->cap_inheritable = cap_intersect(CAP_FULL_SET,
-					     new->cap_inheritable);
-	spin_unlock(&mvx_lock);
-	commit_creds(new);
-
-	// MVX process set up.
-	init_mvx_proc_syscall(current, 0);
-	init_mvx_vtab();
-
-	retval = do_execve(getname_kernel(path),
-			   (const char __user *const __user *)argv,
-			   (const char __user *const __user *)envp);
-	MVXPRINTK("%s: do_execve ret %d\n", __func__, retval);
-	if (!retval)
-		return 0;
-out:
+	ret = call_usermodehelper_exec(sub_info, UMH_KILLABLE);
+	MVXPRINTK("%s: Finished MVX process setup. ret %d\n", __func__, ret);
 	do_exit(0);
+
+	return ret;
 }
 
 /**
@@ -213,25 +231,16 @@ static void clone_mvx_thread(struct work_struct *_work)
 	struct pcn_kmsg_work *work = (struct pcn_kmsg_work *)_work;
 	mvx_init_t *init_msg = work->msg;
 	pid_t pid;
-	struct task_struct *mvx_task;
 
-	// Use a kthread to find the userspace process and mark it as MVX process
+	/* Use a kthread to launch a userspace process and mark it as MVX process */
 	pid = kernel_thread(mvx_process_fork, init_msg->exe_path,
 			    CLONE_PARENT | SIGCHLD);
 	if (pid < 0) {
 		printk("%s: create child process error\n", __func__);
 		return;
 	}
-	MVXPRINTK("%s: thread [%d] created, path %s\n",
-		 __func__, pid, init_msg->exe_path);
-
-	// Set it as MVX (follower) process
-	mvx_task = pid_task(find_vpid(pid), PIDTYPE_PID);
-	mvx_task->is_mvx_process = 1;
-	mvx_task->is_follower = 1;
-	MVXPRINTK("%s: comm %s. mvx process %d, follower %d\n", __func__,
-		 mvx_task->comm, mvx_task->is_mvx_process,
-		 mvx_task->is_follower);
+	MVXPRINTK("%s: MVX helper thread [%d] finished launching MVX process, bin path: %s.\n",
+			__func__, pid, init_msg->exe_path);
 }
 
 /**
@@ -284,9 +293,7 @@ static int handle_mvx_message(struct pcn_kmsg_message *msg)
  * */
 static int handle_mvx_reply(struct pcn_kmsg_message *msg)
 {
-#ifdef CONFIG_POPCORN_DEBUG_MVX_SERVER
 	mvx_reply_t *reply = (mvx_reply_t *)msg;
-#endif
 	extern struct completion master_wait;
 
 	MVXPRINTK("--> %s: ret 0x%lx(%ld), follower syscall %ld\n", __func__,
@@ -339,8 +346,8 @@ int mvx_server_start_mvx(struct task_struct *tsk, unsigned int dst_nid)
 		goto out;
 	}
 
-	MVXPRINTK("%s: [%d] exe_path %s. mvx %d, follower %d\n", __func__,
-		 tsk->pid, req->exe_path, tsk->is_mvx_process, tsk->is_follower);
+	MVXPRINTK("%s: [%d] exe_path %s. arg_start 0x%lx, arg_end 0x%lx\n", __func__,
+			tsk->pid, req->exe_path, mm->arg_start, mm->arg_end);
 	MVXPRINTK("%s: size %lu; dst nid %d\n", __func__, sizeof(*req), dst_nid);
 
 	ret = pcn_kmsg_send(PCN_KMSG_TYPE_MVX, dst_nid, req, sizeof(*req));
@@ -363,7 +370,6 @@ int __init mvx_server_init(void)
 
 	/* Master variant handles the MVX (syscall) replay message from follower. */
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_MVX_REPLY, mvx_reply);
-	//init_mvx_vtab();
 
 	return 0;
 }

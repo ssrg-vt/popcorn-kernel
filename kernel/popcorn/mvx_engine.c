@@ -228,7 +228,11 @@ static void follower_writev(int32_t *retval, unsigned int dst_nid)
 		  __NR_writev, syscall_name[__NR_writev],
 		  mvx_follower_msg.flag, mvx_follower_msg.syscall);
 
-	*(ssize_t *)retval = (ssize_t)mvx_follower_msg.retval;
+	if (*retval != (ssize_t)mvx_follower_msg.retval)
+		pr_info("follower ret %d != %ld from master\n",
+			*retval, (ssize_t)mvx_follower_msg.retval);
+
+	//*(ssize_t *)retval = (ssize_t)mvx_follower_msg.retval;
 	mvx_send_reply(*(ssize_t *)retval, __NR_writev, dst_nid);
 out:
 	return;

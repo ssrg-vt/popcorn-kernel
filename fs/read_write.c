@@ -945,7 +945,7 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 		ret = redirect_writev(fd, vec, vlen);
 		return ret;
 	}
-#if 0
+#if 1
 	if (mvx_process(current)) {
 		char kbuf[128];
 		int ret = 0, i;

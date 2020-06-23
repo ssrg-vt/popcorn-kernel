@@ -103,13 +103,7 @@ static inline void mvx_print(struct task_struct *tsk)
 	       mvx_process(tsk), mvx_follower(tsk));
 }
 
-//static inline void mvx_print_msg(mvx_core_msg_t *msg)
-//{
-//	MVXPRINTK("syscall %d, flag %d, len %d, ret %ld. buf %s\n",
-//		  msg->syscall, msg->flag, msg->len, msg->retval,
-//		  (msg->len == 0) ? "" : msg->buf);
-//}
-
+#if 0
 static inline void mvx_print_fd_vtab(void)
 {
 	int i;
@@ -121,6 +115,9 @@ static inline void mvx_print_fd_vtab(void)
 		}
 	}
 }
+#else
+static inline void mvx_print_fd_vtab(void) {}
+#endif
 
 /**
  * Update fd_vtab entry.
