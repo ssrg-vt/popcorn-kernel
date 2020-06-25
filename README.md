@@ -1,14 +1,10 @@
-ATTENTION: If you are looking for the lastest release code of TSO implementation, please checkout "master-tso" branch.
+Scaling Shared Memory Multiprocessing Applications in Non-cache-coherent Domains
+====
 
-"master-tso-develop" is a private & development branch which is only used for synchronizing/backing up code on different machines.
+* Popcorn's improved distributed shared memory protocol and subsystem.
 
-----------------------------------------------
+* This work is based on the [Popcorn Linux project](http://popcornlinux.org/).
 
-Popcorn Linux for Distributed Thread Execution
-----------------------------------------------
+* Detailed design, implementation, and performance benchmarks are available in our [SYSTOR'20 paper](https://dl.acm.org/doi/pdf/10.1145/3383669.3398278) or e-mail Ho-Ren (Jack) Chuang (horenc@vt.edu) for more details.
 
-* Allow applications to run on multiple machines in a distributed and transparent way.
-
-* Visit http://popcornlinux.org and https://github.com/ssrg-vt/popcorn-kernel/wiki for more information or e-mail Sang-Hoon Kim (sanghoon@vt.edu).
-
-* Copyright Systems Software Research Group at Virginia Tech, 2017-2018.
+* Copyright Systems Software Research Group at Virginia Tech, 2019-2020.
