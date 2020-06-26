@@ -1,6 +1,6 @@
 /*
  * common.h
- * Copyright (C) 2017 jackchuang <jackchuang@echo3>
+ * Copyright (C) 2017 Ho-Ren (Jack) Chuang <horenc@vt.edu>
  *
  * Distributed under terms of the MIT license.
  */

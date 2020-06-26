@@ -1,10 +1,10 @@
 /*
  * sync.c
- * Copyright (C) 2018 Ho-Ren(Jack) Chuang <horenc@vt.edu>
+ * Copyright (C) 2018 Ho-Ren (Jack) Chuang <horenc@vt.edu>
  *
  * Distributed under terms of the MIT license.
  *
- * TODO: take ip into consideration
+ * Note: take IP into consideration
  */
 #include <linux/syscalls.h>
 #include <linux/pagemap.h>
@@ -55,11 +55,6 @@ atomic64_t popcorn_global_remote_cnt = ATOMIC64_INIT(0);
 #define GLOBAL_BARRIER_MANUAL_CLEAN 1
 spinlock_t popcorn_global_lock;
 spinlock_t popcorn_global_lock2;
-/* TODO remove it */
-//unsigned long popcorn_global_local_cnt = 0; // overflow problem
-//unsigned long popcorn_global_remote_cnt = 0; // overflow problem
-//volatile unsigned long popcorn_global_local_cnt = 0; // overflow problem
-//volatile unsigned long popcorn_global_remote_cnt = 0; // overflow problem
 
 atomic64_t popcorn_global_time = ATOMIC64_INIT(0);
 
@@ -343,12 +338,12 @@ void show_omp_hash(unsigned long omp_hash)
 #endif
 
 /* rcsi meta/mem hash lock per region (sys-wide) */
-#define RCSI_HASH_BITS 10 /* TODO try larger */ // looks for MW
+#define RCSI_HASH_BITS 10 /* try larger */
 DEFINE_HASHTABLE(rcsi_hash, RCSI_HASH_BITS);
 DEFINE_SPINLOCK(rcsi_hash_lock);
 
 /* GOD VIEW */
-#define SYS_REGION_HASH_BITS 10 /* TODO TODO TODO try larger */
+#define SYS_REGION_HASH_BITS 10 /* try larger */
 DEFINE_HASHTABLE(sys_region_hash, SYS_REGION_HASH_BITS);
 DEFINE_RWLOCK(sys_region_hash_lock);
 bool is_god = true; /* 1: record 0: pf */
@@ -475,9 +470,9 @@ int rcsi_meta_total_size = -1;
 //int MAX_PAGE_CHUNK_SIZE = MAX_PAGE_CHUNK_SIZE;
 int rcsi_chunks = -1;
 
-#define PER_REGION_HASH_BITS 15 /* TODO testing this value */
-#define EVERY_REGION_HASH_BITS_R 15 /* TODO testing this value */ // pf read
-#define EVERY_REGION_HASH_BITS_W 10 /* TODO testing this value */ // pf w
+#define PER_REGION_HASH_BITS 15 /* test this value */
+#define EVERY_REGION_HASH_BITS_R 15 /* test this value (pf R) */
+#define EVERY_REGION_HASH_BITS_W 10 /* testtest this value (pf W) */
 #define BEHAVIOR_SAMPLE_CNT 100
 struct omp_region {
 	struct hlist_node hentry;
@@ -553,12 +548,8 @@ struct sys_omp_region {
 
 	int read_cnt;
 	int writenopg_cnt;
-	//unsigned long read_addrs[MAX_READ_BUFFERS * MAX_POPCORN_THREADS / 1]; // hardcode TODO
-	unsigned long read_addrs[MAX_READ_BUFFERS * MAX_POPCORN_THREADS / 4]; // hardcode TODO
-	//unsigned long writenopg_addrs[MAX_WRITE_NOPAGE_BUFFERS * MAX_POPCORN_THREADS / 1]; // hardcode TODO
-	unsigned long writenopg_addrs[1000]; // hardcode TODO
-	//unsigned long read_addrs[MAX_READ_BUFFERS * MAX_POPCORN_THREADS / 5]; // hardcode TODO
-	//unsigned long writenopg_addrs[MAX_WRITE_NOPAGE_BUFFERS * MAX_POPCORN_THREADS / 5]; // hardcode TODO
+	unsigned long read_addrs[MAX_READ_BUFFERS * MAX_POPCORN_THREADS / 4]; // hardcode
+	unsigned long writenopg_addrs[1000]; // hardcode
 
 	/* two hash tables for addrs */
 	DECLARE_HASHTABLE(every_rregion_hash, EVERY_REGION_HASH_BITS_R);
@@ -603,7 +594,7 @@ void mw_results(struct remote_context *rc)
 	printk("======================\n");
 	printk("=== MW results ===\n");
 	printk("======================\n");
-	// TODO other times like mw memcpy
+	/* Implement other times like mw memcpy */
 	printk("mw_time: [[%lu]]* s =>\n", mw_time / NANOSECOND);
 	printk("\tlocal_find_conf [[%lu]]* wait_diffs %lu wait_merg %lu wait_end %lu "
 										"& wait_remotehs %lu s\n",
@@ -622,7 +613,7 @@ void mw_results(struct remote_context *rc)
 				mw_inv_peak, mw_inv_cnt ? mw_inv_total / mw_inv_cnt : 0);
 	printk("\t\t\tmw req send peak %lu avg %lu\n",
 				mw_send_peak, mw_send_cnt ? mw_send_total / mw_send_cnt : 0);
-	/* TODO: avg length per msg size */
+	/* Implement avg length per msg size */
 	printk("mw_log_time %ld ms\n",
 				atomic64_read(&mw_log_time) / MICROSECOND / divider);
 	// handle for remote
@@ -659,14 +650,8 @@ void mw_results(struct remote_context *rc)
 			"kmpc_reduce_nowait %lu (0 when perf)\n",
 			rc->kmpc_reduce, rc->kmpc_end_reduce, rc->kmpc_reduce_nowait);
 	printk("\n");
-//	printk("(raw) kmpc_dispatch_init [[%lu]] kmpc_dispatch_fini [[%lu]]\n",
-//						rc->kmpc_dispatch_init, rc->kmpc_dispatch_fini);
-//	printk("(raw) kmpc_static_init [[%lu]] kmpc_static_fini [[%lu]]\n",
-//						rc->kmpc_static_init, rc->kmpc_static_fini);
 	printk("(how many VAIN regions skipped)smart_skip_cnt %ld\n",
 												smart_skip_cnt / divider);
-
-
 
 	printk("TODO: WW merge one by one now -> more \n");
 #endif
@@ -683,9 +668,6 @@ void pf_results(struct remote_context *rc)
 	printk("======================\n");
 	printk("=== PF parameters ===\n");
 	printk("======================\n");
-	//printk("GOD_VIEW (%s)\n", GOD_VIEW ? "O" : "X");
-	//printk("PREFETCH (%s)\n", PREFETCH ? "O" : "X");
-	//printk(" (%s)\n",  ? "O" : "X");
 	printk("- PREFETCH_THRESHOLD = max %lu pgs per msg\n", PREFETCH_THRESHOLD);
 	printk("- MAX_PF_MSG %d\n", MAX_PF_MSG);
 	printk("- PF_CONSIDER_CPU (%s) TODO: implemente\n",
@@ -782,13 +764,9 @@ void rcsi_time_stat(struct seq_file *seq, void *v)
 		printk("clean global_barrier cnts \t\t popcorn_global_local_cnt %ld\n"
 									"\t\t popcorn_global_remote_cnt %ld\n"
 									"\t\t and clean popcorn_global_time\n",
-//									popcorn_global_local_cnt,
-//									popcorn_global_remote_cnt);
 									atomic64_read(&popcorn_global_local_cnt),
 									atomic64_read(&popcorn_global_remote_cnt));
 
-//		popcorn_global_local_cnt = 0;
-//		popcorn_global_remote_cnt = 0;
 		atomic64_set(&popcorn_global_local_cnt, 0);
 		atomic64_set(&popcorn_global_remote_cnt, 0);
 
@@ -854,14 +832,6 @@ struct sys_omp_region *__sys_omp_region_hash(unsigned long region_hash_cnt_hash,
 	}
 	return NULL;
 }
-#if 0
-	struct sys_omp_region *sys_region = kmalloc TODO
-	spin_lock(&sys_region_hash_lock);
-	found = __sys_omp_region_hash(hash);
-	if (likely(!found))
-		hash_add(sys_region_hash, &sys_region->hentry, addr);
-	spin_unlock(&sys_region_hash_lock);
-#endif
 
 struct sys_omp_region *__add_sys_omp_region_hash(unsigned long sys_omp_region_id, unsigned long omp_hash, int region_cnt)
 {
@@ -995,11 +965,9 @@ void __wait_prefetch_req_done(int pending_pf_req)
 		atomic_inc(&rc->pf_ongoing_cnt);
 
 	PFVPRINTK("\t\tpf leader down\n");
-	//if(!current->at_remote){printk("\t\tpf leader down\n");}
 	while (atomic_read(&rc->pf_ongoing_cnt)) {
-		CPU_RELAX; // TODO: BUG();
+		CPU_RELAX; /* BUG(); */
 	}
-	//if(!current->at_remote){printk("\t\tpf leader up\n");}
 	PFVPRINTK("\t\tpf leader up\n");
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
@@ -1025,15 +993,6 @@ void __send_pf_req(int pf_nr_pages, int send_id, struct prefetch_list_body *pf_r
 #endif
 
 	BUG_ON(!req || !pf_nr_pages);
-
-#if 0 // TODO: post-icdcs removing locks
-	/* pf_map */
-	pf_map->pf_req_id = send_id;
-	pf_map->pf_list_size = pf_nr_pages;
-    spin_lock(&rc->pf_ongoing_lock);
-	list_add_tail(&pf_map->list, &rc->pf_ongoing_list);
-    spin_unlock(&rc->pf_ongoing_lock);
-#endif // TODO: post-icdcs removing locks
 
 	/* msg */
 	req->origin_pid = current->pid;
@@ -1116,16 +1075,6 @@ static void process_remote_prefetch_request(struct work_struct *work)
 	handle_pf_reqest_cpu[raw_smp_processor_id()]++;
 #endif
 
-#if 0
-    if (tsk->at_remote) {
-		// TODO new
-	} else {
-		/* Only support remote prefetch */
-//		__handle_prefetch_at_origin(from_nid, req->remote_pid, req->origin_pid,
-//										req->pf_list_size, req->pf_req_id,
-//										(struct prefetch_body*)&req->pf_list);
-	}
-#endif
 	PFVPRINTK("\t\t<-done reqs hash 0x%lx #%d\n",
 				req->god_omp_hash, req->pf_req_id);
     END_KMSG_WORK(req);
@@ -1166,7 +1115,6 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 	int sent_cnt = 0;
 	int pf_nr_pages = 0;
 	int pending_pf_req = 0;
-//	struct pf_ongoing_map *pf_map = NULL; // TODO: post-icdcs removing locks
 	struct prefetch_list_body pf_reqs[MAX_PF_REQ];
 #if STATIS
 	int r_cnt = sys_region->read_cnt;
@@ -1181,7 +1129,7 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 
 	hash_for_each_safe(sys_region->every_rregion_hash, bkt, tmp, fi, hentry) {
 		unsigned long addr = fi->addr;
-		struct fault_handle *fh = select_prefetch_page2(addr); // TODO: post-icdcs removing locks
+		struct fault_handle *fh = select_prefetch_page2(addr);
 #if STRONG_CHECK_SANITY
 		BUG_ON(!addr);
 #endif
@@ -1200,14 +1148,6 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 			pf_kmalloc_start = ktime_get();
 #endif
 
-
-#if 0 // TODO: post-icdcs removing locks
-//		BUG_ON(!pf_map); // .........BUG
-		/* on going req map */
-		if (!pf_nr_pages)
-			pf_map = kzalloc(sizeof(*pf_map), GFP_KERNEL);
-#endif // TODO: post-icdcs removing locks
-
 #if PF_TIME
 		if (!pf_nr_pages) {
 			pf_kmalloc_done = ktime_get();
@@ -1216,21 +1156,13 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 		}
 #endif
 
-#ifdef CONFIG_POPCORN_CHECK_SANITY
-//		BUG_ON(!pf_map); // TODO: post-icdcs removing locks
-#endif
-		//pf_map->fh[pf_nr_pages] = fh; // TODO: post-icdcs removing locks (chage pf response)
-		// nothing
-//		pf_map->addr[pf_nr_pages] = addr; // TODO: post-icdcs removing locks
-
 		/* preparing msg */
 		pf_reqs[pf_nr_pages].addr = addr;
 		pf_nr_pages++;
 		// load to msg 1 ~ 7 (0-6)
 
 		if (pf_nr_pages >= MAX_PF_REQ) { // >= 7 ([0-6]) send
-			//__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, pf_map, sys_region);
-			__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, NULL, sys_region); // TODO: post-icdcs removing locks
+			__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, NULL, sys_region);
 			pending_pf_req++;
 			pf_nr_pages = 0;
 #if !SKIP_MEM_CLEAN // testing
@@ -1245,8 +1177,7 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 			break;
 	}
 	if (pf_nr_pages) { // 1 ~ 6
-		//__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, pf_map, sys_region); // TODO: post-icdcs removing locks
-		__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, NULL, sys_region); // TODO: post-icdcs removing locks
+		__send_pf_req(pf_nr_pages, pending_pf_req, pf_reqs, NULL, sys_region);
 		pending_pf_req++;
 	}
 
@@ -1263,19 +1194,6 @@ int __select_prefetch_pages_send(struct sys_omp_region *sys_region)
 		BUG_ON(r_cnt); /* if no skipping, check cnt == hash_size */
 #endif
 	}
-
-#if 0
-	int w_cnt = sys_region->writenopg_cnt; // statis / dbg
-	hash_for_each_safe(sys_region->every_wregion_hash, bkt, tmp, fi, hentry) {
-		//TODO every_wregion_hash
-		//TODO every_wregion_hash
-		//TODO every_wregion_hash
-		//TODO every_wregion_hash
-		//TODO every_wregion_hash
-		//TODO every_wregion_hash
-		w_cnt--;
-	}
-#endif
 
 out:
 	PFPRINTK("-->--> sent_cnt %d (%d msgs) == r_cnt %d (w_cnt %d) "
@@ -1526,14 +1444,7 @@ void __show_si_addrs(struct remote_context *rc)
 	printk("echo > /proc/popcorn_stat\n");
 	printk("echo > /proc/popcorn_stat\n");
 #endif
-	/* TODO */
 	printk("\n");
-	printk("TODO: 123\n");
-	//printk("TODO: get pure pf data\n");
-	printk("TODO: seperate __create_analyze_region()\n");
-	printk("TODO: RDMA W will be faster?\n");
-	printk("TODO: check - \"testing/test\"\n");
-	//printk("TODO: show max/avf local_wr_cnt => multithread to make ARM node efficient? -> change to use post threadhold = 96 and sperated to 96 * n (1 at lease) peice\n");
 #endif
 }
 #endif
@@ -1615,7 +1526,7 @@ void __show_mwpf_config(void)
 	printk("FINAL_DATA = 0\n");
 #endif
 
-	printk("TODO printk CONN\n");
+	printk("printk CONN\n");
 
 	/* Move to other place*/
 	printk("mw_local_dispatch_calc_time = %lu ns\n", mw_local_dispatch_calc_time);
@@ -1745,10 +1656,7 @@ struct omp_region *__add_omp_region_hash(struct remote_context *rc, unsigned lon
 	struct omp_region *region = kzalloc(sizeof(*region), GFP_KERNEL);
 	region->id = omp_region_id;
 	region->type = RCSI_UNKNOW;
-	//region->cnt = 0; // TODO testing
-	//////////////////// since position
-	region->cnt = 1; // TODO testing
-	//////////////////// since position
+	region->cnt = 1;
 #if SMART_REGION_DBG
 	atomic_set(&region->total_cnt, 1);
 	atomic_set(&region->skip_cnt, 0);
@@ -1817,30 +1725,16 @@ struct omp_region *__create_analyze_region(struct remote_context *rc)
 	region->in_region_inv_sum += rc->inv_cnt;
 #endif
 	if (!(region->type & RCSI_VAIN)) {
-#if GOD_VIEW
-//		if (!sys_region) return region;
-#endif
 		if (rc->inv_cnt < VAIN_THRESHOLD
-#if GOD_VIEW
-//			//&& sys_region->read_cnt + sys_region->writenopg_cnt
-//			&& sys_region->read_cnt < PREFETCH_THRESHOLD
-#endif
 			)
 		{
 			++region->vain_cnt;
 			if (region->vain_cnt >= VAIN_REGION_REPEAT_THRESHOLD) {
 				region->type |= RCSI_VAIN; // update local
-#if SMART_REGION_PERF_DBG
-//				printk("[0x%lx] %d change to VAIN 0x%lx %d region(%s)\n",
-//						region->id, rc->inv_cnt,
-//						region->type, region->cnt,
-//						current->tso_region?"O":"X");
-#endif
 			}
 			/* will update the remote to double check by handshake */
 		} else {
 			region->vain_cnt = 0;
-			// TODO: determin what type REPEAT/SERIAL (need at lease two logs) rc->inv_addrs[rc->inv_cnt]
 		}
 	} // else done
 	return region;
@@ -1858,7 +1752,7 @@ void __try_flip_region_type(struct remote_context *rc)
 			if (region->type & RCSI_VAIN) {
 				//region->type &= ~RCSI_VAIN;
 				/* enter next begion WARN: skew will hang */
-				// TODO not using flip now
+				/* not using flip now */
 #if SMART_REGION_DBG
 				printk("[0x%lx] %llu clean RCSI_VAIN %d \n",
 							region->id, current->tso_wr_cnt,
@@ -1875,7 +1769,7 @@ void __try_flip_region_type(struct remote_context *rc)
 /************
  * Prefetch
  */
-/* TODO: add writefault + !page_mine */
+/* add writefault + !page_mine */
 /* This is just loging */
 bool rcsi_readfault_collect(struct task_struct *tsk, unsigned long addr)
 {
@@ -1896,12 +1790,12 @@ bool rcsi_readfault_collect(struct task_struct *tsk, unsigned long addr)
 		if (rf->addr == addr)
 			return false;
 
-	rf = kzalloc(sizeof(*rf), GFP_KERNEL); /* TODO perf optimize bitmap? */
+	rf = kzalloc(sizeof(*rf), GFP_KERNEL); /* perf optimize bitmap? */
 	BUG_ON(!rf);
 	rf->addr = addr;
 	write_lock(&region->per_region_hash_lock);
 	region->read_fault_cnt++; /* current problem is this # too small */
-	/* TODO BUG() -  first few addr are not the most common?  */
+	/* BUG() -  first few addr are not the most common?  */
 	if (region->read_max == 0 ||
 			(addr > region->read_max &&
 			(addr - region->read_max) < 0x7fff00000000))
@@ -2014,10 +1908,9 @@ void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *pag
 			kunmap(page);
 		}
 #endif
-		/* TODO: atomic 1 line - start */
-		spin_lock(&rc->inv_lock);		// TODO change to use atomic
-		ivn_cnt_tmp = rc->inv_cnt++;	// TODO change to use atomic
-		spin_unlock(&rc->inv_lock);		// TODO change to use atomic
+		spin_lock(&rc->inv_lock);		// change to use atomic
+		ivn_cnt_tmp = rc->inv_cnt++;	// change to use atomic
+		spin_unlock(&rc->inv_lock);		// change to use atomic
 #if !SKIP_MEM_CLEAN
 		BUG_ON(rc->inv_addrs[ivn_cnt_tmp]);
 #endif
@@ -2037,22 +1930,6 @@ void tso_wr_inc(struct vm_area_struct *vma, unsigned long addr, struct page *pag
 		__put_rcsi_work(rcsi_w_new);
 	}
 #else // !HASH_GLOBAL
-//    spin_lock(&rc->inv_lock);
-//	ivn_cnt_tmp = rc->inv_cnt++; /* TODO: atomic 1 line */
-//    spin_unlock(&rc->inv_lock);
-//
-//	rc->inv_addrs[ivn_cnt_tmp] = addr;
-//#if !MW_IDEAL
-//	if (my_nid != NOCOPY_NODE) {
-//#if STRONG_CHECK_SANITY
-//		BUG_ON(*(rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE)));
-//#endif
-//		memcpy(rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
-//		//copy_from_user_page(vma, page, addr,
-//		//		rc->inv_pages + (ivn_cnt_tmp * PAGE_SIZE), paddr, PAGE_SIZE);
-//		kunmap(page);
-//	}
-//#endif
 
 #endif
 #endif
@@ -2167,53 +2044,6 @@ out:
 /* read&write into 1*/
 void si_writenopg_inc(struct task_struct *tsk, unsigned long addr)
 {
-#if 0
-#if PREFETCH && GOD_VIEW
-	//bool populated = false; // TODO kfree(fi);
-	int writenopg_slot, writenopg_cnt;
-	struct fault_info *fi;
-	struct sys_omp_region *sys_region = __si_inc_common(tsk);
-	if (!is_god)
-		return;
-
-	if (!sys_region)
-		return;
-
-	/* save if not duplicated */
-	spin_lock(&sys_region->w_lock);
-
-	writenopg_cnt = sys_region->writenopg_cnt;
-	if (writenopg_cnt >=
-			sizeof(sys_region->writenopg_addrs) /
-			sizeof(*sys_region->writenopg_addrs)) {
-		sys_region->skip_w_cnt++;
-#if PERF_FULL_BULL_WARN
-		WARN_ON_ONCE("godview si_w_addrs_buf full\n");
-#endif
-		goto out;
-	}
-
-	/* peek */
-	hash_for_each_possible(sys_region->every_wregion_hash, fi, hentry, addr)
-		if (fi->addr == addr)
-			goto out;
-
-	/* save */
-	fi = kmalloc(sizeof(*fi), GFP_ATOMIC); // perf - pg fault path
-	BUG_ON(!fi); /* remember to free */
-	fi->addr = addr;
-	hash_add(sys_region->every_wregion_hash, &fi->hentry, addr);
-	writenopg_slot = writenopg_cnt;
-	sys_region->writenopg_addrs[writenopg_slot] = addr; /* g_arry */ // kill
-#if STRONG_CHECK_SANITY
-	BUG_ON(!addr);
-#endif
-	sys_region->writenopg_cnt++;
-
-out:
-	spin_unlock(&sys_region->w_lock);
-#endif
-#endif
 }
 
 /* ugly */
@@ -2239,12 +2069,11 @@ void __clean_global_rcsi(struct remote_context *rc)
 	struct rcsi_work *pos;
 	struct hlist_node *tmp;
 	/* Attention: lock order */
-	/* clean hash table - TODO func */
-	//spin_lock(&rcsi_hash_lock);
+	/* clean hash table - functionize */
 	hash_for_each_safe(rcsi_hash, bkt, tmp, pos, hentry) { /* iter objs */
 		pos->addr = 0;
-		if (my_nid != NOCOPY_NODE) { // SKIP_MEM_CLEAN can be skipped right? perf
-#if !SKIP_MEM_CLEAN //testing
+		if (my_nid != NOCOPY_NODE) {
+#if !SKIP_MEM_CLEAN
 			memset(pos->paddr, 0, PAGE_SIZE); /* TODO: perf critical */
 #endif
 		}
@@ -2252,14 +2081,11 @@ void __clean_global_rcsi(struct remote_context *rc)
 		hlist_del(&pos->hentry);
 	}
 	BUG_ON(!hash_empty(rcsi_hash));
-	//spin_unlock(&rcsi_hash_lock);
 
-#if !SKIP_MEM_CLEAN //testing
+#if !SKIP_MEM_CLEAN
 	memset(rc->inv_addrs, 0, sizeof(*rc->inv_addrs) * rc->inv_cnt);
 #endif
-//	spin_lock(&rc->inv_lock); // no need
 	rc->inv_cnt = 0;
-//	spin_unlock(&rc->inv_lock); // no need
 }
 
 /* read fault - serial */
@@ -2285,12 +2111,10 @@ void __clean_rcsi_read_fault(struct remote_context *rc)
 #if DECISION_PREFETCH_STATIS
 	/* TODO use selector to choose hash table */
 	/* remove all read fault addrs from this this region */
-	//writelock(&rc->omp_region_hash_lock);
 	hash_for_each_safe(region->per_region_hash, bkt, tmp, rf, hentry) {
 		read_fault_cnt++;
 		hlist_del(&rf->hentry);
 	}
-	//write_unlock(&rc->omp_region_hash_lock);
 	BUG_ON(!hash_empty(region->per_region_hash));
 #endif
 
@@ -2340,16 +2164,6 @@ void __tso_wr_clean_all(struct remote_context *rc)
 /* [leader all done/handshak] -> remote */
 static void	__sned_handshake(struct remote_context *rc, int nid, struct omp_region *region)
 {
-#if 0
-	remote_baiier_done_request_t req = {
-        .origin_pid = rc->remote_tgids[nid],
-		.remote_region_type = region->type,
-    };
-
-	/* tell remote */ /* handshak */
-    pcn_kmsg_send(PCN_KMSG_TYPE_PAGE_MERGE_DONE_REQUEST,
-								nid, &req, sizeof(req));
-#endif
 	remote_baiier_done_request_t *req = pcn_kmsg_get(sizeof(*req));
     req->origin_pid = rc->remote_tgids[nid],
 	req->remote_region_type = region->type,
@@ -3105,8 +2919,6 @@ void __locally_find_conflictions2(int nid, struct remote_context *rc)
 			mw_w->per_inv_batch_max = per_inv_batch_max;
 			mw_w->pgs_to_send = pgs_to_send[i];
 			if (i) { /* NEW */
-//			mw_w->iter = i; // TODO; starts from 1 and should not conflict
-				//mw_w->iter = iter_ofs[i-1]; // = req_base // = iters I will handle
 				mw_w->iter = iter_ofs[i]; // = req_base // = iters I will handle
 				mw_w->send_ofs = total_sent_cnt_ofs[i-1]; // send cnt ofs
 			} else {
@@ -3185,7 +2997,6 @@ static void __make_diff(char *new, char *origin, page_diff_apply_request_t *req)
 			good = 1; break;
 		}
 	}
-//	BUG_ON(!good && "origin page is all zero") /* TODO: BUG remote first? zpg !!!!*/;
 	good = 0;
 	for (i = 0; i < PAGE_SIZE; i++) {
 		if(*(new + i) ^ *(origin + i)) {
@@ -3197,7 +3008,7 @@ static void __make_diff(char *new, char *origin, page_diff_apply_request_t *req)
 }
 
 /* -> [Remote][diff_req] -> back(local) */
-/* todo: merge with __do_apply_diff() */
+/* merge with __do_apply_diff() */
 /* Double check this function */
 static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct remote_context *rc, int local_ofs, int nid, unsigned long conflict_addr)
 {
@@ -3221,7 +3032,7 @@ static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct rem
 		*(req->diff_page + i) = 0;
 #endif
 
-	down_read(&tsk->mm->mmap_sem); // TODO: post-icdcs removing locks
+	down_read(&tsk->mm->mmap_sem);
 
 	vma = find_vma(tsk->mm, conflict_addr);
 	BUG_ON(!vma);
@@ -3245,17 +3056,12 @@ static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct rem
 	BUG_ON(!paddr);
 
 #if HASH_GLOBAL
-	/* TODO - mark the function as serial/not - serial I guess */
-	//spin_lock(&rcsi_hash_lock);
 	rcsi_w = __rcsi_hash(conflict_addr);
-	//spin_unlock(&rcsi_hash_lock);
 	BUG_ON(!rcsi_w);
 #if !MW_IDEAL // can extend
 	__make_diff(paddr, rcsi_w->paddr, req);
 #endif
 #else
-//	__make_diff(paddr,  rc->inv_pages + (local_ofs * PAGE_SIZE), req);
-// TODO remove rc->inv_pages
 #endif
 
 #if CONSERVATIVE
@@ -3266,7 +3072,7 @@ static void __make_diffs_send_back_at_remote(struct task_struct *tsk, struct rem
 #endif
 
 	pte_unmap(pte);
-	up_read(&tsk->mm->mmap_sem); // TODO: post-icdcs removing locks
+	up_read(&tsk->mm->mmap_sem);
 
 #if STRONG_CHECK_SANITY && !MW_IDEAL
 	/* immediately remote after working */
@@ -3300,7 +3106,7 @@ static void __apply_diff(char *target, char *diff)
 		*(target + i) = *(target + i) ^ *(diff + i);
 }
 
-/* todo: merge with __make_diffs_send_back_at_remote() */
+/* merge with __make_diffs_send_back_at_remote() */
 void __do_apply_diff(page_diff_apply_request_t *req, struct task_struct *tsk)
 {
 	unsigned long conflict_addr = req->diff_addr;
@@ -3312,7 +3118,7 @@ void __do_apply_diff(page_diff_apply_request_t *req, struct task_struct *tsk)
 	void *paddr;
 	BUG_ON(!conflict_addr);
 
-	down_read(&tsk->mm->mmap_sem); // TODO: post-icdcs removing locks
+	down_read(&tsk->mm->mmap_sem);
 
 	vma = find_vma(tsk->mm, conflict_addr);
 	BUG_ON(!vma);
@@ -3347,16 +3153,14 @@ void __do_apply_diff(page_diff_apply_request_t *req, struct task_struct *tsk)
 #endif
 
 	pte_unmap(pte);
-	up_read(&tsk->mm->mmap_sem); // TODO: post-icdcs removing locks
+	up_read(&tsk->mm->mmap_sem);
 }
 
 /* diff_req -> back[Local] */
 extern void sync_set_page_owner(int nid, struct mm_struct *mm, unsigned long addr);
-//static int handle_page_apply_diff_request(struct pcn_kmsg_message *msg)
 static void process_page_apply_diff_request(struct work_struct *work)
 {
 	START_KMSG_WORK(page_diff_apply_request_t, req, work);
-    //page_diff_apply_request_t *req = (page_diff_apply_request_t *)msg;
 	struct task_struct *tsk = __get_task_struct(req->origin_pid);
 	struct remote_context *rc;
 	BUG_ON(!tsk);
@@ -3367,13 +3171,6 @@ static void process_page_apply_diff_request(struct work_struct *work)
 	__do_apply_diff(req, tsk);
 
 	/* ownership */
-	// TODO BUG will hang......cause sync proble.........why
-	//				sync_set_page_owner(0, tsk->mm, req->diff_addr);
-	//				sync_clear_page_owner(1, tsk->mm, req->diff_addr);
-	// this msg may/ may not happen. So fix here is not realistic <- WRONG
-	// only for ww case // normally inv case has been handled in the first place.
-	// this is the 2nd bandadge for special cases
-
 	atomic_dec(&rc->doing_diff_cnt);
 	atomic_inc(&rc->req_diffs);
 #if MW_TIME
@@ -3384,8 +3181,6 @@ static void process_page_apply_diff_request(struct work_struct *work)
 
 	__put_task_remote(rc);
     put_task_struct(tsk);
-	//pcn_kmsg_done(req);
-	//return 0;
     END_KMSG_WORK(req);
 }
 
@@ -3485,7 +3280,7 @@ void __wait_last_reset_done(struct remote_context *rc)
 	//printk("remote mg start - 1\n");
 	while (atomic_read(&rc->per_barrier_reset_done) != rc->remote_done_cnt) {
 		CPU_RELAX; //origin and only
-		smp_rmb();	// potential BUG(); TODO testing important
+		smp_rmb();
 	}
 	/* for race condition, prevent from overwritten */ /* This may be a straggler case PERF */ /* no sleep may casue a 100% kernel spining (bus)*/
 }
@@ -3497,10 +3292,9 @@ void __wait_local_list_ready(struct remote_context *rc, int wr_cnt)
 	//printk("remote mg start - 2\n");
 	while(!rc->ready) {
 		CPU_RELAX;
-		smp_rmb(); // potential BUG(); TODO testing important
+		smp_rmb();
 		/* This sleeping is somehow causing pf deadlock */
 	}
-	/* TODO bug spinging on bare now */
 	BARRMPRINTK("\t\t\tdone find conflict at remote req->wr_cnt %d (barrier)\n", wr_cnt);
 }
 
@@ -3526,16 +3320,8 @@ static void process_page_merge_request(struct work_struct *work)
 #endif
 
 	/* put more handshake info to detect skew cases */
-	//req->begin =
-	//current->tso_begin_m_cnt
-	//current->tso_begin_cnt
-	//req->fence = current->tso_fence_cnt;
 	rc->remote_fence = req->fence;
-	//BUG_ON(rc->fence != current->tso_fence_cnt); // too early
-	//req->end =
-	//mb %lu b %lu f %lu
 
-	// testing !!!! TODO this should be done in another side? or later
 	if (req->iter == req->total_iter) {
 		rc->remote_merge_id = req->merge_id; /* handshake remote status */
 		smp_wmb();
@@ -3611,7 +3397,6 @@ static void process_page_merge_request(struct work_struct *work)
 static int handle_page_diff_all_done_request(struct pcn_kmsg_message *msg)
 {
     remote_baiier_done_request_t *req = (remote_baiier_done_request_t *)msg;
-	/* TODO: change name */
 	struct task_struct *tsk = __get_task_struct(req->origin_pid);
 	struct remote_context *rc = tsk->mm->remote;
 
@@ -3719,7 +3504,7 @@ void __wait_remote_done_handshake(struct remote_context *rc)
 													rc->remote_done);
 	while (rc->local_done_cnt > rc->remote_done_cnt) { /* wait for remote */
 		CPU_RELAX;
-		smp_rmb(); // potential BUG(); TODO testing important
+		smp_rmb();
 	}
 	/* at this moment - remote might have sent to me MERGE req */
 	/* race condition rc-> diffs is 0 but reset by later -1 */
@@ -3731,7 +3516,6 @@ void __wait_remote_done_handshake(struct remote_context *rc)
 	if (rc->local_done_cnt != rc->remote_done_cnt) {
 		WSYPRINTK(KERN_ERR "lf: %lu rf: %d\n",
 				current->tso_fence_cnt, rc->remote_fence);
-		//BUG_ON(rc->remote_fence != current->tso_fence_cnt); /* gurdian false-true */
 	}
 #endif
 }
@@ -3743,11 +3527,6 @@ void __smart_region_handshake(struct remote_context *rc, struct omp_region *regi
 		if (region->type & RCSI_VAIN)  //  optimize code style
 			if (!(rc->remote_type & RCSI_VAIN)) {
 				region->type &= ~RCSI_VAIN; /* roll back - conservative */
-#if SMART_REGION_PERF_DBG
-//				printk("[0x%lx] %d ROLL BACK to VAIN 0x%lx %d\n",
-//										region->id, rc->inv_cnt,
-//										region->type, region->cnt);
-#endif
 			}
 	}
 }
@@ -4041,10 +3820,7 @@ void collect_tso_wr(struct task_struct *tsk)
 	printk("(raw)(__kmpc_for_static_init) begin_m %lu "
 			"((not moved) Barriers)fence_m %lu\n",
 			rc->tso_begin_m_cnt, rc->tso_fence_m_cnt);
-			//"(__kmpc_for_static_fini) end_m %lu\n",
-			//rc->tso_begin_m_cnt, rc->tso_fence_m_cnt, rc->tso_end_m_cnt);
 
-	//if (rc->tso_begin_m_cnt || rc->tso_fence_m_cnt || rc->tso_end_m_cnt)
 	if (rc->tso_begin_m_cnt || rc->tso_fence_m_cnt)
 		printk("\ttso: WARNNING - MISSING TO HANDLE SOME REGIONS !!!!!\n");
 	else
@@ -4062,8 +3838,6 @@ void collect_tso_wr(struct task_struct *tsk)
 	printk("\n");
 	pf_results(rc);
 	printk("\n");
-	//printk("TODO: more info\n");
-	//printk("TODO: 123\n");
 
 	__put_task_remote(rc);
 #endif
@@ -4163,7 +3937,6 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 #endif
 				/* serial pf */
 				PFPRINTK("#omp_hash 0x%lx cnt %d\n", omp_hash, region->cnt);
-				//printk("#omp_hash 0x%lx cnt %d\n", omp_hash, region->cnt);
 				sys_region = __god_view_prefetch(rc, omp_hash, region->cnt);
 				if (!sys_region) {
 					write_lock(&sys_region_hash_lock);
@@ -4171,21 +3944,13 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 					write_unlock(&sys_region_hash_lock);
 				}
 
-				////////////////////////////////////////////
 				// region cnt is specific for pf
 				region->cnt++; /* region cnt only used by pf */
-				// TODO testing moved to here
-				// increase for next (very prograssive)
-				////////////////////////////////////////////
 			}
 			__end_begin_barrier(leader);
 
 			current->omp_hash = omp_hash;
-			////////////////////////////////////////////
-			// testing in case future current-> region_cnt still need to use this number to match (casued by progressive region->cnt++)
-			//current->region_cnt = region->cnt;
 			current->region_cnt = region->cnt - 1; /* region cnt only used by pf */
-			////////////////////////////////////////////
 #if PF_TIME
 			if (leader) {
 				ktime_t dt, pf_end = ktime_get();
@@ -4212,9 +3977,6 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 #endif
 	}
 
-	/* TODO: THINK HARD: Doing readfault related works here
-		is costly since it has to stop all threads */
-
 	current->tso_region = true;
 #if TSO_LOG_TIME
 	current->tso_begin_cnt++;
@@ -4227,9 +3989,6 @@ static int __popcorn_tso_begin(int id, void __user * file, unsigned long omp_has
 void __wait_diffs_done(struct remote_context *rc)
 {
 	/* sync: 1. wait diffs 2. wait merge msgs */
-	//if (current->tso_region){printk("wait diffs\n");}
-	//if(!current->at_remote){printk("wait diffs\n");}
-	//PFVPRINTK("wait all diffs done (origin only)\n");
 	if (my_nid == NOCOPY_NODE) {
 		/* local calculated diff cnt VS remote calculated diff cnt that has been done at origin) */
 		WSYPRINTK("wait diffs sync: l calc %d r calc %d (origin only) lr(%d/%d)\n",
@@ -4242,8 +4001,6 @@ void __wait_diffs_done(struct remote_context *rc)
 					atomic_read(&rc->diffs), atomic_read(&rc->req_diffs),
 					rc->local_merge_id, rc->remote_merge_id);
 	}
-	//printk("done wait diffs\n");
-	//if (current->tso_region){printk("done wait diffs\n");}
 }
 
 /* Prevent from double handshake
@@ -4253,14 +4010,12 @@ void __wait_merge_msgs(struct remote_context *rc)
 	/* BUG() - if spining here, may mean never recv the merge req */
 	SYNCPRINTK2("mg: wait lr(%d/%d)\n",
 				rc->local_merge_id, rc->remote_merge_id);
-	//if(!current->at_remote){printk("mg: wait\n");}
-	while(rc->local_merge_id > rc->remote_merge_id) { //BUG: remote_merge_id is updated in the first merg_req() just wait one
+	while(rc->local_merge_id > rc->remote_merge_id) {
 		CPU_RELAX;
-		smp_rmb(); // potential BUG(); TODO testing important
+		smp_rmb();
 	}
 
 	/* going to handshake */
-	//printk("mg: done wait\n");
 	SYNCPRINTK2("mg: pass lr(%d/%d)\n",
 				rc->local_merge_id, rc->remote_merge_id);
 
@@ -4293,27 +4048,16 @@ static int __popcorn_tso_fence(int id, void __user * file, unsigned long omp_has
 		__try_flip_region_type(rc);
 #endif
 #if MW_TIME
-		// !current->tso_region count for invain (pgs)
 		atomic_add(current->skip_wr_per_rw_cnt, &rc->sys_smart_skip_cnt);
-		//current->smart_skip_cnt += current->skip_wr_per_rw_cnt;
 		current->skip_wr_per_rw_cnt = 0;
 #endif
 	}
 #endif
 
-// TODO try to remove __popcorn_tso_fence from end 12/12  remove start
 	if (!current->tso_region) { /* open to detect errors */
-#if !SMART_REGION && !SMART_REGION_DBG
-// uncomment it
-//		PCNPRINTK_ERR("[%d] BUG fence in a not-tso region "
-//						"tso_region_id %lu line %d omp_hash 0x%lx - IGNORE\n",
-//						current->pid, current->tso_region_id, id, omp_hash);
-//								/* warnning - this omp has is not begin */
-#endif
 		current->tso_region_id = 0; // the rest of region -> X
 		goto out;
 	}
-// TODO try to remove __popcorn_tso_fence from end 12/12  remove done
 
 #if POPCORN_TSO_BARRIER
 	leader = __popcorn_start_begin_barrier(rc, id);
@@ -4322,10 +4066,7 @@ static int __popcorn_tso_fence(int id, void __user * file, unsigned long omp_has
 		mw_start = ktime_get();
 #endif
 		/* Main MW protocol time */
-		//if (current->tso_region){printk("MERGE wait\n");}
-		//__locally_find_conflictions(TO_THE_OTHER_NID(), rc);
 		__locally_find_conflictions2(TO_THE_OTHER_NID(), rc);
-		//if (current->tso_region){printk("MERGE passed\n");}
 #if MW_TIME
 		mw_find_conf = ktime_get();
 #endif
@@ -4335,16 +4076,11 @@ static int __popcorn_tso_fence(int id, void __user * file, unsigned long omp_has
 		__dbg_si_addrs(current->omp_hash, current->region_cnt);
 #endif
 
-		/* if never been here, create. todo - see if do outside leader (may be seperate analyze here & create outside). pf need the resgion info */
+		/* If never been here, create. See if do outside leader
+			(may be seperate analyze here & create outside).
+								pf needs the resgion info */
 		region = __create_analyze_region(rc);
-		////////////////////////////////////////////
-		////////////////////////////////////////////
-		//region->cnt++; // TODO testing moving to begin
-		////////////////////////////////////////////
-		////////////////////////////////////////////
 		current->smart_is_vain = false;
-		////////////////////////////////////////////
-		////////////////////////////////////////////
 
 		__wait_diffs_done(rc); /* till local == remote calculated # done local  */
 #if MW_TIME
@@ -4403,26 +4139,18 @@ static int __popcorn_tso_end(int id, void __user * file, unsigned long omp_hash,
 		goto valid_end;
 	}
 
-//#if TSO_LOG_TIME
 	else if (a == KMPC_REDUCE) {
 		current->kmpc_reduce++;
 		goto valid_end;
 	} else if (a == KMPC_END_REDUCE) {
 		current->kmpc_end_reduce++;
 		goto valid_end;
-		//TODO try to skip
+		/* try to skip */
 	} else if (a == KMPC_DISPATCH_FINI) {
 		current->kmpc_dispatch_fini++;
 	} else if ( a == KMPC_STATIC_FINI) {
 		current->kmpc_static_fini++;
 	}
-//#endif
-
-//	if (a == KMPC_REDUCE) {
-//		goto valid_end;
-//	} else if (a == KMPC_END_REDUCE) {
-//		goto valid_end;
-//	}
 
 #if TSO_LOG_TIME
 #if !SMART_REGION
@@ -4454,24 +4182,12 @@ static int __popcorn_tso_end(int id, void __user * file, unsigned long omp_hash,
 
 	if (!current->tso_region) return 0;
     trace_tso(my_nid, current->pid, id, 'e');
-// TODO try to merge user space barrier with kernel space barrier
-// TODO rely on compiler auto add barrier latter on which has
-//  leader thread waiting in syscall
-//  followers TODO also have to call syscall
-//  		all try to do __popcorn_tso_fence() plus global_barrier()
-//
-// TODO try to remove __popcorn_tso_fence from end 12/12 remove start
-// TODO
+	/* Optimize - try to merge user space barrier with kernel space barrier */
 
-// 11/12 testing
-#if POST_ICDCS19_TESTING
-	//__popcorn_tso_fence(id, file, omp_hash, a, b);
-#else
+#if !POST_ICDCS19_TESTING
 	__popcorn_tso_fence(id, file, omp_hash, a, b);
 #endif
 
-// TODO
-// TODO try to remove __popcorn_tso_fence from end 12/12 remove done
 #if TSO_LOG_TIME
 	current->tso_end_cnt++;
 #endif
@@ -4591,7 +4307,7 @@ SYSCALL_DEFINE5(popcorn_tso_fence_manual, int, id, void __user *, file, unsigned
 		printk("\n"
 				"==========================================\n"
 				"KM/BLK: Completed %lu is_god(%s - 1: record 0: pf ) "
-				"pf_cnt %ld(TODO: don't trust)\n"
+				"pf_cnt %ld (don't trust)\n"
 				"========================================\n\n",
 								omp_hash, is_god ? "O" : "X",
 									atomic64_read(&fp_cnt));
@@ -4715,28 +4431,8 @@ static void process_toggle_memory_pattern_trace_response(struct work_struct *wor
 /* Popcorn global barrier */
 static int handle_global_barrier_request(struct pcn_kmsg_message *msg)
 {
-//	unsigned long flags;
-
-
-	// seems line this update confliction will happen
-	// pretend from reentrying
-	// reader frendly design (no atomic)
 	atomic64_inc(&popcorn_global_remote_cnt); // racecondition?
 
-//	//spin_lock(&popcorn_global_lock);
-//	spin_lock_irqsave(&popcorn_global_lock, flags); // try
-//	popcorn_global_remote_cnt++; // racecondition?
-//	smp_wmb(); // look no need
-//	spin_unlock_irqrestore(&popcorn_global_lock, flags);
-//	//spin_unlock(&popcorn_global_lock);
-
-#if VM_TESTING
-////	//printk("\t\t recv remote %lu\n", popcorn_global_remote_cnt);
-//	printk("\t\t recv remote %ld\n", atomic64_read(&popcorn_global_remote_cnt));
-#endif
-
-//    remote_popcorn_barrier_request_t *req =
-//				(remote_popcorn_barrier_request_t *)msg;
 	pcn_kmsg_done(msg);
 	return 0;
 }
@@ -4754,43 +4450,13 @@ SYSCALL_DEFINE5(popcorn_global_barrier, unsigned long, id, void __user *, file, 
     pcn_kmsg_post(PCN_KMSG_TYPE_GLOBAL_BARRIER_REQUEST,
 					TO_THE_OTHER_NID(), req, sizeof(*req));
 
-//	spin_lock(&popcorn_global_lock2);
-//	__popcorn_global_local_cnt = ++popcorn_global_local_cnt;
-//	smp_wmb();
-//	spin_unlock(&popcorn_global_lock2);
-
 	atomic64_inc(&popcorn_global_local_cnt);
-#if VM_TESTING
-//	printk("[%d] coming local (sys) %lu(sent)\n", current->pid,
-//							 atomic64_read(&popcorn_global_local_cnt));
-//////////									 __popcorn_global_local_cnt);
-#endif
-//	static u64 cnt = 0;
-//	if (cnt++ < 100)
-//		printk("TODO: IMPLEMENTING\n");
 
 #if GLOBAL_SYS_BAR_TIME
 	start = ktime_get();
 #endif
 	while (atomic64_read(&popcorn_global_local_cnt) >
 			atomic64_read(&popcorn_global_remote_cnt)) {
-//	while (__popcorn_global_local_cnt >
-//			popcorn_global_remote_cnt) {
-		//;
-//#if VM_TESTING
-#if 0
-		if (ppp++ > 100000000000 && ppp < (100000000000 + 100)) {
-			printk("[%d]WAIT TOO LONG "
-						"local (sys) %lu(sent) remote %lu\n",
-									current->pid,
-									__popcorn_global_local_cnt,
-									//atomic64_read(&popcorn_global_local_cnt),
-									//atomic64_read(&popcorn_global_remote_cnt));
-									popcorn_global_remote_cnt);
-		}
-#endif
-
-//		smp_rmb(); // must need
 		/* only single CPU I think I can spin */
 		CPU_RELAX;
 	}

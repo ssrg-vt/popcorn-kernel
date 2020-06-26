@@ -1473,8 +1473,8 @@ int request_remote_work(pid_t pid, struct pcn_kmsg_message *req)
 		__put_task_remote(rc);
 	} else {
 		WARN_ON(tsk->remote_work);
-		while (tsk->remote_work) // Jack DEX BUG FIX
-			; // Jack DEX BUG FIX
+		while (tsk->remote_work) /* DEX BUG FIX */
+			;
 		tsk->remote_work = req;
 		complete(&tsk->remote_work_pended); /* implicit memory barrier */
 	}

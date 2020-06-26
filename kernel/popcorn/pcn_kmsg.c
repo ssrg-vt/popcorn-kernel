@@ -96,28 +96,6 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 #ifdef CONFIG_POPCORN_STAT
 	t4e = ktime_get();
 	t4 += ktime_to_ns(ktime_sub(t4e, t4s));
-#if 0
-	if (cnt <= 2 ) {
-		t2 = 0; t3 = 0; t4 = 0;
-	}
-
-	if (cnt >= ITERS) {
-		//printk("%s(): %d\n", __func__, cnt);
-		printk("%s(): t2 %lld ns %lld us!!!\n",
-						__func__,
-						t2 / ITER,
-						t2 / ITER / 1000);
-		printk("%s(): t3 %lld ns %lld us!!!\n",
-						__func__,
-						t3 / ITER,
-						t3 / ITER / 1000);
-		printk("%s(): t4 %lld ns %lld us!!!\n",
-						__func__,
-						t4 / ITER,
-						t4 / ITER / 1000);
-		// TODO jack
-	}
-#endif
 #endif
 
 }

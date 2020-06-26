@@ -1,6 +1,6 @@
 /*
  * sync.h
- * Copyright (C) 2018 jackchuang <jackchuang@mir7>
+ * Copyright (C) 2018 Ho-Ren (Jack) Chuang <horenc@vt.edu>
  *
  * Distributed under terms of the MIT license.
  */
