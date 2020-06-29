@@ -133,6 +133,9 @@ asmlinkage long sys_hscall(unsigned long arg0, unsigned long arg1,
 		/* Init FD vtab. */
 		init_mvx_vtab();
 	}
+	if (arg0 == 0x2) {
+		//retrieve_argv(current);
+	}
 
 	return 0;
 }
@@ -206,11 +209,16 @@ static int mvx_process_fork(void *data)
 {
 	struct subprocess_info *sub_info;
 	int ret = 0;
-	char *path = (char *)data;
+	cmd_t *cmd = (cmd_t *)data;
+	//char *path = (char *)data;
+	char *path = cmd->exe_path;
+	int argc = cmd->argc;
 	char *argv[] = {path, NULL};
 	static char *envp[] = {"HOME=/", "TERM=linux",
 		"PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
 
+	MVXPRINTK("%s: argc %u, path %s, argv %s (cmdline size: %u).\n",
+		__func__, argc, path, cmd->cmdline, cmd->cmdline_size);
 	/* Prepare the userspace follower variant. */
 	sub_info = call_usermodehelper_setup(argv[0], argv, envp, GFP_ATOMIC,
 			init_follower_mvx_process, NULL, NULL);
@@ -233,14 +241,14 @@ static void clone_mvx_thread(struct work_struct *_work)
 	pid_t pid;
 
 	/* Use a kthread to launch a userspace process and mark it as MVX process */
-	pid = kernel_thread(mvx_process_fork, init_msg->exe_path,
+	pid = kernel_thread(mvx_process_fork, &(init_msg->cmd),
 			    CLONE_PARENT | SIGCHLD);
 	if (pid < 0) {
 		printk("%s: create child process error\n", __func__);
 		return;
 	}
 	MVXPRINTK("%s: MVX helper thread [%d] finished launching MVX process, bin path: %s.\n",
-			__func__, pid, init_msg->exe_path);
+			__func__, pid, init_msg->cmd.exe_path);
 }
 
 /**
@@ -323,6 +331,43 @@ int mvx_send_reply(long retval, long syscall, int dst_nid)
 }
 
 /**
+ * Prepare the cmd: retrieve master variant's cmdline from `mm_struct`.
+ * */
+static int mvx_prepare_init_req(struct mm_struct *mm, cmd_t *cmd)
+{
+	int ret, i, argc, arg_size;
+	char *buf;
+
+	ret = get_cmdline(current, cmd->cmdline, MVX_CMDLINE_SIZE);
+	if (ret >= MVX_CMDLINE_SIZE) {
+		MVXPRINTK("%s: MVX_CMDLINE_SIZE %d too small for cmdline\n",
+			__func__, MVX_CMDLINE_SIZE);
+		return -ENOMEM;
+	}
+	cmd->cmdline_size = ret;
+
+	if (get_file_path(mm->exe_file, cmd->exe_path, sizeof(cmd->exe_path))) {
+		MVXPRINTK("%s: get_file_path error\n", __func__);
+		return -ENOMEM;
+	}
+
+#if 1
+	buf = cmd->cmdline;
+	arg_size = 0;
+	argc = 0;
+	for (i = 0; i < ret; i += (arg_size+1)) {
+		arg_size = strlen(buf + i);
+		pr_info("[%2u] argv[%d]: %s. arg_size %u\n", i, argc++, buf+i, arg_size);
+	}
+#endif
+	cmd->argc = argc;
+	MVXPRINTK("%s: Finish cmd_t preparation: argc %u. cmd->len %u. cmd->cmdline %s. exe path %s\n",
+			__func__, cmd->argc, cmd->cmdline_size, cmd->cmdline, cmd->exe_path);
+
+	return 0;
+}
+
+/**
  * Master initializes MVX, and syncronizes with remote follower(s)
  * The real syscall handler.
  * */
@@ -338,16 +383,23 @@ int mvx_server_start_mvx(struct task_struct *tsk, unsigned int dst_nid)
 		goto out;
 	}
 
-	// Get the exe file name and path.
-	if (get_file_path(mm->exe_file, req->exe_path, sizeof(req->exe_path))) {
-		printk("%s: cannot get path to exe binary\n", __func__);
+	/* Get the exe file path + name. */
+//	if (get_file_path(mm->exe_file, req->cmd->exe_path, sizeof(req->cmd->exe_path))) {
+//		printk("%s: cannot get path to exe binary\n", __func__);
+//		ret = -ESRCH;
+//		pcn_kmsg_put(req);
+//		goto out;
+//	}
+	/* Prepare 'cmdline' and 'path+name' from `mm_struct`. */
+	if (mvx_prepare_init_req(mm, &(req->cmd))) {
+		printk("%s: Prepare cmd from mm_struct error.\n", __func__);
 		ret = -ESRCH;
 		pcn_kmsg_put(req);
 		goto out;
 	}
 
 	MVXPRINTK("%s: [%d] exe_path %s. arg_start 0x%lx, arg_end 0x%lx\n", __func__,
-			tsk->pid, req->exe_path, mm->arg_start, mm->arg_end);
+			tsk->pid, req->cmd.exe_path, mm->arg_start, mm->arg_end);
 	MVXPRINTK("%s: size %lu; dst nid %d\n", __func__, sizeof(*req), dst_nid);
 
 	ret = pcn_kmsg_send(PCN_KMSG_TYPE_MVX, dst_nid, req, sizeof(*req));
