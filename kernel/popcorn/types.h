@@ -378,7 +378,6 @@ DEFINE_PCN_KMSG(signal_trans_t , SIGNAL_TRANSMIT_FIELDS);
 /* Command line struct */
 typedef struct _cmd {
 	int argc;
-	int max_arg_len;
 	int cmdline_size;
 	char cmdline[MVX_CMDLINE_SIZE];
 	char exe_path[MVX_EXE_PATH_SIZE];

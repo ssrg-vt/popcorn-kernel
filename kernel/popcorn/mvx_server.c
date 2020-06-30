@@ -214,9 +214,7 @@ static int mvx_process_fork(void *data)
 	char *path = cmd->exe_path;
 	char *cmdline = cmd->cmdline;
 	int argc = cmd->argc;
-	//int max_arg_len = cmd->max_arg_len;
-	//char *argv[] = {path, NULL};
-	char *argv[8] = {0};
+	char *argv[8] = {0};	/* Only support up to 8 params for now. */
 	static char *envp[] = {"HOME=/", "TERM=linux",
 		"PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
 
@@ -224,7 +222,7 @@ static int mvx_process_fork(void *data)
 	off = 0;
 	for (i = 0; i < argc; i++) {
 		arg_size = strlen(cmdline + off);
-		strncpy(argv[i], cmdline + off, arg_size + 1);
+		argv[i] = cmdline + off;
 		off += (arg_size + 1);
 		pr_info("argv[%u] %s (%u)\n", i, argv[i], arg_size);
 	}
@@ -348,7 +346,7 @@ int mvx_send_reply(long retval, long syscall, int dst_nid)
  * */
 static int mvx_prepare_init_req(struct mm_struct *mm, cmd_t *cmd)
 {
-	int ret, i, argc, arg_size, max_arg_len;
+	int ret, i, argc, arg_size;
 	char *buf;
 
 	ret = get_cmdline(current, cmd->cmdline, MVX_CMDLINE_SIZE);
@@ -367,16 +365,13 @@ static int mvx_prepare_init_req(struct mm_struct *mm, cmd_t *cmd)
 	buf = cmd->cmdline;
 	arg_size = 0;
 	argc = 0;
-	max_arg_len = 0;
 	for (i = 0; i < ret; i += (arg_size+1)) {
 		arg_size = strlen(buf + i);
-		if (arg_size > max_arg_len) max_arg_len = arg_size;
 		pr_info("[%2u] argv[%d]: %s. arg_size %u\n", i, argc++, buf+i, arg_size);
 	}
 	cmd->argc = argc;
-	cmd->max_arg_len = max_arg_len + 1;		/* include the space of '\0' */
-	MVXPRINTK("%s: Retrieved argc %u. cmd->len %u (max %u). cmd->cmdline %s. exe path %s\n",
-			__func__, cmd->argc, cmd->cmdline_size, max_arg_len, cmd->cmdline, cmd->exe_path);
+	MVXPRINTK("%s: Retrieved argc %u. cmd->len %u. cmd->cmdline %s. exe path %s\n",
+			__func__, cmd->argc, cmd->cmdline_size, cmd->cmdline, cmd->exe_path);
 
 	return 0;
 }
