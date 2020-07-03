@@ -238,6 +238,35 @@ out:
 	return;
 }
 
+static void follower_write(int32_t *retval, unsigned int dst_nid)
+{
+	extern struct completion follower_wait;
+
+	MVXPRINTK("\n");
+	MVXPRINTK("Follower waits msg on\n[%2ld] syscall: <SYS_write>\n",
+		  mvx_index++);
+	/* Follower waits for a message from master. */
+	if (current->is_mvx_process)
+		wait_for_completion_interruptible(&follower_wait);
+	else
+		goto out;
+
+	MVX_WARN_ON(mvx_follower_msg.syscall != __NR_write);
+
+	MVXPRINTK("syscall %d: <%s>. flag %d. master msg syscall %d\n",
+		  __NR_write, syscall_name[__NR_write],
+		  mvx_follower_msg.flag, mvx_follower_msg.syscall);
+
+	if (*retval != (ssize_t)mvx_follower_msg.retval)
+		pr_info("follower ret %d != %ld from master\n",
+			*retval, (ssize_t)mvx_follower_msg.retval);
+
+	*(ssize_t *)retval = (ssize_t)mvx_follower_msg.retval;
+	mvx_send_reply(*(ssize_t *)retval, __NR_write, dst_nid);
+out:
+	return;
+}
+
 /**
  * This is called by socket, epoll_create1; only update the retval.
  * So the retval is the simulated fd.
@@ -366,6 +395,9 @@ int mvx_follower_post_syscall(struct task_struct *tsk, unsigned int dst_nid,
 	/* This syscall only in post, but have to send reply. */
 	case __NR_writev:
 		follower_writev(retval, dst_nid);
+		break;
+	case __NR_write:
+		follower_write(retval, dst_nid);
 		break;
 
 	/* These 3 syscall was in pre procedure. */
@@ -665,7 +697,8 @@ int mvx_master_sync(struct task_struct *tsk, unsigned int dst_nid,
 			master_close(msg, args, retval);
 		}
 	case __NR_writev:
-		if (syscall == __NR_writev) {
+	case __NR_write:
+		if (syscall == __NR_writev || syscall == __NR_write) {
 			if (mvx_is_real_fd(args[0])) {
 				msg->flag = MVX_REAL;
 			} else {

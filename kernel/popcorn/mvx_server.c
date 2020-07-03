@@ -403,13 +403,6 @@ int mvx_server_start_mvx(struct task_struct *tsk, unsigned int dst_nid)
 		goto out;
 	}
 
-	/* Get the exe file path + name. */
-//	if (get_file_path(mm->exe_file, req->cmd->exe_path, sizeof(req->cmd->exe_path))) {
-//		printk("%s: cannot get path to exe binary\n", __func__);
-//		ret = -ESRCH;
-//		pcn_kmsg_put(req);
-//		goto out;
-//	}
 	/* Prepare 'cmdline' and 'exe_path + executable name' from `mm_struct`. */
 	if (mvx_prepare_init_req(mm, &(req->cmd))) {
 		printk("%s: Prepare cmd from mm_struct error.\n", __func__);

@@ -628,6 +628,30 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		ret = redirect_write(fd, buf, count);
 		return ret;
 	}
+#endif
+
+	f = fdget_pos(fd);
+	ret = -EBADF;
+
+	if (f.file) {
+		loff_t pos = file_pos_read(f.file);
+		ret = vfs_write(f.file, buf, count, &pos);
+		if (ret >= 0)
+			file_pos_write(f.file, pos);
+		fdput_pos(f);
+	}
+#ifdef CONFIG_POPCORN
+	if (mvx_process(current)) {
+		mvx_print_fd_vtab();
+		if (!mvx_follower(current)) {
+			mvx_master_sync(current, FOLLOWER_NID,
+					__NR_write, mvx_args, ret);
+		} else {
+			mvx_follower_post_syscall(current, MASTER_NID,
+				__NR_write, mvx_args, (int *)&ret);
+		}
+	}
+#if 1
 	if (mvx_process(current)) {
 		char kbuf[128];
 		size_t len = count<128 ? count : 127;
@@ -641,18 +665,7 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		MVXPRINTK("Not support %s yet.\n", __func__);
 	}
 #endif
-
-	f = fdget_pos(fd);
-	ret = -EBADF;
-
-	if (f.file) {
-		loff_t pos = file_pos_read(f.file);
-		ret = vfs_write(f.file, buf, count, &pos);
-		if (ret >= 0)
-			file_pos_write(f.file, pos);
-		fdput_pos(f);
-	}
-
+#endif
 	return ret;
 }
 
@@ -945,31 +958,6 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 		ret = redirect_writev(fd, vec, vlen);
 		return ret;
 	}
-#if 1
-	if (mvx_process(current)) {
-		char kbuf[128];
-		int ret = 0, i;
-		size_t len;
-		struct iovec *kvec;	// SMAP will not allow access user memory directly.
-
-		MVXPRINTK("\n%s: mvx [%d]. fd %lu, vlen %lu. MVX %s.\n",
-			  __func__, current->pid, fd, vlen,
-			  (mvx_follower(current) ? "follower":"master"));
-
-		kvec = kmalloc(vlen*sizeof(struct iovec), GFP_KERNEL);
-		ret = copy_from_user(kvec, vec, vlen*sizeof(struct iovec));
-		BUG_ON(ret);
-
-		for (i = 0; i < vlen; i++) {
-			len = (kvec[i].iov_len < 128) ? kvec[i].iov_len : 127;
-			ret = copy_from_user(kbuf, kvec[i].iov_base, len);
-			BUG_ON(ret);
-			kbuf[len] = 0;
-			MVXPRINTK("%s: buf: %s", __func__, kbuf);
-		}
-		kfree(kvec);
-	}
-#endif
 #endif
 
 	f = fdget_pos(fd);
@@ -997,6 +985,31 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 				__NR_writev, mvx_args, (int *)&ret);
 		}
 	}
+#if 1
+	if (mvx_process(current)) {
+		char kbuf[128];
+		int ret = 0, i;
+		size_t len;
+		struct iovec *kvec;	// SMAP will not allow access user memory directly.
+
+		MVXPRINTK("\n%s: mvx [%d]. fd %lu, vlen %lu. MVX %s.\n",
+			  __func__, current->pid, fd, vlen,
+			  (mvx_follower(current) ? "follower":"master"));
+
+		kvec = kmalloc(vlen*sizeof(struct iovec), GFP_KERNEL);
+		ret = copy_from_user(kvec, vec, vlen*sizeof(struct iovec));
+		BUG_ON(ret);
+
+		for (i = 0; i < vlen; i++) {
+			len = (kvec[i].iov_len < 128) ? kvec[i].iov_len : 127;
+			ret = copy_from_user(kbuf, kvec[i].iov_base, len);
+			BUG_ON(ret);
+			kbuf[len] = 0;
+			MVXPRINTK("%s: buf: %s", __func__, kbuf);
+		}
+		kfree(kvec);
+	}
+#endif
 #endif
 	return ret;
 }
