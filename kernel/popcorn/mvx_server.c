@@ -18,8 +18,8 @@ int64_t mvx_args[NUM_SYSCALLS];
 EXPORT_SYMBOL(mvx_args);
 
 /* MVX master/follower node id. */
-int master_nid = 1;	// arm64 as master
-int follower_nid = 0;
+//int master_nid = 1;	// arm64 as master
+//int follower_nid = 0;
 
 /* A global mvx message; used for passing data between modules. */
 mvx_core_msg_t mvx_follower_msg;
@@ -127,7 +127,7 @@ asmlinkage long sys_hscall(unsigned long arg0, unsigned long arg1,
 	/* arg0 == 0x1 indicates a MVX process (master). */
 	if (arg0 == 0x1) {
 		/* Get the process info and message follower to start. */
-		mvx_server_start_mvx(current, 0);	// TODO: dst node
+		mvx_server_start_mvx(current, FOLLOWER_NID);
 		/* Setup the MVX process info. */
 		init_mvx_proc_syscall(current, 1);
 		/* Init FD vtab. */
@@ -177,11 +177,18 @@ static bool install_pseudo_fd(char *stdin, char *stdout)
 	}
 	fdtab->fd[1] = fdtab->fd[2] = fp_stdout;
 
-	MVXPRINTK("[%d] %s: Init pseudo FDs (STDIN|STDOUT|STDERR) success.\n",
-			current->pid, __func__);
 	return true;
 out:
 	return false;
+}
+
+/**
+ * Update uid and gid in `cred *new` with the id provided.
+ * */
+static void alter_uid_gid(struct cred *new, uid_t uid, gid_t gid)
+{
+	new->uid = new->euid = new->suid = new->fsuid = KUIDT_INIT(uid);
+	new->gid = new->egid = new->sgid = new->fsgid = KGIDT_INIT(gid);
 }
 
 /**
@@ -190,13 +197,16 @@ out:
  * - Init the fd vtab
  * - Install the pseudo fds.
  * */
-static int init_follower_mvx_process(struct subprocess_info *info, struct cred *new)
+static int init_mvx_follower_process(struct subprocess_info *info, struct cred *new)
 {
 	init_mvx_proc_syscall(current, 0);
 	init_mvx_vtab();
 	install_pseudo_fd(MVX_STDIN_LOC, MVX_STDOUT_LOC);
+	alter_uid_gid(new, MVX_FOLLOWER_UID, MVX_FOLLOWER_GID);
+
 	MVXPRINTK("[%d] %s: Finished the Follower MVX process initialization.\n",
 		current->pid, __func__);
+
 	return 0;
 }
 
@@ -218,21 +228,20 @@ static int mvx_process_fork(void *data)
 	static char *envp[] = {"HOME=/", "TERM=linux",
 		"PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
 
+	/* Prepare the argv[] of the follower variant process. */
 	BUG_ON(argc > 8);	/* Only support up to 8 params for now. */
 	off = 0;
 	for (i = 0; i < argc; i++) {
 		arg_size = strlen(cmdline + off);
 		argv[i] = cmdline + off;
 		off += (arg_size + 1);
-		pr_info("argv[%u] %s (%u)\n", i, argv[i], arg_size);
+		MVXPRINTK("argv[%u] %s (%u)\n", i, argv[i], arg_size);
 	}
-	argv[0] = path;
-	MVXPRINTK("%s: argc %u, path %s, argv %s (cmdline size: %u).\n",
-		__func__, argc, path, cmd->cmdline, cmd->cmdline_size);
+	argv[0] = path;	/* argv[0] points to the full path of the executable. */
 
 	/* Prepare the userspace follower variant. */
 	sub_info = call_usermodehelper_setup(argv[0], argv, envp, GFP_ATOMIC,
-			init_follower_mvx_process, NULL, NULL);
+			init_mvx_follower_process, NULL, NULL);
 	if (sub_info == NULL) return -ENOMEM;
 
 	ret = call_usermodehelper_exec(sub_info, UMH_KILLABLE);
@@ -347,8 +356,9 @@ int mvx_send_reply(long retval, long syscall, int dst_nid)
 static int mvx_prepare_init_req(struct mm_struct *mm, cmd_t *cmd)
 {
 	int ret, i, argc, arg_size;
-	char *buf;
+	char *buf = cmd->cmdline;
 
+	/* Get cmdline and size of the current process. */
 	ret = get_cmdline(current, cmd->cmdline, MVX_CMDLINE_SIZE);
 	if (ret >= MVX_CMDLINE_SIZE) {
 		MVXPRINTK("%s: MVX_CMDLINE_SIZE %d too small for cmdline\n",
@@ -357,20 +367,21 @@ static int mvx_prepare_init_req(struct mm_struct *mm, cmd_t *cmd)
 	}
 	cmd->cmdline_size = ret;
 
+	/* Get the exe file path. */
 	if (get_file_path(mm->exe_file, cmd->exe_path, sizeof(cmd->exe_path))) {
 		MVXPRINTK("%s: get_file_path error\n", __func__);
 		return -ENOMEM;
 	}
 
-	buf = cmd->cmdline;
-	arg_size = 0;
-	argc = 0;
+	/* Get argc by parsing the cmdline. */
+	argc = arg_size = 0;
 	for (i = 0; i < ret; i += (arg_size+1)) {
 		arg_size = strlen(buf + i);
 		pr_info("[%2u] argv[%d]: %s. arg_size %u\n", i, argc++, buf+i, arg_size);
 	}
 	cmd->argc = argc;
-	MVXPRINTK("%s: Retrieved argc %u. cmd->len %u. cmd->cmdline %s. exe path %s\n",
+
+	MVXPRINTK("%s: Retrieved argc %u, cmdline size %u, cmdline %s, exe path %s\n",
 			__func__, cmd->argc, cmd->cmdline_size, cmd->cmdline, cmd->exe_path);
 
 	return 0;

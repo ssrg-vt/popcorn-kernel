@@ -379,7 +379,7 @@ SYSCALL_DEFINE3(fcntl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)
 		mvx_args[2] = arg;
 	}
 	if (mvx_process(current) && mvx_follower(current)) {
-		mvx_follower_wait_exec(current, master_nid, __NR_fcntl, mvx_args,
+		mvx_follower_wait_exec(current, MASTER_NID, __NR_fcntl, mvx_args,
 				       (int32_t*)&err, sizeof(long));
 		MVXPRINTK("%s: fd %d, cmd %u, arg %lu. ret: %lx\n",
 			  __func__, fd, cmd, arg, err);
@@ -406,7 +406,7 @@ out:
 #ifdef CONFIG_POPCORN
 	if (mvx_process(current) && !mvx_follower(current)) {
 		// Master forwards syscall params/retval to follower(s)
-		mvx_master_sync(current, follower_nid, __NR_fcntl, mvx_args, err);
+		mvx_master_sync(current, FOLLOWER_NID, __NR_fcntl, mvx_args, err);
 		MVXPRINTK("%s: fd %d, cmd %u, arg %lu. ret: %ld\n",
 			  __func__, fd, cmd, arg, err);
 	}

@@ -859,11 +859,11 @@ SYSCALL_DEFINE1(exit, int, error_code)
 	if (mvx_process(current)) {
 		mvx_args[0] = error_code;
 		if (mvx_follower(current)) {
-			mvx_follower_wait_exec(current, master_nid,
+			mvx_follower_wait_exec(current, MASTER_NID,
 					       __NR_exit,
 					mvx_args, NULL, 0);
 		} else {
-			mvx_master_sync(current, follower_nid,
+			mvx_master_sync(current, FOLLOWER_NID,
 					__NR_exit, mvx_args, 0);
 		}
 		MVXPRINTK("%s: error_code %d\n", __func__, error_code);
@@ -917,11 +917,11 @@ SYSCALL_DEFINE1(exit_group, int, error_code)
 		if (mvx_follower(current)) {
 			//mvx_follower_post_syscall(current, 0,
 			//		__NR_exit_group, mvx_args, NULL);
-			mvx_follower_wait_exec(current, master_nid,
+			mvx_follower_wait_exec(current, MASTER_NID,
 					       __NR_exit_group,
 					mvx_args, NULL, 0);
 		} else {
-			mvx_master_sync(current, follower_nid,
+			mvx_master_sync(current, FOLLOWER_NID,
 					__NR_exit_group, mvx_args, 0);
 		}
 		MVXPRINTK("%s: error_code %d\n", __func__, error_code);

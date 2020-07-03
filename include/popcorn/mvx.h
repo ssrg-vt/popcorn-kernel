@@ -1,9 +1,9 @@
 /**
  * @file include/popcorn/mvx.h
  *
- * MVX related functions
+ * MVX related configuration and functions.
  *
- * @author Xiaoguang Wang, SSRG Virginia Tech, 2019
+ * @author Xiaoguang Wang, SSRG Virginia Tech, 2019-2020
  */
 
 #ifndef __INCLUDE_POPCORN_MVX_H__
@@ -13,21 +13,15 @@
 #include <popcorn/debug.h>
 
 /* MVX master/follower node id. */
-extern int master_nid;
-extern int follower_nid;
+#define MASTER_NID			1		/* ARM64 node as master */
+#define FOLLOWER_NID		0		/* x86_64 node as follower */
+
+/* MVX follower process UID/GID. */
+#define MVX_FOLLOWER_UID	1000
+#define MVX_FOLLOWER_GID	1000
 
 /* MVX Virtual Descriptor Table size. */
 #define VDT_SIZE	512
-
-//typedef struct _vdt_entry {
-//	int id;
-//	int real;
-//} vdt_entry_t;
-
-enum mvx_variant_role {
-	MVX_MASTER = 0,
-	MVX_FOLLOWER = 1,
-};
 
 /* VFD types: Read FD, simulated FD. Used in `mvx_message_t.flag`. */
 enum mvx_vfd_type {
