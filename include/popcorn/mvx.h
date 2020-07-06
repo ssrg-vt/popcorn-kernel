@@ -66,7 +66,7 @@ struct epoll_event_x86 {
 
 #define MVX_WARN_ON(condition) {\
 	if(unlikely(condition)) \
-		pr_err("[MVX Violation] %s:%d %s\n", __FILE__, __LINE__, __func__); \
+		pr_err("[**MVX Violation**] %s:%d %s\n", __FILE__, __LINE__, __func__); \
 }
 
 static inline void stop_mvx_process(struct task_struct *tsk)

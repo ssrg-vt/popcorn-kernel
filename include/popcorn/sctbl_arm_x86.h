@@ -1,5 +1,6 @@
 /* A syscall number map from syscall in arm64 to x86_64 */
 [66] = 20,	// writev
+[64] = 1,      // write
 [56] = 2,	// openat
 [202] = 43,	// accept
 [242] = 288,	// accept4
