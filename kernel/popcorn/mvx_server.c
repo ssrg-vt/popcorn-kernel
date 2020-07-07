@@ -17,10 +17,6 @@
 int64_t mvx_args[NUM_SYSCALLS];
 EXPORT_SYMBOL(mvx_args);
 
-/* MVX master/follower node id. */
-//int master_nid = 1;	// arm64 as master
-//int follower_nid = 0;
-
 /* A global mvx message; used for passing data between modules. */
 mvx_core_msg_t mvx_follower_msg;
 
@@ -81,7 +77,10 @@ static inline void init_mvx_proc_syscall(struct task_struct *tsk, int leader)
 	if (leader) {
 		/* This is master. */
 		tsk->is_follower = 0;
-#ifdef __x86_64__
+		/* Clear the completion counter. */
+		reinit_completion(&master_wait);
+
+#ifdef __x86_64__	/* TODO: Current we dd not support x86 node as master. */
 		memcpy(syscall_tbl, syscall_tbl_x2a, 512*sizeof(int));
 #endif
 #ifdef __aarch64__
@@ -91,6 +90,8 @@ static inline void init_mvx_proc_syscall(struct task_struct *tsk, int leader)
 	} else {
 		/* This is follower. */
 		tsk->is_follower = 1;
+		/* Clear the completion counter. */
+		reinit_completion(&follower_wait);
 		MVXPRINTK("MVX follower variant [PID:%d] init ...\n", tsk->pid);
 	}
 	/* MVX process. */
@@ -132,9 +133,6 @@ asmlinkage long sys_hscall(unsigned long arg0, unsigned long arg1,
 		init_mvx_proc_syscall(current, 1);
 		/* Init FD vtab. */
 		init_mvx_vtab();
-	}
-	if (arg0 == 0x2) {
-		//retrieve_argv(current);
 	}
 
 	return 0;

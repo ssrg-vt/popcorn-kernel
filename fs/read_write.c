@@ -643,6 +643,7 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 #ifdef CONFIG_POPCORN
 	if (mvx_process(current)) {
 		mvx_print_fd_vtab();
+		pr_info("fd %d, count %ld, ret %ld\n", fd, count, ret);
 		if (!mvx_follower(current)) {
 			mvx_master_sync(current, FOLLOWER_NID,
 					__NR_write, mvx_args, ret);
