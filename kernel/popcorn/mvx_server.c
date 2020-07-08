@@ -1,5 +1,6 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>		// getname_kernel()
+#include <linux/file.h>		// f_dupfd()
 #include <linux/fdtable.h>
 #include <linux/completion.h>	// completion
 #include <linux/syscalls.h>
@@ -61,7 +62,9 @@ const char* dir_whitelist[] = {
 size_t whitelist_len = sizeof(dir_whitelist)/sizeof(char*);
 
 /* ========= Common code for MVX system ========= */
-/* Initialize the FD VTable. */
+/**
+ * Initialize the FD VTable.
+ */
 static inline void init_mvx_vtab(void)
 {
 	memset(fd_vtab, 0, sizeof(int)*VDT_SIZE);
@@ -71,8 +74,13 @@ static inline void init_mvx_vtab(void)
 	mvx_index = 0;	// This is not for vtab, but for syscall seq log.
 }
 
-/* Initialize the MVX process flags and the syscall translation table. */
-static inline void init_mvx_proc_syscall(struct task_struct *tsk, int leader)
+/**
+ * Initialize the MVX process flags and the syscall translation table.
+ * - Init task MVX roles (is_follower, is_mvx_process)
+ * - leader copies the syscall table
+ * - reinit completions (master_wait, follower_wait)
+ */
+static inline void init_mvx_proc_env(struct task_struct *tsk, int leader)
 {
 	if (leader) {
 		/* This is master. */
@@ -96,6 +104,9 @@ static inline void init_mvx_proc_syscall(struct task_struct *tsk, int leader)
 	}
 	/* MVX process. */
 	tsk->is_mvx_process = 1;
+
+	/* Init FD vtab. */
+	init_mvx_vtab();
 }
 
 /* ========= Syscall code for MVX system ========= */
@@ -109,8 +120,7 @@ SYSCALL_DEFINE1(popcorn_mvx, int, mvx_leader)
 	pr_info(" 1) Start on master and 2) on follower\n");
 	pr_info("%d %d\n", MVX_VFD_MAX, MVX_OFF);
 
-	init_mvx_proc_syscall(current, mvx_leader);
-	init_mvx_vtab();
+	init_mvx_proc_env(current, mvx_leader);
 
 	return 0;
 }
@@ -130,9 +140,7 @@ asmlinkage long sys_hscall(unsigned long arg0, unsigned long arg1,
 		/* Get the process info and message follower to start. */
 		mvx_server_start_mvx(current, FOLLOWER_NID);
 		/* Setup the MVX process info. */
-		init_mvx_proc_syscall(current, 1);
-		/* Init FD vtab. */
-		init_mvx_vtab();
+		init_mvx_proc_env(current, 1);
 	}
 
 	return 0;
@@ -147,33 +155,35 @@ static bool install_pseudo_fd(char *stdin, char *stdout)
 	struct file *fp_stdin, *fp_stdout;
 	struct files_struct *files = current->files;
 	struct fdtable *fdtab = NULL;
+	int fd0, fd1;
 
 	if (files == NULL) {
 		MVXPRINTK("Cannot find open file table struct.\n");
 		goto out;
 	}
-	/* Alloc and open fd 0, 1 and 2. */
+	/* Alloc fd 0, 1. */
 	fdtab = files_fdtable(files);
-	if ((__alloc_fd(files, 0, rlimit(RLIMIT_NOFILE), 0) < 0)
-		|| (__alloc_fd(files, 1, rlimit(RLIMIT_NOFILE), 0) < 0)
-		|| (__alloc_fd(files, 2, rlimit(RLIMIT_NOFILE), 0) < 0)) {
-		MVXPRINTK("%s: __alloc_fd error.\n", __func__);
+	if (((fd0 = __alloc_fd(files, 0, rlimit(RLIMIT_NOFILE), 0)) < 0)
+		|| ((fd1 = __alloc_fd(files, 1, rlimit(RLIMIT_NOFILE), 0)) < 0)) {
+		MVXPRINTK("%s: __alloc_fd error. fd0 %d, fd1 %d.\n", __func__, fd0, fd1);
 		goto out;
 	}
 
+	/* Open files for stdin and stdout; install the FDs. */
 	fp_stdin = filp_open(stdin, O_RDONLY|O_CREAT, 0644);
 	if (IS_ERR(fp_stdin)) {
-		MVXPRINTK("Cannot open STDIN file %ld.\n", PTR_ERR(fp_stdin));
+		MVXPRINTK("Cannot open STDIN file: %ld.\n", PTR_ERR(fp_stdin));
 		return false;
 	}
-	fdtab->fd[0] = fp_stdin;
+	__fd_install(files, 0, fp_stdin);
 
 	fp_stdout = filp_open(stdout, O_WRONLY|O_CREAT|O_TRUNC, 0644);
 	if (IS_ERR(fp_stdin)) {
-		MVXPRINTK("Cannot open STDOUT (STDERR) files %ld.\n", PTR_ERR(fp_stdout));
+		MVXPRINTK("Cannot open STDOUT file: %ld.\n", PTR_ERR(fp_stdout));
 		return false;
 	}
-	fdtab->fd[1] = fdtab->fd[2] = fp_stdout;
+	__fd_install(files, 1, fp_stdout);
+	f_dupfd(1, fp_stdout, 0);	/* Duplicate stdout to stderr. */
 
 	return true;
 out:
@@ -197,8 +207,9 @@ static void alter_uid_gid(struct cred *new, uid_t uid, gid_t gid)
  * */
 static int init_mvx_follower_process(struct subprocess_info *info, struct cred *new)
 {
-	init_mvx_proc_syscall(current, 0);
-	init_mvx_vtab();
+	/* Init MVX process related info; */
+	init_mvx_proc_env(current, 0);
+	/* Install pseudo FDs on follower. */
 	install_pseudo_fd(MVX_STDIN_LOC, MVX_STDOUT_LOC);
 	alter_uid_gid(new, MVX_FOLLOWER_UID, MVX_FOLLOWER_GID);
 
