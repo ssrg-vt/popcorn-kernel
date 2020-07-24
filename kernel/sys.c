@@ -837,9 +837,11 @@ change_okay:
 SYSCALL_DEFINE0(getpid)
 {
 #ifdef CONFIG_POPCORN
+#if 0
 	if (distributed_remote_process(current)) {
 		return redirect_getpid(0);
 	}
+#endif
 #endif
 
 	return task_tgid_vnr(current);
