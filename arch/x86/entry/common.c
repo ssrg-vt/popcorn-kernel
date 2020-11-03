@@ -34,6 +34,18 @@
 #include <asm/fpu/api.h>
 #include <asm/nospec-branch.h>
 
+#ifdef CONFIG_POPCORN
+ #include <popcorn/syscall_server.h>
+ #include <popcorn/types.h>
+/* If the system call is a popcorn system call , never
+ * redirect
+*/
+#define IS_PCN_SYSCALL(a) ((a == __NR_popcorn_migrate) \
+	|| (a == __NR_popcorn_propose_migration) \
+	|| (a == __NR_popcorn_get_thread_status) \
+	|| (a == __NR_popcorn_get_node_info))
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/syscalls.h>
 
@@ -280,10 +292,19 @@ __visible inline void syscall_return_slowpath(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_X86_64
+static long is_redirectable(struct pt_regs * reg ,int nr)
+{
+	if(distributed_remote_process(current) && !IS_PCN_SYSCALL(nr) ){
+		reg->ax = syscall_redirect(nr,reg);
+		return reg->ax;
+	}
+	reg->ax = sys_call_table[nr](reg);
+	return reg->ax;
+}
+
 __visible void do_syscall_64(unsigned long nr, struct pt_regs *regs)
 {
 	struct thread_info *ti;
-
 	enter_from_user_mode();
 	local_irq_enable();
 	ti = current_thread_info();
@@ -298,9 +319,8 @@ __visible void do_syscall_64(unsigned long nr, struct pt_regs *regs)
 	nr &= __SYSCALL_MASK;
 	if (likely(nr < NR_syscalls)) {
 		nr = array_index_nospec(nr, NR_syscalls);
-		regs->ax = sys_call_table[nr](regs);
+		regs->ax = is_redirectable( regs,nr );
 	}
-
 	syscall_return_slowpath(regs);
 }
 #endif
