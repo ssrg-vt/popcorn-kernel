@@ -9,7 +9,9 @@ CFLAGS_armv8_deprecated.o := -I$(src)
 
 CFLAGS_REMOVE_ftrace.o = $(CC_FLAGS_FTRACE)
 CFLAGS_REMOVE_insn.o = $(CC_FLAGS_FTRACE)
-CFLAGS_REMOVE_return_address.o = $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_return_address.o := $(CC_FLAGS_FTRACE)
+
+CFLAGS_syscall_redirect.o += -I$(srctree)/kernel/popcorn
 
 # Object file lists.
 obj-y			:= debug-monitors.o entry.o irq.o fpsimd.o		\
@@ -60,7 +62,8 @@ obj-$(CONFIG_CRASH_CORE)		+= crash_core.o
 obj-$(CONFIG_ARM_SDE_INTERFACE)		+= sdei.o
 obj-$(CONFIG_ARM64_SSBD)		+= ssbd.o
 obj-$(CONFIG_ARM64_PTR_AUTH)		+= pointer_auth.o
-obj-$(CONFIG_POPCORN)			+= cpuinfo_popcorn.o process_server.o
+obj-$(CONFIG_POPCORN)			+= cpuinfo_popcorn.o process_server.o \
+					   syscall_redirect.o
 
 obj-y					+= vdso/ probes/
 head-y					:= head.o

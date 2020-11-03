@@ -1053,30 +1053,7 @@ int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, v
 
 	return ret;
 }
-/*
-int process_remote_syscall(struct pcn_kmsg_message *msg)
-{
-	int retval = 0;
-	unsigned long *syscall_table = NULL;
-	syscall_fwd_t *req = (syscall_fwd_t *)msg;
-	syscall_rep_t *rep = pcn_kmsg_get(sizeof(*rep));
-	int (* syscall_ptr)(struct pt_regs * );
-	
 
-	syscall_table = (unsigned long*)kallsyms_lookup_name("sys_call_table");
-	syscall_ptr = (int (*)(struct pt_regs*))(syscall_table + req->call_type );
-	
-	retval = syscall_ptr(&req->params);
-	rep->origin_pid = current->origin_pid;
-	rep->remote_ws = req->remote_ws;
-	rep->ret = retval;
-	pcn_kmsg_post(PCN_KMSG_TYPE_SYSCALL_REP, current->remote_nid, rep,
-		      sizeof(*rep));
-	pcn_kmsg_done(req);
-
-	return retval;
-}
-*/
 DEFINE_KMSG_RW_HANDLER(origin_task_exit, origin_task_exit_t, remote_pid);
 DEFINE_KMSG_RW_HANDLER(remote_task_exit, remote_task_exit_t, origin_pid);
 DEFINE_KMSG_RW_HANDLER(back_migration, back_migration_request_t, origin_pid);

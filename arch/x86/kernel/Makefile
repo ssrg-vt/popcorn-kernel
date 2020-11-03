@@ -22,6 +22,8 @@ CFLAGS_REMOVE_early_printk.o = -pg
 CFLAGS_REMOVE_head64.o = -pg
 endif
 
+CFLAGS_syscall_redirect.o += -I$(srctree)/kernel/popcorn
+
 KASAN_SANITIZE_head$(BITS).o				:= n
 KASAN_SANITIZE_dumpstack.o				:= n
 KASAN_SANITIZE_dumpstack_$(BITS).o			:= n
@@ -133,7 +135,7 @@ obj-$(CONFIG_EFI)			+= sysfb_efi.o
 
 obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o
 obj-$(CONFIG_TRACING)			+= tracepoint.o
-obj-$(CONFIG_POPCORN)		+= cpuinfo.o process_server.o
+obj-$(CONFIG_POPCORN)		+= cpuinfo.o process_server.o syscall_redirect.o
 obj-$(CONFIG_SCHED_MC_PRIO)		+= itmt.o
 obj-$(CONFIG_X86_INTEL_UMIP)		+= umip.o
 

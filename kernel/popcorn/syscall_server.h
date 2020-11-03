@@ -14,8 +14,6 @@
 #include "wait_station.h"
 #include "types.h"
 
-int
-//int process_remote_syscall(struct pcn_kmsg_message *msg);
 //int handle_signal_remotes(struct pcn_kmsg_message  *msg);
 extern long syscall_redirect(unsigned long nr, struct pt_regs *regs);
 /*This Set of macros allows for forwarding of syscalls of up to 6 arguments,
