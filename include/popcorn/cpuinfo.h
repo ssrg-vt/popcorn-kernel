@@ -20,7 +20,6 @@
 
 #define MAX_ARM_CORES 128
 #define MAX_X86_CORES 32
-#define MAX_RISCV_CORES 8
 
 #include <popcorn/bundle.h>
 #include <linux/seq_file.h>
@@ -89,7 +88,7 @@ struct percore_info_riscv {
 
 struct cpuinfo_arch_riscv {
 	unsigned int num_cpus;
-	struct percore_info_riscv cores[MAX_RISCV_CORES];
+	struct percore_info_riscv cores[MAX_ARM_CORES];
 };
 
 

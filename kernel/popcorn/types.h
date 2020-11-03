@@ -7,6 +7,7 @@
 #include <linux/workqueue.h>
 #include <linux/signal.h>
 #include <linux/slab.h>
+#include <linux/sched.h>
 #include <linux/radix-tree.h>
 #include <linux/sched/task.h>
 #include <popcorn/pcn_kmsg.h>
@@ -153,6 +154,45 @@ DEFINE_PCN_KMSG(vma_info_response_t, VMA_INFO_RESPONSE_FIELDS);
 
 #define vma_info_anon(x) ((x)->vm_file_path[0] == '\0' ? true : false)
 
+/**
+* Syscall server. Allows forwarding and handling of remote system calls.
+*/
+
+/* Enumerate syscall types*/
+enum pcn_syscall_types
+{
+	PCN_SYSCALL_SOCKET_CREATE,      // 0
+	PCN_SYSCALL_SETSOCKOPT,
+	PCN_SYSCALL_BIND,
+	PCN_SYSCALL_LISTEN,
+	PCN_SYSCALL_ACCEPT4,
+	PCN_SYSCALL_SHUTDOWN,           // 5
+	PCN_SYSCALL_RECVFROM,
+	PCN_SYSCALL_EPOLL_CREATE1,
+	PCN_SYSCALL_EPOLL_WAIT,
+	PCN_SYSCALL_EPOLL_PWAIT,
+	PCN_SYSCALL_EPOLL_CTL,          // 10
+	PCN_SYSCALL_READ,
+	PCN_SYSCALL_WRITE,
+	PCN_SYSCALL_OPEN,
+	PCN_SYSCALL_CLOSE,
+	PCN_SYSCALL_IOCTL,              // 15
+	PCN_SYSCALL_WRITEV,
+	PCN_SYSCALL_FSTAT,
+	PCN_SYSCALL_SENDFILE64,
+	PCN_SYSCALL_SELECT,
+	PCN_SYSCALL_FCNTL,              // 20
+	PCN_SYSCALL_FSTATAT,
+	PCN_SYSCALL_GETPID,
+	PCN_SYSCALL_GETUID,
+	PCN_SYSCALL_DUP,
+	PCN_SYSCALL_OPENAT,		// 25
+	PCN_SYSCALL_GETTIMEOFDAY,
+	PCN_SYSCALL_STATX,
+	PCN_SYSCALL_PSELECT6,
+	PCN_SYSCALL_GETTIME,
+	PCN_NUM_SYSCALLS
+};
 
 #define VMA_OP_REQUEST_FIELDS \
 	pid_t origin_pid; \
@@ -303,7 +343,27 @@ DEFINE_PCN_KMSG(node_info_t, NODE_INFO_FIELDS);
 	int power_3;
 DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
 
+#define SYSCALL_FWD_FIELDS                               \
+         pid_t origin_pid;                               \
+	 unsigned long args[6];				 \
+         int remote_ws;                                  \
+         enum pcn_syscall_types call_type;               \
+         int ret;
+DEFINE_PCN_KMSG(syscall_fwd_t, SYSCALL_FWD_FIELDS);
 
+#define SYSCALL_REP_FIELDS                               \
+         pid_t origin_pid;                               \
+         int remote_ws;                                  \
+         int ret;
+DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
+
+#define SIGNAL_TRANSMIT_FIELDS                          \
+       pid_t origin_pid;                                \
+       pid_t remote_pid;                                \
+       int   remote_nid;                                \
+       int sig;                                         \
+       bool group;
+DEFINE_PCN_KMSG(signal_trans_t , SIGNAL_TRANSMIT_FIELDS);
 /**
  * Message routing using work queues
  */
@@ -359,7 +419,6 @@ static inline int handle_##x(struct pcn_kmsg_message *msg) {\
 	kfree(__pcn_kmsg_work__);
 
 
-#include <linux/sched.h>
 
 static inline struct task_struct *__get_task_struct(pid_t pid)
 {

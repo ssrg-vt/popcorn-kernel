@@ -22,6 +22,7 @@
 #include <linux/sched/mm.h>
 #include <linux/uaccess.h>
 
+#include<linux/kprobes.h>
 #include <asm/mmu_context.h>
 #include <asm/kdebug.h>
 //#include <asm/uaccess.h>
@@ -29,7 +30,7 @@
 #include <popcorn/types.h>
 #include <popcorn/bundle.h>
 #include <popcorn/cpuinfo.h>
-
+#include "syscall_redirect.h"
 #include "types.h"
 #include "process_server.h"
 #include "vma_server.h"
@@ -39,6 +40,8 @@
 
 static struct list_head remote_contexts[2];
 static spinlock_t remote_contexts_lock[2];
+
+int handle_signal_remotes(struct pcn_kmsg_message  *msg);
 
 enum {
 	INDEX_OUTBOUND = 0,
@@ -363,7 +366,7 @@ static void process_remote_task_exit(remote_task_exit_t *req)
 		return;
 	}
 
-	PSPRINTK("%s [%d] 0x%x\n", __func__, tsk->pid, req->exit_code);
+//	PSPRINTK("%s [%d] 0x%x\n", __func__, tsk->pid, req->exit_code);
 
 	tsk->remote = NULL;
 	tsk->remote_nid = -1;
@@ -521,8 +524,8 @@ static int remote_thread_main(void *_args)
 	clone_request_t *req = params->req;
 
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
-	PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
-			current->pid, req->origin_pid, PCN_KMSG_FROM_NID(req));
+//	PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
+//			current->pid, req->origin_pid, PCN_KMSG_FROM_NID(req));
 #endif
 
 	current->flags &= ~PF_KTHREAD;	/* Demote from temporary priviledge */
@@ -668,6 +671,9 @@ static void __run_remote_worker(struct remote_context *rc)
 		case PCN_KMSG_TYPE_TASK_EXIT_ORIGIN:
 			process_origin_task_exit(rc, (origin_task_exit_t *)msg);
 			break;
+		case PCN_KMSG_TYPE_SIGNAL_FWD:
+			handle_signal_remotes(msg);
+                        break;
 		default:
 			printk("Unknown remote work type %d\n", msg->header.type);
 			break;
@@ -863,7 +869,25 @@ static void __process_remote_works(void)
 		req = (struct pcn_kmsg_message *)current->remote_work;
 		current->remote_work = NULL;
 		smp_wmb();
-
+		/*
+                *Check if a restart is triggered for systemcall
+                *If yes trigger the signal to remote node
+                *For now only SIGINT is handled
+                */
+                if (ret == -ERESTARTSYS)
+                {
+                        unsigned long flags;
+                        spin_lock_irqsave(&current->sighand->siglock, flags);
+                        if (current->signal->flags &
+                                        (SIGNAL_GROUP_COREDUMP| SIGNAL_GROUP_EXIT))
+                        {
+                                remote_signalling(SIGINT , current , 1);
+                                run = false;
+                        }
+                        spin_unlock_irqrestore(
+                                        &current->sighand->siglock, flags);
+                        continue;
+               }
 		if (!req) continue;
 
 		switch (req->header.type) {
@@ -886,6 +910,9 @@ static void __process_remote_works(void)
 		case PCN_KMSG_TYPE_TASK_MIGRATE_BACK:
 			process_back_migration((back_migration_request_t *)req);
 			run = false;
+			break;
+		case PCN_KMSG_TYPE_SYSCALL_FWD:
+			process_remote_syscall(req);
 			break;
 		default:
 			if (WARN_ON("Received unsupported remote work")) {
@@ -1026,8 +1053,30 @@ int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, v
 
 	return ret;
 }
+/*
+int process_remote_syscall(struct pcn_kmsg_message *msg)
+{
+	int retval = 0;
+	unsigned long *syscall_table = NULL;
+	syscall_fwd_t *req = (syscall_fwd_t *)msg;
+	syscall_rep_t *rep = pcn_kmsg_get(sizeof(*rep));
+	int (* syscall_ptr)(struct pt_regs * );
+	
 
+	syscall_table = (unsigned long*)kallsyms_lookup_name("sys_call_table");
+	syscall_ptr = (int (*)(struct pt_regs*))(syscall_table + req->call_type );
+	
+	retval = syscall_ptr(&req->params);
+	rep->origin_pid = current->origin_pid;
+	rep->remote_ws = req->remote_ws;
+	rep->ret = retval;
+	pcn_kmsg_post(PCN_KMSG_TYPE_SYSCALL_REP, current->remote_nid, rep,
+		      sizeof(*rep));
+	pcn_kmsg_done(req);
 
+	return retval;
+}
+*/
 DEFINE_KMSG_RW_HANDLER(origin_task_exit, origin_task_exit_t, remote_pid);
 DEFINE_KMSG_RW_HANDLER(remote_task_exit, remote_task_exit_t, origin_pid);
 DEFINE_KMSG_RW_HANDLER(back_migration, back_migration_request_t, origin_pid);

@@ -28,6 +28,7 @@ extern int vma_server_init(void);
 extern int page_server_init(void);
 extern int remote_info_init(void);
 extern int statistics_init(void);
+extern int syscall_server_init(void);
 
 static int __init popcorn_init(void)
 {
@@ -51,6 +52,7 @@ static int __init popcorn_init(void)
 
 	remote_info_init();
 	statistics_init();
+	syscall_server_init();
 	return 0;
 }
 late_initcall(popcorn_init);

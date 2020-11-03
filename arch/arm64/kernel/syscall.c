@@ -14,6 +14,19 @@
 #include <asm/thread_info.h>
 #include <asm/unistd.h>
 
+#ifdef CONFIG_POPCORN
+ #include <popcorn/syscall_server.h>
+ #include <popcorn/types.h>
+/* If the system call is a popcorn system call , never 
+ * redirect
+*/
+#define IS_PCN_SYSCALL(a) ((a == __NR_popcorn_migrate) \
+        || (a == __NR_popcorn_propose_migration) \
+        || (a == __NR_popcorn_get_thread_status) \
+        || (a == __NR_popcorn_get_node_info))   
+#endif
+
+
 long compat_arm_syscall(struct pt_regs *regs, int scno);
 long sys_ni_syscall(void);
 
@@ -45,7 +58,14 @@ static void invoke_syscall(struct pt_regs *regs, unsigned int scno,
 	if (scno < sc_nr) {
 		syscall_fn_t syscall_fn;
 		syscall_fn = syscall_table[array_index_nospec(scno, sc_nr)];
-		ret = __invoke_syscall(regs, syscall_fn);
+
+		if (distributed_remote_process(current) && !IS_PCN_SYSCALL(scno)) {
+			printk("Remote syscall request for syscall no %d",scno);
+			ret = syscall_redirect(scno,regs);
+		}
+		else {	
+			ret = __invoke_syscall(regs, syscall_fn);
+		}
 	} else {
 		ret = do_ni_syscall(regs, scno);
 	}
