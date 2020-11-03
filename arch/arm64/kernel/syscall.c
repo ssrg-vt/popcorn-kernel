@@ -17,13 +17,13 @@
 #ifdef CONFIG_POPCORN
  #include <popcorn/syscall_server.h>
  #include <popcorn/types.h>
-/* If the system call is a popcorn system call , never 
+/* If the system call is a popcorn system call , never
  * redirect
 */
 #define IS_PCN_SYSCALL(a) ((a == __NR_popcorn_migrate) \
-        || (a == __NR_popcorn_propose_migration) \
-        || (a == __NR_popcorn_get_thread_status) \
-        || (a == __NR_popcorn_get_node_info))   
+	|| (a == __NR_popcorn_propose_migration) \
+	|| (a == __NR_popcorn_get_thread_status) \
+	|| (a == __NR_popcorn_get_node_info))
 #endif
 
 
@@ -63,7 +63,7 @@ static void invoke_syscall(struct pt_regs *regs, unsigned int scno,
 			printk("Remote syscall request for syscall no %d",scno);
 			ret = syscall_redirect(scno,regs);
 		}
-		else {	
+		else {
 			ret = __invoke_syscall(regs, syscall_fn);
 		}
 	} else {
