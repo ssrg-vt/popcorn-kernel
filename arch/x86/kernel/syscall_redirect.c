@@ -90,23 +90,31 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	syscall_fwd_t *req = (syscall_fwd_t *) msg;
 	syscall_rep_t *rep = pcn_kmsg_get(sizeof(*rep));
 	struct pt_regs reg;
-	printk(KERN_INFO "remote system call num %d received at index %d\n\n "  \
-		,redirect_table[req->call_type],req->call_type);
+
+	printk(KERN_INFO "remote system call num %d received at index %d\n\n ",
+	       redirect_table[req->call_type],req->call_type);
+
 	syscall_set_arg(current,&reg,(unsigned long *)&req->args);
 
-	printk("Parameters are %x \n%x \n%x \n%x \n%x \n%x\n",req->args[0],req->args[1],req->args[2],req->args[3],req->args[4],req->args[5]);
+	printk("Parameters are %x \n%x \n%x \n%x \n%x \n%x\n",
+	       req->args[0], req->args[1], req->args[2], req->args[3],
+	       req->args[4], req->args[5]);
 
 	do_syscall_64(redirect_table[req->call_type] ,&reg);
+
 	retval = reg.ax;
 	rep->origin_pid = current->origin_pid;
 	rep->remote_ws = req->remote_ws;
 	rep->ret = retval;
+
 	pcn_kmsg_post(PCN_KMSG_TYPE_SYSCALL_REP,
 		current->remote_nid, rep,sizeof(*rep));
+
 	pcn_kmsg_done(req);
-	printk(KERN_INFO"Return value from master %d\n\n for syscall \
-		number %d ",retval,redirect_table[req->call_type]);
+
+	printk(KERN_INFO
+	       "Return value from master %d\n\n for syscall number %d ",
+	       retval, redirect_table[req->call_type]);
+
 	return retval;
-
-
 }

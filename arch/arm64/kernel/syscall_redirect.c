@@ -42,24 +42,29 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	syscall_fwd_t *req = (syscall_fwd_t *) msg;
 	syscall_rep_t *rep = pcn_kmsg_get(sizeof(*rep));
 	struct pt_regs reg;
+
 	printk(KERN_INFO "remote system call num %d received\n\n",
 	       redirect_table[req->call_type]);
+
 	syscall_set_arg(current,&reg,(unsigned long *)&req->args);
 
-//	do_syscall_64(redirect_table[req->call_type] ,&reg);
 	const syscall_fn_t syscallfn =
 		sys_call_table[redirect_table[req->call_type]];
+
 	retval = syscallfn(&reg);
 
 	rep->origin_pid = current->origin_pid;
 	rep->remote_ws = req->remote_ws;
 	rep->ret = retval;
+
 	pcn_kmsg_post(PCN_KMSG_TYPE_SYSCALL_REP,
 		current->remote_nid, rep,sizeof(*rep));
+
 	pcn_kmsg_done(req);
-	printk(KERN_INFO"Return value from master %d\n\n for syscall \
-		number %d ",retval,redirect_table[req->call_type]);
+
+	printk(KERN_INFO
+	       "Return value from master %d\n\n for syscall number %d",
+	       retval, redirect_table[req->call_type]);
+
 	return retval;
-
-
 }
