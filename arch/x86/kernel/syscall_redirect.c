@@ -92,9 +92,9 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	struct pt_regs reg;
 
 	printk(KERN_INFO "remote system call num %d received at index %d\n\n ",
-	       redirect_table[req->call_type],req->call_type);
+	       redirect_table[req->call_type], req->call_type);
 
-	syscall_set_arg(current,&reg,(unsigned long *)&req->args);
+	syscall_set_arg(current, &reg, (unsigned long *)&req->args);
 
 	printk("Parameters are %x \n%x \n%x \n%x \n%x \n%x\n",
 	       req->args[0], req->args[1], req->args[2], req->args[3],
@@ -108,7 +108,7 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	rep->ret = retval;
 
 	pcn_kmsg_post(PCN_KMSG_TYPE_SYSCALL_REP,
-		current->remote_nid, rep,sizeof(*rep));
+		current->remote_nid, rep, sizeof(*rep));
 
 	pcn_kmsg_done(req);
 
