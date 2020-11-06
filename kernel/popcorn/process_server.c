@@ -366,7 +366,7 @@ static void process_remote_task_exit(remote_task_exit_t *req)
 		return;
 	}
 
-//	PSPRINTK("%s [%d] 0x%x\n", __func__, tsk->pid, req->exit_code);
+	PSPRINTK("%s [%d] 0x%x\n", __func__, tsk->pid, req->exit_code);
 
 	tsk->remote = NULL;
 	tsk->remote_nid = -1;
@@ -524,8 +524,8 @@ static int remote_thread_main(void *_args)
 	clone_request_t *req = params->req;
 
 #ifdef CONFIG_POPCORN_DEBUG_VERBOSE
-//	PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
-//			current->pid, req->origin_pid, PCN_KMSG_FROM_NID(req));
+	PSPRINTK("%s [%d] started for [%d/%d]\n", __func__,
+			current->pid, req->origin_pid, PCN_KMSG_FROM_NID(req));
 #endif
 
 	current->flags &= ~PF_KTHREAD;	/* Demote from temporary priviledge */
@@ -1053,6 +1053,7 @@ int process_server_do_migration(struct task_struct *tsk, unsigned int dst_nid, v
 
 	return ret;
 }
+
 
 DEFINE_KMSG_RW_HANDLER(origin_task_exit, origin_task_exit_t, remote_pid);
 DEFINE_KMSG_RW_HANDLER(remote_task_exit, remote_task_exit_t, origin_pid);
