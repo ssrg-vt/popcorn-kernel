@@ -80,6 +80,19 @@ int remote_signalling(int sig ,struct task_struct * tsk , int group )
 }
 EXPORT_SYMBOL(remote_signalling);
 
+int popcorn_syscall_redirectable(unsigned long nr)
+{
+	int i;
+
+	for (i = 0; i < PCN_NUM_SYSCALLS; i++) {
+		if (redirect_table[i] == nr)
+			return 1;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(popcorn_syscall_redirectable);
+
 long syscall_redirect(unsigned long nr, struct pt_regs *regs)
 {
 	int ret = 0 , i =0;

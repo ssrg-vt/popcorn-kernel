@@ -59,7 +59,9 @@ static void invoke_syscall(struct pt_regs *regs, unsigned int scno,
 		syscall_fn_t syscall_fn;
 		syscall_fn = syscall_table[array_index_nospec(scno, sc_nr)];
 
-		if (distributed_remote_process(current) && !IS_PCN_SYSCALL(scno)) {
+		if (distributed_remote_process(current)
+		    && !IS_PCN_SYSCALL(scno)
+		    && popcorn_syscall_redirectable(scno)) {
 			printk("Remote syscall request for syscall no %d",scno);
 			ret = syscall_redirect(scno,regs);
 		}

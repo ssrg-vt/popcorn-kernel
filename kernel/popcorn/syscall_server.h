@@ -16,6 +16,7 @@
 
 //int handle_signal_remotes(struct pcn_kmsg_message  *msg);
 extern long syscall_redirect(unsigned long nr, struct pt_regs *regs);
+
 /*This Set of macros allows for forwarding of syscalls of up to 6 arguments,
  *with 12 arguments being input altogether, eg. SET_REQ_PARAMS(int, a, char, b)
  *This segment will fill in the RPC syscall definitions with the correct
