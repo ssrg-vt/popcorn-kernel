@@ -25,6 +25,7 @@
 #include<linux/kprobes.h>
 #include <asm/mmu_context.h>
 #include <asm/kdebug.h>
+#include <linux/signal.h>
 //#include <asm/uaccess.h>
 
 #include <popcorn/types.h>
@@ -338,6 +339,8 @@ int process_server_task_exit(struct task_struct *tsk)
 			tsk->at_remote ? "remote" : "local",
 			tsk->is_worker ? " worker": "",
 			tsk->exit_code);
+	//dump_stack();
+	do_send_sig_info(SIGABRT, SEND_SIG_PRIV, current, true);
 
 	// show_regs(task_pt_regs(tsk));
 

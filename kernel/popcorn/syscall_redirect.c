@@ -44,6 +44,41 @@ const int redirect_table[PCN_NUM_SYSCALLS] = {
   __NR_clock_gettime
 };
 
+const char *redirect_table_str[PCN_NUM_SYSCALLS] = {
+  "socket",			// 0
+  "setsockopt",
+  "bind",
+  "listen",
+  "accept4",
+  "shutdown",			// 5
+  "recvfrom",
+  "epoll_create1",
+  "epoll_waiti",
+  "epoll_pwait",
+  "epoll_ctl",			// 10
+  "read",
+  "write",
+  "open",
+  "close",
+  "ioctl",			// 15
+  "writev",
+  "fstat",
+  "sendfile",
+  "select",
+  "fcntl",			// 20
+  "stat",
+  "getpid",
+  "getuid",
+  "dup",
+  "openat",			// 25
+  "gettimeofday",
+  "statx",
+  "pselect6",
+  "clock_gettime",
+  "unsupported",
+};
+
+
 /*
  * Handling the signal sent from origin node to remote node
  * We manually force the signal in the destination PID
@@ -119,8 +154,8 @@ long syscall_redirect(unsigned long nr, struct pt_regs *regs)
 		}
 	}
 
-	printk(KERN_INFO "redirect called for #syscall %d at index %d, %d\n",
-	       nr, i, PCN_NUM_SYSCALLS);
+	printk(KERN_INFO "redirect called for #syscall %d (%s) at index %d, %d\n",
+	       nr, redirect_table_str[i], i, PCN_NUM_SYSCALLS);
 
 	if(req->call_type  == -1) {
 		BUG_ON( req->call_type  == -1);
