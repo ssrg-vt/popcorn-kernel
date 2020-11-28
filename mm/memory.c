@@ -4004,6 +4004,7 @@ int handle_pte_fault_origin(struct mm_struct *mm, struct vm_area_struct *vma,
 	pte_t entry = *pte;
 	struct vm_fault vmf = {
 		.vma = vma,
+		.pmd = pmd,
 		.address = address & PAGE_MASK,
 		.flags = flags,
 		.pgoff = linear_page_index(vma, address),
