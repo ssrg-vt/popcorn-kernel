@@ -29,7 +29,7 @@ const int redirect_table[PCN_NUM_SYSCALLS] = {
   __NR_close,
   __NR_ioctl,			// 15
   __NR_writev,
-  __NR_fstat,
+  __NR_newfstatat,
   __NR_sendfile,
   -1 /*__NR_select*/,
   __NR_fcntl,			// 20
@@ -153,7 +153,7 @@ long syscall_redirect(unsigned long nr, struct pt_regs *regs)
 
 	syscall_get_arg(current,regs,(unsigned long *)&req->args);
 
-	printk("%s: Parameters are %x, %x, %x, %x, %x, %x\n",
+	printk("%s: Parameters are %lx, %lx, %lx, %lx, %lx, %lx\n",
 	       __FUNCTION__,
 	       req->args[0], req->args[1], req->args[2], req->args[3],
 	       req->args[4], req->args[5]);
