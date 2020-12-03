@@ -36,6 +36,9 @@
 #include <asm/sighandling.h>
 #include <asm/vm86.h>
 
+#include <popcorn/types.h>
+#include "../../../kernel/popcorn/types.h"
+
 #ifdef CONFIG_X86_64
 #include <asm/proto.h>
 #include <asm/ia32_unistd.h>
@@ -712,6 +715,11 @@ handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 {
 	bool stepping, failed;
 	struct fpu *fpu = &current->thread.fpu;
+
+	if (distributed_process(current)) {
+		current->remote->sigpending = ksig->sig;
+		return;
+	}
 
 	if (v8086_mode(regs))
 		save_v86_state((struct kernel_vm86_regs *) regs, VM86_SIGNAL);

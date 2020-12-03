@@ -25,6 +25,7 @@ struct remote_context {
 
 	int tgid;
 	bool for_remote;
+	int sigpending;
 
 	/* Tracking page status */
 	struct radix_tree_root pages;
@@ -351,10 +352,11 @@ DEFINE_PCN_KMSG(sched_periodic_req, SCHED_PERIODIC_FIELDS);
          int ret;
 DEFINE_PCN_KMSG(syscall_fwd_t, SYSCALL_FWD_FIELDS);
 
-#define SYSCALL_REP_FIELDS                               \
-         pid_t origin_pid;                               \
-         int remote_ws;                                  \
-         int ret;
+#define SYSCALL_REP_FIELDS				\
+	pid_t origin_pid;				\
+	int remote_ws;					\
+	int sigpending;					\
+	int ret;
 DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
 
 #define SIGNAL_TRANSMIT_FIELDS                          \

@@ -36,6 +36,7 @@
 #include "process_server.h"
 #include "vma_server.h"
 #include "page_server.h"
+#include "syscall_server.h"
 #include "wait_station.h"
 #include "util.h"
 
@@ -134,6 +135,7 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 
 	rc->tgid = tgid;
 	rc->for_remote = remote;
+	rc->sigpending = 0;
 
 	for (i = 0; i < FAULTS_HASH; i++) {
 		INIT_HLIST_HEAD(&rc->faults[i]);

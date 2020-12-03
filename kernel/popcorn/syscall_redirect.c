@@ -41,7 +41,7 @@ const int redirect_table[PCN_NUM_SYSCALLS] = {
   __NR_gettimeofday,
   __NR_statx,
   __NR_pselect6,
-  __NR_clock_gettime
+  __NR_clock_gettime,
 };
 
 const char *redirect_table_str[PCN_NUM_SYSCALLS] = {
@@ -78,17 +78,29 @@ const char *redirect_table_str[PCN_NUM_SYSCALLS] = {
   "unsupported",
 };
 
+const char *popcorn_decode_syscall(int nr)
+{
+	int i;
+
+	for (i = 0; i < PCN_NUM_SYSCALLS; i++) {
+		if (nr == redirect_table[i])
+			return redirect_table_str[i];
+	}
+
+	return "unsupported";
+}
 
 /*
  * Handling the signal sent from origin node to remote node
  * We manually force the signal in the destination PID
  */
-int handle_signal_remotes(struct pcn_kmsg_message  *msg)
+int handle_signal_remotes(struct pcn_kmsg_message *msg)
 {
        signal_trans_t * recv = (signal_trans_t*)msg;
        struct task_struct * tgt_tsk = find_task_by_vpid(recv->remote_pid);
-       printk(KERN_INFO"received the signal %d for task %d \n\n",
-		       recv->sig,recv->remote_pid);
+       printk("%s: received the signal %d for task %d (%d) \n\n",
+	      __FUNCTION__, recv->sig, recv->remote_pid,
+	      current->pid);
        force_sig(recv->sig, tgt_tsk);
        tgt_tsk->remote->stop_remote_worker = false;
        return 0;
@@ -100,7 +112,7 @@ EXPORT_SYMBOL(handle_signal_remotes);
  * migrated.We are sending the request to remote node that the process is
  * currently stationed.
  */
-int remote_signalling(int sig ,struct task_struct * tsk , int group )
+int remote_signalling(int sig, struct task_struct * tsk, int group)
 {
        int re;
        signal_trans_t *sigreq = pcn_kmsg_get(sizeof(*sigreq));
@@ -141,7 +153,8 @@ long syscall_redirect(unsigned long nr, struct pt_regs *regs)
 
 	syscall_get_arg(current,regs,(unsigned long *)&req->args);
 
-	printk("Parameters are %x \n%x \n%x \n%x \n%x \n%x\n",
+	printk("%s: Parameters are %x, %x, %x, %x, %x, %x\n",
+	       __FUNCTION__,
 	       req->args[0], req->args[1], req->args[2], req->args[3],
 	       req->args[4], req->args[5]);
 
@@ -154,15 +167,16 @@ long syscall_redirect(unsigned long nr, struct pt_regs *regs)
 		}
 	}
 
-	printk(KERN_INFO "redirect called for #syscall %d (%s) at index %d, %d\n",
+	printk(KERN_INFO "%s: redirect called for #syscall %d (%s) at index %d, %d\n",
+	       __FUNCTION__, 
 	       nr, redirect_table_str[i], i, PCN_NUM_SYSCALLS);
 
 	if(req->call_type  == -1) {
 		BUG_ON( req->call_type  == -1);
 
 		printk(KERN_INFO
-		       "redirect called for #syscall %d not yet implemented",
-		       nr);
+		       "%s: redirect called for #syscall %d not yet implemented",
+		       __FUNCTION__, nr);
 
 		return -1;
 	} else {
@@ -173,8 +187,12 @@ long syscall_redirect(unsigned long nr, struct pt_regs *regs)
 		pcn_kmsg_done(rep);
 
 		printk(KERN_INFO
-		       "redirect called for #syscall %d with return value %d",
-		       nr, ret);
+		       "%s: redirect called for #syscall %d with return value %d, sigpending = %d",
+		       __FUNCTION__, nr, ret, rep->sigpending);
+
+		if (rep->sigpending) {
+			do_exit(0);
+		}
 	}
 	return ret;
 }

@@ -30,7 +30,10 @@
 
 extern long syscall_redirect(unsigned long nr, struct pt_regs *regs);
 int handle_signal_remotes(struct pcn_kmsg_message  *msg);
+
 extern const int redirect_table[];
+extern const char *redirect_table_str[];
+
 int process_remote_syscall(struct pcn_kmsg_message *msg);
 void syscall_get_arg(struct task_struct *task,
 		     struct pt_regs *regs,
