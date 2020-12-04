@@ -355,10 +355,6 @@
 431	common	fsconfig		__x64_sys_fsconfig
 432	common	fsmount			__x64_sys_fsmount
 433	common	fspick			__x64_sys_fspick
-434 	64	popcorn_migrate		__x64_sys_popcorn_migrate
-435 	64	popcorn_propose_migration	__x64_sys_popcorn_propose_migration
-436 	64	popcorn_get_thread_status	__x64_sys_popcorn_get_thread_status
-437 	64	popcorn_get_node_info	__x64_sys_popcorn_get_node_info
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact
@@ -402,3 +398,11 @@
 545	x32	execveat		__x32_compat_sys_execveat/ptregs
 546	x32	preadv2			__x32_compat_sys_preadv64v2
 547	x32	pwritev2		__x32_compat_sys_pwritev64v2
+
+#
+# Popcorn Linux
+#
+900 	64	popcorn_migrate		__x64_sys_popcorn_migrate
+901 	64	popcorn_propose_migration	__x64_sys_popcorn_propose_migration
+902 	64	popcorn_get_thread_status	__x64_sys_popcorn_get_thread_status
+903 	64	popcorn_get_node_info	__x64_sys_popcorn_get_node_info
