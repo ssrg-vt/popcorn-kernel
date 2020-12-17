@@ -347,7 +347,7 @@ void rdma_kmsg_stat(struct seq_file *seq, void *v)
 static int __send_to(int to_nid, struct send_work *sw, size_t size)
 {
 	struct rdma_handle *rh = rdma_handles[to_nid];
-	struct ib_send_wr *bad_wr = NULL;
+	const struct ib_send_wr *bad_wr = NULL;
 	int ret;
 
 #ifdef CONFIG_POPCORN_CHECK_SANITY
@@ -449,7 +449,7 @@ int rdma_kmsg_write(int to_nid, dma_addr_t rdma_addr, void *addr, size_t size, u
 {
 	DECLARE_COMPLETION_ONSTACK(done);
 	struct rdma_work *rw;
-	struct ib_send_wr *bad_wr = NULL;
+	const struct ib_send_wr *bad_wr = NULL;
 
 	dma_addr_t dma_addr;
 	int ret;
@@ -493,7 +493,7 @@ void rdma_kmsg_done(struct pcn_kmsg_message *msg)
 {
 	/* Put back the receive work */
 	int ret;
-	struct ib_recv_wr *bad_wr = NULL;
+	const struct ib_recv_wr *bad_wr = NULL;
 	int from_nid = PCN_KMSG_FROM_NID(msg);
 	struct rdma_handle *rh = rdma_handles[from_nid];
 	int index = ((void *)msg - rh->recv_buffer) / PCN_KMSG_MAX_SIZE;
@@ -619,7 +619,7 @@ static __init int __setup_pd_cq_qp(struct rdma_handle *rh)
 
 	/* Create global pd if it is not allocated yet */
 	if (!rdma_pd) {
-		rdma_pd = ib_alloc_pd(rh->device);
+		rdma_pd = ib_alloc_pd(rh->device,0);
 		if (IS_ERR(rdma_pd)) {
 			ret = PTR_ERR(rdma_pd);
 			rdma_pd = NULL;
@@ -699,7 +699,9 @@ static __init int __setup_buffers_and_pools(struct rdma_handle *rh)
 
 	for (i = 0; i < MAX_RECV_DEPTH; i++) {
 		struct recv_work *rw = rws + i;
-		struct ib_recv_wr *wr, *bad_wr = NULL;
+		struct ib_recv_wr *wr;
+	        const struct ib_recv_wr *bad_wr = NULL;
+		
 		struct ib_sge *sgl;
 
 		rw->header.type = WORK_TYPE_RECV;
@@ -737,7 +739,7 @@ static __init int __setup_rdma_buffer(const int nr_chunks)
 	int ret;
 	DECLARE_COMPLETION_ONSTACK(done);
 	struct ib_mr *mr = NULL;
-	struct ib_send_wr *bad_wr = NULL;
+	const struct ib_send_wr *bad_wr = NULL;
 	struct ib_reg_wr reg_wr = {
 		.wr = {
 			.opcode = IB_WR_REG_MR,
@@ -768,7 +770,7 @@ static __init int __setup_rdma_buffer(const int nr_chunks)
 	sg_dma_address(&sg) = __rdma_sink_dma_addr;
 	sg_dma_len(&sg) = 1 << (PAGE_SHIFT + alloc_order);
 
-	ret = ib_map_mr_sg(mr, &sg, 1, PAGE_SIZE);
+	ret = ib_map_mr_sg(mr, &sg, 1,NULL, PAGE_SIZE);
 	if (ret != 1) {
 		printk("Cannot map scatterlist to mr, %d\n", ret);
 		goto out_dereg;
@@ -780,7 +782,7 @@ static __init int __setup_rdma_buffer(const int nr_chunks)
 	 * rdma_handles[my_nid] is for accepting connection without qp & cp.
 	 * So, let's use rdma_handles[1] for nid 0 and rdma_handles[0] otherwise.
 	 */
-	ret = ib_post_send(rdma_handles[!my_nid]->qp, &reg_wr.wr, &bad_wr);
+	ret = ib_post_send(rdma_handles[!my_nid]->qp, &reg_wr.wr,&bad_wr);
 	if (ret || bad_wr) {
 		printk("Cannot register mr, %d %p\n", ret, bad_wr);
 		if (bad_wr) ret = -EINVAL;
