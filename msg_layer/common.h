@@ -18,8 +18,10 @@
 
 #define MAX_NUM_NODES	32
 
+
 static uint32_t ip_table[MAX_NUM_NODES] = { 0 };
 static uint32_t max_nodes = MAX_NUM_NODES;
+
 
 static uint32_t __init __get_host_ip(void)
 {
