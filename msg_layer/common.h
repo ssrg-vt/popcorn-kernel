@@ -12,11 +12,13 @@
 #include <popcorn/bundle.h>
 #include <popcorn/debug.h>
 
+#include "config.h"
+
 #include <linux/inet.h>
 #include <linux/inetdevice.h>
 #include <linux/netdevice.h>
 
-#define MAX_NUM_NODES	32
+#define MAX_NUM_NODES	2
 
 
 static uint32_t ip_table[MAX_NUM_NODES] = { 0 };
@@ -48,9 +50,15 @@ bool __init identify_myself(void)
 	uint32_t my_ip;
 
 	PCNPRINTK("Loading node configuration...");
+//	ip_table[0] = in_aton("10.2.10.13");
+//	ip_table[1] = in_aton("10.2.10.10");	
+
+	for (i = 0; i < MAX_NUM_NODES; i++) {
+                ip_table[i] = in_aton(ip_addresses[i]);
+        }
 
 	my_ip = __get_host_ip();
-
+	
 	for (i = 0; i < max_nodes; i++) {
 		char *me = " ";
 		if (my_ip == ip_table[i]) {
