@@ -42,6 +42,8 @@ const int redirect_table[PCN_NUM_SYSCALLS] = {
   __NR_statx,
   __NR_pselect6,
   __NR_clock_gettime,
+  __NR_nanosleep,
+  __NR_futex
 };
 
 const char *redirect_table_str[PCN_NUM_SYSCALLS] = {
@@ -75,6 +77,7 @@ const char *redirect_table_str[PCN_NUM_SYSCALLS] = {
   "statx",
   "pselect6",
   "clock_gettime",
+  "nanosleep",
   "unsupported",
 };
 
@@ -158,7 +161,7 @@ long syscall_redirect(unsigned long nr, struct pt_regs *regs)
 	       req->args[0], req->args[1], req->args[2], req->args[3],
 	       req->args[4], req->args[5]);
 
-	for (i = 0; i < PCN_NUM_SYSCALLS; i++)
+	for (i = 0; i < PCN_NUM_SYSCALLS ; i++)
 	{
 		if(redirect_table[i] == nr)
 		{
