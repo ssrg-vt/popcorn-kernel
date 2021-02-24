@@ -161,7 +161,7 @@ long syscall_redirect(unsigned long nr, struct pt_regs *regs)
 	       req->args[0], req->args[1], req->args[2], req->args[3],
 	       req->args[4], req->args[5]);
 
-	for (i = 0; i < PCN_NUM_SYSCALLS ; i++)
+	for (i = 0; i < PCN_NUM_SYSCALLS; i++)
 	{
 		if(redirect_table[i] == nr)
 		{
