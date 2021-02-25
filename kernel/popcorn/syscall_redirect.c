@@ -97,6 +97,7 @@ const char *popcorn_decode_syscall(int nr)
  * Handling the signal sent from origin node to remote node
  * We manually force the signal in the destination PID
  */
+/*
 int handle_signal_remotes(struct pcn_kmsg_message *msg)
 {
        signal_trans_t * recv = (signal_trans_t*)msg;
@@ -109,12 +110,13 @@ int handle_signal_remotes(struct pcn_kmsg_message *msg)
        return 0;
 }
 EXPORT_SYMBOL(handle_signal_remotes);
-
+*/
 /*
  * A signal arrived at the origin node for a process that is currently
  * migrated.We are sending the request to remote node that the process is
  * currently stationed.
  */
+/*
 int remote_signalling(int sig, struct task_struct * tsk, int group)
 {
        int re;
@@ -129,7 +131,7 @@ int remote_signalling(int sig, struct task_struct * tsk, int group)
        return 0;
 }
 EXPORT_SYMBOL(remote_signalling);
-
+*/
 int popcorn_syscall_redirectable(unsigned long nr)
 {
 	int i;
@@ -218,7 +220,8 @@ int __init syscall_server_init(void)
 			      syscall_fwd);
 	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SYSCALL_REP,
 			      syscall_reply);
-	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SIGNAL_FWD,
+/*	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_SIGNAL_FWD,
 			      signal_remotes);
-	return 0;
+*/
+      return 0;
 }

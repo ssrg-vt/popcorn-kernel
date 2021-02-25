@@ -135,7 +135,7 @@ static struct remote_context *__alloc_remote_context(int nid, int tgid, bool rem
 
 	rc->tgid = tgid;
 	rc->for_remote = remote;
-	rc->sigpending = 0;
+//	rc->sigpending = 0;
 
 	for (i = 0; i < FAULTS_HASH; i++) {
 		INIT_HLIST_HEAD(&rc->faults[i]);
@@ -676,9 +676,9 @@ static void __run_remote_worker(struct remote_context *rc)
 		case PCN_KMSG_TYPE_TASK_EXIT_ORIGIN:
 			process_origin_task_exit(rc, (origin_task_exit_t *)msg);
 			break;
-		case PCN_KMSG_TYPE_SIGNAL_FWD:
-			handle_signal_remotes(msg);
-                        break;
+//		case PCN_KMSG_TYPE_SIGNAL_FWD:
+//			handle_signal_remotes(msg);
+//                      break;
 		default:
 			printk("Unknown remote work type %d\n", msg->header.type);
 			break;
@@ -879,7 +879,7 @@ static void __process_remote_works(void)
                 *If yes trigger the signal to remote node
                 *For now only SIGINT is handled
                 */
-                if (ret == -ERESTARTSYS)
+                /*if (ret == -ERESTARTSYS)
                 {
                         unsigned long flags;
                         spin_lock_irqsave(&current->sighand->siglock, flags);
@@ -893,6 +893,7 @@ static void __process_remote_works(void)
                                         &current->sighand->siglock, flags);
                         continue;
                }
+	       */
 		if (!req) continue;
 
 		switch (req->header.type) {

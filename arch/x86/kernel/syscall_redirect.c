@@ -110,7 +110,7 @@ int process_remote_syscall(struct pcn_kmsg_message *msg)
 	rep->origin_pid = current->origin_pid;
 	rep->remote_ws = req->remote_ws;
 	rep->ret = retval;
-	rep->sigpending = current->remote->sigpending;
+//	rep->sigpending = current->remote->sigpending;
 
 	pcn_kmsg_post(PCN_KMSG_TYPE_SYSCALL_REP,
 		current->remote_nid, rep, sizeof(*rep));

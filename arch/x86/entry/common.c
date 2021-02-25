@@ -43,7 +43,8 @@
 #define IS_PCN_SYSCALL(a) ((a == __NR_popcorn_migrate) \
 	|| (a == __NR_popcorn_propose_migration) \
 	|| (a == __NR_popcorn_get_thread_status) \
-	|| (a == __NR_popcorn_get_node_info))
+	|| (a == __NR_popcorn_get_node_info) \
+	|| (a == __NR_futex))
 #endif
 
 #define CREATE_TRACE_POINTS
