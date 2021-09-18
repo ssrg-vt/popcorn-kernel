@@ -58,7 +58,7 @@ static void invoke_syscall(struct pt_regs *regs, unsigned int scno,
 	if (scno < sc_nr) {
 		syscall_fn_t syscall_fn;
 		syscall_fn = syscall_table[array_index_nospec(scno, sc_nr)];
-
+#ifdef CONFIG_POPCORN
 		if (distributed_remote_process(current)
 		    && !IS_PCN_SYSCALL(scno)
 		    && popcorn_syscall_redirectable(scno)) {
@@ -67,10 +67,12 @@ static void invoke_syscall(struct pt_regs *regs, unsigned int scno,
 			       scno, popcorn_decode_syscall(scno),
 			       current->pid);
 			ret = syscall_redirect(scno,regs);
-		}
-		else {
+		} else {
 			ret = __invoke_syscall(regs, syscall_fn);
 		}
+#else
+		ret = __invoke_syscall(regs, syscall_fn);
+#endif
 	} else {
 		ret = do_ni_syscall(regs, scno);
 	}
