@@ -359,7 +359,7 @@ static struct task_struct * __init __start_handler(const int nid, const char *ty
 	return tsk;
 }
 
-static int __start_handlers(const int nid)
+static int __init __start_handlers(const int nid)
 {
 	struct task_struct *tsk_send, *tsk_recv;
 	tsk_send = __start_handler(nid, "send", send_handler);
@@ -565,7 +565,7 @@ done:
 	return retval;
 }
 
-static void __exit exit_kmsg_sock(void)
+static void exit_kmsg_sock(void)
 {
 	int i;
 	if (sock_listen) sock_release(sock_listen);
