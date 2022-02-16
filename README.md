@@ -11,5 +11,7 @@ fDSM - FPGA-Accelerated DSM framework for Heterogeneous ISA hardware
 
 * Currently, fDSM is only supported for a 2-node setup. Manually change the node ID (either 0 or 1) in the FPGA driver (popcorn-kernel/msg_layer/xdma.c - Line # 1004 - my_nid variable). 
 
+* Contact naarayananrao@vt.edu for the FPGA design. Use the .mcs files to program the SPI flash of the FPGA. 
+
 
 
