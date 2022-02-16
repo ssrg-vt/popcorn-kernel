@@ -23,6 +23,13 @@ config POPCORN_KMSG_RDMA
 	help
 		Mellanox Connect-X4 and Connect-X5
 
+config POPCORN_KMSG_XDMA
+	tristate "Over FPGA XDMA"
+	depends on m && PCI
+	default n
+	help
+		Xilinx Alveo U50 Accelerator Card
+
 # InfiniBand
 #config POPCORN_KMSG_IB
 #	tristate "Over InfiniBand"
