@@ -1,0 +1,58 @@
+=== diff for manifest (zephyr):
+diff --git zephyr/arch/arm64/core/mmu.c zephyr/arch/arm64/core/mmu.c
+index 229efff6ae..fdaf5dfaf6 100644
+--- zephyr/arch/arm64/core/mmu.c
++++ zephyr/arch/arm64/core/mmu.c
+@@ -669,6 +669,41 @@ static const struct arm_mmu_flat_range mmu_zephyr_ranges[] = {
+ 	  .end   = __rodata_region_end,
+ 	  .attrs = MT_NORMAL | MT_P_RO_U_RO | MT_DEFAULT_SECURE_STATE },
+ 
++	/* The write shared memory for zephyr. 	 
++	 * Note: read-write region is marked execute-never internally
++	 */
++	{ .name  = "write_shm_are",
++	  .start = (void *)0x60000000,
++	  .end   = (void *)0xa0000000,
++	  .attrs = MT_NORMAL | MT_P_RW_U_NA  },
++	/* The read shared memory for zephyr. 	 
++	 * Note: read-write region is marked execute-never internally
++	 */
++	{ .name  = "read_shm_are",
++	  .start = (void *)0x7f000000,
++	  .end   = (void *)0x7f002000,
++	  .attrs = MT_NORMAL | MT_P_RW_U_NA },
++	/* The write shared memory for zephyr. 	 
++	 * Note: read-write region is marked execute-never internally
++	 */
++	{ .name  = "write_shm_are_2",
++	  .start = (void *)0x90000000,
++	  .end   = (void *)0x90002000,
++	  .attrs = MT_NORMAL | MT_P_RW_U_NA  },
++	/* The read shared memory for zephyr. 	 
++	 * Note: read-write region is marked execute-never internally
++	 */
++	{ .name  = "read_shm_are_2",
++	  .start = (void *)0x9f000000,
++	  .end   = (void *)0x9f002000,
++	  .attrs = MT_NORMAL | MT_P_RW_U_NA },
++	/* The read shared memory for zephyr. 	 
++	 * Note: read-write region is marked execute-never internally
++	 */
++	{ .name  = "global_shm_area",
++	  .start = (void *)0x100000000,
++	  .end   = (void *)0x100002000,
++	  .attrs = MT_NORMAL | MT_P_RW_U_NA  },
+ #ifdef CONFIG_NOCACHE_MEMORY
+ 	/* Mark nocache segment noncachable, read-write and execute-never */
+ 	{ .name  = "nocache_data",
+@@ -724,7 +759,7 @@ static void setup_page_tables(struct arm_mmu_ptables *ptables)
+ 		 "Maximum VA not supported\n");
+ 	__ASSERT(max_pa <= (1ULL << CONFIG_ARM64_PA_BITS),
+ 		 "Maximum PA not supported\n");
+-
++	printf("This code is executing\n");
+ 	/* setup translation table for zephyr execution regions */
+ 	for (index = 0U; index < ARRAY_SIZE(mmu_zephyr_ranges); index++) {
+ 		range = &mmu_zephyr_ranges[index];
+
+Empty diff in 46 projects.

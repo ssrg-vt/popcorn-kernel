@@ -1,0 +1,142 @@
+/dts-v1/;
+
+/ {
+	#address-cells = < 0x1 >;
+	#size-cells = < 0x1 >;
+	model = "QEMU X86 emulator";
+	compatible = "qemu,x86_emulator";
+	chosen {
+		zephyr,sram = &dram0;
+		zephyr,flash = &flash0;
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+		zephyr,bt-uart = &uart1;
+		zephyr,uart-pipe = &uart1;
+		zephyr,bt-mon-uart = &uart1;
+		zephyr,code-partition = &slot0_partition;
+		zephyr,flash-controller = &sim_flash;
+	};
+	aliases {
+		uart-0 = &uart0;
+		uart-1 = &uart1;
+		eeprom-0 = &eeprom0;
+		eeprom-1 = &eeprom1;
+	};
+	cpus {
+		#address-cells = < 0x1 >;
+		#size-cells = < 0x0 >;
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "intel,x86";
+			d-cache-line-size = < 0x40 >;
+			reg = < 0x0 >;
+		};
+	};
+	intc: ioapic@fec00000 {
+		compatible = "intel,ioapic";
+		reg = < 0xfec00000 0x1000 >;
+		interrupt-controller;
+		#interrupt-cells = < 0x3 >;
+		phandle = < 0x1 >;
+	};
+	dram0: memory@0 {
+		device_type = "memory";
+		reg = < 0x0 0x400000 >;
+	};
+	soc {
+		#address-cells = < 0x1 >;
+		#size-cells = < 0x1 >;
+		compatible = "simple-bus";
+		ranges;
+		uart0: uart@3f8 {
+			compatible = "ns16550";
+			reg = < 0x3f8 0x100 >;
+			label = "UART_0";
+			clock-frequency = < 0x1c2000 >;
+			interrupts = < 0x4 0x100 0x3 >;
+			interrupt-parent = < &intc >;
+			status = "okay";
+			current-speed = < 0x1c200 >;
+		};
+		uart1: uart@2f8 {
+			compatible = "ns16550";
+			reg = < 0x2f8 0x100 >;
+			label = "UART_1";
+			clock-frequency = < 0x1c2000 >;
+			interrupts = < 0x3 0x100 0x3 >;
+			interrupt-parent = < &intc >;
+			status = "okay";
+			current-speed = < 0x1c200 >;
+		};
+		hpet: hpet@fed00000 {
+			label = "HPET";
+			compatible = "intel,hpet";
+			reg = < 0xfed00000 0x400 >;
+			interrupts = < 0x2 0x0 0x4 >;
+			interrupt-parent = < &intc >;
+			status = "okay";
+		};
+		eth0: eth@febc0000 {
+			compatible = "intel,e1000";
+			reg = < 0xfebc0000 0x100 >;
+			label = "eth0";
+			interrupts = < 0xb 0x100 0x3 >;
+			interrupt-parent = < &intc >;
+			status = "okay";
+		};
+	};
+	flash0: flash@500000 {
+		compatible = "soc-nv-flash";
+		reg = < 0x500000 0x400000 >;
+	};
+	sim_flash: sim_flash {
+		compatible = "zephyr,sim-flash";
+		label = "FLASH_SIMULATOR";
+		#address-cells = < 0x1 >;
+		#size-cells = < 0x1 >;
+		erase-value = < 0xff >;
+		flash_sim0: flash_sim@0 {
+			compatible = "soc-nv-flash";
+			reg = < 0x0 0x100000 >;
+			erase-block-size = < 0x400 >;
+			write-block-size = < 0x4 >;
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = < 0x1 >;
+				#size-cells = < 0x1 >;
+				storage_partition: partition@1000 {
+					label = "storage";
+					reg = < 0x1000 0x10000 >;
+				};
+				slot0_partition: partition@11000 {
+					label = "image-0";
+					reg = < 0x11000 0x10000 >;
+				};
+				slot1_partition: partition@21000 {
+					label = "image-1";
+					reg = < 0x21000 0x10000 >;
+				};
+				eepromemu_partition: partition@31000 {
+					label = "eeprom-emu";
+					reg = < 0x31000 0x10000 >;
+					phandle = < 0x2 >;
+				};
+			};
+		};
+	};
+	eeprom1: eeprom1 {
+		status = "okay";
+		compatible = "zephyr,emu-eeprom";
+		label = "EEPROM_1";
+		size = < 0x1000 >;
+		pagesize = < 0x2000 >;
+		partition = < &eepromemu_partition >;
+		rambuf;
+	};
+	eeprom0: eeprom0 {
+		status = "okay";
+		compatible = "zephyr,sim-eeprom";
+		label = "EEPROM_0";
+		size = < 0x1000 >;
+	};
+};

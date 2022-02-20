@@ -1,0 +1,67 @@
+<mxfile host="app.diagrams.net" modified="2022-01-06T20:11:10.240Z" agent="5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36" etag="WyATg2UwoeSzlbb9zDlw" version="15.8.7" type="github">
+  <diagram id="zYR9mQDlraU34CcKwi7g" name="Page-1">
+    <mxGraphModel dx="1298" dy="834" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="qclGZfqV7uJqO9f-H4In-1" value="x86 VM copying data into memory &amp;gt;&amp;nbsp; 0x100000000" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="150" width="180" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-3" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" target="qclGZfqV7uJqO9f-H4In-1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="390" y="90" as="sourcePoint" />
+            <mxPoint x="450" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-4" value="x86 VM raises &quot;&lt;span style=&quot;font-family: &amp;#34;nimbusmonl&amp;#34; ; font-size: 9pt&quot;&gt;arch_send_call_function_cross_arch_ipi&lt;/span&gt;&quot;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="260" width="260" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-5" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="qclGZfqV7uJqO9f-H4In-1" target="qclGZfqV7uJqO9f-H4In-4">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="400" y="470" as="sourcePoint" />
+            <mxPoint x="450" y="420" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-7" value="Start" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="330" y="30" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-8" value="QEMU taps and identifies that the IPI is for core 1 and redirects the IPI to ARM64 machine" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="340" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-9" value="ARM machines receives the interrupt and calls &quot;&lt;span style=&quot;font-family: &amp;#34;menlo&amp;#34; ; font-size: 11px&quot;&gt;IPI__pcn_kmsg_receive&lt;/span&gt;&lt;span&gt;&quot;&amp;nbsp;&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="440" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-10" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="qclGZfqV7uJqO9f-H4In-8" target="qclGZfqV7uJqO9f-H4In-9">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="400" y="460" as="sourcePoint" />
+            <mxPoint x="450" y="410" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-11" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="qclGZfqV7uJqO9f-H4In-4" target="qclGZfqV7uJqO9f-H4In-8">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="400" y="460" as="sourcePoint" />
+            <mxPoint x="450" y="410" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-12" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="qclGZfqV7uJqO9f-H4In-9" target="qclGZfqV7uJqO9f-H4In-13">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="400" y="450" as="sourcePoint" />
+            <mxPoint x="450" y="400" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-13" value="Copies the data to local buffer and takes action" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="540" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-14" value="Stop" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="330" y="630" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="qclGZfqV7uJqO9f-H4In-15" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="qclGZfqV7uJqO9f-H4In-13" target="qclGZfqV7uJqO9f-H4In-14">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="350" y="450" as="sourcePoint" />
+            <mxPoint x="400" y="400" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,4043 @@
+diff --git a/.gitattributes b/.gitattributes
+index 07f430e944..0dff0698c0 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -1,3 +1,4 @@
+ *.c.inc         diff=c
+ *.h.inc         diff=c
+ *.py            diff=python
++blobs/** filter=lfs diff=lfs merge=lfs -text
+diff --git a/.gitignore b/.gitignore
+index 75a4be0724..67a71a8bb7 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -13,3 +13,8 @@ GTAGS
+ *~
+ *.ast_raw
+ *.depend_raw
++/.cache/
++/.idea/
++/.vscode/
++/compile_commands.json.*
++/*.code-workspace
+diff --git a/.idea/.gitignore b/.idea/.gitignore
+new file mode 100644
+index 0000000000..8bf4d45d6e
+--- /dev/null
++++ b/.idea/.gitignore
+@@ -0,0 +1,6 @@
++# Default ignored files
++/shelf/
++/workspace.xml
++# Datasource local storage ignored files
++/dataSources/
++/dataSources.local.xml
+diff --git a/Makefile b/Makefile
+index bcbbec71a1..1f1c66b28b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -177,7 +177,7 @@ SUBDIR_MAKEFLAGS=$(if $(V),,--no-print-directory --quiet)
+ 
+ include $(SRC_PATH)/tests/Makefile.include
+ 
+-all: recurse-all
++all: recurse-all plugins
+ 
+ ROM_DIRS = $(addprefix pc-bios/, $(ROMS))
+ ROM_DIRS_RULES=$(foreach t, all clean, $(addsuffix /$(t), $(ROM_DIRS)))
+@@ -219,7 +219,7 @@ distclean: clean
+ 	rm -f roms/seabios/config.mak roms/vgabios/config.mak
+ 	rm -f qemu-plugins-ld.symbols qemu-plugins-ld64.symbols
+ 	rm -f *-config-target.h *-config-devices.mak *-config-devices.h
+-	rm -rf meson-private meson-logs meson-info compile_commands.json
++	rm -rf meson-private meson-logs meson-info
+ 	rm -f Makefile.ninja Makefile.mtest build.ninja.stamp meson.stamp
+ 	rm -f config.log
+ 	rm -f linux-headers/asm
+diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
+index 8a7b779270..0d441b178c 100644
+--- a/accel/tcg/cputlb.c
++++ b/accel/tcg/cputlb.c
+@@ -59,6 +59,9 @@
+ # define DEBUG_TLB_LOG_GATE 0
+ #endif
+ 
++static uint64_t tlb_miss_counter;
++static uint64_t page_fault_counter;
++
+ #define tlb_debug(fmt, ...) do { \
+     if (DEBUG_TLB_LOG_GATE) { \
+         qemu_log_mask(CPU_LOG_MMU, "%s: " fmt, __func__, \
+@@ -1745,6 +1748,12 @@ bool tlb_plugin_lookup(CPUState *cpu, target_ulong addr, int mmu_idx,
+     }
+ }
+ 
++void tlb_plugin_read_counters(struct qemu_plugin_page_counter *ctr)
++{
++    ctr->tlb_miss_counter = tlb_miss_counter;
++    ctr->page_fault_counter = page_fault_counter;
++}
++
+ #endif
+ 
+ /* Probe for a read-modify-write atomic operation.  Do not allow unaligned
+diff --git a/backends/hostmem-ram.c b/backends/hostmem-ram.c
+index 5cc53e76c9..33aa5404ff 100644
+--- a/backends/hostmem-ram.c
++++ b/backends/hostmem-ram.c
+@@ -19,6 +19,7 @@
+ static void
+ ram_backend_memory_alloc(HostMemoryBackend *backend, Error **errp)
+ {
++    printf("Initializing memory backend this way with %s\n", __func__ );
+     char *name;
+ 
+     if (!backend->size) {
+@@ -27,8 +28,12 @@ ram_backend_memory_alloc(HostMemoryBackend *backend, Error **errp)
+     }
+ 
+     name = host_memory_backend_get_name(backend);
+-    memory_region_init_ram_shared_nomigrate(&backend->mr, OBJECT(backend), name,
+-                           backend->size, backend->share, errp);
++    memory_region_init_ram_from_file(&backend->mr, OBJECT(backend), name, backend->size, 0, RAM_SHARED, "/dev/shm/ddr-share", false ,errp);
++//    memory_region_init_ram_shared_nomigrate(&backend->mr, OBJECT(backend), name,
++//                           backend->size, backend->share, errp);
++    printf("\t[shm] %s(): create shared memory path=\"/dev/shm/ddr-share\" "
++            "name=\"%s\" base=no_base size=0x%lx (0x200000000 8G)\n",
++            __func__, name, backend->size);
+     g_free(name);
+ }
+ 
+diff --git a/blobs/aarch64/Image b/blobs/aarch64/Image
+new file mode 100644
+index 0000000000..1609e82b65
+--- /dev/null
++++ b/blobs/aarch64/Image
+@@ -0,0 +1,3 @@
++version https://git-lfs.github.com/spec/v1
++oid sha256:ac0417006c75ed50241ccaa9b5855949fab98ee1b034f26b5536b1f44af79d46
++size 10189312
+diff --git a/blobs/aarch64/rootfs.ext4 b/blobs/aarch64/rootfs.ext4
+new file mode 100644
+index 0000000000..a55c9eb4c2
+--- /dev/null
++++ b/blobs/aarch64/rootfs.ext4
+@@ -0,0 +1,3 @@
++version https://git-lfs.github.com/spec/v1
++oid sha256:e56b45738cdaef72504cf13e17ccf054520278f91ebdd91017405c99a828f014
++size 62914560
+diff --git a/blobs/riscv64/Image b/blobs/riscv64/Image
+new file mode 100755
+index 0000000000..71e595ff2a
+--- /dev/null
++++ b/blobs/riscv64/Image
+@@ -0,0 +1,3 @@
++version https://git-lfs.github.com/spec/v1
++oid sha256:137d1e351fe8041f599f64291589abd88f0674d963b93971c173a2af7e3205bb
++size 17237220
+diff --git a/blobs/riscv64/fw_jump.bin b/blobs/riscv64/fw_jump.bin
+new file mode 100755
+index 0000000000..8a92f8cd42
+--- /dev/null
++++ b/blobs/riscv64/fw_jump.bin
+@@ -0,0 +1,3 @@
++version https://git-lfs.github.com/spec/v1
++oid sha256:192734c938b65bf7c08850edd9fd0ce27f4d4e8356805c4f7c1b2c9d957ca259
++size 75096
+diff --git a/blobs/riscv64/rootfs.img b/blobs/riscv64/rootfs.img
+new file mode 100644
+index 0000000000..efd96c5ade
+--- /dev/null
++++ b/blobs/riscv64/rootfs.img
+@@ -0,0 +1,3 @@
++version https://git-lfs.github.com/spec/v1
++oid sha256:afea0162173c777fde3cdfc44acdf625d158087931efa327ee21348a3b1c93fc
++size 268435456
+diff --git a/blobs/x86_64/bzImage b/blobs/x86_64/bzImage
+new file mode 100644
+index 0000000000..7bba70a76b
+--- /dev/null
++++ b/blobs/x86_64/bzImage
+@@ -0,0 +1,3 @@
++version https://git-lfs.github.com/spec/v1
++oid sha256:308e47ca977e70931107cad4ae2ca772ec8ed83233cce06b0a554768af21f136
++size 2597280
+diff --git a/blobs/x86_64/initramfs.cpio.gz b/blobs/x86_64/initramfs.cpio.gz
+new file mode 100644
+index 0000000000..92a87cf412
+--- /dev/null
++++ b/blobs/x86_64/initramfs.cpio.gz
+@@ -0,0 +1,3 @@
++version https://git-lfs.github.com/spec/v1
++oid sha256:5983dd3bf9b387a62f4b95a3e780b23852299d95a9b128ac089ca06441d113e8
++size 1425602
+diff --git a/build.sh b/build.sh
+new file mode 100755
+index 0000000000..83d86f6868
+--- /dev/null
++++ b/build.sh
+@@ -0,0 +1,3 @@
++#!/bin/bash
++./configure --target-list=aarch64-softmmu,x86_64-softmmu  --extra-cflags="-lrt -Wno-error=unused-function"  --enable-debug --enable-plugins --disable-docs --disable-gtk --disable-opengl --disable-vnc --disable-virglrenderer --enable-debug-info --enable-trace-backends=log
++#./configure --target-list=aarch64-softmmu,x86_64-softmmu --disable-werror --extra-cflags="-lrt" --enable-debug --enable-plugins
+diff --git a/contrib/plugins/hotpages.c b/contrib/plugins/hotpages.c
+index bf53267532..3d11cc5a55 100644
+--- a/contrib/plugins/hotpages.c
++++ b/contrib/plugins/hotpages.c
+@@ -112,6 +112,11 @@ static void vcpu_haddr(unsigned int cpu_index, qemu_plugin_meminfo_t meminfo,
+     struct qemu_plugin_hwaddr *hwaddr = qemu_plugin_get_hwaddr(meminfo, vaddr);
+     uint64_t page;
+     PageCounters *count;
++    
++    uint64_t phy_addr = qemu_plugin_hwaddr_phys_addr(hwaddr);
++
++    if (phy_addr >= 0x1000000000ULL && phy_addr < 0x1001000000ULL)
++        printf("here we go\n");
+ 
+     /* We only get a hwaddr for system emulation */
+     if (track_io) {
+diff --git a/contrib/plugins/hwprofile.c b/contrib/plugins/hwprofile.c
+index faf216ac00..85e43bd771 100644
+--- a/contrib/plugins/hwprofile.c
++++ b/contrib/plugins/hwprofile.c
+@@ -1,195 +1,131 @@
+ /*
+  * Copyright (C) 2020, Alex Bennée <alex.bennee@linaro.org>
++ * usage example:
+  *
+- * HW Profile - breakdown access patterns for IO to devices
++ * #if defined(CONFIG_X86_64)
++ *   #define ARCH_TRIGGER_ADDR = 0x0f200000ULL
++ * #elif defined(CONFIG_ARM64)
++ *   #define ARCH_TRIGGER_ADDR = 0x1200000000ULL
++ * #endif
++ *
++ * void *trigger_address = memremap(ARCH_TRIGGER_ADDR, 0x10, MEMREMAP_WB);
++ * memset(trigger_address, 0, 0x10);
++ * memunmap(trigger_address);
+  *
+  * License: GNU GPL, version 2 or later.
+  *   See the COPYING file in the top-level directory.
+  */
+-
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
+ #include <inttypes.h>
+ #include <assert.h>
+ #include <stdlib.h>
+-#include <inttypes.h>
+-#include <string.h>
+ #include <unistd.h>
++#include <string.h>
+ #include <stdio.h>
+ #include <glib.h>
+-
++#include <sys/mman.h>
++#include <errno.h>
++#include <unistd.h>
++#include <sys/un.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <math.h>
+ #include <qemu-plugin.h>
+ 
+ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
+ 
+-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+-
+-typedef struct {
+-    uint64_t cpu_read;
+-    uint64_t cpu_write;
+-    uint64_t reads;
+-    uint64_t writes;
+-} IOCounts;
+-
+-typedef struct {
+-    uint64_t off_or_pc;
+-    IOCounts counts;
+-} IOLocationCounts;
+-
+-typedef struct {
+-    const char *name;
+-    uint64_t   base;
+-    IOCounts   totals;
+-    GHashTable *detail;
+-} DeviceCounts;
+-
+-static GMutex lock;
+-static GHashTable *devices;
+-
+-/* track the access pattern to a piece of HW */
+-static bool pattern;
+-/* track the source address of access to HW */
+-static bool source;
+-/* track only matched regions of HW */
+-static bool check_match;
+-static gchar **matches;
+-
+-static enum qemu_plugin_mem_rw rw = QEMU_PLUGIN_MEM_RW;
+-
+-static inline bool track_reads(void)
++typedef enum
+ {
+-    return rw == QEMU_PLUGIN_MEM_RW || rw == QEMU_PLUGIN_MEM_R;
+-}
+-
+-static inline bool track_writes(void)
++    PROF_ARCH_AARCH64,
++    PROF_ARCH_X86_64,
++    PROF_ARCH_INCOMPATIBLE
++} ProfileArch;
++
++static uint8_t icount_on;
++static bool enable_log;
++static uint64_t insn_count;
++static FILE *fp;
++static enum qemu_plugin_mem_rw rw = QEMU_PLUGIN_MEM_RW;
++static ProfileArch prof_arch;
++static uint32_t prof_cost;
++static char *shm_path;
++const uint64_t shm_size = 0x00100000;
++static void *shm_ptr;
++static uint64_t prof_base;
++static char *primesim_socket_path;
++static int primesim_socket_fd;
++
++int client_connect_socket(const char *server_socket_path)
+ {
+-    return rw == QEMU_PLUGIN_MEM_RW || rw == QEMU_PLUGIN_MEM_W;
+-}
++    int client_sock, rc, len;
++    struct sockaddr_un server_sockaddr;
++    char buf[256];
++    memset(&server_sockaddr, 0, sizeof(struct sockaddr_un));
++
++    /**************************************/
++    /* Create a UNIX domain stream socket */
++    /**************************************/
++    client_sock = socket(AF_UNIX, SOCK_STREAM, 0);
++    if (client_sock == -1)
++    {
++        printf("SOCKET ERROR = %s\n", strerror(errno));
++        exit(1);
++    }
+ 
+-static void plugin_init(void)
+-{
+-    devices = g_hash_table_new(NULL, NULL);
+-}
++    server_sockaddr.sun_family = AF_UNIX;
++    strcpy(server_sockaddr.sun_path, server_socket_path);
++    rc = connect(client_sock, (struct sockaddr *)&server_sockaddr, sizeof(struct sockaddr_un));
++    if (rc == -1)
++    {
++        printf("CONNECT ERROR = %s\n", strerror(errno));
++        close(client_sock);
++        exit(1);
++    }
+ 
+-static gint sort_cmp(gconstpointer a, gconstpointer b)
+-{
+-    DeviceCounts *ea = (DeviceCounts *) a;
+-    DeviceCounts *eb = (DeviceCounts *) b;
+-    return ea->totals.reads + ea->totals.writes >
+-           eb->totals.reads + eb->totals.writes ? -1 : 1;
++    return client_sock;
+ }
+ 
+-static gint sort_loc(gconstpointer a, gconstpointer b)
++void client_send_message(int client_sock, uint64_t buf)
+ {
+-    IOLocationCounts *ea = (IOLocationCounts *) a;
+-    IOLocationCounts *eb = (IOLocationCounts *) b;
+-    return ea->off_or_pc > eb->off_or_pc;
++    int ret;
++    do
++    {
++        ret = write(client_sock, (void *)&buf, sizeof(buf));
++    } while (ret <= 0);
+ }
+ 
+-static void fmt_iocount_record(GString *s, IOCounts *rec)
++void client_close_socket(int socket_fd)
+ {
+-    if (track_reads()) {
+-        g_string_append_printf(s, ", %"PRIx64", %"PRId64,
+-                               rec->cpu_read, rec->reads);
+-    }
+-    if (track_writes()) {
+-        g_string_append_printf(s, ", %"PRIx64", %"PRId64,
+-                               rec->cpu_write, rec->writes);
+-    }
++    close(socket_fd);
+ }
+ 
+-static void fmt_dev_record(GString *s, DeviceCounts *rec)
++static void plugin_init(void)
+ {
+-    g_string_append_printf(s, "%s, 0x%"PRIx64,
+-                           rec->name, rec->base);
+-    fmt_iocount_record(s, &rec->totals);
+-    g_string_append_c(s, '\n');
++    icount_on = 1;
++    insn_count = 0;
+ }
+ 
+ static void plugin_exit(qemu_plugin_id_t id, void *p)
+ {
+-    g_autoptr(GString) report = g_string_new("");
+-    GList *counts;
+-
+-    if (!(pattern || source)) {
+-        g_string_printf(report, "Device, Address");
+-        if (track_reads()) {
+-            g_string_append_printf(report, ", RCPUs, Reads");
+-        }
+-        if (track_writes()) {
+-            g_string_append_printf(report, ",  WCPUs, Writes");
+-        }
+-        g_string_append_c(report, '\n');
+-    }
+-
+-    counts = g_hash_table_get_values(devices);
+-    if (counts && g_list_next(counts)) {
+-        GList *it;
+-
+-        it = g_list_sort(counts, sort_cmp);
+-
+-        while (it) {
+-            DeviceCounts *rec = (DeviceCounts *) it->data;
+-            if (rec->detail) {
+-                GList *accesses = g_hash_table_get_values(rec->detail);
+-                GList *io_it = g_list_sort(accesses, sort_loc);
+-                const char *prefix = pattern ? "off" : "pc";
+-                g_string_append_printf(report, "%s @ 0x%"PRIx64"\n",
+-                                       rec->name, rec->base);
+-                while (io_it) {
+-                    IOLocationCounts *loc = (IOLocationCounts *) io_it->data;
+-                    g_string_append_printf(report, "  %s:%08"PRIx64,
+-                                           prefix, loc->off_or_pc);
+-                    fmt_iocount_record(report, &loc->counts);
+-                    g_string_append_c(report, '\n');
+-                    io_it = io_it->next;
+-                }
+-            } else {
+-                fmt_dev_record(report, rec);
+-            }
+-            it = it->next;
+-        };
+-        g_list_free(it);
+-    }
+-
+-    qemu_plugin_outs(report->str);
+-}
+-
+-static DeviceCounts *new_count(const char *name, uint64_t base)
+-{
+-    DeviceCounts *count = g_new0(DeviceCounts, 1);
+-    count->name = name;
+-    count->base = base;
+-    if (pattern || source) {
+-        count->detail = g_hash_table_new(NULL, NULL);
++    g_autofree gchar *out = g_strdup_printf("insns: %" PRIu64 "\n", insn_count);
++    qemu_plugin_outs(out);
++    munmap(shm_ptr, shm_size);
++    shm_unlink(shm_path);
++
++    if (enable_log)
++    {
++        client_send_message(primesim_socket_fd, 0xdeadbeefULL);
++        client_send_message(primesim_socket_fd, 0xdeadbeefULL);
++        client_send_message(primesim_socket_fd, 0xdeadbeefULL);
+     }
+-    g_hash_table_insert(devices, (gpointer) name, count);
+-    return count;
+-}
+-
+-static IOLocationCounts *new_location(GHashTable *table, uint64_t off_or_pc)
+-{
+-    IOLocationCounts *loc = g_new0(IOLocationCounts, 1);
+-    loc->off_or_pc = off_or_pc;
+-    g_hash_table_insert(table, (gpointer) off_or_pc, loc);
+-    return loc;
++    client_close_socket(primesim_socket_fd);
+ }
+ 
+-static void hwprofile_match_hit(DeviceCounts *rec, uint64_t off)
++static void toggle_icount(void)
+ {
+-    g_autoptr(GString) report = g_string_new("hwprofile: match @ offset");
+-    g_string_append_printf(report, "%"PRIx64", previous hits\n", off);
+-    fmt_dev_record(report, rec);
+-    qemu_plugin_outs(report->str);
+-}
+-
+-static void inc_count(IOCounts *count, bool is_write, unsigned int cpu_index)
+-{
+-    if (is_write) {
+-        count->writes++;
+-        count->cpu_write |= (1 << cpu_index);
+-    } else {
+-        count->reads++;
+-        count->cpu_read |= (1 << cpu_index);
+-    }
++    icount_on = icount_on == 1 ? 0 : 1;
+ }
+ 
+ static void vcpu_haddr(unsigned int cpu_index, qemu_plugin_meminfo_t meminfo,
+@@ -197,47 +133,61 @@ static void vcpu_haddr(unsigned int cpu_index, qemu_plugin_meminfo_t meminfo,
+ {
+     struct qemu_plugin_hwaddr *hwaddr = qemu_plugin_get_hwaddr(meminfo, vaddr);
+ 
+-    if (!hwaddr || !qemu_plugin_hwaddr_is_io(hwaddr)) {
++    // if (!hwaddr || !qemu_plugin_hwaddr_is_io(hwaddr))
++    if (!hwaddr)
+         return;
+-    } else {
+-        const char *name = qemu_plugin_hwaddr_device_name(hwaddr);
+-        uint64_t off = qemu_plugin_hwaddr_phys_addr(hwaddr);
+-        bool is_write = qemu_plugin_mem_is_store(meminfo);
+-        DeviceCounts *counts;
+-
+-        g_mutex_lock(&lock);
+-        counts = (DeviceCounts *) g_hash_table_lookup(devices, name);
+-
+-        if (!counts) {
+-            uint64_t base = vaddr - off;
+-            counts = new_count(name, base);
+-        }
+ 
+-        if (check_match) {
+-            if (g_strv_contains((const char * const *)matches, counts->name)) {
+-                hwprofile_match_hit(counts, off);
+-                inc_count(&counts->totals, is_write, cpu_index);
+-            }
+-        } else {
+-            inc_count(&counts->totals, is_write, cpu_index);
+-        }
++    uint64_t phy_addr = qemu_plugin_hwaddr_phys_addr(hwaddr);
+ 
+-        /* either track offsets or source of access */
+-        if (source) {
+-            off = (uint64_t) udata;
+-        }
++    if (enable_log)
++    {
++        client_send_message(primesim_socket_fd, insn_count);
++        client_send_message(primesim_socket_fd, phy_addr);
++        client_send_message(primesim_socket_fd, qemu_plugin_mem_is_store(meminfo));
++        client_send_message(primesim_socket_fd, pow(2, qemu_plugin_mem_size_shift(meminfo)));
++    }
+ 
+-        if (pattern || source) {
+-            IOLocationCounts *io_count = g_hash_table_lookup(counts->detail,
+-                                                             (gpointer) off);
+-            if (!io_count) {
+-                io_count = new_location(counts->detail, off);
+-            }
+-            inc_count(&io_count->counts, is_write, cpu_index);
+-        }
++    if (phy_addr >> 8 != prof_base)
++    {
++        return;
++    }
+ 
+-        g_mutex_unlock(&lock);
++    uint32_t offset = phy_addr & 0xFF;
++
++    uint64_t reset_cnt;
++
++    void *rst_shm_offset, *ctr_shm_offset;
++    switch (phy_addr & 0xFF)
++    {
++    case 0x00:
++        insn_count -= prof_cost;
++        toggle_icount();
++        break;
++    case 0x08:
++        break;
++    case 0x10:
++        break;
++    case 0x18:
++        rst_shm_offset = (void *)(((uint64_t *)shm_ptr) + 2);
++        memcpy(&reset_cnt, rst_shm_offset, sizeof(uint64_t));
++        if (reset_cnt == 0xdeadbeefULL)
++        {
++            insn_count = 0;
++            memset(rst_shm_offset, 0, sizeof(uint64_t));
++        }
++        ctr_shm_offset = (void *)(((uint64_t *)shm_ptr) + 1);
++        memcpy(ctr_shm_offset, &insn_count, sizeof(uint64_t));
++        break;
++    default:
++        break;
+     }
++
++    return;
++}
++
++static void vcpu_insn_exec_before(unsigned int cpu_index, void *udata)
++{
++    insn_count += icount_on;
+ }
+ 
+ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
+@@ -245,9 +195,15 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
+     size_t n = qemu_plugin_tb_n_insns(tb);
+     size_t i;
+ 
+-    for (i = 0; i < n; i++) {
++    for (i = 0; i < n; i++)
++    {
+         struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);
+-        gpointer udata = (gpointer) (source ? qemu_plugin_insn_vaddr(insn) : 0);
++        uint64_t vaddr = qemu_plugin_insn_vaddr(insn);
++        qemu_plugin_register_vcpu_insn_exec_cb(
++            insn, vcpu_insn_exec_before, QEMU_PLUGIN_CB_NO_REGS,
++            GUINT_TO_POINTER(vaddr));
++
++        gpointer udata = (gpointer)(qemu_plugin_insn_vaddr(insn));
+         qemu_plugin_register_vcpu_mem_cb(insn, vcpu_haddr,
+                                          QEMU_PLUGIN_CB_NO_REGS,
+                                          rw, udata);
+@@ -259,44 +215,98 @@ int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_t *info,
+                         int argc, char **argv)
+ {
+     int i;
++    enable_log = true;
++    prof_cost = 1;
+ 
+-    for (i = 0; i < argc; i++) {
++    for (i = 0; i < argc; i++)
++    {
+         char *opt = argv[i];
+-        if (g_strcmp0(opt, "read") == 0) {
++        if (g_strcmp0(opt, "read") == 0)
++        {
+             rw = QEMU_PLUGIN_MEM_R;
+-        } else if (g_strcmp0(opt, "write") == 0) {
++        }
++        else if (g_strcmp0(opt, "write") == 0)
++        {
+             rw = QEMU_PLUGIN_MEM_W;
+-        } else if (g_strcmp0(opt, "pattern") == 0) {
+-            pattern = true;
+-        } else if (g_strcmp0(opt, "source") == 0) {
+-            source = true;
+-        } else if (g_str_has_prefix(opt, "match")) {
++        }
++        else if (g_strcmp0(opt, "log") == 0)
++        {
++            enable_log = true;
++        }
++        else if (g_str_has_prefix(opt, "overhead") == 0)
++        {
+             gchar **parts = g_strsplit(opt, "=", 2);
+-            check_match = true;
+-            matches = g_strsplit(parts[1], ",", -1);
++            prof_cost = atoi(parts[1]);
++            fprintf(stderr, "prof_cost %d\n", prof_cost);
+             g_strfreev(parts);
+-        } else {
++        }
++        else
++        {
+             fprintf(stderr, "option parsing failed: %s\n", opt);
+             return -1;
+         }
+     }
+ 
+-    if (source && pattern) {
+-        fprintf(stderr, "can only currently track either source or pattern.\n");
++    printf("qemu target is %s\n", info->target_name);
++
++    // detect system architecture
++    if (strcmp(info->target_name, "aarch64") == 0)
++    {
++        prof_arch = PROF_ARCH_AARCH64;
++        shm_path = "/icount_aarch64";
++        prof_base = 0x0f2000ULL;
++        //FIXME: change the arch
++        primesim_socket_path = "/tmp/hwprofile_x64";
++    }
++    else if (strcmp(info->target_name, "x86_64") == 0)
++    {
++        prof_arch = PROF_ARCH_X86_64;
++        shm_path = "/icount_x64";
++        prof_base = 0x12000000ULL;
++        primesim_socket_path = "/tmp/hwprofile_x64";
++    }
++    else
++    {
++        prof_arch = PROF_ARCH_INCOMPATIBLE;
++    }
++
++    int fd = shm_open(shm_path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRWXU);
++    if (fd == -1)
++    {
++        printf("failed to shm_open\n");
+         return -1;
+     }
+ 
+-    if (!info->system_emulation) {
+-        fprintf(stderr, "hwprofile: plugin only useful for system emulation\n");
++    if (ftruncate(fd, shm_size) < 0)
++    {
++        printf("truncation failure\n");
+         return -1;
+     }
+ 
+-    /* Just warn about overflow */
+-    if (info->system.smp_vcpus > 64 ||
+-        info->system.max_vcpus > 64) {
+-        fprintf(stderr, "hwprofile: can only track up to 64 CPUs\n");
++    shm_ptr = mmap(NULL, shm_size, PROT_WRITE, MAP_SHARED, fd, 0);
++    if (shm_ptr == MAP_FAILED)
++    {
++        printf("mmap failed\n");
++        return -1;
++    }
++
++    if (!info->system_emulation)
++    {
++        fprintf(stderr, "hwprofile: plugin only useful for system emulation\n");
++        return -1;
+     }
+ 
++    if (enable_log)
++    {
++
++        primesim_socket_fd = client_connect_socket(primesim_socket_path);
++        if (primesim_socket_fd == -1)
++        {
++            fprintf(stderr, "failed to connect to primesim\n");
++            return -1;
++        }
++        client_send_message(primesim_socket_fd, 0xdeadbeefULL);
++    }
+     plugin_init();
+ 
+     qemu_plugin_register_vcpu_tb_trans_cb(id, vcpu_tb_trans);
+diff --git a/hw/Kconfig b/hw/Kconfig
+index ff40bd3f7b..f4a9938edb 100644
+--- a/hw/Kconfig
++++ b/hw/Kconfig
+@@ -39,6 +39,7 @@ source usb/Kconfig
+ source virtio/Kconfig
+ source vfio/Kconfig
+ source watchdog/Kconfig
++source demo/Kconfig
+ 
+ # arch Kconfig
+ source arm/Kconfig
+@@ -82,3 +83,4 @@ config XLNX_ZYNQMP
+     select REGISTER
+     select CAN_BUS
+     select PTIMER
++    select DEMO
+diff --git a/hw/arm/Kconfig b/hw/arm/Kconfig
+index 8c37cf00da..f4c193d656 100644
+--- a/hw/arm/Kconfig
++++ b/hw/arm/Kconfig
+@@ -28,6 +28,9 @@ config ARM_VIRT
+     select ACPI_HW_REDUCED
+     select ACPI_NVDIMM
+     select ACPI_APEI
++    select DEMO
++    select VINTC
++    select SIFIVE_GPIO
+ 
+ config CHEETAH
+     bool
+diff --git a/hw/arm/boot.c b/hw/arm/boot.c
+index e56c42ac22..978ec625ff 100644
+--- a/hw/arm/boot.c
++++ b/hw/arm/boot.c
+@@ -528,6 +528,7 @@ static void fdt_add_psci_node(void *fdt)
+ int arm_load_dtb(hwaddr addr, const struct arm_boot_info *binfo,
+                  hwaddr addr_limit, AddressSpace *as, MachineState *ms)
+ {
++    printf("\nARM LOAD DTB!!!\n");
+     void *fdt = NULL;
+     int size, rc, n = 0;
+     uint32_t acells, scells;
+@@ -599,11 +600,17 @@ int arm_load_dtb(hwaddr addr, const struct arm_boot_info *binfo,
+         n++;
+     }
+     g_strfreev(node_path);
+-
++    printf("\nMEMDEV: checking memory info\n");
+     if (ms->numa_state != NULL && ms->numa_state->num_nodes > 0) {
++        printf("Path 1, node number is%d\n", ms->numa_state->num_nodes);
+         mem_base = binfo->loader_start;
+         for (i = 0; i < ms->numa_state->num_nodes; i++) {
+-            mem_len = ms->numa_state->nodes[i].node_mem;
++            //NOTE: here is where we change the ram stuff
++            // the base is moved in virt.c vms->bootinfo.loader_start
++            // it's at memory base + 1/2 size
++            mem_len = (ms->numa_state->nodes[i].node_mem);
++            printf("MEMDEV: memory base is %lx, memory length is %lx\n", mem_base, mem_len);
++            //We should ignore upper half of memory
+             rc = fdt_add_memory_node(fdt, acells, mem_base,
+                                      scells, mem_len, i);
+             if (rc < 0) {
+@@ -615,8 +622,9 @@ int arm_load_dtb(hwaddr addr, const struct arm_boot_info *binfo,
+             mem_base += mem_len;
+         }
+     } else {
+-        rc = fdt_add_memory_node(fdt, acells, binfo->loader_start,
+-                                 scells, binfo->ram_size, -1);
++        printf("MEMINFO: adding memory here\n");
++        rc = fdt_add_memory_node(fdt, acells, binfo->raw_mem_start_addr,
++                                 scells, (binfo->ram_size), -1);
+         if (rc < 0) {
+             fprintf(stderr, "couldn't add /memory@%"PRIx64" node\n",
+                     binfo->loader_start);
+diff --git a/hw/arm/virt.c b/hw/arm/virt.c
+index 516e905b91..c5dbd3f0de 100644
+--- a/hw/arm/virt.c
++++ b/hw/arm/virt.c
+@@ -44,6 +44,8 @@
+ #include "hw/vfio/vfio-calxeda-xgmac.h"
+ #include "hw/vfio/vfio-amd-xgbe.h"
+ #include "hw/display/ramfb.h"
++#include "hw/misc/vintc.h"
++#include "hw/gpio/sifive_gpio.h"
+ #include "net/net.h"
+ #include "sysemu/device_tree.h"
+ #include "sysemu/numa.h"
+@@ -158,12 +160,15 @@ static const MemMapEntry base_memmap[] = {
+     /* ...repeating for a total of NUM_VIRTIO_TRANSPORTS, each of that size */
+     [VIRT_PLATFORM_BUS] =       { 0x0c000000, 0x02000000 },
+     [VIRT_SECURE_MEM] =         { 0x0e000000, 0x01000000 },
+-    [VIRT_SHARED_MEM] =         { 0x0f000000, 0x01000000 },
++    [VIRT_SHARED_MEM] =         { 0x0f000000, 0x00100000 },
++    [VIRT_VINTC] =              { 0x0f100000, 0x00000100 },
++    [VIRT_PERF_MEM] =           { 0x0f200000, 0x00100000 },
++    [VIRT_STRAMASH_GPIO]      = { 0x0f300000, 0x00100000 },
+     [VIRT_PCIE_MMIO] =          { 0x10000000, 0x2eff0000 },
+     [VIRT_PCIE_PIO] =           { 0x3eff0000, 0x00010000 },
+     [VIRT_PCIE_ECAM] =          { 0x3f000000, 0x01000000 },
+     /* Actual RAM size depends on initial RAM and device memory settings */
+-    [VIRT_MEM] =                { GiB, LEGACY_RAMLIMIT_BYTES },
++    [VIRT_MEM] =                { GiB, GiB},
+ };
+ 
+ /*
+@@ -191,6 +196,7 @@ static const int a15irqmap[] = {
+     [VIRT_GPIO] = 7,
+     [VIRT_SECURE_UART] = 8,
+     [VIRT_ACPI_GED] = 9,
++    [VIRT_VINTC] = 10,
+     [VIRT_MMIO] = 16, /* ...to 16 + NUM_VIRTIO_TRANSPORTS - 1 */
+     [VIRT_GIC_V2M] = 48, /* ...to 48 + NUM_GICV2M_SPIS - 1 */
+     [VIRT_SMMU] = 74,    /* ...to 74 + NUM_SMMU_IRQS - 1 */
+@@ -377,13 +383,15 @@ static void fdt_add_cpu_nodes(const VirtMachineState *vms)
+         }
+     }
+ 
++    printf("number of cpu is %d\n", smp_cpus + 1);
++
+     qemu_fdt_add_subnode(ms->fdt, "/cpus");
+     qemu_fdt_setprop_cell(ms->fdt, "/cpus", "#address-cells", addr_cells);
+     qemu_fdt_setprop_cell(ms->fdt, "/cpus", "#size-cells", 0x0);
+ 
+-    for (cpu = smp_cpus - 1; cpu >= 0; cpu--) {
++    ARMCPU *armcpu = ARM_CPU(qemu_get_cpu(0));
++    for (cpu = smp_cpus; cpu >= 0; cpu--) {
+         char *nodename = g_strdup_printf("/cpus/cpu@%d", cpu);
+-        ARMCPU *armcpu = ARM_CPU(qemu_get_cpu(cpu));
+         CPUState *cs = CPU(armcpu);
+ 
+         qemu_fdt_add_subnode(ms->fdt, nodename);
+@@ -409,6 +417,10 @@ static void fdt_add_cpu_nodes(const VirtMachineState *vms)
+                 ms->possible_cpus->cpus[cs->cpu_index].props.node_id);
+         }
+ 
++        if (cpu == 1) {
++            qemu_fdt_setprop_string(ms->fdt, nodename, "status", "disabled");
++        }
++
+         g_free(nodename);
+     }
+ }
+@@ -623,6 +635,68 @@ static void create_v2m(VirtMachineState *vms)
+     vms->msi_controller = VIRT_MSI_CTRL_GICV2M;
+ }
+ 
++//static void create_shared_register(VirtMachineState *vms)
++//{
++//  DeviceState *dev;
++//  dev = qdev_new("demo");
++//  sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, vms->memmap[VIRT_SHARED_REG].base);
++//  sysbus_realize(SYS_BUS_DEVICE(dev), &error_fatal);
++//}
++
++static void create_virtual_intc(VirtMachineState *vms, MemoryRegion *mem)
++{
++  DeviceState  *dev;
++  MachineState *ms = MACHINE(vms);
++  hwaddr base = vms->memmap[VIRT_VINTC].base;
++  hwaddr size = vms->memmap[VIRT_VINTC].size;
++
++
++  int irq = vms->irqmap[VIRT_VINTC];
++  dev = qdev_new(TYPE_VINTC);
++  SysBusDevice *s = SYS_BUS_DEVICE(dev);
++
++  object_property_parse(OBJECT(dev), "chardev", "vintchar", &error_fatal);
++
++  sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
++  memory_region_add_subregion(mem, base,
++                              sysbus_mmio_get_region(s, 0));
++//  sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, base);
++  sysbus_connect_irq(s, 0, qdev_get_gpio_in(vms->gic, irq));
++
++  const char compatible[] = "arm,vintc";
++  char *node_name;
++  node_name = g_strdup_printf("/vintc@%" PRIx64, base);
++  qemu_fdt_add_subnode(ms->fdt, node_name);
++  qemu_fdt_setprop(ms->fdt, node_name, "compatible", compatible, sizeof compatible);
++  qemu_fdt_setprop_sized_cells(ms->fdt, node_name, "reg", 2, base, 2, size);
++  qemu_fdt_setprop_cells(ms->fdt, node_name, "interrupts",GIC_FDT_IRQ_TYPE_SPI, irq, GIC_FDT_IRQ_FLAGS_LEVEL_HI);
++  g_free(node_name);
++}
++
++static void create_stramash_gpio(VirtMachineState *vms, MemoryRegion *mem)
++{
++  DeviceState  *dev;
++  MachineState *ms = MACHINE(vms);
++  hwaddr base = vms->memmap[VIRT_STRAMASH_GPIO].base;
++  hwaddr size = vms->memmap[VIRT_STRAMASH_GPIO].size;
++
++  dev = qdev_new(TYPE_SIFIVE_GPIO);
++  SysBusDevice *s = SYS_BUS_DEVICE(dev);
++
++  sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
++  memory_region_add_subregion(mem, base,
++                              sysbus_mmio_get_region(s, 0));
++
++  const char compatible[] = "stramash,gpio-1.00";
++  char *node_name;
++  node_name = g_strdup_printf("/stramash_gpio@%" PRIx64, base);
++  qemu_fdt_add_subnode(ms->fdt, node_name);
++  qemu_fdt_setprop(ms->fdt, node_name, "compatible", compatible, sizeof compatible);
++  qemu_fdt_setprop_sized_cells(ms->fdt, node_name, "reg", 2, base, 2, size);
++  g_free(node_name);
++}
++
++
+ static void create_gic(VirtMachineState *vms)
+ {
+     MachineState *ms = MACHINE(vms);
+@@ -664,6 +738,8 @@ static void create_gic(VirtMachineState *vms)
+             qdev_prop_set_uint32(vms->gic, "redist-region-count[1]",
+                 MIN(smp_cpus - redist0_count, redist1_capacity));
+         }
++        object_property_parse(OBJECT(vms->gic), "arm-chr", "arm_chr", &error_fatal);
++        printf("Finished parsing\n");
+     } else {
+         if (!kvm_irqchip_in_kernel()) {
+             qdev_prop_set_bit(vms->gic, "has-virtualization-extensions",
+@@ -829,6 +905,7 @@ static void virt_powerdown_req(Notifier *n, void *opaque)
+     }
+ }
+ 
++
+ static void create_gpio_keys(char *fdt, DeviceState *pl061_dev,
+                              uint32_t phandle)
+ {
+@@ -1470,6 +1547,19 @@ static void create_tag_ram(MemoryRegion *tag_sysmem,
+     memory_region_add_subregion(tag_sysmem, base / 32, tagram);
+ }
+ 
++static void create_perf_ram(MemoryRegion *perf_sysmem,
++        VirtMachineState *vms,
++        const char *name)
++{
++  hwaddr base = vms->memmap[VIRT_PERF_MEM].base;
++  hwaddr size = vms->memmap[VIRT_PERF_MEM].size;
++
++    MemoryRegion *perf_mem = g_new(MemoryRegion, 1);
++
++    memory_region_init_ram_from_file(perf_mem, NULL, name, size, 0, RAM_SHARED, "/dev/shm/icount_aarch64" , false , &error_fatal);
++    memory_region_add_subregion(perf_sysmem, base  , perf_mem);
++}
++
+ static void create_shared_ram(MemoryRegion *shared_sysmem,
+                               VirtMachineState *vms,
+                            const char *name)
+@@ -1478,7 +1568,7 @@ static void create_shared_ram(MemoryRegion *shared_sysmem,
+   hwaddr size = vms->memmap[VIRT_SHARED_MEM].size;
+   MemoryRegion *shared_ram = g_new(MemoryRegion, 1);
+ 
+-  memory_region_init_ram_from_file(shared_ram, NULL, name, size, 0, RAM_SHARED, "/dev/shm/share", &error_fatal);
++  memory_region_init_ram_from_file(shared_ram, NULL, name, size, 0, RAM_SHARED, "/dev/shm/share", false, &error_fatal);
+   memory_region_add_subregion(shared_sysmem, base, shared_ram);
+ }
+ 
+@@ -1628,6 +1718,7 @@ static void virt_set_memmap(VirtMachineState *vms)
+      * is aligned on 1GiB. We never put the high IO region below 256GiB
+      * so that if maxram_size is < 255GiB we keep the legacy memory map.
+      * The device region size assumes 1GiB page max alignment per slot.
++     * NOTE: don't care about this part as it's above device virtual memory
+      */
+     device_memory_base =
+         ROUND_UP(vms->memmap[VIRT_MEM].base + ms->ram_size, GiB);
+@@ -1653,10 +1744,13 @@ static void virt_set_memmap(VirtMachineState *vms)
+     }
+     vms->highest_gpa = base - 1;
+     if (device_memory_size > 0) {
++        g_assert(0);
++        device_memory_size = device_memory_size >> 2;
++        printf("DEVMEM: device memory size is %lx, device_memory_base is %lx\n", device_memory_size, device_memory_base);
+         ms->device_memory = g_malloc0(sizeof(*ms->device_memory));
+         ms->device_memory->base = device_memory_base;
+-        memory_region_init(&ms->device_memory->mr, OBJECT(vms),
+-                           "device-memory", device_memory_size);
++        memory_region_init_ram_from_file(&ms->device_memory->mr, OBJECT(vms),
++                           "ddr-share", device_memory_size, 0, RAM_SHARED, "/dev/shm/devmem", false, &error_fatal);
+     }
+ }
+ 
+@@ -1665,6 +1759,7 @@ static void virt_set_memmap(VirtMachineState *vms)
+  * according to the gic-version property
+  *
+  * Default GIC type is v2
++ * bump gic version to v3 for better documentation and support
+  */
+ static void finalize_gic_version(VirtMachineState *vms)
+ {
+@@ -1682,7 +1777,7 @@ static void finalize_gic_version(VirtMachineState *vms)
+                 return;
+             case VIRT_GIC_VERSION_MAX:
+             case VIRT_GIC_VERSION_NOSEL:
+-                vms->gic_version = VIRT_GIC_VERSION_2;
++                vms->gic_version = VIRT_GIC_VERSION_3;
+                 return;
+             case VIRT_GIC_VERSION_2:
+                 return;
+@@ -1745,7 +1840,7 @@ static void finalize_gic_version(VirtMachineState *vms)
+     /* TCG mode */
+     switch (vms->gic_version) {
+     case VIRT_GIC_VERSION_NOSEL:
+-        vms->gic_version = VIRT_GIC_VERSION_2;
++        vms->gic_version = VIRT_GIC_VERSION_3;
+         break;
+     case VIRT_GIC_VERSION_MAX:
+         vms->gic_version = VIRT_GIC_VERSION_3;
+@@ -2005,6 +2100,8 @@ static void machvirt_init(MachineState *machine)
+ 
+         create_shared_ram(sysmem, vms, "shared-memory");
+ 
++        create_perf_ram(sysmem,vms, "perf-memory");
++
+ 
+         if (vms->mte) {
+ 
+@@ -2078,7 +2175,11 @@ static void machvirt_init(MachineState *machine)
+                        machine->ram_size, "mach-virt.tag");
+     }
+ 
++//    create_shared_register(vms);
+ 
++    //create_virtual_intc(vms, sysmem);
++
++    create_stramash_gpio(vms, sysmem);
+ 
+     vms->highmem_ecam &= vms->highmem && (!firmware_loaded || aarch64);
+ 
+@@ -2123,10 +2224,12 @@ static void machvirt_init(MachineState *machine)
+                                vms->fw_cfg, OBJECT(vms));
+     }
+ 
+-    vms->bootinfo.ram_size = machine->ram_size;
++    vms->bootinfo.ram_size = machine->ram_size - 2 * GiB;
+     vms->bootinfo.nb_cpus = smp_cpus;
+     vms->bootinfo.board_id = -1;
+-    vms->bootinfo.loader_start = vms->memmap[VIRT_MEM].base;
++    vms->bootinfo.loader_start = vms->memmap[VIRT_MEM].base + 1.5 * GiB;
++    vms->bootinfo.raw_mem_start_addr = vms->memmap[VIRT_MEM].base + 1.5 * GiB;
++    printf("\nMEMDEV: memory base is %lx, loader start is %lx\n", vms->memmap[VIRT_MEM].base, vms->bootinfo.loader_start);
+     vms->bootinfo.get_dtb = machvirt_dtb;
+     vms->bootinfo.skip_dtb_autoload = true;
+     vms->bootinfo.firmware_loaded = firmware_loaded;
+@@ -2740,7 +2843,7 @@ static void virt_instance_init(Object *obj)
+         vms->its = false;
+     } else {
+         /* Default allows ITS instantiation */
+-        vms->its = true;
++        vms->its = false;
+     }
+ 
+     /* Default disallows iommu instantiation */
+diff --git a/hw/char/Kconfig b/hw/char/Kconfig
+index 4cf36ac637..d8eb1d49a8 100644
+--- a/hw/char/Kconfig
++++ b/hw/char/Kconfig
+@@ -67,3 +67,6 @@ config SIFIVE_UART
+ 
+ config GOLDFISH_TTY
+     bool
++
++config VIRTUAL_INTC
++    bool
+diff --git a/hw/core/register.c b/hw/core/register.c
+index d6f8c20816..c0fd481e01 100644
+--- a/hw/core/register.c
++++ b/hw/core/register.c
+@@ -34,9 +34,6 @@ static inline void register_write_val(RegisterInfo *reg, uint64_t val)
+     case 4:
+         *(uint32_t *)reg->data = val;
+         break;
+-    case 8:
+-        *(uint64_t *)reg->data = val;
+-        break;
+     default:
+         g_assert_not_reached();
+     }
+@@ -51,8 +48,6 @@ static inline uint64_t register_read_val(RegisterInfo *reg)
+         return *(uint16_t *)reg->data;
+     case 4:
+         return *(uint32_t *)reg->data;
+-    case 8:
+-        return *(uint64_t *)reg->data;
+     default:
+         g_assert_not_reached();
+     }
+@@ -249,7 +244,22 @@ static RegisterInfoArray *register_init_block(DeviceState *owner,
+     int data_size = data_size_bits >> 3;
+     int i;
+ 
+-    r_array->r = g_new0(RegisterInfo *, num);
++    // here goes the shared memory allocation stuff
++    int reg_fd = shm_open("/test", O_RDWR|O_CREAT,S_IRUSR | S_IWUSR);
++    if (reg_fd == -1) {
++      perror("open");
++      g_assert(0);
++    }
++  size_t reg_len = sizeof(RegisterInfoArray)*num;
++  if (ftruncate(reg_fd, reg_len) == -1) {
++    perror("ftruncate");
++    g_assert(0);
++  }
++    void *reg_addr = mmap(NULL, sizeof(RegisterInfoArray)*num, PROT_READ|PROT_WRITE, MAP_SHARED, reg_fd, 0);
++
++    // TODO: currently the problem is that too much information is shared in the register
++    // we should dial it down a lot
++    r_array->r = reg_addr;
+     r_array->num_elements = num;
+     r_array->debug = debug_enabled;
+     r_array->prefix = device_prefix;
+@@ -267,6 +277,7 @@ static RegisterInfoArray *register_init_block(DeviceState *owner,
+         r->access = &rae[i];
+         r->opaque = owner;
+ 
++        // this is the actual problem
+         r_array->r[i] = r;
+     }
+ 
+@@ -302,9 +313,9 @@ RegisterInfoArray *register_init_block32(DeviceState *owner,
+ 
+ void register_finalize_block(RegisterInfoArray *r_array)
+ {
+-    object_unparent(OBJECT(&r_array->mem));
+-    g_free(r_array->r);
+-    g_free(r_array);
++    //object_unparent(OBJECT(&r_array->mem));
++    //g_free(r_array->r);
++    //g_free(r_array);
+ }
+ 
+ static void register_class_init(ObjectClass *oc, void *data)
+diff --git a/hw/demo/Kconfig b/hw/demo/Kconfig
+new file mode 100644
+index 0000000000..aa74a9306d
+--- /dev/null
++++ b/hw/demo/Kconfig
+@@ -0,0 +1,2 @@
++config DEMO
++    bool
+\ No newline at end of file
+diff --git a/hw/demo/demo.c b/hw/demo/demo.c
+new file mode 100644
+index 0000000000..9e28f0d3f9
+--- /dev/null
++++ b/hw/demo/demo.c
+@@ -0,0 +1,121 @@
++/*
++ * QEMU model of the Xilinx ZynqMP Real Time Clock (demo).
++ *
++ * Copyright (c) 2017 Xilinx Inc.
++ *
++ * Written-by: Alistair Francis <alistair.francis@xilinx.com>
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#include "qemu/osdep.h"
++#include "qemu-common.h"
++#include "hw/sysbus.h"
++#include "hw/register.h"
++#include "qemu/bitops.h"
++#include "qemu/log.h"
++#include "qemu/module.h"
++#include "hw/irq.h"
++#include "qemu/cutils.h"
++#include "sysemu/sysemu.h"
++#include "trace.h"
++#include "migration/vmstate.h"
++#include "qom/object.h"
++
++#define REG_R_MAX 1
++#define TYPE_DEMO "demo"
++
++REG32(REG_DEMO, 0x0)
++
++struct demo_struct {
++  SysBusDevice parent_obj;
++  MemoryRegion iomem;
++  uint32_t regs[REG_R_MAX];
++  RegisterInfo regs_info[REG_R_MAX];
++};
++
++OBJECT_DECLARE_SIMPLE_TYPE(demo_struct, DEMO)
++
++
++static const RegisterAccessInfo demo_regs_info[] = {
++    {.name = "REG_DEMO", .addr = A_REG_DEMO,
++    },
++};
++
++static const MemoryRegionOps demo_ops = {
++    .read = register_read_memory,
++    .write = register_write_memory,
++    .endianness = DEVICE_LITTLE_ENDIAN,
++    .valid = {
++        .min_access_size = 4,
++        .max_access_size = 4,
++    },
++};
++
++static void demo_init(Object *obj)
++{
++  demo_struct *s = DEMO(obj);
++  SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
++  RegisterInfoArray *reg_array;
++
++  memory_region_init(&s->iomem, obj, TYPE_DEMO, REG_R_MAX* 4);
++  reg_array =
++      register_init_block32(DEVICE(obj), demo_regs_info,
++                            ARRAY_SIZE(demo_regs_info),
++                            s->regs_info, s->regs,
++                            &demo_ops,
++                            1,
++                            REG_R_MAX * 4);
++  memory_region_add_subregion(&s->iomem,
++                              0x0,
++                              &reg_array->mem);
++  sysbus_init_mmio(sbd, &s->iomem);
++}
++
++static const VMStateDescription vmstate_demo = {
++    .name = TYPE_DEMO,
++    .version_id = 1,
++    .minimum_version_id = 1,
++    .fields = (VMStateField[]) {
++        VMSTATE_UINT32_ARRAY(regs, demo_struct, REG_R_MAX),
++        VMSTATE_END_OF_LIST(),
++    }
++};
++
++static void demo_class_init(ObjectClass *klass, void *data)
++{
++  DeviceClass *dc = DEVICE_CLASS(klass);
++
++  dc->vmsd = &vmstate_demo;
++}
++
++static const TypeInfo demo_info = {
++    .name          = TYPE_DEMO,
++    .parent        = TYPE_SYS_BUS_DEVICE,
++    .instance_size = sizeof(demo_struct),
++    .class_init    = demo_class_init,
++    .instance_init = demo_init,
++};
++
++static void demo_register_types(void)
++{
++  type_register_static(&demo_info);
++}
++
++type_init(demo_register_types)
+\ No newline at end of file
+diff --git a/hw/demo/meson.build b/hw/demo/meson.build
+new file mode 100644
+index 0000000000..a5646b4343
+--- /dev/null
++++ b/hw/demo/meson.build
+@@ -0,0 +1 @@
++softmmu_ss.add(when: 'CONFIG_ARM_VIRT', if_true: files('demo.c'))
+\ No newline at end of file
+diff --git a/hw/gpio/sifive_gpio.c b/hw/gpio/sifive_gpio.c
+index 78bf29e996..309d4dd678 100644
+--- a/hw/gpio/sifive_gpio.c
++++ b/hw/gpio/sifive_gpio.c
+@@ -13,28 +13,11 @@
+ 
+ #include "qemu/osdep.h"
+ #include "qemu/log.h"
+-#include "hw/irq.h"
+ #include "hw/qdev-properties.h"
+ #include "hw/gpio/sifive_gpio.h"
+ #include "migration/vmstate.h"
+ #include "trace.h"
+ 
+-static void update_output_irq(SIFIVEGPIOState *s)
+-{
+-    uint32_t pending;
+-    uint32_t pin;
+-
+-    pending = s->high_ip & s->high_ie;
+-    pending |= s->low_ip & s->low_ie;
+-    pending |= s->rise_ip & s->rise_ie;
+-    pending |= s->fall_ip & s->fall_ie;
+-
+-    for (int i = 0; i < s->ngpio; i++) {
+-        pin = 1 << i;
+-        qemu_set_irq(s->irq[i], (pending & pin) != 0);
+-        trace_sifive_gpio_update_output_irq(i, (pending & pin) != 0);
+-    }
+-}
+ 
+ static void update_state(SIFIVEGPIOState *s)
+ {
+@@ -76,10 +59,7 @@ static void update_state(SIFIVEGPIOState *s)
+             actual_value = pull;
+         }
+ 
+-        if (output_en) {
+-            qemu_set_irq(s->output[i], actual_value);
+-        }
+-
++        
+         /* Input value */
+         ival = input_en && actual_value;
+ 
+@@ -97,9 +77,8 @@ static void update_state(SIFIVEGPIOState *s)
+         s->fall_ip = deposit32(s->fall_ip, i, 1, fall_ip);
+ 
+         /* Update value */
+-        s->value = deposit32(s->value, i, 1, ival);
++        // s->value = deposit32(s->value, i, 1, ival);
+     }
+-    update_output_irq(s);
+ }
+ 
+ static uint64_t sifive_gpio_read(void *opaque, hwaddr offset, unsigned int size)
+@@ -196,6 +175,10 @@ static void sifive_gpio_write(void *opaque, hwaddr offset,
+ 
+     switch (offset) {
+ 
++    case SIFIVE_GPIO_REG_VALUE:
++        s->value = value;
++        break;
++
+     case SIFIVE_GPIO_REG_INPUT_EN:
+         s->input_en = value;
+         break;
+@@ -293,6 +276,7 @@ static void sifive_gpio_set(void *opaque, int line, int value)
+     if (value >= 0) {
+         s->in = deposit32(s->in, line, 1, value != 0);
+     }
++    // s->value = 0xdeadbeef;
+ 
+     update_state(s);
+ }
+@@ -363,10 +347,7 @@ static void sifive_gpio_realize(DeviceState *dev, Error **errp)
+ 
+     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->mmio);
+ 
+-    for (int i = 0; i < s->ngpio; i++) {
+-        sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq[i]);
+-    }
+-
++    
+     qdev_init_gpio_in(DEVICE(s), sifive_gpio_set, s->ngpio);
+     qdev_init_gpio_out(DEVICE(s), s->output, s->ngpio);
+ }
+diff --git a/hw/i386/Kconfig b/hw/i386/Kconfig
+index 7f91f30877..b954cec871 100644
+--- a/hw/i386/Kconfig
++++ b/hw/i386/Kconfig
+@@ -36,6 +36,8 @@ config PC
+     select ACPI_VMGENID
+     select VIRTIO_PMEM_SUPPORTED
+     select VIRTIO_MEM_SUPPORTED
++    select VINTC
++    select SIFIVE_GPIO
+ 
+ config PC_PCI
+     bool
+diff --git a/hw/i386/microvm.c b/hw/i386/microvm.c
+index edf2b0f061..38973655c6 100644
+--- a/hw/i386/microvm.c
++++ b/hw/i386/microvm.c
+@@ -317,6 +317,18 @@ static void microvm_memory_init(MicrovmMachineState *mms)
+         e820_add_entry(0x100000000ULL, x86ms->above_4g_mem_size, E820_RAM);
+     }
+ 
++    MemoryRegion *share_mem = g_new(MemoryRegion, 1);
++
++    memory_region_init_ram_from_file(share_mem, NULL,
++                                   "microvm.shared-ram",
++                                     0x100000, 0,
++                                   RAM_SHARED, "/dev/shm/share",
++                                   false,
++                                   &error_fatal);
++    memory_region_add_subregion(system_memory,
++                              0x100000, share_mem);
++    //e820_add_entry(0x100000,0x1000000, E820_RAM);
++
+     fw_cfg = fw_cfg_init_io_dma(FW_CFG_IO_BASE, FW_CFG_IO_BASE + 4,
+                                 &address_space_memory);
+ 
+diff --git a/hw/i386/pc.c b/hw/i386/pc.c
+index 8a84b25a03..0651b469ce 100644
+--- a/hw/i386/pc.c
++++ b/hw/i386/pc.c
+@@ -51,6 +51,7 @@
+ #include "hw/input/i8042.h"
+ #include "hw/irq.h"
+ #include "hw/audio/pcspk.h"
++#include "hw/misc/vintc.h"
+ #include "hw/pci/msi.h"
+ #include "hw/sysbus.h"
+ #include "sysemu/sysemu.h"
+@@ -883,8 +884,11 @@ void pc_memory_init(PCMachineState *pcms,
+     memory_region_init_alias(ram_below_4g, NULL, "ram-below-4g", machine->ram,
+                              0, x86ms->below_4g_mem_size);
+     memory_region_add_subregion(system_memory, 0, ram_below_4g);
+-    e820_add_entry(0, x86ms->below_4g_mem_size, E820_RAM);
++    printf("\nMEMINFO: real world memory size is 0x%lx\n", x86ms->below_4g_mem_size);
++    e820_add_entry(0, x86ms->below_4g_mem_size / 2, E820_RAM);
+     if (x86ms->above_4g_mem_size > 0) {
++        printf("Ram size > 4G for x86, aborting");
++//        g_assert(0);
+         ram_above_4g = g_malloc(sizeof(*ram_above_4g));
+         memory_region_init_alias(ram_above_4g, NULL, "ram-above-4g",
+                                  machine->ram,
+@@ -895,7 +899,25 @@ void pc_memory_init(PCMachineState *pcms,
+         e820_add_entry(0x100000000ULL, x86ms->above_4g_mem_size, E820_RAM);
+     }
+ 
+-    if (!pcmc->has_reserved_memory &&
++  MemoryRegion *share_mem = g_new(MemoryRegion, 1);
++
++  memory_region_init_ram_from_file(share_mem, NULL,
++                                   "pc.shared-ram",
++                                   0x100000, 0,
++                                   RAM_SHARED, "/dev/shm/share",
++                                   0,
++                                   &error_fatal);
++  memory_region_add_subregion(system_memory,
++                              0x1000000000ULL, share_mem);
++
++  MemoryRegion *benchmark_mem = g_new(MemoryRegion, 1);
++  memory_region_init_ram_from_file(benchmark_mem, NULL, "pc.benchmark_mem", 0x100000, 0, RAM_SHARED, "/dev/shm/icount_x64", false ,&error_fatal);
++  memory_region_add_subregion(system_memory, 0x1200000000ULL, benchmark_mem);
++
++  //FIXME: add this information to e820
++  //e820_add_entry(0x1000000000ULL, 0x1000000ULL, E820_RAM);
++
++  if (!pcmc->has_reserved_memory &&
+         (machine->ram_slots ||
+          (machine->maxram_size > machine->ram_size))) {
+ 
+@@ -1151,7 +1173,23 @@ void pc_basic_device_init(struct PCMachineState *pcms,
+         pit_alt_irq = qdev_get_gpio_in(hpet, HPET_LEGACY_PIT_INT);
+         rtc_irq = qdev_get_gpio_in(hpet, HPET_LEGACY_RTC_INT);
+     }
+-    *rtc_state = mc146818_rtc_init(isa_bus, 2000, rtc_irq);
++
++    DeviceState *vint_dev;
++    hwaddr base = 0x1100000000;
++    //FIX: correct irq number
++    int irq = 0;
++    vint_dev = qdev_new(TYPE_VINTC);
++    SysBusDevice *vint_sysbus = SYS_BUS_DEVICE(vint_dev);
++
++    object_property_parse(OBJECT(vint_dev), "chardev", "vintchar", &error_fatal);
++
++    sysbus_realize_and_unref(SYS_BUS_DEVICE(vint_dev), &error_fatal);
++//  memory_region_add_subregion(mem, base,
++//                              sysbus_mmio_get_region(s, 0));
++    sysbus_mmio_map(SYS_BUS_DEVICE(vint_dev), 0, base);
++    sysbus_connect_irq(vint_sysbus, 0, gsi[irq]);
++
++  *rtc_state = mc146818_rtc_init(isa_bus, 2000, rtc_irq);
+ 
+     qemu_register_boot_set(pc_boot_set, *rtc_state);
+ 
+@@ -1192,6 +1230,7 @@ void pc_nic_init(PCMachineClass *pcmc, ISABus *isa_bus, PCIBus *pci_bus)
+     rom_reset_order_override();
+ }
+ 
++//TODO: do I need to change i8259?
+ void pc_i8259_create(ISABus *isa_bus, qemu_irq *i8259_irqs)
+ {
+     qemu_irq *i8259;
+diff --git a/hw/i386/pc_piix.c b/hw/i386/pc_piix.c
+index 46cc951073..16f1ce4ed1 100644
+--- a/hw/i386/pc_piix.c
++++ b/hw/i386/pc_piix.c
+@@ -73,7 +73,9 @@ static const int ide_iobase2[MAX_IDE_BUS] = { 0x3f6, 0x376 };
+ static const int ide_irq[MAX_IDE_BUS] = { 14, 15 };
+ #endif
+ 
+-/* PC hardware initialisation */
++/* PC hardware initialisation
++ * this function gets called for -M pc
++ * */
+ static void pc_init1(MachineState *machine,
+                      const char *host_type, const char *pci_type)
+ {
+diff --git a/hw/intc/apic.c b/hw/intc/apic.c
+index f4f50f974e..c976cadfaf 100644
+--- a/hw/intc/apic.c
++++ b/hw/intc/apic.c
+@@ -30,6 +30,9 @@
+ #include "hw/i386/apic-msidef.h"
+ #include "qapi/error.h"
+ #include "qom/object.h"
++#include "hw/qdev-properties-system.h"
++#include "hw/qdev-properties.h"
++#include "qemu/cutils.h"
+ 
+ #define MAX_APICS 255
+ #define MAX_APIC_WORDS 8
+@@ -50,6 +53,194 @@ static void apic_update_irq(APICCommonState *s);
+ static void apic_get_delivery_bitmask(uint32_t *deliver_bitmask,
+                                       uint8_t dest, uint8_t dest_mode);
+ 
++static void apic_interrupt_cb(void *opaque)
++{
++    APICCommonState *apic = (APICCommonState *) opaque;
++    
++    uint16_t posn = apic->vm_id;
++    
++    event_notifier_test_and_clear(&apic->eventfd[posn]);
++    
++    apic_set_irq(apic, 0xdd, 0);
++    //TODO: add stuff here
++}
++
++static void apic_process_msg_disconnect(APICCommonState *s, uint16_t posn, Error **errp)
++{
++    event_notifier_cleanup(&s->eventfd[posn]);
++}
++
++static void apic_process_msg_connect(APICCommonState *s, uint16_t posn, int fd,
++                                Error **errp)
++{
++  /*
++   * The N-th connect message for this peer comes with the file
++   * descriptor for vector N-1.  Count messages to find the vector.
++   */
++
++  event_notifier_init_fd(&s->eventfd[posn], fd);
++  fcntl_setfl(fd, O_NONBLOCK);
++
++  if (posn == s->vm_id) {
++      APICCommonClass *info = APIC_COMMON_GET_CLASS(s);
++      int eventfd = event_notifier_get_fd(&s->eventfd[posn]);
++      //TODO: set opaque as null, pass arguments as we see fit
++      qemu_set_fd_handler(eventfd, info->interrupt_cb, NULL, s);
++  }
++}
++
++static void process_msg(APICCommonState *s, int64_t msg, int fd, Error **errp)
++{
++
++  if (msg == -1) {
++    //TODO: disable shm in server in the future
++    return;
++  }
++
++  if (fd >= 0) {
++    apic_process_msg_connect(s, msg, fd, errp);
++  } else {
++    apic_process_msg_disconnect(s, msg, errp);
++  }
++}
++
++
++
++static int64_t apic_recv_msg(APICCommonState *s, int *pfd, Error **errp)
++{
++  int64_t msg;
++  int n, ret;
++
++  n = 0;
++  do {
++    ret = qemu_chr_fe_read_all(&s->chr, (uint8_t *)&msg + n,
++                               sizeof(msg) - n);
++    if (ret < 0) {
++      if (ret == -EINTR) {
++        continue;
++      }
++      error_setg_errno(errp, -ret, "read from server failed");
++      return INT64_MIN;
++    }
++    n += ret;
++  } while (n < sizeof(msg));
++
++  *pfd = qemu_chr_fe_get_msgfd(&s->chr);
++  return le64_to_cpu(msg);
++}
++
++static void apic_read(void *opaque, const uint8_t *buf, int size)
++{
++  APICCommonState *s = opaque;
++  Error *err = NULL;
++  int fd;
++  int64_t msg;
++
++  assert(size >= 0 && s->msg_buffered_bytes + size <= sizeof(s->msg_buf));
++  memcpy((unsigned char *)&s->msg_buf + s->msg_buffered_bytes, buf, size);
++  s->msg_buffered_bytes += size;
++  if (s->msg_buffered_bytes < sizeof(s->msg_buf)) {
++    return;
++  }
++  msg = le64_to_cpu(s->msg_buf);
++
++
++  s->msg_buffered_bytes = 0;
++
++  fd = qemu_chr_fe_get_msgfd(&s->chr);
++
++  process_msg(s, msg, fd, &err);
++  if (err) {
++    error_report_err(err);
++  }
++}
++
++static int apic_can_receive(void *opaque)
++{
++  APICCommonState *s = opaque;
++
++  assert(s->msg_buffered_bytes < sizeof(s->msg_buf));
++  return sizeof(s->msg_buf) - s->msg_buffered_bytes;
++}
++
++static void apic_send_interrupt(void *opaque, int target)
++{
++    APICCommonState *s = opaque;
++    if (target > 1) {
++        printf("target is too large\n");
++        return;
++    }
++    event_notifier_set(&s->eventfd[target]);
++}
++
++
++static void apic_recv_setup(APICCommonState *s, Error **errp)
++{
++  Error *err = NULL;
++  int64_t msg;
++  int fd;
++
++  msg = apic_recv_msg(s, &fd, &err);
++  if (err) {
++    error_propagate(errp, err);
++    return;
++  }
++  if (msg != 0x0) {
++    error_setg(errp, "server sent version %" PRId64 ", expecting %d",
++               msg, 0x0);
++    return;
++  }
++
++  if (fd != -1) {
++    error_setg(errp, "server sent invalid version message");
++    return;
++  }
++
++  /*
++   * vintc-server sends the remaining initial messages in a fixed
++   * order, but the device has always accepted them in any order.
++   * Stay as compatible as practical, just in case people use
++   * servers that behave differently.
++   */
++
++  /*
++   * vintc_device_spec.txt has always required the ID message
++   * right here, and vintc-server has always complied.  However,
++   * older versions of the device accepted it out of order, but
++   * broke when an interrupt setup message arrived before it.
++   */
++  msg = apic_recv_msg(s, &fd, &err);
++  if (err) {
++    error_propagate(errp, err);
++    return;
++  }
++  //if (fd != -1 || msg < 0 || msg > 1) {
++  //  error_setg(errp, "server sent invalid ID message");
++  //  return;
++  //}
++
++  s->vm_id = msg;
++
++  /*
++   * Receive more messages until we got shared memory.
++   */
++  do {
++    msg = apic_recv_msg(s, &fd, &err);
++    if (err) {
++      error_propagate(errp, err);
++      return;
++    }
++    process_msg(s, msg, fd, &err);
++    if (err) {
++      error_propagate(errp, err);
++      return;
++    }
++  } while (msg != -1);
++}
++
++
++
++
+ /* Find first bit starting from msb */
+ static int apic_fls_bit(uint32_t value)
+ {
+@@ -460,6 +651,8 @@ static void apic_get_delivery_bitmask(uint32_t *deliver_bitmask,
+     int i;
+ 
+     if (dest_mode == 0) {
++        // printf("apic operating in physical mode\n");
++        // TODO: this is the physical mode. QEMU *never* operates here
+         if (dest == 0xff) {
+             memset(deliver_bitmask, 0xff, MAX_APIC_WORDS * sizeof(uint32_t));
+         } else {
+@@ -469,15 +662,27 @@ static void apic_get_delivery_bitmask(uint32_t *deliver_bitmask,
+                 apic_set_bit(deliver_bitmask, idx);
+         }
+     } else {
++        //TODO: this is the logical mode
+         /* XXX: cluster mode */
++        // printf("apic operating in cluster mode\n");
+         memset(deliver_bitmask, 0x00, MAX_APIC_WORDS * sizeof(uint32_t));
+         for(i = 0; i < MAX_APICS; i++) {
+             apic_iter = local_apics[i];
+             if (apic_iter) {
+                 if (apic_iter->dest_mode == 0xf) {
++                    //TODO: this dest_mode differs between cluster and flat
++                    //this is flat
+                     if (dest & apic_iter->log_dest)
++                        // printf("apic operating in logical flat mode, dest is %x\n", dest);
+                         apic_set_bit(deliver_bitmask, i);
++                    if (dest == (1 << 1)) {
++                        //TODO: send logic is correct, receive logic isn't
++                        APICCommonClass *info = APIC_COMMON_GET_CLASS(apic_iter);
++                        info->send_interrupt(apic_iter, (apic_iter->vm_id == 1) ? 0 : 1);
++                    }
+                 } else if (apic_iter->dest_mode == 0x0) {
++                    // TODO: qemu never enters here: this is cluster mode
++                    // printf("apic operating in logical cluster mode\n");
+                     if ((dest & 0xf0) == (apic_iter->log_dest & 0xf0) &&
+                         (dest & apic_iter->log_dest & 0x0f)) {
+                         apic_set_bit(deliver_bitmask, i);
+@@ -508,6 +713,7 @@ void apic_sipi(DeviceState *dev)
+     s->wait_for_sipi = 0;
+ }
+ 
++//TODO: this is where apic ipi gets invoked
+ static void apic_deliver(DeviceState *dev, uint8_t dest, uint8_t dest_mode,
+                          uint8_t delivery_mode, uint8_t vector_num,
+                          uint8_t trigger_mode)
+@@ -519,6 +725,7 @@ static void apic_deliver(DeviceState *dev, uint8_t dest, uint8_t dest_mode,
+ 
+     switch (dest_shorthand) {
+     case 0:
++        //TODO: should be here, where dest shorthand represends the `dest'
+         apic_get_delivery_bitmask(deliver_bitmask, dest, dest_mode);
+         break;
+     case 1:
+@@ -876,6 +1083,10 @@ static void apic_realize(DeviceState *dev, Error **errp)
+         return;
+     }
+ 
++    // result is 0.
++    // There is indeed only a single apic when there's only one core
++    // printf("apic id is %d\n", s->id);
++
+     if (kvm_enabled()) {
+         warn_report("Userspace local APIC is deprecated for KVM.");
+         warn_report("Do not use kernel-irqchip except for the -M isapc machine type.");
+@@ -884,10 +1095,38 @@ static void apic_realize(DeviceState *dev, Error **errp)
+     memory_region_init_io(&s->io_memory, OBJECT(s), &apic_io_ops, s, "apic-msi",
+                           APIC_SPACE_SIZE);
+ 
++    //TODO: check me
+     s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, apic_timer, s);
+     local_apics[s->id] = s;
+ 
+     msi_nonbroken = true;
++
++    APICCommonClass *agcc = APIC_COMMON_GET_CLASS(s);
++    
++    if (!qemu_chr_fe_backend_connected(&s->chr)) {
++        error_setg(errp, "apic requires a backend connected to a character device");
++        return;
++    }
++
++
++    Chardev *chr = qemu_chr_fe_get_driver(&s->chr);
++    if (!chr) {
++        error_setg(errp, "apic requires a backend connected to a character device");
++        return;
++    }
++
++
++    Error *err = NULL;
++    agcc->recv_setup(s, &err);
++
++    if (err) {
++        error_propagate(errp, err);
++        return;
++    }
++
++    qemu_chr_fe_set_handlers(&s->chr, agcc->can_read_cb,
++                             agcc->read_cb, NULL, NULL, s, NULL, true);
++
+ }
+ 
+ static void apic_unrealize(DeviceState *dev)
+@@ -898,12 +1137,19 @@ static void apic_unrealize(DeviceState *dev)
+     local_apics[s->id] = NULL;
+ }
+ 
++static Property apic_properties[] = {
++    DEFINE_PROP_CHR("x86-chr", APICCommonState, chr),
++    DEFINE_PROP_END_OF_LIST(),
++};
++
+ static void apic_class_init(ObjectClass *klass, void *data)
+ {
++    DeviceClass *dc = DEVICE_CLASS(klass);
+     APICCommonClass *k = APIC_COMMON_CLASS(klass);
+ 
+     k->realize = apic_realize;
+     k->unrealize = apic_unrealize;
++    device_class_set_props(dc, apic_properties);
+     k->set_base = apic_set_base;
+     k->set_tpr = apic_set_tpr;
+     k->get_tpr = apic_get_tpr;
+@@ -912,6 +1158,16 @@ static void apic_class_init(ObjectClass *klass, void *data)
+     k->pre_save = apic_pre_save;
+     k->post_load = apic_post_load;
+     k->send_msi = apic_send_msi;
++    
++    k->process_msg_disconnect = apic_process_msg_disconnect;
++    k->process_msg_connect = apic_process_msg_connect;
++    k->process_msg = process_msg;
++    k->recv_msg = apic_recv_msg;
++    k->read_cb = apic_read;
++    k->can_read_cb = apic_can_receive;
++    k->send_interrupt = apic_send_interrupt;
++    k->recv_setup = apic_recv_setup;
++    k->interrupt_cb = apic_interrupt_cb;
+ }
+ 
+ static const TypeInfo apic_info = {
+diff --git a/hw/intc/arm_gicv3.c b/hw/intc/arm_gicv3.c
+index 66eaa97198..d681e01070 100644
+--- a/hw/intc/arm_gicv3.c
++++ b/hw/intc/arm_gicv3.c
+@@ -22,6 +22,16 @@
+ #include "hw/intc/arm_gicv3.h"
+ #include "gicv3_internal.h"
+ 
++static void arm_gicv3_interrupt_cb(void *opaque)
++{
++    GICv3State *s = (GICv3State *)opaque;
++    int posn = s->vm_id;
++    event_notifier_test_and_clear(&s->eventfd[posn]);
++    GICv3CPUState *cs = &s->cpu[0];
++    gicv3_redist_send_sgi(cs, GICV3_G1NS, 7, 1);
++}
++
++
+ static bool irqbetter(GICv3CPUState *cs, int irq, uint8_t prio)
+ {
+     /* Return true if this IRQ at this priority should take
+@@ -190,6 +200,8 @@ void gicv3_redist_update(GICv3CPUState *cs)
+ {
+     gicv3_redist_update_noirqset(cs);
+     gicv3_cpuif_update(cs);
++    //TODO: gicv3_redist_send_sgi();
++    //TODO: call some other function?
+ }
+ 
+ /* Update the GIC status after state in the distributor has
+@@ -397,6 +409,7 @@ static void arm_gicv3_class_init(ObjectClass *klass, void *data)
+ 
+     agcc->post_load = arm_gicv3_post_load;
+     device_class_set_parent_realize(dc, arm_gic_realize, &agc->parent_realize);
++    agcc->interrupt_cb = arm_gicv3_interrupt_cb;
+ }
+ 
+ static const TypeInfo arm_gicv3_info = {
+diff --git a/hw/intc/arm_gicv3_common.c b/hw/intc/arm_gicv3_common.c
+index 58ef65f589..470a00832a 100644
+--- a/hw/intc/arm_gicv3_common.c
++++ b/hw/intc/arm_gicv3_common.c
+@@ -25,6 +25,7 @@
+ #include "qapi/error.h"
+ #include "qemu/module.h"
+ #include "hw/core/cpu.h"
++#include "hw/qdev-properties-system.h"
+ #include "hw/intc/arm_gicv3_common.h"
+ #include "hw/qdev-properties.h"
+ #include "migration/vmstate.h"
+@@ -32,6 +33,184 @@
+ #include "hw/arm/linux-boot-if.h"
+ #include "sysemu/kvm.h"
+ 
++static void gicv3_process_msg_disconnect(GICv3State *s, uint16_t posn, Error **errp)
++{
++    event_notifier_cleanup(&s->eventfd[posn]);
++}
++
++static void gicv3_process_msg_connect(GICv3State *s, uint16_t posn, int fd,
++                                Error **errp)
++{
++  /*
++   * The N-th connect message for this peer comes with the file
++   * descriptor for vector N-1.  Count messages to find the vector.
++   */
++  ARMGICv3CommonClass *agcc = ARM_GICV3_COMMON_GET_CLASS(s);
++  
++  event_notifier_init_fd(&s->eventfd[posn], fd);
++  fcntl_setfl(fd, O_NONBLOCK);
++
++  if (posn == s->vm_id) {
++      int eventfd = event_notifier_get_fd(&s->eventfd[posn]);
++      //TODO: set opaque as null, pass arguments as we see fit
++      qemu_set_fd_handler(eventfd, agcc->interrupt_cb, NULL, s);
++  }
++
++}
++
++static void process_msg(GICv3State *s, int64_t msg, int fd, Error **errp)
++{
++
++  if (msg == -1) {
++    //TODO: disable shm in server in the future
++    return;
++  }
++
++  if (fd >= 0) {
++    gicv3_process_msg_connect(s, msg, fd, errp);
++  } else {
++    gicv3_process_msg_disconnect(s, msg, errp);
++  }
++}
++
++
++
++static int64_t gicv3_recv_msg(GICv3State *s, int *pfd, Error **errp)
++{
++  int64_t msg;
++  int n, ret;
++
++  n = 0;
++  do {
++    ret = qemu_chr_fe_read_all(&s->chr, (uint8_t *)&msg + n,
++                               sizeof(msg) - n);
++    if (ret < 0) {
++      if (ret == -EINTR) {
++        continue;
++      }
++      error_setg_errno(errp, -ret, "read from server failed");
++      return INT64_MIN;
++    }
++    n += ret;
++  } while (n < sizeof(msg));
++
++  *pfd = qemu_chr_fe_get_msgfd(&s->chr);
++  return le64_to_cpu(msg);
++}
++
++static void gicv3_read(void *opaque, const uint8_t *buf, int size)
++{
++  GICv3State *s = opaque;
++  Error *err = NULL;
++  int fd;
++  int64_t msg;
++
++  assert(size >= 0 && s->msg_buffered_bytes + size <= sizeof(s->msg_buf));
++  memcpy((unsigned char *)&s->msg_buf + s->msg_buffered_bytes, buf, size);
++  s->msg_buffered_bytes += size;
++  if (s->msg_buffered_bytes < sizeof(s->msg_buf)) {
++    return;
++  }
++  msg = le64_to_cpu(s->msg_buf);
++  
++  
++  s->msg_buffered_bytes = 0;
++
++  fd = qemu_chr_fe_get_msgfd(&s->chr);
++
++  process_msg(s, msg, fd, &err);
++  if (err) {
++    error_report_err(err);
++  }
++}
++
++static int gicv3_can_receive(void *opaque)
++{
++  GICv3State *s = opaque;
++
++  assert(s->msg_buffered_bytes < sizeof(s->msg_buf));
++  return sizeof(s->msg_buf) - s->msg_buffered_bytes;
++}
++
++static void gicv3_send_interrupt(void *opaque, int target)
++{
++    if (target > 1) {
++        printf("target is too large\n");
++        return;
++    }
++    GICv3State *s = opaque;
++    event_notifier_set(&s->eventfd[target]);
++}
++
++
++static void gicv3_recv_setup(GICv3State *s, Error **errp)
++{
++  Error *err = NULL;
++  int64_t msg;
++  int fd;
++
++  msg = gicv3_recv_msg(s, &fd, &err);
++  if (err) {
++    error_propagate(errp, err);
++    return;
++  }
++  if (msg != 0x0) {
++    error_setg(errp, "server sent version %" PRId64 ", expecting %d",
++               msg, 0x0);
++    return;
++  }
++
++  //if (fd != -1) {
++  //  error_setg(errp, "server sent invalid version message");
++  //  return;
++  //}
++
++
++  /*
++   * vintc-server sends the remaining initial messages in a fixed
++   * order, but the device has always accepted them in any order.
++   * Stay as compatible as practical, just in case people use
++   * servers that behave differently.
++   */
++
++  /*
++   * vintc_device_spec.txt has always required the ID message
++   * right here, and vintc-server has always complied.  However,
++   * older versions of the device accepted it out of order, but
++   * broke when an interrupt setup message arrived before it.
++   */
++  msg = gicv3_recv_msg(s, &fd, &err);
++  if (err) {
++    error_propagate(errp, err);
++    return;
++  }
++  //if (fd != -1 || msg < 0 || msg > 1) {
++  //  error_setg(errp, "server sent invalid ID message");
++  //  return;
++  //}
++
++  s->vm_id = msg;
++  
++  /*
++   * Receive more messages until we got shared memory.
++   */
++  do {
++    msg = gicv3_recv_msg(s, &fd, &err);
++    if (err) {
++      error_propagate(errp, err);
++      return;
++    }
++    process_msg(s, msg, fd, &err);
++    if (err) {
++      error_propagate(errp, err);
++      return;
++    }
++  } while (msg != -1);
++}
++
++
++
++
+ 
+ static void gicv3_gicd_no_migration_shift_bug_post_load(GICv3State *cs)
+ {
+@@ -308,6 +487,8 @@ void gicv3_init_irqs_and_mmio(GICv3State *s, qemu_irq_handler handler,
+ static void arm_gicv3_common_realize(DeviceState *dev, Error **errp)
+ {
+     GICv3State *s = ARM_GICV3_COMMON(dev);
++    ARMGICv3CommonClass *agcc = ARM_GICV3_COMMON_GET_CLASS(s);
++    
+     int i;
+ 
+     /* revision property is actually reserved and currently used only in order
+@@ -382,6 +563,31 @@ static void arm_gicv3_common_realize(DeviceState *dev, Error **errp)
+             (i << 8) |
+             (last << 4);
+     }
++
++    if (!qemu_chr_fe_backend_connected(&s->chr)) {
++        error_setg(errp, "GICv3 requires a backend connected to a character device");
++        return;
++    }
++
++
++    Chardev *chr = qemu_chr_fe_get_driver(&s->chr);
++    if (!chr) {
++        error_setg(errp, "GICv3 requires a backend connected to a character device");
++        return;
++    }
++
++
++    Error *err = NULL;
++    agcc->recv_setup(s, &err);
++    
++    if (err) {
++        error_propagate(errp, err);
++        return;
++    }
++
++    qemu_chr_fe_set_handlers(&s->chr, agcc->can_read_cb,
++                             agcc->read_cb, NULL, NULL, s, NULL, true);
++
+ }
+ 
+ static void arm_gicv3_finalize(Object *obj)
+@@ -491,6 +697,7 @@ static void arm_gic_common_linux_init(ARMLinuxBootIf *obj,
+ }
+ 
+ static Property arm_gicv3_common_properties[] = {
++    DEFINE_PROP_CHR("arm-chr", GICv3State, chr),
+     DEFINE_PROP_UINT32("num-cpu", GICv3State, num_cpu, 1),
+     DEFINE_PROP_UINT32("num-irq", GICv3State, num_irq, 32),
+     DEFINE_PROP_UINT32("revision", GICv3State, revision, 3),
+@@ -504,12 +711,22 @@ static void arm_gicv3_common_class_init(ObjectClass *klass, void *data)
+ {
+     DeviceClass *dc = DEVICE_CLASS(klass);
+     ARMLinuxBootIfClass *albifc = ARM_LINUX_BOOT_IF_CLASS(klass);
++    ARMGICv3CommonClass *agcc = ARM_GICV3_COMMON_CLASS(klass);
+ 
+     dc->reset = arm_gicv3_common_reset;
+     dc->realize = arm_gicv3_common_realize;
+     device_class_set_props(dc, arm_gicv3_common_properties);
+     dc->vmsd = &vmstate_gicv3;
+     albifc->arm_linux_init = arm_gic_common_linux_init;
++    
++    agcc->process_msg_disconnect = gicv3_process_msg_disconnect;
++    agcc->process_msg_connect = gicv3_process_msg_connect;
++    agcc->process_msg = process_msg;
++    agcc->recv_msg = gicv3_recv_msg;
++    agcc->read_cb = gicv3_read;
++    agcc->can_read_cb = gicv3_can_receive;
++    agcc->send_interrupt = gicv3_send_interrupt;
++    agcc->recv_setup = gicv3_recv_setup;
+ }
+ 
+ static const TypeInfo arm_gicv3_common_type = {
+diff --git a/hw/intc/arm_gicv3_cpuif.c b/hw/intc/arm_gicv3_cpuif.c
+index 43ef1d7a84..166aa7109a 100644
+--- a/hw/intc/arm_gicv3_cpuif.c
++++ b/hw/intc/arm_gicv3_cpuif.c
+@@ -1678,6 +1678,14 @@ static void icc_generate_sgi(CPUARMState *env, GICv3CPUState *cs,
+         /* The redistributor will check against its own GICR_NSACR as needed */
+         gicv3_redist_send_sgi(ocs, grp, irq, ns);
+     }
++
++    // if route to target 2 ( not present ) specifically
++    if (!irm && (targetlist == ( 0 ))) {
++        ARMGICv3CommonClass *agcc = ARM_GICV3_COMMON_GET_CLASS(s);
++        //TODO: which target to send interrupt to?
++        agcc->send_interrupt(s, s->vm_id == 1 ? 0 : 1);
++    }
++
+ }
+ 
+ static void icc_sgi0r_write(CPUARMState *env, const ARMCPRegInfo *ri,
+diff --git a/hw/intc/arm_gicv3_redist.c b/hw/intc/arm_gicv3_redist.c
+index 8645220d61..b29f69fddc 100644
+--- a/hw/intc/arm_gicv3_redist.c
++++ b/hw/intc/arm_gicv3_redist.c
+@@ -561,6 +561,7 @@ void gicv3_redist_send_sgi(GICv3CPUState *cs, int grp, int irq, bool ns)
+     }
+ 
+     if (grp != irqgrp) {
++        printf("irq group %d is not equal to group %d, exiting\n", irqgrp, grp);
+         return;
+     }
+ 
+@@ -570,6 +571,7 @@ void gicv3_redist_send_sgi(GICv3CPUState *cs, int grp, int irq, bool ns)
+ 
+         if ((irqgrp == GICV3_G0 && nsaccess < 1) ||
+             (irqgrp == GICV3_G1 && nsaccess < 2)) {
++            printf("irq group %d is not equal to nsaccess %d, exiting\n", irqgrp, nsaccess);
+             return;
+         }
+     }
+diff --git a/hw/intc/gicv3_internal.h b/hw/intc/gicv3_internal.h
+index 05303a55c8..0e24e81125 100644
+--- a/hw/intc/gicv3_internal.h
++++ b/hw/intc/gicv3_internal.h
+@@ -24,6 +24,8 @@
+ #ifndef QEMU_ARM_GICV3_INTERNAL_H
+ #define QEMU_ARM_GICV3_INTERNAL_H
+ 
++#include "qemu/cutils.h"
++#include "qapi/error.h"
+ #include "hw/intc/arm_gicv3_common.h"
+ 
+ /* Distributor registers, as offsets from the distributor base address */
+@@ -410,4 +412,10 @@ static inline void gicv3_cache_all_target_cpustates(GICv3State *s)
+ 
+ void gicv3_set_gicv3state(CPUState *cpu, GICv3CPUState *s);
+ 
++
++//TODO: setup interrupt callback
++// vintc.c:325
++
++
++
+ #endif /* QEMU_ARM_GICV3_INTERNAL_H */
+diff --git a/hw/meson.build b/hw/meson.build
+index 8ba79b1a52..9eaf0515fb 100644
+--- a/hw/meson.build
++++ b/hw/meson.build
+@@ -40,6 +40,7 @@ subdir('virtio')
+ subdir('watchdog')
+ subdir('xen')
+ subdir('xenpv')
++subdir('demo')
+ 
+ subdir('alpha')
+ subdir('arm')
+diff --git a/hw/misc/Kconfig b/hw/misc/Kconfig
+index c71ed25820..c3aea9ddb8 100644
+--- a/hw/misc/Kconfig
++++ b/hw/misc/Kconfig
+@@ -186,4 +186,7 @@ config SIFIVE_U_PRCI
+ config VIRT_CTRL
+     bool
+ 
++config VINTC
++    bool
++
+ source macio/Kconfig
+diff --git a/hw/misc/ivshmem.c b/hw/misc/ivshmem.c
+index a1fa4878be..2c052fac55 100644
+--- a/hw/misc/ivshmem.c
++++ b/hw/misc/ivshmem.c
+@@ -117,6 +117,8 @@ struct IVShmemState {
+     /* migration stuff */
+     OnOffAuto master;
+     Error *migration_blocker;
++
++    uint32_t *shared_reg_ptr;
+ };
+ 
+ /* registers for the Inter-VM shared memory device */
+@@ -125,8 +127,39 @@ enum ivshmem_registers {
+     INTRSTATUS = 4,
+     IVPOSITION = 8,
+     DOORBELL = 12,
++    SHARED_REG_ADDR = 16,
++    SHARED_REG_SIZE = 20,
++};
++
++enum ivshmem_shared_registers_offset {
++  SHARED_ADDR_OFFSET = 0,
++  SHARED_SIZE_OFFSET = 1,
+ };
+ 
++static void allocate_shared_reg(const char* shared_reg_name, int shared_reg_size, void *opaque) {
++    IVShmemState *s = opaque;
++    int shared_reg_fd = shm_open(shared_reg_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
++    if (shared_reg_fd == -1) {
++        printf("allocating shared memory failed\n");
++        g_assert(0);
++    }
++    if (ftruncate(shared_reg_fd, shared_reg_size) == -1) {
++        printf("Ftruncating shared register failed\n");
++        g_assert(0);
++    }
++    s->shared_reg_ptr = (uint32_t *)mmap(NULL, shared_reg_size, PROT_READ | PROT_WRITE, MAP_SHARED, shared_reg_fd, 0);
++}
++
++static uint32_t read_shared_register(void *opaque, size_t offset) {
++    IVShmemState *s = opaque;
++    return s->shared_reg_ptr[offset];
++}
++
++static void write_shared_register(void *opaque, uint32_t write_data, size_t offset) {
++    IVShmemState *s = opaque;
++    s->shared_reg_ptr[offset] = write_data;
++}
++
+ static inline uint32_t ivshmem_has_feature(IVShmemState *ivs,
+                                                     unsigned int feature) {
+     return (ivs->features & (1 << feature));
+@@ -206,6 +239,17 @@ static void ivshmem_io_write(void *opaque, hwaddr addr,
+                                 vector, dest);
+             }
+             break;
++
++        case SHARED_REG_ADDR:
++            IVSHMEM_DPRINTF("Writing to shared address register\n");
++            write_shared_register(s, val, SHARED_ADDR_OFFSET);
++            break;
++
++        case SHARED_REG_SIZE:
++            IVSHMEM_DPRINTF("Writing to shared size register\n");
++            write_shared_register(s, val, SHARED_SIZE_OFFSET);
++            break;
++
+         default:
+             IVSHMEM_DPRINTF("Unhandled write " TARGET_FMT_plx "\n", addr);
+     }
+@@ -232,6 +276,16 @@ static uint64_t ivshmem_io_read(void *opaque, hwaddr addr,
+             ret = s->vm_id;
+             break;
+ 
++        case SHARED_REG_ADDR:
++            ret = read_shared_register(s, SHARED_ADDR_OFFSET);
++            IVSHMEM_DPRINTF("read address return value is %d\n", ret);
++            break;
++
++        case SHARED_REG_SIZE:
++            ret = read_shared_register(s, SHARED_SIZE_OFFSET);
++            IVSHMEM_DPRINTF("read size return value is %d\n", ret);
++            break;
++
+         default:
+             IVSHMEM_DPRINTF("why are we reading " TARGET_FMT_plx "\n", addr);
+             ret = 0;
+@@ -906,6 +960,8 @@ static void ivshmem_common_realize(PCIDevice *dev, Error **errp)
+             return;
+         }
+     }
++    allocate_shared_reg("/qemu_shared_register_ipi", 32, s);
++
+ 
+     vmstate_register_ram(s->ivshmem_bar2, DEVICE(s));
+     pci_register_bar(PCI_DEVICE(s), 2,
+diff --git a/hw/misc/meson.build b/hw/misc/meson.build
+index 21034dc60a..80a7191afa 100644
+--- a/hw/misc/meson.build
++++ b/hw/misc/meson.build
+@@ -42,6 +42,7 @@ softmmu_ss.add(when: 'CONFIG_PUV3', if_true: files('puv3_pm.c'))
+ subdir('macio')
+ 
+ softmmu_ss.add(when: 'CONFIG_IVSHMEM_DEVICE', if_true: files('ivshmem.c'))
++softmmu_ss.add(when: 'CONFIG_VINTC', if_true: files('vintc.c'))
+ 
+ softmmu_ss.add(when: 'CONFIG_ALLWINNER_H3', if_true: files('allwinner-h3-ccu.c'))
+ specific_ss.add(when: 'CONFIG_ALLWINNER_H3', if_true: files('allwinner-cpucfg.c'))
+diff --git a/hw/misc/vintc.c b/hw/misc/vintc.c
+new file mode 100644
+index 0000000000..b606719e6d
+--- /dev/null
++++ b/hw/misc/vintc.c
+@@ -0,0 +1,673 @@
++//
++// Created by eva on 4/4/21.
++//
++
++#include "qemu/osdep.h"
++#include "qemu/units.h"
++#include "qapi/error.h"
++#include "qemu/cutils.h"
++#include "hw/qdev-properties-system.h"
++#include "migration/blocker.h"
++#include "migration/vmstate.h"
++#include "qemu/error-report.h"
++#include "qemu/event_notifier.h"
++#include "qemu/module.h"
++#include "qom/object_interfaces.h"
++#include "chardev/char-fe.h"
++#include "sysemu/hostmem.h"
++#include "sysemu/qtest.h"
++#include "qapi/visitor.h"
++#include "hw/irq.h"
++#include "hw/sysbus.h"
++
++#include "hw/misc/vintc.h"
++#include "qom/object.h"
++
++#define VINTC_MAX_PEERS UINT16_MAX
++#define VINTC_IOEVENTFD   0
++#define VINTC_MSI     1
++
++#define VINTC_IO_SIZE 0x100
++
++#define VINTC_DPRINTF(fmt, ...)                       \
++    do {                                                \
++        if (VINTC_DEBUG) {                            \
++            printf("VINTC: " fmt, ## __VA_ARGS__);    \
++        }                                               \
++    } while (0)
++
++
++typedef struct VIntcState VIntcState;
++DECLARE_INSTANCE_CHECKER(VIntcState, VINTC,
++                         TYPE_VINTC)
++
++
++typedef struct Peer {
++  int nb_eventfds;
++  EventNotifier *eventfds;
++} Peer;
++
++typedef struct DeviceVector {
++  DeviceState *dev;
++  int virq;
++  bool unmasked;
++} DeviceVector;
++
++struct VIntcState {
++  SysBusDevice parent_obj;
++  CharBackend server_chr; /* without interrupts */
++
++  // memory region for mmaped io
++  MemoryRegion vintc_mmio;
++
++  // interrupt support
++  Peer *peers;
++  int number_peers; // number of peers
++  uint64_t msg_buf; // buffer for messages
++  int msg_buffered_bytes; // number in msg_buf used
++
++  int vm_id;
++
++  uint32_t vectors;
++
++  // proper irqs
++  qemu_irq irq;
++
++  DeviceVector *dev_vectors;
++
++  // register stuff
++  uint32_t intrstatus;
++  uint32_t intrmask;
++
++  uint32_t *shared_reg_ptr;
++};
++
++/* registers for the Inter-VM shared memory device */
++enum vintc_registers {
++  INTRMASK = 0,
++  INTRSTATUS = 4,
++  IVPOSITION = 8,
++  DOORBELL = 12,
++  SHARED_REG_ADDR = 16,
++  SHARED_REG_SIZE = 20,
++};
++
++enum ivshmem_shared_registers_offset {
++  SHARED_ADDR_OFFSET = 0,
++  SHARED_SIZE_OFFSET = 1,
++};
++
++static Property vintc_properties[] = {
++    DEFINE_PROP_CHR("chardev", VIntcState, server_chr),
++    DEFINE_PROP_UINT32("vectors", VIntcState, vectors, 1),
++    DEFINE_PROP_END_OF_LIST(),
++};
++
++static const VMStateDescription vintc_vmsd = {
++    .name = TYPE_VINTC,
++    .version_id = 0,
++    .minimum_version_id = 0,
++    .fields = (VMStateField[]) {
++        VMSTATE_UINT32(intrstatus, VIntcState),
++        VMSTATE_END_OF_LIST(),
++    }
++};
++
++static void allocate_shared_reg(const char* shared_reg_name, int shared_reg_size, void *opaque) {
++    VIntcState *s = opaque;
++    int shared_reg_fd = shm_open(shared_reg_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
++    if (shared_reg_fd == -1) {
++        printf("allocating shared memory failed\n");
++        g_assert(0);
++    }
++    if (ftruncate(shared_reg_fd, shared_reg_size) == -1) {
++        printf("Ftruncating shared register failed\n");
++        g_assert(0);
++    }
++    s->shared_reg_ptr = (uint32_t *)mmap(NULL, shared_reg_size, PROT_READ | PROT_WRITE, MAP_SHARED, shared_reg_fd, 0);
++}
++
++static uint32_t read_shared_register(void *opaque, size_t offset) {
++    VIntcState *s = opaque;
++    return s->shared_reg_ptr[offset];
++}
++
++static void write_shared_register(void *opaque, uint32_t write_data, size_t offset) {
++    VIntcState *s = opaque;
++    s->shared_reg_ptr[offset] = write_data;
++}
++
++
++static void vintc_IntrMask_write(VIntcState *s, uint32_t val)
++{
++  VINTC_DPRINTF("interrupt mask write(w) val = 0x%04x\n", val);
++
++  s->intrmask = val;
++}
++
++static uint32_t vintc_IntrMask_read(VIntcState *s)
++{
++
++  uint32_t ret = s->intrmask;
++  VINTC_DPRINTF("interrupt status read(r) val = 0x%04x\n", ret);
++  return ret;
++}
++
++static void vintc_IntrStatus_write(VIntcState *s, uint32_t val)
++{
++  VINTC_DPRINTF("interrupt status write(w) val = 0x%04x\n", val);
++
++  s->intrstatus = val;
++}
++
++static uint32_t vintc_IntrStatus_read(VIntcState *s)
++{
++
++  uint32_t ret = s->intrstatus;
++  VINTC_DPRINTF("interrupt status read(r) val = 0x%04x\n", ret);
++  s->intrstatus = 0;
++  return ret;
++}
++
++
++static uint64_t vintc_io_read(void *opaque, hwaddr addr,
++                                unsigned size)
++{
++
++  VIntcState *s = opaque;
++  uint32_t ret;
++
++  switch (addr)
++  {
++    case INTRMASK:
++      ret = vintc_IntrMask_read(s);
++      break;
++
++    case INTRSTATUS:
++      ret = vintc_IntrStatus_read(s);
++      break;
++
++    case IVPOSITION:
++      ret = s->vm_id;
++      qemu_set_irq(s->irq, 0);
++      break;
++
++      case SHARED_REG_ADDR:
++          ret = read_shared_register(s, SHARED_ADDR_OFFSET);
++          VINTC_DPRINTF("read address return value is %d\n", ret);
++          break;
++
++      case SHARED_REG_SIZE:
++          ret = read_shared_register(s, SHARED_SIZE_OFFSET);
++          VINTC_DPRINTF("read size return value is %d\n", ret);
++          break;
++
++    default:
++      VINTC_DPRINTF("why are we reading " TARGET_FMT_plx "\n", addr);
++      ret = 0;
++  }
++
++  return ret;
++}
++
++static void vintc_io_write(void *opaque, hwaddr addr,
++                             uint64_t val, unsigned size)
++{
++  VIntcState *s = opaque;
++
++  uint16_t dest = val >> 16;
++  uint16_t vector = val & 0xff;
++
++
++
++  addr &= 0xfc;
++
++  VINTC_DPRINTF("writing to addr " TARGET_FMT_plx "\n", addr);
++  switch (addr)
++  {
++    case INTRMASK:
++      vintc_IntrMask_write(s, val);
++      break;
++
++    case INTRSTATUS:
++      vintc_IntrStatus_write(s, val);
++      break;
++
++    case DOORBELL:
++        if (vector != 0) {
++            VINTC_DPRINTF("Vector is not equal to 0, aborting\n");
++        }
++      VINTC_DPRINTF("writing to doorbell register\n");
++      /* check that dest VM ID is reasonable */
++      if (dest >= s->number_peers) {
++        VINTC_DPRINTF("Current number of peers is %d\n", s->number_peers);
++        VINTC_DPRINTF("Invalid destination VM ID (%d)\n", dest);
++        break;
++      }
++
++      /* check doorbell range */
++      if (vector < s->peers[dest].nb_eventfds) {
++        VINTC_DPRINTF("Current vector is %d\n", vector);
++        VINTC_DPRINTF("number of eventfd for peer at %d is %d\n", dest, s->peers[dest].nb_eventfds);
++        VINTC_DPRINTF("Notifying VM %d on vector %d\n", dest, vector);
++        event_notifier_set(&s->peers[dest].eventfds[vector]);
++      } else {
++        VINTC_DPRINTF("Current vector is %d\n", vector);
++        VINTC_DPRINTF("number of eventfd for peer at %d is %d\n", dest, s->peers[dest].nb_eventfds);
++        VINTC_DPRINTF("Invalid destination vector %d on VM %d\n",
++                        vector, dest);
++      }
++      break;
++
++      case SHARED_REG_ADDR:
++          VINTC_DPRINTF("Writing to shared address register\n");
++          write_shared_register(s, val, SHARED_ADDR_OFFSET);
++          break;
++
++      case SHARED_REG_SIZE:
++          VINTC_DPRINTF("Writing to shared size register\n");
++          write_shared_register(s, val, SHARED_SIZE_OFFSET);
++          break;
++
++    default:
++      VINTC_DPRINTF("Unhandled write " TARGET_FMT_plx "\n", addr);
++  }
++}
++
++
++
++static const MemoryRegionOps vintc_mmio_ops = {
++    .read = vintc_io_read,
++    .write = vintc_io_write,
++    .endianness = DEVICE_NATIVE_ENDIAN,
++    .impl = {
++        .min_access_size = 4,
++        .max_access_size = 4,
++    },
++};
++
++
++static void vintc_vector_notify(void *opaque)
++{
++  DeviceVector *entry = opaque;
++  DeviceState *dev = entry->dev;
++  VIntcState *s = VINTC(dev);
++  int vector = entry - s->dev_vectors;
++  EventNotifier *n = &s->peers[s->vm_id].eventfds[vector];
++
++  if (!event_notifier_test_and_clear(n)) {
++    return;
++  }
++
++  VINTC_DPRINTF("interrupt on vector %p %d\n", dev, vector);
++  VINTC_DPRINTF("interrupt o");
++  //FIXME: this part differs from the original implementation, because we're raising irq directly
++
++  qemu_set_irq(s->irq, 1);
++  vintc_IntrStatus_write(s, 1);
++}
++
++static void watch_vector_notifier(VIntcState *s, EventNotifier *n,
++                                  int vector)
++{
++  int eventfd = event_notifier_get_fd(n);
++
++  assert(!s->dev_vectors[vector].dev);
++  s->dev_vectors[vector].dev = DEVICE(s);
++
++  qemu_set_fd_handler(eventfd, vintc_vector_notify,
++                      NULL, &s->dev_vectors[vector]);
++}
++
++
++
++static void setup_interrupt(VIntcState *s, int vector, Error **errp)
++{
++  EventNotifier  *n = &s->peers[s->vm_id].eventfds[vector];
++  VINTC_DPRINTF("setting up interrupt for vector %d\n", vector);
++
++  watch_vector_notifier(s, n, vector);
++}
++
++static void vintc_init(Object *obj) {
++  VIntcState *s = VINTC(obj);
++  SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
++
++  //TODO: extract size into define
++  memory_region_init_io(&s->vintc_mmio, OBJECT(s), &vintc_mmio_ops, s,
++                        "vintc-mmio", VINTC_IO_SIZE);
++
++  sysbus_init_mmio(sbd, &s->vintc_mmio);
++  sysbus_init_irq(sbd, &s->irq);
++}
++
++static void resize_peers(VIntcState *s, int nb_peers)
++{
++  int old_nb_peers = s->number_peers;
++  int i;
++
++  assert(nb_peers > old_nb_peers);
++  VINTC_DPRINTF("bumping storage to %d peers\n", nb_peers);
++
++  s->peers = g_realloc(s->peers, nb_peers * sizeof(Peer));
++  s->number_peers = nb_peers;
++
++  for (i = old_nb_peers; i < nb_peers; i++) {
++    s->peers[i].eventfds = g_new0(EventNotifier, s->vectors);
++    s->peers[i].nb_eventfds = 0;
++  }
++}
++
++static int64_t vintc_recv_msg(VIntcState *s, int *pfd, Error **errp)
++{
++  int64_t msg;
++  int n, ret;
++
++  n = 0;
++  do {
++    ret = qemu_chr_fe_read_all(&s->server_chr, (uint8_t *)&msg + n,
++                               sizeof(msg) - n);
++    if (ret < 0) {
++      if (ret == -EINTR) {
++        continue;
++      }
++      error_setg_errno(errp, -ret, "read from server failed");
++      return INT64_MIN;
++    }
++    n += ret;
++  } while (n < sizeof(msg));
++
++  *pfd = qemu_chr_fe_get_msgfd(&s->server_chr);
++  return le64_to_cpu(msg);
++}
++
++static void vintc_del_eventfd(VIntcState *s, int posn, int i)
++{
++  memory_region_del_eventfd(&s->vintc_mmio,
++                            DOORBELL,
++                            4,
++                            true,
++                            (posn << 16) | i,
++                            &s->peers[posn].eventfds[i]);
++}
++
++static void close_peer_eventfds(VIntcState *s, int posn)
++{
++  //TODO: verify function here is correct
++  int i, n;
++
++  assert(posn >= 0 && posn < s->number_peers);
++  n = s->peers[posn].nb_eventfds;
++
++    memory_region_transaction_begin();
++    for (i = 0; i < n; i++) {
++      vintc_del_eventfd(s, posn, i);
++    }
++    memory_region_transaction_commit();
++
++  for (i = 0; i < n; i++) {
++    event_notifier_cleanup(&s->peers[posn].eventfds[i]);
++  }
++
++  g_free(s->peers[posn].eventfds);
++  s->peers[posn].nb_eventfds = 0;
++}
++static void process_msg_disconnect(VIntcState *s, uint16_t posn,
++                                   Error **errp)
++{
++  VINTC_DPRINTF("posn %d has gone away\n", posn);
++  if (posn >= s->number_peers || posn == s->vm_id) {
++    error_setg(errp, "invalid peer %d", posn);
++    return;
++  }
++  close_peer_eventfds(s, posn);
++}
++
++static void vintc_add_eventfd(VIntcState *s, int posn, int i)
++{
++  memory_region_add_eventfd(&s->vintc_mmio,
++                            DOORBELL,
++                            4,
++                            true,
++                            (posn << 16) | i,
++                            &s->peers[posn].eventfds[i]);
++}
++
++static void process_msg_connect(VIntcState *s, uint16_t posn, int fd,
++                                Error **errp)
++{
++  VINTC_DPRINTF("Processing incoming CONNECT message");
++  Peer *peer = &s->peers[posn];
++  int vector;
++
++  /*
++   * The N-th connect message for this peer comes with the file
++   * descriptor for vector N-1.  Count messages to find the vector.
++   */
++  if (peer->nb_eventfds >= s->vectors) {
++    error_setg(errp, "Too many eventfd received, device has %d vectors",
++               s->vectors);
++    close(fd);
++    return;
++  }
++  vector = peer->nb_eventfds++;
++  VINTC_DPRINTF("vector size is %d\n", vector);
++
++  VINTC_DPRINTF("eventfds[%d][%d] = %d\n", posn, vector, fd);
++  event_notifier_init_fd(&peer->eventfds[vector], fd);
++  fcntl_setfl(fd, O_NONBLOCK); /* msix/irqfd poll non block */
++
++  if (posn == s->vm_id) {
++    VINTC_DPRINTF("setting up interrupt\n");
++    setup_interrupt(s, vector, errp);
++    /* TODO do we need to handle the error? */
++  }
++
++    vintc_add_eventfd(s, posn, vector);
++}
++
++static void process_msg(VIntcState *s, int64_t msg, int fd, Error **errp)
++{
++  VINTC_DPRINTF("posn is %" PRId64 ", fd is %d\n", msg, fd);
++
++  if (msg < -1 || msg > VINTC_MAX_PEERS) {
++    error_setg(errp, "server sent invalid message %" PRId64, msg);
++    close(fd);
++    return;
++  }
++
++  if (msg == -1) {
++    //TODO: disable shm in server in the future
++    VINTC_DPRINTF("Processing shared memory, ignore");
++    return;
++  }
++
++  if (msg >= s->number_peers) {
++    resize_peers(s, msg + 1);
++  }
++
++  if (fd >= 0) {
++    process_msg_connect(s, msg, fd, errp);
++  } else {
++    process_msg_disconnect(s, msg, errp);
++  }
++}
++
++static void vintc_recv_setup(VIntcState *s, Error **errp)
++{
++  Error *err = NULL;
++  int64_t msg;
++  int fd;
++
++  msg = vintc_recv_msg(s, &fd, &err);
++  if (err) {
++    error_propagate(errp, err);
++    return;
++  }
++  if (msg != IVSHMEM_PROTOCOL_VERSION) {
++    error_setg(errp, "server sent version %" PRId64 ", expecting %d",
++               msg, IVSHMEM_PROTOCOL_VERSION);
++    return;
++  }
++  if (fd != -1) {
++    error_setg(errp, "server sent invalid version message");
++    return;
++  }
++
++  /*
++   * vintc-server sends the remaining initial messages in a fixed
++   * order, but the device has always accepted them in any order.
++   * Stay as compatible as practical, just in case people use
++   * servers that behave differently.
++   */
++
++  /*
++   * vintc_device_spec.txt has always required the ID message
++   * right here, and vintc-server has always complied.  However,
++   * older versions of the device accepted it out of order, but
++   * broke when an interrupt setup message arrived before it.
++   */
++  msg = vintc_recv_msg(s, &fd, &err);
++  if (err) {
++    error_propagate(errp, err);
++    return;
++  }
++  if (fd != -1 || msg < 0 || msg > VINTC_MAX_PEERS) {
++    error_setg(errp, "server sent invalid ID message");
++    return;
++  }
++  s->vm_id = msg;
++
++  /*
++   * Receive more messages until we got shared memory.
++   */
++  do {
++    msg = vintc_recv_msg(s, &fd, &err);
++    if (err) {
++      error_propagate(errp, err);
++      return;
++    }
++    process_msg(s, msg, fd, &err);
++    if (err) {
++      error_propagate(errp, err);
++      return;
++    }
++  } while (msg != -1);
++
++  /*
++   * This function must either map the shared memory or fail.  The
++   * loop above ensures that: it terminates normally only after it
++   * successfully processed the server's shared memory message.
++   * Assert that actually mapped the shared memory:
++   */
++  //TODO: I've disabled correctly mapping the shared memory as above
++  // please update in the future
++//  g_assert(0);
++}
++
++static int vintc_can_receive(void *opaque)
++{
++  VIntcState *s = opaque;
++
++  assert(s->msg_buffered_bytes < sizeof(s->msg_buf));
++  return sizeof(s->msg_buf) - s->msg_buffered_bytes;
++}
++
++static void vintc_read(void *opaque, const uint8_t *buf, int size)
++{
++  VIntcState *s = opaque;
++  Error *err = NULL;
++  int fd;
++  int64_t msg;
++
++  assert(size >= 0 && s->msg_buffered_bytes + size <= sizeof(s->msg_buf));
++  memcpy((unsigned char *)&s->msg_buf + s->msg_buffered_bytes, buf, size);
++  s->msg_buffered_bytes += size;
++  if (s->msg_buffered_bytes < sizeof(s->msg_buf)) {
++    return;
++  }
++  msg = le64_to_cpu(s->msg_buf);
++  s->msg_buffered_bytes = 0;
++
++  fd = qemu_chr_fe_get_msgfd(&s->server_chr);
++
++  process_msg(s, msg, fd, &err);
++  if (err) {
++    error_report_err(err);
++  }
++}
++
++static int vintc_setup_interrupts(VIntcState *s, Error **errp)
++{
++  //FIXME: this differs a lot from the original approach
++  /* allocate QEMU callback data for receiving interrupts */
++  s->dev_vectors = g_malloc0(s->vectors * sizeof(DeviceState));
++
++
++  return 0;
++}
++
++static void vintc_realize(DeviceState *dev, Error **errp) {
++  VIntcState *s = VINTC(dev);
++  Error *err = NULL;
++
++  if (!qemu_chr_fe_backend_connected(&s->server_chr)) {
++    error_setg(errp, "You must specify a 'chardev'");
++    return;
++  }
++
++
++
++  Chardev *chr = qemu_chr_fe_get_driver(&s->server_chr);
++  assert(chr);
++
++  VINTC_DPRINTF("using shared memory server (socket = %s)\n",
++                  chr->filename);
++
++  // receive messages from server
++  /* we allocate enough space for 16 peers and grow as needed */
++  resize_peers(s, 16);
++
++  /*
++   * Receive setup messages from server synchronously.
++   * Older versions did it asynchronously, but that creates a
++   * number of entertaining race conditions.
++   */
++  vintc_recv_setup(s, &err);
++  if (err) {
++    error_propagate(errp, err);
++    return;
++  }
++
++  qemu_chr_fe_set_handlers(&s->server_chr,vintc_can_receive,
++                           vintc_read, NULL, NULL, s, NULL, true);
++
++  if (vintc_setup_interrupts(s, errp) < 0) {
++    error_prepend(errp, "Failed to initialize interrupts: ");
++    return;
++  }
++
++    allocate_shared_reg("/qemu_shared_register_ipi", 32, s);
++}
++
++static void vintc_class_init(ObjectClass *klass, void *data) {
++  DeviceClass *dc = DEVICE_CLASS(klass);
++  dc->vmsd = &vintc_vmsd;
++  //FIXME
++  dc->realize = vintc_realize;
++  device_class_set_props(dc, vintc_properties);
++}
++
++static const TypeInfo vintc_info = {
++    .name = TYPE_VINTC,
++    .parent = TYPE_SYS_BUS_DEVICE,
++    .instance_size = sizeof(VIntcState),
++    .class_init = vintc_class_init,
++    .instance_init = vintc_init,
++};
++
++static void vintc_register_types(void) {
++  type_register_static(&vintc_info);
++}
++
++type_init(vintc_register_types);
+diff --git a/hw/riscv/virt.c b/hw/riscv/virt.c
+index d6d261a732..77b5924c12 100644
+--- a/hw/riscv/virt.c
++++ b/hw/riscv/virt.c
+@@ -665,6 +665,7 @@ static void virt_machine_init(MachineState *machine)
+                             "riscv_virt_board.shared-ram",
+                             memmap[VIRT_SHARED_MEM].size, 0, 
+                             RAM_SHARED, "/dev/shm/share", 
++                            false,
+                             &error_fatal);
+     memory_region_add_subregion(system_memory, 
+                 memmap[VIRT_SHARED_MEM].base, share_mem);
+diff --git a/include/hw/arm/boot.h b/include/hw/arm/boot.h
+index ce2b48b88b..e8c9a8ac77 100644
+--- a/include/hw/arm/boot.h
++++ b/include/hw/arm/boot.h
+@@ -115,6 +115,7 @@ struct arm_boot_info {
+      * required by the Linux booting ABI before the switch to non-secure.
+      */
+     bool secure_board_setup;
++    hwaddr raw_mem_start_addr;
+ 
+     arm_endianness endianness;
+ };
+diff --git a/include/hw/arm/virt.h b/include/hw/arm/virt.h
+index 79f5db17b3..498bce9366 100644
+--- a/include/hw/arm/virt.h
++++ b/include/hw/arm/virt.h
+@@ -79,9 +79,13 @@ enum {
+     VIRT_PCIE_ECAM,
+     VIRT_PLATFORM_BUS,
+     VIRT_GPIO,
++    VIRT_SECURE_GPIO,
+     VIRT_SECURE_UART,
+     VIRT_SECURE_MEM,
+     VIRT_SHARED_MEM,
++    VIRT_VINTC,
++    VIRT_PERF_MEM,
++    VIRT_STRAMASH_GPIO,
+     VIRT_PCDIMM_ACPI,
+     VIRT_ACPI_GED,
+     VIRT_NVDIMM_ACPI,
+diff --git a/include/hw/core/tcg-cpu-ops.h b/include/hw/core/tcg-cpu-ops.h
+index 72d791438c..8d8b645507 100644
+--- a/include/hw/core/tcg-cpu-ops.h
++++ b/include/hw/core/tcg-cpu-ops.h
+@@ -47,6 +47,8 @@ struct TCGCPUOps {
+     void (*do_interrupt)(CPUState *cpu);
+     /**
+      * @tlb_fill: Handle a softmmu tlb miss or user-only address fault
++     * 
++     * TODO: look at me
+      *
+      * For system mode, if the access is valid, call tlb_set_page
+      * and return true; if the access is invalid, and probe is
+diff --git a/include/hw/i386/apic_internal.h b/include/hw/i386/apic_internal.h
+index c175e7e718..a6d5a69240 100644
+--- a/include/hw/i386/apic_internal.h
++++ b/include/hw/i386/apic_internal.h
+@@ -21,6 +21,8 @@
+ #ifndef QEMU_APIC_INTERNAL_H
+ #define QEMU_APIC_INTERNAL_H
+ 
++#include "qemu/event_notifier.h"
++#include "chardev/char-fe.h"
+ #include "cpu.h"
+ #include "exec/memory.h"
+ #include "qemu/timer.h"
+@@ -148,6 +150,17 @@ struct APICCommonClass {
+      * device, but it's convenient to have it here for now.
+      */
+     void (*send_msi)(MSIMessage *msi);
++    
++    void (*process_msg_disconnect)(APICCommonState *s, uint16_t posn,Error **errp);
++    void (*process_msg_connect)(APICCommonState *s, uint16_t posn, int fd, Error **errp);
++    void (*process_msg)(APICCommonState *s, int64_t msg, int fd, Error **errp);
++    int64_t (*recv_msg)(APICCommonState *s, int *pfd, Error **errp);
++    void (*read_cb)(void *opaque, const uint8_t *buffer, int size);
++    int (*can_read_cb)(void *opaque);
++    void (*send_interrupt)(void * opaque, int target);
++    void (*recv_setup)(APICCommonState *s, Error **errp);
++    void (*interrupt_cb)(void *opaque);
++
+ };
+ 
+ struct APICCommonState {
+@@ -187,6 +200,12 @@ struct APICCommonState {
+     DeviceState *vapic;
+     hwaddr vapic_paddr; /* note: persistence via kvmvapic */
+     bool legacy_instance_id;
++
++    CharBackend chr;
++    EventNotifier eventfd[2];
++    uint64_t msg_buf; // buffer for messages
++    int msg_buffered_bytes; // number in msg_buf used
++    int vm_id;
+ };
+ 
+ typedef struct VAPICState {
+diff --git a/include/hw/intc/arm_gicv3_common.h b/include/hw/intc/arm_gicv3_common.h
+index 91491a2f66..c680caff61 100644
+--- a/include/hw/intc/arm_gicv3_common.h
++++ b/include/hw/intc/arm_gicv3_common.h
+@@ -24,6 +24,8 @@
+ #ifndef HW_ARM_GICV3_COMMON_H
+ #define HW_ARM_GICV3_COMMON_H
+ 
++#include "qemu/event_notifier.h"
++#include "chardev/char-fe.h"
+ #include "hw/sysbus.h"
+ #include "hw/intc/arm_gic_common.h"
+ #include "qom/object.h"
+@@ -249,6 +251,12 @@ struct GICv3State {
+     uint32_t gicd_nsacr[DIV_ROUND_UP(GICV3_MAXIRQ, 16)];
+ 
+     GICv3CPUState *cpu;
++
++    CharBackend chr;
++    EventNotifier eventfd[2];
++    uint64_t msg_buf; // buffer for messages
++    int msg_buffered_bytes; // number in msg_buf used
++    int vm_id;
+ };
+ 
+ #define GICV3_BITMAP_ACCESSORS(BMP)                                     \
+@@ -290,6 +298,15 @@ struct ARMGICv3CommonClass {
+ 
+     void (*pre_save)(GICv3State *s);
+     void (*post_load)(GICv3State *s);
++    void (*process_msg_disconnect)(GICv3State *s, uint16_t posn, Error **errp);
++    void (*process_msg_connect)(GICv3State *s, uint16_t posn, int fd, Error **errp);
++    void (*process_msg)(GICv3State *s, int64_t msg, int fd, Error **errp);
++    int64_t (*recv_msg)(GICv3State *s, int *pfd, Error **errp);
++    void (*read_cb)(void *opaque, const uint8_t *buffer, int size);
++    int (*can_read_cb)(void *opaque);
++    void (*send_interrupt)(void * opaque, int target);
++    void (*recv_setup)(GICv3State *s, Error **errp);
++    void (*interrupt_cb)(void *opaque);
+ };
+ 
+ void gicv3_init_irqs_and_mmio(GICv3State *s, qemu_irq_handler handler,
+diff --git a/include/hw/misc/vintc.h b/include/hw/misc/vintc.h
+new file mode 100644
+index 0000000000..3e2ad3c562
+--- /dev/null
++++ b/include/hw/misc/vintc.h
+@@ -0,0 +1,13 @@
++//
++// Created by eva on 4/4/21.
++//
++
++#ifndef HW_CHAR_VIRTUAL_INTC_H_
++#define HW_CHAR_VIRTUAL_INTC_H_
++
++#define VINTC_DEBUG 1
++#define IVSHMEM_PROTOCOL_VERSION 0
++
++#define TYPE_VINTC "vintc"
++
++#endif //HW_CHAR_VIRTUAL_INTC_H_
+diff --git a/include/qemu/plugin-memory.h b/include/qemu/plugin-memory.h
+index fbbe99474b..8bc285a9ef 100644
+--- a/include/qemu/plugin-memory.h
++++ b/include/qemu/plugin-memory.h
+@@ -23,6 +23,11 @@ struct qemu_plugin_hwaddr {
+     } v;
+ };
+ 
++struct qemu_plugin_page_counter {
++    uint64_t tlb_miss_counter;
++    uint64_t page_fault_counter;
++};
++
+ /**
+  * tlb_plugin_lookup: query last TLB lookup
+  * @cpu: cpu environment
+@@ -37,4 +42,6 @@ struct qemu_plugin_hwaddr {
+ bool tlb_plugin_lookup(CPUState *cpu, target_ulong addr, int mmu_idx,
+                        bool is_store, struct qemu_plugin_hwaddr *data);
+ 
++void tlb_plugin_read_counters(struct qemu_plugin_page_counter *ctr);
++
+ #endif /* _PLUGIN_MEMORY_H_ */
+diff --git a/include/qemu/qemu-plugin.h b/include/qemu/qemu-plugin.h
+index 97cdfd7761..ad3164e030 100644
+--- a/include/qemu/qemu-plugin.h
++++ b/include/qemu/qemu-plugin.h
+@@ -402,6 +402,7 @@ void *qemu_plugin_insn_haddr(const struct qemu_plugin_insn *insn);
+ typedef uint32_t qemu_plugin_meminfo_t;
+ /** struct qemu_plugin_hwaddr - opaque hw address handle */
+ struct qemu_plugin_hwaddr;
++struct qemu_plugin_page_counter;
+ 
+ /**
+  * qemu_plugin_mem_size_shift() - get size of access
+@@ -448,6 +449,7 @@ bool qemu_plugin_mem_is_store(qemu_plugin_meminfo_t info);
+ struct qemu_plugin_hwaddr *qemu_plugin_get_hwaddr(qemu_plugin_meminfo_t info,
+                                                   uint64_t vaddr);
+ 
++struct qemu_plugin_page_counter *qemu_plugin_get_page_counter(void)                                                                                                                                               ;
+ /*
+  * The following additional queries can be run on the hwaddr structure to
+  * return information about it - namely whether it is for an IO access and the
+diff --git a/meson.build b/meson.build
+index c6f4b0cf5e..5698c2a727 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1996,13 +1996,19 @@ softmmu_mods = []
+ foreach d, list : modules
+   foreach m, module_ss : list
+     if enable_modules and targetos != 'windows'
+-      module_ss = module_ss.apply(config_all, strict: false)
+-      sl = static_library(d + '-' + m, [genh, module_ss.sources()],
+-                          dependencies: [modulecommon, module_ss.dependencies()], pic: true)
++      module_dn = module_ss.apply(config_all, strict: false)
++      sl = static_library(d + '-' + m, [genh, module_dn.sources()],
++                          dependencies: [modulecommon, module_dn.dependencies()], pic: true)
+       if d == 'block'
+         block_mods += sl
+       else
+-        softmmu_mods += sl
++        # we only build 2 non-block modules as modules: it is the gui part
++        if d + '-' + m in [ 'ui-gtk', 'ui-sdl', 'audio-pa' ]
++          softmmu_mods += sl
++        else
++          warning('Compiling module statically: ' + d + '-' + m)
++          softmmu_ss.add_all(module_ss)
++        endif
+       endif
+     else
+       if d == 'block'
+@@ -2371,6 +2377,7 @@ if have_tools
+                install: true)
+   endif
+ 
++  
+   if 'CONFIG_IVSHMEM' in config_host
+     subdir('contrib/ivshmem-client')
+     subdir('contrib/ivshmem-server')
+diff --git a/min.sh b/min.sh
+new file mode 100755
+index 0000000000..791ac2c014
+--- /dev/null
++++ b/min.sh
+@@ -0,0 +1,2 @@
++#!/bin/bash
++./configure --target-list=aarch64-softmmu,x86_64-softmmu  --extra-cflags="-lrt -Wno-error=unused-function -Wno-error=unused-variable"   --disable-docs --disable-gtk --disable-opengl --disable-vnc --disable-virglrenderer
+diff --git a/plugins/api.c b/plugins/api.c
+index b22998cd7c..ecf04ea9bf 100644
+--- a/plugins/api.c
++++ b/plugins/api.c
+@@ -266,6 +266,7 @@ bool qemu_plugin_mem_is_store(qemu_plugin_meminfo_t info)
+ 
+ #ifdef CONFIG_SOFTMMU
+ static __thread struct qemu_plugin_hwaddr hwaddr_info;
++static __thread struct qemu_plugin_page_counter tlb_counter_info;
+ #endif
+ 
+ struct qemu_plugin_hwaddr *qemu_plugin_get_hwaddr(qemu_plugin_meminfo_t info,
+@@ -288,6 +289,13 @@ struct qemu_plugin_hwaddr *qemu_plugin_get_hwaddr(qemu_plugin_meminfo_t info,
+ #endif
+ }
+ 
++struct qemu_plugin_page_counter *qemu_plugin_get_page_counter(void)
++{
++    tlb_plugin_read_counters(&tlb_counter_info);
++    return &tlb_counter_info;
++}
++
++
+ bool qemu_plugin_hwaddr_is_io(const struct qemu_plugin_hwaddr *haddr)
+ {
+ #ifdef CONFIG_SOFTMMU
+@@ -311,8 +319,13 @@ uint64_t qemu_plugin_hwaddr_phys_addr(const struct qemu_plugin_hwaddr *haddr)
+                 error_report("Bad ram pointer %"PRIx64"", haddr->v.ram.hostaddr);
+                 abort();
+             }
++            //if (block->mr->addr < 0x0f300000ULL) {
++            //    printf("block offset is %lx\n", block->offset);
++            //    printf("offset is %lx\n", offset);
++            //    printf("mr address is %lx\n", block->mr->addr);
++            //}
+ 
+-            return block->offset + offset + block->mr->addr;
++            return block->mr->addr + offset;
+         } else {
+             MemoryRegionSection *mrs = haddr->v.io.section;
+             return haddr->v.io.offset + mrs->mr->addr;
+diff --git a/plugins/qemu-plugins.symbols b/plugins/qemu-plugins.symbols
+index 4bdb381f48..ed8195dcc5 100644
+--- a/plugins/qemu-plugins.symbols
++++ b/plugins/qemu-plugins.symbols
+@@ -31,6 +31,7 @@
+   qemu_plugin_mem_is_big_endian;
+   qemu_plugin_mem_is_store;
+   qemu_plugin_get_hwaddr;
++  qemu_plugin_get_page_counter;
+   qemu_plugin_hwaddr_is_io;
+   qemu_plugin_hwaddr_to_raddr;
+   qemu_plugin_vcpu_for_each;
+diff --git a/qom/object.c b/qom/object.c
+index 6a01d56546..baa417b4e2 100644
+--- a/qom/object.c
++++ b/qom/object.c
+@@ -314,6 +314,12 @@ static void type_initialize(TypeImpl *ti)
+         int i;
+ 
+         g_assert(parent->class_size <= ti->class_size);
++        if (!(parent->instance_size <= ti->instance_size)) {
++          printf("Name of parent is %s\n", parent->name);
++          printf("Error: size of parent instance size is %lu\n", parent->instance_size);
++          printf("Error name of self is %s\n", ti->name);
++          printf("Error: size of self instance is %lu\n", ti->instance_size);
++        }
+         g_assert(parent->instance_size <= ti->instance_size);
+         memcpy(ti->class, parent->class, parent->class_size);
+         ti->class->interfaces = NULL;
+diff --git a/scripts/.gdbinit b/scripts/.gdbinit
+new file mode 100644
+index 0000000000..5a0da9725d
+--- /dev/null
++++ b/scripts/.gdbinit
+@@ -0,0 +1,14 @@
++# GDB may have ./.gdbinit loading disabled by default.  In that case you can
++# follow the instructions it prints.  They boil down to adding the following to
++# your home directory's ~/.gdbinit file:
++#
++#   add-auto-load-safe-path /path/to/qemu/.gdbinit
++
++# Load QEMU-specific sub-commands and settings
++file ../build/qemu-system-aarch64
++source qemu-gdb.py
++b create_stramash_gpio
++b sifive_gpio_realize
++b sifive_gpio_class_init
++start
++layout src
+diff --git a/scripts/aarch64-another.sh b/scripts/aarch64-another.sh
+new file mode 100755
+index 0000000000..cc6a95832b
+--- /dev/null
++++ b/scripts/aarch64-another.sh
+@@ -0,0 +1,16 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-aarch64 \
++  -M virt \
++  -nographic \
++  -cpu cortex-a53 \
++  -smp 1 \
++  -kernel ../blobs/aarch64/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -netdev user,id=eth0 \
++  -device virtio-net-device,netdev=eth0 \
++  -drive file=../blobs/aarch64/rootfs.ext2,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0
+diff --git a/scripts/aarch64-char-client.sh b/scripts/aarch64-char-client.sh
+new file mode 100755
+index 0000000000..7acc269727
+--- /dev/null
++++ b/scripts/aarch64-char-client.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-aarch64 \
++  -M virt \
++  -monitor unix:qemu-monitor-socket,server,nowait \
++  -serial stdio \
++  -chardev socket,mux=off,id=share,path=tmp_socket \
++  -serial chardev:share \
++  -cpu cortex-a53 \
++  -smp 1 \
++  -kernel ../blobs/aarch64/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -netdev user,id=eth0 \
++  -device virtio-net-device,netdev=eth0 \
++  -drive file=../blobs/aarch64/rootfs.ext4,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0
+diff --git a/scripts/aarch64-char-server.sh b/scripts/aarch64-char-server.sh
+new file mode 100755
+index 0000000000..eb41cbd690
+--- /dev/null
++++ b/scripts/aarch64-char-server.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-aarch64 \
++  -M virt \
++  -serial stdio \
++  -chardev socket,mux=off,id=share,path=tmp_socket,server=on \
++  -serial chardev:share \
++  -cpu cortex-a53 \
++  -smp 1 \
++  -kernel ../blobs/aarch64/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -netdev user,id=eth0 \
++  -device virtio-net-device,netdev=eth0 \
++  -drive file=../blobs/aarch64/rootfs.ext2,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0
+diff --git a/scripts/aarch64-debug.sh b/scripts/aarch64-debug.sh
+new file mode 100755
+index 0000000000..69ac402804
+--- /dev/null
++++ b/scripts/aarch64-debug.sh
+@@ -0,0 +1,27 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-aarch64 \
++  -M virt \
++  -m 8G \
++  -s -S \
++  -nographic \
++  --trace "*_generate_sgi" \
++  -cpu cortex-a72 \
++  -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++  -chardev socket,path=/tmp/cross_ipi_chr,id=arm_chr \
++  -smp 1 \
++  -kernel ../../../linux/arch/arm64/boot/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -drive file=../blobs/aarch64/rootfs.ext4,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0 
++#  -kernel ../blobs/aarch64/Image \
++#  -plugin ../build/contrib/plugins/libhwprofile.so \
++#  -d plugin
++#  -monitor unix:qemu-monitor-socket,server,nowait \
++#  -netdev user,id=eth0 \
++#  -device virtio-net-device,netdev=eth0
++#  -m 1G,slots=1,maxmem=2G \
++#  -object memory-backend-file,id=mem1,share=on,mem-path=/dev/shm/ddr-share,size=1G
+diff --git a/scripts/aarch64-kernel.sh b/scripts/aarch64-kernel.sh
+new file mode 100755
+index 0000000000..9b4f64e21f
+--- /dev/null
++++ b/scripts/aarch64-kernel.sh
+@@ -0,0 +1,28 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-aarch64 \
++  -M virt \
++  -m 8G \
++  -nographic \
++  --trace "sifive_gpio_*" \
++  -cpu cortex-a72 \
++  -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++  -chardev socket,path=/tmp/cross_ipi_chr,id=arm_chr \
++  -smp 1 \
++  -kernel ../../../linux/arch/arm64/boot/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -drive file=../blobs/aarch64/rootfs.ext4,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0 
++
++#  -plugin ../build/contrib/plugins/libhwprofile.so \
++#  -d plugin \
++
++#  -kernel ../blobs/aarch64/Image \
++#  -monitor unix:qemu-monitor-socket,server,nowait \
++#  -netdev user,id=eth0 \
++#  -device virtio-net-device,netdev=eth0
++#  -m 1G,slots=1,maxmem=2G \
++#  -object memory-backend-file,id=mem1,share=on,mem-path=/dev/shm/ddr-share,size=1G
+diff --git a/scripts/aarch64-monitor.sh b/scripts/aarch64-monitor.sh
+new file mode 100755
+index 0000000000..529f8c0843
+--- /dev/null
++++ b/scripts/aarch64-monitor.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/aarch64-softmmu/qemu-system-aarch64 \
++  -M virt,secure=on \
++  -monitor unix:qemu-monitor-socket,server,nowait \
++  -nographic \
++  -cpu cortex-a53 \
++  -smp 1 \
++  -kernel ../blobs/aarch64/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -netdev user,id=eth0 \
++  -device virtio-net-device,netdev=eth0 \
++  -drive file=../blobs/aarch64/rootfs.ext4,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0
+diff --git a/scripts/aarch64-start.sh b/scripts/aarch64-start.sh
+new file mode 100755
+index 0000000000..3d516366c1
+--- /dev/null
++++ b/scripts/aarch64-start.sh
+@@ -0,0 +1,14 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-aarch64 \
++  -M virt \
++  -nographic \
++  -cpu cortex-a53 \
++  -smp 1 \
++  -kernel ../blobs/aarch64/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -drive file=../blobs/aarch64/rootfs.ext4,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0
+diff --git a/scripts/aarch64-tap.sh b/scripts/aarch64-tap.sh
+new file mode 100755
+index 0000000000..6cf1fd31d6
+--- /dev/null
++++ b/scripts/aarch64-tap.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-aarch64 \
++  -M virt \
++  -nographic \
++  -cpu cortex-a53 \
++  -smp 1 \
++  -kernel ../blobs/aarch64/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -netdev user,id=eth0 \
++  -netdev type=tap,id=net0 \
++  -device virtio-net-device,netdev=net0,mac=00:da:bc:de:02:11 \
++  -drive file=../blobs/aarch64/rootfs.ext4,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0
+diff --git a/scripts/aarch64-vintc-other.sh b/scripts/aarch64-vintc-other.sh
+new file mode 100755
+index 0000000000..4f02e98d89
+--- /dev/null
++++ b/scripts/aarch64-vintc-other.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-aarch64 \
++  -M virt \
++  -serial mon:stdio \
++  -cpu cortex-a53 \
++  -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++  -smp 1 \
++  -kernel ../blobs/aarch64/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -netdev user,id=eth0 \
++  -device virtio-net-device,netdev=eth0 \
++  -drive file=../blobs/aarch64/rootfs.ext2,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0
+diff --git a/scripts/aarch64-vintc.sh b/scripts/aarch64-vintc.sh
+new file mode 100755
+index 0000000000..fe7c29b009
+--- /dev/null
++++ b/scripts/aarch64-vintc.sh
+@@ -0,0 +1,15 @@
++#!/bin/bash
++if [ ! -d ../blobs/aarch64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-aarch64 \
++  -M virt \
++  -serial mon:stdio \
++  -cpu cortex-a53 \
++  -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++  -smp 1 \
++  -kernel ../blobs/aarch64/Image \
++  -append "rootwait root=/dev/vda console=ttyAMA0" \
++  -drive file=../blobs/aarch64/rootfs.ext4,if=none,format=raw,id=hd0 \
++  -device virtio-blk-device,drive=hd0
+diff --git a/scripts/cross_serv.sh b/scripts/cross_serv.sh
+new file mode 100755
+index 0000000000..32778a5a7c
+--- /dev/null
++++ b/scripts/cross_serv.sh
+@@ -0,0 +1,2 @@
++#!/bin/bash
++../build/contrib/ivshmem-server/ivshmem-server -S /tmp/cross_ipi_chr -v -F l 0 -n 1
+diff --git a/scripts/gmon.out b/scripts/gmon.out
+new file mode 100644
+index 0000000000..817f69da52
+Binary files /dev/null and b/scripts/gmon.out differ
+diff --git a/scripts/ivsh-server.sh b/scripts/ivsh-server.sh
+new file mode 100755
+index 0000000000..9883321f67
+--- /dev/null
++++ b/scripts/ivsh-server.sh
+@@ -0,0 +1,2 @@
++#!/bin/bash
++../build/contrib/ivshmem-server/ivshmem-server -vF -l 4K -n 1
+diff --git a/scripts/riscv64-start.sh b/scripts/riscv64-start.sh
+new file mode 100755
+index 0000000000..0a9f708d2b
+--- /dev/null
++++ b/scripts/riscv64-start.sh
+@@ -0,0 +1,15 @@
++#!/bin/bash
++if [ ! -d ../blobs/riscv64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/riscv64-softmmu/qemu-system-riscv64 \
++ -M virt \
++ -m 128M \
++ -bios ../blobs/riscv64/fw_jump.bin \
++ -nographic \
++ -kernel ../blobs/riscv64/Image \
++ -drive file=../blobs/riscv64/rootfs.img,format=raw,id=hd0 \
++ -device virtio-blk-device,drive=hd0 \
++ -append "root=/dev/vda ro console=ttyS0" \
++ -object rng-random,filename=/dev/urandom,id=rng0
+diff --git a/scripts/x64-client.sh b/scripts/x64-client.sh
+new file mode 100755
+index 0000000000..5607601e16
+--- /dev/null
++++ b/scripts/x64-client.sh
+@@ -0,0 +1,15 @@
++#!/bin/bash
++if [ ! -d ../blobs/riscv64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-x86_64 \
++ -M pc,dumpdtb=x86.dtb \
++ -m 128M \
++ -nographic \
++ -device ivshmem-doorbell,vectors=1,chardev=ivsh \
++ -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++ -chardev socket,path=/tmp/ivshmem_socket,id=ivsh \
++ -kernel ~/research/stramash/linux/arch/x86/boot/bzImage \
++ -initrd ~/research/stramash/busybox/x86/initramfs.cpio.gz \
++ -append "console=ttyS0"
+diff --git a/scripts/x64-debian.sh b/scripts/x64-debian.sh
+new file mode 100755
+index 0000000000..482a99cee6
+--- /dev/null
++++ b/scripts/x64-debian.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++if [ ! -d ../blobs/riscv64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-x86_64 \
++ -M pc \
++ -m 8G \
++ -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++ -device ivshmem-doorbell,vectors=1,chardev=ivsh \
++ -chardev socket,path=/tmp/ivshmem_socket,id=ivsh \
++ -boot d \
++ -cdrom ../blobs/i386/debian.iso \
++ -netdev tap,id=mynet0,ifname=tap0,script=no,downscript=no \
++ -net nic,model=e1000,netdev=mynet0
++# -m 1G,slots=1,maxmem=2G \
++# -object memory-backend-file,id=mem1,share=on,mem-path=/dev/shm/ddr-share,size=1G
+diff --git a/scripts/x64-ivsh.sh b/scripts/x64-ivsh.sh
+new file mode 100755
+index 0000000000..3dcbb98f2a
+--- /dev/null
++++ b/scripts/x64-ivsh.sh
+@@ -0,0 +1,13 @@
++#!/bin/bash
++if [ ! -d ../blobs/riscv64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-x86_64 \
++ -M pc \
++ -m 128M \
++ -nographic \
++ -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++ -kernel ~/research/stramash/linux/arch/x86_64/boot/bzImage \
++ -initrd ~/research/stramash/busybox/x86/initramfs.cpio.gz \
++ -append "console=ttyS0"
+diff --git a/scripts/x64-kernel.sh b/scripts/x64-kernel.sh
+new file mode 100755
+index 0000000000..19667b62ad
+--- /dev/null
++++ b/scripts/x64-kernel.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++if [ ! -d ../blobs/riscv64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-x86_64 \
++ -M pc \
++ -m 8G \
++ -nographic \
++ -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++ -chardev socket,path=/tmp/ivshmem_socket,id=ivsh \
++ -chardev socket,path=/tmp/cross_ipi_chr,id=x86_chr \
++ -device ivshmem-doorbell,vectors=1,chardev=ivsh \
++ -initrd ../blobs/x86_64/initramfs.cpio.gz \
++ -kernel ../../../linux-x86/arch/x86/boot/bzImage \
++ -append "console=ttyS0"
++# -plugin ../build/contrib/plugins/libhwprofile.so \
++# -d plugin
++
++# note that the current approach works
++# 设一个限定
++
++
++# -monitor unix:qemu-monitor-socket,server,nowait \
++# -plugin ../build/contrib/plugins/libhwprofile.so,arg=log \
++# -plugin ~/research/stramash/qemu/build/tests/plugin/libinsn.so \
++# -plugin ~/research/stramash/qemu/build/tests/plugin/libinsn.so,arg=inline \
++# -icount 2\
++# -netdev tap,id=mynet0,ifname=tap0,script=no,downscript=no \
++# -net nic,model=e1000,netdev=mynet0
++# -m 1G,slots=1,maxmem=2G \
++# -object memory-backend-file,id=mem1,share=on,mem-path=/dev/shm/ddr-share,size=1G
+diff --git a/scripts/x64-monitor.sh b/scripts/x64-monitor.sh
+new file mode 100755
+index 0000000000..9cbd3e1d60
+--- /dev/null
++++ b/scripts/x64-monitor.sh
+@@ -0,0 +1,15 @@
++#!/bin/bash
++if [ ! -d ../blobs/riscv64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-x86_64 \
++ -M pc \
++ -m 256M \
++ -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++ -monitor unix:qemu-monitor-socket-x64,server,nowait \
++ -nographic \
++ -kernel ../blobs/i386/bzImage \
++ -initrd ../blobs/i386/initramfs.cpio.gz \
++ -append "console=ttyS0 nopat" \
++ -nographic
+diff --git a/scripts/x64-start.sh b/scripts/x64-start.sh
+new file mode 100755
+index 0000000000..059f7c4809
+--- /dev/null
++++ b/scripts/x64-start.sh
+@@ -0,0 +1,13 @@
++#!/bin/bash
++if [ ! -d ../blobs/riscv64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-x86_64 \
++ -M pc \
++ -m 128M \
++ -nographic \
++ -kernel ../blobs/i386/bzImage \
++ -initrd ../blobs/i386/initramfs.cpio.gz \
++ -append "console=ttyS0" \
++ -nographic
+diff --git a/scripts/x64-test.sh b/scripts/x64-test.sh
+new file mode 100755
+index 0000000000..314b6dc518
+--- /dev/null
++++ b/scripts/x64-test.sh
+@@ -0,0 +1,15 @@
++#!/bin/bash
++if [ ! -d ../blobs/riscv64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-x86_64 \
++ -M pc,dumpdtb=x86.dtb \
++ -m 128M \
++ -nographic \
++ -device ivshmem-doorbell,vectors=1,chardev=ivsh \
++ -chardev socket,path=/tmp/ivshmem_socket,id=vintchar \
++ -chardev socket,path=/tmp/ivshmem_socket,id=ivsh \
++ -kernel ~/research/stramash/linux/arch/x86/boot/bzImage \
++ -initrd ../blobs/i386/initramfs.cpio.gz \
++ -append "console=ttyS0"
+diff --git a/scripts/x64-trace.sh b/scripts/x64-trace.sh
+new file mode 100755
+index 0000000000..ef14e8171a
+--- /dev/null
++++ b/scripts/x64-trace.sh
+@@ -0,0 +1,14 @@
++#!/bin/bash
++if [ ! -d ../blobs/riscv64 ]; then
++    echo "Binary blobs for booting doesn't exists. Please extract the gzipped tar into qemu root directory"
++    exit -1;
++fi
++../build/qemu-system-x86_64 \
++ -M pc \
++ -m 128M \
++ -nographic \
++ -kernel ../blobs/i386/bzImage \
++ -initrd ../blobs/i386/initramfs.cpio.gz \
++ -append "console=ttyS0" \
++ -trace events=/tmp/events \
++ -nographic
+diff --git a/softmmu/qdev-monitor.c b/softmmu/qdev-monitor.c
+index a9955b97a0..2dbdf94872 100644
+--- a/softmmu/qdev-monitor.c
++++ b/softmmu/qdev-monitor.c
+@@ -583,6 +583,7 @@ void qdev_set_id(DeviceState *dev, const char *id)
+     }
+ }
+ 
++// key part we're missing
+ DeviceState *qdev_device_add(QemuOpts *opts, Error **errp)
+ {
+     DeviceClass *dc;
+diff --git a/softmmu/vl.c b/softmmu/vl.c
+index aadb526138..9d6e216e53 100644
+--- a/softmmu/vl.c
++++ b/softmmu/vl.c
+@@ -1204,6 +1204,7 @@ static int device_help_func(void *opaque, QemuOpts *opts, Error **errp)
+     return qdev_device_help(opts);
+ }
+ 
++//Key part we're missing
+ static int device_init_func(void *opaque, QemuOpts *opts, Error **errp)
+ {
+     DeviceState *dev;
+@@ -2295,11 +2296,13 @@ static void configure_accelerators(const char *progname)
+ 
+ static void create_default_memdev(MachineState *ms, const char *path)
+ {
++    printf("MEMDEV: Creating default memory device\n");
+     Object *obj;
+     MachineClass *mc = MACHINE_GET_CLASS(ms);
+ 
+     obj = object_new(path ? TYPE_MEMORY_BACKEND_FILE : TYPE_MEMORY_BACKEND_RAM);
+     if (path) {
++        printf("MEMDEV: Using path");
+         object_property_set_str(obj, "mem-path", path, &error_fatal);
+     }
+     object_property_set_int(obj, "size", ms->ram_size, &error_fatal);
+diff --git a/target/i386/cpu.c b/target/i386/cpu.c
+index ad99cad0e7..1effd4cc8f 100644
+--- a/target/i386/cpu.c
++++ b/target/i386/cpu.c
+@@ -4271,6 +4271,8 @@ static PropValue kvm_default_props[] = {
+  */
+ static PropValue tcg_default_props[] = {
+     { "vme", "off" },
++    { "x2apic", "off" },
++    { "apic", "on" },
+     { NULL, NULL },
+ };
+ 
+@@ -6310,6 +6312,8 @@ static void x86_cpu_apic_create(X86CPU *cpu, Error **errp)
+                               OBJECT(cpu->apic_state));
+     object_unref(OBJECT(cpu->apic_state));
+ 
++    object_property_parse(OBJECT(cpu->apic_state), "x86-chr", "x86_chr", &error_fatal);
++
+     qdev_prop_set_uint32(cpu->apic_state, "id", cpu->apic_id);
+     /* TODO: convert to link<> */
+     apic = APIC_COMMON(cpu->apic_state);
+@@ -6317,6 +6321,7 @@ static void x86_cpu_apic_create(X86CPU *cpu, Error **errp)
+     apic->apicbase = APIC_DEFAULT_ADDRESS | MSR_IA32_APICBASE_ENABLE;
+ }
+ 
++//TODO: unlike gic, much of the apic code is in here
+ static void x86_cpu_apic_realize(X86CPU *cpu, Error **errp)
+ {
+     APICCommonState *apic;
+diff --git a/tests/plugin/insn.c b/tests/plugin/insn.c
+index c253980ec8..cc570edda7 100644
+--- a/tests/plugin/insn.c
++++ b/tests/plugin/insn.c
+@@ -17,19 +17,43 @@
+ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
+ 
+ static uint64_t insn_count;
+-static bool do_inline;
++static uint8_t icount_on;
++
++static void plugin_init(void)
++{
++    icount_on = 0;
++}
+ 
+ static void vcpu_insn_exec_before(unsigned int cpu_index, void *udata)
+ {
+-    static uint64_t last_pc;
+-    uint64_t this_pc = GPOINTER_TO_UINT(udata);
+-    if (this_pc == last_pc) {
+-        g_autofree gchar *out = g_strdup_printf("detected repeat execution @ 0x%"
+-                                                PRIx64 "\n", this_pc);
+-        qemu_plugin_outs(out);
+-    }
+-    last_pc = this_pc;
+-    insn_count++;
++    insn_count += icount_on;
++}
++
++static void vcpu_haddr(unsigned int cpu_index, qemu_plugin_meminfo_t meminfo,
++                       uint64_t vaddr, void *udata)
++{
++    struct qemu_plugin_hwaddr *hwaddr = qemu_plugin_get_hwaddr(meminfo, vaddr);
++//    struct qemu_plugin_page_counter *pgctr = qemu_plugin_get_page_counter();
++    if (!hwaddr || !qemu_plugin_hwaddr_is_io(hwaddr)) {
++        uint64_t off = qemu_plugin_hwaddr_phys_addr(hwaddr);
++        if (off >= 0x1200000000ULL) {
++//            printf("the address for memory access is %llx\n", pgctr->tlb_miss_counter);
++            icount_on = icount_on == 1 ? 0 : 1;
++        }
++        if (off > 0x100000000ULL) {
++            printf("the address for memory access is %lx\n", off);
++            if (qemu_plugin_mem_is_store(meminfo))
++            {
++                printf("this is a memory write\n");
++            }
++            else 
++            {
++                printf("this is a memory read\n");
++            }
++        }
++
++    } 
++    return;
+ }
+ 
+ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
+@@ -40,15 +64,15 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
+     for (i = 0; i < n; i++) {
+         struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);
+ 
+-        if (do_inline) {
+-            qemu_plugin_register_vcpu_insn_exec_inline(
+-                insn, QEMU_PLUGIN_INLINE_ADD_U64, &insn_count, 1);
+-        } else {
+             uint64_t vaddr = qemu_plugin_insn_vaddr(insn);
+             qemu_plugin_register_vcpu_insn_exec_cb(
+                 insn, vcpu_insn_exec_before, QEMU_PLUGIN_CB_NO_REGS,
+                 GUINT_TO_POINTER(vaddr));
+-        }
++        gpointer udata = (gpointer) (qemu_plugin_insn_vaddr(insn));
++        qemu_plugin_register_vcpu_mem_cb(insn, vcpu_haddr,
++                                         QEMU_PLUGIN_CB_NO_REGS,
++                                         QEMU_PLUGIN_MEM_RW, udata);
++
+     }
+ }
+ 
+@@ -62,9 +86,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
+                                            const qemu_info_t *info,
+                                            int argc, char **argv)
+ {
+-    if (argc && !strcmp(argv[0], "inline")) {
+-        do_inline = true;
+-    }
++    plugin_init();
+ 
+     qemu_plugin_register_vcpu_tb_trans_cb(id, vcpu_tb_trans);
+     qemu_plugin_register_atexit_cb(id, plugin_exit, NULL);
+diff --git a/util/event_notifier-posix.c b/util/event_notifier-posix.c
+index 8307013c5d..9b475b41aa 100644
+--- a/util/event_notifier-posix.c
++++ b/util/event_notifier-posix.c
+@@ -123,7 +123,7 @@ int event_notifier_test_and_clear(EventNotifier *e)
+ {
+     int value;
+     ssize_t len;
+-    char buffer[512];
++    uint64_t buffer;
+ 
+     if (!e->initialized) {
+         return 0;
+@@ -132,9 +132,9 @@ int event_notifier_test_and_clear(EventNotifier *e)
+     /* Drain the notify pipe.  For eventfd, only 8 bytes will be read.  */
+     value = 0;
+     do {
+-        len = read(e->rfd, buffer, sizeof(buffer));
++        len = read(e->rfd, &buffer, sizeof(buffer));
+         value |= (len > 0);
+-    } while ((len == -1 && errno == EINTR) || len == sizeof(buffer));
++    } while ((len == -1 && errno == EINTR));
+ 
+     return value;
+ }

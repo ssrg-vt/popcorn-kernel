@@ -1,0 +1,158 @@
+/dts-v1/;
+/ {
+ #address-cells = <1>;
+ #size-cells = <1>;
+ chosen { };
+ aliases { };
+};
+/ {
+ cpus {
+  #address-cells = <1>;
+  #size-cells = <0>;
+  cpu@0 {
+   device_type = "cpu";
+   compatible = "intel,x86";
+   d-cache-line-size = <64>;
+   reg = <0>;
+  };
+ };
+ intc: ioapic@fec00000 {
+  compatible = "intel,ioapic";
+  reg = <0xfec00000 0x1000>;
+  interrupt-controller;
+  #interrupt-cells = <3>;
+ };
+ dram0: memory@0 {
+  device_type = "memory";
+  reg = <0 ((4096) * 1024)>;
+ };
+ soc {
+  #address-cells = <1>;
+  #size-cells = <1>;
+  compatible = "simple-bus";
+  ranges;
+  uart0: uart@3f8 {
+   compatible = "ns16550";
+   reg = <0x000003f8 0x100>;
+   label = "UART_0";
+   clock-frequency = <1843200>;
+   interrupts = <4 (0x00000100 | 0x00000000 | 0x00000000) 3>;
+   interrupt-parent = <&intc>;
+   status = "disabled";
+  };
+  uart1: uart@2f8 {
+   compatible = "ns16550";
+   reg = <0x000002f8 0x100>;
+   label = "UART_1";
+   clock-frequency = <1843200>;
+   interrupts = <3 (0x00000100 | 0x00000000 | 0x00000000) 3>;
+   interrupt-parent = <&intc>;
+   status = "disabled";
+  };
+  hpet: hpet@fed00000 {
+   label = "HPET";
+   compatible = "intel,hpet";
+   reg = <0xfed00000 0x400>;
+   interrupts = <2 (0x00000000 | 0x00000000 | 0x00000000) 4>;
+   interrupt-parent = <&intc>;
+   status = "disabled";
+  };
+ };
+};
+/ {
+ model = "QEMU X86 emulator";
+ compatible = "qemu,x86_emulator";
+ flash0: flash@500000 {
+  compatible = "soc-nv-flash";
+  reg = <0x00500000 ((4096) * 1024)>;
+ };
+ aliases {
+  uart-0 = &uart0;
+  uart-1 = &uart1;
+  eeprom-0 = &eeprom0;
+  eeprom-1 = &eeprom1;
+ };
+ chosen {
+  zephyr,sram = &dram0;
+  zephyr,flash = &flash0;
+  zephyr,console = &uart0;
+  zephyr,shell-uart = &uart0;
+  zephyr,bt-uart = &uart1;
+  zephyr,uart-pipe = &uart1;
+  zephyr,bt-mon-uart = &uart1;
+  zephyr,code-partition = &slot0_partition;
+  zephyr,flash-controller = &sim_flash;
+ };
+ soc {
+  eth0: eth@febc0000 {
+   compatible = "intel,e1000";
+   reg = <0xfebc0000 0x100>;
+   label = "eth0";
+   interrupts = <11 (0x00000100 | 0x00000000 | 0x00000000) 3>;
+   interrupt-parent = <&intc>;
+   status = "okay";
+  };
+ };
+ sim_flash: sim_flash {
+  compatible = "zephyr,sim-flash";
+  label = "FLASH_SIMULATOR";
+  #address-cells = <1>;
+  #size-cells = <1>;
+  erase-value = <0xff>;
+  flash_sim0: flash_sim@0 {
+   compatible = "soc-nv-flash";
+   reg = <0x00000000 ((1024) * 1024)>;
+   erase-block-size = <1024>;
+   write-block-size = <4>;
+  };
+ };
+ eeprom1: eeprom1 {
+  status = "okay";
+  compatible = "zephyr,emu-eeprom";
+  label = "EEPROM_1";
+  size = <((4) * 1024)>;
+  pagesize = <((8) * 1024)>;
+  partition = <&eepromemu_partition>;
+  rambuf;
+ };
+ eeprom0: eeprom0 {
+  status = "okay";
+  compatible = "zephyr,sim-eeprom";
+  label = "EEPROM_0";
+  size = <((4) * 1024)>;
+ };
+};
+&uart0 {
+ status = "okay";
+ current-speed = <115200>;
+};
+&uart1 {
+ status = "okay";
+ current-speed = <115200>;
+};
+&hpet {
+ status = "okay";
+};
+&flash_sim0 {
+ partitions {
+  compatible = "fixed-partitions";
+  #address-cells = <1>;
+  #size-cells = <1>;
+  storage_partition: partition@1000 {
+   label = "storage";
+   reg = <0x00001000 0x00010000>;
+  };
+  slot0_partition: partition@11000 {
+   label = "image-0";
+   reg = <0x00011000 0x00010000>;
+  };
+  slot1_partition: partition@21000 {
+   label = "image-1";
+   reg = <0x00021000 0x00010000>;
+  };
+  eepromemu_partition: partition@31000 {
+   label = "eeprom-emu";
+   reg = <0x00031000 0x00010000>;
+  };
+ };
+};

@@ -1,0 +1,36 @@
+The target system is: Generic - 2.7.0 - x86
+The host system is: Linux - 4.9.0-15-amd64 - x86_64
+Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+Compiler: /home/ashwin/zephyr-sdk-0.13.0/x86_64-zephyr-elf/bin/x86_64-zephyr-elf-gcc 
+Build flags: -m64;
+Id flags:  
+
+The output was:
+0
+/home/ashwin/zephyr-sdk-0.13.0/x86_64-zephyr-elf/bin/../lib/gcc/x86_64-zephyr-elf/10.3.0/../../../../x86_64-zephyr-elf/bin/ld: warning: cannot find entry symbol _start; defaulting to 00000000004000b0
+
+
+Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+
+The C compiler identification is GNU, found in "/home/ashwin/bt_x64/build/CMakeFiles/3.21.1/CompilerIdC/a.out"
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+Compiler: /home/ashwin/zephyr-sdk-0.13.0/x86_64-zephyr-elf/bin/x86_64-zephyr-elf-g++ 
+Build flags: -m64;
+Id flags:  
+
+The output was:
+0
+/home/ashwin/zephyr-sdk-0.13.0/x86_64-zephyr-elf/bin/../lib/gcc/x86_64-zephyr-elf/10.3.0/../../../../x86_64-zephyr-elf/bin/ld: warning: cannot find entry symbol _start; defaulting to 00000000004000b0
+
+
+Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+
+The CXX compiler identification is GNU, found in "/home/ashwin/bt_x64/build/CMakeFiles/3.21.1/CompilerIdCXX/a.out"
+
+Checking whether the ASM compiler is GNU using "--version" matched "(GNU assembler)|(GCC)|(Free Software Foundation)":
+x86_64-zephyr-elf-gcc (crosstool-NG 1.24.0.378_e011758) 10.3.0
+Copyright (C) 2020 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+

@@ -1,0 +1,47 @@
+%compare-lengths
+%define lookup-function-name z_object_lookup
+%language=ANSI-C
+%global-table
+%struct-type
+%{
+#include <kernel.h>
+#include <toolchain.h>
+#include <syscall_handler.h>
+#include <string.h>
+%}
+struct z_object;
+static struct k_mutex kernel_mutexes[1] = {
+Z_MUTEX_INITIALIZER(kernel_mutexes[0])};
+%%
+"\x90\x30\x02\xa0\x00\x00\x00\x00", {}, K_OBJ_DRIVER_UART, 0 | K_OBJ_FLAG_DRIVER, { .unused = 0 }
+"\x18\x60\x02\xa0\x00\x00\x00\x00", {}, K_OBJ_SYS_MUTEX, 0, { .mutex = &kernel_mutexes[0] }
+"\x20\x80\x04\xa0\x00\x00\x00\x00", {}, K_OBJ_THREAD, 0, { .thread_id = 0 }
+"\x58\x81\x04\xa0\x00\x00\x00\x00", {}, K_OBJ_THREAD, 0, { .thread_id = 1 }
+"\x00\x30\x09\xa0\x00\x00\x00\x00", {}, K_OBJ_THREAD_STACK_ELEMENT, 0, { .stack_size = 24576 }
+"\x00\x90\x09\xa0\x00\x00\x00\x00", {}, K_OBJ_THREAD_STACK_ELEMENT, 0, { .stack_size = 8192 }
+%%
+struct z_object *z_object_gperf_find(const void *obj)
+{
+    return z_object_lookup((const char *)obj, sizeof(void *));
+}
+
+void z_object_gperf_wordlist_foreach(_wordlist_cb_func_t func, void *context)
+{
+    int i;
+
+    for (i = MIN_HASH_VALUE; i <= MAX_HASH_VALUE; i++) {
+        if (wordlist[i].name != NULL) {
+            func(&wordlist[i], context);
+        }
+    }
+}
+
+#ifndef CONFIG_DYNAMIC_OBJECTS
+struct z_object *z_object_find(const void *obj)
+	ALIAS_OF(z_object_gperf_find);
+
+void z_object_wordlist_foreach(_wordlist_cb_func_t func, void *context)
+	ALIAS_OF(z_object_gperf_wordlist_foreach);
+#endif
+
+uint8_t _thread_idx_map[2] = { 0xfc,  0xff, };

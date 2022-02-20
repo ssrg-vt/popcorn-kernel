@@ -1,0 +1,45 @@
+The target system is: Generic - 2.7.99 - x86
+The host system is: Linux - 5.2.21popcorn-900+ - x86_64
+Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+Compiler: /home/ashwin/zephyr-sdk-0.13.2/x86_64-zephyr-elf/bin/x86_64-zephyr-elf-gcc 
+Build flags: -m64;
+Id flags:  
+
+The output was:
+0
+/home/ashwin/zephyr-sdk-0.13.2/x86_64-zephyr-elf/bin/../lib/gcc/x86_64-zephyr-elf/10.3.0/../../../../x86_64-zephyr-elf/bin/ld: warning: cannot find entry symbol _start; defaulting to 00000000004000b0
+
+
+Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+
+The C compiler identification is GNU, found in "/home/ashwin/zephyrproject/build/CMakeFiles/3.22.1/CompilerIdC/a.out"
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+Compiler: /home/ashwin/zephyr-sdk-0.13.2/x86_64-zephyr-elf/bin/x86_64-zephyr-elf-g++ 
+Build flags: -m64;
+Id flags:  
+
+The output was:
+0
+/home/ashwin/zephyr-sdk-0.13.2/x86_64-zephyr-elf/bin/../lib/gcc/x86_64-zephyr-elf/10.3.0/../../../../x86_64-zephyr-elf/bin/ld: warning: cannot find entry symbol _start; defaulting to 00000000004000b0
+
+
+Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+
+The CXX compiler identification is GNU, found in "/home/ashwin/zephyrproject/build/CMakeFiles/3.22.1/CompilerIdCXX/a.out"
+
+Checking whether the ASM compiler is GNU using "--version" matched "(GNU assembler)|(GCC)|(Free Software Foundation)":
+x86_64-zephyr-elf-gcc (crosstool-NG 1.24.0.378_e011758) 10.3.0
+Copyright (C) 2020 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Performing C SOURCE FILE Test check_fmacro_prefix_map__home_ashwin_zephyr_for_pophype_blackscholes_x86_CMAKE_SOURCE_DIR_C__nostartfiles__nostdlib__isystem___home_ashwin_zephyr_sdk_0_13_2_x86_64_zephyr_elf_bin____lib_gcc_x86_64_zephyr_elf_10_3_0_include___isystem___home_ashwin_zephyr_sdk_0_13_2_x86_64_zephyr_elf_bin____lib_gcc_x86_64_zephyr_elf_10_3_0_include_fixed___Wl___unresolved_symbols_ignore_in_object_files__Wl___entry_0 succeeded with the following output:
+Change Dir: /home/ashwin/zephyrproject/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/ninja cmTC_4b9a4 && [1/2] Building C object CMakeFiles/cmTC_4b9a4.dir/src.c.obj
+[2/2] Linking C executable cmTC_4b9a4
+
+
+Source file was:
+int main(void) { return 0; }

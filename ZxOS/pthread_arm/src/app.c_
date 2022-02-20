@@ -1,0 +1,47 @@
+#include <pthread.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <errno.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
+#define STACKSZ (1024 + CONFIG_TEST_EXTRA_STACKSIZE)
+K_THREAD_STACK_ARRAY_DEFINE(stacks_mt, 2, STACKSZ);
+
+void *print_hello(void *arg)
+{
+	//while(1)
+	for(int i = 0 ; i < 100 ; i++)
+	{
+		printk("Hello \n");
+		usleep(USEC_PER_MSEC * 10U);
+	}
+}
+
+void *print_again(void *arg)
+{
+	//while(1)
+	for(int i = 0 ; i < 100 ; i++)
+	{
+		printk("Hello again\n");
+		usleep(USEC_PER_MSEC * 10U);
+	}
+}
+
+int main()
+{
+	pthread_attr_t attrp[2] ;
+	pthread_t new_thread[2] ;
+	pthread_attr_init(&attrp[0]);
+	pthread_attr_setstack(&attrp[0], &stacks_mt[0][0], STACKSZ);
+	int r = pthread_create(&new_thread[0], &attrp[0], print_hello, (void*)0);
+	printf("Thread one ID is %d\n",r);
+	pthread_attr_init(&attrp[1]);
+	pthread_attr_setstack(&attrp[1], &stacks_mt[0][1], STACKSZ);
+	int s = pthread_create(&new_thread[1], &attrp[1], print_again, (void*)0);
+	printf("Thread two ID is %d\n",s);
+	pthread_join(new_thread[1], NULL);
+	pthread_join(new_thread[0], NULL);
+}

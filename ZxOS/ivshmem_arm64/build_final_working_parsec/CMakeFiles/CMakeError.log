@@ -1,0 +1,24 @@
+Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+Compiler: /home/ashwin/zephyr-sdk-0.13.2/aarch64-zephyr-elf/bin/aarch64-zephyr-elf-gcc 
+Build flags: 
+Id flags:  
+
+The output was:
+1
+/home/ashwin/zephyr-sdk-0.13.2/aarch64-zephyr-elf/bin/../lib/gcc/aarch64-zephyr-elf/10.3.0/../../../../aarch64-zephyr-elf/bin/ld: /home/ashwin/zephyr-sdk-0.13.2/aarch64-zephyr-elf/bin/../lib/gcc/aarch64-zephyr-elf/10.3.0/../../../../aarch64-zephyr-elf/lib/libc.a(lib_a-exit.o): in function `exit':
+exit.c:(.text.exit+0x3c): undefined reference to `_exit'
+collect2: error: ld returned 1 exit status
+
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" failed.
+Compiler: /home/ashwin/zephyr-sdk-0.13.2/aarch64-zephyr-elf/bin/aarch64-zephyr-elf-g++ 
+Build flags: 
+Id flags:  
+
+The output was:
+1
+/home/ashwin/zephyr-sdk-0.13.2/aarch64-zephyr-elf/bin/../lib/gcc/aarch64-zephyr-elf/10.3.0/../../../../aarch64-zephyr-elf/bin/ld: /home/ashwin/zephyr-sdk-0.13.2/aarch64-zephyr-elf/bin/../lib/gcc/aarch64-zephyr-elf/10.3.0/../../../../aarch64-zephyr-elf/lib/libc.a(lib_a-exit.o): in function `exit':
+exit.c:(.text.exit+0x3c): undefined reference to `_exit'
+collect2: error: ld returned 1 exit status
+
+
