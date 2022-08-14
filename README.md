@@ -27,3 +27,5 @@ How to build:
 8. Copy build.sh from scripts/ folder to the home directory and run ./build.sh (Update the paths as needed in line 4 and 16)
 
 At this point the Petalinux image with the hardware design will be flashed to the FPGA, power off and power on the host to load the new design. 
+
+The test apps can be found in apps/ folder
