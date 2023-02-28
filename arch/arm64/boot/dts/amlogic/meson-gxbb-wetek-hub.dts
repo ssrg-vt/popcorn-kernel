@@ -12,7 +12,3 @@
 	compatible = "wetek,hub", "amlogic,meson-gxbb";
 	model = "WeTek Hub";
 };
-
-&ir {
-	linux,rc-map-name = "rc-wetek-hub";
-};

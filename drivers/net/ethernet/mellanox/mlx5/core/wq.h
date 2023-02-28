@@ -89,7 +89,6 @@ int mlx5_cqwq_create(struct mlx5_core_dev *mdev, struct mlx5_wq_param *param,
 		     void *cqc, struct mlx5_cqwq *wq,
 		     struct mlx5_wq_ctrl *wq_ctrl);
 u32 mlx5_cqwq_get_size(struct mlx5_cqwq *wq);
-u8 mlx5_cqwq_get_log_stride_size(struct mlx5_cqwq *wq);
 
 int mlx5_wq_ll_create(struct mlx5_core_dev *mdev, struct mlx5_wq_param *param,
 		      void *wqc, struct mlx5_wq_ll *wq,
@@ -133,6 +132,11 @@ static inline void mlx5_wq_cyc_pop(struct mlx5_wq_cyc *wq)
 static inline void mlx5_wq_cyc_update_db_record(struct mlx5_wq_cyc *wq)
 {
 	*wq->db = cpu_to_be32(wq->wqe_ctr);
+}
+
+static inline u16 mlx5_wq_cyc_get_ctr_wrap_cnt(struct mlx5_wq_cyc *wq, u16 ctr)
+{
+	return ctr >> wq->fbc.log_sz;
 }
 
 static inline u16 mlx5_wq_cyc_ctr2ix(struct mlx5_wq_cyc *wq, u16 ctr)

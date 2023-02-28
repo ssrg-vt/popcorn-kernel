@@ -1,9 +1,20 @@
-// SPDX-License-Identifier: ISC
 /*
  * Copyright (C) 2018 Lorenzo Bianconi <lorenzo.bianconi83@gmail.com>
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "mt76x02_usb.h"
+#include "mt76x02.h"
 
 static void mt76x02u_remove_dma_hdr(struct sk_buff *skb)
 {
@@ -42,7 +53,7 @@ int mt76x02u_skb_dma_info(struct sk_buff *skb, int port, u32 flags)
 	pad = round_up(skb->len, 4) + 4 - skb->len;
 
 	/* First packet of a A-MSDU burst keeps track of the whole burst
-	 * length, need to update length of it and the last packet.
+	 * length, need to update lenght of it and the last packet.
 	 */
 	skb_walk_frags(skb, iter) {
 		last = iter;
@@ -68,7 +79,6 @@ int mt76x02u_tx_prepare_skb(struct mt76_dev *mdev, void *data,
 	struct mt76x02_dev *dev = container_of(mdev, struct mt76x02_dev, mt76);
 	int pid, len = tx_info->skb->len, ep = q2ep(mdev->q_tx[qid].q->hw_idx);
 	struct mt76x02_txwi *txwi;
-	bool ampdu = IEEE80211_SKB_CB(tx_info->skb)->flags & IEEE80211_TX_CTL_AMPDU;
 	enum mt76_qsel qsel;
 	u32 flags;
 
@@ -79,15 +89,9 @@ int mt76x02u_tx_prepare_skb(struct mt76_dev *mdev, void *data,
 	skb_push(tx_info->skb, sizeof(*txwi));
 
 	pid = mt76_tx_status_skb_add(mdev, wcid, tx_info->skb);
-
-	/* encode packet rate for no-skb packet id to fix up status reporting */
-	if (pid == MT_PACKET_ID_NO_SKB)
-		pid = MT_PACKET_ID_HAS_RATE |
-		      (le16_to_cpu(txwi->rate) & MT_RXWI_RATE_INDEX);
-
 	txwi->pktid = pid;
 
-	if ((mt76_is_skb_pktid(pid) && ampdu) || ep == MT_EP_OUT_HCCA)
+	if (pid >= MT_PACKET_ID_FIRST || ep == MT_EP_OUT_HCCA)
 		qsel = MT_QSEL_MGMT;
 	else
 		qsel = MT_QSEL_EDCA;

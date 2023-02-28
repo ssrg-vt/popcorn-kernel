@@ -112,15 +112,10 @@ err_exit:
 static int aq_ndev_set_features(struct net_device *ndev,
 				netdev_features_t features)
 {
-	bool is_vlan_rx_strip = !!(features & NETIF_F_HW_VLAN_CTAG_RX);
-	bool is_vlan_tx_insert = !!(features & NETIF_F_HW_VLAN_CTAG_TX);
 	struct aq_nic_s *aq_nic = netdev_priv(ndev);
-	bool need_ndev_restart = false;
-	struct aq_nic_cfg_s *aq_cfg;
+	struct aq_nic_cfg_s *aq_cfg = aq_nic_get_cfg(aq_nic);
 	bool is_lro = false;
 	int err = 0;
-
-	aq_cfg = aq_nic_get_cfg(aq_nic);
 
 	if (!(features & NETIF_F_NTUPLE)) {
 		if (aq_nic->ndev->features & NETIF_F_NTUPLE) {
@@ -144,31 +139,16 @@ static int aq_ndev_set_features(struct net_device *ndev,
 
 		if (aq_cfg->is_lro != is_lro) {
 			aq_cfg->is_lro = is_lro;
-			need_ndev_restart = true;
+
+			if (netif_running(ndev)) {
+				aq_ndev_close(ndev);
+				aq_ndev_open(ndev);
+			}
 		}
 	}
-
-	if ((aq_nic->ndev->features ^ features) & NETIF_F_RXCSUM) {
+	if ((aq_nic->ndev->features ^ features) & NETIF_F_RXCSUM)
 		err = aq_nic->aq_hw_ops->hw_set_offload(aq_nic->aq_hw,
 							aq_cfg);
-
-		if (unlikely(err))
-			goto err_exit;
-	}
-
-	if (aq_cfg->is_vlan_rx_strip != is_vlan_rx_strip) {
-		aq_cfg->is_vlan_rx_strip = is_vlan_rx_strip;
-		need_ndev_restart = true;
-	}
-	if (aq_cfg->is_vlan_tx_insert != is_vlan_tx_insert) {
-		aq_cfg->is_vlan_tx_insert = is_vlan_tx_insert;
-		need_ndev_restart = true;
-	}
-
-	if (need_ndev_restart && netif_running(ndev)) {
-		aq_ndev_close(ndev);
-		aq_ndev_open(ndev);
-	}
 
 err_exit:
 	return err;
@@ -194,7 +174,9 @@ static void aq_ndev_set_multicast_settings(struct net_device *ndev)
 {
 	struct aq_nic_s *aq_nic = netdev_priv(ndev);
 
-	(void)aq_nic_set_multicast_list(aq_nic, ndev);
+	aq_nic_set_packet_filter(aq_nic, ndev->flags);
+
+	aq_nic_set_multicast_list(aq_nic, ndev);
 }
 
 static int aq_ndo_vlan_rx_add_vid(struct net_device *ndev, __be16 proto,

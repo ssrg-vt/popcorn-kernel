@@ -153,8 +153,8 @@ struct acpi_object_method {
 	} dispatch;
 
 	u32 aml_length;
-	acpi_owner_id owner_id;
 	u8 thread_count;
+	acpi_owner_id owner_id;
 };
 
 /* Flags for info_flags field above */

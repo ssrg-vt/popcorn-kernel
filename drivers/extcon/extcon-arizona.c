@@ -326,12 +326,10 @@ static void arizona_start_mic(struct arizona_extcon_info *info)
 
 	arizona_extcon_pulse_micbias(info);
 
-	ret = regmap_update_bits_check(arizona->regmap, ARIZONA_MIC_DETECT_1,
-				       ARIZONA_MICD_ENA, ARIZONA_MICD_ENA,
-				       &change);
-	if (ret < 0) {
-		dev_err(arizona->dev, "Failed to enable micd: %d\n", ret);
-	} else if (!change) {
+	regmap_update_bits_check(arizona->regmap, ARIZONA_MIC_DETECT_1,
+				 ARIZONA_MICD_ENA, ARIZONA_MICD_ENA,
+				 &change);
+	if (!change) {
 		regulator_disable(info->micvdd);
 		pm_runtime_put_autosuspend(info->dev);
 	}
@@ -343,14 +341,12 @@ static void arizona_stop_mic(struct arizona_extcon_info *info)
 	const char *widget = arizona_extcon_get_micbias(info);
 	struct snd_soc_dapm_context *dapm = arizona->dapm;
 	struct snd_soc_component *component = snd_soc_dapm_to_component(dapm);
-	bool change = false;
+	bool change;
 	int ret;
 
-	ret = regmap_update_bits_check(arizona->regmap, ARIZONA_MIC_DETECT_1,
-				       ARIZONA_MICD_ENA, 0,
-				       &change);
-	if (ret < 0)
-		dev_err(arizona->dev, "Failed to disable micd: %d\n", ret);
+	regmap_update_bits_check(arizona->regmap, ARIZONA_MIC_DETECT_1,
+				 ARIZONA_MICD_ENA, 0,
+				 &change);
 
 	ret = snd_soc_component_disable_pin(component, widget);
 	if (ret != 0)
@@ -1253,7 +1249,7 @@ static int arizona_extcon_get_micd_configs(struct device *dev,
 	int i, j;
 	u32 *vals;
 
-	nconfs = device_property_count_u32(arizona->dev, prop);
+	nconfs = device_property_read_u32_array(arizona->dev, prop, NULL, 0);
 	if (nconfs <= 0)
 		return 0;
 
@@ -1722,15 +1718,12 @@ static int arizona_extcon_remove(struct platform_device *pdev)
 	struct arizona *arizona = info->arizona;
 	int jack_irq_rise, jack_irq_fall;
 	bool change;
-	int ret;
 
-	ret = regmap_update_bits_check(arizona->regmap, ARIZONA_MIC_DETECT_1,
-				       ARIZONA_MICD_ENA, 0,
-				       &change);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to disable micd on remove: %d\n",
-			ret);
-	} else if (change) {
+	regmap_update_bits_check(arizona->regmap, ARIZONA_MIC_DETECT_1,
+				 ARIZONA_MICD_ENA, 0,
+				 &change);
+
+	if (change) {
 		regulator_disable(info->micvdd);
 		pm_runtime_put(info->dev);
 	}

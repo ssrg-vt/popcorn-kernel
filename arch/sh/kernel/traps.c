@@ -141,7 +141,7 @@ BUILD_TRAP_HANDLER(debug)
 		       SIGTRAP) == NOTIFY_STOP)
 		return;
 
-	force_sig(SIGTRAP);
+	force_sig(SIGTRAP, current);
 }
 
 /*
@@ -167,7 +167,7 @@ BUILD_TRAP_HANDLER(bug)
 	}
 #endif
 
-	force_sig(SIGTRAP);
+	force_sig(SIGTRAP, current);
 }
 
 BUILD_TRAP_HANDLER(nmi)

@@ -4,14 +4,9 @@
  */
 
 #include <linux/module.h>
-
+#include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_drv.h>
-#include <drm/drm_file.h>
-#include <drm/drm_ioctl.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drm_print.h>
-
 #include "udl_drv.h"
 
 static int udl_usb_suspend(struct usb_interface *interface,
@@ -59,7 +54,7 @@ static void udl_driver_release(struct drm_device *dev)
 }
 
 static struct drm_driver driver = {
-	.driver_features = DRIVER_MODESET | DRIVER_GEM,
+	.driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_PRIME,
 	.release = udl_driver_release,
 
 	/* gem hooks */

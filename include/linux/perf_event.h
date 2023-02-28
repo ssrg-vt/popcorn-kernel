@@ -246,7 +246,6 @@ struct perf_event;
 #define PERF_PMU_CAP_ITRACE			0x20
 #define PERF_PMU_CAP_HETEROGENEOUS_CPUS		0x40
 #define PERF_PMU_CAP_NO_EXCLUDE			0x80
-#define PERF_PMU_CAP_AUX_OUTPUT			0x100
 
 /**
  * struct pmu - generic performance monitoring unit
@@ -257,7 +256,6 @@ struct pmu {
 	struct module			*module;
 	struct device			*dev;
 	const struct attribute_group	**attr_groups;
-	const struct attribute_group	**attr_update;
 	const char			*name;
 	int				type;
 
@@ -292,7 +290,7 @@ struct pmu {
 	 *  -EBUSY	-- @event is for this PMU but PMU temporarily unavailable
 	 *  -EINVAL	-- @event is for this PMU but @event is not valid
 	 *  -EOPNOTSUPP -- @event is for this PMU, @event is valid, but not supported
-	 *  -EACCES	-- @event is for this PMU, @event is valid, but no privileges
+	 *  -EACCESS	-- @event is for this PMU, @event is valid, but no privilidges
 	 *
 	 *  0		-- @event is for this PMU and valid
 	 *
@@ -445,16 +443,6 @@ struct pmu {
 	 * caller provides necessary serialization.
 	 */
 	void (*addr_filters_sync)	(struct perf_event *event);
-					/* optional */
-
-	/*
-	 * Check if event can be used for aux_output purposes for
-	 * events of this PMU.
-	 *
-	 * Runs from perf_event_open(). Should return 0 for "no match"
-	 * or non-zero for "match".
-	 */
-	int (*aux_output_match)		(struct perf_event *event);
 					/* optional */
 
 	/*
@@ -692,9 +680,6 @@ struct perf_event {
 	struct perf_addr_filter_range	*addr_filter_ranges;
 	unsigned long			addr_filters_gen;
 
-	/* for aux_output events */
-	struct perf_event		*aux_event;
-
 	void (*destroy)(struct perf_event *);
 	struct rcu_head			rcu_head;
 
@@ -764,11 +749,6 @@ struct perf_event_context {
 	int				nr_stat;
 	int				nr_freq;
 	int				rotate_disable;
-	/*
-	 * Set when nr_events != nr_active, except tolerant to events not
-	 * necessary to be active due to scheduling constraints, such as cgroups.
-	 */
-	int				rotate_necessary;
 	refcount_t			refcount;
 	struct task_struct		*task;
 

@@ -381,15 +381,10 @@
 		};
 
 		emmc_pins: emmc {
-			mux-0 {
+			mux {
 				groups = "emmc_nand_d07",
-				       "emmc_cmd";
-				function = "emmc";
-				bias-pull-up;
-			};
-
-			mux-1 {
-				groups = "emmc_clk";
+				       "emmc_cmd",
+				       "emmc_clk";
 				function = "emmc";
 				bias-disable;
 			};
@@ -399,7 +394,7 @@
 			mux {
 				groups = "emmc_ds";
 				function = "emmc";
-				bias-pull-down;
+				bias-disable;
 			};
 		};
 
@@ -441,18 +436,13 @@
 		};
 
 		sdcard_pins: sdcard {
-			mux-0 {
+			mux {
 				groups = "sdcard_d0",
 				       "sdcard_d1",
 				       "sdcard_d2",
 				       "sdcard_d3",
-				       "sdcard_cmd";
-				function = "sdcard";
-				bias-pull-up;
-			};
-
-			mux-1 {
-				groups = "sdcard_clk";
+				       "sdcard_cmd",
+				       "sdcard_clk";
 				function = "sdcard";
 				bias-disable;
 			};
@@ -467,18 +457,13 @@
 		};
 
 		sdio_pins: sdio {
-			mux-0 {
+			mux {
 				groups = "sdio_d0",
 				       "sdio_d1",
 				       "sdio_d2",
 				       "sdio_d3",
-				       "sdio_cmd";
-				function = "sdio";
-				bias-pull-up;
-			};
-
-			mux-1 {
-				groups = "sdio_clk";
+				       "sdio_cmd",
+				       "sdio_clk";
 				function = "sdio";
 				bias-disable;
 			};
@@ -844,15 +829,4 @@
 &vpu {
 	compatible = "amlogic,meson-gxbb-vpu", "amlogic,meson-gx-vpu";
 	power-domains = <&pwrc_vpu>;
-};
-
-&vdec {
-	compatible = "amlogic,gxbb-vdec", "amlogic,gx-vdec";
-	clocks = <&clkc CLKID_DOS_PARSER>,
-		 <&clkc CLKID_DOS>,
-		 <&clkc CLKID_VDEC_1>,
-		 <&clkc CLKID_VDEC_HEVC>;
-	clock-names = "dos_parser", "dos", "vdec_1", "vdec_hevc";
-	resets = <&reset RESET_PARSER>;
-	reset-names = "esparser";
 };

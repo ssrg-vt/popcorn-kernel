@@ -25,8 +25,6 @@
 
 /* QXL cmd/ring handling */
 
-#include <linux/delay.h>
-
 #include <drm/drm_util.h>
 
 #include "qxl_drv.h"
@@ -377,7 +375,7 @@ void qxl_io_destroy_primary(struct qxl_device *qdev)
 {
 	wait_for_io_cmd(qdev, 0, QXL_IO_DESTROY_PRIMARY_ASYNC);
 	qdev->primary_bo->is_primary = false;
-	drm_gem_object_put_unlocked(&qdev->primary_bo->tbo.base);
+	drm_gem_object_put_unlocked(&qdev->primary_bo->gem_base);
 	qdev->primary_bo = NULL;
 }
 
@@ -404,7 +402,7 @@ void qxl_io_create_primary(struct qxl_device *qdev, struct qxl_bo *bo)
 	wait_for_io_cmd(qdev, 0, QXL_IO_CREATE_PRIMARY_ASYNC);
 	qdev->primary_bo = bo;
 	qdev->primary_bo->is_primary = true;
-	drm_gem_object_get(&qdev->primary_bo->tbo.base);
+	drm_gem_object_get(&qdev->primary_bo->gem_base);
 }
 
 void qxl_io_memslot_add(struct qxl_device *qdev, uint8_t id)

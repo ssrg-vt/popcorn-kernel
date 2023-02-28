@@ -238,7 +238,8 @@ retry:
 	if (nr_inline > (PAGE_SIZE - sizeof(*req)) / sizeof(struct page *))
 		nr_inline = 0;
 
-	req = kzalloc(struct_size(req, array, nr_inline), GFP_KERNEL);
+	req = kzalloc(sizeof(*req) + sizeof(struct page *) * nr_inline,
+		      GFP_KERNEL);
 	if (!req)
 		return ERR_PTR(-ENOMEM);
 
@@ -803,12 +804,7 @@ success:
 			continue;
 
 		if (cookie->inodes[i]) {
-			struct afs_vnode *iv = AFS_FS_I(cookie->inodes[i]);
-
-			if (test_bit(AFS_VNODE_UNSET, &iv->flags))
-				continue;
-
-			afs_vnode_commit_status(&fc, iv,
+			afs_vnode_commit_status(&fc, AFS_FS_I(cookie->inodes[i]),
 						scb->cb_break, NULL, scb);
 			continue;
 		}
@@ -971,58 +967,6 @@ static struct dentry *afs_lookup(struct inode *dir, struct dentry *dentry,
 }
 
 /*
- * Check the validity of a dentry under RCU conditions.
- */
-static int afs_d_revalidate_rcu(struct dentry *dentry)
-{
-	struct afs_vnode *dvnode, *vnode;
-	struct dentry *parent;
-	struct inode *dir, *inode;
-	long dir_version, de_version;
-
-	_enter("%p", dentry);
-
-	/* Check the parent directory is still valid first. */
-	parent = READ_ONCE(dentry->d_parent);
-	dir = d_inode_rcu(parent);
-	if (!dir)
-		return -ECHILD;
-	dvnode = AFS_FS_I(dir);
-	if (test_bit(AFS_VNODE_DELETED, &dvnode->flags))
-		return -ECHILD;
-
-	if (!afs_check_validity(dvnode))
-		return -ECHILD;
-
-	/* We only need to invalidate a dentry if the server's copy changed
-	 * behind our back.  If we made the change, it's no problem.  Note that
-	 * on a 32-bit system, we only have 32 bits in the dentry to store the
-	 * version.
-	 */
-	dir_version = (long)READ_ONCE(dvnode->status.data_version);
-	de_version = (long)READ_ONCE(dentry->d_fsdata);
-	if (de_version != dir_version) {
-		dir_version = (long)READ_ONCE(dvnode->invalid_before);
-		if (de_version - dir_version < 0)
-			return -ECHILD;
-	}
-
-	/* Check to see if the vnode referred to by the dentry still
-	 * has a callback.
-	 */
-	if (d_really_is_positive(dentry)) {
-		inode = d_inode_rcu(dentry);
-		if (inode) {
-			vnode = AFS_FS_I(inode);
-			if (!afs_check_validity(vnode))
-				return -ECHILD;
-		}
-	}
-
-	return 1; /* Still valid */
-}
-
-/*
  * check that a dentry lookup hit has found a valid entry
  * - NOTE! the hit can be a negative hit too, so we can't assume we have an
  *   inode
@@ -1039,7 +983,7 @@ static int afs_d_revalidate(struct dentry *dentry, unsigned int flags)
 	int ret;
 
 	if (flags & LOOKUP_RCU)
-		return afs_d_revalidate_rcu(dentry);
+		return -ECHILD;
 
 	if (d_really_is_positive(dentry)) {
 		vnode = AFS_FS_I(d_inode(dentry));
@@ -1446,12 +1390,12 @@ static int afs_dir_remove_link(struct afs_vnode *dvnode, struct dentry *dentry,
 			drop_nlink(&vnode->vfs_inode);
 			if (vnode->vfs_inode.i_nlink == 0) {
 				set_bit(AFS_VNODE_DELETED, &vnode->flags);
-				__afs_break_callback(vnode, afs_cb_break_for_unlink);
+				__afs_break_callback(vnode);
 			}
 			write_sequnlock(&vnode->cb_lock);
 			ret = 0;
 		} else {
-			afs_break_callback(vnode, afs_cb_break_for_unlink);
+			afs_break_callback(vnode);
 
 			if (test_bit(AFS_VNODE_DELETED, &vnode->flags))
 				kdebug("AFS_VNODE_DELETED");
@@ -1473,8 +1417,7 @@ static int afs_unlink(struct inode *dir, struct dentry *dentry)
 {
 	struct afs_fs_cursor fc;
 	struct afs_status_cb *scb;
-	struct afs_vnode *dvnode = AFS_FS_I(dir);
-	struct afs_vnode *vnode = AFS_FS_I(d_inode(dentry));
+	struct afs_vnode *dvnode = AFS_FS_I(dir), *vnode = NULL;
 	struct key *key;
 	bool need_rehash = false;
 	int ret;
@@ -1497,12 +1440,15 @@ static int afs_unlink(struct inode *dir, struct dentry *dentry)
 	}
 
 	/* Try to make sure we have a callback promise on the victim. */
-	ret = afs_validate(vnode, key);
-	if (ret < 0)
-		goto error_key;
+	if (d_really_is_positive(dentry)) {
+		vnode = AFS_FS_I(d_inode(dentry));
+		ret = afs_validate(vnode, key);
+		if (ret < 0)
+			goto error_key;
+	}
 
 	spin_lock(&dentry->d_lock);
-	if (d_count(dentry) > 1) {
+	if (vnode && d_count(dentry) > 1) {
 		spin_unlock(&dentry->d_lock);
 		/* Start asynchronous writeout of the inode */
 		write_inode_now(d_inode(dentry), 0);

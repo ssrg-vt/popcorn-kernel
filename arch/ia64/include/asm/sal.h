@@ -43,7 +43,6 @@
 #include <asm/pal.h>
 #include <asm/fpu.h>
 
-extern unsigned long sal_systab_phys;
 extern spinlock_t sal_lock;
 
 /* SAL spec _requires_ eight args for each call. */

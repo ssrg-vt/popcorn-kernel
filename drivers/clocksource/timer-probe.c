@@ -29,9 +29,7 @@ void __init timer_probe(void)
 
 		ret = init_func_ret(np);
 		if (ret) {
-			if (ret != -EPROBE_DEFER)
-				pr_err("Failed to initialize '%pOF': %d\n", np,
-				       ret);
+			pr_err("Failed to initialize '%pOF': %d\n", np, ret);
 			continue;
 		}
 

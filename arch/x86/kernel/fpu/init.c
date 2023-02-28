@@ -204,6 +204,12 @@ static void __init fpu__init_system_xstate_size_legacy(void)
 	 */
 
 	if (!boot_cpu_has(X86_FEATURE_FPU)) {
+		/*
+		 * Disable xsave as we do not support it if i387
+		 * emulation is enabled.
+		 */
+		setup_clear_cpu_cap(X86_FEATURE_XSAVE);
+		setup_clear_cpu_cap(X86_FEATURE_XSAVEOPT);
 		fpu_kernel_xstate_size = sizeof(struct swregs_state);
 	} else {
 		if (boot_cpu_has(X86_FEATURE_FXSR))
@@ -246,20 +252,17 @@ static void __init fpu__init_parse_early_param(void)
 	char *argptr = arg;
 	int bit;
 
-#ifdef CONFIG_X86_32
 	if (cmdline_find_option_bool(boot_command_line, "no387"))
-#ifdef CONFIG_MATH_EMULATION
 		setup_clear_cpu_cap(X86_FEATURE_FPU);
-#else
-		pr_err("Option 'no387' required CONFIG_MATH_EMULATION enabled.\n");
-#endif
 
-	if (cmdline_find_option_bool(boot_command_line, "nofxsr"))
+	if (cmdline_find_option_bool(boot_command_line, "nofxsr")) {
 		setup_clear_cpu_cap(X86_FEATURE_FXSR);
-#endif
+		setup_clear_cpu_cap(X86_FEATURE_FXSR_OPT);
+		setup_clear_cpu_cap(X86_FEATURE_XMM);
+	}
 
 	if (cmdline_find_option_bool(boot_command_line, "noxsave"))
-		setup_clear_cpu_cap(X86_FEATURE_XSAVE);
+		fpu__xstate_clear_all_cpu_caps();
 
 	if (cmdline_find_option_bool(boot_command_line, "noxsaveopt"))
 		setup_clear_cpu_cap(X86_FEATURE_XSAVEOPT);

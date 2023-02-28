@@ -241,6 +241,9 @@ extern void cleanup_highmap(void);
 #define HAVE_ARCH_UNMAPPED_AREA
 #define HAVE_ARCH_UNMAPPED_AREA_TOPDOWN
 
+#define pgtable_cache_init()   do { } while (0)
+#define check_pgt_cache()      do { } while (0)
+
 #define PAGE_AGP    PAGE_KERNEL_NOCACHE
 #define HAVE_PAGE_AGP 1
 
@@ -256,14 +259,18 @@ extern void init_extra_mapping_uc(unsigned long phys, unsigned long size);
 extern void init_extra_mapping_wb(unsigned long phys, unsigned long size);
 
 #define gup_fast_permitted gup_fast_permitted
-static inline bool gup_fast_permitted(unsigned long start, unsigned long end)
+static inline bool gup_fast_permitted(unsigned long start, int nr_pages)
 {
+	unsigned long len, end;
+
+	len = (unsigned long)nr_pages << PAGE_SHIFT;
+	end = start + len;
+	if (end < start)
+		return false;
 	if (end >> __VIRTUAL_MASK_SHIFT)
 		return false;
 	return true;
 }
-
-#include <asm/pgtable-invert.h>
 
 #endif /* !__ASSEMBLY__ */
 #endif /* _ASM_X86_PGTABLE_64_H */

@@ -272,8 +272,10 @@ static int twl6040_vibra_probe(struct platform_device *pdev)
 	}
 
 	info->irq = platform_get_irq(pdev, 0);
-	if (info->irq < 0)
+	if (info->irq < 0) {
+		dev_err(info->dev, "invalid irq\n");
 		return -EINVAL;
+	}
 
 	error = devm_request_threaded_irq(&pdev->dev, info->irq, NULL,
 					  twl6040_vib_irq_handler,

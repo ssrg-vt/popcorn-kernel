@@ -762,8 +762,10 @@ static int hvfb_probe(struct hv_device *hdev,
 	int ret;
 
 	info = framebuffer_alloc(sizeof(struct hvfb_par), &hdev->device);
-	if (!info)
+	if (!info) {
+		pr_err("No memory for framebuffer info\n");
 		return -ENOMEM;
+	}
 
 	par = info->par;
 	par->info = info;

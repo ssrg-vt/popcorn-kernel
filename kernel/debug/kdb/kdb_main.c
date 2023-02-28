@@ -830,7 +830,7 @@ static void parse_grep(const char *str)
 	cp++;
 	while (isspace(*cp))
 		cp++;
-	if (!str_has_prefix(cp, "grep ")) {
+	if (strncmp(cp, "grep ", 5)) {
 		kdb_printf("invalid 'pipe', see grephelp\n");
 		return;
 	}

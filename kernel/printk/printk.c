@@ -118,29 +118,19 @@ static unsigned int __read_mostly devkmsg_log = DEVKMSG_LOG_MASK_DEFAULT;
 
 static int __control_devkmsg(char *str)
 {
-	size_t len;
-
 	if (!str)
 		return -EINVAL;
 
-	len = str_has_prefix(str, "on");
-	if (len) {
+	if (!strncmp(str, "on", 2)) {
 		devkmsg_log = DEVKMSG_LOG_MASK_ON;
-		return len;
-	}
-
-	len = str_has_prefix(str, "off");
-	if (len) {
+		return 2;
+	} else if (!strncmp(str, "off", 3)) {
 		devkmsg_log = DEVKMSG_LOG_MASK_OFF;
-		return len;
-	}
-
-	len = str_has_prefix(str, "ratelimit");
-	if (len) {
+		return 3;
+	} else if (!strncmp(str, "ratelimit", 9)) {
 		devkmsg_log = DEVKMSG_LOG_MASK_DEFAULT;
-		return len;
+		return 9;
 	}
-
 	return -EINVAL;
 }
 

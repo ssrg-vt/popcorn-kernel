@@ -603,7 +603,6 @@ struct ip_vs_dest_user_kern {
 
 	u16			tun_type;	/* tunnel type */
 	__be16			tun_port;	/* tunnel port */
-	u16			tun_flags;	/* tunnel flags */
 };
 
 
@@ -666,7 +665,6 @@ struct ip_vs_dest {
 	atomic_t		last_weight;	/* server latest weight */
 	__u16			tun_type;	/* tunnel type */
 	__be16			tun_port;	/* tunnel port */
-	__u16			tun_flags;	/* tunnel flags */
 
 	refcount_t		refcnt;		/* reference counter */
 	struct ip_vs_stats      stats;          /* statistics */
@@ -889,7 +887,6 @@ struct netns_ipvs {
 	struct delayed_work	defense_work;   /* Work handler */
 	int			drop_rate;
 	int			drop_counter;
-	int			old_secure_tcp;
 	atomic_t		dropentry;
 	/* locks in ctl.c */
 	spinlock_t		dropentry_lock;  /* drop entry handling */
@@ -1409,9 +1406,6 @@ bool ip_vs_has_real_service(struct netns_ipvs *ipvs, int af, __u16 protocol,
 struct ip_vs_dest *
 ip_vs_find_real_service(struct netns_ipvs *ipvs, int af, __u16 protocol,
 			const union nf_inet_addr *daddr, __be16 dport);
-struct ip_vs_dest *ip_vs_find_tunnel(struct netns_ipvs *ipvs, int af,
-				     const union nf_inet_addr *daddr,
-				     __be16 tun_port);
 
 int ip_vs_use_count_inc(void);
 void ip_vs_use_count_dec(void);
@@ -1504,9 +1498,6 @@ static inline int ip_vs_todrop(struct netns_ipvs *ipvs)
 #else
 static inline int ip_vs_todrop(struct netns_ipvs *ipvs) { return 0; }
 #endif
-
-#define IP_VS_DFWD_METHOD(dest) (atomic_read(&(dest)->conn_flags) & \
-				 IP_VS_CONN_F_FWD_MASK)
 
 /* ip_vs_fwd_tag returns the forwarding tag of the connection */
 #define IP_VS_FWD_METHOD(cp)  (cp->flags & IP_VS_CONN_F_FWD_MASK)

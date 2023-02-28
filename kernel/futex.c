@@ -59,6 +59,12 @@
 
 #include <asm/futex.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/process_server.h>
+#include <popcorn/page_server.h>
+#endif
+
 #include "locking/rtmutex_common.h"
 
 /*
@@ -469,35 +475,6 @@ enum futex_access {
 	FUTEX_READ,
 	FUTEX_WRITE
 };
-
-/**
- * futex_setup_timer - set up the sleeping hrtimer.
- * @time:	ptr to the given timeout value
- * @timeout:	the hrtimer_sleeper structure to be set up
- * @flags:	futex flags
- * @range_ns:	optional range in ns
- *
- * Return: Initialized hrtimer_sleeper structure or NULL if no timeout
- *	   value given
- */
-static inline struct hrtimer_sleeper *
-futex_setup_timer(ktime_t *time, struct hrtimer_sleeper *timeout,
-		  int flags, u64 range_ns)
-{
-	if (!time)
-		return NULL;
-
-	hrtimer_init_sleeper_on_stack(timeout, (flags & FLAGS_CLOCKRT) ?
-				      CLOCK_REALTIME : CLOCK_MONOTONIC,
-				      HRTIMER_MODE_ABS);
-	/*
-	 * If range_ns is 0, calling hrtimer_set_expires_range_ns() is
-	 * effectively the same as calling hrtimer_set_expires().
-	 */
-	hrtimer_set_expires_range_ns(&timeout->timer, *time, range_ns);
-
-	return timeout;
-}
 
 /**
  * get_futex_key() - Get parameters which are the keys for a futex
@@ -2611,7 +2588,7 @@ static void futex_wait_queue_me(struct futex_hash_bucket *hb, struct futex_q *q,
 
 	/* Arm the timer */
 	if (timeout)
-		hrtimer_sleeper_start_expires(timeout, HRTIMER_MODE_ABS);
+		hrtimer_start_expires(&timeout->timer, HRTIMER_MODE_ABS);
 
 	/*
 	 * If we have been removed from the hash list, then another task
@@ -2708,24 +2685,44 @@ out:
 static int futex_wait(u32 __user *uaddr, unsigned int flags, u32 val,
 		      ktime_t *abs_time, u32 bitset)
 {
-	struct hrtimer_sleeper timeout, *to;
+	struct hrtimer_sleeper timeout, *to = NULL;
 	struct restart_block *restart;
 	struct futex_hash_bucket *hb;
 	struct futex_q q = futex_q_init;
 	int ret;
+#ifdef CONFIG_POPCORN
+	struct fault_handle *fh = NULL;
+#endif
 
 	if (!bitset)
 		return -EINVAL;
 	q.bitset = bitset;
 
-	to = futex_setup_timer(abs_time, &timeout, flags,
-			       current->timer_slack_ns);
+	if (abs_time) {
+		to = &timeout;
+
+		hrtimer_init_on_stack(&to->timer, (flags & FLAGS_CLOCKRT) ?
+				      CLOCK_REALTIME : CLOCK_MONOTONIC,
+				      HRTIMER_MODE_ABS);
+		hrtimer_init_sleeper(to, current);
+		hrtimer_set_expires_range_ns(&to->timer, *abs_time,
+					     current->timer_slack_ns);
+	}
+
 retry:
+#ifdef CONFIG_POPCORN
+	ret = page_server_get_userpage(uaddr, &fh, "wait");
+	if (ret < 0)
+		goto out;
+#endif
 	/*
 	 * Prepare to wait on uaddr. On success, holds hb lock and increments
 	 * q.key refs.
 	 */
 	ret = futex_wait_setup(uaddr, val, flags, &q, &hb);
+#ifdef CONFIG_POPCORN
+	page_server_put_userpage(fh, "wait");
+#endif
 	if (ret)
 		goto out;
 
@@ -2799,7 +2796,7 @@ static long futex_wait_restart(struct restart_block *restart)
 static int futex_lock_pi(u32 __user *uaddr, unsigned int flags,
 			 ktime_t *time, int trylock)
 {
-	struct hrtimer_sleeper timeout, *to;
+	struct hrtimer_sleeper timeout, *to = NULL;
 	struct futex_pi_state *pi_state = NULL;
 	struct rt_mutex_waiter rt_waiter;
 	struct futex_hash_bucket *hb;
@@ -2812,7 +2809,13 @@ static int futex_lock_pi(u32 __user *uaddr, unsigned int flags,
 	if (refill_pi_state_cache())
 		return -ENOMEM;
 
-	to = futex_setup_timer(time, &timeout, FLAGS_CLOCKRT, 0);
+	if (time) {
+		to = &timeout;
+		hrtimer_init_on_stack(&to->timer, CLOCK_REALTIME,
+				      HRTIMER_MODE_ABS);
+		hrtimer_init_sleeper(to, current);
+		hrtimer_set_expires(&to->timer, *time);
+	}
 
 retry:
 	ret = get_futex_key(uaddr, flags & FLAGS_SHARED, &q.key, FUTEX_WRITE);
@@ -2897,7 +2900,7 @@ retry_private:
 	}
 
 	if (unlikely(to))
-		hrtimer_sleeper_start_expires(to, HRTIMER_MODE_ABS);
+		hrtimer_start_expires(&to->timer, HRTIMER_MODE_ABS);
 
 	ret = rt_mutex_wait_proxy_lock(&q.pi_state->pi_mutex, to, &rt_waiter);
 
@@ -3209,7 +3212,7 @@ static int futex_wait_requeue_pi(u32 __user *uaddr, unsigned int flags,
 				 u32 val, ktime_t *abs_time, u32 bitset,
 				 u32 __user *uaddr2)
 {
-	struct hrtimer_sleeper timeout, *to;
+	struct hrtimer_sleeper timeout, *to = NULL;
 	struct futex_pi_state *pi_state = NULL;
 	struct rt_mutex_waiter rt_waiter;
 	struct futex_hash_bucket *hb;
@@ -3226,8 +3229,15 @@ static int futex_wait_requeue_pi(u32 __user *uaddr, unsigned int flags,
 	if (!bitset)
 		return -EINVAL;
 
-	to = futex_setup_timer(abs_time, &timeout, flags,
-			       current->timer_slack_ns);
+	if (abs_time) {
+		to = &timeout;
+		hrtimer_init_on_stack(&to->timer, (flags & FLAGS_CLOCKRT) ?
+				      CLOCK_REALTIME : CLOCK_MONOTONIC,
+				      HRTIMER_MODE_ABS);
+		hrtimer_init_sleeper(to, current);
+		hrtimer_set_expires_range_ns(&to->timer, *abs_time,
+					     current->timer_slack_ns);
+	}
 
 	/*
 	 * The waiter is allocated on our stack, manipulated by the requeue
@@ -3636,6 +3646,16 @@ long do_futex(u32 __user *uaddr, int op, u32 val, ktime_t *timeout,
 			return -ENOSYS;
 	}
 
+#ifdef CONFIG_POPCORN
+	if (distributed_process(current)) {
+		// printk("  [%d] F %x %x %x %p\n", current->pid, op, flags, val, uaddr);
+		WARN_ON(cmd != FUTEX_WAIT &&
+				cmd != FUTEX_WAIT_BITSET &&
+				cmd != FUTEX_WAKE &&
+				cmd != FUTEX_WAKE_BITSET);
+	}
+#endif
+
 	switch (cmd) {
 	case FUTEX_WAIT:
 		val3 = FUTEX_BITSET_MATCH_ANY;
@@ -3702,6 +3722,12 @@ SYSCALL_DEFINE6(futex, u32 __user *, uaddr, int, op, u32, val,
 	    cmd == FUTEX_CMP_REQUEUE_PI || cmd == FUTEX_WAKE_OP)
 		val2 = (u32) (unsigned long) utime;
 
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		return process_server_do_futex_at_remote(
+				uaddr, op, val, tp ? true : false, &ts, uaddr2, val2, val3);
+	}
+#endif
 	return do_futex(uaddr, op, val, tp, uaddr2, val2, val3);
 }
 

@@ -116,11 +116,12 @@ void lubbock_set_hexled(uint32_t value)
 
 static struct gpio_chip *lubbock_misc_wr_gc;
 
-static void lubbock_set_misc_wr(unsigned int mask, unsigned int set)
+void lubbock_set_misc_wr(unsigned int mask, unsigned int set)
 {
 	unsigned long m = mask, v = set;
 	lubbock_misc_wr_gc->set_multiple(lubbock_misc_wr_gc, &m, &v);
 }
+EXPORT_SYMBOL(lubbock_set_misc_wr);
 
 static int lubbock_udc_is_connected(void)
 {

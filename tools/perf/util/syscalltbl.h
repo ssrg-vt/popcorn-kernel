@@ -6,7 +6,6 @@ struct syscalltbl {
 	union {
 		int audit_machine;
 		struct {
-			int max_id;
 			int nr_entries;
 			void *entries;
 		} syscalls;

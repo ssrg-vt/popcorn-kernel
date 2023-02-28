@@ -34,7 +34,6 @@
 #include <linux/notifier.h>
 #include <linux/uaccess.h>
 #include <linux/gfp.h>
-#include <linux/security.h>
 
 #include <asm/cpufeature.h>
 #include <asm/msr.h>
@@ -79,10 +78,6 @@ static ssize_t msr_write(struct file *file, const char __user *buf,
 	int cpu = iminor(file_inode(file));
 	int err = 0;
 	ssize_t bytes = 0;
-
-	err = security_locked_down(LOCKDOWN_MSR);
-	if (err)
-		return err;
 
 	if (count % 8)
 		return -EINVAL;	/* Invalid chunk size */
@@ -135,9 +130,6 @@ static long msr_ioctl(struct file *file, unsigned int ioc, unsigned long arg)
 			err = -EFAULT;
 			break;
 		}
-		err = security_locked_down(LOCKDOWN_MSR);
-		if (err)
-			break;
 		err = wrmsr_safe_regs_on_cpu(cpu, regs);
 		if (err)
 			break;

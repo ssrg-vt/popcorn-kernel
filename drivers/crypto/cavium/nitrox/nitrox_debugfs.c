@@ -9,8 +9,7 @@ static int firmware_show(struct seq_file *s, void *v)
 {
 	struct nitrox_device *ndev = s->private;
 
-	seq_printf(s, "Version: %s\n", ndev->hw.fw_name[0]);
-	seq_printf(s, "Version: %s\n", ndev->hw.fw_name[1]);
+	seq_printf(s, "Version: %s\n", ndev->hw.fw_name);
 	return 0;
 }
 

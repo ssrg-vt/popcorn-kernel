@@ -643,7 +643,8 @@ static int kvaser_usb_init_one(struct kvaser_usb *dev,
 			return err;
 	}
 
-	netdev = alloc_candev(struct_size(priv, tx_contexts, dev->max_tx_urbs),
+	netdev = alloc_candev(sizeof(*priv) +
+			      dev->max_tx_urbs * sizeof(*priv->tx_contexts),
 			      dev->max_tx_urbs);
 	if (!netdev) {
 		dev_err(&dev->intf->dev, "Cannot alloc candev\n");

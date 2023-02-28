@@ -162,7 +162,6 @@ static __le16 ieee80211_duration(struct ieee80211_tx_data *tx,
 			break;
 		}
 		case NL80211_BAND_5GHZ:
-		case NL80211_BAND_6GHZ:
 			if (r->flags & IEEE80211_RATE_MANDATORY_A)
 				mrate = r->bitrate;
 			break;
@@ -3547,8 +3546,6 @@ struct sk_buff *ieee80211_tx_dequeue(struct ieee80211_hw *hw,
 	ieee80211_tx_result r;
 	struct ieee80211_vif *vif = txq->vif;
 
-	WARN_ON_ONCE(softirq_count() == 0);
-
 begin:
 	spin_lock_bh(&fq->lock);
 
@@ -4650,8 +4647,7 @@ struct sk_buff *ieee80211_beacon_get_tim(struct ieee80211_hw *hw,
 	if (!sband)
 		return bcn;
 
-	ieee80211_tx_monitor(hw_to_local(hw), copy, sband, 1, shift, false,
-			     NULL);
+	ieee80211_tx_monitor(hw_to_local(hw), copy, sband, 1, shift, false);
 
 	return bcn;
 }

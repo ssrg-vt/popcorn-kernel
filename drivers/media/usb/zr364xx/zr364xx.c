@@ -141,6 +141,7 @@ struct zr364xx_pipeinfo {
 };
 
 struct zr364xx_fmt {
+	char *name;
 	u32 fourcc;
 	int depth;
 };
@@ -148,6 +149,7 @@ struct zr364xx_fmt {
 /* image formats.  */
 static const struct zr364xx_fmt formats[] = {
 	{
+		.name = "JPG",
 		.fourcc = V4L2_PIX_FMT_JPEG,
 		.depth = 24
 	}
@@ -197,9 +199,11 @@ static int send_control_msg(struct usb_device *udev, u8 request, u16 value,
 {
 	int status;
 
-	unsigned char *transfer_buffer = kmemdup(cp, size, GFP_KERNEL);
+	unsigned char *transfer_buffer = kmalloc(size, GFP_KERNEL);
 	if (!transfer_buffer)
 		return -ENOMEM;
+
+	memcpy(transfer_buffer, cp, size);
 
 	status = usb_control_msg(udev,
 				 usb_sndctrlpipe(udev, 0),
@@ -372,7 +376,8 @@ static int buffer_prepare(struct videobuf_queue *vq, struct videobuf_buffer *vb,
 						  vb);
 	int rc;
 
-	DBG("%s, field=%d\n", __func__, field);
+	DBG("%s, field=%d, fmt name = %s\n", __func__, field,
+	    cam->fmt ? cam->fmt->name : "");
 	if (!cam->fmt)
 		return -EINVAL;
 
@@ -693,6 +698,11 @@ static int zr364xx_vidioc_querycap(struct file *file, void *priv,
 		strscpy(cap->card, cam->udev->product, sizeof(cap->card));
 	strscpy(cap->bus_info, dev_name(&cam->udev->dev),
 		sizeof(cap->bus_info));
+	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE |
+			    V4L2_CAP_READWRITE |
+			    V4L2_CAP_STREAMING;
+	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
+
 	return 0;
 }
 
@@ -746,6 +756,8 @@ static int zr364xx_vidioc_enum_fmt_vid_cap(struct file *file,
 {
 	if (f->index > 0)
 		return -EINVAL;
+	f->flags = V4L2_FMT_FLAG_COMPRESSED;
+	strscpy(f->description, formats[0].name, sizeof(f->description));
 	f->pixelformat = formats[0].fourcc;
 	return 0;
 }
@@ -1317,8 +1329,6 @@ static const struct video_device zr364xx_template = {
 	.fops = &zr364xx_fops,
 	.ioctl_ops = &zr364xx_ioctl_ops,
 	.release = video_device_release_empty,
-	.device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
-		       V4L2_CAP_STREAMING,
 };
 
 

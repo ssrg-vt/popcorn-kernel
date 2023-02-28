@@ -26,9 +26,8 @@ The control framework was created in order to implement all the rules of the
 V4L2 specification with respect to controls in a central place. And to make
 life as easy as possible for the driver developer.
 
-Note that the control framework relies on the presence of a struct
-:c:type:`v4l2_device` for V4L2 drivers and struct :c:type:`v4l2_subdev` for
-sub-device drivers.
+Note that the control framework relies on the presence of a struct v4l2_device
+for V4L2 drivers and struct v4l2_subdev for sub-device drivers.
 
 
 Objects in the framework
@@ -36,13 +35,12 @@ Objects in the framework
 
 There are two main objects:
 
-The :c:type:`v4l2_ctrl` object describes the control properties and keeps
-track of the control's value (both the current value and the proposed new
-value).
+The v4l2_ctrl object describes the control properties and keeps track of the
+control's value (both the current value and the proposed new value).
 
-:c:type:`v4l2_ctrl_handler` is the object that keeps track of controls. It
-maintains a list of v4l2_ctrl objects that it owns and another list of
-references to controls, possibly to controls owned by other handlers.
+v4l2_ctrl_handler is the object that keeps track of controls. It maintains a
+list of v4l2_ctrl objects that it owns and another list of references to
+controls, possibly to controls owned by other handlers.
 
 
 Basic usage for V4L2 and sub-device drivers
@@ -50,39 +48,21 @@ Basic usage for V4L2 and sub-device drivers
 
 1) Prepare the driver:
 
-.. code-block:: c
-
-	#include <media/v4l2-ctrls.h>
-
 1.1) Add the handler to your driver's top-level struct:
 
-For V4L2 drivers:
-
-.. code-block:: c
+.. code-block:: none
 
 	struct foo_dev {
-		...
-		struct v4l2_device v4l2_dev;
 		...
 		struct v4l2_ctrl_handler ctrl_handler;
 		...
 	};
 
-For sub-device drivers:
-
-.. code-block:: c
-
-	struct foo_dev {
-		...
-		struct v4l2_subdev sd;
-		...
-		struct v4l2_ctrl_handler ctrl_handler;
-		...
-	};
+	struct foo_dev *foo;
 
 1.2) Initialize the handler:
 
-.. code-block:: c
+.. code-block:: none
 
 	v4l2_ctrl_handler_init(&foo->ctrl_handler, nr_of_controls);
 
@@ -92,48 +72,72 @@ information. It is a hint only.
 
 1.3) Hook the control handler into the driver:
 
-For V4L2 drivers:
+1.3.1) For V4L2 drivers do this:
 
-.. code-block:: c
+.. code-block:: none
+
+	struct foo_dev {
+		...
+		struct v4l2_device v4l2_dev;
+		...
+		struct v4l2_ctrl_handler ctrl_handler;
+		...
+	};
 
 	foo->v4l2_dev.ctrl_handler = &foo->ctrl_handler;
 
-For sub-device drivers:
+Where foo->v4l2_dev is of type struct v4l2_device.
 
-.. code-block:: c
+Finally, remove all control functions from your v4l2_ioctl_ops (if any):
+vidioc_queryctrl, vidioc_query_ext_ctrl, vidioc_querymenu, vidioc_g_ctrl,
+vidioc_s_ctrl, vidioc_g_ext_ctrls, vidioc_try_ext_ctrls and vidioc_s_ext_ctrls.
+Those are now no longer needed.
+
+1.3.2) For sub-device drivers do this:
+
+.. code-block:: none
+
+	struct foo_dev {
+		...
+		struct v4l2_subdev sd;
+		...
+		struct v4l2_ctrl_handler ctrl_handler;
+		...
+	};
 
 	foo->sd.ctrl_handler = &foo->ctrl_handler;
 
+Where foo->sd is of type struct v4l2_subdev.
+
 1.4) Clean up the handler at the end:
 
-.. code-block:: c
+.. code-block:: none
 
 	v4l2_ctrl_handler_free(&foo->ctrl_handler);
 
 
 2) Add controls:
 
-You add non-menu controls by calling :c:func:`v4l2_ctrl_new_std`:
+You add non-menu controls by calling v4l2_ctrl_new_std:
 
-.. code-block:: c
+.. code-block:: none
 
 	struct v4l2_ctrl *v4l2_ctrl_new_std(struct v4l2_ctrl_handler *hdl,
 			const struct v4l2_ctrl_ops *ops,
 			u32 id, s32 min, s32 max, u32 step, s32 def);
 
-Menu and integer menu controls are added by calling
-:c:func:`v4l2_ctrl_new_std_menu`:
+Menu and integer menu controls are added by calling v4l2_ctrl_new_std_menu:
 
-.. code-block:: c
+.. code-block:: none
 
 	struct v4l2_ctrl *v4l2_ctrl_new_std_menu(struct v4l2_ctrl_handler *hdl,
 			const struct v4l2_ctrl_ops *ops,
 			u32 id, s32 max, s32 skip_mask, s32 def);
 
 Menu controls with a driver specific menu are added by calling
-:c:func:`v4l2_ctrl_new_std_menu_items`:
+v4l2_ctrl_new_std_menu_items:
 
-.. code-block:: c
+.. code-block:: none
 
        struct v4l2_ctrl *v4l2_ctrl_new_std_menu_items(
                        struct v4l2_ctrl_handler *hdl,
@@ -141,18 +145,17 @@ Menu controls with a driver specific menu are added by calling
                        s32 skip_mask, s32 def, const char * const *qmenu);
 
 Integer menu controls with a driver specific menu can be added by calling
-:c:func:`v4l2_ctrl_new_int_menu`:
+v4l2_ctrl_new_int_menu:
 
-.. code-block:: c
+.. code-block:: none
 
 	struct v4l2_ctrl *v4l2_ctrl_new_int_menu(struct v4l2_ctrl_handler *hdl,
 			const struct v4l2_ctrl_ops *ops,
 			u32 id, s32 max, s32 def, const s64 *qmenu_int);
 
-These functions are typically called right after the
-:c:func:`v4l2_ctrl_handler_init`:
+These functions are typically called right after the v4l2_ctrl_handler_init:
 
-.. code-block:: c
+.. code-block:: none
 
 	static const s64 exp_bias_qmenu[] = {
 	       -2, -1, 0, 1, 2
@@ -189,34 +192,33 @@ These functions are typically called right after the
 		return err;
 	}
 
-The :c:func:`v4l2_ctrl_new_std` function returns the v4l2_ctrl pointer to
-the new control, but if you do not need to access the pointer outside the
-control ops, then there is no need to store it.
+The v4l2_ctrl_new_std function returns the v4l2_ctrl pointer to the new
+control, but if you do not need to access the pointer outside the control ops,
+then there is no need to store it.
 
-The :c:func:`v4l2_ctrl_new_std` function will fill in most fields based on
-the control ID except for the min, max, step and default values. These are
-passed in the last four arguments. These values are driver specific while
-control attributes like type, name, flags are all global. The control's
-current value will be set to the default value.
+The v4l2_ctrl_new_std function will fill in most fields based on the control
+ID except for the min, max, step and default values. These are passed in the
+last four arguments. These values are driver specific while control attributes
+like type, name, flags are all global. The control's current value will be set
+to the default value.
 
-The :c:func:`v4l2_ctrl_new_std_menu` function is very similar but it is
-used for menu controls. There is no min argument since that is always 0 for
-menu controls, and instead of a step there is a skip_mask argument: if bit
-X is 1, then menu item X is skipped.
+The v4l2_ctrl_new_std_menu function is very similar but it is used for menu
+controls. There is no min argument since that is always 0 for menu controls,
+and instead of a step there is a skip_mask argument: if bit X is 1, then menu
+item X is skipped.
 
-The :c:func:`v4l2_ctrl_new_int_menu` function creates a new standard
-integer menu control with driver-specific items in the menu. It differs
-from v4l2_ctrl_new_std_menu in that it doesn't have the mask argument and
-takes as the last argument an array of signed 64-bit integers that form an
-exact menu item list.
+The v4l2_ctrl_new_int_menu function creates a new standard integer menu
+control with driver-specific items in the menu. It differs from
+v4l2_ctrl_new_std_menu in that it doesn't have the mask argument and takes
+as the last argument an array of signed 64-bit integers that form an exact
+menu item list.
 
-The :c:func:`v4l2_ctrl_new_std_menu_items` function is very similar to
-v4l2_ctrl_new_std_menu but takes an extra parameter qmenu, which is the
-driver specific menu for an otherwise standard menu control. A good example
-for this control is the test pattern control for capture/display/sensors
-devices that have the capability to generate test patterns. These test
-patterns are hardware specific, so the contents of the menu will vary from
-device to device.
+The v4l2_ctrl_new_std_menu_items function is very similar to
+v4l2_ctrl_new_std_menu but takes an extra parameter qmenu, which is the driver
+specific menu for an otherwise standard menu control. A good example for this
+control is the test pattern control for capture/display/sensors devices that
+have the capability to generate test patterns. These test patterns are hardware
+specific, so the contents of the menu will vary from device to device.
 
 Note that if something fails, the function will return NULL or an error and
 set ctrl_handler->error to the error code. If ctrl_handler->error was already
@@ -231,7 +233,7 @@ a bit faster that way.
 
 3) Optionally force initial control setup:
 
-.. code-block:: c
+.. code-block:: none
 
 	v4l2_ctrl_handler_setup(&foo->ctrl_handler);
 
@@ -240,9 +242,9 @@ initializes the hardware to the default control values. It is recommended
 that you do this as this ensures that both the internal data structures and
 the hardware are in sync.
 
-4) Finally: implement the :c:type:`v4l2_ctrl_ops`
+4) Finally: implement the v4l2_ctrl_ops
 
-.. code-block:: c
+.. code-block:: none
 
 	static const struct v4l2_ctrl_ops foo_ctrl_ops = {
 		.s_ctrl = foo_s_ctrl,
@@ -250,7 +252,7 @@ the hardware are in sync.
 
 Usually all you need is s_ctrl:
 
-.. code-block:: c
+.. code-block:: none
 
 	static int foo_s_ctrl(struct v4l2_ctrl *ctrl)
 	{
@@ -303,7 +305,7 @@ Accessing Control Values
 The following union is used inside the control framework to access control
 values:
 
-.. code-block:: c
+.. code-block:: none
 
 	union v4l2_ctrl_ptr {
 		s32 *p_s32;
@@ -315,7 +317,7 @@ values:
 The v4l2_ctrl struct contains these fields that can be used to access both
 current and new values:
 
-.. code-block:: c
+.. code-block:: none
 
 	s32 val;
 	struct {
@@ -328,7 +330,7 @@ current and new values:
 
 If the control has a simple s32 type type, then:
 
-.. code-block:: c
+.. code-block:: none
 
 	&ctrl->val == ctrl->p_new.p_s32
 	&ctrl->cur.val == ctrl->p_cur.p_s32
@@ -352,7 +354,7 @@ exception is for controls that return a volatile register such as a signal
 strength read-out that changes continuously. In that case you will need to
 implement g_volatile_ctrl like this:
 
-.. code-block:: c
+.. code-block:: none
 
 	static int foo_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	{
@@ -370,7 +372,7 @@ changes.
 
 To mark a control as volatile you have to set V4L2_CTRL_FLAG_VOLATILE:
 
-.. code-block:: c
+.. code-block:: none
 
 	ctrl = v4l2_ctrl_new_std(&sd->ctrl_handler, ...);
 	if (ctrl)
@@ -391,7 +393,7 @@ not to introduce deadlocks.
 Outside of the control ops you have to go through to helper functions to get
 or set a single control value safely in your driver:
 
-.. code-block:: c
+.. code-block:: none
 
 	s32 v4l2_ctrl_g_ctrl(struct v4l2_ctrl *ctrl);
 	int v4l2_ctrl_s_ctrl(struct v4l2_ctrl *ctrl, s32 val);
@@ -402,7 +404,7 @@ will result in a deadlock since these helpers lock the handler as well.
 
 You can also take the handler lock yourself:
 
-.. code-block:: c
+.. code-block:: none
 
 	mutex_lock(&state->ctrl_handler.lock);
 	pr_info("String value is '%s'\n", ctrl1->p_cur.p_char);
@@ -415,7 +417,7 @@ Menu Controls
 
 The v4l2_ctrl struct contains this union:
 
-.. code-block:: c
+.. code-block:: none
 
 	union {
 		u32 step;
@@ -443,7 +445,7 @@ Custom Controls
 
 Driver specific controls can be created using v4l2_ctrl_new_custom():
 
-.. code-block:: c
+.. code-block:: none
 
 	static const struct v4l2_ctrl_config ctrl_filter = {
 		.ops = &ctrl_custom_ops,
@@ -497,7 +499,7 @@ By default all controls are independent from the others. But in more
 complex scenarios you can get dependencies from one control to another.
 In that case you need to 'cluster' them:
 
-.. code-block:: c
+.. code-block:: none
 
 	struct foo {
 		struct v4l2_ctrl_handler ctrl_handler;
@@ -521,7 +523,7 @@ composite control. Similar to how a 'struct' works in C.
 So when s_ctrl is called with V4L2_CID_AUDIO_VOLUME as argument, you should set
 all two controls belonging to the audio_cluster:
 
-.. code-block:: c
+.. code-block:: none
 
 	static int foo_s_ctrl(struct v4l2_ctrl *ctrl)
 	{
@@ -543,7 +545,7 @@ all two controls belonging to the audio_cluster:
 
 In the example above the following are equivalent for the VOLUME case:
 
-.. code-block:: c
+.. code-block:: none
 
 	ctrl == ctrl->cluster[AUDIO_CL_VOLUME] == state->audio_cluster[AUDIO_CL_VOLUME]
 	ctrl->cluster[AUDIO_CL_MUTE] == state->audio_cluster[AUDIO_CL_MUTE]
@@ -551,7 +553,7 @@ In the example above the following are equivalent for the VOLUME case:
 In practice using cluster arrays like this becomes very tiresome. So instead
 the following equivalent method is used:
 
-.. code-block:: c
+.. code-block:: none
 
 	struct {
 		/* audio cluster */
@@ -563,7 +565,7 @@ The anonymous struct is used to clearly 'cluster' these two control pointers,
 but it serves no other purpose. The effect is the same as creating an
 array with two control pointers. So you can just do:
 
-.. code-block:: c
+.. code-block:: none
 
 	state->volume = v4l2_ctrl_new_std(&state->ctrl_handler, ...);
 	state->mute = v4l2_ctrl_new_std(&state->ctrl_handler, ...);
@@ -619,7 +621,7 @@ changing that control affects the control flags of the manual controls.
 In order to simplify this a special variation of v4l2_ctrl_cluster was
 introduced:
 
-.. code-block:: c
+.. code-block:: none
 
 	void v4l2_ctrl_auto_cluster(unsigned ncontrols, struct v4l2_ctrl **controls,
 				    u8 manual_val, bool set_volatile);
@@ -674,7 +676,7 @@ of another handler (e.g. for a video device node), then you should first add
 the controls to the first handler, add the other controls to the second
 handler and finally add the first handler to the second. For example:
 
-.. code-block:: c
+.. code-block:: none
 
 	v4l2_ctrl_new_std(&radio_ctrl_handler, &radio_ops, V4L2_CID_AUDIO_VOLUME, ...);
 	v4l2_ctrl_new_std(&radio_ctrl_handler, &radio_ops, V4L2_CID_AUDIO_MUTE, ...);
@@ -688,7 +690,7 @@ all controls.
 
 Or you can add specific controls to a handler:
 
-.. code-block:: c
+.. code-block:: none
 
 	volume = v4l2_ctrl_new_std(&video_ctrl_handler, &ops, V4L2_CID_AUDIO_VOLUME, ...);
 	v4l2_ctrl_new_std(&video_ctrl_handler, &ops, V4L2_CID_BRIGHTNESS, ...);
@@ -697,7 +699,7 @@ Or you can add specific controls to a handler:
 What you should not do is make two identical controls for two handlers.
 For example:
 
-.. code-block:: c
+.. code-block:: none
 
 	v4l2_ctrl_new_std(&radio_ctrl_handler, &radio_ops, V4L2_CID_AUDIO_MUTE, ...);
 	v4l2_ctrl_new_std(&video_ctrl_handler, &video_ops, V4L2_CID_AUDIO_MUTE, ...);
@@ -718,7 +720,7 @@ not own. For example, if you have to find a volume control from a subdev.
 
 You can do that by calling v4l2_ctrl_find:
 
-.. code-block:: c
+.. code-block:: none
 
 	struct v4l2_ctrl *volume;
 
@@ -727,7 +729,7 @@ You can do that by calling v4l2_ctrl_find:
 Since v4l2_ctrl_find will lock the handler you have to be careful where you
 use it. For example, this is not a good idea:
 
-.. code-block:: c
+.. code-block:: none
 
 	struct v4l2_ctrl_handler ctrl_handler;
 
@@ -736,7 +738,7 @@ use it. For example, this is not a good idea:
 
 ...and in video_ops.s_ctrl:
 
-.. code-block:: c
+.. code-block:: none
 
 	case V4L2_CID_BRIGHTNESS:
 		contrast = v4l2_find_ctrl(&ctrl_handler, V4L2_CID_CONTRAST);
@@ -758,7 +760,7 @@ not when it is used in consumer-level hardware. In that case you want to keep
 those low-level controls local to the subdev. You can do this by simply
 setting the 'is_private' flag of the control to 1:
 
-.. code-block:: c
+.. code-block:: none
 
 	static const struct v4l2_ctrl_config ctrl_private = {
 		.ops = &ctrl_custom_ops,
@@ -795,7 +797,7 @@ Sometimes the platform or bridge driver needs to be notified when a control
 from a sub-device driver changes. You can set a notify callback by calling
 this function:
 
-.. code-block:: c
+.. code-block:: none
 
 	void v4l2_ctrl_notify(struct v4l2_ctrl *ctrl,
 		void (*notify)(struct v4l2_ctrl *ctrl, void *priv), void *priv);

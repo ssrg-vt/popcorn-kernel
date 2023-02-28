@@ -24,7 +24,6 @@ void cache_wbinv_range(unsigned long start, unsigned long end);
 void cache_wbinv_all(void);
 
 void dma_wbinv_range(unsigned long start, unsigned long end);
-void dma_inv_range(unsigned long start, unsigned long end);
 void dma_wb_range(unsigned long start, unsigned long end);
 
 #endif

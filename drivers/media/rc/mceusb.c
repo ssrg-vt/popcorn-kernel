@@ -462,7 +462,6 @@ struct mceusb_dev {
 
 	/* usb */
 	struct usb_device *usbdev;
-	struct usb_interface *usbintf;
 	struct urb *urb_in;
 	unsigned int pipe_in;
 	struct usb_endpoint_descriptor *usb_ep_out;
@@ -519,7 +518,6 @@ struct mceusb_dev {
 	unsigned long kevent_flags;
 #		define EVENT_TX_HALT	0
 #		define EVENT_RX_HALT	1
-#		define EVENT_RST_PEND	31
 };
 
 /* MCE Device Command Strings, generally a port and command pair */
@@ -765,15 +763,8 @@ static void mceusb_dev_printdata(struct mceusb_dev *ir, u8 *buf, int buf_len,
 static void mceusb_defer_kevent(struct mceusb_dev *ir, int kevent)
 {
 	set_bit(kevent, &ir->kevent_flags);
-
-	if (test_bit(EVENT_RST_PEND, &ir->kevent_flags)) {
-		dev_dbg(ir->dev, "kevent %d dropped pending USB Reset Device",
-			kevent);
-		return;
-	}
-
 	if (!schedule_work(&ir->kevent))
-		dev_dbg(ir->dev, "kevent %d already scheduled", kevent);
+		dev_err(ir->dev, "kevent %d may have been dropped", kevent);
 	else
 		dev_dbg(ir->dev, "kevent %d scheduled", kevent);
 }
@@ -1243,8 +1234,8 @@ static void mceusb_process_ir_data(struct mceusb_dev *ir, int buf_len)
 			rawir.pulse = ((ir->buf_in[i] & MCE_PULSE_BIT) != 0);
 			rawir.duration = (ir->buf_in[i] & MCE_PULSE_MASK);
 			if (unlikely(!rawir.duration)) {
-				dev_dbg(ir->dev, "nonsensical irdata %02x with duration 0",
-					ir->buf_in[i]);
+				dev_warn(ir->dev, "nonsensical irdata %02x with duration 0",
+					 ir->buf_in[i]);
 				break;
 			}
 			if (rawir.pulse) {
@@ -1465,59 +1456,28 @@ static void mceusb_deferred_kevent(struct work_struct *work)
 		container_of(work, struct mceusb_dev, kevent);
 	int status;
 
-	dev_err(ir->dev, "kevent handler called (flags 0x%lx)",
-		ir->kevent_flags);
-
-	if (test_bit(EVENT_RST_PEND, &ir->kevent_flags)) {
-		dev_err(ir->dev, "kevent handler canceled pending USB Reset Device");
-		return;
-	}
-
 	if (test_bit(EVENT_RX_HALT, &ir->kevent_flags)) {
 		usb_unlink_urb(ir->urb_in);
 		status = usb_clear_halt(ir->usbdev, ir->pipe_in);
-		dev_err(ir->dev, "rx clear halt status = %d", status);
 		if (status < 0) {
-			/*
-			 * Unable to clear RX halt/stall.
-			 * Will need to call usb_reset_device().
-			 */
-			dev_err(ir->dev,
-				"stuck RX HALT state requires USB Reset Device to clear");
-			usb_queue_reset_device(ir->usbintf);
-			set_bit(EVENT_RST_PEND, &ir->kevent_flags);
-			clear_bit(EVENT_RX_HALT, &ir->kevent_flags);
-
-			/* Cancel all other error events and handlers */
-			clear_bit(EVENT_TX_HALT, &ir->kevent_flags);
-			return;
+			dev_err(ir->dev, "rx clear halt error %d",
+				status);
 		}
 		clear_bit(EVENT_RX_HALT, &ir->kevent_flags);
-		status = usb_submit_urb(ir->urb_in, GFP_KERNEL);
-		if (status < 0) {
-			dev_err(ir->dev, "rx unhalt submit urb error = %d",
-				status);
+		if (status == 0) {
+			status = usb_submit_urb(ir->urb_in, GFP_KERNEL);
+			if (status < 0) {
+				dev_err(ir->dev,
+					"rx unhalt submit urb error %d",
+					status);
+			}
 		}
 	}
 
 	if (test_bit(EVENT_TX_HALT, &ir->kevent_flags)) {
 		status = usb_clear_halt(ir->usbdev, ir->pipe_out);
-		dev_err(ir->dev, "tx clear halt status = %d", status);
-		if (status < 0) {
-			/*
-			 * Unable to clear TX halt/stall.
-			 * Will need to call usb_reset_device().
-			 */
-			dev_err(ir->dev,
-				"stuck TX HALT state requires USB Reset Device to clear");
-			usb_queue_reset_device(ir->usbintf);
-			set_bit(EVENT_RST_PEND, &ir->kevent_flags);
-			clear_bit(EVENT_TX_HALT, &ir->kevent_flags);
-
-			/* Cancel all other error events and handlers */
-			clear_bit(EVENT_RX_HALT, &ir->kevent_flags);
-			return;
-		}
+		if (status < 0)
+			dev_err(ir->dev, "tx clear halt error %d", status);
 		clear_bit(EVENT_TX_HALT, &ir->kevent_flags);
 	}
 }
@@ -1679,7 +1639,6 @@ static int mceusb_dev_probe(struct usb_interface *intf,
 	if (!ir->urb_in)
 		goto urb_in_alloc_fail;
 
-	ir->usbintf = intf;
 	ir->usbdev = usb_get_dev(dev);
 	ir->dev = &intf->dev;
 	ir->len_in = maxp;
@@ -1786,8 +1745,6 @@ static void mceusb_dev_disconnect(struct usb_interface *intf)
 {
 	struct usb_device *dev = interface_to_usbdev(intf);
 	struct mceusb_dev *ir = usb_get_intfdata(intf);
-
-	dev_dbg(&intf->dev, "%s called", __func__);
 
 	usb_set_intfdata(intf, NULL);
 

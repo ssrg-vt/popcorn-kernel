@@ -95,20 +95,15 @@ static void cleanup_slot(struct controller *ctrl)
 }
 
 /*
- * set_attention_status - Turns the Attention Indicator on, off or blinking
+ * set_attention_status - Turns the Amber LED for a slot on, off or blink
  */
 static int set_attention_status(struct hotplug_slot *hotplug_slot, u8 status)
 {
 	struct controller *ctrl = to_ctrl(hotplug_slot);
 	struct pci_dev *pdev = ctrl->pcie->port;
 
-	if (status)
-		status <<= PCI_EXP_SLTCTL_ATTN_IND_SHIFT;
-	else
-		status = PCI_EXP_SLTCTL_ATTN_IND_OFF;
-
 	pci_config_pm_runtime_get(pdev);
-	pciehp_set_indicators(ctrl, INDICATOR_NOOP, status);
+	pciehp_set_attention_status(ctrl, status);
 	pci_config_pm_runtime_put(pdev);
 	return 0;
 }

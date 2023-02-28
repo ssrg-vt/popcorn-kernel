@@ -42,7 +42,6 @@ Program types
 .. toctree::
    :maxdepth: 1
 
-   prog_cgroup_sockopt
    prog_cgroup_sysctl
    prog_flow_dissector
 

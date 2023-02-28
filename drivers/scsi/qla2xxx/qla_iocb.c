@@ -292,26 +292,6 @@ void qla2x00_build_scsi_iocbs_64(srb_t *sp, cmd_entry_t *cmd_pkt,
 	}
 }
 
-/*
- * Find the first handle that is not in use, starting from
- * req->current_outstanding_cmd + 1. The caller must hold the lock that is
- * associated with @req.
- */
-uint32_t qla2xxx_get_next_handle(struct req_que *req)
-{
-	uint32_t index, handle = req->current_outstanding_cmd;
-
-	for (index = 1; index < req->num_outstanding_cmds; index++) {
-		handle++;
-		if (handle == req->num_outstanding_cmds)
-			handle = 1;
-		if (!req->outstanding_cmds[handle])
-			return handle;
-	}
-
-	return 0;
-}
-
 /**
  * qla2x00_start_scsi() - Send a SCSI command to the ISP
  * @sp: command to send to the ISP
@@ -326,6 +306,7 @@ qla2x00_start_scsi(srb_t *sp)
 	scsi_qla_host_t	*vha;
 	struct scsi_cmnd *cmd;
 	uint32_t	*clr_ptr;
+	uint32_t        index;
 	uint32_t	handle;
 	cmd_entry_t	*cmd_pkt;
 	uint16_t	cnt;
@@ -358,8 +339,16 @@ qla2x00_start_scsi(srb_t *sp)
 	/* Acquire ring specific lock */
 	spin_lock_irqsave(&ha->hardware_lock, flags);
 
-	handle = qla2xxx_get_next_handle(req);
-	if (handle == 0)
+	/* Check for room in outstanding command list. */
+	handle = req->current_outstanding_cmd;
+	for (index = 1; index < req->num_outstanding_cmds; index++) {
+		handle++;
+		if (handle == req->num_outstanding_cmds)
+			handle = 1;
+		if (!req->outstanding_cmds[handle])
+			break;
+	}
+	if (index == req->num_outstanding_cmds)
 		goto queuing_error;
 
 	/* Map the sg table so we have an accurate count of sg entries needed */
@@ -621,7 +610,7 @@ qla24xx_build_scsi_type_6_iocbs(srb_t *sp, struct cmd_type_6 *cmd_pkt,
 	}
 
 	cur_seg = scsi_sglist(cmd);
-	ctx = sp->u.scmd.ct6_ctx;
+	ctx = GET_CMD_CTX_SP(sp);
 
 	while (tot_dsds) {
 		avail_dsds = (tot_dsds > QLA_DSDS_PER_IOCB) ?
@@ -954,7 +943,8 @@ alloc_and_fill:
 
 			if (sp) {
 				list_add_tail(&dsd_ptr->list,
-					      &sp->u.scmd.crc_ctx->dsd_list);
+				    &((struct crc_context *)
+					    sp->u.scmd.ctx)->dsd_list);
 
 				sp->flags |= SRB_CRC_CTX_DSD_VALID;
 			} else {
@@ -1051,7 +1041,8 @@ qla24xx_walk_and_build_sglist(struct qla_hw_data *ha, srb_t *sp,
 
 			if (sp) {
 				list_add_tail(&dsd_ptr->list,
-					      &sp->u.scmd.crc_ctx->dsd_list);
+				    &((struct crc_context *)
+					    sp->u.scmd.ctx)->dsd_list);
 
 				sp->flags |= SRB_CRC_CTX_DSD_VALID;
 			} else {
@@ -1097,7 +1088,7 @@ qla24xx_walk_and_build_prot_sglist(struct qla_hw_data *ha, srb_t *sp,
 
 		sgl = scsi_prot_sglist(cmd);
 		vha = sp->vha;
-		difctx = sp->u.scmd.crc_ctx;
+		difctx = sp->u.scmd.ctx;
 		direction_to_device = cmd->sc_data_direction == DMA_TO_DEVICE;
 		ql_dbg(ql_dbg_tgt + ql_dbg_verbose, vha, 0xe021,
 		  "%s: scsi_cmnd: %p, crc_ctx: %p, sp: %p\n",
@@ -1373,7 +1364,6 @@ qla24xx_walk_and_build_prot_sglist(struct qla_hw_data *ha, srb_t *sp,
 	cur_dsd++;
 	return 0;
 }
-
 /**
  * qla24xx_build_scsi_crc_2_iocbs() - Build IOCB command utilizing Command
  *							Type 6 IOCB types.
@@ -1437,7 +1427,7 @@ qla24xx_build_scsi_crc_2_iocbs(srb_t *sp, struct cmd_type_crc_2 *cmd_pkt,
 		bundling = 0;
 
 	/* Allocate CRC context from global pool */
-	crc_ctx_pkt = sp->u.scmd.crc_ctx =
+	crc_ctx_pkt = sp->u.scmd.ctx =
 	    dma_pool_zalloc(ha->dl_dma_pool, GFP_ATOMIC, &crc_ctx_dma);
 
 	if (!crc_ctx_pkt)
@@ -1525,7 +1515,7 @@ qla24xx_build_scsi_crc_2_iocbs(srb_t *sp, struct cmd_type_crc_2 *cmd_pkt,
 	}
 
 	if (!bundling) {
-		cur_dsd = &crc_ctx_pkt->u.nobundling.data_dsd[0];
+		cur_dsd = &crc_ctx_pkt->u.nobundling.data_dsd;
 	} else {
 		/*
 		 * Configure Bundling if we need to fetch interlaving
@@ -1535,7 +1525,7 @@ qla24xx_build_scsi_crc_2_iocbs(srb_t *sp, struct cmd_type_crc_2 *cmd_pkt,
 		crc_ctx_pkt->u.bundling.dif_byte_count = cpu_to_le32(dif_bytes);
 		crc_ctx_pkt->u.bundling.dseg_count = cpu_to_le16(tot_dsds -
 							tot_prot_dsds);
-		cur_dsd = &crc_ctx_pkt->u.bundling.data_dsd[0];
+		cur_dsd = &crc_ctx_pkt->u.bundling.data_dsd;
 	}
 
 	/* Finish the common fields of CRC pkt */
@@ -1593,6 +1583,7 @@ qla24xx_start_scsi(srb_t *sp)
 	int		nseg;
 	unsigned long   flags;
 	uint32_t	*clr_ptr;
+	uint32_t        index;
 	uint32_t	handle;
 	struct cmd_type_7 *cmd_pkt;
 	uint16_t	cnt;
@@ -1620,8 +1611,16 @@ qla24xx_start_scsi(srb_t *sp)
 	/* Acquire ring specific lock */
 	spin_lock_irqsave(&ha->hardware_lock, flags);
 
-	handle = qla2xxx_get_next_handle(req);
-	if (handle == 0)
+	/* Check for room in outstanding command list. */
+	handle = req->current_outstanding_cmd;
+	for (index = 1; index < req->num_outstanding_cmds; index++) {
+		handle++;
+		if (handle == req->num_outstanding_cmds)
+			handle = 1;
+		if (!req->outstanding_cmds[handle])
+			break;
+	}
+	if (index == req->num_outstanding_cmds)
 		goto queuing_error;
 
 	/* Map the sg table so we have an accurate count of sg entries needed */
@@ -1724,6 +1723,7 @@ qla24xx_dif_start_scsi(srb_t *sp)
 	int			nseg;
 	unsigned long		flags;
 	uint32_t		*clr_ptr;
+	uint32_t		index;
 	uint32_t		handle;
 	uint16_t		cnt;
 	uint16_t		req_cnt = 0;
@@ -1764,8 +1764,17 @@ qla24xx_dif_start_scsi(srb_t *sp)
 	/* Acquire ring specific lock */
 	spin_lock_irqsave(&ha->hardware_lock, flags);
 
-	handle = qla2xxx_get_next_handle(req);
-	if (handle == 0)
+	/* Check for room in outstanding command list. */
+	handle = req->current_outstanding_cmd;
+	for (index = 1; index < req->num_outstanding_cmds; index++) {
+		handle++;
+		if (handle == req->num_outstanding_cmds)
+			handle = 1;
+		if (!req->outstanding_cmds[handle])
+			break;
+	}
+
+	if (index == req->num_outstanding_cmds)
 		goto queuing_error;
 
 	/* Compute number of required data segments */
@@ -1910,6 +1919,7 @@ qla2xxx_start_scsi_mq(srb_t *sp)
 	int		nseg;
 	unsigned long   flags;
 	uint32_t	*clr_ptr;
+	uint32_t        index;
 	uint32_t	handle;
 	struct cmd_type_7 *cmd_pkt;
 	uint16_t	cnt;
@@ -1940,8 +1950,16 @@ qla2xxx_start_scsi_mq(srb_t *sp)
 		vha->marker_needed = 0;
 	}
 
-	handle = qla2xxx_get_next_handle(req);
-	if (handle == 0)
+	/* Check for room in outstanding command list. */
+	handle = req->current_outstanding_cmd;
+	for (index = 1; index < req->num_outstanding_cmds; index++) {
+		handle++;
+		if (handle == req->num_outstanding_cmds)
+			handle = 1;
+		if (!req->outstanding_cmds[handle])
+			break;
+	}
+	if (index == req->num_outstanding_cmds)
 		goto queuing_error;
 
 	/* Map the sg table so we have an accurate count of sg entries needed */
@@ -2045,6 +2063,7 @@ qla2xxx_dif_start_scsi_mq(srb_t *sp)
 	int			nseg;
 	unsigned long		flags;
 	uint32_t		*clr_ptr;
+	uint32_t		index;
 	uint32_t		handle;
 	uint16_t		cnt;
 	uint16_t		req_cnt = 0;
@@ -2099,8 +2118,17 @@ qla2xxx_dif_start_scsi_mq(srb_t *sp)
 		vha->marker_needed = 0;
 	}
 
-	handle = qla2xxx_get_next_handle(req);
-	if (handle == 0)
+	/* Check for room in outstanding command list. */
+	handle = req->current_outstanding_cmd;
+	for (index = 1; index < req->num_outstanding_cmds; index++) {
+		handle++;
+		if (handle == req->num_outstanding_cmds)
+			handle = 1;
+		if (!req->outstanding_cmds[handle])
+			break;
+	}
+
+	if (index == req->num_outstanding_cmds)
 		goto queuing_error;
 
 	/* Compute number of required data segments */
@@ -2247,7 +2275,7 @@ __qla2x00_alloc_iocbs(struct qla_qpair *qpair, srb_t *sp)
 	struct qla_hw_data *ha = vha->hw;
 	struct req_que *req = qpair->req;
 	device_reg_t *reg = ISP_QUE_REG(ha, req->id);
-	uint32_t handle;
+	uint32_t index, handle;
 	request_t *pkt;
 	uint16_t cnt, req_cnt;
 
@@ -2287,8 +2315,16 @@ __qla2x00_alloc_iocbs(struct qla_qpair *qpair, srb_t *sp)
 		goto queuing_error;
 
 	if (sp) {
-		handle = qla2xxx_get_next_handle(req);
-		if (handle == 0) {
+		/* Check for room in outstanding command list. */
+		handle = req->current_outstanding_cmd;
+		for (index = 1; index < req->num_outstanding_cmds; index++) {
+			handle++;
+			if (handle == req->num_outstanding_cmds)
+				handle = 1;
+			if (!req->outstanding_cmds[handle])
+				break;
+		}
+		if (index == req->num_outstanding_cmds) {
 			ql_log(ql_log_warn, vha, 0x700b,
 			    "No room on outstanding cmd array.\n");
 			goto queuing_error;
@@ -2504,11 +2540,13 @@ void qla2x00_init_timer(srb_t *sp, unsigned long tmo)
 	sp->free = qla2x00_sp_free;
 	if (IS_QLAFX00(sp->vha->hw) && sp->type == SRB_FXIOCB_DCMD)
 		init_completion(&sp->u.iocb_cmd.u.fxiocb.fxiocb_comp);
-	sp->start_timer = 1;
+	add_timer(&sp->u.iocb_cmd.timer);
 }
 
-static void qla2x00_els_dcmd_sp_free(srb_t *sp)
+static void
+qla2x00_els_dcmd_sp_free(void *data)
 {
+	srb_t *sp = data;
 	struct srb_iocb *elsio = &sp->u.iocb_cmd;
 
 	kfree(sp->fcport);
@@ -2538,8 +2576,10 @@ qla2x00_els_dcmd_iocb_timeout(void *data)
 	complete(&lio->u.els_logo.comp);
 }
 
-static void qla2x00_els_dcmd_sp_done(srb_t *sp, int res)
+static void
+qla2x00_els_dcmd_sp_done(void *ptr, int res)
 {
+	srb_t *sp = ptr;
 	fc_port_t *fcport = sp->fcport;
 	struct srb_iocb *lio = &sp->u.iocb_cmd;
 	struct scsi_qla_host *vha = sp->vha;
@@ -2656,20 +2696,19 @@ qla24xx_els_logo_iocb(srb_t *sp, struct els_entry_24xx *els_iocb)
 	els_iocb->port_id[0] = sp->fcport->d_id.b.al_pa;
 	els_iocb->port_id[1] = sp->fcport->d_id.b.area;
 	els_iocb->port_id[2] = sp->fcport->d_id.b.domain;
-	/* For SID the byte order is different than DID */
-	els_iocb->s_id[1] = vha->d_id.b.al_pa;
-	els_iocb->s_id[2] = vha->d_id.b.area;
-	els_iocb->s_id[0] = vha->d_id.b.domain;
+	els_iocb->s_id[0] = vha->d_id.b.al_pa;
+	els_iocb->s_id[1] = vha->d_id.b.area;
+	els_iocb->s_id[2] = vha->d_id.b.domain;
+	els_iocb->control_flags = 0;
 
 	if (elsio->u.els_logo.els_cmd == ELS_DCMD_PLOGI) {
-		els_iocb->control_flags = 0;
 		els_iocb->tx_byte_count = els_iocb->tx_len =
-			cpu_to_le32(sizeof(struct els_plogi_payload));
+			sizeof(struct els_plogi_payload);
 		put_unaligned_le64(elsio->u.els_plogi.els_plogi_pyld_dma,
 				   &els_iocb->tx_address);
 		els_iocb->rx_dsd_count = 1;
 		els_iocb->rx_byte_count = els_iocb->rx_len =
-			cpu_to_le32(sizeof(struct els_plogi_payload));
+			sizeof(struct els_plogi_payload);
 		put_unaligned_le64(elsio->u.els_plogi.els_resp_pyld_dma,
 				   &els_iocb->rx_address);
 
@@ -2678,9 +2717,7 @@ qla24xx_els_logo_iocb(srb_t *sp, struct els_entry_24xx *els_iocb)
 		ql_dump_buffer(ql_log_info, vha, 0x0109,
 		    (uint8_t *)els_iocb, 0x70);
 	} else {
-		els_iocb->control_flags = 1 << 13;
-		els_iocb->tx_byte_count =
-			cpu_to_le32(sizeof(struct els_logo_payload));
+		els_iocb->tx_byte_count = sizeof(struct els_logo_payload);
 		put_unaligned_le64(elsio->u.els_logo.els_logo_pyld_dma,
 				   &els_iocb->tx_address);
 		els_iocb->tx_len = cpu_to_le32(sizeof(struct els_logo_payload));
@@ -2718,23 +2755,10 @@ qla2x00_els_dcmd2_iocb_timeout(void *data)
 	sp->done(sp, QLA_FUNCTION_TIMEOUT);
 }
 
-void qla2x00_els_dcmd2_free(scsi_qla_host_t *vha, struct els_plogi *els_plogi)
+static void
+qla2x00_els_dcmd2_sp_done(void *ptr, int res)
 {
-	if (els_plogi->els_plogi_pyld)
-		dma_free_coherent(&vha->hw->pdev->dev,
-				  els_plogi->tx_size,
-				  els_plogi->els_plogi_pyld,
-				  els_plogi->els_plogi_pyld_dma);
-
-	if (els_plogi->els_resp_pyld)
-		dma_free_coherent(&vha->hw->pdev->dev,
-				  els_plogi->rx_size,
-				  els_plogi->els_resp_pyld,
-				  els_plogi->els_resp_pyld_dma);
-}
-
-static void qla2x00_els_dcmd2_sp_done(srb_t *sp, int res)
-{
+	srb_t *sp = ptr;
 	fc_port_t *fcport = sp->fcport;
 	struct srb_iocb *lio = &sp->u.iocb_cmd;
 	struct scsi_qla_host *vha = sp->vha;
@@ -2756,16 +2780,26 @@ static void qla2x00_els_dcmd2_sp_done(srb_t *sp, int res)
 		} else {
 			memset(&ea, 0, sizeof(ea));
 			ea.fcport = fcport;
-			ea.data[0] = MBS_COMMAND_COMPLETE;
-			ea.sp = sp;
-			qla24xx_handle_plogi_done_event(vha, &ea);
+			ea.rc = res;
+			ea.event = FCME_ELS_PLOGI_DONE;
+			qla2x00_fcport_event_handler(vha, &ea);
 		}
 
 		e = qla2x00_alloc_work(vha, QLA_EVT_UNMAP);
 		if (!e) {
 			struct srb_iocb *elsio = &sp->u.iocb_cmd;
 
-			qla2x00_els_dcmd2_free(vha, &elsio->u.els_plogi);
+			if (elsio->u.els_plogi.els_plogi_pyld)
+				dma_free_coherent(&sp->vha->hw->pdev->dev,
+				    elsio->u.els_plogi.tx_size,
+				    elsio->u.els_plogi.els_plogi_pyld,
+				    elsio->u.els_plogi.els_plogi_pyld_dma);
+
+			if (elsio->u.els_plogi.els_resp_pyld)
+				dma_free_coherent(&sp->vha->hw->pdev->dev,
+				    elsio->u.els_plogi.rx_size,
+				    elsio->u.els_plogi.els_resp_pyld,
+				    elsio->u.els_plogi.els_resp_pyld_dma);
 			sp->free(sp);
 			return;
 		}
@@ -2865,7 +2899,18 @@ qla24xx_els_dcmd2_iocb(scsi_qla_host_t *vha, int els_opcode,
 
 out:
 	fcport->flags &= ~(FCF_ASYNC_SENT);
-	qla2x00_els_dcmd2_free(vha, &elsio->u.els_plogi);
+	if (elsio->u.els_plogi.els_plogi_pyld)
+		dma_free_coherent(&sp->vha->hw->pdev->dev,
+		    elsio->u.els_plogi.tx_size,
+		    elsio->u.els_plogi.els_plogi_pyld,
+		    elsio->u.els_plogi.els_plogi_pyld_dma);
+
+	if (elsio->u.els_plogi.els_resp_pyld)
+		dma_free_coherent(&sp->vha->hw->pdev->dev,
+		    elsio->u.els_plogi.rx_size,
+		    elsio->u.els_plogi.els_resp_pyld,
+		    elsio->u.els_plogi.els_resp_pyld_dma);
+
 	sp->free(sp);
 done:
 	return rval;
@@ -3070,6 +3115,7 @@ qla82xx_start_scsi(srb_t *sp)
 	unsigned long   flags;
 	struct scsi_cmnd *cmd;
 	uint32_t	*clr_ptr;
+	uint32_t        index;
 	uint32_t	handle;
 	uint16_t	cnt;
 	uint16_t	req_cnt;
@@ -3109,8 +3155,16 @@ qla82xx_start_scsi(srb_t *sp)
 	/* Acquire ring specific lock */
 	spin_lock_irqsave(&ha->hardware_lock, flags);
 
-	handle = qla2xxx_get_next_handle(req);
-	if (handle == 0)
+	/* Check for room in outstanding command list. */
+	handle = req->current_outstanding_cmd;
+	for (index = 1; index < req->num_outstanding_cmds; index++) {
+		handle++;
+		if (handle == req->num_outstanding_cmds)
+			handle = 1;
+		if (!req->outstanding_cmds[handle])
+			break;
+	}
+	if (index == req->num_outstanding_cmds)
 		goto queuing_error;
 
 	/* Map the sg table so we have an accurate count of sg entries needed */
@@ -3181,7 +3235,7 @@ sufficient_dsds:
 				goto queuing_error;
 		}
 
-		ctx = sp->u.scmd.ct6_ctx =
+		ctx = sp->u.scmd.ctx =
 		    mempool_alloc(ha->ctx_mempool, GFP_ATOMIC);
 		if (!ctx) {
 			ql_log(ql_log_fatal, vha, 0x3010,
@@ -3377,9 +3431,9 @@ queuing_error:
 	if (tot_dsds)
 		scsi_dma_unmap(cmd);
 
-	if (sp->u.scmd.crc_ctx) {
-		mempool_free(sp->u.scmd.crc_ctx, ha->ctx_mempool);
-		sp->u.scmd.crc_ctx = NULL;
+	if (sp->u.scmd.ctx) {
+		mempool_free(sp->u.scmd.ctx, ha->ctx_mempool);
+		sp->u.scmd.ctx = NULL;
 	}
 	spin_unlock_irqrestore(&ha->hardware_lock, flags);
 
@@ -3614,9 +3668,6 @@ qla2x00_start_sp(srb_t *sp)
 		break;
 	}
 
-	if (sp->start_timer)
-		add_timer(&sp->u.iocb_cmd.timer);
-
 	wmb();
 	qla2x00_start_iocbs(vha, qp->req);
 done:
@@ -3718,6 +3769,7 @@ qla2x00_start_bidir(srb_t *sp, struct scsi_qla_host *vha, uint32_t tot_dsds)
 	struct qla_hw_data *ha = vha->hw;
 	unsigned long flags;
 	uint32_t handle;
+	uint32_t index;
 	uint16_t req_cnt;
 	uint16_t cnt;
 	uint32_t *clr_ptr;
@@ -3742,8 +3794,17 @@ qla2x00_start_bidir(srb_t *sp, struct scsi_qla_host *vha, uint32_t tot_dsds)
 	/* Acquire ring specific lock */
 	spin_lock_irqsave(&ha->hardware_lock, flags);
 
-	handle = qla2xxx_get_next_handle(req);
-	if (handle == 0) {
+	/* Check for room in outstanding command list. */
+	handle = req->current_outstanding_cmd;
+	for (index = 1; index < req->num_outstanding_cmds; index++) {
+		handle++;
+		if (handle == req->num_outstanding_cmds)
+			handle = 1;
+		if (!req->outstanding_cmds[handle])
+			break;
+	}
+
+	if (index == req->num_outstanding_cmds) {
 		rval = EXT_STATUS_BUSY;
 		goto queuing_error;
 	}

@@ -87,7 +87,7 @@ struct module;
 
 struct device_node;
 struct videomode;
-struct dma_resv;
+struct reservation_object;
 struct dma_buf_attachment;
 
 struct pci_dev;

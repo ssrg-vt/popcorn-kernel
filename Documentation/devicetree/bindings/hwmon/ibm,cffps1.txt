@@ -1,10 +1,8 @@
-Device-tree bindings for IBM Common Form Factor Power Supply Versions 1 and 2
------------------------------------------------------------------------------
+Device-tree bindings for IBM Common Form Factor Power Supply Version 1
+----------------------------------------------------------------------
 
 Required properties:
- - compatible				: Must be one of the following:
-						"ibm,cffps1"
-						"ibm,cffps2"
+ - compatible = "ibm,cffps1";
  - reg = < I2C bus address >;		: Address of the power supply on the
 					  I2C bus.
 

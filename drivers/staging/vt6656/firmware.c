@@ -30,87 +30,98 @@ int vnt_download_firmware(struct vnt_private *priv)
 {
 	struct device *dev = &priv->usb->dev;
 	const struct firmware *fw;
+	int status;
 	void *buffer = NULL;
+	bool result = false;
 	u16 length;
-	int ii;
-	int ret = 0;
+	int ii, rc;
 
 	dev_dbg(dev, "---->Download firmware\n");
 
-	ret = request_firmware(&fw, FIRMWARE_NAME, dev);
-	if (ret) {
+	rc = request_firmware(&fw, FIRMWARE_NAME, dev);
+	if (rc) {
 		dev_err(dev, "firmware file %s request failed (%d)\n",
-			FIRMWARE_NAME, ret);
-		goto end;
+			FIRMWARE_NAME, rc);
+			goto out;
 	}
 
 	buffer = kmalloc(FIRMWARE_CHUNK_SIZE, GFP_KERNEL);
-	if (!buffer) {
-		ret = -ENOMEM;
+	if (!buffer)
 		goto free_fw;
-	}
 
 	for (ii = 0; ii < fw->size; ii += FIRMWARE_CHUNK_SIZE) {
 		length = min_t(int, fw->size - ii, FIRMWARE_CHUNK_SIZE);
 		memcpy(buffer, fw->data + ii, length);
 
-		ret = vnt_control_out(priv, 0, 0x1200 + ii, 0x0000, length,
-				      buffer);
-		if (ret)
-			goto free_buffer;
+		status = vnt_control_out(priv,
+					 0,
+					 0x1200 + ii,
+					 0x0000,
+					 length,
+					 buffer);
 
 		dev_dbg(dev, "Download firmware...%d %zu\n", ii, fw->size);
+
+		if (status != STATUS_SUCCESS)
+			goto free_fw;
 	}
 
-free_buffer:
-	kfree(buffer);
+	result = true;
 free_fw:
 	release_firmware(fw);
-end:
-	return ret;
+
+out:
+	kfree(buffer);
+
+	return result;
 }
 MODULE_FIRMWARE(FIRMWARE_NAME);
 
 int vnt_firmware_branch_to_sram(struct vnt_private *priv)
 {
+	int status;
+
 	dev_dbg(&priv->usb->dev, "---->Branch to Sram\n");
 
-	return vnt_control_out(priv, 1, 0x1200, 0x0000, 0, NULL);
+	status = vnt_control_out(priv,
+				 1,
+				 0x1200,
+				 0x0000,
+				 0,
+				 NULL);
+	return status == STATUS_SUCCESS;
 }
 
 int vnt_check_firmware_version(struct vnt_private *priv)
 {
-	int ret = 0;
+	int status;
 
-	ret = vnt_control_in(priv, MESSAGE_TYPE_READ, 0,
-			     MESSAGE_REQUEST_VERSION, 2,
-			     (u8 *)&priv->firmware_version);
-	if (ret) {
-		dev_dbg(&priv->usb->dev,
-			"Could not get firmware version: %d.\n", ret);
-		goto end;
+	status = vnt_control_in(priv,
+				MESSAGE_TYPE_READ,
+				0,
+				MESSAGE_REQUEST_VERSION,
+				2,
+				(u8 *)&priv->firmware_version);
+
+	dev_dbg(&priv->usb->dev, "Firmware Version [%04x]\n",
+		priv->firmware_version);
+
+	if (status != STATUS_SUCCESS) {
+		dev_dbg(&priv->usb->dev, "Firmware Invalid.\n");
+		return false;
+	}
+	if (priv->firmware_version == 0xFFFF) {
+		dev_dbg(&priv->usb->dev, "In Loader.\n");
+		return false;
 	}
 
 	dev_dbg(&priv->usb->dev, "Firmware Version [%04x]\n",
 		priv->firmware_version);
 
-	if (priv->firmware_version == 0xFFFF) {
-		dev_dbg(&priv->usb->dev, "In Loader.\n");
-		ret = -EINVAL;
-		goto end;
-	}
-
 	if (priv->firmware_version < FIRMWARE_VERSION) {
 		/* branch to loader for download new firmware */
-		ret = vnt_firmware_branch_to_sram(priv);
-		if (ret) {
-			dev_dbg(&priv->usb->dev,
-				"Could not branch to SRAM: %d.\n", ret);
-		} else {
-			ret = -EINVAL;
-		}
+		vnt_firmware_branch_to_sram(priv);
+		return false;
 	}
-
-end:
-	return ret;
+	return true;
 }

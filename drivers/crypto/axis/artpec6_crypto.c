@@ -2854,6 +2854,7 @@ static int artpec6_crypto_probe(struct platform_device *pdev)
 	struct artpec6_crypto *ac;
 	struct device *dev = &pdev->dev;
 	void __iomem *base;
+	struct resource *res;
 	int irq;
 	int err;
 
@@ -2866,7 +2867,8 @@ static int artpec6_crypto_probe(struct platform_device *pdev)
 
 	variant = (enum artpec6_crypto_variant)match->data;
 
-	base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 

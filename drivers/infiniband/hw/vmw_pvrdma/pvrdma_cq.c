@@ -92,19 +92,20 @@ int pvrdma_req_notify_cq(struct ib_cq *ibcq,
 
 /**
  * pvrdma_create_cq - create completion queue
- * @ibcq: Allocated CQ
+ * @ibdev: the device
  * @attr: completion queue attributes
  * @udata: user data
  *
- * @return: 0 on success
+ * @return: ib_cq completion queue pointer on success,
+ *          otherwise returns negative errno.
  */
-int pvrdma_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
-		     struct ib_udata *udata)
+struct ib_cq *pvrdma_create_cq(struct ib_device *ibdev,
+			       const struct ib_cq_init_attr *attr,
+			       struct ib_udata *udata)
 {
-	struct ib_device *ibdev = ibcq->device;
 	int entries = attr->cqe;
 	struct pvrdma_dev *dev = to_vdev(ibdev);
-	struct pvrdma_cq *cq = to_vcq(ibcq);
+	struct pvrdma_cq *cq;
 	int ret;
 	int npages;
 	unsigned long flags;
@@ -112,7 +113,7 @@ int pvrdma_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 	union pvrdma_cmd_resp rsp;
 	struct pvrdma_cmd_create_cq *cmd = &req.create_cq;
 	struct pvrdma_cmd_create_cq_resp *resp = &rsp.create_cq_resp;
-	struct pvrdma_create_cq_resp cq_resp = {};
+	struct pvrdma_create_cq_resp cq_resp = {0};
 	struct pvrdma_create_cq ucmd;
 	struct pvrdma_ucontext *context = rdma_udata_to_drv_context(
 		udata, struct pvrdma_ucontext, ibucontext);
@@ -121,10 +122,16 @@ int pvrdma_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 
 	entries = roundup_pow_of_two(entries);
 	if (entries < 1 || entries > dev->dsr->caps.max_cqe)
-		return -EINVAL;
+		return ERR_PTR(-EINVAL);
 
 	if (!atomic_add_unless(&dev->num_cqs, 1, dev->dsr->caps.max_cq))
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
+
+	cq = kzalloc(sizeof(*cq), GFP_KERNEL);
+	if (!cq) {
+		atomic_dec(&dev->num_cqs);
+		return ERR_PTR(-ENOMEM);
+	}
 
 	cq->ibcq.cqe = entries;
 	cq->is_kernel = !udata;
@@ -204,19 +211,22 @@ int pvrdma_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 			dev_warn(&dev->pdev->dev,
 				 "failed to copy back udata\n");
 			pvrdma_destroy_cq(&cq->ibcq, udata);
-			return -EINVAL;
+			return ERR_PTR(-EINVAL);
 		}
 	}
 
-	return 0;
+	return &cq->ibcq;
 
 err_page_dir:
 	pvrdma_page_dir_cleanup(dev, &cq->pdir);
 err_umem:
-	ib_umem_release(cq->umem);
+	if (!cq->is_kernel)
+		ib_umem_release(cq->umem);
 err_cq:
 	atomic_dec(&dev->num_cqs);
-	return ret;
+	kfree(cq);
+
+	return ERR_PTR(ret);
 }
 
 static void pvrdma_free_cq(struct pvrdma_dev *dev, struct pvrdma_cq *cq)
@@ -225,17 +235,21 @@ static void pvrdma_free_cq(struct pvrdma_dev *dev, struct pvrdma_cq *cq)
 		complete(&cq->free);
 	wait_for_completion(&cq->free);
 
-	ib_umem_release(cq->umem);
+	if (!cq->is_kernel)
+		ib_umem_release(cq->umem);
 
 	pvrdma_page_dir_cleanup(dev, &cq->pdir);
+	kfree(cq);
 }
 
 /**
  * pvrdma_destroy_cq - destroy completion queue
  * @cq: the completion queue to destroy.
  * @udata: user data or null for kernel object
+ *
+ * @return: 0 for success.
  */
-void pvrdma_destroy_cq(struct ib_cq *cq, struct ib_udata *udata)
+int pvrdma_destroy_cq(struct ib_cq *cq, struct ib_udata *udata)
 {
 	struct pvrdma_cq *vcq = to_vcq(cq);
 	union pvrdma_cmd_req req;
@@ -261,6 +275,8 @@ void pvrdma_destroy_cq(struct ib_cq *cq, struct ib_udata *udata)
 
 	pvrdma_free_cq(dev, vcq);
 	atomic_dec(&dev->num_cqs);
+
+	return ret;
 }
 
 static inline struct pvrdma_cqe *get_cqe(struct pvrdma_cq *cq, int i)

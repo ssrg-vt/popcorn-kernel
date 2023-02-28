@@ -194,7 +194,7 @@ SYSCALL_DEFINE0(rt_sigreturn)
 	return regs->r0;
 
 badframe:
-	force_sig(SIGSEGV);
+	force_sig(SIGSEGV, current);
 	return 0;
 }
 

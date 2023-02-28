@@ -5,13 +5,11 @@
 #include <string.h>
 
 #include <linux/kernel.h>
-#include <linux/string.h>
-#include <linux/zalloc.h>
 
 #include "util/dso.h"
+#include "util/util.h"
 #include "util/debug.h"
 #include "util/callchain.h"
-#include "util/symbol_conf.h"
 #include "srcline.h"
 #include "string2.h"
 #include "symbol.h"
@@ -289,8 +287,7 @@ static int addr2line(const char *dso_name, u64 addr,
 	}
 
 	if (a2l == NULL) {
-		if (!symbol_conf.disable_add2line_warn)
-			pr_warning("addr2line_init failed for %s\n", dso_name);
+		pr_warning("addr2line_init failed for %s\n", dso_name);
 		return 0;
 	}
 
@@ -467,7 +464,7 @@ static struct inline_node *addr2inlines(const char *dso_name, u64 addr,
 		char *srcline;
 		struct symbol *inline_sym;
 
-		strim(funcname);
+		rtrim(funcname);
 
 		if (getline(&filename, &filelen, fp) == -1)
 			goto out;

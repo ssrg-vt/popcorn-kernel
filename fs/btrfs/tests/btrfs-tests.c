@@ -5,7 +5,6 @@
 
 #include <linux/fs.h>
 #include <linux/mount.h>
-#include <linux/pseudo_fs.h>
 #include <linux/magic.h>
 #include "btrfs-tests.h"
 #include "../ctree.h"
@@ -15,7 +14,6 @@
 #include "../volumes.h"
 #include "../disk-io.h"
 #include "../qgroup.h"
-#include "../block-group.h"
 
 static struct vfsmount *test_mnt = NULL;
 
@@ -34,31 +32,23 @@ static const struct super_operations btrfs_test_super_ops = {
 	.destroy_inode	= btrfs_test_destroy_inode,
 };
 
-
-static int btrfs_test_init_fs_context(struct fs_context *fc)
+static struct dentry *btrfs_test_mount(struct file_system_type *fs_type,
+				       int flags, const char *dev_name,
+				       void *data)
 {
-	struct pseudo_fs_context *ctx = init_pseudo(fc, BTRFS_TEST_MAGIC);
-	if (!ctx)
-		return -ENOMEM;
-	ctx->ops = &btrfs_test_super_ops;
-	return 0;
+	return mount_pseudo(fs_type, "btrfs_test:", &btrfs_test_super_ops,
+			    NULL, BTRFS_TEST_MAGIC);
 }
 
 static struct file_system_type test_type = {
 	.name		= "btrfs_test_fs",
-	.init_fs_context = btrfs_test_init_fs_context,
+	.mount		= btrfs_test_mount,
 	.kill_sb	= kill_anon_super,
 };
 
 struct inode *btrfs_new_test_inode(void)
 {
-	struct inode *inode;
-
-	inode = new_inode(test_mnt->mnt_sb);
-	if (inode)
-		inode_init_owner(inode, NULL, S_IFREG);
-
-	return inode;
+	return new_inode(test_mnt->mnt_sb);
 }
 
 static int btrfs_init_test_fs(void)

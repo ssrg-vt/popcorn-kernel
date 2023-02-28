@@ -1243,12 +1243,8 @@ static int cxgb3i_ddp_init(struct cxgbi_device *cdev)
 		tformat.pgsz_order[i] = uinfo.pgsz_factor[i];
 	cxgbi_tagmask_check(tagmask, &tformat);
 
-	err = cxgbi_ddp_ppm_setup(&tdev->ulp_iscsi, cdev, &tformat,
-				  (uinfo.ulimit - uinfo.llimit + 1),
-				  uinfo.llimit, uinfo.llimit, 0, 0, 0);
-	if (err)
-		return err;
-
+	cxgbi_ddp_ppm_setup(&tdev->ulp_iscsi, cdev, &tformat, ppmax,
+			    uinfo.llimit, uinfo.llimit, 0);
 	if (!(cdev->flags & CXGBI_FLAG_DDP_OFF)) {
 		uinfo.tagmask = tagmask;
 		uinfo.ulimit = uinfo.llimit + (ppmax << PPOD_SIZE_SHIFT);
@@ -1322,7 +1318,7 @@ static void cxgb3i_dev_open(struct t3cdev *t3dev)
 
 	err = cxgb3i_ddp_init(cdev);
 	if (err) {
-		pr_info("0x%p ddp init failed %d\n", cdev, err);
+		pr_info("0x%p ddp init failed\n", cdev);
 		goto err_out;
 	}
 

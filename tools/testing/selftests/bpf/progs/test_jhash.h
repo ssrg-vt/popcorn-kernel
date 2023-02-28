@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2019 Facebook
-#include <features.h>
 
 typedef unsigned int u32;
 
-static __always_inline u32 rol32(u32 word, unsigned int shift)
+static __attribute__((always_inline)) u32 rol32(u32 word, unsigned int shift)
 {
 	return (word << shift) | (word >> ((-shift) & 31));
 }

@@ -794,18 +794,17 @@ static int azx_rirb_get_response(struct hdac_bus *bus, unsigned int addr,
 	unsigned long timeout;
 	unsigned long loopcounter;
 	int do_poll = 0;
-	bool warned = false;
 
  again:
 	timeout = jiffies + msecs_to_jiffies(1000);
 
 	for (loopcounter = 0;; loopcounter++) {
 		spin_lock_irq(&bus->reg_lock);
-		if (bus->polling_mode || do_poll)
+		if (chip->polling_mode || do_poll)
 			snd_hdac_bus_update_rirb(bus);
 		if (!bus->rirb.cmds[addr]) {
 			if (!do_poll)
-				bus->poll_count = 0;
+				chip->poll_count = 0;
 			if (res)
 				*res = bus->rirb.res[addr]; /* the last value */
 			spin_unlock_irq(&bus->reg_lock);
@@ -814,17 +813,9 @@ static int azx_rirb_get_response(struct hdac_bus *bus, unsigned int addr,
 		spin_unlock_irq(&bus->reg_lock);
 		if (time_after(jiffies, timeout))
 			break;
-#define LOOP_COUNT_MAX	3000
-		if (hbus->needs_damn_long_delay ||
-		    loopcounter > LOOP_COUNT_MAX) {
-			if (loopcounter > LOOP_COUNT_MAX && !warned) {
-				dev_dbg_ratelimited(chip->card->dev,
-						    "too slow response, last cmd=%#08x\n",
-						    bus->last_cmd[addr]);
-				warned = true;
-			}
+		if (hbus->needs_damn_long_delay || loopcounter > 3000)
 			msleep(2); /* temporary workaround */
-		} else {
+		else {
 			udelay(10);
 			cond_resched();
 		}
@@ -833,21 +824,21 @@ static int azx_rirb_get_response(struct hdac_bus *bus, unsigned int addr,
 	if (hbus->no_response_fallback)
 		return -EIO;
 
-	if (!bus->polling_mode && bus->poll_count < 2) {
+	if (!chip->polling_mode && chip->poll_count < 2) {
 		dev_dbg(chip->card->dev,
 			"azx_get_response timeout, polling the codec once: last cmd=0x%08x\n",
 			bus->last_cmd[addr]);
 		do_poll = 1;
-		bus->poll_count++;
+		chip->poll_count++;
 		goto again;
 	}
 
 
-	if (!bus->polling_mode) {
+	if (!chip->polling_mode) {
 		dev_warn(chip->card->dev,
 			 "azx_get_response timeout, switching to polling mode: last cmd=0x%08x\n",
 			 bus->last_cmd[addr]);
-		bus->polling_mode = 1;
+		chip->polling_mode = 1;
 		goto again;
 	}
 
@@ -1219,12 +1210,14 @@ void snd_hda_bus_reset(struct hda_bus *bus)
 }
 
 /* HD-audio bus initialization */
-int azx_bus_init(struct azx *chip, const char *model)
+int azx_bus_init(struct azx *chip, const char *model,
+		 const struct hdac_io_ops *io_ops)
 {
 	struct hda_bus *bus = &chip->bus;
 	int err;
 
-	err = snd_hdac_bus_init(&bus->core, chip->card->dev, &bus_core_ops);
+	err = snd_hdac_bus_init(&bus->core, chip->card->dev, &bus_core_ops,
+				io_ops);
 	if (err < 0)
 		return err;
 

@@ -30,12 +30,11 @@
 /**
  * struct mstp_clock_group - MSTP gating clocks group
  *
- * @data: clock specifier translation for clocks in this group
+ * @data: clocks in this group
  * @smstpcr: module stop control register
  * @mstpsr: module stop status register (optional)
  * @lock: protects writes to SMSTPCR
  * @width_8bit: registers are 8-bit, not 32-bit
- * @clks: clocks in this group
  */
 struct mstp_clock_group {
 	struct clk_onecell_data data;
@@ -43,7 +42,6 @@ struct mstp_clock_group {
 	void __iomem *mstpsr;
 	spinlock_t lock;
 	bool width_8bit;
-	struct clk *clks[];
 };
 
 /**
@@ -188,13 +186,14 @@ static void __init cpg_mstp_clocks_init(struct device_node *np)
 	struct clk **clks;
 	unsigned int i;
 
-	group = kzalloc(struct_size(group, clks, MSTP_MAX_CLOCKS), GFP_KERNEL);
-	if (group == NULL) {
+	group = kzalloc(sizeof(*group), GFP_KERNEL);
+	clks = kmalloc_array(MSTP_MAX_CLOCKS, sizeof(*clks), GFP_KERNEL);
+	if (group == NULL || clks == NULL) {
 		kfree(group);
+		kfree(clks);
 		return;
 	}
 
-	clks = group->clks;
 	spin_lock_init(&group->lock);
 	group->data.clks = clks;
 
@@ -204,6 +203,7 @@ static void __init cpg_mstp_clocks_init(struct device_node *np)
 	if (group->smstpcr == NULL) {
 		pr_err("%s: failed to remap SMSTPCR\n", __func__);
 		kfree(group);
+		kfree(clks);
 		return;
 	}
 
@@ -297,12 +297,16 @@ found:
 		return PTR_ERR(clk);
 
 	error = pm_clk_create(dev);
-	if (error)
+	if (error) {
+		dev_err(dev, "pm_clk_create failed %d\n", error);
 		goto fail_put;
+	}
 
 	error = pm_clk_add_clk(dev, clk);
-	if (error)
+	if (error) {
+		dev_err(dev, "pm_clk_add_clk %pC failed %d\n", clk, error);
 		goto fail_destroy;
+	}
 
 	return 0;
 

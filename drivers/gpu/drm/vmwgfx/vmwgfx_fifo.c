@@ -25,11 +25,9 @@
  *
  **************************************************************************/
 
-#include <linux/sched/signal.h>
-
-#include <drm/ttm/ttm_placement.h>
-
 #include "vmwgfx_drv.h"
+#include <drm/drmP.h>
+#include <drm/ttm/ttm_placement.h>
 
 struct vmw_temp_set_context {
 	SVGA3dCmdHeader header;

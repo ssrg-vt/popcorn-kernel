@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ WITH Linux-syscall-note */
 /*
- * video.h - DEPRECATED MPEG-TS video decoder API
- *
- * NOTE: should not be used on future drivers
+ * video.h
  *
  * Copyright (C) 2000 Marcus Metzler <marcus@convergence.de>
  *                  & Ralph  Metzler <ralph@convergence.de>

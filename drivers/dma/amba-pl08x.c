@@ -2508,8 +2508,9 @@ DEFINE_SHOW_ATTRIBUTE(pl08x_debugfs);
 static void init_pl08x_debugfs(struct pl08x_driver_data *pl08x)
 {
 	/* Expose a simple debugfs interface to view all clocks */
-	debugfs_create_file(dev_name(&pl08x->adev->dev), S_IFREG | S_IRUGO,
-			    NULL, pl08x, &pl08x_debugfs_fops);
+	(void) debugfs_create_file(dev_name(&pl08x->adev->dev),
+			S_IFREG | S_IRUGO, NULL, pl08x,
+			&pl08x_debugfs_fops);
 }
 
 #else

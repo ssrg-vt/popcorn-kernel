@@ -357,7 +357,6 @@ int ctc_mpc_alloc_channel(int port_num, void (*callback)(int, int))
 		/*fsm_newstate(grp->fsm, MPCG_STATE_XID2INITW);*/
 		if (callback)
 			grp->send_qllc_disc = 1;
-		/* Else, fall through */
 	case MPCG_STATE_XID0IOWAIT:
 		fsm_deltimer(&grp->timer);
 		grp->outstanding_xid2 = 0;
@@ -1470,7 +1469,6 @@ static void mpc_action_timeout(fsm_instance *fi, int event, void *arg)
 		if ((fsm_getstate(rch->fsm) == CH_XID0_PENDING) &&
 		   (fsm_getstate(wch->fsm) == CH_XID0_PENDING))
 			break;
-		/* Else, fall through */
 	default:
 		fsm_event(grp->fsm, MPCG_EVENT_INOP, dev);
 	}
@@ -1523,7 +1521,8 @@ void mpc_action_send_discontact(unsigned long thischan)
 	unsigned long	saveflags = 0;
 
 	spin_lock_irqsave(get_ccwdev_lock(ch->cdev), saveflags);
-	rc = ccw_device_start(ch->cdev, &ch->ccw[15], 0, 0xff, 0);
+	rc = ccw_device_start(ch->cdev, &ch->ccw[15],
+					(unsigned long)ch, 0xff, 0);
 	spin_unlock_irqrestore(get_ccwdev_lock(ch->cdev), saveflags);
 
 	if (rc != 0) {
@@ -1796,7 +1795,8 @@ static void mpc_action_side_xid(fsm_instance *fsm, void *arg, int side)
 	}
 
 	fsm_addtimer(&ch->timer, 5000 , CTC_EVENT_TIMER, ch);
-	rc = ccw_device_start(ch->cdev, &ch->ccw[8], 0, 0xff, 0);
+	rc = ccw_device_start(ch->cdev, &ch->ccw[8],
+				(unsigned long)ch, 0xff, 0);
 
 	if (gotlock)	/* see remark above about conditional locking */
 		spin_unlock_irqrestore(get_ccwdev_lock(ch->cdev), saveflags);
@@ -2089,7 +2089,6 @@ static int mpc_send_qllc_discontact(struct net_device *dev)
 			grp->estconnfunc = NULL;
 			break;
 		}
-		/* Else, fall through */
 	case MPCG_STATE_FLOWC:
 	case MPCG_STATE_READY:
 		grp->send_qllc_disc = 2;

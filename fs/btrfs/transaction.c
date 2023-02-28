@@ -10,7 +10,6 @@
 #include <linux/pagemap.h>
 #include <linux/blkdev.h>
 #include <linux/uuid.h>
-#include "misc.h"
 #include "ctree.h"
 #include "disk-io.h"
 #include "transaction.h"
@@ -20,7 +19,6 @@
 #include "volumes.h"
 #include "dev-replace.h"
 #include "qgroup.h"
-#include "block-group.h"
 
 #define BTRFS_ROOT_TRANS_TAG 0
 
@@ -131,24 +129,6 @@ static inline void extwriter_counter_init(struct btrfs_transaction *trans,
 static inline int extwriter_counter_read(struct btrfs_transaction *trans)
 {
 	return atomic_read(&trans->num_extwriters);
-}
-
-/*
- * To be called after all the new block groups attached to the transaction
- * handle have been created (btrfs_create_pending_block_groups()).
- */
-void btrfs_trans_release_chunk_metadata(struct btrfs_trans_handle *trans)
-{
-	struct btrfs_fs_info *fs_info = trans->fs_info;
-
-	if (!trans->chunk_bytes_reserved)
-		return;
-
-	WARN_ON_ONCE(!list_empty(&trans->new_bgs));
-
-	btrfs_block_rsv_release(fs_info, &fs_info->chunk_block_rsv,
-				trans->chunk_bytes_reserved);
-	trans->chunk_bytes_reserved = 0;
 }
 
 /*
@@ -486,7 +466,7 @@ start_transaction(struct btrfs_root *root, unsigned int num_items,
 		 * worth of delayed refs updates in this trans handle, and
 		 * refill that amount for whatever is missing in the reserve.
 		 */
-		num_bytes = btrfs_calc_insert_metadata_size(fs_info, num_items);
+		num_bytes = btrfs_calc_trans_metadata_size(fs_info, num_items);
 		if (delayed_refs_rsv->full == 0) {
 			delayed_refs_bytes = num_bytes;
 			num_bytes <<= 1;
@@ -637,7 +617,7 @@ struct btrfs_trans_handle *btrfs_start_transaction_fallback_global_rsv(
 	if (IS_ERR(trans))
 		return trans;
 
-	num_bytes = btrfs_calc_insert_metadata_size(fs_info, num_items);
+	num_bytes = btrfs_calc_trans_metadata_size(fs_info, num_items);
 	ret = btrfs_cond_migrate_bytes(fs_info, &fs_info->trans_block_rsv,
 				       num_bytes, min_factor);
 	if (ret) {

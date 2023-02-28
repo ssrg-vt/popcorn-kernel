@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016 MediaTek Inc.
  * Author: PC Chen <pc.chen@mediatek.com>
@@ -28,9 +28,6 @@
 
 #define H264_MAX_FB_NUM				17
 #define HDR_PARSING_BUF_SZ			1024
-
-#define DEC_ERR_RET(ret)			((ret) >> 16)
-#define H264_ERR_NOT_VALID			3
 
 /**
  * struct h264_fb - h264 decode frame buffer information
@@ -269,7 +266,7 @@ static void get_dpb_size(struct vdec_h264_inst *inst, unsigned int *dpb_sz)
 	mtk_vcodec_debug(inst, "sz=%d", *dpb_sz);
 }
 
-static int vdec_h264_init(struct mtk_vcodec_ctx *ctx)
+static int vdec_h264_init(struct mtk_vcodec_ctx *ctx, unsigned long *h_vdec)
 {
 	struct vdec_h264_inst *inst = NULL;
 	int err;
@@ -298,7 +295,7 @@ static int vdec_h264_init(struct mtk_vcodec_ctx *ctx)
 
 	mtk_vcodec_debug(inst, "H264 Instance >> %p", inst);
 
-	ctx->drv_handle = inst;
+	*h_vdec = (unsigned long)inst;
 	return 0;
 
 error_deinit:
@@ -309,7 +306,7 @@ error_free_inst:
 	return err;
 }
 
-static void vdec_h264_deinit(void *h_vdec)
+static void vdec_h264_deinit(unsigned long h_vdec)
 {
 	struct vdec_h264_inst *inst = (struct vdec_h264_inst *)h_vdec;
 
@@ -334,7 +331,7 @@ static int find_start_code(unsigned char *data, unsigned int data_sz)
 	return -1;
 }
 
-static int vdec_h264_decode(void *h_vdec, struct mtk_vcodec_mem *bs,
+static int vdec_h264_decode(unsigned long h_vdec, struct mtk_vcodec_mem *bs,
 			    struct vdec_fb *fb, bool *res_chg)
 {
 	struct vdec_h264_inst *inst = (struct vdec_h264_inst *)h_vdec;
@@ -360,11 +357,8 @@ static int vdec_h264_decode(void *h_vdec, struct mtk_vcodec_mem *bs,
 	buf = (unsigned char *)bs->va;
 	buf_sz = bs->size;
 	nal_start_idx = find_start_code(buf, buf_sz);
-	if (nal_start_idx < 0) {
-		mtk_vcodec_err(inst, "invalid nal start code");
-		err = -EIO;
+	if (nal_start_idx < 0)
 		goto err_free_fb_out;
-	}
 
 	nal_start = buf[nal_start_idx];
 	nal_type = NAL_TYPE(buf[nal_start_idx]);
@@ -388,14 +382,8 @@ static int vdec_h264_decode(void *h_vdec, struct mtk_vcodec_mem *bs,
 	data[0] = buf_sz;
 	data[1] = nal_start;
 	err = vpu_dec_start(vpu, data, 2);
-	if (err) {
-		if (err > 0 && (DEC_ERR_RET(err) == H264_ERR_NOT_VALID)) {
-			mtk_vcodec_err(inst, "- error bitstream - err = %d -",
-				       err);
-			err = -EIO;
-		}
+	if (err)
 		goto err_free_fb_out;
-	}
 
 	*res_chg = inst->vsi->dec.resolution_changed;
 	if (*res_chg) {
@@ -463,8 +451,8 @@ static void vdec_h264_get_fb(struct vdec_h264_inst *inst,
 	list->count--;
 }
 
-static int vdec_h264_get_param(void *h_vdec, enum vdec_get_param_type type,
-			       void *out)
+static int vdec_h264_get_param(unsigned long h_vdec,
+			       enum vdec_get_param_type type, void *out)
 {
 	struct vdec_h264_inst *inst = (struct vdec_h264_inst *)h_vdec;
 
@@ -497,9 +485,16 @@ static int vdec_h264_get_param(void *h_vdec, enum vdec_get_param_type type,
 	return 0;
 }
 
-const struct vdec_common_if vdec_h264_if = {
+static struct vdec_common_if vdec_h264_if = {
 	.init		= vdec_h264_init,
 	.decode		= vdec_h264_decode,
 	.get_param	= vdec_h264_get_param,
 	.deinit		= vdec_h264_deinit,
 };
+
+struct vdec_common_if *get_h264_dec_comm_if(void);
+
+struct vdec_common_if *get_h264_dec_comm_if(void)
+{
+	return &vdec_h264_if;
+}

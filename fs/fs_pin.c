@@ -19,12 +19,18 @@ void pin_remove(struct fs_pin *pin)
 	spin_unlock_irq(&pin->wait.lock);
 }
 
-void pin_insert(struct fs_pin *pin, struct vfsmount *m)
+void pin_insert_group(struct fs_pin *pin, struct vfsmount *m, struct hlist_head *p)
 {
 	spin_lock(&pin_lock);
-	hlist_add_head(&pin->s_list, &m->mnt_sb->s_pins);
+	if (p)
+		hlist_add_head(&pin->s_list, p);
 	hlist_add_head(&pin->m_list, &real_mount(m)->mnt_pins);
 	spin_unlock(&pin_lock);
+}
+
+void pin_insert(struct fs_pin *pin, struct vfsmount *m)
+{
+	pin_insert_group(pin, m, &m->mnt_sb->s_pins);
 }
 
 void pin_kill(struct fs_pin *p)

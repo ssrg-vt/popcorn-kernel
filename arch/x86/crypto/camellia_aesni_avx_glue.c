@@ -208,7 +208,7 @@ static int xts_encrypt(struct skcipher_request *req)
 
 	return glue_xts_req_128bit(&camellia_enc_xts, req,
 				   XTS_TWEAK_CAST(camellia_enc_blk),
-				   &ctx->tweak_ctx, &ctx->crypt_ctx, false);
+				   &ctx->tweak_ctx, &ctx->crypt_ctx);
 }
 
 static int xts_decrypt(struct skcipher_request *req)
@@ -218,7 +218,7 @@ static int xts_decrypt(struct skcipher_request *req)
 
 	return glue_xts_req_128bit(&camellia_dec_xts, req,
 				   XTS_TWEAK_CAST(camellia_enc_blk),
-				   &ctx->tweak_ctx, &ctx->crypt_ctx, true);
+				   &ctx->tweak_ctx, &ctx->crypt_ctx);
 }
 
 static struct skcipher_alg camellia_algs[] = {

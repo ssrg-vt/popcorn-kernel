@@ -23,8 +23,6 @@
  *
  */
 
-#include <linux/slab.h>
-
 #include "dm_services.h"
 #include "dm_helpers.h"
 #include "gpio_service_interface.h"
@@ -93,8 +91,6 @@ union hdmi_scdc_status_flags_data {
 		uint8_t CH2_LOCKED:1;
 		uint8_t RESERVED:4;
 		uint8_t RESERVED2:8;
-		uint8_t RESERVED3:8;
-
 	} fields;
 };
 
@@ -111,10 +107,14 @@ union hdmi_scdc_ced_data {
 		uint8_t CH2_7HIGH:7;
 		uint8_t CH2_VALID:1;
 		uint8_t CHECKSUM:8;
-		uint8_t RESERVED:8;
-		uint8_t RESERVED2:8;
-		uint8_t RESERVED3:8;
-		uint8_t RESERVED4:4;
+	} fields;
+};
+
+union hdmi_scdc_test_config_Data {
+	uint8_t byte;
+	struct {
+		uint8_t TEST_READ_REQUEST_DELAY:7;
+		uint8_t TEST_READ_REQUEST: 1;
 	} fields;
 };
 
@@ -294,7 +294,7 @@ static uint32_t defer_delay_converter_wa(
 {
 	struct dc_link *link = ddc->link;
 
-	if (link->dpcd_caps.branch_dev_id == DP_BRANCH_DEVICE_ID_0080E1 &&
+	if (link->dpcd_caps.branch_dev_id == DP_BRANCH_DEVICE_ID_4 &&
 		!memcmp(link->dpcd_caps.branch_dev_name,
 			DP_DVI_CONVERTER_ID_4,
 			sizeof(link->dpcd_caps.branch_dev_name)))
@@ -374,7 +374,6 @@ void dal_ddc_service_i2c_query_dp_dual_mode_adaptor(
 	enum display_dongle_type *dongle = &sink_cap->dongle_type;
 	uint8_t type2_dongle_buf[DP_ADAPTOR_TYPE2_SIZE];
 	bool is_type2_dongle = false;
-	int retry_count = 2;
 	struct dp_hdmi_dongle_signature_data *dongle_signature;
 
 	/* Assume we have no valid DP passive dongle connected */
@@ -387,24 +386,13 @@ void dal_ddc_service_i2c_query_dp_dual_mode_adaptor(
 		DP_HDMI_DONGLE_ADDRESS,
 		type2_dongle_buf,
 		sizeof(type2_dongle_buf))) {
-		/* Passive HDMI dongles can sometimes fail here without retrying*/
-		while (retry_count > 0) {
-			if (i2c_read(ddc,
-				DP_HDMI_DONGLE_ADDRESS,
-				type2_dongle_buf,
-				sizeof(type2_dongle_buf)))
-				break;
-			retry_count--;
-		}
-		if (retry_count == 0) {
-			*dongle = DISPLAY_DONGLE_DP_DVI_DONGLE;
-			sink_cap->max_hdmi_pixel_clock = DP_ADAPTOR_DVI_MAX_TMDS_CLK;
+		*dongle = DISPLAY_DONGLE_DP_DVI_DONGLE;
+		sink_cap->max_hdmi_pixel_clock = DP_ADAPTOR_DVI_MAX_TMDS_CLK;
 
-			CONN_DATA_DETECT(ddc->link, type2_dongle_buf, sizeof(type2_dongle_buf),
-					"DP-DVI passive dongle %dMhz: ",
-					DP_ADAPTOR_DVI_MAX_TMDS_CLK / 1000);
-			return;
-		}
+		CONN_DATA_DETECT(ddc->link, type2_dongle_buf, sizeof(type2_dongle_buf),
+				"DP-DVI passive dongle %dMhz: ",
+				DP_ADAPTOR_DVI_MAX_TMDS_CLK / 1000);
+		return;
 	}
 
 	/* Check if Type 2 dongle.*/

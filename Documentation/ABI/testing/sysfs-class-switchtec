@@ -1,6 +1,6 @@
 switchtec - Microsemi Switchtec PCI Switch Management Endpoint
 
-For details on this subsystem look at Documentation/driver-api/switchtec.rst.
+For details on this subsystem look at Documentation/switchtec.txt.
 
 What: 		/sys/class/switchtec
 Date:		05-Jan-2017

@@ -39,9 +39,7 @@ ams,input-max-microamp: Maximum flash controller input current. The
 Optional properties of the flash child node
 ===========================================
 
-function	:  See Documentation/devicetree/bindings/leds/common.txt.
-color		:  See Documentation/devicetree/bindings/leds/common.txt.
-label		:  See Documentation/devicetree/bindings/leds/common.txt (deprecated).
+label		: The label of the flash LED.
 
 
 Required properties of the indicator child node (1)
@@ -54,32 +52,28 @@ led-max-microamp: Maximum indicator current. The allowed values are
 Optional properties of the indicator child node
 ===============================================
 
-function	:  See Documentation/devicetree/bindings/leds/common.txt.
-color		:  See Documentation/devicetree/bindings/leds/common.txt.
-label		:  See Documentation/devicetree/bindings/leds/common.txt (deprecated).
+label		: The label of the indicator LED.
 
 
 Example
 =======
 
-#include <dt-bindings/leds/common.h>
-
 	as3645a@30 {
-		#address-cells = <1>;
-		#size-cells = <0>;
+		#address-cells: 1
+		#size-cells: 0
 		reg = <0x30>;
 		compatible = "ams,as3645a";
-		led@0 {
+		flash@0 {
 			reg = <0x0>;
 			flash-timeout-us = <150000>;
 			flash-max-microamp = <320000>;
 			led-max-microamp = <60000>;
 			ams,input-max-microamp = <1750000>;
-			function = LED_FUNCTION_FLASH;
+			label = "as3645a:flash";
 		};
-		led@1 {
+		indicator@1 {
 			reg = <0x1>;
 			led-max-microamp = <10000>;
-			function = LED_FUNCTION_INDICATOR;
+			label = "as3645a:indicator";
 		};
 	};

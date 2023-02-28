@@ -12,6 +12,7 @@
 #include <linux/ptrace.h>
 #include <linux/kernel.h>
 #include <linux/stringify.h>
+#include "util.h"
 
 struct pt_regs_dwarfnum {
 	const char *name;

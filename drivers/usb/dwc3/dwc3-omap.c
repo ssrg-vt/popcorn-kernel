@@ -14,6 +14,7 @@
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
+#include <linux/platform_data/dwc3-omap.h>
 #include <linux/pm_runtime.h>
 #include <linux/dma-mapping.h>
 #include <linux/ioport.h>
@@ -104,12 +105,6 @@
 #define USBOTGSS_UTMI_OTG_CTRL_SESSEND		BIT(3)
 #define USBOTGSS_UTMI_OTG_CTRL_SESSVALID	BIT(2)
 #define USBOTGSS_UTMI_OTG_CTRL_VBUSVALID	BIT(1)
-
-enum dwc3_omap_utmi_mode {
-	DWC3_OMAP_UTMI_MODE_UNKNOWN = 0,
-	DWC3_OMAP_UTMI_MODE_HW,
-	DWC3_OMAP_UTMI_MODE_SW,
-};
 
 struct dwc3_omap {
 	struct device		*dev;
@@ -451,6 +446,7 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	struct device_node	*node = pdev->dev.of_node;
 
 	struct dwc3_omap	*omap;
+	struct resource		*res;
 	struct device		*dev = &pdev->dev;
 	struct regulator	*vbus_reg = NULL;
 
@@ -473,10 +469,13 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, omap);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(dev, "missing IRQ resource: %d\n", irq);
 		return irq;
+	}
 
-	base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 

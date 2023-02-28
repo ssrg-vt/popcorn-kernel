@@ -33,9 +33,9 @@
  *	However, SEGREL32 is used only for PARISC unwind entries, and we want
  *	those entries to have an absolute address, and not just an offset.
  *
- *	The unwind table mechanism has the ability to specify an offset for
+ *	The unwind table mechanism has the ability to specify an offset for 
  *	the unwind table; however, because we split off the init functions into
- *	a different piece of memory, it is not possible to do this using a
+ *	a different piece of memory, it is not possible to do this using a 
  *	single offset. Instead, we use the above hack for now.
  */
 
@@ -52,6 +52,12 @@
 #include <asm/pgtable.h>
 #include <asm/unwind.h>
 #include <asm/sections.h>
+
+#if 0
+#define DEBUGP printk
+#else
+#define DEBUGP(fmt...)
+#endif
 
 #define RELOC_REACHABLE(val, bits) \
 	(( ( !((val) & (1<<((bits)-1))) && ((val)>>(bits)) != 0 )  ||	\
@@ -294,7 +300,7 @@ unsigned int arch_mod_section_prepend(struct module *mod,
 		* sizeof(struct stub_entry);
 }
 
-#define CONST
+#define CONST 
 int module_frob_arch_sections(CONST Elf_Ehdr *hdr,
 			      CONST Elf_Shdr *sechdrs,
 			      CONST char *secstrings,
@@ -380,7 +386,7 @@ static Elf64_Word get_got(struct module *me, unsigned long value, long addend)
 
 	got[i].addr = value;
  out:
-	pr_debug("GOT ENTRY %d[%lx] val %lx\n", i, i*sizeof(struct got_entry),
+	DEBUGP("GOT ENTRY %d[%x] val %lx\n", i, i*sizeof(struct got_entry),
 	       value);
 	return i * sizeof(struct got_entry);
 }
@@ -533,7 +539,7 @@ int apply_relocate_add(Elf_Shdr *sechdrs,
 	//unsigned long dp = (unsigned long)$global$;
 	register unsigned long dp asm ("r27");
 
-	pr_debug("Applying relocate section %u to %u\n", relsec,
+	DEBUGP("Applying relocate section %u to %u\n", relsec,
 	       targetsec);
 	for (i = 0; i < sechdrs[relsec].sh_size / sizeof(*rel); i++) {
 		/* This is where to make the change */
@@ -557,7 +563,7 @@ int apply_relocate_add(Elf_Shdr *sechdrs,
 
 #if 0
 #define r(t) ELF32_R_TYPE(rel[i].r_info)==t ? #t :
-		pr_debug("Symbol %s loc 0x%x val 0x%x addend 0x%x: %s\n",
+		DEBUGP("Symbol %s loc 0x%x val 0x%x addend 0x%x: %s\n",
 			strtab + sym->st_name,
 			(uint32_t)loc, val, addend,
 			r(R_PARISC_PLABEL32)
@@ -598,7 +604,7 @@ int apply_relocate_add(Elf_Shdr *sechdrs,
 			/* See note about special handling of SEGREL32 at
 			 * the beginning of this file.
 			 */
-			*loc = fsel(val, addend);
+			*loc = fsel(val, addend); 
 			break;
 		case R_PARISC_SECREL32:
 			/* 32-bit section relative address. */
@@ -677,7 +683,7 @@ int apply_relocate_add(Elf_Shdr *sechdrs,
 	Elf_Addr loc0;
 	unsigned int targetsec = sechdrs[relsec].sh_info;
 
-	pr_debug("Applying relocate section %u to %u\n", relsec,
+	DEBUGP("Applying relocate section %u to %u\n", relsec,
 	       targetsec);
 	for (i = 0; i < sechdrs[relsec].sh_size / sizeof(*rel); i++) {
 		/* This is where to make the change */
@@ -719,7 +725,7 @@ int apply_relocate_add(Elf_Shdr *sechdrs,
 		case R_PARISC_LTOFF21L:
 			/* LT-relative; left 21 bits */
 			val = get_got(me, val, addend);
-			pr_debug("LTOFF21L Symbol %s loc %p val %llx\n",
+			DEBUGP("LTOFF21L Symbol %s loc %p val %lx\n",
 			       strtab + sym->st_name,
 			       loc, val);
 			val = lrsel(val, 0);
@@ -730,14 +736,14 @@ int apply_relocate_add(Elf_Shdr *sechdrs,
 			/* LT-relative; right 14 bits */
 			val = get_got(me, val, addend);
 			val = rrsel(val, 0);
-			pr_debug("LTOFF14R Symbol %s loc %p val %llx\n",
+			DEBUGP("LTOFF14R Symbol %s loc %p val %lx\n",
 			       strtab + sym->st_name,
 			       loc, val);
 			*loc = mask(*loc, 14) | reassemble_14(val);
 			break;
 		case R_PARISC_PCREL22F:
 			/* PC-relative; 22 bits */
-			pr_debug("PCREL22F Symbol %s loc %p val %llx\n",
+			DEBUGP("PCREL22F Symbol %s loc %p val %lx\n",
 			       strtab + sym->st_name,
 			       loc, val);
 			val += addend;
@@ -769,7 +775,7 @@ int apply_relocate_add(Elf_Shdr *sechdrs,
 					val = get_stub(me, val, addend, ELF_STUB_GOT,
 						       loc0, targetsec);
 			}
-			pr_debug("STUB FOR %s loc %px, val %llx+%llx at %llx\n",
+			DEBUGP("STUB FOR %s loc %lx, val %lx+%lx at %lx\n", 
 			       strtab + sym->st_name, loc, sym->st_value,
 			       addend, val);
 			val = (val - dot - 8)/4;
@@ -793,7 +799,7 @@ int apply_relocate_add(Elf_Shdr *sechdrs,
 			/* See note about special handling of SEGREL32 at
 			 * the beginning of this file.
 			 */
-			*loc = fsel(val, addend);
+			*loc = fsel(val, addend); 
 			break;
 		case R_PARISC_SECREL32:
 			/* 32-bit section relative address. */
@@ -803,14 +809,14 @@ int apply_relocate_add(Elf_Shdr *sechdrs,
 			/* 64-bit function address */
 			if(in_local(me, (void *)(val + addend))) {
 				*loc64 = get_fdesc(me, val+addend);
-				pr_debug("FDESC for %s at %llx points to %llx\n",
+				DEBUGP("FDESC for %s at %p points to %lx\n",
 				       strtab + sym->st_name, *loc64,
 				       ((Elf_Fdesc *)*loc64)->addr);
 			} else {
 				/* if the symbol is not local to this
 				 * module then val+addend is a pointer
 				 * to the function descriptor */
-				pr_debug("Non local FPTR64 Symbol %s loc %p val %llx\n",
+				DEBUGP("Non local FPTR64 Symbol %s loc %p val %lx\n",
 				       strtab + sym->st_name,
 				       loc, val);
 				*loc64 = val + addend;
@@ -841,7 +847,7 @@ register_unwind_table(struct module *me,
 	end = table + sechdrs[me->arch.unwind_section].sh_size;
 	gp = (Elf_Addr)me->core_layout.base + me->arch.got_offset;
 
-	pr_debug("register_unwind_table(), sect = %d at 0x%p - 0x%p (gp=0x%lx)\n",
+	DEBUGP("register_unwind_table(), sect = %d at 0x%p - 0x%p (gp=0x%lx)\n",
 	       me->arch.unwind_section, table, end, gp);
 	me->arch.unwind = unwind_table_add(me->name, 0, gp, table, end);
 }
@@ -862,7 +868,6 @@ int module_finalize(const Elf_Ehdr *hdr,
 	const char *strtab = NULL;
 	const Elf_Shdr *s;
 	char *secstrings;
-	int err, symindex = -1;
 	Elf_Sym *newptr, *oldptr;
 	Elf_Shdr *symhdr = NULL;
 #ifdef DEBUG
@@ -889,7 +894,6 @@ int module_finalize(const Elf_Ehdr *hdr,
 		if(sechdrs[i].sh_type == SHT_SYMTAB
 		   && (sechdrs[i].sh_flags & SHF_ALLOC)) {
 			int strindex = sechdrs[i].sh_link;
-			symindex = i;
 			/* FIXME: AWFUL HACK
 			 * The cast is to drop the const from
 			 * the sechdrs pointer */
@@ -899,7 +903,7 @@ int module_finalize(const Elf_Ehdr *hdr,
 		}
 	}
 
-	pr_debug("module %s: strtab %p, symhdr %p\n",
+	DEBUGP("module %s: strtab %p, symhdr %p\n",
 	       me->name, strtab, symhdr);
 
 	if(me->arch.got_count > MAX_GOTS) {
@@ -918,7 +922,7 @@ int module_finalize(const Elf_Ehdr *hdr,
 	oldptr = (void *)symhdr->sh_addr;
 	newptr = oldptr + 1;	/* we start counting at 1 */
 	nsyms = symhdr->sh_size / sizeof(Elf_Sym);
-	pr_debug("OLD num_symtab %lu\n", nsyms);
+	DEBUGP("OLD num_symtab %lu\n", nsyms);
 
 	for (i = 1; i < nsyms; i++) {
 		oldptr++;	/* note, count starts at 1 so preincrement */
@@ -933,7 +937,7 @@ int module_finalize(const Elf_Ehdr *hdr,
 
 	}
 	nsyms = newptr - (Elf_Sym *)symhdr->sh_addr;
-	pr_debug("NEW num_symtab %lu\n", nsyms);
+	DEBUGP("NEW num_symtab %lu\n", nsyms);
 	symhdr->sh_size = nsyms * sizeof(Elf_Sym);
 
 	/* find .altinstructions section */
@@ -945,24 +949,8 @@ int module_finalize(const Elf_Ehdr *hdr,
 		if (!strcmp(".altinstructions", secname))
 			/* patch .altinstructions */
 			apply_alternatives(aseg, aseg + s->sh_size, me->name);
-
-		/* For 32 bit kernels we're compiling modules with
-		 * -ffunction-sections so we must relocate the addresses in the
-		 *__mcount_loc section.
-		 */
-		if (symindex != -1 && !strcmp(secname, "__mcount_loc")) {
-			if (s->sh_type == SHT_REL)
-				err = apply_relocate((Elf_Shdr *)sechdrs,
-							strtab, symindex,
-							s - sechdrs, me);
-			else if (s->sh_type == SHT_RELA)
-				err = apply_relocate_add((Elf_Shdr *)sechdrs,
-							strtab, symindex,
-							s - sechdrs, me);
-			if (err)
-				return err;
-		}
 	}
+
 	return 0;
 }
 

@@ -3,6 +3,7 @@
 
 #include "gtk.h"
 #include "../progress.h"
+#include "util.h"
 
 static GtkWidget *dialog;
 static GtkWidget *progress;

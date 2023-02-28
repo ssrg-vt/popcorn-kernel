@@ -18,13 +18,24 @@ ssize_t security_show(struct device *dev,
 	 * For the test version we need to poll the "hardware" in order
 	 * to get the updated status for unlock testing.
 	 */
-	nvdimm->sec.flags = nvdimm_security_flags(nvdimm, NVDIMM_USER);
+	nvdimm->sec.state = nvdimm_security_state(nvdimm, NVDIMM_USER);
+	nvdimm->sec.ext_state = nvdimm_security_state(nvdimm, NVDIMM_MASTER);
 
-	if (test_bit(NVDIMM_SECURITY_DISABLED, &nvdimm->sec.flags))
+	switch (nvdimm->sec.state) {
+	case NVDIMM_SECURITY_DISABLED:
 		return sprintf(buf, "disabled\n");
-	if (test_bit(NVDIMM_SECURITY_UNLOCKED, &nvdimm->sec.flags))
+	case NVDIMM_SECURITY_UNLOCKED:
 		return sprintf(buf, "unlocked\n");
-	if (test_bit(NVDIMM_SECURITY_LOCKED, &nvdimm->sec.flags))
+	case NVDIMM_SECURITY_LOCKED:
 		return sprintf(buf, "locked\n");
+	case NVDIMM_SECURITY_FROZEN:
+		return sprintf(buf, "frozen\n");
+	case NVDIMM_SECURITY_OVERWRITE:
+		return sprintf(buf, "overwrite\n");
+	default:
+		return -ENOTTY;
+	}
+
 	return -ENOTTY;
 }
+

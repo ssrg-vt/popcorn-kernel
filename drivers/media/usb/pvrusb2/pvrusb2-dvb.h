@@ -18,10 +18,7 @@ struct pvr2_dvb_adapter {
 	struct dmxdev		dmxdev;
 	struct dvb_demux	demux;
 	struct dvb_net		dvb_net;
-	struct dvb_frontend	*fe[2];
-
-	struct i2c_client	*i2c_client_demod[2];
-	struct i2c_client	*i2c_client_tuner;
+	struct dvb_frontend	*fe;
 
 	int			feedcount;
 	int			max_feed_count;

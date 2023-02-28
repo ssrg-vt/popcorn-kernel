@@ -35,14 +35,20 @@ void adfs_object_fixup(struct adfs_dir *dir, struct object_info *obj)
 	if (obj->name_len <= 2 && dots == obj->name_len)
 		obj->name[0] = '^';
 
-	/*
-	 * If the object is a file, and the user requested the ,xyz hex
-	 * filetype suffix to the name, check the filetype and append.
-	 */
-	if (!(obj->attr & ADFS_NDA_DIRECTORY) && ADFS_SB(dir->sb)->s_ftsuffix) {
-		u16 filetype = adfs_filetype(obj->loadaddr);
+	obj->filetype = -1;
 
-		if (filetype != ADFS_FILETYPE_NONE) {
+	/*
+	 * object is a file and is filetyped and timestamped?
+	 * RISC OS 12-bit filetype is stored in load_address[19:8]
+	 */
+	if ((0 == (obj->attr & ADFS_NDA_DIRECTORY)) &&
+	    (0xfff00000 == (0xfff00000 & obj->loadaddr))) {
+		obj->filetype = (__u16) ((0x000fff00 & obj->loadaddr) >> 8);
+
+		/* optionally append the ,xyz hex filetype suffix */
+		if (ADFS_SB(dir->sb)->s_ftsuffix) {
+			__u16 filetype = obj->filetype;
+
 			obj->name[obj->name_len++] = ',';
 			obj->name[obj->name_len++] = hex_asc_lo(filetype >> 8);
 			obj->name[obj->name_len++] = hex_asc_lo(filetype >> 4);
@@ -86,7 +92,7 @@ adfs_readdir(struct file *file, struct dir_context *ctx)
 		goto unlock_out;
 	while (ops->getnext(&dir, &obj) == 0) {
 		if (!dir_emit(ctx, obj.name, obj.name_len,
-			      obj.indaddr, DT_UNKNOWN))
+			    obj.file_id, DT_UNKNOWN))
 			break;
 		ctx->pos++;
 	}
@@ -107,8 +113,8 @@ adfs_dir_update(struct super_block *sb, struct object_info *obj, int wait)
 	const struct adfs_dir_ops *ops = ADFS_SB(sb)->s_dir;
 	struct adfs_dir dir;
 
-	printk(KERN_INFO "adfs_dir_update: object %06x in dir %06x\n",
-		 obj->indaddr, obj->parent_id);
+	printk(KERN_INFO "adfs_dir_update: object %06X in dir %06X\n",
+		 obj->file_id, obj->parent_id);
 
 	if (!ops->update) {
 		ret = -EINVAL;
@@ -172,8 +178,7 @@ static int adfs_dir_lookup_byname(struct inode *inode, const struct qstr *qstr,
 		goto out;
 
 	if (ADFS_I(inode)->parent_id != dir.parent_id) {
-		adfs_error(sb,
-			   "parent directory changed under me! (%06x but got %06x)\n",
+		adfs_error(sb, "parent directory changed under me! (%lx but got %x)\n",
 			   ADFS_I(inode)->parent_id, dir.parent_id);
 		ret = -EIO;
 		goto free_out;

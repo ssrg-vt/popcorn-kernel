@@ -4,8 +4,6 @@
 #include <stdbool.h>
 #include <traceevent/event-parse.h>
 #include "evsel.h"
-#include "util/evsel_fprintf.h"
-#include "util/event.h"
 #include "callchain.h"
 #include "map.h"
 #include "strlist.h"
@@ -35,26 +33,26 @@ static int __print_attr__fprintf(FILE *fp, const char *name, const char *val, vo
 	return comma_fprintf(fp, (bool *)priv, " %s: %s", name, val);
 }
 
-int perf_evsel__fprintf(struct evsel *evsel,
+int perf_evsel__fprintf(struct perf_evsel *evsel,
 			struct perf_attr_details *details, FILE *fp)
 {
 	bool first = true;
 	int printed = 0;
 
 	if (details->event_group) {
-		struct evsel *pos;
+		struct perf_evsel *pos;
 
 		if (!perf_evsel__is_group_leader(evsel))
 			return 0;
 
-		if (evsel->core.nr_members > 1)
+		if (evsel->nr_members > 1)
 			printed += fprintf(fp, "%s{", evsel->group_name ?: "");
 
 		printed += fprintf(fp, "%s", perf_evsel__name(evsel));
 		for_each_group_member(pos, evsel)
 			printed += fprintf(fp, ",%s", perf_evsel__name(pos));
 
-		if (evsel->core.nr_members > 1)
+		if (evsel->nr_members > 1)
 			printed += fprintf(fp, "}");
 		goto out;
 	}
@@ -62,22 +60,22 @@ int perf_evsel__fprintf(struct evsel *evsel,
 	printed += fprintf(fp, "%s", perf_evsel__name(evsel));
 
 	if (details->verbose) {
-		printed += perf_event_attr__fprintf(fp, &evsel->core.attr,
+		printed += perf_event_attr__fprintf(fp, &evsel->attr,
 						    __print_attr__fprintf, &first);
 	} else if (details->freq) {
 		const char *term = "sample_freq";
 
-		if (!evsel->core.attr.freq)
+		if (!evsel->attr.freq)
 			term = "sample_period";
 
 		printed += comma_fprintf(fp, &first, " %s=%" PRIu64,
-					 term, (u64)evsel->core.attr.sample_freq);
+					 term, (u64)evsel->attr.sample_freq);
 	}
 
 	if (details->trace_fields) {
 		struct tep_format_field *field;
 
-		if (evsel->core.attr.type != PERF_TYPE_TRACEPOINT) {
+		if (evsel->attr.type != PERF_TYPE_TRACEPOINT) {
 			printed += comma_fprintf(fp, &first, " (not a tracepoint)");
 			goto out;
 		}
@@ -103,7 +101,7 @@ out:
 
 int sample__fprintf_callchain(struct perf_sample *sample, int left_alignment,
 			      unsigned int print_opts, struct callchain_cursor *cursor,
-			      struct strlist *bt_stop_list, FILE *fp)
+			      FILE *fp)
 {
 	int printed = 0;
 	struct callchain_cursor_node *node;
@@ -176,8 +174,10 @@ int sample__fprintf_callchain(struct perf_sample *sample, int left_alignment,
 				printed += fprintf(fp, "\n");
 
 			/* Add srccode here too? */
-			if (bt_stop_list && node->sym &&
-			    strlist__has_entry(bt_stop_list, node->sym->name)) {
+			if (symbol_conf.bt_stop_list &&
+			    node->sym &&
+			    strlist__has_entry(symbol_conf.bt_stop_list,
+					       node->sym->name)) {
 				break;
 			}
 
@@ -192,7 +192,7 @@ next:
 
 int sample__fprintf_sym(struct perf_sample *sample, struct addr_location *al,
 			int left_alignment, unsigned int print_opts,
-			struct callchain_cursor *cursor, struct strlist *bt_stop_list, FILE *fp)
+			struct callchain_cursor *cursor, FILE *fp)
 {
 	int printed = 0;
 	int print_ip = print_opts & EVSEL__PRINT_IP;
@@ -203,8 +203,8 @@ int sample__fprintf_sym(struct perf_sample *sample, struct addr_location *al,
 	int print_unknown_as_addr = print_opts & EVSEL__PRINT_UNKNOWN_AS_ADDR;
 
 	if (cursor != NULL) {
-		printed += sample__fprintf_callchain(sample, left_alignment, print_opts,
-						     cursor, bt_stop_list, fp);
+		printed += sample__fprintf_callchain(sample, left_alignment,
+						     print_opts, cursor, fp);
 	} else {
 		printed += fprintf(fp, "%-*.*s", left_alignment, left_alignment, " ");
 

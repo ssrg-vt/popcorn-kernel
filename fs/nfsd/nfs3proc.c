@@ -172,8 +172,13 @@ nfsd3_proc_read(struct svc_rqst *rqstp)
 	nfserr = nfsd_read(rqstp, &resp->fh,
 				  argp->offset,
 			   	  rqstp->rq_vec, argp->vlen,
-				  &resp->count,
-				  &resp->eof);
+				  &resp->count);
+	if (nfserr == 0) {
+		struct inode	*inode = d_inode(resp->fh.fh_dentry);
+		resp->eof = nfsd_eof_on_read(cnt, resp->count, argp->offset,
+							inode->i_size);
+	}
+
 	RETURN_STATUS(nfserr);
 }
 

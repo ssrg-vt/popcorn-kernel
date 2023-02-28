@@ -27,6 +27,11 @@ bool rtw_phy_write_rf_reg(struct rtw_dev *rtwdev, enum rtw_rf_path rf_path,
 			  u32 addr, u32 mask, u32 data);
 bool rtw_phy_write_rf_reg_mix(struct rtw_dev *rtwdev, enum rtw_rf_path rf_path,
 			      u32 addr, u32 mask, u32 data);
+void phy_store_tx_power_by_rate(void *adapter, u32 band, u32 rfpath, u32 txnum,
+				u32 regaddr, u32 bitmask, u32 data);
+void phy_set_tx_power_limit(struct rtw_dev *rtwdev, u8 regd, u8 band,
+			    u8 bw, u8 rs, u8 ch, s8 pwr_limit);
+void phy_set_tx_power_index_by_rs(void *adapter, u8 ch, u8 path, u8 rs);
 void rtw_phy_setup_phy_cond(struct rtw_dev *rtwdev, u32 pkg);
 void rtw_parse_tbl_phy_cond(struct rtw_dev *rtwdev, const struct rtw_table *tbl);
 void rtw_parse_tbl_bb_pg(struct rtw_dev *rtwdev, const struct rtw_table *tbl);
@@ -39,20 +44,11 @@ void rtw_phy_cfg_bb(struct rtw_dev *rtwdev, const struct rtw_table *tbl,
 		    u32 addr, u32 data);
 void rtw_phy_cfg_rf(struct rtw_dev *rtwdev, const struct rtw_table *tbl,
 		    u32 addr, u32 data);
-void rtw_phy_init_tx_power(struct rtw_dev *rtwdev);
+void rtw_hw_init_tx_power(struct rtw_hal *hal);
 void rtw_phy_load_tables(struct rtw_dev *rtwdev);
 void rtw_phy_set_tx_power_level(struct rtw_dev *rtwdev, u8 channel);
 void rtw_phy_tx_power_by_rate_config(struct rtw_hal *hal);
 void rtw_phy_tx_power_limit_config(struct rtw_hal *hal);
-
-struct rtw_txpwr_lmt_cfg_pair {
-	u8 regd;
-	u8 band;
-	u8 bw;
-	u8 rs;
-	u8 ch;
-	s8 txpwr_lmt;
-};
 
 #define RTW_DECL_TABLE_PHY_COND_CORE(name, cfg, path)	\
 const struct rtw_table name ## _tbl = {			\
@@ -114,17 +110,6 @@ static inline int rtw_check_supported_rfe(struct rtw_dev *rtwdev)
 
 void rtw_phy_dig_write(struct rtw_dev *rtwdev, u8 igi);
 
-struct rtw_power_params {
-	u8 pwr_base;
-	s8 pwr_offset;
-	s8 pwr_limit;
-};
-
-void
-rtw_get_tx_power_params(struct rtw_dev *rtwdev, u8 path,
-			u8 rate, u8 bw, u8 ch, u8 regd,
-			struct rtw_power_params *pwr_param);
-
 #define	MASKBYTE0		0xff
 #define	MASKBYTE1		0xff00
 #define	MASKBYTE2		0xff0000
@@ -145,7 +130,5 @@ rtw_get_tx_power_params(struct rtw_dev *rtwdev, u8 path,
 #define MASKBYTE2HIGHNIBBLE	0x00f00000
 #define MASKBYTE3LOWNIBBLE	0x0f000000
 #define	MASKL3BYTES		0x00ffffff
-
-#define CCK_FA_AVG_RESET 0xffffffff
 
 #endif

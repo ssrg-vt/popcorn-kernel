@@ -96,7 +96,8 @@ void rxe_mem_cleanup(struct rxe_pool_entry *arg)
 	struct rxe_mem *mem = container_of(arg, typeof(*mem), pelem);
 	int i;
 
-	ib_umem_release(mem->umem);
+	if (mem->umem)
+		ib_umem_release(mem->umem);
 
 	if (mem->map) {
 		for (i = 0; i < mem->num_map; i++)

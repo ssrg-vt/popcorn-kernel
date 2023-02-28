@@ -13,17 +13,16 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 
-/* For enabling manual bridge set(enable/disable) function */
-#ifdef CONFIG_DEBUG_KERNEL
-#undef DEBUG
-#define DEBUG
-#endif
-
 static DEFINE_IDA(fpga_bridge_ida);
 static struct class *fpga_bridge_class;
 
 /* Lock for adding/removing bridges to linked lists*/
 static spinlock_t bridge_list_lock;
+
+static int fpga_bridge_of_node_match(struct device *dev, const void *data)
+{
+	return dev->of_node == data;
+}
 
 /**
  * fpga_bridge_enable - Enable transactions on the bridge
@@ -105,7 +104,8 @@ struct fpga_bridge *of_fpga_bridge_get(struct device_node *np,
 {
 	struct device *dev;
 
-	dev = class_find_device_by_of_node(fpga_bridge_class, np);
+	dev = class_find_device(fpga_bridge_class, NULL, np,
+				fpga_bridge_of_node_match);
 	if (!dev)
 		return ERR_PTR(-ENODEV);
 
@@ -310,33 +310,9 @@ static ssize_t state_show(struct device *dev,
 static DEVICE_ATTR_RO(name);
 static DEVICE_ATTR_RO(state);
 
-#ifdef DEBUG
-static ssize_t set_store(struct device *dev,
-			 struct device_attribute *attr,
-			 const char *buf, size_t count)
-{
-	struct fpga_bridge *bridge = to_fpga_bridge(dev);
-	long enable;
-	int ret;
-
-	ret = kstrtol(buf, 16, &enable);
-	if (ret)
-		return ret;
-
-	if (bridge->br_ops && bridge->br_ops->enable_set)
-		enable = bridge->br_ops->enable_set(bridge, !!enable);
-
-	return count;
-}
-static DEVICE_ATTR_WO(set);
-#endif
-
 static struct attribute *fpga_bridge_attrs[] = {
 	&dev_attr_name.attr,
 	&dev_attr_state.attr,
-#ifdef DEBUG
-	&dev_attr_set.attr,
-#endif
 	NULL,
 };
 ATTRIBUTE_GROUPS(fpga_bridge);

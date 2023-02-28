@@ -23,6 +23,8 @@
  *
  */
 
+#include <drm/drmP.h>
+
 #include "dm_services_types.h"
 #include "dc.h"
 
@@ -276,6 +278,8 @@ void *amdgpu_dm_irq_register_interrupt(struct amdgpu_device *adev,
 		DRM_ERROR("DM_IRQ: failed to allocate irq handler!\n");
 		return DAL_INVALID_IRQ_HANDLER_IDX;
 	}
+
+	memset(handler_data, 0, sizeof(*handler_data));
 
 	init_handler_common_data(handler_data, ih, handler_args, &adev->dm);
 

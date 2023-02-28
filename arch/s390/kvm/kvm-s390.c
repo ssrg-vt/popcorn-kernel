@@ -227,11 +227,6 @@ int kvm_arch_hardware_enable(void)
 	return 0;
 }
 
-int kvm_arch_check_processor_compat(void)
-{
-	return 0;
-}
-
 static void kvm_gmap_notifier(struct gmap *gmap, unsigned long start,
 			      unsigned long end);
 
@@ -332,7 +327,7 @@ static inline int plo_test_bit(unsigned char nr)
 	return cc == 0;
 }
 
-static __always_inline void __insn32_query(unsigned int opcode, u8 *query)
+static inline void __insn32_query(unsigned int opcode, u8 query[32])
 {
 	register unsigned long r0 asm("0") = 0;	/* query function */
 	register unsigned long r1 asm("1") = (unsigned long) query;
@@ -340,9 +335,9 @@ static __always_inline void __insn32_query(unsigned int opcode, u8 *query)
 	asm volatile(
 		/* Parameter regs are ignored */
 		"	.insn	rrf,%[opc] << 16,2,4,6,0\n"
-		:
+		: "=m" (*query)
 		: "d" (r0), "a" (r1), [opc] "i" (opcode)
-		: "cc", "memory");
+		: "cc");
 }
 
 #define INSN_SORTL 0xb938
@@ -2425,13 +2420,13 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	kvm->arch.sca = (struct bsca_block *) get_zeroed_page(alloc_flags);
 	if (!kvm->arch.sca)
 		goto out_err;
-	mutex_lock(&kvm_lock);
+	spin_lock(&kvm_lock);
 	sca_offset += 16;
 	if (sca_offset + sizeof(struct bsca_block) > PAGE_SIZE)
 		sca_offset = 0;
 	kvm->arch.sca = (struct bsca_block *)
 			((char *) kvm->arch.sca + sca_offset);
-	mutex_unlock(&kvm_lock);
+	spin_unlock(&kvm_lock);
 
 	sprintf(debug_name, "kvm-%u", current->pid);
 
@@ -2467,9 +2462,6 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 		set_kvm_facility(kvm->arch.model.fac_mask, 147);
 		set_kvm_facility(kvm->arch.model.fac_list, 147);
 	}
-
-	if (css_general_characteristics.aiv && test_facility(65))
-		set_kvm_facility(kvm->arch.model.fac_mask, 65);
 
 	kvm->arch.model.cpuid = kvm_s390_get_initial_cpuid();
 	kvm->arch.model.ibc = sclp.ibc & 0x0fff;
@@ -2516,6 +2508,16 @@ out_err:
 	sca_dispose(kvm);
 	KVM_EVENT(3, "creation of vm failed: %d", rc);
 	return rc;
+}
+
+bool kvm_arch_has_vcpu_debugfs(void)
+{
+	return false;
+}
+
+int kvm_arch_create_vcpu_debugfs(struct kvm_vcpu *vcpu)
+{
+	return 0;
 }
 
 void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu)
@@ -4000,10 +4002,6 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 	if (kvm_run->immediate_exit)
 		return -EINTR;
 
-	if (kvm_run->kvm_valid_regs & ~KVM_SYNC_S390_VALID_FIELDS ||
-	    kvm_run->kvm_dirty_regs & ~KVM_SYNC_S390_VALID_FIELDS)
-		return -EINVAL;
-
 	vcpu_load(vcpu);
 
 	if (guestdbg_exit_pending(vcpu)) {
@@ -4261,7 +4259,7 @@ static long kvm_s390_guest_mem_op(struct kvm_vcpu *vcpu,
 	const u64 supported_flags = KVM_S390_MEMOP_F_INJECT_EXCEPTION
 				    | KVM_S390_MEMOP_F_CHECK_ONLY;
 
-	if (mop->flags & ~supported_flags || mop->ar >= NUM_ACRS || !mop->size)
+	if (mop->flags & ~supported_flags)
 		return -EINVAL;
 
 	if (mop->size > MEM_OP_MAX_SIZE)

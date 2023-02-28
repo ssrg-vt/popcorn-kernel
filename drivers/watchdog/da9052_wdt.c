@@ -176,7 +176,14 @@ static int da9052_wdt_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	return devm_watchdog_register_device(dev, &driver_data->wdt);
+	ret = devm_watchdog_register_device(dev, &driver_data->wdt);
+	if (ret != 0) {
+		dev_err(da9052->dev, "watchdog_register_device() failed: %d\n",
+			ret);
+		return ret;
+	}
+
+	return ret;
 }
 
 static struct platform_driver da9052_wdt_driver = {

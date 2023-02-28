@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
-#include <stdbool.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <stdio.h>
+#include "perf.h"
+#include "util/util.h"
 #include "util/debug.h"
 #include <subcmd/parse-options.h>
-#include "util/perf_regs.h"
 #include "util/parse-regs-options.h"
 
 static int

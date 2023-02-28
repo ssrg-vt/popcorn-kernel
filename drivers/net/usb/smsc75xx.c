@@ -661,7 +661,8 @@ static void smsc75xx_status(struct usbnet *dev, struct urb *urb)
 		return;
 	}
 
-	intdata = get_unaligned_le32(urb->transfer_buffer);
+	memcpy(&intdata, urb->transfer_buffer, 4);
+	le32_to_cpus(&intdata);
 
 	netif_dbg(dev, link, dev->net, "intdata: 0x%08X\n", intdata);
 
@@ -2180,10 +2181,12 @@ static int smsc75xx_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 		struct sk_buff *ax_skb;
 		unsigned char *packet;
 
-		rx_cmd_a = get_unaligned_le32(skb->data);
+		memcpy(&rx_cmd_a, skb->data, sizeof(rx_cmd_a));
+		le32_to_cpus(&rx_cmd_a);
 		skb_pull(skb, 4);
 
-		rx_cmd_b = get_unaligned_le32(skb->data);
+		memcpy(&rx_cmd_b, skb->data, sizeof(rx_cmd_b));
+		le32_to_cpus(&rx_cmd_b);
 		skb_pull(skb, 4 + RXW_PADDING);
 
 		packet = skb->data;
@@ -2255,7 +2258,6 @@ static struct sk_buff *smsc75xx_tx_fixup(struct usbnet *dev,
 					 struct sk_buff *skb, gfp_t flags)
 {
 	u32 tx_cmd_a, tx_cmd_b;
-	void *ptr;
 
 	if (skb_cow_head(skb, SMSC75XX_TX_OVERHEAD)) {
 		dev_kfree_skb_any(skb);
@@ -2276,9 +2278,13 @@ static struct sk_buff *smsc75xx_tx_fixup(struct usbnet *dev,
 		tx_cmd_b = 0;
 	}
 
-	ptr = skb_push(skb, 8);
-	put_unaligned_le32(tx_cmd_a, ptr);
-	put_unaligned_le32(tx_cmd_b, ptr + 4);
+	skb_push(skb, 4);
+	cpu_to_le32s(&tx_cmd_b);
+	memcpy(skb->data, &tx_cmd_b, 4);
+
+	skb_push(skb, 4);
+	cpu_to_le32s(&tx_cmd_a);
+	memcpy(skb->data, &tx_cmd_a, 4);
 
 	return skb;
 }

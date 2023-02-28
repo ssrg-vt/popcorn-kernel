@@ -111,20 +111,6 @@ int xive_native_configure_irq(u32 hw_irq, u32 target, u8 prio, u32 sw_irq)
 }
 EXPORT_SYMBOL_GPL(xive_native_configure_irq);
 
-static int xive_native_get_irq_config(u32 hw_irq, u32 *target, u8 *prio,
-				      u32 *sw_irq)
-{
-	s64 rc;
-	__be64 vp;
-	__be32 lirq;
-
-	rc = opal_xive_get_irq_config(hw_irq, &vp, prio, &lirq);
-
-	*target = be64_to_cpu(vp);
-	*sw_irq = be32_to_cpu(lirq);
-
-	return rc == 0 ? 0 : -ENXIO;
-}
 
 /* This can be called multiple time to change a queue configuration */
 int xive_native_configure_queue(u32 vp_id, struct xive_q *q, u8 prio,
@@ -467,7 +453,6 @@ EXPORT_SYMBOL_GPL(xive_native_sync_queue);
 static const struct xive_ops xive_native_ops = {
 	.populate_irq_data	= xive_native_populate_irq_data,
 	.configure_irq		= xive_native_configure_irq,
-	.get_irq_config		= xive_native_get_irq_config,
 	.setup_queue		= xive_native_setup_queue,
 	.cleanup_queue		= xive_native_cleanup_queue,
 	.match			= xive_native_match,
@@ -825,13 +810,6 @@ int xive_native_set_queue_state(u32 vp_id, u32 prio, u32 qtoggle, u32 qindex)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(xive_native_set_queue_state);
-
-bool xive_native_has_queue_state_support(void)
-{
-	return opal_check_token(OPAL_XIVE_GET_QUEUE_STATE) &&
-		opal_check_token(OPAL_XIVE_SET_QUEUE_STATE);
-}
-EXPORT_SYMBOL_GPL(xive_native_has_queue_state_support);
 
 int xive_native_get_vp_state(u32 vp_id, u64 *out_state)
 {

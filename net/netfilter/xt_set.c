@@ -2,7 +2,7 @@
 /* Copyright (C) 2000-2002 Joakim Axelsson <gozem@linux.nu>
  *                         Patrick Schaaf <bof@bof.de>
  *                         Martin Josefsson <gandalf@wlug.westbo.se>
- * Copyright (C) 2003-2013 Jozsef Kadlecsik <kadlec@netfilter.org>
+ * Copyright (C) 2003-2013 Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>
  */
 
 /* Kernel module which implements the set match and SET target
@@ -14,10 +14,11 @@
 
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter/ipset/ip_set.h>
+#include <linux/netfilter/ipset/ip_set_timeout.h>
 #include <uapi/linux/netfilter/xt_set.h>
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@netfilter.org>");
+MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>");
 MODULE_DESCRIPTION("Xtables: IP set match and target module");
 MODULE_ALIAS("xt_SET");
 MODULE_ALIAS("ipt_set");
@@ -435,7 +436,6 @@ set_target_v3_checkentry(const struct xt_tgchk_param *par)
 {
 	const struct xt_set_info_target_v3 *info = par->targinfo;
 	ip_set_id_t index;
-	int ret = 0;
 
 	if (info->add_set.index != IPSET_INVALID_ID) {
 		index = ip_set_nfnl_get_byindex(par->net,
@@ -453,16 +453,17 @@ set_target_v3_checkentry(const struct xt_tgchk_param *par)
 		if (index == IPSET_INVALID_ID) {
 			pr_info_ratelimited("Cannot find del_set index %u as target\n",
 					    info->del_set.index);
-			ret = -ENOENT;
-			goto cleanup_add;
+			if (info->add_set.index != IPSET_INVALID_ID)
+				ip_set_nfnl_put(par->net,
+						info->add_set.index);
+			return -ENOENT;
 		}
 	}
 
 	if (info->map_set.index != IPSET_INVALID_ID) {
 		if (strncmp(par->table, "mangle", 7)) {
 			pr_info_ratelimited("--map-set only usable from mangle table\n");
-			ret = -EINVAL;
-			goto cleanup_del;
+			return -EINVAL;
 		}
 		if (((info->flags & IPSET_FLAG_MAP_SKBPRIO) |
 		     (info->flags & IPSET_FLAG_MAP_SKBQUEUE)) &&
@@ -470,16 +471,20 @@ set_target_v3_checkentry(const struct xt_tgchk_param *par)
 					 1 << NF_INET_LOCAL_OUT |
 					 1 << NF_INET_POST_ROUTING))) {
 			pr_info_ratelimited("mapping of prio or/and queue is allowed only from OUTPUT/FORWARD/POSTROUTING chains\n");
-			ret = -EINVAL;
-			goto cleanup_del;
+			return -EINVAL;
 		}
 		index = ip_set_nfnl_get_byindex(par->net,
 						info->map_set.index);
 		if (index == IPSET_INVALID_ID) {
 			pr_info_ratelimited("Cannot find map_set index %u as target\n",
 					    info->map_set.index);
-			ret = -ENOENT;
-			goto cleanup_del;
+			if (info->add_set.index != IPSET_INVALID_ID)
+				ip_set_nfnl_put(par->net,
+						info->add_set.index);
+			if (info->del_set.index != IPSET_INVALID_ID)
+				ip_set_nfnl_put(par->net,
+						info->del_set.index);
+			return -ENOENT;
 		}
 	}
 
@@ -487,21 +492,16 @@ set_target_v3_checkentry(const struct xt_tgchk_param *par)
 	    info->del_set.dim > IPSET_DIM_MAX ||
 	    info->map_set.dim > IPSET_DIM_MAX) {
 		pr_info_ratelimited("SET target dimension over the limit!\n");
-		ret = -ERANGE;
-		goto cleanup_mark;
+		if (info->add_set.index != IPSET_INVALID_ID)
+			ip_set_nfnl_put(par->net, info->add_set.index);
+		if (info->del_set.index != IPSET_INVALID_ID)
+			ip_set_nfnl_put(par->net, info->del_set.index);
+		if (info->map_set.index != IPSET_INVALID_ID)
+			ip_set_nfnl_put(par->net, info->map_set.index);
+		return -ERANGE;
 	}
 
 	return 0;
-cleanup_mark:
-	if (info->map_set.index != IPSET_INVALID_ID)
-		ip_set_nfnl_put(par->net, info->map_set.index);
-cleanup_del:
-	if (info->del_set.index != IPSET_INVALID_ID)
-		ip_set_nfnl_put(par->net, info->del_set.index);
-cleanup_add:
-	if (info->add_set.index != IPSET_INVALID_ID)
-		ip_set_nfnl_put(par->net, info->add_set.index);
-	return ret;
 }
 
 static void

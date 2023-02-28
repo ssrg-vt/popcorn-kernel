@@ -290,7 +290,8 @@ int pvrdma_dereg_mr(struct ib_mr *ibmr, struct ib_udata *udata)
 			 "could not deregister mem region, error: %d\n", ret);
 
 	pvrdma_page_dir_cleanup(dev, &mr->pdir);
-	ib_umem_release(mr->umem);
+	if (mr->umem)
+		ib_umem_release(mr->umem);
 
 	kfree(mr->pages);
 	kfree(mr);

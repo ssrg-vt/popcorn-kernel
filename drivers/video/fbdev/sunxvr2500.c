@@ -132,6 +132,7 @@ static int s3d_pci_register(struct pci_dev *pdev,
 
 	info = framebuffer_alloc(sizeof(struct s3d_info), &pdev->dev);
 	if (!info) {
+		printk(KERN_ERR "s3d: Cannot allocate fb_info\n");
 		err = -ENOMEM;
 		goto err_disable;
 	}

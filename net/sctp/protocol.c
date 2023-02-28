@@ -81,7 +81,7 @@ static void sctp_v4_copy_addrlist(struct list_head *addrlist,
 		return;
 	}
 
-	in_dev_for_each_ifa_rcu(ifa, in_dev) {
+	for (ifa = in_dev->ifa_list; ifa; ifa = ifa->ifa_next) {
 		/* Add the address to the local list.  */
 		addr = kzalloc(sizeof(*addr), GFP_ATOMIC);
 		if (addr) {
@@ -1253,9 +1253,6 @@ static int __net_init sctp_defaults_init(struct net *net)
 
 	/* Disable AUTH by default. */
 	net->sctp.auth_enable = 0;
-
-	/* Enable ECN by default. */
-	net->sctp.ecn_enable = 1;
 
 	/* Set SCOPE policy to enabled */
 	net->sctp.scope_policy = SCTP_SCOPE_POLICY_ENABLE;

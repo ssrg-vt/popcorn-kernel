@@ -502,6 +502,7 @@ static __init int armada38x_rtc_probe(struct platform_device *pdev)
 	struct resource *res;
 	struct armada38x_rtc *rtc;
 	const struct of_device_id *match;
+	int ret;
 
 	match = of_match_device(armada38x_rtc_of_match_table, &pdev->dev);
 	if (!match)
@@ -529,8 +530,11 @@ static __init int armada38x_rtc_probe(struct platform_device *pdev)
 		return PTR_ERR(rtc->regs_soc);
 
 	rtc->irq = platform_get_irq(pdev, 0);
-	if (rtc->irq < 0)
+
+	if (rtc->irq < 0) {
+		dev_err(&pdev->dev, "no irq\n");
 		return rtc->irq;
+	}
 
 	rtc->rtc_dev = devm_rtc_allocate_device(&pdev->dev);
 	if (IS_ERR(rtc->rtc_dev))
@@ -560,7 +564,11 @@ static __init int armada38x_rtc_probe(struct platform_device *pdev)
 
 	rtc->rtc_dev->range_max = U32_MAX;
 
-	return rtc_register_device(rtc->rtc_dev);
+	ret = rtc_register_device(rtc->rtc_dev);
+	if (ret)
+		dev_err(&pdev->dev, "Failed to register RTC device: %d\n", ret);
+
+	return ret;
 }
 
 #ifdef CONFIG_PM_SLEEP

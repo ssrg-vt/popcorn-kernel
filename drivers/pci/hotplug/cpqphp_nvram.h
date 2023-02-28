@@ -16,7 +16,10 @@
 
 #ifndef CONFIG_HOTPLUG_PCI_COMPAQ_NVRAM
 
-static inline void compaq_nvram_init(void __iomem *rom_start) { }
+static inline void compaq_nvram_init(void __iomem *rom_start)
+{
+	return;
+}
 
 static inline int compaq_nvram_load(void __iomem *rom_start, struct controller *ctrl)
 {

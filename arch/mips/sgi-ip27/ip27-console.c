@@ -35,7 +35,6 @@ void prom_putchar(char c)
 {
 	struct ioc3_uartregs *uart = console_uart();
 
-	while ((readb(&uart->iu_lsr) & 0x20) == 0)
-		;
-	writeb(c, &uart->iu_thr);
+	while ((uart->iu_lsr & 0x20) == 0);
+	uart->iu_thr = c;
 }

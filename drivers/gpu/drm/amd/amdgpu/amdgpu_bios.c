@@ -25,11 +25,10 @@
  *          Alex Deucher
  *          Jerome Glisse
  */
-
+#include <drm/drmP.h>
 #include "amdgpu.h"
 #include "atom.h"
 
-#include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/acpi.h>
 /*

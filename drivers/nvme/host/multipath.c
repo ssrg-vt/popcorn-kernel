@@ -158,19 +158,10 @@ void nvme_mpath_clear_ctrl_paths(struct nvme_ctrl *ctrl)
 	struct nvme_ns *ns;
 
 	mutex_lock(&ctrl->scan_lock);
-	down_read(&ctrl->namespaces_rwsem);
 	list_for_each_entry(ns, &ctrl->namespaces, list)
 		if (nvme_mpath_clear_current_path(ns))
 			kblockd_schedule_work(&ns->head->requeue_work);
-	up_read(&ctrl->namespaces_rwsem);
 	mutex_unlock(&ctrl->scan_lock);
-}
-
-static bool nvme_path_is_disabled(struct nvme_ns *ns)
-{
-	return ns->ctrl->state != NVME_CTRL_LIVE ||
-		test_bit(NVME_NS_ANA_PENDING, &ns->flags) ||
-		test_bit(NVME_NS_REMOVING, &ns->flags);
 }
 
 static struct nvme_ns *__nvme_find_path(struct nvme_ns_head *head, int node)
@@ -179,7 +170,8 @@ static struct nvme_ns *__nvme_find_path(struct nvme_ns_head *head, int node)
 	struct nvme_ns *found = NULL, *fallback = NULL, *ns;
 
 	list_for_each_entry_rcu(ns, &head->list, siblings) {
-		if (nvme_path_is_disabled(ns))
+		if (ns->ctrl->state != NVME_CTRL_LIVE ||
+		    test_bit(NVME_NS_ANA_PENDING, &ns->flags))
 			continue;
 
 		if (READ_ONCE(head->subsys->iopolicy) == NVME_IOPOLICY_NUMA)
@@ -227,16 +219,14 @@ static struct nvme_ns *nvme_round_robin_path(struct nvme_ns_head *head,
 {
 	struct nvme_ns *ns, *found, *fallback = NULL;
 
-	if (list_is_singular(&head->list)) {
-		if (nvme_path_is_disabled(old))
-			return NULL;
+	if (list_is_singular(&head->list))
 		return old;
-	}
 
 	for (ns = nvme_next_ns(head, old);
 	     ns != old;
 	     ns = nvme_next_ns(head, ns)) {
-		if (nvme_path_is_disabled(ns))
+		if (ns->ctrl->state != NVME_CTRL_LIVE ||
+		    test_bit(NVME_NS_ANA_PENDING, &ns->flags))
 			continue;
 
 		if (ns->ana_state == NVME_ANA_OPTIMIZED) {
@@ -524,13 +514,14 @@ static int nvme_update_ana_state(struct nvme_ctrl *ctrl,
 	return 0;
 }
 
-static int nvme_read_ana_log(struct nvme_ctrl *ctrl)
+static int nvme_read_ana_log(struct nvme_ctrl *ctrl, bool groups_only)
 {
 	u32 nr_change_groups = 0;
 	int error;
 
 	mutex_lock(&ctrl->ana_lock);
-	error = nvme_get_log(ctrl, NVME_NSID_ALL, NVME_LOG_ANA, 0,
+	error = nvme_get_log(ctrl, NVME_NSID_ALL, NVME_LOG_ANA,
+			groups_only ? NVME_ANA_LOG_RGO : 0,
 			ctrl->ana_log_buf, ctrl->ana_log_size, 0);
 	if (error) {
 		dev_warn(ctrl->device, "Failed to get ANA log: %d\n", error);
@@ -566,7 +557,7 @@ static void nvme_ana_work(struct work_struct *work)
 {
 	struct nvme_ctrl *ctrl = container_of(work, struct nvme_ctrl, ana_work);
 
-	nvme_read_ana_log(ctrl);
+	nvme_read_ana_log(ctrl, false);
 }
 
 static void nvme_anatt_timeout(struct timer_list *t)
@@ -716,7 +707,7 @@ int nvme_mpath_init(struct nvme_ctrl *ctrl, struct nvme_id_ctrl *id)
 		goto out;
 	}
 
-	error = nvme_read_ana_log(ctrl);
+	error = nvme_read_ana_log(ctrl, true);
 	if (error)
 		goto out_free_ana_log_buf;
 	return 0;

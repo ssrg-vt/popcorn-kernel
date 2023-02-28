@@ -63,11 +63,7 @@ properties:
     description:
       Set this flag to force EHCI reset after resume.
 
-  phys:
-    description: PHY specifier for the USB PHY
-
-  phy-names:
-    const: usb
+  phys: true
 
 required:
   - compatible
@@ -78,7 +74,7 @@ additionalProperties: false
 
 examples:
   - |
-    usb@e0000300 {
+    ehci@e0000300 {
         compatible = "ibm,usb-ehci-440epx", "generic-ehci";
         interrupt-parent = <&UIC0>;
         interrupts = <0x1a 4>;

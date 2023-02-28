@@ -115,6 +115,7 @@ static struct dentry *csr_dbgdir;
  * @client:	i2c client used to perform IO operations
  *
  * @ee_file:	EEPROM read/write sysfs-file
+ * @csr_file:	CSR read/write debugfs-node
  */
 struct idt_smb_seq;
 struct idt_89hpesx_dev {
@@ -136,6 +137,7 @@ struct idt_89hpesx_dev {
 
 	struct bin_attribute *ee_file;
 	struct dentry *csr_dir;
+	struct dentry *csr_file;
 };
 
 /*
@@ -1376,8 +1378,8 @@ static void idt_create_dbgfs_files(struct idt_89hpesx_dev *pdev)
 	pdev->csr_dir = debugfs_create_dir(fname, csr_dbgdir);
 
 	/* Create Debugfs file for CSR read/write operations */
-	debugfs_create_file(cli->name, 0600, pdev->csr_dir, pdev,
-			    &csr_dbgfs_ops);
+	pdev->csr_file = debugfs_create_file(cli->name, 0600,
+		pdev->csr_dir, pdev, &csr_dbgfs_ops);
 }
 
 /*

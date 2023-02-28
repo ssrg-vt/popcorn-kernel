@@ -15,19 +15,10 @@ Required sub-node properties:
 	- reg: Pin that the LED is connected to. Must be 1, 2, or 3.
 
 Optional sub-node properties:
-	- function :
-		see Documentation/devicetree/bindings/leds/common.txt
-	- color :
-		see Documentation/devicetree/bindings/leds/common.txt
-	- label :
-		see Documentation/devicetree/bindings/leds/common.txt (deprecated)
-	- linux,default-trigger :
-		see Documentation/devicetree/bindings/leds/common.txt
+	- label: see Documentation/devicetree/bindings/leds/common.txt
+	- linux,default-trigger: see Documentation/devicetree/bindings/leds/common.txt
 
 Example:
-
-#include <dt-bindings/leds/common.h>
-
 led-controller@30 {
 	compatible = "panasonic,an30259a";
 	reg = <0x30>;
@@ -37,19 +28,16 @@ led-controller@30 {
 	led@1 {
 		reg = <1>;
 		linux,default-trigger = "heartbeat";
-		function = LED_FUNCTION_INDICATOR;
-		color = <LED_COLOR_ID_RED>;
+		label = "red:indicator";
 	};
 
 	led@2 {
 		reg = <2>;
-		function = LED_FUNCTION_INDICATOR;
-		color = <LED_COLOR_ID_GREEN>;
+		label = "green:indicator";
 	};
 
 	led@3 {
 		reg = <3>;
-		function = LED_FUNCTION_INDICATOR;
-		color = <LED_COLOR_ID_BLUE>;
+		label = "blue:indicator";
 	};
 };

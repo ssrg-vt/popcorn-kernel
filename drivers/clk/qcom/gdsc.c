@@ -141,9 +141,7 @@ static int gdsc_toggle_logic(struct gdsc *sc, enum gdsc_status status)
 		udelay(1);
 	}
 
-	ret = gdsc_poll_status(sc, status);
-	WARN(ret, "%s status stuck at 'o%s'", sc->pd.name, status ? "ff" : "n");
-	return ret;
+	return gdsc_poll_status(sc, status);
 }
 
 static inline int gdsc_deassert_reset(struct gdsc *sc)

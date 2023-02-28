@@ -636,8 +636,10 @@ static int brcmstb_gpio_probe(struct platform_device *pdev)
 
 	if (of_property_read_bool(np, "interrupt-controller")) {
 		priv->parent_irq = platform_get_irq(pdev, 0);
-		if (priv->parent_irq <= 0)
+		if (priv->parent_irq <= 0) {
+			dev_err(dev, "Couldn't get IRQ");
 			return -ENOENT;
+		}
 	} else {
 		priv->parent_irq = -ENOENT;
 	}

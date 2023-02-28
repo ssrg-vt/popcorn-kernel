@@ -11,11 +11,10 @@
  *		accelerated operations on a GEM object)
  */
 
-#include <linux/pagemap.h>
-
+#include <drm/drmP.h>
 #include <drm/drm.h>
+#include <drm/gma_drm.h>
 #include <drm/drm_vma_manager.h>
-
 #include "psb_drv.h"
 
 void psb_gem_free_object(struct drm_gem_object *obj)

@@ -94,7 +94,6 @@ config MMC_SDHCI_PCI
 	depends on MMC_SDHCI && PCI
 	select MMC_CQHCI
 	select IOSF_MBI if X86
-	select MMC_SDHCI_IO_ACCESSORS
 	help
 	  This selects the PCI Secure Digital Host Controller Interface.
 	  Most controllers found today are PCI devices.
@@ -152,18 +151,6 @@ config MMC_SDHCI_OF_ARASAN
 	  (SDHCI). This hardware is found e.g. in Xilinx' Zynq SoC.
 
 	  If you have a controller with this interface, say Y or M here.
-
-	  If unsure, say N.
-
-config MMC_SDHCI_OF_ASPEED
-	tristate "SDHCI OF support for the ASPEED SDHCI controller"
-	depends on MMC_SDHCI_PLTFM
-	depends on OF && OF_ADDRESS
-	help
-	  This selects the ASPEED Secure Digital Host Controller Interface.
-
-	  If you have a controller with this interface, say Y or M here. You
-	  also need to enable an appropriate bus interface.
 
 	  If unsure, say N.
 
@@ -1009,7 +996,7 @@ config MMC_SDHCI_OMAP
 
 config MMC_SDHCI_AM654
 	tristate "Support for the SDHCI Controller in TI's AM654 SOCs"
-	depends on MMC_SDHCI_PLTFM && OF && REGMAP_MMIO
+	depends on MMC_SDHCI_PLTFM && OF
 	select MMC_SDHCI_IO_ACCESSORS
 	help
 	  This selects the Secure Digital Host Controller Interface (SDHCI)

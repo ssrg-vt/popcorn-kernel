@@ -1110,8 +1110,10 @@ static int ov7670_set_fmt(struct v4l2_subdev *sd,
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 		mbus_fmt = v4l2_subdev_get_try_format(sd, cfg, format->pad);
 		*mbus_fmt = format->format;
-#endif
 		return 0;
+#else
+		return -ENOTTY;
+#endif
 	}
 
 	ret = ov7670_try_fmt_internal(sd, &format->format, &info->fmt, &info->wsize);
@@ -1144,7 +1146,7 @@ static int ov7670_get_fmt(struct v4l2_subdev *sd,
 		format->format = *mbus_fmt;
 		return 0;
 #else
-		return -EINVAL;
+		return -ENOTTY;
 #endif
 	} else {
 		format->format = info->format;

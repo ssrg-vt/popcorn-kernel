@@ -190,7 +190,8 @@ isac_rme_irq(struct isac_hw *isac)
 #endif
 		}
 		WriteISAC(isac, ISAC_CMDR, 0x80);
-		dev_kfree_skb(isac->dch.rx_skb);
+		if (isac->dch.rx_skb)
+			dev_kfree_skb(isac->dch.rx_skb);
 		isac->dch.rx_skb = NULL;
 	} else {
 		count = ReadISAC(isac, ISAC_RBCL) & 0x1f;
@@ -209,7 +210,8 @@ isac_xpr_irq(struct isac_hw *isac)
 	if (isac->dch.tx_skb && isac->dch.tx_idx < isac->dch.tx_skb->len) {
 		isac_fill_fifo(isac);
 	} else {
-		dev_kfree_skb(isac->dch.tx_skb);
+		if (isac->dch.tx_skb)
+			dev_kfree_skb(isac->dch.tx_skb);
 		if (get_next_dframe(&isac->dch))
 			isac_fill_fifo(isac);
 	}
@@ -462,7 +464,8 @@ isacsx_rme_irq(struct isac_hw *isac)
 			isac->dch.err_crc++;
 #endif
 		WriteISAC(isac, ISACX_CMDRD, ISACX_CMDRD_RMC);
-		dev_kfree_skb(isac->dch.rx_skb);
+		if (isac->dch.rx_skb)
+			dev_kfree_skb(isac->dch.rx_skb);
 		isac->dch.rx_skb = NULL;
 	} else {
 		count = ReadISAC(isac, ISACX_RBCLD) & 0x1f;
@@ -1009,7 +1012,8 @@ hscx_xpr(struct hscx_hw *hx)
 	if (hx->bch.tx_skb && hx->bch.tx_idx < hx->bch.tx_skb->len) {
 		hscx_fill_fifo(hx);
 	} else {
-		dev_kfree_skb(hx->bch.tx_skb);
+		if (hx->bch.tx_skb)
+			dev_kfree_skb(hx->bch.tx_skb);
 		if (get_next_bframe(&hx->bch)) {
 			hscx_fill_fifo(hx);
 			test_and_clear_bit(FLG_TX_EMPTY, &hx->bch.Flags);

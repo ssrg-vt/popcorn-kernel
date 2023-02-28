@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * perf.c
  *
@@ -7,12 +8,8 @@
  * perf top, perf record, perf report, etc.) are started.
  */
 #include "builtin.h"
-#include "perf.h"
 
-#include "util/build-id.h"
-#include "util/cache.h"
 #include "util/env.h"
-#include <internal/lib.h> // page_size
 #include <subcmd/exec-cmd.h>
 #include "util/config.h"
 #include <subcmd/run-command.h>
@@ -21,12 +18,8 @@
 #include "util/bpf-loader.h"
 #include "util/debug.h"
 #include "util/event.h"
-#include "util/util.h" // usage()
-#include "ui/ui.h"
-#include "perf-sys.h"
 #include <api/fs/fs.h>
 #include <api/fs/tracing_path.h>
-#include <perf/core.h>
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -36,8 +29,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <linux/kernel.h>
-#include <linux/string.h>
-#include <linux/zalloc.h>
 
 const char perf_usage_string[] =
 	"perf [--version] [--help] [OPTIONS] COMMAND [ARGS]";
@@ -430,12 +421,6 @@ void pthread__unblock_sigwinch(void)
 	pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 }
 
-static int libperf_print(enum libperf_print_level level,
-			 const char *fmt, va_list ap)
-{
-	return eprintf(level, verbose, fmt, ap);
-}
-
 int main(int argc, const char **argv)
 {
 	int err;
@@ -446,7 +431,8 @@ int main(int argc, const char **argv)
 	exec_cmd_init("perf", PREFIX, PERF_EXEC_PATH, EXEC_PATH_ENVIRONMENT);
 	pager_init(PERF_PAGER_ENVIRONMENT);
 
-	libperf_init(libperf_print);
+	/* The page_size is placed in util object. */
+	page_size = sysconf(_SC_PAGE_SIZE);
 
 	cmd = extract_argv0_path(argv[0]);
 	if (!cmd)

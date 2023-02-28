@@ -512,9 +512,11 @@ static int nfs4_xdr_dec_cb_recall(struct rpc_rqst *rqstp,
 	if (unlikely(status))
 		return status;
 
-	status = decode_cb_sequence4res(xdr, cb);
-	if (unlikely(status || cb->cb_seq_status))
-		return status;
+	if (cb != NULL) {
+		status = decode_cb_sequence4res(xdr, cb);
+		if (unlikely(status || cb->cb_seq_status))
+			return status;
+	}
 
 	return decode_cb_op_status(xdr, OP_CB_RECALL, &cb->cb_status);
 }
@@ -602,10 +604,11 @@ static int nfs4_xdr_dec_cb_layout(struct rpc_rqst *rqstp,
 	if (unlikely(status))
 		return status;
 
-	status = decode_cb_sequence4res(xdr, cb);
-	if (unlikely(status || cb->cb_seq_status))
-		return status;
-
+	if (cb) {
+		status = decode_cb_sequence4res(xdr, cb);
+		if (unlikely(status || cb->cb_seq_status))
+			return status;
+	}
 	return decode_cb_op_status(xdr, OP_CB_LAYOUTRECALL, &cb->cb_status);
 }
 #endif /* CONFIG_NFSD_PNFS */
@@ -660,10 +663,11 @@ static int nfs4_xdr_dec_cb_notify_lock(struct rpc_rqst *rqstp,
 	if (unlikely(status))
 		return status;
 
-	status = decode_cb_sequence4res(xdr, cb);
-	if (unlikely(status || cb->cb_seq_status))
-		return status;
-
+	if (cb) {
+		status = decode_cb_sequence4res(xdr, cb);
+		if (unlikely(status || cb->cb_seq_status))
+			return status;
+	}
 	return decode_cb_op_status(xdr, OP_CB_NOTIFY_LOCK, &cb->cb_status);
 }
 
@@ -755,10 +759,11 @@ static int nfs4_xdr_dec_cb_offload(struct rpc_rqst *rqstp,
 	if (unlikely(status))
 		return status;
 
-	status = decode_cb_sequence4res(xdr, cb);
-	if (unlikely(status || cb->cb_seq_status))
-		return status;
-
+	if (cb) {
+		status = decode_cb_sequence4res(xdr, cb);
+		if (unlikely(status || cb->cb_seq_status))
+			return status;
+	}
 	return decode_cb_op_status(xdr, OP_CB_OFFLOAD, &cb->cb_status);
 }
 /*

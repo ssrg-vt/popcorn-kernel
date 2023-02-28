@@ -412,10 +412,8 @@ static int rzn1_dt_node_to_map(struct pinctrl_dev *pctldev,
 
 	for_each_child_of_node(np, child) {
 		ret = rzn1_dt_node_to_map_one(pctldev, child, map, num_maps);
-		if (ret < 0) {
-			of_node_put(child);
+		if (ret < 0)
 			return ret;
-		}
 	}
 
 	return 0;
@@ -794,10 +792,8 @@ static int rzn1_pinctrl_parse_functions(struct device_node *np,
 		grp = &ipctl->groups[ipctl->ngroups];
 		grp->func = func->name;
 		ret = rzn1_pinctrl_parse_groups(child, grp, ipctl);
-		if (ret < 0) {
-			of_node_put(child);
+		if (ret < 0)
 			return ret;
-		}
 		i++;
 		ipctl->ngroups++;
 	}
@@ -842,10 +838,8 @@ static int rzn1_pinctrl_probe_dt(struct platform_device *pdev,
 
 	for_each_child_of_node(np, child) {
 		ret = rzn1_pinctrl_parse_functions(child, ipctl, i++);
-		if (ret < 0) {
-			of_node_put(child);
+		if (ret < 0)
 			return ret;
-		}
 	}
 
 	return 0;

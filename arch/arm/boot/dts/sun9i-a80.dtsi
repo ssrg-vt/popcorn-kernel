@@ -331,12 +331,8 @@
 			snps,fixed-burst;
 			snps,force_sf_dma_mode;
 			status = "disabled";
-
-			mdio: mdio {
-				compatible = "snps,dwmac-mdio";
-				#address-cells = <1>;
-				#size-cells = <0>;
-			};
+			#address-cells = <1>;
+			#size-cells = <0>;
 		};
 
 		ehci0: usb@a00000 {
@@ -346,7 +342,6 @@
 			clocks = <&usb_clocks CLK_BUS_HCI0>;
 			resets = <&usb_clocks RST_USB0_HCI>;
 			phys = <&usbphy1>;
-			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -358,7 +353,6 @@
 				 <&usb_clocks CLK_USB_OHCI0>;
 			resets = <&usb_clocks RST_USB0_HCI>;
 			phys = <&usbphy1>;
-			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -380,7 +374,6 @@
 			clocks = <&usb_clocks CLK_BUS_HCI1>;
 			resets = <&usb_clocks RST_USB1_HCI>;
 			phys = <&usbphy2>;
-			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -410,7 +403,6 @@
 			clocks = <&usb_clocks CLK_BUS_HCI2>;
 			resets = <&usb_clocks RST_USB2_HCI>;
 			phys = <&usbphy3>;
-			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -422,7 +414,6 @@
 				 <&usb_clocks CLK_USB_OHCI2>;
 			resets = <&usb_clocks RST_USB2_HCI>;
 			phys = <&usbphy3>;
-			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -1176,7 +1167,7 @@
 		};
 
 		r_ir: ir@8002000 {
-			compatible = "allwinner,sun6i-a31-ir";
+			compatible = "allwinner,sun5i-a13-ir";
 			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
 			pinctrl-names = "default";
 			pinctrl-0 = <&r_ir_pins>;

@@ -56,11 +56,6 @@ static int kfd_init(void)
 	if (err < 0)
 		goto err_create_wq;
 
-	/* Ignore the return value, so that we can continue
-	 * to init the KFD, even if procfs isn't craated
-	 */
-	kfd_procfs_init();
-
 	kfd_debugfs_init();
 
 	return 0;
@@ -77,7 +72,6 @@ static void kfd_exit(void)
 {
 	kfd_debugfs_fini();
 	kfd_process_destroy_wq();
-	kfd_procfs_shutdown();
 	kfd_topology_shutdown();
 	kfd_chardev_exit();
 }

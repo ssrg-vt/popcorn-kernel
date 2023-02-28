@@ -21,7 +21,7 @@
 #define PERIOD(x)		(((x) * 0x10) + 0x10)
 #define DUTY(x)			(((x) * 0x10) + 0x14)
 
-#define PERIOD_MIN		0x2
+#define MIN_PERIOD		108		/* 9.2 MHz max. PWM clock */
 
 struct bcm2835_pwm {
 	struct pwm_chip chip;
@@ -64,22 +64,22 @@ static int bcm2835_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 	struct bcm2835_pwm *pc = to_bcm2835_pwm(chip);
 	unsigned long rate = clk_get_rate(pc->clk);
 	unsigned long scaler;
-	u32 period;
 
 	if (!rate) {
 		dev_err(pc->dev, "failed to get clock rate\n");
 		return -EINVAL;
 	}
 
-	scaler = DIV_ROUND_CLOSEST(NSEC_PER_SEC, rate);
-	period = DIV_ROUND_CLOSEST(period_ns, scaler);
+	scaler = NSEC_PER_SEC / rate;
 
-	if (period < PERIOD_MIN)
+	if (period_ns <= MIN_PERIOD) {
+		dev_err(pc->dev, "period %d not supported, minimum %d\n",
+			period_ns, MIN_PERIOD);
 		return -EINVAL;
+	}
 
-	writel(DIV_ROUND_CLOSEST(duty_ns, scaler),
-	       pc->base + DUTY(pwm->hwpwm));
-	writel(period, pc->base + PERIOD(pwm->hwpwm));
+	writel(duty_ns / scaler, pc->base + DUTY(pwm->hwpwm));
+	writel(period_ns / scaler, pc->base + PERIOD(pwm->hwpwm));
 
 	return 0;
 }
@@ -153,11 +153,8 @@ static int bcm2835_pwm_probe(struct platform_device *pdev)
 
 	pc->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(pc->clk)) {
-		ret = PTR_ERR(pc->clk);
-		if (ret != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "clock not found: %d\n", ret);
-
-		return ret;
+		dev_err(&pdev->dev, "clock not found: %ld\n", PTR_ERR(pc->clk));
+		return PTR_ERR(pc->clk);
 	}
 
 	ret = clk_prepare_enable(pc->clk);

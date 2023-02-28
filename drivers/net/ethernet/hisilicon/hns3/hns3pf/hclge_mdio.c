@@ -55,9 +55,9 @@ static int hclge_mdio_write(struct mii_bus *bus, int phyid, int regnum,
 	mdio_cmd = (struct hclge_mdio_cfg_cmd *)desc.data;
 
 	hnae3_set_field(mdio_cmd->phyid, HCLGE_MDIO_PHYID_M,
-			HCLGE_MDIO_PHYID_S, (u32)phyid);
+			HCLGE_MDIO_PHYID_S, phyid);
 	hnae3_set_field(mdio_cmd->phyad, HCLGE_MDIO_PHYREG_M,
-			HCLGE_MDIO_PHYREG_S, (u32)regnum);
+			HCLGE_MDIO_PHYREG_S, regnum);
 
 	hnae3_set_bit(mdio_cmd->ctrl_bit, HCLGE_MDIO_CTRL_START_B, 1);
 	hnae3_set_field(mdio_cmd->ctrl_bit, HCLGE_MDIO_CTRL_ST_M,
@@ -93,9 +93,9 @@ static int hclge_mdio_read(struct mii_bus *bus, int phyid, int regnum)
 	mdio_cmd = (struct hclge_mdio_cfg_cmd *)desc.data;
 
 	hnae3_set_field(mdio_cmd->phyid, HCLGE_MDIO_PHYID_M,
-			HCLGE_MDIO_PHYID_S, (u32)phyid);
+			HCLGE_MDIO_PHYID_S, phyid);
 	hnae3_set_field(mdio_cmd->phyad, HCLGE_MDIO_PHYREG_M,
-			HCLGE_MDIO_PHYREG_S, (u32)regnum);
+			HCLGE_MDIO_PHYREG_S, regnum);
 
 	hnae3_set_bit(mdio_cmd->ctrl_bit, HCLGE_MDIO_CTRL_START_B, 1);
 	hnae3_set_field(mdio_cmd->ctrl_bit, HCLGE_MDIO_CTRL_ST_M,
@@ -230,8 +230,6 @@ int hclge_mac_connect_phy(struct hnae3_handle *handle)
 	 */
 	linkmode_clear_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT,
 			   phydev->advertising);
-
-	phy_attached_info(phydev);
 
 	return 0;
 }

@@ -26,11 +26,10 @@
 #include <memory.h>
 #include <unistd.h>
 #include <asm/unistd.h>
-#include <errno.h>
 #include <linux/bpf.h>
 #include "bpf.h"
 #include "libbpf.h"
-#include "libbpf_internal.h"
+#include <errno.h>
 
 /*
  * When building perf, unistd.h is overridden. __NR_bpf is
@@ -52,6 +51,10 @@
 # else
 #  error __NR_bpf not defined. libbpf does not support your arch.
 # endif
+#endif
+
+#ifndef min
+#define min(x, y) ((x) < (y) ? (x) : (y))
 #endif
 
 static inline __u64 ptr_to_u64(const void *ptr)
@@ -253,7 +256,6 @@ int bpf_load_program_xattr(const struct bpf_load_program_attr *load_attr,
 	if (load_attr->name)
 		memcpy(attr.prog_name, load_attr->name,
 		       min(strlen(load_attr->name), BPF_OBJ_NAME_LEN - 1));
-	attr.prog_flags = load_attr->prog_flags;
 
 	fd = sys_bpf_prog_load(&attr, sizeof(attr));
 	if (fd >= 0)
@@ -568,7 +570,7 @@ int bpf_prog_test_run_xattr(struct bpf_prog_test_run_attr *test_attr)
 	return ret;
 }
 
-static int bpf_obj_get_next_id(__u32 start_id, __u32 *next_id, int cmd)
+int bpf_prog_get_next_id(__u32 start_id, __u32 *next_id)
 {
 	union bpf_attr attr;
 	int err;
@@ -576,26 +578,26 @@ static int bpf_obj_get_next_id(__u32 start_id, __u32 *next_id, int cmd)
 	memset(&attr, 0, sizeof(attr));
 	attr.start_id = start_id;
 
-	err = sys_bpf(cmd, &attr, sizeof(attr));
+	err = sys_bpf(BPF_PROG_GET_NEXT_ID, &attr, sizeof(attr));
 	if (!err)
 		*next_id = attr.next_id;
 
 	return err;
 }
 
-int bpf_prog_get_next_id(__u32 start_id, __u32 *next_id)
-{
-	return bpf_obj_get_next_id(start_id, next_id, BPF_PROG_GET_NEXT_ID);
-}
-
 int bpf_map_get_next_id(__u32 start_id, __u32 *next_id)
 {
-	return bpf_obj_get_next_id(start_id, next_id, BPF_MAP_GET_NEXT_ID);
-}
+	union bpf_attr attr;
+	int err;
 
-int bpf_btf_get_next_id(__u32 start_id, __u32 *next_id)
-{
-	return bpf_obj_get_next_id(start_id, next_id, BPF_BTF_GET_NEXT_ID);
+	memset(&attr, 0, sizeof(attr));
+	attr.start_id = start_id;
+
+	err = sys_bpf(BPF_MAP_GET_NEXT_ID, &attr, sizeof(attr));
+	if (!err)
+		*next_id = attr.next_id;
+
+	return err;
 }
 
 int bpf_prog_get_fd_by_id(__u32 id)

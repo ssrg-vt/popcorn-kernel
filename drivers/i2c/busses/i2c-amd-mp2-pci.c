@@ -457,12 +457,18 @@ static struct pci_driver amd_mp2_pci_driver = {
 };
 module_pci_driver(amd_mp2_pci_driver);
 
+static int amd_mp2_device_match(struct device *dev, void *data)
+{
+	return 1;
+}
+
 struct amd_mp2_dev *amd_mp2_find_device(void)
 {
 	struct device *dev;
 	struct pci_dev *pci_dev;
 
-	dev = driver_find_next_device(&amd_mp2_pci_driver.driver, NULL);
+	dev = driver_find_device(&amd_mp2_pci_driver.driver, NULL, NULL,
+				 amd_mp2_device_match);
 	if (!dev)
 		return NULL;
 

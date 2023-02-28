@@ -255,8 +255,10 @@ static int brcmstb_waketmr_probe(struct platform_device *pdev)
 	timer->rtc->range_max = U32_MAX;
 
 	ret = rtc_register_device(timer->rtc);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "unable to register device\n");
 		goto err_notifier;
+	}
 
 	dev_info(dev, "registered, with irq %d\n", timer->irq);
 

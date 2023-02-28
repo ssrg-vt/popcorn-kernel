@@ -8,11 +8,7 @@
 /include/ "nspire.dtsi"
 
 &lcd {
-	port {
-		clcd_pads: endpoint {
-			remote-endpoint = <&panel_in>;
-		};
-	};
+	lcd-type = "classic";
 };
 
 &fast_timer {
@@ -71,15 +67,6 @@
 			interrupt-controller;
 			reg = <0xDC000000 0x1000>;
 			#interrupt-cells = <1>;
-		};
-	};
-
-	panel {
-		compatible = "ti,nspire-classic-lcd-panel";
-		port {
-			panel_in: endpoint {
-				remote-endpoint = <&clcd_pads>;
-			};
 		};
 	};
 	chosen {

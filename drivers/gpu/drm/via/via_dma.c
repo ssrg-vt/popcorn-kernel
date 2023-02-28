@@ -34,15 +34,8 @@
  *    Thomas Hellstrom.
  */
 
-#include <linux/delay.h>
-#include <linux/uaccess.h>
-
-#include <drm/drm.h>
-#include <drm/drm_agpsupport.h>
-#include <drm/drm_device.h>
-#include <drm/drm_file.h>
+#include <drm/drmP.h>
 #include <drm/via_drm.h>
-
 #include "via_drv.h"
 #include "via_3d_reg.h"
 
@@ -437,14 +430,14 @@ static int via_hook_segment(drm_via_private_t *dev_priv,
 	diff = (uint32_t) (ptr - reader) - dev_priv->dma_diff;
 	count = 10000000;
 	while (diff == 0 && count--) {
-		paused = (via_read(dev_priv, 0x41c) & 0x80000000);
+		paused = (VIA_READ(0x41c) & 0x80000000);
 		if (paused)
 			break;
 		reader = *(dev_priv->hw_addr_ptr);
 		diff = (uint32_t) (ptr - reader) - dev_priv->dma_diff;
 	}
 
-	paused = via_read(dev_priv, 0x41c) & 0x80000000;
+	paused = VIA_READ(0x41c) & 0x80000000;
 
 	if (paused && !no_pci_fire) {
 		reader = *(dev_priv->hw_addr_ptr);
@@ -461,10 +454,10 @@ static int via_hook_segment(drm_via_private_t *dev_priv,
 			 * doesn't make a difference.
 			 */
 
-			via_write(dev_priv, VIA_REG_TRANSET, (HC_ParaType_PreCR << 16));
-			via_write(dev_priv, VIA_REG_TRANSPACE, pause_addr_hi);
-			via_write(dev_priv, VIA_REG_TRANSPACE, pause_addr_lo);
-			via_read(dev_priv, VIA_REG_TRANSPACE);
+			VIA_WRITE(VIA_REG_TRANSET, (HC_ParaType_PreCR << 16));
+			VIA_WRITE(VIA_REG_TRANSPACE, pause_addr_hi);
+			VIA_WRITE(VIA_REG_TRANSPACE, pause_addr_lo);
+			VIA_READ(VIA_REG_TRANSPACE);
 		}
 	}
 	return paused;
@@ -474,10 +467,10 @@ static int via_wait_idle(drm_via_private_t *dev_priv)
 {
 	int count = 10000000;
 
-	while (!(via_read(dev_priv, VIA_REG_STATUS) & VIA_VR_QUEUE_BUSY) && --count)
+	while (!(VIA_READ(VIA_REG_STATUS) & VIA_VR_QUEUE_BUSY) && --count)
 		;
 
-	while (count && (via_read(dev_priv, VIA_REG_STATUS) &
+	while (count && (VIA_READ(VIA_REG_STATUS) &
 			   (VIA_CMD_RGTR_BUSY | VIA_2D_ENG_BUSY |
 			    VIA_3D_ENG_BUSY)))
 		--count;
@@ -543,21 +536,21 @@ static void via_cmdbuf_start(drm_via_private_t *dev_priv)
 	via_flush_write_combine();
 	(void) *(volatile uint32_t *)dev_priv->last_pause_ptr;
 
-	via_write(dev_priv, VIA_REG_TRANSET, (HC_ParaType_PreCR << 16));
-	via_write(dev_priv, VIA_REG_TRANSPACE, command);
-	via_write(dev_priv, VIA_REG_TRANSPACE, start_addr_lo);
-	via_write(dev_priv, VIA_REG_TRANSPACE, end_addr_lo);
+	VIA_WRITE(VIA_REG_TRANSET, (HC_ParaType_PreCR << 16));
+	VIA_WRITE(VIA_REG_TRANSPACE, command);
+	VIA_WRITE(VIA_REG_TRANSPACE, start_addr_lo);
+	VIA_WRITE(VIA_REG_TRANSPACE, end_addr_lo);
 
-	via_write(dev_priv, VIA_REG_TRANSPACE, pause_addr_hi);
-	via_write(dev_priv, VIA_REG_TRANSPACE, pause_addr_lo);
+	VIA_WRITE(VIA_REG_TRANSPACE, pause_addr_hi);
+	VIA_WRITE(VIA_REG_TRANSPACE, pause_addr_lo);
 	wmb();
-	via_write(dev_priv, VIA_REG_TRANSPACE, command | HC_HAGPCMNT_MASK);
-	via_read(dev_priv, VIA_REG_TRANSPACE);
+	VIA_WRITE(VIA_REG_TRANSPACE, command | HC_HAGPCMNT_MASK);
+	VIA_READ(VIA_REG_TRANSPACE);
 
 	dev_priv->dma_diff = 0;
 
 	count = 10000000;
-	while (!(via_read(dev_priv, 0x41c) & 0x80000000) && count--);
+	while (!(VIA_READ(0x41c) & 0x80000000) && count--);
 
 	reader = *(dev_priv->hw_addr_ptr);
 	ptr = ((volatile char *)dev_priv->last_pause_ptr - dev_priv->dma_ptr) +

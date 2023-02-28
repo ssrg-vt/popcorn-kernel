@@ -1352,7 +1352,8 @@ static const struct v4l2_subdev_ops ov772x_subdev_ops = {
  * i2c_driver function
  */
 
-static int ov772x_probe(struct i2c_client *client)
+static int ov772x_probe(struct i2c_client *client,
+			const struct i2c_device_id *did)
 {
 	struct ov772x_priv	*priv;
 	int			ret;
@@ -1485,7 +1486,7 @@ static struct i2c_driver ov772x_i2c_driver = {
 		.name = "ov772x",
 		.of_match_table = ov772x_of_match,
 	},
-	.probe_new = ov772x_probe,
+	.probe    = ov772x_probe,
 	.remove   = ov772x_remove,
 	.id_table = ov772x_id,
 };

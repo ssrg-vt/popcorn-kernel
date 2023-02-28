@@ -32,6 +32,8 @@
  *    Gareth Hughes <gareth@valinux.com>
  */
 
+#include <drm/drmP.h>
+#include <drm/mga_drm.h>
 #include "mga_drv.h"
 
 /* ================================================================
@@ -1014,7 +1016,7 @@ int mga_getparam(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		return -EINVAL;
 	}
 
-	DRM_DEBUG("pid=%d\n", task_pid_nr(current));
+	DRM_DEBUG("pid=%d\n", DRM_CURRENTPID);
 
 	switch (param->param) {
 	case MGA_PARAM_IRQ_NR:
@@ -1046,7 +1048,7 @@ static int mga_set_fence(struct drm_device *dev, void *data, struct drm_file *fi
 		return -EINVAL;
 	}
 
-	DRM_DEBUG("pid=%d\n", task_pid_nr(current));
+	DRM_DEBUG("pid=%d\n", DRM_CURRENTPID);
 
 	/* I would normal do this assignment in the declaration of fence,
 	 * but dev_priv may be NULL.
@@ -1075,7 +1077,7 @@ file_priv)
 		return -EINVAL;
 	}
 
-	DRM_DEBUG("pid=%d\n", task_pid_nr(current));
+	DRM_DEBUG("pid=%d\n", DRM_CURRENTPID);
 
 	mga_driver_fence_wait(dev, fence);
 	return 0;

@@ -76,8 +76,7 @@ static int mwifiex_11n_dispatch_amsdu_pkt(struct mwifiex_private *priv,
 /* This function will process the rx packet and forward it to kernel/upper
  * layer.
  */
-static int mwifiex_11n_dispatch_pkt(struct mwifiex_private *priv,
-				    struct sk_buff *payload)
+static int mwifiex_11n_dispatch_pkt(struct mwifiex_private *priv, void *payload)
 {
 
 	int ret;
@@ -110,25 +109,27 @@ mwifiex_11n_dispatch_pkt_until_start_win(struct mwifiex_private *priv,
 					 struct mwifiex_rx_reorder_tbl *tbl,
 					 int start_win)
 {
-	struct sk_buff_head list;
-	struct sk_buff *skb;
 	int pkt_to_send, i;
-
-	__skb_queue_head_init(&list);
-	spin_lock_bh(&priv->rx_reorder_tbl_lock);
+	void *rx_tmp_ptr;
+	unsigned long flags;
 
 	pkt_to_send = (start_win > tbl->start_win) ?
 		      min((start_win - tbl->start_win), tbl->win_size) :
 		      tbl->win_size;
 
 	for (i = 0; i < pkt_to_send; ++i) {
+		spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
+		rx_tmp_ptr = NULL;
 		if (tbl->rx_reorder_ptr[i]) {
-			skb = tbl->rx_reorder_ptr[i];
-			__skb_queue_tail(&list, skb);
+			rx_tmp_ptr = tbl->rx_reorder_ptr[i];
 			tbl->rx_reorder_ptr[i] = NULL;
 		}
+		spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
+		if (rx_tmp_ptr)
+			mwifiex_11n_dispatch_pkt(priv, rx_tmp_ptr);
 	}
 
+	spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 	/*
 	 * We don't have a circular buffer, hence use rotation to simulate
 	 * circular buffer
@@ -139,10 +140,7 @@ mwifiex_11n_dispatch_pkt_until_start_win(struct mwifiex_private *priv,
 	}
 
 	tbl->start_win = start_win;
-	spin_unlock_bh(&priv->rx_reorder_tbl_lock);
-
-	while ((skb = __skb_dequeue(&list)))
-		mwifiex_11n_dispatch_pkt(priv, skb);
+	spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
 }
 
 /*
@@ -157,21 +155,24 @@ static void
 mwifiex_11n_scan_and_dispatch(struct mwifiex_private *priv,
 			      struct mwifiex_rx_reorder_tbl *tbl)
 {
-	struct sk_buff_head list;
-	struct sk_buff *skb;
 	int i, j, xchg;
-
-	__skb_queue_head_init(&list);
-	spin_lock_bh(&priv->rx_reorder_tbl_lock);
+	void *rx_tmp_ptr;
+	unsigned long flags;
 
 	for (i = 0; i < tbl->win_size; ++i) {
-		if (!tbl->rx_reorder_ptr[i])
+		spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
+		if (!tbl->rx_reorder_ptr[i]) {
+			spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock,
+					       flags);
 			break;
-		skb = tbl->rx_reorder_ptr[i];
-		__skb_queue_tail(&list, skb);
+		}
+		rx_tmp_ptr = tbl->rx_reorder_ptr[i];
 		tbl->rx_reorder_ptr[i] = NULL;
+		spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
+		mwifiex_11n_dispatch_pkt(priv, rx_tmp_ptr);
 	}
 
+	spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 	/*
 	 * We don't have a circular buffer, hence use rotation to simulate
 	 * circular buffer
@@ -184,11 +185,7 @@ mwifiex_11n_scan_and_dispatch(struct mwifiex_private *priv,
 		}
 	}
 	tbl->start_win = (tbl->start_win + i) & (MAX_TID_VALUE - 1);
-
-	spin_unlock_bh(&priv->rx_reorder_tbl_lock);
-
-	while ((skb = __skb_dequeue(&list)))
-		mwifiex_11n_dispatch_pkt(priv, skb);
+	spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
 }
 
 /*
@@ -201,18 +198,19 @@ static void
 mwifiex_del_rx_reorder_entry(struct mwifiex_private *priv,
 			     struct mwifiex_rx_reorder_tbl *tbl)
 {
+	unsigned long flags;
 	int start_win;
 
 	if (!tbl)
 		return;
 
-	spin_lock_bh(&priv->adapter->rx_proc_lock);
+	spin_lock_irqsave(&priv->adapter->rx_proc_lock, flags);
 	priv->adapter->rx_locked = true;
 	if (priv->adapter->rx_processing) {
-		spin_unlock_bh(&priv->adapter->rx_proc_lock);
+		spin_unlock_irqrestore(&priv->adapter->rx_proc_lock, flags);
 		flush_workqueue(priv->adapter->rx_workqueue);
 	} else {
-		spin_unlock_bh(&priv->adapter->rx_proc_lock);
+		spin_unlock_irqrestore(&priv->adapter->rx_proc_lock, flags);
 	}
 
 	start_win = (tbl->start_win + tbl->win_size) & (MAX_TID_VALUE - 1);
@@ -221,16 +219,16 @@ mwifiex_del_rx_reorder_entry(struct mwifiex_private *priv,
 	del_timer_sync(&tbl->timer_context.timer);
 	tbl->timer_context.timer_is_set = false;
 
-	spin_lock_bh(&priv->rx_reorder_tbl_lock);
+	spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 	list_del(&tbl->list);
-	spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+	spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
 
 	kfree(tbl->rx_reorder_ptr);
 	kfree(tbl);
 
-	spin_lock_bh(&priv->adapter->rx_proc_lock);
+	spin_lock_irqsave(&priv->adapter->rx_proc_lock, flags);
 	priv->adapter->rx_locked = false;
-	spin_unlock_bh(&priv->adapter->rx_proc_lock);
+	spin_unlock_irqrestore(&priv->adapter->rx_proc_lock, flags);
 
 }
 
@@ -242,15 +240,17 @@ struct mwifiex_rx_reorder_tbl *
 mwifiex_11n_get_rx_reorder_tbl(struct mwifiex_private *priv, int tid, u8 *ta)
 {
 	struct mwifiex_rx_reorder_tbl *tbl;
+	unsigned long flags;
 
-	spin_lock_bh(&priv->rx_reorder_tbl_lock);
+	spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 	list_for_each_entry(tbl, &priv->rx_reorder_tbl_ptr, list) {
 		if (!memcmp(tbl->ta, ta, ETH_ALEN) && tbl->tid == tid) {
-			spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+			spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock,
+					       flags);
 			return tbl;
 		}
 	}
-	spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+	spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
 
 	return NULL;
 }
@@ -261,19 +261,21 @@ mwifiex_11n_get_rx_reorder_tbl(struct mwifiex_private *priv, int tid, u8 *ta)
 void mwifiex_11n_del_rx_reorder_tbl_by_ta(struct mwifiex_private *priv, u8 *ta)
 {
 	struct mwifiex_rx_reorder_tbl *tbl, *tmp;
+	unsigned long flags;
 
 	if (!ta)
 		return;
 
-	spin_lock_bh(&priv->rx_reorder_tbl_lock);
+	spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 	list_for_each_entry_safe(tbl, tmp, &priv->rx_reorder_tbl_ptr, list) {
 		if (!memcmp(tbl->ta, ta, ETH_ALEN)) {
-			spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+			spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock,
+					       flags);
 			mwifiex_del_rx_reorder_entry(priv, tbl);
-			spin_lock_bh(&priv->rx_reorder_tbl_lock);
+			spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 		}
 	}
-	spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+	spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
 
 	return;
 }
@@ -287,16 +289,18 @@ mwifiex_11n_find_last_seq_num(struct reorder_tmr_cnxt *ctx)
 {
 	struct mwifiex_rx_reorder_tbl *rx_reorder_tbl_ptr = ctx->ptr;
 	struct mwifiex_private *priv = ctx->priv;
+	unsigned long flags;
 	int i;
 
-	spin_lock_bh(&priv->rx_reorder_tbl_lock);
+	spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 	for (i = rx_reorder_tbl_ptr->win_size - 1; i >= 0; --i) {
 		if (rx_reorder_tbl_ptr->rx_reorder_ptr[i]) {
-			spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+			spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock,
+					       flags);
 			return i;
 		}
 	}
-	spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+	spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
 
 	return -1;
 }
@@ -344,6 +348,7 @@ mwifiex_11n_create_rx_reorder_tbl(struct mwifiex_private *priv, u8 *ta,
 	int i;
 	struct mwifiex_rx_reorder_tbl *tbl, *new_node;
 	u16 last_seq = 0;
+	unsigned long flags;
 	struct mwifiex_sta_node *node;
 
 	/*
@@ -367,7 +372,7 @@ mwifiex_11n_create_rx_reorder_tbl(struct mwifiex_private *priv, u8 *ta,
 	new_node->init_win = seq_num;
 	new_node->flags = 0;
 
-	spin_lock_bh(&priv->sta_list_spinlock);
+	spin_lock_irqsave(&priv->sta_list_spinlock, flags);
 	if (mwifiex_queuing_ra_based(priv)) {
 		if (priv->bss_role == MWIFIEX_BSS_ROLE_UAP) {
 			node = mwifiex_get_sta_entry(priv, ta);
@@ -381,7 +386,7 @@ mwifiex_11n_create_rx_reorder_tbl(struct mwifiex_private *priv, u8 *ta,
 		else
 			last_seq = priv->rx_seq[tid];
 	}
-	spin_unlock_bh(&priv->sta_list_spinlock);
+	spin_unlock_irqrestore(&priv->sta_list_spinlock, flags);
 
 	mwifiex_dbg(priv->adapter, INFO,
 		    "info: last_seq=%d start_win=%d\n",
@@ -413,9 +418,9 @@ mwifiex_11n_create_rx_reorder_tbl(struct mwifiex_private *priv, u8 *ta,
 	for (i = 0; i < win_size; ++i)
 		new_node->rx_reorder_ptr[i] = NULL;
 
-	spin_lock_bh(&priv->rx_reorder_tbl_lock);
+	spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 	list_add_tail(&new_node->list, &priv->rx_reorder_tbl_ptr);
-	spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+	spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
 }
 
 static void
@@ -471,17 +476,18 @@ int mwifiex_cmd_11n_addba_rsp_gen(struct mwifiex_private *priv,
 	u32 rx_win_size = priv->add_ba_param.rx_win_size;
 	u8 tid;
 	int win_size;
+	unsigned long flags;
 	uint16_t block_ack_param_set;
 
 	if ((GET_BSS_ROLE(priv) == MWIFIEX_BSS_ROLE_STA) &&
 	    ISSUPP_TDLS_ENABLED(priv->adapter->fw_cap_info) &&
 	    priv->adapter->is_hw_11ac_capable &&
 	    memcmp(priv->cfg_bssid, cmd_addba_req->peer_mac_addr, ETH_ALEN)) {
-		spin_lock_bh(&priv->sta_list_spinlock);
+		spin_lock_irqsave(&priv->sta_list_spinlock, flags);
 		sta_ptr = mwifiex_get_sta_entry(priv,
 						cmd_addba_req->peer_mac_addr);
 		if (!sta_ptr) {
-			spin_unlock_bh(&priv->sta_list_spinlock);
+			spin_unlock_irqrestore(&priv->sta_list_spinlock, flags);
 			mwifiex_dbg(priv->adapter, ERROR,
 				    "BA setup with unknown TDLS peer %pM!\n",
 				    cmd_addba_req->peer_mac_addr);
@@ -489,7 +495,7 @@ int mwifiex_cmd_11n_addba_rsp_gen(struct mwifiex_private *priv,
 		}
 		if (sta_ptr->is_11ac_enabled)
 			rx_win_size = MWIFIEX_11AC_STA_AMPDU_DEF_RXWINSIZE;
-		spin_unlock_bh(&priv->sta_list_spinlock);
+		spin_unlock_irqrestore(&priv->sta_list_spinlock, flags);
 	}
 
 	cmd->command = cpu_to_le16(HostCmd_CMD_11N_ADDBA_RSP);
@@ -676,6 +682,7 @@ mwifiex_del_ba_tbl(struct mwifiex_private *priv, int tid, u8 *peer_mac,
 	struct mwifiex_tx_ba_stream_tbl *ptx_tbl;
 	struct mwifiex_ra_list_tbl *ra_list;
 	u8 cleanup_rx_reorder_tbl;
+	unsigned long flags;
 	int tid_down;
 
 	if (type == TYPE_DELBA_RECEIVE)
@@ -709,9 +716,9 @@ mwifiex_del_ba_tbl(struct mwifiex_private *priv, int tid, u8 *peer_mac,
 			ra_list->amsdu_in_ampdu = false;
 			ra_list->ba_status = BA_SETUP_NONE;
 		}
-		spin_lock_bh(&priv->tx_ba_stream_tbl_lock);
+		spin_lock_irqsave(&priv->tx_ba_stream_tbl_lock, flags);
 		mwifiex_11n_delete_tx_ba_stream_tbl_entry(priv, ptx_tbl);
-		spin_unlock_bh(&priv->tx_ba_stream_tbl_lock);
+		spin_unlock_irqrestore(&priv->tx_ba_stream_tbl_lock, flags);
 	}
 }
 
@@ -797,16 +804,17 @@ void mwifiex_11n_ba_stream_timeout(struct mwifiex_private *priv,
 void mwifiex_11n_cleanup_reorder_tbl(struct mwifiex_private *priv)
 {
 	struct mwifiex_rx_reorder_tbl *del_tbl_ptr, *tmp_node;
+	unsigned long flags;
 
-	spin_lock_bh(&priv->rx_reorder_tbl_lock);
+	spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 	list_for_each_entry_safe(del_tbl_ptr, tmp_node,
 				 &priv->rx_reorder_tbl_ptr, list) {
-		spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+		spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
 		mwifiex_del_rx_reorder_entry(priv, del_tbl_ptr);
-		spin_lock_bh(&priv->rx_reorder_tbl_lock);
+		spin_lock_irqsave(&priv->rx_reorder_tbl_lock, flags);
 	}
 	INIT_LIST_HEAD(&priv->rx_reorder_tbl_ptr);
-	spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+	spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, flags);
 
 	mwifiex_reset_11n_rx_seq_num(priv);
 }
@@ -818,6 +826,7 @@ void mwifiex_update_rxreor_flags(struct mwifiex_adapter *adapter, u8 flags)
 {
 	struct mwifiex_private *priv;
 	struct mwifiex_rx_reorder_tbl *tbl;
+	unsigned long lock_flags;
 	int i;
 
 	for (i = 0; i < adapter->priv_num; i++) {
@@ -825,10 +834,10 @@ void mwifiex_update_rxreor_flags(struct mwifiex_adapter *adapter, u8 flags)
 		if (!priv)
 			continue;
 
-		spin_lock_bh(&priv->rx_reorder_tbl_lock);
+		spin_lock_irqsave(&priv->rx_reorder_tbl_lock, lock_flags);
 		list_for_each_entry(tbl, &priv->rx_reorder_tbl_ptr, list)
 			tbl->flags = flags;
-		spin_unlock_bh(&priv->rx_reorder_tbl_lock);
+		spin_unlock_irqrestore(&priv->rx_reorder_tbl_lock, lock_flags);
 	}
 
 	return;

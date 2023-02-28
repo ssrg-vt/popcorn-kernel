@@ -239,7 +239,7 @@ static int tkip_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb)
 	/* Add room for ICV */
 	skb_put(skb, IEEE80211_TKIP_ICV_LEN);
 
-	return ieee80211_tkip_encrypt_data(&tx->local->wep_tx_ctx,
+	return ieee80211_tkip_encrypt_data(tx->local->wep_tx_tfm,
 					   key, skb, pos, len);
 }
 
@@ -290,7 +290,7 @@ ieee80211_crypto_tkip_decrypt(struct ieee80211_rx_data *rx)
 	if (status->flag & RX_FLAG_DECRYPTED)
 		hwaccel = 1;
 
-	res = ieee80211_tkip_decrypt_data(&rx->local->wep_rx_ctx,
+	res = ieee80211_tkip_decrypt_data(rx->local->wep_rx_tfm,
 					  key, skb->data + hdrlen,
 					  skb->len - hdrlen, rx->sta->sta.addr,
 					  hdr->addr1, hwaccel, rx->security_idx,
@@ -946,8 +946,7 @@ ieee80211_crypto_aes_cmac_encrypt(struct ieee80211_tx_data *tx)
 
 	info = IEEE80211_SKB_CB(skb);
 
-	if (info->control.hw_key &&
-	    !(key->conf.flags & IEEE80211_KEY_FLAG_GENERATE_MMIE))
+	if (info->control.hw_key)
 		return TX_CONTINUE;
 
 	if (WARN_ON(skb_tailroom(skb) < sizeof(*mmie)))
@@ -962,9 +961,6 @@ ieee80211_crypto_aes_cmac_encrypt(struct ieee80211_tx_data *tx)
 	pn64 = atomic64_inc_return(&key->conf.tx_pn);
 
 	bip_ipn_set64(mmie->sequence_number, pn64);
-
-	if (info->control.hw_key)
-		return TX_CONTINUE;
 
 	bip_aad(skb, aad);
 

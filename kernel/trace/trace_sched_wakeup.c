@@ -579,7 +579,8 @@ probe_wakeup(void *ignore, struct task_struct *p)
 	else
 		tracing_dl = 0;
 
-	wakeup_task = get_task_struct(p);
+	wakeup_task = p;
+	get_task_struct(wakeup_task);
 
 	local_save_flags(flags);
 

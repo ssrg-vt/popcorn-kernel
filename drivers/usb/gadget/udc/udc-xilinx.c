@@ -11,7 +11,6 @@
  * USB peripheral controller (at91_udc.c).
  */
 
-#include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
@@ -172,7 +171,6 @@ struct xusb_ep {
  * @addr: the usb device base address
  * @lock: instance of spinlock
  * @dma_enabled: flag indicating whether the dma is included in the system
- * @clk: pointer to struct clk
  * @read_fn: function pointer to read device registers
  * @write_fn: function pointer to write to device registers
  */
@@ -190,9 +188,8 @@ struct xusb_udc {
 	void __iomem *addr;
 	spinlock_t lock;
 	bool dma_enabled;
-	struct clk *clk;
 
-	unsigned int (*read_fn)(void __iomem *reg);
+	unsigned int (*read_fn)(void __iomem *);
 	void (*write_fn)(void __iomem *, u32, u32);
 };
 
@@ -632,7 +629,7 @@ top:
 		dev_dbg(udc->dev, "read %s, %d bytes%s req %p %d/%d\n",
 			ep->ep_usb.name, count, is_short ? "/S" : "", req,
 			req->usb_req.actual, req->usb_req.length);
-
+		bufferspace -= count;
 		/* Completion */
 		if ((req->usb_req.actual == req->usb_req.length) || is_short) {
 			if (udc->dma_enabled && req->usb_req.length)
@@ -1402,6 +1399,7 @@ err:
 /**
  * xudc_stop - stops the device.
  * @gadget: pointer to the usb gadget structure
+ * @driver: pointer to usb gadget driver structure
  *
  * Return: zero always
  */
@@ -1734,7 +1732,7 @@ static void xudc_set_clear_feature(struct xusb_udc *udc)
  *
  * Process setup packet and delegate to gadget layer.
  */
-static void xudc_handle_setup(struct xusb_udc *udc) __must_hold(&udc->lock)
+static void xudc_handle_setup(struct xusb_udc *udc)
 {
 	struct xusb_ep *ep0 = &udc->ep[0];
 	struct usb_ctrlrequest setup;
@@ -2076,8 +2074,10 @@ static int xudc_probe(struct platform_device *pdev)
 		return PTR_ERR(udc->addr);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "unable to get irq\n");
 		return irq;
+	}
 	ret = devm_request_irq(&pdev->dev, irq, xudc_irq, 0,
 			       dev_name(&pdev->dev), udc);
 	if (ret < 0) {
@@ -2093,26 +2093,6 @@ static int xudc_probe(struct platform_device *pdev)
 	udc->gadget.speed = USB_SPEED_UNKNOWN;
 	udc->gadget.ep0 = &udc->ep[XUSB_EP_NUMBER_ZERO].ep_usb;
 	udc->gadget.name = driver_name;
-
-	udc->clk = devm_clk_get(&pdev->dev, "s_axi_aclk");
-	if (IS_ERR(udc->clk)) {
-		if (PTR_ERR(udc->clk) != -ENOENT) {
-			ret = PTR_ERR(udc->clk);
-			goto fail;
-		}
-
-		/*
-		 * Clock framework support is optional, continue on,
-		 * anyways if we don't find a matching clock
-		 */
-		udc->clk = NULL;
-	}
-
-	ret = clk_prepare_enable(udc->clk);
-	if (ret) {
-		dev_err(&pdev->dev, "Unable to enable clock.\n");
-		return ret;
-	}
 
 	spin_lock_init(&udc->lock);
 
@@ -2169,65 +2149,9 @@ static int xudc_remove(struct platform_device *pdev)
 	struct xusb_udc *udc = platform_get_drvdata(pdev);
 
 	usb_del_gadget_udc(&udc->gadget);
-	clk_disable_unprepare(udc->clk);
 
 	return 0;
 }
-
-#ifdef CONFIG_PM_SLEEP
-static int xudc_suspend(struct device *dev)
-{
-	struct xusb_udc *udc;
-	u32 crtlreg;
-	unsigned long flags;
-
-	udc = dev_get_drvdata(dev);
-
-	spin_lock_irqsave(&udc->lock, flags);
-
-	crtlreg = udc->read_fn(udc->addr + XUSB_CONTROL_OFFSET);
-	crtlreg &= ~XUSB_CONTROL_USB_READY_MASK;
-
-	udc->write_fn(udc->addr, XUSB_CONTROL_OFFSET, crtlreg);
-
-	spin_unlock_irqrestore(&udc->lock, flags);
-	if (udc->driver && udc->driver->disconnect)
-		udc->driver->disconnect(&udc->gadget);
-
-	clk_disable(udc->clk);
-
-	return 0;
-}
-
-static int xudc_resume(struct device *dev)
-{
-	struct xusb_udc *udc;
-	u32 crtlreg;
-	unsigned long flags;
-	int ret;
-
-	udc = dev_get_drvdata(dev);
-
-	ret = clk_enable(udc->clk);
-	if (ret < 0)
-		return ret;
-
-	spin_lock_irqsave(&udc->lock, flags);
-
-	crtlreg = udc->read_fn(udc->addr + XUSB_CONTROL_OFFSET);
-	crtlreg |= XUSB_CONTROL_USB_READY_MASK;
-
-	udc->write_fn(udc->addr, XUSB_CONTROL_OFFSET, crtlreg);
-
-	spin_unlock_irqrestore(&udc->lock, flags);
-
-	return 0;
-}
-#endif /* CONFIG_PM_SLEEP */
-
-static const struct dev_pm_ops xudc_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(xudc_suspend, xudc_resume)
-};
 
 /* Match table for of_platform binding */
 static const struct of_device_id usb_of_match[] = {
@@ -2240,7 +2164,6 @@ static struct platform_driver xudc_driver = {
 	.driver = {
 		.name = driver_name,
 		.of_match_table = usb_of_match,
-		.pm	= &xudc_pm_ops,
 	},
 	.probe = xudc_probe,
 	.remove = xudc_remove,

@@ -478,7 +478,7 @@ static int s5pv210_target(struct cpufreq_policy *policy, unsigned int index)
 				arm_volt, arm_volt_max);
 	}
 
-	pr_debug("Perf changed[L%d]\n", index);
+	printk(KERN_DEBUG "Perf changed[L%d]\n", index);
 
 exit:
 	mutex_unlock(&set_freq_lock);
@@ -541,8 +541,7 @@ static int s5pv210_cpu_init(struct cpufreq_policy *policy)
 	s5pv210_dram_conf[1].freq = clk_get_rate(dmc1_clk);
 
 	policy->suspend_freq = SLEEP_FREQ;
-	cpufreq_generic_init(policy, s5pv210_freq_table, 40000);
-	return 0;
+	return cpufreq_generic_init(policy, s5pv210_freq_table, 40000);
 
 out_dmc1:
 	clk_put(dmc0_clk);

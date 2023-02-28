@@ -151,7 +151,7 @@ struct nfsd3_readres {
 	__be32			status;
 	struct svc_fh		fh;
 	unsigned long		count;
-	__u32			eof;
+	int			eof;
 };
 
 struct nfsd3_writeres {

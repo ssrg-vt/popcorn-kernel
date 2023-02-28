@@ -1650,7 +1650,8 @@ static int s5c73m3_get_platform_data(struct s5c73m3 *state)
 	return 0;
 }
 
-static int s5c73m3_probe(struct i2c_client *client)
+static int s5c73m3_probe(struct i2c_client *client,
+				const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
 	struct v4l2_subdev *sd;
@@ -1805,7 +1806,7 @@ static struct i2c_driver s5c73m3_i2c_driver = {
 		.of_match_table = of_match_ptr(s5c73m3_of_match),
 		.name	= DRIVER_NAME,
 	},
-	.probe_new	= s5c73m3_probe,
+	.probe		= s5c73m3_probe,
 	.remove		= s5c73m3_remove,
 	.id_table	= s5c73m3_id,
 };

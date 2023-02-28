@@ -64,6 +64,7 @@ struct gcov_node {
 static const char objtree[] = OBJTREE;
 static const char srctree[] = SRCTREE;
 static struct gcov_node root_node;
+static struct dentry *reset_dentry;
 static LIST_HEAD(all_head);
 static DEFINE_MUTEX(node_lock);
 
@@ -386,6 +387,8 @@ static void add_links(struct gcov_node *node, struct dentry *parent)
 			goto out_err;
 		node->links[i] = debugfs_create_symlink(deskew(basename),
 							parent,	target);
+		if (!node->links[i])
+			goto out_err;
 		kfree(target);
 	}
 
@@ -447,6 +450,11 @@ static struct gcov_node *new_node(struct gcov_node *parent,
 					parent->dentry, node, &gcov_data_fops);
 	} else
 		node->dentry = debugfs_create_dir(node->name, parent->dentry);
+	if (!node->dentry) {
+		pr_warn("could not create file\n");
+		kfree(node);
+		return NULL;
+	}
 	if (info)
 		add_links(node, parent->dentry);
 	list_add(&node->list, &parent->children);
@@ -753,20 +761,32 @@ void gcov_event(enum gcov_action action, struct gcov_info *info)
 /* Create debugfs entries. */
 static __init int gcov_fs_init(void)
 {
+	int rc = -EIO;
+
 	init_node(&root_node, NULL, NULL, NULL);
 	/*
 	 * /sys/kernel/debug/gcov will be parent for the reset control file
 	 * and all profiling files.
 	 */
 	root_node.dentry = debugfs_create_dir("gcov", NULL);
+	if (!root_node.dentry)
+		goto err_remove;
 	/*
 	 * Create reset file which resets all profiling counts when written
 	 * to.
 	 */
-	debugfs_create_file("reset", 0600, root_node.dentry, NULL,
-			    &gcov_reset_fops);
+	reset_dentry = debugfs_create_file("reset", 0600, root_node.dentry,
+					   NULL, &gcov_reset_fops);
+	if (!reset_dentry)
+		goto err_remove;
 	/* Replay previous events to get our fs hierarchy up-to-date. */
 	gcov_enable_events();
 	return 0;
+
+err_remove:
+	pr_err("init failed\n");
+	debugfs_remove(root_node.dentry);
+
+	return rc;
 }
 device_initcall(gcov_fs_init);

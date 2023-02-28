@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * bpf-script-test-prologue.c
  * Test BPF prologue

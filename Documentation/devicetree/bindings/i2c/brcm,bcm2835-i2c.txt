@@ -1,9 +1,7 @@
 Broadcom BCM2835 I2C controller
 
 Required properties:
-- compatible : Should be one of:
-	"brcm,bcm2711-i2c"
-	"brcm,bcm2835-i2c"
+- compatible : Should be "brcm,bcm2835-i2c".
 - reg: Should contain register location and length.
 - interrupts: Should contain interrupt.
 - clocks : The clock feeding the I2C controller.

@@ -126,7 +126,7 @@ asmlinkage int sys_rt_sigreturn(void)
 	return er0;
 
 badframe:
-	force_sig(SIGSEGV);
+	force_sig(SIGSEGV, current);
 	return 0;
 }
 

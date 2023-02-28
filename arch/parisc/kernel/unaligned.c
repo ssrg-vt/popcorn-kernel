@@ -676,14 +676,14 @@ void handle_unaligned(struct pt_regs *regs)
 		if (ret == ERR_PAGEFAULT)
 		{
 			force_sig_fault(SIGSEGV, SEGV_MAPERR,
-					(void __user *)regs->ior);
+					(void __user *)regs->ior, current);
 		}
 		else
 		{
 force_sigbus:
 			/* couldn't handle it ... */
 			force_sig_fault(SIGBUS, BUS_ADRALN,
-					(void __user *)regs->ior);
+					(void __user *)regs->ior, current);
 		}
 		
 		return;

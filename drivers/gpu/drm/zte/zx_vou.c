@@ -6,10 +6,7 @@
 
 #include <linux/clk.h>
 #include <linux/component.h>
-#include <linux/module.h>
 #include <linux/of_address.h>
-#include <linux/platform_device.h>
-
 #include <video/videomode.h>
 
 #include <drm/drm_atomic_helper.h>
@@ -20,7 +17,7 @@
 #include <drm/drm_of.h>
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drm_vblank.h>
+#include <drm/drmP.h>
 
 #include "zx_common_regs.h"
 #include "zx_drm_drv.h"

@@ -112,8 +112,6 @@ struct ftrace_likely_data {
 
 #if defined(CC_USING_HOTPATCH)
 #define notrace			__attribute__((hotpatch(0, 0)))
-#elif defined(CC_USING_PATCHABLE_FUNCTION_ENTRY)
-#define notrace			__attribute__((patchable_function_entry(0, 0)))
 #else
 #define notrace			__attribute__((__no_instrument_function__))
 #endif
@@ -130,6 +128,10 @@ struct ftrace_likely_data {
 
 /*
  * Force always-inline if the user requests it so via the .config.
+ * GCC does not warn about unused static inline functions for
+ * -Wunused-function.  This turns out to avoid the need for complex #ifdef
+ * directives.  Suppress the warning in clang as well by using "unused"
+ * function attribute, which is redundant but not harmful for gcc.
  * Prefer gnu_inline, so that extern inline functions do not emit an
  * externally visible function. This makes extern inline behave as per gnu89
  * semantics rather than c99. This prevents multiple symbol definition errors
@@ -140,35 +142,14 @@ struct ftrace_likely_data {
  */
 #if !defined(CONFIG_OPTIMIZE_INLINING)
 #define inline inline __attribute__((__always_inline__)) __gnu_inline \
-	__inline_maybe_unused notrace
+	__maybe_unused notrace
 #else
 #define inline inline                                    __gnu_inline \
-	__inline_maybe_unused notrace
+	__maybe_unused notrace
 #endif
 
-/*
- * gcc provides both __inline__ and __inline as alternate spellings of
- * the inline keyword, though the latter is undocumented. New kernel
- * code should only use the inline spelling, but some existing code
- * uses __inline__. Since we #define inline above, to ensure
- * __inline__ has the same semantics, we need this #define.
- *
- * However, the spelling __inline is strictly reserved for referring
- * to the bare keyword.
- */
 #define __inline__ inline
-
-/*
- * GCC does not warn about unused static inline functions for -Wunused-function.
- * Suppress the warning in clang as well by using __maybe_unused, but enable it
- * for W=1 build. This will allow clang to find unused functions. Remove the
- * __inline_maybe_unused entirely after fixing most of -Wunused-function warnings.
- */
-#ifdef KBUILD_EXTRA_WARN1
-#define __inline_maybe_unused
-#else
-#define __inline_maybe_unused __maybe_unused
-#endif
+#define __inline   inline
 
 /*
  * Rather then using noinline to prevent stack consumption, use
@@ -204,12 +185,6 @@ struct ftrace_likely_data {
 
 #ifndef asm_volatile_goto
 #define asm_volatile_goto(x...) asm goto(x)
-#endif
-
-#ifdef CONFIG_CC_HAS_ASM_INLINE
-#define asm_inline asm __inline
-#else
-#define asm_inline asm
 #endif
 
 #ifndef __no_fgcse

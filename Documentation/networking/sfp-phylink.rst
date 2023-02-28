@@ -8,8 +8,7 @@ Overview
 ========
 
 phylink is a mechanism to support hot-pluggable networking modules
-directly connected to a MAC without needing to re-initialise the
-adapter on hot-plug events.
+without needing to re-initialise the adapter on hot-plug events.
 
 phylink supports conventional phylib-based setups, fixed link setups
 and SFP (Small Formfactor Pluggable) modules at present.
@@ -99,7 +98,6 @@ this documentation.
 4. Add::
 
 	struct phylink *phylink;
-	struct phylink_config phylink_config;
 
    to the driver's private data structure.  We shall refer to the
    driver's private data pointer as ``priv`` below, and the driver's
@@ -225,10 +223,8 @@ this documentation.
    .. code-block:: c
 
 	struct phylink *phylink;
-	priv->phylink_config.dev = &dev.dev;
-	priv->phylink_config.type = PHYLINK_NETDEV;
 
-	phylink = phylink_create(&priv->phylink_config, node, phy_mode, &phylink_ops);
+	phylink = phylink_create(dev, node, phy_mode, &phylink_ops);
 	if (IS_ERR(phylink)) {
 		err = PTR_ERR(phylink);
 		fail probe;

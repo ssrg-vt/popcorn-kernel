@@ -358,7 +358,7 @@ static int __ghes_peek_estatus(struct ghes *ghes,
 		return -ENOENT;
 	}
 
-	return 0;
+	return __ghes_check_estatus(ghes, estatus);
 }
 
 static int __ghes_read_estatus(struct acpi_hest_generic_status *estatus,
@@ -496,7 +496,7 @@ static void ghes_do_proc(struct ghes *ghes,
 	int sev, sec_sev;
 	struct acpi_hest_generic_data *gdata;
 	guid_t *sec_type;
-	const guid_t *fru_id = &guid_null;
+	guid_t *fru_id = &NULL_UUID_LE;
 	char *fru_text = "";
 
 	sev = ghes_severity(estatus->error_severity);

@@ -18,6 +18,7 @@
 #include <linux/slab.h>
 #include <linux/jiffies.h>
 #include <linux/delay.h>
+#include <linux/pci-aspm.h>
 #include "../pci.h"
 
 #ifdef MODULE_PARAM_PREFIX
@@ -912,10 +913,10 @@ void pcie_aspm_init_link_state(struct pci_dev *pdev)
 
 	/*
 	 * We allocate pcie_link_state for the component on the upstream
-	 * end of a Link, so there's nothing to do unless this device is
-	 * downstream port.
+	 * end of a Link, so there's nothing to do unless this device has a
+	 * Link on its secondary side.
 	 */
-	if (!pcie_downstream_port(pdev))
+	if (!pdev->has_secondary_link)
 		return;
 
 	/* VIA has a strange chipset, root port is under a bridge */
@@ -1061,18 +1062,18 @@ void pcie_aspm_powersave_config_link(struct pci_dev *pdev)
 	up_read(&pci_bus_sem);
 }
 
-static int __pci_disable_link_state(struct pci_dev *pdev, int state, bool sem)
+static void __pci_disable_link_state(struct pci_dev *pdev, int state, bool sem)
 {
 	struct pci_dev *parent = pdev->bus->self;
 	struct pcie_link_state *link;
 
 	if (!pci_is_pcie(pdev))
-		return 0;
+		return;
 
-	if (pcie_downstream_port(pdev))
+	if (pdev->has_secondary_link)
 		parent = pdev;
 	if (!parent || !parent->link_state)
-		return -EINVAL;
+		return;
 
 	/*
 	 * A driver requested that ASPM be disabled on this device, but
@@ -1084,7 +1085,7 @@ static int __pci_disable_link_state(struct pci_dev *pdev, int state, bool sem)
 	 */
 	if (aspm_disabled) {
 		pci_warn(pdev, "can't disable ASPM; OS doesn't have ASPM control\n");
-		return -EPERM;
+		return;
 	}
 
 	if (sem)
@@ -1104,13 +1105,11 @@ static int __pci_disable_link_state(struct pci_dev *pdev, int state, bool sem)
 	mutex_unlock(&aspm_lock);
 	if (sem)
 		up_read(&pci_bus_sem);
-
-	return 0;
 }
 
-int pci_disable_link_state_locked(struct pci_dev *pdev, int state)
+void pci_disable_link_state_locked(struct pci_dev *pdev, int state)
 {
-	return __pci_disable_link_state(pdev, state, false);
+	__pci_disable_link_state(pdev, state, false);
 }
 EXPORT_SYMBOL(pci_disable_link_state_locked);
 
@@ -1118,14 +1117,14 @@ EXPORT_SYMBOL(pci_disable_link_state_locked);
  * pci_disable_link_state - Disable device's link state, so the link will
  * never enter specific states.  Note that if the BIOS didn't grant ASPM
  * control to the OS, this does nothing because we can't touch the LNKCTL
- * register. Returns 0 or a negative errno.
+ * register.
  *
  * @pdev: PCI device
  * @state: ASPM link state to disable
  */
-int pci_disable_link_state(struct pci_dev *pdev, int state)
+void pci_disable_link_state(struct pci_dev *pdev, int state)
 {
-	return __pci_disable_link_state(pdev, state, true);
+	__pci_disable_link_state(pdev, state, true);
 }
 EXPORT_SYMBOL(pci_disable_link_state);
 
@@ -1168,26 +1167,6 @@ static int pcie_aspm_get_policy(char *buffer, const struct kernel_param *kp)
 
 module_param_call(policy, pcie_aspm_set_policy, pcie_aspm_get_policy,
 	NULL, 0644);
-
-/**
- * pcie_aspm_enabled - Check if PCIe ASPM has been enabled for a device.
- * @pdev: Target device.
- */
-bool pcie_aspm_enabled(struct pci_dev *pdev)
-{
-	struct pci_dev *bridge = pci_upstream_bridge(pdev);
-	bool ret;
-
-	if (!bridge)
-		return false;
-
-	mutex_lock(&aspm_lock);
-	ret = bridge->link_state ? !!bridge->link_state->aspm_enabled : false;
-	mutex_unlock(&aspm_lock);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(pcie_aspm_enabled);
 
 #ifdef CONFIG_PCIEASPM_DEBUG
 static ssize_t link_state_show(struct device *dev,

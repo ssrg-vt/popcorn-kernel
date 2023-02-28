@@ -461,8 +461,10 @@ static ssize_t rdtgroup_cpus_write(struct kernfs_open_file *of,
 	}
 
 	rdtgrp = rdtgroup_kn_lock_live(of->kn);
+	rdt_last_cmd_clear();
 	if (!rdtgrp) {
 		ret = -ENOENT;
+		rdt_last_cmd_puts("Directory was removed\n");
 		goto unlock;
 	}
 
@@ -2102,7 +2104,8 @@ static int rdt_init_fs_context(struct fs_context *fc)
 	ctx->kfc.magic = RDTGROUP_SUPER_MAGIC;
 	fc->fs_private = &ctx->kfc;
 	fc->ops = &rdt_fs_context_ops;
-	put_user_ns(fc->user_ns);
+	if (fc->user_ns)
+		put_user_ns(fc->user_ns);
 	fc->user_ns = get_user_ns(&init_user_ns);
 	fc->global = true;
 	return 0;
@@ -2485,21 +2488,21 @@ out_destroy:
  * modification to the CBM if the default does not satisfy the
  * requirements.
  */
-static u32 cbm_ensure_valid(u32 _val, struct rdt_resource *r)
+static void cbm_ensure_valid(u32 *_val, struct rdt_resource *r)
 {
+	unsigned long val = *_val;
 	unsigned int cbm_len = r->cache.cbm_len;
 	unsigned long first_bit, zero_bit;
-	unsigned long val = _val;
 
-	if (!val)
-		return 0;
+	if (val == 0)
+		return;
 
 	first_bit = find_first_bit(&val, cbm_len);
 	zero_bit = find_next_zero_bit(&val, cbm_len, first_bit);
 
 	/* Clear any remaining bits to ensure contiguous region */
 	bitmap_clear(&val, zero_bit, cbm_len - zero_bit);
-	return (u32)val;
+	*_val = (u32)val;
 }
 
 /*
@@ -2557,7 +2560,7 @@ static int __init_one_rdt_domain(struct rdt_domain *d, struct rdt_resource *r,
 	 * Force the initial CBM to be valid, user can
 	 * modify the CBM based on system availability.
 	 */
-	d->new_ctrl = cbm_ensure_valid(d->new_ctrl, r);
+	cbm_ensure_valid(&d->new_ctrl, r);
 	/*
 	 * Assign the u32 CBM to an unsigned long to ensure that
 	 * bitmap_weight() does not access out-of-bound memory.
@@ -2646,8 +2649,10 @@ static int mkdir_rdt_prepare(struct kernfs_node *parent_kn,
 	int ret;
 
 	prdtgrp = rdtgroup_kn_lock_live(prgrp_kn);
+	rdt_last_cmd_clear();
 	if (!prdtgrp) {
 		ret = -ENODEV;
+		rdt_last_cmd_puts("Directory was removed\n");
 		goto out_unlock;
 	}
 

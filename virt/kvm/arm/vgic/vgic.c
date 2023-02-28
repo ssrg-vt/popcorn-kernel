@@ -119,22 +119,6 @@ static void vgic_irq_release(struct kref *ref)
 {
 }
 
-/*
- * Drop the refcount on the LPI. Must be called with lpi_list_lock held.
- */
-void __vgic_put_lpi_locked(struct kvm *kvm, struct vgic_irq *irq)
-{
-	struct vgic_dist *dist = &kvm->arch.vgic;
-
-	if (!kref_put(&irq->refcount, vgic_irq_release))
-		return;
-
-	list_del(&irq->lpi_list);
-	dist->lpi_list_count--;
-
-	kfree(irq);
-}
-
 void vgic_put_irq(struct kvm *kvm, struct vgic_irq *irq)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
@@ -144,8 +128,16 @@ void vgic_put_irq(struct kvm *kvm, struct vgic_irq *irq)
 		return;
 
 	raw_spin_lock_irqsave(&dist->lpi_list_lock, flags);
-	__vgic_put_lpi_locked(kvm, irq);
+	if (!kref_put(&irq->refcount, vgic_irq_release)) {
+		raw_spin_unlock_irqrestore(&dist->lpi_list_lock, flags);
+		return;
+	};
+
+	list_del(&irq->lpi_list);
+	dist->lpi_list_count--;
 	raw_spin_unlock_irqrestore(&dist->lpi_list_lock, flags);
+
+	kfree(irq);
 }
 
 void vgic_flush_pending_lpis(struct kvm_vcpu *vcpu)

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <pthread.h>
 #include <dlfcn.h>
-#include <unistd.h>
 
-#include <subcmd/pager.h>
+#include "../util/cache.h"
 #include "../util/debug.h"
 #include "../util/hist.h"
-#include "ui.h"
+#include "../util/util.h"
 
 pthread_mutex_t ui__lock = PTHREAD_MUTEX_INITIALIZER;
 void *perf_gtk_handle;
@@ -90,9 +89,9 @@ void setup_browser(bool fallback_to_pager)
 		printf("GTK browser requested but could not find %s\n",
 		       PERF_GTK_DSO);
 		sleep(1);
-		use_browser = 1;
 		/* fall through */
 	case 1:
+		use_browser = 1;
 		if (ui__init() == 0)
 			break;
 		/* fall through */

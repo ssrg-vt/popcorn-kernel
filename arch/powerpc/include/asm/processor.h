@@ -346,6 +346,8 @@ static inline unsigned long __pack_fe01(unsigned int fpmode)
 
 #define spin_cpu_relax()	barrier()
 
+#define spin_cpu_yield()	spin_cpu_relax()
+
 #define spin_end()	HMT_medium()
 
 #define spin_until_cond(cond)					\

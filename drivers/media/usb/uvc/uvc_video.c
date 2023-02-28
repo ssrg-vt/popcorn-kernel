@@ -1097,20 +1097,6 @@ static int uvc_video_decode_start(struct uvc_streaming *stream,
 	return data[0];
 }
 
-static void uvc_video_copy_packets(struct uvc_urb *uvc_urb)
-{
-	unsigned int i;
-
-	for (i = 0; i < uvc_urb->async_operations; i++) {
-		struct uvc_copy_op *op = &uvc_urb->copy_operations[i];
-
-		memcpy(op->dst, op->src, op->len);
-
-		/* Release reference taken on this buffer. */
-		uvc_queue_buffer_release(op->buf);
-	}
-}
-
 /*
  * uvc_video_decode_data_work: Asynchronous memcpy processing
  *
@@ -1120,26 +1106,22 @@ static void uvc_video_copy_packets(struct uvc_urb *uvc_urb)
 static void uvc_video_copy_data_work(struct work_struct *work)
 {
 	struct uvc_urb *uvc_urb = container_of(work, struct uvc_urb, work);
-	struct uvc_streaming *stream = uvc_urb->stream;
-	struct uvc_video_queue *queue = &stream->queue;
+	unsigned int i;
 	int ret;
 
-	uvc_video_copy_packets(uvc_urb);
+	for (i = 0; i < uvc_urb->async_operations; i++) {
+		struct uvc_copy_op *op = &uvc_urb->copy_operations[i];
 
-	/*
-	 * Prevent resubmitting URBs when shutting down to ensure that no new
-	 * work item will be scheduled after uvc_stop_streaming() flushes the
-	 * work queue.
-	 */
-	spin_lock_irq(&queue->irqlock);
-	if (!(queue->flags & UVC_QUEUE_STOPPING)) {
-		ret = usb_submit_urb(uvc_urb->urb, GFP_ATOMIC);
-		if (ret < 0)
-			uvc_printk(KERN_ERR,
-				   "Failed to resubmit video URB (%d).\n",
-				   ret);
+		memcpy(op->dst, op->src, op->len);
+
+		/* Release reference taken on this buffer. */
+		uvc_queue_buffer_release(op->buf);
 	}
-	spin_unlock_irq(&queue->irqlock);
+
+	ret = usb_submit_urb(uvc_urb->urb, GFP_KERNEL);
+	if (ret < 0)
+		uvc_printk(KERN_ERR, "Failed to resubmit video URB (%d).\n",
+			   ret);
 }
 
 static void uvc_video_decode_data(struct uvc_urb *uvc_urb,
@@ -1542,10 +1524,6 @@ static void uvc_video_complete(struct urb *urb)
 
 	buf = uvc_queue_get_current_buffer(queue);
 
-	/*
-	 * Process the URB headers, and optionally queue expensive memcpy tasks
-	 * to be deferred to a work queue.
-	 */
 	if (vb2_qmeta) {
 		spin_lock_irqsave(&qmeta->irqlock, flags);
 		if (!list_empty(&qmeta->irqqueue))
@@ -1573,21 +1551,7 @@ static void uvc_video_complete(struct urb *urb)
 		return;
 	}
 
-	/*
-	 * When the stream is stopped, all URBs are freed as part of the call to
-	 * uvc_stop_streaming() and must not be handled asynchronously. In that
-	 * event we can safely complete the packet work directly in this
-	 * context, without resubmitting the URB.
-	 */
-	spin_lock_irqsave(&queue->irqlock, flags);
-	if (!(queue->flags & UVC_QUEUE_STOPPING)) {
-		/* Handle any heavy lifting required */
-		INIT_WORK(&uvc_urb->work, uvc_video_copy_data_work);
-		queue_work(stream->async_wq, &uvc_urb->work);
-	} else {
-		uvc_video_copy_packets(uvc_urb);
-	}
-	spin_unlock_irqrestore(&queue->irqlock, flags);
+	queue_work(stream->async_wq, &uvc_urb->work);
 }
 
 /*

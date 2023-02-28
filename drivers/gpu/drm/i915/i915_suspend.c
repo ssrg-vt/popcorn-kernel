@@ -26,12 +26,9 @@
 
 #include <drm/i915_drm.h>
 
-#include "display/intel_fbc.h"
-#include "display/intel_gmbus.h"
-
-#include "i915_drv.h"
 #include "i915_reg.h"
-#include "i915_suspend.h"
+#include "intel_drv.h"
+#include "intel_fbc.h"
 
 static void i915_save_display(struct drm_i915_private *dev_priv)
 {
@@ -147,7 +144,7 @@ int i915_restore_state(struct drm_i915_private *dev_priv)
 
 	mutex_unlock(&dev_priv->drm.struct_mutex);
 
-	intel_gmbus_reset(dev_priv);
+	intel_i2c_reset(dev_priv);
 
 	return 0;
 }

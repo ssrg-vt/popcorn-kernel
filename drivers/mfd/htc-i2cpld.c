@@ -385,7 +385,8 @@ static void htcpld_unregister_chip_i2c(
 	htcpld = platform_get_drvdata(pdev);
 	chip = &htcpld->chip[chip_index];
 
-	i2c_unregister_device(chip->client);
+	if (chip->client)
+		i2c_unregister_device(chip->client);
 }
 
 static int htcpld_register_chip_gpio(

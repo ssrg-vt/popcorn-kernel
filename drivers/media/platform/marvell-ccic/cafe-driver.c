@@ -9,7 +9,6 @@
  *
  * Copyright 2006-11 One Laptop Per Child Association, Inc.
  * Copyright 2006-11 Jonathan Corbet <corbet@lwn.net>
- * Copyright 2018 Lubomir Rintel <lkundrak@v3.sk>
  *
  * Written by Jonathan Corbet, corbet@lwn.net.
  *
@@ -26,12 +25,10 @@
 #include <linux/slab.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
-#include <media/i2c/ov7670.h>
 #include <linux/device.h>
 #include <linux/wait.h>
 #include <linux/delay.h>
 #include <linux/io.h>
-#include <linux/clkdev.h>
 
 #include "mcam-core.h"
 
@@ -53,7 +50,6 @@ struct cafe_camera {
 	int registered;			/* Fully initialized? */
 	struct mcam_camera mcam;
 	struct pci_dev *pdev;
-	struct i2c_adapter *i2c_adapter;
 	wait_queue_head_t smbus_wait;	/* Waiting on i2c events */
 };
 
@@ -353,15 +349,15 @@ static int cafe_smbus_setup(struct cafe_camera *cam)
 		return ret;
 	}
 
-	cam->i2c_adapter = adap;
+	cam->mcam.i2c_adapter = adap;
 	cafe_smbus_enable_irq(cam);
 	return 0;
 }
 
 static void cafe_smbus_shutdown(struct cafe_camera *cam)
 {
-	i2c_del_adapter(cam->i2c_adapter);
-	kfree(cam->i2c_adapter);
+	i2c_del_adapter(cam->mcam.i2c_adapter);
+	kfree(cam->mcam.i2c_adapter);
 }
 
 
@@ -454,29 +450,6 @@ static irqreturn_t cafe_irq(int irq, void *data)
 	return IRQ_RETVAL(handled);
 }
 
-/* -------------------------------------------------------------------------- */
-
-static struct ov7670_config sensor_cfg = {
-	/*
-	 * Exclude QCIF mode, because it only captures a tiny portion
-	 * of the sensor FOV
-	 */
-	.min_width = 320,
-	.min_height = 240,
-
-	/*
-	 * Set the clock speed for the XO 1; I don't believe this
-	 * driver has ever run anywhere else.
-	 */
-	.clock_speed = 45,
-	.use_smbus = 1,
-};
-
-static struct i2c_board_info ov7670_info = {
-	.type = "ov7670",
-	.addr = 0x42 >> 1,
-	.platform_data = &sensor_cfg,
-};
 
 /* -------------------------------------------------------------------------- */
 /*
@@ -507,6 +480,12 @@ static int cafe_pci_probe(struct pci_dev *pdev,
 	mcam->dev = &pdev->dev;
 	snprintf(mcam->bus_info, sizeof(mcam->bus_info), "PCI:%s", pci_name(pdev));
 	/*
+	 * Set the clock speed for the XO 1; I don't believe this
+	 * driver has ever run anywhere else.
+	 */
+	mcam->clock_speed = 45;
+	mcam->use_smbus = 1;
+	/*
 	 * Vmalloc mode for buffers is traditional with this driver.
 	 * We *might* be able to run DMA_contig, especially on a system
 	 * with CMA in it.
@@ -532,10 +511,11 @@ static int cafe_pci_probe(struct pci_dev *pdev,
 		goto out_iounmap;
 
 	/*
-	 * Initialize the controller.
+	 * Initialize the controller and leave it powered up.  It will
+	 * stay that way until the sensor driver shows up.
 	 */
 	cafe_ctlr_init(mcam);
-
+	cafe_ctlr_power_up(mcam);
 	/*
 	 * Set up I2C/SMBUS communications.  We have to drop the mutex here
 	 * because the sensor could attach in this call chain, leading to
@@ -545,24 +525,12 @@ static int cafe_pci_probe(struct pci_dev *pdev,
 	if (ret)
 		goto out_pdown;
 
-	mcam->asd.match_type = V4L2_ASYNC_MATCH_I2C;
-	mcam->asd.match.i2c.adapter_id = i2c_adapter_id(cam->i2c_adapter);
-	mcam->asd.match.i2c.address = ov7670_info.addr;
-
 	ret = mccic_register(mcam);
-	if (ret)
-		goto out_smbus_shutdown;
-
-	clkdev_create(mcam->mclk, "xclk", "%d-%04x",
-		i2c_adapter_id(cam->i2c_adapter), ov7670_info.addr);
-
-	if (i2c_new_device(cam->i2c_adapter, &ov7670_info)) {
+	if (ret == 0) {
 		cam->registered = 1;
 		return 0;
 	}
 
-	mccic_shutdown(mcam);
-out_smbus_shutdown:
 	cafe_smbus_shutdown(cam);
 out_pdown:
 	cafe_ctlr_power_down(mcam);

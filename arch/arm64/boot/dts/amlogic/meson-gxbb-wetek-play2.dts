@@ -54,7 +54,3 @@
 &usb1 {
 	status = "okay";
 };
-
-&ir {
-	linux,rc-map-name = "rc-wetek-play2";
-};

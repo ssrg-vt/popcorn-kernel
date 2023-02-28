@@ -36,13 +36,6 @@ static void ohci_hcd_init (struct ohci_hcd *ohci)
 
 static int ohci_mem_init (struct ohci_hcd *ohci)
 {
-	/*
-	 * HCs with local memory allocate from localmem_pool so there's
-	 * no need to create the below dma pools.
-	 */
-	if (ohci_to_hcd(ohci)->localmem_pool)
-		return 0;
-
 	ohci->td_cache = dma_pool_create ("ohci_td",
 		ohci_to_hcd(ohci)->self.controller,
 		sizeof (struct td),
@@ -91,13 +84,8 @@ td_alloc (struct ohci_hcd *hc, gfp_t mem_flags)
 {
 	dma_addr_t	dma;
 	struct td	*td;
-	struct usb_hcd	*hcd = ohci_to_hcd(hc);
 
-	if (hcd->localmem_pool)
-		td = gen_pool_dma_zalloc_align(hcd->localmem_pool,
-				sizeof(*td), &dma, 32);
-	else
-		td = dma_pool_zalloc(hc->td_cache, mem_flags, &dma);
+	td = dma_pool_zalloc (hc->td_cache, mem_flags, &dma);
 	if (td) {
 		/* in case hc fetches it, make it look dead */
 		td->hwNextTD = cpu_to_hc32 (hc, dma);
@@ -111,7 +99,6 @@ static void
 td_free (struct ohci_hcd *hc, struct td *td)
 {
 	struct td	**prev = &hc->td_hash [TD_HASH_FUNC (td->td_dma)];
-	struct usb_hcd	*hcd = ohci_to_hcd(hc);
 
 	while (*prev && *prev != td)
 		prev = &(*prev)->td_hash;
@@ -119,12 +106,7 @@ td_free (struct ohci_hcd *hc, struct td *td)
 		*prev = td->td_hash;
 	else if ((td->hwINFO & cpu_to_hc32(hc, TD_DONE)) != 0)
 		ohci_dbg (hc, "no hash for td %p\n", td);
-
-	if (hcd->localmem_pool)
-		gen_pool_free(hcd->localmem_pool, (unsigned long)td,
-			      sizeof(*td));
-	else
-		dma_pool_free(hc->td_cache, td, td->td_dma);
+	dma_pool_free (hc->td_cache, td, td->td_dma);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -135,13 +117,8 @@ ed_alloc (struct ohci_hcd *hc, gfp_t mem_flags)
 {
 	dma_addr_t	dma;
 	struct ed	*ed;
-	struct usb_hcd	*hcd = ohci_to_hcd(hc);
 
-	if (hcd->localmem_pool)
-		ed = gen_pool_dma_zalloc_align(hcd->localmem_pool,
-				sizeof(*ed), &dma, 16);
-	else
-		ed = dma_pool_zalloc(hc->ed_cache, mem_flags, &dma);
+	ed = dma_pool_zalloc (hc->ed_cache, mem_flags, &dma);
 	if (ed) {
 		INIT_LIST_HEAD (&ed->td_list);
 		ed->dma = dma;
@@ -152,12 +129,6 @@ ed_alloc (struct ohci_hcd *hc, gfp_t mem_flags)
 static void
 ed_free (struct ohci_hcd *hc, struct ed *ed)
 {
-	struct usb_hcd	*hcd = ohci_to_hcd(hc);
-
-	if (hcd->localmem_pool)
-		gen_pool_free(hcd->localmem_pool, (unsigned long)ed,
-			      sizeof(*ed));
-	else
-		dma_pool_free(hc->ed_cache, ed, ed->dma);
+	dma_pool_free (hc->ed_cache, ed, ed->dma);
 }
 

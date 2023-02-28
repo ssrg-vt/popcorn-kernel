@@ -129,26 +129,27 @@ void vnt_mac_set_keyentry(struct vnt_private *priv, u16 key_ctl, u32 entry_idx,
 			(u8 *)&set_key);
 }
 
-int vnt_mac_reg_bits_off(struct vnt_private *priv, u8 reg_ofs, u8 bits)
+void vnt_mac_reg_bits_off(struct vnt_private *priv, u8 reg_ofs, u8 bits)
 {
 	u8 data[2];
 
 	data[0] = 0;
 	data[1] = bits;
 
-	return vnt_control_out(priv, MESSAGE_TYPE_WRITE_MASK, reg_ofs,
-			       MESSAGE_REQUEST_MACREG, ARRAY_SIZE(data), data);
+	vnt_control_out(priv, MESSAGE_TYPE_WRITE_MASK,
+			reg_ofs, MESSAGE_REQUEST_MACREG, ARRAY_SIZE(data),
+			data);
 }
 
-int vnt_mac_reg_bits_on(struct vnt_private *priv, u8 reg_ofs, u8 bits)
+void vnt_mac_reg_bits_on(struct vnt_private *priv, u8 reg_ofs, u8 bits)
 {
 	u8 data[2];
 
 	data[0] = bits;
 	data[1] = bits;
 
-	return vnt_control_out(priv, MESSAGE_TYPE_WRITE_MASK, reg_ofs,
-			       MESSAGE_REQUEST_MACREG, ARRAY_SIZE(data), data);
+	vnt_control_out(priv, MESSAGE_TYPE_WRITE_MASK, reg_ofs,
+			MESSAGE_REQUEST_MACREG, ARRAY_SIZE(data), data);
 }
 
 void vnt_mac_write_word(struct vnt_private *priv, u8 reg_ofs, u16 word)
@@ -223,13 +224,13 @@ void vnt_mac_set_beacon_interval(struct vnt_private *priv, u16 interval)
 			MESSAGE_REQUEST_MACREG, ARRAY_SIZE(data), data);
 }
 
-int vnt_mac_set_led(struct vnt_private *priv, u8 state, u8 led)
+void vnt_mac_set_led(struct vnt_private *priv, u8 state, u8 led)
 {
 	u8 data[2];
 
 	data[0] = led;
 	data[1] = state;
 
-	return vnt_control_out(priv, MESSAGE_TYPE_WRITE_MASK, MAC_REG_PAPEDELAY,
-			       MESSAGE_REQUEST_MACREG, ARRAY_SIZE(data), data);
+	vnt_control_out(priv, MESSAGE_TYPE_WRITE_MASK, MAC_REG_PAPEDELAY,
+			MESSAGE_REQUEST_MACREG, ARRAY_SIZE(data), data);
 }

@@ -175,6 +175,7 @@ static int ci_hdrc_msm_probe(struct platform_device *pdev)
 	struct platform_device *plat_ci;
 	struct clk *clk;
 	struct reset_control *reset;
+	struct resource *res;
 	int ret;
 	struct device_node *ulpi_node, *phy_node;
 
@@ -208,7 +209,8 @@ static int ci_hdrc_msm_probe(struct platform_device *pdev)
 	if (IS_ERR(clk))
 		return PTR_ERR(clk);
 
-	ci->base = devm_platform_ioremap_resource(pdev, 1);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	ci->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(ci->base))
 		return PTR_ERR(ci->base);
 
@@ -216,13 +218,13 @@ static int ci_hdrc_msm_probe(struct platform_device *pdev)
 	ci->rcdev.ops = &ci_hdrc_msm_reset_ops;
 	ci->rcdev.of_node = pdev->dev.of_node;
 	ci->rcdev.nr_resets = 2;
-	ret = devm_reset_controller_register(&pdev->dev, &ci->rcdev);
+	ret = reset_controller_register(&ci->rcdev);
 	if (ret)
 		return ret;
 
 	ret = clk_prepare_enable(ci->fs_clk);
 	if (ret)
-		return ret;
+		goto err_fs;
 
 	reset_control_assert(reset);
 	usleep_range(10000, 12000);
@@ -232,7 +234,7 @@ static int ci_hdrc_msm_probe(struct platform_device *pdev)
 
 	ret = clk_prepare_enable(ci->core_clk);
 	if (ret)
-		return ret;
+		goto err_fs;
 
 	ret = clk_prepare_enable(ci->iface_clk);
 	if (ret)
@@ -271,6 +273,8 @@ err_mux:
 	clk_disable_unprepare(ci->iface_clk);
 err_iface:
 	clk_disable_unprepare(ci->core_clk);
+err_fs:
+	reset_controller_unregister(&ci->rcdev);
 	return ret;
 }
 
@@ -282,6 +286,7 @@ static int ci_hdrc_msm_remove(struct platform_device *pdev)
 	ci_hdrc_remove_device(ci->ci);
 	clk_disable_unprepare(ci->iface_clk);
 	clk_disable_unprepare(ci->core_clk);
+	reset_controller_unregister(&ci->rcdev);
 
 	return 0;
 }

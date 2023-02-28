@@ -866,10 +866,8 @@ static int rza1_dt_node_pin_count(struct device_node *np)
 	npins = 0;
 	for_each_child_of_node(np, child) {
 		of_pins = of_find_property(child, "pinmux", NULL);
-		if (!of_pins) {
-			of_node_put(child);
+		if (!of_pins)
 			return -EINVAL;
-		}
 
 		npins += of_pins->length / sizeof(u32);
 	}
@@ -1027,10 +1025,8 @@ static int rza1_dt_node_to_map(struct pinctrl_dev *pctldev,
 		for_each_child_of_node(np, child) {
 			ret = rza1_parse_pinmux_node(rza1_pctl, child, mux_conf,
 						     grpin);
-			if (ret < 0) {
-				of_node_put(child);
+			if (ret < 0)
 				return ret;
-			}
 
 			grpin += ret;
 			mux_conf += ret;
@@ -1276,10 +1272,8 @@ static int rza1_gpio_register(struct rza1_pinctrl *rza1_pctl)
 
 		ret = rza1_parse_gpiochip(rza1_pctl, child, &gpio_chips[i],
 					  &gpio_ranges[i]);
-		if (ret) {
-			of_node_put(child);
+		if (ret)
 			return ret;
-		}
 
 		++i;
 	}
@@ -1365,6 +1359,7 @@ static int rza1_pinctrl_register(struct rza1_pinctrl *rza1_pctl)
 static int rza1_pinctrl_probe(struct platform_device *pdev)
 {
 	struct rza1_pinctrl *rza1_pctl;
+	struct resource *res;
 	int ret;
 
 	rza1_pctl = devm_kzalloc(&pdev->dev, sizeof(*rza1_pctl), GFP_KERNEL);
@@ -1373,7 +1368,8 @@ static int rza1_pinctrl_probe(struct platform_device *pdev)
 
 	rza1_pctl->dev = &pdev->dev;
 
-	rza1_pctl->base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	rza1_pctl->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(rza1_pctl->base))
 		return PTR_ERR(rza1_pctl->base);
 

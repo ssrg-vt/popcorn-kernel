@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
-#define _GNU_SOURCE
-#include <pthread.h>
-#include <sched.h>
-#include <sys/socket.h>
 #include <test_progs.h>
 
 #define MAX_CNT_RAWTP	10ull
 #define MAX_STACK_RAWTP	100
-
-static int duration = 0;
-
 struct get_stack_trace_t {
 	int pid;
 	int kern_stack_size;
@@ -20,7 +13,7 @@ struct get_stack_trace_t {
 	struct bpf_stack_build_id user_stack_buildid[MAX_STACK_RAWTP];
 };
 
-static void get_stack_print_output(void *ctx, int cpu, void *data, __u32 size)
+static int get_stack_print_output(void *data, int size)
 {
 	bool good_kern_stack = false, good_user_stack = false;
 	const char *nonjit_func = "___bpf_prog_run";
@@ -41,7 +34,7 @@ static void get_stack_print_output(void *ctx, int cpu, void *data, __u32 size)
 		 * just assume it is good if the stack is not empty.
 		 * This could be improved in the future.
 		 */
-		if (env.jit_enabled) {
+		if (jit_enabled) {
 			found = num_stack > 0;
 		} else {
 			for (i = 0; i < num_stack; i++) {
@@ -58,7 +51,7 @@ static void get_stack_print_output(void *ctx, int cpu, void *data, __u32 size)
 		}
 	} else {
 		num_stack = e->kern_stack_size / sizeof(__u64);
-		if (env.jit_enabled) {
+		if (jit_enabled) {
 			good_kern_stack = num_stack > 0;
 		} else {
 			for (i = 0; i < num_stack; i++) {
@@ -72,73 +65,75 @@ static void get_stack_print_output(void *ctx, int cpu, void *data, __u32 size)
 		if (e->user_stack_size > 0 && e->user_stack_buildid_size > 0)
 			good_user_stack = true;
 	}
+	if (!good_kern_stack || !good_user_stack)
+		return LIBBPF_PERF_EVENT_ERROR;
 
-	if (!good_kern_stack)
-	    CHECK(!good_kern_stack, "kern_stack", "corrupted kernel stack\n");
-	if (!good_user_stack)
-	    CHECK(!good_user_stack, "user_stack", "corrupted user stack\n");
+	if (cnt == MAX_CNT_RAWTP)
+		return LIBBPF_PERF_EVENT_DONE;
+
+	return LIBBPF_PERF_EVENT_CONT;
 }
 
 void test_get_stack_raw_tp(void)
 {
 	const char *file = "./test_get_stack_rawtp.o";
-	const char *prog_name = "raw_tracepoint/sys_enter";
-	int i, err, prog_fd, exp_cnt = MAX_CNT_RAWTP;
-	struct perf_buffer_opts pb_opts = {};
-	struct perf_buffer *pb = NULL;
-	struct bpf_link *link = NULL;
+	int i, efd, err, prog_fd, pmu_fd, perfmap_fd;
+	struct perf_event_attr attr = {};
 	struct timespec tv = {0, 10};
-	struct bpf_program *prog;
+	__u32 key = 0, duration = 0;
 	struct bpf_object *obj;
-	struct bpf_map *map;
-	cpu_set_t cpu_set;
 
 	err = bpf_prog_load(file, BPF_PROG_TYPE_RAW_TRACEPOINT, &obj, &prog_fd);
 	if (CHECK(err, "prog_load raw tp", "err %d errno %d\n", err, errno))
 		return;
 
-	prog = bpf_object__find_program_by_title(obj, prog_name);
-	if (CHECK(!prog, "find_probe", "prog '%s' not found\n", prog_name))
+	efd = bpf_raw_tracepoint_open("sys_enter", prog_fd);
+	if (CHECK(efd < 0, "raw_tp_open", "err %d errno %d\n", efd, errno))
 		goto close_prog;
 
-	map = bpf_object__find_map_by_name(obj, "perfmap");
-	if (CHECK(!map, "bpf_find_map", "not found\n"))
+	perfmap_fd = bpf_find_map(__func__, obj, "perfmap");
+	if (CHECK(perfmap_fd < 0, "bpf_find_map", "err %d errno %d\n",
+		  perfmap_fd, errno))
 		goto close_prog;
 
 	err = load_kallsyms();
 	if (CHECK(err < 0, "load_kallsyms", "err %d errno %d\n", err, errno))
 		goto close_prog;
 
-	CPU_ZERO(&cpu_set);
-	CPU_SET(0, &cpu_set);
-	err = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set), &cpu_set);
-	if (CHECK(err, "set_affinity", "err %d, errno %d\n", err, errno))
+	attr.sample_type = PERF_SAMPLE_RAW;
+	attr.type = PERF_TYPE_SOFTWARE;
+	attr.config = PERF_COUNT_SW_BPF_OUTPUT;
+	pmu_fd = syscall(__NR_perf_event_open, &attr, getpid()/*pid*/, -1/*cpu*/,
+			 -1/*group_fd*/, 0);
+	if (CHECK(pmu_fd < 0, "perf_event_open", "err %d errno %d\n", pmu_fd,
+		  errno))
 		goto close_prog;
 
-	link = bpf_program__attach_raw_tracepoint(prog, "sys_enter");
-	if (CHECK(IS_ERR(link), "attach_raw_tp", "err %ld\n", PTR_ERR(link)))
+	err = bpf_map_update_elem(perfmap_fd, &key, &pmu_fd, BPF_ANY);
+	if (CHECK(err < 0, "bpf_map_update_elem", "err %d errno %d\n", err,
+		  errno))
 		goto close_prog;
 
-	pb_opts.sample_cb = get_stack_print_output;
-	pb = perf_buffer__new(bpf_map__fd(map), 8, &pb_opts);
-	if (CHECK(IS_ERR(pb), "perf_buf__new", "err %ld\n", PTR_ERR(pb)))
+	err = ioctl(pmu_fd, PERF_EVENT_IOC_ENABLE, 0);
+	if (CHECK(err < 0, "ioctl PERF_EVENT_IOC_ENABLE", "err %d errno %d\n",
+		  err, errno))
+		goto close_prog;
+
+	err = perf_event_mmap(pmu_fd);
+	if (CHECK(err < 0, "perf_event_mmap", "err %d errno %d\n", err, errno))
 		goto close_prog;
 
 	/* trigger some syscall action */
 	for (i = 0; i < MAX_CNT_RAWTP; i++)
 		nanosleep(&tv, NULL);
 
-	while (exp_cnt > 0) {
-		err = perf_buffer__poll(pb, 100);
-		if (err < 0 && CHECK(err < 0, "pb__poll", "err %d\n", err))
-			goto close_prog;
-		exp_cnt -= err;
-	}
+	err = perf_event_poller(pmu_fd, get_stack_print_output);
+	if (CHECK(err < 0, "perf_event_poller", "err %d errno %d\n", err, errno))
+		goto close_prog;
 
+	goto close_prog_noerr;
 close_prog:
-	if (!IS_ERR_OR_NULL(link))
-		bpf_link__destroy(link);
-	if (!IS_ERR_OR_NULL(pb))
-		perf_buffer__free(pb);
+	error_cnt++;
+close_prog_noerr:
 	bpf_object__close(obj);
 }

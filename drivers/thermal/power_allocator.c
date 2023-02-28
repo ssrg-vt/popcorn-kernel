@@ -651,4 +651,13 @@ static struct thermal_governor thermal_gov_power_allocator = {
 	.unbind_from_tz	= power_allocator_unbind,
 	.throttle	= power_allocator_throttle,
 };
-THERMAL_GOVERNOR_DECLARE(thermal_gov_power_allocator);
+
+int thermal_gov_power_allocator_register(void)
+{
+	return thermal_register_governor(&thermal_gov_power_allocator);
+}
+
+void thermal_gov_power_allocator_unregister(void)
+{
+	thermal_unregister_governor(&thermal_gov_power_allocator);
+}

@@ -8,15 +8,13 @@
  */
 
 #include <sys/types.h>
-#include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-#include <linux/ctype.h>
-#include <linux/kernel.h>
-#include <linux/zalloc.h>
+#include <ctype.h>
 
 #include "../../util/header.h"
+#include "../../util/util.h"
 
 #define SYSINFO_MANU	"Manufacturer:"
 #define SYSINFO_TYPE	"Type:"
@@ -55,7 +53,7 @@ int get_cpuid(char *buffer, size_t sz)
 
 	sysinfo = fopen(SYSINFO, "r");
 	if (sysinfo == NULL)
-		return errno;
+		return -1;
 
 	while ((read = getline(&line, &line_sz, sysinfo)) != -1) {
 		if (!strncmp(line, SYSINFO_MANU, strlen(SYSINFO_MANU))) {
@@ -90,7 +88,7 @@ int get_cpuid(char *buffer, size_t sz)
 
 	/* Missing manufacturer, type or model information should not happen */
 	if (!manufacturer[0] || !type[0] || !model[0])
-		return EINVAL;
+		return -1;
 
 	/*
 	 * Scan /proc/service_levels and return the CPU-MF counter facility
@@ -134,14 +132,14 @@ skip_sysinfo:
 	else
 		nbytes = snprintf(buffer, sz, "%s,%s,%s", manufacturer, type,
 				  model);
-	return (nbytes >= sz) ? ENOBUFS : 0;
+	return (nbytes >= sz) ? -1 : 0;
 }
 
 char *get_cpuid_str(struct perf_pmu *pmu __maybe_unused)
 {
 	char *buf = malloc(128);
 
-	if (buf && get_cpuid(buf, 128))
+	if (buf && get_cpuid(buf, 128) < 0)
 		zfree(&buf);
 	return buf;
 }

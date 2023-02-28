@@ -27,7 +27,7 @@ static __be16 t10_pi_ip_fn(void *data, unsigned int len)
  * tag.
  */
 static blk_status_t t10_pi_generate(struct blk_integrity_iter *iter,
-		csum_fn *fn, enum t10_dif_type type)
+		csum_fn *fn, unsigned int type)
 {
 	unsigned int i;
 
@@ -37,7 +37,7 @@ static blk_status_t t10_pi_generate(struct blk_integrity_iter *iter,
 		pi->guard_tag = fn(iter->data_buf, iter->interval);
 		pi->app_tag = 0;
 
-		if (type == T10_PI_TYPE1_PROTECTION)
+		if (type == 1)
 			pi->ref_tag = cpu_to_be32(lower_32_bits(iter->seed));
 		else
 			pi->ref_tag = 0;
@@ -51,18 +51,17 @@ static blk_status_t t10_pi_generate(struct blk_integrity_iter *iter,
 }
 
 static blk_status_t t10_pi_verify(struct blk_integrity_iter *iter,
-		csum_fn *fn, enum t10_dif_type type)
+		csum_fn *fn, unsigned int type)
 {
 	unsigned int i;
-
-	BUG_ON(type == T10_PI_TYPE0_PROTECTION);
 
 	for (i = 0 ; i < iter->data_size ; i += iter->interval) {
 		struct t10_pi_tuple *pi = iter->prot_buf;
 		__be16 csum;
 
-		if (type == T10_PI_TYPE1_PROTECTION ||
-		    type == T10_PI_TYPE2_PROTECTION) {
+		switch (type) {
+		case 1:
+		case 2:
 			if (pi->app_tag == T10_PI_APP_ESCAPE)
 				goto next;
 
@@ -74,10 +73,12 @@ static blk_status_t t10_pi_verify(struct blk_integrity_iter *iter,
 				       iter->seed, be32_to_cpu(pi->ref_tag));
 				return BLK_STS_PROTECTION;
 			}
-		} else if (type == T10_PI_TYPE3_PROTECTION) {
+			break;
+		case 3:
 			if (pi->app_tag == T10_PI_APP_ESCAPE &&
 			    pi->ref_tag == T10_PI_REF_ESCAPE)
 				goto next;
+			break;
 		}
 
 		csum = fn(iter->data_buf, iter->interval);
@@ -101,39 +102,93 @@ next:
 
 static blk_status_t t10_pi_type1_generate_crc(struct blk_integrity_iter *iter)
 {
-	return t10_pi_generate(iter, t10_pi_crc_fn, T10_PI_TYPE1_PROTECTION);
+	return t10_pi_generate(iter, t10_pi_crc_fn, 1);
 }
 
 static blk_status_t t10_pi_type1_generate_ip(struct blk_integrity_iter *iter)
 {
-	return t10_pi_generate(iter, t10_pi_ip_fn, T10_PI_TYPE1_PROTECTION);
+	return t10_pi_generate(iter, t10_pi_ip_fn, 1);
 }
 
 static blk_status_t t10_pi_type1_verify_crc(struct blk_integrity_iter *iter)
 {
-	return t10_pi_verify(iter, t10_pi_crc_fn, T10_PI_TYPE1_PROTECTION);
+	return t10_pi_verify(iter, t10_pi_crc_fn, 1);
 }
 
 static blk_status_t t10_pi_type1_verify_ip(struct blk_integrity_iter *iter)
 {
-	return t10_pi_verify(iter, t10_pi_ip_fn, T10_PI_TYPE1_PROTECTION);
+	return t10_pi_verify(iter, t10_pi_ip_fn, 1);
 }
 
+static blk_status_t t10_pi_type3_generate_crc(struct blk_integrity_iter *iter)
+{
+	return t10_pi_generate(iter, t10_pi_crc_fn, 3);
+}
+
+static blk_status_t t10_pi_type3_generate_ip(struct blk_integrity_iter *iter)
+{
+	return t10_pi_generate(iter, t10_pi_ip_fn, 3);
+}
+
+static blk_status_t t10_pi_type3_verify_crc(struct blk_integrity_iter *iter)
+{
+	return t10_pi_verify(iter, t10_pi_crc_fn, 3);
+}
+
+static blk_status_t t10_pi_type3_verify_ip(struct blk_integrity_iter *iter)
+{
+	return t10_pi_verify(iter, t10_pi_ip_fn, 3);
+}
+
+const struct blk_integrity_profile t10_pi_type1_crc = {
+	.name			= "T10-DIF-TYPE1-CRC",
+	.generate_fn		= t10_pi_type1_generate_crc,
+	.verify_fn		= t10_pi_type1_verify_crc,
+};
+EXPORT_SYMBOL(t10_pi_type1_crc);
+
+const struct blk_integrity_profile t10_pi_type1_ip = {
+	.name			= "T10-DIF-TYPE1-IP",
+	.generate_fn		= t10_pi_type1_generate_ip,
+	.verify_fn		= t10_pi_type1_verify_ip,
+};
+EXPORT_SYMBOL(t10_pi_type1_ip);
+
+const struct blk_integrity_profile t10_pi_type3_crc = {
+	.name			= "T10-DIF-TYPE3-CRC",
+	.generate_fn		= t10_pi_type3_generate_crc,
+	.verify_fn		= t10_pi_type3_verify_crc,
+};
+EXPORT_SYMBOL(t10_pi_type3_crc);
+
+const struct blk_integrity_profile t10_pi_type3_ip = {
+	.name			= "T10-DIF-TYPE3-IP",
+	.generate_fn		= t10_pi_type3_generate_ip,
+	.verify_fn		= t10_pi_type3_verify_ip,
+};
+EXPORT_SYMBOL(t10_pi_type3_ip);
+
 /**
- * t10_pi_type1_prepare - prepare PI prior submitting request to device
+ * t10_pi_prepare - prepare PI prior submitting request to device
  * @rq:              request with PI that should be prepared
+ * @protection_type: PI type (Type 1/Type 2/Type 3)
  *
  * For Type 1/Type 2, the virtual start sector is the one that was
  * originally submitted by the block layer for the ref_tag usage. Due to
  * partitioning, MD/DM cloning, etc. the actual physical start sector is
  * likely to be different. Remap protection information to match the
  * physical LBA.
+ *
+ * Type 3 does not have a reference tag so no remapping is required.
  */
-static void t10_pi_type1_prepare(struct request *rq)
+void t10_pi_prepare(struct request *rq, u8 protection_type)
 {
 	const int tuple_sz = rq->q->integrity.tuple_size;
 	u32 ref_tag = t10_pi_ref_tag(rq);
 	struct bio *bio;
+
+	if (protection_type == T10_PI_TYPE3_PROTECTION)
+		return;
 
 	__rq_for_each_bio(bio, rq) {
 		struct bio_integrity_payload *bip = bio_integrity(bio);
@@ -167,11 +222,13 @@ static void t10_pi_type1_prepare(struct request *rq)
 		bip->bip_flags |= BIP_MAPPED_INTEGRITY;
 	}
 }
+EXPORT_SYMBOL(t10_pi_prepare);
 
 /**
- * t10_pi_type1_complete - prepare PI prior returning request to the blk layer
+ * t10_pi_complete - prepare PI prior returning request to the block layer
  * @rq:              request with PI that should be prepared
- * @nr_bytes:        total bytes to prepare
+ * @protection_type: PI type (Type 1/Type 2/Type 3)
+ * @intervals:       total elements to prepare
  *
  * For Type 1/Type 2, the virtual start sector is the one that was
  * originally submitted by the block layer for the ref_tag usage. Due to
@@ -179,13 +236,18 @@ static void t10_pi_type1_prepare(struct request *rq)
  * likely to be different. Since the physical start sector was submitted
  * to the device, we should remap it back to virtual values expected by the
  * block layer.
+ *
+ * Type 3 does not have a reference tag so no remapping is required.
  */
-static void t10_pi_type1_complete(struct request *rq, unsigned int nr_bytes)
+void t10_pi_complete(struct request *rq, u8 protection_type,
+		     unsigned int intervals)
 {
-	unsigned intervals = nr_bytes >> rq->q->integrity.interval_exp;
 	const int tuple_sz = rq->q->integrity.tuple_size;
 	u32 ref_tag = t10_pi_ref_tag(rq);
 	struct bio *bio;
+
+	if (protection_type == T10_PI_TYPE3_PROTECTION)
+		return;
 
 	__rq_for_each_bio(bio, rq) {
 		struct bio_integrity_payload *bip = bio_integrity(bio);
@@ -214,73 +276,4 @@ static void t10_pi_type1_complete(struct request *rq, unsigned int nr_bytes)
 		}
 	}
 }
-
-static blk_status_t t10_pi_type3_generate_crc(struct blk_integrity_iter *iter)
-{
-	return t10_pi_generate(iter, t10_pi_crc_fn, T10_PI_TYPE3_PROTECTION);
-}
-
-static blk_status_t t10_pi_type3_generate_ip(struct blk_integrity_iter *iter)
-{
-	return t10_pi_generate(iter, t10_pi_ip_fn, T10_PI_TYPE3_PROTECTION);
-}
-
-static blk_status_t t10_pi_type3_verify_crc(struct blk_integrity_iter *iter)
-{
-	return t10_pi_verify(iter, t10_pi_crc_fn, T10_PI_TYPE3_PROTECTION);
-}
-
-static blk_status_t t10_pi_type3_verify_ip(struct blk_integrity_iter *iter)
-{
-	return t10_pi_verify(iter, t10_pi_ip_fn, T10_PI_TYPE3_PROTECTION);
-}
-
-/**
- * Type 3 does not have a reference tag so no remapping is required.
- */
-static void t10_pi_type3_prepare(struct request *rq)
-{
-}
-
-/**
- * Type 3 does not have a reference tag so no remapping is required.
- */
-static void t10_pi_type3_complete(struct request *rq, unsigned int nr_bytes)
-{
-}
-
-const struct blk_integrity_profile t10_pi_type1_crc = {
-	.name			= "T10-DIF-TYPE1-CRC",
-	.generate_fn		= t10_pi_type1_generate_crc,
-	.verify_fn		= t10_pi_type1_verify_crc,
-	.prepare_fn		= t10_pi_type1_prepare,
-	.complete_fn		= t10_pi_type1_complete,
-};
-EXPORT_SYMBOL(t10_pi_type1_crc);
-
-const struct blk_integrity_profile t10_pi_type1_ip = {
-	.name			= "T10-DIF-TYPE1-IP",
-	.generate_fn		= t10_pi_type1_generate_ip,
-	.verify_fn		= t10_pi_type1_verify_ip,
-	.prepare_fn		= t10_pi_type1_prepare,
-	.complete_fn		= t10_pi_type1_complete,
-};
-EXPORT_SYMBOL(t10_pi_type1_ip);
-
-const struct blk_integrity_profile t10_pi_type3_crc = {
-	.name			= "T10-DIF-TYPE3-CRC",
-	.generate_fn		= t10_pi_type3_generate_crc,
-	.verify_fn		= t10_pi_type3_verify_crc,
-	.prepare_fn		= t10_pi_type3_prepare,
-	.complete_fn		= t10_pi_type3_complete,
-};
-EXPORT_SYMBOL(t10_pi_type3_crc);
-
-const struct blk_integrity_profile t10_pi_type3_ip = {
-	.name			= "T10-DIF-TYPE3-IP",
-	.generate_fn		= t10_pi_type3_generate_ip,
-	.verify_fn		= t10_pi_type3_verify_ip,
-	.prepare_fn		= t10_pi_type3_prepare,
-	.complete_fn		= t10_pi_type3_complete,
-};
-EXPORT_SYMBOL(t10_pi_type3_ip);
+EXPORT_SYMBOL(t10_pi_complete);

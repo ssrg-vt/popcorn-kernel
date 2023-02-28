@@ -173,9 +173,9 @@
 #define DRIVER_VERSION		"1.1.1"
 
 /* Number of isochronous URBs. */
-#define UVC_URBS		50
+#define UVC_URBS		5
 /* Maximum number of packets per URB. */
-#define UVC_MAX_PACKETS		48
+#define UVC_MAX_PACKETS		32
 /* Maximum status buffer size in bytes of interrupt URB. */
 #define UVC_MAX_STATUS_SIZE	16
 
@@ -420,7 +420,6 @@ struct uvc_buffer {
 
 #define UVC_QUEUE_DISCONNECTED		(1 << 0)
 #define UVC_QUEUE_DROP_CORRUPTED	(1 << 1)
-#define UVC_QUEUE_STOPPING		(1 << 2)
 
 struct uvc_video_queue {
 	struct vb2_queue queue;

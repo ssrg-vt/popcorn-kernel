@@ -92,6 +92,7 @@ static int sun4i_mdio_probe(struct platform_device *pdev)
 	struct device_node *np = pdev->dev.of_node;
 	struct mii_bus *bus;
 	struct sun4i_mdio_data *data;
+	struct resource *res;
 	int ret;
 
 	bus = mdiobus_alloc_size(sizeof(*data));
@@ -105,7 +106,8 @@ static int sun4i_mdio_probe(struct platform_device *pdev)
 	bus->parent = &pdev->dev;
 
 	data = bus->priv;
-	data->membase = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	data->membase = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(data->membase)) {
 		ret = PTR_ERR(data->membase);
 		goto err_out_free_mdiobus;
@@ -145,11 +147,8 @@ err_out_free_mdiobus:
 static int sun4i_mdio_remove(struct platform_device *pdev)
 {
 	struct mii_bus *bus = platform_get_drvdata(pdev);
-	struct sun4i_mdio_data *data = bus->priv;
 
 	mdiobus_unregister(bus);
-	if (data->regulator)
-		regulator_disable(data->regulator);
 	mdiobus_free(bus);
 
 	return 0;

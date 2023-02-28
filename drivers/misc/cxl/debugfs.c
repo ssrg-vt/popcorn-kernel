@@ -26,11 +26,11 @@ static int debugfs_io_u64_set(void *data, u64 val)
 DEFINE_DEBUGFS_ATTRIBUTE(fops_io_x64, debugfs_io_u64_get, debugfs_io_u64_set,
 			 "0x%016llx\n");
 
-static void debugfs_create_io_x64(const char *name, umode_t mode,
-				  struct dentry *parent, u64 __iomem *value)
+static struct dentry *debugfs_create_io_x64(const char *name, umode_t mode,
+					    struct dentry *parent, u64 __iomem *value)
 {
-	debugfs_create_file_unsafe(name, mode, parent, (void __force *)value,
-				   &fops_io_x64);
+	return debugfs_create_file_unsafe(name, mode, parent,
+					  (void __force *)value, &fops_io_x64);
 }
 
 void cxl_debugfs_add_adapter_regs_psl9(struct cxl *adapter, struct dentry *dir)
@@ -54,22 +54,25 @@ void cxl_debugfs_add_adapter_regs_psl8(struct cxl *adapter, struct dentry *dir)
 	debugfs_create_io_x64("trace", S_IRUSR | S_IWUSR, dir, _cxl_p1_addr(adapter, CXL_PSL_TRACE));
 }
 
-void cxl_debugfs_adapter_add(struct cxl *adapter)
+int cxl_debugfs_adapter_add(struct cxl *adapter)
 {
 	struct dentry *dir;
 	char buf[32];
 
 	if (!cxl_debugfs)
-		return;
+		return -ENODEV;
 
 	snprintf(buf, 32, "card%i", adapter->adapter_num);
 	dir = debugfs_create_dir(buf, cxl_debugfs);
+	if (IS_ERR(dir))
+		return PTR_ERR(dir);
 	adapter->debugfs = dir;
 
 	debugfs_create_io_x64("err_ivte", S_IRUSR, dir, _cxl_p1_addr(adapter, CXL_PSL_ErrIVTE));
 
 	if (adapter->native->sl_ops->debugfs_add_adapter_regs)
 		adapter->native->sl_ops->debugfs_add_adapter_regs(adapter, dir);
+	return 0;
 }
 
 void cxl_debugfs_adapter_remove(struct cxl *adapter)
@@ -93,16 +96,18 @@ void cxl_debugfs_add_afu_regs_psl8(struct cxl_afu *afu, struct dentry *dir)
 	debugfs_create_io_x64("trace", S_IRUSR | S_IWUSR, dir, _cxl_p1n_addr(afu, CXL_PSL_SLICE_TRACE));
 }
 
-void cxl_debugfs_afu_add(struct cxl_afu *afu)
+int cxl_debugfs_afu_add(struct cxl_afu *afu)
 {
 	struct dentry *dir;
 	char buf[32];
 
 	if (!afu->adapter->debugfs)
-		return;
+		return -ENODEV;
 
 	snprintf(buf, 32, "psl%i.%i", afu->adapter->adapter_num, afu->slice);
 	dir = debugfs_create_dir(buf, afu->adapter->debugfs);
+	if (IS_ERR(dir))
+		return PTR_ERR(dir);
 	afu->debugfs = dir;
 
 	debugfs_create_io_x64("sr",         S_IRUSR, dir, _cxl_p1n_addr(afu, CXL_PSL_SR_An));
@@ -113,6 +118,8 @@ void cxl_debugfs_afu_add(struct cxl_afu *afu)
 
 	if (afu->adapter->native->sl_ops->debugfs_add_afu_regs)
 		afu->adapter->native->sl_ops->debugfs_add_afu_regs(afu, dir);
+
+	return 0;
 }
 
 void cxl_debugfs_afu_remove(struct cxl_afu *afu)
@@ -120,12 +127,19 @@ void cxl_debugfs_afu_remove(struct cxl_afu *afu)
 	debugfs_remove_recursive(afu->debugfs);
 }
 
-void __init cxl_debugfs_init(void)
+int __init cxl_debugfs_init(void)
 {
-	if (!cpu_has_feature(CPU_FTR_HVMODE))
-		return;
+	struct dentry *ent;
 
-	cxl_debugfs = debugfs_create_dir("cxl", NULL);
+	if (!cpu_has_feature(CPU_FTR_HVMODE))
+		return 0;
+
+	ent = debugfs_create_dir("cxl", NULL);
+	if (IS_ERR(ent))
+		return PTR_ERR(ent);
+	cxl_debugfs = ent;
+
+	return 0;
 }
 
 void cxl_debugfs_exit(void)

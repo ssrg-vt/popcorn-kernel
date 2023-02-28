@@ -73,7 +73,7 @@ s32 FillH2CCmd8723B(struct adapter *padapter, u8 ElementID, u32 CmdLen, u8 *pCmd
 		goto exit;
 	}
 
-	if (padapter->bSurpriseRemoved)
+	if (padapter->bSurpriseRemoved == true)
 		goto exit;
 
 	/* pay attention to if  race condition happened in  H2C cmd setting. */
@@ -297,7 +297,7 @@ static void ConstructNullFunctionData(
 
 	SetSeqNum(pwlanhdr, 0);
 
-	if (bQoS) {
+	if (bQoS == true) {
 		struct ieee80211_qos_hdr *pwlanqoshdr;
 
 		SetFrameSubType(pframe, WIFI_QOS_DATA_NULL);
@@ -436,7 +436,7 @@ static void ConstructARPResponse(
 		DBG_871X("%s(): Add MIC\n", __func__);
 
 		psta = rtw_get_stainfo(&padapter->stapriv, get_my_bssid(&(pmlmeinfo->network)));
-		if (psta) {
+		if (psta != NULL) {
 			if (!memcmp(&psta->dot11tkiptxmickey.skey[0], null_key, 16)) {
 				DBG_871X("%s(): STA dot11tkiptxmickey == 0\n", __func__);
 			}
@@ -674,6 +674,10 @@ static void ConstructProbeReq(struct adapter *padapter, u8 *pframe, u32 *pLength
 	u32 pktlen;
 	unsigned char *mac;
 	unsigned char bssrate[NumRates];
+	struct xmit_priv *pxmitpriv = &(padapter->xmitpriv);
+	struct mlme_priv *pmlmepriv = &(padapter->mlmepriv);
+	struct mlme_ext_priv *pmlmeext = &(padapter->mlmeextpriv);
+	struct mlme_ext_info *pmlmeinfo = &(pmlmeext->mlmext_info);
 	int bssrate_len = 0;
 	u8 bc_addr[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
@@ -753,7 +757,7 @@ static void ConstructProbeRsp(struct adapter *padapter, u8 *pframe, u32 *pLength
 			cur_network->IELength-_FIXED_IE_LENGTH_, NULL, &wps_ielen);
 
 	/* inerset & update wps_probe_resp_ie */
-	if (pmlmepriv->wps_probe_resp_ie && pwps_ie && (wps_ielen > 0)) {
+	if ((pmlmepriv->wps_probe_resp_ie != NULL) && pwps_ie && (wps_ielen > 0)) {
 		uint wps_offset, remainder_ielen;
 		u8 *premainder_ie;
 
@@ -991,7 +995,7 @@ void rtl8723b_set_FwMacIdConfig_cmd(struct adapter *padapter, u8 mac_id, u8 raid
 	FillH2CCmd8723B(padapter, H2C_8723B_MACID_CFG, H2C_MACID_CFG_LEN, u1H2CMacIdConfigParm);
 }
 
-void rtl8723b_set_rssi_cmd(struct adapter *padapter, u8 *param)
+static void rtl8723b_set_FwRssiSetting_cmd(struct adapter *padapter, u8 *param)
 {
 	u8 u1H2CRssiSettingParm[H2C_RSSI_SETTING_LEN] = {0};
 	u8 mac_id = *param;
@@ -1044,9 +1048,9 @@ void rtl8723b_set_FwPwrMode_cmd(struct adapter *padapter, u8 psmode)
 	}
 
 	if (psmode > 0) {
-		if (hal_btcoex_IsBtControlLps(padapter) == true) {
-			PowerState = hal_btcoex_RpwmVal(padapter);
-			byte5 = hal_btcoex_LpsVal(padapter);
+		if (rtw_btcoex_IsBtControlLps(padapter) == true) {
+			PowerState = rtw_btcoex_RpwmVal(padapter);
+			byte5 = rtw_btcoex_LpsVal(padapter);
 
 			if ((rlbm == 2) && (byte5 & BIT(4))) {
 				/*  Keep awake interval to 1 to prevent from */
@@ -1071,7 +1075,7 @@ void rtl8723b_set_FwPwrMode_cmd(struct adapter *padapter, u8 psmode)
 	SET_8723B_H2CCMD_PWRMODE_PARM_PWR_STATE(u1H2CPwrModeParm, PowerState);
 	SET_8723B_H2CCMD_PWRMODE_PARM_BYTE5(u1H2CPwrModeParm, byte5);
 	if (psmode != PS_MODE_ACTIVE) {
-		if (!pmlmeext->adaptive_tsf_done && pmlmeext->bcn_cnt > 0) {
+		if (pmlmeext->adaptive_tsf_done == false && pmlmeext->bcn_cnt > 0) {
 			u8 ratio_20_delay, ratio_80_delay;
 
 			/* byte 6 for adaptive_early_32k */
@@ -1133,7 +1137,7 @@ void rtl8723b_set_FwPwrMode_cmd(struct adapter *padapter, u8 psmode)
 
 	}
 
-	hal_btcoex_RecordPwrMode(padapter, u1H2CPwrModeParm, H2C_PWRMODE_LEN);
+	rtw_btcoex_RecordPwrMode(padapter, u1H2CPwrModeParm, H2C_PWRMODE_LEN);
 
 	RT_PRINT_DATA(_module_hal_init_c_, _drv_always_, "u1H2CPwrModeParm:", u1H2CPwrModeParm, H2C_PWRMODE_LEN);
 
@@ -1252,7 +1256,7 @@ static void rtl8723b_set_FwRemoteWakeCtrl_Cmd(struct adapter *padapter, u8 benab
 	FillH2CCmd8723B(padapter, H2C_8723B_REMOTE_WAKE_CTRL,
 		H2C_REMOTE_WAKE_CTRL_LEN, u1H2CRemoteWakeCtrlParm);
 #ifdef CONFIG_PNO_SUPPORT
-	if (ppwrpriv->wowlan_pno_enable && !ppwrpriv->pno_in_resume) {
+	if (ppwrpriv->wowlan_pno_enable && ppwrpriv->pno_in_resume == false) {
 		res = rtw_read8(padapter, REG_PNO_STATUS);
 		DBG_871X("cmd: 0x81 REG_PNO_STATUS: 0x%02x\n", res);
 		while (!(res&BIT(7)) && count < 25) {
@@ -1284,6 +1288,8 @@ static void rtl8723b_set_FwAOACGlobalInfo_Cmd(struct adapter *padapter,  u8 grou
 static void rtl8723b_set_FwScanOffloadInfo_cmd(struct adapter *padapter, PRSVDPAGE_LOC rsvdpageloc, u8 enable)
 {
 	u8 u1H2CScanOffloadInfoParm[H2C_SCAN_OFFLOAD_CTRL_LEN] = {0};
+	u8 res = 0, count = 0;
+	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(padapter);
 
 	DBG_871X("%s: loc_probe_packet:%d, loc_scan_info: %d loc_ssid_info:%d\n",
 		__func__, rsvdpageloc->LocProbePacket, rsvdpageloc->LocScanInfo, rsvdpageloc->LocSSIDInfo);
@@ -1300,7 +1306,7 @@ static void rtl8723b_set_FwScanOffloadInfo_cmd(struct adapter *padapter, PRSVDPA
 }
 #endif /* CONFIG_PNO_SUPPORT */
 
-void rtl8723b_set_wowlan_cmd(struct adapter *padapter, u8 enable)
+static void rtl8723b_set_FwWoWlanRelated_cmd(struct adapter *padapter, u8 enable)
 {
 	struct security_priv *psecpriv = &padapter->securitypriv;
 	struct pwrctrl_priv *ppwrpriv = adapter_to_pwrctl(padapter);
@@ -1316,7 +1322,7 @@ void rtl8723b_set_wowlan_cmd(struct adapter *padapter, u8 enable)
 
 		if (!(ppwrpriv->wowlan_pno_enable)) {
 			psta = rtw_get_stainfo(&padapter->stapriv, get_bssid(pmlmepriv));
-			if (psta)
+			if (psta != NULL)
 				rtl8723b_set_FwMediaStatusRpt_cmd(padapter, RT_MEDIA_CONNECT, psta->mac_id);
 		} else
 			DBG_871X("%s(): Disconnected, no FwMediaStatusRpt CONNECT\n", __func__);
@@ -1345,6 +1351,11 @@ void rtl8723b_set_wowlan_cmd(struct adapter *padapter, u8 enable)
 	}
 
 	DBG_871X_LEVEL(_drv_always_, "-%s()-\n", __func__);
+}
+
+void rtl8723b_set_wowlan_cmd(struct adapter *padapter, u8 enable)
+{
+	rtl8723b_set_FwWoWlanRelated_cmd(padapter, enable);
 }
 #endif /* CONFIG_WOWLAN */
 
@@ -1393,7 +1404,7 @@ static void rtl8723b_set_Fw_AP_Offload_Cmd(struct adapter *padapter, u8 bFuncEn)
 			H2C_AP_OFFLOAD_LEN, u1H2CAPOffloadCtrlParm);
 }
 
-void rtl8723b_set_ap_wowlan_cmd(struct adapter *padapter, u8 enable)
+static void rtl8723b_set_AP_FwWoWlan_cmd(struct adapter *padapter, u8 enable)
 {
 	DBG_871X_LEVEL(_drv_always_, "+%s()+: enable =%d\n", __func__, enable);
 	if (enable) {
@@ -1406,6 +1417,12 @@ void rtl8723b_set_ap_wowlan_cmd(struct adapter *padapter, u8 enable)
 	rtl8723b_set_Fw_AP_Offload_Cmd(padapter, enable);
 	msleep(10);
 	DBG_871X_LEVEL(_drv_always_, "-%s()-\n", __func__);
+	return ;
+}
+
+void rtl8723b_set_ap_wowlan_cmd(struct adapter *padapter, u8 enable)
+{
+	rtl8723b_set_AP_FwWoWlan_cmd(padapter, enable);
 }
 #endif /* CONFIG_AP_WOWLAN */
 
@@ -1423,6 +1440,7 @@ static void rtl8723b_set_FwRsvdPagePkt(
 	struct adapter *padapter, bool bDLFinished
 )
 {
+	struct hal_com_data *pHalData;
 	struct xmit_frame *pcmdframe;
 	struct pkt_attrib *pattrib;
 	struct xmit_priv *pxmitpriv;
@@ -1452,6 +1470,7 @@ static void rtl8723b_set_FwRsvdPagePkt(
 
 	/* DBG_871X("%s---->\n", __func__); */
 
+	pHalData = GET_HAL_DATA(padapter);
 	pxmitpriv = &padapter->xmitpriv;
 	pmlmeext = &padapter->mlmeextpriv;
 	pmlmeinfo = &pmlmeext->mlmext_info;
@@ -1658,7 +1677,7 @@ static void rtl8723b_set_FwRsvdPagePkt(
 #endif /* CONFIG_WOWLAN */
 	{
 #ifdef CONFIG_PNO_SUPPORT
-		if (!pwrctl->pno_in_resume && pwrctl->pno_inited) {
+		if (pwrctl->pno_in_resume == false && pwrctl->pno_inited == true) {
 			/* Probe Request */
 			RsvdPageLoc.LocProbePacket = TotalPageNum;
 			ConstructProbeReq(
@@ -2017,6 +2036,11 @@ void rtl8723b_download_rsvd_page(struct adapter *padapter, u8 mstatus)
 	}
 }
 
+void rtl8723b_set_rssi_cmd(struct adapter *padapter, u8 *param)
+{
+	rtl8723b_set_FwRssiSetting_cmd(padapter, param);
+}
+
 void rtl8723b_set_FwJoinBssRpt_cmd(struct adapter *padapter, u8 mstatus)
 {
 	if (mstatus == 1)
@@ -2101,7 +2125,7 @@ static void ConstructBtNullFunctionData(
 	SetDuration(pwlanhdr, 0);
 	SetSeqNum(pwlanhdr, 0);
 
-	if (bQoS) {
+	if (bQoS == true) {
 		struct ieee80211_qos_hdr *pwlanqoshdr;
 
 		SetFrameSubType(pframe, WIFI_QOS_DATA_NULL);
@@ -2289,7 +2313,7 @@ void rtl8723b_download_BTCoex_AP_mode_rsvd_page(struct adapter *padapter)
 		} while (!bcn_valid && (poll%10) != 0 && !padapter->bSurpriseRemoved && !padapter->bDriverStopped);
 	} while (!bcn_valid && (DLBcnCount <= 100) && !padapter->bSurpriseRemoved && !padapter->bDriverStopped);
 
-	if (bcn_valid) {
+	if (true == bcn_valid) {
 		struct pwrctrl_priv *pwrctl = adapter_to_pwrctl(padapter);
 		pwrctl->fw_psmode_iface_id = padapter->iface_id;
 		DBG_8192C(ADPT_FMT": DL RSVD page success! DLBcnCount:%d, poll:%d\n",

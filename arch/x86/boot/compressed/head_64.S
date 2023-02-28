@@ -87,7 +87,7 @@ ENTRY(startup_32)
 
 	call	verify_cpu
 	testl	%eax, %eax
-	jnz	.Lno_longmode
+	jnz	no_longmode
 
 /*
  * Compute the delta between where we were compiled to run at
@@ -322,7 +322,7 @@ ENTRY(startup_64)
 1:	popq	%rdi
 	subq	$1b, %rdi
 
-	call	.Ladjust_got
+	call	adjust_got
 
 	/*
 	 * At this point we are in long mode with 4-level paging enabled,
@@ -421,7 +421,7 @@ trampoline_return:
 
 	/* The new adjustment is the relocation address */
 	movq	%rbx, %rdi
-	call	.Ladjust_got
+	call	adjust_got
 
 /*
  * Copy the compressed kernel to the end of our buffer
@@ -440,7 +440,7 @@ trampoline_return:
 /*
  * Jump to the relocated address.
  */
-	leaq	.Lrelocated(%rbx), %rax
+	leaq	relocated(%rbx), %rax
 	jmp	*%rax
 
 #ifdef CONFIG_EFI_STUB
@@ -511,7 +511,7 @@ ENDPROC(efi64_stub_entry)
 #endif
 
 	.text
-.Lrelocated:
+relocated:
 
 /*
  * Clear BSS (stack is currently empty)
@@ -548,7 +548,7 @@ ENDPROC(efi64_stub_entry)
  * first time we touch GOT).
  * RDI is the new adjustment to apply.
  */
-.Ladjust_got:
+adjust_got:
 	/* Walk through the GOT adding the address to the entries */
 	leaq	_got(%rip), %rdx
 	leaq	_egot(%rip), %rcx
@@ -622,7 +622,7 @@ ENTRY(trampoline_32bit_src)
 	movl	%eax, %cr4
 
 	/* Calculate address of paging_enabled() once we are executing in the trampoline */
-	leal	.Lpaging_enabled - trampoline_32bit_src + TRAMPOLINE_32BIT_CODE_OFFSET(%ecx), %eax
+	leal	paging_enabled - trampoline_32bit_src + TRAMPOLINE_32BIT_CODE_OFFSET(%ecx), %eax
 
 	/* Prepare the stack for far return to Long Mode */
 	pushl	$__KERNEL_CS
@@ -635,7 +635,7 @@ ENTRY(trampoline_32bit_src)
 	lret
 
 	.code64
-.Lpaging_enabled:
+paging_enabled:
 	/* Return from the trampoline */
 	jmp	*%rdi
 
@@ -647,7 +647,7 @@ ENTRY(trampoline_32bit_src)
 	.org	trampoline_32bit_src + TRAMPOLINE_32BIT_CODE_SIZE
 
 	.code32
-.Lno_longmode:
+no_longmode:
 	/* This isn't an x86-64 CPU, so hang intentionally, we cannot continue */
 1:
 	hlt
@@ -659,7 +659,6 @@ ENTRY(trampoline_32bit_src)
 gdt64:
 	.word	gdt_end - gdt
 	.quad   0
-	.balign	8
 gdt:
 	.word	gdt_end - gdt
 	.long	gdt

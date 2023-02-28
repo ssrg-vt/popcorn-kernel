@@ -1,6 +1,17 @@
-/* SPDX-License-Identifier: ISC */
 /*
  * Copyright (C) 2016 Felix Fietkau <nbd@nbd.name>
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #ifndef __MT76_H
@@ -38,10 +49,8 @@ struct mt76_bus_ops {
 	u32 (*rr)(struct mt76_dev *dev, u32 offset);
 	void (*wr)(struct mt76_dev *dev, u32 offset, u32 val);
 	u32 (*rmw)(struct mt76_dev *dev, u32 offset, u32 mask, u32 val);
-	void (*write_copy)(struct mt76_dev *dev, u32 offset, const void *data,
-			   int len);
-	void (*read_copy)(struct mt76_dev *dev, u32 offset, void *data,
-			  int len);
+	void (*copy)(struct mt76_dev *dev, u32 offset, const void *data,
+		     int len);
 	int (*wr_rp)(struct mt76_dev *dev, u32 base,
 		     const struct mt76_reg_pair *rp, int len);
 	int (*rd_rp)(struct mt76_dev *dev, u32 base,
@@ -93,9 +102,8 @@ struct mt76_queue_entry {
 		struct urb *urb;
 	};
 	enum mt76_txq_id qid;
-	bool skip_buf0:1;
-	bool schedule:1;
-	bool done:1;
+	bool schedule;
+	bool done;
 };
 
 struct mt76_queue_regs {
@@ -205,7 +213,6 @@ struct mt76_wcid {
 
 	u8 rx_check_pn;
 	u8 rx_key_pn[IEEE80211_NUM_TIDS][6];
-	u16 cipher;
 
 	u32 tx_info;
 	bool sw_iv;
@@ -252,11 +259,10 @@ struct mt76_rx_tid {
 #define MT_TX_CB_TXS_DONE		BIT(1)
 #define MT_TX_CB_TXS_FAILED		BIT(2)
 
-#define MT_PACKET_ID_MASK		GENMASK(6, 0)
+#define MT_PACKET_ID_MASK		GENMASK(7, 0)
 #define MT_PACKET_ID_NO_ACK		0
 #define MT_PACKET_ID_NO_SKB		1
 #define MT_PACKET_ID_FIRST		2
-#define MT_PACKET_ID_HAS_RATE		BIT(7)
 
 #define MT_TX_STATUS_SKB_TIMEOUT	HZ
 
@@ -273,6 +279,7 @@ enum {
 	MT76_STATE_MCU_RUNNING,
 	MT76_SCANNING,
 	MT76_RESET,
+	MT76_OFFCHANNEL,
 	MT76_REMOVED,
 	MT76_READING_STATS,
 };
@@ -375,23 +382,21 @@ enum mt76u_out_ep {
 	__MT_EP_OUT_MAX,
 };
 
-#define MT_TX_SG_MAX_SIZE	8
-#define MT_RX_SG_MAX_SIZE	1
+#define MT_SG_MAX_SIZE		8
 #define MT_NUM_TX_ENTRIES	256
 #define MT_NUM_RX_ENTRIES	128
 #define MCU_RESP_URB_SIZE	1024
 struct mt76_usb {
 	struct mutex usb_ctrl_mtx;
-	union {
-		u8 data[32];
-		__le32 reg_val;
-	};
+	u8 data[32];
 
 	struct tasklet_struct rx_tasklet;
 	struct delayed_work stat_work;
 
 	u8 out_ep[__MT_EP_OUT_MAX];
+	u16 out_max_packet;
 	u8 in_ep[__MT_EP_IN_MAX];
+	u16 in_max_packet;
 	bool sg_en;
 
 	struct mt76u_mcu {
@@ -448,7 +453,6 @@ struct mt76_dev {
 	int tx_dma_idx[4];
 
 	struct tasklet_struct tx_tasklet;
-	struct napi_struct tx_napi;
 	struct delayed_work mac_work;
 
 	wait_queue_head_t tx_wait;
@@ -480,8 +484,6 @@ struct mt76_dev {
 	int txpower_conf;
 	int txpower_cur;
 
-	enum nl80211_dfs_regions region;
-
 	u32 debugfs_reg;
 
 	struct led_classdev led_cdev;
@@ -490,8 +492,6 @@ struct mt76_dev {
 	u8 led_pin;
 
 	u8 csa_complete;
-
-	ktime_t survey_time;
 
 	u32 rxfilter;
 
@@ -535,8 +535,7 @@ struct mt76_rx_status {
 #define __mt76_rr(dev, ...)	(dev)->bus->rr((dev), __VA_ARGS__)
 #define __mt76_wr(dev, ...)	(dev)->bus->wr((dev), __VA_ARGS__)
 #define __mt76_rmw(dev, ...)	(dev)->bus->rmw((dev), __VA_ARGS__)
-#define __mt76_wr_copy(dev, ...)	(dev)->bus->write_copy((dev), __VA_ARGS__)
-#define __mt76_rr_copy(dev, ...)	(dev)->bus->read_copy((dev), __VA_ARGS__)
+#define __mt76_wr_copy(dev, ...)	(dev)->bus->copy((dev), __VA_ARGS__)
 
 #define __mt76_set(dev, offset, val)	__mt76_rmw(dev, offset, 0, val)
 #define __mt76_clear(dev, offset, val)	__mt76_rmw(dev, offset, val, 0)
@@ -544,8 +543,7 @@ struct mt76_rx_status {
 #define mt76_rr(dev, ...)	(dev)->mt76.bus->rr(&((dev)->mt76), __VA_ARGS__)
 #define mt76_wr(dev, ...)	(dev)->mt76.bus->wr(&((dev)->mt76), __VA_ARGS__)
 #define mt76_rmw(dev, ...)	(dev)->mt76.bus->rmw(&((dev)->mt76), __VA_ARGS__)
-#define mt76_wr_copy(dev, ...)	(dev)->mt76.bus->write_copy(&((dev)->mt76), __VA_ARGS__)
-#define mt76_rr_copy(dev, ...)	(dev)->mt76.bus->read_copy(&((dev)->mt76), __VA_ARGS__)
+#define mt76_wr_copy(dev, ...)	(dev)->mt76.bus->copy(&((dev)->mt76), __VA_ARGS__)
 #define mt76_wr_rp(dev, ...)	(dev)->mt76.bus->wr_rp(&((dev)->mt76), __VA_ARGS__)
 #define mt76_rd_rp(dev, ...)	(dev)->mt76.bus->rd_rp(&((dev)->mt76), __VA_ARGS__)
 
@@ -579,7 +577,6 @@ bool __mt76_poll_msec(struct mt76_dev *dev, u32 offset, u32 mask, u32 val,
 #define mt76_poll_msec(dev, ...) __mt76_poll_msec(&((dev)->mt76), __VA_ARGS__)
 
 void mt76_mmio_init(struct mt76_dev *dev, void __iomem *regs);
-void mt76_pci_disable_aspm(struct pci_dev *pdev);
 
 static inline u16 mt76_chip(struct mt76_dev *dev)
 {
@@ -675,7 +672,7 @@ static inline struct mt76_tx_cb *mt76_tx_skb_cb(struct sk_buff *skb)
 {
 	BUILD_BUG_ON(sizeof(struct mt76_tx_cb) >
 		     sizeof(IEEE80211_SKB_CB(skb)->status.status_driver_data));
-	return ((void *)IEEE80211_SKB_CB(skb)->status.status_driver_data);
+	return ((void *) IEEE80211_SKB_CB(skb)->status.status_driver_data);
 }
 
 static inline void mt76_insert_hdr_pad(struct sk_buff *skb)
@@ -692,14 +689,6 @@ static inline void mt76_insert_hdr_pad(struct sk_buff *skb)
 	skb->data[len + 1] = 0;
 }
 
-static inline bool mt76_is_skb_pktid(u8 pktid)
-{
-	if (pktid & MT_PACKET_ID_HAS_RATE)
-		return false;
-
-	return pktid >= MT_PACKET_ID_FIRST;
-}
-
 void mt76_rx(struct mt76_dev *dev, enum mt76_rxq_id q, struct sk_buff *skb);
 void mt76_tx(struct mt76_dev *dev, struct ieee80211_sta *sta,
 	     struct mt76_wcid *wcid, struct sk_buff *skb);
@@ -710,7 +699,6 @@ void mt76_stop_tx_queues(struct mt76_dev *dev, struct ieee80211_sta *sta,
 			 bool send_bar);
 void mt76_txq_schedule(struct mt76_dev *dev, enum mt76_txq_id qid);
 void mt76_txq_schedule_all(struct mt76_dev *dev);
-void mt76_tx_tasklet(unsigned long data);
 void mt76_release_buffered_frames(struct ieee80211_hw *hw,
 				  struct ieee80211_sta *sta,
 				  u16 tids, int nframes,
@@ -751,6 +739,8 @@ int mt76_sta_state(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 void __mt76_sta_remove(struct mt76_dev *dev, struct ieee80211_vif *vif,
 		       struct ieee80211_sta *sta);
 
+struct ieee80211_sta *mt76_rx_convert(struct sk_buff *skb);
+
 int mt76_get_min_avg_rssi(struct mt76_dev *dev);
 
 int mt76_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
@@ -760,14 +750,6 @@ void mt76_csa_check(struct mt76_dev *dev);
 void mt76_csa_finish(struct mt76_dev *dev);
 
 int mt76_set_tim(struct ieee80211_hw *hw, struct ieee80211_sta *sta, bool set);
-void mt76_insert_ccmp_hdr(struct sk_buff *skb, u8 key_id);
-int mt76_get_rate(struct mt76_dev *dev,
-		  struct ieee80211_supported_band *sband,
-		  int idx, bool cck);
-void mt76_sw_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-		  const u8 *mac);
-void mt76_sw_scan_complete(struct ieee80211_hw *hw,
-			   struct ieee80211_vif *vif);
 
 /* internal */
 void mt76_tx_free(struct mt76_dev *dev);

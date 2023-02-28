@@ -55,7 +55,7 @@
 #include <linux/io.h>
 #include <linux/uaccess.h>
 
-#include "charlcd.h"
+#include <misc/charlcd.h>
 
 #define KEYPAD_MINOR		185
 

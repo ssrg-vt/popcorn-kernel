@@ -56,7 +56,7 @@ instead of ``double-indenting`` the ``case`` labels.  E.g.:
 	case 'K':
 	case 'k':
 		mem <<= 10;
-		fallthrough;
+		/* fall through */
 	default:
 		break;
 	}
@@ -686,7 +686,7 @@ filesystems) should advertise this prominently in their prompt string::
 	...
 
 For full documentation on the configuration files, see the file
-Documentation/kbuild/kconfig-language.rst.
+Documentation/kbuild/kconfig-language.txt.
 
 
 11) Data structures

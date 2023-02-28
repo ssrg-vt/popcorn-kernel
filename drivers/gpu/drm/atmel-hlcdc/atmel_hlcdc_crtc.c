@@ -8,19 +8,15 @@
  */
 
 #include <linux/clk.h>
-#include <linux/mfd/atmel-hlcdc.h>
-#include <linux/pinctrl/consumer.h>
 #include <linux/pm.h>
 #include <linux/pm_runtime.h>
+#include <linux/pinctrl/consumer.h>
+
+#include <drm/drm_crtc.h>
+#include <drm/drm_probe_helper.h>
+#include <drm/drmP.h>
 
 #include <video/videomode.h>
-
-#include <drm/drm_atomic.h>
-#include <drm/drm_atomic_helper.h>
-#include <drm/drm_crtc.h>
-#include <drm/drm_modeset_helper_vtables.h>
-#include <drm/drm_probe_helper.h>
-#include <drm/drm_vblank.h>
 
 #include "atmel_hlcdc_dc.h"
 
@@ -71,8 +67,7 @@ static void atmel_hlcdc_crtc_mode_set_nofb(struct drm_crtc *c)
 	unsigned long mode_rate;
 	struct videomode vm;
 	unsigned long prate;
-	unsigned int mask = ATMEL_HLCDC_CLKDIV_MASK | ATMEL_HLCDC_CLKPOL;
-	unsigned int cfg = 0;
+	unsigned int cfg;
 	int div;
 
 	vm.vfront_porch = adj->crtc_vsync_start - adj->crtc_vdisplay;
@@ -95,10 +90,7 @@ static void atmel_hlcdc_crtc_mode_set_nofb(struct drm_crtc *c)
 		     (adj->crtc_hdisplay - 1) |
 		     ((adj->crtc_vdisplay - 1) << 16));
 
-	if (!crtc->dc->desc->fixed_clksrc) {
-		cfg |= ATMEL_HLCDC_CLKSEL;
-		mask |= ATMEL_HLCDC_CLKSEL;
-	}
+	cfg = ATMEL_HLCDC_CLKSEL;
 
 	prate = 2 * clk_get_rate(crtc->dc->hlcdc->sys_clk);
 	mode_rate = adj->crtc_clock * 1000;
@@ -129,16 +121,20 @@ static void atmel_hlcdc_crtc_mode_set_nofb(struct drm_crtc *c)
 
 	cfg |= ATMEL_HLCDC_CLKDIV(div);
 
-	regmap_update_bits(regmap, ATMEL_HLCDC_CFG(0), mask, cfg);
+	regmap_update_bits(regmap, ATMEL_HLCDC_CFG(0),
+			   ATMEL_HLCDC_CLKSEL | ATMEL_HLCDC_CLKDIV_MASK |
+			   ATMEL_HLCDC_CLKPOL, cfg);
 
-	state = drm_crtc_state_to_atmel_hlcdc_crtc_state(c->state);
-	cfg = state->output_mode << 8;
+	cfg = 0;
 
 	if (adj->flags & DRM_MODE_FLAG_NVSYNC)
 		cfg |= ATMEL_HLCDC_VSPOL;
 
 	if (adj->flags & DRM_MODE_FLAG_NHSYNC)
 		cfg |= ATMEL_HLCDC_HSPOL;
+
+	state = drm_crtc_state_to_atmel_hlcdc_crtc_state(c->state);
+	cfg |= state->output_mode << 8;
 
 	regmap_update_bits(regmap, ATMEL_HLCDC_CFG(5),
 			   ATMEL_HLCDC_HSPOL | ATMEL_HLCDC_VSPOL |

@@ -2847,7 +2847,8 @@ out_err:
 	return NULL;
 }
 
-static int smiapp_probe(struct i2c_client *client)
+static int smiapp_probe(struct i2c_client *client,
+			const struct i2c_device_id *devid)
 {
 	struct smiapp_sensor *sensor;
 	struct smiapp_hwconfig *hwcfg = smiapp_get_hwconfig(&client->dev);
@@ -3171,7 +3172,7 @@ static struct i2c_driver smiapp_i2c_driver = {
 		.name = SMIAPP_NAME,
 		.pm = &smiapp_pm_ops,
 	},
-	.probe_new = smiapp_probe,
+	.probe	= smiapp_probe,
 	.remove	= smiapp_remove,
 	.id_table = smiapp_id_table,
 };

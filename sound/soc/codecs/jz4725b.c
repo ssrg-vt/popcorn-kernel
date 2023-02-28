@@ -545,13 +545,15 @@ static int jz4725b_codec_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct jz_icdc *icdc;
+	struct resource *mem;
 	int ret;
 
 	icdc = devm_kzalloc(dev, sizeof(*icdc), GFP_KERNEL);
 	if (!icdc)
 		return -ENOMEM;
 
-	icdc->base = devm_platform_ioremap_resource(pdev, 0);
+	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	icdc->base = devm_ioremap_resource(dev, mem);
 	if (IS_ERR(icdc->base))
 		return PTR_ERR(icdc->base);
 

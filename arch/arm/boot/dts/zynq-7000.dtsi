@@ -1,9 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0+
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Xilinx Zynq 7000 DTSI
- * Describes the hardware common to all Zynq 7000-based boards.
- *
- *  Copyright (C) 2011 - 2015 Xilinx
+ * Copyright (C) 2011 - 2014 Xilinx
  */
 
 / {
@@ -62,41 +59,7 @@
 		regulator-always-on;
 	};
 
-	replicator {
-		compatible = "arm,coresight-static-replicator";
-		clocks = <&clkc 27>, <&clkc 46>, <&clkc 47>;
-		clock-names = "apb_pclk", "dbg_trc", "dbg_apb";
-
-		out-ports {
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			/* replicator output ports */
-			port@0 {
-				reg = <0>;
-				replicator_out_port0: endpoint {
-					remote-endpoint = <&tpiu_in_port>;
-				};
-			};
-			port@1 {
-				reg = <1>;
-				replicator_out_port1: endpoint {
-					remote-endpoint = <&etb_in_port>;
-				};
-			};
-		};
-		in-ports {
-			/* replicator input port */
-			port {
-				replicator_in_port0: endpoint {
-					remote-endpoint = <&funnel_out_port>;
-				};
-			};
-		};
-	};
-
 	amba: amba {
-		u-boot,dm-pre-reloc;
 		compatible = "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -192,13 +155,6 @@
 			reg = <0xf8006000 0x1000>;
 		};
 
-		ocmc: ocmc@f800c000 {
-			compatible = "xlnx,zynq-ocmc-1.0";
-			interrupt-parent = <&intc>;
-			interrupts = <0 3 4>;
-			reg = <0xf800c000 0x1000>;
-		};
-
 		uart0: serial@e0000000 {
 			compatible = "xlnx,xuartps", "cdns,uart-r1p8";
 			status = "disabled";
@@ -239,45 +195,6 @@
 			clock-names = "ref_clk", "pclk";
 			#address-cells = <1>;
 			#size-cells = <0>;
-		};
-
-		qspi: spi@e000d000 {
-			clock-names = "ref_clk", "pclk";
-			clocks = <&clkc 10>, <&clkc 43>;
-			compatible = "xlnx,zynq-qspi-1.0";
-			status = "disabled";
-			interrupt-parent = <&intc>;
-			interrupts = <0 19 4>;
-			reg = <0xe000d000 0x1000>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-		};
-
-		smcc: memory-controller@e000e000 {
-			#address-cells = <1>;
-			#size-cells = <1>;
-			status = "disabled";
-			clock-names = "memclk", "apb_pclk";
-			clocks = <&clkc 11>, <&clkc 44>;
-			compatible = "arm,pl353-smc-r2p1", "arm,primecell";
-			interrupt-parent = <&intc>;
-			interrupts = <0 18 4>;
-			ranges ;
-			reg = <0xe000e000 0x1000>;
-			nand0: flash@e1000000 {
-				status = "disabled";
-				compatible = "arm,pl353-nand-r2p1";
-				reg = <0xe1000000 0x1000000>;
-				#address-cells = <1>;
-				#size-cells = <1>;
-			};
-			nor0: flash@e2000000 {
-				status = "disabled";
-				compatible = "cfi-flash";
-				reg = <0xe2000000 0x2000000>;
-				#address-cells = <1>;
-				#size-cells = <1>;
-			};
 		};
 
 		gem0: ethernet@e000b000 {
@@ -323,17 +240,15 @@
 		};
 
 		slcr: slcr@f8000000 {
-			u-boot,dm-pre-reloc;
 			#address-cells = <1>;
 			#size-cells = <1>;
 			compatible = "xlnx,zynq-slcr", "syscon", "simple-mfd";
 			reg = <0xF8000000 0x1000>;
 			ranges;
 			clkc: clkc@100 {
-				u-boot,dm-pre-reloc;
 				#clock-cells = <1>;
 				compatible = "xlnx,ps7-clkc";
-				fclk-enable = <0xf>;
+				fclk-enable = <0>;
 				clock-output-names = "armpll", "ddrpll", "iopll", "cpu_6or4x",
 						"cpu_3or2x", "cpu_2x", "cpu_1x", "ddr2x", "ddr3x",
 						"dci", "lqspi", "smc", "pcap", "gem0", "gem1",
@@ -382,17 +297,12 @@
 
 		devcfg: devcfg@f8007000 {
 			compatible = "xlnx,zynq-devcfg-1.0";
+			reg = <0xf8007000 0x100>;
 			interrupt-parent = <&intc>;
 			interrupts = <0 8 4>;
-			reg = <0xf8007000 0x100>;
-			clocks = <&clkc 12>, <&clkc 15>, <&clkc 16>, <&clkc 17>, <&clkc 18>;
-			clock-names = "ref_clk", "fclk0", "fclk1", "fclk2", "fclk3";
+			clocks = <&clkc 12>;
+			clock-names = "ref_clk";
 			syscon = <&slcr>;
-		};
-
-		efuse: efuse@f800d000 {
-			compatible = "xlnx,zynq-efuse";
-			reg = <0xf800d000 0x20>;
 		};
 
 		global_timer: timer@f8f00200 {
@@ -454,108 +364,6 @@
 			interrupts = <0 9 1>;
 			reg = <0xf8005000 0x1000>;
 			timeout-sec = <10>;
-		};
-
-		etb@f8801000 {
-			compatible = "arm,coresight-etb10", "arm,primecell";
-			reg = <0xf8801000 0x1000>;
-			clocks = <&clkc 27>, <&clkc 46>, <&clkc 47>;
-			clock-names = "apb_pclk", "dbg_trc", "dbg_apb";
-			in-ports {
-				port {
-					etb_in_port: endpoint {
-						remote-endpoint = <&replicator_out_port1>;
-					};
-				};
-			};
-		};
-
-		tpiu@f8803000 {
-			compatible = "arm,coresight-tpiu", "arm,primecell";
-			reg = <0xf8803000 0x1000>;
-			clocks = <&clkc 27>, <&clkc 46>, <&clkc 47>;
-			clock-names = "apb_pclk", "dbg_trc", "dbg_apb";
-			in-ports {
-				port {
-					tpiu_in_port: endpoint {
-						remote-endpoint = <&replicator_out_port0>;
-					};
-				};
-			};
-		};
-
-		funnel@f8804000 {
-			compatible = "arm,coresight-static-funnel", "arm,primecell";
-			reg = <0xf8804000 0x1000>;
-			clocks = <&clkc 27>, <&clkc 46>, <&clkc 47>;
-			clock-names = "apb_pclk", "dbg_trc", "dbg_apb";
-
-			/* funnel output ports */
-			out-ports {
-				port {
-					funnel_out_port: endpoint {
-						remote-endpoint =
-							<&replicator_in_port0>;
-					};
-				};
-			};
-
-			in-ports {
-				#address-cells = <1>;
-				#size-cells = <0>;
-
-				/* funnel input ports */
-				port@0 {
-					reg = <0>;
-					funnel0_in_port0: endpoint {
-						remote-endpoint = <&ptm0_out_port>;
-					};
-				};
-
-				port@1 {
-					reg = <1>;
-					funnel0_in_port1: endpoint {
-						remote-endpoint = <&ptm1_out_port>;
-					};
-				};
-
-				port@2 {
-					reg = <2>;
-					funnel0_in_port2: endpoint {
-					};
-				};
-				/* The other input ports are not connect to anything */
-			};
-		};
-
-		ptm@f889c000 {
-			compatible = "arm,coresight-etm3x", "arm,primecell";
-			reg = <0xf889c000 0x1000>;
-			clocks = <&clkc 27>, <&clkc 46>, <&clkc 47>;
-			clock-names = "apb_pclk", "dbg_trc", "dbg_apb";
-			cpu = <&cpu0>;
-			out-ports {
-				port {
-					ptm0_out_port: endpoint {
-						remote-endpoint = <&funnel0_in_port0>;
-					};
-				};
-			};
-		};
-
-		ptm@f889d000 {
-			compatible = "arm,coresight-etm3x", "arm,primecell";
-			reg = <0xf889d000 0x1000>;
-			clocks = <&clkc 27>, <&clkc 46>, <&clkc 47>;
-			clock-names = "apb_pclk", "dbg_trc", "dbg_apb";
-			cpu = <&cpu1>;
-			out-ports {
-				port {
-					ptm1_out_port: endpoint {
-						remote-endpoint = <&funnel0_in_port1>;
-					};
-				};
-			};
 		};
 	};
 };

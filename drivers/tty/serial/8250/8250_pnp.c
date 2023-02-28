@@ -462,8 +462,8 @@ serial_pnp_probe(struct pnp_dev *dev, const struct pnp_device_id *dev_id)
 		return -ENODEV;
 
 	dev_dbg(&dev->dev,
-		 "Setup PNP port: port %#lx, mem %#llx, irq %u, type %u\n",
-		 uart.port.iobase, (unsigned long long)uart.port.mapbase,
+		 "Setup PNP port: port %lx, mem %pa, irq %d, type %d\n",
+		 uart.port.iobase, &uart.port.mapbase,
 		 uart.port.irq, uart.port.iotype);
 
 	if (flags & CIR_PORT) {
@@ -498,9 +498,10 @@ static void serial_pnp_remove(struct pnp_dev *dev)
 		serial8250_unregister_port(line - 1);
 }
 
-static int __maybe_unused serial_pnp_suspend(struct device *dev)
+#ifdef CONFIG_PM
+static int serial_pnp_suspend(struct pnp_dev *dev, pm_message_t state)
 {
-	long line = (long)dev_get_drvdata(dev);
+	long line = (long)pnp_get_drvdata(dev);
 
 	if (!line)
 		return -ENODEV;
@@ -508,25 +509,26 @@ static int __maybe_unused serial_pnp_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused serial_pnp_resume(struct device *dev)
+static int serial_pnp_resume(struct pnp_dev *dev)
 {
-	long line = (long)dev_get_drvdata(dev);
+	long line = (long)pnp_get_drvdata(dev);
 
 	if (!line)
 		return -ENODEV;
 	serial8250_resume_port(line - 1);
 	return 0;
 }
-
-static SIMPLE_DEV_PM_OPS(serial_pnp_pm_ops, serial_pnp_suspend, serial_pnp_resume);
+#else
+#define serial_pnp_suspend NULL
+#define serial_pnp_resume NULL
+#endif /* CONFIG_PM */
 
 static struct pnp_driver serial_pnp_driver = {
 	.name		= "serial",
 	.probe		= serial_pnp_probe,
 	.remove		= serial_pnp_remove,
-	.driver         = {
-		.pm     = &serial_pnp_pm_ops,
-	},
+	.suspend	= serial_pnp_suspend,
+	.resume		= serial_pnp_resume,
 	.id_table	= pnp_dev_table,
 };
 

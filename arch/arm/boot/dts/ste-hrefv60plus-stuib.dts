@@ -6,8 +6,6 @@
  */
 
 /dts-v1/;
-#include <dt-bindings/gpio/gpio.h>
-#include <dt-bindings/interrupt-controller/irq.h>
 #include "ste-hrefv60plus.dtsi"
 #include "ste-href-stuib.dtsi"
 
@@ -27,16 +25,12 @@
 		i2c@80110000 {
 			/* Only one of these will be used */
 			bu21013_tp@5c {
-				interrupt-parent = <&gpio2>;
-				interrupts = <20 IRQ_TYPE_LEVEL_LOW>;
-				touch-gpios = <&gpio2 20 GPIO_ACTIVE_LOW>;
-				reset-gpios = <&gpio4 17 GPIO_LINE_OPEN_DRAIN>;
+				touch-gpio = <&gpio2 20 0x4>;
+				reset-gpio = <&gpio4 17 0x4>;
 			};
 			bu21013_tp@5d {
-				interrupt-parent = <&gpio2>;
-				interrupts = <20 IRQ_TYPE_LEVEL_LOW>;
-				touch-gpios = <&gpio2 20 GPIO_ACTIVE_LOW>;
-				reset-gpios = <&gpio4 17 GPIO_LINE_OPEN_DRAIN>;
+				touch-gpio = <&gpio2 20 0x4>;
+				reset-gpio = <&gpio4 17 0x4>;
 			};
 		};
 	};

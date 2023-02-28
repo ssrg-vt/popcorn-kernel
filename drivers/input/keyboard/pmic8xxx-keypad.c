@@ -544,12 +544,16 @@ static int pmic8xxx_kp_probe(struct platform_device *pdev)
 	}
 
 	kp->key_sense_irq = platform_get_irq(pdev, 0);
-	if (kp->key_sense_irq < 0)
+	if (kp->key_sense_irq < 0) {
+		dev_err(&pdev->dev, "unable to get keypad sense irq\n");
 		return kp->key_sense_irq;
+	}
 
 	kp->key_stuck_irq = platform_get_irq(pdev, 1);
-	if (kp->key_stuck_irq < 0)
+	if (kp->key_stuck_irq < 0) {
+		dev_err(&pdev->dev, "unable to get keypad stuck irq\n");
 		return kp->key_stuck_irq;
+	}
 
 	kp->input->name = "PMIC8XXX keypad";
 	kp->input->phys = "pmic8xxx_keypad/input0";

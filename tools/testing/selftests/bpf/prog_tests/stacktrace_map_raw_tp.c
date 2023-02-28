@@ -3,38 +3,31 @@
 
 void test_stacktrace_map_raw_tp(void)
 {
-	const char *prog_name = "tracepoint/sched/sched_switch";
 	int control_map_fd, stackid_hmap_fd, stackmap_fd;
 	const char *file = "./test_stacktrace_map.o";
+	int efd, err, prog_fd;
 	__u32 key, val, duration = 0;
-	int err, prog_fd;
-	struct bpf_program *prog;
 	struct bpf_object *obj;
-	struct bpf_link *link = NULL;
 
 	err = bpf_prog_load(file, BPF_PROG_TYPE_RAW_TRACEPOINT, &obj, &prog_fd);
 	if (CHECK(err, "prog_load raw tp", "err %d errno %d\n", err, errno))
 		return;
 
-	prog = bpf_object__find_program_by_title(obj, prog_name);
-	if (CHECK(!prog, "find_prog", "prog '%s' not found\n", prog_name))
-		goto close_prog;
-
-	link = bpf_program__attach_raw_tracepoint(prog, "sched_switch");
-	if (CHECK(IS_ERR(link), "attach_raw_tp", "err %ld\n", PTR_ERR(link)))
+	efd = bpf_raw_tracepoint_open("sched_switch", prog_fd);
+	if (CHECK(efd < 0, "raw_tp_open", "err %d errno %d\n", efd, errno))
 		goto close_prog;
 
 	/* find map fds */
 	control_map_fd = bpf_find_map(__func__, obj, "control_map");
-	if (CHECK_FAIL(control_map_fd < 0))
+	if (control_map_fd < 0)
 		goto close_prog;
 
 	stackid_hmap_fd = bpf_find_map(__func__, obj, "stackid_hmap");
-	if (CHECK_FAIL(stackid_hmap_fd < 0))
+	if (stackid_hmap_fd < 0)
 		goto close_prog;
 
 	stackmap_fd = bpf_find_map(__func__, obj, "stackmap");
-	if (CHECK_FAIL(stackmap_fd < 0))
+	if (stackmap_fd < 0)
 		goto close_prog;
 
 	/* give some time for bpf program run */
@@ -58,8 +51,9 @@ void test_stacktrace_map_raw_tp(void)
 		  "err %d errno %d\n", err, errno))
 		goto close_prog;
 
+	goto close_prog_noerr;
 close_prog:
-	if (!IS_ERR_OR_NULL(link))
-		bpf_link__destroy(link);
+	error_cnt++;
+close_prog_noerr:
 	bpf_object__close(obj);
 }

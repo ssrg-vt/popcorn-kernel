@@ -270,6 +270,7 @@ struct device;
 
 struct fsl_ssi_dbg {
 	struct dentry *dbg_dir;
+	struct dentry *dbg_stats;
 
 	struct {
 		unsigned int rfrc;
@@ -298,7 +299,7 @@ struct fsl_ssi_dbg {
 
 void fsl_ssi_dbg_isr(struct fsl_ssi_dbg *ssi_dbg, u32 sisr);
 
-void fsl_ssi_debugfs_create(struct fsl_ssi_dbg *ssi_dbg, struct device *dev);
+int fsl_ssi_debugfs_create(struct fsl_ssi_dbg *ssi_dbg, struct device *dev);
 
 void fsl_ssi_debugfs_remove(struct fsl_ssi_dbg *ssi_dbg);
 
@@ -311,9 +312,10 @@ static inline void fsl_ssi_dbg_isr(struct fsl_ssi_dbg *stats, u32 sisr)
 {
 }
 
-static inline void fsl_ssi_debugfs_create(struct fsl_ssi_dbg *ssi_dbg,
-					  struct device *dev)
+static inline int fsl_ssi_debugfs_create(struct fsl_ssi_dbg *ssi_dbg,
+					 struct device *dev)
 {
+	return 0;
 }
 
 static inline void fsl_ssi_debugfs_remove(struct fsl_ssi_dbg *ssi_dbg)

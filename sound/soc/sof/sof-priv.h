@@ -56,12 +56,6 @@
 #define SOF_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | \
 	SNDRV_PCM_FMTBIT_S32_LE | SNDRV_PCM_FMTBIT_FLOAT)
 
-#define ENABLE_DEBUGFS_CACHEBUF \
-	(IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE) || \
-	 IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST))
-
-#define DMA_CHAN_INVALID	0xFFFFFFFF
-
 struct snd_sof_dev;
 struct snd_sof_ipc_msg;
 struct snd_sof_ipc;
@@ -143,10 +137,6 @@ struct snd_sof_dsp_ops {
 			     struct snd_pcm_hw_params *params,
 			     struct sof_ipc_stream_params *ipc_params); /* optional */
 
-	/* host stream hw_free */
-	int (*pcm_hw_free)(struct snd_sof_dev *sdev,
-			   struct snd_pcm_substream *substream); /* optional */
-
 	/* host stream trigger */
 	int (*pcm_trigger)(struct snd_sof_dev *sdev,
 			   struct snd_pcm_substream *substream,
@@ -171,12 +161,12 @@ struct snd_sof_dsp_ops {
 	int (*post_fw_run)(struct snd_sof_dev *sof_dev); /* optional */
 
 	/* DSP PM */
-	int (*suspend)(struct snd_sof_dev *sof_dev); /* optional */
+	int (*suspend)(struct snd_sof_dev *sof_dev, int state); /* optional */
 	int (*resume)(struct snd_sof_dev *sof_dev); /* optional */
-	int (*runtime_suspend)(struct snd_sof_dev *sof_dev); /* optional */
+	int (*runtime_suspend)(struct snd_sof_dev *sof_dev,
+			       int state); /* optional */
 	int (*runtime_resume)(struct snd_sof_dev *sof_dev); /* optional */
-	int (*runtime_idle)(struct snd_sof_dev *sof_dev); /* optional */
-	int (*set_hw_params_upon_resume)(struct snd_sof_dev *sdev); /* optional */
+	void (*set_hw_params_upon_resume)(struct snd_sof_dev *sdev); /* optional */
 
 	/* DSP clocking */
 	int (*set_clk)(struct snd_sof_dev *sof_dev, u32 freq); /* optional */
@@ -194,13 +184,6 @@ struct snd_sof_dsp_ops {
 	int (*trace_release)(struct snd_sof_dev *sdev); /* optional */
 	int (*trace_trigger)(struct snd_sof_dev *sdev,
 			     int cmd); /* optional */
-
-	/* misc */
-	int (*get_bar_index)(struct snd_sof_dev *sdev,
-			     u32 type); /* optional */
-	int (*get_mailbox_offset)(struct snd_sof_dev *sdev);/* mandatory for common loader code */
-	int (*get_window_offset)(struct snd_sof_dev *sdev,
-				 u32 id);/* mandatory for common loader code */
 
 	/* DAI ops */
 	struct snd_soc_dai_driver *drv;
@@ -234,6 +217,7 @@ enum sof_debugfs_access_type {
 
 /* FS entry for debug files that can expose DSP memories, registers */
 struct snd_sof_dfsentry {
+	struct dentry *dfsentry;
 	size_t size;
 	enum sof_dfsentry_type type;
 	/*
@@ -242,7 +226,7 @@ struct snd_sof_dfsentry {
 	 * or if it is accessible only when the DSP is in D0.
 	 */
 	enum sof_debugfs_access_type access_type;
-#if ENABLE_DEBUGFS_CACHEBUF
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_ENABLE_DEBUGFS_CACHE)
 	char *cache_buf; /* buffer to cache the contents of debugfs memory */
 #endif
 	struct snd_sof_dev *sdev;
@@ -302,15 +286,13 @@ struct snd_sof_pcm {
 	struct snd_sof_pcm_stream stream[2];
 	struct list_head list;	/* list in sdev pcm list */
 	struct snd_pcm_hw_params params[2];
-	bool prepared[2]; /* PCM_PARAMS set successfully */
+	int hw_params_upon_resume[2]; /* set up hw_params upon resume */
 };
 
 /* ALSA SOF Kcontrol device */
 struct snd_sof_control {
 	struct snd_sof_dev *sdev;
 	int comp_id;
-	int min_volume_step; /* min volume step for volume_table */
-	int max_volume_step; /* max volume step for volume_table */
 	int num_channels;
 	u32 readback_offset; /* offset to mmaped data if used */
 	struct sof_ipc_ctrl_data *control_data;
@@ -349,7 +331,6 @@ struct snd_sof_route {
 struct snd_sof_dai {
 	struct snd_sof_dev *sdev;
 	const char *name;
-	const char *cpu_dai_name;
 
 	struct sof_ipc_comp_dai comp_dai;
 	struct sof_ipc_dai_config *dai_config;
@@ -436,9 +417,7 @@ struct snd_sof_dev {
 	u32 host_offset;
 	u32 dtrace_is_enabled;
 	u32 dtrace_error;
-	u32 dtrace_draining;
-
-	bool msi_enabled;
+	u32 msi_enabled;
 
 	void *private;			/* core does not touch this */
 };
@@ -452,7 +431,6 @@ int snd_sof_device_remove(struct device *dev);
 
 int snd_sof_runtime_suspend(struct device *dev);
 int snd_sof_runtime_resume(struct device *dev);
-int snd_sof_runtime_idle(struct device *dev);
 int snd_sof_resume(struct device *dev);
 int snd_sof_suspend(struct device *dev);
 
@@ -566,7 +544,7 @@ int snd_sof_debugfs_io_item(struct snd_sof_dev *sdev,
 			    enum sof_debugfs_access_type access_type);
 int snd_sof_debugfs_buf_item(struct snd_sof_dev *sdev,
 			     void *base, size_t size,
-			     const char *name, mode_t mode);
+			     const char *name);
 int snd_sof_trace_update_pos(struct snd_sof_dev *sdev,
 			     struct sof_ipc_dma_trace_posn *posn);
 void snd_sof_trace_notify_for_error(struct snd_sof_dev *sdev);
@@ -641,8 +619,6 @@ void sof_block_write(struct snd_sof_dev *sdev, u32 bar, u32 offset, void *src,
 		     size_t size);
 void sof_block_read(struct snd_sof_dev *sdev, u32 bar, u32 offset, void *dest,
 		    size_t size);
-
-int sof_fw_ready(struct snd_sof_dev *sdev, u32 msg_id);
 
 void intel_ipc_msg_data(struct snd_sof_dev *sdev,
 			struct snd_pcm_substream *substream,

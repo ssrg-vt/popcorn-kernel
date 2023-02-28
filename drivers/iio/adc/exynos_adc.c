@@ -805,8 +805,10 @@ static int exynos_adc_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "no irq resource?\n");
 		return irq;
+	}
 	info->irq = irq;
 
 	irq = platform_get_irq(pdev, 1);

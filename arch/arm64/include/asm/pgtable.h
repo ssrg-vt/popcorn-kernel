@@ -21,7 +21,9 @@
  *	and fixed mappings
  */
 #define VMALLOC_START		(MODULES_END)
-#define VMALLOC_END		(- PUD_SIZE - VMEMMAP_SIZE - SZ_64K)
+#define VMALLOC_END		(PAGE_OFFSET - PUD_SIZE - VMEMMAP_SIZE - SZ_64K)
+
+#define vmemmap			((struct page *)VMEMMAP_START - (memstart_addr >> PAGE_SHIFT))
 
 #define FIRST_USER_ADDRESS	0UL
 
@@ -32,8 +34,6 @@
 #include <linux/mmdebug.h>
 #include <linux/mm_types.h>
 #include <linux/sched.h>
-
-extern struct page *vmemmap;
 
 extern void __pte_error(const char *file, int line, unsigned long val);
 extern void __pmd_error(const char *file, int line, unsigned long val);
@@ -79,7 +79,6 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 #define pte_write(pte)		(!!(pte_val(pte) & PTE_WRITE))
 #define pte_user_exec(pte)	(!(pte_val(pte) & PTE_UXN))
 #define pte_cont(pte)		(!!(pte_val(pte) & PTE_CONT))
-#define pte_devmap(pte)		(!!(pte_val(pte) & PTE_DEVMAP))
 
 #define pte_cont_addr_end(addr, end)						\
 ({	unsigned long __boundary = ((addr) + CONT_PTE_SIZE) & CONT_PTE_MASK;	\
@@ -207,11 +206,6 @@ static inline pmd_t pmd_mkcont(pmd_t pmd)
 	return __pmd(pmd_val(pmd) | PMD_SECT_CONT);
 }
 
-static inline pte_t pte_mkdevmap(pte_t pte)
-{
-	return set_pte_bit(pte, __pgprot(PTE_DEVMAP | PTE_SPECIAL));
-}
-
 static inline void set_pte(pte_t *ptep, pte_t pte)
 {
 	WRITE_ONCE(*ptep, pte);
@@ -243,49 +237,54 @@ extern void __sync_icache_dcache(pte_t pteval);
  *
  *   PTE_DIRTY || (PTE_WRITE && !PTE_RDONLY)
  */
-
-static inline void __check_racy_pte_update(struct mm_struct *mm, pte_t *ptep,
-					   pte_t pte)
-{
-	pte_t old_pte;
-
-	if (!IS_ENABLED(CONFIG_DEBUG_VM))
-		return;
-
-	old_pte = READ_ONCE(*ptep);
-
-	if (!pte_valid(old_pte) || !pte_valid(pte))
-		return;
-	if (mm != current->active_mm && atomic_read(&mm->mm_users) <= 1)
-		return;
-
-	/*
-	 * Check for potential race with hardware updates of the pte
-	 * (ptep_set_access_flags safely changes valid ptes without going
-	 * through an invalid entry).
-	 */
-	VM_WARN_ONCE(!pte_young(pte),
-		     "%s: racy access flag clearing: 0x%016llx -> 0x%016llx",
-		     __func__, pte_val(old_pte), pte_val(pte));
-	VM_WARN_ONCE(pte_write(old_pte) && !pte_dirty(pte),
-		     "%s: racy dirty state clearing: 0x%016llx -> 0x%016llx",
-		     __func__, pte_val(old_pte), pte_val(pte));
-}
-
 static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 			      pte_t *ptep, pte_t pte)
 {
+	pte_t old_pte;
+
 	if (pte_present(pte) && pte_user_exec(pte) && !pte_special(pte))
 		__sync_icache_dcache(pte);
 
-	__check_racy_pte_update(mm, ptep, pte);
+	/*
+	 * If the existing pte is valid, check for potential race with
+	 * hardware updates of the pte (ptep_set_access_flags safely changes
+	 * valid ptes without going through an invalid entry).
+	 */
+	old_pte = READ_ONCE(*ptep);
+	if (IS_ENABLED(CONFIG_DEBUG_VM) && pte_valid(old_pte) && pte_valid(pte) &&
+	   (mm == current->active_mm || atomic_read(&mm->mm_users) > 1)) {
+		VM_WARN_ONCE(!pte_young(pte),
+			     "%s: racy access flag clearing: 0x%016llx -> 0x%016llx",
+			     __func__, pte_val(old_pte), pte_val(pte));
+		VM_WARN_ONCE(pte_write(old_pte) && !pte_dirty(pte),
+			     "%s: racy dirty state clearing: 0x%016llx -> 0x%016llx",
+			     __func__, pte_val(old_pte), pte_val(pte));
+	}
 
 	set_pte(ptep, pte);
+}
+
+#define __HAVE_ARCH_PTE_SAME
+static inline int pte_same(pte_t pte_a, pte_t pte_b)
+{
+	pteval_t lhs, rhs;
+
+	lhs = pte_val(pte_a);
+	rhs = pte_val(pte_b);
+
+	if (pte_present(pte_a))
+		lhs &= ~PTE_RDONLY;
+
+	if (pte_present(pte_b))
+		rhs &= ~PTE_RDONLY;
+
+	return (lhs == rhs);
 }
 
 /*
  * Huge pte definitions.
  */
+#define pte_huge(pte)		(!(pte_val(pte) & PTE_TABLE_BIT))
 #define pte_mkhuge(pte)		(__pte(pte_val(pte) & ~PTE_TABLE_BIT))
 
 /*
@@ -327,14 +326,9 @@ static inline pmd_t pte_pmd(pte_t pte)
 	return __pmd(pte_val(pte));
 }
 
-static inline pgprot_t mk_pud_sect_prot(pgprot_t prot)
+static inline pgprot_t mk_sect_prot(pgprot_t prot)
 {
-	return __pgprot((pgprot_val(prot) & ~PUD_TABLE_BIT) | PUD_TYPE_SECT);
-}
-
-static inline pgprot_t mk_pmd_sect_prot(pgprot_t prot)
-{
-	return __pgprot((pgprot_val(prot) & ~PMD_TABLE_BIT) | PMD_TYPE_SECT);
+	return __pgprot(pgprot_val(prot) & ~PTE_TABLE_BIT);
 }
 
 #ifdef CONFIG_NUMA_BALANCING
@@ -378,14 +372,6 @@ static inline int pmd_protnone(pmd_t pmd)
 
 #define pmd_mkhuge(pmd)		(__pmd(pmd_val(pmd) & ~PMD_TABLE_BIT))
 
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-#define pmd_devmap(pmd)		pte_devmap(pmd_pte(pmd))
-#endif
-static inline pmd_t pmd_mkdevmap(pmd_t pmd)
-{
-	return pte_pmd(set_pte_bit(pmd_pte(pmd), __pgprot(PTE_DEVMAP)));
-}
-
 #define __pmd_to_phys(pmd)	__pte_to_phys(pmd_pte(pmd))
 #define __phys_to_pmd_val(phys)	__phys_to_pte_val(phys)
 #define pmd_pfn(pmd)		((__pmd_to_phys(pmd) & PMD_MASK) >> PAGE_SHIFT)
@@ -420,18 +406,6 @@ static inline pmd_t pmd_mkdevmap(pmd_t pmd)
 	__pgprot_modify(prot, PTE_ATTRINDX_MASK, PTE_ATTRINDX(MT_NORMAL_NC) | PTE_PXN | PTE_UXN)
 #define pgprot_device(prot) \
 	__pgprot_modify(prot, PTE_ATTRINDX_MASK, PTE_ATTRINDX(MT_DEVICE_nGnRE) | PTE_PXN | PTE_UXN)
-/*
- * DMA allocations for non-coherent devices use what the Arm architecture calls
- * "Normal non-cacheable" memory, which permits speculation, unaligned accesses
- * and merging of writes.  This is different from "Device-nGnR[nE]" memory which
- * is intended for MMIO and thus forbids speculation, preserves access size,
- * requires strict alignment and can also force write responses to come from the
- * endpoint.
- */
-#define pgprot_dmacoherent(prot) \
-	__pgprot_modify(prot, PTE_ATTRINDX_MASK, \
-			PTE_ATTRINDX(MT_NORMAL_NC) | PTE_PXN | PTE_UXN)
-
 #define __HAVE_PHYS_MEM_ACCESS_PROT
 struct file;
 extern pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
@@ -603,7 +577,6 @@ static inline void set_pgd(pgd_t *pgdp, pgd_t pgd)
 
 	WRITE_ONCE(*pgdp, pgd);
 	dsb(ishst);
-	isb();
 }
 
 static inline void pgd_clear(pgd_t *pgdp)
@@ -687,16 +660,6 @@ static inline int pmdp_set_access_flags(struct vm_area_struct *vma,
 					pmd_t entry, int dirty)
 {
 	return ptep_set_access_flags(vma, address, (pte_t *)pmdp, pmd_pte(entry), dirty);
-}
-
-static inline int pud_devmap(pud_t pud)
-{
-	return 0;
-}
-
-static inline int pgd_devmap(pgd_t pgd)
-{
-	return 0;
 }
 #endif
 
@@ -844,6 +807,8 @@ extern int kern_addr_valid(unsigned long addr);
 
 #include <asm-generic/pgtable.h>
 
+static inline void pgtable_cache_init(void) { }
+
 /*
  * On AArch64, the cache coherency is handled via the set_pte_at() function.
  */
@@ -858,6 +823,9 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
 }
 
 #define update_mmu_cache_pmd(vma, address, pmd) do { } while (0)
+
+#define kc_vaddr_to_offset(v)	((v) & ~VA_START)
+#define kc_offset_to_vaddr(o)	((o) | VA_START)
 
 #ifdef CONFIG_ARM64_PA_BITS_52
 #define phys_to_ttbr(addr)	(((addr) | ((addr) >> 46)) & TTBR_BADDR_MASK_52)

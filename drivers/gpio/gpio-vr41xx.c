@@ -467,9 +467,10 @@ static struct gpio_chip vr41xx_gpio_chip = {
 
 static int giu_probe(struct platform_device *pdev)
 {
+	struct resource *res;
 	unsigned int trigger, i, pin;
 	struct irq_chip *chip;
-	int irq;
+	int irq, ret;
 
 	switch (pdev->id) {
 	case GPIO_50PINS_PULLUPDOWN:
@@ -488,14 +489,21 @@ static int giu_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	giu_base = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(giu_base))
-		return PTR_ERR(giu_base);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -EBUSY;
+
+	giu_base = ioremap(res->start, resource_size(res));
+	if (!giu_base)
+		return -ENOMEM;
 
 	vr41xx_gpio_chip.parent = &pdev->dev;
 
-	if (gpiochip_add_data(&vr41xx_gpio_chip, NULL))
+	ret = gpiochip_add_data(&vr41xx_gpio_chip, NULL);
+	if (!ret) {
+		iounmap(giu_base);
 		return -ENODEV;
+	}
 
 	giu_write(GIUINTENL, 0);
 	giu_write(GIUINTENH, 0);
@@ -526,6 +534,7 @@ static int giu_probe(struct platform_device *pdev)
 static int giu_remove(struct platform_device *pdev)
 {
 	if (giu_base) {
+		iounmap(giu_base);
 		giu_base = NULL;
 	}
 

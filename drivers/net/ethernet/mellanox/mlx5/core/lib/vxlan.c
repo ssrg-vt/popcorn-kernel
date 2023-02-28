@@ -32,7 +32,6 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/refcount.h>
 #include <linux/mlx5/driver.h>
 #include <net/vxlan.h>
 #include "mlx5_core.h"
@@ -49,7 +48,7 @@ struct mlx5_vxlan {
 
 struct mlx5_vxlan_port {
 	struct hlist_node hlist;
-	refcount_t refcount;
+	atomic_t refcount;
 	u16 udp_port;
 };
 
@@ -114,7 +113,7 @@ int mlx5_vxlan_add_port(struct mlx5_vxlan *vxlan, u16 port)
 
 	vxlanp = mlx5_vxlan_lookup_port(vxlan, port);
 	if (vxlanp) {
-		refcount_inc(&vxlanp->refcount);
+		atomic_inc(&vxlanp->refcount);
 		return 0;
 	}
 
@@ -138,7 +137,7 @@ int mlx5_vxlan_add_port(struct mlx5_vxlan *vxlan, u16 port)
 	}
 
 	vxlanp->udp_port = port;
-	refcount_set(&vxlanp->refcount, 1);
+	atomic_set(&vxlanp->refcount, 1);
 
 	spin_lock_bh(&vxlan->lock);
 	hash_add(vxlan->htable, &vxlanp->hlist, port);
@@ -171,7 +170,7 @@ int mlx5_vxlan_del_port(struct mlx5_vxlan *vxlan, u16 port)
 		goto out_unlock;
 	}
 
-	if (refcount_dec_and_test(&vxlanp->refcount)) {
+	if (atomic_dec_and_test(&vxlanp->refcount)) {
 		hash_del(&vxlanp->hlist);
 		remove = true;
 	}

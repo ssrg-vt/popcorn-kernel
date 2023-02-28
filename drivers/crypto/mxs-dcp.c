@@ -986,6 +986,8 @@ static int mxs_dcp_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct dcp *sdcp = NULL;
 	int i, ret;
+
+	struct resource *iores;
 	int dcp_vmi_irq, dcp_irq;
 
 	if (global_sdcp) {
@@ -993,20 +995,25 @@ static int mxs_dcp_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+	iores = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	dcp_vmi_irq = platform_get_irq(pdev, 0);
-	if (dcp_vmi_irq < 0)
+	if (dcp_vmi_irq < 0) {
+		dev_err(dev, "Failed to get IRQ: (%d)!\n", dcp_vmi_irq);
 		return dcp_vmi_irq;
+	}
 
 	dcp_irq = platform_get_irq(pdev, 1);
-	if (dcp_irq < 0)
+	if (dcp_irq < 0) {
+		dev_err(dev, "Failed to get IRQ: (%d)!\n", dcp_irq);
 		return dcp_irq;
+	}
 
 	sdcp = devm_kzalloc(dev, sizeof(*sdcp), GFP_KERNEL);
 	if (!sdcp)
 		return -ENOMEM;
 
 	sdcp->dev = dev;
-	sdcp->base = devm_platform_ioremap_resource(pdev, 0);
+	sdcp->base = devm_ioremap_resource(dev, iores);
 	if (IS_ERR(sdcp->base))
 		return PTR_ERR(sdcp->base);
 

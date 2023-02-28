@@ -368,21 +368,10 @@ static blk_status_t blk_integrity_nop_fn(struct blk_integrity_iter *iter)
 	return BLK_STS_OK;
 }
 
-static void blk_integrity_nop_prepare(struct request *rq)
-{
-}
-
-static void blk_integrity_nop_complete(struct request *rq,
-		unsigned int nr_bytes)
-{
-}
-
 static const struct blk_integrity_profile nop_profile = {
 	.name = "nop",
 	.generate_fn = blk_integrity_nop_fn,
 	.verify_fn = blk_integrity_nop_fn,
-	.prepare_fn = blk_integrity_nop_prepare,
-	.complete_fn = blk_integrity_nop_complete,
 };
 
 /**
@@ -394,7 +383,7 @@ static const struct blk_integrity_profile nop_profile = {
  * send/receive integrity metadata it must use this function to register
  * the capability with the block layer. The template is a blk_integrity
  * struct with values appropriate for the underlying hardware. See
- * Documentation/block/data-integrity.rst.
+ * Documentation/block/data-integrity.txt.
  */
 void blk_integrity_register(struct gendisk *disk, struct blk_integrity *template)
 {

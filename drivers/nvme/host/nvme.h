@@ -15,9 +15,6 @@
 #include <linux/sed-opal.h>
 #include <linux/fault-inject.h>
 #include <linux/rcupdate.h>
-#include <linux/wait.h>
-
-#include <trace/events/block.h>
 
 extern unsigned int nvme_io_timeout;
 #define NVME_IO_TIMEOUT	(nvme_io_timeout * HZ)
@@ -95,26 +92,6 @@ enum nvme_quirks {
 	 * Broken Write Zeroes.
 	 */
 	NVME_QUIRK_DISABLE_WRITE_ZEROES		= (1 << 9),
-
-	/*
-	 * Force simple suspend/resume path.
-	 */
-	NVME_QUIRK_SIMPLE_SUSPEND		= (1 << 10),
-
-	/*
-	 * Use only one interrupt vector for all queues
-	 */
-	NVME_QUIRK_SINGLE_VECTOR		= (1 << 11),
-
-	/*
-	 * Use non-standard 128 bytes SQEs.
-	 */
-	NVME_QUIRK_128_BYTES_SQES		= (1 << 12),
-
-	/*
-	 * Prevent tag overlap between queues
-	 */
-	NVME_QUIRK_SHARED_TAGS                  = (1 << 13),
 };
 
 /*
@@ -162,19 +139,11 @@ static inline u16 nvme_req_qid(struct request *req)
 enum nvme_ctrl_state {
 	NVME_CTRL_NEW,
 	NVME_CTRL_LIVE,
+	NVME_CTRL_ADMIN_ONLY,    /* Only admin queue live */
 	NVME_CTRL_RESETTING,
 	NVME_CTRL_CONNECTING,
 	NVME_CTRL_DELETING,
 	NVME_CTRL_DEAD,
-};
-
-struct nvme_fault_inject {
-#ifdef CONFIG_FAULT_INJECTION_DEBUG_FS
-	struct fault_attr attr;
-	struct dentry *parent;
-	bool dont_retry;	/* DNR, do not retry */
-	u16 status;		/* status code */
-#endif
 };
 
 struct nvme_ctrl {
@@ -186,7 +155,6 @@ struct nvme_ctrl {
 	const struct nvme_ctrl_ops *ops;
 	struct request_queue *admin_q;
 	struct request_queue *connect_q;
-	struct request_queue *fabrics_q;
 	struct device *dev;
 	int instance;
 	int numa_node;
@@ -199,7 +167,6 @@ struct nvme_ctrl {
 	struct cdev cdev;
 	struct work_struct reset_work;
 	struct work_struct delete_work;
-	wait_queue_head_t state_wq;
 
 	struct nvme_subsystem *subsys;
 	struct list_head subsys_entry;
@@ -222,7 +189,6 @@ struct nvme_ctrl {
 	u16 oacs;
 	u16 nssa;
 	u16 nr_streams;
-	u16 sqsize;
 	u32 max_namespaces;
 	atomic_t abort_limit;
 	u8 vwc;
@@ -271,6 +237,7 @@ struct nvme_ctrl {
 	u16 hmmaxd;
 
 	/* Fabrics only */
+	u16 sqsize;
 	u32 ioccsz;
 	u32 iorcsz;
 	u16 icdoff;
@@ -280,8 +247,6 @@ struct nvme_ctrl {
 
 	struct page *discard_page;
 	unsigned long discard_page_busy;
-
-	struct nvme_fault_inject fault_inject;
 };
 
 enum nvme_iopolicy {
@@ -307,7 +272,6 @@ struct nvme_subsystem {
 	char			firmware_rev[8];
 	u8			cmic;
 	u16			vendor_id;
-	u16			awupf;	/* 0's based awupf value. */
 	struct ida		ns_ida;
 #ifdef CONFIG_NVME_MULTIPATH
 	enum nvme_iopolicy	iopolicy;
@@ -349,6 +313,15 @@ struct nvme_ns_head {
 #endif
 };
 
+#ifdef CONFIG_FAULT_INJECTION_DEBUG_FS
+struct nvme_fault_inject {
+	struct fault_attr attr;
+	struct dentry *parent;
+	bool dont_retry;	/* DNR, do not retry */
+	u16 status;		/* status code */
+};
+#endif
+
 struct nvme_ns {
 	struct list_head list;
 
@@ -376,7 +349,9 @@ struct nvme_ns {
 #define NVME_NS_ANA_PENDING	2
 	u16 noiob;
 
+#ifdef CONFIG_FAULT_INJECTION_DEBUG_FS
 	struct nvme_fault_inject fault_inject;
+#endif
 
 };
 
@@ -397,18 +372,12 @@ struct nvme_ctrl_ops {
 };
 
 #ifdef CONFIG_FAULT_INJECTION_DEBUG_FS
-void nvme_fault_inject_init(struct nvme_fault_inject *fault_inj,
-			    const char *dev_name);
-void nvme_fault_inject_fini(struct nvme_fault_inject *fault_inject);
+void nvme_fault_inject_init(struct nvme_ns *ns);
+void nvme_fault_inject_fini(struct nvme_ns *ns);
 void nvme_should_fail(struct request *req);
 #else
-static inline void nvme_fault_inject_init(struct nvme_fault_inject *fault_inj,
-					  const char *dev_name)
-{
-}
-static inline void nvme_fault_inject_fini(struct nvme_fault_inject *fault_inj)
-{
-}
+static inline void nvme_fault_inject_init(struct nvme_ns *ns) {}
+static inline void nvme_fault_inject_fini(struct nvme_ns *ns) {}
 static inline void nvme_should_fail(struct request *req) {}
 #endif
 
@@ -450,9 +419,8 @@ void nvme_complete_rq(struct request *req);
 bool nvme_cancel_request(struct request *req, void *data, bool reserved);
 bool nvme_change_ctrl_state(struct nvme_ctrl *ctrl,
 		enum nvme_ctrl_state new_state);
-bool nvme_wait_reset(struct nvme_ctrl *ctrl);
-int nvme_disable_ctrl(struct nvme_ctrl *ctrl);
-int nvme_enable_ctrl(struct nvme_ctrl *ctrl);
+int nvme_disable_ctrl(struct nvme_ctrl *ctrl, u64 cap);
+int nvme_enable_ctrl(struct nvme_ctrl *ctrl, u64 cap);
 int nvme_shutdown_ctrl(struct nvme_ctrl *ctrl);
 int nvme_init_ctrl(struct nvme_ctrl *ctrl, struct device *dev,
 		const struct nvme_ctrl_ops *ops, unsigned long quirks);
@@ -491,17 +459,10 @@ int __nvme_submit_sync_cmd(struct request_queue *q, struct nvme_command *cmd,
 		union nvme_result *result, void *buffer, unsigned bufflen,
 		unsigned timeout, int qid, int at_head,
 		blk_mq_req_flags_t flags, bool poll);
-int nvme_set_features(struct nvme_ctrl *dev, unsigned int fid,
-		      unsigned int dword11, void *buffer, size_t buflen,
-		      u32 *result);
-int nvme_get_features(struct nvme_ctrl *dev, unsigned int fid,
-		      unsigned int dword11, void *buffer, size_t buflen,
-		      u32 *result);
 int nvme_set_queue_count(struct nvme_ctrl *ctrl, int *count);
 void nvme_stop_keep_alive(struct nvme_ctrl *ctrl);
 int nvme_reset_ctrl(struct nvme_ctrl *ctrl);
 int nvme_reset_ctrl_sync(struct nvme_ctrl *ctrl);
-int nvme_try_sched_reset(struct nvme_ctrl *ctrl);
 int nvme_delete_ctrl(struct nvme_ctrl *ctrl);
 
 int nvme_get_log(struct nvme_ctrl *ctrl, u32 nsid, u8 log_page, u8 lsp,
@@ -539,16 +500,6 @@ static inline void nvme_mpath_check_last_path(struct nvme_ns *ns)
 
 	if (head->disk && list_empty(&head->list))
 		kblockd_schedule_work(&head->requeue_work);
-}
-
-static inline void nvme_trace_bio_complete(struct request *req,
-        blk_status_t status)
-{
-	struct nvme_ns *ns = req->q->queuedata;
-
-	if (req->cmd_flags & REQ_NVME_MPATH)
-		trace_block_bio_complete(ns->head->disk->queue,
-					 req->bio, status);
 }
 
 extern struct device_attribute dev_attr_ana_grpid;
@@ -596,10 +547,6 @@ static inline void nvme_mpath_clear_ctrl_paths(struct nvme_ctrl *ctrl)
 {
 }
 static inline void nvme_mpath_check_last_path(struct nvme_ns *ns)
-{
-}
-static inline void nvme_trace_bio_complete(struct request *req,
-        blk_status_t status)
 {
 }
 static inline int nvme_mpath_init(struct nvme_ctrl *ctrl,

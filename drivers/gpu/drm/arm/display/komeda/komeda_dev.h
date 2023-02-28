@@ -92,10 +92,6 @@ struct komeda_dev_funcs {
 	int (*enum_resources)(struct komeda_dev *mdev);
 	/** @cleanup: call to chip to cleanup komeda_dev->chip data */
 	void (*cleanup)(struct komeda_dev *mdev);
-	/** @connect_iommu: Optional, connect to external iommu */
-	int (*connect_iommu)(struct komeda_dev *mdev);
-	/** @disconnect_iommu: Optional, disconnect to external iommu */
-	int (*disconnect_iommu)(struct komeda_dev *mdev);
 	/**
 	 * @irq_handler:
 	 *
@@ -160,8 +156,10 @@ struct komeda_dev {
 	struct komeda_chip_info chip;
 	/** @fmt_tbl: initialized by &komeda_dev_funcs->init_format_table */
 	struct komeda_format_caps_table fmt_tbl;
-	/** @aclk: HW main engine clk */
-	struct clk *aclk;
+	/** @pclk: APB clock for register access */
+	struct clk *pclk;
+	/** @mclk: HW main engine clk */
+	struct clk *mclk;
 
 	/** @irq: irq number */
 	int irq;
@@ -185,9 +183,6 @@ struct komeda_dev {
 	 * destroyed by &komeda_dev_funcs.cleanup()
 	 */
 	void *chip_data;
-
-	/** @iommu: iommu domain */
-	struct iommu_domain *iommu;
 
 	/** @debugfs_root: root directory of komeda debugfs */
 	struct dentry *debugfs_root;

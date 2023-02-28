@@ -164,8 +164,10 @@ static int keystone_irq_probe(struct platform_device *pdev)
 	}
 
 	kirq->irq = platform_get_irq(pdev, 0);
-	if (kirq->irq < 0)
+	if (kirq->irq < 0) {
+		dev_err(dev, "no irq resource %d\n", kirq->irq);
 		return kirq->irq;
+	}
 
 	kirq->dev = dev;
 	kirq->mask = ~0x0;

@@ -291,7 +291,6 @@ static int gic_set_type(struct irq_data *d, unsigned int type)
 {
 	void __iomem *base = gic_dist_base(d);
 	unsigned int gicirq = gic_irq(d);
-	int ret;
 
 	/* Interrupt configuration for SGIs can't be changed */
 	if (gicirq < 16)
@@ -302,14 +301,7 @@ static int gic_set_type(struct irq_data *d, unsigned int type)
 			    type != IRQ_TYPE_EDGE_RISING)
 		return -EINVAL;
 
-	ret = gic_configure_irq(gicirq, type, base + GIC_DIST_CONFIG, NULL);
-	if (ret && gicirq < 32) {
-		/* Misconfigured PPIs are usually not fatal */
-		pr_warn("GIC: PPI%d is secure or misconfigured\n", gicirq - 16);
-		ret = 0;
-	}
-
-	return ret;
+	return gic_configure_irq(gicirq, type, base, NULL);
 }
 
 static int gic_irq_set_vcpu_affinity(struct irq_data *d, void *vcpu)
@@ -353,17 +345,6 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 
 	return IRQ_SET_MASK_OK_DONE;
 }
-
-void gic_set_cpu(unsigned int cpu, unsigned int irq)
-{
-	struct irq_data *d = irq_get_irq_data(irq);
-	struct cpumask mask;
-
-	cpumask_clear(&mask);
-	cpumask_set_cpu(cpu, &mask);
-	gic_set_affinity(d, &mask, true);
-}
-EXPORT_SYMBOL(gic_set_cpu);
 #endif
 
 static void __exception_irq_entry gic_handle_irq(struct pt_regs *regs)
@@ -554,7 +535,7 @@ static int gic_cpu_init(struct gic_chip_data *gic)
 				gic_cpu_map[i] &= ~cpu_mask;
 	}
 
-	gic_cpu_config(dist_base, 32, NULL);
+	gic_cpu_config(dist_base, NULL);
 
 	writel_relaxed(GICC_INT_PRI_THRESHOLD, base + GIC_CPU_PRIMASK);
 	gic_cpu_if_up(gic);
@@ -814,19 +795,18 @@ static int gic_pm_init(struct gic_chip_data *gic)
 #endif
 
 #ifdef CONFIG_SMP
-void gic_raise_softirq(const struct cpumask *mask, unsigned int irq)
+static void gic_raise_softirq(const struct cpumask *mask, unsigned int irq)
 {
 	int cpu;
 	unsigned long flags, map = 0;
 
-#if 0
 	if (unlikely(nr_cpu_ids == 1)) {
 		/* Only one CPU? let's do a self-IPI... */
 		writel_relaxed(2 << 24 | irq,
 			       gic_data_dist_base(&gic_data[0]) + GIC_DIST_SOFTINT);
 		return;
 	}
-#endif
+
 	gic_lock_irqsave(flags);
 
 	/* Convert our logical CPU mask into a physical one. */
@@ -844,7 +824,6 @@ void gic_raise_softirq(const struct cpumask *mask, unsigned int irq)
 
 	gic_unlock_irqrestore(flags);
 }
-EXPORT_SYMBOL(gic_raise_softirq);
 #endif
 
 #ifdef CONFIG_BL_SWITCHER
@@ -1648,7 +1627,7 @@ static int __init gic_v2_acpi_init(struct acpi_subtable_header *header,
 	/*
 	 * Initialize GIC instance zero (no multi-GIC support).
 	 */
-	domain_handle = irq_domain_alloc_fwnode(&dist->base_address);
+	domain_handle = irq_domain_alloc_fwnode(gic->raw_dist_base);
 	if (!domain_handle) {
 		pr_err("Unable to allocate domain handle\n");
 		gic_teardown(gic);

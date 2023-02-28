@@ -314,8 +314,6 @@ static int i2c_device_probe(struct device *dev)
 
 	driver = to_i2c_driver(dev->driver);
 
-	client->irq = client->init_irq;
-
 	if (!client->irq && !driver->disable_i2c_core_irq_mapping) {
 		int irq = -ENOENT;
 
@@ -329,7 +327,7 @@ static int i2c_device_probe(struct device *dev)
 			if (irq == -EINVAL || irq == -ENODATA)
 				irq = of_irq_get(dev->of_node, 0);
 		} else if (ACPI_COMPANION(dev)) {
-			irq = i2c_acpi_get_irq(client);
+			irq = acpi_dev_gpio_irq_get(ACPI_COMPANION(dev), 0);
 		}
 		if (irq == -EPROBE_DEFER)
 			return irq;
@@ -350,11 +348,13 @@ static int i2c_device_probe(struct device *dev)
 		return -ENODEV;
 
 	if (client->flags & I2C_CLIENT_WAKE) {
-		int wakeirq;
+		int wakeirq = -ENOENT;
 
-		wakeirq = of_irq_get_byname(dev->of_node, "wakeup");
-		if (wakeirq == -EPROBE_DEFER)
-			return wakeirq;
+		if (dev->of_node) {
+			wakeirq = of_irq_get_byname(dev->of_node, "wakeup");
+			if (wakeirq == -EPROBE_DEFER)
+				return wakeirq;
+		}
 
 		device_init_wakeup(&client->dev, true);
 
@@ -424,7 +424,7 @@ static int i2c_device_remove(struct device *dev)
 	dev_pm_clear_wake_irq(&client->dev);
 	device_init_wakeup(&client->dev, false);
 
-	client->irq = 0;
+	client->irq = client->init_irq;
 	if (client->flags & I2C_CLIENT_HOST_NOTIFY)
 		pm_runtime_put(&client->adapter->dev);
 
@@ -679,8 +679,8 @@ static void i2c_dev_set_name(struct i2c_adapter *adap,
 		     i2c_encode_flags_to_addr(client));
 }
 
-int i2c_dev_irq_from_resources(const struct resource *resources,
-			       unsigned int num_resources)
+static int i2c_dev_irq_from_resources(const struct resource *resources,
+				      unsigned int num_resources)
 {
 	struct irq_data *irqd;
 	int i;
@@ -721,7 +721,7 @@ int i2c_dev_irq_from_resources(const struct resource *resources,
  * This returns the new i2c client, which may be saved for later use with
  * i2c_unregister_device(); or an ERR_PTR to describe the error.
  */
-struct i2c_client *
+static struct i2c_client *
 i2c_new_client_device(struct i2c_adapter *adap, struct i2c_board_info const *info)
 {
 	struct i2c_client	*client;
@@ -741,6 +741,7 @@ i2c_new_client_device(struct i2c_adapter *adap, struct i2c_board_info const *inf
 	if (!client->init_irq)
 		client->init_irq = i2c_dev_irq_from_resources(info->resources,
 							 info->num_resources);
+	client->irq = client->init_irq;
 
 	strlcpy(client->name, info->type, sizeof(client->name));
 
@@ -830,7 +831,7 @@ EXPORT_SYMBOL_GPL(i2c_new_device);
  */
 void i2c_unregister_device(struct i2c_client *client)
 {
-	if (IS_ERR_OR_NULL(client))
+	if (!client)
 		return;
 
 	if (client->dev.of_node) {
@@ -886,7 +887,8 @@ static struct i2c_driver dummy_driver = {
  * This returns the new i2c client, which should be saved for later use with
  * i2c_unregister_device(); or an ERR_PTR to describe the error.
  */
-struct i2c_client *i2c_new_dummy_device(struct i2c_adapter *adapter, u16 address)
+static struct i2c_client *
+i2c_new_dummy_device(struct i2c_adapter *adapter, u16 address)
 {
 	struct i2c_board_info info = {
 		I2C_BOARD_INFO("dummy", address),
@@ -964,7 +966,7 @@ struct i2c_client *devm_i2c_new_dummy_device(struct device *dev,
 EXPORT_SYMBOL_GPL(devm_i2c_new_dummy_device);
 
 /**
- * i2c_new_ancillary_device - Helper to get the instantiated secondary address
+ * i2c_new_secondary_device - Helper to get the instantiated secondary address
  * and create the associated device
  * @client: Handle to the primary client
  * @name: Handle to specify which secondary address to get
@@ -983,9 +985,9 @@ EXPORT_SYMBOL_GPL(devm_i2c_new_dummy_device);
  * cell whose "reg-names" value matches the slave name.
  *
  * This returns the new i2c client, which should be saved for later use with
- * i2c_unregister_device(); or an ERR_PTR to describe the error.
+ * i2c_unregister_device(); or NULL to indicate an error.
  */
-struct i2c_client *i2c_new_ancillary_device(struct i2c_client *client,
+struct i2c_client *i2c_new_secondary_device(struct i2c_client *client,
 						const char *name,
 						u16 default_addr)
 {
@@ -1000,9 +1002,9 @@ struct i2c_client *i2c_new_ancillary_device(struct i2c_client *client,
 	}
 
 	dev_dbg(&client->adapter->dev, "Address for %s : 0x%x\n", name, addr);
-	return i2c_new_dummy_device(client->adapter, addr);
+	return i2c_new_dummy(client->adapter, addr);
 }
-EXPORT_SYMBOL_GPL(i2c_new_ancillary_device);
+EXPORT_SYMBOL_GPL(i2c_new_secondary_device);
 
 /* ------------------------------------------------------------------------- */
 
@@ -1661,7 +1663,7 @@ EXPORT_SYMBOL_GPL(i2c_parse_fw_timings);
 
 /* ------------------------------------------------------------------------- */
 
-int i2c_for_each_dev(void *data, int (*fn)(struct device *dev, void *data))
+int i2c_for_each_dev(void *data, int (*fn)(struct device *, void *))
 {
 	int res;
 
@@ -2204,7 +2206,7 @@ static int i2c_detect_address(struct i2c_client *temp_client,
 			dev_warn(&adapter->dev,
 				"This adapter will soon drop class based instantiation of devices. "
 				"Please make sure client 0x%02x gets instantiated by other means. "
-				"Check 'Documentation/i2c/instantiating-devices.rst' for details.\n",
+				"Check 'Documentation/i2c/instantiating-devices' for details.\n",
 				info.addr);
 
 		dev_dbg(&adapter->dev, "Creating %s at 0x%02x\n",
@@ -2234,7 +2236,7 @@ static int i2c_detect(struct i2c_adapter *adapter, struct i2c_driver *driver)
 	if (adapter->class == I2C_CLASS_DEPRECATED) {
 		dev_dbg(&adapter->dev,
 			"This adapter dropped support for I2C classes and won't auto-detect %s devices anymore. "
-			"If you need it, check 'Documentation/i2c/instantiating-devices.rst' for alternatives.\n",
+			"If you need it, check 'Documentation/i2c/instantiating-devices' for alternatives.\n",
 			driver->driver.name);
 		return 0;
 	}
@@ -2274,7 +2276,7 @@ struct i2c_client *
 i2c_new_probed_device(struct i2c_adapter *adap,
 		      struct i2c_board_info *info,
 		      unsigned short const *addr_list,
-		      int (*probe)(struct i2c_adapter *adap, unsigned short addr))
+		      int (*probe)(struct i2c_adapter *, unsigned short addr))
 {
 	int i;
 

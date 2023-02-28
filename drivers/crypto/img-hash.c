@@ -958,7 +958,9 @@ static int img_hash_probe(struct platform_device *pdev)
 	crypto_init_queue(&hdev->queue, IMG_HASH_QUEUE_LENGTH);
 
 	/* Register bank */
-	hdev->io_base = devm_platform_ioremap_resource(pdev, 0);
+	hash_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+
+	hdev->io_base = devm_ioremap_resource(dev, hash_res);
 	if (IS_ERR(hdev->io_base)) {
 		err = PTR_ERR(hdev->io_base);
 		dev_err(dev, "can't ioremap, returned %d\n", err);
@@ -978,6 +980,7 @@ static int img_hash_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
+		dev_err(dev, "no IRQ resource info\n");
 		err = irq;
 		goto res_err;
 	}

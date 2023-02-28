@@ -1306,6 +1306,7 @@ static long intel_vgpu_ioctl(struct mdev_device *mdev, unsigned int cmd,
 		unsigned int i;
 		int ret;
 		struct vfio_region_info_cap_sparse_mmap *sparse = NULL;
+		size_t size;
 		int nr_areas = 1;
 		int cap_type_id;
 
@@ -1348,8 +1349,9 @@ static long intel_vgpu_ioctl(struct mdev_device *mdev, unsigned int cmd,
 					VFIO_REGION_INFO_FLAG_WRITE;
 			info.size = gvt_aperture_sz(vgpu->gvt);
 
-			sparse = kzalloc(struct_size(sparse, areas, nr_areas),
-					 GFP_KERNEL);
+			size = sizeof(*sparse) +
+					(nr_areas * sizeof(*sparse->areas));
+			sparse = kzalloc(size, GFP_KERNEL);
 			if (!sparse)
 				return -ENOMEM;
 
@@ -1414,9 +1416,9 @@ static long intel_vgpu_ioctl(struct mdev_device *mdev, unsigned int cmd,
 			switch (cap_type_id) {
 			case VFIO_REGION_INFO_CAP_SPARSE_MMAP:
 				ret = vfio_info_add_capability(&caps,
-					&sparse->header,
-					struct_size(sparse, areas,
-						    sparse->nr_areas));
+					&sparse->header, sizeof(*sparse) +
+					(sparse->nr_areas *
+						sizeof(*sparse->areas)));
 				if (ret) {
 					kfree(sparse);
 					return ret;
@@ -1574,7 +1576,7 @@ hw_id_show(struct device *dev, struct device_attribute *attr,
 		struct intel_vgpu *vgpu = (struct intel_vgpu *)
 			mdev_get_drvdata(mdev);
 		return sprintf(buf, "%u\n",
-			       vgpu->submission.shadow[0]->gem_context->hw_id);
+			       vgpu->submission.shadow_ctx->hw_id);
 	}
 	return sprintf(buf, "\n");
 }
@@ -1796,6 +1798,9 @@ static int kvmgt_guest_init(struct mdev_device *mdev)
 						"kvmgt_nr_cache_entries",
 						0444, vgpu->debugfs,
 						&vgpu->vdev.nr_cache_entries);
+	if (!info->debugfs_cache_entries)
+		gvt_vgpu_err("Cannot create kvmgt debugfs entry\n");
+
 	return 0;
 }
 

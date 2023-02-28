@@ -15,6 +15,7 @@
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_simple_kms_helper.h>
+#include <drm/drmP.h>
 
 #include "mxsfb_drv.h"
 
@@ -30,7 +31,7 @@ static int mxsfb_panel_get_modes(struct drm_connector *connector)
 			drm_connector_to_mxsfb_drm_private(connector);
 
 	if (mxsfb->panel)
-		return drm_panel_get_modes(mxsfb->panel);
+		return mxsfb->panel->funcs->get_modes(mxsfb->panel);
 
 	return 0;
 }

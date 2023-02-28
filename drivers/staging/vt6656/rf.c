@@ -811,9 +811,8 @@ void vnt_rf_rssi_to_dbm(struct vnt_private *priv, u8 rssi, long *dbm)
 	*dbm = -1 * (a + b * 2);
 }
 
-int vnt_rf_table_download(struct vnt_private *priv)
+void vnt_rf_table_download(struct vnt_private *priv)
 {
-	int ret = 0;
 	u16 length1 = 0, length2 = 0, length3 = 0;
 	u8 *addr1 = NULL, *addr2 = NULL, *addr3 = NULL;
 	u16 length, value;
@@ -866,10 +865,8 @@ int vnt_rf_table_download(struct vnt_private *priv)
 	/* Init Table */
 	memcpy(array, addr1, length1);
 
-	ret = vnt_control_out(priv, MESSAGE_TYPE_WRITE, 0,
-			      MESSAGE_REQUEST_RF_INIT, length1, array);
-	if (ret)
-		goto end;
+	vnt_control_out(priv, MESSAGE_TYPE_WRITE, 0,
+			MESSAGE_REQUEST_RF_INIT, length1, array);
 
 	/* Channel Table 0 */
 	value = 0;
@@ -881,10 +878,8 @@ int vnt_rf_table_download(struct vnt_private *priv)
 
 		memcpy(array, addr2, length);
 
-		ret = vnt_control_out(priv, MESSAGE_TYPE_WRITE, value,
-				      MESSAGE_REQUEST_RF_CH0, length, array);
-		if (ret)
-			goto end;
+		vnt_control_out(priv, MESSAGE_TYPE_WRITE,
+				value, MESSAGE_REQUEST_RF_CH0, length, array);
 
 		length2 -= length;
 		value += length;
@@ -901,10 +896,8 @@ int vnt_rf_table_download(struct vnt_private *priv)
 
 		memcpy(array, addr3, length);
 
-		ret = vnt_control_out(priv, MESSAGE_TYPE_WRITE, value,
-				      MESSAGE_REQUEST_RF_CH1, length, array);
-		if (ret)
-			goto end;
+		vnt_control_out(priv, MESSAGE_TYPE_WRITE,
+				value, MESSAGE_REQUEST_RF_CH1, length, array);
 
 		length3 -= length;
 		value += length;
@@ -920,10 +913,8 @@ int vnt_rf_table_download(struct vnt_private *priv)
 		memcpy(array, addr1, length1);
 
 		/* Init Table 2 */
-		ret = vnt_control_out(priv, MESSAGE_TYPE_WRITE, 0,
-				      MESSAGE_REQUEST_RF_INIT2, length1, array);
-		if (ret)
-			goto end;
+		vnt_control_out(priv, MESSAGE_TYPE_WRITE,
+				0, MESSAGE_REQUEST_RF_INIT2, length1, array);
 
 		/* Channel Table 0 */
 		value = 0;
@@ -935,18 +926,13 @@ int vnt_rf_table_download(struct vnt_private *priv)
 
 			memcpy(array, addr2, length);
 
-			ret = vnt_control_out(priv, MESSAGE_TYPE_WRITE, value,
-					      MESSAGE_REQUEST_RF_CH2, length,
-					      array);
-			if (ret)
-				goto end;
+			vnt_control_out(priv, MESSAGE_TYPE_WRITE,
+					value, MESSAGE_REQUEST_RF_CH2,
+					length, array);
 
 			length2 -= length;
 			value += length;
 			addr2 += length;
 		}
 	}
-
-end:
-	return ret;
 }

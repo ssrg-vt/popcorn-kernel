@@ -697,14 +697,16 @@ static void ni65_free_buffer(struct priv *p)
 	for(i=0;i<TMDNUM;i++) {
 		kfree(p->tmdbounce[i]);
 #ifdef XMT_VIA_SKB
-		dev_kfree_skb(p->tmd_skb[i]);
+		if(p->tmd_skb[i])
+			dev_kfree_skb(p->tmd_skb[i]);
 #endif
 	}
 
 	for(i=0;i<RMDNUM;i++)
 	{
 #ifdef RCV_VIA_SKB
-		dev_kfree_skb(p->recv_skb[i]);
+		if(p->recv_skb[i])
+			dev_kfree_skb(p->recv_skb[i]);
 #else
 		kfree(p->recvbounce[i]);
 #endif

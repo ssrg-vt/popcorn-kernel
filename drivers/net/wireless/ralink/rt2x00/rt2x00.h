@@ -23,6 +23,7 @@
 #include <linux/leds.h>
 #include <linux/mutex.h>
 #include <linux/etherdevice.h>
+#include <linux/input-polldev.h>
 #include <linux/kfifo.h>
 #include <linux/hrtimer.h>
 #include <linux/average.h>
@@ -324,8 +325,6 @@ struct link {
 	 * to bring the device/driver back into the desired state.
 	 */
 	struct delayed_work watchdog_work;
-	unsigned int watchdog_interval;
-	bool watchdog_disabled;
 
 	/*
 	 * Work structure for scheduling periodic AGC adjustments.
@@ -616,7 +615,6 @@ struct rt2x00lib_ops {
 	void (*config) (struct rt2x00_dev *rt2x00dev,
 			struct rt2x00lib_conf *libconf,
 			const unsigned int changed_flags);
-	void (*pre_reset_hw) (struct rt2x00_dev *rt2x00dev);
 	int (*sta_add) (struct rt2x00_dev *rt2x00dev,
 			struct ieee80211_vif *vif,
 			struct ieee80211_sta *sta);
@@ -657,7 +655,6 @@ enum rt2x00_state_flags {
 	DEVICE_STATE_ENABLED_RADIO,
 	DEVICE_STATE_SCANNING,
 	DEVICE_STATE_FLUSHING,
-	DEVICE_STATE_RESET,
 
 	/*
 	 * Driver configuration
@@ -713,7 +710,6 @@ enum rt2x00_capability_flags {
 	CAPABILITY_VCO_RECALIBRATION,
 	CAPABILITY_EXTERNAL_PA_TX0,
 	CAPABILITY_EXTERNAL_PA_TX1,
-	CAPABILITY_RESTART_HW,
 };
 
 /*
@@ -1268,12 +1264,6 @@ static inline bool
 rt2x00_has_cap_vco_recalibration(struct rt2x00_dev *rt2x00dev)
 {
 	return rt2x00_has_cap_flag(rt2x00dev, CAPABILITY_VCO_RECALIBRATION);
-}
-
-static inline bool
-rt2x00_has_cap_restart_hw(struct rt2x00_dev *rt2x00dev)
-{
-	return rt2x00_has_cap_flag(rt2x00dev, CAPABILITY_RESTART_HW);
 }
 
 /**

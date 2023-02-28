@@ -34,6 +34,18 @@
 #include <asm/fpu/api.h>
 #include <asm/nospec-branch.h>
 
+#ifdef CONFIG_POPCORN
+ #include <popcorn/syscall_server.h>
+ #include <popcorn/types.h>
+/* If the system call is a popcorn system call , never
+ * redirect
+*/
+#define IS_PCN_SYSCALL(a) ((a == __NR_popcorn_migrate) \
+	|| (a == __NR_popcorn_propose_migration) \
+	|| (a == __NR_popcorn_get_thread_status) \
+	|| (a == __NR_popcorn_get_node_info))
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/syscalls.h>
 
@@ -72,18 +84,23 @@ static long syscall_trace_enter(struct pt_regs *regs)
 
 	struct thread_info *ti = current_thread_info();
 	unsigned long ret = 0;
+	bool emulated = false;
 	u32 work;
 
 	if (IS_ENABLED(CONFIG_DEBUG_ENTRY))
 		BUG_ON(regs != task_pt_regs(current));
 
-	work = READ_ONCE(ti->flags);
+	work = READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY;
 
-	if (work & (_TIF_SYSCALL_TRACE | _TIF_SYSCALL_EMU)) {
-		ret = tracehook_report_syscall_entry(regs);
-		if (ret || (work & _TIF_SYSCALL_EMU))
-			return -1L;
-	}
+	if (unlikely(work & _TIF_SYSCALL_EMU))
+		emulated = true;
+
+	if ((emulated || (work & _TIF_SYSCALL_TRACE)) &&
+	    tracehook_report_syscall_entry(regs))
+		return -1L;
+
+	if (emulated)
+		return -1L;
 
 #ifdef CONFIG_SECCOMP
 	/*
@@ -275,28 +292,35 @@ __visible inline void syscall_return_slowpath(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_X86_64
+static long is_redirectable(struct pt_regs * reg ,int nr)
+{
+	if(distributed_remote_process(current) && !IS_PCN_SYSCALL(nr) ){
+		reg->ax = syscall_redirect(nr,reg);
+		return reg->ax;
+	}
+	reg->ax = sys_call_table[nr](reg);
+	return reg->ax;
+}
+
 __visible void do_syscall_64(unsigned long nr, struct pt_regs *regs)
 {
 	struct thread_info *ti;
-
 	enter_from_user_mode();
 	local_irq_enable();
 	ti = current_thread_info();
 	if (READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY)
 		nr = syscall_trace_enter(regs);
 
+	/*
+	 * NB: Native and x32 syscalls are dispatched from the same
+	 * table.  The only functional difference is the x32 bit in
+	 * regs->orig_ax, which changes the behavior of some syscalls.
+	 */
+	nr &= __SYSCALL_MASK;
 	if (likely(nr < NR_syscalls)) {
 		nr = array_index_nospec(nr, NR_syscalls);
-		regs->ax = sys_call_table[nr](regs);
-#ifdef CONFIG_X86_X32_ABI
-	} else if (likely((nr & __X32_SYSCALL_BIT) &&
-			  (nr & ~__X32_SYSCALL_BIT) < X32_NR_syscalls)) {
-		nr = array_index_nospec(nr & ~__X32_SYSCALL_BIT,
-					X32_NR_syscalls);
-		regs->ax = x32_sys_call_table[nr](regs);
-#endif
+		regs->ax = is_redirectable( regs,nr );
 	}
-
 	syscall_return_slowpath(regs);
 }
 #endif

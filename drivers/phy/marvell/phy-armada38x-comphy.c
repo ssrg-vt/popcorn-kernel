@@ -200,10 +200,8 @@ static int a38x_comphy_probe(struct platform_device *pdev)
 		}
 
 		phy = devm_phy_create(&pdev->dev, child, &a38x_comphy_ops);
-		if (IS_ERR(phy)) {
-			of_node_put(child);
+		if (IS_ERR(phy))
 			return PTR_ERR(phy);
-		}
 
 		priv->lane[val].base = base + 0x28 * val;
 		priv->lane[val].priv = priv;

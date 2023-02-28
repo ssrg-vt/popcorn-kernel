@@ -898,6 +898,9 @@ static int htc_process_trailer(struct htc_target *target, u8 *buffer,
 			break;
 		}
 
+		if (status != 0)
+			break;
+
 		/* advance buffer past this record for next time around */
 		buffer += record->len;
 		len -= record->len;

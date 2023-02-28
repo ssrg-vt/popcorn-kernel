@@ -74,7 +74,7 @@ int ip27_be_handler(struct pt_regs *regs, int is_fixup)
 	show_regs(regs);
 	dump_tlb_all();
 	while(1);
-	force_sig(SIGBUS);
+	force_sig(SIGBUS, current);
 }
 
 void __init ip27_be_init(void)

@@ -6,31 +6,28 @@
  */
 
 #include "builtin.h"
+#include "perf.h"
 
 #include <errno.h>
 #include <unistd.h>
 #include <signal.h>
-#include <stdlib.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <linux/capability.h>
-#include <linux/string.h>
 
 #include "debug.h"
-#include <subcmd/pager.h>
 #include <subcmd/parse-options.h>
 #include <api/fs/tracing_path.h>
 #include "evlist.h"
 #include "target.h"
 #include "cpumap.h"
 #include "thread_map.h"
-#include "util/cap.h"
 #include "util/config.h"
+
 
 #define DEFAULT_TRACER  "function_graph"
 
 struct perf_ftrace {
-	struct evlist		*evlist;
+	struct perf_evlist	*evlist;
 	struct target		target;
 	const char		*tracer;
 	struct list_head	filters;
@@ -159,16 +156,16 @@ static int set_tracing_pid(struct perf_ftrace *ftrace)
 	if (target__has_cpu(&ftrace->target))
 		return 0;
 
-	for (i = 0; i < perf_thread_map__nr(ftrace->evlist->core.threads); i++) {
+	for (i = 0; i < thread_map__nr(ftrace->evlist->threads); i++) {
 		scnprintf(buf, sizeof(buf), "%d",
-			  ftrace->evlist->core.threads->map[i]);
+			  ftrace->evlist->threads->map[i]);
 		if (append_tracing_file("set_ftrace_pid", buf) < 0)
 			return -1;
 	}
 	return 0;
 }
 
-static int set_tracing_cpumask(struct perf_cpu_map *cpumap)
+static int set_tracing_cpumask(struct cpu_map *cpumap)
 {
 	char *cpumask;
 	size_t mask_size;
@@ -195,7 +192,7 @@ static int set_tracing_cpumask(struct perf_cpu_map *cpumap)
 
 static int set_tracing_cpu(struct perf_ftrace *ftrace)
 {
-	struct perf_cpu_map *cpumap = ftrace->evlist->core.cpus;
+	struct cpu_map *cpumap = ftrace->evlist->cpus;
 
 	if (!target__has_cpu(&ftrace->target))
 		return 0;
@@ -205,11 +202,11 @@ static int set_tracing_cpu(struct perf_ftrace *ftrace)
 
 static int reset_tracing_cpu(void)
 {
-	struct perf_cpu_map *cpumap = perf_cpu_map__new(NULL);
+	struct cpu_map *cpumap = cpu_map__new(NULL);
 	int ret;
 
 	ret = set_tracing_cpumask(cpumap);
-	perf_cpu_map__put(cpumap);
+	cpu_map__put(cpumap);
 	return ret;
 }
 
@@ -284,14 +281,8 @@ static int __cmd_ftrace(struct perf_ftrace *ftrace, int argc, const char **argv)
 		.events = POLLIN,
 	};
 
-	if (!perf_cap__capable(CAP_SYS_ADMIN)) {
-		pr_err("ftrace only works for %s!\n",
-#ifdef HAVE_LIBCAP_SUPPORT
-		"users with the SYS_ADMIN capability"
-#else
-		"root"
-#endif
-		);
+	if (geteuid() != 0) {
+		pr_err("ftrace only works for root!\n");
 		return -1;
 	}
 
@@ -440,7 +431,7 @@ static void delete_filter_func(struct list_head *head)
 	struct filter_entry *pos, *tmp;
 
 	list_for_each_entry_safe(pos, tmp, head, list) {
-		list_del_init(&pos->list);
+		list_del(&pos->list);
 		free(pos);
 	}
 }
@@ -504,7 +495,7 @@ int cmd_ftrace(int argc, const char **argv)
 		goto out_delete_filters;
 	}
 
-	ftrace.evlist = evlist__new();
+	ftrace.evlist = perf_evlist__new();
 	if (ftrace.evlist == NULL) {
 		ret = -ENOMEM;
 		goto out_delete_filters;
@@ -517,7 +508,7 @@ int cmd_ftrace(int argc, const char **argv)
 	ret = __cmd_ftrace(&ftrace, argc, argv);
 
 out_delete_evlist:
-	evlist__delete(ftrace.evlist);
+	perf_evlist__delete(ftrace.evlist);
 
 out_delete_filters:
 	delete_filter_func(&ftrace.filters);

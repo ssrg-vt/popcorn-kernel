@@ -254,9 +254,9 @@ do_trap(int trapnr, int signr, char *str, struct pt_regs *regs,
 	show_signal(tsk, signr, "trap ", str, regs, error_code);
 
 	if (!sicode)
-		force_sig(signr);
+		force_sig(signr, tsk);
 	else
-		force_sig_fault(signr, sicode, addr);
+		force_sig_fault(signr, sicode, addr, tsk);
 }
 NOKPROBE_SYMBOL(do_trap);
 
@@ -313,10 +313,13 @@ __visible void __noreturn handle_stack_overflow(const char *message,
 
 #ifdef CONFIG_X86_64
 /* Runs on IST stack */
-dotraplinkage void do_double_fault(struct pt_regs *regs, long error_code, unsigned long cr2)
+dotraplinkage void do_double_fault(struct pt_regs *regs, long error_code)
 {
 	static const char str[] = "double fault";
 	struct task_struct *tsk = current;
+#ifdef CONFIG_VMAP_STACK
+	unsigned long cr2;
+#endif
 
 #ifdef CONFIG_X86_ESPFIX64
 	extern unsigned char native_irq_return_iret[];
@@ -412,6 +415,7 @@ dotraplinkage void do_double_fault(struct pt_regs *regs, long error_code, unsign
 	 * stack even if the actual trigger for the double fault was
 	 * something else.
 	 */
+	cr2 = read_cr2();
 	if ((unsigned long)task_stack_page(tsk) - 1 - cr2 < PAGE_SIZE)
 		handle_stack_overflow("kernel stack overflow (double-fault)", regs, cr2);
 #endif
@@ -562,7 +566,7 @@ do_general_protection(struct pt_regs *regs, long error_code)
 
 	show_signal(tsk, SIGSEGV, "", desc, regs, error_code);
 
-	force_sig(SIGSEGV);
+	force_sig(SIGSEGV, tsk);
 }
 NOKPROBE_SYMBOL(do_general_protection);
 
@@ -801,7 +805,7 @@ dotraplinkage void do_debug(struct pt_regs *regs, long error_code)
 	}
 	si_code = get_si_code(tsk->thread.debugreg6);
 	if (tsk->thread.debugreg6 & (DR_STEP | DR_TRAP_BITS) || user_icebp)
-		send_sigtrap(regs, error_code, si_code);
+		send_sigtrap(tsk, regs, error_code, si_code);
 	cond_local_irq_disable(regs);
 	debug_stack_usage_dec();
 
@@ -852,7 +856,7 @@ static void math_error(struct pt_regs *regs, int error_code, int trapnr)
 		return;
 
 	force_sig_fault(SIGFPE, si_code,
-			(void __user *)uprobe_get_trap_addr(regs));
+			(void __user *)uprobe_get_trap_addr(regs), task);
 }
 
 dotraplinkage void do_coprocessor_error(struct pt_regs *regs, long error_code)

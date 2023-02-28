@@ -36,6 +36,9 @@
 #include <asm/sighandling.h>
 #include <asm/vm86.h>
 
+#include <popcorn/types.h>
+#include "../../../kernel/popcorn/types.h"
+
 #ifdef CONFIG_X86_64
 #include <asm/proto.h>
 #include <asm/ia32_unistd.h>
@@ -391,7 +394,7 @@ static int __setup_rt_frame(int sig, struct ksignal *ksig,
 		put_user_ex(&frame->uc, &frame->puc);
 
 		/* Create the ucontext.  */
-		if (static_cpu_has(X86_FEATURE_XSAVE))
+		if (boot_cpu_has(X86_FEATURE_XSAVE))
 			put_user_ex(UC_FP_XSTATE, &frame->uc.uc_flags);
 		else
 			put_user_ex(0, &frame->uc.uc_flags);
@@ -713,6 +716,11 @@ handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 	bool stepping, failed;
 	struct fpu *fpu = &current->thread.fpu;
 
+	if (distributed_process(current)) {
+		current->remote->sigpending = ksig->sig;
+		return;
+	}
+
 	if (v8086_mode(regs))
 		save_v86_state((struct kernel_vm86_regs *) regs, VM86_SIGNAL);
 
@@ -857,7 +865,7 @@ void signal_fault(struct pt_regs *regs, void __user *frame, char *where)
 		pr_cont("\n");
 	}
 
-	force_sig(SIGSEGV);
+	force_sig(SIGSEGV, me);
 }
 
 #ifdef CONFIG_X86_X32_ABI

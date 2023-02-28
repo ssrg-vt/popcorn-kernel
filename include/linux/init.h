@@ -137,8 +137,6 @@ extern initcall_entry_t __con_initcall_start[], __con_initcall_end[];
 /* Used for contructor calls. */
 typedef void (*ctor_fn_t)(void);
 
-struct file_system_type;
-
 /* Defined in init/main.c */
 extern int do_one_initcall(initcall_t fn);
 extern char __initdata boot_command_line[];
@@ -148,8 +146,7 @@ extern unsigned int reset_devices;
 /* used by init/main.c */
 void setup_arch(char **);
 void prepare_namespace(void);
-void __init init_rootfs(void);
-extern struct file_system_type rootfs_fs_type;
+int __init init_rootfs(void);
 
 #if defined(CONFIG_STRICT_KERNEL_RWX) || defined(CONFIG_STRICT_MODULE_RWX)
 extern bool rodata_enabled;

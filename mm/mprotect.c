@@ -9,7 +9,7 @@
  *  (C) Copyright 2002 Red Hat Inc, All Rights Reserved
  */
 
-#include <linux/pagewalk.h>
+#include <linux/mm.h>
 #include <linux/hugetlb.h>
 #include <linux/shm.h>
 #include <linux/mman.h>
@@ -24,6 +24,11 @@
 #include <linux/mmu_notifier.h>
 #include <linux/migrate.h>
 #include <linux/perf_event.h>
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 #include <linux/pkeys.h>
 #include <linux/ksm.h>
 #include <linux/uaccess.h>
@@ -308,33 +313,6 @@ unsigned long change_protection(struct vm_area_struct *vma, unsigned long start,
 	return pages;
 }
 
-static int prot_none_pte_entry(pte_t *pte, unsigned long addr,
-			       unsigned long next, struct mm_walk *walk)
-{
-	return pfn_modify_allowed(pte_pfn(*pte), *(pgprot_t *)(walk->private)) ?
-		0 : -EACCES;
-}
-
-static int prot_none_hugetlb_entry(pte_t *pte, unsigned long hmask,
-				   unsigned long addr, unsigned long next,
-				   struct mm_walk *walk)
-{
-	return pfn_modify_allowed(pte_pfn(*pte), *(pgprot_t *)(walk->private)) ?
-		0 : -EACCES;
-}
-
-static int prot_none_test(unsigned long addr, unsigned long next,
-			  struct mm_walk *walk)
-{
-	return 0;
-}
-
-static const struct mm_walk_ops prot_none_walk_ops = {
-	.pte_entry		= prot_none_pte_entry,
-	.hugetlb_entry		= prot_none_hugetlb_entry,
-	.test_walk		= prot_none_test,
-};
-
 int
 mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	unsigned long start, unsigned long end, unsigned long newflags)
@@ -350,22 +328,6 @@ mprotect_fixup(struct vm_area_struct *vma, struct vm_area_struct **pprev,
 	if (newflags == oldflags) {
 		*pprev = vma;
 		return 0;
-	}
-
-	/*
-	 * Do PROT_NONE PFN permission checks here when we can still
-	 * bail out without undoing a lot of state. This is a rather
-	 * uncommon case, so doesn't need to be very optimized.
-	 */
-	if (arch_has_pfn_modify_check() &&
-	    (vma->vm_flags & (VM_PFNMAP|VM_MIXEDMAP)) &&
-	    (newflags & (VM_READ|VM_WRITE|VM_EXEC)) == 0) {
-		pgprot_t new_pgprot = vm_get_page_prot(newflags);
-
-		error = walk_page_range(current->mm, start, end,
-				&prot_none_walk_ops, &new_pgprot);
-		if (error)
-			return error;
 	}
 
 	/*
@@ -459,8 +421,6 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 	const bool rier = (current->personality & READ_IMPLIES_EXEC) &&
 				(prot & PROT_READ);
 
-	start = untagged_addr(start);
-
 	prot &= ~(PROT_GROWSDOWN|PROT_GROWSUP);
 	if (grows == (PROT_GROWSDOWN|PROT_GROWSUP)) /* can't be both */
 		return -EINVAL;
@@ -475,7 +435,12 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 		return -ENOMEM;
 	if (!arch_validate_prot(prot, start))
 		return -EINVAL;
-
+#ifdef CONFIG_POPCORN
+	if (distributed_remote_process(current)) {
+		error = vma_server_mprotect_remote(start, len, prot);
+		if (error) return error;
+	}
+#endif
 	reqprot = prot;
 
 	if (down_write_killable(&current->mm->mmap_sem))
@@ -577,6 +542,14 @@ SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
 {
 	return do_mprotect_pkey(start, len, prot, -1);
 }
+
+#ifdef CONFIG_POPCORN
+long ksys_mprotect(unsigned long start, size_t len,
+		  unsigned long prot)
+{
+        return __do_sys_mprotect(start, len, prot);
+}
+#endif
 
 #ifdef CONFIG_ARCH_HAS_PKEYS
 

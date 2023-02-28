@@ -24,7 +24,6 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
-#include <linux/prefetch.h>
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
 #include <linux/usb/ch9.h>
@@ -35,6 +34,8 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #endif
+
+#include <mach/hardware.h>
 
 /*
  * USB device configuration structure
@@ -741,6 +742,7 @@ static inline void udc_protocol_cmd_data_w(struct lpc32xx_udc *udc, u32 cmd,
  * response data */
 static u32 udc_protocol_cmd_r(struct lpc32xx_udc *udc, u32 cmd)
 {
+	u32 tmp;
 	int to = 1000;
 
 	/* Write a command and read data from the protocol engine */
@@ -750,6 +752,7 @@ static u32 udc_protocol_cmd_r(struct lpc32xx_udc *udc, u32 cmd)
 	/* Write command code */
 	udc_protocol_cmd_w(udc, cmd);
 
+	tmp = readl(USBD_DEVINTST(udc->udp_baseaddr));
 	while ((!(readl(USBD_DEVINTST(udc->udp_baseaddr)) & USBD_CDFULL))
 	       && (to > 0))
 		to--;
@@ -1151,7 +1154,7 @@ static void udc_pop_fifo(struct lpc32xx_udc *udc, u8 *data, u32 bytes)
 	u32 *p32, tmp, cbytes;
 
 	/* Use optimal data transfer method based on source address and size */
-	switch (((uintptr_t) data) & 0x3) {
+	switch (((u32) data) & 0x3) {
 	case 0: /* 32-bit aligned */
 		p32 = (u32 *) data;
 		cbytes = (bytes & ~0x3);
@@ -1177,11 +1180,11 @@ static void udc_pop_fifo(struct lpc32xx_udc *udc, u8 *data, u32 bytes)
 			tmp = readl(USBD_RXDATA(udc->udp_baseaddr));
 
 			bl = bytes - n;
-			if (bl > 4)
-				bl = 4;
+			if (bl > 3)
+				bl = 3;
 
 			for (i = 0; i < bl; i++)
-				data[n + i] = (u8) ((tmp >> (i * 8)) & 0xFF);
+				data[n + i] = (u8) ((tmp >> (n * 8)) & 0xFF);
 		}
 		break;
 
@@ -1252,7 +1255,7 @@ static void udc_stuff_fifo(struct lpc32xx_udc *udc, u8 *data, u32 bytes)
 	u32 *p32, tmp, cbytes;
 
 	/* Use optimal data transfer method based on source address and size */
-	switch (((uintptr_t) data) & 0x3) {
+	switch (((u32) data) & 0x3) {
 	case 0: /* 32-bit aligned */
 		p32 = (u32 *) data;
 		cbytes = (bytes & ~0x3);
@@ -1989,7 +1992,7 @@ void udc_handle_eps(struct lpc32xx_udc *udc, struct lpc32xx_ep *ep)
 /* DMA end of transfer completion */
 static void udc_handle_dma_ep(struct lpc32xx_udc *udc, struct lpc32xx_ep *ep)
 {
-	u32 status;
+	u32 status, epstatus;
 	struct lpc32xx_request *req;
 	struct lpc32xx_usbd_dd_gad *dd;
 
@@ -2083,7 +2086,7 @@ static void udc_handle_dma_ep(struct lpc32xx_udc *udc, struct lpc32xx_ep *ep)
 		if (udc_clearep_getsts(udc, ep->hwep_num) & EP_SEL_F) {
 			udc_clearep_getsts(udc, ep->hwep_num);
 			uda_enable_hwepint(udc, ep->hwep_num);
-			udc_clearep_getsts(udc, ep->hwep_num);
+			epstatus = udc_clearep_getsts(udc, ep->hwep_num);
 
 			/* Let the EP interrupt handle the ZLP */
 			return;
@@ -2195,7 +2198,7 @@ static void udc_handle_ep0_setup(struct lpc32xx_udc *udc)
 	struct lpc32xx_ep *ep, *ep0 = &udc->ep[0];
 	struct usb_ctrlrequest ctrlpkt;
 	int i, bytes;
-	u16 wIndex, wValue, reqtype, req, tmp;
+	u16 wIndex, wValue, wLength, reqtype, req, tmp;
 
 	/* Nuke previous transfers */
 	nuke(ep0, -EPROTO);
@@ -2211,6 +2214,7 @@ static void udc_handle_ep0_setup(struct lpc32xx_udc *udc)
 	/* Native endianness */
 	wIndex = le16_to_cpu(ctrlpkt.wIndex);
 	wValue = le16_to_cpu(ctrlpkt.wValue);
+	wLength = le16_to_cpu(ctrlpkt.wLength);
 	reqtype = le16_to_cpu(ctrlpkt.bRequestType);
 
 	/* Set direction of EP0 */
@@ -2261,7 +2265,7 @@ static void udc_handle_ep0_setup(struct lpc32xx_udc *udc)
 		default:
 			break;
 		}
-		break;
+
 
 	case USB_REQ_SET_ADDRESS:
 		if (reqtype == (USB_TYPE_STANDARD | USB_RECIP_DEVICE)) {
@@ -3057,8 +3061,11 @@ static int lpc32xx_udc_probe(struct platform_device *pdev)
 	/* Get IRQs */
 	for (i = 0; i < 4; i++) {
 		udc->udp_irq[i] = platform_get_irq(pdev, i);
-		if (udc->udp_irq[i] < 0)
+		if (udc->udp_irq[i] < 0) {
+			dev_err(udc->dev,
+				"irq resource %d not available!\n", i);
 			return udc->udp_irq[i];
+		}
 	}
 
 	udc->udp_baseaddr = devm_ioremap_resource(dev, res);

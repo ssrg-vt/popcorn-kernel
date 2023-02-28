@@ -247,6 +247,7 @@ static int klp_check_stack(struct task_struct *task, char *err_buf)
 	int ret, nr_entries;
 
 	ret = stack_trace_save_tsk_reliable(task, entries, ARRAY_SIZE(entries));
+	WARN_ON_ONCE(ret == -ENOSYS);
 	if (ret < 0) {
 		snprintf(err_buf, STACK_ERR_BUF_SIZE,
 			 "%s: %s:%d has an unreliable stack\n",
@@ -280,24 +281,17 @@ static int klp_check_stack(struct task_struct *task, char *err_buf)
  */
 static bool klp_try_switch_task(struct task_struct *task)
 {
-	static char err_buf[STACK_ERR_BUF_SIZE];
 	struct rq *rq;
 	struct rq_flags flags;
 	int ret;
 	bool success = false;
+	char err_buf[STACK_ERR_BUF_SIZE];
 
 	err_buf[0] = '\0';
 
 	/* check if this task has already switched over */
 	if (task->patch_state == klp_target_state)
 		return true;
-
-	/*
-	 * For arches which don't have reliable stack traces, we have to rely
-	 * on other methods (e.g., switching tasks at kernel exit).
-	 */
-	if (!klp_have_reliable_stack())
-		return false;
 
 	/*
 	 * Now try to check the stack for any to-be-patched or to-be-unpatched
@@ -334,6 +328,7 @@ done:
 		pr_debug("%s", err_buf);
 
 	return success;
+
 }
 
 /*

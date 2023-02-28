@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <errno.h>
 #include <inttypes.h>
-#include <linux/string.h>
 /* For the CLR_() macros */
 #include <pthread.h>
 
 #include <sched.h>
 #include "evlist.h"
 #include "evsel.h"
+#include "perf.h"
 #include "debug.h"
-#include "record.h"
 #include "tests.h"
-#include "util/mmap.h"
 
 static int sched__get_first_possible_cpu(pid_t pid, cpu_set_t *maskp)
 {
@@ -52,8 +50,8 @@ int test__PERF_RECORD(struct test *test __maybe_unused, int subtest __maybe_unus
 	};
 	cpu_set_t cpu_mask;
 	size_t cpu_mask_size = sizeof(cpu_mask);
-	struct evlist *evlist = perf_evlist__new_dummy();
-	struct evsel *evsel;
+	struct perf_evlist *evlist = perf_evlist__new_dummy();
+	struct perf_evsel *evsel;
 	struct perf_sample sample;
 	const char *cmd = "sleep";
 	const char *argv[] = { cmd, "1", NULL, };
@@ -104,7 +102,7 @@ int test__PERF_RECORD(struct test *test __maybe_unused, int subtest __maybe_unus
 	/*
 	 * Config the evsels, setting attr->comm on the first one, etc.
 	 */
-	evsel = evlist__first(evlist);
+	evsel = perf_evlist__first(evlist);
 	perf_evsel__set_sample_bit(evsel, CPU);
 	perf_evsel__set_sample_bit(evsel, TID);
 	perf_evsel__set_sample_bit(evsel, TIME);
@@ -132,7 +130,7 @@ int test__PERF_RECORD(struct test *test __maybe_unused, int subtest __maybe_unus
 	 * Call sys_perf_event_open on all the fds on all the evsels,
 	 * grouping them if asked to.
 	 */
-	err = evlist__open(evlist);
+	err = perf_evlist__open(evlist);
 	if (err < 0) {
 		pr_debug("perf_evlist__open: %s\n",
 			 str_error_r(errno, sbuf, sizeof(sbuf)));
@@ -144,9 +142,9 @@ int test__PERF_RECORD(struct test *test __maybe_unused, int subtest __maybe_unus
 	 * fds in the same CPU to be injected in the same mmap ring buffer
 	 * (using ioctl(PERF_EVENT_IOC_SET_OUTPUT)).
 	 */
-	err = evlist__mmap(evlist, opts.mmap_pages);
+	err = perf_evlist__mmap(evlist, opts.mmap_pages);
 	if (err < 0) {
-		pr_debug("evlist__mmap: %s\n",
+		pr_debug("perf_evlist__mmap: %s\n",
 			 str_error_r(errno, sbuf, sizeof(sbuf)));
 		goto out_delete_evlist;
 	}
@@ -155,7 +153,7 @@ int test__PERF_RECORD(struct test *test __maybe_unused, int subtest __maybe_unus
 	 * Now that all is properly set up, enable the events, they will
 	 * count just on workload.pid, which will start...
 	 */
-	evlist__enable(evlist);
+	perf_evlist__enable(evlist);
 
 	/*
 	 * Now!
@@ -165,9 +163,9 @@ int test__PERF_RECORD(struct test *test __maybe_unused, int subtest __maybe_unus
 	while (1) {
 		int before = total_events;
 
-		for (i = 0; i < evlist->core.nr_mmaps; i++) {
+		for (i = 0; i < evlist->nr_mmaps; i++) {
 			union perf_event *event;
-			struct mmap *md;
+			struct perf_mmap *md;
 
 			md = &evlist->mmap[i];
 			if (perf_mmap__read_init(md) < 0)
@@ -287,7 +285,7 @@ int test__PERF_RECORD(struct test *test __maybe_unused, int subtest __maybe_unus
 		 * perf_event_attr.wakeup_events, just PERF_EVENT_SAMPLE does.
 		 */
 		if (total_events == before && false)
-			evlist__poll(evlist, -1);
+			perf_evlist__poll(evlist, -1);
 
 		sleep(1);
 		if (++wakeups > 5) {
@@ -327,7 +325,7 @@ found_exit:
 		++errs;
 	}
 out_delete_evlist:
-	evlist__delete(evlist);
+	perf_evlist__delete(evlist);
 out:
 	return (err < 0 || errs > 0) ? -1 : 0;
 }

@@ -188,19 +188,6 @@
 	};
 };
 
-&cpu {
-	cpu-supply = <&vdcdc3_reg>;
-};
-
-/*
- * The standard da850-evm kits and SOM's are 375MHz so enable this operating
- * point by default. Higher frequencies must be enabled for custom boards with
- * other variants of the SoC.
- */
-&opp_375 {
-	status = "okay";
-};
-
 &sata {
 	status = "okay";
 };
@@ -281,7 +268,7 @@
 	flash: m25p80@0 {
 		#address-cells = <1>;
 		#size-cells = <1>;
-		compatible = "jedec,spi-nor";
+		compatible = "m25p64";
 		spi-max-frequency = <30000000>;
 		m25p,fast-read;
 		reg = <0>;

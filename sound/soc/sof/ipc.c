@@ -17,6 +17,12 @@
 #include "sof-priv.h"
 #include "ops.h"
 
+/*
+ * IPC message default size and timeout (ms).
+ * TODO: allow platforms to set size and timeout.
+ */
+#define IPC_TIMEOUT_MS		300
+
 static void ipc_trace_message(struct snd_sof_dev *sdev, u32 msg_id);
 static void ipc_stream_message(struct snd_sof_dev *sdev, u32 msg_cmd);
 
@@ -169,15 +175,6 @@ static void ipc_log_header(struct device *dev, u8 *text, u32 cmd)
 		break;
 	case SOF_IPC_GLB_TRACE_MSG:
 		str = "GLB_TRACE_MSG"; break;
-	case SOF_IPC_GLB_TEST_MSG:
-		str = "GLB_TEST_MSG";
-		switch (type) {
-		case SOF_IPC_TEST_IPC_FLOOD:
-			str2 = "IPC_FLOOD"; break;
-		default:
-			str2 = "unknown type"; break;
-		}
-		break;
 	default:
 		str = "unknown GLB command"; break;
 	}
@@ -190,8 +187,7 @@ static void ipc_log_header(struct device *dev, u8 *text, u32 cmd)
 #else
 static inline void ipc_log_header(struct device *dev, u8 *text, u32 cmd)
 {
-	if ((cmd & SOF_GLB_TYPE_MASK) != SOF_IPC_GLB_TRACE_MSG)
-		dev_dbg(dev, "%s: 0x%x\n", text, cmd);
+	dev_dbg(dev, "%s: 0x%x\n", text, cmd);
 }
 #endif
 
@@ -205,7 +201,7 @@ static int tx_wait_done(struct snd_sof_ipc *ipc, struct snd_sof_ipc_msg *msg,
 
 	/* wait for DSP IPC completion */
 	ret = wait_event_timeout(msg->waitq, msg->ipc_complete,
-				 msecs_to_jiffies(sdev->ipc_timeout));
+				 msecs_to_jiffies(IPC_TIMEOUT_MS));
 
 	if (ret == 0) {
 		dev_err(sdev->dev, "error: ipc timed out for 0x%x size %d\n",
@@ -572,10 +568,8 @@ static int sof_set_get_large_ctrl_data(struct snd_sof_dev *sdev,
 	else
 		err = sof_get_ctrl_copy_params(cdata->type, partdata, cdata,
 					       sparams);
-	if (err < 0) {
-		kfree(partdata);
+	if (err < 0)
 		return err;
-	}
 
 	msg_bytes = sparams->msg_bytes;
 	pl_size = sparams->pl_size;
@@ -776,11 +770,11 @@ int snd_sof_ipc_valid(struct snd_sof_dev *sdev)
 			 " lock debug: %s\n"
 			 " lock vdebug: %s\n",
 			 v->build, v->date, v->time,
-			 (ready->flags & SOF_IPC_INFO_GDB) ?
+			 ready->flags & SOF_IPC_INFO_GDB ?
 				"enabled" : "disabled",
-			 (ready->flags & SOF_IPC_INFO_LOCKS) ?
+			 ready->flags & SOF_IPC_INFO_LOCKS ?
 				"enabled" : "disabled",
-			 (ready->flags & SOF_IPC_INFO_LOCKSV) ?
+			 ready->flags & SOF_IPC_INFO_LOCKSV ?
 				"enabled" : "disabled");
 	}
 

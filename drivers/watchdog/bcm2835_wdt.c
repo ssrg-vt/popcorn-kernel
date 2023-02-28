@@ -202,8 +202,10 @@ static int bcm2835_wdt_probe(struct platform_device *pdev)
 
 	watchdog_stop_on_reboot(&bcm2835_wdt_wdd);
 	err = devm_watchdog_register_device(dev, &bcm2835_wdt_wdd);
-	if (err)
+	if (err) {
+		dev_err(dev, "Failed to register watchdog device");
 		return err;
+	}
 
 	if (pm_power_off == NULL) {
 		pm_power_off = bcm2835_power_off;

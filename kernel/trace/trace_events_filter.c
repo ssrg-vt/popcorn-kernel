@@ -452,10 +452,8 @@ predicate_parse(const char *str, int nr_parens, int nr_preds,
 
 		switch (*next) {
 		case '(':					/* #2 */
-			if (top - op_stack > nr_parens) {
-				ret = -EINVAL;
-				goto out_free;
-			}
+			if (top - op_stack > nr_parens)
+				return ERR_PTR(-EINVAL);
 			*(++top) = invert;
 			continue;
 		case '!':					/* #3 */
@@ -1085,9 +1083,6 @@ int filter_assign_type(const char *type)
 
 	if (strchr(type, '[') && strstr(type, "char"))
 		return FILTER_STATIC_STRING;
-
-	if (strcmp(type, "char *") == 0 || strcmp(type, "const char *") == 0)
-		return FILTER_PTR_STRING;
 
 	return FILTER_OTHER;
 }

@@ -22,6 +22,7 @@
  *
  * TODO:
  * - Factor out locallink DMA code into separate driver
+ * - Fix multicast assignment.
  * - Fix support for hardware checksumming.
  * - Testing.  Lots and lots of testing.
  *
@@ -52,7 +53,6 @@
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
-#include <linux/processor.h>
 #include <linux/platform_data/xilinx-ll-temac.h>
 
 #include "ll_temac.h"
@@ -84,118 +84,51 @@ static void _temac_iow_le(struct temac_local *lp, int offset, u32 value)
 	return iowrite32(value, lp->regs + offset);
 }
 
-static bool hard_acs_rdy(struct temac_local *lp)
-{
-	return temac_ior(lp, XTE_RDY0_OFFSET) & XTE_RDY0_HARD_ACS_RDY_MASK;
-}
-
-static bool hard_acs_rdy_or_timeout(struct temac_local *lp, ktime_t timeout)
-{
-	ktime_t cur = ktime_get();
-
-	return hard_acs_rdy(lp) || ktime_after(cur, timeout);
-}
-
-/* Poll for maximum 20 ms.  This is similar to the 2 jiffies @ 100 Hz
- * that was used before, and should cover MDIO bus speed down to 3200
- * Hz.
- */
-#define HARD_ACS_RDY_POLL_NS (20 * NSEC_PER_MSEC)
-
-/**
- * temac_indirect_busywait - Wait for current indirect register access
- * to complete.
- */
 int temac_indirect_busywait(struct temac_local *lp)
 {
-	ktime_t timeout = ktime_add_ns(ktime_get(), HARD_ACS_RDY_POLL_NS);
+	unsigned long end = jiffies + 2;
 
-	spin_until_cond(hard_acs_rdy_or_timeout(lp, timeout));
-	if (WARN_ON(!hard_acs_rdy(lp)))
-		return -ETIMEDOUT;
-	else
-		return 0;
+	while (!(temac_ior(lp, XTE_RDY0_OFFSET) & XTE_RDY0_HARD_ACS_RDY_MASK)) {
+		if (time_before_eq(end, jiffies)) {
+			WARN_ON(1);
+			return -ETIMEDOUT;
+		}
+		usleep_range(500, 1000);
+	}
+	return 0;
 }
 
 /**
- * temac_indirect_in32 - Indirect register read access.  This function
- * must be called without lp->indirect_lock being held.
+ * temac_indirect_in32
+ *
+ * lp->indirect_mutex must be held when calling this function
  */
 u32 temac_indirect_in32(struct temac_local *lp, int reg)
 {
-	unsigned long flags;
-	int val;
+	u32 val;
 
-	spin_lock_irqsave(lp->indirect_lock, flags);
-	val = temac_indirect_in32_locked(lp, reg);
-	spin_unlock_irqrestore(lp->indirect_lock, flags);
+	if (temac_indirect_busywait(lp))
+		return -ETIMEDOUT;
+	temac_iow(lp, XTE_CTL0_OFFSET, reg);
+	if (temac_indirect_busywait(lp))
+		return -ETIMEDOUT;
+	val = temac_ior(lp, XTE_LSW0_OFFSET);
+
 	return val;
 }
 
 /**
- * temac_indirect_in32_locked - Indirect register read access.  This
- * function must be called with lp->indirect_lock being held.  Use
- * this together with spin_lock_irqsave/spin_lock_irqrestore to avoid
- * repeated lock/unlock and to ensure uninterrupted access to indirect
- * registers.
- */
-u32 temac_indirect_in32_locked(struct temac_local *lp, int reg)
-{
-	/* This initial wait should normally not spin, as we always
-	 * try to wait for indirect access to complete before
-	 * releasing the indirect_lock.
-	 */
-	if (WARN_ON(temac_indirect_busywait(lp)))
-		return -ETIMEDOUT;
-	/* Initiate read from indirect register */
-	temac_iow(lp, XTE_CTL0_OFFSET, reg);
-	/* Wait for indirect register access to complete.  We really
-	 * should not see timeouts, and could even end up causing
-	 * problem for following indirect access, so let's make a bit
-	 * of WARN noise.
-	 */
-	if (WARN_ON(temac_indirect_busywait(lp)))
-		return -ETIMEDOUT;
-	/* Value is ready now */
-	return temac_ior(lp, XTE_LSW0_OFFSET);
-}
-
-/**
- * temac_indirect_out32 - Indirect register write access.  This function
- * must be called without lp->indirect_lock being held.
+ * temac_indirect_out32
+ *
+ * lp->indirect_mutex must be held when calling this function
  */
 void temac_indirect_out32(struct temac_local *lp, int reg, u32 value)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(lp->indirect_lock, flags);
-	temac_indirect_out32_locked(lp, reg, value);
-	spin_unlock_irqrestore(lp->indirect_lock, flags);
-}
-
-/**
- * temac_indirect_out32_locked - Indirect register write access.  This
- * function must be called with lp->indirect_lock being held.  Use
- * this together with spin_lock_irqsave/spin_lock_irqrestore to avoid
- * repeated lock/unlock and to ensure uninterrupted access to indirect
- * registers.
- */
-void temac_indirect_out32_locked(struct temac_local *lp, int reg, u32 value)
-{
-	/* As in temac_indirect_in32_locked(), we should normally not
-	 * spin here.  And if it happens, we actually end up silently
-	 * ignoring the write request.  Ouch.
-	 */
-	if (WARN_ON(temac_indirect_busywait(lp)))
+	if (temac_indirect_busywait(lp))
 		return;
-	/* Initiate write to indirect register */
 	temac_iow(lp, XTE_LSW0_OFFSET, value);
 	temac_iow(lp, XTE_CTL0_OFFSET, CNTLREG_WRITE_ENABLE_MASK | reg);
-	/* As in temac_indirect_in32_locked(), we should not see timeouts
-	 * here.  And if it happens, we continue before the write has
-	 * completed.  Not good.
-	 */
-	WARN_ON(temac_indirect_busywait(lp));
+	temac_indirect_busywait(lp);
 }
 
 /**
@@ -411,21 +344,20 @@ out:
 static void temac_do_set_mac_address(struct net_device *ndev)
 {
 	struct temac_local *lp = netdev_priv(ndev);
-	unsigned long flags;
 
 	/* set up unicast MAC address filter set its mac address */
-	spin_lock_irqsave(lp->indirect_lock, flags);
-	temac_indirect_out32_locked(lp, XTE_UAW0_OFFSET,
-				    (ndev->dev_addr[0]) |
-				    (ndev->dev_addr[1] << 8) |
-				    (ndev->dev_addr[2] << 16) |
-				    (ndev->dev_addr[3] << 24));
+	mutex_lock(lp->indirect_mutex);
+	temac_indirect_out32(lp, XTE_UAW0_OFFSET,
+			     (ndev->dev_addr[0]) |
+			     (ndev->dev_addr[1] << 8) |
+			     (ndev->dev_addr[2] << 16) |
+			     (ndev->dev_addr[3] << 24));
 	/* There are reserved bits in EUAW1
 	 * so don't affect them Set MAC bits [47:32] in EUAW1 */
-	temac_indirect_out32_locked(lp, XTE_UAW1_OFFSET,
-				    (ndev->dev_addr[4] & 0x000000ff) |
-				    (ndev->dev_addr[5] << 8));
-	spin_unlock_irqrestore(lp->indirect_lock, flags);
+	temac_indirect_out32(lp, XTE_UAW1_OFFSET,
+			     (ndev->dev_addr[4] & 0x000000ff) |
+			     (ndev->dev_addr[5] << 8));
+	mutex_unlock(lp->indirect_mutex);
 }
 
 static int temac_init_mac_address(struct net_device *ndev, const void *address)
@@ -451,58 +383,49 @@ static int temac_set_mac_address(struct net_device *ndev, void *p)
 static void temac_set_multicast_list(struct net_device *ndev)
 {
 	struct temac_local *lp = netdev_priv(ndev);
-	u32 multi_addr_msw, multi_addr_lsw;
-	int i = 0;
-	unsigned long flags;
-	bool promisc_mode_disabled = false;
+	u32 multi_addr_msw, multi_addr_lsw, val;
+	int i;
 
-	if (ndev->flags & (IFF_PROMISC | IFF_ALLMULTI) ||
-	    (netdev_mc_count(ndev) > MULTICAST_CAM_TABLE_NUM)) {
+	mutex_lock(lp->indirect_mutex);
+	if (ndev->flags & (IFF_ALLMULTI | IFF_PROMISC) ||
+	    netdev_mc_count(ndev) > MULTICAST_CAM_TABLE_NUM) {
+		/*
+		 *	We must make the kernel realise we had to move
+		 *	into promisc mode or we start all out war on
+		 *	the cable. If it was a promisc request the
+		 *	flag is already set. If not we assert it.
+		 */
+		ndev->flags |= IFF_PROMISC;
 		temac_indirect_out32(lp, XTE_AFM_OFFSET, XTE_AFM_EPPRM_MASK);
 		dev_info(&ndev->dev, "Promiscuous mode enabled.\n");
-		return;
-	}
-
-	spin_lock_irqsave(lp->indirect_lock, flags);
-
-	if (!netdev_mc_empty(ndev)) {
+	} else if (!netdev_mc_empty(ndev)) {
 		struct netdev_hw_addr *ha;
 
+		i = 0;
 		netdev_for_each_mc_addr(ha, ndev) {
-			if (WARN_ON(i >= MULTICAST_CAM_TABLE_NUM))
+			if (i >= MULTICAST_CAM_TABLE_NUM)
 				break;
 			multi_addr_msw = ((ha->addr[3] << 24) |
 					  (ha->addr[2] << 16) |
 					  (ha->addr[1] << 8) |
 					  (ha->addr[0]));
-			temac_indirect_out32_locked(lp, XTE_MAW0_OFFSET,
-						    multi_addr_msw);
+			temac_indirect_out32(lp, XTE_MAW0_OFFSET,
+					     multi_addr_msw);
 			multi_addr_lsw = ((ha->addr[5] << 8) |
 					  (ha->addr[4]) | (i << 16));
-			temac_indirect_out32_locked(lp, XTE_MAW1_OFFSET,
-						    multi_addr_lsw);
+			temac_indirect_out32(lp, XTE_MAW1_OFFSET,
+					     multi_addr_lsw);
 			i++;
 		}
-	}
-
-	/* Clear all or remaining/unused address table entries */
-	while (i < MULTICAST_CAM_TABLE_NUM) {
-		temac_indirect_out32_locked(lp, XTE_MAW0_OFFSET, 0);
-		temac_indirect_out32_locked(lp, XTE_MAW1_OFFSET, i << 16);
-		i++;
-	}
-
-	/* Enable address filter block if currently disabled */
-	if (temac_indirect_in32_locked(lp, XTE_AFM_OFFSET)
-	    & XTE_AFM_EPPRM_MASK) {
-		temac_indirect_out32_locked(lp, XTE_AFM_OFFSET, 0);
-		promisc_mode_disabled = true;
-	}
-
-	spin_unlock_irqrestore(lp->indirect_lock, flags);
-
-	if (promisc_mode_disabled)
+	} else {
+		val = temac_indirect_in32(lp, XTE_AFM_OFFSET);
+		temac_indirect_out32(lp, XTE_AFM_OFFSET,
+				     val & ~XTE_AFM_EPPRM_MASK);
+		temac_indirect_out32(lp, XTE_MAW0_OFFSET, 0);
+		temac_indirect_out32(lp, XTE_MAW1_OFFSET, 0);
 		dev_info(&ndev->dev, "Promiscuous mode disabled.\n");
+	}
+	mutex_unlock(lp->indirect_mutex);
 }
 
 static struct temac_option {
@@ -593,19 +516,17 @@ static u32 temac_setoptions(struct net_device *ndev, u32 options)
 	struct temac_local *lp = netdev_priv(ndev);
 	struct temac_option *tp = &temac_options[0];
 	int reg;
-	unsigned long flags;
 
-	spin_lock_irqsave(lp->indirect_lock, flags);
+	mutex_lock(lp->indirect_mutex);
 	while (tp->opt) {
-		reg = temac_indirect_in32_locked(lp, tp->reg) & ~tp->m_or;
-		if (options & tp->opt) {
+		reg = temac_indirect_in32(lp, tp->reg) & ~tp->m_or;
+		if (options & tp->opt)
 			reg |= tp->m_or;
-			temac_indirect_out32_locked(lp, tp->reg, reg);
-		}
+		temac_indirect_out32(lp, tp->reg, reg);
 		tp++;
 	}
-	spin_unlock_irqrestore(lp->indirect_lock, flags);
 	lp->options |= options;
+	mutex_unlock(lp->indirect_mutex);
 
 	return 0;
 }
@@ -616,7 +537,6 @@ static void temac_device_reset(struct net_device *ndev)
 	struct temac_local *lp = netdev_priv(ndev);
 	u32 timeout;
 	u32 val;
-	unsigned long flags;
 
 	/* Perform a software reset */
 
@@ -625,6 +545,7 @@ static void temac_device_reset(struct net_device *ndev)
 
 	dev_dbg(&ndev->dev, "%s()\n", __func__);
 
+	mutex_lock(lp->indirect_mutex);
 	/* Reset the receiver and wait for it to finish reset */
 	temac_indirect_out32(lp, XTE_RXC1_OFFSET, XTE_RXC1_RXRST_MASK);
 	timeout = 1000;
@@ -650,11 +571,8 @@ static void temac_device_reset(struct net_device *ndev)
 	}
 
 	/* Disable the receiver */
-	spin_lock_irqsave(lp->indirect_lock, flags);
-	val = temac_indirect_in32_locked(lp, XTE_RXC1_OFFSET);
-	temac_indirect_out32_locked(lp, XTE_RXC1_OFFSET,
-				    val & ~XTE_RXC1_RXEN_MASK);
-	spin_unlock_irqrestore(lp->indirect_lock, flags);
+	val = temac_indirect_in32(lp, XTE_RXC1_OFFSET);
+	temac_indirect_out32(lp, XTE_RXC1_OFFSET, val & ~XTE_RXC1_RXEN_MASK);
 
 	/* Reset Local Link (DMA) */
 	lp->dma_out(lp, DMA_CONTROL_REG, DMA_CONTROL_RST);
@@ -674,12 +592,12 @@ static void temac_device_reset(struct net_device *ndev)
 				"temac_device_reset descriptor allocation failed\n");
 	}
 
-	spin_lock_irqsave(lp->indirect_lock, flags);
-	temac_indirect_out32_locked(lp, XTE_RXC0_OFFSET, 0);
-	temac_indirect_out32_locked(lp, XTE_RXC1_OFFSET, 0);
-	temac_indirect_out32_locked(lp, XTE_TXC_OFFSET, 0);
-	temac_indirect_out32_locked(lp, XTE_FCC_OFFSET, XTE_FCC_RXFLO_MASK);
-	spin_unlock_irqrestore(lp->indirect_lock, flags);
+	temac_indirect_out32(lp, XTE_RXC0_OFFSET, 0);
+	temac_indirect_out32(lp, XTE_RXC1_OFFSET, 0);
+	temac_indirect_out32(lp, XTE_TXC_OFFSET, 0);
+	temac_indirect_out32(lp, XTE_FCC_OFFSET, XTE_FCC_RXFLO_MASK);
+
+	mutex_unlock(lp->indirect_mutex);
 
 	/* Sync default options with HW
 	 * but leave receiver and transmitter disabled.  */
@@ -703,14 +621,13 @@ static void temac_adjust_link(struct net_device *ndev)
 	struct phy_device *phy = ndev->phydev;
 	u32 mii_speed;
 	int link_state;
-	unsigned long flags;
 
 	/* hash together the state values to decide if something has changed */
 	link_state = phy->speed | (phy->duplex << 1) | phy->link;
 
+	mutex_lock(lp->indirect_mutex);
 	if (lp->last_link != link_state) {
-		spin_lock_irqsave(lp->indirect_lock, flags);
-		mii_speed = temac_indirect_in32_locked(lp, XTE_EMCFG_OFFSET);
+		mii_speed = temac_indirect_in32(lp, XTE_EMCFG_OFFSET);
 		mii_speed &= ~XTE_EMCFG_LINKSPD_MASK;
 
 		switch (phy->speed) {
@@ -720,12 +637,11 @@ static void temac_adjust_link(struct net_device *ndev)
 		}
 
 		/* Write new speed setting out to TEMAC */
-		temac_indirect_out32_locked(lp, XTE_EMCFG_OFFSET, mii_speed);
-		spin_unlock_irqrestore(lp->indirect_lock, flags);
-
+		temac_indirect_out32(lp, XTE_EMCFG_OFFSET, mii_speed);
 		lp->last_link = link_state;
 		phy_print_status(phy);
 	}
+	mutex_unlock(lp->indirect_mutex);
 }
 
 #ifdef CONFIG_64BIT
@@ -1095,7 +1011,6 @@ static const struct net_device_ops temac_netdev_ops = {
 	.ndo_open = temac_open,
 	.ndo_stop = temac_stop,
 	.ndo_start_xmit = temac_start_xmit,
-	.ndo_set_rx_mode = temac_set_multicast_list,
 	.ndo_set_mac_address = temac_set_mac_address,
 	.ndo_validate_addr = eth_validate_addr,
 	.ndo_do_ioctl = temac_ioctl,
@@ -1161,6 +1076,7 @@ static int temac_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, ndev);
 	SET_NETDEV_DEV(ndev, &pdev->dev);
+	ndev->flags &= ~IFF_MULTICAST;  /* clear multicast */
 	ndev->features = NETIF_F_SG;
 	ndev->netdev_ops = &temac_netdev_ops;
 	ndev->ethtool_ops = &temac_ethtool_ops;
@@ -1187,17 +1103,17 @@ static int temac_probe(struct platform_device *pdev)
 
 	/* Setup mutex for synchronization of indirect register access */
 	if (pdata) {
-		if (!pdata->indirect_lock) {
+		if (!pdata->indirect_mutex) {
 			dev_err(&pdev->dev,
-				"indirect_lock missing in platform_data\n");
+				"indirect_mutex missing in platform_data\n");
 			return -EINVAL;
 		}
-		lp->indirect_lock = pdata->indirect_lock;
+		lp->indirect_mutex = pdata->indirect_mutex;
 	} else {
-		lp->indirect_lock = devm_kmalloc(&pdev->dev,
-						 sizeof(*lp->indirect_lock),
-						 GFP_KERNEL);
-		spin_lock_init(lp->indirect_lock);
+		lp->indirect_mutex = devm_kmalloc(&pdev->dev,
+						  sizeof(*lp->indirect_mutex),
+						  GFP_KERNEL);
+		mutex_init(lp->indirect_mutex);
 	}
 
 	/* map device registers */

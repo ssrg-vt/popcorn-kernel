@@ -5,8 +5,6 @@
  * Author: Vinay Simha <vinaysimha@inforcecomputing.com>
  */
 
-#include <linux/delay.h>
-
 #include <drm/drm_crtc.h>
 #include <drm/drm_probe_helper.h>
 

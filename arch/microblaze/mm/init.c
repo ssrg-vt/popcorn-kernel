@@ -7,7 +7,6 @@
  * for more details.
  */
 
-#include <linux/dma-contiguous.h>
 #include <linux/memblock.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -276,7 +275,6 @@ static void __init mmu_init_hw(void)
 asmlinkage void __init mmu_init(void)
 {
 	unsigned int kstart, ksize;
-	phys_addr_t __maybe_unused size;
 
 	if (!memblock.reserved.cnt) {
 		pr_emerg("Error memory count\n");
@@ -318,14 +316,10 @@ asmlinkage void __init mmu_init(void)
 #if defined(CONFIG_BLK_DEV_INITRD)
 	/* Remove the init RAM disk from the available memory. */
 	if (initrd_start) {
+		unsigned long size;
 		size = initrd_end - initrd_start;
 		memblock_reserve(__virt_to_phys(initrd_start), size);
 	}
-
-	size = __initramfs_end - __initramfs_start;
-	if (size)
-		memblock_reserve((phys_addr_t)__virt_to_phys(__initramfs_start),
-				 size);
 #endif /* CONFIG_BLK_DEV_INITRD */
 
 	/* Initialize the MMU hardware */
@@ -348,11 +342,6 @@ asmlinkage void __init mmu_init(void)
 	/* This will also cause that unflatten device tree will be allocated
 	 * inside 768MB limit */
 	memblock_set_current_limit(memory_start + lowmem_size - 1);
-
-	parse_early_param();
-
-	/* CMA initialization */
-	dma_contiguous_reserve(memory_start + lowmem_size - 1);
 }
 
 /* This is only called until mem_init is done. */
@@ -363,8 +352,7 @@ void __init *early_get_page(void)
 	 * because of mem mapping from head.S
 	 */
 	return memblock_alloc_try_nid_raw(PAGE_SIZE, PAGE_SIZE,
-				memory_start,
-				(phys_addr_t)__virt_to_phys(_end_tlb_mapping),
+				MEMBLOCK_LOW_LIMIT, memory_start + kernel_tlb,
 				NUMA_NO_NODE);
 }
 

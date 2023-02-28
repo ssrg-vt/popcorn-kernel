@@ -25,7 +25,6 @@
 #include <linux/skbuff.h>
 #include <linux/if_arp.h>
 #include <linux/jiffies.h>
-#include <linux/refcount.h>
 
 #include <net/ax25.h>
 
@@ -71,7 +70,7 @@ struct mkiss {
 #define CRC_MODE_FLEX_TEST	3
 #define CRC_MODE_SMACK_TEST	4
 
-	refcount_t		refcnt;
+	atomic_t		refcnt;
 	struct completion	dead;
 };
 
@@ -669,7 +668,7 @@ static struct mkiss *mkiss_get(struct tty_struct *tty)
 	read_lock(&disc_data_lock);
 	ax = tty->disc_data;
 	if (ax)
-		refcount_inc(&ax->refcnt);
+		atomic_inc(&ax->refcnt);
 	read_unlock(&disc_data_lock);
 
 	return ax;
@@ -677,7 +676,7 @@ static struct mkiss *mkiss_get(struct tty_struct *tty)
 
 static void mkiss_put(struct mkiss *ax)
 {
-	if (refcount_dec_and_test(&ax->refcnt))
+	if (atomic_dec_and_test(&ax->refcnt))
 		complete(&ax->dead);
 }
 
@@ -705,7 +704,7 @@ static int mkiss_open(struct tty_struct *tty)
 	ax->dev = dev;
 
 	spin_lock_init(&ax->buflock);
-	refcount_set(&ax->refcnt, 1);
+	atomic_set(&ax->refcnt, 1);
 	init_completion(&ax->dead);
 
 	ax->tty = tty;
@@ -785,7 +784,7 @@ static void mkiss_close(struct tty_struct *tty)
 	 * We have now ensured that nobody can start using ap from now on, but
 	 * we have to wait for all existing users to finish.
 	 */
-	if (!refcount_dec_and_test(&ax->refcnt))
+	if (!atomic_dec_and_test(&ax->refcnt))
 		wait_for_completion(&ax->dead);
 	/*
 	 * Halt the transmit queue so that a new transmit cannot scribble

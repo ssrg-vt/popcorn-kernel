@@ -258,17 +258,12 @@ struct max310x_one {
 	struct work_struct	tx_work;
 	struct work_struct	md_work;
 	struct work_struct	rs_work;
-
-	u8 wr_header;
-	u8 rd_header;
-	u8 rx_buf[MAX310X_FIFO_SIZE];
 };
-#define to_max310x_port(_port) \
-	container_of(_port, struct max310x_one, port)
 
 struct max310x_port {
 	struct max310x_devtype	*devtype;
 	struct regmap		*regmap;
+	struct mutex		mutex;
 	struct clk		*clk;
 #ifdef CONFIG_GPIOLIB
 	struct gpio_chip	gpio;
@@ -623,11 +618,11 @@ static int max310x_set_ref_clk(struct device *dev, struct max310x_port *s,
 
 static void max310x_batch_write(struct uart_port *port, u8 *txbuf, unsigned int len)
 {
-	struct max310x_one *one = to_max310x_port(port);
+	u8 header[] = { (port->iobase + MAX310X_THR_REG) | MAX310X_WRITE_BIT };
 	struct spi_transfer xfer[] = {
 		{
-			.tx_buf = &one->wr_header,
-			.len = sizeof(one->wr_header),
+			.tx_buf = &header,
+			.len = sizeof(header),
 		}, {
 			.tx_buf = txbuf,
 			.len = len,
@@ -638,11 +633,11 @@ static void max310x_batch_write(struct uart_port *port, u8 *txbuf, unsigned int 
 
 static void max310x_batch_read(struct uart_port *port, u8 *rxbuf, unsigned int len)
 {
-	struct max310x_one *one = to_max310x_port(port);
+	u8 header[] = { port->iobase + MAX310X_RHR_REG };
 	struct spi_transfer xfer[] = {
 		{
-			.tx_buf = &one->rd_header,
-			.len = sizeof(one->rd_header),
+			.tx_buf = &header,
+			.len = sizeof(header),
 		}, {
 			.rx_buf = rxbuf,
 			.len = len,
@@ -653,8 +648,8 @@ static void max310x_batch_read(struct uart_port *port, u8 *rxbuf, unsigned int l
 
 static void max310x_handle_rx(struct uart_port *port, unsigned int rxlen)
 {
-	struct max310x_one *one = to_max310x_port(port);
 	unsigned int sts, ch, flag, i;
+	u8 buf[MAX310X_FIFO_SIZE];
 
 	if (port->read_status_mask == MAX310X_LSR_RXOVR_BIT) {
 		/* We are just reading, happily ignoring any error conditions.
@@ -669,7 +664,7 @@ static void max310x_handle_rx(struct uart_port *port, unsigned int rxlen)
 		 * */
 
 		sts = max310x_port_read(port, MAX310X_LSR_IRQSTS_REG);
-		max310x_batch_read(port, one->rx_buf, rxlen);
+		max310x_batch_read(port, buf, rxlen);
 
 		port->icount.rx += rxlen;
 		flag = TTY_NORMAL;
@@ -680,16 +675,9 @@ static void max310x_handle_rx(struct uart_port *port, unsigned int rxlen)
 			port->icount.overrun++;
 		}
 
-		for (i = 0; i < (rxlen - 1); ++i)
-			uart_insert_char(port, sts, 0, one->rx_buf[i], flag);
-
-		/*
-		 * Handle the overrun case for the last character only, since
-		 * the RxFIFO overflow happens after it is pushed to the FIFO
-		 * tail.
-		 */
-		uart_insert_char(port, sts, MAX310X_LSR_RXOVR_BIT,
-				 one->rx_buf[rxlen-1], flag);
+		for (i = 0; i < rxlen; ++i) {
+			uart_insert_char(port, sts, MAX310X_LSR_RXOVR_BIT, buf[i], flag);
+		}
 
 	} else {
 		if (unlikely(rxlen >= port->fifosize)) {
@@ -789,9 +777,10 @@ static void max310x_handle_tx(struct uart_port *port)
 
 static void max310x_start_tx(struct uart_port *port)
 {
-	struct max310x_one *one = to_max310x_port(port);
+	struct max310x_one *one = container_of(port, struct max310x_one, port);
 
-	schedule_work(&one->tx_work);
+	if (!work_pending(&one->tx_work))
+		schedule_work(&one->tx_work);
 }
 
 static irqreturn_t max310x_port_irq(struct max310x_port *s, int portno)
@@ -848,11 +837,14 @@ static irqreturn_t max310x_ist(int irq, void *dev_id)
 	return IRQ_RETVAL(handled);
 }
 
-static void max310x_tx_proc(struct work_struct *ws)
+static void max310x_wq_proc(struct work_struct *ws)
 {
 	struct max310x_one *one = container_of(ws, struct max310x_one, tx_work);
+	struct max310x_port *s = dev_get_drvdata(one->port.dev);
 
+	mutex_lock(&s->mutex);
 	max310x_handle_tx(&one->port);
+	mutex_unlock(&s->mutex);
 }
 
 static unsigned int max310x_tx_empty(struct uart_port *port)
@@ -882,7 +874,7 @@ static void max310x_md_proc(struct work_struct *ws)
 
 static void max310x_set_mctrl(struct uart_port *port, unsigned int mctrl)
 {
-	struct max310x_one *one = to_max310x_port(port);
+	struct max310x_one *one = container_of(port, struct max310x_one, port);
 
 	schedule_work(&one->md_work);
 }
@@ -955,42 +947,16 @@ static void max310x_set_termios(struct uart_port *port,
 	/* Configure flow control */
 	max310x_port_write(port, MAX310X_XON1_REG, termios->c_cc[VSTART]);
 	max310x_port_write(port, MAX310X_XOFF1_REG, termios->c_cc[VSTOP]);
-
-	/* Disable transmitter before enabling AutoCTS or auto transmitter
-	 * flow control
-	 */
-	if (termios->c_cflag & CRTSCTS || termios->c_iflag & IXOFF) {
-		max310x_port_update(port, MAX310X_MODE1_REG,
-				    MAX310X_MODE1_TXDIS_BIT,
-				    MAX310X_MODE1_TXDIS_BIT);
-	}
-
-	port->status &= ~(UPSTAT_AUTOCTS | UPSTAT_AUTORTS | UPSTAT_AUTOXOFF);
-
-	if (termios->c_cflag & CRTSCTS) {
-		/* Enable AUTORTS and AUTOCTS */
-		port->status |= UPSTAT_AUTOCTS | UPSTAT_AUTORTS;
+	if (termios->c_cflag & CRTSCTS)
 		flow |= MAX310X_FLOWCTRL_AUTOCTS_BIT |
 			MAX310X_FLOWCTRL_AUTORTS_BIT;
-	}
 	if (termios->c_iflag & IXON)
 		flow |= MAX310X_FLOWCTRL_SWFLOW3_BIT |
 			MAX310X_FLOWCTRL_SWFLOWEN_BIT;
-	if (termios->c_iflag & IXOFF) {
-		port->status |= UPSTAT_AUTOXOFF;
+	if (termios->c_iflag & IXOFF)
 		flow |= MAX310X_FLOWCTRL_SWFLOW1_BIT |
 			MAX310X_FLOWCTRL_SWFLOWEN_BIT;
-	}
 	max310x_port_write(port, MAX310X_FLOWCTRL_REG, flow);
-
-	/* Enable transmitter after disabling AutoCTS and auto transmitter
-	 * flow control
-	 */
-	if (!(termios->c_cflag & CRTSCTS) && !(termios->c_iflag & IXOFF)) {
-		max310x_port_update(port, MAX310X_MODE1_REG,
-				    MAX310X_MODE1_TXDIS_BIT,
-				    0);
-	}
 
 	/* Get baud rate generator configuration */
 	baud = uart_get_baud_rate(port, termios, old,
@@ -1007,36 +973,37 @@ static void max310x_set_termios(struct uart_port *port,
 static void max310x_rs_proc(struct work_struct *ws)
 {
 	struct max310x_one *one = container_of(ws, struct max310x_one, rs_work);
-	unsigned int delay, mode1 = 0, mode2 = 0;
+	unsigned int val;
 
-	delay = (one->port.rs485.delay_rts_before_send << 4) |
+	val = (one->port.rs485.delay_rts_before_send << 4) |
 		one->port.rs485.delay_rts_after_send;
-	max310x_port_write(&one->port, MAX310X_HDPIXDELAY_REG, delay);
+	max310x_port_write(&one->port, MAX310X_HDPIXDELAY_REG, val);
 
 	if (one->port.rs485.flags & SER_RS485_ENABLED) {
-		mode1 = MAX310X_MODE1_TRNSCVCTRL_BIT;
-
-		if (!(one->port.rs485.flags & SER_RS485_RX_DURING_TX))
-			mode2 = MAX310X_MODE2_ECHOSUPR_BIT;
+		max310x_port_update(&one->port, MAX310X_MODE1_REG,
+				MAX310X_MODE1_TRNSCVCTRL_BIT,
+				MAX310X_MODE1_TRNSCVCTRL_BIT);
+		max310x_port_update(&one->port, MAX310X_MODE2_REG,
+				MAX310X_MODE2_ECHOSUPR_BIT,
+				MAX310X_MODE2_ECHOSUPR_BIT);
+	} else {
+		max310x_port_update(&one->port, MAX310X_MODE1_REG,
+				MAX310X_MODE1_TRNSCVCTRL_BIT, 0);
+		max310x_port_update(&one->port, MAX310X_MODE2_REG,
+				MAX310X_MODE2_ECHOSUPR_BIT, 0);
 	}
-
-	max310x_port_update(&one->port, MAX310X_MODE1_REG,
-			MAX310X_MODE1_TRNSCVCTRL_BIT, mode1);
-	max310x_port_update(&one->port, MAX310X_MODE2_REG,
-			MAX310X_MODE2_ECHOSUPR_BIT, mode2);
 }
 
 static int max310x_rs485_config(struct uart_port *port,
 				struct serial_rs485 *rs485)
 {
-	struct max310x_one *one = to_max310x_port(port);
+	struct max310x_one *one = container_of(port, struct max310x_one, port);
 
 	if ((rs485->delay_rts_before_send > 0x0f) ||
 	    (rs485->delay_rts_after_send > 0x0f))
 		return -ERANGE;
 
-	rs485->flags &= SER_RS485_RTS_ON_SEND | SER_RS485_RX_DURING_TX |
-			SER_RS485_ENABLED;
+	rs485->flags &= SER_RS485_RTS_ON_SEND | SER_RS485_ENABLED;
 	memset(rs485->padding, 0, sizeof(rs485->padding));
 	port->rs485 = *rs485;
 
@@ -1061,22 +1028,6 @@ static int max310x_startup(struct uart_port *port)
 	max310x_port_write(port, MAX310X_MODE2_REG, val);
 	max310x_port_update(port, MAX310X_MODE2_REG,
 			    MAX310X_MODE2_FIFORST_BIT, 0);
-
-	/* Configure mode1/mode2 to have rs485/rs232 enabled at startup */
-	val = (clamp(port->rs485.delay_rts_before_send, 0U, 15U) << 4) |
-		clamp(port->rs485.delay_rts_after_send, 0U, 15U);
-	max310x_port_write(port, MAX310X_HDPIXDELAY_REG, val);
-
-	if (port->rs485.flags & SER_RS485_ENABLED) {
-		max310x_port_update(port, MAX310X_MODE1_REG,
-				    MAX310X_MODE1_TRNSCVCTRL_BIT,
-				    MAX310X_MODE1_TRNSCVCTRL_BIT);
-
-		if (!(port->rs485.flags & SER_RS485_RX_DURING_TX))
-			max310x_port_update(port, MAX310X_MODE2_REG,
-					    MAX310X_MODE2_ECHOSUPR_BIT,
-					    MAX310X_MODE2_ECHOSUPR_BIT);
-	}
 
 	/* Configure flow control levels */
 	/* Flow control halt level 96, resume level 48 */
@@ -1329,6 +1280,8 @@ static int max310x_probe(struct device *dev, struct max310x_devtype *devtype,
 	uartclk = max310x_set_ref_clk(dev, s, freq, xtal);
 	dev_dbg(dev, "Reference clock set to %i Hz\n", uartclk);
 
+	mutex_init(&s->mutex);
+
 	for (i = 0; i < devtype->nr; i++) {
 		unsigned int line;
 
@@ -1356,15 +1309,11 @@ static int max310x_probe(struct device *dev, struct max310x_devtype *devtype,
 		/* Clear IRQ status register */
 		max310x_port_read(&s->p[i].port, MAX310X_IRQSTS_REG);
 		/* Initialize queue for start TX */
-		INIT_WORK(&s->p[i].tx_work, max310x_tx_proc);
+		INIT_WORK(&s->p[i].tx_work, max310x_wq_proc);
 		/* Initialize queue for changing LOOPBACK mode */
 		INIT_WORK(&s->p[i].md_work, max310x_md_proc);
 		/* Initialize queue for changing RS485 mode */
 		INIT_WORK(&s->p[i].rs_work, max310x_rs_proc);
-		/* Initialize SPI-transfer buffers */
-		s->p[i].wr_header = (s->p[i].port.iobase + MAX310X_THR_REG) |
-				    MAX310X_WRITE_BIT;
-		s->p[i].rd_header = (s->p[i].port.iobase + MAX310X_RHR_REG);
 
 		/* Register port */
 		ret = uart_add_one_port(&max310x_uart, &s->p[i].port);
@@ -1412,6 +1361,8 @@ out_uart:
 		}
 	}
 
+	mutex_destroy(&s->mutex);
+
 out_clk:
 	clk_disable_unprepare(s->clk);
 
@@ -1432,6 +1383,7 @@ static int max310x_remove(struct device *dev)
 		s->devtype->power(&s->p[i].port, 0);
 	}
 
+	mutex_destroy(&s->mutex);
 	clk_disable_unprepare(s->clk);
 
 	return 0;

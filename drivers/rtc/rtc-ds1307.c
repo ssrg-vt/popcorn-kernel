@@ -222,45 +222,6 @@ static int ds1307_get_time(struct device *dev, struct rtc_time *t)
 		return -EINVAL;
 	}
 
-	tmp = regs[DS1307_REG_SECS];
-	switch (ds1307->type) {
-	case ds_1307:
-	case m41t0:
-	case m41t00:
-	case m41t11:
-		if (tmp & DS1307_BIT_CH)
-			return -EINVAL;
-		break;
-	case ds_1308:
-	case ds_1338:
-		if (tmp & DS1307_BIT_CH)
-			return -EINVAL;
-
-		ret = regmap_read(ds1307->regmap, DS1307_REG_CONTROL, &tmp);
-		if (ret)
-			return ret;
-		if (tmp & DS1338_BIT_OSF)
-			return -EINVAL;
-		break;
-	case ds_1340:
-		if (tmp & DS1340_BIT_nEOSC)
-			return -EINVAL;
-
-		ret = regmap_read(ds1307->regmap, DS1340_REG_FLAG, &tmp);
-		if (ret)
-			return ret;
-		if (tmp & DS1340_BIT_OSF)
-			return -EINVAL;
-		break;
-	case mcp794xx:
-		if (!(tmp & MCP794XX_BIT_ST))
-			return -EINVAL;
-
-		break;
-	default:
-		break;
-	}
-
 	t->tm_sec = bcd2bin(regs[DS1307_REG_SECS] & 0x7f);
 	t->tm_min = bcd2bin(regs[DS1307_REG_MIN] & 0x7f);
 	tmp = regs[DS1307_REG_HOUR] & 0x3f;
@@ -325,17 +286,7 @@ static int ds1307_set_time(struct device *dev, struct rtc_time *t)
 	if (t->tm_year > 199 && chip->century_bit)
 		regs[chip->century_reg] |= chip->century_bit;
 
-	switch (ds1307->type) {
-	case ds_1308:
-	case ds_1338:
-		regmap_update_bits(ds1307->regmap, DS1307_REG_CONTROL,
-				   DS1338_BIT_OSF, 0);
-		break;
-	case ds_1340:
-		regmap_update_bits(ds1307->regmap, DS1340_REG_FLAG,
-				   DS1340_BIT_OSF, 0);
-		break;
-	case mcp794xx:
+	if (ds1307->type == mcp794xx) {
 		/*
 		 * these bits were cleared when preparing the date/time
 		 * values and need to be set again before writing the
@@ -343,9 +294,6 @@ static int ds1307_set_time(struct device *dev, struct rtc_time *t)
 		 */
 		regs[DS1307_REG_SECS] |= MCP794XX_BIT_ST;
 		regs[DS1307_REG_WDAY] |= MCP794XX_BIT_VBATEN;
-		break;
-	default:
-		break;
 	}
 
 	dev_dbg(dev, "%s: %7ph\n", "write", regs);
@@ -1754,6 +1702,7 @@ static int ds1307_probe(struct i2c_client *client,
 		break;
 	}
 
+read_rtc:
 	/* read RTC registers */
 	err = regmap_bulk_read(ds1307->regmap, chip->offset, regs,
 			       sizeof(regs));
@@ -1762,11 +1711,75 @@ static int ds1307_probe(struct i2c_client *client,
 		goto exit;
 	}
 
-	if (ds1307->type == mcp794xx &&
-	    !(regs[DS1307_REG_WDAY] & MCP794XX_BIT_VBATEN)) {
-		regmap_write(ds1307->regmap, DS1307_REG_WDAY,
-			     regs[DS1307_REG_WDAY] |
-			     MCP794XX_BIT_VBATEN);
+	/*
+	 * minimal sanity checking; some chips (like DS1340) don't
+	 * specify the extra bits as must-be-zero, but there are
+	 * still a few values that are clearly out-of-range.
+	 */
+	tmp = regs[DS1307_REG_SECS];
+	switch (ds1307->type) {
+	case ds_1307:
+	case m41t0:
+	case m41t00:
+	case m41t11:
+		/* clock halted?  turn it on, so clock can tick. */
+		if (tmp & DS1307_BIT_CH) {
+			regmap_write(ds1307->regmap, DS1307_REG_SECS, 0);
+			dev_warn(ds1307->dev, "SET TIME!\n");
+			goto read_rtc;
+		}
+		break;
+	case ds_1308:
+	case ds_1338:
+		/* clock halted?  turn it on, so clock can tick. */
+		if (tmp & DS1307_BIT_CH)
+			regmap_write(ds1307->regmap, DS1307_REG_SECS, 0);
+
+		/* oscillator fault?  clear flag, and warn */
+		if (regs[DS1307_REG_CONTROL] & DS1338_BIT_OSF) {
+			regmap_write(ds1307->regmap, DS1307_REG_CONTROL,
+				     regs[DS1307_REG_CONTROL] &
+				     ~DS1338_BIT_OSF);
+			dev_warn(ds1307->dev, "SET TIME!\n");
+			goto read_rtc;
+		}
+		break;
+	case ds_1340:
+		/* clock halted?  turn it on, so clock can tick. */
+		if (tmp & DS1340_BIT_nEOSC)
+			regmap_write(ds1307->regmap, DS1307_REG_SECS, 0);
+
+		err = regmap_read(ds1307->regmap, DS1340_REG_FLAG, &tmp);
+		if (err) {
+			dev_dbg(ds1307->dev, "read error %d\n", err);
+			goto exit;
+		}
+
+		/* oscillator fault?  clear flag, and warn */
+		if (tmp & DS1340_BIT_OSF) {
+			regmap_write(ds1307->regmap, DS1340_REG_FLAG, 0);
+			dev_warn(ds1307->dev, "SET TIME!\n");
+		}
+		break;
+	case mcp794xx:
+		/* make sure that the backup battery is enabled */
+		if (!(regs[DS1307_REG_WDAY] & MCP794XX_BIT_VBATEN)) {
+			regmap_write(ds1307->regmap, DS1307_REG_WDAY,
+				     regs[DS1307_REG_WDAY] |
+				     MCP794XX_BIT_VBATEN);
+		}
+
+		/* clock halted?  turn it on, so clock can tick. */
+		if (!(tmp & MCP794XX_BIT_ST)) {
+			regmap_write(ds1307->regmap, DS1307_REG_SECS,
+				     MCP794XX_BIT_ST);
+			dev_warn(ds1307->dev, "SET TIME!\n");
+			goto read_rtc;
+		}
+
+		break;
+	default:
+		break;
 	}
 
 	tmp = regs[DS1307_REG_HOUR];

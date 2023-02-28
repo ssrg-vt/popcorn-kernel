@@ -37,7 +37,6 @@ static void __iomem *zynq_clkc_base;
 #define SLCR_CAN_MIOCLK_CTRL		(zynq_clkc_base + 0x60)
 #define SLCR_DBG_CLK_CTRL		(zynq_clkc_base + 0x64)
 #define SLCR_PCAP_CLK_CTRL		(zynq_clkc_base + 0x68)
-#define SLCR_TOPSW_CLK_CTRL		(zynq_clkc_base + 0x6c)
 #define SLCR_FPGA0_CLK_CTRL		(zynq_clkc_base + 0x70)
 #define SLCR_621_TRUE			(zynq_clkc_base + 0xc4)
 #define SLCR_SWDT_CLK_SEL		(zynq_clkc_base + 0x204)
@@ -99,48 +98,6 @@ static const char *const gem1_emio_input_names[] __initconst = {
 	"gem1_emio_clk"};
 static const char *const swdt_ext_clk_input_names[] __initconst = {
 	"swdt_ext_clk"};
-
-#ifdef CONFIG_SUSPEND
-static struct clk *iopll_save_parent;
-
-#define TOPSW_CLK_CTRL_DIS_MASK	BIT(0)
-
-int zynq_clk_suspend_early(void)
-{
-	int ret;
-
-	iopll_save_parent = clk_get_parent(clks[iopll]);
-
-	ret = clk_set_parent(clks[iopll], ps_clk);
-	if (ret)
-		pr_info("%s: reparent iopll failed %d\n", __func__, ret);
-
-	return 0;
-}
-
-void zynq_clk_resume_late(void)
-{
-	clk_set_parent(clks[iopll], iopll_save_parent);
-}
-
-void zynq_clk_topswitch_enable(void)
-{
-	u32 reg;
-
-	reg = readl(SLCR_TOPSW_CLK_CTRL);
-	reg &= ~TOPSW_CLK_CTRL_DIS_MASK;
-	writel(reg, SLCR_TOPSW_CLK_CTRL);
-}
-
-void zynq_clk_topswitch_disable(void)
-{
-	u32 reg;
-
-	reg = readl(SLCR_TOPSW_CLK_CTRL);
-	reg |= TOPSW_CLK_CTRL_DIS_MASK;
-	writel(reg, SLCR_TOPSW_CLK_CTRL);
-}
-#endif
 
 static void __init zynq_clk_register_fclk(enum zynq_clk fclk,
 		const char *clk_name, void __iomem *fclk_ctrl_reg,
@@ -400,14 +357,14 @@ static void __init zynq_clk_setup(struct device_node *np)
 				periph_parents, enable);
 	}
 
-	zynq_clk_register_periph_clk(lqspi, clk_max, clk_output_name[lqspi], NULL,
-				     SLCR_LQSPI_CLK_CTRL, periph_parents, 0);
+	zynq_clk_register_periph_clk(lqspi, 0, clk_output_name[lqspi], NULL,
+			SLCR_LQSPI_CLK_CTRL, periph_parents, 0);
 
-	zynq_clk_register_periph_clk(smc, clk_max, clk_output_name[smc], NULL,
-				     SLCR_SMC_CLK_CTRL, periph_parents, 0);
+	zynq_clk_register_periph_clk(smc, 0, clk_output_name[smc], NULL,
+			SLCR_SMC_CLK_CTRL, periph_parents, 0);
 
-	zynq_clk_register_periph_clk(pcap, clk_max, clk_output_name[pcap], NULL,
-				     SLCR_PCAP_CLK_CTRL, periph_parents, 0);
+	zynq_clk_register_periph_clk(pcap, 0, clk_output_name[pcap], NULL,
+			SLCR_PCAP_CLK_CTRL, periph_parents, 0);
 
 	zynq_clk_register_periph_clk(sdio0, sdio1, clk_output_name[sdio0],
 			clk_output_name[sdio1], SLCR_SDIO_CLK_CTRL,

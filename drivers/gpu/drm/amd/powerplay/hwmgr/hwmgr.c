@@ -194,7 +194,6 @@ int hwmgr_sw_init(struct pp_hwmgr *hwmgr)
 		return -EINVAL;
 
 	phm_register_irq_handlers(hwmgr);
-	pr_info("hwmgr_sw_init smu backed is %s\n", hwmgr->smumgr_funcs->name);
 
 	return hwmgr->smumgr_funcs->smu_init(hwmgr);
 }

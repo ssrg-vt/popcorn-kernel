@@ -105,8 +105,12 @@
 };
 
 &ehci {
-	phys = <&exynos_usbphy 2>, <&exynos_usbphy 3>;
-	phy-names = "hsic0", "hsic1";
+	port@1 {
+		status = "okay";
+	};
+	port@2 {
+		status = "okay";
+	};
 };
 
 &sound {

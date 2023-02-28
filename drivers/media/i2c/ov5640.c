@@ -132,8 +132,6 @@ static const struct ov5640_pixfmt ov5640_formats[] = {
 	{ MEDIA_BUS_FMT_JPEG_1X8, V4L2_COLORSPACE_JPEG, },
 	{ MEDIA_BUS_FMT_UYVY8_2X8, V4L2_COLORSPACE_SRGB, },
 	{ MEDIA_BUS_FMT_YUYV8_2X8, V4L2_COLORSPACE_SRGB, },
-	{ MEDIA_BUS_FMT_UYVY8_1X16, V4L2_COLORSPACE_SRGB, },
-	{ MEDIA_BUS_FMT_YUYV8_1X16, V4L2_COLORSPACE_SRGB, },
 	{ MEDIA_BUS_FMT_RGB565_2X8_LE, V4L2_COLORSPACE_SRGB, },
 	{ MEDIA_BUS_FMT_RGB565_2X8_BE, V4L2_COLORSPACE_SRGB, },
 	{ MEDIA_BUS_FMT_SBGGR8_1X8, V4L2_COLORSPACE_SRGB, },
@@ -160,8 +158,8 @@ static const int ov5640_framerates[] = {
 /* regulator supplies */
 static const char * const ov5640_supply_name[] = {
 	"DOVDD", /* Digital I/O (1.8V) supply */
-	"AVDD",  /* Analog (2.8V) supply */
 	"DVDD",  /* Digital Core (1.5V) supply */
+	"AVDD",  /* Analog (2.8V) supply */
 };
 
 #define OV5640_NUM_SUPPLIES ARRAY_SIZE(ov5640_supply_name)
@@ -1450,7 +1448,6 @@ static int ov5640_get_light_freq(struct ov5640_dev *sensor)
 			light_freq = 50;
 		} else {
 			/* 60Hz */
-			light_freq = 60;
 		}
 	}
 
@@ -2250,13 +2247,11 @@ static int ov5640_set_framefmt(struct ov5640_dev *sensor,
 
 	switch (format->code) {
 	case MEDIA_BUS_FMT_UYVY8_2X8:
-	case MEDIA_BUS_FMT_UYVY8_1X16:
 		/* YUV422, UYVY */
 		fmt = 0x3f;
 		mux = OV5640_FMT_MUX_YUV422;
 		break;
 	case MEDIA_BUS_FMT_YUYV8_2X8:
-	case MEDIA_BUS_FMT_YUYV8_1X16:
 		/* YUV422, YUYV */
 		fmt = 0x30;
 		mux = OV5640_FMT_MUX_YUV422;
@@ -2571,13 +2566,6 @@ static int ov5640_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	int val;
 
 	/* v4l2_ctrl_lock() locks our own mutex */
-
-	/*
-	 * If the sensor is not powered up by the host driver, do
-	 * not try to access it to update the volatile controls.
-	 */
-	if (sensor->power_count == 0)
-		return 0;
 
 	switch (ctrl->id) {
 	case V4L2_CID_AUTOGAIN:
@@ -2948,7 +2936,8 @@ power_off:
 	return ret;
 }
 
-static int ov5640_probe(struct i2c_client *client)
+static int ov5640_probe(struct i2c_client *client,
+			const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
 	struct fwnode_handle *endpoint;
@@ -3066,7 +3055,7 @@ static int ov5640_probe(struct i2c_client *client)
 	if (ret)
 		goto entity_cleanup;
 
-	ret = v4l2_async_register_subdev_sensor_common(&sensor->sd);
+	ret = v4l2_async_register_subdev(&sensor->sd);
 	if (ret)
 		goto free_ctrls;
 
@@ -3111,7 +3100,7 @@ static struct i2c_driver ov5640_i2c_driver = {
 		.of_match_table	= ov5640_dt_ids,
 	},
 	.id_table = ov5640_id,
-	.probe_new = ov5640_probe,
+	.probe    = ov5640_probe,
 	.remove   = ov5640_remove,
 };
 

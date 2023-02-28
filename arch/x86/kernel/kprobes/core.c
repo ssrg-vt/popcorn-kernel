@@ -56,7 +56,7 @@
 DEFINE_PER_CPU(struct kprobe *, current_kprobe) = NULL;
 DEFINE_PER_CPU(struct kprobe_ctlblk, kprobe_ctlblk);
 
-#define stack_addr(regs) ((unsigned long *)regs->sp)
+#define stack_addr(regs) ((unsigned long *)kernel_stack_pointer(regs))
 
 #define W(row, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, ba, bb, bc, bd, be, bf)\
 	(((b0##UL << 0x0)|(b1##UL << 0x1)|(b2##UL << 0x2)|(b3##UL << 0x3) |   \
@@ -580,7 +580,7 @@ static void setup_singlestep(struct kprobe *p, struct pt_regs *regs,
 	if (setup_detour_execution(p, regs, reenter))
 		return;
 
-#if !defined(CONFIG_PREEMPTION)
+#if !defined(CONFIG_PREEMPT)
 	if (p->ainsn.boostable && !p->post_handler) {
 		/* Boost up -- we can execute copied instructions directly */
 		if (!reenter)
@@ -718,27 +718,29 @@ asm(
 	".global kretprobe_trampoline\n"
 	".type kretprobe_trampoline, @function\n"
 	"kretprobe_trampoline:\n"
-	/* We don't bother saving the ss register */
 #ifdef CONFIG_X86_64
+	/* We don't bother saving the ss register */
 	"	pushq %rsp\n"
 	"	pushfq\n"
 	SAVE_REGS_STRING
 	"	movq %rsp, %rdi\n"
 	"	call trampoline_handler\n"
 	/* Replace saved sp with true return address. */
-	"	movq %rax, 19*8(%rsp)\n"
+	"	movq %rax, 152(%rsp)\n"
 	RESTORE_REGS_STRING
 	"	popfq\n"
 #else
-	"	pushl %esp\n"
-	"	pushfl\n"
+	"	pushf\n"
 	SAVE_REGS_STRING
 	"	movl %esp, %eax\n"
 	"	call trampoline_handler\n"
-	/* Replace saved sp with true return address. */
-	"	movl %eax, 15*4(%esp)\n"
+	/* Move flags to cs */
+	"	movl 56(%esp), %edx\n"
+	"	movl %edx, 52(%esp)\n"
+	/* Replace saved flags with true return address. */
+	"	movl %eax, 56(%esp)\n"
 	RESTORE_REGS_STRING
-	"	popfl\n"
+	"	popf\n"
 #endif
 	"	ret\n"
 	".size kretprobe_trampoline, .-kretprobe_trampoline\n"
@@ -779,13 +781,16 @@ __used __visible void *trampoline_handler(struct pt_regs *regs)
 	INIT_HLIST_HEAD(&empty_rp);
 	kretprobe_hash_lock(current, &head, &flags);
 	/* fixup registers */
+#ifdef CONFIG_X86_64
 	regs->cs = __KERNEL_CS;
-#ifdef CONFIG_X86_32
-	regs->cs |= get_kernel_rpl();
-	regs->gs = 0;
-#endif
-	/* We use pt_regs->sp for return address holder. */
+	/* On x86-64, we use pt_regs->sp for return address holder. */
 	frame_pointer = &regs->sp;
+#else
+	regs->cs = __KERNEL_CS | get_kernel_rpl();
+	regs->gs = 0;
+	/* On x86-32, we use pt_regs->flags for return address holder. */
+	frame_pointer = &regs->flags;
+#endif
 	regs->ip = trampoline_address;
 	regs->orig_ax = ~0UL;
 
@@ -808,7 +813,7 @@ __used __visible void *trampoline_handler(struct pt_regs *regs)
 			continue;
 		/*
 		 * Return probes must be pushed on this hash list correct
-		 * order (same as return order) so that it can be popped
+		 * order (same as return order) so that it can be poped
 		 * correctly. However, if we find it is pushed it incorrect
 		 * order, this means we find a function which should not be
 		 * probed, because the wrong order entry is pushed on the

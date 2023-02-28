@@ -9,8 +9,7 @@ described here. It's recommended to follow these conventions whenever a
 new function or type is added to keep libbpf API clean and consistent.
 
 All types and functions provided by libbpf API should have one of the
-following prefixes: ``bpf_``, ``btf_``, ``libbpf_``, ``xsk_``,
-``perf_buffer_``.
+following prefixes: ``bpf_``, ``btf_``, ``libbpf_``, ``xsk_``.
 
 System call wrappers
 --------------------

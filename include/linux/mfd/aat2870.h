@@ -136,6 +136,7 @@ struct aat2870_data {
 
 	/* for debugfs */
 	struct dentry *dentry_root;
+	struct dentry *dentry_reg;
 };
 
 struct aat2870_subdev_info {

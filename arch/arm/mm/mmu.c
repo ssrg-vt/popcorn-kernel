@@ -729,9 +729,9 @@ static void __init *early_alloc(unsigned long sz)
 
 static void *__init late_alloc(unsigned long sz)
 {
-	void *ptr = (void *)__get_free_pages(GFP_PGTABLE_KERNEL, get_order(sz));
+	void *ptr = (void *)__get_free_pages(PGALLOC_GFP, get_order(sz));
 
-	if (!ptr || !pgtable_pte_page_ctor(virt_to_page(ptr)))
+	if (!ptr || !pgtable_page_ctor(virt_to_page(ptr)))
 		BUG();
 	return ptr;
 }
@@ -1197,9 +1197,6 @@ void __init adjust_lowmem_bounds(void)
 		phys_addr_t block_start = reg->base;
 		phys_addr_t block_end = reg->base + reg->size;
 
-		if (memblock_is_nomap(reg))
-			continue;
-
 		if (reg->base < vmalloc_limit) {
 			if (block_end > lowmem_limit)
 				/*
@@ -1620,7 +1617,7 @@ static void __init early_fixmap_shutdown(void)
 		pte_t *pte;
 		struct map_desc map;
 
-		map.virtual = fix_to_virt(i);
+		map.virtual = __fix_to_virt(i);
 		pte = pte_offset_early_fixmap(pmd_off_k(map.virtual), map.virtual);
 
 		/* Only i/o device mappings are supported ATM */

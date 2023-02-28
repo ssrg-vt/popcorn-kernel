@@ -3554,8 +3554,10 @@ static int __init amifb_probe(struct platform_device *pdev)
 	custom.dmacon = DMAF_ALL | DMAF_MASTER;
 
 	info = framebuffer_alloc(sizeof(struct amifb_par), &pdev->dev);
-	if (!info)
+	if (!info) {
+		dev_err(&pdev->dev, "framebuffer_alloc failed\n");
 		return -ENOMEM;
+	}
 
 	strcpy(info->fix.id, "Amiga ");
 	info->fix.visual = FB_VISUAL_PSEUDOCOLOR;

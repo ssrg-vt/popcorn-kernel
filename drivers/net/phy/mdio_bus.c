@@ -42,17 +42,21 @@
 
 static int mdiobus_register_gpiod(struct mdio_device *mdiodev)
 {
-	int error;
+	struct gpio_desc *gpiod = NULL;
 
 	/* Deassert the optional reset signal */
-	mdiodev->reset_gpio = gpiod_get_optional(&mdiodev->dev,
-						 "reset", GPIOD_OUT_LOW);
-	error = PTR_ERR_OR_ZERO(mdiodev->reset_gpio);
-	if (error)
-		return error;
+	if (mdiodev->dev.of_node)
+		gpiod = fwnode_get_named_gpiod(&mdiodev->dev.of_node->fwnode,
+					       "reset-gpios", 0, GPIOD_OUT_LOW,
+					       "PHY reset");
+	if (IS_ERR(gpiod)) {
+		if (PTR_ERR(gpiod) == -ENOENT || PTR_ERR(gpiod) == -ENOSYS)
+			gpiod = NULL;
+		else
+			return PTR_ERR(gpiod);
+	}
 
-	if (mdiodev->reset_gpio)
-		gpiod_set_consumer_name(mdiodev->reset_gpio, "PHY reset");
+	mdiodev->reset_gpio = gpiod;
 
 	return 0;
 }
@@ -64,12 +68,11 @@ static int mdiobus_register_reset(struct mdio_device *mdiodev)
 	if (mdiodev->dev.of_node)
 		reset = devm_reset_control_get_exclusive(&mdiodev->dev,
 							 "phy");
-	if (IS_ERR(reset)) {
-		if (PTR_ERR(reset) == -ENOENT || PTR_ERR(reset) == -ENOTSUPP)
-			reset = NULL;
-		else
-			return PTR_ERR(reset);
-	}
+	if (PTR_ERR(reset) == -ENOENT ||
+	    PTR_ERR(reset) == -ENOTSUPP)
+		reset = NULL;
+	else if (IS_ERR(reset))
+		return PTR_ERR(reset);
 
 	mdiodev->reset_ctrl = reset;
 
@@ -259,6 +262,11 @@ static struct class mdio_bus_class = {
 };
 
 #if IS_ENABLED(CONFIG_OF_MDIO)
+/* Helper function for of_mdio_find_bus */
+static int of_mdio_bus_match(struct device *dev, const void *mdio_bus_np)
+{
+	return dev->of_node == mdio_bus_np;
+}
 /**
  * of_mdio_find_bus - Given an mii_bus node, find the mii_bus.
  * @mdio_bus_np: Pointer to the mii_bus.
@@ -279,7 +287,9 @@ struct mii_bus *of_mdio_find_bus(struct device_node *mdio_bus_np)
 	if (!mdio_bus_np)
 		return NULL;
 
-	d = class_find_device_by_of_node(&mdio_bus_class, mdio_bus_np);
+	d = class_find_device(&mdio_bus_class, NULL,  mdio_bus_np,
+			      of_mdio_bus_match);
+
 	return d ? to_mii_bus(d) : NULL;
 }
 EXPORT_SYMBOL(of_mdio_find_bus);

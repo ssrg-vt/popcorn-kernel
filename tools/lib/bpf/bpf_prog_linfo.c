@@ -6,7 +6,10 @@
 #include <linux/err.h>
 #include <linux/bpf.h>
 #include "libbpf.h"
-#include "libbpf_internal.h"
+
+#ifndef min
+#define min(x, y) ((x) < (y) ? (x) : (y))
+#endif
 
 struct bpf_prog_linfo {
 	void *raw_linfo;

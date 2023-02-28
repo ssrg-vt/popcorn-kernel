@@ -13,7 +13,8 @@
 #include <linux/kdev_t.h>
 #include <linux/idr.h>
 #include <linux/pm_runtime.h>
-#include <linux/greybus.h>
+
+#include "greybus.h"
 
 struct gb_vibrator_device {
 	struct gb_connection	*connection;

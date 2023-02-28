@@ -17,7 +17,6 @@
 
 #include <linux/thermal.h>
 #include <linux/regmap.h>
-#include <linux/slab.h>
 
 struct tsens_priv;
 

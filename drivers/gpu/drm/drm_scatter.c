@@ -1,4 +1,4 @@
-/*
+/**
  * \file drm_scatter.c
  * IOCTLs to manage scatter/gather memory
  *
@@ -31,14 +31,9 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#include <linux/mm.h>
-#include <linux/slab.h>
 #include <linux/vmalloc.h>
-
-#include <drm/drm.h>
-#include <drm/drm_drv.h>
-#include <drm/drm_print.h>
-
+#include <linux/slab.h>
+#include <drm/drmP.h>
 #include "drm_legacy.h"
 
 #define DEBUG_SCATTER 0

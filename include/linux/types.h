@@ -174,7 +174,7 @@ typedef struct {
 
 #ifdef CONFIG_64BIT
 typedef struct {
-	s64 counter;
+	long counter;
 } atomic64_t;
 #endif
 

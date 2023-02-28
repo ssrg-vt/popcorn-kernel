@@ -42,7 +42,7 @@
 			    VGIC_AFFINITY_LEVEL(val, 3))
 
 /*
- * As per Documentation/virt/kvm/devices/arm-vgic-v3.txt,
+ * As per Documentation/virtual/kvm/devices/arm-vgic-v3.txt,
  * below macros are defined for CPUREG encoding.
  */
 #define KVM_REG_ARM_VGIC_SYSREG_OP0_MASK   0x000000000000c000
@@ -63,7 +63,7 @@
 				      KVM_REG_ARM_VGIC_SYSREG_OP2_MASK)
 
 /*
- * As per Documentation/virt/kvm/devices/arm-vgic-its.txt,
+ * As per Documentation/virtual/kvm/devices/arm-vgic-its.txt,
  * below macros are defined for ITS table entry encoding.
  */
 #define KVM_ITS_CTE_VALID_SHIFT		63
@@ -161,7 +161,6 @@ vgic_get_mmio_region(struct kvm_vcpu *vcpu, struct vgic_io_device *iodev,
 		     gpa_t addr, int len);
 struct vgic_irq *vgic_get_irq(struct kvm *kvm, struct kvm_vcpu *vcpu,
 			      u32 intid);
-void __vgic_put_lpi_locked(struct kvm *kvm, struct vgic_irq *irq);
 void vgic_put_irq(struct kvm *kvm, struct vgic_irq *irq);
 bool vgic_get_phys_line_level(struct vgic_irq *irq);
 void vgic_irq_set_phys_pending(struct vgic_irq *irq, bool pending);
@@ -308,10 +307,6 @@ int vgic_copy_lpi_list(struct kvm *kvm, struct kvm_vcpu *vcpu, u32 **intid_ptr);
 int vgic_its_resolve_lpi(struct kvm *kvm, struct vgic_its *its,
 			 u32 devid, u32 eventid, struct vgic_irq **irq);
 struct vgic_its *vgic_msi_to_its(struct kvm *kvm, struct kvm_msi *msi);
-int vgic_its_inject_cached_translation(struct kvm *kvm, struct kvm_msi *msi);
-void vgic_lpi_translation_cache_init(struct kvm *kvm);
-void vgic_lpi_translation_cache_destroy(struct kvm *kvm);
-void vgic_its_invalidate_cache(struct kvm *kvm);
 
 bool vgic_supports_direct_msis(struct kvm *kvm);
 int vgic_v4_init(struct kvm *kvm);

@@ -454,7 +454,7 @@ static int sprd_pinconf_get(struct pinctrl_dev *pctldev, unsigned int pin_id,
 	if (pin->type == GLOBAL_CTRL_PIN &&
 	    param == SPRD_PIN_CONFIG_CONTROL) {
 		arg = reg;
-	} else if (pin->type == COMMON_PIN || pin->type == MISC_PIN) {
+	} else if (pin->type == COMMON_PIN) {
 		switch (param) {
 		case SPRD_PIN_CONFIG_SLEEP_MODE:
 			arg = (reg >> SLEEP_MODE_SHIFT) & SLEEP_MODE_MASK;
@@ -465,6 +465,14 @@ static int sprd_pinconf_get(struct pinctrl_dev *pctldev, unsigned int pin_id,
 		case PIN_CONFIG_OUTPUT:
 			arg = reg & SLEEP_OUTPUT_MASK;
 			break;
+		case PIN_CONFIG_SLEEP_HARDWARE_STATE:
+			arg = 0;
+			break;
+		default:
+			return -ENOTSUPP;
+		}
+	} else if (pin->type == MISC_PIN) {
+		switch (param) {
 		case PIN_CONFIG_DRIVE_STRENGTH:
 			arg = (reg >> DRIVE_STRENGTH_SHIFT) &
 				DRIVE_STRENGTH_MASK;
@@ -598,7 +606,7 @@ static int sprd_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin_id,
 		if (pin->type == GLOBAL_CTRL_PIN &&
 		    param == SPRD_PIN_CONFIG_CONTROL) {
 			val = arg;
-		} else if (pin->type == COMMON_PIN || pin->type == MISC_PIN) {
+		} else if (pin->type == COMMON_PIN) {
 			switch (param) {
 			case SPRD_PIN_CONFIG_SLEEP_MODE:
 				if (arg & AP_SLEEP)
@@ -631,6 +639,13 @@ static int sprd_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin_id,
 					shift = SLEEP_OUTPUT_SHIFT;
 				}
 				break;
+			case PIN_CONFIG_SLEEP_HARDWARE_STATE:
+				continue;
+			default:
+				return -ENOTSUPP;
+			}
+		} else if (pin->type == MISC_PIN) {
+			switch (param) {
 			case PIN_CONFIG_DRIVE_STRENGTH:
 				if (arg < 2 || arg > 60)
 					return -EINVAL;
@@ -925,10 +940,8 @@ static int sprd_pinctrl_parse_dt(struct sprd_pinctrl *sprd_pctl)
 
 	for_each_child_of_node(np, child) {
 		ret = sprd_pinctrl_parse_groups(child, sprd_pctl, grp);
-		if (ret) {
-			of_node_put(child);
+		if (ret)
 			return ret;
-		}
 
 		*temp++ = grp->name;
 		grp++;
@@ -937,11 +950,8 @@ static int sprd_pinctrl_parse_dt(struct sprd_pinctrl *sprd_pctl)
 			for_each_child_of_node(child, sub_child) {
 				ret = sprd_pinctrl_parse_groups(sub_child,
 								sprd_pctl, grp);
-				if (ret) {
-					of_node_put(sub_child);
-					of_node_put(child);
+				if (ret)
 					return ret;
-				}
 
 				*temp++ = grp->name;
 				grp++;
@@ -1010,6 +1020,7 @@ int sprd_pinctrl_core_probe(struct platform_device *pdev,
 	struct sprd_pinctrl *sprd_pctl;
 	struct sprd_pinctrl_soc_info *pinctrl_info;
 	struct pinctrl_pin_desc *pin_desc;
+	struct resource *res;
 	int ret, i;
 
 	sprd_pctl = devm_kzalloc(&pdev->dev, sizeof(struct sprd_pinctrl),
@@ -1017,7 +1028,8 @@ int sprd_pinctrl_core_probe(struct platform_device *pdev,
 	if (!sprd_pctl)
 		return -ENOMEM;
 
-	sprd_pctl->base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	sprd_pctl->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(sprd_pctl->base))
 		return PTR_ERR(sprd_pctl->base);
 

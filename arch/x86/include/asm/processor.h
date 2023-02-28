@@ -105,7 +105,7 @@ struct cpuinfo_x86 {
 	int			x86_power;
 	unsigned long		loops_per_jiffy;
 	/* cpuid returned max cores value: */
-	u16			x86_max_cores;
+	u16			 x86_max_cores;
 	u16			apicid;
 	u16			initial_apicid;
 	u16			x86_clflush_size;
@@ -117,8 +117,6 @@ struct cpuinfo_x86 {
 	u16			logical_proc_id;
 	/* Core id: */
 	u16			cpu_core_id;
-	u16			cpu_die_id;
-	u16			logical_die_id;
 	/* Index into per_cpu list: */
 	u16			cpu_index;
 	u32			microcode;
@@ -146,8 +144,7 @@ enum cpuid_regs_idx {
 #define X86_VENDOR_TRANSMETA	7
 #define X86_VENDOR_NSC		8
 #define X86_VENDOR_HYGON	9
-#define X86_VENDOR_ZHAOXIN	10
-#define X86_VENDOR_NUM		11
+#define X86_VENDOR_NUM		10
 
 #define X86_VENDOR_UNKNOWN	0xff
 
@@ -741,7 +738,6 @@ extern void load_direct_gdt(int);
 extern void load_fixmap_gdt(int);
 extern void load_percpu_segment(int);
 extern void cpu_init(void);
-extern void cr4_init(void);
 
 static inline unsigned long get_debugctlmsr(void)
 {
@@ -868,7 +864,7 @@ static inline void spin_lock_prefetch(const void *x)
  */
 #define TASK_SIZE_MAX	((1UL << __VIRTUAL_MASK_SHIFT) - PAGE_SIZE)
 
-#define DEFAULT_MAP_WINDOW	((1UL << 47) - PAGE_SIZE)
+#define DEFAULT_MAP_WINDOW	((1UL << 38) - PAGE_SIZE)
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
@@ -986,13 +982,6 @@ enum mds_mitigations {
 	MDS_MITIGATION_OFF,
 	MDS_MITIGATION_FULL,
 	MDS_MITIGATION_VMWERV,
-};
-
-enum taa_mitigations {
-	TAA_MITIGATION_OFF,
-	TAA_MITIGATION_UCODE_NEEDED,
-	TAA_MITIGATION_VERW,
-	TAA_MITIGATION_TSX_DISABLED,
 };
 
 #endif /* _ASM_X86_PROCESSOR_H */

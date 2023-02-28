@@ -2,7 +2,6 @@
 /* Copyright (c) 2019 Mellanox Technologies. */
 
 #include <linux/netdevice.h>
-#include <net/nexthop.h>
 #include "lag.h"
 #include "lag_mp.h"
 #include "mlx5_core.h"
@@ -111,8 +110,6 @@ static void mlx5_lag_fib_route_event(struct mlx5_lag *ldev,
 				     struct fib_info *fi)
 {
 	struct lag_mp *mp = &ldev->lag_mp;
-	struct fib_nh *fib_nh0, *fib_nh1;
-	unsigned int nhs;
 
 	/* Handle delete event */
 	if (event == FIB_EVENT_ENTRY_DEL) {
@@ -123,11 +120,9 @@ static void mlx5_lag_fib_route_event(struct mlx5_lag *ldev,
 	}
 
 	/* Handle add/replace event */
-	nhs = fib_info_num_path(fi);
-	if (nhs == 1) {
+	if (fi->fib_nhs == 1) {
 		if (__mlx5_lag_is_active(ldev)) {
-			struct fib_nh *nh = fib_info_nh(fi, 0);
-			struct net_device *nh_dev = nh->fib_nh_dev;
+			struct net_device *nh_dev = fi->fib_nh[0].fib_nh_dev;
 			int i = mlx5_lag_dev_get_netdev_idx(ldev, nh_dev);
 
 			mlx5_lag_set_port_affinity(ldev, ++i);
@@ -135,16 +130,14 @@ static void mlx5_lag_fib_route_event(struct mlx5_lag *ldev,
 		return;
 	}
 
-	if (nhs != 2)
+	if (fi->fib_nhs != 2)
 		return;
 
 	/* Verify next hops are ports of the same hca */
-	fib_nh0 = fib_info_nh(fi, 0);
-	fib_nh1 = fib_info_nh(fi, 1);
-	if (!(fib_nh0->fib_nh_dev == ldev->pf[0].netdev &&
-	      fib_nh1->fib_nh_dev == ldev->pf[1].netdev) &&
-	    !(fib_nh0->fib_nh_dev == ldev->pf[1].netdev &&
-	      fib_nh1->fib_nh_dev == ldev->pf[0].netdev)) {
+	if (!(fi->fib_nh[0].fib_nh_dev == ldev->pf[0].netdev &&
+	      fi->fib_nh[1].fib_nh_dev == ldev->pf[1].netdev) &&
+	    !(fi->fib_nh[0].fib_nh_dev == ldev->pf[1].netdev &&
+	      fi->fib_nh[1].fib_nh_dev == ldev->pf[0].netdev)) {
 		mlx5_core_warn(ldev->pf[0].dev, "Multipath offload require two ports of the same HCA\n");
 		return;
 	}
@@ -181,7 +174,7 @@ static void mlx5_lag_fib_nexthop_event(struct mlx5_lag *ldev,
 			mlx5_lag_set_port_affinity(ldev, i);
 		}
 	} else if (event == FIB_EVENT_NH_ADD &&
-		   fib_info_num_path(fi) == 2) {
+		   fi->fib_nhs == 2) {
 		mlx5_lag_set_port_affinity(ldev, 0);
 	}
 }
@@ -245,11 +238,7 @@ static int mlx5_lag_fib_event(struct notifier_block *nb,
 	struct mlx5_fib_event_work *fib_work;
 	struct fib_entry_notifier_info *fen_info;
 	struct fib_nh_notifier_info *fnh_info;
-	struct net_device *fib_dev;
 	struct fib_info *fi;
-
-	if (!net_eq(info->net, &init_net))
-		return NOTIFY_DONE;
 
 	if (info->family != AF_INET)
 		return NOTIFY_DONE;
@@ -265,13 +254,8 @@ static int mlx5_lag_fib_event(struct notifier_block *nb,
 		fen_info = container_of(info, struct fib_entry_notifier_info,
 					info);
 		fi = fen_info->fi;
-		if (fi->nh) {
-			NL_SET_ERR_MSG_MOD(info->extack, "IPv4 route with nexthop objects is not supported");
-			return notifier_from_errno(-EINVAL);
-		}
-		fib_dev = fib_info_nh(fen_info->fi, 0)->fib_nh_dev;
-		if (fib_dev != ldev->pf[0].netdev &&
-		    fib_dev != ldev->pf[1].netdev) {
+		if (fi->fib_dev != ldev->pf[0].netdev &&
+		    fi->fib_dev != ldev->pf[1].netdev) {
 			return NOTIFY_DONE;
 		}
 		fib_work = mlx5_lag_init_fib_work(ldev, event);

@@ -20,10 +20,6 @@
 #include <linux/firmware.h>
 #include <linux/of_device.h>
 #include <linux/property.h>
-#include <linux/irq.h>
-#include <linux/interrupt.h>
-#include <linux/irqdomain.h>
-#include <linux/workqueue.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -691,12 +687,10 @@ static void rt5677_set_dsp_mode(struct snd_soc_component *component, bool on)
 	struct rt5677_priv *rt5677 = snd_soc_component_get_drvdata(component);
 
 	if (on) {
-		regmap_update_bits(rt5677->regmap, RT5677_PWR_DSP1,
-			RT5677_PWR_DSP, RT5677_PWR_DSP);
+		regmap_update_bits(rt5677->regmap, RT5677_PWR_DSP1, 0x2, 0x2);
 		rt5677->is_dsp_mode = true;
 	} else {
-		regmap_update_bits(rt5677->regmap, RT5677_PWR_DSP1,
-			RT5677_PWR_DSP, 0x0);
+		regmap_update_bits(rt5677->regmap, RT5677_PWR_DSP1, 0x2, 0x0);
 		rt5677->is_dsp_mode = false;
 	}
 }
@@ -835,13 +829,13 @@ static const struct snd_kcontrol_new rt5677_snd_controls[] = {
 
 	/* DAC Digital Volume */
 	SOC_DOUBLE_TLV("DAC1 Playback Volume", RT5677_DAC1_DIG_VOL,
-		RT5677_L_VOL_SFT, RT5677_R_VOL_SFT, 127, 0, dac_vol_tlv),
+		RT5677_L_VOL_SFT, RT5677_R_VOL_SFT, 87, 0, dac_vol_tlv),
 	SOC_DOUBLE_TLV("DAC2 Playback Volume", RT5677_DAC2_DIG_VOL,
-		RT5677_L_VOL_SFT, RT5677_R_VOL_SFT, 127, 0, dac_vol_tlv),
+		RT5677_L_VOL_SFT, RT5677_R_VOL_SFT, 87, 0, dac_vol_tlv),
 	SOC_DOUBLE_TLV("DAC3 Playback Volume", RT5677_DAC3_DIG_VOL,
-		RT5677_L_VOL_SFT, RT5677_R_VOL_SFT, 127, 0, dac_vol_tlv),
+		RT5677_L_VOL_SFT, RT5677_R_VOL_SFT, 87, 0, dac_vol_tlv),
 	SOC_DOUBLE_TLV("DAC4 Playback Volume", RT5677_DAC4_DIG_VOL,
-		RT5677_L_VOL_SFT, RT5677_R_VOL_SFT, 127, 0, dac_vol_tlv),
+		RT5677_L_VOL_SFT, RT5677_R_VOL_SFT, 87, 0, dac_vol_tlv),
 
 	/* IN1/IN2 Control */
 	SOC_SINGLE_TLV("IN1 Boost", RT5677_IN1, RT5677_BST_SFT1, 8, 0, bst_tlv),
@@ -2610,8 +2604,7 @@ static const struct snd_soc_dapm_widget rt5677_dapm_widgets[] = {
 	SND_SOC_DAPM_SUPPLY_S("I2S2 ASRC", 1, RT5677_ASRC_1, 1, 0, NULL, 0),
 	SND_SOC_DAPM_SUPPLY_S("I2S3 ASRC", 1, RT5677_ASRC_1, 2, 0, NULL, 0),
 	SND_SOC_DAPM_SUPPLY_S("I2S4 ASRC", 1, RT5677_ASRC_1, 3, 0, NULL, 0),
-	SND_SOC_DAPM_SUPPLY_S("DAC STO ASRC", 1, RT5677_ASRC_2, 14, 0,
-		rt5677_filter_power_event, SND_SOC_DAPM_POST_PMU),
+	SND_SOC_DAPM_SUPPLY_S("DAC STO ASRC", 1, RT5677_ASRC_2, 14, 0, NULL, 0),
 	SND_SOC_DAPM_SUPPLY_S("DAC MONO2 L ASRC", 1, RT5677_ASRC_2, 13, 0, NULL,
 		0),
 	SND_SOC_DAPM_SUPPLY_S("DAC MONO2 R ASRC", 1, RT5677_ASRC_2, 12, 0, NULL,
@@ -4468,8 +4461,7 @@ static int rt5677_set_bias_level(struct snd_soc_component *component,
 
 			regmap_update_bits(rt5677->regmap, RT5677_PWR_ANLG1,
 				RT5677_LDO1_SEL_MASK | RT5677_LDO2_SEL_MASK,
-				5 << RT5677_LDO1_SEL_SFT |
-				5 << RT5677_LDO2_SEL_SFT);
+				0x0055);
 			regmap_update_bits(rt5677->regmap,
 				RT5677_PR_BASE + RT5677_BIAS_CUR4,
 				0x0f00, 0x0f00);
@@ -4493,11 +4485,9 @@ static int rt5677_set_bias_level(struct snd_soc_component *component,
 	case SND_SOC_BIAS_OFF:
 		regmap_update_bits(rt5677->regmap, RT5677_DIG_MISC, 0x1, 0x0);
 		regmap_write(rt5677->regmap, RT5677_PWR_DIG1, 0x0000);
-		regmap_write(rt5677->regmap, RT5677_PWR_ANLG1,
-			2 << RT5677_LDO1_SEL_SFT |
-			2 << RT5677_LDO2_SEL_SFT);
-		regmap_update_bits(rt5677->regmap, RT5677_PWR_ANLG2,
-			RT5677_PWR_CORE, 0);
+		regmap_write(rt5677->regmap, RT5677_PWR_DIG2, 0x0000);
+		regmap_write(rt5677->regmap, RT5677_PWR_ANLG1, 0x0022);
+		regmap_write(rt5677->regmap, RT5677_PWR_ANLG2, 0x0000);
 		regmap_update_bits(rt5677->regmap,
 			RT5677_PR_BASE + RT5677_BIAS_CUR4, 0x0f00, 0x0000);
 
@@ -4627,6 +4617,7 @@ static void rt5677_gpio_config(struct rt5677_priv *rt5677, unsigned offset,
 static int rt5677_to_irq(struct gpio_chip *chip, unsigned offset)
 {
 	struct rt5677_priv *rt5677 = gpiochip_get_data(chip);
+	struct regmap_irq_chip_data *data = rt5677->irq_data;
 	int irq;
 
 	if ((rt5677->pdata.jd1_gpio == 1 && offset == RT5677_GPIO1) ||
@@ -4652,11 +4643,11 @@ static int rt5677_to_irq(struct gpio_chip *chip, unsigned offset)
 		return -ENXIO;
 	}
 
-	return irq_create_mapping(rt5677->domain, irq);
+	return regmap_irq_get_virq(data, irq);
 }
 
 static const struct gpio_chip rt5677_template_chip = {
-	.label			= RT5677_DRV_NAME,
+	.label			= "rt5677",
 	.owner			= THIS_MODULE,
 	.direction_output	= rt5677_gpio_direction_out,
 	.set			= rt5677_gpio_set,
@@ -4722,13 +4713,36 @@ static int rt5677_probe(struct snd_soc_component *component)
 
 	snd_soc_component_force_bias_level(component, SND_SOC_BIAS_OFF);
 
-	regmap_update_bits(rt5677->regmap, RT5677_DIG_MISC,
-			~RT5677_IRQ_DEBOUNCE_SEL_MASK, 0x0020);
-	regmap_write(rt5677->regmap, RT5677_PWR_DSP2,
-			RT5677_PWR_SLIM_ISO | RT5677_PWR_CORE_ISO);
+	regmap_write(rt5677->regmap, RT5677_DIG_MISC, 0x0020);
+	regmap_write(rt5677->regmap, RT5677_PWR_DSP2, 0x0c00);
 
 	for (i = 0; i < RT5677_GPIO_NUM; i++)
 		rt5677_gpio_config(rt5677, i, rt5677->pdata.gpio_config[i]);
+
+	if (rt5677->irq_data) {
+		regmap_update_bits(rt5677->regmap, RT5677_GPIO_CTRL1, 0x8000,
+			0x8000);
+		regmap_update_bits(rt5677->regmap, RT5677_DIG_MISC, 0x0018,
+			0x0008);
+
+		if (rt5677->pdata.jd1_gpio)
+			regmap_update_bits(rt5677->regmap, RT5677_JD_CTRL1,
+				RT5677_SEL_GPIO_JD1_MASK,
+				rt5677->pdata.jd1_gpio <<
+				RT5677_SEL_GPIO_JD1_SFT);
+
+		if (rt5677->pdata.jd2_gpio)
+			regmap_update_bits(rt5677->regmap, RT5677_JD_CTRL1,
+				RT5677_SEL_GPIO_JD2_MASK,
+				rt5677->pdata.jd2_gpio <<
+				RT5677_SEL_GPIO_JD2_SFT);
+
+		if (rt5677->pdata.jd3_gpio)
+			regmap_update_bits(rt5677->regmap, RT5677_JD_CTRL1,
+				RT5677_SEL_GPIO_JD3_MASK,
+				rt5677->pdata.jd3_gpio <<
+				RT5677_SEL_GPIO_JD3_SFT);
+	}
 
 	mutex_init(&rt5677->dsp_cmd_lock);
 	mutex_init(&rt5677->dsp_pri_lock);
@@ -4941,7 +4955,6 @@ static struct snd_soc_dai_driver rt5677_dai[] = {
 };
 
 static const struct snd_soc_component_driver soc_component_dev_rt5677 = {
-	.name			= RT5677_DRV_NAME,
 	.probe			= rt5677_probe,
 	.remove			= rt5677_remove,
 	.suspend		= rt5677_suspend,
@@ -5003,202 +5016,80 @@ static const struct acpi_device_id rt5677_acpi_match[] = {
 };
 MODULE_DEVICE_TABLE(acpi, rt5677_acpi_match);
 
-static void rt5677_read_device_properties(struct rt5677_priv *rt5677,
+static void rt5677_read_acpi_properties(struct rt5677_priv *rt5677,
 		struct device *dev)
 {
 	u32 val;
 
-	rt5677->pdata.in1_diff =
-		device_property_read_bool(dev, "IN1") ||
-		device_property_read_bool(dev, "realtek,in1-differential");
-
-	rt5677->pdata.in2_diff =
-		device_property_read_bool(dev, "IN2") ||
-		device_property_read_bool(dev, "realtek,in2-differential");
-
-	rt5677->pdata.lout1_diff =
-		device_property_read_bool(dev, "OUT1") ||
-		device_property_read_bool(dev, "realtek,lout1-differential");
-
-	rt5677->pdata.lout2_diff =
-		device_property_read_bool(dev, "OUT2") ||
-		device_property_read_bool(dev, "realtek,lout2-differential");
-
-	rt5677->pdata.lout3_diff =
-		device_property_read_bool(dev, "OUT3") ||
-		device_property_read_bool(dev, "realtek,lout3-differential");
-
-	device_property_read_u8_array(dev, "realtek,gpio-config",
-				      rt5677->pdata.gpio_config,
-				      RT5677_GPIO_NUM);
-
-	if (!device_property_read_u32(dev, "DCLK", &val) ||
-	    !device_property_read_u32(dev, "realtek,dmic2_clk_pin", &val))
+	if (!device_property_read_u32(dev, "DCLK", &val))
 		rt5677->pdata.dmic2_clk_pin = val;
 
-	if (!device_property_read_u32(dev, "JD1", &val) ||
-	    !device_property_read_u32(dev, "realtek,jd1-gpio", &val))
-		rt5677->pdata.jd1_gpio = val;
+	rt5677->pdata.in1_diff = device_property_read_bool(dev, "IN1");
+	rt5677->pdata.in2_diff = device_property_read_bool(dev, "IN2");
+	rt5677->pdata.lout1_diff = device_property_read_bool(dev, "OUT1");
+	rt5677->pdata.lout2_diff = device_property_read_bool(dev, "OUT2");
+	rt5677->pdata.lout3_diff = device_property_read_bool(dev, "OUT3");
 
-	if (!device_property_read_u32(dev, "JD2", &val) ||
-	    !device_property_read_u32(dev, "realtek,jd2-gpio", &val))
-		rt5677->pdata.jd2_gpio = val;
-
-	if (!device_property_read_u32(dev, "JD3", &val) ||
-	    !device_property_read_u32(dev, "realtek,jd3-gpio", &val))
-		rt5677->pdata.jd3_gpio = val;
+	device_property_read_u32(dev, "JD1", &rt5677->pdata.jd1_gpio);
+	device_property_read_u32(dev, "JD2", &rt5677->pdata.jd2_gpio);
+	device_property_read_u32(dev, "JD3", &rt5677->pdata.jd3_gpio);
 }
 
-struct rt5677_irq_desc {
-	unsigned int enable_mask;
-	unsigned int status_mask;
-	unsigned int polarity_mask;
-};
+static void rt5677_read_device_properties(struct rt5677_priv *rt5677,
+		struct device *dev)
+{
+	rt5677->pdata.in1_diff = device_property_read_bool(dev,
+			"realtek,in1-differential");
+	rt5677->pdata.in2_diff = device_property_read_bool(dev,
+			"realtek,in2-differential");
+	rt5677->pdata.lout1_diff = device_property_read_bool(dev,
+			"realtek,lout1-differential");
+	rt5677->pdata.lout2_diff = device_property_read_bool(dev,
+			"realtek,lout2-differential");
+	rt5677->pdata.lout3_diff = device_property_read_bool(dev,
+			"realtek,lout3-differential");
 
-static const struct rt5677_irq_desc rt5677_irq_descs[] = {
+	device_property_read_u8_array(dev, "realtek,gpio-config",
+			rt5677->pdata.gpio_config, RT5677_GPIO_NUM);
+
+	device_property_read_u32(dev, "realtek,jd1-gpio",
+			&rt5677->pdata.jd1_gpio);
+	device_property_read_u32(dev, "realtek,jd2-gpio",
+			&rt5677->pdata.jd2_gpio);
+	device_property_read_u32(dev, "realtek,jd3-gpio",
+			&rt5677->pdata.jd3_gpio);
+}
+
+static struct regmap_irq rt5677_irqs[] = {
 	[RT5677_IRQ_JD1] = {
-		.enable_mask = RT5677_EN_IRQ_GPIO_JD1,
-		.status_mask = RT5677_STA_GPIO_JD1,
-		.polarity_mask = RT5677_INV_GPIO_JD1,
+		.reg_offset = 0,
+		.mask = RT5677_EN_IRQ_GPIO_JD1,
 	},
 	[RT5677_IRQ_JD2] = {
-		.enable_mask = RT5677_EN_IRQ_GPIO_JD2,
-		.status_mask = RT5677_STA_GPIO_JD2,
-		.polarity_mask = RT5677_INV_GPIO_JD2,
+		.reg_offset = 0,
+		.mask = RT5677_EN_IRQ_GPIO_JD2,
 	},
 	[RT5677_IRQ_JD3] = {
-		.enable_mask = RT5677_EN_IRQ_GPIO_JD3,
-		.status_mask = RT5677_STA_GPIO_JD3,
-		.polarity_mask = RT5677_INV_GPIO_JD3,
+		.reg_offset = 0,
+		.mask = RT5677_EN_IRQ_GPIO_JD3,
 	},
 };
 
-static irqreturn_t rt5677_irq(int unused, void *data)
-{
-	struct rt5677_priv *rt5677 = data;
-	int ret = 0, loop, i, reg_irq, virq;
-	bool irq_fired = false;
+static struct regmap_irq_chip rt5677_irq_chip = {
+	.name = "rt5677",
+	.irqs = rt5677_irqs,
+	.num_irqs = ARRAY_SIZE(rt5677_irqs),
 
-	mutex_lock(&rt5677->irq_lock);
-
-	/*
-	 * Loop to handle interrupts until the last i2c read shows no pending
-	 * irqs. The interrupt line is shared by multiple interrupt sources.
-	 * After the regmap_read() below, a new interrupt source line may
-	 * become high before the regmap_write() finishes, so there isn't a
-	 * rising edge on the shared interrupt line for the new interrupt. Thus,
-	 * the loop is needed to avoid missing irqs.
-	 *
-	 * A safeguard of 20 loops is used to avoid hanging in the irq handler
-	 * if there is something wrong with the interrupt status update. The
-	 * interrupt sources here are audio jack plug/unplug events which
-	 * shouldn't happen at a high frequency for a long period of time.
-	 * Empirically, more than 3 loops have never been seen.
-	 */
-	for (loop = 0; loop < 20; loop++) {
-		/* Read interrupt status */
-		ret = regmap_read(rt5677->regmap, RT5677_IRQ_CTRL1, &reg_irq);
-		if (ret) {
-			dev_err(rt5677->dev, "failed reading IRQ status: %d\n",
-				ret);
-			goto exit;
-		}
-
-		irq_fired = false;
-		for (i = 0; i < RT5677_IRQ_NUM; i++) {
-			if (reg_irq & rt5677_irq_descs[i].status_mask) {
-				irq_fired = true;
-				virq = irq_find_mapping(rt5677->domain, i);
-				if (virq)
-					handle_nested_irq(virq);
-
-				/* Clear the interrupt by flipping the polarity
-				 * of the interrupt source line that fired
-				 */
-				reg_irq ^= rt5677_irq_descs[i].polarity_mask;
-			}
-		}
-		if (!irq_fired)
-			goto exit;
-
-		ret = regmap_write(rt5677->regmap, RT5677_IRQ_CTRL1, reg_irq);
-		if (ret) {
-			dev_err(rt5677->dev, "failed updating IRQ status: %d\n",
-				ret);
-			goto exit;
-		}
-	}
-exit:
-	mutex_unlock(&rt5677->irq_lock);
-	if (irq_fired)
-		return IRQ_HANDLED;
-	else
-		return IRQ_NONE;
-}
-
-static void rt5677_irq_bus_lock(struct irq_data *data)
-{
-	struct rt5677_priv *rt5677 = irq_data_get_irq_chip_data(data);
-
-	mutex_lock(&rt5677->irq_lock);
-}
-
-static void rt5677_irq_bus_sync_unlock(struct irq_data *data)
-{
-	struct rt5677_priv *rt5677 = irq_data_get_irq_chip_data(data);
-
-	// Set the enable/disable bits for the jack detect IRQs.
-	regmap_update_bits(rt5677->regmap, RT5677_IRQ_CTRL1,
-			RT5677_EN_IRQ_GPIO_JD1 | RT5677_EN_IRQ_GPIO_JD2 |
-			RT5677_EN_IRQ_GPIO_JD3, rt5677->irq_en);
-	mutex_unlock(&rt5677->irq_lock);
-}
-
-static void rt5677_irq_enable(struct irq_data *data)
-{
-	struct rt5677_priv *rt5677 = irq_data_get_irq_chip_data(data);
-
-	rt5677->irq_en |= rt5677_irq_descs[data->hwirq].enable_mask;
-}
-
-static void rt5677_irq_disable(struct irq_data *data)
-{
-	struct rt5677_priv *rt5677 = irq_data_get_irq_chip_data(data);
-
-	rt5677->irq_en &= ~rt5677_irq_descs[data->hwirq].enable_mask;
-}
-
-static struct irq_chip rt5677_irq_chip = {
-	.name			= "rt5677_irq_chip",
-	.irq_bus_lock		= rt5677_irq_bus_lock,
-	.irq_bus_sync_unlock	= rt5677_irq_bus_sync_unlock,
-	.irq_disable		= rt5677_irq_disable,
-	.irq_enable		= rt5677_irq_enable,
-};
-
-static int rt5677_irq_map(struct irq_domain *h, unsigned int virq,
-			  irq_hw_number_t hw)
-{
-	struct rt5677_priv *rt5677 = h->host_data;
-
-	irq_set_chip_data(virq, rt5677);
-	irq_set_chip(virq, &rt5677_irq_chip);
-	irq_set_nested_thread(virq, 1);
-	irq_set_noprobe(virq);
-	return 0;
-}
-
-
-static const struct irq_domain_ops rt5677_domain_ops = {
-	.map	= rt5677_irq_map,
-	.xlate	= irq_domain_xlate_twocell,
+	.num_regs = 1,
+	.status_base = RT5677_IRQ_CTRL1,
+	.mask_base = RT5677_IRQ_CTRL1,
+	.mask_invert = 1,
 };
 
 static int rt5677_init_irq(struct i2c_client *i2c)
 {
 	int ret;
 	struct rt5677_priv *rt5677 = i2c_get_clientdata(i2c);
-	unsigned int jd_mask = 0, jd_val = 0;
 
 	if (!rt5677->pdata.jd1_gpio &&
 		!rt5677->pdata.jd2_gpio &&
@@ -5210,53 +5101,24 @@ static int rt5677_init_irq(struct i2c_client *i2c)
 		return -EINVAL;
 	}
 
-	mutex_init(&rt5677->irq_lock);
+	ret = regmap_add_irq_chip(rt5677->regmap, i2c->irq,
+		IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_ONESHOT, 0,
+		&rt5677_irq_chip, &rt5677->irq_data);
 
-	/*
-	 * Select RC as the debounce clock so that GPIO works even when
-	 * MCLK is gated which happens when there is no audio stream
-	 * (SND_SOC_BIAS_OFF).
-	 */
-	regmap_update_bits(rt5677->regmap, RT5677_DIG_MISC,
-			RT5677_IRQ_DEBOUNCE_SEL_MASK,
-			RT5677_IRQ_DEBOUNCE_SEL_RC);
-	/* Enable auto power on RC when GPIO states are changed */
-	regmap_update_bits(rt5677->regmap, RT5677_GEN_CTRL1, 0xff, 0xff);
-
-	/* Select and enable jack detection sources per platform data */
-	if (rt5677->pdata.jd1_gpio) {
-		jd_mask	|= RT5677_SEL_GPIO_JD1_MASK;
-		jd_val	|= rt5677->pdata.jd1_gpio << RT5677_SEL_GPIO_JD1_SFT;
-	}
-	if (rt5677->pdata.jd2_gpio) {
-		jd_mask	|= RT5677_SEL_GPIO_JD2_MASK;
-		jd_val	|= rt5677->pdata.jd2_gpio << RT5677_SEL_GPIO_JD2_SFT;
-	}
-	if (rt5677->pdata.jd3_gpio) {
-		jd_mask	|= RT5677_SEL_GPIO_JD3_MASK;
-		jd_val	|= rt5677->pdata.jd3_gpio << RT5677_SEL_GPIO_JD3_SFT;
-	}
-	regmap_update_bits(rt5677->regmap, RT5677_JD_CTRL1, jd_mask, jd_val);
-
-	/* Set GPIO1 pin to be IRQ output */
-	regmap_update_bits(rt5677->regmap, RT5677_GPIO_CTRL1,
-			RT5677_GPIO1_PIN_MASK, RT5677_GPIO1_PIN_IRQ);
-
-	/* Ready to listen for interrupts */
-	rt5677->domain = irq_domain_add_linear(i2c->dev.of_node,
-			RT5677_IRQ_NUM, &rt5677_domain_ops, rt5677);
-	if (!rt5677->domain) {
-		dev_err(&i2c->dev, "Failed to create IRQ domain\n");
-		return -ENOMEM;
+	if (ret != 0) {
+		dev_err(&i2c->dev, "Failed to register IRQ chip: %d\n", ret);
+		return ret;
 	}
 
-	ret = devm_request_threaded_irq(&i2c->dev, i2c->irq, NULL, rt5677_irq,
-			IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-			"rt5677", rt5677);
-	if (ret)
-		dev_err(&i2c->dev, "Failed to request IRQ: %d\n", ret);
+	return 0;
+}
 
-	return ret;
+static void rt5677_free_irq(struct i2c_client *i2c)
+{
+	struct rt5677_priv *rt5677 = i2c_get_clientdata(i2c);
+
+	if (rt5677->irq_data)
+		regmap_del_irq_chip(i2c->irq, rt5677->irq_data);
 }
 
 static int rt5677_i2c_probe(struct i2c_client *i2c)
@@ -5270,7 +5132,6 @@ static int rt5677_i2c_probe(struct i2c_client *i2c)
 	if (rt5677 == NULL)
 		return -ENOMEM;
 
-	rt5677->dev = &i2c->dev;
 	i2c_set_clientdata(i2c, rt5677);
 
 	if (i2c->dev.of_node) {
@@ -5279,17 +5140,19 @@ static int rt5677_i2c_probe(struct i2c_client *i2c)
 		match_id = of_match_device(rt5677_of_match, &i2c->dev);
 		if (match_id)
 			rt5677->type = (enum rt5677_type)match_id->data;
+
+		rt5677_read_device_properties(rt5677, &i2c->dev);
 	} else if (ACPI_HANDLE(&i2c->dev)) {
 		const struct acpi_device_id *acpi_id;
 
 		acpi_id = acpi_match_device(rt5677_acpi_match, &i2c->dev);
 		if (acpi_id)
 			rt5677->type = (enum rt5677_type)acpi_id->driver_data;
+
+		rt5677_read_acpi_properties(rt5677, &i2c->dev);
 	} else {
 		return -EINVAL;
 	}
-
-	rt5677_read_device_properties(rt5677, &i2c->dev);
 
 	/* pow-ldo2 and reset are optional. The codec pins may be statically
 	 * connected on the board without gpios. If the gpio device property
@@ -5384,9 +5247,7 @@ static int rt5677_i2c_probe(struct i2c_client *i2c)
 			RT5677_MICBIAS1_CTRL_VDD_3_3V);
 
 	rt5677_init_gpio(i2c);
-	ret = rt5677_init_irq(i2c);
-	if (ret)
-		dev_err(&i2c->dev, "Failed to initialize irq: %d\n", ret);
+	rt5677_init_irq(i2c);
 
 	return devm_snd_soc_register_component(&i2c->dev,
 				      &soc_component_dev_rt5677,
@@ -5395,6 +5256,7 @@ static int rt5677_i2c_probe(struct i2c_client *i2c)
 
 static int rt5677_i2c_remove(struct i2c_client *i2c)
 {
+	rt5677_free_irq(i2c);
 	rt5677_free_gpio(i2c);
 
 	return 0;
@@ -5402,7 +5264,7 @@ static int rt5677_i2c_remove(struct i2c_client *i2c)
 
 static struct i2c_driver rt5677_i2c_driver = {
 	.driver = {
-		.name = RT5677_DRV_NAME,
+		.name = "rt5677",
 		.of_match_table = rt5677_of_match,
 		.acpi_match_table = ACPI_PTR(rt5677_acpi_match),
 	},

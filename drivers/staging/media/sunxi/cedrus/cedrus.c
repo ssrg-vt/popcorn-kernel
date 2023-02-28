@@ -29,70 +29,15 @@
 
 static const struct cedrus_control cedrus_controls[] = {
 	{
-		.cfg = {
-			.id	= V4L2_CID_MPEG_VIDEO_MPEG2_SLICE_PARAMS,
-		},
+		.id		= V4L2_CID_MPEG_VIDEO_MPEG2_SLICE_PARAMS,
+		.elem_size	= sizeof(struct v4l2_ctrl_mpeg2_slice_params),
 		.codec		= CEDRUS_CODEC_MPEG2,
 		.required	= true,
 	},
 	{
-		.cfg = {
-			.id	= V4L2_CID_MPEG_VIDEO_MPEG2_QUANTIZATION,
-		},
+		.id		= V4L2_CID_MPEG_VIDEO_MPEG2_QUANTIZATION,
+		.elem_size	= sizeof(struct v4l2_ctrl_mpeg2_quantization),
 		.codec		= CEDRUS_CODEC_MPEG2,
-		.required	= false,
-	},
-	{
-		.cfg = {
-			.id	= V4L2_CID_MPEG_VIDEO_H264_DECODE_PARAMS,
-		},
-		.codec		= CEDRUS_CODEC_H264,
-		.required	= true,
-	},
-	{
-		.cfg = {
-			.id	= V4L2_CID_MPEG_VIDEO_H264_SLICE_PARAMS,
-		},
-		.codec		= CEDRUS_CODEC_H264,
-		.required	= true,
-	},
-	{
-		.cfg = {
-			.id	= V4L2_CID_MPEG_VIDEO_H264_SPS,
-		},
-		.codec		= CEDRUS_CODEC_H264,
-		.required	= true,
-	},
-	{
-		.cfg = {
-			.id	= V4L2_CID_MPEG_VIDEO_H264_PPS,
-		},
-		.codec		= CEDRUS_CODEC_H264,
-		.required	= true,
-	},
-	{
-		.cfg = {
-			.id	= V4L2_CID_MPEG_VIDEO_H264_SCALING_MATRIX,
-		},
-		.codec		= CEDRUS_CODEC_H264,
-		.required	= true,
-	},
-	{
-		.cfg = {
-			.id	= V4L2_CID_MPEG_VIDEO_H264_DECODE_MODE,
-			.max	= V4L2_MPEG_VIDEO_H264_DECODE_MODE_SLICE_BASED,
-			.def	= V4L2_MPEG_VIDEO_H264_DECODE_MODE_SLICE_BASED,
-		},
-		.codec		= CEDRUS_CODEC_H264,
-		.required	= false,
-	},
-	{
-		.cfg = {
-			.id	= V4L2_CID_MPEG_VIDEO_H264_START_CODE,
-			.max	= V4L2_MPEG_VIDEO_H264_START_CODE_NONE,
-			.def	= V4L2_MPEG_VIDEO_H264_START_CODE_NONE,
-		},
-		.codec		= CEDRUS_CODEC_H264,
 		.required	= false,
 	},
 };
@@ -131,8 +76,12 @@ static int cedrus_init_ctrls(struct cedrus_dev *dev, struct cedrus_ctx *ctx)
 		return -ENOMEM;
 
 	for (i = 0; i < CEDRUS_CONTROLS_COUNT; i++) {
-		ctrl = v4l2_ctrl_new_custom(hdl, &cedrus_controls[i].cfg,
-					    NULL);
+		struct v4l2_ctrl_config cfg = {};
+
+		cfg.elem_size = cedrus_controls[i].elem_size;
+		cfg.id = cedrus_controls[i].id;
+
+		ctrl = v4l2_ctrl_new_custom(hdl, &cfg, NULL);
 		if (hdl->error) {
 			v4l2_err(&dev->v4l2_dev,
 				 "Failed to create new custom control\n");
@@ -199,7 +148,7 @@ static int cedrus_request_validate(struct media_request *req)
 			continue;
 
 		ctrl_test = v4l2_ctrl_request_hdl_ctrl_find(hdl,
-							    cedrus_controls[i].cfg.id);
+							    cedrus_controls[i].id);
 		if (!ctrl_test) {
 			v4l2_info(&ctx->dev->v4l2_dev,
 				  "Missing required codec control\n");
@@ -329,7 +278,6 @@ static int cedrus_probe(struct platform_device *pdev)
 	}
 
 	dev->dec_ops[CEDRUS_CODEC_MPEG2] = &cedrus_dec_ops_mpeg2;
-	dev->dec_ops[CEDRUS_CODEC_H264] = &cedrus_dec_ops_h264;
 
 	mutex_init(&dev->dev_mutex);
 
@@ -421,41 +369,36 @@ static int cedrus_remove(struct platform_device *pdev)
 }
 
 static const struct cedrus_variant sun4i_a10_cedrus_variant = {
-	.mod_rate	= 320000000,
+	/* No particular capability. */
 };
 
 static const struct cedrus_variant sun5i_a13_cedrus_variant = {
-	.mod_rate	= 320000000,
+	/* No particular capability. */
 };
 
 static const struct cedrus_variant sun7i_a20_cedrus_variant = {
-	.mod_rate	= 320000000,
+	/* No particular capability. */
 };
 
 static const struct cedrus_variant sun8i_a33_cedrus_variant = {
 	.capabilities	= CEDRUS_CAPABILITY_UNTILED,
-	.mod_rate	= 320000000,
 };
 
 static const struct cedrus_variant sun8i_h3_cedrus_variant = {
 	.capabilities	= CEDRUS_CAPABILITY_UNTILED,
-	.mod_rate	= 402000000,
 };
 
 static const struct cedrus_variant sun50i_a64_cedrus_variant = {
 	.capabilities	= CEDRUS_CAPABILITY_UNTILED,
-	.mod_rate	= 402000000,
 };
 
 static const struct cedrus_variant sun50i_h5_cedrus_variant = {
 	.capabilities	= CEDRUS_CAPABILITY_UNTILED,
-	.mod_rate	= 402000000,
 };
 
 static const struct cedrus_variant sun50i_h6_cedrus_variant = {
 	.capabilities	= CEDRUS_CAPABILITY_UNTILED,
 	.quirks		= CEDRUS_QUIRK_NO_DMA_OFFSET,
-	.mod_rate	= 600000000,
 };
 
 static const struct of_device_id cedrus_dt_match[] = {

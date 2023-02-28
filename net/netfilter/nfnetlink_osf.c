@@ -33,7 +33,6 @@ static inline int nf_osf_ttl(const struct sk_buff *skb,
 {
 	struct in_device *in_dev = __in_dev_get_rcu(skb->dev);
 	const struct iphdr *ip = ip_hdr(skb);
-	const struct in_ifaddr *ifa;
 	int ret = 0;
 
 	if (ttl_check == NF_OSF_TTL_TRUE)
@@ -43,12 +42,14 @@ static inline int nf_osf_ttl(const struct sk_buff *skb,
 	else if (ip->ttl <= f_ttl)
 		return 1;
 
-	in_dev_for_each_ifa_rcu(ifa, in_dev) {
+	for_ifa(in_dev) {
 		if (inet_ifa_match(ip->saddr, ifa)) {
 			ret = (ip->ttl == f_ttl);
 			break;
 		}
 	}
+
+	endfor_ifa(in_dev);
 
 	return ret;
 }

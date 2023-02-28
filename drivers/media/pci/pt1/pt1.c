@@ -1217,7 +1217,8 @@ static void pt1_i2c_init(struct pt1 *pt1)
 
 static int pt1_suspend(struct device *dev)
 {
-	struct pt1 *pt1 = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct pt1 *pt1 = pci_get_drvdata(pdev);
 
 	pt1_init_streams(pt1);
 	pt1_disable_ram(pt1);
@@ -1229,7 +1230,8 @@ static int pt1_suspend(struct device *dev)
 
 static int pt1_resume(struct device *dev)
 {
-	struct pt1 *pt1 = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct pt1 *pt1 = pci_get_drvdata(pdev);
 	int ret;
 	int i;
 

@@ -8,7 +8,6 @@
  */
 
 #include <linux/acpi.h>
-#include <linux/bitfield.h>
 #include <linux/extable.h>
 #include <linux/signal.h>
 #include <linux/mm.h>
@@ -37,6 +36,12 @@
 #include <asm/system_misc.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
+
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 #include <asm/traps.h>
 
 struct fault_info {
@@ -59,6 +64,28 @@ static inline const struct fault_info *esr_to_debug_fault_info(unsigned int esr)
 {
 	return debug_fault_info + DBG_ESR_EVT(esr);
 }
+
+#ifdef CONFIG_KPROBES
+static inline int notify_page_fault(struct pt_regs *regs, unsigned int esr)
+{
+	int ret = 0;
+
+	/* kprobe_running() needs smp_processor_id() */
+	if (!user_mode(regs)) {
+		preempt_disable();
+		if (kprobe_running() && kprobe_fault_handler(regs, esr))
+			ret = 1;
+		preempt_enable();
+	}
+
+	return ret;
+}
+#else
+static inline int notify_page_fault(struct pt_regs *regs, unsigned int esr)
+{
+	return 0;
+}
+#endif
 
 static void data_abort_decode(unsigned int esr)
 {
@@ -87,8 +114,8 @@ static void mem_abort_decode(unsigned int esr)
 	pr_alert("Mem abort info:\n");
 
 	pr_alert("  ESR = 0x%08x\n", esr);
-	pr_alert("  EC = 0x%02lx: %s, IL = %u bits\n",
-		 ESR_ELx_EC(esr), esr_get_class_string(esr),
+	pr_alert("  Exception class = %s, IL = %u bits\n",
+		 esr_get_class_string(esr),
 		 (esr & ESR_ELx_IL) ? 32 : 16);
 	pr_alert("  SET = %lu, FnV = %lu\n",
 		 (esr & ESR_ELx_SET_MASK) >> ESR_ELx_SET_SHIFT,
@@ -110,16 +137,7 @@ static inline bool is_ttbr0_addr(unsigned long addr)
 static inline bool is_ttbr1_addr(unsigned long addr)
 {
 	/* TTBR1 addresses may have a tag if KASAN_SW_TAGS is in use */
-	return arch_kasan_reset_tag(addr) >= PAGE_OFFSET;
-}
-
-static inline unsigned long mm_to_pgd_phys(struct mm_struct *mm)
-{
-	/* Either init_pg_dir or swapper_pg_dir */
-	if (mm == &init_mm)
-		return __pa_symbol(mm->pgd);
-
-	return (unsigned long)virt_to_phys(mm->pgd);
+	return arch_kasan_reset_tag(addr) >= VA_START;
 }
 
 /*
@@ -148,9 +166,10 @@ static void show_pte(unsigned long addr)
 		return;
 	}
 
-	pr_alert("%s pgtable: %luk pages, %llu-bit VAs, pgdp=%016lx\n",
+	pr_alert("%s pgtable: %luk pages, %u-bit VAs, pgdp=%016lx\n",
 		 mm == &init_mm ? "swapper" : "user", PAGE_SIZE / SZ_1K,
-		 vabits_actual, mm_to_pgd_phys(mm));
+		 mm == &init_mm ? VA_BITS : (int)vabits_user,
+		 (unsigned long)virt_to_phys(mm->pgd));
 	pgdp = pgd_offset(mm, addr);
 	pgd = READ_ONCE(*pgdp);
 	pr_alert("[%016lx] pgd=%016llx", addr, pgd_val(pgd));
@@ -251,38 +270,6 @@ static inline bool is_el1_permission_fault(unsigned long addr, unsigned int esr,
 	return false;
 }
 
-static bool __kprobes is_spurious_el1_translation_fault(unsigned long addr,
-							unsigned int esr,
-							struct pt_regs *regs)
-{
-	unsigned long flags;
-	u64 par, dfsc;
-
-	if (ESR_ELx_EC(esr) != ESR_ELx_EC_DABT_CUR ||
-	    (esr & ESR_ELx_FSC_TYPE) != ESR_ELx_FSC_FAULT)
-		return false;
-
-	local_irq_save(flags);
-	asm volatile("at s1e1r, %0" :: "r" (addr));
-	isb();
-	par = read_sysreg(par_el1);
-	local_irq_restore(flags);
-
-	/*
-	 * If we now have a valid translation, treat the translation fault as
-	 * spurious.
-	 */
-	if (!(par & SYS_PAR_EL1_F))
-		return true;
-
-	/*
-	 * If we got a different type of fault from the AT instruction,
-	 * treat the translation fault as spurious.
-	 */
-	dfsc = FIELD_GET(SYS_PAR_EL1_FST, par);
-	return (dfsc & ESR_ELx_FSC_TYPE) != ESR_ELx_FSC_FAULT;
-}
-
 static void die_kernel_fault(const char *msg, unsigned long addr,
 			     unsigned int esr, struct pt_regs *regs)
 {
@@ -309,10 +296,6 @@ static void __do_kernel_fault(unsigned long addr, unsigned int esr,
 	 * We are almost certainly not prepared to handle instruction faults.
 	 */
 	if (!is_el1_instruction_abort(esr) && fixup_exception(regs))
-		return;
-
-	if (WARN_RATELIMIT(is_spurious_el1_translation_fault(addr, esr, regs),
-	    "Ignoring spurious kernel translation fault at virtual address %016lx\n", addr))
 		return;
 
 	if (is_el1_permission_fault(addr, esr, regs)) {
@@ -407,31 +390,53 @@ static void do_bad_area(unsigned long addr, unsigned int esr, struct pt_regs *re
 #define VM_FAULT_BADACCESS	0x020000
 
 static vm_fault_t __do_page_fault(struct mm_struct *mm, unsigned long addr,
-			   unsigned int mm_flags, unsigned long vm_flags)
+			   unsigned int mm_flags, unsigned long vm_flags,
+			   struct task_struct *tsk)
 {
-	struct vm_area_struct *vma = find_vma(mm, addr);
+	struct vm_area_struct *vma;
+	vm_fault_t fault;
 
+	vma = find_vma(mm, addr);
+#ifdef CONFIG_POPCORN
+	/* vma worker should not fault */
+	BUG_ON(tsk->is_worker);
+
+	if (distributed_remote_process(tsk)) {
+		if (!vma || vma->vm_start > addr) {
+			if (vma_server_fetch_vma(tsk, addr) == 0) {
+				/* Replace with updated VMA */
+				vma = find_vma(mm, addr);
+			}
+		}
+	}
+#endif
+	fault = VM_FAULT_BADMAP;
 	if (unlikely(!vma))
-		return VM_FAULT_BADMAP;
+		goto out;
+	if (unlikely(vma->vm_start > addr))
+		goto check_stack;
 
 	/*
 	 * Ok, we have a good vm_area for this memory access, so we can handle
 	 * it.
 	 */
-	if (unlikely(vma->vm_start > addr)) {
-		if (!(vma->vm_flags & VM_GROWSDOWN))
-			return VM_FAULT_BADMAP;
-		if (expand_stack(vma, addr))
-			return VM_FAULT_BADMAP;
-	}
-
+good_area:
 	/*
 	 * Check that the permissions on the VMA allow for the fault which
 	 * occurred.
 	 */
-	if (!(vma->vm_flags & vm_flags))
-		return VM_FAULT_BADACCESS;
+	if (!(vma->vm_flags & vm_flags)) {
+		fault = VM_FAULT_BADACCESS;
+		goto out;
+	}
+
 	return handle_mm_fault(vma, addr & PAGE_MASK, mm_flags);
+
+check_stack:
+	if (vma->vm_flags & VM_GROWSDOWN && !expand_stack(vma, addr))
+		goto good_area;
+out:
+	return fault;
 }
 
 static bool is_el0_instruction_abort(unsigned int esr)
@@ -439,26 +444,21 @@ static bool is_el0_instruction_abort(unsigned int esr)
 	return ESR_ELx_EC(esr) == ESR_ELx_EC_IABT_LOW;
 }
 
-/*
- * Note: not valid for EL1 DC IVAC, but we never use that such that it
- * should fault. EL0 cannot issue DC IVAC (undef).
- */
-static bool is_write_abort(unsigned int esr)
-{
-	return (esr & ESR_ELx_WNR) && !(esr & ESR_ELx_CM);
-}
-
 static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 				   struct pt_regs *regs)
 {
 	const struct fault_info *inf;
-	struct mm_struct *mm = current->mm;
+	struct task_struct *tsk;
+	struct mm_struct *mm;
 	vm_fault_t fault, major = 0;
 	unsigned long vm_flags = VM_READ | VM_WRITE;
 	unsigned int mm_flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
-	if (kprobe_page_fault(regs, esr))
+	if (notify_page_fault(regs, esr))
 		return 0;
+
+	tsk = current;
+	mm  = tsk->mm;
 
 	/*
 	 * If we're in an interrupt or have no user context, we must not take
@@ -472,8 +472,7 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 
 	if (is_el0_instruction_abort(esr)) {
 		vm_flags = VM_EXEC;
-		mm_flags |= FAULT_FLAG_INSTRUCTION;
-	} else if (is_write_abort(esr)) {
+	} else if ((esr & ESR_ELx_WNR) && !(esr & ESR_ELx_CM)) {
 		vm_flags = VM_WRITE;
 		mm_flags |= FAULT_FLAG_WRITE;
 	}
@@ -512,14 +511,12 @@ retry:
 		 */
 		might_sleep();
 #ifdef CONFIG_DEBUG_VM
-		if (!user_mode(regs) && !search_exception_tables(regs->pc)) {
-			up_read(&mm->mmap_sem);
+		if (!user_mode(regs) && !search_exception_tables(regs->pc))
 			goto no_context;
-		}
 #endif
 	}
 
-	fault = __do_page_fault(mm, addr, mm_flags, vm_flags);
+	fault = __do_page_fault(mm, addr, mm_flags, vm_flags, tsk);
 	major |= fault & VM_FAULT_MAJOR;
 
 	if (fault & VM_FAULT_RETRY) {
@@ -545,6 +542,11 @@ retry:
 			goto retry;
 		}
 	}
+#ifdef CONFIG_POPCORN
+	if (distributed_process(current) && (fault & VM_FAULT_RETRY))
+		return 0;
+#endif
+
 	up_read(&mm->mmap_sem);
 
 	/*
@@ -559,11 +561,11 @@ retry:
 		 * that point.
 		 */
 		if (major) {
-			current->maj_flt++;
+			tsk->maj_flt++;
 			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, regs,
 				      addr);
 		} else {
-			current->min_flt++;
+			tsk->min_flt++;
 			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, regs,
 				      addr);
 		}

@@ -578,8 +578,10 @@ static int ac100_rtc_probe(struct platform_device *pdev)
 	chip->regmap = ac100->regmap;
 
 	chip->irq = platform_get_irq(pdev, 0);
-	if (chip->irq < 0)
+	if (chip->irq < 0) {
+		dev_err(&pdev->dev, "No IRQ resource\n");
 		return chip->irq;
+	}
 
 	chip->rtc = devm_rtc_allocate_device(&pdev->dev);
 	if (IS_ERR(chip->rtc))
@@ -610,7 +612,15 @@ static int ac100_rtc_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	return rtc_register_device(chip->rtc);
+	ret = rtc_register_device(chip->rtc);
+	if (ret) {
+		dev_err(&pdev->dev, "unable to register device\n");
+		return ret;
+	}
+
+	dev_info(&pdev->dev, "RTC enabled\n");
+
+	return 0;
 }
 
 static int ac100_rtc_remove(struct platform_device *pdev)

@@ -23,10 +23,8 @@
  * OF THIS SOFTWARE.
  */
 
-#include <drm/drm_device.h>
-#include <drm/drm_drv.h>
+#include <drm/drmP.h>
 #include <drm/drm_gem.h>
-#include <drm/drm_mode.h>
 
 #include "drm_crtc_internal.h"
 

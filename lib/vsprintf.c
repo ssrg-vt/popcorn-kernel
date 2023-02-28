@@ -599,7 +599,7 @@ static char *string_nocheck(char *buf, char *end, const char *s,
 			    struct printf_spec spec)
 {
 	int len = 0;
-	int lim = spec.precision;
+	size_t lim = spec.precision;
 
 	while (lim--) {
 		char c = *s++;
@@ -869,15 +869,6 @@ char *dentry_name(char *buf, char *end, const struct dentry *d, struct printf_sp
 	return widen_string(buf, n, end, spec);
 }
 
-static noinline_for_stack
-char *file_dentry_name(char *buf, char *end, const struct file *f,
-			struct printf_spec spec, const char *fmt)
-{
-	if (check_pointer(&buf, end, f, spec))
-		return buf;
-
-	return dentry_name(buf, end, f->f_path.dentry, spec, fmt);
-}
 #ifdef CONFIG_BLOCK
 static noinline_for_stack
 char *bdev_name(char *buf, char *end, struct block_device *bdev,
@@ -1808,7 +1799,7 @@ char *clock(char *buf, char *end, struct clk *clk, struct printf_spec spec,
 #ifdef CONFIG_COMMON_CLK
 		return string(buf, end, __clk_get_name(clk), spec);
 #else
-		return ptr_to_id(buf, end, clk, spec);
+		return error_string(buf, end, "(%pC?)", spec);
 #endif
 	}
 }
@@ -2175,7 +2166,9 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 	case 'C':
 		return clock(buf, end, ptr, spec, fmt);
 	case 'D':
-		return file_dentry_name(buf, end, ptr, spec, fmt);
+		return dentry_name(buf, end,
+				   ((const struct file *)ptr)->f_path.dentry,
+				   spec, fmt);
 #ifdef CONFIG_BLOCK
 	case 'g':
 		return bdev_name(buf, end, ptr, spec, fmt);

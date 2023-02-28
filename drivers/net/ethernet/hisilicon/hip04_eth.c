@@ -16,8 +16,6 @@
 #include <linux/mfd/syscon.h>
 #include <linux/regmap.h>
 
-#define SC_PPE_RESET_DREQ		0x026C
-
 #define PPE_CFG_RX_ADDR			0x100
 #define PPE_CFG_POOL_GRP		0x300
 #define PPE_CFG_RX_BUF_SIZE		0x400
@@ -35,23 +33,10 @@
 #define GE_MODE_CHANGE_REG		0x1b4
 #define GE_RECV_CONTROL_REG		0x1e0
 #define GE_STATION_MAC_ADDRESS		0x210
-
-#define PPE_CFG_BUS_CTRL_REG		0x424
-#define PPE_CFG_RX_CTRL_REG		0x428
-
-#if defined(CONFIG_HI13X1_GMAC)
-#define PPE_CFG_CPU_ADD_ADDR		0x6D0
-#define PPE_CFG_MAX_FRAME_LEN_REG	0x500
-#define PPE_CFG_RX_PKT_MODE_REG		0x504
-#define PPE_CFG_QOS_VMID_GEN		0x520
-#define PPE_CFG_RX_PKT_INT		0x740
-#define PPE_INTEN			0x700
-#define PPE_INTSTS			0x708
-#define PPE_RINT			0x704
-#define PPE_CFG_STS_MODE		0x880
-#else
 #define PPE_CFG_CPU_ADD_ADDR		0x580
 #define PPE_CFG_MAX_FRAME_LEN_REG	0x408
+#define PPE_CFG_BUS_CTRL_REG		0x424
+#define PPE_CFG_RX_CTRL_REG		0x428
 #define PPE_CFG_RX_PKT_MODE_REG		0x438
 #define PPE_CFG_QOS_VMID_GEN		0x500
 #define PPE_CFG_RX_PKT_INT		0x538
@@ -59,11 +44,7 @@
 #define PPE_INTSTS			0x608
 #define PPE_RINT			0x604
 #define PPE_CFG_STS_MODE		0x700
-#endif /* CONFIG_HI13X1_GMAC */
-
 #define PPE_HIS_RX_PKT_CNT		0x804
-
-#define RESET_DREQ_ALL			0xffffffff
 
 /* REG_INTERRUPT */
 #define RCV_INT				BIT(10)
@@ -76,15 +57,8 @@
 /* TX descriptor config */
 #define TX_FREE_MEM			BIT(0)
 #define TX_READ_ALLOC_L3		BIT(1)
-#if defined(CONFIG_HI13X1_GMAC)
-#define TX_CLEAR_WB			BIT(7)
-#define TX_RELEASE_TO_PPE		BIT(4)
-#define TX_FINISH_CACHE_INV		BIT(6)
-#define TX_POOL_SHIFT			16
-#else
-#define TX_CLEAR_WB			BIT(4)
 #define TX_FINISH_CACHE_INV		BIT(2)
-#endif
+#define TX_CLEAR_WB			BIT(4)
 #define TX_L3_CHECKSUM			BIT(5)
 #define TX_LOOP_BACK			BIT(11)
 
@@ -119,35 +93,18 @@
 #define GE_RX_PORT_EN			BIT(1)
 #define GE_TX_PORT_EN			BIT(2)
 
-#define PPE_CFG_RX_PKT_ALIGN		BIT(18)
-
-#if defined(CONFIG_HI13X1_GMAC)
-#define PPE_CFG_QOS_VMID_GRP_SHIFT	4
-#define PPE_CFG_RX_CTRL_ALIGN_SHIFT	7
-#define PPE_CFG_STS_RX_PKT_CNT_RC	BIT(0)
-#define PPE_CFG_QOS_VMID_MODE		BIT(15)
-#define PPE_CFG_BUS_LOCAL_REL		(BIT(9) | BIT(15) | BIT(19) | BIT(23))
-
-/* buf unit size is cache_line_size, which is 64, so the shift is 6 */
-#define PPE_BUF_SIZE_SHIFT		6
-#define PPE_TX_BUF_HOLD			BIT(31)
-#define CACHE_LINE_MASK			0x3F
-#else
-#define PPE_CFG_QOS_VMID_GRP_SHIFT	8
-#define PPE_CFG_RX_CTRL_ALIGN_SHIFT	11
 #define PPE_CFG_STS_RX_PKT_CNT_RC	BIT(12)
-#define PPE_CFG_QOS_VMID_MODE		BIT(14)
-#define PPE_CFG_BUS_LOCAL_REL		BIT(14)
 
-/* buf unit size is 1, so the shift is 6 */
-#define PPE_BUF_SIZE_SHIFT		0
-#define PPE_TX_BUF_HOLD			0
-#endif /* CONFIG_HI13X1_GMAC */
+#define PPE_CFG_RX_PKT_ALIGN		BIT(18)
+#define PPE_CFG_QOS_VMID_MODE		BIT(14)
+#define PPE_CFG_QOS_VMID_GRP_SHIFT	8
 
 #define PPE_CFG_RX_FIFO_FSFU		BIT(11)
 #define PPE_CFG_RX_DEPTH_SHIFT		16
 #define PPE_CFG_RX_START_SHIFT		0
+#define PPE_CFG_RX_CTRL_ALIGN_SHIFT	11
 
+#define PPE_CFG_BUS_LOCAL_REL		BIT(14)
 #define PPE_CFG_BUS_BIG_ENDIEN		BIT(0)
 
 #define RX_DESC_NUM			128
@@ -171,50 +128,26 @@
 #define HIP04_MIN_TX_COALESCE_FRAMES	100
 
 struct tx_desc {
-#if defined(CONFIG_HI13X1_GMAC)
-	u32 reserved1[2];
-	u32 send_addr;
-	u16 send_size;
-	u16 data_offset;
-	u32 reserved2[7];
-	u32 cfg;
-	u32 wb_addr;
-	u32 reserved3[3];
-#else
 	u32 send_addr;
 	u32 send_size;
 	u32 next_addr;
 	u32 cfg;
 	u32 wb_addr;
-#endif
 } __aligned(64);
 
 struct rx_desc {
-#if defined(CONFIG_HI13X1_GMAC)
-	u32 reserved1[3];
-	u16 pkt_len;
-	u16 reserved_16;
-	u32 reserved2[6];
-	u32 pkt_err;
-	u32 reserved3[5];
-#else
 	u16 reserved_16;
 	u16 pkt_len;
 	u32 reserve1[3];
 	u32 pkt_err;
 	u32 reserve2[4];
-#endif
 };
 
 struct hip04_priv {
 	void __iomem *base;
-#if defined(CONFIG_HI13X1_GMAC)
-	void __iomem *sysctrl_base;
-#endif
 	int phy_mode;
 	int chan;
 	unsigned int port;
-	unsigned int group;
 	unsigned int speed;
 	unsigned int duplex;
 	unsigned int reg_inten;
@@ -237,7 +170,6 @@ struct hip04_priv {
 	dma_addr_t rx_phys[RX_DESC_NUM];
 	unsigned int rx_head;
 	unsigned int rx_buf_size;
-	unsigned int rx_cnt_remaining;
 
 	struct device_node *phy_node;
 	struct phy_device *phy;
@@ -290,13 +222,6 @@ static void hip04_config_port(struct net_device *ndev, u32 speed, u32 duplex)
 	writel_relaxed(val, priv->base + GE_MODE_CHANGE_REG);
 }
 
-static void hip04_reset_dreq(struct hip04_priv *priv)
-{
-#if defined(CONFIG_HI13X1_GMAC)
-	writel_relaxed(RESET_DREQ_ALL, priv->sysctrl_base + SC_PPE_RESET_DREQ);
-#endif
-}
-
 static void hip04_reset_ppe(struct hip04_priv *priv)
 {
 	u32 val, tmp, timeout = 0;
@@ -317,14 +242,14 @@ static void hip04_config_fifo(struct hip04_priv *priv)
 	val |= PPE_CFG_STS_RX_PKT_CNT_RC;
 	writel_relaxed(val, priv->base + PPE_CFG_STS_MODE);
 
-	val = BIT(priv->group);
+	val = BIT(priv->port);
 	regmap_write(priv->map, priv->port * 4 + PPE_CFG_POOL_GRP, val);
 
-	val = priv->group << PPE_CFG_QOS_VMID_GRP_SHIFT;
+	val = priv->port << PPE_CFG_QOS_VMID_GRP_SHIFT;
 	val |= PPE_CFG_QOS_VMID_MODE;
 	writel_relaxed(val, priv->base + PPE_CFG_QOS_VMID_GEN);
 
-	val = RX_BUF_SIZE >> PPE_BUF_SIZE_SHIFT;
+	val = RX_BUF_SIZE;
 	regmap_write(priv->map, priv->port * 4 + PPE_CFG_RX_BUF_SIZE, val);
 
 	val = RX_DESC_NUM << PPE_CFG_RX_DEPTH_SHIFT;
@@ -361,10 +286,8 @@ static void hip04_config_fifo(struct hip04_priv *priv)
 	val |= GE_RX_STRIP_PAD | GE_RX_PAD_EN;
 	writel_relaxed(val, priv->base + GE_RECV_CONTROL_REG);
 
-#ifndef CONFIG_HI13X1_GMAC
 	val = GE_AUTO_NEG_CTL;
 	writel_relaxed(val, priv->base + GE_TX_LOCAL_PAGE_REG);
-#endif
 }
 
 static void hip04_mac_enable(struct net_device *ndev)
@@ -407,18 +330,12 @@ static void hip04_mac_disable(struct net_device *ndev)
 
 static void hip04_set_xmit_desc(struct hip04_priv *priv, dma_addr_t phys)
 {
-	u32 val;
-
-	val = phys >> PPE_BUF_SIZE_SHIFT | PPE_TX_BUF_HOLD;
-	writel(val, priv->base + PPE_CFG_CPU_ADD_ADDR);
+	writel(phys, priv->base + PPE_CFG_CPU_ADD_ADDR);
 }
 
 static void hip04_set_recv_desc(struct hip04_priv *priv, dma_addr_t phys)
 {
-	u32 val;
-
-	val = phys >> PPE_BUF_SIZE_SHIFT;
-	regmap_write(priv->map, priv->port * 4 + PPE_CFG_RX_ADDR, val);
+	regmap_write(priv->map, priv->port * 4 + PPE_CFG_RX_ADDR, phys);
 }
 
 static u32 hip04_recv_cnt(struct hip04_priv *priv)
@@ -526,20 +443,11 @@ hip04_mac_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 
 	priv->tx_skb[tx_head] = skb;
 	priv->tx_phys[tx_head] = phys;
-
-	desc->send_size = (__force u32)cpu_to_be32(skb->len);
-#if defined(CONFIG_HI13X1_GMAC)
-	desc->cfg = (__force u32)cpu_to_be32(TX_CLEAR_WB | TX_FINISH_CACHE_INV
-		| TX_RELEASE_TO_PPE | priv->port << TX_POOL_SHIFT);
-	desc->data_offset = (__force u32)cpu_to_be32(phys & CACHE_LINE_MASK);
-	desc->send_addr =  (__force u32)cpu_to_be32(phys & ~CACHE_LINE_MASK);
-#else
-	desc->cfg = (__force u32)cpu_to_be32(TX_CLEAR_WB | TX_FINISH_CACHE_INV);
-	desc->send_addr = (__force u32)cpu_to_be32(phys);
-#endif
+	desc->send_addr = cpu_to_be32(phys);
+	desc->send_size = cpu_to_be32(skb->len);
+	desc->cfg = cpu_to_be32(TX_CLEAR_WB | TX_FINISH_CACHE_INV);
 	phys = priv->tx_desc_dma + tx_head * sizeof(struct tx_desc);
-	desc->wb_addr = (__force u32)cpu_to_be32(phys +
-		offsetof(struct tx_desc, send_addr));
+	desc->wb_addr = cpu_to_be32(phys);
 	skb_tx_timestamp(skb);
 
 	hip04_set_xmit_desc(priv, phys);
@@ -576,6 +484,7 @@ static int hip04_rx_poll(struct napi_struct *napi, int budget)
 	struct hip04_priv *priv = container_of(napi, struct hip04_priv, napi);
 	struct net_device *ndev = priv->ndev;
 	struct net_device_stats *stats = &ndev->stats;
+	unsigned int cnt = hip04_recv_cnt(priv);
 	struct rx_desc *desc;
 	struct sk_buff *skb;
 	unsigned char *buf;
@@ -588,8 +497,8 @@ static int hip04_rx_poll(struct napi_struct *napi, int budget)
 
 	/* clean up tx descriptors */
 	tx_remaining = hip04_tx_reclaim(ndev, false);
-	priv->rx_cnt_remaining += hip04_recv_cnt(priv);
-	while (priv->rx_cnt_remaining && !last) {
+
+	while (cnt && !last) {
 		buf = priv->rx_buf[priv->rx_head];
 		skb = build_skb(buf, priv->rx_buf_size);
 		if (unlikely(!skb)) {
@@ -602,8 +511,8 @@ static int hip04_rx_poll(struct napi_struct *napi, int budget)
 		priv->rx_phys[priv->rx_head] = 0;
 
 		desc = (struct rx_desc *)skb->data;
-		len = be16_to_cpu((__force __be16)desc->pkt_len);
-		err = be32_to_cpu((__force __be32)desc->pkt_err);
+		len = be16_to_cpu(desc->pkt_len);
+		err = be32_to_cpu(desc->pkt_err);
 
 		if (0 == len) {
 			dev_kfree_skb_any(skb);
@@ -635,13 +544,11 @@ refill:
 		hip04_set_recv_desc(priv, phys);
 
 		priv->rx_head = RX_NEXT(priv->rx_head);
-		if (rx >= budget) {
-			--priv->rx_cnt_remaining;
+		if (rx >= budget)
 			goto done;
-		}
 
-		if (--priv->rx_cnt_remaining == 0)
-			priv->rx_cnt_remaining += hip04_recv_cnt(priv);
+		if (--cnt == 0)
+			cnt = hip04_recv_cnt(priv);
 	}
 
 	if (!(priv->reg_inten & RCV_INT)) {
@@ -726,7 +633,6 @@ static int hip04_mac_open(struct net_device *ndev)
 	int i;
 
 	priv->rx_head = 0;
-	priv->rx_cnt_remaining = 0;
 	priv->tx_head = 0;
 	priv->tx_tail = 0;
 	hip04_reset_ppe(priv);
@@ -905,6 +811,7 @@ static int hip04_mac_probe(struct platform_device *pdev)
 	struct of_phandle_args arg;
 	struct net_device *ndev;
 	struct hip04_priv *priv;
+	struct resource *res;
 	int irq;
 	int ret;
 
@@ -918,21 +825,14 @@ static int hip04_mac_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, ndev);
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 
-	priv->base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	priv->base = devm_ioremap_resource(d, res);
 	if (IS_ERR(priv->base)) {
 		ret = PTR_ERR(priv->base);
 		goto init_fail;
 	}
 
-#if defined(CONFIG_HI13X1_GMAC)
-	priv->sysctrl_base = devm_platform_ioremap_resource(pdev, 1);
-	if (IS_ERR(priv->sysctrl_base)) {
-		ret = PTR_ERR(priv->sysctrl_base);
-		goto init_fail;
-	}
-#endif
-
-	ret = of_parse_phandle_with_fixed_args(node, "port-handle", 3, 0, &arg);
+	ret = of_parse_phandle_with_fixed_args(node, "port-handle", 2, 0, &arg);
 	if (ret < 0) {
 		dev_warn(d, "no port-handle\n");
 		goto init_fail;
@@ -940,7 +840,6 @@ static int hip04_mac_probe(struct platform_device *pdev)
 
 	priv->port = arg.args[0];
 	priv->chan = arg.args[1] * RX_DESC_NUM;
-	priv->group = arg.args[2];
 
 	hrtimer_init(&priv->tx_coalesce_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
@@ -1001,7 +900,6 @@ static int hip04_mac_probe(struct platform_device *pdev)
 	ndev->irq = irq;
 	netif_napi_add(ndev, &priv->napi, hip04_rx_poll, NAPI_POLL_WEIGHT);
 
-	hip04_reset_dreq(priv);
 	hip04_reset_ppe(priv);
 	if (priv->phy_mode == PHY_INTERFACE_MODE_MII)
 		hip04_config_port(ndev, SPEED_100, DUPLEX_FULL);
@@ -1041,6 +939,7 @@ static int hip04_remove(struct platform_device *pdev)
 
 	hip04_free_ring(ndev, d);
 	unregister_netdev(ndev);
+	free_irq(ndev->irq, ndev);
 	of_node_put(priv->phy_node);
 	cancel_work_sync(&priv->tx_timeout_task);
 	free_netdev(ndev);

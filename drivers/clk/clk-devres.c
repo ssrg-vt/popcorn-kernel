@@ -52,8 +52,8 @@ static void devm_clk_bulk_release(struct device *dev, void *res)
 	clk_bulk_put(devres->num_clks, devres->clks);
 }
 
-static int __devm_clk_bulk_get(struct device *dev, int num_clks,
-			       struct clk_bulk_data *clks, bool optional)
+int __must_check devm_clk_bulk_get(struct device *dev, int num_clks,
+		      struct clk_bulk_data *clks)
 {
 	struct clk_bulk_devres *devres;
 	int ret;
@@ -63,10 +63,7 @@ static int __devm_clk_bulk_get(struct device *dev, int num_clks,
 	if (!devres)
 		return -ENOMEM;
 
-	if (optional)
-		ret = clk_bulk_get_optional(dev, num_clks, clks);
-	else
-		ret = clk_bulk_get(dev, num_clks, clks);
+	ret = clk_bulk_get(dev, num_clks, clks);
 	if (!ret) {
 		devres->clks = clks;
 		devres->num_clks = num_clks;
@@ -77,20 +74,7 @@ static int __devm_clk_bulk_get(struct device *dev, int num_clks,
 
 	return ret;
 }
-
-int __must_check devm_clk_bulk_get(struct device *dev, int num_clks,
-		      struct clk_bulk_data *clks)
-{
-	return __devm_clk_bulk_get(dev, num_clks, clks, false);
-}
 EXPORT_SYMBOL_GPL(devm_clk_bulk_get);
-
-int __must_check devm_clk_bulk_get_optional(struct device *dev, int num_clks,
-		      struct clk_bulk_data *clks)
-{
-	return __devm_clk_bulk_get(dev, num_clks, clks, true);
-}
-EXPORT_SYMBOL_GPL(devm_clk_bulk_get_optional);
 
 int __must_check devm_clk_bulk_get_all(struct device *dev,
 				       struct clk_bulk_data **clks)

@@ -44,7 +44,7 @@
 #define smnMP0_FW_INTF			0x30101c0
 #define smnMP1_PUB_CTRL			0x3010b14
 
-bool vega20_is_smc_ram_running(struct pp_hwmgr *hwmgr)
+static bool vega20_is_smc_ram_running(struct pp_hwmgr *hwmgr)
 {
 	struct amdgpu_device *adev = hwmgr->adev;
 	uint32_t mp1_fw_flags;
@@ -163,7 +163,6 @@ static int vega20_copy_table_from_smc(struct pp_hwmgr *hwmgr,
 {
 	struct vega20_smumgr *priv =
 			(struct vega20_smumgr *)(hwmgr->smu_backend);
-	struct amdgpu_device *adev = hwmgr->adev;
 	int ret = 0;
 
 	PP_ASSERT_WITH_CODE(table_id < TABLE_COUNT,
@@ -187,9 +186,6 @@ static int vega20_copy_table_from_smc(struct pp_hwmgr *hwmgr,
 			PPSMC_MSG_TransferTableSmu2Dram, table_id)) == 0,
 			"[CopyTableFromSMC] Attempt to Transfer Table From SMU Failed!",
 			return ret);
-
-	/* flush hdp cache */
-	adev->nbio_funcs->hdp_flush(adev, NULL);
 
 	memcpy(table, priv->smu_tables.entry[table_id].table,
 			priv->smu_tables.entry[table_id].size);
@@ -270,7 +266,6 @@ int vega20_get_activity_monitor_coeff(struct pp_hwmgr *hwmgr,
 {
 	struct vega20_smumgr *priv =
 			(struct vega20_smumgr *)(hwmgr->smu_backend);
-	struct amdgpu_device *adev = hwmgr->adev;
 	int ret = 0;
 
 	PP_ASSERT_WITH_CODE((ret = vega20_send_msg_to_smc_with_parameter(hwmgr,
@@ -288,9 +283,6 @@ int vega20_get_activity_monitor_coeff(struct pp_hwmgr *hwmgr,
 			TABLE_ACTIVITY_MONITOR_COEFF | (workload_type << 16))) == 0,
 			"[GetActivityMonitor] Attempt to Transfer Table From SMU Failed!",
 			return ret);
-
-	/* flush hdp cache */
-	adev->nbio_funcs->hdp_flush(adev, NULL);
 
 	memcpy(table, priv->smu_tables.entry[TABLE_ACTIVITY_MONITOR_COEFF].table,
 			priv->smu_tables.entry[TABLE_ACTIVITY_MONITOR_COEFF].size);
@@ -600,7 +592,6 @@ static int vega20_smc_table_manager(struct pp_hwmgr *hwmgr, uint8_t *table,
 }
 
 const struct pp_smumgr_func vega20_smu_funcs = {
-	.name = "vega20_smu",
 	.smu_init = &vega20_smu_init,
 	.smu_fini = &vega20_smu_fini,
 	.start_smu = &vega20_start_smu,

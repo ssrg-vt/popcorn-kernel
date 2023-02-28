@@ -3,14 +3,13 @@
  * Copyright (c) 2015 MediaTek Inc.
  */
 
-#include <linux/dma-buf.h>
-#include <linux/dma-resv.h>
-
+#include <drm/drmP.h>
 #include <drm/drm_modeset_helper.h>
 #include <drm/drm_fb_helper.h>
-#include <drm/drm_fourcc.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_framebuffer_helper.h>
+#include <linux/dma-buf.h>
+#include <linux/reservation.h>
 
 #include "mtk_drm_drv.h"
 #include "mtk_drm_fb.h"
@@ -25,11 +24,10 @@ static struct drm_framebuffer *mtk_drm_framebuffer_init(struct drm_device *dev,
 					const struct drm_mode_fb_cmd2 *mode,
 					struct drm_gem_object *obj)
 {
-	const struct drm_format_info *info = drm_get_format_info(dev, mode);
 	struct drm_framebuffer *fb;
 	int ret;
 
-	if (info->num_planes != 1)
+	if (drm_format_num_planes(mode->pixel_format) != 1)
 		return ERR_PTR(-EINVAL);
 
 	fb = kzalloc(sizeof(*fb), GFP_KERNEL);
@@ -50,11 +48,38 @@ static struct drm_framebuffer *mtk_drm_framebuffer_init(struct drm_device *dev,
 	return fb;
 }
 
+/*
+ * Wait for any exclusive fence in fb's gem object's reservation object.
+ *
+ * Returns -ERESTARTSYS if interrupted, else 0.
+ */
+int mtk_fb_wait(struct drm_framebuffer *fb)
+{
+	struct drm_gem_object *gem;
+	struct reservation_object *resv;
+	long ret;
+
+	if (!fb)
+		return 0;
+
+	gem = fb->obj[0];
+	if (!gem || !gem->dma_buf || !gem->dma_buf->resv)
+		return 0;
+
+	resv = gem->dma_buf->resv;
+	ret = reservation_object_wait_timeout_rcu(resv, false, true,
+						  MAX_SCHEDULE_TIMEOUT);
+	/* MAX_SCHEDULE_TIMEOUT on success, -ERESTARTSYS if interrupted */
+	if (WARN_ON(ret < 0))
+		return ret;
+
+	return 0;
+}
+
 struct drm_framebuffer *mtk_drm_mode_fb_create(struct drm_device *dev,
 					       struct drm_file *file,
 					       const struct drm_mode_fb_cmd2 *cmd)
 {
-	const struct drm_format_info *info = drm_get_format_info(dev, cmd);
 	struct drm_framebuffer *fb;
 	struct drm_gem_object *gem;
 	unsigned int width = cmd->width;
@@ -62,14 +87,14 @@ struct drm_framebuffer *mtk_drm_mode_fb_create(struct drm_device *dev,
 	unsigned int size, bpp;
 	int ret;
 
-	if (info->num_planes != 1)
+	if (drm_format_num_planes(cmd->pixel_format) != 1)
 		return ERR_PTR(-EINVAL);
 
 	gem = drm_gem_object_lookup(file, cmd->handles[0]);
 	if (!gem)
 		return ERR_PTR(-ENOENT);
 
-	bpp = info->cpp[0];
+	bpp = drm_format_plane_cpp(cmd->pixel_format, 0);
 	size = (height - 1) * cmd->pitches[0] + width * bpp;
 	size += cmd->offsets[0];
 

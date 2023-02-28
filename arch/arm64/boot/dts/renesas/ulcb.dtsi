@@ -26,7 +26,7 @@
 	};
 
 	chosen {
-		bootargs = "ignore_loglevel rw root=/dev/nfs ip=on";
+		bootargs = "ignore_loglevel rw root=/dev/nfs ip=dhcp";
 		stdout-path = "serial0:115200n8";
 	};
 
@@ -428,11 +428,6 @@
 	};
 };
 
-&rwdt {
-	timeout-sec = <60>;
-	status = "okay";
-};
-
 &scif2 {
 	pinctrl-0 = <&scif2_pins>;
 	pinctrl-names = "default";
@@ -481,5 +476,10 @@
 	pinctrl-0 = <&usb1_pins>;
 	pinctrl-names = "default";
 
+	status = "okay";
+};
+
+&rwdt {
+	timeout-sec = <60>;
 	status = "okay";
 };

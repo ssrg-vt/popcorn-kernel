@@ -230,7 +230,6 @@ static struct attribute *ext4_attrs[] = {
 	ATTR_LIST(journal_task),
 	NULL,
 };
-ATTRIBUTE_GROUPS(ext4);
 
 /* Features this copy of ext4 supports */
 EXT4_ATTR_FEATURE(lazy_itable_init);
@@ -241,9 +240,6 @@ EXT4_ATTR_FEATURE(encryption);
 #endif
 #ifdef CONFIG_UNICODE
 EXT4_ATTR_FEATURE(casefold);
-#endif
-#ifdef CONFIG_FS_VERITY
-EXT4_ATTR_FEATURE(verity);
 #endif
 EXT4_ATTR_FEATURE(metadata_csum_seed);
 
@@ -257,13 +253,9 @@ static struct attribute *ext4_feat_attrs[] = {
 #ifdef CONFIG_UNICODE
 	ATTR_LIST(casefold),
 #endif
-#ifdef CONFIG_FS_VERITY
-	ATTR_LIST(verity),
-#endif
 	ATTR_LIST(metadata_csum_seed),
 	NULL,
 };
-ATTRIBUTE_GROUPS(ext4_feat);
 
 static void *calc_ptr(struct ext4_attr *a, struct ext4_sb_info *sbi)
 {
@@ -382,13 +374,13 @@ static const struct sysfs_ops ext4_attr_ops = {
 };
 
 static struct kobj_type ext4_sb_ktype = {
-	.default_groups = ext4_groups,
+	.default_attrs	= ext4_attrs,
 	.sysfs_ops	= &ext4_attr_ops,
 	.release	= ext4_sb_release,
 };
 
 static struct kobj_type ext4_feat_ktype = {
-	.default_groups = ext4_feat_groups,
+	.default_attrs	= ext4_feat_attrs,
 	.sysfs_ops	= &ext4_attr_ops,
 	.release	= (void (*)(struct kobject *))kfree,
 };

@@ -21,7 +21,7 @@
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
-#include <linux/gpio/machine.h>
+#include <mach/hardware.h>
 #include <asm/irq.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
@@ -29,10 +29,8 @@
 #include <asm/mach/time.h>
 #include <asm/mach-types.h>
 #include <asm/page.h>
-
-#include "hardware.h"
+#include <mach/time.h>
 #include "gpio-iop32x.h"
-#include "irqs.h"
 
 /*
  * GLAN Tank timer tick configuration.
@@ -187,8 +185,6 @@ static void glantank_power_off(void)
 static void __init glantank_init_machine(void)
 {
 	register_iop32x_gpio();
-	gpiod_add_lookup_table(&iop3xx_i2c0_gpio_lookup);
-	gpiod_add_lookup_table(&iop3xx_i2c1_gpio_lookup);
 	platform_device_register(&iop3xx_i2c0_device);
 	platform_device_register(&iop3xx_i2c1_device);
 	platform_device_register(&glantank_flash_device);

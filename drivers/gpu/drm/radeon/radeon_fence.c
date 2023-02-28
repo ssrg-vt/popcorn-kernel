@@ -28,21 +28,15 @@
  *    Jerome Glisse <glisse@freedesktop.org>
  *    Dave Airlie
  */
-
-#include <linux/atomic.h>
-#include <linux/firmware.h>
-#include <linux/kref.h>
-#include <linux/sched/signal.h>
 #include <linux/seq_file.h>
-#include <linux/slab.h>
+#include <linux/atomic.h>
 #include <linux/wait.h>
-
-#include <drm/drm_debugfs.h>
-#include <drm/drm_device.h>
-#include <drm/drm_file.h>
-
-#include "radeon.h"
+#include <linux/kref.h>
+#include <linux/slab.h>
+#include <linux/firmware.h>
+#include <drm/drmP.h>
 #include "radeon_reg.h"
+#include "radeon.h"
 #include "radeon_trace.h"
 
 /*

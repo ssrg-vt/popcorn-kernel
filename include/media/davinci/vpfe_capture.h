@@ -32,7 +32,7 @@
 #define CAPTURE_DRV_NAME		"vpfe-capture"
 
 struct vpfe_pixel_format {
-	u32 pixelformat;
+	struct v4l2_fmtdesc fmtdesc;
 	/* bytes per pixel */
 	int bpp;
 };

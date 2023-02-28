@@ -25,8 +25,7 @@
 
 #include "tests.h"
 #include "debug.h"
-#include "event.h"
-#include "perf-sys.h"
+#include "perf.h"
 #include "cloexec.h"
 
 static int fd1;

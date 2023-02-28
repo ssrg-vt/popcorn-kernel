@@ -55,12 +55,16 @@ static int ab8500_ponkey_probe(struct platform_device *pdev)
 	int error;
 
 	irq_dbf = platform_get_irq_byname(pdev, "ONKEY_DBF");
-	if (irq_dbf < 0)
+	if (irq_dbf < 0) {
+		dev_err(&pdev->dev, "No IRQ for ONKEY_DBF, error=%d\n", irq_dbf);
 		return irq_dbf;
+	}
 
 	irq_dbr = platform_get_irq_byname(pdev, "ONKEY_DBR");
-	if (irq_dbr < 0)
+	if (irq_dbr < 0) {
+		dev_err(&pdev->dev, "No IRQ for ONKEY_DBR, error=%d\n", irq_dbr);
 		return irq_dbr;
+	}
 
 	ponkey = devm_kzalloc(&pdev->dev, sizeof(struct ab8500_ponkey),
 			      GFP_KERNEL);

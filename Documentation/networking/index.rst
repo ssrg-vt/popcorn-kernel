@@ -14,10 +14,7 @@ Contents:
    device_drivers/index
    dsa/index
    devlink-info-versions
-   devlink-trap
-   devlink-trap-netdevsim
    ieee802154
-   j1939
    kapi
    z8530book
    msg_zerocopy
@@ -34,7 +31,7 @@ Contents:
    tls
    tls-offload
 
-.. only::  subproject and html
+.. only::  subproject
 
    Indices
    =======

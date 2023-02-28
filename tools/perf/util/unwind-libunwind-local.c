@@ -25,7 +25,6 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <linux/list.h>
-#include <linux/zalloc.h>
 #ifndef REMOTE_UNWIND_LIBUNWIND
 #include <libunwind.h>
 #include <libunwind-ptrace.h>
@@ -37,6 +36,7 @@
 #include "unwind.h"
 #include "map.h"
 #include "symbol.h"
+#include "util.h"
 #include "debug.h"
 #include "asm/bug.h"
 #include "dso.h"
@@ -345,7 +345,7 @@ static int read_unwind_spec_debug_frame(struct dso *dso,
 							__func__,
 							dso->symsrc_filename,
 							debuglink);
-					zfree(&dso->symsrc_filename);
+					free(dso->symsrc_filename);
 				}
 				dso->symsrc_filename = debuglink;
 			} else {

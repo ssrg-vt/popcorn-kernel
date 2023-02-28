@@ -12,32 +12,32 @@ unit prefixes.
 Time/Frequency
 ----------------------------------------
 -mhz		: megahertz
--hz		: hertz (preferred)
--sec		: second
--ms		: millisecond
--us		: microsecond
--ns		: nanosecond
+-hz		: Hertz (preferred)
+-sec		: seconds
+-ms		: milliseconds
+-us		: microseconds
+-ns		: nanoseconds
 
 Distance
 ----------------------------------------
--mm		: millimeter
+-mm		: millimeters
 
 Electricity
 ----------------------------------------
--microamp	: microampere
--microamp-hours : microampere hour
--ohms		: ohm
--micro-ohms	: microohm
--microwatt-hours: microwatt hour
--microvolt	: microvolt
--picofarads	: picofarad
--femtofarads	: femtofarad
+-microamp	: micro amps
+-microamp-hours : micro amp-hours
+-ohms		: Ohms
+-micro-ohms	: micro Ohms
+-microwatt-hours: micro Watt-hours
+-microvolt	: micro volts
+-picofarads	: picofarads
+-femtofarads	: femtofarads
 
 Temperature
 ----------------------------------------
--celsius	: degree Celsius
--millicelsius	: millidegree Celsius
+-celsius	: Degrees Celsius
+-millicelsius	: Degreee milli-Celsius
 
 Pressure
 ----------------------------------------
--kpascal	: kilopascal
+-kpascal	: kiloPascal

@@ -10,9 +10,8 @@
 #include <linux/list.h>
 #include <linux/of.h>
 #include <linux/gfp.h>
+#include <memory/jedec_ddr.h>
 #include <linux/export.h>
-
-#include "jedec_ddr.h"
 #include "of_memory.h"
 
 /**

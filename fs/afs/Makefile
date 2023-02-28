@@ -29,6 +29,7 @@ kafs-y := \
 	server.o \
 	server_list.o \
 	super.o \
+	netdevices.o \
 	vlclient.o \
 	vl_list.o \
 	vl_probe.o \

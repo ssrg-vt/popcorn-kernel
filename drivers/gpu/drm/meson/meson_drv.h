@@ -7,26 +7,14 @@
 #ifndef __MESON_DRV_H
 #define __MESON_DRV_H
 
-#include <linux/device.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/platform_device.h>
 #include <linux/regmap.h>
-
-struct drm_crtc;
-struct drm_device;
-struct drm_plane;
-struct meson_drm;
-
-enum vpu_compatible {
-	VPU_COMPATIBLE_GXBB = 0,
-	VPU_COMPATIBLE_GXL  = 1,
-	VPU_COMPATIBLE_GXM  = 2,
-	VPU_COMPATIBLE_G12A = 3,
-};
+#include <linux/of.h>
+#include <linux/soc/amlogic/meson-canvas.h>
+#include <drm/drmP.h>
 
 struct meson_drm {
 	struct device *dev;
-	enum vpu_compatible compat;
 	void __iomem *io_base;
 	struct regmap *hhi;
 	int vsync_irq;
@@ -125,9 +113,9 @@ struct meson_drm {
 };
 
 static inline int meson_vpu_is_compatible(struct meson_drm *priv,
-					  enum vpu_compatible family)
+					  const char *compat)
 {
-	return priv->compat == family;
+	return of_device_is_compatible(priv->dev->of_node, compat);
 }
 
 #endif /* __MESON_DRV_H */

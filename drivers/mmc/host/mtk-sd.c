@@ -192,7 +192,6 @@
 #define SDC_STS_CMDBUSY         (0x1 << 1)	/* RW */
 #define SDC_STS_SWR_COMPL       (0x1 << 31)	/* RW */
 
-#define SDC_DAT1_IRQ_TRIGGER	(0x1 << 19)	/* RW */
 /* SDC_ADV_CFG0 mask */
 #define SDC_RX_ENHANCE_EN	(0x1 << 20)	/* RW */
 
@@ -329,7 +328,6 @@ struct mt_bdma_desc {
 	u32 ptr;
 	u32 bd_data_len;
 #define BDMA_DESC_BUFLEN	(0xffff) /* bit0 ~ bit15 */
-#define BDMA_DESC_BUFLEN_EXT	(0xffffff) /* bit0 ~ bit23 */
 };
 
 struct msdc_dma {
@@ -643,14 +641,8 @@ static inline void msdc_dma_setup(struct msdc_host *host, struct msdc_dma *dma,
 			bd[j].bd_info |= (upper_32_bits(dma_address) & 0xf)
 					 << 28;
 		}
-
-		if (host->dev_comp->support_64g) {
-			bd[j].bd_data_len &= ~BDMA_DESC_BUFLEN_EXT;
-			bd[j].bd_data_len |= (dma_len & BDMA_DESC_BUFLEN_EXT);
-		} else {
-			bd[j].bd_data_len &= ~BDMA_DESC_BUFLEN;
-			bd[j].bd_data_len |= (dma_len & BDMA_DESC_BUFLEN);
-		}
+		bd[j].bd_data_len &= ~BDMA_DESC_BUFLEN;
+		bd[j].bd_data_len |= (dma_len & BDMA_DESC_BUFLEN);
 
 		if (j == data->sg_count - 1) /* the last bd */
 			bd[j].bd_info |= BDMA_DESC_EOL;
@@ -1079,13 +1071,11 @@ static bool msdc_cmd_done(struct msdc_host *host, int events,
 	}
 
 	if (!sbc_error && !(events & MSDC_INT_CMDRDY)) {
-		if (events & MSDC_INT_CMDTMO ||
-		    (cmd->opcode != MMC_SEND_TUNING_BLOCK &&
-		     cmd->opcode != MMC_SEND_TUNING_BLOCK_HS200))
+		if (cmd->opcode != MMC_SEND_TUNING_BLOCK &&
+		    cmd->opcode != MMC_SEND_TUNING_BLOCK_HS200)
 			/*
 			 * should not clear fifo/interrupt as the tune data
-			 * may have alreay come when cmd19/cmd21 gets response
-			 * CRC error.
+			 * may have alreay come.
 			 */
 			msdc_reset_hw(host);
 		if (events & MSDC_INT_RSPCRCERR) {
@@ -1578,7 +1568,6 @@ static void msdc_init_hw(struct msdc_host *host)
 
 	/* Config SDIO device detect interrupt function */
 	sdr_clr_bits(host->base + SDC_CFG, SDC_CFG_SDIOIDE);
-	sdr_set_bits(host->base + SDC_ADV_CFG0, SDC_DAT1_IRQ_TRIGGER);
 
 	/* Configure to default data timeout */
 	sdr_set_field(host->base + SDC_CFG, SDC_CFG_DTOC, 3);
@@ -2286,10 +2275,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	mmc->caps |= MMC_CAP_ERASE | MMC_CAP_CMD23;
 	/* MMC core transfer sizes tunable parameters */
 	mmc->max_segs = MAX_BD_NUM;
-	if (host->dev_comp->support_64g)
-		mmc->max_seg_size = BDMA_DESC_BUFLEN_EXT;
-	else
-		mmc->max_seg_size = BDMA_DESC_BUFLEN;
+	mmc->max_seg_size = BDMA_DESC_BUFLEN;
 	mmc->max_blk_size = 2048;
 	mmc->max_req_size = 512 * 1024;
 	mmc->max_blk_count = mmc->max_req_size / 512;

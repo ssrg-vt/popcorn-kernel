@@ -7,7 +7,6 @@
 #include <linux/export.h>
 #include <linux/extable.h>
 #include <linux/moduleloader.h>
-#include <linux/module_signature.h>
 #include <linux/trace_events.h>
 #include <linux/init.h>
 #include <linux/kallsyms.h>
@@ -65,14 +64,9 @@
 
 /*
  * Modules' sections will be aligned on page boundaries
- * to ensure complete separation of code and data, but
- * only when CONFIG_ARCH_HAS_STRICT_MODULE_RWX=y
+ * to ensure complete separation of code and data
  */
-#ifdef CONFIG_ARCH_HAS_STRICT_MODULE_RWX
 # define debug_align(X) ALIGN(X, PAGE_SIZE)
-#else
-# define debug_align(X) (X)
-#endif
 
 /* If this is set, the section belongs in the init part of the module */
 #define INIT_OFFSET_MASK (1UL << (BITS_PER_LONG-1))
@@ -545,20 +539,12 @@ static const char *kernel_symbol_name(const struct kernel_symbol *sym)
 #endif
 }
 
-static const char *kernel_symbol_namespace(const struct kernel_symbol *sym)
+static int cmp_name(const void *va, const void *vb)
 {
-#ifdef CONFIG_HAVE_ARCH_PREL32_RELOCATIONS
-	if (!sym->namespace_offset)
-		return NULL;
-	return offset_to_ptr(&sym->namespace_offset);
-#else
-	return sym->namespace;
-#endif
-}
-
-static int cmp_name(const void *name, const void *sym)
-{
-	return strcmp(name, kernel_symbol_name(sym));
+	const char *a;
+	const struct kernel_symbol *b;
+	a = va; b = vb;
+	return strcmp(a, kernel_symbol_name(b));
 }
 
 static bool find_exported_symbol_in_section(const struct symsearch *syms,
@@ -1388,41 +1374,6 @@ static inline int same_magic(const char *amagic, const char *bmagic,
 }
 #endif /* CONFIG_MODVERSIONS */
 
-static char *get_modinfo(const struct load_info *info, const char *tag);
-static char *get_next_modinfo(const struct load_info *info, const char *tag,
-			      char *prev);
-
-static int verify_namespace_is_imported(const struct load_info *info,
-					const struct kernel_symbol *sym,
-					struct module *mod)
-{
-	const char *namespace;
-	char *imported_namespace;
-
-	namespace = kernel_symbol_namespace(sym);
-	if (namespace) {
-		imported_namespace = get_modinfo(info, "import_ns");
-		while (imported_namespace) {
-			if (strcmp(namespace, imported_namespace) == 0)
-				return 0;
-			imported_namespace = get_next_modinfo(
-				info, "import_ns", imported_namespace);
-		}
-#ifdef CONFIG_MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS
-		pr_warn(
-#else
-		pr_err(
-#endif
-			"%s: module uses symbol (%s) from namespace %s, but does not import it.\n",
-			mod->name, kernel_symbol_name(sym), namespace);
-#ifndef CONFIG_MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS
-		return -EINVAL;
-#endif
-	}
-	return 0;
-}
-
-
 /* Resolve a symbol for this module.  I.e. if we find one, record usage. */
 static const struct kernel_symbol *resolve_symbol(struct module *mod,
 						  const struct load_info *info,
@@ -1448,12 +1399,6 @@ static const struct kernel_symbol *resolve_symbol(struct module *mod,
 
 	if (!check_version(info, name, mod, crc)) {
 		sym = ERR_PTR(-EINVAL);
-		goto getname;
-	}
-
-	err = verify_namespace_is_imported(info, sym, mod);
-	if (err) {
-		sym = ERR_PTR(err);
 		goto getname;
 	}
 
@@ -1542,7 +1487,8 @@ static void add_sect_attrs(struct module *mod, const struct load_info *info)
 	for (i = 0; i < info->hdr->e_shnum; i++)
 		if (!sect_empty(&info->sechdrs[i]))
 			nloaded++;
-	size[0] = ALIGN(struct_size(sect_attrs, attrs, nloaded),
+	size[0] = ALIGN(sizeof(*sect_attrs)
+			+ nloaded * sizeof(sect_attrs->attrs[0]),
 			sizeof(sect_attrs->grp.attrs[0]));
 	size[1] = (nloaded + 1) * sizeof(sect_attrs->grp.attrs[0]);
 	sect_attrs = kzalloc(size[0] + size[1], GFP_KERNEL);
@@ -2531,8 +2477,7 @@ static char *next_string(char *string, unsigned long *secsize)
 	return string;
 }
 
-static char *get_next_modinfo(const struct load_info *info, const char *tag,
-			      char *prev)
+static char *get_modinfo(struct load_info *info, const char *tag)
 {
 	char *p;
 	unsigned int taglen = strlen(tag);
@@ -2543,23 +2488,11 @@ static char *get_next_modinfo(const struct load_info *info, const char *tag,
 	 * get_modinfo() calls made before rewrite_section_headers()
 	 * must use sh_offset, as sh_addr isn't set!
 	 */
-	char *modinfo = (char *)info->hdr + infosec->sh_offset;
-
-	if (prev) {
-		size -= prev - modinfo;
-		modinfo = next_string(prev, &size);
-	}
-
-	for (p = modinfo; p; p = next_string(p, &size)) {
+	for (p = (char *)info->hdr + infosec->sh_offset; p; p = next_string(p, &size)) {
 		if (strncmp(p, tag, taglen) == 0 && p[taglen] == '=')
 			return p + taglen + 1;
 	}
 	return NULL;
-}
-
-static char *get_modinfo(const struct load_info *info, const char *tag)
-{
-	return get_next_modinfo(info, tag, NULL);
 }
 
 static void setup_modinfo(struct module *mod, struct load_info *info)
@@ -2804,11 +2737,6 @@ void * __weak module_alloc(unsigned long size)
 	return vmalloc_exec(size);
 }
 
-bool __weak module_exit_section(const char *name)
-{
-	return strstarts(name, ".exit");
-}
-
 #ifdef CONFIG_DEBUG_KMEMLEAK
 static void kmemleak_load_module(const struct module *mod,
 				 const struct load_info *info)
@@ -2839,9 +2767,8 @@ static inline void kmemleak_load_module(const struct module *mod,
 #ifdef CONFIG_MODULE_SIG
 static int module_sig_check(struct load_info *info, int flags)
 {
-	int err = -ENODATA;
+	int err = -ENOKEY;
 	const unsigned long markerlen = sizeof(MODULE_SIG_STRING) - 1;
-	const char *reason;
 	const void *mod = info->hdr;
 
 	/*
@@ -2856,38 +2783,16 @@ static int module_sig_check(struct load_info *info, int flags)
 		err = mod_verify_sig(mod, info);
 	}
 
-	switch (err) {
-	case 0:
+	if (!err) {
 		info->sig_ok = true;
 		return 0;
-
-		/* We don't permit modules to be loaded into trusted kernels
-		 * without a valid signature on them, but if we're not
-		 * enforcing, certain errors are non-fatal.
-		 */
-	case -ENODATA:
-		reason = "Loading of unsigned module";
-		goto decide;
-	case -ENOPKG:
-		reason = "Loading of module with unsupported crypto";
-		goto decide;
-	case -ENOKEY:
-		reason = "Loading of module with unavailable key";
-	decide:
-		if (is_module_sig_enforced()) {
-			pr_notice("%s is rejected\n", reason);
-			return -EKEYREJECTED;
-		}
-
-		return security_locked_down(LOCKDOWN_MODULE_SIGNATURE);
-
-		/* All other errors are fatal, including nomem, unparseable
-		 * signatures and signature check failures - even if signatures
-		 * aren't required.
-		 */
-	default:
-		return err;
 	}
+
+	/* Not having a signature is only an error if we're strict. */
+	if (err == -ENOKEY && !is_module_sig_enforced())
+		err = 0;
+
+	return err;
 }
 #else /* !CONFIG_MODULE_SIG */
 static int module_sig_check(struct load_info *info, int flags)
@@ -3021,7 +2926,7 @@ static int rewrite_section_headers(struct load_info *info, int flags)
 
 #ifndef CONFIG_MODULE_UNLOAD
 		/* Don't load .exit sections */
-		if (module_exit_section(info->secstrings+shdr->sh_name))
+		if (strstarts(info->secstrings+shdr->sh_name, ".exit"))
 			shdr->sh_flags &= ~(unsigned long)SHF_ALLOC;
 #endif
 	}
@@ -3191,11 +3096,6 @@ static int find_module_sections(struct module *mod, struct load_info *info)
 	mod->tracepoints_ptrs = section_objs(info, "__tracepoints_ptrs",
 					     sizeof(*mod->tracepoints_ptrs),
 					     &mod->num_tracepoints);
-#endif
-#ifdef CONFIG_TREE_SRCU
-	mod->srcu_struct_ptrs = section_objs(info, "___srcu_struct_ptrs",
-					     sizeof(*mod->srcu_struct_ptrs),
-					     &mod->num_srcu_structs);
 #endif
 #ifdef CONFIG_BPF_EVENTS
 	mod->bpf_raw_events = section_objs(info, "__bpf_raw_tp_map",

@@ -32,9 +32,7 @@ static int alt_pr_platform_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 
-	alt_pr_unregister(dev);
-
-	return 0;
+	return alt_pr_unregister(dev);
 }
 
 static const struct of_device_id alt_pr_of_match[] = {

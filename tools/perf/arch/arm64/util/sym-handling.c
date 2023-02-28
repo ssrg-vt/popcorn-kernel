@@ -4,9 +4,11 @@
  * Copyright (C) 2015 Naveen N. Rao, IBM Corporation
  */
 
-#include "symbol.h" // for the elf__needs_adjust_symbols() prototype
-#include <stdbool.h>
-#include <gelf.h>
+#include "debug.h"
+#include "symbol.h"
+#include "map.h"
+#include "probe-event.h"
+#include "probe-file.h"
 
 #ifdef HAVE_LIBELF_SUPPORT
 bool elf__needs_adjust_symbols(GElf_Ehdr ehdr)

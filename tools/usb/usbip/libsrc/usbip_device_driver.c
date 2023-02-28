@@ -69,7 +69,7 @@ int read_usb_vudc_device(struct udev_device *sdev, struct usbip_usb_device *dev)
 	FILE *fd = NULL;
 	struct udev_device *plat;
 	const char *speed;
-	size_t ret;
+	int ret = 0;
 
 	plat = udev_device_get_parent(sdev);
 	path = udev_device_get_syspath(plat);
@@ -79,10 +79,8 @@ int read_usb_vudc_device(struct udev_device *sdev, struct usbip_usb_device *dev)
 	if (!fd)
 		return -1;
 	ret = fread((char *) &descr, sizeof(descr), 1, fd);
-	if (ret != 1) {
-		err("Cannot read vudc device descr file: %s", strerror(errno));
+	if (ret < 0)
 		goto err;
-	}
 	fclose(fd);
 
 	copy_descr_attr(dev, &descr, bDeviceClass);
@@ -93,8 +91,7 @@ int read_usb_vudc_device(struct udev_device *sdev, struct usbip_usb_device *dev)
 	copy_descr_attr16(dev, &descr, idProduct);
 	copy_descr_attr16(dev, &descr, bcdDevice);
 
-	strncpy(dev->path, path, SYSFS_PATH_MAX - 1);
-	dev->path[SYSFS_PATH_MAX - 1] = '\0';
+	strncpy(dev->path, path, SYSFS_PATH_MAX);
 
 	dev->speed = USB_SPEED_UNKNOWN;
 	speed = udev_device_get_sysattr_value(sdev, "current_speed");
@@ -113,8 +110,7 @@ int read_usb_vudc_device(struct udev_device *sdev, struct usbip_usb_device *dev)
 	dev->busnum = 0;
 
 	name = udev_device_get_sysname(plat);
-	strncpy(dev->busid, name, SYSFS_BUS_ID_SIZE - 1);
-	dev->busid[SYSFS_BUS_ID_SIZE - 1] = '\0';
+	strncpy(dev->busid, name, SYSFS_BUS_ID_SIZE);
 	return 0;
 err:
 	fclose(fd);

@@ -1555,7 +1555,8 @@ static int stm32_mdma_probe(struct platform_device *pdev)
 			 nr_requests);
 	}
 
-	count = device_property_count_u32(&pdev->dev, "st,ahb-addr-masks");
+	count = device_property_read_u32_array(&pdev->dev, "st,ahb-addr-masks",
+					       NULL, 0);
 	if (count < 0)
 		count = 0;
 
@@ -1637,8 +1638,10 @@ static int stm32_mdma_probe(struct platform_device *pdev)
 	}
 
 	dmadev->irq = platform_get_irq(pdev, 0);
-	if (dmadev->irq < 0)
+	if (dmadev->irq < 0) {
+		dev_err(&pdev->dev, "failed to get IRQ\n");
 		return dmadev->irq;
+	}
 
 	ret = devm_request_irq(&pdev->dev, dmadev->irq, stm32_mdma_irq_handler,
 			       0, dev_name(&pdev->dev), dmadev);

@@ -904,14 +904,12 @@ static int deliver_response(struct ipmi_smi *intf, struct ipmi_recv_msg *msg)
 			rv = -EINVAL;
 		}
 		ipmi_free_recv_msg(msg);
-	} else if (oops_in_progress) {
+	} else if (!oops_in_progress) {
 		/*
 		 * If we are running in the panic context, calling the
 		 * receive handler doesn't much meaning and has a deadlock
 		 * risk.  At this moment, simply skip it in that case.
 		 */
-		ipmi_free_recv_msg(msg);
-	} else {
 		int index;
 		struct ipmi_user *user = acquire_ipmi_user(msg->user, &index);
 
@@ -2222,8 +2220,7 @@ static int i_ipmi_request(struct ipmi_user     *user,
 	else {
 		smi_msg = ipmi_alloc_smi_msg();
 		if (smi_msg == NULL) {
-			if (!supplied_recv)
-				ipmi_free_recv_msg(recv_msg);
+			ipmi_free_recv_msg(recv_msg);
 			rv = -ENOMEM;
 			goto out;
 		}
@@ -2822,9 +2819,9 @@ static const struct device_type bmc_device_type = {
 	.groups		= bmc_dev_attr_groups,
 };
 
-static int __find_bmc_guid(struct device *dev, const void *data)
+static int __find_bmc_guid(struct device *dev, void *data)
 {
-	const guid_t *guid = data;
+	guid_t *guid = data;
 	struct bmc_device *bmc;
 	int rv;
 
@@ -2860,9 +2857,9 @@ struct prod_dev_id {
 	unsigned char device_id;
 };
 
-static int __find_bmc_prod_dev_id(struct device *dev, const void *data)
+static int __find_bmc_prod_dev_id(struct device *dev, void *data)
 {
-	const struct prod_dev_id *cid = data;
+	struct prod_dev_id *cid = data;
 	struct bmc_device *bmc;
 	int rv;
 

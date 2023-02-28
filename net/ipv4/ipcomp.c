@@ -186,7 +186,8 @@ static void __exit ipcomp4_fini(void)
 {
 	if (xfrm4_protocol_deregister(&ipcomp4_protocol, IPPROTO_COMP) < 0)
 		pr_info("%s: can't remove protocol\n", __func__);
-	xfrm_unregister_type(&ipcomp_type, AF_INET);
+	if (xfrm_unregister_type(&ipcomp_type, AF_INET) < 0)
+		pr_info("%s: can't remove xfrm type\n", __func__);
 }
 
 module_init(ipcomp4_init);

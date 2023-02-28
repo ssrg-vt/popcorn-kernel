@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <stddef.h>
@@ -7,9 +8,10 @@
 #include "event.h"
 #include "evlist.h"
 #include "header.h"
+#include "util.h"
 #include "debug.h"
 
-static int process_event(struct evlist **pevlist, union perf_event *event)
+static int process_event(struct perf_evlist **pevlist, union perf_event *event)
 {
 	struct perf_sample sample;
 
@@ -37,14 +39,14 @@ static int process_event(struct evlist **pevlist, union perf_event *event)
 
 static int process_events(union perf_event **events, size_t count)
 {
-	struct evlist *evlist = NULL;
+	struct perf_evlist *evlist = NULL;
 	int err = 0;
 	size_t i;
 
 	for (i = 0; i < count && !err; i++)
 		err = process_event(&evlist, events[i]);
 
-	evlist__delete(evlist);
+	perf_evlist__delete(evlist);
 
 	return err;
 }
@@ -85,10 +87,10 @@ int test__parse_no_sample_id_all(struct test *test __maybe_unused, int subtest _
 		},
 		.id = 2,
 	};
-	struct perf_record_mmap event3 = {
+	struct mmap_event event3 = {
 		.header = {
 			.type = PERF_RECORD_MMAP,
-			.size = sizeof(struct perf_record_mmap),
+			.size = sizeof(struct mmap_event),
 		},
 	};
 	union perf_event *events[] = {

@@ -19,7 +19,6 @@
 #include <linux/vmalloc.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/signal.h>
-#include <linux/mm.h>
 
 #include <asm/iommu.h>
 #include <asm/tce.h>
@@ -31,6 +30,51 @@
 
 static void tce_iommu_detach_group(void *iommu_data,
 		struct iommu_group *iommu_group);
+
+static long try_increment_locked_vm(struct mm_struct *mm, long npages)
+{
+	long ret = 0, locked, lock_limit;
+
+	if (WARN_ON_ONCE(!mm))
+		return -EPERM;
+
+	if (!npages)
+		return 0;
+
+	down_write(&mm->mmap_sem);
+	locked = mm->locked_vm + npages;
+	lock_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
+	if (locked > lock_limit && !capable(CAP_IPC_LOCK))
+		ret = -ENOMEM;
+	else
+		mm->locked_vm += npages;
+
+	pr_debug("[%d] RLIMIT_MEMLOCK +%ld %ld/%ld%s\n", current->pid,
+			npages << PAGE_SHIFT,
+			mm->locked_vm << PAGE_SHIFT,
+			rlimit(RLIMIT_MEMLOCK),
+			ret ? " - exceeded" : "");
+
+	up_write(&mm->mmap_sem);
+
+	return ret;
+}
+
+static void decrement_locked_vm(struct mm_struct *mm, long npages)
+{
+	if (!mm || !npages)
+		return;
+
+	down_write(&mm->mmap_sem);
+	if (WARN_ON_ONCE(npages > mm->locked_vm))
+		npages = mm->locked_vm;
+	mm->locked_vm -= npages;
+	pr_debug("[%d] RLIMIT_MEMLOCK -%ld %ld/%ld\n", current->pid,
+			npages << PAGE_SHIFT,
+			mm->locked_vm << PAGE_SHIFT,
+			rlimit(RLIMIT_MEMLOCK));
+	up_write(&mm->mmap_sem);
+}
 
 /*
  * VFIO IOMMU fd for SPAPR_TCE IOMMU implementation
@@ -176,13 +220,13 @@ put_exit:
 }
 
 static bool tce_page_is_contained(struct mm_struct *mm, unsigned long hpa,
-		unsigned int it_page_shift)
+		unsigned int page_shift)
 {
 	struct page *page;
 	unsigned long size = 0;
 
-	if (mm_iommu_is_devmem(mm, hpa, it_page_shift, &size))
-		return size == (1UL << it_page_shift);
+	if (mm_iommu_is_devmem(mm, hpa, page_shift, &size))
+		return size == (1UL << page_shift);
 
 	page = pfn_to_page(hpa >> PAGE_SHIFT);
 	/*
@@ -190,7 +234,7 @@ static bool tce_page_is_contained(struct mm_struct *mm, unsigned long hpa,
 	 * a page we just found. Otherwise the hardware can get access to
 	 * a bigger memory chunk that it should.
 	 */
-	return page_shift(compound_head(page)) >= it_page_shift;
+	return (PAGE_SHIFT + compound_order(compound_head(page))) >= page_shift;
 }
 
 static inline bool tce_groups_attached(struct tce_container *container)
@@ -289,7 +333,7 @@ static int tce_iommu_enable(struct tce_container *container)
 		return ret;
 
 	locked = table_group->tce32_size >> PAGE_SHIFT;
-	ret = account_locked_vm(container->mm, locked, true);
+	ret = try_increment_locked_vm(container->mm, locked);
 	if (ret)
 		return ret;
 
@@ -308,7 +352,7 @@ static void tce_iommu_disable(struct tce_container *container)
 	container->enabled = false;
 
 	BUG_ON(!container->mm);
-	account_locked_vm(container->mm, container->locked_pages, false);
+	decrement_locked_vm(container->mm, container->locked_pages);
 }
 
 static void *tce_iommu_open(unsigned long arg)
@@ -435,7 +479,7 @@ static int tce_iommu_clear(struct tce_container *container,
 	unsigned long oldhpa;
 	long ret;
 	enum dma_data_direction direction;
-	unsigned long lastentry = entry + pages, firstentry = entry;
+	unsigned long lastentry = entry + pages;
 
 	for ( ; entry < lastentry; ++entry) {
 		if (tbl->it_indirect_levels && tbl->it_userspace) {
@@ -460,7 +504,7 @@ static int tce_iommu_clear(struct tce_container *container,
 
 		direction = DMA_NONE;
 		oldhpa = 0;
-		ret = iommu_tce_xchg_no_kill(container->mm, tbl, entry, &oldhpa,
+		ret = iommu_tce_xchg(container->mm, tbl, entry, &oldhpa,
 				&direction);
 		if (ret)
 			continue;
@@ -475,8 +519,6 @@ static int tce_iommu_clear(struct tce_container *container,
 
 		tce_iommu_unuse_page(container, oldhpa);
 	}
-
-	iommu_tce_kill(tbl, firstentry, pages);
 
 	return 0;
 }
@@ -520,8 +562,8 @@ static long tce_iommu_build(struct tce_container *container,
 
 		hpa |= offset;
 		dirtmp = direction;
-		ret = iommu_tce_xchg_no_kill(container->mm, tbl, entry + i,
-				&hpa, &dirtmp);
+		ret = iommu_tce_xchg(container->mm, tbl, entry + i, &hpa,
+				&dirtmp);
 		if (ret) {
 			tce_iommu_unuse_page(container, hpa);
 			pr_err("iommu_tce: %s failed ioba=%lx, tce=%lx, ret=%ld\n",
@@ -538,8 +580,6 @@ static long tce_iommu_build(struct tce_container *container,
 
 	if (ret)
 		tce_iommu_clear(container, tbl, entry, i);
-	else
-		iommu_tce_kill(tbl, entry, pages);
 
 	return ret;
 }
@@ -576,8 +616,8 @@ static long tce_iommu_build_v2(struct tce_container *container,
 		if (mm_iommu_mapped_inc(mem))
 			break;
 
-		ret = iommu_tce_xchg_no_kill(container->mm, tbl, entry + i,
-				&hpa, &dirtmp);
+		ret = iommu_tce_xchg(container->mm, tbl, entry + i, &hpa,
+				&dirtmp);
 		if (ret) {
 			/* dirtmp cannot be DMA_NONE here */
 			tce_iommu_unuse_page_v2(container, tbl, entry + i);
@@ -597,8 +637,6 @@ static long tce_iommu_build_v2(struct tce_container *container,
 
 	if (ret)
 		tce_iommu_clear(container, tbl, entry, i);
-	else
-		iommu_tce_kill(tbl, entry, pages);
 
 	return ret;
 }
@@ -618,7 +656,7 @@ static long tce_iommu_create_table(struct tce_container *container,
 	if (!table_size)
 		return -EINVAL;
 
-	ret = account_locked_vm(container->mm, table_size >> PAGE_SHIFT, true);
+	ret = try_increment_locked_vm(container->mm, table_size >> PAGE_SHIFT);
 	if (ret)
 		return ret;
 
@@ -637,7 +675,7 @@ static void tce_iommu_free_table(struct tce_container *container,
 	unsigned long pages = tbl->it_allocated_size >> PAGE_SHIFT;
 
 	iommu_tce_table_put(tbl);
-	account_locked_vm(container->mm, pages, false);
+	decrement_locked_vm(container->mm, pages);
 }
 
 static long tce_iommu_create_window(struct tce_container *container,
@@ -1240,7 +1278,7 @@ release_exit:
 static int tce_iommu_attach_group(void *iommu_data,
 		struct iommu_group *iommu_group)
 {
-	int ret = 0;
+	int ret;
 	struct tce_container *container = iommu_data;
 	struct iommu_table_group *table_group;
 	struct tce_iommu_group *tcegrp = NULL;
@@ -1293,13 +1331,13 @@ static int tce_iommu_attach_group(void *iommu_data,
 			!table_group->ops->release_ownership) {
 		if (container->v2) {
 			ret = -EPERM;
-			goto free_exit;
+			goto unlock_exit;
 		}
 		ret = tce_iommu_take_ownership(container, table_group);
 	} else {
 		if (!container->v2) {
 			ret = -EPERM;
-			goto free_exit;
+			goto unlock_exit;
 		}
 		ret = tce_iommu_take_ownership_ddw(container, table_group);
 		if (!tce_groups_attached(container) && !container->tables[0])
@@ -1311,11 +1349,10 @@ static int tce_iommu_attach_group(void *iommu_data,
 		list_add(&tcegrp->next, &container->group_list);
 	}
 
-free_exit:
+unlock_exit:
 	if (ret && tcegrp)
 		kfree(tcegrp);
 
-unlock_exit:
 	mutex_unlock(&container->lock);
 
 	return ret;

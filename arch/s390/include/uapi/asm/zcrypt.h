@@ -4,7 +4,7 @@
  *
  *  zcrypt 2.2.1 (user-visible header)
  *
- *  Copyright IBM Corp. 2001, 2019
+ *  Copyright IBM Corp. 2001, 2018
  *  Author(s): Robert Burroughs
  *	       Eric Rossman (edrossma@us.ibm.com)
  *
@@ -20,7 +20,6 @@
 
 #include <linux/ioctl.h>
 #include <linux/compiler.h>
-#include <linux/types.h>
 
 /* Name of the zcrypt device driver. */
 #define ZCRYPT_NAME "zcrypt"
@@ -161,17 +160,17 @@ struct ica_xcRB {
  * @payload_len:	Payload length
  */
 struct ep11_cprb {
-	__u16		cprb_len;
+	uint16_t	cprb_len;
 	unsigned char	cprb_ver_id;
 	unsigned char	pad_000[2];
 	unsigned char	flags;
 	unsigned char	func_id[2];
-	__u32		source_id;
-	__u32		target_id;
-	__u32		ret_code;
-	__u32		reserved1;
-	__u32		reserved2;
-	__u32		payload_len;
+	uint32_t	source_id;
+	uint32_t	target_id;
+	uint32_t	ret_code;
+	uint32_t	reserved1;
+	uint32_t	reserved2;
+	uint32_t	payload_len;
 } __attribute__((packed));
 
 /**
@@ -180,8 +179,8 @@ struct ep11_cprb {
  * @dom_id:	Usage domain id
  */
 struct ep11_target_dev {
-	__u16 ap_id;
-	__u16 dom_id;
+	uint16_t ap_id;
+	uint16_t dom_id;
 };
 
 /**
@@ -196,14 +195,14 @@ struct ep11_target_dev {
  * @resp:		Addr to response block
  */
 struct ep11_urb {
-	__u16		targets_num;
-	__u64		targets;
-	__u64		weight;
-	__u64		req_no;
-	__u64		req_len;
-	__u64		req;
-	__u64		resp_len;
-	__u64		resp;
+	uint16_t		targets_num;
+	uint64_t		targets;
+	uint64_t		weight;
+	uint64_t		req_no;
+	uint64_t		req_len;
+	uint64_t		req;
+	uint64_t		resp_len;
+	uint64_t		resp;
 } __attribute__((packed));
 
 /**
@@ -286,7 +285,7 @@ struct zcrypt_device_matrix_ext {
  *	 0x08: CEX3A
  *	 0x0a: CEX4
  *	 0x0b: CEX5
- *	 0x0c: CEX6 and CEX7
+ *	 0x0c: CEX6
  *	 0x0d: device is disabled
  *
  *   ZCRYPT_QDEPTH_MASK

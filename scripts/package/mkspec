@@ -29,9 +29,9 @@ fi
 
 PROVIDES="$PROVIDES kernel-$KERNELRELEASE"
 __KERNELRELEASE=$(echo $KERNELRELEASE | sed -e "s/-/_/g")
-EXCLUDES="$RCS_TAR_IGNORE --exclude=*vmlinux* --exclude=*.mod \
+EXCLUDES="$RCS_TAR_IGNORE --exclude=.tmp_versions --exclude=*vmlinux* \
 --exclude=*.o --exclude=*.ko --exclude=*.cmd --exclude=Documentation \
---exclude=.config.old --exclude=.missing-syscalls.d --exclude=*.s"
+--exclude=.config.old --exclude=.missing-syscalls.d"
 
 # We can label the here-doc lines for conditional output to the spec file
 #

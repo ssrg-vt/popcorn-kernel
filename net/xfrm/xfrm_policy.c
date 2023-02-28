@@ -585,6 +585,9 @@ static void xfrm_bydst_resize(struct net *net, int dir)
 	odst = rcu_dereference_protected(net->xfrm.policy_bydst[dir].table,
 				lockdep_is_held(&net->xfrm.xfrm_policy_lock));
 
+	odst = rcu_dereference_protected(net->xfrm.policy_bydst[dir].table,
+				lockdep_is_held(&net->xfrm.xfrm_policy_lock));
+
 	for (i = hmask; i >= 0; i--)
 		xfrm_dst_hash_transfer(net, odst + i, ndst, nhashmask, dir);
 
@@ -2808,7 +2811,7 @@ static void xfrm_policy_queue_process(struct timer_list *t)
 			continue;
 		}
 
-		nf_reset_ct(skb);
+		nf_reset(skb);
 		skb_dst_drop(skb);
 		skb_dst_set(skb, dst);
 
@@ -3629,7 +3632,7 @@ int __xfrm_policy_check(struct sock *sk, int dir, struct sk_buff *skb,
 		}
 		xfrm_nr = ti;
 		if (npols > 1) {
-			xfrm_tmpl_sort(stp, tpp, xfrm_nr, family);
+			xfrm_tmpl_sort(stp, tpp, xfrm_nr, family, net);
 			tpp = stp;
 		}
 

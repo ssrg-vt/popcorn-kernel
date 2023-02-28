@@ -22,9 +22,8 @@
  *
  */
 #include <linux/list.h>
-#include <linux/pci.h>
 #include <linux/slab.h>
-
+#include <drm/drmP.h>
 #include <linux/firmware.h>
 #include <drm/amdgpu_drm.h>
 #include "amdgpu.h"

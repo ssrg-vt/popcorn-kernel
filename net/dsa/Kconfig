@@ -73,11 +73,23 @@ config NET_DSA_TAG_MTK
 	  Say Y or M if you want to enable support for tagging frames for
 	  Mediatek switches.
 
+config NET_DSA_TAG_KSZ_COMMON
+	tristate
+	default n
+
 config NET_DSA_TAG_KSZ
-	tristate "Tag driver for Microchip 8795/9477/9893 families of switches"
+	tristate "Tag driver for Microchip 9893 family of switches"
+	select NET_DSA_TAG_KSZ_COMMON
 	help
 	  Say Y if you want to enable support for tagging frames for the
-	  Microchip 8795/9477/9893 families of switches.
+	  Microchip 9893 family of switches.
+
+config NET_DSA_TAG_KSZ9477
+	tristate "Tag driver for Microchip 9477 family of switches"
+	select NET_DSA_TAG_KSZ_COMMON
+	help
+	  Say Y if you want to enable support for tagging frames for the
+	  Microchip 9477 family of switches.
 
 config NET_DSA_TAG_QCA
 	tristate "Tag driver for Qualcomm Atheros QCA8K switches"
@@ -94,7 +106,6 @@ config NET_DSA_TAG_LAN9303
 config NET_DSA_TAG_SJA1105
 	tristate "Tag driver for NXP SJA1105 switches"
 	select NET_DSA_TAG_8021Q
-	select PACKING
 	help
 	  Say Y or M if you want to enable support for tagging frames with the
 	  NXP SJA1105 switch family. Both the native tagging protocol (which

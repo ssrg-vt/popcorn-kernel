@@ -510,6 +510,7 @@ struct f11_data {
 	struct rmi_2d_sensor_platform_data sensor_pdata;
 	unsigned long *abs_mask;
 	unsigned long *rel_mask;
+	unsigned long *result_bits;
 };
 
 enum f11_finger_state {
@@ -1056,7 +1057,7 @@ static int rmi_f11_initialize(struct rmi_function *fn)
 	/*
 	** init instance data, fill in values and create any sysfs files
 	*/
-	f11 = devm_kzalloc(&fn->dev, sizeof(struct f11_data) + mask_size * 2,
+	f11 = devm_kzalloc(&fn->dev, sizeof(struct f11_data) + mask_size * 3,
 			GFP_KERNEL);
 	if (!f11)
 		return -ENOMEM;
@@ -1075,6 +1076,8 @@ static int rmi_f11_initialize(struct rmi_function *fn)
 			+ sizeof(struct f11_data));
 	f11->rel_mask = (unsigned long *)((char *)f11
 			+ sizeof(struct f11_data) + mask_size);
+	f11->result_bits = (unsigned long *)((char *)f11
+			+ sizeof(struct f11_data) + mask_size * 2);
 
 	set_bit(fn->irq_pos, f11->abs_mask);
 	set_bit(fn->irq_pos + 1, f11->rel_mask);
@@ -1281,8 +1284,8 @@ static irqreturn_t rmi_f11_attention(int irq, void *ctx)
 			valid_bytes = f11->sensor.attn_size;
 		memcpy(f11->sensor.data_pkt, drvdata->attn_data.data,
 			valid_bytes);
-		drvdata->attn_data.data += valid_bytes;
-		drvdata->attn_data.size -= valid_bytes;
+		drvdata->attn_data.data += f11->sensor.attn_size;
+		drvdata->attn_data.size -= f11->sensor.attn_size;
 	} else {
 		error = rmi_read_block(rmi_dev,
 				data_base_addr, f11->sensor.data_pkt,

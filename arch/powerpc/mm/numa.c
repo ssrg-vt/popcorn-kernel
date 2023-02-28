@@ -163,22 +163,6 @@ static void unmap_cpu_from_node(unsigned long cpu)
 }
 #endif /* CONFIG_HOTPLUG_CPU || CONFIG_PPC_SPLPAR */
 
-int cpu_distance(__be32 *cpu1_assoc, __be32 *cpu2_assoc)
-{
-	int dist = 0;
-
-	int i, index;
-
-	for (i = 0; i < distance_ref_points_depth; i++) {
-		index = be32_to_cpu(distance_ref_points[i]);
-		if (cpu1_assoc[index] == cpu2_assoc[index])
-			break;
-		dist++;
-	}
-
-	return dist;
-}
-
 /* must hold reference to node during call */
 static const __be32 *of_get_associativity(struct device_node *dev)
 {
@@ -228,7 +212,7 @@ static int associativity_to_nid(const __be32 *associativity)
 {
 	int nid = NUMA_NO_NODE;
 
-	if (!numa_enabled)
+	if (min_common_depth == -1)
 		goto out;
 
 	if (of_read_number(associativity, 1) >= min_common_depth)
@@ -432,19 +416,17 @@ static int of_get_assoc_arrays(struct assoc_arrays *aa)
 static int of_drconf_to_nid_single(struct drmem_lmb *lmb)
 {
 	struct assoc_arrays aa = { .arrays = NULL };
-	int default_nid = NUMA_NO_NODE;
+	int default_nid = 0;
 	int nid = default_nid;
 	int rc, index;
-
-	if ((min_common_depth < 0) || !numa_enabled)
-		return default_nid;
 
 	rc = of_get_assoc_arrays(&aa);
 	if (rc)
 		return default_nid;
 
-	if (min_common_depth <= aa.array_sz &&
-	    !(lmb->flags & DRCONF_MEM_AI_INVALID) && lmb->aa_index < aa.n_arrays) {
+	if (min_common_depth > 0 && min_common_depth <= aa.array_sz &&
+	    !(lmb->flags & DRCONF_MEM_AI_INVALID) &&
+	    lmb->aa_index < aa.n_arrays) {
 		index = lmb->aa_index * aa.array_sz + min_common_depth - 1;
 		nid = of_read_number(&aa.arrays[index], 1);
 
@@ -644,14 +626,8 @@ static int __init parse_numa_properties(void)
 
 	min_common_depth = find_min_common_depth();
 
-	if (min_common_depth < 0) {
-		/*
-		 * if we fail to parse min_common_depth from device tree
-		 * mark the numa disabled, boot with numa disabled.
-		 */
-		numa_enabled = false;
+	if (min_common_depth < 0)
 		return min_common_depth;
-	}
 
 	dbg("NUMA associativity depth for CPU/Memory: %d\n", min_common_depth);
 
@@ -767,7 +743,7 @@ void __init dump_numa_cpu_topology(void)
 	unsigned int node;
 	unsigned int cpu, count;
 
-	if (!numa_enabled)
+	if (min_common_depth == -1 || !numa_enabled)
 		return;
 
 	for_each_online_node(node) {
@@ -832,7 +808,7 @@ static void __init find_possible_nodes(void)
 	struct device_node *rtas;
 	u32 numnodes, i;
 
-	if (!numa_enabled)
+	if (min_common_depth <= 0)
 		return;
 
 	rtas = of_find_node_by_path("/rtas");
@@ -1034,7 +1010,7 @@ int hot_add_scn_to_nid(unsigned long scn_addr)
 	struct device_node *memory = NULL;
 	int nid;
 
-	if (!numa_enabled)
+	if (!numa_enabled || (min_common_depth < 0))
 		return first_online_node;
 
 	memory = of_find_node_by_path("/ibm,dynamic-reconfiguration-memory");
@@ -1087,6 +1063,9 @@ u64 memory_hotplug_max(void)
 
 /* Virtual Processor Home Node (VPHN) support */
 #ifdef CONFIG_PPC_SPLPAR
+
+#include "book3s64/vphn.h"
+
 struct topology_update_data {
 	struct topology_update_data *next;
 	unsigned int cpu;
@@ -1182,13 +1161,25 @@ static int update_cpu_associativity_changes_mask(void)
  * Retrieve the new associativity information for a virtual processor's
  * home node.
  */
+static long hcall_vphn(unsigned long cpu, __be32 *associativity)
+{
+	long rc;
+	long retbuf[PLPAR_HCALL9_BUFSIZE] = {0};
+	u64 flags = 1;
+	int hwcpu = get_hard_smp_processor_id(cpu);
+
+	rc = plpar_hcall9(H_HOME_NODE_ASSOCIATIVITY, retbuf, flags, hwcpu);
+	vphn_unpack_associativity(retbuf, associativity);
+
+	return rc;
+}
+
 static long vphn_get_associativity(unsigned long cpu,
 					__be32 *associativity)
 {
 	long rc;
 
-	rc = hcall_vphn(get_hard_smp_processor_id(cpu),
-				VPHN_FLAG_VCPU, associativity);
+	rc = hcall_vphn(cpu, associativity);
 
 	switch (rc) {
 	case H_FUNCTION:

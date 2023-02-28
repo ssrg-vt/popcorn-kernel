@@ -460,14 +460,12 @@ static int xgene_enet_reset(struct xgene_enet_pdata *p)
 		}
 	} else {
 #ifdef CONFIG_ACPI
-		acpi_status status;
-
-		status = acpi_evaluate_object(ACPI_HANDLE(&p->pdev->dev),
-					      "_RST", NULL, NULL);
-		if (ACPI_FAILURE(status)) {
+		if (acpi_has_method(ACPI_HANDLE(&p->pdev->dev), "_RST"))
+			acpi_evaluate_object(ACPI_HANDLE(&p->pdev->dev),
+					     "_RST", NULL, NULL);
+		else if (acpi_has_method(ACPI_HANDLE(&p->pdev->dev), "_INI"))
 			acpi_evaluate_object(ACPI_HANDLE(&p->pdev->dev),
 					     "_INI", NULL, NULL);
-		}
 #endif
 	}
 

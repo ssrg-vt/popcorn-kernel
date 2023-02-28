@@ -5,11 +5,7 @@
  *          Fabien Dessenne <fabien.dessenne@st.com>
  *          for STMicroelectronics.
  */
-
-#include <linux/moduleparam.h>
 #include <linux/seq_file.h>
-
-#include <drm/drm_print.h>
 
 #include "sti_compositor.h"
 #include "sti_mixer.h"

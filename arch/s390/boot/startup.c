@@ -101,28 +101,15 @@ static void handle_relocs(unsigned long offset)
 	dynsym = (Elf64_Sym *) vmlinux.dynsym_start;
 	for (rela = rela_start; rela < rela_end; rela++) {
 		loc = rela->r_offset + offset;
-		val = rela->r_addend;
+		val = rela->r_addend + offset;
 		r_sym = ELF64_R_SYM(rela->r_info);
-		if (r_sym) {
-			if (dynsym[r_sym].st_shndx != SHN_UNDEF)
-				val += dynsym[r_sym].st_value + offset;
-		} else {
-			/*
-			 * 0 == undefined symbol table index (STN_UNDEF),
-			 * used for R_390_RELATIVE, only add KASLR offset
-			 */
-			val += offset;
-		}
+		if (r_sym)
+			val += dynsym[r_sym].st_value;
 		r_type = ELF64_R_TYPE(rela->r_info);
 		rc = arch_kexec_do_relocs(r_type, (void *) loc, val, 0);
 		if (rc)
 			error("Unknown relocation type");
 	}
-}
-
-static void clear_bss_section(void)
-{
-	memset((void *)vmlinux.default_lma + vmlinux.image_size, 0, vmlinux.bss_size);
 }
 
 void startup_kernel(void)
@@ -164,7 +151,6 @@ void startup_kernel(void)
 	} else if (__kaslr_offset)
 		memcpy((void *)vmlinux.default_lma, img, vmlinux.image_size);
 
-	clear_bss_section();
 	copy_bootdata();
 	if (IS_ENABLED(CONFIG_RELOCATABLE))
 		handle_relocs(__kaslr_offset);

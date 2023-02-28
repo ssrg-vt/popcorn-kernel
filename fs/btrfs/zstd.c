@@ -17,7 +17,6 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/zstd.h>
-#include "misc.h"
 #include "compression.h"
 #include "ctree.h"
 
@@ -711,6 +710,14 @@ finish:
 	return ret;
 }
 
+static unsigned int zstd_set_level(unsigned int level)
+{
+	if (!level)
+		return ZSTD_BTRFS_DEFAULT_LEVEL;
+
+	return min_t(unsigned int, level, ZSTD_BTRFS_MAX_LEVEL);
+}
+
 const struct btrfs_compress_op btrfs_zstd_compress = {
 	.init_workspace_manager = zstd_init_workspace_manager,
 	.cleanup_workspace_manager = zstd_cleanup_workspace_manager,
@@ -721,6 +728,5 @@ const struct btrfs_compress_op btrfs_zstd_compress = {
 	.compress_pages = zstd_compress_pages,
 	.decompress_bio = zstd_decompress_bio,
 	.decompress = zstd_decompress,
-	.max_level	= ZSTD_BTRFS_MAX_LEVEL,
-	.default_level	= ZSTD_BTRFS_DEFAULT_LEVEL,
+	.set_level = zstd_set_level,
 };

@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2000 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
+ * Licensed under the GPL
  */
 
 #include <linux/mm.h>
@@ -163,12 +163,13 @@ static void show_segv_info(struct uml_pt_regs *regs)
 static void bad_segv(struct faultinfo fi, unsigned long ip)
 {
 	current->thread.arch.faultinfo = fi;
-	force_sig_fault(SIGSEGV, SEGV_ACCERR, (void __user *) FAULT_ADDRESS(fi));
+	force_sig_fault(SIGSEGV, SEGV_ACCERR, (void __user *) FAULT_ADDRESS(fi),
+			current);
 }
 
 void fatal_sigsegv(void)
 {
-	force_sigsegv(SIGSEGV);
+	force_sigsegv(SIGSEGV, current);
 	do_signal(&current->thread.regs);
 	/*
 	 * This is to tell gcc that we're not returning - do_signal
@@ -267,11 +268,13 @@ unsigned long segv(struct faultinfo fi, unsigned long ip, int is_user,
 
 	if (err == -EACCES) {
 		current->thread.arch.faultinfo = fi;
-		force_sig_fault(SIGBUS, BUS_ADRERR, (void __user *)address);
+		force_sig_fault(SIGBUS, BUS_ADRERR, (void __user *)address,
+				current);
 	} else {
 		BUG_ON(err != -EFAULT);
 		current->thread.arch.faultinfo = fi;
-		force_sig_fault(SIGSEGV, si_code, (void __user *) address);
+		force_sig_fault(SIGSEGV, si_code, (void __user *) address,
+				current);
 	}
 
 out:
@@ -301,11 +304,12 @@ void relay_signal(int sig, struct siginfo *si, struct uml_pt_regs *regs)
 	if ((err == 0) && (siginfo_layout(sig, code) == SIL_FAULT)) {
 		struct faultinfo *fi = UPT_FAULTINFO(regs);
 		current->thread.arch.faultinfo = *fi;
-		force_sig_fault(sig, code, (void __user *)FAULT_ADDRESS(*fi));
+		force_sig_fault(sig, code, (void __user *)FAULT_ADDRESS(*fi),
+				current);
 	} else {
 		printk(KERN_ERR "Attempted to relay unknown signal %d (si_code = %d) with errno %d\n",
 		       sig, code, err);
-		force_sig(sig);
+		force_sig(sig, current);
 	}
 }
 

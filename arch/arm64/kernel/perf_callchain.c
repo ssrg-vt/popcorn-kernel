@@ -154,7 +154,12 @@ void perf_callchain_kernel(struct perf_callchain_entry_ctx *entry,
 		return;
 	}
 
-	start_backtrace(&frame, regs->regs[29], regs->pc);
+	frame.fp = regs->regs[29];
+	frame.pc = regs->pc;
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+	frame.graph = 0;
+#endif
+
 	walk_stackframe(current, &frame, callchain_trace, entry);
 }
 

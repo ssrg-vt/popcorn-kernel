@@ -75,7 +75,6 @@ static struct bpf_map *array_map_alloc(union bpf_attr *attr)
 	u32 elem_size, index_mask, max_entries;
 	bool unpriv = !capable(CAP_SYS_ADMIN);
 	u64 cost, array_size, mask64;
-	struct bpf_map_memory mem;
 	struct bpf_array *array;
 
 	elem_size = round_up(attr->value_size, 8);
@@ -109,29 +108,32 @@ static struct bpf_map *array_map_alloc(union bpf_attr *attr)
 
 	/* make sure there is no u32 overflow later in round_up() */
 	cost = array_size;
-	if (percpu)
+	if (cost >= U32_MAX - PAGE_SIZE)
+		return ERR_PTR(-ENOMEM);
+	if (percpu) {
 		cost += (u64)attr->max_entries * elem_size * num_possible_cpus();
+		if (cost >= U32_MAX - PAGE_SIZE)
+			return ERR_PTR(-ENOMEM);
+	}
+	cost = round_up(cost, PAGE_SIZE) >> PAGE_SHIFT;
 
-	ret = bpf_map_charge_init(&mem, cost);
+	ret = bpf_map_precharge_memlock(cost);
 	if (ret < 0)
 		return ERR_PTR(ret);
 
 	/* allocate all map elements and zero-initialize them */
 	array = bpf_map_area_alloc(array_size, numa_node);
-	if (!array) {
-		bpf_map_charge_finish(&mem);
+	if (!array)
 		return ERR_PTR(-ENOMEM);
-	}
 	array->index_mask = index_mask;
 	array->map.unpriv_array = unpriv;
 
 	/* copy mandatory map attributes */
 	bpf_map_init_from_attr(&array->map, attr);
-	bpf_map_charge_move(&array->map.memory, &mem);
+	array->map.pages = cost;
 	array->elem_size = elem_size;
 
 	if (percpu && bpf_array_alloc_percpu(array)) {
-		bpf_map_charge_finish(&array->map.memory);
 		bpf_map_area_free(array);
 		return ERR_PTR(-ENOMEM);
 	}

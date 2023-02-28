@@ -8,7 +8,6 @@
 #include <drm/drm_flip_work.h>
 #include <drm/drm_mode.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drm_vblank.h>
 
 #include "mdp4_kms.h"
 

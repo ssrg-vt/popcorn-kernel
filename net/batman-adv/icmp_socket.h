@@ -10,11 +10,12 @@
 #include "main.h"
 
 #include <linux/types.h>
-#include <uapi/linux/batadv_packet.h>
+
+struct batadv_icmp_header;
 
 #define BATADV_ICMP_SOCKET "socket"
 
-void batadv_socket_setup(struct batadv_priv *bat_priv);
+int batadv_socket_setup(struct batadv_priv *bat_priv);
 
 #ifdef CONFIG_BATMAN_ADV_DEBUGFS
 

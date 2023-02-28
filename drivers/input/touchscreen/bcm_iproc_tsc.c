@@ -489,8 +489,10 @@ static int iproc_ts_probe(struct platform_device *pdev)
 
 	/* get interrupt */
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "platform_get_irq failed: %d\n", irq);
 		return irq;
+	}
 
 	error = devm_request_irq(&pdev->dev, irq,
 				 iproc_touchscreen_interrupt,

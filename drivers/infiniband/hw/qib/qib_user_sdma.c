@@ -317,7 +317,7 @@ static int qib_user_sdma_page_to_frags(const struct qib_devdata *dd,
 		 * the caller can ignore this page.
 		 */
 		if (put) {
-			put_user_page(page);
+			put_page(page);
 		} else {
 			/* coalesce case */
 			kunmap(page);
@@ -631,7 +631,7 @@ static void qib_user_sdma_free_pkt_frag(struct device *dev,
 			kunmap(pkt->addr[i].page);
 
 		if (pkt->addr[i].put_page)
-			put_user_page(pkt->addr[i].page);
+			put_page(pkt->addr[i].page);
 		else
 			__free_page(pkt->addr[i].page);
 	} else if (pkt->addr[i].kvaddr) {
@@ -706,7 +706,7 @@ static int qib_user_sdma_pin_pages(const struct qib_devdata *dd,
 	/* if error, return all pages not managed by pkt */
 free_pages:
 	while (i < j)
-		put_user_page(pages[i++]);
+		put_page(pages[i++]);
 
 done:
 	return ret;
@@ -904,11 +904,10 @@ static int qib_user_sdma_queue_pkts(const struct qib_devdata *dd,
 		}
 
 		if (frag_size) {
-			int tidsmsize, n;
-			size_t pktsize;
+			int pktsize, tidsmsize, n;
 
 			n = npages*((2*PAGE_SIZE/frag_size)+1);
-			pktsize = struct_size(pkt, addr, n);
+			pktsize = sizeof(*pkt) + sizeof(pkt->addr[0])*n;
 
 			/*
 			 * Determine if this is tid-sdma or just sdma.

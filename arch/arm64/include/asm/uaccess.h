@@ -62,10 +62,6 @@ static inline unsigned long __range_ok(const void __user *addr, unsigned long si
 {
 	unsigned long ret, limit = current_thread_info()->addr_limit;
 
-	if (IS_ENABLED(CONFIG_ARM64_TAGGED_ADDR_ABI) &&
-	    test_thread_flag(TIF_TAGGED_ADDR))
-		addr = untagged_addr(addr);
-
 	__chk_user_ptr(addr);
 	asm volatile(
 	// A + B <= C + 1 for all A,B,C, in four easy steps:
@@ -219,8 +215,7 @@ static inline void uaccess_enable_not_uao(void)
 
 /*
  * Sanitise a uaccess pointer such that it becomes NULL if above the
- * current addr_limit. In case the pointer is tagged (has the top byte set),
- * untag the pointer before checking.
+ * current addr_limit.
  */
 #define uaccess_mask_ptr(ptr) (__typeof__(ptr))__uaccess_mask_ptr(ptr)
 static inline void __user *__uaccess_mask_ptr(const void __user *ptr)
@@ -228,11 +223,10 @@ static inline void __user *__uaccess_mask_ptr(const void __user *ptr)
 	void __user *safe_ptr;
 
 	asm volatile(
-	"	bics	xzr, %3, %2\n"
+	"	bics	xzr, %1, %2\n"
 	"	csel	%0, %1, xzr, eq\n"
 	: "=&r" (safe_ptr)
-	: "r" (ptr), "r" (current_thread_info()->addr_limit),
-	  "r" (untagged_addr(ptr))
+	: "r" (ptr), "r" (current_thread_info()->addr_limit)
 	: "cc");
 
 	csdb();
@@ -378,34 +372,20 @@ do {									\
 extern unsigned long __must_check __arch_copy_from_user(void *to, const void __user *from, unsigned long n);
 #define raw_copy_from_user(to, from, n)					\
 ({									\
-	unsigned long __acfu_ret;					\
-	uaccess_enable_not_uao();					\
-	__acfu_ret = __arch_copy_from_user((to),			\
-				      __uaccess_mask_ptr(from), (n));	\
-	uaccess_disable_not_uao();					\
-	__acfu_ret;							\
+	__arch_copy_from_user((to), __uaccess_mask_ptr(from), (n));	\
 })
 
 extern unsigned long __must_check __arch_copy_to_user(void __user *to, const void *from, unsigned long n);
 #define raw_copy_to_user(to, from, n)					\
 ({									\
-	unsigned long __actu_ret;					\
-	uaccess_enable_not_uao();					\
-	__actu_ret = __arch_copy_to_user(__uaccess_mask_ptr(to),	\
-				    (from), (n));			\
-	uaccess_disable_not_uao();					\
-	__actu_ret;							\
+	__arch_copy_to_user(__uaccess_mask_ptr(to), (from), (n));	\
 })
 
 extern unsigned long __must_check __arch_copy_in_user(void __user *to, const void __user *from, unsigned long n);
 #define raw_copy_in_user(to, from, n)					\
 ({									\
-	unsigned long __aciu_ret;					\
-	uaccess_enable_not_uao();					\
-	__aciu_ret = __arch_copy_in_user(__uaccess_mask_ptr(to),	\
-				    __uaccess_mask_ptr(from), (n));	\
-	uaccess_disable_not_uao();					\
-	__aciu_ret;							\
+	__arch_copy_in_user(__uaccess_mask_ptr(to),			\
+			    __uaccess_mask_ptr(from), (n));		\
 })
 
 #define INLINE_COPY_TO_USER
@@ -414,11 +394,8 @@ extern unsigned long __must_check __arch_copy_in_user(void __user *to, const voi
 extern unsigned long __must_check __arch_clear_user(void __user *to, unsigned long n);
 static inline unsigned long __must_check __clear_user(void __user *to, unsigned long n)
 {
-	if (access_ok(to, n)) {
-		uaccess_enable_not_uao();
+	if (access_ok(to, n))
 		n = __arch_clear_user(__uaccess_mask_ptr(to), n);
-		uaccess_disable_not_uao();
-	}
 	return n;
 }
 #define clear_user	__clear_user

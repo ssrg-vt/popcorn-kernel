@@ -4,15 +4,10 @@
  * Author:Mark Yao <mark.yao@rock-chips.com>
  */
 
-#include <linux/component.h>
-#include <linux/mod_devicetable.h>
-#include <linux/module.h>
-#include <linux/of.h>
-#include <linux/platform_device.h>
+#include <drm/drmP.h>
 
-#include <drm/drm_fourcc.h>
-#include <drm/drm_plane.h>
-#include <drm/drm_print.h>
+#include <linux/kernel.h>
+#include <linux/component.h>
 
 #include "rockchip_drm_vop.h"
 #include "rockchip_vop_reg.h"

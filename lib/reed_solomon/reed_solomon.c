@@ -340,8 +340,7 @@ EXPORT_SYMBOL_GPL(encode_rs8);
  *  @data:	data field of a given type
  *  @par:	received parity data field
  *  @len:	data length
- *  @s: 	syndrome data field, must be in index form
- *		(if NULL, syndrome is calculated)
+ *  @s:		syndrome data field (if NULL, syndrome is calculated)
  *  @no_eras:	number of erasures
  *  @eras_pos:	position of erasures, can be NULL
  *  @invmsk:	invert data mask (will be xored on data, not on parity!)
@@ -355,8 +354,7 @@ EXPORT_SYMBOL_GPL(encode_rs8);
  *  decoding, so the caller has to ensure that decoder invocations are
  *  serialized.
  *
- *  Returns the number of corrected symbols or -EBADMSG for uncorrectable
- *  errors. The count includes errors in the parity.
+ *  Returns the number of corrected bits or -EBADMSG for uncorrectable errors.
  */
 int decode_rs8(struct rs_control *rsc, uint8_t *data, uint16_t *par, int len,
 	       uint16_t *s, int no_eras, int *eras_pos, uint16_t invmsk,
@@ -393,8 +391,7 @@ EXPORT_SYMBOL_GPL(encode_rs16);
  *  @data:	data field of a given type
  *  @par:	received parity data field
  *  @len:	data length
- *  @s: 	syndrome data field, must be in index form
- *		(if NULL, syndrome is calculated)
+ *  @s:		syndrome data field (if NULL, syndrome is calculated)
  *  @no_eras:	number of erasures
  *  @eras_pos:	position of erasures, can be NULL
  *  @invmsk:	invert data mask (will be xored on data, not on parity!)
@@ -406,8 +403,7 @@ EXPORT_SYMBOL_GPL(encode_rs16);
  *  decoding, so the caller has to ensure that decoder invocations are
  *  serialized.
  *
- *  Returns the number of corrected symbols or -EBADMSG for uncorrectable
- *  errors. The count includes errors in the parity.
+ *  Returns the number of corrected bits or -EBADMSG for uncorrectable errors.
  */
 int decode_rs16(struct rs_control *rsc, uint16_t *data, uint16_t *par, int len,
 		uint16_t *s, int no_eras, int *eras_pos, uint16_t invmsk,

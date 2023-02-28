@@ -229,7 +229,8 @@ void __init pSeries_final_fixup(void)
 
 	pSeries_request_regions();
 
-	eeh_show_enabled();
+	eeh_probe_devices();
+	eeh_addr_cache_build();
 
 #ifdef CONFIG_PCI_IOV
 	ppc_md.pcibios_sriov_enable = pseries_pcibios_sriov_enable;

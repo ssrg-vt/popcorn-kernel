@@ -164,9 +164,20 @@ static inline struct lowpan_peer *peer_lookup_dst(struct lowpan_btle_dev *dev,
 	int count = atomic_read(&dev->peer_count);
 	const struct in6_addr *nexthop;
 	struct lowpan_peer *peer;
-	struct neighbour *neigh;
 
 	BT_DBG("peers %d addr %pI6c rt %p", count, daddr, rt);
+
+	/* If we have multiple 6lowpan peers, then check where we should
+	 * send the packet. If only one peer exists, then we can send the
+	 * packet right away.
+	 */
+	if (count == 1) {
+		rcu_read_lock();
+		peer = list_first_or_null_rcu(&dev->peers, struct lowpan_peer,
+					      list);
+		rcu_read_unlock();
+		return peer;
+	}
 
 	if (!rt) {
 		if (ipv6_addr_any(&lowpan_cb(skb)->gw)) {
@@ -202,20 +213,6 @@ static inline struct lowpan_peer *peer_lookup_dst(struct lowpan_btle_dev *dev,
 			rcu_read_unlock();
 			return peer;
 		}
-	}
-
-	/* use the neighbour cache for matching addresses assigned by SLAAC
-	*/
-	neigh = __ipv6_neigh_lookup(dev->netdev, nexthop);
-	if (neigh) {
-		list_for_each_entry_rcu(peer, &dev->peers, list) {
-			if (!memcmp(neigh->ha, peer->lladdr, ETH_ALEN)) {
-				neigh_release(neigh);
-				rcu_read_unlock();
-				return peer;
-			}
-		}
-		neigh_release(neigh);
 	}
 
 	rcu_read_unlock();
@@ -571,11 +568,19 @@ static netdev_tx_t bt_xmit(struct sk_buff *skb, struct net_device *netdev)
 	return err < 0 ? NET_XMIT_DROP : err;
 }
 
+static int bt_dev_init(struct net_device *dev)
+{
+	netdev_lockdep_set_classes(dev);
+
+	return 0;
+}
+
 static const struct net_device_ops netdev_ops = {
+	.ndo_init		= bt_dev_init,
 	.ndo_start_xmit		= bt_xmit,
 };
 
-static const struct header_ops header_ops = {
+static struct header_ops header_ops = {
 	.create	= header_create,
 };
 

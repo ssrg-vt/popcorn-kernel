@@ -11,8 +11,7 @@
  */
 
 #include <linux/bitops.h>
-#include <linux/gpio/driver.h>
-#include <linux/io.h>
+#include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/pinctrl/pinmux.h>
@@ -116,7 +115,7 @@ static void rza2_pin_to_gpio(void __iomem *pfc_base, unsigned int offset,
 	mask16 = RZA2_PDR_MASK << (pin * 2);
 	reg16 &= ~mask16;
 
-	if (dir)
+	if (dir == GPIOF_DIR_IN)
 		reg16 |= RZA2_PDR_INPUT << (pin * 2);	/* pin as input */
 	else
 		reg16 |= RZA2_PDR_OUTPUT << (pin * 2);	/* pin as output */
@@ -135,18 +134,18 @@ static int rza2_chip_get_direction(struct gpio_chip *chip, unsigned int offset)
 	reg16 = (reg16 >> (pin * 2)) & RZA2_PDR_MASK;
 
 	if (reg16 == RZA2_PDR_OUTPUT)
-		return 0;
+		return GPIOF_DIR_OUT;
 
 	if (reg16 == RZA2_PDR_INPUT)
-		return 1;
+		return GPIOF_DIR_IN;
 
 	/*
 	 * This GPIO controller has a default Hi-Z state that is not input or
 	 * output, so force the pin to input now.
 	 */
-	rza2_pin_to_gpio(priv->base, offset, 1);
+	rza2_pin_to_gpio(priv->base, offset, GPIOF_DIR_IN);
 
-	return 1;
+	return GPIOF_DIR_IN;
 }
 
 static int rza2_chip_direction_input(struct gpio_chip *chip,
@@ -154,7 +153,7 @@ static int rza2_chip_direction_input(struct gpio_chip *chip,
 {
 	struct rza2_pinctrl_priv *priv = gpiochip_get_data(chip);
 
-	rza2_pin_to_gpio(priv->base, offset, 1);
+	rza2_pin_to_gpio(priv->base, offset, GPIOF_DIR_IN);
 
 	return 0;
 }
@@ -192,7 +191,7 @@ static int rza2_chip_direction_output(struct gpio_chip *chip,
 	struct rza2_pinctrl_priv *priv = gpiochip_get_data(chip);
 
 	rza2_chip_set(chip, offset, val);
-	rza2_pin_to_gpio(priv->base, offset, 0);
+	rza2_pin_to_gpio(priv->base, offset, GPIOF_DIR_OUT);
 
 	return 0;
 }

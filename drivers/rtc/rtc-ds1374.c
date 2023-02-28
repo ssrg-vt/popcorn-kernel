@@ -14,7 +14,7 @@
  */
 /*
  * It would be more efficient to use i2c msgs/i2c_transfer directly but, as
- * recommended in .../Documentation/i2c/writing-clients.rst section
+ * recommened in .../Documentation/i2c/writing-clients section
  * "Sending and receiving", using SMBus level communication is preferred.
  */
 

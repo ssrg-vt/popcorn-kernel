@@ -41,7 +41,7 @@ static int ocxl_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	return 0;
 }
 
-static void ocxl_remove(struct pci_dev *dev)
+void ocxl_remove(struct pci_dev *dev)
 {
 	struct ocxl_fn *fn;
 	struct ocxl_afu *afu;

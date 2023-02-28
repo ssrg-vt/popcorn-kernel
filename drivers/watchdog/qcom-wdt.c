@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2014, The Linux Foundation. All rights reserved.
  */
-#include <linux/bits.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
-#include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -20,9 +18,6 @@ enum wdt_reg {
 	WDT_BARK_TIME,
 	WDT_BITE_TIME,
 };
-
-#define QCOM_WDT_ENABLE		BIT(0)
-#define QCOM_WDT_ENABLE_IRQ	BIT(1)
 
 static const u32 reg_offset_data_apcs_tmr[] = {
 	[WDT_RST] = 0x38,
@@ -42,6 +37,7 @@ static const u32 reg_offset_data_kpss[] = {
 
 struct qcom_wdt {
 	struct watchdog_device	wdd;
+	struct clk		*clk;
 	unsigned long		rate;
 	void __iomem		*base;
 	const u32		*layout;
@@ -58,35 +54,15 @@ struct qcom_wdt *to_qcom_wdt(struct watchdog_device *wdd)
 	return container_of(wdd, struct qcom_wdt, wdd);
 }
 
-static inline int qcom_get_enable(struct watchdog_device *wdd)
-{
-	int enable = QCOM_WDT_ENABLE;
-
-	if (wdd->pretimeout)
-		enable |= QCOM_WDT_ENABLE_IRQ;
-
-	return enable;
-}
-
-static irqreturn_t qcom_wdt_isr(int irq, void *arg)
-{
-	struct watchdog_device *wdd = arg;
-
-	watchdog_notify_pretimeout(wdd);
-
-	return IRQ_HANDLED;
-}
-
 static int qcom_wdt_start(struct watchdog_device *wdd)
 {
 	struct qcom_wdt *wdt = to_qcom_wdt(wdd);
-	unsigned int bark = wdd->timeout - wdd->pretimeout;
 
 	writel(0, wdt_addr(wdt, WDT_EN));
 	writel(1, wdt_addr(wdt, WDT_RST));
-	writel(bark * wdt->rate, wdt_addr(wdt, WDT_BARK_TIME));
+	writel(wdd->timeout * wdt->rate, wdt_addr(wdt, WDT_BARK_TIME));
 	writel(wdd->timeout * wdt->rate, wdt_addr(wdt, WDT_BITE_TIME));
-	writel(qcom_get_enable(wdd), wdt_addr(wdt, WDT_EN));
+	writel(1, wdt_addr(wdt, WDT_EN));
 	return 0;
 }
 
@@ -113,13 +89,6 @@ static int qcom_wdt_set_timeout(struct watchdog_device *wdd,
 	return qcom_wdt_start(wdd);
 }
 
-static int qcom_wdt_set_pretimeout(struct watchdog_device *wdd,
-				   unsigned int timeout)
-{
-	wdd->pretimeout = timeout;
-	return qcom_wdt_start(wdd);
-}
-
 static int qcom_wdt_restart(struct watchdog_device *wdd, unsigned long action,
 			    void *data)
 {
@@ -136,7 +105,7 @@ static int qcom_wdt_restart(struct watchdog_device *wdd, unsigned long action,
 	writel(1, wdt_addr(wdt, WDT_RST));
 	writel(timeout, wdt_addr(wdt, WDT_BARK_TIME));
 	writel(timeout, wdt_addr(wdt, WDT_BITE_TIME));
-	writel(QCOM_WDT_ENABLE, wdt_addr(wdt, WDT_EN));
+	writel(1, wdt_addr(wdt, WDT_EN));
 
 	/*
 	 * Actually make sure the above sequence hits hardware before sleeping.
@@ -152,7 +121,6 @@ static const struct watchdog_ops qcom_wdt_ops = {
 	.stop		= qcom_wdt_stop,
 	.ping		= qcom_wdt_ping,
 	.set_timeout	= qcom_wdt_set_timeout,
-	.set_pretimeout	= qcom_wdt_set_pretimeout,
 	.restart        = qcom_wdt_restart,
 	.owner		= THIS_MODULE,
 };
@@ -161,15 +129,6 @@ static const struct watchdog_info qcom_wdt_info = {
 	.options	= WDIOF_KEEPALIVEPING
 			| WDIOF_MAGICCLOSE
 			| WDIOF_SETTIMEOUT
-			| WDIOF_CARDRESET,
-	.identity	= KBUILD_MODNAME,
-};
-
-static const struct watchdog_info qcom_wdt_pt_info = {
-	.options	= WDIOF_KEEPALIVEPING
-			| WDIOF_MAGICCLOSE
-			| WDIOF_SETTIMEOUT
-			| WDIOF_PRETIMEOUT
 			| WDIOF_CARDRESET,
 	.identity	= KBUILD_MODNAME,
 };
@@ -187,8 +146,7 @@ static int qcom_wdt_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	const u32 *regs;
 	u32 percpu_offset;
-	int irq, ret;
-	struct clk *clk;
+	int ret;
 
 	regs = of_device_get_match_data(dev);
 	if (!regs) {
@@ -215,18 +173,19 @@ static int qcom_wdt_probe(struct platform_device *pdev)
 	if (IS_ERR(wdt->base))
 		return PTR_ERR(wdt->base);
 
-	clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(clk)) {
+	wdt->clk = devm_clk_get(dev, NULL);
+	if (IS_ERR(wdt->clk)) {
 		dev_err(dev, "failed to get input clock\n");
-		return PTR_ERR(clk);
+		return PTR_ERR(wdt->clk);
 	}
 
-	ret = clk_prepare_enable(clk);
+	ret = clk_prepare_enable(wdt->clk);
 	if (ret) {
 		dev_err(dev, "failed to setup clock\n");
 		return ret;
 	}
-	ret = devm_add_action_or_reset(dev, qcom_clk_disable_unprepare, clk);
+	ret = devm_add_action_or_reset(dev, qcom_clk_disable_unprepare,
+				       wdt->clk);
 	if (ret)
 		return ret;
 
@@ -238,31 +197,14 @@ static int qcom_wdt_probe(struct platform_device *pdev)
 	 * that it would bite before a second elapses it's usefulness is
 	 * limited.  Bail if this is the case.
 	 */
-	wdt->rate = clk_get_rate(clk);
+	wdt->rate = clk_get_rate(wdt->clk);
 	if (wdt->rate == 0 ||
 	    wdt->rate > 0x10000000U) {
 		dev_err(dev, "invalid clock rate\n");
 		return -EINVAL;
 	}
 
-	/* check if there is pretimeout support */
-	irq = platform_get_irq(pdev, 0);
-	if (irq > 0) {
-		ret = devm_request_irq(dev, irq, qcom_wdt_isr,
-				       IRQF_TRIGGER_RISING,
-				       "wdt_bark", &wdt->wdd);
-		if (ret)
-			return ret;
-
-		wdt->wdd.info = &qcom_wdt_pt_info;
-		wdt->wdd.pretimeout = 1;
-	} else {
-		if (irq == -EPROBE_DEFER)
-			return -EPROBE_DEFER;
-
-		wdt->wdd.info = &qcom_wdt_info;
-	}
-
+	wdt->wdd.info = &qcom_wdt_info;
 	wdt->wdd.ops = &qcom_wdt_ops;
 	wdt->wdd.min_timeout = 1;
 	wdt->wdd.max_timeout = 0x10000000U / wdt->rate;
@@ -281,8 +223,10 @@ static int qcom_wdt_probe(struct platform_device *pdev)
 	watchdog_init_timeout(&wdt->wdd, 0, dev);
 
 	ret = devm_watchdog_register_device(dev, &wdt->wdd);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "failed to register watchdog\n");
 		return ret;
+	}
 
 	platform_set_drvdata(pdev, wdt);
 	return 0;

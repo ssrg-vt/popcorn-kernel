@@ -6,9 +6,6 @@
  * ima_policy.c
  *	- initialize default measure policy rules
  */
-
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/fs.h>
@@ -79,7 +76,6 @@ struct ima_rule_entry {
 		int type;	/* audit type */
 	} lsm[MAX_LSM_RULES];
 	char *fsname;
-	struct ima_template_desc *template;
 };
 
 /*
@@ -199,7 +195,7 @@ static struct ima_rule_entry secure_boot_rules[] __ro_after_init = {
 };
 
 /* An array of architecture specific rules */
-static struct ima_rule_entry *arch_policy_entry __ro_after_init;
+struct ima_rule_entry *arch_policy_entry __ro_after_init;
 
 static LIST_HEAD(ima_default_rules);
 static LIST_HEAD(ima_policy_rules);
@@ -249,111 +245,29 @@ static int __init default_appraise_policy_setup(char *str)
 }
 __setup("ima_appraise_tcb", default_appraise_policy_setup);
 
-static void ima_lsm_free_rule(struct ima_rule_entry *entry)
-{
-	int i;
-
-	for (i = 0; i < MAX_LSM_RULES; i++) {
-		kfree(entry->lsm[i].rule);
-		kfree(entry->lsm[i].args_p);
-	}
-	kfree(entry);
-}
-
-static struct ima_rule_entry *ima_lsm_copy_rule(struct ima_rule_entry *entry)
-{
-	struct ima_rule_entry *nentry;
-	int i, result;
-
-	nentry = kmalloc(sizeof(*nentry), GFP_KERNEL);
-	if (!nentry)
-		return NULL;
-
-	/*
-	 * Immutable elements are copied over as pointers and data; only
-	 * lsm rules can change
-	 */
-	memcpy(nentry, entry, sizeof(*nentry));
-	memset(nentry->lsm, 0, FIELD_SIZEOF(struct ima_rule_entry, lsm));
-
-	for (i = 0; i < MAX_LSM_RULES; i++) {
-		if (!entry->lsm[i].rule)
-			continue;
-
-		nentry->lsm[i].type = entry->lsm[i].type;
-		nentry->lsm[i].args_p = kstrdup(entry->lsm[i].args_p,
-						GFP_KERNEL);
-		if (!nentry->lsm[i].args_p)
-			goto out_err;
-
-		result = security_filter_rule_init(nentry->lsm[i].type,
-						   Audit_equal,
-						   nentry->lsm[i].args_p,
-						   &nentry->lsm[i].rule);
-		if (result == -EINVAL)
-			pr_warn("ima: rule for LSM \'%d\' is undefined\n",
-				entry->lsm[i].type);
-	}
-	return nentry;
-
-out_err:
-	ima_lsm_free_rule(nentry);
-	return NULL;
-}
-
-static int ima_lsm_update_rule(struct ima_rule_entry *entry)
-{
-	struct ima_rule_entry *nentry;
-
-	nentry = ima_lsm_copy_rule(entry);
-	if (!nentry)
-		return -ENOMEM;
-
-	list_replace_rcu(&entry->list, &nentry->list);
-	synchronize_rcu();
-	ima_lsm_free_rule(entry);
-
-	return 0;
-}
-
 /*
  * The LSM policy can be reloaded, leaving the IMA LSM based rules referring
  * to the old, stale LSM policy.  Update the IMA LSM based rules to reflect
- * the reloaded LSM policy.
+ * the reloaded LSM policy.  We assume the rules still exist; and BUG_ON() if
+ * they don't.
  */
 static void ima_lsm_update_rules(void)
 {
-	struct ima_rule_entry *entry, *e;
-	int i, result, needs_update;
+	struct ima_rule_entry *entry;
+	int result;
+	int i;
 
-	list_for_each_entry_safe(entry, e, &ima_policy_rules, list) {
-		needs_update = 0;
+	list_for_each_entry(entry, &ima_policy_rules, list) {
 		for (i = 0; i < MAX_LSM_RULES; i++) {
-			if (entry->lsm[i].rule) {
-				needs_update = 1;
-				break;
-			}
-		}
-		if (!needs_update)
-			continue;
-
-		result = ima_lsm_update_rule(entry);
-		if (result) {
-			pr_err("ima: lsm rule update error %d\n",
-				result);
-			return;
+			if (!entry->lsm[i].rule)
+				continue;
+			result = security_filter_rule_init(entry->lsm[i].type,
+							   Audit_equal,
+							   entry->lsm[i].args_p,
+							   &entry->lsm[i].rule);
+			BUG_ON(!entry->lsm[i].rule);
 		}
 	}
-}
-
-int ima_lsm_policy_change(struct notifier_block *nb, unsigned long event,
-			  void *lsm_data)
-{
-	if (event != LSM_POLICY_CHANGE)
-		return NOTIFY_DONE;
-
-	ima_lsm_update_rules();
-	return NOTIFY_OK;
 }
 
 /**
@@ -373,11 +287,6 @@ static bool ima_match_rules(struct ima_rule_entry *rule, struct inode *inode,
 {
 	int i;
 
-	if (func == KEXEC_CMDLINE) {
-		if ((rule->flags & IMA_FUNC) && (rule->func == func))
-			return true;
-		return false;
-	}
 	if ((rule->flags & IMA_FUNC) &&
 	    (rule->func != func && func != POST_SETATTR))
 		return false;
@@ -414,10 +323,11 @@ static bool ima_match_rules(struct ima_rule_entry *rule, struct inode *inode,
 	for (i = 0; i < MAX_LSM_RULES; i++) {
 		int rc = 0;
 		u32 osid;
+		int retried = 0;
 
 		if (!rule->lsm[i].rule)
 			continue;
-
+retry:
 		switch (i) {
 		case LSM_OBJ_USER:
 		case LSM_OBJ_ROLE:
@@ -437,6 +347,11 @@ static bool ima_match_rules(struct ima_rule_entry *rule, struct inode *inode,
 							rule->lsm[i].rule);
 		default:
 			break;
+		}
+		if ((rc < 0) && (!retried)) {
+			retried = 1;
+			ima_lsm_update_rules();
+			goto retry;
 		}
 		if (!rc)
 			return false;
@@ -478,7 +393,6 @@ static int get_subaction(struct ima_rule_entry *rule, enum ima_hooks func)
  * @func: IMA hook identifier
  * @mask: requested action (MAY_READ | MAY_WRITE | MAY_APPEND | MAY_EXEC)
  * @pcr: set the pcr to extend
- * @template_desc: the template that should be used for this rule
  *
  * Measure decision based on func/mask/fsmagic and LSM(subj/obj/type)
  * conditions.
@@ -488,14 +402,10 @@ static int get_subaction(struct ima_rule_entry *rule, enum ima_hooks func)
  * than writes so ima_match_policy() is classical RCU candidate.
  */
 int ima_match_policy(struct inode *inode, const struct cred *cred, u32 secid,
-		     enum ima_hooks func, int mask, int flags, int *pcr,
-		     struct ima_template_desc **template_desc)
+		     enum ima_hooks func, int mask, int flags, int *pcr)
 {
 	struct ima_rule_entry *entry;
 	int action = 0, actmask = flags | (flags << 1);
-
-	if (template_desc)
-		*template_desc = ima_template_desc_current();
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(entry, ima_rules, list) {
@@ -516,7 +426,6 @@ int ima_match_policy(struct inode *inode, const struct cred *cred, u32 secid,
 				action |= IMA_FAIL_UNVERIFIABLE_SIGS;
 		}
 
-
 		if (entry->action & IMA_DO_MASK)
 			actmask &= ~(entry->action | entry->action << 1);
 		else
@@ -524,9 +433,6 @@ int ima_match_policy(struct inode *inode, const struct cred *cred, u32 secid,
 
 		if ((pcr) && (entry->flags & IMA_PCR))
 			*pcr = entry->pcr;
-
-		if (template_desc && entry->template)
-			*template_desc = entry->template;
 
 		if (!actmask)
 			break;
@@ -766,7 +672,7 @@ enum {
 	Opt_uid_gt, Opt_euid_gt, Opt_fowner_gt,
 	Opt_uid_lt, Opt_euid_lt, Opt_fowner_lt,
 	Opt_appraise_type, Opt_permit_directio,
-	Opt_pcr, Opt_template, Opt_err
+	Opt_pcr, Opt_err
 };
 
 static const match_table_t policy_tokens = {
@@ -800,7 +706,6 @@ static const match_table_t policy_tokens = {
 	{Opt_appraise_type, "appraise_type=%s"},
 	{Opt_permit_directio, "permit_directio"},
 	{Opt_pcr, "pcr=%s"},
-	{Opt_template, "template=%s"},
 	{Opt_err, NULL}
 };
 
@@ -848,45 +753,12 @@ static void ima_log_string(struct audit_buffer *ab, char *key, char *value)
 	ima_log_string_op(ab, key, value, NULL);
 }
 
-/*
- * Validating the appended signature included in the measurement list requires
- * the file hash calculated without the appended signature (i.e., the 'd-modsig'
- * field). Therefore, notify the user if they have the 'modsig' field but not
- * the 'd-modsig' field in the template.
- */
-static void check_template_modsig(const struct ima_template_desc *template)
-{
-#define MSG "template with 'modsig' field also needs 'd-modsig' field\n"
-	bool has_modsig, has_dmodsig;
-	static bool checked;
-	int i;
-
-	/* We only need to notify the user once. */
-	if (checked)
-		return;
-
-	has_modsig = has_dmodsig = false;
-	for (i = 0; i < template->num_fields; i++) {
-		if (!strcmp(template->fields[i]->field_id, "modsig"))
-			has_modsig = true;
-		else if (!strcmp(template->fields[i]->field_id, "d-modsig"))
-			has_dmodsig = true;
-	}
-
-	if (has_modsig && !has_dmodsig)
-		pr_notice(MSG);
-
-	checked = true;
-#undef MSG
-}
-
 static int ima_parse_rule(char *rule, struct ima_rule_entry *entry)
 {
 	struct audit_buffer *ab;
 	char *from;
 	char *p;
 	bool uid_token;
-	struct ima_template_desc *template_desc;
 	int result = 0;
 
 	ab = integrity_audit_log_start(audit_context(), GFP_KERNEL,
@@ -994,8 +866,6 @@ static int ima_parse_rule(char *rule, struct ima_rule_entry *entry)
 				entry->func = KEXEC_INITRAMFS_CHECK;
 			else if (strcmp(args[0].from, "POLICY_CHECK") == 0)
 				entry->func = POLICY_CHECK;
-			else if (strcmp(args[0].from, "KEXEC_CMDLINE") == 0)
-				entry->func = KEXEC_CMDLINE;
 			else
 				result = -EINVAL;
 			if (!result)
@@ -1165,10 +1035,6 @@ static int ima_parse_rule(char *rule, struct ima_rule_entry *entry)
 			ima_log_string(ab, "appraise_type", args[0].from);
 			if ((strcmp(args[0].from, "imasig")) == 0)
 				entry->flags |= IMA_DIGSIG_REQUIRED;
-			else if (ima_hook_supports_modsig(entry->func) &&
-				 strcmp(args[0].from, "imasig|modsig") == 0)
-				entry->flags |= IMA_DIGSIG_REQUIRED |
-						IMA_MODSIG_ALLOWED;
 			else
 				result = -EINVAL;
 			break;
@@ -1189,28 +1055,6 @@ static int ima_parse_rule(char *rule, struct ima_rule_entry *entry)
 				entry->flags |= IMA_PCR;
 
 			break;
-		case Opt_template:
-			ima_log_string(ab, "template", args[0].from);
-			if (entry->action != MEASURE) {
-				result = -EINVAL;
-				break;
-			}
-			template_desc = lookup_template_desc(args[0].from);
-			if (!template_desc || entry->template) {
-				result = -EINVAL;
-				break;
-			}
-
-			/*
-			 * template_desc_init_fields() does nothing if
-			 * the template is already initialised, so
-			 * it's safe to do this unconditionally
-			 */
-			template_desc_init_fields(template_desc->fmt,
-						 &(template_desc->fields),
-						 &(template_desc->num_fields));
-			entry->template = template_desc;
-			break;
 		case Opt_err:
 			ima_log_string(ab, "UNKNOWN", p);
 			result = -EINVAL;
@@ -1221,12 +1065,6 @@ static int ima_parse_rule(char *rule, struct ima_rule_entry *entry)
 		result = -EINVAL;
 	else if (entry->action == APPRAISE)
 		temp_ima_appraise |= ima_appraise_flag(entry->func);
-
-	if (!result && entry->flags & IMA_MODSIG_ALLOWED) {
-		template_desc = entry->template ? entry->template :
-						  ima_template_desc_current();
-		check_template_modsig(template_desc);
-	}
 
 	audit_log_format(ab, "res=%d", !result);
 	audit_log_end(ab);
@@ -1299,12 +1137,6 @@ void ima_delete_rules(void)
 	}
 }
 
-#define __ima_hook_stringify(str)	(#str),
-
-const char *const func_tokens[] = {
-	__ima_hooks(__ima_hook_stringify)
-};
-
 #ifdef	CONFIG_IMA_READ_POLICY
 enum {
 	mask_exec = 0, mask_write, mask_read, mask_append
@@ -1315,6 +1147,12 @@ static const char *const mask_tokens[] = {
 	"^MAY_WRITE",
 	"^MAY_READ",
 	"^MAY_APPEND"
+};
+
+#define __ima_hook_stringify(str)	(#str),
+
+static const char *const func_tokens[] = {
+	__ima_hooks(__ima_hook_stringify)
 };
 
 void *ima_policy_start(struct seq_file *m, loff_t *pos)
@@ -1492,14 +1330,8 @@ int ima_policy_show(struct seq_file *m, void *v)
 			}
 		}
 	}
-	if (entry->template)
-		seq_printf(m, "template=%s ", entry->template->name);
-	if (entry->flags & IMA_DIGSIG_REQUIRED) {
-		if (entry->flags & IMA_MODSIG_ALLOWED)
-			seq_puts(m, "appraise_type=imasig|modsig ");
-		else
-			seq_puts(m, "appraise_type=imasig ");
-	}
+	if (entry->flags & IMA_DIGSIG_REQUIRED)
+		seq_puts(m, "appraise_type=imasig ");
 	if (entry->flags & IMA_PERMIT_DIRECTIO)
 		seq_puts(m, "permit_directio ");
 	rcu_read_unlock();
@@ -1507,53 +1339,3 @@ int ima_policy_show(struct seq_file *m, void *v)
 	return 0;
 }
 #endif	/* CONFIG_IMA_READ_POLICY */
-
-#if defined(CONFIG_IMA_APPRAISE) && defined(CONFIG_INTEGRITY_TRUSTED_KEYRING)
-/*
- * ima_appraise_signature: whether IMA will appraise a given function using
- * an IMA digital signature. This is restricted to cases where the kernel
- * has a set of built-in trusted keys in order to avoid an attacker simply
- * loading additional keys.
- */
-bool ima_appraise_signature(enum kernel_read_file_id id)
-{
-	struct ima_rule_entry *entry;
-	bool found = false;
-	enum ima_hooks func;
-
-	if (id >= READING_MAX_ID)
-		return false;
-
-	func = read_idmap[id] ?: FILE_CHECK;
-
-	rcu_read_lock();
-	list_for_each_entry_rcu(entry, ima_rules, list) {
-		if (entry->action != APPRAISE)
-			continue;
-
-		/*
-		 * A generic entry will match, but otherwise require that it
-		 * match the func we're looking for
-		 */
-		if (entry->func && entry->func != func)
-			continue;
-
-		/*
-		 * We require this to be a digital signature, not a raw IMA
-		 * hash.
-		 */
-		if (entry->flags & IMA_DIGSIG_REQUIRED)
-			found = true;
-
-		/*
-		 * We've found a rule that matches, so break now even if it
-		 * didn't require a digital signature - a later rule that does
-		 * won't override it, so would be a false positive.
-		 */
-		break;
-	}
-
-	rcu_read_unlock();
-	return found;
-}
-#endif /* CONFIG_IMA_APPRAISE && CONFIG_INTEGRITY_TRUSTED_KEYRING */

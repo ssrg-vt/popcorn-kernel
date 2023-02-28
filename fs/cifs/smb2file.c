@@ -88,20 +88,14 @@ smb2_open_file(const unsigned int xid, struct cifs_open_parms *oparms,
 	}
 
 	if (buf) {
-		/* if open response does not have IndexNumber field - get it */
-		if (smb2_data->IndexNumber == 0) {
-			rc = SMB2_get_srv_num(xid, oparms->tcon,
-				      fid->persistent_fid,
+		/* open response does not have IndexNumber field - get it */
+		rc = SMB2_get_srv_num(xid, oparms->tcon, fid->persistent_fid,
 				      fid->volatile_fid,
 				      &smb2_data->IndexNumber);
-			if (rc) {
-				/*
-				 * let get_inode_info disable server inode
-				 * numbers
-				 */
-				smb2_data->IndexNumber = 0;
-				rc = 0;
-			}
+		if (rc) {
+			/* let get_inode_info disable server inode numbers */
+			smb2_data->IndexNumber = 0;
+			rc = 0;
 		}
 		move_smb2_info_to_cifs(buf, smb2_data);
 	}
@@ -145,7 +139,7 @@ smb2_unlock_range(struct cifsFileInfo *cfile, struct file_lock *flock,
 
 	cur = buf;
 
-	cifs_down_write(&cinode->lock_sem);
+	down_write(&cinode->lock_sem);
 	list_for_each_entry_safe(li, tmp, &cfile->llist->locks, llist) {
 		if (flock->fl_start > li->offset ||
 		    (flock->fl_start + length) <

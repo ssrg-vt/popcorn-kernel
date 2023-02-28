@@ -1202,6 +1202,7 @@ static int sil24_port_start(struct ata_port *ap)
 	cb = dmam_alloc_coherent(dev, cb_size, &cb_dma, GFP_KERNEL);
 	if (!cb)
 		return -ENOMEM;
+	memset(cb, 0, cb_size);
 
 	pp->cmd_block = cb;
 	pp->cmd_block_dma = cb_dma;
@@ -1301,10 +1302,28 @@ static int sil24_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	host->iomap = iomap;
 
 	/* configure and activate the device */
-	rc = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
-	if (rc) {
-		dev_err(&pdev->dev, "DMA enable failed\n");
-		return rc;
+	if (!dma_set_mask(&pdev->dev, DMA_BIT_MASK(64))) {
+		rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
+		if (rc) {
+			rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+			if (rc) {
+				dev_err(&pdev->dev,
+					"64-bit DMA enable failed\n");
+				return rc;
+			}
+		}
+	} else {
+		rc = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
+		if (rc) {
+			dev_err(&pdev->dev, "32-bit DMA enable failed\n");
+			return rc;
+		}
+		rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+		if (rc) {
+			dev_err(&pdev->dev,
+				"32-bit consistent DMA enable failed\n");
+			return rc;
+		}
 	}
 
 	/* Set max read request size to 4096.  This slightly increases

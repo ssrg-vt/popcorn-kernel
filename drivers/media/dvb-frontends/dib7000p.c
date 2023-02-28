@@ -2036,8 +2036,7 @@ static int dib7000pc_detection(struct i2c_adapter *i2c_adap)
 	if (i2c_transfer(i2c_adap, msg, 2) == 2)
 		if (rx[0] == 0x01 && rx[1] == 0xb3) {
 			dprintk("-D-  DiB7000PC detected\n");
-			ret = 1;
-			goto out;
+			return 1;
 		}
 
 	msg[0].addr = msg[1].addr = 0x40;
@@ -2045,13 +2044,11 @@ static int dib7000pc_detection(struct i2c_adapter *i2c_adap)
 	if (i2c_transfer(i2c_adap, msg, 2) == 2)
 		if (rx[0] == 0x01 && rx[1] == 0xb3) {
 			dprintk("-D-  DiB7000PC detected\n");
-			ret = 1;
-			goto out;
+			return 1;
 		}
 
 	dprintk("-D-  DiB7000PC not detected\n");
 
-out:
 	kfree(rx);
 rx_memory_error:
 	kfree(tx);

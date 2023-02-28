@@ -110,17 +110,10 @@
 #endif
 
 #ifdef CONFIG_FTRACE_MCOUNT_RECORD
-#ifdef CC_USING_PATCHABLE_FUNCTION_ENTRY
-#define MCOUNT_REC()	. = ALIGN(8);				\
-			__start_mcount_loc = .;			\
-			KEEP(*(__patchable_function_entries))	\
-			__stop_mcount_loc = .;
-#else
 #define MCOUNT_REC()	. = ALIGN(8);				\
 			__start_mcount_loc = .;			\
 			KEEP(*(__mcount_loc))			\
 			__stop_mcount_loc = .;
-#endif
 #else
 #define MCOUNT_REC()
 #endif
@@ -215,13 +208,8 @@
 			__start_lsm_info = .;				\
 			KEEP(*(.lsm_info.init))				\
 			__end_lsm_info = .;
-#define EARLY_LSM_TABLE()	. = ALIGN(8);				\
-			__start_early_lsm_info = .;			\
-			KEEP(*(.early_lsm_info.init))			\
-			__end_early_lsm_info = .;
 #else
 #define LSM_TABLE()
-#define EARLY_LSM_TABLE()
 #endif
 
 #define ___OF_TABLE(cfg, name)	_OF_TABLE_##cfg(name)
@@ -249,16 +237,6 @@
 	__##name##_acpi_probe_table_end = .;
 #else
 #define ACPI_PROBE_TABLE(name)
-#endif
-
-#ifdef CONFIG_THERMAL
-#define THERMAL_TABLE(name)						\
-	. = ALIGN(8);							\
-	__##name##_thermal_table = .;					\
-	KEEP(*(__##name##_thermal_table))				\
-	__##name##_thermal_table_end = .;
-#else
-#define THERMAL_TABLE(name)
 #endif
 
 #define KERNEL_DTB()							\
@@ -630,10 +608,8 @@
 	IRQCHIP_OF_MATCH_TABLE()					\
 	ACPI_PROBE_TABLE(irqchip)					\
 	ACPI_PROBE_TABLE(timer)						\
-	THERMAL_TABLE(governor)						\
 	EARLYCON_TABLE()						\
-	LSM_TABLE()							\
-	EARLY_LSM_TABLE()
+	LSM_TABLE()
 
 #define INIT_TEXT							\
 	*(.init.text .init.text.*)					\

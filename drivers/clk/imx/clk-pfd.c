@@ -121,13 +121,12 @@ static const struct clk_ops clk_pfd_ops = {
 	.is_enabled     = clk_pfd_is_enabled,
 };
 
-struct clk_hw *imx_clk_hw_pfd(const char *name, const char *parent_name,
+struct clk *imx_clk_pfd(const char *name, const char *parent_name,
 			void __iomem *reg, u8 idx)
 {
 	struct clk_pfd *pfd;
-	struct clk_hw *hw;
+	struct clk *clk;
 	struct clk_init_data init;
-	int ret;
 
 	pfd = kzalloc(sizeof(*pfd), GFP_KERNEL);
 	if (!pfd)
@@ -143,13 +142,10 @@ struct clk_hw *imx_clk_hw_pfd(const char *name, const char *parent_name,
 	init.num_parents = 1;
 
 	pfd->hw.init = &init;
-	hw = &pfd->hw;
 
-	ret = clk_hw_register(NULL, hw);
-	if (ret) {
+	clk = clk_register(NULL, &pfd->hw);
+	if (IS_ERR(clk))
 		kfree(pfd);
-		return ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }

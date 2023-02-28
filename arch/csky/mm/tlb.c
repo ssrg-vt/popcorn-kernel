@@ -10,12 +10,7 @@
 #include <asm/pgtable.h>
 #include <asm/setup.h>
 
-/*
- * One C-SKY MMU TLB entry contain two PFN/page entry, ie:
- * 1VPN -> 2PFN
- */
-#define TLB_ENTRY_SIZE		(PAGE_SIZE * 2)
-#define TLB_ENTRY_SIZE_MASK	(PAGE_MASK << 1)
+#define CSKY_TLB_SIZE CONFIG_CPU_TLB_SIZE
 
 void flush_tlb_all(void)
 {
@@ -24,148 +19,201 @@ void flush_tlb_all(void)
 
 void flush_tlb_mm(struct mm_struct *mm)
 {
-#ifdef CONFIG_CPU_HAS_TLBI
-	asm volatile("tlbi.asids %0"::"r"(cpu_asid(mm)));
-#else
+	int cpu = smp_processor_id();
+
+	if (cpu_context(cpu, mm) != 0)
+		drop_mmu_context(mm, cpu);
+
 	tlb_invalid_all();
-#endif
 }
 
-/*
- * MMU operation regs only could invalid tlb entry in jtlb and we
- * need change asid field to invalid I-utlb & D-utlb.
- */
-#ifndef CONFIG_CPU_HAS_TLBI
 #define restore_asid_inv_utlb(oldpid, newpid) \
 do { \
-	if (oldpid == newpid) \
+	if ((oldpid & ASID_MASK) == newpid) \
 		write_mmu_entryhi(oldpid + 1); \
 	write_mmu_entryhi(oldpid); \
 } while (0)
-#endif
 
 void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
-			unsigned long end)
+			   unsigned long end)
 {
-	unsigned long newpid = cpu_asid(vma->vm_mm);
+	struct mm_struct *mm = vma->vm_mm;
+	int cpu = smp_processor_id();
 
-	start &= TLB_ENTRY_SIZE_MASK;
-	end   += TLB_ENTRY_SIZE - 1;
-	end   &= TLB_ENTRY_SIZE_MASK;
+	if (cpu_context(cpu, mm) != 0) {
+		unsigned long size, flags;
+		int newpid = cpu_asid(cpu, mm);
 
+		local_irq_save(flags);
+		size = (end - start + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+		size = (size + 1) >> 1;
+		if (size <= CSKY_TLB_SIZE/2) {
+			start &= (PAGE_MASK << 1);
+			end += ((PAGE_SIZE << 1) - 1);
+			end &= (PAGE_MASK << 1);
 #ifdef CONFIG_CPU_HAS_TLBI
-	while (start < end) {
-		asm volatile("tlbi.vas %0"::"r"(start | newpid));
-		start += 2*PAGE_SIZE;
-	}
-	sync_is();
+			while (start < end) {
+				asm volatile("tlbi.vaas %0"
+					     ::"r"(start | newpid));
+				start += (PAGE_SIZE << 1);
+			}
+			sync_is();
 #else
-	{
-	unsigned long flags, oldpid;
+			{
+			int oldpid = read_mmu_entryhi();
 
-	local_irq_save(flags);
-	oldpid = read_mmu_entryhi() & ASID_MASK;
-	while (start < end) {
-		int idx;
+			while (start < end) {
+				int idx;
 
-		write_mmu_entryhi(start | newpid);
-		start += 2*PAGE_SIZE;
-		tlb_probe();
-		idx = read_mmu_index();
-		if (idx >= 0)
-			tlb_invalid_indexed();
-	}
-	restore_asid_inv_utlb(oldpid, newpid);
-	local_irq_restore(flags);
-	}
+				write_mmu_entryhi(start | newpid);
+				start += (PAGE_SIZE << 1);
+				tlb_probe();
+				idx = read_mmu_index();
+				if (idx >= 0)
+					tlb_invalid_indexed();
+			}
+			restore_asid_inv_utlb(oldpid, newpid);
+			}
 #endif
+		} else {
+			drop_mmu_context(mm, cpu);
+		}
+		local_irq_restore(flags);
+	}
 }
 
 void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
-	start &= TLB_ENTRY_SIZE_MASK;
-	end   += TLB_ENTRY_SIZE - 1;
-	end   &= TLB_ENTRY_SIZE_MASK;
-
-#ifdef CONFIG_CPU_HAS_TLBI
-	while (start < end) {
-		asm volatile("tlbi.vaas %0"::"r"(start));
-		start += 2*PAGE_SIZE;
-	}
-	sync_is();
-#else
-	{
-	unsigned long flags, oldpid;
+	unsigned long size, flags;
 
 	local_irq_save(flags);
-	oldpid = read_mmu_entryhi() & ASID_MASK;
-	while (start < end) {
-		int idx;
+	size = (end - start + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+	if (size <= CSKY_TLB_SIZE) {
+		start &= (PAGE_MASK << 1);
+		end += ((PAGE_SIZE << 1) - 1);
+		end &= (PAGE_MASK << 1);
+#ifdef CONFIG_CPU_HAS_TLBI
+		while (start < end) {
+			asm volatile("tlbi.vaas %0"::"r"(start));
+			start += (PAGE_SIZE << 1);
+		}
+		sync_is();
+#else
+		{
+		int oldpid = read_mmu_entryhi();
 
-		write_mmu_entryhi(start | oldpid);
-		start += 2*PAGE_SIZE;
+		while (start < end) {
+			int idx;
+
+			write_mmu_entryhi(start);
+			start += (PAGE_SIZE << 1);
+			tlb_probe();
+			idx = read_mmu_index();
+			if (idx >= 0)
+				tlb_invalid_indexed();
+		}
+		restore_asid_inv_utlb(oldpid, 0);
+		}
+#endif
+	} else {
+		flush_tlb_all();
+	}
+
+	local_irq_restore(flags);
+}
+
+void flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
+{
+	int cpu = smp_processor_id();
+	int newpid = cpu_asid(cpu, vma->vm_mm);
+
+	if (!vma || cpu_context(cpu, vma->vm_mm) != 0) {
+		page &= (PAGE_MASK << 1);
+
+#ifdef CONFIG_CPU_HAS_TLBI
+		asm volatile("tlbi.vaas %0"::"r"(page | newpid));
+		sync_is();
+#else
+		{
+		int oldpid, idx;
+		unsigned long flags;
+
+		local_irq_save(flags);
+		oldpid = read_mmu_entryhi();
+		write_mmu_entryhi(page | newpid);
 		tlb_probe();
 		idx = read_mmu_index();
 		if (idx >= 0)
 			tlb_invalid_indexed();
-	}
-	restore_asid_inv_utlb(oldpid, oldpid);
-	local_irq_restore(flags);
-	}
+
+		restore_asid_inv_utlb(oldpid, newpid);
+		local_irq_restore(flags);
+		}
 #endif
+	}
 }
 
-void flush_tlb_page(struct vm_area_struct *vma, unsigned long addr)
+/*
+ * Remove one kernel space TLB entry.  This entry is assumed to be marked
+ * global so we don't do the ASID thing.
+ */
+void flush_tlb_one(unsigned long page)
 {
-	int newpid = cpu_asid(vma->vm_mm);
+	int oldpid;
 
-	addr &= TLB_ENTRY_SIZE_MASK;
+	oldpid = read_mmu_entryhi();
+	page &= (PAGE_MASK << 1);
 
 #ifdef CONFIG_CPU_HAS_TLBI
-	asm volatile("tlbi.vas %0"::"r"(addr | newpid));
+	page = page | (oldpid & 0xfff);
+	asm volatile("tlbi.vaas %0"::"r"(page));
 	sync_is();
 #else
 	{
-	int oldpid, idx;
+	int idx;
 	unsigned long flags;
 
+	page = page | (oldpid & 0xff);
+
 	local_irq_save(flags);
-	oldpid = read_mmu_entryhi() & ASID_MASK;
-	write_mmu_entryhi(addr | newpid);
+	write_mmu_entryhi(page);
 	tlb_probe();
 	idx = read_mmu_index();
 	if (idx >= 0)
 		tlb_invalid_indexed();
-
-	restore_asid_inv_utlb(oldpid, newpid);
-	local_irq_restore(flags);
-	}
-#endif
-}
-
-void flush_tlb_one(unsigned long addr)
-{
-	addr &= TLB_ENTRY_SIZE_MASK;
-
-#ifdef CONFIG_CPU_HAS_TLBI
-	asm volatile("tlbi.vaas %0"::"r"(addr));
-	sync_is();
-#else
-	{
-	int oldpid, idx;
-	unsigned long flags;
-
-	local_irq_save(flags);
-	oldpid = read_mmu_entryhi() & ASID_MASK;
-	write_mmu_entryhi(addr | oldpid);
-	tlb_probe();
-	idx = read_mmu_index();
-	if (idx >= 0)
-		tlb_invalid_indexed();
-
 	restore_asid_inv_utlb(oldpid, oldpid);
 	local_irq_restore(flags);
 	}
 #endif
 }
 EXPORT_SYMBOL(flush_tlb_one);
+
+/* show current 32 jtlbs */
+void show_jtlb_table(void)
+{
+	unsigned long flags;
+	int entryhi, entrylo0, entrylo1;
+	int entry;
+	int oldpid;
+
+	local_irq_save(flags);
+	entry = 0;
+	pr_info("\n\n\n");
+
+	oldpid = read_mmu_entryhi();
+	while (entry < CSKY_TLB_SIZE) {
+		write_mmu_index(entry);
+		tlb_read();
+		entryhi = read_mmu_entryhi();
+		entrylo0 = read_mmu_entrylo0();
+		entrylo0 = entrylo0;
+		entrylo1 = read_mmu_entrylo1();
+		entrylo1 = entrylo1;
+		pr_info("jtlb[%d]:	entryhi - 0x%x;	entrylo0 - 0x%x;"
+			"	entrylo1 - 0x%x\n",
+			entry, entryhi, entrylo0, entrylo1);
+		entry++;
+	}
+	write_mmu_entryhi(oldpid);
+	local_irq_restore(flags);
+}

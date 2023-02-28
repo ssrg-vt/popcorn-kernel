@@ -452,6 +452,8 @@ static int mvpp2_dbgfs_flow_port_init(struct dentry *parent,
 	struct dentry *port_dir;
 
 	port_dir = debugfs_create_dir(port->dev->name, parent);
+	if (IS_ERR(port_dir))
+		return PTR_ERR(port_dir);
 
 	port_entry = &port->priv->dbgfs_entries->port_flow_entries[port->id];
 
@@ -478,6 +480,8 @@ static int mvpp2_dbgfs_flow_entry_init(struct dentry *parent,
 	sprintf(flow_entry_name, "%02d", flow);
 
 	flow_entry_dir = debugfs_create_dir(flow_entry_name, parent);
+	if (!flow_entry_dir)
+		return -ENOMEM;
 
 	entry = &priv->dbgfs_entries->flow_entries[flow];
 
@@ -510,6 +514,8 @@ static int mvpp2_dbgfs_flow_init(struct dentry *parent, struct mvpp2 *priv)
 	int i, ret;
 
 	flow_dir = debugfs_create_dir("flows", parent);
+	if (!flow_dir)
+		return -ENOMEM;
 
 	for (i = 0; i < MVPP2_N_PRS_FLOWS; i++) {
 		ret = mvpp2_dbgfs_flow_entry_init(flow_dir, priv, i);
@@ -533,6 +539,8 @@ static int mvpp2_dbgfs_prs_entry_init(struct dentry *parent,
 	sprintf(prs_entry_name, "%03d", tid);
 
 	prs_entry_dir = debugfs_create_dir(prs_entry_name, parent);
+	if (!prs_entry_dir)
+		return -ENOMEM;
 
 	entry = &priv->dbgfs_entries->prs_entries[tid];
 
@@ -570,6 +578,8 @@ static int mvpp2_dbgfs_prs_init(struct dentry *parent, struct mvpp2 *priv)
 	int i, ret;
 
 	prs_dir = debugfs_create_dir("parser", parent);
+	if (!prs_dir)
+		return -ENOMEM;
 
 	for (i = 0; i < MVPP2_PRS_TCAM_SRAM_SIZE; i++) {
 		ret = mvpp2_dbgfs_prs_entry_init(prs_dir, priv, i);
@@ -678,6 +688,8 @@ static int mvpp2_dbgfs_port_init(struct dentry *parent,
 	struct dentry *port_dir;
 
 	port_dir = debugfs_create_dir(port->dev->name, parent);
+	if (IS_ERR(port_dir))
+		return PTR_ERR(port_dir);
 
 	debugfs_create_file("parser_entries", 0444, port_dir, port,
 			    &mvpp2_dbgfs_port_parser_fops);
@@ -704,10 +716,15 @@ void mvpp2_dbgfs_init(struct mvpp2 *priv, const char *name)
 	int ret, i;
 
 	mvpp2_root = debugfs_lookup(MVPP2_DRIVER_NAME, NULL);
-	if (!mvpp2_root)
+	if (!mvpp2_root) {
 		mvpp2_root = debugfs_create_dir(MVPP2_DRIVER_NAME, NULL);
+		if (IS_ERR(mvpp2_root))
+			return;
+	}
 
 	mvpp2_dir = debugfs_create_dir(name, mvpp2_root);
+	if (IS_ERR(mvpp2_dir))
+		return;
 
 	priv->dbgfs_dir = mvpp2_dir;
 	priv->dbgfs_entries = kzalloc(sizeof(*priv->dbgfs_entries), GFP_KERNEL);

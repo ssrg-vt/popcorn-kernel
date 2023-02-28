@@ -126,8 +126,6 @@ void aq_nic_cfg_start(struct aq_nic_s *self)
 
 	cfg->link_speed_msk &= cfg->aq_hw_caps->link_speed_msk;
 	cfg->features = cfg->aq_hw_caps->hw_features;
-	cfg->is_vlan_rx_strip = !!(cfg->features & NETIF_F_HW_VLAN_CTAG_RX);
-	cfg->is_vlan_tx_insert = !!(cfg->features & NETIF_F_HW_VLAN_CTAG_TX);
 	cfg->is_vlan_force_promisc = true;
 }
 
@@ -288,8 +286,7 @@ void aq_nic_ndev_init(struct aq_nic_s *self)
 	self->ndev->hw_features |= aq_hw_caps->hw_features;
 	self->ndev->features = aq_hw_caps->hw_features;
 	self->ndev->vlan_features |= NETIF_F_HW_CSUM | NETIF_F_RXCSUM |
-				     NETIF_F_RXHASH | NETIF_F_SG |
-				     NETIF_F_LRO | NETIF_F_TSO;
+				     NETIF_F_RXHASH | NETIF_F_SG | NETIF_F_LRO;
 	self->ndev->priv_flags = aq_hw_caps->hw_priv_flags;
 	self->ndev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
 
@@ -430,37 +427,26 @@ static unsigned int aq_nic_map_skb(struct aq_nic_s *self,
 	unsigned int dx = ring->sw_tail;
 	struct aq_ring_buff_s *first = NULL;
 	struct aq_ring_buff_s *dx_buff = &ring->buff_ring[dx];
-	bool need_context_tag = false;
-
-	dx_buff->flags = 0U;
 
 	if (unlikely(skb_is_gso(skb))) {
-		dx_buff->mss = skb_shinfo(skb)->gso_size;
-		dx_buff->is_gso = 1U;
+		dx_buff->flags = 0U;
 		dx_buff->len_pkt = skb->len;
 		dx_buff->len_l2 = ETH_HLEN;
 		dx_buff->len_l3 = ip_hdrlen(skb);
 		dx_buff->len_l4 = tcp_hdrlen(skb);
+		dx_buff->mss = skb_shinfo(skb)->gso_size;
+		dx_buff->is_txc = 1U;
 		dx_buff->eop_index = 0xffffU;
+
 		dx_buff->is_ipv6 =
 			(ip_hdr(skb)->version == 6) ? 1U : 0U;
-		need_context_tag = true;
-	}
 
-	if (self->aq_nic_cfg.is_vlan_tx_insert && skb_vlan_tag_present(skb)) {
-		dx_buff->vlan_tx_tag = skb_vlan_tag_get(skb);
-		dx_buff->len_pkt = skb->len;
-		dx_buff->is_vlan = 1U;
-		need_context_tag = true;
-	}
-
-	if (need_context_tag) {
 		dx = aq_ring_next_dx(ring, dx);
 		dx_buff = &ring->buff_ring[dx];
-		dx_buff->flags = 0U;
 		++ret;
 	}
 
+	dx_buff->flags = 0U;
 	dx_buff->len = skb_headlen(skb);
 	dx_buff->pa = dma_map_single(aq_nic_get_dev(self),
 				     skb->data,
@@ -549,7 +535,7 @@ mapping_error:
 	     --ret, dx = aq_ring_next_dx(ring, dx)) {
 		dx_buff = &ring->buff_ring[dx];
 
-		if (!dx_buff->is_gso && !dx_buff->is_vlan && dx_buff->pa) {
+		if (!dx_buff->is_txc && dx_buff->pa) {
 			if (unlikely(dx_buff->is_sop)) {
 				dma_unmap_single(aq_nic_get_dev(self),
 						 dx_buff->pa,
@@ -631,12 +617,9 @@ err_exit:
 
 int aq_nic_set_multicast_list(struct aq_nic_s *self, struct net_device *ndev)
 {
-	const struct aq_hw_ops *hw_ops = self->aq_hw_ops;
-	struct aq_nic_cfg_s *cfg = &self->aq_nic_cfg;
-	unsigned int packet_filter = ndev->flags;
+	unsigned int packet_filter = self->packet_filter;
 	struct netdev_hw_addr *ha = NULL;
 	unsigned int i = 0U;
-	int err = 0;
 
 	self->mc_list.count = 0;
 	if (netdev_uc_count(ndev) > AQ_HW_MULTICAST_ADDRESS_MAX) {
@@ -644,28 +627,29 @@ int aq_nic_set_multicast_list(struct aq_nic_s *self, struct net_device *ndev)
 	} else {
 		netdev_for_each_uc_addr(ha, ndev) {
 			ether_addr_copy(self->mc_list.ar[i++], ha->addr);
+
+			if (i >= AQ_HW_MULTICAST_ADDRESS_MAX)
+				break;
 		}
 	}
 
-	cfg->is_mc_list_enabled = !!(packet_filter & IFF_MULTICAST);
-	if (cfg->is_mc_list_enabled) {
-		if (i + netdev_mc_count(ndev) > AQ_HW_MULTICAST_ADDRESS_MAX) {
-			packet_filter |= IFF_ALLMULTI;
-		} else {
-			netdev_for_each_mc_addr(ha, ndev) {
-				ether_addr_copy(self->mc_list.ar[i++],
-						ha->addr);
-			}
+	if (i + netdev_mc_count(ndev) > AQ_HW_MULTICAST_ADDRESS_MAX) {
+		packet_filter |= IFF_ALLMULTI;
+	} else {
+		netdev_for_each_mc_addr(ha, ndev) {
+			ether_addr_copy(self->mc_list.ar[i++], ha->addr);
+
+			if (i >= AQ_HW_MULTICAST_ADDRESS_MAX)
+				break;
 		}
 	}
 
 	if (i > 0 && i <= AQ_HW_MULTICAST_ADDRESS_MAX) {
+		packet_filter |= IFF_MULTICAST;
 		self->mc_list.count = i;
-		err = hw_ops->hw_multicast_list_set(self->aq_hw,
-						    self->mc_list.ar,
-						    self->mc_list.count);
-		if (err < 0)
-			return err;
+		self->aq_hw_ops->hw_multicast_list_set(self->aq_hw,
+						       self->mc_list.ar,
+						       self->mc_list.count);
 	}
 	return aq_nic_set_packet_filter(self, packet_filter);
 }

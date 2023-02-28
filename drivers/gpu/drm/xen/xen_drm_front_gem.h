@@ -11,12 +11,7 @@
 #ifndef __XEN_DRM_FRONT_GEM_H
 #define __XEN_DRM_FRONT_GEM_H
 
-struct dma_buf_attachment;
-struct drm_device;
-struct drm_gem_object;
-struct file;
-struct sg_table;
-struct vm_area_struct;
+#include <drm/drmP.h>
 
 struct drm_gem_object *xen_drm_front_gem_create(struct drm_device *dev,
 						size_t size);

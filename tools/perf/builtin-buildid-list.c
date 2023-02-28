@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * builtin-buildid-list.c
  *
@@ -10,15 +11,13 @@
 #include "builtin.h"
 #include "perf.h"
 #include "util/build-id.h"
+#include "util/cache.h"
 #include "util/debug.h"
-#include "util/dso.h"
-#include <subcmd/pager.h>
 #include <subcmd/parse-options.h>
 #include "util/session.h"
 #include "util/symbol.h"
 #include "util/data.h"
 #include <errno.h>
-#include <linux/err.h>
 
 static int sysfs__fprintf_build_id(FILE *fp)
 {
@@ -66,8 +65,8 @@ static int perf_session__list_build_ids(bool force, bool with_hits)
 		goto out;
 
 	session = perf_session__new(&data, false, &build_id__mark_dso_hit_ops);
-	if (IS_ERR(session))
-		return PTR_ERR(session);
+	if (session == NULL)
+		return -1;
 
 	/*
 	 * We take all buildids when the file contains AUX area tracing data

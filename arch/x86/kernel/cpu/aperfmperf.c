@@ -13,7 +13,6 @@
 #include <linux/percpu.h>
 #include <linux/cpufreq.h>
 #include <linux/smp.h>
-#include <linux/sched/isolation.h>
 
 #include "cpu.h"
 
@@ -86,9 +85,6 @@ unsigned int aperfmperf_get_khz(int cpu)
 	if (!boot_cpu_has(X86_FEATURE_APERFMPERF))
 		return 0;
 
-	if (!housekeeping_cpu(cpu, HK_FLAG_MISC))
-		return 0;
-
 	aperfmperf_snapshot_cpu(cpu, ktime_get(), true);
 	return per_cpu(samples.khz, cpu);
 }
@@ -105,12 +101,9 @@ void arch_freq_prepare_all(void)
 	if (!boot_cpu_has(X86_FEATURE_APERFMPERF))
 		return;
 
-	for_each_online_cpu(cpu) {
-		if (!housekeeping_cpu(cpu, HK_FLAG_MISC))
-			continue;
+	for_each_online_cpu(cpu)
 		if (!aperfmperf_snapshot_cpu(cpu, now, false))
 			wait = true;
-	}
 
 	if (wait)
 		msleep(APERFMPERF_REFRESH_DELAY_MS);
@@ -122,9 +115,6 @@ unsigned int arch_freq_get_on_cpu(int cpu)
 		return 0;
 
 	if (!boot_cpu_has(X86_FEATURE_APERFMPERF))
-		return 0;
-
-	if (!housekeeping_cpu(cpu, HK_FLAG_MISC))
 		return 0;
 
 	if (aperfmperf_snapshot_cpu(cpu, ktime_get(), true))

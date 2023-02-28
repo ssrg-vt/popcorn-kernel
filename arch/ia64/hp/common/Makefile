@@ -6,5 +6,7 @@
 # Copyright (C) Alex Williamson (alex_williamson@hp.com)
 #
 
-obj-$(CONFIG_IA64_HP_SBA_IOMMU) += sba_iommu.o
+obj-y := sba_iommu.o
+obj-$(CONFIG_IA64_HP_ZX1_SWIOTLB) += hwsw_iommu.o
+obj-$(CONFIG_IA64_GENERIC) += hwsw_iommu.o
 obj-$(CONFIG_IA64_HP_AML_NFW) += aml_nfw.o

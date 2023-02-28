@@ -1881,8 +1881,12 @@ static int omapfb_create_framebuffers(struct omapfb2_device *fbdev)
 
 		fbi = framebuffer_alloc(sizeof(struct omapfb_info),
 				fbdev->dev);
-		if (!fbi)
+
+		if (fbi == NULL) {
+			dev_err(fbdev->dev,
+				"unable to allocate memory for plane info\n");
 			return -ENOMEM;
+		}
 
 		clear_fb_info(fbi);
 

@@ -26,6 +26,8 @@ static int ptdump_curknl_show(struct seq_file *m, void *v)
 DEFINE_SHOW_ATTRIBUTE(ptdump_curknl);
 
 #ifdef CONFIG_PAGE_TABLE_ISOLATION
+static struct dentry *pe_curusr;
+
 static int ptdump_curusr_show(struct seq_file *m, void *v)
 {
 	if (current->mm->pgd) {
@@ -40,6 +42,8 @@ DEFINE_SHOW_ATTRIBUTE(ptdump_curusr);
 #endif
 
 #if defined(CONFIG_EFI) && defined(CONFIG_X86_64)
+static struct dentry *pe_efi;
+
 static int ptdump_efi_show(struct seq_file *m, void *v)
 {
 	if (efi_mm.pgd)
@@ -50,24 +54,41 @@ static int ptdump_efi_show(struct seq_file *m, void *v)
 DEFINE_SHOW_ATTRIBUTE(ptdump_efi);
 #endif
 
-static struct dentry *dir;
+static struct dentry *dir, *pe_knl, *pe_curknl;
 
 static int __init pt_dump_debug_init(void)
 {
 	dir = debugfs_create_dir("page_tables", NULL);
+	if (!dir)
+		return -ENOMEM;
 
-	debugfs_create_file("kernel", 0400, dir, NULL, &ptdump_fops);
-	debugfs_create_file("current_kernel", 0400, dir, NULL,
-			    &ptdump_curknl_fops);
+	pe_knl = debugfs_create_file("kernel", 0400, dir, NULL,
+				     &ptdump_fops);
+	if (!pe_knl)
+		goto err;
+
+	pe_curknl = debugfs_create_file("current_kernel", 0400,
+					dir, NULL, &ptdump_curknl_fops);
+	if (!pe_curknl)
+		goto err;
 
 #ifdef CONFIG_PAGE_TABLE_ISOLATION
-	debugfs_create_file("current_user", 0400, dir, NULL,
-			    &ptdump_curusr_fops);
+	pe_curusr = debugfs_create_file("current_user", 0400,
+					dir, NULL, &ptdump_curusr_fops);
+	if (!pe_curusr)
+		goto err;
 #endif
+
 #if defined(CONFIG_EFI) && defined(CONFIG_X86_64)
-	debugfs_create_file("efi", 0400, dir, NULL, &ptdump_efi_fops);
+	pe_efi = debugfs_create_file("efi", 0400, dir, NULL, &ptdump_efi_fops);
+	if (!pe_efi)
+		goto err;
 #endif
+
 	return 0;
+err:
+	debugfs_remove_recursive(dir);
+	return -ENOMEM;
 }
 
 static void __exit pt_dump_debug_exit(void)

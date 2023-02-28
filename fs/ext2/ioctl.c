@@ -60,10 +60,18 @@ long ext2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 		oldflags = ei->i_flags;
 
-		ret = vfs_ioc_setflags_prepare(inode, oldflags, flags);
-		if (ret) {
-			inode_unlock(inode);
-			goto setflags_out;
+		/*
+		 * The IMMUTABLE and APPEND_ONLY flags can only be changed by
+		 * the relevant capability.
+		 *
+		 * This test looks nicer. Thanks to Pauline Middelink
+		 */
+		if ((flags ^ oldflags) & (EXT2_APPEND_FL | EXT2_IMMUTABLE_FL)) {
+			if (!capable(CAP_LINUX_IMMUTABLE)) {
+				inode_unlock(inode);
+				ret = -EPERM;
+				goto setflags_out;
+			}
 		}
 
 		flags = flags & EXT2_FL_USER_MODIFIABLE;

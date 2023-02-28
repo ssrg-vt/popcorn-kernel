@@ -111,8 +111,10 @@ static int ohci_platform_probe(struct platform_device *dev)
 		return err;
 
 	irq = platform_get_irq(dev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&dev->dev, "no irq provided");
 		return irq;
+	}
 
 	hcd = usb_create_hcd(&ohci_platform_hc_driver, &dev->dev,
 			dev_name(&dev->dev));

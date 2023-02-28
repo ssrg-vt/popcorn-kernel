@@ -11,7 +11,8 @@
  */
 #include <linux/linkage.h>
 #include <asm/assembler.h>
-#include "lpc32xx.h"
+#include <mach/platform.h>
+#include <mach/hardware.h>
 
 /* Using named register defines makes the code easier to follow */
 #define WORK1_REG			r0

@@ -10,6 +10,7 @@ obj-$(CONFIG_PHY_XGENE)			+= phy-xgene.o
 obj-$(CONFIG_PHY_PISTACHIO_USB)		+= phy-pistachio-usb.o
 obj-$(CONFIG_ARCH_SUNXI)		+= allwinner/
 obj-$(CONFIG_ARCH_MESON)		+= amlogic/
+obj-$(CONFIG_LANTIQ)			+= lantiq/
 obj-$(CONFIG_ARCH_MEDIATEK)		+= mediatek/
 obj-$(CONFIG_ARCH_RENESAS)		+= renesas/
 obj-$(CONFIG_ARCH_ROCKCHIP)		+= rockchip/
@@ -18,7 +19,6 @@ obj-y					+= broadcom/	\
 					   cadence/	\
 					   freescale/	\
 					   hisilicon/	\
-					   lantiq/	\
 					   marvell/	\
 					   motorola/	\
 					   mscc/	\
@@ -28,4 +28,3 @@ obj-y					+= broadcom/	\
 					   socionext/	\
 					   st/		\
 					   ti/
-obj-$(CONFIG_PHY_XILINX_ZYNQMP)		+= phy-zynqmp.o

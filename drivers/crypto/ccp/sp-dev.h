@@ -13,6 +13,7 @@
 #define __SP_DEV_H__
 
 #include <linux/device.h>
+#include <linux/pci.h>
 #include <linux/spinlock.h>
 #include <linux/mutex.h>
 #include <linux/list.h>

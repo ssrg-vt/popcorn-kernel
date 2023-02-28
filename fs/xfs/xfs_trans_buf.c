@@ -10,9 +10,11 @@
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "xfs_inode.h"
 #include "xfs_trans.h"
 #include "xfs_buf_item.h"
 #include "xfs_trans_priv.h"
+#include "xfs_error.h"
 #include "xfs_trace.h"
 
 /*
@@ -172,7 +174,8 @@ xfs_trans_get_buf_map(
 xfs_buf_t *
 xfs_trans_getsb(
 	xfs_trans_t		*tp,
-	struct xfs_mount	*mp)
+	struct xfs_mount	*mp,
+	int			flags)
 {
 	xfs_buf_t		*bp;
 	struct xfs_buf_log_item	*bip;
@@ -182,7 +185,7 @@ xfs_trans_getsb(
 	 * if tp is NULL.
 	 */
 	if (tp == NULL)
-		return xfs_getsb(mp);
+		return xfs_getsb(mp, flags);
 
 	/*
 	 * If the superblock buffer already has this transaction
@@ -200,7 +203,7 @@ xfs_trans_getsb(
 		return bp;
 	}
 
-	bp = xfs_getsb(mp);
+	bp = xfs_getsb(mp, flags);
 	if (bp == NULL)
 		return NULL;
 
@@ -425,7 +428,7 @@ xfs_trans_brelse(
 
 /*
  * Mark the buffer as not needing to be unlocked when the buf item's
- * iop_committing() routine is called.  The buffer must already be locked
+ * iop_unlock() routine is called.  The buffer must already be locked
  * and associated with the given transaction.
  */
 /* ARGSUSED */

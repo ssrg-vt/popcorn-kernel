@@ -90,7 +90,7 @@ static inline u8 *skcipher_get_spot(u8 *start, unsigned int len)
 	return max(start, end_page);
 }
 
-static int skcipher_done_slow(struct skcipher_walk *walk, unsigned int bsize)
+static void skcipher_done_slow(struct skcipher_walk *walk, unsigned int bsize)
 {
 	u8 *addr;
 
@@ -98,21 +98,19 @@ static int skcipher_done_slow(struct skcipher_walk *walk, unsigned int bsize)
 	addr = skcipher_get_spot(addr, bsize);
 	scatterwalk_copychunks(addr, &walk->out, bsize,
 			       (walk->flags & SKCIPHER_WALK_PHYS) ? 2 : 1);
-	return 0;
 }
 
 int skcipher_walk_done(struct skcipher_walk *walk, int err)
 {
-	unsigned int n = walk->nbytes;
-	unsigned int nbytes = 0;
+	unsigned int n; /* bytes processed */
+	bool more;
 
-	if (!n)
+	if (unlikely(err < 0))
 		goto finish;
 
-	if (likely(err >= 0)) {
-		n -= err;
-		nbytes = walk->total - n;
-	}
+	n = walk->nbytes - err;
+	walk->total -= n;
+	more = (walk->total != 0);
 
 	if (likely(!(walk->flags & (SKCIPHER_WALK_PHYS |
 				    SKCIPHER_WALK_SLOW |
@@ -128,7 +126,7 @@ unmap_src:
 		memcpy(walk->dst.virt.addr, walk->page, n);
 		skcipher_unmap_dst(walk);
 	} else if (unlikely(walk->flags & SKCIPHER_WALK_SLOW)) {
-		if (err > 0) {
+		if (err) {
 			/*
 			 * Didn't process all bytes.  Either the algorithm is
 			 * broken, or this was the last step and it turned out
@@ -136,29 +134,27 @@ unmap_src:
 			 * the algorithm requires it.
 			 */
 			err = -EINVAL;
-			nbytes = 0;
-		} else
-			n = skcipher_done_slow(walk, n);
+			goto finish;
+		}
+		skcipher_done_slow(walk, n);
+		goto already_advanced;
 	}
-
-	if (err > 0)
-		err = 0;
-
-	walk->total = nbytes;
-	walk->nbytes = 0;
 
 	scatterwalk_advance(&walk->in, n);
 	scatterwalk_advance(&walk->out, n);
-	scatterwalk_done(&walk->in, 0, nbytes);
-	scatterwalk_done(&walk->out, 1, nbytes);
+already_advanced:
+	scatterwalk_done(&walk->in, 0, more);
+	scatterwalk_done(&walk->out, 1, more);
 
-	if (nbytes) {
+	if (more) {
 		crypto_yield(walk->flags & SKCIPHER_WALK_SLEEP ?
 			     CRYPTO_TFM_REQ_MAY_SLEEP : 0);
 		return skcipher_walk_next(walk);
 	}
-
+	err = 0;
 finish:
+	walk->nbytes = 0;
+
 	/* Short-circuit for the common/fast path. */
 	if (!((unsigned long)walk->buffer | (unsigned long)walk->page))
 		goto out;
@@ -617,23 +613,6 @@ static int skcipher_setkey_blkcipher(struct crypto_skcipher *tfm,
 	return 0;
 }
 
-static int skcipher_setkeytype_blkcipher(struct crypto_skcipher *tfm,
-					 const u8 *key, unsigned int keylen)
-{
-	struct crypto_blkcipher **ctx = crypto_skcipher_ctx(tfm);
-	struct crypto_blkcipher *blkcipher = *ctx;
-	int err;
-
-	crypto_blkcipher_clear_flags(blkcipher, ~0);
-	crypto_blkcipher_set_flags(blkcipher, crypto_skcipher_get_flags(tfm) &
-			CRYPTO_TFM_REQ_MASK);
-	err = crypto_blkcipher_setkeytype(blkcipher, key, keylen);
-	crypto_skcipher_set_flags(tfm, crypto_blkcipher_get_flags(blkcipher) &
-			CRYPTO_TFM_RES_MASK);
-
-	return err;
-}
-
 static int skcipher_crypt_blkcipher(struct skcipher_request *req,
 				    int (*crypt)(struct blkcipher_desc *,
 						 struct scatterlist *,
@@ -700,7 +679,6 @@ static int crypto_init_skcipher_ops_blkcipher(struct crypto_tfm *tfm)
 	tfm->exit = crypto_exit_skcipher_ops_blkcipher;
 
 	skcipher->setkey = skcipher_setkey_blkcipher;
-	skcipher->setkeytype = skcipher_setkeytype_blkcipher;
 	skcipher->encrypt = skcipher_encrypt_blkcipher;
 	skcipher->decrypt = skcipher_decrypt_blkcipher;
 
@@ -858,40 +836,6 @@ static int skcipher_setkey(struct crypto_skcipher *tfm, const u8 *key,
 	crypto_skcipher_clear_flags(tfm, CRYPTO_TFM_NEED_KEY);
 	return 0;
 }
-
-int crypto_skcipher_encrypt(struct skcipher_request *req)
-{
-	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
-	struct crypto_alg *alg = tfm->base.__crt_alg;
-	unsigned int cryptlen = req->cryptlen;
-	int ret;
-
-	crypto_stats_get(alg);
-	if (crypto_skcipher_get_flags(tfm) & CRYPTO_TFM_NEED_KEY)
-		ret = -ENOKEY;
-	else
-		ret = tfm->encrypt(req);
-	crypto_stats_skcipher_encrypt(cryptlen, ret, alg);
-	return ret;
-}
-EXPORT_SYMBOL_GPL(crypto_skcipher_encrypt);
-
-int crypto_skcipher_decrypt(struct skcipher_request *req)
-{
-	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
-	struct crypto_alg *alg = tfm->base.__crt_alg;
-	unsigned int cryptlen = req->cryptlen;
-	int ret;
-
-	crypto_stats_get(alg);
-	if (crypto_skcipher_get_flags(tfm) & CRYPTO_TFM_NEED_KEY)
-		ret = -ENOKEY;
-	else
-		ret = tfm->decrypt(req);
-	crypto_stats_skcipher_decrypt(cryptlen, ret, alg);
-	return ret;
-}
-EXPORT_SYMBOL_GPL(crypto_skcipher_decrypt);
 
 static void crypto_skcipher_exit_tfm(struct crypto_tfm *tfm)
 {

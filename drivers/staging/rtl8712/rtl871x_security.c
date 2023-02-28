@@ -636,7 +636,7 @@ u32 r8712_tkip_encrypt(struct _adapter *padapter, u8 *pxmitframe)
 }
 
 /* The hlen doesn't include the IV */
-void r8712_tkip_decrypt(struct _adapter *padapter, u8 *precvframe)
+u32 r8712_tkip_decrypt(struct _adapter *padapter, u8 *precvframe)
 {	/* exclude ICV */
 	u16 pnl;
 	u32 pnh;
@@ -665,12 +665,12 @@ void r8712_tkip_decrypt(struct _adapter *padapter, u8 *precvframe)
 			length = ((union recv_frame *)precvframe)->
 				 u.hdr.len - prxattrib->hdrlen -
 				 prxattrib->iv_len;
-			if (is_multicast_ether_addr(prxattrib->ra)) {
+			if (IS_MCAST(prxattrib->ra)) {
 				idx = iv[3];
 				prwskey = &psecuritypriv->XGrpKey[
 					 ((idx >> 6) & 0x3) - 1].skey[0];
 				if (!psecuritypriv->binstallGrpkey)
-					return;
+					return _FAIL;
 			} else {
 				prwskey = &stainfo->x_UncstKey.skey[0];
 			}
@@ -686,8 +686,16 @@ void r8712_tkip_decrypt(struct _adapter *padapter, u8 *precvframe)
 			arcfour_encrypt(&mycontext, payload, payload, length);
 			*((__le32 *)crc) = cpu_to_le32(getcrc32(payload,
 					length - 4));
+			if (crc[3] != payload[length - 1] ||
+			    crc[2] != payload[length - 2] ||
+			    crc[1] != payload[length - 3] ||
+			    crc[0] != payload[length - 4])
+				return _FAIL;
+		} else {
+			return _FAIL;
 		}
 	}
+	return _SUCCESS;
 }
 
 /* 3 =====AES related===== */
@@ -1011,8 +1019,8 @@ static void bitwise_xor(u8 *ina, u8 *inb, u8 *out)
 		out[i] = ina[i] ^ inb[i];
 }
 
-static void aes_cipher(u8 *key, uint hdrlen,
-		       u8 *pframe, uint plen)
+static sint aes_cipher(u8 *key, uint	hdrlen,
+			u8 *pframe, uint plen)
 {
 	uint qc_exists, a4_exists, i, j, payload_remainder;
 	uint num_blocks, payload_index;
@@ -1132,6 +1140,7 @@ static void aes_cipher(u8 *key, uint hdrlen,
 	bitwise_xor(aes_out, padded_buffer, chain_buffer);
 	for (j = 0; j < 8; j++)
 		pframe[payload_index++] = chain_buffer[j];
+	return _SUCCESS;
 }
 
 u32 r8712_aes_encrypt(struct _adapter *padapter, u8 *pxmitframe)
@@ -1184,8 +1193,8 @@ u32 r8712_aes_encrypt(struct _adapter *padapter, u8 *pxmitframe)
 	return res;
 }
 
-static void aes_decipher(u8 *key, uint hdrlen,
-			 u8 *pframe, uint plen)
+static sint aes_decipher(u8 *key, uint	hdrlen,
+			u8 *pframe, uint plen)
 {
 	static u8 message[MAX_MSG_SIZE];
 	uint qc_exists, a4_exists, i, j, payload_remainder;
@@ -1339,9 +1348,10 @@ static void aes_decipher(u8 *key, uint hdrlen,
 	for (j = 0; j < 8; j++)
 		message[payload_index++] = chain_buffer[j];
 	/* compare the mic */
+	return _SUCCESS;
 }
 
-void r8712_aes_decrypt(struct _adapter *padapter, u8 *precvframe)
+u32 r8712_aes_decrypt(struct _adapter *padapter, u8 *precvframe)
 {	/* exclude ICV */
 	/* Intermediate Buffers */
 	sint		length;
@@ -1358,13 +1368,13 @@ void r8712_aes_decrypt(struct _adapter *padapter, u8 *precvframe)
 		stainfo = r8712_get_stainfo(&padapter->stapriv,
 					    &prxattrib->ta[0]);
 		if (stainfo != NULL) {
-			if (is_multicast_ether_addr(prxattrib->ra)) {
+			if (IS_MCAST(prxattrib->ra)) {
 				iv = pframe + prxattrib->hdrlen;
 				idx = iv[3];
 				prwskey = &psecuritypriv->XGrpKey[
 					  ((idx >> 6) & 0x3) - 1].skey[0];
 				if (!psecuritypriv->binstallGrpkey)
-					return;
+					return _FAIL;
 
 			} else {
 				prwskey = &stainfo->x_UncstKey.skey[0];
@@ -1374,8 +1384,11 @@ void r8712_aes_decrypt(struct _adapter *padapter, u8 *precvframe)
 				 prxattrib->iv_len;
 			aes_decipher(prwskey, prxattrib->hdrlen, pframe,
 				     length);
+		} else {
+			return _FAIL;
 		}
 	}
+	return _SUCCESS;
 }
 
 void r8712_use_tkipkey_handler(struct timer_list *t)

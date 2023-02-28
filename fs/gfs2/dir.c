@@ -750,7 +750,7 @@ static struct gfs2_dirent *gfs2_dirent_split_alloc(struct inode *inode,
 	struct gfs2_dirent *dent;
 	dent = gfs2_dirent_scan(inode, bh->b_data, bh->b_size,
 				gfs2_dirent_find_offset, name, ptr);
-	if (IS_ERR_OR_NULL(dent))
+	if (!dent || IS_ERR(dent))
 		return dent;
 	return do_init_dirent(inode, dent, name, bh,
 			      (unsigned)(ptr - (void *)dent));
@@ -854,7 +854,7 @@ static struct gfs2_dirent *gfs2_dirent_search(struct inode *inode,
 		return ERR_PTR(error);
 	dent = gfs2_dirent_scan(inode, bh->b_data, bh->b_size, scan, name, NULL);
 got_dent:
-	if (IS_ERR_OR_NULL(dent)) {
+	if (unlikely(dent == NULL || IS_ERR(dent))) {
 		brelse(bh);
 		bh = NULL;
 	}
@@ -1463,7 +1463,8 @@ static int gfs2_dir_read_leaf(struct inode *inode, struct dir_context *ctx,
 				sort_offset : entries, copied);
 out_free:
 	for(i = 0; i < leaf; i++)
-		brelse(larr[i]);
+		if (larr[i])
+			brelse(larr[i]);
 	kvfree(larr);
 out:
 	return error;

@@ -13,7 +13,6 @@
 #include <linux/errno.h>
 #include <linux/err.h>
 #include <linux/of.h>
-#include <uapi/linux/iommu.h>
 
 #define IOMMU_READ	(1 << 0)
 #define IOMMU_WRITE	(1 << 1)
@@ -30,12 +29,6 @@
  * if the IOMMU page table format is equivalent.
  */
 #define IOMMU_PRIV	(1 << 5)
-/*
- * Non-coherent masters on few Qualcomm SoCs can use this page protection flag
- * to set correct cacheability attributes to use an outer level of cache -
- * last level cache, aka system cache.
- */
-#define IOMMU_QCOM_SYS_CACHE	(1 << 6)
 
 struct iommu_ops;
 struct iommu_group;
@@ -44,7 +37,6 @@ struct device;
 struct iommu_domain;
 struct notifier_block;
 struct iommu_sva;
-struct iommu_fault_event;
 
 /* iommu fault flags */
 #define IOMMU_FAULT_READ	0x0
@@ -54,7 +46,6 @@ typedef int (*iommu_fault_handler_t)(struct iommu_domain *,
 			struct device *, unsigned long, int, void *);
 typedef int (*iommu_mm_exit_handler_t)(struct device *dev, struct iommu_sva *,
 				       void *);
-typedef int (*iommu_dev_fault_handler_t)(struct iommu_fault *, void *);
 
 struct iommu_domain_geometry {
 	dma_addr_t aperture_start; /* First address that can be mapped    */
@@ -132,12 +123,6 @@ enum iommu_attr {
 enum iommu_resv_type {
 	/* Memory regions which must be mapped 1:1 at all times */
 	IOMMU_RESV_DIRECT,
-	/*
-	 * Memory regions which are advertised to be 1:1 but are
-	 * commonly considered relaxable in some conditions,
-	 * for instance in device assignment use case (USB, Graphics)
-	 */
-	IOMMU_RESV_DIRECT_RELAXABLE,
 	/* Arbitrary "never map this or give it to a device" address ranges */
 	IOMMU_RESV_RESERVED,
 	/* Hardware MSI region (untranslated) */
@@ -192,23 +177,6 @@ struct iommu_sva_ops {
 #ifdef CONFIG_IOMMU_API
 
 /**
- * struct iommu_iotlb_gather - Range information for a pending IOTLB flush
- *
- * @start: IOVA representing the start of the range to be flushed
- * @end: IOVA representing the end of the range to be flushed (exclusive)
- * @pgsize: The interval at which to perform the flush
- *
- * This structure is intended to be updated by multiple calls to the
- * ->unmap() function in struct iommu_ops before eventually being passed
- * into ->iotlb_sync().
- */
-struct iommu_iotlb_gather {
-	unsigned long		start;
-	unsigned long		end;
-	size_t			pgsize;
-};
-
-/**
  * struct iommu_ops - iommu ops and capabilities
  * @capable: check capability
  * @domain_alloc: allocate iommu domain
@@ -218,6 +186,7 @@ struct iommu_iotlb_gather {
  * @map: map a physically contiguous memory region to an iommu domain
  * @unmap: unmap a physically contiguous memory region from an iommu domain
  * @flush_iotlb_all: Synchronously flush all hardware TLBs for this domain
+ * @iotlb_range_add: Add a given iova range to the flush queue for this domain
  * @iotlb_sync_map: Sync mappings created recently using @map to the hardware
  * @iotlb_sync: Flush all queued ranges from the hardware TLBs and empty flush
  *            queue
@@ -243,7 +212,6 @@ struct iommu_iotlb_gather {
  * @sva_bind: Bind process address space to device
  * @sva_unbind: Unbind process address space from device
  * @sva_get_pasid: Get PASID associated to a SVA handle
- * @page_response: handle page request response
  * @pgsize_bitmap: bitmap of all possible supported page sizes
  */
 struct iommu_ops {
@@ -258,11 +226,12 @@ struct iommu_ops {
 	int (*map)(struct iommu_domain *domain, unsigned long iova,
 		   phys_addr_t paddr, size_t size, int prot);
 	size_t (*unmap)(struct iommu_domain *domain, unsigned long iova,
-		     size_t size, struct iommu_iotlb_gather *iotlb_gather);
+		     size_t size);
 	void (*flush_iotlb_all)(struct iommu_domain *domain);
+	void (*iotlb_range_add)(struct iommu_domain *domain,
+				unsigned long iova, size_t size);
 	void (*iotlb_sync_map)(struct iommu_domain *domain);
-	void (*iotlb_sync)(struct iommu_domain *domain,
-			   struct iommu_iotlb_gather *iotlb_gather);
+	void (*iotlb_sync)(struct iommu_domain *domain);
 	phys_addr_t (*iova_to_phys)(struct iommu_domain *domain, dma_addr_t iova);
 	int (*add_device)(struct device *dev);
 	void (*remove_device)(struct device *dev);
@@ -303,10 +272,6 @@ struct iommu_ops {
 	void (*sva_unbind)(struct iommu_sva *handle);
 	int (*sva_get_pasid)(struct iommu_sva *handle);
 
-	int (*page_response)(struct device *dev,
-			     struct iommu_fault_event *evt,
-			     struct iommu_page_response *msg);
-
 	unsigned long pgsize_bitmap;
 };
 
@@ -322,48 +287,6 @@ struct iommu_device {
 	const struct iommu_ops *ops;
 	struct fwnode_handle *fwnode;
 	struct device *dev;
-};
-
-/**
- * struct iommu_fault_event - Generic fault event
- *
- * Can represent recoverable faults such as a page requests or
- * unrecoverable faults such as DMA or IRQ remapping faults.
- *
- * @fault: fault descriptor
- * @list: pending fault event list, used for tracking responses
- */
-struct iommu_fault_event {
-	struct iommu_fault fault;
-	struct list_head list;
-};
-
-/**
- * struct iommu_fault_param - per-device IOMMU fault data
- * @handler: Callback function to handle IOMMU faults at device level
- * @data: handler private data
- * @faults: holds the pending faults which needs response
- * @lock: protect pending faults list
- */
-struct iommu_fault_param {
-	iommu_dev_fault_handler_t handler;
-	void *data;
-	struct list_head faults;
-	struct mutex lock;
-};
-
-/**
- * struct iommu_param - collection of per-device IOMMU data
- *
- * @fault_param: IOMMU detected device fault reporting data
- *
- * TODO: migrate other per device data pointers under iommu_dev_data, e.g.
- *	struct iommu_group	*iommu_group;
- *	struct iommu_fwspec	*iommu_fwspec;
- */
-struct iommu_param {
-	struct mutex lock;
-	struct iommu_fault_param *fault_param;
 };
 
 int  iommu_device_register(struct iommu_device *iommu);
@@ -393,13 +316,6 @@ static inline struct iommu_device *dev_to_iommu_device(struct device *dev)
 	return (struct iommu_device *)dev_get_drvdata(dev);
 }
 
-static inline void iommu_iotlb_gather_init(struct iommu_iotlb_gather *gather)
-{
-	*gather = (struct iommu_iotlb_gather) {
-		.start	= ULONG_MAX,
-	};
-}
-
 #define IOMMU_GROUP_NOTIFY_ADD_DEVICE		1 /* Device added */
 #define IOMMU_GROUP_NOTIFY_DEL_DEVICE		2 /* Pre Device removed */
 #define IOMMU_GROUP_NOTIFY_BIND_DRIVER		3 /* Pre Driver bind */
@@ -424,8 +340,7 @@ extern int iommu_map(struct iommu_domain *domain, unsigned long iova,
 extern size_t iommu_unmap(struct iommu_domain *domain, unsigned long iova,
 			  size_t size);
 extern size_t iommu_unmap_fast(struct iommu_domain *domain,
-			       unsigned long iova, size_t size,
-			       struct iommu_iotlb_gather *iotlb_gather);
+			       unsigned long iova, size_t size);
 extern size_t iommu_map_sg(struct iommu_domain *domain, unsigned long iova,
 			   struct scatterlist *sg,unsigned int nents, int prot);
 extern phys_addr_t iommu_iova_to_phys(struct iommu_domain *domain, dma_addr_t iova);
@@ -435,10 +350,6 @@ extern void iommu_set_fault_handler(struct iommu_domain *domain,
 extern void iommu_get_resv_regions(struct device *dev, struct list_head *list);
 extern void iommu_put_resv_regions(struct device *dev, struct list_head *list);
 extern int iommu_request_dm_for_dev(struct device *dev);
-extern int iommu_request_dma_domain_for_dev(struct device *dev);
-extern void iommu_set_default_passthrough(bool cmd_line);
-extern void iommu_set_default_translated(bool cmd_line);
-extern bool iommu_default_passthrough(void);
 extern struct iommu_resv_region *
 iommu_alloc_resv_region(phys_addr_t start, size_t length, int prot,
 			enum iommu_resv_type type);
@@ -467,17 +378,6 @@ extern int iommu_group_register_notifier(struct iommu_group *group,
 					 struct notifier_block *nb);
 extern int iommu_group_unregister_notifier(struct iommu_group *group,
 					   struct notifier_block *nb);
-extern int iommu_register_device_fault_handler(struct device *dev,
-					iommu_dev_fault_handler_t handler,
-					void *data);
-
-extern int iommu_unregister_device_fault_handler(struct device *dev);
-
-extern int iommu_report_device_fault(struct device *dev,
-				     struct iommu_fault_event *evt);
-extern int iommu_page_response(struct device *dev,
-			       struct iommu_page_response *msg);
-
 extern int iommu_group_id(struct iommu_group *group);
 extern struct iommu_group *iommu_group_get_for_dev(struct device *dev);
 extern struct iommu_domain *iommu_group_default_domain(struct iommu_group *);
@@ -502,38 +402,17 @@ static inline void iommu_flush_tlb_all(struct iommu_domain *domain)
 		domain->ops->flush_iotlb_all(domain);
 }
 
-static inline void iommu_tlb_sync(struct iommu_domain *domain,
-				  struct iommu_iotlb_gather *iotlb_gather)
+static inline void iommu_tlb_range_add(struct iommu_domain *domain,
+				       unsigned long iova, size_t size)
 {
-	if (domain->ops->iotlb_sync)
-		domain->ops->iotlb_sync(domain, iotlb_gather);
-
-	iommu_iotlb_gather_init(iotlb_gather);
+	if (domain->ops->iotlb_range_add)
+		domain->ops->iotlb_range_add(domain, iova, size);
 }
 
-static inline void iommu_iotlb_gather_add_page(struct iommu_domain *domain,
-					       struct iommu_iotlb_gather *gather,
-					       unsigned long iova, size_t size)
+static inline void iommu_tlb_sync(struct iommu_domain *domain)
 {
-	unsigned long start = iova, end = start + size;
-
-	/*
-	 * If the new page is disjoint from the current range or is mapped at
-	 * a different granularity, then sync the TLB so that the gather
-	 * structure can be rewritten.
-	 */
-	if (gather->pgsize != size ||
-	    end < gather->start || start > gather->end) {
-		if (gather->pgsize)
-			iommu_tlb_sync(domain, gather);
-		gather->pgsize = size;
-	}
-
-	if (gather->end < end)
-		gather->end = end;
-
-	if (gather->start > start)
-		gather->start = start;
+	if (domain->ops->iotlb_sync)
+		domain->ops->iotlb_sync(domain);
 }
 
 /* PCI device grouping function */
@@ -613,8 +492,6 @@ struct iommu_ops {};
 struct iommu_group {};
 struct iommu_fwspec {};
 struct iommu_device {};
-struct iommu_fault_param {};
-struct iommu_iotlb_gather {};
 
 static inline bool iommu_present(struct bus_type *bus)
 {
@@ -669,8 +546,7 @@ static inline size_t iommu_unmap(struct iommu_domain *domain,
 }
 
 static inline size_t iommu_unmap_fast(struct iommu_domain *domain,
-				      unsigned long iova, int gfp_order,
-				      struct iommu_iotlb_gather *iotlb_gather)
+				      unsigned long iova, int gfp_order)
 {
 	return 0;
 }
@@ -686,8 +562,12 @@ static inline void iommu_flush_tlb_all(struct iommu_domain *domain)
 {
 }
 
-static inline void iommu_tlb_sync(struct iommu_domain *domain,
-				  struct iommu_iotlb_gather *iotlb_gather)
+static inline void iommu_tlb_range_add(struct iommu_domain *domain,
+				       unsigned long iova, size_t size)
+{
+}
+
+static inline void iommu_tlb_sync(struct iommu_domain *domain)
 {
 }
 
@@ -732,24 +612,6 @@ static inline int iommu_get_group_resv_regions(struct iommu_group *group,
 static inline int iommu_request_dm_for_dev(struct device *dev)
 {
 	return -ENODEV;
-}
-
-static inline int iommu_request_dma_domain_for_dev(struct device *dev)
-{
-	return -ENODEV;
-}
-
-static inline void iommu_set_default_passthrough(bool cmd_line)
-{
-}
-
-static inline void iommu_set_default_translated(bool cmd_line)
-{
-}
-
-static inline bool iommu_default_passthrough(void)
-{
-	return true;
 }
 
 static inline int iommu_attach_group(struct iommu_domain *domain,
@@ -823,31 +685,6 @@ static inline int iommu_group_unregister_notifier(struct iommu_group *group,
 	return 0;
 }
 
-static inline
-int iommu_register_device_fault_handler(struct device *dev,
-					iommu_dev_fault_handler_t handler,
-					void *data)
-{
-	return -ENODEV;
-}
-
-static inline int iommu_unregister_device_fault_handler(struct device *dev)
-{
-	return 0;
-}
-
-static inline
-int iommu_report_device_fault(struct device *dev, struct iommu_fault_event *evt)
-{
-	return -ENODEV;
-}
-
-static inline int iommu_page_response(struct device *dev,
-				      struct iommu_page_response *msg)
-{
-	return -ENODEV;
-}
-
 static inline int iommu_group_id(struct iommu_group *group)
 {
 	return -ENODEV;
@@ -883,16 +720,6 @@ static inline void iommu_device_set_fwnode(struct iommu_device *iommu,
 static inline struct iommu_device *dev_to_iommu_device(struct device *dev)
 {
 	return NULL;
-}
-
-static inline void iommu_iotlb_gather_init(struct iommu_iotlb_gather *gather)
-{
-}
-
-static inline void iommu_iotlb_gather_add_page(struct iommu_domain *domain,
-					       struct iommu_iotlb_gather *gather,
-					       unsigned long iova, size_t size)
-{
 }
 
 static inline void iommu_device_unregister(struct iommu_device *iommu)

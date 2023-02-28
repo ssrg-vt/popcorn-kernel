@@ -223,12 +223,11 @@ static inline void forget_syscall(struct pt_regs *regs)
 #define fast_interrupts_enabled(regs) \
 	(!((regs)->pstate & PSR_F_BIT))
 
-static inline unsigned long user_stack_pointer(struct pt_regs *regs)
-{
-	if (compat_user_mode(regs))
-		return regs->compat_sp;
-	return regs->sp;
-}
+#define GET_USP(regs) \
+	(!compat_user_mode(regs) ? (regs)->sp : (regs)->compat_sp)
+
+#define SET_USP(ptregs, value) \
+	(!compat_user_mode(regs) ? ((regs)->sp = value) : ((regs)->compat_sp = value))
 
 extern int regs_query_register_offset(const char *name);
 extern unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs,
@@ -301,11 +300,6 @@ static inline unsigned long regs_return_value(struct pt_regs *regs)
 	return regs->regs[0];
 }
 
-static inline void regs_set_return_value(struct pt_regs *regs, unsigned long rc)
-{
-	regs->regs[0] = rc;
-}
-
 /**
  * regs_get_kernel_argument() - get Nth function argument in kernel
  * @regs:	pt_regs of that context
@@ -332,20 +326,13 @@ static inline unsigned long regs_get_kernel_argument(struct pt_regs *regs,
 struct task_struct;
 int valid_user_regs(struct user_pt_regs *regs, struct task_struct *task);
 
-static inline unsigned long instruction_pointer(struct pt_regs *regs)
-{
-	return regs->pc;
-}
-static inline void instruction_pointer_set(struct pt_regs *regs,
-		unsigned long val)
-{
-	regs->pc = val;
-}
+#define GET_IP(regs)		((unsigned long)(regs)->pc)
+#define SET_IP(regs, value)	((regs)->pc = ((u64) (value)))
 
-static inline unsigned long frame_pointer(struct pt_regs *regs)
-{
-	return regs->regs[29];
-}
+#define GET_FP(ptregs)		((unsigned long)(ptregs)->regs[29])
+#define SET_FP(ptregs, value)	((ptregs)->regs[29] = ((u64) (value)))
+
+#include <asm-generic/ptrace.h>
 
 #define procedure_link_pointer(regs)	((regs)->regs[30])
 
@@ -355,6 +342,7 @@ static inline void procedure_link_pointer_set(struct pt_regs *regs,
 	procedure_link_pointer(regs) = val;
 }
 
+#undef profile_pc
 extern unsigned long profile_pc(struct pt_regs *regs);
 
 #endif /* __ASSEMBLY__ */

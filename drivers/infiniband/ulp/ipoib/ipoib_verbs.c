@@ -260,8 +260,11 @@ void ipoib_transport_dev_cleanup(struct net_device *dev)
 		priv->qp = NULL;
 	}
 
-	ib_destroy_cq(priv->send_cq);
-	ib_destroy_cq(priv->recv_cq);
+	if (ib_destroy_cq(priv->send_cq))
+		ipoib_warn(priv, "ib_cq_destroy (send) failed\n");
+
+	if (ib_destroy_cq(priv->recv_cq))
+		ipoib_warn(priv, "ib_cq_destroy (recv) failed\n");
 }
 
 void ipoib_event(struct ib_event_handler *handler,

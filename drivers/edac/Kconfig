@@ -334,13 +334,6 @@ config EDAC_CPC925
 	  a companion chip to the PowerPC 970 family of
 	  processors.
 
-config EDAC_PL310_L2
-	tristate "Pl310 L2 Cache Controller"
-	depends on ARM
-	help
-	  Support for parity error detection on L2 cache controller
-	  data and tag ram memory
-
 config EDAC_HIGHBANK_MC
 	tristate "Highbank Memory Controller"
 	depends on ARCH_HIGHBANK
@@ -467,19 +460,6 @@ config EDAC_ALTERA_SDMMC
 	  Support for error detection and correction on the
 	  Altera SDMMC FIFO Memory for Altera SoCs.
 
-config EDAC_SIFIVE
-	bool "Sifive platform EDAC driver"
-	depends on EDAC=y && RISCV
-	help
-	  Support for error detection and correction on the SiFive SoCs.
-
-config EDAC_ARMADA_XP
-	bool "Marvell Armada XP DDR and L2 Cache ECC"
-	depends on MACH_MVEBU_V7
-	help
-	  Support for error correction and detection on the Marvell Aramada XP
-	  DDR RAM and L2 cache controllers.
-
 config EDAC_SYNOPSYS
 	tristate "Synopsys DDR Memory Controller"
 	depends on ARCH_ZYNQ || ARCH_ZYNQMP
@@ -487,27 +467,12 @@ config EDAC_SYNOPSYS
 	  Support for error detection and correction on the Synopsys DDR
 	  memory controller.
 
-config EDAC_ZYNQMP_OCM
-	tristate "Xilinx ZynqMP OCM Controller"
-	depends on ARCH_ZYNQMP
-	help
-	  Support for error detection and correction on the xilinx ZynqMP OCM
-	  controller.
-
 config EDAC_XGENE
 	tristate "APM X-Gene SoC"
 	depends on (ARM64 || COMPILE_TEST)
 	help
 	  Support for error detection and correction on the
 	  APM X-Gene family of SOCs.
-
-config EDAC_CORTEX_ARM64
-	tristate "ARM Cortex A57/A53"
-	default y if !CPU_IDLE
-	depends on !CPU_IDLE && ARM64
-	help
-	  Support for error detection and correction on the
-	  ARM Cortex A57 and A53.
 
 config EDAC_TI
 	tristate "Texas Instruments DDR3 ECC Controller"
@@ -538,23 +503,5 @@ config EDAC_ASPEED
 
 	  First, ECC must be configured in the bootloader. Then, this driver
 	  will expose error counters via the EDAC kernel framework.
-
-config EDAC_BLUEFIELD
-	tristate "Mellanox BlueField Memory ECC"
-	depends on ARM64 && ((MELLANOX_PLATFORM && ACPI) || COMPILE_TEST)
-	help
-	  Support for error detection and correction on the
-	  Mellanox BlueField SoCs.
-
-config EDAC_XILINX_DDR
-	tristate "Xilinx Versal DDR Memory Controller"
-	depends on ARCH_ZYNQMP
-	help
-	  Support for error detection and correction on the Xilinx Versal DDR
-	  memory controller.
-
-	  Report both Single Bit Errors (CE) and Double Bit Errors (UE).
-	  Support injecting both Correctable and UnCorrectable errors for debug
-	  purpose using sysfs entries.
 
 endif # EDAC

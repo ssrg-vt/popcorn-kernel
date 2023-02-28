@@ -12,6 +12,7 @@
 
 #include "coda_int.h"
 
+#ifdef CONFIG_SYSCTL
 static struct ctl_table_header *fs_table_header;
 
 static struct ctl_table coda_table[] = {
@@ -61,3 +62,13 @@ void coda_sysctl_clean(void)
 		fs_table_header = NULL;
 	}
 }
+
+#else
+void coda_sysctl_init(void)
+{
+}
+
+void coda_sysctl_clean(void)
+{
+}
+#endif

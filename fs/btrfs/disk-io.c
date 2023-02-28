@@ -19,7 +19,6 @@
 #include <linux/crc32c.h>
 #include <linux/sched/mm.h>
 #include <asm/unaligned.h>
-#include <crypto/hash.h>
 #include "ctree.h"
 #include "disk-io.h"
 #include "transaction.h"
@@ -40,7 +39,10 @@
 #include "compression.h"
 #include "tree-checker.h"
 #include "ref-verify.h"
-#include "block-group.h"
+
+#ifdef CONFIG_X86
+#include <asm/cpufeature.h>
+#endif
 
 #define BTRFS_SUPER_FLAG_SUPP	(BTRFS_HEADER_FLAG_WRITTEN |\
 				 BTRFS_HEADER_FLAG_RELOC |\
@@ -247,6 +249,16 @@ out:
 	return em;
 }
 
+u32 btrfs_csum_data(const char *data, u32 seed, size_t len)
+{
+	return crc32c(seed, data, len);
+}
+
+void btrfs_csum_final(u32 crc, u8 *result)
+{
+	put_unaligned_le32(~crc, result);
+}
+
 /*
  * Compute the csum of a btree block and store the result to provided buffer.
  *
@@ -254,8 +266,6 @@ out:
  */
 static int csum_tree_block(struct extent_buffer *buf, u8 *result)
 {
-	struct btrfs_fs_info *fs_info = buf->fs_info;
-	SHASH_DESC_ON_STACK(shash, fs_info->csum_shash);
 	unsigned long len;
 	unsigned long cur_len;
 	unsigned long offset = BTRFS_CSUM_SIZE;
@@ -263,12 +273,9 @@ static int csum_tree_block(struct extent_buffer *buf, u8 *result)
 	unsigned long map_start;
 	unsigned long map_len;
 	int err;
-
-	shash->tfm = fs_info->csum_shash;
-	crypto_shash_init(shash);
+	u32 crc = ~(u32)0;
 
 	len = buf->len - offset;
-
 	while (len > 0) {
 		/*
 		 * Note: we don't need to check for the err == 1 case here, as
@@ -281,13 +288,14 @@ static int csum_tree_block(struct extent_buffer *buf, u8 *result)
 		if (WARN_ON(err))
 			return err;
 		cur_len = min(len, map_len - (offset - map_start));
-		crypto_shash_update(shash, kaddr + offset - map_start, cur_len);
+		crc = btrfs_csum_data(kaddr + offset - map_start,
+				      crc, cur_len);
 		len -= cur_len;
 		offset += cur_len;
 	}
 	memset(result, 0, BTRFS_CSUM_SIZE);
 
-	crypto_shash_final(shash, result);
+	btrfs_csum_final(crc, result);
 
 	return 0;
 }
@@ -348,16 +356,6 @@ out:
 	return ret;
 }
 
-static bool btrfs_supported_super_csum(u16 csum_type)
-{
-	switch (csum_type) {
-	case BTRFS_CSUM_TYPE_CRC32:
-		return true;
-	default:
-		return false;
-	}
-}
-
 /*
  * Return 0 if the superblock checksum type matches the checksum value of that
  * algorithm. Pass the raw disk superblock data.
@@ -367,25 +365,33 @@ static int btrfs_check_super_csum(struct btrfs_fs_info *fs_info,
 {
 	struct btrfs_super_block *disk_sb =
 		(struct btrfs_super_block *)raw_disk_sb;
-	char result[BTRFS_CSUM_SIZE];
-	SHASH_DESC_ON_STACK(shash, fs_info->csum_shash);
+	u16 csum_type = btrfs_super_csum_type(disk_sb);
+	int ret = 0;
 
-	shash->tfm = fs_info->csum_shash;
-	crypto_shash_init(shash);
+	if (csum_type == BTRFS_CSUM_TYPE_CRC32) {
+		u32 crc = ~(u32)0;
+		char result[sizeof(crc)];
 
-	/*
-	 * The super_block structure does not span the whole
-	 * BTRFS_SUPER_INFO_SIZE range, we expect that the unused space is
-	 * filled with zeros and is included in the checksum.
-	 */
-	crypto_shash_update(shash, raw_disk_sb + BTRFS_CSUM_SIZE,
-			    BTRFS_SUPER_INFO_SIZE - BTRFS_CSUM_SIZE);
-	crypto_shash_final(shash, result);
+		/*
+		 * The super_block structure does not span the whole
+		 * BTRFS_SUPER_INFO_SIZE range, we expect that the unused space
+		 * is filled with zeros and is included in the checksum.
+		 */
+		crc = btrfs_csum_data(raw_disk_sb + BTRFS_CSUM_SIZE,
+				crc, BTRFS_SUPER_INFO_SIZE - BTRFS_CSUM_SIZE);
+		btrfs_csum_final(crc, result);
 
-	if (memcmp(disk_sb->csum, result, btrfs_super_csum_size(disk_sb)))
-		return 1;
+		if (memcmp(raw_disk_sb, result, sizeof(result)))
+			ret = 1;
+	}
 
-	return 0;
+	if (csum_type >= ARRAY_SIZE(btrfs_csum_sizes)) {
+		btrfs_err(fs_info, "unsupported checksum algorithm %u",
+				csum_type);
+		ret = 1;
+	}
+
+	return ret;
 }
 
 int btrfs_verify_level_key(struct extent_buffer *eb, int level,
@@ -877,13 +883,14 @@ static blk_status_t btree_submit_bio_start(void *private_data, struct bio *bio,
 	return btree_csum_one_bio(bio);
 }
 
-static int check_async_write(struct btrfs_fs_info *fs_info,
-			     struct btrfs_inode *bi)
+static int check_async_write(struct btrfs_inode *bi)
 {
 	if (atomic_read(&bi->sync_writers))
 		return 0;
-	if (test_bit(BTRFS_FS_CSUM_IMPL_FAST, &fs_info->flags))
+#ifdef CONFIG_X86
+	if (static_cpu_has(X86_FEATURE_XMM4_2))
 		return 0;
+#endif
 	return 1;
 }
 
@@ -892,7 +899,7 @@ static blk_status_t btree_submit_bio_hook(struct inode *inode, struct bio *bio,
 					  unsigned long bio_flags)
 {
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
-	int async = check_async_write(fs_info, BTRFS_I(inode));
+	int async = check_async_write(BTRFS_I(inode));
 	blk_status_t ret;
 
 	if (bio_op(bio) != REQ_OP_WRITE) {
@@ -1046,6 +1053,35 @@ void readahead_tree_block(struct btrfs_fs_info *fs_info, u64 bytenr)
 		free_extent_buffer_stale(buf);
 	else
 		free_extent_buffer(buf);
+}
+
+int reada_tree_block_flagged(struct btrfs_fs_info *fs_info, u64 bytenr,
+			 int mirror_num, struct extent_buffer **eb)
+{
+	struct extent_buffer *buf = NULL;
+	int ret;
+
+	buf = btrfs_find_create_tree_block(fs_info, bytenr);
+	if (IS_ERR(buf))
+		return 0;
+
+	set_bit(EXTENT_BUFFER_READAHEAD, &buf->bflags);
+
+	ret = read_extent_buffer_pages(buf, WAIT_PAGE_LOCK, mirror_num);
+	if (ret) {
+		free_extent_buffer_stale(buf);
+		return ret;
+	}
+
+	if (test_bit(EXTENT_BUFFER_CORRUPT, &buf->bflags)) {
+		free_extent_buffer_stale(buf);
+		return -EIO;
+	} else if (extent_buffer_uptodate(buf)) {
+		*eb = buf;
+	} else {
+		free_extent_buffer(buf);
+	}
+	return 0;
 }
 
 struct extent_buffer *btrfs_find_create_tree_block(
@@ -2008,6 +2044,7 @@ static void btrfs_stop_all_workers(struct btrfs_fs_info *fs_info)
 	btrfs_destroy_workqueue(fs_info->readahead_workers);
 	btrfs_destroy_workqueue(fs_info->flush_workers);
 	btrfs_destroy_workqueue(fs_info->qgroup_rescan_workers);
+	btrfs_destroy_workqueue(fs_info->extent_workers);
 	/*
 	 * Now that all other work queues are destroyed, we can safely destroy
 	 * the queues used for metadata I/O, since tasks from those other work
@@ -2213,6 +2250,10 @@ static int btrfs_init_workqueues(struct btrfs_fs_info *fs_info,
 				      max_active, 2);
 	fs_info->qgroup_rescan_workers =
 		btrfs_alloc_workqueue(fs_info, "qgroup-rescan", flags, 1, 0);
+	fs_info->extent_workers =
+		btrfs_alloc_workqueue(fs_info, "extent-refs", flags,
+				      min_t(u64, fs_devices->num_devices,
+					    max_active), 8);
 
 	if (!(fs_info->workers && fs_info->delalloc_workers &&
 	      fs_info->submit_workers && fs_info->flush_workers &&
@@ -2223,34 +2264,12 @@ static int btrfs_init_workqueues(struct btrfs_fs_info *fs_info,
 	      fs_info->endio_freespace_worker && fs_info->rmw_workers &&
 	      fs_info->caching_workers && fs_info->readahead_workers &&
 	      fs_info->fixup_workers && fs_info->delayed_workers &&
+	      fs_info->extent_workers &&
 	      fs_info->qgroup_rescan_workers)) {
 		return -ENOMEM;
 	}
 
 	return 0;
-}
-
-static int btrfs_init_csum_hash(struct btrfs_fs_info *fs_info, u16 csum_type)
-{
-	struct crypto_shash *csum_shash;
-	const char *csum_name = btrfs_super_csum_name(csum_type);
-
-	csum_shash = crypto_alloc_shash(csum_name, 0, 0);
-
-	if (IS_ERR(csum_shash)) {
-		btrfs_err(fs_info, "error allocating %s hash for checksum",
-			  csum_name);
-		return PTR_ERR(csum_shash);
-	}
-
-	fs_info->csum_shash = csum_shash;
-
-	return 0;
-}
-
-static void btrfs_free_csum_hash(struct btrfs_fs_info *fs_info)
-{
-	crypto_free_shash(fs_info->csum_shash);
 }
 
 static int btrfs_replay_log(struct btrfs_fs_info *fs_info,
@@ -2568,7 +2587,7 @@ static int btrfs_validate_write_super(struct btrfs_fs_info *fs_info,
 	ret = validate_super(fs_info, sb, -1);
 	if (ret < 0)
 		goto out;
-	if (!btrfs_supported_super_csum(btrfs_super_csum_type(sb))) {
+	if (btrfs_super_csum_type(sb) != BTRFS_CSUM_TYPE_CRC32) {
 		ret = -EUCLEAN;
 		btrfs_err(fs_info, "invalid csum type, has %u want %u",
 			  btrfs_super_csum_type(sb), BTRFS_CSUM_TYPE_CRC32);
@@ -2598,7 +2617,6 @@ int open_ctree(struct super_block *sb,
 	u32 stripesize;
 	u64 generation;
 	u64 features;
-	u16 csum_type;
 	struct btrfs_key location;
 	struct buffer_head *bh;
 	struct btrfs_super_block *disk_super;
@@ -2659,6 +2677,8 @@ int open_ctree(struct super_block *sb,
 	INIT_LIST_HEAD(&fs_info->delayed_iputs);
 	INIT_LIST_HEAD(&fs_info->delalloc_roots);
 	INIT_LIST_HEAD(&fs_info->caching_block_groups);
+	INIT_LIST_HEAD(&fs_info->pending_raid_kobjs);
+	spin_lock_init(&fs_info->pending_raid_kobjs_lock);
 	spin_lock_init(&fs_info->delalloc_root_lock);
 	spin_lock_init(&fs_info->trans_lock);
 	spin_lock_init(&fs_info->fs_roots_radix_lock);
@@ -2679,7 +2699,7 @@ int open_ctree(struct super_block *sb,
 	INIT_LIST_HEAD(&fs_info->space_info);
 	INIT_LIST_HEAD(&fs_info->tree_mod_seq_list);
 	INIT_LIST_HEAD(&fs_info->unused_bgs);
-	extent_map_tree_init(&fs_info->mapping_tree);
+	btrfs_mapping_init(&fs_info->mapping_tree);
 	btrfs_init_block_rsv(&fs_info->global_block_rsv,
 			     BTRFS_BLOCK_RSV_GLOBAL);
 	btrfs_init_block_rsv(&fs_info->trans_block_rsv, BTRFS_BLOCK_RSV_TRANS);
@@ -2783,8 +2803,6 @@ int open_ctree(struct super_block *sb,
 	spin_lock_init(&fs_info->swapfile_pins_lock);
 	fs_info->swapfile_pins = RB_ROOT;
 
-	fs_info->send_in_progress = 0;
-
 	ret = btrfs_alloc_stripe_hash_table(fs_info);
 	if (ret) {
 		err = ret;
@@ -2805,25 +2823,6 @@ int open_ctree(struct super_block *sb,
 	}
 
 	/*
-	 * Verify the type first, if that or the the checksum value are
-	 * corrupted, we'll find out
-	 */
-	csum_type = btrfs_super_csum_type((struct btrfs_super_block *)bh->b_data);
-	if (!btrfs_supported_super_csum(csum_type)) {
-		btrfs_err(fs_info, "unsupported checksum algorithm: %u",
-			  csum_type);
-		err = -EINVAL;
-		brelse(bh);
-		goto fail_alloc;
-	}
-
-	ret = btrfs_init_csum_hash(fs_info, csum_type);
-	if (ret) {
-		err = ret;
-		goto fail_alloc;
-	}
-
-	/*
 	 * We want to check superblock checksum, the type is stored inside.
 	 * Pass the whole disk block of size BTRFS_SUPER_INFO_SIZE (4k).
 	 */
@@ -2831,7 +2830,7 @@ int open_ctree(struct super_block *sb,
 		btrfs_err(fs_info, "superblock checksum mismatch");
 		err = -EINVAL;
 		brelse(bh);
-		goto fail_csum;
+		goto fail_alloc;
 	}
 
 	/*
@@ -2868,11 +2867,11 @@ int open_ctree(struct super_block *sb,
 	if (ret) {
 		btrfs_err(fs_info, "superblock contains fatal errors");
 		err = -EINVAL;
-		goto fail_csum;
+		goto fail_alloc;
 	}
 
 	if (!btrfs_super_root(disk_super))
-		goto fail_csum;
+		goto fail_alloc;
 
 	/* check FS state, whether FS is broken. */
 	if (btrfs_super_flags(disk_super) & BTRFS_SUPER_FLAG_ERROR)
@@ -2894,7 +2893,7 @@ int open_ctree(struct super_block *sb,
 	ret = btrfs_parse_options(fs_info, options, sb->s_flags);
 	if (ret) {
 		err = ret;
-		goto fail_csum;
+		goto fail_alloc;
 	}
 
 	features = btrfs_super_incompat_flags(disk_super) &
@@ -2904,7 +2903,7 @@ int open_ctree(struct super_block *sb,
 		    "cannot mount because of unsupported optional features (%llx)",
 		    features);
 		err = -EINVAL;
-		goto fail_csum;
+		goto fail_alloc;
 	}
 
 	features = btrfs_super_incompat_flags(disk_super);
@@ -2948,7 +2947,7 @@ int open_ctree(struct super_block *sb,
 		btrfs_err(fs_info,
 "unequal nodesize/sectorsize (%u != %u) are not allowed for mixed block groups",
 			nodesize, sectorsize);
-		goto fail_csum;
+		goto fail_alloc;
 	}
 
 	/*
@@ -2964,7 +2963,7 @@ int open_ctree(struct super_block *sb,
 	"cannot mount read-write because of unsupported optional features (%llx)",
 		       features);
 		err = -EINVAL;
-		goto fail_csum;
+		goto fail_alloc;
 	}
 
 	ret = btrfs_init_workqueues(fs_info, fs_devices);
@@ -3342,8 +3341,6 @@ fail_tree_roots:
 fail_sb_buffer:
 	btrfs_stop_all_workers(fs_info);
 	btrfs_free_block_groups(fs_info);
-fail_csum:
-	btrfs_free_csum_hash(fs_info);
 fail_alloc:
 fail_iput:
 	btrfs_mapping_tree_free(&fs_info->mapping_tree);
@@ -3485,19 +3482,16 @@ struct buffer_head *btrfs_read_dev_super(struct block_device *bdev)
 static int write_dev_supers(struct btrfs_device *device,
 			    struct btrfs_super_block *sb, int max_mirrors)
 {
-	struct btrfs_fs_info *fs_info = device->fs_info;
-	SHASH_DESC_ON_STACK(shash, fs_info->csum_shash);
 	struct buffer_head *bh;
 	int i;
 	int ret;
 	int errors = 0;
+	u32 crc;
 	u64 bytenr;
 	int op_flags;
 
 	if (max_mirrors == 0)
 		max_mirrors = BTRFS_SUPER_MIRROR_MAX;
-
-	shash->tfm = fs_info->csum_shash;
 
 	for (i = 0; i < max_mirrors; i++) {
 		bytenr = btrfs_sb_offset(i);
@@ -3507,10 +3501,10 @@ static int write_dev_supers(struct btrfs_device *device,
 
 		btrfs_set_super_bytenr(sb, bytenr);
 
-		crypto_shash_init(shash);
-		crypto_shash_update(shash, (const char *)sb + BTRFS_CSUM_SIZE,
-				    BTRFS_SUPER_INFO_SIZE - BTRFS_CSUM_SIZE);
-		crypto_shash_final(shash, sb->csum);
+		crc = ~(u32)0;
+		crc = btrfs_csum_data((const char *)sb + BTRFS_CSUM_SIZE, crc,
+				      BTRFS_SUPER_INFO_SIZE - BTRFS_CSUM_SIZE);
+		btrfs_csum_final(crc, sb->csum);
 
 		/* One reference for us, and we leave it for the caller */
 		bh = __getblk(device->bdev, bytenr / BTRFS_BDEV_BLOCKSIZE,
@@ -3725,7 +3719,7 @@ int btrfs_get_num_tolerated_disk_barrier_failures(u64 flags)
 
 	if ((flags & BTRFS_BLOCK_GROUP_PROFILE_MASK) == 0 ||
 	    (flags & BTRFS_AVAIL_ALLOC_BIT_SINGLE))
-		min_tolerated = min_t(int, min_tolerated,
+		min_tolerated = min(min_tolerated,
 				    btrfs_raid_array[BTRFS_RAID_SINGLE].
 				    tolerated_failures);
 
@@ -3734,7 +3728,7 @@ int btrfs_get_num_tolerated_disk_barrier_failures(u64 flags)
 			continue;
 		if (!(flags & btrfs_raid_array[raid_type].bg_flag))
 			continue;
-		min_tolerated = min_t(int, min_tolerated,
+		min_tolerated = min(min_tolerated,
 				    btrfs_raid_array[raid_type].
 				    tolerated_failures);
 	}
@@ -4080,7 +4074,6 @@ void close_ctree(struct btrfs_fs_info *fs_info)
 	percpu_counter_destroy(&fs_info->dev_replace.bio_counter);
 	cleanup_srcu_struct(&fs_info->subvol_srcu);
 
-	btrfs_free_csum_hash(fs_info);
 	btrfs_free_stripe_hash_table(fs_info);
 	btrfs_free_ref_cache(fs_info);
 }

@@ -15,6 +15,7 @@
 #include <asm/kvm_asm.h>
 #include <asm/kvm_mmio.h>
 #include <asm/fpstate.h>
+#include <asm/smp_plat.h>
 #include <kvm/arm_arch_timer.h>
 
 #define __KVM_HAVE_ARCH_INTC_INITIALIZED
@@ -146,10 +147,11 @@ struct kvm_host_data {
 
 typedef struct kvm_host_data kvm_host_data_t;
 
-static inline void kvm_init_host_cpu_context(struct kvm_cpu_context *cpu_ctxt)
+static inline void kvm_init_host_cpu_context(struct kvm_cpu_context *cpu_ctxt,
+					     int cpu)
 {
 	/* The host's MPIDR is immutable, so let's set it up at boot time */
-	cpu_ctxt->cp15[c0_MPIDR] = read_cpuid_mpidr();
+	cpu_ctxt->cp15[c0_MPIDR] = cpu_logical_map(cpu);
 }
 
 struct vcpu_reset_state {
@@ -360,11 +362,7 @@ static inline void kvm_vcpu_pmu_restore_host(struct kvm_vcpu *vcpu) {}
 static inline void kvm_arm_vhe_guest_enter(void) {}
 static inline void kvm_arm_vhe_guest_exit(void) {}
 
-#define KVM_BP_HARDEN_UNKNOWN		-1
-#define KVM_BP_HARDEN_WA_NEEDED		0
-#define KVM_BP_HARDEN_NOT_REQUIRED	1
-
-static inline int kvm_arm_harden_branch_predictor(void)
+static inline bool kvm_arm_harden_branch_predictor(void)
 {
 	switch(read_cpuid_part()) {
 #ifdef CONFIG_HARDEN_BRANCH_PREDICTOR
@@ -372,12 +370,10 @@ static inline int kvm_arm_harden_branch_predictor(void)
 	case ARM_CPU_PART_CORTEX_A12:
 	case ARM_CPU_PART_CORTEX_A15:
 	case ARM_CPU_PART_CORTEX_A17:
-		return KVM_BP_HARDEN_WA_NEEDED;
+		return true;
 #endif
-	case ARM_CPU_PART_CORTEX_A7:
-		return KVM_BP_HARDEN_NOT_REQUIRED;
 	default:
-		return KVM_BP_HARDEN_UNKNOWN;
+		return false;
 	}
 }
 

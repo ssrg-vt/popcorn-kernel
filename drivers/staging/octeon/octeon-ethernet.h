@@ -13,34 +13,7 @@
 
 #include <linux/of.h>
 #include <linux/phy.h>
-
-#ifdef CONFIG_MIPS
-
-#include <asm/octeon/octeon.h>
-
-#include <asm/octeon/cvmx-asxx-defs.h>
-#include <asm/octeon/cvmx-config.h>
-#include <asm/octeon/cvmx-fau.h>
-#include <asm/octeon/cvmx-gmxx-defs.h>
-#include <asm/octeon/cvmx-helper.h>
-#include <asm/octeon/cvmx-helper-util.h>
-#include <asm/octeon/cvmx-ipd.h>
-#include <asm/octeon/cvmx-ipd-defs.h>
-#include <asm/octeon/cvmx-npi-defs.h>
-#include <asm/octeon/cvmx-pip.h>
-#include <asm/octeon/cvmx-pko.h>
-#include <asm/octeon/cvmx-pow.h>
-#include <asm/octeon/cvmx-scratch.h>
-#include <asm/octeon/cvmx-spi.h>
-#include <asm/octeon/cvmx-spxx-defs.h>
-#include <asm/octeon/cvmx-stxx-defs.h>
-#include <asm/octeon/cvmx-wqe.h>
-
-#else
-
-#include "octeon-stubs.h"
-
-#endif
+#include <asm/octeon/cvmx-helper-board.h>
 
 /**
  * This is the definition of the Ethernet driver's private

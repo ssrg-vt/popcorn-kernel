@@ -24,15 +24,16 @@
  *
  */
 
-#include <linux/frame.h>
-#include <linux/kernel.h>
-#include <linux/module.h>
+
 #include <linux/slab.h>
-
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/frame.h>
 #include <asm/hypervisor.h>
-
+#include <drm/drmP.h>
 #include "vmwgfx_drv.h"
 #include "vmwgfx_msg.h"
+
 
 #define MESSAGE_STATUS_SUCCESS  0x0001
 #define MESSAGE_STATUS_DORECV   0x0002
@@ -45,6 +46,8 @@
 #define RETRIES                 3
 
 #define VMW_HYPERVISOR_MAGIC    0x564D5868
+#define VMW_HYPERVISOR_PORT     0x5658
+#define VMW_HYPERVISOR_HB_PORT  0x5659
 
 #define VMW_PORT_CMD_MSG        30
 #define VMW_PORT_CMD_HB_MSG     0
@@ -90,7 +93,7 @@ static int vmw_open_channel(struct rpc_channel *channel, unsigned int protocol)
 
 	VMW_PORT(VMW_PORT_CMD_OPEN_CHANNEL,
 		(protocol | GUESTMSG_FLAG_COOKIE), si, di,
-		0,
+		VMW_HYPERVISOR_PORT,
 		VMW_HYPERVISOR_MAGIC,
 		eax, ebx, ecx, edx, si, di);
 
@@ -123,7 +126,7 @@ static int vmw_close_channel(struct rpc_channel *channel)
 
 	VMW_PORT(VMW_PORT_CMD_CLOSE_CHANNEL,
 		0, si, di,
-		channel->channel_id << 16,
+		(VMW_HYPERVISOR_PORT | (channel->channel_id << 16)),
 		VMW_HYPERVISOR_MAGIC,
 		eax, ebx, ecx, edx, si, di);
 
@@ -157,8 +160,7 @@ static unsigned long vmw_port_hb_out(struct rpc_channel *channel,
 		VMW_PORT_HB_OUT(
 			(MESSAGE_STATUS_SUCCESS << 16) | VMW_PORT_CMD_HB_MSG,
 			msg_len, si, di,
-			VMWARE_HYPERVISOR_HB | (channel->channel_id << 16) |
-			VMWARE_HYPERVISOR_OUT,
+			VMW_HYPERVISOR_HB_PORT | (channel->channel_id << 16),
 			VMW_HYPERVISOR_MAGIC, bp,
 			eax, ebx, ecx, edx, si, di);
 
@@ -179,7 +181,7 @@ static unsigned long vmw_port_hb_out(struct rpc_channel *channel,
 
 		VMW_PORT(VMW_PORT_CMD_MSG | (MSG_TYPE_SENDPAYLOAD << 16),
 			 word, si, di,
-			 channel->channel_id << 16,
+			 VMW_HYPERVISOR_PORT | (channel->channel_id << 16),
 			 VMW_HYPERVISOR_MAGIC,
 			 eax, ebx, ecx, edx, si, di);
 	}
@@ -211,7 +213,7 @@ static unsigned long vmw_port_hb_in(struct rpc_channel *channel, char *reply,
 		VMW_PORT_HB_IN(
 			(MESSAGE_STATUS_SUCCESS << 16) | VMW_PORT_CMD_HB_MSG,
 			reply_len, si, di,
-			VMWARE_HYPERVISOR_HB | (channel->channel_id << 16),
+			VMW_HYPERVISOR_HB_PORT | (channel->channel_id << 16),
 			VMW_HYPERVISOR_MAGIC, bp,
 			eax, ebx, ecx, edx, si, di);
 
@@ -228,7 +230,7 @@ static unsigned long vmw_port_hb_in(struct rpc_channel *channel, char *reply,
 
 		VMW_PORT(VMW_PORT_CMD_MSG | (MSG_TYPE_RECVPAYLOAD << 16),
 			 MESSAGE_STATUS_SUCCESS, si, di,
-			 channel->channel_id << 16,
+			 VMW_HYPERVISOR_PORT | (channel->channel_id << 16),
 			 VMW_HYPERVISOR_MAGIC,
 			 eax, ebx, ecx, edx, si, di);
 
@@ -267,7 +269,7 @@ static int vmw_send_msg(struct rpc_channel *channel, const char *msg)
 
 		VMW_PORT(VMW_PORT_CMD_SENDSIZE,
 			msg_len, si, di,
-			channel->channel_id << 16,
+			VMW_HYPERVISOR_PORT | (channel->channel_id << 16),
 			VMW_HYPERVISOR_MAGIC,
 			eax, ebx, ecx, edx, si, di);
 
@@ -325,7 +327,7 @@ static int vmw_recv_msg(struct rpc_channel *channel, void **msg,
 
 		VMW_PORT(VMW_PORT_CMD_RECVSIZE,
 			0, si, di,
-			channel->channel_id << 16,
+			(VMW_HYPERVISOR_PORT | (channel->channel_id << 16)),
 			VMW_HYPERVISOR_MAGIC,
 			eax, ebx, ecx, edx, si, di);
 
@@ -369,7 +371,7 @@ static int vmw_recv_msg(struct rpc_channel *channel, void **msg,
 
 		VMW_PORT(VMW_PORT_CMD_RECVSTATUS,
 			MESSAGE_STATUS_SUCCESS, si, di,
-			channel->channel_id << 16,
+			(VMW_HYPERVISOR_PORT | (channel->channel_id << 16)),
 			VMW_HYPERVISOR_MAGIC,
 			eax, ebx, ecx, edx, si, di);
 

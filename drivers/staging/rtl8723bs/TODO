@@ -12,4 +12,5 @@ TODO:
 - switch to use MAC80211
 
 Please send any patches to Greg Kroah-Hartman <gregkh@linuxfoundation.org>,
-Hans de Goede <hdegoede@redhat.com> and Larry Finger <Larry.Finger@lwfinger.net>.
+Bastien Nocera <hadess@hadess.net>, Hans de Goede <hdegoede@redhat.com>
+and Larry Finger <Larry.Finger@lwfinger.net>.

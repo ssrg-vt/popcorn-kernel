@@ -9,7 +9,6 @@
 /* For internal use only */
 extern char param_governor[];
 extern struct cpuidle_governor *cpuidle_curr_governor;
-extern struct cpuidle_governor *cpuidle_prev_governor;
 extern struct list_head cpuidle_governors;
 extern struct list_head cpuidle_detected_devices;
 extern struct mutex cpuidle_lock;
@@ -23,7 +22,6 @@ extern void cpuidle_install_idle_handler(void);
 extern void cpuidle_uninstall_idle_handler(void);
 
 /* governors */
-extern struct cpuidle_governor *cpuidle_find_governor(const char *str);
 extern int cpuidle_switch_governor(struct cpuidle_governor *gov);
 
 /* sysfs */

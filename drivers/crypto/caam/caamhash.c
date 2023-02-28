@@ -82,6 +82,14 @@
 #define HASH_MSG_LEN			8
 #define MAX_CTX_LEN			(HASH_MSG_LEN + SHA512_DIGEST_SIZE)
 
+#ifdef DEBUG
+/* for print_hex_dumps with line references */
+#define debug(format, arg...) printk(format, arg)
+#else
+#define debug(format, arg...)
+#endif
+
+
 static struct list_head hash_list;
 
 /* ahash per-session context */
@@ -95,8 +103,8 @@ struct caam_hash_ctx {
 	dma_addr_t sh_desc_update_first_dma;
 	dma_addr_t sh_desc_fin_dma;
 	dma_addr_t sh_desc_digest_dma;
+	dma_addr_t key_dma;
 	enum dma_data_direction dir;
-	enum dma_data_direction key_dir;
 	struct device *jrdev;
 	int ctx_len;
 	struct alginfo adata;
@@ -235,10 +243,11 @@ static int ahash_set_sh_desc(struct crypto_ahash *ahash)
 			  ctx->ctx_len, true, ctrlpriv->era);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_update_dma,
 				   desc_bytes(desc), ctx->dir);
-
-	print_hex_dump_debug("ahash update shdesc@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc),
-			     1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR,
+		       "ahash update shdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc), 1);
+#endif
 
 	/* ahash_update_first shared descriptor */
 	desc = ctx->sh_desc_update_first;
@@ -246,9 +255,11 @@ static int ahash_set_sh_desc(struct crypto_ahash *ahash)
 			  ctx->ctx_len, false, ctrlpriv->era);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_update_first_dma,
 				   desc_bytes(desc), ctx->dir);
-	print_hex_dump_debug("ahash update first shdesc@"__stringify(__LINE__)
-			     ": ", DUMP_PREFIX_ADDRESS, 16, 4, desc,
-			     desc_bytes(desc), 1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR,
+		       "ahash update first shdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc), 1);
+#endif
 
 	/* ahash_final shared descriptor */
 	desc = ctx->sh_desc_fin;
@@ -256,10 +267,11 @@ static int ahash_set_sh_desc(struct crypto_ahash *ahash)
 			  ctx->ctx_len, true, ctrlpriv->era);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_fin_dma,
 				   desc_bytes(desc), ctx->dir);
-
-	print_hex_dump_debug("ahash final shdesc@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, desc,
-			     desc_bytes(desc), 1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "ahash final shdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc,
+		       desc_bytes(desc), 1);
+#endif
 
 	/* ahash_digest shared descriptor */
 	desc = ctx->sh_desc_digest;
@@ -267,10 +279,12 @@ static int ahash_set_sh_desc(struct crypto_ahash *ahash)
 			  ctx->ctx_len, false, ctrlpriv->era);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_digest_dma,
 				   desc_bytes(desc), ctx->dir);
-
-	print_hex_dump_debug("ahash digest shdesc@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, desc,
-			     desc_bytes(desc), 1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR,
+		       "ahash digest shdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc,
+		       desc_bytes(desc), 1);
+#endif
 
 	return 0;
 }
@@ -282,10 +296,13 @@ static int axcbc_set_sh_desc(struct crypto_ahash *ahash)
 	struct device *jrdev = ctx->jrdev;
 	u32 *desc;
 
+	/* key is loaded from memory for UPDATE and FINALIZE states */
+	ctx->adata.key_dma = ctx->key_dma;
+
 	/* shared descriptor for ahash_update */
 	desc = ctx->sh_desc_update;
 	cnstr_shdsc_sk_hash(desc, &ctx->adata, OP_ALG_AS_UPDATE,
-			    ctx->ctx_len, ctx->ctx_len);
+			    ctx->ctx_len, ctx->ctx_len, 0);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_update_dma,
 				   desc_bytes(desc), ctx->dir);
 	print_hex_dump_debug("axcbc update shdesc@" __stringify(__LINE__)" : ",
@@ -295,7 +312,7 @@ static int axcbc_set_sh_desc(struct crypto_ahash *ahash)
 	/* shared descriptor for ahash_{final,finup} */
 	desc = ctx->sh_desc_fin;
 	cnstr_shdsc_sk_hash(desc, &ctx->adata, OP_ALG_AS_FINALIZE,
-			    digestsize, ctx->ctx_len);
+			    digestsize, ctx->ctx_len, 0);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_fin_dma,
 				   desc_bytes(desc), ctx->dir);
 	print_hex_dump_debug("axcbc finup shdesc@" __stringify(__LINE__)" : ",
@@ -308,17 +325,17 @@ static int axcbc_set_sh_desc(struct crypto_ahash *ahash)
 	/* shared descriptor for first invocation of ahash_update */
 	desc = ctx->sh_desc_update_first;
 	cnstr_shdsc_sk_hash(desc, &ctx->adata, OP_ALG_AS_INIT, ctx->ctx_len,
-			    ctx->ctx_len);
+			    ctx->ctx_len, ctx->key_dma);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_update_first_dma,
 				   desc_bytes(desc), ctx->dir);
-	print_hex_dump_debug("axcbc update first shdesc@" __stringify(__LINE__)
-			     " : ", DUMP_PREFIX_ADDRESS, 16, 4, desc,
-			     desc_bytes(desc), 1);
+	print_hex_dump_debug("axcbc update first shdesc@" __stringify(__LINE__)" : ",
+			     DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc),
+			     1);
 
 	/* shared descriptor for ahash_digest */
 	desc = ctx->sh_desc_digest;
 	cnstr_shdsc_sk_hash(desc, &ctx->adata, OP_ALG_AS_INITFINAL,
-			    digestsize, ctx->ctx_len);
+			    digestsize, ctx->ctx_len, 0);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_digest_dma,
 				   desc_bytes(desc), ctx->dir);
 	print_hex_dump_debug("axcbc digest shdesc@" __stringify(__LINE__)" : ",
@@ -337,7 +354,7 @@ static int acmac_set_sh_desc(struct crypto_ahash *ahash)
 	/* shared descriptor for ahash_update */
 	desc = ctx->sh_desc_update;
 	cnstr_shdsc_sk_hash(desc, &ctx->adata, OP_ALG_AS_UPDATE,
-			    ctx->ctx_len, ctx->ctx_len);
+			    ctx->ctx_len, ctx->ctx_len, 0);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_update_dma,
 				   desc_bytes(desc), ctx->dir);
 	print_hex_dump_debug("acmac update shdesc@" __stringify(__LINE__)" : ",
@@ -347,7 +364,7 @@ static int acmac_set_sh_desc(struct crypto_ahash *ahash)
 	/* shared descriptor for ahash_{final,finup} */
 	desc = ctx->sh_desc_fin;
 	cnstr_shdsc_sk_hash(desc, &ctx->adata, OP_ALG_AS_FINALIZE,
-			    digestsize, ctx->ctx_len);
+			    digestsize, ctx->ctx_len, 0);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_fin_dma,
 				   desc_bytes(desc), ctx->dir);
 	print_hex_dump_debug("acmac finup shdesc@" __stringify(__LINE__)" : ",
@@ -357,17 +374,17 @@ static int acmac_set_sh_desc(struct crypto_ahash *ahash)
 	/* shared descriptor for first invocation of ahash_update */
 	desc = ctx->sh_desc_update_first;
 	cnstr_shdsc_sk_hash(desc, &ctx->adata, OP_ALG_AS_INIT, ctx->ctx_len,
-			    ctx->ctx_len);
+			    ctx->ctx_len, 0);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_update_first_dma,
 				   desc_bytes(desc), ctx->dir);
-	print_hex_dump_debug("acmac update first shdesc@" __stringify(__LINE__)
-			     " : ", DUMP_PREFIX_ADDRESS, 16, 4, desc,
+	print_hex_dump_debug("acmac update first shdesc@" __stringify(__LINE__)" : ",
+			     DUMP_PREFIX_ADDRESS, 16, 4, desc,
 			     desc_bytes(desc), 1);
 
 	/* shared descriptor for ahash_digest */
 	desc = ctx->sh_desc_digest;
 	cnstr_shdsc_sk_hash(desc, &ctx->adata, OP_ALG_AS_INITFINAL,
-			    digestsize, ctx->ctx_len);
+			    digestsize, ctx->ctx_len, 0);
 	dma_sync_single_for_device(jrdev, ctx->sh_desc_digest_dma,
 				   desc_bytes(desc), ctx->dir);
 	print_hex_dump_debug("acmac digest shdesc@" __stringify(__LINE__)" : ",
@@ -412,11 +429,12 @@ static int hash_digest_key(struct caam_hash_ctx *ctx, u32 *keylen, u8 *key,
 	append_seq_store(desc, digestsize, LDST_CLASS_2_CCB |
 			 LDST_SRCDST_BYTE_CONTEXT);
 
-	print_hex_dump_debug("key_in@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, key, *keylen, 1);
-	print_hex_dump_debug("jobdesc@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc),
-			     1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "key_in@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, key, *keylen, 1);
+	print_hex_dump(KERN_ERR, "jobdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc), 1);
+#endif
 
 	result.err = 0;
 	init_completion(&result.completion);
@@ -426,10 +444,11 @@ static int hash_digest_key(struct caam_hash_ctx *ctx, u32 *keylen, u8 *key,
 		/* in progress */
 		wait_for_completion(&result.completion);
 		ret = result.err;
-
-		print_hex_dump_debug("digested key@"__stringify(__LINE__)": ",
-				     DUMP_PREFIX_ADDRESS, 16, 4, key,
-				     digestsize, 1);
+#ifdef DEBUG
+		print_hex_dump(KERN_ERR,
+			       "digested key@"__stringify(__LINE__)": ",
+			       DUMP_PREFIX_ADDRESS, 16, 4, key, digestsize, 1);
+#endif
 	}
 	dma_unmap_single(jrdev, key_dma, *keylen, DMA_BIDIRECTIONAL);
 
@@ -444,14 +463,15 @@ static int ahash_setkey(struct crypto_ahash *ahash,
 			const u8 *key, unsigned int keylen)
 {
 	struct caam_hash_ctx *ctx = crypto_ahash_ctx(ahash);
-	struct device *jrdev = ctx->jrdev;
 	int blocksize = crypto_tfm_alg_blocksize(&ahash->base);
 	int digestsize = crypto_ahash_digestsize(ahash);
 	struct caam_drv_private *ctrlpriv = dev_get_drvdata(ctx->jrdev->parent);
 	int ret;
 	u8 *hashed_key = NULL;
 
-	dev_dbg(jrdev, "keylen %d\n", keylen);
+#ifdef DEBUG
+	printk(KERN_ERR "keylen %d\n", keylen);
+#endif
 
 	if (keylen > blocksize) {
 		hashed_key = kmemdup(key, keylen, GFP_KERNEL | GFP_DMA);
@@ -477,18 +497,6 @@ static int ahash_setkey(struct crypto_ahash *ahash,
 			goto bad_free_key;
 
 		memcpy(ctx->key, key, keylen);
-
-		/*
-		 * In case |user key| > |derived key|, using DKP<imm,imm>
-		 * would result in invalid opcodes (last bytes of user key) in
-		 * the resulting descriptor. Use DKP<ptr,imm> instead => both
-		 * virtual and dma key addresses are needed.
-		 */
-		if (keylen > ctx->adata.keylen_pad)
-			dma_sync_single_for_device(ctx->jrdev,
-						   ctx->adata.key_dma,
-						   ctx->adata.keylen_pad,
-						   DMA_TO_DEVICE);
 	} else {
 		ret = gen_split_key(ctx->jrdev, ctx->key, &ctx->adata, key,
 				    keylen, CAAM_MAX_HASH_KEY_SIZE);
@@ -510,14 +518,8 @@ static int axcbc_setkey(struct crypto_ahash *ahash, const u8 *key,
 	struct caam_hash_ctx *ctx = crypto_ahash_ctx(ahash);
 	struct device *jrdev = ctx->jrdev;
 
-	if (keylen != AES_KEYSIZE_128) {
-		crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_KEY_LEN);
-		return -EINVAL;
-	}
-
 	memcpy(ctx->key, key, keylen);
-	dma_sync_single_for_device(jrdev, ctx->adata.key_dma, keylen,
-				   DMA_TO_DEVICE);
+	dma_sync_single_for_device(jrdev, ctx->key_dma, keylen, DMA_TO_DEVICE);
 	ctx->adata.keylen = keylen;
 
 	print_hex_dump_debug("axcbc ctx.key@" __stringify(__LINE__)" : ",
@@ -530,13 +532,6 @@ static int acmac_setkey(struct crypto_ahash *ahash, const u8 *key,
 			unsigned int keylen)
 {
 	struct caam_hash_ctx *ctx = crypto_ahash_ctx(ahash);
-	int err;
-
-	err = aes_check_keylen(keylen);
-	if (err) {
-		crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_KEY_LEN);
-		return err;
-	}
 
 	/* key is immediate data for all cmac shared descriptors */
 	ctx->adata.key_virt = key;
@@ -560,7 +555,7 @@ struct ahash_edesc {
 	dma_addr_t sec4_sg_dma;
 	int src_nents;
 	int sec4_sg_bytes;
-	u32 hw_desc[DESC_JOB_IO_LEN_MAX / sizeof(u32)] ____cacheline_aligned;
+	u32 hw_desc[DESC_JOB_IO_LEN / sizeof(u32)] ____cacheline_aligned;
 	struct sec4_sg_entry sec4_sg[0];
 };
 
@@ -605,24 +600,27 @@ static void ahash_done(struct device *jrdev, u32 *desc, u32 err,
 	struct crypto_ahash *ahash = crypto_ahash_reqtfm(req);
 	int digestsize = crypto_ahash_digestsize(ahash);
 	struct caam_hash_state *state = ahash_request_ctx(req);
+#ifdef DEBUG
 	struct caam_hash_ctx *ctx = crypto_ahash_ctx(ahash);
-	int ecode = 0;
 
-	dev_dbg(jrdev, "%s %d: err 0x%x\n", __func__, __LINE__, err);
+	dev_err(jrdev, "%s %d: err 0x%x\n", __func__, __LINE__, err);
+#endif
 
 	edesc = container_of(desc, struct ahash_edesc, hw_desc[0]);
 	if (err)
-		ecode = caam_jr_strstatus(jrdev, err);
+		caam_jr_strstatus(jrdev, err);
 
 	ahash_unmap_ctx(jrdev, edesc, req, digestsize, DMA_FROM_DEVICE);
 	memcpy(req->result, state->caam_ctx, digestsize);
 	kfree(edesc);
 
-	print_hex_dump_debug("ctx@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, state->caam_ctx,
-			     ctx->ctx_len, 1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "ctx@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, state->caam_ctx,
+		       ctx->ctx_len, 1);
+#endif
 
-	req->base.complete(&req->base, ecode);
+	req->base.complete(&req->base, err);
 }
 
 static void ahash_done_bi(struct device *jrdev, u32 *desc, u32 err,
@@ -633,28 +631,31 @@ static void ahash_done_bi(struct device *jrdev, u32 *desc, u32 err,
 	struct crypto_ahash *ahash = crypto_ahash_reqtfm(req);
 	struct caam_hash_ctx *ctx = crypto_ahash_ctx(ahash);
 	struct caam_hash_state *state = ahash_request_ctx(req);
+#ifdef DEBUG
 	int digestsize = crypto_ahash_digestsize(ahash);
-	int ecode = 0;
 
-	dev_dbg(jrdev, "%s %d: err 0x%x\n", __func__, __LINE__, err);
+	dev_err(jrdev, "%s %d: err 0x%x\n", __func__, __LINE__, err);
+#endif
 
 	edesc = container_of(desc, struct ahash_edesc, hw_desc[0]);
 	if (err)
-		ecode = caam_jr_strstatus(jrdev, err);
+		caam_jr_strstatus(jrdev, err);
 
 	ahash_unmap_ctx(jrdev, edesc, req, ctx->ctx_len, DMA_BIDIRECTIONAL);
 	switch_buf(state);
 	kfree(edesc);
 
-	print_hex_dump_debug("ctx@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, state->caam_ctx,
-			     ctx->ctx_len, 1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "ctx@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, state->caam_ctx,
+		       ctx->ctx_len, 1);
 	if (req->result)
-		print_hex_dump_debug("result@"__stringify(__LINE__)": ",
-				     DUMP_PREFIX_ADDRESS, 16, 4, req->result,
-				     digestsize, 1);
+		print_hex_dump(KERN_ERR, "result@"__stringify(__LINE__)": ",
+			       DUMP_PREFIX_ADDRESS, 16, 4, req->result,
+			       digestsize, 1);
+#endif
 
-	req->base.complete(&req->base, ecode);
+	req->base.complete(&req->base, err);
 }
 
 static void ahash_done_ctx_src(struct device *jrdev, u32 *desc, u32 err,
@@ -665,24 +666,27 @@ static void ahash_done_ctx_src(struct device *jrdev, u32 *desc, u32 err,
 	struct crypto_ahash *ahash = crypto_ahash_reqtfm(req);
 	int digestsize = crypto_ahash_digestsize(ahash);
 	struct caam_hash_state *state = ahash_request_ctx(req);
+#ifdef DEBUG
 	struct caam_hash_ctx *ctx = crypto_ahash_ctx(ahash);
-	int ecode = 0;
 
-	dev_dbg(jrdev, "%s %d: err 0x%x\n", __func__, __LINE__, err);
+	dev_err(jrdev, "%s %d: err 0x%x\n", __func__, __LINE__, err);
+#endif
 
 	edesc = container_of(desc, struct ahash_edesc, hw_desc[0]);
 	if (err)
-		ecode = caam_jr_strstatus(jrdev, err);
+		caam_jr_strstatus(jrdev, err);
 
 	ahash_unmap_ctx(jrdev, edesc, req, digestsize, DMA_BIDIRECTIONAL);
 	memcpy(req->result, state->caam_ctx, digestsize);
 	kfree(edesc);
 
-	print_hex_dump_debug("ctx@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, state->caam_ctx,
-			     ctx->ctx_len, 1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "ctx@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, state->caam_ctx,
+		       ctx->ctx_len, 1);
+#endif
 
-	req->base.complete(&req->base, ecode);
+	req->base.complete(&req->base, err);
 }
 
 static void ahash_done_ctx_dst(struct device *jrdev, u32 *desc, u32 err,
@@ -693,28 +697,31 @@ static void ahash_done_ctx_dst(struct device *jrdev, u32 *desc, u32 err,
 	struct crypto_ahash *ahash = crypto_ahash_reqtfm(req);
 	struct caam_hash_ctx *ctx = crypto_ahash_ctx(ahash);
 	struct caam_hash_state *state = ahash_request_ctx(req);
+#ifdef DEBUG
 	int digestsize = crypto_ahash_digestsize(ahash);
-	int ecode = 0;
 
-	dev_dbg(jrdev, "%s %d: err 0x%x\n", __func__, __LINE__, err);
+	dev_err(jrdev, "%s %d: err 0x%x\n", __func__, __LINE__, err);
+#endif
 
 	edesc = container_of(desc, struct ahash_edesc, hw_desc[0]);
 	if (err)
-		ecode = caam_jr_strstatus(jrdev, err);
+		caam_jr_strstatus(jrdev, err);
 
 	ahash_unmap_ctx(jrdev, edesc, req, ctx->ctx_len, DMA_FROM_DEVICE);
 	switch_buf(state);
 	kfree(edesc);
 
-	print_hex_dump_debug("ctx@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, state->caam_ctx,
-			     ctx->ctx_len, 1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "ctx@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, state->caam_ctx,
+		       ctx->ctx_len, 1);
 	if (req->result)
-		print_hex_dump_debug("result@"__stringify(__LINE__)": ",
-				     DUMP_PREFIX_ADDRESS, 16, 4, req->result,
-				     digestsize, 1);
+		print_hex_dump(KERN_ERR, "result@"__stringify(__LINE__)": ",
+			       DUMP_PREFIX_ADDRESS, 16, 4, req->result,
+			       digestsize, 1);
+#endif
 
-	req->base.complete(&req->base, ecode);
+	req->base.complete(&req->base, err);
 }
 
 /*
@@ -752,10 +759,9 @@ static int ahash_edesc_add_src(struct caam_hash_ctx *ctx,
 
 	if (nents > 1 || first_sg) {
 		struct sec4_sg_entry *sg = edesc->sec4_sg;
-		unsigned int sgsize = sizeof(*sg) *
-				      pad_sg_nents(first_sg + nents);
+		unsigned int sgsize = sizeof(*sg) * (first_sg + nents);
 
-		sg_to_sec4_sg_last(req->src, to_hash, sg + first_sg, 0);
+		sg_to_sec4_sg_last(req->src, nents, sg + first_sg, 0);
 
 		src_dma = dma_map_single(ctx->jrdev, sg, sgsize, DMA_TO_DEVICE);
 		if (dma_mapping_error(ctx->jrdev, src_dma)) {
@@ -813,10 +819,8 @@ static int ahash_update_ctx(struct ahash_request *req)
 	}
 
 	if (to_hash) {
-		int pad_nents;
-		int src_len = req->nbytes - *next_buflen;
-
-		src_nents = sg_nents_for_len(req->src, src_len);
+		src_nents = sg_nents_for_len(req->src,
+					     req->nbytes - (*next_buflen));
 		if (src_nents < 0) {
 			dev_err(jrdev, "Invalid number of src SG.\n");
 			return src_nents;
@@ -834,14 +838,15 @@ static int ahash_update_ctx(struct ahash_request *req)
 		}
 
 		sec4_sg_src_index = 1 + (*buflen ? 1 : 0);
-		pad_nents = pad_sg_nents(sec4_sg_src_index + mapped_nents);
-		sec4_sg_bytes = pad_nents * sizeof(struct sec4_sg_entry);
+		sec4_sg_bytes = (sec4_sg_src_index + mapped_nents) *
+				 sizeof(struct sec4_sg_entry);
 
 		/*
 		 * allocate space for base edesc and hw desc commands,
 		 * link tables
 		 */
-		edesc = ahash_edesc_alloc(ctx, pad_nents, ctx->sh_desc_update,
+		edesc = ahash_edesc_alloc(ctx, sec4_sg_src_index + mapped_nents,
+					  ctx->sh_desc_update,
 					  ctx->sh_desc_update_dma, flags);
 		if (!edesc) {
 			dma_unmap_sg(jrdev, req->src, src_nents, DMA_TO_DEVICE);
@@ -861,7 +866,7 @@ static int ahash_update_ctx(struct ahash_request *req)
 			goto unmap_ctx;
 
 		if (mapped_nents)
-			sg_to_sec4_sg_last(req->src, src_len,
+			sg_to_sec4_sg_last(req->src, mapped_nents,
 					   edesc->sec4_sg + sec4_sg_src_index,
 					   0);
 		else
@@ -888,9 +893,11 @@ static int ahash_update_ctx(struct ahash_request *req)
 
 		append_seq_out_ptr(desc, state->ctx_dma, ctx->ctx_len, 0);
 
-		print_hex_dump_debug("jobdesc@"__stringify(__LINE__)": ",
-				     DUMP_PREFIX_ADDRESS, 16, 4, desc,
-				     desc_bytes(desc), 1);
+#ifdef DEBUG
+		print_hex_dump(KERN_ERR, "jobdesc@"__stringify(__LINE__)": ",
+			       DUMP_PREFIX_ADDRESS, 16, 4, desc,
+			       desc_bytes(desc), 1);
+#endif
 
 		ret = caam_jr_enqueue(jrdev, desc, ahash_done_bi, req);
 		if (ret)
@@ -903,12 +910,13 @@ static int ahash_update_ctx(struct ahash_request *req)
 		*buflen = *next_buflen;
 		*next_buflen = last_buflen;
 	}
-
-	print_hex_dump_debug("buf@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, buf, *buflen, 1);
-	print_hex_dump_debug("next buf@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, next_buf,
-			     *next_buflen, 1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "buf@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, buf, *buflen, 1);
+	print_hex_dump(KERN_ERR, "next buf@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, next_buf,
+		       *next_buflen, 1);
+#endif
 
 	return ret;
 unmap_ctx:
@@ -927,17 +935,18 @@ static int ahash_final_ctx(struct ahash_request *req)
 		       GFP_KERNEL : GFP_ATOMIC;
 	int buflen = *current_buflen(state);
 	u32 *desc;
-	int sec4_sg_bytes;
+	int sec4_sg_bytes, sec4_sg_src_index;
 	int digestsize = crypto_ahash_digestsize(ahash);
 	struct ahash_edesc *edesc;
 	int ret;
 
-	sec4_sg_bytes = pad_sg_nents(1 + (buflen ? 1 : 0)) *
-			sizeof(struct sec4_sg_entry);
+	sec4_sg_src_index = 1 + (buflen ? 1 : 0);
+	sec4_sg_bytes = sec4_sg_src_index * sizeof(struct sec4_sg_entry);
 
 	/* allocate space for base edesc and hw desc commands, link tables */
-	edesc = ahash_edesc_alloc(ctx, 4, ctx->sh_desc_fin,
-				  ctx->sh_desc_fin_dma, flags);
+	edesc = ahash_edesc_alloc(ctx, sec4_sg_src_index,
+				  ctx->sh_desc_fin, ctx->sh_desc_fin_dma,
+				  flags);
 	if (!edesc)
 		return -ENOMEM;
 
@@ -954,7 +963,7 @@ static int ahash_final_ctx(struct ahash_request *req)
 	if (ret)
 		goto unmap_ctx;
 
-	sg_to_sec4_set_last(edesc->sec4_sg + (buflen ? 1 : 0));
+	sg_to_sec4_set_last(edesc->sec4_sg + sec4_sg_src_index - 1);
 
 	edesc->sec4_sg_dma = dma_map_single(jrdev, edesc->sec4_sg,
 					    sec4_sg_bytes, DMA_TO_DEVICE);
@@ -968,9 +977,10 @@ static int ahash_final_ctx(struct ahash_request *req)
 			  LDST_SGF);
 	append_seq_out_ptr(desc, state->ctx_dma, digestsize, 0);
 
-	print_hex_dump_debug("jobdesc@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc),
-			     1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "jobdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc), 1);
+#endif
 
 	ret = caam_jr_enqueue(jrdev, desc, ahash_done_ctx_src, req);
 	if (ret)
@@ -1048,9 +1058,10 @@ static int ahash_finup_ctx(struct ahash_request *req)
 
 	append_seq_out_ptr(desc, state->ctx_dma, digestsize, 0);
 
-	print_hex_dump_debug("jobdesc@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc),
-			     1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "jobdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc), 1);
+#endif
 
 	ret = caam_jr_enqueue(jrdev, desc, ahash_done_ctx_src, req);
 	if (ret)
@@ -1124,9 +1135,10 @@ static int ahash_digest(struct ahash_request *req)
 		return -ENOMEM;
 	}
 
-	print_hex_dump_debug("jobdesc@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc),
-			     1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "jobdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc), 1);
+#endif
 
 	ret = caam_jr_enqueue(jrdev, desc, ahash_done, req);
 	if (!ret) {
@@ -1178,9 +1190,10 @@ static int ahash_final_no_ctx(struct ahash_request *req)
 	if (ret)
 		goto unmap;
 
-	print_hex_dump_debug("jobdesc@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc),
-			     1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "jobdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc), 1);
+#endif
 
 	ret = caam_jr_enqueue(jrdev, desc, ahash_done, req);
 	if (!ret) {
@@ -1233,10 +1246,8 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 	}
 
 	if (to_hash) {
-		int pad_nents;
-		int src_len = req->nbytes - *next_buflen;
-
-		src_nents = sg_nents_for_len(req->src, src_len);
+		src_nents = sg_nents_for_len(req->src,
+					     req->nbytes - *next_buflen);
 		if (src_nents < 0) {
 			dev_err(jrdev, "Invalid number of src SG.\n");
 			return src_nents;
@@ -1253,14 +1264,14 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 			mapped_nents = 0;
 		}
 
-		pad_nents = pad_sg_nents(1 + mapped_nents);
-		sec4_sg_bytes = pad_nents * sizeof(struct sec4_sg_entry);
+		sec4_sg_bytes = (1 + mapped_nents) *
+				sizeof(struct sec4_sg_entry);
 
 		/*
 		 * allocate space for base edesc and hw desc commands,
 		 * link tables
 		 */
-		edesc = ahash_edesc_alloc(ctx, pad_nents,
+		edesc = ahash_edesc_alloc(ctx, 1 + mapped_nents,
 					  ctx->sh_desc_update_first,
 					  ctx->sh_desc_update_first_dma,
 					  flags);
@@ -1276,7 +1287,8 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 		if (ret)
 			goto unmap_ctx;
 
-		sg_to_sec4_sg_last(req->src, src_len, edesc->sec4_sg + 1, 0);
+		sg_to_sec4_sg_last(req->src, mapped_nents,
+				   edesc->sec4_sg + 1, 0);
 
 		if (*next_buflen) {
 			scatterwalk_map_and_copy(next_buf, req->src,
@@ -1301,9 +1313,11 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 		if (ret)
 			goto unmap_ctx;
 
-		print_hex_dump_debug("jobdesc@"__stringify(__LINE__)": ",
-				     DUMP_PREFIX_ADDRESS, 16, 4, desc,
-				     desc_bytes(desc), 1);
+#ifdef DEBUG
+		print_hex_dump(KERN_ERR, "jobdesc@"__stringify(__LINE__)": ",
+			       DUMP_PREFIX_ADDRESS, 16, 4, desc,
+			       desc_bytes(desc), 1);
+#endif
 
 		ret = caam_jr_enqueue(jrdev, desc, ahash_done_ctx_dst, req);
 		if (ret)
@@ -1319,12 +1333,13 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 		*buflen = *next_buflen;
 		*next_buflen = 0;
 	}
-
-	print_hex_dump_debug("buf@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, buf, *buflen, 1);
-	print_hex_dump_debug("next buf@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, next_buf, *next_buflen,
-			     1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "buf@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, buf, *buflen, 1);
+	print_hex_dump(KERN_ERR, "next buf@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, next_buf,
+		       *next_buflen, 1);
+#endif
 
 	return ret;
  unmap_ctx:
@@ -1399,9 +1414,10 @@ static int ahash_finup_no_ctx(struct ahash_request *req)
 	if (ret)
 		goto unmap;
 
-	print_hex_dump_debug("jobdesc@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc),
-			     1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "jobdesc@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, desc, desc_bytes(desc), 1);
+#endif
 
 	ret = caam_jr_enqueue(jrdev, desc, ahash_done, req);
 	if (!ret) {
@@ -1501,9 +1517,11 @@ static int ahash_update_first(struct ahash_request *req)
 		if (ret)
 			goto unmap_ctx;
 
-		print_hex_dump_debug("jobdesc@"__stringify(__LINE__)": ",
-				     DUMP_PREFIX_ADDRESS, 16, 4, desc,
-				     desc_bytes(desc), 1);
+#ifdef DEBUG
+		print_hex_dump(KERN_ERR, "jobdesc@"__stringify(__LINE__)": ",
+			       DUMP_PREFIX_ADDRESS, 16, 4, desc,
+			       desc_bytes(desc), 1);
+#endif
 
 		ret = caam_jr_enqueue(jrdev, desc, ahash_done_ctx_dst, req);
 		if (ret)
@@ -1521,10 +1539,11 @@ static int ahash_update_first(struct ahash_request *req)
 					 req->nbytes, 0);
 		switch_buf(state);
 	}
-
-	print_hex_dump_debug("next buf@"__stringify(__LINE__)": ",
-			     DUMP_PREFIX_ADDRESS, 16, 4, next_buf, *next_buflen,
-			     1);
+#ifdef DEBUG
+	print_hex_dump(KERN_ERR, "next buf@"__stringify(__LINE__)": ",
+		       DUMP_PREFIX_ADDRESS, 16, 4, next_buf,
+		       *next_buflen, 1);
+#endif
 
 	return ret;
  unmap_ctx:
@@ -1838,38 +1857,28 @@ static int caam_hash_cra_init(struct crypto_tfm *tfm)
 
 	if (is_xcbc_aes(caam_hash->alg_type)) {
 		ctx->dir = DMA_TO_DEVICE;
-		ctx->key_dir = DMA_BIDIRECTIONAL;
 		ctx->adata.algtype = OP_TYPE_CLASS1_ALG | caam_hash->alg_type;
 		ctx->ctx_len = 48;
-	} else if (is_cmac_aes(caam_hash->alg_type)) {
-		ctx->dir = DMA_TO_DEVICE;
-		ctx->key_dir = DMA_NONE;
-		ctx->adata.algtype = OP_TYPE_CLASS1_ALG | caam_hash->alg_type;
-		ctx->ctx_len = 32;
-	} else {
-		if (priv->era >= 6) {
-			ctx->dir = DMA_BIDIRECTIONAL;
-			ctx->key_dir = alg->setkey ? DMA_TO_DEVICE : DMA_NONE;
-		} else {
-			ctx->dir = DMA_TO_DEVICE;
-			ctx->key_dir = DMA_NONE;
-		}
-		ctx->adata.algtype = OP_TYPE_CLASS2_ALG | caam_hash->alg_type;
-		ctx->ctx_len = runninglen[(ctx->adata.algtype &
-					   OP_ALG_ALGSEL_SUBMASK) >>
-					  OP_ALG_ALGSEL_SHIFT];
-	}
 
-	if (ctx->key_dir != DMA_NONE) {
-		ctx->adata.key_dma = dma_map_single_attrs(ctx->jrdev, ctx->key,
-							  ARRAY_SIZE(ctx->key),
-							  ctx->key_dir,
-							  DMA_ATTR_SKIP_CPU_SYNC);
-		if (dma_mapping_error(ctx->jrdev, ctx->adata.key_dma)) {
+		ctx->key_dma = dma_map_single_attrs(ctx->jrdev, ctx->key,
+						    ARRAY_SIZE(ctx->key),
+						    DMA_BIDIRECTIONAL,
+						    DMA_ATTR_SKIP_CPU_SYNC);
+		if (dma_mapping_error(ctx->jrdev, ctx->key_dma)) {
 			dev_err(ctx->jrdev, "unable to map key\n");
 			caam_jr_free(ctx->jrdev);
 			return -ENOMEM;
 		}
+	} else if (is_cmac_aes(caam_hash->alg_type)) {
+		ctx->dir = DMA_TO_DEVICE;
+		ctx->adata.algtype = OP_TYPE_CLASS1_ALG | caam_hash->alg_type;
+		ctx->ctx_len = 32;
+	} else {
+		ctx->dir = priv->era >= 6 ? DMA_BIDIRECTIONAL : DMA_TO_DEVICE;
+		ctx->adata.algtype = OP_TYPE_CLASS2_ALG | caam_hash->alg_type;
+		ctx->ctx_len = runninglen[(ctx->adata.algtype &
+					   OP_ALG_ALGSEL_SUBMASK) >>
+					  OP_ALG_ALGSEL_SHIFT];
 	}
 
 	dma_addr = dma_map_single_attrs(ctx->jrdev, ctx->sh_desc_update,
@@ -1878,10 +1887,10 @@ static int caam_hash_cra_init(struct crypto_tfm *tfm)
 	if (dma_mapping_error(ctx->jrdev, dma_addr)) {
 		dev_err(ctx->jrdev, "unable to map shared descriptors\n");
 
-		if (ctx->key_dir != DMA_NONE)
-			dma_unmap_single_attrs(ctx->jrdev, ctx->adata.key_dma,
+		if (is_xcbc_aes(caam_hash->alg_type))
+			dma_unmap_single_attrs(ctx->jrdev, ctx->key_dma,
 					       ARRAY_SIZE(ctx->key),
-					       ctx->key_dir,
+					       DMA_BIDIRECTIONAL,
 					       DMA_ATTR_SKIP_CPU_SYNC);
 
 		caam_jr_free(ctx->jrdev);
@@ -1914,14 +1923,14 @@ static void caam_hash_cra_exit(struct crypto_tfm *tfm)
 	dma_unmap_single_attrs(ctx->jrdev, ctx->sh_desc_update_dma,
 			       offsetof(struct caam_hash_ctx, key),
 			       ctx->dir, DMA_ATTR_SKIP_CPU_SYNC);
-	if (ctx->key_dir != DMA_NONE)
-		dma_unmap_single_attrs(ctx->jrdev, ctx->adata.key_dma,
-				       ARRAY_SIZE(ctx->key), ctx->key_dir,
+	if (is_xcbc_aes(ctx->adata.algtype))
+		dma_unmap_single_attrs(ctx->jrdev, ctx->key_dma,
+				       ARRAY_SIZE(ctx->key), DMA_BIDIRECTIONAL,
 				       DMA_ATTR_SKIP_CPU_SYNC);
 	caam_jr_free(ctx->jrdev);
 }
 
-void caam_algapi_hash_exit(void)
+static void __exit caam_algapi_hash_exit(void)
 {
 	struct caam_hash_alg *t_alg, *n;
 
@@ -1979,12 +1988,39 @@ caam_hash_alloc(struct caam_hash_template *template,
 	return t_alg;
 }
 
-int caam_algapi_hash_init(struct device *ctrldev)
+static int __init caam_algapi_hash_init(void)
 {
+	struct device_node *dev_node;
+	struct platform_device *pdev;
 	int i = 0, err = 0;
-	struct caam_drv_private *priv = dev_get_drvdata(ctrldev);
+	struct caam_drv_private *priv;
 	unsigned int md_limit = SHA512_DIGEST_SIZE;
 	u32 md_inst, md_vid;
+
+	dev_node = of_find_compatible_node(NULL, NULL, "fsl,sec-v4.0");
+	if (!dev_node) {
+		dev_node = of_find_compatible_node(NULL, NULL, "fsl,sec4.0");
+		if (!dev_node)
+			return -ENODEV;
+	}
+
+	pdev = of_find_device_by_node(dev_node);
+	if (!pdev) {
+		of_node_put(dev_node);
+		return -ENODEV;
+	}
+
+	priv = dev_get_drvdata(&pdev->dev);
+	of_node_put(dev_node);
+
+	/*
+	 * If priv is NULL, it's probably because the caam driver wasn't
+	 * properly initialized (e.g. RNG4 init failed). Thus, bail out here.
+	 */
+	if (!priv) {
+		err = -ENODEV;
+		goto out_put_dev;
+	}
 
 	/*
 	 * Register crypto algorithms the device supports.  First, identify
@@ -2006,8 +2042,10 @@ int caam_algapi_hash_init(struct device *ctrldev)
 	 * Skip registration of any hashing algorithms if MD block
 	 * is not present.
 	 */
-	if (!md_inst)
-		return 0;
+	if (!md_inst) {
+		err = -ENODEV;
+		goto out_put_dev;
+	}
 
 	/* Limit digest size based on LP256 */
 	if (md_vid == CHA_VER_VID_MD_LP256)
@@ -2064,5 +2102,14 @@ int caam_algapi_hash_init(struct device *ctrldev)
 			list_add_tail(&t_alg->entry, &hash_list);
 	}
 
+out_put_dev:
+	put_device(&pdev->dev);
 	return err;
 }
+
+module_init(caam_algapi_hash_init);
+module_exit(caam_algapi_hash_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("FSL CAAM support for ahash functions of crypto API");
+MODULE_AUTHOR("Freescale Semiconductor - NMG");

@@ -230,7 +230,3 @@
 		>;
 	};
 };
-
-&adma_dsp {
-	status = "okay";
-};

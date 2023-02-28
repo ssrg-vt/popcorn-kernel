@@ -593,6 +593,7 @@ int search_by_key(struct super_block *sb, const struct cpu_key *key,
 	struct buffer_head *bh;
 	struct path_element *last_element;
 	int node_level, retval;
+	int right_neighbor_of_leaf_node;
 	int fs_gen;
 	struct buffer_head *reada_bh[SEARCH_BY_KEY_READA];
 	b_blocknr_t reada_blocks[SEARCH_BY_KEY_READA];
@@ -612,6 +613,8 @@ int search_by_key(struct super_block *sb, const struct cpu_key *key,
 	 */
 
 	pathrelse(search_path);
+
+	right_neighbor_of_leaf_node = 0;
 
 	/*
 	 * With each iteration of this loop we search through the items in the
@@ -698,6 +701,7 @@ io_error:
 			 */
 			block_number = SB_ROOT_BLOCK(sb);
 			expected_level = -1;
+			right_neighbor_of_leaf_node = 0;
 
 			/* repeat search from the root */
 			continue;

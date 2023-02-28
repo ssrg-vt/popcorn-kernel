@@ -81,13 +81,9 @@ EXPORT_SYMBOL(__delay);
 void udelay(unsigned long usecs)
 {
 	u64 ucycles = (u64)usecs * lpj_fine * UDELAY_MULT;
-	u64 n;
 
 	if (unlikely(usecs > MAX_UDELAY_US)) {
-		n = (u64)usecs * riscv_timebase;
-		do_div(n, 1000000);
-
-		__delay(n);
+		__delay((u64)usecs * riscv_timebase / 1000000ULL);
 		return;
 	}
 

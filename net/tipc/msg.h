@@ -102,15 +102,13 @@ struct plist;
 #define TIPC_MEDIA_INFO_OFFSET	5
 
 struct tipc_skb_cb {
-	struct sk_buff *tail;
-	unsigned long nxt_retr;
-	unsigned long retr_stamp;
 	u32 bytes_read;
 	u32 orig_member;
+	struct sk_buff *tail;
+	unsigned long nxt_retr;
+	bool validated;
 	u16 chain_imp;
 	u16 ackers;
-	u16 retr_cnt;
-	bool validated;
 };
 
 #define TIPC_SKB_CB(__skb) ((struct tipc_skb_cb *)&((__skb)->cb[0]))
@@ -310,7 +308,7 @@ static inline unchar *msg_data(struct tipc_msg *m)
 	return ((unchar *)m) + msg_hdr_sz(m);
 }
 
-static inline struct tipc_msg *msg_inner_hdr(struct tipc_msg *m)
+static inline struct tipc_msg *msg_get_wrapped(struct tipc_msg *m)
 {
 	return (struct tipc_msg *)msg_data(m);
 }
@@ -488,7 +486,7 @@ static inline void msg_set_prevnode(struct tipc_msg *m, u32 a)
 static inline u32 msg_origport(struct tipc_msg *m)
 {
 	if (msg_user(m) == MSG_FRAGMENTER)
-		m = msg_inner_hdr(m);
+		m = msg_get_wrapped(m);
 	return msg_word(m, 4);
 }
 
@@ -723,25 +721,11 @@ static inline void msg_set_last_bcast(struct tipc_msg *m, u32 n)
 	msg_set_bits(m, 4, 16, 0xffff, n);
 }
 
-static inline u32 msg_nof_fragms(struct tipc_msg *m)
-{
-	return msg_bits(m, 4, 0, 0xffff);
-}
-
-static inline void msg_set_nof_fragms(struct tipc_msg *m, u32 n)
-{
-	msg_set_bits(m, 4, 0, 0xffff, n);
-}
-
-static inline u32 msg_fragm_no(struct tipc_msg *m)
-{
-	return msg_bits(m, 4, 16, 0xffff);
-}
-
 static inline void msg_set_fragm_no(struct tipc_msg *m, u32 n)
 {
 	msg_set_bits(m, 4, 16, 0xffff, n);
 }
+
 
 static inline u16 msg_next_sent(struct tipc_msg *m)
 {
@@ -889,16 +873,6 @@ static inline u16 msg_msgcnt(struct tipc_msg *m)
 }
 
 static inline void msg_set_msgcnt(struct tipc_msg *m, u16 n)
-{
-	msg_set_bits(m, 9, 16, 0xffff, n);
-}
-
-static inline u16 msg_syncpt(struct tipc_msg *m)
-{
-	return msg_bits(m, 9, 16, 0xffff);
-}
-
-static inline void msg_set_syncpt(struct tipc_msg *m, u16 n)
 {
 	msg_set_bits(m, 9, 16, 0xffff, n);
 }
@@ -1061,8 +1035,6 @@ bool tipc_msg_bundle(struct sk_buff *skb, struct tipc_msg *msg, u32 mtu);
 bool tipc_msg_make_bundle(struct sk_buff **skb, struct tipc_msg *msg,
 			  u32 mtu, u32 dnode);
 bool tipc_msg_extract(struct sk_buff *skb, struct sk_buff **iskb, int *pos);
-int tipc_msg_fragment(struct sk_buff *skb, const struct tipc_msg *hdr,
-		      int pktmax, struct sk_buff_head *frags);
 int tipc_msg_build(struct tipc_msg *mhdr, struct msghdr *m,
 		   int offset, int dsz, int mtu, struct sk_buff_head *list);
 bool tipc_msg_lookup_dest(struct net *net, struct sk_buff *skb, int *err);

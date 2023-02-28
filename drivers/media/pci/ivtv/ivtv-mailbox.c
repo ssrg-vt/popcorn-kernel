@@ -10,6 +10,8 @@
 #include "ivtv-driver.h"
 #include "ivtv-mailbox.h"
 
+#include <stdarg.h>
+
 /* Firmware mailbox flags*/
 #define IVTV_MBOX_FIRMWARE_DONE 0x00000004
 #define IVTV_MBOX_DRIVER_DONE   0x00000002

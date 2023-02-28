@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
-
-#include <linux/cpuhotplug.h>
+#include <linux/threads.h>
 #include <linux/cpumask.h>
-#include <linux/slab.h>
-#include <linux/mm.h>
+#include <linux/string.h>
+#include <linux/kernel.h>
+#include <linux/ctype.h>
+#include <linux/dmar.h>
+#include <linux/irq.h>
+#include <linux/cpu.h>
 
-#include <asm/apic.h>
-
-#include "local.h"
+#include <asm/smp.h>
+#include "x2apic.h"
 
 struct cluster_mask {
 	unsigned int	clusterid;
@@ -48,7 +50,7 @@ __x2apic_send_IPI_mask(const struct cpumask *mask, int vector, int apic_dest)
 	cpumask_copy(tmpmsk, mask);
 	/* If IPI should not be sent to self, clear current CPU */
 	if (apic_dest != APIC_DEST_ALLINC)
-		__cpumask_clear_cpu(smp_processor_id(), tmpmsk);
+		cpumask_clear_cpu(smp_processor_id(), tmpmsk);
 
 	/* Collapse cpus in a cluster so a single IPI per cluster is sent */
 	for_each_cpu(cpu, tmpmsk) {
@@ -82,12 +84,12 @@ x2apic_send_IPI_mask_allbutself(const struct cpumask *mask, int vector)
 
 static void x2apic_send_IPI_allbutself(int vector)
 {
-	__x2apic_send_IPI_shorthand(vector, APIC_DEST_ALLBUT);
+	__x2apic_send_IPI_mask(cpu_online_mask, vector, APIC_DEST_ALLBUT);
 }
 
 static void x2apic_send_IPI_all(int vector)
 {
-	__x2apic_send_IPI_shorthand(vector, APIC_DEST_ALLINC);
+	__x2apic_send_IPI_mask(cpu_online_mask, vector, APIC_DEST_ALLINC);
 }
 
 static u32 x2apic_calc_apicid(unsigned int cpu)
@@ -156,8 +158,7 @@ static int x2apic_dead_cpu(unsigned int dead_cpu)
 {
 	struct cluster_mask *cmsk = per_cpu(cluster_masks, dead_cpu);
 
-	if (cmsk)
-		cpumask_clear_cpu(dead_cpu, &cmsk->mask);
+	cpumask_clear_cpu(dead_cpu, &cmsk->mask);
 	free_cpumask_var(per_cpu(ipi_mask, dead_cpu));
 	return 0;
 }

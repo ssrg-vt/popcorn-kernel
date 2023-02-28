@@ -24,10 +24,6 @@ menuconfig DRM
 	  details.  You should also select and configure AGP
 	  (/dev/agpgart) support if it is available for your platform.
 
-config DRM_MIPI_DBI
-	tristate
-	depends on DRM
-
 config DRM_MIPI_DSI
 	bool
 	depends on DRM
@@ -145,7 +141,7 @@ config DRM_LOAD_EDID_FIRMWARE
 	  monitor are unable to provide appropriate EDID data. Since this
 	  feature is provided as a workaround for broken hardware, the
 	  default case is N. Details and instructions how to build your own
-	  EDID data are given in Documentation/driver-api/edid.rst.
+	  EDID data are given in Documentation/EDID/HOWTO.txt.
 
 config DRM_DP_CEC
 	bool "Enable DisplayPort CEC-Tunneling-over-AUX HDMI support"
@@ -164,13 +160,6 @@ config DRM_TTM
 	  GPU memory management subsystem for devices with multiple
 	  GPU memory types. Will be enabled automatically if a device driver
 	  uses it.
-
-config DRM_VRAM_HELPER
-	tristate
-	depends on DRM
-	select DRM_TTM
-	help
-	  Helpers for VRAM memory management
 
 config DRM_GEM_CMA_HELPER
 	bool
@@ -318,11 +307,7 @@ source "drivers/gpu/drm/bridge/Kconfig"
 
 source "drivers/gpu/drm/sti/Kconfig"
 
-source "drivers/gpu/drm/zocl/Kconfig"
-
 source "drivers/gpu/drm/imx/Kconfig"
-
-source "drivers/gpu/drm/ingenic/Kconfig"
 
 source "drivers/gpu/drm/v3d/Kconfig"
 
@@ -342,11 +327,9 @@ source "drivers/gpu/drm/mxsfb/Kconfig"
 
 source "drivers/gpu/drm/meson/Kconfig"
 
-source "drivers/gpu/drm/tiny/Kconfig"
+source "drivers/gpu/drm/tinydrm/Kconfig"
 
 source "drivers/gpu/drm/pl111/Kconfig"
-
-source "drivers/gpu/drm/xlnx/Kconfig"
 
 source "drivers/gpu/drm/tve200/Kconfig"
 
@@ -359,8 +342,6 @@ source "drivers/gpu/drm/lima/Kconfig"
 source "drivers/gpu/drm/panfrost/Kconfig"
 
 source "drivers/gpu/drm/aspeed/Kconfig"
-
-source "drivers/gpu/drm/mcde/Kconfig"
 
 # Keep legacy drivers last
 
@@ -402,7 +383,7 @@ config DRM_R128
 config DRM_I810
 	tristate "Intel I810"
 	# !PREEMPT because of missing ioctl locking
-	depends on DRM && AGP && AGP_INTEL && (!PREEMPTION || BROKEN)
+	depends on DRM && AGP && AGP_INTEL && (!PREEMPT || BROKEN)
 	help
 	  Choose this option if you have an Intel I810 graphics card.  If M is
 	  selected, the module will be called i810.  AGP support is required

@@ -65,6 +65,9 @@ subsys_initcall(sysenter_setup);
 /* Register vsyscall32 into the ABI table */
 #include <linux/sysctl.h>
 
+static const int zero;
+static const int one = 1;
+
 static struct ctl_table abi_table2[] = {
 	{
 		.procname	= "vsyscall32",
@@ -72,8 +75,8 @@ static struct ctl_table abi_table2[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= SYSCTL_ZERO,
-		.extra2		= SYSCTL_ONE,
+		.extra1		= (int *)&zero,
+		.extra2		= (int *)&one,
 	},
 	{}
 };

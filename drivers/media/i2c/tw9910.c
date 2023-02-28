@@ -934,7 +934,8 @@ static int tw9910_probe(struct i2c_client *client,
 {
 	struct tw9910_priv		*priv;
 	struct tw9910_video_info	*info;
-	struct i2c_adapter		*adapter = client->adapter;
+	struct i2c_adapter		*adapter =
+		to_i2c_adapter(client->dev.parent);
 	int ret;
 
 	if (!client->dev.platform_data) {

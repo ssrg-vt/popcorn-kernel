@@ -25,6 +25,9 @@ struct ocfs2_blockcheck_stats {
 	 * ocfs2_blockcheck_stats_debugfs_install()
 	 */
 	struct dentry *b_debug_dir;	/* Parent of the debugfs  files */
+	struct dentry *b_debug_check;	/* Exposes b_check_count */
+	struct dentry *b_debug_failure;	/* Exposes b_failure_count */
+	struct dentry *b_debug_recover;	/* Exposes b_recover_count */
 };
 
 
@@ -53,8 +56,8 @@ int ocfs2_block_check_validate_bhs(struct buffer_head **bhs, int nr,
 				   struct ocfs2_blockcheck_stats *stats);
 
 /* Debug Initialization */
-void ocfs2_blockcheck_stats_debugfs_install(struct ocfs2_blockcheck_stats *stats,
-					    struct dentry *parent);
+int ocfs2_blockcheck_stats_debugfs_install(struct ocfs2_blockcheck_stats *stats,
+					   struct dentry *parent);
 void ocfs2_blockcheck_stats_debugfs_remove(struct ocfs2_blockcheck_stats *stats);
 
 /*

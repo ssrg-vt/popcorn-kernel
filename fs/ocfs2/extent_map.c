@@ -590,7 +590,8 @@ int ocfs2_xattr_get_clusters(struct inode *inode, u32 v_cluster,
 			*extent_flags = rec->e_flags;
 	}
 out:
-	brelse(eb_bh);
+	if (eb_bh)
+		brelse(eb_bh);
 	return ret;
 }
 

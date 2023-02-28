@@ -246,7 +246,6 @@ typedef struct amdgim_vf2pf_info_v2 amdgim_vf2pf_info ;
 struct amdgpu_virt {
 	uint32_t			caps;
 	struct amdgpu_bo		*csa_obj;
-	void				*csa_cpu_addr;
 	bool chained_ib_support;
 	uint32_t			reg_val_offs;
 	struct amdgpu_irq_src		ack_irq;
@@ -259,7 +258,6 @@ struct amdgpu_virt {
 	uint32_t gim_feature;
 	/* protect DPM events to GIM */
 	struct mutex                    dpm_mutex;
-	uint32_t reg_access_mode;
 };
 
 #define amdgpu_sriov_enabled(adev) \
@@ -308,4 +306,5 @@ int amdgpu_virt_fw_reserve_get_checksum(void *obj, unsigned long obj_size,
 void amdgpu_virt_init_data_exchange(struct amdgpu_device *adev);
 uint32_t amdgpu_virt_get_sclk(struct amdgpu_device *adev, bool lowest);
 uint32_t amdgpu_virt_get_mclk(struct amdgpu_device *adev, bool lowest);
+
 #endif

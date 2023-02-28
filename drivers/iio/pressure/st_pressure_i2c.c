@@ -78,12 +78,17 @@ static const struct i2c_device_id st_press_id_table[] = {
 MODULE_DEVICE_TABLE(i2c, st_press_id_table);
 
 static int st_press_i2c_probe(struct i2c_client *client,
-			      const struct i2c_device_id *id)
+						const struct i2c_device_id *id)
 {
-	const struct st_sensor_settings *settings;
-	struct st_sensor_data *press_data;
 	struct iio_dev *indio_dev;
+	struct st_sensor_data *press_data;
 	int ret;
+
+	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*press_data));
+	if (!indio_dev)
+		return -ENOMEM;
+
+	press_data = iio_priv(indio_dev);
 
 	if (client->dev.of_node) {
 		st_sensors_of_name_probe(&client->dev, st_press_of_match,
@@ -94,27 +99,11 @@ static int st_press_i2c_probe(struct i2c_client *client,
 			return -ENODEV;
 
 		strlcpy(client->name, st_press_id_table[ret].name,
-			sizeof(client->name));
+				sizeof(client->name));
 	} else if (!id)
 		return -ENODEV;
 
-	settings = st_press_get_settings(client->name);
-	if (!settings) {
-		dev_err(&client->dev, "device name %s not recognized.\n",
-			client->name);
-		return -ENODEV;
-	}
-
-	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*press_data));
-	if (!indio_dev)
-		return -ENOMEM;
-
-	press_data = iio_priv(indio_dev);
-	press_data->sensor_settings = (struct st_sensor_settings *)settings;
-
-	ret = st_sensors_i2c_configure(indio_dev, client);
-	if (ret < 0)
-		return ret;
+	st_sensors_i2c_configure(indio_dev, client, press_data);
 
 	ret = st_press_common_probe(indio_dev);
 	if (ret < 0)

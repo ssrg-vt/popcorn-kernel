@@ -22,6 +22,7 @@
 
 #include "tscs454.h"
 
+static const unsigned int PLL_48K_RATE = (48000 * 256);
 static const unsigned int PLL_44_1K_RATE = (44100 * 256);
 
 #define COEFF_SIZE 3

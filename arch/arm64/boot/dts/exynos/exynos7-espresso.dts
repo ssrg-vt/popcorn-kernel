@@ -59,11 +59,6 @@
 	clock-frequency = <24000000>;
 };
 
-&gpu {
-	mali-supply = <&buck6_reg>;
-	status = "okay";
-};
-
 &serial_2 {
 	status = "okay";
 };

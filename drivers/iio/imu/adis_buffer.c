@@ -35,11 +35,8 @@ static int adis_update_scan_mode_burst(struct iio_dev *indio_dev,
 		return -ENOMEM;
 
 	adis->buffer = kzalloc(burst_length + sizeof(u16), GFP_KERNEL);
-	if (!adis->buffer) {
-		kfree(adis->xfer);
-		adis->xfer = NULL;
+	if (!adis->buffer)
 		return -ENOMEM;
-	}
 
 	tx = adis->buffer + burst_length;
 	tx[0] = ADIS_READ_REG(adis->burst->reg_cmd);
@@ -81,11 +78,8 @@ int adis_update_scan_mode(struct iio_dev *indio_dev,
 		return -ENOMEM;
 
 	adis->buffer = kcalloc(indio_dev->scan_bytes, 2, GFP_KERNEL);
-	if (!adis->buffer) {
-		kfree(adis->xfer);
-		adis->xfer = NULL;
+	if (!adis->buffer)
 		return -ENOMEM;
-	}
 
 	rx = adis->buffer;
 	tx = rx + scan_count;

@@ -12,7 +12,7 @@ Linux Sound Subsystem Documentation
    hd-audio/index
    cards/index
 
-.. only::  subproject and html
+.. only::  subproject
 
    Indices
    =======

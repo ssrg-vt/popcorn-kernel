@@ -124,7 +124,7 @@ void fpu_fpe(struct pt_regs *regs)
 			code = FPE_FLTRES;
 	}
 
-	force_sig_fault(sig, code, (void __user *)regs->pc);
+	force_sig_fault(sig, code, (void __user *)regs->pc, current);
 }
 
 #define FMFVR_FPU_REGS(vrx, vry)	\

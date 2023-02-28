@@ -9,6 +9,9 @@
 /* For the CLR_() macros */
 #include <pthread.h>
 
+#include "../perf.h"
+#include "../builtin.h"
+#include "../util/util.h"
 #include <subcmd/parse-options.h>
 #include "../util/cloexec.h"
 
@@ -32,7 +35,6 @@
 #include <linux/kernel.h>
 #include <linux/time64.h>
 #include <linux/numa.h>
-#include <linux/zalloc.h>
 
 #include <numa.h>
 #include <numaif.h>

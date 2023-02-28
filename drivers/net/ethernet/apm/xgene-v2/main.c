@@ -54,8 +54,10 @@ static int xge_get_resources(struct xge_pdata *pdata)
 	}
 
 	ret = platform_get_irq(pdev, 0);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(dev, "Unable to get irq\n");
 		return ret;
+	}
 	pdata->resources.irq = ret;
 
 	return 0;

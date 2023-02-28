@@ -42,13 +42,6 @@
 /* size of tplg abi in byte */
 #define SOF_TPLG_ABI_SIZE 3
 
-struct sof_widget_data {
-	int ctrl_type;
-	int ipc_cmd;
-	struct sof_abi_hdr *pdata;
-	struct snd_sof_control *control;
-};
-
 /* send pcm params ipc */
 static int ipc_pcm_params(struct snd_sof_widget *swidget, int dir)
 {
@@ -346,9 +339,6 @@ static const struct sof_dai_types sof_dais[] = {
 	{"SSP", SOF_DAI_INTEL_SSP},
 	{"HDA", SOF_DAI_INTEL_HDA},
 	{"DMIC", SOF_DAI_INTEL_DMIC},
-	{"ALH", SOF_DAI_INTEL_ALH},
-	{"SAI", SOF_DAI_IMX_SAI},
-	{"ESAI", SOF_DAI_IMX_ESAI},
 };
 
 static enum sof_ipc_dai_type find_dai(const char *name)
@@ -404,8 +394,6 @@ static const struct sof_process_types sof_process[] = {
 	{"KEYWORD_DETECT", SOF_PROCESS_KEYWORD_DETECT, SOF_COMP_KEYWORD_DETECT},
 	{"KPB", SOF_PROCESS_KPB, SOF_COMP_KPB},
 	{"CHAN_SELECTOR", SOF_PROCESS_CHAN_SELECTOR, SOF_COMP_SELECTOR},
-	{"MUX", SOF_PROCESS_MUX, SOF_COMP_MUX},
-	{"DEMUX", SOF_PROCESS_DEMUX, SOF_COMP_DEMUX},
 };
 
 static enum sof_ipc_process_type find_process(const char *name)
@@ -454,15 +442,14 @@ static int sof_control_load_volume(struct snd_soc_component *scomp,
 		return -EINVAL;
 
 	/* init the volume get/put data */
-	scontrol->size = struct_size(scontrol->control_data, chanv,
-				     le32_to_cpu(mc->num_channels));
+	scontrol->size = sizeof(struct sof_ipc_ctrl_data) +
+			 sizeof(struct sof_ipc_ctrl_value_chan) *
+			 le32_to_cpu(mc->num_channels);
 	scontrol->control_data = kzalloc(scontrol->size, GFP_KERNEL);
 	if (!scontrol->control_data)
 		return -ENOMEM;
 
 	scontrol->comp_id = sdev->next_comp_id;
-	scontrol->min_volume_step = le32_to_cpu(mc->min);
-	scontrol->max_volume_step = le32_to_cpu(mc->max);
 	scontrol->num_channels = le32_to_cpu(mc->num_channels);
 
 	/* set cmd for mixer control */
@@ -514,8 +501,9 @@ static int sof_control_load_enum(struct snd_soc_component *scomp,
 		return -EINVAL;
 
 	/* init the enum get/put data */
-	scontrol->size = struct_size(scontrol->control_data, chanv,
-				     le32_to_cpu(ec->num_channels));
+	scontrol->size = sizeof(struct sof_ipc_ctrl_data) +
+			 sizeof(struct sof_ipc_ctrl_value_chan) *
+			 le32_to_cpu(ec->num_channels);
 	scontrol->control_data = kzalloc(scontrol->size, GFP_KERNEL);
 	if (!scontrol->control_data)
 		return -ENOMEM;
@@ -543,16 +531,15 @@ static int sof_control_load_bytes(struct snd_soc_component *scomp,
 	struct soc_bytes_ext *sbe = (struct soc_bytes_ext *)kc->private_value;
 	int max_size = sbe->max;
 
-	/* init the get/put bytes data */
-	scontrol->size = sizeof(struct sof_ipc_ctrl_data) +
-		le32_to_cpu(control->priv.size);
-
-	if (scontrol->size > max_size) {
+	if (le32_to_cpu(control->priv.size) > max_size) {
 		dev_err(sdev->dev, "err: bytes data size %d exceeds max %d.\n",
-			scontrol->size, max_size);
+			control->priv.size, max_size);
 		return -EINVAL;
 	}
 
+	/* init the get/put bytes data */
+	scontrol->size = sizeof(struct sof_ipc_ctrl_data) +
+		le32_to_cpu(control->priv.size);
 	scontrol->control_data = kzalloc(max_size, GFP_KERNEL);
 	cdata = scontrol->control_data;
 	if (!scontrol->control_data)
@@ -759,9 +746,6 @@ static const struct sof_topology_token ssp_tokens[] = {
 		get_token_u16,
 		offsetof(struct sof_ipc_dai_ssp_params,
 			 tdm_per_slot_padding_flag), 0},
-	{SOF_TKN_INTEL_SSP_BCLK_DELAY, SND_SOC_TPLG_TUPLE_TYPE_WORD,
-		get_token_u32,
-		offsetof(struct sof_ipc_dai_ssp_params, bclk_delay), 0},
 
 };
 
@@ -793,10 +777,6 @@ static const struct sof_topology_token dmic_tokens[] = {
 	{SOF_TKN_INTEL_DMIC_FIFO_WORD_LENGTH,
 		SND_SOC_TPLG_TUPLE_TYPE_SHORT, get_token_u16,
 		offsetof(struct sof_ipc_dai_dmic_params, fifo_bits), 0},
-	{SOF_TKN_INTEL_DMIC_UNMUTE_RAMP_TIME_MS,
-		SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
-		offsetof(struct sof_ipc_dai_dmic_params, unmute_ramp_time), 0},
-
 };
 
 /*
@@ -921,9 +901,7 @@ static void sof_parse_word_tokens(struct snd_soc_component *scomp,
 		for (j = 0; j < count; j++) {
 			/* match token type */
 			if (!(tokens[j].type == SND_SOC_TPLG_TUPLE_TYPE_WORD ||
-			      tokens[j].type == SND_SOC_TPLG_TUPLE_TYPE_SHORT ||
-			      tokens[j].type == SND_SOC_TPLG_TUPLE_TYPE_BYTE ||
-			      tokens[j].type == SND_SOC_TPLG_TUPLE_TYPE_BOOL))
+			      tokens[j].type == SND_SOC_TPLG_TUPLE_TYPE_SHORT))
 				continue;
 
 			/* match token id */
@@ -1572,9 +1550,6 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_soc_tplg_private *private = &tw->priv;
 	struct sof_ipc_comp_volume *volume;
-	struct snd_sof_control *scontrol;
-	int min_step;
-	int max_step;
 	int ret;
 
 	volume = kzalloc(sizeof(*volume), GFP_KERNEL);
@@ -1616,17 +1591,6 @@ static int sof_widget_load_pga(struct snd_soc_component *scomp, int index,
 	sof_dbg_comp_config(scomp, &volume->config);
 
 	swidget->private = volume;
-
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
-		if (scontrol->comp_id == swidget->comp_id) {
-			min_step = scontrol->min_volume_step;
-			max_step = scontrol->max_volume_step;
-			volume->min_value = scontrol->volume_table[min_step];
-			volume->max_value = scontrol->volume_table[max_step];
-			volume->channels = scontrol->num_channels;
-			break;
-		}
-	}
 
 	ret = sof_ipc_tx_message(sdev->ipc, volume->comp.hdr.cmd, volume,
 				 sizeof(*volume), r, sizeof(*r));
@@ -1755,34 +1719,51 @@ err:
 	return ret;
 }
 
-static int sof_get_control_data(struct snd_sof_dev *sdev,
-				struct snd_soc_dapm_widget *widget,
-				struct sof_widget_data *wdata,
-				size_t *size)
+static int sof_process_load(struct snd_soc_component *scomp, int index,
+			    struct snd_sof_widget *swidget,
+			    struct snd_soc_tplg_dapm_widget *tw,
+			    struct sof_ipc_comp_reply *r,
+			    int type)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_soc_tplg_private *private = &tw->priv;
+	struct snd_soc_dapm_widget *widget = swidget->widget;
 	const struct snd_kcontrol_new *kc;
-	struct soc_mixer_control *sm;
 	struct soc_bytes_ext *sbe;
+	struct soc_mixer_control *sm;
 	struct soc_enum *se;
-	int i;
+	struct snd_sof_control *scontrol = NULL;
+	struct sof_abi_hdr *pdata = NULL;
+	struct sof_ipc_comp_process *process;
+	size_t ipc_size, ipc_data_size = 0;
+	int ret, i, offset = 0;
 
-	*size = 0;
+	if (type == SOF_COMP_NONE) {
+		dev_err(sdev->dev, "error: invalid process comp type %d\n",
+			type);
+		return -EINVAL;
+	}
 
+	/*
+	 * get possible component controls - get size of all pdata,
+	 * then memcpy with headers
+	 */
 	for (i = 0; i < widget->num_kcontrols; i++) {
+
 		kc = &widget->kcontrol_news[i];
 
 		switch (widget->dobj.widget.kcontrol_type) {
 		case SND_SOC_TPLG_TYPE_MIXER:
 			sm = (struct soc_mixer_control *)kc->private_value;
-			wdata[i].control = sm->dobj.private;
+			scontrol = sm->dobj.private;
 			break;
 		case SND_SOC_TPLG_TYPE_BYTES:
 			sbe = (struct soc_bytes_ext *)kc->private_value;
-			wdata[i].control = sbe->dobj.private;
+			scontrol = sbe->dobj.private;
 			break;
 		case SND_SOC_TPLG_TYPE_ENUM:
 			se = (struct soc_enum *)kc->private_value;
-			wdata[i].control = se->dobj.private;
+			scontrol = se->dobj.private;
 			break;
 		default:
 			dev_err(sdev->dev, "error: unknown kcontrol type %d in widget %s\n",
@@ -1791,97 +1772,31 @@ static int sof_get_control_data(struct snd_sof_dev *sdev,
 			return -EINVAL;
 		}
 
-		if (!wdata[i].control) {
+		if (!scontrol) {
 			dev_err(sdev->dev, "error: no scontrol for widget %s\n",
 				widget->name);
 			return -EINVAL;
 		}
 
-		wdata[i].pdata = wdata[i].control->control_data->data;
-		if (!wdata[i].pdata)
-			return -EINVAL;
+		/* don't include if no private data */
+		pdata = scontrol->control_data->data;
+		if (!pdata)
+			continue;
 
 		/* make sure data is valid - data can be updated at runtime */
-		if (wdata[i].pdata->magic != SOF_ABI_MAGIC)
-			return -EINVAL;
+		if (pdata->magic != SOF_ABI_MAGIC)
+			continue;
 
-		*size += wdata[i].pdata->size;
-
-		/* get data type */
-		switch (wdata[i].control->cmd) {
-		case SOF_CTRL_CMD_VOLUME:
-		case SOF_CTRL_CMD_ENUM:
-		case SOF_CTRL_CMD_SWITCH:
-			wdata[i].ipc_cmd = SOF_IPC_COMP_SET_VALUE;
-			wdata[i].ctrl_type = SOF_CTRL_TYPE_VALUE_CHAN_SET;
-			break;
-		case SOF_CTRL_CMD_BINARY:
-			wdata[i].ipc_cmd = SOF_IPC_COMP_SET_DATA;
-			wdata[i].ctrl_type = SOF_CTRL_TYPE_DATA_SET;
-			break;
-		default:
-			break;
-		}
-	}
-
-	return 0;
-}
-
-static int sof_process_load(struct snd_soc_component *scomp, int index,
-			    struct snd_sof_widget *swidget,
-			    struct snd_soc_tplg_dapm_widget *tw,
-			    struct sof_ipc_comp_reply *r,
-			    int type)
-{
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct snd_soc_dapm_widget *widget = swidget->widget;
-	struct snd_soc_tplg_private *private = &tw->priv;
-	struct sof_ipc_comp_process *process = NULL;
-	struct sof_widget_data *wdata = NULL;
-	size_t ipc_data_size = 0;
-	size_t ipc_size;
-	int offset = 0;
-	int ret = 0;
-	int i;
-
-	if (type == SOF_COMP_NONE) {
-		dev_err(sdev->dev, "error: invalid process comp type %d\n",
-			type);
-		return -EINVAL;
-	}
-
-	/* allocate struct for widget control data sizes and types */
-	if (widget->num_kcontrols) {
-		wdata = kcalloc(widget->num_kcontrols,
-				sizeof(*wdata),
-				GFP_KERNEL);
-
-		if (!wdata)
-			return -ENOMEM;
-
-		/* get possible component controls and get size of all pdata */
-		ret = sof_get_control_data(sdev, widget, wdata,
-					   &ipc_data_size);
-
-		if (ret < 0)
-			goto out;
+		ipc_data_size += pdata->size;
 	}
 
 	ipc_size = sizeof(struct sof_ipc_comp_process) +
 		le32_to_cpu(private->size) +
 		ipc_data_size;
 
-	/* we are exceeding max ipc size, config needs to be sent separately */
-	if (ipc_size > SOF_IPC_MSG_MAX_SIZE) {
-		ipc_size -= ipc_data_size;
-		ipc_data_size = 0;
-	}
-
 	process = kzalloc(ipc_size, GFP_KERNEL);
-	if (!process) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!process)
+		return -ENOMEM;
 
 	/* configure iir IPC message */
 	process->comp.hdr.size = ipc_size;
@@ -1907,13 +1822,40 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 	 * get possible component controls - get size of all pdata,
 	 * then memcpy with headers
 	 */
-	if (ipc_data_size) {
-		for (i = 0; i < widget->num_kcontrols; i++) {
-			memcpy(&process->data + offset,
-			       wdata[i].pdata->data,
-			       wdata[i].pdata->size);
-			offset += wdata[i].pdata->size;
+	for (i = 0; i < widget->num_kcontrols; i++) {
+		kc = &widget->kcontrol_news[i];
+
+		switch (widget->dobj.widget.kcontrol_type) {
+		case SND_SOC_TPLG_TYPE_MIXER:
+			sm = (struct soc_mixer_control *)kc->private_value;
+			scontrol = sm->dobj.private;
+			break;
+		case SND_SOC_TPLG_TYPE_BYTES:
+			sbe = (struct soc_bytes_ext *)kc->private_value;
+			scontrol = sbe->dobj.private;
+			break;
+		case SND_SOC_TPLG_TYPE_ENUM:
+			se = (struct soc_enum *)kc->private_value;
+			scontrol = se->dobj.private;
+			break;
+		default:
+			dev_err(sdev->dev, "error: unknown kcontrol type %d in widget %s\n",
+				widget->dobj.widget.kcontrol_type,
+				widget->name);
+			return -EINVAL;
 		}
+
+		/* don't include if no private data */
+		pdata = scontrol->control_data->data;
+		if (!pdata)
+			continue;
+
+		/* make sure data is valid - data can be updated at runtime */
+		if (pdata->magic != SOF_ABI_MAGIC)
+			continue;
+
+		memcpy(&process->data + offset, pdata->data, pdata->size);
+		offset += pdata->size;
 	}
 
 	process->size = ipc_data_size;
@@ -1921,35 +1863,10 @@ static int sof_process_load(struct snd_soc_component *scomp, int index,
 
 	ret = sof_ipc_tx_message(sdev->ipc, process->comp.hdr.cmd, process,
 				 ipc_size, r, sizeof(*r));
-
-	if (ret < 0) {
-		dev_err(sdev->dev, "error: create process failed\n");
-		goto err;
-	}
-
-	/* we sent the data in single message so return */
-	if (ipc_data_size)
-		goto out;
-
-	/* send control data with large message supported method */
-	for (i = 0; i < widget->num_kcontrols; i++) {
-		wdata[i].control->readback_offset = 0;
-		ret = snd_sof_ipc_set_get_comp_data(sdev->ipc, wdata[i].control,
-						    wdata[i].ipc_cmd,
-						    wdata[i].ctrl_type,
-						    wdata[i].control->cmd,
-						    true);
-		if (ret != 0) {
-			dev_err(sdev->dev, "error: send control failed\n");
-			break;
-		}
-	}
-
+	if (ret >= 0)
+		return ret;
 err:
-	if (ret < 0)
-		kfree(process);
-out:
-	kfree(wdata);
+	kfree(process);
 	return ret;
 }
 
@@ -2423,9 +2340,6 @@ static int sof_set_dai_config(struct snd_sof_dev *sdev, u32 size,
 			if (!dai->dai_config)
 				return -ENOMEM;
 
-			/* set cpu_dai_name */
-			dai->cpu_dai_name = link->cpus->dai_name;
-
 			found = 1;
 		}
 	}
@@ -2518,26 +2432,6 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, int index,
 			config->dai_index);
 
 	return ret;
-}
-
-static int sof_link_sai_load(struct snd_soc_component *scomp, int index,
-			     struct snd_soc_dai_link *link,
-			     struct snd_soc_tplg_link_config *cfg,
-			     struct snd_soc_tplg_hw_config *hw_config,
-			     struct sof_ipc_dai_config *config)
-{
-	/*TODO: Add implementation */
-	return 0;
-}
-
-static int sof_link_esai_load(struct snd_soc_component *scomp, int index,
-			      struct snd_soc_dai_link *link,
-			      struct snd_soc_tplg_link_config *cfg,
-			      struct snd_soc_tplg_hw_config *hw_config,
-			      struct sof_ipc_dai_config *config)
-{
-	/*TODO: Add implementation */
-	return 0;
 }
 
 static int sof_link_dmic_load(struct snd_soc_component *scomp, int index,
@@ -2674,7 +2568,9 @@ err:
  */
 static int sof_link_hda_process(struct snd_sof_dev *sdev,
 				struct snd_soc_dai_link *link,
-				struct sof_ipc_dai_config *config)
+				struct sof_ipc_dai_config *config,
+				int tx_slot,
+				int rx_slot)
 {
 	struct sof_ipc_reply reply;
 	u32 size = sizeof(*config);
@@ -2687,17 +2583,26 @@ static int sof_link_hda_process(struct snd_sof_dev *sdev,
 			continue;
 
 		if (strcmp(link->name, sof_dai->name) == 0) {
+			if (sof_dai->comp_dai.direction ==
+			    SNDRV_PCM_STREAM_PLAYBACK) {
+				if (!link->dpcm_playback)
+					return -EINVAL;
+
+				config->hda.link_dma_ch = tx_slot;
+			} else {
+				if (!link->dpcm_capture)
+					return -EINVAL;
+
+				config->hda.link_dma_ch = rx_slot;
+			}
+
 			config->dai_index = sof_dai->comp_dai.dai_index;
 			found = 1;
-
-			config->hda.link_dma_ch = DMA_CHAN_INVALID;
 
 			/* save config in dai component */
 			sof_dai->dai_config = kmemdup(config, size, GFP_KERNEL);
 			if (!sof_dai->dai_config)
 				return -ENOMEM;
-
-			sof_dai->cpu_dai_name = link->cpus->dai_name;
 
 			/* send message to DSP */
 			ret = sof_ipc_tx_message(sdev->ipc,
@@ -2734,12 +2639,18 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 			     struct sof_ipc_dai_config *config)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_soc_dai_link_component dai_component;
 	struct snd_soc_tplg_private *private = &cfg->priv;
 	struct snd_soc_dai *dai;
 	u32 size = sizeof(*config);
+	u32 tx_num = 0;
+	u32 tx_slot = 0;
+	u32 rx_num = 0;
+	u32 rx_slot = 0;
 	int ret;
 
 	/* init IPC */
+	memset(&dai_component, 0, sizeof(dai_component));
 	memset(&config->hda, 0, sizeof(struct sof_ipc_dai_hda_params));
 	config->hdr.size = size;
 
@@ -2753,51 +2664,33 @@ static int sof_link_hda_load(struct snd_soc_component *scomp, int index,
 		return ret;
 	}
 
-	dai = snd_soc_find_dai(link->cpus);
+	dai_component.dai_name = link->cpu_dai_name;
+	dai = snd_soc_find_dai(&dai_component);
 	if (!dai) {
 		dev_err(sdev->dev, "error: failed to find dai %s in %s",
-			link->cpus->dai_name, __func__);
+			dai_component.dai_name, __func__);
 		return -EINVAL;
 	}
 
-	ret = sof_link_hda_process(sdev, link, config);
-	if (ret < 0)
-		dev_err(sdev->dev, "error: failed to process hda dai link %s",
-			link->name);
+	if (link->dpcm_playback)
+		tx_num = 1;
 
-	return ret;
-}
+	if (link->dpcm_capture)
+		rx_num = 1;
 
-static int sof_link_alh_load(struct snd_soc_component *scomp, int index,
-			     struct snd_soc_dai_link *link,
-			     struct snd_soc_tplg_link_config *cfg,
-			     struct snd_soc_tplg_hw_config *hw_config,
-			     struct sof_ipc_dai_config *config)
-{
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct sof_ipc_reply reply;
-	u32 size = sizeof(*config);
-	int ret;
-
-	/* init IPC */
-	config->hdr.size = size;
-
-	/* send message to DSP */
-	ret = sof_ipc_tx_message(sdev->ipc,
-				 config->hdr.cmd, config, size, &reply,
-				 sizeof(reply));
-
+	ret = snd_soc_dai_get_channel_map(dai, &tx_num, &tx_slot,
+					  &rx_num, &rx_slot);
 	if (ret < 0) {
-		dev_err(sdev->dev, "error: failed to set DAI config for ALH %d\n",
+		dev_err(sdev->dev, "error: failed to get dma channel for HDA%d\n",
 			config->dai_index);
+
 		return ret;
 	}
 
-	/* set config for all DAI's with name matching the link name */
-	ret = sof_set_dai_config(sdev, size, link, config);
+	ret = sof_link_hda_process(sdev, link, config, tx_slot, rx_slot);
 	if (ret < 0)
-		dev_err(sdev->dev, "error: failed to save DAI config for ALH %d\n",
-			config->dai_index);
+		dev_err(sdev->dev, "error: failed to process hda dai link %s",
+			link->name);
 
 	return ret;
 }
@@ -2815,11 +2708,7 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 	int ret;
 	int i = 0;
 
-	if (!link->platforms) {
-		dev_err(sdev->dev, "error: no platforms\n");
-		return -EINVAL;
-	}
-	link->platforms->name = dev_name(sdev->dev);
+	link->platform_name = dev_name(sdev->dev);
 
 	/*
 	 * Set nonatomic property for FE dai links as their trigger action
@@ -2898,18 +2787,6 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 		ret = sof_link_hda_load(scomp, index, link, cfg, hw_config,
 					&config);
 		break;
-	case SOF_DAI_INTEL_ALH:
-		ret = sof_link_alh_load(scomp, index, link, cfg, hw_config,
-					&config);
-		break;
-	case SOF_DAI_IMX_SAI:
-		ret = sof_link_sai_load(scomp, index, link, cfg, hw_config,
-					&config);
-		break;
-	case SOF_DAI_IMX_ESAI:
-		ret = sof_link_esai_load(scomp, index, link, cfg, hw_config,
-					 &config);
-		break;
 	default:
 		dev_err(sdev->dev, "error: invalid DAI type %d\n", config.type);
 		ret = -EINVAL;
@@ -2924,15 +2801,29 @@ static int sof_link_load(struct snd_soc_component *scomp, int index,
 static int sof_link_hda_unload(struct snd_sof_dev *sdev,
 			       struct snd_soc_dai_link *link)
 {
+	struct snd_soc_dai_link_component dai_component;
 	struct snd_soc_dai *dai;
 	int ret = 0;
 
-	dai = snd_soc_find_dai(link->cpus);
+	memset(&dai_component, 0, sizeof(dai_component));
+	dai_component.dai_name = link->cpu_dai_name;
+	dai = snd_soc_find_dai(&dai_component);
 	if (!dai) {
 		dev_err(sdev->dev, "error: failed to find dai %s in %s",
-			link->cpus->dai_name, __func__);
+			dai_component.dai_name, __func__);
 		return -EINVAL;
 	}
+
+	/*
+	 * FIXME: this call to hw_free is mainly to release the link DMA ID.
+	 * This is abusing the API and handling SOC internals is not
+	 * recommended. This part will be reworked.
+	 */
+	if (dai->driver->ops->hw_free)
+		ret = dai->driver->ops->hw_free(NULL, dai);
+	if (ret < 0)
+		dev_err(sdev->dev, "error: failed to free hda resource for %s\n",
+			link->name);
 
 	return ret;
 }
@@ -2967,8 +2858,7 @@ found:
 	switch (sof_dai->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
 	case SOF_DAI_INTEL_DMIC:
-	case SOF_DAI_INTEL_ALH:
-		/* no resource needs to be released for SSP, DMIC and ALH */
+		/* no resource needs to be released for SSP and DMIC */
 		break;
 	case SOF_DAI_INTEL_HDA:
 		ret = sof_link_hda_unload(sdev, link);
@@ -3108,49 +2998,6 @@ err:
 	return ret;
 }
 
-/* Function to set the initial value of SOF kcontrols.
- * The value will be stored in scontrol->control_data
- */
-static int snd_sof_cache_kcontrol_val(struct snd_sof_dev *sdev)
-{
-	struct snd_sof_control *scontrol = NULL;
-	int ipc_cmd, ctrl_type;
-	int ret = 0;
-
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
-
-		/* notify DSP of kcontrol values */
-		switch (scontrol->cmd) {
-		case SOF_CTRL_CMD_VOLUME:
-		case SOF_CTRL_CMD_ENUM:
-		case SOF_CTRL_CMD_SWITCH:
-			ipc_cmd = SOF_IPC_COMP_GET_VALUE;
-			ctrl_type = SOF_CTRL_TYPE_VALUE_CHAN_GET;
-			break;
-		case SOF_CTRL_CMD_BINARY:
-			ipc_cmd = SOF_IPC_COMP_GET_DATA;
-			ctrl_type = SOF_CTRL_TYPE_DATA_GET;
-			break;
-		default:
-			dev_err(sdev->dev,
-				"error: Invalid scontrol->cmd: %d\n",
-				scontrol->cmd);
-			return -EINVAL;
-		}
-		ret = snd_sof_ipc_set_get_comp_data(sdev->ipc, scontrol,
-						    ipc_cmd, ctrl_type,
-						    scontrol->cmd,
-						    false);
-		if (ret < 0) {
-			dev_warn(sdev->dev,
-				"error: kcontrol value get for widget: %d\n",
-				scontrol->comp_id);
-		}
-	}
-
-	return ret;
-}
-
 int snd_sof_complete_pipeline(struct snd_sof_dev *sdev,
 			      struct snd_sof_widget *swidget)
 {
@@ -3194,11 +3041,6 @@ static void sof_complete(struct snd_soc_component *scomp)
 			break;
 		}
 	}
-	/*
-	 * cache initial values of SOF kcontrols by reading DSP value over
-	 * IPC. It may be overwritten by alsa-mixer after booting up
-	 */
-	snd_sof_cache_kcontrol_val(sdev);
 }
 
 /* manifest - optional to inform component of manifest */

@@ -211,16 +211,16 @@ static ssize_t fieldbus_write(struct file *filp, const char __user *buf,
 	return fbdev->write_area(fbdev, buf, size, offset);
 }
 
-static __poll_t fieldbus_poll(struct file *filp, poll_table *wait)
+static unsigned int fieldbus_poll(struct file *filp, poll_table *wait)
 {
 	struct fb_open_file *of = filp->private_data;
 	struct fieldbus_dev *fbdev = of->fbdev;
-	__poll_t mask = EPOLLIN | EPOLLRDNORM | EPOLLOUT | EPOLLWRNORM;
+	unsigned int mask = POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM;
 
 	poll_wait(filp, &fbdev->dc_wq, wait);
 	/* data changed ? */
 	if (fbdev->dc_event != of->dc_event)
-		mask |= EPOLLPRI | EPOLLERR;
+		mask |= POLLPRI | POLLERR;
 	return mask;
 }
 

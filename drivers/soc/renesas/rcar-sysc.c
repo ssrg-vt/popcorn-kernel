@@ -170,7 +170,7 @@ struct rcar_sysc_pd {
 	struct generic_pm_domain genpd;
 	struct rcar_sysc_ch ch;
 	unsigned int flags;
-	char name[];
+	char name[0];
 };
 
 static inline struct rcar_sysc_pd *to_rcar_pd(struct generic_pm_domain *d)
@@ -200,6 +200,7 @@ static int __init rcar_sysc_pd_setup(struct rcar_sysc_pd *pd)
 {
 	struct generic_pm_domain *genpd = &pd->genpd;
 	const char *name = pd->genpd.name;
+	struct dev_power_governor *gov = &simple_qos_governor;
 	int error;
 
 	if (pd->flags & PD_CPU) {
@@ -253,7 +254,7 @@ static int __init rcar_sysc_pd_setup(struct rcar_sysc_pd *pd)
 	rcar_sysc_power(&pd->ch, true);
 
 finalize:
-	error = pm_genpd_init(genpd, &simple_qos_governor, false);
+	error = pm_genpd_init(genpd, gov, false);
 	if (error)
 		pr_err("Failed to init PM domain %s: %d\n", name, error);
 
@@ -345,7 +346,7 @@ static int __init rcar_sysc_pd_init(void)
 	if (info->init) {
 		error = info->init();
 		if (error)
-			goto out_put;
+			return error;
 	}
 
 	has_cpg_mstp = of_find_compatible_node(NULL, NULL,

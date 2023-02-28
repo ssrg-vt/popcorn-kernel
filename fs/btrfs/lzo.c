@@ -507,6 +507,11 @@ out:
 	return ret;
 }
 
+static unsigned int lzo_set_level(unsigned int level)
+{
+	return 0;
+}
+
 const struct btrfs_compress_op btrfs_lzo_compress = {
 	.init_workspace_manager	= lzo_init_workspace_manager,
 	.cleanup_workspace_manager = lzo_cleanup_workspace_manager,
@@ -517,6 +522,5 @@ const struct btrfs_compress_op btrfs_lzo_compress = {
 	.compress_pages		= lzo_compress_pages,
 	.decompress_bio		= lzo_decompress_bio,
 	.decompress		= lzo_decompress,
-	.max_level		= 1,
-	.default_level		= 1,
+	.set_level		= lzo_set_level,
 };

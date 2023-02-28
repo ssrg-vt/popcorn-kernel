@@ -5,11 +5,10 @@
  * Test the kernel's signal frame code.
  *
  * The kernel sets up two sets of ucontexts if the signal was to be
- * delivered while the thread was in a transaction (referred too as
- * first and second contexts).
+ * delivered while the thread was in a transaction.
  * Expected behaviour is that the checkpointed state is in the user
- * context passed to the signal handler (first context). The speculated
- * state can be accessed with the uc_link pointer (second context).
+ * context passed to the signal handler. The speculated state can be
+ * accessed with the uc_link pointer.
  *
  * The rationale for this is that if TM unaware code (which linked
  * against TM libs) installs a signal handler it will not know of the
@@ -29,20 +28,17 @@
 
 #define MAX_ATTEMPT 500000
 
-#define NV_FPU_REGS 18 /* Number of non-volatile FP registers */
-#define FPR14 14 /* First non-volatile FP register to check in f14-31 subset */
+#define NV_FPU_REGS 18
 
 long tm_signal_self_context_load(pid_t pid, long *gprs, double *fps, vector int *vms, vector int *vss);
 
-/* Test only non-volatile registers, i.e. 18 fpr registers from f14 to f31 */
+/* Be sure there are 2x as many as there are NV FPU regs (2x18) */
 static double fps[] = {
-	/* First context will be set with these values, i.e. non-speculative */
 	 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-	/* Second context will be set with these values, i.e. speculative */
 	-1,-2,-3,-4,-5,-6,-7,-8,-9,-10,-11,-12,-13,-14,-15,-16,-17,-18
 };
 
-static sig_atomic_t fail, broken;
+static sig_atomic_t fail;
 
 static void signal_usr1(int signum, siginfo_t *info, void *uc)
 {
@@ -50,24 +46,11 @@ static void signal_usr1(int signum, siginfo_t *info, void *uc)
 	ucontext_t *ucp = uc;
 	ucontext_t *tm_ucp = ucp->uc_link;
 
-	for (i = 0; i < NV_FPU_REGS; i++) {
-		/* Check first context. Print all mismatches. */
-		fail = (ucp->uc_mcontext.fp_regs[FPR14 + i] != fps[i]);
-		if (fail) {
-			broken = 1;
-			printf("FPR%d (1st context) == %g instead of %g (expected)\n",
-				FPR14 + i, ucp->uc_mcontext.fp_regs[FPR14 + i], fps[i]);
-		}
-	}
-
-	for (i = 0; i < NV_FPU_REGS; i++) {
-		/* Check second context. Print all mismatches. */
-		fail = (tm_ucp->uc_mcontext.fp_regs[FPR14 + i] != fps[NV_FPU_REGS + i]);
-		if (fail) {
-			broken = 1;
-			printf("FPR%d (2nd context) == %g instead of %g (expected)\n",
-				FPR14 + i, tm_ucp->uc_mcontext.fp_regs[FPR14 + i], fps[NV_FPU_REGS + i]);
-		}
+	for (i = 0; i < NV_FPU_REGS && !fail; i++) {
+		fail = (ucp->uc_mcontext.fp_regs[i + 14] != fps[i]);
+		fail |= (tm_ucp->uc_mcontext.fp_regs[i + 14] != fps[i + NV_FPU_REGS]);
+		if (fail)
+			printf("Failed on %d FP %g or %g\n", i, ucp->uc_mcontext.fp_regs[i + 14], tm_ucp->uc_mcontext.fp_regs[i + 14]);
 	}
 }
 
@@ -89,19 +72,13 @@ static int tm_signal_context_chk_fpu()
 	}
 
 	i = 0;
-	while (i < MAX_ATTEMPT && !broken) {
-		/*
-		 * tm_signal_self_context_load will set both first and second
-		 * contexts accordingly to the values passed through non-NULL
-		 * array pointers to it, in that case 'fps', and invoke the
-		 * signal handler installed for SIGUSR1.
-		 */
+	while (i < MAX_ATTEMPT && !fail) {
 		rc = tm_signal_self_context_load(pid, NULL, fps, NULL, NULL);
 		FAIL_IF(rc != pid);
 		i++;
 	}
 
-	return (broken);
+	return fail;
 }
 
 int main(void)

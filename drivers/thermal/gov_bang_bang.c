@@ -116,4 +116,13 @@ static struct thermal_governor thermal_gov_bang_bang = {
 	.name		= "bang_bang",
 	.throttle	= bang_bang_control,
 };
-THERMAL_GOVERNOR_DECLARE(thermal_gov_bang_bang);
+
+int thermal_gov_bang_bang_register(void)
+{
+	return thermal_register_governor(&thermal_gov_bang_bang);
+}
+
+void thermal_gov_bang_bang_unregister(void)
+{
+	thermal_unregister_governor(&thermal_gov_bang_bang);
+}

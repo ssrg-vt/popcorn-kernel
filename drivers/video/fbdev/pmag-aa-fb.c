@@ -165,8 +165,10 @@ static int pmagaafb_probe(struct device *dev)
 	int err;
 
 	info = framebuffer_alloc(sizeof(struct aafb_par), dev);
-	if (!info)
+	if (!info) {
+		printk(KERN_ERR "%s: Cannot allocate memory\n", dev_name(dev));
 		return -ENOMEM;
+	}
 
 	par = info->par;
 	dev_set_drvdata(dev, info);

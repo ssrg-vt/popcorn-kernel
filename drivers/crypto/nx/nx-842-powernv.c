@@ -1020,7 +1020,6 @@ static __init int nx842_powernv_init(void)
 		ret = nx842_powernv_probe_vas(dn);
 		if (ret) {
 			nx842_delete_coprocs();
-			of_node_put(dn);
 			return ret;
 		}
 	}

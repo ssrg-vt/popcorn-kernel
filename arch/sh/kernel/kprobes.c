@@ -485,8 +485,7 @@ int __kprobes kprobe_exceptions_notify(struct notifier_block *self,
 	struct kprobe_ctlblk *kcb = get_kprobe_ctlblk();
 
 	addr = (kprobe_opcode_t *) (args->regs->pc);
-	if (val == DIE_TRAP &&
-	    args->trapnr == (BREAKPOINT_INSTRUCTION & 0xff)) {
+	if (val == DIE_TRAP) {
 		if (!kprobe_running()) {
 			if (kprobe_handler(args->regs)) {
 				ret = NOTIFY_STOP;

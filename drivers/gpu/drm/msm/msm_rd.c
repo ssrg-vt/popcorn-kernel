@@ -31,13 +31,10 @@
 
 #ifdef CONFIG_DEBUG_FS
 
-#include <linux/circ_buf.h>
-#include <linux/debugfs.h>
 #include <linux/kfifo.h>
-#include <linux/uaccess.h>
+#include <linux/debugfs.h>
+#include <linux/circ_buf.h>
 #include <linux/wait.h>
-
-#include <drm/drm_file.h>
 
 #include "msm_drv.h"
 #include "msm_gpu.h"
@@ -236,6 +233,8 @@ static void rd_cleanup(struct msm_rd_state *rd)
 static struct msm_rd_state *rd_init(struct drm_minor *minor, const char *name)
 {
 	struct msm_rd_state *rd;
+	struct dentry *ent;
+	int ret = 0;
 
 	rd = kzalloc(sizeof(*rd), GFP_KERNEL);
 	if (!rd)
@@ -248,10 +247,20 @@ static struct msm_rd_state *rd_init(struct drm_minor *minor, const char *name)
 
 	init_waitqueue_head(&rd->fifo_event);
 
-	debugfs_create_file(name, S_IFREG | S_IRUGO, minor->debugfs_root, rd,
-			    &rd_debugfs_fops);
+	ent = debugfs_create_file(name, S_IFREG | S_IRUGO,
+			minor->debugfs_root, rd, &rd_debugfs_fops);
+	if (!ent) {
+		DRM_ERROR("Cannot create /sys/kernel/debug/dri/%pd/%s\n",
+				minor->debugfs_root, name);
+		ret = -ENOMEM;
+		goto fail;
+	}
 
 	return rd;
+
+fail:
+	rd_cleanup(rd);
+	return ERR_PTR(ret);
 }
 
 int msm_rd_debugfs_init(struct drm_minor *minor)

@@ -14,7 +14,6 @@
 
 #include <linux/linkage.h>
 #include <asm/asm-offsets.h>
-#include <asm/asmmacro.h>
 #include <asm/processor.h>
 #include <asm/coprocessor.h>
 #include <asm/thread_info.h>
@@ -122,9 +121,7 @@
 
 ENTRY(coprocessor_flush)
 
-	/* reserve 4 bytes on stack to save a0 */
-	abi_entry(4)
-
+	entry	a1, 32
 	s32i	a0, a1, 0
 	movi	a0, .Lsave_cp_regs_jump_table
 	addx8	a3, a3, a0
@@ -134,8 +131,7 @@ ENTRY(coprocessor_flush)
 	beqz	a3, 1f
 	callx0	a3
 1:	l32i	a0, a1, 0
-
-	abi_ret(4)
+	retw
 
 ENDPROC(coprocessor_flush)
 

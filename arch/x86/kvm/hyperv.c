@@ -23,7 +23,6 @@
 #include "ioapic.h"
 #include "hyperv.h"
 
-#include <linux/cpu.h>
 #include <linux/kvm_host.h>
 #include <linux/highmem.h>
 #include <linux/sched/cputime.h>
@@ -1597,7 +1596,7 @@ int kvm_hv_hypercall(struct kvm_vcpu *vcpu)
 {
 	u64 param, ingpa, outgpa, ret = HV_STATUS_SUCCESS;
 	uint16_t code, rep_idx, rep_cnt;
-	bool fast, rep;
+	bool fast, longmode, rep;
 
 	/*
 	 * hypercall generates UD from non zero cpl and real mode
@@ -1608,14 +1607,9 @@ int kvm_hv_hypercall(struct kvm_vcpu *vcpu)
 		return 1;
 	}
 
-#ifdef CONFIG_X86_64
-	if (is_64_bit_mode(vcpu)) {
-		param = kvm_rcx_read(vcpu);
-		ingpa = kvm_rdx_read(vcpu);
-		outgpa = kvm_r8_read(vcpu);
-	} else
-#endif
-	{
+	longmode = is_64_bit_mode(vcpu);
+
+	if (!longmode) {
 		param = ((u64)kvm_rdx_read(vcpu) << 32) |
 			(kvm_rax_read(vcpu) & 0xffffffff);
 		ingpa = ((u64)kvm_rbx_read(vcpu) << 32) |
@@ -1623,6 +1617,13 @@ int kvm_hv_hypercall(struct kvm_vcpu *vcpu)
 		outgpa = ((u64)kvm_rdi_read(vcpu) << 32) |
 			(kvm_rsi_read(vcpu) & 0xffffffff);
 	}
+#ifdef CONFIG_X86_64
+	else {
+		param = kvm_rcx_read(vcpu);
+		ingpa = kvm_rdx_read(vcpu);
+		outgpa = kvm_r8_read(vcpu);
+	}
+#endif
 
 	code = param & 0xffff;
 	fast = !!(param & HV_HYPERCALL_FAST_BIT);
@@ -1873,8 +1874,7 @@ int kvm_vcpu_ioctl_get_hv_cpuid(struct kvm_vcpu *vcpu, struct kvm_cpuid2 *cpuid,
 			ent->eax |= HV_X64_EX_PROCESSOR_MASKS_RECOMMENDED;
 			if (evmcs_ver)
 				ent->eax |= HV_X64_ENLIGHTENED_VMCS_RECOMMENDED;
-			if (!cpu_smt_possible())
-				ent->eax |= HV_X64_NO_NONARCH_CORESHARING;
+
 			/*
 			 * Default number of spinlock retry attempts, matches
 			 * HyperV 2016.

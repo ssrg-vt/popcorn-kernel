@@ -143,8 +143,6 @@ config I2C_I801
 	    Cedar Fork (PCH)
 	    Ice Lake (PCH)
 	    Comet Lake (PCH)
-	    Elkhart Lake (PCH)
-	    Tiger Lake (PCH)
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-i801.
@@ -429,7 +427,6 @@ config I2C_AXXIA
 	tristate "Axxia I2C controller"
 	depends on ARCH_AXXIA || COMPILE_TEST
 	default ARCH_AXXIA
-	select I2C_SLAVE
 	help
 	  Say yes if you want to support the I2C bus on Axxia platforms.
 
@@ -439,7 +436,7 @@ config I2C_AXXIA
 
 config I2C_BCM2835
 	tristate "Broadcom BCM2835 I2C controller"
-	depends on ARCH_BCM2835 || ARCH_BRCMSTB
+	depends on ARCH_BCM2835
 	help
 	  If you say yes to this option, support will be included for the
 	  BCM2835 I2C controller.
@@ -685,7 +682,7 @@ config I2C_IMX_LPI2C
 
 config I2C_IOP3XX
 	tristate "Intel IOPx3xx and IXP4xx on-chip I2C interface"
-	depends on ARCH_IOP32X || ARCH_IXP4XX
+	depends on ARCH_IOP32X || ARCH_IOP33X || ARCH_IXP4XX || ARCH_IOP13XX
 	help
 	  Say Y here if you want to use the IIC bus controller on
 	  the Intel IOPx3xx I/O Processors or IXP4xx Network Processors.
@@ -695,7 +692,7 @@ config I2C_IOP3XX
 
 config I2C_JZ4780
 	tristate "JZ4780 I2C controller interface support"
-	depends on MIPS || COMPILE_TEST
+	depends on MACH_JZ4780 || COMPILE_TEST
 	help
 	 If you say yes to this option, support will be included for the
 	 Ingenic JZ4780 I2C controller.
@@ -748,13 +745,6 @@ config I2C_MT65XX
 	  for MT65xx and MT81xx.
 	  If you want to use MediaTek(R) I2C interface, say Y or M here.
 	  If unsure, say N.
-
-config I2C_MT7621
-	tristate "MT7621/MT7628 I2C Controller"
-	depends on (RALINK && (SOC_MT7620 || SOC_MT7621)) || COMPILE_TEST
-	help
-	  Say Y here to include support for I2C controller in the
-	  MediaTek MT7621/MT7628 SoCs.
 
 config I2C_MV64XXX
 	tristate "Marvell mv64xxx I2C Controller"
@@ -978,7 +968,7 @@ config I2C_SIRF
 	  will be called i2c-sirf.
 
 config I2C_SPRD
-	tristate "Spreadtrum I2C interface"
+	bool "Spreadtrum I2C interface"
 	depends on I2C=y && ARCH_SPRD
 	help
 	  If you say yes to this option, support will be included for the
@@ -1207,7 +1197,7 @@ config I2C_PARPORT
 	  and makes it easier to add support for new devices.
 
 	  An adapter type parameter is now mandatory.  Please read the file
-	  Documentation/i2c/busses/i2c-parport.rst for details.
+	  Documentation/i2c/busses/i2c-parport for details.
 
 	  Another driver exists, named i2c-parport-light, which doesn't depend
 	  on the parport driver.  This is meant for embedded systems. Don't say
@@ -1310,20 +1300,6 @@ config I2C_ELEKTOR
 	  This support is also available as a module.  If so, the module
 	  will be called i2c-elektor.
 
-config I2C_ICY
-	tristate "ICY Zorro card"
-	depends on ZORRO
-	select I2C_ALGOPCF
-	help
-	  This supports the PCF8584 Zorro bus I2C adapter, known as ICY.
-	  Say Y if you own such an adapter.
-
-	  This support is also available as a module.  If so, the module
-	  will be called i2c-icy.
-
-	  If you have a 2019 edition board with an LTC2990 sensor at address
-	  0x4c, loading the module 'ltc2990' is sufficient to enable it.
-
 config I2C_MLXCPLD
 	tristate "Mellanox I2C driver"
 	depends on X86_64
@@ -1360,7 +1336,7 @@ config I2C_SIBYTE
 
 config I2C_CROS_EC_TUNNEL
 	tristate "ChromeOS EC tunnel I2C bus"
-	depends on CROS_EC
+	depends on MFD_CROS_EC
 	help
 	  If you say yes here you get an I2C bus that will tunnel i2c commands
 	  through to the other side of the ChromeOS EC to the i2c bus

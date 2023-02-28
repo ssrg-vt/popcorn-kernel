@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/compiler.h>
 #include <linux/types.h>
-#include <linux/zalloc.h>
 #include <inttypes.h>
-#include <limits.h>
 #include <unistd.h>
 #include "tests.h"
 #include "debug.h"
@@ -15,7 +13,6 @@
 #include "symbol.h"
 #include "thread.h"
 #include "callchain.h"
-#include "util/synthetic-events.h"
 
 #if defined (__x86_64__) || defined (__i386__) || defined (__powerpc__)
 #include "arch-tests.h"
@@ -118,8 +115,8 @@ noinline int test_dwarf_unwind__thread(struct thread *thread)
 	}
 
  out:
-	zfree(&sample.user_stack.data);
-	zfree(&sample.user_regs.regs);
+	free(sample.user_stack.data);
+	free(sample.user_regs.regs);
 	return err;
 }
 

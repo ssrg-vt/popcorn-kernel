@@ -144,7 +144,7 @@ found_service:
 
 	/* look through the service's keyring */
 	kref = keyring_search(make_key_ref(rx->securities, 1UL),
-			      &key_type_rxrpc_s, kdesc, true);
+			      &key_type_rxrpc_s, kdesc);
 	if (IS_ERR(kref)) {
 		read_unlock(&local->services_lock);
 		_leave(" = %ld [search]", PTR_ERR(kref));

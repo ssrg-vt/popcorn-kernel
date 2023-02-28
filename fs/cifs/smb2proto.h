@@ -84,8 +84,7 @@ extern int smb311_posix_mkdir(const unsigned int xid, struct inode *inode,
 			       umode_t mode, struct cifs_tcon *tcon,
 			       const char *full_path,
 			       struct cifs_sb_info *cifs_sb);
-extern int smb2_mkdir(const unsigned int xid, struct inode *inode,
-		      umode_t mode, struct cifs_tcon *tcon,
+extern int smb2_mkdir(const unsigned int xid, struct cifs_tcon *tcon,
 		      const char *name, struct cifs_sb_info *cifs_sb);
 extern void smb2_mkdir_setinfo(struct inode *inode, const char *full_path,
 			       struct cifs_sb_info *cifs_sb,
@@ -150,10 +149,6 @@ extern int SMB2_ioctl_init(struct cifs_tcon *tcon, struct smb_rqst *rqst,
 			   bool is_fsctl, char *in_data, u32 indatalen,
 			   __u32 max_response_size);
 extern void SMB2_ioctl_free(struct smb_rqst *rqst);
-extern int SMB2_change_notify(const unsigned int xid, struct cifs_tcon *tcon,
-			u64 persistent_fid, u64 volatile_fid, bool watch_tree,
-			u32 completion_filter);
-
 extern int SMB2_close(const unsigned int xid, struct cifs_tcon *tcon,
 		      u64 persistent_file_id, u64 volatile_file_id);
 extern int SMB2_close_flags(const unsigned int xid, struct cifs_tcon *tcon,
@@ -163,10 +158,6 @@ extern int SMB2_close_init(struct cifs_tcon *tcon, struct smb_rqst *rqst,
 extern void SMB2_close_free(struct smb_rqst *rqst);
 extern int SMB2_flush(const unsigned int xid, struct cifs_tcon *tcon,
 		      u64 persistent_file_id, u64 volatile_file_id);
-extern int SMB2_flush_init(const unsigned int xid, struct smb_rqst *rqst,
-			   struct cifs_tcon *tcon,
-			   u64 persistent_file_id, u64 volatile_file_id);
-extern void SMB2_flush_free(struct smb_rqst *rqst);
 extern int SMB2_query_info(const unsigned int xid, struct cifs_tcon *tcon,
 			   u64 persistent_file_id, u64 volatile_file_id,
 			   struct smb2_file_all_info *data);
@@ -237,10 +228,9 @@ extern int smb3_validate_negotiate(const unsigned int, struct cifs_tcon *);
 
 extern enum securityEnum smb2_select_sectype(struct TCP_Server_Info *,
 					enum securityEnum);
-extern void smb2_parse_contexts(struct TCP_Server_Info *server,
-				struct smb2_create_rsp *rsp,
-				unsigned int *epoch, char *lease_key,
-				__u8 *oplock, struct smb2_file_all_info *buf);
+extern __u8 smb2_parse_lease_state(struct TCP_Server_Info *server,
+				   struct smb2_create_rsp *rsp,
+				   unsigned int *epoch, char *lease_key);
 extern int smb3_encryption_required(const struct cifs_tcon *tcon);
 extern int smb2_validate_iov(unsigned int offset, unsigned int buffer_length,
 			     struct kvec *iov, unsigned int min_buf_size);

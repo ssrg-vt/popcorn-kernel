@@ -819,16 +819,22 @@ static int lantiq_ssc_probe(struct platform_device *pdev)
 	}
 
 	rx_irq = platform_get_irq_byname(pdev, LTQ_SPI_RX_IRQ_NAME);
-	if (rx_irq < 0)
+	if (rx_irq < 0) {
+		dev_err(dev, "failed to get %s\n", LTQ_SPI_RX_IRQ_NAME);
 		return -ENXIO;
+	}
 
 	tx_irq = platform_get_irq_byname(pdev, LTQ_SPI_TX_IRQ_NAME);
-	if (tx_irq < 0)
+	if (tx_irq < 0) {
+		dev_err(dev, "failed to get %s\n", LTQ_SPI_TX_IRQ_NAME);
 		return -ENXIO;
+	}
 
 	err_irq = platform_get_irq_byname(pdev, LTQ_SPI_ERR_IRQ_NAME);
-	if (err_irq < 0)
+	if (err_irq < 0) {
+		dev_err(dev, "failed to get %s\n", LTQ_SPI_ERR_IRQ_NAME);
 		return -ENXIO;
+	}
 
 	master = spi_alloc_master(dev, sizeof(struct lantiq_ssc_spi));
 	if (!master)

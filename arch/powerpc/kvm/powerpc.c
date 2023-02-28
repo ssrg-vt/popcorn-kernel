@@ -419,9 +419,9 @@ int kvm_arch_hardware_setup(void)
 	return 0;
 }
 
-int kvm_arch_check_processor_compat(void)
+void kvm_arch_check_processor_compat(void *rtn)
 {
-	return kvmppc_core_check_processor_compat();
+	*(int *)rtn = kvmppc_core_check_processor_compat();
 }
 
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
@@ -455,6 +455,16 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	return kvmppc_core_init_vm(kvm);
 err_out:
 	return -EINVAL;
+}
+
+bool kvm_arch_has_vcpu_debugfs(void)
+{
+	return false;
+}
+
+int kvm_arch_create_vcpu_debugfs(struct kvm_vcpu *vcpu)
+{
+	return 0;
 }
 
 void kvm_arch_destroy_vm(struct kvm *kvm)
@@ -561,8 +571,7 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 		 * a POWER9 processor) and the PowerNV platform, as
 		 * nested is not yet supported.
 		 */
-		r = xive_enabled() && !!cpu_has_feature(CPU_FTR_HVMODE) &&
-			kvmppc_xive_native_supported();
+		r = xive_enabled() && !!cpu_has_feature(CPU_FTR_HVMODE);
 		break;
 #endif
 

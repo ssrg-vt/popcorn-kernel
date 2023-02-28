@@ -10,8 +10,7 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/videodev2.h>
-
-#include "coda.h"
+#include <coda.h>
 
 static const u8 coda_filler_size[8] = { 0, 7, 14, 13, 12, 11, 10, 9 };
 

@@ -342,32 +342,6 @@ encode_read_segment(struct xdr_stream *xdr, struct rpcrdma_mr *mr,
 	return 0;
 }
 
-static struct rpcrdma_mr_seg *rpcrdma_mr_prepare(struct rpcrdma_xprt *r_xprt,
-						 struct rpcrdma_req *req,
-						 struct rpcrdma_mr_seg *seg,
-						 int nsegs, bool writing,
-						 struct rpcrdma_mr **mr)
-{
-	*mr = rpcrdma_mr_pop(&req->rl_free_mrs);
-	if (!*mr) {
-		*mr = rpcrdma_mr_get(r_xprt);
-		if (!*mr)
-			goto out_getmr_err;
-		trace_xprtrdma_mr_get(req);
-		(*mr)->mr_req = req;
-	}
-
-	rpcrdma_mr_push(*mr, &req->rl_registered);
-	return frwr_map(r_xprt, seg, nsegs, writing, req->rl_slot.rq_xid, *mr);
-
-out_getmr_err:
-	trace_xprtrdma_nomrs(req);
-	xprt_wait_for_buffer_space(&r_xprt->rx_xprt);
-	if (r_xprt->rx_ep.rep_connected != -ENODEV)
-		schedule_work(&r_xprt->rx_buf.rb_refresh_worker);
-	return ERR_PTR(-EAGAIN);
-}
-
 /* Register and XDR encode the Read list. Supports encoding a list of read
  * segments that belong to a single read chunk.
  *
@@ -382,19 +356,15 @@ out_getmr_err:
  *
  * Only a single @pos value is currently supported.
  */
-static int rpcrdma_encode_read_list(struct rpcrdma_xprt *r_xprt,
-				    struct rpcrdma_req *req,
-				    struct rpc_rqst *rqst,
-				    enum rpcrdma_chunktype rtype)
+static noinline int
+rpcrdma_encode_read_list(struct rpcrdma_xprt *r_xprt, struct rpcrdma_req *req,
+			 struct rpc_rqst *rqst, enum rpcrdma_chunktype rtype)
 {
 	struct xdr_stream *xdr = &req->rl_stream;
 	struct rpcrdma_mr_seg *seg;
 	struct rpcrdma_mr *mr;
 	unsigned int pos;
 	int nsegs;
-
-	if (rtype == rpcrdma_noch)
-		goto done;
 
 	pos = rqst->rq_snd_buf.head[0].iov_len;
 	if (rtype == rpcrdma_areadch)
@@ -406,9 +376,10 @@ static int rpcrdma_encode_read_list(struct rpcrdma_xprt *r_xprt,
 		return nsegs;
 
 	do {
-		seg = rpcrdma_mr_prepare(r_xprt, req, seg, nsegs, false, &mr);
+		seg = frwr_map(r_xprt, seg, nsegs, false, rqst->rq_xid, &mr);
 		if (IS_ERR(seg))
 			return PTR_ERR(seg);
+		rpcrdma_mr_push(mr, &req->rl_registered);
 
 		if (encode_read_segment(xdr, mr, pos) < 0)
 			return -EMSGSIZE;
@@ -418,8 +389,7 @@ static int rpcrdma_encode_read_list(struct rpcrdma_xprt *r_xprt,
 		nsegs -= mr->mr_nents;
 	} while (nsegs);
 
-done:
-	return encode_item_not_present(xdr);
+	return 0;
 }
 
 /* Register and XDR encode the Write list. Supports encoding a list
@@ -437,19 +407,15 @@ done:
  *
  * Only a single Write chunk is currently supported.
  */
-static int rpcrdma_encode_write_list(struct rpcrdma_xprt *r_xprt,
-				     struct rpcrdma_req *req,
-				     struct rpc_rqst *rqst,
-				     enum rpcrdma_chunktype wtype)
+static noinline int
+rpcrdma_encode_write_list(struct rpcrdma_xprt *r_xprt, struct rpcrdma_req *req,
+			  struct rpc_rqst *rqst, enum rpcrdma_chunktype wtype)
 {
 	struct xdr_stream *xdr = &req->rl_stream;
 	struct rpcrdma_mr_seg *seg;
 	struct rpcrdma_mr *mr;
 	int nsegs, nchunks;
 	__be32 *segcount;
-
-	if (wtype != rpcrdma_writech)
-		goto done;
 
 	seg = req->rl_segments;
 	nsegs = rpcrdma_convert_iovs(r_xprt, &rqst->rq_rcv_buf,
@@ -467,9 +433,10 @@ static int rpcrdma_encode_write_list(struct rpcrdma_xprt *r_xprt,
 
 	nchunks = 0;
 	do {
-		seg = rpcrdma_mr_prepare(r_xprt, req, seg, nsegs, true, &mr);
+		seg = frwr_map(r_xprt, seg, nsegs, true, rqst->rq_xid, &mr);
 		if (IS_ERR(seg))
 			return PTR_ERR(seg);
+		rpcrdma_mr_push(mr, &req->rl_registered);
 
 		if (encode_rdma_segment(xdr, mr) < 0)
 			return -EMSGSIZE;
@@ -484,8 +451,7 @@ static int rpcrdma_encode_write_list(struct rpcrdma_xprt *r_xprt,
 	/* Update count of segments in this Write chunk */
 	*segcount = cpu_to_be32(nchunks);
 
-done:
-	return encode_item_not_present(xdr);
+	return 0;
 }
 
 /* Register and XDR encode the Reply chunk. Supports encoding an array
@@ -500,19 +466,15 @@ done:
  * Returns zero on success, or a negative errno if a failure occurred.
  * @xdr is advanced to the next position in the stream.
  */
-static int rpcrdma_encode_reply_chunk(struct rpcrdma_xprt *r_xprt,
-				      struct rpcrdma_req *req,
-				      struct rpc_rqst *rqst,
-				      enum rpcrdma_chunktype wtype)
+static noinline int
+rpcrdma_encode_reply_chunk(struct rpcrdma_xprt *r_xprt, struct rpcrdma_req *req,
+			   struct rpc_rqst *rqst, enum rpcrdma_chunktype wtype)
 {
 	struct xdr_stream *xdr = &req->rl_stream;
 	struct rpcrdma_mr_seg *seg;
 	struct rpcrdma_mr *mr;
 	int nsegs, nchunks;
 	__be32 *segcount;
-
-	if (wtype != rpcrdma_replych)
-		return encode_item_not_present(xdr);
 
 	seg = req->rl_segments;
 	nsegs = rpcrdma_convert_iovs(r_xprt, &rqst->rq_rcv_buf, 0, wtype, seg);
@@ -528,9 +490,10 @@ static int rpcrdma_encode_reply_chunk(struct rpcrdma_xprt *r_xprt,
 
 	nchunks = 0;
 	do {
-		seg = rpcrdma_mr_prepare(r_xprt, req, seg, nsegs, true, &mr);
+		seg = frwr_map(r_xprt, seg, nsegs, true, rqst->rq_xid, &mr);
 		if (IS_ERR(seg))
 			return PTR_ERR(seg);
+		rpcrdma_mr_push(mr, &req->rl_registered);
 
 		if (encode_rdma_segment(xdr, mr) < 0)
 			return -EMSGSIZE;
@@ -548,16 +511,6 @@ static int rpcrdma_encode_reply_chunk(struct rpcrdma_xprt *r_xprt,
 	return 0;
 }
 
-static void rpcrdma_sendctx_done(struct kref *kref)
-{
-	struct rpcrdma_req *req =
-		container_of(kref, struct rpcrdma_req, rl_kref);
-	struct rpcrdma_rep *rep = req->rl_reply;
-
-	rpcrdma_complete_rqst(rep);
-	rep->rr_rxprt->rx_stats.reply_waits_for_send++;
-}
-
 /**
  * rpcrdma_sendctx_unmap - DMA-unmap Send buffer
  * @sc: sendctx containing SGEs to unmap
@@ -566,9 +519,6 @@ static void rpcrdma_sendctx_done(struct kref *kref)
 void rpcrdma_sendctx_unmap(struct rpcrdma_sendctx *sc)
 {
 	struct ib_sge *sge;
-
-	if (!sc->sc_unmap_count)
-		return;
 
 	/* The first two SGEs contain the transport header and
 	 * the inline buffer. These are always left mapped so
@@ -579,7 +529,9 @@ void rpcrdma_sendctx_unmap(struct rpcrdma_sendctx *sc)
 		ib_dma_unmap_page(sc->sc_device, sge->addr, sge->length,
 				  DMA_TO_DEVICE);
 
-	kref_put(&sc->sc_req->rl_kref, rpcrdma_sendctx_done);
+	if (test_and_clear_bit(RPCRDMA_REQ_F_TX_RESOURCES,
+			       &sc->sc_req->rl_flags))
+		wake_up_bit(&sc->sc_req->rl_flags, RPCRDMA_REQ_F_TX_RESOURCES);
 }
 
 /* Prepare an SGE for the RPC-over-RDMA transport header.
@@ -714,7 +666,7 @@ map_tail:
 out:
 	sc->sc_wr.num_sge += sge_no;
 	if (sc->sc_unmap_count)
-		kref_get(&req->rl_kref);
+		__set_bit(RPCRDMA_REQ_F_TX_RESOURCES, &req->rl_flags);
 	return true;
 
 out_regbuf:
@@ -747,28 +699,22 @@ rpcrdma_prepare_send_sges(struct rpcrdma_xprt *r_xprt,
 			  struct rpcrdma_req *req, u32 hdrlen,
 			  struct xdr_buf *xdr, enum rpcrdma_chunktype rtype)
 {
-	int ret;
-
-	ret = -EAGAIN;
 	req->rl_sendctx = rpcrdma_sendctx_get_locked(r_xprt);
 	if (!req->rl_sendctx)
-		goto err;
+		return -EAGAIN;
 	req->rl_sendctx->sc_wr.num_sge = 0;
 	req->rl_sendctx->sc_unmap_count = 0;
 	req->rl_sendctx->sc_req = req;
-	kref_init(&req->rl_kref);
+	__clear_bit(RPCRDMA_REQ_F_TX_RESOURCES, &req->rl_flags);
 
-	ret = -EIO;
 	if (!rpcrdma_prepare_hdr_sge(r_xprt, req, hdrlen))
-		goto err;
+		return -EIO;
+
 	if (rtype != rpcrdma_areadch)
 		if (!rpcrdma_prepare_msg_sges(r_xprt, req, xdr, rtype))
-			goto err;
-	return 0;
+			return -EIO;
 
-err:
-	trace_xprtrdma_prepsend_failed(&req->rl_slot, ret);
-	return ret;
+	return 0;
 }
 
 /**
@@ -867,7 +813,12 @@ rpcrdma_marshal_req(struct rpcrdma_xprt *r_xprt, struct rpc_rqst *rqst)
 	 * chunks. Very likely the connection has been replaced,
 	 * so these registrations are invalid and unusable.
 	 */
-	frwr_recycle(req);
+	while (unlikely(!list_empty(&req->rl_registered))) {
+		struct rpcrdma_mr *mr;
+
+		mr = rpcrdma_mr_pop(&req->rl_registered);
+		rpcrdma_mr_recycle(mr);
+	}
 
 	/* This implementation supports the following combinations
 	 * of chunk lists in one RPC-over-RDMA Call message:
@@ -891,28 +842,50 @@ rpcrdma_marshal_req(struct rpcrdma_xprt *r_xprt, struct rpc_rqst *rqst)
 	 * send a Call message with a Position Zero Read chunk and a
 	 * regular Read chunk at the same time.
 	 */
-	ret = rpcrdma_encode_read_list(r_xprt, req, rqst, rtype);
-	if (ret)
-		goto out_err;
-	ret = rpcrdma_encode_write_list(r_xprt, req, rqst, wtype);
-	if (ret)
-		goto out_err;
-	ret = rpcrdma_encode_reply_chunk(r_xprt, req, rqst, wtype);
+	if (rtype != rpcrdma_noch) {
+		ret = rpcrdma_encode_read_list(r_xprt, req, rqst, rtype);
+		if (ret)
+			goto out_err;
+	}
+	ret = encode_item_not_present(xdr);
 	if (ret)
 		goto out_err;
 
-	ret = rpcrdma_prepare_send_sges(r_xprt, req, req->rl_hdrbuf.len,
+	if (wtype == rpcrdma_writech) {
+		ret = rpcrdma_encode_write_list(r_xprt, req, rqst, wtype);
+		if (ret)
+			goto out_err;
+	}
+	ret = encode_item_not_present(xdr);
+	if (ret)
+		goto out_err;
+
+	if (wtype != rpcrdma_replych)
+		ret = encode_item_not_present(xdr);
+	else
+		ret = rpcrdma_encode_reply_chunk(r_xprt, req, rqst, wtype);
+	if (ret)
+		goto out_err;
+
+	trace_xprtrdma_marshal(rqst, xdr_stream_pos(xdr), rtype, wtype);
+
+	ret = rpcrdma_prepare_send_sges(r_xprt, req, xdr_stream_pos(xdr),
 					&rqst->rq_snd_buf, rtype);
 	if (ret)
 		goto out_err;
-
-	trace_xprtrdma_marshal(req, rtype, wtype);
 	return 0;
 
 out_err:
 	trace_xprtrdma_marshal_failed(rqst, ret);
-	r_xprt->rx_stats.failed_marshal_count++;
-	frwr_reset(req);
+	switch (ret) {
+	case -EAGAIN:
+		xprt_wait_for_buffer_space(rqst->rq_xprt);
+		break;
+	case -ENOBUFS:
+		break;
+	default:
+		r_xprt->rx_stats.failed_marshal_count++;
+	}
 	return ret;
 }
 
@@ -1261,6 +1234,8 @@ void rpcrdma_complete_rqst(struct rpcrdma_rep *rep)
 	struct rpc_rqst *rqst = rep->rr_rqst;
 	int status;
 
+	xprt->reestablish_timeout = 0;
+
 	switch (rep->rr_proc) {
 	case rdma_msg:
 		status = rpcrdma_decode_msg(r_xprt, rep, rqst);
@@ -1294,17 +1269,51 @@ out_badheader:
 	goto out;
 }
 
-static void rpcrdma_reply_done(struct kref *kref)
+void rpcrdma_release_rqst(struct rpcrdma_xprt *r_xprt, struct rpcrdma_req *req)
 {
-	struct rpcrdma_req *req =
-		container_of(kref, struct rpcrdma_req, rl_kref);
+	/* Invalidate and unmap the data payloads before waking
+	 * the waiting application. This guarantees the memory
+	 * regions are properly fenced from the server before the
+	 * application accesses the data. It also ensures proper
+	 * send flow control: waking the next RPC waits until this
+	 * RPC has relinquished all its Send Queue entries.
+	 */
+	if (!list_empty(&req->rl_registered))
+		frwr_unmap_sync(r_xprt, &req->rl_registered);
 
-	rpcrdma_complete_rqst(req->rl_reply);
+	/* Ensure that any DMA mapped pages associated with
+	 * the Send of the RPC Call have been unmapped before
+	 * allowing the RPC to complete. This protects argument
+	 * memory not controlled by the RPC client from being
+	 * re-used before we're done with it.
+	 */
+	if (test_bit(RPCRDMA_REQ_F_TX_RESOURCES, &req->rl_flags)) {
+		r_xprt->rx_stats.reply_waits_for_send++;
+		out_of_line_wait_on_bit(&req->rl_flags,
+					RPCRDMA_REQ_F_TX_RESOURCES,
+					bit_wait,
+					TASK_UNINTERRUPTIBLE);
+	}
 }
 
-/**
- * rpcrdma_reply_handler - Process received RPC/RDMA messages
- * @rep: Incoming rpcrdma_rep object to process
+/* Reply handling runs in the poll worker thread. Anything that
+ * might wait is deferred to a separate workqueue.
+ */
+void rpcrdma_deferred_completion(struct work_struct *work)
+{
+	struct rpcrdma_rep *rep =
+			container_of(work, struct rpcrdma_rep, rr_work);
+	struct rpcrdma_req *req = rpcr_to_rdmar(rep->rr_rqst);
+	struct rpcrdma_xprt *r_xprt = rep->rr_rxprt;
+
+	trace_xprtrdma_defer_cmp(rep);
+	if (rep->rr_wc_flags & IB_WC_WITH_INVALIDATE)
+		frwr_reminv(rep, &req->rl_registered);
+	rpcrdma_release_rqst(r_xprt, req);
+	rpcrdma_complete_rqst(rep);
+}
+
+/* Process received RPC/RDMA messages.
  *
  * Errors must result in the RPC task either being awakened, or
  * allowed to timeout, to discover the errors at that time.
@@ -1318,12 +1327,6 @@ void rpcrdma_reply_handler(struct rpcrdma_rep *rep)
 	struct rpc_rqst *rqst;
 	u32 credits;
 	__be32 *p;
-
-	/* Any data means we had a useful conversation, so
-	 * then we don't need to delay the next reconnect.
-	 */
-	if (xprt->reestablish_timeout)
-		xprt->reestablish_timeout = 0;
 
 	/* Fixed transport header fields */
 	xdr_init_decode(&rep->rr_stream, &rep->rr_hdrbuf,
@@ -1357,10 +1360,10 @@ void rpcrdma_reply_handler(struct rpcrdma_rep *rep)
 	else if (credits > buf->rb_max_requests)
 		credits = buf->rb_max_requests;
 	if (buf->rb_credits != credits) {
-		spin_lock(&xprt->transport_lock);
+		spin_lock_bh(&xprt->transport_lock);
 		buf->rb_credits = credits;
 		xprt->cwnd = credits << RPC_CWNDSHIFT;
-		spin_unlock(&xprt->transport_lock);
+		spin_unlock_bh(&xprt->transport_lock);
 	}
 
 	req = rpcr_to_rdmar(rqst);
@@ -1370,16 +1373,10 @@ void rpcrdma_reply_handler(struct rpcrdma_rep *rep)
 	}
 	req->rl_reply = rep;
 	rep->rr_rqst = rqst;
+	clear_bit(RPCRDMA_REQ_F_PENDING, &req->rl_flags);
 
 	trace_xprtrdma_reply(rqst->rq_task, rep, req, credits);
-
-	if (rep->rr_wc_flags & IB_WC_WITH_INVALIDATE)
-		frwr_reminv(rep, &req->rl_registered);
-	if (!list_empty(&req->rl_registered))
-		frwr_unmap_async(r_xprt, req);
-		/* LocalInv completion will complete the RPC */
-	else
-		kref_put(&req->rl_kref, rpcrdma_reply_done);
+	queue_work(buf->rb_completion_wq, &rep->rr_work);
 	return;
 
 out_badversion:

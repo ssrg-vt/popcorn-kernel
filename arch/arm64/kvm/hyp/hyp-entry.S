@@ -216,34 +216,17 @@ ENDPROC(\label)
 
 	.align 11
 
-.macro check_preamble_length start, end
-/* kvm_patch_vector_branch() generates code that jumps over the preamble. */
-.if ((\end-\start) != KVM_VECTOR_PREAMBLE)
-	.error "KVM vector preamble length mismatch"
-.endif
-.endm
-
 .macro valid_vect target
 	.align 7
-661:
-	esb
 	stp	x0, x1, [sp, #-16]!
-662:
 	b	\target
-
-check_preamble_length 661b, 662b
 .endm
 
 .macro invalid_vect target
 	.align 7
-661:
 	b	\target
-	nop
-662:
 	ldp	x0, x1, [sp], #16
 	b	\target
-
-check_preamble_length 661b, 662b
 .endm
 
 ENTRY(__kvm_hyp_vector)
@@ -271,14 +254,13 @@ ENDPROC(__kvm_hyp_vector)
 #ifdef CONFIG_KVM_INDIRECT_VECTORS
 .macro hyp_ventry
 	.align 7
-1:	esb
-	.rept 26
+1:	.rept 27
 	nop
 	.endr
 /*
  * The default sequence is to directly branch to the KVM vectors,
  * using the computed offset. This applies for VHE as well as
- * !ARM64_HARDEN_EL2_VECTORS. The first vector must always run the preamble.
+ * !ARM64_HARDEN_EL2_VECTORS.
  *
  * For ARM64_HARDEN_EL2_VECTORS configurations, this gets replaced
  * with:
@@ -289,13 +271,12 @@ ENDPROC(__kvm_hyp_vector)
  * movk	x0, #((addr >> 32) & 0xffff), lsl #32
  * br	x0
  *
- * Where:
- * addr = kern_hyp_va(__kvm_hyp_vector) + vector-offset + KVM_VECTOR_PREAMBLE.
+ * Where addr = kern_hyp_va(__kvm_hyp_vector) + vector-offset + 4.
  * See kvm_patch_vector_branch for details.
  */
 alternative_cb	kvm_patch_vector_branch
-	stp	x0, x1, [sp, #-16]!
-	b	__kvm_hyp_vector + (1b - 0b + KVM_VECTOR_PREAMBLE)
+	b	__kvm_hyp_vector + (1b - 0b)
+	nop
 	nop
 	nop
 	nop
@@ -320,7 +301,6 @@ ENTRY(__bp_harden_hyp_vecs_end)
 	.popsection
 
 ENTRY(__smccc_workaround_1_smc_start)
-	esb
 	sub	sp, sp, #(8 * 4)
 	stp	x2, x3, [sp, #(8 * 0)]
 	stp	x0, x1, [sp, #(8 * 2)]

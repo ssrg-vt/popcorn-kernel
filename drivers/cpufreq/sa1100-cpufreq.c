@@ -181,8 +181,7 @@ static int sa1100_target(struct cpufreq_policy *policy, unsigned int ppcr)
 
 static int __init sa1100_cpu_init(struct cpufreq_policy *policy)
 {
-	cpufreq_generic_init(policy, sa11x0_freq_table, 0);
-	return 0;
+	return cpufreq_generic_init(policy, sa11x0_freq_table, 0);
 }
 
 static struct cpufreq_driver sa1100_driver __refdata = {

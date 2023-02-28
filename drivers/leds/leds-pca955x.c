@@ -429,7 +429,7 @@ static int pca955x_probe(struct i2c_client *client,
 	int ngpios = 0;
 
 	chip = &pca955x_chipdefs[id->driver_data];
-	adapter = client->adapter;
+	adapter = to_i2c_adapter(client->dev.parent);
 	pdata = dev_get_platdata(&client->dev);
 	if (!pdata) {
 		pdata =	pca955x_get_pdata(client, chip);

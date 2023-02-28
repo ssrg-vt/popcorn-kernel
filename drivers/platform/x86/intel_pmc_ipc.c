@@ -936,8 +936,10 @@ static int ipc_plat_probe(struct platform_device *pdev)
 	spin_lock_init(&ipcdev.gcr_lock);
 
 	ipcdev.irq = platform_get_irq(pdev, 0);
-	if (ipcdev.irq < 0)
+	if (ipcdev.irq < 0) {
+		dev_err(&pdev->dev, "Failed to get irq\n");
 		return -EINVAL;
+	}
 
 	ret = ipc_plat_get_res(pdev);
 	if (ret) {

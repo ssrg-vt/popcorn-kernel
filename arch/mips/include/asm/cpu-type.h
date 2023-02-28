@@ -38,7 +38,7 @@ static inline int __pure __get_cpu_type(const int cpu_type)
 #if defined(CONFIG_SYS_HAS_CPU_MIPS32_R1) || \
     defined(CONFIG_SYS_HAS_CPU_MIPS32_R2)
 	case CPU_4KEC:
-	case CPU_XBURST:
+	case CPU_JZRISC:
 #endif
 
 #ifdef CONFIG_SYS_HAS_CPU_MIPS32_R2
@@ -116,6 +116,11 @@ static inline int __pure __get_cpu_type(const int cpu_type)
 	case CPU_VR4181A:
 #endif
 
+#ifdef CONFIG_SYS_HAS_CPU_R4300
+	case CPU_R4300:
+	case CPU_R4310:
+#endif
+
 #ifdef CONFIG_SYS_HAS_CPU_R4X00
 	case CPU_R4000PC:
 	case CPU_R4000SC:
@@ -138,12 +143,20 @@ static inline int __pure __get_cpu_type(const int cpu_type)
 	case CPU_R5000:
 #endif
 
+#ifdef CONFIG_SYS_HAS_CPU_R5432
+	case CPU_R5432:
+#endif
+
 #ifdef CONFIG_SYS_HAS_CPU_R5500
 	case CPU_R5500:
 #endif
 
 #ifdef CONFIG_SYS_HAS_CPU_NEVADA
 	case CPU_NEVADA:
+#endif
+
+#ifdef CONFIG_SYS_HAS_CPU_R8000
+	case CPU_R8000:
 #endif
 
 #ifdef CONFIG_SYS_HAS_CPU_R10000

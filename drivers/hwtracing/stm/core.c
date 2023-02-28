@@ -89,6 +89,13 @@ static struct class stm_class = {
 	.dev_groups	= stm_groups,
 };
 
+static int stm_dev_match(struct device *dev, const void *data)
+{
+	const char *name = data;
+
+	return sysfs_streq(name, dev_name(dev));
+}
+
 /**
  * stm_find_device() - find stm device by name
  * @buf:	character buffer containing the name
@@ -109,7 +116,7 @@ struct stm_device *stm_find_device(const char *buf)
 	if (!stm_core_up)
 		return NULL;
 
-	dev = class_find_device_by_name(&stm_class, buf);
+	dev = class_find_device(&stm_class, NULL, buf, stm_dev_match);
 	if (!dev)
 		return NULL;
 

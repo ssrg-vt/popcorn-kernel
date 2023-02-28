@@ -6,12 +6,23 @@
 #include "bpf_helpers.h"
 #include "bpf_endian.h"
 
+#define bpf_printk(fmt, ...)				\
+({							\
+	char ____fmt[] = fmt;				\
+	bpf_trace_printk(____fmt, sizeof(____fmt),	\
+			##__VA_ARGS__);			\
+})
+
 /* Packet parsing state machine helpers. */
 #define cursor_advance(_cursor, _len) \
 	({ void *_tmp = _cursor; _cursor += _len; _tmp; })
 
 #define SR6_FLAG_ALERT (1 << 4)
 
+#define htonll(x) ((bpf_htonl(1)) == 1 ? (x) : ((uint64_t)bpf_htonl((x) & \
+				0xFFFFFFFF) << 32) | bpf_htonl((x) >> 32))
+#define ntohll(x) ((bpf_ntohl(1)) == 1 ? (x) : ((uint64_t)bpf_ntohl((x) & \
+				0xFFFFFFFF) << 32) | bpf_ntohl((x) >> 32))
 #define BPF_PACKET_HEADER __attribute__((packed))
 
 struct ip6_t {
@@ -272,8 +283,8 @@ int has_egr_tlv(struct __sk_buff *skb, struct ip6_srh_t *srh)
 			return 0;
 
 		// check if egress TLV value is correct
-		if (bpf_be64_to_cpu(egr_addr.hi) == 0xfd00000000000000 &&
-		    bpf_be64_to_cpu(egr_addr.lo) == 0x4)
+		if (ntohll(egr_addr.hi) == 0xfd00000000000000 &&
+				ntohll(egr_addr.lo) == 0x4)
 			return 1;
 	}
 
@@ -304,8 +315,8 @@ int __encap_srh(struct __sk_buff *skb)
 
 	#pragma clang loop unroll(full)
 	for (unsigned long long lo = 0; lo < 4; lo++) {
-		seg->lo = bpf_cpu_to_be64(4 - lo);
-		seg->hi = bpf_cpu_to_be64(hi);
+		seg->lo = htonll(4 - lo);
+		seg->hi = htonll(hi);
 		seg = (struct ip6_addr_t *)((char *)seg + sizeof(*seg));
 	}
 
@@ -345,8 +356,8 @@ int __add_egr_x(struct __sk_buff *skb)
 	if (err)
 		return BPF_DROP;
 
-	addr.lo = bpf_cpu_to_be64(lo);
-	addr.hi = bpf_cpu_to_be64(hi);
+	addr.lo = htonll(lo);
+	addr.hi = htonll(hi);
 	err = bpf_lwt_seg6_action(skb, SEG6_LOCAL_ACTION_END_X,
 				  (void *)&addr, sizeof(addr));
 	if (err)

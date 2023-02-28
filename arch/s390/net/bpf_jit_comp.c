@@ -299,11 +299,9 @@ static inline void reg_set_seen(struct bpf_jit *jit, u32 b1)
 
 #define EMIT_ZERO(b1)						\
 ({								\
-	if (!fp->aux->verifier_zext) {				\
-		/* llgfr %dst,%dst (zero extend to 64 bit) */	\
-		EMIT4(0xb9160000, b1, b1);			\
-		REG_SET_SEEN(b1);				\
-	}							\
+	/* llgfr %dst,%dst (zero extend to 64 bit) */		\
+	EMIT4(0xb9160000, b1, b1);				\
+	REG_SET_SEEN(b1);					\
 })
 
 /*
@@ -502,8 +500,7 @@ static void bpf_jit_epilogue(struct bpf_jit *jit, u32 stack_depth)
  * NOTE: Use noinline because for gcov (-fprofile-arcs) gcc allocates a lot of
  * stack space for the large switch statement.
  */
-static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
-				 int i, bool extra_pass)
+static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp, int i)
 {
 	struct bpf_insn *insn = &fp->insnsi[i];
 	int jmp_off, last, insn_count = 1;
@@ -523,8 +520,6 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
 	case BPF_ALU | BPF_MOV | BPF_X: /* dst = (u32) src */
 		/* llgfr %dst,%src */
 		EMIT4(0xb9160000, dst_reg, src_reg);
-		if (insn_is_zext(&insn[1]))
-			insn_count = 2;
 		break;
 	case BPF_ALU64 | BPF_MOV | BPF_X: /* dst = src */
 		/* lgr %dst,%src */
@@ -533,8 +528,6 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
 	case BPF_ALU | BPF_MOV | BPF_K: /* dst = (u32) imm */
 		/* llilf %dst,imm */
 		EMIT6_IMM(0xc00f0000, dst_reg, imm);
-		if (insn_is_zext(&insn[1]))
-			insn_count = 2;
 		break;
 	case BPF_ALU64 | BPF_MOV | BPF_K: /* dst = imm */
 		/* lgfi %dst,imm */
@@ -646,8 +639,6 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
 		EMIT4(0xb9970000, REG_W0, src_reg);
 		/* llgfr %dst,%rc */
 		EMIT4(0xb9160000, dst_reg, rc_reg);
-		if (insn_is_zext(&insn[1]))
-			insn_count = 2;
 		break;
 	}
 	case BPF_ALU64 | BPF_DIV | BPF_X: /* dst = dst / src */
@@ -685,8 +676,6 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
 			      EMIT_CONST_U32(imm));
 		/* llgfr %dst,%rc */
 		EMIT4(0xb9160000, dst_reg, rc_reg);
-		if (insn_is_zext(&insn[1]))
-			insn_count = 2;
 		break;
 	}
 	case BPF_ALU64 | BPF_DIV | BPF_K: /* dst = dst / imm */
@@ -875,13 +864,10 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
 		case 16: /* dst = (u16) cpu_to_be16(dst) */
 			/* llghr %dst,%dst */
 			EMIT4(0xb9850000, dst_reg, dst_reg);
-			if (insn_is_zext(&insn[1]))
-				insn_count = 2;
 			break;
 		case 32: /* dst = (u32) cpu_to_be32(dst) */
-			if (!fp->aux->verifier_zext)
-				/* llgfr %dst,%dst */
-				EMIT4(0xb9160000, dst_reg, dst_reg);
+			/* llgfr %dst,%dst */
+			EMIT4(0xb9160000, dst_reg, dst_reg);
 			break;
 		case 64: /* dst = (u64) cpu_to_be64(dst) */
 			break;
@@ -896,15 +882,12 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
 			EMIT4_DISP(0x88000000, dst_reg, REG_0, 16);
 			/* llghr %dst,%dst */
 			EMIT4(0xb9850000, dst_reg, dst_reg);
-			if (insn_is_zext(&insn[1]))
-				insn_count = 2;
 			break;
 		case 32: /* dst = (u32) cpu_to_le32(dst) */
 			/* lrvr %dst,%dst */
 			EMIT4(0xb91f0000, dst_reg, dst_reg);
-			if (!fp->aux->verifier_zext)
-				/* llgfr %dst,%dst */
-				EMIT4(0xb9160000, dst_reg, dst_reg);
+			/* llgfr %dst,%dst */
+			EMIT4(0xb9160000, dst_reg, dst_reg);
 			break;
 		case 64: /* dst = (u64) cpu_to_le64(dst) */
 			/* lrvgr %dst,%dst */
@@ -985,22 +968,16 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
 		/* llgc %dst,0(off,%src) */
 		EMIT6_DISP_LH(0xe3000000, 0x0090, dst_reg, src_reg, REG_0, off);
 		jit->seen |= SEEN_MEM;
-		if (insn_is_zext(&insn[1]))
-			insn_count = 2;
 		break;
 	case BPF_LDX | BPF_MEM | BPF_H: /* dst = *(u16 *)(ul) (src + off) */
 		/* llgh %dst,0(off,%src) */
 		EMIT6_DISP_LH(0xe3000000, 0x0091, dst_reg, src_reg, REG_0, off);
 		jit->seen |= SEEN_MEM;
-		if (insn_is_zext(&insn[1]))
-			insn_count = 2;
 		break;
 	case BPF_LDX | BPF_MEM | BPF_W: /* dst = *(u32 *)(ul) (src + off) */
 		/* llgf %dst,off(%src) */
 		jit->seen |= SEEN_MEM;
 		EMIT6_DISP_LH(0xe3000000, 0x0016, dst_reg, src_reg, REG_0, off);
-		if (insn_is_zext(&insn[1]))
-			insn_count = 2;
 		break;
 	case BPF_LDX | BPF_MEM | BPF_DW: /* dst = *(u64 *)(ul) (src + off) */
 		/* lg %dst,0(off,%src) */
@@ -1012,14 +989,10 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
 	 */
 	case BPF_JMP | BPF_CALL:
 	{
-		u64 func;
-		bool func_addr_fixed;
-		int ret;
-
-		ret = bpf_jit_get_func_addr(fp, insn, extra_pass,
-					    &func, &func_addr_fixed);
-		if (ret < 0)
-			return -1;
+		/*
+		 * b0 = (__bpf_call_base + imm)(b1, b2, b3, b4, b5)
+		 */
+		const u64 func = (u64)__bpf_call_base + imm;
 
 		REG_SET_SEEN(BPF_REG_5);
 		jit->seen |= SEEN_FUNC;
@@ -1288,8 +1261,7 @@ branch_oc:
 /*
  * Compile eBPF program into s390x code
  */
-static int bpf_jit_prog(struct bpf_jit *jit, struct bpf_prog *fp,
-			bool extra_pass)
+static int bpf_jit_prog(struct bpf_jit *jit, struct bpf_prog *fp)
 {
 	int i, insn_count;
 
@@ -1298,7 +1270,7 @@ static int bpf_jit_prog(struct bpf_jit *jit, struct bpf_prog *fp,
 
 	bpf_jit_prologue(jit, fp->aux->stack_depth);
 	for (i = 0; i < fp->len; i += insn_count) {
-		insn_count = bpf_jit_insn(jit, fp, i, extra_pass);
+		insn_count = bpf_jit_insn(jit, fp, i);
 		if (insn_count < 0)
 			return -1;
 		/* Next instruction address */
@@ -1312,17 +1284,6 @@ static int bpf_jit_prog(struct bpf_jit *jit, struct bpf_prog *fp,
 	return 0;
 }
 
-bool bpf_jit_needs_zext(void)
-{
-	return true;
-}
-
-struct s390_jit_data {
-	struct bpf_binary_header *header;
-	struct bpf_jit ctx;
-	int pass;
-};
-
 /*
  * Compile eBPF program "fp"
  */
@@ -1330,9 +1291,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 {
 	struct bpf_prog *tmp, *orig_fp = fp;
 	struct bpf_binary_header *header;
-	struct s390_jit_data *jit_data;
 	bool tmp_blinded = false;
-	bool extra_pass = false;
 	struct bpf_jit jit;
 	int pass;
 
@@ -1351,23 +1310,6 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 		fp = tmp;
 	}
 
-	jit_data = fp->aux->jit_data;
-	if (!jit_data) {
-		jit_data = kzalloc(sizeof(*jit_data), GFP_KERNEL);
-		if (!jit_data) {
-			fp = orig_fp;
-			goto out;
-		}
-		fp->aux->jit_data = jit_data;
-	}
-	if (jit_data->ctx.addrs) {
-		jit = jit_data->ctx;
-		header = jit_data->header;
-		extra_pass = true;
-		pass = jit_data->pass + 1;
-		goto skip_init_ctx;
-	}
-
 	memset(&jit, 0, sizeof(jit));
 	jit.addrs = kcalloc(fp->len + 1, sizeof(*jit.addrs), GFP_KERNEL);
 	if (jit.addrs == NULL) {
@@ -1380,7 +1322,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 	 *   - 3:   Calculate program size and addrs arrray
 	 */
 	for (pass = 1; pass <= 3; pass++) {
-		if (bpf_jit_prog(&jit, fp, extra_pass)) {
+		if (bpf_jit_prog(&jit, fp)) {
 			fp = orig_fp;
 			goto free_addrs;
 		}
@@ -1392,14 +1334,12 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 		fp = orig_fp;
 		goto free_addrs;
 	}
-
 	header = bpf_jit_binary_alloc(jit.size, &jit.prg_buf, 2, jit_fill_hole);
 	if (!header) {
 		fp = orig_fp;
 		goto free_addrs;
 	}
-skip_init_ctx:
-	if (bpf_jit_prog(&jit, fp, extra_pass)) {
+	if (bpf_jit_prog(&jit, fp)) {
 		bpf_jit_binary_free(header);
 		fp = orig_fp;
 		goto free_addrs;
@@ -1408,24 +1348,12 @@ skip_init_ctx:
 		bpf_jit_dump(fp->len, jit.size, pass, jit.prg_buf);
 		print_fn_code(jit.prg_buf, jit.size_prg);
 	}
-	if (!fp->is_func || extra_pass) {
-		bpf_jit_binary_lock_ro(header);
-	} else {
-		jit_data->header = header;
-		jit_data->ctx = jit;
-		jit_data->pass = pass;
-	}
+	bpf_jit_binary_lock_ro(header);
 	fp->bpf_func = (void *) jit.prg_buf;
 	fp->jited = 1;
 	fp->jited_len = jit.size;
-
-	if (!fp->is_func || extra_pass) {
-		bpf_prog_fill_jited_linfo(fp, jit.addrs + 1);
 free_addrs:
-		kfree(jit.addrs);
-		kfree(jit_data);
-		fp->aux->jit_data = NULL;
-	}
+	kfree(jit.addrs);
 out:
 	if (tmp_blinded)
 		bpf_jit_prog_release_other(fp, fp == orig_fp ?

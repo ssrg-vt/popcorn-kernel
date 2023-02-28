@@ -6,11 +6,9 @@
 
 #include <linux/clk.h>
 #include <linux/debugfs.h>
-#include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/hdmi.h>
 #include <linux/math64.h>
-#include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
@@ -18,9 +16,6 @@
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_debugfs.h>
-#include <drm/drm_file.h>
-#include <drm/drm_fourcc.h>
 #include <drm/drm_probe_helper.h>
 
 #include "hda.h"

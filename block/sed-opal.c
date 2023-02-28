@@ -26,9 +26,6 @@
 #define IO_BUFFER_LENGTH 2048
 #define MAX_TOKS 64
 
-/* Number of bytes needed by cmd_finalize. */
-#define CMD_FINALIZE_BYTES_NEEDED 7
-
 struct opal_step {
 	int (*fn)(struct opal_dev *dev, void *data);
 	void *data;
@@ -129,8 +126,7 @@ static const u8 opaluid[][OPAL_UID_LENGTH] = {
 		{ 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x84, 0x01 },
 
 	/* tables */
-	[OPAL_TABLE_TABLE] =
-		{ 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01 },
+
 	[OPAL_LOCKINGRANGE_GLOBAL] =
 		{ 0x00, 0x00, 0x08, 0x02, 0x00, 0x00, 0x00, 0x01 },
 	[OPAL_LOCKINGRANGE_ACE_RDLOCKED] =
@@ -151,6 +147,7 @@ static const u8 opaluid[][OPAL_UID_LENGTH] = {
 		{ 0x00, 0x00, 0x08, 0x01, 0x00, 0x00, 0x00, 0x00 },
 
 	/* C_PIN_TABLE object ID's */
+
 	[OPAL_C_PIN_MSID] =
 		{ 0x00, 0x00, 0x00, 0x0B, 0x00, 0x00, 0x84, 0x02},
 	[OPAL_C_PIN_SID] =
@@ -159,6 +156,7 @@ static const u8 opaluid[][OPAL_UID_LENGTH] = {
 		{ 0x00, 0x00, 0x00, 0x0B, 0x00, 0x01, 0x00, 0x01},
 
 	/* half UID's (only first 4 bytes used) */
+
 	[OPAL_HALF_UID_AUTHORITY_OBJ_REF] =
 		{ 0x00, 0x00, 0x0C, 0x05, 0xff, 0xff, 0xff, 0xff },
 	[OPAL_HALF_UID_BOOLEAN_ACE] =
@@ -372,8 +370,8 @@ static void check_geometry(struct opal_dev *dev, const void *data)
 {
 	const struct d0_geometry_features *geo = data;
 
-	dev->align = be64_to_cpu(geo->alignment_granularity);
-	dev->lowest_lba = be64_to_cpu(geo->lowest_aligned_lba);
+	dev->align = geo->alignment_granularity;
+	dev->lowest_lba = geo->lowest_aligned_lba;
 }
 
 static int execute_step(struct opal_dev *dev,
@@ -514,7 +512,6 @@ static int opal_discovery0(struct opal_dev *dev, void *data)
 	ret = opal_recv_cmd(dev);
 	if (ret)
 		return ret;
-
 	return opal_discovery0_end(dev);
 }
 
@@ -523,13 +520,7 @@ static int opal_discovery0_step(struct opal_dev *dev)
 	const struct opal_step discovery0_step = {
 		opal_discovery0,
 	};
-
 	return execute_step(dev, &discovery0_step, 0);
-}
-
-static size_t remaining_size(struct opal_dev *cmd)
-{
-	return IO_BUFFER_LENGTH - cmd->pos;
 }
 
 static bool can_add(int *err, struct opal_dev *cmd, size_t len)
@@ -537,7 +528,7 @@ static bool can_add(int *err, struct opal_dev *cmd, size_t len)
 	if (*err)
 		return false;
 
-	if (remaining_size(cmd) < len) {
+	if (len > IO_BUFFER_LENGTH || cmd->pos > IO_BUFFER_LENGTH - len) {
 		pr_debug("Error adding %zu bytes: end of buffer.\n", len);
 		*err = -ERANGE;
 		return false;
@@ -550,7 +541,6 @@ static void add_token_u8(int *err, struct opal_dev *cmd, u8 tok)
 {
 	if (!can_add(err, cmd, 1))
 		return;
-
 	cmd->cmd[cmd->pos++] = tok;
 }
 
@@ -577,7 +567,6 @@ static void add_medium_atom_header(struct opal_dev *cmd, bool bytestring,
 	header0 |= bytestring ? MEDIUM_ATOM_BYTESTRING : 0;
 	header0 |= has_sign ? MEDIUM_ATOM_SIGNED : 0;
 	header0 |= (len >> 8) & MEDIUM_ATOM_LEN_MASK;
-
 	cmd->cmd[cmd->pos++] = header0;
 	cmd->cmd[cmd->pos++] = len;
 }
@@ -650,7 +639,6 @@ static int build_locking_range(u8 *buffer, size_t length, u8 lr)
 
 	if (lr == 0)
 		return 0;
-
 	buffer[5] = LOCKING_RANGE_NON_GLOBAL;
 	buffer[7] = lr;
 
@@ -686,11 +674,7 @@ static int cmd_finalize(struct opal_dev *cmd, u32 hsn, u32 tsn)
 	struct opal_header *hdr;
 	int err = 0;
 
-	/*
-	 * Close the parameter list opened from cmd_start.
-	 * The number of bytes added must be equal to
-	 * CMD_FINALIZE_BYTES_NEEDED.
-	 */
+	/* close the parameter list opened from cmd_start */
 	add_token_u8(&err, cmd, OPAL_ENDLIST);
 
 	add_token_u8(&err, cmd, OPAL_ENDOFDATA);
@@ -905,6 +889,10 @@ static int response_parse(const u8 *buf, size_t length,
 		num_entries++;
 	}
 
+	if (num_entries == 0) {
+		pr_debug("Couldn't parse response.\n");
+		return -EINVAL;
+	}
 	resp->num = num_entries;
 
 	return 0;
@@ -943,7 +931,6 @@ static size_t response_get_string(const struct parsed_resp *resp, int n,
 	}
 
 	*store = tok->pos + skip;
-
 	return tok->len - skip;
 }
 
@@ -1061,7 +1048,6 @@ static int start_opal_session_cont(struct opal_dev *dev)
 
 	dev->hsn = hsn;
 	dev->tsn = tsn;
-
 	return 0;
 }
 
@@ -1084,7 +1070,6 @@ static int end_session_cont(struct opal_dev *dev)
 {
 	dev->hsn = 0;
 	dev->tsn = 0;
-
 	return parse_and_check_status(dev);
 }
 
@@ -1134,29 +1119,6 @@ static int generic_get_column(struct opal_dev *dev, const u8 *table,
 	return finalize_and_send(dev, parse_and_check_status);
 }
 
-/*
- * see TCG SAS 5.3.2.3 for a description of the available columns
- *
- * the result is provided in dev->resp->tok[4]
- */
-static int generic_get_table_info(struct opal_dev *dev, enum opal_uid table,
-				  u64 column)
-{
-	u8 uid[OPAL_UID_LENGTH];
-	const unsigned int half = OPAL_UID_LENGTH/2;
-
-	/* sed-opal UIDs can be split in two halves:
-	 *  first:  actual table index
-	 *  second: relative index in the table
-	 * so we have to get the first half of the OPAL_TABLE_TABLE and use the
-	 * first part of the target table as relative index into that table
-	 */
-	memcpy(uid, opaluid[OPAL_TABLE_TABLE], half);
-	memcpy(uid+half, opaluid[table], half);
-
-	return generic_get_column(dev, uid, column);
-}
-
 static int gen_key(struct opal_dev *dev, void *data)
 {
 	u8 uid[OPAL_UID_LENGTH];
@@ -1173,7 +1135,6 @@ static int gen_key(struct opal_dev *dev, void *data)
 		return err;
 
 	}
-
 	return finalize_and_send(dev, parse_and_check_status);
 }
 
@@ -1186,14 +1147,12 @@ static int get_active_key_cont(struct opal_dev *dev)
 	error = parse_and_check_status(dev);
 	if (error)
 		return error;
-
 	keylen = response_get_string(&dev->parsed, 4, &activekey);
 	if (!activekey) {
 		pr_debug("%s: Couldn't extract the Activekey from the response\n",
 			 __func__);
 		return OPAL_INVAL_PARAM;
 	}
-
 	dev->prev_data = kmemdup(activekey, keylen, GFP_KERNEL);
 
 	if (!dev->prev_data)
@@ -1255,7 +1214,6 @@ static int generic_lr_enable_disable(struct opal_dev *dev,
 
 	add_token_u8(&err, dev, OPAL_ENDLIST);
 	add_token_u8(&err, dev, OPAL_ENDNAME);
-
 	return err;
 }
 
@@ -1268,7 +1226,6 @@ static inline int enable_global_lr(struct opal_dev *dev, u8 *uid,
 					0, 0);
 	if (err)
 		pr_debug("Failed to create enable global lr command\n");
-
 	return err;
 }
 
@@ -1319,6 +1276,7 @@ static int setup_locking_range(struct opal_dev *dev, void *data)
 	if (err) {
 		pr_debug("Error building Setup Locking range command.\n");
 		return err;
+
 	}
 
 	return finalize_and_send(dev, parse_and_check_status);
@@ -1349,7 +1307,6 @@ static int start_generic_opal_session(struct opal_dev *dev,
 		break;
 	case OPAL_ADMIN1_UID:
 	case OPAL_SID_UID:
-	case OPAL_PSID_UID:
 		add_token_u8(&err, dev, OPAL_STARTNAME);
 		add_token_u8(&err, dev, 0); /* HostChallenge */
 		add_token_bytestring(&err, dev, key, key_len);
@@ -1398,7 +1355,6 @@ static int start_SIDASP_opal_session(struct opal_dev *dev, void *data)
 		kfree(key);
 		dev->prev_data = NULL;
 	}
-
 	return ret;
 }
 
@@ -1409,16 +1365,6 @@ static int start_admin1LSP_opal_session(struct opal_dev *dev, void *data)
 	return start_generic_opal_session(dev, OPAL_ADMIN1_UID,
 					  OPAL_LOCKINGSP_UID,
 					  key->key, key->key_len);
-}
-
-static int start_PSID_opal_session(struct opal_dev *dev, void *data)
-{
-	const struct opal_key *okey = data;
-
-	return start_generic_opal_session(dev, OPAL_PSID_UID,
-					  OPAL_ADMINSP_UID,
-					  okey->key,
-					  okey->key_len);
 }
 
 static int start_auth_opal_session(struct opal_dev *dev, void *data)
@@ -1524,7 +1470,6 @@ static int erase_locking_range(struct opal_dev *dev, void *data)
 		pr_debug("Error building Erase Locking Range Command.\n");
 		return err;
 	}
-
 	return finalize_and_send(dev, parse_and_check_status);
 }
 
@@ -1578,73 +1523,6 @@ static int set_mbr_enable_disable(struct opal_dev *dev, void *data)
 	}
 
 	return finalize_and_send(dev, parse_and_check_status);
-}
-
-static int write_shadow_mbr(struct opal_dev *dev, void *data)
-{
-	struct opal_shadow_mbr *shadow = data;
-	const u8 __user *src;
-	u8 *dst;
-	size_t off = 0;
-	u64 len;
-	int err = 0;
-
-	/* do we fit in the available shadow mbr space? */
-	err = generic_get_table_info(dev, OPAL_MBR, OPAL_TABLE_ROWS);
-	if (err) {
-		pr_debug("MBR: could not get shadow size\n");
-		return err;
-	}
-
-	len = response_get_u64(&dev->parsed, 4);
-	if (shadow->size > len || shadow->offset > len - shadow->size) {
-		pr_debug("MBR: does not fit in shadow (%llu vs. %llu)\n",
-			 shadow->offset + shadow->size, len);
-		return -ENOSPC;
-	}
-
-	/* do the actual transmission(s) */
-	src = (u8 __user *)(uintptr_t)shadow->data;
-	while (off < shadow->size) {
-		err = cmd_start(dev, opaluid[OPAL_MBR], opalmethod[OPAL_SET]);
-		add_token_u8(&err, dev, OPAL_STARTNAME);
-		add_token_u8(&err, dev, OPAL_WHERE);
-		add_token_u64(&err, dev, shadow->offset + off);
-		add_token_u8(&err, dev, OPAL_ENDNAME);
-
-		add_token_u8(&err, dev, OPAL_STARTNAME);
-		add_token_u8(&err, dev, OPAL_VALUES);
-
-		/*
-		 * The bytestring header is either 1 or 2 bytes, so assume 2.
-		 * There also needs to be enough space to accommodate the
-		 * trailing OPAL_ENDNAME (1 byte) and tokens added by
-		 * cmd_finalize.
-		 */
-		len = min(remaining_size(dev) - (2+1+CMD_FINALIZE_BYTES_NEEDED),
-			  (size_t)(shadow->size - off));
-		pr_debug("MBR: write bytes %zu+%llu/%llu\n",
-			 off, len, shadow->size);
-
-		dst = add_bytestring_header(&err, dev, len);
-		if (!dst)
-			break;
-		if (copy_from_user(dst, src + off, len))
-			err = -EFAULT;
-		dev->pos += len;
-
-		add_token_u8(&err, dev, OPAL_ENDNAME);
-		if (err)
-			break;
-
-		err = finalize_and_send(dev, parse_and_check_status);
-		if (err)
-			break;
-
-		off += len;
-	}
-
-	return err;
 }
 
 static int generic_pw_cmd(u8 *key, size_t key_len, u8 *cpin_uid,
@@ -1824,7 +1702,6 @@ static int lock_unlock_locking_range(struct opal_dev *dev, void *data)
 		pr_debug("Error building SET command.\n");
 		return err;
 	}
-
 	return finalize_and_send(dev, parse_and_check_status);
 }
 
@@ -1866,7 +1743,6 @@ static int lock_unlock_locking_range_sum(struct opal_dev *dev, void *data)
 		pr_debug("Error building SET command.\n");
 		return ret;
 	}
-
 	return finalize_and_send(dev, parse_and_check_status);
 }
 
@@ -1967,7 +1843,6 @@ static int end_opal_session(struct opal_dev *dev, void *data)
 
 	if (err < 0)
 		return err;
-
 	return finalize_and_send(dev, end_session_cont);
 }
 
@@ -1976,7 +1851,6 @@ static int end_opal_session_error(struct opal_dev *dev)
 	const struct opal_step error_end_session = {
 		end_opal_session,
 	};
-
 	return execute_step(dev, &error_end_session, 0);
 }
 
@@ -1996,7 +1870,6 @@ static int check_opal_support(struct opal_dev *dev)
 	ret = opal_discovery0_step(dev);
 	dev->supported = !ret;
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2017,7 +1890,6 @@ void free_opal_dev(struct opal_dev *dev)
 {
 	if (!dev)
 		return;
-
 	clean_opal_dev(dev);
 	kfree(dev);
 }
@@ -2040,7 +1912,6 @@ struct opal_dev *init_opal_dev(void *data, sec_send_recv *send_recv)
 		kfree(dev);
 		return NULL;
 	}
-
 	return dev;
 }
 EXPORT_SYMBOL(init_opal_dev);
@@ -2060,7 +1931,6 @@ static int opal_secure_erase_locking_range(struct opal_dev *dev,
 	setup_opal_dev(dev);
 	ret = execute_steps(dev, erase_steps, ARRAY_SIZE(erase_steps));
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2078,7 +1948,6 @@ static int opal_erase_locking_range(struct opal_dev *dev,
 	setup_opal_dev(dev);
 	ret = execute_steps(dev, erase_steps, ARRAY_SIZE(erase_steps));
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2106,53 +1975,6 @@ static int opal_enable_disable_shadow_mbr(struct opal_dev *dev,
 	setup_opal_dev(dev);
 	ret = execute_steps(dev, mbr_steps, ARRAY_SIZE(mbr_steps));
 	mutex_unlock(&dev->dev_lock);
-
-	return ret;
-}
-
-static int opal_set_mbr_done(struct opal_dev *dev,
-			     struct opal_mbr_done *mbr_done)
-{
-	u8 mbr_done_tf = mbr_done->done_flag == OPAL_MBR_DONE ?
-		OPAL_TRUE : OPAL_FALSE;
-
-	const struct opal_step mbr_steps[] = {
-		{ start_admin1LSP_opal_session, &mbr_done->key },
-		{ set_mbr_done, &mbr_done_tf },
-		{ end_opal_session, }
-	};
-	int ret;
-
-	if (mbr_done->done_flag != OPAL_MBR_DONE &&
-	    mbr_done->done_flag != OPAL_MBR_NOT_DONE)
-		return -EINVAL;
-
-	mutex_lock(&dev->dev_lock);
-	setup_opal_dev(dev);
-	ret = execute_steps(dev, mbr_steps, ARRAY_SIZE(mbr_steps));
-	mutex_unlock(&dev->dev_lock);
-
-	return ret;
-}
-
-static int opal_write_shadow_mbr(struct opal_dev *dev,
-				 struct opal_shadow_mbr *info)
-{
-	const struct opal_step mbr_steps[] = {
-		{ start_admin1LSP_opal_session, &info->key },
-		{ write_shadow_mbr, info },
-		{ end_opal_session, }
-	};
-	int ret;
-
-	if (info->size == 0)
-		return 0;
-
-	mutex_lock(&dev->dev_lock);
-	setup_opal_dev(dev);
-	ret = execute_steps(dev, mbr_steps, ARRAY_SIZE(mbr_steps));
-	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2171,7 +1993,6 @@ static int opal_save(struct opal_dev *dev, struct opal_lock_unlock *lk_unlk)
 	setup_opal_dev(dev);
 	add_suspend_info(dev, suspend);
 	mutex_unlock(&dev->dev_lock);
-
 	return 0;
 }
 
@@ -2190,14 +2011,12 @@ static int opal_add_user_to_lr(struct opal_dev *dev,
 		pr_debug("Locking state was not RO or RW\n");
 		return -EINVAL;
 	}
-
 	if (lk_unlk->session.who < OPAL_USER1 ||
 	    lk_unlk->session.who > OPAL_USER9) {
 		pr_debug("Authority was not within the range of users: %d\n",
 			 lk_unlk->session.who);
 		return -EINVAL;
 	}
-
 	if (lk_unlk->session.sum) {
 		pr_debug("%s not supported in sum. Use setup locking range\n",
 			 __func__);
@@ -2208,32 +2027,20 @@ static int opal_add_user_to_lr(struct opal_dev *dev,
 	setup_opal_dev(dev);
 	ret = execute_steps(dev, steps, ARRAY_SIZE(steps));
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
-static int opal_reverttper(struct opal_dev *dev, struct opal_key *opal, bool psid)
+static int opal_reverttper(struct opal_dev *dev, struct opal_key *opal)
 {
-	/* controller will terminate session */
 	const struct opal_step revert_steps[] = {
 		{ start_SIDASP_opal_session, opal },
-		{ revert_tper, }
+		{ revert_tper, } /* controller will terminate session */
 	};
-	const struct opal_step psid_revert_steps[] = {
-		{ start_PSID_opal_session, opal },
-		{ revert_tper, }
-	};
-
 	int ret;
 
 	mutex_lock(&dev->dev_lock);
 	setup_opal_dev(dev);
-	if (psid)
-		ret = execute_steps(dev, psid_revert_steps,
-				    ARRAY_SIZE(psid_revert_steps));
-	else
-		ret = execute_steps(dev, revert_steps,
-				    ARRAY_SIZE(revert_steps));
+	ret = execute_steps(dev, revert_steps, ARRAY_SIZE(revert_steps));
 	mutex_unlock(&dev->dev_lock);
 
 	/*
@@ -2285,13 +2092,13 @@ static int opal_lock_unlock(struct opal_dev *dev,
 {
 	int ret;
 
-	if (lk_unlk->session.who > OPAL_USER9)
+	if (lk_unlk->session.who < OPAL_ADMIN1 ||
+	    lk_unlk->session.who > OPAL_USER9)
 		return -EINVAL;
 
 	mutex_lock(&dev->dev_lock);
 	ret = __opal_lock_unlock(dev, lk_unlk);
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2314,7 +2121,6 @@ static int opal_take_ownership(struct opal_dev *dev, struct opal_key *opal)
 	setup_opal_dev(dev);
 	ret = execute_steps(dev, owner_steps, ARRAY_SIZE(owner_steps));
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2336,7 +2142,6 @@ static int opal_activate_lsp(struct opal_dev *dev,
 	setup_opal_dev(dev);
 	ret = execute_steps(dev, active_steps, ARRAY_SIZE(active_steps));
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2354,7 +2159,6 @@ static int opal_setup_locking_range(struct opal_dev *dev,
 	setup_opal_dev(dev);
 	ret = execute_steps(dev, lr_steps, ARRAY_SIZE(lr_steps));
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2367,7 +2171,9 @@ static int opal_set_new_pw(struct opal_dev *dev, struct opal_new_pw *opal_pw)
 	};
 	int ret;
 
-	if (opal_pw->session.who > OPAL_USER9  ||
+	if (opal_pw->session.who < OPAL_ADMIN1 ||
+	    opal_pw->session.who > OPAL_USER9  ||
+	    opal_pw->new_user_pw.who < OPAL_ADMIN1 ||
 	    opal_pw->new_user_pw.who > OPAL_USER9)
 		return -EINVAL;
 
@@ -2375,7 +2181,6 @@ static int opal_set_new_pw(struct opal_dev *dev, struct opal_new_pw *opal_pw)
 	setup_opal_dev(dev);
 	ret = execute_steps(dev, pw_steps, ARRAY_SIZE(pw_steps));
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2400,7 +2205,6 @@ static int opal_activate_user(struct opal_dev *dev,
 	setup_opal_dev(dev);
 	ret = execute_steps(dev, act_steps, ARRAY_SIZE(act_steps));
 	mutex_unlock(&dev->dev_lock);
-
 	return ret;
 }
 
@@ -2412,7 +2216,6 @@ bool opal_unlock_from_suspend(struct opal_dev *dev)
 
 	if (!dev)
 		return false;
-
 	if (!dev->supported)
 		return false;
 
@@ -2430,7 +2233,6 @@ bool opal_unlock_from_suspend(struct opal_dev *dev)
 				 suspend->unlk.session.sum);
 			was_failure = true;
 		}
-
 		if (dev->mbr_enabled) {
 			ret = __opal_set_mbr_done(dev, &suspend->unlk.session.opal_key);
 			if (ret)
@@ -2438,7 +2240,6 @@ bool opal_unlock_from_suspend(struct opal_dev *dev)
 		}
 	}
 	mutex_unlock(&dev->dev_lock);
-
 	return was_failure;
 }
 EXPORT_SYMBOL(opal_unlock_from_suspend);
@@ -2479,7 +2280,7 @@ int sed_ioctl(struct opal_dev *dev, unsigned int cmd, void __user *arg)
 		ret = opal_activate_user(dev, p);
 		break;
 	case IOC_OPAL_REVERT_TPR:
-		ret = opal_reverttper(dev, p, false);
+		ret = opal_reverttper(dev, p);
 		break;
 	case IOC_OPAL_LR_SETUP:
 		ret = opal_setup_locking_range(dev, p);
@@ -2490,20 +2291,11 @@ int sed_ioctl(struct opal_dev *dev, unsigned int cmd, void __user *arg)
 	case IOC_OPAL_ENABLE_DISABLE_MBR:
 		ret = opal_enable_disable_shadow_mbr(dev, p);
 		break;
-	case IOC_OPAL_MBR_DONE:
-		ret = opal_set_mbr_done(dev, p);
-		break;
-	case IOC_OPAL_WRITE_SHADOW_MBR:
-		ret = opal_write_shadow_mbr(dev, p);
-		break;
 	case IOC_OPAL_ERASE_LR:
 		ret = opal_erase_locking_range(dev, p);
 		break;
 	case IOC_OPAL_SECURE_ERASE_LR:
 		ret = opal_secure_erase_locking_range(dev, p);
-		break;
-	case IOC_OPAL_PSID_REVERT_TPR:
-		ret = opal_reverttper(dev, p, true);
 		break;
 	default:
 		break;

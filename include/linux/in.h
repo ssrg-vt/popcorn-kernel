@@ -63,7 +63,7 @@ static inline bool ipv4_is_all_snoopers(__be32 addr)
 
 static inline bool ipv4_is_zeronet(__be32 addr)
 {
-	return (addr == 0);
+	return (addr & htonl(0xff000000)) == htonl(0x00000000);
 }
 
 /* Special-Use IPv4 Addresses (RFC3330) */

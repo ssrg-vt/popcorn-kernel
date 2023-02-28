@@ -181,8 +181,7 @@ static void ssip_skb_to_msg(struct sk_buff *skb, struct hsi_msg *msg)
 		sg = sg_next(sg);
 		BUG_ON(!sg);
 		frag = &skb_shinfo(skb)->frags[i];
-		sg_set_page(sg, skb_frag_page(frag), skb_frag_size(frag),
-				skb_frag_off(frag));
+		sg_set_page(sg, frag->page.p, frag->size, frag->page_offset);
 	}
 }
 
@@ -291,7 +290,7 @@ static void ssip_set_rxstate(struct ssi_protocol *ssi, unsigned int state)
 		/* CMT speech workaround */
 		if (atomic_read(&ssi->tx_usecnt))
 			break;
-		/* Else, fall through */
+		/* Otherwise fall through */
 	case RECEIVING:
 		mod_timer(&ssi->keep_alive, jiffies +
 						msecs_to_jiffies(SSIP_KATOUT));
@@ -466,10 +465,9 @@ static void ssip_keep_alive(struct timer_list *t)
 		case SEND_READY:
 			if (atomic_read(&ssi->tx_usecnt) == 0)
 				break;
-			/* Fall through */
 			/*
-			 * Workaround for cmt-speech in that case
-			 * we relay on audio timers.
+			 * Fall through. Workaround for cmt-speech
+			 * in that case we relay on audio timers.
 			 */
 		case SEND_IDLE:
 			spin_unlock(&ssi->lock);

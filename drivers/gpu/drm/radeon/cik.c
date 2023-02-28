@@ -21,22 +21,18 @@
  *
  * Authors: Alex Deucher
  */
-
 #include <linux/firmware.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-
-#include <drm/drm_pci.h>
-#include <drm/drm_vblank.h>
-
-#include "atom.h"
-#include "cik_blit_shaders.h"
-#include "cikd.h"
-#include "clearstate_ci.h"
+#include <drm/drmP.h>
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "radeon_audio.h"
+#include "cikd.h"
+#include "atom.h"
+#include "cik_blit_shaders.h"
 #include "radeon_ucode.h"
+#include "clearstate_ci.h"
 
 #define SH_MEM_CONFIG_GFX_DEFAULT \
 	ALIGNMENT_MODE(SH_MEM_ALIGNMENT_MODE_UNALIGNED)
@@ -3484,7 +3480,7 @@ int cik_ring_test(struct radeon_device *rdev, struct radeon_ring *ring)
 		tmp = RREG32(scratch);
 		if (tmp == 0xDEADBEEF)
 			break;
-		udelay(1);
+		DRM_UDELAY(1);
 	}
 	if (i < rdev->usec_timeout) {
 		DRM_INFO("ring test on %d succeeded in %d usecs\n", ring->idx, i);
@@ -3659,7 +3655,7 @@ bool cik_semaphore_ring_emit(struct radeon_device *rdev,
 struct radeon_fence *cik_copy_cpdma(struct radeon_device *rdev,
 				    uint64_t src_offset, uint64_t dst_offset,
 				    unsigned num_gpu_pages,
-				    struct dma_resv *resv)
+				    struct reservation_object *resv)
 {
 	struct radeon_fence *fence;
 	struct radeon_sync sync;
@@ -3829,7 +3825,7 @@ int cik_ib_test(struct radeon_device *rdev, struct radeon_ring *ring)
 		tmp = RREG32(scratch);
 		if (tmp == 0xDEADBEEF)
 			break;
-		udelay(1);
+		DRM_UDELAY(1);
 	}
 	if (i < rdev->usec_timeout) {
 		DRM_INFO("ib test on ring %d succeeded in %u usecs\n", ib.fence->ring, i);

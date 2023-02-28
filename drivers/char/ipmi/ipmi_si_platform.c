@@ -427,7 +427,7 @@ static int ipmi_remove(struct platform_device *pdev)
 	return ipmi_si_remove_by_dev(&pdev->dev);
 }
 
-static int pdev_match_name(struct device *dev, const void *data)
+static int pdev_match_name(struct device *dev, void *data)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	const char *name = data;
@@ -444,7 +444,6 @@ void ipmi_remove_platform_device_by_name(char *name)
 		struct platform_device *pdev = to_platform_device(dev);
 
 		platform_device_unregister(pdev);
-		put_device(dev);
 	}
 }
 
@@ -457,7 +456,7 @@ static const struct platform_device_id si_plat_ids[] = {
 
 struct platform_driver ipmi_platform_driver = {
 	.driver = {
-		.name = SI_DEVICE_NAME,
+		.name = DEVICE_NAME,
 		.of_match_table = of_ipmi_match,
 		.acpi_match_table = ACPI_PTR(acpi_ipmi_match),
 	},

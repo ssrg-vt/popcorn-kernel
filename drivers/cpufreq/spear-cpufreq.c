@@ -153,9 +153,8 @@ static int spear_cpufreq_target(struct cpufreq_policy *policy,
 static int spear_cpufreq_init(struct cpufreq_policy *policy)
 {
 	policy->clk = spear_cpufreq.clk;
-	cpufreq_generic_init(policy, spear_cpufreq.freq_tbl,
+	return cpufreq_generic_init(policy, spear_cpufreq.freq_tbl,
 			spear_cpufreq.transition_latency);
-	return 0;
 }
 
 static struct cpufreq_driver spear_cpufreq_driver = {

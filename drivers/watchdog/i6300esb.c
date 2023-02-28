@@ -315,8 +315,11 @@ static int esb_probe(struct pci_dev *pdev,
 
 	/* Register the watchdog so that userspace has access to it */
 	ret = watchdog_register_device(&edev->wdd);
-	if (ret != 0)
+	if (ret != 0) {
+		dev_err(&pdev->dev,
+			"cannot register watchdog device (err=%d)\n", ret);
 		goto err_unmap;
+	}
 	dev_info(&pdev->dev,
 		"initialized. heartbeat=%d sec (nowayout=%d)\n",
 		edev->wdd.timeout, nowayout);

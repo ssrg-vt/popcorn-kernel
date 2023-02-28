@@ -1095,7 +1095,7 @@ static struct packet_type ieee802154_packet_type = {
 
 static int __init af_ieee802154_init(void)
 {
-	int rc;
+	int rc = -EINVAL;
 
 	rc = proto_register(&ieee802154_raw_prot, 1);
 	if (rc)

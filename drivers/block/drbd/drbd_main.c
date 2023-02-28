@@ -322,8 +322,6 @@ static int drbd_thread_setup(void *arg)
 		 thi->name[0],
 		 resource->name);
 
-	allow_kernel_signal(DRBD_SIGKILL);
-	allow_kernel_signal(SIGXCPU);
 restart:
 	retval = thi->function(thi);
 
@@ -467,7 +465,7 @@ void _drbd_thread_stop(struct drbd_thread *thi, int restart, int wait)
 		smp_mb();
 		init_completion(&thi->stop);
 		if (thi->task != current)
-			send_sig(DRBD_SIGKILL, thi->task, 1);
+			force_sig(DRBD_SIGKILL, thi->task);
 	}
 
 	spin_unlock_irqrestore(&thi->t_lock, flags);
@@ -786,6 +784,7 @@ int __drbd_send_protocol(struct drbd_connection *connection, enum drbd_packet cm
 
 	if (nc->tentative && connection->agreed_pro_version < 92) {
 		rcu_read_unlock();
+		mutex_unlock(&sock->mutex);
 		drbd_err(connection, "--dry-run is not supported by peer");
 		return -EOPNOTSUPP;
 	}
@@ -3010,7 +3009,8 @@ static int __init drbd_init(void)
 	spin_lock_init(&retry.lock);
 	INIT_LIST_HEAD(&retry.writes);
 
-	drbd_debugfs_init();
+	if (drbd_debugfs_init())
+		pr_notice("failed to initialize debugfs -- will not be available\n");
 
 	pr_info("initialized. "
 	       "Version: " REL_VERSION " (api:%d/proto:%d-%d)\n",

@@ -314,11 +314,25 @@ static const struct file_operations batadv_fops = {
 /**
  * batadv_socket_setup() - Create debugfs "socket" file
  * @bat_priv: the bat priv with all the soft interface information
+ *
+ * Return: 0 on success or negative error number in case of failure
  */
-void batadv_socket_setup(struct batadv_priv *bat_priv)
+int batadv_socket_setup(struct batadv_priv *bat_priv)
 {
-	debugfs_create_file(BATADV_ICMP_SOCKET, 0600, bat_priv->debug_dir,
-			    bat_priv, &batadv_fops);
+	struct dentry *d;
+
+	if (!bat_priv->debug_dir)
+		goto err;
+
+	d = debugfs_create_file(BATADV_ICMP_SOCKET, 0600, bat_priv->debug_dir,
+				bat_priv, &batadv_fops);
+	if (!d)
+		goto err;
+
+	return 0;
+
+err:
+	return -ENOMEM;
 }
 
 /**

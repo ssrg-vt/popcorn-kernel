@@ -138,7 +138,7 @@ static int sprd_rtc_lock_alarm(struct sprd_rtc *rtc, bool lock)
 	if (ret)
 		return ret;
 
-	val &= ~SPRD_RTC_ALMLOCK_MASK;
+	val &= ~(SPRD_RTC_ALMLOCK_MASK | SPRD_RTC_POWEROFF_ALM_FLAG);
 	if (lock)
 		val |= SPRD_RTC_ALM_LOCK;
 	else
@@ -614,8 +614,10 @@ static int sprd_rtc_probe(struct platform_device *pdev)
 	}
 
 	rtc->irq = platform_get_irq(pdev, 0);
-	if (rtc->irq < 0)
+	if (rtc->irq < 0) {
+		dev_err(&pdev->dev, "failed to get RTC irq number\n");
 		return rtc->irq;
+	}
 
 	rtc->rtc = devm_rtc_allocate_device(&pdev->dev);
 	if (IS_ERR(rtc->rtc))
@@ -654,6 +656,7 @@ static int sprd_rtc_probe(struct platform_device *pdev)
 	rtc->rtc->range_max = 5662310399LL;
 	ret = rtc_register_device(rtc->rtc);
 	if (ret) {
+		dev_err(&pdev->dev, "failed to register rtc device\n");
 		device_init_wakeup(&pdev->dev, 0);
 		return ret;
 	}

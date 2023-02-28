@@ -4,7 +4,7 @@
  * Copyright (C) 2015 Naveen N. Rao, IBM Corporation
  */
 
-#include "dso.h"
+#include "debug.h"
 #include "symbol.h"
 #include "map.h"
 #include "probe-event.h"

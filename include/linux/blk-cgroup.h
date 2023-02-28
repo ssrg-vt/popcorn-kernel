@@ -63,15 +63,17 @@ struct blkcg {
 
 /*
  * blkg_[rw]stat->aux_cnt is excluded for local stats but included for
- * recursive.  Used to carry stats of dead children.
+ * recursive.  Used to carry stats of dead children, and, for blkg_rwstat,
+ * to carry result values from read and sum operations.
  */
+struct blkg_stat {
+	struct percpu_counter		cpu_cnt;
+	atomic64_t			aux_cnt;
+};
+
 struct blkg_rwstat {
 	struct percpu_counter		cpu_cnt[BLKG_RWSTAT_NR];
 	atomic64_t			aux_cnt[BLKG_RWSTAT_NR];
-};
-
-struct blkg_rwstat_sample {
-	u64				cnt[BLKG_RWSTAT_NR];
 };
 
 /*
@@ -132,25 +134,20 @@ struct blkcg_gq {
 
 	struct blkg_policy_data		*pd[BLKCG_MAX_POLS];
 
-	spinlock_t			async_bio_lock;
-	struct bio_list			async_bios;
-	struct work_struct		async_bio_work;
+	struct rcu_head			rcu_head;
 
 	atomic_t			use_delay;
 	atomic64_t			delay_nsec;
 	atomic64_t			delay_start;
 	u64				last_delay;
 	int				last_use;
-
-	struct rcu_head			rcu_head;
 };
 
 typedef struct blkcg_policy_data *(blkcg_pol_alloc_cpd_fn)(gfp_t gfp);
 typedef void (blkcg_pol_init_cpd_fn)(struct blkcg_policy_data *cpd);
 typedef void (blkcg_pol_free_cpd_fn)(struct blkcg_policy_data *cpd);
 typedef void (blkcg_pol_bind_cpd_fn)(struct blkcg_policy_data *cpd);
-typedef struct blkg_policy_data *(blkcg_pol_alloc_pd_fn)(gfp_t gfp,
-				struct request_queue *q, struct blkcg *blkcg);
+typedef struct blkg_policy_data *(blkcg_pol_alloc_pd_fn)(gfp_t gfp, int node);
 typedef void (blkcg_pol_init_pd_fn)(struct blkg_policy_data *pd);
 typedef void (blkcg_pol_online_pd_fn)(struct blkg_policy_data *pd);
 typedef void (blkcg_pol_offline_pd_fn)(struct blkg_policy_data *pd);
@@ -182,7 +179,6 @@ struct blkcg_policy {
 
 extern struct blkcg blkcg_root;
 extern struct cgroup_subsys_state * const blkcg_root_css;
-extern bool blkcg_debug_stats;
 
 struct blkcg_gq *blkg_lookup_slowpath(struct blkcg *blkcg,
 				      struct request_queue *q, bool update_hint);
@@ -202,13 +198,6 @@ int blkcg_activate_policy(struct request_queue *q,
 void blkcg_deactivate_policy(struct request_queue *q,
 			     const struct blkcg_policy *pol);
 
-static inline u64 blkg_rwstat_read_counter(struct blkg_rwstat *rwstat,
-		unsigned int idx)
-{
-	return atomic64_read(&rwstat->aux_cnt[idx]) +
-		percpu_counter_sum_positive(&rwstat->cpu_cnt[idx]);
-}
-
 const char *blkg_dev_name(struct blkcg_gq *blkg);
 void blkcg_print_blkgs(struct seq_file *sf, struct blkcg *blkcg,
 		       u64 (*prfill)(struct seq_file *,
@@ -217,7 +206,8 @@ void blkcg_print_blkgs(struct seq_file *sf, struct blkcg *blkcg,
 		       bool show_total);
 u64 __blkg_prfill_u64(struct seq_file *sf, struct blkg_policy_data *pd, u64 v);
 u64 __blkg_prfill_rwstat(struct seq_file *sf, struct blkg_policy_data *pd,
-			 const struct blkg_rwstat_sample *rwstat);
+			 const struct blkg_rwstat *rwstat);
+u64 blkg_prfill_stat(struct seq_file *sf, struct blkg_policy_data *pd, int off);
 u64 blkg_prfill_rwstat(struct seq_file *sf, struct blkg_policy_data *pd,
 		       int off);
 int blkg_print_stat_bytes(struct seq_file *sf, void *v);
@@ -225,8 +215,10 @@ int blkg_print_stat_ios(struct seq_file *sf, void *v);
 int blkg_print_stat_bytes_recursive(struct seq_file *sf, void *v);
 int blkg_print_stat_ios_recursive(struct seq_file *sf, void *v);
 
-void blkg_rwstat_recursive_sum(struct blkcg_gq *blkg, struct blkcg_policy *pol,
-		int off, struct blkg_rwstat_sample *sum);
+u64 blkg_stat_recursive_sum(struct blkcg_gq *blkg,
+			    struct blkcg_policy *pol, int off);
+struct blkg_rwstat blkg_rwstat_recursive_sum(struct blkcg_gq *blkg,
+					     struct blkcg_policy *pol, int off);
 
 struct blkg_conf_ctx {
 	struct gendisk			*disk;
@@ -234,7 +226,6 @@ struct blkg_conf_ctx {
 	char				*body;
 };
 
-struct gendisk *blkcg_conf_get_disk(char **inputp);
 int blkg_conf_prep(struct blkcg *blkcg, const struct blkcg_policy *pol,
 		   char *input, struct blkg_conf_ctx *ctx);
 void blkg_conf_finish(struct blkg_conf_ctx *ctx);
@@ -377,7 +368,7 @@ static inline struct blkcg_gq *__blkg_lookup(struct blkcg *blkcg,
  * @q: request_queue of interest
  *
  * Lookup blkg for the @blkcg - @q pair.  This function should be called
- * under RCU read lock.
+ * under RCU read loc.
  */
 static inline struct blkcg_gq *blkg_lookup(struct blkcg *blkcg,
 					   struct request_queue *q)
@@ -578,6 +569,69 @@ static inline void blkg_put(struct blkcg_gq *blkg)
 		if (((d_blkg) = __blkg_lookup(css_to_blkcg(pos_css),	\
 					      (p_blkg)->q, false)))
 
+static inline int blkg_stat_init(struct blkg_stat *stat, gfp_t gfp)
+{
+	int ret;
+
+	ret = percpu_counter_init(&stat->cpu_cnt, 0, gfp);
+	if (ret)
+		return ret;
+
+	atomic64_set(&stat->aux_cnt, 0);
+	return 0;
+}
+
+static inline void blkg_stat_exit(struct blkg_stat *stat)
+{
+	percpu_counter_destroy(&stat->cpu_cnt);
+}
+
+/**
+ * blkg_stat_add - add a value to a blkg_stat
+ * @stat: target blkg_stat
+ * @val: value to add
+ *
+ * Add @val to @stat.  The caller must ensure that IRQ on the same CPU
+ * don't re-enter this function for the same counter.
+ */
+static inline void blkg_stat_add(struct blkg_stat *stat, uint64_t val)
+{
+	percpu_counter_add_batch(&stat->cpu_cnt, val, BLKG_STAT_CPU_BATCH);
+}
+
+/**
+ * blkg_stat_read - read the current value of a blkg_stat
+ * @stat: blkg_stat to read
+ */
+static inline uint64_t blkg_stat_read(struct blkg_stat *stat)
+{
+	return percpu_counter_sum_positive(&stat->cpu_cnt);
+}
+
+/**
+ * blkg_stat_reset - reset a blkg_stat
+ * @stat: blkg_stat to reset
+ */
+static inline void blkg_stat_reset(struct blkg_stat *stat)
+{
+	percpu_counter_set(&stat->cpu_cnt, 0);
+	atomic64_set(&stat->aux_cnt, 0);
+}
+
+/**
+ * blkg_stat_add_aux - add a blkg_stat into another's aux count
+ * @to: the destination blkg_stat
+ * @from: the source
+ *
+ * Add @from's count including the aux one to @to's aux count.
+ */
+static inline void blkg_stat_add_aux(struct blkg_stat *to,
+				     struct blkg_stat *from)
+{
+	atomic64_add(blkg_stat_read(from) + atomic64_read(&from->aux_cnt),
+		     &to->aux_cnt);
+}
+
 static inline int blkg_rwstat_init(struct blkg_rwstat *rwstat, gfp_t gfp)
 {
 	int i, ret;
@@ -639,14 +693,15 @@ static inline void blkg_rwstat_add(struct blkg_rwstat *rwstat,
  *
  * Read the current snapshot of @rwstat and return it in the aux counts.
  */
-static inline void blkg_rwstat_read(struct blkg_rwstat *rwstat,
-		struct blkg_rwstat_sample *result)
+static inline struct blkg_rwstat blkg_rwstat_read(struct blkg_rwstat *rwstat)
 {
+	struct blkg_rwstat result;
 	int i;
 
 	for (i = 0; i < BLKG_RWSTAT_NR; i++)
-		result->cnt[i] =
-			percpu_counter_sum_positive(&rwstat->cpu_cnt[i]);
+		atomic64_set(&result.aux_cnt[i],
+			     percpu_counter_sum_positive(&rwstat->cpu_cnt[i]));
+	return result;
 }
 
 /**
@@ -659,10 +714,10 @@ static inline void blkg_rwstat_read(struct blkg_rwstat *rwstat,
  */
 static inline uint64_t blkg_rwstat_total(struct blkg_rwstat *rwstat)
 {
-	struct blkg_rwstat_sample tmp = { };
+	struct blkg_rwstat tmp = blkg_rwstat_read(rwstat);
 
-	blkg_rwstat_read(rwstat, &tmp);
-	return tmp.cnt[BLKG_RWSTAT_READ] + tmp.cnt[BLKG_RWSTAT_WRITE];
+	return atomic64_read(&tmp.aux_cnt[BLKG_RWSTAT_READ]) +
+		atomic64_read(&tmp.aux_cnt[BLKG_RWSTAT_WRITE]);
 }
 
 /**
@@ -708,15 +763,6 @@ static inline bool blk_throtl_bio(struct request_queue *q, struct blkcg_gq *blkg
 				  struct bio *bio) { return false; }
 #endif
 
-bool __blkcg_punt_bio_submit(struct bio *bio);
-
-static inline bool blkcg_punt_bio_submit(struct bio *bio)
-{
-	if (bio->bi_opf & REQ_CGROUP_PUNT)
-		return __blkcg_punt_bio_submit(bio);
-	else
-		return false;
-}
 
 static inline void blkcg_bio_issue_init(struct bio *bio)
 {
@@ -864,7 +910,6 @@ static inline char *blkg_path(struct blkcg_gq *blkg) { return NULL; }
 static inline void blkg_get(struct blkcg_gq *blkg) { }
 static inline void blkg_put(struct blkcg_gq *blkg) { }
 
-static inline bool blkcg_punt_bio_submit(struct bio *bio) { return false; }
 static inline void blkcg_bio_issue_init(struct bio *bio) { }
 static inline bool blkcg_bio_issue_check(struct request_queue *q,
 					 struct bio *bio) { return true; }

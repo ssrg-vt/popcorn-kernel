@@ -810,7 +810,6 @@ static void release_gid_table(struct ib_device *device,
 	if (leak)
 		return;
 
-	mutex_destroy(&table->lock);
 	kfree(table->data_vec);
 	kfree(table);
 }

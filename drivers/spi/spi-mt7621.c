@@ -327,6 +327,7 @@ static int mt7621_spi_probe(struct platform_device *pdev)
 	struct spi_controller *master;
 	struct mt7621_spi *rs;
 	void __iomem *base;
+	struct resource *r;
 	int status = 0;
 	struct clk *clk;
 	int ret;
@@ -335,7 +336,8 @@ static int mt7621_spi_probe(struct platform_device *pdev)
 	if (!match)
 		return -EINVAL;
 
-	base = devm_platform_ioremap_resource(pdev, 0);
+	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	base = devm_ioremap_resource(&pdev->dev, r);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 

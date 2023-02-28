@@ -39,7 +39,6 @@
 #include <net/sock.h>
 #include <net/arp.h>
 #include <net/ip_fib.h>
-#include <net/nexthop.h>
 #include <net/rtnetlink.h>
 #include <net/xfrm.h>
 #include <net/l3mdev.h>
@@ -124,8 +123,7 @@ struct fib_table *fib_get_table(struct net *net, u32 id)
 	h = id & (FIB_TABLE_HASHSZ - 1);
 
 	head = &net->ipv4.fib_table_hash[h];
-	hlist_for_each_entry_rcu(tb, head, tb_hlist,
-				 lockdep_rtnl_is_held()) {
+	hlist_for_each_entry_rcu(tb, head, tb_hlist) {
 		if (tb->tb_id == id)
 			return tb;
 	}
@@ -190,7 +188,7 @@ int fib_unmerge(struct net *net)
 	return 0;
 }
 
-void fib_flush(struct net *net)
+static void fib_flush(struct net *net)
 {
 	int flushed = 0;
 	unsigned int h;
@@ -232,9 +230,7 @@ static inline unsigned int __inet_dev_addr_type(struct net *net,
 	if (table) {
 		ret = RTN_UNICAST;
 		if (!fib_table_lookup(table, &fl4, &res, FIB_LOOKUP_NOREF)) {
-			struct fib_nh_common *nhc = fib_info_nhc(res.fi, 0);
-
-			if (!dev || dev == nhc->nhc_dev)
+			if (!dev || dev == res.fi->fib_dev)
 				ret = res.type;
 		}
 	}
@@ -321,19 +317,19 @@ bool fib_info_nh_uses_dev(struct fib_info *fi, const struct net_device *dev)
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
 	int ret;
 
-	for (ret = 0; ret < fib_info_num_path(fi); ret++) {
-		const struct fib_nh_common *nhc = fib_info_nhc(fi, ret);
+	for (ret = 0; ret < fi->fib_nhs; ret++) {
+		struct fib_nh *nh = &fi->fib_nh[ret];
 
-		if (nhc->nhc_dev == dev) {
+		if (nh->fib_nh_dev == dev) {
 			dev_match = true;
 			break;
-		} else if (l3mdev_master_ifindex_rcu(nhc->nhc_dev) == dev->ifindex) {
+		} else if (l3mdev_master_ifindex_rcu(nh->fib_nh_dev) == dev->ifindex) {
 			dev_match = true;
 			break;
 		}
 	}
 #else
-	if (fib_info_nhc(fi, 0)->nhc_dev == dev)
+	if (fi->fib_nh[0].fib_nh_dev == dev)
 		dev_match = true;
 #endif
 
@@ -389,11 +385,6 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 	fib_combine_itag(itag, &res);
 
 	dev_match = fib_info_nh_uses_dev(res.fi, dev);
-	/* This is not common, loopback packets retain skb_dst so normally they
-	 * would not even hit this slow path.
-	 */
-	dev_match = dev_match || (res.type == RTN_LOCAL &&
-				  dev == net->loopback_dev);
 	if (dev_match) {
 		ret = FIB_RES_NHC(res)->nhc_scope >= RT_SCOPE_HOST;
 		return ret;
@@ -545,22 +536,14 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 		cfg->fc_oif = dev->ifindex;
 		cfg->fc_table = l3mdev_fib_table(dev);
 		if (colon) {
-			const struct in_ifaddr *ifa;
-			struct in_device *in_dev;
-
-			in_dev = __in_dev_get_rtnl(dev);
+			struct in_ifaddr *ifa;
+			struct in_device *in_dev = __in_dev_get_rtnl(dev);
 			if (!in_dev)
 				return -ENODEV;
-
 			*colon = ':';
-
-			rcu_read_lock();
-			in_dev_for_each_ifa_rcu(ifa, in_dev) {
+			for (ifa = in_dev->ifa_list; ifa; ifa = ifa->ifa_next)
 				if (strcmp(ifa->ifa_label, devname) == 0)
 					break;
-			}
-			rcu_read_unlock();
-
 			if (!ifa)
 				return -ENODEV;
 			cfg->fc_prefsrc = ifa->ifa_local;
@@ -658,7 +641,6 @@ int ip_rt_ioctl(struct net *net, unsigned int cmd, struct rtentry *rt)
 }
 
 const struct nla_policy rtm_ipv4_policy[RTA_MAX + 1] = {
-	[RTA_UNSPEC]		= { .strict_start_type = RTA_DPORT + 1 },
 	[RTA_DST]		= { .type = NLA_U32 },
 	[RTA_SRC]		= { .type = NLA_U32 },
 	[RTA_IIF]		= { .type = NLA_U32 },
@@ -677,7 +659,6 @@ const struct nla_policy rtm_ipv4_policy[RTA_MAX + 1] = {
 	[RTA_IP_PROTO]		= { .type = NLA_U8 },
 	[RTA_SPORT]		= { .type = NLA_U16 },
 	[RTA_DPORT]		= { .type = NLA_U16 },
-	[RTA_NH_ID]		= { .type = NLA_U32 },
 };
 
 int fib_gw_from_via(struct fib_config *cfg, struct nlattr *nla,
@@ -815,18 +796,6 @@ static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
 			if (err < 0)
 				goto errout;
 			break;
-		case RTA_NH_ID:
-			cfg->fc_nh_id = nla_get_u32(attr);
-			break;
-		}
-	}
-
-	if (cfg->fc_nh_id) {
-		if (cfg->fc_oif || cfg->fc_gw_family ||
-		    cfg->fc_encap || cfg->fc_mp) {
-			NL_SET_ERR_MSG(extack,
-				       "Nexthop specification and nexthop id are mutually exclusive");
-			return -EINVAL;
 		}
 	}
 
@@ -852,12 +821,6 @@ static int inet_rtm_delroute(struct sk_buff *skb, struct nlmsghdr *nlh,
 	err = rtm_to_fib_config(net, skb, nlh, &cfg, extack);
 	if (err < 0)
 		goto errout;
-
-	if (cfg.fc_nh_id && !nexthop_find_by_id(net, cfg.fc_nh_id)) {
-		NL_SET_ERR_MSG(extack, "Nexthop id does not exist");
-		err = -EINVAL;
-		goto errout;
-	}
 
 	tb = fib_get_table(net, cfg.fc_table);
 	if (!tb) {
@@ -918,15 +881,10 @@ int ip_valid_fib_dump_req(struct net *net, const struct nlmsghdr *nlh,
 		NL_SET_ERR_MSG(extack, "Invalid values in header for FIB dump request");
 		return -EINVAL;
 	}
-
 	if (rtm->rtm_flags & ~(RTM_F_CLONED | RTM_F_PREFIX)) {
 		NL_SET_ERR_MSG(extack, "Invalid flags for FIB dump request");
 		return -EINVAL;
 	}
-	if (rtm->rtm_flags & RTM_F_CLONED)
-		filter->dump_routes = false;
-	else
-		filter->dump_exceptions = false;
 
 	filter->dump_all_families = (rtm->rtm_family == AF_UNSPEC);
 	filter->flags    = rtm->rtm_flags;
@@ -973,10 +931,9 @@ EXPORT_SYMBOL_GPL(ip_valid_fib_dump_req);
 
 static int inet_dump_fib(struct sk_buff *skb, struct netlink_callback *cb)
 {
-	struct fib_dump_filter filter = { .dump_routes = true,
-					  .dump_exceptions = true };
 	const struct nlmsghdr *nlh = cb->nlh;
 	struct net *net = sock_net(skb->sk);
+	struct fib_dump_filter filter = {};
 	unsigned int h, s_h;
 	unsigned int e = 0, s_e;
 	struct fib_table *tb;
@@ -993,8 +950,8 @@ static int inet_dump_fib(struct sk_buff *skb, struct netlink_callback *cb)
 		filter.flags = rtm->rtm_flags & (RTM_F_PREFIX | RTM_F_CLONED);
 	}
 
-	/* ipv4 does not use prefix flag */
-	if (filter.flags & RTM_F_PREFIX)
+	/* fib entries are never clones and ipv4 does not use prefix flag */
+	if (filter.flags & (RTM_F_PREFIX | RTM_F_CLONED))
 		return skb->len;
 
 	if (filter.table_id) {
@@ -1148,7 +1105,7 @@ void fib_modify_prefix_metric(struct in_ifaddr *ifa, u32 new_metric)
 	if (!(dev->flags & IFF_UP) ||
 	    ifa->ifa_flags & (IFA_F_SECONDARY | IFA_F_NOPREFIXROUTE) ||
 	    ipv4_is_zeronet(prefix) ||
-	    (prefix == ifa->ifa_local && ifa->ifa_prefixlen == 32))
+	    prefix == ifa->ifa_local || ifa->ifa_prefixlen == 32)
 		return;
 
 	/* add the new */
@@ -1215,8 +1172,8 @@ void fib_del_ifaddr(struct in_ifaddr *ifa, struct in_ifaddr *iprim)
 	 *
 	 * Scan address list to be sure that addresses are really gone.
 	 */
-	rcu_read_lock();
-	in_dev_for_each_ifa_rcu(ifa1, in_dev) {
+
+	for (ifa1 = in_dev->ifa_list; ifa1; ifa1 = ifa1->ifa_next) {
 		if (ifa1 == ifa) {
 			/* promotion, keep the IP */
 			gone = 0;
@@ -1284,7 +1241,6 @@ void fib_del_ifaddr(struct in_ifaddr *ifa, struct in_ifaddr *iprim)
 			}
 		}
 	}
-	rcu_read_unlock();
 
 no_promotions:
 	if (!(ok & BRD_OK))
@@ -1454,7 +1410,6 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 	struct netdev_notifier_info_ext *info_ext = ptr;
 	struct in_device *in_dev;
 	struct net *net = dev_net(dev);
-	struct in_ifaddr *ifa;
 	unsigned int flags;
 
 	if (event == NETDEV_UNREGISTER) {
@@ -1469,9 +1424,9 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 
 	switch (event) {
 	case NETDEV_UP:
-		in_dev_for_each_ifa_rtnl(ifa, in_dev) {
+		for_ifa(in_dev) {
 			fib_add_ifaddr(ifa);
-		}
+		} endfor_ifa(in_dev);
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
 		fib_sync_up(dev, RTNH_F_DEAD);
 #endif

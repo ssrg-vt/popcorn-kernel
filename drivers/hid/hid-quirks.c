@@ -16,7 +16,6 @@
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/mutex.h>
-#include <linux/input/elan-i2c-ids.h>
 
 #include "hid-ids.h"
 
@@ -920,8 +919,6 @@ static const struct hid_device_id hid_mouse_ignore_list[] = {
 
 bool hid_ignore(struct hid_device *hdev)
 {
-	int i;
-
 	if (hdev->quirks & HID_QUIRK_NO_IGNORE)
 		return false;
 	if (hdev->quirks & HID_QUIRK_IGNORE)
@@ -986,15 +983,18 @@ bool hid_ignore(struct hid_device *hdev)
 		break;
 	case USB_VENDOR_ID_ELAN:
 		/*
-		 * Blacklist of everything that gets handled by the elan_i2c
-		 * input driver.  This avoids disabling valid touchpads and
-		 * other ELAN devices.
+		 * Many Elan devices have a product id of 0x0401 and are handled
+		 * by the elan_i2c input driver. But the ACPI HID ELAN0800 dev
+		 * is not (and cannot be) handled by that driver ->
+		 * Ignore all 0x0401 devs except for the ELAN0800 dev.
 		 */
-		if ((hdev->product == 0x0401 || hdev->product == 0x0400))
-			for (i = 0; strlen(elan_acpi_id[i].id); ++i)
-				if (!strncmp(hdev->name, elan_acpi_id[i].id,
-					     strlen(elan_acpi_id[i].id)))
-					return true;
+		if (hdev->product == 0x0401 &&
+		    strncmp(hdev->name, "ELAN0800", 8) != 0)
+			return true;
+		/* Same with product id 0x0400 */
+		if (hdev->product == 0x0400 &&
+		    strncmp(hdev->name, "QTEC0001", 8) != 0)
+			return true;
 		break;
 	}
 

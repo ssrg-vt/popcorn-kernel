@@ -21,11 +21,17 @@ static int cmma_flag = 1;
 
 static int __init cmma(char *str)
 {
-	bool enabled;
+	char *parm;
 
-	if (!kstrtobool(str, &enabled))
-		cmma_flag = enabled;
-	return 1;
+	parm = strstrip(str);
+	if (strcmp(parm, "yes") == 0 || strcmp(parm, "on") == 0) {
+		cmma_flag = 1;
+		return 1;
+	}
+	cmma_flag = 0;
+	if (strcmp(parm, "no") == 0 || strcmp(parm, "off") == 0)
+		return 1;
+	return 0;
 }
 __setup("cmma=", cmma);
 

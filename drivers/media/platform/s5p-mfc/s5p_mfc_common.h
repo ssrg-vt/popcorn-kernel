@@ -718,6 +718,7 @@ struct s5p_mfc_ctx {
  *			used by the MFC
  */
 struct s5p_mfc_fmt {
+	char *name;
 	u32 fourcc;
 	u32 codec_mode;
 	enum s5p_mfc_fmt_type type;

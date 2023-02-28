@@ -22,11 +22,9 @@
  */
 
 #include <linux/kthread.h>
-#include <linux/module.h>
-#include <linux/sched.h>
-#include <linux/slab.h>
 #include <linux/wait.h>
-
+#include <linux/sched.h>
+#include <drm/drmP.h>
 #include <drm/gpu_scheduler.h>
 
 static struct kmem_cache *sched_fence_slab;

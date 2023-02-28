@@ -5,13 +5,16 @@
  * Author: Jassi Brar <jaswinder.singh@linaro.org>
  */
 
-#include <linux/amba/bus.h>
-#include <linux/device.h>
-#include <linux/err.h>
 #include <linux/interrupt.h>
+#include <linux/spinlock.h>
+#include <linux/mutex.h>
+#include <linux/delay.h>
+#include <linux/slab.h>
+#include <linux/err.h>
 #include <linux/io.h>
-#include <linux/mailbox_controller.h>
 #include <linux/module.h>
+#include <linux/amba/bus.h>
+#include <linux/mailbox_controller.h>
 
 #define INTR_STAT_OFS	0x0
 #define INTR_SET_OFS	0x8

@@ -27,16 +27,15 @@
  *	We should probably make this generic and share it with Medfield
  */
 
-#include <linux/pm_runtime.h>
-
+#include <drm/drmP.h>
 #include <drm/drm.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_edid.h>
-
-#include "cdv_device.h"
-#include "psb_drv.h"
 #include "psb_intel_drv.h"
+#include "psb_drv.h"
 #include "psb_intel_reg.h"
+#include "cdv_device.h"
+#include <linux/pm_runtime.h>
 
 /* hdmi control bits */
 #define HDMI_NULL_PACKETS_DURING_VSYNC	(1 << 9)

@@ -7,7 +7,6 @@
  */
 
 #include <errno.h>
-#include <string.h>
 #include "../../util/kvm-stat.h"
 #include "../../util/evsel.h"
 #include <asm/sie.h>
@@ -24,7 +23,7 @@ const char *kvm_exit_reason = "icptcode";
 const char *kvm_entry_trace = "kvm:kvm_s390_sie_enter";
 const char *kvm_exit_trace = "kvm:kvm_s390_sie_exit";
 
-static void event_icpt_insn_get_key(struct evsel *evsel,
+static void event_icpt_insn_get_key(struct perf_evsel *evsel,
 				    struct perf_sample *sample,
 				    struct event_key *key)
 {
@@ -35,7 +34,7 @@ static void event_icpt_insn_get_key(struct evsel *evsel,
 	key->exit_reasons = sie_icpt_insn_codes;
 }
 
-static void event_sigp_get_key(struct evsel *evsel,
+static void event_sigp_get_key(struct perf_evsel *evsel,
 			       struct perf_sample *sample,
 			       struct event_key *key)
 {
@@ -43,7 +42,7 @@ static void event_sigp_get_key(struct evsel *evsel,
 	key->exit_reasons = sie_sigp_order_codes;
 }
 
-static void event_diag_get_key(struct evsel *evsel,
+static void event_diag_get_key(struct perf_evsel *evsel,
 			       struct perf_sample *sample,
 			       struct event_key *key)
 {
@@ -51,7 +50,7 @@ static void event_diag_get_key(struct evsel *evsel,
 	key->exit_reasons = sie_diagnose_codes;
 }
 
-static void event_icpt_prog_get_key(struct evsel *evsel,
+static void event_icpt_prog_get_key(struct perf_evsel *evsel,
 				    struct perf_sample *sample,
 				    struct event_key *key)
 {

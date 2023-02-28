@@ -76,7 +76,6 @@ static inline bool constraint_match(struct event_constraint *c, u64 ecode)
 #define PERF_X86_EVENT_EXCL_ACCT	0x0100 /* accounted EXCL event */
 #define PERF_X86_EVENT_AUTO_RELOAD	0x0200 /* use PEBS auto-reload */
 #define PERF_X86_EVENT_LARGE_PEBS	0x0400 /* use large PEBS */
-#define PERF_X86_EVENT_PEBS_VIA_PT	0x0800 /* use PT buffer for PEBS */
 
 struct amd_nb {
 	int nb_id;  /* NorthBridge id */
@@ -86,11 +85,6 @@ struct amd_nb {
 };
 
 #define PEBS_COUNTER_MASK	((1ULL << MAX_PEBS_EVENTS) - 1)
-#define PEBS_PMI_AFTER_EACH_RECORD BIT_ULL(60)
-#define PEBS_OUTPUT_OFFSET	61
-#define PEBS_OUTPUT_MASK	(3ull << PEBS_OUTPUT_OFFSET)
-#define PEBS_OUTPUT_PT		(1ull << PEBS_OUTPUT_OFFSET)
-#define PEBS_VIA_PT_MASK	(PEBS_OUTPUT_PT | PEBS_PMI_AFTER_EACH_RECORD)
 
 /*
  * Flags PEBS can handle without an PMI.
@@ -217,8 +211,6 @@ struct cpu_hw_events {
 	u64			pebs_enabled;
 	int			n_pebs;
 	int			n_large_pebs;
-	int			n_pebs_via_pt;
-	int			pebs_output;
 
 	/* Current super set of events hardware configuration */
 	u64			pebs_data_cfg;
@@ -518,8 +510,6 @@ union perf_capabilities {
 		 */
 		u64	full_width_write:1;
 		u64     pebs_baseline:1;
-		u64	pebs_metrics_available:1;
-		u64	pebs_output_pt_available:1;
 	};
 	u64	capabilities;
 };
@@ -623,11 +613,14 @@ struct x86_pmu {
 	int		attr_rdpmc_broken;
 	int		attr_rdpmc;
 	struct attribute **format_attrs;
+	struct attribute **event_attrs;
+	struct attribute **caps_attrs;
 
 	ssize_t		(*events_sysfs_show)(char *page, u64 config);
-	const struct attribute_group **attr_update;
+	struct attribute **cpu_events;
 
 	unsigned long	attr_freeze_on_smi;
+	struct attribute **attrs;
 
 	/*
 	 * CPU Hotplug hooks
@@ -702,8 +695,6 @@ struct x86_pmu {
 	 * Check period value for PERF_EVENT_IOC_PERIOD ioctl.
 	 */
 	int (*check_period) (struct perf_event *event, u64 period);
-
-	int (*aux_output_match) (struct perf_event *event);
 };
 
 struct x86_perf_task_context {
@@ -895,6 +886,8 @@ static inline void set_linear_ip(struct pt_regs *regs, unsigned long ip)
 ssize_t x86_event_sysfs_show(char *page, u64 config, u64 event);
 ssize_t intel_event_sysfs_show(char *page, u64 config);
 
+struct attribute **merge_attr(struct attribute **a, struct attribute **b);
+
 ssize_t events_sysfs_show(struct device *dev, struct device_attribute *attr,
 			  char *page);
 ssize_t events_ht_sysfs_show(struct device *dev, struct device_attribute *attr,
@@ -912,11 +905,6 @@ static inline int amd_pmu_init(void)
 }
 
 #endif /* CONFIG_CPU_SUP_AMD */
-
-static inline int is_pebs_pt(struct perf_event *event)
-{
-	return !!(event->hw.flags & PERF_X86_EVENT_PEBS_VIA_PT);
-}
 
 #ifdef CONFIG_CPU_SUP_INTEL
 

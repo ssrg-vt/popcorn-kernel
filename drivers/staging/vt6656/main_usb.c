@@ -109,38 +109,33 @@ static void vnt_set_options(struct vnt_private *priv)
  */
 static int vnt_init_registers(struct vnt_private *priv)
 {
-	int ret = 0;
 	struct vnt_cmd_card_init *init_cmd = &priv->init_command;
 	struct vnt_rsp_card_init *init_rsp = &priv->init_response;
 	u8 antenna;
 	int ii;
+	int status = STATUS_SUCCESS;
 	u8 tmp;
 	u8 calib_tx_iq = 0, calib_tx_dc = 0, calib_rx_iq = 0;
 
 	dev_dbg(&priv->usb->dev, "---->INIbInitAdapter. [%d][%d]\n",
 		DEVICE_INIT_COLD, priv->packet_type);
 
-	ret = vnt_check_firmware_version(priv);
-	if (ret) {
-		ret = vnt_download_firmware(priv);
-		if (ret) {
-			dev_dbg(&priv->usb->dev,
-				"Could not download firmware: %d.\n", ret);
-			goto end;
-		}
-
-		ret = vnt_firmware_branch_to_sram(priv);
-		if (ret) {
-			dev_dbg(&priv->usb->dev,
-				"Could not branch to SRAM: %d.\n", ret);
-			goto end;
+	if (!vnt_check_firmware_version(priv)) {
+		if (vnt_download_firmware(priv) == true) {
+			if (vnt_firmware_branch_to_sram(priv) == false) {
+				dev_dbg(&priv->usb->dev,
+					" vnt_firmware_branch_to_sram fail\n");
+				return false;
+			}
+		} else {
+			dev_dbg(&priv->usb->dev, "FIRMWAREbDownload fail\n");
+			return false;
 		}
 	}
 
-	ret = vnt_vt3184_init(priv);
-	if (ret) {
+	if (!vnt_vt3184_init(priv)) {
 		dev_dbg(&priv->usb->dev, "vnt_vt3184_init fail\n");
-		goto end;
+		return false;
 	}
 
 	init_cmd->init_class = DEVICE_INIT_COLD;
@@ -151,27 +146,28 @@ static int vnt_init_registers(struct vnt_private *priv)
 	init_cmd->long_retry_limit = priv->long_retry_limit;
 
 	/* issue card_init command to device */
-	ret = vnt_control_out(priv, MESSAGE_TYPE_CARDINIT, 0, 0,
-			      sizeof(struct vnt_cmd_card_init),
-			      (u8 *)init_cmd);
-	if (ret) {
+	status = vnt_control_out(priv, MESSAGE_TYPE_CARDINIT, 0, 0,
+				 sizeof(struct vnt_cmd_card_init),
+				 (u8 *)init_cmd);
+	if (status != STATUS_SUCCESS) {
 		dev_dbg(&priv->usb->dev, "Issue Card init fail\n");
-		goto end;
+		return false;
 	}
 
-	ret = vnt_control_in(priv, MESSAGE_TYPE_INIT_RSP, 0, 0,
-			     sizeof(struct vnt_rsp_card_init),
-			     (u8 *)init_rsp);
-	if (ret) {
-		dev_dbg(&priv->usb->dev, "Cardinit request in status fail!\n");
-		goto end;
+	status = vnt_control_in(priv, MESSAGE_TYPE_INIT_RSP, 0, 0,
+				sizeof(struct vnt_rsp_card_init),
+				(u8 *)init_rsp);
+	if (status != STATUS_SUCCESS) {
+		dev_dbg(&priv->usb->dev,
+			"Cardinit request in status fail!\n");
+		return false;
 	}
 
 	/* local ID for AES functions */
-	ret = vnt_control_in(priv, MESSAGE_TYPE_READ, MAC_REG_LOCALID,
-			     MESSAGE_REQUEST_MACREG, 1, &priv->local_id);
-	if (ret)
-		goto end;
+	status = vnt_control_in(priv, MESSAGE_TYPE_READ, MAC_REG_LOCALID,
+				MESSAGE_REQUEST_MACREG, 1, &priv->local_id);
+	if (status != STATUS_SUCCESS)
+		return false;
 
 	/* do MACbSoftwareReset in MACvInitialize */
 
@@ -257,9 +253,7 @@ static int vnt_init_registers(struct vnt_private *priv)
 	}
 
 	/* Set initial antenna mode */
-	ret = vnt_set_antenna_mode(priv, priv->rx_antenna_mode);
-	if (ret)
-		goto end;
+	vnt_set_antenna_mode(priv, priv->rx_antenna_mode);
 
 	/* get Auto Fall Back type */
 	priv->auto_fb_ctrl = AUTO_FB_0;
@@ -281,41 +275,33 @@ static int vnt_init_registers(struct vnt_private *priv)
 				/* CR255, enable TX/RX IQ and
 				 * DC compensation mode
 				 */
-				ret = vnt_control_out_u8(priv,
-							 MESSAGE_REQUEST_BBREG,
-							 0xff, 0x03);
-				if (ret)
-					goto end;
-
+				vnt_control_out_u8(priv,
+						   MESSAGE_REQUEST_BBREG,
+						   0xff,
+						   0x03);
 				/* CR251, TX I/Q Imbalance Calibration */
-				ret = vnt_control_out_u8(priv,
-							 MESSAGE_REQUEST_BBREG,
-							 0xfb, calib_tx_iq);
-				if (ret)
-					goto end;
-
+				vnt_control_out_u8(priv,
+						   MESSAGE_REQUEST_BBREG,
+						   0xfb,
+						   calib_tx_iq);
 				/* CR252, TX DC-Offset Calibration */
-				ret = vnt_control_out_u8(priv,
-							 MESSAGE_REQUEST_BBREG,
-							 0xfC, calib_tx_dc);
-				if (ret)
-					goto end;
-
+				vnt_control_out_u8(priv,
+						   MESSAGE_REQUEST_BBREG,
+						   0xfC,
+						   calib_tx_dc);
 				/* CR253, RX I/Q Imbalance Calibration */
-				ret = vnt_control_out_u8(priv,
-							 MESSAGE_REQUEST_BBREG,
-							 0xfd, calib_rx_iq);
-				if (ret)
-					goto end;
+				vnt_control_out_u8(priv,
+						   MESSAGE_REQUEST_BBREG,
+						   0xfd,
+						   calib_rx_iq);
 			} else {
 				/* CR255, turn off
 				 * BB Calibration compensation
 				 */
-				ret = vnt_control_out_u8(priv,
-							 MESSAGE_REQUEST_BBREG,
-							 0xff, 0x0);
-				if (ret)
-					goto end;
+				vnt_control_out_u8(priv,
+						   MESSAGE_REQUEST_BBREG,
+						   0xff,
+						   0x0);
 			}
 		}
 	}
@@ -337,52 +323,37 @@ static int vnt_init_registers(struct vnt_private *priv)
 	else
 		priv->short_slot_time = false;
 
-	ret = vnt_set_short_slot_time(priv);
-	if (ret)
-		goto end;
+	vnt_set_short_slot_time(priv);
 
 	priv->radio_ctl = priv->eeprom[EEP_OFS_RADIOCTL];
 
 	if ((priv->radio_ctl & EEP_RADIOCTL_ENABLE) != 0) {
-		ret = vnt_control_in(priv, MESSAGE_TYPE_READ,
-				     MAC_REG_GPIOCTL1, MESSAGE_REQUEST_MACREG,
-				     1, &tmp);
-		if (ret)
-			goto end;
+		status = vnt_control_in(priv, MESSAGE_TYPE_READ,
+					MAC_REG_GPIOCTL1,
+					MESSAGE_REQUEST_MACREG, 1, &tmp);
 
-		if ((tmp & GPIO3_DATA) == 0) {
-			ret = vnt_mac_reg_bits_on(priv, MAC_REG_GPIOCTL1,
-						  GPIO3_INTMD);
-		} else {
-			ret = vnt_mac_reg_bits_off(priv, MAC_REG_GPIOCTL1,
-						   GPIO3_INTMD);
-		}
+		if (status != STATUS_SUCCESS)
+			return false;
 
-		if (ret)
-			goto end;
+		if ((tmp & GPIO3_DATA) == 0)
+			vnt_mac_reg_bits_on(priv, MAC_REG_GPIOCTL1,
+					    GPIO3_INTMD);
+		else
+			vnt_mac_reg_bits_off(priv, MAC_REG_GPIOCTL1,
+					     GPIO3_INTMD);
 	}
 
+	vnt_mac_set_led(priv, LEDSTS_TMLEN, 0x38);
 
-	ret = vnt_mac_set_led(priv, LEDSTS_TMLEN, 0x38);
-	if (ret)
-		goto end;
+	vnt_mac_set_led(priv, LEDSTS_STS, LEDSTS_SLOW);
 
-	ret = vnt_mac_set_led(priv, LEDSTS_STS, LEDSTS_SLOW);
-	if (ret)
-		goto end;
+	vnt_mac_reg_bits_on(priv, MAC_REG_GPIOCTL0, 0x01);
 
-	ret = vnt_mac_reg_bits_on(priv, MAC_REG_GPIOCTL0, 0x01);
-	if (ret)
-		goto end;
-
-	ret = vnt_radio_power_on(priv);
-	if (ret)
-		goto end;
+	vnt_radio_power_on(priv);
 
 	dev_dbg(&priv->usb->dev, "<----INIbInitAdapter Exit\n");
 
-end:
-	return ret;
+	return true;
 }
 
 static void vnt_free_tx_bufs(struct vnt_private *priv)
@@ -392,9 +363,6 @@ static void vnt_free_tx_bufs(struct vnt_private *priv)
 
 	for (ii = 0; ii < priv->num_tx_context; ii++) {
 		tx_context = priv->tx_context[ii];
-		if (!tx_context)
-			continue;
-
 		/* deallocate URBs */
 		if (tx_context->urb) {
 			usb_kill_urb(tx_context->urb);
@@ -529,34 +497,28 @@ static void vnt_tx_80211(struct ieee80211_hw *hw,
 
 static int vnt_start(struct ieee80211_hw *hw)
 {
-	int ret = 0;
 	struct vnt_private *priv = hw->priv;
 
 	priv->rx_buf_sz = MAX_TOTAL_SIZE_WITH_ALL_HEADERS;
 
-	ret = vnt_alloc_bufs(priv);
-	if (ret) {
+	if (!vnt_alloc_bufs(priv)) {
 		dev_dbg(&priv->usb->dev, "vnt_alloc_bufs fail...\n");
-		goto err;
+		return -ENOMEM;
 	}
 
 	clear_bit(DEVICE_FLAGS_DISCONNECTED, &priv->flags);
 
-	ret = vnt_init_registers(priv);
-	if (ret) {
+	if (vnt_init_registers(priv) == false) {
 		dev_dbg(&priv->usb->dev, " init register fail\n");
 		goto free_all;
 	}
 
-	ret = vnt_key_init_table(priv);
-	if (ret)
+	if (vnt_key_init_table(priv))
 		goto free_all;
 
 	priv->int_interval = 1;  /* bInterval is set to 1 */
 
-	ret = vnt_int_start_interrupt(priv);
-	if (ret)
-		goto free_all;
+	vnt_int_start_interrupt(priv);
 
 	ieee80211_wake_queues(hw);
 
@@ -569,8 +531,8 @@ free_all:
 
 	usb_kill_urb(priv->interrupt_urb);
 	usb_free_urb(priv->interrupt_urb);
-err:
-	return ret;
+
+	return -ENOMEM;
 }
 
 static void vnt_stop(struct ieee80211_hw *hw)

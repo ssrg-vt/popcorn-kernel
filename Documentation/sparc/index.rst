@@ -1,3 +1,5 @@
+:orphan:
+
 ==================
 Sparc Architecture
 ==================

@@ -5,11 +5,10 @@
  * Test the kernel's signal frame code.
  *
  * The kernel sets up two sets of ucontexts if the signal was to be
- * delivered while the thread was in a transaction (referred too as
- * first and second contexts).
+ * delivered while the thread was in a transaction.
  * Expected behaviour is that the checkpointed state is in the user
- * context passed to the signal handler (first context). The speculated
- * state can be accessed with the uc_link pointer (second context).
+ * context passed to the signal handler. The speculated state can be
+ * accessed with the uc_link pointer.
  *
  * The rationale for this is that if TM unaware code (which linked
  * against TM libs) installs a signal handler it will not know of the
@@ -30,24 +29,18 @@
 
 #define MAX_ATTEMPT 500000
 
-#define NV_VMX_REGS 12 /* Number of non-volatile VMX registers */
-#define VMX20 20 /* First non-volatile register to check in vr20-31 subset */
+#define NV_VMX_REGS 12
 
 long tm_signal_self_context_load(pid_t pid, long *gprs, double *fps, vector int *vms, vector int *vss);
 
-static sig_atomic_t fail, broken;
+static sig_atomic_t fail;
 
-/* Test only non-volatile registers, i.e. 12 vmx registers from vr20 to vr31 */
 vector int vms[] = {
-	/* First context will be set with these values, i.e. non-speculative */
-	/* VMX20     ,  VMX21      , ... */
-	{ 1, 2, 3, 4},{ 5, 6, 7, 8},{ 9,10,11,12},
+	{1, 2, 3, 4 },{5, 6, 7, 8 },{9, 10,11,12},
 	{13,14,15,16},{17,18,19,20},{21,22,23,24},
 	{25,26,27,28},{29,30,31,32},{33,34,35,36},
 	{37,38,39,40},{41,42,43,44},{45,46,47,48},
-	/* Second context will be set with these values, i.e. speculative */
-	/* VMX20        , VMX21            , ... */
-	{ -1, -2, -3, -4},{ -5, -6, -7, -8},{ -9,-10,-11,-12},
+	{-1, -2, -3, -4}, {-5, -6, -7, -8}, {-9, -10,-11,-12},
 	{-13,-14,-15,-16},{-17,-18,-19,-20},{-21,-22,-23,-24},
 	{-25,-26,-27,-28},{-29,-30,-31,-32},{-33,-34,-35,-36},
 	{-37,-38,-39,-40},{-41,-42,-43,-44},{-45,-46,-47,-48}
@@ -55,43 +48,26 @@ vector int vms[] = {
 
 static void signal_usr1(int signum, siginfo_t *info, void *uc)
 {
-	int i, j;
+	int i;
 	ucontext_t *ucp = uc;
 	ucontext_t *tm_ucp = ucp->uc_link;
 
-	for (i = 0; i < NV_VMX_REGS; i++) {
-		/* Check first context. Print all mismatches. */
-		fail = memcmp(ucp->uc_mcontext.v_regs->vrregs[VMX20 + i],
+	for (i = 0; i < NV_VMX_REGS && !fail; i++) {
+		fail = memcmp(ucp->uc_mcontext.v_regs->vrregs[i + 20],
 				&vms[i], sizeof(vector int));
-		if (fail) {
-			broken = 1;
-			printf("VMX%d (1st context) == 0x", VMX20 + i);
-			/* Print actual value in first context. */
-			for (j = 0; j < 4; j++)
-				printf("%08x", ucp->uc_mcontext.v_regs->vrregs[VMX20 + i][j]);
-			printf(" instead of 0x");
-			/* Print expected value. */
-			for (j = 0; j < 4; j++)
-				printf("%08x", vms[i][j]);
-			printf(" (expected)\n");
-		}
-	}
+		fail |= memcmp(tm_ucp->uc_mcontext.v_regs->vrregs[i + 20],
+				&vms[i + NV_VMX_REGS], sizeof (vector int));
 
-	for (i = 0; i < NV_VMX_REGS; i++)  {
-		/* Check second context. Print all mismatches. */
-		fail = memcmp(tm_ucp->uc_mcontext.v_regs->vrregs[VMX20 + i],
-				&vms[NV_VMX_REGS + i], sizeof (vector int));
 		if (fail) {
-			broken = 1;
-			printf("VMX%d (2nd context) == 0x", NV_VMX_REGS + i);
-			/* Print actual value in second context. */
+			int j;
+
+			fprintf(stderr, "Failed on %d vmx 0x", i);
 			for (j = 0; j < 4; j++)
-				printf("%08x", tm_ucp->uc_mcontext.v_regs->vrregs[VMX20 + i][j]);
-			printf(" instead of 0x");
-			/* Print expected value. */
-			for (j = 0; j < 4; j++)
-				printf("%08x", vms[NV_VMX_REGS + i][j]);
-			printf(" (expected)\n");
+				fprintf(stderr, "%04x", ucp->uc_mcontext.v_regs->vrregs[i + 20][j]);
+			fprintf(stderr, " vs 0x");
+			for (j = 0 ; j < 4; j++)
+				fprintf(stderr, "%04x", tm_ucp->uc_mcontext.v_regs->vrregs[i + 20][j]);
+			fprintf(stderr, "\n");
 		}
 	}
 }
@@ -114,19 +90,13 @@ static int tm_signal_context_chk()
 	}
 
 	i = 0;
-	while (i < MAX_ATTEMPT && !broken) {
-		/*
-		 * tm_signal_self_context_load will set both first and second
-		 * contexts accordingly to the values passed through non-NULL
-		 * array pointers to it, in that case 'vms', and invoke the
-		 * signal handler installed for SIGUSR1.
-		 */
+	while (i < MAX_ATTEMPT && !fail) {
 		rc = tm_signal_self_context_load(pid, NULL, NULL, vms, NULL);
 		FAIL_IF(rc != pid);
 		i++;
 	}
 
-	return (broken);
+	return fail;
 }
 
 int main(void)

@@ -446,7 +446,7 @@ void ptdump_check_wx(void)
 static int ptdump_init(void)
 {
 	ptdump_initialize();
-	ptdump_debugfs_register(&kernel_ptdump_info, "kernel_page_tables");
-	return 0;
+	return ptdump_debugfs_register(&kernel_ptdump_info,
+					"kernel_page_tables");
 }
 __initcall(ptdump_init);

@@ -3,10 +3,7 @@
 #define ARMADA_TRACE_H
 
 #include <linux/tracepoint.h>
-
-struct drm_crtc;
-struct drm_framebuffer;
-struct drm_plane;
+#include <drm/drmP.h>
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM armada

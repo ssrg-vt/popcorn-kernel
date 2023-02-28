@@ -5,13 +5,13 @@
  */
 #include "xfs.h"
 #include "xfs_fs.h"
-#include "xfs_shared.h"
 #include "xfs_format.h"
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_sb.h"
 #include "xfs_mount.h"
 #include "xfs_inode.h"
+#include "xfs_error.h"
 #include "xfs_trans.h"
 #include "xfs_trans_priv.h"
 #include "xfs_inode_item.h"
@@ -23,6 +23,8 @@
 #include "xfs_dquot.h"
 #include "xfs_reflink.h"
 
+#include <linux/kthread.h>
+#include <linux/freezer.h>
 #include <linux/iversion.h>
 
 /*
@@ -40,7 +42,7 @@ xfs_inode_alloc(
 	 * KM_MAYFAIL and return NULL here on ENOMEM. Set the
 	 * code up to do this anyway.
 	 */
-	ip = kmem_zone_alloc(xfs_inode_zone, 0);
+	ip = kmem_zone_alloc(xfs_inode_zone, KM_SLEEP);
 	if (!ip)
 		return NULL;
 	if (inode_init_always(mp->m_super, VFS_I(ip))) {

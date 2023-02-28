@@ -393,9 +393,10 @@ static int rtsx_transfer_sglist_adma_partial(struct rtsx_chip *chip, u8 card,
 			*offset = 0;
 			*index = *index + 1;
 		}
-		option = RTSX_SG_VALID | RTSX_SG_TRANS_DATA;
-		if ((i == sg_cnt - 1) || !resid)
-			option |= RTSX_SG_END;
+		if ((i == (sg_cnt - 1)) || !resid)
+			option = RTSX_SG_VALID | RTSX_SG_END | RTSX_SG_TRANS_DATA;
+		else
+			option = RTSX_SG_VALID | RTSX_SG_TRANS_DATA;
 
 		rtsx_add_sg_tbl(chip, (u32)addr, (u32)len, option);
 
@@ -540,9 +541,10 @@ static int rtsx_transfer_sglist_adma(struct rtsx_chip *chip, u8 card,
 			dev_dbg(rtsx_dev(chip), "DMA addr: 0x%x, Len: 0x%x\n",
 				(unsigned int)addr, len);
 
-			option = RTSX_SG_VALID | RTSX_SG_TRANS_DATA;
 			if (j == (sg_cnt - 1))
-				option |= RTSX_SG_END;
+				option = RTSX_SG_VALID | RTSX_SG_END | RTSX_SG_TRANS_DATA;
+			else
+				option = RTSX_SG_VALID | RTSX_SG_TRANS_DATA;
 
 			rtsx_add_sg_tbl(chip, (u32)addr, (u32)len, option);
 

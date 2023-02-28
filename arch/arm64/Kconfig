@@ -13,8 +13,10 @@ config ARM64
 	select ARCH_HAS_DEBUG_VIRTUAL
 	select ARCH_HAS_DEVMEM_IS_ALLOWED
 	select ARCH_HAS_DMA_COHERENT_TO_PFN
+	select ARCH_HAS_DMA_MMAP_PGPROT
 	select ARCH_HAS_DMA_PREP_COHERENT
 	select ARCH_HAS_ACPI_TABLE_UPGRADE if ACPI
+	select ARCH_HAS_ELF_RANDOMIZE
 	select ARCH_HAS_FAST_MULTIPLIER
 	select ARCH_HAS_FORTIFY_SOURCE
 	select ARCH_HAS_GCOV_PROFILE_ALL
@@ -22,10 +24,8 @@ config ARM64
 	select ARCH_HAS_KCOV
 	select ARCH_HAS_KEEPINITRD
 	select ARCH_HAS_MEMBARRIER_SYNC_CORE
-	select ARCH_HAS_PTE_DEVMAP
 	select ARCH_HAS_PTE_SPECIAL
 	select ARCH_HAS_SETUP_DMA_OPS
-	select ARCH_HAS_SET_DIRECT_MAP
 	select ARCH_HAS_SET_MEMORY
 	select ARCH_HAS_STRICT_KERNEL_RWX
 	select ARCH_HAS_STRICT_MODULE_RWX
@@ -70,9 +70,7 @@ config ARM64
 	select ARCH_SUPPORTS_INT128 if GCC_VERSION >= 50000 || CC_IS_CLANG
 	select ARCH_SUPPORTS_NUMA_BALANCING
 	select ARCH_WANT_COMPAT_IPC_PARSE_VERSION if COMPAT
-	select ARCH_WANT_DEFAULT_TOPDOWN_MMAP_LAYOUT
 	select ARCH_WANT_FRAME_POINTERS
-	select ARCH_WANT_HUGE_PMD_SHARE if ARM64_4K_PAGES || (ARM64_16K_PAGES && !ARM64_VA_BITS_36)
 	select ARCH_HAS_UBSAN_SANITIZE_ALL
 	select ARM_AMBA
 	select ARM_ARCH_TIMER
@@ -109,7 +107,6 @@ config ARM64
 	select GENERIC_STRNCPY_FROM_USER
 	select GENERIC_STRNLEN_USER
 	select GENERIC_TIME_VSYSCALL
-	select GENERIC_GETTIMEOFDAY
 	select HANDLE_DOMAIN_IRQ
 	select HARDIRQS_SW_RESEND
 	select HAVE_PCI
@@ -133,7 +130,6 @@ config ARM64
 	select HAVE_ARCH_TRANSPARENT_HUGEPAGE
 	select HAVE_ARCH_VMAP_STACK
 	select HAVE_ARM_SMCCC
-	select HAVE_ASM_MODVERSIONS
 	select HAVE_EBPF_JIT
 	select HAVE_C_RECORDMCOUNT
 	select HAVE_CMPXCHG_DOUBLE
@@ -144,10 +140,8 @@ config ARM64
 	select HAVE_DMA_CONTIGUOUS
 	select HAVE_DYNAMIC_FTRACE
 	select HAVE_EFFICIENT_UNALIGNED_ACCESS
-	select HAVE_FAST_GUP
 	select HAVE_FTRACE_MCOUNT_RECORD
 	select HAVE_FUNCTION_TRACER
-	select HAVE_FUNCTION_ERROR_INJECTION
 	select HAVE_FUNCTION_GRAPH_TRACER
 	select HAVE_GCC_PLUGINS
 	select HAVE_HW_BREAKPOINT if PERF_EVENTS
@@ -166,7 +160,6 @@ config ARM64
 	select HAVE_SYSCALL_TRACEPOINTS
 	select HAVE_KPROBES
 	select HAVE_KRETPROBES
-	select HAVE_GENERIC_VDSO
 	select IOMMU_DMA if IOMMU_SUPPORT
 	select IRQ_DOMAIN
 	select IRQ_FORCED_THREADING
@@ -185,6 +178,7 @@ config ARM64
 	select SWIOTLB
 	select SYSCTL_EXCEPTION_TRACE
 	select THREAD_INFO_IN_TASK
+	select ARCH_SUPPORTS_POPCORN
 	help
 	  ARM 64-bit (AArch64) Linux support.
 
@@ -270,6 +264,9 @@ config ZONE_DMA32
 	bool "Support DMA32 zone" if EXPERT
 	default y
 
+config HAVE_GENERIC_GUP
+	def_bool y
+
 config ARCH_ENABLE_MEMORY_HOTPLUG
 	def_bool y
 
@@ -286,7 +283,7 @@ config PGTABLE_LEVELS
 	int
 	default 2 if ARM64_16K_PAGES && ARM64_VA_BITS_36
 	default 2 if ARM64_64K_PAGES && ARM64_VA_BITS_42
-	default 3 if ARM64_64K_PAGES && (ARM64_VA_BITS_48 || ARM64_VA_BITS_52)
+	default 3 if ARM64_64K_PAGES && (ARM64_VA_BITS_48 || ARM64_USER_VA_BITS_52)
 	default 3 if ARM64_4K_PAGES && ARM64_VA_BITS_39
 	default 3 if ARM64_16K_PAGES && ARM64_VA_BITS_47
 	default 4 if !ARM64_64K_PAGES && ARM64_VA_BITS_48
@@ -297,20 +294,7 @@ config ARCH_SUPPORTS_UPROBES
 config ARCH_PROC_KCORE_TEXT
 	def_bool y
 
-config KASAN_SHADOW_OFFSET
-	hex
-	depends on KASAN
-	default 0xdfffa00000000000 if (ARM64_VA_BITS_48 || ARM64_VA_BITS_52) && !KASAN_SW_TAGS
-	default 0xdfffd00000000000 if ARM64_VA_BITS_47 && !KASAN_SW_TAGS
-	default 0xdffffe8000000000 if ARM64_VA_BITS_42 && !KASAN_SW_TAGS
-	default 0xdfffffd000000000 if ARM64_VA_BITS_39 && !KASAN_SW_TAGS
-	default 0xdffffffa00000000 if ARM64_VA_BITS_36 && !KASAN_SW_TAGS
-	default 0xefff900000000000 if (ARM64_VA_BITS_48 || ARM64_VA_BITS_52) && KASAN_SW_TAGS
-	default 0xefffc80000000000 if ARM64_VA_BITS_47 && KASAN_SW_TAGS
-	default 0xeffffe4000000000 if ARM64_VA_BITS_42 && KASAN_SW_TAGS
-	default 0xefffffc800000000 if ARM64_VA_BITS_39 && KASAN_SW_TAGS
-	default 0xeffffff900000000 if ARM64_VA_BITS_36 && KASAN_SW_TAGS
-	default 0xffffffffffffffff
+source "kernel/Kconfig.popcorn"
 
 source "arch/arm64/Kconfig.platforms"
 
@@ -616,23 +600,6 @@ config CAVIUM_ERRATUM_30115
 
 	  If unsure, say Y.
 
-config CAVIUM_TX2_ERRATUM_219
-	bool "Cavium ThunderX2 erratum 219: PRFM between TTBR change and ISB fails"
-	default y
-	help
-	  On Cavium ThunderX2, a load, store or prefetch instruction between a
-	  TTBR update and the corresponding context synchronizing operation can
-	  cause a spurious Data Abort to be delivered to any hardware thread in
-	  the CPU core.
-
-	  Work around the issue by avoiding the problematic code sequence and
-	  trapping KVM guest TTBRx_EL1 writes to EL2 when SMT is enabled. The
-	  trap handler performs the corresponding register access, skips the
-	  instruction and ensures context synchronization by virtue of the
-	  exception return.
-
-	  If unsure, say Y.
-
 config QCOM_FALKOR_ERRATUM_1003
 	bool "Falkor E1003: Incorrect translation due to ASID change"
 	default y
@@ -731,14 +698,14 @@ config ARM64_4K_PAGES
 	  This feature enables 4KB pages support.
 
 config ARM64_16K_PAGES
-	bool "16KB"
+	bool "16KB" if !POPCORN
 	help
 	  The system will use 16KB pages support. AArch32 emulation
 	  requires applications compiled with 16K (or a multiple of 16K)
 	  aligned segments.
 
 config ARM64_64K_PAGES
-	bool "64KB"
+	bool "64KB" if !POPCORN
 	help
 	  This feature enables 64KB pages support (4KB by default)
 	  allowing only two levels of page tables and faster TLB
@@ -752,6 +719,7 @@ choice
 	default ARM64_VA_BITS_39 if ARM64_4K_PAGES
 	default ARM64_VA_BITS_47 if ARM64_16K_PAGES
 	default ARM64_VA_BITS_42 if ARM64_64K_PAGES
+	default ARM64_VA_BITS_48 if POPCORN
 	help
 	  Allows choosing one of multiple possible virtual address
 	  space sizes. The level of translation table is determined by
@@ -759,31 +727,30 @@ choice
 
 config ARM64_VA_BITS_36
 	bool "36-bit" if EXPERT
-	depends on ARM64_16K_PAGES
+	depends on ARM64_16K_PAGES && !POPCORN
 
 config ARM64_VA_BITS_39
 	bool "39-bit"
-	depends on ARM64_4K_PAGES
+	depends on ARM64_4K_PAGES && !POPCORN
 
 config ARM64_VA_BITS_42
 	bool "42-bit"
-	depends on ARM64_64K_PAGES
+	depends on ARM64_64K_PAGES && !POPCORN
 
 config ARM64_VA_BITS_47
 	bool "47-bit"
-	depends on ARM64_16K_PAGES
+	depends on ARM64_16K_PAGES && !POPCORN
 
 config ARM64_VA_BITS_48
 	bool "48-bit"
 
-config ARM64_VA_BITS_52
-	bool "52-bit"
+config ARM64_USER_VA_BITS_52
+	bool "52-bit (user)"
 	depends on ARM64_64K_PAGES && (ARM64_PAN || !ARM64_SW_TTBR0_PAN)
 	help
 	  Enable 52-bit virtual addressing for userspace when explicitly
-	  requested via a hint to mmap(). The kernel will also use 52-bit
-	  virtual addresses for its own mappings (provided HW support for
-	  this feature is available, otherwise it reverts to 48-bit).
+	  requested via a hint to mmap(). The kernel will continue to
+	  use 48-bit virtual addresses for its own mappings.
 
 	  NOTE: Enabling 52-bit virtual addressing in conjunction with
 	  ARMv8.3 Pointer Authentication will result in the PAC being
@@ -796,7 +763,7 @@ endchoice
 
 config ARM64_FORCE_52BIT
 	bool "Force 52-bit virtual addresses for userspace"
-	depends on ARM64_VA_BITS_52 && EXPERT
+	depends on ARM64_USER_VA_BITS_52 && EXPERT
 	help
 	  For systems with 52-bit userspace VAs enabled, the kernel will attempt
 	  to maintain compatibility with older software by providing 48-bit VAs
@@ -813,8 +780,7 @@ config ARM64_VA_BITS
 	default 39 if ARM64_VA_BITS_39
 	default 42 if ARM64_VA_BITS_42
 	default 47 if ARM64_VA_BITS_47
-	default 48 if ARM64_VA_BITS_48
-	default 52 if ARM64_VA_BITS_52
+	default 48 if ARM64_VA_BITS_48 || ARM64_USER_VA_BITS_52
 
 choice
 	prompt "Physical address space size"
@@ -941,6 +907,7 @@ config SYS_SUPPORTS_HUGETLBFS
 	def_bool y
 
 config ARCH_WANT_HUGE_PMD_SHARE
+	def_bool y if ARM64_4K_PAGES || (ARM64_16K_PAGES && !ARM64_VA_BITS_36)
 
 config ARCH_HAS_CACHE_LINE_SIZE
 	def_bool y
@@ -971,6 +938,7 @@ config PARAVIRT
 config PARAVIRT_TIME_ACCOUNTING
 	bool "Paravirtual steal time accounting"
 	select PARAVIRT
+	default n
 	help
 	  Select this option to enable fine granularity task steal time
 	  accounting. Time spent executing other tasks in parallel with
@@ -998,7 +966,7 @@ config KEXEC_FILE
 	  for kernel and initramfs as opposed to list of segments as
 	  accepted by previous system call.
 
-config KEXEC_SIG
+config KEXEC_VERIFY_SIG
 	bool "Verify kernel signature during kexec_file_load() syscall"
 	depends on KEXEC_FILE
 	help
@@ -1013,13 +981,13 @@ config KEXEC_SIG
 config KEXEC_IMAGE_VERIFY_SIG
 	bool "Enable Image signature verification support"
 	default y
-	depends on KEXEC_SIG
+	depends on KEXEC_VERIFY_SIG
 	depends on EFI && SIGNED_PE_FILE_VERIFICATION
 	help
 	  Enable Image signature verification support.
 
 comment "Support for PE file signature verification disabled"
-	depends on KEXEC_SIG
+	depends on KEXEC_VERIFY_SIG
 	depends on !EFI || !SIGNED_PE_FILE_VERIFICATION
 
 config CRASH_DUMP
@@ -1031,7 +999,7 @@ config CRASH_DUMP
 	  reserved region and then later executed after a crash by
 	  kdump/kexec.
 
-	  For more details see Documentation/admin-guide/kdump/kdump.rst
+	  For more details see Documentation/kdump/kdump.txt
 
 config XEN_DOM0
 	def_bool y
@@ -1144,15 +1112,6 @@ config ARM64_SW_TTBR0_PAN
 	  zeroed area and reserved ASID. The user access routines
 	  restore the valid TTBR0_EL1 temporarily.
 
-config ARM64_TAGGED_ADDR_ABI
-	bool "Enable the tagged user addresses syscall ABI"
-	default y
-	help
-	  When this option is enabled, user applications can opt in to a
-	  relaxed ABI via prctl() allowing tagged addresses to be passed
-	  to system calls as pointer arguments. For details, see
-	  Documentation/arm64/tagged-address-abi.rst.
-
 menuconfig COMPAT
 	bool "Kernel support for 32-bit EL0"
 	depends on ARM64_4K_PAGES || EXPERT
@@ -1175,7 +1134,7 @@ menuconfig COMPAT
 if COMPAT
 
 config KUSER_HELPERS
-	bool "Enable kuser helpers page for 32-bit applications"
+	bool "Enable kuser helpers page for 32 bit applications"
 	default y
 	help
 	  Warning: disabling this option may break 32-bit user programs.
@@ -1186,7 +1145,7 @@ config KUSER_HELPERS
 	  the system. This permits binaries to be run on ARMv4 through
 	  to ARMv8 without modification.
 
-	  See Documentation/arm/kernel_user_helpers.rst for details.
+	  See Documentation/arm/kernel_user_helpers.txt for details.
 
 	  However, the fixed address nature of these helpers can be used
 	  by ROP (return orientated programming) authors when creating
@@ -1201,18 +1160,6 @@ config KUSER_HELPERS
 	  Say N here only if you are absolutely certain that you do not
 	  need these helpers; otherwise, the safe option is to say Y.
 
-config COMPAT_VDSO
-	bool "Enable vDSO for 32-bit applications"
-	depends on !CPU_BIG_ENDIAN && "$(CROSS_COMPILE_COMPAT)" != ""
-	select GENERIC_COMPAT_VDSO
-	default y
-	help
-	  Place in the process address space of 32-bit applications an
-	  ELF shared object providing fast implementations of gettimeofday
-	  and clock_gettime.
-
-	  You must have a 32-bit build of glibc 2.22 or later for programs
-	  to seamlessly take advantage of this.
 
 menuconfig ARMV8_DEPRECATED
 	bool "Emulate deprecated/obsolete ARMv8 instructions"
@@ -1318,7 +1265,6 @@ config ARM64_PAN
 
 config ARM64_LSE_ATOMICS
 	bool "Atomic instructions"
-	depends on JUMP_LABEL
 	default y
 	help
 	  As part of the Large System Extensions, ARMv8.1 introduces new
@@ -1477,27 +1423,12 @@ config ARM64_SVE
 	  KVM in the same kernel image.
 
 config ARM64_MODULE_PLTS
-	bool "Use PLTs to allow module memory to spill over into vmalloc area"
-	depends on MODULES
+	bool
 	select HAVE_MOD_ARCH_SPECIFIC
-	help
-	  Allocate PLTs when loading modules so that jumps and calls whose
-	  targets are too far away for their relative offsets to be encoded
-	  in the instructions themselves can be bounced via veneers in the
-	  module's PLT. This allows modules to be allocated in the generic
-	  vmalloc area after the dedicated module memory area has been
-	  exhausted.
-
-	  When running with address space randomization (KASLR), the module
-	  region itself may be too far away for ordinary relative jumps and
-	  calls, and so in that case, module PLTs are required and cannot be
-	  disabled.
-
-	  Specific errata workaround(s) might also force module PLTs to be
-	  enabled (ARM64_ERRATUM_843419).
 
 config ARM64_PSEUDO_NMI
 	bool "Support for NMI-like interrupts"
+	depends on BROKEN # 1556553607-46531-1-git-send-email-julien.thierry@arm.com
 	select CONFIG_ARM_GIC_V3
 	help
 	  Adds support for mimicking Non-Maskable Interrupts through the use of
@@ -1510,20 +1441,8 @@ config ARM64_PSEUDO_NMI
 
 	  If unsure, say N
 
-if ARM64_PSEUDO_NMI
-config ARM64_DEBUG_PRIORITY_MASKING
-	bool "Debug interrupt priority masking"
-	help
-	  This adds runtime checks to functions enabling/disabling
-	  interrupts when using priority masking. The additional checks verify
-	  the validity of ICC_PMR_EL1 when calling concerned functions.
-
-	  If unsure, say N
-endif
-
 config RELOCATABLE
 	bool
-	select ARCH_HAS_RELR
 	help
 	  This builds the kernel as a Position Independent Executable (PIE),
 	  which retains all relocation metadata required to relocate the

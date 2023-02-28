@@ -25,17 +25,12 @@
 /*
  * Authors: Dave Airlie <airlied@redhat.com>
  */
-
-#include <linux/console.h>
 #include <linux/module.h>
-#include <linux/pci.h>
+#include <linux/console.h>
 
+#include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_drv.h>
-#include <drm/drm_gem_vram_helper.h>
-#include <drm/drm_pci.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drm_vram_mm_helper.h>
 
 #include "ast_drv.h"
 
@@ -105,21 +100,28 @@ ast_pci_remove(struct pci_dev *pdev)
 static int ast_drm_freeze(struct drm_device *dev)
 {
 	drm_kms_helper_poll_disable(dev);
-	pci_save_state(dev->pdev);
-	drm_fb_helper_set_suspend_unlocked(dev->fb_helper, true);
 
+	pci_save_state(dev->pdev);
+
+	console_lock();
+	ast_fbdev_set_suspend(dev, 1);
+	console_unlock();
 	return 0;
 }
 
 static int ast_drm_thaw(struct drm_device *dev)
 {
+	int error = 0;
+
 	ast_post_gpu(dev);
 
 	drm_mode_config_reset(dev);
 	drm_helper_resume_force_mode(dev);
-	drm_fb_helper_set_suspend_unlocked(dev->fb_helper, false);
 
-	return 0;
+	console_lock();
+	ast_fbdev_set_suspend(dev, 0);
+	console_unlock();
+	return error;
 }
 
 static int ast_drm_resume(struct drm_device *dev)
@@ -203,7 +205,13 @@ static struct pci_driver ast_pci_driver = {
 
 static const struct file_operations ast_fops = {
 	.owner = THIS_MODULE,
-	DRM_VRAM_MM_FILE_OPERATIONS
+	.open = drm_open,
+	.release = drm_release,
+	.unlocked_ioctl = drm_ioctl,
+	.mmap = ast_mmap,
+	.poll = drm_poll,
+	.compat_ioctl = drm_compat_ioctl,
+	.read = drm_read,
 };
 
 static struct drm_driver driver = {
@@ -220,7 +228,10 @@ static struct drm_driver driver = {
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
 
-	DRM_GEM_VRAM_DRIVER
+	.gem_free_object_unlocked = ast_gem_free_object,
+	.dumb_create = ast_dumb_create,
+	.dumb_map_offset = ast_dumb_mmap_offset,
+
 };
 
 static int __init ast_init(void)

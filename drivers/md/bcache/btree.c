@@ -613,10 +613,6 @@ static void mca_data_alloc(struct btree *b, struct bkey *k, gfp_t gfp)
 static struct btree *mca_bucket_alloc(struct cache_set *c,
 				      struct bkey *k, gfp_t gfp)
 {
-	/*
-	 * kzalloc() is necessary here for initialization,
-	 * see code comments in bch_btree_keys_init().
-	 */
 	struct btree *b = kzalloc(sizeof(struct btree), gfp);
 
 	if (!b)

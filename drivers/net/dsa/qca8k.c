@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2009 Felix Fietkau <nbd@nbd.name>
  * Copyright (C) 2011-2012 Gabor Juhos <juhosg@openwrt.org>
- * Copyright (c) 2015, 2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016 John Crispin <john@phrozen.org>
  */
 
@@ -14,7 +14,6 @@
 #include <linux/of_platform.h>
 #include <linux/if_bridge.h>
 #include <linux/mdio.h>
-#include <linux/gpio/consumer.h>
 #include <linux/etherdevice.h>
 
 #include "qca8k.h"
@@ -583,11 +582,8 @@ qca8k_setup_mdio_bus(struct qca8k_priv *priv)
 
 	for_each_available_child_of_node(ports, port) {
 		err = of_property_read_u32(port, "reg", &reg);
-		if (err) {
-			of_node_put(port);
-			of_node_put(ports);
+		if (err)
 			return err;
-		}
 
 		if (!dsa_is_user_port(priv->ds, reg))
 			continue;
@@ -598,7 +594,6 @@ qca8k_setup_mdio_bus(struct qca8k_priv *priv)
 			internal_mdio_mask |= BIT(reg);
 	}
 
-	of_node_put(ports);
 	if (!external_mdio_mask && !internal_mdio_mask) {
 		dev_err(priv->dev, "no PHYs are defined.\n");
 		return -EINVAL;
@@ -705,7 +700,7 @@ qca8k_setup(struct dsa_switch *ds)
 		    BIT(0) << QCA8K_GLOBAL_FW_CTRL1_UC_DP_S);
 
 	/* Setup connection between CPU port & user ports */
-	for (i = 0; i < QCA8K_NUM_PORTS; i++) {
+	for (i = 0; i < DSA_MAX_PORTS; i++) {
 		/* CPU port gets connected to all user ports of the switch */
 		if (dsa_is_cpu_port(ds, i)) {
 			qca8k_rmw(priv, QCA8K_PORT_LOOKUP_CTRL(QCA8K_CPU_PORT),
@@ -936,13 +931,8 @@ qca8k_port_enable(struct dsa_switch *ds, int port,
 {
 	struct qca8k_priv *priv = (struct qca8k_priv *)ds->priv;
 
-	if (!dsa_is_user_port(ds, port))
-		return 0;
-
 	qca8k_port_set_status(priv, port, 1);
 	priv->port_sts[port].enabled = 1;
-
-	phy_support_asym_pause(phy);
 
 	return 0;
 }
@@ -1056,20 +1046,6 @@ qca8k_sw_probe(struct mdio_device *mdiodev)
 	priv->bus = mdiodev->bus;
 	priv->dev = &mdiodev->dev;
 
-	priv->reset_gpio = devm_gpiod_get_optional(priv->dev, "reset",
-						   GPIOD_ASIS);
-	if (IS_ERR(priv->reset_gpio))
-		return PTR_ERR(priv->reset_gpio);
-
-	if (priv->reset_gpio) {
-		gpiod_set_value_cansleep(priv->reset_gpio, 1);
-		/* The active low duration must be greater than 10 ms
-		 * and checkpatch.pl wants 20 ms.
-		 */
-		msleep(20);
-		gpiod_set_value_cansleep(priv->reset_gpio, 0);
-	}
-
 	/* read the switches ID register */
 	id = qca8k_read(priv, QCA8K_REG_MASK_CTRL);
 	id >>= QCA8K_MASK_CTRL_ID_S;
@@ -1077,7 +1053,7 @@ qca8k_sw_probe(struct mdio_device *mdiodev)
 	if (id != QCA8K_ID_QCA8337)
 		return -ENODEV;
 
-	priv->ds = dsa_switch_alloc(&mdiodev->dev, QCA8K_NUM_PORTS);
+	priv->ds = dsa_switch_alloc(&mdiodev->dev, DSA_MAX_PORTS);
 	if (!priv->ds)
 		return -ENOMEM;
 

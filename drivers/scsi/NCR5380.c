@@ -149,27 +149,18 @@ static inline void initialize_SCp(struct scsi_cmnd *cmd)
 
 	if (scsi_bufflen(cmd)) {
 		cmd->SCp.buffer = scsi_sglist(cmd);
+		cmd->SCp.buffers_residual = scsi_sg_count(cmd) - 1;
 		cmd->SCp.ptr = sg_virt(cmd->SCp.buffer);
 		cmd->SCp.this_residual = cmd->SCp.buffer->length;
 	} else {
 		cmd->SCp.buffer = NULL;
+		cmd->SCp.buffers_residual = 0;
 		cmd->SCp.ptr = NULL;
 		cmd->SCp.this_residual = 0;
 	}
 
 	cmd->SCp.Status = 0;
 	cmd->SCp.Message = 0;
-}
-
-static inline void advance_sg_buffer(struct scsi_cmnd *cmd)
-{
-	struct scatterlist *s = cmd->SCp.buffer;
-
-	if (!cmd->SCp.this_residual && s && !sg_is_last(s)) {
-		cmd->SCp.buffer = sg_next(s);
-		cmd->SCp.ptr = sg_virt(cmd->SCp.buffer);
-		cmd->SCp.this_residual = cmd->SCp.buffer->length;
-	}
 }
 
 /**
@@ -1679,7 +1670,12 @@ static void NCR5380_information_transfer(struct Scsi_Host *instance)
 			    sun3_dma_setup_done != cmd) {
 				int count;
 
-				advance_sg_buffer(cmd);
+				if (!cmd->SCp.this_residual && cmd->SCp.buffers_residual) {
+					++cmd->SCp.buffer;
+					--cmd->SCp.buffers_residual;
+					cmd->SCp.this_residual = cmd->SCp.buffer->length;
+					cmd->SCp.ptr = sg_virt(cmd->SCp.buffer);
+				}
 
 				count = sun3scsi_dma_xfer_len(hostdata, cmd);
 
@@ -1729,11 +1725,15 @@ static void NCR5380_information_transfer(struct Scsi_Host *instance)
 				 * scatter-gather list, move onto the next one.
 				 */
 
-				advance_sg_buffer(cmd);
-				dsprintk(NDEBUG_INFORMATION, instance,
-					"this residual %d, sg ents %d\n",
-					cmd->SCp.this_residual,
-					sg_nents(cmd->SCp.buffer));
+				if (!cmd->SCp.this_residual && cmd->SCp.buffers_residual) {
+					++cmd->SCp.buffer;
+					--cmd->SCp.buffers_residual;
+					cmd->SCp.this_residual = cmd->SCp.buffer->length;
+					cmd->SCp.ptr = sg_virt(cmd->SCp.buffer);
+					dsprintk(NDEBUG_INFORMATION, instance, "%d bytes and %d buffers left\n",
+					         cmd->SCp.this_residual,
+					         cmd->SCp.buffers_residual);
+				}
 
 				/*
 				 * The preferred transfer method is going to be
@@ -2126,7 +2126,12 @@ static void NCR5380_reselect(struct Scsi_Host *instance)
 	if (sun3_dma_setup_done != tmp) {
 		int count;
 
-		advance_sg_buffer(tmp);
+		if (!tmp->SCp.this_residual && tmp->SCp.buffers_residual) {
+			++tmp->SCp.buffer;
+			--tmp->SCp.buffers_residual;
+			tmp->SCp.this_residual = tmp->SCp.buffer->length;
+			tmp->SCp.ptr = sg_virt(tmp->SCp.buffer);
+		}
 
 		count = sun3scsi_dma_xfer_len(hostdata, tmp);
 

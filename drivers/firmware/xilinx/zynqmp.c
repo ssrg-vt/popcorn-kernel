@@ -2,7 +2,7 @@
 /*
  * Xilinx Zynq MPSoC Firmware layer
  *
- *  Copyright (C) 2014-2020 Xilinx, Inc.
+ *  Copyright (C) 2014-2018 Xilinx, Inc.
  *
  *  Michal Simek <michal.simek@xilinx.com>
  *  Davorin Mista <davorin.mista@aggios.com>
@@ -24,12 +24,7 @@
 #include <linux/firmware/xlnx-zynqmp.h>
 #include "zynqmp-debug.h"
 
-static unsigned long register_address;
-
 static const struct zynqmp_eemi_ops *eemi_ops_tbl;
-
-static bool feature_check_enabled;
-static u32 zynqmp_pm_features[PM_API_MAX];
 
 static const struct mfd_cell firmware_devs[] = {
 	{
@@ -49,14 +44,10 @@ static int zynqmp_pm_ret_code(u32 ret_status)
 	case XST_PM_SUCCESS:
 	case XST_PM_DOUBLE_REQ:
 		return 0;
-	case XST_PM_NO_FEATURE:
-		return -ENOTSUPP;
 	case XST_PM_NO_ACCESS:
 		return -EACCES;
 	case XST_PM_ABORT_SUSPEND:
 		return -ECANCELED;
-	case XST_PM_MULT_USER:
-		return -EUSERS;
 	case XST_PM_INTERNAL:
 	case XST_PM_CONFLICT:
 	case XST_PM_INVALID_NODE:
@@ -136,39 +127,6 @@ static noinline int do_fw_call_hvc(u64 arg0, u64 arg1, u64 arg2,
 }
 
 /**
- * zynqmp_pm_feature() - Check weather given feature is supported or not
- * @api_id:		API ID to check
- *
- * Return: Returns status, either success or error+reason
- */
-static int zynqmp_pm_feature(u32 api_id)
-{
-	int ret;
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	u64 smc_arg[2];
-
-	if (!feature_check_enabled)
-		return 0;
-
-	/* Return value if feature is already checked */
-	if (zynqmp_pm_features[api_id] != PM_FEATURE_UNCHECKED)
-		return zynqmp_pm_features[api_id];
-
-	smc_arg[0] = PM_SIP_SVC | PM_FEATURE_CHECK;
-	smc_arg[1] = api_id;
-
-	ret = do_fw_call(smc_arg[0], smc_arg[1], 0, ret_payload);
-	if (ret) {
-		zynqmp_pm_features[api_id] = PM_FEATURE_INVALID;
-		return PM_FEATURE_INVALID;
-	}
-
-	zynqmp_pm_features[api_id] = ret_payload[1];
-
-	return zynqmp_pm_features[api_id];
-}
-
-/**
  * zynqmp_pm_invoke_fn() - Invoke the system-level platform management layer
  *			   caller function depending on the configuration
  * @pm_api_id:		Requested PM-API call
@@ -201,9 +159,6 @@ int zynqmp_pm_invoke_fn(u32 pm_api_id, u32 arg0, u32 arg1,
 	 * Make sure to stay in x0 register
 	 */
 	u64 smc_arg[4];
-
-	if (zynqmp_pm_feature(pm_api_id) == PM_FEATURE_INVALID)
-		return -ENOTSUPP;
 
 	smc_arg[0] = PM_SIP_SVC | pm_api_id;
 	smc_arg[1] = ((u64)arg1 << 32) | arg0;
@@ -506,39 +461,6 @@ static int zynqmp_pm_clock_getparent(u32 clock_id, u32 *parent_id)
 }
 
 /**
- * versal_is_valid_ioctl() - Check whether IOCTL ID is valid or not for versal
- * @ioctl_id:	IOCTL ID
- *
- * Return: 1 if IOCTL is valid else 0
- */
-static inline int versal_is_valid_ioctl(u32 ioctl_id)
-{
-	switch (ioctl_id) {
-	case IOCTL_GET_RPU_OPER_MODE:
-	case IOCTL_SET_RPU_OPER_MODE:
-	case IOCTL_RPU_BOOT_ADDR_CONFIG:
-	case IOCTL_TCM_COMB_CONFIG:
-	case IOCTL_SET_TAPDELAY_BYPASS:
-	case IOCTL_SD_DLL_RESET:
-	case IOCTL_SET_SD_TAPDELAY:
-	case IOCTL_WRITE_GGS:
-	case IOCTL_READ_GGS:
-	case IOCTL_WRITE_PGGS:
-	case IOCTL_READ_PGGS:
-	case IOCTL_SET_BOOT_HEALTH_STATUS:
-	case IOCTL_PROBE_COUNTER_READ:
-	case IOCTL_PROBE_COUNTER_WRITE:
-	case IOCTL_USB_SET_STATE:
-	case IOCTL_OSPI_MUX_SELECT:
-	case IOCTL_GET_LAST_RESET_REASON:
-	case IOCTL_AIE_ISR_CLEAR:
-		return 1;
-	default:
-		return 0;
-	}
-}
-
-/**
  * zynqmp_is_valid_ioctl() - Check whether IOCTL ID is valid or not
  * @ioctl_id:	IOCTL ID
  *
@@ -551,21 +473,6 @@ static inline int zynqmp_is_valid_ioctl(u32 ioctl_id)
 	case IOCTL_GET_PLL_FRAC_MODE:
 	case IOCTL_SET_PLL_FRAC_DATA:
 	case IOCTL_GET_PLL_FRAC_DATA:
-	case IOCTL_GET_RPU_OPER_MODE:
-	case IOCTL_SET_RPU_OPER_MODE:
-	case IOCTL_RPU_BOOT_ADDR_CONFIG:
-	case IOCTL_TCM_COMB_CONFIG:
-	case IOCTL_SET_TAPDELAY_BYPASS:
-	case IOCTL_SET_SGMII_MODE:
-	case IOCTL_SD_DLL_RESET:
-	case IOCTL_SET_SD_TAPDELAY:
-	case IOCTL_WRITE_GGS:
-	case IOCTL_READ_GGS:
-	case IOCTL_WRITE_PGGS:
-	case IOCTL_READ_PGGS:
-	case IOCTL_ULPI_RESET:
-	case IOCTL_SET_BOOT_HEALTH_STATUS:
-	case IOCTL_AFI:
 		return 1;
 	default:
 		return 0;
@@ -587,13 +494,8 @@ static inline int zynqmp_is_valid_ioctl(u32 ioctl_id)
 static int zynqmp_pm_ioctl(u32 node_id, u32 ioctl_id, u32 arg1, u32 arg2,
 			   u32 *out)
 {
-	if (of_find_compatible_node(NULL, NULL, "xlnx,versal")) {
-		if (!versal_is_valid_ioctl(ioctl_id))
-			return -EINVAL;
-	} else {
-		if (!zynqmp_is_valid_ioctl(ioctl_id))
-			return -EINVAL;
-	}
+	if (!zynqmp_is_valid_ioctl(ioctl_id))
+		return -EINVAL;
 
 	return zynqmp_pm_invoke_fn(PM_IOCTL, node_id, ioctl_id,
 				   arg1, arg2, out);
@@ -607,7 +509,7 @@ static int zynqmp_pm_ioctl(u32 node_id, u32 ioctl_id, u32 arg1, u32 arg2,
  *
  * Return: Returns status, either success or error+reason
  */
-static int zynqmp_pm_reset_assert(const u32 reset,
+static int zynqmp_pm_reset_assert(const enum zynqmp_pm_reset reset,
 				  const enum zynqmp_pm_reset_action assert_flag)
 {
 	return zynqmp_pm_invoke_fn(PM_RESET_ASSERT, reset, assert_flag,
@@ -621,7 +523,8 @@ static int zynqmp_pm_reset_assert(const u32 reset,
  *
  * Return: Returns status, either success or error+reason
  */
-static int zynqmp_pm_reset_get_status(const u32 reset, u32 *status)
+static int zynqmp_pm_reset_get_status(const enum zynqmp_pm_reset reset,
+				      u32 *status)
 {
 	u32 ret_payload[PAYLOAD_ARG_CNT];
 	int ret;
@@ -761,485 +664,6 @@ static int zynqmp_pm_set_requirement(const u32 node, const u32 capabilities,
 				   qos, ack, NULL);
 }
 
-/**
- * zynqmp_pm_load_pdi - Load and process pdi
- * @src:	Source device where PDI is located
- * @address:	Pdi src address
- *
- * This function provides support to load pdi from linux
- *
- * Return: Returns status, either success or error+reason
- */
-static int zynqmp_pm_load_pdi(const u32 src, const u64 address)
-{
-	return zynqmp_pm_invoke_fn(PM_LOAD_PDI, src,
-				   lower_32_bits(address),
-				   upper_32_bits(address), 0, NULL);
-}
-
-/**
- * zynqmp_pm_fpga_read - Perform the fpga configuration readback
- * @reg_numframes: Configuration register offset (or) Number of frames to read
- * @phys_address: Physical Address of the buffer
- * @readback_type: Type of fpga readback operation
- * @value: Value to read
- *
- * This function provides access to xilfpga library to perform
- * fpga configuration readback.
- *
- * Return:	Returns status, either success or error+reason
- */
-static int zynqmp_pm_fpga_read(const u32 reg_numframes, const u64 phys_address,
-			       u32 readback_type, u32 *value)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	if (!value)
-		return -EINVAL;
-
-	ret = zynqmp_pm_invoke_fn(PM_FPGA_READ, reg_numframes,
-				  lower_32_bits(phys_address),
-				  upper_32_bits(phys_address), readback_type,
-				  ret_payload);
-	*value = ret_payload[1];
-
-	return ret;
-}
-
-/**
- * zynqmp_pm_sha_hash - Access the SHA engine to calculate the hash
- * @address:	Address of the data/ Address of output buffer where
- *		hash should be stored.
- * @size:	Size of the data.
- * @flags:
- *	BIT(0) - for initializing csudma driver and SHA3(Here address
- *		 and size inputs can be NULL).
- *	BIT(1) - to call Sha3_Update API which can be called multiple
- *		 times when data is not contiguous.
- *	BIT(2) - to get final hash of the whole updated data.
- *		 Hash will be overwritten at provided address with
- *		 48 bytes.
- *
- * Return:	Returns status, either success or error code.
- */
-static int zynqmp_pm_sha_hash(const u64 address, const u32 size,
-			      const u32 flags)
-{
-	u32 lower_32_bits = (u32)address;
-	u32 upper_32_bits = (u32)(address >> 32);
-
-	return zynqmp_pm_invoke_fn(PM_SECURE_SHA, upper_32_bits, lower_32_bits,
-				   size, flags, NULL);
-}
-
-/**
- * zynqmp_pm_rsa - Access RSA hardware to encrypt/decrypt the data with RSA.
- * @address:	Address of the data
- * @size:	Size of the data.
- * @flags:
- *		BIT(0) - Encryption/Decryption
- *			 0 - RSA decryption with private key
- *			 1 - RSA encryption with public key.
- *
- * Return:	Returns status, either success or error code.
- */
-static int zynqmp_pm_rsa(const u64 address, const u32 size, const u32 flags)
-{
-	u32 lower_32_bits = (u32)address;
-	u32 upper_32_bits = (u32)(address >> 32);
-
-	return zynqmp_pm_invoke_fn(PM_SECURE_RSA, upper_32_bits, lower_32_bits,
-				   size, flags, NULL);
-}
-
-/**
- * zynqmp_pm_aes - Access AES hardware to encrypt/decrypt the data using
- * AES-GCM core.
- * @address:	Address of the AesParams structure.
- * @out:	Returned output value
- *
- * Return:	Returns status, either success or error code.
- */
-static int zynqmp_pm_aes_engine(const u64 address, u32 *out)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	if (!out)
-		return -EINVAL;
-
-	ret = zynqmp_pm_invoke_fn(PM_SECURE_AES, upper_32_bits(address),
-				  lower_32_bits(address),
-				  0, 0, ret_payload);
-	*out = ret_payload[1];
-	return ret;
-}
-
-/**
- * zynqmp_pm_request_suspend - PM call to request for another PU or subsystem to
- *					be suspended gracefully.
- * @node:	Node ID of the targeted PU or subsystem
- * @ack:	Flag to specify whether acknowledge is requested
- * @latency:	Requested wakeup latency (not supported)
- * @state:	Requested state (not supported)
- *
- * Return:	Returns status, either success or error+reason
- */
-static int zynqmp_pm_request_suspend(const u32 node,
-				     const enum zynqmp_pm_request_ack ack,
-				     const u32 latency,
-				     const u32 state)
-{
-	return zynqmp_pm_invoke_fn(PM_REQUEST_SUSPEND, node, ack,
-				   latency, state, NULL);
-}
-
-/**
- * zynqmp_pm_force_powerdown - PM call to request for another PU or subsystem to
- *				be powered down forcefully
- * @target:	Node ID of the targeted PU or subsystem
- * @ack:	Flag to specify whether acknowledge is requested
- *
- * Return:	Returns status, either success or error+reason
- */
-static int zynqmp_pm_force_powerdown(const u32 target,
-				     const enum zynqmp_pm_request_ack ack)
-{
-	return zynqmp_pm_invoke_fn(PM_FORCE_POWERDOWN, target, ack, 0, 0, NULL);
-}
-
-/**
- * zynqmp_pm_request_wakeup - PM call to wake up selected master or subsystem
- * @node:	Node ID of the master or subsystem
- * @set_addr:	Specifies whether the address argument is relevant
- * @address:	Address from which to resume when woken up
- * @ack:	Flag to specify whether acknowledge requested
- *
- * Return:	Returns status, either success or error+reason
- */
-static int zynqmp_pm_request_wakeup(const u32 node,
-				    const bool set_addr,
-				    const u64 address,
-				    const enum zynqmp_pm_request_ack ack)
-{
-	/* set_addr flag is encoded into 1st bit of address */
-	return zynqmp_pm_invoke_fn(PM_REQUEST_WAKEUP, node, address | set_addr,
-				   address >> 32, ack, NULL);
-}
-
-/**
- * zynqmp_pm_set_wakeup_source - PM call to specify the wakeup source
- *					while suspended
- * @target:	Node ID of the targeted PU or subsystem
- * @wakeup_node:Node ID of the wakeup peripheral
- * @enable:	Enable or disable the specified peripheral as wake source
- *
- * Return:	Returns status, either success or error+reason
- */
-static int zynqmp_pm_set_wakeup_source(const u32 target,
-				       const u32 wakeup_node,
-				       const u32 enable)
-{
-	return zynqmp_pm_invoke_fn(PM_SET_WAKEUP_SOURCE, target,
-				   wakeup_node, enable, 0, NULL);
-}
-
-/**
- * zynqmp_pm_system_shutdown - PM call to request a system shutdown or restart
- * @type:	Shutdown or restart? 0 for shutdown, 1 for restart
- * @subtype:	Specifies which system should be restarted or shut down
- *
- * Return:	Returns status, either success or error+reason
- */
-static int zynqmp_pm_system_shutdown(const u32 type, const u32 subtype)
-{
-	return zynqmp_pm_invoke_fn(PM_SYSTEM_SHUTDOWN, type, subtype,
-				   0, 0, NULL);
-}
-
-/**
- * zynqmp_pm_set_max_latency - PM call to set wakeup latency requirements
- * @node:	Node ID of the slave
- * @latency:	Requested maximum wakeup latency
- *
- * Return:	Returns status, either success or error+reason
- */
-static int zynqmp_pm_set_max_latency(const u32 node, const u32 latency)
-{
-	return zynqmp_pm_invoke_fn(PM_SET_MAX_LATENCY, node, latency,
-				   0, 0, NULL);
-}
-
-/**
- * zynqmp_pm_set_configuration - PM call to set system configuration
- * @physical_addr:	Physical 32-bit address of data structure in memory
- *
- * Return:		Returns status, either success or error+reason
- */
-static int zynqmp_pm_set_configuration(const u32 physical_addr)
-{
-	return zynqmp_pm_invoke_fn(PM_SET_CONFIGURATION, physical_addr, 0,
-				   0, 0, NULL);
-}
-
-/**
- * zynqmp_pm_get_node_status - PM call to request a node's current power state
- * @node:		ID of the component or sub-system in question
- * @status:		Current operating state of the requested node
- * @requirements:	Current requirements asserted on the node,
- *			used for slave nodes only.
- * @usage:		Usage information, used for slave nodes only:
- *			PM_USAGE_NO_MASTER	- No master is currently using
- *						  the node
- *			PM_USAGE_CURRENT_MASTER	- Only requesting master is
- *						  currently using the node
- *			PM_USAGE_OTHER_MASTER	- Only other masters are
- *						  currently using the node
- *			PM_USAGE_BOTH_MASTERS	- Both the current and at least
- *						  one other master is currently
- *						  using the node
- *
- * Return:		Returns status, either success or error+reason
- */
-static int zynqmp_pm_get_node_status(const u32 node, u32 *const status,
-				     u32 *const requirements, u32 *const usage)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	if (!status)
-		return -EINVAL;
-
-	ret = zynqmp_pm_invoke_fn(PM_GET_NODE_STATUS, node, 0, 0,
-				  0, ret_payload);
-	if (ret_payload[0] == XST_PM_SUCCESS) {
-		*status = ret_payload[1];
-		if (requirements)
-			*requirements = ret_payload[2];
-		if (usage)
-			*usage = ret_payload[3];
-	}
-
-	return ret;
-}
-
-/**
- * zynqmp_pm_get_operating_characteristic - PM call to request operating
- *						characteristic information
- * @node:	Node ID of the slave
- * @type:	Type of the operating characteristic requested
- * @result:	Used to return the requsted operating characteristic
- *
- * Return:	Returns status, either success or error+reason
- */
-static int zynqmp_pm_get_operating_characteristic(const u32 node,
-		const enum zynqmp_pm_opchar_type type,
-		u32 *const result)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	if (!result)
-		return -EINVAL;
-
-	ret = zynqmp_pm_invoke_fn(PM_GET_OPERATING_CHARACTERISTIC,
-				  node, type, 0, 0, ret_payload);
-	if (ret_payload[0] == XST_PM_SUCCESS)
-		*result = ret_payload[1];
-
-	return ret;
-}
-
-/**
- * zynqmp_pm_pinctrl_request - Request Pin from firmware
- * @pin:	Pin number to request
- *
- * This function requests pin from firmware.
- *
- * Return:	Returns status, either success or error+reason.
- */
-static int zynqmp_pm_pinctrl_request(const u32 pin)
-{
-	return zynqmp_pm_invoke_fn(PM_PINCTRL_REQUEST, pin, 0, 0, 0, NULL);
-}
-
-/**
- * zynqmp_pm_pinctrl_release - Inform firmware that Pin control is released
- * @pin:	Pin number to release
- *
- * This function release pin from firmware.
- *
- * Return:	Returns status, either success or error+reason.
- */
-static int zynqmp_pm_pinctrl_release(const u32 pin)
-{
-	return zynqmp_pm_invoke_fn(PM_PINCTRL_RELEASE, pin, 0, 0, 0, NULL);
-}
-
-/**
- * zynqmp_pm_pinctrl_get_function - Read function id set for the given pin
- * @pin:	Pin number
- * @id:		Buffer to store function ID
- *
- * This function provides the function currently set for the given pin.
- *
- * Return:	Returns status, either success or error+reason
- */
-static int zynqmp_pm_pinctrl_get_function(const u32 pin, u32 *id)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	if (!id)
-		return -EINVAL;
-
-	ret = zynqmp_pm_invoke_fn(PM_PINCTRL_GET_FUNCTION, pin, 0,
-				  0, 0, ret_payload);
-	*id = ret_payload[1];
-
-	return ret;
-}
-
-/**
- * zynqmp_pm_pinctrl_set_function - Set requested function for the pin
- * @pin:	Pin number
- * @id:		Function ID to set
- *
- * This function sets requested function for the given pin.
- *
- * Return:	Returns status, either success or error+reason.
- */
-static int zynqmp_pm_pinctrl_set_function(const u32 pin, const u32 id)
-{
-	return zynqmp_pm_invoke_fn(PM_PINCTRL_SET_FUNCTION, pin, id,
-				   0, 0, NULL);
-}
-
-/**
- * zynqmp_pm_pinctrl_get_config - Get configuration parameter for the pin
- * @pin:	Pin number
- * @param:	Parameter to get
- * @value:	Buffer to store parameter value
- *
- * This function gets requested configuration parameter for the given pin.
- *
- * Return:	Returns status, either success or error+reason.
- */
-static int zynqmp_pm_pinctrl_get_config(const u32 pin, const u32 param,
-					u32 *value)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	if (!value)
-		return -EINVAL;
-
-	ret = zynqmp_pm_invoke_fn(PM_PINCTRL_CONFIG_PARAM_GET, pin, param,
-				  0, 0, ret_payload);
-	*value = ret_payload[1];
-
-	return ret;
-}
-
-/**
- * zynqmp_pm_pinctrl_set_config - Set configuration parameter for the pin
- * @pin:	Pin number
- * @param:	Parameter to set
- * @value:	Parameter value to set
- *
- * This function sets requested configuration parameter for the given pin.
- *
- * Return:	Returns status, either success or error+reason.
- */
-static int zynqmp_pm_pinctrl_set_config(const u32 pin, const u32 param,
-					u32 value)
-{
-	return zynqmp_pm_invoke_fn(PM_PINCTRL_CONFIG_PARAM_SET, pin,
-				   param, value, 0, NULL);
-}
-
-/**
- * zynqmp_pm_config_reg_access - PM Config API for Config register access
- * @register_access_id:	ID of the requested REGISTER_ACCESS
- * @address:		Address of the register to be accessed
- * @mask:		Mask to be written to the register
- * @value:		Value to be written to the register
- * @out:		Returned output value
- *
- * This function calls REGISTER_ACCESS to configure CSU/PMU registers.
- *
- * Return:	Returns status, either success or error+reason
- */
-
-static int zynqmp_pm_config_reg_access(u32 register_access_id, u32 address,
-				       u32 mask, u32 value, u32 *out)
-{
-	return zynqmp_pm_invoke_fn(PM_REGISTER_ACCESS, register_access_id,
-				   address, mask, value, out);
-}
-
-/**
- * zynqmp_pm_efuse_access - Provides access to efuse memory.
- * @address:	Address of the efuse params structure
- * @out:		Returned output value
- *
- * Return:	Returns status, either success or error code.
- */
-static int zynqmp_pm_efuse_access(const u64 address, u32 *out)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	if (!out)
-		return -EINVAL;
-
-	ret = zynqmp_pm_invoke_fn(PM_EFUSE_ACCESS, upper_32_bits(address),
-				  lower_32_bits(address), 0, 0, ret_payload);
-	*out = ret_payload[1];
-
-	return ret;
-}
-
-static int zynqmp_pm_secure_load(const u64 src_addr, u64 key_addr, u64 *dst)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret_value;
-
-	if (!dst)
-		return -EINVAL;
-
-	ret_value = zynqmp_pm_invoke_fn(PM_SECURE_IMAGE,
-					lower_32_bits(src_addr),
-					upper_32_bits(src_addr),
-					lower_32_bits(key_addr),
-					upper_32_bits(key_addr),
-					ret_payload);
-	*dst = ((u64)ret_payload[1] << 32) | ret_payload[2];
-
-	return ret_value;
-}
-
-/**
- * zynqmp_pm_get_last_reset_reason() - PM API for getting last reset reason
- *
- * @reset_reason:	last reset reason
- *
- * This function returns last reset reason
- *
- * Return: Returns status, either success or error+reason
- */
-int zynqmp_pm_get_last_reset_reason(u32 *reset_reason)
-{
-	if (!reset_reason)
-		return -EINVAL;
-
-	return zynqmp_pm_invoke_fn(PM_IOCTL, 0,
-				   IOCTL_GET_LAST_RESET_REASON,
-				   0, 0, reset_reason);
-}
-EXPORT_SYMBOL_GPL(zynqmp_pm_get_last_reset_reason);
-
 static const struct zynqmp_eemi_ops eemi_ops = {
 	.get_api_version = zynqmp_pm_get_api_version,
 	.get_chipid = zynqmp_pm_get_chipid,
@@ -1263,29 +687,6 @@ static const struct zynqmp_eemi_ops eemi_ops = {
 	.set_requirement = zynqmp_pm_set_requirement,
 	.fpga_load = zynqmp_pm_fpga_load,
 	.fpga_get_status = zynqmp_pm_fpga_get_status,
-	.fpga_read = zynqmp_pm_fpga_read,
-	.sha_hash = zynqmp_pm_sha_hash,
-	.rsa = zynqmp_pm_rsa,
-	.request_suspend = zynqmp_pm_request_suspend,
-	.force_powerdown = zynqmp_pm_force_powerdown,
-	.request_wakeup = zynqmp_pm_request_wakeup,
-	.set_wakeup_source = zynqmp_pm_set_wakeup_source,
-	.system_shutdown = zynqmp_pm_system_shutdown,
-	.set_max_latency = zynqmp_pm_set_max_latency,
-	.set_configuration = zynqmp_pm_set_configuration,
-	.get_node_status = zynqmp_pm_get_node_status,
-	.get_operating_characteristic = zynqmp_pm_get_operating_characteristic,
-	.pinctrl_request = zynqmp_pm_pinctrl_request,
-	.pinctrl_release = zynqmp_pm_pinctrl_release,
-	.pinctrl_get_function = zynqmp_pm_pinctrl_get_function,
-	.pinctrl_set_function = zynqmp_pm_pinctrl_set_function,
-	.pinctrl_get_config = zynqmp_pm_pinctrl_get_config,
-	.pinctrl_set_config = zynqmp_pm_pinctrl_set_config,
-	.register_access = zynqmp_pm_config_reg_access,
-	.aes = zynqmp_pm_aes_engine,
-	.efuse_access = zynqmp_pm_efuse_access,
-	.pdi_load = zynqmp_pm_load_pdi,
-	.secure_image = zynqmp_pm_secure_load,
 };
 
 /**
@@ -1303,386 +704,6 @@ const struct zynqmp_eemi_ops *zynqmp_pm_get_eemi_ops(void)
 }
 EXPORT_SYMBOL_GPL(zynqmp_pm_get_eemi_ops);
 
-/**
- * struct zynqmp_pm_shutdown_scope - Struct for shutdown scope
- * @subtype:	Shutdown subtype
- * @name:	Matching string for scope argument
- *
- * This struct encapsulates mapping between shutdown scope ID and string.
- */
-struct zynqmp_pm_shutdown_scope {
-	const enum zynqmp_pm_shutdown_subtype subtype;
-	const char *name;
-};
-
-static struct zynqmp_pm_shutdown_scope shutdown_scopes[] = {
-	[ZYNQMP_PM_SHUTDOWN_SUBTYPE_SUBSYSTEM] = {
-		.subtype = ZYNQMP_PM_SHUTDOWN_SUBTYPE_SUBSYSTEM,
-		.name = "subsystem",
-	},
-	[ZYNQMP_PM_SHUTDOWN_SUBTYPE_PS_ONLY] = {
-		.subtype = ZYNQMP_PM_SHUTDOWN_SUBTYPE_PS_ONLY,
-		.name = "ps_only",
-	},
-	[ZYNQMP_PM_SHUTDOWN_SUBTYPE_SYSTEM] = {
-		.subtype = ZYNQMP_PM_SHUTDOWN_SUBTYPE_SYSTEM,
-		.name = "system",
-	},
-};
-
-static struct zynqmp_pm_shutdown_scope *selected_scope =
-		&shutdown_scopes[ZYNQMP_PM_SHUTDOWN_SUBTYPE_SYSTEM];
-
-/**
- * zynqmp_pm_is_shutdown_scope_valid - Check if shutdown scope string is valid
- * @scope_string:	Shutdown scope string
- *
- * Return:		Return pointer to matching shutdown scope struct from
- *			array of available options in system if string is valid,
- *			otherwise returns NULL.
- */
-static struct zynqmp_pm_shutdown_scope*
-		zynqmp_pm_is_shutdown_scope_valid(const char *scope_string)
-{
-	int count;
-
-	for (count = 0; count < ARRAY_SIZE(shutdown_scopes); count++)
-		if (sysfs_streq(scope_string, shutdown_scopes[count].name))
-			return &shutdown_scopes[count];
-
-	return NULL;
-}
-
-/**
- * shutdown_scope_show - Show shutdown_scope sysfs attribute
- * @kobj:	Kobject structure
- * @attr:	Kobject attribute structure
- * @buf:	Requested available shutdown_scope attributes string
- *
- * User-space interface for viewing the available scope options for system
- * shutdown. Scope option for next shutdown call is marked with [].
- *
- * Usage: cat /sys/firmware/zynqmp/shutdown_scope
- *
- * Return:	Number of bytes printed into the buffer.
- */
-static ssize_t shutdown_scope_show(struct kobject *kobj,
-				   struct kobj_attribute *attr,
-				   char *buf)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(shutdown_scopes); i++) {
-		if (&shutdown_scopes[i] == selected_scope) {
-			strcat(buf, "[");
-			strcat(buf, shutdown_scopes[i].name);
-			strcat(buf, "]");
-		} else {
-			strcat(buf, shutdown_scopes[i].name);
-		}
-		strcat(buf, " ");
-	}
-	strcat(buf, "\n");
-
-	return strlen(buf);
-}
-
-/**
- * shutdown_scope_store - Store shutdown_scope sysfs attribute
- * @kobj:	Kobject structure
- * @attr:	Kobject attribute structure
- * @buf:	User entered shutdown_scope attribute string
- * @count:	Buffer size
- *
- * User-space interface for setting the scope for the next system shutdown.
- * Usage: echo <scope> > /sys/firmware/zynqmp/shutdown_scope
- *
- * The Linux shutdown functionality implemented via PSCI system_off does not
- * include an option to set a scope, i.e. which parts of the system to shut
- * down.
- *
- * This API function allows to set the shutdown scope for the next shutdown
- * request by passing it to the ATF running in EL3. When the next shutdown
- * is performed, the platform specific portion of PSCI-system_off can use
- * the chosen shutdown scope.
- *
- * subsystem:	Only the APU along with all of its peripherals not used by other
- *		processing units will be shut down. This may result in the FPD
- *		power domain being shut down provided that no other processing
- *		unit uses FPD peripherals or DRAM.
- * ps_only:	The complete PS will be shut down, including the RPU, PMU, etc.
- *		Only the PL domain (FPGA) remains untouched.
- * system:	The complete system/device is shut down.
- *
- * Return:	count argument if request succeeds, the corresponding error
- *		code otherwise
- */
-static ssize_t shutdown_scope_store(struct kobject *kobj,
-				    struct kobj_attribute *attr,
-				    const char *buf, size_t count)
-{
-	int ret;
-	struct zynqmp_pm_shutdown_scope *scope;
-
-	scope = zynqmp_pm_is_shutdown_scope_valid(buf);
-	if (!scope)
-		return -EINVAL;
-
-	ret = zynqmp_pm_system_shutdown(ZYNQMP_PM_SHUTDOWN_TYPE_SETSCOPE_ONLY,
-					scope->subtype);
-	if (ret) {
-		pr_err("unable to set shutdown scope %s\n", buf);
-		return ret;
-	}
-
-	selected_scope = scope;
-
-	return count;
-}
-
-static struct kobj_attribute zynqmp_attr_shutdown_scope =
-						__ATTR_RW(shutdown_scope);
-
-/**
- * health_status_store - Store health_status sysfs attribute
- * @kobj:	Kobject structure
- * @attr:	Kobject attribute structure
- * @buf:	User entered health_status attribute string
- * @count:	Buffer size
- *
- * User-space interface for setting the boot health status.
- * Usage: echo <value> > /sys/firmware/zynqmp/health_status
- *
- * Value:
- *	1 - Set healthy bit to 1
- *	0 - Unset healthy bit
- *
- * Return:	count argument if request succeeds, the corresponding error
- *		code otherwise
- */
-static ssize_t health_status_store(struct kobject *kobj,
-				   struct kobj_attribute *attr,
-				   const char *buf, size_t count)
-{
-	int ret;
-	unsigned int value;
-
-	ret = kstrtouint(buf, 10, &value);
-	if (ret)
-		return ret;
-
-	ret = zynqmp_pm_ioctl(0, IOCTL_SET_BOOT_HEALTH_STATUS, value, 0, NULL);
-	if (ret) {
-		pr_err("unable to set healthy bit value to %u\n", value);
-		return ret;
-	}
-
-	return count;
-}
-
-static struct kobj_attribute zynqmp_attr_health_status =
-						__ATTR_WO(health_status);
-
-/**
- * config_reg_store - Write config_reg sysfs attribute
- * @kobj:	Kobject structure
- * @attr:	Kobject attribute structure
- * @buf:	User entered health_status attribute string
- * @count:	Buffer size
- *
- * User-space interface for setting the config register.
- *
- * To write any CSU/PMU register
- * echo <address> <mask> <values> > /sys/firmware/zynqmp/config_reg
- * Usage:
- * echo 0x345AB234 0xFFFFFFFF 0x1234ABCD > /sys/firmware/zynqmp/config_reg
- *
- * To Read any CSU/PMU register, write address to the variable like below
- * echo <address> > /sys/firmware/zynqmp/config_reg
- *
- * Return:	count argument if request succeeds, the corresponding error
- *		code otherwise
- */
-static ssize_t config_reg_store(struct kobject *kobj,
-				struct kobj_attribute *attr,
-				const char *buf, size_t count)
-{
-	char *kern_buff, *inbuf, *tok;
-	unsigned long address, value, mask;
-	int ret;
-
-	kern_buff = kzalloc(count, GFP_KERNEL);
-	if (!kern_buff)
-		return -ENOMEM;
-
-	ret = strlcpy(kern_buff, buf, count);
-	if (ret < 0) {
-		ret = -EFAULT;
-		goto err;
-	}
-
-	inbuf = kern_buff;
-
-	/* Read the addess */
-	tok = strsep(&inbuf, " ");
-	if (!tok) {
-		ret = -EFAULT;
-		goto err;
-	}
-	ret = kstrtol(tok, 16, &address);
-	if (ret) {
-		ret = -EFAULT;
-		goto err;
-	}
-	/* Read the write value */
-	tok = strsep(&inbuf, " ");
-	/*
-	 * If parameter provided is only address, then its a read operation.
-	 * Store the address in a global variable and retrieve whenever
-	 * required.
-	 */
-	if (!tok) {
-		register_address = address;
-		goto err;
-	}
-	register_address = address;
-
-	ret = kstrtol(tok, 16, &mask);
-	if (ret) {
-		ret = -EFAULT;
-		goto err;
-	}
-	tok = strsep(&inbuf, " ");
-	if (!tok) {
-		ret = -EFAULT;
-		goto err;
-	}
-	ret = kstrtol(tok, 16, &value);
-	if (ret) {
-		ret = -EFAULT;
-		goto err;
-	}
-	ret = zynqmp_pm_config_reg_access(CONFIG_REG_WRITE, address,
-					  mask, value, NULL);
-	if (ret)
-		pr_err("unable to write value to %lx\n", value);
-err:
-	kfree(kern_buff);
-	if (ret)
-		return ret;
-	return count;
-}
-
-/**
- * config_reg_show - Read config_reg sysfs attribute
- * @kobj:	Kobject structure
- * @attr:	Kobject attribute structure
- * @buf:	User entered health_status attribute string
- *
- * User-space interface for getting the config register.
- *
- * To Read any CSU/PMU register, write address to the variable like below
- * echo <address> > /sys/firmware/zynqmp/config_reg
- *
- * Then Read the address using below command
- * cat /sys/firmware/zynqmp/config_reg
- *
- * Return: number of chars written to buf.
- */
-static ssize_t config_reg_show(struct kobject *kobj,
-			       struct kobj_attribute *attr,
-			       char *buf)
-{
-	int ret;
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-
-	ret = zynqmp_pm_config_reg_access(CONFIG_REG_READ, register_address,
-					  0, 0, ret_payload);
-	if (ret)
-		return ret;
-
-	return sprintf(buf, "0x%x\n", ret_payload[1]);
-}
-
-static struct kobj_attribute zynqmp_attr_config_reg =
-					__ATTR_RW(config_reg);
-
-static ssize_t last_reset_reason_show(struct kobject *kobj,
-				      struct kobj_attribute *attr,
-				      char *buf)
-{
-	int ret;
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-
-	ret = zynqmp_pm_get_last_reset_reason(ret_payload);
-	if (ret)
-		return ret;
-	switch (ret_payload[1]) {
-	case PM_RESET_REASON_EXT_POR:
-		return sprintf(buf, "ext_por\n");
-	case PM_RESET_REASON_SW_POR:
-		return sprintf(buf, "sw_por\n");
-	case PM_RESET_REASON_SLR_POR:
-		return sprintf(buf, "sl_por\n");
-	case PM_RESET_REASON_ERR_POR:
-		return sprintf(buf, "err_por\n");
-	case PM_RESET_REASON_DAP_SRST:
-		return sprintf(buf, "dap_srst\n");
-	case PM_RESET_REASON_ERR_SRST:
-		return sprintf(buf, "err_srst\n");
-	case PM_RESET_REASON_SW_SRST:
-		return sprintf(buf, "sw_srst\n");
-	case PM_RESET_REASON_SLR_SRST:
-		return sprintf(buf, "slr_srst\n");
-	default:
-		return sprintf(buf, "unknown reset\n");
-	}
-}
-
-static struct kobj_attribute zynqmp_attr_last_reset_reason =
-					__ATTR_RO(last_reset_reason);
-
-static struct attribute *attrs[] = {
-	&zynqmp_attr_shutdown_scope.attr,
-	&zynqmp_attr_health_status.attr,
-	&zynqmp_attr_config_reg.attr,
-	&zynqmp_attr_last_reset_reason.attr,
-	NULL,
-};
-
-static const struct attribute_group attr_group = {
-	.attrs = attrs,
-	NULL,
-};
-
-static int zynqmp_pm_sysfs_init(void)
-{
-	struct kobject *zynqmp_kobj;
-	int ret;
-
-	zynqmp_kobj = kobject_create_and_add("zynqmp", firmware_kobj);
-	if (!zynqmp_kobj) {
-		pr_err("zynqmp: Firmware kobj add failed.\n");
-		return -ENOMEM;
-	}
-
-	ret = sysfs_create_group(zynqmp_kobj, &attr_group);
-	if (ret) {
-		pr_err("%s() sysfs creation fail with error %d\n",
-		       __func__, ret);
-		goto err;
-	}
-
-	ret = zynqmp_pm_ggs_init(zynqmp_kobj);
-	if (ret) {
-		pr_err("%s() GGS init fail with error %d\n",
-		       __func__, ret);
-		goto err;
-	}
-err:
-	return ret;
-}
-
 static int zynqmp_firmware_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -1690,13 +711,8 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 	int ret;
 
 	np = of_find_compatible_node(NULL, NULL, "xlnx,zynqmp");
-	if (!np) {
-		np = of_find_compatible_node(NULL, NULL, "xlnx,versal");
-		if (!np)
-			return 0;
-
-		feature_check_enabled = true;
-	}
+	if (!np)
+		return 0;
 	of_node_put(np);
 
 	ret = get_set_conduit_method(dev->of_node);
@@ -1732,12 +748,6 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 	/* Assign eemi_ops_table */
 	eemi_ops_tbl = &eemi_ops;
 
-	ret = zynqmp_pm_sysfs_init();
-	if (ret) {
-		pr_err("%s() sysfs init fail with error %d\n", __func__, ret);
-		return ret;
-	}
-
 	zynqmp_pm_api_debugfs_init();
 
 	ret = mfd_add_devices(&pdev->dev, PLATFORM_DEVID_NONE, firmware_devs,
@@ -1760,7 +770,6 @@ static int zynqmp_firmware_remove(struct platform_device *pdev)
 
 static const struct of_device_id zynqmp_firmware_of_match[] = {
 	{.compatible = "xlnx,zynqmp-firmware"},
-	{.compatible = "xlnx,versal-firmware"},
 	{},
 };
 MODULE_DEVICE_TABLE(of, zynqmp_firmware_of_match);

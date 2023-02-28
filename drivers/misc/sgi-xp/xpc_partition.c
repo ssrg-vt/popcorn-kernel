@@ -70,7 +70,7 @@ xpc_get_rsvd_page_pa(int nasid)
 	unsigned long rp_pa = nasid;	/* seed with nasid */
 	size_t len = 0;
 	size_t buf_len = 0;
-	void *buf = NULL;
+	void *buf = buf;
 	void *buf_base = NULL;
 	enum xp_retval (*get_partition_rsvd_page_pa)
 		(void *, u64 *, unsigned long *, size_t *) =
@@ -92,6 +92,10 @@ xpc_get_rsvd_page_pa(int nasid)
 
 		if (ret != xpNeedMoreInfo)
 			break;
+
+		/* !!! L1_CACHE_ALIGN() is only a sn2-bte_copy requirement */
+		if (is_shub())
+			len = L1_CACHE_ALIGN(len);
 
 		if (len > buf_len) {
 			kfree(buf_base);
@@ -448,6 +452,7 @@ xpc_discovery(void)
 		case 32:
 			max_regions *= 2;
 			region_size = 16;
+			DBUG_ON(!is_shub2());
 		}
 	}
 

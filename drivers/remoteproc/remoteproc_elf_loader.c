@@ -247,7 +247,8 @@ find_table(struct device *dev, struct elf32_hdr *ehdr, size_t fw_size)
 		}
 
 		/* make sure the offsets array isn't truncated */
-		if (struct_size(table, offset, table->num) > size) {
+		if (table->num * sizeof(table->offset[0]) +
+				sizeof(struct resource_table) > size) {
 			dev_err(dev, "resource table incomplete\n");
 			return NULL;
 		}

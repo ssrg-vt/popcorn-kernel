@@ -29,11 +29,8 @@
 #include <linux/module.h>
 #include <linux/stat.h>
 #include <linux/sysfs.h>
-
+#include "intel_drv.h"
 #include "i915_drv.h"
-#include "i915_sysfs.h"
-#include "intel_pm.h"
-#include "intel_sideband.h"
 
 static inline struct drm_i915_private *kdev_minor_to_i915(struct device *kdev)
 {
@@ -48,7 +45,7 @@ static u32 calc_residency(struct drm_i915_private *dev_priv,
 	intel_wakeref_t wakeref;
 	u64 res = 0;
 
-	with_intel_runtime_pm(&dev_priv->runtime_pm, wakeref)
+	with_intel_runtime_pm(dev_priv, wakeref)
 		res = intel_rc6_residency_us(dev_priv, reg);
 
 	return DIV_ROUND_CLOSEST_ULL(res, 1000);
@@ -262,23 +259,25 @@ static ssize_t gt_act_freq_mhz_show(struct device *kdev,
 {
 	struct drm_i915_private *dev_priv = kdev_minor_to_i915(kdev);
 	intel_wakeref_t wakeref;
-	u32 freq;
+	int ret;
 
-	wakeref = intel_runtime_pm_get(&dev_priv->runtime_pm);
+	wakeref = intel_runtime_pm_get(dev_priv);
 
+	mutex_lock(&dev_priv->pcu_lock);
 	if (IS_VALLEYVIEW(dev_priv) || IS_CHERRYVIEW(dev_priv)) {
-		vlv_punit_get(dev_priv);
+		u32 freq;
 		freq = vlv_punit_read(dev_priv, PUNIT_REG_GPU_FREQ_STS);
-		vlv_punit_put(dev_priv);
-
-		freq = (freq >> 8) & 0xff;
+		ret = intel_gpu_freq(dev_priv, (freq >> 8) & 0xff);
 	} else {
-		freq = intel_get_cagf(dev_priv, I915_READ(GEN6_RPSTAT1));
+		ret = intel_gpu_freq(dev_priv,
+				     intel_get_cagf(dev_priv,
+						    I915_READ(GEN6_RPSTAT1)));
 	}
+	mutex_unlock(&dev_priv->pcu_lock);
 
-	intel_runtime_pm_put(&dev_priv->runtime_pm, wakeref);
+	intel_runtime_pm_put(dev_priv, wakeref);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", intel_gpu_freq(dev_priv, freq));
+	return snprintf(buf, PAGE_SIZE, "%d\n", ret);
 }
 
 static ssize_t gt_cur_freq_mhz_show(struct device *kdev,
@@ -319,12 +318,12 @@ static ssize_t gt_boost_freq_mhz_store(struct device *kdev,
 	if (val < rps->min_freq || val > rps->max_freq)
 		return -EINVAL;
 
-	mutex_lock(&rps->lock);
+	mutex_lock(&dev_priv->pcu_lock);
 	if (val != rps->boost_freq) {
 		rps->boost_freq = val;
 		boost = atomic_read(&rps->num_waiters);
 	}
-	mutex_unlock(&rps->lock);
+	mutex_unlock(&dev_priv->pcu_lock);
 	if (boost)
 		schedule_work(&rps->work);
 
@@ -364,15 +363,18 @@ static ssize_t gt_max_freq_mhz_store(struct device *kdev,
 	if (ret)
 		return ret;
 
-	wakeref = intel_runtime_pm_get(&dev_priv->runtime_pm);
-	mutex_lock(&rps->lock);
+	wakeref = intel_runtime_pm_get(dev_priv);
+
+	mutex_lock(&dev_priv->pcu_lock);
 
 	val = intel_freq_opcode(dev_priv, val);
+
 	if (val < rps->min_freq ||
 	    val > rps->max_freq ||
 	    val < rps->min_freq_softlimit) {
-		ret = -EINVAL;
-		goto unlock;
+		mutex_unlock(&dev_priv->pcu_lock);
+		intel_runtime_pm_put(dev_priv, wakeref);
+		return -EINVAL;
 	}
 
 	if (val > rps->rp0_freq)
@@ -390,9 +392,9 @@ static ssize_t gt_max_freq_mhz_store(struct device *kdev,
 	 * frequency request may be unchanged. */
 	ret = intel_set_rps(dev_priv, val);
 
-unlock:
-	mutex_unlock(&rps->lock);
-	intel_runtime_pm_put(&dev_priv->runtime_pm, wakeref);
+	mutex_unlock(&dev_priv->pcu_lock);
+
+	intel_runtime_pm_put(dev_priv, wakeref);
 
 	return ret ?: count;
 }
@@ -420,15 +422,18 @@ static ssize_t gt_min_freq_mhz_store(struct device *kdev,
 	if (ret)
 		return ret;
 
-	wakeref = intel_runtime_pm_get(&dev_priv->runtime_pm);
-	mutex_lock(&rps->lock);
+	wakeref = intel_runtime_pm_get(dev_priv);
+
+	mutex_lock(&dev_priv->pcu_lock);
 
 	val = intel_freq_opcode(dev_priv, val);
+
 	if (val < rps->min_freq ||
 	    val > rps->max_freq ||
 	    val > rps->max_freq_softlimit) {
-		ret = -EINVAL;
-		goto unlock;
+		mutex_unlock(&dev_priv->pcu_lock);
+		intel_runtime_pm_put(dev_priv, wakeref);
+		return -EINVAL;
 	}
 
 	rps->min_freq_softlimit = val;
@@ -442,9 +447,9 @@ static ssize_t gt_min_freq_mhz_store(struct device *kdev,
 	 * frequency request may be unchanged. */
 	ret = intel_set_rps(dev_priv, val);
 
-unlock:
-	mutex_unlock(&rps->lock);
-	intel_runtime_pm_put(&dev_priv->runtime_pm, wakeref);
+	mutex_unlock(&dev_priv->pcu_lock);
+
+	intel_runtime_pm_put(dev_priv, wakeref);
 
 	return ret ?: count;
 }

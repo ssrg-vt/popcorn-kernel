@@ -568,11 +568,17 @@ nfsd4_access(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 
 static void gen_boot_verifier(nfs4_verifier *verifier, struct net *net)
 {
-	__be32 *verf = (__be32 *)verifier->data;
+	__be32 verf[2];
+	struct nfsd_net *nn = net_generic(net, nfsd_net_id);
 
-	BUILD_BUG_ON(2*sizeof(*verf) != sizeof(verifier->data));
-
-	nfsd_copy_boot_verifier(verf, net_generic(net, nfsd_net_id));
+	/*
+	 * This is opaque to client, so no need to byte-swap. Use
+	 * __force to keep sparse happy. y2038 time_t overflow is
+	 * irrelevant in this usage.
+	 */
+	verf[0] = (__force __be32)nn->nfssvc_boot.tv_sec;
+	verf[1] = (__force __be32)nn->nfssvc_boot.tv_nsec;
+	memcpy(verifier->data, verf, sizeof(verifier->data));
 }
 
 static __be32
@@ -755,7 +761,7 @@ nfsd4_read(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	struct nfsd4_read *read = &u->read;
 	__be32 status;
 
-	read->rd_nf = NULL;
+	read->rd_filp = NULL;
 	if (read->rd_offset >= OFFSET_MAX)
 		return nfserr_inval;
 
@@ -776,7 +782,7 @@ nfsd4_read(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	/* check stateid */
 	status = nfs4_preprocess_stateid_op(rqstp, cstate, &cstate->current_fh,
 					&read->rd_stateid, RD_STATE,
-					&read->rd_nf);
+					&read->rd_filp, &read->rd_tmp_file);
 	if (status) {
 		dprintk("NFSD: nfsd4_read: couldn't process stateid!\n");
 		goto out;
@@ -792,8 +798,8 @@ out:
 static void
 nfsd4_read_release(union nfsd4_op_u *u)
 {
-	if (u->read.rd_nf)
-		nfsd_file_put(u->read.rd_nf);
+	if (u->read.rd_filp)
+		fput(u->read.rd_filp);
 	trace_nfsd_read_done(u->read.rd_rqstp, u->read.rd_fhp,
 			     u->read.rd_offset, u->read.rd_length);
 }
@@ -948,7 +954,7 @@ nfsd4_setattr(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	if (setattr->sa_iattr.ia_valid & ATTR_SIZE) {
 		status = nfs4_preprocess_stateid_op(rqstp, cstate,
 				&cstate->current_fh, &setattr->sa_stateid,
-				WR_STATE, NULL);
+				WR_STATE, NULL, NULL);
 		if (status) {
 			dprintk("NFSD: nfsd4_setattr: couldn't process stateid!\n");
 			return status;
@@ -987,7 +993,7 @@ nfsd4_write(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 {
 	struct nfsd4_write *write = &u->write;
 	stateid_t *stateid = &write->wr_stateid;
-	struct nfsd_file *nf = NULL;
+	struct file *filp = NULL;
 	__be32 status = nfs_ok;
 	unsigned long cnt;
 	int nvecs;
@@ -999,7 +1005,7 @@ nfsd4_write(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	trace_nfsd_write_start(rqstp, &cstate->current_fh,
 			       write->wr_offset, cnt);
 	status = nfs4_preprocess_stateid_op(rqstp, cstate, &cstate->current_fh,
-						stateid, WR_STATE, &nf);
+						stateid, WR_STATE, &filp, NULL);
 	if (status) {
 		dprintk("NFSD: nfsd4_write: couldn't process stateid!\n");
 		return status;
@@ -1012,10 +1018,10 @@ nfsd4_write(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 				      &write->wr_head, write->wr_buflen);
 	WARN_ON_ONCE(nvecs > ARRAY_SIZE(rqstp->rq_vec));
 
-	status = nfsd_vfs_write(rqstp, &cstate->current_fh, nf->nf_file,
+	status = nfsd_vfs_write(rqstp, &cstate->current_fh, filp,
 				write->wr_offset, rqstp->rq_vec, nvecs, &cnt,
 				write->wr_how_written);
-	nfsd_file_put(nf);
+	fput(filp);
 
 	write->wr_bytes_written = cnt;
 	trace_nfsd_write_done(rqstp, &cstate->current_fh,
@@ -1025,8 +1031,8 @@ nfsd4_write(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 
 static __be32
 nfsd4_verify_copy(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
-		  stateid_t *src_stateid, struct nfsd_file **src,
-		  stateid_t *dst_stateid, struct nfsd_file **dst)
+		  stateid_t *src_stateid, struct file **src,
+		  stateid_t *dst_stateid, struct file **dst)
 {
 	__be32 status;
 
@@ -1034,22 +1040,22 @@ nfsd4_verify_copy(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		return nfserr_nofilehandle;
 
 	status = nfs4_preprocess_stateid_op(rqstp, cstate, &cstate->save_fh,
-					    src_stateid, RD_STATE, src);
+					    src_stateid, RD_STATE, src, NULL);
 	if (status) {
 		dprintk("NFSD: %s: couldn't process src stateid!\n", __func__);
 		goto out;
 	}
 
 	status = nfs4_preprocess_stateid_op(rqstp, cstate, &cstate->current_fh,
-					    dst_stateid, WR_STATE, dst);
+					    dst_stateid, WR_STATE, dst, NULL);
 	if (status) {
 		dprintk("NFSD: %s: couldn't process dst stateid!\n", __func__);
 		goto out_put_src;
 	}
 
 	/* fix up for NFS-specific error code */
-	if (!S_ISREG(file_inode((*src)->nf_file)->i_mode) ||
-	    !S_ISREG(file_inode((*dst)->nf_file)->i_mode)) {
+	if (!S_ISREG(file_inode(*src)->i_mode) ||
+	    !S_ISREG(file_inode(*dst)->i_mode)) {
 		status = nfserr_wrong_type;
 		goto out_put_dst;
 	}
@@ -1057,9 +1063,9 @@ nfsd4_verify_copy(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 out:
 	return status;
 out_put_dst:
-	nfsd_file_put(*dst);
+	fput(*dst);
 out_put_src:
-	nfsd_file_put(*src);
+	fput(*src);
 	goto out;
 }
 
@@ -1068,7 +1074,7 @@ nfsd4_clone(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		union nfsd4_op_u *u)
 {
 	struct nfsd4_clone *clone = &u->clone;
-	struct nfsd_file *src, *dst;
+	struct file *src, *dst;
 	__be32 status;
 
 	status = nfsd4_verify_copy(rqstp, cstate, &clone->cl_src_stateid, &src,
@@ -1076,11 +1082,11 @@ nfsd4_clone(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	if (status)
 		goto out;
 
-	status = nfsd4_clone_file_range(src->nf_file, clone->cl_src_pos,
-			dst->nf_file, clone->cl_dst_pos, clone->cl_count);
+	status = nfsd4_clone_file_range(src, clone->cl_src_pos,
+			dst, clone->cl_dst_pos, clone->cl_count);
 
-	nfsd_file_put(dst);
-	nfsd_file_put(src);
+	fput(dst);
+	fput(src);
 out:
 	return status;
 }
@@ -1170,9 +1176,8 @@ static ssize_t _nfsd_copy_file_range(struct nfsd4_copy *copy)
 	do {
 		if (kthread_should_stop())
 			break;
-		bytes_copied = nfsd_copy_file_range(copy->nf_src->nf_file,
-				src_pos, copy->nf_dst->nf_file, dst_pos,
-				bytes_total);
+		bytes_copied = nfsd_copy_file_range(copy->file_src, src_pos,
+				copy->file_dst, dst_pos, bytes_total);
 		if (bytes_copied <= 0)
 			break;
 		bytes_total -= bytes_copied;
@@ -1199,8 +1204,8 @@ static __be32 nfsd4_do_copy(struct nfsd4_copy *copy, bool sync)
 		status = nfs_ok;
 	}
 
-	nfsd_file_put(copy->nf_src);
-	nfsd_file_put(copy->nf_dst);
+	fput(copy->file_src);
+	fput(copy->file_dst);
 	return status;
 }
 
@@ -1213,16 +1218,16 @@ static void dup_copy_fields(struct nfsd4_copy *src, struct nfsd4_copy *dst)
 	memcpy(&dst->cp_res, &src->cp_res, sizeof(src->cp_res));
 	memcpy(&dst->fh, &src->fh, sizeof(src->fh));
 	dst->cp_clp = src->cp_clp;
-	dst->nf_dst = nfsd_file_get(src->nf_dst);
-	dst->nf_src = nfsd_file_get(src->nf_src);
+	dst->file_dst = get_file(src->file_dst);
+	dst->file_src = get_file(src->file_src);
 	memcpy(&dst->cp_stateid, &src->cp_stateid, sizeof(src->cp_stateid));
 }
 
 static void cleanup_async_copy(struct nfsd4_copy *copy)
 {
 	nfs4_free_cp_state(copy);
-	nfsd_file_put(copy->nf_dst);
-	nfsd_file_put(copy->nf_src);
+	fput(copy->file_dst);
+	fput(copy->file_src);
 	spin_lock(&copy->cp_clp->async_lock);
 	list_del(&copy->copies);
 	spin_unlock(&copy->cp_clp->async_lock);
@@ -1259,8 +1264,8 @@ nfsd4_copy(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	struct nfsd4_copy *async_copy = NULL;
 
 	status = nfsd4_verify_copy(rqstp, cstate, &copy->cp_src_stateid,
-				   &copy->nf_src, &copy->cp_dst_stateid,
-				   &copy->nf_dst);
+				   &copy->file_src, &copy->cp_dst_stateid,
+				   &copy->file_dst);
 	if (status)
 		goto out;
 
@@ -1342,21 +1347,21 @@ nfsd4_fallocate(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		struct nfsd4_fallocate *fallocate, int flags)
 {
 	__be32 status;
-	struct nfsd_file *nf;
+	struct file *file;
 
 	status = nfs4_preprocess_stateid_op(rqstp, cstate, &cstate->current_fh,
 					    &fallocate->falloc_stateid,
-					    WR_STATE, &nf);
+					    WR_STATE, &file, NULL);
 	if (status != nfs_ok) {
 		dprintk("NFSD: nfsd4_fallocate: couldn't process stateid!\n");
 		return status;
 	}
 
-	status = nfsd4_vfs_fallocate(rqstp, &cstate->current_fh, nf->nf_file,
+	status = nfsd4_vfs_fallocate(rqstp, &cstate->current_fh, file,
 				     fallocate->falloc_offset,
 				     fallocate->falloc_length,
 				     flags);
-	nfsd_file_put(nf);
+	fput(file);
 	return status;
 }
 static __be32
@@ -1401,11 +1406,11 @@ nfsd4_seek(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	struct nfsd4_seek *seek = &u->seek;
 	int whence;
 	__be32 status;
-	struct nfsd_file *nf;
+	struct file *file;
 
 	status = nfs4_preprocess_stateid_op(rqstp, cstate, &cstate->current_fh,
 					    &seek->seek_stateid,
-					    RD_STATE, &nf);
+					    RD_STATE, &file, NULL);
 	if (status) {
 		dprintk("NFSD: nfsd4_seek: couldn't process stateid!\n");
 		return status;
@@ -1427,14 +1432,14 @@ nfsd4_seek(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	 * Note:  This call does change file->f_pos, but nothing in NFSD
 	 *        should ever file->f_pos.
 	 */
-	seek->seek_pos = vfs_llseek(nf->nf_file, seek->seek_offset, whence);
+	seek->seek_pos = vfs_llseek(file, seek->seek_offset, whence);
 	if (seek->seek_pos < 0)
 		status = nfserrno(seek->seek_pos);
-	else if (seek->seek_pos >= i_size_read(file_inode(nf->nf_file)))
+	else if (seek->seek_pos >= i_size_read(file_inode(file)))
 		seek->seek_eof = true;
 
 out:
-	nfsd_file_put(nf);
+	fput(file);
 	return status;
 }
 

@@ -7,7 +7,6 @@
  */
 
 #include <linux/mm.h>
-#include <linux/suspend.h>
 #include <asm/page.h>
 #include <asm/sections.h>
 

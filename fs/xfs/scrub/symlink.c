@@ -9,11 +9,19 @@
 #include "xfs_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
+#include "xfs_defer.h"
+#include "xfs_btree.h"
+#include "xfs_bit.h"
 #include "xfs_log_format.h"
+#include "xfs_trans.h"
+#include "xfs_sb.h"
 #include "xfs_inode.h"
+#include "xfs_inode_fork.h"
 #include "xfs_symlink.h"
+#include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
+#include "scrub/trace.h"
 
 /* Set us up to scrub a symbolic link. */
 int
@@ -22,7 +30,7 @@ xchk_setup_symlink(
 	struct xfs_inode	*ip)
 {
 	/* Allocate the buffer without the inode lock held. */
-	sc->buf = kmem_zalloc_large(XFS_SYMLINK_MAXLEN + 1, 0);
+	sc->buf = kmem_zalloc_large(XFS_SYMLINK_MAXLEN + 1, KM_SLEEP);
 	if (!sc->buf)
 		return -ENOMEM;
 

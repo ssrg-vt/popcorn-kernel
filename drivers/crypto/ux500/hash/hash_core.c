@@ -806,7 +806,7 @@ static int hash_process_data(struct hash_device_data *device_data,
 			 * HW peripheral, otherwise we first copy data
 			 * to a local buffer
 			 */
-			if (IS_ALIGNED((unsigned long)data_buffer, 4) &&
+			if ((0 == (((u32)data_buffer) % 4)) &&
 			    (0 == *index))
 				hash_processblock(device_data,
 						  (const u32 *)data_buffer,
@@ -864,8 +864,7 @@ static int hash_dma_final(struct ahash_request *req)
 	if (ret)
 		return ret;
 
-	dev_dbg(device_data->dev, "%s: (ctx=0x%lx)!\n", __func__,
-		(unsigned long)ctx);
+	dev_dbg(device_data->dev, "%s: (ctx=0x%x)!\n", __func__, (u32) ctx);
 
 	if (req_ctx->updated) {
 		ret = hash_resume_state(device_data, &device_data->state);
@@ -970,8 +969,7 @@ static int hash_hw_final(struct ahash_request *req)
 	if (ret)
 		return ret;
 
-	dev_dbg(device_data->dev, "%s: (ctx=0x%lx)!\n", __func__,
-		(unsigned long)ctx);
+	dev_dbg(device_data->dev, "%s: (ctx=0x%x)!\n", __func__, (u32) ctx);
 
 	if (req_ctx->updated) {
 		ret = hash_resume_state(device_data, &device_data->state);
@@ -1274,8 +1272,8 @@ void hash_get_digest(struct hash_device_data *device_data,
 	else
 		loop_ctr = SHA256_DIGEST_SIZE / sizeof(u32);
 
-	dev_dbg(device_data->dev, "%s: digest array:(0x%lx)\n",
-		__func__, (unsigned long)digest);
+	dev_dbg(device_data->dev, "%s: digest array:(0x%x)\n",
+		__func__, (u32) digest);
 
 	/* Copy result into digest array */
 	for (count = 0; count < loop_ctr; count++) {

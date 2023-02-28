@@ -10,8 +10,8 @@ TBD
 Target core device interfaces
 =============================
 
-This section is blank because no kerneldoc comments have been added to
-drivers/target/target_core_device.c.
+.. kernel-doc:: drivers/target/target_core_device.c
+    :export:
 
 Target core transport interfaces
 ================================

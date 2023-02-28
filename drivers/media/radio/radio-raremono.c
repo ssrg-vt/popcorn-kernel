@@ -184,6 +184,8 @@ static int vidioc_querycap(struct file *file, void *priv,
 	strscpy(v->driver, "radio-raremono", sizeof(v->driver));
 	strscpy(v->card, "Thanko's Raremono", sizeof(v->card));
 	usb_make_path(radio->usbdev, v->bus_info, sizeof(v->bus_info));
+	v->device_caps = V4L2_CAP_TUNER | V4L2_CAP_RADIO;
+	v->capabilities = v->device_caps | V4L2_CAP_DEVICE_CAPS;
 	return 0;
 }
 
@@ -354,7 +356,6 @@ static int usb_raremono_probe(struct usb_interface *intf,
 	radio->vdev.ioctl_ops = &usb_raremono_ioctl_ops;
 	radio->vdev.lock = &radio->lock;
 	radio->vdev.release = video_device_release_empty;
-	radio->vdev.device_caps = V4L2_CAP_TUNER | V4L2_CAP_RADIO;
 	radio->v4l2_dev.release = raremono_device_release;
 
 	usb_set_intfdata(intf, &radio->v4l2_dev);

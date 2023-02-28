@@ -27,8 +27,6 @@
 #ifndef __NOUVEAU_CRTC_H__
 #define __NOUVEAU_CRTC_H__
 
-#include <drm/drm_crtc.h>
-
 #include <nvif/notify.h>
 
 struct nouveau_crtc {

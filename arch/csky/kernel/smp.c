@@ -212,6 +212,8 @@ void csky_start_secondary(void)
 	TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir);
 	TLBMISS_HANDLER_SETUP_PGD_KERNEL(swapper_pg_dir);
 
+	asid_cache(smp_processor_id()) = ASID_FIRST_VERSION;
+
 #ifdef CONFIG_CPU_HAS_FPU
 	init_fpu();
 #endif

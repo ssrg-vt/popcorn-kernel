@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <stdbool.h>
 #include <inttypes.h>
-#include <stdlib.h>
-#include <string.h>
 #include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 
-#include "map_symbol.h"
 #include "branch.h"
+#include "util.h"
 #include "event.h"
 #include "evsel.h"
 #include "debug.h"
-#include "util/synthetic-events.h"
 
 #include "tests.h"
 
@@ -155,13 +152,11 @@ static bool samples_same(const struct perf_sample *s1,
 
 static int do_test(u64 sample_type, u64 sample_regs, u64 read_format)
 {
-	struct evsel evsel = {
+	struct perf_evsel evsel = {
 		.needs_swap = false,
-		.core = {
-			. attr = {
-				.sample_type = sample_type,
-				.read_format = read_format,
-			},
+		.attr = {
+			.sample_type = sample_type,
+			.read_format = read_format,
 		},
 	};
 	union perf_event *event;
@@ -225,10 +220,10 @@ static int do_test(u64 sample_type, u64 sample_regs, u64 read_format)
 	int err, ret = -1;
 
 	if (sample_type & PERF_SAMPLE_REGS_USER)
-		evsel.core.attr.sample_regs_user = sample_regs;
+		evsel.attr.sample_regs_user = sample_regs;
 
 	if (sample_type & PERF_SAMPLE_REGS_INTR)
-		evsel.core.attr.sample_regs_intr = sample_regs;
+		evsel.attr.sample_regs_intr = sample_regs;
 
 	for (i = 0; i < sizeof(regs); i++)
 		*(i + (u8 *)regs) = i & 0xfe;

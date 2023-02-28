@@ -110,7 +110,7 @@
 };
 
 &emac {
-	phy-handle = <&phy1>;
+	phy = <&phy1>;
 	status = "okay";
 };
 

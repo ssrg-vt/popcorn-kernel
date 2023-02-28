@@ -26,6 +26,7 @@
 #include <linux/slab.h>
 
 #include <asm/delay.h>
+#include <asm/machvec.h>
 #include <asm/page.h>
 #include <asm/ptrace.h>
 #include <asm/sal.h>

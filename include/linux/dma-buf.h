@@ -28,20 +28,18 @@ struct dma_buf_attachment;
 
 /**
  * struct dma_buf_ops - operations possible on struct dma_buf
+ * @map_atomic: [optional] maps a page from the buffer into kernel address
+ *		space, users may not block until the subsequent unmap call.
+ *		This callback must not sleep.
+ * @unmap_atomic: [optional] unmaps a atomically mapped page from the buffer.
+ *		  This Callback must not sleep.
+ * @map: [optional] maps a page from the buffer into kernel address space.
+ * @unmap: [optional] unmaps a page from the buffer.
  * @vmap: [optional] creates a virtual mapping for the buffer into kernel
  *	  address space. Same restrictions as for vmap and friends apply.
  * @vunmap: [optional] unmaps a vmap from the buffer
  */
 struct dma_buf_ops {
-	/**
-	  * @cache_sgt_mapping:
-	  *
-	  * If true the framework will cache the first mapping made for each
-	  * attachment. This avoids creating mappings for attachments multiple
-	  * times.
-	  */
-	bool cache_sgt_mapping;
-
 	/**
 	 * @attach:
 	 *
@@ -196,6 +194,8 @@ struct dma_buf_ops {
 	 * to be restarted.
 	 */
 	int (*end_cpu_access)(struct dma_buf *, enum dma_data_direction);
+	void *(*map)(struct dma_buf *, unsigned long);
+	void (*unmap)(struct dma_buf *, unsigned long, void *);
 
 	/**
 	 * @mmap:
@@ -234,31 +234,6 @@ struct dma_buf_ops {
 	 */
 	int (*mmap)(struct dma_buf *, struct vm_area_struct *vma);
 
-	/**
-	 * @map:
-	 *
-	 * Maps a page from the buffer into kernel address space. The page is
-	 * specified by offset into the buffer in PAGE_SIZE units.
-	 *
-	 * This callback is optional.
-	 *
-	 * Returns:
-	 *
-	 * Virtual address pointer where requested page can be accessed. NULL
-	 * on error or when this function is unimplemented by the exporter.
-	 */
-	void *(*map)(struct dma_buf *, unsigned long);
-
-	/**
-	 * @unmap:
-	 *
-	 * Unmaps a page from the buffer. Page offset and address pointer should
-	 * be the same as the one passed to and returned by matching call to map.
-	 *
-	 * This callback is optional.
-	 */
-	void (*unmap)(struct dma_buf *, unsigned long, void *);
-
 	void *(*vmap)(struct dma_buf *);
 	void (*vunmap)(struct dma_buf *, void *vaddr);
 };
@@ -269,12 +244,10 @@ struct dma_buf_ops {
  * @file: file pointer used for sharing buffers across, and for refcounting.
  * @attachments: list of dma_buf_attachment that denotes all devices attached.
  * @ops: dma_buf_ops associated with this buffer object.
- * @lock: used internally to serialize list manipulation, attach/detach and
- *        vmap/unmap, and accesses to name
+ * @lock: used internally to serialize list manipulation, attach/detach and vmap/unmap
  * @vmapping_counter: used internally to refcnt the vmaps
  * @vmap_ptr: the current vmap ptr if vmapping_counter > 0
  * @exp_name: name of the exporter; useful for debugging.
- * @name: userspace-provided name; useful for accounting and debugging.
  * @owner: pointer to exporter module; used for refcounting when exporter is a
  *         kernel module.
  * @list_node: node for dma_buf accounting and debugging.
@@ -302,11 +275,10 @@ struct dma_buf {
 	unsigned vmapping_counter;
 	void *vmap_ptr;
 	const char *exp_name;
-	const char *name;
 	struct module *owner;
 	struct list_head list_node;
 	void *priv;
-	struct dma_resv *resv;
+	struct reservation_object *resv;
 
 	/* poll support */
 	wait_queue_head_t poll;
@@ -324,8 +296,6 @@ struct dma_buf {
  * @dmabuf: buffer for this attachment.
  * @dev: device attached to the buffer.
  * @node: list of dma_buf_attachment.
- * @sgt: cached mapping.
- * @dir: direction of cached mapping.
  * @priv: exporter specific attachment data.
  *
  * This structure holds the attachment information between the dma_buf buffer
@@ -341,8 +311,6 @@ struct dma_buf_attachment {
 	struct dma_buf *dmabuf;
 	struct device *dev;
 	struct list_head node;
-	struct sg_table *sgt;
-	enum dma_data_direction dir;
 	void *priv;
 };
 
@@ -365,7 +333,7 @@ struct dma_buf_export_info {
 	const struct dma_buf_ops *ops;
 	size_t size;
 	int flags;
-	struct dma_resv *resv;
+	struct reservation_object *resv;
 	void *priv;
 };
 

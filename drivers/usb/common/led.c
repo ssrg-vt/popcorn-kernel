@@ -10,7 +10,6 @@
 #include <linux/init.h>
 #include <linux/leds.h>
 #include <linux/usb.h>
-#include "common.h"
 
 #define BLINK_DELAY 30
 
@@ -37,14 +36,18 @@ void usb_led_activity(enum usb_led_event ev)
 EXPORT_SYMBOL_GPL(usb_led_activity);
 
 
-void __init ledtrig_usb_init(void)
+static int __init ledtrig_usb_init(void)
 {
 	led_trigger_register_simple("usb-gadget", &ledtrig_usb_gadget);
 	led_trigger_register_simple("usb-host", &ledtrig_usb_host);
+	return 0;
 }
 
-void __exit ledtrig_usb_exit(void)
+static void __exit ledtrig_usb_exit(void)
 {
 	led_trigger_unregister_simple(ledtrig_usb_gadget);
 	led_trigger_unregister_simple(ledtrig_usb_host);
 }
+
+module_init(ledtrig_usb_init);
+module_exit(ledtrig_usb_exit);

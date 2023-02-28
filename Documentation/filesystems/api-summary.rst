@@ -89,6 +89,9 @@ Other Functions
 .. kernel-doc:: fs/direct-io.c
    :export:
 
+.. kernel-doc:: fs/file_table.c
+   :export:
+
 .. kernel-doc:: fs/libfs.c
    :export:
 

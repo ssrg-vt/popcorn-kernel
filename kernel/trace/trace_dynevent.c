@@ -47,7 +47,6 @@ int dyn_event_release(int argc, char **argv, struct dyn_event_operations *type)
 			return -EINVAL;
 		event++;
 	}
-	argc--; argv++;
 
 	p = strchr(event, '/');
 	if (p) {
@@ -62,13 +61,10 @@ int dyn_event_release(int argc, char **argv, struct dyn_event_operations *type)
 	for_each_dyn_event_safe(pos, n) {
 		if (type && type != pos->ops)
 			continue;
-		if (!pos->ops->match(system, event,
-				argc, (const char **)argv, pos))
-			continue;
-
-		ret = pos->ops->free(pos);
-		if (ret)
+		if (pos->ops->match(system, event, pos)) {
+			ret = pos->ops->free(pos);
 			break;
+		}
 	}
 	mutex_unlock(&event_mutex);
 
@@ -173,10 +169,6 @@ out:
 static int dyn_event_open(struct inode *inode, struct file *file)
 {
 	int ret;
-
-	ret = tracing_check_open_get_tr(NULL);
-	if (ret)
-		return ret;
 
 	if ((file->f_mode & FMODE_WRITE) && (file->f_flags & O_TRUNC)) {
 		ret = dyn_events_release_all(NULL);

@@ -13,7 +13,8 @@
 #include <linux/fs.h>
 #include <linux/idr.h>
 #include <linux/uaccess.h>
-#include <linux/greybus.h>
+
+#include "greybus.h"
 
 struct gb_raw {
 	struct gb_connection *connection;

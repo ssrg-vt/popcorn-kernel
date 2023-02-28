@@ -885,6 +885,7 @@ static int mrfld_pinctrl_probe(struct platform_device *pdev)
 {
 	struct mrfld_family *families;
 	struct mrfld_pinctrl *mp;
+	struct resource *mem;
 	void __iomem *regs;
 	size_t nfamilies;
 	unsigned int i;
@@ -896,7 +897,8 @@ static int mrfld_pinctrl_probe(struct platform_device *pdev)
 	mp->dev = &pdev->dev;
 	raw_spin_lock_init(&mp->lock);
 
-	regs = devm_platform_ioremap_resource(pdev, 0);
+	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	regs = devm_ioremap_resource(&pdev->dev, mem);
 	if (IS_ERR(regs))
 		return PTR_ERR(regs);
 

@@ -929,7 +929,7 @@ static int ov2640_get_fmt(struct v4l2_subdev *sd,
 		format->format = *mf;
 		return 0;
 #else
-		return -EINVAL;
+		return -ENOTTY;
 #endif
 	}
 
@@ -1190,10 +1190,11 @@ static int ov2640_probe_dt(struct i2c_client *client,
 /*
  * i2c_driver functions
  */
-static int ov2640_probe(struct i2c_client *client)
+static int ov2640_probe(struct i2c_client *client,
+			const struct i2c_device_id *did)
 {
 	struct ov2640_priv	*priv;
-	struct i2c_adapter	*adapter = client->adapter;
+	struct i2c_adapter	*adapter = to_i2c_adapter(client->dev.parent);
 	int			ret;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
@@ -1301,7 +1302,7 @@ static struct i2c_driver ov2640_i2c_driver = {
 		.name = "ov2640",
 		.of_match_table = of_match_ptr(ov2640_of_match),
 	},
-	.probe_new = ov2640_probe,
+	.probe    = ov2640_probe,
 	.remove   = ov2640_remove,
 	.id_table = ov2640_id,
 };

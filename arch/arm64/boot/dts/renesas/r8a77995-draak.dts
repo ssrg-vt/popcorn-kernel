@@ -19,6 +19,11 @@
 		ethernet0 = &avb;
 	};
 
+	chosen {
+		bootargs = "ignore_loglevel rw root=/dev/nfs ip=dhcp";
+		stdout-path = "serial0:115200n8";
+	};
+
 	backlight: backlight {
 		compatible = "pwm-backlight";
 		pwms = <&pwm1 0 50000>;
@@ -28,11 +33,6 @@
 
 		power-supply = <&reg_12p0v>;
 		enable-gpios = <&gpio4 0 GPIO_ACTIVE_HIGH>;
-	};
-
-	chosen {
-		bootargs = "ignore_loglevel rw root=/dev/nfs ip=on";
-		stdout-path = "serial0:115200n8";
 	};
 
 	composite-in {
@@ -175,14 +175,6 @@
 		reg = <0>;
 		interrupt-parent = <&gpio5>;
 		interrupts = <19 IRQ_TYPE_LEVEL_LOW>;
-		/*
-		 * TX clock internal delay mode is required for reliable
-		 * 1Gbps communication using the KSZ9031RNX phy present on
-		 * the Draak board, however, TX clock internal delay mode
-		 * isn't supported on r8a77995.  Thus, limit speed to
-		 * 100Mbps for reliable communication.
-		 */
-		max-speed = <100>;
 	};
 };
 
@@ -519,7 +511,12 @@
 	status = "okay";
 
 	ports {
-		port {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
 			vin4_in: endpoint {
 				remote-endpoint = <&adv7180_out>;
 			};

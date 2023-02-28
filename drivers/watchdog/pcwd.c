@@ -651,7 +651,7 @@ static long pcwd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EINVAL;
 
 		pcwd_keepalive();
-		/* Fall through */
+		/* Fall */
 
 	case WDIOC_GETTIMEOUT:
 		return put_user(heartbeat, argp);

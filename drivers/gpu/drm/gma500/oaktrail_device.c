@@ -6,20 +6,18 @@
  **************************************************************************/
 
 #include <linux/backlight.h>
-#include <linux/delay.h>
-#include <linux/dmi.h>
 #include <linux/module.h>
-
+#include <linux/dmi.h>
+#include <drm/drmP.h>
+#include <drm/drm.h>
+#include <drm/gma_drm.h>
+#include "psb_drv.h"
+#include "psb_reg.h"
+#include "psb_intel_reg.h"
 #include <asm/intel-mid.h>
 #include <asm/intel_scu_ipc.h>
-
-#include <drm/drm.h>
-
-#include "intel_bios.h"
 #include "mid_bios.h"
-#include "psb_drv.h"
-#include "psb_intel_reg.h"
-#include "psb_reg.h"
+#include "intel_bios.h"
 
 static int oaktrail_output_init(struct drm_device *dev)
 {
@@ -317,7 +315,7 @@ static int oaktrail_restore_display_registers(struct drm_device *dev)
 
 	/* Actually enable it */
 	PSB_WVDC32(p->dpll, MRST_DPLL_A);
-	udelay(150);
+	DRM_UDELAY(150);
 
 	/* Restore mode */
 	PSB_WVDC32(p->htotal, HTOTAL_A);

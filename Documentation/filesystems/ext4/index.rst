@@ -8,7 +8,7 @@ ext4 Data Structures and Algorithms
    :maxdepth: 6
    :numbered:
 
-   about
-   overview
-   globals
-   dynamic
+   about.rst
+   overview.rst
+   globals.rst
+   dynamic.rst

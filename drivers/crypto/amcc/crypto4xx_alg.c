@@ -527,20 +527,28 @@ static int crypto4xx_aes_gcm_validate_keylen(unsigned int keylen)
 static int crypto4xx_compute_gcm_hash_key_sw(__le32 *hash_start, const u8 *key,
 					     unsigned int keylen)
 {
-	struct crypto_aes_ctx ctx;
+	struct crypto_cipher *aes_tfm = NULL;
 	uint8_t src[16] = { 0 };
-	int rc;
+	int rc = 0;
 
-	rc = aes_expandkey(&ctx, key, keylen);
-	if (rc) {
-		pr_err("aes_expandkey() failed: %d\n", rc);
+	aes_tfm = crypto_alloc_cipher("aes", 0, CRYPTO_ALG_NEED_FALLBACK);
+	if (IS_ERR(aes_tfm)) {
+		rc = PTR_ERR(aes_tfm);
+		pr_warn("could not load aes cipher driver: %d\n", rc);
 		return rc;
 	}
 
-	aes_encrypt(&ctx, src, src);
+	rc = crypto_cipher_setkey(aes_tfm, key, keylen);
+	if (rc) {
+		pr_err("setkey() failed: %d\n", rc);
+		goto out;
+	}
+
+	crypto_cipher_encrypt_one(aes_tfm, src, src);
 	crypto4xx_memcpy_to_le32(hash_start, src, 16);
-	memzero_explicit(&ctx, sizeof(ctx));
-	return 0;
+out:
+	crypto_free_cipher(aes_tfm);
+	return rc;
 }
 
 int crypto4xx_setkey_aes_gcm(struct crypto_aead *cipher,

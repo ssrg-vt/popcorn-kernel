@@ -73,7 +73,8 @@ struct conntrack_gc_work {
 };
 
 static __read_mostly struct kmem_cache *nf_conntrack_cachep;
-static DEFINE_SPINLOCK(nf_conntrack_locks_all_lock);
+static __read_mostly spinlock_t nf_conntrack_locks_all_lock;
+static __read_mostly DEFINE_SPINLOCK(nf_conntrack_locks_all_lock);
 static __read_mostly bool nf_conntrack_locks_all;
 
 /* every gc cycle scans at most 1/GC_MAX_BUCKETS_DIV part of table */
@@ -748,6 +749,9 @@ begin:
 			continue;
 		}
 
+		if (nf_ct_is_dying(ct))
+			continue;
+
 		if (nf_ct_key_equal(h, tuple, zone, net))
 			return h;
 	}
@@ -773,24 +777,20 @@ __nf_conntrack_find_get(struct net *net, const struct nf_conntrack_zone *zone,
 	struct nf_conn *ct;
 
 	rcu_read_lock();
-
+begin:
 	h = ____nf_conntrack_find(net, zone, tuple, hash);
 	if (h) {
-		/* We have a candidate that matches the tuple we're interested
-		 * in, try to obtain a reference and re-check tuple
-		 */
 		ct = nf_ct_tuplehash_to_ctrack(h);
-		if (likely(atomic_inc_not_zero(&ct->ct_general.use))) {
-			if (likely(nf_ct_key_equal(h, tuple, zone, net)))
-				goto found;
-
-			/* TYPESAFE_BY_RCU recycled the candidate */
-			nf_ct_put(ct);
+		if (unlikely(nf_ct_is_dying(ct) ||
+			     !atomic_inc_not_zero(&ct->ct_general.use)))
+			h = NULL;
+		else {
+			if (unlikely(!nf_ct_key_equal(h, tuple, zone, net))) {
+				nf_ct_put(ct);
+				goto begin;
+			}
 		}
-
-		h = NULL;
 	}
-found:
 	rcu_read_unlock();
 
 	return h;
@@ -1792,8 +1792,8 @@ void __nf_ct_refresh_acct(struct nf_conn *ct,
 	if (nf_ct_is_confirmed(ct))
 		extra_jiffies += nfct_time_stamp;
 
-	if (READ_ONCE(ct->timeout) != extra_jiffies)
-		WRITE_ONCE(ct->timeout, extra_jiffies);
+	if (ct->timeout != extra_jiffies)
+		ct->timeout = extra_jiffies;
 acct:
 	if (do_acct)
 		nf_ct_acct_update(ct, ctinfo, skb->len);
@@ -1816,7 +1816,9 @@ EXPORT_SYMBOL_GPL(nf_ct_kill_acct);
 #include <linux/netfilter/nfnetlink_conntrack.h>
 #include <linux/mutex.h>
 
-/* Generic function for tcp/udp/sctp/dccp and alike. */
+/* Generic function for tcp/udp/sctp/dccp and alike. This needs to be
+ * in ip_conntrack_core, since we don't want the protocols to autoload
+ * or depend on ctnetlink */
 int nf_ct_port_tuple_to_nlattr(struct sk_buff *skb,
 			       const struct nf_conntrack_tuple *tuple)
 {

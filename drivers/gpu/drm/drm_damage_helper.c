@@ -286,7 +286,7 @@ drm_atomic_helper_damage_iter_init(struct drm_atomic_helper_damage_iter *iter,
 	iter->plane_src.y2 = (state->src.y2 >> 16) + !!(state->src.y2 & 0xFFFF);
 
 	if (!iter->clips || !drm_rect_equals(&state->src, &old_state->src)) {
-		iter->clips = NULL;
+		iter->clips = 0;
 		iter->num_clips = 0;
 		iter->full_update = true;
 	}

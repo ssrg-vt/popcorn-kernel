@@ -10,8 +10,6 @@
 
 #include <linux/pci.h>
 
-#define HL_PLDM_PCI_ELBI_TIMEOUT_MSEC	(HL_PCI_ELBI_TIMEOUT_MSEC * 10)
-
 /**
  * hl_pci_bars_map() - Map PCI BARs.
  * @hdev: Pointer to hl_device structure.
@@ -90,13 +88,7 @@ static int hl_pci_elbi_write(struct hl_device *hdev, u64 addr, u32 data)
 {
 	struct pci_dev *pdev = hdev->pdev;
 	ktime_t timeout;
-	u64 msec;
 	u32 val;
-
-	if (hdev->pldm)
-		msec = HL_PLDM_PCI_ELBI_TIMEOUT_MSEC;
-	else
-		msec = HL_PCI_ELBI_TIMEOUT_MSEC;
 
 	/* Clear previous status */
 	pci_write_config_dword(pdev, mmPCI_CONFIG_ELBI_STS, 0);
@@ -106,7 +98,7 @@ static int hl_pci_elbi_write(struct hl_device *hdev, u64 addr, u32 data)
 	pci_write_config_dword(pdev, mmPCI_CONFIG_ELBI_CTRL,
 				PCI_CONFIG_ELBI_CTRL_WRITE);
 
-	timeout = ktime_add_ms(ktime_get(), msec);
+	timeout = ktime_add_ms(ktime_get(), 10);
 	for (;;) {
 		pci_read_config_dword(pdev, mmPCI_CONFIG_ELBI_STS, &val);
 		if (val & PCI_CONFIG_ELBI_STS_MASK)

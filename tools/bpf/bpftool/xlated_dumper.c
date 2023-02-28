@@ -31,7 +31,9 @@ void kernel_syms_load(struct dump_data *dd)
 	if (!fp)
 		return;
 
-	while (fgets(buff, sizeof(buff), fp)) {
+	while (!feof(fp)) {
+		if (!fgets(buff, sizeof(buff), fp))
+			break;
 		tmp = reallocarray(dd->sym_mapping, dd->sym_count + 1,
 				   sizeof(*dd->sym_mapping));
 		if (!tmp) {

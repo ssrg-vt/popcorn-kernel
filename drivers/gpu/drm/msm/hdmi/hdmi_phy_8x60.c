@@ -4,8 +4,6 @@
  * Author: Rob Clark <robdclark@gmail.com>
  */
 
-#include <linux/delay.h>
-
 #include "hdmi.h"
 
 static void hdmi_phy_8x60_powerup(struct hdmi_phy *phy,

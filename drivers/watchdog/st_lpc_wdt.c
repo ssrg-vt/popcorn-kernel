@@ -228,8 +228,10 @@ static int st_wdog_probe(struct platform_device *pdev)
 		return ret;
 
 	ret = devm_watchdog_register_device(dev, &st_wdog_dev);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "Unable to register watchdog\n");
 		return ret;
+	}
 
 	st_wdog_setup(st_wdog, true);
 

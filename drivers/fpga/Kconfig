@@ -12,16 +12,6 @@ menuconfig FPGA
 
 if FPGA
 
-config FPGA_MGR_DEBUG_FS
-	tristate "FPGA debug fs"
-	select DEBUG_FS
-	help
-	  Say Y here if you want to expose a DebugFS interface for the
-	  FPGA Manager Framework. FPGA manager DebugFS provides a user
-	  interface to read the fpga specific configuration information.
-
-	  If unsure, say N.
-
 config FPGA_MGR_SOCFPGA
 	tristate "Altera SOCFPGA FPGA Manager"
 	depends on ARCH_SOCFPGA || COMPILE_TEST
@@ -36,9 +26,9 @@ config FPGA_MGR_SOCFPGA_A10
 	  FPGA manager driver support for Altera Arria10 SoCFPGA.
 
 config ALTERA_PR_IP_CORE
-	tristate "Altera Partial Reconfiguration IP Core"
-	help
-	  Core driver support for Altera Partial Reconfiguration IP component
+        tristate "Altera Partial Reconfiguration IP Core"
+        help
+          Core driver support for Altera Partial Reconfiguration IP component
 
 config ALTERA_PR_IP_CORE_PLAT
 	tristate "Platform support of Altera Partial Reconfiguration IP Core"
@@ -56,11 +46,11 @@ config FPGA_MGR_ALTERA_PS_SPI
 	  using the passive serial interface over SPI.
 
 config FPGA_MGR_ALTERA_CVP
-	tristate "Altera CvP FPGA Manager"
+	tristate "Altera Arria-V/Cyclone-V/Stratix-V CvP FPGA Manager"
 	depends on PCI
 	help
-	  FPGA manager driver support for Arria-V, Cyclone-V, Stratix-V,
-	  Arria 10 and Stratix10 Altera FPGAs using the CvP interface over PCIe.
+	  FPGA manager driver support for Arria-V, Cyclone-V, Stratix-V
+	  and Arria 10 Altera FPGAs using the CvP interface over PCIe.
 
 config FPGA_MGR_ZYNQ_FPGA
 	tristate "Xilinx Zynq FPGA"
@@ -100,24 +90,6 @@ config FPGA_MGR_TS73XX
 	help
 	  FPGA manager driver support for the Altera Cyclone II FPGA
 	  present on the TS-73xx SBC boards.
-
-config FPGA_MGR_ZYNQ_AFI_FPGA
-	bool "Xilinx AFI FPGA"
-	depends on FPGA_MGR_ZYNQ_FPGA
-	help
-	  Zynq AFI driver support for writing to the AFI registers
-	  for configuring the PS_PL interface. For some of the bitstream
-	  or designs to work the PS to PL interfaces need to be configured
-	  like the data bus-width etc.
-
-config XILINX_AFI_FPGA
-	bool "Xilinx AFI FPGA"
-	depends on FPGA_MGR_ZYNQMP_FPGA || COMPILE_TEST
-	help
-	  FPGA manager driver support for writing to the AFI registers
-	  for configuring the PS_PL interface. For some of the bitstream
-	  or designs to work the PS to PL interfaces need to be configured
-	  like the datawidth etc.
 
 config FPGA_BRIDGE
 	tristate "FPGA Bridge Framework"
@@ -242,14 +214,5 @@ config FPGA_MGR_ZYNQMP_FPGA
 	  This driver uses the processor configuration port(PCAP)
 	  to configure the programmable logic(PL) through PS
 	  on ZynqMP SoC.
-
-config FPGA_MGR_VERSAL_FPGA
-	tristate "Xilinx Versal FPGA"
-	depends on ARCH_ZYNQMP || COMPILE_TEST
-	help
-	  Select this option to enable FPGA manager driver support for
-	  Xilinx Versal SOC. This driver uses the versal soc firmware
-	  interface to load programmable logic(PL) images
-	  on versal soc.
 
 endif # FPGA

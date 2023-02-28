@@ -15,10 +15,10 @@ config ARM_GIC_PM
 	bool
 	depends on PM
 	select ARM_GIC
+	select PM_CLK
 
 config ARM_GIC_MAX_NR
 	int
-	depends on ARM_GIC
 	default 2 if ARCH_REALVIEW
 	default 1
 
@@ -86,14 +86,6 @@ config ALPINE_MSI
 	depends on PCI
 	select PCI_MSI
 	select GENERIC_IRQ_CHIP
-
-config AL_FIC
-	bool "Amazon's Annapurna Labs Fabric Interrupt Controller"
-	depends on OF || COMPILE_TEST
-	select GENERIC_IRQ_CHIP
-	select IRQ_DOMAIN
-	help
-	  Support Amazon's Annapurna Labs Fabric Interrupt Controller.
 
 config ATMEL_AIC_IRQ
 	bool
@@ -225,26 +217,13 @@ config RDA_INTC
 	select IRQ_DOMAIN
 
 config RENESAS_INTC_IRQPIN
-	bool "Renesas INTC External IRQ Pin Support" if COMPILE_TEST
+	bool
 	select IRQ_DOMAIN
-	help
-	  Enable support for the Renesas Interrupt Controller for external
-	  interrupt pins, as found on SH/R-Mobile and R-Car Gen1 SoCs.
 
 config RENESAS_IRQC
-	bool "Renesas R-Mobile APE6 and R-Car IRQC support" if COMPILE_TEST
+	bool
 	select GENERIC_IRQ_CHIP
 	select IRQ_DOMAIN
-	help
-	  Enable support for the Renesas Interrupt Controller for external
-	  devices, as found on R-Mobile APE6, R-Car Gen2, and R-Car Gen3 SoCs.
-
-config RENESAS_RZA1_IRQC
-	bool "Renesas RZ/A1 IRQC support" if COMPILE_TEST
-	select IRQ_DOMAIN_HIERARCHY
-	help
-	  Enable support for the Renesas RZ/A1 Interrupt Controller, to use up
-	  to 8 external interrupts with configurable sense select.
 
 config ST_IRQCHIP
 	bool
@@ -286,12 +265,8 @@ config XTENSA_MX
 	select GENERIC_IRQ_EFFECTIVE_AFF_MASK
 
 config XILINX_INTC
-	bool "Xilinx Interrupt Controller (IP core)"
+	bool
 	select IRQ_DOMAIN
-	help
-	  Support for the Xilinx Interrupt Controller which can be used
-	  with MicroBlaze and Zynq. It is a secondary chained controller when
-	  used with Zynq.
 
 config IRQ_CROSSBAR
 	bool
@@ -319,28 +294,13 @@ config INGENIC_IRQ
 	depends on MACH_INGENIC
 	default y
 
-config INGENIC_TCU_IRQ
-	bool "Ingenic JZ47xx TCU interrupt controller"
-	default MACH_INGENIC
-	depends on MIPS || COMPILE_TEST
-	select MFD_SYSCON
-	select GENERIC_IRQ_CHIP
-	help
-	  Support for interrupts in the Timer/Counter Unit (TCU) of the Ingenic
-	  JZ47xx SoCs.
-
-	  If unsure, say N.
-
 config RENESAS_H8300H_INTC
         bool
 	select IRQ_DOMAIN
 
 config RENESAS_H8S_INTC
-	bool "Renesas H8S Interrupt Controller Support" if COMPILE_TEST
+        bool
 	select IRQ_DOMAIN
-	help
-	  Enable support for the Renesas H8/300 Interrupt Controller, as found
-	  on Renesas H8S SoCs.
 
 config IMX_GPCV2
 	bool

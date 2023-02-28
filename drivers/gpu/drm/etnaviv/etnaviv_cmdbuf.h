@@ -8,9 +8,7 @@
 
 #include <linux/types.h>
 
-struct device;
-struct etnaviv_iommu_context;
-struct etnaviv_vram_mapping;
+struct etnaviv_gpu;
 struct etnaviv_cmdbuf_suballoc;
 struct etnaviv_perfmon_request;
 
@@ -25,22 +23,15 @@ struct etnaviv_cmdbuf {
 };
 
 struct etnaviv_cmdbuf_suballoc *
-etnaviv_cmdbuf_suballoc_new(struct device *dev);
+etnaviv_cmdbuf_suballoc_new(struct etnaviv_gpu * gpu);
 void etnaviv_cmdbuf_suballoc_destroy(struct etnaviv_cmdbuf_suballoc *suballoc);
-int etnaviv_cmdbuf_suballoc_map(struct etnaviv_cmdbuf_suballoc *suballoc,
-				struct etnaviv_iommu_context *context,
-				struct etnaviv_vram_mapping *mapping,
-				u32 memory_base);
-void etnaviv_cmdbuf_suballoc_unmap(struct etnaviv_iommu_context *context,
-				   struct etnaviv_vram_mapping *mapping);
 
 
 int etnaviv_cmdbuf_init(struct etnaviv_cmdbuf_suballoc *suballoc,
 		struct etnaviv_cmdbuf *cmdbuf, u32 size);
 void etnaviv_cmdbuf_free(struct etnaviv_cmdbuf *cmdbuf);
 
-u32 etnaviv_cmdbuf_get_va(struct etnaviv_cmdbuf *buf,
-			  struct etnaviv_vram_mapping *mapping);
+u32 etnaviv_cmdbuf_get_va(struct etnaviv_cmdbuf *buf);
 dma_addr_t etnaviv_cmdbuf_get_pa(struct etnaviv_cmdbuf *buf);
 
 #endif /* __ETNAVIV_CMDBUF_H__ */

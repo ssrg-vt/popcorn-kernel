@@ -570,6 +570,7 @@ static int pic32_sqi_probe(struct platform_device *pdev)
 {
 	struct spi_master *master;
 	struct pic32_sqi *sqi;
+	struct resource *reg;
 	int ret;
 
 	master = spi_alloc_master(&pdev->dev, sizeof(*sqi));
@@ -579,7 +580,8 @@ static int pic32_sqi_probe(struct platform_device *pdev)
 	sqi = spi_master_get_devdata(master);
 	sqi->master = master;
 
-	sqi->regs = devm_platform_ioremap_resource(pdev, 0);
+	reg = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	sqi->regs = devm_ioremap_resource(&pdev->dev, reg);
 	if (IS_ERR(sqi->regs)) {
 		ret = PTR_ERR(sqi->regs);
 		goto err_free_master;
@@ -588,6 +590,7 @@ static int pic32_sqi_probe(struct platform_device *pdev)
 	/* irq */
 	sqi->irq = platform_get_irq(pdev, 0);
 	if (sqi->irq < 0) {
+		dev_err(&pdev->dev, "no irq found\n");
 		ret = sqi->irq;
 		goto err_free_master;
 	}

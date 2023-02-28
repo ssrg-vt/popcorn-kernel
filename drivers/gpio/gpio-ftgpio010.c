@@ -226,7 +226,6 @@ static int ftgpio_gpio_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct ftgpio_gpio *g;
-	struct gpio_irq_chip *girq;
 	int irq;
 	int ret;
 
@@ -278,25 +277,9 @@ static int ftgpio_gpio_probe(struct platform_device *pdev)
 	if (!IS_ERR(g->clk))
 		g->gc.set_config = ftgpio_gpio_set_config;
 
-	g->irq.name = "FTGPIO010";
-	g->irq.irq_ack = ftgpio_gpio_ack_irq;
-	g->irq.irq_mask = ftgpio_gpio_mask_irq;
-	g->irq.irq_unmask = ftgpio_gpio_unmask_irq;
-	g->irq.irq_set_type = ftgpio_gpio_set_irq_type;
-
-	girq = &g->gc.irq;
-	girq->chip = &g->irq;
-	girq->parent_handler = ftgpio_gpio_irq_handler;
-	girq->num_parents = 1;
-	girq->parents = devm_kcalloc(dev, 1, sizeof(*girq->parents),
-				     GFP_KERNEL);
-	if (!girq->parents) {
-		ret = -ENOMEM;
+	ret = devm_gpiochip_add_data(dev, &g->gc, g);
+	if (ret)
 		goto dis_clk;
-	}
-	girq->default_type = IRQ_TYPE_NONE;
-	girq->handler = handle_bad_irq;
-	girq->parents[0] = irq;
 
 	/* Disable, unmask and clear all interrupts */
 	writel(0x0, g->base + GPIO_INT_EN);
@@ -306,9 +289,21 @@ static int ftgpio_gpio_probe(struct platform_device *pdev)
 	/* Clear any use of debounce */
 	writel(0x0, g->base + GPIO_DEBOUNCE_EN);
 
-	ret = devm_gpiochip_add_data(dev, &g->gc, g);
-	if (ret)
+	g->irq.name = "FTGPIO010";
+	g->irq.irq_ack = ftgpio_gpio_ack_irq;
+	g->irq.irq_mask = ftgpio_gpio_mask_irq;
+	g->irq.irq_unmask = ftgpio_gpio_unmask_irq;
+	g->irq.irq_set_type = ftgpio_gpio_set_irq_type;
+
+	ret = gpiochip_irqchip_add(&g->gc, &g->irq,
+				   0, handle_bad_irq,
+				   IRQ_TYPE_NONE);
+	if (ret) {
+		dev_info(dev, "could not add irqchip\n");
 		goto dis_clk;
+	}
+	gpiochip_set_chained_irqchip(&g->gc, &g->irq,
+				     irq, ftgpio_gpio_irq_handler);
 
 	platform_set_drvdata(pdev, g);
 	dev_info(dev, "FTGPIO010 @%p registered\n", g->base);

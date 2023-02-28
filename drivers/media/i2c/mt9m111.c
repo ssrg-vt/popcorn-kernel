@@ -10,7 +10,6 @@
 #include <linux/log2.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
-#include <linux/regulator/consumer.h>
 #include <linux/v4l2-mediabus.h>
 #include <linux/module.h>
 #include <linux/property.h>
@@ -241,7 +240,6 @@ struct mt9m111 {
 	int power_count;
 	const struct mt9m111_datafmt *fmt;
 	int lastpage;	/* PageMap cache value */
-	struct regulator *regulator;
 	bool is_streaming;
 	/* user point of view - 0: falling 1: rising edge */
 	unsigned int pclk_sample:1;
@@ -533,7 +531,7 @@ static int mt9m111_get_fmt(struct v4l2_subdev *sd,
 		format->format = *mf;
 		return 0;
 #else
-		return -EINVAL;
+		return -ENOTTY;
 #endif
 	}
 
@@ -981,23 +979,11 @@ static int mt9m111_power_on(struct mt9m111 *mt9m111)
 	if (ret < 0)
 		return ret;
 
-	ret = regulator_enable(mt9m111->regulator);
-	if (ret < 0)
-		goto out_clk_disable;
-
 	ret = mt9m111_resume(mt9m111);
-	if (ret < 0)
-		goto out_regulator_disable;
-
-	return 0;
-
-out_regulator_disable:
-	regulator_disable(mt9m111->regulator);
-
-out_clk_disable:
-	v4l2_clk_disable(mt9m111->clk);
-
-	dev_err(&client->dev, "Failed to resume the sensor: %d\n", ret);
+	if (ret < 0) {
+		dev_err(&client->dev, "Failed to resume the sensor: %d\n", ret);
+		v4l2_clk_disable(mt9m111->clk);
+	}
 
 	return ret;
 }
@@ -1005,7 +991,6 @@ out_clk_disable:
 static void mt9m111_power_off(struct mt9m111 *mt9m111)
 {
 	mt9m111_suspend(mt9m111);
-	regulator_disable(mt9m111->regulator);
 	v4l2_clk_disable(mt9m111->clk);
 }
 
@@ -1243,10 +1228,11 @@ out_put_fw:
 	return ret;
 }
 
-static int mt9m111_probe(struct i2c_client *client)
+static int mt9m111_probe(struct i2c_client *client,
+			 const struct i2c_device_id *did)
 {
 	struct mt9m111 *mt9m111;
-	struct i2c_adapter *adapter = client->adapter;
+	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
 	int ret;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_WORD_DATA)) {
@@ -1268,13 +1254,6 @@ static int mt9m111_probe(struct i2c_client *client)
 	mt9m111->clk = v4l2_clk_get(&client->dev, "mclk");
 	if (IS_ERR(mt9m111->clk))
 		return PTR_ERR(mt9m111->clk);
-
-	mt9m111->regulator = devm_regulator_get(&client->dev, "vdd");
-	if (IS_ERR(mt9m111->regulator)) {
-		dev_err(&client->dev, "regulator not found: %ld\n",
-			PTR_ERR(mt9m111->regulator));
-		return PTR_ERR(mt9m111->regulator);
-	}
 
 	/* Default HIGHPOWER context */
 	mt9m111->ctx = &context_b;
@@ -1387,7 +1366,7 @@ static struct i2c_driver mt9m111_i2c_driver = {
 		.name = "mt9m111",
 		.of_match_table = of_match_ptr(mt9m111_of_match),
 	},
-	.probe_new	= mt9m111_probe,
+	.probe		= mt9m111_probe,
 	.remove		= mt9m111_remove,
 	.id_table	= mt9m111_id,
 };

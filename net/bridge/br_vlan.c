@@ -797,16 +797,6 @@ bool br_vlan_enabled(const struct net_device *dev)
 }
 EXPORT_SYMBOL_GPL(br_vlan_enabled);
 
-int br_vlan_get_proto(const struct net_device *dev, u16 *p_proto)
-{
-	struct net_bridge *br = netdev_priv(dev);
-
-	*p_proto = ntohs(br->vlan_proto);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(br_vlan_get_proto);
-
 int __br_vlan_set_proto(struct net_bridge *br, __be16 proto)
 {
 	int err = 0;
@@ -1229,11 +1219,13 @@ void br_vlan_get_stats(const struct net_bridge_vlan *v,
 	}
 }
 
-static int __br_vlan_get_pvid(const struct net_device *dev,
-			      struct net_bridge_port *p, u16 *p_pvid)
+int br_vlan_get_pvid(const struct net_device *dev, u16 *p_pvid)
 {
 	struct net_bridge_vlan_group *vg;
+	struct net_bridge_port *p;
 
+	ASSERT_RTNL();
+	p = br_port_get_check_rtnl(dev);
 	if (p)
 		vg = nbp_vlan_group(p);
 	else if (netif_is_bridge_master(dev))
@@ -1244,20 +1236,7 @@ static int __br_vlan_get_pvid(const struct net_device *dev,
 	*p_pvid = br_get_pvid(vg);
 	return 0;
 }
-
-int br_vlan_get_pvid(const struct net_device *dev, u16 *p_pvid)
-{
-	ASSERT_RTNL();
-
-	return __br_vlan_get_pvid(dev, br_port_get_check_rtnl(dev), p_pvid);
-}
 EXPORT_SYMBOL_GPL(br_vlan_get_pvid);
-
-int br_vlan_get_pvid_rcu(const struct net_device *dev, u16 *p_pvid)
-{
-	return __br_vlan_get_pvid(dev, br_port_get_check_rcu(dev), p_pvid);
-}
-EXPORT_SYMBOL_GPL(br_vlan_get_pvid_rcu);
 
 int br_vlan_get_info(const struct net_device *dev, u16 vid,
 		     struct bridge_vlan_info *p_vinfo)
@@ -1281,8 +1260,6 @@ int br_vlan_get_info(const struct net_device *dev, u16 vid,
 
 	p_vinfo->vid = vid;
 	p_vinfo->flags = v->flags;
-	if (vid == br_get_pvid(vg))
-		p_vinfo->flags |= BRIDGE_VLAN_INFO_PVID;
 	return 0;
 }
 EXPORT_SYMBOL_GPL(br_vlan_get_info);

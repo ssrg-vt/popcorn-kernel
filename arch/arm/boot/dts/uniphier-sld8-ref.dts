@@ -81,8 +81,4 @@
 
 &nand {
 	status = "okay";
-
-	nand@0 {
-		reg = <0>;
-	};
 };

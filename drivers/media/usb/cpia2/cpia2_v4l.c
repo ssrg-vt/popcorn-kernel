@@ -250,6 +250,13 @@ static int cpia2_querycap(struct file *file, void *fh, struct v4l2_capability *v
 
 	if (usb_make_path(cam->dev, vc->bus_info, sizeof(vc->bus_info)) <0)
 		memset(vc->bus_info,0, sizeof(vc->bus_info));
+
+	vc->device_caps = V4L2_CAP_VIDEO_CAPTURE |
+			   V4L2_CAP_READWRITE |
+			   V4L2_CAP_STREAMING;
+	vc->capabilities = vc->device_caps |
+			   V4L2_CAP_DEVICE_CAPS;
+
 	return 0;
 }
 
@@ -292,13 +299,28 @@ static int cpia2_s_input(struct file *file, void *fh, unsigned int i)
 static int cpia2_enum_fmt_vid_cap(struct file *file, void *fh,
 					    struct v4l2_fmtdesc *f)
 {
-	if (f->index > 1)
-		return -EINVAL;
+	int index = f->index;
 
-	if (f->index == 0)
+	if (index < 0 || index > 1)
+	       return -EINVAL;
+
+	memset(f, 0, sizeof(*f));
+	f->index = index;
+	f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	f->flags = V4L2_FMT_FLAG_COMPRESSED;
+	switch(index) {
+	case 0:
+		strscpy(f->description, "MJPEG", sizeof(f->description));
 		f->pixelformat = V4L2_PIX_FMT_MJPEG;
-	else
+		break;
+	case 1:
+		strscpy(f->description, "JPEG", sizeof(f->description));
 		f->pixelformat = V4L2_PIX_FMT_JPEG;
+		break;
+	default:
+		return -EINVAL;
+	}
+
 	return 0;
 }
 
@@ -323,6 +345,7 @@ static int cpia2_try_fmt_vid_cap(struct file *file, void *fh,
 	f->fmt.pix.bytesperline = 0;
 	f->fmt.pix.sizeimage = cam->frame_size;
 	f->fmt.pix.colorspace = V4L2_COLORSPACE_JPEG;
+	f->fmt.pix.priv = 0;
 
 	switch (cpia2_match_video_size(f->fmt.pix.width, f->fmt.pix.height)) {
 	case VIDEOSIZE_VGA:
@@ -433,6 +456,7 @@ static int cpia2_g_fmt_vid_cap(struct file *file, void *fh,
 	f->fmt.pix.bytesperline = 0;
 	f->fmt.pix.sizeimage = cam->frame_size;
 	f->fmt.pix.colorspace = V4L2_COLORSPACE_JPEG;
+	f->fmt.pix.priv = 0;
 
 	return 0;
 }
@@ -1128,8 +1152,6 @@ int cpia2_register_camera(struct camera_data *cam)
 	cam->vdev.lock = &cam->v4l2_lock;
 	cam->vdev.ctrl_handler = hdl;
 	cam->vdev.v4l2_dev = &cam->v4l2_dev;
-	cam->vdev.device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
-				V4L2_CAP_STREAMING;
 
 	reset_camera_struct_v4l(cam);
 

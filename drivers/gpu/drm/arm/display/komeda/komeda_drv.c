@@ -83,12 +83,11 @@ static int compare_of(struct device *dev, void *data)
 
 static void komeda_add_slave(struct device *master,
 			     struct component_match **match,
-			     struct device_node *np,
-			     u32 port, u32 endpoint)
+			     struct device_node *np, int port)
 {
 	struct device_node *remote;
 
-	remote = of_graph_get_remote_node(np, port, endpoint);
+	remote = of_graph_get_remote_node(np, port, 0);
 	if (remote) {
 		drm_of_component_match_add(master, match, compare_of, remote);
 		of_node_put(remote);
@@ -109,8 +108,7 @@ static int komeda_platform_probe(struct platform_device *pdev)
 			continue;
 
 		/* add connector */
-		komeda_add_slave(dev, &match, child, KOMEDA_OF_PORT_OUTPUT, 0);
-		komeda_add_slave(dev, &match, child, KOMEDA_OF_PORT_OUTPUT, 1);
+		komeda_add_slave(dev, &match, child, KOMEDA_OF_PORT_OUTPUT);
 	}
 
 	return component_master_add_with_match(dev, &komeda_master_ops, match);

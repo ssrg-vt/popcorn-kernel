@@ -28,9 +28,7 @@
 #ifndef _SIS_DRV_H_
 #define _SIS_DRV_H_
 
-#include <drm/drm_ioctl.h>
 #include <drm/drm_legacy.h>
-#include <drm/drm_mm.h>
 
 /* General customization:
  */
@@ -48,8 +46,12 @@ enum sis_family {
 	SIS_CHIP_315 = 1,
 };
 
-#define SIS_READ(reg)         readl(((void __iomem *)dev_priv->mmio->handle) + (reg))
-#define SIS_WRITE(reg, val)   writel(val, ((void __iomem *)dev_priv->mmio->handle) + (reg))
+#include <drm/drm_mm.h>
+
+
+#define SIS_BASE (dev_priv->mmio)
+#define SIS_READ(reg)         DRM_READ32(SIS_BASE, reg)
+#define SIS_WRITE(reg, val)   DRM_WRITE32(SIS_BASE, reg, val)
 
 typedef struct drm_sis_private {
 	drm_local_map_t *mmio;

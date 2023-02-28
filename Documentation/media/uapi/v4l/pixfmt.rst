@@ -31,7 +31,6 @@ see also :ref:`VIDIOC_G_FBUF <VIDIOC_G_FBUF>`.)
     pixfmt-intro
     pixfmt-indexed
     pixfmt-rgb
-    pixfmt-bayer
     yuv-formats
     hsv-formats
     depth-formats

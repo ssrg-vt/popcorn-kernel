@@ -174,10 +174,10 @@ out:
 		kobject_uevent(&scmdev->dev.kobj, KOBJ_CHANGE);
 }
 
-static int check_address(struct device *dev, const void *data)
+static int check_address(struct device *dev, void *data)
 {
 	struct scm_device *scmdev = to_scm_dev(dev);
-	const struct sale *sale = data;
+	struct sale *sale = data;
 
 	return scmdev->address == sale->sa;
 }

@@ -4,6 +4,7 @@
  * All Rights Reserved.
  */
 #include "xfs.h"
+#include "xfs_sysctl.h"
 
 /*
  * Tunable XFS parameters.  xfs_params is required even when CONFIG_SYSCTL=n,
@@ -39,8 +40,5 @@ struct xfs_globals xfs_globals = {
 	.bug_on_assert		=	true,	/* assert failures BUG() */
 #else
 	.bug_on_assert		=	false,	/* assert failures WARN() */
-#endif
-#ifdef DEBUG
-	.pwork_threads		=	-1,	/* automatic thread detection */
 #endif
 };

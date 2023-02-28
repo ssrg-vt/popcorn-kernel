@@ -633,7 +633,7 @@ int xenvif_connect_data(struct xenvif_queue *queue,
 			unsigned int rx_evtchn)
 {
 	struct task_struct *task;
-	int err;
+	int err = -ENOMEM;
 
 	BUG_ON(queue->tx_irq);
 	BUG_ON(queue->task);
@@ -719,6 +719,7 @@ err_unmap:
 	xenvif_unmap_frontend_data_rings(queue);
 	netif_napi_del(&queue->napi);
 err:
+	module_put(THIS_MODULE);
 	return err;
 }
 

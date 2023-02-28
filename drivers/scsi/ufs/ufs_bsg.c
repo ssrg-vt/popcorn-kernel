@@ -98,8 +98,6 @@ static int ufs_bsg_request(struct bsg_job *job)
 
 	bsg_reply->reply_payload_rcv_len = 0;
 
-	pm_runtime_get_sync(hba->dev);
-
 	msgcode = bsg_request->msgcode;
 	switch (msgcode) {
 	case UPIU_TRANSACTION_QUERY_REQ:
@@ -124,7 +122,7 @@ static int ufs_bsg_request(struct bsg_job *job)
 		memcpy(&uc, &bsg_request->upiu_req.uc, UIC_CMD_SIZE);
 		ret = ufshcd_send_uic_cmd(hba, &uc);
 		if (ret)
-			dev_err(hba->dev,
+			dev_dbg(hba->dev,
 				"send uic cmd: error code %d\n", ret);
 
 		memcpy(&bsg_reply->upiu_rsp.uc, &uc, UIC_CMD_SIZE);
@@ -136,8 +134,6 @@ static int ufs_bsg_request(struct bsg_job *job)
 
 		break;
 	}
-
-	pm_runtime_put_sync(hba->dev);
 
 	if (!desc_buff)
 		goto out;
@@ -153,9 +149,7 @@ static int ufs_bsg_request(struct bsg_job *job)
 out:
 	bsg_reply->result = ret;
 	job->reply_len = sizeof(struct ufs_bsg_reply);
-	/* complete the job here only if no error */
-	if (ret == 0)
-		bsg_job_done(job, ret, bsg_reply->reply_payload_rcv_len);
+	bsg_job_done(job, ret, bsg_reply->reply_payload_rcv_len);
 
 	return ret;
 }

@@ -975,7 +975,7 @@ static int __init lock_torture_init(void)
 			goto unwind;
 	}
 	if (stutter > 0) {
-		firsterr = torture_stutter_init(stutter, stutter);
+		firsterr = torture_stutter_init(stutter);
 		if (firsterr)
 			goto unwind;
 	}

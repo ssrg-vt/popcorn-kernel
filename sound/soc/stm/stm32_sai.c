@@ -20,20 +20,13 @@
 #include "stm32_sai.h"
 
 static const struct stm32_sai_conf stm32_sai_conf_f4 = {
-	.version = STM_SAI_STM32F4,
-	.fifo_size = 8,
-	.has_spdif_pdm = false,
+	.version = SAI_STM32F4,
+	.has_spdif = false,
 };
 
-/*
- * Default settings for stm32 H7 socs and next.
- * These default settings will be overridden if the soc provides
- * support of hardware configuration registers.
- */
 static const struct stm32_sai_conf stm32_sai_conf_h7 = {
-	.version = STM_SAI_STM32H7,
-	.fifo_size = 8,
-	.has_spdif_pdm = true,
+	.version = SAI_STM32H7,
+	.has_spdif = true,
 };
 
 static const struct of_device_id stm32_sai_ids[] = {
@@ -152,22 +145,21 @@ static int stm32_sai_probe(struct platform_device *pdev)
 {
 	struct stm32_sai_data *sai;
 	struct reset_control *rst;
+	struct resource *res;
 	const struct of_device_id *of_id;
-	u32 val;
-	int ret;
 
 	sai = devm_kzalloc(&pdev->dev, sizeof(*sai), GFP_KERNEL);
 	if (!sai)
 		return -ENOMEM;
 
-	sai->base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	sai->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(sai->base))
 		return PTR_ERR(sai->base);
 
 	of_id = of_match_device(stm32_sai_ids, &pdev->dev);
 	if (of_id)
-		memcpy(&sai->conf, (const struct stm32_sai_conf *)of_id->data,
-		       sizeof(struct stm32_sai_conf));
+		sai->conf = (struct stm32_sai_conf *)of_id->data;
 	else
 		return -EINVAL;
 
@@ -193,8 +185,10 @@ static int stm32_sai_probe(struct platform_device *pdev)
 
 	/* init irqs */
 	sai->irq = platform_get_irq(pdev, 0);
-	if (sai->irq < 0)
+	if (sai->irq < 0) {
+		dev_err(&pdev->dev, "no irq for node %s\n", pdev->name);
 		return sai->irq;
+	}
 
 	/* reset */
 	rst = devm_reset_control_get_exclusive(&pdev->dev, NULL);
@@ -203,30 +197,6 @@ static int stm32_sai_probe(struct platform_device *pdev)
 		udelay(2);
 		reset_control_deassert(rst);
 	}
-
-	/* Enable peripheral clock to allow register access */
-	ret = clk_prepare_enable(sai->pclk);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to enable clock: %d\n", ret);
-		return ret;
-	}
-
-	val = FIELD_GET(SAI_IDR_ID_MASK,
-			readl_relaxed(sai->base + STM_SAI_IDR));
-	if (val == SAI_IPIDR_NUMBER) {
-		val = readl_relaxed(sai->base + STM_SAI_HWCFGR);
-		sai->conf.fifo_size = FIELD_GET(SAI_HWCFGR_FIFO_SIZE, val);
-		sai->conf.has_spdif_pdm = !!FIELD_GET(SAI_HWCFGR_SPDIF_PDM,
-						      val);
-
-		val = readl_relaxed(sai->base + STM_SAI_VERR);
-		sai->conf.version = val;
-
-		dev_dbg(&pdev->dev, "SAI version: %lu.%lu registered\n",
-			FIELD_GET(SAI_VERR_MAJ_MASK, val),
-			FIELD_GET(SAI_VERR_MIN_MASK, val));
-	}
-	clk_disable_unprepare(sai->pclk);
 
 	sai->pdev = pdev;
 	sai->set_sync = &stm32_sai_set_sync;

@@ -14,8 +14,6 @@
 extern const u32 vmx_msr_index[];
 extern u64 host_efer;
 
-extern u32 get_umwait_control_msr(void);
-
 #define MSR_TYPE_R	1
 #define MSR_TYPE_W	2
 #define MSR_TYPE_RW	3
@@ -111,19 +109,12 @@ struct nested_vmx {
 	 * to guest memory during VM exit.
 	 */
 	struct vmcs12 *cached_shadow_vmcs12;
-
 	/*
 	 * Indicates if the shadow vmcs or enlightened vmcs must be updated
 	 * with the data held by struct vmcs12.
 	 */
-	bool need_vmcs12_to_shadow_sync;
+	bool need_vmcs12_sync;
 	bool dirty_vmcs12;
-
-	/*
-	 * Indicates lazily loaded guest state has not yet been decached from
-	 * vmcs02.
-	 */
-	bool need_sync_vmcs02_to_vmcs12_rare;
 
 	/*
 	 * vmcs02 has been initialized, i.e. state that is constant for
@@ -189,41 +180,36 @@ struct vcpu_vmx {
 	struct kvm_vcpu       vcpu;
 	u8                    fail;
 	u8		      msr_bitmap_mode;
-
-	/*
-	 * If true, host state has been stored in vmx->loaded_vmcs for
-	 * the CPU registers that only need to be switched when transitioning
-	 * to/from the kernel, and the registers have been loaded with guest
-	 * values.  If false, host state is loaded in the CPU registers
-	 * and vmx->loaded_vmcs->host_state is invalid.
-	 */
-	bool		      guest_state_loaded;
-
 	u32                   exit_intr_info;
 	u32                   idt_vectoring_info;
 	ulong                 rflags;
-
 	struct shared_msr_entry *guest_msrs;
 	int                   nmsrs;
 	int                   save_nmsrs;
-	bool                  guest_msrs_ready;
+	bool                  guest_msrs_dirty;
+	unsigned long	      host_idt_base;
 #ifdef CONFIG_X86_64
 	u64		      msr_host_kernel_gs_base;
 	u64		      msr_guest_kernel_gs_base;
 #endif
 
 	u64		      spec_ctrl;
-	u32		      msr_ia32_umwait_control;
 
+	u32 vm_entry_controls_shadow;
+	u32 vm_exit_controls_shadow;
 	u32 secondary_exec_control;
 
 	/*
 	 * loaded_vmcs points to the VMCS currently used in this vcpu. For a
 	 * non-nested (L1) guest, it always points to vmcs01. For a nested
-	 * guest (L2), it points to a different VMCS.
+	 * guest (L2), it points to a different VMCS.  loaded_cpu_state points
+	 * to the VMCS whose state is loaded into the CPU registers that only
+	 * need to be switched when transitioning to/from the kernel; a NULL
+	 * value indicates that host state is loaded.
 	 */
 	struct loaded_vmcs    vmcs01;
 	struct loaded_vmcs   *loaded_vmcs;
+	struct loaded_vmcs   *loaded_cpu_state;
 
 	struct msr_autoload {
 		struct vmx_msrs guest;
@@ -256,7 +242,7 @@ struct vcpu_vmx {
 	struct nested_vmx nested;
 
 	/* Dynamic PLE window. */
-	unsigned int ple_window;
+	int ple_window;
 	bool ple_window_dirty;
 
 	bool req_immediate_exit;
@@ -273,6 +259,8 @@ struct vcpu_vmx {
 	u32 host_pkru;
 
 	unsigned long host_debugctlmsr;
+
+	u64 msr_ia32_power_ctl;
 
 	/*
 	 * Only bits masked by msr_ia32_feature_control_valid_bits can be set in
@@ -304,14 +292,12 @@ struct kvm_vmx {
 };
 
 bool nested_vmx_allowed(struct kvm_vcpu *vcpu);
-void vmx_vcpu_load_vmcs(struct kvm_vcpu *vcpu, int cpu);
 void vmx_vcpu_load(struct kvm_vcpu *vcpu, int cpu);
+void vmx_vcpu_put(struct kvm_vcpu *vcpu);
 int allocate_vpid(void);
 void free_vpid(int vpid);
 void vmx_set_constant_host_state(struct vcpu_vmx *vmx);
 void vmx_prepare_switch_to_guest(struct kvm_vcpu *vcpu);
-void vmx_set_host_fs_gs(struct vmcs_host_state *host, u16 fs_sel, u16 gs_sel,
-			unsigned long fs_base, unsigned long gs_base);
 int vmx_get_cpl(struct kvm_vcpu *vcpu);
 unsigned long vmx_get_rflags(struct kvm_vcpu *vcpu);
 void vmx_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags);
@@ -355,11 +341,6 @@ static inline int pi_test_and_set_pir(int vector, struct pi_desc *pi_desc)
 	return test_and_set_bit(vector, (unsigned long *)pi_desc->pir);
 }
 
-static inline bool pi_is_pir_empty(struct pi_desc *pi_desc)
-{
-	return bitmap_empty((unsigned long *)pi_desc->pir, NR_VECTORS);
-}
-
 static inline void pi_set_sn(struct pi_desc *pi_desc)
 {
 	set_bit(POSTED_INTR_SN,
@@ -375,12 +356,6 @@ static inline void pi_set_on(struct pi_desc *pi_desc)
 static inline void pi_clear_on(struct pi_desc *pi_desc)
 {
 	clear_bit(POSTED_INTR_ON,
-		(unsigned long *)&pi_desc->control);
-}
-
-static inline void pi_clear_sn(struct pi_desc *pi_desc)
-{
-	clear_bit(POSTED_INTR_SN,
 		(unsigned long *)&pi_desc->control);
 }
 
@@ -401,31 +376,69 @@ static inline u8 vmx_get_rvi(void)
 	return vmcs_read16(GUEST_INTR_STATUS) & 0xff;
 }
 
-#define BUILD_CONTROLS_SHADOW(lname, uname)				    \
-static inline void lname##_controls_set(struct vcpu_vmx *vmx, u32 val)	    \
-{									    \
-	if (vmx->loaded_vmcs->controls_shadow.lname != val) {		    \
-		vmcs_write32(uname, val);				    \
-		vmx->loaded_vmcs->controls_shadow.lname = val;		    \
-	}								    \
-}									    \
-static inline u32 lname##_controls_get(struct vcpu_vmx *vmx)		    \
-{									    \
-	return vmx->loaded_vmcs->controls_shadow.lname;			    \
-}									    \
-static inline void lname##_controls_setbit(struct vcpu_vmx *vmx, u32 val)   \
-{									    \
-	lname##_controls_set(vmx, lname##_controls_get(vmx) | val);	    \
-}									    \
-static inline void lname##_controls_clearbit(struct vcpu_vmx *vmx, u32 val) \
-{									    \
-	lname##_controls_set(vmx, lname##_controls_get(vmx) & ~val);	    \
+static inline void vm_entry_controls_reset_shadow(struct vcpu_vmx *vmx)
+{
+	vmx->vm_entry_controls_shadow = vmcs_read32(VM_ENTRY_CONTROLS);
 }
-BUILD_CONTROLS_SHADOW(vm_entry, VM_ENTRY_CONTROLS)
-BUILD_CONTROLS_SHADOW(vm_exit, VM_EXIT_CONTROLS)
-BUILD_CONTROLS_SHADOW(pin, PIN_BASED_VM_EXEC_CONTROL)
-BUILD_CONTROLS_SHADOW(exec, CPU_BASED_VM_EXEC_CONTROL)
-BUILD_CONTROLS_SHADOW(secondary_exec, SECONDARY_VM_EXEC_CONTROL)
+
+static inline void vm_entry_controls_init(struct vcpu_vmx *vmx, u32 val)
+{
+	vmcs_write32(VM_ENTRY_CONTROLS, val);
+	vmx->vm_entry_controls_shadow = val;
+}
+
+static inline void vm_entry_controls_set(struct vcpu_vmx *vmx, u32 val)
+{
+	if (vmx->vm_entry_controls_shadow != val)
+		vm_entry_controls_init(vmx, val);
+}
+
+static inline u32 vm_entry_controls_get(struct vcpu_vmx *vmx)
+{
+	return vmx->vm_entry_controls_shadow;
+}
+
+static inline void vm_entry_controls_setbit(struct vcpu_vmx *vmx, u32 val)
+{
+	vm_entry_controls_set(vmx, vm_entry_controls_get(vmx) | val);
+}
+
+static inline void vm_entry_controls_clearbit(struct vcpu_vmx *vmx, u32 val)
+{
+	vm_entry_controls_set(vmx, vm_entry_controls_get(vmx) & ~val);
+}
+
+static inline void vm_exit_controls_reset_shadow(struct vcpu_vmx *vmx)
+{
+	vmx->vm_exit_controls_shadow = vmcs_read32(VM_EXIT_CONTROLS);
+}
+
+static inline void vm_exit_controls_init(struct vcpu_vmx *vmx, u32 val)
+{
+	vmcs_write32(VM_EXIT_CONTROLS, val);
+	vmx->vm_exit_controls_shadow = val;
+}
+
+static inline void vm_exit_controls_set(struct vcpu_vmx *vmx, u32 val)
+{
+	if (vmx->vm_exit_controls_shadow != val)
+		vm_exit_controls_init(vmx, val);
+}
+
+static inline u32 vm_exit_controls_get(struct vcpu_vmx *vmx)
+{
+	return vmx->vm_exit_controls_shadow;
+}
+
+static inline void vm_exit_controls_setbit(struct vcpu_vmx *vmx, u32 val)
+{
+	vm_exit_controls_set(vmx, vm_exit_controls_get(vmx) | val);
+}
+
+static inline void vm_exit_controls_clearbit(struct vcpu_vmx *vmx, u32 val)
+{
+	vm_exit_controls_set(vmx, vm_exit_controls_get(vmx) & ~val);
+}
 
 static inline void vmx_segment_cache_clear(struct vcpu_vmx *vmx)
 {
@@ -455,7 +468,6 @@ static inline u32 vmx_vmexit_ctrl(void)
 }
 
 u32 vmx_exec_control(struct vcpu_vmx *vmx);
-u32 vmx_pin_based_exec_ctrl(struct vcpu_vmx *vmx);
 
 static inline struct kvm_vmx *to_kvm_vmx(struct kvm *kvm)
 {
@@ -509,12 +521,6 @@ static inline void decache_tsc_multiplier(struct vcpu_vmx *vmx)
 {
 	vmx->current_tsc_ratio = vmx->vcpu.arch.tsc_scaling_ratio;
 	vmcs_write64(TSC_MULTIPLIER, vmx->current_tsc_ratio);
-}
-
-static inline bool vmx_has_waitpkg(struct vcpu_vmx *vmx)
-{
-	return vmx->secondary_exec_control &
-		SECONDARY_EXEC_ENABLE_USR_WAIT_PAUSE;
 }
 
 void dump_vmcs(void);

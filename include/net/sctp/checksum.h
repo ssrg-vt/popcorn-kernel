@@ -43,21 +43,19 @@ static inline __wsum sctp_csum_combine(__wsum csum, __wsum csum2,
 						   (__force __u32)csum2, len);
 }
 
-static const struct skb_checksum_ops sctp_csum_ops = {
-	.update  = sctp_csum_update,
-	.combine = sctp_csum_combine,
-};
-
 static inline __le32 sctp_compute_cksum(const struct sk_buff *skb,
 					unsigned int offset)
 {
 	struct sctphdr *sh = (struct sctphdr *)(skb->data + offset);
+	const struct skb_checksum_ops ops = {
+		.update  = sctp_csum_update,
+		.combine = sctp_csum_combine,
+	};
 	__le32 old = sh->checksum;
 	__wsum new;
 
 	sh->checksum = 0;
-	new = ~__skb_checksum(skb, offset, skb->len - offset, ~(__wsum)0,
-			      &sctp_csum_ops);
+	new = ~__skb_checksum(skb, offset, skb->len - offset, ~(__wsum)0, &ops);
 	sh->checksum = old;
 
 	return cpu_to_le32((__force __u32)new);

@@ -22,7 +22,6 @@
 	uint16_t *index_of = rs->index_of;
 	uint16_t u, q, tmp, num1, num2, den, discr_r, syn_error;
 	int count = 0;
-	int num_corrected;
 	uint16_t msk = (uint16_t) rs->nn;
 
 	/*
@@ -40,7 +39,7 @@
 
 	/* Check length parameter for validity */
 	pad = nn - nroots - len;
-	BUG_ON(pad < 0 || pad >= nn - nroots);
+	BUG_ON(pad < 0 || pad >= nn);
 
 	/* Does the caller provide the syndrome ? */
 	if (s != NULL) {
@@ -99,7 +98,8 @@
 		/* if syndrome is zero, data[] is a codeword and there are no
 		 * errors to correct. So return data[] unmodified
 		 */
-		return 0;
+		count = 0;
+		goto finish;
 	}
 
  decode:
@@ -185,15 +185,6 @@
 		if (lambda[i] != nn)
 			deg_lambda = i;
 	}
-
-	if (deg_lambda == 0) {
-		/*
-		 * deg(lambda) is zero even though the syndrome is non-zero
-		 * => uncorrectable error detected
-		 */
-		return -EBADMSG;
-	}
-
 	/* Find roots of error+erasure locator polynomial by Chien search */
 	memcpy(&reg[1], &lambda[1], nroots * sizeof(reg[0]));
 	count = 0;		/* Number of roots of lambda(x) */
@@ -207,12 +198,6 @@
 		}
 		if (q != 0)
 			continue;	/* Not a root */
-
-		if (k < pad) {
-			/* Impossible error location. Uncorrectable error. */
-			return -EBADMSG;
-		}
-
 		/* store root (index-form) and error location number */
 		root[count] = i;
 		loc[count] = k;
@@ -227,7 +212,8 @@
 		 * deg(lambda) unequal to number of roots => uncorrectable
 		 * error detected
 		 */
-		return -EBADMSG;
+		count = -EBADMSG;
+		goto finish;
 	}
 	/*
 	 * Compute err+eras evaluator poly omega(x) = s(x)*lambda(x) (modulo
@@ -247,9 +233,7 @@
 	/*
 	 * Compute error values in poly-form. num1 = omega(inv(X(l))), num2 =
 	 * inv(X(l))**(fcr-1) and den = lambda_pr(inv(X(l))) all in poly-form
-	 * Note: we reuse the buffer for b to store the correction pattern
 	 */
-	num_corrected = 0;
 	for (j = count - 1; j >= 0; j--) {
 		num1 = 0;
 		for (i = deg_omega; i >= 0; i--) {
@@ -257,13 +241,6 @@
 				num1 ^= alpha_to[rs_modnn(rs, omega[i] +
 							i * root[j])];
 		}
-
-		if (num1 == 0) {
-			/* Nothing to correct at this position */
-			b[j] = 0;
-			continue;
-		}
-
 		num2 = alpha_to[rs_modnn(rs, root[j] * (fcr - 1) + nn)];
 		den = 0;
 
@@ -275,52 +252,30 @@
 						       i * root[j])];
 			}
 		}
-
-		b[j] = alpha_to[rs_modnn(rs, index_of[num1] +
-					       index_of[num2] +
-					       nn - index_of[den])];
-		num_corrected++;
-	}
-
-	/*
-	 * We compute the syndrome of the 'error' and check that it matches
-	 * the syndrome of the received word
-	 */
-	for (i = 0; i < nroots; i++) {
-		tmp = 0;
-		for (j = 0; j < count; j++) {
-			if (b[j] == 0)
-				continue;
-
-			k = (fcr + i) * prim * (nn-loc[j]-1);
-			tmp ^= alpha_to[rs_modnn(rs, index_of[b[j]] + k)];
-		}
-
-		if (tmp != alpha_to[s[i]])
-			return -EBADMSG;
-	}
-
-	/*
-	 * Store the error correction pattern, if a
-	 * correction buffer is available
-	 */
-	if (corr && eras_pos) {
-		j = 0;
-		for (i = 0; i < count; i++) {
-			if (b[i]) {
-				corr[j] = b[i];
-				eras_pos[j++] = loc[i] - pad;
+		/* Apply error to data */
+		if (num1 != 0 && loc[j] >= pad) {
+			uint16_t cor = alpha_to[rs_modnn(rs,index_of[num1] +
+						       index_of[num2] +
+						       nn - index_of[den])];
+			/* Store the error correction pattern, if a
+			 * correction buffer is available */
+			if (corr) {
+				corr[j] = cor;
+			} else {
+				/* If a data buffer is given and the
+				 * error is inside the message,
+				 * correct it */
+				if (data && (loc[j] < (nn - nroots)))
+					data[loc[j] - pad] ^= cor;
 			}
 		}
-	} else if (data && par) {
-		/* Apply error to data and parity */
-		for (i = 0; i < count; i++) {
-			if (loc[i] < (nn - nroots))
-				data[loc[i] - pad] ^= b[i];
-			else
-				par[loc[i] - pad - len] ^= b[i];
-		}
 	}
 
-	return  num_corrected;
+finish:
+	if (eras_pos != NULL) {
+		for (i = 0; i < count; i++)
+			eras_pos[i] = loc[i] - pad;
+	}
+	return count;
+
 }

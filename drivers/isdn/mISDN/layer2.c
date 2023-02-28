@@ -900,7 +900,8 @@ l2_disconnect(struct FsmInst *fi, int event, void *arg)
 	send_uframe(l2, NULL, DISC | 0x10, CMD);
 	mISDN_FsmDelTimer(&l2->t203, 1);
 	restart_t200(l2, 2);
-	dev_kfree_skb(skb);
+	if (skb)
+		dev_kfree_skb(skb);
 }
 
 static void
@@ -1721,7 +1722,8 @@ l2_set_own_busy(struct FsmInst *fi, int event, void *arg)
 		enquiry_cr(l2, RNR, RSP, 0);
 		test_and_clear_bit(FLG_ACK_PEND, &l2->flag);
 	}
-	dev_kfree_skb(skb);
+	if (skb)
+		dev_kfree_skb(skb);
 }
 
 static void
@@ -1734,7 +1736,8 @@ l2_clear_own_busy(struct FsmInst *fi, int event, void *arg)
 		enquiry_cr(l2, RR, RSP, 0);
 		test_and_clear_bit(FLG_ACK_PEND, &l2->flag);
 	}
-	dev_kfree_skb(skb);
+	if (skb)
+		dev_kfree_skb(skb);
 }
 
 static void

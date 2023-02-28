@@ -528,8 +528,10 @@ static int qcom_slim_probe(struct platform_device *pdev)
 
 	slim_mem = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ctrl");
 	ctrl->base = devm_ioremap_resource(ctrl->dev, slim_mem);
-	if (IS_ERR(ctrl->base))
+	if (IS_ERR(ctrl->base)) {
+		dev_err(&pdev->dev, "IOremap failed\n");
 		return PTR_ERR(ctrl->base);
+	}
 
 	sctrl->set_laddr = qcom_set_laddr;
 	sctrl->xfer_msg = qcom_xfer_msg;

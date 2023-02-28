@@ -221,26 +221,13 @@ static inline int __init mips_sc_probe(void)
 	else
 		return 0;
 
-	if (current_cpu_type() == CPU_XBURST) {
-		switch (mips_machtype) {
-		/*
-		 * According to config2 it would be 5-ways, but that is
-		 * contradicted by all documentation.
-		 */
-		case MACH_INGENIC_JZ4770:
-			c->scache.ways = 4;
-			break;
-
-		/*
-		 * According to config2 it would be 5-ways and 512-sets,
-		 * but that is contradicted by all documentation.
-		 */
-		case MACH_INGENIC_X1000:
-			c->scache.sets = 256;
-			c->scache.ways = 4;
-			break;
-		}
-	}
+	/*
+	 * According to config2 it would be 5-ways, but that is contradicted
+	 * by all documentation.
+	 */
+	if (current_cpu_type() == CPU_JZRISC &&
+				mips_machtype == MACH_INGENIC_JZ4770)
+		c->scache.ways = 4;
 
 	c->scache.waysize = c->scache.sets * c->scache.linesz;
 	c->scache.waybit = __ffs(c->scache.waysize);

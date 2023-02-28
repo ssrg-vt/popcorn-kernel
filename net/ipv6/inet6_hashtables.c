@@ -105,7 +105,7 @@ static inline int compute_score(struct sock *sk, struct net *net,
 			return -1;
 
 		score = 1;
-		if (READ_ONCE(sk->sk_incoming_cpu) == raw_smp_processor_id())
+		if (sk->sk_incoming_cpu == raw_smp_processor_id())
 			score++;
 	}
 	return score;
@@ -174,7 +174,7 @@ struct sock *inet6_lookup_listener(struct net *net,
 				     saddr, sport, &in6addr_any, hnum,
 				     dif, sdif);
 done:
-	if (IS_ERR(result))
+	if (unlikely(IS_ERR(result)))
 		return NULL;
 	return result;
 }

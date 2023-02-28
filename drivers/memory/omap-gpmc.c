@@ -19,7 +19,6 @@
 #include <linux/io.h>
 #include <linux/gpio/driver.h>
 #include <linux/gpio/consumer.h> /* GPIO descriptor enum */
-#include <linux/gpio/machine.h>
 #include <linux/interrupt.h>
 #include <linux/irqdomain.h>
 #include <linux/platform_device.h>
@@ -2170,8 +2169,7 @@ static int gpmc_probe_generic_child(struct platform_device *pdev,
 
 		waitpin_desc = gpiochip_request_own_desc(&gpmc->gpio_chip,
 							 wait_pin, "WAITPIN",
-							 GPIO_ACTIVE_HIGH,
-							 GPIOD_IN);
+							 0);
 		if (IS_ERR(waitpin_desc)) {
 			dev_err(&pdev->dev, "invalid wait-pin: %d\n", wait_pin);
 			ret = PTR_ERR(waitpin_desc);

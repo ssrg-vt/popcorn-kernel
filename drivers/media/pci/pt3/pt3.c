@@ -626,7 +626,8 @@ static void pt3_cleanup_adapter(struct pt3_board *pt3, int index)
 
 static int pt3_suspend(struct device *dev)
 {
-	struct pt3_board *pt3 = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct pt3_board *pt3 = pci_get_drvdata(pdev);
 	int i;
 	struct pt3_adapter *adap;
 
@@ -645,7 +646,8 @@ static int pt3_suspend(struct device *dev)
 
 static int pt3_resume(struct device *dev)
 {
-	struct pt3_board *pt3 = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct pt3_board *pt3 = pci_get_drvdata(pdev);
 	int i, ret;
 	struct pt3_adapter *adap;
 

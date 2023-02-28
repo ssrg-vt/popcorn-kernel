@@ -329,7 +329,7 @@ void vnt_get_phy_field(struct vnt_private *priv, u32 frame_length,
  * Return Value: none
  *
  */
-int vnt_set_antenna_mode(struct vnt_private *priv, u8 antenna_mode)
+void vnt_set_antenna_mode(struct vnt_private *priv, u8 antenna_mode)
 {
 	switch (antenna_mode) {
 	case ANT_TXA:
@@ -344,8 +344,8 @@ int vnt_set_antenna_mode(struct vnt_private *priv, u8 antenna_mode)
 		break;
 	}
 
-	return vnt_control_out(priv, MESSAGE_TYPE_SET_ANTMD,
-			       (u16)antenna_mode, 0, 0, NULL);
+	vnt_control_out(priv, MESSAGE_TYPE_SET_ANTMD,
+			(u16)antenna_mode, 0, 0, NULL);
 }
 
 /*
@@ -364,7 +364,7 @@ int vnt_set_antenna_mode(struct vnt_private *priv, u8 antenna_mode)
 
 int vnt_vt3184_init(struct vnt_private *priv)
 {
-	int ret = 0;
+	int status;
 	u16 length;
 	u8 *addr;
 	u8 *agc;
@@ -372,10 +372,11 @@ int vnt_vt3184_init(struct vnt_private *priv)
 	u8 array[256];
 	u8 data;
 
-	ret = vnt_control_in(priv, MESSAGE_TYPE_READ, 0, MESSAGE_REQUEST_EEPROM,
-			     EEP_MAX_CONTEXT_SIZE, priv->eeprom);
-	if (ret)
-		goto end;
+	status = vnt_control_in(priv, MESSAGE_TYPE_READ, 0,
+				MESSAGE_REQUEST_EEPROM, EEP_MAX_CONTEXT_SIZE,
+						priv->eeprom);
+	if (status != STATUS_SUCCESS)
+		return false;
 
 	priv->rf_type = priv->eeprom[EEP_OFS_RFTYPE];
 
@@ -422,10 +423,8 @@ int vnt_vt3184_init(struct vnt_private *priv)
 		priv->bb_vga[3] = 0x0;
 
 		/* Fix VT3226 DFC system timing issue */
-		ret = vnt_mac_reg_bits_on(priv, MAC_REG_SOFTPWRCTL2,
-					  SOFTPWRCTL_RFLEOPT);
-		if (ret)
-			goto end;
+		vnt_mac_reg_bits_on(priv, MAC_REG_SOFTPWRCTL2,
+				    SOFTPWRCTL_RFLEOPT);
 	} else if (priv->rf_type == RF_VT3342A0) {
 		priv->bb_rx_conf = vnt_vt3184_vt3226d0[10];
 		length = sizeof(vnt_vt3184_vt3226d0);
@@ -439,74 +438,48 @@ int vnt_vt3184_init(struct vnt_private *priv)
 		priv->bb_vga[3] = 0x0;
 
 		/* Fix VT3226 DFC system timing issue */
-		ret = vnt_mac_reg_bits_on(priv, MAC_REG_SOFTPWRCTL2,
-					  SOFTPWRCTL_RFLEOPT);
-		if (ret)
-			goto end;
+		vnt_mac_reg_bits_on(priv, MAC_REG_SOFTPWRCTL2,
+				    SOFTPWRCTL_RFLEOPT);
 	} else {
-		goto end;
+		return true;
 	}
 
 	memcpy(array, addr, length);
 
-	ret = vnt_control_out(priv, MESSAGE_TYPE_WRITE, 0,
-			      MESSAGE_REQUEST_BBREG, length, array);
-	if (ret)
-		goto end;
+	vnt_control_out(priv, MESSAGE_TYPE_WRITE, 0,
+			MESSAGE_REQUEST_BBREG, length, array);
 
 	memcpy(array, agc, length_agc);
 
-	ret = vnt_control_out(priv, MESSAGE_TYPE_WRITE, 0,
-			      MESSAGE_REQUEST_BBAGC, length_agc, array);
-	if (ret)
-		goto end;
+	vnt_control_out(priv, MESSAGE_TYPE_WRITE, 0,
+			MESSAGE_REQUEST_BBAGC, length_agc, array);
 
 	if ((priv->rf_type == RF_VT3226) ||
 	    (priv->rf_type == RF_VT3342A0)) {
-		ret = vnt_control_out_u8(priv, MESSAGE_REQUEST_MACREG,
-					 MAC_REG_ITRTMSET, 0x23);
-		if (ret)
-			goto end;
-
-		ret = vnt_mac_reg_bits_on(priv, MAC_REG_PAPEDELAY, 0x01);
-		if (ret)
-			goto end;
+		vnt_control_out_u8(priv, MESSAGE_REQUEST_MACREG,
+				   MAC_REG_ITRTMSET, 0x23);
+		vnt_mac_reg_bits_on(priv, MAC_REG_PAPEDELAY, 0x01);
 	} else if (priv->rf_type == RF_VT3226D0) {
-		ret = vnt_control_out_u8(priv, MESSAGE_REQUEST_MACREG,
-					 MAC_REG_ITRTMSET, 0x11);
-		if (ret)
-			goto end;
-
-		ret = vnt_mac_reg_bits_on(priv, MAC_REG_PAPEDELAY, 0x01);
-		if (ret)
-			goto end;
+		vnt_control_out_u8(priv, MESSAGE_REQUEST_MACREG,
+				   MAC_REG_ITRTMSET, 0x11);
+		vnt_mac_reg_bits_on(priv, MAC_REG_PAPEDELAY, 0x01);
 	}
 
-	ret = vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x04, 0x7f);
-	if (ret)
-		goto end;
+	vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x04, 0x7f);
+	vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0d, 0x01);
 
-	ret = vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0d, 0x01);
-	if (ret)
-		goto end;
-
-	ret = vnt_rf_table_download(priv);
-	if (ret)
-		goto end;
+	vnt_rf_table_download(priv);
 
 	/* Fix for TX USB resets from vendors driver */
-	ret = vnt_control_in(priv, MESSAGE_TYPE_READ, USB_REG4,
-			     MESSAGE_REQUEST_MEM, sizeof(data), &data);
-	if (ret)
-		goto end;
+	vnt_control_in(priv, MESSAGE_TYPE_READ, USB_REG4,
+		       MESSAGE_REQUEST_MEM, sizeof(data), &data);
 
 	data |= 0x2;
 
-	ret = vnt_control_out(priv, MESSAGE_TYPE_WRITE, USB_REG4,
-			      MESSAGE_REQUEST_MEM, sizeof(data), &data);
+	vnt_control_out(priv, MESSAGE_TYPE_WRITE, USB_REG4,
+			MESSAGE_REQUEST_MEM, sizeof(data), &data);
 
-end:
-	return ret;
+	return true;
 }
 
 /*
@@ -521,9 +494,8 @@ end:
  * Return Value: none
  *
  */
-int vnt_set_short_slot_time(struct vnt_private *priv)
+void vnt_set_short_slot_time(struct vnt_private *priv)
 {
-	int ret = 0;
 	u8 bb_vga = 0;
 
 	if (priv->short_slot_time)
@@ -531,18 +503,12 @@ int vnt_set_short_slot_time(struct vnt_private *priv)
 	else
 		priv->bb_rx_conf |= 0x20;
 
-	ret = vnt_control_in_u8(priv, MESSAGE_REQUEST_BBREG, 0xe7, &bb_vga);
-	if (ret)
-		goto end;
+	vnt_control_in_u8(priv, MESSAGE_REQUEST_BBREG, 0xe7, &bb_vga);
 
 	if (bb_vga == priv->bb_vga[0])
 		priv->bb_rx_conf |= 0x20;
 
-	ret = vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0a,
-				 priv->bb_rx_conf);
-
-end:
-	return ret;
+	vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0a, priv->bb_rx_conf);
 }
 
 void vnt_set_vga_gain_offset(struct vnt_private *priv, u8 data)
@@ -570,30 +536,16 @@ void vnt_set_vga_gain_offset(struct vnt_private *priv, u8 data)
  * Return Value: none
  *
  */
-int vnt_set_deep_sleep(struct vnt_private *priv)
+void vnt_set_deep_sleep(struct vnt_private *priv)
 {
-	int ret = 0;
-
-	/* CR12 */
-	ret = vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0c, 0x17);
-	if (ret)
-		return ret;
-
-	/* CR13 */
-	return vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0d, 0xB9);
+	vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0c, 0x17);/* CR12 */
+	vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0d, 0xB9);/* CR13 */
 }
 
-int vnt_exit_deep_sleep(struct vnt_private *priv)
+void vnt_exit_deep_sleep(struct vnt_private *priv)
 {
-	int ret = 0;
-
-	/* CR12 */
-	ret = vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0c, 0x00);
-	if (ret)
-		return ret;
-
-	/* CR13 */
-	return vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0d, 0x01);
+	vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0c, 0x00);/* CR12 */
+	vnt_control_out_u8(priv, MESSAGE_REQUEST_BBREG, 0x0d, 0x01);/* CR13 */
 }
 
 void vnt_update_pre_ed_threshold(struct vnt_private *priv, int scanning)

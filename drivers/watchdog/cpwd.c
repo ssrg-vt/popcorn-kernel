@@ -26,7 +26,6 @@
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
 #include <linux/timer.h>
-#include <linux/compat.h>
 #include <linux/slab.h>
 #include <linux/mutex.h>
 #include <linux/io.h>
@@ -474,9 +473,27 @@ static long cpwd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
-static long cpwd_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+static long cpwd_compat_ioctl(struct file *file, unsigned int cmd,
+			      unsigned long arg)
 {
-	return cpwd_ioctl(file, cmd, (unsigned long)compat_ptr(arg));
+	int rval = -ENOIOCTLCMD;
+
+	switch (cmd) {
+	/* solaris ioctls are specific to this driver */
+	case WIOCSTART:
+	case WIOCSTOP:
+	case WIOCGSTAT:
+		mutex_lock(&cpwd_mutex);
+		rval = cpwd_ioctl(file, cmd, arg);
+		mutex_unlock(&cpwd_mutex);
+		break;
+
+	/* everything else is handled by the generic compat layer */
+	default:
+		break;
+	}
+
+	return rval;
 }
 
 static ssize_t cpwd_write(struct file *file, const char __user *buf,

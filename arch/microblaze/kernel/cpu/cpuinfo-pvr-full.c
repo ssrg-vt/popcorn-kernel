@@ -22,8 +22,13 @@
 
 #define CI(c, p) { ci->c = PVR_##p(pvr); }
 
+#if defined(CONFIG_EARLY_PRINTK) && defined(CONFIG_SERIAL_UARTLITE_CONSOLE)
 #define err_printk(x) \
-	pr_err("ERROR: Microblaze " x "-different for PVR and DTS\n");
+	early_printk("ERROR: Microblaze " x "-different for PVR and DTS\n");
+#else
+#define err_printk(x) \
+	pr_info("ERROR: Microblaze " x "-different for PVR and DTS\n");
+#endif
 
 void set_cpuinfo_pvr_full(struct cpuinfo *ci, struct device_node *cpu)
 {

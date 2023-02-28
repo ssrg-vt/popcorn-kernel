@@ -39,13 +39,13 @@
 #include <linux/init.h>
 #include <linux/netdevice.h>
 #include <net/net_namespace.h>
+#include <net/netns/generic.h>
 #include <linux/security.h>
 #include <linux/notifier.h>
 #include <linux/hashtable.h>
 #include <rdma/rdma_netlink.h>
 #include <rdma/ib_addr.h>
 #include <rdma/ib_cache.h>
-#include <rdma/rdma_counter.h>
 
 #include "core_priv.h"
 #include "restrack.h"
@@ -93,7 +93,7 @@ static DEFINE_XARRAY_FLAGS(devices, XA_FLAGS_ALLOC);
 static DECLARE_RWSEM(devices_rwsem);
 #define DEVICE_REGISTERED XA_MARK_1
 
-static u32 highest_client_id;
+static LIST_HEAD(client_list);
 #define CLIENT_REGISTERED XA_MARK_1
 static DEFINE_XARRAY_FLAGS(clients, XA_FLAGS_ALLOC);
 static DECLARE_RWSEM(clients_rwsem);
@@ -110,7 +110,17 @@ static void ib_client_put(struct ib_client *client)
  */
 #define CLIENT_DATA_REGISTERED XA_MARK_1
 
-unsigned int rdma_dev_net_id;
+/**
+ * struct rdma_dev_net - rdma net namespace metadata for a net
+ * @net:	Pointer to owner net namespace
+ * @id:		xarray id to identify the net namespace.
+ */
+struct rdma_dev_net {
+	possible_net_t net;
+	u32 id;
+};
+
+static unsigned int rdma_dev_net_id;
 
 /*
  * A list of net namespaces is maintained in an xarray. This is necessary
@@ -266,7 +276,7 @@ struct ib_port_data_rcu {
 	struct ib_port_data pdata[];
 };
 
-static void ib_device_check_mandatory(struct ib_device *device)
+static int ib_device_check_mandatory(struct ib_device *device)
 {
 #define IB_MANDATORY_FUNC(x) { offsetof(struct ib_device_ops, x), #x }
 	static const struct {
@@ -301,6 +311,8 @@ static void ib_device_check_mandatory(struct ib_device *device)
 			break;
 		}
 	}
+
+	return 0;
 }
 
 /*
@@ -369,7 +381,7 @@ struct ib_device *ib_device_get_by_name(const char *name,
 	down_read(&devices_rwsem);
 	device = __ib_device_get_by_name(name);
 	if (device && driver_id != RDMA_DRIVER_UNKNOWN &&
-	    device->ops.driver_id != driver_id)
+	    device->driver_id != driver_id)
 		device = NULL;
 
 	if (device) {
@@ -443,15 +455,6 @@ int ib_device_rename(struct ib_device *ibdev, const char *name)
 	return 0;
 }
 
-int ib_device_set_dim(struct ib_device *ibdev, u8 use_dim)
-{
-	if (use_dim > 1)
-		return -EINVAL;
-	ibdev->use_cq_dim = use_dim;
-
-	return 0;
-}
-
 static int alloc_name(struct ib_device *ibdev, const char *name)
 {
 	struct ib_device *device;
@@ -460,7 +463,7 @@ static int alloc_name(struct ib_device *ibdev, const char *name)
 	int rc;
 	int i;
 
-	lockdep_assert_held_write(&devices_rwsem);
+	lockdep_assert_held_exclusive(&devices_rwsem);
 	ida_init(&inuse);
 	xa_for_each (&devices, index, device) {
 		char buf[IB_DEVICE_NAME_MAX];
@@ -497,15 +500,10 @@ static void ib_device_release(struct device *device)
 	if (dev->port_data) {
 		ib_cache_release_one(dev);
 		ib_security_release_port_pkey_list(dev);
-		rdma_counter_release(dev);
 		kfree_rcu(container_of(dev->port_data, struct ib_port_data_rcu,
 				       pdata[0]),
 			  rcu_head);
 	}
-
-	mutex_destroy(&dev->unregistration_lock);
-	mutex_destroy(&dev->compat_devs_mutex);
-
 	xa_destroy(&dev->compat_devs);
 	xa_destroy(&dev->client_data);
 	kfree_rcu(dev, rcu_head);
@@ -1052,7 +1050,7 @@ int rdma_compatdev_set(u8 enable)
 
 static void rdma_dev_exit_net(struct net *net)
 {
-	struct rdma_dev_net *rnet = rdma_net_to_dev_net(net);
+	struct rdma_dev_net *rnet = net_generic(net, rdma_dev_net_id);
 	struct ib_device *dev;
 	unsigned long index;
 	int ret;
@@ -1086,32 +1084,25 @@ static void rdma_dev_exit_net(struct net *net)
 	}
 	up_read(&devices_rwsem);
 
-	rdma_nl_net_exit(rnet);
 	xa_erase(&rdma_nets, rnet->id);
 }
 
 static __net_init int rdma_dev_init_net(struct net *net)
 {
-	struct rdma_dev_net *rnet = rdma_net_to_dev_net(net);
+	struct rdma_dev_net *rnet = net_generic(net, rdma_dev_net_id);
 	unsigned long index;
 	struct ib_device *dev;
 	int ret;
-
-	write_pnet(&rnet->net, net);
-
-	ret = rdma_nl_net_init(rnet);
-	if (ret)
-		return ret;
 
 	/* No need to create any compat devices in default init_net. */
 	if (net_eq(net, &init_net))
 		return 0;
 
+	write_pnet(&rnet->net, net);
+
 	ret = xa_alloc(&rdma_nets, &rnet->id, rnet, xa_limit_32b, GFP_KERNEL);
-	if (ret) {
-		rdma_nl_net_exit(rnet);
+	if (ret)
 		return ret;
-	}
 
 	down_read(&devices_rwsem);
 	xa_for_each_marked (&devices, index, dev, DEVICE_REGISTERED) {
@@ -1215,7 +1206,10 @@ static int setup_device(struct ib_device *device)
 	int ret;
 
 	setup_dma_device(device);
-	ib_device_check_mandatory(device);
+
+	ret = ib_device_check_mandatory(device);
+	if (ret)
+		return ret;
 
 	ret = setup_port_data(device);
 	if (ret) {
@@ -1236,7 +1230,7 @@ static int setup_device(struct ib_device *device)
 
 static void disable_device(struct ib_device *device)
 {
-	u32 cid;
+	struct ib_client *client;
 
 	WARN_ON(!refcount_read(&device->refcount));
 
@@ -1244,19 +1238,10 @@ static void disable_device(struct ib_device *device)
 	xa_clear_mark(&devices, device->index, DEVICE_REGISTERED);
 	up_write(&devices_rwsem);
 
-	/*
-	 * Remove clients in LIFO order, see assign_client_id. This could be
-	 * more efficient if xarray learns to reverse iterate. Since no new
-	 * clients can be added to this ib_device past this point we only need
-	 * the maximum possible client_id value here.
-	 */
 	down_read(&clients_rwsem);
-	cid = highest_client_id;
+	list_for_each_entry_reverse(client, &client_list, list)
+		remove_client_context(device, client->client_id);
 	up_read(&clients_rwsem);
-	while (cid) {
-		cid--;
-		remove_client_context(device, cid);
-	}
 
 	/* Pairs with refcount_set in enable_device */
 	ib_device_put(device);
@@ -1348,8 +1333,6 @@ int ib_register_device(struct ib_device *device, const char *name)
 	}
 
 	ib_device_register_rdmacg(device);
-
-	rdma_counter_init(device);
 
 	/*
 	 * Ensure that ADD uevent is not fired because it
@@ -1509,7 +1492,7 @@ void ib_unregister_driver(enum rdma_driver_id driver_id)
 
 	down_read(&devices_rwsem);
 	xa_for_each (&devices, index, ib_dev) {
-		if (ib_dev->ops.driver_id != driver_id)
+		if (ib_dev->driver_id != driver_id)
 			continue;
 
 		get_device(&ib_dev->dev);
@@ -1683,29 +1666,28 @@ static int assign_client_id(struct ib_client *client)
 	/*
 	 * The add/remove callbacks must be called in FIFO/LIFO order. To
 	 * achieve this we assign client_ids so they are sorted in
-	 * registration order.
+	 * registration order, and retain a linked list we can reverse iterate
+	 * to get the LIFO order. The extra linked list can go away if xarray
+	 * learns to reverse iterate.
 	 */
-	client->client_id = highest_client_id;
+	if (list_empty(&client_list)) {
+		client->client_id = 0;
+	} else {
+		struct ib_client *last;
+
+		last = list_last_entry(&client_list, struct ib_client, list);
+		client->client_id = last->client_id + 1;
+	}
 	ret = xa_insert(&clients, client->client_id, client, GFP_KERNEL);
 	if (ret)
 		goto out;
 
-	highest_client_id++;
 	xa_set_mark(&clients, client->client_id, CLIENT_REGISTERED);
+	list_add_tail(&client->list, &client_list);
 
 out:
 	up_write(&clients_rwsem);
 	return ret;
-}
-
-static void remove_client_id(struct ib_client *client)
-{
-	down_write(&clients_rwsem);
-	xa_erase(&clients, client->client_id);
-	for (; highest_client_id; highest_client_id--)
-		if (xa_load(&clients, highest_client_id - 1))
-			break;
-	up_write(&clients_rwsem);
 }
 
 /**
@@ -1787,107 +1769,13 @@ void ib_unregister_client(struct ib_client *client)
 	 * removal is ongoing. Wait until all removals are completed.
 	 */
 	wait_for_completion(&client->uses_zero);
-	remove_client_id(client);
+
+	down_write(&clients_rwsem);
+	list_del(&client->list);
+	xa_erase(&clients, client->client_id);
+	up_write(&clients_rwsem);
 }
 EXPORT_SYMBOL(ib_unregister_client);
-
-static int __ib_get_global_client_nl_info(const char *client_name,
-					  struct ib_client_nl_info *res)
-{
-	struct ib_client *client;
-	unsigned long index;
-	int ret = -ENOENT;
-
-	down_read(&clients_rwsem);
-	xa_for_each_marked (&clients, index, client, CLIENT_REGISTERED) {
-		if (strcmp(client->name, client_name) != 0)
-			continue;
-		if (!client->get_global_nl_info) {
-			ret = -EOPNOTSUPP;
-			break;
-		}
-		ret = client->get_global_nl_info(res);
-		if (WARN_ON(ret == -ENOENT))
-			ret = -EINVAL;
-		if (!ret && res->cdev)
-			get_device(res->cdev);
-		break;
-	}
-	up_read(&clients_rwsem);
-	return ret;
-}
-
-static int __ib_get_client_nl_info(struct ib_device *ibdev,
-				   const char *client_name,
-				   struct ib_client_nl_info *res)
-{
-	unsigned long index;
-	void *client_data;
-	int ret = -ENOENT;
-
-	down_read(&ibdev->client_data_rwsem);
-	xan_for_each_marked (&ibdev->client_data, index, client_data,
-			     CLIENT_DATA_REGISTERED) {
-		struct ib_client *client = xa_load(&clients, index);
-
-		if (!client || strcmp(client->name, client_name) != 0)
-			continue;
-		if (!client->get_nl_info) {
-			ret = -EOPNOTSUPP;
-			break;
-		}
-		ret = client->get_nl_info(ibdev, client_data, res);
-		if (WARN_ON(ret == -ENOENT))
-			ret = -EINVAL;
-
-		/*
-		 * The cdev is guaranteed valid as long as we are inside the
-		 * client_data_rwsem as remove_one can't be called. Keep it
-		 * valid for the caller.
-		 */
-		if (!ret && res->cdev)
-			get_device(res->cdev);
-		break;
-	}
-	up_read(&ibdev->client_data_rwsem);
-
-	return ret;
-}
-
-/**
- * ib_get_client_nl_info - Fetch the nl_info from a client
- * @device - IB device
- * @client_name - Name of the client
- * @res - Result of the query
- */
-int ib_get_client_nl_info(struct ib_device *ibdev, const char *client_name,
-			  struct ib_client_nl_info *res)
-{
-	int ret;
-
-	if (ibdev)
-		ret = __ib_get_client_nl_info(ibdev, client_name, res);
-	else
-		ret = __ib_get_global_client_nl_info(client_name, res);
-#ifdef CONFIG_MODULES
-	if (ret == -ENOENT) {
-		request_module("rdma-client-%s", client_name);
-		if (ibdev)
-			ret = __ib_get_client_nl_info(ibdev, client_name, res);
-		else
-			ret = __ib_get_global_client_nl_info(client_name, res);
-	}
-#endif
-	if (ret) {
-		if (ret == -ENOENT)
-			return -EOPNOTSUPP;
-		return ret;
-	}
-
-	if (WARN_ON(!res->cdev))
-		return -EINVAL;
-	return 0;
-}
 
 /**
  * ib_set_client_data - Set IB client context
@@ -1973,75 +1861,6 @@ void ib_dispatch_event(struct ib_event *event)
 }
 EXPORT_SYMBOL(ib_dispatch_event);
 
-static int iw_query_port(struct ib_device *device,
-			   u8 port_num,
-			   struct ib_port_attr *port_attr)
-{
-	struct in_device *inetdev;
-	struct net_device *netdev;
-	int err;
-
-	memset(port_attr, 0, sizeof(*port_attr));
-
-	netdev = ib_device_get_netdev(device, port_num);
-	if (!netdev)
-		return -ENODEV;
-
-	port_attr->max_mtu = IB_MTU_4096;
-	port_attr->active_mtu = ib_mtu_int_to_enum(netdev->mtu);
-
-	if (!netif_carrier_ok(netdev)) {
-		port_attr->state = IB_PORT_DOWN;
-		port_attr->phys_state = IB_PORT_PHYS_STATE_DISABLED;
-	} else {
-		rcu_read_lock();
-		inetdev = __in_dev_get_rcu(netdev);
-
-		if (inetdev && inetdev->ifa_list) {
-			port_attr->state = IB_PORT_ACTIVE;
-			port_attr->phys_state = IB_PORT_PHYS_STATE_LINK_UP;
-		} else {
-			port_attr->state = IB_PORT_INIT;
-			port_attr->phys_state =
-				IB_PORT_PHYS_STATE_PORT_CONFIGURATION_TRAINING;
-		}
-
-		rcu_read_unlock();
-	}
-
-	dev_put(netdev);
-	err = device->ops.query_port(device, port_num, port_attr);
-	if (err)
-		return err;
-
-	return 0;
-}
-
-static int __ib_query_port(struct ib_device *device,
-			   u8 port_num,
-			   struct ib_port_attr *port_attr)
-{
-	union ib_gid gid = {};
-	int err;
-
-	memset(port_attr, 0, sizeof(*port_attr));
-
-	err = device->ops.query_port(device, port_num, port_attr);
-	if (err || port_attr->subnet_prefix)
-		return err;
-
-	if (rdma_port_get_link_layer(device, port_num) !=
-	    IB_LINK_LAYER_INFINIBAND)
-		return 0;
-
-	err = device->ops.query_gid(device, port_num, 0, &gid);
-	if (err)
-		return err;
-
-	port_attr->subnet_prefix = be64_to_cpu(gid.global.subnet_prefix);
-	return 0;
-}
-
 /**
  * ib_query_port - Query IB port attributes
  * @device:Device to query
@@ -2055,13 +1874,26 @@ int ib_query_port(struct ib_device *device,
 		  u8 port_num,
 		  struct ib_port_attr *port_attr)
 {
+	union ib_gid gid;
+	int err;
+
 	if (!rdma_is_port_valid(device, port_num))
 		return -EINVAL;
 
-	if (rdma_protocol_iwarp(device, port_num))
-		return iw_query_port(device, port_num, port_attr);
-	else
-		return __ib_query_port(device, port_num, port_attr);
+	memset(port_attr, 0, sizeof(*port_attr));
+	err = device->ops.query_port(device, port_num, port_attr);
+	if (err || port_attr->subnet_prefix)
+		return err;
+
+	if (rdma_port_get_link_layer(device, port_num) != IB_LINK_LAYER_INFINIBAND)
+		return 0;
+
+	err = device->ops.query_gid(device, port_num, 0, &gid);
+	if (err)
+		return err;
+
+	port_attr->subnet_prefix = be64_to_cpu(gid.global.subnet_prefix);
+	return 0;
 }
 EXPORT_SYMBOL(ib_query_port);
 
@@ -2235,7 +2067,7 @@ struct ib_device *ib_device_get_by_netdev(struct net_device *ndev,
 				    (uintptr_t)ndev) {
 		if (rcu_access_pointer(cur->netdev) == ndev &&
 		    (driver_id == RDMA_DRIVER_UNKNOWN ||
-		     cur->ib_dev->ops.driver_id == driver_id) &&
+		     cur->ib_dev->driver_id == driver_id) &&
 		    ib_device_try_get(cur->ib_dev)) {
 			res = cur->ib_dev;
 			break;
@@ -2540,28 +2372,12 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 
 #define SET_OBJ_SIZE(ptr, name) SET_DEVICE_OP(ptr, size_##name)
 
-	if (ops->driver_id != RDMA_DRIVER_UNKNOWN) {
-		WARN_ON(dev_ops->driver_id != RDMA_DRIVER_UNKNOWN &&
-			dev_ops->driver_id != ops->driver_id);
-		dev_ops->driver_id = ops->driver_id;
-	}
-	if (ops->owner) {
-		WARN_ON(dev_ops->owner && dev_ops->owner != ops->owner);
-		dev_ops->owner = ops->owner;
-	}
-	if (ops->uverbs_abi_ver)
-		dev_ops->uverbs_abi_ver = ops->uverbs_abi_ver;
-
-	dev_ops->uverbs_no_driver_id_binding |=
-		ops->uverbs_no_driver_id_binding;
-
 	SET_DEVICE_OP(dev_ops, add_gid);
 	SET_DEVICE_OP(dev_ops, advise_mr);
 	SET_DEVICE_OP(dev_ops, alloc_dm);
 	SET_DEVICE_OP(dev_ops, alloc_fmr);
 	SET_DEVICE_OP(dev_ops, alloc_hw_stats);
 	SET_DEVICE_OP(dev_ops, alloc_mr);
-	SET_DEVICE_OP(dev_ops, alloc_mr_integrity);
 	SET_DEVICE_OP(dev_ops, alloc_mw);
 	SET_DEVICE_OP(dev_ops, alloc_pd);
 	SET_DEVICE_OP(dev_ops, alloc_rdma_netdev);
@@ -2569,11 +2385,6 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 	SET_DEVICE_OP(dev_ops, alloc_xrcd);
 	SET_DEVICE_OP(dev_ops, attach_mcast);
 	SET_DEVICE_OP(dev_ops, check_mr_status);
-	SET_DEVICE_OP(dev_ops, counter_alloc_stats);
-	SET_DEVICE_OP(dev_ops, counter_bind_qp);
-	SET_DEVICE_OP(dev_ops, counter_dealloc);
-	SET_DEVICE_OP(dev_ops, counter_unbind_qp);
-	SET_DEVICE_OP(dev_ops, counter_update_stats);
 	SET_DEVICE_OP(dev_ops, create_ah);
 	SET_DEVICE_OP(dev_ops, create_counters);
 	SET_DEVICE_OP(dev_ops, create_cq);
@@ -2617,7 +2428,6 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 	SET_DEVICE_OP(dev_ops, get_vf_config);
 	SET_DEVICE_OP(dev_ops, get_vf_stats);
 	SET_DEVICE_OP(dev_ops, init_port);
-	SET_DEVICE_OP(dev_ops, invalidate_range);
 	SET_DEVICE_OP(dev_ops, iw_accept);
 	SET_DEVICE_OP(dev_ops, iw_add_ref);
 	SET_DEVICE_OP(dev_ops, iw_connect);
@@ -2627,7 +2437,6 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 	SET_DEVICE_OP(dev_ops, iw_reject);
 	SET_DEVICE_OP(dev_ops, iw_rem_ref);
 	SET_DEVICE_OP(dev_ops, map_mr_sg);
-	SET_DEVICE_OP(dev_ops, map_mr_sg_pi);
 	SET_DEVICE_OP(dev_ops, map_phys_fmr);
 	SET_DEVICE_OP(dev_ops, mmap);
 	SET_DEVICE_OP(dev_ops, modify_ah);
@@ -2664,7 +2473,6 @@ void ib_set_device_ops(struct ib_device *dev, const struct ib_device_ops *ops)
 	SET_DEVICE_OP(dev_ops, unmap_fmr);
 
 	SET_OBJ_SIZE(dev_ops, ib_ah);
-	SET_OBJ_SIZE(dev_ops, ib_cq);
 	SET_OBJ_SIZE(dev_ops, ib_pd);
 	SET_OBJ_SIZE(dev_ops, ib_srq);
 	SET_OBJ_SIZE(dev_ops, ib_ucontext);
@@ -2716,7 +2524,11 @@ static int __init ib_core_init(void)
 		goto err_comp_unbound;
 	}
 
-	rdma_nl_init();
+	ret = rdma_nl_init();
+	if (ret) {
+		pr_warn("Couldn't init IB netlink interface: err %d\n", ret);
+		goto err_sysfs;
+	}
 
 	ret = addr_init();
 	if (ret) {
@@ -2736,7 +2548,7 @@ static int __init ib_core_init(void)
 		goto err_mad;
 	}
 
-	ret = register_blocking_lsm_notifier(&ibdev_lsm_nb);
+	ret = register_lsm_notifier(&ibdev_lsm_nb);
 	if (ret) {
 		pr_warn("Couldn't register LSM notifier. ret %d\n", ret);
 		goto err_sa;
@@ -2755,7 +2567,7 @@ static int __init ib_core_init(void)
 	return 0;
 
 err_compat:
-	unregister_blocking_lsm_notifier(&ibdev_lsm_nb);
+	unregister_lsm_notifier(&ibdev_lsm_nb);
 err_sa:
 	ib_sa_cleanup();
 err_mad:
@@ -2763,6 +2575,8 @@ err_mad:
 err_addr:
 	addr_cleanup();
 err_ibnl:
+	rdma_nl_exit();
+err_sysfs:
 	class_unregister(&ib_class);
 err_comp_unbound:
 	destroy_workqueue(ib_comp_unbound_wq);
@@ -2779,7 +2593,7 @@ static void __exit ib_core_cleanup(void)
 	nldev_exit();
 	rdma_nl_unregister(RDMA_NL_LS);
 	unregister_pernet_device(&rdma_dev_net_ops);
-	unregister_blocking_lsm_notifier(&ibdev_lsm_nb);
+	unregister_lsm_notifier(&ibdev_lsm_nb);
 	ib_sa_cleanup();
 	ib_mad_cleanup();
 	addr_cleanup();

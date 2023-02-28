@@ -39,7 +39,8 @@ The Linux DPIO driver consists of 3 primary components--
 
    DPIO service-- provides APIs to other Linux drivers for services
 
-   QBman portal interface-- sends portal commands, gets responses::
+   QBman portal interface-- sends portal commands, gets responses
+::
 
           fsl-mc          other
            bus           drivers
@@ -59,7 +60,6 @@ The Linux DPIO driver consists of 3 primary components--
 
 The diagram below shows how the DPIO driver components fit with the other
 DPAA2 Linux driver components::
-
                                                    +------------+
                                                    | OS Network |
                                                    |   Stack    |

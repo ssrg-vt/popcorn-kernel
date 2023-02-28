@@ -14,9 +14,7 @@
 #include <linux/rpmsg.h>
 
 #define MSG		"hello world!"
-
-static int count = 100;
-module_param(count, int, 0644);
+#define MSG_LIMIT	100
 
 struct instance_data {
 	int rx_count;
@@ -31,11 +29,11 @@ static int rpmsg_sample_cb(struct rpmsg_device *rpdev, void *data, int len,
 	dev_info(&rpdev->dev, "incoming msg %d (src: 0x%x)\n",
 		 ++idata->rx_count, src);
 
-	print_hex_dump_debug(__func__, DUMP_PREFIX_NONE, 16, 1, data, len,
-			     true);
+	print_hex_dump(KERN_DEBUG, __func__, DUMP_PREFIX_NONE, 16, 1,
+		       data, len,  true);
 
 	/* samples should not live forever */
-	if (idata->rx_count >= count) {
+	if (idata->rx_count >= MSG_LIMIT) {
 		dev_info(&rpdev->dev, "goodbye!\n");
 		return 0;
 	}

@@ -561,16 +561,22 @@ static int qcom_rpm_probe(struct platform_device *pdev)
 	clk_prepare_enable(rpm->ramclk); /* Accepts NULL */
 
 	irq_ack = platform_get_irq_byname(pdev, "ack");
-	if (irq_ack < 0)
+	if (irq_ack < 0) {
+		dev_err(&pdev->dev, "required ack interrupt missing\n");
 		return irq_ack;
+	}
 
 	irq_err = platform_get_irq_byname(pdev, "err");
-	if (irq_err < 0)
+	if (irq_err < 0) {
+		dev_err(&pdev->dev, "required err interrupt missing\n");
 		return irq_err;
+	}
 
 	irq_wakeup = platform_get_irq_byname(pdev, "wakeup");
-	if (irq_wakeup < 0)
+	if (irq_wakeup < 0) {
+		dev_err(&pdev->dev, "required wakeup interrupt missing\n");
 		return irq_wakeup;
+	}
 
 	match = of_match_device(qcom_rpm_of_match, &pdev->dev);
 	if (!match)

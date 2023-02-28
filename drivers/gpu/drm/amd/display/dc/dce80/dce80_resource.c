@@ -23,8 +23,6 @@
  *
  */
 
-#include <linux/slab.h>
-
 #include "dce/dce_8_0_d.h"
 #include "dce/dce_8_0_sh_mask.h"
 
@@ -39,6 +37,7 @@
 #include "dce110/dce110_timing_generator.h"
 #include "dce110/dce110_resource.h"
 #include "dce80/dce80_timing_generator.h"
+#include "dce/dce_clk_mgr.h"
 #include "dce/dce_mem_input.h"
 #include "dce/dce_link_encoder.h"
 #include "dce/dce_stream_encoder.h"
@@ -154,6 +153,19 @@ static const struct dce110_timing_generator_offsets dce80_tg_offsets[] = {
 /* set register offset with instance */
 #define SRI(reg_name, block, id)\
 	.reg_name = mm ## block ## id ## _ ## reg_name
+
+
+static const struct clk_mgr_registers disp_clk_regs = {
+		CLK_COMMON_REG_LIST_DCE_BASE()
+};
+
+static const struct clk_mgr_shift disp_clk_shift = {
+		CLK_COMMON_MASK_SH_LIST_DCE_COMMON_BASE(__SHIFT)
+};
+
+static const struct clk_mgr_mask disp_clk_mask = {
+		CLK_COMMON_MASK_SH_LIST_DCE_COMMON_BASE(_MASK)
+};
 
 #define ipp_regs(id)\
 [id] = {\
@@ -322,7 +334,7 @@ static const struct dce_audio_shift audio_shift = {
 		AUD_COMMON_MASK_SH_LIST(__SHIFT)
 };
 
-static const struct dce_audio_mask audio_mask = {
+static const struct dce_aduio_mask audio_mask = {
 		AUD_COMMON_MASK_SH_LIST(_MASK)
 };
 
@@ -701,7 +713,6 @@ struct clock_source *dce80_clock_source_create(
 		return &clk_src->base;
 	}
 
-	kfree(clk_src);
 	BREAK_TO_DEBUGGER();
 	return NULL;
 }
@@ -791,6 +802,9 @@ static void destruct(struct dce110_resource_pool *pool)
 		}
 	}
 
+	if (pool->base.clk_mgr != NULL)
+		dce_clk_mgr_destroy(&pool->base.clk_mgr);
+
 	if (pool->base.irqs != NULL) {
 		dal_irq_service_destroy(&pool->base.irqs);
 	}
@@ -866,8 +880,7 @@ static const struct resource_funcs dce80_res_pool_funcs = {
 	.validate_bandwidth = dce80_validate_bandwidth,
 	.validate_plane = dce100_validate_plane,
 	.add_stream_to_ctx = dce100_add_stream_to_ctx,
-	.validate_global = dce80_validate_global,
-	.find_first_free_match_stream_enc_for_link = dce100_find_first_free_match_stream_enc_for_link
+	.validate_global = dce80_validate_global
 };
 
 static bool dce80_construct(
@@ -877,6 +890,7 @@ static bool dce80_construct(
 {
 	unsigned int i;
 	struct dc_context *ctx = dc->ctx;
+	struct dc_firmware_info info;
 	struct dc_bios *bp;
 
 	ctx->dc_bios->regs = &bios_regs;
@@ -902,7 +916,8 @@ static bool dce80_construct(
 
 	bp = ctx->dc_bios;
 
-	if (bp->fw_info_valid && bp->fw_info.external_clock_source_frequency_for_dp != 0) {
+	if ((bp->funcs->get_firmware_info(bp, &info) == BP_RESULT_OK) &&
+		info.external_clock_source_frequency_for_dp != 0) {
 		pool->base.dp_clock_source =
 				dce80_clock_source_create(ctx, bp, CLOCK_SOURCE_ID_EXTERNAL, NULL, true);
 
@@ -937,6 +952,16 @@ static bool dce80_construct(
 			BREAK_TO_DEBUGGER();
 			goto res_create_fail;
 		}
+	}
+
+	pool->base.clk_mgr = dce_clk_mgr_create(ctx,
+			&disp_clk_regs,
+			&disp_clk_shift,
+			&disp_clk_mask);
+	if (pool->base.clk_mgr == NULL) {
+		dm_error("DC: failed to create display clock!\n");
+		BREAK_TO_DEBUGGER();
+		goto res_create_fail;
 	}
 
 	pool->base.dmcu = dce_dmcu_create(ctx,
@@ -1074,6 +1099,7 @@ static bool dce81_construct(
 {
 	unsigned int i;
 	struct dc_context *ctx = dc->ctx;
+	struct dc_firmware_info info;
 	struct dc_bios *bp;
 
 	ctx->dc_bios->regs = &bios_regs;
@@ -1099,7 +1125,8 @@ static bool dce81_construct(
 
 	bp = ctx->dc_bios;
 
-	if (bp->fw_info_valid && bp->fw_info.external_clock_source_frequency_for_dp != 0) {
+	if ((bp->funcs->get_firmware_info(bp, &info) == BP_RESULT_OK) &&
+		info.external_clock_source_frequency_for_dp != 0) {
 		pool->base.dp_clock_source =
 				dce80_clock_source_create(ctx, bp, CLOCK_SOURCE_ID_EXTERNAL, NULL, true);
 
@@ -1134,6 +1161,16 @@ static bool dce81_construct(
 			BREAK_TO_DEBUGGER();
 			goto res_create_fail;
 		}
+	}
+
+	pool->base.clk_mgr = dce_clk_mgr_create(ctx,
+			&disp_clk_regs,
+			&disp_clk_shift,
+			&disp_clk_mask);
+	if (pool->base.clk_mgr == NULL) {
+		dm_error("DC: failed to create display clock!\n");
+		BREAK_TO_DEBUGGER();
+		goto res_create_fail;
 	}
 
 	pool->base.dmcu = dce_dmcu_create(ctx,
@@ -1271,6 +1308,7 @@ static bool dce83_construct(
 {
 	unsigned int i;
 	struct dc_context *ctx = dc->ctx;
+	struct dc_firmware_info info;
 	struct dc_bios *bp;
 
 	ctx->dc_bios->regs = &bios_regs;
@@ -1296,7 +1334,8 @@ static bool dce83_construct(
 
 	bp = ctx->dc_bios;
 
-	if (bp->fw_info_valid && bp->fw_info.external_clock_source_frequency_for_dp != 0) {
+	if ((bp->funcs->get_firmware_info(bp, &info) == BP_RESULT_OK) &&
+		info.external_clock_source_frequency_for_dp != 0) {
 		pool->base.dp_clock_source =
 				dce80_clock_source_create(ctx, bp, CLOCK_SOURCE_ID_EXTERNAL, NULL, true);
 
@@ -1327,6 +1366,16 @@ static bool dce83_construct(
 			BREAK_TO_DEBUGGER();
 			goto res_create_fail;
 		}
+	}
+
+	pool->base.clk_mgr = dce_clk_mgr_create(ctx,
+			&disp_clk_regs,
+			&disp_clk_shift,
+			&disp_clk_mask);
+	if (pool->base.clk_mgr == NULL) {
+		dm_error("DC: failed to create display clock!\n");
+		BREAK_TO_DEBUGGER();
+		goto res_create_fail;
 	}
 
 	pool->base.dmcu = dce_dmcu_create(ctx,

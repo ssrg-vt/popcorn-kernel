@@ -6,7 +6,6 @@
  * Copyright (C) 2015 Regents of the University of California
  */
 
-#include <linux/elf.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/binfmts.h>
@@ -26,7 +25,7 @@ static union {
 	struct vdso_data	data;
 	u8			page[PAGE_SIZE];
 } vdso_data_store __page_aligned_data;
-static struct vdso_data *vdso_data = &vdso_data_store.data;
+struct vdso_data *vdso_data = &vdso_data_store.data;
 
 static int __init vdso_init(void)
 {
@@ -91,5 +90,24 @@ const char *arch_vma_name(struct vm_area_struct *vma)
 {
 	if (vma->vm_mm && (vma->vm_start == (long)vma->vm_mm->context.vdso))
 		return "[vdso]";
+	return NULL;
+}
+
+/*
+ * Function stubs to prevent linker errors when AT_SYSINFO_EHDR is defined
+ */
+
+int in_gate_area_no_mm(unsigned long addr)
+{
+	return 0;
+}
+
+int in_gate_area(struct mm_struct *mm, unsigned long addr)
+{
+	return 0;
+}
+
+struct vm_area_struct *get_gate_vma(struct mm_struct *mm)
+{
 	return NULL;
 }

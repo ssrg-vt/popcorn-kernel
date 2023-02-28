@@ -251,7 +251,6 @@
 struct esp_cmd_priv {
 	int			num_sg;
 	int			cur_residue;
-	struct scatterlist	*prv_sg;
 	struct scatterlist	*cur_sg;
 	int			tot_residue;
 };
@@ -274,7 +273,6 @@ struct esp_cmd_entry {
 	struct scsi_cmnd	*cmd;
 
 	unsigned int		saved_cur_residue;
-	struct scatterlist	*saved_prv_sg;
 	struct scatterlist	*saved_cur_sg;
 	unsigned int		saved_tot_residue;
 

@@ -477,6 +477,7 @@ static int qs_port_start(struct ata_port *ap)
 				      GFP_KERNEL);
 	if (!pp->pkt)
 		return -ENOMEM;
+	memset(pp->pkt, 0, QS_PKT_BYTES);
 	ap->private_data = pp;
 
 	qs_enter_reg_mode(ap);
@@ -537,13 +538,33 @@ static void qs_host_init(struct ata_host *host, unsigned int chip_id)
 static int qs_set_dma_masks(struct pci_dev *pdev, void __iomem *mmio_base)
 {
 	u32 bus_info = readl(mmio_base + QS_HID_HPHY);
-	int dma_bits = (bus_info & QS_HPHY_64BIT) ? 64 : 32;
-	int rc;
+	int rc, have_64bit_bus = (bus_info & QS_HPHY_64BIT);
 
-	rc = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(dma_bits));
-	if (rc)
-		dev_err(&pdev->dev, "%d-bit DMA enable failed\n", dma_bits);
-	return rc;
+	if (have_64bit_bus &&
+	    !dma_set_mask(&pdev->dev, DMA_BIT_MASK(64))) {
+		rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
+		if (rc) {
+			rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+			if (rc) {
+				dev_err(&pdev->dev,
+					"64-bit DMA enable failed\n");
+				return rc;
+			}
+		}
+	} else {
+		rc = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
+		if (rc) {
+			dev_err(&pdev->dev, "32-bit DMA enable failed\n");
+			return rc;
+		}
+		rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+		if (rc) {
+			dev_err(&pdev->dev,
+				"32-bit consistent DMA enable failed\n");
+			return rc;
+		}
+	}
+	return 0;
 }
 
 static int qs_ata_init_one(struct pci_dev *pdev,

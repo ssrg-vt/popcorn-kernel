@@ -32,9 +32,6 @@ mlx5_ib_ft_type_to_namespace(enum mlx5_ib_uapi_flow_table_type table_type,
 	case MLX5_IB_UAPI_FLOW_TABLE_TYPE_FDB:
 		*namespace = MLX5_FLOW_NAMESPACE_FDB;
 		break;
-	case MLX5_IB_UAPI_FLOW_TABLE_TYPE_RDMA_RX:
-		*namespace = MLX5_FLOW_NAMESPACE_RDMA_RX;
-		break;
 	default:
 		return -EINVAL;
 	}
@@ -68,12 +65,11 @@ static const struct uverbs_attr_spec mlx5_ib_flow_type[] = {
 static int UVERBS_HANDLER(MLX5_IB_METHOD_CREATE_FLOW)(
 	struct uverbs_attr_bundle *attrs)
 {
-	struct mlx5_flow_context flow_context = {.flow_tag = MLX5_FS_DEFAULT_FLOW_TAG};
+	struct mlx5_flow_act flow_act = {.flow_tag = MLX5_FS_DEFAULT_FLOW_TAG};
 	struct mlx5_ib_flow_handler *flow_handler;
 	struct mlx5_ib_flow_matcher *fs_matcher;
 	struct ib_uobject **arr_flow_actions;
 	struct ib_uflow_resources *uflow_res;
-	struct mlx5_flow_act flow_act = {};
 	void *devx_obj;
 	int dest_id, dest_type;
 	void *cmd_in;
@@ -104,11 +100,6 @@ static int UVERBS_HANDLER(MLX5_IB_METHOD_CREATE_FLOW)(
 	if (fs_matcher->ns_type == MLX5_FLOW_NAMESPACE_FDB && !dest_devx)
 		return -EINVAL;
 
-	/* Allow only DEVX object or QP as dest when inserting to RDMA_RX */
-	if ((fs_matcher->ns_type == MLX5_FLOW_NAMESPACE_RDMA_RX) &&
-	    ((!dest_devx && !dest_qp) || (dest_devx && dest_qp)))
-		return -EINVAL;
-
 	if (dest_devx) {
 		devx_obj = uverbs_attr_get_obj(
 			attrs, MLX5_IB_ATTR_CREATE_FLOW_DEST_DEVX);
@@ -120,9 +111,8 @@ static int UVERBS_HANDLER(MLX5_IB_METHOD_CREATE_FLOW)(
 		 */
 		if (!mlx5_ib_devx_is_flow_dest(devx_obj, &dest_id, &dest_type))
 			return -EINVAL;
-		/* Allow only flow table as dest when inserting to FDB or RDMA_RX */
-		if ((fs_matcher->ns_type == MLX5_FLOW_NAMESPACE_FDB ||
-		     fs_matcher->ns_type == MLX5_FLOW_NAMESPACE_RDMA_RX) &&
+		/* Allow only flow table as dest when inserting to FDB */
+		if (fs_matcher->ns_type == MLX5_FLOW_NAMESPACE_FDB &&
 		    dest_type != MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE)
 			return -EINVAL;
 	} else if (dest_qp) {
@@ -182,19 +172,17 @@ static int UVERBS_HANDLER(MLX5_IB_METHOD_CREATE_FLOW)(
 				   arr_flow_actions[i]->object);
 	}
 
-	ret = uverbs_copy_from(&flow_context.flow_tag, attrs,
+	ret = uverbs_copy_from(&flow_act.flow_tag, attrs,
 			       MLX5_IB_ATTR_CREATE_FLOW_TAG);
 	if (!ret) {
-		if (flow_context.flow_tag >= BIT(24)) {
+		if (flow_act.flow_tag >= BIT(24)) {
 			ret = -EINVAL;
 			goto err_out;
 		}
-		flow_context.flags |= FLOW_CONTEXT_HAS_TAG;
+		flow_act.flags |= FLOW_ACT_HAS_TAG;
 	}
 
-	flow_handler = mlx5_ib_raw_fs_rule_add(dev, fs_matcher,
-					       &flow_context,
-					       &flow_act,
+	flow_handler = mlx5_ib_raw_fs_rule_add(dev, fs_matcher, &flow_act,
 					       counter_id,
 					       cmd_in, inlen,
 					       dest_id, dest_type);
@@ -331,11 +319,11 @@ void mlx5_ib_destroy_flow_action_raw(struct mlx5_ib_flow_action *maction)
 	switch (maction->flow_action_raw.sub_type) {
 	case MLX5_IB_FLOW_ACTION_MODIFY_HEADER:
 		mlx5_modify_header_dealloc(maction->flow_action_raw.dev->mdev,
-					   maction->flow_action_raw.modify_hdr);
+					   maction->flow_action_raw.action_id);
 		break;
 	case MLX5_IB_FLOW_ACTION_PACKET_REFORMAT:
 		mlx5_packet_reformat_dealloc(maction->flow_action_raw.dev->mdev,
-					     maction->flow_action_raw.pkt_reformat);
+			maction->flow_action_raw.action_id);
 		break;
 	case MLX5_IB_FLOW_ACTION_DECAP:
 		break;
@@ -361,11 +349,10 @@ mlx5_ib_create_modify_header(struct mlx5_ib_dev *dev,
 	if (!maction)
 		return ERR_PTR(-ENOMEM);
 
-	maction->flow_action_raw.modify_hdr =
-		mlx5_modify_header_alloc(dev->mdev, namespace, num_actions, in);
+	ret = mlx5_modify_header_alloc(dev->mdev, namespace, num_actions, in,
+				       &maction->flow_action_raw.action_id);
 
-	if (IS_ERR(maction->flow_action_raw.modify_hdr)) {
-		ret = PTR_ERR(maction->flow_action_raw.modify_hdr);
+	if (ret) {
 		kfree(maction);
 		return ERR_PTR(ret);
 	}
@@ -489,13 +476,11 @@ static int mlx5_ib_flow_action_create_packet_reformat_ctx(
 	if (ret)
 		return ret;
 
-	maction->flow_action_raw.pkt_reformat =
-		mlx5_packet_reformat_alloc(dev->mdev, prm_prt, len,
-					   in, namespace);
-	if (IS_ERR(maction->flow_action_raw.pkt_reformat)) {
-		ret = PTR_ERR(maction->flow_action_raw.pkt_reformat);
+	ret = mlx5_packet_reformat_alloc(dev->mdev, prm_prt, len,
+					 in, namespace,
+					 &maction->flow_action_raw.action_id);
+	if (ret)
 		return ret;
-	}
 
 	maction->flow_action_raw.sub_type =
 		MLX5_IB_FLOW_ACTION_PACKET_REFORMAT;

@@ -25,20 +25,9 @@
 #include <asm/pgtable-hwdef.h>
 #include <asm/ptdump.h>
 
-
-enum address_markers_idx {
-	PAGE_OFFSET_NR = 0,
-	PAGE_END_NR,
+static const struct addr_marker address_markers[] = {
 #ifdef CONFIG_KASAN
-	KASAN_START_NR,
-#endif
-};
-
-static struct addr_marker address_markers[] = {
-	{ PAGE_OFFSET,			"Linear Mapping start" },
-	{ 0 /* PAGE_END */,		"Linear Mapping end" },
-#ifdef CONFIG_KASAN
-	{ 0 /* KASAN_SHADOW_START */,	"Kasan shadow start" },
+	{ KASAN_SHADOW_START,		"Kasan shadow start" },
 	{ KASAN_SHADOW_END,		"Kasan shadow end" },
 #endif
 	{ MODULES_VADDR,		"Modules start" },
@@ -53,6 +42,7 @@ static struct addr_marker address_markers[] = {
 	{ VMEMMAP_START,		"vmemmap start" },
 	{ VMEMMAP_START + VMEMMAP_SIZE,	"vmemmap end" },
 #endif
+	{ PAGE_OFFSET,			"Linear mapping" },
 	{ -1,				NULL },
 };
 
@@ -386,7 +376,7 @@ static void ptdump_initialize(void)
 static struct ptdump_info kernel_ptdump_info = {
 	.mm		= &init_mm,
 	.markers	= address_markers,
-	.base_addr	= PAGE_OFFSET,
+	.base_addr	= VA_START,
 };
 
 void ptdump_check_wx(void)
@@ -400,7 +390,7 @@ void ptdump_check_wx(void)
 		.check_wx = true,
 	};
 
-	walk_pgd(&st, &init_mm, PAGE_OFFSET);
+	walk_pgd(&st, &init_mm, VA_START);
 	note_page(&st, 0, 0, 0);
 	if (st.wx_pages || st.uxn_pages)
 		pr_warn("Checked W+X mappings: FAILED, %lu W+X pages found, %lu non-UXN pages found\n",
@@ -411,10 +401,6 @@ void ptdump_check_wx(void)
 
 static int ptdump_init(void)
 {
-	address_markers[PAGE_END_NR].start_address = PAGE_END;
-#ifdef CONFIG_KASAN
-	address_markers[KASAN_START_NR].start_address = KASAN_SHADOW_START;
-#endif
 	ptdump_initialize();
 	ptdump_debugfs_register(&kernel_ptdump_info, "kernel_page_tables");
 	return 0;

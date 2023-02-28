@@ -260,7 +260,8 @@ static void bcma_host_pci_remove(struct pci_dev *dev)
 #ifdef CONFIG_PM_SLEEP
 static int bcma_host_pci_suspend(struct device *dev)
 {
-	struct bcma_bus *bus = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct bcma_bus *bus = pci_get_drvdata(pdev);
 
 	bus->mapped_core = NULL;
 
@@ -269,7 +270,8 @@ static int bcma_host_pci_suspend(struct device *dev)
 
 static int bcma_host_pci_resume(struct device *dev)
 {
-	struct bcma_bus *bus = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct bcma_bus *bus = pci_get_drvdata(pdev);
 
 	return bcma_bus_resume(bus);
 }

@@ -23,7 +23,6 @@
 #include <linux/slab.h>
 #include <asm/unaligned.h>
 #include <linux/kernel.h>
-#include <linux/xattr.h>
 #include "ecryptfs_kernel.h"
 
 #define DECRYPT		0
@@ -861,10 +860,13 @@ static struct ecryptfs_flag_map_elem ecryptfs_flag_map[] = {
  * @crypt_stat: The cryptographic context
  * @page_virt: Source data to be parsed
  * @bytes_read: Updated with the number of bytes read
+ *
+ * Returns zero on success; non-zero if the flag set is invalid
  */
-static void ecryptfs_process_flags(struct ecryptfs_crypt_stat *crypt_stat,
+static int ecryptfs_process_flags(struct ecryptfs_crypt_stat *crypt_stat,
 				  char *page_virt, int *bytes_read)
 {
+	int rc = 0;
 	int i;
 	u32 flags;
 
@@ -877,6 +879,7 @@ static void ecryptfs_process_flags(struct ecryptfs_crypt_stat *crypt_stat,
 	/* Version is in top 8 bits of the 32-bit flag vector */
 	crypt_stat->file_version = ((flags >> 24) & 0xFF);
 	(*bytes_read) = 4;
+	return rc;
 }
 
 /**
@@ -1114,21 +1117,9 @@ ecryptfs_write_metadata_to_xattr(struct dentry *ecryptfs_dentry,
 				 char *page_virt, size_t size)
 {
 	int rc;
-	struct dentry *lower_dentry = ecryptfs_dentry_to_lower(ecryptfs_dentry);
-	struct inode *lower_inode = d_inode(lower_dentry);
 
-	if (!(lower_inode->i_opflags & IOP_XATTR)) {
-		rc = -EOPNOTSUPP;
-		goto out;
-	}
-
-	inode_lock(lower_inode);
-	rc = __vfs_setxattr(lower_dentry, lower_inode, ECRYPTFS_XATTR_NAME,
-			    page_virt, size, 0);
-	if (!rc && ecryptfs_inode)
-		fsstack_copy_attr_all(ecryptfs_inode, lower_inode);
-	inode_unlock(lower_inode);
-out:
+	rc = ecryptfs_setxattr(ecryptfs_dentry, ecryptfs_inode,
+			       ECRYPTFS_XATTR_NAME, page_virt, size, 0);
 	return rc;
 }
 
@@ -1302,7 +1293,12 @@ static int ecryptfs_read_headers_virt(char *page_virt,
 	if (!(crypt_stat->flags & ECRYPTFS_I_SIZE_INITIALIZED))
 		ecryptfs_i_size_init(page_virt, d_inode(ecryptfs_dentry));
 	offset += MAGIC_ECRYPTFS_MARKER_SIZE_BYTES;
-	ecryptfs_process_flags(crypt_stat, (page_virt + offset), &bytes_read);
+	rc = ecryptfs_process_flags(crypt_stat, (page_virt + offset),
+				    &bytes_read);
+	if (rc) {
+		ecryptfs_printk(KERN_WARNING, "Error processing flags\n");
+		goto out;
+	}
 	if (crypt_stat->file_version > ECRYPTFS_SUPPORTED_FILE_VERSION) {
 		ecryptfs_printk(KERN_WARNING, "File version is [%d]; only "
 				"file version [%d] is supported by this "

@@ -170,7 +170,9 @@ static int asd_init_target_ddb(struct domain_device *dev)
 			}
 		} else {
 			flags |= CONCURRENT_CONN_SUPP;
-			if (!dev->parent && dev_is_expander(dev->dev_type))
+			if (!dev->parent &&
+			    (dev->dev_type == SAS_EDGE_EXPANDER_DEVICE ||
+			     dev->dev_type == SAS_FANOUT_EXPANDER_DEVICE))
 				asd_ddbsite_write_byte(asd_ha, ddb, MAX_CCONN,
 						       4);
 			else

@@ -19,11 +19,8 @@
  * each CRTC.
  */
 
-#include <linux/component.h>
-#include <linux/platform_device.h>
-
 #include <drm/drm_atomic_helper.h>
-
+#include <linux/component.h>
 #include "vc4_drv.h"
 #include "vc4_regs.h"
 

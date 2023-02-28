@@ -21,11 +21,8 @@
  *
  * Authors: Alex Deucher
  */
-
-#include <linux/delay.h>
 #include <linux/firmware.h>
-#include <linux/module.h>
-
+#include <drm/drmP.h>
 #include "amdgpu.h"
 #include "amdgpu_ucode.h"
 #include "amdgpu_trace.h"
@@ -577,7 +574,7 @@ static int sdma_v2_4_ring_test_ring(struct amdgpu_ring *ring)
 		tmp = le32_to_cpu(adev->wb.wb[index]);
 		if (tmp == 0xDEADBEEF)
 			break;
-		udelay(1);
+		DRM_UDELAY(1);
 	}
 
 	if (i >= adev->usec_timeout)

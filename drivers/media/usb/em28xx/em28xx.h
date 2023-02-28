@@ -251,11 +251,13 @@ struct em28xx_usb_ctl {
 /**
  * struct em28xx_fmt - Struct to enumberate video formats
  *
+ * @name:	Name for the video standard
  * @fourcc:	v4l2 format id
  * @depth:	mean number of bits to represent a pixel
  * @reg:	em28xx register value to set it
  */
 struct em28xx_fmt {
+	char	*name;
 	u32	fourcc;
 	int	depth;
 	int	reg;
@@ -655,7 +657,7 @@ struct em28xx {
 	enum em28xx_chip_id chip_id;
 
 	unsigned int is_em25xx:1;	// em25xx/em276x/7x/8x family bridge
-	unsigned int disconnected:1;	// device has been disconnected
+	unsigned int disconnected:1;	// device has been diconnected
 	unsigned int has_video:1;
 	unsigned int is_audio_only:1;
 	unsigned int is_webcam:1;

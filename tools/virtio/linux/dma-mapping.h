@@ -29,6 +29,4 @@ enum dma_data_direction {
 #define dma_unmap_single(...) do { } while (0)
 #define dma_unmap_page(...) do { } while (0)
 
-#define dma_max_mapping_size(...) SIZE_MAX
-
 #endif

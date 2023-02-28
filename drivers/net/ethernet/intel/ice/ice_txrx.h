@@ -58,19 +58,19 @@ struct ice_tx_buf {
 	unsigned int bytecount;
 	unsigned short gso_segs;
 	u32 tx_flags;
-	DEFINE_DMA_UNMAP_LEN(len);
 	DEFINE_DMA_UNMAP_ADDR(dma);
+	DEFINE_DMA_UNMAP_LEN(len);
 };
 
 struct ice_tx_offload_params {
-	u64 cd_qw1;
-	struct ice_ring *tx_ring;
+	u8 header_len;
 	u32 td_cmd;
 	u32 td_offset;
 	u32 td_l2tag1;
-	u32 cd_tunnel_params;
 	u16 cd_l2tag2;
-	u8 header_len;
+	u32 cd_tunnel_params;
+	u64 cd_qw1;
+	struct ice_ring *tx_ring;
 };
 
 struct ice_rx_buf {
@@ -144,26 +144,12 @@ enum ice_rx_dtype {
 #define ICE_DFLT_INTRL	0
 #define ICE_MAX_INTRL	236
 
-#define ICE_WB_ON_ITR_USECS	2
-#define ICE_IN_WB_ON_ITR_MODE	255
-/* Sets WB_ON_ITR and assumes INTENA bit is already cleared, which allows
- * setting the MSK_M bit to tell hardware to ignore the INTENA_M bit. Also,
- * set the write-back latency to the usecs passed in.
- */
-#define ICE_GLINT_DYN_CTL_WB_ON_ITR(usecs, itr_idx)	\
-	((((usecs) << (GLINT_DYN_CTL_INTERVAL_S - ICE_ITR_GRAN_S)) & \
-	  GLINT_DYN_CTL_INTERVAL_M) | \
-	 (((itr_idx) << GLINT_DYN_CTL_ITR_INDX_S) & \
-	  GLINT_DYN_CTL_ITR_INDX_M) | GLINT_DYN_CTL_INTENA_MSK_M | \
-	 GLINT_DYN_CTL_WB_ON_ITR_M)
-
 /* Legacy or Advanced Mode Queue */
 #define ICE_TX_ADVANCED	0
 #define ICE_TX_LEGACY	1
 
 /* descriptor ring, associated with a VSI */
 struct ice_ring {
-	/* CL1 - 1st cacheline starts here */
 	struct ice_ring *next;		/* pointer to next ring in q_vector */
 	void *desc;			/* Descriptor ring memory */
 	struct device *dev;		/* Used for DMA mapping */
@@ -175,11 +161,11 @@ struct ice_ring {
 		struct ice_tx_buf *tx_buf;
 		struct ice_rx_buf *rx_buf;
 	};
-	/* CL2 - 2nd cacheline starts here */
 	u16 q_index;			/* Queue number of ring */
-	u16 q_handle;			/* Queue handle per TC */
-
-	u8 ring_active:1;		/* is ring online or not */
+	u32 txq_teid;			/* Added Tx queue TEID */
+#ifdef CONFIG_DCB
+	u8 dcb_tc;		/* Traffic class of ring */
+#endif /* CONFIG_DCB */
 
 	u16 count;			/* Number of descriptors */
 	u16 reg_idx;			/* HW register index of the ring */
@@ -187,7 +173,8 @@ struct ice_ring {
 	/* used in interrupt processing */
 	u16 next_to_use;
 	u16 next_to_clean;
-	u16 next_to_alloc;
+
+	u8 ring_active;			/* is ring online or not */
 
 	/* stats structs */
 	struct ice_q_stats	stats;
@@ -197,17 +184,10 @@ struct ice_ring {
 		struct ice_rxq_stats rx_stats;
 	};
 
-	struct rcu_head rcu;		/* to avoid race on free */
-	/* CLX - the below items are only accessed infrequently and should be
-	 * in their own cache line if possible
-	 */
-	dma_addr_t dma;			/* physical address of ring */
 	unsigned int size;		/* length of descriptor ring in bytes */
-	u32 txq_teid;			/* Added Tx queue TEID */
-	u16 rx_buf_len;
-#ifdef CONFIG_DCB
-	u8 dcb_tc;			/* Traffic class of ring */
-#endif /* CONFIG_DCB */
+	dma_addr_t dma;			/* physical address of ring */
+	struct rcu_head rcu;		/* to avoid race on free */
+	u16 next_to_alloc;
 } ____cacheline_internodealigned_in_smp;
 
 struct ice_ring_container {

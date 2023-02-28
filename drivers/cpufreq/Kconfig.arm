@@ -19,18 +19,6 @@ config ACPI_CPPC_CPUFREQ
 
 	  If in doubt, say N.
 
-config ARM_ALLWINNER_SUN50I_CPUFREQ_NVMEM
-	tristate "Allwinner nvmem based SUN50I CPUFreq driver"
-	depends on ARCH_SUNXI
-	depends on NVMEM_SUNXI_SID
-	select PM_OPP
-	help
-	  This adds the nvmem based CPUFreq driver for Allwinner
-	  h6 SoC.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called sun50i-cpufreq-nvmem.
-
 config ARM_ARMADA_37XX_CPUFREQ
 	tristate "Armada 37xx CPUFreq support"
 	depends on ARCH_MVEBU && CPUFREQ_DT
@@ -105,15 +93,6 @@ config ARM_IMX6Q_CPUFREQ
 
 	  If in doubt, say N.
 
-config ARM_IMX_CPUFREQ_DT
-	tristate "Freescale i.MX8M cpufreq support"
-	depends on ARCH_MXC && CPUFREQ_DT
-	help
-	  This adds cpufreq driver support for Freescale i.MX8M series SoCs,
-	  based on cpufreq-dt.
-
-	  If in doubt, say N.
-
 config ARM_KIRKWOOD_CPUFREQ
 	def_bool MACH_KIRKWOOD
 	help
@@ -132,8 +111,8 @@ config ARM_OMAP2PLUS_CPUFREQ
 	depends on ARCH_OMAP2PLUS
 	default ARCH_OMAP2PLUS
 
-config ARM_QCOM_CPUFREQ_NVMEM
-	tristate "Qualcomm nvmem based CPUFreq"
+config ARM_QCOM_CPUFREQ_KRYO
+	tristate "Qualcomm Kryo based CPUFreq"
 	depends on ARM64
 	depends on QCOM_QFPROM
 	depends on QCOM_SMEM
@@ -153,14 +132,6 @@ config ARM_QCOM_CPUFREQ_HW
 	  in this engine exposes a programming interface to the OS.
 	  The driver implements the cpufreq interface for this HW engine.
 	  Say Y if you want to support CPUFreq HW.
-
-config ARM_RASPBERRYPI_CPUFREQ
-	tristate "Raspberry Pi cpufreq support"
-	depends on CLK_RASPBERRYPI || COMPILE_TEST
-	help
-	  This adds the CPUFreq driver for Raspberry Pi
-
-	  If in doubt, say N.
 
 config ARM_S3C_CPUFREQ
 	bool

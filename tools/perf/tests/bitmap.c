@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/compiler.h>
 #include <linux/bitmap.h>
-#include <perf/cpumap.h>
-#include <internal/cpumap.h>
 #include "tests.h"
+#include "cpumap.h"
 #include "debug.h"
 
 #define NBITS 100
 
 static unsigned long *get_bitmap(const char *str, int nbits)
 {
-	struct perf_cpu_map *map = perf_cpu_map__new(str);
+	struct cpu_map *map = cpu_map__new(str);
 	unsigned long *bm = NULL;
 	int i;
 
@@ -22,7 +21,7 @@ static unsigned long *get_bitmap(const char *str, int nbits)
 	}
 
 	if (map)
-		perf_cpu_map__put(map);
+		cpu_map__put(map);
 	return bm;
 }
 

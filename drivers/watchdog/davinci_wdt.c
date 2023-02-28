@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * drivers/char/watchdog/davinci_wdt.c
  *
@@ -6,7 +5,10 @@
  *
  * Copyright (C) 2006-2013 Texas Instruments.
  *
- * 2007 (c) MontaVista Software, Inc.
+ * 2007 (c) MontaVista Software, Inc. This file is licensed under
+ * the terms of the GNU General Public License version 2. This program
+ * is licensed "as is" without any warranty of any kind, whether express
+ * or implied.
  */
 
 #include <linux/module.h>
@@ -245,7 +247,13 @@ static int davinci_wdt_probe(struct platform_device *pdev)
 	if (IS_ERR(davinci_wdt->base))
 		return PTR_ERR(davinci_wdt->base);
 
-	return devm_watchdog_register_device(dev, wdd);
+	ret = devm_watchdog_register_device(dev, wdd);
+	if (ret) {
+		dev_err(dev, "cannot register watchdog device\n");
+		return ret;
+	}
+
+	return 0;
 }
 
 static const struct of_device_id davinci_wdt_of_match[] = {

@@ -16,7 +16,9 @@
 #endif
 
 /* Boundary values */
-static int		u8_max   = 0xFF;
+static int		zero     = 0,
+			one      = 1,
+			u8_max   = 0xFF;
 static unsigned long	seqw_min = DCCPF_SEQ_WMIN,
 			seqw_max = 0xFFFFFFFF;		/* maximum on 32 bit */
 
@@ -36,7 +38,7 @@ static struct ctl_table dccp_default_table[] = {
 		.maxlen		= sizeof(sysctl_dccp_rx_ccid),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= SYSCTL_ZERO,
+		.extra1		= &zero,
 		.extra2		= &u8_max,		/* RFC 4340, 10. */
 	},
 	{
@@ -45,7 +47,7 @@ static struct ctl_table dccp_default_table[] = {
 		.maxlen		= sizeof(sysctl_dccp_tx_ccid),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= SYSCTL_ZERO,
+		.extra1		= &zero,
 		.extra2		= &u8_max,		/* RFC 4340, 10. */
 	},
 	{
@@ -54,7 +56,7 @@ static struct ctl_table dccp_default_table[] = {
 		.maxlen		= sizeof(sysctl_dccp_request_retries),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= SYSCTL_ONE,
+		.extra1		= &one,
 		.extra2		= &u8_max,
 	},
 	{
@@ -63,7 +65,7 @@ static struct ctl_table dccp_default_table[] = {
 		.maxlen		= sizeof(sysctl_dccp_retries1),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= SYSCTL_ZERO,
+		.extra1		= &zero,
 		.extra2		= &u8_max,
 	},
 	{
@@ -72,7 +74,7 @@ static struct ctl_table dccp_default_table[] = {
 		.maxlen		= sizeof(sysctl_dccp_retries2),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= SYSCTL_ZERO,
+		.extra1		= &zero,
 		.extra2		= &u8_max,
 	},
 	{
@@ -81,7 +83,7 @@ static struct ctl_table dccp_default_table[] = {
 		.maxlen		= sizeof(sysctl_dccp_tx_qlen),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= SYSCTL_ZERO,
+		.extra1		= &zero,
 	},
 	{
 		.procname	= "sync_ratelimit",

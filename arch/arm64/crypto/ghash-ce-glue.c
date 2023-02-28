@@ -70,6 +70,8 @@ asmlinkage void pmull_gcm_decrypt(int blocks, u64 dg[], u8 dst[],
 asmlinkage void pmull_gcm_encrypt_block(u8 dst[], u8 const src[],
 					u32 const rk[], int rounds);
 
+asmlinkage void __aes_arm64_encrypt(u32 *rk, u8 *out, const u8 *in, int rounds);
+
 static int ghash_init(struct shash_desc *desc)
 {
 	struct ghash_desc_ctx *ctx = shash_desc_ctx(desc);
@@ -307,13 +309,14 @@ static int gcm_setkey(struct crypto_aead *tfm, const u8 *inkey,
 	u8 key[GHASH_BLOCK_SIZE];
 	int ret;
 
-	ret = aes_expandkey(&ctx->aes_key, inkey, keylen);
+	ret = crypto_aes_expand_key(&ctx->aes_key, inkey, keylen);
 	if (ret) {
 		tfm->base.crt_flags |= CRYPTO_TFM_RES_BAD_KEY_LEN;
 		return -EINVAL;
 	}
 
-	aes_encrypt(&ctx->aes_key, key, (u8[AES_BLOCK_SIZE]){});
+	__aes_arm64_encrypt(ctx->aes_key.key_enc, key, (u8[AES_BLOCK_SIZE]){},
+			    num_rounds(&ctx->aes_key));
 
 	return __ghash_setkey(&ctx->ghash_key, key, sizeof(be128));
 }
@@ -464,7 +467,7 @@ static int gcm_encrypt(struct aead_request *req)
 			rk = ctx->aes_key.key_enc;
 		} while (walk.nbytes >= 2 * AES_BLOCK_SIZE);
 	} else {
-		aes_encrypt(&ctx->aes_key, tag, iv);
+		__aes_arm64_encrypt(ctx->aes_key.key_enc, tag, iv, nrounds);
 		put_unaligned_be32(2, iv + GCM_IV_SIZE);
 
 		while (walk.nbytes >= (2 * AES_BLOCK_SIZE)) {
@@ -475,7 +478,8 @@ static int gcm_encrypt(struct aead_request *req)
 			int remaining = blocks;
 
 			do {
-				aes_encrypt(&ctx->aes_key, ks, iv);
+				__aes_arm64_encrypt(ctx->aes_key.key_enc,
+						    ks, iv, nrounds);
 				crypto_xor_cpy(dst, src, ks, AES_BLOCK_SIZE);
 				crypto_inc(iv, AES_BLOCK_SIZE);
 
@@ -491,10 +495,13 @@ static int gcm_encrypt(struct aead_request *req)
 						 walk.nbytes % (2 * AES_BLOCK_SIZE));
 		}
 		if (walk.nbytes) {
-			aes_encrypt(&ctx->aes_key, ks, iv);
+			__aes_arm64_encrypt(ctx->aes_key.key_enc, ks, iv,
+					    nrounds);
 			if (walk.nbytes > AES_BLOCK_SIZE) {
 				crypto_inc(iv, AES_BLOCK_SIZE);
-				aes_encrypt(&ctx->aes_key, ks + AES_BLOCK_SIZE, iv);
+				__aes_arm64_encrypt(ctx->aes_key.key_enc,
+					            ks + AES_BLOCK_SIZE, iv,
+						    nrounds);
 			}
 		}
 	}
@@ -598,7 +605,7 @@ static int gcm_decrypt(struct aead_request *req)
 			rk = ctx->aes_key.key_enc;
 		} while (walk.nbytes >= 2 * AES_BLOCK_SIZE);
 	} else {
-		aes_encrypt(&ctx->aes_key, tag, iv);
+		__aes_arm64_encrypt(ctx->aes_key.key_enc, tag, iv, nrounds);
 		put_unaligned_be32(2, iv + GCM_IV_SIZE);
 
 		while (walk.nbytes >= (2 * AES_BLOCK_SIZE)) {
@@ -611,7 +618,8 @@ static int gcm_decrypt(struct aead_request *req)
 					pmull_ghash_update_p64);
 
 			do {
-				aes_encrypt(&ctx->aes_key, buf, iv);
+				__aes_arm64_encrypt(ctx->aes_key.key_enc,
+						    buf, iv, nrounds);
 				crypto_xor_cpy(dst, src, buf, AES_BLOCK_SIZE);
 				crypto_inc(iv, AES_BLOCK_SIZE);
 
@@ -629,9 +637,11 @@ static int gcm_decrypt(struct aead_request *req)
 				memcpy(iv2, iv, AES_BLOCK_SIZE);
 				crypto_inc(iv2, AES_BLOCK_SIZE);
 
-				aes_encrypt(&ctx->aes_key, iv2, iv2);
+				__aes_arm64_encrypt(ctx->aes_key.key_enc, iv2,
+						    iv2, nrounds);
 			}
-			aes_encrypt(&ctx->aes_key, iv, iv);
+			__aes_arm64_encrypt(ctx->aes_key.key_enc, iv, iv,
+					    nrounds);
 		}
 	}
 

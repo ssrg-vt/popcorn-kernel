@@ -65,7 +65,7 @@ ethsw_get_link_ksettings(struct net_device *netdev,
 				     port_priv->idx,
 				     &state);
 	if (err) {
-		netdev_err(netdev, "ERROR %d getting link state\n", err);
+		netdev_err(netdev, "ERROR %d getting link state", err);
 		goto out;
 	}
 
@@ -88,21 +88,18 @@ ethsw_set_link_ksettings(struct net_device *netdev,
 			 const struct ethtool_link_ksettings *link_ksettings)
 {
 	struct ethsw_port_priv *port_priv = netdev_priv(netdev);
-	struct ethsw_core *ethsw = port_priv->ethsw_data;
 	struct dpsw_link_cfg cfg = {0};
-	bool if_running;
-	int err = 0, ret;
+	int err = 0;
 
-	/* Interface needs to be down to change link settings */
-	if_running = netif_running(netdev);
-	if (if_running) {
-		err = dpsw_if_disable(ethsw->mc_io, 0,
-				      ethsw->dpsw_handle,
-				      port_priv->idx);
-		if (err) {
-			netdev_err(netdev, "dpsw_if_disable err %d\n", err);
-			return err;
-		}
+	netdev_dbg(netdev, "Setting link parameters...");
+
+	/* Due to a temporary MC limitation, the DPSW port must be down
+	 * in order to be able to change link settings. Taking steps to let
+	 * the user know that.
+	 */
+	if (netif_running(netdev)) {
+		netdev_info(netdev, "Sorry, interface must be brought down first.\n");
+		return -EACCES;
 	}
 
 	cfg.rate = link_ksettings->base.speed;
@@ -119,16 +116,12 @@ ethsw_set_link_ksettings(struct net_device *netdev,
 				   port_priv->ethsw_data->dpsw_handle,
 				   port_priv->idx,
 				   &cfg);
+	if (err)
+		/* ethtool will be loud enough if we return an error; no point
+		 * in putting our own error message on the console by default
+		 */
+		netdev_dbg(netdev, "ERROR %d setting link cfg", err);
 
-	if (if_running) {
-		ret = dpsw_if_enable(ethsw->mc_io, 0,
-				     ethsw->dpsw_handle,
-				     port_priv->idx);
-		if (ret) {
-			netdev_err(netdev, "dpsw_if_enable err %d\n", ret);
-			return ret;
-		}
-	}
 	return err;
 }
 
@@ -162,6 +155,9 @@ static void ethsw_ethtool_get_stats(struct net_device *netdev,
 {
 	struct ethsw_port_priv *port_priv = netdev_priv(netdev);
 	int i, err;
+
+	memset(data, 0,
+	       sizeof(u64) * ETHSW_NUM_COUNTERS);
 
 	for (i = 0; i < ETHSW_NUM_COUNTERS; i++) {
 		err = dpsw_if_get_counter(port_priv->ethsw_data->mc_io, 0,

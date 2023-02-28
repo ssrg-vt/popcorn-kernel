@@ -35,10 +35,8 @@
  * The refresh rate is also calculated for video playback sync purposes.
  */
 
-#include <drm/drm_device.h>
-#include <drm/drm_vblank.h>
+#include <drm/drmP.h>
 #include <drm/via_drm.h>
-
 #include "via_drv.h"
 
 #define VIA_REG_INTERRUPT       0x200
@@ -110,7 +108,7 @@ irqreturn_t via_driver_irq_handler(int irq, void *arg)
 	drm_via_irq_t *cur_irq = dev_priv->via_irqs;
 	int i;
 
-	status = via_read(dev_priv, VIA_REG_INTERRUPT);
+	status = VIA_READ(VIA_REG_INTERRUPT);
 	if (status & VIA_IRQ_VBLANK_PENDING) {
 		atomic_inc(&dev_priv->vbl_received);
 		if (!(atomic_read(&dev_priv->vbl_received) & 0x0F)) {
@@ -145,7 +143,7 @@ irqreturn_t via_driver_irq_handler(int irq, void *arg)
 	}
 
 	/* Acknowledge interrupts */
-	via_write(dev_priv, VIA_REG_INTERRUPT, status);
+	VIA_WRITE(VIA_REG_INTERRUPT, status);
 
 
 	if (handled)
@@ -160,8 +158,8 @@ static __inline__ void viadrv_acknowledge_irqs(drm_via_private_t *dev_priv)
 
 	if (dev_priv) {
 		/* Acknowledge interrupts */
-		status = via_read(dev_priv, VIA_REG_INTERRUPT);
-		via_write(dev_priv, VIA_REG_INTERRUPT, status |
+		status = VIA_READ(VIA_REG_INTERRUPT);
+		VIA_WRITE(VIA_REG_INTERRUPT, status |
 			  dev_priv->irq_pending_mask);
 	}
 }
@@ -176,11 +174,11 @@ int via_enable_vblank(struct drm_device *dev, unsigned int pipe)
 		return -EINVAL;
 	}
 
-	status = via_read(dev_priv, VIA_REG_INTERRUPT);
-	via_write(dev_priv, VIA_REG_INTERRUPT, status | VIA_IRQ_VBLANK_ENABLE);
+	status = VIA_READ(VIA_REG_INTERRUPT);
+	VIA_WRITE(VIA_REG_INTERRUPT, status | VIA_IRQ_VBLANK_ENABLE);
 
-	via_write8(dev_priv, 0x83d4, 0x11);
-	via_write8_mask(dev_priv, 0x83d5, 0x30, 0x30);
+	VIA_WRITE8(0x83d4, 0x11);
+	VIA_WRITE8(0x83d5, VIA_READ8(0x83d5) | 0x30);
 
 	return 0;
 }
@@ -190,11 +188,11 @@ void via_disable_vblank(struct drm_device *dev, unsigned int pipe)
 	drm_via_private_t *dev_priv = dev->dev_private;
 	u32 status;
 
-	status = via_read(dev_priv, VIA_REG_INTERRUPT);
-	via_write(dev_priv, VIA_REG_INTERRUPT, status & ~VIA_IRQ_VBLANK_ENABLE);
+	status = VIA_READ(VIA_REG_INTERRUPT);
+	VIA_WRITE(VIA_REG_INTERRUPT, status & ~VIA_IRQ_VBLANK_ENABLE);
 
-	via_write8(dev_priv, 0x83d4, 0x11);
-	via_write8_mask(dev_priv, 0x83d5, 0x30, 0);
+	VIA_WRITE8(0x83d4, 0x11);
+	VIA_WRITE8(0x83d5, VIA_READ8(0x83d5) & ~0x30);
 
 	if (pipe != 0)
 		DRM_ERROR("%s:  bad crtc %u\n", __func__, pipe);
@@ -235,12 +233,12 @@ via_driver_irq_wait(struct drm_device *dev, unsigned int irq, int force_sequence
 	cur_irq = dev_priv->via_irqs + real_irq;
 
 	if (masks[real_irq][2] && !force_sequence) {
-		VIA_WAIT_ON(ret, cur_irq->irq_queue, 3 * HZ,
-			    ((via_read(dev_priv, masks[irq][2]) & masks[irq][3]) ==
+		DRM_WAIT_ON(ret, cur_irq->irq_queue, 3 * HZ,
+			    ((VIA_READ(masks[irq][2]) & masks[irq][3]) ==
 			     masks[irq][4]));
 		cur_irq_sequence = atomic_read(&cur_irq->irq_received);
 	} else {
-		VIA_WAIT_ON(ret, cur_irq->irq_queue, 3 * HZ,
+		DRM_WAIT_ON(ret, cur_irq->irq_queue, 3 * HZ,
 			    (((cur_irq_sequence =
 			       atomic_read(&cur_irq->irq_received)) -
 			      *sequence) <= (1 << 23)));
@@ -294,8 +292,8 @@ void via_driver_irq_preinstall(struct drm_device *dev)
 		dev_priv->last_vblank_valid = 0;
 
 		/* Clear VSync interrupt regs */
-		status = via_read(dev_priv, VIA_REG_INTERRUPT);
-		via_write(dev_priv, VIA_REG_INTERRUPT, status &
+		status = VIA_READ(VIA_REG_INTERRUPT);
+		VIA_WRITE(VIA_REG_INTERRUPT, status &
 			  ~(dev_priv->irq_enable_mask));
 
 		/* Clear bits if they're already high */
@@ -312,13 +310,13 @@ int via_driver_irq_postinstall(struct drm_device *dev)
 	if (!dev_priv)
 		return -EINVAL;
 
-	status = via_read(dev_priv, VIA_REG_INTERRUPT);
-	via_write(dev_priv, VIA_REG_INTERRUPT, status | VIA_IRQ_GLOBAL
+	status = VIA_READ(VIA_REG_INTERRUPT);
+	VIA_WRITE(VIA_REG_INTERRUPT, status | VIA_IRQ_GLOBAL
 		  | dev_priv->irq_enable_mask);
 
 	/* Some magic, oh for some data sheets ! */
-	via_write8(dev_priv, 0x83d4, 0x11);
-	via_write8_mask(dev_priv, 0x83d5, 0x30, 0x30);
+	VIA_WRITE8(0x83d4, 0x11);
+	VIA_WRITE8(0x83d5, VIA_READ8(0x83d5) | 0x30);
 
 	return 0;
 }
@@ -333,11 +331,11 @@ void via_driver_irq_uninstall(struct drm_device *dev)
 
 		/* Some more magic, oh for some data sheets ! */
 
-		via_write8(dev_priv, 0x83d4, 0x11);
-		via_write8_mask(dev_priv, 0x83d5, 0x30, 0);
+		VIA_WRITE8(0x83d4, 0x11);
+		VIA_WRITE8(0x83d5, VIA_READ8(0x83d5) & ~0x30);
 
-		status = via_read(dev_priv, VIA_REG_INTERRUPT);
-		via_write(dev_priv, VIA_REG_INTERRUPT, status &
+		status = VIA_READ(VIA_REG_INTERRUPT);
+		VIA_WRITE(VIA_REG_INTERRUPT, status &
 			  ~(VIA_IRQ_VBLANK_ENABLE | dev_priv->irq_enable_mask));
 	}
 }

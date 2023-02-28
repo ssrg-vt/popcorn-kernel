@@ -878,9 +878,12 @@ static struct mirror_set *alloc_context(unsigned int nr_mirrors,
 					struct dm_target *ti,
 					struct dm_dirty_log *dl)
 {
-	struct mirror_set *ms =
-		kzalloc(struct_size(ms, mirror, nr_mirrors), GFP_KERNEL);
+	size_t len;
+	struct mirror_set *ms = NULL;
 
+	len = sizeof(*ms) + (sizeof(ms->mirror[0]) * nr_mirrors);
+
+	ms = kzalloc(len, GFP_KERNEL);
 	if (!ms) {
 		ti->error = "Cannot allocate mirror context";
 		return NULL;

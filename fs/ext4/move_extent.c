@@ -13,10 +13,11 @@
 #include "ext4_extents.h"
 
 /**
- * get_ext_path() - Find an extent path for designated logical block number.
- * @inode:	inode to be searched
+ * get_ext_path - Find an extent path for designated logical block number.
+ *
+ * @inode:	an inode which is searched
  * @lblock:	logical block number to find an extent path
- * @ppath:	pointer to an extent path pointer (for output)
+ * @path:	pointer to an extent path pointer (for output)
  *
  * ext4_find_extent wrapper. Return 0 on success, or a negative error value
  * on failure.
@@ -41,9 +42,8 @@ get_ext_path(struct inode *inode, ext4_lblk_t lblock,
 }
 
 /**
- * ext4_double_down_write_data_sem() - write lock two inodes's i_data_sem
- * @first: inode to be locked
- * @second: inode to be locked
+ * ext4_double_down_write_data_sem - Acquire two inodes' write lock
+ *                                   of i_data_sem
  *
  * Acquire write lock of i_data_sem of the two inodes
  */

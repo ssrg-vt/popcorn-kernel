@@ -27,9 +27,7 @@
 // *** IMPORTANT ***
 // SMU TEAM: Always increment the interface version if
 // any structure is changed in this file
-// Be aware of that the version should be updated in
-// smu_v11_0.h, rename is also needed.
-// #define SMU11_DRIVER_IF_VERSION 0x13
+#define SMU11_DRIVER_IF_VERSION 0x12
 
 #define PPTABLE_V20_SMU_VERSION 3
 
@@ -617,7 +615,6 @@ typedef struct {
   uint16_t     UclkAverageLpfTau;
   uint16_t     GfxActivityLpfTau;
   uint16_t     UclkActivityLpfTau;
-  uint16_t     SocketPowerLpfTau;
 
 
   uint32_t     MmHubPadding[8];
@@ -668,8 +665,7 @@ typedef struct {
   uint32_t ThrottlerStatus       ;
 
   uint8_t  LinkDpmLevel;
-  uint16_t AverageSocketPower;
-  uint8_t  Padding;
+  uint8_t  Padding[3];
 
 
   uint32_t     MmHubPadding[7];

@@ -171,9 +171,6 @@ cifs_get_next_mid(struct TCP_Server_Info *server)
 	/* we do not want to loop forever */
 	last_mid = cur_mid;
 	cur_mid++;
-	/* avoid 0xFFFF MID */
-	if (cur_mid == 0xffff)
-		cur_mid++;
 
 	/*
 	 * This nested loop looks more expensive than it is.
@@ -1226,15 +1223,16 @@ struct smb_version_operations smb1_operations = {
 	.query_all_EAs = CIFSSMBQAllEAs,
 	.set_EA = CIFSSMBSetEA,
 #endif /* CIFS_XATTR */
+#ifdef CONFIG_CIFS_ACL
 	.get_acl = get_cifs_acl,
 	.get_acl_by_fid = get_cifs_acl_by_fid,
 	.set_acl = set_cifs_acl,
+#endif /* CIFS_ACL */
 	.make_node = cifs_make_node,
 };
 
 struct smb_version_values smb1_values = {
 	.version_string = SMB1_VERSION_STRING,
-	.protocol_id = SMB10_PROT_ID,
 	.large_lock_type = LOCKING_ANDX_LARGE_FILES,
 	.exclusive_lock_type = 0,
 	.shared_lock_type = LOCKING_ANDX_SHARED_LOCK,

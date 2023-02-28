@@ -57,19 +57,16 @@ static void dump_backtrace_entry(unsigned long where)
 	printk(" %pS\n", (void *)where);
 }
 
-static void dump_kernel_instr(const char *lvl, struct pt_regs *regs)
+static void __dump_instr(const char *lvl, struct pt_regs *regs)
 {
 	unsigned long addr = instruction_pointer(regs);
 	char str[sizeof("00000000 ") * 5 + 2 + 1], *p = str;
 	int i;
 
-	if (user_mode(regs))
-		return;
-
 	for (i = -4; i < 1; i++) {
 		unsigned int val, bad;
 
-		bad = aarch64_insn_read(&((u32 *)addr)[i], &val);
+		bad = get_user(val, &((u32 *)addr)[i]);
 
 		if (!bad)
 			p += sprintf(p, i == 0 ? "(%08x) " : "%08x ", val);
@@ -78,8 +75,19 @@ static void dump_kernel_instr(const char *lvl, struct pt_regs *regs)
 			break;
 		}
 	}
-
 	printk("%sCode: %s\n", lvl, str);
+}
+
+static void dump_instr(const char *lvl, struct pt_regs *regs)
+{
+	if (!user_mode(regs)) {
+		mm_segment_t fs = get_fs();
+		set_fs(KERNEL_DS);
+		__dump_instr(lvl, regs);
+		set_fs(fs);
+	} else {
+		__dump_instr(lvl, regs);
+	}
 }
 
 void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
@@ -102,17 +110,18 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		return;
 
 	if (tsk == current) {
-		start_backtrace(&frame,
-				(unsigned long)__builtin_frame_address(0),
-				(unsigned long)dump_backtrace);
+		frame.fp = (unsigned long)__builtin_frame_address(0);
+		frame.pc = (unsigned long)dump_backtrace;
 	} else {
 		/*
 		 * task blocked in __switch_to
 		 */
-		start_backtrace(&frame,
-				thread_saved_fp(tsk),
-				thread_saved_pc(tsk));
+		frame.fp = thread_saved_fp(tsk);
+		frame.pc = thread_saved_pc(tsk);
 	}
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+	frame.graph = 0;
+#endif
 
 	printk("Call trace:\n");
 	do {
@@ -164,7 +173,8 @@ static int __die(const char *str, int err, struct pt_regs *regs)
 	print_modules();
 	show_regs(regs);
 
-	dump_kernel_instr(KERN_EMERG, regs);
+	if (!user_mode(regs))
+		dump_instr(KERN_EMERG, regs);
 
 	return ret;
 }
@@ -234,16 +244,16 @@ void arm64_force_sig_fault(int signo, int code, void __user *addr,
 {
 	arm64_show_signal(signo, str);
 	if (signo == SIGKILL)
-		force_sig(SIGKILL);
+		force_sig(SIGKILL, current);
 	else
-		force_sig_fault(signo, code, addr);
+		force_sig_fault(signo, code, addr, current);
 }
 
 void arm64_force_sig_mceerr(int code, void __user *addr, short lsb,
 			    const char *str)
 {
 	arm64_show_signal(SIGBUS, str);
-	force_sig_mceerr(code, addr, lsb);
+	force_sig_mceerr(code, addr, lsb, current);
 }
 
 void arm64_force_sig_ptrace_errno_trap(int errno, void __user *addr,
@@ -513,7 +523,7 @@ struct sys64_hook {
 	void (*handler)(unsigned int esr, struct pt_regs *regs);
 };
 
-static const struct sys64_hook sys64_hooks[] = {
+static struct sys64_hook sys64_hooks[] = {
 	{
 		.esr_mask = ESR_ELx_SYS64_ISS_EL0_CACHE_OP_MASK,
 		.esr_val = ESR_ELx_SYS64_ISS_EL0_CACHE_OP_VAL,
@@ -638,7 +648,7 @@ static void compat_cntfrq_read_handler(unsigned int esr, struct pt_regs *regs)
 	arm64_compat_skip_faulting_instruction(regs, 4);
 }
 
-static const struct sys64_hook cp15_32_hooks[] = {
+static struct sys64_hook cp15_32_hooks[] = {
 	{
 		.esr_mask = ESR_ELx_CP15_32_ISS_SYS_MASK,
 		.esr_val = ESR_ELx_CP15_32_ISS_SYS_CNTFRQ,
@@ -658,7 +668,7 @@ static void compat_cntvct_read_handler(unsigned int esr, struct pt_regs *regs)
 	arm64_compat_skip_faulting_instruction(regs, 4);
 }
 
-static const struct sys64_hook cp15_64_hooks[] = {
+static struct sys64_hook cp15_64_hooks[] = {
 	{
 		.esr_mask = ESR_ELx_CP15_64_ISS_SYS_MASK,
 		.esr_val = ESR_ELx_CP15_64_ISS_SYS_CNTVCT,
@@ -669,7 +679,7 @@ static const struct sys64_hook cp15_64_hooks[] = {
 
 asmlinkage void __exception do_cp15instr(unsigned int esr, struct pt_regs *regs)
 {
-	const struct sys64_hook *hook, *hook_base;
+	struct sys64_hook *hook, *hook_base;
 
 	if (!cp15_cond_valid(esr, regs)) {
 		/*
@@ -709,7 +719,7 @@ asmlinkage void __exception do_cp15instr(unsigned int esr, struct pt_regs *regs)
 
 asmlinkage void __exception do_sysinstr(unsigned int esr, struct pt_regs *regs)
 {
-	const struct sys64_hook *hook;
+	struct sys64_hook *hook;
 
 	for (hook = sys64_hooks; hook->handler; hook++)
 		if ((hook->esr_mask & esr) == hook->esr_val) {
@@ -735,7 +745,6 @@ static const char *esr_class_str[] = {
 	[ESR_ELx_EC_CP14_LS]		= "CP14 LDC/STC",
 	[ESR_ELx_EC_FP_ASIMD]		= "ASIMD",
 	[ESR_ELx_EC_CP10_ID]		= "CP10 MRC/VMRS",
-	[ESR_ELx_EC_PAC]		= "PAC",
 	[ESR_ELx_EC_CP14_64]		= "CP14 MCRR/MRRC",
 	[ESR_ELx_EC_ILL]		= "PSTATE.IL",
 	[ESR_ELx_EC_SVC32]		= "SVC (AArch32)",
@@ -746,7 +755,6 @@ static const char *esr_class_str[] = {
 	[ESR_ELx_EC_SMC64]		= "SMC (AArch64)",
 	[ESR_ELx_EC_SYS64]		= "MSR/MRS (AArch64)",
 	[ESR_ELx_EC_SVE]		= "SVE",
-	[ESR_ELx_EC_ERET]		= "ERET/ERETAA/ERETAB",
 	[ESR_ELx_EC_IMP_DEF]		= "EL3 IMP DEF",
 	[ESR_ELx_EC_IABT_LOW]		= "IABT (lower EL)",
 	[ESR_ELx_EC_IABT_CUR]		= "IABT (current EL)",
@@ -874,10 +882,6 @@ bool arm64_is_fatal_ras_serror(struct pt_regs *regs, unsigned int esr)
 		/*
 		 * The CPU can't make progress. The exception may have
 		 * been imprecise.
-		 *
-		 * Neoverse-N1 #1349291 means a non-KVM SError reported as
-		 * Unrecoverable should be treated as Uncontainable. We
-		 * call arm64_serror_panic() in both cases.
 		 */
 		return true;
 

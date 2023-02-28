@@ -104,7 +104,7 @@ struct	pwrctrl_priv {
 };
 
 void r8712_init_pwrctrl_priv(struct _adapter *adapter);
-int r8712_register_cmd_alive(struct _adapter *padapter);
+sint r8712_register_cmd_alive(struct _adapter *padapter);
 void r8712_unregister_cmd_alive(struct _adapter *padapter);
 void r8712_cpwm_int_hdl(struct _adapter *padapter,
 			struct reportpwrstate_parm *preportpwrstate);

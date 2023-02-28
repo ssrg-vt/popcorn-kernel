@@ -308,7 +308,7 @@ static void advk_pcie_setup_hw(struct advk_pcie *pcie)
 
 	advk_writel(pcie, PCIE_ISR1_ALL_MASK, PCIE_ISR1_MASK_REG);
 
-	/* Unmask all MSIs */
+	/* Unmask all MSI's */
 	advk_writel(pcie, 0, PCIE_MSI_MASK_REG);
 
 	/* Enable summary interrupt for GIC SPI source */

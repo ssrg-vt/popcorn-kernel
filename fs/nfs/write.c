@@ -104,7 +104,7 @@ EXPORT_SYMBOL_GPL(nfs_commit_free);
 
 static struct nfs_pgio_header *nfs_writehdr_alloc(void)
 {
-	struct nfs_pgio_header *p = mempool_alloc(nfs_wdata_mempool, GFP_KERNEL);
+	struct nfs_pgio_header *p = mempool_alloc(nfs_wdata_mempool, GFP_NOIO);
 
 	memset(p, 0, sizeof(*p));
 	p->rw_mode = FMODE_WRITE;
@@ -714,11 +714,12 @@ int nfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
 	struct inode *inode = mapping->host;
 	struct nfs_pageio_descriptor pgio;
 	struct nfs_io_completion *ioc;
+	unsigned int pflags = memalloc_nofs_save();
 	int err;
 
 	nfs_inc_stats(inode, NFSIOS_VFSWRITEPAGES);
 
-	ioc = nfs_io_completion_alloc(GFP_KERNEL);
+	ioc = nfs_io_completion_alloc(GFP_NOFS);
 	if (ioc)
 		nfs_io_completion_init(ioc, nfs_io_completion_commit, inode);
 
@@ -729,6 +730,8 @@ int nfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
 	pgio.pg_error = 0;
 	nfs_pageio_complete(&pgio);
 	nfs_io_completion_put(ioc);
+
+	memalloc_nofs_restore(pflags);
 
 	if (err < 0)
 		goto out_err;
@@ -786,6 +789,7 @@ static void nfs_inode_remove_request(struct nfs_page *req)
 	struct nfs_inode *nfsi = NFS_I(inode);
 	struct nfs_page *head;
 
+	atomic_long_dec(&nfsi->nrequests);
 	if (nfs_page_group_sync_on_bit(req, PG_REMOVE)) {
 		head = req->wb_head;
 
@@ -798,10 +802,8 @@ static void nfs_inode_remove_request(struct nfs_page *req)
 		spin_unlock(&mapping->private_lock);
 	}
 
-	if (test_and_clear_bit(PG_INODE_REF, &req->wb_flags)) {
+	if (test_and_clear_bit(PG_INODE_REF, &req->wb_flags))
 		nfs_release_request(req);
-		atomic_long_dec(&nfsi->nrequests);
-	}
 }
 
 static void

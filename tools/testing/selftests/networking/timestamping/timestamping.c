@@ -32,7 +32,6 @@
 #include <asm/types.h>
 #include <linux/net_tstamp.h>
 #include <linux/errqueue.h>
-#include <linux/sockios.h>
 
 #ifndef SO_TIMESTAMPING
 # define SO_TIMESTAMPING         37
@@ -41,6 +40,14 @@
 
 #ifndef SO_TIMESTAMPNS
 # define SO_TIMESTAMPNS 35
+#endif
+
+#ifndef SIOCGSTAMPNS
+# define SIOCGSTAMPNS 0x8907
+#endif
+
+#ifndef SIOCSHWTSTAMP
+# define SIOCSHWTSTAMP 0x89b0
 #endif
 
 static void usage(const char *error)

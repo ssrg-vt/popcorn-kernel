@@ -393,19 +393,24 @@ int sctp_bind_addr_state(const struct sctp_bind_addr *bp,
 {
 	struct sctp_sockaddr_entry *laddr;
 	struct sctp_af *af;
+	int state = -1;
 
 	af = sctp_get_af_specific(addr->sa.sa_family);
 	if (unlikely(!af))
-		return -1;
+		return state;
 
+	rcu_read_lock();
 	list_for_each_entry_rcu(laddr, &bp->address_list, list) {
 		if (!laddr->valid)
 			continue;
-		if (af->cmp_addr(&laddr->a, addr))
-			return laddr->state;
+		if (af->cmp_addr(&laddr->a, addr)) {
+			state = laddr->state;
+			break;
+		}
 	}
+	rcu_read_unlock();
 
-	return -1;
+	return state;
 }
 
 /* Find the first address in the bind address list that is not present in

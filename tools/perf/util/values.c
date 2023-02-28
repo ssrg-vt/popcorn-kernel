@@ -2,10 +2,9 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <errno.h>
-#include <linux/zalloc.h>
 
+#include "util.h"
 #include "values.h"
 #include "debug.h"
 

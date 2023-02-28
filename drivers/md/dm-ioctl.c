@@ -601,27 +601,17 @@ static void list_version_get_info(struct target_type *tt, void *param)
     info->vers = align_ptr(((void *) ++info->vers) + strlen(tt->name) + 1);
 }
 
-static int __list_versions(struct dm_ioctl *param, size_t param_size, const char *name)
+static int list_versions(struct file *filp, struct dm_ioctl *param, size_t param_size)
 {
 	size_t len, needed = 0;
 	struct dm_target_versions *vers;
 	struct vers_iter iter_info;
-	struct target_type *tt = NULL;
-
-	if (name) {
-		tt = dm_get_target_type(name);
-		if (!tt)
-			return -EINVAL;
-	}
 
 	/*
 	 * Loop through all the devices working out how much
 	 * space we need.
 	 */
-	if (!tt)
-		dm_target_iterate(list_version_get_needed, &needed);
-	else
-		list_version_get_needed(tt, &needed);
+	dm_target_iterate(list_version_get_needed, &needed);
 
 	/*
 	 * Grab our output buffer.
@@ -642,26 +632,11 @@ static int __list_versions(struct dm_ioctl *param, size_t param_size, const char
 	/*
 	 * Now loop through filling out the names & versions.
 	 */
-	if (!tt)
-		dm_target_iterate(list_version_get_info, &iter_info);
-	else
-		list_version_get_info(tt, &iter_info);
+	dm_target_iterate(list_version_get_info, &iter_info);
 	param->flags |= iter_info.flags;
 
  out:
-	if (tt)
-		dm_put_target_type(tt);
 	return 0;
-}
-
-static int list_versions(struct file *filp, struct dm_ioctl *param, size_t param_size)
-{
-	return __list_versions(param, param_size, NULL);
-}
-
-static int get_target_version(struct file *filp, struct dm_ioctl *param, size_t param_size)
-{
-	return __list_versions(param, param_size, param->name);
 }
 
 static int check_name(const char *name)
@@ -1617,7 +1592,7 @@ static int target_message(struct file *filp, struct dm_ioctl *param, size_t para
 	}
 
 	ti = dm_table_find_target(table, tmsg->sector);
-	if (!ti) {
+	if (!dm_target_is_valid(ti)) {
 		DMWARN("Target message sector outside device.");
 		r = -EINVAL;
 	} else if (ti->type->message)
@@ -1689,7 +1664,6 @@ static ioctl_fn lookup_ioctl(unsigned int cmd, int *ioctl_flags)
 		{DM_TARGET_MSG_CMD, 0, target_message},
 		{DM_DEV_SET_GEOMETRY_CMD, 0, dev_set_geometry},
 		{DM_DEV_ARM_POLL, IOCTL_FLAGS_NO_PARAMS, dev_arm_poll},
-		{DM_GET_TARGET_VERSION, 0, get_target_version},
 	};
 
 	if (unlikely(cmd >= ARRAY_SIZE(_ioctls)))

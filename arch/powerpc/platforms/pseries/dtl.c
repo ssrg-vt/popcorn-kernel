@@ -27,7 +27,13 @@ struct dtl {
 };
 static DEFINE_PER_CPU(struct dtl, cpu_dtl);
 
-static u8 dtl_event_mask = DTL_LOG_ALL;
+/*
+ * Dispatch trace log event mask:
+ * 0x7: 0x1: voluntary virtual processor waits
+ *      0x2: time-slice preempts
+ *      0x4: virtual partition memory page faults
+ */
+static u8 dtl_event_mask = 0x7;
 
 
 /*
@@ -42,6 +48,7 @@ struct dtl_ring {
 	struct dtl_entry *write_ptr;
 	struct dtl_entry *buf;
 	struct dtl_entry *buf_end;
+	u8	saved_dtl_mask;
 };
 
 static DEFINE_PER_CPU(struct dtl_ring, dtl_rings);
@@ -91,6 +98,7 @@ static int dtl_start(struct dtl *dtl)
 	dtlr->write_ptr = dtl->buf;
 
 	/* enable event logging */
+	dtlr->saved_dtl_mask = lppaca_of(dtl->cpu).dtl_enable_mask;
 	lppaca_of(dtl->cpu).dtl_enable_mask |= dtl_event_mask;
 
 	dtl_consumer = consume_dtle;
@@ -108,7 +116,7 @@ static void dtl_stop(struct dtl *dtl)
 	dtlr->buf = NULL;
 
 	/* restore dtl_enable_mask */
-	lppaca_of(dtl->cpu).dtl_enable_mask = DTL_LOG_PREEMPT;
+	lppaca_of(dtl->cpu).dtl_enable_mask = dtlr->saved_dtl_mask;
 
 	if (atomic_dec_and_test(&dtl_count))
 		dtl_consumer = NULL;
@@ -180,16 +188,11 @@ static int dtl_enable(struct dtl *dtl)
 	if (dtl->buf)
 		return -EBUSY;
 
-	/* ensure there are no other conflicting dtl users */
-	if (!read_trylock(&dtl_access_lock))
-		return -EBUSY;
-
 	n_entries = dtl_buf_entries;
 	buf = kmem_cache_alloc_node(dtl_cache, GFP_KERNEL, cpu_to_node(dtl->cpu));
 	if (!buf) {
 		printk(KERN_WARNING "%s: buffer alloc failed for cpu %d\n",
 				__func__, dtl->cpu);
-		read_unlock(&dtl_access_lock);
 		return -ENOMEM;
 	}
 
@@ -206,11 +209,8 @@ static int dtl_enable(struct dtl *dtl)
 	}
 	spin_unlock(&dtl->lock);
 
-	if (rc) {
-		read_unlock(&dtl_access_lock);
+	if (rc)
 		kmem_cache_free(dtl_cache, buf);
-	}
-
 	return rc;
 }
 
@@ -222,7 +222,6 @@ static void dtl_disable(struct dtl *dtl)
 	dtl->buf = NULL;
 	dtl->buf_entries = 0;
 	spin_unlock(&dtl->lock);
-	read_unlock(&dtl_access_lock);
 }
 
 /* file interface */

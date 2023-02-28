@@ -520,8 +520,10 @@ static int bcm63xx_spi_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(dev, "no irq: %d\n", irq);
 		return irq;
+	}
 
 	clk = devm_clk_get(dev, "spi");
 	if (IS_ERR(clk)) {

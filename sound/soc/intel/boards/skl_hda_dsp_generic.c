@@ -23,7 +23,6 @@ static const struct snd_soc_dapm_widget skl_hda_widgets[] = {
 	SND_SOC_DAPM_MIC("Alt Analog In", NULL),
 	SND_SOC_DAPM_SPK("Digital Out", NULL),
 	SND_SOC_DAPM_MIC("Digital In", NULL),
-	SND_SOC_DAPM_MIC("SoC DMIC", NULL),
 };
 
 static const struct snd_soc_dapm_route skl_hda_map[] = {
@@ -41,9 +40,6 @@ static const struct snd_soc_dapm_route skl_hda_map[] = {
 	{ "Codec Input Pin1", NULL, "Analog In" },
 	{ "Codec Input Pin2", NULL, "Digital In" },
 	{ "Codec Input Pin3", NULL, "Alt Analog In" },
-
-	/* digital mics */
-	{"DMic", NULL, "SoC DMIC"},
 
 	/* CODEC BE connections */
 	{ "Analog Codec Playback", NULL, "Analog CPU Playback" },
@@ -73,7 +69,7 @@ skl_hda_add_dai_link(struct snd_soc_card *card, struct snd_soc_dai_link *link)
 	int ret = 0;
 
 	dev_dbg(card->dev, "%s: dai link name - %s\n", __func__, link->name);
-	link->platforms->name = ctx->platform_name;
+	link->platform_name = ctx->platform_name;
 	link->nonatomic = 1;
 
 	if (strstr(link->name, "HDMI")) {
@@ -146,7 +142,7 @@ static int skl_hda_fill_card_info(struct snd_soc_acpi_mach_params *mach_params)
 	card->num_dapm_routes = num_route;
 
 	for_each_card_prelinks(card, i, dai_link)
-		dai_link->platforms->name = mach_params->platform;
+		dai_link->platform_name = mach_params->platform;
 
 	return 0;
 }

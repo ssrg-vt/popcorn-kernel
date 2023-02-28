@@ -7,31 +7,12 @@
  */
 #include <linux/dmaengine.h>
 #include <linux/pm_runtime.h>
-#include <linux/mtd/spi-nor.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/spi-mem.h>
 
 #include "internals.h"
 
 #define SPI_MEM_MAX_BUSWIDTH		8
-
-bool update_stripe(const struct spi_mem_op *op)
-{
-	if (op->cmd.opcode ==  SPINOR_OP_BE_4K ||
-	    op->cmd.opcode ==  SPINOR_OP_BE_32K ||
-	    op->cmd.opcode ==  SPINOR_OP_CHIP_ERASE ||
-	    op->cmd.opcode ==  SPINOR_OP_SE ||
-	    op->cmd.opcode ==  SPINOR_OP_BE_32K_4B ||
-	    op->cmd.opcode ==  SPINOR_OP_SE_4B ||
-	    op->cmd.opcode == SPINOR_OP_BE_4K_4B ||
-	    op->cmd.opcode ==  SPINOR_OP_WRSR ||
-	    op->cmd.opcode ==  SPINOR_OP_WREAR ||
-	    op->cmd.opcode ==  SPINOR_OP_BRWR ||
-	    (op->cmd.opcode ==  SPINOR_OP_WRSR2 && !op->addr.nbytes))
-		return false;
-
-	return true;
-}
 
 /**
  * spi_controller_dma_map_mem_op_data() - DMA-map the buffer attached to a
@@ -365,7 +346,6 @@ int spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 		xfers[xferpos].tx_buf = tmpbuf + op->addr.nbytes + 1;
 		xfers[xferpos].len = op->dummy.nbytes;
 		xfers[xferpos].tx_nbits = op->dummy.buswidth;
-		xfers[xferpos].dummy = op->dummy.nbytes * 8;
 		spi_message_add_tail(&xfers[xferpos], &msg);
 		xferpos++;
 		totalxferlen += op->dummy.nbytes;
@@ -380,7 +360,6 @@ int spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 			xfers[xferpos].tx_nbits = op->data.buswidth;
 		}
 
-		xfers[xferpos].stripe = update_stripe(op);
 		xfers[xferpos].len = op->data.nbytes;
 		spi_message_add_tail(&xfers[xferpos], &msg);
 		xferpos++;

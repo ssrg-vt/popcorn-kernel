@@ -5,22 +5,20 @@
  * Copyright (C) 2013 Philipp Zabel, Pengutronix
  */
 
-#include <linux/clk-provider.h>
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
 #include <linux/component.h>
-#include <linux/i2c.h>
 #include <linux/module.h>
-#include <linux/platform_device.h>
+#include <linux/i2c.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/spinlock.h>
 #include <linux/videodev2.h>
-
-#include <video/imx-ipu-v3.h>
-
+#include <drm/drmP.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_probe_helper.h>
+#include <video/imx-ipu-v3.h>
 
 #include "imx-drm.h"
 
@@ -484,10 +482,8 @@ static int imx_tve_register(struct drm_device *drm, struct imx_tve *tve)
 
 	drm_connector_helper_add(&tve->connector,
 			&imx_tve_connector_helper_funcs);
-	drm_connector_init_with_ddc(drm, &tve->connector,
-				    &imx_tve_connector_funcs,
-				    DRM_MODE_CONNECTOR_VGA,
-				    tve->ddc);
+	drm_connector_init(drm, &tve->connector, &imx_tve_connector_funcs,
+			   DRM_MODE_CONNECTOR_VGA);
 
 	drm_connector_attach_encoder(&tve->connector, &tve->encoder);
 

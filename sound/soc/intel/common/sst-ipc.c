@@ -43,7 +43,7 @@ static struct ipc_message *msg_get_empty(struct sst_generic_ipc *ipc)
 }
 
 static int tx_wait_done(struct sst_generic_ipc *ipc,
-	struct ipc_message *msg, struct sst_ipc_message *reply)
+	struct ipc_message *msg, void *rx_data)
 {
 	unsigned long flags;
 	int ret;
@@ -62,11 +62,8 @@ static int tx_wait_done(struct sst_generic_ipc *ipc,
 	} else {
 
 		/* copy the data returned from DSP */
-		if (reply) {
-			reply->header = msg->rx.header;
-			if (reply->data)
-				memcpy(reply->data, msg->rx.data, msg->rx.size);
-		}
+		if (msg->rx_size)
+			memcpy(rx_data, msg->rx_data, msg->rx_size);
 		ret = msg->errno;
 	}
 
@@ -75,9 +72,9 @@ static int tx_wait_done(struct sst_generic_ipc *ipc,
 	return ret;
 }
 
-static int ipc_tx_message(struct sst_generic_ipc *ipc,
-	struct sst_ipc_message request,
-	struct sst_ipc_message *reply, int wait)
+static int ipc_tx_message(struct sst_generic_ipc *ipc, u64 header,
+	void *tx_data, size_t tx_bytes, void *rx_data,
+	size_t rx_bytes, int wait)
 {
 	struct ipc_message *msg;
 	unsigned long flags;
@@ -90,24 +87,23 @@ static int ipc_tx_message(struct sst_generic_ipc *ipc,
 		return -EBUSY;
 	}
 
-	msg->tx.header = request.header;
-	msg->tx.size = request.size;
-	msg->rx.header = 0;
-	msg->rx.size = reply ? reply->size : 0;
+	msg->header = header;
+	msg->tx_size = tx_bytes;
+	msg->rx_size = rx_bytes;
 	msg->wait = wait;
 	msg->errno = 0;
 	msg->pending = false;
 	msg->complete = false;
 
-	if ((request.size) && (ipc->ops.tx_data_copy != NULL))
-		ipc->ops.tx_data_copy(msg, request.data, request.size);
+	if ((tx_bytes) && (ipc->ops.tx_data_copy != NULL))
+		ipc->ops.tx_data_copy(msg, tx_data, tx_bytes);
 
 	list_add_tail(&msg->list, &ipc->tx_list);
 	schedule_work(&ipc->kwork);
 	spin_unlock_irqrestore(&ipc->dsp->spinlock, flags);
 
 	if (wait)
-		return tx_wait_done(ipc, msg, reply);
+		return tx_wait_done(ipc, msg, rx_data);
 	else
 		return 0;
 }
@@ -122,13 +118,13 @@ static int msg_empty_list_init(struct sst_generic_ipc *ipc)
 		return -ENOMEM;
 
 	for (i = 0; i < IPC_EMPTY_LIST_SIZE; i++) {
-		ipc->msg[i].tx.data = kzalloc(ipc->tx_data_max_size, GFP_KERNEL);
-		if (ipc->msg[i].tx.data == NULL)
+		ipc->msg[i].tx_data = kzalloc(ipc->tx_data_max_size, GFP_KERNEL);
+		if (ipc->msg[i].tx_data == NULL)
 			goto free_mem;
 
-		ipc->msg[i].rx.data = kzalloc(ipc->rx_data_max_size, GFP_KERNEL);
-		if (ipc->msg[i].rx.data == NULL) {
-			kfree(ipc->msg[i].tx.data);
+		ipc->msg[i].rx_data = kzalloc(ipc->rx_data_max_size, GFP_KERNEL);
+		if (ipc->msg[i].rx_data == NULL) {
+			kfree(ipc->msg[i].tx_data);
 			goto free_mem;
 		}
 
@@ -140,8 +136,8 @@ static int msg_empty_list_init(struct sst_generic_ipc *ipc)
 
 free_mem:
 	while (i > 0) {
-		kfree(ipc->msg[i-1].tx.data);
-		kfree(ipc->msg[i-1].rx.data);
+		kfree(ipc->msg[i-1].tx_data);
+		kfree(ipc->msg[i-1].rx_data);
 		--i;
 	}
 	kfree(ipc->msg);
@@ -177,8 +173,8 @@ static void ipc_tx_msgs(struct work_struct *work)
 	spin_unlock_irq(&ipc->dsp->spinlock);
 }
 
-int sst_ipc_tx_message_wait(struct sst_generic_ipc *ipc,
-	struct sst_ipc_message request, struct sst_ipc_message *reply)
+int sst_ipc_tx_message_wait(struct sst_generic_ipc *ipc, u64 header,
+	void *tx_data, size_t tx_bytes, void *rx_data, size_t rx_bytes)
 {
 	int ret;
 
@@ -191,7 +187,8 @@ int sst_ipc_tx_message_wait(struct sst_generic_ipc *ipc,
 		if (ipc->ops.check_dsp_lp_on(ipc->dsp, true))
 			return -EIO;
 
-	ret = ipc_tx_message(ipc, request, reply, 1);
+	ret = ipc_tx_message(ipc, header, tx_data, tx_bytes,
+		rx_data, rx_bytes, 1);
 
 	if (ipc->ops.check_dsp_lp_on)
 		if (ipc->ops.check_dsp_lp_on(ipc->dsp, false))
@@ -201,17 +198,19 @@ int sst_ipc_tx_message_wait(struct sst_generic_ipc *ipc,
 }
 EXPORT_SYMBOL_GPL(sst_ipc_tx_message_wait);
 
-int sst_ipc_tx_message_nowait(struct sst_generic_ipc *ipc,
-	struct sst_ipc_message request)
+int sst_ipc_tx_message_nowait(struct sst_generic_ipc *ipc, u64 header,
+	void *tx_data, size_t tx_bytes)
 {
-	return ipc_tx_message(ipc, request, NULL, 0);
+	return ipc_tx_message(ipc, header, tx_data, tx_bytes,
+		NULL, 0, 0);
 }
 EXPORT_SYMBOL_GPL(sst_ipc_tx_message_nowait);
 
-int sst_ipc_tx_message_nopm(struct sst_generic_ipc *ipc,
-	struct sst_ipc_message request, struct sst_ipc_message *reply)
+int sst_ipc_tx_message_nopm(struct sst_generic_ipc *ipc, u64 header,
+	void *tx_data, size_t tx_bytes, void *rx_data, size_t rx_bytes)
 {
-	return ipc_tx_message(ipc, request, reply, 1);
+	return ipc_tx_message(ipc, header, tx_data, tx_bytes,
+		rx_data, rx_bytes, 1);
 }
 EXPORT_SYMBOL_GPL(sst_ipc_tx_message_nopm);
 
@@ -233,7 +232,7 @@ struct ipc_message *sst_ipc_reply_find_msg(struct sst_generic_ipc *ipc,
 	}
 
 	list_for_each_entry(msg, &ipc->rx_list, list) {
-		if ((msg->tx.header & mask) == header)
+		if ((msg->header & mask) == header)
 			return msg;
 	}
 
@@ -307,8 +306,8 @@ void sst_ipc_fini(struct sst_generic_ipc *ipc)
 
 	if (ipc->msg) {
 		for (i = 0; i < IPC_EMPTY_LIST_SIZE; i++) {
-			kfree(ipc->msg[i].tx.data);
-			kfree(ipc->msg[i].rx.data);
+			kfree(ipc->msg[i].tx_data);
+			kfree(ipc->msg[i].rx_data);
 		}
 		kfree(ipc->msg);
 	}

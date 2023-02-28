@@ -15,5 +15,3 @@ obj-$(CONFIG_MISDN_NETJET) += netjet.o
 # chip modules
 obj-$(CONFIG_MISDN_IPAC) += mISDNipac.o
 obj-$(CONFIG_MISDN_ISAR) += mISDNisar.o
-
-obj-$(CONFIG_MISDN_HDLC) += isdnhdlc.o

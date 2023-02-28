@@ -539,8 +539,11 @@ static void omap_pm_init_debugfs(void)
 	struct dentry *d;
 
 	d = debugfs_create_dir("pm_debug", NULL);
-	debugfs_create_file("omap_pm", S_IWUSR | S_IRUGO, d, NULL,
-			    &omap_pm_debug_fops);
+	if (!d)
+		return;
+
+	(void) debugfs_create_file("omap_pm", S_IWUSR | S_IRUGO,
+					d, NULL, &omap_pm_debug_fops);
 }
 
 #endif /* CONFIG_DEBUG_FS */

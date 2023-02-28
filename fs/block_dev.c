@@ -26,7 +26,6 @@
 #include <linux/writeback.h>
 #include <linux/mpage.h>
 #include <linux/mount.h>
-#include <linux/pseudo_fs.h>
 #include <linux/uio.h>
 #include <linux/namei.h>
 #include <linux/log2.h>
@@ -204,12 +203,13 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 {
 	struct file *file = iocb->ki_filp;
 	struct block_device *bdev = I_BDEV(bdev_file_inode(file));
-	struct bio_vec inline_vecs[DIO_INLINE_BIO_VECS], *vecs;
+	struct bio_vec inline_vecs[DIO_INLINE_BIO_VECS], *vecs, *bvec;
 	loff_t pos = iocb->ki_pos;
 	bool should_dirty = false;
 	struct bio bio;
 	ssize_t ret;
 	blk_qc_t qc;
+	struct bvec_iter_all iter_all;
 
 	if ((pos | iov_iter_alignment(iter)) &
 	    (bdev_logical_block_size(bdev) - 1))
@@ -259,7 +259,13 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 	}
 	__set_current_state(TASK_RUNNING);
 
-	bio_release_pages(&bio, should_dirty);
+	bio_for_each_segment_all(bvec, &bio, iter_all) {
+		if (should_dirty && !PageCompound(bvec->bv_page))
+			set_page_dirty_lock(bvec->bv_page);
+		if (!bio_flagged(&bio, BIO_NO_PAGE_REF))
+			put_page(bvec->bv_page);
+	}
+
 	if (unlikely(bio.bi_status))
 		ret = blk_status_to_errno(bio.bi_status);
 
@@ -329,7 +335,13 @@ static void blkdev_bio_end_io(struct bio *bio)
 	if (should_dirty) {
 		bio_check_pages_dirty(bio);
 	} else {
-		bio_release_pages(bio, false);
+		if (!bio_flagged(bio, BIO_NO_PAGE_REF)) {
+			struct bvec_iter_all iter_all;
+			struct bio_vec *bvec;
+
+			bio_for_each_segment_all(bvec, bio, iter_all)
+				put_page(bvec->bv_page);
+		}
 		bio_put(bio);
 	}
 }
@@ -822,19 +834,19 @@ static const struct super_operations bdev_sops = {
 	.evict_inode = bdev_evict_inode,
 };
 
-static int bd_init_fs_context(struct fs_context *fc)
+static struct dentry *bd_mount(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	struct pseudo_fs_context *ctx = init_pseudo(fc, BDEVFS_MAGIC);
-	if (!ctx)
-		return -ENOMEM;
-	fc->s_iflags |= SB_I_CGROUPWB;
-	ctx->ops = &bdev_sops;
-	return 0;
+	struct dentry *dent;
+	dent = mount_pseudo(fs_type, "bdev:", &bdev_sops, NULL, BDEVFS_MAGIC);
+	if (!IS_ERR(dent))
+		dent->d_sb->s_iflags |= SB_I_CGROUPWB;
+	return dent;
 }
 
 static struct file_system_type bd_type = {
 	.name		= "bdev",
-	.init_fs_context = bd_init_fs_context,
+	.mount		= bd_mount,
 	.kill_sb	= kill_anon_super,
 };
 
@@ -1971,9 +1983,6 @@ ssize_t blkdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	if (bdev_read_only(I_BDEV(bd_inode)))
 		return -EPERM;
-
-	if (IS_SWAPFILE(bd_inode))
-		return -ETXTBSY;
 
 	if (!iov_iter_count(from))
 		return 0;

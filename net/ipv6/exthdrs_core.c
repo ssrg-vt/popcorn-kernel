@@ -197,8 +197,10 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 		struct ipv6hdr _ip6, *ip6;
 
 		ip6 = skb_header_pointer(skb, *offset, sizeof(_ip6), &_ip6);
-		if (!ip6 || (ip6->version != 6))
+		if (!ip6 || (ip6->version != 6)) {
+			printk(KERN_ERR "IPv6 header not found\n");
 			return -EBADMSG;
+		}
 		start = *offset + sizeof(struct ipv6hdr);
 		nexthdr = ip6->nexthdr;
 	}
@@ -264,7 +266,7 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 		} else if (nexthdr == NEXTHDR_AUTH) {
 			if (flags && (*flags & IP6_FH_F_AUTH) && (target < 0))
 				break;
-			hdrlen = ipv6_authlen(hp);
+			hdrlen = (hp->hdrlen + 2) << 2;
 		} else
 			hdrlen = ipv6_optlen(hp);
 

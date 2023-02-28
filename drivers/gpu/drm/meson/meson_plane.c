@@ -9,20 +9,24 @@
  *     Jasper St. Pierre <jstpierre@mecheye.net>
  */
 
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/bitfield.h>
-
+#include <linux/platform_device.h>
+#include <drm/drmP.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_device.h>
-#include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_fourcc.h>
-#include <drm/drm_gem_cma_helper.h>
-#include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_plane_helper.h>
+#include <drm/drm_gem_cma_helper.h>
+#include <drm/drm_fb_cma_helper.h>
+#include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_rect.h>
 
 #include "meson_plane.h"
-#include "meson_registers.h"
+#include "meson_vpp.h"
 #include "meson_viu.h"
+#include "meson_registers.h"
 
 /* OSD_SCI_WH_M1 */
 #define SCI_WH_M1_W(w)			FIELD_PREP(GENMASK(28, 16), w)
@@ -138,7 +142,7 @@ static void meson_plane_atomic_update(struct drm_plane *plane,
 				      OSD_ENDIANNESS_LE);
 
 	/* On GXBB, Use the old non-HDR RGB2YUV converter */
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB))
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu"))
 		priv->viu.osd1_blk0_cfg[0] |= OSD_OUTPUT_COLOR_RGB;
 
 	switch (fb->format->format) {
@@ -292,7 +296,7 @@ static void meson_plane_atomic_update(struct drm_plane *plane,
 	priv->viu.osd1_blk0_cfg[3] = ((dest.x2 - 1) << 16) | dest.x1;
 	priv->viu.osd1_blk0_cfg[4] = ((dest.y2 - 1) << 16) | dest.y1;
 
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A)) {
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu")) {
 		priv->viu.osd_blend_din0_scope_h = ((dest.x2 - 1) << 16) | dest.x1;
 		priv->viu.osd_blend_din0_scope_v = ((dest.y2 - 1) << 16) | dest.y1;
 		priv->viu.osb_blend0_size = dst_h << 16 | dst_w;
@@ -308,8 +312,8 @@ static void meson_plane_atomic_update(struct drm_plane *plane,
 
 	if (!meson_plane->enabled) {
 		/* Reset OSD1 before enabling it on GXL+ SoCs */
-		if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXM) ||
-		    meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXL))
+		if (meson_vpu_is_compatible(priv, "amlogic,meson-gxm-vpu") ||
+		    meson_vpu_is_compatible(priv, "amlogic,meson-gxl-vpu"))
 			meson_viu_osd1_reset(priv);
 
 		meson_plane->enabled = true;
@@ -327,8 +331,8 @@ static void meson_plane_atomic_disable(struct drm_plane *plane,
 	struct meson_drm *priv = meson_plane->priv;
 
 	/* Disable OSD1 */
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A))
-		writel_bits_relaxed(VIU_OSD1_POSTBLD_SRC_OSD1, 0,
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu"))
+		writel_bits_relaxed(3 << 8, 0,
 				    priv->io_base + _REG(OSD1_BLEND_SRC_CTRL));
 	else
 		writel_bits_relaxed(VPP_OSD1_POSTBLEND, 0,
@@ -384,9 +388,6 @@ int meson_plane_create(struct meson_drm *priv)
 				 DRM_PLANE_TYPE_PRIMARY, "meson_primary_plane");
 
 	drm_plane_helper_add(plane, &meson_plane_helper_funcs);
-
-	/* For now, OSD Primary plane is always on the front */
-	drm_plane_create_zpos_immutable_property(plane, 1);
 
 	priv->primary_plane = plane;
 

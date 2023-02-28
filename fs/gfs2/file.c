@@ -136,36 +136,27 @@ static struct {
 	{FS_JOURNAL_DATA_FL, GFS2_DIF_JDATA | GFS2_DIF_INHERIT_JDATA},
 };
 
-static inline u32 gfs2_gfsflags_to_fsflags(struct inode *inode, u32 gfsflags)
-{
-	int i;
-	u32 fsflags = 0;
-
-	if (S_ISDIR(inode->i_mode))
-		gfsflags &= ~GFS2_DIF_JDATA;
-	else
-		gfsflags &= ~GFS2_DIF_INHERIT_JDATA;
-
-	for (i = 0; i < ARRAY_SIZE(fsflag_gfs2flag); i++)
-		if (gfsflags & fsflag_gfs2flag[i].gfsflag)
-			fsflags |= fsflag_gfs2flag[i].fsflag;
-	return fsflags;
-}
-
 static int gfs2_get_flags(struct file *filp, u32 __user *ptr)
 {
 	struct inode *inode = file_inode(filp);
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_holder gh;
-	int error;
-	u32 fsflags;
+	int i, error;
+	u32 gfsflags, fsflags = 0;
 
 	gfs2_holder_init(ip->i_gl, LM_ST_SHARED, 0, &gh);
 	error = gfs2_glock_nq(&gh);
 	if (error)
 		goto out_uninit;
 
-	fsflags = gfs2_gfsflags_to_fsflags(inode, ip->i_diskflags);
+	gfsflags = ip->i_diskflags;
+	if (S_ISDIR(inode->i_mode))
+		gfsflags &= ~GFS2_DIF_JDATA;
+	else
+		gfsflags &= ~GFS2_DIF_INHERIT_JDATA;
+	for (i = 0; i < ARRAY_SIZE(fsflag_gfs2flag); i++)
+		if (gfsflags & fsflag_gfs2flag[i].gfsflag)
+			fsflags |= fsflag_gfs2flag[i].fsflag;
 
 	if (put_user(fsflags, ptr))
 		error = -EFAULT;
@@ -209,11 +200,9 @@ void gfs2_set_inode_flags(struct inode *inode)
  * @filp: file pointer
  * @reqflags: The flags to set
  * @mask: Indicates which flags are valid
- * @fsflags: The FS_* inode flags passed in
  *
  */
-static int do_gfs2_set_flags(struct file *filp, u32 reqflags, u32 mask,
-			     const u32 fsflags)
+static int do_gfs2_set_flags(struct file *filp, u32 reqflags, u32 mask)
 {
 	struct inode *inode = file_inode(filp);
 	struct gfs2_inode *ip = GFS2_I(inode);
@@ -221,7 +210,7 @@ static int do_gfs2_set_flags(struct file *filp, u32 reqflags, u32 mask,
 	struct buffer_head *bh;
 	struct gfs2_holder gh;
 	int error;
-	u32 new_flags, flags, oldflags;
+	u32 new_flags, flags;
 
 	error = mnt_want_write_file(filp);
 	if (error)
@@ -230,11 +219,6 @@ static int do_gfs2_set_flags(struct file *filp, u32 reqflags, u32 mask,
 	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &gh);
 	if (error)
 		goto out_drop_write;
-
-	oldflags = gfs2_gfsflags_to_fsflags(inode, ip->i_diskflags);
-	error = vfs_ioc_setflags_prepare(inode, oldflags, fsflags);
-	if (error)
-		goto out;
 
 	error = -EACCES;
 	if (!inode_owner_or_capable(inode))
@@ -324,7 +308,7 @@ static int gfs2_set_flags(struct file *filp, u32 __user *ptr)
 		mask &= ~(GFS2_DIF_TOPDIR | GFS2_DIF_INHERIT_JDATA);
 	}
 
-	return do_gfs2_set_flags(filp, gfsflags, mask, fsflags);
+	return do_gfs2_set_flags(filp, gfsflags, mask);
 }
 
 static int gfs2_getlabel(struct file *filp, char __user *label)
@@ -379,30 +363,31 @@ static void gfs2_size_hint(struct file *filep, loff_t offset, size_t size)
 }
 
 /**
- * gfs2_allocate_page_backing - Allocate blocks for a write fault
+ * gfs2_allocate_page_backing - Use bmap to allocate blocks
  * @page: The (locked) page to allocate backing for
  *
- * We try to allocate all the blocks required for the page in one go.  This
- * might fail for various reasons, so we keep trying until all the blocks to
- * back this page are allocated.  If some of the blocks are already allocated,
- * that is ok too.
+ * We try to allocate all the blocks required for the page in
+ * one go. This might fail for various reasons, so we keep
+ * trying until all the blocks to back this page are allocated.
+ * If some of the blocks are already allocated, thats ok too.
  */
+
 static int gfs2_allocate_page_backing(struct page *page)
 {
-	u64 pos = page_offset(page);
-	u64 size = PAGE_SIZE;
+	struct inode *inode = page->mapping->host;
+	struct buffer_head bh;
+	unsigned long size = PAGE_SIZE;
+	u64 lblock = page->index << (PAGE_SHIFT - inode->i_blkbits);
 
 	do {
-		struct iomap iomap = { };
-
-		if (gfs2_iomap_get_alloc(page->mapping->host, pos, 1, &iomap))
+		bh.b_state = 0;
+		bh.b_size = size;
+		gfs2_block_map(inode, lblock, &bh, 1);
+		if (!buffer_mapped(&bh))
 			return -EIO;
-
-		iomap.length = min(iomap.length, size);
-		size -= iomap.length;
-		pos += iomap.length;
-	} while (size > 0);
-
+		size -= bh.b_size;
+		lblock += (bh.b_size >> inode->i_blkbits);
+	} while(size > 0);
 	return 0;
 }
 
@@ -423,7 +408,7 @@ static vm_fault_t gfs2_page_mkwrite(struct vm_fault *vmf)
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	struct gfs2_alloc_parms ap = { .aflags = 0, };
 	unsigned long last_index;
-	u64 pos = page_offset(page);
+	u64 pos = page->index << PAGE_SHIFT;
 	unsigned int data_blocks, ind_blocks, rblocks;
 	struct gfs2_holder gh;
 	loff_t size;
@@ -1049,7 +1034,7 @@ static long __gfs2_fallocate(struct file *file, int mode, loff_t offset, loff_t 
 			rblocks += data_blocks ? data_blocks : 1;
 
 		error = gfs2_trans_begin(sdp, rblocks,
-					 PAGE_SIZE >> inode->i_blkbits);
+					 PAGE_SIZE/sdp->sd_sb.sb_bsize);
 		if (error)
 			goto out_trans_fail;
 
@@ -1065,10 +1050,11 @@ static long __gfs2_fallocate(struct file *file, int mode, loff_t offset, loff_t 
 		gfs2_quota_unlock(ip);
 	}
 
-	if (!(mode & FALLOC_FL_KEEP_SIZE) && (pos + count) > inode->i_size)
+	if (!(mode & FALLOC_FL_KEEP_SIZE) && (pos + count) > inode->i_size) {
 		i_size_write(inode, pos + count);
-	file_update_time(file);
-	mark_inode_dirty(inode);
+		file_update_time(file);
+		mark_inode_dirty(inode);
+	}
 
 	if ((file->f_flags & O_DSYNC) || IS_SYNC(file->f_mapping->host))
 		return vfs_fsync_range(file, pos, pos + count - 1,
@@ -1180,7 +1166,7 @@ static int gfs2_lock(struct file *file, int cmd, struct file_lock *fl)
 		cmd = F_SETLK;
 		fl->fl_type = F_UNLCK;
 	}
-	if (unlikely(test_bit(SDF_WITHDRAWN, &sdp->sd_flags))) {
+	if (unlikely(test_bit(SDF_SHUTDOWN, &sdp->sd_flags))) {
 		if (fl->fl_type == F_UNLCK)
 			locks_lock_file_wait(file, fl);
 		return -EIO;

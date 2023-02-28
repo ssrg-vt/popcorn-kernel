@@ -12,7 +12,6 @@
 #include <linux/idr.h>
 #include <linux/module.h>
 #include <linux/mount.h>
-#include <linux/pseudo_fs.h>
 #include <linux/poll.h>
 #include <linux/sched/signal.h>
 
@@ -32,15 +31,31 @@
 static int ocxlflash_fs_cnt;
 static struct vfsmount *ocxlflash_vfs_mount;
 
-static int ocxlflash_fs_init_fs_context(struct fs_context *fc)
+static const struct dentry_operations ocxlflash_fs_dops = {
+	.d_dname	= simple_dname,
+};
+
+/*
+ * ocxlflash_fs_mount() - mount the pseudo-filesystem
+ * @fs_type:	File system type.
+ * @flags:	Flags for the filesystem.
+ * @dev_name:	Device name associated with the filesystem.
+ * @data:	Data pointer.
+ *
+ * Return: pointer to the directory entry structure
+ */
+static struct dentry *ocxlflash_fs_mount(struct file_system_type *fs_type,
+					 int flags, const char *dev_name,
+					 void *data)
 {
-	return init_pseudo(fc, OCXLFLASH_FS_MAGIC) ? 0 : -ENOMEM;
+	return mount_pseudo(fs_type, "ocxlflash:", NULL, &ocxlflash_fs_dops,
+			    OCXLFLASH_FS_MAGIC);
 }
 
 static struct file_system_type ocxlflash_fs_type = {
 	.name		= "ocxlflash",
 	.owner		= THIS_MODULE,
-	.init_fs_context = ocxlflash_fs_init_fs_context,
+	.mount		= ocxlflash_fs_mount,
 	.kill_sb	= kill_anon_super,
 };
 

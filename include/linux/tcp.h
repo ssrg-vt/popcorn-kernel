@@ -58,7 +58,12 @@ static inline unsigned int tcp_optlen(const struct sk_buff *skb)
 
 /* TCP Fast Open Cookie as stored in memory */
 struct tcp_fastopen_cookie {
-	__le64	val[DIV_ROUND_UP(TCP_FASTOPEN_COOKIE_MAX, sizeof(u64))];
+	union {
+		u8	val[TCP_FASTOPEN_COOKIE_MAX];
+#if IS_ENABLED(CONFIG_IPV6)
+		struct in6_addr addr;
+#endif
+	};
 	s8	len;
 	bool	exp;	/* In RFC6994 experimental option format */
 };
@@ -240,7 +245,6 @@ struct tcp_sock {
 		syn_smc:1;	/* SYN includes SMC */
 	u32	tlp_high_seq;	/* snd_nxt at the time of TLP retransmit. */
 
-	u32	tcp_tx_delay;	/* delay (in usec) added to TX packets */
 	u64	tcp_wstamp_ns;	/* departure time for next sent data packet */
 	u64	tcp_clock_cache; /* cache last tcp_clock_ns() (see tcp_mstamp_refresh()) */
 
@@ -354,8 +358,6 @@ struct tcp_sock {
 #define BPF_SOCK_OPS_TEST_FLAG(TP, ARG) 0
 #endif
 
-	u32 rcv_ooopack; /* Received out-of-order packets, for tcpinfo */
-
 /* Receiver side RTT estimation */
 	u32 rcv_rtt_last_tsecr;
 	struct {
@@ -393,7 +395,7 @@ struct tcp_sock {
 	/* fastopen_rsk points to request_sock that resulted in this big
 	 * socket. Used to retransmit SYNACKs etc.
 	 */
-	struct request_sock __rcu *fastopen_rsk;
+	struct request_sock *fastopen_rsk;
 	u32	*saved_syn;
 };
 
@@ -434,7 +436,6 @@ struct tcp_timewait_sock {
 	u32			  tw_last_oow_ack_time;
 
 	int			  tw_ts_recent_stamp;
-	u32			  tw_tx_delay;
 #ifdef CONFIG_TCP_MD5SIG
 	struct tcp_md5sig_key	  *tw_md5_key;
 #endif
@@ -447,8 +448,8 @@ static inline struct tcp_timewait_sock *tcp_twsk(const struct sock *sk)
 
 static inline bool tcp_passive_fastopen(const struct sock *sk)
 {
-	return sk->sk_state == TCP_SYN_RECV &&
-	       rcu_access_pointer(tcp_sk(sk)->fastopen_rsk) != NULL;
+	return (sk->sk_state == TCP_SYN_RECV &&
+		tcp_sk(sk)->fastopen_rsk != NULL);
 }
 
 static inline void fastopen_queue_tune(struct sock *sk, int backlog)

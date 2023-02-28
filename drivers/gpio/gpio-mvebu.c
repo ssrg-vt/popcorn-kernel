@@ -38,7 +38,6 @@
 #include <linux/err.h>
 #include <linux/gpio/driver.h>
 #include <linux/gpio/consumer.h>
-#include <linux/gpio/machine.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/irq.h>
@@ -619,11 +618,15 @@ static int mvebu_pwm_request(struct pwm_chip *chip, struct pwm_device *pwm)
 		ret = -EBUSY;
 	} else {
 		desc = gpiochip_request_own_desc(&mvchip->chip,
-						 pwm->hwpwm, "mvebu-pwm",
-						 GPIO_ACTIVE_HIGH,
-						 GPIOD_OUT_LOW);
+						 pwm->hwpwm, "mvebu-pwm", 0);
 		if (IS_ERR(desc)) {
 			ret = PTR_ERR(desc);
+			goto out;
+		}
+
+		ret = gpiod_direction_output(desc, 0);
+		if (ret) {
+			gpiochip_free_own_desc(desc);
 			goto out;
 		}
 
@@ -694,7 +697,7 @@ static void mvebu_pwm_get_state(struct pwm_chip *chip,
 }
 
 static int mvebu_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
-			   const struct pwm_state *state)
+			   struct pwm_state *state)
 {
 	struct mvebu_pwm *mvpwm = to_mvebu_pwm(chip);
 	struct mvebu_gpio_chip *mvchip = mvpwm->mvchip;

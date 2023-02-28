@@ -1,2 +1,2 @@
 perf-y += util/
-perf-y += tests/
+perf-$(CONFIG_DWARF_UNWIND) += tests/

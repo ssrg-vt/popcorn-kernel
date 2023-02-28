@@ -164,30 +164,70 @@ static const struct file_operations dpaa2_dbg_ch_ops = {
 
 void dpaa2_dbg_add(struct dpaa2_eth_priv *priv)
 {
-	struct dentry *dir;
+	if (!dpaa2_dbg_root)
+		return;
 
 	/* Create a directory for the interface */
-	dir = debugfs_create_dir(priv->net_dev->name, dpaa2_dbg_root);
-	priv->dbg.dir = dir;
+	priv->dbg.dir = debugfs_create_dir(priv->net_dev->name,
+					   dpaa2_dbg_root);
+	if (!priv->dbg.dir) {
+		netdev_err(priv->net_dev, "debugfs_create_dir() failed\n");
+		return;
+	}
 
 	/* per-cpu stats file */
-	debugfs_create_file("cpu_stats", 0444, dir, priv, &dpaa2_dbg_cpu_ops);
+	priv->dbg.cpu_stats = debugfs_create_file("cpu_stats", 0444,
+						  priv->dbg.dir, priv,
+						  &dpaa2_dbg_cpu_ops);
+	if (!priv->dbg.cpu_stats) {
+		netdev_err(priv->net_dev, "debugfs_create_file() failed\n");
+		goto err_cpu_stats;
+	}
 
 	/* per-fq stats file */
-	debugfs_create_file("fq_stats", 0444, dir, priv, &dpaa2_dbg_fq_ops);
+	priv->dbg.fq_stats = debugfs_create_file("fq_stats", 0444,
+						 priv->dbg.dir, priv,
+						 &dpaa2_dbg_fq_ops);
+	if (!priv->dbg.fq_stats) {
+		netdev_err(priv->net_dev, "debugfs_create_file() failed\n");
+		goto err_fq_stats;
+	}
 
 	/* per-fq stats file */
-	debugfs_create_file("ch_stats", 0444, dir, priv, &dpaa2_dbg_ch_ops);
+	priv->dbg.ch_stats = debugfs_create_file("ch_stats", 0444,
+						 priv->dbg.dir, priv,
+						 &dpaa2_dbg_ch_ops);
+	if (!priv->dbg.fq_stats) {
+		netdev_err(priv->net_dev, "debugfs_create_file() failed\n");
+		goto err_ch_stats;
+	}
+
+	return;
+
+err_ch_stats:
+	debugfs_remove(priv->dbg.fq_stats);
+err_fq_stats:
+	debugfs_remove(priv->dbg.cpu_stats);
+err_cpu_stats:
+	debugfs_remove(priv->dbg.dir);
 }
 
 void dpaa2_dbg_remove(struct dpaa2_eth_priv *priv)
 {
-	debugfs_remove_recursive(priv->dbg.dir);
+	debugfs_remove(priv->dbg.fq_stats);
+	debugfs_remove(priv->dbg.ch_stats);
+	debugfs_remove(priv->dbg.cpu_stats);
+	debugfs_remove(priv->dbg.dir);
 }
 
 void dpaa2_eth_dbg_init(void)
 {
 	dpaa2_dbg_root = debugfs_create_dir(DPAA2_ETH_DBG_ROOT, NULL);
+	if (!dpaa2_dbg_root) {
+		pr_err("DPAA2-ETH: debugfs create failed\n");
+		return;
+	}
+
 	pr_debug("DPAA2-ETH: debugfs created\n");
 }
 

@@ -143,18 +143,24 @@ static void bcm_kona_wdt_debug_init(struct platform_device *pdev)
 	wdt->debugfs = NULL;
 
 	dir = debugfs_create_dir(BCM_KONA_WDT_NAME, NULL);
+	if (IS_ERR_OR_NULL(dir))
+		return;
 
-	debugfs_create_file("info", S_IFREG | S_IRUGO, dir, wdt,
-			    &bcm_kona_fops);
-	wdt->debugfs = dir;
+	if (debugfs_create_file("info", S_IFREG | S_IRUGO, dir, wdt,
+				&bcm_kona_fops))
+		wdt->debugfs = dir;
+	else
+		debugfs_remove_recursive(dir);
 }
 
 static void bcm_kona_wdt_debug_exit(struct platform_device *pdev)
 {
 	struct bcm_kona_wdt *wdt = platform_get_drvdata(pdev);
 
-	if (wdt)
+	if (wdt && wdt->debugfs) {
 		debugfs_remove_recursive(wdt->debugfs);
+		wdt->debugfs = NULL;
+	}
 }
 
 #else
@@ -301,8 +307,10 @@ static int bcm_kona_wdt_probe(struct platform_device *pdev)
 	watchdog_stop_on_reboot(&bcm_kona_wdt_wdd);
 	watchdog_stop_on_unregister(&bcm_kona_wdt_wdd);
 	ret = devm_watchdog_register_device(dev, &bcm_kona_wdt_wdd);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "Failed to register watchdog device");
 		return ret;
+	}
 
 	bcm_kona_wdt_debug_init(pdev);
 	dev_dbg(dev, "Broadcom Kona Watchdog Timer");

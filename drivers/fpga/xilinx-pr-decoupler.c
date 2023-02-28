@@ -19,13 +19,8 @@
 #define CTRL_OFFSET		0
 
 struct xlnx_pr_decoupler_data {
-	const struct xlnx_config_data *ipconfig;
 	void __iomem *io_base;
 	struct clk *clk;
-};
-
-struct xlnx_config_data {
-	char *name;
 };
 
 static inline void xlnx_pr_decoupler_write(struct xlnx_pr_decoupler_data *d,
@@ -81,28 +76,15 @@ static const struct fpga_bridge_ops xlnx_pr_decoupler_br_ops = {
 	.enable_show = xlnx_pr_decoupler_enable_show,
 };
 
-static const struct xlnx_config_data decoupler_config = {
-	.name = "Xilinx PR Decoupler",
-};
-
-static const struct xlnx_config_data shutdown_config = {
-	.name = "Xilinx DFX AXI shutdown mgr",
-};
-
 static const struct of_device_id xlnx_pr_decoupler_of_match[] = {
-	{ .compatible = "xlnx,pr-decoupler-1.00", .data = &decoupler_config },
-	{ .compatible = "xlnx,pr-decoupler", .data = &decoupler_config },
-	{ .compatible = "xlnx,dfx-axi-shutdown-manager-1.00",
-					.data = &shutdown_config },
-	{ .compatible = "xlnx,dfx-axi-shutdown-manager",
-					.data = &shutdown_config },
+	{ .compatible = "xlnx,pr-decoupler-1.00", },
+	{ .compatible = "xlnx,pr-decoupler", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, xlnx_pr_decoupler_of_match);
 
 static int xlnx_pr_decoupler_probe(struct platform_device *pdev)
 {
-	struct device_node *np = pdev->dev.of_node;
 	struct xlnx_pr_decoupler_data *priv;
 	struct fpga_bridge *br;
 	int err;
@@ -112,14 +94,6 @@ static int xlnx_pr_decoupler_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	if (np) {
-		const struct of_device_id *match;
-
-		match = of_match_node(xlnx_pr_decoupler_of_match, np);
-		if (match && match->data)
-			priv->ipconfig = match->data;
-	}
-
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	priv->io_base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(priv->io_base))
@@ -127,8 +101,7 @@ static int xlnx_pr_decoupler_probe(struct platform_device *pdev)
 
 	priv->clk = devm_clk_get(&pdev->dev, "aclk");
 	if (IS_ERR(priv->clk)) {
-		if (PTR_ERR(priv->clk) != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "input clock not found\n");
+		dev_err(&pdev->dev, "input clock not found\n");
 		return PTR_ERR(priv->clk);
 	}
 
@@ -140,7 +113,7 @@ static int xlnx_pr_decoupler_probe(struct platform_device *pdev)
 
 	clk_disable(priv->clk);
 
-	br = devm_fpga_bridge_create(&pdev->dev, priv->ipconfig->name,
+	br = devm_fpga_bridge_create(&pdev->dev, "Xilinx PR Decoupler",
 				     &xlnx_pr_decoupler_br_ops, priv);
 	if (!br) {
 		err = -ENOMEM;
@@ -151,8 +124,7 @@ static int xlnx_pr_decoupler_probe(struct platform_device *pdev)
 
 	err = fpga_bridge_register(br);
 	if (err) {
-		dev_err(&pdev->dev, "unable to register %s",
-			priv->ipconfig->name);
+		dev_err(&pdev->dev, "unable to register Xilinx PR Decoupler");
 		goto err_clk;
 	}
 

@@ -199,7 +199,7 @@ resubmit:
 				kfree_skb(skb);
 				return;
 			}
-			nf_reset_ct(skb);
+			nf_reset(skb);
 		}
 		ret = INDIRECT_CALL_2(ipprot->handler, tcp_v4_rcv, udp_rcv,
 				      skb);

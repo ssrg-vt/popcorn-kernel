@@ -177,6 +177,8 @@ static void conf_message(const char *fmt, ...)
 static const char *conf_filename;
 static int conf_lineno, conf_warnings;
 
+const char conf_defname[] = "arch/$(ARCH)/defconfig";
+
 static void conf_warning(const char *fmt, ...)
 {
 	va_list ap;
@@ -229,6 +231,21 @@ static const char *conf_get_autoconfig_name(void)
 	char *name = getenv("KCONFIG_AUTOCONFIG");
 
 	return name ? name : "include/config/auto.conf";
+}
+
+char *conf_get_default_confname(void)
+{
+	static char fullname[PATH_MAX+1];
+	char *env, *name;
+
+	name = expand_string(conf_defname);
+	env = getenv(SRCTREE);
+	if (env) {
+		snprintf(fullname, sizeof(fullname), "%s/%s", env, name);
+		if (is_present(fullname))
+			return fullname;
+	}
+	return name;
 }
 
 static int conf_set_sym_val(struct symbol *sym, int def, int def_flags, char *p)
@@ -534,9 +551,11 @@ int conf_read(const char *name)
 			switch (sym->type) {
 			case S_BOOLEAN:
 			case S_TRISTATE:
-				if (sym->def[S_DEF_USER].tri == sym_get_tristate_value(sym))
+				if (sym->def[S_DEF_USER].tri != sym_get_tristate_value(sym))
+					break;
+				if (!sym_is_choice(sym))
 					continue;
-				break;
+				/* fall through */
 			default:
 				if (!strcmp(sym->curr.val, sym->def[S_DEF_USER].val))
 					continue;
@@ -794,7 +813,7 @@ int conf_write_defconfig(const char *filename)
 				goto next_menu;
 			sym->flags &= ~SYMBOL_WRITE;
 			/* If we cannot change the symbol - skip */
-			if (!sym_is_changeable(sym))
+			if (!sym_is_changable(sym))
 				goto next_menu;
 			/* If symbol equals to default value - skip */
 			if (strcmp(sym_get_string_value(sym), sym_get_string_default(sym)) == 0)

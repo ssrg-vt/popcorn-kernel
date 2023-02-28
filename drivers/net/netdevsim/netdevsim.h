@@ -145,7 +145,6 @@ struct nsim_dev_port {
 struct nsim_dev {
 	struct nsim_bus_dev *nsim_bus_dev;
 	struct nsim_fib_data *fib_data;
-	struct nsim_trap_data *trap_data;
 	struct dentry *ddir;
 	struct dentry *ports_ddir;
 	struct bpf_offload_dev *bpf_dev;
@@ -158,10 +157,6 @@ struct nsim_dev {
 	struct netdev_phys_item_id switch_id;
 	struct list_head port_list;
 	struct mutex port_list_lock; /* protects port list */
-	bool fw_update_status;
-	u32 max_macs;
-	bool test1;
-	struct devlink_region *dummy_region;
 };
 
 int nsim_dev_init(void);

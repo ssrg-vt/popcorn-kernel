@@ -66,7 +66,7 @@ static inline int clp_get_ilp(unsigned long *ilp)
 /*
  * Call Logical Processor with c=0, the give constant lps and an lpcb request.
  */
-static __always_inline int clp_req(void *data, unsigned int lps)
+static inline int clp_req(void *data, unsigned int lps)
 {
 	struct { u8 _[CLP_BLK_SIZE]; } *req = data;
 	u64 ignored;
@@ -291,7 +291,7 @@ int clp_enable_fh(struct zpci_dev *zdev, u8 nr_dma_as)
 		goto out;
 
 	zdev->fh = fh;
-	if (zpci_use_mio(zdev)) {
+	if (zdev->mio_capable) {
 		rc = clp_set_pci_fn(&fh, nr_dma_as, CLP_SET_ENABLE_MIO);
 		zpci_dbg(3, "ena mio fid:%x, fh:%x, rc:%d\n", zdev->fid, fh, rc);
 		if (rc)

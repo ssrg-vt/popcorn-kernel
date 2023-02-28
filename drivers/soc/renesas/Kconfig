@@ -58,22 +58,19 @@ config ARCH_R7S72100
 	select ARM_ERRATA_754322
 	select PM
 	select PM_GENERIC_DOMAINS
-	select RENESAS_OSTM
-	select RENESAS_RZA1_IRQC
 	select SYS_SUPPORTS_SH_MTU2
+	select RENESAS_OSTM
 
 config ARCH_R7S9210
 	bool "RZ/A2 (R7S9210)"
 	select PM
 	select PM_GENERIC_DOMAINS
 	select RENESAS_OSTM
-	select RENESAS_RZA1_IRQC
 
 config ARCH_R8A73A4
 	bool "R-Mobile APE6 (R8A73A40)"
 	select ARCH_RMOBILE
 	select ARM_ERRATA_798181 if SMP
-	select ARM_ERRATA_814220
 	select HAVE_ARM_ARCH_TIMER
 	select RENESAS_IRQC
 
@@ -98,13 +95,11 @@ config ARCH_R8A7744
 config ARCH_R8A7745
 	bool "RZ/G1E (R8A77450)"
 	select ARCH_RCAR_GEN2
-	select ARM_ERRATA_814220
 	select SYSC_R8A7745
 
 config ARCH_R8A77470
 	bool "RZ/G1C (R8A77470)"
 	select ARCH_RCAR_GEN2
-	select ARM_ERRATA_814220
 	select SYSC_R8A77470
 
 config ARCH_R8A7778
@@ -124,7 +119,6 @@ config ARCH_R8A7790
 	bool "R-Car H2 (R8A77900)"
 	select ARCH_RCAR_GEN2
 	select ARM_ERRATA_798181 if SMP
-	select ARM_ERRATA_814220
 	select I2C
 	select SYSC_R8A7790
 
@@ -151,13 +145,11 @@ config ARCH_R8A7793
 config ARCH_R8A7794
 	bool "R-Car E2 (R8A77940)"
 	select ARCH_RCAR_GEN2
-	select ARM_ERRATA_814220
 	select SYSC_R8A7794
 
 config ARCH_R9A06G032
 	bool "RZ/N1D (R9A06G032)"
 	select ARCH_RZN1
-	select ARM_ERRATA_814220
 
 config ARCH_SH73A0
 	bool "SH-Mobile AG5 (R8A73A00)"

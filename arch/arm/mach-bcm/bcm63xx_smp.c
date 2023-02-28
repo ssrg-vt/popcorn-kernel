@@ -141,7 +141,6 @@ static int bcm63138_smp_boot_secondary(unsigned int cpu,
 	 * return
 	 */
 	ret = bcm63xx_pmb_power_on_cpu(dn);
-	of_node_put(dn);
 	if (ret)
 		goto out;
 out:

@@ -211,17 +211,24 @@ acpi_status ACPI_INIT_FUNCTION acpi_initialize_objects(u32 flags)
 
 	ACPI_FUNCTION_TRACE(acpi_initialize_objects);
 
-#ifdef ACPI_OBSOLETE_BEHAVIOR
 	/*
-	 * 05/2019: Removed, initialization now happens at both object
-	 * creation and table load time
+	 * This case handles the legacy option that groups all module-level
+	 * code blocks together and defers execution until all of the tables
+	 * are loaded. Execute all of these blocks at this time.
+	 * Execute any module-level code that was detected during the table
+	 * load phase.
+	 *
+	 * Note: this option is deprecated and will be eliminated in the
+	 * future. Use of this option can cause problems with AML code that
+	 * depends upon in-order immediate execution of module-level code.
 	 */
+	acpi_ns_exec_module_code_list();
 
 	/*
 	 * Initialize the objects that remain uninitialized. This
 	 * runs the executable AML that may be part of the
-	 * declaration of these objects: operation_regions, buffer_fields,
-	 * bank_fields, Buffers, and Packages.
+	 * declaration of these objects:
+	 * operation_regions, buffer_fields, Buffers, and Packages.
 	 */
 	if (!(flags & ACPI_NO_OBJECT_INIT)) {
 		status = acpi_ns_initialize_objects();
@@ -229,7 +236,6 @@ acpi_status ACPI_INIT_FUNCTION acpi_initialize_objects(u32 flags)
 			return_ACPI_STATUS(status);
 		}
 	}
-#endif
 
 	/*
 	 * Initialize all device/region objects in the namespace. This runs

@@ -26,7 +26,6 @@
 
 static const struct gk104_fifo_func
 gp10b_fifo = {
-	.intr.fault = gp100_fifo_intr_fault,
 	.pbdma = &gm200_fifo_pbdma,
 	.fault.access = gk104_fifo_fault_access,
 	.fault.engine = gp100_fifo_fault_engine,

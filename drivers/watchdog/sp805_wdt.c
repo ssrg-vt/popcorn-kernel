@@ -288,8 +288,11 @@ sp805_wdt_probe(struct amba_device *adev, const struct amba_id *id)
 	}
 
 	ret = watchdog_register_device(&wdt->wdd);
-	if (ret)
+	if (ret) {
+		dev_err(&adev->dev, "watchdog_register_device() failed: %d\n",
+				ret);
 		goto err;
+	}
 	amba_set_drvdata(adev, wdt);
 
 	dev_info(&adev->dev, "registration successful\n");

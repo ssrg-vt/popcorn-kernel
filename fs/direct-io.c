@@ -241,8 +241,9 @@ void dio_warn_stale_pagecache(struct file *filp)
 	}
 }
 
-/*
+/**
  * dio_complete() - called when all DIO BIO I/O has been completed
+ * @offset: the byte offset in the file of the completed operation
  *
  * This drops i_dio_count, lets interested parties know that a DIO operation
  * has completed, and calculates the resulting return code for the operation.
@@ -537,8 +538,8 @@ static struct bio *dio_await_one(struct dio *dio)
  */
 static blk_status_t dio_bio_complete(struct dio *dio, struct bio *bio)
 {
+	struct bio_vec *bvec;
 	blk_status_t err = bio->bi_status;
-	bool should_dirty = dio->op == REQ_OP_READ && dio->should_dirty;
 
 	if (err) {
 		if (err == BLK_STS_AGAIN && (bio->bi_opf & REQ_NOWAIT))
@@ -547,10 +548,19 @@ static blk_status_t dio_bio_complete(struct dio *dio, struct bio *bio)
 			dio->io_error = -EIO;
 	}
 
-	if (dio->is_async && should_dirty) {
+	if (dio->is_async && dio->op == REQ_OP_READ && dio->should_dirty) {
 		bio_check_pages_dirty(bio);	/* transfers ownership */
 	} else {
-		bio_release_pages(bio, should_dirty);
+		struct bvec_iter_all iter_all;
+
+		bio_for_each_segment_all(bvec, bio, iter_all) {
+			struct page *page = bvec->bv_page;
+
+			if (dio->op == REQ_OP_READ && !PageCompound(page) &&
+					dio->should_dirty)
+				set_page_dirty_lock(page);
+			put_page(page);
+		}
 		bio_put(bio);
 	}
 	return err;

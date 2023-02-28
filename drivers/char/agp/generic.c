@@ -1311,7 +1311,8 @@ static void ipi_handler(void *null)
 
 void global_cache_flush(void)
 {
-	on_each_cpu(ipi_handler, NULL, 1);
+	if (on_each_cpu(ipi_handler, NULL, 1) != 0)
+		panic(PFX "timed out waiting for the other CPUs!\n");
 }
 EXPORT_SYMBOL(global_cache_flush);
 

@@ -825,7 +825,7 @@ static int ceph_mknod(struct inode *dir, struct dentry *dentry,
 	struct ceph_fs_client *fsc = ceph_sb_to_client(dir->i_sb);
 	struct ceph_mds_client *mdsc = fsc->mdsc;
 	struct ceph_mds_request *req;
-	struct ceph_acl_sec_ctx as_ctx = {};
+	struct ceph_acls_info acls = {};
 	int err;
 
 	if (ceph_snap(dir) != CEPH_NOSNAP)
@@ -836,10 +836,7 @@ static int ceph_mknod(struct inode *dir, struct dentry *dentry,
 		goto out;
 	}
 
-	err = ceph_pre_init_acls(dir, &mode, &as_ctx);
-	if (err < 0)
-		goto out;
-	err = ceph_security_init_secctx(dentry, mode, &as_ctx);
+	err = ceph_pre_init_acls(dir, &mode, &acls);
 	if (err < 0)
 		goto out;
 
@@ -858,9 +855,9 @@ static int ceph_mknod(struct inode *dir, struct dentry *dentry,
 	req->r_args.mknod.rdev = cpu_to_le32(rdev);
 	req->r_dentry_drop = CEPH_CAP_FILE_SHARED | CEPH_CAP_AUTH_EXCL;
 	req->r_dentry_unless = CEPH_CAP_FILE_EXCL;
-	if (as_ctx.pagelist) {
-		req->r_pagelist = as_ctx.pagelist;
-		as_ctx.pagelist = NULL;
+	if (acls.pagelist) {
+		req->r_pagelist = acls.pagelist;
+		acls.pagelist = NULL;
 	}
 	err = ceph_mdsc_do_request(mdsc, dir, req);
 	if (!err && !req->r_reply_info.head->is_dentry)
@@ -868,10 +865,10 @@ static int ceph_mknod(struct inode *dir, struct dentry *dentry,
 	ceph_mdsc_put_request(req);
 out:
 	if (!err)
-		ceph_init_inode_acls(d_inode(dentry), &as_ctx);
+		ceph_init_inode_acls(d_inode(dentry), &acls);
 	else
 		d_drop(dentry);
-	ceph_release_acl_sec_ctx(&as_ctx);
+	ceph_release_acls_info(&acls);
 	return err;
 }
 
@@ -887,7 +884,6 @@ static int ceph_symlink(struct inode *dir, struct dentry *dentry,
 	struct ceph_fs_client *fsc = ceph_sb_to_client(dir->i_sb);
 	struct ceph_mds_client *mdsc = fsc->mdsc;
 	struct ceph_mds_request *req;
-	struct ceph_acl_sec_ctx as_ctx = {};
 	int err;
 
 	if (ceph_snap(dir) != CEPH_NOSNAP)
@@ -897,10 +893,6 @@ static int ceph_symlink(struct inode *dir, struct dentry *dentry,
 		err = -EDQUOT;
 		goto out;
 	}
-
-	err = ceph_security_init_secctx(dentry, S_IFLNK | 0777, &as_ctx);
-	if (err < 0)
-		goto out;
 
 	dout("symlink in dir %p dentry %p to '%s'\n", dir, dentry, dest);
 	req = ceph_mdsc_create_request(mdsc, CEPH_MDS_OP_SYMLINK, USE_AUTH_MDS);
@@ -927,7 +919,6 @@ static int ceph_symlink(struct inode *dir, struct dentry *dentry,
 out:
 	if (err)
 		d_drop(dentry);
-	ceph_release_acl_sec_ctx(&as_ctx);
 	return err;
 }
 
@@ -936,7 +927,7 @@ static int ceph_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	struct ceph_fs_client *fsc = ceph_sb_to_client(dir->i_sb);
 	struct ceph_mds_client *mdsc = fsc->mdsc;
 	struct ceph_mds_request *req;
-	struct ceph_acl_sec_ctx as_ctx = {};
+	struct ceph_acls_info acls = {};
 	int err = -EROFS;
 	int op;
 
@@ -959,10 +950,7 @@ static int ceph_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	}
 
 	mode |= S_IFDIR;
-	err = ceph_pre_init_acls(dir, &mode, &as_ctx);
-	if (err < 0)
-		goto out;
-	err = ceph_security_init_secctx(dentry, mode, &as_ctx);
+	err = ceph_pre_init_acls(dir, &mode, &acls);
 	if (err < 0)
 		goto out;
 
@@ -979,9 +967,9 @@ static int ceph_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	req->r_args.mkdir.mode = cpu_to_le32(mode);
 	req->r_dentry_drop = CEPH_CAP_FILE_SHARED | CEPH_CAP_AUTH_EXCL;
 	req->r_dentry_unless = CEPH_CAP_FILE_EXCL;
-	if (as_ctx.pagelist) {
-		req->r_pagelist = as_ctx.pagelist;
-		as_ctx.pagelist = NULL;
+	if (acls.pagelist) {
+		req->r_pagelist = acls.pagelist;
+		acls.pagelist = NULL;
 	}
 	err = ceph_mdsc_do_request(mdsc, dir, req);
 	if (!err &&
@@ -991,10 +979,10 @@ static int ceph_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	ceph_mdsc_put_request(req);
 out:
 	if (!err)
-		ceph_init_inode_acls(d_inode(dentry), &as_ctx);
+		ceph_init_inode_acls(d_inode(dentry), &acls);
 	else
 		d_drop(dentry);
-	ceph_release_acl_sec_ctx(&as_ctx);
+	ceph_release_acls_info(&acls);
 	return err;
 }
 
@@ -1267,7 +1255,7 @@ __dentry_leases_walk(struct ceph_mds_client *mdsc,
 		if (!spin_trylock(&dentry->d_lock))
 			continue;
 
-		if (__lockref_is_dead(&dentry->d_lockref)) {
+		if (dentry->d_lockref.count < 0) {
 			list_del_init(&di->lease_list);
 			goto next;
 		}
@@ -1445,7 +1433,8 @@ static bool __dentry_lease_is_valid(struct ceph_dentry_info *di)
 	return false;
 }
 
-static int dentry_lease_is_valid(struct dentry *dentry, unsigned int flags)
+static int dentry_lease_is_valid(struct dentry *dentry, unsigned int flags,
+				 struct inode *dir)
 {
 	struct ceph_dentry_info *di;
 	struct ceph_mds_session *session = NULL;
@@ -1477,7 +1466,7 @@ static int dentry_lease_is_valid(struct dentry *dentry, unsigned int flags)
 	spin_unlock(&dentry->d_lock);
 
 	if (session) {
-		ceph_mdsc_lease_send_msg(session, dentry,
+		ceph_mdsc_lease_send_msg(session, dir, dentry,
 					 CEPH_MDS_LEASE_RENEW, seq);
 		ceph_put_mds_session(session);
 	}
@@ -1553,37 +1542,36 @@ static int ceph_d_revalidate(struct dentry *dentry, unsigned int flags)
 {
 	int valid = 0;
 	struct dentry *parent;
-	struct inode *dir, *inode;
+	struct inode *dir;
 
 	if (flags & LOOKUP_RCU) {
 		parent = READ_ONCE(dentry->d_parent);
 		dir = d_inode_rcu(parent);
 		if (!dir)
 			return -ECHILD;
-		inode = d_inode_rcu(dentry);
 	} else {
 		parent = dget_parent(dentry);
 		dir = d_inode(parent);
-		inode = d_inode(dentry);
 	}
 
 	dout("d_revalidate %p '%pd' inode %p offset %lld\n", dentry,
-	     dentry, inode, ceph_dentry(dentry)->offset);
+	     dentry, d_inode(dentry), ceph_dentry(dentry)->offset);
 
 	/* always trust cached snapped dentries, snapdir dentry */
 	if (ceph_snap(dir) != CEPH_NOSNAP) {
 		dout("d_revalidate %p '%pd' inode %p is SNAPPED\n", dentry,
-		     dentry, inode);
+		     dentry, d_inode(dentry));
 		valid = 1;
-	} else if (inode && ceph_snap(inode) == CEPH_SNAPDIR) {
+	} else if (d_really_is_positive(dentry) &&
+		   ceph_snap(d_inode(dentry)) == CEPH_SNAPDIR) {
 		valid = 1;
 	} else {
-		valid = dentry_lease_is_valid(dentry, flags);
+		valid = dentry_lease_is_valid(dentry, flags, dir);
 		if (valid == -ECHILD)
 			return valid;
 		if (valid || dir_lease_is_valid(dir, dentry)) {
-			if (inode)
-				valid = ceph_is_any_caps(inode);
+			if (d_really_is_positive(dentry))
+				valid = ceph_is_any_caps(d_inode(dentry));
 			else
 				valid = 1;
 		}

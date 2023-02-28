@@ -294,8 +294,7 @@ EINVAL
     The requested mode is invalid.
 
 EPERM
-    Monitor mode is requested, but the process does have the ``CAP_NET_ADMIN``
-    capability.
+    Monitor mode is requested without having root permissions
 
 EBUSY
     Someone else is already an exclusive follower or initiator.

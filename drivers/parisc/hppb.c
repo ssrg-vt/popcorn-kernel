@@ -61,6 +61,8 @@ static int __init hppb_probe(struct parisc_device *dev)
 		}
 		card = card->next;
 	}
+	printk(KERN_INFO "Found GeckoBoa at 0x%llx\n",
+			(unsigned long long) dev->hpa.start);
 
 	card->hpa = dev->hpa.start;
 	card->mmio_region.name = "HP-PB Bus";
@@ -70,11 +72,10 @@ static int __init hppb_probe(struct parisc_device *dev)
 	card->mmio_region.end = gsc_readl(dev->hpa.start + IO_IO_HIGH) - 1;
 
 	status = ccio_request_resource(dev, &card->mmio_region);
-
-	pr_info("Found GeckoBoa at %pap, bus space %pR,%s claimed.\n",
-			&dev->hpa.start,
-			&card->mmio_region,
-			(status < 0) ? " not":"" );
+	if(status < 0) {
+		printk(KERN_ERR "%s: failed to claim HP-PB bus space (%pR)\n",
+			__FILE__, &card->mmio_region);
+	}
 
         return 0;
 }

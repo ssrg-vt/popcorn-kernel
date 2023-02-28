@@ -107,37 +107,13 @@ void debug_unregister(debug_info_t *id);
 void debug_set_level(debug_info_t *id, int new_level);
 
 void debug_set_critical(void);
-
 void debug_stop_all(void);
 
-/**
- * debug_level_enabled() - Returns true if debug events for the specified
- *			   level would be logged. Otherwise returns false.
- *
- * @id:		handle for debug log
- * @level:	debug level
- *
- * Return:
- * - %true if level is less or equal to the current debug level.
- */
 static inline bool debug_level_enabled(debug_info_t *id, int level)
 {
 	return level <= id->level;
 }
 
-/**
- * debug_event() - writes binary debug entry to active debug area
- *		   (if level <= actual debug level)
- *
- * @id:		handle for debug log
- * @level:	debug level
- * @data:	pointer to data for debug entry
- * @length:	length of data in bytes
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- */
 static inline debug_entry_t *debug_event(debug_info_t *id, int level,
 					 void *data, int length)
 {
@@ -146,18 +122,6 @@ static inline debug_entry_t *debug_event(debug_info_t *id, int level,
 	return debug_event_common(id, level, data, length);
 }
 
-/**
- * debug_int_event() - writes unsigned integer debug entry to active debug area
- *		       (if level <= actual debug level)
- *
- * @id:		handle for debug log
- * @level:	debug level
- * @tag:	integer value for debug entry
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- */
 static inline debug_entry_t *debug_int_event(debug_info_t *id, int level,
 					     unsigned int tag)
 {
@@ -168,18 +132,6 @@ static inline debug_entry_t *debug_int_event(debug_info_t *id, int level,
 	return debug_event_common(id, level, &t, sizeof(unsigned int));
 }
 
-/**
- * debug_long_event() - writes unsigned long debug entry to active debug area
- *		       (if level <= actual debug level)
- *
- * @id:		handle for debug log
- * @level:	debug level
- * @tag:	long integer value for debug entry
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- */
 static inline debug_entry_t *debug_long_event(debug_info_t *id, int level,
 					      unsigned long tag)
 {
@@ -190,18 +142,6 @@ static inline debug_entry_t *debug_long_event(debug_info_t *id, int level,
 	return debug_event_common(id, level, &t, sizeof(unsigned long));
 }
 
-/**
- * debug_text_event() - writes string debug entry in ascii format to active
- *			debug area (if level <= actual debug level)
- *
- * @id:		handle for debug log
- * @level:	debug level
- * @txt:	string for debug entry
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- */
 static inline debug_entry_t *debug_text_event(debug_info_t *id, int level,
 					      const char *txt)
 {
@@ -212,28 +152,12 @@ static inline debug_entry_t *debug_text_event(debug_info_t *id, int level,
 
 /*
  * IMPORTANT: Use "%s" in sprintf format strings with care! Only pointers are
- * stored in the s390dbf. See Documentation/s390/s390dbf.rst for more details!
+ * stored in the s390dbf. See Documentation/s390/s390dbf.txt for more details!
  */
 extern debug_entry_t *
 __debug_sprintf_event(debug_info_t *id, int level, char *string, ...)
 	__attribute__ ((format(printf, 3, 4)));
 
-/**
- * debug_sprintf_event() - writes debug entry with format string
- *			   and varargs (longs) to active debug area
- *			   (if level $<=$ actual debug level).
- *
- * @_id:	handle for debug log
- * @_level:	debug level
- * @_fmt:	format string for debug entry
- * @...:	varargs used as in sprintf()
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- *
- * floats and long long datatypes cannot be used as varargs.
- */
 #define debug_sprintf_event(_id, _level, _fmt, ...)			\
 ({									\
 	debug_entry_t *__ret;						\
@@ -248,20 +172,6 @@ __debug_sprintf_event(debug_info_t *id, int level, char *string, ...)
 	__ret;								\
 })
 
-/**
- * debug_exception() - writes binary debug entry to active debug area
- *		       (if level <= actual debug level)
- *		       and switches to next debug area
- *
- * @id:		handle for debug log
- * @level:	debug level
- * @data:	pointer to data for debug entry
- * @length:	length of data in bytes
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- */
 static inline debug_entry_t *debug_exception(debug_info_t *id, int level,
 					     void *data, int length)
 {
@@ -270,19 +180,6 @@ static inline debug_entry_t *debug_exception(debug_info_t *id, int level,
 	return debug_exception_common(id, level, data, length);
 }
 
-/**
- * debug_int_exception() - writes unsigned int debug entry to active debug area
- *			   (if level <= actual debug level)
- *			   and switches to next debug area
- *
- * @id:		handle for debug log
- * @level:	debug level
- * @tag:	integer value for debug entry
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- */
 static inline debug_entry_t *debug_int_exception(debug_info_t *id, int level,
 						 unsigned int tag)
 {
@@ -293,19 +190,6 @@ static inline debug_entry_t *debug_int_exception(debug_info_t *id, int level,
 	return debug_exception_common(id, level, &t, sizeof(unsigned int));
 }
 
-/**
- * debug_long_exception() - writes long debug entry to active debug area
- *			   (if level <= actual debug level)
- *			   and switches to next debug area
- *
- * @id:		handle for debug log
- * @level:	debug level
- * @tag:	long integer value for debug entry
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- */
 static inline debug_entry_t *debug_long_exception (debug_info_t *id, int level,
 						   unsigned long tag)
 {
@@ -316,20 +200,6 @@ static inline debug_entry_t *debug_long_exception (debug_info_t *id, int level,
 	return debug_exception_common(id, level, &t, sizeof(unsigned long));
 }
 
-/**
- * debug_text_exception() - writes string debug entry in ascii format to active
- *			    debug area (if level <= actual debug level)
- *			    and switches to next debug area
- * area
- *
- * @id:	handle for debug log
- * @level:	debug level
- * @txt:	string for debug entry
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- */
 static inline debug_entry_t *debug_text_exception(debug_info_t *id, int level,
 						  const char *txt)
 {
@@ -340,30 +210,12 @@ static inline debug_entry_t *debug_text_exception(debug_info_t *id, int level,
 
 /*
  * IMPORTANT: Use "%s" in sprintf format strings with care! Only pointers are
- * stored in the s390dbf. See Documentation/s390/s390dbf.rst for more details!
+ * stored in the s390dbf. See Documentation/s390/s390dbf.txt for more details!
  */
 extern debug_entry_t *
 __debug_sprintf_exception(debug_info_t *id, int level, char *string, ...)
 	__attribute__ ((format(printf, 3, 4)));
 
-
-/**
- * debug_sprintf_exception() - writes debug entry with format string and
- *			       varargs (longs) to active debug area
- *			       (if level <= actual debug level)
- *			       and switches to next debug area.
- *
- * @_id:	handle for debug log
- * @_level:	debug level
- * @_fmt:	format string for debug entry
- * @...:	varargs used as in sprintf()
- *
- * Return:
- * - Address of written debug entry
- * - %NULL if error
- *
- * floats and long long datatypes cannot be used as varargs.
- */
 #define debug_sprintf_exception(_id, _level, _fmt, ...)			\
 ({									\
 	debug_entry_t *__ret;						\
@@ -379,7 +231,6 @@ __debug_sprintf_exception(debug_info_t *id, int level, char *string, ...)
 })
 
 int debug_register_view(debug_info_t *id, struct debug_view *view);
-
 int debug_unregister_view(debug_info_t *id, struct debug_view *view);
 
 /*

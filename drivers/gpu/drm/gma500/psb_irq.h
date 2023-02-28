@@ -12,7 +12,7 @@
 #ifndef _PSB_IRQ_H_
 #define _PSB_IRQ_H_
 
-struct drm_device;
+#include <drm/drmP.h>
 
 bool sysirq_init(struct drm_device *dev);
 void sysirq_uninit(struct drm_device *dev);

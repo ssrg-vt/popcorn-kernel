@@ -7,10 +7,8 @@
 #ifndef _STI_CRTC_H_
 #define _STI_CRTC_H_
 
-struct drm_crtc;
-struct drm_device;
-struct drm_plane;
-struct notifier_block;
+#include <drm/drmP.h>
+
 struct sti_mixer;
 
 int sti_crtc_init(struct drm_device *drm_dev, struct sti_mixer *mixer,

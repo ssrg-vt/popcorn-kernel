@@ -225,7 +225,7 @@ do_sigreturn(struct sigcontext __user *sc)
 	return;
 
 give_sigsegv:
-	force_sig(SIGSEGV);
+	force_sig(SIGSEGV, current);
 }
 
 asmlinkage void
@@ -253,7 +253,7 @@ do_rt_sigreturn(struct rt_sigframe __user *frame)
 	return;
 
 give_sigsegv:
-	force_sig(SIGSEGV);
+	force_sig(SIGSEGV, current);
 }
 
 

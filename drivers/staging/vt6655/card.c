@@ -409,11 +409,14 @@ bool CARDbSetBeaconPeriod(struct vnt_private *priv,
  *  Out:
  *      none
  *
+ * Return Value: true if success; otherwise false
  */
-void CARDbRadioPowerOff(struct vnt_private *priv)
+bool CARDbRadioPowerOff(struct vnt_private *priv)
 {
+	bool bResult = true;
+
 	if (priv->bRadioOff)
-		return;
+		return true;
 
 	switch (priv->byRFType) {
 	case RF_RFMD2959:
@@ -441,6 +444,7 @@ void CARDbRadioPowerOff(struct vnt_private *priv)
 	pr_debug("chester power off\n");
 	MACvRegBitsOn(priv->PortOffset, MAC_REG_GPIOCTL0,
 		      LED_ACTSET);  /* LED issue */
+	return bResult;
 }
 
 /*

@@ -642,8 +642,11 @@ static int mlxreg_hotplug_probe(struct platform_device *pdev)
 		priv->irq = pdata->irq;
 	} else {
 		priv->irq = platform_get_irq(pdev, 0);
-		if (priv->irq < 0)
+		if (priv->irq < 0) {
+			dev_err(&pdev->dev, "Failed to get platform irq: %d\n",
+				priv->irq);
 			return priv->irq;
+		}
 	}
 
 	priv->regmap = pdata->regmap;

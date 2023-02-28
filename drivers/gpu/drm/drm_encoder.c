@@ -21,9 +21,7 @@
  */
 
 #include <linux/export.h>
-
-#include <drm/drm_device.h>
-#include <drm/drm_drv.h>
+#include <drm/drmP.h>
 #include <drm/drm_encoder.h>
 
 #include "drm_crtc_internal.h"

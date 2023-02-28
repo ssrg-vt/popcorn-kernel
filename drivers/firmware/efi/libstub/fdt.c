@@ -363,17 +363,26 @@ fail:
 
 void *get_fdt(efi_system_table_t *sys_table, unsigned long *fdt_size)
 {
-	void *fdt;
+	efi_guid_t fdt_guid = DEVICE_TREE_GUID;
+	efi_config_table_t *tables;
+	int i;
 
-	fdt = get_efi_config_table(sys_table, DEVICE_TREE_GUID);
+	tables = (efi_config_table_t *)sys_table->tables;
 
-	if (!fdt)
-		return NULL;
+	for (i = 0; i < sys_table->nr_tables; i++) {
+		void *fdt;
 
-	if (fdt_check_header(fdt) != 0) {
-		pr_efi_err(sys_table, "Invalid header detected on UEFI supplied FDT, ignoring ...\n");
-		return NULL;
+		if (efi_guidcmp(tables[i].guid, fdt_guid) != 0)
+			continue;
+
+		fdt = (void *)tables[i].table;
+		if (fdt_check_header(fdt) != 0) {
+			pr_efi_err(sys_table, "Invalid header detected on UEFI supplied FDT, ignoring ...\n");
+			return NULL;
+		}
+		*fdt_size = fdt_totalsize(fdt);
+		return fdt;
 	}
-	*fdt_size = fdt_totalsize(fdt);
-	return fdt;
+
+	return NULL;
 }

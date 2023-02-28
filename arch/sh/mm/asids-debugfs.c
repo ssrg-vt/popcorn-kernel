@@ -63,8 +63,13 @@ static const struct file_operations asids_debugfs_fops = {
 
 static int __init asids_debugfs_init(void)
 {
-	debugfs_create_file("asids", S_IRUSR, arch_debugfs_dir, NULL,
-			    &asids_debugfs_fops);
-	return 0;
+	struct dentry *asids_dentry;
+
+	asids_dentry = debugfs_create_file("asids", S_IRUSR, arch_debugfs_dir,
+					   NULL, &asids_debugfs_fops);
+	if (!asids_dentry)
+		return -ENOMEM;
+
+	return PTR_ERR_OR_ZERO(asids_dentry);
 }
 device_initcall(asids_debugfs_init);

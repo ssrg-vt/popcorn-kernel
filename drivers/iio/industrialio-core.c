@@ -228,9 +228,9 @@ s64 iio_get_time_ns(const struct iio_dev *indio_dev)
 		ktime_get_coarse_ts64(&tp);
 		return timespec64_to_ns(&tp);
 	case CLOCK_BOOTTIME:
-		return ktime_get_boottime_ns();
+		return ktime_get_boot_ns();
 	case CLOCK_TAI:
-		return ktime_get_clocktai_ns();
+		return ktime_get_tai_ns();
 	default:
 		BUG();
 	}
@@ -366,25 +366,39 @@ static void iio_device_unregister_debugfs(struct iio_dev *indio_dev)
 	debugfs_remove_recursive(indio_dev->debugfs_dentry);
 }
 
-static void iio_device_register_debugfs(struct iio_dev *indio_dev)
+static int iio_device_register_debugfs(struct iio_dev *indio_dev)
 {
+	struct dentry *d;
+
 	if (indio_dev->info->debugfs_reg_access == NULL)
-		return;
+		return 0;
 
 	if (!iio_debugfs_dentry)
-		return;
+		return 0;
 
 	indio_dev->debugfs_dentry =
 		debugfs_create_dir(dev_name(&indio_dev->dev),
 				   iio_debugfs_dentry);
+	if (indio_dev->debugfs_dentry == NULL) {
+		dev_warn(indio_dev->dev.parent,
+			 "Failed to create debugfs directory\n");
+		return -EFAULT;
+	}
 
-	debugfs_create_file("direct_reg_access", 0644,
-			    indio_dev->debugfs_dentry, indio_dev,
-			    &iio_debugfs_reg_fops);
+	d = debugfs_create_file("direct_reg_access", 0644,
+				indio_dev->debugfs_dentry,
+				indio_dev, &iio_debugfs_reg_fops);
+	if (!d) {
+		iio_device_unregister_debugfs(indio_dev);
+		return -ENOMEM;
+	}
+
+	return 0;
 }
 #else
-static void iio_device_register_debugfs(struct iio_dev *indio_dev)
+static int iio_device_register_debugfs(struct iio_dev *indio_dev)
 {
+	return 0;
 }
 
 static void iio_device_unregister_debugfs(struct iio_dev *indio_dev)
@@ -554,7 +568,6 @@ static ssize_t __iio_format_value(char *buf, size_t len, unsigned int type,
 {
 	unsigned long long tmp;
 	int tmp0, tmp1;
-	s64 tmp2;
 	bool scale_db = false;
 
 	switch (type) {
@@ -577,13 +590,10 @@ static ssize_t __iio_format_value(char *buf, size_t len, unsigned int type,
 		else
 			return snprintf(buf, len, "%d.%09u", vals[0], vals[1]);
 	case IIO_VAL_FRACTIONAL:
-		tmp2 = div_s64((s64)vals[0] * 1000000000LL, vals[1]);
+		tmp = div_s64((s64)vals[0] * 1000000000LL, vals[1]);
 		tmp1 = vals[1];
-		tmp0 = (int)div_s64_rem(tmp2, 1000000000, &tmp1);
-		if ((tmp2 < 0) && (tmp0 == 0))
-			return snprintf(buf, len, "-%d.%09u", tmp0, abs(tmp1));
-		else
-			return snprintf(buf, len, "%d.%09u", tmp0, abs(tmp1));
+		tmp0 = (int)div_s64_rem(tmp, 1000000000, &tmp1);
+		return snprintf(buf, len, "%d.%09u", tmp0, abs(tmp1));
 	case IIO_VAL_FRACTIONAL_LOG2:
 		tmp = shift_right((s64)vals[0] * 1000000000LL, vals[1]);
 		tmp0 = (int)div_s64_rem(tmp, 1000000000LL, &tmp1);
@@ -1094,8 +1104,6 @@ static int iio_device_add_info_mask_type_avail(struct iio_dev *indio_dev,
 	char *avail_postfix;
 
 	for_each_set_bit(i, infomask, sizeof(*infomask) * 8) {
-		if (i >= ARRAY_SIZE(iio_chan_info_postfix))
-			return -EINVAL;
 		avail_postfix = kasprintf(GFP_KERNEL,
 					  "%s_available",
 					  iio_chan_info_postfix[i]);
@@ -1242,16 +1250,6 @@ static ssize_t iio_show_dev_name(struct device *dev,
 
 static DEVICE_ATTR(name, S_IRUGO, iio_show_dev_name, NULL);
 
-static ssize_t iio_show_dev_label(struct device *dev,
-				 struct device_attribute *attr,
-				 char *buf)
-{
-	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
-	return snprintf(buf, PAGE_SIZE, "%s\n", indio_dev->label);
-}
-
-static DEVICE_ATTR(label, S_IRUGO, iio_show_dev_label, NULL);
-
 static ssize_t iio_show_timestamp_clock(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
@@ -1368,8 +1366,6 @@ static int iio_device_register_sysfs(struct iio_dev *indio_dev)
 
 	if (indio_dev->name)
 		attrcount++;
-	if (indio_dev->label)
-		attrcount++;
 	if (clk)
 		attrcount++;
 
@@ -1392,8 +1388,6 @@ static int iio_device_register_sysfs(struct iio_dev *indio_dev)
 		indio_dev->chan_attr_group.attrs[attrn++] = &p->dev_attr.attr;
 	if (indio_dev->name)
 		indio_dev->chan_attr_group.attrs[attrn++] = &dev_attr_name.attr;
-	if (indio_dev->label)
-		indio_dev->chan_attr_group.attrs[attrn++] = &dev_attr_label.attr;
 	if (clk)
 		indio_dev->chan_attr_group.attrs[attrn++] = clk;
 
@@ -1665,9 +1659,6 @@ int __iio_device_register(struct iio_dev *indio_dev, struct module *this_mod)
 	if (!indio_dev->dev.of_node && indio_dev->dev.parent)
 		indio_dev->dev.of_node = indio_dev->dev.parent->of_node;
 
-	indio_dev->label = of_get_property(indio_dev->dev.of_node, "label",
-					   NULL);
-
 	ret = iio_check_unique_scan_index(indio_dev);
 	if (ret < 0)
 		return ret;
@@ -1678,7 +1669,12 @@ int __iio_device_register(struct iio_dev *indio_dev, struct module *this_mod)
 	/* configure elements for the chrdev */
 	indio_dev->dev.devt = MKDEV(MAJOR(iio_devt), indio_dev->id);
 
-	iio_device_register_debugfs(indio_dev);
+	ret = iio_device_register_debugfs(indio_dev);
+	if (ret) {
+		dev_err(indio_dev->dev.parent,
+			"Failed to register debugfs interfaces\n");
+		return ret;
+	}
 
 	ret = iio_buffer_alloc_sysfs_and_mask(indio_dev);
 	if (ret) {

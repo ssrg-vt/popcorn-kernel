@@ -605,10 +605,12 @@ const struct objagg_stats *objagg_stats_get(struct objagg *objagg)
 {
 	struct objagg_stats *objagg_stats;
 	struct objagg_obj *objagg_obj;
+	size_t alloc_size;
 	int i;
 
-	objagg_stats = kzalloc(struct_size(objagg_stats, stats_info,
-					   objagg->obj_count), GFP_KERNEL);
+	alloc_size = sizeof(*objagg_stats) +
+		     sizeof(objagg_stats->stats_info[0]) * objagg->obj_count;
+	objagg_stats = kzalloc(alloc_size, GFP_KERNEL);
 	if (!objagg_stats)
 		return ERR_PTR(-ENOMEM);
 

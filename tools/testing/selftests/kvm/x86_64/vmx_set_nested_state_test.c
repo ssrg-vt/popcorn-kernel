@@ -224,6 +224,7 @@ int main(int argc, char *argv[])
 {
 	struct kvm_vm *vm;
 	struct kvm_nested_state state;
+	struct kvm_cpuid_entry2 *entry = kvm_get_supported_cpuid_entry(1);
 
 	have_evmcs = kvm_check_cap(KVM_CAP_HYPERV_ENLIGHTENED_VMCS);
 
@@ -236,7 +237,10 @@ int main(int argc, char *argv[])
 	 * AMD currently does not implement set_nested_state, so for now we
 	 * just early out.
 	 */
-	nested_vmx_check_supported();
+	if (!(entry->ecx & CPUID_VMX)) {
+		fprintf(stderr, "nested VMX not enabled, skipping test\n");
+		exit(KSFT_SKIP);
+	}
 
 	vm = vm_create_default(VCPU_ID, 0, 0);
 
@@ -267,7 +271,12 @@ int main(int argc, char *argv[])
 	state.flags = KVM_STATE_NESTED_RUN_PENDING;
 	test_nested_state_expect_einval(vm, &state);
 
-	test_vmx_nested_state(vm);
+	/*
+	 * TODO: When SVM support is added for KVM_SET_NESTED_STATE
+	 *       add tests here to support it like VMX.
+	 */
+	if (entry->ecx & CPUID_VMX)
+		test_vmx_nested_state(vm);
 
 	kvm_vm_free(vm);
 	return 0;

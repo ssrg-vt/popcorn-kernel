@@ -157,8 +157,6 @@ struct qedr_dev {
 	u32			dp_module;
 	u8			dp_level;
 	u8			num_hwfns;
-#define QEDR_IS_CMT(dev)        ((dev)->num_hwfns > 1)
-	u8			affin_hwfn_idx;
 	u8			gsi_ll2_handle;
 
 	uint			wq_multiplier;
@@ -229,7 +227,7 @@ struct qedr_ucontext {
 	struct ib_ucontext ibucontext;
 	struct qedr_dev *dev;
 	struct qedr_pd *pd;
-	void __iomem *dpi_addr;
+	u64 dpi_addr;
 	u64 dpi_phys_addr;
 	u32 dpi_size;
 	u16 dpi;

@@ -221,13 +221,12 @@ static int tcf_dump_walker(struct tcf_idrinfo *idrinfo, struct sk_buff *skb,
 	struct idr *idr = &idrinfo->action_idr;
 	struct tc_action *p;
 	unsigned long id = 1;
-	unsigned long tmp;
 
 	mutex_lock(&idrinfo->lock);
 
 	s_i = cb->args[0];
 
-	idr_for_each_entry_ul(idr, p, tmp, id) {
+	idr_for_each_entry_ul(idr, p, id) {
 		index++;
 		if (index < s_i)
 			continue;
@@ -293,7 +292,6 @@ static int tcf_del_walker(struct tcf_idrinfo *idrinfo, struct sk_buff *skb,
 	struct idr *idr = &idrinfo->action_idr;
 	struct tc_action *p;
 	unsigned long id = 1;
-	unsigned long tmp;
 
 	nest = nla_nest_start_noflag(skb, 0);
 	if (nest == NULL)
@@ -302,7 +300,7 @@ static int tcf_del_walker(struct tcf_idrinfo *idrinfo, struct sk_buff *skb,
 		goto nla_put_failure;
 
 	mutex_lock(&idrinfo->lock);
-	idr_for_each_entry_ul(idr, p, tmp, id) {
+	idr_for_each_entry_ul(idr, p, id) {
 		ret = tcf_idr_release_unsafe(p);
 		if (ret == ACT_P_DELETED) {
 			module_put(ops->owner);
@@ -535,9 +533,8 @@ void tcf_idrinfo_destroy(const struct tc_action_ops *ops,
 	struct tc_action *p;
 	int ret;
 	unsigned long id = 1;
-	unsigned long tmp;
 
-	idr_for_each_entry_ul(idr, p, tmp, id) {
+	idr_for_each_entry_ul(idr, p, id) {
 		ret = __tcf_idr_release(p, false, true);
 		if (ret == ACT_P_DELETED)
 			module_put(ops->owner);
@@ -832,7 +829,8 @@ static struct tc_cookie *nla_memdup_cookie(struct nlattr **tb)
 }
 
 static const struct nla_policy tcf_action_policy[TCA_ACT_MAX + 1] = {
-	[TCA_ACT_KIND]		= { .type = NLA_STRING },
+	[TCA_ACT_KIND]		= { .type = NLA_NUL_STRING,
+				    .len = IFNAMSIZ - 1 },
 	[TCA_ACT_INDEX]		= { .type = NLA_U32 },
 	[TCA_ACT_COOKIE]	= { .type = NLA_BINARY,
 				    .len = TC_COOKIE_MAX_SIZE },
@@ -864,10 +862,8 @@ struct tc_action *tcf_action_init_1(struct net *net, struct tcf_proto *tp,
 			NL_SET_ERR_MSG(extack, "TC action kind must be specified");
 			goto err_out;
 		}
-		if (nla_strlcpy(act_name, kind, IFNAMSIZ) >= IFNAMSIZ) {
-			NL_SET_ERR_MSG(extack, "TC action name too long");
-			goto err_out;
-		}
+		nla_strlcpy(act_name, kind, IFNAMSIZ);
+
 		if (tb[TCA_ACT_COOKIE]) {
 			cookie = nla_memdup_cookie(tb);
 			if (!cookie) {
@@ -1353,16 +1349,11 @@ static int tcf_action_add(struct net *net, struct nlattr *nla,
 			  struct netlink_ext_ack *extack)
 {
 	size_t attr_size = 0;
-	int loop, ret;
+	int ret = 0;
 	struct tc_action *actions[TCA_ACT_MAX_PRIO] = {};
 
-	for (loop = 0; loop < 10; loop++) {
-		ret = tcf_action_init(net, NULL, nla, NULL, NULL, ovr, 0,
-				      actions, &attr_size, true, extack);
-		if (ret != -EAGAIN)
-			break;
-	}
-
+	ret = tcf_action_init(net, NULL, nla, NULL, NULL, ovr, 0, actions,
+			      &attr_size, true, extack);
 	if (ret < 0)
 		return ret;
 	ret = tcf_add_notify(net, n, actions, portid, attr_size, extack);
@@ -1412,8 +1403,11 @@ static int tc_ctl_action(struct sk_buff *skb, struct nlmsghdr *n,
 		 */
 		if (n->nlmsg_flags & NLM_F_REPLACE)
 			ovr = 1;
+replay:
 		ret = tcf_action_add(net, tca[TCA_ACT_TAB], n, portid, ovr,
 				     extack);
+		if (ret == -EAGAIN)
+			goto replay;
 		break;
 	case RTM_DELACTION:
 		ret = tca_action_gd(net, tca[TCA_ACT_TAB], n,

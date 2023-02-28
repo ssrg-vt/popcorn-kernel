@@ -255,10 +255,10 @@ static __inline__ int atomic_sub_if_positive(int i, atomic_t * v)
 #define atomic64_set(v, i)	WRITE_ONCE((v)->counter, (i))
 
 #define ATOMIC64_OP(op, c_op, asm_op)					      \
-static __inline__ void atomic64_##op(s64 i, atomic64_t * v)		      \
+static __inline__ void atomic64_##op(long i, atomic64_t * v)		      \
 {									      \
 	if (kernel_uses_llsc) {						      \
-		s64 temp;						      \
+		long temp;						      \
 									      \
 		loongson_llsc_mb();					      \
 		__asm__ __volatile__(					      \
@@ -281,12 +281,12 @@ static __inline__ void atomic64_##op(s64 i, atomic64_t * v)		      \
 }
 
 #define ATOMIC64_OP_RETURN(op, c_op, asm_op)				      \
-static __inline__ s64 atomic64_##op##_return_relaxed(s64 i, atomic64_t * v)   \
+static __inline__ long atomic64_##op##_return_relaxed(long i, atomic64_t * v) \
 {									      \
-	s64 result;							      \
+	long result;							      \
 									      \
 	if (kernel_uses_llsc) {						      \
-		s64 temp;						      \
+		long temp;						      \
 									      \
 		loongson_llsc_mb();					      \
 		__asm__ __volatile__(					      \
@@ -315,12 +315,12 @@ static __inline__ s64 atomic64_##op##_return_relaxed(s64 i, atomic64_t * v)   \
 }
 
 #define ATOMIC64_FETCH_OP(op, c_op, asm_op)				      \
-static __inline__ s64 atomic64_fetch_##op##_relaxed(s64 i, atomic64_t * v)    \
+static __inline__ long atomic64_fetch_##op##_relaxed(long i, atomic64_t * v)  \
 {									      \
-	s64 result;							      \
+	long result;							      \
 									      \
 	if (kernel_uses_llsc) {						      \
-		s64 temp;						      \
+		long temp;						      \
 									      \
 		loongson_llsc_mb();					      \
 		__asm__ __volatile__(					      \
@@ -387,14 +387,14 @@ ATOMIC64_OPS(xor, ^=, xor)
  * Atomically test @v and subtract @i if @v is greater or equal than @i.
  * The function returns the old value of @v minus @i.
  */
-static __inline__ s64 atomic64_sub_if_positive(s64 i, atomic64_t * v)
+static __inline__ long atomic64_sub_if_positive(long i, atomic64_t * v)
 {
-	s64 result;
+	long result;
 
 	smp_mb__before_llsc();
 
 	if (kernel_uses_llsc) {
-		s64 temp;
+		long temp;
 
 		__asm__ __volatile__(
 		"	.set	push					\n"

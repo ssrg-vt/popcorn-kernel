@@ -48,20 +48,14 @@ static int rave_sp_backlight_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct backlight_device *bd;
 
-	bd = devm_backlight_device_register(dev, pdev->name, dev,
+	bd = devm_backlight_device_register(dev, pdev->name, dev->parent,
 					    dev_get_drvdata(dev->parent),
 					    &rave_sp_backlight_ops,
 					    &rave_sp_backlight_props);
 	if (IS_ERR(bd))
 		return PTR_ERR(bd);
 
-	/*
-	 * If there is a phandle pointing to the device node we can
-	 * assume that another device will manage the status changes.
-	 * If not we make sure the backlight is in a consistent state.
-	 */
-	if (!dev->of_node->phandle)
-		backlight_update_status(bd);
+	backlight_update_status(bd);
 
 	return 0;
 }

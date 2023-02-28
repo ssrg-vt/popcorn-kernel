@@ -2,11 +2,9 @@
 /* Copyright (c) 2016-2017 The Linux Foundation. All rights reserved.
  */
 
+
 #include <linux/types.h>
 #include <linux/debugfs.h>
-
-#include <drm/drm_debugfs.h>
-#include <drm/drm_file.h>
 #include <drm/drm_print.h>
 
 #include "a5xx_gpu.h"
@@ -151,6 +149,7 @@ DEFINE_SIMPLE_ATTRIBUTE(reset_fops, NULL, reset_set, "%llx\n");
 int a5xx_debugfs_init(struct msm_gpu *gpu, struct drm_minor *minor)
 {
 	struct drm_device *dev;
+	struct dentry *ent;
 	int ret;
 
 	if (!minor)
@@ -167,8 +166,11 @@ int a5xx_debugfs_init(struct msm_gpu *gpu, struct drm_minor *minor)
 		return ret;
 	}
 
-	debugfs_create_file("reset", S_IWUGO, minor->debugfs_root, dev,
-			    &reset_fops);
+	ent = debugfs_create_file("reset", S_IWUGO,
+		minor->debugfs_root,
+		dev, &reset_fops);
+	if (!ent)
+		return -ENOMEM;
 
 	return 0;
 }

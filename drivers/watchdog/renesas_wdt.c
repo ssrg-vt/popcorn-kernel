@@ -7,7 +7,6 @@
  */
 #include <linux/bitops.h>
 #include <linux/clk.h>
-#include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -71,15 +70,6 @@ static int rwdt_init_timeout(struct watchdog_device *wdev)
 	return 0;
 }
 
-static void rwdt_wait_cycles(struct rwdt_priv *priv, unsigned int cycles)
-{
-	unsigned int delay;
-
-	delay = DIV_ROUND_UP(cycles * 1000000, priv->clk_rate);
-
-	usleep_range(delay, 2 * delay);
-}
-
 static int rwdt_start(struct watchdog_device *wdev)
 {
 	struct rwdt_priv *priv = watchdog_get_drvdata(wdev);
@@ -90,8 +80,6 @@ static int rwdt_start(struct watchdog_device *wdev)
 	/* Stop the timer before we modify any register */
 	val = readb_relaxed(priv->base + RWTCSRA) & ~RWTCSRA_TME;
 	rwdt_write(priv, val, RWTCSRA);
-	/* Delay 2 cycles before setting watchdog counter */
-	rwdt_wait_cycles(priv, 2);
 
 	rwdt_init_timeout(wdev);
 	rwdt_write(priv, priv->cks, RWTCSRA);
@@ -110,8 +98,6 @@ static int rwdt_stop(struct watchdog_device *wdev)
 	struct rwdt_priv *priv = watchdog_get_drvdata(wdev);
 
 	rwdt_write(priv, priv->cks, RWTCSRA);
-	/* Delay 3 cycles before disabling module clock */
-	rwdt_wait_cycles(priv, 3);
 	pm_runtime_put(wdev->parent);
 
 	return 0;
@@ -189,16 +175,15 @@ static inline bool rwdt_blacklisted(struct device *dev) { return false; }
 
 static int rwdt_probe(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
 	struct rwdt_priv *priv;
 	struct clk *clk;
 	unsigned long clks_per_sec;
 	int ret, i;
 
-	if (rwdt_blacklisted(dev))
+	if (rwdt_blacklisted(&pdev->dev))
 		return -ENODEV;
 
-	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
@@ -206,16 +191,16 @@ static int rwdt_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->base))
 		return PTR_ERR(priv->base);
 
-	clk = devm_clk_get(dev, NULL);
+	clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(clk))
 		return PTR_ERR(clk);
 
-	pm_runtime_enable(dev);
-	pm_runtime_get_sync(dev);
+	pm_runtime_enable(&pdev->dev);
+	pm_runtime_get_sync(&pdev->dev);
 	priv->clk_rate = clk_get_rate(clk);
 	priv->wdev.bootstatus = (readb_relaxed(priv->base + RWTCSRA) &
 				RWTCSRA_WOVF) ? WDIOF_CARDRESET : 0;
-	pm_runtime_put(dev);
+	pm_runtime_put(&pdev->dev);
 
 	if (!priv->clk_rate) {
 		ret = -ENOENT;
@@ -231,14 +216,14 @@ static int rwdt_probe(struct platform_device *pdev)
 	}
 
 	if (i < 0) {
-		dev_err(dev, "Can't find suitable clock divider\n");
+		dev_err(&pdev->dev, "Can't find suitable clock divider\n");
 		ret = -ERANGE;
 		goto out_pm_disable;
 	}
 
 	priv->wdev.info = &rwdt_ident;
 	priv->wdev.ops = &rwdt_ops;
-	priv->wdev.parent = dev;
+	priv->wdev.parent = &pdev->dev;
 	priv->wdev.min_timeout = 1;
 	priv->wdev.max_timeout = DIV_BY_CLKS_PER_SEC(priv, 65536);
 	priv->wdev.timeout = min(priv->wdev.max_timeout, RWDT_DEFAULT_TIMEOUT);
@@ -250,7 +235,7 @@ static int rwdt_probe(struct platform_device *pdev)
 	watchdog_stop_on_unregister(&priv->wdev);
 
 	/* This overrides the default timeout only if DT configuration was found */
-	watchdog_init_timeout(&priv->wdev, 0, dev);
+	watchdog_init_timeout(&priv->wdev, 0, &pdev->dev);
 
 	ret = watchdog_register_device(&priv->wdev);
 	if (ret < 0)
@@ -259,7 +244,7 @@ static int rwdt_probe(struct platform_device *pdev)
 	return 0;
 
  out_pm_disable:
-	pm_runtime_disable(dev);
+	pm_runtime_disable(&pdev->dev);
 	return ret;
 }
 

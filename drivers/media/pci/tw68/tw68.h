@@ -85,6 +85,7 @@ struct tw68_tvnorm {
 };
 
 struct tw68_format {
+	char	*name;
 	u32	fourcc;
 	u32	depth;
 	u32	twformat;

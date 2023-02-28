@@ -183,14 +183,14 @@ static int adv748x_initialise_clients(struct adv748x_state *state)
 	int ret;
 
 	for (i = ADV748X_PAGE_DPLL; i < ADV748X_PAGE_MAX; ++i) {
-		state->i2c_clients[i] = i2c_new_ancillary_device(
+		state->i2c_clients[i] = i2c_new_secondary_device(
 				state->client,
 				adv748x_default_addresses[i].name,
 				adv748x_default_addresses[i].default_addr);
 
-		if (IS_ERR(state->i2c_clients[i])) {
+		if (state->i2c_clients[i] == NULL) {
 			adv_err(state, "failed to create i2c client %u\n", i);
-			return PTR_ERR(state->i2c_clients[i]);
+			return -ENOMEM;
 		}
 
 		ret = adv748x_configure_regmap(state, i);
@@ -668,7 +668,8 @@ static void adv748x_dt_cleanup(struct adv748x_state *state)
 		of_node_put(state->endpoints[i]);
 }
 
-static int adv748x_probe(struct i2c_client *client)
+static int adv748x_probe(struct i2c_client *client,
+			 const struct i2c_device_id *id)
 {
 	struct adv748x_state *state;
 	int ret;
@@ -796,6 +797,13 @@ static int adv748x_remove(struct i2c_client *client)
 	return 0;
 }
 
+static const struct i2c_device_id adv748x_id[] = {
+	{ "adv7481", 0 },
+	{ "adv7482", 0 },
+	{ },
+};
+MODULE_DEVICE_TABLE(i2c, adv748x_id);
+
 static const struct of_device_id adv748x_of_table[] = {
 	{ .compatible = "adi,adv7481", },
 	{ .compatible = "adi,adv7482", },
@@ -808,8 +816,9 @@ static struct i2c_driver adv748x_driver = {
 		.name = "adv748x",
 		.of_match_table = adv748x_of_table,
 	},
-	.probe_new = adv748x_probe,
+	.probe = adv748x_probe,
 	.remove = adv748x_remove,
+	.id_table = adv748x_id,
 };
 
 module_i2c_driver(adv748x_driver);

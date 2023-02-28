@@ -693,12 +693,16 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 	fei->sram_size = resource_size(res);
 
 	fei->idle_irq = platform_get_irq_byname(pdev, "c8sectpfe-idle-irq");
-	if (fei->idle_irq < 0)
+	if (fei->idle_irq < 0) {
+		dev_err(dev, "Can't get c8sectpfe-idle-irq\n");
 		return fei->idle_irq;
+	}
 
 	fei->error_irq = platform_get_irq_byname(pdev, "c8sectpfe-error-irq");
-	if (fei->error_irq < 0)
+	if (fei->error_irq < 0) {
+		dev_err(dev, "Can't get c8sectpfe-error-irq\n");
 		return fei->error_irq;
+	}
 
 	platform_set_drvdata(pdev, fei);
 

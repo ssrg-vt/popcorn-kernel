@@ -21,40 +21,22 @@
 #include <net/tcp_states.h> /* for TCP_TIME_WAIT */
 #include <net/netfilter/nf_tables.h>
 #include <net/netfilter/nf_tables_core.h>
-#include <net/netfilter/nft_meta.h>
-#include <net/netfilter/nf_tables_offload.h>
 
 #include <uapi/linux/netfilter_bridge.h> /* NF_BR_PRE_ROUTING */
 
-#define NFT_META_SECS_PER_MINUTE	60
-#define NFT_META_SECS_PER_HOUR		3600
-#define NFT_META_SECS_PER_DAY		86400
-#define NFT_META_DAYS_PER_WEEK		7
+struct nft_meta {
+	enum nft_meta_keys	key:8;
+	union {
+		enum nft_registers	dreg:8;
+		enum nft_registers	sreg:8;
+	};
+};
 
 static DEFINE_PER_CPU(struct rnd_state, nft_prandom_state);
 
-static u8 nft_meta_weekday(unsigned long secs)
-{
-	unsigned int dse;
-	u8 wday;
-
-	secs -= NFT_META_SECS_PER_MINUTE * sys_tz.tz_minuteswest;
-	dse = secs / NFT_META_SECS_PER_DAY;
-	wday = (4 + dse) % NFT_META_DAYS_PER_WEEK;
-
-	return wday;
-}
-
-static u32 nft_meta_hour(unsigned long secs)
-{
-	struct tm tm;
-
-	time64_to_tm(secs, 0, &tm);
-
-	return tm.tm_hour * NFT_META_SECS_PER_HOUR
-		+ tm.tm_min * NFT_META_SECS_PER_MINUTE
-		+ tm.tm_sec;
-}
+#ifdef CONFIG_NF_TABLES_BRIDGE
+#include "../bridge/br_private.h"
+#endif
 
 void nft_meta_get_eval(const struct nft_expr *expr,
 		       struct nft_regs *regs,
@@ -65,6 +47,9 @@ void nft_meta_get_eval(const struct nft_expr *expr,
 	const struct net_device *in = nft_in(pkt), *out = nft_out(pkt);
 	struct sock *sk;
 	u32 *dest = &regs->data[priv->dreg];
+#ifdef CONFIG_NF_TABLES_BRIDGE
+	const struct net_bridge_port *p;
+#endif
 
 	switch (priv->key) {
 	case NFT_META_LEN:
@@ -88,16 +73,24 @@ void nft_meta_get_eval(const struct nft_expr *expr,
 		*dest = skb->mark;
 		break;
 	case NFT_META_IIF:
-		*dest = in ? in->ifindex : 0;
+		if (in == NULL)
+			goto err;
+		*dest = in->ifindex;
 		break;
 	case NFT_META_OIF:
-		*dest = out ? out->ifindex : 0;
+		if (out == NULL)
+			goto err;
+		*dest = out->ifindex;
 		break;
 	case NFT_META_IIFNAME:
-		strncpy((char *)dest, in ? in->name : "", IFNAMSIZ);
+		if (in == NULL)
+			goto err;
+		strncpy((char *)dest, in->name, IFNAMSIZ);
 		break;
 	case NFT_META_OIFNAME:
-		strncpy((char *)dest, out ? out->name : "", IFNAMSIZ);
+		if (out == NULL)
+			goto err;
+		strncpy((char *)dest, out->name, IFNAMSIZ);
 		break;
 	case NFT_META_IIFTYPE:
 		if (in == NULL)
@@ -236,6 +229,18 @@ void nft_meta_get_eval(const struct nft_expr *expr,
 		nft_reg_store8(dest, secpath_exists(skb));
 		break;
 #endif
+#ifdef CONFIG_NF_TABLES_BRIDGE
+	case NFT_META_BRI_IIFNAME:
+		if (in == NULL || (p = br_port_get_rcu(in)) == NULL)
+			goto err;
+		strncpy((char *)dest, p->br->dev->name, IFNAMSIZ);
+		return;
+	case NFT_META_BRI_OIFNAME:
+		if (out == NULL || (p = br_port_get_rcu(out)) == NULL)
+			goto err;
+		strncpy((char *)dest, p->br->dev->name, IFNAMSIZ);
+		return;
+#endif
 	case NFT_META_IIFKIND:
 		if (in == NULL || in->rtnl_link_ops == NULL)
 			goto err;
@@ -246,15 +251,6 @@ void nft_meta_get_eval(const struct nft_expr *expr,
 			goto err;
 		strncpy((char *)dest, out->rtnl_link_ops->kind, IFNAMSIZ);
 		break;
-	case NFT_META_TIME_NS:
-		nft_reg_store64(dest, ktime_get_real_ns());
-		break;
-	case NFT_META_TIME_DAY:
-		nft_reg_store8(dest, nft_meta_weekday(get_seconds()));
-		break;
-	case NFT_META_TIME_HOUR:
-		*dest = nft_meta_hour(get_seconds());
-		break;
 	default:
 		WARN_ON(1);
 		goto err;
@@ -264,11 +260,10 @@ void nft_meta_get_eval(const struct nft_expr *expr,
 err:
 	regs->verdict.code = NFT_BREAK;
 }
-EXPORT_SYMBOL_GPL(nft_meta_get_eval);
 
-void nft_meta_set_eval(const struct nft_expr *expr,
-		       struct nft_regs *regs,
-		       const struct nft_pktinfo *pkt)
+static void nft_meta_set_eval(const struct nft_expr *expr,
+			      struct nft_regs *regs,
+			       const struct nft_pktinfo *pkt)
 {
 	const struct nft_meta *meta = nft_expr_priv(expr);
 	struct sk_buff *skb = pkt->skb;
@@ -305,18 +300,16 @@ void nft_meta_set_eval(const struct nft_expr *expr,
 		WARN_ON(1);
 	}
 }
-EXPORT_SYMBOL_GPL(nft_meta_set_eval);
 
-const struct nla_policy nft_meta_policy[NFTA_META_MAX + 1] = {
+static const struct nla_policy nft_meta_policy[NFTA_META_MAX + 1] = {
 	[NFTA_META_DREG]	= { .type = NLA_U32 },
 	[NFTA_META_KEY]		= { .type = NLA_U32 },
 	[NFTA_META_SREG]	= { .type = NLA_U32 },
 };
-EXPORT_SYMBOL_GPL(nft_meta_policy);
 
-int nft_meta_get_init(const struct nft_ctx *ctx,
-		      const struct nft_expr *expr,
-		      const struct nlattr * const tb[])
+static int nft_meta_get_init(const struct nft_ctx *ctx,
+			     const struct nft_expr *expr,
+			     const struct nlattr * const tb[])
 {
 	struct nft_meta *priv = nft_expr_priv(expr);
 	unsigned int len;
@@ -367,15 +360,14 @@ int nft_meta_get_init(const struct nft_ctx *ctx,
 		len = sizeof(u8);
 		break;
 #endif
-	case NFT_META_TIME_NS:
-		len = sizeof(u64);
+#ifdef CONFIG_NF_TABLES_BRIDGE
+	case NFT_META_BRI_IIFNAME:
+	case NFT_META_BRI_OIFNAME:
+		if (ctx->family != NFPROTO_BRIDGE)
+			return -EOPNOTSUPP;
+		len = IFNAMSIZ;
 		break;
-	case NFT_META_TIME_DAY:
-		len = sizeof(u8);
-		break;
-	case NFT_META_TIME_HOUR:
-		len = sizeof(u32);
-		break;
+#endif
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -384,7 +376,6 @@ int nft_meta_get_init(const struct nft_ctx *ctx,
 	return nft_validate_register_store(ctx, priv->dreg, NULL,
 					   NFT_DATA_VALUE, len);
 }
-EXPORT_SYMBOL_GPL(nft_meta_get_init);
 
 static int nft_meta_get_validate(const struct nft_ctx *ctx,
 				 const struct nft_expr *expr,
@@ -418,9 +409,9 @@ static int nft_meta_get_validate(const struct nft_ctx *ctx,
 #endif
 }
 
-int nft_meta_set_validate(const struct nft_ctx *ctx,
-			  const struct nft_expr *expr,
-			  const struct nft_data **data)
+static int nft_meta_set_validate(const struct nft_ctx *ctx,
+				 const struct nft_expr *expr,
+				 const struct nft_data **data)
 {
 	struct nft_meta *priv = nft_expr_priv(expr);
 	unsigned int hooks;
@@ -446,11 +437,10 @@ int nft_meta_set_validate(const struct nft_ctx *ctx,
 
 	return nft_chain_validate_hooks(ctx->chain, hooks);
 }
-EXPORT_SYMBOL_GPL(nft_meta_set_validate);
 
-int nft_meta_set_init(const struct nft_ctx *ctx,
-		      const struct nft_expr *expr,
-		      const struct nlattr * const tb[])
+static int nft_meta_set_init(const struct nft_ctx *ctx,
+			     const struct nft_expr *expr,
+			     const struct nlattr * const tb[])
 {
 	struct nft_meta *priv = nft_expr_priv(expr);
 	unsigned int len;
@@ -485,10 +475,9 @@ int nft_meta_set_init(const struct nft_ctx *ctx,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(nft_meta_set_init);
 
-int nft_meta_get_dump(struct sk_buff *skb,
-		      const struct nft_expr *expr)
+static int nft_meta_get_dump(struct sk_buff *skb,
+			     const struct nft_expr *expr)
 {
 	const struct nft_meta *priv = nft_expr_priv(expr);
 
@@ -501,9 +490,8 @@ int nft_meta_get_dump(struct sk_buff *skb,
 nla_put_failure:
 	return -1;
 }
-EXPORT_SYMBOL_GPL(nft_meta_get_dump);
 
-int nft_meta_set_dump(struct sk_buff *skb, const struct nft_expr *expr)
+static int nft_meta_set_dump(struct sk_buff *skb, const struct nft_expr *expr)
 {
 	const struct nft_meta *priv = nft_expr_priv(expr);
 
@@ -517,41 +505,14 @@ int nft_meta_set_dump(struct sk_buff *skb, const struct nft_expr *expr)
 nla_put_failure:
 	return -1;
 }
-EXPORT_SYMBOL_GPL(nft_meta_set_dump);
 
-void nft_meta_set_destroy(const struct nft_ctx *ctx,
-			  const struct nft_expr *expr)
+static void nft_meta_set_destroy(const struct nft_ctx *ctx,
+				 const struct nft_expr *expr)
 {
 	const struct nft_meta *priv = nft_expr_priv(expr);
 
 	if (priv->key == NFT_META_NFTRACE)
 		static_branch_dec(&nft_trace_enabled);
-}
-EXPORT_SYMBOL_GPL(nft_meta_set_destroy);
-
-static int nft_meta_get_offload(struct nft_offload_ctx *ctx,
-				struct nft_flow_rule *flow,
-				const struct nft_expr *expr)
-{
-	const struct nft_meta *priv = nft_expr_priv(expr);
-	struct nft_offload_reg *reg = &ctx->regs[priv->dreg];
-
-	switch (priv->key) {
-	case NFT_META_PROTOCOL:
-		NFT_OFFLOAD_MATCH(FLOW_DISSECTOR_KEY_BASIC, basic, n_proto,
-				  sizeof(__u16), reg);
-		nft_offload_set_dependency(ctx, NFT_OFFLOAD_DEP_NETWORK);
-		break;
-	case NFT_META_L4PROTO:
-		NFT_OFFLOAD_MATCH(FLOW_DISSECTOR_KEY_BASIC, basic, ip_proto,
-				  sizeof(__u8), reg);
-		nft_offload_set_dependency(ctx, NFT_OFFLOAD_DEP_TRANSPORT);
-		break;
-	default:
-		return -EOPNOTSUPP;
-	}
-
-	return 0;
 }
 
 static const struct nft_expr_ops nft_meta_get_ops = {
@@ -561,7 +522,6 @@ static const struct nft_expr_ops nft_meta_get_ops = {
 	.init		= nft_meta_get_init,
 	.dump		= nft_meta_get_dump,
 	.validate	= nft_meta_get_validate,
-	.offload	= nft_meta_get_offload,
 };
 
 static const struct nft_expr_ops nft_meta_set_ops = {
@@ -584,10 +544,6 @@ nft_meta_select_ops(const struct nft_ctx *ctx,
 	if (tb[NFTA_META_DREG] && tb[NFTA_META_SREG])
 		return ERR_PTR(-EINVAL);
 
-#if IS_ENABLED(CONFIG_NF_TABLES_BRIDGE) && IS_MODULE(CONFIG_NFT_BRIDGE_META)
-	if (ctx->family == NFPROTO_BRIDGE)
-		return ERR_PTR(-EAGAIN);
-#endif
 	if (tb[NFTA_META_DREG])
 		return &nft_meta_get_ops;
 

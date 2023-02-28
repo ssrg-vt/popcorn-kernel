@@ -8,14 +8,11 @@
 #include <linux/kfifo.h>
 #include <linux/io.h>
 #include <linux/workqueue.h>
-
-#include <drm/drm_device.h>
-#include <drm/drm_mm.h>
+#include <drm/drmP.h>
 
 struct armada_crtc;
 struct armada_gem_object;
 struct clk;
-struct drm_display_mode;
 struct drm_fb_helper;
 
 static inline void
@@ -78,7 +75,6 @@ void armada_fbdev_fini(struct drm_device *);
 
 int armada_overlay_plane_create(struct drm_device *, unsigned long);
 
-void armada_drm_crtc_debugfs_init(struct armada_crtc *dcrtc);
 int armada_drm_debugfs_init(struct drm_minor *);
 
 #endif

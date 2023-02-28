@@ -1659,7 +1659,8 @@ static bool rcar_dmac_chan_filter(struct dma_chan *chan, void *arg)
 	 * Forcing it to call dma_request_channel() and iterate through all
 	 * channels from all controllers is just pointless.
 	 */
-	if (chan->device->device_config != rcar_dmac_device_config)
+	if (chan->device->device_config != rcar_dmac_device_config ||
+	    dma_spec->np != chan->device->dev->of_node)
 		return false;
 
 	return !test_and_set_bit(dma_spec->args[0], dmac->modules);
@@ -1679,8 +1680,7 @@ static struct dma_chan *rcar_dmac_of_xlate(struct of_phandle_args *dma_spec,
 	dma_cap_zero(mask);
 	dma_cap_set(DMA_SLAVE, mask);
 
-	chan = __dma_request_channel(&mask, rcar_dmac_chan_filter, dma_spec,
-				     ofdma->of_node);
+	chan = dma_request_channel(mask, rcar_dmac_chan_filter, dma_spec);
 	if (!chan)
 		return NULL;
 
@@ -1749,8 +1749,10 @@ static int rcar_dmac_chan_probe(struct rcar_dmac *dmac,
 	/* Request the channel interrupt. */
 	sprintf(pdev_irqname, "ch%u", index);
 	rchan->irq = platform_get_irq_byname(pdev, pdev_irqname);
-	if (rchan->irq < 0)
+	if (rchan->irq < 0) {
+		dev_err(dmac->dev, "no IRQ specified for channel %u\n", index);
 		return -ENODEV;
+	}
 
 	irqname = devm_kasprintf(dmac->dev, GFP_KERNEL, "%s:%u",
 				 dev_name(dmac->dev), index);

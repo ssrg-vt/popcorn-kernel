@@ -547,7 +547,8 @@ static int ov5647_parse_dt(struct device_node *np)
 	return ret;
 }
 
-static int ov5647_probe(struct i2c_client *client)
+static int ov5647_probe(struct i2c_client *client,
+			const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
 	struct ov5647 *sensor;
@@ -643,7 +644,7 @@ static struct i2c_driver ov5647_driver = {
 		.of_match_table = of_match_ptr(ov5647_of_match),
 		.name	= SENSOR_NAME,
 	},
-	.probe_new	= ov5647_probe,
+	.probe		= ov5647_probe,
 	.remove		= ov5647_remove,
 	.id_table	= ov5647_id,
 };

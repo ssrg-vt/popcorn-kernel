@@ -4,8 +4,7 @@
  * Copyright (c) 2017, Intel Corporation.
  * Author: Andi Kleen
  */
-#include <linux/list.h>
-#include <linux/zalloc.h>
+#include "linux/list.h"
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -15,7 +14,7 @@
 #include <string.h>
 #include "srccode.h"
 #include "debug.h"
-#include <internal/lib.h> // page_size
+#include "util.h"
 
 #define MAXSRCCACHE (32*1024*1024)
 #define MAXSRCFILES     64
@@ -83,12 +82,12 @@ static void fill_lines(char **lines, int maxline, char *map, int maplen)
 
 static void free_srcfile(struct srcfile *sf)
 {
-	list_del_init(&sf->nd);
+	list_del(&sf->nd);
 	hlist_del(&sf->hash_nd);
 	map_total_sz -= sf->maplen;
 	munmap(sf->map, sf->maplen);
-	zfree(&sf->lines);
-	zfree(&sf->fn);
+	free(sf->lines);
+	free(sf->fn);
 	free(sf);
 	num_srcfiles--;
 }
@@ -154,7 +153,7 @@ static struct srcfile *find_srcfile(char *fn)
 out_map:
 	munmap(h->map, sz);
 out_fn:
-	zfree(&h->fn);
+	free(h->fn);
 out_h:
 	free(h);
 	return NULL;

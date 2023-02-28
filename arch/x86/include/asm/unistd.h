@@ -5,6 +5,12 @@
 #include <uapi/asm/unistd.h>
 
 
+# ifdef CONFIG_X86_X32_ABI
+#  define __SYSCALL_MASK (~(__X32_SYSCALL_BIT))
+# else
+#  define __SYSCALL_MASK (~0)
+# endif
+
 # ifdef CONFIG_X86_32
 
 #  include <asm/unistd_32.h>
@@ -48,6 +54,5 @@
 # define __ARCH_WANT_SYS_FORK
 # define __ARCH_WANT_SYS_VFORK
 # define __ARCH_WANT_SYS_CLONE
-# define __ARCH_WANT_SYS_CLONE3
 
 #endif /* _ASM_X86_UNISTD_H */

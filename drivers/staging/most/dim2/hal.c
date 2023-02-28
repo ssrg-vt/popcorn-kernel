@@ -13,7 +13,6 @@
 #include "reg.h"
 #include <linux/stddef.h>
 #include <linux/kernel.h>
-#include <linux/io.h>
 
 /*
  * Size factor for isochronous DBR buffer.
@@ -144,13 +143,13 @@ static void free_dbr(int offs, int size)
 
 static void dim2_transfer_madr(u32 val)
 {
-	writel(val, &g.dim2->MADR);
+	dimcb_io_write(&g.dim2->MADR, val);
 
 	/* wait for transfer completion */
-	while ((readl(&g.dim2->MCTL) & 1) != 1)
+	while ((dimcb_io_read(&g.dim2->MCTL) & 1) != 1)
 		continue;
 
-	writel(0, &g.dim2->MCTL);   /* clear transfer complete */
+	dimcb_io_write(&g.dim2->MCTL, 0);   /* clear transfer complete */
 }
 
 static void dim2_clear_dbr(u16 addr, u16 size)
@@ -160,8 +159,8 @@ static void dim2_clear_dbr(u16 addr, u16 size)
 	u16 const end_addr = addr + size;
 	u32 const cmd = bit_mask(MADR_WNR_BIT) | bit_mask(MADR_TB_BIT);
 
-	writel(0, &g.dim2->MCTL);   /* clear transfer complete */
-	writel(0, &g.dim2->MDAT0);
+	dimcb_io_write(&g.dim2->MCTL, 0);   /* clear transfer complete */
+	dimcb_io_write(&g.dim2->MDAT0, 0);
 
 	for (; addr < end_addr; addr++)
 		dim2_transfer_madr(cmd | addr);
@@ -171,28 +170,28 @@ static u32 dim2_read_ctr(u32 ctr_addr, u16 mdat_idx)
 {
 	dim2_transfer_madr(ctr_addr);
 
-	return readl((&g.dim2->MDAT0) + mdat_idx);
+	return dimcb_io_read((&g.dim2->MDAT0) + mdat_idx);
 }
 
 static void dim2_write_ctr_mask(u32 ctr_addr, const u32 *mask, const u32 *value)
 {
 	enum { MADR_WNR_BIT = 31 };
 
-	writel(0, &g.dim2->MCTL);   /* clear transfer complete */
+	dimcb_io_write(&g.dim2->MCTL, 0);   /* clear transfer complete */
 
 	if (mask[0] != 0)
-		writel(value[0], &g.dim2->MDAT0);
+		dimcb_io_write(&g.dim2->MDAT0, value[0]);
 	if (mask[1] != 0)
-		writel(value[1], &g.dim2->MDAT1);
+		dimcb_io_write(&g.dim2->MDAT1, value[1]);
 	if (mask[2] != 0)
-		writel(value[2], &g.dim2->MDAT2);
+		dimcb_io_write(&g.dim2->MDAT2, value[2]);
 	if (mask[3] != 0)
-		writel(value[3], &g.dim2->MDAT3);
+		dimcb_io_write(&g.dim2->MDAT3, value[3]);
 
-	writel(mask[0], &g.dim2->MDWE0);
-	writel(mask[1], &g.dim2->MDWE1);
-	writel(mask[2], &g.dim2->MDWE2);
-	writel(mask[3], &g.dim2->MDWE3);
+	dimcb_io_write(&g.dim2->MDWE0, mask[0]);
+	dimcb_io_write(&g.dim2->MDWE1, mask[1]);
+	dimcb_io_write(&g.dim2->MDWE2, mask[2]);
+	dimcb_io_write(&g.dim2->MDWE3, mask[3]);
 
 	dim2_transfer_madr(bit_mask(MADR_WNR_BIT) | ctr_addr);
 }
@@ -357,13 +356,15 @@ static void dim2_configure_channel(
 	dim2_configure_cat(AHB_CAT, ch_addr, type, is_tx ? 0 : 1);
 
 	/* unmask interrupt for used channel, enable mlb_sys_int[0] interrupt */
-	writel(readl(&g.dim2->ACMR0) | bit_mask(ch_addr), &g.dim2->ACMR0);
+	dimcb_io_write(&g.dim2->ACMR0,
+		       dimcb_io_read(&g.dim2->ACMR0) | bit_mask(ch_addr));
 }
 
 static void dim2_clear_channel(u8 ch_addr)
 {
 	/* mask interrupt for used channel, disable mlb_sys_int[0] interrupt */
-	writel(readl(&g.dim2->ACMR0) & ~bit_mask(ch_addr), &g.dim2->ACMR0);
+	dimcb_io_write(&g.dim2->ACMR0,
+		       dimcb_io_read(&g.dim2->ACMR0) & ~bit_mask(ch_addr));
 
 	dim2_clear_cat(AHB_CAT, ch_addr);
 	dim2_clear_adt(ch_addr);
@@ -372,7 +373,7 @@ static void dim2_clear_channel(u8 ch_addr)
 	dim2_clear_cdt(ch_addr);
 
 	/* clear channel status bit */
-	writel(bit_mask(ch_addr), &g.dim2->ACSR0);
+	dimcb_io_write(&g.dim2->ACSR0, bit_mask(ch_addr));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -470,7 +471,7 @@ static inline bool check_bytes_per_frame(u32 bytes_per_frame)
 	return true;
 }
 
-u16 dim_norm_ctrl_async_buffer_size(u16 buf_size)
+static inline u16 norm_ctrl_async_buffer_size(u16 buf_size)
 {
 	u16 const max_size = (u16)ADT1_CTRL_ASYNC_BD_MASK + 1u;
 
@@ -516,20 +517,20 @@ static inline u16 norm_sync_buffer_size(u16 buf_size, u16 bytes_per_frame)
 static void dim2_cleanup(void)
 {
 	/* disable MediaLB */
-	writel(false << MLBC0_MLBEN_BIT, &g.dim2->MLBC0);
+	dimcb_io_write(&g.dim2->MLBC0, false << MLBC0_MLBEN_BIT);
 
 	dim2_clear_ctram();
 
 	/* disable mlb_int interrupt */
-	writel(0, &g.dim2->MIEN);
+	dimcb_io_write(&g.dim2->MIEN, 0);
 
 	/* clear status for all dma channels */
-	writel(0xFFFFFFFF, &g.dim2->ACSR0);
-	writel(0xFFFFFFFF, &g.dim2->ACSR1);
+	dimcb_io_write(&g.dim2->ACSR0, 0xFFFFFFFF);
+	dimcb_io_write(&g.dim2->ACSR1, 0xFFFFFFFF);
 
 	/* mask interrupts for all channels */
-	writel(0, &g.dim2->ACMR0);
-	writel(0, &g.dim2->ACMR1);
+	dimcb_io_write(&g.dim2->ACMR0, 0);
+	dimcb_io_write(&g.dim2->ACMR1, 0);
 }
 
 static void dim2_initialize(bool enable_6pin, u8 mlb_clock)
@@ -537,22 +538,23 @@ static void dim2_initialize(bool enable_6pin, u8 mlb_clock)
 	dim2_cleanup();
 
 	/* configure and enable MediaLB */
-	writel(enable_6pin << MLBC0_MLBPEN_BIT |
-	       mlb_clock << MLBC0_MLBCLK_SHIFT |
-	       g.fcnt << MLBC0_FCNT_SHIFT |
-	       true << MLBC0_MLBEN_BIT,
-	       &g.dim2->MLBC0);
+	dimcb_io_write(&g.dim2->MLBC0,
+		       enable_6pin << MLBC0_MLBPEN_BIT |
+		       mlb_clock << MLBC0_MLBCLK_SHIFT |
+		       g.fcnt << MLBC0_FCNT_SHIFT |
+		       true << MLBC0_MLBEN_BIT);
 
 	/* activate all HBI channels */
-	writel(0xFFFFFFFF, &g.dim2->HCMR0);
-	writel(0xFFFFFFFF, &g.dim2->HCMR1);
+	dimcb_io_write(&g.dim2->HCMR0, 0xFFFFFFFF);
+	dimcb_io_write(&g.dim2->HCMR1, 0xFFFFFFFF);
 
 	/* enable HBI */
-	writel(bit_mask(HCTL_EN_BIT), &g.dim2->HCTL);
+	dimcb_io_write(&g.dim2->HCTL, bit_mask(HCTL_EN_BIT));
 
 	/* configure DMA */
-	writel(ACTL_DMA_MODE_VAL_DMA_MODE_1 << ACTL_DMA_MODE_BIT |
-	       true << ACTL_SCE_BIT, &g.dim2->ACTL);
+	dimcb_io_write(&g.dim2->ACTL,
+		       ACTL_DMA_MODE_VAL_DMA_MODE_1 << ACTL_DMA_MODE_BIT |
+		       true << ACTL_SCE_BIT);
 }
 
 static bool dim2_is_mlb_locked(void)
@@ -560,12 +562,12 @@ static bool dim2_is_mlb_locked(void)
 	u32 const mask0 = bit_mask(MLBC0_MLBLK_BIT);
 	u32 const mask1 = bit_mask(MLBC1_CLKMERR_BIT) |
 			  bit_mask(MLBC1_LOCKERR_BIT);
-	u32 const c1 = readl(&g.dim2->MLBC1);
+	u32 const c1 = dimcb_io_read(&g.dim2->MLBC1);
 	u32 const nda_mask = (u32)MLBC1_NDA_MASK << MLBC1_NDA_SHIFT;
 
-	writel(c1 & nda_mask, &g.dim2->MLBC1);
-	return (readl(&g.dim2->MLBC1) & mask1) == 0 &&
-	       (readl(&g.dim2->MLBC0) & mask0) != 0;
+	dimcb_io_write(&g.dim2->MLBC1, c1 & nda_mask);
+	return (dimcb_io_read(&g.dim2->MLBC1) & mask1) == 0 &&
+	       (dimcb_io_read(&g.dim2->MLBC0) & mask0) != 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -588,7 +590,7 @@ static inline bool service_channel(u8 ch_addr, u8 idx)
 	dim2_write_ctr_mask(ADT + ch_addr, mask, adt_w);
 
 	/* clear channel status bit */
-	writel(bit_mask(ch_addr), &g.dim2->ACSR0);
+	dimcb_io_write(&g.dim2->ACSR0, bit_mask(ch_addr));
 
 	return true;
 }
@@ -650,7 +652,7 @@ static bool channel_start(struct dim_channel *ch, u32 buf_addr, u16 buf_size)
 		return dim_on_error(DIM_ERR_BAD_BUFFER_SIZE, "Bad buffer size");
 
 	if (ch->packet_length == 0 && ch->bytes_per_frame == 0 &&
-	    buf_size != dim_norm_ctrl_async_buffer_size(buf_size))
+	    buf_size != norm_ctrl_async_buffer_size(buf_size))
 		return dim_on_error(DIM_ERR_BAD_BUFFER_SIZE,
 				    "Bad control/async buffer size");
 
@@ -774,8 +776,13 @@ static u8 init_ctrl_async(struct dim_channel *ch, u8 type, u8 is_tx,
 
 void dim_service_mlb_int_irq(void)
 {
-	writel(0, &g.dim2->MS0);
-	writel(0, &g.dim2->MS1);
+	dimcb_io_write(&g.dim2->MS0, 0);
+	dimcb_io_write(&g.dim2->MS1, 0);
+}
+
+u16 dim_norm_ctrl_async_buffer_size(u16 buf_size)
+{
+	return norm_ctrl_async_buffer_size(buf_size);
 }
 
 /**
@@ -822,7 +829,7 @@ u8 dim_init_async(struct dim_channel *ch, u8 is_tx, u16 ch_address,
 	if (is_tx && !g.atx_dbr.ch_addr) {
 		g.atx_dbr.ch_addr = ch->addr;
 		dbrcnt_init(ch->addr, ch->dbr_size);
-		writel(bit_mask(20), &g.dim2->MIEN);
+		dimcb_io_write(&g.dim2->MIEN, bit_mask(20));
 	}
 
 	return ret;
@@ -889,7 +896,7 @@ u8 dim_destroy_channel(struct dim_channel *ch)
 		return DIM_ERR_DRIVER_NOT_INITIALIZED;
 
 	if (ch->addr == g.atx_dbr.ch_addr) {
-		writel(0, &g.dim2->MIEN);
+		dimcb_io_write(&g.dim2->MIEN, 0);
 		g.atx_dbr.ch_addr = 0;
 	}
 

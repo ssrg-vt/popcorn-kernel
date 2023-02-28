@@ -4,9 +4,16 @@
 #ifndef __ASM_CSKY_IO_H
 #define __ASM_CSKY_IO_H
 
-#include <asm/pgtable.h>
+#include <abi/pgtable-bits.h>
 #include <linux/types.h>
 #include <linux/version.h>
+
+extern void __iomem *ioremap(phys_addr_t offset, size_t size);
+
+extern void iounmap(void *addr);
+
+extern int remap_area_pages(unsigned long address, phys_addr_t phys_addr,
+		size_t size, unsigned long flags);
 
 /*
  * I/O memory access primitives. Reads are ordered relative to any
@@ -33,17 +40,9 @@
 #define writel(v,c)		({ wmb(); writel_relaxed((v),(c)); mb(); })
 #endif
 
-/*
- * I/O memory mapping functions.
- */
-extern void __iomem *ioremap_cache(phys_addr_t addr, size_t size);
-extern void __iomem *__ioremap(phys_addr_t addr, size_t size, pgprot_t prot);
-extern void iounmap(void *addr);
-
-#define ioremap(addr, size)		__ioremap((addr), (size), pgprot_noncached(PAGE_KERNEL))
-#define ioremap_wc(addr, size)		__ioremap((addr), (size), pgprot_writecombine(PAGE_KERNEL))
-#define ioremap_nocache(addr, size)	ioremap((addr), (size))
-#define ioremap_cache			ioremap_cache
+#define ioremap_nocache(phy, sz)	ioremap(phy, sz)
+#define ioremap_wc ioremap_nocache
+#define ioremap_wt ioremap_nocache
 
 #include <asm-generic/io.h>
 

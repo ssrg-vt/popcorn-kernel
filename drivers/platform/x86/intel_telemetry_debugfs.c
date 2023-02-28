@@ -900,7 +900,7 @@ static int __init telemetry_debugfs_init(void)
 {
 	const struct x86_cpu_id *id;
 	int err;
-	struct dentry *dir;
+	struct dentry *f;
 
 	/* Only APL supported for now */
 	id = x86_match_cpu(telemetry_debugfs_cpu_ids);
@@ -923,22 +923,68 @@ static int __init telemetry_debugfs_init(void)
 
 	register_pm_notifier(&pm_notifier);
 
-	dir = debugfs_create_dir("telemetry", NULL);
-	debugfs_conf->telemetry_dbg_dir = dir;
+	err = -ENOMEM;
+	debugfs_conf->telemetry_dbg_dir = debugfs_create_dir("telemetry", NULL);
+	if (!debugfs_conf->telemetry_dbg_dir)
+		goto out_pm;
 
-	debugfs_create_file("pss_info", S_IFREG | S_IRUGO, dir, NULL,
-			    &telem_pss_states_fops);
-	debugfs_create_file("ioss_info", S_IFREG | S_IRUGO, dir, NULL,
-			    &telem_ioss_states_fops);
-	debugfs_create_file("soc_states", S_IFREG | S_IRUGO, dir, NULL,
-			    &telem_soc_states_fops);
-	debugfs_create_file("s0ix_residency_usec", S_IFREG | S_IRUGO, dir, NULL,
-			    &telem_s0ix_fops);
-	debugfs_create_file("pss_trace_verbosity", S_IFREG | S_IRUGO, dir, NULL,
-			    &telem_pss_trc_verb_ops);
-	debugfs_create_file("ioss_trace_verbosity", S_IFREG | S_IRUGO, dir,
-			    NULL, &telem_ioss_trc_verb_ops);
+	f = debugfs_create_file("pss_info", S_IFREG | S_IRUGO,
+				debugfs_conf->telemetry_dbg_dir, NULL,
+				&telem_pss_states_fops);
+	if (!f) {
+		pr_err("pss_sample_info debugfs register failed\n");
+		goto out;
+	}
+
+	f = debugfs_create_file("ioss_info", S_IFREG | S_IRUGO,
+				debugfs_conf->telemetry_dbg_dir, NULL,
+				&telem_ioss_states_fops);
+	if (!f) {
+		pr_err("ioss_sample_info debugfs register failed\n");
+		goto out;
+	}
+
+	f = debugfs_create_file("soc_states", S_IFREG | S_IRUGO,
+				debugfs_conf->telemetry_dbg_dir,
+				NULL, &telem_soc_states_fops);
+	if (!f) {
+		pr_err("ioss_sample_info debugfs register failed\n");
+		goto out;
+	}
+
+	f = debugfs_create_file("s0ix_residency_usec", S_IFREG | S_IRUGO,
+				debugfs_conf->telemetry_dbg_dir,
+				NULL, &telem_s0ix_fops);
+	if (!f) {
+		pr_err("s0ix_residency_usec debugfs register failed\n");
+		goto out;
+	}
+
+	f = debugfs_create_file("pss_trace_verbosity", S_IFREG | S_IRUGO,
+				debugfs_conf->telemetry_dbg_dir, NULL,
+				&telem_pss_trc_verb_ops);
+	if (!f) {
+		pr_err("pss_trace_verbosity debugfs register failed\n");
+		goto out;
+	}
+
+	f = debugfs_create_file("ioss_trace_verbosity", S_IFREG | S_IRUGO,
+				debugfs_conf->telemetry_dbg_dir, NULL,
+				&telem_ioss_trc_verb_ops);
+	if (!f) {
+		pr_err("ioss_trace_verbosity debugfs register failed\n");
+		goto out;
+	}
+
 	return 0;
+
+out:
+	debugfs_remove_recursive(debugfs_conf->telemetry_dbg_dir);
+	debugfs_conf->telemetry_dbg_dir = NULL;
+out_pm:
+	unregister_pm_notifier(&pm_notifier);
+
+	return err;
 }
 
 static void __exit telemetry_debugfs_exit(void)

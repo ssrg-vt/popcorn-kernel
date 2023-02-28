@@ -176,7 +176,7 @@ static int rxrpc_queue_packet(struct rxrpc_sock *rx, struct rxrpc_call *call,
 	skb->tstamp = ktime_get_real();
 
 	ix = seq & RXRPC_RXTX_BUFF_MASK;
-	rxrpc_get_skb(skb, rxrpc_skb_got);
+	rxrpc_get_skb(skb, rxrpc_skb_tx_got);
 	call->rxtx_annotations[ix] = annotation;
 	smp_wmb();
 	call->rxtx_buffer[ix] = skb;
@@ -248,7 +248,7 @@ static int rxrpc_queue_packet(struct rxrpc_sock *rx, struct rxrpc_call *call,
 	}
 
 out:
-	rxrpc_free_skb(skb, rxrpc_skb_freed);
+	rxrpc_free_skb(skb, rxrpc_skb_tx_freed);
 	_leave(" = %d", ret);
 	return ret;
 }
@@ -289,7 +289,7 @@ static int rxrpc_send_data(struct rxrpc_sock *rx,
 
 	skb = call->tx_pending;
 	call->tx_pending = NULL;
-	rxrpc_see_skb(skb, rxrpc_skb_seen);
+	rxrpc_see_skb(skb, rxrpc_skb_tx_seen);
 
 	copied = 0;
 	do {
@@ -336,9 +336,7 @@ static int rxrpc_send_data(struct rxrpc_sock *rx,
 			if (!skb)
 				goto maybe_error;
 
-			sp = rxrpc_skb(skb);
-			sp->rx_flags |= RXRPC_SKB_TX_BUFFER;
-			rxrpc_new_skb(skb, rxrpc_skb_new);
+			rxrpc_new_skb(skb, rxrpc_skb_tx_new);
 
 			_debug("ALLOC SEND %p", skb);
 
@@ -348,6 +346,7 @@ static int rxrpc_send_data(struct rxrpc_sock *rx,
 			skb_reserve(skb, call->conn->security_size);
 			skb->len += call->conn->security_size;
 
+			sp = rxrpc_skb(skb);
 			sp->remain = chunk;
 			if (sp->remain > skb_tailroom(skb))
 				sp->remain = skb_tailroom(skb);
@@ -419,7 +418,7 @@ static int rxrpc_send_data(struct rxrpc_sock *rx,
 				 call->tx_winsize)
 				sp->hdr.flags |= RXRPC_MORE_PACKETS;
 
-			ret = call->security->secure_packet(
+			ret = conn->security->secure_packet(
 				call, skb, skb->mark, skb->head);
 			if (ret < 0)
 				goto out;
@@ -440,7 +439,7 @@ out:
 	return ret;
 
 call_terminated:
-	rxrpc_free_skb(skb, rxrpc_skb_freed);
+	rxrpc_free_skb(skb, rxrpc_skb_tx_freed);
 	_leave(" = %d", call->error);
 	return call->error;
 
@@ -661,7 +660,6 @@ int rxrpc_do_sendmsg(struct rxrpc_sock *rx, struct msghdr *msg, size_t len)
 		case RXRPC_CALL_SERVER_PREALLOC:
 		case RXRPC_CALL_SERVER_SECURING:
 		case RXRPC_CALL_SERVER_ACCEPTING:
-			rxrpc_put_call(call, rxrpc_call_put);
 			ret = -EBUSY;
 			goto error_release_sock;
 		default:

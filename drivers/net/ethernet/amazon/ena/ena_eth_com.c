@@ -32,7 +32,7 @@
 
 #include "ena_eth_com.h"
 
-static struct ena_eth_io_rx_cdesc_base *ena_com_get_next_rx_cdesc(
+static inline struct ena_eth_io_rx_cdesc_base *ena_com_get_next_rx_cdesc(
 	struct ena_com_io_cq *io_cq)
 {
 	struct ena_eth_io_rx_cdesc_base *cdesc;
@@ -59,7 +59,7 @@ static struct ena_eth_io_rx_cdesc_base *ena_com_get_next_rx_cdesc(
 	return cdesc;
 }
 
-static void *get_sq_desc_regular_queue(struct ena_com_io_sq *io_sq)
+static inline void *get_sq_desc_regular_queue(struct ena_com_io_sq *io_sq)
 {
 	u16 tail_masked;
 	u32 offset;
@@ -71,7 +71,7 @@ static void *get_sq_desc_regular_queue(struct ena_com_io_sq *io_sq)
 	return (void *)((uintptr_t)io_sq->desc_addr.virt_addr + offset);
 }
 
-static int ena_com_write_bounce_buffer_to_dev(struct ena_com_io_sq *io_sq,
+static inline int ena_com_write_bounce_buffer_to_dev(struct ena_com_io_sq *io_sq,
 						     u8 *bounce_buffer)
 {
 	struct ena_com_llq_info *llq_info = &io_sq->llq_info;
@@ -81,17 +81,6 @@ static int ena_com_write_bounce_buffer_to_dev(struct ena_com_io_sq *io_sq,
 
 	dst_tail_mask = io_sq->tail & (io_sq->q_depth - 1);
 	dst_offset = dst_tail_mask * llq_info->desc_list_entry_size;
-
-	if (is_llq_max_tx_burst_exists(io_sq)) {
-		if (unlikely(!io_sq->entries_in_tx_burst_left)) {
-			pr_err("Error: trying to send more packets than tx burst allows\n");
-			return -ENOSPC;
-		}
-
-		io_sq->entries_in_tx_burst_left--;
-		pr_debug("decreasing entries_in_tx_burst_left of queue %d to %d\n",
-			 io_sq->qid, io_sq->entries_in_tx_burst_left);
-	}
 
 	/* Make sure everything was written into the bounce buffer before
 	 * writing the bounce buffer to the device
@@ -111,7 +100,7 @@ static int ena_com_write_bounce_buffer_to_dev(struct ena_com_io_sq *io_sq,
 	return 0;
 }
 
-static int ena_com_write_header_to_bounce(struct ena_com_io_sq *io_sq,
+static inline int ena_com_write_header_to_bounce(struct ena_com_io_sq *io_sq,
 						 u8 *header_src,
 						 u16 header_len)
 {
@@ -142,7 +131,7 @@ static int ena_com_write_header_to_bounce(struct ena_com_io_sq *io_sq,
 	return 0;
 }
 
-static void *get_sq_desc_llq(struct ena_com_io_sq *io_sq)
+static inline void *get_sq_desc_llq(struct ena_com_io_sq *io_sq)
 {
 	struct ena_com_llq_pkt_ctrl *pkt_ctrl = &io_sq->llq_buf_ctrl;
 	u8 *bounce_buffer;
@@ -162,7 +151,7 @@ static void *get_sq_desc_llq(struct ena_com_io_sq *io_sq)
 	return sq_desc;
 }
 
-static int ena_com_close_bounce_buffer(struct ena_com_io_sq *io_sq)
+static inline int ena_com_close_bounce_buffer(struct ena_com_io_sq *io_sq)
 {
 	struct ena_com_llq_pkt_ctrl *pkt_ctrl = &io_sq->llq_buf_ctrl;
 	struct ena_com_llq_info *llq_info = &io_sq->llq_info;
@@ -189,7 +178,7 @@ static int ena_com_close_bounce_buffer(struct ena_com_io_sq *io_sq)
 	return 0;
 }
 
-static void *get_sq_desc(struct ena_com_io_sq *io_sq)
+static inline void *get_sq_desc(struct ena_com_io_sq *io_sq)
 {
 	if (io_sq->mem_queue_type == ENA_ADMIN_PLACEMENT_POLICY_DEV)
 		return get_sq_desc_llq(io_sq);
@@ -197,7 +186,7 @@ static void *get_sq_desc(struct ena_com_io_sq *io_sq)
 	return get_sq_desc_regular_queue(io_sq);
 }
 
-static int ena_com_sq_update_llq_tail(struct ena_com_io_sq *io_sq)
+static inline int ena_com_sq_update_llq_tail(struct ena_com_io_sq *io_sq)
 {
 	struct ena_com_llq_pkt_ctrl *pkt_ctrl = &io_sq->llq_buf_ctrl;
 	struct ena_com_llq_info *llq_info = &io_sq->llq_info;
@@ -211,8 +200,8 @@ static int ena_com_sq_update_llq_tail(struct ena_com_io_sq *io_sq)
 
 		pkt_ctrl->curr_bounce_buf =
 			ena_com_get_next_bounce_buffer(&io_sq->bounce_buf_ctrl);
-		memset(io_sq->llq_buf_ctrl.curr_bounce_buf,
-		       0x0, llq_info->desc_list_entry_size);
+			memset(io_sq->llq_buf_ctrl.curr_bounce_buf,
+			       0x0, llq_info->desc_list_entry_size);
 
 		pkt_ctrl->idx = 0;
 		if (unlikely(llq_info->desc_stride_ctrl == ENA_ADMIN_SINGLE_DESC_PER_ENTRY))
@@ -225,7 +214,7 @@ static int ena_com_sq_update_llq_tail(struct ena_com_io_sq *io_sq)
 	return 0;
 }
 
-static int ena_com_sq_update_tail(struct ena_com_io_sq *io_sq)
+static inline int ena_com_sq_update_tail(struct ena_com_io_sq *io_sq)
 {
 	if (io_sq->mem_queue_type == ENA_ADMIN_PLACEMENT_POLICY_DEV)
 		return ena_com_sq_update_llq_tail(io_sq);
@@ -239,7 +228,7 @@ static int ena_com_sq_update_tail(struct ena_com_io_sq *io_sq)
 	return 0;
 }
 
-static struct ena_eth_io_rx_cdesc_base *
+static inline struct ena_eth_io_rx_cdesc_base *
 	ena_com_rx_cdesc_idx_to_ptr(struct ena_com_io_cq *io_cq, u16 idx)
 {
 	idx &= (io_cq->q_depth - 1);
@@ -248,7 +237,7 @@ static struct ena_eth_io_rx_cdesc_base *
 		idx * io_cq->cdesc_entry_size_in_bytes);
 }
 
-static u16 ena_com_cdesc_rx_pkt_get(struct ena_com_io_cq *io_cq,
+static inline u16 ena_com_cdesc_rx_pkt_get(struct ena_com_io_cq *io_cq,
 					   u16 *first_cdesc_idx)
 {
 	struct ena_eth_io_rx_cdesc_base *cdesc;
@@ -285,7 +274,24 @@ static u16 ena_com_cdesc_rx_pkt_get(struct ena_com_io_cq *io_cq,
 	return count;
 }
 
-static int ena_com_create_and_store_tx_meta_desc(struct ena_com_io_sq *io_sq,
+static inline bool ena_com_meta_desc_changed(struct ena_com_io_sq *io_sq,
+					     struct ena_com_tx_ctx *ena_tx_ctx)
+{
+	int rc;
+
+	if (ena_tx_ctx->meta_valid) {
+		rc = memcmp(&io_sq->cached_tx_meta,
+			    &ena_tx_ctx->ena_meta,
+			    sizeof(struct ena_com_tx_meta));
+
+		if (unlikely(rc != 0))
+			return true;
+	}
+
+	return false;
+}
+
+static inline int ena_com_create_and_store_tx_meta_desc(struct ena_com_io_sq *io_sq,
 							struct ena_com_tx_ctx *ena_tx_ctx)
 {
 	struct ena_eth_io_tx_meta_desc *meta_desc = NULL;
@@ -334,7 +340,7 @@ static int ena_com_create_and_store_tx_meta_desc(struct ena_com_io_sq *io_sq,
 	return ena_com_sq_update_tail(io_sq);
 }
 
-static void ena_com_rx_set_flags(struct ena_com_rx_ctx *ena_rx_ctx,
+static inline void ena_com_rx_set_flags(struct ena_com_rx_ctx *ena_rx_ctx,
 					struct ena_eth_io_rx_cdesc_base *cdesc)
 {
 	ena_rx_ctx->l3_proto = cdesc->status &

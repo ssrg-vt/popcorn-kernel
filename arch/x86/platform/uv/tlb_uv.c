@@ -66,6 +66,7 @@ static struct tunables tunables[] = {
 };
 
 static struct dentry *tunables_dir;
+static struct dentry *tunables_file;
 
 /* these correspond to the statistics printed by ptc_seq_show() */
 static char *stat_description[] = {
@@ -1699,8 +1700,18 @@ static int __init uv_ptc_init(void)
 	}
 
 	tunables_dir = debugfs_create_dir(UV_BAU_TUNABLES_DIR, NULL);
-	debugfs_create_file(UV_BAU_TUNABLES_FILE, 0600, tunables_dir, NULL,
-			    &tunables_fops);
+	if (!tunables_dir) {
+		pr_err("unable to create debugfs directory %s\n",
+		       UV_BAU_TUNABLES_DIR);
+		return -EINVAL;
+	}
+	tunables_file = debugfs_create_file(UV_BAU_TUNABLES_FILE, 0600,
+					tunables_dir, NULL, &tunables_fops);
+	if (!tunables_file) {
+		pr_err("unable to create debugfs file %s\n",
+		       UV_BAU_TUNABLES_FILE);
+		return -EINVAL;
+	}
 	return 0;
 }
 
@@ -1804,9 +1815,9 @@ static void pq_init(int node, int pnode)
 
 	plsize = (DEST_Q_SIZE + 1) * sizeof(struct bau_pq_entry);
 	vp = kmalloc_node(plsize, GFP_KERNEL, node);
-	BUG_ON(!vp);
-
 	pqp = (struct bau_pq_entry *)vp;
+	BUG_ON(!pqp);
+
 	cp = (char *)pqp + 31;
 	pqp = (struct bau_pq_entry *)(((unsigned long)cp >> 5) << 5);
 

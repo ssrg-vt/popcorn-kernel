@@ -567,10 +567,6 @@ static int xcrb_msg_to_type6_ep11cprb_msgx(struct ap_message *ap_msg,
 	payload_hdr = (struct pld_hdr *)((&(msg->pld_lenfmt))+lfmt);
 	*fcode = payload_hdr->func_val & 0xFFFF;
 
-	/* enable special processing based on the cprbs flags special bit */
-	if (msg->cprbx.flags & 0x20)
-		ap_msg->special = 1;
-
 	return 0;
 }
 
@@ -801,7 +797,10 @@ static int convert_response_ica(struct zcrypt_queue *zq,
 		if (msg->cprbx.cprb_ver_id == 0x02)
 			return convert_type86_ica(zq, reply,
 						  outputdata, outputdatalength);
-		/* fall through - wrong cprb version is an unknown response */
+		/*
+		 * Fall through, no break, incorrect cprb version is an unknown
+		 * response
+		 */
 	default: /* Unknown response type, this should NEVER EVER happen */
 		zq->online = 0;
 		pr_err("Cryptographic device %02x.%04x failed and was set offline\n",
@@ -834,7 +833,10 @@ static int convert_response_xcrb(struct zcrypt_queue *zq,
 		}
 		if (msg->cprbx.cprb_ver_id == 0x02)
 			return convert_type86_xcrb(zq, reply, xcRB);
-		/* fall through - wrong cprb version is an unknown response */
+		/*
+		 * Fall through, no break, incorrect cprb version is an unknown
+		 * response
+		 */
 	default: /* Unknown response type, this should NEVER EVER happen */
 		xcRB->status = 0x0008044DL; /* HDD_InvalidParm */
 		zq->online = 0;
@@ -864,7 +866,7 @@ static int convert_response_ep11_xcrb(struct zcrypt_queue *zq,
 			return convert_error(zq, reply);
 		if (msg->cprbx.cprb_ver_id == 0x04)
 			return convert_type86_ep11_xcrb(zq, reply, xcRB);
-		/* fall through - wrong cprb version is an unknown resp */
+	/* Fall through, no break, incorrect cprb version is an unknown resp.*/
 	default: /* Unknown response type, this should NEVER EVER happen */
 		zq->online = 0;
 		pr_err("Cryptographic device %02x.%04x failed and was set offline\n",
@@ -894,7 +896,10 @@ static int convert_response_rng(struct zcrypt_queue *zq,
 			return -EINVAL;
 		if (msg->cprbx.cprb_ver_id == 0x02)
 			return convert_type86_rng(zq, reply, data);
-		/* fall through - wrong cprb version is an unknown response */
+		/*
+		 * Fall through, no break, incorrect cprb version is an unknown
+		 * response
+		 */
 	default: /* Unknown response type, this should NEVER EVER happen */
 		zq->online = 0;
 		pr_err("Cryptographic device %02x.%04x failed and was set offline\n",

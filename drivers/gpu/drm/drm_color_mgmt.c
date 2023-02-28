@@ -20,13 +20,9 @@
  * OF THIS SOFTWARE.
  */
 
-#include <linux/uaccess.h>
-
-#include <drm/drm_color_mgmt.h>
+#include <drm/drmP.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_device.h>
-#include <drm/drm_drv.h>
-#include <drm/drm_print.h>
+#include <drm/drm_color_mgmt.h>
 
 #include "drm_crtc_internal.h"
 

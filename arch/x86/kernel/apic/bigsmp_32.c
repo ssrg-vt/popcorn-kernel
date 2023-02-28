@@ -4,13 +4,18 @@
  *
  * Drives the local APIC in "clustered mode".
  */
+#include <linux/threads.h>
 #include <linux/cpumask.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/dmi.h>
 #include <linux/smp.h>
 
+#include <asm/apicdef.h>
+#include <asm/fixmap.h>
+#include <asm/mpspec.h>
 #include <asm/apic.h>
-
-#include "local.h"
+#include <asm/ipi.h>
 
 static unsigned bigsmp_get_apic_id(unsigned long x)
 {

@@ -53,8 +53,12 @@ static void l1_guest_code(struct vmx_pages *vmx_pages)
 int main(int argc, char *argv[])
 {
 	vm_vaddr_t vmx_pages_gva;
+	struct kvm_cpuid_entry2 *entry = kvm_get_supported_cpuid_entry(1);
 
-	nested_vmx_check_supported();
+	if (!(entry->ecx & CPUID_VMX)) {
+		fprintf(stderr, "nested VMX not enabled, skipping test\n");
+		exit(KSFT_SKIP);
+	}
 
 	vm = vm_create_default(VCPU_ID, 0, (void *) l1_guest_code);
 	vcpu_set_cpuid(vm, VCPU_ID, kvm_get_supported_cpuid());

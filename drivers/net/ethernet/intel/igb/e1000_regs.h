@@ -409,8 +409,6 @@ do { \
 #define E1000_I210_TQAVCC(_n)	(0x3004 + ((_n) * 0x40))
 #define E1000_I210_TQAVHC(_n)	(0x300C + ((_n) * 0x40))
 
-#define E1000_I210_RR2DCDELAY	0x5BF4
-
 #define E1000_INVM_DATA_REG(_n)	(0x12120 + 4*(_n))
 #define E1000_INVM_SIZE		64 /* Number of INVM Data Registers */
 

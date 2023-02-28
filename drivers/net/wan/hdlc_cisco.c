@@ -193,15 +193,16 @@ static int cisco_rx(struct sk_buff *skb)
 			mask = ~cpu_to_be32(0); /* is the mask correct? */
 
 			if (in_dev != NULL) {
-				const struct in_ifaddr *ifa;
+				struct in_ifaddr **ifap = &in_dev->ifa_list;
 
-				in_dev_for_each_ifa_rcu(ifa, in_dev) {
+				while (*ifap != NULL) {
 					if (strcmp(dev->name,
-						   ifa->ifa_label) == 0) {
-						addr = ifa->ifa_local;
-						mask = ifa->ifa_mask;
+						   (*ifap)->ifa_label) == 0) {
+						addr = (*ifap)->ifa_local;
+						mask = (*ifap)->ifa_mask;
 						break;
 					}
+					ifap = &(*ifap)->ifa_next;
 				}
 
 				cisco_keepalive_send(dev, CISCO_ADDR_REPLY,

@@ -138,7 +138,8 @@ typedef struct {
 	compat_sigset_word	sig[_COMPAT_NSIG_WORDS];
 } compat_sigset_t;
 
-int set_compat_user_sigmask(const compat_sigset_t __user *umask,
+int set_compat_user_sigmask(const compat_sigset_t __user *usigmask,
+			    sigset_t *set, sigset_t *oldset,
 			    size_t sigsetsize);
 
 struct compat_sigaction {

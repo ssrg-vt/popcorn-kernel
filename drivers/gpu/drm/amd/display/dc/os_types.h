@@ -26,13 +26,11 @@
 #ifndef _OS_TYPES_H_
 #define _OS_TYPES_H_
 
-#include <linux/kgdb.h>
-#include <linux/kref.h>
-#include <linux/types.h>
-
 #include <asm/byteorder.h>
+#include <linux/types.h>
+#include <drm/drmP.h>
 
-#include <drm/drm_print.h>
+#include <linux/kref.h>
 
 #include "cgs_common.h"
 

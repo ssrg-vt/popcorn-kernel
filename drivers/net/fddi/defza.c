@@ -33,7 +33,6 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
-#include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
 #include <linux/list.h>

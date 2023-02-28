@@ -313,11 +313,8 @@ void hw_atl_rpb_rx_pkt_buff_size_per_tc_set(struct aq_hw_s *aq_hw,
 					    u32 rx_pkt_buff_size_per_tc,
 					    u32 buffer);
 
-/* toggle rdm rx dma descriptor cache init */
-void hw_atl_rdm_rx_dma_desc_cache_init_tgl(struct aq_hw_s *aq_hw);
-
-/* get rdm rx dma descriptor cache init done */
-u32 hw_atl_rdm_rx_dma_desc_cache_init_done_get(struct aq_hw_s *aq_hw);
+/* set rdm rx dma descriptor cache init */
+void hw_atl_rdm_rx_dma_desc_cache_init_set(struct aq_hw_s *aq_hw, u32 init);
 
 /* set rx xoff enable (per tc) */
 void hw_atl_rpb_rx_xoff_en_per_tc_set(struct aq_hw_s *aq_hw, u32 rx_xoff_en_per_tc,
@@ -490,11 +487,6 @@ void hw_atl_rpo_ipv4header_crc_offload_en_set(struct aq_hw_s *aq_hw,
 void hw_atl_rpo_rx_desc_vlan_stripping_set(struct aq_hw_s *aq_hw,
 					   u32 rx_desc_vlan_stripping,
 					   u32 descriptor);
-
-void hw_atl_rpo_outer_vlan_tag_mode_set(void *context,
-					u32 outervlantagmode);
-
-u32 hw_atl_rpo_outer_vlan_tag_mode_get(void *context);
 
 /* set tcp/udp checksum offload enable */
 void hw_atl_rpo_tcp_udp_crc_offload_en_set(struct aq_hw_s *aq_hw,

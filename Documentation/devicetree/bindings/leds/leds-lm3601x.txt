@@ -22,14 +22,9 @@ Required properties for flash LED child nodes:
 	- led-max-microamp : Range from 2.4mA - 376mA
 
 Optional child properties:
-	- function : see Documentation/devicetree/bindings/leds/common.txt
-	- color : see Documentation/devicetree/bindings/leds/common.txt
-	- label : see Documentation/devicetree/bindings/leds/common.txt (deprecated)
+	- label : see Documentation/devicetree/bindings/leds/common.txt
 
 Example:
-
-#include <dt-bindings/leds/common.h>
-
 led-controller@64 {
 	compatible = "ti,lm36010";
 	#address-cells = <1>;
@@ -38,8 +33,7 @@ led-controller@64 {
 
 	led@0 {
 		reg = <1>;
-		function = LED_FUNCTION_TORCH;
-		color = <LED_COLOR_ID_WHITE>;
+		label = "white:torch";
 		led-max-microamp = <376000>;
 		flash-max-microamp = <1500000>;
 		flash-max-timeout-us = <1600000>;

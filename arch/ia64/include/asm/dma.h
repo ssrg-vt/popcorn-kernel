@@ -12,7 +12,11 @@
 
 extern unsigned long MAX_DMA_ADDRESS;
 
-extern int isa_dma_bridge_buggy;
+#ifdef CONFIG_PCI
+  extern int isa_dma_bridge_buggy;
+#else
+# define isa_dma_bridge_buggy 	(0)
+#endif
 
 #define free_dma(x)
 

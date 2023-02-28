@@ -76,7 +76,6 @@ static void dwc2_set_s3c6400_params(struct dwc2_hsotg *hsotg)
 	struct dwc2_core_params *p = &hsotg->params;
 
 	p->power_down = 0;
-	p->phy_utmi_width = 8;
 }
 
 static void dwc2_set_rk_params(struct dwc2_hsotg *hsotg)
@@ -404,7 +403,10 @@ static void dwc2_get_device_properties(struct dwc2_hsotg *hsotg)
 		device_property_read_u32(hsotg->dev, "g-np-tx-fifo-size",
 					 &p->g_np_tx_fifo_size);
 
-		num = device_property_count_u32(hsotg->dev, "g-tx-fifo-size");
+		num = device_property_read_u32_array(hsotg->dev,
+						     "g-tx-fifo-size",
+						     NULL, 0);
+
 		if (num > 0) {
 			num = min(num, 15);
 			memset(p->g_tx_fifo_size, 0,

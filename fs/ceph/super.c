@@ -143,7 +143,6 @@ enum {
 	Opt_snapdirname,
 	Opt_mds_namespace,
 	Opt_fscache_uniq,
-	Opt_recover_session,
 	Opt_last_string,
 	/* string args above */
 	Opt_dirstat,
@@ -185,7 +184,6 @@ static match_table_t fsopt_tokens = {
 	/* int args above */
 	{Opt_snapdirname, "snapdirname=%s"},
 	{Opt_mds_namespace, "mds_namespace=%s"},
-	{Opt_recover_session, "recover_session=%s"},
 	{Opt_fscache_uniq, "fsc=%s"},
 	/* string args above */
 	{Opt_dirstat, "dirstat"},
@@ -256,19 +254,7 @@ static int parse_fsopt_token(char *c, void *private)
 		if (!fsopt->mds_namespace)
 			return -ENOMEM;
 		break;
-	case Opt_recover_session:
-		if (!strncmp(argstr[0].from, "no",
-			     argstr[0].to - argstr[0].from)) {
-			fsopt->flags &= ~CEPH_MOUNT_OPT_CLEANRECOVER;
-		} else if (!strncmp(argstr[0].from, "clean",
-				    argstr[0].to - argstr[0].from)) {
-			fsopt->flags |= CEPH_MOUNT_OPT_CLEANRECOVER;
-		} else {
-			return -EINVAL;
-		}
-		break;
 	case Opt_fscache_uniq:
-#ifdef CONFIG_CEPH_FSCACHE
 		kfree(fsopt->fscache_uniq);
 		fsopt->fscache_uniq = kstrndup(argstr[0].from,
 					       argstr[0].to-argstr[0].from,
@@ -277,10 +263,7 @@ static int parse_fsopt_token(char *c, void *private)
 			return -ENOMEM;
 		fsopt->flags |= CEPH_MOUNT_OPT_FSCACHE;
 		break;
-#else
-		pr_err("fscache support is disabled\n");
-		return -EINVAL;
-#endif
+		/* misc */
 	case Opt_wsize:
 		if (intval < (int)PAGE_SIZE || intval > CEPH_MAX_WRITE_SIZE)
 			return -EINVAL;
@@ -357,15 +340,10 @@ static int parse_fsopt_token(char *c, void *private)
 		fsopt->flags &= ~CEPH_MOUNT_OPT_INO32;
 		break;
 	case Opt_fscache:
-#ifdef CONFIG_CEPH_FSCACHE
 		fsopt->flags |= CEPH_MOUNT_OPT_FSCACHE;
 		kfree(fsopt->fscache_uniq);
 		fsopt->fscache_uniq = NULL;
 		break;
-#else
-		pr_err("fscache support is disabled\n");
-		return -EINVAL;
-#endif
 	case Opt_nofscache:
 		fsopt->flags &= ~CEPH_MOUNT_OPT_FSCACHE;
 		kfree(fsopt->fscache_uniq);
@@ -598,10 +576,6 @@ static int ceph_show_options(struct seq_file *m, struct dentry *root)
 
 	if (fsopt->mds_namespace)
 		seq_show_option(m, "mds_namespace", fsopt->mds_namespace);
-
-	if (fsopt->flags & CEPH_MOUNT_OPT_CLEANRECOVER)
-		seq_show_option(m, "recover_session", "clean");
-
 	if (fsopt->wsize != CEPH_MAX_WRITE_SIZE)
 		seq_printf(m, ",wsize=%d", fsopt->wsize);
 	if (fsopt->rsize != CEPH_MAX_READ_SIZE)
@@ -690,7 +664,6 @@ static struct ceph_fs_client *create_fs_client(struct ceph_mount_options *fsopt,
 
 	fsc->sb = NULL;
 	fsc->mount_state = CEPH_MOUNT_MOUNTING;
-	fsc->filp_gen = 1;
 
 	atomic_long_set(&fsc->writeback_count, 0);
 
@@ -740,7 +713,6 @@ static void destroy_fs_client(struct ceph_fs_client *fsc)
 {
 	dout("destroy_fs_client %p\n", fsc);
 
-	ceph_mdsc_destroy(fsc);
 	destroy_workqueue(fsc->inode_wq);
 	destroy_workqueue(fsc->cap_wq);
 
@@ -857,7 +829,7 @@ static void ceph_umount_begin(struct super_block *sb)
 	fsc->mount_state = CEPH_MOUNT_SHUTDOWN;
 	ceph_osdc_abort_requests(&fsc->client->osdc, -EIO);
 	ceph_mdsc_force_umount(fsc->mdsc);
-	fsc->filp_gen++; // invalidate open files
+	return;
 }
 
 static int ceph_remount(struct super_block *sb, int *flags, char *data)
@@ -870,7 +842,7 @@ static const struct super_operations ceph_super_ops = {
 	.alloc_inode	= ceph_alloc_inode,
 	.free_inode	= ceph_free_inode,
 	.write_inode    = ceph_write_inode,
-	.drop_inode	= generic_delete_inode,
+	.drop_inode	= ceph_drop_inode,
 	.evict_inode	= ceph_evict_inode,
 	.sync_fs        = ceph_sync_fs,
 	.put_super	= ceph_put_super,
@@ -965,7 +937,9 @@ static struct dentry *ceph_real_mount(struct ceph_fs_client *fsc)
 			dout("mount opening path %s\n", path);
 		}
 
-		ceph_fs_debugfs_init(fsc);
+		err = ceph_fs_debugfs_init(fsc);
+		if (err < 0)
+			goto out;
 
 		root = open_root_dentry(fsc, path, started);
 		if (IS_ERR(root)) {
@@ -1006,9 +980,7 @@ static int ceph_set_super(struct super_block *s, void *data)
 	s->s_d_op = &ceph_dentry_ops;
 	s->s_export_op = &ceph_export_ops;
 
-	s->s_time_gran = 1;
-	s->s_time_min = 0;
-	s->s_time_max = U32_MAX;
+	s->s_time_gran = 1000;  /* 1000 ns == 1 us */
 
 	ret = set_anon_super(s, NULL);  /* what is that second arg for? */
 	if (ret != 0)
@@ -1117,6 +1089,7 @@ static struct dentry *ceph_mount(struct file_system_type *fs_type,
 	}
 
 	if (ceph_sb_to_client(sb) != fsc) {
+		ceph_mdsc_destroy(fsc);
 		destroy_fs_client(fsc);
 		fsc = ceph_sb_to_client(sb);
 		dout("get_sb got existing client %p\n", fsc);
@@ -1142,6 +1115,7 @@ out_splat:
 	goto out_final;
 
 out:
+	ceph_mdsc_destroy(fsc);
 	destroy_fs_client(fsc);
 out_final:
 	dout("ceph_mount fail %ld\n", PTR_ERR(res));
@@ -1165,6 +1139,8 @@ static void ceph_kill_sb(struct super_block *s)
 
 	ceph_fscache_unregister_fs(fsc);
 
+	ceph_mdsc_destroy(fsc);
+
 	destroy_fs_client(fsc);
 	free_anon_bdev(dev);
 }
@@ -1178,33 +1154,6 @@ static struct file_system_type ceph_fs_type = {
 };
 MODULE_ALIAS_FS("ceph");
 
-int ceph_force_reconnect(struct super_block *sb)
-{
-	struct ceph_fs_client *fsc = ceph_sb_to_client(sb);
-	int err = 0;
-
-	ceph_umount_begin(sb);
-
-	/* Make sure all page caches get invalidated.
-	 * see remove_session_caps_cb() */
-	flush_workqueue(fsc->inode_wq);
-
-	/* In case that we were blacklisted. This also reset
-	 * all mon/osd connections */
-	ceph_reset_client_addr(fsc->client);
-
-	ceph_osdc_clear_abort_err(&fsc->client->osdc);
-
-	fsc->blacklisted = false;
-	fsc->mount_state = CEPH_MOUNT_MOUNTED;
-
-	if (sb->s_root) {
-		err = __ceph_do_getattr(d_inode(sb->s_root), NULL,
-					CEPH_STAT_CAP_INODE, true);
-	}
-	return err;
-}
-
 static int __init init_ceph(void)
 {
 	int ret = init_caches();
@@ -1212,15 +1161,17 @@ static int __init init_ceph(void)
 		goto out;
 
 	ceph_flock_init();
+	ceph_xattr_init();
 	ret = register_filesystem(&ceph_fs_type);
 	if (ret)
-		goto out_caches;
+		goto out_xattr;
 
 	pr_info("loaded (mds proto %d)\n", CEPH_MDSC_PROTOCOL);
 
 	return 0;
 
-out_caches:
+out_xattr:
+	ceph_xattr_exit();
 	destroy_caches();
 out:
 	return ret;
@@ -1230,6 +1181,7 @@ static void __exit exit_ceph(void)
 {
 	dout("exit_ceph\n");
 	unregister_filesystem(&ceph_fs_type);
+	ceph_xattr_exit();
 	destroy_caches();
 }
 

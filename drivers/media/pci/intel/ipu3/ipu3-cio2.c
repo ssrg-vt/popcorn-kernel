@@ -1174,7 +1174,7 @@ static const struct v4l2_file_operations cio2_v4l2_fops = {
 
 static const struct v4l2_ioctl_ops cio2_v4l2_ioctl_ops = {
 	.vidioc_querycap = cio2_v4l2_querycap,
-	.vidioc_enum_fmt_vid_cap = cio2_v4l2_enum_fmt,
+	.vidioc_enum_fmt_vid_cap_mplane = cio2_v4l2_enum_fmt,
 	.vidioc_g_fmt_vid_cap_mplane = cio2_v4l2_g_fmt,
 	.vidioc_s_fmt_vid_cap_mplane = cio2_v4l2_s_fmt,
 	.vidioc_try_fmt_vid_cap_mplane = cio2_v4l2_try_fmt,
@@ -1475,64 +1475,55 @@ static const struct v4l2_async_notifier_operations cio2_async_ops = {
 	.complete = cio2_notifier_complete,
 };
 
-static int cio2_parse_firmware(struct cio2_device *cio2)
+static int cio2_fwnode_parse(struct device *dev,
+			     struct v4l2_fwnode_endpoint *vep,
+			     struct v4l2_async_subdev *asd)
 {
-	unsigned int i;
-	int ret;
+	struct sensor_async_subdev *s_asd =
+			container_of(asd, struct sensor_async_subdev, asd);
 
-	for (i = 0; i < CIO2_NUM_PORTS; i++) {
-		struct v4l2_fwnode_endpoint vep = {
-			.bus_type = V4L2_MBUS_CSI2_DPHY
-		};
-		struct sensor_async_subdev *s_asd = NULL;
-		struct fwnode_handle *ep;
-
-		ep = fwnode_graph_get_endpoint_by_id(
-			dev_fwnode(&cio2->pci_dev->dev), i, 0,
-			FWNODE_GRAPH_ENDPOINT_NEXT);
-
-		if (!ep)
-			continue;
-
-		ret = v4l2_fwnode_endpoint_parse(ep, &vep);
-		if (ret)
-			goto err_parse;
-
-		s_asd = kzalloc(sizeof(*s_asd), GFP_KERNEL);
-		if (!s_asd) {
-			ret = -ENOMEM;
-			goto err_parse;
-		}
-
-		s_asd->csi2.port = vep.base.port;
-		s_asd->csi2.lanes = vep.bus.mipi_csi2.num_data_lanes;
-
-		ret = v4l2_async_notifier_add_fwnode_remote_subdev(
-			&cio2->notifier, ep, &s_asd->asd);
-		if (ret)
-			goto err_parse;
-
-		fwnode_handle_put(ep);
-
-		continue;
-
-err_parse:
-		fwnode_handle_put(ep);
-		kfree(s_asd);
-		return ret;
+	if (vep->bus_type != V4L2_MBUS_CSI2_DPHY) {
+		dev_err(dev, "Only CSI2 bus type is currently supported\n");
+		return -EINVAL;
 	}
 
-	/*
-	 * Proceed even without sensors connected to allow the device to
-	 * suspend.
-	 */
+	s_asd->csi2.port = vep->base.port;
+	s_asd->csi2.lanes = vep->bus.mipi_csi2.num_data_lanes;
+
+	return 0;
+}
+
+static int cio2_notifier_init(struct cio2_device *cio2)
+{
+	int ret;
+
+	v4l2_async_notifier_init(&cio2->notifier);
+
+	ret = v4l2_async_notifier_parse_fwnode_endpoints(
+		&cio2->pci_dev->dev, &cio2->notifier,
+		sizeof(struct sensor_async_subdev),
+		cio2_fwnode_parse);
+	if (ret < 0)
+		return ret;
+
+	if (list_empty(&cio2->notifier.asd_list))
+		return -ENODEV;	/* no endpoint */
+
 	cio2->notifier.ops = &cio2_async_ops;
 	ret = v4l2_async_notifier_register(&cio2->v4l2_dev, &cio2->notifier);
-	if (ret)
+	if (ret) {
 		dev_err(&cio2->pci_dev->dev,
 			"failed to register async notifier : %d\n", ret);
+		v4l2_async_notifier_cleanup(&cio2->notifier);
+	}
 
 	return ret;
+}
+
+static void cio2_notifier_exit(struct cio2_device *cio2)
+{
+	v4l2_async_notifier_unregister(&cio2->notifier);
+	v4l2_async_notifier_cleanup(&cio2->notifier);
 }
 
 /**************** Queue initialization ****************/
@@ -1818,18 +1809,17 @@ static int cio2_pci_probe(struct pci_dev *pci_dev,
 	if (r)
 		goto fail_v4l2_device_unregister;
 
-	v4l2_async_notifier_init(&cio2->notifier);
-
 	/* Register notifier for subdevices we care */
-	r = cio2_parse_firmware(cio2);
-	if (r)
-		goto fail_clean_notifier;
+	r = cio2_notifier_init(cio2);
+	/* Proceed without sensors connected to allow the device to suspend. */
+	if (r && r != -ENODEV)
+		goto fail_cio2_queue_exit;
 
 	r = devm_request_irq(&pci_dev->dev, pci_dev->irq, cio2_irq,
 			     IRQF_SHARED, CIO2_NAME, cio2);
 	if (r) {
 		dev_err(&pci_dev->dev, "failed to request IRQ (%d)\n", r);
-		goto fail_clean_notifier;
+		goto fail;
 	}
 
 	pm_runtime_put_noidle(&pci_dev->dev);
@@ -1837,9 +1827,9 @@ static int cio2_pci_probe(struct pci_dev *pci_dev,
 
 	return 0;
 
-fail_clean_notifier:
-	v4l2_async_notifier_unregister(&cio2->notifier);
-	v4l2_async_notifier_cleanup(&cio2->notifier);
+fail:
+	cio2_notifier_exit(cio2);
+fail_cio2_queue_exit:
 	cio2_queues_exit(cio2);
 fail_v4l2_device_unregister:
 	v4l2_device_unregister(&cio2->v4l2_dev);
@@ -1858,8 +1848,7 @@ static void cio2_pci_remove(struct pci_dev *pci_dev)
 	struct cio2_device *cio2 = pci_get_drvdata(pci_dev);
 
 	media_device_unregister(&cio2->media_dev);
-	v4l2_async_notifier_unregister(&cio2->notifier);
-	v4l2_async_notifier_cleanup(&cio2->notifier);
+	cio2_notifier_exit(cio2);
 	cio2_queues_exit(cio2);
 	cio2_fbpt_exit_dummy(cio2);
 	v4l2_device_unregister(&cio2->v4l2_dev);
@@ -2011,7 +2000,8 @@ static int __maybe_unused cio2_suspend(struct device *dev)
 
 static int __maybe_unused cio2_resume(struct device *dev)
 {
-	struct cio2_device *cio2 = dev_get_drvdata(dev);
+	struct pci_dev *pci_dev = to_pci_dev(dev);
+	struct cio2_device *cio2 = pci_get_drvdata(pci_dev);
 	int r = 0;
 	struct cio2_queue *q = cio2->cur_queue;
 

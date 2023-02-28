@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: LGPL-2.1
-// Copyright (C) 2018, 2019 Red Hat Inc, Arnaldo Carvalho de Melo <acme@redhat.com>
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (C) 2018, Red Hat Inc, Arnaldo Carvalho de Melo <acme@redhat.com>
 //
 #ifndef HAVE_GET_CURRENT_DIR_NAME
-#include "get_current_dir_name.h"
+#include "util.h"
 #include <unistd.h>
+#include <stdlib.h>
 #include <stdlib.h>
 
 /* Android's 'bionic' library, for one, doesn't have this */

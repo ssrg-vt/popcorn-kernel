@@ -31,9 +31,7 @@
 #define _PSB_POWERMGMT_H_
 
 #include <linux/pci.h>
-
-struct device;
-struct drm_device;
+#include <drm/drmP.h>
 
 void gma_power_init(struct drm_device *dev);
 void gma_power_uninit(struct drm_device *dev);

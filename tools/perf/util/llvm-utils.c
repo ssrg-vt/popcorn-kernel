@@ -8,10 +8,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <linux/err.h>
-#include <linux/string.h>
-#include <linux/zalloc.h>
 #include "debug.h"
 #include "llvm-utils.h"
 #include "config.h"
@@ -233,14 +230,14 @@ static int detect_kbuild_dir(char **kbuild_dir)
 	const char *prefix_dir = "";
 	const char *suffix_dir = "";
 
-	/* _UTSNAME_LENGTH is 65 */
-	char release[128];
-
 	char *autoconf_path;
 
 	int err;
 
 	if (!test_dir) {
+		/* _UTSNAME_LENGTH is 65 */
+		char release[128];
+
 		err = fetch_kernel_version(NULL, release,
 					   sizeof(release));
 		if (err)
@@ -355,7 +352,8 @@ void llvm__get_kbuild_opts(char **kbuild_dir, char **kbuild_include_opts)
 "     \toption in [llvm] to \"\" to suppress this detection.\n\n",
 			*kbuild_dir);
 
-		zfree(kbuild_dir);
+		free(*kbuild_dir);
+		*kbuild_dir = NULL;
 		goto errout;
 	}
 

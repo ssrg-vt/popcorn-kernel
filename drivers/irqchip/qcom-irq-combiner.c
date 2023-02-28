@@ -229,6 +229,7 @@ static int get_registers(struct platform_device *pdev, struct combiner *comb)
 static int __init combiner_probe(struct platform_device *pdev)
 {
 	struct combiner *combiner;
+	size_t alloc_sz;
 	int nregs;
 	int err;
 
@@ -238,8 +239,8 @@ static int __init combiner_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	combiner = devm_kzalloc(&pdev->dev, struct_size(combiner, regs, nregs),
-				GFP_KERNEL);
+	alloc_sz = sizeof(*combiner) + sizeof(struct combiner_reg) * nregs;
+	combiner = devm_kzalloc(&pdev->dev, alloc_sz, GFP_KERNEL);
 	if (!combiner)
 		return -ENOMEM;
 
@@ -248,8 +249,10 @@ static int __init combiner_probe(struct platform_device *pdev)
 		return err;
 
 	combiner->parent_irq = platform_get_irq(pdev, 0);
-	if (combiner->parent_irq <= 0)
+	if (combiner->parent_irq <= 0) {
+		dev_err(&pdev->dev, "Error getting IRQ resource\n");
 		return -EPROBE_DEFER;
+	}
 
 	combiner->domain = irq_domain_create_linear(pdev->dev.fwnode, combiner->nirqs,
 						    &domain_ops, combiner);

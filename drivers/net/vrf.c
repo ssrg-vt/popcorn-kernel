@@ -366,7 +366,7 @@ static int vrf_finish_output6(struct net *net, struct sock *sk,
 	struct neighbour *neigh;
 	int ret;
 
-	nf_reset_ct(skb);
+	nf_reset(skb);
 
 	skb->protocol = htons(ETH_P_IPV6);
 	skb->dev = dev;
@@ -459,7 +459,7 @@ static struct sk_buff *vrf_ip6_out_direct(struct net_device *vrf_dev,
 
 	/* reset skb device */
 	if (likely(err == 1))
-		nf_reset_ct(skb);
+		nf_reset(skb);
 	else
 		skb = NULL;
 
@@ -560,7 +560,7 @@ static int vrf_finish_output(struct net *net, struct sock *sk, struct sk_buff *s
 	bool is_v6gw = false;
 	int ret = -EINVAL;
 
-	nf_reset_ct(skb);
+	nf_reset(skb);
 
 	/* Be paranoid, rather than too clever. */
 	if (unlikely(skb_headroom(skb) < hh_len && dev->header_ops)) {
@@ -670,7 +670,7 @@ static struct sk_buff *vrf_ip_out_direct(struct net_device *vrf_dev,
 
 	/* reset skb device */
 	if (likely(err == 1))
-		nf_reset_ct(skb);
+		nf_reset(skb);
 	else
 		skb = NULL;
 
@@ -865,6 +865,7 @@ static int vrf_dev_init(struct net_device *dev)
 
 	/* similarly, oper state is irrelevant; set to up to avoid confusion */
 	dev->operstate = IF_OPER_UP;
+	netdev_lockdep_set_classes(dev);
 	return 0;
 
 out_rth:
@@ -1083,14 +1084,12 @@ static struct sk_buff *vrf_l3_rcv(struct net_device *vrf_dev,
 #if IS_ENABLED(CONFIG_IPV6)
 /* send to link-local or multicast address via interface enslaved to
  * VRF device. Force lookup to VRF table without changing flow struct
- * Note: Caller to this function must hold rcu_read_lock() and no refcnt
- * is taken on the dst by this function.
  */
 static struct dst_entry *vrf_link_scope_lookup(const struct net_device *dev,
 					      struct flowi6 *fl6)
 {
 	struct net *net = dev_net(dev);
-	int flags = RT6_LOOKUP_F_IFACE | RT6_LOOKUP_F_DST_NOREF;
+	int flags = RT6_LOOKUP_F_IFACE;
 	struct dst_entry *dst = NULL;
 	struct rt6_info *rt;
 
@@ -1100,6 +1099,7 @@ static struct dst_entry *vrf_link_scope_lookup(const struct net_device *dev,
 	 */
 	if (fl6->flowi6_oif == dev->ifindex) {
 		dst = &net->ipv6.ip6_null_entry->dst;
+		dst_hold(dst);
 		return dst;
 	}
 

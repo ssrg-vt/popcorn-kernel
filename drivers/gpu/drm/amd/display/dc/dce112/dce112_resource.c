@@ -23,8 +23,6 @@
  *
  */
 
-#include <linux/slab.h>
-
 #include "dm_services.h"
 
 #include "link_encoder.h"
@@ -36,6 +34,8 @@
 #include "dce110/dce110_timing_generator.h"
 
 #include "irq/dce110/irq_service_dce110.h"
+
+#include "dce/dce_clk_mgr.h"
 #include "dce/dce_mem_input.h"
 #include "dce/dce_transform.h"
 #include "dce/dce_link_encoder.h"
@@ -147,6 +147,19 @@ static const struct dce110_timing_generator_offsets dce112_tg_offsets[] = {
 /* set register offset with instance */
 #define SRI(reg_name, block, id)\
 	.reg_name = mm ## block ## id ## _ ## reg_name
+
+
+static const struct clk_mgr_registers disp_clk_regs = {
+		CLK_COMMON_REG_LIST_DCE_BASE()
+};
+
+static const struct clk_mgr_shift disp_clk_shift = {
+		CLK_COMMON_MASK_SH_LIST_DCE_COMMON_BASE(__SHIFT)
+};
+
+static const struct clk_mgr_mask disp_clk_mask = {
+		CLK_COMMON_MASK_SH_LIST_DCE_COMMON_BASE(_MASK)
+};
 
 static const struct dce_dmcu_registers dmcu_regs = {
 		DMCU_DCE110_COMMON_REG_LIST()
@@ -337,7 +350,7 @@ static const struct dce_audio_shift audio_shift = {
 		AUD_COMMON_MASK_SH_LIST(__SHIFT)
 };
 
-static const struct dce_audio_mask audio_mask = {
+static const struct dce_aduio_mask audio_mask = {
 		AUD_COMMON_MASK_SH_LIST(_MASK)
 };
 
@@ -687,7 +700,6 @@ struct clock_source *dce112_clock_source_create(
 		return &clk_src->base;
 	}
 
-	kfree(clk_src);
 	BREAK_TO_DEBUGGER();
 	return NULL;
 }
@@ -761,6 +773,9 @@ static void destruct(struct dce110_resource_pool *pool)
 
 	if (pool->base.dmcu != NULL)
 		dce_dmcu_destroy(&pool->base.dmcu);
+
+	if (pool->base.clk_mgr != NULL)
+		dce_clk_mgr_destroy(&pool->base.clk_mgr);
 
 	if (pool->base.irqs != NULL) {
 		dal_irq_service_destroy(&pool->base.irqs);
@@ -978,8 +993,7 @@ static const struct resource_funcs dce112_res_pool_funcs = {
 	.validate_bandwidth = dce112_validate_bandwidth,
 	.validate_plane = dce100_validate_plane,
 	.add_stream_to_ctx = dce112_add_stream_to_ctx,
-	.validate_global = dce112_validate_global,
-	.find_first_free_match_stream_enc_for_link = dce110_find_first_free_match_stream_enc_for_link
+	.validate_global = dce112_validate_global
 };
 
 static void bw_calcs_data_update_from_pplib(struct dc *dc)
@@ -988,10 +1002,6 @@ static void bw_calcs_data_update_from_pplib(struct dc *dc)
 	struct dm_pp_clock_levels_with_latency mem_clks = {0};
 	struct dm_pp_wm_sets_with_clock_ranges clk_ranges = {0};
 	struct dm_pp_clock_levels clks = {0};
-	int memory_type_multiplier = MEMORY_TYPE_MULTIPLIER_CZ;
-
-	if (dc->bw_vbios && dc->bw_vbios->memory_type == bw_def_hbm)
-		memory_type_multiplier = MEMORY_TYPE_HBM;
 
 	/*do system clock  TODO PPLIB: after PPLIB implement,
 	 * then remove old way
@@ -1031,12 +1041,12 @@ static void bw_calcs_data_update_from_pplib(struct dc *dc)
 				&clks);
 
 		dc->bw_vbios->low_yclk = bw_frc_to_fixed(
-			clks.clocks_in_khz[0] * memory_type_multiplier, 1000);
+			clks.clocks_in_khz[0] * MEMORY_TYPE_MULTIPLIER_CZ, 1000);
 		dc->bw_vbios->mid_yclk = bw_frc_to_fixed(
-			clks.clocks_in_khz[clks.num_levels>>1] * memory_type_multiplier,
+			clks.clocks_in_khz[clks.num_levels>>1] * MEMORY_TYPE_MULTIPLIER_CZ,
 			1000);
 		dc->bw_vbios->high_yclk = bw_frc_to_fixed(
-			clks.clocks_in_khz[clks.num_levels-1] * memory_type_multiplier,
+			clks.clocks_in_khz[clks.num_levels-1] * MEMORY_TYPE_MULTIPLIER_CZ,
 			1000);
 
 		return;
@@ -1072,12 +1082,12 @@ static void bw_calcs_data_update_from_pplib(struct dc *dc)
 	 * YCLK = UMACLK*m_memoryTypeMultiplier
 	 */
 	dc->bw_vbios->low_yclk = bw_frc_to_fixed(
-		mem_clks.data[0].clocks_in_khz * memory_type_multiplier, 1000);
+		mem_clks.data[0].clocks_in_khz * MEMORY_TYPE_MULTIPLIER_CZ, 1000);
 	dc->bw_vbios->mid_yclk = bw_frc_to_fixed(
-		mem_clks.data[mem_clks.num_levels>>1].clocks_in_khz * memory_type_multiplier,
+		mem_clks.data[mem_clks.num_levels>>1].clocks_in_khz * MEMORY_TYPE_MULTIPLIER_CZ,
 		1000);
 	dc->bw_vbios->high_yclk = bw_frc_to_fixed(
-		mem_clks.data[mem_clks.num_levels-1].clocks_in_khz * memory_type_multiplier,
+		mem_clks.data[mem_clks.num_levels-1].clocks_in_khz * MEMORY_TYPE_MULTIPLIER_CZ,
 		1000);
 
 	/* Now notify PPLib/SMU about which Watermarks sets they should select
@@ -1214,6 +1224,16 @@ static bool construct(
 		}
 	}
 
+	pool->base.clk_mgr = dce112_clk_mgr_create(ctx,
+			&disp_clk_regs,
+			&disp_clk_shift,
+			&disp_clk_mask);
+	if (pool->base.clk_mgr == NULL) {
+		dm_error("DC: failed to create display clock!\n");
+		BREAK_TO_DEBUGGER();
+		goto res_create_fail;
+	}
+
 	pool->base.dmcu = dce_dmcu_create(ctx,
 			&dmcu_regs,
 			&dmcu_shift,
@@ -1343,7 +1363,6 @@ struct resource_pool *dce112_create_resource_pool(
 	if (construct(num_virtual_links, dc, pool))
 		return &pool->base;
 
-	kfree(pool);
 	BREAK_TO_DEBUGGER();
 	return NULL;
 }

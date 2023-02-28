@@ -9,7 +9,6 @@
 #include <linux/bitops.h>
 #include <linux/mtd/cfi.h>
 #include <linux/mtd/mtd.h>
-#include <linux/spi/spi-mem.h>
 
 /*
  * Manufacturer IDs
@@ -26,8 +25,6 @@
 #define SNOR_MFR_SPANSION	CFI_MFR_AMD
 #define SNOR_MFR_SST		CFI_MFR_SST
 #define SNOR_MFR_WINBOND	0xef /* Also used by some Spansion */
-#define SNOR_MFR_ISSI		CFI_MFR_PMC
-#define SNOR_MFR_CYPRESS	CFI_MFR_CYPRESS
 
 /*
  * Note on opcode nomenclature: some opcodes have a format like
@@ -68,7 +65,6 @@
 #define SPINOR_OP_CLFSR		0x50	/* Clear flag status register */
 #define SPINOR_OP_RDEAR		0xc8	/* Read Extended Address Register */
 #define SPINOR_OP_WREAR		0xc5	/* Write Extended Address Register */
-#define SPINOR_OP_WRCR		0x81	/* Write Configuration register */
 
 /* 4-byte address opcodes - used on Spansion and some Macronix flashes. */
 #define SPINOR_OP_READ_4B	0x13	/* Read data bytes (low frequency) */
@@ -102,7 +98,6 @@
 #define SPINOR_OP_WRDI		0x04	/* Write disable */
 #define SPINOR_OP_AAI_WP	0xad	/* Auto address increment word program */
 
-#define GLOBAL_BLKPROT_UNLK	0x98	/* Clear global write protection bits */
 /* Used for S3AN flashes only */
 #define SPINOR_OP_XSE		0x50	/* Sector erase */
 #define SPINOR_OP_XPP		0x82	/* Page program */
@@ -118,15 +113,11 @@
 
 /* Used for Spansion flashes only. */
 #define SPINOR_OP_BRWR		0x17	/* Bank register write */
-#define	SPINOR_OP_BRRD		0x16	/* Bank register read */
 #define SPINOR_OP_CLSR		0x30	/* Clear status register 1 */
 
 /* Used for Micron flashes only. */
 #define SPINOR_OP_RD_EVCR      0x65    /* Read EVCR register */
 #define SPINOR_OP_WD_EVCR      0x61    /* Write EVCR register */
-
-/* For Micron flashes only */
-#define SPINOR_VCR_OCTAL_DDR	0xE7	/* VCR BYTE0 value for Octal DDR mode */
 
 /* Status Register bits. */
 #define SR_WIP			BIT(0)	/* Write in progress */
@@ -135,15 +126,8 @@
 #define SR_BP0			BIT(2)	/* Block protect 0 */
 #define SR_BP1			BIT(3)	/* Block protect 1 */
 #define SR_BP2			BIT(4)	/* Block protect 2 */
-#define	SR_BP_BIT_OFFSET	2	/* Offset to Block protect 0 */
-#define	SR_BP_BIT_MASK		(SR_BP2 | SR_BP1 | SR_BP0)
 #define SR_TB			BIT(5)	/* Top/Bottom protect */
 #define SR_SRWD			BIT(7)	/* SR write protect */
-#define SR_BP3			0x40
-/* Bit to determine whether protection starts from top or bottom */
-#define SR_BP_TB		0x20
-#define BP_BITS_FROM_SR(sr)	(((sr) & SR_BP_BIT_MASK) >> SR_BP_BIT_OFFSET)
-#define M25P_MAX_LOCKABLE_SECTORS	64
 /* Spansion/Cypress specific status bits */
 #define SR_E_ERR		BIT(5)
 #define SR_P_ERR		BIT(6)
@@ -162,14 +146,6 @@
 /* Configuration Register bits. */
 #define CR_QUAD_EN_SPAN		BIT(1)	/* Spansion Quad I/O */
 
-/* Extended/Bank Address Register bits */
-#define EAR_SEGMENT_MASK	0x7 /* 128 Mb segment mask */
-enum read_mode {
-	SPI_NOR_NORMAL = 0,
-	SPI_NOR_FAST,
-	SPI_NOR_DUAL,
-	SPI_NOR_QUAD,
-};
 /* Status Register 2 bits. */
 #define SR2_QUAD_EN_BIT7	BIT(7)
 
@@ -248,8 +224,7 @@ static inline u8 spi_nor_get_protocol_width(enum spi_nor_protocol proto)
 	return spi_nor_get_protocol_data_nbits(proto);
 }
 
-#define SPI_NOR_MAX_ID_LEN	6
-
+#define SPI_NOR_MAX_CMD_SIZE	8
 enum spi_nor_ops {
 	SPI_NOR_OPS_READ = 0,
 	SPI_NOR_OPS_WRITE,
@@ -262,14 +237,12 @@ enum spi_nor_option_flags {
 	SNOR_F_USE_FSR		= BIT(0),
 	SNOR_F_HAS_SR_TB	= BIT(1),
 	SNOR_F_NO_OP_CHIP_ERASE	= BIT(2),
-	SNOR_F_READY_XSR_RDY	= BIT(3),
-	SNOR_F_USE_CLSR		= BIT(4),
-	SNOR_F_BROKEN_RESET	= BIT(5),
-	SNOR_F_4B_OPCODES	= BIT(6),
-	SNOR_F_HAS_4BAIT	= BIT(7),
-	SNOR_F_HAS_LOCK		= BIT(8),
-	SNOR_F_BROKEN_OCTAL_DDR = BIT(9),
-	SNOR_F_UPPER_CS		= BIT(10),
+	SNOR_F_S3AN_ADDR_DEFAULT = BIT(3),
+	SNOR_F_READY_XSR_RDY	= BIT(4),
+	SNOR_F_USE_CLSR		= BIT(5),
+	SNOR_F_BROKEN_RESET	= BIT(6),
+	SNOR_F_4B_OPCODES	= BIT(7),
+	SNOR_F_HAS_4BAIT	= BIT(8),
 };
 
 /**
@@ -361,6 +334,130 @@ struct spi_nor_erase_map {
 };
 
 /**
+ * struct flash_info - Forward declaration of a structure used internally by
+ *		       spi_nor_scan()
+ */
+struct flash_info;
+
+/**
+ * struct spi_nor - Structure for defining a the SPI NOR layer
+ * @mtd:		point to a mtd_info structure
+ * @lock:		the lock for the read/write/erase/lock/unlock operations
+ * @dev:		point to a spi device, or a spi nor controller device.
+ * @info:		spi-nor part JDEC MFR id and other info
+ * @page_size:		the page size of the SPI NOR
+ * @addr_width:		number of address bytes
+ * @erase_opcode:	the opcode for erasing a sector
+ * @read_opcode:	the read opcode
+ * @read_dummy:		the dummy needed by the read operation
+ * @program_opcode:	the program opcode
+ * @sst_write_second:	used by the SST write operation
+ * @flags:		flag options for the current SPI-NOR (SNOR_F_*)
+ * @read_proto:		the SPI protocol for read operations
+ * @write_proto:	the SPI protocol for write operations
+ * @reg_proto		the SPI protocol for read_reg/write_reg/erase operations
+ * @cmd_buf:		used by the write_reg
+ * @erase_map:		the erase map of the SPI NOR
+ * @prepare:		[OPTIONAL] do some preparations for the
+ *			read/write/erase/lock/unlock operations
+ * @unprepare:		[OPTIONAL] do some post work after the
+ *			read/write/erase/lock/unlock operations
+ * @read_reg:		[DRIVER-SPECIFIC] read out the register
+ * @write_reg:		[DRIVER-SPECIFIC] write data to the register
+ * @read:		[DRIVER-SPECIFIC] read data from the SPI NOR
+ * @write:		[DRIVER-SPECIFIC] write data to the SPI NOR
+ * @erase:		[DRIVER-SPECIFIC] erase a sector of the SPI NOR
+ *			at the offset @offs; if not provided by the driver,
+ *			spi-nor will send the erase opcode via write_reg()
+ * @flash_lock:		[FLASH-SPECIFIC] lock a region of the SPI NOR
+ * @flash_unlock:	[FLASH-SPECIFIC] unlock a region of the SPI NOR
+ * @flash_is_locked:	[FLASH-SPECIFIC] check if a region of the SPI NOR is
+ * @quad_enable:	[FLASH-SPECIFIC] enables SPI NOR quad mode
+ * @clear_sr_bp:	[FLASH-SPECIFIC] clears the Block Protection Bits from
+ *			the SPI NOR Status Register.
+ *			completely locked
+ * @priv:		the private data
+ */
+struct spi_nor {
+	struct mtd_info		mtd;
+	struct mutex		lock;
+	struct device		*dev;
+	const struct flash_info	*info;
+	u32			page_size;
+	u8			addr_width;
+	u8			erase_opcode;
+	u8			read_opcode;
+	u8			read_dummy;
+	u8			program_opcode;
+	enum spi_nor_protocol	read_proto;
+	enum spi_nor_protocol	write_proto;
+	enum spi_nor_protocol	reg_proto;
+	bool			sst_write_second;
+	u32			flags;
+	u8			cmd_buf[SPI_NOR_MAX_CMD_SIZE];
+	struct spi_nor_erase_map	erase_map;
+
+	int (*prepare)(struct spi_nor *nor, enum spi_nor_ops ops);
+	void (*unprepare)(struct spi_nor *nor, enum spi_nor_ops ops);
+	int (*read_reg)(struct spi_nor *nor, u8 opcode, u8 *buf, int len);
+	int (*write_reg)(struct spi_nor *nor, u8 opcode, u8 *buf, int len);
+
+	ssize_t (*read)(struct spi_nor *nor, loff_t from,
+			size_t len, u_char *read_buf);
+	ssize_t (*write)(struct spi_nor *nor, loff_t to,
+			size_t len, const u_char *write_buf);
+	int (*erase)(struct spi_nor *nor, loff_t offs);
+
+	int (*flash_lock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
+	int (*flash_unlock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
+	int (*flash_is_locked)(struct spi_nor *nor, loff_t ofs, uint64_t len);
+	int (*quad_enable)(struct spi_nor *nor);
+	int (*clear_sr_bp)(struct spi_nor *nor);
+
+	void *priv;
+};
+
+static u64 __maybe_unused
+spi_nor_region_is_last(const struct spi_nor_erase_region *region)
+{
+	return region->offset & SNOR_LAST_REGION;
+}
+
+static u64 __maybe_unused
+spi_nor_region_end(const struct spi_nor_erase_region *region)
+{
+	return (region->offset & ~SNOR_ERASE_FLAGS_MASK) + region->size;
+}
+
+static void __maybe_unused
+spi_nor_region_mark_end(struct spi_nor_erase_region *region)
+{
+	region->offset |= SNOR_LAST_REGION;
+}
+
+static void __maybe_unused
+spi_nor_region_mark_overlay(struct spi_nor_erase_region *region)
+{
+	region->offset |= SNOR_OVERLAID_REGION;
+}
+
+static bool __maybe_unused spi_nor_has_uniform_erase(const struct spi_nor *nor)
+{
+	return !!nor->erase_map.uniform_erase_type;
+}
+
+static inline void spi_nor_set_flash_node(struct spi_nor *nor,
+					  struct device_node *np)
+{
+	mtd_set_of_node(&nor->mtd, np);
+}
+
+static inline struct device_node *spi_nor_get_flash_node(struct spi_nor *nor)
+{
+	return mtd_get_of_node(&nor->mtd);
+}
+
+/**
  * struct spi_nor_hwcaps - Structure for describing the hardware capabilies
  * supported by the SPI controller (bus master).
  * @mask:		the bitmask listing all the supported hw capabilies
@@ -420,271 +517,6 @@ struct spi_nor_hwcaps {
 #define SNOR_HWCAPS_PP_1_1_8	BIT(20)
 #define SNOR_HWCAPS_PP_1_8_8	BIT(21)
 #define SNOR_HWCAPS_PP_8_8_8	BIT(22)
-
-#define SNOR_HWCAPS_X_X_X	(SNOR_HWCAPS_READ_2_2_2 |	\
-				 SNOR_HWCAPS_READ_4_4_4 |	\
-				 SNOR_HWCAPS_READ_8_8_8 |	\
-				 SNOR_HWCAPS_PP_4_4_4 |		\
-				 SNOR_HWCAPS_PP_8_8_8)
-
-#define SNOR_HWCAPS_DTR		(SNOR_HWCAPS_READ_1_1_1_DTR |	\
-				 SNOR_HWCAPS_READ_1_2_2_DTR |	\
-				 SNOR_HWCAPS_READ_1_4_4_DTR |	\
-				 SNOR_HWCAPS_READ_1_8_8_DTR)
-
-#define SNOR_HWCAPS_ALL		(SNOR_HWCAPS_READ_MASK |	\
-				 SNOR_HWCAPS_PP_MASK)
-
-struct spi_nor_read_command {
-	u8			num_mode_clocks;
-	u8			num_wait_states;
-	u8			opcode;
-	enum spi_nor_protocol	proto;
-};
-
-struct spi_nor_pp_command {
-	u8			opcode;
-	enum spi_nor_protocol	proto;
-};
-
-enum spi_nor_read_command_index {
-	SNOR_CMD_READ,
-	SNOR_CMD_READ_FAST,
-	SNOR_CMD_READ_1_1_1_DTR,
-
-	/* Dual SPI */
-	SNOR_CMD_READ_1_1_2,
-	SNOR_CMD_READ_1_2_2,
-	SNOR_CMD_READ_2_2_2,
-	SNOR_CMD_READ_1_2_2_DTR,
-
-	/* Quad SPI */
-	SNOR_CMD_READ_1_1_4,
-	SNOR_CMD_READ_1_4_4,
-	SNOR_CMD_READ_4_4_4,
-	SNOR_CMD_READ_1_4_4_DTR,
-
-	/* Octal SPI */
-	SNOR_CMD_READ_1_1_8,
-	SNOR_CMD_READ_1_8_8,
-	SNOR_CMD_READ_8_8_8,
-	SNOR_CMD_READ_1_8_8_DTR,
-
-	SNOR_CMD_READ_MAX
-};
-
-enum spi_nor_pp_command_index {
-	SNOR_CMD_PP,
-
-	/* Quad SPI */
-	SNOR_CMD_PP_1_1_4,
-	SNOR_CMD_PP_1_4_4,
-	SNOR_CMD_PP_4_4_4,
-
-	/* Octal SPI */
-	SNOR_CMD_PP_1_1_8,
-	SNOR_CMD_PP_1_8_8,
-	SNOR_CMD_PP_8_8_8,
-
-	SNOR_CMD_PP_MAX
-};
-
-/* Forward declaration that will be used in 'struct spi_nor_flash_parameter' */
-struct spi_nor;
-
-/**
- * struct spi_nor_locking_ops - SPI NOR locking methods
- * @lock:	lock a region of the SPI NOR.
- * @unlock:	unlock a region of the SPI NOR.
- * @is_locked:	check if a region of the SPI NOR is completely locked
- */
-struct spi_nor_locking_ops {
-	int (*lock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
-	int (*unlock)(struct spi_nor *nor, loff_t ofs, uint64_t len);
-	int (*is_locked)(struct spi_nor *nor, loff_t ofs, uint64_t len);
-};
-
-/**
- * struct spi_nor_flash_parameter - SPI NOR flash parameters and settings.
- * Includes legacy flash parameters and settings that can be overwritten
- * by the spi_nor_fixups hooks, or dynamically when parsing the JESD216
- * Serial Flash Discoverable Parameters (SFDP) tables.
- *
- * @size:		the flash memory density in bytes.
- * @page_size:		the page size of the SPI NOR flash memory.
- * @hwcaps:		describes the read and page program hardware
- *			capabilities.
- * @reads:		read capabilities ordered by priority: the higher index
- *                      in the array, the higher priority.
- * @page_programs:	page program capabilities ordered by priority: the
- *                      higher index in the array, the higher priority.
- * @erase_map:		the erase map parsed from the SFDP Sector Map Parameter
- *                      Table.
- * @quad_enable:	enables SPI NOR quad mode.
- * @set_4byte:		puts the SPI NOR in 4 byte addressing mode.
- * @convert_addr:	converts an absolute address into something the flash
- *                      will understand. Particularly useful when pagesize is
- *                      not a power-of-2.
- * @setup:              configures the SPI NOR memory. Useful for SPI NOR
- *                      flashes that have peculiarities to the SPI NOR standard
- *                      e.g. different opcodes, specific address calculation,
- *                      page size, etc.
- * @locking_ops:	SPI NOR locking methods.
- */
-struct spi_nor_flash_parameter {
-	u64				size;
-	u32				page_size;
-
-	struct spi_nor_hwcaps		hwcaps;
-	struct spi_nor_read_command	reads[SNOR_CMD_READ_MAX];
-	struct spi_nor_pp_command	page_programs[SNOR_CMD_PP_MAX];
-
-	struct spi_nor_erase_map        erase_map;
-
-	int (*quad_enable)(struct spi_nor *nor);
-	int (*set_4byte)(struct spi_nor *nor, bool enable);
-	u32 (*convert_addr)(struct spi_nor *nor, u32 addr);
-	int (*setup)(struct spi_nor *nor, const struct spi_nor_hwcaps *hwcaps);
-
-	const struct spi_nor_locking_ops *locking_ops;
-};
-
-/**
- * struct flash_info - Forward declaration of a structure used internally by
- *		       spi_nor_scan()
- */
-struct flash_info;
-
-/**
- * struct spi_nor - Structure for defining a the SPI NOR layer
- * @mtd:		point to a mtd_info structure
- * @lock:		the lock for the read/write/erase/lock/unlock operations
- * @dev:		point to a spi device, or a spi nor controller device.
- * @spimem:		point to the spi mem device
- * @bouncebuf:		bounce buffer used when the buffer passed by the MTD
- *                      layer is not DMA-able
- * @bouncebuf_size:	size of the bounce buffer
- * @info:		spi-nor part JDEC MFR id and other info
- * @page_size:		the page size of the SPI NOR
- * @addr_width:		number of address bytes
- * @erase_opcode:	the opcode for erasing a sector
- * @read_opcode:	the read opcode
- * @read_dummy:		the dummy needed by the read operation
- * @program_opcode:	the program opcode
- * @sst_write_second:	used by the SST write operation
- * @flags:		flag options for the current SPI-NOR (SNOR_F_*)
- * @read_proto:		the SPI protocol for read operations
- * @write_proto:	the SPI protocol for write operations
- * @reg_proto		the SPI protocol for read_reg/write_reg/erase operations
- * @prepare:		[OPTIONAL] do some preparations for the
- *			read/write/erase/lock/unlock operations
- * @unprepare:		[OPTIONAL] do some post work after the
- *			read/write/erase/lock/unlock operations
- * @read_reg:		[DRIVER-SPECIFIC] read out the register
- * @write_reg:		[DRIVER-SPECIFIC] write data to the register
- * @read:		[DRIVER-SPECIFIC] read data from the SPI NOR
- * @write:		[DRIVER-SPECIFIC] write data to the SPI NOR
- * @erase:		[DRIVER-SPECIFIC] erase a sector of the SPI NOR
- *			at the offset @offs; if not provided by the driver,
- *			spi-nor will send the erase opcode via write_reg()
- * @clear_sr_bp:	[FLASH-SPECIFIC] clears the Block Protection Bits from
- *			the SPI NOR Status Register.
- * @params:		[FLASH-SPECIFIC] SPI-NOR flash parameters and settings.
- *                      The structure includes legacy flash parameters and
- *                      settings that can be overwritten by the spi_nor_fixups
- *                      hooks, or dynamically when parsing the SFDP tables.
- * @priv:		the private data
- */
-struct spi_nor {
-	struct mtd_info		mtd;
-	struct mutex		lock;
-	struct device		*dev;
-	struct spi_mem		*spimem;
-	u8			*bouncebuf;
-	size_t			bouncebuf_size;
-	struct spi_device       *spi;
-	const struct flash_info	*info;
-	u32			page_size;
-	u8			addr_width;
-	u8			erase_opcode;
-	u8			read_opcode;
-	u8			read_dummy;
-	u8			program_opcode;
-	enum read_mode		flash_read;
-	u32			jedec_id;
-	u16			curbank;
-	u16			n_sectors;
-	u32			sector_size;
-	enum spi_nor_protocol	read_proto;
-	enum spi_nor_protocol	write_proto;
-	enum spi_nor_protocol	reg_proto;
-	bool			sst_write_second;
-	u32			flags;
-	bool			shift;
-	bool			isparallel;
-	bool                    isstacked;
-	bool			is_lock;
-	u8			device_id[SPI_NOR_MAX_ID_LEN];
-	bool			is_addrvalid;
-	loff_t			reg_addr;
-	struct delayed_work	complete_work;
-
-	int (*prepare)(struct spi_nor *nor, enum spi_nor_ops ops);
-	void (*unprepare)(struct spi_nor *nor, enum spi_nor_ops ops);
-	int (*read_reg)(struct spi_nor *nor, u8 opcode, u8 *buf, int len);
-	int (*write_reg)(struct spi_nor *nor, u8 opcode, u8 *buf, int len);
-
-	ssize_t (*read)(struct spi_nor *nor, loff_t from,
-			size_t len, u_char *read_buf);
-	ssize_t (*write)(struct spi_nor *nor, loff_t to,
-			size_t len, const u_char *write_buf);
-	int (*erase)(struct spi_nor *nor, loff_t offs);
-
-	int (*clear_sr_bp)(struct spi_nor *nor);
-	struct spi_nor_flash_parameter params;
-
-	void *priv;
-};
-
-static u64 __maybe_unused
-spi_nor_region_is_last(const struct spi_nor_erase_region *region)
-{
-	return region->offset & SNOR_LAST_REGION;
-}
-
-static u64 __maybe_unused
-spi_nor_region_end(const struct spi_nor_erase_region *region)
-{
-	return (region->offset & ~SNOR_ERASE_FLAGS_MASK) + region->size;
-}
-
-static void __maybe_unused
-spi_nor_region_mark_end(struct spi_nor_erase_region *region)
-{
-	region->offset |= SNOR_LAST_REGION;
-}
-
-static void __maybe_unused
-spi_nor_region_mark_overlay(struct spi_nor_erase_region *region)
-{
-	region->offset |= SNOR_OVERLAID_REGION;
-}
-
-static bool __maybe_unused spi_nor_has_uniform_erase(const struct spi_nor *nor)
-{
-	return !!nor->params.erase_map.uniform_erase_type;
-}
-
-static inline void spi_nor_set_flash_node(struct spi_nor *nor,
-					  struct device_node *np)
-{
-	mtd_set_of_node(&nor->mtd, np);
-}
-
-static inline struct device_node *spi_nor_get_flash_node(struct spi_nor *nor)
-{
-	return mtd_get_of_node(&nor->mtd);
-}
 
 /**
  * spi_nor_scan() - scan the SPI NOR

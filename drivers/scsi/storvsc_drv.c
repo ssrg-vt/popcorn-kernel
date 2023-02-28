@@ -375,7 +375,6 @@ enum storvsc_request_type {
 
 static int storvsc_ringbuffer_size = (128 * 1024);
 static u32 max_outstanding_req_per_channel;
-static int storvsc_change_queue_depth(struct scsi_device *sdev, int queue_depth);
 
 static int storvsc_vcpus_per_sub_channel = 4;
 
@@ -1423,6 +1422,9 @@ static int storvsc_device_configure(struct scsi_device *sdevice)
 {
 	blk_queue_rq_timeout(sdevice->request_queue, (storvsc_timeout * HZ));
 
+	/* Ensure there are no gaps in presented sgls */
+	blk_queue_virt_boundary(sdevice->request_queue, PAGE_SIZE - 1);
+
 	sdevice->no_write_same = 1;
 
 	/*
@@ -1695,11 +1697,8 @@ static struct scsi_host_template scsi_driver = {
 	.this_id =		-1,
 	/* Make sure we dont get a sg segment crosses a page boundary */
 	.dma_boundary =		PAGE_SIZE-1,
-	/* Ensure there are no gaps in presented sgls */
-	.virt_boundary_mask =	PAGE_SIZE-1,
 	.no_write_same =	1,
 	.track_queue_depth =	1,
-	.change_queue_depth =	storvsc_change_queue_depth,
 };
 
 enum {
@@ -1837,7 +1836,8 @@ static int storvsc_probe(struct hv_device *device,
 	/*
 	 * Set the number of HW queues we are supporting.
 	 */
-	host->nr_hw_queues = num_present_cpus();
+	if (stor_device->num_sc != 0)
+		host->nr_hw_queues = stor_device->num_sc + 1;
 
 	/*
 	 * Set the error handler work queue.
@@ -1903,15 +1903,6 @@ err_out1:
 err_out0:
 	scsi_host_put(host);
 	return ret;
-}
-
-/* Change a scsi target's queue depth */
-static int storvsc_change_queue_depth(struct scsi_device *sdev, int queue_depth)
-{
-	if (queue_depth > scsi_driver.can_queue)
-		queue_depth = scsi_driver.can_queue;
-
-	return scsi_change_queue_depth(sdev, queue_depth);
 }
 
 static int storvsc_remove(struct hv_device *dev)

@@ -1248,6 +1248,7 @@ static const struct qmp_phy_cfg msm8998_pciephy_cfg = {
 
 	.start_ctrl             = SERDES_START | PCS_START,
 	.pwrdn_ctrl		= SW_PWRDN | REFCLK_DRV_DSBL,
+	.mask_com_pcs_ready	= PCS_READY,
 };
 
 static const struct qmp_phy_cfg msm8998_usb3phy_cfg = {
@@ -2092,7 +2093,8 @@ static int qcom_qmp_phy_probe(struct platform_device *pdev)
 		if (ret) {
 			dev_err(dev, "failed to create lane%d phy, %d\n",
 				id, ret);
-			goto err_node_put;
+			pm_runtime_disable(dev);
+			return ret;
 		}
 
 		/*
@@ -2103,7 +2105,8 @@ static int qcom_qmp_phy_probe(struct platform_device *pdev)
 		if (ret) {
 			dev_err(qmp->dev,
 				"failed to register pipe clock source\n");
-			goto err_node_put;
+			pm_runtime_disable(dev);
+			return ret;
 		}
 		id++;
 	}
@@ -2115,11 +2118,6 @@ static int qcom_qmp_phy_probe(struct platform_device *pdev)
 		pm_runtime_disable(dev);
 
 	return PTR_ERR_OR_ZERO(phy_provider);
-
-err_node_put:
-	pm_runtime_disable(dev);
-	of_node_put(child);
-	return ret;
 }
 
 static struct platform_driver qcom_qmp_phy_driver = {

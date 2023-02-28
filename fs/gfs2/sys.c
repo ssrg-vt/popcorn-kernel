@@ -118,7 +118,7 @@ static ssize_t freeze_store(struct gfs2_sbd *sdp, const char *buf, size_t len)
 
 static ssize_t withdraw_show(struct gfs2_sbd *sdp, char *buf)
 {
-	unsigned int b = test_bit(SDF_WITHDRAWN, &sdp->sd_flags);
+	unsigned int b = test_bit(SDF_SHUTDOWN, &sdp->sd_flags);
 	return snprintf(buf, PAGE_SIZE, "%u\n", b);
 }
 
@@ -296,18 +296,17 @@ static struct attribute *gfs2_attrs[] = {
 	&gfs2_attr_demote_rq.attr,
 	NULL,
 };
-ATTRIBUTE_GROUPS(gfs2);
 
 static void gfs2_sbd_release(struct kobject *kobj)
 {
 	struct gfs2_sbd *sdp = container_of(kobj, struct gfs2_sbd, sd_kobj);
 
-	free_sbd(sdp);
+	kfree(sdp);
 }
 
 static struct kobj_type gfs2_ktype = {
 	.release = gfs2_sbd_release,
-	.default_groups = gfs2_groups,
+	.default_attrs = gfs2_attrs,
 	.sysfs_ops     = &gfs2_attr_ops,
 };
 
@@ -680,6 +679,7 @@ fail_lock_module:
 fail_tune:
 	sysfs_remove_group(&sdp->sd_kobj, &tune_group);
 fail_reg:
+	free_percpu(sdp->sd_lkstats);
 	fs_err(sdp, "error %d adding sysfs files\n", error);
 	kobject_put(&sdp->sd_kobj);
 	sb->s_fs_info = NULL;

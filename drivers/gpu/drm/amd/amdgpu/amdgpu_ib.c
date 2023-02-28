@@ -28,10 +28,8 @@
  */
 #include <linux/seq_file.h>
 #include <linux/slab.h>
-
+#include <drm/drmP.h>
 #include <drm/amdgpu_drm.h>
-#include <drm/drm_debugfs.h>
-
 #include "amdgpu.h"
 #include "atom.h"
 #include "amdgpu_trace.h"
@@ -143,8 +141,7 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 	/* ring tests don't use a job */
 	if (job) {
 		vm = job->vm;
-		fence_ctx = job->base.s_fence ?
-			job->base.s_fence->scheduled.context : 0;
+		fence_ctx = job->base.s_fence->scheduled.context;
 	} else {
 		vm = NULL;
 		fence_ctx = 0;
@@ -212,7 +209,6 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 	skip_preamble = ring->current_ctx == fence_ctx;
 	if (job && ring->funcs->emit_cntxcntl) {
 		status |= job->preamble_status;
-		status |= job->preemption_status;
 		amdgpu_ring_emit_cntxcntl(ring, status);
 	}
 
@@ -221,10 +217,9 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 
 		/* drop preamble IBs if we don't have a context switch */
 		if ((ib->flags & AMDGPU_IB_FLAG_PREAMBLE) &&
-		    skip_preamble &&
-		    !(status & AMDGPU_PREAMBLE_IB_PRESENT_FIRST) &&
-		    !amdgpu_mcbp &&
-		    !amdgpu_sriov_vf(adev)) /* for SRIOV preemption, Preamble CE ib must be inserted anyway */
+			skip_preamble &&
+			!(status & AMDGPU_PREAMBLE_IB_PRESENT_FIRST) &&
+			!amdgpu_sriov_vf(adev)) /* for SRIOV preemption, Preamble CE ib must be inserted anyway */
 			continue;
 
 		amdgpu_ring_emit_ib(ring, job, ib, status);

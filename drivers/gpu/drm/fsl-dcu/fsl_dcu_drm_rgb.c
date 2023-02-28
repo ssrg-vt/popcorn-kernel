@@ -8,6 +8,7 @@
 #include <linux/backlight.h>
 #include <linux/of_graph.h>
 
+#include <drm/drmP.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_of.h>
 #include <drm/drm_panel.h>
@@ -65,9 +66,17 @@ static const struct drm_connector_funcs fsl_dcu_drm_connector_funcs = {
 static int fsl_dcu_drm_connector_get_modes(struct drm_connector *connector)
 {
 	struct fsl_dcu_drm_connector *fsl_connector;
+	int (*get_modes)(struct drm_panel *panel);
+	int num_modes = 0;
 
 	fsl_connector = to_fsl_dcu_connector(connector);
-	return drm_panel_get_modes(fsl_connector->panel);
+	if (fsl_connector->panel && fsl_connector->panel->funcs &&
+	    fsl_connector->panel->funcs->get_modes) {
+		get_modes = fsl_connector->panel->funcs->get_modes;
+		num_modes = get_modes(fsl_connector->panel);
+	}
+
+	return num_modes;
 }
 
 static int fsl_dcu_drm_connector_mode_valid(struct drm_connector *connector,

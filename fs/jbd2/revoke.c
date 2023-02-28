@@ -638,8 +638,10 @@ static void flush_descriptor(journal_t *journal,
 {
 	jbd2_journal_revoke_header_t *header;
 
-	if (is_journal_aborted(journal))
+	if (is_journal_aborted(journal)) {
+		put_bh(descriptor);
 		return;
+	}
 
 	header = (jbd2_journal_revoke_header_t *)descriptor->b_data;
 	header->r_count = cpu_to_be32(offset);

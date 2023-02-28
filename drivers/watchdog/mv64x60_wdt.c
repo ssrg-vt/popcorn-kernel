@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * mv64x60_wdt.c - MV64X60 (Marvell Discovery) watchdog userspace interface
  *
@@ -10,7 +9,10 @@
  *
  * Derived from mpc8xx_wdt.c, with the following copyright.
  *
- * 2002 (c) Florian Schirmer <jolt@tuxbox.org>
+ * 2002 (c) Florian Schirmer <jolt@tuxbox.org> This file is licensed under
+ * the terms of the GNU General Public License version 2. This program
+ * is licensed "as is" without any warranty of any kind, whether express
+ * or implied.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt

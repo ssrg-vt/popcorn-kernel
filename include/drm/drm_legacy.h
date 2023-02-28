@@ -1,5 +1,11 @@
 #ifndef __DRM_DRM_LEGACY_H__
 #define __DRM_DRM_LEGACY_H__
+
+#include <drm/drm_auth.h>
+#include <drm/drm_hashtab.h>
+
+struct drm_device;
+
 /*
  * Legacy driver interfaces for the Direct Rendering Manager
  *
@@ -33,12 +39,6 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <drm/drm.h>
-#include <drm/drm_auth.h>
-#include <drm/drm_hashtab.h>
-
-struct drm_device;
-struct file;
 
 /*
  * Legacy Support for palateontologic DRM drivers

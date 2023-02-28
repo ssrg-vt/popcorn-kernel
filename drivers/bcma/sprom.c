@@ -222,7 +222,7 @@ static void bcma_sprom_extract_r8(struct bcma_bus *bus, const u16 *sprom)
 {
 	u16 v, o;
 	int i;
-	static const u16 pwr_info_offset[] = {
+	u16 pwr_info_offset[] = {
 		SSB_SROM8_PWR_INFO_CORE0, SSB_SROM8_PWR_INFO_CORE1,
 		SSB_SROM8_PWR_INFO_CORE2, SSB_SROM8_PWR_INFO_CORE3
 	};
@@ -578,11 +578,9 @@ int bcma_sprom_get(struct bcma_bus *bus)
 {
 	u16 offset = BCMA_CC_SPROM;
 	u16 *sprom;
-	static const size_t sprom_sizes[] = {
-		SSB_SPROMSIZE_WORDS_R4,
-		SSB_SPROMSIZE_WORDS_R10,
-		SSB_SPROMSIZE_WORDS_R11,
-	};
+	size_t sprom_sizes[] = { SSB_SPROMSIZE_WORDS_R4,
+				 SSB_SPROMSIZE_WORDS_R10,
+				 SSB_SPROMSIZE_WORDS_R11, };
 	int i, err = 0;
 
 	if (!bus->drv_cc.core)

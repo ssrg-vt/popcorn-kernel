@@ -6,8 +6,6 @@
 
  */
 
-#define pr_fmt(fmt) "v4l2-ctrls: " fmt
-
 #include <linux/ctype.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -17,12 +15,6 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-dev.h>
-
-#define dprintk(vdev, fmt, arg...) do {					\
-	if (!WARN_ON(!(vdev)) && ((vdev)->dev_debug & V4L2_DEV_DEBUG_CTRL)) \
-		printk(KERN_DEBUG pr_fmt("%s: %s: " fmt),		\
-		       __func__, video_device_node_name(vdev), ##arg);	\
-} while (0)
 
 #define has_op(master, op) \
 	(master->ops && master->ops->op)
@@ -402,31 +394,6 @@ const char * const *v4l2_ctrl_get_menu(u32 id)
 		"Explicit",
 		NULL,
 	};
-	static const char * const h264_decode_mode[] = {
-		"Slice-Based",
-		"Frame-Based",
-		NULL,
-	};
-	static const char * const h264_start_code[] = {
-		"No Start Code",
-		"Annex B Start Code",
-		NULL,
-	};
-	static const char * const mpeg_mpeg2_level[] = {
-		"Low",
-		"Main",
-		"High 1440",
-		"High",
-		NULL,
-	};
-	static const char * const mpeg2_profile[] = {
-		"Simple",
-		"Main",
-		"SNR Scalable",
-		"Spatially Scalable",
-		"High",
-		NULL,
-	};
 	static const char * const mpeg_mpeg4_level[] = {
 		"0",
 		"0b",
@@ -643,14 +610,6 @@ const char * const *v4l2_ctrl_get_menu(u32 id)
 		return h264_fp_arrangement_type;
 	case V4L2_CID_MPEG_VIDEO_H264_FMO_MAP_TYPE:
 		return h264_fmo_map_type;
-	case V4L2_CID_MPEG_VIDEO_H264_DECODE_MODE:
-		return h264_decode_mode;
-	case V4L2_CID_MPEG_VIDEO_H264_START_CODE:
-		return h264_start_code;
-	case V4L2_CID_MPEG_VIDEO_MPEG2_LEVEL:
-		return mpeg_mpeg2_level;
-	case V4L2_CID_MPEG_VIDEO_MPEG2_PROFILE:
-		return mpeg2_profile;
 	case V4L2_CID_MPEG_VIDEO_MPEG4_LEVEL:
 		return mpeg_mpeg4_level;
 	case V4L2_CID_MPEG_VIDEO_MPEG4_PROFILE:
@@ -861,15 +820,6 @@ const char *v4l2_ctrl_get_name(u32 id)
 	case V4L2_CID_MPEG_VIDEO_H264_I_FRAME_MAX_QP:		return "H264 I-Frame Maximum QP Value";
 	case V4L2_CID_MPEG_VIDEO_H264_P_FRAME_MIN_QP:		return "H264 P-Frame Minimum QP Value";
 	case V4L2_CID_MPEG_VIDEO_H264_P_FRAME_MAX_QP:		return "H264 P-Frame Maximum QP Value";
-	case V4L2_CID_MPEG_VIDEO_H264_SPS:			return "H264 Sequence Parameter Set";
-	case V4L2_CID_MPEG_VIDEO_H264_PPS:			return "H264 Picture Parameter Set";
-	case V4L2_CID_MPEG_VIDEO_H264_SCALING_MATRIX:		return "H264 Scaling Matrix";
-	case V4L2_CID_MPEG_VIDEO_H264_SLICE_PARAMS:		return "H264 Slice Parameters";
-	case V4L2_CID_MPEG_VIDEO_H264_DECODE_PARAMS:		return "H264 Decode Parameters";
-	case V4L2_CID_MPEG_VIDEO_H264_DECODE_MODE:		return "H264 Decode Mode";
-	case V4L2_CID_MPEG_VIDEO_H264_START_CODE:		return "H264 Start Code";
-	case V4L2_CID_MPEG_VIDEO_MPEG2_LEVEL:			return "MPEG2 Level";
-	case V4L2_CID_MPEG_VIDEO_MPEG2_PROFILE:			return "MPEG2 Profile";
 	case V4L2_CID_MPEG_VIDEO_MPEG4_I_FRAME_QP:		return "MPEG4 I-Frame QP Value";
 	case V4L2_CID_MPEG_VIDEO_MPEG4_P_FRAME_QP:		return "MPEG4 P-Frame QP Value";
 	case V4L2_CID_MPEG_VIDEO_MPEG4_B_FRAME_QP:		return "MPEG4 B-Frame QP Value";
@@ -909,7 +859,6 @@ const char *v4l2_ctrl_get_name(u32 id)
 	case V4L2_CID_MPEG_VIDEO_VPX_P_FRAME_QP:		return "VPX P-Frame QP Value";
 	case V4L2_CID_MPEG_VIDEO_VP8_PROFILE:			return "VP8 Profile";
 	case V4L2_CID_MPEG_VIDEO_VP9_PROFILE:			return "VP9 Profile";
-	case V4L2_CID_MPEG_VIDEO_VP8_FRAME_HEADER:		return "VP8 Frame Header";
 
 	/* HEVC controls */
 	case V4L2_CID_MPEG_VIDEO_HEVC_I_FRAME_QP:		return "HEVC I-Frame QP Value";
@@ -1196,7 +1145,6 @@ void v4l2_ctrl_fill(u32 id, const char **name, enum v4l2_ctrl_type *type,
 	case V4L2_CID_FLASH_STROBE_STOP:
 	case V4L2_CID_AUTO_FOCUS_START:
 	case V4L2_CID_AUTO_FOCUS_STOP:
-	case V4L2_CID_DO_WHITE_BALANCE:
 		*type = V4L2_CTRL_TYPE_BUTTON;
 		*flags |= V4L2_CTRL_FLAG_WRITE_ONLY |
 			  V4L2_CTRL_FLAG_EXECUTE_ON_WRITE;
@@ -1236,10 +1184,6 @@ void v4l2_ctrl_fill(u32 id, const char **name, enum v4l2_ctrl_type *type,
 	case V4L2_CID_MPEG_VIDEO_H264_VUI_SAR_IDC:
 	case V4L2_CID_MPEG_VIDEO_H264_SEI_FP_ARRANGEMENT_TYPE:
 	case V4L2_CID_MPEG_VIDEO_H264_FMO_MAP_TYPE:
-	case V4L2_CID_MPEG_VIDEO_H264_DECODE_MODE:
-	case V4L2_CID_MPEG_VIDEO_H264_START_CODE:
-	case V4L2_CID_MPEG_VIDEO_MPEG2_LEVEL:
-	case V4L2_CID_MPEG_VIDEO_MPEG2_PROFILE:
 	case V4L2_CID_MPEG_VIDEO_MPEG4_LEVEL:
 	case V4L2_CID_MPEG_VIDEO_MPEG4_PROFILE:
 	case V4L2_CID_JPEG_CHROMA_SUBSAMPLING:
@@ -1356,24 +1300,6 @@ void v4l2_ctrl_fill(u32 id, const char **name, enum v4l2_ctrl_type *type,
 		break;
 	case V4L2_CID_MPEG_VIDEO_FWHT_PARAMS:
 		*type = V4L2_CTRL_TYPE_FWHT_PARAMS;
-		break;
-	case V4L2_CID_MPEG_VIDEO_H264_SPS:
-		*type = V4L2_CTRL_TYPE_H264_SPS;
-		break;
-	case V4L2_CID_MPEG_VIDEO_H264_PPS:
-		*type = V4L2_CTRL_TYPE_H264_PPS;
-		break;
-	case V4L2_CID_MPEG_VIDEO_H264_SCALING_MATRIX:
-		*type = V4L2_CTRL_TYPE_H264_SCALING_MATRIX;
-		break;
-	case V4L2_CID_MPEG_VIDEO_H264_SLICE_PARAMS:
-		*type = V4L2_CTRL_TYPE_H264_SLICE_PARAMS;
-		break;
-	case V4L2_CID_MPEG_VIDEO_H264_DECODE_PARAMS:
-		*type = V4L2_CTRL_TYPE_H264_DECODE_PARAMS;
-		break;
-	case V4L2_CID_MPEG_VIDEO_VP8_FRAME_HEADER:
-		*type = V4L2_CTRL_TYPE_VP8_FRAME_HEADER;
 		break;
 	default:
 		*type = V4L2_CTRL_TYPE_INTEGER;
@@ -1524,32 +1450,6 @@ static bool std_equal(const struct v4l2_ctrl *ctrl, u32 idx,
 	}
 }
 
-static void std_init_compound(const struct v4l2_ctrl *ctrl, u32 idx,
-			      union v4l2_ctrl_ptr ptr)
-{
-	struct v4l2_ctrl_mpeg2_slice_params *p_mpeg2_slice_params;
-	void *p = ptr.p + idx * ctrl->elem_size;
-
-	memset(p, 0, ctrl->elem_size);
-
-	/*
-	 * The cast is needed to get rid of a gcc warning complaining that
-	 * V4L2_CTRL_TYPE_MPEG2_SLICE_PARAMS is not part of the
-	 * v4l2_ctrl_type enum.
-	 */
-	switch ((u32)ctrl->type) {
-	case V4L2_CTRL_TYPE_MPEG2_SLICE_PARAMS:
-		p_mpeg2_slice_params = p;
-		/* 4:2:0 */
-		p_mpeg2_slice_params->sequence.chroma_format = 1;
-		/* interlaced top field */
-		p_mpeg2_slice_params->picture.picture_structure = 1;
-		p_mpeg2_slice_params->picture.picture_coding_type =
-					V4L2_MPEG2_PICTURE_CODING_TYPE_I;
-		break;
-	}
-}
-
 static void std_init(const struct v4l2_ctrl *ctrl, u32 idx,
 		     union v4l2_ctrl_ptr ptr)
 {
@@ -1569,10 +1469,6 @@ static void std_init(const struct v4l2_ctrl *ctrl, u32 idx,
 	case V4L2_CTRL_TYPE_BOOLEAN:
 		ptr.p_s32[idx] = ctrl->default_value;
 		break;
-	case V4L2_CTRL_TYPE_BUTTON:
-	case V4L2_CTRL_TYPE_CTRL_CLASS:
-		ptr.p_s32[idx] = 0;
-		break;
 	case V4L2_CTRL_TYPE_U8:
 		ptr.p_u8[idx] = ctrl->default_value;
 		break;
@@ -1583,7 +1479,8 @@ static void std_init(const struct v4l2_ctrl *ctrl, u32 idx,
 		ptr.p_u32[idx] = ctrl->default_value;
 		break;
 	default:
-		std_init_compound(ctrl, idx, ptr);
+		idx *= ctrl->elem_size;
+		memset(ptr.p + idx, 0, ctrl->elem_size);
 		break;
 	}
 }
@@ -1659,105 +1556,10 @@ static void std_log(const struct v4l2_ctrl *ctrl)
 })
 
 /* Validate a new control */
-
-#define zero_padding(s) \
-	memset(&(s).padding, 0, sizeof((s).padding))
-
-/*
- * Compound controls validation requires setting unused fields/flags to zero
- * in order to properly detect unchanged controls with std_equal's memcmp.
- */
-static int std_validate_compound(const struct v4l2_ctrl *ctrl, u32 idx,
-				 union v4l2_ctrl_ptr ptr)
-{
-	struct v4l2_ctrl_mpeg2_slice_params *p_mpeg2_slice_params;
-	struct v4l2_ctrl_vp8_frame_header *p_vp8_frame_header;
-	void *p = ptr.p + idx * ctrl->elem_size;
-
-	switch ((u32)ctrl->type) {
-	case V4L2_CTRL_TYPE_MPEG2_SLICE_PARAMS:
-		p_mpeg2_slice_params = p;
-
-		switch (p_mpeg2_slice_params->sequence.chroma_format) {
-		case 1: /* 4:2:0 */
-		case 2: /* 4:2:2 */
-		case 3: /* 4:4:4 */
-			break;
-		default:
-			return -EINVAL;
-		}
-
-		switch (p_mpeg2_slice_params->picture.intra_dc_precision) {
-		case 0: /* 8 bits */
-		case 1: /* 9 bits */
-		case 2: /* 10 bits */
-		case 3: /* 11 bits */
-			break;
-		default:
-			return -EINVAL;
-		}
-
-		switch (p_mpeg2_slice_params->picture.picture_structure) {
-		case 1: /* interlaced top field */
-		case 2: /* interlaced bottom field */
-		case 3: /* progressive */
-			break;
-		default:
-			return -EINVAL;
-		}
-
-		switch (p_mpeg2_slice_params->picture.picture_coding_type) {
-		case V4L2_MPEG2_PICTURE_CODING_TYPE_I:
-		case V4L2_MPEG2_PICTURE_CODING_TYPE_P:
-		case V4L2_MPEG2_PICTURE_CODING_TYPE_B:
-			break;
-		default:
-			return -EINVAL;
-		}
-
-		break;
-
-	case V4L2_CTRL_TYPE_MPEG2_QUANTIZATION:
-		break;
-
-	case V4L2_CTRL_TYPE_FWHT_PARAMS:
-		break;
-
-	case V4L2_CTRL_TYPE_H264_SPS:
-	case V4L2_CTRL_TYPE_H264_PPS:
-	case V4L2_CTRL_TYPE_H264_SCALING_MATRIX:
-	case V4L2_CTRL_TYPE_H264_SLICE_PARAMS:
-	case V4L2_CTRL_TYPE_H264_DECODE_PARAMS:
-		break;
-
-	case V4L2_CTRL_TYPE_VP8_FRAME_HEADER:
-		p_vp8_frame_header = p;
-
-		switch (p_vp8_frame_header->num_dct_parts) {
-		case 1:
-		case 2:
-		case 4:
-		case 8:
-			break;
-		default:
-			return -EINVAL;
-		}
-		zero_padding(p_vp8_frame_header->segment_header);
-		zero_padding(p_vp8_frame_header->lf_header);
-		zero_padding(p_vp8_frame_header->quant_header);
-		zero_padding(p_vp8_frame_header->entropy_header);
-		zero_padding(p_vp8_frame_header->coder_state);
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
 static int std_validate(const struct v4l2_ctrl *ctrl, u32 idx,
 			union v4l2_ctrl_ptr ptr)
 {
+	struct v4l2_ctrl_mpeg2_slice_params *p_mpeg2_slice_params;
 	size_t len;
 	u64 offset;
 	s64 val;
@@ -1820,8 +1622,56 @@ static int std_validate(const struct v4l2_ctrl *ctrl, u32 idx,
 			return -ERANGE;
 		return 0;
 
+	case V4L2_CTRL_TYPE_MPEG2_SLICE_PARAMS:
+		p_mpeg2_slice_params = ptr.p;
+
+		switch (p_mpeg2_slice_params->sequence.chroma_format) {
+		case 1: /* 4:2:0 */
+		case 2: /* 4:2:2 */
+		case 3: /* 4:4:4 */
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		switch (p_mpeg2_slice_params->picture.intra_dc_precision) {
+		case 0: /* 8 bits */
+		case 1: /* 9 bits */
+		case 2: /* 10 bits */
+		case 3: /* 11 bits */
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		switch (p_mpeg2_slice_params->picture.picture_structure) {
+		case 1: /* interlaced top field */
+		case 2: /* interlaced bottom field */
+		case 3: /* progressive */
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		switch (p_mpeg2_slice_params->picture.picture_coding_type) {
+		case V4L2_MPEG2_PICTURE_CODING_TYPE_I:
+		case V4L2_MPEG2_PICTURE_CODING_TYPE_P:
+		case V4L2_MPEG2_PICTURE_CODING_TYPE_B:
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		return 0;
+
+	case V4L2_CTRL_TYPE_MPEG2_QUANTIZATION:
+		return 0;
+
+	case V4L2_CTRL_TYPE_FWHT_PARAMS:
+		return 0;
+
 	default:
-		return std_validate_compound(ctrl, idx, ptr);
+		return -EINVAL;
 	}
 }
 
@@ -2402,24 +2252,6 @@ static struct v4l2_ctrl *v4l2_ctrl_new(struct v4l2_ctrl_handler *hdl,
 		break;
 	case V4L2_CTRL_TYPE_FWHT_PARAMS:
 		elem_size = sizeof(struct v4l2_ctrl_fwht_params);
-		break;
-	case V4L2_CTRL_TYPE_H264_SPS:
-		elem_size = sizeof(struct v4l2_ctrl_h264_sps);
-		break;
-	case V4L2_CTRL_TYPE_H264_PPS:
-		elem_size = sizeof(struct v4l2_ctrl_h264_pps);
-		break;
-	case V4L2_CTRL_TYPE_H264_SCALING_MATRIX:
-		elem_size = sizeof(struct v4l2_ctrl_h264_scaling_matrix);
-		break;
-	case V4L2_CTRL_TYPE_H264_SLICE_PARAMS:
-		elem_size = sizeof(struct v4l2_ctrl_h264_slice_params);
-		break;
-	case V4L2_CTRL_TYPE_H264_DECODE_PARAMS:
-		elem_size = sizeof(struct v4l2_ctrl_h264_decode_params);
-		break;
-	case V4L2_CTRL_TYPE_VP8_FRAME_HEADER:
-		elem_size = sizeof(struct v4l2_ctrl_vp8_frame_header);
 		break;
 	default:
 		if (type < V4L2_CTRL_COMPOUND_TYPES)
@@ -3290,7 +3122,6 @@ static int v4l2_ctrl_request_bind(struct media_request *req,
 static int prepare_ext_ctrls(struct v4l2_ctrl_handler *hdl,
 			     struct v4l2_ext_controls *cs,
 			     struct v4l2_ctrl_helper *helpers,
-			     struct video_device *vdev,
 			     bool get)
 {
 	struct v4l2_ctrl_helper *h;
@@ -3308,31 +3139,20 @@ static int prepare_ext_ctrls(struct v4l2_ctrl_handler *hdl,
 		if (cs->which &&
 		    cs->which != V4L2_CTRL_WHICH_DEF_VAL &&
 		    cs->which != V4L2_CTRL_WHICH_REQUEST_VAL &&
-		    V4L2_CTRL_ID2WHICH(id) != cs->which) {
-			dprintk(vdev,
-				"invalid which 0x%x or control id 0x%x\n",
-				cs->which, id);
+		    V4L2_CTRL_ID2WHICH(id) != cs->which)
 			return -EINVAL;
-		}
 
 		/* Old-style private controls are not allowed for
 		   extended controls */
-		if (id >= V4L2_CID_PRIVATE_BASE) {
-			dprintk(vdev,
-				"old-style private controls not allowed\n");
+		if (id >= V4L2_CID_PRIVATE_BASE)
 			return -EINVAL;
-		}
 		ref = find_ref_lock(hdl, id);
-		if (ref == NULL) {
-			dprintk(vdev, "cannot find control id 0x%x\n", id);
+		if (ref == NULL)
 			return -EINVAL;
-		}
 		h->ref = ref;
 		ctrl = ref->ctrl;
-		if (ctrl->flags & V4L2_CTRL_FLAG_DISABLED) {
-			dprintk(vdev, "control id 0x%x is disabled\n", id);
+		if (ctrl->flags & V4L2_CTRL_FLAG_DISABLED)
 			return -EINVAL;
-		}
 
 		if (ctrl->cluster[0]->ncontrols > 1)
 			have_clusters = true;
@@ -3342,17 +3162,10 @@ static int prepare_ext_ctrls(struct v4l2_ctrl_handler *hdl,
 			unsigned tot_size = ctrl->elems * ctrl->elem_size;
 
 			if (c->size < tot_size) {
-				/*
-				 * In the get case the application first
-				 * queries to obtain the size of the control.
-				 */
 				if (get) {
 					c->size = tot_size;
 					return -ENOSPC;
 				}
-				dprintk(vdev,
-					"pointer control id 0x%x size too small, %d bytes but %d bytes needed\n",
-					id, c->size, tot_size);
 				return -EFAULT;
 			}
 			c->size = tot_size;
@@ -3413,8 +3226,7 @@ static int class_check(struct v4l2_ctrl_handler *hdl, u32 which)
 
 /* Get extended controls. Allocates the helpers array if needed. */
 static int v4l2_g_ext_ctrls_common(struct v4l2_ctrl_handler *hdl,
-				   struct v4l2_ext_controls *cs,
-				   struct video_device *vdev)
+				   struct v4l2_ext_controls *cs)
 {
 	struct v4l2_ctrl_helper helper[4];
 	struct v4l2_ctrl_helper *helpers = helper;
@@ -3440,7 +3252,7 @@ static int v4l2_g_ext_ctrls_common(struct v4l2_ctrl_handler *hdl,
 			return -ENOMEM;
 	}
 
-	ret = prepare_ext_ctrls(hdl, cs, helpers, vdev, true);
+	ret = prepare_ext_ctrls(hdl, cs, helpers, true);
 	cs->error_idx = cs->count;
 
 	for (i = 0; !ret && i < cs->count; i++)
@@ -3533,8 +3345,8 @@ v4l2_ctrls_find_req_obj(struct v4l2_ctrl_handler *hdl,
 	return obj;
 }
 
-int v4l2_g_ext_ctrls(struct v4l2_ctrl_handler *hdl, struct video_device *vdev,
-		     struct media_device *mdev, struct v4l2_ext_controls *cs)
+int v4l2_g_ext_ctrls(struct v4l2_ctrl_handler *hdl, struct media_device *mdev,
+		     struct v4l2_ext_controls *cs)
 {
 	struct media_request_object *obj = NULL;
 	struct media_request *req = NULL;
@@ -3570,7 +3382,7 @@ int v4l2_g_ext_ctrls(struct v4l2_ctrl_handler *hdl, struct video_device *vdev,
 				   req_obj);
 	}
 
-	ret = v4l2_g_ext_ctrls_common(hdl, cs, vdev);
+	ret = v4l2_g_ext_ctrls_common(hdl, cs);
 
 	if (obj) {
 		media_request_unlock_for_access(req);
@@ -3713,9 +3525,7 @@ static int try_or_set_cluster(struct v4l2_fh *fh, struct v4l2_ctrl *master,
 
 /* Validate controls. */
 static int validate_ctrls(struct v4l2_ext_controls *cs,
-			  struct v4l2_ctrl_helper *helpers,
-			  struct video_device *vdev,
-			  bool set)
+			  struct v4l2_ctrl_helper *helpers, bool set)
 {
 	unsigned i;
 	int ret = 0;
@@ -3727,24 +3537,16 @@ static int validate_ctrls(struct v4l2_ext_controls *cs,
 
 		cs->error_idx = i;
 
-		if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY) {
-			dprintk(vdev,
-				"control id 0x%x is read-only\n",
-				ctrl->id);
+		if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 			return -EACCES;
-		}
 		/* This test is also done in try_set_control_cluster() which
 		   is called in atomic context, so that has the final say,
 		   but it makes sense to do an up-front check as well. Once
 		   an error occurs in try_set_control_cluster() some other
 		   controls may have been set already and we want to do a
 		   best-effort to avoid that. */
-		if (set && (ctrl->flags & V4L2_CTRL_FLAG_GRABBED)) {
-			dprintk(vdev,
-				"control id 0x%x is grabbed, cannot set\n",
-				ctrl->id);
+		if (set && (ctrl->flags & V4L2_CTRL_FLAG_GRABBED))
 			return -EBUSY;
-		}
 		/*
 		 * Skip validation for now if the payload needs to be copied
 		 * from userspace into kernelspace. We'll validate those later.
@@ -3779,8 +3581,7 @@ static void update_from_auto_cluster(struct v4l2_ctrl *master)
 /* Try or try-and-set controls */
 static int try_set_ext_ctrls_common(struct v4l2_fh *fh,
 				    struct v4l2_ctrl_handler *hdl,
-				    struct v4l2_ext_controls *cs,
-				    struct video_device *vdev, bool set)
+				    struct v4l2_ext_controls *cs, bool set)
 {
 	struct v4l2_ctrl_helper helper[4];
 	struct v4l2_ctrl_helper *helpers = helper;
@@ -3790,19 +3591,13 @@ static int try_set_ext_ctrls_common(struct v4l2_fh *fh,
 	cs->error_idx = cs->count;
 
 	/* Default value cannot be changed */
-	if (cs->which == V4L2_CTRL_WHICH_DEF_VAL) {
-		dprintk(vdev, "%s: cannot change default value\n",
-			video_device_node_name(vdev));
+	if (cs->which == V4L2_CTRL_WHICH_DEF_VAL)
 		return -EINVAL;
-	}
 
 	cs->which = V4L2_CTRL_ID2WHICH(cs->which);
 
-	if (hdl == NULL) {
-		dprintk(vdev, "%s: invalid null control handler\n",
-			video_device_node_name(vdev));
+	if (hdl == NULL)
 		return -EINVAL;
-	}
 
 	if (cs->count == 0)
 		return class_check(hdl, cs->which);
@@ -3813,9 +3608,9 @@ static int try_set_ext_ctrls_common(struct v4l2_fh *fh,
 		if (!helpers)
 			return -ENOMEM;
 	}
-	ret = prepare_ext_ctrls(hdl, cs, helpers, vdev, false);
+	ret = prepare_ext_ctrls(hdl, cs, helpers, false);
 	if (!ret)
-		ret = validate_ctrls(cs, helpers, vdev, set);
+		ret = validate_ctrls(cs, helpers, set);
 	if (ret && set)
 		cs->error_idx = cs->count;
 	for (i = 0; !ret && i < cs->count; i++) {
@@ -3900,9 +3695,7 @@ static int try_set_ext_ctrls_common(struct v4l2_fh *fh,
 }
 
 static int try_set_ext_ctrls(struct v4l2_fh *fh,
-			     struct v4l2_ctrl_handler *hdl,
-			     struct video_device *vdev,
-			     struct media_device *mdev,
+			     struct v4l2_ctrl_handler *hdl, struct media_device *mdev,
 			     struct v4l2_ext_controls *cs, bool set)
 {
 	struct media_request_object *obj = NULL;
@@ -3910,39 +3703,21 @@ static int try_set_ext_ctrls(struct v4l2_fh *fh,
 	int ret;
 
 	if (cs->which == V4L2_CTRL_WHICH_REQUEST_VAL) {
-		if (!mdev) {
-			dprintk(vdev, "%s: missing media device\n",
-				video_device_node_name(vdev));
+		if (!mdev || cs->request_fd < 0)
 			return -EINVAL;
-		}
-
-		if (cs->request_fd < 0) {
-			dprintk(vdev, "%s: invalid request fd %d\n",
-				video_device_node_name(vdev), cs->request_fd);
-			return -EINVAL;
-		}
 
 		req = media_request_get_by_fd(mdev, cs->request_fd);
-		if (IS_ERR(req)) {
-			dprintk(vdev, "%s: cannot find request fd %d\n",
-				video_device_node_name(vdev), cs->request_fd);
+		if (IS_ERR(req))
 			return PTR_ERR(req);
-		}
 
 		ret = media_request_lock_for_update(req);
 		if (ret) {
-			dprintk(vdev, "%s: cannot lock request fd %d\n",
-				video_device_node_name(vdev), cs->request_fd);
 			media_request_put(req);
 			return ret;
 		}
 
 		obj = v4l2_ctrls_find_req_obj(hdl, req, set);
 		if (IS_ERR(obj)) {
-			dprintk(vdev,
-				"%s: cannot find request object for request fd %d\n",
-				video_device_node_name(vdev),
-				cs->request_fd);
 			media_request_unlock_for_update(req);
 			media_request_put(req);
 			return PTR_ERR(obj);
@@ -3951,11 +3726,7 @@ static int try_set_ext_ctrls(struct v4l2_fh *fh,
 				   req_obj);
 	}
 
-	ret = try_set_ext_ctrls_common(fh, hdl, cs, vdev, set);
-	if (ret)
-		dprintk(vdev,
-			"%s: try_set_ext_ctrls_common failed (%d)\n",
-			video_device_node_name(vdev), ret);
+	ret = try_set_ext_ctrls_common(fh, hdl, cs, set);
 
 	if (obj) {
 		media_request_unlock_for_update(req);
@@ -3966,22 +3737,17 @@ static int try_set_ext_ctrls(struct v4l2_fh *fh,
 	return ret;
 }
 
-int v4l2_try_ext_ctrls(struct v4l2_ctrl_handler *hdl,
-		       struct video_device *vdev,
-		       struct media_device *mdev,
+int v4l2_try_ext_ctrls(struct v4l2_ctrl_handler *hdl, struct media_device *mdev,
 		       struct v4l2_ext_controls *cs)
 {
-	return try_set_ext_ctrls(NULL, hdl, vdev, mdev, cs, false);
+	return try_set_ext_ctrls(NULL, hdl, mdev, cs, false);
 }
 EXPORT_SYMBOL(v4l2_try_ext_ctrls);
 
-int v4l2_s_ext_ctrls(struct v4l2_fh *fh,
-		     struct v4l2_ctrl_handler *hdl,
-		     struct video_device *vdev,
-		     struct media_device *mdev,
-		     struct v4l2_ext_controls *cs)
+int v4l2_s_ext_ctrls(struct v4l2_fh *fh, struct v4l2_ctrl_handler *hdl,
+		     struct media_device *mdev, struct v4l2_ext_controls *cs)
 {
-	return try_set_ext_ctrls(fh, hdl, vdev, mdev, cs, true);
+	return try_set_ext_ctrls(fh, hdl, mdev, cs, true);
 }
 EXPORT_SYMBOL(v4l2_s_ext_ctrls);
 

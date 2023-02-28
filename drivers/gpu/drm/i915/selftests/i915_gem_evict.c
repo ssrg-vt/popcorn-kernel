@@ -22,15 +22,10 @@
  *
  */
 
-#include "gem/i915_gem_pm.h"
-#include "gem/selftests/igt_gem_utils.h"
-#include "gem/selftests/mock_context.h"
-#include "gt/intel_gt.h"
+#include "../i915_selftest.h"
 
-#include "i915_selftest.h"
-
-#include "igt_flush_test.h"
 #include "lib_sw_fence.h"
+#include "mock_context.h"
 #include "mock_drm.h"
 #include "mock_gem_device.h"
 
@@ -48,48 +43,41 @@ static int populate_ggtt(struct drm_i915_private *i915,
 {
 	unsigned long unbound, bound, count;
 	struct drm_i915_gem_object *obj;
+	u64 size;
 
 	count = 0;
-	do {
+	for (size = 0;
+	     size + I915_GTT_PAGE_SIZE <= i915->ggtt.vm.total;
+	     size += I915_GTT_PAGE_SIZE) {
 		struct i915_vma *vma;
 
 		obj = i915_gem_object_create_internal(i915, I915_GTT_PAGE_SIZE);
 		if (IS_ERR(obj))
 			return PTR_ERR(obj);
 
-		vma = i915_gem_object_ggtt_pin(obj, NULL, 0, 0, 0);
-		if (IS_ERR(vma)) {
-			i915_gem_object_put(obj);
-			if (vma == ERR_PTR(-ENOSPC))
-				break;
-
-			return PTR_ERR(vma);
-		}
-
 		quirk_add(obj, objects);
+
+		vma = i915_gem_object_ggtt_pin(obj, NULL, 0, 0, 0);
+		if (IS_ERR(vma))
+			return PTR_ERR(vma);
+
 		count++;
-	} while (1);
-	pr_debug("Filled GGTT with %lu pages [%llu total]\n",
-		 count, i915->ggtt.vm.total / PAGE_SIZE);
-
-	bound = 0;
-	unbound = 0;
-	list_for_each_entry(obj, objects, st_link) {
-		GEM_BUG_ON(!obj->mm.quirked);
-
-		if (atomic_read(&obj->bind_count))
-			bound++;
-		else
-			unbound++;
 	}
-	GEM_BUG_ON(bound + unbound != count);
 
+	unbound = 0;
+	list_for_each_entry(obj, &i915->mm.unbound_list, mm.link)
+		if (obj->mm.quirked)
+			unbound++;
 	if (unbound) {
 		pr_err("%s: Found %lu objects unbound, expected %u!\n",
 		       __func__, unbound, 0);
 		return -EINVAL;
 	}
 
+	bound = 0;
+	list_for_each_entry(obj, &i915->mm.bound_list, mm.link)
+		if (obj->mm.quirked)
+			bound++;
 	if (bound != count) {
 		pr_err("%s: Found %lu objects bound, expected %lu!\n",
 		       __func__, bound, count);
@@ -409,7 +397,7 @@ static int igt_evict_contexts(void *arg)
 		return 0;
 
 	mutex_lock(&i915->drm.struct_mutex);
-	wakeref = intel_runtime_pm_get(&i915->runtime_pm);
+	wakeref = intel_runtime_pm_get(i915);
 
 	/* Reserve a block so that we know we have enough to fit a few rq */
 	memset(&hole, 0, sizeof(hole));
@@ -472,7 +460,7 @@ static int igt_evict_contexts(void *arg)
 
 			/* We will need some GGTT space for the rq's context */
 			igt_evict_ctl.fail_if_busy = true;
-			rq = igt_request_alloc(ctx, engine);
+			rq = i915_request_alloc(engine, ctx);
 			igt_evict_ctl.fail_if_busy = false;
 
 			if (IS_ERR(rq)) {
@@ -510,8 +498,6 @@ static int igt_evict_contexts(void *arg)
 
 	mutex_lock(&i915->drm.struct_mutex);
 out_locked:
-	if (igt_flush_test(i915, I915_WAIT_LOCKED))
-		err = -EIO;
 	while (reserved) {
 		struct reserved *next = reserved->next;
 
@@ -522,7 +508,7 @@ out_locked:
 	}
 	if (drm_mm_node_allocated(&hole))
 		drm_mm_remove_node(&hole);
-	intel_runtime_pm_put(&i915->runtime_pm, wakeref);
+	intel_runtime_pm_put(i915, wakeref);
 	mutex_unlock(&i915->drm.struct_mutex);
 
 	return err;
@@ -546,7 +532,7 @@ int i915_gem_evict_mock_selftests(void)
 		return -ENOMEM;
 
 	mutex_lock(&i915->drm.struct_mutex);
-	with_intel_runtime_pm(&i915->runtime_pm, wakeref)
+	with_intel_runtime_pm(i915, wakeref)
 		err = i915_subtests(tests, i915);
 
 	mutex_unlock(&i915->drm.struct_mutex);
@@ -561,7 +547,7 @@ int i915_gem_evict_live_selftests(struct drm_i915_private *i915)
 		SUBTEST(igt_evict_contexts),
 	};
 
-	if (intel_gt_is_wedged(&i915->gt))
+	if (i915_terminally_wedged(i915))
 		return 0;
 
 	return i915_subtests(tests, i915);

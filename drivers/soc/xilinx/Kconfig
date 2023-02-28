@@ -3,8 +3,7 @@ menu "Xilinx SoC drivers"
 
 config XILINX_VCU
 	tristate "Xilinx VCU logicoreIP Init"
-	select MFD_CORE
-	depends on HAS_IOMEM && COMMON_CLK
+	depends on HAS_IOMEM
 	help
 	  Provides the driver to enable and disable the isolation between the
 	  processing system and programmable logic part by using the logicoreIP
@@ -22,15 +21,11 @@ config ZYNQMP_POWER
 	bool "Enable Xilinx Zynq MPSoC Power Management driver"
 	depends on PM && ARCH_ZYNQMP
 	default y
-	select MAILBOX
-	select ZYNQMP_IPI_MBOX
 	help
 	  Say yes to enable power management support for ZyqnMP SoC.
 	  This driver uses firmware driver as an interface for power
 	  management request to firmware. It registers isr to handle
-	  power management callbacks from firmware. It registers mailbox client
-	  to handle power management callbacks from firmware.
-
+	  power management callbacks from firmware.
 	  If in doubt, say N.
 
 config ZYNQMP_PM_DOMAINS

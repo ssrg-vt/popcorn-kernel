@@ -6,5 +6,3 @@ config RTL8192U
 	select WIRELESS_EXT
 	select WEXT_PRIV
 	select CRYPTO
-	select CRYPTO_AES
-	select CRYPTO_CCM

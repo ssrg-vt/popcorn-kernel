@@ -30,10 +30,6 @@
 #include "dal_asic_id.h"
 #include "dm_pp_smu.h"
 
-#define MEMORY_TYPE_MULTIPLIER_CZ 4
-#define MEMORY_TYPE_HBM 2
-
-
 enum dce_version resource_parse_asic_id(
 		struct hw_asic_id asic_id);
 
@@ -46,12 +42,6 @@ struct resource_caps {
 	int num_pll;
 	int num_dwb;
 	int num_ddc;
-#ifdef CONFIG_DRM_AMD_DC_DCN2_0
-	int num_vmid;
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
-	int num_dsc;
-#endif
-#endif
 };
 
 struct resource_straps {
@@ -180,5 +170,8 @@ void update_audio_usage(
 		bool acquired);
 
 unsigned int resource_pixel_format_to_bpp(enum surface_pixel_format format);
+
+struct pipe_ctx *dc_res_get_odm_bottom_pipe(struct pipe_ctx *pipe_ctx);
+bool dc_res_is_odm_head_pipe(struct pipe_ctx *pipe_ctx);
 
 #endif /* DRIVERS_GPU_DRM_AMD_DC_DEV_DC_INC_RESOURCE_H_ */

@@ -124,7 +124,7 @@ static int hclge_ets_validate(struct hclge_dev *hdev, struct ieee_ets *ets,
 	if (ret)
 		return ret;
 
-	for (i = 0; i < hdev->tc_max; i++) {
+	for (i = 0; i < HNAE3_MAX_TC; i++) {
 		switch (ets->tc_tsa[i]) {
 		case IEEE_8021QAZ_TSA_STRICT:
 			if (hdev->tm_info.tc_info[i].tc_sch_mode !=
@@ -198,32 +198,9 @@ static int hclge_client_setup_tc(struct hclge_dev *hdev)
 	return 0;
 }
 
-static int hclge_notify_down_uinit(struct hclge_dev *hdev)
-{
-	int ret;
-
-	ret = hclge_notify_client(hdev, HNAE3_DOWN_CLIENT);
-	if (ret)
-		return ret;
-
-	return hclge_notify_client(hdev, HNAE3_UNINIT_CLIENT);
-}
-
-static int hclge_notify_init_up(struct hclge_dev *hdev)
-{
-	int ret;
-
-	ret = hclge_notify_client(hdev, HNAE3_INIT_CLIENT);
-	if (ret)
-		return ret;
-
-	return hclge_notify_client(hdev, HNAE3_UP_CLIENT);
-}
-
 static int hclge_ieee_setets(struct hnae3_handle *h, struct ieee_ets *ets)
 {
 	struct hclge_vport *vport = hclge_get_vport(h);
-	struct net_device *netdev = h->kinfo.netdev;
 	struct hclge_dev *hdev = vport->back;
 	bool map_changed = false;
 	u8 num_tc = 0;
@@ -238,9 +215,11 @@ static int hclge_ieee_setets(struct hnae3_handle *h, struct ieee_ets *ets)
 		return ret;
 
 	if (map_changed) {
-		netif_dbg(h, drv, netdev, "set ets\n");
+		ret = hclge_notify_client(hdev, HNAE3_DOWN_CLIENT);
+		if (ret)
+			return ret;
 
-		ret = hclge_notify_down_uinit(hdev);
+		ret = hclge_notify_client(hdev, HNAE3_UNINIT_CLIENT);
 		if (ret)
 			return ret;
 	}
@@ -260,7 +239,11 @@ static int hclge_ieee_setets(struct hnae3_handle *h, struct ieee_ets *ets)
 		if (ret)
 			goto err_out;
 
-		ret = hclge_notify_init_up(hdev);
+		ret = hclge_notify_client(hdev, HNAE3_INIT_CLIENT);
+		if (ret)
+			return ret;
+
+		ret = hclge_notify_client(hdev, HNAE3_UP_CLIENT);
 		if (ret)
 			return ret;
 	}
@@ -271,8 +254,10 @@ err_out:
 	if (!map_changed)
 		return ret;
 
-	hclge_notify_init_up(hdev);
+	if (hclge_notify_client(hdev, HNAE3_INIT_CLIENT))
+		return ret;
 
+	hclge_notify_client(hdev, HNAE3_UP_CLIENT);
 	return ret;
 }
 
@@ -315,10 +300,8 @@ static int hclge_ieee_getpfc(struct hnae3_handle *h, struct ieee_pfc *pfc)
 static int hclge_ieee_setpfc(struct hnae3_handle *h, struct ieee_pfc *pfc)
 {
 	struct hclge_vport *vport = hclge_get_vport(h);
-	struct net_device *netdev = h->kinfo.netdev;
 	struct hclge_dev *hdev = vport->back;
 	u8 i, j, pfc_map, *prio_tc;
-	int ret;
 
 	if (!(hdev->dcbx_cap & DCB_CAP_DCBX_VER_IEEE) ||
 	    hdev->flag & HCLGE_FLAG_MQPRIO_ENABLE)
@@ -342,27 +325,7 @@ static int hclge_ieee_setpfc(struct hnae3_handle *h, struct ieee_pfc *pfc)
 	hdev->tm_info.hw_pfc_map = pfc_map;
 	hdev->tm_info.pfc_en = pfc->pfc_en;
 
-	netif_dbg(h, drv, netdev,
-		  "set pfc: pfc_en=%x, pfc_map=%x, num_tc=%u\n",
-		  pfc->pfc_en, pfc_map, hdev->tm_info.num_tc);
-
-	hclge_tm_pfc_info_update(hdev);
-
-	ret = hclge_pause_setup_hw(hdev, false);
-	if (ret)
-		return ret;
-
-	ret = hclge_notify_client(hdev, HNAE3_DOWN_CLIENT);
-	if (ret)
-		return ret;
-
-	ret = hclge_buffer_alloc(hdev);
-	if (ret) {
-		hclge_notify_client(hdev, HNAE3_UP_CLIENT);
-		return ret;
-	}
-
-	return hclge_notify_client(hdev, HNAE3_UP_CLIENT);
+	return hclge_pause_setup_hw(hdev, false);
 }
 
 /* DCBX configuration */
@@ -380,10 +343,7 @@ static u8 hclge_getdcbx(struct hnae3_handle *h)
 static u8 hclge_setdcbx(struct hnae3_handle *h, u8 mode)
 {
 	struct hclge_vport *vport = hclge_get_vport(h);
-	struct net_device *netdev = h->kinfo.netdev;
 	struct hclge_dev *hdev = vport->back;
-
-	netif_dbg(h, drv, netdev, "set dcbx: mode=%u\n", mode);
 
 	/* No support for LLD_MANAGED modes or CEE */
 	if ((mode & DCB_CAP_DCBX_LLD_MANAGED) ||
@@ -410,7 +370,11 @@ static int hclge_setup_tc(struct hnae3_handle *h, u8 tc, u8 *prio_tc)
 	if (ret)
 		return -EINVAL;
 
-	ret = hclge_notify_down_uinit(hdev);
+	ret = hclge_notify_client(hdev, HNAE3_DOWN_CLIENT);
+	if (ret)
+		return ret;
+
+	ret = hclge_notify_client(hdev, HNAE3_UNINIT_CLIENT);
 	if (ret)
 		return ret;
 
@@ -432,11 +396,17 @@ static int hclge_setup_tc(struct hnae3_handle *h, u8 tc, u8 *prio_tc)
 	else
 		hdev->flag &= ~HCLGE_FLAG_MQPRIO_ENABLE;
 
-	return hclge_notify_init_up(hdev);
+	ret = hclge_notify_client(hdev, HNAE3_INIT_CLIENT);
+	if (ret)
+		return ret;
+
+	return hclge_notify_client(hdev, HNAE3_UP_CLIENT);
 
 err_out:
-	hclge_notify_init_up(hdev);
+	if (hclge_notify_client(hdev, HNAE3_INIT_CLIENT))
+		return ret;
 
+	hclge_notify_client(hdev, HNAE3_UP_CLIENT);
 	return ret;
 }
 

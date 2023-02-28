@@ -680,8 +680,10 @@ static int of_platform_mb862xx_probe(struct platform_device *ofdev)
 	}
 
 	info = framebuffer_alloc(sizeof(struct mb862xxfb_par), dev);
-	if (!info)
+	if (info == NULL) {
+		dev_err(dev, "cannot allocate framebuffer\n");
 		return -ENOMEM;
+	}
 
 	par = info->par;
 	par->info = info;
@@ -1003,6 +1005,7 @@ static int mb862xx_pci_probe(struct pci_dev *pdev,
 
 	info = framebuffer_alloc(sizeof(struct mb862xxfb_par), dev);
 	if (!info) {
+		dev_err(dev, "framebuffer alloc failed\n");
 		ret = -ENOMEM;
 		goto dis_dev;
 	}

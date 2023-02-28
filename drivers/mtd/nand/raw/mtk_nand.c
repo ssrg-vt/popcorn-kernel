@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0 OR MIT
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MTK NAND Flash controller driver.
  * Copyright (C) 2016 MediaTek Inc.
@@ -79,10 +79,6 @@
 #define NFI_FDMM(x)		(0xA4 + (x) * sizeof(u32) * 2)
 #define NFI_FDM_MAX_SIZE	(8)
 #define NFI_FDM_MIN_SIZE	(1)
-#define NFI_DEBUG_CON1		(0x220)
-#define		STROBE_MASK		GENMASK(4, 3)
-#define		STROBE_SHIFT		(3)
-#define		MAX_STROBE_DLY		(3)
 #define NFI_MASTER_STA		(0x224)
 #define		MASTER_STA_MASK		(0x0FFF)
 #define NFI_EMPTY_THRESH	(0x23C)
@@ -154,8 +150,6 @@ struct mtk_nfc {
 	struct list_head chips;
 
 	u8 *buffer;
-
-	unsigned long assigned_cs;
 };
 
 /*
@@ -507,7 +501,7 @@ static int mtk_nfc_setup_data_interface(struct nand_chip *chip, int csline,
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
 	const struct nand_sdr_timings *timings;
 	u32 rate, tpoecs, tprecs, tc2r, tw2r, twh, twst = 0, trlt = 0;
-	u32 temp, tsel = 0;
+	u32 thold;
 
 	timings = nand_get_sdr_timings(conf);
 	if (IS_ERR(timings))
@@ -544,51 +538,29 @@ static int mtk_nfc_setup_data_interface(struct nand_chip *chip, int csline,
 	twh &= 0xf;
 
 	/* Calculate real WE#/RE# hold time in nanosecond */
-	temp = (twh + 1) * 1000000 / rate;
+	thold = (twh + 1) * 1000000 / rate;
 	/* nanosecond to picosecond */
-	temp *= 1000;
+	thold *= 1000;
 
 	/*
 	 * WE# low level time should be expaned to meet WE# pulse time
 	 * and WE# cycle time at the same time.
 	 */
-	if (temp < timings->tWC_min)
-		twst = timings->tWC_min - temp;
+	if (thold < timings->tWC_min)
+		twst = timings->tWC_min - thold;
 	twst = max(timings->tWP_min, twst) / 1000;
 	twst = DIV_ROUND_UP(twst * rate, 1000000) - 1;
 	twst &= 0xf;
 
 	/*
-	 * RE# low level time should be expaned to meet RE# pulse time
-	 * and RE# cycle time at the same time.
+	 * RE# low level time should be expaned to meet RE# pulse time,
+	 * RE# access time and RE# cycle time at the same time.
 	 */
-	if (temp < timings->tRC_min)
-		trlt = timings->tRC_min - temp;
-	trlt = max(trlt, timings->tRP_min) / 1000;
+	if (thold < timings->tRC_min)
+		trlt = timings->tRC_min - thold;
+	trlt = max3(trlt, timings->tREA_max, timings->tRP_min) / 1000;
 	trlt = DIV_ROUND_UP(trlt * rate, 1000000) - 1;
 	trlt &= 0xf;
-
-	/* Calculate RE# pulse time in nanosecond. */
-	temp = (trlt + 1) * 1000000 / rate;
-	/* nanosecond to picosecond */
-	temp *= 1000;
-	/*
-	 * If RE# access time is bigger than RE# pulse time,
-	 * delay sampling data timing.
-	 */
-	if (temp < timings->tREA_max) {
-		tsel = timings->tREA_max / 1000;
-		tsel = DIV_ROUND_UP(tsel * rate, 1000000);
-		tsel -= (trlt + 1);
-		if (tsel > MAX_STROBE_DLY) {
-			trlt += tsel - MAX_STROBE_DLY;
-			tsel = MAX_STROBE_DLY;
-		}
-	}
-	temp = nfi_readl(nfc, NFI_DEBUG_CON1);
-	temp &= ~STROBE_MASK;
-	temp |= tsel << STROBE_SHIFT;
-	nfi_writel(nfc, temp, NFI_DEBUG_CON1);
 
 	/*
 	 * ACCON: access timing control register
@@ -1360,17 +1332,6 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 			dev_err(dev, "reg property failure : %d\n", ret);
 			return ret;
 		}
-
-		if (tmp >= MTK_NAND_MAX_NSELS) {
-			dev_err(dev, "invalid CS: %u\n", tmp);
-			return -EINVAL;
-		}
-
-		if (test_and_set_bit(tmp, &nfc->assigned_cs)) {
-			dev_err(dev, "CS %u already assigned\n", tmp);
-			return -EINVAL;
-		}
-
 		chip->sels[i] = tmp;
 	}
 
@@ -1645,6 +1606,6 @@ static struct platform_driver mtk_nfc_driver = {
 
 module_platform_driver(mtk_nfc_driver);
 
-MODULE_LICENSE("Dual MIT/GPL");
+MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaolei Li <xiaolei.li@mediatek.com>");
 MODULE_DESCRIPTION("MTK Nand Flash Controller Driver");

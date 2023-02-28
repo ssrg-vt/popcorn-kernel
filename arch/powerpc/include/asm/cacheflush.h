@@ -57,29 +57,20 @@ static inline void __flush_dcache_icache_phys(unsigned long physaddr)
 }
 #endif
 
+#ifdef CONFIG_PPC32
 /*
  * Write any modified data cache blocks out to memory and invalidate them.
  * Does not invalidate the corresponding instruction cache blocks.
  */
 static inline void flush_dcache_range(unsigned long start, unsigned long stop)
 {
-	unsigned long shift = l1_cache_shift();
-	unsigned long bytes = l1_cache_bytes();
-	void *addr = (void *)(start & ~(bytes - 1));
-	unsigned long size = stop - (unsigned long)addr + (bytes - 1);
+	void *addr = (void *)(start & ~(L1_CACHE_BYTES - 1));
+	unsigned long size = stop - (unsigned long)addr + (L1_CACHE_BYTES - 1);
 	unsigned long i;
 
-	if (IS_ENABLED(CONFIG_PPC64)) {
-		mb();	/* sync */
-		isync();
-	}
-
-	for (i = 0; i < size >> shift; i++, addr += bytes)
+	for (i = 0; i < size >> L1_CACHE_SHIFT; i++, addr += L1_CACHE_BYTES)
 		dcbf(addr);
 	mb();	/* sync */
-
-	if (IS_ENABLED(CONFIG_PPC64))
-		isync();
 }
 
 /*
@@ -89,13 +80,11 @@ static inline void flush_dcache_range(unsigned long start, unsigned long stop)
  */
 static inline void clean_dcache_range(unsigned long start, unsigned long stop)
 {
-	unsigned long shift = l1_cache_shift();
-	unsigned long bytes = l1_cache_bytes();
-	void *addr = (void *)(start & ~(bytes - 1));
-	unsigned long size = stop - (unsigned long)addr + (bytes - 1);
+	void *addr = (void *)(start & ~(L1_CACHE_BYTES - 1));
+	unsigned long size = stop - (unsigned long)addr + (L1_CACHE_BYTES - 1);
 	unsigned long i;
 
-	for (i = 0; i < size >> shift; i++, addr += bytes)
+	for (i = 0; i < size >> L1_CACHE_SHIFT; i++, addr += L1_CACHE_BYTES)
 		dcbst(addr);
 	mb();	/* sync */
 }
@@ -108,16 +97,20 @@ static inline void clean_dcache_range(unsigned long start, unsigned long stop)
 static inline void invalidate_dcache_range(unsigned long start,
 					   unsigned long stop)
 {
-	unsigned long shift = l1_cache_shift();
-	unsigned long bytes = l1_cache_bytes();
-	void *addr = (void *)(start & ~(bytes - 1));
-	unsigned long size = stop - (unsigned long)addr + (bytes - 1);
+	void *addr = (void *)(start & ~(L1_CACHE_BYTES - 1));
+	unsigned long size = stop - (unsigned long)addr + (L1_CACHE_BYTES - 1);
 	unsigned long i;
 
-	for (i = 0; i < size >> shift; i++, addr += bytes)
+	for (i = 0; i < size >> L1_CACHE_SHIFT; i++, addr += L1_CACHE_BYTES)
 		dcbi(addr);
 	mb();	/* sync */
 }
+
+#endif /* CONFIG_PPC32 */
+#ifdef CONFIG_PPC64
+extern void flush_dcache_range(unsigned long start, unsigned long stop);
+extern void flush_inval_dcache_range(unsigned long start, unsigned long stop);
+#endif
 
 #define copy_to_user_page(vma, page, vaddr, dst, src, len) \
 	do { \

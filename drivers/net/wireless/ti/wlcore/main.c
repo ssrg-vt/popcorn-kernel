@@ -483,7 +483,7 @@ static int wlcore_fw_status(struct wl1271 *wl, struct wl_fw_status *status)
 	}
 
 	/* update the host-chipset time offset */
-	wl->time_offset = (ktime_get_boottime_ns() >> 10) -
+	wl->time_offset = (ktime_get_boot_ns() >> 10) -
 		(s64)(status->fw_localtime);
 
 	wl->fw_fast_lnk_map = status->link_fast_bitmap;
@@ -5749,8 +5749,7 @@ static void wlcore_roc_complete_work(struct work_struct *work)
 		ieee80211_remain_on_channel_expired(wl->hw);
 }
 
-static int wlcore_op_cancel_remain_on_channel(struct ieee80211_hw *hw,
-					      struct ieee80211_vif *vif)
+static int wlcore_op_cancel_remain_on_channel(struct ieee80211_hw *hw)
 {
 	struct wl1271 *wl = hw->priv;
 

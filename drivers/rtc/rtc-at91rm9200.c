@@ -378,8 +378,10 @@ static int __init at91_rtc_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "no irq resource defined\n");
 		return -ENXIO;
+	}
 
 	at91_rtc_regs = devm_ioremap(&pdev->dev, regs->start,
 				     resource_size(regs));

@@ -8,13 +8,11 @@
  */
 
 #include <linux/module.h>
-#include <linux/io.h>
 #include <linux/notifier.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 
-#include <drm/drm_modes.h>
-#include <drm/drm_print.h>
+#include <drm/drmP.h>
 
 #include "sti_drv.h"
 #include "sti_vtg.h"

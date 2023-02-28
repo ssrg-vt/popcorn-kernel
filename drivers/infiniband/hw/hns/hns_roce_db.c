@@ -52,6 +52,7 @@ out:
 
 	return ret;
 }
+EXPORT_SYMBOL(hns_roce_db_map_user);
 
 void hns_roce_db_unmap_user(struct hns_roce_ucontext *context,
 			    struct hns_roce_db *db)
@@ -67,6 +68,7 @@ void hns_roce_db_unmap_user(struct hns_roce_ucontext *context,
 
 	mutex_unlock(&context->page_mutex);
 }
+EXPORT_SYMBOL(hns_roce_db_unmap_user);
 
 static struct hns_roce_db_pgdir *hns_roce_alloc_db_pgdir(
 					struct device *dma_device)
@@ -77,8 +79,7 @@ static struct hns_roce_db_pgdir *hns_roce_alloc_db_pgdir(
 	if (!pgdir)
 		return NULL;
 
-	bitmap_fill(pgdir->order1,
-		    HNS_ROCE_DB_PER_PAGE / HNS_ROCE_DB_TYPE_COUNT);
+	bitmap_fill(pgdir->order1, HNS_ROCE_DB_PER_PAGE / 2);
 	pgdir->bits[0] = pgdir->order0;
 	pgdir->bits[1] = pgdir->order1;
 	pgdir->page = dma_alloc_coherent(dma_device, PAGE_SIZE,
@@ -116,7 +117,7 @@ found:
 	db->u.pgdir	= pgdir;
 	db->index	= i;
 	db->db_record	= pgdir->page + db->index;
-	db->dma		= pgdir->db_dma  + db->index * HNS_ROCE_DB_UNIT_SIZE;
+	db->dma		= pgdir->db_dma  + db->index * 4;
 	db->order	= order;
 
 	return 0;
@@ -150,6 +151,7 @@ out:
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(hns_roce_alloc_db);
 
 void hns_roce_free_db(struct hns_roce_dev *hr_dev, struct hns_roce_db *db)
 {
@@ -169,8 +171,7 @@ void hns_roce_free_db(struct hns_roce_dev *hr_dev, struct hns_roce_db *db)
 	i >>= o;
 	set_bit(i, db->u.pgdir->bits[o]);
 
-	if (bitmap_full(db->u.pgdir->order1,
-			HNS_ROCE_DB_PER_PAGE / HNS_ROCE_DB_TYPE_COUNT)) {
+	if (bitmap_full(db->u.pgdir->order1, HNS_ROCE_DB_PER_PAGE / 2)) {
 		dma_free_coherent(hr_dev->dev, PAGE_SIZE, db->u.pgdir->page,
 				  db->u.pgdir->db_dma);
 		list_del(&db->u.pgdir->list);
@@ -179,3 +180,4 @@ void hns_roce_free_db(struct hns_roce_dev *hr_dev, struct hns_roce_db *db)
 
 	mutex_unlock(&hr_dev->pgdir_mutex);
 }
+EXPORT_SYMBOL_GPL(hns_roce_free_db);

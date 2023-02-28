@@ -12,14 +12,17 @@
 #include "xfs_bit.h"
 #include "xfs_sb.h"
 #include "xfs_mount.h"
+#include "xfs_defer.h"
 #include "xfs_inode.h"
 #include "xfs_btree.h"
 #include "xfs_ialloc.h"
 #include "xfs_ialloc_btree.h"
 #include "xfs_alloc.h"
+#include "xfs_rtalloc.h"
 #include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_bmap.h"
+#include "xfs_cksum.h"
 #include "xfs_trans.h"
 #include "xfs_buf_item.h"
 #include "xfs_icreate_item.h"
@@ -27,6 +30,20 @@
 #include "xfs_trace.h"
 #include "xfs_log.h"
 #include "xfs_rmap.h"
+
+
+/*
+ * Allocation group level functions.
+ */
+int
+xfs_ialloc_cluster_alignment(
+	struct xfs_mount	*mp)
+{
+	if (xfs_sb_version_hasalign(&mp->m_sb) &&
+	    mp->m_sb.sb_inoalignmt >= xfs_icluster_size_fsb(mp))
+		return mp->m_sb.sb_inoalignmt;
+	return 1;
+}
 
 /*
  * Lookup a record by ino in the btree given by cur.
@@ -282,7 +299,7 @@ xfs_ialloc_inode_init(
 	 * sizes, manipulate the inodes in buffers  which are multiples of the
 	 * blocks size.
 	 */
-	nbufs = length / M_IGEO(mp)->blocks_per_cluster;
+	nbufs = length / mp->m_blocks_per_cluster;
 
 	/*
 	 * Figure out what version number to use in the inodes we create.  If
@@ -326,10 +343,9 @@ xfs_ialloc_inode_init(
 		 * Get the block.
 		 */
 		d = XFS_AGB_TO_DADDR(mp, agno, agbno +
-				(j * M_IGEO(mp)->blocks_per_cluster));
+				(j * mp->m_blocks_per_cluster));
 		fbuf = xfs_trans_get_buf(tp, mp->m_ddev_targp, d,
-					 mp->m_bsize *
-					 M_IGEO(mp)->blocks_per_cluster,
+					 mp->m_bsize * mp->m_blocks_per_cluster,
 					 XBF_UNMAPPED);
 		if (!fbuf)
 			return -ENOMEM;
@@ -337,7 +353,7 @@ xfs_ialloc_inode_init(
 		/* Initialize the inode buffers and log them appropriately. */
 		fbuf->b_ops = &xfs_inode_buf_ops;
 		xfs_buf_zero(fbuf, 0, BBTOB(fbuf->b_length));
-		for (i = 0; i < M_IGEO(mp)->inodes_per_cluster; i++) {
+		for (i = 0; i < mp->m_inodes_per_cluster; i++) {
 			int	ioffset = i << mp->m_sb.sb_inodelog;
 			uint	isize = xfs_dinode_size(version);
 
@@ -600,26 +616,24 @@ error:
  * Allocate new inodes in the allocation group specified by agbp.
  * Return 0 for success, else error code.
  */
-STATIC int
+STATIC int				/* error code or 0 */
 xfs_ialloc_ag_alloc(
-	struct xfs_trans	*tp,
-	struct xfs_buf		*agbp,
-	int			*alloc)
+	xfs_trans_t	*tp,		/* transaction pointer */
+	xfs_buf_t	*agbp,		/* alloc group buffer */
+	int		*alloc)
 {
-	struct xfs_agi		*agi;
-	struct xfs_alloc_arg	args;
-	xfs_agnumber_t		agno;
-	int			error;
-	xfs_agino_t		newino;		/* new first inode's number */
-	xfs_agino_t		newlen;		/* new number of inodes */
-	int			isaligned = 0;	/* inode allocation at stripe */
-						/* unit boundary */
-	/* init. to full chunk */
-	uint16_t		allocmask = (uint16_t) -1;
+	xfs_agi_t	*agi;		/* allocation group header */
+	xfs_alloc_arg_t	args;		/* allocation argument structure */
+	xfs_agnumber_t	agno;
+	int		error;
+	xfs_agino_t	newino;		/* new first inode's number */
+	xfs_agino_t	newlen;		/* new number of inodes */
+	int		isaligned = 0;	/* inode allocation at stripe unit */
+					/* boundary */
+	uint16_t	allocmask = (uint16_t) -1; /* init. to full chunk */
 	struct xfs_inobt_rec_incore rec;
-	struct xfs_perag	*pag;
-	struct xfs_ino_geometry	*igeo = M_IGEO(tp->t_mountp);
-	int			do_sparse = 0;
+	struct xfs_perag *pag;
+	int		do_sparse = 0;
 
 	memset(&args, 0, sizeof(args));
 	args.tp = tp;
@@ -630,7 +644,7 @@ xfs_ialloc_ag_alloc(
 #ifdef DEBUG
 	/* randomly do sparse inode allocations */
 	if (xfs_sb_version_hassparseinodes(&tp->t_mountp->m_sb) &&
-	    igeo->ialloc_min_blks < igeo->ialloc_blks)
+	    args.mp->m_ialloc_min_blks < args.mp->m_ialloc_blks)
 		do_sparse = prandom_u32() & 1;
 #endif
 
@@ -638,12 +652,12 @@ xfs_ialloc_ag_alloc(
 	 * Locking will ensure that we don't have two callers in here
 	 * at one time.
 	 */
-	newlen = igeo->ialloc_inos;
-	if (igeo->maxicount &&
+	newlen = args.mp->m_ialloc_inos;
+	if (args.mp->m_maxicount &&
 	    percpu_counter_read_positive(&args.mp->m_icount) + newlen >
-							igeo->maxicount)
+							args.mp->m_maxicount)
 		return -ENOSPC;
-	args.minlen = args.maxlen = igeo->ialloc_blks;
+	args.minlen = args.maxlen = args.mp->m_ialloc_blks;
 	/*
 	 * First try to allocate inodes contiguous with the last-allocated
 	 * chunk of inodes.  If the filesystem is striped, this will fill
@@ -653,7 +667,7 @@ xfs_ialloc_ag_alloc(
 	newino = be32_to_cpu(agi->agi_newino);
 	agno = be32_to_cpu(agi->agi_seqno);
 	args.agbno = XFS_AGINO_TO_AGBNO(args.mp, newino) +
-		     igeo->ialloc_blks;
+		     args.mp->m_ialloc_blks;
 	if (do_sparse)
 		goto sparse_alloc;
 	if (likely(newino != NULLAGINO &&
@@ -676,10 +690,10 @@ xfs_ialloc_ag_alloc(
 		 * but not to use them in the actual exact allocation.
 		 */
 		args.alignment = 1;
-		args.minalignslop = igeo->cluster_align - 1;
+		args.minalignslop = args.mp->m_cluster_align - 1;
 
 		/* Allow space for the inode btree to split. */
-		args.minleft = igeo->inobt_maxlevels - 1;
+		args.minleft = args.mp->m_in_maxlevels - 1;
 		if ((error = xfs_alloc_vextent(&args)))
 			return error;
 
@@ -706,12 +720,12 @@ xfs_ialloc_ag_alloc(
 		 * pieces, so don't need alignment anyway.
 		 */
 		isaligned = 0;
-		if (igeo->ialloc_align) {
+		if (args.mp->m_sinoalign) {
 			ASSERT(!(args.mp->m_flags & XFS_MOUNT_NOALIGN));
 			args.alignment = args.mp->m_dalign;
 			isaligned = 1;
 		} else
-			args.alignment = igeo->cluster_align;
+			args.alignment = args.mp->m_cluster_align;
 		/*
 		 * Need to figure out where to allocate the inode blocks.
 		 * Ideally they should be spaced out through the a.g.
@@ -727,7 +741,7 @@ xfs_ialloc_ag_alloc(
 		/*
 		 * Allow space for the inode btree to split.
 		 */
-		args.minleft = igeo->inobt_maxlevels - 1;
+		args.minleft = args.mp->m_in_maxlevels - 1;
 		if ((error = xfs_alloc_vextent(&args)))
 			return error;
 	}
@@ -740,7 +754,7 @@ xfs_ialloc_ag_alloc(
 		args.type = XFS_ALLOCTYPE_NEAR_BNO;
 		args.agbno = be32_to_cpu(agi->agi_root);
 		args.fsbno = XFS_AGB_TO_FSB(args.mp, agno, args.agbno);
-		args.alignment = igeo->cluster_align;
+		args.alignment = args.mp->m_cluster_align;
 		if ((error = xfs_alloc_vextent(&args)))
 			return error;
 	}
@@ -750,7 +764,7 @@ xfs_ialloc_ag_alloc(
 	 * the sparse allocation length is smaller than a full chunk.
 	 */
 	if (xfs_sb_version_hassparseinodes(&args.mp->m_sb) &&
-	    igeo->ialloc_min_blks < igeo->ialloc_blks &&
+	    args.mp->m_ialloc_min_blks < args.mp->m_ialloc_blks &&
 	    args.fsbno == NULLFSBLOCK) {
 sparse_alloc:
 		args.type = XFS_ALLOCTYPE_NEAR_BNO;
@@ -759,7 +773,7 @@ sparse_alloc:
 		args.alignment = args.mp->m_sb.sb_spino_align;
 		args.prod = 1;
 
-		args.minlen = igeo->ialloc_min_blks;
+		args.minlen = args.mp->m_ialloc_min_blks;
 		args.maxlen = args.minlen;
 
 		/*
@@ -775,7 +789,7 @@ sparse_alloc:
 		args.min_agbno = args.mp->m_sb.sb_inoalignmt;
 		args.max_agbno = round_down(args.mp->m_sb.sb_agblocks,
 					    args.mp->m_sb.sb_inoalignmt) -
-				 igeo->ialloc_blks;
+				 args.mp->m_ialloc_blks;
 
 		error = xfs_alloc_vextent(&args);
 		if (error)
@@ -992,7 +1006,7 @@ xfs_ialloc_ag_select(
 		 * space needed for alignment of inode chunks when checking the
 		 * longest contiguous free space in the AG - this prevents us
 		 * from getting ENOSPC because we have free space larger than
-		 * ialloc_blks but alignment constraints prevent us from using
+		 * m_ialloc_blks but alignment constraints prevent us from using
 		 * it.
 		 *
 		 * If we can't find an AG with space for full alignment slack to
@@ -1001,9 +1015,9 @@ xfs_ialloc_ag_select(
 		 * if we fail allocation due to alignment issues then it is most
 		 * likely a real ENOSPC condition.
 		 */
-		ineed = M_IGEO(mp)->ialloc_min_blks;
+		ineed = mp->m_ialloc_min_blks;
 		if (flags && ineed > 1)
-			ineed += M_IGEO(mp)->cluster_align;
+			ineed += mp->m_cluster_align;
 		longest = pag->pagf_longest;
 		if (!longest)
 			longest = pag->pagf_flcount > 0;
@@ -1689,7 +1703,6 @@ xfs_dialloc(
 	int			noroom = 0;
 	xfs_agnumber_t		start_agno;
 	struct xfs_perag	*pag;
-	struct xfs_ino_geometry	*igeo = M_IGEO(mp);
 	int			okalloc = 1;
 
 	if (*IO_agbp) {
@@ -1720,9 +1733,9 @@ xfs_dialloc(
 	 * Read rough value of mp->m_icount by percpu_counter_read_positive,
 	 * which will sacrifice the preciseness but improve the performance.
 	 */
-	if (igeo->maxicount &&
-	    percpu_counter_read_positive(&mp->m_icount) + igeo->ialloc_inos
-							> igeo->maxicount) {
+	if (mp->m_maxicount &&
+	    percpu_counter_read_positive(&mp->m_icount) + mp->m_ialloc_inos
+							> mp->m_maxicount) {
 		noroom = 1;
 		okalloc = 0;
 	}
@@ -1839,8 +1852,7 @@ xfs_difree_inode_chunk(
 	if (!xfs_inobt_issparse(rec->ir_holemask)) {
 		/* not sparse, calculate extent info directly */
 		xfs_bmap_add_free(tp, XFS_AGB_TO_FSB(mp, agno, sagbno),
-				  M_IGEO(mp)->ialloc_blks,
-				  &XFS_RMAP_OINFO_INODES);
+				  mp->m_ialloc_blks, &XFS_RMAP_OINFO_INODES);
 		return;
 	}
 
@@ -2249,7 +2261,7 @@ xfs_imap_lookup(
 
 	/* check that the returned record contains the required inode */
 	if (rec.ir_startino > agino ||
-	    rec.ir_startino + M_IGEO(mp)->ialloc_inos <= agino)
+	    rec.ir_startino + mp->m_ialloc_inos <= agino)
 		return -EINVAL;
 
 	/* for untrusted inodes check it is allocated first */
@@ -2340,7 +2352,7 @@ xfs_imap(
 	 * If the inode cluster size is the same as the blocksize or
 	 * smaller we get to the buffer by simple arithmetics.
 	 */
-	if (M_IGEO(mp)->blocks_per_cluster == 1) {
+	if (mp->m_blocks_per_cluster == 1) {
 		offset = XFS_INO_TO_OFFSET(mp, ino);
 		ASSERT(offset < mp->m_sb.sb_inopblock);
 
@@ -2356,8 +2368,8 @@ xfs_imap(
 	 * find the location. Otherwise we have to do a btree
 	 * lookup to find the location.
 	 */
-	if (M_IGEO(mp)->inoalign_mask) {
-		offset_agbno = agbno & M_IGEO(mp)->inoalign_mask;
+	if (mp->m_inoalign_mask) {
+		offset_agbno = agbno & mp->m_inoalign_mask;
 		chunk_agbno = agbno - offset_agbno;
 	} else {
 		error = xfs_imap_lookup(mp, tp, agno, agino, agbno,
@@ -2369,13 +2381,13 @@ xfs_imap(
 out_map:
 	ASSERT(agbno >= chunk_agbno);
 	cluster_agbno = chunk_agbno +
-		((offset_agbno / M_IGEO(mp)->blocks_per_cluster) *
-		 M_IGEO(mp)->blocks_per_cluster);
+		((offset_agbno / mp->m_blocks_per_cluster) *
+		 mp->m_blocks_per_cluster);
 	offset = ((agbno - cluster_agbno) * mp->m_sb.sb_inopblock) +
 		XFS_INO_TO_OFFSET(mp, ino);
 
 	imap->im_blkno = XFS_AGB_TO_DADDR(mp, agno, cluster_agbno);
-	imap->im_len = XFS_FSB_TO_BB(mp, M_IGEO(mp)->blocks_per_cluster);
+	imap->im_len = XFS_FSB_TO_BB(mp, mp->m_blocks_per_cluster);
 	imap->im_boffset = (unsigned short)(offset << mp->m_sb.sb_inodelog);
 
 	/*
@@ -2394,6 +2406,20 @@ out_map:
 		return -EINVAL;
 	}
 	return 0;
+}
+
+/*
+ * Compute and fill in value of m_in_maxlevels.
+ */
+void
+xfs_ialloc_compute_maxlevels(
+	xfs_mount_t	*mp)		/* file system mount structure */
+{
+	uint		inodes;
+
+	inodes = (1LL << XFS_INO_AGINO_BITS(mp)) >> XFS_INODES_PER_CHUNK_LOG;
+	mp->m_in_maxlevels = xfs_btree_compute_maxlevels(mp->m_inobt_mnr,
+							 inodes);
 }
 
 /*
@@ -2467,7 +2493,7 @@ static xfs_failaddr_t
 xfs_agi_verify(
 	struct xfs_buf	*bp)
 {
-	struct xfs_mount *mp = bp->b_mount;
+	struct xfs_mount *mp = bp->b_target->bt_mount;
 	struct xfs_agi	*agi = XFS_BUF_TO_AGI(bp);
 	int		i;
 
@@ -2519,7 +2545,7 @@ static void
 xfs_agi_read_verify(
 	struct xfs_buf	*bp)
 {
-	struct xfs_mount *mp = bp->b_mount;
+	struct xfs_mount *mp = bp->b_target->bt_mount;
 	xfs_failaddr_t	fa;
 
 	if (xfs_sb_version_hascrc(&mp->m_sb) &&
@@ -2536,7 +2562,7 @@ static void
 xfs_agi_write_verify(
 	struct xfs_buf	*bp)
 {
-	struct xfs_mount	*mp = bp->b_mount;
+	struct xfs_mount	*mp = bp->b_target->bt_mount;
 	struct xfs_buf_log_item	*bip = bp->b_log_item;
 	xfs_failaddr_t		fa;
 
@@ -2741,116 +2767,4 @@ xfs_ialloc_count_inodes(
 	*count = ci.count;
 	*freecount = ci.freecount;
 	return 0;
-}
-
-/*
- * Initialize inode-related geometry information.
- *
- * Compute the inode btree min and max levels and set maxicount.
- *
- * Set the inode cluster size.  This may still be overridden by the file
- * system block size if it is larger than the chosen cluster size.
- *
- * For v5 filesystems, scale the cluster size with the inode size to keep a
- * constant ratio of inode per cluster buffer, but only if mkfs has set the
- * inode alignment value appropriately for larger cluster sizes.
- *
- * Then compute the inode cluster alignment information.
- */
-void
-xfs_ialloc_setup_geometry(
-	struct xfs_mount	*mp)
-{
-	struct xfs_sb		*sbp = &mp->m_sb;
-	struct xfs_ino_geometry	*igeo = M_IGEO(mp);
-	uint64_t		icount;
-	uint			inodes;
-
-	/* Compute inode btree geometry. */
-	igeo->agino_log = sbp->sb_inopblog + sbp->sb_agblklog;
-	igeo->inobt_mxr[0] = xfs_inobt_maxrecs(mp, sbp->sb_blocksize, 1);
-	igeo->inobt_mxr[1] = xfs_inobt_maxrecs(mp, sbp->sb_blocksize, 0);
-	igeo->inobt_mnr[0] = igeo->inobt_mxr[0] / 2;
-	igeo->inobt_mnr[1] = igeo->inobt_mxr[1] / 2;
-
-	igeo->ialloc_inos = max_t(uint16_t, XFS_INODES_PER_CHUNK,
-			sbp->sb_inopblock);
-	igeo->ialloc_blks = igeo->ialloc_inos >> sbp->sb_inopblog;
-
-	if (sbp->sb_spino_align)
-		igeo->ialloc_min_blks = sbp->sb_spino_align;
-	else
-		igeo->ialloc_min_blks = igeo->ialloc_blks;
-
-	/* Compute and fill in value of m_ino_geo.inobt_maxlevels. */
-	inodes = (1LL << XFS_INO_AGINO_BITS(mp)) >> XFS_INODES_PER_CHUNK_LOG;
-	igeo->inobt_maxlevels = xfs_btree_compute_maxlevels(igeo->inobt_mnr,
-			inodes);
-
-	/*
-	 * Set the maximum inode count for this filesystem, being careful not
-	 * to use obviously garbage sb_inopblog/sb_inopblock values.  Regular
-	 * users should never get here due to failing sb verification, but
-	 * certain users (xfs_db) need to be usable even with corrupt metadata.
-	 */
-	if (sbp->sb_imax_pct && igeo->ialloc_blks) {
-		/*
-		 * Make sure the maximum inode count is a multiple
-		 * of the units we allocate inodes in.
-		 */
-		icount = sbp->sb_dblocks * sbp->sb_imax_pct;
-		do_div(icount, 100);
-		do_div(icount, igeo->ialloc_blks);
-		igeo->maxicount = XFS_FSB_TO_INO(mp,
-				icount * igeo->ialloc_blks);
-	} else {
-		igeo->maxicount = 0;
-	}
-
-	/*
-	 * Compute the desired size of an inode cluster buffer size, which
-	 * starts at 8K and (on v5 filesystems) scales up with larger inode
-	 * sizes.
-	 *
-	 * Preserve the desired inode cluster size because the sparse inodes
-	 * feature uses that desired size (not the actual size) to compute the
-	 * sparse inode alignment.  The mount code validates this value, so we
-	 * cannot change the behavior.
-	 */
-	igeo->inode_cluster_size_raw = XFS_INODE_BIG_CLUSTER_SIZE;
-	if (xfs_sb_version_hascrc(&mp->m_sb)) {
-		int	new_size = igeo->inode_cluster_size_raw;
-
-		new_size *= mp->m_sb.sb_inodesize / XFS_DINODE_MIN_SIZE;
-		if (mp->m_sb.sb_inoalignmt >= XFS_B_TO_FSBT(mp, new_size))
-			igeo->inode_cluster_size_raw = new_size;
-	}
-
-	/* Calculate inode cluster ratios. */
-	if (igeo->inode_cluster_size_raw > mp->m_sb.sb_blocksize)
-		igeo->blocks_per_cluster = XFS_B_TO_FSBT(mp,
-				igeo->inode_cluster_size_raw);
-	else
-		igeo->blocks_per_cluster = 1;
-	igeo->inode_cluster_size = XFS_FSB_TO_B(mp, igeo->blocks_per_cluster);
-	igeo->inodes_per_cluster = XFS_FSB_TO_INO(mp, igeo->blocks_per_cluster);
-
-	/* Calculate inode cluster alignment. */
-	if (xfs_sb_version_hasalign(&mp->m_sb) &&
-	    mp->m_sb.sb_inoalignmt >= igeo->blocks_per_cluster)
-		igeo->cluster_align = mp->m_sb.sb_inoalignmt;
-	else
-		igeo->cluster_align = 1;
-	igeo->inoalign_mask = igeo->cluster_align - 1;
-	igeo->cluster_align_inodes = XFS_FSB_TO_INO(mp, igeo->cluster_align);
-
-	/*
-	 * If we are using stripe alignment, check whether
-	 * the stripe unit is a multiple of the inode alignment
-	 */
-	if (mp->m_dalign && igeo->inoalign_mask &&
-	    !(mp->m_dalign & igeo->inoalign_mask))
-		igeo->ialloc_align = mp->m_dalign;
-	else
-		igeo->ialloc_align = 0;
 }

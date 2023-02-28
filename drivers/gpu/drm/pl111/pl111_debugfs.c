@@ -5,10 +5,8 @@
 
 #include <linux/amba/clcd-regs.h>
 #include <linux/seq_file.h>
-
 #include <drm/drm_debugfs.h>
-#include <drm/drm_file.h>
-
+#include <drm/drmP.h>
 #include "pl111_drm.h"
 
 #define REGDEF(reg) { reg, #reg }

@@ -116,7 +116,7 @@ static int i40e_xsk_umem_enable(struct i40e_vsi *vsi, struct xdp_umem *umem,
 			return err;
 
 		/* Kick start the NAPI context so that receiving will start */
-		err = i40e_xsk_wakeup(vsi->netdev, qid, XDP_WAKEUP_RX);
+		err = i40e_xsk_async_xmit(vsi->netdev, qid);
 		if (err)
 			return err;
 	}
@@ -190,11 +190,9 @@ int i40e_xsk_umem_setup(struct i40e_vsi *vsi, struct xdp_umem *umem,
  **/
 static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp)
 {
-	struct xdp_umem *umem = rx_ring->xsk_umem;
 	int err, result = I40E_XDP_PASS;
 	struct i40e_ring *xdp_ring;
 	struct bpf_prog *xdp_prog;
-	u64 offset;
 	u32 act;
 
 	rcu_read_lock();
@@ -203,10 +201,7 @@ static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp)
 	 */
 	xdp_prog = READ_ONCE(rx_ring->xdp_prog);
 	act = bpf_prog_run_xdp(xdp_prog, xdp);
-	offset = xdp->data - xdp->data_hard_start;
-
-	xdp->handle = xsk_umem_adjust_offset(umem, xdp->handle, offset);
-
+	xdp->handle += xdp->data - xdp->data_hard_start;
 	switch (act) {
 	case XDP_PASS:
 		break;
@@ -220,7 +215,6 @@ static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp)
 		break;
 	default:
 		bpf_warn_invalid_xdp_action(act);
-		/* fall through */
 	case XDP_ABORTED:
 		trace_xdp_exception(rx_ring->netdev, xdp_prog, act);
 		/* fallthrough -- handle aborts by dropping packet */
@@ -267,7 +261,7 @@ static bool i40e_alloc_buffer_zc(struct i40e_ring *rx_ring,
 	bi->addr = xdp_umem_get_data(umem, handle);
 	bi->addr += hr;
 
-	bi->handle = xsk_umem_adjust_offset(umem, handle, umem->headroom);
+	bi->handle = handle + umem->headroom;
 
 	xsk_umem_discard_addr(umem);
 	return true;
@@ -304,7 +298,7 @@ static bool i40e_alloc_buffer_slow_zc(struct i40e_ring *rx_ring,
 	bi->addr = xdp_umem_get_data(umem, handle);
 	bi->addr += hr;
 
-	bi->handle = xsk_umem_adjust_offset(umem, handle, umem->headroom);
+	bi->handle = handle + umem->headroom;
 
 	xsk_umem_discard_addr_rq(umem);
 	return true;
@@ -425,6 +419,8 @@ static void i40e_reuse_rx_buffer_zc(struct i40e_ring *rx_ring,
 				    struct i40e_rx_buffer *old_bi)
 {
 	struct i40e_rx_buffer *new_bi = &rx_ring->rx_bi[rx_ring->next_to_alloc];
+	unsigned long mask = (unsigned long)rx_ring->xsk_umem->chunk_mask;
+	u64 hr = rx_ring->xsk_umem->headroom + XDP_PACKET_HEADROOM;
 	u16 nta = rx_ring->next_to_alloc;
 
 	/* update, and store next to alloc */
@@ -432,9 +428,14 @@ static void i40e_reuse_rx_buffer_zc(struct i40e_ring *rx_ring,
 	rx_ring->next_to_alloc = (nta < rx_ring->count) ? nta : 0;
 
 	/* transfer page from old buffer to new buffer */
-	new_bi->dma = old_bi->dma;
-	new_bi->addr = old_bi->addr;
-	new_bi->handle = old_bi->handle;
+	new_bi->dma = old_bi->dma & mask;
+	new_bi->dma += hr;
+
+	new_bi->addr = (void *)((unsigned long)old_bi->addr & mask);
+	new_bi->addr += hr;
+
+	new_bi->handle = old_bi->handle & mask;
+	new_bi->handle += rx_ring->xsk_umem->headroom;
 
 	old_bi->addr = NULL;
 }
@@ -469,8 +470,7 @@ void i40e_zca_free(struct zero_copy_allocator *alloc, unsigned long handle)
 	bi->addr = xdp_umem_get_data(rx_ring->xsk_umem, handle);
 	bi->addr += hr;
 
-	bi->handle = xsk_umem_adjust_offset(rx_ring->xsk_umem, (u64)handle,
-					    rx_ring->xsk_umem->headroom);
+	bi->handle = (u64)handle + rx_ring->xsk_umem->headroom;
 }
 
 /**
@@ -625,15 +625,6 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 
 	i40e_finalize_xdp_rx(rx_ring, xdp_xmit);
 	i40e_update_rx_stats(rx_ring, total_rx_bytes, total_rx_packets);
-
-	if (xsk_umem_uses_need_wakeup(rx_ring->xsk_umem)) {
-		if (failure || rx_ring->next_to_clean == rx_ring->next_to_use)
-			xsk_set_rx_need_wakeup(rx_ring->xsk_umem);
-		else
-			xsk_clear_rx_need_wakeup(rx_ring->xsk_umem);
-
-		return (int)total_rx_packets;
-	}
 	return failure ? budget : (int)total_rx_packets;
 }
 
@@ -649,8 +640,8 @@ static bool i40e_xmit_zc(struct i40e_ring *xdp_ring, unsigned int budget)
 	struct i40e_tx_desc *tx_desc = NULL;
 	struct i40e_tx_buffer *tx_bi;
 	bool work_done = true;
-	struct xdp_desc desc;
 	dma_addr_t dma;
+	u32 len;
 
 	while (budget-- > 0) {
 		if (!unlikely(I40E_DESC_UNUSED(xdp_ring))) {
@@ -659,23 +650,21 @@ static bool i40e_xmit_zc(struct i40e_ring *xdp_ring, unsigned int budget)
 			break;
 		}
 
-		if (!xsk_umem_consume_tx(xdp_ring->xsk_umem, &desc))
+		if (!xsk_umem_consume_tx(xdp_ring->xsk_umem, &dma, &len))
 			break;
 
-		dma = xdp_umem_get_dma(xdp_ring->xsk_umem, desc.addr);
-
-		dma_sync_single_for_device(xdp_ring->dev, dma, desc.len,
+		dma_sync_single_for_device(xdp_ring->dev, dma, len,
 					   DMA_BIDIRECTIONAL);
 
 		tx_bi = &xdp_ring->tx_bi[xdp_ring->next_to_use];
-		tx_bi->bytecount = desc.len;
+		tx_bi->bytecount = len;
 
 		tx_desc = I40E_TX_DESC(xdp_ring, xdp_ring->next_to_use);
 		tx_desc->buffer_addr = cpu_to_le64(dma);
 		tx_desc->cmd_type_offset_bsz =
 			build_ctob(I40E_TX_DESC_CMD_ICRC
 				   | I40E_TX_DESC_CMD_EOP,
-				   0, desc.len, 0);
+				   0, len, 0);
 
 		xdp_ring->next_to_use++;
 		if (xdp_ring->next_to_use == xdp_ring->count)
@@ -767,23 +756,19 @@ bool i40e_clean_xdp_tx_irq(struct i40e_vsi *vsi,
 	i40e_update_tx_stats(tx_ring, completed_frames, total_bytes);
 
 out_xmit:
-	if (xsk_umem_uses_need_wakeup(tx_ring->xsk_umem))
-		xsk_set_tx_need_wakeup(tx_ring->xsk_umem);
-
 	xmit_done = i40e_xmit_zc(tx_ring, budget);
 
 	return work_done && xmit_done;
 }
 
 /**
- * i40e_xsk_wakeup - Implements the ndo_xsk_wakeup
+ * i40e_xsk_async_xmit - Implements the ndo_xsk_async_xmit
  * @dev: the netdevice
  * @queue_id: queue id to wake up
- * @flags: ignored in our case since we have Rx and Tx in the same NAPI.
  *
  * Returns <0 for errors, 0 otherwise.
  **/
-int i40e_xsk_wakeup(struct net_device *dev, u32 queue_id, u32 flags)
+int i40e_xsk_async_xmit(struct net_device *dev, u32 queue_id)
 {
 	struct i40e_netdev_priv *np = netdev_priv(dev);
 	struct i40e_vsi *vsi = np->vsi;

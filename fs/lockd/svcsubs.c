@@ -180,7 +180,7 @@ again:
 		/* update current lock count */
 		file->f_locks++;
 
-		lockhost = ((struct nlm_lockowner *)fl->fl_owner)->host;
+		lockhost = (struct nlm_host *) fl->fl_owner;
 		if (match(lockhost, host)) {
 			struct file_lock lock = *fl;
 

@@ -172,10 +172,9 @@ static void svc_rdma_recv_ctxt_destroy(struct svcxprt_rdma *rdma,
 void svc_rdma_recv_ctxts_destroy(struct svcxprt_rdma *rdma)
 {
 	struct svc_rdma_recv_ctxt *ctxt;
-	struct llist_node *node;
 
-	while ((node = llist_del_first(&rdma->sc_recv_ctxts))) {
-		ctxt = llist_entry(node, struct svc_rdma_recv_ctxt, rc_node);
+	while ((ctxt = svc_rdma_next_recv_ctxt(&rdma->sc_recv_ctxts))) {
+		list_del(&ctxt->rc_list);
 		svc_rdma_recv_ctxt_destroy(rdma, ctxt);
 	}
 }
@@ -184,18 +183,21 @@ static struct svc_rdma_recv_ctxt *
 svc_rdma_recv_ctxt_get(struct svcxprt_rdma *rdma)
 {
 	struct svc_rdma_recv_ctxt *ctxt;
-	struct llist_node *node;
 
-	node = llist_del_first(&rdma->sc_recv_ctxts);
-	if (!node)
+	spin_lock(&rdma->sc_recv_lock);
+	ctxt = svc_rdma_next_recv_ctxt(&rdma->sc_recv_ctxts);
+	if (!ctxt)
 		goto out_empty;
-	ctxt = llist_entry(node, struct svc_rdma_recv_ctxt, rc_node);
+	list_del(&ctxt->rc_list);
+	spin_unlock(&rdma->sc_recv_lock);
 
 out:
 	ctxt->rc_page_count = 0;
 	return ctxt;
 
 out_empty:
+	spin_unlock(&rdma->sc_recv_lock);
+
 	ctxt = svc_rdma_recv_ctxt_alloc(rdma);
 	if (!ctxt)
 		return NULL;
@@ -216,9 +218,11 @@ void svc_rdma_recv_ctxt_put(struct svcxprt_rdma *rdma,
 	for (i = 0; i < ctxt->rc_page_count; i++)
 		put_page(ctxt->rc_pages[i]);
 
-	if (!ctxt->rc_temp)
-		llist_add(&ctxt->rc_node, &rdma->sc_recv_ctxts);
-	else
+	if (!ctxt->rc_temp) {
+		spin_lock(&rdma->sc_recv_lock);
+		list_add(&ctxt->rc_list, &rdma->sc_recv_ctxts);
+		spin_unlock(&rdma->sc_recv_lock);
+	} else
 		svc_rdma_recv_ctxt_destroy(rdma, ctxt);
 }
 

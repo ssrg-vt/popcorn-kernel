@@ -329,7 +329,7 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 	for (i = 0; ; i += ms) {
 		/* If we've waited too long, return a busy indication.  This
 		 * really ought to be based on our initial position in the
-		 * mailbox access list but this is a start.  We very rarely
+		 * mailbox access list but this is a start.  We very rearely
 		 * contend on access to the mailbox ...
 		 */
 		pcie_fw = t4_read_reg(adap, PCIE_FW_A);
@@ -606,7 +606,7 @@ void t4_memory_rw_residual(struct adapter *adap, u32 off, u32 addr, u8 *buf,
  *
  *	Reads/writes an [almost] arbitrary memory region in the firmware: the
  *	firmware memory address and host buffer must be aligned on 32-bit
- *	boundaries; the length may be arbitrary.  The memory is transferred as
+ *	boudaries; the length may be arbitrary.  The memory is transferred as
  *	a raw byte sequence from/to the firmware's memory.  If this memory
  *	contains data structures which contain multi-byte integers, it's the
  *	caller's responsibility to perform appropriate byte order conversions.
@@ -3774,7 +3774,7 @@ int t4_phy_fw_ver(struct adapter *adap, int *phy_fw_ver)
  *	A negative error number will be returned if an error occurs.  If
  *	version number support is available and there's no need to upgrade
  *	the firmware, 0 will be returned.  If firmware is successfully
- *	transferred to the adapter, 1 will be returned.
+ *	transferred to the adapter, 1 will be retured.
  *
  *	NOTE: some adapters only have local RAM to store the PHY firmware.  As
  *	a result, a RESET of the adapter would cause that RAM to lose its
@@ -3808,7 +3808,7 @@ int t4_load_phy_fw(struct adapter *adap,
 	}
 
 	/* Ask the firmware where it wants us to copy the PHY firmware image.
-	 * The size of the file requires a special version of the READ command
+	 * The size of the file requires a special version of the READ coommand
 	 * which will pass the file size via the values field in PARAMS_CMD and
 	 * retrieve the return value from firmware and place it in the same
 	 * buffer values
@@ -4082,7 +4082,7 @@ static inline fw_port_cap32_t cc_to_fwcap_pause(enum cc_pause cc_pause)
 		fw_pause |= FW_PORT_CAP32_FORCE_PAUSE;
 
 	/* Translate orthogonal Pause controls into IEEE 802.3 Pause,
-	 * Asymmetrical Pause for use in reporting to upper layer OS code, etc.
+	 * Asymetrical Pause for use in reporting to upper layer OS code, etc.
 	 * Note that these bits are ignored in L1 Configure commands.
 	 */
 	if (cc_pause & PAUSE_RX) {
@@ -4151,7 +4151,7 @@ fw_port_cap32_t t4_link_acaps(struct adapter *adapter, unsigned int port,
 	/* Convert Common Code Forward Error Control settings into the
 	 * Firmware's API.  If the current Requested FEC has "Automatic"
 	 * (IEEE 802.3) specified, then we use whatever the Firmware
-	 * sent us as part of its IEEE 802.3-based interpretation of
+	 * sent us as part of it's IEEE 802.3-based interpratation of
 	 * the Transceiver Module EPROM FEC parameters.  Otherwise we
 	 * use whatever is in the current Requested FEC settings.
 	 */
@@ -4248,7 +4248,7 @@ int t4_link_l1cfg_core(struct adapter *adapter, unsigned int mbox,
 
 	/* Unfortunately, even if the Requested Port Capabilities "fit" within
 	 * the Physical Port Capabilities, some combinations of features may
-	 * still not be legal.  For example, 40Gb/s and Reed-Solomon Forward
+	 * still not be leagal.  For example, 40Gb/s and Reed-Solomon Forward
 	 * Error Correction.  So if the Firmware rejects the L1 Configure
 	 * request, flag that here.
 	 */
@@ -6209,37 +6209,6 @@ unsigned int t4_get_mps_bg_map(struct adapter *adapter, int pidx)
 }
 
 /**
- *      t4_get_tp_e2c_map - return the E2C channel map associated with a port
- *      @adapter: the adapter
- *      @pidx: the port index
- */
-static unsigned int t4_get_tp_e2c_map(struct adapter *adapter, int pidx)
-{
-	unsigned int nports;
-	u32 param, val = 0;
-	int ret;
-
-	nports = 1 << NUMPORTS_G(t4_read_reg(adapter, MPS_CMN_CTL_A));
-	if (pidx >= nports) {
-		CH_WARN(adapter, "TP E2C Channel Port Index %d >= Nports %d\n",
-			pidx, nports);
-		return 0;
-	}
-
-	/* FW version >= 1.16.44.0 can determine E2C channel map using
-	 * FW_PARAMS_PARAM_DEV_TPCHMAP API.
-	 */
-	param = (FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_DEV) |
-		 FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_DEV_TPCHMAP));
-	ret = t4_query_params_ns(adapter, adapter->mbox, adapter->pf,
-				 0, 1, &param, &val);
-	if (!ret)
-		return (val >> (8 * pidx)) & 0xff;
-
-	return 0;
-}
-
-/**
  *	t4_get_tp_ch_map - return TP ingress channels associated with a port
  *	@adapter: the adapter
  *	@pidx: the port index
@@ -6797,7 +6766,7 @@ int t4_sge_ctxt_flush(struct adapter *adap, unsigned int mbox, int ctxt_type)
 }
 
 /**
- *	t4_read_sge_dbqtimers - read SGE Doorbell Queue Timer values
+ *	t4_read_sge_dbqtimers - reag SGE Doorbell Queue Timer values
  *	@adap - the adapter
  *	@ndbqtimers: size of the provided SGE Doorbell Queue Timer table
  *	@dbqtimers: SGE Doorbell Queue Timer table
@@ -6925,8 +6894,8 @@ retry:
 			waiting -= 50;
 
 			/*
-			 * If neither Error nor Initialized are indicated
-			 * by the firmware keep waiting till we exhaust our
+			 * If neither Error nor Initialialized are indicated
+			 * by the firmware keep waiting till we exaust our
 			 * timeout ... and then retry if we haven't exhausted
 			 * our retries ...
 			 */
@@ -7238,7 +7207,7 @@ int t4_fl_pkt_align(struct adapter *adap)
 	 * separately.  The actual Ingress Packet Data alignment boundary
 	 * within Packed Buffer Mode is the maximum of these two
 	 * specifications.  (Note that it makes no real practical sense to
-	 * have the Padding Boundary be larger than the Packing Boundary but you
+	 * have the Pading Boudary be larger than the Packing Boundary but you
 	 * could set the chip up that way and, in fact, legacy T4 code would
 	 * end doing this because it would initialize the Padding Boundary and
 	 * leave the Packing Boundary initialized to 0 (16 bytes).)
@@ -7309,6 +7278,7 @@ int t4_fixup_host_params(struct adapter *adap, unsigned int page_size,
 	} else {
 		unsigned int pack_align;
 		unsigned int ingpad, ingpack;
+		unsigned int pcie_cap;
 
 		/* T5 introduced the separation of the Free List Padding and
 		 * Packing Boundaries.  Thus, we can select a smaller Padding
@@ -7333,7 +7303,8 @@ int t4_fixup_host_params(struct adapter *adap, unsigned int page_size,
 		 * multiple of the Maximum Payload Size.
 		 */
 		pack_align = fl_align;
-		if (pci_is_pcie(adap->pdev)) {
+		pcie_cap = pci_find_capability(adap->pdev, PCI_CAP_ID_EXP);
+		if (pcie_cap) {
 			unsigned int mps, mps_log;
 			u16 devctl;
 
@@ -7341,8 +7312,9 @@ int t4_fixup_host_params(struct adapter *adap, unsigned int page_size,
 			 * [bits 7:5] encodes sizes as powers of 2 starting at
 			 * 128 bytes.
 			 */
-			pcie_capability_read_word(adap->pdev, PCI_EXP_DEVCTL,
-						  &devctl);
+			pci_read_config_word(adap->pdev,
+					     pcie_cap + PCI_EXP_DEVCTL,
+					     &devctl);
 			mps_log = ((devctl & PCI_EXP_DEVCTL_PAYLOAD) >> 5) + 7;
 			mps = 1 << mps_log;
 			if (mps > pack_align)
@@ -8973,10 +8945,10 @@ static int t4_get_flash_params(struct adapter *adap)
 			goto found;
 		}
 
-	/* Decode Flash part size.  The code below looks repetitive with
+	/* Decode Flash part size.  The code below looks repetative with
 	 * common encodings, but that's not guaranteed in the JEDEC
-	 * specification for the Read JEDEC ID command.  The only thing that
-	 * we're guaranteed by the JEDEC specification is where the
+	 * specification for the Read JADEC ID command.  The only thing that
+	 * we're guaranteed by the JADEC specification is where the
 	 * Manufacturer ID is in the returned result.  After that each
 	 * Manufacturer ~could~ encode things completely differently.
 	 * Note, all Flash parts must have 64KB sectors.
@@ -9317,7 +9289,7 @@ int t4_init_devlog_params(struct adapter *adap)
 	struct fw_devlog_cmd devlog_cmd;
 	int ret;
 
-	/* If we're dealing with newer firmware, the Device Log Parameters
+	/* If we're dealing with newer firmware, the Device Log Paramerters
 	 * are stored in a designated register which allows us to access the
 	 * Device Log even if we can't talk to the firmware.
 	 */
@@ -9396,9 +9368,8 @@ int t4_init_sge_params(struct adapter *adapter)
  */
 int t4_init_tp_params(struct adapter *adap, bool sleep_ok)
 {
-	u32 param, val, v;
-	int chan, ret;
-
+	int chan;
+	u32 v;
 
 	v = t4_read_reg(adap, TP_TIMER_RESOLUTION_A);
 	adap->params.tp.tre = TIMERRESOLUTION_G(v);
@@ -9408,47 +9379,11 @@ int t4_init_tp_params(struct adapter *adap, bool sleep_ok)
 	for (chan = 0; chan < NCHAN; chan++)
 		adap->params.tp.tx_modq[chan] = chan;
 
-	/* Cache the adapter's Compressed Filter Mode/Mask and global Ingress
+	/* Cache the adapter's Compressed Filter Mode and global Incress
 	 * Configuration.
 	 */
-	param = (FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_DEV) |
-		 FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_DEV_FILTER) |
-		 FW_PARAMS_PARAM_Y_V(FW_PARAM_DEV_FILTER_MODE_MASK));
-
-	/* Read current value */
-	ret = t4_query_params(adap, adap->mbox, adap->pf, 0, 1,
-			      &param, &val);
-	if (ret == 0) {
-		dev_info(adap->pdev_dev,
-			 "Current filter mode/mask 0x%x:0x%x\n",
-			 FW_PARAMS_PARAM_FILTER_MODE_G(val),
-			 FW_PARAMS_PARAM_FILTER_MASK_G(val));
-		adap->params.tp.vlan_pri_map =
-			FW_PARAMS_PARAM_FILTER_MODE_G(val);
-		adap->params.tp.filter_mask =
-			FW_PARAMS_PARAM_FILTER_MASK_G(val);
-	} else {
-		dev_info(adap->pdev_dev,
-			 "Failed to read filter mode/mask via fw api, using indirect-reg-read\n");
-
-		/* Incase of older-fw (which doesn't expose the api
-		 * FW_PARAM_DEV_FILTER_MODE_MASK) and newer-driver (which uses
-		 * the fw api) combination, fall-back to older method of reading
-		 * the filter mode from indirect-register
-		 */
-		t4_tp_pio_read(adap, &adap->params.tp.vlan_pri_map, 1,
-			       TP_VLAN_PRI_MAP_A, sleep_ok);
-
-		/* With the older-fw and newer-driver combination we might run
-		 * into an issue when user wants to use hash filter region but
-		 * the filter_mask is zero, in this case filter_mask validation
-		 * is tough. To avoid that we set the filter_mask same as filter
-		 * mode, which will behave exactly as the older way of ignoring
-		 * the filter mask validation.
-		 */
-		adap->params.tp.filter_mask = adap->params.tp.vlan_pri_map;
-	}
-
+	t4_tp_pio_read(adap, &adap->params.tp.vlan_pri_map, 1,
+		       TP_VLAN_PRI_MAP_A, sleep_ok);
 	t4_tp_pio_read(adap, &adap->params.tp.ingress_config, 1,
 		       TP_INGRESS_CONFIG_A, sleep_ok);
 
@@ -9659,7 +9594,6 @@ int t4_init_portinfo(struct port_info *pi, int mbox,
 	pi->tx_chan = port;
 	pi->lport = port;
 	pi->rss_size = rss_size;
-	pi->rx_cchan = t4_get_tp_e2c_map(pi->adapter, port);
 
 	/* If fw supports returning the VIN as part of FW_VI_CMD,
 	 * save the returned values.

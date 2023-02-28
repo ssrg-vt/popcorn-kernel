@@ -402,8 +402,10 @@ static int sp5100_tco_probe(struct platform_device *pdev)
 		return ret;
 
 	ret = devm_watchdog_register_device(dev, wdd);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "cannot register watchdog device (err=%d)\n", ret);
 		return ret;
+	}
 
 	/* Show module parameters */
 	dev_info(dev, "initialized. heartbeat=%d sec (nowayout=%d)\n",

@@ -896,8 +896,10 @@ static int sifive_serial_probe(struct platform_device *pdev)
 	int irq, id, r;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "could not acquire interrupt\n");
 		return -EPROBE_DEFER;
+	}
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	base = devm_ioremap_resource(&pdev->dev, mem);

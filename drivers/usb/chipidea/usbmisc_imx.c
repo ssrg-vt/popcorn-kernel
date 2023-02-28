@@ -773,6 +773,7 @@ MODULE_DEVICE_TABLE(of, usbmisc_imx_dt_ids);
 
 static int usbmisc_imx_probe(struct platform_device *pdev)
 {
+	struct resource	*res;
 	struct imx_usbmisc *data;
 	const struct of_device_id *of_id;
 
@@ -786,7 +787,8 @@ static int usbmisc_imx_probe(struct platform_device *pdev)
 
 	spin_lock_init(&data->lock);
 
-	data->base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	data->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(data->base))
 		return PTR_ERR(data->base);
 

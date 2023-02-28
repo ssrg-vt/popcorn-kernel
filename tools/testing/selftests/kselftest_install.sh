@@ -24,12 +24,12 @@ main()
 		echo "$0: Installing in specified location - $install_loc ..."
 	fi
 
-	install_dir=$install_loc/kselftest_install
+	install_dir=$install_loc/kselftest
 
 # Create install directory
 	mkdir -p $install_dir
 # Build tests
-	KSFT_INSTALL_PATH=$install_dir make install
+	INSTALL_PATH=$install_dir make install
 }
 
 main "$@"

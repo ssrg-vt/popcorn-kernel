@@ -68,7 +68,6 @@ xfs_rmap_irec_offset_unpack(
 	if (offset & ~(XFS_RMAP_OFF_MASK | XFS_RMAP_OFF_FLAGS))
 		return -EFSCORRUPTED;
 	irec->rm_offset = XFS_RMAP_OFF(offset);
-	irec->rm_flags = 0;
 	if (offset & XFS_RMAP_OFF_ATTR_FORK)
 		irec->rm_flags |= XFS_RMAP_ATTR_FORK;
 	if (offset & XFS_RMAP_OFF_BMBT_BLOCK)
@@ -162,16 +161,16 @@ struct xfs_rmap_intent {
 };
 
 /* functions for updating the rmapbt based on bmbt map/unmap operations */
-void xfs_rmap_map_extent(struct xfs_trans *tp, struct xfs_inode *ip,
+int xfs_rmap_map_extent(struct xfs_trans *tp, struct xfs_inode *ip,
 		int whichfork, struct xfs_bmbt_irec *imap);
-void xfs_rmap_unmap_extent(struct xfs_trans *tp, struct xfs_inode *ip,
+int xfs_rmap_unmap_extent(struct xfs_trans *tp, struct xfs_inode *ip,
 		int whichfork, struct xfs_bmbt_irec *imap);
-void xfs_rmap_convert_extent(struct xfs_mount *mp, struct xfs_trans *tp,
+int xfs_rmap_convert_extent(struct xfs_mount *mp, struct xfs_trans *tp,
 		struct xfs_inode *ip, int whichfork,
 		struct xfs_bmbt_irec *imap);
-void xfs_rmap_alloc_extent(struct xfs_trans *tp, xfs_agnumber_t agno,
+int xfs_rmap_alloc_extent(struct xfs_trans *tp, xfs_agnumber_t agno,
 		xfs_agblock_t bno, xfs_extlen_t len, uint64_t owner);
-void xfs_rmap_free_extent(struct xfs_trans *tp, xfs_agnumber_t agno,
+int xfs_rmap_free_extent(struct xfs_trans *tp, xfs_agnumber_t agno,
 		xfs_agblock_t bno, xfs_extlen_t len, uint64_t owner);
 
 void xfs_rmap_finish_one_cleanup(struct xfs_trans *tp,

@@ -4,7 +4,6 @@
 
 #include <linux/types.h>
 #include <stdarg.h>
-#include <sys/types.h>
 
 #define HE_COLORSET_TOP		50
 #define HE_COLORSET_MEDIUM	51
@@ -23,7 +22,6 @@ struct ui_browser {
 	void	      *priv;
 	const char    *title;
 	char	      *helpline;
-	const char    *no_samples_msg;
 	void 	      (*refresh_dimensions)(struct ui_browser *browser);
 	unsigned int  (*refresh)(struct ui_browser *browser);
 	void	      (*write)(struct ui_browser *browser, void *entry, int row);

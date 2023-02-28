@@ -7,17 +7,18 @@
 #ifndef HOST1X_DRM_H
 #define HOST1X_DRM_H 1
 
+#include <uapi/drm/tegra_drm.h>
 #include <linux/host1x.h>
 #include <linux/iova.h>
 #include <linux/of_gpio.h>
 
+#include <drm/drmP.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_encoder.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_fixed.h>
 #include <drm/drm_probe_helper.h>
-#include <uapi/drm/tegra_drm.h>
 
 #include "gem.h"
 #include "hub.h"
@@ -123,7 +124,8 @@ struct tegra_output {
 	const struct edid *edid;
 	struct cec_notifier *cec;
 	unsigned int hpd_irq;
-	struct gpio_desc *hpd_gpio;
+	int hpd_gpio;
+	enum of_gpio_flags hpd_gpio_flags;
 
 	struct drm_encoder encoder;
 	struct drm_connector connector;

@@ -837,11 +837,11 @@ static void free_netsgbuf(void *buf)
 
 	i = 1;
 	while (frags--) {
-		skb_frag_t *frag = &skb_shinfo(skb)->frags[i - 1];
+		struct skb_frag_struct *frag = &skb_shinfo(skb)->frags[i - 1];
 
 		pci_unmap_page((lio->oct_dev)->pci_dev,
 			       g->sg[(i >> 2)].ptr[(i & 3)],
-			       skb_frag_size(frag), DMA_TO_DEVICE);
+			       frag->size, DMA_TO_DEVICE);
 		i++;
 	}
 
@@ -881,11 +881,11 @@ static void free_netsgbuf_with_resp(void *buf)
 
 	i = 1;
 	while (frags--) {
-		skb_frag_t *frag = &skb_shinfo(skb)->frags[i - 1];
+		struct skb_frag_struct *frag = &skb_shinfo(skb)->frags[i - 1];
 
 		pci_unmap_page((lio->oct_dev)->pci_dev,
 			       g->sg[(i >> 2)].ptr[(i & 3)],
-			       skb_frag_size(frag), DMA_TO_DEVICE);
+			       frag->size, DMA_TO_DEVICE);
 		i++;
 	}
 
@@ -1497,7 +1497,7 @@ static netdev_tx_t liquidio_xmit(struct sk_buff *skb, struct net_device *netdev)
 		ndata.reqtype = REQTYPE_NORESP_NET;
 
 	} else {
-		skb_frag_t *frag;
+		struct skb_frag_struct *frag;
 		struct octnic_gather *g;
 		int i, frags;
 
@@ -1535,9 +1535,11 @@ static netdev_tx_t liquidio_xmit(struct sk_buff *skb, struct net_device *netdev)
 			frag = &skb_shinfo(skb)->frags[i - 1];
 
 			g->sg[(i >> 2)].ptr[(i & 3)] =
-				skb_frag_dma_map(&oct->pci_dev->dev,
-						 frag, 0, skb_frag_size(frag),
-						 DMA_TO_DEVICE);
+				dma_map_page(&oct->pci_dev->dev,
+					     frag->page.p,
+					     frag->page_offset,
+					     frag->size,
+					     DMA_TO_DEVICE);
 			if (dma_mapping_error(&oct->pci_dev->dev,
 					      g->sg[i >> 2].ptr[i & 3])) {
 				dma_unmap_single(&oct->pci_dev->dev,
@@ -1548,7 +1550,7 @@ static netdev_tx_t liquidio_xmit(struct sk_buff *skb, struct net_device *netdev)
 					frag = &skb_shinfo(skb)->frags[j - 1];
 					dma_unmap_page(&oct->pci_dev->dev,
 						       g->sg[j >> 2].ptr[j & 3],
-						       skb_frag_size(frag),
+						       frag->size,
 						       DMA_TO_DEVICE);
 				}
 				dev_err(&oct->pci_dev->dev, "%s DMA mapping error 3\n",
@@ -1556,8 +1558,7 @@ static netdev_tx_t liquidio_xmit(struct sk_buff *skb, struct net_device *netdev)
 				return NETDEV_TX_BUSY;
 			}
 
-			add_sg_size(&g->sg[(i >> 2)], skb_frag_size(frag),
-				    (i & 3));
+			add_sg_size(&g->sg[(i >> 2)], frag->size, (i & 3));
 			i++;
 		}
 

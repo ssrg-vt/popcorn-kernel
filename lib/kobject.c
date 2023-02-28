@@ -498,10 +498,8 @@ int kobject_rename(struct kobject *kobj, const char *new_name)
 	kobj = kobject_get(kobj);
 	if (!kobj)
 		return -EINVAL;
-	if (!kobj->parent) {
-		kobject_put(kobj);
+	if (!kobj->parent)
 		return -EINVAL;
-	}
 
 	devpath = kobject_get_path(kobj, GFP_KERNEL);
 	if (!devpath) {

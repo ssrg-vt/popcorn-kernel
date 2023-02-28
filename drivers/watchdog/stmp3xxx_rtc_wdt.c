@@ -98,8 +98,10 @@ static int stmp3xxx_wdt_probe(struct platform_device *pdev)
 	stmp3xxx_wdd.parent = dev;
 
 	ret = devm_watchdog_register_device(dev, &stmp3xxx_wdd);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(dev, "cannot register watchdog device\n");
 		return ret;
+	}
 
 	if (register_reboot_notifier(&wdt_notifier))
 		dev_warn(dev, "cannot register reboot notifier\n");

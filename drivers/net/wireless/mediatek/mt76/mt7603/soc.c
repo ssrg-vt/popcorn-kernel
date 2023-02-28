@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: ISC
+/* SPDX-License-Identifier: ISC */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -9,6 +9,7 @@
 static int
 mt76_wmac_probe(struct platform_device *pdev)
 {
+	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	struct mt7603_dev *dev;
 	void __iomem *mem_base;
 	struct mt76_dev *mdev;
@@ -16,10 +17,12 @@ mt76_wmac_probe(struct platform_device *pdev)
 	int ret;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "Failed to get device IRQ\n");
 		return irq;
+	}
 
-	mem_base = devm_platform_ioremap_resource(pdev, 0);
+	mem_base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(mem_base)) {
 		dev_err(&pdev->dev, "Failed to get memory resource\n");
 		return PTR_ERR(mem_base);

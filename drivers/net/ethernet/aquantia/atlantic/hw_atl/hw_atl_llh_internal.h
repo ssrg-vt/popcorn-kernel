@@ -318,25 +318,6 @@
 /* default value of bitfield rdm_desc_init_i */
 #define HW_ATL_RDM_RX_DMA_DESC_CACHE_INIT_DEFAULT 0x0
 
-/* rdm_desc_init_done_i bitfield definitions
- * preprocessor definitions for the bitfield rdm_desc_init_done_i.
- * port="pif_rdm_desc_init_done_i"
- */
-
-/* register address for bitfield rdm_desc_init_done_i */
-#define RDM_RX_DMA_DESC_CACHE_INIT_DONE_ADR 0x00005a10
-/* bitmask for bitfield rdm_desc_init_done_i */
-#define RDM_RX_DMA_DESC_CACHE_INIT_DONE_MSK 0x00000001U
-/* inverted bitmask for bitfield rdm_desc_init_done_i */
-#define RDM_RX_DMA_DESC_CACHE_INIT_DONE_MSKN 0xfffffffe
-/* lower bit position of bitfield  rdm_desc_init_done_i */
-#define RDM_RX_DMA_DESC_CACHE_INIT_DONE_SHIFT 0U
-/* width of bitfield rdm_desc_init_done_i */
-#define RDM_RX_DMA_DESC_CACHE_INIT_DONE_WIDTH 1
-/* default value of bitfield rdm_desc_init_done_i */
-#define RDM_RX_DMA_DESC_CACHE_INIT_DONE_DEFAULT 0x0
-
-
 /* rx int_desc_wrb_en bitfield definitions
  * preprocessor definitions for the bitfield "int_desc_wrb_en".
  * port="pif_rdm_int_desc_wrb_en_i"
@@ -1401,24 +1382,6 @@
 #define HW_ATL_RPOL4CHK_EN_WIDTH 1
 /* default value of bitfield l4_chk_en */
 #define HW_ATL_RPOL4CHK_EN_DEFAULT 0x0
-
-/* RX outer_vl_ins_mode Bitfield Definitions
- * Preprocessor definitions for the bitfield "outer_vl_ins_mode".
- * PORT="pif_rpo_outer_vl_mode_i"
- */
-
-/* Register address for bitfield outer_vl_ins_mode */
-#define HW_ATL_RPO_OUTER_VL_INS_MODE_ADR 0x00005580
-/* Bitmask for bitfield outer_vl_ins_mode */
-#define HW_ATL_RPO_OUTER_VL_INS_MODE_MSK 0x00000004
-/* Inverted bitmask for bitfield outer_vl_ins_mode */
-#define HW_ATL_RPO_OUTER_VL_INS_MODE_MSKN 0xFFFFFFFB
-/* Lower bit position of bitfield outer_vl_ins_mode */
-#define HW_ATL_RPO_OUTER_VL_INS_MODE_SHIFT 2
-/* Width of bitfield outer_vl_ins_mode */
-#define HW_ATL_RPO_OUTER_VL_INS_MODE_WIDTH 1
-/* Default value of bitfield outer_vl_ins_mode */
-#define HW_ATL_RPO_OUTER_VL_INS_MODE_DEFAULT 0x0
 
 /* rx reg_res_dsbl bitfield definitions
  * preprocessor definitions for the bitfield "reg_res_dsbl".

@@ -28,13 +28,7 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <linux/slab.h>
-#include <linux/uaccess.h>
-
-#include <drm/drm_drv.h>
-#include <drm/drm_file.h>
-#include <drm/drm_print.h>
-
+#include <drm/drmP.h>
 #include "drm_legacy.h"
 
 struct drm_ctx_list {

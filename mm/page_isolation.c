@@ -230,7 +230,7 @@ undo:
 /*
  * Make isolated pages available again.
  */
-void undo_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
+int undo_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
 			    unsigned migratetype)
 {
 	unsigned long pfn;
@@ -247,6 +247,7 @@ void undo_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
 			continue;
 		unset_migratetype_isolate(page, migratetype);
 	}
+	return 0;
 }
 /*
  * Test all pages in the range is free(means isolated) or not.

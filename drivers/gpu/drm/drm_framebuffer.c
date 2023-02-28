@@ -21,21 +21,16 @@
  */
 
 #include <linux/export.h>
-#include <linux/uaccess.h>
-
+#include <drm/drmP.h>
+#include <drm/drm_auth.h>
+#include <drm/drm_framebuffer.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_uapi.h>
-#include <drm/drm_auth.h>
-#include <drm/drm_debugfs.h>
-#include <drm/drm_drv.h>
-#include <drm/drm_file.h>
-#include <drm/drm_fourcc.h>
-#include <drm/drm_framebuffer.h>
 #include <drm/drm_print.h>
 #include <drm/drm_util.h>
 
-#include "drm_crtc_internal.h"
 #include "drm_internal.h"
+#include "drm_crtc_internal.h"
 
 /**
  * DOC: overview
@@ -201,8 +196,7 @@ static int framebuffer_check(struct drm_device *dev,
 	for (i = 0; i < info->num_planes; i++) {
 		unsigned int width = fb_plane_width(r->width, info, i);
 		unsigned int height = fb_plane_height(r->height, info, i);
-		unsigned int block_size = info->char_per_block[i] ||
-					  info->bytes_per_macropixel[i];
+		unsigned int block_size = info->char_per_block[i];
 		u64 min_pitch = drm_format_info_min_pitch(info, i, width);
 
 		if (!block_size && (r->modifier[i] == DRM_FORMAT_MOD_LINEAR)) {
@@ -296,8 +290,7 @@ drm_internal_framebuffer_create(struct drm_device *dev,
 	struct drm_framebuffer *fb;
 	int ret;
 
-	if (r->flags & ~(DRM_MODE_FB_INTERLACED | DRM_MODE_FB_MODIFIERS |
-	    DRM_MODE_FB_ALTERNATE_TOP | DRM_MODE_FB_ALTERNATE_BOTTOM)) {
+	if (r->flags & ~(DRM_MODE_FB_INTERLACED | DRM_MODE_FB_MODIFIERS)) {
 		DRM_DEBUG_KMS("bad framebuffer flags 0x%08x\n", r->flags);
 		return ERR_PTR(-EINVAL);
 	}

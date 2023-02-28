@@ -562,8 +562,7 @@ static void kyber_limit_depth(unsigned int op, struct blk_mq_alloc_data *data)
 	}
 }
 
-static bool kyber_bio_merge(struct blk_mq_hw_ctx *hctx, struct bio *bio,
-		unsigned int nr_segs)
+static bool kyber_bio_merge(struct blk_mq_hw_ctx *hctx, struct bio *bio)
 {
 	struct kyber_hctx_data *khd = hctx->sched_data;
 	struct blk_mq_ctx *ctx = blk_mq_get_ctx(hctx->queue);
@@ -573,8 +572,9 @@ static bool kyber_bio_merge(struct blk_mq_hw_ctx *hctx, struct bio *bio,
 	bool merged;
 
 	spin_lock(&kcq->lock);
-	merged = blk_mq_bio_list_merge(hctx->queue, rq_list, bio, nr_segs);
+	merged = blk_mq_bio_list_merge(hctx->queue, rq_list, bio);
 	spin_unlock(&kcq->lock);
+	blk_mq_put_ctx(ctx);
 
 	return merged;
 }

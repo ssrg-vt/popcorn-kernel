@@ -9,11 +9,12 @@
 
 #include "main.h"
 
-#include <linux/netdevice.h>
-#include <linux/seq_file.h>
-#include <linux/skbuff.h>
 #include <linux/types.h>
-#include <uapi/linux/batadv_packet.h>
+
+struct batadv_ogm_packet;
+struct net_device;
+struct seq_file;
+struct sk_buff;
 
 #ifdef CONFIG_BATMAN_ADV_NC
 
@@ -39,7 +40,7 @@ void batadv_nc_skb_store_for_decoding(struct batadv_priv *bat_priv,
 void batadv_nc_skb_store_sniffed_unicast(struct batadv_priv *bat_priv,
 					 struct sk_buff *skb);
 int batadv_nc_nodes_seq_print_text(struct seq_file *seq, void *offset);
-void batadv_nc_init_debugfs(struct batadv_priv *bat_priv);
+int batadv_nc_init_debugfs(struct batadv_priv *bat_priv);
 
 #else /* ifdef CONFIG_BATMAN_ADV_NC */
 
@@ -110,8 +111,9 @@ static inline int batadv_nc_nodes_seq_print_text(struct seq_file *seq,
 	return 0;
 }
 
-static inline void batadv_nc_init_debugfs(struct batadv_priv *bat_priv)
+static inline int batadv_nc_init_debugfs(struct batadv_priv *bat_priv)
 {
+	return 0;
 }
 
 #endif /* ifdef CONFIG_BATMAN_ADV_NC */

@@ -1,4 +1,0 @@
-XILINX SYNCHRONIZER DRIVER
-M:	Vishal Sagar <vishal.sagar@xilinx.com>
-S:	Maintained
-F:	drivers/staging/xlnxsync

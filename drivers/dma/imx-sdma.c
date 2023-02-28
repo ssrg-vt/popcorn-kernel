@@ -1707,14 +1707,6 @@ static void sdma_add_scripts(struct sdma_engine *sdma,
 	if (!sdma->script_number)
 		sdma->script_number = SDMA_SCRIPT_ADDRS_ARRAY_SIZE_V1;
 
-	if (sdma->script_number > sizeof(struct sdma_script_start_addrs)
-				  / sizeof(s32)) {
-		dev_err(sdma->dev,
-			"SDMA script number %d not match with firmware.\n",
-			sdma->script_number);
-		return;
-	}
-
 	for (i = 0; i < sdma->script_number; i++)
 		if (addr_arr[i] > 0)
 			saddr_arr[i] = addr_arr[i];
@@ -1894,6 +1886,10 @@ static int sdma_init(struct sdma_engine *sdma)
 	sdma->context_phys = ccb_phys +
 		MAX_DMA_CHANNELS * sizeof (struct sdma_channel_control);
 
+	/* Zero-out the CCB structures array just allocated */
+	memset(sdma->channel_control, 0,
+			MAX_DMA_CHANNELS * sizeof (struct sdma_channel_control));
+
 	/* disable all channels */
 	for (i = 0; i < sdma->drvdata->num_events; i++)
 		writel_relaxed(0, sdma->regs + chnenbl_ofs(sdma, i));
@@ -1938,9 +1934,14 @@ disable_clk_ipg:
 static bool sdma_filter_fn(struct dma_chan *chan, void *fn_param)
 {
 	struct sdma_channel *sdmac = to_sdma_chan(chan);
+	struct sdma_engine *sdma = sdmac->sdma;
 	struct imx_dma_data *data = fn_param;
 
 	if (!imx_dma_is_general_purpose(chan))
+		return false;
+
+	/* return false if it's not the right device */
+	if (sdma->dev->of_node != data->of_node)
 		return false;
 
 	sdmac->data = *data;
@@ -1970,9 +1971,9 @@ static struct dma_chan *sdma_xlate(struct of_phandle_args *dma_spec,
 	 * be set to sdmac->event_id1.
 	 */
 	data.dma_request2 = 0;
+	data.of_node = ofdma->of_node;
 
-	return __dma_request_channel(&mask, sdma_filter_fn, &data,
-				     ofdma->of_node);
+	return dma_request_channel(mask, sdma_filter_fn, &data);
 }
 
 static int sdma_probe(struct platform_device *pdev)

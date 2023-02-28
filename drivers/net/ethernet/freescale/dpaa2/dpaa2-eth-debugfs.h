@@ -11,6 +11,9 @@ struct dpaa2_eth_priv;
 
 struct dpaa2_debugfs {
 	struct dentry *dir;
+	struct dentry *fq_stats;
+	struct dentry *ch_stats;
+	struct dentry *cpu_stats;
 };
 
 #ifdef CONFIG_DEBUG_FS

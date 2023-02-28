@@ -6,7 +6,6 @@
 #include "fw.h"
 #include "ps.h"
 #include "mac.h"
-#include "coex.h"
 #include "debug.h"
 
 static int rtw_ips_pwr_up(struct rtw_dev *rtwdev)
@@ -26,8 +25,6 @@ static int rtw_ips_pwr_up(struct rtw_dev *rtwdev)
 int rtw_enter_ips(struct rtw_dev *rtwdev)
 {
 	rtw_flag_set(rtwdev, RTW_FLAG_INACTIVE_PS);
-
-	rtw_coex_ips_notify(rtwdev, COEX_IPS_ENTER);
 
 	rtw_core_stop(rtwdev);
 
@@ -56,8 +53,6 @@ int rtw_leave_ips(struct rtw_dev *rtwdev)
 
 	rtw_iterate_vifs_atomic(rtwdev, rtw_restore_port_cfg_iter, rtwdev);
 
-	rtw_coex_ips_notify(rtwdev, COEX_IPS_LEAVE);
-
 	return 0;
 }
 
@@ -72,8 +67,6 @@ static void rtw_leave_lps_core(struct rtw_dev *rtwdev)
 
 	rtw_fw_set_pwr_mode(rtwdev);
 	rtw_flag_clear(rtwdev, RTW_FLAG_LEISURE_PS);
-
-	rtw_coex_lps_notify(rtwdev, COEX_LPS_DISABLE);
 }
 
 static void rtw_enter_lps_core(struct rtw_dev *rtwdev)
@@ -84,8 +77,6 @@ static void rtw_enter_lps_core(struct rtw_dev *rtwdev)
 	conf->awake_interval = 1;
 	conf->rlbm = 1;
 	conf->smart_ps = 2;
-
-	rtw_coex_lps_notify(rtwdev, COEX_LPS_ENABLE);
 
 	rtw_fw_set_pwr_mode(rtwdev);
 	rtw_flag_set(rtwdev, RTW_FLAG_LEISURE_PS);

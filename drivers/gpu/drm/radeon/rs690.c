@@ -25,13 +25,11 @@
  *          Alex Deucher
  *          Jerome Glisse
  */
-
-#include <drm/drm_pci.h>
-
-#include "atom.h"
+#include <drm/drmP.h>
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "radeon_audio.h"
+#include "atom.h"
 #include "rs690d.h"
 
 int rs690_mc_wait_for_idle(struct radeon_device *rdev)

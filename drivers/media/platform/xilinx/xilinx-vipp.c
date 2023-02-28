@@ -27,27 +27,16 @@
 #define XVIPP_DMA_S2MM				0
 #define XVIPP_DMA_MM2S				1
 
-/*
- * This is for backward compatibility for existing applications,
- * and planned to be deprecated
- */
-static bool xvip_is_mplane = true;
-MODULE_PARM_DESC(is_mplane,
-		 "v4l2 device capability to handle multi planar formats");
-module_param_named(is_mplane, xvip_is_mplane, bool, 0444);
-
 /**
  * struct xvip_graph_entity - Entity in the video graph
  * @asd: subdev asynchronous registration information
  * @entity: media entity, from the corresponding V4L2 subdev
  * @subdev: V4L2 subdev
- * @streaming: status of the V4L2 subdev if streaming or not
  */
 struct xvip_graph_entity {
 	struct v4l2_async_subdev asd; /* must be first */
 	struct media_entity *entity;
 	struct v4l2_subdev *subdev;
-	bool streaming;
 };
 
 static inline struct xvip_graph_entity *
@@ -71,22 +60,6 @@ xvip_graph_find_entity(struct xvip_composite_device *xdev,
 		entity = to_xvip_entity(asd);
 		if (entity->asd.match.fwnode == fwnode)
 			return entity;
-	}
-
-	return NULL;
-}
-
-static struct xvip_graph_entity *
-xvip_graph_find_entity_from_media(struct xvip_composite_device *xdev,
-				  struct media_entity *entity)
-{
-	struct xvip_graph_entity *xvip_entity;
-	struct v4l2_async_subdev *asd;
-
-	list_for_each_entry(asd, &xdev->notifier.asd_list, asd_list) {
-		xvip_entity = to_xvip_entity(asd);
-		if (xvip_entity->entity == entity)
-			return xvip_entity;
 	}
 
 	return NULL;
@@ -192,6 +165,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		}
 	}
 
+	fwnode_handle_put(ep);
 	return ret;
 }
 
@@ -206,190 +180,6 @@ xvip_graph_find_dma(struct xvip_composite_device *xdev, unsigned int port)
 	}
 
 	return NULL;
-}
-
-/**
- * xvip_graph_entity_set_streaming - Update the streaming status
- * @xdev: Composite video device
- * @entity: graph entity to update
- * @enable: enable/disable streaming status
- *
- * Update the streaming status of given entity.
- *
- * Return: previous streaming status (true or false)
- */
-static bool xvip_graph_entity_set_streaming(struct xvip_composite_device *xdev,
-					    struct xvip_graph_entity *entity,
-					    bool enable)
-{
-	bool status = entity->streaming;
-
-	entity->streaming = enable;
-	return status;
-}
-
-static int
-xvip_graph_entity_start_stop_subdev(struct xvip_composite_device *xdev,
-				    struct xvip_graph_entity *entity, bool on)
-{
-	struct v4l2_subdev *subdev;
-	int ret = 0;
-
-	dev_dbg(xdev->dev, "%s entity %s\n",
-		on ? "Starting" : "Stopping", entity->entity->name);
-	subdev = media_entity_to_v4l2_subdev(entity->entity);
-
-	/*
-	 * start or stop the subdev only once in case if they are
-	 * shared between sub-graphs
-	 */
-	if (on) {
-		/* power-on subdevice */
-		ret = v4l2_subdev_call(subdev, core, s_power, 1);
-		if (ret < 0 && ret != -ENOIOCTLCMD) {
-			dev_err(xdev->dev,
-				"s_power on failed on subdev\n");
-			xvip_graph_entity_set_streaming(xdev, entity, 0);
-			return ret;
-		}
-
-		/* stream-on subdevice */
-		ret = v4l2_subdev_call(subdev, video, s_stream, 1);
-		if (ret < 0 && ret != -ENOIOCTLCMD) {
-			dev_err(xdev->dev,
-				"s_stream on failed on subdev\n");
-			v4l2_subdev_call(subdev, core, s_power, 0);
-			xvip_graph_entity_set_streaming(xdev, entity, 0);
-		}
-	} else {
-		/* stream-off subdevice */
-		ret = v4l2_subdev_call(subdev, video, s_stream, 0);
-		if (ret < 0 && ret != -ENOIOCTLCMD) {
-			dev_err(xdev->dev,
-				"s_stream off failed on subdev\n");
-			xvip_graph_entity_set_streaming(xdev, entity, 1);
-		}
-
-		/* power-off subdevice */
-		ret = v4l2_subdev_call(subdev, core, s_power, 0);
-		if (ret < 0 && ret != -ENOIOCTLCMD)
-			dev_err(xdev->dev,
-				"s_power off failed on subdev\n");
-	}
-
-	if (ret == -ENOIOCTLCMD)
-		ret = 0;
-
-	return ret;
-}
-
-/**
- * xvip_graph_entity_start_stop - start / stop the graph entity
- * @xdev: composite device
- * @entity: entity to check
- * @on: boolean flag. true for enable and false for disable
- *
- * Check if all immediate dependencies are ready dependeing on 'on' flag.
- * If enabling, check all source pads. Sink pads for disabling. Once all
- * dependencies are ready, set the streaming state on the entity. If the state
- * is already set, optimize it by skipping checks.
- *
- * Return: true if the state is successfully or already set. false otherwise.
- */
-static bool xvip_graph_entity_start_stop(struct xvip_composite_device *xdev,
-					 struct xvip_graph_entity *entity,
-					 bool on)
-{
-	unsigned long pad_flag = on ? MEDIA_PAD_FL_SOURCE : MEDIA_PAD_FL_SINK;
-	unsigned int i;
-	bool state;
-	int ret;
-
-	if (entity->streaming == on)
-		return true;
-
-	for (i = 0; i < entity->entity->num_pads; i++) {
-		struct xvip_graph_entity *remote;
-		struct media_pad *pad;
-
-		if (!(entity->entity->pads[i].flags & pad_flag))
-			continue;
-
-		/* skipping not connected pads */
-		pad = media_entity_remote_pad(&entity->entity->pads[i]);
-		if (!pad || !pad->entity)
-			continue;
-
-		/*
-		 * Skip if there is no remote. This entity is at the end,
-		 * such as DMA, sensor, or other type.
-		 */
-		remote = xvip_graph_find_entity_from_media(xdev, pad->entity);
-		if (!remote)
-			continue;
-
-		/* the dependency state doesn't meet */
-		if (remote->streaming != on) {
-			state = xvip_graph_entity_start_stop(xdev, remote, on);
-			if (!state)
-				return state;
-		}
-	}
-
-	/* set state and report if state is changed or not */
-	state = xvip_graph_entity_set_streaming(xdev, entity, on);
-	/* This shouldn't happen as check is already above */
-	if (state == on) {
-		WARN(1, "Should never get here\n");
-		return true;
-	}
-
-	ret = xvip_graph_entity_start_stop_subdev(xdev, entity, on);
-	if (ret < 0) {
-		dev_err(xdev->dev, "ret = %d for entity %s\n",
-			ret, entity->entity->name);
-		return false;
-	}
-
-	return true;
-}
-
-/**
- * xvip_graph_pipeline_start_stop - start or stop the pipe in the graph
- * @xdev: composite device
- * @pipe: pipeline to start / stop
- * @on: boolean flag. true for enable and false for disable
- *
- * Enable or disable the pipe in the graph by iterating the asd list.
- * The pipe is a sub-graph, and the check ensures the given entity
- * is part of the pipe before doing start or stop. This function
- * or any subsequent functions don't and shouldn't change the asd list,
- * so that there's no race if the caller holds the pipeline lock.
- * xvip_graph_entity_start_stop() takes care of dependencies,
- * or state-checking.
- *
- * Return: 0 for success, otherwise error code
- */
-int xvip_graph_pipeline_start_stop(struct xvip_composite_device *xdev,
-				   struct xvip_pipeline *pipe, bool on)
-{
-	struct v4l2_async_subdev *asd;
-
-	list_for_each_entry(asd, &xdev->notifier.asd_list, asd_list) {
-		struct xvip_graph_entity *entity;
-		bool state;
-
-		entity = to_xvip_entity(asd);
-		/* skip an entity not belongng to the given pipe */
-		if (&pipe->pipe != entity->entity->pipe)
-			continue;
-
-		state = xvip_graph_entity_start_stop(xdev, entity, on);
-		if (!state)
-			return -EPIPE;
-	}
-
-	return 0;
 }
 
 static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
@@ -486,6 +276,7 @@ static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 		}
 	}
 
+	of_node_put(ep);
 	return ret;
 }
 
@@ -594,9 +385,9 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 		asd = v4l2_async_notifier_add_fwnode_subdev(
 			&xdev->notifier, remote,
 			sizeof(struct xvip_graph_entity));
-		fwnode_handle_put(remote);
 		if (IS_ERR(asd)) {
 			ret = PTR_ERR(asd);
+			fwnode_handle_put(remote);
 			goto err_notifier_cleanup;
 		}
 	}
@@ -651,11 +442,9 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 		return ret;
 
 	if (strcmp(direction, "input") == 0)
-		type = xvip_is_mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE :
-						V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	else if (strcmp(direction, "output") == 0)
-		type = xvip_is_mplane ? V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE :
-					V4L2_BUF_TYPE_VIDEO_OUTPUT;
+		type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
 	else
 		return -EINVAL;
 
@@ -673,14 +462,8 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 
 	list_add_tail(&dma->list, &xdev->dmas);
 
-	if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
-		xdev->v4l2_caps |= V4L2_CAP_VIDEO_CAPTURE_MPLANE;
-	else if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		xdev->v4l2_caps |= V4L2_CAP_VIDEO_CAPTURE;
-	else if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT)
-		xdev->v4l2_caps |= V4L2_CAP_VIDEO_OUTPUT;
-	else if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
-		xdev->v4l2_caps |= V4L2_CAP_VIDEO_OUTPUT_MPLANE;
+	xdev->v4l2_caps |= type == V4L2_BUF_TYPE_VIDEO_CAPTURE
+			 ? V4L2_CAP_VIDEO_CAPTURE : V4L2_CAP_VIDEO_OUTPUT;
 
 	return 0;
 }
@@ -811,7 +594,6 @@ static int xvip_composite_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xdev->dev = &pdev->dev;
-	mutex_init(&xdev->lock);
 	INIT_LIST_HEAD(&xdev->dmas);
 	v4l2_async_notifier_init(&xdev->notifier);
 
@@ -838,7 +620,6 @@ static int xvip_composite_remove(struct platform_device *pdev)
 {
 	struct xvip_composite_device *xdev = platform_get_drvdata(pdev);
 
-	mutex_destroy(&xdev->lock);
 	xvip_graph_cleanup(xdev);
 	xvip_composite_v4l2_cleanup(xdev);
 

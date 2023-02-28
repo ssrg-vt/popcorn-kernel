@@ -111,9 +111,13 @@
 &gmac {
 	pinctrl-names = "default";
 	pinctrl-0 = <&gmac_rgmii_pins>;
-	phy-handle = <&phy1>;
+	phy = <&phy1>;
 	phy-mode = "rgmii";
 	status = "okay";
+
+	phy1: ethernet-phy@1 {
+		reg = <1>;
+	};
 };
 
 &hdmi {
@@ -195,12 +199,6 @@
 		linux,code = <KEY_ENTER>;
 		channel = <0>;
 		voltage = <1400000>;
-	};
-};
-
-&gmac_mdio {
-	phy1: ethernet-phy@1 {
-		reg = <1>;
 	};
 };
 

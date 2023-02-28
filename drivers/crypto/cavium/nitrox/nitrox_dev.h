@@ -10,10 +10,6 @@
 #define VERSION_LEN 32
 /* Maximum queues in PF mode */
 #define MAX_PF_QUEUES	64
-/* Maximum device queues */
-#define MAX_DEV_QUEUES (MAX_PF_QUEUES)
-/* Maximum UCD Blocks */
-#define CNN55XX_MAX_UCD_BLOCKS	8
 
 /**
  * struct nitrox_cmdq - NITROX command queue
@@ -78,7 +74,7 @@ struct nitrox_cmdq {
  */
 struct nitrox_hw {
 	char partname[IFNAMSIZ * 2];
-	char fw_name[CNN55XX_MAX_UCD_BLOCKS][VERSION_LEN];
+	char fw_name[VERSION_LEN];
 
 	int freq;
 	u16 vendor_id;
@@ -210,7 +206,6 @@ enum vf_mode {
  * @mode: Device mode PF/VF
  * @ctx_pool: DMA pool for crypto context
  * @pkt_inq: Packet input rings
- * @aqmq: AQM command queues
  * @qvec: MSI-X queue vectors information
  * @iov: SR-IOV informatin
  * @num_vecs: number of MSI-X vectors
@@ -237,7 +232,6 @@ struct nitrox_device {
 
 	struct dma_pool *ctx_pool;
 	struct nitrox_cmdq *pkt_inq;
-	struct nitrox_cmdq *aqmq[MAX_DEV_QUEUES] ____cacheline_aligned_in_smp;
 
 	struct nitrox_q_vector *qvec;
 	struct nitrox_iov iov;

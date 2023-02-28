@@ -23,13 +23,11 @@
  *
  * Authors: Alex Deucher
  */
-
-#include <linux/dma-buf.h>
-
-#include <drm/drm_prime.h>
-#include <drm/radeon_drm.h>
+#include <drm/drmP.h>
 
 #include "radeon.h"
+#include <drm/radeon_drm.h>
+#include <linux/dma-buf.h>
 
 struct sg_table *radeon_gem_prime_get_sg_table(struct drm_gem_object *obj)
 {
@@ -63,15 +61,15 @@ struct drm_gem_object *radeon_gem_prime_import_sg_table(struct drm_device *dev,
 							struct dma_buf_attachment *attach,
 							struct sg_table *sg)
 {
-	struct dma_resv *resv = attach->dmabuf->resv;
+	struct reservation_object *resv = attach->dmabuf->resv;
 	struct radeon_device *rdev = dev->dev_private;
 	struct radeon_bo *bo;
 	int ret;
 
-	dma_resv_lock(resv, NULL);
+	ww_mutex_lock(&resv->lock, NULL);
 	ret = radeon_bo_create(rdev, attach->dmabuf->size, PAGE_SIZE, false,
 			       RADEON_GEM_DOMAIN_GTT, 0, sg, resv, &bo);
-	dma_resv_unlock(resv);
+	ww_mutex_unlock(&resv->lock);
 	if (ret)
 		return ERR_PTR(ret);
 
@@ -80,7 +78,7 @@ struct drm_gem_object *radeon_gem_prime_import_sg_table(struct drm_device *dev,
 	mutex_unlock(&rdev->gem.mutex);
 
 	bo->prime_shared_count = 1;
-	return &bo->tbo.base;
+	return &bo->gem_base;
 }
 
 int radeon_gem_prime_pin(struct drm_gem_object *obj)
@@ -117,11 +115,19 @@ void radeon_gem_prime_unpin(struct drm_gem_object *obj)
 }
 
 
-struct dma_buf *radeon_gem_prime_export(struct drm_gem_object *gobj,
+struct reservation_object *radeon_gem_prime_res_obj(struct drm_gem_object *obj)
+{
+	struct radeon_bo *bo = gem_to_radeon_bo(obj);
+
+	return bo->tbo.resv;
+}
+
+struct dma_buf *radeon_gem_prime_export(struct drm_device *dev,
+					struct drm_gem_object *gobj,
 					int flags)
 {
 	struct radeon_bo *bo = gem_to_radeon_bo(gobj);
 	if (radeon_ttm_tt_has_userptr(bo->tbo.ttm))
 		return ERR_PTR(-EPERM);
-	return drm_gem_prime_export(gobj, flags);
+	return drm_gem_prime_export(dev, gobj, flags);
 }

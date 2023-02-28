@@ -228,6 +228,7 @@ static DEFINE_IDR(st_index_idr);
 
 
 
+#include "osst_detect.h"
 #ifndef SIGS_FROM_OSST
 #define SIGS_FROM_OSST \
 	{"OnStream", "SC-", "", "osst"}, \
@@ -4266,10 +4267,9 @@ static int st_probe(struct device *dev)
 	if (SDp->type != TYPE_TAPE)
 		return -ENODEV;
 	if ((stp = st_incompatible(SDp))) {
+		sdev_printk(KERN_INFO, SDp, "Found incompatible tape\n");
 		sdev_printk(KERN_INFO, SDp,
-			    "OnStream tapes are no longer supported;\n");
-		sdev_printk(KERN_INFO, SDp,
-			    "please mail to linux-scsi@vger.kernel.org.\n");
+			    "st: The suggested driver is %s.\n", stp);
 		return -ENODEV;
 	}
 

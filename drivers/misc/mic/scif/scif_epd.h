@@ -156,8 +156,9 @@ static inline int scif_verify_epd(struct scif_endpt *ep)
 static inline int scif_anon_inode_getfile(scif_epd_t epd)
 {
 	epd->anon = anon_inode_getfile("scif", &scif_anon_fops, NULL, 0);
-
-	return PTR_ERR_OR_ZERO(epd->anon);
+	if (IS_ERR(epd->anon))
+		return PTR_ERR(epd->anon);
+	return 0;
 }
 
 static inline void scif_anon_inode_fput(scif_epd_t epd)

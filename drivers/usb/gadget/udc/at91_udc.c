@@ -799,6 +799,7 @@ static int at91_wakeup(struct usb_gadget *gadget)
 {
 	struct at91_udc	*udc = to_udc(gadget);
 	u32		glbstate;
+	int		status = -EINVAL;
 	unsigned long	flags;
 
 	DBG("%s\n", __func__ );
@@ -817,7 +818,7 @@ static int at91_wakeup(struct usb_gadget *gadget)
 
 done:
 	spin_unlock_irqrestore(&udc->lock, flags);
-	return 0;
+	return status;
 }
 
 /* reinit == restore initial software state */

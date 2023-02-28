@@ -301,7 +301,8 @@ struct xfs_buf *				/* buffer for fsbno */
 xfs_btree_get_bufl(
 	struct xfs_mount	*mp,	/* file system mount point */
 	struct xfs_trans	*tp,	/* transaction pointer */
-	xfs_fsblock_t		fsbno);	/* file system block number */
+	xfs_fsblock_t		fsbno,	/* file system block number */
+	uint			lock);	/* lock flags for get_buf */
 
 /*
  * Get a buffer for the block, return it with no data read.
@@ -312,7 +313,8 @@ xfs_btree_get_bufs(
 	struct xfs_mount	*mp,	/* file system mount point */
 	struct xfs_trans	*tp,	/* transaction pointer */
 	xfs_agnumber_t		agno,	/* allocation group number */
-	xfs_agblock_t		agbno);	/* allocation group block number */
+	xfs_agblock_t		agbno,	/* allocation group block number */
+	uint			lock);	/* lock flags for get_buf */
 
 /*
  * Check for the cursor referring to the last block at the given level.
@@ -343,6 +345,7 @@ xfs_btree_read_bufl(
 	struct xfs_mount	*mp,	/* file system mount point */
 	struct xfs_trans	*tp,	/* transaction pointer */
 	xfs_fsblock_t		fsbno,	/* file system block number */
+	uint			lock,	/* lock flags for read_buf */
 	struct xfs_buf		**bpp,	/* buffer for fsbno */
 	int			refval,	/* ref count value for buffer */
 	const struct xfs_buf_ops *ops);
@@ -380,7 +383,8 @@ xfs_btree_init_block(
 	xfs_btnum_t	btnum,
 	__u16		level,
 	__u16		numrecs,
-	__u64		owner);
+	__u64		owner,
+	unsigned int	flags);
 
 void
 xfs_btree_init_block_int(
@@ -464,13 +468,9 @@ xfs_failaddr_t xfs_btree_lblock_verify(struct xfs_buf *bp,
 uint xfs_btree_compute_maxlevels(uint *limits, unsigned long len);
 unsigned long long xfs_btree_calc_size(uint *limits, unsigned long long len);
 
-/*
- * Return codes for the query range iterator function are 0 to continue
- * iterating, and non-zero to stop iterating.  Any non-zero value will be
- * passed up to the _query_range caller.  The special value -ECANCELED can be
- * used to stop iteration, because _query_range never generates that error
- * code on its own.
- */
+/* return codes */
+#define XFS_BTREE_QUERY_RANGE_CONTINUE	0	/* keep iterating */
+#define XFS_BTREE_QUERY_RANGE_ABORT	1	/* stop iterating */
 typedef int (*xfs_btree_query_range_fn)(struct xfs_btree_cur *cur,
 		union xfs_btree_rec *rec, void *priv);
 

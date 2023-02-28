@@ -364,14 +364,18 @@ static int mqueue_get_tree(struct fs_context *fc)
 {
 	struct mqueue_fs_context *ctx = fc->fs_private;
 
-	return get_tree_keyed(fc, mqueue_fill_super, ctx->ipc_ns);
+	put_user_ns(fc->user_ns);
+	fc->user_ns = get_user_ns(ctx->ipc_ns->user_ns);
+	fc->s_fs_info = ctx->ipc_ns;
+	return vfs_get_super(fc, vfs_get_keyed_super, mqueue_fill_super);
 }
 
 static void mqueue_fs_context_free(struct fs_context *fc)
 {
 	struct mqueue_fs_context *ctx = fc->fs_private;
 
-	put_ipc_ns(ctx->ipc_ns);
+	if (ctx->ipc_ns)
+		put_ipc_ns(ctx->ipc_ns);
 	kfree(ctx);
 }
 
@@ -384,8 +388,6 @@ static int mqueue_init_fs_context(struct fs_context *fc)
 		return -ENOMEM;
 
 	ctx->ipc_ns = get_ipc_ns(current->nsproxy->ipc_ns);
-	put_user_ns(fc->user_ns);
-	fc->user_ns = get_user_ns(ctx->ipc_ns->user_ns);
 	fc->fs_private = ctx;
 	fc->ops = &mqueue_fs_context_ops;
 	return 0;
@@ -404,8 +406,6 @@ static struct vfsmount *mq_create_mount(struct ipc_namespace *ns)
 	ctx = fc->fs_private;
 	put_ipc_ns(ctx->ipc_ns);
 	ctx->ipc_ns = get_ipc_ns(ns);
-	put_user_ns(fc->user_ns);
-	fc->user_ns = get_user_ns(ctx->ipc_ns->user_ns);
 
 	mnt = fc_mount(fc);
 	put_fs_context(fc);
@@ -1240,14 +1240,15 @@ static int do_mq_notify(mqd_t mqdes, const struct sigevent *notification)
 
 			/* create the notify skb */
 			nc = alloc_skb(NOTIFY_COOKIE_LEN, GFP_KERNEL);
-			if (!nc)
-				return -ENOMEM;
-
+			if (!nc) {
+				ret = -ENOMEM;
+				goto out;
+			}
 			if (copy_from_user(nc->data,
 					notification->sigev_value.sival_ptr,
 					NOTIFY_COOKIE_LEN)) {
 				ret = -EFAULT;
-				goto free_skb;
+				goto out;
 			}
 
 			/* TODO: add a header? */
@@ -1263,7 +1264,8 @@ retry:
 			fdput(f);
 			if (IS_ERR(sock)) {
 				ret = PTR_ERR(sock);
-				goto free_skb;
+				sock = NULL;
+				goto out;
 			}
 
 			timeo = MAX_SCHEDULE_TIMEOUT;
@@ -1272,8 +1274,11 @@ retry:
 				sock = NULL;
 				goto retry;
 			}
-			if (ret)
-				return ret;
+			if (ret) {
+				sock = NULL;
+				nc = NULL;
+				goto out;
+			}
 		}
 	}
 
@@ -1328,8 +1333,7 @@ out_fput:
 out:
 	if (sock)
 		netlink_detachskb(sock, nc);
-	else
-free_skb:
+	else if (nc)
 		dev_kfree_skb(nc);
 
 	return ret;

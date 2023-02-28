@@ -51,22 +51,16 @@
 		compatible = "simple-bus";
 		ranges;
 
-		clkctl: clock-controller@fffe0004 {
-			compatible = "brcm,bcm6358-clocks";
-			reg = <0xfffe0004 0x4>;
-			#clock-cells = <1>;
-		};
-
-		periph_cntl: syscon@fffe0008 {
+		periph_cntl: syscon@fffe0000 {
 			compatible = "syscon";
-			reg = <0xfffe0000 0x4>;
+			reg = <0xfffe0000 0xc>;
 			native-endian;
 		};
 
 		reboot: syscon-reboot@fffe0008 {
 			compatible = "syscon-reboot";
 			regmap = <&periph_cntl>;
-			offset = <0x0>;
+			offset = <0x8>;
 			mask = <0x1>;
 		};
 

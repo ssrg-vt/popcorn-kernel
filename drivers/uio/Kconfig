@@ -2,7 +2,6 @@
 menuconfig UIO
 	tristate "Userspace I/O drivers"
 	depends on MMU
-	select DMA_SHARED_BUFFER
 	help
 	  Enable this to allow the userspace driver core code to be
 	  built.  This code allows userspace programs easy access to
@@ -166,27 +165,4 @@ config UIO_HV_GENERIC
 	  to network and storage devices from userspace.
 
 	  If you compile this as a module, it will be called uio_hv_generic.
-
-config UIO_XILINX_APM
-	tristate "Xilinx AXI Performance Monitor driver"
-	depends on MICROBLAZE || ARCH_ZYNQ || ARCH_ZYNQMP
-	help
-	  This driver is developed for AXI Performance Monitor IP, designed to
-	  monitor AXI4 traffic for performance analysis of AXI bus in the
-	  system. Driver maps HW registers and parameters to userspace.
-
-	  To compile this driver as a module, choose M here; the module
-	  will be called uio_xilinx_apm.
-
-config UIO_XILINX_AI_ENGINE
-	tristate "Xilinx AI Engine driver"
-	select IRQ_SIM
-	select UIO_DMEM_GENIRQ
-	select UIO_PDRV_GENIRQ
-	help
-	  The driver for Xilinx AI Engine that utilizes the uio_dmem_genirq.
-	  The userspace library will use this to interact with the AI Engine
-	  hardware, as well as for the memory allocation.
-	  Say 'y' only for platforms with the AI Engine IP.
-
 endif

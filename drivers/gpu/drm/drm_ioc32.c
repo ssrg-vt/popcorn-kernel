@@ -31,13 +31,10 @@
 #include <linux/ratelimit.h>
 #include <linux/export.h>
 
-#include <drm/drm_agpsupport.h>
-#include <drm/drm_file.h>
-#include <drm/drm_print.h>
-
-#include "drm_crtc_internal.h"
-#include "drm_internal.h"
+#include <drm/drmP.h>
 #include "drm_legacy.h"
+#include "drm_internal.h"
+#include "drm_crtc_internal.h"
 
 #define DRM_IOCTL_VERSION32		DRM_IOWR(0x00, drm_version32_t)
 #define DRM_IOCTL_GET_UNIQUE32		DRM_IOWR(0x01, drm_unique32_t)
@@ -108,7 +105,7 @@ static int compat_drm_version(struct file *file, unsigned int cmd,
 		.desc = compat_ptr(v32.desc),
 	};
 	err = drm_ioctl_kernel(file, drm_version, &v,
-			       DRM_RENDER_ALLOW);
+			       DRM_UNLOCKED|DRM_RENDER_ALLOW);
 	if (err)
 		return err;
 
@@ -142,7 +139,7 @@ static int compat_drm_getunique(struct file *file, unsigned int cmd,
 		.unique = compat_ptr(uq32.unique),
 	};
 
-	err = drm_ioctl_kernel(file, drm_getunique, &uq, 0);
+	err = drm_ioctl_kernel(file, drm_getunique, &uq, DRM_UNLOCKED);
 	if (err)
 		return err;
 
@@ -181,7 +178,7 @@ static int compat_drm_getmap(struct file *file, unsigned int cmd,
 		return -EFAULT;
 
 	map.offset = m32.offset;
-	err = drm_ioctl_kernel(file, drm_legacy_getmap_ioctl, &map, 0);
+	err = drm_ioctl_kernel(file, drm_legacy_getmap_ioctl, &map, DRM_UNLOCKED);
 	if (err)
 		return err;
 
@@ -267,7 +264,7 @@ static int compat_drm_getclient(struct file *file, unsigned int cmd,
 
 	client.idx = c32.idx;
 
-	err = drm_ioctl_kernel(file, drm_getclient, &client, 0);
+	err = drm_ioctl_kernel(file, drm_getclient, &client, DRM_UNLOCKED);
 	if (err)
 		return err;
 
@@ -297,7 +294,7 @@ static int compat_drm_getstats(struct file *file, unsigned int cmd,
 	drm_stats32_t __user *argp = (void __user *)arg;
 	int err;
 
-	err = drm_ioctl_kernel(file, drm_noop, NULL, 0);
+	err = drm_ioctl_kernel(file, drm_noop, NULL, DRM_UNLOCKED);
 	if (err)
 		return err;
 
@@ -895,7 +892,8 @@ static int compat_drm_mode_addfb2(struct file *file, unsigned int cmd,
 			   sizeof(req64.modifier)))
 		return -EFAULT;
 
-	err = drm_ioctl_kernel(file, drm_mode_addfb2, &req64, 0);
+	err = drm_ioctl_kernel(file, drm_mode_addfb2, &req64,
+			       DRM_UNLOCKED);
 	if (err)
 		return err;
 

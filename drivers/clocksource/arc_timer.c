@@ -13,7 +13,6 @@
  */
 
 #include <linux/interrupt.h>
-#include <linux/bits.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/clocksource.h>
@@ -140,7 +139,7 @@ static u64 arc_read_rtc(struct clocksource *cs)
 		l = read_aux_reg(AUX_RTC_LOW);
 		h = read_aux_reg(AUX_RTC_HIGH);
 		status = read_aux_reg(AUX_RTC_CTRL);
-	} while (!(status & BIT(31)));
+	} while (!(status & _BITUL(31)));
 
 	return (((u64)h) << 32) | l;
 }

@@ -39,7 +39,7 @@ Revision and Copyright
 **********************
 Authors:
 
-- Verkuil, Hans <hverkuil-cisco@xs4all.nl>
+- Verkuil, Hans <hans.verkuil@cisco.com>
 
  - Initial version.
 

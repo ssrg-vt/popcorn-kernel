@@ -534,7 +534,8 @@ static int picolcd_probe(struct hid_device *hdev,
 	data = kzalloc(sizeof(struct picolcd_data), GFP_KERNEL);
 	if (data == NULL) {
 		hid_err(hdev, "can't allocate space for Minibox PicoLCD device data\n");
-		return -ENOMEM;
+		error = -ENOMEM;
+		goto err_no_cleanup;
 	}
 
 	spin_lock_init(&data->lock);
@@ -596,6 +597,9 @@ err_cleanup_hid_hw:
 	hid_hw_stop(hdev);
 err_cleanup_data:
 	kfree(data);
+err_no_cleanup:
+	hid_set_drvdata(hdev, NULL);
+
 	return error;
 }
 
@@ -631,6 +635,7 @@ static void picolcd_remove(struct hid_device *hdev)
 	picolcd_exit_cir(data);
 	picolcd_exit_keys(data);
 
+	hid_set_drvdata(hdev, NULL);
 	mutex_destroy(&data->mutex);
 	/* Finally, clean up the picolcd data itself */
 	kfree(data);

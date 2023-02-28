@@ -1,7 +1,6 @@
 #!/bin/sh
 # Add vfs_getname probe to get syscall args filenames
-
-# SPDX-License-Identifier: GPL-2.0
+#
 # Arnaldo Carvalho de Melo <acme@kernel.org>, 2017
 
 . $(dirname $0)/lib/probe.sh

@@ -488,6 +488,7 @@ static void mts_command_done( struct urb *transfer )
 
 static void mts_do_sg (struct urb* transfer)
 {
+	struct scatterlist * sg;
 	int status = transfer->status;
 	MTS_INT_INIT();
 
@@ -499,12 +500,13 @@ static void mts_do_sg (struct urb* transfer)
 		mts_transfer_cleanup(transfer);
         }
 
-	context->curr_sg = sg_next(context->curr_sg);
+	sg = scsi_sglist(context->srb);
+	context->fragment++;
 	mts_int_submit_urb(transfer,
 			   context->data_pipe,
-			   sg_virt(context->curr_sg),
-			   context->curr_sg->length,
-			   sg_is_last(context->curr_sg) ?
+			   sg_virt(&sg[context->fragment]),
+			   sg[context->fragment].length,
+			   context->fragment + 1 == scsi_sg_count(context->srb) ?
 			   mts_data_done : mts_do_sg);
 }
 
@@ -524,20 +526,22 @@ static void
 mts_build_transfer_context(struct scsi_cmnd *srb, struct mts_desc* desc)
 {
 	int pipe;
-
+	struct scatterlist * sg;
+	
 	MTS_DEBUG_GOT_HERE();
 
 	desc->context.instance = desc;
 	desc->context.srb = srb;
+	desc->context.fragment = 0;
 
 	if (!scsi_bufflen(srb)) {
 		desc->context.data = NULL;
 		desc->context.data_length = 0;
 		return;
 	} else {
-		desc->context.curr_sg = scsi_sglist(srb);
-		desc->context.data = sg_virt(desc->context.curr_sg);
-		desc->context.data_length = desc->context.curr_sg->length;
+		sg = scsi_sglist(srb);
+		desc->context.data = sg_virt(&sg[0]);
+		desc->context.data_length = sg[0].length;
 	}
 
 
@@ -716,10 +720,6 @@ static int mts_usb_probe(struct usb_interface *intf,
 
 	}
 
-	if (ep_in_current != &ep_in_set[2]) {
-		MTS_WARNING("couldn't find two input bulk endpoints. Bailing out.\n");
-		return -ENODEV;
-	}
 
 	if ( ep_out == -1 ) {
 		MTS_WARNING( "couldn't find an output bulk endpoint. Bailing out.\n" );

@@ -26,13 +26,10 @@
  * Authors: Dave Airlie <airlied@redhat.com>
  */
 
-#include <linux/delay.h>
-#include <linux/pci.h>
-
-#include <drm/drm_print.h>
+#include <drm/drmP.h>
+#include "ast_drv.h"
 
 #include "ast_dram_tables.h"
-#include "ast_drv.h"
 
 static void ast_post_chip_2300(struct drm_device *dev);
 static void ast_post_chip_2500(struct drm_device *dev);

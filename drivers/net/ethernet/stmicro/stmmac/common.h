@@ -75,7 +75,6 @@ struct stmmac_extra_stats {
 	unsigned long rx_missed_cntr;
 	unsigned long rx_overflow_cntr;
 	unsigned long rx_vlan;
-	unsigned long rx_split_hdr_pkt_n;
 	/* Tx/Rx IRQ error info */
 	unsigned long tx_undeflow_irq;
 	unsigned long tx_process_stopped_irq;
@@ -247,13 +246,12 @@ struct stmmac_safety_stats {
 
 /* Max/Min RI Watchdog Timer count value */
 #define MAX_DMA_RIWT		0xff
-#define MIN_DMA_RIWT		0x10
+#define MIN_DMA_RIWT		0x20
 /* Tx coalesce parameters */
 #define STMMAC_COAL_TX_TIMER	1000
 #define STMMAC_MAX_COAL_TX_TICK	100000
 #define STMMAC_TX_MAX_FRAMES	256
 #define STMMAC_TX_FRAMES	1
-#define STMMAC_RX_FRAMES	25
 
 /* Packets types */
 enum packets_types {
@@ -327,7 +325,6 @@ struct dma_features {
 	/* 802.3az - Energy-Efficient Ethernet (EEE) */
 	unsigned int eee;
 	unsigned int av;
-	unsigned int hash_tb_sz;
 	unsigned int tsoen;
 	/* TX and RX csum */
 	unsigned int tx_coe;
@@ -354,14 +351,6 @@ struct dma_features {
 	unsigned int frpsel;
 	unsigned int frpbs;
 	unsigned int frpes;
-	unsigned int addr64;
-	unsigned int rssen;
-	unsigned int vlhash;
-	unsigned int sphen;
-	unsigned int vlins;
-	unsigned int dvlan;
-	unsigned int l3l4fnum;
-	unsigned int arpoffsel;
 };
 
 /* GMAC TX FIFO is 8K, Rx FIFO is 16K */
@@ -389,16 +378,6 @@ struct dma_features {
 
 #define JUMBO_LEN		9000
 
-/* Receive Side Scaling */
-#define STMMAC_RSS_HASH_KEY_SIZE	40
-#define STMMAC_RSS_MAX_TABLE_SIZE	256
-
-/* VLAN */
-#define STMMAC_VLAN_NONE	0x0
-#define STMMAC_VLAN_REMOVE	0x1
-#define STMMAC_VLAN_INSERT	0x2
-#define STMMAC_VLAN_REPLACE	0x3
-
 extern const struct stmmac_desc_ops enh_desc_ops;
 extern const struct stmmac_desc_ops ndesc_ops;
 
@@ -413,12 +392,8 @@ struct mac_link {
 	u32 speed100;
 	u32 speed1000;
 	u32 speed2500;
+	u32 speed10000;
 	u32 duplex;
-	struct {
-		u32 speed2500;
-		u32 speed5000;
-		u32 speed10000;
-	} xgmii;
 };
 
 struct mii_regs {
@@ -439,13 +414,12 @@ struct mac_device_info {
 	const struct stmmac_mode_ops *mode;
 	const struct stmmac_hwtimestamp *ptp;
 	const struct stmmac_tc_ops *tc;
-	const struct stmmac_mmc_ops *mmc;
 	struct mii_regs mii;	/* MII register Addresses */
 	struct mac_link link;
 	void __iomem *pcsr;     /* vpointer to device CSRs */
-	unsigned int multicast_filter_bins;
-	unsigned int unicast_filter_entries;
-	unsigned int mcast_bits_log2;
+	int multicast_filter_bins;
+	int unicast_filter_entries;
+	int mcast_bits_log2;
 	unsigned int rx_csum;
 	unsigned int pcs;
 	unsigned int pmt;

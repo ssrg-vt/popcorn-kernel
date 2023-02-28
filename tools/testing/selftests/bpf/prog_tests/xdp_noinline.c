@@ -31,8 +31,10 @@ void test_xdp_noinline(void)
 	u32 *magic = (u32 *)buf;
 
 	err = bpf_prog_load(file, BPF_PROG_TYPE_XDP, &obj, &prog_fd);
-	if (CHECK_FAIL(err))
+	if (err) {
+		error_cnt++;
 		return;
+	}
 
 	map_fd = bpf_find_map(__func__, obj, "vip_map");
 	if (map_fd < 0)
@@ -71,10 +73,9 @@ void test_xdp_noinline(void)
 		bytes += stats[i].bytes;
 		pkts += stats[i].pkts;
 	}
-	if (CHECK_FAIL(bytes != MAGIC_BYTES * NUM_ITER * 2 ||
-		       pkts != NUM_ITER * 2)) {
-		printf("test_xdp_noinline:FAIL:stats %lld %lld\n",
-		       bytes, pkts);
+	if (bytes != MAGIC_BYTES * NUM_ITER * 2 || pkts != NUM_ITER * 2) {
+		error_cnt++;
+		printf("test_xdp_noinline:FAIL:stats %lld %lld\n", bytes, pkts);
 	}
 out:
 	bpf_object__close(obj);

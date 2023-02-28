@@ -6,7 +6,7 @@
 #ifndef __LLVM_UTILS_H
 #define __LLVM_UTILS_H
 
-#include <stdbool.h>
+#include "debug.h"
 
 struct llvm_param {
 	/* Path of clang executable */

@@ -558,14 +558,7 @@ void mite_prep_dma(struct mite_channel *mite_chan,
 }
 EXPORT_SYMBOL_GPL(mite_prep_dma);
 
-/**
- * mite_request_channel_in_range() - Request a MITE dma channel.
- * @mite: MITE device.
- * @ring: MITE dma ring.
- * @min_channel: minimum channel index to use.
- * @max_channel: maximum channel index to use.
- */
-struct mite_channel *mite_request_channel_in_range(struct mite *mite,
+static struct mite_channel *__mite_request_channel(struct mite *mite,
 						   struct mite_ring *ring,
 						   unsigned int min_channel,
 						   unsigned int max_channel)
@@ -590,6 +583,21 @@ struct mite_channel *mite_request_channel_in_range(struct mite *mite,
 	spin_unlock_irqrestore(&mite->lock, flags);
 	return mite_chan;
 }
+
+/**
+ * mite_request_channel_in_range() - Request a MITE dma channel.
+ * @mite: MITE device.
+ * @ring: MITE dma ring.
+ * @min_channel: minimum channel index to use.
+ * @max_channel: maximum channel index to use.
+ */
+struct mite_channel *mite_request_channel_in_range(struct mite *mite,
+						   struct mite_ring *ring,
+						   unsigned int min_channel,
+						   unsigned int max_channel)
+{
+	return __mite_request_channel(mite, ring, min_channel, max_channel);
+}
 EXPORT_SYMBOL_GPL(mite_request_channel_in_range);
 
 /**
@@ -600,8 +608,7 @@ EXPORT_SYMBOL_GPL(mite_request_channel_in_range);
 struct mite_channel *mite_request_channel(struct mite *mite,
 					  struct mite_ring *ring)
 {
-	return mite_request_channel_in_range(mite, ring, 0,
-					     mite->num_channels - 1);
+	return __mite_request_channel(mite, ring, 0, mite->num_channels - 1);
 }
 EXPORT_SYMBOL_GPL(mite_request_channel);
 

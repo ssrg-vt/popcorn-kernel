@@ -9,9 +9,9 @@
 
 #include "main.h"
 
-#include <linux/netlink.h>
-#include <linux/seq_file.h>
-#include <linux/skbuff.h>
+struct netlink_callback;
+struct seq_file;
+struct sk_buff;
 
 /**
  * enum batadv_forw_mode - the way a packet should be forwarded as

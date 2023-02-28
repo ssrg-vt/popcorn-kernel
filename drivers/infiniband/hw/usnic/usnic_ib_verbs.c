@@ -194,7 +194,7 @@ find_free_vf_and_create_qp_grp(struct usnic_ib_dev *us_ibdev,
 			return ERR_CAST(dev_list);
 		for (i = 0; dev_list[i]; i++) {
 			dev = dev_list[i];
-			vf = dev_get_drvdata(dev);
+			vf = pci_get_drvdata(to_pci_dev(dev));
 			spin_lock(&vf->lock);
 			vnic = vf->vnic;
 			if (!usnic_vnic_check_room(vnic, res_spec)) {
@@ -356,14 +356,13 @@ int usnic_ib_query_port(struct ib_device *ibdev, u8 port,
 
 	if (!us_ibdev->ufdev->link_up) {
 		props->state = IB_PORT_DOWN;
-		props->phys_state = IB_PORT_PHYS_STATE_DISABLED;
+		props->phys_state = 3;
 	} else if (!us_ibdev->ufdev->inaddr) {
 		props->state = IB_PORT_INIT;
-		props->phys_state =
-			IB_PORT_PHYS_STATE_PORT_CONFIGURATION_TRAINING;
+		props->phys_state = 4;
 	} else {
 		props->state = IB_PORT_ACTIVE;
-		props->phys_state = IB_PORT_PHYS_STATE_LINK_UP;
+		props->phys_state = 5;
 	}
 
 	props->port_cap_flags = 0;
@@ -588,18 +587,28 @@ out_unlock:
 	return status;
 }
 
-int usnic_ib_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
-		       struct ib_udata *udata)
+struct ib_cq *usnic_ib_create_cq(struct ib_device *ibdev,
+				 const struct ib_cq_init_attr *attr,
+				 struct ib_udata *udata)
 {
-	if (attr->flags)
-		return -EINVAL;
+	struct ib_cq *cq;
 
-	return 0;
+	usnic_dbg("\n");
+	if (attr->flags)
+		return ERR_PTR(-EINVAL);
+
+	cq = kzalloc(sizeof(*cq), GFP_KERNEL);
+	if (!cq)
+		return ERR_PTR(-EBUSY);
+
+	return cq;
 }
 
-void usnic_ib_destroy_cq(struct ib_cq *cq, struct ib_udata *udata)
+int usnic_ib_destroy_cq(struct ib_cq *cq, struct ib_udata *udata)
 {
-	return;
+	usnic_dbg("\n");
+	kfree(cq);
+	return 0;
 }
 
 struct ib_mr *usnic_ib_reg_mr(struct ib_pd *pd, u64 start, u64 length,

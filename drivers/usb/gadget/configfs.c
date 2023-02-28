@@ -61,8 +61,6 @@ struct gadget_info {
 	bool use_os_desc;
 	char b_vendor_code;
 	char qw_sign[OS_STRING_QW_SIGN_LEN];
-	spinlock_t spinlock;
-	bool unbind;
 };
 
 static inline struct gadget_info *to_gadget_info(struct config_item *item)
@@ -231,47 +229,6 @@ static ssize_t gadget_dev_desc_bcdUSB_store(struct config_item *item,
 	return len;
 }
 
-static ssize_t gadget_dev_desc_max_speed_show(struct config_item *item,
-					      char *page)
-{
-	struct gadget_info *gi = to_gadget_info(item);
-	enum usb_device_speed max_speed = gi->composite.gadget_driver.max_speed;
-
-	return sprintf(page, "%s\n", usb_speed_string(max_speed));
-}
-
-static ssize_t gadget_dev_desc_max_speed_store(struct config_item *item,
-					       const char *page, size_t len)
-{
-	struct gadget_info *gi = to_gadget_info(item);
-	char *name;
-	int ret;
-	const char * const speed_names[] = {
-		[USB_SPEED_UNKNOWN] = "UNKNOWN",
-		[USB_SPEED_LOW] = "low-speed",
-		[USB_SPEED_FULL] = "full-speed",
-		[USB_SPEED_HIGH] = "high-speed",
-		[USB_SPEED_WIRELESS] = "wireless",
-		[USB_SPEED_SUPER] = "super-speed",
-		[USB_SPEED_SUPER_PLUS] = "super-speed-plus",
-	};
-
-	name = kstrdup(page, GFP_KERNEL);
-	if (!name)
-		return -ENOMEM;
-	if (name[len - 1] == '\n')
-		name[len - 1] = '\0';
-
-	ret = match_string(speed_names, ARRAY_SIZE(speed_names), name);
-
-	if (ret != -EINVAL) {
-		gi->composite.gadget_driver.max_speed = ret;
-		return len;
-	}
-
-	return ret;
-}
-
 static ssize_t gadget_dev_desc_UDC_show(struct config_item *item, char *page)
 {
 	char *udc_name = to_gadget_info(item)->composite.gadget_driver.udc_name;
@@ -342,7 +299,6 @@ CONFIGFS_ATTR(gadget_dev_desc_, idVendor);
 CONFIGFS_ATTR(gadget_dev_desc_, idProduct);
 CONFIGFS_ATTR(gadget_dev_desc_, bcdDevice);
 CONFIGFS_ATTR(gadget_dev_desc_, bcdUSB);
-CONFIGFS_ATTR(gadget_dev_desc_, max_speed);
 CONFIGFS_ATTR(gadget_dev_desc_, UDC);
 
 static struct configfs_attribute *gadget_root_attrs[] = {
@@ -354,7 +310,6 @@ static struct configfs_attribute *gadget_root_attrs[] = {
 	&gadget_dev_desc_attr_idProduct,
 	&gadget_dev_desc_attr_bcdDevice,
 	&gadget_dev_desc_attr_bcdUSB,
-	&gadget_dev_desc_attr_max_speed,
 	&gadget_dev_desc_attr_UDC,
 	NULL,
 };
@@ -1289,7 +1244,6 @@ static int configfs_composite_bind(struct usb_gadget *gadget,
 	int				ret;
 
 	/* the gi->lock is hold by the caller */
-	gi->unbind = 0;
 	cdev->gadget = gadget;
 	set_gadget_data(gadget, cdev);
 	ret = composite_dev_prepare(composite, cdev);
@@ -1422,128 +1376,31 @@ static void configfs_composite_unbind(struct usb_gadget *gadget)
 {
 	struct usb_composite_dev	*cdev;
 	struct gadget_info		*gi;
-	unsigned long flags;
 
 	/* the gi->lock is hold by the caller */
 
 	cdev = get_gadget_data(gadget);
 	gi = container_of(cdev, struct gadget_info, cdev);
-	spin_lock_irqsave(&gi->spinlock, flags);
-	gi->unbind = 1;
-	spin_unlock_irqrestore(&gi->spinlock, flags);
 
 	kfree(otg_desc[0]);
 	otg_desc[0] = NULL;
 	purge_configs_funcs(gi);
 	composite_dev_cleanup(cdev);
 	usb_ep_autoconfig_reset(cdev->gadget);
-	spin_lock_irqsave(&gi->spinlock, flags);
 	cdev->gadget = NULL;
 	set_gadget_data(gadget, NULL);
-	spin_unlock_irqrestore(&gi->spinlock, flags);
-}
-
-static int configfs_composite_setup(struct usb_gadget *gadget,
-		const struct usb_ctrlrequest *ctrl)
-{
-	struct usb_composite_dev *cdev;
-	struct gadget_info *gi;
-	unsigned long flags;
-	int ret;
-
-	cdev = get_gadget_data(gadget);
-	if (!cdev)
-		return 0;
-
-	gi = container_of(cdev, struct gadget_info, cdev);
-	spin_lock_irqsave(&gi->spinlock, flags);
-	cdev = get_gadget_data(gadget);
-	if (!cdev || gi->unbind) {
-		spin_unlock_irqrestore(&gi->spinlock, flags);
-		return 0;
-	}
-
-	ret = composite_setup(gadget, ctrl);
-	spin_unlock_irqrestore(&gi->spinlock, flags);
-	return ret;
-}
-
-static void configfs_composite_disconnect(struct usb_gadget *gadget)
-{
-	struct usb_composite_dev *cdev;
-	struct gadget_info *gi;
-	unsigned long flags;
-
-	cdev = get_gadget_data(gadget);
-	if (!cdev)
-		return;
-
-	gi = container_of(cdev, struct gadget_info, cdev);
-	spin_lock_irqsave(&gi->spinlock, flags);
-	cdev = get_gadget_data(gadget);
-	if (!cdev || gi->unbind) {
-		spin_unlock_irqrestore(&gi->spinlock, flags);
-		return;
-	}
-
-	composite_disconnect(gadget);
-	spin_unlock_irqrestore(&gi->spinlock, flags);
-}
-
-static void configfs_composite_suspend(struct usb_gadget *gadget)
-{
-	struct usb_composite_dev *cdev;
-	struct gadget_info *gi;
-	unsigned long flags;
-
-	cdev = get_gadget_data(gadget);
-	if (!cdev)
-		return;
-
-	gi = container_of(cdev, struct gadget_info, cdev);
-	spin_lock_irqsave(&gi->spinlock, flags);
-	cdev = get_gadget_data(gadget);
-	if (!cdev || gi->unbind) {
-		spin_unlock_irqrestore(&gi->spinlock, flags);
-		return;
-	}
-
-	composite_suspend(gadget);
-	spin_unlock_irqrestore(&gi->spinlock, flags);
-}
-
-static void configfs_composite_resume(struct usb_gadget *gadget)
-{
-	struct usb_composite_dev *cdev;
-	struct gadget_info *gi;
-	unsigned long flags;
-
-	cdev = get_gadget_data(gadget);
-	if (!cdev)
-		return;
-
-	gi = container_of(cdev, struct gadget_info, cdev);
-	spin_lock_irqsave(&gi->spinlock, flags);
-	cdev = get_gadget_data(gadget);
-	if (!cdev || gi->unbind) {
-		spin_unlock_irqrestore(&gi->spinlock, flags);
-		return;
-	}
-
-	composite_resume(gadget);
-	spin_unlock_irqrestore(&gi->spinlock, flags);
 }
 
 static const struct usb_gadget_driver configfs_driver_template = {
 	.bind           = configfs_composite_bind,
 	.unbind         = configfs_composite_unbind,
 
-	.setup          = configfs_composite_setup,
-	.reset          = configfs_composite_disconnect,
-	.disconnect     = configfs_composite_disconnect,
+	.setup          = composite_setup,
+	.reset          = composite_disconnect,
+	.disconnect     = composite_disconnect,
 
-	.suspend	= configfs_composite_suspend,
-	.resume		= configfs_composite_resume,
+	.suspend	= composite_suspend,
+	.resume		= composite_resume,
 
 	.max_speed	= USB_SPEED_SUPER,
 	.driver = {
@@ -1585,7 +1442,7 @@ static struct config_group *gadgets_make(
 	gi->composite.unbind = configfs_do_nothing;
 	gi->composite.suspend = NULL;
 	gi->composite.resume = NULL;
-	gi->composite.max_speed = gi->composite.gadget_driver.max_speed;
+	gi->composite.max_speed = USB_SPEED_SUPER;
 
 	mutex_init(&gi->lock);
 	INIT_LIST_HEAD(&gi->string_list);

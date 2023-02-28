@@ -284,8 +284,10 @@ static int sprd_wdt_probe(struct platform_device *pdev)
 	}
 
 	wdt->irq = platform_get_irq(pdev, 0);
-	if (wdt->irq < 0)
+	if (wdt->irq < 0) {
+		dev_err(dev, "failed to get IRQ resource\n");
 		return wdt->irq;
+	}
 
 	ret = devm_request_irq(dev, wdt->irq, sprd_wdt_isr, IRQF_NO_SUSPEND,
 			       "sprd-wdt", (void *)wdt);
@@ -318,6 +320,7 @@ static int sprd_wdt_probe(struct platform_device *pdev)
 	ret = devm_watchdog_register_device(dev, &wdt->wdd);
 	if (ret) {
 		sprd_wdt_disable(wdt);
+		dev_err(dev, "failed to register watchdog\n");
 		return ret;
 	}
 	platform_set_drvdata(pdev, wdt);

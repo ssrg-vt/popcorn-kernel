@@ -257,8 +257,6 @@ static int generic_suspend(struct usb_device *udev, pm_message_t msg)
 	else
 		rc = usb_port_suspend(udev, msg);
 
-	if (rc == 0)
-		usbfs_notify_suspend(udev);
 	return rc;
 }
 
@@ -275,9 +273,6 @@ static int generic_resume(struct usb_device *udev, pm_message_t msg)
 		rc = hcd_bus_resume(udev, msg);
 	else
 		rc = usb_port_resume(udev, msg);
-
-	if (rc == 0)
-		usbfs_notify_resume(udev);
 	return rc;
 }
 

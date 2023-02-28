@@ -18,7 +18,8 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(
 	struct lima_device *ldev = to_lima_dev(dev);
 	struct lima_bo *bo;
 
-	bo = lima_bo_create(ldev, attach->dmabuf->size, 0, sgt);
+	bo = lima_bo_create(ldev, attach->dmabuf->size, 0, sgt,
+			    attach->dmabuf->resv);
 	if (IS_ERR(bo))
 		return ERR_CAST(bo);
 

@@ -660,6 +660,7 @@ static int omap_hdq_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct hdq_data *hdq_data;
+	struct resource *res;
 	int ret, irq;
 	u8 rev;
 	const char *mode;
@@ -673,7 +674,8 @@ static int omap_hdq_probe(struct platform_device *pdev)
 	hdq_data->dev = dev;
 	platform_set_drvdata(pdev, hdq_data);
 
-	hdq_data->hdq_base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	hdq_data->hdq_base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(hdq_data->hdq_base))
 		return PTR_ERR(hdq_data->hdq_base);
 

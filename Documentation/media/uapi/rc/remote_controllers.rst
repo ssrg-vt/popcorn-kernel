@@ -27,7 +27,6 @@ Part III - Remote Controller API
 
     rc-intro
     rc-sysfs-nodes
-    rc-protos
     rc-tables
     rc-table-change
     lirc-dev

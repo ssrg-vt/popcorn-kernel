@@ -39,6 +39,7 @@ FILE *outf;
 int *fd_percpu;
 struct timeval interval_tv = {5, 0};
 struct timespec interval_ts = {5, 0};
+struct timespec one_msec = {0, 1000000};
 unsigned int num_iterations;
 unsigned int debug;
 unsigned int quiet;
@@ -59,7 +60,6 @@ unsigned int do_irtl_hsw;
 unsigned int units = 1000000;	/* MHz etc */
 unsigned int genuine_intel;
 unsigned int authentic_amd;
-unsigned int hygon_genuine;
 unsigned int max_level, max_extended_level;
 unsigned int has_invariant_tsc;
 unsigned int do_nhm_platform_info;
@@ -100,7 +100,6 @@ unsigned int has_hwp_epp;		/* IA32_HWP_REQUEST[bits 31:24] */
 unsigned int has_hwp_pkg;		/* IA32_HWP_REQUEST_PKG */
 unsigned int has_misc_feature_control;
 unsigned int first_counter_read = 1;
-int ignore_stdin;
 
 #define RAPL_PKG		(1 << 0)
 					/* 0x610 MSR_PKG_POWER_LIMIT */
@@ -167,7 +166,6 @@ size_t cpu_present_setsize, cpu_affinity_setsize, cpu_subset_size;
 struct thread_data {
 	struct timeval tv_begin;
 	struct timeval tv_end;
-	struct timeval tv_delta;
 	unsigned long long tsc;
 	unsigned long long aperf;
 	unsigned long long mperf;
@@ -852,6 +850,7 @@ int dump_counters(struct thread_data *t, struct core_data *c,
 		outp += sprintf(outp, "pc8: %016llX\n", p->pc8);
 		outp += sprintf(outp, "pc9: %016llX\n", p->pc9);
 		outp += sprintf(outp, "pc10: %016llX\n", p->pc10);
+		outp += sprintf(outp, "pc10: %016llX\n", p->pc10);
 		outp += sprintf(outp, "cpu_lpi: %016llX\n", p->cpu_lpi);
 		outp += sprintf(outp, "sys_lpi: %016llX\n", p->sys_lpi);
 		outp += sprintf(outp, "Joules PKG: %0X\n", p->energy_pkg);
@@ -913,7 +912,7 @@ int format_counters(struct thread_data *t, struct core_data *c,
 	if (DO_BIC(BIC_TOD))
 		outp += sprintf(outp, "%10ld.%06ld\t", t->tv_end.tv_sec, t->tv_end.tv_usec);
 
-	interval_float = t->tv_delta.tv_sec + t->tv_delta.tv_usec/1000000.0;
+	interval_float = tv_delta.tv_sec + tv_delta.tv_usec/1000000.0;
 
 	tsc = t->tsc * tsc_tweak;
 
@@ -1319,7 +1318,6 @@ delta_thread(struct thread_data *new, struct thread_data *old,
 	 * over-write old w/ new so we can print end of interval values
 	 */
 
-	timersub(&new->tv_begin, &old->tv_begin, &old->tv_delta);
 	old->tv_begin = new->tv_begin;
 	old->tv_end = new->tv_end;
 
@@ -1416,8 +1414,6 @@ void clear_counters(struct thread_data *t, struct core_data *c, struct pkg_data 
 	t->tv_begin.tv_usec = 0;
 	t->tv_end.tv_sec = 0;
 	t->tv_end.tv_usec = 0;
-	t->tv_delta.tv_sec = 0;
-	t->tv_delta.tv_usec = 0;
 
 	t->tsc = 0;
 	t->aperf = 0;
@@ -1587,9 +1583,6 @@ void compute_average(struct thread_data *t, struct core_data *c,
 
 	for_all_cpus(sum_counters, t, c, p);
 
-	/* Use the global time delta for the average. */
-	average.threads.tv_delta = tv_delta;
-
 	average.threads.tsc /= topo.num_cpus;
 	average.threads.aperf /= topo.num_cpus;
 	average.threads.mperf /= topo.num_cpus;
@@ -1731,7 +1724,7 @@ void get_apic_id(struct thread_data *t)
 	if (!DO_BIC(BIC_X2APIC))
 		return;
 
-	if (authentic_amd || hygon_genuine) {
+	if (authentic_amd) {
 		unsigned int topology_extensions;
 
 		if (max_extended_level < 0x8000001e)
@@ -1779,12 +1772,12 @@ int get_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 	struct msr_counter *mp;
 	int i;
 
+	gettimeofday(&t->tv_begin, (struct timezone *)NULL);
+
 	if (cpu_migrate(cpu)) {
 		fprintf(outf, "Could not migrate to CPU %d\n", cpu);
 		return -1;
 	}
-
-	gettimeofday(&t->tv_begin, (struct timezone *)NULL);
 
 	if (first_counter_read)
 		get_apic_id(t);
@@ -2168,7 +2161,7 @@ int has_turbo_ratio_group_limits(int family, int model)
 	switch (model) {
 	case INTEL_FAM6_ATOM_GOLDMONT:
 	case INTEL_FAM6_SKYLAKE_X:
-	case INTEL_FAM6_ATOM_GOLDMONT_D:
+	case INTEL_FAM6_ATOM_GOLDMONT_X:
 		return 1;
 	}
 	return 0;
@@ -3005,6 +2998,8 @@ static void signal_handler (int signal)
 			fprintf(stderr, "SIGUSR1\n");
 		break;
 	}
+	/* make sure this manually-invoked interval is at least 1ms long */
+	nanosleep(&one_msec, NULL);
 }
 
 void setup_signal_handler(void)
@@ -3023,38 +3018,29 @@ void setup_signal_handler(void)
 
 void do_sleep(void)
 {
-	struct timeval tout;
-	struct timespec rest;
+	struct timeval select_timeout;
 	fd_set readfds;
 	int retval;
 
 	FD_ZERO(&readfds);
 	FD_SET(0, &readfds);
 
-	if (ignore_stdin) {
+	if (!isatty(fileno(stdin))) {
 		nanosleep(&interval_ts, NULL);
 		return;
 	}
 
-	tout = interval_tv;
-	retval = select(1, &readfds, NULL, NULL, &tout);
+	select_timeout = interval_tv;
+	retval = select(1, &readfds, NULL, NULL, &select_timeout);
 
 	if (retval == 1) {
 		switch (getc(stdin)) {
 		case 'q':
 			exit_requested = 1;
 			break;
-		case EOF:
-			/*
-			 * 'stdin' is a pipe closed on the other end. There
-			 * won't be any further input.
-			 */
-			ignore_stdin = 1;
-			/* Sleep the rest of the time */
-			rest.tv_sec = (tout.tv_sec + tout.tv_usec / 1000000);
-			rest.tv_nsec = (tout.tv_usec % 1000000) * 1000;
-			nanosleep(&rest, NULL);
 		}
+		/* make sure this manually-invoked interval is at least 1ms long */
+		nanosleep(&one_msec, NULL);
 	}
 }
 
@@ -3234,15 +3220,15 @@ int probe_nhm_msrs(unsigned int family, unsigned int model)
 		pkg_cstate_limits = snb_pkg_cstate_limits;
 		has_misc_feature_control = 1;
 		break;
-	case INTEL_FAM6_HASWELL:	/* HSW */
-	case INTEL_FAM6_HASWELL_G:	/* HSW */
+	case INTEL_FAM6_HASWELL_CORE:	/* HSW */
 	case INTEL_FAM6_HASWELL_X:	/* HSX */
-	case INTEL_FAM6_HASWELL_L:	/* HSW */
-	case INTEL_FAM6_BROADWELL:	/* BDW */
-	case INTEL_FAM6_BROADWELL_G:	/* BDW */
+	case INTEL_FAM6_HASWELL_ULT:	/* HSW */
+	case INTEL_FAM6_HASWELL_GT3E:	/* HSW */
+	case INTEL_FAM6_BROADWELL_CORE:	/* BDW */
+	case INTEL_FAM6_BROADWELL_GT3E:	/* BDW */
 	case INTEL_FAM6_BROADWELL_X:	/* BDX */
-	case INTEL_FAM6_SKYLAKE_L:	/* SKL */
-	case INTEL_FAM6_CANNONLAKE_L:	/* CNL */
+	case INTEL_FAM6_SKYLAKE_MOBILE:	/* SKL */
+	case INTEL_FAM6_CANNONLAKE_MOBILE:	/* CNL */
 		pkg_cstate_limits = hsw_pkg_cstate_limits;
 		has_misc_feature_control = 1;
 		break;
@@ -3252,7 +3238,7 @@ int probe_nhm_msrs(unsigned int family, unsigned int model)
 		break;
 	case INTEL_FAM6_ATOM_SILVERMONT:	/* BYT */
 		no_MSR_MISC_PWR_MGMT = 1;
-	case INTEL_FAM6_ATOM_SILVERMONT_D:	/* AVN */
+	case INTEL_FAM6_ATOM_SILVERMONT_X:	/* AVN */
 		pkg_cstate_limits = slv_pkg_cstate_limits;
 		break;
 	case INTEL_FAM6_ATOM_AIRMONT:	/* AMT */
@@ -3264,7 +3250,7 @@ int probe_nhm_msrs(unsigned int family, unsigned int model)
 		break;
 	case INTEL_FAM6_ATOM_GOLDMONT:	/* BXT */
 	case INTEL_FAM6_ATOM_GOLDMONT_PLUS:
-	case INTEL_FAM6_ATOM_GOLDMONT_D:	/* DNV */
+	case INTEL_FAM6_ATOM_GOLDMONT_X:	/* DNV */
 		pkg_cstate_limits = glm_pkg_cstate_limits;
 		break;
 	default:
@@ -3307,7 +3293,7 @@ int is_dnv(unsigned int family, unsigned int model)
 		return 0;
 
 	switch (model) {
-	case INTEL_FAM6_ATOM_GOLDMONT_D:
+	case INTEL_FAM6_ATOM_GOLDMONT_X:
 		return 1;
 	}
 	return 0;
@@ -3431,15 +3417,15 @@ int has_config_tdp(unsigned int family, unsigned int model)
 
 	switch (model) {
 	case INTEL_FAM6_IVYBRIDGE:	/* IVB */
-	case INTEL_FAM6_HASWELL:	/* HSW */
+	case INTEL_FAM6_HASWELL_CORE:	/* HSW */
 	case INTEL_FAM6_HASWELL_X:	/* HSX */
-	case INTEL_FAM6_HASWELL_L:	/* HSW */
-	case INTEL_FAM6_HASWELL_G:	/* HSW */
-	case INTEL_FAM6_BROADWELL:	/* BDW */
-	case INTEL_FAM6_BROADWELL_G:	/* BDW */
+	case INTEL_FAM6_HASWELL_ULT:	/* HSW */
+	case INTEL_FAM6_HASWELL_GT3E:	/* HSW */
+	case INTEL_FAM6_BROADWELL_CORE:	/* BDW */
+	case INTEL_FAM6_BROADWELL_GT3E:	/* BDW */
 	case INTEL_FAM6_BROADWELL_X:	/* BDX */
-	case INTEL_FAM6_SKYLAKE_L:	/* SKL */
-	case INTEL_FAM6_CANNONLAKE_L:	/* CNL */
+	case INTEL_FAM6_SKYLAKE_MOBILE:	/* SKL */
+	case INTEL_FAM6_CANNONLAKE_MOBILE:	/* CNL */
 	case INTEL_FAM6_SKYLAKE_X:	/* SKX */
 
 	case INTEL_FAM6_XEON_PHI_KNL:	/* Knights Landing */
@@ -3821,7 +3807,7 @@ double get_tdp_intel(unsigned int model)
 
 	switch (model) {
 	case INTEL_FAM6_ATOM_SILVERMONT:
-	case INTEL_FAM6_ATOM_SILVERMONT_D:
+	case INTEL_FAM6_ATOM_SILVERMONT_X:
 		return 30.0;
 	default:
 		return 135.0;
@@ -3832,7 +3818,6 @@ double get_tdp_amd(unsigned int family)
 {
 	switch (family) {
 	case 0x17:
-	case 0x18:
 	default:
 		/* This is the max stock TDP of HEDT/Server Fam17h chips */
 		return 250.0;
@@ -3870,11 +3855,11 @@ void rapl_probe_intel(unsigned int family, unsigned int model)
 	switch (model) {
 	case INTEL_FAM6_SANDYBRIDGE:
 	case INTEL_FAM6_IVYBRIDGE:
-	case INTEL_FAM6_HASWELL:	/* HSW */
-	case INTEL_FAM6_HASWELL_L:	/* HSW */
-	case INTEL_FAM6_HASWELL_G:	/* HSW */
-	case INTEL_FAM6_BROADWELL:	/* BDW */
-	case INTEL_FAM6_BROADWELL_G:	/* BDW */
+	case INTEL_FAM6_HASWELL_CORE:	/* HSW */
+	case INTEL_FAM6_HASWELL_ULT:	/* HSW */
+	case INTEL_FAM6_HASWELL_GT3E:	/* HSW */
+	case INTEL_FAM6_BROADWELL_CORE:	/* BDW */
+	case INTEL_FAM6_BROADWELL_GT3E:	/* BDW */
 		do_rapl = RAPL_PKG | RAPL_CORES | RAPL_CORE_POLICY | RAPL_GFX | RAPL_PKG_POWER_INFO;
 		if (rapl_joules) {
 			BIC_PRESENT(BIC_Pkg_J);
@@ -3894,8 +3879,8 @@ void rapl_probe_intel(unsigned int family, unsigned int model)
 		else
 			BIC_PRESENT(BIC_PkgWatt);
 		break;
-	case INTEL_FAM6_SKYLAKE_L:	/* SKL */
-	case INTEL_FAM6_CANNONLAKE_L:	/* CNL */
+	case INTEL_FAM6_SKYLAKE_MOBILE:	/* SKL */
+	case INTEL_FAM6_CANNONLAKE_MOBILE:	/* CNL */
 		do_rapl = RAPL_PKG | RAPL_CORES | RAPL_CORE_POLICY | RAPL_DRAM | RAPL_DRAM_PERF_STATUS | RAPL_PKG_PERF_STATUS | RAPL_GFX | RAPL_PKG_POWER_INFO;
 		BIC_PRESENT(BIC_PKG__);
 		BIC_PRESENT(BIC_RAM__);
@@ -3942,7 +3927,7 @@ void rapl_probe_intel(unsigned int family, unsigned int model)
 		}
 		break;
 	case INTEL_FAM6_ATOM_SILVERMONT:	/* BYT */
-	case INTEL_FAM6_ATOM_SILVERMONT_D:	/* AVN */
+	case INTEL_FAM6_ATOM_SILVERMONT_X:	/* AVN */
 		do_rapl = RAPL_PKG | RAPL_CORES;
 		if (rapl_joules) {
 			BIC_PRESENT(BIC_Pkg_J);
@@ -3952,7 +3937,7 @@ void rapl_probe_intel(unsigned int family, unsigned int model)
 			BIC_PRESENT(BIC_CorWatt);
 		}
 		break;
-	case INTEL_FAM6_ATOM_GOLDMONT_D:	/* DNV */
+	case INTEL_FAM6_ATOM_GOLDMONT_X:	/* DNV */
 		do_rapl = RAPL_PKG | RAPL_DRAM | RAPL_DRAM_POWER_INFO | RAPL_DRAM_PERF_STATUS | RAPL_PKG_PERF_STATUS | RAPL_PKG_POWER_INFO | RAPL_CORES_ENERGY_STATUS;
 		BIC_PRESENT(BIC_PKG__);
 		BIC_PRESENT(BIC_RAM__);
@@ -4013,7 +3998,6 @@ void rapl_probe_amd(unsigned int family, unsigned int model)
 
 	switch (family) {
 	case 0x17: /* Zen, Zen+ */
-	case 0x18: /* Hygon Dhyana */
 		do_rapl = RAPL_AMD_F17H | RAPL_PER_CORE_ENERGY;
 		if (rapl_joules) {
 			BIC_PRESENT(BIC_Pkg_J);
@@ -4050,7 +4034,7 @@ void rapl_probe(unsigned int family, unsigned int model)
 {
 	if (genuine_intel)
 		rapl_probe_intel(family, model);
-	if (authentic_amd || hygon_genuine)
+	if (authentic_amd)
 		rapl_probe_amd(family, model);
 }
 
@@ -4063,9 +4047,9 @@ void perf_limit_reasons_probe(unsigned int family, unsigned int model)
 		return;
 
 	switch (model) {
-	case INTEL_FAM6_HASWELL:	/* HSW */
-	case INTEL_FAM6_HASWELL_L:	/* HSW */
-	case INTEL_FAM6_HASWELL_G:	/* HSW */
+	case INTEL_FAM6_HASWELL_CORE:	/* HSW */
+	case INTEL_FAM6_HASWELL_ULT:	/* HSW */
+	case INTEL_FAM6_HASWELL_GT3E:	/* HSW */
 		do_gfx_perf_limit_reasons = 1;
 	case INTEL_FAM6_HASWELL_X:	/* HSX */
 		do_core_perf_limit_reasons = 1;
@@ -4280,28 +4264,28 @@ int has_snb_msrs(unsigned int family, unsigned int model)
 	switch (model) {
 	case INTEL_FAM6_SANDYBRIDGE:
 	case INTEL_FAM6_SANDYBRIDGE_X:
-	case INTEL_FAM6_IVYBRIDGE:		/* IVB */
-	case INTEL_FAM6_IVYBRIDGE_X:		/* IVB Xeon */
-	case INTEL_FAM6_HASWELL:		/* HSW */
-	case INTEL_FAM6_HASWELL_X:		/* HSW */
-	case INTEL_FAM6_HASWELL_L:		/* HSW */
-	case INTEL_FAM6_HASWELL_G:		/* HSW */
-	case INTEL_FAM6_BROADWELL:		/* BDW */
-	case INTEL_FAM6_BROADWELL_G:		/* BDW */
-	case INTEL_FAM6_BROADWELL_X:		/* BDX */
-	case INTEL_FAM6_SKYLAKE_L:		/* SKL */
-	case INTEL_FAM6_CANNONLAKE_L:		/* CNL */
-	case INTEL_FAM6_SKYLAKE_X:		/* SKX */
-	case INTEL_FAM6_ATOM_GOLDMONT:		/* BXT */
+	case INTEL_FAM6_IVYBRIDGE:	/* IVB */
+	case INTEL_FAM6_IVYBRIDGE_X:	/* IVB Xeon */
+	case INTEL_FAM6_HASWELL_CORE:	/* HSW */
+	case INTEL_FAM6_HASWELL_X:	/* HSW */
+	case INTEL_FAM6_HASWELL_ULT:	/* HSW */
+	case INTEL_FAM6_HASWELL_GT3E:	/* HSW */
+	case INTEL_FAM6_BROADWELL_CORE:	/* BDW */
+	case INTEL_FAM6_BROADWELL_GT3E:	/* BDW */
+	case INTEL_FAM6_BROADWELL_X:	/* BDX */
+	case INTEL_FAM6_SKYLAKE_MOBILE:	/* SKL */
+	case INTEL_FAM6_CANNONLAKE_MOBILE:	/* CNL */
+	case INTEL_FAM6_SKYLAKE_X:	/* SKX */
+	case INTEL_FAM6_ATOM_GOLDMONT:	/* BXT */
 	case INTEL_FAM6_ATOM_GOLDMONT_PLUS:
-	case INTEL_FAM6_ATOM_GOLDMONT_D:	/* DNV */
+	case INTEL_FAM6_ATOM_GOLDMONT_X:	/* DNV */
 		return 1;
 	}
 	return 0;
 }
 
 /*
- * HSW ULT added support for C8/C9/C10 MSRs:
+ * HSW adds support for additional MSRs:
  *
  * MSR_PKG_C8_RESIDENCY		0x00000630
  * MSR_PKG_C9_RESIDENCY		0x00000631
@@ -4312,16 +4296,16 @@ int has_snb_msrs(unsigned int family, unsigned int model)
  * MSR_PKGC10_IRTL		0x00000635
  *
  */
-int has_c8910_msrs(unsigned int family, unsigned int model)
+int has_hsw_msrs(unsigned int family, unsigned int model)
 {
 	if (!genuine_intel)
 		return 0;
 
 	switch (model) {
-	case INTEL_FAM6_HASWELL_L:	/* HSW */
-	case INTEL_FAM6_BROADWELL:	/* BDW */
-	case INTEL_FAM6_SKYLAKE_L:	/* SKL */
-	case INTEL_FAM6_CANNONLAKE_L:	/* CNL */
+	case INTEL_FAM6_HASWELL_ULT:	/* HSW */
+	case INTEL_FAM6_BROADWELL_CORE:	/* BDW */
+	case INTEL_FAM6_SKYLAKE_MOBILE:	/* SKL */
+	case INTEL_FAM6_CANNONLAKE_MOBILE:	/* CNL */
 	case INTEL_FAM6_ATOM_GOLDMONT:	/* BXT */
 	case INTEL_FAM6_ATOM_GOLDMONT_PLUS:
 		return 1;
@@ -4343,8 +4327,8 @@ int has_skl_msrs(unsigned int family, unsigned int model)
 		return 0;
 
 	switch (model) {
-	case INTEL_FAM6_SKYLAKE_L:	/* SKL */
-	case INTEL_FAM6_CANNONLAKE_L:	/* CNL */
+	case INTEL_FAM6_SKYLAKE_MOBILE:	/* SKL */
+	case INTEL_FAM6_CANNONLAKE_MOBILE:	/* CNL */
 		return 1;
 	}
 	return 0;
@@ -4356,7 +4340,7 @@ int is_slm(unsigned int family, unsigned int model)
 		return 0;
 	switch (model) {
 	case INTEL_FAM6_ATOM_SILVERMONT:	/* BYT */
-	case INTEL_FAM6_ATOM_SILVERMONT_D:	/* AVN */
+	case INTEL_FAM6_ATOM_SILVERMONT_X:	/* AVN */
 		return 1;
 	}
 	return 0;
@@ -4379,7 +4363,7 @@ int is_cnl(unsigned int family, unsigned int model)
 		return 0;
 
 	switch (model) {
-	case INTEL_FAM6_CANNONLAKE_L: /* CNL */
+	case INTEL_FAM6_CANNONLAKE_MOBILE: /* CNL */
 		return 1;
 	}
 
@@ -4603,21 +4587,18 @@ unsigned int intel_model_duplicates(unsigned int model)
 		return INTEL_FAM6_XEON_PHI_KNL;
 
 	case INTEL_FAM6_BROADWELL_X:
-	case INTEL_FAM6_BROADWELL_D:	/* BDX-DE */
+	case INTEL_FAM6_BROADWELL_XEON_D:	/* BDX-DE */
 		return INTEL_FAM6_BROADWELL_X;
 
-	case INTEL_FAM6_SKYLAKE_L:
-	case INTEL_FAM6_SKYLAKE:
-	case INTEL_FAM6_KABYLAKE_L:
-	case INTEL_FAM6_KABYLAKE:
-		return INTEL_FAM6_SKYLAKE_L;
+	case INTEL_FAM6_SKYLAKE_MOBILE:
+	case INTEL_FAM6_SKYLAKE_DESKTOP:
+	case INTEL_FAM6_KABYLAKE_MOBILE:
+	case INTEL_FAM6_KABYLAKE_DESKTOP:
+		return INTEL_FAM6_SKYLAKE_MOBILE;
 
-	case INTEL_FAM6_ICELAKE_L:
+	case INTEL_FAM6_ICELAKE_MOBILE:
 	case INTEL_FAM6_ICELAKE_NNPI:
-		return INTEL_FAM6_CANNONLAKE_L;
-
-	case INTEL_FAM6_ATOM_TREMONT_D:
-		return INTEL_FAM6_ATOM_GOLDMONT_D;
+		return INTEL_FAM6_CANNONLAKE_MOBILE;
 	}
 	return model;
 }
@@ -4635,8 +4616,6 @@ void process_cpuid()
 		genuine_intel = 1;
 	else if (ebx == 0x68747541 && ecx == 0x444d4163 && edx == 0x69746e65)
 		authentic_amd = 1;
-	else if (ebx == 0x6f677948 && ecx == 0x656e6975 && edx == 0x6e65476e)
-		hygon_genuine = 1;
 
 	if (!quiet)
 		fprintf(outf, "CPUID(0): %.4s%.4s%.4s ",
@@ -4768,10 +4747,10 @@ void process_cpuid()
 
 			if (crystal_hz == 0)
 				switch(model) {
-				case INTEL_FAM6_SKYLAKE_L:	/* SKL */
+				case INTEL_FAM6_SKYLAKE_MOBILE:	/* SKL */
 					crystal_hz = 24000000;	/* 24.0 MHz */
 					break;
-				case INTEL_FAM6_ATOM_GOLDMONT_D:	/* DNV */
+				case INTEL_FAM6_ATOM_GOLDMONT_X:	/* DNV */
 					crystal_hz = 25000000;	/* 25.0 MHz */
 					break;
 				case INTEL_FAM6_ATOM_GOLDMONT:	/* BXT */
@@ -4857,12 +4836,12 @@ void process_cpuid()
 		BIC_NOT_PRESENT(BIC_CPU_c7);
 		BIC_NOT_PRESENT(BIC_Pkgpc7);
 	}
-	if (has_c8910_msrs(family, model)) {
+	if (has_hsw_msrs(family, model)) {
 		BIC_PRESENT(BIC_Pkgpc8);
 		BIC_PRESENT(BIC_Pkgpc9);
 		BIC_PRESENT(BIC_Pkgpc10);
 	}
-	do_irtl_hsw = has_c8910_msrs(family, model);
+	do_irtl_hsw = has_hsw_msrs(family, model);
 	if (has_skl_msrs(family, model)) {
 		BIC_PRESENT(BIC_Totl_c0);
 		BIC_PRESENT(BIC_Any_c0);
@@ -5306,7 +5285,7 @@ int get_and_dump_counters(void)
 }
 
 void print_version() {
-	fprintf(outf, "turbostat version 19.08.31"
+	fprintf(outf, "turbostat version 19.03.20"
 		" - Len Brown <lenb@kernel.org>\n");
 }
 

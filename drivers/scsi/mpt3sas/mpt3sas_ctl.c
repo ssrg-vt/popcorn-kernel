@@ -596,16 +596,8 @@ _ctl_set_task_mid(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command *karg,
 		if (priv_data->sas_target->handle != handle)
 			continue;
 		st = scsi_cmd_priv(scmd);
-
-		/*
-		 * If the given TaskMID from the user space is zero, then the
-		 * first outstanding smid will be picked up.  Otherwise,
-		 * targeted smid will be the one.
-		 */
-		if (!tm_request->TaskMID || tm_request->TaskMID == st->smid) {
-			tm_request->TaskMID = cpu_to_le16(st->smid);
-			found = 1;
-		}
+		tm_request->TaskMID = cpu_to_le16(st->smid);
+		found = 1;
 	}
 
 	if (!found) {
@@ -662,6 +654,7 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 	size_t data_in_sz = 0;
 	long ret;
 	u16 device_handle = MPT3SAS_INVALID_DEVICE_HANDLE;
+	u8 tr_method = MPI26_SCSITASKMGMT_MSGFLAGS_PROTOCOL_LVL_RST_PCIE;
 
 	issue_reset = 0;
 
@@ -714,7 +707,6 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 	ioc->ctl_cmds.status = MPT3_CMD_PENDING;
 	memset(ioc->ctl_cmds.reply, 0, ioc->reply_sz);
 	request = mpt3sas_base_get_msg_frame(ioc, smid);
-	memset(request, 0, ioc->request_sz);
 	memcpy(request, mpi_request, karg.data_sge_offset*4);
 	ioc->ctl_cmds.smid = smid;
 	data_out_sz = karg.data_out_size;
@@ -830,7 +822,7 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 		if (mpi_request->Function == MPI2_FUNCTION_SCSI_IO_REQUEST)
 			ioc->put_smid_scsi_io(ioc, smid, device_handle);
 		else
-			ioc->put_smid_default(ioc, smid);
+			mpt3sas_base_put_smid_default(ioc, smid);
 		break;
 	}
 	case MPI2_FUNCTION_SCSI_TASK_MGMT:
@@ -867,7 +859,7 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 		    tm_request->DevHandle));
 		ioc->build_sg_mpi(ioc, psge, data_out_dma, data_out_sz,
 		    data_in_dma, data_in_sz);
-		ioc->put_smid_hi_priority(ioc, smid, 0);
+		mpt3sas_base_put_smid_hi_priority(ioc, smid, 0);
 		break;
 	}
 	case MPI2_FUNCTION_SMP_PASSTHROUGH:
@@ -898,7 +890,7 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 		}
 		ioc->build_sg(ioc, psge, data_out_dma, data_out_sz, data_in_dma,
 		    data_in_sz);
-		ioc->put_smid_default(ioc, smid);
+		mpt3sas_base_put_smid_default(ioc, smid);
 		break;
 	}
 	case MPI2_FUNCTION_SATA_PASSTHROUGH:
@@ -913,7 +905,7 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 		}
 		ioc->build_sg(ioc, psge, data_out_dma, data_out_sz, data_in_dma,
 		    data_in_sz);
-		ioc->put_smid_default(ioc, smid);
+		mpt3sas_base_put_smid_default(ioc, smid);
 		break;
 	}
 	case MPI2_FUNCTION_FW_DOWNLOAD:
@@ -921,7 +913,7 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 	{
 		ioc->build_sg(ioc, psge, data_out_dma, data_out_sz, data_in_dma,
 		    data_in_sz);
-		ioc->put_smid_default(ioc, smid);
+		mpt3sas_base_put_smid_default(ioc, smid);
 		break;
 	}
 	case MPI2_FUNCTION_TOOLBOX:
@@ -929,38 +921,14 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 		Mpi2ToolboxCleanRequest_t *toolbox_request =
 			(Mpi2ToolboxCleanRequest_t *)mpi_request;
 
-		if ((toolbox_request->Tool == MPI2_TOOLBOX_DIAGNOSTIC_CLI_TOOL)
-		    || (toolbox_request->Tool ==
-		    MPI26_TOOLBOX_BACKEND_PCIE_LANE_MARGIN))
+		if (toolbox_request->Tool == MPI2_TOOLBOX_DIAGNOSTIC_CLI_TOOL) {
 			ioc->build_sg(ioc, psge, data_out_dma, data_out_sz,
 				data_in_dma, data_in_sz);
-		else if (toolbox_request->Tool ==
-				MPI2_TOOLBOX_MEMORY_MOVE_TOOL) {
-			Mpi2ToolboxMemMoveRequest_t *mem_move_request =
-					(Mpi2ToolboxMemMoveRequest_t *)request;
-			Mpi2SGESimple64_t tmp, *src = NULL, *dst = NULL;
-
-			ioc->build_sg_mpi(ioc, psge, data_out_dma,
-					data_out_sz, data_in_dma, data_in_sz);
-			if (data_out_sz && !data_in_sz) {
-				dst =
-				    (Mpi2SGESimple64_t *)&mem_move_request->SGL;
-				src = (void *)dst + ioc->sge_size;
-
-				memcpy(&tmp, src, ioc->sge_size);
-				memcpy(src, dst, ioc->sge_size);
-				memcpy(dst, &tmp, ioc->sge_size);
-			}
-			if (ioc->logging_level & MPT_DEBUG_TM) {
-				ioc_info(ioc,
-				  "Mpi2ToolboxMemMoveRequest_t request msg\n");
-				_debug_dump_mf(mem_move_request,
-							ioc->request_sz/4);
-			}
-		} else
+		} else {
 			ioc->build_sg_mpi(ioc, psge, data_out_dma, data_out_sz,
-			    data_in_dma, data_in_sz);
-		ioc->put_smid_default(ioc, smid);
+				data_in_dma, data_in_sz);
+		}
+		mpt3sas_base_put_smid_default(ioc, smid);
 		break;
 	}
 	case MPI2_FUNCTION_SAS_IO_UNIT_CONTROL:
@@ -980,7 +948,7 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 	default:
 		ioc->build_sg_mpi(ioc, psge, data_out_dma, data_out_sz,
 		    data_in_dma, data_in_sz);
-		ioc->put_smid_default(ioc, smid);
+		mpt3sas_base_put_smid_default(ioc, smid);
 		break;
 	}
 
@@ -1079,14 +1047,12 @@ _ctl_do_mpt_command(struct MPT3SAS_ADAPTER *ioc, struct mpt3_ioctl_command karg,
 			mpt3sas_halt_firmware(ioc);
 			pcie_device = mpt3sas_get_pdev_by_handle(ioc,
 				le16_to_cpu(mpi_request->FunctionDependent1));
-			if (pcie_device && (!ioc->tm_custom_handling) &&
-			    (!(mpt3sas_scsih_is_pcie_scsi_device(
-			    pcie_device->device_info))))
+			if (pcie_device && (!ioc->tm_custom_handling))
 				mpt3sas_scsih_issue_locked_tm(ioc,
 				  le16_to_cpu(mpi_request->FunctionDependent1),
 				  0, MPI2_SCSITASKMGMT_TASKTYPE_TARGET_RESET, 0,
 				  0, pcie_device->reset_timeout,
-			MPI26_SCSITASKMGMT_MSGFLAGS_PROTOCOL_LVL_RST_PCIE);
+				  tr_method);
 			else
 				mpt3sas_scsih_issue_locked_tm(ioc,
 				  le16_to_cpu(mpi_request->FunctionDependent1),
@@ -1610,7 +1576,7 @@ _ctl_diag_register_2(struct MPT3SAS_ADAPTER *ioc,
 			cpu_to_le32(ioc->product_specific[buffer_type][i]);
 
 	init_completion(&ioc->ctl_cmds.done);
-	ioc->put_smid_default(ioc, smid);
+	mpt3sas_base_put_smid_default(ioc, smid);
 	wait_for_completion_timeout(&ioc->ctl_cmds.done,
 	    MPT3_IOCTL_DEFAULT_TIMEOUT*HZ);
 
@@ -1937,7 +1903,7 @@ mpt3sas_send_diag_release(struct MPT3SAS_ADAPTER *ioc, u8 buffer_type,
 	mpi_request->VP_ID = 0;
 
 	init_completion(&ioc->ctl_cmds.done);
-	ioc->put_smid_default(ioc, smid);
+	mpt3sas_base_put_smid_default(ioc, smid);
 	wait_for_completion_timeout(&ioc->ctl_cmds.done,
 	    MPT3_IOCTL_DEFAULT_TIMEOUT*HZ);
 
@@ -2185,7 +2151,7 @@ _ctl_diag_read_buffer(struct MPT3SAS_ADAPTER *ioc, void __user *arg)
 	mpi_request->VP_ID = 0;
 
 	init_completion(&ioc->ctl_cmds.done);
-	ioc->put_smid_default(ioc, smid);
+	mpt3sas_base_put_smid_default(ioc, smid);
 	wait_for_completion_timeout(&ioc->ctl_cmds.done,
 	    MPT3_IOCTL_DEFAULT_TIMEOUT*HZ);
 
@@ -2353,10 +2319,6 @@ _ctl_ioctl_main(struct file *file, unsigned int cmd, void __user *arg,
 			break;
 		}
 
-		if (karg.hdr.ioc_number != ioctl_header.ioc_number) {
-			ret = -EINVAL;
-			break;
-		}
 		if (_IOC_SIZE(cmd) == sizeof(struct mpt3_ioctl_command)) {
 			uarg = arg;
 			ret = _ctl_do_mpt_command(ioc, karg, &uarg->mf);
@@ -2491,7 +2453,7 @@ _ctl_mpt2_ioctl_compat(struct file *file, unsigned cmd, unsigned long arg)
 
 /* scsi host attributes */
 /**
- * version_fw_show - firmware version
+ * _ctl_version_fw_show - firmware version
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2499,7 +2461,7 @@ _ctl_mpt2_ioctl_compat(struct file *file, unsigned cmd, unsigned long arg)
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-version_fw_show(struct device *cdev, struct device_attribute *attr,
+_ctl_version_fw_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2511,10 +2473,10 @@ version_fw_show(struct device *cdev, struct device_attribute *attr,
 	    (ioc->facts.FWVersion.Word & 0x0000FF00) >> 8,
 	    ioc->facts.FWVersion.Word & 0x000000FF);
 }
-static DEVICE_ATTR_RO(version_fw);
+static DEVICE_ATTR(version_fw, S_IRUGO, _ctl_version_fw_show, NULL);
 
 /**
- * version_bios_show - bios version
+ * _ctl_version_bios_show - bios version
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2522,7 +2484,7 @@ static DEVICE_ATTR_RO(version_fw);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-version_bios_show(struct device *cdev, struct device_attribute *attr,
+_ctl_version_bios_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2536,10 +2498,10 @@ version_bios_show(struct device *cdev, struct device_attribute *attr,
 	    (version & 0x0000FF00) >> 8,
 	    version & 0x000000FF);
 }
-static DEVICE_ATTR_RO(version_bios);
+static DEVICE_ATTR(version_bios, S_IRUGO, _ctl_version_bios_show, NULL);
 
 /**
- * version_mpi_show - MPI (message passing interface) version
+ * _ctl_version_mpi_show - MPI (message passing interface) version
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2547,7 +2509,7 @@ static DEVICE_ATTR_RO(version_bios);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-version_mpi_show(struct device *cdev, struct device_attribute *attr,
+_ctl_version_mpi_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2556,10 +2518,10 @@ version_mpi_show(struct device *cdev, struct device_attribute *attr,
 	return snprintf(buf, PAGE_SIZE, "%03x.%02x\n",
 	    ioc->facts.MsgVersion, ioc->facts.HeaderVersion >> 8);
 }
-static DEVICE_ATTR_RO(version_mpi);
+static DEVICE_ATTR(version_mpi, S_IRUGO, _ctl_version_mpi_show, NULL);
 
 /**
- * version_product_show - product name
+ * _ctl_version_product_show - product name
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2567,7 +2529,7 @@ static DEVICE_ATTR_RO(version_mpi);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-version_product_show(struct device *cdev, struct device_attribute *attr,
+_ctl_version_product_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2575,10 +2537,10 @@ version_product_show(struct device *cdev, struct device_attribute *attr,
 
 	return snprintf(buf, 16, "%s\n", ioc->manu_pg0.ChipName);
 }
-static DEVICE_ATTR_RO(version_product);
+static DEVICE_ATTR(version_product, S_IRUGO, _ctl_version_product_show, NULL);
 
 /**
- * version_nvdata_persistent_show - ndvata persistent version
+ * _ctl_version_nvdata_persistent_show - ndvata persistent version
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2586,7 +2548,7 @@ static DEVICE_ATTR_RO(version_product);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-version_nvdata_persistent_show(struct device *cdev,
+_ctl_version_nvdata_persistent_show(struct device *cdev,
 	struct device_attribute *attr, char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2595,10 +2557,11 @@ version_nvdata_persistent_show(struct device *cdev,
 	return snprintf(buf, PAGE_SIZE, "%08xh\n",
 	    le32_to_cpu(ioc->iounit_pg0.NvdataVersionPersistent.Word));
 }
-static DEVICE_ATTR_RO(version_nvdata_persistent);
+static DEVICE_ATTR(version_nvdata_persistent, S_IRUGO,
+	_ctl_version_nvdata_persistent_show, NULL);
 
 /**
- * version_nvdata_default_show - nvdata default version
+ * _ctl_version_nvdata_default_show - nvdata default version
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2606,7 +2569,7 @@ static DEVICE_ATTR_RO(version_nvdata_persistent);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-version_nvdata_default_show(struct device *cdev, struct device_attribute
+_ctl_version_nvdata_default_show(struct device *cdev, struct device_attribute
 	*attr, char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2615,10 +2578,11 @@ version_nvdata_default_show(struct device *cdev, struct device_attribute
 	return snprintf(buf, PAGE_SIZE, "%08xh\n",
 	    le32_to_cpu(ioc->iounit_pg0.NvdataVersionDefault.Word));
 }
-static DEVICE_ATTR_RO(version_nvdata_default);
+static DEVICE_ATTR(version_nvdata_default, S_IRUGO,
+	_ctl_version_nvdata_default_show, NULL);
 
 /**
- * board_name_show - board name
+ * _ctl_board_name_show - board name
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2626,7 +2590,7 @@ static DEVICE_ATTR_RO(version_nvdata_default);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-board_name_show(struct device *cdev, struct device_attribute *attr,
+_ctl_board_name_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2634,10 +2598,10 @@ board_name_show(struct device *cdev, struct device_attribute *attr,
 
 	return snprintf(buf, 16, "%s\n", ioc->manu_pg0.BoardName);
 }
-static DEVICE_ATTR_RO(board_name);
+static DEVICE_ATTR(board_name, S_IRUGO, _ctl_board_name_show, NULL);
 
 /**
- * board_assembly_show - board assembly name
+ * _ctl_board_assembly_show - board assembly name
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2645,7 +2609,7 @@ static DEVICE_ATTR_RO(board_name);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-board_assembly_show(struct device *cdev, struct device_attribute *attr,
+_ctl_board_assembly_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2653,10 +2617,10 @@ board_assembly_show(struct device *cdev, struct device_attribute *attr,
 
 	return snprintf(buf, 16, "%s\n", ioc->manu_pg0.BoardAssembly);
 }
-static DEVICE_ATTR_RO(board_assembly);
+static DEVICE_ATTR(board_assembly, S_IRUGO, _ctl_board_assembly_show, NULL);
 
 /**
- * board_tracer_show - board tracer number
+ * _ctl_board_tracer_show - board tracer number
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2664,7 +2628,7 @@ static DEVICE_ATTR_RO(board_assembly);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-board_tracer_show(struct device *cdev, struct device_attribute *attr,
+_ctl_board_tracer_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2672,10 +2636,10 @@ board_tracer_show(struct device *cdev, struct device_attribute *attr,
 
 	return snprintf(buf, 16, "%s\n", ioc->manu_pg0.BoardTracerNumber);
 }
-static DEVICE_ATTR_RO(board_tracer);
+static DEVICE_ATTR(board_tracer, S_IRUGO, _ctl_board_tracer_show, NULL);
 
 /**
- * io_delay_show - io missing delay
+ * _ctl_io_delay_show - io missing delay
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2686,7 +2650,7 @@ static DEVICE_ATTR_RO(board_tracer);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-io_delay_show(struct device *cdev, struct device_attribute *attr,
+_ctl_io_delay_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2694,10 +2658,10 @@ io_delay_show(struct device *cdev, struct device_attribute *attr,
 
 	return snprintf(buf, PAGE_SIZE, "%02d\n", ioc->io_missing_delay);
 }
-static DEVICE_ATTR_RO(io_delay);
+static DEVICE_ATTR(io_delay, S_IRUGO, _ctl_io_delay_show, NULL);
 
 /**
- * device_delay_show - device missing delay
+ * _ctl_device_delay_show - device missing delay
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2708,7 +2672,7 @@ static DEVICE_ATTR_RO(io_delay);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-device_delay_show(struct device *cdev, struct device_attribute *attr,
+_ctl_device_delay_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2716,10 +2680,10 @@ device_delay_show(struct device *cdev, struct device_attribute *attr,
 
 	return snprintf(buf, PAGE_SIZE, "%02d\n", ioc->device_missing_delay);
 }
-static DEVICE_ATTR_RO(device_delay);
+static DEVICE_ATTR(device_delay, S_IRUGO, _ctl_device_delay_show, NULL);
 
 /**
- * fw_queue_depth_show - global credits
+ * _ctl_fw_queue_depth_show - global credits
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2729,7 +2693,7 @@ static DEVICE_ATTR_RO(device_delay);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-fw_queue_depth_show(struct device *cdev, struct device_attribute *attr,
+_ctl_fw_queue_depth_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2737,10 +2701,10 @@ fw_queue_depth_show(struct device *cdev, struct device_attribute *attr,
 
 	return snprintf(buf, PAGE_SIZE, "%02d\n", ioc->facts.RequestCredit);
 }
-static DEVICE_ATTR_RO(fw_queue_depth);
+static DEVICE_ATTR(fw_queue_depth, S_IRUGO, _ctl_fw_queue_depth_show, NULL);
 
 /**
- * sas_address_show - sas address
+ * _ctl_sas_address_show - sas address
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2750,7 +2714,7 @@ static DEVICE_ATTR_RO(fw_queue_depth);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-host_sas_address_show(struct device *cdev, struct device_attribute *attr,
+_ctl_host_sas_address_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 
 {
@@ -2760,10 +2724,11 @@ host_sas_address_show(struct device *cdev, struct device_attribute *attr,
 	return snprintf(buf, PAGE_SIZE, "0x%016llx\n",
 	    (unsigned long long)ioc->sas_hba.sas_address);
 }
-static DEVICE_ATTR_RO(host_sas_address);
+static DEVICE_ATTR(host_sas_address, S_IRUGO,
+	_ctl_host_sas_address_show, NULL);
 
 /**
- * logging_level_show - logging level
+ * _ctl_logging_level_show - logging level
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2771,7 +2736,7 @@ static DEVICE_ATTR_RO(host_sas_address);
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-logging_level_show(struct device *cdev, struct device_attribute *attr,
+_ctl_logging_level_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2780,7 +2745,7 @@ logging_level_show(struct device *cdev, struct device_attribute *attr,
 	return snprintf(buf, PAGE_SIZE, "%08xh\n", ioc->logging_level);
 }
 static ssize_t
-logging_level_store(struct device *cdev, struct device_attribute *attr,
+_ctl_logging_level_store(struct device *cdev, struct device_attribute *attr,
 	const char *buf, size_t count)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2795,10 +2760,11 @@ logging_level_store(struct device *cdev, struct device_attribute *attr,
 		 ioc->logging_level);
 	return strlen(buf);
 }
-static DEVICE_ATTR_RW(logging_level);
+static DEVICE_ATTR(logging_level, S_IRUGO | S_IWUSR, _ctl_logging_level_show,
+	_ctl_logging_level_store);
 
 /**
- * fwfault_debug_show - show/store fwfault_debug
+ * _ctl_fwfault_debug_show - show/store fwfault_debug
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2807,7 +2773,7 @@ static DEVICE_ATTR_RW(logging_level);
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-fwfault_debug_show(struct device *cdev, struct device_attribute *attr,
+_ctl_fwfault_debug_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2816,7 +2782,7 @@ fwfault_debug_show(struct device *cdev, struct device_attribute *attr,
 	return snprintf(buf, PAGE_SIZE, "%d\n", ioc->fwfault_debug);
 }
 static ssize_t
-fwfault_debug_store(struct device *cdev, struct device_attribute *attr,
+_ctl_fwfault_debug_store(struct device *cdev, struct device_attribute *attr,
 	const char *buf, size_t count)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2831,10 +2797,11 @@ fwfault_debug_store(struct device *cdev, struct device_attribute *attr,
 		 ioc->fwfault_debug);
 	return strlen(buf);
 }
-static DEVICE_ATTR_RW(fwfault_debug);
+static DEVICE_ATTR(fwfault_debug, S_IRUGO | S_IWUSR,
+	_ctl_fwfault_debug_show, _ctl_fwfault_debug_store);
 
 /**
- * ioc_reset_count_show - ioc reset count
+ * _ctl_ioc_reset_count_show - ioc reset count
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2844,7 +2811,7 @@ static DEVICE_ATTR_RW(fwfault_debug);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-ioc_reset_count_show(struct device *cdev, struct device_attribute *attr,
+_ctl_ioc_reset_count_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2852,10 +2819,10 @@ ioc_reset_count_show(struct device *cdev, struct device_attribute *attr,
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", ioc->ioc_reset_count);
 }
-static DEVICE_ATTR_RO(ioc_reset_count);
+static DEVICE_ATTR(ioc_reset_count, S_IRUGO, _ctl_ioc_reset_count_show, NULL);
 
 /**
- * reply_queue_count_show - number of reply queues
+ * _ctl_ioc_reply_queue_count_show - number of reply queues
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2865,7 +2832,7 @@ static DEVICE_ATTR_RO(ioc_reset_count);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-reply_queue_count_show(struct device *cdev,
+_ctl_ioc_reply_queue_count_show(struct device *cdev,
 	struct device_attribute *attr, char *buf)
 {
 	u8 reply_queue_count;
@@ -2880,10 +2847,11 @@ reply_queue_count_show(struct device *cdev,
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", reply_queue_count);
 }
-static DEVICE_ATTR_RO(reply_queue_count);
+static DEVICE_ATTR(reply_queue_count, S_IRUGO, _ctl_ioc_reply_queue_count_show,
+	NULL);
 
 /**
- * BRM_status_show - Backup Rail Monitor Status
+ * _ctl_BRM_status_show - Backup Rail Monitor Status
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2893,7 +2861,7 @@ static DEVICE_ATTR_RO(reply_queue_count);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-BRM_status_show(struct device *cdev, struct device_attribute *attr,
+_ctl_BRM_status_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -2955,7 +2923,7 @@ BRM_status_show(struct device *cdev, struct device_attribute *attr,
 	mutex_unlock(&ioc->pci_access_mutex);
 	return rc;
 }
-static DEVICE_ATTR_RO(BRM_status);
+static DEVICE_ATTR(BRM_status, S_IRUGO, _ctl_BRM_status_show, NULL);
 
 struct DIAG_BUFFER_START {
 	__le32	Size;
@@ -2968,7 +2936,7 @@ struct DIAG_BUFFER_START {
 };
 
 /**
- * host_trace_buffer_size_show - host buffer size (trace only)
+ * _ctl_host_trace_buffer_size_show - host buffer size (trace only)
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -2976,7 +2944,7 @@ struct DIAG_BUFFER_START {
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-host_trace_buffer_size_show(struct device *cdev,
+_ctl_host_trace_buffer_size_show(struct device *cdev,
 	struct device_attribute *attr, char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3008,10 +2976,11 @@ host_trace_buffer_size_show(struct device *cdev,
 	ioc->ring_buffer_sz = size;
 	return snprintf(buf, PAGE_SIZE, "%d\n", size);
 }
-static DEVICE_ATTR_RO(host_trace_buffer_size);
+static DEVICE_ATTR(host_trace_buffer_size, S_IRUGO,
+	_ctl_host_trace_buffer_size_show, NULL);
 
 /**
- * host_trace_buffer_show - firmware ring buffer (trace only)
+ * _ctl_host_trace_buffer_show - firmware ring buffer (trace only)
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3023,7 +2992,7 @@ static DEVICE_ATTR_RO(host_trace_buffer_size);
  * offset to the same attribute, it will move the pointer.
  */
 static ssize_t
-host_trace_buffer_show(struct device *cdev, struct device_attribute *attr,
+_ctl_host_trace_buffer_show(struct device *cdev, struct device_attribute *attr,
 	char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3055,7 +3024,7 @@ host_trace_buffer_show(struct device *cdev, struct device_attribute *attr,
 }
 
 static ssize_t
-host_trace_buffer_store(struct device *cdev, struct device_attribute *attr,
+_ctl_host_trace_buffer_store(struct device *cdev, struct device_attribute *attr,
 	const char *buf, size_t count)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3068,13 +3037,14 @@ host_trace_buffer_store(struct device *cdev, struct device_attribute *attr,
 	ioc->ring_buffer_offset = val;
 	return strlen(buf);
 }
-static DEVICE_ATTR_RW(host_trace_buffer);
+static DEVICE_ATTR(host_trace_buffer, S_IRUGO | S_IWUSR,
+	_ctl_host_trace_buffer_show, _ctl_host_trace_buffer_store);
 
 
 /*****************************************/
 
 /**
- * host_trace_buffer_enable_show - firmware ring buffer (trace only)
+ * _ctl_host_trace_buffer_enable_show - firmware ring buffer (trace only)
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3084,7 +3054,7 @@ static DEVICE_ATTR_RW(host_trace_buffer);
  * This is a mechnism to post/release host_trace_buffers
  */
 static ssize_t
-host_trace_buffer_enable_show(struct device *cdev,
+_ctl_host_trace_buffer_enable_show(struct device *cdev,
 	struct device_attribute *attr, char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3102,7 +3072,7 @@ host_trace_buffer_enable_show(struct device *cdev,
 }
 
 static ssize_t
-host_trace_buffer_enable_store(struct device *cdev,
+_ctl_host_trace_buffer_enable_store(struct device *cdev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3152,12 +3122,14 @@ host_trace_buffer_enable_store(struct device *cdev,
  out:
 	return strlen(buf);
 }
-static DEVICE_ATTR_RW(host_trace_buffer_enable);
+static DEVICE_ATTR(host_trace_buffer_enable, S_IRUGO | S_IWUSR,
+	_ctl_host_trace_buffer_enable_show,
+	_ctl_host_trace_buffer_enable_store);
 
 /*********** diagnostic trigger suppport *********************************/
 
 /**
- * diag_trigger_master_show - show the diag_trigger_master attribute
+ * _ctl_diag_trigger_master_show - show the diag_trigger_master attribute
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3165,7 +3137,7 @@ static DEVICE_ATTR_RW(host_trace_buffer_enable);
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-diag_trigger_master_show(struct device *cdev,
+_ctl_diag_trigger_master_show(struct device *cdev,
 	struct device_attribute *attr, char *buf)
 
 {
@@ -3182,7 +3154,7 @@ diag_trigger_master_show(struct device *cdev,
 }
 
 /**
- * diag_trigger_master_store - store the diag_trigger_master attribute
+ * _ctl_diag_trigger_master_store - store the diag_trigger_master attribute
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3191,7 +3163,7 @@ diag_trigger_master_show(struct device *cdev,
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-diag_trigger_master_store(struct device *cdev,
+_ctl_diag_trigger_master_store(struct device *cdev,
 	struct device_attribute *attr, const char *buf, size_t count)
 
 {
@@ -3210,11 +3182,12 @@ diag_trigger_master_store(struct device *cdev,
 	spin_unlock_irqrestore(&ioc->diag_trigger_lock, flags);
 	return rc;
 }
-static DEVICE_ATTR_RW(diag_trigger_master);
+static DEVICE_ATTR(diag_trigger_master, S_IRUGO | S_IWUSR,
+	_ctl_diag_trigger_master_show, _ctl_diag_trigger_master_store);
 
 
 /**
- * diag_trigger_event_show - show the diag_trigger_event attribute
+ * _ctl_diag_trigger_event_show - show the diag_trigger_event attribute
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3222,7 +3195,7 @@ static DEVICE_ATTR_RW(diag_trigger_master);
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-diag_trigger_event_show(struct device *cdev,
+_ctl_diag_trigger_event_show(struct device *cdev,
 	struct device_attribute *attr, char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3238,7 +3211,7 @@ diag_trigger_event_show(struct device *cdev,
 }
 
 /**
- * diag_trigger_event_store - store the diag_trigger_event attribute
+ * _ctl_diag_trigger_event_store - store the diag_trigger_event attribute
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3247,7 +3220,7 @@ diag_trigger_event_show(struct device *cdev,
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-diag_trigger_event_store(struct device *cdev,
+_ctl_diag_trigger_event_store(struct device *cdev,
 	struct device_attribute *attr, const char *buf, size_t count)
 
 {
@@ -3266,11 +3239,12 @@ diag_trigger_event_store(struct device *cdev,
 	spin_unlock_irqrestore(&ioc->diag_trigger_lock, flags);
 	return sz;
 }
-static DEVICE_ATTR_RW(diag_trigger_event);
+static DEVICE_ATTR(diag_trigger_event, S_IRUGO | S_IWUSR,
+	_ctl_diag_trigger_event_show, _ctl_diag_trigger_event_store);
 
 
 /**
- * diag_trigger_scsi_show - show the diag_trigger_scsi attribute
+ * _ctl_diag_trigger_scsi_show - show the diag_trigger_scsi attribute
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3278,7 +3252,7 @@ static DEVICE_ATTR_RW(diag_trigger_event);
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-diag_trigger_scsi_show(struct device *cdev,
+_ctl_diag_trigger_scsi_show(struct device *cdev,
 	struct device_attribute *attr, char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3294,7 +3268,7 @@ diag_trigger_scsi_show(struct device *cdev,
 }
 
 /**
- * diag_trigger_scsi_store - store the diag_trigger_scsi attribute
+ * _ctl_diag_trigger_scsi_store - store the diag_trigger_scsi attribute
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3303,7 +3277,7 @@ diag_trigger_scsi_show(struct device *cdev,
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-diag_trigger_scsi_store(struct device *cdev,
+_ctl_diag_trigger_scsi_store(struct device *cdev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3312,19 +3286,21 @@ diag_trigger_scsi_store(struct device *cdev,
 	ssize_t sz;
 
 	spin_lock_irqsave(&ioc->diag_trigger_lock, flags);
-	sz = min(sizeof(ioc->diag_trigger_scsi), count);
-	memset(&ioc->diag_trigger_scsi, 0, sizeof(ioc->diag_trigger_scsi));
+	sz = min(sizeof(struct SL_WH_SCSI_TRIGGERS_T), count);
+	memset(&ioc->diag_trigger_scsi, 0,
+	    sizeof(struct SL_WH_EVENT_TRIGGERS_T));
 	memcpy(&ioc->diag_trigger_scsi, buf, sz);
 	if (ioc->diag_trigger_scsi.ValidEntries > NUM_VALID_ENTRIES)
 		ioc->diag_trigger_scsi.ValidEntries = NUM_VALID_ENTRIES;
 	spin_unlock_irqrestore(&ioc->diag_trigger_lock, flags);
 	return sz;
 }
-static DEVICE_ATTR_RW(diag_trigger_scsi);
+static DEVICE_ATTR(diag_trigger_scsi, S_IRUGO | S_IWUSR,
+	_ctl_diag_trigger_scsi_show, _ctl_diag_trigger_scsi_store);
 
 
 /**
- * diag_trigger_scsi_show - show the diag_trigger_mpi attribute
+ * _ctl_diag_trigger_scsi_show - show the diag_trigger_mpi attribute
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3332,7 +3308,7 @@ static DEVICE_ATTR_RW(diag_trigger_scsi);
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-diag_trigger_mpi_show(struct device *cdev,
+_ctl_diag_trigger_mpi_show(struct device *cdev,
 	struct device_attribute *attr, char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3348,7 +3324,7 @@ diag_trigger_mpi_show(struct device *cdev,
 }
 
 /**
- * diag_trigger_mpi_store - store the diag_trigger_mpi attribute
+ * _ctl_diag_trigger_mpi_store - store the diag_trigger_mpi attribute
  * @cdev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3357,7 +3333,7 @@ diag_trigger_mpi_show(struct device *cdev,
  * A sysfs 'read/write' shost attribute.
  */
 static ssize_t
-diag_trigger_mpi_store(struct device *cdev,
+_ctl_diag_trigger_mpi_store(struct device *cdev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct Scsi_Host *shost = class_to_shost(cdev);
@@ -3376,130 +3352,12 @@ diag_trigger_mpi_store(struct device *cdev,
 	return sz;
 }
 
-static DEVICE_ATTR_RW(diag_trigger_mpi);
+static DEVICE_ATTR(diag_trigger_mpi, S_IRUGO | S_IWUSR,
+	_ctl_diag_trigger_mpi_show, _ctl_diag_trigger_mpi_store);
 
 /*********** diagnostic trigger suppport *** END ****************************/
 
 /*****************************************/
-
-/**
- * drv_support_bitmap_show - driver supported feature bitmap
- * @cdev - pointer to embedded class device
- * @buf - the buffer returned
- *
- * A sysfs 'read-only' shost attribute.
- */
-static ssize_t
-drv_support_bitmap_show(struct device *cdev,
-	struct device_attribute *attr, char *buf)
-{
-	struct Scsi_Host *shost = class_to_shost(cdev);
-	struct MPT3SAS_ADAPTER *ioc = shost_priv(shost);
-
-	return snprintf(buf, PAGE_SIZE, "0x%08x\n", ioc->drv_support_bitmap);
-}
-static DEVICE_ATTR_RO(drv_support_bitmap);
-
-/**
- * enable_sdev_max_qd_show - display whether sdev max qd is enabled/disabled
- * @cdev - pointer to embedded class device
- * @buf - the buffer returned
- *
- * A sysfs read/write shost attribute. This attribute is used to set the
- * targets queue depth to HBA IO queue depth if this attribute is enabled.
- */
-static ssize_t
-enable_sdev_max_qd_show(struct device *cdev,
-	struct device_attribute *attr, char *buf)
-{
-	struct Scsi_Host *shost = class_to_shost(cdev);
-	struct MPT3SAS_ADAPTER *ioc = shost_priv(shost);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", ioc->enable_sdev_max_qd);
-}
-
-/**
- * enable_sdev_max_qd_store - Enable/disable sdev max qd
- * @cdev - pointer to embedded class device
- * @buf - the buffer returned
- *
- * A sysfs read/write shost attribute. This attribute is used to set the
- * targets queue depth to HBA IO queue depth if this attribute is enabled.
- * If this attribute is disabled then targets will have corresponding default
- * queue depth.
- */
-static ssize_t
-enable_sdev_max_qd_store(struct device *cdev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct Scsi_Host *shost = class_to_shost(cdev);
-	struct MPT3SAS_ADAPTER *ioc = shost_priv(shost);
-	struct MPT3SAS_DEVICE *sas_device_priv_data;
-	struct MPT3SAS_TARGET *sas_target_priv_data;
-	int val = 0;
-	struct scsi_device *sdev;
-	struct _raid_device *raid_device;
-	int qdepth;
-
-	if (kstrtoint(buf, 0, &val) != 0)
-		return -EINVAL;
-
-	switch (val) {
-	case 0:
-		ioc->enable_sdev_max_qd = 0;
-		shost_for_each_device(sdev, ioc->shost) {
-			sas_device_priv_data = sdev->hostdata;
-			if (!sas_device_priv_data)
-				continue;
-			sas_target_priv_data = sas_device_priv_data->sas_target;
-			if (!sas_target_priv_data)
-				continue;
-
-			if (sas_target_priv_data->flags &
-			    MPT_TARGET_FLAGS_VOLUME) {
-				raid_device =
-				    mpt3sas_raid_device_find_by_handle(ioc,
-				    sas_target_priv_data->handle);
-
-				switch (raid_device->volume_type) {
-				case MPI2_RAID_VOL_TYPE_RAID0:
-					if (raid_device->device_info &
-					    MPI2_SAS_DEVICE_INFO_SSP_TARGET)
-						qdepth =
-						    MPT3SAS_SAS_QUEUE_DEPTH;
-					else
-						qdepth =
-						    MPT3SAS_SATA_QUEUE_DEPTH;
-					break;
-				case MPI2_RAID_VOL_TYPE_RAID1E:
-				case MPI2_RAID_VOL_TYPE_RAID1:
-				case MPI2_RAID_VOL_TYPE_RAID10:
-				case MPI2_RAID_VOL_TYPE_UNKNOWN:
-				default:
-					qdepth = MPT3SAS_RAID_QUEUE_DEPTH;
-				}
-			} else if (sas_target_priv_data->flags &
-			    MPT_TARGET_FLAGS_PCIE_DEVICE)
-				qdepth = MPT3SAS_NVME_QUEUE_DEPTH;
-			else
-				qdepth = MPT3SAS_SAS_QUEUE_DEPTH;
-
-			mpt3sas_scsih_change_queue_depth(sdev, qdepth);
-		}
-		break;
-	case 1:
-		ioc->enable_sdev_max_qd = 1;
-		shost_for_each_device(sdev, ioc->shost)
-			mpt3sas_scsih_change_queue_depth(sdev,
-			    shost->can_queue);
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return strlen(buf);
-}
-static DEVICE_ATTR_RW(enable_sdev_max_qd);
 
 struct device_attribute *mpt3sas_host_attrs[] = {
 	&dev_attr_version_fw,
@@ -3526,16 +3384,14 @@ struct device_attribute *mpt3sas_host_attrs[] = {
 	&dev_attr_diag_trigger_event,
 	&dev_attr_diag_trigger_scsi,
 	&dev_attr_diag_trigger_mpi,
-	&dev_attr_drv_support_bitmap,
 	&dev_attr_BRM_status,
-	&dev_attr_enable_sdev_max_qd,
 	NULL,
 };
 
 /* device attributes */
 
 /**
- * sas_address_show - sas address
+ * _ctl_device_sas_address_show - sas address
  * @dev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3545,7 +3401,7 @@ struct device_attribute *mpt3sas_host_attrs[] = {
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-sas_address_show(struct device *dev, struct device_attribute *attr,
+_ctl_device_sas_address_show(struct device *dev, struct device_attribute *attr,
 	char *buf)
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
@@ -3554,10 +3410,10 @@ sas_address_show(struct device *dev, struct device_attribute *attr,
 	return snprintf(buf, PAGE_SIZE, "0x%016llx\n",
 	    (unsigned long long)sas_device_priv_data->sas_target->sas_address);
 }
-static DEVICE_ATTR_RO(sas_address);
+static DEVICE_ATTR(sas_address, S_IRUGO, _ctl_device_sas_address_show, NULL);
 
 /**
- * sas_device_handle_show - device handle
+ * _ctl_device_handle_show - device handle
  * @dev: pointer to embedded class device
  * @attr: ?
  * @buf: the buffer returned
@@ -3567,7 +3423,7 @@ static DEVICE_ATTR_RO(sas_address);
  * A sysfs 'read-only' shost attribute.
  */
 static ssize_t
-sas_device_handle_show(struct device *dev, struct device_attribute *attr,
+_ctl_device_handle_show(struct device *dev, struct device_attribute *attr,
 	char *buf)
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
@@ -3576,10 +3432,10 @@ sas_device_handle_show(struct device *dev, struct device_attribute *attr,
 	return snprintf(buf, PAGE_SIZE, "0x%04x\n",
 	    sas_device_priv_data->sas_target->handle);
 }
-static DEVICE_ATTR_RO(sas_device_handle);
+static DEVICE_ATTR(sas_device_handle, S_IRUGO, _ctl_device_handle_show, NULL);
 
 /**
- * sas_ncq_io_prio_show - send prioritized io commands to device
+ * _ctl_device_ncq_io_prio_show - send prioritized io commands to device
  * @dev: pointer to embedded device
  * @attr: ?
  * @buf: the buffer returned
@@ -3587,7 +3443,7 @@ static DEVICE_ATTR_RO(sas_device_handle);
  * A sysfs 'read/write' sdev attribute, only works with SATA
  */
 static ssize_t
-sas_ncq_prio_enable_show(struct device *dev,
+_ctl_device_ncq_prio_enable_show(struct device *dev,
 				 struct device_attribute *attr, char *buf)
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
@@ -3598,7 +3454,7 @@ sas_ncq_prio_enable_show(struct device *dev,
 }
 
 static ssize_t
-sas_ncq_prio_enable_store(struct device *dev,
+_ctl_device_ncq_prio_enable_store(struct device *dev,
 				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -3615,7 +3471,9 @@ sas_ncq_prio_enable_store(struct device *dev,
 	sas_device_priv_data->ncq_prio_enable = ncq_prio_enable;
 	return strlen(buf);
 }
-static DEVICE_ATTR_RW(sas_ncq_prio_enable);
+static DEVICE_ATTR(sas_ncq_prio_enable, S_IRUGO | S_IWUSR,
+		   _ctl_device_ncq_prio_enable_show,
+		   _ctl_device_ncq_prio_enable_store);
 
 struct device_attribute *mpt3sas_dev_attrs[] = {
 	&dev_attr_sas_address,

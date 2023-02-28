@@ -361,8 +361,7 @@ void snd_hda_pick_fixup(struct hda_codec *codec,
 			const struct hda_fixup *fixlist);
 void snd_hda_pick_pin_fixup(struct hda_codec *codec,
 			    const struct snd_hda_pin_quirk *pin_quirk,
-			    const struct hda_fixup *fixlist,
-			    bool match_all_pins);
+			    const struct hda_fixup *fixlist);
 
 /* helper macros to retrieve pin default-config values */
 #define get_defcfg_connect(cfg) \

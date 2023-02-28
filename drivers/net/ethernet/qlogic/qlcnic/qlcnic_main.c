@@ -4119,14 +4119,13 @@ static void
 qlcnic_config_indev_addr(struct qlcnic_adapter *adapter,
 			struct net_device *dev, unsigned long event)
 {
-	const struct in_ifaddr *ifa;
 	struct in_device *indev;
 
 	indev = in_dev_get(dev);
 	if (!indev)
 		return;
 
-	in_dev_for_each_ifa_rtnl(ifa, indev) {
+	for_ifa(indev) {
 		switch (event) {
 		case NETDEV_UP:
 			qlcnic_config_ipaddr(adapter,
@@ -4139,7 +4138,7 @@ qlcnic_config_indev_addr(struct qlcnic_adapter *adapter,
 		default:
 			break;
 		}
-	}
+	} endfor_ifa(indev);
 
 	in_dev_put(indev);
 }

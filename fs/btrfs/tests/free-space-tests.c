@@ -8,7 +8,6 @@
 #include "../ctree.h"
 #include "../disk-io.h"
 #include "../free-space-cache.h"
-#include "../block-group.h"
 
 #define BITS_PER_BITMAP		(PAGE_SIZE * 8UL)
 

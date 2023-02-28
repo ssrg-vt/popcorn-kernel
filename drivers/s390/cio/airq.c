@@ -16,11 +16,9 @@
 #include <linux/mutex.h>
 #include <linux/rculist.h>
 #include <linux/slab.h>
-#include <linux/dmapool.h>
 
 #include <asm/airq.h>
 #include <asm/isc.h>
-#include <asm/cio.h>
 
 #include "cio.h"
 #include "cio_debug.h"
@@ -29,7 +27,7 @@
 static DEFINE_SPINLOCK(airq_lists_lock);
 static struct hlist_head airq_lists[MAX_ISC+1];
 
-static struct dma_pool *airq_iv_cache;
+static struct kmem_cache *airq_iv_cache;
 
 /**
  * register_adapter_interrupt() - register adapter interrupt handler
@@ -117,11 +115,6 @@ void __init init_airq_interrupts(void)
 	setup_irq(THIN_INTERRUPT, &airq_interrupt);
 }
 
-static inline unsigned long iv_size(unsigned long bits)
-{
-	return BITS_TO_LONGS(bits) * sizeof(unsigned long);
-}
-
 /**
  * airq_iv_create - create an interrupt vector
  * @bits: number of bits in the interrupt vector
@@ -139,19 +132,17 @@ struct airq_iv *airq_iv_create(unsigned long bits, unsigned long flags)
 		goto out;
 	iv->bits = bits;
 	iv->flags = flags;
-	size = iv_size(bits);
+	size = BITS_TO_LONGS(bits) * sizeof(unsigned long);
 
 	if (flags & AIRQ_IV_CACHELINE) {
-		if ((cache_line_size() * BITS_PER_BYTE) < bits
-				|| !airq_iv_cache)
+		if ((cache_line_size() * BITS_PER_BYTE) < bits)
 			goto out_free;
 
-		iv->vector = dma_pool_zalloc(airq_iv_cache, GFP_KERNEL,
-					     &iv->vector_dma);
+		iv->vector = kmem_cache_zalloc(airq_iv_cache, GFP_KERNEL);
 		if (!iv->vector)
 			goto out_free;
 	} else {
-		iv->vector = cio_dma_zalloc(size);
+		iv->vector = kzalloc(size, GFP_KERNEL);
 		if (!iv->vector)
 			goto out_free;
 	}
@@ -187,10 +178,10 @@ out_free:
 	kfree(iv->ptr);
 	kfree(iv->bitlock);
 	kfree(iv->avail);
-	if (iv->flags & AIRQ_IV_CACHELINE && iv->vector)
-		dma_pool_free(airq_iv_cache, iv->vector, iv->vector_dma);
+	if (iv->flags & AIRQ_IV_CACHELINE)
+		kmem_cache_free(airq_iv_cache, iv->vector);
 	else
-		cio_dma_free(iv->vector, size);
+		kfree(iv->vector);
 	kfree(iv);
 out:
 	return NULL;
@@ -207,9 +198,9 @@ void airq_iv_release(struct airq_iv *iv)
 	kfree(iv->ptr);
 	kfree(iv->bitlock);
 	if (iv->flags & AIRQ_IV_CACHELINE)
-		dma_pool_free(airq_iv_cache, iv->vector, iv->vector_dma);
+		kmem_cache_free(airq_iv_cache, iv->vector);
 	else
-		cio_dma_free(iv->vector, iv_size(iv->bits));
+		kfree(iv->vector);
 	kfree(iv->avail);
 	kfree(iv);
 }
@@ -304,12 +295,12 @@ unsigned long airq_iv_scan(struct airq_iv *iv, unsigned long start,
 }
 EXPORT_SYMBOL(airq_iv_scan);
 
-int __init airq_init(void)
+static int __init airq_init(void)
 {
-	airq_iv_cache = dma_pool_create("airq_iv_cache", cio_get_dma_css_dev(),
-					cache_line_size(),
-					cache_line_size(), PAGE_SIZE);
+	airq_iv_cache = kmem_cache_create("airq_iv_cache", cache_line_size(),
+					  cache_line_size(), 0, NULL);
 	if (!airq_iv_cache)
 		return -ENOMEM;
 	return 0;
 }
+subsys_initcall(airq_init);

@@ -438,7 +438,10 @@ int ubifs_log_start_commit(struct ubifs_info *c, int *ltail_lnum)
 	*ltail_lnum = c->lhead_lnum;
 
 	c->lhead_offs += len;
-	ubifs_assert(c, c->lhead_offs < c->leb_size);
+	if (c->lhead_offs == c->leb_size) {
+		c->lhead_lnum = ubifs_next_log_lnum(c, c->lhead_lnum);
+		c->lhead_offs = 0;
+	}
 
 	remove_buds(c);
 

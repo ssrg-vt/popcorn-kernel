@@ -21,7 +21,7 @@
 #include "backref.h"
 #include "extent_io.h"
 #include "qgroup.h"
-#include "block-group.h"
+
 
 /* TODO XXX FIXME
  *  - subvol delete -> delete when ref goes to 0? delete limits also?
@@ -1312,9 +1312,8 @@ static int __del_qgroup_relation(struct btrfs_trans_handle *trans, u64 src,
 	struct btrfs_qgroup *member;
 	struct btrfs_qgroup_list *list;
 	struct ulist *tmp;
-	bool found = false;
 	int ret = 0;
-	int ret2;
+	int err;
 
 	tmp = ulist_alloc(GFP_KERNEL);
 	if (!tmp)
@@ -1328,39 +1327,28 @@ static int __del_qgroup_relation(struct btrfs_trans_handle *trans, u64 src,
 
 	member = find_qgroup_rb(fs_info, src);
 	parent = find_qgroup_rb(fs_info, dst);
-	/*
-	 * The parent/member pair doesn't exist, then try to delete the dead
-	 * relation items only.
-	 */
-	if (!member || !parent)
-		goto delete_item;
+	if (!member || !parent) {
+		ret = -EINVAL;
+		goto out;
+	}
 
 	/* check if such qgroup relation exist firstly */
 	list_for_each_entry(list, &member->groups, next_group) {
-		if (list->group == parent) {
-			found = true;
-			break;
-		}
+		if (list->group == parent)
+			goto exist;
 	}
-
-delete_item:
+	ret = -ENOENT;
+	goto out;
+exist:
 	ret = del_qgroup_relation_item(trans, src, dst);
-	if (ret < 0 && ret != -ENOENT)
-		goto out;
-	ret2 = del_qgroup_relation_item(trans, dst, src);
-	if (ret2 < 0 && ret2 != -ENOENT)
-		goto out;
+	err = del_qgroup_relation_item(trans, dst, src);
+	if (err && !ret)
+		ret = err;
 
-	/* At least one deletion succeeded, return 0 */
-	if (!ret || !ret2)
-		ret = 0;
-
-	if (found) {
-		spin_lock(&fs_info->qgroup_lock);
-		del_relation_rb(fs_info, src, dst);
-		ret = quick_update_accounting(fs_info, tmp, src, dst, -1);
-		spin_unlock(&fs_info->qgroup_lock);
-	}
+	spin_lock(&fs_info->qgroup_lock);
+	del_relation_rb(fs_info, src, dst);
+	ret = quick_update_accounting(fs_info, tmp, src, dst, -1);
+	spin_unlock(&fs_info->qgroup_lock);
 out:
 	ulist_free(tmp);
 	return ret;
@@ -3629,7 +3617,7 @@ int __btrfs_qgroup_reserve_meta(struct btrfs_root *root, int num_bytes,
 		return 0;
 
 	BUG_ON(num_bytes != round_down(num_bytes, fs_info->nodesize));
-	trace_qgroup_meta_reserve(root, (s64)num_bytes, type);
+	trace_qgroup_meta_reserve(root, type, (s64)num_bytes);
 	ret = qgroup_reserve(root, num_bytes, enforce, type);
 	if (ret < 0)
 		return ret;
@@ -3676,7 +3664,7 @@ void __btrfs_qgroup_free_meta(struct btrfs_root *root, int num_bytes,
 	 */
 	num_bytes = sub_root_meta_rsv(root, num_bytes, type);
 	BUG_ON(num_bytes != round_down(num_bytes, fs_info->nodesize));
-	trace_qgroup_meta_reserve(root, -(s64)num_bytes, type);
+	trace_qgroup_meta_reserve(root, type, -(s64)num_bytes);
 	btrfs_qgroup_free_refroot(fs_info, root->root_key.objectid,
 				  num_bytes, type);
 }

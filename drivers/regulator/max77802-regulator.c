@@ -14,7 +14,9 @@
 #include <linux/kernel.h>
 #include <linux/bug.h>
 #include <linux/err.h>
+#include <linux/gpio.h>
 #include <linux/slab.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/driver.h>

@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __LINUX_OMAP_DMA_H
 #define __LINUX_OMAP_DMA_H
+#include <linux/omap-dmaengine.h>
+
 /*
  *  Legacy OMAP DMA handling defines and functions
  *

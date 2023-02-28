@@ -27,52 +27,100 @@ int mv88e6xxx_g1_write(struct mv88e6xxx_chip *chip, int reg, u16 val)
 	return mv88e6xxx_write(chip, addr, reg, val);
 }
 
-int mv88e6xxx_g1_wait_bit(struct mv88e6xxx_chip *chip, int reg, int
-			  bit, int val)
+int mv88e6xxx_g1_wait(struct mv88e6xxx_chip *chip, int reg, u16 mask)
 {
-	return mv88e6xxx_wait_bit(chip, chip->info->global1_addr, reg,
-				  bit, val);
-}
-
-int mv88e6xxx_g1_wait_mask(struct mv88e6xxx_chip *chip, int reg,
-			   u16 mask, u16 val)
-{
-	return mv88e6xxx_wait_mask(chip, chip->info->global1_addr, reg,
-				   mask, val);
+	return mv88e6xxx_wait(chip, chip->info->global1_addr, reg, mask);
 }
 
 /* Offset 0x00: Switch Global Status Register */
 
 static int mv88e6185_g1_wait_ppu_disabled(struct mv88e6xxx_chip *chip)
 {
-	return mv88e6xxx_g1_wait_mask(chip, MV88E6XXX_G1_STS,
-				      MV88E6185_G1_STS_PPU_STATE_MASK,
-				      MV88E6185_G1_STS_PPU_STATE_DISABLED);
+	u16 state;
+	int i, err;
+
+	for (i = 0; i < 16; i++) {
+		err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_STS, &state);
+		if (err)
+			return err;
+
+		/* Check the value of the PPUState bits 15:14 */
+		state &= MV88E6185_G1_STS_PPU_STATE_MASK;
+		if (state != MV88E6185_G1_STS_PPU_STATE_POLLING)
+			return 0;
+
+		usleep_range(1000, 2000);
+	}
+
+	return -ETIMEDOUT;
 }
 
 static int mv88e6185_g1_wait_ppu_polling(struct mv88e6xxx_chip *chip)
 {
-	return mv88e6xxx_g1_wait_mask(chip, MV88E6XXX_G1_STS,
-				      MV88E6185_G1_STS_PPU_STATE_MASK,
-				      MV88E6185_G1_STS_PPU_STATE_POLLING);
+	u16 state;
+	int i, err;
+
+	for (i = 0; i < 16; ++i) {
+		err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_STS, &state);
+		if (err)
+			return err;
+
+		/* Check the value of the PPUState bits 15:14 */
+		state &= MV88E6185_G1_STS_PPU_STATE_MASK;
+		if (state == MV88E6185_G1_STS_PPU_STATE_POLLING)
+			return 0;
+
+		usleep_range(1000, 2000);
+	}
+
+	return -ETIMEDOUT;
 }
 
 static int mv88e6352_g1_wait_ppu_polling(struct mv88e6xxx_chip *chip)
 {
-	int bit = __bf_shf(MV88E6352_G1_STS_PPU_STATE);
+	u16 state;
+	int i, err;
 
-	return mv88e6xxx_g1_wait_bit(chip, MV88E6XXX_G1_STS, bit, 1);
+	for (i = 0; i < 16; ++i) {
+		err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_STS, &state);
+		if (err)
+			return err;
+
+		/* Check the value of the PPUState (or InitState) bit 15 */
+		if (state & MV88E6352_G1_STS_PPU_STATE)
+			return 0;
+
+		usleep_range(1000, 2000);
+	}
+
+	return -ETIMEDOUT;
 }
 
 static int mv88e6xxx_g1_wait_init_ready(struct mv88e6xxx_chip *chip)
 {
-	int bit = __bf_shf(MV88E6XXX_G1_STS_INIT_READY);
+	const unsigned long timeout = jiffies + 1 * HZ;
+	u16 val;
+	int err;
 
 	/* Wait up to 1 second for the switch to be ready. The InitReady bit 11
 	 * is set to a one when all units inside the device (ATU, VTU, etc.)
 	 * have finished their initialization and are ready to accept frames.
 	 */
-	return mv88e6xxx_g1_wait_bit(chip, MV88E6XXX_G1_STS, bit, 1);
+	while (time_before(jiffies, timeout)) {
+		err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_STS, &val);
+		if (err)
+			return err;
+
+		if (val & MV88E6XXX_G1_STS_INIT_READY)
+			break;
+
+		usleep_range(1000, 2000);
+	}
+
+	if (time_after(jiffies, timeout))
+		return -ETIMEDOUT;
+
+	return 0;
 }
 
 /* Offset 0x01: Switch MAC Address Register Bytes 0 & 1
@@ -130,7 +178,7 @@ int mv88e6185_g1_reset(struct mv88e6xxx_chip *chip)
 	return mv88e6185_g1_wait_ppu_polling(chip);
 }
 
-int mv88e6250_g1_reset(struct mv88e6xxx_chip *chip)
+int mv88e6352_g1_reset(struct mv88e6xxx_chip *chip)
 {
 	u16 val;
 	int err;
@@ -146,14 +194,7 @@ int mv88e6250_g1_reset(struct mv88e6xxx_chip *chip)
 	if (err)
 		return err;
 
-	return mv88e6xxx_g1_wait_init_ready(chip);
-}
-
-int mv88e6352_g1_reset(struct mv88e6xxx_chip *chip)
-{
-	int err;
-
-	err = mv88e6250_g1_reset(chip);
+	err = mv88e6xxx_g1_wait_init_ready(chip);
 	if (err)
 		return err;
 
@@ -254,12 +295,6 @@ int mv88e6085_g1_ieee_pri_map(struct mv88e6xxx_chip *chip)
 	return mv88e6xxx_g1_write(chip, MV88E6XXX_G1_IEEE_PRI, 0xfa41);
 }
 
-int mv88e6250_g1_ieee_pri_map(struct mv88e6xxx_chip *chip)
-{
-	/* Reset the IEEE Tag priorities to defaults */
-	return mv88e6xxx_g1_write(chip, MV88E6XXX_G1_IEEE_PRI, 0xfa50);
-}
-
 /* Offset 0x1a: Monitor Control */
 /* Offset 0x1a: Monitor & MGMT Control on some devices */
 
@@ -340,26 +375,26 @@ int mv88e6390_g1_mgmt_rsvd2cpu(struct mv88e6xxx_chip *chip)
 	u16 ptr;
 	int err;
 
-	/* 01:80:c2:00:00:00-01:80:c2:00:00:07 are Management */
-	ptr = MV88E6390_G1_MONITOR_MGMT_CTL_PTR_0180C200000XLO;
+	/* 01:c2:80:00:00:00:00-01:c2:80:00:00:00:07 are Management */
+	ptr = MV88E6390_G1_MONITOR_MGMT_CTL_PTR_0180C280000000XLO;
 	err = mv88e6390_g1_monitor_write(chip, ptr, 0xff);
 	if (err)
 		return err;
 
-	/* 01:80:c2:00:00:08-01:80:c2:00:00:0f are Management */
-	ptr = MV88E6390_G1_MONITOR_MGMT_CTL_PTR_0180C200000XHI;
+	/* 01:c2:80:00:00:00:08-01:c2:80:00:00:00:0f are Management */
+	ptr = MV88E6390_G1_MONITOR_MGMT_CTL_PTR_0180C280000000XHI;
 	err = mv88e6390_g1_monitor_write(chip, ptr, 0xff);
 	if (err)
 		return err;
 
-	/* 01:80:c2:00:00:20-01:80:c2:00:00:27 are Management */
-	ptr = MV88E6390_G1_MONITOR_MGMT_CTL_PTR_0180C200002XLO;
+	/* 01:c2:80:00:00:00:20-01:c2:80:00:00:00:27 are Management */
+	ptr = MV88E6390_G1_MONITOR_MGMT_CTL_PTR_0180C280000002XLO;
 	err = mv88e6390_g1_monitor_write(chip, ptr, 0xff);
 	if (err)
 		return err;
 
-	/* 01:80:c2:00:00:28-01:80:c2:00:00:2f are Management */
-	ptr = MV88E6390_G1_MONITOR_MGMT_CTL_PTR_0180C200002XHI;
+	/* 01:c2:80:00:00:00:28-01:c2:80:00:00:00:2f are Management */
+	ptr = MV88E6390_G1_MONITOR_MGMT_CTL_PTR_0180C280000002XHI;
 	err = mv88e6390_g1_monitor_write(chip, ptr, 0xff);
 	if (err)
 		return err;
@@ -426,11 +461,10 @@ int mv88e6xxx_g1_set_device_number(struct mv88e6xxx_chip *chip, int index)
 
 /* Offset 0x1d: Statistics Operation 2 */
 
-static int mv88e6xxx_g1_stats_wait(struct mv88e6xxx_chip *chip)
+int mv88e6xxx_g1_stats_wait(struct mv88e6xxx_chip *chip)
 {
-	int bit = __bf_shf(MV88E6XXX_G1_STATS_OP_BUSY);
-
-	return mv88e6xxx_g1_wait_bit(chip, MV88E6XXX_G1_STATS_OP, bit, 0);
+	return mv88e6xxx_g1_wait(chip, MV88E6XXX_G1_STATS_OP,
+				 MV88E6XXX_G1_STATS_OP_BUSY);
 }
 
 int mv88e6095_g1_stats_set_histogram(struct mv88e6xxx_chip *chip)

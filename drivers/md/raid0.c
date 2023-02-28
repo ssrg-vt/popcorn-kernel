@@ -145,16 +145,13 @@ static int create_strip_zones(struct mddev *mddev, struct r0conf **private_conf)
 
 	if (conf->nr_strip_zones == 1) {
 		conf->layout = RAID0_ORIG_LAYOUT;
-	} else if (mddev->layout == RAID0_ORIG_LAYOUT ||
-		   mddev->layout == RAID0_ALT_MULTIZONE_LAYOUT) {
-		conf->layout = mddev->layout;
 	} else if (default_layout == RAID0_ORIG_LAYOUT ||
 		   default_layout == RAID0_ALT_MULTIZONE_LAYOUT) {
 		conf->layout = default_layout;
 	} else {
 		pr_err("md/raid0:%s: cannot assemble multi-zone RAID0 with default_layout setting\n",
 		       mdname(mddev));
-		pr_err("md/raid0: please set raid0.default_layout to 1 or 2\n");
+		pr_err("md/raid0: please set raid.default_layout to 1 or 2\n");
 		err = -ENOTSUPP;
 		goto abort;
 	}
@@ -616,11 +613,6 @@ static bool raid0_make_request(struct mddev *mddev, struct bio *bio)
 		break;
 	default:
 		WARN("md/raid0:%s: Invalid layout\n", mdname(mddev));
-		bio_io_error(bio);
-		return true;
-	}
-
-	if (unlikely(is_mddev_broken(tmp_dev, "raid0"))) {
 		bio_io_error(bio);
 		return true;
 	}

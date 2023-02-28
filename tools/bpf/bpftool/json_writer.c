@@ -15,6 +15,7 @@
 #include <malloc.h>
 #include <inttypes.h>
 #include <stdint.h>
+#include <linux/compiler.h>
 
 #include "json_writer.h"
 
@@ -152,7 +153,8 @@ void jsonw_name(json_writer_t *self, const char *name)
 		putc(' ', self->out);
 }
 
-void jsonw_vprintf_enquote(json_writer_t *self, const char *fmt, va_list ap)
+void __printf(2, 0)
+jsonw_vprintf_enquote(json_writer_t *self, const char *fmt, va_list ap)
 {
 	jsonw_eor(self);
 	putc('"', self->out);
@@ -160,7 +162,7 @@ void jsonw_vprintf_enquote(json_writer_t *self, const char *fmt, va_list ap)
 	putc('"', self->out);
 }
 
-void jsonw_printf(json_writer_t *self, const char *fmt, ...)
+void __printf(2, 3) jsonw_printf(json_writer_t *self, const char *fmt, ...)
 {
 	va_list ap;
 

@@ -609,7 +609,7 @@ static int bcm_sysport_set_coalesce(struct net_device *dev,
 				    struct ethtool_coalesce *ec)
 {
 	struct bcm_sysport_priv *priv = netdev_priv(dev);
-	struct dim_cq_moder moder;
+	struct net_dim_cq_moder moder;
 	u32 usecs, pkts;
 	unsigned int i;
 
@@ -708,7 +708,8 @@ static int bcm_sysport_alloc_rx_bufs(struct bcm_sysport_priv *priv)
 	for (i = 0; i < priv->num_rx_bds; i++) {
 		cb = &priv->rx_cbs[i];
 		skb = bcm_sysport_rx_refill(priv, cb);
-		dev_kfree_skb(skb);
+		if (skb)
+			dev_kfree_skb(skb);
 		if (!cb->skb)
 			return -ENOMEM;
 	}
@@ -991,7 +992,7 @@ static int bcm_sysport_poll(struct napi_struct *napi, int budget)
 {
 	struct bcm_sysport_priv *priv =
 		container_of(napi, struct bcm_sysport_priv, napi);
-	struct dim_sample dim_sample = {};
+	struct net_dim_sample dim_sample;
 	unsigned int work_done = 0;
 
 	work_done = bcm_sysport_desc_rx(priv, budget);
@@ -1015,8 +1016,8 @@ static int bcm_sysport_poll(struct napi_struct *napi, int budget)
 	}
 
 	if (priv->dim.use_dim) {
-		dim_update_sample(priv->dim.event_ctr, priv->dim.packets,
-				  priv->dim.bytes, &dim_sample);
+		net_dim_sample(priv->dim.event_ctr, priv->dim.packets,
+			       priv->dim.bytes, &dim_sample);
 		net_dim(&priv->dim.dim, dim_sample);
 	}
 
@@ -1086,16 +1087,16 @@ static void bcm_sysport_resume_from_wol(struct bcm_sysport_priv *priv)
 
 static void bcm_sysport_dim_work(struct work_struct *work)
 {
-	struct dim *dim = container_of(work, struct dim, work);
+	struct net_dim *dim = container_of(work, struct net_dim, work);
 	struct bcm_sysport_net_dim *ndim =
 			container_of(dim, struct bcm_sysport_net_dim, dim);
 	struct bcm_sysport_priv *priv =
 			container_of(ndim, struct bcm_sysport_priv, dim);
-	struct dim_cq_moder cur_profile = net_dim_get_rx_moderation(dim->mode,
-								    dim->profile_ix);
+	struct net_dim_cq_moder cur_profile =
+			net_dim_get_rx_moderation(dim->mode, dim->profile_ix);
 
 	bcm_sysport_set_rx_coalesce(priv, cur_profile.usec, cur_profile.pkts);
-	dim->state = DIM_START_MEASURE;
+	dim->state = NET_DIM_START_MEASURE;
 }
 
 /* RX and misc interrupt routine */
@@ -1436,7 +1437,7 @@ static void bcm_sysport_init_dim(struct bcm_sysport_priv *priv,
 	struct bcm_sysport_net_dim *dim = &priv->dim;
 
 	INIT_WORK(&dim->dim.work, cb);
-	dim->dim.mode = DIM_CQ_PERIOD_MODE_START_FROM_EQE;
+	dim->dim.mode = NET_DIM_CQ_PERIOD_MODE_START_FROM_EQE;
 	dim->event_ctr = 0;
 	dim->packets = 0;
 	dim->bytes = 0;
@@ -1445,7 +1446,7 @@ static void bcm_sysport_init_dim(struct bcm_sysport_priv *priv,
 static void bcm_sysport_init_rx_coalesce(struct bcm_sysport_priv *priv)
 {
 	struct bcm_sysport_net_dim *dim = &priv->dim;
-	struct dim_cq_moder moder;
+	struct net_dim_cq_moder moder;
 	u32 usecs, pkts;
 
 	usecs = priv->rx_coalesce_usecs;
@@ -2419,10 +2420,12 @@ static int bcm_sysport_probe(struct platform_device *pdev)
 	struct device_node *dn;
 	struct net_device *dev;
 	const void *macaddr;
+	struct resource *r;
 	u32 txq, rxq;
 	int ret;
 
 	dn = pdev->dev.of_node;
+	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	of_id = of_match_node(bcm_sysport_of_match, dn);
 	if (!of_id || !of_id->data)
 		return -EINVAL;
@@ -2470,7 +2473,7 @@ static int bcm_sysport_probe(struct platform_device *pdev)
 		goto err_free_netdev;
 	}
 
-	priv->base = devm_platform_ioremap_resource(pdev, 0);
+	priv->base = devm_ioremap_resource(&pdev->dev, r);
 	if (IS_ERR(priv->base)) {
 		ret = PTR_ERR(priv->base);
 		goto err_free_netdev;
@@ -2481,7 +2484,7 @@ static int bcm_sysport_probe(struct platform_device *pdev)
 
 	priv->phy_interface = of_get_phy_mode(dn);
 	/* Default to GMII interface mode */
-	if ((int)priv->phy_interface < 0)
+	if (priv->phy_interface < 0)
 		priv->phy_interface = PHY_INTERFACE_MODE_GMII;
 
 	/* In the case of a fixed PHY, the DT node associated

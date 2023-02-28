@@ -16,22 +16,17 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <math.h>
-#include <linux/string.h>
-#include <linux/zalloc.h>
 
 #include "asm/bug.h"
 
-#include "debug.h"
-#include "dso.h"
-#include "event.h"
 #include "hist.h"
+#include "util.h"
 #include "sort.h"
 #include "machine.h"
 #include "map.h"
 #include "callchain.h"
 #include "branch.h"
 #include "symbol.h"
-#include "../perf.h"
 
 #define CALLCHAIN_PARAM_DEFAULT			\
 	.mode		= CHAIN_GRAPH_ABS,	\
@@ -641,7 +636,7 @@ add_child(struct callchain_node *parent,
 		struct callchain_list *call, *tmp;
 
 		list_for_each_entry_safe(call, tmp, &new->val, list) {
-			list_del_init(&call->list);
+			list_del(&call->list);
 			map__zput(call->ms.map);
 			free(call);
 		}
@@ -1007,7 +1002,7 @@ merge_chain_branch(struct callchain_cursor *cursor,
 		callchain_cursor_append(cursor, list->ip,
 					list->ms.map, list->ms.sym,
 					false, NULL, 0, 0, 0, list->srcline);
-		list_del_init(&list->list);
+		list_del(&list->list);
 		map__zput(list->ms.map);
 		free(list);
 	}
@@ -1082,7 +1077,7 @@ int callchain_cursor_append(struct callchain_cursor *cursor,
 
 int sample__resolve_callchain(struct perf_sample *sample,
 			      struct callchain_cursor *cursor, struct symbol **parent,
-			      struct evsel *evsel, struct addr_location *al,
+			      struct perf_evsel *evsel, struct addr_location *al,
 			      int max_stack)
 {
 	if (sample->callchain == NULL && !symbol_conf.show_branchflag_count)
@@ -1458,13 +1453,13 @@ static void free_callchain_node(struct callchain_node *node)
 	struct rb_node *n;
 
 	list_for_each_entry_safe(list, tmp, &node->parent_val, list) {
-		list_del_init(&list->list);
+		list_del(&list->list);
 		map__zput(list->ms.map);
 		free(list);
 	}
 
 	list_for_each_entry_safe(list, tmp, &node->val, list) {
-		list_del_init(&list->list);
+		list_del(&list->list);
 		map__zput(list->ms.map);
 		free(list);
 	}
@@ -1549,7 +1544,7 @@ int callchain_node__make_parent_list(struct callchain_node *node)
 
 out:
 	list_for_each_entry_safe(chain, new, &head, list) {
-		list_del_init(&chain->list);
+		list_del(&chain->list);
 		map__zput(chain->ms.map);
 		free(chain);
 	}

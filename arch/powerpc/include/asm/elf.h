@@ -175,7 +175,4 @@ do {									\
 	ARCH_DLINFO_CACHE_GEOMETRY;					\
 } while (0)
 
-/* Relocate the kernel image to @final_address */
-void relocate(unsigned long final_address);
-
 #endif /* _ASM_POWERPC_ELF_H */

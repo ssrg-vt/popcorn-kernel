@@ -41,10 +41,6 @@ void nvmet_port_disc_changed(struct nvmet_port *port,
 		__nvmet_disc_changed(port, ctrl);
 	}
 	mutex_unlock(&nvmet_disc_subsys->lock);
-
-	/* If transport can signal change, notify transport */
-	if (port->tr_ops && port->tr_ops->discovery_chg)
-		port->tr_ops->discovery_chg(port);
 }
 
 static void __nvmet_subsys_disc_changed(struct nvmet_port *port,
@@ -381,7 +377,9 @@ int __init nvmet_init_discovery(void)
 {
 	nvmet_disc_subsys =
 		nvmet_subsys_alloc(NVME_DISC_SUBSYS_NAME, NVME_NQN_DISC);
-	return PTR_ERR_OR_ZERO(nvmet_disc_subsys);
+	if (IS_ERR(nvmet_disc_subsys))
+		return PTR_ERR(nvmet_disc_subsys);
+	return 0;
 }
 
 void nvmet_exit_discovery(void)

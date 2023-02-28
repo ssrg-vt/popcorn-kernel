@@ -31,21 +31,22 @@ static void spufs_handle_event(struct spu_context *ctx,
 
 	switch (type) {
 	case SPE_EVENT_INVALID_DMA:
-		force_sig_fault(SIGBUS, BUS_OBJERR, NULL);
+		force_sig_fault(SIGBUS, BUS_OBJERR, NULL, current);
 		break;
 	case SPE_EVENT_SPE_DATA_STORAGE:
 		ctx->ops->restart_dma(ctx);
-		force_sig_fault(SIGSEGV, SEGV_ACCERR, (void __user *)ea);
+		force_sig_fault(SIGSEGV, SEGV_ACCERR, (void __user *)ea,
+				current);
 		break;
 	case SPE_EVENT_DMA_ALIGNMENT:
 		/* DAR isn't set for an alignment fault :( */
-		force_sig_fault(SIGBUS, BUS_ADRALN, NULL);
+		force_sig_fault(SIGBUS, BUS_ADRALN, NULL, current);
 		break;
 	case SPE_EVENT_SPE_ERROR:
 		force_sig_fault(
 			SIGILL, ILL_ILLOPC,
 			(void __user *)(unsigned long)
-			ctx->ops->npc_read(ctx) - 4);
+			ctx->ops->npc_read(ctx) - 4, current);
 		break;
 	}
 }

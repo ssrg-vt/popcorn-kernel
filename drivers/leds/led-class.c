@@ -14,7 +14,6 @@
 #include <linux/leds.h>
 #include <linux/list.h>
 #include <linux/module.h>
-#include <linux/property.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/timer.h>
@@ -214,6 +213,13 @@ static int led_resume(struct device *dev)
 
 static SIMPLE_DEV_PM_OPS(leds_class_dev_pm_ops, led_suspend, led_resume);
 
+static int match_name(struct device *dev, const void *data)
+{
+	if (!dev_name(dev))
+		return 0;
+	return !strcmp(dev_name(dev), (char *)data);
+}
+
 static int led_classdev_next_name(const char *init_name, char *name,
 				  size_t len)
 {
@@ -224,7 +230,7 @@ static int led_classdev_next_name(const char *init_name, char *name,
 	strlcpy(name, init_name, len);
 
 	while ((ret < len) &&
-	       (dev = class_find_device_by_name(leds_class, name))) {
+	       (dev = class_find_device(leds_class, NULL, name, match_name))) {
 		put_device(dev);
 		ret = snprintf(name, len, "%s_%u", init_name, ++i);
 	}
@@ -236,48 +242,31 @@ static int led_classdev_next_name(const char *init_name, char *name,
 }
 
 /**
- * led_classdev_register_ext - register a new object of led_classdev class
- *			       with init data.
+ * of_led_classdev_register - register a new object of led_classdev class.
  *
  * @parent: parent of LED device
  * @led_cdev: the led_classdev structure for this device.
- * @init_data: LED class device initialization data
+ * @np: DT node describing this LED
  */
-int led_classdev_register_ext(struct device *parent,
-			      struct led_classdev *led_cdev,
-			      struct led_init_data *init_data)
+int of_led_classdev_register(struct device *parent, struct device_node *np,
+			    struct led_classdev *led_cdev)
 {
-	char composed_name[LED_MAX_NAME_SIZE];
-	char final_name[LED_MAX_NAME_SIZE];
-	const char *proposed_name = composed_name;
+	char name[LED_MAX_NAME_SIZE];
 	int ret;
 
-	if (init_data) {
-		if (init_data->devname_mandatory && !init_data->devicename) {
-			dev_err(parent, "Mandatory device name is missing");
-			return -EINVAL;
-		}
-		ret = led_compose_name(parent, init_data, composed_name);
-		if (ret < 0)
-			return ret;
-	} else {
-		proposed_name = led_cdev->name;
-	}
-
-	ret = led_classdev_next_name(proposed_name, final_name, sizeof(final_name));
+	ret = led_classdev_next_name(led_cdev->name, name, sizeof(name));
 	if (ret < 0)
 		return ret;
 
 	mutex_init(&led_cdev->led_access);
 	mutex_lock(&led_cdev->led_access);
 	led_cdev->dev = device_create_with_groups(leds_class, parent, 0,
-				led_cdev, led_cdev->groups, "%s", final_name);
+				led_cdev, led_cdev->groups, "%s", name);
 	if (IS_ERR(led_cdev->dev)) {
 		mutex_unlock(&led_cdev->led_access);
 		return PTR_ERR(led_cdev->dev);
 	}
-	if (init_data && init_data->fwnode)
-		led_cdev->dev->fwnode = init_data->fwnode;
+	led_cdev->dev->of_node = np;
 
 	if (ret)
 		dev_warn(parent, "Led %s renamed to %s due to name collision",
@@ -287,7 +276,6 @@ int led_classdev_register_ext(struct device *parent,
 		ret = led_add_brightness_hw_changed(led_cdev);
 		if (ret) {
 			device_unregister(led_cdev->dev);
-			led_cdev->dev = NULL;
 			mutex_unlock(&led_cdev->led_access);
 			return ret;
 		}
@@ -323,7 +311,7 @@ int led_classdev_register_ext(struct device *parent,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(led_classdev_register_ext);
+EXPORT_SYMBOL_GPL(of_led_classdev_register);
 
 /**
  * led_classdev_unregister - unregisters a object of led_properties class.
@@ -333,9 +321,6 @@ EXPORT_SYMBOL_GPL(led_classdev_register_ext);
  */
 void led_classdev_unregister(struct led_classdev *led_cdev)
 {
-	if (IS_ERR_OR_NULL(led_cdev->dev))
-		return;
-
 #ifdef CONFIG_LEDS_TRIGGERS
 	down_write(&led_cdev->trigger_lock);
 	if (led_cdev->trigger)
@@ -371,15 +356,14 @@ static void devm_led_classdev_release(struct device *dev, void *res)
 }
 
 /**
- * devm_led_classdev_register_ext - resource managed led_classdev_register_ext()
+ * devm_of_led_classdev_register - resource managed led_classdev_register()
  *
  * @parent: parent of LED device
  * @led_cdev: the led_classdev structure for this device.
- * @init_data: LED class device initialization data
  */
-int devm_led_classdev_register_ext(struct device *parent,
-				   struct led_classdev *led_cdev,
-				   struct led_init_data *init_data)
+int devm_of_led_classdev_register(struct device *parent,
+				  struct device_node *np,
+				  struct led_classdev *led_cdev)
 {
 	struct led_classdev **dr;
 	int rc;
@@ -388,7 +372,7 @@ int devm_led_classdev_register_ext(struct device *parent,
 	if (!dr)
 		return -ENOMEM;
 
-	rc = led_classdev_register_ext(parent, led_cdev, init_data);
+	rc = of_led_classdev_register(parent, np, led_cdev);
 	if (rc) {
 		devres_free(dr);
 		return rc;
@@ -399,7 +383,7 @@ int devm_led_classdev_register_ext(struct device *parent,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(devm_led_classdev_register_ext);
+EXPORT_SYMBOL_GPL(devm_of_led_classdev_register);
 
 static int devm_led_classdev_match(struct device *dev, void *res, void *data)
 {

@@ -148,7 +148,8 @@ static void br_multicast_group_expired(struct timer_list *t)
 	if (!netif_running(br->dev) || timer_pending(&mp->timer))
 		goto out;
 
-	br_multicast_host_leave(mp, true);
+	mp->host_joined = false;
+	br_mdb_notify(br->dev, NULL, &mp->addr, RTM_DELMDB, 0);
 
 	if (mp->ports)
 		goto out;
@@ -511,27 +512,6 @@ static bool br_port_group_equal(struct net_bridge_port_group *p,
 	return ether_addr_equal(src, p->eth_addr);
 }
 
-void br_multicast_host_join(struct net_bridge_mdb_entry *mp, bool notify)
-{
-	if (!mp->host_joined) {
-		mp->host_joined = true;
-		if (notify)
-			br_mdb_notify(mp->br->dev, NULL, &mp->addr,
-				      RTM_NEWMDB, 0);
-	}
-	mod_timer(&mp->timer, jiffies + mp->br->multicast_membership_interval);
-}
-
-void br_multicast_host_leave(struct net_bridge_mdb_entry *mp, bool notify)
-{
-	if (!mp->host_joined)
-		return;
-
-	mp->host_joined = false;
-	if (notify)
-		br_mdb_notify(mp->br->dev, NULL, &mp->addr, RTM_DELMDB, 0);
-}
-
 static int br_multicast_add_group(struct net_bridge *br,
 				  struct net_bridge_port *port,
 				  struct br_ip *group,
@@ -554,7 +534,11 @@ static int br_multicast_add_group(struct net_bridge *br,
 		goto err;
 
 	if (!port) {
-		br_multicast_host_join(mp, true);
+		if (!mp->host_joined) {
+			mp->host_joined = true;
+			br_mdb_notify(br->dev, NULL, &mp->addr, RTM_NEWMDB, 0);
+		}
+		mod_timer(&mp->timer, now + br->multicast_membership_interval);
 		goto out;
 	}
 
@@ -1412,7 +1396,7 @@ br_multicast_leave_group(struct net_bridge *br,
 			del_timer(&p->timer);
 			kfree_rcu(p, rcu);
 			br_mdb_notify(br->dev, port, group, RTM_DELMDB,
-				      p->flags | MDB_PG_FLAGS_FAST_LEAVE);
+				      p->flags);
 
 			if (!mp->ports && !mp->host_joined &&
 			    netif_running(br->dev))

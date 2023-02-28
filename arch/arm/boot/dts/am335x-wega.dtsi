@@ -12,12 +12,16 @@
 		compatible = "ti,da830-evm-audio";
 	};
 
-	vcc3v3: fixedregulator1 {
-		compatible = "regulator-fixed";
-		regulator-name = "vcc3v3";
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
-		regulator-boot-on;
+	regulators {
+		compatible = "simple-bus";
+
+		vcc3v3: fixedregulator1 {
+			compatible = "regulator-fixed";
+			regulator-name = "vcc3v3";
+			regulator-min-microvolt = <3300000>;
+			regulator-max-microvolt = <3300000>;
+			regulator-boot-on;
+		};
 	};
 };
 

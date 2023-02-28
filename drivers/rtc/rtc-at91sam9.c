@@ -342,8 +342,10 @@ static int at91_rtc_probe(struct platform_device *pdev)
 	struct of_phandle_args args;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "failed to get interrupt resource\n");
 		return irq;
+	}
 
 	rtc = devm_kzalloc(&pdev->dev, sizeof(*rtc), GFP_KERNEL);
 	if (!rtc)

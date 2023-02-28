@@ -12,7 +12,6 @@
 
 #include <asm/cacheflush.h>
 #include <linux/cache.h>
-#include <linux/smp.h>
 #include <asm/cpuinfo.h>
 #include <asm/pvr.h>
 
@@ -93,8 +92,7 @@ static inline void __disable_dcache_nomsr(void)
 #define CACHE_LOOP_LIMITS(start, end, cache_line_length, cache_size)	\
 do {									\
 	int align = ~(cache_line_length - 1);				\
-	if (start <  UINT_MAX - cache_size)				\
-		end = min(start + cache_size, end);			\
+	end = min(start + cache_size, end);				\
 	start &= align;							\
 } while (0)
 
@@ -159,8 +157,6 @@ do {									\
 
 static void __flush_icache_range_msr_irq(unsigned long start, unsigned long end)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 	unsigned long flags;
 #ifndef ASM_LOOP
 	int i;
@@ -169,15 +165,15 @@ static void __flush_icache_range_msr_irq(unsigned long start, unsigned long end)
 				(unsigned int)start, (unsigned int) end);
 
 	CACHE_LOOP_LIMITS(start, end,
-			cpuinfo->icache_line_length, cpuinfo->icache_size);
+			cpuinfo.icache_line_length, cpuinfo.icache_size);
 
 	local_irq_save(flags);
 	__disable_icache_msr();
 
 #ifdef ASM_LOOP
-	CACHE_RANGE_LOOP_1(start, end, cpuinfo->icache_line_length, wic);
+	CACHE_RANGE_LOOP_1(start, end, cpuinfo.icache_line_length, wic);
 #else
-	for (i = start; i < end; i += cpuinfo->icache_line_length)
+	for (i = start; i < end; i += cpuinfo.icache_line_length)
 		__asm__ __volatile__ ("wic	%0, r0;"	\
 				: : "r" (i));
 #endif
@@ -188,8 +184,6 @@ static void __flush_icache_range_msr_irq(unsigned long start, unsigned long end)
 static void __flush_icache_range_nomsr_irq(unsigned long start,
 				unsigned long end)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 	unsigned long flags;
 #ifndef ASM_LOOP
 	int i;
@@ -198,15 +192,15 @@ static void __flush_icache_range_nomsr_irq(unsigned long start,
 				(unsigned int)start, (unsigned int) end);
 
 	CACHE_LOOP_LIMITS(start, end,
-			cpuinfo->icache_line_length, cpuinfo->icache_size);
+			cpuinfo.icache_line_length, cpuinfo.icache_size);
 
 	local_irq_save(flags);
 	__disable_icache_nomsr();
 
 #ifdef ASM_LOOP
-	CACHE_RANGE_LOOP_1(start, end, cpuinfo->icache_line_length, wic);
+	CACHE_RANGE_LOOP_1(start, end, cpuinfo.icache_line_length, wic);
 #else
-	for (i = start; i < end; i += cpuinfo->icache_line_length)
+	for (i = start; i < end; i += cpuinfo.icache_line_length)
 		__asm__ __volatile__ ("wic	%0, r0;"	\
 				: : "r" (i));
 #endif
@@ -218,8 +212,6 @@ static void __flush_icache_range_nomsr_irq(unsigned long start,
 static void __flush_icache_range_noirq(unsigned long start,
 				unsigned long end)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 #ifndef ASM_LOOP
 	int i;
 #endif
@@ -227,11 +219,11 @@ static void __flush_icache_range_noirq(unsigned long start,
 				(unsigned int)start, (unsigned int) end);
 
 	CACHE_LOOP_LIMITS(start, end,
-			cpuinfo->icache_line_length, cpuinfo->icache_size);
+			cpuinfo.icache_line_length, cpuinfo.icache_size);
 #ifdef ASM_LOOP
-	CACHE_RANGE_LOOP_1(start, end, cpuinfo->icache_line_length, wic);
+	CACHE_RANGE_LOOP_1(start, end, cpuinfo.icache_line_length, wic);
 #else
-	for (i = start; i < end; i += cpuinfo->icache_line_length)
+	for (i = start; i < end; i += cpuinfo.icache_line_length)
 		__asm__ __volatile__ ("wic	%0, r0;"	\
 				: : "r" (i));
 #endif
@@ -239,8 +231,6 @@ static void __flush_icache_range_noirq(unsigned long start,
 
 static void __flush_icache_all_msr_irq(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 	unsigned long flags;
 #ifndef ASM_LOOP
 	int i;
@@ -250,10 +240,11 @@ static void __flush_icache_all_msr_irq(void)
 	local_irq_save(flags);
 	__disable_icache_msr();
 #ifdef ASM_LOOP
-	CACHE_ALL_LOOP(cpuinfo->icache_size, cpuinfo->icache_line_length, wic);
+	CACHE_ALL_LOOP(cpuinfo.icache_size, cpuinfo.icache_line_length, wic);
 #else
-	for (i = 0; i < cpuinfo->icache_size; i += cpuinfo->icache_line_length)
-		__asm__ __volatile__ ("wic	%0, r0;" \
+	for (i = 0; i < cpuinfo.icache_size;
+		 i += cpuinfo.icache_line_length)
+			__asm__ __volatile__ ("wic	%0, r0;" \
 					: : "r" (i));
 #endif
 	__enable_icache_msr();
@@ -262,8 +253,6 @@ static void __flush_icache_all_msr_irq(void)
 
 static void __flush_icache_all_nomsr_irq(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 	unsigned long flags;
 #ifndef ASM_LOOP
 	int i;
@@ -273,10 +262,11 @@ static void __flush_icache_all_nomsr_irq(void)
 	local_irq_save(flags);
 	__disable_icache_nomsr();
 #ifdef ASM_LOOP
-	CACHE_ALL_LOOP(cpuinfo->icache_size, cpuinfo->icache_line_length, wic);
+	CACHE_ALL_LOOP(cpuinfo.icache_size, cpuinfo.icache_line_length, wic);
 #else
-	for (i = 0; i < cpuinfo->icache_size; i += cpuinfo->icache_line_length)
-		__asm__ __volatile__ ("wic	%0, r0;" \
+	for (i = 0; i < cpuinfo.icache_size;
+		 i += cpuinfo.icache_line_length)
+			__asm__ __volatile__ ("wic	%0, r0;" \
 					: : "r" (i));
 #endif
 	__enable_icache_nomsr();
@@ -285,25 +275,22 @@ static void __flush_icache_all_nomsr_irq(void)
 
 static void __flush_icache_all_noirq(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 #ifndef ASM_LOOP
 	int i;
 #endif
 	pr_debug("%s\n", __func__);
 #ifdef ASM_LOOP
-	CACHE_ALL_LOOP(cpuinfo->icache_size, cpuinfo->icache_line_length, wic);
+	CACHE_ALL_LOOP(cpuinfo.icache_size, cpuinfo.icache_line_length, wic);
 #else
-	for (i = 0; i < cpuinfo->icache_size; i += cpuinfo->icache_line_length)
-		__asm__ __volatile__ ("wic	%0, r0;" \
+	for (i = 0; i < cpuinfo.icache_size;
+		 i += cpuinfo.icache_line_length)
+			__asm__ __volatile__ ("wic	%0, r0;" \
 					: : "r" (i));
 #endif
 }
 
 static void __invalidate_dcache_all_msr_irq(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 	unsigned long flags;
 #ifndef ASM_LOOP
 	int i;
@@ -313,10 +300,11 @@ static void __invalidate_dcache_all_msr_irq(void)
 	local_irq_save(flags);
 	__disable_dcache_msr();
 #ifdef ASM_LOOP
-	CACHE_ALL_LOOP(cpuinfo->dcache_size, cpuinfo->dcache_line_length, wdc);
+	CACHE_ALL_LOOP(cpuinfo.dcache_size, cpuinfo.dcache_line_length, wdc);
 #else
-	for (i = 0; i < cpuinfo->dcache_size; i += cpuinfo->dcache_line_length)
-		__asm__ __volatile__ ("wdc	%0, r0;" \
+	for (i = 0; i < cpuinfo.dcache_size;
+		 i += cpuinfo.dcache_line_length)
+			__asm__ __volatile__ ("wdc	%0, r0;" \
 					: : "r" (i));
 #endif
 	__enable_dcache_msr();
@@ -325,8 +313,6 @@ static void __invalidate_dcache_all_msr_irq(void)
 
 static void __invalidate_dcache_all_nomsr_irq(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 	unsigned long flags;
 #ifndef ASM_LOOP
 	int i;
@@ -336,10 +322,11 @@ static void __invalidate_dcache_all_nomsr_irq(void)
 	local_irq_save(flags);
 	__disable_dcache_nomsr();
 #ifdef ASM_LOOP
-	CACHE_ALL_LOOP(cpuinfo->dcache_size, cpuinfo->dcache_line_length, wdc);
+	CACHE_ALL_LOOP(cpuinfo.dcache_size, cpuinfo.dcache_line_length, wdc);
 #else
-	for (i = 0; i < cpuinfo->dcache_size; i += cpuinfo->dcache_line_length)
-		__asm__ __volatile__ ("wdc	%0, r0;" \
+	for (i = 0; i < cpuinfo.dcache_size;
+		 i += cpuinfo.dcache_line_length)
+			__asm__ __volatile__ ("wdc	%0, r0;" \
 					: : "r" (i));
 #endif
 	__enable_dcache_nomsr();
@@ -348,17 +335,16 @@ static void __invalidate_dcache_all_nomsr_irq(void)
 
 static void __invalidate_dcache_all_noirq_wt(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 #ifndef ASM_LOOP
 	int i;
 #endif
 	pr_debug("%s\n", __func__);
 #ifdef ASM_LOOP
-	CACHE_ALL_LOOP(cpuinfo->dcache_size, cpuinfo->dcache_line_length, wdc);
+	CACHE_ALL_LOOP(cpuinfo.dcache_size, cpuinfo.dcache_line_length, wdc);
 #else
-	for (i = 0; i < cpuinfo->dcache_size; i += cpuinfo->dcache_line_length)
-		__asm__ __volatile__ ("wdc	%0, r0;" \
+	for (i = 0; i < cpuinfo.dcache_size;
+		 i += cpuinfo.dcache_line_length)
+			__asm__ __volatile__ ("wdc	%0, r0;" \
 					: : "r" (i));
 #endif
 }
@@ -372,18 +358,17 @@ static void __invalidate_dcache_all_noirq_wt(void)
  */
 static void __invalidate_dcache_all_wb(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 #ifndef ASM_LOOP
 	int i;
 #endif
 	pr_debug("%s\n", __func__);
 #ifdef ASM_LOOP
-	CACHE_ALL_LOOP(cpuinfo->dcache_size, cpuinfo->dcache_line_length,
+	CACHE_ALL_LOOP(cpuinfo.dcache_size, cpuinfo.dcache_line_length,
 					wdc);
 #else
-	for (i = 0; i < cpuinfo->dcache_size; i += cpuinfo->dcache_line_length)
-		__asm__ __volatile__ ("wdc	%0, r0;" \
+	for (i = 0; i < cpuinfo.dcache_size;
+		 i += cpuinfo.dcache_line_length)
+			__asm__ __volatile__ ("wdc	%0, r0;" \
 					: : "r" (i));
 #endif
 }
@@ -391,8 +376,6 @@ static void __invalidate_dcache_all_wb(void)
 static void __invalidate_dcache_range_wb(unsigned long start,
 						unsigned long end)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 #ifndef ASM_LOOP
 	int i;
 #endif
@@ -400,11 +383,11 @@ static void __invalidate_dcache_range_wb(unsigned long start,
 				(unsigned int)start, (unsigned int) end);
 
 	CACHE_LOOP_LIMITS(start, end,
-			cpuinfo->dcache_line_length, cpuinfo->dcache_size);
+			cpuinfo.dcache_line_length, cpuinfo.dcache_size);
 #ifdef ASM_LOOP
-	CACHE_RANGE_LOOP_2(start, end, cpuinfo->dcache_line_length, wdc.clear);
+	CACHE_RANGE_LOOP_2(start, end, cpuinfo.dcache_line_length, wdc.clear);
 #else
-	for (i = start; i < end; i += cpuinfo->dcache_line_length)
+	for (i = start; i < end; i += cpuinfo.dcache_line_length)
 		__asm__ __volatile__ ("wdc.clear	%0, r0;"	\
 				: : "r" (i));
 #endif
@@ -413,20 +396,18 @@ static void __invalidate_dcache_range_wb(unsigned long start,
 static void __invalidate_dcache_range_nomsr_wt(unsigned long start,
 							unsigned long end)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 #ifndef ASM_LOOP
 	int i;
 #endif
 	pr_debug("%s: start 0x%x, end 0x%x\n", __func__,
 				(unsigned int)start, (unsigned int) end);
 	CACHE_LOOP_LIMITS(start, end,
-			cpuinfo->dcache_line_length, cpuinfo->dcache_size);
+			cpuinfo.dcache_line_length, cpuinfo.dcache_size);
 
 #ifdef ASM_LOOP
-	CACHE_RANGE_LOOP_1(start, end, cpuinfo->dcache_line_length, wdc);
+	CACHE_RANGE_LOOP_1(start, end, cpuinfo.dcache_line_length, wdc);
 #else
-	for (i = start; i < end; i += cpuinfo->dcache_line_length)
+	for (i = start; i < end; i += cpuinfo.dcache_line_length)
 		__asm__ __volatile__ ("wdc	%0, r0;"	\
 				: : "r" (i));
 #endif
@@ -435,8 +416,6 @@ static void __invalidate_dcache_range_nomsr_wt(unsigned long start,
 static void __invalidate_dcache_range_msr_irq_wt(unsigned long start,
 							unsigned long end)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 	unsigned long flags;
 #ifndef ASM_LOOP
 	int i;
@@ -444,15 +423,15 @@ static void __invalidate_dcache_range_msr_irq_wt(unsigned long start,
 	pr_debug("%s: start 0x%x, end 0x%x\n", __func__,
 				(unsigned int)start, (unsigned int) end);
 	CACHE_LOOP_LIMITS(start, end,
-			cpuinfo->dcache_line_length, cpuinfo->dcache_size);
+			cpuinfo.dcache_line_length, cpuinfo.dcache_size);
 
 	local_irq_save(flags);
 	__disable_dcache_msr();
 
 #ifdef ASM_LOOP
-	CACHE_RANGE_LOOP_1(start, end, cpuinfo->dcache_line_length, wdc);
+	CACHE_RANGE_LOOP_1(start, end, cpuinfo.dcache_line_length, wdc);
 #else
-	for (i = start; i < end; i += cpuinfo->dcache_line_length)
+	for (i = start; i < end; i += cpuinfo.dcache_line_length)
 		__asm__ __volatile__ ("wdc	%0, r0;"	\
 				: : "r" (i));
 #endif
@@ -464,8 +443,6 @@ static void __invalidate_dcache_range_msr_irq_wt(unsigned long start,
 static void __invalidate_dcache_range_nomsr_irq(unsigned long start,
 							unsigned long end)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 	unsigned long flags;
 #ifndef ASM_LOOP
 	int i;
@@ -474,15 +451,15 @@ static void __invalidate_dcache_range_nomsr_irq(unsigned long start,
 				(unsigned int)start, (unsigned int) end);
 
 	CACHE_LOOP_LIMITS(start, end,
-			cpuinfo->dcache_line_length, cpuinfo->dcache_size);
+			cpuinfo.dcache_line_length, cpuinfo.dcache_size);
 
 	local_irq_save(flags);
 	__disable_dcache_nomsr();
 
 #ifdef ASM_LOOP
-	CACHE_RANGE_LOOP_1(start, end, cpuinfo->dcache_line_length, wdc);
+	CACHE_RANGE_LOOP_1(start, end, cpuinfo.dcache_line_length, wdc);
 #else
-	for (i = start; i < end; i += cpuinfo->dcache_line_length)
+	for (i = start; i < end; i += cpuinfo.dcache_line_length)
 		__asm__ __volatile__ ("wdc	%0, r0;"	\
 				: : "r" (i));
 #endif
@@ -493,26 +470,23 @@ static void __invalidate_dcache_range_nomsr_irq(unsigned long start,
 
 static void __flush_dcache_all_wb(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 #ifndef ASM_LOOP
 	int i;
 #endif
 	pr_debug("%s\n", __func__);
 #ifdef ASM_LOOP
-	CACHE_ALL_LOOP(cpuinfo->dcache_size, cpuinfo->dcache_line_length,
+	CACHE_ALL_LOOP(cpuinfo.dcache_size, cpuinfo.dcache_line_length,
 				wdc.flush);
 #else
-	for (i = 0; i < cpuinfo->dcache_size; i += cpuinfo->dcache_line_length)
-		__asm__ __volatile__ ("wdc.flush	%0, r0;" \
+	for (i = 0; i < cpuinfo.dcache_size;
+		 i += cpuinfo.dcache_line_length)
+			__asm__ __volatile__ ("wdc.flush	%0, r0;" \
 					: : "r" (i));
 #endif
 }
 
 static void __flush_dcache_range_wb(unsigned long start, unsigned long end)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
 #ifndef ASM_LOOP
 	int i;
 #endif
@@ -520,11 +494,11 @@ static void __flush_dcache_range_wb(unsigned long start, unsigned long end)
 				(unsigned int)start, (unsigned int) end);
 
 	CACHE_LOOP_LIMITS(start, end,
-			cpuinfo->dcache_line_length, cpuinfo->dcache_size);
+			cpuinfo.dcache_line_length, cpuinfo.dcache_size);
 #ifdef ASM_LOOP
-	CACHE_RANGE_LOOP_2(start, end, cpuinfo->dcache_line_length, wdc.flush);
+	CACHE_RANGE_LOOP_2(start, end, cpuinfo.dcache_line_length, wdc.flush);
 #else
-	for (i = start; i < end; i += cpuinfo->dcache_line_length)
+	for (i = start; i < end; i += cpuinfo.dcache_line_length)
 		__asm__ __volatile__ ("wdc.flush	%0, r0;"	\
 				: : "r" (i));
 #endif
@@ -633,19 +607,16 @@ static const struct scache wt_nomsr_noirq = {
 
 void microblaze_cache_init(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct cpuinfo *cpuinfo = per_cpu_ptr(&cpu_info, cpu);
-
-	if (cpuinfo->use_instr & PVR2_USE_MSR_INSTR) {
-		if (cpuinfo->dcache_wb) {
+	if (cpuinfo.use_instr & PVR2_USE_MSR_INSTR) {
+		if (cpuinfo.dcache_wb) {
 			pr_info("wb_msr\n");
 			mbc = (struct scache *)&wb_msr;
-			if (cpuinfo->ver_code <= CPUVER_7_20_D) {
+			if (cpuinfo.ver_code <= CPUVER_7_20_D) {
 				/* MS: problem with signal handling - hw bug */
 				pr_info("WB won't work properly\n");
 			}
 		} else {
-			if (cpuinfo->ver_code >= CPUVER_7_20_A) {
+			if (cpuinfo.ver_code >= CPUVER_7_20_A) {
 				pr_info("wt_msr_noirq\n");
 				mbc = (struct scache *)&wt_msr_noirq;
 			} else {
@@ -654,15 +625,15 @@ void microblaze_cache_init(void)
 			}
 		}
 	} else {
-		if (cpuinfo->dcache_wb) {
+		if (cpuinfo.dcache_wb) {
 			pr_info("wb_nomsr\n");
 			mbc = (struct scache *)&wb_nomsr;
-			if (cpuinfo->ver_code <= CPUVER_7_20_D) {
+			if (cpuinfo.ver_code <= CPUVER_7_20_D) {
 				/* MS: problem with signal handling - hw bug */
 				pr_info("WB won't work properly\n");
 			}
 		} else {
-			if (cpuinfo->ver_code >= CPUVER_7_20_A) {
+			if (cpuinfo.ver_code >= CPUVER_7_20_A) {
 				pr_info("wt_nomsr_noirq\n");
 				mbc = (struct scache *)&wt_nomsr_noirq;
 			} else {

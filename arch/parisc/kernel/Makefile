@@ -14,11 +14,10 @@ obj-y	     	:= cache.o pacache.o setup.o pdt.o traps.o time.o irq.o \
 
 ifdef CONFIG_FUNCTION_TRACER
 # Do not profile debug and lowlevel utilities
-CFLAGS_REMOVE_ftrace.o = $(CC_FLAGS_FTRACE)
-CFLAGS_REMOVE_cache.o =  $(CC_FLAGS_FTRACE)
-CFLAGS_REMOVE_perf.o = $(CC_FLAGS_FTRACE)
-CFLAGS_REMOVE_unwind.o = $(CC_FLAGS_FTRACE)
-CFLAGS_REMOVE_patch.o = $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_ftrace.o = -pg
+CFLAGS_REMOVE_cache.o = -pg
+CFLAGS_REMOVE_perf.o = -pg
+CFLAGS_REMOVE_unwind.o = -pg
 endif
 
 obj-$(CONFIG_SMP)	+= smp.o
@@ -37,5 +36,3 @@ obj-$(CONFIG_FUNCTION_GRAPH_TRACER)	+= ftrace.o
 obj-$(CONFIG_JUMP_LABEL)		+= jump_label.o
 obj-$(CONFIG_KGDB)			+= kgdb.o
 obj-$(CONFIG_KPROBES)			+= kprobes.o
-obj-$(CONFIG_KEXEC)			+= kexec.o relocate_kernel.o
-obj-$(CONFIG_KEXEC_FILE)		+= kexec_file.o

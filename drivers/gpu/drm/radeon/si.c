@@ -21,23 +21,19 @@
  *
  * Authors: Alex Deucher
  */
-
 #include <linux/firmware.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-
-#include <drm/drm_pci.h>
-#include <drm/drm_vblank.h>
-#include <drm/radeon_drm.h>
-
-#include "atom.h"
-#include "clearstate_si.h"
+#include <drm/drmP.h>
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "radeon_audio.h"
-#include "radeon_ucode.h"
-#include "si_blit_shaders.h"
+#include <drm/radeon_drm.h>
 #include "sid.h"
+#include "atom.h"
+#include "si_blit_shaders.h"
+#include "clearstate_si.h"
+#include "radeon_ucode.h"
 
 
 MODULE_FIRMWARE("radeon/TAHITI_pfp.bin");

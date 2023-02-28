@@ -13,5 +13,3 @@ obj-$(CONFIG_ISDN_CAPI_CAPIDRV)		+= capidrv.o
 
 kernelcapi-y				:= kcapi.o capiutil.o capilib.o
 kernelcapi-$(CONFIG_PROC_FS)		+= kcapi_proc.o
-
-ccflags-y += -I$(srctree)/$(src)/../include -I$(srctree)/$(src)/../include/uapi

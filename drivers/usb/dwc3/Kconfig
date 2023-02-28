@@ -23,7 +23,6 @@ config USB_DWC3_ULPI
 choice
 	bool "DWC3 Mode Selection"
 	default USB_DWC3_DUAL_ROLE if (USB && USB_GADGET)
-	default USB_DWC3_OTG if (USB && USB_GADGET && USB_OTG && USB_OTG_FSM)
 	default USB_DWC3_HOST if (USB && !USB_GADGET)
 	default USB_DWC3_GADGET if (!USB && USB_GADGET)
 
@@ -48,15 +47,6 @@ config USB_DWC3_DUAL_ROLE
 	help
 	  This is the default mode of working of DWC3 controller where
 	  both host and gadget features are enabled.
-
-config USB_DWC3_OTG
-	bool "Dual Role mode + OTG"
-	depends on ((USB=y || USB=USB_DWC3) && \
-			(USB_GADGET=y || USB_GADGET=USB_DWC3) && \
-				USB_OTG && USB_OTG_FSM && PM)
-	help
-	  This is the default mode of working of DWC3 controller where
-	  both host and gadget features are enabled with OTG support.
 
 endchoice
 
@@ -112,7 +102,6 @@ config USB_DWC3_MESON_G12A
        depends on ARCH_MESON || COMPILE_TEST
        default USB_DWC3
        select USB_ROLE_SWITCH
-	select REGMAP_MMIO
        help
          Support USB2/3 functionality in Amlogic G12A platforms.
 	 Say 'Y' or 'M' if you have one such device.
@@ -139,7 +128,7 @@ config USB_DWC3_QCOM
 	tristate "Qualcomm Platform"
 	depends on ARCH_QCOM || COMPILE_TEST
 	depends on EXTCON || !EXTCON
-	depends on (OF || ACPI)
+	depends on OF
 	default USB_DWC3
 	help
 	  Some Qualcomm SoCs use DesignWare Core IP for USB2/3

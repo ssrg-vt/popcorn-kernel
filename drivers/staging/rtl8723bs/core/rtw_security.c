@@ -2290,7 +2290,8 @@ static void gf_mulx(u8 *pad)
 
 static void aes_encrypt_deinit(void *ctx)
 {
-	kzfree(ctx);
+	memset(ctx, 0, AES_PRIV_SIZE);
+	kfree(ctx);
 }
 
 

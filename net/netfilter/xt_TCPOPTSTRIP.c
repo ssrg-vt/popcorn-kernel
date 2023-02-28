@@ -28,33 +28,33 @@ static inline unsigned int optlen(const u_int8_t *opt, unsigned int offset)
 static unsigned int
 tcpoptstrip_mangle_packet(struct sk_buff *skb,
 			  const struct xt_action_param *par,
-			  unsigned int tcphoff)
+			  unsigned int tcphoff, unsigned int minlen)
 {
 	const struct xt_tcpoptstrip_target_info *info = par->targinfo;
-	struct tcphdr *tcph, _th;
 	unsigned int optl, i, j;
+	struct tcphdr *tcph;
 	u_int16_t n, o;
 	u_int8_t *opt;
-	int tcp_hdrlen;
+	int len, tcp_hdrlen;
 
 	/* This is a fragment, no TCP header is available */
 	if (par->fragoff != 0)
 		return XT_CONTINUE;
 
-	tcph = skb_header_pointer(skb, tcphoff, sizeof(_th), &_th);
-	if (!tcph)
+	if (!skb_make_writable(skb, skb->len))
 		return NF_DROP;
 
-	tcp_hdrlen = tcph->doff * 4;
-	if (tcp_hdrlen < sizeof(struct tcphdr))
+	len = skb->len - tcphoff;
+	if (len < (int)sizeof(struct tcphdr))
 		return NF_DROP;
 
-	if (skb_ensure_writable(skb, tcphoff + tcp_hdrlen))
-		return NF_DROP;
-
-	/* must reload tcph, might have been moved */
 	tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
-	opt  = (u8 *)tcph;
+	tcp_hdrlen = tcph->doff * 4;
+
+	if (len < tcp_hdrlen)
+		return NF_DROP;
+
+	opt  = (u_int8_t *)tcph;
 
 	/*
 	 * Walk through all TCP options - if we find some option to remove,
@@ -88,7 +88,8 @@ tcpoptstrip_mangle_packet(struct sk_buff *skb,
 static unsigned int
 tcpoptstrip_tg4(struct sk_buff *skb, const struct xt_action_param *par)
 {
-	return tcpoptstrip_mangle_packet(skb, par, ip_hdrlen(skb));
+	return tcpoptstrip_mangle_packet(skb, par, ip_hdrlen(skb),
+	       sizeof(struct iphdr) + sizeof(struct tcphdr));
 }
 
 #if IS_ENABLED(CONFIG_IP6_NF_MANGLE)
@@ -105,7 +106,8 @@ tcpoptstrip_tg6(struct sk_buff *skb, const struct xt_action_param *par)
 	if (tcphoff < 0)
 		return NF_DROP;
 
-	return tcpoptstrip_mangle_packet(skb, par, tcphoff);
+	return tcpoptstrip_mangle_packet(skb, par, tcphoff,
+	       sizeof(*ipv6h) + sizeof(struct tcphdr));
 }
 #endif
 

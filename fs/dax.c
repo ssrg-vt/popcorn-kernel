@@ -26,6 +26,7 @@
 #include <linux/mmu_notifier.h>
 #include <linux/iomap.h>
 #include <asm/pgalloc.h>
+#include "internal.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/fs_dax.h>
@@ -220,11 +221,10 @@ static void *get_unlocked_entry(struct xa_state *xas, unsigned int order)
 
 	for (;;) {
 		entry = xas_find_conflict(xas);
-		if (!entry || WARN_ON_ONCE(!xa_is_value(entry)))
-			return entry;
 		if (dax_entry_order(entry) < order)
 			return XA_RETRY_ENTRY;
-		if (!dax_is_locked(entry))
+		if (!entry || WARN_ON_ONCE(!xa_is_value(entry)) ||
+				!dax_is_locked(entry))
 			return entry;
 
 		wq = dax_entry_waitqueue(xas, entry, &ewait.key);
@@ -1201,7 +1201,7 @@ dax_iomap_rw(struct kiocb *iocb, struct iov_iter *iter,
 	unsigned flags = 0;
 
 	if (iov_iter_rw(iter) == WRITE) {
-		lockdep_assert_held_write(&inode->i_rwsem);
+		lockdep_assert_held_exclusive(&inode->i_rwsem);
 		flags |= IOMAP_WRITE;
 	} else {
 		lockdep_assert_held(&inode->i_rwsem);

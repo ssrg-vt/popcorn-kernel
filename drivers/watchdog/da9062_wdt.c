@@ -214,8 +214,11 @@ static int da9062_wdt_probe(struct platform_device *pdev)
 	watchdog_set_drvdata(&wdt->wdtdev, wdt);
 
 	ret = devm_watchdog_register_device(dev, &wdt->wdtdev);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(wdt->hw->dev,
+			"watchdog registration failed (%d)\n", ret);
 		return ret;
+	}
 
 	return da9062_wdt_ping(&wdt->wdtdev);
 }

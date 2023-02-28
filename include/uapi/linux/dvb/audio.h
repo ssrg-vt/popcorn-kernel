@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ WITH Linux-syscall-note */
 /*
- * audio.h - DEPRECATED MPEG-TS audio decoder API
- *
- * NOTE: should not be used on future drivers
+ * audio.h
  *
  * Copyright (C) 2000 Ralph  Metzler <ralph@convergence.de>
  *                  & Marcus Metzler <marcus@convergence.de>
@@ -54,7 +52,7 @@ typedef enum {
 typedef struct audio_mixer {
 	unsigned int volume_left;
 	unsigned int volume_right;
-  /* what else do we need? bass, pass-through, ... */
+  // what else do we need? bass, pass-through, ...
 } audio_mixer_t;
 
 

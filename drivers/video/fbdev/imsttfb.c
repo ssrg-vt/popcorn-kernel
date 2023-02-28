@@ -1477,8 +1477,11 @@ static int imsttfb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		printk(KERN_ERR "imsttfb: no OF node for pci device\n");
 
 	info = framebuffer_alloc(sizeof(struct imstt_par), &pdev->dev);
-	if (!info)
+
+	if (!info) {
+		printk(KERN_ERR "imsttfb: Can't allocate memory\n");
 		return -ENOMEM;
+	}
 
 	par = info->par;
 

@@ -54,21 +54,6 @@ struct phylink_link_state {
 	unsigned int an_complete:1;
 };
 
-enum phylink_op_type {
-	PHYLINK_NETDEV = 0,
-	PHYLINK_DEV,
-};
-
-/**
- * struct phylink_config - PHYLINK configuration structure
- * @dev: a pointer to a struct device associated with the MAC
- * @type: operation type of PHYLINK instance
- */
-struct phylink_config {
-	struct device *dev;
-	enum phylink_op_type type;
-};
-
 /**
  * struct phylink_mac_ops - MAC operations structure.
  * @validate: Validate and update the link configuration.
@@ -81,17 +66,16 @@ struct phylink_config {
  * The individual methods are described more fully below.
  */
 struct phylink_mac_ops {
-	void (*validate)(struct phylink_config *config,
-			 unsigned long *supported,
+	void (*validate)(struct net_device *ndev, unsigned long *supported,
 			 struct phylink_link_state *state);
-	int (*mac_link_state)(struct phylink_config *config,
+	int (*mac_link_state)(struct net_device *ndev,
 			      struct phylink_link_state *state);
-	void (*mac_config)(struct phylink_config *config, unsigned int mode,
+	void (*mac_config)(struct net_device *ndev, unsigned int mode,
 			   const struct phylink_link_state *state);
-	void (*mac_an_restart)(struct phylink_config *config);
-	void (*mac_link_down)(struct phylink_config *config, unsigned int mode,
+	void (*mac_an_restart)(struct net_device *ndev);
+	void (*mac_link_down)(struct net_device *ndev, unsigned int mode,
 			      phy_interface_t interface);
-	void (*mac_link_up)(struct phylink_config *config, unsigned int mode,
+	void (*mac_link_up)(struct net_device *ndev, unsigned int mode,
 			    phy_interface_t interface,
 			    struct phy_device *phy);
 };
@@ -99,7 +83,7 @@ struct phylink_mac_ops {
 #if 0 /* For kernel-doc purposes only. */
 /**
  * validate - Validate and update the link configuration
- * @config: a pointer to a &struct phylink_config.
+ * @ndev: a pointer to a &struct net_device for the MAC.
  * @supported: ethtool bitmask for supported link modes.
  * @state: a pointer to a &struct phylink_link_state.
  *
@@ -109,26 +93,19 @@ struct phylink_mac_ops {
  * Note that the PHY may be able to transform from one connection
  * technology to another, so, eg, don't clear 1000BaseX just
  * because the MAC is unable to BaseX mode. This is more about
- * clearing unsupported speeds and duplex settings. The port modes
- * should not be cleared; phylink_set_port_modes() will help with this.
+ * clearing unsupported speeds and duplex settings.
  *
  * If the @state->interface mode is %PHY_INTERFACE_MODE_1000BASEX
  * or %PHY_INTERFACE_MODE_2500BASEX, select the appropriate mode
  * based on @state->advertising and/or @state->speed and update
- * @state->interface accordingly. See phylink_helper_basex_speed().
- *
- * When @state->interface is %PHY_INTERFACE_MODE_NA, phylink expects the
- * MAC driver to return all supported link modes.
- *
- * If the @state->interface mode is not supported, then the @supported
- * mask must be cleared.
+ * @state->interface accordingly.
  */
-void validate(struct phylink_config *config, unsigned long *supported,
+void validate(struct net_device *ndev, unsigned long *supported,
 	      struct phylink_link_state *state);
 
 /**
  * mac_link_state() - Read the current link state from the hardware
- * @config: a pointer to a &struct phylink_config.
+ * @ndev: a pointer to a &struct net_device for the MAC.
  * @state: a pointer to a &struct phylink_link_state.
  *
  * Read the current link state from the MAC, reporting the current
@@ -137,12 +114,12 @@ void validate(struct phylink_config *config, unsigned long *supported,
  * negotiation completion state in @state->an_complete, and link
  * up state in @state->link.
  */
-int mac_link_state(struct phylink_config *config,
+int mac_link_state(struct net_device *ndev,
 		   struct phylink_link_state *state);
 
 /**
  * mac_config() - configure the MAC for the selected mode and state
- * @config: a pointer to a &struct phylink_config.
+ * @ndev: a pointer to a &struct net_device for the MAC.
  * @mode: one of %MLO_AN_FIXED, %MLO_AN_PHY, %MLO_AN_INBAND.
  * @state: a pointer to a &struct phylink_link_state.
  *
@@ -191,18 +168,18 @@ int mac_link_state(struct phylink_config *config,
  * down.  This "update" behaviour is critical to avoid bouncing the
  * link up status.
  */
-void mac_config(struct phylink_config *config, unsigned int mode,
+void mac_config(struct net_device *ndev, unsigned int mode,
 		const struct phylink_link_state *state);
 
 /**
  * mac_an_restart() - restart 802.3z BaseX autonegotiation
- * @config: a pointer to a &struct phylink_config.
+ * @ndev: a pointer to a &struct net_device for the MAC.
  */
-void mac_an_restart(struct phylink_config *config);
+void mac_an_restart(struct net_device *ndev);
 
 /**
  * mac_link_down() - take the link down
- * @config: a pointer to a &struct phylink_config.
+ * @ndev: a pointer to a &struct net_device for the MAC.
  * @mode: link autonegotiation mode
  * @interface: link &typedef phy_interface_t mode
  *
@@ -211,12 +188,12 @@ void mac_an_restart(struct phylink_config *config);
  * Energy Efficient Ethernet MAC configuration. Interface type
  * selection must be done in mac_config().
  */
-void mac_link_down(struct phylink_config *config, unsigned int mode,
+void mac_link_down(struct net_device *ndev, unsigned int mode,
 		   phy_interface_t interface);
 
 /**
  * mac_link_up() - allow the link to come up
- * @config: a pointer to a &struct phylink_config.
+ * @ndev: a pointer to a &struct net_device for the MAC.
  * @mode: link autonegotiation mode
  * @interface: link &typedef phy_interface_t mode
  * @phy: any attached phy
@@ -227,14 +204,13 @@ void mac_link_down(struct phylink_config *config, unsigned int mode,
  * phy_init_eee() and perform appropriate MAC configuration for EEE.
  * Interface type selection must be done in mac_config().
  */
-void mac_link_up(struct phylink_config *config, unsigned int mode,
+void mac_link_up(struct net_device *ndev, unsigned int mode,
 		 phy_interface_t interface,
 		 struct phy_device *phy);
 #endif
 
-struct phylink *phylink_create(struct phylink_config *, struct fwnode_handle *,
-			       phy_interface_t iface,
-			       const struct phylink_mac_ops *ops);
+struct phylink *phylink_create(struct net_device *, struct fwnode_handle *,
+	phy_interface_t iface, const struct phylink_mac_ops *ops);
 void phylink_destroy(struct phylink *);
 
 int phylink_connect_phy(struct phylink *, struct phy_device *);

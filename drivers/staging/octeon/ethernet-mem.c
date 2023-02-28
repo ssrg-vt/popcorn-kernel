@@ -9,9 +9,12 @@
 #include <linux/netdevice.h>
 #include <linux/slab.h>
 
-#include "octeon-ethernet.h"
+#include <asm/octeon/octeon.h>
+
 #include "ethernet-mem.h"
 #include "ethernet-defines.h"
+
+#include <asm/octeon/cvmx-fpa.h>
 
 /**
  * cvm_oct_fill_hw_skbuff - fill the supplied hardware pool with skbuffs

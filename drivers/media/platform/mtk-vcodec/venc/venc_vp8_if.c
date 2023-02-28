@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016 MediaTek Inc.
  * Author: Daniel Hsiao <daniel.hsiao@mediatek.com>
@@ -323,7 +323,7 @@ static int vp8_enc_encode_frame(struct venc_vp8_inst *inst,
 	return ret;
 }
 
-static int vp8_enc_init(struct mtk_vcodec_ctx *ctx)
+static int vp8_enc_init(struct mtk_vcodec_ctx *ctx, unsigned long *handle)
 {
 	int ret = 0;
 	struct venc_vp8_inst *inst;
@@ -349,12 +349,12 @@ static int vp8_enc_init(struct mtk_vcodec_ctx *ctx)
 	if (ret)
 		kfree(inst);
 	else
-		ctx->drv_handle = inst;
+		(*handle) = (unsigned long)inst;
 
 	return ret;
 }
 
-static int vp8_enc_encode(void *handle,
+static int vp8_enc_encode(unsigned long handle,
 			  enum venc_start_opt opt,
 			  struct venc_frm_buf *frm_buf,
 			  struct mtk_vcodec_mem *bs_buf,
@@ -391,7 +391,7 @@ encode_err:
 	return ret;
 }
 
-static int vp8_enc_set_param(void *handle,
+static int vp8_enc_set_param(unsigned long handle,
 			     enum venc_set_param_type type,
 			     struct venc_enc_param *enc_prm)
 {
@@ -442,7 +442,7 @@ static int vp8_enc_set_param(void *handle,
 	return ret;
 }
 
-static int vp8_enc_deinit(void *handle)
+static int vp8_enc_deinit(unsigned long handle)
 {
 	int ret = 0;
 	struct venc_vp8_inst *inst = (struct venc_vp8_inst *)handle;
@@ -460,9 +460,16 @@ static int vp8_enc_deinit(void *handle)
 	return ret;
 }
 
-const struct venc_common_if venc_vp8_if = {
+static const struct venc_common_if venc_vp8_if = {
 	.init = vp8_enc_init,
 	.encode = vp8_enc_encode,
 	.set_param = vp8_enc_set_param,
 	.deinit = vp8_enc_deinit,
 };
+
+const struct venc_common_if *get_vp8_enc_comm_if(void);
+
+const struct venc_common_if *get_vp8_enc_comm_if(void)
+{
+	return &venc_vp8_if;
+}

@@ -25,14 +25,9 @@
  *          Alex Deucher
  *          Jerome Glisse
  */
-
 #include <linux/seq_file.h>
 #include <linux/slab.h>
-
-#include <drm/drm_debugfs.h>
-#include <drm/drm_device.h>
-#include <drm/drm_file.h>
-
+#include <drm/drmP.h>
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "rs400d.h"
@@ -72,7 +67,7 @@ void rs400_gart_tlb_flush(struct radeon_device *rdev)
 		tmp = RREG32_MC(RS480_GART_CACHE_CNTRL);
 		if ((tmp & RS480_GART_CACHE_INVALIDATE) == 0)
 			break;
-		udelay(1);
+		DRM_UDELAY(1);
 		timeout--;
 	} while (timeout > 0);
 	WREG32_MC(RS480_GART_CACHE_CNTRL, 0);
@@ -250,7 +245,7 @@ int rs400_mc_wait_for_idle(struct radeon_device *rdev)
 		if (tmp & RADEON_MC_IDLE) {
 			return 0;
 		}
-		udelay(1);
+		DRM_UDELAY(1);
 	}
 	return -1;
 }

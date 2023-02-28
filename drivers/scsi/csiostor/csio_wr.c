@@ -1316,6 +1316,7 @@ csio_wr_fixup_host_params(struct csio_hw *hw)
 	u32 fl_align = clsz < 32 ? 32 : clsz;
 	u32 pack_align;
 	u32 ingpad, ingpack;
+	int pcie_cap;
 
 	csio_wr_reg32(hw, HOSTPAGESIZEPF0_V(s_hps) | HOSTPAGESIZEPF1_V(s_hps) |
 		      HOSTPAGESIZEPF2_V(s_hps) | HOSTPAGESIZEPF3_V(s_hps) |
@@ -1346,7 +1347,8 @@ csio_wr_fixup_host_params(struct csio_hw *hw)
 	 * multiple of the Maximum Payload Size.
 	 */
 	pack_align = fl_align;
-	if (pci_is_pcie(hw->pdev)) {
+	pcie_cap = pci_find_capability(hw->pdev, PCI_CAP_ID_EXP);
+	if (pcie_cap) {
 		u32 mps, mps_log;
 		u16 devctl;
 
@@ -1354,7 +1356,9 @@ csio_wr_fixup_host_params(struct csio_hw *hw)
 		 * [bits 7:5] encodes sizes as powers of 2 starting at
 		 * 128 bytes.
 		 */
-		pcie_capability_read_word(hw->pdev, PCI_EXP_DEVCTL, &devctl);
+		pci_read_config_word(hw->pdev,
+				     pcie_cap + PCI_EXP_DEVCTL,
+				     &devctl);
 		mps_log = ((devctl & PCI_EXP_DEVCTL_PAYLOAD) >> 5) + 7;
 		mps = 1 << mps_log;
 		if (mps > pack_align)

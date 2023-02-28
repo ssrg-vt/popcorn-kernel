@@ -63,8 +63,6 @@ struct dm_verity {
 
 	struct dm_verity_fec *fec;	/* forward error correction */
 	unsigned long *validated_blocks; /* bitset blocks validated */
-
-	char *signature_key_desc; /* signature keyring reference */
 };
 
 struct dm_verity_io {

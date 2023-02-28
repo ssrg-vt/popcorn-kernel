@@ -26,25 +26,21 @@
 #include <linux/of.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
-#include <linux/iopoll.h>
 
 #define CDNS_UART_TTY_NAME	"ttyPS"
 #define CDNS_UART_NAME		"xuartps"
-#define CDNS_UART_MAJOR		0	/* use dynamic node allocation */
-#define CDNS_UART_MINOR		0	/* works best with devtmpfs */
-#define CDNS_UART_NR_PORTS	16
 #define CDNS_UART_FIFO_SIZE	64	/* FIFO size */
 #define CDNS_UART_REGISTER_SPACE	0x1000
-#define TX_TIMEOUT		500000
 
 /* Rx Trigger level */
 static int rx_trigger_level = 56;
-module_param(rx_trigger_level, uint, 0444);
+static int uartps_major;
+module_param(rx_trigger_level, uint, S_IRUGO);
 MODULE_PARM_DESC(rx_trigger_level, "Rx trigger level, 1-63 bytes");
 
 /* Rx Timeout */
 static int rx_timeout = 10;
-module_param(rx_timeout, uint, 0444);
+module_param(rx_timeout, uint, S_IRUGO);
 MODULE_PARM_DESC(rx_timeout, "Rx timeout, 1-255");
 
 /* Register offsets for the UART. */
@@ -160,16 +156,6 @@ MODULE_PARM_DESC(rx_timeout, "Rx timeout, 1-255");
 #define CDNS_UART_MODEMCR_DTR	0x00000001 /* Data Terminal Ready */
 
 /*
- * Modem Status register:
- * The read/write Modem Status register reports the interface with the modem
- * or data set, or a peripheral device emulating a modem.
- */
-#define CDNS_UART_MODEMSR_DCD	BIT(7) /* Data Carrier Detect */
-#define CDNS_UART_MODEMSR_RI	BIT(6) /* Ting Indicator */
-#define CDNS_UART_MODEMSR_DSR	BIT(5) /* Data Set Ready */
-#define CDNS_UART_MODEMSR_CTS	BIT(4) /* Clear To Send */
-
-/*
  * Channel Status Register:
  * The channel status register (CSR) is provided to enable the control logic
  * to monitor the status of bits in the channel interrupt status register,
@@ -194,6 +180,7 @@ MODULE_PARM_DESC(rx_timeout, "Rx timeout, 1-255");
  * @pclk:		APB clock
  * @cdns_uart_driver:	Pointer to UART driver
  * @baud:		Current baud rate
+ * @id:			Port ID
  * @clk_rate_change_nb:	Notifier block for clock changes
  * @quirks:		Flags for RXBS support.
  */
@@ -203,6 +190,7 @@ struct cdns_uart {
 	struct clk		*pclk;
 	struct uart_driver	*cdns_uart_driver;
 	unsigned int		baud;
+	int			id;
 	struct notifier_block	clk_rate_change_nb;
 	u32			quirks;
 	bool cts_override;
@@ -211,7 +199,7 @@ struct cdns_platform_data {
 	u32 quirks;
 };
 #define to_cdns_uart(_nb) container_of(_nb, struct cdns_uart, \
-		clk_rate_change_nb)
+		clk_rate_change_nb);
 
 /**
  * cdns_uart_handle_rx - Handle the received bytes along with Rx errors.
@@ -231,13 +219,6 @@ static void cdns_uart_handle_rx(void *dev_id, unsigned int isrstatus)
 	bool is_rxbs_support;
 
 	is_rxbs_support = cdns_uart->quirks & CDNS_UART_RXBS_SUPPORT;
-
-	/*
-	 * RXEMPTY will never be set if RX is disabled as read bytes
-	 * will not be removed from the FIFO
-	 */
-	if (readl(port->membase + CDNS_UART_CR) & CDNS_UART_CR_RX_DIS)
-		return;
 
 	while ((readl(port->membase + CDNS_UART_SR) &
 		CDNS_UART_SR_RXEMPTY) != CDNS_UART_SR_RXEMPTY) {
@@ -331,16 +312,15 @@ static void cdns_uart_handle_tx(void *dev_id)
 	} else {
 		numbytes = port->fifosize;
 		while (numbytes && !uart_circ_empty(&port->state->xmit) &&
-		       !(readl(port->membase + CDNS_UART_SR) &
-						CDNS_UART_SR_TXFULL)) {
+		       !(readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_TXFULL)) {
 			/*
 			 * Get the data from the UART circular buffer
 			 * and write it to the cdns_uart's TX_FIFO
 			 * register.
 			 */
 			writel(
-				port->state->xmit.buf[port->state->xmit.tail],
-					port->membase + CDNS_UART_FIFO);
+				port->state->xmit.buf[port->state->xmit.
+				tail], port->membase + CDNS_UART_FIFO);
 
 			port->icount.tx++;
 
@@ -386,8 +366,6 @@ static irqreturn_t cdns_uart_isr(int irq, void *dev_id)
 		isrstatus &= ~CDNS_UART_IXR_TXEMPTY;
 	}
 
-	isrstatus &= port->read_status_mask;
-	isrstatus &= ~port->ignore_status_mask;
 	/*
 	 * Skip RX processing if RX is disabled as RXEMPTY will never be set
 	 * as read bytes will not be removed from the FIFO.
@@ -663,8 +641,8 @@ static unsigned int cdns_uart_tx_empty(struct uart_port *port)
 	unsigned int status;
 
 	status = readl(port->membase + CDNS_UART_SR) &
-		       (CDNS_UART_SR_TXEMPTY | CDNS_UART_SR_TACTIVE);
-	return (status == CDNS_UART_SR_TXEMPTY) ? TIOCSER_TEMT : 0;
+				CDNS_UART_SR_TXEMPTY;
+	return status ? TIOCSER_TEMT : 0;
 }
 
 /**
@@ -703,12 +681,21 @@ static void cdns_uart_break_ctl(struct uart_port *port, int ctl)
 static void cdns_uart_set_termios(struct uart_port *port,
 				struct ktermios *termios, struct ktermios *old)
 {
-	u32 cval = 0;
+	unsigned int cval = 0;
 	unsigned int baud, minbaud, maxbaud;
 	unsigned long flags;
 	unsigned int ctrl_reg, mode_reg;
 
 	spin_lock_irqsave(&port->lock, flags);
+
+	/* Wait for the transmit FIFO to empty before making changes */
+	if (!(readl(port->membase + CDNS_UART_CR) &
+				CDNS_UART_CR_TX_DIS)) {
+		while (!(readl(port->membase + CDNS_UART_SR) &
+				CDNS_UART_SR_TXEMPTY)) {
+			cpu_relax();
+		}
+	}
 
 	/* Disable the TX and RX to set baud rate */
 	ctrl_reg = readl(port->membase + CDNS_UART_CR);
@@ -811,13 +798,6 @@ static void cdns_uart_set_termios(struct uart_port *port,
 	}
 	cval |= mode_reg & 1;
 	writel(cval, port->membase + CDNS_UART_MR);
-
-	cval = readl(port->membase + CDNS_UART_MODEMCR);
-	if (termios->c_cflag & CRTSCTS)
-		cval |= CDNS_UART_MODEMCR_FCM;
-	else
-		cval &= ~CDNS_UART_MODEMCR_FCM;
-	writel(cval, port->membase + CDNS_UART_MODEMCR);
 
 	spin_unlock_irqrestore(&port->lock, flags);
 }
@@ -1021,24 +1001,12 @@ static void cdns_uart_config_port(struct uart_port *port, int flags)
  */
 static unsigned int cdns_uart_get_mctrl(struct uart_port *port)
 {
-	u32 val;
-	unsigned int mctrl = 0;
 	struct cdns_uart *cdns_uart_data = port->private_data;
 
 	if (cdns_uart_data->cts_override)
-		return TIOCM_CTS | TIOCM_DSR | TIOCM_CAR;
+		return 0;
 
-	val = readl(port->membase + CDNS_UART_MODEMSR);
-	if (val & CDNS_UART_MODEMSR_CTS)
-		mctrl |= TIOCM_CTS;
-	if (val & CDNS_UART_MODEMSR_DSR)
-		mctrl |= TIOCM_DSR;
-	if (val & CDNS_UART_MODEMSR_RI)
-		mctrl |= TIOCM_RNG;
-	if (val & CDNS_UART_MODEMSR_DCD)
-		mctrl |= TIOCM_CAR;
-
-	return mctrl;
+	return TIOCM_CTS | TIOCM_DSR | TIOCM_CAR;
 }
 
 static void cdns_uart_set_mctrl(struct uart_port *port, unsigned int mctrl)
@@ -1053,13 +1021,12 @@ static void cdns_uart_set_mctrl(struct uart_port *port, unsigned int mctrl)
 	val = readl(port->membase + CDNS_UART_MODEMCR);
 	mode_reg = readl(port->membase + CDNS_UART_MR);
 
-	val &= ~(CDNS_UART_MODEMCR_RTS | CDNS_UART_MODEMCR_DTR);
+	val &= ~(CDNS_UART_MODEMCR_RTS | CDNS_UART_MODEMCR_DTR |
+		 CDNS_UART_MODEMCR_FCM);
 	mode_reg &= ~CDNS_UART_MR_CHMODE_MASK;
 
-	if (mctrl & TIOCM_RTS)
-		val |= CDNS_UART_MODEMCR_RTS;
-	if (mctrl & TIOCM_DTR)
-		val |= CDNS_UART_MODEMCR_DTR;
+	if (mctrl & TIOCM_RTS || mctrl & TIOCM_DTR)
+		val |= CDNS_UART_MODEMCR_FCM;
 	if (mctrl & TIOCM_LOOP)
 		mode_reg |= CDNS_UART_MR_CHMODE_L_LOOP;
 	else
@@ -1106,6 +1073,8 @@ static void cdns_uart_poll_put_char(struct uart_port *port, unsigned char c)
 		cpu_relax();
 
 	spin_unlock_irqrestore(&port->lock, flags);
+
+	return;
 }
 #endif
 
@@ -1146,8 +1115,6 @@ static const struct uart_ops cdns_uart_ops = {
 #endif
 };
 
-static struct uart_driver cdns_uart_uart_driver;
-
 #ifdef CONFIG_SERIAL_XILINX_PS_UART_CONSOLE
 /**
  * cdns_uart_console_putchar - write the character to the FIFO buffer
@@ -1156,13 +1123,6 @@ static struct uart_driver cdns_uart_uart_driver;
  */
 static void cdns_uart_console_putchar(struct uart_port *port, int ch)
 {
-	unsigned int ctrl_reg;
-
-	ctrl_reg = readl(port->membase + CDNS_UART_CR);
-	while (ctrl_reg & CDNS_UART_CR_TX_DIS) {
-		ctrl_reg = readl(port->membase + CDNS_UART_CR);
-		cpu_relax();
-	}
 	while (readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_TXFULL)
 		cpu_relax();
 	writel(ch, port->membase + CDNS_UART_FIFO);
@@ -1230,7 +1190,7 @@ static void cdns_uart_console_write(struct console *co, const char *s,
 				unsigned int count)
 {
 	struct uart_port *port = console_port;
-	unsigned long flags = 0;
+	unsigned long flags;
 	unsigned int imr, ctrl;
 	int locked = 1;
 
@@ -1255,7 +1215,9 @@ static void cdns_uart_console_write(struct console *co, const char *s,
 	writel(ctrl, port->membase + CDNS_UART_CR);
 
 	uart_console_write(port, s, count, cdns_uart_console_putchar);
-	while (cdns_uart_tx_empty(port) != TIOCSER_TEMT)
+	while ((readl(port->membase + CDNS_UART_SR) &
+			(CDNS_UART_SR_TXEMPTY | CDNS_UART_SR_TACTIVE)) !=
+			CDNS_UART_SR_TXEMPTY)
 		cpu_relax();
 
 	/* restore interrupt state */
@@ -1280,7 +1242,6 @@ static int cdns_uart_console_setup(struct console *co, char *options)
 	int bits = 8;
 	int parity = 'n';
 	int flow = 'n';
-	unsigned long time_out;
 
 	if (!port->membase) {
 		pr_debug("console on " CDNS_UART_TTY_NAME "%i not present\n",
@@ -1291,25 +1252,8 @@ static int cdns_uart_console_setup(struct console *co, char *options)
 	if (options)
 		uart_parse_options(options, &baud, &parity, &bits, &flow);
 
-	/* Wait for tx_empty before setting up the console */
-	time_out = jiffies + usecs_to_jiffies(TX_TIMEOUT);
-
-	while (time_before(jiffies, time_out) &&
-	       cdns_uart_tx_empty(port) != TIOCSER_TEMT)
-		cpu_relax();
-
 	return uart_set_options(port, co, baud, parity, bits, flow);
 }
-
-static struct console cdns_uart_console = {
-	.name	= CDNS_UART_TTY_NAME,
-	.write	= cdns_uart_console_write,
-	.device	= uart_console_device,
-	.setup	= cdns_uart_console_setup,
-	.flags	= CON_PRINTBUFFER,
-	.index	= -1, /* Specified on the cmdline (e.g. console=ttyPS ) */
-	.data	= &cdns_uart_uart_driver,
-};
 #endif /* CONFIG_SERIAL_XILINX_PS_UART_CONSOLE */
 
 #ifdef CONFIG_PM_SLEEP
@@ -1441,8 +1385,89 @@ static const struct of_device_id cdns_uart_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, cdns_uart_of_match);
 
-/* Temporary variable for storing number of instances */
-static int instances;
+/*
+ * Maximum number of instances without alias IDs but if there is alias
+ * which target "< MAX_UART_INSTANCES" range this ID can't be used.
+ */
+#define MAX_UART_INSTANCES	32
+
+/* Stores static aliases list */
+static DECLARE_BITMAP(alias_bitmap, MAX_UART_INSTANCES);
+static int alias_bitmap_initialized;
+
+/* Stores actual bitmap of allocated IDs with alias IDs together */
+static DECLARE_BITMAP(bitmap, MAX_UART_INSTANCES);
+/* Protect bitmap operations to have unique IDs */
+static DEFINE_MUTEX(bitmap_lock);
+
+static int cdns_get_id(struct platform_device *pdev)
+{
+	int id, ret;
+
+	mutex_lock(&bitmap_lock);
+
+	/* Alias list is stable that's why get alias bitmap only once */
+	if (!alias_bitmap_initialized) {
+		ret = of_alias_get_alias_list(cdns_uart_of_match, "serial",
+					      alias_bitmap, MAX_UART_INSTANCES);
+		if (ret && ret != -EOVERFLOW) {
+			mutex_unlock(&bitmap_lock);
+			return ret;
+		}
+
+		alias_bitmap_initialized++;
+	}
+
+	/* Make sure that alias ID is not taken by instance without alias */
+	bitmap_or(bitmap, bitmap, alias_bitmap, MAX_UART_INSTANCES);
+
+	dev_dbg(&pdev->dev, "Alias bitmap: %*pb\n",
+		MAX_UART_INSTANCES, bitmap);
+
+	/* Look for a serialN alias */
+	id = of_alias_get_id(pdev->dev.of_node, "serial");
+	if (id < 0) {
+		dev_warn(&pdev->dev,
+			 "No serial alias passed. Using the first free id\n");
+
+		/*
+		 * Start with id 0 and check if there is no serial0 alias
+		 * which points to device which is compatible with this driver.
+		 * If alias exists then try next free position.
+		 */
+		id = 0;
+
+		for (;;) {
+			dev_info(&pdev->dev, "Checking id %d\n", id);
+			id = find_next_zero_bit(bitmap, MAX_UART_INSTANCES, id);
+
+			/* No free empty instance */
+			if (id == MAX_UART_INSTANCES) {
+				dev_err(&pdev->dev, "No free ID\n");
+				mutex_unlock(&bitmap_lock);
+				return -EINVAL;
+			}
+
+			dev_dbg(&pdev->dev, "The empty id is %d\n", id);
+			/* Check if ID is empty */
+			if (!test_and_set_bit(id, bitmap)) {
+				/* Break the loop if bit is taken */
+				dev_dbg(&pdev->dev,
+					"Selected ID %d allocation passed\n",
+					id);
+				break;
+			}
+			dev_dbg(&pdev->dev,
+				"Selected ID %d allocation failed\n", id);
+			/* if taking bit fails then try next one */
+			id++;
+		}
+	}
+
+	mutex_unlock(&bitmap_lock);
+
+	return id;
+}
 
 /**
  * cdns_uart_probe - Platform driver probe
@@ -1452,11 +1477,16 @@ static int instances;
  */
 static int cdns_uart_probe(struct platform_device *pdev)
 {
-	int rc, id, irq;
+	int rc, irq;
 	struct uart_port *port;
 	struct resource *res;
 	struct cdns_uart *cdns_uart_data;
 	const struct of_device_id *match;
+	struct uart_driver *cdns_uart_uart_driver;
+	char *driver_name;
+#ifdef CONFIG_SERIAL_XILINX_PS_UART_CONSOLE
+	struct console *cdns_uart_console;
+#endif
 
 	cdns_uart_data = devm_kzalloc(&pdev->dev, sizeof(*cdns_uart_data),
 			GFP_KERNEL);
@@ -1466,35 +1496,65 @@ static int cdns_uart_probe(struct platform_device *pdev)
 	if (!port)
 		return -ENOMEM;
 
-	/* Look for a serialN alias */
-	id = of_alias_get_id(pdev->dev.of_node, "serial");
-	if (id < 0)
-		id = 0;
+	cdns_uart_uart_driver = devm_kzalloc(&pdev->dev,
+					     sizeof(*cdns_uart_uart_driver),
+					     GFP_KERNEL);
+	if (!cdns_uart_uart_driver)
+		return -ENOMEM;
 
-	if (id >= CDNS_UART_NR_PORTS) {
-		dev_err(&pdev->dev, "Cannot get uart_port structure\n");
-		return -ENODEV;
+	cdns_uart_data->id = cdns_get_id(pdev);
+	if (cdns_uart_data->id < 0)
+		return cdns_uart_data->id;
+
+	/* There is a need to use unique driver name */
+	driver_name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%s%d",
+				     CDNS_UART_NAME, cdns_uart_data->id);
+	if (!driver_name) {
+		rc = -ENOMEM;
+		goto err_out_id;
 	}
 
-	if (!cdns_uart_uart_driver.state) {
-		cdns_uart_uart_driver.owner = THIS_MODULE;
-		cdns_uart_uart_driver.driver_name = CDNS_UART_NAME;
-		cdns_uart_uart_driver.dev_name = CDNS_UART_TTY_NAME;
-		cdns_uart_uart_driver.major = CDNS_UART_MAJOR;
-		cdns_uart_uart_driver.minor = CDNS_UART_MINOR;
-		cdns_uart_uart_driver.nr = CDNS_UART_NR_PORTS;
+	cdns_uart_uart_driver->owner = THIS_MODULE;
+	cdns_uart_uart_driver->driver_name = driver_name;
+	cdns_uart_uart_driver->dev_name	= CDNS_UART_TTY_NAME;
+	cdns_uart_uart_driver->major = uartps_major;
+	cdns_uart_uart_driver->minor = cdns_uart_data->id;
+	cdns_uart_uart_driver->nr = 1;
+
 #ifdef CONFIG_SERIAL_XILINX_PS_UART_CONSOLE
-		cdns_uart_uart_driver.cons = &cdns_uart_console;
+	cdns_uart_console = devm_kzalloc(&pdev->dev, sizeof(*cdns_uart_console),
+					 GFP_KERNEL);
+	if (!cdns_uart_console) {
+		rc = -ENOMEM;
+		goto err_out_id;
+	}
+
+	strncpy(cdns_uart_console->name, CDNS_UART_TTY_NAME,
+		sizeof(cdns_uart_console->name));
+	cdns_uart_console->index = cdns_uart_data->id;
+	cdns_uart_console->write = cdns_uart_console_write;
+	cdns_uart_console->device = uart_console_device;
+	cdns_uart_console->setup = cdns_uart_console_setup;
+	cdns_uart_console->flags = CON_PRINTBUFFER;
+	cdns_uart_console->data = cdns_uart_uart_driver;
+	cdns_uart_uart_driver->cons = cdns_uart_console;
 #endif
 
-		rc = uart_register_driver(&cdns_uart_uart_driver);
-		if (rc < 0) {
-			dev_err(&pdev->dev, "Failed to register driver\n");
-			return rc;
-		}
+	rc = uart_register_driver(cdns_uart_uart_driver);
+	if (rc < 0) {
+		dev_err(&pdev->dev, "Failed to register driver\n");
+		goto err_out_id;
 	}
 
-	cdns_uart_data->cdns_uart_driver = &cdns_uart_uart_driver;
+	uartps_major = cdns_uart_uart_driver->tty_driver->major;
+	cdns_uart_data->cdns_uart_driver = cdns_uart_uart_driver;
+
+	/*
+	 * Setting up proper name_base needs to be done after uart
+	 * registration because tty_driver structure is not filled.
+	 * name_base is 0 by default.
+	 */
+	cdns_uart_uart_driver->tty_driver->name_base = cdns_uart_data->id;
 
 	match = of_match_node(cdns_uart_of_match, pdev->dev.of_node);
 	if (match && match->data) {
@@ -1571,7 +1631,6 @@ static int cdns_uart_probe(struct platform_device *pdev)
 	port->flags	= UPF_BOOT_AUTOCONF;
 	port->ops	= &cdns_uart_ops;
 	port->fifosize	= CDNS_UART_FIFO_SIZE;
-	port->line	= id;
 
 	/*
 	 * Register the port.
@@ -1583,8 +1642,6 @@ static int cdns_uart_probe(struct platform_device *pdev)
 	port->dev = &pdev->dev;
 	port->uartclk = clk_get_rate(cdns_uart_data->uartclk);
 	port->private_data = cdns_uart_data;
-	port->read_status_mask = CDNS_UART_IXR_TXEMPTY | CDNS_UART_IXR_RXTRIG |
-			CDNS_UART_IXR_OVERRUN | CDNS_UART_IXR_TOUT;
 	cdns_uart_data->port = port;
 	platform_set_drvdata(pdev, port);
 
@@ -1601,13 +1658,11 @@ static int cdns_uart_probe(struct platform_device *pdev)
 	 * If register_console() don't assign value, then console_port pointer
 	 * is cleanup.
 	 */
-	if (!console_port) {
-		cdns_uart_console.index = id;
+	if (!console_port)
 		console_port = port;
-	}
 #endif
 
-	rc = uart_add_one_port(&cdns_uart_uart_driver, port);
+	rc = uart_add_one_port(cdns_uart_uart_driver, port);
 	if (rc) {
 		dev_err(&pdev->dev,
 			"uart_add_one_port() failed; err=%i\n", rc);
@@ -1617,17 +1672,12 @@ static int cdns_uart_probe(struct platform_device *pdev)
 #ifdef CONFIG_SERIAL_XILINX_PS_UART_CONSOLE
 	/* This is not port which is used for console that's why clean it up */
 	if (console_port == port &&
-	    !(cdns_uart_uart_driver.cons->flags & CON_ENABLED)) {
+	    !(cdns_uart_uart_driver->cons->flags & CON_ENABLED))
 		console_port = NULL;
-		cdns_uart_console.index = -1;
-	}
 #endif
 
 	cdns_uart_data->cts_override = of_property_read_bool(pdev->dev.of_node,
 							     "cts-override");
-
-	instances++;
-
 	return 0;
 
 err_out_pm_disable:
@@ -1643,8 +1693,12 @@ err_out_clk_disable:
 err_out_clk_dis_pclk:
 	clk_disable_unprepare(cdns_uart_data->pclk);
 err_out_unregister_driver:
-	if (!instances)
-		uart_unregister_driver(cdns_uart_data->cdns_uart_driver);
+	uart_unregister_driver(cdns_uart_data->cdns_uart_driver);
+err_out_id:
+	mutex_lock(&bitmap_lock);
+	if (cdns_uart_data->id < MAX_UART_INSTANCES)
+		clear_bit(cdns_uart_data->id, bitmap);
+	mutex_unlock(&bitmap_lock);
 	return rc;
 }
 
@@ -1667,6 +1721,10 @@ static int cdns_uart_remove(struct platform_device *pdev)
 #endif
 	rc = uart_remove_one_port(cdns_uart_data->cdns_uart_driver, port);
 	port->mapbase = 0;
+	mutex_lock(&bitmap_lock);
+	if (cdns_uart_data->id < MAX_UART_INSTANCES)
+		clear_bit(cdns_uart_data->id, bitmap);
+	mutex_unlock(&bitmap_lock);
 	clk_disable_unprepare(cdns_uart_data->uartclk);
 	clk_disable_unprepare(cdns_uart_data->pclk);
 	pm_runtime_disable(&pdev->dev);
@@ -1679,8 +1737,7 @@ static int cdns_uart_remove(struct platform_device *pdev)
 		console_port = NULL;
 #endif
 
-	if (!--instances)
-		uart_unregister_driver(cdns_uart_data->cdns_uart_driver);
+	uart_unregister_driver(cdns_uart_data->cdns_uart_driver);
 	return rc;
 }
 

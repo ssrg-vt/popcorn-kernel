@@ -88,7 +88,8 @@ struct snd_efw {
 	struct amdtp_stream rx_stream;
 	struct cmp_connection out_conn;
 	struct cmp_connection in_conn;
-	unsigned int substreams_counter;
+	unsigned int capture_substreams;
+	unsigned int playback_substreams;
 
 	/* hardware metering parameters */
 	unsigned int phys_out;
@@ -107,8 +108,6 @@ struct snd_efw {
 	u8 *resp_buf;
 	u8 *pull_ptr;
 	u8 *push_ptr;
-
-	struct amdtp_domain domain;
 };
 
 int snd_efw_transaction_cmd(struct fw_unit *unit,
@@ -207,8 +206,7 @@ int snd_efw_command_get_sampling_rate(struct snd_efw *efw, unsigned int *rate);
 int snd_efw_command_set_sampling_rate(struct snd_efw *efw, unsigned int rate);
 
 int snd_efw_stream_init_duplex(struct snd_efw *efw);
-int snd_efw_stream_reserve_duplex(struct snd_efw *efw, unsigned int rate);
-int snd_efw_stream_start_duplex(struct snd_efw *efw);
+int snd_efw_stream_start_duplex(struct snd_efw *efw, unsigned int rate);
 void snd_efw_stream_stop_duplex(struct snd_efw *efw);
 void snd_efw_stream_update_duplex(struct snd_efw *efw);
 void snd_efw_stream_destroy_duplex(struct snd_efw *efw);

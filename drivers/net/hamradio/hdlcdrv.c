@@ -475,7 +475,8 @@ static int hdlcdrv_close(struct net_device *dev)
 
 	if (s->ops && s->ops->close)
 		i = s->ops->close(dev);
-	dev_kfree_skb(s->skb);
+	if (s->skb)
+		dev_kfree_skb(s->skb);
 	s->skb = NULL;
 	s->opened = 0;
 	return i;

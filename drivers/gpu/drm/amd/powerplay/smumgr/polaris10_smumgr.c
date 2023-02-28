@@ -21,8 +21,6 @@
  *
  */
 
-#include <linux/pci.h>
-
 #include "pp_debug.h"
 #include "smumgr.h"
 #include "smu74.h"
@@ -655,7 +653,7 @@ static int polaris10_populate_smc_mvdd_table(struct pp_hwmgr *hwmgr,
 			count = SMU_MAX_SMIO_LEVELS;
 		for (level = 0; level < count; level++) {
 			table->SmioTable2.Pattern[level].Voltage =
-				PP_HOST_TO_SMC_US(data->mvdd_voltage_table.entries[level].value * VOLTAGE_SCALE);
+				PP_HOST_TO_SMC_US(data->mvdd_voltage_table.entries[count].value * VOLTAGE_SCALE);
 			/* Index into DpmTable.Smio. Drive bits from Smio entry to get this voltage level.*/
 			table->SmioTable2.Pattern[level].Smio =
 				(uint8_t) level;
@@ -2319,8 +2317,6 @@ static uint32_t polaris10_get_offsetof(uint32_t type, uint32_t member)
 			return offsetof(SMU74_SoftRegisters, VoltageChangeTimeout);
 		case AverageGraphicsActivity:
 			return offsetof(SMU74_SoftRegisters, AverageGraphicsActivity);
-		case AverageMemoryActivity:
-			return offsetof(SMU74_SoftRegisters, AverageMemoryActivity);
 		case PreVBlankGap:
 			return offsetof(SMU74_SoftRegisters, PreVBlankGap);
 		case VBlankTimeout:
@@ -2556,7 +2552,6 @@ static int polaris10_update_dpm_settings(struct pp_hwmgr *hwmgr,
 }
 
 const struct pp_smumgr_func polaris10_smu_funcs = {
-	.name = "polaris10_smu",
 	.smu_init = polaris10_smu_init,
 	.smu_fini = smu7_smu_fini,
 	.start_smu = polaris10_start_smu,

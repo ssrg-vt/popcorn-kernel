@@ -244,8 +244,10 @@ static int rockchip_saradc_probe(struct platform_device *pdev)
 	init_completion(&info->completion);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(&pdev->dev, "no irq resource?\n");
 		return irq;
+	}
 
 	ret = devm_request_irq(&pdev->dev, irq, rockchip_saradc_isr,
 			       0, dev_name(&pdev->dev), info);

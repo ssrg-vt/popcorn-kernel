@@ -66,7 +66,6 @@ parisc_acctyp(unsigned long code, unsigned int inst)
 	case 0x30000000: /* coproc2 */
 		if (bit22set(inst))
 			return VM_WRITE;
-		/* fall through */
 
 	case 0x0: /* indexed/memory management */
 		if (bit22set(inst)) {
@@ -404,13 +403,13 @@ bad_area:
 				lsb = PAGE_SHIFT;
 
 			force_sig_mceerr(BUS_MCEERR_AR, (void __user *) address,
-					 lsb);
+					 lsb, current);
 			return;
 		}
 #endif
 		show_signal_msg(regs, code, address, tsk, vma);
 
-		force_sig_fault(signo, si_code, (void __user *) address);
+		force_sig_fault(signo, si_code, (void __user *) address, current);
 		return;
 	}
 

@@ -9,6 +9,8 @@
 #include <linux/sysctl.h>
 #include "internal.h"
 
+static const int zero, one = 1, max = INT_MAX;
+
 struct ctl_table key_sysctls[] = {
 	{
 		.procname = "maxkeys",
@@ -16,8 +18,8 @@ struct ctl_table key_sysctls[] = {
 		.maxlen = sizeof(unsigned),
 		.mode = 0644,
 		.proc_handler = proc_dointvec_minmax,
-		.extra1 = (void *) SYSCTL_ONE,
-		.extra2 = (void *) SYSCTL_INT_MAX,
+		.extra1 = (void *) &one,
+		.extra2 = (void *) &max,
 	},
 	{
 		.procname = "maxbytes",
@@ -25,8 +27,8 @@ struct ctl_table key_sysctls[] = {
 		.maxlen = sizeof(unsigned),
 		.mode = 0644,
 		.proc_handler = proc_dointvec_minmax,
-		.extra1 = (void *) SYSCTL_ONE,
-		.extra2 = (void *) SYSCTL_INT_MAX,
+		.extra1 = (void *) &one,
+		.extra2 = (void *) &max,
 	},
 	{
 		.procname = "root_maxkeys",
@@ -34,8 +36,8 @@ struct ctl_table key_sysctls[] = {
 		.maxlen = sizeof(unsigned),
 		.mode = 0644,
 		.proc_handler = proc_dointvec_minmax,
-		.extra1 = (void *) SYSCTL_ONE,
-		.extra2 = (void *) SYSCTL_INT_MAX,
+		.extra1 = (void *) &one,
+		.extra2 = (void *) &max,
 	},
 	{
 		.procname = "root_maxbytes",
@@ -43,8 +45,8 @@ struct ctl_table key_sysctls[] = {
 		.maxlen = sizeof(unsigned),
 		.mode = 0644,
 		.proc_handler = proc_dointvec_minmax,
-		.extra1 = (void *) SYSCTL_ONE,
-		.extra2 = (void *) SYSCTL_INT_MAX,
+		.extra1 = (void *) &one,
+		.extra2 = (void *) &max,
 	},
 	{
 		.procname = "gc_delay",
@@ -52,8 +54,8 @@ struct ctl_table key_sysctls[] = {
 		.maxlen = sizeof(unsigned),
 		.mode = 0644,
 		.proc_handler = proc_dointvec_minmax,
-		.extra1 = (void *) SYSCTL_ZERO,
-		.extra2 = (void *) SYSCTL_INT_MAX,
+		.extra1 = (void *) &zero,
+		.extra2 = (void *) &max,
 	},
 #ifdef CONFIG_PERSISTENT_KEYRINGS
 	{
@@ -62,8 +64,8 @@ struct ctl_table key_sysctls[] = {
 		.maxlen = sizeof(unsigned),
 		.mode = 0644,
 		.proc_handler = proc_dointvec_minmax,
-		.extra1 = (void *) SYSCTL_ZERO,
-		.extra2 = (void *) SYSCTL_INT_MAX,
+		.extra1 = (void *) &zero,
+		.extra2 = (void *) &max,
 	},
 #endif
 	{ }

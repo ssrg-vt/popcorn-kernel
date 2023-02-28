@@ -25,8 +25,7 @@
  *
  **************************************************************************/
 
-#include <linux/sched/signal.h>
-
+#include <drm/drmP.h>
 #include "vmwgfx_drv.h"
 
 #define VMW_FENCE_WRAP (1 << 24)

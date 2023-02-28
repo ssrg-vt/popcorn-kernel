@@ -39,7 +39,6 @@
 #include <linux/smp.h>
 #include <linux/pagemap.h>
 #include <linux/mount.h>
-#include <linux/pseudo_fs.h>
 #include <linux/bitops.h>
 #include <linux/capability.h>
 #include <linux/rcupdate.h>
@@ -601,19 +600,17 @@ pfm_unprotect_ctx_ctxsw(pfm_context_t *x, unsigned long f)
 /* forward declaration */
 static const struct dentry_operations pfmfs_dentry_operations;
 
-static int pfmfs_init_fs_context(struct fs_context *fc)
+static struct dentry *
+pfmfs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
-	struct pseudo_fs_context *ctx = init_pseudo(fc, PFMFS_MAGIC);
-	if (!ctx)
-		return -ENOMEM;
-	ctx->dops = &pfmfs_dentry_operations;
-	return 0;
+	return mount_pseudo(fs_type, "pfm:", NULL, &pfmfs_dentry_operations,
+			PFMFS_MAGIC);
 }
 
 static struct file_system_type pfm_fs_type = {
-	.name			= "pfmfs",
-	.init_fs_context	= pfmfs_init_fs_context,
-	.kill_sb		= kill_anon_super,
+	.name     = "pfmfs",
+	.mount    = pfmfs_mount,
+	.kill_sb  = kill_anon_super,
 };
 MODULE_ALIAS_FS("pfmfs");
 
@@ -6393,7 +6390,11 @@ pfm_install_alt_pmu_interrupt(pfm_intr_handler_desc_t *hdl)
 	}
 
 	/* save the current system wide pmu states */
-	on_each_cpu(pfm_alt_save_pmu_state, NULL, 1);
+	ret = on_each_cpu(pfm_alt_save_pmu_state, NULL, 1);
+	if (ret) {
+		DPRINT(("on_each_cpu() failed: %d\n", ret));
+		goto cleanup_reserve;
+	}
 
 	/* officially change to the alternate interrupt handler */
 	pfm_alt_intr_handler = hdl;
@@ -6420,6 +6421,7 @@ int
 pfm_remove_alt_pmu_interrupt(pfm_intr_handler_desc_t *hdl)
 {
 	int i;
+	int ret;
 
 	if (hdl == NULL) return -EINVAL;
 
@@ -6433,7 +6435,10 @@ pfm_remove_alt_pmu_interrupt(pfm_intr_handler_desc_t *hdl)
 
 	pfm_alt_intr_handler = NULL;
 
-	on_each_cpu(pfm_alt_restore_pmu_state, NULL, 1);
+	ret = on_each_cpu(pfm_alt_restore_pmu_state, NULL, 1);
+	if (ret) {
+		DPRINT(("on_each_cpu() failed: %d\n", ret));
+	}
 
 	for_each_online_cpu(i) {
 		pfm_unreserve_session(NULL, 1, i);

@@ -2446,11 +2446,10 @@ TRACE_EVENT(rdev_set_mcast_rate,
 		       sizeof(int) * NUM_NL80211_BANDS);
 	),
 	TP_printk(WIPHY_PR_FMT ", " NETDEV_PR_FMT ", "
-		  "mcast_rates [2.4GHz=0x%x, 5.2GHz=0x%x, 6GHz=0x%x, 60GHz=0x%x]",
+		  "mcast_rates [2.4GHz=0x%x, 5.2GHz=0x%x, 60GHz=0x%x]",
 		  WIPHY_PR_ARG, NETDEV_PR_ARG,
 		  __entry->mcast_rate[NL80211_BAND_2GHZ],
 		  __entry->mcast_rate[NL80211_BAND_5GHZ],
-		  __entry->mcast_rate[NL80211_BAND_6GHZ],
 		  __entry->mcast_rate[NL80211_BAND_60GHZ])
 );
 
@@ -2736,24 +2735,6 @@ TRACE_EVENT(cfg80211_ready_on_channel,
 );
 
 TRACE_EVENT(cfg80211_ready_on_channel_expired,
-	TP_PROTO(struct wireless_dev *wdev, u64 cookie,
-		 struct ieee80211_channel *chan),
-	TP_ARGS(wdev, cookie, chan),
-	TP_STRUCT__entry(
-		WDEV_ENTRY
-		__field(u64, cookie)
-		CHAN_ENTRY
-	),
-	TP_fast_assign(
-		WDEV_ASSIGN;
-		__entry->cookie = cookie;
-		CHAN_ASSIGN(chan);
-	),
-	TP_printk(WDEV_PR_FMT ", cookie: %llu, " CHAN_PR_FMT,
-		  WDEV_PR_ARG, __entry->cookie, CHAN_PR_ARG)
-);
-
-TRACE_EVENT(cfg80211_tx_mgmt_expired,
 	TP_PROTO(struct wireless_dev *wdev, u64 cookie,
 		 struct ieee80211_channel *chan),
 	TP_ARGS(wdev, cookie, chan),

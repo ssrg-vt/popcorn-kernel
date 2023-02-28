@@ -23,6 +23,7 @@
 #ifndef __NOUVEAU_HW_H__
 #define __NOUVEAU_HW_H__
 
+#include <drm/drmP.h>
 #include "disp.h"
 #include "nvreg.h"
 

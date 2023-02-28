@@ -502,7 +502,7 @@ int bpf_remove_insns(struct bpf_prog *prog, u32 off, u32 cnt)
 	return WARN_ON_ONCE(bpf_adj_branches(prog, off, off + cnt, off, false));
 }
 
-static void bpf_prog_kallsyms_del_subprogs(struct bpf_prog *fp)
+void bpf_prog_kallsyms_del_subprogs(struct bpf_prog *fp)
 {
 	int i;
 
@@ -890,8 +890,7 @@ int bpf_jit_get_func_addr(const struct bpf_prog *prog,
 
 static int bpf_jit_blind_insn(const struct bpf_insn *from,
 			      const struct bpf_insn *aux,
-			      struct bpf_insn *to_buff,
-			      bool emit_zext)
+			      struct bpf_insn *to_buff)
 {
 	struct bpf_insn *to = to_buff;
 	u32 imm_rnd = get_random_int();
@@ -1006,8 +1005,6 @@ static int bpf_jit_blind_insn(const struct bpf_insn *from,
 	case 0: /* Part 2 of BPF_LD | BPF_IMM | BPF_DW. */
 		*to++ = BPF_ALU32_IMM(BPF_MOV, BPF_REG_AX, imm_rnd ^ aux[0].imm);
 		*to++ = BPF_ALU32_IMM(BPF_XOR, BPF_REG_AX, imm_rnd);
-		if (emit_zext)
-			*to++ = BPF_ZEXT_REG(BPF_REG_AX);
 		*to++ = BPF_ALU64_REG(BPF_OR,  aux[0].dst_reg, BPF_REG_AX);
 		break;
 
@@ -1091,8 +1088,7 @@ struct bpf_prog *bpf_jit_blind_constants(struct bpf_prog *prog)
 		    insn[1].code == 0)
 			memcpy(aux, insn, sizeof(aux));
 
-		rewritten = bpf_jit_blind_insn(insn, aux, insn_buff,
-						clone->aux->verifier_zext);
+		rewritten = bpf_jit_blind_insn(insn, aux, insn_buff);
 		if (!rewritten)
 			continue;
 
@@ -1303,7 +1299,7 @@ static u64 __no_fgcse ___bpf_prog_run(u64 *regs, const struct bpf_insn *insn, u6
 {
 #define BPF_INSN_2_LBL(x, y)    [BPF_##x | BPF_##y] = &&x##_##y
 #define BPF_INSN_3_LBL(x, y, z) [BPF_##x | BPF_##y | BPF_##z] = &&x##_##y##_##z
-	static const void * const jumptable[256] __annotate_jump_table = {
+	static const void *jumptable[256] = {
 		[0 ... 255] = &&default_label,
 		/* Now overwrite non-defaults ... */
 		BPF_INSN_MAP(BPF_INSN_2_LBL, BPF_INSN_3_LBL),
@@ -1562,6 +1558,7 @@ out:
 		BUG_ON(1);
 		return 0;
 }
+STACK_FRAME_NON_STANDARD(___bpf_prog_run); /* jump table */
 
 #define PROG_NAME(stack_size) __bpf_prog_run##stack_size
 #define DEFINE_BPF_PROG_RUN(stack_size) \
@@ -1794,42 +1791,38 @@ struct bpf_prog_array *bpf_prog_array_alloc(u32 prog_cnt, gfp_t flags)
 	return &empty_prog_array.hdr;
 }
 
-void bpf_prog_array_free(struct bpf_prog_array *progs)
+void bpf_prog_array_free(struct bpf_prog_array __rcu *progs)
 {
-	if (!progs || progs == &empty_prog_array.hdr)
+	if (!progs ||
+	    progs == (struct bpf_prog_array __rcu *)&empty_prog_array.hdr)
 		return;
 	kfree_rcu(progs, rcu);
 }
 
-int bpf_prog_array_length(struct bpf_prog_array *array)
+int bpf_prog_array_length(struct bpf_prog_array __rcu *array)
 {
 	struct bpf_prog_array_item *item;
 	u32 cnt = 0;
 
-	for (item = array->items; item->prog; item++)
+	rcu_read_lock();
+	item = rcu_dereference(array)->items;
+	for (; item->prog; item++)
 		if (item->prog != &dummy_bpf_prog.prog)
 			cnt++;
+	rcu_read_unlock();
 	return cnt;
 }
 
-bool bpf_prog_array_is_empty(struct bpf_prog_array *array)
-{
-	struct bpf_prog_array_item *item;
 
-	for (item = array->items; item->prog; item++)
-		if (item->prog != &dummy_bpf_prog.prog)
-			return false;
-	return true;
-}
-
-static bool bpf_prog_array_copy_core(struct bpf_prog_array *array,
+static bool bpf_prog_array_copy_core(struct bpf_prog_array __rcu *array,
 				     u32 *prog_ids,
 				     u32 request_cnt)
 {
 	struct bpf_prog_array_item *item;
 	int i = 0;
 
-	for (item = array->items; item->prog; item++) {
+	item = rcu_dereference_check(array, 1)->items;
+	for (; item->prog; item++) {
 		if (item->prog == &dummy_bpf_prog.prog)
 			continue;
 		prog_ids[i] = item->prog->aux->id;
@@ -1842,7 +1835,7 @@ static bool bpf_prog_array_copy_core(struct bpf_prog_array *array,
 	return !!(item->prog);
 }
 
-int bpf_prog_array_copy_to_user(struct bpf_prog_array *array,
+int bpf_prog_array_copy_to_user(struct bpf_prog_array __rcu *array,
 				__u32 __user *prog_ids, u32 cnt)
 {
 	unsigned long err = 0;
@@ -1853,12 +1846,18 @@ int bpf_prog_array_copy_to_user(struct bpf_prog_array *array,
 	 * cnt = bpf_prog_array_length();
 	 * if (cnt > 0)
 	 *     bpf_prog_array_copy_to_user(..., cnt);
-	 * so below kcalloc doesn't need extra cnt > 0 check.
+	 * so below kcalloc doesn't need extra cnt > 0 check, but
+	 * bpf_prog_array_length() releases rcu lock and
+	 * prog array could have been swapped with empty or larger array,
+	 * so always copy 'cnt' prog_ids to the user.
+	 * In a rare race the user will see zero prog_ids
 	 */
 	ids = kcalloc(cnt, sizeof(u32), GFP_USER | __GFP_NOWARN);
 	if (!ids)
 		return -ENOMEM;
+	rcu_read_lock();
 	nospc = bpf_prog_array_copy_core(array, ids, cnt);
+	rcu_read_unlock();
 	err = copy_to_user(prog_ids, ids, cnt * sizeof(u32));
 	kfree(ids);
 	if (err)
@@ -1868,19 +1867,19 @@ int bpf_prog_array_copy_to_user(struct bpf_prog_array *array,
 	return 0;
 }
 
-void bpf_prog_array_delete_safe(struct bpf_prog_array *array,
+void bpf_prog_array_delete_safe(struct bpf_prog_array __rcu *array,
 				struct bpf_prog *old_prog)
 {
-	struct bpf_prog_array_item *item;
+	struct bpf_prog_array_item *item = array->items;
 
-	for (item = array->items; item->prog; item++)
+	for (; item->prog; item++)
 		if (item->prog == old_prog) {
 			WRITE_ONCE(item->prog, &dummy_bpf_prog.prog);
 			break;
 		}
 }
 
-int bpf_prog_array_copy(struct bpf_prog_array *old_array,
+int bpf_prog_array_copy(struct bpf_prog_array __rcu *old_array,
 			struct bpf_prog *exclude_prog,
 			struct bpf_prog *include_prog,
 			struct bpf_prog_array **new_array)
@@ -1944,7 +1943,7 @@ int bpf_prog_array_copy(struct bpf_prog_array *old_array,
 	return 0;
 }
 
-int bpf_prog_array_copy_info(struct bpf_prog_array *array,
+int bpf_prog_array_copy_info(struct bpf_prog_array __rcu *array,
 			     u32 *prog_ids, u32 request_cnt,
 			     u32 *prog_cnt)
 {
@@ -2087,15 +2086,6 @@ bool __weak bpf_helper_changes_pkt_data(void *func)
 	return false;
 }
 
-/* Return TRUE if the JIT backend wants verifier to enable sub-register usage
- * analysis code and wants explicit zero extension inserted by verifier.
- * Otherwise, return FALSE.
- */
-bool __weak bpf_jit_needs_zext(void)
-{
-	return false;
-}
-
 /* To execute LD_ABS/LD_IND instructions __bpf_prog_run() may call
  * skb_copy_bits(), so provide a weak definition of it for NET-less config.
  */
@@ -2113,4 +2103,3 @@ EXPORT_SYMBOL(bpf_stats_enabled_key);
 #include <linux/bpf_trace.h>
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(xdp_exception);
-EXPORT_TRACEPOINT_SYMBOL_GPL(xdp_bulk_tx);

@@ -41,7 +41,8 @@ libs-y			+= arch/unicore32/lib/
 
 boot			:= arch/unicore32/boot
 
-# Default target when executing plain make
+# Default defconfig and target when executing plain make
+KBUILD_DEFCONFIG	:= $(ARCH)_defconfig
 KBUILD_IMAGE		:= $(boot)/zImage
 
 all:	zImage

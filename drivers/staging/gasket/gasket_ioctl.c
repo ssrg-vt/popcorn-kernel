@@ -39,7 +39,8 @@ static int gasket_set_event_fd(struct gasket_dev *gasket_dev,
 }
 
 /* Read the size of the page table. */
-static int gasket_read_page_table_size(struct gasket_dev *gasket_dev,
+static int gasket_read_page_table_size(
+	struct gasket_dev *gasket_dev,
 	struct gasket_page_table_ioctl __user *argp)
 {
 	int ret = 0;
@@ -65,7 +66,8 @@ static int gasket_read_page_table_size(struct gasket_dev *gasket_dev,
 }
 
 /* Read the size of the simple page table. */
-static int gasket_read_simple_page_table_size(struct gasket_dev *gasket_dev,
+static int gasket_read_simple_page_table_size(
+	struct gasket_dev *gasket_dev,
 	struct gasket_page_table_ioctl __user *argp)
 {
 	int ret = 0;
@@ -91,7 +93,8 @@ static int gasket_read_simple_page_table_size(struct gasket_dev *gasket_dev,
 }
 
 /* Set the boundary between the simple and extended page tables. */
-static int gasket_partition_page_table(struct gasket_dev *gasket_dev,
+static int gasket_partition_page_table(
+	struct gasket_dev *gasket_dev,
 	struct gasket_page_table_ioctl __user *argp)
 {
 	int ret;
@@ -182,7 +185,8 @@ static int gasket_unmap_buffers(struct gasket_dev *gasket_dev,
  * Reserve structures for coherent allocation, and allocate or free the
  * corresponding memory.
  */
-static int gasket_config_coherent_allocator(struct gasket_dev *gasket_dev,
+static int gasket_config_coherent_allocator(
+	struct gasket_dev *gasket_dev,
 	struct gasket_coherent_alloc_config_ioctl __user *argp)
 {
 	int ret;
@@ -349,7 +353,8 @@ long gasket_handle_ioctl(struct file *filp, uint cmd, void __user *argp)
 		 */
 		trace_gasket_ioctl_integer_data(arg);
 		dev_dbg(gasket_dev->dev,
-			"Unknown ioctl cmd=0x%x not caught by gasket_is_supported_ioctl\n",
+			"Unknown ioctl cmd=0x%x not caught by "
+			"gasket_is_supported_ioctl\n",
 			cmd);
 		retval = -EINVAL;
 		break;

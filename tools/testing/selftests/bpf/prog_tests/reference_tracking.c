@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <test_progs.h>
 
+static int libbpf_debug_print(enum libbpf_print_level level,
+			      const char *format, va_list args)
+{
+	if (level == LIBBPF_DEBUG)
+		return 0;
+
+	return vfprintf(stderr, format, args);
+}
+
 void test_reference_tracking(void)
 {
 	const char *file = "./test_sk_lookup_kern.o";
@@ -10,8 +19,10 @@ void test_reference_tracking(void)
 	int err = 0;
 
 	obj = bpf_object__open(file);
-	if (CHECK_FAIL(IS_ERR(obj)))
+	if (IS_ERR(obj)) {
+		error_cnt++;
 		return;
+	}
 
 	bpf_object__for_each_program(prog, obj) {
 		const char *title;
@@ -25,11 +36,9 @@ void test_reference_tracking(void)
 
 		/* Expect verifier failure if test name has 'fail' */
 		if (strstr(title, "fail") != NULL) {
-			libbpf_print_fn_t old_print_fn;
-
-			old_print_fn = libbpf_set_print(NULL);
+			libbpf_set_print(NULL);
 			err = !bpf_program__load(prog, "GPL", 0);
-			libbpf_set_print(old_print_fn);
+			libbpf_set_print(libbpf_debug_print);
 		} else {
 			err = bpf_program__load(prog, "GPL", 0);
 		}

@@ -2,7 +2,6 @@
 // Copyright (c) 2018 Facebook
 // Copyright (c) 2019 Cloudflare
 
-#include <limits.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -78,7 +77,7 @@ out:
 	return fd;
 }
 
-static int get_map_fd_by_prog_id(int prog_id, bool *xdp)
+static int get_map_fd_by_prog_id(int prog_id)
 {
 	struct bpf_prog_info info = {};
 	__u32 info_len = sizeof(info);
@@ -105,8 +104,6 @@ static int get_map_fd_by_prog_id(int prog_id, bool *xdp)
 		goto err;
 	}
 
-	*xdp = info.type == BPF_PROG_TYPE_XDP;
-
 	map_fd = bpf_map_get_fd_by_id(map_ids[0]);
 	if (map_fd < 0)
 		log_err("Failed to get fd by map id %d", map_ids[0]);
@@ -116,28 +113,14 @@ err:
 	return map_fd;
 }
 
-static int run_test(int server_fd, int results_fd, bool xdp)
+static int run_test(int server_fd, int results_fd)
 {
 	int client = -1, srv_client = -1;
 	int ret = 0;
 	__u32 key = 0;
-	__u32 key_gen = 1;
-	__u32 key_mss = 2;
-	__u32 value = 0;
-	__u32 value_gen = 0;
-	__u32 value_mss = 0;
+	__u64 value = 0;
 
 	if (bpf_map_update_elem(results_fd, &key, &value, 0) < 0) {
-		log_err("Can't clear results");
-		goto err;
-	}
-
-	if (bpf_map_update_elem(results_fd, &key_gen, &value_gen, 0) < 0) {
-		log_err("Can't clear results");
-		goto err;
-	}
-
-	if (bpf_map_update_elem(results_fd, &key_mss, &value_mss, 0) < 0) {
 		log_err("Can't clear results");
 		goto err;
 	}
@@ -157,35 +140,8 @@ static int run_test(int server_fd, int results_fd, bool xdp)
 		goto err;
 	}
 
-	if (value == 0) {
-		log_err("Didn't match syncookie: %u", value);
-		goto err;
-	}
-
-	if (bpf_map_lookup_elem(results_fd, &key_gen, &value_gen) < 0) {
-		log_err("Can't lookup result");
-		goto err;
-	}
-
-	if (xdp && value_gen == 0) {
-		// SYN packets do not get passed through generic XDP, skip the
-		// rest of the test.
-		printf("Skipping XDP cookie check\n");
-		goto out;
-	}
-
-	if (bpf_map_lookup_elem(results_fd, &key_mss, &value_mss) < 0) {
-		log_err("Can't lookup result");
-		goto err;
-	}
-
-	if (value != value_gen) {
-		log_err("BPF generated cookie does not match kernel one");
-		goto err;
-	}
-
-	if (value_mss < 536 || value_mss > USHRT_MAX) {
-		log_err("Unexpected MSS retrieved");
+	if (value != 1) {
+		log_err("Didn't match syncookie: %llu", value);
 		goto err;
 	}
 
@@ -207,14 +163,13 @@ int main(int argc, char **argv)
 	int server_v6 = -1;
 	int results = -1;
 	int err = 0;
-	bool xdp;
 
 	if (argc < 2) {
 		fprintf(stderr, "Usage: %s prog_id\n", argv[0]);
 		exit(1);
 	}
 
-	results = get_map_fd_by_prog_id(atoi(argv[1]), &xdp);
+	results = get_map_fd_by_prog_id(atoi(argv[1]));
 	if (results < 0) {
 		log_err("Can't get map");
 		goto err;
@@ -239,10 +194,10 @@ int main(int argc, char **argv)
 	if (server_v6 == -1)
 		goto err;
 
-	if (run_test(server, results, xdp))
+	if (run_test(server, results))
 		goto err;
 
-	if (run_test(server_v6, results, xdp))
+	if (run_test(server_v6, results))
 		goto err;
 
 	printf("ok\n");

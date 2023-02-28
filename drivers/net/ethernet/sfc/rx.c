@@ -412,6 +412,7 @@ efx_rx_packet_gro(struct efx_channel *channel, struct efx_rx_buffer *rx_buf,
 		  unsigned int n_frags, u8 *eh)
 {
 	struct napi_struct *napi = &channel->napi_str;
+	gro_result_t gro_result;
 	struct efx_nic *efx = channel->efx;
 	struct sk_buff *skb;
 
@@ -448,7 +449,9 @@ efx_rx_packet_gro(struct efx_channel *channel, struct efx_rx_buffer *rx_buf,
 
 	skb_record_rx_queue(skb, channel->rx_queue.core_index);
 
-	napi_gro_frags(napi);
+	gro_result = napi_gro_frags(napi);
+	if (gro_result != GRO_DROP)
+		channel->irq_mod_score += 2;
 }
 
 /* Allocate and construct an SKB around page fragments */

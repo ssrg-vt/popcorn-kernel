@@ -138,7 +138,6 @@ static int calibrate_v1(struct tsens_priv *priv)
 	}
 
 	compute_intercept_slope(priv, p1, p2, mode);
-	kfree(qfprom_cdata);
 
 	return 0;
 }

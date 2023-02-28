@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/compiler.h>
-#include <linux/string.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <string.h>
 #include <sys/wait.h>
-#include <perf/cpumap.h>
 #include "tests.h"
 #include "evlist.h"
 #include "evsel.h"
+#include "util.h"
 #include "debug.h"
-#include "parse-events.h"
 #include "thread_map.h"
 #include "target.h"
 
-static int attach__enable_on_exec(struct evlist *evlist)
+static int attach__enable_on_exec(struct perf_evlist *evlist)
 {
-	struct evsel *evsel = evlist__last(evlist);
+	struct perf_evsel *evsel = perf_evlist__last(evlist);
 	struct target target = {
 		.uid = UINT_MAX,
 	};
@@ -38,9 +36,9 @@ static int attach__enable_on_exec(struct evlist *evlist)
 		return err;
 	}
 
-	evsel->core.attr.enable_on_exec = 1;
+	evsel->attr.enable_on_exec = 1;
 
-	err = evlist__open(evlist);
+	err = perf_evlist__open(evlist);
 	if (err < 0) {
 		pr_debug("perf_evlist__open: %s\n",
 			 str_error_r(errno, sbuf, sizeof(sbuf)));
@@ -50,16 +48,16 @@ static int attach__enable_on_exec(struct evlist *evlist)
 	return perf_evlist__start_workload(evlist) == 1 ? TEST_OK : TEST_FAIL;
 }
 
-static int detach__enable_on_exec(struct evlist *evlist)
+static int detach__enable_on_exec(struct perf_evlist *evlist)
 {
 	waitpid(evlist->workload.pid, NULL, 0);
 	return 0;
 }
 
-static int attach__current_disabled(struct evlist *evlist)
+static int attach__current_disabled(struct perf_evlist *evlist)
 {
-	struct evsel *evsel = evlist__last(evlist);
-	struct perf_thread_map *threads;
+	struct perf_evsel *evsel = perf_evlist__last(evlist);
+	struct thread_map *threads;
 	int err;
 
 	pr_debug("attaching to current thread as disabled\n");
@@ -70,7 +68,7 @@ static int attach__current_disabled(struct evlist *evlist)
 		return -1;
 	}
 
-	evsel->core.attr.disabled = 1;
+	evsel->attr.disabled = 1;
 
 	err = perf_evsel__open_per_thread(evsel, threads);
 	if (err) {
@@ -78,14 +76,14 @@ static int attach__current_disabled(struct evlist *evlist)
 		return err;
 	}
 
-	perf_thread_map__put(threads);
-	return evsel__enable(evsel) == 0 ? TEST_OK : TEST_FAIL;
+	thread_map__put(threads);
+	return perf_evsel__enable(evsel) == 0 ? TEST_OK : TEST_FAIL;
 }
 
-static int attach__current_enabled(struct evlist *evlist)
+static int attach__current_enabled(struct perf_evlist *evlist)
 {
-	struct evsel *evsel = evlist__last(evlist);
-	struct perf_thread_map *threads;
+	struct perf_evsel *evsel = perf_evlist__last(evlist);
+	struct thread_map *threads;
 	int err;
 
 	pr_debug("attaching to current thread as enabled\n");
@@ -98,32 +96,32 @@ static int attach__current_enabled(struct evlist *evlist)
 
 	err = perf_evsel__open_per_thread(evsel, threads);
 
-	perf_thread_map__put(threads);
+	thread_map__put(threads);
 	return err == 0 ? TEST_OK : TEST_FAIL;
 }
 
-static int detach__disable(struct evlist *evlist)
+static int detach__disable(struct perf_evlist *evlist)
 {
-	struct evsel *evsel = evlist__last(evlist);
+	struct perf_evsel *evsel = perf_evlist__last(evlist);
 
-	return evsel__enable(evsel);
+	return perf_evsel__enable(evsel);
 }
 
-static int attach__cpu_disabled(struct evlist *evlist)
+static int attach__cpu_disabled(struct perf_evlist *evlist)
 {
-	struct evsel *evsel = evlist__last(evlist);
-	struct perf_cpu_map *cpus;
+	struct perf_evsel *evsel = perf_evlist__last(evlist);
+	struct cpu_map *cpus;
 	int err;
 
 	pr_debug("attaching to CPU 0 as enabled\n");
 
-	cpus = perf_cpu_map__new("0");
+	cpus = cpu_map__new("0");
 	if (cpus == NULL) {
-		pr_debug("failed to call perf_cpu_map__new\n");
+		pr_debug("failed to call cpu_map__new\n");
 		return -1;
 	}
 
-	evsel->core.attr.disabled = 1;
+	evsel->attr.disabled = 1;
 
 	err = perf_evsel__open_per_cpu(evsel, cpus);
 	if (err) {
@@ -134,21 +132,21 @@ static int attach__cpu_disabled(struct evlist *evlist)
 		return err;
 	}
 
-	perf_cpu_map__put(cpus);
-	return evsel__enable(evsel);
+	cpu_map__put(cpus);
+	return perf_evsel__enable(evsel);
 }
 
-static int attach__cpu_enabled(struct evlist *evlist)
+static int attach__cpu_enabled(struct perf_evlist *evlist)
 {
-	struct evsel *evsel = evlist__last(evlist);
-	struct perf_cpu_map *cpus;
+	struct perf_evsel *evsel = perf_evlist__last(evlist);
+	struct cpu_map *cpus;
 	int err;
 
 	pr_debug("attaching to CPU 0 as enabled\n");
 
-	cpus = perf_cpu_map__new("0");
+	cpus = cpu_map__new("0");
 	if (cpus == NULL) {
-		pr_debug("failed to call perf_cpu_map__new\n");
+		pr_debug("failed to call cpu_map__new\n");
 		return -1;
 	}
 
@@ -156,19 +154,19 @@ static int attach__cpu_enabled(struct evlist *evlist)
 	if (err == -EACCES)
 		return TEST_SKIP;
 
-	perf_cpu_map__put(cpus);
+	cpu_map__put(cpus);
 	return err ? TEST_FAIL : TEST_OK;
 }
 
-static int test_times(int (attach)(struct evlist *),
-		      int (detach)(struct evlist *))
+static int test_times(int (attach)(struct perf_evlist *),
+		      int (detach)(struct perf_evlist *))
 {
 	struct perf_counts_values count;
-	struct evlist *evlist = NULL;
-	struct evsel *evsel;
+	struct perf_evlist *evlist = NULL;
+	struct perf_evsel *evsel;
 	int err = -1, i;
 
-	evlist = evlist__new();
+	evlist = perf_evlist__new();
 	if (!evlist) {
 		pr_debug("failed to create event list\n");
 		goto out_err;
@@ -180,8 +178,8 @@ static int test_times(int (attach)(struct evlist *),
 		goto out_err;
 	}
 
-	evsel = evlist__last(evlist);
-	evsel->core.attr.read_format |=
+	evsel = perf_evlist__last(evlist);
+	evsel->attr.read_format |=
 		PERF_FORMAT_TOTAL_TIME_ENABLED |
 		PERF_FORMAT_TOTAL_TIME_RUNNING;
 
@@ -197,7 +195,7 @@ static int test_times(int (attach)(struct evlist *),
 
 	TEST_ASSERT_VAL("failed to detach", !detach(evlist));
 
-	perf_evsel__read(&evsel->core, 0, 0, &count);
+	perf_evsel__read(evsel, 0, 0, &count);
 
 	err = !(count.ena == count.run);
 
@@ -206,7 +204,7 @@ static int test_times(int (attach)(struct evlist *),
 		 count.ena, count.run);
 
 out_err:
-	evlist__delete(evlist);
+	perf_evlist__delete(evlist);
 	return !err ? TEST_OK : TEST_FAIL;
 }
 

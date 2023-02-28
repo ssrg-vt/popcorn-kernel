@@ -462,8 +462,11 @@ static int sh_tmu_channel_setup(struct sh_tmu_channel *ch, unsigned int index,
 		ch->base = tmu->mapbase + 8 + ch->index * 12;
 
 	ch->irq = platform_get_irq(tmu->pdev, index);
-	if (ch->irq < 0)
+	if (ch->irq < 0) {
+		dev_err(&tmu->pdev->dev, "ch%u: failed to get irq\n",
+			ch->index);
 		return ch->irq;
+	}
 
 	ch->cs_enabled = false;
 	ch->enable_count = 0;

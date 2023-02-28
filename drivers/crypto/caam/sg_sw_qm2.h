@@ -25,19 +25,15 @@ static inline void dma_to_qm_sg_one(struct dpaa2_sg_entry *qm_sg_ptr,
  * but does not have final bit; instead, returns last entry
  */
 static inline struct dpaa2_sg_entry *
-sg_to_qm_sg(struct scatterlist *sg, int len,
+sg_to_qm_sg(struct scatterlist *sg, int sg_count,
 	    struct dpaa2_sg_entry *qm_sg_ptr, u16 offset)
 {
-	int ent_len;
-
-	while (len) {
-		ent_len = min_t(int, sg_dma_len(sg), len);
-
-		dma_to_qm_sg_one(qm_sg_ptr, sg_dma_address(sg), ent_len,
-				 offset);
+	while (sg_count && sg) {
+		dma_to_qm_sg_one(qm_sg_ptr, sg_dma_address(sg),
+				 sg_dma_len(sg), offset);
 		qm_sg_ptr++;
 		sg = sg_next(sg);
-		len -= ent_len;
+		sg_count--;
 	}
 	return qm_sg_ptr - 1;
 }
@@ -46,11 +42,11 @@ sg_to_qm_sg(struct scatterlist *sg, int len,
  * convert scatterlist to h/w link table format
  * scatterlist must have been previously dma mapped
  */
-static inline void sg_to_qm_sg_last(struct scatterlist *sg, int len,
+static inline void sg_to_qm_sg_last(struct scatterlist *sg, int sg_count,
 				    struct dpaa2_sg_entry *qm_sg_ptr,
 				    u16 offset)
 {
-	qm_sg_ptr = sg_to_qm_sg(sg, len, qm_sg_ptr, offset);
+	qm_sg_ptr = sg_to_qm_sg(sg, sg_count, qm_sg_ptr, offset);
 	dpaa2_sg_set_final(qm_sg_ptr, true);
 }
 

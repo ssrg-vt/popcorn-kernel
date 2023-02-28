@@ -936,8 +936,6 @@ struct xhci_virt_ep {
 #define EP_GETTING_NO_STREAMS	(1 << 5)
 #define EP_HARD_CLEAR_TOGGLE	(1 << 6)
 #define EP_SOFT_CLEAR_TOGGLE	(1 << 7)
-/* usb_hub_clear_tt_buffer is in progress */
-#define EP_CLEARING_TT		(1 << 8)
 	/* ----  Related to URB cancellation ---- */
 	struct list_head	cancelled_td_list;
 	/* Watchdog timer for stop endpoint command to cancel URBs */
@@ -1614,9 +1612,6 @@ struct xhci_ring {
 	enum xhci_ring_type	type;
 	bool			last_td_was_short;
 	struct radix_tree_root	*trb_address_map;
-	struct timer_list	stream_timer;
-	bool			stream_timeout_handler;
-	struct xhci_hcd		*xhci;
 };
 
 struct xhci_erst_entry {
@@ -1870,7 +1865,6 @@ struct xhci_hcd {
 #define XHCI_DEFAULT_PM_RUNTIME_ALLOW	BIT_ULL(33)
 #define XHCI_RESET_PLL_ON_DISCONNECT	BIT_ULL(34)
 #define XHCI_SNPS_BROKEN_SUSPEND    BIT_ULL(35)
-#define XHCI_STREAM_QUIRK	BIT_ULL(33) /* FIXME this is wrong */
 
 	unsigned int		num_active_eps;
 	unsigned int		limit_active_eps;
@@ -2113,14 +2107,10 @@ void xhci_queue_new_dequeue_state(struct xhci_hcd *xhci,
 void xhci_cleanup_stalled_ring(struct xhci_hcd *xhci, unsigned int ep_index,
 		unsigned int stream_id, struct xhci_td *td);
 void xhci_stop_endpoint_command_watchdog(struct timer_list *t);
-void xhci_stream_timeout(struct timer_list *unused);
 void xhci_handle_command_timeout(struct work_struct *work);
 
 void xhci_ring_ep_doorbell(struct xhci_hcd *xhci, unsigned int slot_id,
 		unsigned int ep_index, unsigned int stream_id);
-void xhci_ring_doorbell_for_active_rings(struct xhci_hcd *xhci,
-		unsigned int slot_id,
-		unsigned int ep_index);
 void xhci_cleanup_command_queue(struct xhci_hcd *xhci);
 void inc_deq(struct xhci_hcd *xhci, struct xhci_ring *ring);
 unsigned int count_trbs(u64 addr, u64 len);
@@ -2342,13 +2332,12 @@ static inline const char *xhci_decode_trb(u32 field0, u32 field1, u32 field2,
 		break;
 	case TRB_RESET_EP:
 		sprintf(str,
-			"%s: ctx %08x%08x slot %d ep %d flags %c:%c",
+			"%s: ctx %08x%08x slot %d ep %d flags %c",
 			xhci_trb_type_string(type),
 			field1, field0,
 			TRB_TO_SLOT_ID(field3),
 			/* Macro decrements 1, maybe it shouldn't?!? */
 			TRB_TO_EP_INDEX(field3) + 1,
-			field3 & TRB_TSP ? 'T' : 't',
 			field3 & TRB_CYCLE ? 'C' : 'c');
 		break;
 	case TRB_STOP_RING:

@@ -33,12 +33,12 @@ static void __hyp_text __tlb_switch_to_guest_vhe(struct kvm *kvm,
 		 * in the TCR_EL1 register. We also need to prevent it to
 		 * allocate IPA->PA walks, so we enable the S1 MMU...
 		 */
-		val = cxt->tcr = read_sysreg_el1(SYS_TCR);
+		val = cxt->tcr = read_sysreg_el1(tcr);
 		val |= TCR_EPD1_MASK | TCR_EPD0_MASK;
-		write_sysreg_el1(val, SYS_TCR);
-		val = cxt->sctlr = read_sysreg_el1(SYS_SCTLR);
+		write_sysreg_el1(val, tcr);
+		val = cxt->sctlr = read_sysreg_el1(sctlr);
 		val |= SCTLR_ELx_M;
-		write_sysreg_el1(val, SYS_SCTLR);
+		write_sysreg_el1(val, sctlr);
 	}
 
 	/*
@@ -67,14 +67,10 @@ static void __hyp_text __tlb_switch_to_guest_nvhe(struct kvm *kvm,
 	isb();
 }
 
-static void __hyp_text __tlb_switch_to_guest(struct kvm *kvm,
-					     struct tlb_inv_context *cxt)
-{
-	if (has_vhe())
-		__tlb_switch_to_guest_vhe(kvm, cxt);
-	else
-		__tlb_switch_to_guest_nvhe(kvm, cxt);
-}
+static hyp_alternate_select(__tlb_switch_to_guest,
+			    __tlb_switch_to_guest_nvhe,
+			    __tlb_switch_to_guest_vhe,
+			    ARM64_HAS_VIRT_HOST_EXTN);
 
 static void __hyp_text __tlb_switch_to_host_vhe(struct kvm *kvm,
 						struct tlb_inv_context *cxt)
@@ -89,8 +85,8 @@ static void __hyp_text __tlb_switch_to_host_vhe(struct kvm *kvm,
 
 	if (cpus_have_const_cap(ARM64_WORKAROUND_1165522)) {
 		/* Restore the registers to what they were */
-		write_sysreg_el1(cxt->tcr, SYS_TCR);
-		write_sysreg_el1(cxt->sctlr, SYS_SCTLR);
+		write_sysreg_el1(cxt->tcr, tcr);
+		write_sysreg_el1(cxt->sctlr, sctlr);
 	}
 
 	local_irq_restore(cxt->flags);
@@ -102,14 +98,10 @@ static void __hyp_text __tlb_switch_to_host_nvhe(struct kvm *kvm,
 	write_sysreg(0, vttbr_el2);
 }
 
-static void __hyp_text __tlb_switch_to_host(struct kvm *kvm,
-					    struct tlb_inv_context *cxt)
-{
-	if (has_vhe())
-		__tlb_switch_to_host_vhe(kvm, cxt);
-	else
-		__tlb_switch_to_host_nvhe(kvm, cxt);
-}
+static hyp_alternate_select(__tlb_switch_to_host,
+			    __tlb_switch_to_host_nvhe,
+			    __tlb_switch_to_host_vhe,
+			    ARM64_HAS_VIRT_HOST_EXTN);
 
 void __hyp_text __kvm_tlb_flush_vmid_ipa(struct kvm *kvm, phys_addr_t ipa)
 {
@@ -119,7 +111,7 @@ void __hyp_text __kvm_tlb_flush_vmid_ipa(struct kvm *kvm, phys_addr_t ipa)
 
 	/* Switch to requested VMID */
 	kvm = kern_hyp_va(kvm);
-	__tlb_switch_to_guest(kvm, &cxt);
+	__tlb_switch_to_guest()(kvm, &cxt);
 
 	/*
 	 * We could do so much better if we had the VA as well.
@@ -162,7 +154,7 @@ void __hyp_text __kvm_tlb_flush_vmid_ipa(struct kvm *kvm, phys_addr_t ipa)
 	if (!has_vhe() && icache_is_vpipt())
 		__flush_icache_all();
 
-	__tlb_switch_to_host(kvm, &cxt);
+	__tlb_switch_to_host()(kvm, &cxt);
 }
 
 void __hyp_text __kvm_tlb_flush_vmid(struct kvm *kvm)
@@ -173,13 +165,13 @@ void __hyp_text __kvm_tlb_flush_vmid(struct kvm *kvm)
 
 	/* Switch to requested VMID */
 	kvm = kern_hyp_va(kvm);
-	__tlb_switch_to_guest(kvm, &cxt);
+	__tlb_switch_to_guest()(kvm, &cxt);
 
 	__tlbi(vmalls12e1is);
 	dsb(ish);
 	isb();
 
-	__tlb_switch_to_host(kvm, &cxt);
+	__tlb_switch_to_host()(kvm, &cxt);
 }
 
 void __hyp_text __kvm_tlb_flush_local_vmid(struct kvm_vcpu *vcpu)
@@ -188,31 +180,19 @@ void __hyp_text __kvm_tlb_flush_local_vmid(struct kvm_vcpu *vcpu)
 	struct tlb_inv_context cxt;
 
 	/* Switch to requested VMID */
-	__tlb_switch_to_guest(kvm, &cxt);
+	__tlb_switch_to_guest()(kvm, &cxt);
 
 	__tlbi(vmalle1);
 	dsb(nsh);
 	isb();
 
-	__tlb_switch_to_host(kvm, &cxt);
+	__tlb_switch_to_host()(kvm, &cxt);
 }
 
 void __hyp_text __kvm_flush_vm_context(void)
 {
 	dsb(ishst);
 	__tlbi(alle1is);
-
-	/*
-	 * VIPT and PIPT caches are not affected by VMID, so no maintenance
-	 * is necessary across a VMID rollover.
-	 *
-	 * VPIPT caches constrain lookup and maintenance to the active VMID,
-	 * so we need to invalidate lines with a stale VMID to avoid an ABA
-	 * race after multiple rollovers.
-	 *
-	 */
-	if (icache_is_vpipt())
-		asm volatile("ic ialluis");
-
+	asm volatile("ic ialluis" : : );
 	dsb(ish);
 }

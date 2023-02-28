@@ -42,7 +42,9 @@ int lowpan_register_netdevice(struct net_device *dev,
 	if (ret < 0)
 		return ret;
 
-	lowpan_dev_debugfs_init(dev);
+	ret = lowpan_dev_debugfs_init(dev);
+	if (ret < 0)
+		unregister_netdevice(dev);
 
 	return ret;
 }
@@ -150,7 +152,9 @@ static int __init lowpan_module_init(void)
 {
 	int ret;
 
-	lowpan_debugfs_init();
+	ret = lowpan_debugfs_init();
+	if (ret < 0)
+		return ret;
 
 	ret = register_netdevice_notifier(&lowpan_notifier);
 	if (ret < 0) {

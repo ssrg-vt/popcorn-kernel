@@ -46,8 +46,6 @@ const char *zpool_get_type(struct zpool *pool);
 
 void zpool_destroy_pool(struct zpool *pool);
 
-bool zpool_malloc_support_movable(struct zpool *pool);
-
 int zpool_malloc(struct zpool *pool, size_t size, gfp_t gfp,
 			unsigned long *handle);
 
@@ -92,7 +90,6 @@ struct zpool_driver {
 			struct zpool *zpool);
 	void (*destroy)(void *pool);
 
-	bool malloc_support_movable;
 	int (*malloc)(void *pool, size_t size, gfp_t gfp,
 				unsigned long *handle);
 	void (*free)(void *pool, unsigned long handle);

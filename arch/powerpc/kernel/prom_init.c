@@ -40,7 +40,6 @@
 #include <asm/sections.h>
 #include <asm/machdep.h>
 #include <asm/asm-prototypes.h>
-#include <asm/ultravisor-api.h>
 
 #include <linux/linux_logo.h>
 
@@ -95,7 +94,7 @@ static int of_workarounds __prombss;
 #define PROM_BUG() do {						\
         prom_printf("kernel BUG at %s line 0x%x!\n",		\
 		    __FILE__, __LINE__);			\
-	__builtin_trap();					\
+        __asm__ __volatile__(".long " BUG_ILLEGAL_INSTR);	\
 } while (0)
 
 #ifdef DEBUG_PROM
@@ -170,10 +169,6 @@ static unsigned long __prombss prom_tce_alloc_end;
 #ifdef CONFIG_PPC_PSERIES
 static bool __prombss prom_radix_disable;
 static bool __prombss prom_xive_disable;
-#endif
-
-#ifdef CONFIG_PPC_SVM
-static bool __prombss prom_svm_enable;
 #endif
 
 struct platform_support {
@@ -817,17 +812,6 @@ static void __init early_cmdline_parse(void)
 		prom_debug("XIVE disabled from cmdline\n");
 	}
 #endif /* CONFIG_PPC_PSERIES */
-
-#ifdef CONFIG_PPC_SVM
-	opt = prom_strstr(prom_cmd_line, "svm=");
-	if (opt) {
-		bool val;
-
-		opt += sizeof("svm=") - 1;
-		if (!prom_strtobool(opt, &val))
-			prom_svm_enable = val;
-	}
-#endif /* CONFIG_PPC_SVM */
 }
 
 #ifdef CONFIG_PPC_PSERIES
@@ -1592,6 +1576,9 @@ static void __init reserve_mem(u64 base, u64 size)
 static void __init prom_init_mem(void)
 {
 	phandle node;
+#ifdef DEBUG_PROM
+	char *path;
+#endif
 	char type[64];
 	unsigned int plen;
 	cell_t *p, *endp;
@@ -1613,6 +1600,9 @@ static void __init prom_init_mem(void)
 	prom_debug("root_size_cells: %x\n", rsc);
 
 	prom_debug("scanning memory:\n");
+#ifdef DEBUG_PROM
+	path = prom_scratch;
+#endif
 
 	for (node = 0; prom_next_node(&node); ) {
 		type[0] = 0;
@@ -1637,10 +1627,9 @@ static void __init prom_init_mem(void)
 		endp = p + (plen / sizeof(cell_t));
 
 #ifdef DEBUG_PROM
-		memset(prom_scratch, 0, sizeof(prom_scratch));
-		call_prom("package-to-path", 3, 1, node, prom_scratch,
-			  sizeof(prom_scratch) - 1);
-		prom_debug("  node %s :\n", prom_scratch);
+		memset(path, 0, sizeof(prom_scratch));
+		call_prom("package-to-path", 3, 1, node, path, sizeof(prom_scratch) - 1);
+		prom_debug("  node %s :\n", path);
 #endif /* DEBUG_PROM */
 
 		while ((endp - p) >= (rac + rsc)) {
@@ -1727,43 +1716,6 @@ static void __init prom_close_stdin(void)
 		call_prom("close", 1, 0, stdin);
 	}
 }
-
-#ifdef CONFIG_PPC_SVM
-static int prom_rtas_hcall(uint64_t args)
-{
-	register uint64_t arg1 asm("r3") = H_RTAS;
-	register uint64_t arg2 asm("r4") = args;
-
-	asm volatile("sc 1\n" : "=r" (arg1) :
-			"r" (arg1),
-			"r" (arg2) :);
-	return arg1;
-}
-
-static struct rtas_args __prombss os_term_args;
-
-static void __init prom_rtas_os_term(char *str)
-{
-	phandle rtas_node;
-	__be32 val;
-	u32 token;
-
-	prom_debug("%s: start...\n", __func__);
-	rtas_node = call_prom("finddevice", 1, 1, ADDR("/rtas"));
-	prom_debug("rtas_node: %x\n", rtas_node);
-	if (!PHANDLE_VALID(rtas_node))
-		return;
-
-	val = 0;
-	prom_getprop(rtas_node, "ibm,os-term", &val, sizeof(val));
-	token = be32_to_cpu(val);
-	prom_debug("ibm,os-term: %x\n", token);
-	if (token == 0)
-		prom_panic("Could not get token for ibm,os-term\n");
-	os_term_args.token = cpu_to_be32(token);
-	prom_rtas_hcall((uint64_t)&os_term_args);
-}
-#endif /* CONFIG_PPC_SVM */
 
 /*
  * Allocate room for and instantiate RTAS
@@ -3221,59 +3173,6 @@ static void unreloc_toc(void)
 #endif
 #endif
 
-#ifdef CONFIG_PPC_SVM
-/*
- * Perform the Enter Secure Mode ultracall.
- */
-static int enter_secure_mode(unsigned long kbase, unsigned long fdt)
-{
-	register unsigned long r3 asm("r3") = UV_ESM;
-	register unsigned long r4 asm("r4") = kbase;
-	register unsigned long r5 asm("r5") = fdt;
-
-	asm volatile("sc 2" : "+r"(r3) : "r"(r4), "r"(r5));
-
-	return r3;
-}
-
-/*
- * Call the Ultravisor to transfer us to secure memory if we have an ESM blob.
- */
-static void setup_secure_guest(unsigned long kbase, unsigned long fdt)
-{
-	int ret;
-
-	if (!prom_svm_enable)
-		return;
-
-	/* Switch to secure mode. */
-	prom_printf("Switching to secure mode.\n");
-
-	/*
-	 * The ultravisor will do an integrity check of the kernel image but we
-	 * relocated it so the check will fail. Restore the original image by
-	 * relocating it back to the kernel virtual base address.
-	 */
-	if (IS_ENABLED(CONFIG_RELOCATABLE))
-		relocate(KERNELBASE);
-
-	ret = enter_secure_mode(kbase, fdt);
-
-	/* Relocate the kernel again. */
-	if (IS_ENABLED(CONFIG_RELOCATABLE))
-		relocate(kbase);
-
-	if (ret != U_SUCCESS) {
-		prom_printf("Returned %d from switching to secure mode.\n", ret);
-		prom_rtas_os_term("Switch to secure mode failed.\n");
-	}
-}
-#else
-static void setup_secure_guest(unsigned long kbase, unsigned long fdt)
-{
-}
-#endif /* CONFIG_PPC_SVM */
-
 /*
  * We enter here early on, when the Open Firmware prom is still
  * handling exceptions and the MMU hash table for us.
@@ -3471,9 +3370,6 @@ unsigned long __init prom_init(unsigned long r3, unsigned long r4,
 #else
 	unreloc_toc();
 #endif
-
-	/* Move to secure memory if we're supposed to be secure guests. */
-	setup_secure_guest(kbase, hdr);
 
 	__start(hdr, kbase, 0, 0, 0, 0, 0);
 

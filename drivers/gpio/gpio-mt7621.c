@@ -241,6 +241,13 @@ mediatek_gpio_bank_probe(struct device *dev,
 	if (!rg->chip.label)
 		return -ENOMEM;
 
+	ret = devm_gpiochip_add_data(dev, &rg->chip, mtk);
+	if (ret < 0) {
+		dev_err(dev, "Could not register gpio %d, ret=%d\n",
+			rg->chip.ngpio, ret);
+		return ret;
+	}
+
 	rg->irq_chip.name = dev_name(dev);
 	rg->irq_chip.parent_device = dev;
 	rg->irq_chip.irq_unmask = mediatek_gpio_irq_unmask;
@@ -249,10 +256,8 @@ mediatek_gpio_bank_probe(struct device *dev,
 	rg->irq_chip.irq_set_type = mediatek_gpio_irq_type;
 
 	if (mtk->gpio_irq) {
-		struct gpio_irq_chip *girq;
-
 		/*
-		 * Directly request the irq here instead of passing
+		 * Manually request the irq here instead of passing
 		 * a flow-handler to gpiochip_set_chained_irqchip,
 		 * because the irq is shared.
 		 */
@@ -266,21 +271,15 @@ mediatek_gpio_bank_probe(struct device *dev,
 			return ret;
 		}
 
-		girq = &rg->chip.irq;
-		girq->chip = &rg->irq_chip;
-		/* This will let us handle the parent IRQ in the driver */
-		girq->parent_handler = NULL;
-		girq->num_parents = 0;
-		girq->parents = NULL;
-		girq->default_type = IRQ_TYPE_NONE;
-		girq->handler = handle_simple_irq;
-	}
+		ret = gpiochip_irqchip_add(&rg->chip, &rg->irq_chip,
+					   0, handle_simple_irq, IRQ_TYPE_NONE);
+		if (ret) {
+			dev_err(dev, "failed to add gpiochip_irqchip\n");
+			return ret;
+		}
 
-	ret = devm_gpiochip_add_data(dev, &rg->chip, mtk);
-	if (ret < 0) {
-		dev_err(dev, "Could not register gpio %d, ret=%d\n",
-			rg->chip.ngpio, ret);
-		return ret;
+		gpiochip_set_chained_irqchip(&rg->chip, &rg->irq_chip,
+					     mtk->gpio_irq, NULL);
 	}
 
 	/* set polarity to low for all gpios */

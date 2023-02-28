@@ -55,7 +55,7 @@
 
 #define IMX2_WDT_WMCR		0x08		/* Misc Register */
 
-#define IMX2_WDT_MAX_TIME	128U
+#define IMX2_WDT_MAX_TIME	128
 #define IMX2_WDT_DEFAULT_TIME	60		/* in seconds */
 
 #define WDOG_SEC_TO_COUNT(s)	((s * 2 - 1) << 8)
@@ -180,7 +180,7 @@ static int imx2_wdt_set_timeout(struct watchdog_device *wdog,
 {
 	unsigned int actual;
 
-	actual = min(new_timeout, IMX2_WDT_MAX_TIME);
+	actual = min(new_timeout, wdog->max_hw_heartbeat_ms * 1000);
 	__imx2_wdt_set_timeout(wdog, actual);
 	wdog->timeout = new_timeout;
 	return 0;
@@ -316,8 +316,10 @@ static int __init imx2_wdt_probe(struct platform_device *pdev)
 	regmap_write(wdev->regmap, IMX2_WDT_WMCR, 0);
 
 	ret = watchdog_register_device(wdog);
-	if (ret)
+	if (ret) {
+		dev_err(&pdev->dev, "cannot register watchdog device\n");
 		goto disable_clk;
+	}
 
 	dev_info(&pdev->dev, "timeout %d sec (nowayout=%d)\n",
 		 wdog->timeout, nowayout);

@@ -828,7 +828,9 @@ static int __init init_o2nm(void)
 {
 	int ret = -1;
 
-	o2hb_init();
+	ret = o2hb_init();
+	if (ret)
+		goto out;
 
 	ret = o2net_init();
 	if (ret)

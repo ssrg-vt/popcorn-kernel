@@ -88,7 +88,7 @@ static inline void mangle(struct seq_file *m, const char *s)
 static void show_type(struct seq_file *m, struct super_block *sb)
 {
 	mangle(m, sb->s_type->name);
-	if (sb->s_subtype) {
+	if (sb->s_subtype && sb->s_subtype[0]) {
 		seq_putc(m, '.');
 		mangle(m, sb->s_subtype);
 	}

@@ -33,6 +33,11 @@
 #define CREATE_TRACE_POINTS
 #include <asm/trace/exceptions.h>
 
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
+
 /*
  * Returns 0 if mmiotrace is disabled, or if the fault is not
  * handled by mmiotrace:
@@ -44,6 +49,23 @@ kmmio_fault(struct pt_regs *regs, unsigned long addr)
 		if (kmmio_handler(regs, addr) == 1)
 			return -1;
 	return 0;
+}
+
+static nokprobe_inline int kprobes_fault(struct pt_regs *regs)
+{
+	if (!kprobes_built_in())
+		return 0;
+	if (user_mode(regs))
+		return 0;
+	/*
+	 * To be potentially processing a kprobe fault and to be allowed to call
+	 * kprobe_running(), we have to be non-preemptible.
+	 */
+	if (preemptible())
+		return 0;
+	if (!kprobe_running())
+		return 0;
+	return kprobe_fault_handler(regs, X86_TRAP_PF);
 }
 
 /*
@@ -690,10 +712,6 @@ static void set_signal_archinfo(unsigned long address,
 	 * To avoid leaking information about the kernel page
 	 * table layout, pretend that user-mode accesses to
 	 * kernel addresses are always protection faults.
-	 *
-	 * NB: This means that failed vsyscalls with vsyscall=none
-	 * will have the PROT bit.  This doesn't leak any
-	 * information and does not appear to cause any problems.
 	 */
 	if (address >= TASK_SIZE_MAX)
 		error_code |= X86_PF_PROT;
@@ -740,7 +758,8 @@ no_context(struct pt_regs *regs, unsigned long error_code,
 			set_signal_archinfo(address, error_code);
 
 			/* XXX: hwpoison faults will set the wrong code. */
-			force_sig_fault(signal, si_code, (void __user *)address);
+			force_sig_fault(signal, si_code, (void __user *)address,
+					tsk);
 		}
 
 		/*
@@ -901,7 +920,7 @@ __bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
 		if (si_code == SEGV_PKUERR)
 			force_sig_pkuerr((void __user *)address, pkey);
 
-		force_sig_fault(SIGSEGV, si_code, (void __user *)address);
+		force_sig_fault(SIGSEGV, si_code, (void __user *)address, tsk);
 
 		return;
 	}
@@ -998,6 +1017,8 @@ static void
 do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
 	  vm_fault_t fault)
 {
+	struct task_struct *tsk = current;
+
 	/* Kernel mode? Handle exceptions or die: */
 	if (!(error_code & X86_PF_USER)) {
 		no_context(regs, error_code, address, SIGBUS, BUS_ADRERR);
@@ -1012,7 +1033,6 @@ do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
 
 #ifdef CONFIG_MEMORY_FAILURE
 	if (fault & (VM_FAULT_HWPOISON|VM_FAULT_HWPOISON_LARGE)) {
-		struct task_struct *tsk = current;
 		unsigned lsb = 0;
 
 		pr_err(
@@ -1022,11 +1042,11 @@ do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
 			lsb = hstate_index_to_shift(VM_FAULT_GET_HINDEX(fault));
 		if (fault & VM_FAULT_HWPOISON)
 			lsb = PAGE_SHIFT;
-		force_sig_mceerr(BUS_MCEERR_AR, (void __user *)address, lsb);
+		force_sig_mceerr(BUS_MCEERR_AR, (void __user *)address, lsb, tsk);
 		return;
 	}
 #endif
-	force_sig_fault(SIGBUS, BUS_ADRERR, (void __user *)address);
+	force_sig_fault(SIGBUS, BUS_ADRERR, (void __user *)address, tsk);
 }
 
 static noinline void
@@ -1262,7 +1282,7 @@ do_kern_addr_fault(struct pt_regs *regs, unsigned long hw_error_code,
 		return;
 
 	/* kprobes don't want to hook the spurious faults: */
-	if (kprobe_page_fault(regs, X86_TRAP_PF))
+	if (kprobes_fault(regs))
 		return;
 
 	/*
@@ -1293,7 +1313,7 @@ void do_user_addr_fault(struct pt_regs *regs,
 	mm = tsk->mm;
 
 	/* kprobes don't want to hook the spurious faults: */
-	if (unlikely(kprobe_page_fault(regs, X86_TRAP_PF)))
+	if (unlikely(kprobes_fault(regs)))
 		return;
 
 	/*
@@ -1351,18 +1371,16 @@ void do_user_addr_fault(struct pt_regs *regs,
 
 #ifdef CONFIG_X86_64
 	/*
-	 * Faults in the vsyscall page might need emulation.  The
-	 * vsyscall page is at a high address (>PAGE_OFFSET), but is
-	 * considered to be part of the user address space.
+	 * Instruction fetch faults in the vsyscall page might need
+	 * emulation.  The vsyscall page is at a high address
+	 * (>PAGE_OFFSET), but is considered to be part of the user
+	 * address space.
 	 *
 	 * The vsyscall page does not have a "real" VMA, so do this
 	 * emulation before we go searching for VMAs.
-	 *
-	 * PKRU never rejects instruction fetches, so we don't need
-	 * to consider the PF_PK bit.
 	 */
-	if (is_vsyscall_vaddr(address)) {
-		if (emulate_vsyscall(hw_error_code, regs, address))
+	if ((hw_error_code & X86_PF_INSTR) && is_vsyscall_vaddr(address)) {
+		if (emulate_vsyscall(regs, address))
 			return;
 	}
 #endif
@@ -1400,6 +1418,20 @@ retry:
 	}
 
 	vma = find_vma(mm, address);
+#ifdef CONFIG_POPCORN
+	/* vma worker should not fault */
+	BUG_ON(tsk->is_worker);
+
+	if (distributed_remote_process(tsk)) {
+		if (!vma || vma->vm_start > address) {
+			if (vma_server_fetch_vma(tsk, address) == 0) {
+				/* Replace with updated VMA */
+				vma = find_vma(mm, address);
+			}
+		}
+	}
+#endif
+	  
 	if (unlikely(!vma)) {
 		bad_area(regs, hw_error_code, address);
 		return;
@@ -1487,8 +1519,9 @@ good_area:
 NOKPROBE_SYMBOL(do_user_addr_fault);
 
 /*
- * Explicitly marked noinline such that the function tracer sees this as the
- * page_fault entry point.
+ * This routine handles page faults.  It determines the address,
+ * and the problem, and then passes it off to one of the appropriate
+ * routines.
  */
 static noinline void
 __do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
@@ -1507,27 +1540,35 @@ __do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
 }
 NOKPROBE_SYMBOL(__do_page_fault);
 
-static __always_inline void
-trace_page_fault_entries(struct pt_regs *regs, unsigned long error_code,
-			 unsigned long address)
+static nokprobe_inline void
+trace_page_fault_entries(unsigned long address, struct pt_regs *regs,
+			 unsigned long error_code)
 {
-	if (!trace_pagefault_enabled())
-		return;
-
 	if (user_mode(regs))
 		trace_page_fault_user(address, regs, error_code);
 	else
 		trace_page_fault_kernel(address, regs, error_code);
 }
 
-dotraplinkage void
-do_page_fault(struct pt_regs *regs, unsigned long error_code, unsigned long address)
+/*
+ * We must have this function blacklisted from kprobes, tagged with notrace
+ * and call read_cr2() before calling anything else. To avoid calling any
+ * kind of tracing machinery before we've observed the CR2 value.
+ *
+ * exception_{enter,exit}() contains all sorts of tracepoints.
+ */
+dotraplinkage void notrace
+do_page_fault(struct pt_regs *regs, unsigned long error_code)
 {
+	unsigned long address = read_cr2(); /* Get the faulting address */
 	enum ctx_state prev_state;
 
 	prev_state = exception_enter();
-	trace_page_fault_entries(regs, error_code, address);
+	if (trace_pagefault_enabled())
+		trace_page_fault_entries(address, regs, error_code);
+
 	__do_page_fault(regs, error_code, address);
 	exception_exit(prev_state);
 }
 NOKPROBE_SYMBOL(do_page_fault);
+

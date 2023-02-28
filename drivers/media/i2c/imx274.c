@@ -1821,7 +1821,8 @@ static const struct i2c_device_id imx274_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, imx274_id);
 
-static int imx274_probe(struct i2c_client *client)
+static int imx274_probe(struct i2c_client *client,
+			const struct i2c_device_id *id)
 {
 	struct v4l2_subdev *sd;
 	struct stimx274 *imx274;
@@ -1983,7 +1984,7 @@ static struct i2c_driver imx274_i2c_driver = {
 		.name	= DRIVER_NAME,
 		.of_match_table	= imx274_of_id_table,
 	},
-	.probe_new	= imx274_probe,
+	.probe		= imx274_probe,
 	.remove		= imx274_remove,
 	.id_table	= imx274_id,
 };

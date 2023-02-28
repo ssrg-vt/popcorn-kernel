@@ -198,6 +198,8 @@ static inline pte_t pte_mkspecial(pte_t pte) { return pte; }
 	__pgprot(pgprot_val(prot) & ~PTE_CACHEABLE)
 #define pgprot_writecombine(prot)	\
 	__pgprot(pgprot_val(prot) & ~PTE_CACHEABLE)
+#define pgprot_dmacoherent(prot)	\
+	__pgprot(pgprot_val(prot) & ~PTE_CACHEABLE)
 
 #define pmd_none(pmd)		(!pmd_val(pmd))
 #define pmd_present(pmd)	(pmd_val(pmd) & PMD_PRESENT)
@@ -284,6 +286,8 @@ extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
 #define kern_addr_valid(addr)	(1)
 
 #include <asm-generic/pgtable.h>
+
+#define pgtable_cache_init() do { } while (0)
 
 #endif /* !__ASSEMBLY__ */
 

@@ -91,8 +91,8 @@ static unsigned short pull16(unsigned char **cpp);
 struct slcompress *
 slhc_init(int rslots, int tslots)
 {
-	short i;
-	struct cstate *ts;
+	register short i;
+	register struct cstate *ts;
 	struct slcompress *comp;
 
 	if (rslots < 0 || rslots > 255 || tslots < 0 || tslots > 255)
@@ -206,7 +206,7 @@ pull16(unsigned char **cpp)
 static long
 decode(unsigned char **cpp)
 {
-	int x;
+	register int x;
 
 	x = *(*cpp)++;
 	if(x == 0){
@@ -227,14 +227,14 @@ int
 slhc_compress(struct slcompress *comp, unsigned char *icp, int isize,
 	unsigned char *ocp, unsigned char **cpp, int compress_cid)
 {
-	struct cstate *ocs = &(comp->tstate[comp->xmit_oldest]);
-	struct cstate *lcs = ocs;
-	struct cstate *cs = lcs->next;
-	unsigned long deltaS, deltaA;
-	short changes = 0;
+	register struct cstate *ocs = &(comp->tstate[comp->xmit_oldest]);
+	register struct cstate *lcs = ocs;
+	register struct cstate *cs = lcs->next;
+	register unsigned long deltaS, deltaA;
+	register short changes = 0;
 	int hlen;
 	unsigned char new_seq[16];
-	unsigned char *cp = new_seq;
+	register unsigned char *cp = new_seq;
 	struct iphdr *ip;
 	struct tcphdr *th, *oth;
 	__sum16 csum;
@@ -486,11 +486,11 @@ uncompressed:
 int
 slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 {
-	int changes;
+	register int changes;
 	long x;
-	struct tcphdr *thp;
-	struct iphdr *ip;
-	struct cstate *cs;
+	register struct tcphdr *thp;
+	register struct iphdr *ip;
+	register struct cstate *cs;
 	int len, hdrlen;
 	unsigned char *cp = icp;
 
@@ -543,7 +543,7 @@ slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 	switch(changes & SPECIALS_MASK){
 	case SPECIAL_I:		/* Echoed terminal traffic */
 		{
-		short i;
+		register short i;
 		i = ntohs(ip->tot_len) - hdrlen;
 		thp->ack_seq = htonl( ntohl(thp->ack_seq) + i);
 		thp->seq = htonl( ntohl(thp->seq) + i);
@@ -637,7 +637,7 @@ bad:
 int
 slhc_remember(struct slcompress *comp, unsigned char *icp, int isize)
 {
-	struct cstate *cs;
+	register struct cstate *cs;
 	unsigned ihl;
 
 	unsigned char index;

@@ -4,3 +4,4 @@
 #include <linux/module.h>
 
 EXPORT_SYMBOL(memcpy);
+EXPORT_SYMBOL(memset);

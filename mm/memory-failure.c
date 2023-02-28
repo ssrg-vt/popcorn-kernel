@@ -199,6 +199,7 @@ struct to_kill {
 	struct task_struct *tsk;
 	unsigned long addr;
 	short size_shift;
+	char addr_valid;
 };
 
 /*
@@ -212,12 +213,12 @@ static int kill_proc(struct to_kill *tk, unsigned long pfn, int flags)
 	short addr_lsb = tk->size_shift;
 	int ret;
 
-	pr_err("Memory failure: %#lx: Sending SIGBUS to %s:%d due to hardware memory corruption\n",
+	pr_err("Memory failure: %#lx: Killing %s:%d due to hardware memory corruption\n",
 		pfn, t->comm, t->pid);
 
 	if ((flags & MF_ACTION_REQUIRED) && t->mm == current->mm) {
 		ret = force_sig_mceerr(BUS_MCEERR_AR, (void __user *)tk->addr,
-				       addr_lsb);
+				       addr_lsb, current);
 	} else {
 		/*
 		 * Don't use force here, it's convenient if the signal
@@ -323,27 +324,22 @@ static void add_to_kill(struct task_struct *tsk, struct page *p,
 		}
 	}
 	tk->addr = page_address_in_vma(p, vma);
+	tk->addr_valid = 1;
 	if (is_zone_device_page(p))
 		tk->size_shift = dev_pagemap_mapping_shift(p, vma);
 	else
 		tk->size_shift = compound_order(compound_head(p)) + PAGE_SHIFT;
 
 	/*
-	 * Send SIGKILL if "tk->addr == -EFAULT". Also, as
-	 * "tk->size_shift" is always non-zero for !is_zone_device_page(),
-	 * so "tk->size_shift == 0" effectively checks no mapping on
-	 * ZONE_DEVICE. Indeed, when a devdax page is mmapped N times
-	 * to a process' address space, it's possible not all N VMAs
-	 * contain mappings for the page, but at least one VMA does.
-	 * Only deliver SIGBUS with payload derived from the VMA that
-	 * has a mapping for the page.
+	 * In theory we don't have to kill when the page was
+	 * munmaped. But it could be also a mremap. Since that's
+	 * likely very rare kill anyways just out of paranoia, but use
+	 * a SIGKILL because the error is not contained anymore.
 	 */
-	if (tk->addr == -EFAULT) {
+	if (tk->addr == -EFAULT || tk->size_shift == 0) {
 		pr_info("Memory failure: Unable to find user space address %lx in %s\n",
 			page_to_pfn(p), tsk->comm);
-	} else if (tk->size_shift == 0) {
-		kfree(tk);
-		return;
+		tk->addr_valid = 0;
 	}
 	get_task_struct(tsk);
 	tk->tsk = tsk;
@@ -370,7 +366,7 @@ static void kill_procs(struct list_head *to_kill, int forcekill, bool fail,
 			 * make sure the process doesn't catch the
 			 * signal and then access the memory. Just kill it.
 			 */
-			if (fail || tk->addr == -EFAULT) {
+			if (fail || tk->addr_valid == 0) {
 				pr_err("Memory failure: %#lx: forcibly killing %s:%d because of failure to unmap corrupted page\n",
 				       pfn, tk->tsk->comm, tk->tsk->pid);
 				do_send_sig_info(SIGKILL, SEND_SIG_PRIV,
@@ -1181,12 +1177,16 @@ static int memory_failure_dev_pagemap(unsigned long pfn, int flags,
 		goto unlock;
 	}
 
-	if (pgmap->type == MEMORY_DEVICE_PRIVATE) {
+	switch (pgmap->type) {
+	case MEMORY_DEVICE_PRIVATE:
+	case MEMORY_DEVICE_PUBLIC:
 		/*
 		 * TODO: Handle HMM pages which may need coordination
 		 * with device-side memory.
 		 */
 		goto unlock;
+	default:
+		break;
 	}
 
 	/*
@@ -1257,19 +1257,17 @@ int memory_failure(unsigned long pfn, int flags)
 	if (!sysctl_memory_failure_recovery)
 		panic("Memory failure on page %lx", pfn);
 
-	p = pfn_to_online_page(pfn);
-	if (!p) {
-		if (pfn_valid(pfn)) {
-			pgmap = get_dev_pagemap(pfn, NULL);
-			if (pgmap)
-				return memory_failure_dev_pagemap(pfn, flags,
-								  pgmap);
-		}
+	if (!pfn_valid(pfn)) {
 		pr_err("Memory failure: %#lx: memory outside kernel control\n",
 			pfn);
 		return -ENXIO;
 	}
 
+	pgmap = get_dev_pagemap(pfn, NULL);
+	if (pgmap)
+		return memory_failure_dev_pagemap(pfn, flags, pgmap);
+
+	p = pfn_to_page(pfn);
 	if (PageHuge(p))
 		return memory_failure_hugetlb(pfn, flags);
 	if (TestSetPageHWPoison(p)) {

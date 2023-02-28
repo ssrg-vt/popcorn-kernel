@@ -3,12 +3,13 @@
 #define __PERF_SYMBOL 1
 
 #include <linux/types.h>
-#include <linux/refcount.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <linux/list.h>
 #include <linux/rbtree.h>
 #include <stdio.h>
+#include "map_symbol.h"
+#include "branch.h"
 #include "path.h"
 #include "symbol_conf.h"
 
@@ -18,7 +19,8 @@
 #endif
 #include <elf.h>
 
-struct dso;
+#include "dso.h"
+
 struct map;
 struct map_groups;
 struct option;
@@ -37,6 +39,15 @@ struct option;
 Elf_Scn *elf_section_by_name(Elf *elf, GElf_Ehdr *ep,
 			     GElf_Shdr *shp, const char *name, size_t *idx);
 #endif
+
+#ifndef DMGL_PARAMS
+#define DMGL_NO_OPTS     0              /* For readability... */
+#define DMGL_PARAMS      (1 << 0)       /* Include function args */
+#define DMGL_ANSI        (1 << 1)       /* Include const, volatile, etc */
+#endif
+
+#define DSO__NAME_KALLSYMS	"[kernel.kallsyms]"
+#define DSO__NAME_KCORE		"[kernel.kcore]"
 
 /** struct symbol - symtab entry
  *
@@ -105,14 +116,18 @@ struct ref_reloc_sym {
 	u64		unrelocated_addr;
 };
 
-struct block_info {
-	struct symbol		*sym;
-	u64			start;
-	u64			end;
-	u64			cycles;
-	u64			cycles_aggr;
-	int			num;
-	int			num_aggr;
+struct branch_info {
+	struct addr_map_symbol from;
+	struct addr_map_symbol to;
+	struct branch_flags flags;
+	char			*srcline_from;
+	char			*srcline_to;
+};
+
+struct mem_info {
+	struct addr_map_symbol	iaddr;
+	struct addr_map_symbol	daddr;
+	union perf_mem_data_src	data_src;
 	refcount_t		refcnt;
 };
 
@@ -129,6 +144,37 @@ struct addr_location {
 	s32	      cpu;
 	s32	      socket;
 };
+
+struct symsrc {
+	char *name;
+	int fd;
+	enum dso_binary_type type;
+
+#ifdef HAVE_LIBELF_SUPPORT
+	Elf *elf;
+	GElf_Ehdr ehdr;
+
+	Elf_Scn *opdsec;
+	size_t opdidx;
+	GElf_Shdr opdshdr;
+
+	Elf_Scn *symtab;
+	GElf_Shdr symshdr;
+
+	Elf_Scn *dynsym;
+	size_t dynsym_idx;
+	GElf_Shdr dynshdr;
+
+	bool adjust_symbols;
+	bool is_64_bit;
+#endif
+};
+
+void symsrc__destroy(struct symsrc *ss);
+int symsrc__init(struct symsrc *ss, struct dso *dso, const char *name,
+		 enum dso_binary_type type);
+bool symsrc__has_symtab(struct symsrc *ss);
+bool symsrc__possibly_runtime(struct symsrc *ss);
 
 int dso__load(struct dso *dso, struct map *map);
 int dso__load_vmlinux(struct dso *dso, struct map *map,
@@ -182,8 +228,6 @@ bool symbol__restricted_filename(const char *filename,
 				 const char *restricted_filename);
 int symbol__config_symfs(const struct option *opt __maybe_unused,
 			 const char *dir, int unset __maybe_unused);
-
-struct symsrc;
 
 int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
 		  struct symsrc *runtime_ss, int kmodule);
@@ -288,17 +332,5 @@ static inline void __mem_info__zput(struct mem_info **mi)
 }
 
 #define mem_info__zput(mi) __mem_info__zput(&mi)
-
-struct block_info *block_info__new(void);
-struct block_info *block_info__get(struct block_info *bi);
-void   block_info__put(struct block_info *bi);
-
-static inline void __block_info__zput(struct block_info **bi)
-{
-	block_info__put(*bi);
-	*bi = NULL;
-}
-
-#define block_info__zput(bi) __block_info__zput(&bi)
 
 #endif /* __PERF_SYMBOL */

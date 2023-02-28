@@ -4,7 +4,7 @@
  * Author: Alex Smith <alex.smith@imgtec.com>
  */
 
-#include <asm/vdso/vdso.h>
+#include "vdso.h"
 
 #include <asm/isa-rev.h>
 

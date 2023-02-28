@@ -232,8 +232,10 @@ static int hix5hd2_ir_probe(struct platform_device *pdev)
 		return PTR_ERR(priv->base);
 
 	priv->irq = platform_get_irq(pdev, 0);
-	if (priv->irq < 0)
+	if (priv->irq < 0) {
+		dev_err(dev, "irq can not get\n");
 		return priv->irq;
+	}
 
 	rdev = rc_allocate_device(RC_DRIVER_IR_RAW);
 	if (!rdev)

@@ -18,7 +18,10 @@
 #include <asm/ptrace.h>
 #include <asm/tlbflush.h>
 
-#include "../kernel/head.h"
+#ifdef CONFIG_POPCORN
+#include <popcorn/types.h>
+#include <popcorn/vma_server.h>
+#endif
 
 /*
  * This routine handles page faults.  It determines the address and the
@@ -71,6 +74,21 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 retry:
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, addr);
+
+#ifdef CONFIG_POPCORN
+	/* vma worker should not fault */
+	BUG_ON(tsk->is_worker);
+
+	if (distributed_remote_process(tsk)) {
+		if (!vma || vma->vm_start > addr) {
+			if (vma_server_fetch_vma(tsk, addr) == 0) {
+				/* Replace with updated VMA */
+				vma = find_vma(mm, addr);
+			}
+		}
+	}
+#endif
+
 	if (unlikely(!vma))
 		goto bad_area;
 	if (likely(vma->vm_start <= addr))
@@ -160,6 +178,11 @@ good_area:
 		}
 	}
 
+#ifdef CONFIG_POPCORN
+	if (distributed_process(current) && (fault & VM_FAULT_RETRY))
+		return;
+#endif
+
 	up_read(&mm->mmap_sem);
 	return;
 
@@ -171,7 +194,7 @@ bad_area:
 	up_read(&mm->mmap_sem);
 	/* User mode accesses just cause a SIGSEGV */
 	if (user_mode(regs)) {
-		do_trap(regs, SIGSEGV, code, addr);
+		do_trap(regs, SIGSEGV, code, addr, tsk);
 		return;
 	}
 
@@ -207,7 +230,7 @@ do_sigbus:
 	/* Kernel mode? Handle exceptions or die */
 	if (!user_mode(regs))
 		goto no_context;
-	do_trap(regs, SIGBUS, BUS_ADRERR, addr);
+	do_trap(regs, SIGBUS, BUS_ADRERR, addr, tsk);
 	return;
 
 vmalloc_fault:
@@ -221,7 +244,7 @@ vmalloc_fault:
 
 		/* User mode accesses just cause a SIGSEGV */
 		if (user_mode(regs))
-			return do_trap(regs, SIGSEGV, code, addr);
+			return do_trap(regs, SIGSEGV, code, addr, tsk);
 
 		/*
 		 * Synchronize this task's top level page-table

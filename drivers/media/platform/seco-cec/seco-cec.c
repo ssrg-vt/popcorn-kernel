@@ -18,7 +18,7 @@
 #include <linux/platform_device.h>
 
 /* CEC Framework */
-#include <media/cec-notifier.h>
+#include <media/cec.h>
 
 #include "seco-cec.h"
 
@@ -507,10 +507,10 @@ err:
 }
 
 struct cec_dmi_match {
-	const char *sys_vendor;
-	const char *product_name;
-	const char *devname;
-	const char *conn;
+	char *sys_vendor;
+	char *product_name;
+	char *devname;
+	char *conn;
 };
 
 static const struct cec_dmi_match secocec_dmi_match_table[] = {
@@ -518,8 +518,7 @@ static const struct cec_dmi_match secocec_dmi_match_table[] = {
 	{ "SECO", "UDOO x86", "0000:00:02.0", "Port B" },
 };
 
-static struct device *secocec_cec_find_hdmi_dev(struct device *dev,
-						const char **conn)
+static int secocec_cec_get_notifier(struct cec_notifier **notify)
 {
 	int i;
 
@@ -534,15 +533,16 @@ static struct device *secocec_cec_find_hdmi_dev(struct device *dev,
 			d = bus_find_device_by_name(&pci_bus_type, NULL,
 						    m->devname);
 			if (!d)
-				return ERR_PTR(-EPROBE_DEFER);
+				return -EPROBE_DEFER;
 
+			*notify = cec_notifier_get_conn(d, m->conn);
 			put_device(d);
-			*conn = m->conn;
-			return d;
+
+			return 0;
 		}
 	}
 
-	return ERR_PTR(-EINVAL);
+	return -EINVAL;
 }
 
 static int secocec_acpi_probe(struct secocec_data *sdev)
@@ -573,14 +573,8 @@ static int secocec_probe(struct platform_device *pdev)
 {
 	struct secocec_data *secocec;
 	struct device *dev = &pdev->dev;
-	struct device *hdmi_dev;
-	const char *conn = NULL;
 	int ret;
 	u16 val;
-
-	hdmi_dev = secocec_cec_find_hdmi_dev(&pdev->dev, &conn);
-	if (IS_ERR(hdmi_dev))
-		return PTR_ERR(hdmi_dev);
 
 	secocec = devm_kzalloc(dev, sizeof(*secocec), GFP_KERNEL);
 	if (!secocec)
@@ -623,6 +617,12 @@ static int secocec_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+	ret = secocec_cec_get_notifier(&secocec->notifier);
+	if (ret) {
+		dev_err(dev, "no CEC notifier available\n");
+		goto err;
+	}
+
 	ret = devm_request_threaded_irq(dev,
 					secocec->irq,
 					NULL,
@@ -640,8 +640,7 @@ static int secocec_probe(struct platform_device *pdev)
 	secocec->cec_adap = cec_allocate_adapter(&secocec_cec_adap_ops,
 						 secocec,
 						 dev_name(dev),
-						 CEC_CAP_DEFAULTS |
-						 CEC_CAP_CONNECTOR_INFO,
+						 CEC_CAP_DEFAULTS,
 						 SECOCEC_MAX_ADDRS);
 
 	if (IS_ERR(secocec->cec_adap)) {
@@ -649,20 +648,16 @@ static int secocec_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	secocec->notifier = cec_notifier_cec_adap_register(hdmi_dev, conn,
-							   secocec->cec_adap);
-	if (!secocec->notifier) {
-		ret = -ENOMEM;
-		goto err_delete_adapter;
-	}
-
 	ret = cec_register_adapter(secocec->cec_adap, dev);
 	if (ret)
-		goto err_notifier;
+		goto err_delete_adapter;
+
+	if (secocec->notifier)
+		cec_register_cec_notifier(secocec->cec_adap, secocec->notifier);
 
 	ret = secocec_ir_probe(secocec);
 	if (ret)
-		goto err_notifier;
+		goto err_delete_adapter;
 
 	platform_set_drvdata(pdev, secocec);
 
@@ -670,8 +665,6 @@ static int secocec_probe(struct platform_device *pdev)
 
 	return ret;
 
-err_notifier:
-	cec_notifier_cec_adap_unregister(secocec->notifier);
 err_delete_adapter:
 	cec_delete_adapter(secocec->cec_adap);
 err:
@@ -692,8 +685,10 @@ static int secocec_remove(struct platform_device *pdev)
 
 		dev_dbg(&pdev->dev, "IR disabled");
 	}
-	cec_notifier_cec_adap_unregister(secocec->notifier);
 	cec_unregister_adapter(secocec->cec_adap);
+
+	if (secocec->notifier)
+		cec_notifier_put(secocec->notifier);
 
 	release_region(BRA_SMB_BASE_ADDR, 7);
 

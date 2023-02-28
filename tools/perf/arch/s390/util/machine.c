@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-#include <internal/lib.h> // page_size
+#include "util.h"
 #include "machine.h"
 #include "api/fs/fs.h"
 #include "debug.h"

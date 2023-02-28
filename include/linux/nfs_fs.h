@@ -223,8 +223,6 @@ struct nfs4_copy_state {
 #define NFS_INO_INVALID_MTIME	BIT(10)		/* cached mtime is invalid */
 #define NFS_INO_INVALID_SIZE	BIT(11)		/* cached size is invalid */
 #define NFS_INO_INVALID_OTHER	BIT(12)		/* other attrs are invalid */
-#define NFS_INO_DATA_INVAL_DEFER	\
-				BIT(13)		/* Deferred cache invalidation */
 
 #define NFS_INO_INVALID_ATTR	(NFS_INO_INVALID_CHANGE \
 		| NFS_INO_INVALID_CTIME \
@@ -490,9 +488,6 @@ extern const struct file_operations nfs_dir_operations;
 extern const struct dentry_operations nfs_dentry_operations;
 
 extern void nfs_force_lookup_revalidate(struct inode *dir);
-extern struct dentry *nfs_add_or_obtain(struct dentry *dentry,
-			struct nfs_fh *fh, struct nfs_fattr *fattr,
-			struct nfs4_label *label);
 extern int nfs_instantiate(struct dentry *dentry, struct nfs_fh *fh,
 			struct nfs_fattr *fattr, struct nfs4_label *label);
 extern int nfs_may_open(struct inode *inode, const struct cred *cred, int openflags);

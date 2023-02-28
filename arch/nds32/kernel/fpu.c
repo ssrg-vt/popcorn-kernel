@@ -243,7 +243,7 @@ inline void handle_fpu_exception(struct pt_regs *regs)
 	}
 
 	force_sig_fault(si_signo, si_code,
-			(void __user *)instruction_pointer(regs));
+			(void __user *)instruction_pointer(regs), current);
 done:
 	own_fpu();
 }

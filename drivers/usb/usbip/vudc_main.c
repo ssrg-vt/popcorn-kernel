@@ -22,7 +22,6 @@ static struct platform_driver vudc_driver = {
 	.remove		= vudc_remove,
 	.driver		= {
 		.name	= GADGET_NAME,
-		.dev_groups = vudc_groups,
 	},
 };
 

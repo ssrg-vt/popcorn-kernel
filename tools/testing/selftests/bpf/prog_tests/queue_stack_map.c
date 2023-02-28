@@ -27,8 +27,10 @@ static void test_queue_stack_map_by_type(int type)
 		return;
 
 	err = bpf_prog_load(file, BPF_PROG_TYPE_SCHED_CLS, &obj, &prog_fd);
-	if (CHECK_FAIL(err))
+	if (err) {
+		error_cnt++;
 		return;
+	}
 
 	map_in_fd = bpf_find_map(__func__, obj, "map_in");
 	if (map_in_fd < 0)
@@ -41,8 +43,10 @@ static void test_queue_stack_map_by_type(int type)
 	/* Push 32 elements to the input map */
 	for (i = 0; i < MAP_SIZE; i++) {
 		err = bpf_map_update_elem(map_in_fd, NULL, &vals[i], 0);
-		if (CHECK_FAIL(err))
+		if (err) {
+			error_cnt++;
 			goto out;
+		}
 	}
 
 	/* The eBPF program pushes iph.saddr in the output map,

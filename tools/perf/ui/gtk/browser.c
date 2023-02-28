@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
+#include "../evlist.h"
+#include "../cache.h"
 #include "../evsel.h"
 #include "../sort.h"
 #include "../hist.h"

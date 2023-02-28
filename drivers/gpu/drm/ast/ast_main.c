@@ -25,17 +25,12 @@
 /*
  * Authors: Dave Airlie <airlied@redhat.com>
  */
-
-#include <linux/pci.h>
-
-#include <drm/drm_crtc_helper.h>
-#include <drm/drm_fb_helper.h>
-#include <drm/drm_gem.h>
-#include <drm/drm_gem_framebuffer_helper.h>
-#include <drm/drm_gem_vram_helper.h>
-#include <drm/drm_vram_mm_helper.h>
-
+#include <drm/drmP.h>
 #include "ast_drv.h"
+
+
+#include <drm/drm_fb_helper.h>
+#include <drm/drm_crtc_helper.h>
 
 void ast_set_index_reg_mask(struct ast_private *ast,
 			    uint32_t base, uint8_t index,
@@ -388,8 +383,67 @@ static int ast_get_dram_info(struct drm_device *dev)
 	return 0;
 }
 
+static void ast_user_framebuffer_destroy(struct drm_framebuffer *fb)
+{
+	struct ast_framebuffer *ast_fb = to_ast_framebuffer(fb);
+
+	drm_gem_object_put_unlocked(ast_fb->obj);
+	drm_framebuffer_cleanup(fb);
+	kfree(ast_fb);
+}
+
+static const struct drm_framebuffer_funcs ast_fb_funcs = {
+	.destroy = ast_user_framebuffer_destroy,
+};
+
+
+int ast_framebuffer_init(struct drm_device *dev,
+			 struct ast_framebuffer *ast_fb,
+			 const struct drm_mode_fb_cmd2 *mode_cmd,
+			 struct drm_gem_object *obj)
+{
+	int ret;
+
+	drm_helper_mode_fill_fb_struct(dev, &ast_fb->base, mode_cmd);
+	ast_fb->obj = obj;
+	ret = drm_framebuffer_init(dev, &ast_fb->base, &ast_fb_funcs);
+	if (ret) {
+		DRM_ERROR("framebuffer init failed %d\n", ret);
+		return ret;
+	}
+	return 0;
+}
+
+static struct drm_framebuffer *
+ast_user_framebuffer_create(struct drm_device *dev,
+	       struct drm_file *filp,
+	       const struct drm_mode_fb_cmd2 *mode_cmd)
+{
+	struct drm_gem_object *obj;
+	struct ast_framebuffer *ast_fb;
+	int ret;
+
+	obj = drm_gem_object_lookup(filp, mode_cmd->handles[0]);
+	if (obj == NULL)
+		return ERR_PTR(-ENOENT);
+
+	ast_fb = kzalloc(sizeof(*ast_fb), GFP_KERNEL);
+	if (!ast_fb) {
+		drm_gem_object_put_unlocked(obj);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	ret = ast_framebuffer_init(dev, ast_fb, mode_cmd, obj);
+	if (ret) {
+		drm_gem_object_put_unlocked(obj);
+		kfree(ast_fb);
+		return ERR_PTR(ret);
+	}
+	return &ast_fb->base;
+}
+
 static const struct drm_mode_config_funcs ast_mode_funcs = {
-	.fb_create = drm_gem_fb_create
+	.fb_create = ast_user_framebuffer_create,
 };
 
 static u32 ast_get_vram_info(struct drm_device *dev)
@@ -507,7 +561,7 @@ int ast_driver_load(struct drm_device *dev, unsigned long flags)
 	if (ret)
 		goto out_free;
 
-	ret = drm_fbdev_generic_setup(dev, 32);
+	ret = ast_fbdev_init(dev);
 	if (ret)
 		goto out_free;
 
@@ -528,6 +582,7 @@ void ast_driver_unload(struct drm_device *dev)
 	ast_release_firmware(dev);
 	kfree(ast->dp501_fw_addr);
 	ast_mode_fini(dev);
+	ast_fbdev_fini(dev);
 	drm_mode_config_cleanup(dev);
 
 	ast_mm_fini(ast);
@@ -541,7 +596,7 @@ int ast_gem_create(struct drm_device *dev,
 		   u32 size, bool iskernel,
 		   struct drm_gem_object **obj)
 {
-	struct drm_gem_vram_object *gbo;
+	struct ast_bo *astbo;
 	int ret;
 
 	*obj = NULL;
@@ -550,13 +605,80 @@ int ast_gem_create(struct drm_device *dev,
 	if (size == 0)
 		return -EINVAL;
 
-	gbo = drm_gem_vram_create(dev, &dev->vram_mm->bdev, size, 0, false);
-	if (IS_ERR(gbo)) {
-		ret = PTR_ERR(gbo);
+	ret = ast_bo_create(dev, size, 0, 0, &astbo);
+	if (ret) {
 		if (ret != -ERESTARTSYS)
 			DRM_ERROR("failed to allocate GEM object\n");
 		return ret;
 	}
-	*obj = &gbo->bo.base;
+	*obj = &astbo->gem;
 	return 0;
 }
+
+int ast_dumb_create(struct drm_file *file,
+		    struct drm_device *dev,
+		    struct drm_mode_create_dumb *args)
+{
+	int ret;
+	struct drm_gem_object *gobj;
+	u32 handle;
+
+	args->pitch = args->width * ((args->bpp + 7) / 8);
+	args->size = args->pitch * args->height;
+
+	ret = ast_gem_create(dev, args->size, false,
+			     &gobj);
+	if (ret)
+		return ret;
+
+	ret = drm_gem_handle_create(file, gobj, &handle);
+	drm_gem_object_put_unlocked(gobj);
+	if (ret)
+		return ret;
+
+	args->handle = handle;
+	return 0;
+}
+
+static void ast_bo_unref(struct ast_bo **bo)
+{
+	if ((*bo) == NULL)
+		return;
+	ttm_bo_put(&((*bo)->bo));
+	*bo = NULL;
+}
+
+void ast_gem_free_object(struct drm_gem_object *obj)
+{
+	struct ast_bo *ast_bo = gem_to_ast_bo(obj);
+
+	ast_bo_unref(&ast_bo);
+}
+
+
+static inline u64 ast_bo_mmap_offset(struct ast_bo *bo)
+{
+	return drm_vma_node_offset_addr(&bo->bo.vma_node);
+}
+int
+ast_dumb_mmap_offset(struct drm_file *file,
+		     struct drm_device *dev,
+		     uint32_t handle,
+		     uint64_t *offset)
+{
+	struct drm_gem_object *obj;
+	struct ast_bo *bo;
+
+	obj = drm_gem_object_lookup(file, handle);
+	if (obj == NULL)
+		return -ENOENT;
+
+	bo = gem_to_ast_bo(obj);
+	*offset = ast_bo_mmap_offset(bo);
+
+	drm_gem_object_put_unlocked(obj);
+
+	return 0;
+
+}
+

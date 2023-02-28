@@ -113,13 +113,28 @@ static int graph_get_dai_id(struct device_node *ep)
 
 static int asoc_simple_parse_dai(struct device_node *ep,
 				 struct snd_soc_dai_link_component *dlc,
+				 struct device_node **dai_of_node,
+				 const char **dai_name,
 				 int *is_single_link)
 {
 	struct device_node *node;
 	struct of_phandle_args args;
 	int ret;
 
+	/*
+	 * Use snd_soc_dai_link_component instead of legacy style.
+	 * It is only for codec, but cpu will be supported in the future.
+	 * see
+	 *	soc-core.c :: snd_soc_init_multicodec()
+	 */
+	if (dlc) {
+		dai_name	= &dlc->dai_name;
+		dai_of_node	= &dlc->of_node;
+	}
+
 	if (!ep)
+		return 0;
+	if (!dai_name)
 		return 0;
 
 	node = of_graph_get_port_parent(ep);
@@ -129,30 +144,11 @@ static int asoc_simple_parse_dai(struct device_node *ep,
 	args.args[0]	= graph_get_dai_id(ep);
 	args.args_count	= (of_graph_get_endpoint_count(node) > 1);
 
-	/*
-	 * FIXME
-	 *
-	 * Here, dlc->dai_name is pointer to CPU/Codec DAI name.
-	 * If user unbinded CPU or Codec driver, but not for Sound Card,
-	 * dlc->dai_name is keeping unbinded CPU or Codec
-	 * driver's pointer.
-	 *
-	 * If user re-bind CPU or Codec driver again, ALSA SoC will try
-	 * to rebind Card via snd_soc_try_rebind_card(), but because of
-	 * above reason, it might can't bind Sound Card.
-	 * Because Sound Card is pointing to released dai_name pointer.
-	 *
-	 * To avoid this rebind Card issue,
-	 * 1) It needs to alloc memory to keep dai_name eventhough
-	 *    CPU or Codec driver was unbinded, or
-	 * 2) user need to rebind Sound Card everytime
-	 *    if he unbinded CPU or Codec.
-	 */
-	ret = snd_soc_get_dai_name(&args, &dlc->dai_name);
+	ret = snd_soc_get_dai_name(&args, dai_name);
 	if (ret < 0)
 		return ret;
 
-	dlc->of_node = node;
+	*dai_of_node = node;
 
 	if (is_single_link)
 		*is_single_link = of_graph_get_endpoint_count(node) == 1;
@@ -213,7 +209,6 @@ static int graph_dai_link_of_dpcm(struct asoc_simple_priv *priv,
 	struct device_node *ports;
 	struct device_node *node;
 	struct asoc_simple_dai *dai;
-	struct snd_soc_dai_link_component *cpus = dai_link->cpus;
 	struct snd_soc_dai_link_component *codecs = dai_link->codecs;
 	int ret;
 
@@ -254,7 +249,7 @@ static int graph_dai_link_of_dpcm(struct asoc_simple_priv *priv,
 
 		ret = asoc_simple_set_dailink_name(dev, dai_link,
 						   "fe.%s",
-						   cpus->dai_name);
+						   dai_link->cpu_dai_name);
 		if (ret < 0)
 			goto out_put_node;
 
@@ -264,9 +259,9 @@ static int graph_dai_link_of_dpcm(struct asoc_simple_priv *priv,
 		struct snd_soc_codec_conf *cconf;
 
 		/* FE is dummy */
-		cpus->of_node		= NULL;
-		cpus->dai_name		= "snd-soc-dummy-dai";
-		cpus->name		= "snd-soc-dummy";
+		dai_link->cpu_of_node		= NULL;
+		dai_link->cpu_dai_name		= "snd-soc-dummy-dai";
+		dai_link->cpu_name		= "snd-soc-dummy";
 
 		/* BE settings */
 		dai_link->no_pcm		= 1;
@@ -390,7 +385,7 @@ static int graph_dai_link_of(struct asoc_simple_priv *priv,
 
 	ret = asoc_simple_set_dailink_name(dev, dai_link,
 					   "%s-%s",
-					   dai_link->cpus->dai_name,
+					   dai_link->cpu_dai_name,
 					   dai_link->codecs->dai_name);
 	if (ret < 0)
 		return ret;

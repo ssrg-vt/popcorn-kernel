@@ -569,7 +569,9 @@ static int nx_register_algs(void)
 
 	memset(&nx_driver.stats, 0, sizeof(struct nx_stats));
 
-	NX_DEBUGFS_INIT(&nx_driver);
+	rc = NX_DEBUGFS_INIT(&nx_driver);
+	if (rc)
+		goto out;
 
 	nx_driver.of.status = NX_OKAY;
 

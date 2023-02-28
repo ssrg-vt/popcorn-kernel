@@ -137,8 +137,6 @@ COND_SYSCALL(capset);
 /* kernel/exit.c */
 
 /* kernel/fork.c */
-/* __ARCH_WANT_SYS_CLONE3 */
-COND_SYSCALL(clone3);
 
 /* kernel/futex.c */
 COND_SYSCALL(futex);

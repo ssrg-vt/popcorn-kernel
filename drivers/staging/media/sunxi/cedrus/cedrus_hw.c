@@ -46,10 +46,6 @@ int cedrus_engine_enable(struct cedrus_dev *dev, enum cedrus_codec codec)
 		reg |= VE_MODE_DEC_MPEG;
 		break;
 
-	case CEDRUS_CODEC_H264:
-		reg |= VE_MODE_DEC_H264;
-		break;
-
 	default:
 		return -EINVAL;
 	}
@@ -78,6 +74,9 @@ void cedrus_dst_format_set(struct cedrus_dev *dev,
 
 		reg = VE_PRIMARY_OUT_FMT_NV12;
 		cedrus_write(dev, VE_PRIMARY_OUT_FMT, reg);
+
+		reg = VE_CHROMA_BUF_LEN_SDRT(chroma_size / 2);
+		cedrus_write(dev, VE_CHROMA_BUF_LEN, reg);
 
 		reg = chroma_size / 2;
 		cedrus_write(dev, VE_PRIMARY_CHROMA_BUF_LEN, reg);
@@ -157,8 +156,11 @@ int cedrus_hw_probe(struct cedrus_dev *dev)
 	dev->capabilities = variant->capabilities;
 
 	irq_dec = platform_get_irq(dev->pdev, 0);
-	if (irq_dec <= 0)
+	if (irq_dec <= 0) {
+		dev_err(dev->dev, "Failed to get IRQ\n");
+
 		return irq_dec;
+	}
 	ret = devm_request_irq(dev->dev, irq_dec, cedrus_irq,
 			       0, dev_name(dev->dev), dev);
 	if (ret) {
@@ -234,7 +236,7 @@ int cedrus_hw_probe(struct cedrus_dev *dev)
 		goto err_sram;
 	}
 
-	ret = clk_set_rate(dev->mod_clk, variant->mod_rate);
+	ret = clk_set_rate(dev->mod_clk, CEDRUS_CLOCK_RATE_DEFAULT);
 	if (ret) {
 		dev_err(dev->dev, "Failed to set clock rate\n");
 

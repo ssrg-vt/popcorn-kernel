@@ -42,7 +42,6 @@
 
 #ifndef SVC_RDMA_H
 #define SVC_RDMA_H
-#include <linux/llist.h>
 #include <linux/sunrpc/xdr.h>
 #include <linux/sunrpc/svcsock.h>
 #include <linux/sunrpc/rpc_rdma.h>
@@ -108,7 +107,8 @@ struct svcxprt_rdma {
 	struct list_head     sc_read_complete_q;
 	struct work_struct   sc_work;
 
-	struct llist_head    sc_recv_ctxts;
+	spinlock_t	     sc_recv_lock;
+	struct list_head     sc_recv_ctxts;
 };
 /* sc_flags */
 #define RDMAXPRT_CONN_PENDING	3
@@ -125,7 +125,6 @@ enum {
 #define RPCSVC_MAXPAYLOAD_RDMA	RPCSVC_MAXPAYLOAD
 
 struct svc_rdma_recv_ctxt {
-	struct llist_node	rc_node;
 	struct list_head	rc_list;
 	struct ib_recv_wr	rc_recv_wr;
 	struct ib_cqe		rc_cqe;
@@ -201,6 +200,7 @@ extern struct svc_xprt_class svc_rdma_bc_class;
 #endif
 
 /* svc_rdma.c */
+extern struct workqueue_struct *svc_rdma_wq;
 extern int svc_rdma_init(void);
 extern void svc_rdma_cleanup(void);
 

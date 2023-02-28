@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include "intlist.h"
 #include "probe-event.h"
-#include <linux/ctype.h>
+#include "sane_ctype.h"
 
 #define MAX_PROBE_BUFFER	1024
 #define MAX_PROBES		 128

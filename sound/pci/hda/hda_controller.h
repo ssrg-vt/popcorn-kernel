@@ -133,9 +133,11 @@ struct azx {
 
 	/* flags */
 	int bdl_pos_adj;
+	int poll_count;
 	unsigned int running:1;
 	unsigned int fallback_to_single_cmd:1;
 	unsigned int single_cmd:1;
+	unsigned int polling_mode:1;
 	unsigned int msi:1;
 	unsigned int probing:1; /* codec probing phase */
 	unsigned int snoop:1;
@@ -206,7 +208,8 @@ void azx_stop_chip(struct azx *chip);
 irqreturn_t azx_interrupt(int irq, void *dev_id);
 
 /* Codec interface */
-int azx_bus_init(struct azx *chip, const char *model);
+int azx_bus_init(struct azx *chip, const char *model,
+		 const struct hdac_io_ops *io_ops);
 int azx_probe_codecs(struct azx *chip, unsigned int max_slots);
 int azx_codec_configure(struct azx *chip);
 int azx_init_streams(struct azx *chip);

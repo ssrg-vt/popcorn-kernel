@@ -20,11 +20,8 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  *
  */
-
 #include <linux/firmware.h>
-#include <linux/module.h>
-#include <linux/pci.h>
-
+#include <drm/drmP.h>
 #include <drm/drm_cache.h>
 #include "amdgpu.h"
 #include "gmc_v8_0.h"
@@ -292,7 +289,7 @@ out:
  *
  * @adev: amdgpu_device pointer
  *
- * Load the GDDR MC ucode into the hw (VI).
+ * Load the GDDR MC ucode into the hw (CIK).
  * Returns 0 on success, error on failure.
  */
 static int gmc_v8_0_tonga_mc_load_microcode(struct amdgpu_device *adev)
@@ -446,7 +443,7 @@ static void gmc_v8_0_vram_gtt_location(struct amdgpu_device *adev,
  * @adev: amdgpu_device pointer
  *
  * Set the location of vram, gart, and AGP in the GPU's
- * physical address space (VI).
+ * physical address space (CIK).
  */
 static void gmc_v8_0_mc_program(struct amdgpu_device *adev)
 {
@@ -518,7 +515,7 @@ static void gmc_v8_0_mc_program(struct amdgpu_device *adev)
  * @adev: amdgpu_device pointer
  *
  * Look up the amount of vram, vram width, and decide how to place
- * vram and gart within the GPU's physical address space (VI).
+ * vram and gart within the GPU's physical address space (CIK).
  * Returns 0 for success.
  */
 static int gmc_v8_0_mc_init(struct amdgpu_device *adev)
@@ -633,10 +630,10 @@ static int gmc_v8_0_mc_init(struct amdgpu_device *adev)
  * @adev: amdgpu_device pointer
  * @vmid: vm instance to flush
  *
- * Flush the TLB for the requested page table (VI).
+ * Flush the TLB for the requested page table (CIK).
  */
-static void gmc_v8_0_flush_gpu_tlb(struct amdgpu_device *adev, uint32_t vmid,
-					uint32_t vmhub, uint32_t flush_type)
+static void gmc_v8_0_flush_gpu_tlb(struct amdgpu_device *adev,
+				uint32_t vmid, uint32_t flush_type)
 {
 	/* bits 0-15 are the VM contexts0-15 */
 	WREG32(mmVM_INVALIDATE_REQUEST, 1 << vmid);
@@ -803,7 +800,7 @@ static void gmc_v8_0_set_prt(struct amdgpu_device *adev, bool enable)
  * This sets up the TLBs, programs the page tables for VMID0,
  * sets up the hw for VMIDs 1-15 which are allocated on
  * demand, and sets up the global locations for the LDS, GDS,
- * and GPUVM for FSA64 clients (VI).
+ * and GPUVM for FSA64 clients (CIK).
  * Returns 0 for success, errors for failure.
  */
 static int gmc_v8_0_gart_enable(struct amdgpu_device *adev)
@@ -921,7 +918,7 @@ static int gmc_v8_0_gart_enable(struct amdgpu_device *adev)
 	else
 		gmc_v8_0_set_fault_enable_default(adev, true);
 
-	gmc_v8_0_flush_gpu_tlb(adev, 0, 0, 0);
+	gmc_v8_0_flush_gpu_tlb(adev, 0, 0);
 	DRM_INFO("PCIE GART of %uM enabled (table at 0x%016llX).\n",
 		 (unsigned)(adev->gmc.gart_size >> 20),
 		 (unsigned long long)table_addr);
@@ -951,7 +948,7 @@ static int gmc_v8_0_gart_init(struct amdgpu_device *adev)
  *
  * @adev: amdgpu_device pointer
  *
- * This disables all VM page table (VI).
+ * This disables all VM page table (CIK).
  */
 static void gmc_v8_0_gart_disable(struct amdgpu_device *adev)
 {
@@ -981,7 +978,7 @@ static void gmc_v8_0_gart_disable(struct amdgpu_device *adev)
  * @status: VM_CONTEXT1_PROTECTION_FAULT_STATUS register value
  * @addr: VM_CONTEXT1_PROTECTION_FAULT_ADDR register value
  *
- * Print human readable fault information (VI).
+ * Print human readable fault information (CIK).
  */
 static void gmc_v8_0_vm_decode_fault(struct amdgpu_device *adev, u32 status,
 				     u32 addr, u32 mc_client, unsigned pasid)
@@ -1079,9 +1076,8 @@ static unsigned gmc_v8_0_get_vbios_fb_size(struct amdgpu_device *adev)
 static int gmc_v8_0_sw_init(void *handle)
 {
 	int r;
+	int dma_bits;
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	adev->num_vmhubs = 1;
 
 	if (adev->flags & AMD_IS_APU) {
 		adev->gmc.vram_type = AMDGPU_VRAM_TYPE_UNKNOWN;
@@ -1117,12 +1113,25 @@ static int gmc_v8_0_sw_init(void *handle)
 	 */
 	adev->gmc.mc_mask = 0xffffffffffULL; /* 40 bit MC */
 
-	r = dma_set_mask_and_coherent(adev->dev, DMA_BIT_MASK(40));
+	/* set DMA mask + need_dma32 flags.
+	 * PCIE - can handle 40-bits.
+	 * IGP - can handle 40-bits
+	 * PCI - dma32 for legacy pci gart, 40 bits on newer asics
+	 */
+	adev->need_dma32 = false;
+	dma_bits = adev->need_dma32 ? 32 : 40;
+	r = pci_set_dma_mask(adev->pdev, DMA_BIT_MASK(dma_bits));
 	if (r) {
+		adev->need_dma32 = true;
+		dma_bits = 32;
 		pr_warn("amdgpu: No suitable DMA available\n");
-		return r;
 	}
-	adev->need_swiotlb = drm_need_swiotlb(40);
+	r = pci_set_consistent_dma_mask(adev->pdev, DMA_BIT_MASK(dma_bits));
+	if (r) {
+		pci_set_consistent_dma_mask(adev->pdev, DMA_BIT_MASK(32));
+		pr_warn("amdgpu: No coherent DMA available\n");
+	}
+	adev->need_swiotlb = drm_need_swiotlb(dma_bits);
 
 	r = gmc_v8_0_init_microcode(adev);
 	if (r) {

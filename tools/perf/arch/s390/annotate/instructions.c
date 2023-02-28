@@ -164,10 +164,8 @@ static int s390__annotate_init(struct arch *arch, char *cpuid __maybe_unused)
 	if (!arch->initialized) {
 		arch->initialized = true;
 		arch->associate_instruction_ops = s390__associate_ins_ops;
-		if (cpuid) {
-			if (s390__cpuid_parse(arch, cpuid))
-				err = SYMBOL_ANNOTATE_ERRNO__ARCH_INIT_CPUID_PARSING;
-		}
+		if (cpuid)
+			err = s390__cpuid_parse(arch, cpuid);
 	}
 
 	return err;

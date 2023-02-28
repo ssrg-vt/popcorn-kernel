@@ -1416,8 +1416,10 @@ static int tgafb_register(struct device *dev)
 
 	/* Allocate the fb and par structures.  */
 	info = framebuffer_alloc(sizeof(struct tga_par), dev);
-	if (!info)
+	if (!info) {
+		printk(KERN_ERR "tgafb: Cannot allocate memory\n");
 		return -ENOMEM;
+	}
 
 	par = info->par;
 	dev_set_drvdata(dev, info);

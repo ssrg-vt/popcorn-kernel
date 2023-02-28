@@ -82,7 +82,7 @@
 #ifndef __ASSEMBLY__
 
 #ifdef CONFIG_CPU_CP15_MMU
-static __always_inline unsigned int get_domain(void)
+static inline unsigned int get_domain(void)
 {
 	unsigned int domain;
 
@@ -94,7 +94,7 @@ static __always_inline unsigned int get_domain(void)
 	return domain;
 }
 
-static __always_inline void set_domain(unsigned int val)
+static inline void set_domain(unsigned val)
 {
 	asm volatile(
 	"mcr	p15, 0, %0, c3, c0	@ set domain"
@@ -102,12 +102,12 @@ static __always_inline void set_domain(unsigned int val)
 	isb();
 }
 #else
-static __always_inline unsigned int get_domain(void)
+static inline unsigned int get_domain(void)
 {
 	return 0;
 }
 
-static __always_inline void set_domain(unsigned int val)
+static inline void set_domain(unsigned val)
 {
 }
 #endif

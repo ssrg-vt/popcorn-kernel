@@ -16,6 +16,8 @@
 #include "xfs_trans.h"
 #include "xfs_qm.h"
 #include "xfs_error.h"
+#include "xfs_cksum.h"
+#include "xfs_trace.h"
 
 int
 xfs_calc_dquots_per_chunk(
@@ -222,7 +224,7 @@ static xfs_failaddr_t
 xfs_dquot_buf_verify_struct(
 	struct xfs_buf		*bp)
 {
-	struct xfs_mount	*mp = bp->b_mount;
+	struct xfs_mount	*mp = bp->b_target->bt_mount;
 
 	return xfs_dquot_buf_verify(mp, bp, false);
 }
@@ -231,7 +233,7 @@ static void
 xfs_dquot_buf_read_verify(
 	struct xfs_buf		*bp)
 {
-	struct xfs_mount	*mp = bp->b_mount;
+	struct xfs_mount	*mp = bp->b_target->bt_mount;
 
 	if (!xfs_dquot_buf_verify_crc(mp, bp, false))
 		return;
@@ -248,7 +250,7 @@ static void
 xfs_dquot_buf_readahead_verify(
 	struct xfs_buf	*bp)
 {
-	struct xfs_mount	*mp = bp->b_mount;
+	struct xfs_mount	*mp = bp->b_target->bt_mount;
 
 	if (!xfs_dquot_buf_verify_crc(mp, bp, true) ||
 	    xfs_dquot_buf_verify(mp, bp, true) != NULL) {
@@ -266,7 +268,7 @@ static void
 xfs_dquot_buf_write_verify(
 	struct xfs_buf		*bp)
 {
-	struct xfs_mount	*mp = bp->b_mount;
+	struct xfs_mount	*mp = bp->b_target->bt_mount;
 
 	xfs_dquot_buf_verify(mp, bp, false);
 }

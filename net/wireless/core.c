@@ -5,7 +5,7 @@
  * Copyright 2006-2010		Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
  * Copyright 2015-2017	Intel Deutschland GmbH
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018 Intel Corporation
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -142,10 +142,12 @@ int cfg80211_dev_rename(struct cfg80211_registered_device *rdev,
 	if (result)
 		return result;
 
-	if (rdev->wiphy.debugfsdir)
-		debugfs_rename(rdev->wiphy.debugfsdir->d_parent,
-			       rdev->wiphy.debugfsdir,
-			       rdev->wiphy.debugfsdir->d_parent, newname);
+	if (rdev->wiphy.debugfsdir &&
+	    !debugfs_rename(rdev->wiphy.debugfsdir->d_parent,
+			    rdev->wiphy.debugfsdir,
+			    rdev->wiphy.debugfsdir->d_parent,
+			    newname))
+		pr_err("failed to rename debugfs dir to %s!\n", newname);
 
 	nl80211_notify_wiphy(rdev, NL80211_CMD_NEW_WIPHY);
 
@@ -300,13 +302,12 @@ static int cfg80211_rfkill_set_block(void *data, bool blocked)
 	return 0;
 }
 
-static void cfg80211_rfkill_block_work(struct work_struct *work)
+static void cfg80211_rfkill_sync_work(struct work_struct *work)
 {
 	struct cfg80211_registered_device *rdev;
 
-	rdev = container_of(work, struct cfg80211_registered_device,
-			    rfkill_block);
-	cfg80211_rfkill_set_block(rdev, true);
+	rdev = container_of(work, struct cfg80211_registered_device, rfkill_sync);
+	cfg80211_rfkill_set_block(rdev, rfkill_blocked(rdev->rfkill));
 }
 
 static void cfg80211_event_work(struct work_struct *work)
@@ -517,7 +518,7 @@ use_default_name:
 		return NULL;
 	}
 
-	INIT_WORK(&rdev->rfkill_block, cfg80211_rfkill_block_work);
+	INIT_WORK(&rdev->rfkill_sync, cfg80211_rfkill_sync_work);
 	INIT_WORK(&rdev->conn_work, cfg80211_conn_work);
 	INIT_WORK(&rdev->event_work, cfg80211_event_work);
 
@@ -858,19 +859,6 @@ int wiphy_register(struct wiphy *wiphy)
 		return -EINVAL;
 	}
 
-	for (i = 0; i < rdev->wiphy.n_vendor_commands; i++) {
-		/*
-		 * Validate we have a policy (can be explicitly set to
-		 * VENDOR_CMD_RAW_DATA which is non-NULL) and also that
-		 * we have at least one of doit/dumpit.
-		 */
-		if (WARN_ON(!rdev->wiphy.vendor_commands[i].policy))
-			return -EINVAL;
-		if (WARN_ON(!rdev->wiphy.vendor_commands[i].doit &&
-			    !rdev->wiphy.vendor_commands[i].dumpit))
-			return -EINVAL;
-	}
-
 #ifdef CONFIG_PM
 	if (WARN_ON(rdev->wiphy.wowlan && rdev->wiphy.wowlan->n_patterns &&
 		    (!rdev->wiphy.wowlan->pattern_min_len ||
@@ -898,8 +886,11 @@ int wiphy_register(struct wiphy *wiphy)
 	cfg80211_rdev_list_generation++;
 
 	/* add to debugfs */
-	rdev->wiphy.debugfsdir = debugfs_create_dir(wiphy_name(&rdev->wiphy),
-						    ieee80211_debugfs_dir);
+	rdev->wiphy.debugfsdir =
+		debugfs_create_dir(wiphy_name(&rdev->wiphy),
+				   ieee80211_debugfs_dir);
+	if (IS_ERR(rdev->wiphy.debugfsdir))
+		rdev->wiphy.debugfsdir = NULL;
 
 	cfg80211_debugfs_rdev_add(rdev);
 	nl80211_notify_wiphy(rdev, NL80211_CMD_NEW_WIPHY);
@@ -1062,7 +1053,7 @@ void wiphy_rfkill_set_hw_state(struct wiphy *wiphy, bool blocked)
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
 
 	if (rfkill_set_hw_state(rdev->rfkill, blocked))
-		schedule_work(&rdev->rfkill_block);
+		schedule_work(&rdev->rfkill_sync);
 }
 EXPORT_SYMBOL(wiphy_rfkill_set_hw_state);
 

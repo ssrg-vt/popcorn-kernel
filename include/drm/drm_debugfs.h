@@ -32,8 +32,6 @@
 #ifndef _DRM_DEBUGFS_H_
 #define _DRM_DEBUGFS_H_
 
-#include <linux/types.h>
-#include <linux/seq_file.h>
 /**
  * struct drm_info_list - debugfs info list entry
  *

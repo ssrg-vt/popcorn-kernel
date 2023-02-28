@@ -85,14 +85,13 @@ static const struct clk_ops clk_fixup_div_ops = {
 	.set_rate = clk_fixup_div_set_rate,
 };
 
-struct clk_hw *imx_clk_hw_fixup_divider(const char *name, const char *parent,
+struct clk *imx_clk_fixup_divider(const char *name, const char *parent,
 				  void __iomem *reg, u8 shift, u8 width,
 				  void (*fixup)(u32 *val))
 {
 	struct clk_fixup_div *fixup_div;
-	struct clk_hw *hw;
+	struct clk *clk;
 	struct clk_init_data init;
-	int ret;
 
 	if (!fixup)
 		return ERR_PTR(-EINVAL);
@@ -115,13 +114,9 @@ struct clk_hw *imx_clk_hw_fixup_divider(const char *name, const char *parent,
 	fixup_div->ops = &clk_divider_ops;
 	fixup_div->fixup = fixup;
 
-	hw = &fixup_div->divider.hw;
-
-	ret = clk_hw_register(NULL, hw);
-	if (ret) {
+	clk = clk_register(NULL, &fixup_div->divider.hw);
+	if (IS_ERR(clk))
 		kfree(fixup_div);
-		return ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }

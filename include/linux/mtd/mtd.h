@@ -72,8 +72,7 @@ struct mtd_oob_ops {
 };
 
 #define MTD_MAX_OOBFREE_ENTRIES_LARGE	32
-#define MTD_MAX_ECCPOS_ENTRIES_LARGE	1260
-
+#define MTD_MAX_ECCPOS_ENTRIES_LARGE	640
 /**
  * struct mtd_oob_region - oob region definition
  * @offset: region offset
@@ -190,9 +189,6 @@ struct module;	/* only needed for owner field in mtd_info */
  */
 struct mtd_debug_info {
 	struct dentry *dfs_dir;
-
-	const char *partname;
-	const char *partid;
 };
 
 struct mtd_info {
@@ -319,12 +315,6 @@ struct mtd_info {
 	 */
 	int (*_get_device) (struct mtd_info *mtd);
 	void (*_put_device) (struct mtd_info *mtd);
-
-	/*
-	 * flag indicates a panic write, low level drivers can take appropriate
-	 * action if required to ensure writes go through
-	 */
-	bool oops_panic_write;
 
 	struct notifier_block reboot_notifier;  /* default mode before reboot */
 

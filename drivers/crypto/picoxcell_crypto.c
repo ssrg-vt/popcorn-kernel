@@ -6,7 +6,7 @@
 #include <crypto/aes.h>
 #include <crypto/algapi.h>
 #include <crypto/authenc.h>
-#include <crypto/internal/des.h>
+#include <crypto/des.h>
 #include <crypto/md5.h>
 #include <crypto/sha.h>
 #include <crypto/internal/skcipher.h>
@@ -736,12 +736,16 @@ static void spacc_aead_cra_exit(struct crypto_aead *tfm)
 static int spacc_des_setkey(struct crypto_ablkcipher *cipher, const u8 *key,
 			    unsigned int len)
 {
-	struct spacc_ablk_ctx *ctx = crypto_ablkcipher_ctx(cipher);
-	int err;
+	struct crypto_tfm *tfm = crypto_ablkcipher_tfm(cipher);
+	struct spacc_ablk_ctx *ctx = crypto_tfm_ctx(tfm);
+	u32 tmp[DES_EXPKEY_WORDS];
 
-	err = verify_ablkcipher_des_key(cipher, key);
-	if (err)
-		return err;
+	if (unlikely(!des_ekey(tmp, key)) &&
+	    (crypto_ablkcipher_get_flags(cipher) &
+	     CRYPTO_TFM_REQ_FORBID_WEAK_KEYS)) {
+		tfm->crt_flags |= CRYPTO_TFM_RES_WEAK_KEY;
+		return -EINVAL;
+	}
 
 	memcpy(ctx->key, key, len);
 	ctx->key_len = len;
@@ -757,11 +761,15 @@ static int spacc_des3_setkey(struct crypto_ablkcipher *cipher, const u8 *key,
 			     unsigned int len)
 {
 	struct spacc_ablk_ctx *ctx = crypto_ablkcipher_ctx(cipher);
+	u32 flags;
 	int err;
 
-	err = verify_ablkcipher_des3_key(cipher, key);
-	if (err)
+	flags = crypto_ablkcipher_get_flags(cipher);
+	err = __des3_verify_key(&flags, key);
+	if (unlikely(err)) {
+		crypto_ablkcipher_set_flags(cipher, flags);
 		return err;
+	}
 
 	memcpy(ctx->key, key, len);
 	ctx->key_len = len;
@@ -1616,7 +1624,7 @@ MODULE_DEVICE_TABLE(of, spacc_of_id_table);
 static int spacc_probe(struct platform_device *pdev)
 {
 	int i, err, ret;
-	struct resource *irq;
+	struct resource *mem, *irq;
 	struct device_node *np = pdev->dev.of_node;
 	struct spacc_engine *engine = devm_kzalloc(&pdev->dev, sizeof(*engine),
 						   GFP_KERNEL);
@@ -1645,7 +1653,8 @@ static int spacc_probe(struct platform_device *pdev)
 
 	engine->name = dev_name(&pdev->dev);
 
-	engine->regs = devm_platform_ioremap_resource(pdev, 0);
+	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	engine->regs = devm_ioremap_resource(&pdev->dev, mem);
 	if (IS_ERR(engine->regs))
 		return PTR_ERR(engine->regs);
 

@@ -118,10 +118,12 @@ struct sdhci_host *sdhci_pltfm_init(struct platform_device *pdev,
 				    size_t priv_size)
 {
 	struct sdhci_host *host;
+	struct resource *iomem;
 	void __iomem *ioaddr;
 	int irq, ret;
 
-	ioaddr = devm_platform_ioremap_resource(pdev, 0);
+	iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	ioaddr = devm_ioremap_resource(&pdev->dev, iomem);
 	if (IS_ERR(ioaddr)) {
 		ret = PTR_ERR(ioaddr);
 		goto err;
@@ -129,6 +131,7 @@ struct sdhci_host *sdhci_pltfm_init(struct platform_device *pdev,
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
+		dev_err(&pdev->dev, "failed to get IRQ number\n");
 		ret = irq;
 		goto err;
 	}

@@ -395,48 +395,69 @@ static inline short vmcs_field_to_offset(unsigned long field)
 
 #undef ROL16
 
-static inline u64 vmcs12_read_any(struct vmcs12 *vmcs12, unsigned long field,
-				  u16 offset)
+/*
+ * Read a vmcs12 field. Since these can have varying lengths and we return
+ * one type, we chose the biggest type (u64) and zero-extend the return value
+ * to that size. Note that the caller, handle_vmread, might need to use only
+ * some of the bits we return here (e.g., on 32-bit guests, only 32 bits of
+ * 64-bit fields are to be returned).
+ */
+static inline int vmcs12_read_any(struct vmcs12 *vmcs12,
+				  unsigned long field, u64 *ret)
 {
-	char *p = (char *)vmcs12 + offset;
+	short offset = vmcs_field_to_offset(field);
+	char *p;
+
+	if (offset < 0)
+		return offset;
+
+	p = (char *)vmcs12 + offset;
 
 	switch (vmcs_field_width(field)) {
 	case VMCS_FIELD_WIDTH_NATURAL_WIDTH:
-		return *((natural_width *)p);
+		*ret = *((natural_width *)p);
+		return 0;
 	case VMCS_FIELD_WIDTH_U16:
-		return *((u16 *)p);
+		*ret = *((u16 *)p);
+		return 0;
 	case VMCS_FIELD_WIDTH_U32:
-		return *((u32 *)p);
+		*ret = *((u32 *)p);
+		return 0;
 	case VMCS_FIELD_WIDTH_U64:
-		return *((u64 *)p);
+		*ret = *((u64 *)p);
+		return 0;
 	default:
-		WARN_ON_ONCE(1);
-		return -1;
+		WARN_ON(1);
+		return -ENOENT;
 	}
 }
 
-static inline void vmcs12_write_any(struct vmcs12 *vmcs12, unsigned long field,
-				    u16 offset, u64 field_value)
-{
+static inline int vmcs12_write_any(struct vmcs12 *vmcs12,
+				   unsigned long field, u64 field_value){
+	short offset = vmcs_field_to_offset(field);
 	char *p = (char *)vmcs12 + offset;
+
+	if (offset < 0)
+		return offset;
 
 	switch (vmcs_field_width(field)) {
 	case VMCS_FIELD_WIDTH_U16:
 		*(u16 *)p = field_value;
-		break;
+		return 0;
 	case VMCS_FIELD_WIDTH_U32:
 		*(u32 *)p = field_value;
-		break;
+		return 0;
 	case VMCS_FIELD_WIDTH_U64:
 		*(u64 *)p = field_value;
-		break;
+		return 0;
 	case VMCS_FIELD_WIDTH_NATURAL_WIDTH:
 		*(natural_width *)p = field_value;
-		break;
+		return 0;
 	default:
-		WARN_ON_ONCE(1);
-		break;
+		WARN_ON(1);
+		return -ENOENT;
 	}
+
 }
 
 #endif /* __KVM_X86_VMX_VMCS12_H */

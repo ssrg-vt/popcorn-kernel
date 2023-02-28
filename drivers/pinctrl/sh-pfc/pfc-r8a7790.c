@@ -20,19 +20,13 @@
  * All pins assigned to GPIO bank 3 can be used for SD interfaces in
  * which case they support both 3.3V and 1.8V signalling.
  */
-#define CPU_ALL_GP(fn, sfx)						\
+#define CPU_ALL_PORT(fn, sfx)						\
 	PORT_GP_32(0, fn, sfx),						\
 	PORT_GP_30(1, fn, sfx),						\
 	PORT_GP_30(2, fn, sfx),						\
 	PORT_GP_CFG_32(3, fn, sfx, SH_PFC_PIN_CFG_IO_VOLTAGE),		\
 	PORT_GP_32(4, fn, sfx),						\
 	PORT_GP_32(5, fn, sfx)
-
-#define CPU_ALL_NOGP(fn)		\
-	PIN_NOGP(IIC0_SDA, "AF15", fn),	\
-	PIN_NOGP(IIC0_SCL, "AG15", fn),	\
-	PIN_NOGP(IIC3_SDA, "AH15", fn),	\
-	PIN_NOGP(IIC3_SCL, "AJ15", fn)
 
 enum {
 	PINMUX_RESERVED = 0,
@@ -1733,17 +1727,19 @@ static const u16 pinmux_data[] = {
 	PINMUX_DATA(I2C3_SDA_MARK, FN_SEL_IICDVFS_1),
 };
 
-/*
- * Pins not associated with a GPIO port.
- */
-enum {
-	GP_ASSIGN_LAST(),
-	NOGP_ALL(),
-};
+/* R8A7790 has 6 banks with 32 GPIOs in each = 192 GPIOs */
+#define ROW_GROUP_A(r) ('Z' - 'A' + 1 + (r))
+#define PIN_NUMBER(r, c) (((r) - 'A') * 31 + (c) + 200)
+#define PIN_A_NUMBER(r, c) PIN_NUMBER(ROW_GROUP_A(r), c)
 
 static const struct sh_pfc_pin pinmux_pins[] = {
 	PINMUX_GPIO_GP_ALL(),
-	PINMUX_NOGP_ALL(),
+
+	/* Pins not associated with a GPIO port */
+	SH_PFC_PIN_NAMED(ROW_GROUP_A('F'), 15, AF15),
+	SH_PFC_PIN_NAMED(ROW_GROUP_A('G'), 15, AG15),
+	SH_PFC_PIN_NAMED(ROW_GROUP_A('H'), 15, AH15),
+	SH_PFC_PIN_NAMED(ROW_GROUP_A('J'), 15, AJ15),
 };
 
 /* - AUDIO CLOCK ------------------------------------------------------------ */
@@ -2139,7 +2135,7 @@ static const unsigned int hscif1_ctrl_b_mux[] = {
 /* - I2C0 ------------------------------------------------------------------- */
 static const unsigned int i2c0_pins[] = {
 	/* SCL, SDA */
-	PIN_IIC0_SCL, PIN_IIC0_SDA,
+	PIN_A_NUMBER('G', 15), PIN_A_NUMBER('F', 15),
 };
 static const unsigned int i2c0_mux[] = {
 	I2C0_SCL_MARK, I2C0_SDA_MARK,
@@ -2205,7 +2201,7 @@ static const unsigned int i2c2_e_mux[] = {
 /* - I2C3 ------------------------------------------------------------------- */
 static const unsigned int i2c3_pins[] = {
 	/* SCL, SDA */
-	PIN_IIC3_SCL, PIN_IIC3_SDA,
+	PIN_A_NUMBER('J', 15), PIN_A_NUMBER('H', 15),
 };
 static const unsigned int i2c3_mux[] = {
 	I2C3_SCL_MARK, I2C3_SDA_MARK,
@@ -2213,7 +2209,7 @@ static const unsigned int i2c3_mux[] = {
 /* - IIC0 (I2C4) ------------------------------------------------------------ */
 static const unsigned int iic0_pins[] = {
 	/* SCL, SDA */
-	PIN_IIC0_SCL, PIN_IIC0_SDA,
+	PIN_A_NUMBER('G', 15), PIN_A_NUMBER('F', 15),
 };
 static const unsigned int iic0_mux[] = {
 	IIC0_SCL_MARK, IIC0_SDA_MARK,
@@ -2278,8 +2274,8 @@ static const unsigned int iic2_e_mux[] = {
 };
 /* - IIC3 (I2C7) ------------------------------------------------------------ */
 static const unsigned int iic3_pins[] = {
-	/* SCL, SDA */
-	PIN_IIC3_SCL, PIN_IIC3_SDA,
+/* SCL, SDA */
+	PIN_A_NUMBER('J', 15), PIN_A_NUMBER('H', 15),
 };
 static const unsigned int iic3_mux[] = {
 	IIC3_SCL_MARK, IIC3_SDA_MARK,

@@ -123,25 +123,6 @@ struct drm_format_info {
 	 */
 	u8 block_h[3];
 
-	/**
-	 * @pixels_per_macropixel:
-	 * Number of pixels per macro-pixel (per plane). A macro-pixel is
-	 * composed of multiple pixels, and there can be extra bits between
-	 * pixels. This must be used along with @bytes_per_macropixel, only
-	 * when single pixel size is not byte-aligned. In this case, @cpp
-	 * is not valid and should be 0.
-	 */
-	u8 pixels_per_macropixel[3];
-
-	/**
-	 * @bytes_per_macropixel:
-	 * Number of bytes per macro-pixel (per plane). A macro-pixel is
-	 * composed of multiple pixels. The size of single macro-pixel should
-	 * be byte-aligned. This should be used with @pixels_per_macropixel,
-	 * and @cpp should be 0.
-	 */
-	u8 bytes_per_macropixel[3];
-
 	/** @hsub: Horizontal chroma subsampling factor */
 	u8 hsub;
 	/** @vsub: Vertical chroma subsampling factor */
@@ -279,50 +260,6 @@ drm_format_info_is_yuv_sampling_444(const struct drm_format_info *info)
 	return info->is_yuv && info->hsub == 1 && info->vsub == 1;
 }
 
-/**
- * drm_format_info_plane_width - width of the plane given the first plane
- * @info: pixel format info
- * @width: width of the first plane
- * @plane: plane index
- *
- * Returns:
- * The width of @plane, given that the width of the first plane is @width.
- */
-static inline
-int drm_format_info_plane_width(const struct drm_format_info *info, int width,
-				int plane)
-{
-	if (!info || plane >= info->num_planes)
-		return 0;
-
-	if (plane == 0)
-		return width;
-
-	return width / info->hsub;
-}
-
-/**
- * drm_format_info_plane_height - height of the plane given the first plane
- * @info: pixel format info
- * @height: height of the first plane
- * @plane: plane index
- *
- * Returns:
- * The height of @plane, given that the height of the first plane is @height.
- */
-static inline
-int drm_format_info_plane_height(const struct drm_format_info *info, int height,
-				 int plane)
-{
-	if (!info || plane >= info->num_planes)
-		return 0;
-
-	if (plane == 0)
-		return height;
-
-	return height / info->vsub;
-}
-
 const struct drm_format_info *__drm_format_info(u32 format);
 const struct drm_format_info *drm_format_info(u32 format);
 const struct drm_format_info *
@@ -331,14 +268,18 @@ drm_get_format_info(struct drm_device *dev,
 uint32_t drm_mode_legacy_fb_format(uint32_t bpp, uint32_t depth);
 uint32_t drm_driver_legacy_fb_format(struct drm_device *dev,
 				     uint32_t bpp, uint32_t depth);
+int drm_format_num_planes(uint32_t format);
+int drm_format_plane_cpp(uint32_t format, int plane);
+int drm_format_horz_chroma_subsampling(uint32_t format);
+int drm_format_vert_chroma_subsampling(uint32_t format);
+int drm_format_plane_width(int width, uint32_t format, int plane);
+int drm_format_plane_height(int height, uint32_t format, int plane);
 unsigned int drm_format_info_block_width(const struct drm_format_info *info,
 					 int plane);
 unsigned int drm_format_info_block_height(const struct drm_format_info *info,
 					  int plane);
 uint64_t drm_format_info_min_pitch(const struct drm_format_info *info,
 				   int plane, unsigned int buffer_width);
-uint64_t drm_format_plane_width_bytes(const struct drm_format_info *info,
-				 int plane, unsigned int width);
 const char *drm_get_format_name(uint32_t format, struct drm_format_name_buf *buf);
 
 #endif /* __DRM_FOURCC_H__ */

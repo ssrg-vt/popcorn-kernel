@@ -4,3 +4,6 @@
 #
 
 obj-y += cio/ block/ char/ crypto/ net/ scsi/ virtio/
+
+drivers-y += drivers/s390/built-in.a
+

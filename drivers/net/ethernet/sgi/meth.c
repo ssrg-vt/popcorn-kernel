@@ -247,7 +247,8 @@ static void meth_free_tx_ring(struct meth_private *priv)
 
 	/* Remove any pending skb */
 	for (i = 0; i < TX_RING_ENTRIES; i++) {
-		dev_kfree_skb(priv->tx_skbs[i]);
+		if (priv->tx_skbs[i])
+			dev_kfree_skb(priv->tx_skbs[i]);
 		priv->tx_skbs[i] = NULL;
 	}
 	dma_free_coherent(&priv->pdev->dev, TX_RING_BUFFER_SIZE, priv->tx_ring,

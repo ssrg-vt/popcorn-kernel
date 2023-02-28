@@ -35,21 +35,16 @@
  * Watchdog timer block registers.
  */
 #define TIMER_CTRL		0x0000
-#define TIMER1_FIXED_ENABLE_BIT	BIT(12)
-#define WDT_AXP_FIXED_ENABLE_BIT BIT(10)
-#define TIMER1_ENABLE_BIT	BIT(2)
-
-#define TIMER_A370_STATUS	0x0004
-#define WDT_A370_EXPIRED	BIT(31)
-#define TIMER1_STATUS_BIT	BIT(8)
-
-#define TIMER1_VAL_OFF		0x001c
+#define TIMER_A370_STATUS	0x04
 
 #define WDT_MAX_CYCLE_COUNT	0xffffffff
 
 #define WDT_A370_RATIO_MASK(v)	((v) << 16)
 #define WDT_A370_RATIO_SHIFT	5
 #define WDT_A370_RATIO		(1 << WDT_A370_RATIO_SHIFT)
+
+#define WDT_AXP_FIXED_ENABLE_BIT BIT(10)
+#define WDT_A370_EXPIRED	BIT(31)
 
 static bool nowayout = WATCHDOG_NOWAYOUT;
 static int heartbeat = -1;		/* module parameter (seconds) */
@@ -163,7 +158,6 @@ static int armadaxp_wdt_clock_init(struct platform_device *pdev,
 				   struct orion_watchdog *dev)
 {
 	int ret;
-	u32 val;
 
 	dev->clk = of_clk_get_by_name(pdev->dev.of_node, "fixed");
 	if (IS_ERR(dev->clk))
@@ -174,9 +168,10 @@ static int armadaxp_wdt_clock_init(struct platform_device *pdev,
 		return ret;
 	}
 
-	/* Fix the wdt and timer1 clock freqency to 25MHz */
-	val = WDT_AXP_FIXED_ENABLE_BIT | TIMER1_FIXED_ENABLE_BIT;
-	atomic_io_modify(dev->reg + TIMER_CTRL, val, val);
+	/* Enable the fixed watchdog clock input */
+	atomic_io_modify(dev->reg + TIMER_CTRL,
+			 WDT_AXP_FIXED_ENABLE_BIT,
+			 WDT_AXP_FIXED_ENABLE_BIT);
 
 	dev->clk_rate = clk_get_rate(dev->clk);
 	return 0;
@@ -188,10 +183,6 @@ static int orion_wdt_ping(struct watchdog_device *wdt_dev)
 	/* Reload watchdog duration */
 	writel(dev->clk_rate * wdt_dev->timeout,
 	       dev->reg + dev->data->wdt_counter_offset);
-	if (dev->wdt.info->options & WDIOF_PRETIMEOUT)
-		writel(dev->clk_rate * (wdt_dev->timeout - wdt_dev->pretimeout),
-		       dev->reg + TIMER1_VAL_OFF);
-
 	return 0;
 }
 
@@ -203,18 +194,13 @@ static int armada375_start(struct watchdog_device *wdt_dev)
 	/* Set watchdog duration */
 	writel(dev->clk_rate * wdt_dev->timeout,
 	       dev->reg + dev->data->wdt_counter_offset);
-	if (dev->wdt.info->options & WDIOF_PRETIMEOUT)
-		writel(dev->clk_rate * (wdt_dev->timeout - wdt_dev->pretimeout),
-		       dev->reg + TIMER1_VAL_OFF);
 
 	/* Clear the watchdog expiration bit */
 	atomic_io_modify(dev->reg + TIMER_A370_STATUS, WDT_A370_EXPIRED, 0);
 
 	/* Enable watchdog timer */
-	reg = dev->data->wdt_enable_bit;
-	if (dev->wdt.info->options & WDIOF_PRETIMEOUT)
-		reg |= TIMER1_ENABLE_BIT;
-	atomic_io_modify(dev->reg + TIMER_CTRL, reg, reg);
+	atomic_io_modify(dev->reg + TIMER_CTRL, dev->data->wdt_enable_bit,
+						dev->data->wdt_enable_bit);
 
 	/* Enable reset on watchdog */
 	reg = readl(dev->rstout);
@@ -291,7 +277,7 @@ static int orion_stop(struct watchdog_device *wdt_dev)
 static int armada375_stop(struct watchdog_device *wdt_dev)
 {
 	struct orion_watchdog *dev = watchdog_get_drvdata(wdt_dev);
-	u32 reg, mask;
+	u32 reg;
 
 	/* Disable reset on watchdog */
 	atomic_io_modify(dev->rstout_mask, dev->data->rstout_mask_bit,
@@ -301,10 +287,7 @@ static int armada375_stop(struct watchdog_device *wdt_dev)
 	writel(reg, dev->rstout);
 
 	/* Disable watchdog timer */
-	mask = dev->data->wdt_enable_bit;
-	if (wdt_dev->info->options & WDIOF_PRETIMEOUT)
-		mask |= TIMER1_ENABLE_BIT;
-	atomic_io_modify(dev->reg + TIMER_CTRL, mask, 0);
+	atomic_io_modify(dev->reg + TIMER_CTRL, dev->data->wdt_enable_bit, 0);
 
 	return 0;
 }
@@ -366,7 +349,7 @@ static unsigned int orion_wdt_get_timeleft(struct watchdog_device *wdt_dev)
 	return readl(dev->reg + dev->data->wdt_counter_offset) / dev->clk_rate;
 }
 
-static struct watchdog_info orion_wdt_info = {
+static const struct watchdog_info orion_wdt_info = {
 	.options = WDIOF_SETTIMEOUT | WDIOF_KEEPALIVEPING | WDIOF_MAGICCLOSE,
 	.identity = "Orion Watchdog",
 };
@@ -382,16 +365,6 @@ static const struct watchdog_ops orion_wdt_ops = {
 static irqreturn_t orion_wdt_irq(int irq, void *devid)
 {
 	panic("Watchdog Timeout");
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t orion_wdt_pre_irq(int irq, void *devid)
-{
-	struct orion_watchdog *dev = devid;
-
-	atomic_io_modify(dev->reg + TIMER_A370_STATUS,
-			 TIMER1_STATUS_BIT, 0);
-	watchdog_notify_pretimeout(&dev->wdt);
 	return IRQ_HANDLED;
 }
 
@@ -615,19 +588,6 @@ static int orion_wdt_probe(struct platform_device *pdev)
 			goto disable_clk;
 		}
 	}
-
-	/* Optional 2nd interrupt for pretimeout */
-	irq = platform_get_irq(pdev, 1);
-	if (irq > 0) {
-		orion_wdt_info.options |= WDIOF_PRETIMEOUT;
-		ret = devm_request_irq(&pdev->dev, irq, orion_wdt_pre_irq,
-				       0, pdev->name, dev);
-		if (ret < 0) {
-			dev_err(&pdev->dev, "failed to request IRQ\n");
-			goto disable_clk;
-		}
-	}
-
 
 	watchdog_set_nowayout(&dev->wdt, nowayout);
 	ret = watchdog_register_device(&dev->wdt);

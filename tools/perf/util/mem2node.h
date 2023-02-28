@@ -2,9 +2,8 @@
 #define __MEM2NODE_H
 
 #include <linux/rbtree.h>
-#include <linux/types.h>
+#include "env.h"
 
-struct perf_env;
 struct phys_entry;
 
 struct mem2node {

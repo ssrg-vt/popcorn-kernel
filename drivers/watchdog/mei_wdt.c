@@ -384,8 +384,10 @@ static int mei_wdt_register(struct mei_wdt *wdt)
 	watchdog_stop_on_reboot(&wdt->wdd);
 
 	ret = watchdog_register_device(&wdt->wdd);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "unable to register watchdog device = %d.\n", ret);
 		watchdog_set_drvdata(&wdt->wdd, NULL);
+	}
 
 	wdt->state = MEI_WDT_IDLE;
 
@@ -537,23 +539,38 @@ static void dbgfs_unregister(struct mei_wdt *wdt)
 	wdt->dbgfs_dir = NULL;
 }
 
-static void dbgfs_register(struct mei_wdt *wdt)
+static int dbgfs_register(struct mei_wdt *wdt)
 {
-	struct dentry *dir;
+	struct dentry *dir, *f;
 
 	dir = debugfs_create_dir(KBUILD_MODNAME, NULL);
+	if (!dir)
+		return -ENOMEM;
+
 	wdt->dbgfs_dir = dir;
+	f = debugfs_create_file("state", S_IRUSR, dir, wdt, &dbgfs_fops_state);
+	if (!f)
+		goto err;
 
-	debugfs_create_file("state", S_IRUSR, dir, wdt, &dbgfs_fops_state);
+	f = debugfs_create_file("activation",  S_IRUSR,
+				dir, wdt, &dbgfs_fops_activation);
+	if (!f)
+		goto err;
 
-	debugfs_create_file("activation", S_IRUSR, dir, wdt,
-			    &dbgfs_fops_activation);
+	return 0;
+err:
+	dbgfs_unregister(wdt);
+	return -ENODEV;
 }
 
 #else
 
 static inline void dbgfs_unregister(struct mei_wdt *wdt) {}
-static inline void dbgfs_register(struct mei_wdt *wdt) {}
+
+static inline int dbgfs_register(struct mei_wdt *wdt)
+{
+	return 0;
+}
 #endif /* CONFIG_DEBUG_FS */
 
 static int mei_wdt_probe(struct mei_cl_device *cldev,
@@ -606,7 +623,8 @@ static int mei_wdt_probe(struct mei_cl_device *cldev,
 	if (ret)
 		goto err_disable;
 
-	dbgfs_register(wdt);
+	if (dbgfs_register(wdt))
+		dev_warn(&cldev->dev, "cannot register debugfs\n");
 
 	return 0;
 

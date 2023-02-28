@@ -22,7 +22,8 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include "dove.h"
+#include <mach/dove.h>
+
 #include "common.h"
 
 static struct mv643xx_eth_platform_data cm_a510_ge00_data = {

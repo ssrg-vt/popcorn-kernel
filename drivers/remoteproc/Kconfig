@@ -2,7 +2,7 @@
 menu "Remoteproc drivers"
 
 config REMOTEPROC
-	bool "Support for Remote Processor subsystem"
+	tristate "Support for Remote Processor subsystem"
 	depends on HAS_DMA
 	select CRC32
 	select FW_LOADER
@@ -16,7 +16,7 @@ if REMOTEPROC
 
 config IMX_REMOTEPROC
 	tristate "IMX6/7 remoteproc support"
-	depends on ARCH_MXC
+	depends on SOC_IMX6SX || SOC_IMX7D
 	help
 	  Say y here to support iMX's remote processors (Cortex M4
 	  on iMX7D) via the remote processor framework.
@@ -116,7 +116,6 @@ config QCOM_Q6V5_MSS
 	depends on RPMSG_QCOM_GLINK_SMEM || RPMSG_QCOM_GLINK_SMEM=n
 	depends on QCOM_SYSMON || QCOM_SYSMON=n
 	select MFD_SYSCON
-	select QCOM_MDT_LOADER
 	select QCOM_Q6V5_COMMON
 	select QCOM_RPROC_COMMON
 	select QCOM_SCM
@@ -196,43 +195,8 @@ config ST_REMOTEPROC
 	  processor framework.
 	  This can be either built-in or a loadable module.
 
-config ZYNQ_REMOTEPROC
-	tristate "Support ZYNQ remoteproc"
-	depends on ARCH_ZYNQ && SMP && !DEBUG_SG
-	select RPMSG_VIRTIO
-	select HOTPLUG_CPU
-	select SRAM
-	help
-	  Say y here to support Xilinx ZynQ remote processors (the second
-	  ARM CORTEX-A9 cpu) via the remote processor framework.
-
-config ZYNQMP_R5_REMOTEPROC
-	tristate "ZynqMP_r5 remoteproc support"
-	depends on ARM64 && PM && ARCH_ZYNQMP
-	select RPMSG_VIRTIO
-	select MAILBOX
-	select ZYNQMP_IPI_MBOX
-	help
-	  Say y here to support ZynqMP R5 remote processors via the remote
-	  processor framework.
-
 config ST_SLIM_REMOTEPROC
 	tristate
-
-config STM32_RPROC
-	tristate "STM32 remoteproc support"
-	depends on ARCH_STM32
-	depends on REMOTEPROC
-	select MAILBOX
-	help
-	  Say y here to support STM32 MCU processors via the
-	  remote processor framework.
-
-	  You want to say y here in order to enable AMP
-	  use-cases to run on your platform (dedicated firmware could be
-	  offloaded to remote MCU processors using this framework).
-
-	  This can be either built-in or a loadable module.
 
 endif # REMOTEPROC
 

@@ -6,7 +6,8 @@
  * Copyright 2016 Linaro Ltd.
  */
 
-#include <linux/greybus.h>
+#include "greybus.h"
+
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/ioctl.h>

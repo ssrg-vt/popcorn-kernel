@@ -2125,7 +2125,7 @@ struct pcpu_alloc_info * __init pcpu_alloc_alloc_info(int nr_groups,
 	void *ptr;
 	int unit;
 
-	base_size = ALIGN(struct_size(ai, groups, nr_groups),
+	base_size = ALIGN(sizeof(*ai) + nr_groups * sizeof(ai->groups[0]),
 			  __alignof__(ai->groups[0].cpu_map[0]));
 	ai_size = base_size + nr_units * sizeof(ai->groups[0].cpu_map[0]);
 
@@ -2220,7 +2220,7 @@ static void pcpu_dump_alloc_info(const char *lvl,
  * @base_addr: mapped address
  *
  * Initialize the first percpu chunk which contains the kernel static
- * percpu area.  This function is to be called from arch percpu area
+ * perpcu area.  This function is to be called from arch percpu area
  * setup path.
  *
  * @ai contains all information necessary to initialize the first
@@ -2267,9 +2267,12 @@ static void pcpu_dump_alloc_info(const char *lvl,
  * share the same vm, but use offset regions in the area allocation map.
  * The chunk serving the dynamic region is circulated in the chunk slots
  * and available for dynamic allocation like any other chunk.
+ *
+ * RETURNS:
+ * 0 on success, -errno on failure.
  */
-void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
-				   void *base_addr)
+int __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
+				  void *base_addr)
 {
 	size_t size_sum = ai->static_size + ai->reserved_size + ai->dyn_size;
 	size_t static_size, dyn_size;
@@ -2454,6 +2457,7 @@ void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 
 	/* we're done */
 	pcpu_base_addr = base_addr;
+	return 0;
 }
 
 #ifdef CONFIG_SMP
@@ -2706,7 +2710,7 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 	struct pcpu_alloc_info *ai;
 	size_t size_sum, areas_size;
 	unsigned long max_distance;
-	int group, i, highest_group, rc = 0;
+	int group, i, highest_group, rc;
 
 	ai = pcpu_build_alloc_info(reserved_size, dyn_size, atom_size,
 				   cpu_distance_fn);
@@ -2791,7 +2795,7 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 		PFN_DOWN(size_sum), ai->static_size, ai->reserved_size,
 		ai->dyn_size, ai->unit_size);
 
-	pcpu_setup_first_chunk(ai, base);
+	rc = pcpu_setup_first_chunk(ai, base);
 	goto out_free;
 
 out_free_areas:
@@ -2835,7 +2839,7 @@ int __init pcpu_page_first_chunk(size_t reserved_size,
 	int unit_pages;
 	size_t pages_size;
 	struct page **pages;
-	int unit, i, j, rc = 0;
+	int unit, i, j, rc;
 	int upa;
 	int nr_g0_units;
 
@@ -2916,7 +2920,7 @@ int __init pcpu_page_first_chunk(size_t reserved_size,
 		unit_pages, psize_str, ai->static_size,
 		ai->reserved_size, ai->dyn_size);
 
-	pcpu_setup_first_chunk(ai, vm.addr);
+	rc = pcpu_setup_first_chunk(ai, vm.addr);
 	goto out_free_ar;
 
 enomem:
@@ -3010,7 +3014,8 @@ void __init setup_per_cpu_areas(void)
 	ai->groups[0].nr_units = 1;
 	ai->groups[0].cpu_map[0] = 0;
 
-	pcpu_setup_first_chunk(ai, fc);
+	if (pcpu_setup_first_chunk(ai, fc) < 0)
+		panic("Failed to initialize percpu areas.");
 	pcpu_free_alloc_info(ai);
 }
 

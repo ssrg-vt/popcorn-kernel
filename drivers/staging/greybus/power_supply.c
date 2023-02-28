@@ -10,7 +10,8 @@
 #include <linux/module.h>
 #include <linux/power_supply.h>
 #include <linux/slab.h>
-#include <linux/greybus.h>
+
+#include "greybus.h"
 
 #define PROP_MAX 32
 

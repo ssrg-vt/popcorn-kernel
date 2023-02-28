@@ -565,7 +565,8 @@ static void asd_destroy_ha_caches(struct asd_ha_struct *asd_ha)
 	if (asd_ha->hw_prof.scb_ext)
 		asd_free_coherent(asd_ha, asd_ha->hw_prof.scb_ext);
 
-	kfree(asd_ha->hw_prof.ddb_bitmap);
+	if (asd_ha->hw_prof.ddb_bitmap)
+		kfree(asd_ha->hw_prof.ddb_bitmap);
 	asd_ha->hw_prof.ddb_bitmap = NULL;
 
 	for (i = 0; i < ASD_MAX_PHYS; i++) {
@@ -640,10 +641,12 @@ Err:
 
 static void asd_destroy_global_caches(void)
 {
-	kmem_cache_destroy(asd_dma_token_cache);
+	if (asd_dma_token_cache)
+		kmem_cache_destroy(asd_dma_token_cache);
 	asd_dma_token_cache = NULL;
 
-	kmem_cache_destroy(asd_ascb_cache);
+	if (asd_ascb_cache)
+		kmem_cache_destroy(asd_ascb_cache);
 	asd_ascb_cache = NULL;
 }
 

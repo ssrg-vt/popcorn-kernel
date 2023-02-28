@@ -139,7 +139,8 @@ static struct {
 		"decoder MPG",
 		VFL_TYPE_GRABBER, IVTV_V4L2_DEC_MPG_OFFSET,
 		PCI_DMA_TODEVICE, 0,
-		V4L2_CAP_VIDEO_OUTPUT | V4L2_CAP_AUDIO | V4L2_CAP_READWRITE,
+		V4L2_CAP_VIDEO_OUTPUT | V4L2_CAP_AUDIO | V4L2_CAP_READWRITE |
+		V4L2_CAP_VIDEO_OUTPUT_OVERLAY,
 		&ivtv_v4l2_dec_fops
 	},
 	{	/* IVTV_DEC_STREAM_TYPE_VBI */
@@ -160,7 +161,8 @@ static struct {
 		"decoder YUV",
 		VFL_TYPE_GRABBER, IVTV_V4L2_DEC_YUV_OFFSET,
 		PCI_DMA_TODEVICE, 0,
-		V4L2_CAP_VIDEO_OUTPUT | V4L2_CAP_AUDIO | V4L2_CAP_READWRITE,
+		V4L2_CAP_VIDEO_OUTPUT | V4L2_CAP_AUDIO | V4L2_CAP_READWRITE |
+		V4L2_CAP_VIDEO_OUTPUT_OVERLAY,
 		&ivtv_v4l2_dec_fops
 	}
 };
@@ -298,14 +300,6 @@ static int ivtv_reg_dev(struct ivtv *itv, int type)
 
 		if (s_mpg->vdev.v4l2_dev)
 			num = s_mpg->vdev.num + ivtv_stream_info[type].num_offset;
-	}
-	s->vdev.device_caps = s->caps;
-	if (itv->osd_video_pbase) {
-		itv->streams[IVTV_DEC_STREAM_TYPE_YUV].vdev.device_caps |=
-			V4L2_CAP_VIDEO_OUTPUT_OVERLAY;
-		itv->streams[IVTV_DEC_STREAM_TYPE_MPG].vdev.device_caps |=
-			V4L2_CAP_VIDEO_OUTPUT_OVERLAY;
-		itv->v4l2_cap |= V4L2_CAP_VIDEO_OUTPUT_OVERLAY;
 	}
 	video_set_drvdata(&s->vdev, s);
 

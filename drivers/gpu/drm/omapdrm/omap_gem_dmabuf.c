@@ -5,9 +5,6 @@
  */
 
 #include <linux/dma-buf.h>
-#include <linux/highmem.h>
-
-#include <drm/drm_prime.h>
 
 #include "omap_drv.h"
 
@@ -128,7 +125,8 @@ static const struct dma_buf_ops omap_dmabuf_ops = {
 	.mmap = omap_gem_dmabuf_mmap,
 };
 
-struct dma_buf *omap_gem_prime_export(struct drm_gem_object *obj, int flags)
+struct dma_buf *omap_gem_prime_export(struct drm_device *dev,
+		struct drm_gem_object *obj, int flags)
 {
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
@@ -137,7 +135,7 @@ struct dma_buf *omap_gem_prime_export(struct drm_gem_object *obj, int flags)
 	exp_info.flags = flags;
 	exp_info.priv = obj;
 
-	return drm_gem_dmabuf_export(obj->dev, &exp_info);
+	return drm_gem_dmabuf_export(dev, &exp_info);
 }
 
 /* -----------------------------------------------------------------------------

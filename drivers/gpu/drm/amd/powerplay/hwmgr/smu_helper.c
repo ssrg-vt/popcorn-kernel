@@ -20,9 +20,6 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  *
  */
-
-#include <linux/pci.h>
-
 #include "hwmgr.h"
 #include "pp_debug.h"
 #include "ppatomctrl.h"

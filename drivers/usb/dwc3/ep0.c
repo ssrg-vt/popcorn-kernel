@@ -336,11 +336,6 @@ static int dwc3_ep0_handle_status(struct dwc3 *dwc,
 				usb_status |= 1 << USB_DEV_STAT_U2_ENABLED;
 		}
 
-		/* Sends the status indicating if the remote wakeup is
-		 * supported by device.
-		 */
-		usb_status |= dwc->remote_wakeup << USB_DEVICE_REMOTE_WAKEUP;
-
 		break;
 
 	case USB_RECIP_INTERFACE:
@@ -384,8 +379,6 @@ static int dwc3_ep0_handle_u1(struct dwc3 *dwc, enum usb_device_state state,
 	if ((dwc->speed != DWC3_DSTS_SUPERSPEED) &&
 			(dwc->speed != DWC3_DSTS_SUPERSPEED_PLUS))
 		return -EINVAL;
-	if (set && dwc->dis_u1_entry_quirk)
-		return -EINVAL;
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
 	if (set)
@@ -407,8 +400,6 @@ static int dwc3_ep0_handle_u2(struct dwc3 *dwc, enum usb_device_state state,
 		return -EINVAL;
 	if ((dwc->speed != DWC3_DSTS_SUPERSPEED) &&
 			(dwc->speed != DWC3_DSTS_SUPERSPEED_PLUS))
-		return -EINVAL;
-	if (set && dwc->dis_u2_entry_quirk)
 		return -EINVAL;
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
@@ -459,12 +450,7 @@ static int dwc3_ep0_handle_device(struct dwc3 *dwc,
 
 	switch (wValue) {
 	case USB_DEVICE_REMOTE_WAKEUP:
-		if (set)
-			dwc->remote_wakeup = 1;
-		else
-			dwc->remote_wakeup = 0;
 		break;
-
 	/*
 	 * 9.4.1 says only only for SS, in AddressState only for
 	 * default control pipe
@@ -480,34 +466,6 @@ static int dwc3_ep0_handle_device(struct dwc3 *dwc,
 		break;
 	case USB_DEVICE_TEST_MODE:
 		ret = dwc3_ep0_handle_test(dwc, state, wIndex, set);
-		break;
-	case USB_DEVICE_B_HNP_ENABLE:
-		if (set) {
-			if (dwc->gadget.host_request_flag) {
-				struct usb_phy *phy =
-					usb_get_phy(USB_PHY_TYPE_USB3);
-
-				dwc->gadget.b_hnp_enable = 0;
-				dwc->gadget.host_request_flag = 0;
-				otg_start_hnp(phy->otg);
-				usb_put_phy(phy);
-			} else {
-				dwc->gadget.b_hnp_enable = 1;
-			}
-		} else
-			return -EINVAL;
-		break;
-
-	case USB_DEVICE_A_HNP_SUPPORT:
-		/* RH port supports HNP */
-		dev_dbg(dwc->dev,
-			    "SET_FEATURE: USB_DEVICE_A_HNP_SUPPORT\n");
-		break;
-
-	case USB_DEVICE_A_ALT_HNP_SUPPORT:
-		/* other RH port does */
-		dev_dbg(dwc->dev,
-			    "SET_FEATURE: USB_DEVICE_A_ALT_HNP_SUPPORT\n");
 		break;
 	default:
 		ret = -EINVAL;
@@ -668,10 +626,7 @@ static int dwc3_ep0_set_config(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 			 * nothing is pending from application.
 			 */
 			reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-			if (!dwc->dis_u1_entry_quirk)
-				reg |= DWC3_DCTL_ACCEPTU1ENA;
-			if (!dwc->dis_u2_entry_quirk)
-				reg |= DWC3_DCTL_ACCEPTU2ENA;
+			reg |= (DWC3_DCTL_ACCEPTU1ENA | DWC3_DCTL_ACCEPTU2ENA);
 			dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 		}
 		break;
@@ -790,10 +745,7 @@ static int dwc3_ep0_std_request(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 
 	switch (ctrl->bRequest) {
 	case USB_REQ_GET_STATUS:
-		if (le16_to_cpu(ctrl->wIndex) == OTG_STS_SELECTOR)
-			ret = dwc3_ep0_delegate_req(dwc, ctrl);
-		else
-			ret = dwc3_ep0_handle_status(dwc, ctrl);
+		ret = dwc3_ep0_handle_status(dwc, ctrl);
 		break;
 	case USB_REQ_CLEAR_FEATURE:
 		ret = dwc3_ep0_handle_feature(dwc, ctrl, 0);

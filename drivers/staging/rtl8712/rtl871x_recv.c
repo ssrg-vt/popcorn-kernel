@@ -48,7 +48,7 @@ void _r8712_init_sta_recv_priv(struct sta_recv_priv *psta_recvpriv)
 	_init_queue(&psta_recvpriv->defrag_q);
 }
 
-void _r8712_init_recv_priv(struct recv_priv *precvpriv,
+sint _r8712_init_recv_priv(struct recv_priv *precvpriv,
 			   struct _adapter *padapter)
 {
 	sint i;
@@ -64,7 +64,7 @@ void _r8712_init_recv_priv(struct recv_priv *precvpriv,
 				sizeof(union recv_frame) + RXFRAME_ALIGN_SZ,
 				GFP_ATOMIC);
 	if (precvpriv->pallocated_frame_buf == NULL)
-		return;
+		return _FAIL;
 	kmemleak_not_leak(precvpriv->pallocated_frame_buf);
 	precvpriv->precv_frame_buf = precvpriv->pallocated_frame_buf +
 				    RXFRAME_ALIGN_SZ -
@@ -80,7 +80,7 @@ void _r8712_init_recv_priv(struct recv_priv *precvpriv,
 		precvframe++;
 	}
 	precvpriv->rx_pending_cnt = 1;
-	r8712_init_recv_priv(precvpriv, padapter);
+	return r8712_init_recv_priv(precvpriv, padapter);
 }
 
 void _r8712_free_recv_priv(struct recv_priv *precvpriv)
@@ -151,7 +151,7 @@ sint r8712_recvframe_chkmic(struct _adapter *adapter,
 	if (prxattrib->encrypt == _TKIP_) {
 		/* calculate mic code */
 		if (stainfo != NULL) {
-			if (is_multicast_ether_addr(prxattrib->ra)) {
+			if (IS_MCAST(prxattrib->ra)) {
 				iv = precvframe->u.hdr.rx_data +
 				     prxattrib->hdrlen;
 				idx = iv[3];
@@ -180,12 +180,12 @@ sint r8712_recvframe_chkmic(struct _adapter *adapter,
 			if (bmic_err) {
 				if (prxattrib->bdecrypted)
 					r8712_handle_tkip_mic_err(adapter,
-						(u8)is_multicast_ether_addr(prxattrib->ra));
+						(u8)IS_MCAST(prxattrib->ra));
 				res = _FAIL;
 			} else {
 				/* mic checked ok */
 				if (!psecuritypriv->bcheck_grpkey &&
-				    is_multicast_ether_addr(prxattrib->ra))
+				    IS_MCAST(prxattrib->ra))
 					psecuritypriv->bcheck_grpkey = true;
 			}
 			recvframe_pull_tail(precvframe, 8);
@@ -245,7 +245,8 @@ union recv_frame *r8712_portctrl(struct _adapter *adapter,
 	if (auth_alg == 2) {
 		/* get ether_type */
 		ptr = ptr + pfhdr->attrib.hdrlen + LLC_HEADER_SIZE;
-		ether_type = get_unaligned_be16(ptr);
+		memcpy(&ether_type, ptr, 2);
+		be16_to_cpus(&ether_type);
 
 		if ((psta != NULL) && (psta->ieee8021x_blocked)) {
 			/* blocked
@@ -304,7 +305,7 @@ static sint sta2sta_data_frame(struct _adapter *adapter,
 	u8 *mybssid  = get_bssid(pmlmepriv);
 	u8 *myhwaddr = myid(&adapter->eeprompriv);
 	u8 *sta_addr = NULL;
-	bool bmcast = is_multicast_ether_addr(pattrib->dst);
+	sint bmcast = IS_MCAST(pattrib->dst);
 
 	if (check_fwstate(pmlmepriv, WIFI_ADHOC_STATE) ||
 	    check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE)) {
@@ -330,7 +331,7 @@ static sint sta2sta_data_frame(struct _adapter *adapter,
 			/* For AP mode, if DA == MCAST, then BSSID should
 			 * be also MCAST
 			 */
-			if (!is_multicast_ether_addr(pattrib->bssid))
+			if (!IS_MCAST(pattrib->bssid))
 				return _FAIL;
 		} else { /* not mc-frame */
 			/* For AP mode, if DA is non-MCAST, then it must be
@@ -372,7 +373,7 @@ static sint ap2sta_data_frame(struct _adapter *adapter,
 	struct	mlme_priv *pmlmepriv = &adapter->mlmepriv;
 	u8 *mybssid  = get_bssid(pmlmepriv);
 	u8 *myhwaddr = myid(&adapter->eeprompriv);
-	bool bmcast = is_multicast_ether_addr(pattrib->dst);
+	sint bmcast = IS_MCAST(pattrib->dst);
 
 	if (check_fwstate(pmlmepriv, WIFI_STATION_STATE) &&
 	    check_fwstate(pmlmepriv, _FW_LINKED)) {
@@ -531,7 +532,7 @@ static sint validate_recv_data_frame(struct _adapter *adapter,
 
 	if (pattrib->privacy) {
 		GET_ENCRY_ALGO(psecuritypriv, psta, pattrib->encrypt,
-			       is_multicast_ether_addr(pattrib->ra));
+			       IS_MCAST(pattrib->ra));
 		SET_ICE_IV_LEN(pattrib->iv_len, pattrib->icv_len,
 			       pattrib->encrypt);
 	} else {
@@ -585,7 +586,7 @@ sint r8712_validate_recv_frame(struct _adapter *adapter,
 	return retval;
 }
 
-int r8712_wlanhdr_to_ethhdr(union recv_frame *precvframe)
+sint r8712_wlanhdr_to_ethhdr(union recv_frame *precvframe)
 {
 	/*remove the wlanhdr and add the eth_hdr*/
 	sint	rmv_len;
@@ -628,14 +629,14 @@ int r8712_wlanhdr_to_ethhdr(union recv_frame *precvframe)
 		ptr = recvframe_pull(precvframe, (rmv_len -
 		      sizeof(struct ethhdr) + 2) - 24);
 		if (!ptr)
-			return -ENOMEM;
+			return _FAIL;
 		memcpy(ptr, get_rxmem(precvframe), 24);
 		ptr += 24;
 	} else {
 		ptr = recvframe_pull(precvframe, (rmv_len -
 		      sizeof(struct ethhdr) + (bsnaphdr ? 2 : 0)));
 		if (!ptr)
-			return -ENOMEM;
+			return _FAIL;
 	}
 
 	memcpy(ptr, pattrib->dst, ETH_ALEN);
@@ -645,10 +646,10 @@ int r8712_wlanhdr_to_ethhdr(union recv_frame *precvframe)
 
 		memcpy(ptr + 12, &be_tmp, 2);
 	}
-	return 0;
+	return _SUCCESS;
 }
 
-void r8712_recv_entry(union recv_frame *precvframe)
+s32 r8712_recv_entry(union recv_frame *precvframe)
 {
 	struct _adapter *padapter;
 	struct recv_priv *precvpriv;
@@ -666,8 +667,9 @@ void r8712_recv_entry(union recv_frame *precvframe)
 	precvpriv->rx_pkts++;
 	precvpriv->rx_bytes += (uint)(precvframe->u.hdr.rx_tail -
 				precvframe->u.hdr.rx_data);
-	return;
+	return ret;
 _recv_entry_drop:
 	precvpriv->rx_drop++;
 	padapter->mppriv.rx_pktloss = precvpriv->rx_drop;
+	return ret;
 }

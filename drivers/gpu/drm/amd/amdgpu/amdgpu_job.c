@@ -24,7 +24,7 @@
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/sched.h>
-
+#include <drm/drmP.h>
 #include "amdgpu.h"
 #include "amdgpu_trace.h"
 
@@ -51,8 +51,6 @@ static void amdgpu_job_timedout(struct drm_sched_job *s_job)
 
 	if (amdgpu_device_should_recover_gpu(ring->adev))
 		amdgpu_device_gpu_recover(ring->adev, job);
-	else
-		drm_sched_suspend_timeout(&ring->sched);
 }
 
 int amdgpu_job_alloc(struct amdgpu_device *adev, unsigned num_ibs,
@@ -218,7 +216,7 @@ static struct dma_fence *amdgpu_job_run(struct drm_sched_job *sched_job)
 	struct amdgpu_ring *ring = to_amdgpu_ring(sched_job->sched);
 	struct dma_fence *fence = NULL, *finished;
 	struct amdgpu_job *job;
-	int r = 0;
+	int r;
 
 	job = to_amdgpu_job(sched_job);
 	finished = &job->base.s_fence->finished;
@@ -243,8 +241,6 @@ static struct dma_fence *amdgpu_job_run(struct drm_sched_job *sched_job)
 	job->fence = dma_fence_get(fence);
 
 	amdgpu_job_free_resources(job);
-
-	fence = r ? ERR_PTR(r) : fence;
 	return fence;
 }
 

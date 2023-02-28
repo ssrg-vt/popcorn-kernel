@@ -4,7 +4,7 @@
  * Queue Interface backend functionality
  *
  * Copyright 2013-2016 Freescale Semiconductor, Inc.
- * Copyright 2016-2017, 2019 NXP
+ * Copyright 2016-2017 NXP
  */
 
 #include <linux/cpumask.h>
@@ -59,9 +59,11 @@ static DEFINE_PER_CPU(int, last_cpu);
 /*
  * caam_qi_priv - CAAM QI backend private params
  * @cgr: QMan congestion group
+ * @qi_pdev: platform device for QI backend
  */
 struct caam_qi_priv {
 	struct qman_cgr cgr;
+	struct platform_device *qi_pdev;
 };
 
 static struct caam_qi_priv qipriv ____cacheline_aligned;
@@ -93,16 +95,6 @@ static u64 times_congested;
  * NOTE: The memcache is SMP-safe. No need to handle spinlocks in-here
  */
 static struct kmem_cache *qi_cache;
-
-static void *caam_iova_to_virt(struct iommu_domain *domain,
-			       dma_addr_t iova_addr)
-{
-	phys_addr_t phys_addr;
-
-	phys_addr = domain ? iommu_iova_to_phys(domain, iova_addr) : iova_addr;
-
-	return phys_to_virt(phys_addr);
-}
 
 int caam_qi_enqueue(struct device *qidev, struct caam_drv_req *req)
 {
@@ -144,7 +136,6 @@ static void caam_fq_ern_cb(struct qman_portal *qm, struct qman_fq *fq,
 	const struct qm_fd *fd;
 	struct caam_drv_req *drv_req;
 	struct device *qidev = &(raw_cpu_ptr(&pcpu_qipriv)->net_dev.dev);
-	struct caam_drv_private *priv = dev_get_drvdata(qidev);
 
 	fd = &msg->ern.fd;
 
@@ -153,7 +144,7 @@ static void caam_fq_ern_cb(struct qman_portal *qm, struct qman_fq *fq,
 		return;
 	}
 
-	drv_req = caam_iova_to_virt(priv->domain, qm_fd_addr_get64(fd));
+	drv_req = (struct caam_drv_req *)phys_to_virt(qm_fd_addr_get64(fd));
 	if (!drv_req) {
 		dev_err(qidev,
 			"Can't find original request for CAAM response\n");
@@ -163,10 +154,7 @@ static void caam_fq_ern_cb(struct qman_portal *qm, struct qman_fq *fq,
 	dma_unmap_single(drv_req->drv_ctx->qidev, qm_fd_addr(fd),
 			 sizeof(drv_req->fd_sgt), DMA_BIDIRECTIONAL);
 
-	if (fd->status)
-		drv_req->cbk(drv_req, be32_to_cpu(fd->status));
-	else
-		drv_req->cbk(drv_req, JRSTA_SSRC_QI);
+	drv_req->cbk(drv_req, -EIO);
 }
 
 static struct qman_fq *create_caam_req_fq(struct device *qidev,
@@ -503,7 +491,7 @@ EXPORT_SYMBOL(caam_drv_ctx_rel);
 void caam_qi_shutdown(struct device *qidev)
 {
 	int i;
-	struct caam_qi_priv *priv = &qipriv;
+	struct caam_qi_priv *priv = dev_get_drvdata(qidev);
 	const cpumask_t *cpus = qman_affine_cpus();
 
 	for_each_cpu(i, cpus) {
@@ -521,6 +509,8 @@ void caam_qi_shutdown(struct device *qidev)
 	qman_release_cgrid(priv->cgr.cgrid);
 
 	kmem_cache_destroy(qi_cache);
+
+	platform_device_unregister(priv->qi_pdev);
 }
 
 static void cgr_cb(struct qman_portal *qm, struct qman_cgr *cgr, int congested)
@@ -563,7 +553,6 @@ static enum qman_cb_dqrr_result caam_rsp_fq_dqrr_cb(struct qman_portal *p,
 	struct caam_drv_req *drv_req;
 	const struct qm_fd *fd;
 	struct device *qidev = &(raw_cpu_ptr(&pcpu_qipriv)->net_dev.dev);
-	struct caam_drv_private *priv = dev_get_drvdata(qidev);
 	u32 status;
 
 	if (caam_qi_napi_schedule(p, caam_napi))
@@ -577,9 +566,8 @@ static enum qman_cb_dqrr_result caam_rsp_fq_dqrr_cb(struct qman_portal *p,
 
 		if (ssrc != JRSTA_SSRC_CCB_ERROR ||
 		    err_id != JRSTA_CCBERR_ERRID_ICVCHK)
-			dev_err_ratelimited(qidev,
-					    "Error: %#x in CAAM response FD\n",
-					    status);
+			dev_err(qidev, "Error: %#x in CAAM response FD\n",
+				status);
 	}
 
 	if (unlikely(qm_fd_get_format(fd) != qm_fd_compound)) {
@@ -587,7 +575,7 @@ static enum qman_cb_dqrr_result caam_rsp_fq_dqrr_cb(struct qman_portal *p,
 		return qman_cb_dqrr_consume;
 	}
 
-	drv_req = caam_iova_to_virt(priv->domain, qm_fd_addr_get64(fd));
+	drv_req = (struct caam_drv_req *)phys_to_virt(qm_fd_addr_get64(fd));
 	if (unlikely(!drv_req)) {
 		dev_err(qidev,
 			"Can't find original request for caam response\n");
@@ -707,17 +695,33 @@ static void free_rsp_fqs(void)
 int caam_qi_init(struct platform_device *caam_pdev)
 {
 	int err, i;
+	struct platform_device *qi_pdev;
 	struct device *ctrldev = &caam_pdev->dev, *qidev;
 	struct caam_drv_private *ctrlpriv;
 	const cpumask_t *cpus = qman_affine_cpus();
+	static struct platform_device_info qi_pdev_info = {
+		.name = "caam_qi",
+		.id = PLATFORM_DEVID_NONE
+	};
+
+	qi_pdev_info.parent = ctrldev;
+	qi_pdev_info.dma_mask = dma_get_mask(ctrldev);
+	qi_pdev = platform_device_register_full(&qi_pdev_info);
+	if (IS_ERR(qi_pdev))
+		return PTR_ERR(qi_pdev);
+	set_dma_ops(&qi_pdev->dev, get_dma_ops(ctrldev));
 
 	ctrlpriv = dev_get_drvdata(ctrldev);
-	qidev = ctrldev;
+	qidev = &qi_pdev->dev;
+
+	qipriv.qi_pdev = qi_pdev;
+	dev_set_drvdata(qidev, &qipriv);
 
 	/* Initialize the congestion detection */
 	err = init_cgr(qidev);
 	if (err) {
 		dev_err(qidev, "CGR initialization failed: %d\n", err);
+		platform_device_unregister(qi_pdev);
 		return err;
 	}
 
@@ -726,6 +730,7 @@ int caam_qi_init(struct platform_device *caam_pdev)
 	if (err) {
 		dev_err(qidev, "Can't allocate CAAM response FQs: %d\n", err);
 		free_rsp_fqs();
+		platform_device_unregister(qi_pdev);
 		return err;
 	}
 
@@ -748,11 +753,15 @@ int caam_qi_init(struct platform_device *caam_pdev)
 		napi_enable(irqtask);
 	}
 
+	/* Hook up QI device to parent controlling caam device */
+	ctrlpriv->qidev = qidev;
+
 	qi_cache = kmem_cache_create("caamqicache", CAAM_QI_MEMCACHE_SIZE, 0,
 				     SLAB_CACHE_DMA, NULL);
 	if (!qi_cache) {
 		dev_err(qidev, "Can't allocate CAAM cache\n");
 		free_rsp_fqs();
+		platform_device_unregister(qi_pdev);
 		return -ENOMEM;
 	}
 
@@ -760,8 +769,6 @@ int caam_qi_init(struct platform_device *caam_pdev)
 	debugfs_create_file("qi_congested", 0444, ctrlpriv->ctl,
 			    &times_congested, &caam_fops_u64_ro);
 #endif
-
-	ctrlpriv->qi_init = 1;
 	dev_info(qidev, "Linux CAAM Queue I/F driver initialised\n");
 	return 0;
 }

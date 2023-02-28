@@ -5,7 +5,6 @@
  */
 #include "xfs.h"
 #include "xfs_fs.h"
-#include "xfs_shared.h"
 #include "xfs_format.h"
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
@@ -13,6 +12,7 @@
 #include "xfs_inode.h"
 #include "xfs_trans.h"
 #include "xfs_inode_item.h"
+#include "xfs_error.h"
 #include "xfs_trace.h"
 #include "xfs_trans_priv.h"
 #include "xfs_buf_item.h"
@@ -565,7 +565,7 @@ out_unlock:
  * Unlock the inode associated with the inode log item.
  */
 STATIC void
-xfs_inode_item_release(
+xfs_inode_item_unlock(
 	struct xfs_log_item	*lip)
 {
 	struct xfs_inode_log_item *iip = INODE_ITEM(lip);
@@ -621,21 +621,23 @@ xfs_inode_item_committed(
 STATIC void
 xfs_inode_item_committing(
 	struct xfs_log_item	*lip,
-	xfs_lsn_t		commit_lsn)
+	xfs_lsn_t		lsn)
 {
-	INODE_ITEM(lip)->ili_last_lsn = commit_lsn;
-	return xfs_inode_item_release(lip);
+	INODE_ITEM(lip)->ili_last_lsn = lsn;
 }
 
+/*
+ * This is the ops vector shared by all buf log items.
+ */
 static const struct xfs_item_ops xfs_inode_item_ops = {
 	.iop_size	= xfs_inode_item_size,
 	.iop_format	= xfs_inode_item_format,
 	.iop_pin	= xfs_inode_item_pin,
 	.iop_unpin	= xfs_inode_item_unpin,
-	.iop_release	= xfs_inode_item_release,
+	.iop_unlock	= xfs_inode_item_unlock,
 	.iop_committed	= xfs_inode_item_committed,
 	.iop_push	= xfs_inode_item_push,
-	.iop_committing	= xfs_inode_item_committing,
+	.iop_committing = xfs_inode_item_committing,
 	.iop_error	= xfs_inode_item_error
 };
 
@@ -651,7 +653,7 @@ xfs_inode_item_init(
 	struct xfs_inode_log_item *iip;
 
 	ASSERT(ip->i_itemp == NULL);
-	iip = ip->i_itemp = kmem_zone_zalloc(xfs_ili_zone, 0);
+	iip = ip->i_itemp = kmem_zone_zalloc(xfs_ili_zone, KM_SLEEP);
 
 	iip->ili_inode = ip;
 	xfs_log_item_init(mp, &iip->ili_item, XFS_LI_INODE,

@@ -22,6 +22,7 @@
  * Authors: Christian König
  */
 
+#include <drm/drmP.h>
 #include "amdgpu.h"
 
 struct amdgpu_gtt_mgr {

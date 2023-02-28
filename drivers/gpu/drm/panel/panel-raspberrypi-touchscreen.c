@@ -53,8 +53,9 @@
 #include <linux/of_graph.h>
 #include <linux/pm.h>
 
+#include <drm/drm_panel.h>
+#include <drm/drmP.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_device.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_panel.h>
 

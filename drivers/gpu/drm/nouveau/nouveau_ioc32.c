@@ -33,8 +33,7 @@
 
 #include <linux/compat.h>
 
-#include <drm/drm.h>
-#include <drm/drm_ioctl.h>
+#include <drm/drmP.h>
 
 #include "nouveau_ioctl.h"
 

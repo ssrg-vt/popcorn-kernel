@@ -66,7 +66,7 @@ MODULE_PARM_DESC(resetmode,
 
 static struct {
 	unsigned short sch_wdtba;
-	spinlock_t unlock_sequence;
+	struct spinlock unlock_sequence;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
@@ -254,8 +254,12 @@ static int ie6xx_wdt_probe(struct platform_device *pdev)
 	ie6xx_wdt_debugfs_init();
 
 	ret = watchdog_register_device(&ie6xx_wdt_dev);
-	if (ret)
+	if (ret) {
+		dev_err(&pdev->dev,
+			"Watchdog timer: cannot register device (err =%d)\n",
+									ret);
 		goto misc_register_error;
+	}
 
 	return 0;
 

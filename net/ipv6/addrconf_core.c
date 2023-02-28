@@ -7,7 +7,6 @@
 #include <linux/export.h>
 #include <net/ipv6.h>
 #include <net/ipv6_stubs.h>
-#include <net/addrconf.h>
 #include <net/ip.h>
 
 /* if ipv6 module registers this function is used by xfrm to force all
@@ -184,11 +183,6 @@ static int eafnosupport_fib6_nh_init(struct net *net, struct fib6_nh *fib6_nh,
 	return -EAFNOSUPPORT;
 }
 
-static int eafnosupport_ip6_del_rt(struct net *net, struct fib6_info *rt)
-{
-	return -EAFNOSUPPORT;
-}
-
 const struct ipv6_stub *ipv6_stub __read_mostly = &(struct ipv6_stub) {
 	.ipv6_dst_lookup   = eafnosupport_ipv6_dst_lookup,
 	.ipv6_route_input  = eafnosupport_ipv6_route_input,
@@ -198,7 +192,6 @@ const struct ipv6_stub *ipv6_stub __read_mostly = &(struct ipv6_stub) {
 	.fib6_select_path  = eafnosupport_fib6_select_path,
 	.ip6_mtu_from_fib6 = eafnosupport_ip6_mtu_from_fib6,
 	.fib6_nh_init	   = eafnosupport_fib6_nh_init,
-	.ip6_del_rt	   = eafnosupport_ip6_del_rt,
 };
 EXPORT_SYMBOL_GPL(ipv6_stub);
 

@@ -4,7 +4,7 @@
 #include <dt-bindings/mfd/max77620.h>
 
 / {
-	model = "NVIDIA Jetson AGX Xavier";
+	model = "NVIDIA Tegra194 P2888 Processor Module";
 	compatible = "nvidia,p2888", "nvidia,tegra194";
 
 	aliases {
@@ -191,7 +191,7 @@
 						regulator-boot-on;
 					};
 
-					vdd_1v8ao: sd3 {
+					sd3 {
 						regulator-name = "VDD_1V8AO";
 						regulator-min-microvolt = <1800000>;
 						regulator-max-microvolt = <1800000>;
@@ -288,30 +288,6 @@
 			regulator-max-microvolt = <5000000>;
 			gpio = <&gpio TEGRA194_MAIN_GPIO(A, 3) GPIO_ACTIVE_HIGH>;
 			enable-active-high;
-		};
-
-		vdd_3v3_pcie: regulator@2 {
-			compatible = "regulator-fixed";
-			reg = <2>;
-
-			regulator-name = "PEX_3V3";
-			regulator-min-microvolt = <3300000>;
-			regulator-max-microvolt = <3300000>;
-			gpio = <&gpio TEGRA194_MAIN_GPIO(Z, 2) GPIO_ACTIVE_HIGH>;
-			regulator-boot-on;
-			enable-active-high;
-		};
-
-		vdd_12v_pcie: regulator@3 {
-			compatible = "regulator-fixed";
-			reg = <3>;
-
-			regulator-name = "VDD_12V";
-			regulator-min-microvolt = <1200000>;
-			regulator-max-microvolt = <1200000>;
-			gpio = <&gpio TEGRA194_MAIN_GPIO(A, 1) GPIO_ACTIVE_LOW>;
-			regulator-boot-on;
-			enable-active-low;
 		};
 	};
 };

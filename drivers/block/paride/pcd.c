@@ -314,8 +314,8 @@ static void pcd_init_units(void)
 		disk->queue = blk_mq_init_sq_queue(&cd->tag_set, &pcd_mq_ops,
 						   1, BLK_MQ_F_SHOULD_MERGE);
 		if (IS_ERR(disk->queue)) {
-			disk->queue = NULL;
 			put_disk(disk);
+			disk->queue = NULL;
 			continue;
 		}
 
@@ -723,9 +723,9 @@ static int pcd_detect(void)
 	k = 0;
 	if (pcd_drive_count == 0) { /* nothing spec'd - so autoprobe for 1 */
 		cd = pcd;
-		if (cd->disk && pi_init(cd->pi, 1, -1, -1, -1, -1, -1,
-			    pcd_buffer, PI_PCD, verbose, cd->name)) {
-			if (!pcd_probe(cd, -1, id)) {
+		if (pi_init(cd->pi, 1, -1, -1, -1, -1, -1, pcd_buffer,
+			    PI_PCD, verbose, cd->name)) {
+			if (!pcd_probe(cd, -1, id) && cd->disk) {
 				cd->present = 1;
 				k++;
 			} else
@@ -736,13 +736,11 @@ static int pcd_detect(void)
 			int *conf = *drives[unit];
 			if (!conf[D_PRT])
 				continue;
-			if (!cd->disk)
-				continue;
 			if (!pi_init(cd->pi, 0, conf[D_PRT], conf[D_MOD],
 				     conf[D_UNI], conf[D_PRO], conf[D_DLY],
 				     pcd_buffer, PI_PCD, verbose, cd->name)) 
 				continue;
-			if (!pcd_probe(cd, conf[D_SLV], id)) {
+			if (!pcd_probe(cd, conf[D_SLV], id) && cd->disk) {
 				cd->present = 1;
 				k++;
 			} else

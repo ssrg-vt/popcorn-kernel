@@ -14,7 +14,6 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/fb.h>
-#include <linux/fbcon.h>
 #include <linux/console.h>
 #include <linux/module.h>
 
@@ -176,7 +175,10 @@ static ssize_t store_modes(struct device *device,
 		return -EINVAL;
 
 	console_lock();
-	lock_fb_info(fb_info);
+	if (!lock_fb_info(fb_info)) {
+		console_unlock();
+		return -ENODEV;
+	}
 
 	list_splice(&fb_info->modelist, &old_list);
 	fb_videomode_to_modelist((const struct fb_videomode *)buf, i,
@@ -302,13 +304,12 @@ static ssize_t store_blank(struct device *device,
 {
 	struct fb_info *fb_info = dev_get_drvdata(device);
 	char *last = NULL;
-	int err, arg;
+	int err;
 
-	arg = simple_strtoul(buf, &last, 0);
 	console_lock();
-	err = fb_blank(fb_info, arg);
-	/* might again call into fb_blank */
-	fbcon_fb_blanked(fb_info, arg);
+	fb_info->flags |= FBINFO_MISC_USEREVENT;
+	err = fb_blank(fb_info, simple_strtoul(buf, &last, 0));
+	fb_info->flags &= ~FBINFO_MISC_USEREVENT;
 	console_unlock();
 	if (err < 0)
 		return err;
@@ -404,7 +405,10 @@ static ssize_t store_fbstate(struct device *device,
 	state = simple_strtoul(buf, &last, 0);
 
 	console_lock();
-	lock_fb_info(fb_info);
+	if (!lock_fb_info(fb_info)) {
+		console_unlock();
+		return -ENODEV;
+	}
 
 	fb_set_suspend(fb_info, (int)state);
 

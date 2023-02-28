@@ -626,7 +626,8 @@ static const struct mfd_cell timberdale_cells_bar2[] = {
 static ssize_t show_fw_ver(struct device *dev, struct device_attribute *attr,
 	char *buf)
 {
-	struct timberdale_device *priv = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct timberdale_device *priv = pci_get_drvdata(pdev);
 
 	return sprintf(buf, "%d.%d.%d\n", priv->fw.major, priv->fw.minor,
 		priv->fw.config);

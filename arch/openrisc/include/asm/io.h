@@ -25,11 +25,25 @@
 #define PIO_OFFSET		0
 #define PIO_MASK		0
 
-#define ioremap_nocache ioremap
+#define ioremap_nocache ioremap_nocache
 #include <asm-generic/io.h>
 #include <asm/pgtable.h>
 
-void __iomem *ioremap(phys_addr_t offset, unsigned long size);
-extern void iounmap(void *addr);
+extern void __iomem *__ioremap(phys_addr_t offset, unsigned long size,
+				pgprot_t prot);
 
+static inline void __iomem *ioremap(phys_addr_t offset, size_t size)
+{
+	return __ioremap(offset, size, PAGE_KERNEL);
+}
+
+/* #define _PAGE_CI       0x002 */
+static inline void __iomem *ioremap_nocache(phys_addr_t offset,
+					     unsigned long size)
+{
+	return __ioremap(offset, size,
+			 __pgprot(pgprot_val(PAGE_KERNEL) | _PAGE_CI));
+}
+
+extern void iounmap(void *addr);
 #endif

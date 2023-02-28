@@ -36,25 +36,20 @@
 #include <linux/export.h>
 #include <net/netlink.h>
 #include <net/net_namespace.h>
-#include <net/netns/generic.h>
 #include <net/sock.h>
 #include <rdma/rdma_netlink.h>
 #include <linux/module.h>
 #include "core_priv.h"
 
+static DEFINE_MUTEX(rdma_nl_mutex);
+static struct sock *nls;
 static struct {
-	const struct rdma_nl_cbs *cb_table;
-	/* Synchronizes between ongoing netlink commands and netlink client
-	 * unregistration.
-	 */
-	struct rw_semaphore sem;
+	const struct rdma_nl_cbs   *cb_table;
 } rdma_nl_types[RDMA_NL_NUM_CLIENTS];
 
 bool rdma_nl_chk_listeners(unsigned int group)
 {
-	struct rdma_dev_net *rnet = rdma_net_to_dev_net(&init_net);
-
-	return netlink_has_listeners(rnet->nl_sock, group);
+	return netlink_has_listeners(nls, group);
 }
 EXPORT_SYMBOL(rdma_nl_chk_listeners);
 
@@ -78,53 +73,62 @@ static bool is_nl_msg_valid(unsigned int type, unsigned int op)
 	return (op < max_num_ops[type]) ? true : false;
 }
 
-static const struct rdma_nl_cbs *
-get_cb_table(const struct sk_buff *skb, unsigned int type, unsigned int op)
+static bool is_nl_valid(unsigned int type, unsigned int op)
 {
 	const struct rdma_nl_cbs *cb_table;
 
-	/*
-	 * Currently only NLDEV client is supporting netlink commands in
-	 * non init_net net namespace.
-	 */
-	if (sock_net(skb->sk) != &init_net && type != RDMA_NL_NLDEV)
-		return NULL;
+	if (!is_nl_msg_valid(type, op))
+		return false;
 
-	cb_table = READ_ONCE(rdma_nl_types[type].cb_table);
-	if (!cb_table) {
-		/*
-		 * Didn't get valid reference of the table, attempt module
-		 * load once.
-		 */
-		up_read(&rdma_nl_types[type].sem);
-
+	if (!rdma_nl_types[type].cb_table) {
+		mutex_unlock(&rdma_nl_mutex);
 		request_module("rdma-netlink-subsys-%d", type);
-
-		down_read(&rdma_nl_types[type].sem);
-		cb_table = READ_ONCE(rdma_nl_types[type].cb_table);
+		mutex_lock(&rdma_nl_mutex);
 	}
+
+	cb_table = rdma_nl_types[type].cb_table;
+
 	if (!cb_table || (!cb_table[op].dump && !cb_table[op].doit))
-		return NULL;
-	return cb_table;
+		return false;
+	return true;
 }
 
 void rdma_nl_register(unsigned int index,
 		      const struct rdma_nl_cbs cb_table[])
 {
-	if (WARN_ON(!is_nl_msg_valid(index, 0)) ||
-	    WARN_ON(READ_ONCE(rdma_nl_types[index].cb_table)))
+	mutex_lock(&rdma_nl_mutex);
+	if (!is_nl_msg_valid(index, 0)) {
+		/*
+		 * All clients are not interesting in success/failure of
+		 * this call. They want to see the print to error log and
+		 * continue their initialization. Print warning for them,
+		 * because it is programmer's error to be here.
+		 */
+		mutex_unlock(&rdma_nl_mutex);
+		WARN(true,
+		     "The not-valid %u index was supplied to RDMA netlink\n",
+		     index);
 		return;
+	}
 
-	/* Pairs with the READ_ONCE in is_nl_valid() */
-	smp_store_release(&rdma_nl_types[index].cb_table, cb_table);
+	if (rdma_nl_types[index].cb_table) {
+		mutex_unlock(&rdma_nl_mutex);
+		WARN(true,
+		     "The %u index is already registered in RDMA netlink\n",
+		     index);
+		return;
+	}
+
+	rdma_nl_types[index].cb_table = cb_table;
+	mutex_unlock(&rdma_nl_mutex);
 }
 EXPORT_SYMBOL(rdma_nl_register);
 
 void rdma_nl_unregister(unsigned int index)
 {
-	down_write(&rdma_nl_types[index].sem);
+	mutex_lock(&rdma_nl_mutex);
 	rdma_nl_types[index].cb_table = NULL;
-	up_write(&rdma_nl_types[index].sem);
+	mutex_unlock(&rdma_nl_mutex);
 }
 EXPORT_SYMBOL(rdma_nl_unregister);
 
@@ -156,21 +160,15 @@ static int rdma_nl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 	unsigned int index = RDMA_NL_GET_CLIENT(type);
 	unsigned int op = RDMA_NL_GET_OP(type);
 	const struct rdma_nl_cbs *cb_table;
-	int err = -EINVAL;
 
-	if (!is_nl_msg_valid(index, op))
+	if (!is_nl_valid(index, op))
 		return -EINVAL;
 
-	down_read(&rdma_nl_types[index].sem);
-	cb_table = get_cb_table(skb, index, op);
-	if (!cb_table)
-		goto done;
+	cb_table = rdma_nl_types[index].cb_table;
 
 	if ((cb_table[op].flags & RDMA_NL_ADMIN_PERM) &&
-	    !netlink_capable(skb, CAP_NET_ADMIN)) {
-		err = -EPERM;
-		goto done;
-	}
+	    !netlink_capable(skb, CAP_NET_ADMIN))
+		return -EPERM;
 
 	/*
 	 * LS responses overload the 0x100 (NLM_F_ROOT) flag.  Don't
@@ -178,8 +176,8 @@ static int rdma_nl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 	 */
 	if (index == RDMA_NL_LS) {
 		if (cb_table[op].doit)
-			err = cb_table[op].doit(skb, nlh, extack);
-		goto done;
+			return cb_table[op].doit(skb, nlh, extack);
+		return -EINVAL;
 	}
 	/* FIXME: Convert IWCM to properly handle doit callbacks */
 	if ((nlh->nlmsg_flags & NLM_F_DUMP) || index == RDMA_NL_IWCM) {
@@ -187,15 +185,14 @@ static int rdma_nl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 			.dump = cb_table[op].dump,
 		};
 		if (c.dump)
-			err = netlink_dump_start(skb->sk, skb, nlh, &c);
-		goto done;
+			return netlink_dump_start(nls, skb, nlh, &c);
+		return -EINVAL;
 	}
 
 	if (cb_table[op].doit)
-		err = cb_table[op].doit(skb, nlh, extack);
-done:
-	up_read(&rdma_nl_types[index].sem);
-	return err;
+		return cb_table[op].doit(skb, nlh, extack);
+
+	return 0;
 }
 
 /*
@@ -256,44 +253,47 @@ skip:
 
 static void rdma_nl_rcv(struct sk_buff *skb)
 {
+	mutex_lock(&rdma_nl_mutex);
 	rdma_nl_rcv_skb(skb, &rdma_nl_rcv_msg);
+	mutex_unlock(&rdma_nl_mutex);
 }
 
-int rdma_nl_unicast(struct net *net, struct sk_buff *skb, u32 pid)
+int rdma_nl_unicast(struct sk_buff *skb, u32 pid)
 {
-	struct rdma_dev_net *rnet = rdma_net_to_dev_net(net);
 	int err;
 
-	err = netlink_unicast(rnet->nl_sock, skb, pid, MSG_DONTWAIT);
+	err = netlink_unicast(nls, skb, pid, MSG_DONTWAIT);
 	return (err < 0) ? err : 0;
 }
 EXPORT_SYMBOL(rdma_nl_unicast);
 
-int rdma_nl_unicast_wait(struct net *net, struct sk_buff *skb, __u32 pid)
+int rdma_nl_unicast_wait(struct sk_buff *skb, __u32 pid)
 {
-	struct rdma_dev_net *rnet = rdma_net_to_dev_net(net);
 	int err;
 
-	err = netlink_unicast(rnet->nl_sock, skb, pid, 0);
+	err = netlink_unicast(nls, skb, pid, 0);
 	return (err < 0) ? err : 0;
 }
 EXPORT_SYMBOL(rdma_nl_unicast_wait);
 
-int rdma_nl_multicast(struct net *net, struct sk_buff *skb,
-		      unsigned int group, gfp_t flags)
+int rdma_nl_multicast(struct sk_buff *skb, unsigned int group, gfp_t flags)
 {
-	struct rdma_dev_net *rnet = rdma_net_to_dev_net(net);
-
-	return nlmsg_multicast(rnet->nl_sock, skb, 0, group, flags);
+	return nlmsg_multicast(nls, skb, 0, group, flags);
 }
 EXPORT_SYMBOL(rdma_nl_multicast);
 
-void rdma_nl_init(void)
+int __init rdma_nl_init(void)
 {
-	int idx;
+	struct netlink_kernel_cfg cfg = {
+		.input	= rdma_nl_rcv,
+	};
 
-	for (idx = 0; idx < RDMA_NL_NUM_CLIENTS; idx++)
-		init_rwsem(&rdma_nl_types[idx].sem);
+	nls = netlink_kernel_create(&init_net, NETLINK_RDMA, &cfg);
+	if (!nls)
+		return -ENOMEM;
+
+	nls->sk_sndtimeo = 10 * HZ;
+	return 0;
 }
 
 void rdma_nl_exit(void)
@@ -301,31 +301,9 @@ void rdma_nl_exit(void)
 	int idx;
 
 	for (idx = 0; idx < RDMA_NL_NUM_CLIENTS; idx++)
-		WARN(rdma_nl_types[idx].cb_table,
-		     "Netlink client %d wasn't released prior to unloading %s\n",
-		     idx, KBUILD_MODNAME);
-}
+		rdma_nl_unregister(idx);
 
-int rdma_nl_net_init(struct rdma_dev_net *rnet)
-{
-	struct net *net = read_pnet(&rnet->net);
-	struct netlink_kernel_cfg cfg = {
-		.input	= rdma_nl_rcv,
-	};
-	struct sock *nls;
-
-	nls = netlink_kernel_create(net, NETLINK_RDMA, &cfg);
-	if (!nls)
-		return -ENOMEM;
-
-	nls->sk_sndtimeo = 10 * HZ;
-	rnet->nl_sock = nls;
-	return 0;
-}
-
-void rdma_nl_net_exit(struct rdma_dev_net *rnet)
-{
-	netlink_kernel_release(rnet->nl_sock);
+	netlink_kernel_release(nls);
 }
 
 MODULE_ALIAS_NET_PF_PROTO(PF_NETLINK, NETLINK_RDMA);

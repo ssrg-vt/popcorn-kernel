@@ -541,8 +541,8 @@ DEFINE_SHOW_ATTRIBUTE(tegra_dbg_gpio);
 
 static void tegra_gpio_debuginit(struct tegra_gpio_info *tgi)
 {
-	debugfs_create_file("tegra_gpio", 0444, NULL, tgi,
-			    &tegra_dbg_gpio_fops);
+	(void) debugfs_create_file("tegra_gpio", 0444,
+				   NULL, tgi, &tegra_dbg_gpio_fops);
 }
 
 #else
@@ -624,8 +624,10 @@ static int tegra_gpio_probe(struct platform_device *pdev)
 
 	for (i = 0; i < tgi->bank_count; i++) {
 		ret = platform_get_irq(pdev, i);
-		if (ret < 0)
+		if (ret < 0) {
+			dev_err(&pdev->dev, "Missing IRQ resource: %d\n", ret);
 			return ret;
+		}
 
 		bank = &tgi->bank_info[i];
 		bank->bank = i;

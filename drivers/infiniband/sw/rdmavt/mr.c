@@ -562,7 +562,8 @@ int rvt_dereg_mr(struct ib_mr *ibmr, struct ib_udata *udata)
 	if (ret)
 		goto out;
 	rvt_deinit_mregion(&mr->mr);
-	ib_umem_release(mr->umem);
+	if (mr->umem)
+		ib_umem_release(mr->umem);
 	kfree(mr);
 out:
 	return ret;
@@ -612,8 +613,8 @@ static int rvt_set_page(struct ib_mr *ibmr, u64 addr)
 	n = mapped_segs % RVT_SEGSZ;
 	mr->mr.map[m]->segs[n].vaddr = (void *)addr;
 	mr->mr.map[m]->segs[n].length = ps;
-	mr->mr.length += ps;
 	trace_rvt_mr_page_seg(&mr->mr, m, n, (void *)addr, ps);
+	mr->mr.length += ps;
 
 	return 0;
 }
@@ -642,7 +643,6 @@ int rvt_map_mr_sg(struct ib_mr *ibmr, struct scatterlist *sg,
 	mr->mr.iova = ibmr->iova;
 	mr->mr.offset = ibmr->iova - (u64)mr->mr.map[0]->segs[0].vaddr;
 	mr->mr.length = (size_t)ibmr->length;
-	trace_rvt_map_mr_sg(ibmr, sg_nents, sg_offset);
 	return ret;
 }
 

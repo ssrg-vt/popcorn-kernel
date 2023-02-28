@@ -3,13 +3,10 @@
  * Copyright (C) 2012 Red Hat
  */
 
-#include <linux/dma-buf.h>
-#include <linux/vmalloc.h>
-
-#include <drm/drm_mode.h>
-#include <drm/drm_prime.h>
-
+#include <drm/drmP.h>
 #include "udl_drv.h"
+#include <linux/shmem_fs.h>
+#include <linux/dma-buf.h>
 
 struct udl_gem_object *udl_gem_alloc_object(struct drm_device *dev,
 					    size_t size)

@@ -16,7 +16,6 @@
 #include <linux/acpi.h>
 
 #include "gpiolib.h"
-#include "gpiolib-acpi.h"
 
 /* Common property names */
 #define XGENE_NIRQ_PROPERTY		"apm,nr-irqs"

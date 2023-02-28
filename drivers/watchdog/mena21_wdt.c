@@ -190,8 +190,10 @@ static int a21_wdt_probe(struct platform_device *pdev)
 	dev_set_drvdata(dev, drv);
 
 	ret = devm_watchdog_register_device(dev, &a21_wdt);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "Cannot register watchdog device\n");
 		return ret;
+	}
 
 	dev_info(dev, "MEN A21 watchdog timer driver enabled\n");
 

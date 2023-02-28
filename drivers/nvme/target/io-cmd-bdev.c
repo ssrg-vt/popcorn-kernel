@@ -8,45 +8,6 @@
 #include <linux/module.h>
 #include "nvmet.h"
 
-void nvmet_bdev_set_limits(struct block_device *bdev, struct nvme_id_ns *id)
-{
-	const struct queue_limits *ql = &bdev_get_queue(bdev)->limits;
-	/* Number of logical blocks per physical block. */
-	const u32 lpp = ql->physical_block_size / ql->logical_block_size;
-	/* Logical blocks per physical block, 0's based. */
-	const __le16 lpp0b = to0based(lpp);
-
-	/*
-	 * For NVMe 1.2 and later, bit 1 indicates that the fields NAWUN,
-	 * NAWUPF, and NACWU are defined for this namespace and should be
-	 * used by the host for this namespace instead of the AWUN, AWUPF,
-	 * and ACWU fields in the Identify Controller data structure. If
-	 * any of these fields are zero that means that the corresponding
-	 * field from the identify controller data structure should be used.
-	 */
-	id->nsfeat |= 1 << 1;
-	id->nawun = lpp0b;
-	id->nawupf = lpp0b;
-	id->nacwu = lpp0b;
-
-	/*
-	 * Bit 4 indicates that the fields NPWG, NPWA, NPDG, NPDA, and
-	 * NOWS are defined for this namespace and should be used by
-	 * the host for I/O optimization.
-	 */
-	id->nsfeat |= 1 << 4;
-	/* NPWG = Namespace Preferred Write Granularity. 0's based */
-	id->npwg = lpp0b;
-	/* NPWA = Namespace Preferred Write Alignment. 0's based */
-	id->npwa = id->npwg;
-	/* NPDG = Namespace Preferred Deallocate Granularity. 0's based */
-	id->npdg = to0based(ql->discard_granularity / ql->logical_block_size);
-	/* NPDG = Namespace Preferred Deallocate Alignment */
-	id->npda = id->npdg;
-	/* NOWS = Namespace Optimal Write Size */
-	id->nows = to0based(ql->io_opt / ql->logical_block_size);
-}
-
 int nvmet_bdev_ns_enable(struct nvmet_ns *ns)
 {
 	int ret;

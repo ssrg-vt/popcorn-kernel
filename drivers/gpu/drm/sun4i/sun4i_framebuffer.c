@@ -9,6 +9,7 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drmP.h>
 
 #include "sun4i_drv.h"
 #include "sun4i_framebuffer.h"

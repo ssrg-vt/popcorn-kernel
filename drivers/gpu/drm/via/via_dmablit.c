@@ -34,16 +34,13 @@
  * the same DMA mappings?
  */
 
+#include <drm/drmP.h>
+#include <drm/via_drm.h>
+#include "via_drv.h"
+#include "via_dmablit.h"
+
 #include <linux/pagemap.h>
 #include <linux/slab.h>
-#include <linux/vmalloc.h>
-
-#include <drm/drm_device.h>
-#include <drm/drm_pci.h>
-#include <drm/via_drm.h>
-
-#include "via_dmablit.h"
-#include "via_drv.h"
 
 #define VIA_PGDN(x)	     (((unsigned long)(x)) & PAGE_MASK)
 #define VIA_PGOFF(x)	    (((unsigned long)(x)) & ~PAGE_MASK)
@@ -174,6 +171,7 @@ via_map_blit_for_device(struct pci_dev *pdev,
 static void
 via_free_sg_info(struct pci_dev *pdev, drm_via_sg_info_t *vsg)
 {
+	struct page *page;
 	int i;
 
 	switch (vsg->state) {
@@ -188,8 +186,13 @@ via_free_sg_info(struct pci_dev *pdev, drm_via_sg_info_t *vsg)
 		kfree(vsg->desc_pages);
 		/* fall through */
 	case dr_via_pages_locked:
-		put_user_pages_dirty_lock(vsg->pages, vsg->num_pages,
-					  (vsg->direction == DMA_FROM_DEVICE));
+		for (i = 0; i < vsg->num_pages; ++i) {
+			if (NULL != (page = vsg->pages[i])) {
+				if (!PageReserved(page) && (DMA_FROM_DEVICE == vsg->direction))
+					SetPageDirty(page);
+				put_page(page);
+			}
+		}
 		/* fall through */
 	case dr_via_pages_alloc:
 		vfree(vsg->pages);
@@ -211,16 +214,16 @@ via_fire_dmablit(struct drm_device *dev, drm_via_sg_info_t *vsg, int engine)
 {
 	drm_via_private_t *dev_priv = (drm_via_private_t *)dev->dev_private;
 
-	via_write(dev_priv, VIA_PCI_DMA_MAR0 + engine*0x10, 0);
-	via_write(dev_priv, VIA_PCI_DMA_DAR0 + engine*0x10, 0);
-	via_write(dev_priv, VIA_PCI_DMA_CSR0 + engine*0x04, VIA_DMA_CSR_DD | VIA_DMA_CSR_TD |
+	VIA_WRITE(VIA_PCI_DMA_MAR0 + engine*0x10, 0);
+	VIA_WRITE(VIA_PCI_DMA_DAR0 + engine*0x10, 0);
+	VIA_WRITE(VIA_PCI_DMA_CSR0 + engine*0x04, VIA_DMA_CSR_DD | VIA_DMA_CSR_TD |
 		  VIA_DMA_CSR_DE);
-	via_write(dev_priv, VIA_PCI_DMA_MR0  + engine*0x04, VIA_DMA_MR_CM | VIA_DMA_MR_TDIE);
-	via_write(dev_priv, VIA_PCI_DMA_BCR0 + engine*0x10, 0);
-	via_write(dev_priv, VIA_PCI_DMA_DPR0 + engine*0x10, vsg->chain_start);
+	VIA_WRITE(VIA_PCI_DMA_MR0  + engine*0x04, VIA_DMA_MR_CM | VIA_DMA_MR_TDIE);
+	VIA_WRITE(VIA_PCI_DMA_BCR0 + engine*0x10, 0);
+	VIA_WRITE(VIA_PCI_DMA_DPR0 + engine*0x10, vsg->chain_start);
 	wmb();
-	via_write(dev_priv, VIA_PCI_DMA_CSR0 + engine*0x04, VIA_DMA_CSR_DE | VIA_DMA_CSR_TS);
-	via_read(dev_priv, VIA_PCI_DMA_CSR0 + engine*0x04);
+	VIA_WRITE(VIA_PCI_DMA_CSR0 + engine*0x04, VIA_DMA_CSR_DE | VIA_DMA_CSR_TS);
+	VIA_READ(VIA_PCI_DMA_CSR0 + engine*0x04);
 }
 
 /*
@@ -288,7 +291,7 @@ via_abort_dmablit(struct drm_device *dev, int engine)
 {
 	drm_via_private_t *dev_priv = (drm_via_private_t *)dev->dev_private;
 
-	via_write(dev_priv, VIA_PCI_DMA_CSR0 + engine*0x04, VIA_DMA_CSR_TA);
+	VIA_WRITE(VIA_PCI_DMA_CSR0 + engine*0x04, VIA_DMA_CSR_TA);
 }
 
 static void
@@ -296,7 +299,7 @@ via_dmablit_engine_off(struct drm_device *dev, int engine)
 {
 	drm_via_private_t *dev_priv = (drm_via_private_t *)dev->dev_private;
 
-	via_write(dev_priv, VIA_PCI_DMA_CSR0 + engine*0x04, VIA_DMA_CSR_TD | VIA_DMA_CSR_DD);
+	VIA_WRITE(VIA_PCI_DMA_CSR0 + engine*0x04, VIA_DMA_CSR_TD | VIA_DMA_CSR_DD);
 }
 
 
@@ -327,7 +330,7 @@ via_dmablit_handler(struct drm_device *dev, int engine, int from_irq)
 		spin_lock_irqsave(&blitq->blit_lock, irqsave);
 
 	done_transfer = blitq->is_active &&
-	  ((status = via_read(dev_priv, VIA_PCI_DMA_CSR0 + engine*0x04)) & VIA_DMA_CSR_TD);
+	  ((status = VIA_READ(VIA_PCI_DMA_CSR0 + engine*0x04)) & VIA_DMA_CSR_TD);
 	done_transfer = done_transfer || (blitq->aborting && !(status & VIA_DMA_CSR_DE));
 
 	cur = blitq->cur;
@@ -346,7 +349,7 @@ via_dmablit_handler(struct drm_device *dev, int engine, int from_irq)
 		 * Clear transfer done flag.
 		 */
 
-		via_write(dev_priv, VIA_PCI_DMA_CSR0 + engine*0x04,  VIA_DMA_CSR_TD);
+		VIA_WRITE(VIA_PCI_DMA_CSR0 + engine*0x04,  VIA_DMA_CSR_TD);
 
 		blitq->is_active = 0;
 		blitq->aborting = 0;
@@ -433,7 +436,7 @@ via_dmablit_sync(struct drm_device *dev, uint32_t handle, int engine)
 	int ret = 0;
 
 	if (via_dmablit_active(blitq, engine, handle, &queue)) {
-		VIA_WAIT_ON(ret, *queue, 3 * HZ,
+		DRM_WAIT_ON(ret, *queue, 3 * HZ,
 			    !via_dmablit_active(blitq, engine, handle, NULL));
 	}
 	DRM_DEBUG("DMA blit sync handle 0x%x engine %d returned %d\n",
@@ -684,7 +687,7 @@ via_dmablit_grab_slot(drm_via_blitq_t *blitq, int engine)
 	while (blitq->num_free == 0) {
 		spin_unlock_irqrestore(&blitq->blit_lock, irqsave);
 
-		VIA_WAIT_ON(ret, blitq->busy_queue, HZ, blitq->num_free > 0);
+		DRM_WAIT_ON(ret, blitq->busy_queue, HZ, blitq->num_free > 0);
 		if (ret)
 			return (-EINTR == ret) ? -EAGAIN : ret;
 

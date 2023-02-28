@@ -5,17 +5,13 @@
  * Authors: Matthew Garrett
  *          Dave Airlie
  */
-
 #include <linux/module.h>
 #include <linux/console.h>
-
-#include <drm/drm_drv.h>
-#include <drm/drm_file.h>
-#include <drm/drm_ioctl.h>
-#include <drm/drm_pci.h>
-#include <drm/drm_pciids.h>
+#include <drm/drmP.h>
 
 #include "mgag200_drv.h"
+
+#include <drm/drm_pciids.h>
 
 /*
  * This is the generic driver code. This binds the driver to the drm core,
@@ -60,7 +56,13 @@ static void mga_pci_remove(struct pci_dev *pdev)
 
 static const struct file_operations mgag200_driver_fops = {
 	.owner = THIS_MODULE,
-	DRM_VRAM_MM_FILE_OPERATIONS
+	.open = drm_open,
+	.release = drm_release,
+	.unlocked_ioctl = drm_ioctl,
+	.mmap = mgag200_mmap,
+	.poll = drm_poll,
+	.compat_ioctl = drm_compat_ioctl,
+	.read = drm_read,
 };
 
 static struct drm_driver driver = {
@@ -74,7 +76,10 @@ static struct drm_driver driver = {
 	.major = DRIVER_MAJOR,
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
-	DRM_GEM_VRAM_DRIVER
+
+	.gem_free_object_unlocked = mgag200_gem_free_object,
+	.dumb_create = mgag200_dumb_create,
+	.dumb_map_offset = mgag200_dumb_mmap_offset,
 };
 
 static struct pci_driver mgag200_pci_driver = {

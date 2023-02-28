@@ -44,6 +44,8 @@
 #define DMEM_CHUNK_SIZE (2UL << 20)
 #define DMEM_CHUNK_NPAGES (DMEM_CHUNK_SIZE >> PAGE_SHIFT)
 
+struct nouveau_migrate;
+
 enum nouveau_aper {
 	NOUVEAU_APER_VIRT,
 	NOUVEAU_APER_VRAM,
@@ -70,8 +72,7 @@ struct nouveau_dmem_migrate {
 };
 
 struct nouveau_dmem {
-	struct nouveau_drm *drm;
-	struct dev_pagemap pagemap;
+	struct hmm_devmem *devmem;
 	struct nouveau_dmem_migrate migrate;
 	struct list_head chunk_free;
 	struct list_head chunk_full;
@@ -79,23 +80,30 @@ struct nouveau_dmem {
 	struct mutex mutex;
 };
 
-static inline struct nouveau_dmem *page_to_dmem(struct page *page)
-{
-	return container_of(page->pgmap, struct nouveau_dmem, pagemap);
-}
+struct nouveau_dmem_fault {
+	struct nouveau_drm *drm;
+	struct nouveau_fence *fence;
+	dma_addr_t *dma;
+	unsigned long npages;
+};
 
-static unsigned long nouveau_dmem_page_addr(struct page *page)
-{
-	struct nouveau_dmem_chunk *chunk = page->zone_device_data;
-	unsigned long idx = page_to_pfn(page) - chunk->pfn_first;
+struct nouveau_migrate {
+	struct vm_area_struct *vma;
+	struct nouveau_drm *drm;
+	struct nouveau_fence *fence;
+	unsigned long npages;
+	dma_addr_t *dma;
+	unsigned long dma_nr;
+};
 
-	return (idx << PAGE_SHIFT) + chunk->bo->bo.offset;
-}
-
-static void nouveau_dmem_page_free(struct page *page)
+static void
+nouveau_dmem_free(struct hmm_devmem *devmem, struct page *page)
 {
-	struct nouveau_dmem_chunk *chunk = page->zone_device_data;
-	unsigned long idx = page_to_pfn(page) - chunk->pfn_first;
+	struct nouveau_dmem_chunk *chunk;
+	unsigned long idx;
+
+	chunk = (void *)hmm_devmem_page_get_drvdata(page);
+	idx = page_to_pfn(page) - chunk->pfn_first;
 
 	/*
 	 * FIXME:
@@ -115,95 +123,178 @@ static void nouveau_dmem_page_free(struct page *page)
 	spin_unlock(&chunk->lock);
 }
 
-static void nouveau_dmem_fence_done(struct nouveau_fence **fence)
+static void
+nouveau_dmem_fault_alloc_and_copy(struct vm_area_struct *vma,
+				  const unsigned long *src_pfns,
+				  unsigned long *dst_pfns,
+				  unsigned long start,
+				  unsigned long end,
+				  void *private)
 {
-	if (fence) {
-		nouveau_fence_wait(*fence, true, false);
-		nouveau_fence_unref(fence);
-	} else {
-		/*
-		 * FIXME wait for channel to be IDLE before calling finalizing
-		 * the hmem object.
-		 */
+	struct nouveau_dmem_fault *fault = private;
+	struct nouveau_drm *drm = fault->drm;
+	struct device *dev = drm->dev->dev;
+	unsigned long addr, i, npages = 0;
+	nouveau_migrate_copy_t copy;
+	int ret;
+
+
+	/* First allocate new memory */
+	for (addr = start, i = 0; addr < end; addr += PAGE_SIZE, i++) {
+		struct page *dpage, *spage;
+
+		dst_pfns[i] = 0;
+		spage = migrate_pfn_to_page(src_pfns[i]);
+		if (!spage || !(src_pfns[i] & MIGRATE_PFN_MIGRATE))
+			continue;
+
+		dpage = hmm_vma_alloc_locked_page(vma, addr);
+		if (!dpage) {
+			dst_pfns[i] = MIGRATE_PFN_ERROR;
+			continue;
+		}
+
+		dst_pfns[i] = migrate_pfn(page_to_pfn(dpage)) |
+			      MIGRATE_PFN_LOCKED;
+		npages++;
+	}
+
+	/* Allocate storage for DMA addresses, so we can unmap later. */
+	fault->dma = kmalloc(sizeof(*fault->dma) * npages, GFP_KERNEL);
+	if (!fault->dma)
+		goto error;
+
+	/* Copy things over */
+	copy = drm->dmem->migrate.copy_func;
+	for (addr = start, i = 0; addr < end; addr += PAGE_SIZE, i++) {
+		struct nouveau_dmem_chunk *chunk;
+		struct page *spage, *dpage;
+		u64 src_addr, dst_addr;
+
+		dpage = migrate_pfn_to_page(dst_pfns[i]);
+		if (!dpage || dst_pfns[i] == MIGRATE_PFN_ERROR)
+			continue;
+
+		spage = migrate_pfn_to_page(src_pfns[i]);
+		if (!spage || !(src_pfns[i] & MIGRATE_PFN_MIGRATE)) {
+			dst_pfns[i] = MIGRATE_PFN_ERROR;
+			__free_page(dpage);
+			continue;
+		}
+
+		fault->dma[fault->npages] =
+			dma_map_page_attrs(dev, dpage, 0, PAGE_SIZE,
+					   PCI_DMA_BIDIRECTIONAL,
+					   DMA_ATTR_SKIP_CPU_SYNC);
+		if (dma_mapping_error(dev, fault->dma[fault->npages])) {
+			dst_pfns[i] = MIGRATE_PFN_ERROR;
+			__free_page(dpage);
+			continue;
+		}
+
+		dst_addr = fault->dma[fault->npages++];
+
+		chunk = (void *)hmm_devmem_page_get_drvdata(spage);
+		src_addr = page_to_pfn(spage) - chunk->pfn_first;
+		src_addr = (src_addr << PAGE_SHIFT) + chunk->bo->bo.offset;
+
+		ret = copy(drm, 1, NOUVEAU_APER_HOST, dst_addr,
+				   NOUVEAU_APER_VRAM, src_addr);
+		if (ret) {
+			dst_pfns[i] = MIGRATE_PFN_ERROR;
+			__free_page(dpage);
+			continue;
+		}
+	}
+
+	nouveau_fence_new(drm->dmem->migrate.chan, false, &fault->fence);
+
+	return;
+
+error:
+	for (addr = start, i = 0; addr < end; addr += PAGE_SIZE, ++i) {
+		struct page *page;
+
+		if (!dst_pfns[i] || dst_pfns[i] == MIGRATE_PFN_ERROR)
+			continue;
+
+		page = migrate_pfn_to_page(dst_pfns[i]);
+		dst_pfns[i] = MIGRATE_PFN_ERROR;
+		if (page == NULL)
+			continue;
+
+		__free_page(page);
 	}
 }
 
-static vm_fault_t nouveau_dmem_fault_copy_one(struct nouveau_drm *drm,
-		struct vm_fault *vmf, struct migrate_vma *args,
-		dma_addr_t *dma_addr)
+void nouveau_dmem_fault_finalize_and_map(struct vm_area_struct *vma,
+					 const unsigned long *src_pfns,
+					 const unsigned long *dst_pfns,
+					 unsigned long start,
+					 unsigned long end,
+					 void *private)
 {
-	struct device *dev = drm->dev->dev;
-	struct page *dpage, *spage;
+	struct nouveau_dmem_fault *fault = private;
+	struct nouveau_drm *drm = fault->drm;
 
-	spage = migrate_pfn_to_page(args->src[0]);
-	if (!spage || !(args->src[0] & MIGRATE_PFN_MIGRATE))
-		return 0;
+	if (fault->fence) {
+		nouveau_fence_wait(fault->fence, true, false);
+		nouveau_fence_unref(&fault->fence);
+	} else {
+		/*
+		 * FIXME wait for channel to be IDLE before calling finalizing
+		 * the hmem object below (nouveau_migrate_hmem_fini()).
+		 */
+	}
 
-	dpage = alloc_page_vma(GFP_HIGHUSER, vmf->vma, vmf->address);
-	if (!dpage)
-		return VM_FAULT_SIGBUS;
-	lock_page(dpage);
-
-	*dma_addr = dma_map_page(dev, dpage, 0, PAGE_SIZE, DMA_BIDIRECTIONAL);
-	if (dma_mapping_error(dev, *dma_addr))
-		goto error_free_page;
-
-	if (drm->dmem->migrate.copy_func(drm, 1, NOUVEAU_APER_HOST, *dma_addr,
-			NOUVEAU_APER_VRAM, nouveau_dmem_page_addr(spage)))
-		goto error_dma_unmap;
-
-	args->dst[0] = migrate_pfn(page_to_pfn(dpage)) | MIGRATE_PFN_LOCKED;
-	return 0;
-
-error_dma_unmap:
-	dma_unmap_page(dev, *dma_addr, PAGE_SIZE, DMA_BIDIRECTIONAL);
-error_free_page:
-	__free_page(dpage);
-	return VM_FAULT_SIGBUS;
+	while (fault->npages--) {
+		dma_unmap_page(drm->dev->dev, fault->dma[fault->npages],
+			       PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
+	}
+	kfree(fault->dma);
 }
 
-static vm_fault_t nouveau_dmem_migrate_to_ram(struct vm_fault *vmf)
+static const struct migrate_vma_ops nouveau_dmem_fault_migrate_ops = {
+	.alloc_and_copy		= nouveau_dmem_fault_alloc_and_copy,
+	.finalize_and_map	= nouveau_dmem_fault_finalize_and_map,
+};
+
+static vm_fault_t
+nouveau_dmem_fault(struct hmm_devmem *devmem,
+		   struct vm_area_struct *vma,
+		   unsigned long addr,
+		   const struct page *page,
+		   unsigned int flags,
+		   pmd_t *pmdp)
 {
-	struct nouveau_dmem *dmem = page_to_dmem(vmf->page);
-	struct nouveau_drm *drm = dmem->drm;
-	struct nouveau_fence *fence;
-	unsigned long src = 0, dst = 0;
-	dma_addr_t dma_addr = 0;
-	vm_fault_t ret;
-	struct migrate_vma args = {
-		.vma		= vmf->vma,
-		.start		= vmf->address,
-		.end		= vmf->address + PAGE_SIZE,
-		.src		= &src,
-		.dst		= &dst,
-	};
+	struct drm_device *drm_dev = dev_get_drvdata(devmem->device);
+	unsigned long src[1] = {0}, dst[1] = {0};
+	struct nouveau_dmem_fault fault = {0};
+	int ret;
+
+
 
 	/*
 	 * FIXME what we really want is to find some heuristic to migrate more
 	 * than just one page on CPU fault. When such fault happens it is very
 	 * likely that more surrounding page will CPU fault too.
 	 */
-	if (migrate_vma_setup(&args) < 0)
+	fault.drm = nouveau_drm(drm_dev);
+	ret = migrate_vma(&nouveau_dmem_fault_migrate_ops, vma, addr,
+			  addr + PAGE_SIZE, src, dst, &fault);
+	if (ret)
 		return VM_FAULT_SIGBUS;
-	if (!args.cpages)
-		return 0;
 
-	ret = nouveau_dmem_fault_copy_one(drm, vmf, &args, &dma_addr);
-	if (ret || dst == 0)
-		goto done;
+	if (dst[0] == MIGRATE_PFN_ERROR)
+		return VM_FAULT_SIGBUS;
 
-	nouveau_fence_new(dmem->migrate.chan, false, &fence);
-	migrate_vma_pages(&args);
-	nouveau_dmem_fence_done(&fence);
-	dma_unmap_page(drm->dev->dev, dma_addr, PAGE_SIZE, DMA_BIDIRECTIONAL);
-done:
-	migrate_vma_finalize(&args);
-	return ret;
+	return 0;
 }
 
-static const struct dev_pagemap_ops nouveau_dmem_pagemap_ops = {
-	.page_free		= nouveau_dmem_page_free,
-	.migrate_to_ram		= nouveau_dmem_migrate_to_ram,
+static const struct hmm_devmem_ops
+nouveau_dmem_devmem_ops = {
+	.free = nouveau_dmem_free,
+	.fault = nouveau_dmem_fault,
 };
 
 static int
@@ -490,8 +581,7 @@ void
 nouveau_dmem_init(struct nouveau_drm *drm)
 {
 	struct device *device = drm->dev->dev;
-	struct resource *res;
-	unsigned long i, size, pfn_first;
+	unsigned long i, size;
 	int ret;
 
 	/* This only make sense on PASCAL or newer */
@@ -501,7 +591,6 @@ nouveau_dmem_init(struct nouveau_drm *drm)
 	if (!(drm->dmem = kzalloc(sizeof(*drm->dmem), GFP_KERNEL)))
 		return;
 
-	drm->dmem->drm = drm;
 	mutex_init(&drm->dmem->mutex);
 	INIT_LIST_HEAD(&drm->dmem->chunk_free);
 	INIT_LIST_HEAD(&drm->dmem->chunk_full);
@@ -511,8 +600,11 @@ nouveau_dmem_init(struct nouveau_drm *drm)
 
 	/* Initialize migration dma helpers before registering memory */
 	ret = nouveau_dmem_migrate_init(drm);
-	if (ret)
-		goto out_free;
+	if (ret) {
+		kfree(drm->dmem);
+		drm->dmem = NULL;
+		return;
+	}
 
 	/*
 	 * FIXME we need some kind of policy to decide how much VRAM we
@@ -520,16 +612,14 @@ nouveau_dmem_init(struct nouveau_drm *drm)
 	 * and latter if we want to do thing like over commit then we
 	 * could revisit this.
 	 */
-	res = devm_request_free_mem_region(device, &iomem_resource, size);
-	if (IS_ERR(res))
-		goto out_free;
-	drm->dmem->pagemap.type = MEMORY_DEVICE_PRIVATE;
-	drm->dmem->pagemap.res = *res;
-	drm->dmem->pagemap.ops = &nouveau_dmem_pagemap_ops;
-	if (IS_ERR(devm_memremap_pages(device, &drm->dmem->pagemap)))
-		goto out_free;
+	drm->dmem->devmem = hmm_devmem_add(&nouveau_dmem_devmem_ops,
+					   device, size);
+	if (IS_ERR(drm->dmem->devmem)) {
+		kfree(drm->dmem);
+		drm->dmem = NULL;
+		return;
+	}
 
-	pfn_first = res->start >> PAGE_SHIFT;
 	for (i = 0; i < (size / DMEM_CHUNK_SIZE); ++i) {
 		struct nouveau_dmem_chunk *chunk;
 		struct page *page;
@@ -542,82 +632,160 @@ nouveau_dmem_init(struct nouveau_drm *drm)
 		}
 
 		chunk->drm = drm;
-		chunk->pfn_first = pfn_first + (i * DMEM_CHUNK_NPAGES);
+		chunk->pfn_first = drm->dmem->devmem->pfn_first;
+		chunk->pfn_first += (i * DMEM_CHUNK_NPAGES);
 		list_add_tail(&chunk->list, &drm->dmem->chunk_empty);
 
 		page = pfn_to_page(chunk->pfn_first);
-		for (j = 0; j < DMEM_CHUNK_NPAGES; ++j, ++page)
-			page->zone_device_data = chunk;
+		for (j = 0; j < DMEM_CHUNK_NPAGES; ++j, ++page) {
+			hmm_devmem_page_set_drvdata(page, (long)chunk);
+		}
 	}
 
 	NV_INFO(drm, "DMEM: registered %ldMB of device memory\n", size >> 20);
-	return;
-out_free:
-	kfree(drm->dmem);
-	drm->dmem = NULL;
 }
 
-static unsigned long nouveau_dmem_migrate_copy_one(struct nouveau_drm *drm,
-		unsigned long src, dma_addr_t *dma_addr)
+static void
+nouveau_dmem_migrate_alloc_and_copy(struct vm_area_struct *vma,
+				    const unsigned long *src_pfns,
+				    unsigned long *dst_pfns,
+				    unsigned long start,
+				    unsigned long end,
+				    void *private)
 {
+	struct nouveau_migrate *migrate = private;
+	struct nouveau_drm *drm = migrate->drm;
 	struct device *dev = drm->dev->dev;
-	struct page *dpage, *spage;
+	unsigned long addr, i, npages = 0;
+	nouveau_migrate_copy_t copy;
+	int ret;
 
-	spage = migrate_pfn_to_page(src);
-	if (!spage || !(src & MIGRATE_PFN_MIGRATE))
-		goto out;
+	/* First allocate new memory */
+	for (addr = start, i = 0; addr < end; addr += PAGE_SIZE, i++) {
+		struct page *dpage, *spage;
 
-	dpage = nouveau_dmem_page_alloc_locked(drm);
-	if (!dpage)
-		return 0;
+		dst_pfns[i] = 0;
+		spage = migrate_pfn_to_page(src_pfns[i]);
+		if (!spage || !(src_pfns[i] & MIGRATE_PFN_MIGRATE))
+			continue;
 
-	*dma_addr = dma_map_page(dev, spage, 0, PAGE_SIZE, DMA_BIDIRECTIONAL);
-	if (dma_mapping_error(dev, *dma_addr))
-		goto out_free_page;
+		dpage = nouveau_dmem_page_alloc_locked(drm);
+		if (!dpage)
+			continue;
 
-	if (drm->dmem->migrate.copy_func(drm, 1, NOUVEAU_APER_VRAM,
-			nouveau_dmem_page_addr(dpage), NOUVEAU_APER_HOST,
-			*dma_addr))
-		goto out_dma_unmap;
+		dst_pfns[i] = migrate_pfn(page_to_pfn(dpage)) |
+			      MIGRATE_PFN_LOCKED |
+			      MIGRATE_PFN_DEVICE;
+		npages++;
+	}
 
-	return migrate_pfn(page_to_pfn(dpage)) | MIGRATE_PFN_LOCKED;
+	if (!npages)
+		return;
 
-out_dma_unmap:
-	dma_unmap_page(dev, *dma_addr, PAGE_SIZE, DMA_BIDIRECTIONAL);
-out_free_page:
-	nouveau_dmem_page_free_locked(drm, dpage);
-out:
-	return 0;
+	/* Allocate storage for DMA addresses, so we can unmap later. */
+	migrate->dma = kmalloc(sizeof(*migrate->dma) * npages, GFP_KERNEL);
+	if (!migrate->dma)
+		goto error;
+
+	/* Copy things over */
+	copy = drm->dmem->migrate.copy_func;
+	for (addr = start, i = 0; addr < end; addr += PAGE_SIZE, i++) {
+		struct nouveau_dmem_chunk *chunk;
+		struct page *spage, *dpage;
+		u64 src_addr, dst_addr;
+
+		dpage = migrate_pfn_to_page(dst_pfns[i]);
+		if (!dpage || dst_pfns[i] == MIGRATE_PFN_ERROR)
+			continue;
+
+		chunk = (void *)hmm_devmem_page_get_drvdata(dpage);
+		dst_addr = page_to_pfn(dpage) - chunk->pfn_first;
+		dst_addr = (dst_addr << PAGE_SHIFT) + chunk->bo->bo.offset;
+
+		spage = migrate_pfn_to_page(src_pfns[i]);
+		if (!spage || !(src_pfns[i] & MIGRATE_PFN_MIGRATE)) {
+			nouveau_dmem_page_free_locked(drm, dpage);
+			dst_pfns[i] = 0;
+			continue;
+		}
+
+		migrate->dma[migrate->dma_nr] =
+			dma_map_page_attrs(dev, spage, 0, PAGE_SIZE,
+					   PCI_DMA_BIDIRECTIONAL,
+					   DMA_ATTR_SKIP_CPU_SYNC);
+		if (dma_mapping_error(dev, migrate->dma[migrate->dma_nr])) {
+			nouveau_dmem_page_free_locked(drm, dpage);
+			dst_pfns[i] = 0;
+			continue;
+		}
+
+		src_addr = migrate->dma[migrate->dma_nr++];
+
+		ret = copy(drm, 1, NOUVEAU_APER_VRAM, dst_addr,
+				   NOUVEAU_APER_HOST, src_addr);
+		if (ret) {
+			nouveau_dmem_page_free_locked(drm, dpage);
+			dst_pfns[i] = 0;
+			continue;
+		}
+	}
+
+	nouveau_fence_new(drm->dmem->migrate.chan, false, &migrate->fence);
+
+	return;
+
+error:
+	for (addr = start, i = 0; addr < end; addr += PAGE_SIZE, ++i) {
+		struct page *page;
+
+		if (!dst_pfns[i] || dst_pfns[i] == MIGRATE_PFN_ERROR)
+			continue;
+
+		page = migrate_pfn_to_page(dst_pfns[i]);
+		dst_pfns[i] = MIGRATE_PFN_ERROR;
+		if (page == NULL)
+			continue;
+
+		__free_page(page);
+	}
 }
 
-static void nouveau_dmem_migrate_chunk(struct nouveau_drm *drm,
-		struct migrate_vma *args, dma_addr_t *dma_addrs)
+void nouveau_dmem_migrate_finalize_and_map(struct vm_area_struct *vma,
+					   const unsigned long *src_pfns,
+					   const unsigned long *dst_pfns,
+					   unsigned long start,
+					   unsigned long end,
+					   void *private)
 {
-	struct nouveau_fence *fence;
-	unsigned long addr = args->start, nr_dma = 0, i;
+	struct nouveau_migrate *migrate = private;
+	struct nouveau_drm *drm = migrate->drm;
 
-	for (i = 0; addr < args->end; i++) {
-		args->dst[i] = nouveau_dmem_migrate_copy_one(drm, args->src[i],
-				dma_addrs + nr_dma);
-		if (args->dst[i])
-			nr_dma++;
-		addr += PAGE_SIZE;
+	if (migrate->fence) {
+		nouveau_fence_wait(migrate->fence, true, false);
+		nouveau_fence_unref(&migrate->fence);
+	} else {
+		/*
+		 * FIXME wait for channel to be IDLE before finalizing
+		 * the hmem object below (nouveau_migrate_hmem_fini()) ?
+		 */
 	}
 
-	nouveau_fence_new(drm->dmem->migrate.chan, false, &fence);
-	migrate_vma_pages(args);
-	nouveau_dmem_fence_done(&fence);
-
-	while (nr_dma--) {
-		dma_unmap_page(drm->dev->dev, dma_addrs[nr_dma], PAGE_SIZE,
-				DMA_BIDIRECTIONAL);
+	while (migrate->dma_nr--) {
+		dma_unmap_page(drm->dev->dev, migrate->dma[migrate->dma_nr],
+			       PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
 	}
+	kfree(migrate->dma);
+
 	/*
-	 * FIXME optimization: update GPU page table to point to newly migrated
-	 * memory.
+	 * FIXME optimization: update GPU page table to point to newly
+	 * migrated memory.
 	 */
-	migrate_vma_finalize(args);
 }
+
+static const struct migrate_vma_ops nouveau_dmem_migrate_ops = {
+	.alloc_and_copy		= nouveau_dmem_migrate_alloc_and_copy,
+	.finalize_and_map	= nouveau_dmem_migrate_finalize_and_map,
+};
 
 int
 nouveau_dmem_migrate_vma(struct nouveau_drm *drm,
@@ -625,54 +793,53 @@ nouveau_dmem_migrate_vma(struct nouveau_drm *drm,
 			 unsigned long start,
 			 unsigned long end)
 {
-	unsigned long npages = (end - start) >> PAGE_SHIFT;
-	unsigned long max = min(SG_MAX_SINGLE_ALLOC, npages);
-	dma_addr_t *dma_addrs;
-	struct migrate_vma args = {
-		.vma		= vma,
-		.start		= start,
-	};
-	unsigned long c, i;
-	int ret = -ENOMEM;
+	unsigned long *src_pfns, *dst_pfns, npages;
+	struct nouveau_migrate migrate = {0};
+	unsigned long i, c, max;
+	int ret = 0;
 
-	args.src = kcalloc(max, sizeof(args.src), GFP_KERNEL);
-	if (!args.src)
-		goto out;
-	args.dst = kcalloc(max, sizeof(args.dst), GFP_KERNEL);
-	if (!args.dst)
-		goto out_free_src;
-
-	dma_addrs = kmalloc_array(max, sizeof(*dma_addrs), GFP_KERNEL);
-	if (!dma_addrs)
-		goto out_free_dst;
-
-	for (i = 0; i < npages; i += c) {
-		c = min(SG_MAX_SINGLE_ALLOC, npages);
-		args.end = start + (c << PAGE_SHIFT);
-		ret = migrate_vma_setup(&args);
-		if (ret)
-			goto out_free_dma;
-
-		if (args.cpages)
-			nouveau_dmem_migrate_chunk(drm, &args, dma_addrs);
-		args.start = args.end;
+	npages = (end - start) >> PAGE_SHIFT;
+	max = min(SG_MAX_SINGLE_ALLOC, npages);
+	src_pfns = kzalloc(sizeof(long) * max, GFP_KERNEL);
+	if (src_pfns == NULL)
+		return -ENOMEM;
+	dst_pfns = kzalloc(sizeof(long) * max, GFP_KERNEL);
+	if (dst_pfns == NULL) {
+		kfree(src_pfns);
+		return -ENOMEM;
 	}
 
-	ret = 0;
-out_free_dma:
-	kfree(dma_addrs);
-out_free_dst:
-	kfree(args.dst);
-out_free_src:
-	kfree(args.src);
+	migrate.drm = drm;
+	migrate.vma = vma;
+	migrate.npages = npages;
+	for (i = 0; i < npages; i += c) {
+		unsigned long next;
+
+		c = min(SG_MAX_SINGLE_ALLOC, npages);
+		next = start + (c << PAGE_SHIFT);
+		ret = migrate_vma(&nouveau_dmem_migrate_ops, vma, start,
+				  next, src_pfns, dst_pfns, &migrate);
+		if (ret)
+			goto out;
+		start = next;
+	}
+
 out:
+	kfree(dst_pfns);
+	kfree(src_pfns);
 	return ret;
 }
 
 static inline bool
 nouveau_dmem_page(struct nouveau_drm *drm, struct page *page)
 {
-	return is_device_private_page(page) && drm->dmem == page_to_dmem(page);
+	if (!is_device_private_page(page))
+		return false;
+
+	if (drm->dmem->devmem != page->pgmap->data)
+		return false;
+
+	return true;
 }
 
 void
@@ -683,10 +850,11 @@ nouveau_dmem_convert_pfn(struct nouveau_drm *drm,
 
 	npages = (range->end - range->start) >> PAGE_SHIFT;
 	for (i = 0; i < npages; ++i) {
+		struct nouveau_dmem_chunk *chunk;
 		struct page *page;
 		uint64_t addr;
 
-		page = hmm_device_entry_to_page(range, range->pfns[i]);
+		page = hmm_pfn_to_page(range, range->pfns[i]);
 		if (page == NULL)
 			continue;
 
@@ -700,7 +868,10 @@ nouveau_dmem_convert_pfn(struct nouveau_drm *drm,
 			continue;
 		}
 
-		addr = nouveau_dmem_page_addr(page);
+		chunk = (void *)hmm_devmem_page_get_drvdata(page);
+		addr = page_to_pfn(page) - chunk->pfn_first;
+		addr = (addr + chunk->bo->bo.mem.start) << PAGE_SHIFT;
+
 		range->pfns[i] &= ((1UL << range->pfn_shift) - 1);
 		range->pfns[i] |= (addr >> PAGE_SHIFT) << range->pfn_shift;
 	}

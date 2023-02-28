@@ -116,7 +116,7 @@ static int oxnas_nand_probe(struct platform_device *pdev)
 				    GFP_KERNEL);
 		if (!chip) {
 			err = -ENOMEM;
-			goto err_release_child;
+			goto err_clk_unprepare;
 		}
 
 		chip->controller = &oxnas->base;
@@ -137,12 +137,12 @@ static int oxnas_nand_probe(struct platform_device *pdev)
 		/* Scan to find existence of the device */
 		err = nand_scan(chip, 1);
 		if (err)
-			goto err_release_child;
+			goto err_clk_unprepare;
 
 		err = mtd_device_register(mtd, NULL, 0);
 		if (err) {
 			nand_release(chip);
-			goto err_release_child;
+			goto err_clk_unprepare;
 		}
 
 		oxnas->chips[nchips] = chip;
@@ -159,8 +159,6 @@ static int oxnas_nand_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_release_child:
-	of_node_put(nand_np);
 err_clk_unprepare:
 	clk_disable_unprepare(oxnas->clk);
 	return err;

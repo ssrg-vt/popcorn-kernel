@@ -11,41 +11,9 @@
 #include <asm/thread_info.h>
 #include <asm/page.h>
 #include <asm/csr.h>
-#include <asm/image.h>
 
 __INIT
 ENTRY(_start)
-	/*
-	 * Image header expected by Linux boot-loaders. The image header data
-	 * structure is described in asm/image.h.
-	 * Do not modify it without modifying the structure and all bootloaders
-	 * that expects this header format!!
-	 */
-	/* jump to start kernel */
-	j _start_kernel
-	/* reserved */
-	.word 0
-	.balign 8
-#if __riscv_xlen == 64
-	/* Image load offset(2MB) from start of RAM */
-	.dword 0x200000
-#else
-	/* Image load offset(4MB) from start of RAM */
-	.dword 0x400000
-#endif
-	/* Effective size of kernel image */
-	.dword _end - _start
-	.dword __HEAD_FLAGS
-	.word RISCV_HEADER_VERSION
-	.word 0
-	.dword 0
-	.ascii RISCV_IMAGE_MAGIC
-	.balign 4
-	.ascii RISCV_IMAGE_MAGIC2
-	.word 0
-
-.global _start_kernel
-_start_kernel:
 	/* Mask all interrupts */
 	csrw CSR_SIE, zero
 	csrw CSR_SIP, zero
@@ -61,12 +29,7 @@ _start_kernel:
 	 * floating point in kernel space
 	 */
 	li t0, SR_FS
-	csrc CSR_SSTATUS, t0
-
-#ifdef CONFIG_SMP
-	li t0, CONFIG_NR_CPUS
-	bgeu a0, t0, .Lsecondary_park
-#endif
+	csrc sstatus, t0
 
 	/* Pick one hart to run the main boot sequence */
 	la a3, hart_lottery
@@ -92,9 +55,7 @@ clear_bss_done:
 
 	/* Initialize page tables and relocate to virtual addresses */
 	la sp, init_thread_union + THREAD_SIZE
-	mv a0, s1
 	call setup_vm
-	la a0, early_pg_dir
 	call relocate
 
 	/* Restore C environment */
@@ -103,23 +64,25 @@ clear_bss_done:
 	la sp, init_thread_union + THREAD_SIZE
 
 	/* Start the kernel */
+	mv a0, s1
 	call parse_dtb
 	tail start_kernel
 
 relocate:
 	/* Relocate return address */
 	li a1, PAGE_OFFSET
-	la a2, _start
-	sub a1, a1, a2
+	la a0, _start
+	sub a1, a1, a0
 	add ra, ra, a1
 
 	/* Point stvec to virtual address of intruction after satp write */
-	la a2, 1f
-	add a2, a2, a1
-	csrw CSR_STVEC, a2
+	la a0, 1f
+	add a0, a0, a1
+	csrw CSR_STVEC, a0
 
 	/* Compute satp for kernel page tables, but don't load it yet */
-	srl a2, a0, PAGE_SHIFT
+	la a2, swapper_pg_dir
+	srl a2, a2, PAGE_SHIFT
 	li a1, SATP_MODE
 	or a2, a2, a1
 
@@ -159,6 +122,9 @@ relocate:
 
 .Lsecondary_start:
 #ifdef CONFIG_SMP
+	li a1, CONFIG_NR_CPUS
+	bgeu a0, a1, .Lsecondary_park
+
 	/* Set trap vector to spin forever to help debug */
 	la a3, .Lsecondary_park
 	csrw CSR_STVEC, a3
@@ -182,7 +148,6 @@ relocate:
 	fence
 
 	/* Enable virtual memory and relocate to virtual address */
-	la a0, swapper_pg_dir
 	call relocate
 
 	tail smp_callin

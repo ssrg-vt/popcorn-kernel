@@ -766,15 +766,19 @@ static int if_spi_c2h_data(struct if_spi_card *card)
 
 	/* Read the data from the WLAN module into our skb... */
 	err = spu_read(card, IF_SPI_DATA_RDWRPORT_REG, data, ALIGN(len, 4));
-	if (err) {
-		dev_kfree_skb(skb);
-		goto out;
-	}
+	if (err)
+		goto free_skb;
 
 	/* pass the SKB to libertas */
 	err = lbs_process_rxed_packet(card->priv, skb);
-	/* lbs_process_rxed_packet() consumes the skb */
+	if (err)
+		goto free_skb;
 
+	/* success */
+	goto out;
+
+free_skb:
+	dev_kfree_skb(skb);
 out:
 	if (err)
 		netdev_err(priv->dev, "%s: err=%d\n", __func__, err);

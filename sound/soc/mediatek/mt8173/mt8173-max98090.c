@@ -82,51 +82,41 @@ static int mt8173_max98090_init(struct snd_soc_pcm_runtime *runtime)
 	return max98090_mic_detect(component, &mt8173_max98090_jack);
 }
 
-SND_SOC_DAILINK_DEFS(playback,
-	DAILINK_COMP_ARRAY(COMP_CPU("DL1")),
-	DAILINK_COMP_ARRAY(COMP_DUMMY()),
-	DAILINK_COMP_ARRAY(COMP_EMPTY()));
-
-SND_SOC_DAILINK_DEFS(capture,
-	DAILINK_COMP_ARRAY(COMP_CPU("VUL")),
-	DAILINK_COMP_ARRAY(COMP_DUMMY()),
-	DAILINK_COMP_ARRAY(COMP_EMPTY()));
-
-SND_SOC_DAILINK_DEFS(hifi,
-	DAILINK_COMP_ARRAY(COMP_CPU("I2S")),
-	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "HiFi")),
-	DAILINK_COMP_ARRAY(COMP_EMPTY()));
-
 /* Digital audio interface glue - connects codec <---> CPU */
 static struct snd_soc_dai_link mt8173_max98090_dais[] = {
 	/* Front End DAI links */
 	{
 		.name = "MAX98090 Playback",
 		.stream_name = "MAX98090 Playback",
+		.cpu_dai_name = "DL1",
+		.codec_name = "snd-soc-dummy",
+		.codec_dai_name = "snd-soc-dummy-dai",
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
 		.dynamic = 1,
 		.dpcm_playback = 1,
-		SND_SOC_DAILINK_REG(playback),
 	},
 	{
 		.name = "MAX98090 Capture",
 		.stream_name = "MAX98090 Capture",
+		.cpu_dai_name = "VUL",
+		.codec_name = "snd-soc-dummy",
+		.codec_dai_name = "snd-soc-dummy-dai",
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
 		.dynamic = 1,
 		.dpcm_capture = 1,
-		SND_SOC_DAILINK_REG(capture),
 	},
 	/* Back End DAI links */
 	{
 		.name = "Codec",
+		.cpu_dai_name = "I2S",
 		.no_pcm = 1,
+		.codec_dai_name = "HiFi",
 		.init = mt8173_max98090_init,
 		.ops = &mt8173_max98090_ops,
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 			   SND_SOC_DAIFMT_CBS_CFS,
 		.dpcm_playback = 1,
 		.dpcm_capture = 1,
-		SND_SOC_DAILINK_REG(hifi),
 	},
 };
 
@@ -157,9 +147,9 @@ static int mt8173_max98090_dev_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 	for_each_card_prelinks(card, i, dai_link) {
-		if (dai_link->platforms->name)
+		if (dai_link->platform_name)
 			continue;
-		dai_link->platforms->of_node = platform_node;
+		dai_link->platform_of_node = platform_node;
 	}
 
 	codec_node = of_parse_phandle(pdev->dev.of_node,
@@ -170,9 +160,9 @@ static int mt8173_max98090_dev_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 	for_each_card_prelinks(card, i, dai_link) {
-		if (dai_link->codecs->name)
+		if (dai_link->codec_name)
 			continue;
-		dai_link->codecs->of_node = codec_node;
+		dai_link->codec_of_node = codec_node;
 	}
 	card->dev = &pdev->dev;
 

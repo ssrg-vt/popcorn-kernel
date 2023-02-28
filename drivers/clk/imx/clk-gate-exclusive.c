@@ -55,14 +55,13 @@ static const struct clk_ops clk_gate_exclusive_ops = {
 	.is_enabled = clk_gate_exclusive_is_enabled,
 };
 
-struct clk_hw *imx_clk_hw_gate_exclusive(const char *name, const char *parent,
+struct clk *imx_clk_gate_exclusive(const char *name, const char *parent,
 	 void __iomem *reg, u8 shift, u32 exclusive_mask)
 {
 	struct clk_gate_exclusive *exgate;
 	struct clk_gate *gate;
-	struct clk_hw *hw;
+	struct clk *clk;
 	struct clk_init_data init;
-	int ret;
 
 	if (exclusive_mask == 0)
 		return ERR_PTR(-EINVAL);
@@ -84,13 +83,9 @@ struct clk_hw *imx_clk_hw_gate_exclusive(const char *name, const char *parent,
 	gate->hw.init = &init;
 	exgate->exclusive_mask = exclusive_mask;
 
-	hw = &gate->hw;
+	clk = clk_register(NULL, &gate->hw);
+	if (IS_ERR(clk))
+		kfree(exgate);
 
-	ret = clk_hw_register(NULL, hw);
-	if (ret) {
-		kfree(gate);
-		return ERR_PTR(ret);
-	}
-
-	return hw;
+	return clk;
 }

@@ -1301,10 +1301,14 @@ int genwqe_device_create(struct genwqe_dev *cd)
 		goto err_cdev;
 	}
 
-	genwqe_init_debugfs(cd);
+	rc = genwqe_init_debugfs(cd);
+	if (rc != 0)
+		goto err_debugfs;
 
 	return 0;
 
+ err_debugfs:
+	device_destroy(cd->class_genwqe, cd->devnum_genwqe);
  err_cdev:
 	cdev_del(&cd->cdev_genwqe);
  err_add:

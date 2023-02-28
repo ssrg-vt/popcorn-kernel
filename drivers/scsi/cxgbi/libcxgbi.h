@@ -617,9 +617,8 @@ void cxgbi_ddp_page_size_factor(int *);
 void cxgbi_ddp_set_one_ppod(struct cxgbi_pagepod *,
 			    struct cxgbi_task_tag_info *,
 			    struct scatterlist **sg_pp, unsigned int *sg_off);
-int cxgbi_ddp_ppm_setup(void **ppm_pp, struct cxgbi_device *cdev,
-			struct cxgbi_tag_format *tformat,
-			unsigned int iscsi_size, unsigned int llimit,
-			unsigned int start, unsigned int rsvd_factor,
-			unsigned int edram_start, unsigned int edram_size);
+void cxgbi_ddp_ppm_setup(void **ppm_pp, struct cxgbi_device *,
+			 struct cxgbi_tag_format *, unsigned int ppmax,
+			 unsigned int llimit, unsigned int start,
+			 unsigned int rsvd_factor);
 #endif	/*__LIBCXGBI_H__*/

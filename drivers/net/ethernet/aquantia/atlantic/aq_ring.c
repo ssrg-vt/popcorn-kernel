@@ -313,7 +313,6 @@ int aq_ring_rx_clean(struct aq_ring_s *self,
 					break;
 
 				buff->is_error |= buff_->is_error;
-				buff->is_cso_err |= buff_->is_cso_err;
 
 			} while (!buff_->is_eop);
 
@@ -321,7 +320,7 @@ int aq_ring_rx_clean(struct aq_ring_s *self,
 				err = 0;
 				goto err_exit;
 			}
-			if (buff->is_error || buff->is_cso_err) {
+			if (buff->is_error) {
 				buff_ = buff;
 				do {
 					next_ = buff_->next,
@@ -409,10 +408,6 @@ int aq_ring_rx_clean(struct aq_ring_s *self,
 				} while (!buff_->is_eop);
 			}
 		}
-
-		if (buff->is_vlan)
-			__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q),
-					       buff->vlan_rx_tag);
 
 		skb->protocol = eth_type_trans(skb, ndev);
 

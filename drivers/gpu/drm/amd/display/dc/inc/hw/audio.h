@@ -57,7 +57,6 @@ struct audio {
 	const struct audio_funcs *funcs;
 	struct dc_context *ctx;
 	unsigned int inst;
-	bool enabled;
 };
 
 #endif  /* __DAL_AUDIO__ */

@@ -405,10 +405,8 @@ static int ccp_crypto_init(void)
 	int ret;
 
 	ret = ccp_present();
-	if (ret) {
-		pr_err("Cannot load: there are no available CCPs\n");
+	if (ret)
 		return ret;
-	}
 
 	spin_lock_init(&req_queue_lock);
 	INIT_LIST_HEAD(&req_queue.cmds);

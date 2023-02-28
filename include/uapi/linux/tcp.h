@@ -127,9 +127,6 @@ enum {
 
 #define TCP_CM_INQ		TCP_INQ
 
-#define TCP_TX_DELAY		37	/* delay outgoing packets by XX usec */
-
-
 #define TCP_REPAIR_ON		1
 #define TCP_REPAIR_OFF		0
 #define TCP_REPAIR_OFF_NO_WP	-1	/* Turn off without window probes */
@@ -270,12 +267,6 @@ struct tcp_info {
 	__u64	tcpi_bytes_retrans;  /* RFC4898 tcpEStatsPerfOctetsRetrans */
 	__u32	tcpi_dsack_dups;     /* RFC4898 tcpEStatsStackDSACKDups */
 	__u32	tcpi_reord_seen;     /* reordering events seen */
-
-	__u32	tcpi_rcv_ooopack;    /* Out-of-order packets received */
-
-	__u32	tcpi_snd_wnd;	     /* peer's advertised receive window after
-				      * scaling (bytes)
-				      */
 };
 
 /* netlink attributes types for SCM_TIMESTAMPING_OPT_STATS */

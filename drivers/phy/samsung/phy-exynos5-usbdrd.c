@@ -953,7 +953,6 @@ static struct platform_driver exynos5_usb3drd_phy = {
 	.driver = {
 		.of_match_table	= exynos5_usbdrd_phy_of_match,
 		.name		= "exynos5_usb3drd_phy",
-		.suppress_bind_attrs = true,
 	}
 };
 

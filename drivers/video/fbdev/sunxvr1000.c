@@ -121,6 +121,7 @@ static int gfb_probe(struct platform_device *op)
 
 	info = framebuffer_alloc(sizeof(struct gfb_info), &op->dev);
 	if (!info) {
+		printk(KERN_ERR "gfb: Cannot allocate fb_info\n");
 		err = -ENOMEM;
 		goto err_out;
 	}

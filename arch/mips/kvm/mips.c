@@ -123,9 +123,9 @@ int kvm_arch_hardware_setup(void)
 	return 0;
 }
 
-int kvm_arch_check_processor_compat(void)
+void kvm_arch_check_processor_compat(void *rtn)
 {
-	return 0;
+	*(int *)rtn = 0;
 }
 
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
@@ -147,6 +147,16 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 	if (!kvm->arch.gpa_mm.pgd)
 		return -ENOMEM;
 
+	return 0;
+}
+
+bool kvm_arch_has_vcpu_debugfs(void)
+{
+	return false;
+}
+
+int kvm_arch_create_vcpu_debugfs(struct kvm_vcpu *vcpu)
+{
 	return 0;
 }
 

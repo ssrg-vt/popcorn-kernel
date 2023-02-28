@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for Amlogic Meson IR remote receiver
  *
@@ -113,12 +113,16 @@ static int meson_ir_probe(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	ir->reg = devm_ioremap_resource(dev, res);
-	if (IS_ERR(ir->reg))
+	if (IS_ERR(ir->reg)) {
+		dev_err(dev, "failed to map registers\n");
 		return PTR_ERR(ir->reg);
+	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
+	if (irq < 0) {
+		dev_err(dev, "no irq resource\n");
 		return irq;
+	}
 
 	ir->rc = devm_rc_allocate_device(dev, RC_DRIVER_IR_RAW);
 	if (!ir->rc) {

@@ -1,0 +1,77 @@
+menu "Popcorn Distributed Execution Support"
+
+# This is selected by all the architectures Popcorn supports
+config ARCH_SUPPORTS_POPCORN
+	bool
+
+config POPCORN
+	bool "Popcorn Distributed Execution Support"
+	depends on ARCH_SUPPORTS_POPCORN && !TRANSPARENT_HUGEPAGE && !SWAP && !CMA && !KSM && !MEM_SOFT_DIRTY && !MIGRATION && !COMPACTION
+	default y
+	help
+		Enable or disable the Popcorn multi-kernel Linux support.
+
+if POPCORN
+
+config POPCORN_DEBUG
+	bool "Log debug messages for Popcorn"
+	default n
+	help
+		Enable or disable kernel messages that can help debug Popcorn issues.
+
+config POPCORN_DEBUG_PROCESS_SERVER
+	bool "Task migration"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_PAGE_SERVER
+	bool "Page migration"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_VMA_SERVER
+	bool "VMA handling"
+	depends on POPCORN_DEBUG
+	default n
+
+config POPCORN_DEBUG_VERBOSE
+	bool "Log more debug messages"
+	depends on POPCORN_DEBUG
+	default n
+
+
+config POPCORN_CHECK_SANITY
+	bool "Perform extra-sanity checks"
+	default y
+
+config POPCORN_REMOTE_INFO
+	bool "Single system image over multiple nodes"
+	default n
+
+#config POPCORN_POWER_SENSOR_X86
+#	bool "Power sensor for x86"
+#	depends on X86
+#config POPCORN_POWER_SENSOR_ARM
+#	bool "Power sensor for ARM"
+#	depends on (ARM || ARM64)
+
+config POPCORN_STAT
+	bool "Collect performance statistics"
+	default n
+	help
+		Collect basic performance metrics. The statistics are accessible from /proc/popcorn_stat
+
+config POPCORN_STAT_PGFAULTS
+	bool "Page faults handling"
+	depends on POPCORN_STAT
+	default n
+
+
+comment "Popcorn is not currently supported on this architecture"
+	depends on !ARCH_SUPPORTS_POPCORN
+
+source "msg_layer/Kconfig"
+
+endif # POPCORN
+
+endmenu

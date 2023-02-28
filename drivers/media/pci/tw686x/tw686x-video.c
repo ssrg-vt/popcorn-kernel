@@ -765,6 +765,9 @@ static int tw686x_querycap(struct file *file, void *priv,
 	strscpy(cap->card, dev->name, sizeof(cap->card));
 	snprintf(cap->bus_info, sizeof(cap->bus_info),
 		 "PCI:%s", pci_name(dev->pci_dev));
+	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
+			   V4L2_CAP_READWRITE;
+	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
 	return 0;
 }
 
@@ -1277,8 +1280,6 @@ int tw686x_video_init(struct tw686x_dev *dev)
 		vdev->minor = -1;
 		vdev->lock = &vc->vb_mutex;
 		vdev->ctrl_handler = &vc->ctrl_handler;
-		vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE |
-				    V4L2_CAP_STREAMING | V4L2_CAP_READWRITE;
 		vc->device = vdev;
 		video_set_drvdata(vdev, vc);
 

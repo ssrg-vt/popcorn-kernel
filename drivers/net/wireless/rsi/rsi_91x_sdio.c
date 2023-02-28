@@ -230,16 +230,19 @@ static void rsi_reset_card(struct sdio_func *pfunction)
 		rsi_dbg(ERR_ZONE, "%s: CMD0 failed : %d\n", __func__, err);
 
 	/* Issue CMD5, arg = 0 */
-	err = rsi_issue_sdiocommand(pfunction,	SD_IO_SEND_OP_COND, 0,
-				    (MMC_RSP_R4 | MMC_CMD_BCR), &resp);
-	if (err)
-		rsi_dbg(ERR_ZONE, "%s: CMD5 failed : %d\n",
-			__func__, err);
-	card->ocr = resp;
+	if (!host->ocr_avail) {
+		err = rsi_issue_sdiocommand(pfunction,	SD_IO_SEND_OP_COND, 0,
+					    (MMC_RSP_R4 | MMC_CMD_BCR), &resp);
+		if (err)
+			rsi_dbg(ERR_ZONE, "%s: CMD5 failed : %d\n",
+				__func__, err);
+
+		host->ocr_avail = resp;
+	}
 	/* Issue CMD5, arg = ocr. Wait till card is ready  */
 	for (i = 0; i < 100; i++) {
 		err = rsi_issue_sdiocommand(pfunction, SD_IO_SEND_OP_COND,
-					    card->ocr,
+					    host->ocr_avail,
 					    (MMC_RSP_R4 | MMC_CMD_BCR), &resp);
 		if (err) {
 			rsi_dbg(ERR_ZONE, "%s: CMD5 failed : %d\n",
@@ -841,11 +844,11 @@ static int rsi_init_sdio_interface(struct rsi_hw *adapter,
 				   struct sdio_func *pfunction)
 {
 	struct rsi_91x_sdiodev *rsi_91x_dev;
-	int status;
+	int status = -ENOMEM;
 
 	rsi_91x_dev = kzalloc(sizeof(*rsi_91x_dev), GFP_KERNEL);
 	if (!rsi_91x_dev)
-		return -ENOMEM;
+		return status;
 
 	adapter->rsi_dev = rsi_91x_dev;
 
@@ -887,7 +890,7 @@ static int rsi_init_sdio_interface(struct rsi_hw *adapter,
 #ifdef CONFIG_RSI_DEBUGFS
 	adapter->num_debugfs_entries = MAX_DEBUGFS_ENTRIES;
 #endif
-	return 0;
+	return status;
 fail:
 	sdio_disable_func(pfunction);
 	sdio_release_host(pfunction);
@@ -941,7 +944,7 @@ static int rsi_sdio_ta_reset(struct rsi_hw *adapter)
 	put_unaligned_le32(TA_HOLD_THREAD_VALUE, data);
 	addr = TA_HOLD_THREAD_REG | RSI_SD_REQUEST_MASTER;
 	status = rsi_sdio_write_register_multiple(adapter, addr,
-						  (u8 *)data,
+						  (u8 *)&data,
 						  RSI_9116_REG_SIZE);
 	if (status < 0) {
 		rsi_dbg(ERR_ZONE, "Unable to hold TA threads\n");
@@ -951,7 +954,7 @@ static int rsi_sdio_ta_reset(struct rsi_hw *adapter)
 	put_unaligned_le32(TA_SOFT_RST_CLR, data);
 	addr = TA_SOFT_RESET_REG | RSI_SD_REQUEST_MASTER;
 	status = rsi_sdio_write_register_multiple(adapter, addr,
-						  (u8 *)data,
+						  (u8 *)&data,
 						  RSI_9116_REG_SIZE);
 	if (status < 0) {
 		rsi_dbg(ERR_ZONE, "Unable to get TA out of reset\n");
@@ -961,7 +964,7 @@ static int rsi_sdio_ta_reset(struct rsi_hw *adapter)
 	put_unaligned_le32(TA_PC_ZERO, data);
 	addr = TA_TH0_PC_REG | RSI_SD_REQUEST_MASTER;
 	status = rsi_sdio_write_register_multiple(adapter, addr,
-						  (u8 *)data,
+						  (u8 *)&data,
 						  RSI_9116_REG_SIZE);
 	if (status < 0) {
 		rsi_dbg(ERR_ZONE, "Unable to Reset TA PC value\n");
@@ -972,7 +975,7 @@ static int rsi_sdio_ta_reset(struct rsi_hw *adapter)
 	put_unaligned_le32(TA_RELEASE_THREAD_VALUE, data);
 	addr = TA_RELEASE_THREAD_REG | RSI_SD_REQUEST_MASTER;
 	status = rsi_sdio_write_register_multiple(adapter, addr,
-						  (u8 *)data,
+						  (u8 *)&data,
 						  RSI_9116_REG_SIZE);
 	if (status < 0) {
 		rsi_dbg(ERR_ZONE, "Unable to release TA threads\n");

@@ -40,7 +40,6 @@
 #include "rds_single_path.h"
 #include "rds.h"
 #include "ib.h"
-#include "ib_mr.h"
 
 /*
  * Set the selected protocol version
@@ -151,9 +150,6 @@ void rds_ib_cm_connect_complete(struct rds_connection *conn, struct rdma_cm_even
 		  RDS_PROTOCOL_MAJOR(conn->c_version),
 		  RDS_PROTOCOL_MINOR(conn->c_version),
 		  ic->i_flowctl ? ", flow control" : "");
-
-	/* receive sl from the peer */
-	ic->i_sl = ic->i_cm_id->route.path_rec->sl;
 
 	atomic_set(&ic->i_cq_quiesce, 0);
 
@@ -450,7 +446,6 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	struct ib_qp_init_attr attr;
 	struct ib_cq_init_attr cq_attr = {};
 	struct rds_ib_device *rds_ibdev;
-	unsigned long max_wrs;
 	int ret, fr_queue_space;
 
 	/*
@@ -465,20 +460,18 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	 * completion queue and send queue. This extra space is used for FRMR
 	 * registration and invalidation work requests
 	 */
-	fr_queue_space = (rds_ibdev->use_fastreg ? RDS_IB_DEFAULT_FR_WR : 0);
+	fr_queue_space = rds_ibdev->use_fastreg ?
+			 (RDS_IB_DEFAULT_FR_WR + 1) +
+			 (RDS_IB_DEFAULT_FR_INV_WR + 1)
+			 : 0;
 
 	/* add the conn now so that connection establishment has the dev */
 	rds_ib_add_conn(rds_ibdev, conn);
 
-	max_wrs = rds_ibdev->max_wrs < rds_ib_sysctl_max_send_wr + 1 ?
-		rds_ibdev->max_wrs - 1 : rds_ib_sysctl_max_send_wr;
-	if (ic->i_send_ring.w_nr != max_wrs)
-		rds_ib_ring_resize(&ic->i_send_ring, max_wrs);
-
-	max_wrs = rds_ibdev->max_wrs < rds_ib_sysctl_max_recv_wr + 1 ?
-		rds_ibdev->max_wrs - 1 : rds_ib_sysctl_max_recv_wr;
-	if (ic->i_recv_ring.w_nr != max_wrs)
-		rds_ib_ring_resize(&ic->i_recv_ring, max_wrs);
+	if (rds_ibdev->max_wrs < ic->i_send_ring.w_nr + 1)
+		rds_ib_ring_resize(&ic->i_send_ring, rds_ibdev->max_wrs - 1);
+	if (rds_ibdev->max_wrs < ic->i_recv_ring.w_nr + 1)
+		rds_ib_ring_resize(&ic->i_recv_ring, rds_ibdev->max_wrs - 1);
 
 	/* Protection domain and memory range */
 	ic->i_pd = rds_ibdev->pd;
@@ -536,6 +529,8 @@ static int rds_ib_setup_qp(struct rds_connection *conn)
 	attr.qp_type = IB_QPT_RC;
 	attr.send_cq = ic->i_send_cq;
 	attr.recv_cq = ic->i_recv_cq;
+	atomic_set(&ic->i_fastreg_wrs, RDS_IB_DEFAULT_FR_WR);
+	atomic_set(&ic->i_fastunreg_wrs, RDS_IB_DEFAULT_FR_INV_WR);
 
 	/*
 	 * XXX this can fail if max_*_wr is too large?  Are we supposed
@@ -616,11 +611,11 @@ send_hdrs_dma_out:
 qp_out:
 	rdma_destroy_qp(ic->i_cm_id);
 recv_cq_out:
-	ib_destroy_cq(ic->i_recv_cq);
-	ic->i_recv_cq = NULL;
+	if (!ib_destroy_cq(ic->i_recv_cq))
+		ic->i_recv_cq = NULL;
 send_cq_out:
-	ib_destroy_cq(ic->i_send_cq);
-	ic->i_send_cq = NULL;
+	if (!ib_destroy_cq(ic->i_send_cq))
+		ic->i_send_cq = NULL;
 rds_ibdev_out:
 	rds_ib_remove_conn(rds_ibdev, conn);
 out:
@@ -1002,11 +997,6 @@ void rds_ib_conn_path_shutdown(struct rds_conn_path *cp)
 				ic->i_cm_id, err);
 		}
 
-		/* kick off "flush_worker" for all pools in order to reap
-		 * all FRMR registrations that are still marked "FRMR_IS_INUSE"
-		 */
-		rds_ib_flush_mrs();
-
 		/*
 		 * We want to wait for tx and rx completion to finish
 		 * before we tear down the connection, but we have to be
@@ -1019,8 +1009,8 @@ void rds_ib_conn_path_shutdown(struct rds_conn_path *cp)
 		wait_event(rds_ib_ring_empty_wait,
 			   rds_ib_ring_empty(&ic->i_recv_ring) &&
 			   (atomic_read(&ic->i_signaled_sends) == 0) &&
-			   (atomic_read(&ic->i_fastreg_inuse_count) == 0) &&
-			   (atomic_read(&ic->i_fastreg_wrs) == RDS_IB_DEFAULT_FR_WR));
+			   (atomic_read(&ic->i_fastreg_wrs) == RDS_IB_DEFAULT_FR_WR) &&
+			   (atomic_read(&ic->i_fastunreg_wrs) == RDS_IB_DEFAULT_FR_INV_WR));
 		tasklet_kill(&ic->i_send_tasklet);
 		tasklet_kill(&ic->i_recv_tasklet);
 
@@ -1105,9 +1095,8 @@ void rds_ib_conn_path_shutdown(struct rds_conn_path *cp)
 	ic->i_flowctl = 0;
 	atomic_set(&ic->i_credits, 0);
 
-	/* Re-init rings, but retain sizes. */
-	rds_ib_ring_init(&ic->i_send_ring, ic->i_send_ring.w_nr);
-	rds_ib_ring_init(&ic->i_recv_ring, ic->i_recv_ring.w_nr);
+	rds_ib_ring_init(&ic->i_send_ring, rds_ib_sysctl_max_send_wr);
+	rds_ib_ring_init(&ic->i_recv_ring, rds_ib_sysctl_max_recv_wr);
 
 	if (ic->i_ibinc) {
 		rds_inc_put(&ic->i_ibinc->ii_inc);
@@ -1148,14 +1137,13 @@ int rds_ib_conn_alloc(struct rds_connection *conn, gfp_t gfp)
 	spin_lock_init(&ic->i_ack_lock);
 #endif
 	atomic_set(&ic->i_signaled_sends, 0);
-	atomic_set(&ic->i_fastreg_wrs, RDS_IB_DEFAULT_FR_WR);
 
 	/*
 	 * rds_ib_conn_shutdown() waits for these to be emptied so they
 	 * must be initialized before it can be called.
 	 */
-	rds_ib_ring_init(&ic->i_send_ring, 0);
-	rds_ib_ring_init(&ic->i_recv_ring, 0);
+	rds_ib_ring_init(&ic->i_send_ring, rds_ib_sysctl_max_send_wr);
+	rds_ib_ring_init(&ic->i_recv_ring, rds_ib_sysctl_max_recv_wr);
 
 	ic->conn = conn;
 	conn->c_transport_data = ic;

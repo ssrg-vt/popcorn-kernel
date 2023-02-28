@@ -21,6 +21,7 @@
  *
  */
 
+#include <drm/drmP.h>
 #include "radeon.h"
 #include "trinityd.h"
 #include "trinity_dpm.h"

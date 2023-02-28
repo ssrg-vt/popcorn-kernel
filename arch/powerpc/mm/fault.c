@@ -38,9 +38,30 @@
 #include <asm/pgtable.h>
 #include <asm/mmu.h>
 #include <asm/mmu_context.h>
+
 #include <asm/siginfo.h>
 #include <asm/debug.h>
 #include <asm/kup.h>
+
+static inline bool notify_page_fault(struct pt_regs *regs)
+{
+	bool ret = false;
+
+#ifdef CONFIG_KPROBES
+	/* kprobe_running() needs smp_processor_id() */
+	if (!user_mode(regs)) {
+		preempt_disable();
+		if (kprobe_running() && kprobe_fault_handler(regs, 11))
+			ret = true;
+		preempt_enable();
+	}
+#endif /* CONFIG_KPROBES */
+
+	if (unlikely(debugger_fault_handler(regs)))
+		ret = true;
+
+	return ret;
+}
 
 /*
  * Check whether the instruction inst is a store using
@@ -158,12 +179,13 @@ static int do_sigbus(struct pt_regs *regs, unsigned long address,
 		if (fault & VM_FAULT_HWPOISON)
 			lsb = PAGE_SHIFT;
 
-		force_sig_mceerr(BUS_MCEERR_AR, (void __user *)address, lsb);
+		force_sig_mceerr(BUS_MCEERR_AR, (void __user *)address, lsb,
+				 current);
 		return 0;
 	}
 
 #endif
-	force_sig_fault(SIGBUS, BUS_ADRERR, (void __user *)address);
+	force_sig_fault(SIGBUS, BUS_ADRERR, (void __user *)address, current);
 	return 0;
 }
 
@@ -441,9 +463,8 @@ static int __do_page_fault(struct pt_regs *regs, unsigned long address,
 	int is_write = page_fault_is_write(error_code);
 	vm_fault_t fault, major = 0;
 	bool must_retry = false;
-	bool kprobe_fault = kprobe_page_fault(regs, 11);
 
-	if (unlikely(debugger_fault_handler(regs) || kprobe_fault))
+	if (notify_page_fault(regs))
 		return 0;
 
 	if (unlikely(page_fault_is_bad(error_code))) {
@@ -531,6 +552,7 @@ retry:
 	}
 
 	vma = find_vma(mm, address);
+	  
 	if (unlikely(!vma))
 		return bad_area(regs, address);
 	if (likely(vma->vm_start <= address))

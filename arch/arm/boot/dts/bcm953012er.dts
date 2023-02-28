@@ -39,13 +39,15 @@
 	model = "NorthStar Enterprise Router (BCM953012ER)";
 	compatible = "brcm,bcm953012er", "brcm,brcm53012", "brcm,bcm4708";
 
-	memory@0 {
+	memory {
 		device_type = "memory";
 		reg = <0x00000000 0x8000000>;
 	};
 
 	gpio-keys {
 		compatible = "gpio-keys";
+		#address-cells = <1>;
+		#size-cells = <0>;
 
 		wps {
 			label = "WPS";

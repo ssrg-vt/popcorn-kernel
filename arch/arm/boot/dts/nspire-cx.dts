@@ -9,11 +9,7 @@
 /include/ "nspire.dtsi"
 
 &lcd {
-	port {
-		clcd_pads: endpoint {
-			remote-endpoint = <&panel_in>;
-		};
-	};
+	lcd-type = "cx";
 };
 
 &fast_timer {
@@ -107,15 +103,6 @@
 				compatible = "snps,designware-i2c";
 				reg = <0x90050000 0x1000>;
 				interrupts = <20>;
-			};
-		};
-	};
-
-	panel {
-		compatible = "ti,nspire-cx-lcd-panel";
-		port {
-			panel_in: endpoint {
-				remote-endpoint = <&clcd_pads>;
 			};
 		};
 	};

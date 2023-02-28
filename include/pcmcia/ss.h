@@ -187,7 +187,7 @@ struct pcmcia_socket {
 	unsigned int			sysfs_events;
 
 	/* For the non-trivial interaction between these locks,
-	 * see Documentation/pcmcia/locking.rst */
+	 * see Documentation/pcmcia/locking.txt */
 	struct mutex			skt_mutex;
 	struct mutex			ops_mutex;
 

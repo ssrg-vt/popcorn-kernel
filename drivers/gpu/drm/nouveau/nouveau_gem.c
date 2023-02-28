@@ -51,6 +51,10 @@ nouveau_gem_object_del(struct drm_gem_object *gem)
 	if (gem->import_attach)
 		drm_prime_gem_destroy(gem, nvbo->bo.sg);
 
+	drm_gem_object_release(gem);
+
+	/* reset filp so nouveau_bo_del_ttm() can test for it */
+	gem->filp = NULL;
 	ttm_bo_put(&nvbo->bo);
 
 	pm_runtime_mark_last_busy(dev);
@@ -184,24 +188,11 @@ nouveau_gem_new(struct nouveau_cli *cli, u64 size, int align, uint32_t domain,
 	if (domain & NOUVEAU_GEM_DOMAIN_COHERENT)
 		flags |= TTM_PL_FLAG_UNCACHED;
 
-	nvbo = nouveau_bo_alloc(cli, &size, &align, flags, tile_mode,
-				tile_flags);
-	if (IS_ERR(nvbo))
-		return PTR_ERR(nvbo);
-
-	/* Initialize the embedded gem-object. We return a single gem-reference
-	 * to the caller, instead of a normal nouveau_bo ttm reference. */
-	ret = drm_gem_object_init(drm->dev, &nvbo->bo.base, size);
-	if (ret) {
-		nouveau_bo_ref(NULL, &nvbo);
+	ret = nouveau_bo_new(cli, size, align, flags, tile_mode,
+			     tile_flags, NULL, NULL, pnvbo);
+	if (ret)
 		return ret;
-	}
-
-	ret = nouveau_bo_init(nvbo, size, align, flags, NULL, NULL);
-	if (ret) {
-		nouveau_bo_ref(NULL, &nvbo);
-		return ret;
-	}
+	nvbo = *pnvbo;
 
 	/* we restrict allowed domains on nv50+ to only the types
 	 * that were requested at creation time.  not possibly on
@@ -212,8 +203,15 @@ nouveau_gem_new(struct nouveau_cli *cli, u64 size, int align, uint32_t domain,
 	if (drm->client.device.info.family >= NV_DEVICE_INFO_V0_TESLA)
 		nvbo->valid_domains &= domain;
 
-	nvbo->bo.persistent_swap_storage = nvbo->bo.base.filp;
-	*pnvbo = nvbo;
+	/* Initialize the embedded gem-object. We return a single gem-reference
+	 * to the caller, instead of a normal nouveau_bo ttm reference. */
+	ret = drm_gem_object_init(drm->dev, &nvbo->gem, nvbo->bo.mem.size);
+	if (ret) {
+		nouveau_bo_ref(NULL, pnvbo);
+		return -ENOMEM;
+	}
+
+	nvbo->bo.persistent_swap_storage = nvbo->gem.filp;
 	return 0;
 }
 
@@ -242,7 +240,7 @@ nouveau_gem_info(struct drm_file *file_priv, struct drm_gem_object *gem,
 	}
 
 	rep->size = nvbo->bo.mem.num_pages << PAGE_SHIFT;
-	rep->map_handle = drm_vma_node_offset_addr(&nvbo->bo.base.vma_node);
+	rep->map_handle = drm_vma_node_offset_addr(&nvbo->bo.vma_node);
 	rep->tile_mode = nvbo->mode;
 	rep->tile_flags = nvbo->contig ? 0 : NOUVEAU_GEM_TILE_NONCONTIG;
 	if (cli->device.info.family >= NV_DEVICE_INFO_V0_FERMI)
@@ -270,16 +268,15 @@ nouveau_gem_ioctl_new(struct drm_device *dev, void *data,
 	if (ret)
 		return ret;
 
-	ret = drm_gem_handle_create(file_priv, &nvbo->bo.base,
-				    &req->info.handle);
+	ret = drm_gem_handle_create(file_priv, &nvbo->gem, &req->info.handle);
 	if (ret == 0) {
-		ret = nouveau_gem_info(file_priv, &nvbo->bo.base, &req->info);
+		ret = nouveau_gem_info(file_priv, &nvbo->gem, &req->info);
 		if (ret)
 			drm_gem_handle_delete(file_priv, req->info.handle);
 	}
 
 	/* drop reference from allocate - handle holds it now */
-	drm_gem_object_put_unlocked(&nvbo->bo.base);
+	drm_gem_object_put_unlocked(&nvbo->gem);
 	return ret;
 }
 
@@ -358,7 +355,7 @@ validate_fini_no_ticket(struct validate_op *op, struct nouveau_channel *chan,
 		list_del(&nvbo->entry);
 		nvbo->reserved_by = NULL;
 		ttm_bo_unreserve(&nvbo->bo);
-		drm_gem_object_put_unlocked(&nvbo->bo.base);
+		drm_gem_object_put_unlocked(&nvbo->gem);
 	}
 }
 
@@ -496,7 +493,7 @@ validate_list(struct nouveau_channel *chan, struct nouveau_cli *cli,
 	list_for_each_entry(nvbo, list, entry) {
 		struct drm_nouveau_gem_pushbuf_bo *b = &pbbo[nvbo->pbbo_index];
 
-		ret = nouveau_gem_set_domain(&nvbo->bo.base, b->read_domains,
+		ret = nouveau_gem_set_domain(&nvbo->gem, b->read_domains,
 					     b->write_domains,
 					     b->valid_domains);
 		if (unlikely(ret)) {
@@ -889,7 +886,7 @@ nouveau_gem_ioctl_cpu_prep(struct drm_device *dev, void *data,
 		return -ENOENT;
 	nvbo = nouveau_gem_object(gem);
 
-	lret = dma_resv_wait_timeout_rcu(nvbo->bo.base.resv, write, true,
+	lret = reservation_object_wait_timeout_rcu(nvbo->bo.resv, write, true,
 						   no_wait ? 0 : 30 * HZ);
 	if (!lret)
 		ret = -EBUSY;

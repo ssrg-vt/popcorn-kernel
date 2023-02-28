@@ -28,11 +28,6 @@ static char dpaa2_ethtool_stats[][ETH_GSTRING_LEN] = {
 	"[hw] rx nobuffer discards",
 	"[hw] tx discarded frames",
 	"[hw] tx confirmed frames",
-	"[hw] tx dequeued bytes",
-	"[hw] tx dequeued frames",
-	"[hw] tx rejected bytes",
-	"[hw] tx rejected frames",
-	"[hw] tx pending frames",
 };
 
 #define DPAA2_ETH_NUM_STATS	ARRAY_SIZE(dpaa2_ethtool_stats)
@@ -83,67 +78,71 @@ static int
 dpaa2_eth_get_link_ksettings(struct net_device *net_dev,
 			     struct ethtool_link_ksettings *link_settings)
 {
+	struct dpni_link_state state = {0};
+	int err = 0;
 	struct dpaa2_eth_priv *priv = netdev_priv(net_dev);
 
-	link_settings->base.autoneg = AUTONEG_DISABLE;
-	if (!(priv->link_state.options & DPNI_LINK_OPT_HALF_DUPLEX))
-		link_settings->base.duplex = DUPLEX_FULL;
-	link_settings->base.speed = priv->link_state.rate;
-
-	return 0;
-}
-
-static void dpaa2_eth_get_pauseparam(struct net_device *net_dev,
-				     struct ethtool_pauseparam *pause)
-{
-	struct dpaa2_eth_priv *priv = netdev_priv(net_dev);
-	u64 link_options = priv->link_state.options;
-
-	pause->rx_pause = !!(link_options & DPNI_LINK_OPT_PAUSE);
-	pause->tx_pause = pause->rx_pause ^
-			  !!(link_options & DPNI_LINK_OPT_ASYM_PAUSE);
-	pause->autoneg = AUTONEG_DISABLE;
-}
-
-static int dpaa2_eth_set_pauseparam(struct net_device *net_dev,
-				    struct ethtool_pauseparam *pause)
-{
-	struct dpaa2_eth_priv *priv = netdev_priv(net_dev);
-	struct dpni_link_cfg cfg = {0};
-	int err;
-
-	if (!dpaa2_eth_has_pause_support(priv)) {
-		netdev_info(net_dev, "No pause frame support for DPNI version < %d.%d\n",
-			    DPNI_PAUSE_VER_MAJOR, DPNI_PAUSE_VER_MINOR);
-		return -EOPNOTSUPP;
+	err = dpni_get_link_state(priv->mc_io, 0, priv->mc_token, &state);
+	if (err) {
+		netdev_err(net_dev, "ERROR %d getting link state\n", err);
+		goto out;
 	}
 
-	if (pause->autoneg)
-		return -EOPNOTSUPP;
+	/* At the moment, we have no way of interrogating the DPMAC
+	 * from the DPNI side - and for that matter there may exist
+	 * no DPMAC at all. So for now we just don't report anything
+	 * beyond the DPNI attributes.
+	 */
+	if (state.options & DPNI_LINK_OPT_AUTONEG)
+		link_settings->base.autoneg = AUTONEG_ENABLE;
+	if (!(state.options & DPNI_LINK_OPT_HALF_DUPLEX))
+		link_settings->base.duplex = DUPLEX_FULL;
+	link_settings->base.speed = state.rate;
 
-	cfg.rate = priv->link_state.rate;
-	cfg.options = priv->link_state.options;
-	if (pause->rx_pause)
-		cfg.options |= DPNI_LINK_OPT_PAUSE;
-	else
-		cfg.options &= ~DPNI_LINK_OPT_PAUSE;
-	if (!!pause->rx_pause ^ !!pause->tx_pause)
-		cfg.options |= DPNI_LINK_OPT_ASYM_PAUSE;
-	else
-		cfg.options &= ~DPNI_LINK_OPT_ASYM_PAUSE;
+out:
+	return err;
+}
 
-	if (cfg.options == priv->link_state.options)
-		return 0;
+#define DPNI_DYNAMIC_LINK_SET_VER_MAJOR		7
+#define DPNI_DYNAMIC_LINK_SET_VER_MINOR		1
+static int
+dpaa2_eth_set_link_ksettings(struct net_device *net_dev,
+			     const struct ethtool_link_ksettings *link_settings)
+{
+	struct dpni_link_cfg cfg = {0};
+	struct dpaa2_eth_priv *priv = netdev_priv(net_dev);
+	int err = 0;
+
+	/* If using an older MC version, the DPNI must be down
+	 * in order to be able to change link settings. Taking steps to let
+	 * the user know that.
+	 */
+	if (dpaa2_eth_cmp_dpni_ver(priv, DPNI_DYNAMIC_LINK_SET_VER_MAJOR,
+				   DPNI_DYNAMIC_LINK_SET_VER_MINOR) < 0) {
+		if (netif_running(net_dev)) {
+			netdev_info(net_dev, "Interface must be brought down first.\n");
+			return -EACCES;
+		}
+	}
+
+	cfg.rate = link_settings->base.speed;
+	if (link_settings->base.autoneg == AUTONEG_ENABLE)
+		cfg.options |= DPNI_LINK_OPT_AUTONEG;
+	else
+		cfg.options &= ~DPNI_LINK_OPT_AUTONEG;
+	if (link_settings->base.duplex  == DUPLEX_HALF)
+		cfg.options |= DPNI_LINK_OPT_HALF_DUPLEX;
+	else
+		cfg.options &= ~DPNI_LINK_OPT_HALF_DUPLEX;
 
 	err = dpni_set_link_cfg(priv->mc_io, 0, priv->mc_token, &cfg);
-	if (err) {
-		netdev_err(net_dev, "dpni_set_link_state failed\n");
-		return err;
-	}
+	if (err)
+		/* ethtool will be loud enough if we return an error; no point
+		 * in putting our own error message on the console by default
+		 */
+		netdev_dbg(net_dev, "ERROR %d setting link cfg\n", err);
 
-	priv->link_state.options = cfg.options;
-
-	return 0;
+	return err;
 }
 
 static void dpaa2_eth_get_strings(struct net_device *netdev, u32 stringset,
@@ -193,33 +192,27 @@ static void dpaa2_eth_get_ethtool_stats(struct net_device *net_dev,
 	struct dpaa2_eth_priv *priv = netdev_priv(net_dev);
 	struct dpaa2_eth_drv_stats *extras;
 	struct dpaa2_eth_ch_stats *ch_stats;
-	int dpni_stats_page_size[DPNI_STATISTICS_CNT] = {
-		sizeof(dpni_stats.page_0),
-		sizeof(dpni_stats.page_1),
-		sizeof(dpni_stats.page_2),
-		sizeof(dpni_stats.page_3),
-		sizeof(dpni_stats.page_4),
-		sizeof(dpni_stats.page_5),
-		sizeof(dpni_stats.page_6),
-	};
 
 	memset(data, 0,
 	       sizeof(u64) * (DPAA2_ETH_NUM_STATS + DPAA2_ETH_NUM_EXTRA_STATS));
 
 	/* Print standard counters, from DPNI statistics */
-	for (j = 0; j <= 6; j++) {
-		/* We're not interested in pages 4 & 5 for now */
-		if (j == 4 || j == 5)
-			continue;
+	for (j = 0; j <= 2; j++) {
 		err = dpni_get_statistics(priv->mc_io, 0, priv->mc_token,
 					  j, &dpni_stats);
-		if (err == -EINVAL)
-			/* Older firmware versions don't support all pages */
-			memset(&dpni_stats, 0, sizeof(dpni_stats));
-		else
+		if (err != 0)
 			netdev_warn(net_dev, "dpni_get_stats(%d) failed\n", j);
-
-		num_cnt = dpni_stats_page_size[j] / sizeof(u64);
+		switch (j) {
+		case 0:
+			num_cnt = sizeof(dpni_stats.page_0) / sizeof(u64);
+			break;
+		case 1:
+			num_cnt = sizeof(dpni_stats.page_1) / sizeof(u64);
+			break;
+		case 2:
+			num_cnt = sizeof(dpni_stats.page_2) / sizeof(u64);
+			break;
+		}
 		for (k = 0; k < num_cnt; k++)
 			*(data + i++) = dpni_stats.raw.counter[k];
 	}
@@ -728,8 +721,7 @@ const struct ethtool_ops dpaa2_ethtool_ops = {
 	.get_drvinfo = dpaa2_eth_get_drvinfo,
 	.get_link = ethtool_op_get_link,
 	.get_link_ksettings = dpaa2_eth_get_link_ksettings,
-	.get_pauseparam = dpaa2_eth_get_pauseparam,
-	.set_pauseparam = dpaa2_eth_set_pauseparam,
+	.set_link_ksettings = dpaa2_eth_set_link_ksettings,
 	.get_sset_count = dpaa2_eth_get_sset_count,
 	.get_ethtool_stats = dpaa2_eth_get_ethtool_stats,
 	.get_strings = dpaa2_eth_get_strings,

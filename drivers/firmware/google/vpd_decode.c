@@ -7,6 +7,8 @@
  * Copyright 2017 Google Inc.
  */
 
+#include <linux/export.h>
+
 #include "vpd_decode.h"
 
 static int vpd_decode_len(const u32 max_len, const u8 *in,
@@ -52,7 +54,7 @@ static int vpd_decode_entry(const u32 max_len, const u8 *input_buf,
 	if (max_len - consumed < *entry_len)
 		return VPD_FAIL;
 
-	consumed += *entry_len;
+	consumed += decoded_len;
 	*_consumed = consumed;
 	return VPD_OK;
 }

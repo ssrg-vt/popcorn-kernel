@@ -10,24 +10,6 @@
 
 #ifdef __ASSEMBLY__
 
-.macro ST2 e, o, off
-#ifdef CONFIG_ARC_HAS_LL64
-	std	\e, [sp, \off]
-#else
-	st	\e, [sp, \off]
-	st	\o, [sp, \off+4]
-#endif
-.endm
-
-.macro LD2 e, o, off
-#ifdef CONFIG_ARC_HAS_LL64
-	ldd	\e, [sp, \off]
-#else
-	ld	\e, [sp, \off]
-	ld	\o, [sp, \off+4]
-#endif
-.endm
-
 #define ASM_NL		 `	/* use '`' to mark new line in macro */
 
 /* annotation for data we want in DCCM - if enabled in .config */
@@ -62,15 +44,15 @@
 #else	/* !__ASSEMBLY__ */
 
 #ifdef CONFIG_ARC_HAS_ICCM
-#define __arcfp_code __section(.text.arcfp)
+#define __arcfp_code __attribute__((__section__(".text.arcfp")))
 #else
-#define __arcfp_code __section(.text)
+#define __arcfp_code __attribute__((__section__(".text")))
 #endif
 
 #ifdef CONFIG_ARC_HAS_DCCM
-#define __arcfp_data __section(.data.arcfp)
+#define __arcfp_data __attribute__((__section__(".data.arcfp")))
 #else
-#define __arcfp_data __section(.data)
+#define __arcfp_data __attribute__((__section__(".data")))
 #endif
 
 #endif /* __ASSEMBLY__ */

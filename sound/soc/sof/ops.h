@@ -100,43 +100,6 @@ static inline int snd_sof_dsp_post_fw_run(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-/* misc */
-
-/**
- * snd_sof_dsp_get_bar_index - Maps a section type with a BAR index
- *
- * @sdev: sof device
- * @type: section type as described by snd_sof_fw_blk_type
- *
- * Returns the corresponding BAR index (a positive integer) or -EINVAL
- * in case there is no mapping
- */
-static inline int snd_sof_dsp_get_bar_index(struct snd_sof_dev *sdev, u32 type)
-{
-	if (sof_ops(sdev)->get_bar_index)
-		return sof_ops(sdev)->get_bar_index(sdev, type);
-
-	return sdev->mmio_bar;
-}
-
-static inline int snd_sof_dsp_get_mailbox_offset(struct snd_sof_dev *sdev)
-{
-	if (sof_ops(sdev)->get_mailbox_offset)
-		return sof_ops(sdev)->get_mailbox_offset(sdev);
-
-	dev_err(sdev->dev, "error: %s not defined\n", __func__);
-	return -ENOTSUPP;
-}
-
-static inline int snd_sof_dsp_get_window_offset(struct snd_sof_dev *sdev,
-						u32 id)
-{
-	if (sof_ops(sdev)->get_window_offset)
-		return sof_ops(sdev)->get_window_offset(sdev, id);
-
-	dev_err(sdev->dev, "error: %s not defined\n", __func__);
-	return -ENOTSUPP;
-}
 /* power management */
 static inline int snd_sof_dsp_resume(struct snd_sof_dev *sdev)
 {
@@ -146,10 +109,10 @@ static inline int snd_sof_dsp_resume(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static inline int snd_sof_dsp_suspend(struct snd_sof_dev *sdev)
+static inline int snd_sof_dsp_suspend(struct snd_sof_dev *sdev, int state)
 {
 	if (sof_ops(sdev)->suspend)
-		return sof_ops(sdev)->suspend(sdev);
+		return sof_ops(sdev)->suspend(sdev, state);
 
 	return 0;
 }
@@ -162,27 +125,19 @@ static inline int snd_sof_dsp_runtime_resume(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static inline int snd_sof_dsp_runtime_suspend(struct snd_sof_dev *sdev)
+static inline int snd_sof_dsp_runtime_suspend(struct snd_sof_dev *sdev,
+					      int state)
 {
 	if (sof_ops(sdev)->runtime_suspend)
-		return sof_ops(sdev)->runtime_suspend(sdev);
+		return sof_ops(sdev)->runtime_suspend(sdev, state);
 
 	return 0;
 }
 
-static inline int snd_sof_dsp_runtime_idle(struct snd_sof_dev *sdev)
-{
-	if (sof_ops(sdev)->runtime_idle)
-		return sof_ops(sdev)->runtime_idle(sdev);
-
-	return 0;
-}
-
-static inline int snd_sof_dsp_hw_params_upon_resume(struct snd_sof_dev *sdev)
+static inline void snd_sof_dsp_hw_params_upon_resume(struct snd_sof_dev *sdev)
 {
 	if (sof_ops(sdev)->set_hw_params_upon_resume)
-		return sof_ops(sdev)->set_hw_params_upon_resume(sdev);
-	return 0;
+		sof_ops(sdev)->set_hw_params_upon_resume(sdev);
 }
 
 static inline int snd_sof_dsp_set_clk(struct snd_sof_dev *sdev, u32 freq)
@@ -331,17 +286,6 @@ snd_sof_pcm_platform_hw_params(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-/* host stream hw free */
-static inline int
-snd_sof_pcm_platform_hw_free(struct snd_sof_dev *sdev,
-			     struct snd_pcm_substream *substream)
-{
-	if (sof_ops(sdev) && sof_ops(sdev)->pcm_hw_free)
-		return sof_ops(sdev)->pcm_hw_free(sdev, substream);
-
-	return 0;
-}
-
 /* host stream trigger */
 static inline int
 snd_sof_pcm_platform_trigger(struct snd_sof_dev *sdev,
@@ -405,7 +349,7 @@ static inline const struct snd_sof_dsp_ops
  * @cond: Break condition (usually involving @val)
  * @sleep_us: Maximum time to sleep between reads in us (0
  *            tight-loops).  Should be less than ~20ms since usleep_range
- *            is used (see Documentation/timers/timers-howto.rst).
+ *            is used (see Documentation/timers/timers-howto.txt).
  * @timeout_us: Timeout in us, 0 means never timeout
  *
  * Returns 0 on success and -ETIMEDOUT upon a timeout. In either

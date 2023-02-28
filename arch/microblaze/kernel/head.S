@@ -30,7 +30,6 @@
 
 #include <linux/init.h>
 #include <linux/linkage.h>
-#include <asm/entry.h>
 #include <asm/thread_info.h>
 #include <asm/page.h>
 #include <linux/of_fdt.h>		/* for OF_DT_HEADER */
@@ -39,7 +38,6 @@
 #include <asm/setup.h> /* COMMAND_LINE_SIZE */
 #include <asm/mmu.h>
 #include <asm/processor.h>
-#include <asm/asm-offsets.h>
 
 .section .data
 .global empty_zero_page
@@ -49,11 +47,7 @@ empty_zero_page:
 .global swapper_pg_dir
 swapper_pg_dir:
 	.space	PAGE_SIZE
-#ifdef CONFIG_SMP
-temp_boot_stack:
-	.space	1024
-#define CURRENT_SAVE	CURRENT_SAVE_ADDR
-#endif /* CONFIG_SMP */
+
 #endif /* CONFIG_MMU */
 
 .section .rodata
@@ -85,13 +79,6 @@ real_start:
 	msrclr	r8, 0 /* clear nothing - just read msr for test */
 	cmpu	r8, r8, r1 /* r1 must contain msr reg content */
 
-#ifdef CONFIG_SMP
-	/* skip FDT copy if secondary */
-	mfs	r11, rpvr0
-	andi	r11, r11, 0xFF
-	bnei	r11, _setup_initial_mmu
-#endif /* CONFIG_SMP */
-
 /* r7 may point to an FDT, or there may be one linked in.
    if it's in r7, we've got to save it away ASAP.
    We ensure r7 points to a valid FDT, just in case the bootloader
@@ -112,7 +99,7 @@ big_endian:
 _prepare_copy_fdt:
 	or	r11, r0, r0 /* incremment */
 	ori	r4, r0, TOPHYS(_fdt_start)
-	ori	r3, r0, (0x10000 - 4)
+	ori	r3, r0, (0x8000 - 4)
 _copy_fdt:
 	lw	r12, r7, r11 /* r12 = r7 + r11 */
 	sw	r12, r4, r11 /* addr[r4 + r11] = r12 */
@@ -134,10 +121,10 @@ no_fdt_arg:
 	tophys(r4,r4)			/* convert to phys address */
 	ori	r3, r0, COMMAND_LINE_SIZE - 1 /* number of loops */
 _copy_command_line:
-	/* r2=r5+r11 - r5 contain pointer to command line */
+	/* r2=r5+r6 - r5 contain pointer to command line */
 	lbu	r2, r5, r11
 	beqid	r2, skip		/* Skip if no data */
-	sb	r2, r4, r11		/* addr[r4+r11]= r2 */
+	sb	r2, r4, r11		/* addr[r4+r6]= r2 */
 	addik	r11, r11, 1		/* increment counting */
 	bgtid	r3, _copy_command_line	/* loop for all entries       */
 	addik	r3, r3, -1		/* decrement loop */
@@ -152,15 +139,14 @@ skip:
 	ori	r4, r0, TOPHYS(_bram_load_start)	/* save bram context */
 	ori	r3, r0, (LMB_SIZE - 4)
 _copy_bram:
-	lw	r7, r0, r11		/* r7 = r0 + r11 */
-	sw	r7, r4, r11		/* addr[r4 + r11] = r7 */
+	lw	r7, r0, r11		/* r7 = r0 + r6 */
+	sw	r7, r4, r11		/* addr[r4 + r6] = r7 */
 	addik	r11, r11, 4		/* increment counting */
 	bgtid	r3, _copy_bram		/* loop for all entries */
 	addik	r3, r3, -4		/* descrement loop */
 #endif
 	/* We have to turn on the MMU right away. */
 
-_setup_initial_mmu:
 	/*
 	 * Set up the initial MMU state so we can do the first level of
 	 * kernel initialization.  This maps the first 16 MBytes of memory 1:1
@@ -192,8 +178,9 @@ _invalidate:
 	tophys(r4,r3)			/* Load the kernel physical address */
 
 	/* start to do TLB calculation */
-	addik	r12, r0, _end_tlb_mapping
+	addik	r12, r0, _end
 	rsub	r12, r3, r12
+	addik	r12, r12, CONFIG_LOWMEM_SIZE >> PTE_SHIFT /* that's the pad */
 
 	or r9, r0, r0 /* TLB0 = 0 */
 	or r10, r0, r0 /* TLB1 = 0 */
@@ -335,18 +322,6 @@ jump_over2:
 	 */
 turn_on_mmu:
 	ori	r15,r0,start_here
-#ifdef CONFIG_SMP
-	/*
-	 * Read PVR and mask off all but CPU id bits to use to select
-	 * boot sequence
-	 */
-	mfs	r4, rpvr0
-	andi	r4, r4, 0xFF
-
-	beqi	r4, finish
-	ori	r15, r0, start_secondary_cpu
-finish:
-#endif /* CONFIG_SMP */
 	ori	r4,r0,MSR_KERNEL_VMS
 	mts	rmsr,r4
 	nop
@@ -365,10 +340,6 @@ start_here:
 
 	/* Initialize r31 with current task address */
 	addik	r31, r0, init_task
-#ifdef CONFIG_MMU
-	/* save current for CPU 0 */
-	swi	CURRENT_TASK, r0, PER_CPU(CURRENT_SAVE);
-#endif
 
 	addik	r11, r0, machine_early_init
 	brald	r15, r11
@@ -413,61 +384,3 @@ kernel_load_context:
 	rted	r17, 0		/* enable MMU and jump to start_kernel */
 	nop
 #endif /* CONFIG_MMU */
-
-#ifdef CONFIG_SMP
-/* Entry point for secondary processors */
-start_secondary_cpu:
-
-	/* Initialize small data anchors */
-	addik	r13, r0, _KERNEL_SDA_BASE_
-	addik	r2, r0, _KERNEL_SDA2_BASE_
-
-	/* Initialize stack pointer */
-	addik	r1, r0, temp_boot_stack + 1024 - 4
-
-	/*
-	 * Initialize the exception table.
-	 */
-	addik	r11, r0, secondary_machine_init
-	brald	r15, r11
-	nop
-
-	lwi	r1, r0, secondary_ti
-
-	/* Initialize r31 with current task address */
-	lwi	CURRENT_TASK, r1, TI_TASK
-	/* save current for secondary CPU */
-	swi	CURRENT_TASK, r0, PER_CPU(CURRENT_SAVE);
-
-	/* Initialize stack pointer */
-	addi	r1, r1, THREAD_SIZE - 4
-	swi	r0, r1, 0
-
-	/* Initialize MMU */
-	ori	r11, r0, 0x10000000
-	mts	rzpr, r11
-
-	ori	r15, r0, TOPHYS(kernel_load_context_secondary)
-	ori	r4, r0, MSR_KERNEL
-	mts	rmsr, r4
-	nop
-	bri	4
-	rted	r15, 0
-	nop
-
-	/* Load up the kernel context */
-kernel_load_context_secondary:
-	# Keep entry 0 and 1 valid. Entry 3 mapped to LMB can go away.
-	ori	r5, r0, MICROBLAZE_LMB_TLB_ID
-	mts     rtlbx, r5
-	nop
-	mts	rtlbhi, r0
-	nop
-	addi	r15, r0, machine_halt
-	ori	r17, r0, start_secondary
-	ori	r4, r0, MSR_KERNEL_VMS
-	mts	rmsr, r4
-	nop
-	rted	r17, 0		/* enable MMU and jump to start_kernel */
-	nop
-#endif /* CONFIG_SMP */

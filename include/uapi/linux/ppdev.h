@@ -15,9 +15,6 @@
  * Added PPGETMODES/PPGETMODE/PPGETPHASE, Fred Barnes <frmb2@ukc.ac.uk>, 03/01/2001
  */
 
-#ifndef _UAPI_LINUX_PPDEV_H
-#define _UAPI_LINUX_PPDEV_H
-
 #define PP_IOCTL	'p'
 
 /* Set mode for read/write (e.g. IEEE1284_MODE_EPP) */
@@ -100,4 +97,4 @@ struct ppdev_frob_struct {
 /* only masks user-visible flags */
 #define PP_FLAGMASK	(PP_FASTWRITE | PP_FASTREAD | PP_W91284PIC)
 
-#endif /* _UAPI_LINUX_PPDEV_H */
+

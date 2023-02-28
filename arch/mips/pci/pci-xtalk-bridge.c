@@ -20,50 +20,16 @@
  * Most of the IOC3 PCI config register aren't present
  * we emulate what is needed for a normal PCI enumeration
  */
-static int ioc3_cfg_rd(void *addr, int where, int size, u32 *value)
+static u32 emulate_ioc3_cfg(int where, int size)
 {
-	u32 cf, shift, mask;
+	if (size == 1 && where == 0x3d)
+		return 0x01;
+	else if (size == 2 && where == 0x3c)
+		return 0x0100;
+	else if (size == 4 && where == 0x3c)
+		return 0x00000100;
 
-	switch (where & ~3) {
-	case 0x00 ... 0x10:
-	case 0x40 ... 0x44:
-		if (get_dbe(cf, (u32 *)addr))
-			return PCIBIOS_DEVICE_NOT_FOUND;
-		break;
-	case 0x3c:
-		/* emulate sane interrupt pin value */
-		cf = 0x00000100;
-		break;
-	default:
-		cf = 0;
-		break;
-	}
-	shift = (where & 3) << 3;
-	mask = 0xffffffffU >> ((4 - size) << 3);
-	*value = (cf >> shift) & mask;
-
-	return PCIBIOS_SUCCESSFUL;
-}
-
-static int ioc3_cfg_wr(void *addr, int where, int size, u32 value)
-{
-	u32 cf, shift, mask, smask;
-
-	if ((where >= 0x14 && where < 0x40) || (where >= 0x48))
-		return PCIBIOS_SUCCESSFUL;
-
-	if (get_dbe(cf, (u32 *)addr))
-		return PCIBIOS_DEVICE_NOT_FOUND;
-
-	shift = ((where & 3) << 3);
-	mask = (0xffffffffU >> ((4 - size) << 3));
-	smask = mask << shift;
-
-	cf = (cf & ~smask) | ((value & mask) << shift);
-	if (put_dbe(cf, (u32 *)addr))
-		return PCIBIOS_DEVICE_NOT_FOUND;
-
-	return PCIBIOS_SUCCESSFUL;
+	return 0;
 }
 
 static void bridge_disable_swapping(struct pci_dev *dev)
@@ -98,7 +64,7 @@ static int pci_conf0_read_config(struct pci_bus *bus, unsigned int devfn,
 	int slot = PCI_SLOT(devfn);
 	int fn = PCI_FUNC(devfn);
 	void *addr;
-	u32 cf;
+	u32 cf, shift, mask;
 	int res;
 
 	addr = &bridge->b_type0_cfg_dev[slot].f[fn].c[PCI_VENDOR_ID];
@@ -109,10 +75,8 @@ static int pci_conf0_read_config(struct pci_bus *bus, unsigned int devfn,
 	 * IOC3 is broken beyond belief ...  Don't even give the
 	 * generic PCI code a chance to look at it for real ...
 	 */
-	if (cf == (PCI_VENDOR_ID_SGI | (PCI_DEVICE_ID_SGI_IOC3 << 16))) {
-		addr = &bridge->b_type0_cfg_dev[slot].f[fn].l[where >> 2];
-		return ioc3_cfg_rd(addr, where, size, value);
-	}
+	if (cf == (PCI_VENDOR_ID_SGI | (PCI_DEVICE_ID_SGI_IOC3 << 16)))
+		goto is_ioc3;
 
 	addr = &bridge->b_type0_cfg_dev[slot].f[fn].c[where ^ (4 - size)];
 
@@ -124,6 +88,26 @@ static int pci_conf0_read_config(struct pci_bus *bus, unsigned int devfn,
 		res = get_dbe(*value, (u32 *)addr);
 
 	return res ? PCIBIOS_DEVICE_NOT_FOUND : PCIBIOS_SUCCESSFUL;
+
+is_ioc3:
+
+	/*
+	 * IOC3 special handling
+	 */
+	if ((where >= 0x14 && where < 0x40) || (where >= 0x48)) {
+		*value = emulate_ioc3_cfg(where, size);
+		return PCIBIOS_SUCCESSFUL;
+	}
+
+	addr = &bridge->b_type0_cfg_dev[slot].f[fn].l[where >> 2];
+	if (get_dbe(cf, (u32 *)addr))
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+	shift = ((where & 3) << 3);
+	mask = (0xffffffffU >> ((4 - size) << 3));
+	*value = (cf >> shift) & mask;
+
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf1_read_config(struct pci_bus *bus, unsigned int devfn,
@@ -135,7 +119,7 @@ static int pci_conf1_read_config(struct pci_bus *bus, unsigned int devfn,
 	int slot = PCI_SLOT(devfn);
 	int fn = PCI_FUNC(devfn);
 	void *addr;
-	u32 cf;
+	u32 cf, shift, mask;
 	int res;
 
 	bridge_write(bc, b_pci_cfg, (busno << 16) | (slot << 11));
@@ -147,10 +131,8 @@ static int pci_conf1_read_config(struct pci_bus *bus, unsigned int devfn,
 	 * IOC3 is broken beyond belief ...  Don't even give the
 	 * generic PCI code a chance to look at it for real ...
 	 */
-	if (cf == (PCI_VENDOR_ID_SGI | (PCI_DEVICE_ID_SGI_IOC3 << 16))) {
-		addr = &bridge->b_type1_cfg.c[(fn << 8) | (where & ~3)];
-		return ioc3_cfg_rd(addr, where, size, value);
-	}
+	if (cf == (PCI_VENDOR_ID_SGI | (PCI_DEVICE_ID_SGI_IOC3 << 16)))
+		goto is_ioc3;
 
 	addr = &bridge->b_type1_cfg.c[(fn << 8) | (where ^ (4 - size))];
 
@@ -162,6 +144,26 @@ static int pci_conf1_read_config(struct pci_bus *bus, unsigned int devfn,
 		res = get_dbe(*value, (u32 *)addr);
 
 	return res ? PCIBIOS_DEVICE_NOT_FOUND : PCIBIOS_SUCCESSFUL;
+
+is_ioc3:
+
+	/*
+	 * IOC3 special handling
+	 */
+	if ((where >= 0x14 && where < 0x40) || (where >= 0x48)) {
+		*value = emulate_ioc3_cfg(where, size);
+		return PCIBIOS_SUCCESSFUL;
+	}
+
+	addr = &bridge->b_type1_cfg.c[(fn << 8) | where];
+	if (get_dbe(cf, (u32 *)addr))
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+	shift = ((where & 3) << 3);
+	mask = (0xffffffffU >> ((4 - size) << 3));
+	*value = (cf >> shift) & mask;
+
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_read_config(struct pci_bus *bus, unsigned int devfn,
@@ -181,7 +183,7 @@ static int pci_conf0_write_config(struct pci_bus *bus, unsigned int devfn,
 	int slot = PCI_SLOT(devfn);
 	int fn = PCI_FUNC(devfn);
 	void *addr;
-	u32 cf;
+	u32 cf, shift, mask, smask;
 	int res;
 
 	addr = &bridge->b_type0_cfg_dev[slot].f[fn].c[PCI_VENDOR_ID];
@@ -192,10 +194,8 @@ static int pci_conf0_write_config(struct pci_bus *bus, unsigned int devfn,
 	 * IOC3 is broken beyond belief ...  Don't even give the
 	 * generic PCI code a chance to look at it for real ...
 	 */
-	if (cf == (PCI_VENDOR_ID_SGI | (PCI_DEVICE_ID_SGI_IOC3 << 16))) {
-		addr = &bridge->b_type0_cfg_dev[slot].f[fn].l[where >> 2];
-		return ioc3_cfg_wr(addr, where, size, value);
-	}
+	if (cf == (PCI_VENDOR_ID_SGI | (PCI_DEVICE_ID_SGI_IOC3 << 16)))
+		goto is_ioc3;
 
 	addr = &bridge->b_type0_cfg_dev[slot].f[fn].c[where ^ (4 - size)];
 
@@ -210,6 +210,29 @@ static int pci_conf0_write_config(struct pci_bus *bus, unsigned int devfn,
 		return PCIBIOS_DEVICE_NOT_FOUND;
 
 	return PCIBIOS_SUCCESSFUL;
+
+is_ioc3:
+
+	/*
+	 * IOC3 special handling
+	 */
+	if ((where >= 0x14 && where < 0x40) || (where >= 0x48))
+		return PCIBIOS_SUCCESSFUL;
+
+	addr = &bridge->b_type0_cfg_dev[slot].f[fn].l[where >> 2];
+
+	if (get_dbe(cf, (u32 *)addr))
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+	shift = ((where & 3) << 3);
+	mask = (0xffffffffU >> ((4 - size) << 3));
+	smask = mask << shift;
+
+	cf = (cf & ~smask) | ((value & mask) << shift);
+	if (put_dbe(cf, (u32 *)addr))
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf1_write_config(struct pci_bus *bus, unsigned int devfn,
@@ -221,7 +244,7 @@ static int pci_conf1_write_config(struct pci_bus *bus, unsigned int devfn,
 	int fn = PCI_FUNC(devfn);
 	int busno = bus->number;
 	void *addr;
-	u32 cf;
+	u32 cf, shift, mask, smask;
 	int res;
 
 	bridge_write(bc, b_pci_cfg, (busno << 16) | (slot << 11));
@@ -233,10 +256,8 @@ static int pci_conf1_write_config(struct pci_bus *bus, unsigned int devfn,
 	 * IOC3 is broken beyond belief ...  Don't even give the
 	 * generic PCI code a chance to look at it for real ...
 	 */
-	if (cf == (PCI_VENDOR_ID_SGI | (PCI_DEVICE_ID_SGI_IOC3 << 16))) {
-		addr = &bridge->b_type0_cfg_dev[slot].f[fn].l[where >> 2];
-		return ioc3_cfg_wr(addr, where, size, value);
-	}
+	if (cf == (PCI_VENDOR_ID_SGI | (PCI_DEVICE_ID_SGI_IOC3 << 16)))
+		goto is_ioc3;
 
 	addr = &bridge->b_type1_cfg.c[(fn << 8) | (where ^ (4 - size))];
 
@@ -248,6 +269,28 @@ static int pci_conf1_write_config(struct pci_bus *bus, unsigned int devfn,
 		res = put_dbe(value, (u32 *)addr);
 
 	if (res)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+	return PCIBIOS_SUCCESSFUL;
+
+is_ioc3:
+
+	/*
+	 * IOC3 special handling
+	 */
+	if ((where >= 0x14 && where < 0x40) || (where >= 0x48))
+		return PCIBIOS_SUCCESSFUL;
+
+	addr = &bridge->b_type0_cfg_dev[slot].f[fn].l[where >> 2];
+	if (get_dbe(cf, (u32 *)addr))
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+	shift = ((where & 3) << 3);
+	mask = (0xffffffffU >> ((4 - size) << 3));
+	smask = mask << shift;
+
+	cf = (cf & ~smask) | ((value & mask) << shift);
+	if (put_dbe(cf, (u32 *)addr))
 		return PCIBIOS_DEVICE_NOT_FOUND;
 
 	return PCIBIOS_SUCCESSFUL;

@@ -7,11 +7,7 @@
 
 #include <linux/clk.h>
 #include <linux/component.h>
-#include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
-
-#include <drm/drm_irq.h>
-
 #include "vc4_drv.h"
 #include "vc4_regs.h"
 
@@ -206,7 +202,7 @@ try_again:
 }
 
 /**
- * bin_bo_alloc() - allocates the memory that will be used for
+ * vc4_allocate_bin_bo() - allocates the memory that will be used for
  * tile binning.
  *
  * The binner has a limitation that the addresses in the tile state
@@ -227,15 +223,13 @@ try_again:
  * overall CMA pool before they make scenes complicated enough to run
  * out of bin space.
  */
-static int bin_bo_alloc(struct vc4_dev *vc4)
+static int vc4_allocate_bin_bo(struct drm_device *drm)
 {
+	struct vc4_dev *vc4 = to_vc4_dev(drm);
 	struct vc4_v3d *v3d = vc4->v3d;
 	uint32_t size = 16 * 1024 * 1024;
 	int ret = 0;
 	struct list_head list;
-
-	if (!v3d)
-		return -ENODEV;
 
 	/* We may need to try allocating more than once to get a BO
 	 * that doesn't cross 256MB.  Track the ones we've allocated
@@ -246,7 +240,7 @@ static int bin_bo_alloc(struct vc4_dev *vc4)
 	INIT_LIST_HEAD(&list);
 
 	while (true) {
-		struct vc4_bo *bo = vc4_bo_create(vc4->dev, size, true,
+		struct vc4_bo *bo = vc4_bo_create(drm, size, true,
 						  VC4_BO_TYPE_BIN);
 
 		if (IS_ERR(bo)) {
@@ -287,14 +281,6 @@ static int bin_bo_alloc(struct vc4_dev *vc4)
 			WARN_ON_ONCE(sizeof(vc4->bin_alloc_used) * 8 !=
 				     bo->base.base.size / vc4->bin_alloc_size);
 
-			kref_init(&vc4->bin_bo_kref);
-
-			/* Enable the out-of-memory interrupt to set our
-			 * newly-allocated binner BO, potentially from an
-			 * already-pending-but-masked interrupt.
-			 */
-			V3D_WRITE(V3D_INTENA, V3D_INT_OUTOMEM);
-
 			break;
 		}
 
@@ -314,47 +300,6 @@ static int bin_bo_alloc(struct vc4_dev *vc4)
 	return ret;
 }
 
-int vc4_v3d_bin_bo_get(struct vc4_dev *vc4, bool *used)
-{
-	int ret = 0;
-
-	mutex_lock(&vc4->bin_bo_lock);
-
-	if (used && *used)
-		goto complete;
-
-	if (vc4->bin_bo)
-		kref_get(&vc4->bin_bo_kref);
-	else
-		ret = bin_bo_alloc(vc4);
-
-	if (ret == 0 && used)
-		*used = true;
-
-complete:
-	mutex_unlock(&vc4->bin_bo_lock);
-
-	return ret;
-}
-
-static void bin_bo_release(struct kref *ref)
-{
-	struct vc4_dev *vc4 = container_of(ref, struct vc4_dev, bin_bo_kref);
-
-	if (WARN_ON_ONCE(!vc4->bin_bo))
-		return;
-
-	drm_gem_object_put_unlocked(&vc4->bin_bo->base.base);
-	vc4->bin_bo = NULL;
-}
-
-void vc4_v3d_bin_bo_put(struct vc4_dev *vc4)
-{
-	mutex_lock(&vc4->bin_bo_lock);
-	kref_put(&vc4->bin_bo_kref, bin_bo_release);
-	mutex_unlock(&vc4->bin_bo_lock);
-}
-
 #ifdef CONFIG_PM
 static int vc4_v3d_runtime_suspend(struct device *dev)
 {
@@ -362,6 +307,9 @@ static int vc4_v3d_runtime_suspend(struct device *dev)
 	struct vc4_dev *vc4 = v3d->vc4;
 
 	vc4_irq_uninstall(vc4->dev);
+
+	drm_gem_object_put_unlocked(&vc4->bin_bo->base.base);
+	vc4->bin_bo = NULL;
 
 	clk_disable_unprepare(v3d->clk);
 
@@ -373,6 +321,10 @@ static int vc4_v3d_runtime_resume(struct device *dev)
 	struct vc4_v3d *v3d = dev_get_drvdata(dev);
 	struct vc4_dev *vc4 = v3d->vc4;
 	int ret;
+
+	ret = vc4_allocate_bin_bo(vc4->dev);
+	if (ret)
+		return ret;
 
 	ret = clk_prepare_enable(v3d->clk);
 	if (ret != 0)
@@ -439,6 +391,12 @@ static int vc4_v3d_bind(struct device *dev, struct device *master, void *data)
 	ret = clk_prepare_enable(v3d->clk);
 	if (ret != 0)
 		return ret;
+
+	ret = vc4_allocate_bin_bo(drm);
+	if (ret) {
+		clk_disable_unprepare(v3d->clk);
+		return ret;
+	}
 
 	/* Reset the binner overflow address/size at setup, to be sure
 	 * we don't reuse an old one.

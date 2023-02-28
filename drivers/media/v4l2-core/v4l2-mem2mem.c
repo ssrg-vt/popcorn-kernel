@@ -603,10 +603,11 @@ int v4l2_m2m_streamoff(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_streamoff);
 
-static __poll_t v4l2_m2m_poll_for_data(struct file *file,
-				       struct v4l2_m2m_ctx *m2m_ctx,
-				       struct poll_table_struct *wait)
+__poll_t v4l2_m2m_poll(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
+			   struct poll_table_struct *wait)
 {
+	struct video_device *vfd = video_devdata(file);
+	__poll_t req_events = poll_requested_events(wait);
 	struct vb2_queue *src_q, *dst_q;
 	struct vb2_buffer *src_vb = NULL, *dst_vb = NULL;
 	__poll_t rc = 0;
@@ -618,6 +619,16 @@ static __poll_t v4l2_m2m_poll_for_data(struct file *file,
 	poll_wait(file, &src_q->done_wq, wait);
 	poll_wait(file, &dst_q->done_wq, wait);
 
+	if (test_bit(V4L2_FL_USES_V4L2_FH, &vfd->flags)) {
+		struct v4l2_fh *fh = file->private_data;
+
+		poll_wait(file, &fh->wait, wait);
+		if (v4l2_event_pending(fh))
+			rc = EPOLLPRI;
+		if (!(req_events & (EPOLLOUT | EPOLLWRNORM | EPOLLIN | EPOLLRDNORM)))
+			return rc;
+	}
+
 	/*
 	 * There has to be at least one buffer queued on each queued_list, which
 	 * means either in driver already or waiting for driver to claim it
@@ -626,8 +637,10 @@ static __poll_t v4l2_m2m_poll_for_data(struct file *file,
 	if ((!src_q->streaming || src_q->error ||
 	     list_empty(&src_q->queued_list)) &&
 	    (!dst_q->streaming || dst_q->error ||
-	     list_empty(&dst_q->queued_list)))
-		return EPOLLERR;
+	     list_empty(&dst_q->queued_list))) {
+		rc |= EPOLLERR;
+		goto end;
+	}
 
 	spin_lock_irqsave(&dst_q->done_lock, flags);
 	if (list_empty(&dst_q->done_list)) {
@@ -637,7 +650,7 @@ static __poll_t v4l2_m2m_poll_for_data(struct file *file,
 		 */
 		if (dst_q->last_buffer_dequeued) {
 			spin_unlock_irqrestore(&dst_q->done_lock, flags);
-			return EPOLLIN | EPOLLRDNORM;
+			return rc | EPOLLIN | EPOLLRDNORM;
 		}
 	}
 	spin_unlock_irqrestore(&dst_q->done_lock, flags);
@@ -660,27 +673,7 @@ static __poll_t v4l2_m2m_poll_for_data(struct file *file,
 		rc |= EPOLLIN | EPOLLRDNORM;
 	spin_unlock_irqrestore(&dst_q->done_lock, flags);
 
-	return rc;
-}
-
-__poll_t v4l2_m2m_poll(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
-		       struct poll_table_struct *wait)
-{
-	struct video_device *vfd = video_devdata(file);
-	__poll_t req_events = poll_requested_events(wait);
-	__poll_t rc = 0;
-
-	if (req_events & (EPOLLOUT | EPOLLWRNORM | EPOLLIN | EPOLLRDNORM))
-		rc = v4l2_m2m_poll_for_data(file, m2m_ctx, wait);
-
-	if (test_bit(V4L2_FL_USES_V4L2_FH, &vfd->flags)) {
-		struct v4l2_fh *fh = file->private_data;
-
-		poll_wait(file, &fh->wait, wait);
-		if (v4l2_event_pending(fh))
-			rc |= EPOLLPRI;
-	}
-
+end:
 	return rc;
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_poll);
@@ -1124,35 +1117,6 @@ int v4l2_m2m_ioctl_streamoff(struct file *file, void *priv,
 	return v4l2_m2m_streamoff(file, fh->m2m_ctx, type);
 }
 EXPORT_SYMBOL_GPL(v4l2_m2m_ioctl_streamoff);
-
-int v4l2_m2m_ioctl_try_encoder_cmd(struct file *file, void *fh,
-				   struct v4l2_encoder_cmd *ec)
-{
-	if (ec->cmd != V4L2_ENC_CMD_STOP && ec->cmd != V4L2_ENC_CMD_START)
-		return -EINVAL;
-
-	ec->flags = 0;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(v4l2_m2m_ioctl_try_encoder_cmd);
-
-int v4l2_m2m_ioctl_try_decoder_cmd(struct file *file, void *fh,
-				   struct v4l2_decoder_cmd *dc)
-{
-	if (dc->cmd != V4L2_DEC_CMD_STOP && dc->cmd != V4L2_DEC_CMD_START)
-		return -EINVAL;
-
-	dc->flags = 0;
-
-	if (dc->cmd == V4L2_DEC_CMD_STOP) {
-		dc->stop.pts = 0;
-	} else if (dc->cmd == V4L2_DEC_CMD_START) {
-		dc->start.speed = 0;
-		dc->start.format = V4L2_DEC_START_FMT_NONE;
-	}
-	return 0;
-}
-EXPORT_SYMBOL_GPL(v4l2_m2m_ioctl_try_decoder_cmd);
 
 /*
  * v4l2_file_operations helpers. It is assumed here same lock is used

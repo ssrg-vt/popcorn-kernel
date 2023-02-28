@@ -260,29 +260,28 @@ static void translate_rx_signal_stuff(struct ieee80211_hw *hw,
 bool rtl8723e_rx_query_desc(struct ieee80211_hw *hw,
 			    struct rtl_stats *status,
 			    struct ieee80211_rx_status *rx_status,
-			    u8 *pdesc8, struct sk_buff *skb)
+			    u8 *pdesc, struct sk_buff *skb)
 {
 	struct rx_fwinfo_8723e *p_drvinfo;
 	struct ieee80211_hdr *hdr;
-	__le32 *pdesc = (__le32 *)pdesc8;
-	u32 phystatus = get_rx_desc_physt(pdesc);
+	u32 phystatus = GET_RX_DESC_PHYST(pdesc);
 
-	status->length = (u16)get_rx_desc_pkt_len(pdesc);
-	status->rx_drvinfo_size = (u8)get_rx_desc_drv_info_size(pdesc) *
+	status->length = (u16)GET_RX_DESC_PKT_LEN(pdesc);
+	status->rx_drvinfo_size = (u8)GET_RX_DESC_DRV_INFO_SIZE(pdesc) *
 	    RX_DRV_INFO_SIZE_UNIT;
-	status->rx_bufshift = (u8)(get_rx_desc_shift(pdesc) & 0x03);
-	status->icv = (u16)get_rx_desc_icv(pdesc);
-	status->crc = (u16)get_rx_desc_crc32(pdesc);
+	status->rx_bufshift = (u8)(GET_RX_DESC_SHIFT(pdesc) & 0x03);
+	status->icv = (u16)GET_RX_DESC_ICV(pdesc);
+	status->crc = (u16)GET_RX_DESC_CRC32(pdesc);
 	status->hwerror = (status->crc | status->icv);
-	status->decrypted = !get_rx_desc_swdec(pdesc);
-	status->rate = (u8)get_rx_desc_rxmcs(pdesc);
-	status->shortpreamble = (u16)get_rx_desc_splcp(pdesc);
-	status->isampdu = (bool)(get_rx_desc_paggr(pdesc) == 1);
-	status->isfirst_ampdu = (bool)((get_rx_desc_paggr(pdesc) == 1) &&
-				       (get_rx_desc_faggr(pdesc) == 1));
-	status->timestamp_low = get_rx_desc_tsfl(pdesc);
-	status->rx_is40mhzpacket = (bool)get_rx_desc_bw(pdesc);
-	status->is_ht = (bool)get_rx_desc_rxht(pdesc);
+	status->decrypted = !GET_RX_DESC_SWDEC(pdesc);
+	status->rate = (u8)GET_RX_DESC_RXMCS(pdesc);
+	status->shortpreamble = (u16)GET_RX_DESC_SPLCP(pdesc);
+	status->isampdu = (bool)(GET_RX_DESC_PAGGR(pdesc) == 1);
+	status->isfirst_ampdu = (bool)((GET_RX_DESC_PAGGR(pdesc) == 1) &&
+				       (GET_RX_DESC_FAGGR(pdesc) == 1));
+	status->timestamp_low = GET_RX_DESC_TSFL(pdesc);
+	status->rx_is40mhzpacket = (bool)GET_RX_DESC_BW(pdesc);
+	status->is_ht = (bool)GET_RX_DESC_RXHT(pdesc);
 
 	status->is_cck = RX_HAL_IS_CCK_RATE(status->rate);
 
@@ -332,7 +331,7 @@ bool rtl8723e_rx_query_desc(struct ieee80211_hw *hw,
 		p_drvinfo = (struct rx_fwinfo_8723e *)(skb->data +
 						     status->rx_bufshift);
 
-		translate_rx_signal_stuff(hw, skb, status, pdesc8, p_drvinfo);
+		translate_rx_signal_stuff(hw, skb, status, pdesc, p_drvinfo);
 	}
 	rx_status->signal = status->recvsignalpower + 10;
 	return true;
@@ -351,8 +350,7 @@ void rtl8723e_tx_fill_desc(struct ieee80211_hw *hw,
 	struct rtl_ps_ctl *ppsc = rtl_psc(rtl_priv(hw));
 	bool b_defaultadapter = true;
 	/* bool b_trigger_ac = false; */
-	u8 *pdesc8 = (u8 *)pdesc_tx;
-	__le32 *pdesc = (__le32 *)pdesc8;
+	u8 *pdesc = (u8 *)pdesc_tx;
 	u16 seq_number;
 	__le16 fc = hdr->frame_control;
 	u8 fw_qsel = _rtl8723e_map_hwqueue_to_fwqueue(skb, hw_queue);
@@ -385,7 +383,7 @@ void rtl8723e_tx_fill_desc(struct ieee80211_hw *hw,
 
 	rtl_get_tcb_desc(hw, info, sta, skb, ptcb_desc);
 
-	clear_pci_tx_desc_content(pdesc, sizeof(struct tx_desc_8723e));
+	CLEAR_PCI_TX_DESC_CONTENT(pdesc, sizeof(struct tx_desc_8723e));
 
 	if (ieee80211_is_nullfunc(fc) || ieee80211_is_ctl(fc)) {
 		firstseg = true;
@@ -393,58 +391,58 @@ void rtl8723e_tx_fill_desc(struct ieee80211_hw *hw,
 	}
 
 	if (firstseg) {
-		set_tx_desc_offset(pdesc, USB_HWDESC_HEADER_LEN);
+		SET_TX_DESC_OFFSET(pdesc, USB_HWDESC_HEADER_LEN);
 
-		set_tx_desc_tx_rate(pdesc, ptcb_desc->hw_rate);
+		SET_TX_DESC_TX_RATE(pdesc, ptcb_desc->hw_rate);
 
 		if (ptcb_desc->use_shortgi || ptcb_desc->use_shortpreamble)
-			set_tx_desc_data_shortgi(pdesc, 1);
+			SET_TX_DESC_DATA_SHORTGI(pdesc, 1);
 
 		if (info->flags & IEEE80211_TX_CTL_AMPDU) {
-			set_tx_desc_agg_break(pdesc, 1);
-			set_tx_desc_max_agg_num(pdesc, 0x14);
+			SET_TX_DESC_AGG_BREAK(pdesc, 1);
+			SET_TX_DESC_MAX_AGG_NUM(pdesc, 0x14);
 		}
-		set_tx_desc_seq(pdesc, seq_number);
+		SET_TX_DESC_SEQ(pdesc, seq_number);
 
-		set_tx_desc_rts_enable(pdesc,
+		SET_TX_DESC_RTS_ENABLE(pdesc,
 				       ((ptcb_desc->rts_enable &&
 					!ptcb_desc->cts_enable) ? 1 : 0));
-		set_tx_desc_hw_rts_enable(pdesc,
+		SET_TX_DESC_HW_RTS_ENABLE(pdesc,
 					  ((ptcb_desc->rts_enable ||
 					  ptcb_desc->cts_enable) ? 1 : 0));
-		set_tx_desc_cts2self(pdesc,
+		SET_TX_DESC_CTS2SELF(pdesc,
 				     ((ptcb_desc->cts_enable) ? 1 : 0));
-		set_tx_desc_rts_stbc(pdesc,
+		SET_TX_DESC_RTS_STBC(pdesc,
 				     ((ptcb_desc->rts_stbc) ? 1 : 0));
 
-		set_tx_desc_rts_rate(pdesc, ptcb_desc->rts_rate);
-		set_tx_desc_rts_bw(pdesc, 0);
-		set_tx_desc_rts_sc(pdesc, ptcb_desc->rts_sc);
-		set_tx_desc_rts_short(pdesc,
+		SET_TX_DESC_RTS_RATE(pdesc, ptcb_desc->rts_rate);
+		SET_TX_DESC_RTS_BW(pdesc, 0);
+		SET_TX_DESC_RTS_SC(pdesc, ptcb_desc->rts_sc);
+		SET_TX_DESC_RTS_SHORT(pdesc,
 				((ptcb_desc->rts_rate <= DESC92C_RATE54M) ?
 				(ptcb_desc->rts_use_shortpreamble ? 1 : 0)
 				: (ptcb_desc->rts_use_shortgi ? 1 : 0)));
 
 		if (bw_40) {
 			if (ptcb_desc->packet_bw == HT_CHANNEL_WIDTH_20_40) {
-				set_tx_desc_data_bw(pdesc, 1);
-				set_tx_desc_tx_sub_carrier(pdesc, 3);
+				SET_TX_DESC_DATA_BW(pdesc, 1);
+				SET_TX_DESC_TX_SUB_CARRIER(pdesc, 3);
 			} else {
-				set_tx_desc_data_bw(pdesc, 0);
-				set_tx_desc_tx_sub_carrier(pdesc,
+				SET_TX_DESC_DATA_BW(pdesc, 0);
+				SET_TX_DESC_TX_SUB_CARRIER(pdesc,
 					mac->cur_40_prime_sc);
 			}
 		} else {
-			set_tx_desc_data_bw(pdesc, 0);
-			set_tx_desc_tx_sub_carrier(pdesc, 0);
+			SET_TX_DESC_DATA_BW(pdesc, 0);
+			SET_TX_DESC_TX_SUB_CARRIER(pdesc, 0);
 		}
 
-		set_tx_desc_linip(pdesc, 0);
-		set_tx_desc_pkt_size(pdesc, (u16)skb->len);
+		SET_TX_DESC_LINIP(pdesc, 0);
+		SET_TX_DESC_PKT_SIZE(pdesc, (u16) skb->len);
 
 		if (sta) {
 			u8 ampdu_density = sta->ht_cap.ampdu_density;
-			set_tx_desc_ampdu_density(pdesc, ampdu_density);
+			SET_TX_DESC_AMPDU_DENSITY(pdesc, ampdu_density);
 		}
 
 		if (info->control.hw_key) {
@@ -455,79 +453,78 @@ void rtl8723e_tx_fill_desc(struct ieee80211_hw *hw,
 			case WLAN_CIPHER_SUITE_WEP40:
 			case WLAN_CIPHER_SUITE_WEP104:
 			case WLAN_CIPHER_SUITE_TKIP:
-				set_tx_desc_sec_type(pdesc, 0x1);
+				SET_TX_DESC_SEC_TYPE(pdesc, 0x1);
 				break;
 			case WLAN_CIPHER_SUITE_CCMP:
-				set_tx_desc_sec_type(pdesc, 0x3);
+				SET_TX_DESC_SEC_TYPE(pdesc, 0x3);
 				break;
 			default:
-				set_tx_desc_sec_type(pdesc, 0x0);
+				SET_TX_DESC_SEC_TYPE(pdesc, 0x0);
 				break;
 
 			}
 		}
 
-		set_tx_desc_pkt_id(pdesc, 0);
-		set_tx_desc_queue_sel(pdesc, fw_qsel);
+		SET_TX_DESC_PKT_ID(pdesc, 0);
+		SET_TX_DESC_QUEUE_SEL(pdesc, fw_qsel);
 
-		set_tx_desc_data_rate_fb_limit(pdesc, 0x1F);
-		set_tx_desc_rts_rate_fb_limit(pdesc, 0xF);
-		set_tx_desc_disable_fb(pdesc, 0);
-		set_tx_desc_use_rate(pdesc, ptcb_desc->use_driver_rate ? 1 : 0);
+		SET_TX_DESC_DATA_RATE_FB_LIMIT(pdesc, 0x1F);
+		SET_TX_DESC_RTS_RATE_FB_LIMIT(pdesc, 0xF);
+		SET_TX_DESC_DISABLE_FB(pdesc, 0);
+		SET_TX_DESC_USE_RATE(pdesc, ptcb_desc->use_driver_rate ? 1 : 0);
 
 		if (ieee80211_is_data_qos(fc)) {
 			if (mac->rdg_en) {
 				RT_TRACE(rtlpriv, COMP_SEND, DBG_TRACE,
 					 "Enable RDG function.\n");
-				set_tx_desc_rdg_enable(pdesc, 1);
-				set_tx_desc_htc(pdesc, 1);
+				SET_TX_DESC_RDG_ENABLE(pdesc, 1);
+				SET_TX_DESC_HTC(pdesc, 1);
 			}
 		}
 	}
 
-	set_tx_desc_first_seg(pdesc, (firstseg ? 1 : 0));
-	set_tx_desc_last_seg(pdesc, (lastseg ? 1 : 0));
+	SET_TX_DESC_FIRST_SEG(pdesc, (firstseg ? 1 : 0));
+	SET_TX_DESC_LAST_SEG(pdesc, (lastseg ? 1 : 0));
 
-	set_tx_desc_tx_buffer_size(pdesc, (u16)skb->len);
+	SET_TX_DESC_TX_BUFFER_SIZE(pdesc, (u16) skb->len);
 
-	set_tx_desc_tx_buffer_address(pdesc, mapping);
+	SET_TX_DESC_TX_BUFFER_ADDRESS(pdesc, mapping);
 
 	if (rtlpriv->dm.useramask) {
-		set_tx_desc_rate_id(pdesc, ptcb_desc->ratr_index);
-		set_tx_desc_macid(pdesc, ptcb_desc->mac_id);
+		SET_TX_DESC_RATE_ID(pdesc, ptcb_desc->ratr_index);
+		SET_TX_DESC_MACID(pdesc, ptcb_desc->mac_id);
 	} else {
-		set_tx_desc_rate_id(pdesc, 0xC + ptcb_desc->ratr_index);
-		set_tx_desc_macid(pdesc, ptcb_desc->ratr_index);
+		SET_TX_DESC_RATE_ID(pdesc, 0xC + ptcb_desc->ratr_index);
+		SET_TX_DESC_MACID(pdesc, ptcb_desc->ratr_index);
 	}
 
 	if ((!ieee80211_is_data_qos(fc)) && ppsc->fwctrl_lps) {
-		set_tx_desc_hwseq_en_8723(pdesc, 1);
-		/* set_tx_desc_hwseq_en(pdesc, 1); */
-		/* set_tx_desc_pkt_id(pdesc, 8); */
+		SET_TX_DESC_HWSEQ_EN_8723(pdesc, 1);
+		/* SET_TX_DESC_HWSEQ_EN(pdesc, 1); */
+		/* SET_TX_DESC_PKT_ID(pdesc, 8); */
 
 		if (!b_defaultadapter)
-			set_tx_desc_hwseq_sel_8723(pdesc, 1);
-	/* set_tx_desc_qos(pdesc, 1); */
+			SET_TX_DESC_HWSEQ_SEL_8723(pdesc, 1);
+	/* SET_TX_DESC_QOS(pdesc, 1); */
 	}
 
-	set_tx_desc_more_frag(pdesc, (lastseg ? 0 : 1));
+	SET_TX_DESC_MORE_FRAG(pdesc, (lastseg ? 0 : 1));
 
 	if (is_multicast_ether_addr(ieee80211_get_DA(hdr)) ||
 	    is_broadcast_ether_addr(ieee80211_get_DA(hdr))) {
-		set_tx_desc_bmc(pdesc, 1);
+		SET_TX_DESC_BMC(pdesc, 1);
 	}
 
 	RT_TRACE(rtlpriv, COMP_SEND, DBG_TRACE, "\n");
 }
 
 void rtl8723e_tx_fill_cmddesc(struct ieee80211_hw *hw,
-			      u8 *pdesc8, bool firstseg,
+			      u8 *pdesc, bool firstseg,
 			      bool lastseg, struct sk_buff *skb)
 {
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct rtl_pci *rtlpci = rtl_pcidev(rtl_pcipriv(hw));
 	u8 fw_queue = QSLT_BEACON;
-	__le32 *pdesc = (__le32 *)pdesc8;
 
 	dma_addr_t mapping = pci_map_single(rtlpci->pdev,
 					    skb->data, skb->len,
@@ -541,44 +538,44 @@ void rtl8723e_tx_fill_cmddesc(struct ieee80211_hw *hw,
 			 "DMA mapping error\n");
 		return;
 	}
-	clear_pci_tx_desc_content(pdesc, TX_DESC_SIZE);
+	CLEAR_PCI_TX_DESC_CONTENT(pdesc, TX_DESC_SIZE);
 
 	if (firstseg)
-		set_tx_desc_offset(pdesc, USB_HWDESC_HEADER_LEN);
+		SET_TX_DESC_OFFSET(pdesc, USB_HWDESC_HEADER_LEN);
 
-	set_tx_desc_tx_rate(pdesc, DESC92C_RATE1M);
+	SET_TX_DESC_TX_RATE(pdesc, DESC92C_RATE1M);
 
-	set_tx_desc_seq(pdesc, 0);
+	SET_TX_DESC_SEQ(pdesc, 0);
 
-	set_tx_desc_linip(pdesc, 0);
+	SET_TX_DESC_LINIP(pdesc, 0);
 
-	set_tx_desc_queue_sel(pdesc, fw_queue);
+	SET_TX_DESC_QUEUE_SEL(pdesc, fw_queue);
 
-	set_tx_desc_first_seg(pdesc, 1);
-	set_tx_desc_last_seg(pdesc, 1);
+	SET_TX_DESC_FIRST_SEG(pdesc, 1);
+	SET_TX_DESC_LAST_SEG(pdesc, 1);
 
-	set_tx_desc_tx_buffer_size(pdesc, (u16)(skb->len));
+	SET_TX_DESC_TX_BUFFER_SIZE(pdesc, (u16) (skb->len));
 
-	set_tx_desc_tx_buffer_address(pdesc, mapping);
+	SET_TX_DESC_TX_BUFFER_ADDRESS(pdesc, mapping);
 
-	set_tx_desc_rate_id(pdesc, 7);
-	set_tx_desc_macid(pdesc, 0);
+	SET_TX_DESC_RATE_ID(pdesc, 7);
+	SET_TX_DESC_MACID(pdesc, 0);
 
-	set_tx_desc_own(pdesc, 1);
+	SET_TX_DESC_OWN(pdesc, 1);
 
-	set_tx_desc_pkt_size(pdesc, (u16)(skb->len));
+	SET_TX_DESC_PKT_SIZE((u8 *)pdesc, (u16)(skb->len));
 
-	set_tx_desc_first_seg(pdesc, 1);
-	set_tx_desc_last_seg(pdesc, 1);
+	SET_TX_DESC_FIRST_SEG(pdesc, 1);
+	SET_TX_DESC_LAST_SEG(pdesc, 1);
 
-	set_tx_desc_offset(pdesc, 0x20);
+	SET_TX_DESC_OFFSET(pdesc, 0x20);
 
-	set_tx_desc_use_rate(pdesc, 1);
+	SET_TX_DESC_USE_RATE(pdesc, 1);
 
 	if (!ieee80211_is_data_qos(fc)) {
-		set_tx_desc_hwseq_en_8723(pdesc, 1);
-		/* set_tx_desc_hwseq_en(pdesc, 1); */
-		/* set_tx_desc_pkt_id(pdesc, 8); */
+		SET_TX_DESC_HWSEQ_EN_8723(pdesc, 1);
+		/* SET_TX_DESC_HWSEQ_EN(pdesc, 1); */
+		/* SET_TX_DESC_PKT_ID(pdesc, 8); */
 	}
 
 	RT_PRINT_DATA(rtlpriv, COMP_CMD, DBG_LOUD,
@@ -586,18 +583,16 @@ void rtl8723e_tx_fill_cmddesc(struct ieee80211_hw *hw,
 		      pdesc, TX_DESC_SIZE);
 }
 
-void rtl8723e_set_desc(struct ieee80211_hw *hw, u8 *pdesc8,
+void rtl8723e_set_desc(struct ieee80211_hw *hw, u8 *pdesc,
 		       bool istx, u8 desc_name, u8 *val)
 {
-	__le32 *pdesc = (__le32 *)pdesc8;
-
 	if (istx == true) {
 		switch (desc_name) {
 		case HW_DESC_OWN:
-			set_tx_desc_own(pdesc, 1);
+			SET_TX_DESC_OWN(pdesc, 1);
 			break;
 		case HW_DESC_TX_NEXTDESC_ADDR:
-			set_tx_desc_next_desc_address(pdesc, *(u32 *)val);
+			SET_TX_DESC_NEXT_DESC_ADDRESS(pdesc, *(u32 *) val);
 			break;
 		default:
 			WARN_ONCE(true, "rtl8723ae: ERR txdesc :%d not processed\n",
@@ -607,16 +602,16 @@ void rtl8723e_set_desc(struct ieee80211_hw *hw, u8 *pdesc8,
 	} else {
 		switch (desc_name) {
 		case HW_DESC_RXOWN:
-			set_rx_desc_own(pdesc, 1);
+			SET_RX_DESC_OWN(pdesc, 1);
 			break;
 		case HW_DESC_RXBUFF_ADDR:
-			set_rx_desc_buff_addr(pdesc, *(u32 *)val);
+			SET_RX_DESC_BUFF_ADDR(pdesc, *(u32 *) val);
 			break;
 		case HW_DESC_RXPKT_LEN:
-			set_rx_desc_pkt_len(pdesc, *(u32 *)val);
+			SET_RX_DESC_PKT_LEN(pdesc, *(u32 *) val);
 			break;
 		case HW_DESC_RXERO:
-			set_rx_desc_eor(pdesc, 1);
+			SET_RX_DESC_EOR(pdesc, 1);
 			break;
 		default:
 			WARN_ONCE(true, "rtl8723ae: ERR rxdesc :%d not processed\n",
@@ -627,18 +622,17 @@ void rtl8723e_set_desc(struct ieee80211_hw *hw, u8 *pdesc8,
 }
 
 u64 rtl8723e_get_desc(struct ieee80211_hw *hw,
-		      u8 *pdesc8, bool istx, u8 desc_name)
+		      u8 *pdesc, bool istx, u8 desc_name)
 {
 	u32 ret = 0;
-	__le32 *pdesc = (__le32 *)pdesc8;
 
 	if (istx == true) {
 		switch (desc_name) {
 		case HW_DESC_OWN:
-			ret = get_tx_desc_own(pdesc);
+			ret = GET_TX_DESC_OWN(pdesc);
 			break;
 		case HW_DESC_TXBUFF_ADDR:
-			ret = get_tx_desc_tx_buffer_address(pdesc);
+			ret = GET_TX_DESC_TX_BUFFER_ADDRESS(pdesc);
 			break;
 		default:
 			WARN_ONCE(true, "rtl8723ae: ERR txdesc :%d not processed\n",
@@ -648,13 +642,13 @@ u64 rtl8723e_get_desc(struct ieee80211_hw *hw,
 	} else {
 		switch (desc_name) {
 		case HW_DESC_OWN:
-			ret = get_rx_desc_own(pdesc);
+			ret = GET_RX_DESC_OWN(pdesc);
 			break;
 		case HW_DESC_RXPKT_LEN:
-			ret = get_rx_desc_pkt_len(pdesc);
+			ret = GET_RX_DESC_PKT_LEN(pdesc);
 			break;
 		case HW_DESC_RXBUFF_ADDR:
-			ret = get_rx_desc_buff_addr(pdesc);
+			ret = GET_RX_DESC_BUFF_ADDR(pdesc);
 			break;
 		default:
 			WARN_ONCE(true, "rtl8723ae: ERR rxdesc :%d not processed\n",

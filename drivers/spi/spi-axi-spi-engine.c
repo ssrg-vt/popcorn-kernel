@@ -460,6 +460,7 @@ static int spi_engine_probe(struct platform_device *pdev)
 	struct spi_engine *spi_engine;
 	struct spi_master *master;
 	unsigned int version;
+	struct resource *res;
 	int irq;
 	int ret;
 
@@ -479,7 +480,8 @@ static int spi_engine_probe(struct platform_device *pdev)
 
 	spin_lock_init(&spi_engine->lock);
 
-	spi_engine->base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	spi_engine->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(spi_engine->base)) {
 		ret = PTR_ERR(spi_engine->base);
 		goto err_put_master;

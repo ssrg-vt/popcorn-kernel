@@ -268,6 +268,7 @@ static struct rng_alg exynos_rng_alg = {
 static int exynos_rng_probe(struct platform_device *pdev)
 {
 	struct exynos_rng_dev *rng;
+	struct resource *res;
 	int ret;
 
 	if (exynos_rng_dev)
@@ -288,7 +289,8 @@ static int exynos_rng_probe(struct platform_device *pdev)
 		return PTR_ERR(rng->clk);
 	}
 
-	rng->mem = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	rng->mem = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(rng->mem))
 		return PTR_ERR(rng->mem);
 

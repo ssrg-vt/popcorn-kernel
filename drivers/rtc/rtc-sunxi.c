@@ -442,8 +442,10 @@ static int sunxi_rtc_probe(struct platform_device *pdev)
 		return PTR_ERR(chip->base);
 
 	chip->irq = platform_get_irq(pdev, 0);
-	if (chip->irq < 0)
+	if (chip->irq < 0) {
+		dev_err(&pdev->dev, "No IRQ resource\n");
 		return chip->irq;
+	}
 	ret = devm_request_irq(&pdev->dev, chip->irq, sunxi_rtc_alarmirq,
 			0, dev_name(&pdev->dev), chip);
 	if (ret) {
@@ -472,7 +474,15 @@ static int sunxi_rtc_probe(struct platform_device *pdev)
 
 	chip->rtc->ops = &sunxi_rtc_ops;
 
-	return rtc_register_device(chip->rtc);
+	ret = rtc_register_device(chip->rtc);
+	if (ret) {
+		dev_err(&pdev->dev, "unable to register device\n");
+		return ret;
+	}
+
+	dev_info(&pdev->dev, "RTC enabled\n");
+
+	return 0;
 }
 
 static struct platform_driver sunxi_rtc_driver = {

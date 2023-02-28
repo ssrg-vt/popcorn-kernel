@@ -9,6 +9,8 @@
 #include "xfs_format.h"
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
+#include "xfs_bit.h"
+#include "xfs_sb.h"
 #include "xfs_mount.h"
 #include "xfs_defer.h"
 #include "xfs_trans.h"
@@ -517,7 +519,7 @@ xfs_defer_add(
 	}
 	if (!dfp) {
 		dfp = kmem_alloc(sizeof(struct xfs_defer_pending),
-				KM_NOFS);
+				KM_SLEEP | KM_NOFS);
 		dfp->dfp_type = type;
 		dfp->dfp_intent = NULL;
 		dfp->dfp_done = NULL;

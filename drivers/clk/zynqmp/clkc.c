@@ -2,7 +2,7 @@
 /*
  * Zynq UltraScale+ MPSoC clock controller
  *
- *  Copyright (C) 2016-2019 Xilinx
+ *  Copyright (C) 2016-2018 Xilinx
  *
  * Based on drivers/clk/zynq/clkc.c
  */
@@ -84,7 +84,6 @@ struct name_resp {
 
 struct topology_resp {
 #define CLK_TOPOLOGY_TYPE		GENMASK(3, 0)
-#define CLK_TOPOLOGY_CUSTOM_TYPE_FLAGS	GENMASK(7, 4)
 #define CLK_TOPOLOGY_FLAGS		GENMASK(23, 8)
 #define CLK_TOPOLOGY_TYPE_FLAGS		GENMASK(31, 24)
 	u32 topology[CLK_GET_TOPOLOGY_RESP_WORDS];
@@ -386,41 +385,17 @@ static int __zynqmp_clock_get_topology(struct clock_topology *topology,
 {
 	int i;
 	u32 type;
-	u32 flag;
 
 	for (i = 0; i < ARRAY_SIZE(response->topology); i++) {
 		type = FIELD_GET(CLK_TOPOLOGY_TYPE, response->topology[i]);
 		if (type == TYPE_INVALID)
 			return END_OF_TOPOLOGY_NODE;
 		topology[*nnodes].type = type;
-		flag = FIELD_GET(CLK_TOPOLOGY_FLAGS, response->topology[i]);
-		topology[*nnodes].flag = 0;
-		topology[*nnodes].flag |= (flag & ZYNQMP_CLK_SET_RATE_GATE) ?
-					  CLK_SET_RATE_GATE : 0;
-		topology[*nnodes].flag |= (flag & ZYNQMP_CLK_SET_RATE_PARENT) ?
-					   CLK_SET_RATE_PARENT : 0;
-		topology[*nnodes].flag |= (flag & ZYNQMP_CLK_IGNORE_UNUSED) ?
-					  CLK_IGNORE_UNUSED : 0;
-		topology[*nnodes].flag |= (flag & ZYNQMP_CLK_GET_RATE_NOCACHE) ?
-					  CLK_GET_RATE_NOCACHE : 0;
-		topology[*nnodes].flag |= (flag &
-					   ZYNQMP_CLK_SET_RATE_NO_REPARENT) ?
-					   CLK_SET_RATE_NO_REPARENT : 0;
-		topology[*nnodes].flag |= (flag &
-					   ZYNQMP_CLK_GET_ACCURACY_NOCACHE) ?
-					   CLK_GET_ACCURACY_NOCACHE : 0;
-		topology[*nnodes].flag |= (flag & ZYNQMP_CLK_RECALC_NEW_RATES) ?
-					  CLK_RECALC_NEW_RATES : 0;
-		topology[*nnodes].flag |= (flag & ZYNQMP_CLK_SET_RATE_UNGATE) ?
-					  CLK_SET_RATE_UNGATE : 0;
-		topology[*nnodes].flag |= (flag & ZYNQMP_CLK_IS_CRITICAL) ?
-					  CLK_IS_CRITICAL : 0;
+		topology[*nnodes].flag = FIELD_GET(CLK_TOPOLOGY_FLAGS,
+						   response->topology[i]);
 		topology[*nnodes].type_flag =
 				FIELD_GET(CLK_TOPOLOGY_TYPE_FLAGS,
 					  response->topology[i]);
-		topology[*nnodes].custom_type_flag =
-			FIELD_GET(CLK_TOPOLOGY_CUSTOM_TYPE_FLAGS,
-				  response->topology[i]);
 		(*nnodes)++;
 	}
 
@@ -583,7 +558,7 @@ static struct clk_hw *zynqmp_register_clk_topology(int clk_id, char *clk_name,
 {
 	int j;
 	u32 num_nodes, clk_dev_id;
-	char *clk_out[MAX_NODES];
+	char *clk_out = NULL;
 	struct clock_topology *nodes;
 	struct clk_hw *hw = NULL;
 
@@ -597,16 +572,16 @@ static struct clk_hw *zynqmp_register_clk_topology(int clk_id, char *clk_name,
 		 * Intermediate clock names are postfixed with type of clock.
 		 */
 		if (j != (num_nodes - 1)) {
-			clk_out[j] = kasprintf(GFP_KERNEL, "%s%s", clk_name,
+			clk_out = kasprintf(GFP_KERNEL, "%s%s", clk_name,
 					    clk_type_postfix[nodes[j].type]);
 		} else {
-			clk_out[j] = kasprintf(GFP_KERNEL, "%s", clk_name);
+			clk_out = kasprintf(GFP_KERNEL, "%s", clk_name);
 		}
 
 		if (!clk_topology[nodes[j].type])
 			continue;
 
-		hw = (*clk_topology[nodes[j].type])(clk_out[j], clk_dev_id,
+		hw = (*clk_topology[nodes[j].type])(clk_out, clk_dev_id,
 						    parent_names,
 						    num_parents,
 						    &nodes[j]);
@@ -615,12 +590,9 @@ static struct clk_hw *zynqmp_register_clk_topology(int clk_id, char *clk_name,
 				     __func__,  clk_dev_id, clk_name,
 				     PTR_ERR(hw));
 
-		parent_names[0] = clk_out[j];
+		parent_names[0] = clk_out;
 	}
-
-	for (j = 0; j < num_nodes; j++)
-		kfree(clk_out[j]);
-
+	kfree(clk_out);
 	return hw;
 }
 
@@ -691,12 +663,6 @@ static void zynqmp_get_clock_info(void)
 			continue;
 
 		clock[i].valid = FIELD_GET(CLK_ATTR_VALID, attr.attr[0]);
-
-		/* skip query for invalid clock */
-		ret = zynqmp_is_valid_clock(i);
-		if (ret != CLK_ATTR_VALID)
-			continue;
-
 		clock[i].type = FIELD_GET(CLK_ATTR_TYPE, attr.attr[0]) ?
 			CLK_TYPE_EXTERNAL : CLK_TYPE_OUTPUT;
 
@@ -762,7 +728,9 @@ static int zynqmp_clk_setup(struct device_node *np)
 	zynqmp_register_clocks(np);
 
 	zynqmp_data->num = clock_max_idx;
-	return of_clk_add_hw_provider(np, of_clk_hw_onecell_get, zynqmp_data);
+	of_clk_add_hw_provider(np, of_clk_hw_onecell_get, zynqmp_data);
+
+	return 0;
 }
 
 static int zynqmp_clock_probe(struct platform_device *pdev)
@@ -781,7 +749,6 @@ static int zynqmp_clock_probe(struct platform_device *pdev)
 
 static const struct of_device_id zynqmp_clock_of_match[] = {
 	{.compatible = "xlnx,zynqmp-clk"},
-	{.compatible = "xlnx,versal-clk"},
 	{},
 };
 MODULE_DEVICE_TABLE(of, zynqmp_clock_of_match);

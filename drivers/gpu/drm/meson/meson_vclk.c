@@ -5,10 +5,9 @@
  * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
  */
 
-#include <linux/export.h>
-
-#include <drm/drm_print.h>
-
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <drm/drmP.h>
 #include "meson_drv.h"
 #include "meson_vclk.h"
 
@@ -97,7 +96,6 @@
 #define HHI_VDAC_CNTL1		0x2F8 /* 0xbe offset in data sheet */
 
 #define HHI_HDMI_PLL_CNTL	0x320 /* 0xc8 offset in data sheet */
-#define HHI_HDMI_PLL_CNTL_EN	BIT(30)
 #define HHI_HDMI_PLL_CNTL2	0x324 /* 0xc9 offset in data sheet */
 #define HHI_HDMI_PLL_CNTL3	0x328 /* 0xca offset in data sheet */
 #define HHI_HDMI_PLL_CNTL4	0x32C /* 0xcb offset in data sheet */
@@ -242,7 +240,7 @@ static void meson_venci_cvbs_clock_config(struct meson_drm *priv)
 	unsigned int val;
 
 	/* Setup PLL to output 1.485GHz */
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB)) {
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu")) {
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL, 0x5800023d);
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL2, 0x00404e00);
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL3, 0x0d5c5091);
@@ -254,8 +252,8 @@ static void meson_venci_cvbs_clock_config(struct meson_drm *priv)
 		/* Poll for lock bit */
 		regmap_read_poll_timeout(priv->hhi, HHI_HDMI_PLL_CNTL, val,
 					 (val & HDMI_PLL_LOCK), 10, 0);
-	} else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXM) ||
-		   meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXL)) {
+	} else if (meson_vpu_is_compatible(priv, "amlogic,meson-gxm-vpu") ||
+		   meson_vpu_is_compatible(priv, "amlogic,meson-gxl-vpu")) {
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL, 0x4000027b);
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL2, 0x800cb300);
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL3, 0xa6212844);
@@ -272,7 +270,7 @@ static void meson_venci_cvbs_clock_config(struct meson_drm *priv)
 		/* Poll for lock bit */
 		regmap_read_poll_timeout(priv->hhi, HHI_HDMI_PLL_CNTL, val,
 					 (val & HDMI_PLL_LOCK), 10, 0);
-	} else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A)) {
+	} else if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu")) {
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL, 0x1a0504f7);
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL2, 0x00010000);
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL3, 0x00000000);
@@ -300,7 +298,7 @@ static void meson_venci_cvbs_clock_config(struct meson_drm *priv)
 				VCLK2_DIV_MASK, (55 - 1));
 
 	/* select vid_pll for vclk2 */
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A))
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu"))
 		regmap_update_bits(priv->hhi, HHI_VIID_CLK_CNTL,
 					VCLK2_SEL_MASK, (0 << VCLK2_SEL_SHIFT));
 	else
@@ -455,7 +453,7 @@ void meson_hdmi_pll_set_params(struct meson_drm *priv, unsigned int m,
 {
 	unsigned int val;
 
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB)) {
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu")) {
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL, 0x58000200 | m);
 		if (frac)
 			regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL2,
@@ -470,13 +468,13 @@ void meson_hdmi_pll_set_params(struct meson_drm *priv, unsigned int m,
 
 		/* Enable and unreset */
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL,
-				   0x7 << 28, HHI_HDMI_PLL_CNTL_EN);
+				   0x7 << 28, 0x4 << 28);
 
 		/* Poll for lock bit */
 		regmap_read_poll_timeout(priv->hhi, HHI_HDMI_PLL_CNTL,
 					 val, (val & HDMI_PLL_LOCK), 10, 0);
-	} else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXM) ||
-		   meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXL)) {
+	} else if (meson_vpu_is_compatible(priv, "amlogic,meson-gxm-vpu") ||
+		   meson_vpu_is_compatible(priv, "amlogic,meson-gxl-vpu")) {
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL, 0x40000200 | m);
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL2, 0x800cb000 | frac);
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL3, 0x860f30c4);
@@ -493,11 +491,10 @@ void meson_hdmi_pll_set_params(struct meson_drm *priv, unsigned int m,
 		/* Poll for lock bit */
 		regmap_read_poll_timeout(priv->hhi, HHI_HDMI_PLL_CNTL, val,
 				(val & HDMI_PLL_LOCK), 10, 0);
-	} else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A)) {
+	} else if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu")) {
 		regmap_write(priv->hhi, HHI_HDMI_PLL_CNTL, 0x0b3a0400 | m);
 
 		/* Enable and reset */
-		/* TODO: add specific macro for g12a here */
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL,
 				   0x3 << 28, 0x3 << 28);
 
@@ -545,36 +542,36 @@ void meson_hdmi_pll_set_params(struct meson_drm *priv, unsigned int m,
 		} while(1);
 	}
 
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB))
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu"))
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL2,
 				3 << 16, pll_od_to_reg(od1) << 16);
-	else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXM) ||
-		 meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXL))
+	else if (meson_vpu_is_compatible(priv, "amlogic,meson-gxm-vpu") ||
+		 meson_vpu_is_compatible(priv, "amlogic,meson-gxl-vpu"))
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL3,
 				3 << 21, pll_od_to_reg(od1) << 21);
-	else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A))
+	else if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu"))
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL,
 				3 << 16, pll_od_to_reg(od1) << 16);
 
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB))
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu"))
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL2,
 				3 << 22, pll_od_to_reg(od2) << 22);
-	else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXM) ||
-		 meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXL))
+	else if (meson_vpu_is_compatible(priv, "amlogic,meson-gxm-vpu") ||
+		 meson_vpu_is_compatible(priv, "amlogic,meson-gxl-vpu"))
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL3,
 				3 << 23, pll_od_to_reg(od2) << 23);
-	else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A))
+	else if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu"))
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL,
 				3 << 18, pll_od_to_reg(od2) << 18);
 
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB))
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu"))
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL2,
 				3 << 18, pll_od_to_reg(od3) << 18);
-	else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXM) ||
-		 meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXL))
+	else if (meson_vpu_is_compatible(priv, "amlogic,meson-gxm-vpu") ||
+		 meson_vpu_is_compatible(priv, "amlogic,meson-gxl-vpu"))
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL3,
 				3 << 19, pll_od_to_reg(od3) << 19);
-	else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A))
+	else if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu"))
 		regmap_update_bits(priv->hhi, HHI_HDMI_PLL_CNTL,
 				3 << 20, pll_od_to_reg(od3) << 20);
 }
@@ -585,7 +582,7 @@ static unsigned int meson_hdmi_pll_get_m(struct meson_drm *priv,
 					 unsigned int pll_freq)
 {
 	/* The GXBB PLL has a /2 pre-multiplier */
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB))
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu"))
 		pll_freq /= 2;
 
 	return pll_freq / XTAL_FREQ;
@@ -605,12 +602,12 @@ static unsigned int meson_hdmi_pll_get_frac(struct meson_drm *priv,
 	unsigned int frac;
 
 	/* The GXBB PLL has a /2 pre-multiplier and a larger FRAC width */
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB)) {
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu")) {
 		frac_max = HDMI_FRAC_MAX_GXBB;
 		parent_freq *= 2;
 	}
 
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A))
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu"))
 		frac_max = HDMI_FRAC_MAX_G12A;
 
 	/* We can have a perfect match !*/
@@ -631,15 +628,15 @@ static bool meson_hdmi_pll_validate_params(struct meson_drm *priv,
 					   unsigned int m,
 					   unsigned int frac)
 {
-	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB)) {
+	if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu")) {
 		/* Empiric supported min/max dividers */
 		if (m < 53 || m > 123)
 			return false;
 		if (frac >= HDMI_FRAC_MAX_GXBB)
 			return false;
-	} else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXM) ||
-		   meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXL) ||
-		   meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A)) {
+	} else if (meson_vpu_is_compatible(priv, "amlogic,meson-gxm-vpu") ||
+		   meson_vpu_is_compatible(priv, "amlogic,meson-gxl-vpu") ||
+		   meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu")) {
 		/* Empiric supported min/max dividers */
 		if (m < 106 || m > 247)
 			return false;
@@ -759,7 +756,7 @@ static void meson_vclk_set(struct meson_drm *priv, unsigned int pll_base_freq,
 	/* Set HDMI PLL rate */
 	if (!od1 && !od2 && !od3) {
 		meson_hdmi_pll_generic_set(priv, pll_base_freq);
-	} else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXBB)) {
+	} else if (meson_vpu_is_compatible(priv, "amlogic,meson-gxbb-vpu")) {
 		switch (pll_base_freq) {
 		case 2970000:
 			m = 0x3d;
@@ -776,8 +773,8 @@ static void meson_vclk_set(struct meson_drm *priv, unsigned int pll_base_freq,
 		}
 
 		meson_hdmi_pll_set_params(priv, m, frac, od1, od2, od3);
-	} else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXM) ||
-		   meson_vpu_is_compatible(priv, VPU_COMPATIBLE_GXL)) {
+	} else if (meson_vpu_is_compatible(priv, "amlogic,meson-gxm-vpu") ||
+		   meson_vpu_is_compatible(priv, "amlogic,meson-gxl-vpu")) {
 		switch (pll_base_freq) {
 		case 2970000:
 			m = 0x7b;
@@ -794,7 +791,7 @@ static void meson_vclk_set(struct meson_drm *priv, unsigned int pll_base_freq,
 		}
 
 		meson_hdmi_pll_set_params(priv, m, frac, od1, od2, od3);
-	} else if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A)) {
+	} else if (meson_vpu_is_compatible(priv, "amlogic,meson-g12a-vpu")) {
 		switch (pll_base_freq) {
 		case 2970000:
 			m = 0x7b;
@@ -972,8 +969,7 @@ void meson_vclk_setup(struct meson_drm *priv, unsigned int target,
 		meson_venci_cvbs_clock_config(priv);
 		return;
 	} else if (target == MESON_VCLK_TARGET_DMT) {
-		/*
-		 * The DMT clock path is fixed after the PLL:
+		/* The DMT clock path is fixed after the PLL:
 		 * - automatic PLL freq + OD management
 		 * - vid_pll_div = VID_PLL_DIV_5
 		 * - vclk_div = 2

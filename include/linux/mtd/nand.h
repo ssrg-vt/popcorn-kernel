@@ -346,7 +346,7 @@ static inline unsigned int nanddev_ntargets(const struct nand_device *nand)
 }
 
 /**
- * nanddev_neraseblocks() - Get the total number of eraseblocks
+ * nanddev_neraseblocks() - Get the total number of erasablocks
  * @nand: NAND device
  *
  * Return: the total number of eraseblocks exposed by @nand.

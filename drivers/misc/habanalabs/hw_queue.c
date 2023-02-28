@@ -80,9 +80,9 @@ static void ext_queue_submit_bd(struct hl_device *hdev, struct hl_hw_queue *q,
 
 	bd = (struct hl_bd *) (uintptr_t) q->kernel_address;
 	bd += hl_pi_2_offset(q->pi);
-	bd->ctl = cpu_to_le32(ctl);
-	bd->len = cpu_to_le32(len);
-	bd->ptr = cpu_to_le64(ptr);
+	bd->ctl = __cpu_to_le32(ctl);
+	bd->len = __cpu_to_le32(len);
+	bd->ptr = __cpu_to_le64(ptr);
 
 	q->pi = hl_queue_inc_ptr(q->pi);
 	hdev->asic_funcs->ring_doorbell(hdev, q->hw_queue_id, q->pi);
@@ -249,7 +249,7 @@ static void ext_hw_queue_schedule_job(struct hl_cs_job *job)
 	len = job->job_cb_size;
 	ptr = cb->bus_address;
 
-	cq_pkt.data = cpu_to_le32(
+	cq_pkt.data = __cpu_to_le32(
 				((q->pi << CQ_ENTRY_SHADOW_INDEX_SHIFT)
 					& CQ_ENTRY_SHADOW_INDEX_MASK) |
 				(1 << CQ_ENTRY_SHADOW_INDEX_VALID_SHIFT) |
@@ -265,9 +265,9 @@ static void ext_hw_queue_schedule_job(struct hl_cs_job *job)
 	cq = &hdev->completion_queue[q->hw_queue_id];
 	cq_addr = cq->bus_address + cq->pi * sizeof(struct hl_cq_entry);
 
-	hdev->asic_funcs->add_end_of_cb_packets(hdev, cb->kernel_address, len,
+	hdev->asic_funcs->add_end_of_cb_packets(cb->kernel_address, len,
 						cq_addr,
-						le32_to_cpu(cq_pkt.data),
+						__le32_to_cpu(cq_pkt.data),
 						q->hw_queue_id);
 
 	q->shadow_queue[hl_pi_2_offset(q->pi)] = job;
@@ -364,13 +364,7 @@ int hl_hw_queue_schedule_cs(struct hl_cs *cs)
 		spin_unlock(&hdev->hw_queues_mirror_lock);
 	}
 
-	if (!hdev->cs_active_cnt++) {
-		struct hl_device_idle_busy_ts *ts;
-
-		ts = &hdev->idle_busy_ts_arr[hdev->idle_busy_ts_idx];
-		ts->busy_to_idle_ts = ktime_set(0, 0);
-		ts->idle_to_busy_ts = ktime_get();
-	}
+	atomic_inc(&hdev->cs_active_cnt);
 
 	list_for_each_entry_safe(job, tmp, &cs->job_list, cs_node)
 		if (job->ext_queue)

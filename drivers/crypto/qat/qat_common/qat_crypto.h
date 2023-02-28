@@ -88,8 +88,6 @@ struct qat_crypto_request {
 	struct qat_crypto_request_buffs buf;
 	void (*cb)(struct icp_qat_fw_la_resp *resp,
 		   struct qat_crypto_request *req);
-	void *iv;
-	dma_addr_t iv_paddr;
 };
 
 #endif

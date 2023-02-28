@@ -286,7 +286,7 @@ static struct w1_family_ops w1_f0d_fops = {
 	.remove_slave   = w1_f0d_remove_slave,
 };
 
-static struct w1_family w1_family_0d = {
+static struct w1_family w1_family_2d = {
 	.fid = W1_EEPROM_DS2805,
 	.fops = &w1_f0d_fops,
 };
@@ -294,13 +294,13 @@ static struct w1_family w1_family_0d = {
 static int __init w1_f0d_init(void)
 {
 	pr_info("%s()\n", __func__);
-	return w1_register_family(&w1_family_0d);
+	return w1_register_family(&w1_family_2d);
 }
 
 static void __exit w1_f0d_fini(void)
 {
 	pr_info("%s()\n", __func__);
-	w1_unregister_family(&w1_family_0d);
+	w1_unregister_family(&w1_family_2d);
 }
 
 module_init(w1_f0d_init);

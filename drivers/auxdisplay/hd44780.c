@@ -14,7 +14,8 @@
 #include <linux/property.h>
 #include <linux/slab.h>
 
-#include "charlcd.h"
+#include <misc/charlcd.h>
+
 
 enum hd44780_pin {
 	/* Order does matter due to writing to GPIO array subsets! */

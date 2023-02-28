@@ -100,10 +100,22 @@ static struct mfd_cell cs5535_mfd_cells[] = {
 	},
 };
 
-static const char *olpc_acpi_clones[] = {
-	"olpc-xo1-pm-acpi",
-	"olpc-xo1-sci-acpi"
-};
+#ifdef CONFIG_OLPC
+static void cs5535_clone_olpc_cells(void)
+{
+	static const char *acpi_clones[] = {
+		"olpc-xo1-pm-acpi",
+		"olpc-xo1-sci-acpi"
+	};
+
+	if (!machine_is_olpc())
+		return;
+
+	mfd_clone_cell("cs5535-acpi", acpi_clones, ARRAY_SIZE(acpi_clones));
+}
+#else
+static void cs5535_clone_olpc_cells(void) { }
+#endif
 
 static int cs5535_mfd_probe(struct pci_dev *pdev,
 		const struct pci_device_id *id)
@@ -133,9 +145,7 @@ static int cs5535_mfd_probe(struct pci_dev *pdev,
 		dev_err(&pdev->dev, "MFD add devices failed: %d\n", err);
 		goto err_disable;
 	}
-
-	if (machine_is_olpc())
-		mfd_clone_cell("cs5535-acpi", olpc_acpi_clones, ARRAY_SIZE(olpc_acpi_clones));
+	cs5535_clone_olpc_cells();
 
 	dev_info(&pdev->dev, "%zu devices registered.\n",
 			ARRAY_SIZE(cs5535_mfd_cells));

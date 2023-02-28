@@ -34,19 +34,13 @@ void ima_free_template_entry(struct ima_template_entry *entry)
  * ima_alloc_init_template - create and initialize a new template entry
  */
 int ima_alloc_init_template(struct ima_event_data *event_data,
-			    struct ima_template_entry **entry,
-			    struct ima_template_desc *desc)
+			    struct ima_template_entry **entry)
 {
-	struct ima_template_desc *template_desc;
+	struct ima_template_desc *template_desc = ima_template_desc_current();
 	int i, result = 0;
 
-	if (desc)
-		template_desc = desc;
-	else
-		template_desc = ima_template_desc_current();
-
-	*entry = kzalloc(struct_size(*entry, template_data,
-				     template_desc->num_fields), GFP_NOFS);
+	*entry = kzalloc(sizeof(**entry) + template_desc->num_fields *
+			 sizeof(struct ima_field_data), GFP_NOFS);
 	if (!*entry)
 		return -ENOMEM;
 
@@ -135,17 +129,15 @@ void ima_add_violation(struct file *file, const unsigned char *filename,
 {
 	struct ima_template_entry *entry;
 	struct inode *inode = file_inode(file);
-	struct ima_event_data event_data = { .iint = iint,
-					     .file = file,
-					     .filename = filename,
-					     .violation = cause };
+	struct ima_event_data event_data = {iint, file, filename, NULL, 0,
+					    cause};
 	int violation = 1;
 	int result;
 
 	/* can overflow, only indicator */
 	atomic_long_inc(&ima_htable.violations);
 
-	result = ima_alloc_init_template(&event_data, &entry, NULL);
+	result = ima_alloc_init_template(&event_data, &entry);
 	if (result < 0) {
 		result = -ENOMEM;
 		goto err_out;
@@ -168,13 +160,11 @@ err_out:
  *        MAY_APPEND)
  * @func: caller identifier
  * @pcr: pointer filled in if matched measure policy sets pcr=
- * @template_desc: pointer filled in if matched measure policy sets template=
  *
  * The policy is defined in terms of keypairs:
  *		subj=, obj=, type=, func=, mask=, fsmagic=
  *	subj,obj, and type: are LSM specific.
  *	func: FILE_CHECK | BPRM_CHECK | CREDS_CHECK | MMAP_CHECK | MODULE_CHECK
- *	| KEXEC_CMDLINE
  *	mask: contains the permission mask
  *	fsmagic: hex value
  *
@@ -182,15 +172,13 @@ err_out:
  *
  */
 int ima_get_action(struct inode *inode, const struct cred *cred, u32 secid,
-		   int mask, enum ima_hooks func, int *pcr,
-		   struct ima_template_desc **template_desc)
+		   int mask, enum ima_hooks func, int *pcr)
 {
 	int flags = IMA_MEASURE | IMA_AUDIT | IMA_APPRAISE | IMA_HASH;
 
 	flags &= ima_policy_flag;
 
-	return ima_match_policy(inode, cred, secid, func, mask, flags, pcr,
-				template_desc);
+	return ima_match_policy(inode, cred, secid, func, mask, flags, pcr);
 }
 
 /*
@@ -205,7 +193,7 @@ int ima_get_action(struct inode *inode, const struct cred *cred, u32 secid,
  */
 int ima_collect_measurement(struct integrity_iint_cache *iint,
 			    struct file *file, void *buf, loff_t size,
-			    enum hash_algo algo, struct modsig *modsig)
+			    enum hash_algo algo)
 {
 	const char *audit_cause = "failed";
 	struct inode *inode = file_inode(file);
@@ -218,14 +206,6 @@ int ima_collect_measurement(struct integrity_iint_cache *iint,
 		struct ima_digest_data hdr;
 		char digest[IMA_MAX_DIGEST_SIZE];
 	} hash;
-
-	/*
-	 * Always collect the modsig, because IMA might have already collected
-	 * the file digest without collecting the modsig in a previous
-	 * measurement rule.
-	 */
-	if (modsig)
-		ima_collect_modsig(modsig, buf, size);
 
 	if (iint->flags & IMA_COLLECTED)
 		goto out;
@@ -293,32 +273,21 @@ out:
 void ima_store_measurement(struct integrity_iint_cache *iint,
 			   struct file *file, const unsigned char *filename,
 			   struct evm_ima_xattr_data *xattr_value,
-			   int xattr_len, const struct modsig *modsig, int pcr,
-			   struct ima_template_desc *template_desc)
+			   int xattr_len, int pcr)
 {
 	static const char op[] = "add_template_measure";
 	static const char audit_cause[] = "ENOMEM";
 	int result = -ENOMEM;
 	struct inode *inode = file_inode(file);
 	struct ima_template_entry *entry;
-	struct ima_event_data event_data = { .iint = iint,
-					     .file = file,
-					     .filename = filename,
-					     .xattr_value = xattr_value,
-					     .xattr_len = xattr_len,
-					     .modsig = modsig };
+	struct ima_event_data event_data = {iint, file, filename, xattr_value,
+					    xattr_len, NULL};
 	int violation = 0;
 
-	/*
-	 * We still need to store the measurement in the case of MODSIG because
-	 * we only have its contents to put in the list at the time of
-	 * appraisal, but a file measurement from earlier might already exist in
-	 * the measurement list.
-	 */
-	if (iint->measured_pcrs & (0x1 << pcr) && !modsig)
+	if (iint->measured_pcrs & (0x1 << pcr))
 		return;
 
-	result = ima_alloc_init_template(&event_data, &entry, template_desc);
+	result = ima_alloc_init_template(&event_data, &entry);
 	if (result < 0) {
 		integrity_audit_msg(AUDIT_INTEGRITY_PCR, inode, filename,
 				    op, audit_cause, result, 0);

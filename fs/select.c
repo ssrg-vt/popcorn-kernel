@@ -294,13 +294,11 @@ enum poll_time_type {
 	PT_OLD_TIMESPEC = 3,
 };
 
-static int poll_select_finish(struct timespec64 *end_time,
-			      void __user *p,
-			      enum poll_time_type pt_type, int ret)
+static int poll_select_copy_remaining(struct timespec64 *end_time,
+				      void __user *p,
+				      enum poll_time_type pt_type, int ret)
 {
 	struct timespec64 rts;
-
-	restore_saved_sigmask_unless(ret == -ERESTARTNOHAND);
 
 	if (!p)
 		return ret;
@@ -716,7 +714,9 @@ static int kern_select(int n, fd_set __user *inp, fd_set __user *outp,
 	}
 
 	ret = core_sys_select(n, inp, outp, exp, to);
-	return poll_select_finish(&end_time, tvp, PT_TIMEVAL, ret);
+	ret = poll_select_copy_remaining(&end_time, tvp, PT_TIMEVAL, ret);
+
+	return ret;
 }
 
 SYSCALL_DEFINE5(select, int, n, fd_set __user *, inp, fd_set __user *, outp,
@@ -730,6 +730,7 @@ static long do_pselect(int n, fd_set __user *inp, fd_set __user *outp,
 		       const sigset_t __user *sigmask, size_t sigsetsize,
 		       enum poll_time_type type)
 {
+	sigset_t ksigmask, sigsaved;
 	struct timespec64 ts, end_time, *to = NULL;
 	int ret;
 
@@ -752,12 +753,15 @@ static long do_pselect(int n, fd_set __user *inp, fd_set __user *outp,
 			return -EINVAL;
 	}
 
-	ret = set_user_sigmask(sigmask, sigsetsize);
+	ret = set_user_sigmask(sigmask, &ksigmask, &sigsaved, sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = core_sys_select(n, inp, outp, exp, to);
-	return poll_select_finish(&end_time, tsp, type, ret);
+	restore_user_sigmask(sigmask, &sigsaved, ret == -ERESTARTNOHAND);
+	ret = poll_select_copy_remaining(&end_time, tsp, type, ret);
+
+	return ret;
 }
 
 /*
@@ -922,7 +926,7 @@ static int do_poll(struct poll_list *list, struct poll_wqueues *wait,
 		if (!count) {
 			count = wait->error;
 			if (signal_pending(current))
-				count = -ERESTARTNOHAND;
+				count = -EINTR;
 		}
 		if (count || timed_out)
 			break;
@@ -961,7 +965,7 @@ static int do_sys_poll(struct pollfd __user *ufds, unsigned int nfds,
 		struct timespec64 *end_time)
 {
 	struct poll_wqueues table;
-	int err = -EFAULT, fdcount, len;
+ 	int err = -EFAULT, fdcount, len, size;
 	/* Allocate small arguments on the stack to save memory and be
 	   faster - use long to make sure the buffer is aligned properly
 	   on 64 bit archs to avoid unaligned access */
@@ -989,8 +993,8 @@ static int do_sys_poll(struct pollfd __user *ufds, unsigned int nfds,
 			break;
 
 		len = min(todo, POLLFD_PER_PAGE);
-		walk = walk->next = kmalloc(struct_size(walk, entries, len),
-					    GFP_KERNEL);
+		size = sizeof(struct poll_list) + sizeof(struct pollfd) * len;
+		walk = walk->next = kmalloc(size, GFP_KERNEL);
 		if (!walk) {
 			err = -ENOMEM;
 			goto out_fds;
@@ -1037,7 +1041,7 @@ static long do_restart_poll(struct restart_block *restart_block)
 
 	ret = do_sys_poll(ufds, nfds, to);
 
-	if (ret == -ERESTARTNOHAND) {
+	if (ret == -EINTR) {
 		restart_block->fn = do_restart_poll;
 		ret = -ERESTART_RESTARTBLOCK;
 	}
@@ -1058,7 +1062,7 @@ SYSCALL_DEFINE3(poll, struct pollfd __user *, ufds, unsigned int, nfds,
 
 	ret = do_sys_poll(ufds, nfds, to);
 
-	if (ret == -ERESTARTNOHAND) {
+	if (ret == -EINTR) {
 		struct restart_block *restart_block;
 
 		restart_block = &current->restart_block;
@@ -1082,6 +1086,7 @@ SYSCALL_DEFINE5(ppoll, struct pollfd __user *, ufds, unsigned int, nfds,
 		struct __kernel_timespec __user *, tsp, const sigset_t __user *, sigmask,
 		size_t, sigsetsize)
 {
+	sigset_t ksigmask, sigsaved;
 	struct timespec64 ts, end_time, *to = NULL;
 	int ret;
 
@@ -1094,12 +1099,20 @@ SYSCALL_DEFINE5(ppoll, struct pollfd __user *, ufds, unsigned int, nfds,
 			return -EINVAL;
 	}
 
-	ret = set_user_sigmask(sigmask, sigsetsize);
+	ret = set_user_sigmask(sigmask, &ksigmask, &sigsaved, sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = do_sys_poll(ufds, nfds, to);
-	return poll_select_finish(&end_time, tsp, PT_TIMESPEC, ret);
+
+	restore_user_sigmask(sigmask, &sigsaved, ret == -EINTR);
+	/* We can restart this syscall, usually */
+	if (ret == -EINTR)
+		ret = -ERESTARTNOHAND;
+
+	ret = poll_select_copy_remaining(&end_time, tsp, PT_TIMESPEC, ret);
+
+	return ret;
 }
 
 #if defined(CONFIG_COMPAT_32BIT_TIME) && !defined(CONFIG_64BIT)
@@ -1108,6 +1121,7 @@ SYSCALL_DEFINE5(ppoll_time32, struct pollfd __user *, ufds, unsigned int, nfds,
 		struct old_timespec32 __user *, tsp, const sigset_t __user *, sigmask,
 		size_t, sigsetsize)
 {
+	sigset_t ksigmask, sigsaved;
 	struct timespec64 ts, end_time, *to = NULL;
 	int ret;
 
@@ -1120,12 +1134,20 @@ SYSCALL_DEFINE5(ppoll_time32, struct pollfd __user *, ufds, unsigned int, nfds,
 			return -EINVAL;
 	}
 
-	ret = set_user_sigmask(sigmask, sigsetsize);
+	ret = set_user_sigmask(sigmask, &ksigmask, &sigsaved, sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = do_sys_poll(ufds, nfds, to);
-	return poll_select_finish(&end_time, tsp, PT_OLD_TIMESPEC, ret);
+
+	restore_user_sigmask(sigmask, &sigsaved, ret == -EINTR);
+	/* We can restart this syscall, usually */
+	if (ret == -EINTR)
+		ret = -ERESTARTNOHAND;
+
+	ret = poll_select_copy_remaining(&end_time, tsp, PT_OLD_TIMESPEC, ret);
+
+	return ret;
 }
 #endif
 
@@ -1262,7 +1284,9 @@ static int do_compat_select(int n, compat_ulong_t __user *inp,
 	}
 
 	ret = compat_core_sys_select(n, inp, outp, exp, to);
-	return poll_select_finish(&end_time, tvp, PT_OLD_TIMEVAL, ret);
+	ret = poll_select_copy_remaining(&end_time, tvp, PT_OLD_TIMEVAL, ret);
+
+	return ret;
 }
 
 COMPAT_SYSCALL_DEFINE5(select, int, n, compat_ulong_t __user *, inp,
@@ -1295,6 +1319,7 @@ static long do_compat_pselect(int n, compat_ulong_t __user *inp,
 	void __user *tsp, compat_sigset_t __user *sigmask,
 	compat_size_t sigsetsize, enum poll_time_type type)
 {
+	sigset_t ksigmask, sigsaved;
 	struct timespec64 ts, end_time, *to = NULL;
 	int ret;
 
@@ -1317,12 +1342,15 @@ static long do_compat_pselect(int n, compat_ulong_t __user *inp,
 			return -EINVAL;
 	}
 
-	ret = set_compat_user_sigmask(sigmask, sigsetsize);
+	ret = set_compat_user_sigmask(sigmask, &ksigmask, &sigsaved, sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = compat_core_sys_select(n, inp, outp, exp, to);
-	return poll_select_finish(&end_time, tsp, type, ret);
+	restore_user_sigmask(sigmask, &sigsaved, ret == -ERESTARTNOHAND);
+	ret = poll_select_copy_remaining(&end_time, tsp, type, ret);
+
+	return ret;
 }
 
 COMPAT_SYSCALL_DEFINE6(pselect6_time64, int, n, compat_ulong_t __user *, inp,
@@ -1374,6 +1402,7 @@ COMPAT_SYSCALL_DEFINE5(ppoll_time32, struct pollfd __user *, ufds,
 	unsigned int,  nfds, struct old_timespec32 __user *, tsp,
 	const compat_sigset_t __user *, sigmask, compat_size_t, sigsetsize)
 {
+	sigset_t ksigmask, sigsaved;
 	struct timespec64 ts, end_time, *to = NULL;
 	int ret;
 
@@ -1386,12 +1415,20 @@ COMPAT_SYSCALL_DEFINE5(ppoll_time32, struct pollfd __user *, ufds,
 			return -EINVAL;
 	}
 
-	ret = set_compat_user_sigmask(sigmask, sigsetsize);
+	ret = set_compat_user_sigmask(sigmask, &ksigmask, &sigsaved, sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = do_sys_poll(ufds, nfds, to);
-	return poll_select_finish(&end_time, tsp, PT_OLD_TIMESPEC, ret);
+
+	restore_user_sigmask(sigmask, &sigsaved, ret == -EINTR);
+	/* We can restart this syscall, usually */
+	if (ret == -EINTR)
+		ret = -ERESTARTNOHAND;
+
+	ret = poll_select_copy_remaining(&end_time, tsp, PT_OLD_TIMESPEC, ret);
+
+	return ret;
 }
 #endif
 
@@ -1400,6 +1437,7 @@ COMPAT_SYSCALL_DEFINE5(ppoll_time64, struct pollfd __user *, ufds,
 	unsigned int,  nfds, struct __kernel_timespec __user *, tsp,
 	const compat_sigset_t __user *, sigmask, compat_size_t, sigsetsize)
 {
+	sigset_t ksigmask, sigsaved;
 	struct timespec64 ts, end_time, *to = NULL;
 	int ret;
 
@@ -1412,12 +1450,20 @@ COMPAT_SYSCALL_DEFINE5(ppoll_time64, struct pollfd __user *, ufds,
 			return -EINVAL;
 	}
 
-	ret = set_compat_user_sigmask(sigmask, sigsetsize);
+	ret = set_compat_user_sigmask(sigmask, &ksigmask, &sigsaved, sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = do_sys_poll(ufds, nfds, to);
-	return poll_select_finish(&end_time, tsp, PT_TIMESPEC, ret);
+
+	restore_user_sigmask(sigmask, &sigsaved, ret == -EINTR);
+	/* We can restart this syscall, usually */
+	if (ret == -EINTR)
+		ret = -ERESTARTNOHAND;
+
+	ret = poll_select_copy_remaining(&end_time, tsp, PT_TIMESPEC, ret);
+
+	return ret;
 }
 
 #endif

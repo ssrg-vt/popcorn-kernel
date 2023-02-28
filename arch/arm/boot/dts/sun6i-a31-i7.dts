@@ -117,9 +117,13 @@
 &gmac {
 	pinctrl-names = "default";
 	pinctrl-0 = <&gmac_mii_pins>;
-	phy-handle = <&phy1>;
+	phy = <&phy1>;
 	phy-mode = "mii";
 	status = "okay";
+
+	phy1: ethernet-phy@1 {
+		reg = <1>;
+	};
 };
 
 &hdmi {
@@ -136,12 +140,6 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&s_ir_rx_pin>;
 	status = "okay";
-};
-
-&mdio {
-	phy1: ethernet-phy@1 {
-		reg = <1>;
-	};
 };
 
 &mmc0 {

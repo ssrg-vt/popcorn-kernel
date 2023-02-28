@@ -35,7 +35,8 @@ void wilc_wfi_monitor_rx(struct net_device *mon_dev, u8 *buff, u32 size)
 		return;
 
 	/* Get WILC header */
-	header = get_unaligned_le32(buff - HOST_HDR_OFFSET);
+	memcpy(&header, (buff - HOST_HDR_OFFSET), HOST_HDR_OFFSET);
+	le32_to_cpus(&header);
 	/*
 	 * The packet offset field contain info about what type of management
 	 * the frame we are dealing with and ack status
@@ -232,7 +233,6 @@ struct net_device *wilc_wfi_init_mon_interface(struct wilc *wl,
 	strncpy(wl->monitor_dev->name, name, IFNAMSIZ);
 	wl->monitor_dev->name[IFNAMSIZ - 1] = 0;
 	wl->monitor_dev->netdev_ops = &wilc_wfi_netdev_ops;
-	wl->monitor_dev->needs_free_netdev = true;
 
 	if (register_netdevice(wl->monitor_dev)) {
 		netdev_err(real_dev, "register_netdevice failed\n");
@@ -247,14 +247,12 @@ struct net_device *wilc_wfi_init_mon_interface(struct wilc *wl,
 	return wl->monitor_dev;
 }
 
-void wilc_wfi_deinit_mon_interface(struct wilc *wl, bool rtnl_locked)
+void wilc_wfi_deinit_mon_interface(struct wilc *wl)
 {
 	if (!wl->monitor_dev)
 		return;
 
-	if (rtnl_locked)
-		unregister_netdevice(wl->monitor_dev);
-	else
-		unregister_netdev(wl->monitor_dev);
+	unregister_netdev(wl->monitor_dev);
+	free_netdev(wl->monitor_dev);
 	wl->monitor_dev = NULL;
 }

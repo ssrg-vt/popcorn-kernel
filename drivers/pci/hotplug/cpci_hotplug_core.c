@@ -563,6 +563,7 @@ cleanup_slots(void)
 	}
 cleanup_null:
 	up_write(&list_rwsem);
+	return;
 }
 
 int

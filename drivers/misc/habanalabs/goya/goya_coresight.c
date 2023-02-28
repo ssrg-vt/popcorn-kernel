@@ -15,10 +15,6 @@
 
 #define GOYA_PLDM_CORESIGHT_TIMEOUT_USEC	(CORESIGHT_TIMEOUT_USEC * 100)
 
-#define SPMU_SECTION_SIZE		DMA_CH_0_CS_SPMU_MAX_OFFSET
-#define SPMU_EVENT_TYPES_OFFSET		0x400
-#define SPMU_MAX_COUNTERS		6
-
 static u64 debug_stm_regs[GOYA_STM_LAST + 1] = {
 	[GOYA_STM_CPU]		= mmCPU_STM_BASE,
 	[GOYA_STM_DMA_CH_0_CS]	= mmDMA_CH_0_CS_STM_BASE,
@@ -230,15 +226,8 @@ static int goya_config_stm(struct hl_device *hdev,
 		struct hl_debug_params *params)
 {
 	struct hl_debug_params_stm *input;
-	u64 base_reg;
+	u64 base_reg = debug_stm_regs[params->reg_idx] - CFG_BASE;
 	int rc;
-
-	if (params->reg_idx >= ARRAY_SIZE(debug_stm_regs)) {
-		dev_err(hdev->dev, "Invalid register index in STM\n");
-		return -EINVAL;
-	}
-
-	base_reg = debug_stm_regs[params->reg_idx] - CFG_BASE;
 
 	WREG32(base_reg + 0xFB0, CORESIGHT_UNLOCK);
 
@@ -299,16 +288,9 @@ static int goya_config_etf(struct hl_device *hdev,
 		struct hl_debug_params *params)
 {
 	struct hl_debug_params_etf *input;
-	u64 base_reg;
+	u64 base_reg = debug_etf_regs[params->reg_idx] - CFG_BASE;
 	u32 val;
 	int rc;
-
-	if (params->reg_idx >= ARRAY_SIZE(debug_etf_regs)) {
-		dev_err(hdev->dev, "Invalid register index in ETF\n");
-		return -EINVAL;
-	}
-
-	base_reg = debug_etf_regs[params->reg_idx] - CFG_BASE;
 
 	WREG32(base_reg + 0xFB0, CORESIGHT_UNLOCK);
 
@@ -463,18 +445,11 @@ static int goya_config_etr(struct hl_device *hdev,
 static int goya_config_funnel(struct hl_device *hdev,
 		struct hl_debug_params *params)
 {
-	u64 base_reg;
+	WREG32(debug_funnel_regs[params->reg_idx] - CFG_BASE + 0xFB0,
+			CORESIGHT_UNLOCK);
 
-	if (params->reg_idx >= ARRAY_SIZE(debug_funnel_regs)) {
-		dev_err(hdev->dev, "Invalid register index in FUNNEL\n");
-		return -EINVAL;
-	}
-
-	base_reg = debug_funnel_regs[params->reg_idx] - CFG_BASE;
-
-	WREG32(base_reg + 0xFB0, CORESIGHT_UNLOCK);
-
-	WREG32(base_reg, params->enable ? 0x33F : 0);
+	WREG32(debug_funnel_regs[params->reg_idx] - CFG_BASE,
+			params->enable ? 0x33F : 0);
 
 	return 0;
 }
@@ -483,15 +458,8 @@ static int goya_config_bmon(struct hl_device *hdev,
 		struct hl_debug_params *params)
 {
 	struct hl_debug_params_bmon *input;
-	u64 base_reg;
+	u64 base_reg = debug_bmon_regs[params->reg_idx] - CFG_BASE;
 	u32 pcie_base = 0;
-
-	if (params->reg_idx >= ARRAY_SIZE(debug_bmon_regs)) {
-		dev_err(hdev->dev, "Invalid register index in BMON\n");
-		return -EINVAL;
-	}
-
-	base_reg = debug_bmon_regs[params->reg_idx] - CFG_BASE;
 
 	WREG32(base_reg + 0x104, 1);
 
@@ -554,7 +522,7 @@ static int goya_config_bmon(struct hl_device *hdev,
 static int goya_config_spmu(struct hl_device *hdev,
 		struct hl_debug_params *params)
 {
-	u64 base_reg;
+	u64 base_reg = debug_spmu_regs[params->reg_idx] - CFG_BASE;
 	struct hl_debug_params_spmu *input = params->input;
 	u64 *output;
 	u32 output_arr_len;
@@ -562,13 +530,6 @@ static int goya_config_spmu(struct hl_device *hdev,
 	u32 overflow_idx;
 	u32 cycle_cnt_idx;
 	int i;
-
-	if (params->reg_idx >= ARRAY_SIZE(debug_spmu_regs)) {
-		dev_err(hdev->dev, "Invalid register index in SPMU\n");
-		return -EINVAL;
-	}
-
-	base_reg = debug_spmu_regs[params->reg_idx] - CFG_BASE;
 
 	if (params->enable) {
 		input = params->input;
@@ -578,13 +539,7 @@ static int goya_config_spmu(struct hl_device *hdev,
 
 		if (input->event_types_num < 3) {
 			dev_err(hdev->dev,
-				"not enough event types values for SPMU enable\n");
-			return -EINVAL;
-		}
-
-		if (input->event_types_num > SPMU_MAX_COUNTERS) {
-			dev_err(hdev->dev,
-				"too many event types values for SPMU enable\n");
+				"not enough values for SPMU enable\n");
 			return -EINVAL;
 		}
 
@@ -592,8 +547,7 @@ static int goya_config_spmu(struct hl_device *hdev,
 		WREG32(base_reg + 0xE04, 0x41013040);
 
 		for (i = 0 ; i < input->event_types_num ; i++)
-			WREG32(base_reg + SPMU_EVENT_TYPES_OFFSET + i * 4,
-				input->event_types[i]);
+			WREG32(base_reg + 0x400 + i * 4, input->event_types[i]);
 
 		WREG32(base_reg + 0xE04, 0x41013041);
 		WREG32(base_reg + 0xC00, 0x8000003F);
@@ -610,12 +564,6 @@ static int goya_config_spmu(struct hl_device *hdev,
 		if (output_arr_len < 3) {
 			dev_err(hdev->dev,
 				"not enough values for SPMU disable\n");
-			return -EINVAL;
-		}
-
-		if (events_num > SPMU_MAX_COUNTERS) {
-			dev_err(hdev->dev,
-				"too many events values for SPMU disable\n");
 			return -EINVAL;
 		}
 
@@ -636,11 +584,24 @@ static int goya_config_spmu(struct hl_device *hdev,
 	return 0;
 }
 
+static int goya_config_timestamp(struct hl_device *hdev,
+		struct hl_debug_params *params)
+{
+	WREG32(mmPSOC_TIMESTAMP_BASE - CFG_BASE, 0);
+	if (params->enable) {
+		WREG32(mmPSOC_TIMESTAMP_BASE - CFG_BASE + 0xC, 0);
+		WREG32(mmPSOC_TIMESTAMP_BASE - CFG_BASE + 0x8, 0);
+		WREG32(mmPSOC_TIMESTAMP_BASE - CFG_BASE, 1);
+	}
+
+	return 0;
+}
+
 int goya_debug_coresight(struct hl_device *hdev, void *data)
 {
 	struct hl_debug_params *params = data;
 	u32 val;
-	int rc = 0;
+	int rc;
 
 	switch (params->op) {
 	case HL_DEBUG_OP_STM:
@@ -662,7 +623,7 @@ int goya_debug_coresight(struct hl_device *hdev, void *data)
 		rc = goya_config_spmu(hdev, params);
 		break;
 	case HL_DEBUG_OP_TIMESTAMP:
-		/* Do nothing as this opcode is deprecated */
+		rc = goya_config_timestamp(hdev, params);
 		break;
 
 	default:

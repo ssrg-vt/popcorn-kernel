@@ -193,6 +193,8 @@ static int hdpvr_activate_ir(struct hdpvr_device *dev)
 
 int hdpvr_register_i2c_adapter(struct hdpvr_device *dev)
 {
+	int retval = -ENOMEM;
+
 	hdpvr_activate_ir(dev);
 
 	dev->i2c_adapter = hdpvr_i2c_adapter_template;
@@ -200,7 +202,9 @@ int hdpvr_register_i2c_adapter(struct hdpvr_device *dev)
 
 	i2c_set_adapdata(&dev->i2c_adapter, dev);
 
-	return i2c_add_adapter(&dev->i2c_adapter);
+	retval = i2c_add_adapter(&dev->i2c_adapter);
+
+	return retval;
 }
 
 #endif

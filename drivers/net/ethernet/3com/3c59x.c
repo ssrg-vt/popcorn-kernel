@@ -847,7 +847,8 @@ static void poll_vortex(struct net_device *dev)
 
 static int vortex_suspend(struct device *dev)
 {
-	struct net_device *ndev = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct net_device *ndev = pci_get_drvdata(pdev);
 
 	if (!ndev || !netif_running(ndev))
 		return 0;
@@ -860,7 +861,8 @@ static int vortex_suspend(struct device *dev)
 
 static int vortex_resume(struct device *dev)
 {
-	struct net_device *ndev = dev_get_drvdata(dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct net_device *ndev = pci_get_drvdata(pdev);
 	int err;
 
 	if (!ndev || !netif_running(ndev))
@@ -2173,7 +2175,7 @@ boomerang_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 			dma_addr = skb_frag_dma_map(vp->gendev, frag,
 						    0,
-						    skb_frag_size(frag),
+						    frag->size,
 						    DMA_TO_DEVICE);
 			if (dma_mapping_error(vp->gendev, dma_addr)) {
 				for(i = i-1; i >= 0; i--)

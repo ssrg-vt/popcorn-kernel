@@ -34,7 +34,8 @@ static unsigned int fixmaps_used __initdata;
  * have to convert them into an offset in a page-aligned mapping, but the
  * caller shouldn't need to know that small detail.
  */
-void __iomem *__ref ioremap(phys_addr_t addr, unsigned long size)
+void __iomem *__ref
+__ioremap(phys_addr_t addr, unsigned long size, pgprot_t prot)
 {
 	phys_addr_t p;
 	unsigned long v;
@@ -65,8 +66,7 @@ void __iomem *__ref ioremap(phys_addr_t addr, unsigned long size)
 		fixmaps_used += (size >> PAGE_SHIFT);
 	}
 
-	if (ioremap_page_range(v, v + size, p,
-			__pgprot(pgprot_val(PAGE_KERNEL) | _PAGE_CI))) {
+	if (ioremap_page_range(v, v + size, p, prot)) {
 		if (likely(mem_init_done))
 			vfree(area->addr);
 		else
@@ -76,7 +76,7 @@ void __iomem *__ref ioremap(phys_addr_t addr, unsigned long size)
 
 	return (void __iomem *)(offset + (char *)v);
 }
-EXPORT_SYMBOL(ioremap);
+EXPORT_SYMBOL(__ioremap);
 
 void iounmap(void *addr)
 {

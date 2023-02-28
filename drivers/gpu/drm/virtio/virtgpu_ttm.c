@@ -25,18 +25,17 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <linux/delay.h>
-
-#include <drm/drm.h>
-#include <drm/drm_file.h>
 #include <drm/ttm/ttm_bo_api.h>
 #include <drm/ttm/ttm_bo_driver.h>
-#include <drm/ttm/ttm_module.h>
-#include <drm/ttm/ttm_page_alloc.h>
 #include <drm/ttm/ttm_placement.h>
+#include <drm/ttm/ttm_page_alloc.h>
+#include <drm/ttm/ttm_module.h>
+#include <drm/drmP.h>
+#include <drm/drm.h>
 #include <drm/virtgpu_drm.h>
-
 #include "virtgpu_drv.h"
+
+#include <linux/delay.h>
 
 static struct
 virtio_gpu_device *virtio_gpu_get_vgdev(struct ttm_bo_device *bdev)

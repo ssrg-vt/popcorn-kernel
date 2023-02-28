@@ -11,10 +11,16 @@
 #include <linux/ratelimit.h>
 #include <net/dst.h>
 
-#include "octeon-ethernet.h"
+#include <asm/octeon/octeon.h>
+
 #include "ethernet-defines.h"
+#include "octeon-ethernet.h"
 #include "ethernet-util.h"
 #include "ethernet-mdio.h"
+
+#include <asm/octeon/cvmx-helper.h>
+
+#include <asm/octeon/cvmx-gmxx-defs.h>
 
 int cvm_oct_sgmii_open(struct net_device *dev)
 {

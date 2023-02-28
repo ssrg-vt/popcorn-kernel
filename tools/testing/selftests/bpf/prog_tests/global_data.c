@@ -7,8 +7,10 @@ static void test_global_data_number(struct bpf_object *obj, __u32 duration)
 	uint64_t num;
 
 	map_fd = bpf_find_map(__func__, obj, "result_number");
-	if (CHECK_FAIL(map_fd < 0))
+	if (map_fd < 0) {
+		error_cnt++;
 		return;
+	}
 
 	struct {
 		char *name;
@@ -42,8 +44,10 @@ static void test_global_data_string(struct bpf_object *obj, __u32 duration)
 	char str[32];
 
 	map_fd = bpf_find_map(__func__, obj, "result_string");
-	if (CHECK_FAIL(map_fd < 0))
+	if (map_fd < 0) {
+		error_cnt++;
 		return;
+	}
 
 	struct {
 		char *name;
@@ -77,8 +81,10 @@ static void test_global_data_struct(struct bpf_object *obj, __u32 duration)
 	struct foo val;
 
 	map_fd = bpf_find_map(__func__, obj, "result_struct");
-	if (CHECK_FAIL(map_fd < 0))
+	if (map_fd < 0) {
+		error_cnt++;
 		return;
+	}
 
 	struct {
 		char *name;
@@ -106,12 +112,16 @@ static void test_global_data_rdonly(struct bpf_object *obj, __u32 duration)
 	__u8 *buff;
 
 	map = bpf_object__find_map_by_name(obj, "test_glo.rodata");
-	if (CHECK_FAIL(!map || !bpf_map__is_internal(map)))
+	if (!map || !bpf_map__is_internal(map)) {
+		error_cnt++;
 		return;
+	}
 
 	map_fd = bpf_map__fd(map);
-	if (CHECK_FAIL(map_fd < 0))
+	if (map_fd < 0) {
+		error_cnt++;
 		return;
+	}
 
 	buff = malloc(bpf_map__def(map)->value_size);
 	if (buff)

@@ -673,8 +673,11 @@ static int max77686_init_rtc_regmap(struct max77686_rtc_info *info)
 		struct platform_device *pdev = to_platform_device(info->dev);
 
 		info->rtc_irq = platform_get_irq(pdev, 0);
-		if (info->rtc_irq < 0)
+		if (info->rtc_irq < 0) {
+			dev_err(info->dev, "Failed to get rtc interrupts: %d\n",
+				info->rtc_irq);
 			return info->rtc_irq;
+		}
 	} else {
 		info->rtc_irq =  parent_i2c->irq;
 	}
@@ -690,11 +693,11 @@ static int max77686_init_rtc_regmap(struct max77686_rtc_info *info)
 		goto add_rtc_irq;
 	}
 
-	info->rtc = devm_i2c_new_dummy_device(info->dev, parent_i2c->adapter,
-					      info->drv_data->rtc_i2c_addr);
-	if (IS_ERR(info->rtc)) {
+	info->rtc = i2c_new_dummy(parent_i2c->adapter,
+				  info->drv_data->rtc_i2c_addr);
+	if (!info->rtc) {
 		dev_err(info->dev, "Failed to allocate I2C device for RTC\n");
-		return PTR_ERR(info->rtc);
+		return -ENODEV;
 	}
 
 	info->rtc_regmap = devm_regmap_init_i2c(info->rtc,
@@ -702,7 +705,7 @@ static int max77686_init_rtc_regmap(struct max77686_rtc_info *info)
 	if (IS_ERR(info->rtc_regmap)) {
 		ret = PTR_ERR(info->rtc_regmap);
 		dev_err(info->dev, "Failed to allocate RTC regmap: %d\n", ret);
-		return ret;
+		goto err_unregister_i2c;
 	}
 
 add_rtc_irq:
@@ -712,10 +715,15 @@ add_rtc_irq:
 				  &info->rtc_irq_data);
 	if (ret < 0) {
 		dev_err(info->dev, "Failed to add RTC irq chip: %d\n", ret);
-		return ret;
+		goto err_unregister_i2c;
 	}
 
 	return 0;
+
+err_unregister_i2c:
+	if (info->rtc)
+		i2c_unregister_device(info->rtc);
+	return ret;
 }
 
 static int max77686_rtc_probe(struct platform_device *pdev)
@@ -778,6 +786,8 @@ static int max77686_rtc_probe(struct platform_device *pdev)
 
 err_rtc:
 	regmap_del_irq_chip(info->rtc_irq, info->rtc_irq_data);
+	if (info->rtc)
+		i2c_unregister_device(info->rtc);
 
 	return ret;
 }
@@ -788,6 +798,8 @@ static int max77686_rtc_remove(struct platform_device *pdev)
 
 	free_irq(info->virq, info);
 	regmap_del_irq_chip(info->rtc_irq, info->rtc_irq_data);
+	if (info->rtc)
+		i2c_unregister_device(info->rtc);
 
 	return 0;
 }

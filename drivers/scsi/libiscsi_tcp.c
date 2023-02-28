@@ -8,6 +8,8 @@
  * Copyright (C) 2006 Red Hat, Inc.  All rights reserved.
  * maintained by open-iscsi@googlegroups.com
  *
+ * See the file COPYING included with this distribution for more details.
+ *
  * Credits:
  *	Christoph Hellwig
  *	FUJITA Tomonori

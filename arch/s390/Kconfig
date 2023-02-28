@@ -30,7 +30,7 @@ config GENERIC_BUG_RELATIVE_POINTERS
 	def_bool y
 
 config GENERIC_LOCKBREAK
-	def_bool y if PREEMPT
+	def_bool y if SMP && PREEMPT
 
 config PGSTE
 	def_bool y if KVM
@@ -65,7 +65,6 @@ config S390
 	select ARCH_HAS_GCOV_PROFILE_ALL
 	select ARCH_HAS_GIGANTIC_PAGE
 	select ARCH_HAS_KCOV
-	select ARCH_HAS_MEM_ENCRYPT
 	select ARCH_HAS_PTE_SPECIAL
 	select ARCH_HAS_SET_MEMORY
 	select ARCH_HAS_STRICT_KERNEL_RWX
@@ -103,7 +102,6 @@ config S390
 	select ARCH_INLINE_WRITE_UNLOCK_IRQRESTORE
 	select ARCH_KEEP_MEMBLOCK
 	select ARCH_SAVE_PAGE_KEYS if HIBERNATION
-	select ARCH_STACKWALK
 	select ARCH_SUPPORTS_ATOMIC_RMW
 	select ARCH_SUPPORTS_NUMA_BALANCING
 	select ARCH_USE_BUILTIN_BSWAP
@@ -115,6 +113,7 @@ config S390
 	select DYNAMIC_FTRACE if FUNCTION_TRACER
 	select GENERIC_CLOCKEVENTS
 	select GENERIC_CPU_AUTOPROBE
+	select GENERIC_CPU_DEVICES if !SMP
 	select GENERIC_CPU_VULNERABILITIES
 	select GENERIC_FIND_FIRST_BIT
 	select GENERIC_SMP_IDLE_THREAD
@@ -130,7 +129,6 @@ config S390
 	select HAVE_ARCH_TRACEHOOK
 	select HAVE_ARCH_TRANSPARENT_HUGEPAGE
 	select HAVE_ARCH_VMAP_STACK
-	select HAVE_ASM_MODVERSIONS
 	select HAVE_EBPF_JIT if PACK_STACK && HAVE_MARCH_Z196_FEATURES
 	select HAVE_CMPXCHG_DOUBLE
 	select HAVE_CMPXCHG_LOCAL
@@ -139,7 +137,6 @@ config S390
 	select HAVE_DMA_CONTIGUOUS
 	select HAVE_DYNAMIC_FTRACE
 	select HAVE_DYNAMIC_FTRACE_WITH_REGS
-	select HAVE_FAST_GUP
 	select HAVE_EFFICIENT_UNALIGNED_ACCESS
 	select HAVE_FENTRY
 	select HAVE_FTRACE_MCOUNT_RECORD
@@ -147,6 +144,7 @@ config S390
 	select HAVE_FUNCTION_TRACER
 	select HAVE_FUTEX_CMPXCHG if FUTEX
 	select HAVE_GCC_PLUGINS
+	select HAVE_GENERIC_GUP
 	select HAVE_KERNEL_BZIP2
 	select HAVE_KERNEL_GZIP
 	select HAVE_KERNEL_LZ4
@@ -189,9 +187,6 @@ config S390
 	select VIRT_CPU_ACCOUNTING
 	select ARCH_HAS_SCALED_CPUTIME
 	select HAVE_NMI
-	select ARCH_HAS_FORCE_DMA_UNENCRYPTED
-	select SWIOTLB
-	select GENERIC_ALLOCATOR
 
 
 config SCHED_OMIT_FRAME_POINTER
@@ -235,10 +230,6 @@ config HAVE_MARCH_Z13_FEATURES
 config HAVE_MARCH_Z14_FEATURES
 	def_bool n
 	select HAVE_MARCH_Z13_FEATURES
-
-config HAVE_MARCH_Z15_FEATURES
-	def_bool n
-	select HAVE_MARCH_Z14_FEATURES
 
 choice
 	prompt "Processor type"
@@ -311,14 +302,6 @@ config MARCH_Z14
 	  and 3906 series). The kernel will be slightly faster but will not
 	  work on older machines.
 
-config MARCH_Z15
-	bool "IBM z15"
-	select HAVE_MARCH_Z15_FEATURES
-	help
-	  Select this to enable optimizations for IBM z15 (8562
-	  and 8561 series). The kernel will be slightly faster but will not
-	  work on older machines.
-
 endchoice
 
 config MARCH_Z900_TUNE
@@ -344,9 +327,6 @@ config MARCH_Z13_TUNE
 
 config MARCH_Z14_TUNE
 	def_bool TUNE_Z14 || MARCH_Z14 && TUNE_DEFAULT
-
-config MARCH_Z15_TUNE
-	def_bool TUNE_Z15 || MARCH_Z15 && TUNE_DEFAULT
 
 choice
 	prompt "Tune code generation"
@@ -392,9 +372,6 @@ config TUNE_Z13
 config TUNE_Z14
 	bool "IBM z14"
 
-config TUNE_Z15
-	bool "IBM z15"
-
 endchoice
 
 config 64BIT
@@ -422,10 +399,27 @@ config SYSVIPC_COMPAT
 
 config SMP
 	def_bool y
+	prompt "Symmetric multi-processing support"
+	---help---
+	  This enables support for systems with more than one CPU. If you have
+	  a system with only one CPU, like most personal computers, say N. If
+	  you have a system with more than one CPU, say Y.
+
+	  If you say N here, the kernel will run on uni- and multiprocessor
+	  machines, but will use only one CPU of a multiprocessor machine. If
+	  you say Y here, the kernel will run on many, but not all,
+	  uniprocessor machines. On a uniprocessor machine, the kernel
+	  will run faster if you say N here.
+
+	  See also the SMP-HOWTO available at
+	  <http://www.tldp.org/docs.html#howto>.
+
+	  Even if you don't know what to do here, say Y.
 
 config NR_CPUS
 	int "Maximum number of CPUs (2-512)"
 	range 2 512
+	depends on SMP
 	default "64"
 	help
 	  This allows you to specify the maximum number of CPUs which this
@@ -437,6 +431,12 @@ config NR_CPUS
 
 config HOTPLUG_CPU
 	def_bool y
+	prompt "Support for hot-pluggable CPUs"
+	depends on SMP
+	help
+	  Say Y here to be able to turn CPUs off and on. CPUs
+	  can be controlled through /sys/devices/system/cpu/cpu#.
+	  Say N if you want to disable CPU hotplug.
 
 # Some NUMA nodes have memory ranges that span
 # other nodes.	Even though a pfn is valid and
@@ -448,7 +448,7 @@ config NODES_SPAN_OTHER_NODES
 
 config NUMA
 	bool "NUMA support"
-	depends on SCHED_TOPOLOGY
+	depends on SMP && SCHED_TOPOLOGY
 	default n
 	help
 	  Enable NUMA support
@@ -523,6 +523,7 @@ config SCHED_DRAWER
 config SCHED_TOPOLOGY
 	def_bool y
 	prompt "Topology scheduler support"
+	depends on SMP
 	select SCHED_SMT
 	select SCHED_MC
 	select SCHED_BOOK
@@ -554,9 +555,9 @@ config ARCH_HAS_KEXEC_PURGATORY
 	def_bool y
 	depends on KEXEC_FILE
 
-config KEXEC_SIG
+config KEXEC_VERIFY_SIG
 	bool "Verify kernel signature during kexec_file_load() syscall"
-	depends on KEXEC_FILE && MODULE_SIG_FORMAT
+	depends on KEXEC_FILE && SYSTEM_DATA_VERIFICATION
 	help
 	  This option makes kernel signature verification mandatory for
 	  the kexec_file_load() syscall.
@@ -660,6 +661,9 @@ config ARCH_SPARSEMEM_ENABLE
 config ARCH_SPARSEMEM_DEFAULT
 	def_bool y
 
+config ARCH_SELECT_MEMORY_MODEL
+	def_bool y
+
 config ARCH_ENABLE_MEMORY_HOTPLUG
 	def_bool y if SPARSEMEM
 
@@ -759,7 +763,7 @@ config PCI_NR_FUNCTIONS
 	  This allows you to specify the maximum number of PCI functions which
 	  this kernel will support.
 
-endif # PCI
+endif	# PCI
 
 config HAS_IOMEM
 	def_bool PCI
@@ -825,15 +829,16 @@ menu "Dump support"
 
 config CRASH_DUMP
 	bool "kernel crash dumps"
+	depends on SMP
 	select KEXEC
 	help
 	  Generate crash dump after being started by kexec.
 	  Crash dump kernels are loaded in the main kernel with kexec-tools
 	  into a specially reserved region and then later executed after
 	  a crash by kdump/kexec.
-	  Refer to <file:Documentation/s390/zfcpdump.rst> for more details on this.
+	  Refer to <file:Documentation/s390/zfcpdump.txt> for more details on this.
 	  This option also enables s390 zfcpdump.
-	  See also <file:Documentation/s390/zfcpdump.rst>
+	  See also <file:Documentation/s390/zfcpdump.txt>
 
 endmenu
 

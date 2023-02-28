@@ -11,12 +11,21 @@
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
 #include "xfs_defer.h"
+#include "xfs_da_format.h"
+#include "xfs_da_btree.h"
 #include "xfs_inode.h"
 #include "xfs_trans.h"
+#include "xfs_inode_item.h"
 #include "xfs_bmap.h"
 #include "xfs_bmap_util.h"
+#include "xfs_error.h"
+#include "xfs_dir2.h"
+#include "xfs_dir2_priv.h"
+#include "xfs_ioctl.h"
 #include "xfs_trace.h"
+#include "xfs_log.h"
 #include "xfs_icache.h"
+#include "xfs_pnfs.h"
 #include "xfs_btree.h"
 #include "xfs_refcount_btree.h"
 #include "xfs_refcount.h"
@@ -24,9 +33,11 @@
 #include "xfs_trans_space.h"
 #include "xfs_bit.h"
 #include "xfs_alloc.h"
+#include "xfs_quota_defs.h"
 #include "xfs_quota.h"
 #include "xfs_reflink.h"
 #include "xfs_iomap.h"
+#include "xfs_rmap_btree.h"
 #include "xfs_sb.h"
 #include "xfs_ag_resv.h"
 
@@ -495,8 +506,10 @@ xfs_reflink_cancel_cow_blocks(
 			ASSERT((*tpp)->t_firstblock == NULLFSBLOCK);
 
 			/* Free the CoW orphan record. */
-			xfs_refcount_free_cow_extent(*tpp, del.br_startblock,
-					del.br_blockcount);
+			error = xfs_refcount_free_cow_extent(*tpp,
+					del.br_startblock, del.br_blockcount);
+			if (error)
+				break;
 
 			xfs_bmap_add_free(*tpp, del.br_startblock,
 					  del.br_blockcount, NULL);
@@ -559,7 +572,7 @@ xfs_reflink_cancel_cow_range(
 
 	/* Start a rolling transaction to remove the mappings */
 	error = xfs_trans_alloc(ip->i_mount, &M_RES(ip->i_mount)->tr_write,
-			0, 0, 0, &tp);
+			0, 0, XFS_TRANS_NOFS, &tp);
 	if (error)
 		goto out;
 
@@ -618,7 +631,7 @@ xfs_reflink_end_cow_extent(
 
 	resblks = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
 	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0,
-			XFS_TRANS_RESERVE, &tp);
+			XFS_TRANS_RESERVE | XFS_TRANS_NOFS, &tp);
 	if (error)
 		return error;
 
@@ -673,10 +686,15 @@ xfs_reflink_end_cow_extent(
 	trace_xfs_reflink_cow_remap(ip, &del);
 
 	/* Free the CoW orphan record. */
-	xfs_refcount_free_cow_extent(tp, del.br_startblock, del.br_blockcount);
+	error = xfs_refcount_free_cow_extent(tp, del.br_startblock,
+			del.br_blockcount);
+	if (error)
+		goto out_cancel;
 
 	/* Map the new blocks into the data fork. */
-	xfs_bmap_map_extent(tp, ip, &del);
+	error = xfs_bmap_map_extent(tp, ip, &del);
+	if (error)
+		goto out_cancel;
 
 	/* Charge this new data fork mapping to the on-disk quota. */
 	xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_DELBCOUNT,
@@ -1063,10 +1081,14 @@ xfs_reflink_remap_extent(
 				uirec.br_blockcount, uirec.br_startblock);
 
 		/* Update the refcount tree */
-		xfs_refcount_increase_extent(tp, &uirec);
+		error = xfs_refcount_increase_extent(tp, &uirec);
+		if (error)
+			goto out_cancel;
 
 		/* Map the new blocks into the data fork. */
-		xfs_bmap_map_extent(tp, ip, &uirec);
+		error = xfs_bmap_map_extent(tp, ip, &uirec);
+		if (error)
+			goto out_cancel;
 
 		/* Update quota accounting. */
 		xfs_trans_mod_dquot_byino(tp, ip, XFS_TRANS_DQ_BCOUNT,
@@ -1179,11 +1201,11 @@ xfs_reflink_remap_blocks(
 }
 
 /*
- * Grab the exclusive iolock for a data copy from src to dest, making sure to
- * abide vfs locking order (lowest pointer value goes first) and breaking the
- * layout leases before proceeding.  The loop is needed because we cannot call
- * the blocking break_layout() with the iolocks held, and therefore have to
- * back out both locks.
+ * Grab the exclusive iolock for a data copy from src to dest, making
+ * sure to abide vfs locking order (lowest pointer value goes first) and
+ * breaking the pnfs layout leases on dest before proceeding.  The loop
+ * is needed because we cannot call the blocking break_layout() with the
+ * src iolock held, and therefore have to back out both locks.
  */
 static int
 xfs_iolock_two_inodes_and_break_layout(
@@ -1192,44 +1214,33 @@ xfs_iolock_two_inodes_and_break_layout(
 {
 	int			error;
 
-	if (src > dest)
-		swap(src, dest);
-
 retry:
-	/* Wait to break both inodes' layouts before we start locking. */
-	error = break_layout(src, true);
-	if (error)
-		return error;
-	if (src != dest) {
+	if (src < dest) {
+		inode_lock_shared(src);
+		inode_lock_nested(dest, I_MUTEX_NONDIR2);
+	} else {
+		/* src >= dest */
+		inode_lock(dest);
+	}
+
+	error = break_layout(dest, false);
+	if (error == -EWOULDBLOCK) {
+		inode_unlock(dest);
+		if (src < dest)
+			inode_unlock_shared(src);
 		error = break_layout(dest, true);
 		if (error)
 			return error;
+		goto retry;
 	}
-
-	/* Lock one inode and make sure nobody got in and leased it. */
-	inode_lock(src);
-	error = break_layout(src, false);
 	if (error) {
-		inode_unlock(src);
-		if (error == -EWOULDBLOCK)
-			goto retry;
-		return error;
-	}
-
-	if (src == dest)
-		return 0;
-
-	/* Lock the other inode and make sure nobody got in and leased it. */
-	inode_lock_nested(dest, I_MUTEX_NONDIR2);
-	error = break_layout(dest, false);
-	if (error) {
-		inode_unlock(src);
 		inode_unlock(dest);
-		if (error == -EWOULDBLOCK)
-			goto retry;
+		if (src < dest)
+			inode_unlock_shared(src);
 		return error;
 	}
-
+	if (src > dest)
+		inode_lock_shared_nested(src, I_MUTEX_NONDIR2);
 	return 0;
 }
 
@@ -1247,10 +1258,10 @@ xfs_reflink_remap_unlock(
 
 	xfs_iunlock(dest, XFS_MMAPLOCK_EXCL);
 	if (!same_inode)
-		xfs_iunlock(src, XFS_MMAPLOCK_EXCL);
+		xfs_iunlock(src, XFS_MMAPLOCK_SHARED);
 	inode_unlock(inode_out);
 	if (!same_inode)
-		inode_unlock(inode_in);
+		inode_unlock_shared(inode_in);
 }
 
 /*
@@ -1325,7 +1336,7 @@ xfs_reflink_remap_prep(
 	if (same_inode)
 		xfs_ilock(src, XFS_MMAPLOCK_EXCL);
 	else
-		xfs_lock_two_inodes(src, XFS_MMAPLOCK_EXCL, dest,
+		xfs_lock_two_inodes(src, XFS_MMAPLOCK_SHARED, dest,
 				XFS_MMAPLOCK_EXCL);
 
 	/* Check file eligibility and prepare for block sharing. */

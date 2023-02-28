@@ -11,7 +11,9 @@
  * - Control registers for each USB2 Ports
  * - Control registers for the USB PHY layer
  * - SuperSpeed PHY can be enabled only if port is used
- * - Dynamic OTG switching with ID change interrupt
+ *
+ * TOFIX:
+ * - Add dynamic OTG switching with ID change interrupt
  */
 
 #include <linux/module.h>
@@ -346,22 +348,6 @@ static enum usb_role dwc3_meson_g12a_role_get(struct device *dev)
 		USB_ROLE_HOST : USB_ROLE_DEVICE;
 }
 
-static irqreturn_t dwc3_meson_g12a_irq_thread(int irq, void *data)
-{
-	struct dwc3_meson_g12a *priv = data;
-	enum phy_mode otg_id;
-
-	otg_id = dwc3_meson_g12a_get_id(priv);
-	if (otg_id != priv->otg_phy_mode) {
-		if (dwc3_meson_g12a_otg_mode_set(priv, otg_id))
-			dev_warn(priv->dev, "Failed to switch OTG mode\n");
-	}
-
-	regmap_update_bits(priv->regmap, USB_R5, USB_R5_ID_DIG_IRQ, 0);
-
-	return IRQ_HANDLED;
-}
-
 static struct device *dwc3_meson_g12_find_child(struct device *dev,
 						const char *compatible)
 {
@@ -386,14 +372,16 @@ static int dwc3_meson_g12a_probe(struct platform_device *pdev)
 	struct device		*dev = &pdev->dev;
 	struct device_node	*np = dev->of_node;
 	void __iomem *base;
+	struct resource *res;
 	enum phy_mode otg_id;
-	int ret, i, irq;
+	int ret, i;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
@@ -448,19 +436,6 @@ static int dwc3_meson_g12a_probe(struct platform_device *pdev)
 	/* Get dr_mode */
 	priv->otg_mode = usb_get_dr_mode(dev);
 
-	if (priv->otg_mode == USB_DR_MODE_OTG) {
-		/* Ack irq before registering */
-		regmap_update_bits(priv->regmap, USB_R5,
-				   USB_R5_ID_DIG_IRQ, 0);
-
-		irq = platform_get_irq(pdev, 0);
-		ret = devm_request_threaded_irq(&pdev->dev, irq, NULL,
-						dwc3_meson_g12a_irq_thread,
-						IRQF_ONESHOT, pdev->name, priv);
-		if (ret)
-			return ret;
-	}
-
 	dwc3_meson_g12a_usb_init(priv);
 
 	/* Init PHYs */
@@ -485,6 +460,7 @@ static int dwc3_meson_g12a_probe(struct platform_device *pdev)
 
 	/* Setup OTG mode corresponding to the ID pin */
 	if (priv->otg_mode == USB_DR_MODE_OTG) {
+		/* TOFIX Handle ID mode toggling via IRQ */
 		otg_id = dwc3_meson_g12a_get_id(priv);
 		if (otg_id != priv->otg_phy_mode) {
 			if (dwc3_meson_g12a_otg_mode_set(priv, otg_id))
@@ -562,13 +538,7 @@ static int __maybe_unused dwc3_meson_g12a_runtime_resume(struct device *dev)
 static int __maybe_unused dwc3_meson_g12a_suspend(struct device *dev)
 {
 	struct dwc3_meson_g12a *priv = dev_get_drvdata(dev);
-	int i, ret;
-
-	if (priv->vbus && priv->otg_phy_mode == PHY_MODE_USB_HOST) {
-		ret = regulator_disable(priv->vbus);
-		if (ret)
-			return ret;
-	}
+	int i;
 
 	for (i = 0 ; i < PHY_COUNT ; ++i) {
 		phy_power_off(priv->phys[i]);
@@ -599,12 +569,6 @@ static int __maybe_unused dwc3_meson_g12a_resume(struct device *dev)
 	/* Set PHY Power */
 	for (i = 0 ; i < PHY_COUNT ; ++i) {
 		ret = phy_power_on(priv->phys[i]);
-		if (ret)
-			return ret;
-	}
-
-       if (priv->vbus && priv->otg_phy_mode == PHY_MODE_USB_HOST) {
-               ret = regulator_enable(priv->vbus);
 		if (ret)
 			return ret;
 	}

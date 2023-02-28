@@ -135,14 +135,14 @@ good_area:
 		si_signo = SIGSEGV;
 		si_code  = SEGV_ACCERR;
 	}
-	force_sig_fault(si_signo, si_code, (void __user *)address);
+	force_sig_fault(si_signo, si_code, (void __user *)address, current);
 	return;
 
 bad_area:
 	up_read(&mm->mmap_sem);
 
 	if (user_mode(regs)) {
-		force_sig_fault(SIGSEGV, si_code, (void __user *)address);
+		force_sig_fault(SIGSEGV, si_code, (void __user *)address, current);
 		return;
 	}
 	/* Kernel-mode fault falls through */

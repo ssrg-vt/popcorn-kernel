@@ -665,6 +665,11 @@ static void db2k_initialize_adc(struct comedi_device *dev)
 	db2k_initialize_tmrs(dev);
 }
 
+static void db2k_initialize_dac(struct comedi_device *dev)
+{
+	db2k_dac_disarm(dev);
+}
+
 static int db2k_8255_cb(struct comedi_device *dev, int dir, int port, int data,
 			unsigned long iobase)
 {
@@ -714,7 +719,7 @@ static int db2k_auto_attach(struct comedi_device *dev, unsigned long context)
 		return result;
 
 	db2k_initialize_adc(dev);
-	db2k_dac_disarm(dev);
+	db2k_initialize_dac(dev);
 
 	s = &dev->subdevices[0];
 	/* ai subdevice */

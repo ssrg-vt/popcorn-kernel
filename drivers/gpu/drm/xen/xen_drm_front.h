@@ -11,17 +11,12 @@
 #ifndef __XEN_DRM_FRONT_H_
 #define __XEN_DRM_FRONT_H_
 
-#include <linux/scatterlist.h>
-
-#include <drm/drm_connector.h>
+#include <drm/drmP.h>
 #include <drm/drm_simple_kms_helper.h>
 
-#include "xen_drm_front_cfg.h"
+#include <linux/scatterlist.h>
 
-struct drm_device;
-struct drm_framebuffer;
-struct drm_gem_object;
-struct drm_pending_vblank_event;
+#include "xen_drm_front_cfg.h"
 
 /**
  * DOC: Driver modes of operation in terms of display buffers used

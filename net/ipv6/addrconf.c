@@ -478,7 +478,7 @@ static struct inet6_dev *ipv6_find_idev(struct net_device *dev)
 	if (!idev) {
 		idev = ipv6_add_dev(dev);
 		if (IS_ERR(idev))
-			return idev;
+			return NULL;
 	}
 
 	if (dev->flags&IFF_UP)
@@ -2418,13 +2418,9 @@ static struct fib6_info *addrconf_get_prefix_route(const struct in6_addr *pfx,
 		goto out;
 
 	for_each_fib6_node_rt_rcu(fn) {
-		/* prefix routes only use builtin fib6_nh */
-		if (rt->nh)
+		if (rt->fib6_nh.fib_nh_dev->ifindex != dev->ifindex)
 			continue;
-
-		if (rt->fib6_nh->fib_nh_dev->ifindex != dev->ifindex)
-			continue;
-		if (no_gw && rt->fib6_nh->fib_nh_gw_family)
+		if (no_gw && rt->fib6_nh.fib_nh_gw_family)
 			continue;
 		if ((rt->fib6_flags & flags) != flags)
 			continue;
@@ -2466,8 +2462,8 @@ static struct inet6_dev *addrconf_add_dev(struct net_device *dev)
 	ASSERT_RTNL();
 
 	idev = ipv6_find_idev(dev);
-	if (IS_ERR(idev))
-		return idev;
+	if (!idev)
+		return ERR_PTR(-ENOBUFS);
 
 	if (idev->cnf.disable_ipv6)
 		return ERR_PTR(-EACCES);
@@ -3128,9 +3124,11 @@ static void sit_add_v4_addrs(struct inet6_dev *idev)
 		struct in_device *in_dev = __in_dev_get_rtnl(dev);
 		if (in_dev && (dev->flags & IFF_UP)) {
 			struct in_ifaddr *ifa;
+
 			int flag = scope;
 
-			in_dev_for_each_ifa_rtnl(ifa, in_dev) {
+			for (ifa = in_dev->ifa_list; ifa; ifa = ifa->ifa_next) {
+
 				addr.s6_addr32[3] = ifa->ifa_local;
 
 				if (ifa->ifa_scope == RT_SCOPE_LINK)
@@ -3159,7 +3157,7 @@ static void init_loopback(struct net_device *dev)
 	ASSERT_RTNL();
 
 	idev = ipv6_find_idev(dev);
-	if (IS_ERR(idev)) {
+	if (!idev) {
 		pr_debug("%s: add_dev failed\n", __func__);
 		return;
 	}
@@ -3374,7 +3372,7 @@ static void addrconf_sit_config(struct net_device *dev)
 	 */
 
 	idev = ipv6_find_idev(dev);
-	if (IS_ERR(idev)) {
+	if (!idev) {
 		pr_debug("%s: add_dev failed\n", __func__);
 		return;
 	}
@@ -3399,7 +3397,7 @@ static void addrconf_gre_config(struct net_device *dev)
 	ASSERT_RTNL();
 
 	idev = ipv6_find_idev(dev);
-	if (IS_ERR(idev)) {
+	if (!idev) {
 		pr_debug("%s: add_dev failed\n", __func__);
 		return;
 	}
@@ -4773,8 +4771,8 @@ inet6_rtm_newaddr(struct sk_buff *skb, struct nlmsghdr *nlh,
 			 IFA_F_MCAUTOJOIN | IFA_F_OPTIMISTIC;
 
 	idev = ipv6_find_idev(dev);
-	if (IS_ERR(idev))
-		return PTR_ERR(idev);
+	if (!idev)
+		return -ENOBUFS;
 
 	if (!ipv6_allow_optimistic_dad(net, idev))
 		cfg.ifa_flags &= ~IFA_F_OPTIMISTIC;
@@ -6360,17 +6358,16 @@ void addrconf_disable_policy_idev(struct inet6_dev *idev, int val)
 	list_for_each_entry(ifa, &idev->addr_list, if_list) {
 		spin_lock(&ifa->lock);
 		if (ifa->rt) {
-			/* host routes only use builtin fib6_nh */
-			struct fib6_nh *nh = ifa->rt->fib6_nh;
+			struct fib6_info *rt = ifa->rt;
 			int cpu;
 
 			rcu_read_lock();
 			ifa->rt->dst_nopolicy = val ? true : false;
-			if (nh->rt6i_pcpu) {
+			if (rt->rt6i_pcpu) {
 				for_each_possible_cpu(cpu) {
 					struct rt6_info **rtp;
 
-					rtp = per_cpu_ptr(nh->rt6i_pcpu, cpu);
+					rtp = per_cpu_ptr(rt->rt6i_pcpu, cpu);
 					addrconf_set_nopolicy(*rtp, val);
 				}
 			}
@@ -6440,6 +6437,8 @@ int addrconf_sysctl_disable_policy(struct ctl_table *ctl, int write,
 }
 
 static int minus_one = -1;
+static const int zero = 0;
+static const int one = 1;
 static const int two_five_five = 255;
 
 static const struct ctl_table addrconf_sysctl[] = {
@@ -6456,7 +6455,7 @@ static const struct ctl_table addrconf_sysctl[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)SYSCTL_ONE,
+		.extra1		= (void *)&one,
 		.extra2		= (void *)&two_five_five,
 	},
 	{
@@ -6815,7 +6814,7 @@ static const struct ctl_table addrconf_sysctl[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)SYSCTL_ZERO,
+		.extra1		= (void *)&zero,
 		.extra2		= (void *)&two_five_five,
 	},
 	{

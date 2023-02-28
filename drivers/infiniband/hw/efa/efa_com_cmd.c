@@ -3,6 +3,7 @@
  * Copyright 2018-2019 Amazon.com, Inc. or its affiliates. All rights reserved.
  */
 
+#include "efa.h"
 #include "efa_com.h"
 #include "efa_com_cmd.h"
 
@@ -44,8 +45,7 @@ int efa_com_create_qp(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&cmd_completion,
 			       sizeof(cmd_completion));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to create qp [%d]\n", err);
+		ibdev_err(edev->efa_dev, "Failed to create qp [%d]\n", err);
 		return err;
 	}
 
@@ -57,7 +57,7 @@ int efa_com_create_qp(struct efa_com_dev *edev,
 	res->send_sub_cq_idx = cmd_completion.send_sub_cq_idx;
 	res->recv_sub_cq_idx = cmd_completion.recv_sub_cq_idx;
 
-	return 0;
+	return err;
 }
 
 int efa_com_modify_qp(struct efa_com_dev *edev,
@@ -83,10 +83,9 @@ int efa_com_modify_qp(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&resp,
 			       sizeof(resp));
 	if (err) {
-		ibdev_err_ratelimited(
-			edev->efa_dev,
-			"Failed to modify qp-%u modify_mask[%#x] [%d]\n",
-			cmd.qp_handle, cmd.modify_mask, err);
+		ibdev_err(edev->efa_dev,
+			  "Failed to modify qp-%u modify_mask[%#x] [%d]\n",
+			  cmd.qp_handle, cmd.modify_mask, err);
 		return err;
 	}
 
@@ -111,9 +110,8 @@ int efa_com_query_qp(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&resp,
 			       sizeof(resp));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to query qp-%u [%d]\n",
-				      cmd.qp_handle, err);
+		ibdev_err(edev->efa_dev, "Failed to query qp-%u [%d]\n",
+			  cmd.qp_handle, err);
 		return err;
 	}
 
@@ -142,9 +140,8 @@ int efa_com_destroy_qp(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&cmd_completion,
 			       sizeof(cmd_completion));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to destroy qp-%u [%d]\n",
-				      qp_cmd.qp_handle, err);
+		ibdev_err(edev->efa_dev, "Failed to destroy qp-%u [%d]\n",
+			  qp_cmd.qp_handle, err);
 		return err;
 	}
 
@@ -177,15 +174,14 @@ int efa_com_create_cq(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&cmd_completion,
 			       sizeof(cmd_completion));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to create cq[%d]\n", err);
+		ibdev_err(edev->efa_dev, "Failed to create cq[%d]\n", err);
 		return err;
 	}
 
 	result->cq_idx = cmd_completion.cq_idx;
 	result->actual_depth = params->cq_depth;
 
-	return 0;
+	return err;
 }
 
 int efa_com_destroy_cq(struct efa_com_dev *edev,
@@ -206,9 +202,8 @@ int efa_com_destroy_cq(struct efa_com_dev *edev,
 			       sizeof(destroy_resp));
 
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to destroy CQ-%u [%d]\n",
-				      params->cq_idx, err);
+		ibdev_err(edev->efa_dev, "Failed to destroy CQ-%u [%d]\n",
+			  params->cq_idx, err);
 		return err;
 	}
 
@@ -256,8 +251,7 @@ int efa_com_register_mr(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&cmd_completion,
 			       sizeof(cmd_completion));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to register mr [%d]\n", err);
+		ibdev_err(edev->efa_dev, "Failed to register mr [%d]\n", err);
 		return err;
 	}
 
@@ -284,9 +278,9 @@ int efa_com_dereg_mr(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&cmd_completion,
 			       sizeof(cmd_completion));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to de-register mr(lkey-%u) [%d]\n",
-				      mr_cmd.l_key, err);
+		ibdev_err(edev->efa_dev,
+			  "Failed to de-register mr(lkey-%u) [%d]\n",
+			  mr_cmd.l_key, err);
 		return err;
 	}
 
@@ -313,9 +307,7 @@ int efa_com_create_ah(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&cmd_completion,
 			       sizeof(cmd_completion));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to create ah for %pI6 [%d]\n",
-				      ah_cmd.dest_addr, err);
+		ibdev_err(edev->efa_dev, "Failed to create ah [%d]\n", err);
 		return err;
 	}
 
@@ -342,9 +334,8 @@ int efa_com_destroy_ah(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&cmd_completion,
 			       sizeof(cmd_completion));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to destroy ah-%d pd-%d [%d]\n",
-				      ah_cmd.ah, ah_cmd.pd, err);
+		ibdev_err(edev->efa_dev, "Failed to destroy ah-%d pd-%d [%d]\n",
+			  ah_cmd.ah, ah_cmd.pd, err);
 		return err;
 	}
 
@@ -376,9 +367,8 @@ static int efa_com_get_feature_ex(struct efa_com_dev *edev,
 	int err;
 
 	if (!efa_com_check_supported_feature_id(edev, feature_id)) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Feature %d isn't supported\n",
-				      feature_id);
+		ibdev_err(edev->efa_dev, "Feature %d isn't supported\n",
+			  feature_id);
 		return -EOPNOTSUPP;
 	}
 
@@ -406,10 +396,9 @@ static int efa_com_get_feature_ex(struct efa_com_dev *edev,
 			       sizeof(*get_resp));
 
 	if (err) {
-		ibdev_err_ratelimited(
-			edev->efa_dev,
-			"Failed to submit get_feature command %d [%d]\n",
-			feature_id, err);
+		ibdev_err(edev->efa_dev,
+			  "Failed to submit get_feature command %d [%d]\n",
+			  feature_id, err);
 		return err;
 	}
 
@@ -432,9 +421,8 @@ int efa_com_get_network_attr(struct efa_com_dev *edev,
 	err = efa_com_get_feature(edev, &resp,
 				  EFA_ADMIN_NETWORK_ATTR);
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to get network attributes %d\n",
-				      err);
+		ibdev_err(edev->efa_dev,
+			  "Failed to get network attributes %d\n", err);
 		return err;
 	}
 
@@ -453,9 +441,8 @@ int efa_com_get_device_attr(struct efa_com_dev *edev,
 
 	err = efa_com_get_feature(edev, &resp, EFA_ADMIN_DEVICE_ATTR);
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to get device attributes %d\n",
-				      err);
+		ibdev_err(edev->efa_dev, "Failed to get device attributes %d\n",
+			  err);
 		return err;
 	}
 
@@ -469,10 +456,9 @@ int efa_com_get_device_attr(struct efa_com_dev *edev,
 	result->db_bar = resp.u.device_attr.db_bar;
 
 	if (result->admin_api_version < 1) {
-		ibdev_err_ratelimited(
-			edev->efa_dev,
-			"Failed to get device attr api version [%u < 1]\n",
-			result->admin_api_version);
+		ibdev_err(edev->efa_dev,
+			  "Failed to get device attr api version [%u < 1]\n",
+			  result->admin_api_version);
 		return -EINVAL;
 	}
 
@@ -480,9 +466,8 @@ int efa_com_get_device_attr(struct efa_com_dev *edev,
 	err = efa_com_get_feature(edev, &resp,
 				  EFA_ADMIN_QUEUE_ATTR);
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to get queue attributes %d\n",
-				      err);
+		ibdev_err(edev->efa_dev,
+			  "Failed to get network attributes %d\n", err);
 		return err;
 	}
 
@@ -512,8 +497,7 @@ int efa_com_get_hw_hints(struct efa_com_dev *edev,
 
 	err = efa_com_get_feature(edev, &resp, EFA_ADMIN_HW_HINTS);
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to get hw hints %d\n", err);
+		ibdev_err(edev->efa_dev, "Failed to get hw hints %d\n", err);
 		return err;
 	}
 
@@ -536,9 +520,8 @@ static int efa_com_set_feature_ex(struct efa_com_dev *edev,
 	int err;
 
 	if (!efa_com_check_supported_feature_id(edev, feature_id)) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Feature %d isn't supported\n",
-				      feature_id);
+		ibdev_err(edev->efa_dev, "Feature %d isn't supported\n",
+			  feature_id);
 		return -EOPNOTSUPP;
 	}
 
@@ -562,10 +545,9 @@ static int efa_com_set_feature_ex(struct efa_com_dev *edev,
 			       sizeof(*set_resp));
 
 	if (err) {
-		ibdev_err_ratelimited(
-			edev->efa_dev,
-			"Failed to submit set_feature command %d error: %d\n",
-			feature_id, err);
+		ibdev_err(edev->efa_dev,
+			  "Failed to submit set_feature command %d error: %d\n",
+			  feature_id, err);
 		return err;
 	}
 
@@ -592,9 +574,8 @@ int efa_com_set_aenq_config(struct efa_com_dev *edev, u32 groups)
 
 	err = efa_com_get_feature(edev, &get_resp, EFA_ADMIN_AENQ_CONFIG);
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to get aenq attributes: %d\n",
-				      err);
+		ibdev_err(edev->efa_dev, "Failed to get aenq attributes: %d\n",
+			  err);
 		return err;
 	}
 
@@ -604,10 +585,9 @@ int efa_com_set_aenq_config(struct efa_com_dev *edev, u32 groups)
 		  get_resp.u.aenq.enabled_groups);
 
 	if ((get_resp.u.aenq.supported_groups & groups) != groups) {
-		ibdev_err_ratelimited(
-			edev->efa_dev,
-			"Trying to set unsupported aenq groups[%#x] supported[%#x]\n",
-			groups, get_resp.u.aenq.supported_groups);
+		ibdev_err(edev->efa_dev,
+			  "Trying to set unsupported aenq groups[%#x] supported[%#x]\n",
+			  groups, get_resp.u.aenq.supported_groups);
 		return -EOPNOTSUPP;
 	}
 
@@ -615,9 +595,8 @@ int efa_com_set_aenq_config(struct efa_com_dev *edev, u32 groups)
 	err = efa_com_set_feature(edev, &set_resp, &cmd,
 				  EFA_ADMIN_AENQ_CONFIG);
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to set aenq attributes: %d\n",
-				      err);
+		ibdev_err(edev->efa_dev, "Failed to set aenq attributes: %d\n",
+			  err);
 		return err;
 	}
 
@@ -640,8 +619,7 @@ int efa_com_alloc_pd(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&resp,
 			       sizeof(resp));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to allocate pd[%d]\n", err);
+		ibdev_err(edev->efa_dev, "Failed to allocate pd[%d]\n", err);
 		return err;
 	}
 
@@ -667,9 +645,8 @@ int efa_com_dealloc_pd(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&resp,
 			       sizeof(resp));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to deallocate pd-%u [%d]\n",
-				      cmd.pd, err);
+		ibdev_err(edev->efa_dev, "Failed to deallocate pd-%u [%d]\n",
+			  cmd.pd, err);
 		return err;
 	}
 
@@ -692,8 +669,7 @@ int efa_com_alloc_uar(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&resp,
 			       sizeof(resp));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to allocate uar[%d]\n", err);
+		ibdev_err(edev->efa_dev, "Failed to allocate uar[%d]\n", err);
 		return err;
 	}
 
@@ -719,47 +695,10 @@ int efa_com_dealloc_uar(struct efa_com_dev *edev,
 			       (struct efa_admin_acq_entry *)&resp,
 			       sizeof(resp));
 	if (err) {
-		ibdev_err_ratelimited(edev->efa_dev,
-				      "Failed to deallocate uar-%u [%d]\n",
-				      cmd.uar, err);
+		ibdev_err(edev->efa_dev, "Failed to deallocate uar-%u [%d]\n",
+			  cmd.uar, err);
 		return err;
 	}
-
-	return 0;
-}
-
-int efa_com_get_stats(struct efa_com_dev *edev,
-		      struct efa_com_get_stats_params *params,
-		      union efa_com_get_stats_result *result)
-{
-	struct efa_com_admin_queue *aq = &edev->aq;
-	struct efa_admin_aq_get_stats_cmd cmd = {};
-	struct efa_admin_acq_get_stats_resp resp;
-	int err;
-
-	cmd.aq_common_descriptor.opcode = EFA_ADMIN_GET_STATS;
-	cmd.type = params->type;
-	cmd.scope = params->scope;
-	cmd.scope_modifier = params->scope_modifier;
-
-	err = efa_com_cmd_exec(aq,
-			       (struct efa_admin_aq_entry *)&cmd,
-			       sizeof(cmd),
-			       (struct efa_admin_acq_entry *)&resp,
-			       sizeof(resp));
-	if (err) {
-		ibdev_err_ratelimited(
-			edev->efa_dev,
-			"Failed to get stats type-%u scope-%u.%u [%d]\n",
-			cmd.type, cmd.scope, cmd.scope_modifier, err);
-		return err;
-	}
-
-	result->basic_stats.tx_bytes = resp.basic_stats.tx_bytes;
-	result->basic_stats.tx_pkts = resp.basic_stats.tx_pkts;
-	result->basic_stats.rx_bytes = resp.basic_stats.rx_bytes;
-	result->basic_stats.rx_pkts = resp.basic_stats.rx_pkts;
-	result->basic_stats.rx_drops = resp.basic_stats.rx_drops;
 
 	return 0;
 }

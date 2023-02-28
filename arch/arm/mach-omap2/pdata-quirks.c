@@ -26,7 +26,6 @@
 #include <linux/platform_data/wkup_m3.h>
 #include <linux/platform_data/asoc-ti-mcbsp.h>
 
-#include "clockdomain.h"
 #include "common.h"
 #include "common-board-devices.h"
 #include "control.h"
@@ -89,13 +88,6 @@ static struct iommu_platform_data omap3_iommu_pdata = {
 	.reset_name = "mmu",
 	.assert_reset = omap_device_assert_hardreset,
 	.deassert_reset = omap_device_deassert_hardreset,
-	.device_enable = omap_device_enable,
-	.device_idle = omap_device_idle,
-};
-
-static struct iommu_platform_data omap3_iommu_isp_pdata = {
-	.device_enable = omap_device_enable,
-	.device_idle = omap_device_idle,
 };
 
 static int omap3_sbc_t3730_twl_callback(struct device *dev,
@@ -431,8 +423,6 @@ static struct iommu_platform_data omap4_iommu_pdata = {
 	.reset_name = "mmu_cache",
 	.assert_reset = omap_device_assert_hardreset,
 	.deassert_reset = omap_device_deassert_hardreset,
-	.device_enable = omap_device_enable,
-	.device_idle = omap_device_idle,
 };
 #endif
 
@@ -470,62 +460,6 @@ static void __init dra7x_evm_mmc_quirk(void)
 }
 #endif
 
-static struct clockdomain *ti_sysc_find_one_clockdomain(struct clk *clk)
-{
-	struct clockdomain *clkdm = NULL;
-	struct clk_hw_omap *hwclk;
-
-	hwclk = to_clk_hw_omap(__clk_get_hw(clk));
-	if (hwclk && hwclk->clkdm_name)
-		clkdm = clkdm_lookup(hwclk->clkdm_name);
-
-	return clkdm;
-}
-
-/**
- * ti_sysc_clkdm_init - find clockdomain based on clock
- * @fck: device functional clock
- * @ick: device interface clock
- * @dev: struct device
- *
- * Populate clockdomain based on clock. It is needed for
- * clkdm_deny_idle() and clkdm_allow_idle() for blocking clockdomain
- * clockdomain idle during reset, enable and idle.
- *
- * Note that we assume interconnect driver manages the clocks
- * and do not need to populate oh->_clk for dynamically
- * allocated modules.
- */
-static int ti_sysc_clkdm_init(struct device *dev,
-			      struct clk *fck, struct clk *ick,
-			      struct ti_sysc_cookie *cookie)
-{
-	if (!IS_ERR(fck))
-		cookie->clkdm = ti_sysc_find_one_clockdomain(fck);
-	if (cookie->clkdm)
-		return 0;
-	if (!IS_ERR(ick))
-		cookie->clkdm = ti_sysc_find_one_clockdomain(ick);
-	if (cookie->clkdm)
-		return 0;
-
-	return -ENODEV;
-}
-
-static void ti_sysc_clkdm_deny_idle(struct device *dev,
-				    const struct ti_sysc_cookie *cookie)
-{
-	if (cookie->clkdm)
-		clkdm_deny_idle(cookie->clkdm);
-}
-
-static void ti_sysc_clkdm_allow_idle(struct device *dev,
-				     const struct ti_sysc_cookie *cookie)
-{
-	if (cookie->clkdm)
-		clkdm_allow_idle(cookie->clkdm);
-}
-
 static int ti_sysc_enable_module(struct device *dev,
 				 const struct ti_sysc_cookie *cookie)
 {
@@ -557,9 +491,6 @@ static struct of_dev_auxdata omap_auxdata_lookup[];
 
 static struct ti_sysc_platform_data ti_sysc_pdata = {
 	.auxdata = omap_auxdata_lookup,
-	.init_clockdomain = ti_sysc_clkdm_init,
-	.clkdm_deny_idle = ti_sysc_clkdm_deny_idle,
-	.clkdm_allow_idle = ti_sysc_clkdm_allow_idle,
 	.init_module = omap_hwmod_init_module,
 	.enable_module = ti_sysc_enable_module,
 	.idle_module = ti_sysc_idle_module,
@@ -626,8 +557,6 @@ static struct of_dev_auxdata omap_auxdata_lookup[] = {
 #ifdef CONFIG_ARCH_OMAP3
 	OF_DEV_AUXDATA("ti,omap2-iommu", 0x5d000000, "5d000000.mmu",
 		       &omap3_iommu_pdata),
-	OF_DEV_AUXDATA("ti,omap2-iommu", 0x480bd400, "480bd400.mmu",
-		       &omap3_iommu_isp_pdata),
 	OF_DEV_AUXDATA("ti,omap3-smartreflex-core", 0x480cb000,
 		       "480cb000.smartreflex", &omap_sr_pdata[OMAP_SR_CORE]),
 	OF_DEV_AUXDATA("ti,omap3-smartreflex-mpu-iva", 0x480c9000,

@@ -5,7 +5,6 @@
 #include <linux/types.h>
 #include <linux/list.h>
 #include <net/ip_fib.h>
-#include <net/nexthop.h>
 
 struct fib_alias {
 	struct hlist_node	fa_list;

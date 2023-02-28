@@ -432,6 +432,7 @@ static int rk3328_platform_probe(struct platform_device *pdev)
 {
 	struct device_node *rk3328_np = pdev->dev.of_node;
 	struct rk3328_codec_priv *rk3328;
+	struct resource *res;
 	struct regmap *grf;
 	void __iomem *base;
 	int ret = 0;
@@ -481,7 +482,8 @@ static int rk3328_platform_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	base = devm_platform_ioremap_resource(pdev, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 

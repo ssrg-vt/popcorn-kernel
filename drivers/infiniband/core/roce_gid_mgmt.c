@@ -330,7 +330,6 @@ static void bond_delete_netdev_default_gids(struct ib_device *ib_dev,
 static void enum_netdev_ipv4_ips(struct ib_device *ib_dev,
 				 u8 port, struct net_device *ndev)
 {
-	const struct in_ifaddr *ifa;
 	struct in_device *in_dev;
 	struct sin_list {
 		struct list_head	list;
@@ -350,7 +349,7 @@ static void enum_netdev_ipv4_ips(struct ib_device *ib_dev,
 		return;
 	}
 
-	in_dev_for_each_ifa_rcu(ifa, in_dev) {
+	for_ifa(in_dev) {
 		struct sin_list *entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
 
 		if (!entry)
@@ -360,7 +359,7 @@ static void enum_netdev_ipv4_ips(struct ib_device *ib_dev,
 		entry->ip.sin_addr.s_addr = ifa->ifa_address;
 		list_add_tail(&entry->list, &sin_list);
 	}
-
+	endfor_ifa(in_dev);
 	rcu_read_unlock();
 
 	list_for_each_entry_safe(sin_iter, sin_temp, &sin_list, list) {

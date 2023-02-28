@@ -355,32 +355,25 @@ static int
 request_msix_queue_irqs_uld(struct adapter *adap, unsigned int uld_type)
 {
 	struct sge_uld_rxq_info *rxq_info = adap->sge.uld_rxq_info[uld_type];
-	struct uld_msix_info *minfo;
 	int err = 0;
 	unsigned int idx, bmap_idx;
 
 	for_each_uldrxq(rxq_info, idx) {
 		bmap_idx = rxq_info->msix_tbl[idx];
-		minfo = &adap->msix_info_ulds[bmap_idx];
-		err = request_irq(minfo->vec,
+		err = request_irq(adap->msix_info_ulds[bmap_idx].vec,
 				  t4_sge_intr_msix, 0,
-				  minfo->desc,
+				  adap->msix_info_ulds[bmap_idx].desc,
 				  &rxq_info->uldrxq[idx].rspq);
 		if (err)
 			goto unwind;
-
-		cxgb4_set_msix_aff(adap, minfo->vec,
-				   &minfo->aff_mask, idx);
 	}
 	return 0;
-
 unwind:
 	while (idx-- > 0) {
 		bmap_idx = rxq_info->msix_tbl[idx];
-		minfo = &adap->msix_info_ulds[bmap_idx];
-		cxgb4_clear_msix_aff(minfo->vec, minfo->aff_mask);
 		free_msix_idx_in_bmap(adap, bmap_idx);
-		free_irq(minfo->vec, &rxq_info->uldrxq[idx].rspq);
+		free_irq(adap->msix_info_ulds[bmap_idx].vec,
+			 &rxq_info->uldrxq[idx].rspq);
 	}
 	return err;
 }
@@ -389,16 +382,14 @@ static void
 free_msix_queue_irqs_uld(struct adapter *adap, unsigned int uld_type)
 {
 	struct sge_uld_rxq_info *rxq_info = adap->sge.uld_rxq_info[uld_type];
-	struct uld_msix_info *minfo;
 	unsigned int idx, bmap_idx;
 
 	for_each_uldrxq(rxq_info, idx) {
 		bmap_idx = rxq_info->msix_tbl[idx];
-		minfo = &adap->msix_info_ulds[bmap_idx];
 
-		cxgb4_clear_msix_aff(minfo->vec, minfo->aff_mask);
 		free_msix_idx_in_bmap(adap, bmap_idx);
-		free_irq(minfo->vec, &rxq_info->uldrxq[idx].rspq);
+		free_irq(adap->msix_info_ulds[bmap_idx].vec,
+			 &rxq_info->uldrxq[idx].rspq);
 	}
 }
 
@@ -695,10 +686,10 @@ static void uld_init(struct adapter *adap, struct cxgb4_lld_info *lld)
 	lld->write_cmpl_support = adap->params.write_cmpl_support;
 }
 
-static int uld_attach(struct adapter *adap, unsigned int uld)
+static void uld_attach(struct adapter *adap, unsigned int uld)
 {
-	struct cxgb4_lld_info lli;
 	void *handle;
+	struct cxgb4_lld_info lli;
 
 	uld_init(adap, &lli);
 	uld_queue_init(adap, uld, &lli);
@@ -708,7 +699,7 @@ static int uld_attach(struct adapter *adap, unsigned int uld)
 		dev_warn(adap->pdev_dev,
 			 "could not attach to the %s driver, error %ld\n",
 			 adap->uld[uld].name, PTR_ERR(handle));
-		return PTR_ERR(handle);
+		return;
 	}
 
 	adap->uld[uld].handle = handle;
@@ -716,22 +707,22 @@ static int uld_attach(struct adapter *adap, unsigned int uld)
 
 	if (adap->flags & CXGB4_FULL_INIT_DONE)
 		adap->uld[uld].state_change(handle, CXGB4_STATE_UP);
-
-	return 0;
 }
 
-/* cxgb4_register_uld - register an upper-layer driver
- * @type: the ULD type
- * @p: the ULD methods
+/**
+ *	cxgb4_register_uld - register an upper-layer driver
+ *	@type: the ULD type
+ *	@p: the ULD methods
  *
- * Registers an upper-layer driver with this driver and notifies the ULD
- * about any presently available devices that support its type.
+ *	Registers an upper-layer driver with this driver and notifies the ULD
+ *	about any presently available devices that support its type.  Returns
+ *	%-EBUSY if a ULD of the same type is already registered.
  */
 void cxgb4_register_uld(enum cxgb4_uld type,
 			const struct cxgb4_uld_info *p)
 {
-	struct adapter *adap;
 	int ret = 0;
+	struct adapter *adap;
 
 	if (type >= CXGB4_ULD_MAX)
 		return;
@@ -763,12 +754,8 @@ void cxgb4_register_uld(enum cxgb4_uld type,
 		if (ret)
 			goto free_irq;
 		adap->uld[type] = *p;
-		ret = uld_attach(adap, type);
-		if (ret)
-			goto free_txq;
+		uld_attach(adap, type);
 		continue;
-free_txq:
-		release_sge_txq_uld(adap, type);
 free_irq:
 		if (adap->flags & CXGB4_FULL_INIT_DONE)
 			quiesce_rx_uld(adap, type);

@@ -263,6 +263,7 @@ static void torture_onoff_cleanup(void)
 	onoff_task = NULL;
 #endif /* #ifdef CONFIG_HOTPLUG_CPU */
 }
+EXPORT_SYMBOL_GPL(torture_onoff_cleanup);
 
 /*
  * Print online/offline testing statistics.
@@ -448,6 +449,7 @@ static void torture_shuffle_cleanup(void)
 	}
 	shuffler_task = NULL;
 }
+EXPORT_SYMBOL_GPL(torture_shuffle_cleanup);
 
 /*
  * Variables for auto-shutdown.  This allows "lights out" torture runs
@@ -568,7 +570,6 @@ static void torture_shutdown_cleanup(void)
 static struct task_struct *stutter_task;
 static int stutter_pause_test;
 static int stutter;
-static int stutter_gap;
 
 /*
  * Block until the stutter interval ends.  This must be called periodically
@@ -577,12 +578,10 @@ static int stutter_gap;
 bool stutter_wait(const char *title)
 {
 	int spt;
-	bool ret = false;
 
 	cond_resched_tasks_rcu_qs();
 	spt = READ_ONCE(stutter_pause_test);
 	for (; spt; spt = READ_ONCE(stutter_pause_test)) {
-		ret = true;
 		if (spt == 1) {
 			schedule_timeout_interruptible(1);
 		} else if (spt == 2) {
@@ -593,7 +592,7 @@ bool stutter_wait(const char *title)
 		}
 		torture_shutdown_absorb(title);
 	}
-	return ret;
+	return !!spt;
 }
 EXPORT_SYMBOL_GPL(stutter_wait);
 
@@ -603,24 +602,17 @@ EXPORT_SYMBOL_GPL(stutter_wait);
  */
 static int torture_stutter(void *arg)
 {
-	int wtime;
-
 	VERBOSE_TOROUT_STRING("torture_stutter task started");
 	do {
 		if (!torture_must_stop() && stutter > 1) {
-			wtime = stutter;
-			if (stutter > HZ + 1) {
-				WRITE_ONCE(stutter_pause_test, 1);
-				wtime = stutter - HZ - 1;
-				schedule_timeout_interruptible(wtime);
-				wtime = HZ + 1;
-			}
+			WRITE_ONCE(stutter_pause_test, 1);
+			schedule_timeout_interruptible(stutter - 1);
 			WRITE_ONCE(stutter_pause_test, 2);
-			schedule_timeout_interruptible(wtime);
+			schedule_timeout_interruptible(1);
 		}
 		WRITE_ONCE(stutter_pause_test, 0);
 		if (!torture_must_stop())
-			schedule_timeout_interruptible(stutter_gap);
+			schedule_timeout_interruptible(stutter);
 		torture_shutdown_absorb("torture_stutter");
 	} while (!torture_must_stop());
 	torture_kthread_stopping("torture_stutter");
@@ -630,10 +622,9 @@ static int torture_stutter(void *arg)
 /*
  * Initialize and kick off the torture_stutter kthread.
  */
-int torture_stutter_init(const int s, const int sgap)
+int torture_stutter_init(const int s)
 {
 	stutter = s;
-	stutter_gap = sgap;
 	return torture_create_kthread(torture_stutter, NULL, stutter_task);
 }
 EXPORT_SYMBOL_GPL(torture_stutter_init);

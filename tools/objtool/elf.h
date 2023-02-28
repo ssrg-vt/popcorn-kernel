@@ -57,12 +57,11 @@ struct rela {
 	struct list_head list;
 	struct hlist_node hash;
 	GElf_Rela rela;
-	struct section *sec;
+	struct section *rela_sec;
 	struct symbol *sym;
 	unsigned int type;
 	unsigned long offset;
 	int addend;
-	bool jump_table_start;
 };
 
 struct elf {
@@ -75,7 +74,7 @@ struct elf {
 };
 
 
-struct elf *elf_read(const char *name, int flags);
+struct elf *elf_open(const char *name, int flags);
 struct section *find_section_by_name(struct elf *elf, const char *name);
 struct symbol *find_symbol_by_offset(struct section *sec, unsigned long offset);
 struct symbol *find_symbol_by_name(struct elf *elf, const char *name);

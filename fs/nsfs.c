@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/mount.h>
-#include <linux/pseudo_fs.h>
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/proc_ns.h>
@@ -259,20 +258,15 @@ static const struct super_operations nsfs_ops = {
 	.evict_inode = nsfs_evict,
 	.show_path = nsfs_show_path,
 };
-
-static int nsfs_init_fs_context(struct fs_context *fc)
+static struct dentry *nsfs_mount(struct file_system_type *fs_type,
+			int flags, const char *dev_name, void *data)
 {
-	struct pseudo_fs_context *ctx = init_pseudo(fc, NSFS_MAGIC);
-	if (!ctx)
-		return -ENOMEM;
-	ctx->ops = &nsfs_ops;
-	ctx->dops = &ns_dentry_operations;
-	return 0;
+	return mount_pseudo(fs_type, "nsfs:", &nsfs_ops,
+			&ns_dentry_operations, NSFS_MAGIC);
 }
-
 static struct file_system_type nsfs = {
 	.name = "nsfs",
-	.init_fs_context = nsfs_init_fs_context,
+	.mount = nsfs_mount,
 	.kill_sb = kill_anon_super,
 };
 

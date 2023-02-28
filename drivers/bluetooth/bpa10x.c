@@ -337,7 +337,7 @@ static int bpa10x_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 
 	usb_free_urb(urb);
 
-	return err;
+	return 0;
 }
 
 static int bpa10x_set_diag(struct hci_dev *hdev, bool enable)
@@ -359,8 +359,7 @@ static int bpa10x_set_diag(struct hci_dev *hdev, bool enable)
 	return 0;
 }
 
-static int bpa10x_probe(struct usb_interface *intf,
-			const struct usb_device_id *id)
+static int bpa10x_probe(struct usb_interface *intf, const struct usb_device_id *id)
 {
 	struct bpa10x_data *data;
 	struct hci_dev *hdev;

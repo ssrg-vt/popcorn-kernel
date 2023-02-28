@@ -912,7 +912,7 @@ void mpx_notify_unmap(struct mm_struct *mm, unsigned long start,
 
 	ret = mpx_unmap_tables(mm, start, end);
 	if (ret)
-		force_sig(SIGSEGV);
+		force_sig(SIGSEGV, current);
 }
 
 /* MPX cannot handle addresses above 47 bits yet. */

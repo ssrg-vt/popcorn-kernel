@@ -1006,9 +1006,9 @@ int gether_get_ifname(struct net_device *net, char *name, int len)
 	int ret;
 
 	rtnl_lock();
-	ret = scnprintf(name, len, "%s\n", netdev_name(net));
+	ret = snprintf(name, len, "%s\n", netdev_name(net));
 	rtnl_unlock();
-	return ret;
+	return ret < len ? ret : len;
 }
 EXPORT_SYMBOL_GPL(gether_get_ifname);
 

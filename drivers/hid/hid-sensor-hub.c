@@ -742,6 +742,7 @@ static void sensor_hub_remove(struct hid_device *hdev)
 	}
 	spin_unlock_irqrestore(&data->lock, flags);
 	mfd_remove_devices(&hdev->dev);
+	hid_set_drvdata(hdev, NULL);
 	mutex_destroy(&data->mutex);
 }
 

@@ -110,7 +110,7 @@
 };
 
 &ir {
-	linux,rc-map-name = "rc-khadas";
+	linux,rc-map-name = "rc-geekbox";
 };
 
 &gpio_ao {

@@ -606,25 +606,12 @@ void hw_atl_rpb_rx_flow_ctl_mode_set(struct aq_hw_s *aq_hw, u32 rx_flow_ctl_mode
 			    HW_ATL_RPB_RX_FC_MODE_SHIFT, rx_flow_ctl_mode);
 }
 
-void hw_atl_rdm_rx_dma_desc_cache_init_tgl(struct aq_hw_s *aq_hw)
+void hw_atl_rdm_rx_dma_desc_cache_init_set(struct aq_hw_s *aq_hw, u32 init)
 {
-	u32 val;
-
-	val = aq_hw_read_reg_bit(aq_hw, HW_ATL_RDM_RX_DMA_DESC_CACHE_INIT_ADR,
-				 HW_ATL_RDM_RX_DMA_DESC_CACHE_INIT_MSK,
-				 HW_ATL_RDM_RX_DMA_DESC_CACHE_INIT_SHIFT);
-
 	aq_hw_write_reg_bit(aq_hw, HW_ATL_RDM_RX_DMA_DESC_CACHE_INIT_ADR,
 			    HW_ATL_RDM_RX_DMA_DESC_CACHE_INIT_MSK,
 			    HW_ATL_RDM_RX_DMA_DESC_CACHE_INIT_SHIFT,
-			    val ^ 1);
-}
-
-u32 hw_atl_rdm_rx_dma_desc_cache_init_done_get(struct aq_hw_s *aq_hw)
-{
-	return aq_hw_read_reg_bit(aq_hw, RDM_RX_DMA_DESC_CACHE_INIT_DONE_ADR,
-				  RDM_RX_DMA_DESC_CACHE_INIT_DONE_MSK,
-				  RDM_RX_DMA_DESC_CACHE_INIT_DONE_SHIFT);
+			    init);
 }
 
 void hw_atl_rpb_rx_pkt_buff_size_per_tc_set(struct aq_hw_s *aq_hw,
@@ -1015,22 +1002,6 @@ void hw_atl_rpo_rx_desc_vlan_stripping_set(struct aq_hw_s *aq_hw,
 			    HW_ATL_RPO_DESCDVL_STRIP_MSK,
 			    HW_ATL_RPO_DESCDVL_STRIP_SHIFT,
 			    rx_desc_vlan_stripping);
-}
-
-void hw_atl_rpo_outer_vlan_tag_mode_set(void *context,
-					u32 outervlantagmode)
-{
-	aq_hw_write_reg_bit(context, HW_ATL_RPO_OUTER_VL_INS_MODE_ADR,
-			    HW_ATL_RPO_OUTER_VL_INS_MODE_MSK,
-			    HW_ATL_RPO_OUTER_VL_INS_MODE_SHIFT,
-			    outervlantagmode);
-}
-
-u32 hw_atl_rpo_outer_vlan_tag_mode_get(void *context)
-{
-	return aq_hw_read_reg_bit(context, HW_ATL_RPO_OUTER_VL_INS_MODE_ADR,
-				  HW_ATL_RPO_OUTER_VL_INS_MODE_MSK,
-				  HW_ATL_RPO_OUTER_VL_INS_MODE_SHIFT);
 }
 
 void hw_atl_rpo_tcp_udp_crc_offload_en_set(struct aq_hw_s *aq_hw,

@@ -8,7 +8,8 @@
 #
 
 # Create/update the include/generated/autoksyms.h file from the list
-# of all module's needed symbols as recorded on the second line of *.mod files.
+# of all module's needed symbols as recorded on the third line of
+# .tmp_versions/*.mod files.
 #
 # For each symbol being added or removed, the corresponding dependency
 # file's timestamp is updated to force a rebuild of the affected source
@@ -46,10 +47,13 @@ cat > "$new_ksyms_file" << EOT
  */
 
 EOT
-sed 's/ko$/mod/' modules.order |
-xargs -n1 sed -n -e '2{s/ /\n/g;/^$/!p;}' -- |
-sort -u |
-sed -e 's/\(.*\)/#define __KSYM_\1 1/' >> "$new_ksyms_file"
+[ "$(ls -A "$MODVERDIR")" ] &&
+for mod in "$MODVERDIR"/*.mod; do
+	sed -n -e '3{s/ /\n/g;/^$/!p;}' "$mod"
+done | sort -u |
+while read sym; do
+	echo "#define __KSYM_${sym} 1"
+done >> "$new_ksyms_file"
 
 # Special case for modversions (see modpost.c)
 if [ -n "$CONFIG_MODVERSIONS" ]; then

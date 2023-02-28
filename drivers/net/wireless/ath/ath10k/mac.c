@@ -693,26 +693,6 @@ ath10k_mac_get_any_chandef_iter(struct ieee80211_hw *hw,
 	*def = &conf->def;
 }
 
-static void ath10k_wait_for_peer_delete_done(struct ath10k *ar, u32 vdev_id,
-					     const u8 *addr)
-{
-	unsigned long time_left;
-	int ret;
-
-	if (test_bit(WMI_SERVICE_SYNC_DELETE_CMDS, ar->wmi.svc_map)) {
-		ret = ath10k_wait_for_peer_deleted(ar, vdev_id, addr);
-		if (ret) {
-			ath10k_warn(ar, "failed wait for peer deleted");
-			return;
-		}
-
-		time_left = wait_for_completion_timeout(&ar->peer_delete_done,
-							5 * HZ);
-		if (!time_left)
-			ath10k_warn(ar, "Timeout in receiving peer delete response\n");
-	}
-}
-
 static int ath10k_peer_create(struct ath10k *ar,
 			      struct ieee80211_vif *vif,
 			      struct ieee80211_sta *sta,
@@ -757,7 +737,7 @@ static int ath10k_peer_create(struct ath10k *ar,
 		spin_unlock_bh(&ar->data_lock);
 		ath10k_warn(ar, "failed to find peer %pM on vdev %i after creation\n",
 			    addr, vdev_id);
-		ath10k_wait_for_peer_delete_done(ar, vdev_id, addr);
+		ath10k_wmi_peer_delete(ar, vdev_id, addr);
 		return -ENOENT;
 	}
 
@@ -838,18 +818,6 @@ static int ath10k_peer_delete(struct ath10k *ar, u32 vdev_id, const u8 *addr)
 	ret = ath10k_wait_for_peer_deleted(ar, vdev_id, addr);
 	if (ret)
 		return ret;
-
-	if (test_bit(WMI_SERVICE_SYNC_DELETE_CMDS, ar->wmi.svc_map)) {
-		unsigned long time_left;
-
-		time_left = wait_for_completion_timeout
-			    (&ar->peer_delete_done, 5 * HZ);
-
-		if (!time_left) {
-			ath10k_warn(ar, "Timeout in receiving peer delete response\n");
-			return -ETIMEDOUT;
-		}
-	}
 
 	ar->num_peers--;
 
@@ -1043,7 +1011,6 @@ static int ath10k_monitor_vdev_start(struct ath10k *ar, int vdev_id)
 	arg.channel.max_antenna_gain = channel->max_antenna_gain * 2;
 
 	reinit_completion(&ar->vdev_setup_done);
-	reinit_completion(&ar->vdev_delete_done);
 
 	ret = ath10k_wmi_vdev_start(ar, &arg);
 	if (ret) {
@@ -1093,7 +1060,6 @@ static int ath10k_monitor_vdev_stop(struct ath10k *ar)
 			    ar->monitor_vdev_id, ret);
 
 	reinit_completion(&ar->vdev_setup_done);
-	reinit_completion(&ar->vdev_delete_done);
 
 	ret = ath10k_wmi_vdev_stop(ar, ar->monitor_vdev_id);
 	if (ret)
@@ -1435,7 +1401,6 @@ static int ath10k_vdev_stop(struct ath10k_vif *arvif)
 	lockdep_assert_held(&ar->conf_mutex);
 
 	reinit_completion(&ar->vdev_setup_done);
-	reinit_completion(&ar->vdev_delete_done);
 
 	ret = ath10k_wmi_vdev_stop(ar, arvif->vdev_id);
 	if (ret) {
@@ -1472,7 +1437,6 @@ static int ath10k_vdev_start_restart(struct ath10k_vif *arvif,
 	lockdep_assert_held(&ar->conf_mutex);
 
 	reinit_completion(&ar->vdev_setup_done);
-	reinit_completion(&ar->vdev_delete_done);
 
 	arg.vdev_id = arvif->vdev_id;
 	arg.dtim_period = arvif->dtim_period;
@@ -5455,11 +5419,8 @@ static int ath10k_add_interface(struct ieee80211_hw *hw,
 
 err_peer_delete:
 	if (arvif->vdev_type == WMI_VDEV_TYPE_AP ||
-	    arvif->vdev_type == WMI_VDEV_TYPE_IBSS) {
+	    arvif->vdev_type == WMI_VDEV_TYPE_IBSS)
 		ath10k_wmi_peer_delete(ar, arvif->vdev_id, vif->addr);
-		ath10k_wait_for_peer_delete_done(ar, arvif->vdev_id,
-						 vif->addr);
-	}
 
 err_vdev_delete:
 	ath10k_wmi_vdev_delete(ar, arvif->vdev_id);
@@ -5494,7 +5455,6 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
 	struct ath10k *ar = hw->priv;
 	struct ath10k_vif *arvif = (void *)vif->drv_priv;
 	struct ath10k_peer *peer;
-	unsigned long time_left;
 	int ret;
 	int i;
 
@@ -5502,6 +5462,10 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
 	cancel_delayed_work_sync(&arvif->connection_loss_work);
 
 	mutex_lock(&ar->conf_mutex);
+
+	spin_lock_bh(&ar->data_lock);
+	ath10k_mac_vif_beacon_cleanup(arvif);
+	spin_unlock_bh(&ar->data_lock);
 
 	ret = ath10k_spectral_vif_stop(arvif);
 	if (ret)
@@ -5521,8 +5485,6 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
 			ath10k_warn(ar, "failed to submit AP/IBSS self-peer removal on vdev %i: %d\n",
 				    arvif->vdev_id, ret);
 
-		ath10k_wait_for_peer_delete_done(ar, arvif->vdev_id,
-						 vif->addr);
 		kfree(arvif->u.ap.noa_data);
 	}
 
@@ -5533,15 +5495,6 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
 	if (ret)
 		ath10k_warn(ar, "failed to delete WMI vdev %i: %d\n",
 			    arvif->vdev_id, ret);
-
-	if (test_bit(WMI_SERVICE_SYNC_DELETE_CMDS, ar->wmi.svc_map)) {
-		time_left = wait_for_completion_timeout(&ar->vdev_delete_done,
-							ATH10K_VDEV_DELETE_TIMEOUT_HZ);
-		if (time_left == 0) {
-			ath10k_warn(ar, "Timeout in receiving vdev delete response\n");
-			goto out;
-		}
-	}
 
 	/* Some firmware revisions don't notify host about self-peer removal
 	 * until after associated vdev is deleted.
@@ -5571,11 +5524,6 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
 			peer->vif = NULL;
 		}
 	}
-
-	/* Clean this up late, less opportunity for firmware to access
-	 * DMA memory we have deleted.
-	 */
-	ath10k_mac_vif_beacon_cleanup(arvif);
 	spin_unlock_bh(&ar->data_lock);
 
 	ath10k_peer_cleanup(ar, arvif->vdev_id);
@@ -5598,7 +5546,6 @@ static void ath10k_remove_interface(struct ieee80211_hw *hw,
 
 	ath10k_mac_txq_unref(ar, vif->txq);
 
-out:
 	mutex_unlock(&ar->conf_mutex);
 }
 
@@ -6411,41 +6358,6 @@ static void ath10k_mac_dec_num_stations(struct ath10k_vif *arvif,
 	ar->num_stations--;
 }
 
-static int ath10k_sta_set_txpwr(struct ieee80211_hw *hw,
-				struct ieee80211_vif *vif,
-				struct ieee80211_sta *sta)
-{
-	struct ath10k *ar = hw->priv;
-	struct ath10k_vif *arvif = (void *)vif->drv_priv;
-	int ret = 0;
-	s16 txpwr;
-
-	if (sta->txpwr.type == NL80211_TX_POWER_AUTOMATIC) {
-		txpwr = 0;
-	} else {
-		txpwr = sta->txpwr.power;
-		if (!txpwr)
-			return -EINVAL;
-	}
-
-	if (txpwr > ATH10K_TX_POWER_MAX_VAL || txpwr < ATH10K_TX_POWER_MIN_VAL)
-		return -EINVAL;
-
-	mutex_lock(&ar->conf_mutex);
-
-	ret = ath10k_wmi_peer_set_param(ar, arvif->vdev_id, sta->addr,
-					WMI_PEER_USE_FIXED_PWR, txpwr);
-	if (ret) {
-		ath10k_warn(ar, "failed to set tx power for station ret: %d\n",
-			    ret);
-		goto out;
-	}
-
-out:
-	mutex_unlock(&ar->conf_mutex);
-	return ret;
-}
-
 static int ath10k_sta_state(struct ieee80211_hw *hw,
 			    struct ieee80211_vif *vif,
 			    struct ieee80211_sta *sta,
@@ -6971,8 +6883,7 @@ exit:
 	return ret;
 }
 
-static int ath10k_cancel_remain_on_channel(struct ieee80211_hw *hw,
-					   struct ieee80211_vif *vif)
+static int ath10k_cancel_remain_on_channel(struct ieee80211_hw *hw)
 {
 	struct ath10k *ar = hw->priv;
 
@@ -7196,23 +7107,18 @@ exit:
 static bool
 ath10k_mac_bitrate_mask_has_single_rate(struct ath10k *ar,
 					enum nl80211_band band,
-					const struct cfg80211_bitrate_mask *mask,
-					int *vht_num_rates)
+					const struct cfg80211_bitrate_mask *mask)
 {
 	int num_rates = 0;
-	int i, tmp;
+	int i;
 
 	num_rates += hweight32(mask->control[band].legacy);
 
 	for (i = 0; i < ARRAY_SIZE(mask->control[band].ht_mcs); i++)
 		num_rates += hweight8(mask->control[band].ht_mcs[i]);
 
-	*vht_num_rates = 0;
-	for (i = 0; i < ARRAY_SIZE(mask->control[band].vht_mcs); i++) {
-		tmp = hweight16(mask->control[band].vht_mcs[i]);
-		num_rates += tmp;
-		*vht_num_rates += tmp;
-	}
+	for (i = 0; i < ARRAY_SIZE(mask->control[band].vht_mcs); i++)
+		num_rates += hweight16(mask->control[band].vht_mcs[i]);
 
 	return num_rates == 1;
 }
@@ -7270,16 +7176,13 @@ static int
 ath10k_mac_bitrate_mask_get_single_rate(struct ath10k *ar,
 					enum nl80211_band band,
 					const struct cfg80211_bitrate_mask *mask,
-					u8 *rate, u8 *nss, bool vht_only)
+					u8 *rate, u8 *nss)
 {
 	int rate_idx;
 	int i;
 	u16 bitrate;
 	u8 preamble;
 	u8 hw_rate;
-
-	if (vht_only)
-		goto next;
 
 	if (hweight32(mask->control[band].legacy) == 1) {
 		rate_idx = ffs(mask->control[band].legacy) - 1;
@@ -7314,7 +7217,6 @@ ath10k_mac_bitrate_mask_get_single_rate(struct ath10k *ar,
 		}
 	}
 
-next:
 	for (i = 0; i < ARRAY_SIZE(mask->control[band].vht_mcs); i++) {
 		if (hweight16(mask->control[band].vht_mcs[i]) == 1) {
 			*nss = i + 1;
@@ -7376,8 +7278,7 @@ static int ath10k_mac_set_fixed_rate_params(struct ath10k_vif *arvif,
 static bool
 ath10k_mac_can_set_bitrate_mask(struct ath10k *ar,
 				enum nl80211_band band,
-				const struct cfg80211_bitrate_mask *mask,
-				bool allow_pfr)
+				const struct cfg80211_bitrate_mask *mask)
 {
 	int i;
 	u16 vht_mcs;
@@ -7396,31 +7297,10 @@ ath10k_mac_can_set_bitrate_mask(struct ath10k *ar,
 		case BIT(10) - 1:
 			break;
 		default:
-			if (!allow_pfr)
-				ath10k_warn(ar, "refusing bitrate mask with missing 0-7 VHT MCS rates\n");
+			ath10k_warn(ar, "refusing bitrate mask with missing 0-7 VHT MCS rates\n");
 			return false;
 		}
 	}
-
-	return true;
-}
-
-static bool ath10k_mac_set_vht_bitrate_mask_fixup(struct ath10k *ar,
-						  struct ath10k_vif *arvif,
-						  struct ieee80211_sta *sta)
-{
-	int err;
-	u8 rate = arvif->vht_pfr;
-
-	/* skip non vht and multiple rate peers */
-	if (!sta->vht_cap.vht_supported || arvif->vht_num_rates != 1)
-		return false;
-
-	err = ath10k_wmi_peer_set_param(ar, arvif->vdev_id, sta->addr,
-					WMI_PEER_PARAM_FIXED_RATE, rate);
-	if (err)
-		ath10k_warn(ar, "failed to eanble STA %pM peer fixed rate: %d\n",
-			    sta->addr, err);
 
 	return true;
 }
@@ -7435,34 +7315,11 @@ static void ath10k_mac_set_bitrate_mask_iter(void *data,
 	if (arsta->arvif != arvif)
 		return;
 
-	if (ath10k_mac_set_vht_bitrate_mask_fixup(ar, arvif, sta))
-		return;
-
 	spin_lock_bh(&ar->data_lock);
 	arsta->changed |= IEEE80211_RC_SUPP_RATES_CHANGED;
 	spin_unlock_bh(&ar->data_lock);
 
 	ieee80211_queue_work(ar->hw, &arsta->update_wk);
-}
-
-static void ath10k_mac_clr_bitrate_mask_iter(void *data,
-					     struct ieee80211_sta *sta)
-{
-	struct ath10k_vif *arvif = data;
-	struct ath10k_sta *arsta = (struct ath10k_sta *)sta->drv_priv;
-	struct ath10k *ar = arvif->ar;
-	int err;
-
-	/* clear vht peers only */
-	if (arsta->arvif != arvif || !sta->vht_cap.vht_supported)
-		return;
-
-	err = ath10k_wmi_peer_set_param(ar, arvif->vdev_id, sta->addr,
-					WMI_PEER_PARAM_FIXED_RATE,
-					WMI_FIXED_RATE_NONE);
-	if (err)
-		ath10k_warn(ar, "failed to clear STA %pM peer fixed rate: %d\n",
-			    sta->addr, err);
 }
 
 static int ath10k_mac_op_set_bitrate_mask(struct ieee80211_hw *hw,
@@ -7481,9 +7338,6 @@ static int ath10k_mac_op_set_bitrate_mask(struct ieee80211_hw *hw,
 	u8 ldpc;
 	int single_nss;
 	int ret;
-	int vht_num_rates, allow_pfr;
-	u8 vht_pfr;
-	bool update_bitrate_mask = true;
 
 	if (ath10k_mac_vif_chan(vif, &def))
 		return -EPERM;
@@ -7497,21 +7351,9 @@ static int ath10k_mac_op_set_bitrate_mask(struct ieee80211_hw *hw,
 	if (sgi == NL80211_TXRATE_FORCE_LGI)
 		return -EINVAL;
 
-	allow_pfr = test_bit(ATH10K_FW_FEATURE_PEER_FIXED_RATE,
-			     ar->normal_mode_fw.fw_file.fw_features);
-	if (allow_pfr) {
-		mutex_lock(&ar->conf_mutex);
-		ieee80211_iterate_stations_atomic(ar->hw,
-						  ath10k_mac_clr_bitrate_mask_iter,
-						  arvif);
-		mutex_unlock(&ar->conf_mutex);
-	}
-
-	if (ath10k_mac_bitrate_mask_has_single_rate(ar, band, mask,
-						    &vht_num_rates)) {
+	if (ath10k_mac_bitrate_mask_has_single_rate(ar, band, mask)) {
 		ret = ath10k_mac_bitrate_mask_get_single_rate(ar, band, mask,
-							      &rate, &nss,
-							      false);
+							      &rate, &nss);
 		if (ret) {
 			ath10k_warn(ar, "failed to get single rate for vdev %i: %d\n",
 				    arvif->vdev_id, ret);
@@ -7527,32 +7369,12 @@ static int ath10k_mac_op_set_bitrate_mask(struct ieee80211_hw *hw,
 			  max(ath10k_mac_max_ht_nss(ht_mcs_mask),
 			      ath10k_mac_max_vht_nss(vht_mcs_mask)));
 
-		if (!ath10k_mac_can_set_bitrate_mask(ar, band, mask,
-						     allow_pfr)) {
-			u8 vht_nss;
-
-			if (!allow_pfr || vht_num_rates != 1)
-				return -EINVAL;
-
-			/* Reach here, firmware supports peer fixed rate and has
-			 * single vht rate, and don't update vif birate_mask, as
-			 * the rate only for specific peer.
-			 */
-			ath10k_mac_bitrate_mask_get_single_rate(ar, band, mask,
-								&vht_pfr,
-								&vht_nss,
-								true);
-			update_bitrate_mask = false;
-		} else {
-			vht_pfr = 0;
-		}
+		if (!ath10k_mac_can_set_bitrate_mask(ar, band, mask))
+			return -EINVAL;
 
 		mutex_lock(&ar->conf_mutex);
 
-		if (update_bitrate_mask)
-			arvif->bitrate_mask = *mask;
-		arvif->vht_num_rates = vht_num_rates;
-		arvif->vht_pfr = vht_pfr;
+		arvif->bitrate_mask = *mask;
 		ieee80211_iterate_stations_atomic(ar->hw,
 						  ath10k_mac_set_bitrate_mask_iter,
 						  arvif);
@@ -8055,8 +7877,7 @@ ath10k_mac_op_assign_vif_chanctx(struct ieee80211_hw *hw,
 				    arvif->vdev_id, ret);
 	}
 
-	if (ath10k_peer_stats_enabled(ar) &&
-	    ar->hw_params.tx_stats_over_pktlog) {
+	if (ath10k_peer_stats_enabled(ar)) {
 		ar->pktlog_filter |= ATH10K_PKTLOG_PEER_STATS;
 		ret = ath10k_wmi_pdev_pktlog_enable(ar,
 						    ar->pktlog_filter);
@@ -8194,7 +8015,6 @@ static const struct ieee80211_ops ath10k_ops = {
 	.set_key			= ath10k_set_key,
 	.set_default_unicast_key        = ath10k_set_default_unicast_key,
 	.sta_state			= ath10k_sta_state,
-	.sta_set_txpwr			= ath10k_sta_set_txpwr,
 	.conf_tx			= ath10k_conf_tx,
 	.remain_on_channel		= ath10k_remain_on_channel,
 	.cancel_remain_on_channel	= ath10k_cancel_remain_on_channel,
@@ -8883,9 +8703,6 @@ int ath10k_mac_register(struct ath10k *ar)
 		wiphy_ext_feature_set(ar->hw->wiphy,
 				      NL80211_EXT_FEATURE_ENABLE_FTM_RESPONDER);
 
-	if (test_bit(WMI_SERVICE_TX_PWR_PER_PEER, ar->wmi.svc_map))
-		wiphy_ext_feature_set(ar->hw->wiphy,
-				      NL80211_EXT_FEATURE_STA_TX_PWR);
 	/*
 	 * on LL hardware queues are managed entirely by the FW
 	 * so we only advertise to mac we can do the queues thing

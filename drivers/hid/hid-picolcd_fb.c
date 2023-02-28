@@ -512,8 +512,10 @@ int picolcd_init_framebuffer(struct picolcd_data *data)
 			sizeof(struct fb_deferred_io) +
 			sizeof(struct picolcd_fb_data) +
 			PICOLCDFB_SIZE, dev);
-	if (!info)
+	if (info == NULL) {
+		dev_err(dev, "failed to allocate a framebuffer\n");
 		goto err_nomem;
+	}
 
 	info->fbdefio = info->par;
 	*info->fbdefio = picolcd_fb_defio;

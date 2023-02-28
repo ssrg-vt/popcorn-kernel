@@ -150,9 +150,9 @@ static int max6875_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	/* A fake client is created on the odd address */
-	data->fake_client = i2c_new_dummy_device(client->adapter, client->addr + 1);
-	if (IS_ERR(data->fake_client)) {
-		err = PTR_ERR(data->fake_client);
+	data->fake_client = i2c_new_dummy(client->adapter, client->addr + 1);
+	if (!data->fake_client) {
+		err = -ENOMEM;
 		goto exit_kfree;
 	}
 

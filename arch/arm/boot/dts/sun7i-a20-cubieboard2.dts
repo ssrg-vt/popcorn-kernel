@@ -115,9 +115,13 @@
 &gmac {
 	pinctrl-names = "default";
 	pinctrl-0 = <&gmac_mii_pins>;
-	phy-handle = <&phy1>;
+	phy = <&phy1>;
 	phy-mode = "mii";
 	status = "okay";
+
+	phy1: ethernet-phy@1 {
+		reg = <1>;
+	};
 };
 
 &hdmi {
@@ -155,12 +159,6 @@
 	bus-width = <4>;
 	cd-gpios = <&pio 7 1 GPIO_ACTIVE_LOW>; /* PH1 */
 	status = "okay";
-};
-
-&gmac_mdio {
-	phy1: ethernet-phy@1 {
-		reg = <1>;
-	};
 };
 
 &ohci0 {

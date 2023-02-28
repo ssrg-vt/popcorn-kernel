@@ -44,17 +44,15 @@ nf_nat_redirect_ipv4(struct sk_buff *skb,
 	if (hooknum == NF_INET_LOCAL_OUT) {
 		newdst = htonl(0x7F000001);
 	} else {
-		const struct in_device *indev;
+		struct in_device *indev;
+		struct in_ifaddr *ifa;
 
 		newdst = 0;
 
 		indev = __in_dev_get_rcu(skb->dev);
-		if (indev) {
-			const struct in_ifaddr *ifa;
-
-			ifa = rcu_dereference(indev->ifa_list);
-			if (ifa)
-				newdst = ifa->ifa_local;
+		if (indev && indev->ifa_list) {
+			ifa = indev->ifa_list;
+			newdst = ifa->ifa_local;
 		}
 
 		if (!newdst)

@@ -87,7 +87,6 @@ struct cache_detail {
 					      int has_died);
 
 	struct cache_head *	(*alloc)(void);
-	void			(*flush)(void);
 	int			(*match)(struct cache_head *orig, struct cache_head *new);
 	void			(*init)(struct cache_head *orig, struct cache_head *new);
 	void			(*update)(struct cache_head *orig, struct cache_head *new);
@@ -108,9 +107,9 @@ struct cache_detail {
 	/* fields for communication over channel */
 	struct list_head	queue;
 
-	atomic_t		writers;		/* how many time is /channel open */
-	time_t			last_close;		/* if no writers, when did last close */
-	time_t			last_warn;		/* when we last warned about no writers */
+	atomic_t		readers;		/* how many time is /chennel open */
+	time_t			last_close;		/* if no readers, when did last close */
+	time_t			last_warn;		/* when we last warned about no readers */
 
 	union {
 		struct proc_dir_entry	*procfs;

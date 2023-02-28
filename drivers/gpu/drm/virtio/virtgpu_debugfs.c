@@ -23,8 +23,8 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <drm/drm_debugfs.h>
-#include <drm/drm_file.h>
+#include <linux/debugfs.h>
+#include <drm/drmP.h>
 
 #include "virtgpu_drv.h"
 

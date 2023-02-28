@@ -28,10 +28,6 @@ struct usb_mixer_interface {
 	struct media_mixer_ctl *media_mixer_ctl;
 
 	bool disconnected;
-
-	void *private_data;
-	void (*private_free)(struct usb_mixer_interface *mixer);
-	void (*private_suspend)(struct usb_mixer_interface *mixer);
 };
 
 #define MAX_CHANNELS	16	/* max logical channels */

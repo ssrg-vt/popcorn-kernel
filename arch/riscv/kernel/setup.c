@@ -24,8 +24,6 @@
 #include <asm/tlbflush.h>
 #include <asm/thread_info.h>
 
-#include "head.h"
-
 #ifdef CONFIG_DUMMY_CONSOLE
 struct screen_info screen_info = {
 	.orig_video_lines	= 30,
@@ -41,9 +39,11 @@ struct screen_info screen_info = {
 atomic_t hart_lottery;
 unsigned long boot_cpu_hartid;
 
-void __init parse_dtb(void)
+void __init parse_dtb(phys_addr_t dtb_phys)
 {
-	if (early_init_dt_scan(dtb_early_va))
+	void *dtb = __va(dtb_phys);
+
+	if (early_init_dt_scan(dtb))
 		return;
 
 	pr_err("No DTB passed to the kernel\n");

@@ -33,7 +33,6 @@ struct mcs_group {
 	u16 flags;
 	u8 streams;
 	u8 shift;
-	u8 bw;
 	u16 duration[MCS_GROUP_RATES];
 };
 
@@ -49,12 +48,6 @@ struct minstrel_mcs_group_data {
 
 	/* MCS rate statistics */
 	struct minstrel_rate_stats rates[MCS_GROUP_RATES];
-};
-
-enum minstrel_sample_mode {
-	MINSTREL_SAMPLE_IDLE,
-	MINSTREL_SAMPLE_ACTIVE,
-	MINSTREL_SAMPLE_PENDING,
 };
 
 struct minstrel_ht_sta {
@@ -78,8 +71,6 @@ struct minstrel_ht_sta {
 	unsigned int overhead;
 	unsigned int overhead_rtscts;
 
-	unsigned int total_packets_last;
-	unsigned int total_packets_cur;
 	unsigned int total_packets;
 	unsigned int sample_packets;
 
@@ -90,9 +81,6 @@ struct minstrel_ht_sta {
 	u8 sample_tries;
 	u8 sample_count;
 	u8 sample_slow;
-
-	enum minstrel_sample_mode sample_mode;
-	u16 sample_rate;
 
 	/* current MCS group to be sampled */
 	u8 sample_group;

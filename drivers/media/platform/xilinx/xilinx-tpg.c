@@ -20,7 +20,6 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
 
-#include "xilinx-hls-common.h"
 #include "xilinx-vip.h"
 #include "xilinx-vtc.h"
 
@@ -59,36 +58,6 @@
 #define XTPG_BAYER_PHASE_BGGR			3
 #define XTPG_BAYER_PHASE_OFF			4
 
-/* TPG v7 is a completely redesigned IP using Vivado HLS
- * having a different AXI4-Lite interface
- */
-#define XTPG_HLS_BG_PATTERN			0x0020
-#define XTPG_HLS_FG_PATTERN			0x0028
-#define XTPG_HLS_FG_PATTERN_CROSS_HAIR		(1 << 1)
-#define XTPG_HLS_MASK_ID			0x0030
-#define XTPG_HLS_MOTION_SPEED			0x0038
-#define XTPG_HLS_COLOR_FORMAT			0x0040
-#define XTPG_HLS_COLOR_FORMAT_RGB		0
-#define XTPG_HLS_COLOR_FORMAT_YUV_444		1
-#define XTPG_HLS_COLOR_FORMAT_YUV_422		2
-#define XTPG_HLS_COLOR_FORMAT_YUV_420		3
-#define XTPG_HLS_CROSS_HAIR_HOR			0x0048
-#define XTPG_HLS_CROSS_HAIR_VER			0x0050
-#define XTPG_HLS_ZPLATE_HOR_CNTL_START		0x0058
-#define XTPG_HLS_ZPLATE_HOR_CNTL_DELTA		0x0060
-#define XTPG_HLS_ZPLATE_VER_CNTL_START		0x0068
-#define XTPG_HLS_ZPLATE_VER_CNTL_DELTA		0x0070
-#define XTPG_HLS_BOX_SIZE			0x0078
-#define XTPG_HLS_BOX_COLOR_RED_CB		0x0080
-#define XTPG_HLS_BOX_COLOR_GREEN_CR		0x0088
-#define XTPG_HLS_BOX_COLOR_BLUE_Y		0x0090
-#define XTPG_HLS_ENABLE_INPUT			0x0098
-#define XTPG_HLS_USE_INPUT_VID_STREAM		(1 << 0)
-#define XTPG_HLS_PASS_THRU_START_X		0x00a0
-#define XTPG_HLS_PASS_THRU_START_Y		0x00a8
-#define XTPG_HLS_PASS_THRU_END_X		0x00b0
-#define XTPG_HLS_PASS_THRU_END_Y		0x00b8
-
 /*
  * The minimum blanking value is one clock cycle for the front porch, one clock
  * cycle for the sync pulse and one clock cycle for the back porch.
@@ -97,15 +66,6 @@
 #define XTPG_MAX_HBLANK			(XVTC_MAX_HSIZE - XVIP_MIN_WIDTH)
 #define XTPG_MIN_VBLANK			3
 #define XTPG_MAX_VBLANK			(XVTC_MAX_VSIZE - XVIP_MIN_HEIGHT)
-
-#define XTPG_MIN_WIDTH			(64)
-#define XTPG_MIN_HEIGHT			(64)
-#define XTPG_MAX_WIDTH			(10328)
-#define XTPG_MAX_HEIGHT			(7760)
-
-#define XTPG_MIN_PPC			1
-
-#define XTPG_MIN_FRM_INT		1
 
 /**
  * struct xtpg_device - Xilinx Test Pattern Generator device structure
@@ -122,15 +82,8 @@
  * @vblank: vertical blanking control
  * @pattern: test pattern control
  * @streaming: is the video stream active
- * @is_hls: whether the IP core is HLS based
  * @vtc: video timing controller
  * @vtmux_gpio: video timing mux GPIO
- * @rst_gpio: reset IP core GPIO
- * @max_width: Maximum width supported by this instance
- * @max_height: Maximum height supported by this instance
- * @fi_d: frame interval denominator
- * @fi_n: frame interval numerator
- * @ppc: Pixels per clock control
  */
 struct xtpg_device {
 	struct xvip_device xvip;
@@ -149,17 +102,9 @@ struct xtpg_device {
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *pattern;
 	bool streaming;
-	bool is_hls;
 
 	struct xvtc_device *vtc;
 	struct gpio_desc *vtmux_gpio;
-	struct gpio_desc *rst_gpio;
-
-	u32 max_width;
-	u32 max_height;
-	u32 fi_d;
-	u32 fi_n;
-	u32 ppc;
 };
 
 static inline struct xtpg_device *to_tpg(struct v4l2_subdev *subdev)
@@ -181,32 +126,6 @@ static u32 xtpg_get_bayer_phase(unsigned int code)
 	default:
 		return XTPG_BAYER_PHASE_OFF;
 	}
-}
-
-static void xtpg_config_vtc(struct xtpg_device *xtpg, int width, int height)
-{
-
-	struct xvtc_config config = {
-		.hblank_start = width / xtpg->ppc,
-		.hsync_start = width / xtpg->ppc + 1,
-		.vblank_start = height,
-		.vsync_start = height + 1,
-		.fps = xtpg->fi_d / xtpg->fi_n,
-	};
-	unsigned int htotal;
-	unsigned int vtotal;
-
-	htotal = min_t(unsigned int, XVTC_MAX_HSIZE,
-		       (v4l2_ctrl_g_ctrl(xtpg->hblank) + width) / xtpg->ppc);
-	vtotal = min_t(unsigned int, XVTC_MAX_VSIZE,
-		       v4l2_ctrl_g_ctrl(xtpg->vblank) + height);
-
-	config.hsync_end = htotal - 1;
-	config.hsize = htotal;
-	config.vsync_end = vtotal - 1;
-	config.vsize = vtotal;
-
-	xvtc_generator_start(xtpg->vtc, &config);
 }
 
 static void __xtpg_update_pattern_control(struct xtpg_device *xtpg,
@@ -245,33 +164,6 @@ static void xtpg_update_pattern_control(struct xtpg_device *xtpg,
  * V4L2 Subdevice Video Operations
  */
 
-static int xtpg_g_frame_interval(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_frame_interval *fi)
-{
-	struct xtpg_device *xtpg = to_tpg(subdev);
-
-	fi->interval.numerator = xtpg->fi_n;
-	fi->interval.denominator = xtpg->fi_d;
-
-	return 0;
-}
-
-static int xtpg_s_frame_interval(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_frame_interval *fi)
-{
-	struct xtpg_device *xtpg = to_tpg(subdev);
-
-	if (!fi->interval.numerator || !fi->interval.denominator) {
-		xtpg->fi_n = XTPG_MIN_FRM_INT;
-		xtpg->fi_d = XTPG_MIN_FRM_INT;
-	} else {
-		xtpg->fi_n = fi->interval.numerator;
-		xtpg->fi_d = fi->interval.denominator;
-	}
-
-	return 0;
-}
-
 static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
@@ -281,27 +173,7 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 	u32 bayer_phase;
 
 	if (!enable) {
-		if (!xtpg->is_hls) {
-			xvip_stop(&xtpg->xvip);
-		} else {
-			int ret;
-			/*
-			 * There is an known issue in TPG v7.0 that on
-			 * resolution change it doesn't generates pattern
-			 * correctly i.e some hor/ver offset is added.
-			 * As a workaround issue reset on stop.
-			 */
-			gpiod_set_value_cansleep(xtpg->rst_gpio, 0x1);
-			gpiod_set_value_cansleep(xtpg->rst_gpio, 0x0);
-			ret = v4l2_ctrl_handler_setup(&xtpg->ctrl_handler);
-			if (ret) {
-				struct device *dev = xtpg->xvip.dev;
-
-				dev_err(dev, "failed to set controls\n");
-				return ret;
-			}
-		}
-
+		xvip_stop(&xtpg->xvip);
 		if (xtpg->vtc)
 			xvtc_generator_stop(xtpg->vtc);
 
@@ -310,36 +182,31 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 		return 0;
 	}
 
-	if (xtpg->is_hls) {
-		u32 fmt = 0;
+	xvip_set_frame_size(&xtpg->xvip, &xtpg->formats[0]);
 
-		switch (xtpg->formats[0].code) {
-		case MEDIA_BUS_FMT_VYYUYY8_1X24:
-		case MEDIA_BUS_FMT_VYYUYY10_4X20:
-			fmt = XTPG_HLS_COLOR_FORMAT_YUV_420;
-			break;
-		case MEDIA_BUS_FMT_UYVY8_1X16:
-		case MEDIA_BUS_FMT_UYVY10_1X20:
-			fmt = XTPG_HLS_COLOR_FORMAT_YUV_422;
-			break;
-		case MEDIA_BUS_FMT_VUY8_1X24:
-		case MEDIA_BUS_FMT_VUY10_1X30:
-			fmt = XTPG_HLS_COLOR_FORMAT_YUV_444;
-			break;
-		case MEDIA_BUS_FMT_RBG888_1X24:
-		case MEDIA_BUS_FMT_RBG101010_1X30:
-			fmt = XTPG_HLS_COLOR_FORMAT_RGB;
-			break;
-		}
-		xvip_write(&xtpg->xvip, XTPG_HLS_COLOR_FORMAT, fmt);
-		xvip_write(&xtpg->xvip, XHLS_REG_COLS, width);
-		xvip_write(&xtpg->xvip, XHLS_REG_ROWS, height);
-	} else {
-		xvip_set_frame_size(&xtpg->xvip, &xtpg->formats[0]);
+	if (xtpg->vtc) {
+		struct xvtc_config config = {
+			.hblank_start = width,
+			.hsync_start = width + 1,
+			.vblank_start = height,
+			.vsync_start = height + 1,
+		};
+		unsigned int htotal;
+		unsigned int vtotal;
+
+		htotal = min_t(unsigned int, XVTC_MAX_HSIZE,
+			       v4l2_ctrl_g_ctrl(xtpg->hblank) + width);
+		vtotal = min_t(unsigned int, XVTC_MAX_VSIZE,
+			       v4l2_ctrl_g_ctrl(xtpg->vblank) + height);
+
+		config.hsync_end = htotal - 1;
+		config.hsize = htotal;
+		config.vsync_end = vtotal - 1;
+		config.vsize = vtotal;
+
+		xvtc_generator_start(xtpg->vtc, &config);
 	}
 
-	if (xtpg->vtc)
-		xtpg_config_vtc(xtpg, width, height);
 	/*
 	 * Configure the bayer phase and video timing mux based on the
 	 * operation mode (passthrough or test pattern generation). The test
@@ -348,11 +215,7 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 	 */
 	mutex_lock(xtpg->ctrl_handler.lock);
 
-	if (xtpg->is_hls)
-		xvip_write(&xtpg->xvip, XTPG_HLS_BG_PATTERN,
-			   xtpg->pattern->cur.val);
-	else
-		xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+	xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
 			 XTPG_PATTERN_MASK, xtpg->pattern->cur.val);
 
 	/*
@@ -366,26 +229,18 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	mutex_unlock(xtpg->ctrl_handler.lock);
 
+	/*
+	 * For TPG v5.0, the bayer phase needs to be off for the pass through
+	 * mode, otherwise the external input would be subsampled.
+	 */
+	bayer_phase = passthrough ? XTPG_BAYER_PHASE_OFF
+		    : xtpg_get_bayer_phase(xtpg->formats[0].code);
+	xvip_write(&xtpg->xvip, XTPG_BAYER_PHASE, bayer_phase);
+
 	if (xtpg->vtmux_gpio)
 		gpiod_set_value_cansleep(xtpg->vtmux_gpio, !passthrough);
 
-	if (xtpg->is_hls) {
-		xvip_set(&xtpg->xvip, XTPG_HLS_ENABLE_INPUT,
-			 XTPG_HLS_USE_INPUT_VID_STREAM);
-		xvip_set(&xtpg->xvip, XVIP_CTRL_CONTROL,
-			 XHLS_REG_CTRL_AUTO_RESTART |
-			 XVIP_CTRL_CONTROL_SW_ENABLE);
-	} else {
-		/*
-		 * For TPG v5.0, the bayer phase needs to be off for the pass
-		 * through mode, otherwise the external input would
-		 * be subsampled.
-		 */
-		bayer_phase = passthrough ? XTPG_BAYER_PHASE_OFF
-			    : xtpg_get_bayer_phase(xtpg->formats[0].code);
-		xvip_write(&xtpg->xvip, XTPG_BAYER_PHASE, bayer_phase);
-		xvip_start(&xtpg->xvip);
-	}
+	xvip_start(&xtpg->xvip);
 
 	return 0;
 }
@@ -399,22 +254,14 @@ __xtpg_get_pad_format(struct xtpg_device *xtpg,
 		      struct v4l2_subdev_pad_config *cfg,
 		      unsigned int pad, u32 which)
 {
-	struct v4l2_mbus_framefmt *format;
-
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xtpg->xvip.subdev, cfg,
-						    pad);
-		break;
+		return v4l2_subdev_get_try_format(&xtpg->xvip.subdev, cfg, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format = &xtpg->formats[pad];
-		break;
+		return &xtpg->formats[pad];
 	default:
-		format = NULL;
-		break;
+		return NULL;
 	}
-
-	return format;
 }
 
 static int xtpg_get_format(struct v4l2_subdev *subdev,
@@ -422,13 +269,8 @@ static int xtpg_get_format(struct v4l2_subdev *subdev,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
-	struct v4l2_mbus_framefmt *format;
 
-	format = __xtpg_get_pad_format(xtpg, cfg, fmt->pad, fmt->which);
-	if (!format)
-		return -EINVAL;
-
-	fmt->format = *format;
+	fmt->format = *__xtpg_get_pad_format(xtpg, cfg, fmt->pad, fmt->which);
 
 	return 0;
 }
@@ -442,8 +284,6 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
 	u32 bayer_phase;
 
 	__format = __xtpg_get_pad_format(xtpg, cfg, fmt->pad, fmt->which);
-	if (!__format)
-		return -EINVAL;
 
 	/* In two pads mode the source pad format is always identical to the
 	 * sink pad format.
@@ -460,35 +300,13 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
 			__format->code = fmt->format.code;
 	}
 
-	if (xtpg->is_hls) {
-		switch (fmt->format.code) {
-		case MEDIA_BUS_FMT_VYYUYY8_1X24:
-		case MEDIA_BUS_FMT_VYYUYY10_4X20:
-		case MEDIA_BUS_FMT_UYVY8_1X16:
-		case MEDIA_BUS_FMT_UYVY10_1X20:
-		case MEDIA_BUS_FMT_VUY8_1X24:
-		case MEDIA_BUS_FMT_VUY10_1X30:
-		case MEDIA_BUS_FMT_RBG888_1X24:
-		case MEDIA_BUS_FMT_RBG101010_1X30:
-			__format->code = fmt->format.code;
-			break;
-		default:
-			__format->code = xtpg->default_format.code;
-		}
-	}
-
-	__format->width = clamp_t(unsigned int, fmt->format.width,
-				  XTPG_MIN_WIDTH, xtpg->max_width);
-	__format->height = clamp_t(unsigned int, fmt->format.height,
-				   XTPG_MIN_HEIGHT, xtpg->max_height);
+	xvip_set_format_size(__format, fmt);
 
 	fmt->format = *__format;
 
 	/* Propagate the format to the source pad. */
 	if (xtpg->npads == 2) {
 		__format = __xtpg_get_pad_format(xtpg, cfg, 1, fmt->which);
-		if (!__format)
-			return -EINVAL;
 		*__format = fmt->format;
 	}
 
@@ -504,7 +322,6 @@ static int xtpg_enum_frame_size(struct v4l2_subdev *subdev,
 				struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct v4l2_mbus_framefmt *format;
-	struct xtpg_device *xtpg = to_tpg(subdev);
 
 	format = v4l2_subdev_get_try_format(subdev, cfg, fse->pad);
 
@@ -513,13 +330,12 @@ static int xtpg_enum_frame_size(struct v4l2_subdev *subdev,
 
 	/* Min / max values for pad 0 is always fixed in both one and two pads
 	 * modes. In two pads mode, the source pad(= 1) size is identical to
-	 * the sink pad size.
-	 */
+	 * the sink pad size */
 	if (fse->pad == 0) {
-		fse->min_width = XTPG_MIN_WIDTH;
-		fse->max_width = xtpg->max_width;
-		fse->min_height = XTPG_MIN_HEIGHT;
-		fse->max_height = xtpg->max_height;
+		fse->min_width = XVIP_MIN_WIDTH;
+		fse->max_width = XVIP_MAX_WIDTH;
+		fse->min_height = XVIP_MIN_HEIGHT;
+		fse->max_height = XVIP_MAX_HEIGHT;
 	} else {
 		fse->min_width = format->width;
 		fse->max_width = format->width;
@@ -558,12 +374,8 @@ static int xtpg_s_ctrl(struct v4l2_ctrl *ctrl)
 						ctrl_handler);
 	switch (ctrl->id) {
 	case V4L2_CID_TEST_PATTERN:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_BG_PATTERN,
-				   ctrl->val);
-		else
-			xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
-					 XTPG_PATTERN_MASK, ctrl->val);
+		xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+				 XTPG_PATTERN_MASK, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_CROSS_HAIRS:
 		xvip_clr_or_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
@@ -574,13 +386,10 @@ static int xtpg_s_ctrl(struct v4l2_ctrl *ctrl)
 				XTPG_PATTERN_CONTROL_MOVING_BOX, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_COLOR_MASK:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_MASK_ID, ctrl->val);
-		else
-			xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
-				      XTPG_PATTERN_CONTROL_COLOR_MASK_MASK,
-				      ctrl->val <<
-				      XTPG_PATTERN_CONTROL_COLOR_MASK_SHIFT);
+		xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+				 XTPG_PATTERN_CONTROL_COLOR_MASK_MASK,
+				 ctrl->val <<
+				 XTPG_PATTERN_CONTROL_COLOR_MASK_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_STUCK_PIXEL:
 		xvip_clr_or_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
@@ -595,94 +404,49 @@ static int xtpg_s_ctrl(struct v4l2_ctrl *ctrl)
 				XTPG_PATTERN_CONTROL_MOTION, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_MOTION_SPEED:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_MOTION_SPEED,
-				   ctrl->val);
-		else
-			xvip_write(&xtpg->xvip, XTPG_MOTION_SPEED, ctrl->val);
+		xvip_write(&xtpg->xvip, XTPG_MOTION_SPEED, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_CROSS_HAIR_ROW:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_CROSS_HAIR_HOR,
-				    ctrl->val);
-		else
-			xvip_clr_and_set(&xtpg->xvip, XTPG_CROSS_HAIRS,
-					 XTPG_CROSS_HAIRS_ROW_MASK,
-					 ctrl->val <<
-					 XTPG_CROSS_HAIRS_ROW_SHIFT);
+		xvip_clr_and_set(&xtpg->xvip, XTPG_CROSS_HAIRS,
+				 XTPG_CROSS_HAIRS_ROW_MASK,
+				 ctrl->val << XTPG_CROSS_HAIRS_ROW_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_CROSS_HAIR_COLUMN:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_CROSS_HAIR_VER,
-				   ctrl->val);
-		else
-			xvip_clr_and_set(&xtpg->xvip, XTPG_CROSS_HAIRS,
-					 XTPG_CROSS_HAIRS_COLUMN_MASK,
-					 ctrl->val <<
-					 XTPG_CROSS_HAIRS_COLUMN_SHIFT);
+		xvip_clr_and_set(&xtpg->xvip, XTPG_CROSS_HAIRS,
+				 XTPG_CROSS_HAIRS_COLUMN_MASK,
+				 ctrl->val << XTPG_CROSS_HAIRS_COLUMN_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_ZPLATE_HOR_START:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_ZPLATE_HOR_CNTL_START,
-				   ctrl->val);
-		else
-			xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_HOR_CONTROL,
-					 XTPG_ZPLATE_START_MASK,
-					 ctrl->val << XTPG_ZPLATE_START_SHIFT);
+		xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_HOR_CONTROL,
+				 XTPG_ZPLATE_START_MASK,
+				 ctrl->val << XTPG_ZPLATE_START_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_ZPLATE_HOR_SPEED:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_ZPLATE_HOR_CNTL_DELTA,
-				   ctrl->val);
-		else
-			xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_HOR_CONTROL,
-					 XTPG_ZPLATE_SPEED_MASK,
-					 ctrl->val << XTPG_ZPLATE_SPEED_SHIFT);
+		xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_HOR_CONTROL,
+				 XTPG_ZPLATE_SPEED_MASK,
+				 ctrl->val << XTPG_ZPLATE_SPEED_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_ZPLATE_VER_START:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_ZPLATE_VER_CNTL_START,
-				   ctrl->val);
-		else
-			xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_VER_CONTROL,
-					 XTPG_ZPLATE_START_MASK,
-					 ctrl->val << XTPG_ZPLATE_START_SHIFT);
+		xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_VER_CONTROL,
+				 XTPG_ZPLATE_START_MASK,
+				 ctrl->val << XTPG_ZPLATE_START_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_ZPLATE_VER_SPEED:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_ZPLATE_VER_CNTL_DELTA,
-				   ctrl->val);
-		else
-			xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_VER_CONTROL,
-					 XTPG_ZPLATE_SPEED_MASK,
-					 ctrl->val << XTPG_ZPLATE_SPEED_SHIFT);
+		xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_VER_CONTROL,
+				 XTPG_ZPLATE_SPEED_MASK,
+				 ctrl->val << XTPG_ZPLATE_SPEED_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_BOX_SIZE:
-		if (xtpg->is_hls)
-			xvip_write(&xtpg->xvip, XTPG_HLS_BOX_SIZE, ctrl->val);
-		else
-			xvip_write(&xtpg->xvip, XTPG_BOX_SIZE, ctrl->val);
+		xvip_write(&xtpg->xvip, XTPG_BOX_SIZE, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_BOX_COLOR:
-		if (xtpg->is_hls) {
-			xvip_write(&xtpg->xvip, XTPG_HLS_BOX_COLOR_RED_CB,
-				   ctrl->val >> 16);
-			xvip_write(&xtpg->xvip, XTPG_HLS_BOX_COLOR_GREEN_CR,
-				   ctrl->val >> 8);
-			xvip_write(&xtpg->xvip, XTPG_HLS_BOX_COLOR_BLUE_Y,
-				   ctrl->val);
-		} else {
-			xvip_write(&xtpg->xvip, XTPG_BOX_COLOR, ctrl->val);
-		}
+		xvip_write(&xtpg->xvip, XTPG_BOX_COLOR, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_STUCK_PIXEL_THRESH:
 		xvip_write(&xtpg->xvip, XTPG_STUCK_PIXEL_THRESH, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_NOISE_GAIN:
 		xvip_write(&xtpg->xvip, XTPG_NOISE_GAIN, ctrl->val);
-		return 0;
-	case V4L2_CID_XILINX_TPG_HLS_FG_PATTERN:
-		xvip_write(&xtpg->xvip, XTPG_HLS_FG_PATTERN, ctrl->val);
 		return 0;
 	}
 
@@ -697,8 +461,6 @@ static const struct v4l2_subdev_core_ops xtpg_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops xtpg_video_ops = {
-	.g_frame_interval = xtpg_g_frame_interval,
-	.s_frame_interval = xtpg_s_frame_interval,
 	.s_stream = xtpg_s_stream,
 };
 
@@ -743,51 +505,60 @@ static const char *const xtpg_pattern_strings[] = {
 	"Black/White Checker Board",
 };
 
-static const char *const xtpg_hls_pattern_strings[] = {
-	"Passthrough",
-	"Horizontal Ramp",
-	"Vertical Ramp",
-	"Temporal Ramp",
-	"Solid Red",
-	"Solid Green",
-	"Solid Blue",
-	"Solid Black",
-	"Solid White",
-	"Color Bars",
-	"Zone Plate",
-	"Tartan Color Bars",
-	"Cross Hatch",
-	"Color Sweep",
-	"Vertical/Horizontal Ramps",
-	"Black/White Checker Board",
-	"PseudoRandom",
-};
-
-static const char *const xtpg_hls_fg_strings[] = {
-	"No Overlay",
-	"Moving Box",
-	"Cross Hairs",
-};
-
-static const struct v4l2_ctrl_config xtpg_hls_fg_ctrl = {
-	.ops	= &xtpg_ctrl_ops,
-	.id     = V4L2_CID_XILINX_TPG_HLS_FG_PATTERN,
-	.name   = "Test Pattern: Foreground Pattern",
-	.type   = V4L2_CTRL_TYPE_MENU,
-	.min	= 0,
-	.max	= ARRAY_SIZE(xtpg_hls_fg_strings) - 1,
-	.qmenu	= xtpg_hls_fg_strings,
-};
-
-static struct v4l2_ctrl_config xtpg_common_ctrls[] = {
+static struct v4l2_ctrl_config xtpg_ctrls[] = {
 	{
-		.ops    = &xtpg_ctrl_ops,
-		.id     = V4L2_CID_XILINX_TPG_COLOR_MASK,
-		.name   = "Test Pattern: Color Mask",
-		.type   = V4L2_CTRL_TYPE_BITMASK,
-		.min    = 0,
-		.max    = 0x7,
-		.def    = 0,
+		.ops	= &xtpg_ctrl_ops,
+		.id	= V4L2_CID_XILINX_TPG_CROSS_HAIRS,
+		.name	= "Test Pattern: Cross Hairs",
+		.type	= V4L2_CTRL_TYPE_BOOLEAN,
+		.min	= false,
+		.max	= true,
+		.step	= 1,
+		.def	= 0,
+	}, {
+		.ops	= &xtpg_ctrl_ops,
+		.id	= V4L2_CID_XILINX_TPG_MOVING_BOX,
+		.name	= "Test Pattern: Moving Box",
+		.type	= V4L2_CTRL_TYPE_BOOLEAN,
+		.min	= false,
+		.max	= true,
+		.step	= 1,
+		.def	= 0,
+	}, {
+		.ops	= &xtpg_ctrl_ops,
+		.id	= V4L2_CID_XILINX_TPG_COLOR_MASK,
+		.name	= "Test Pattern: Color Mask",
+		.type	= V4L2_CTRL_TYPE_BITMASK,
+		.min	= 0,
+		.max	= 0xf,
+		.def	= 0,
+	}, {
+		.ops	= &xtpg_ctrl_ops,
+		.id	= V4L2_CID_XILINX_TPG_STUCK_PIXEL,
+		.name	= "Test Pattern: Stuck Pixel",
+		.type	= V4L2_CTRL_TYPE_BOOLEAN,
+		.min	= false,
+		.max	= true,
+		.step	= 1,
+		.def	= 0,
+	}, {
+		.ops	= &xtpg_ctrl_ops,
+		.id	= V4L2_CID_XILINX_TPG_NOISE,
+		.name	= "Test Pattern: Noise",
+		.type	= V4L2_CTRL_TYPE_BOOLEAN,
+		.min	= false,
+		.max	= true,
+		.step	= 1,
+		.def	= 0,
+	}, {
+		.ops	= &xtpg_ctrl_ops,
+		.id	= V4L2_CID_XILINX_TPG_MOTION,
+		.name	= "Test Pattern: Motion",
+		.type	= V4L2_CTRL_TYPE_BOOLEAN,
+		.min	= false,
+		.max	= true,
+		.step	= 1,
+		.def	= 0,
 	}, {
 		.ops	= &xtpg_ctrl_ops,
 		.id	= V4L2_CID_XILINX_TPG_MOTION_SPEED,
@@ -871,59 +642,10 @@ static struct v4l2_ctrl_config xtpg_common_ctrls[] = {
 	}, {
 		.ops	= &xtpg_ctrl_ops,
 		.id	= V4L2_CID_XILINX_TPG_BOX_COLOR,
-		.name	= "Test Pattern: Box Color(RGB/YCbCr)",
+		.name	= "Test Pattern: Box Color(RGB)",
 		.type	= V4L2_CTRL_TYPE_INTEGER,
 		.min	= 0,
 		.max	= (1 << 24) - 1,
-		.step	= 1,
-		.def	= 0,
-	},
-};
-
-static struct v4l2_ctrl_config xtpg_ctrls[] = {
-	{
-		.ops	= &xtpg_ctrl_ops,
-		.id	= V4L2_CID_XILINX_TPG_CROSS_HAIRS,
-		.name	= "Test Pattern: Cross Hairs",
-		.type	= V4L2_CTRL_TYPE_BOOLEAN,
-		.min	= false,
-		.max	= true,
-		.step	= 1,
-		.def	= 0,
-	}, {
-		.ops	= &xtpg_ctrl_ops,
-		.id	= V4L2_CID_XILINX_TPG_MOVING_BOX,
-		.name	= "Test Pattern: Moving Box",
-		.type	= V4L2_CTRL_TYPE_BOOLEAN,
-		.min	= false,
-		.max	= true,
-		.step	= 1,
-		.def	= 0,
-	}, {
-		.ops	= &xtpg_ctrl_ops,
-		.id	= V4L2_CID_XILINX_TPG_STUCK_PIXEL,
-		.name	= "Test Pattern: Stuck Pixel",
-		.type	= V4L2_CTRL_TYPE_BOOLEAN,
-		.min	= false,
-		.max	= true,
-		.step	= 1,
-		.def	= 0,
-	}, {
-		.ops	= &xtpg_ctrl_ops,
-		.id	= V4L2_CID_XILINX_TPG_NOISE,
-		.name	= "Test Pattern: Noise",
-		.type	= V4L2_CTRL_TYPE_BOOLEAN,
-		.min	= false,
-		.max	= true,
-		.step	= 1,
-		.def	= 0,
-	}, {
-		.ops	= &xtpg_ctrl_ops,
-		.id	= V4L2_CID_XILINX_TPG_MOTION,
-		.name	= "Test Pattern: Motion",
-		.type	= V4L2_CTRL_TYPE_BOOLEAN,
-		.min	= false,
-		.max	= true,
 		.step	= 1,
 		.def	= 0,
 	}, {
@@ -991,49 +713,6 @@ static int xtpg_parse_of(struct xtpg_device *xtpg)
 	struct device_node *port;
 	unsigned int nports = 0;
 	bool has_endpoint = false;
-	int ret;
-
-	if (!of_device_is_compatible(dev->of_node, "xlnx,v-tpg-5.0"))
-		xtpg->is_hls = true;
-
-	ret = of_property_read_u32(node, "xlnx,max-height",
-				   &xtpg->max_height);
-	if (ret < 0) {
-		if (of_device_is_compatible(dev->of_node, "xlnx,v-tpg-8.0")) {
-			dev_err(dev, "xlnx,max-height dt property is missing!");
-			return -EINVAL;
-		}
-		xtpg->max_height = XTPG_MAX_HEIGHT;
-	} else if (xtpg->max_height > XTPG_MAX_HEIGHT ||
-		   xtpg->max_height < XTPG_MIN_HEIGHT) {
-		dev_err(dev, "Invalid height in dt");
-		return -EINVAL;
-	}
-
-	ret = of_property_read_u32(node, "xlnx,max-width",
-				   &xtpg->max_width);
-	if (ret < 0) {
-		if (of_device_is_compatible(dev->of_node, "xlnx,v-tpg-8.0")) {
-			dev_err(dev, "xlnx,max-width dt property is missing!");
-			return -EINVAL;
-		}
-		xtpg->max_width = XTPG_MAX_WIDTH;
-	} else if (xtpg->max_width > XTPG_MAX_WIDTH ||
-		   xtpg->max_width < XTPG_MIN_WIDTH) {
-		dev_err(dev, "Invalid width in dt");
-		return -EINVAL;
-	}
-
-	ret = of_property_read_u32(node, "xlnx,ppc",
-				   &xtpg->ppc);
-	if (ret < 0) {
-		xtpg->ppc = XTPG_MIN_PPC;
-		dev_dbg(dev, "failed to read ppc in dt\n");
-	} else if ((xtpg->ppc != 1) && (xtpg->ppc != 2) &&
-			(xtpg->ppc != 4) && (xtpg->ppc != 8)) {
-		dev_err(dev, "Invalid ppc config in dt\n");
-		return -EINVAL;
-	}
 
 	ports = of_get_child_by_name(node, "ports");
 	if (ports == NULL)
@@ -1090,7 +769,6 @@ static int xtpg_probe(struct platform_device *pdev)
 	struct v4l2_subdev *subdev;
 	struct xtpg_device *xtpg;
 	u32 i, bayer_phase;
-	u32 npatterns;
 	int ret;
 
 	xtpg = devm_kzalloc(&pdev->dev, sizeof(*xtpg), GFP_KERNEL);
@@ -1114,29 +792,14 @@ static int xtpg_probe(struct platform_device *pdev)
 		goto error_resource;
 	}
 
-	if (xtpg->is_hls) {
-		xtpg->rst_gpio = devm_gpiod_get(&pdev->dev, "reset",
-						   GPIOD_OUT_HIGH);
-		if (IS_ERR(xtpg->rst_gpio)) {
-			ret = PTR_ERR(xtpg->rst_gpio);
-			goto error_resource;
-		}
-	}
-
 	xtpg->vtc = xvtc_of_get(pdev->dev.of_node);
 	if (IS_ERR(xtpg->vtc)) {
 		ret = PTR_ERR(xtpg->vtc);
 		goto error_resource;
 	}
 
-	/*
-	 * Reset and initialize the core. For TPG HLS version there
-	 * is no SW_RESET bit hence using GPIO based reset.
-	 */
-	if (xtpg->is_hls)
-		gpiod_set_value_cansleep(xtpg->rst_gpio, 0x0);
-	else
-		xvip_reset(&xtpg->xvip);
+	/* Reset and initialize the core */
+	xvip_reset(&xtpg->xvip);
 
 	/* Initialize V4L2 subdevice and media entity. Pad numbers depend on the
 	 * number of pads.
@@ -1152,23 +815,11 @@ static int xtpg_probe(struct platform_device *pdev)
 	xtpg->default_format.code = xtpg->vip_format->code;
 	xtpg->default_format.field = V4L2_FIELD_NONE;
 	xtpg->default_format.colorspace = V4L2_COLORSPACE_SRGB;
+	xvip_get_frame_size(&xtpg->xvip, &xtpg->default_format);
 
-	if (xtpg->is_hls) {
-		npatterns = ARRAY_SIZE(xtpg_hls_pattern_strings);
-		xtpg->default_format.width = xvip_read(&xtpg->xvip,
-						       XHLS_REG_COLS);
-		xtpg->default_format.height = xvip_read(&xtpg->xvip,
-							XHLS_REG_ROWS);
-	} else {
-		npatterns = ARRAY_SIZE(xtpg_pattern_strings);
-		xvip_get_frame_size(&xtpg->xvip, &xtpg->default_format);
-	}
-
-	if (!xtpg->is_hls) {
-		bayer_phase = xtpg_get_bayer_phase(xtpg->vip_format->code);
-		if (bayer_phase != XTPG_BAYER_PHASE_OFF)
-			xtpg->bayer = true;
-	}
+	bayer_phase = xtpg_get_bayer_phase(xtpg->vip_format->code);
+	if (bayer_phase != XTPG_BAYER_PHASE_OFF)
+		xtpg->bayer = true;
 
 	xtpg->formats[0] = xtpg->default_format;
 	if (xtpg->npads == 2)
@@ -1188,13 +839,7 @@ static int xtpg_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto error;
 
-	if (xtpg->is_hls)
-		v4l2_ctrl_handler_init(&xtpg->ctrl_handler, 4 +
-				       ARRAY_SIZE(xtpg_common_ctrls));
-	else
-		v4l2_ctrl_handler_init(&xtpg->ctrl_handler, 3 +
-				       ARRAY_SIZE(xtpg_common_ctrls) +
-				       ARRAY_SIZE(xtpg_ctrls));
+	v4l2_ctrl_handler_init(&xtpg->ctrl_handler, 3 + ARRAY_SIZE(xtpg_ctrls));
 
 	xtpg->vblank = v4l2_ctrl_new_std(&xtpg->ctrl_handler, &xtpg_ctrl_ops,
 					 V4L2_CID_VBLANK, XTPG_MIN_VBLANK,
@@ -1202,41 +847,19 @@ static int xtpg_probe(struct platform_device *pdev)
 	xtpg->hblank = v4l2_ctrl_new_std(&xtpg->ctrl_handler, &xtpg_ctrl_ops,
 					 V4L2_CID_HBLANK, XTPG_MIN_HBLANK,
 					 XTPG_MAX_HBLANK, 1, 100);
+	xtpg->pattern = v4l2_ctrl_new_std_menu_items(&xtpg->ctrl_handler,
+					&xtpg_ctrl_ops, V4L2_CID_TEST_PATTERN,
+					ARRAY_SIZE(xtpg_pattern_strings) - 1,
+					1, 9, xtpg_pattern_strings);
 
-	if (xtpg->is_hls) {
-		xtpg->pattern =
-			v4l2_ctrl_new_std_menu_items(&xtpg->ctrl_handler,
-						     &xtpg_ctrl_ops,
-						     V4L2_CID_TEST_PATTERN,
-						     npatterns - 1,
-						     1, 9,
-						     xtpg_hls_pattern_strings);
-		v4l2_ctrl_new_custom(&xtpg->ctrl_handler,
-				     &xtpg_hls_fg_ctrl, NULL);
-	} else {
-		xtpg->pattern =
-			v4l2_ctrl_new_std_menu_items(&xtpg->ctrl_handler,
-						     &xtpg_ctrl_ops,
-						     V4L2_CID_TEST_PATTERN,
-						     npatterns - 1,
-						     1, 9,
-						     xtpg_pattern_strings);
-
-		for (i = 0; i < ARRAY_SIZE(xtpg_ctrls); i++)
-			v4l2_ctrl_new_custom(&xtpg->ctrl_handler,
-					     &xtpg_ctrls[i], NULL);
-	}
-
-	for (i = 0; i < ARRAY_SIZE(xtpg_common_ctrls); i++)
-		v4l2_ctrl_new_custom(&xtpg->ctrl_handler,
-				     &xtpg_common_ctrls[i], NULL);
+	for (i = 0; i < ARRAY_SIZE(xtpg_ctrls); i++)
+		v4l2_ctrl_new_custom(&xtpg->ctrl_handler, &xtpg_ctrls[i], NULL);
 
 	if (xtpg->ctrl_handler.error) {
 		dev_err(&pdev->dev, "failed to add controls\n");
 		ret = xtpg->ctrl_handler.error;
 		goto error;
 	}
-
 	subdev->ctrl_handler = &xtpg->ctrl_handler;
 
 	xtpg_update_pattern_control(xtpg, true, true);
@@ -1249,12 +872,7 @@ static int xtpg_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, xtpg);
 
-	if (!xtpg->is_hls)
-		xvip_print_version(&xtpg->xvip);
-
-	/* Initialize default frame interval */
-	xtpg->fi_n = 1;
-	xtpg->fi_d = 30;
+	xvip_print_version(&xtpg->xvip);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
@@ -1291,8 +909,6 @@ static SIMPLE_DEV_PM_OPS(xtpg_pm_ops, xtpg_pm_suspend, xtpg_pm_resume);
 
 static const struct of_device_id xtpg_of_id_table[] = {
 	{ .compatible = "xlnx,v-tpg-5.0" },
-	{ .compatible = "xlnx,v-tpg-7.0" },
-	{ .compatible = "xlnx,v-tpg-8.0" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, xtpg_of_id_table);

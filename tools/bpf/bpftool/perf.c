@@ -104,8 +104,6 @@ static void print_perf_json(int pid, int fd, __u32 prog_id, __u32 fd_type,
 		jsonw_string_field(json_wtr, "filename", buf);
 		jsonw_lluint_field(json_wtr, "offset", probe_offset);
 		break;
-	default:
-		break;
 	}
 	jsonw_end_object(json_wtr);
 }
@@ -141,8 +139,6 @@ static void print_perf_plain(int pid, int fd, __u32 prog_id, __u32 fd_type,
 	case BPF_FD_TYPE_URETPROBE:
 		printf("uretprobe  filename %s  offset %llu\n", buf,
 		       probe_offset);
-		break;
-	default:
 		break;
 	}
 }

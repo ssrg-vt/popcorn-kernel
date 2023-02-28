@@ -10,6 +10,13 @@
 #include <linux/dns_resolver.h>
 #include "internal.h"
 
+const struct file_operations afs_dynroot_file_operations = {
+	.open		= dcache_dir_open,
+	.release	= dcache_dir_close,
+	.iterate_shared	= dcache_readdir,
+	.llseek		= dcache_dir_lseek,
+};
+
 /*
  * Probe to see if a cell may exist.  This prevents positive dentries from
  * being created unnecessarily.
@@ -17,7 +24,6 @@
 static int afs_probe_cell_name(struct dentry *dentry)
 {
 	struct afs_cell *cell;
-	struct afs_net *net = afs_d2net(dentry);
 	const char *name = dentry->d_name.name;
 	size_t len = dentry->d_name.len;
 	int ret;
@@ -30,14 +36,13 @@ static int afs_probe_cell_name(struct dentry *dentry)
 		len--;
 	}
 
-	cell = afs_lookup_cell_rcu(net, name, len);
+	cell = afs_lookup_cell_rcu(afs_d2net(dentry), name, len);
 	if (!IS_ERR(cell)) {
-		afs_put_cell(net, cell);
+		afs_put_cell(afs_d2net(dentry), cell);
 		return 0;
 	}
 
-	ret = dns_query(net->net, "afsdb", name, len, "srv=1",
-			NULL, NULL, false);
+	ret = dns_query("afsdb", name, len, "srv=1", NULL, NULL, false);
 	if (ret == -ENODATA)
 		ret = -EDESTADDRREQ;
 	return ret;

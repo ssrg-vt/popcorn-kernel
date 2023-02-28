@@ -3167,7 +3167,15 @@ static int __mmc_test_register_dbgfs_file(struct mmc_card *card,
 	struct mmc_test_dbgfs_file *df;
 
 	if (card->debugfs_root)
-		debugfs_create_file(name, mode, card->debugfs_root, card, fops);
+		file = debugfs_create_file(name, mode, card->debugfs_root,
+			card, fops);
+
+	if (IS_ERR_OR_NULL(file)) {
+		dev_err(&card->dev,
+			"Can't create %s. Perhaps debugfs is disabled.\n",
+			name);
+		return -ENODEV;
+	}
 
 	df = kmalloc(sizeof(*df), GFP_KERNEL);
 	if (!df) {

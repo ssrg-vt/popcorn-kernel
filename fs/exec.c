@@ -735,6 +735,9 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	mm->arg_start = bprm->p;
 #endif
 
+	//dump_stack();
+	//printk (">>> STACK_TOP = %lx (%lx)\n", (void *)stack_top, (void *)STACK_TOP_MAX);
+
 	if (bprm->loader)
 		bprm->loader -= stack_shift;
 	bprm->exec -= stack_shift;
@@ -1033,7 +1036,6 @@ static int exec_mmap(struct mm_struct *mm)
 	}
 	task_lock(tsk);
 	active_mm = tsk->active_mm;
-	membarrier_exec_mmap(mm);
 	tsk->mm = mm;
 	tsk->active_mm = mm;
 	activate_mm(active_mm, mm);
@@ -1664,7 +1666,7 @@ int search_binary_handler(struct linux_binprm *bprm)
 		if (retval < 0 && !bprm->mm) {
 			/* we got to flush_old_exec() and failed after it */
 			read_unlock(&binfmt_lock);
-			force_sigsegv(SIGSEGV);
+			force_sigsegv(SIGSEGV, current);
 			return retval;
 		}
 		if (retval != -ENOEXEC || !bprm->file) {
@@ -1746,12 +1748,15 @@ static int __do_execve_file(int fd, struct filename *filename,
 	if (retval)
 		goto out_ret;
 
+	//printk ("%s: setup\n", __FUNCTION__);
 	retval = -ENOMEM;
 	bprm = kzalloc(sizeof(*bprm), GFP_KERNEL);
 	if (!bprm)
 		goto out_files;
+	//printk ("%s: kzalloc\n", __FUNCTION__);
 
 	retval = prepare_bprm_creds(bprm);
+	//printk ("%s: prepare_bprm_creds = %d\n", __FUNCTION__, retval);
 	if (retval)
 		goto out_free;
 
@@ -1761,6 +1766,7 @@ static int __do_execve_file(int fd, struct filename *filename,
 	if (!file)
 		file = do_open_execat(fd, filename, flags);
 	retval = PTR_ERR(file);
+	//printk ("%s: do_open_execat = %d\n", __FUNCTION__, retval);
 	if (IS_ERR(file))
 		goto out_unmark;
 
@@ -1793,39 +1799,47 @@ static int __do_execve_file(int fd, struct filename *filename,
 	bprm->interp = bprm->filename;
 
 	retval = bprm_mm_init(bprm);
+	//printk ("%s: bprm_mm_init = %d\n", __FUNCTION__, retval);
 	if (retval)
 		goto out_unmark;
 
 	retval = prepare_arg_pages(bprm, argv, envp);
+	//printk ("%s: prepare_arg_pages = %d\n", __FUNCTION__, retval);
 	if (retval < 0)
 		goto out;
 
 	retval = prepare_binprm(bprm);
+	//printk ("%s: prepare_binprm = %d\n", __FUNCTION__, retval);
 	if (retval < 0)
 		goto out;
 
 	retval = copy_strings_kernel(1, &bprm->filename, bprm);
+	//printk ("%s: copy_strings_kernel = %d\n", __FUNCTION__, retval);
 	if (retval < 0)
 		goto out;
 
 	bprm->exec = bprm->p;
 	retval = copy_strings(bprm->envc, envp, bprm);
+	//printk ("%s: copy_strings = %d\n", __FUNCTION__, retval);
 	if (retval < 0)
 		goto out;
 
 	retval = copy_strings(bprm->argc, argv, bprm);
+	//printk ("%s: copy_strings = %d\n", __FUNCTION__, retval);
 	if (retval < 0)
 		goto out;
 
 	would_dump(bprm, bprm->file);
 
 	retval = exec_binprm(bprm);
+	//printk ("%s: exec_binprm = %d\n", __FUNCTION__, retval);
 	if (retval < 0)
 		goto out;
 
 	/* execve succeeded */
 	current->fs->in_exec = 0;
 	current->in_execve = 0;
+	membarrier_execve(current);
 	rseq_execve(current);
 	acct_update_integrals(current);
 	task_numa_free(current, false);

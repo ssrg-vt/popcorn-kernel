@@ -9,6 +9,7 @@
 #include <linux/bug.h>
 #include <linux/bitmap.h>
 #include <linux/err.h>
+#include <drm/drmP.h>
 
 /**
  * Max hardware block count: For ex: max 12 SSPP pipes or

@@ -65,12 +65,18 @@ static int e3x0_button_probe(struct platform_device *pdev)
 	int error;
 
 	irq_press = platform_get_irq_byname(pdev, "press");
-	if (irq_press < 0)
+	if (irq_press < 0) {
+		dev_err(&pdev->dev, "No IRQ for 'press', error=%d\n",
+			irq_press);
 		return irq_press;
+	}
 
 	irq_release = platform_get_irq_byname(pdev, "release");
-	if (irq_release < 0)
+	if (irq_release < 0) {
+		dev_err(&pdev->dev, "No IRQ for 'release', error=%d\n",
+			irq_release);
 		return irq_release;
+	}
 
 	input = devm_input_allocate_device(&pdev->dev);
 	if (!input)

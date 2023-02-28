@@ -206,4 +206,13 @@ static struct thermal_governor thermal_gov_step_wise = {
 	.name		= "step_wise",
 	.throttle	= step_wise_throttle,
 };
-THERMAL_GOVERNOR_DECLARE(thermal_gov_step_wise);
+
+int thermal_gov_step_wise_register(void)
+{
+	return thermal_register_governor(&thermal_gov_step_wise);
+}
+
+void thermal_gov_step_wise_unregister(void)
+{
+	thermal_unregister_governor(&thermal_gov_step_wise);
+}

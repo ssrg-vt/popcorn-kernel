@@ -32,7 +32,7 @@ static const struct pci_device_id pciidlist[] = {
 };
 MODULE_DEVICE_TABLE(pci, pciidlist);
 
-static const struct drm_fb_helper_funcs vbox_fb_helper_funcs = {
+static struct drm_fb_helper_funcs vbox_fb_helper_funcs = {
 	.fb_probe = vboxfb_create,
 };
 
@@ -191,12 +191,18 @@ static struct pci_driver vbox_pci_driver = {
 
 static const struct file_operations vbox_fops = {
 	.owner = THIS_MODULE,
-	DRM_VRAM_MM_FILE_OPERATIONS
+	.open = drm_open,
+	.release = drm_release,
+	.unlocked_ioctl = drm_ioctl,
+	.compat_ioctl = drm_compat_ioctl,
+	.mmap = vbox_mmap,
+	.poll = drm_poll,
+	.read = drm_read,
 };
 
 static struct drm_driver driver = {
 	.driver_features =
-	    DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC,
+	    DRIVER_MODESET | DRIVER_GEM | DRIVER_PRIME | DRIVER_ATOMIC,
 
 	.lastclose = drm_fb_helper_lastclose,
 
@@ -209,7 +215,20 @@ static struct drm_driver driver = {
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
 
-	DRM_GEM_VRAM_DRIVER,
+	.gem_free_object_unlocked = vbox_gem_free_object,
+	.dumb_create = vbox_dumb_create,
+	.dumb_map_offset = vbox_dumb_mmap_offset,
+	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
+	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
+	.gem_prime_export = drm_gem_prime_export,
+	.gem_prime_import = drm_gem_prime_import,
+	.gem_prime_pin = vbox_gem_prime_pin,
+	.gem_prime_unpin = vbox_gem_prime_unpin,
+	.gem_prime_get_sg_table = vbox_gem_prime_get_sg_table,
+	.gem_prime_import_sg_table = vbox_gem_prime_import_sg_table,
+	.gem_prime_vmap = vbox_gem_prime_vmap,
+	.gem_prime_vunmap = vbox_gem_prime_vunmap,
+	.gem_prime_mmap = vbox_gem_prime_mmap,
 };
 
 static int __init vbox_init(void)

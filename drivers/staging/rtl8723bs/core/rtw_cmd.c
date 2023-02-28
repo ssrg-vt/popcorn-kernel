@@ -8,7 +8,6 @@
 
 #include <drv_types.h>
 #include <rtw_debug.h>
-#include <hal_btcoex.h>
 #include <linux/jiffies.h>
 
 static struct _cmd_callback rtw_cmd_callback[] = {
@@ -402,7 +401,7 @@ int rtw_cmd_thread(void *context)
 {
 	u8 ret;
 	struct cmd_obj *pcmd;
-	u8 *pcmdbuf;
+	u8 *pcmdbuf, *prspbuf;
 	unsigned long cmd_start_time;
 	unsigned long cmd_process_time;
 	u8 (*cmd_hdl)(struct adapter *padapter, u8 *pbuf);
@@ -414,6 +413,7 @@ int rtw_cmd_thread(void *context)
 	thread_enter("RTW_CMD_THREAD");
 
 	pcmdbuf = pcmdpriv->cmd_buf;
+	prspbuf = pcmdpriv->rsp_buf;
 
 	pcmdpriv->stop_req = 0;
 	atomic_set(&(pcmdpriv->cmdthd_running), true);
@@ -767,7 +767,7 @@ exit:
 
 u8 rtw_joinbss_cmd(struct adapter  *padapter, struct wlan_network *pnetwork)
 {
-	u8 res = _SUCCESS;
+	u8 *auth, res = _SUCCESS;
 	uint	t_len = 0;
 	struct wlan_bssid_ex		*psecnetwork;
 	struct cmd_obj		*pcmd;
@@ -824,6 +824,7 @@ u8 rtw_joinbss_cmd(struct adapter  *padapter, struct wlan_network *pnetwork)
 
 	memcpy(psecnetwork, &pnetwork->network, get_wlan_bssid_ex_sz(&pnetwork->network));
 
+	auth = &psecuritypriv->authenticator_ie[0];
 	psecuritypriv->authenticator_ie[0] = (unsigned char)psecnetwork->IELength;
 
 	if ((psecnetwork->IELength-12) < (256-1)) {
@@ -1438,7 +1439,7 @@ static void dynamic_chk_wk_hdl(struct adapter *padapter)
 	/*  */
 	/*  BT-Coexist */
 	/*  */
-	hal_btcoex_Handler(padapter);
+	rtw_btcoex_Handler(padapter);
 
 
 	/* always call rtw_ps_processor() at last one. */
@@ -1461,7 +1462,7 @@ void lps_ctrl_wk_hdl(struct adapter *padapter, u8 lps_ctrl_type)
 	switch (lps_ctrl_type) {
 	case LPS_CTRL_SCAN:
 		/* DBG_871X("LPS_CTRL_SCAN\n"); */
-		hal_btcoex_ScanNotify(padapter, true);
+		rtw_btcoex_ScanNotify(padapter, true);
 
 		if (check_fwstate(pmlmepriv, _FW_LINKED) == true) {
 			/*  connect */
@@ -1490,7 +1491,7 @@ void lps_ctrl_wk_hdl(struct adapter *padapter, u8 lps_ctrl_type)
 	case LPS_CTRL_SPECIAL_PACKET:
 		/* DBG_871X("LPS_CTRL_SPECIAL_PACKET\n"); */
 		pwrpriv->DelayLPSLastTimeStamp = jiffies;
-		hal_btcoex_SpecialPacketNotify(padapter, PACKET_DHCP);
+		rtw_btcoex_SpecialPacketNotify(padapter, PACKET_DHCP);
 		LPS_Leave(padapter, "LPS_CTRL_SPECIAL_PACKET");
 		break;
 	case LPS_CTRL_LEAVE:
@@ -1593,7 +1594,7 @@ static void rtw_lps_change_dtim_hdl(struct adapter *padapter, u8 dtim)
 	if (dtim <= 0 || dtim > 16)
 		return;
 
-	if (hal_btcoex_IsBtControlLps(padapter) == true)
+	if (rtw_btcoex_IsBtControlLps(padapter) == true)
 		return;
 
 	mutex_lock(&pwrpriv->lock);
@@ -1659,6 +1660,22 @@ exit:
 
 }
 
+static void power_saving_wk_hdl(struct adapter *padapter)
+{
+	 rtw_ps_processor(padapter);
+}
+
+/* add for CONFIG_IEEE80211W, none 11w can use it */
+static void reset_securitypriv_hdl(struct adapter *padapter)
+{
+	 rtw_reset_securitypriv(padapter);
+}
+
+static void free_assoc_resources_hdl(struct adapter *padapter)
+{
+	 rtw_free_assoc_resources(padapter, 1);
+}
+
 u8 rtw_ps_cmd(struct adapter *padapter)
 {
 	struct cmd_obj		*ppscmd;
@@ -1721,7 +1738,7 @@ static void rtw_chk_hi_queue_hdl(struct adapter *padapter)
 			pstapriv->tim_bitmap &= ~BIT(0);
 			pstapriv->sta_dz_bitmap &= ~BIT(0);
 
-			if (update_tim)
+			if (update_tim == true)
 				update_beacon(padapter, _TIM_IE_, NULL, true);
 		} else {/* re check again */
 			rtw_chk_hi_queue_cmd(padapter);
@@ -1817,12 +1834,17 @@ static void rtw_btinfo_hdl(struct adapter *adapter, u8 *buf, u16 buf_len)
 		len = info->len;
 	}
 
+/* define DBG_PROC_SET_BTINFO_EVT */
+#ifdef DBG_PROC_SET_BTINFO_EVT
+	btinfo_evt_dump(RTW_DBGDUMP, info);
+#endif
+
 	/* transform BT-FW btinfo to WiFI-FW C2H format and notify */
 	if (cmd_idx == BTINFO_WIFI_FETCH)
 		buf[1] = 0;
 	else if (cmd_idx == BTINFO_BT_AUTO_RPT)
 		buf[1] = 2;
-	hal_btcoex_BtInfoNotify(adapter, len+1, &buf[1]);
+	rtw_btcoex_BtInfoNotify(adapter, len+1, &buf[1]);
 }
 
 u8 rtw_c2h_packet_wk_cmd(struct adapter *padapter, u8 *pbuf, u16 length)
@@ -1912,7 +1934,7 @@ static void c2h_wk_callback(_workitem *work)
 			c2h_evt = rtw_malloc(16);
 			if (c2h_evt != NULL) {
 				/* This C2H event is not read, read & clear now */
-				if (c2h_evt_read_88xx(adapter, c2h_evt) != _SUCCESS) {
+				if (rtw_hal_c2h_evt_read(adapter, c2h_evt) != _SUCCESS) {
 					kfree(c2h_evt);
 					continue;
 				}
@@ -1955,7 +1977,7 @@ u8 rtw_drvextra_cmd_hdl(struct adapter *padapter, unsigned char *pbuf)
 		dynamic_chk_wk_hdl(padapter);
 		break;
 	case POWER_SAVING_CTRL_WK_CID:
-		rtw_ps_processor(padapter);
+		power_saving_wk_hdl(padapter);
 		break;
 	case LPS_CTRL_WK_CID:
 		lps_ctrl_wk_hdl(padapter, (u8)pdrvextra_cmd->type);
@@ -1971,10 +1993,10 @@ u8 rtw_drvextra_cmd_hdl(struct adapter *padapter, unsigned char *pbuf)
 		break;
 	/* add for CONFIG_IEEE80211W, none 11w can use it */
 	case RESET_SECURITYPRIV:
-		rtw_reset_securitypriv(padapter);
+		reset_securitypriv_hdl(padapter);
 		break;
 	case FREE_ASSOC_RESOURCES:
-		rtw_free_assoc_resources(padapter, 1);
+		free_assoc_resources_hdl(padapter);
 		break;
 	case C2H_WK_CID:
 		rtw_hal_set_hwreg_with_buf(padapter, HW_VAR_C2H_HANDLE, pdrvextra_cmd->pbuf, pdrvextra_cmd->size);

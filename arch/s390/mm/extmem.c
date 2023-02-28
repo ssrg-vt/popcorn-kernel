@@ -19,7 +19,6 @@
 #include <linux/memblock.h>
 #include <linux/ctype.h>
 #include <linux/ioport.h>
-#include <linux/refcount.h>
 #include <asm/diag.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
@@ -65,7 +64,7 @@ struct dcss_segment {
 	char res_name[16];
 	unsigned long start_addr;
 	unsigned long end;
-	refcount_t ref_count;
+	atomic_t ref_count;
 	int do_nonshared;
 	unsigned int vm_segtype;
 	struct qrange range[6];
@@ -363,7 +362,7 @@ __segment_load (char *name, int do_nonshared, unsigned long *addr, unsigned long
 	seg->start_addr = start_addr;
 	seg->end = end_addr;
 	seg->do_nonshared = do_nonshared;
-	refcount_set(&seg->ref_count, 1);
+	atomic_set(&seg->ref_count, 1);
 	list_add(&seg->list, &dcss_list);
 	*addr = seg->start_addr;
 	*end  = seg->end;
@@ -423,7 +422,7 @@ segment_load (char *name, int do_nonshared, unsigned long *addr,
 		rc = __segment_load (name, do_nonshared, addr, end);
 	else {
 		if (do_nonshared == seg->do_nonshared) {
-			refcount_inc(&seg->ref_count);
+			atomic_inc(&seg->ref_count);
 			*addr = seg->start_addr;
 			*end  = seg->end;
 			rc    = seg->vm_segtype;
@@ -469,7 +468,7 @@ segment_modify_shared (char *name, int do_nonshared)
 		rc = 0;
 		goto out_unlock;
 	}
-	if (refcount_read(&seg->ref_count) != 1) {
+	if (atomic_read (&seg->ref_count) != 1) {
 		pr_warn("DCSS %s is in use and cannot be reloaded\n", name);
 		rc = -EAGAIN;
 		goto out_unlock;
@@ -545,7 +544,7 @@ segment_unload(char *name)
 		pr_err("Unloading unknown DCSS %s failed\n", name);
 		goto out_unlock;
 	}
-	if (!refcount_dec_and_test(&seg->ref_count))
+	if (atomic_dec_return(&seg->ref_count) != 0)
 		goto out_unlock;
 	release_resource(seg->res);
 	kfree(seg->res);

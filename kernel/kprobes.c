@@ -962,15 +962,8 @@ static struct kprobe *alloc_aggr_kprobe(struct kprobe *p)
 #ifdef CONFIG_KPROBES_ON_FTRACE
 static struct ftrace_ops kprobe_ftrace_ops __read_mostly = {
 	.func = kprobe_ftrace_handler,
-	.flags = FTRACE_OPS_FL_SAVE_REGS,
-};
-
-static struct ftrace_ops kprobe_ipmodify_ops __read_mostly = {
-	.func = kprobe_ftrace_handler,
 	.flags = FTRACE_OPS_FL_SAVE_REGS | FTRACE_OPS_FL_IPMODIFY,
 };
-
-static int kprobe_ipmodify_enabled;
 static int kprobe_ftrace_enabled;
 
 /* Must ensure p->addr is really on ftrace */
@@ -983,74 +976,57 @@ static int prepare_kprobe(struct kprobe *p)
 }
 
 /* Caller must lock kprobe_mutex */
-static int __arm_kprobe_ftrace(struct kprobe *p, struct ftrace_ops *ops,
-			       int *cnt)
+static int arm_kprobe_ftrace(struct kprobe *p)
 {
 	int ret = 0;
 
-	ret = ftrace_set_filter_ip(ops, (unsigned long)p->addr, 0, 0);
+	ret = ftrace_set_filter_ip(&kprobe_ftrace_ops,
+				   (unsigned long)p->addr, 0, 0);
 	if (ret) {
 		pr_debug("Failed to arm kprobe-ftrace at %pS (%d)\n",
 			 p->addr, ret);
 		return ret;
 	}
 
-	if (*cnt == 0) {
-		ret = register_ftrace_function(ops);
+	if (kprobe_ftrace_enabled == 0) {
+		ret = register_ftrace_function(&kprobe_ftrace_ops);
 		if (ret) {
 			pr_debug("Failed to init kprobe-ftrace (%d)\n", ret);
 			goto err_ftrace;
 		}
 	}
 
-	(*cnt)++;
+	kprobe_ftrace_enabled++;
 	return ret;
 
 err_ftrace:
 	/*
-	 * At this point, sinec ops is not registered, we should be sefe from
-	 * registering empty filter.
+	 * Note: Since kprobe_ftrace_ops has IPMODIFY set, and ftrace requires a
+	 * non-empty filter_hash for IPMODIFY ops, we're safe from an accidental
+	 * empty filter_hash which would undesirably trace all functions.
 	 */
-	ftrace_set_filter_ip(ops, (unsigned long)p->addr, 1, 0);
+	ftrace_set_filter_ip(&kprobe_ftrace_ops, (unsigned long)p->addr, 1, 0);
 	return ret;
 }
 
-static int arm_kprobe_ftrace(struct kprobe *p)
-{
-	bool ipmodify = (p->post_handler != NULL);
-
-	return __arm_kprobe_ftrace(p,
-		ipmodify ? &kprobe_ipmodify_ops : &kprobe_ftrace_ops,
-		ipmodify ? &kprobe_ipmodify_enabled : &kprobe_ftrace_enabled);
-}
-
 /* Caller must lock kprobe_mutex */
-static int __disarm_kprobe_ftrace(struct kprobe *p, struct ftrace_ops *ops,
-				  int *cnt)
+static int disarm_kprobe_ftrace(struct kprobe *p)
 {
 	int ret = 0;
 
-	if (*cnt == 1) {
-		ret = unregister_ftrace_function(ops);
+	if (kprobe_ftrace_enabled == 1) {
+		ret = unregister_ftrace_function(&kprobe_ftrace_ops);
 		if (WARN(ret < 0, "Failed to unregister kprobe-ftrace (%d)\n", ret))
 			return ret;
 	}
 
-	(*cnt)--;
+	kprobe_ftrace_enabled--;
 
-	ret = ftrace_set_filter_ip(ops, (unsigned long)p->addr, 1, 0);
+	ret = ftrace_set_filter_ip(&kprobe_ftrace_ops,
+			   (unsigned long)p->addr, 1, 0);
 	WARN_ONCE(ret < 0, "Failed to disarm kprobe-ftrace at %pS (%d)\n",
 		  p->addr, ret);
 	return ret;
-}
-
-static int disarm_kprobe_ftrace(struct kprobe *p)
-{
-	bool ipmodify = (p->post_handler != NULL);
-
-	return __disarm_kprobe_ftrace(p,
-		ipmodify ? &kprobe_ipmodify_ops : &kprobe_ftrace_ops,
-		ipmodify ? &kprobe_ipmodify_enabled : &kprobe_ftrace_enabled);
 }
 #else	/* !CONFIG_KPROBES_ON_FTRACE */
 #define prepare_kprobe(p)	arch_prepare_kprobe(p)
@@ -1931,7 +1907,7 @@ int register_kretprobe(struct kretprobe *rp)
 
 	/* Pre-allocate memory for max kretprobe instances */
 	if (rp->maxactive <= 0) {
-#ifdef CONFIG_PREEMPTION
+#ifdef CONFIG_PREEMPT
 		rp->maxactive = max_t(unsigned int, 10, 2*num_possible_cpus());
 #else
 		rp->maxactive = num_possible_cpus();
@@ -2301,7 +2277,6 @@ static int __init init_kprobes(void)
 		init_test_probes();
 	return err;
 }
-subsys_initcall(init_kprobes);
 
 #ifdef CONFIG_DEBUG_FS
 static void report_probe(struct seq_file *pi, struct kprobe *p,
@@ -2596,21 +2571,36 @@ static const struct file_operations fops_kp = {
 
 static int __init debugfs_kprobe_init(void)
 {
-	struct dentry *dir;
+	struct dentry *dir, *file;
 	unsigned int value = 1;
 
 	dir = debugfs_create_dir("kprobes", NULL);
+	if (!dir)
+		return -ENOMEM;
 
-	debugfs_create_file("list", 0400, dir, NULL,
-			    &debugfs_kprobes_operations);
+	file = debugfs_create_file("list", 0400, dir, NULL,
+				&debugfs_kprobes_operations);
+	if (!file)
+		goto error;
 
-	debugfs_create_file("enabled", 0600, dir, &value, &fops_kp);
+	file = debugfs_create_file("enabled", 0600, dir,
+					&value, &fops_kp);
+	if (!file)
+		goto error;
 
-	debugfs_create_file("blacklist", 0400, dir, NULL,
-			    &debugfs_kprobe_blacklist_ops);
+	file = debugfs_create_file("blacklist", 0400, dir, NULL,
+				&debugfs_kprobe_blacklist_ops);
+	if (!file)
+		goto error;
 
 	return 0;
+
+error:
+	debugfs_remove(dir);
+	return -ENOMEM;
 }
 
 late_initcall(debugfs_kprobe_init);
 #endif /* CONFIG_DEBUG_FS */
+
+module_init(init_kprobes);

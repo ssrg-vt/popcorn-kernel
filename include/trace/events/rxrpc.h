@@ -23,17 +23,20 @@
 #define __RXRPC_DECLARE_TRACE_ENUMS_ONCE_ONLY
 
 enum rxrpc_skb_trace {
-	rxrpc_skb_cleaned,
-	rxrpc_skb_freed,
-	rxrpc_skb_got,
-	rxrpc_skb_lost,
-	rxrpc_skb_new,
-	rxrpc_skb_purged,
-	rxrpc_skb_received,
-	rxrpc_skb_rotated,
-	rxrpc_skb_seen,
-	rxrpc_skb_unshared,
-	rxrpc_skb_unshared_nomem,
+	rxrpc_skb_rx_cleaned,
+	rxrpc_skb_rx_freed,
+	rxrpc_skb_rx_got,
+	rxrpc_skb_rx_lost,
+	rxrpc_skb_rx_purged,
+	rxrpc_skb_rx_received,
+	rxrpc_skb_rx_rotated,
+	rxrpc_skb_rx_seen,
+	rxrpc_skb_tx_cleaned,
+	rxrpc_skb_tx_freed,
+	rxrpc_skb_tx_got,
+	rxrpc_skb_tx_new,
+	rxrpc_skb_tx_rotated,
+	rxrpc_skb_tx_seen,
 };
 
 enum rxrpc_local_trace {
@@ -225,17 +228,20 @@ enum rxrpc_tx_point {
  * Declare tracing information enums and their string mappings for display.
  */
 #define rxrpc_skb_traces \
-	EM(rxrpc_skb_cleaned,			"CLN") \
-	EM(rxrpc_skb_freed,			"FRE") \
-	EM(rxrpc_skb_got,			"GOT") \
-	EM(rxrpc_skb_lost,			"*L*") \
-	EM(rxrpc_skb_new,			"NEW") \
-	EM(rxrpc_skb_purged,			"PUR") \
-	EM(rxrpc_skb_received,			"RCV") \
-	EM(rxrpc_skb_rotated,			"ROT") \
-	EM(rxrpc_skb_seen,			"SEE") \
-	EM(rxrpc_skb_unshared,			"UNS") \
-	E_(rxrpc_skb_unshared_nomem,		"US0")
+	EM(rxrpc_skb_rx_cleaned,		"Rx CLN") \
+	EM(rxrpc_skb_rx_freed,			"Rx FRE") \
+	EM(rxrpc_skb_rx_got,			"Rx GOT") \
+	EM(rxrpc_skb_rx_lost,			"Rx *L*") \
+	EM(rxrpc_skb_rx_purged,			"Rx PUR") \
+	EM(rxrpc_skb_rx_received,		"Rx RCV") \
+	EM(rxrpc_skb_rx_rotated,		"Rx ROT") \
+	EM(rxrpc_skb_rx_seen,			"Rx SEE") \
+	EM(rxrpc_skb_tx_cleaned,		"Tx CLN") \
+	EM(rxrpc_skb_tx_freed,			"Tx FRE") \
+	EM(rxrpc_skb_tx_got,			"Tx GOT") \
+	EM(rxrpc_skb_tx_new,			"Tx NEW") \
+	EM(rxrpc_skb_tx_rotated,		"Tx ROT") \
+	E_(rxrpc_skb_tx_seen,			"Tx SEE")
 
 #define rxrpc_local_traces \
 	EM(rxrpc_local_got,			"GOT") \
@@ -519,10 +525,10 @@ TRACE_EVENT(rxrpc_local,
 	    );
 
 TRACE_EVENT(rxrpc_peer,
-	    TP_PROTO(unsigned int peer_debug_id, enum rxrpc_peer_trace op,
+	    TP_PROTO(struct rxrpc_peer *peer, enum rxrpc_peer_trace op,
 		     int usage, const void *where),
 
-	    TP_ARGS(peer_debug_id, op, usage, where),
+	    TP_ARGS(peer, op, usage, where),
 
 	    TP_STRUCT__entry(
 		    __field(unsigned int,	peer		)
@@ -532,7 +538,7 @@ TRACE_EVENT(rxrpc_peer,
 			     ),
 
 	    TP_fast_assign(
-		    __entry->peer = peer_debug_id;
+		    __entry->peer = peer->debug_id;
 		    __entry->op = op;
 		    __entry->usage = usage;
 		    __entry->where = where;
@@ -546,10 +552,10 @@ TRACE_EVENT(rxrpc_peer,
 	    );
 
 TRACE_EVENT(rxrpc_conn,
-	    TP_PROTO(unsigned int conn_debug_id, enum rxrpc_conn_trace op,
+	    TP_PROTO(struct rxrpc_connection *conn, enum rxrpc_conn_trace op,
 		     int usage, const void *where),
 
-	    TP_ARGS(conn_debug_id, op, usage, where),
+	    TP_ARGS(conn, op, usage, where),
 
 	    TP_STRUCT__entry(
 		    __field(unsigned int,	conn		)
@@ -559,7 +565,7 @@ TRACE_EVENT(rxrpc_conn,
 			     ),
 
 	    TP_fast_assign(
-		    __entry->conn = conn_debug_id;
+		    __entry->conn = conn->debug_id;
 		    __entry->op = op;
 		    __entry->usage = usage;
 		    __entry->where = where;
@@ -606,10 +612,10 @@ TRACE_EVENT(rxrpc_client,
 	    );
 
 TRACE_EVENT(rxrpc_call,
-	    TP_PROTO(unsigned int call_debug_id, enum rxrpc_call_trace op,
+	    TP_PROTO(struct rxrpc_call *call, enum rxrpc_call_trace op,
 		     int usage, const void *where, const void *aux),
 
-	    TP_ARGS(call_debug_id, op, usage, where, aux),
+	    TP_ARGS(call, op, usage, where, aux),
 
 	    TP_STRUCT__entry(
 		    __field(unsigned int,		call		)
@@ -620,7 +626,7 @@ TRACE_EVENT(rxrpc_call,
 			     ),
 
 	    TP_fast_assign(
-		    __entry->call = call_debug_id;
+		    __entry->call = call->debug_id;
 		    __entry->op = op;
 		    __entry->usage = usage;
 		    __entry->where = where;
@@ -637,14 +643,13 @@ TRACE_EVENT(rxrpc_call,
 
 TRACE_EVENT(rxrpc_skb,
 	    TP_PROTO(struct sk_buff *skb, enum rxrpc_skb_trace op,
-		     int usage, int mod_count, u8 flags,    const void *where),
+		     int usage, int mod_count, const void *where),
 
-	    TP_ARGS(skb, op, usage, mod_count, flags, where),
+	    TP_ARGS(skb, op, usage, mod_count, where),
 
 	    TP_STRUCT__entry(
 		    __field(struct sk_buff *,		skb		)
 		    __field(enum rxrpc_skb_trace,	op		)
-		    __field(u8,				flags		)
 		    __field(int,			usage		)
 		    __field(int,			mod_count	)
 		    __field(const void *,		where		)
@@ -652,16 +657,14 @@ TRACE_EVENT(rxrpc_skb,
 
 	    TP_fast_assign(
 		    __entry->skb = skb;
-		    __entry->flags = flags;
 		    __entry->op = op;
 		    __entry->usage = usage;
 		    __entry->mod_count = mod_count;
 		    __entry->where = where;
 			   ),
 
-	    TP_printk("s=%p %cx %s u=%d m=%d p=%pSR",
+	    TP_printk("s=%p %s u=%d m=%d p=%pSR",
 		      __entry->skb,
-		      __entry->flags & RXRPC_SKB_TX_BUFFER ? 'T' : 'R',
 		      __print_symbolic(__entry->op, rxrpc_skb_traces),
 		      __entry->usage,
 		      __entry->mod_count,

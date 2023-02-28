@@ -245,8 +245,7 @@ resetsema:
 	spinaphore_init(&ptcg_sem, max_purges);
 }
 
-#ifdef CONFIG_SMP
-static void
+void
 ia64_global_tlb_purge (struct mm_struct *mm, unsigned long start,
 		       unsigned long end, unsigned long nbits)
 {
@@ -283,7 +282,6 @@ ia64_global_tlb_purge (struct mm_struct *mm, unsigned long start,
                 activate_context(active_mm);
         }
 }
-#endif /* CONFIG_SMP */
 
 void
 local_flush_tlb_all (void)
@@ -334,7 +332,7 @@ __flush_tlb_range (struct vm_area_struct *vma, unsigned long start,
 	preempt_disable();
 #ifdef CONFIG_SMP
 	if (mm != current->active_mm || cpumask_weight(mm_cpumask(mm)) != 1) {
-		ia64_global_tlb_purge(mm, start, end, nbits);
+		platform_global_tlb_purge(mm, start, end, nbits);
 		preempt_enable();
 		return;
 	}

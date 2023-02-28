@@ -109,10 +109,22 @@ static const struct file_operations cache_debugfs_fops = {
 
 static int __init cache_debugfs_init(void)
 {
-	debugfs_create_file("dcache", S_IRUSR, arch_debugfs_dir,
-			    (void *)CACHE_TYPE_DCACHE, &cache_debugfs_fops);
-	debugfs_create_file("icache", S_IRUSR, arch_debugfs_dir,
-			    (void *)CACHE_TYPE_ICACHE, &cache_debugfs_fops);
+	struct dentry *dcache_dentry, *icache_dentry;
+
+	dcache_dentry = debugfs_create_file("dcache", S_IRUSR, arch_debugfs_dir,
+					    (unsigned int *)CACHE_TYPE_DCACHE,
+					    &cache_debugfs_fops);
+	if (!dcache_dentry)
+		return -ENOMEM;
+
+	icache_dentry = debugfs_create_file("icache", S_IRUSR, arch_debugfs_dir,
+					    (unsigned int *)CACHE_TYPE_ICACHE,
+					    &cache_debugfs_fops);
+	if (!icache_dentry) {
+		debugfs_remove(dcache_dentry);
+		return -ENOMEM;
+	}
+
 	return 0;
 }
 module_init(cache_debugfs_init);

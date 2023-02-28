@@ -1508,10 +1508,10 @@ void qed_int_cau_conf_sb(struct qed_hwfn *p_hwfn,
 
 		qed_dmae_host2grc(p_hwfn, p_ptt, (u64)(uintptr_t)&phys_addr,
 				  CAU_REG_SB_ADDR_MEMORY +
-				  igu_sb_id * sizeof(u64), 2, NULL);
+				  igu_sb_id * sizeof(u64), 2, 0);
 		qed_dmae_host2grc(p_hwfn, p_ptt, (u64)(uintptr_t)&sb_entry,
 				  CAU_REG_SB_VAR_MEMORY +
-				  igu_sb_id * sizeof(u64), 2, NULL);
+				  igu_sb_id * sizeof(u64), 2, 0);
 	} else {
 		/* Initialize Status Block Address */
 		STORE_RT_REG_AGG(p_hwfn,
@@ -2362,7 +2362,7 @@ int qed_int_set_timer_res(struct qed_hwfn *p_hwfn, struct qed_ptt *p_ptt,
 
 	rc = qed_dmae_grc2host(p_hwfn, p_ptt, CAU_REG_SB_VAR_MEMORY +
 			       sb_id * sizeof(u64),
-			       (u64)(uintptr_t)&sb_entry, 2, NULL);
+			       (u64)(uintptr_t)&sb_entry, 2, 0);
 	if (rc) {
 		DP_ERR(p_hwfn, "dmae_grc2host failed %d\n", rc);
 		return rc;
@@ -2376,7 +2376,7 @@ int qed_int_set_timer_res(struct qed_hwfn *p_hwfn, struct qed_ptt *p_ptt,
 	rc = qed_dmae_host2grc(p_hwfn, p_ptt,
 			       (u64)(uintptr_t)&sb_entry,
 			       CAU_REG_SB_VAR_MEMORY +
-			       sb_id * sizeof(u64), 2, NULL);
+			       sb_id * sizeof(u64), 2, 0);
 	if (rc) {
 		DP_ERR(p_hwfn, "dmae_host2grc failed %d\n", rc);
 		return rc;

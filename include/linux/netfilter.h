@@ -15,6 +15,7 @@
 #include <linux/netdevice.h>
 #include <net/net_namespace.h>
 
+#ifdef CONFIG_NETFILTER
 static inline int NF_DROP_GETERR(int verdict)
 {
 	return -(verdict >> NF_VERDICT_QBITS);
@@ -117,7 +118,6 @@ struct nf_hook_entries {
 	 */
 };
 
-#ifdef CONFIG_NETFILTER
 static inline struct nf_hook_ops **nf_hook_entries_get_hook_ops(const struct nf_hook_entries *e)
 {
 	unsigned int n = e->num_hook_entries;
@@ -336,6 +336,11 @@ int compat_nf_getsockopt(struct sock *sk, u_int8_t pf, int optval,
 		char __user *opt, int *len);
 #endif
 
+/* Call this before modifying an existing packet: ensures it is
+   modifiable and linear to the point you care about (writable_len).
+   Returns true or false. */
+int skb_make_writable(struct sk_buff *skb, unsigned int writable_len);
+
 struct flowi;
 struct nf_queue_entry;
 
@@ -422,7 +427,7 @@ nf_nat_decode_session(struct sk_buff *skb, struct flowi *fl, u_int8_t family)
 }
 #endif /*CONFIG_NETFILTER*/
 
-#if IS_ENABLED(CONFIG_NF_CONNTRACK)
+#if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 #include <linux/netfilter/nf_conntrack_zones_common.h>
 
 extern void (*ip_ct_attach)(struct sk_buff *, const struct sk_buff *) __rcu;

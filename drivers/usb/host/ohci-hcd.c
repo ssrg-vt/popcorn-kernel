@@ -40,7 +40,6 @@
 #include <linux/dmapool.h>
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
-#include <linux/genalloc.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -457,7 +456,7 @@ static int ohci_init (struct ohci_hcd *ohci)
 	struct usb_hcd *hcd = ohci_to_hcd(ohci);
 
 	/* Accept arbitrarily long scatter-gather lists */
-	if (!hcd->localmem_pool)
+	if (!(hcd->driver->flags & HCD_LOCAL_MEM))
 		hcd->self.sg_tablesize = ~0;
 
 	if (distrust_firmware)
@@ -515,15 +514,8 @@ static int ohci_init (struct ohci_hcd *ohci)
 	timer_setup(&ohci->io_watchdog, io_watchdog_func, 0);
 	ohci->prev_frame_no = IO_WATCHDOG_OFF;
 
-	if (hcd->localmem_pool)
-		ohci->hcca = gen_pool_dma_alloc_align(hcd->localmem_pool,
-						sizeof(*ohci->hcca),
-						&ohci->hcca_dma, 256);
-	else
-		ohci->hcca = dma_alloc_coherent(hcd->self.controller,
-						sizeof(*ohci->hcca),
-						&ohci->hcca_dma,
-						GFP_KERNEL);
+	ohci->hcca = dma_alloc_coherent (hcd->self.controller,
+			sizeof(*ohci->hcca), &ohci->hcca_dma, GFP_KERNEL);
 	if (!ohci->hcca)
 		return -ENOMEM;
 
@@ -1007,14 +999,9 @@ static void ohci_stop (struct usb_hcd *hcd)
 	remove_debug_files (ohci);
 	ohci_mem_cleanup (ohci);
 	if (ohci->hcca) {
-		if (hcd->localmem_pool)
-			gen_pool_free(hcd->localmem_pool,
-				      (unsigned long)ohci->hcca,
-				      sizeof(*ohci->hcca));
-		else
-			dma_free_coherent(hcd->self.controller,
-					  sizeof(*ohci->hcca),
-					  ohci->hcca, ohci->hcca_dma);
+		dma_free_coherent (hcd->self.controller,
+				sizeof *ohci->hcca,
+				ohci->hcca, ohci->hcca_dma);
 		ohci->hcca = NULL;
 		ohci->hcca_dma = 0;
 	}
@@ -1187,7 +1174,7 @@ static const struct hc_driver ohci_hc_driver = {
 	 * generic hardware linkage
 	*/
 	.irq =                  ohci_irq,
-	.flags =                HCD_MEMORY | HCD_DMA | HCD_USB11,
+	.flags =                HCD_MEMORY | HCD_USB11,
 
 	/*
 	* basic lifecycle operations

@@ -54,9 +54,9 @@ ENTRY(vmx_vmenter)
 	ret
 
 3:	cmpb $0, kvm_rebooting
-	je 4f
-	ret
-4:	ud2
+	jne 4f
+	call kvm_spurious_fault
+4:	ret
 
 	.pushsection .fixup, "ax"
 5:	jmp 3b
@@ -94,7 +94,7 @@ ENDPROC(vmx_vmexit)
 
 /**
  * __vmx_vcpu_run - Run a vCPU via a transition to VMX guest mode
- * @vmx:	struct vcpu_vmx * (forwarded to vmx_update_host_rsp)
+ * @vmx:	struct vcpu_vmx *
  * @regs:	unsigned long * (to guest registers)
  * @launched:	%true if the VMCS has been launched
  *
@@ -151,7 +151,7 @@ ENTRY(__vmx_vcpu_run)
 	mov VCPU_R14(%_ASM_AX), %r14
 	mov VCPU_R15(%_ASM_AX), %r15
 #endif
-	/* Load guest RAX.  This kills the @regs pointer! */
+	/* Load guest RAX.  This kills the vmx_vcpu pointer! */
 	mov VCPU_RAX(%_ASM_AX), %_ASM_AX
 
 	/* Enter guest mode */

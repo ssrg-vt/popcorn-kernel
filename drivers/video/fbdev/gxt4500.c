@@ -643,9 +643,10 @@ static int gxt4500_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	info = framebuffer_alloc(sizeof(struct gxt4500_par), &pdev->dev);
-	if (!info)
+	if (!info) {
+		dev_err(&pdev->dev, "gxt4500: cannot alloc FB info record\n");
 		goto err_free_fb;
-
+	}
 	par = info->par;
 	cardtype = ent->driver_data;
 	par->refclk_ps = cardinfo[cardtype].refclk_ps;

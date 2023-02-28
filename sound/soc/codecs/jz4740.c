@@ -318,6 +318,7 @@ static int jz4740_codec_probe(struct platform_device *pdev)
 {
 	int ret;
 	struct jz4740_codec *jz4740_codec;
+	struct resource *mem;
 	void __iomem *base;
 
 	jz4740_codec = devm_kzalloc(&pdev->dev, sizeof(*jz4740_codec),
@@ -325,7 +326,8 @@ static int jz4740_codec_probe(struct platform_device *pdev)
 	if (!jz4740_codec)
 		return -ENOMEM;
 
-	base = devm_platform_ioremap_resource(pdev, 0);
+	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	base = devm_ioremap_resource(&pdev->dev, mem);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 

@@ -1,26 +1,18 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <sys/param.h>
-#include <sys/utsname.h>
 #include <inttypes.h>
-#include <stdlib.h>
-#include <string.h>
 #include <api/fs/fs.h>
-#include <linux/zalloc.h>
-#include <perf/cpumap.h>
 
 #include "cputopo.h"
 #include "cpumap.h"
-#include "debug.h"
+#include "util.h"
 #include "env.h"
+
 
 #define CORE_SIB_FMT \
 	"%s/devices/system/cpu/cpu%d/topology/core_siblings_list"
-#define DIE_SIB_FMT \
-	"%s/devices/system/cpu/cpu%d/topology/die_cpus_list"
 #define THRD_SIB_FMT \
 	"%s/devices/system/cpu/cpu%d/topology/thread_siblings_list"
-#define THRD_SIB_FMT_NEW \
-	"%s/devices/system/cpu/cpu%d/topology/core_cpus_list"
 #define NODE_ONLINE_FMT \
 	"%s/devices/system/node/online"
 #define NODE_MEMINFO_FMT \
@@ -42,12 +34,12 @@ static int build_cpu_topology(struct cpu_topology *tp, int cpu)
 		  sysfs__mountpoint(), cpu);
 	fp = fopen(filename, "r");
 	if (!fp)
-		goto try_dies;
+		goto try_threads;
 
 	sret = getline(&buf, &len, fp);
 	fclose(fp);
 	if (sret <= 0)
-		goto try_dies;
+		goto try_threads;
 
 	p = strchr(buf, '\n');
 	if (p)
@@ -65,44 +57,9 @@ static int build_cpu_topology(struct cpu_topology *tp, int cpu)
 	}
 	ret = 0;
 
-try_dies:
-	if (!tp->die_siblings)
-		goto try_threads;
-
-	scnprintf(filename, MAXPATHLEN, DIE_SIB_FMT,
-		  sysfs__mountpoint(), cpu);
-	fp = fopen(filename, "r");
-	if (!fp)
-		goto try_threads;
-
-	sret = getline(&buf, &len, fp);
-	fclose(fp);
-	if (sret <= 0)
-		goto try_threads;
-
-	p = strchr(buf, '\n');
-	if (p)
-		*p = '\0';
-
-	for (i = 0; i < tp->die_sib; i++) {
-		if (!strcmp(buf, tp->die_siblings[i]))
-			break;
-	}
-	if (i == tp->die_sib) {
-		tp->die_siblings[i] = buf;
-		tp->die_sib++;
-		buf = NULL;
-		len = 0;
-	}
-	ret = 0;
-
 try_threads:
-	scnprintf(filename, MAXPATHLEN, THRD_SIB_FMT_NEW,
+	scnprintf(filename, MAXPATHLEN, THRD_SIB_FMT,
 		  sysfs__mountpoint(), cpu);
-	if (access(filename, F_OK) == -1) {
-		scnprintf(filename, MAXPATHLEN, THRD_SIB_FMT,
-			  sysfs__mountpoint(), cpu);
-	}
 	fp = fopen(filename, "r");
 	if (!fp)
 		goto done;
@@ -141,51 +98,26 @@ void cpu_topology__delete(struct cpu_topology *tp)
 	for (i = 0 ; i < tp->core_sib; i++)
 		zfree(&tp->core_siblings[i]);
 
-	if (tp->die_sib) {
-		for (i = 0 ; i < tp->die_sib; i++)
-			zfree(&tp->die_siblings[i]);
-	}
-
 	for (i = 0 ; i < tp->thread_sib; i++)
 		zfree(&tp->thread_siblings[i]);
 
 	free(tp);
 }
 
-static bool has_die_topology(void)
-{
-	char filename[MAXPATHLEN];
-	struct utsname uts;
-
-	if (uname(&uts) < 0)
-		return false;
-
-	if (strncmp(uts.machine, "x86_64", 6))
-		return false;
-
-	scnprintf(filename, MAXPATHLEN, DIE_SIB_FMT,
-		  sysfs__mountpoint(), 0);
-	if (access(filename, F_OK) == -1)
-		return false;
-
-	return true;
-}
-
 struct cpu_topology *cpu_topology__new(void)
 {
 	struct cpu_topology *tp = NULL;
 	void *addr;
-	u32 nr, i, nr_addr;
+	u32 nr, i;
 	size_t sz;
 	long ncpus;
 	int ret = -1;
-	struct perf_cpu_map *map;
-	bool has_die = has_die_topology();
+	struct cpu_map *map;
 
 	ncpus = cpu__max_present_cpu();
 
 	/* build online CPU map */
-	map = perf_cpu_map__new(NULL);
+	map = cpu_map__new(NULL);
 	if (map == NULL) {
 		pr_debug("failed to get system cpumap\n");
 		return NULL;
@@ -194,11 +126,7 @@ struct cpu_topology *cpu_topology__new(void)
 	nr = (u32)(ncpus & UINT_MAX);
 
 	sz = nr * sizeof(char *);
-	if (has_die)
-		nr_addr = 3;
-	else
-		nr_addr = 2;
-	addr = calloc(1, sizeof(*tp) + nr_addr * sz);
+	addr = calloc(1, sizeof(*tp) + 2 * sz);
 	if (!addr)
 		goto out_free;
 
@@ -206,10 +134,6 @@ struct cpu_topology *cpu_topology__new(void)
 	addr += sizeof(*tp);
 	tp->core_siblings = addr;
 	addr += sz;
-	if (has_die) {
-		tp->die_siblings = addr;
-		addr += sz;
-	}
 	tp->thread_siblings = addr;
 
 	for (i = 0; i < nr; i++) {
@@ -222,7 +146,7 @@ struct cpu_topology *cpu_topology__new(void)
 	}
 
 out_free:
-	perf_cpu_map__put(map);
+	cpu_map__put(map);
 	if (ret) {
 		cpu_topology__delete(tp);
 		tp = NULL;
@@ -292,7 +216,7 @@ err:
 
 struct numa_topology *numa_topology__new(void)
 {
-	struct perf_cpu_map *node_map = NULL;
+	struct cpu_map *node_map = NULL;
 	struct numa_topology *tp = NULL;
 	char path[MAXPATHLEN];
 	char *buf = NULL;
@@ -315,7 +239,7 @@ struct numa_topology *numa_topology__new(void)
 	if (c)
 		*c = '\0';
 
-	node_map = perf_cpu_map__new(buf);
+	node_map = cpu_map__new(buf);
 	if (!node_map)
 		goto out;
 
@@ -338,7 +262,7 @@ struct numa_topology *numa_topology__new(void)
 out:
 	free(buf);
 	fclose(fp);
-	perf_cpu_map__put(node_map);
+	cpu_map__put(node_map);
 	return tp;
 }
 
@@ -347,7 +271,7 @@ void numa_topology__delete(struct numa_topology *tp)
 	u32 i;
 
 	for (i = 0; i < tp->nr; i++)
-		zfree(&tp->nodes[i].cpus);
+		free(tp->nodes[i].cpus);
 
 	free(tp);
 }

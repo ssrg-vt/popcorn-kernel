@@ -39,16 +39,9 @@ EXPORT_SYMBOL_GPL(net_namespace_list);
 DECLARE_RWSEM(net_rwsem);
 EXPORT_SYMBOL_GPL(net_rwsem);
 
-#ifdef CONFIG_KEYS
-static struct key_tag init_net_key_domain = { .usage = REFCOUNT_INIT(1) };
-#endif
-
 struct net init_net = {
 	.count		= REFCOUNT_INIT(1),
 	.dev_base_head	= LIST_HEAD_INIT(init_net.dev_base_head),
-#ifdef CONFIG_KEYS
-	.key_domain	= &init_net_key_domain,
-#endif
 };
 EXPORT_SYMBOL(init_net);
 
@@ -152,17 +145,6 @@ static void ops_free(const struct pernet_operations *ops, struct net *net)
 	}
 }
 
-static void ops_pre_exit_list(const struct pernet_operations *ops,
-			      struct list_head *net_exit_list)
-{
-	struct net *net;
-
-	if (ops->pre_exit) {
-		list_for_each_entry(net, net_exit_list, exit_list)
-			ops->pre_exit(net);
-	}
-}
-
 static void ops_exit_list(const struct pernet_operations *ops,
 			  struct list_head *net_exit_list)
 {
@@ -245,12 +227,11 @@ static int __peernet2id(struct net *net, struct net *peer)
 	return __peernet2id_alloc(net, peer, &no);
 }
 
-static void rtnl_net_notifyid(struct net *net, int cmd, int id, u32 portid,
-			      struct nlmsghdr *nlh, gfp_t gfp);
+static void rtnl_net_notifyid(struct net *net, int cmd, int id);
 /* This function returns the id of a peer netns. If no id is assigned, one will
  * be allocated and returned.
  */
-int peernet2id_alloc(struct net *net, struct net *peer, gfp_t gfp)
+int peernet2id_alloc(struct net *net, struct net *peer)
 {
 	bool alloc = false, alive = false;
 	int id;
@@ -269,7 +250,7 @@ int peernet2id_alloc(struct net *net, struct net *peer, gfp_t gfp)
 	id = __peernet2id_alloc(net, peer, &alloc);
 	spin_unlock_bh(&net->nsid_lock);
 	if (alloc && id >= 0)
-		rtnl_net_notifyid(net, RTM_NEWNSID, id, 0, NULL, gfp);
+		rtnl_net_notifyid(net, RTM_NEWNSID, id);
 	if (alive)
 		put_net(peer);
 	return id;
@@ -349,12 +330,6 @@ out_undo:
 	list_add(&net->exit_list, &net_exit_list);
 	saved_ops = ops;
 	list_for_each_entry_continue_reverse(ops, &pernet_list, list)
-		ops_pre_exit_list(ops, &net_exit_list);
-
-	synchronize_rcu();
-
-	ops = saved_ops;
-	list_for_each_entry_continue_reverse(ops, &pernet_list, list)
 		ops_exit_list(ops, &net_exit_list);
 
 	ops = saved_ops;
@@ -412,22 +387,10 @@ static struct net *net_alloc(void)
 	if (!net)
 		goto out_free;
 
-#ifdef CONFIG_KEYS
-	net->key_domain = kzalloc(sizeof(struct key_tag), GFP_KERNEL);
-	if (!net->key_domain)
-		goto out_free_2;
-	refcount_set(&net->key_domain->usage, 1);
-#endif
-
 	rcu_assign_pointer(net->gen, ng);
 out:
 	return net;
 
-#ifdef CONFIG_KEYS
-out_free_2:
-	kmem_cache_free(net_cachep, net);
-	net = NULL;
-#endif
 out_free:
 	kfree(ng);
 	goto out;
@@ -479,7 +442,6 @@ struct net *copy_net_ns(unsigned long flags,
 
 	if (rv < 0) {
 put_userns:
-		key_remove_domain(net->key_domain);
 		put_user_ns(user_ns);
 		net_drop_ns(net);
 dec_ucounts:
@@ -534,8 +496,7 @@ static void unhash_nsid(struct net *net, struct net *last)
 			idr_remove(&tmp->netns_ids, id);
 		spin_unlock_bh(&tmp->nsid_lock);
 		if (id >= 0)
-			rtnl_net_notifyid(tmp, RTM_DELNSID, id, 0, NULL,
-					  GFP_KERNEL);
+			rtnl_net_notifyid(tmp, RTM_DELNSID, id);
 		if (tmp == last)
 			break;
 	}
@@ -580,15 +541,10 @@ static void cleanup_net(struct work_struct *work)
 		list_add_tail(&net->exit_list, &net_exit_list);
 	}
 
-	/* Run all of the network namespace pre_exit methods */
-	list_for_each_entry_reverse(ops, &pernet_list, list)
-		ops_pre_exit_list(ops, &net_exit_list);
-
 	/*
 	 * Another CPU might be rcu-iterating the list, wait for it.
 	 * This needs to be before calling the exit() notifiers, so
 	 * the rcu_barrier() below isn't sufficient alone.
-	 * Also the pre_exit() and exit() methods need this barrier.
 	 */
 	synchronize_rcu();
 
@@ -611,7 +567,6 @@ static void cleanup_net(struct work_struct *work)
 	list_for_each_entry_safe(net, tmp, &net_exit_list, exit_list) {
 		list_del_init(&net->exit_list);
 		dec_net_namespaces(net->ucounts);
-		key_remove_domain(net->key_domain);
 		put_user_ns(net->user_ns);
 		net_drop_ns(net);
 	}
@@ -767,8 +722,7 @@ static int rtnl_net_newid(struct sk_buff *skb, struct nlmsghdr *nlh,
 	err = alloc_netid(net, peer, nsid);
 	spin_unlock_bh(&net->nsid_lock);
 	if (err >= 0) {
-		rtnl_net_notifyid(net, RTM_NEWNSID, err, NETLINK_CB(skb).portid,
-				  nlh, GFP_KERNEL);
+		rtnl_net_notifyid(net, RTM_NEWNSID, err);
 		err = 0;
 	} else if (err == -ENOSPC && nsid >= 0) {
 		err = -EEXIST;
@@ -1055,19 +1009,16 @@ end:
 	return err < 0 ? err : skb->len;
 }
 
-static void rtnl_net_notifyid(struct net *net, int cmd, int id, u32 portid,
-			      struct nlmsghdr *nlh, gfp_t gfp)
+static void rtnl_net_notifyid(struct net *net, int cmd, int id)
 {
 	struct net_fill_args fillargs = {
-		.portid = portid,
-		.seq = nlh ? nlh->nlmsg_seq : 0,
 		.cmd = cmd,
 		.nsid = id,
 	};
 	struct sk_buff *msg;
 	int err = -ENOMEM;
 
-	msg = nlmsg_new(rtnl_net_get_size(), gfp);
+	msg = nlmsg_new(rtnl_net_get_size(), GFP_KERNEL);
 	if (!msg)
 		goto out;
 
@@ -1075,7 +1026,7 @@ static void rtnl_net_notifyid(struct net *net, int cmd, int id, u32 portid,
 	if (err < 0)
 		goto err_out;
 
-	rtnl_notify(msg, net, portid, RTNLGRP_NSID, nlh, gfp);
+	rtnl_notify(msg, net, 0, RTNLGRP_NSID, NULL, 0);
 	return;
 
 err_out:
@@ -1150,8 +1101,6 @@ static int __register_pernet_operations(struct list_head *list,
 out_undo:
 	/* If I have an error cleanup all namespaces I initialized */
 	list_del(&ops->list);
-	ops_pre_exit_list(ops, &net_exit_list);
-	synchronize_rcu();
 	ops_exit_list(ops, &net_exit_list);
 	ops_free_list(ops, &net_exit_list);
 	return error;
@@ -1166,8 +1115,6 @@ static void __unregister_pernet_operations(struct pernet_operations *ops)
 	/* See comment in __register_pernet_operations() */
 	for_each_net(net)
 		list_add_tail(&net->exit_list, &net_exit_list);
-	ops_pre_exit_list(ops, &net_exit_list);
-	synchronize_rcu();
 	ops_exit_list(ops, &net_exit_list);
 	ops_free_list(ops, &net_exit_list);
 }
@@ -1192,8 +1139,6 @@ static void __unregister_pernet_operations(struct pernet_operations *ops)
 	} else {
 		LIST_HEAD(net_exit_list);
 		list_add(&init_net.exit_list, &net_exit_list);
-		ops_pre_exit_list(ops, &net_exit_list);
-		synchronize_rcu();
 		ops_exit_list(ops, &net_exit_list);
 		ops_free_list(ops, &net_exit_list);
 	}

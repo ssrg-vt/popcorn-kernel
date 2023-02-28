@@ -11,7 +11,6 @@ source $TEST_DIR/fw_lib.sh
 
 export HAS_FW_LOADER_USER_HELPER=""
 export HAS_FW_LOADER_USER_HELPER_FALLBACK=""
-export HAS_FW_LOADER_COMPRESS=""
 
 run_tests()
 {

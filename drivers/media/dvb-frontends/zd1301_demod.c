@@ -421,7 +421,8 @@ static int zd1301_demod_i2c_master_xfer(struct i2c_adapter *adapter,
 	} else {
 		dev_dbg(&pdev->dev, "unknown msg[0].len=%u\n", msg[0].len);
 		ret = -EOPNOTSUPP;
-		goto err;
+		if (ret)
+			goto err;
 	}
 
 	return num;

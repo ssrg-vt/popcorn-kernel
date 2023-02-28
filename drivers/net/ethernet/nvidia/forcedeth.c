@@ -713,21 +713,6 @@ struct nv_skb_map {
 	struct nv_skb_map *next_tx_ctx;
 };
 
-struct nv_txrx_stats {
-	u64 stat_rx_packets;
-	u64 stat_rx_bytes; /* not always available in HW */
-	u64 stat_rx_missed_errors;
-	u64 stat_rx_dropped;
-	u64 stat_tx_packets; /* not always available in HW */
-	u64 stat_tx_bytes;
-	u64 stat_tx_dropped;
-};
-
-#define nv_txrx_stats_inc(member) \
-		__this_cpu_inc(np->txrx_stats->member)
-#define nv_txrx_stats_add(member, count) \
-		__this_cpu_add(np->txrx_stats->member, (count))
-
 /*
  * SMP locking:
  * All hardware access under netdev_priv(dev)->lock, except the performance
@@ -812,7 +797,10 @@ struct fe_priv {
 
 	/* RX software stats */
 	struct u64_stats_sync swstats_rx_syncp;
-	struct nv_txrx_stats __percpu *txrx_stats;
+	u64 stat_rx_packets;
+	u64 stat_rx_bytes; /* not always available in HW */
+	u64 stat_rx_missed_errors;
+	u64 stat_rx_dropped;
 
 	/* media detection workaround.
 	 * Locking: Within irq hander or disable_irq+spin_lock(&np->lock);
@@ -838,6 +826,9 @@ struct fe_priv {
 
 	/* TX software stats */
 	struct u64_stats_sync swstats_tx_syncp;
+	u64 stat_tx_packets; /* not always available in HW */
+	u64 stat_tx_bytes;
+	u64 stat_tx_dropped;
 
 	/* msi/msi-x fields */
 	u32 msi_flags;
@@ -1730,39 +1721,6 @@ static void nv_update_stats(struct net_device *dev)
 	}
 }
 
-static void nv_get_stats(int cpu, struct fe_priv *np,
-			 struct rtnl_link_stats64 *storage)
-{
-	struct nv_txrx_stats *src = per_cpu_ptr(np->txrx_stats, cpu);
-	unsigned int syncp_start;
-	u64 rx_packets, rx_bytes, rx_dropped, rx_missed_errors;
-	u64 tx_packets, tx_bytes, tx_dropped;
-
-	do {
-		syncp_start = u64_stats_fetch_begin_irq(&np->swstats_rx_syncp);
-		rx_packets       = src->stat_rx_packets;
-		rx_bytes         = src->stat_rx_bytes;
-		rx_dropped       = src->stat_rx_dropped;
-		rx_missed_errors = src->stat_rx_missed_errors;
-	} while (u64_stats_fetch_retry_irq(&np->swstats_rx_syncp, syncp_start));
-
-	storage->rx_packets       += rx_packets;
-	storage->rx_bytes         += rx_bytes;
-	storage->rx_dropped       += rx_dropped;
-	storage->rx_missed_errors += rx_missed_errors;
-
-	do {
-		syncp_start = u64_stats_fetch_begin_irq(&np->swstats_tx_syncp);
-		tx_packets  = src->stat_tx_packets;
-		tx_bytes    = src->stat_tx_bytes;
-		tx_dropped  = src->stat_tx_dropped;
-	} while (u64_stats_fetch_retry_irq(&np->swstats_tx_syncp, syncp_start));
-
-	storage->tx_packets += tx_packets;
-	storage->tx_bytes   += tx_bytes;
-	storage->tx_dropped += tx_dropped;
-}
-
 /*
  * nv_get_stats64: dev->ndo_get_stats64 function
  * Get latest stats value from the nic.
@@ -1775,7 +1733,7 @@ nv_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *storage)
 	__releases(&netdev_priv(dev)->hwstats_lock)
 {
 	struct fe_priv *np = netdev_priv(dev);
-	int cpu;
+	unsigned int syncp_start;
 
 	/*
 	 * Note: because HW stats are not always available and for
@@ -1788,8 +1746,20 @@ nv_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *storage)
 	 */
 
 	/* software stats */
-	for_each_online_cpu(cpu)
-		nv_get_stats(cpu, np, storage);
+	do {
+		syncp_start = u64_stats_fetch_begin_irq(&np->swstats_rx_syncp);
+		storage->rx_packets       = np->stat_rx_packets;
+		storage->rx_bytes         = np->stat_rx_bytes;
+		storage->rx_dropped       = np->stat_rx_dropped;
+		storage->rx_missed_errors = np->stat_rx_missed_errors;
+	} while (u64_stats_fetch_retry_irq(&np->swstats_rx_syncp, syncp_start));
+
+	do {
+		syncp_start = u64_stats_fetch_begin_irq(&np->swstats_tx_syncp);
+		storage->tx_packets = np->stat_tx_packets;
+		storage->tx_bytes   = np->stat_tx_bytes;
+		storage->tx_dropped = np->stat_tx_dropped;
+	} while (u64_stats_fetch_retry_irq(&np->swstats_tx_syncp, syncp_start));
 
 	/* If the nic supports hw counters then retrieve latest values */
 	if (np->driver_data & DEV_HAS_STATISTICS_V123) {
@@ -1857,7 +1827,7 @@ static int nv_alloc_rx(struct net_device *dev)
 		} else {
 packet_dropped:
 			u64_stats_update_begin(&np->swstats_rx_syncp);
-			nv_txrx_stats_inc(stat_rx_dropped);
+			np->stat_rx_dropped++;
 			u64_stats_update_end(&np->swstats_rx_syncp);
 			return 1;
 		}
@@ -1899,7 +1869,7 @@ static int nv_alloc_rx_optimized(struct net_device *dev)
 		} else {
 packet_dropped:
 			u64_stats_update_begin(&np->swstats_rx_syncp);
-			nv_txrx_stats_inc(stat_rx_dropped);
+			np->stat_rx_dropped++;
 			u64_stats_update_end(&np->swstats_rx_syncp);
 			return 1;
 		}
@@ -2043,7 +2013,7 @@ static void nv_drain_tx(struct net_device *dev)
 		}
 		if (nv_release_txskb(np, &np->tx_skb[i])) {
 			u64_stats_update_begin(&np->swstats_tx_syncp);
-			nv_txrx_stats_inc(stat_tx_dropped);
+			np->stat_tx_dropped++;
 			u64_stats_update_end(&np->swstats_tx_syncp);
 		}
 		np->tx_skb[i].dma = 0;
@@ -2257,7 +2227,7 @@ static netdev_tx_t nv_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			/* on DMA mapping error - drop the packet */
 			dev_kfree_skb_any(skb);
 			u64_stats_update_begin(&np->swstats_tx_syncp);
-			nv_txrx_stats_inc(stat_tx_dropped);
+			np->stat_tx_dropped++;
 			u64_stats_update_end(&np->swstats_tx_syncp);
 			return NETDEV_TX_OK;
 		}
@@ -2303,7 +2273,7 @@ static netdev_tx_t nv_start_xmit(struct sk_buff *skb, struct net_device *dev)
 				dev_kfree_skb_any(skb);
 				np->put_tx_ctx = start_tx_ctx;
 				u64_stats_update_begin(&np->swstats_tx_syncp);
-				nv_txrx_stats_inc(stat_tx_dropped);
+				np->stat_tx_dropped++;
 				u64_stats_update_end(&np->swstats_tx_syncp);
 				return NETDEV_TX_OK;
 			}
@@ -2414,7 +2384,7 @@ static netdev_tx_t nv_start_xmit_optimized(struct sk_buff *skb,
 			/* on DMA mapping error - drop the packet */
 			dev_kfree_skb_any(skb);
 			u64_stats_update_begin(&np->swstats_tx_syncp);
-			nv_txrx_stats_inc(stat_tx_dropped);
+			np->stat_tx_dropped++;
 			u64_stats_update_end(&np->swstats_tx_syncp);
 			return NETDEV_TX_OK;
 		}
@@ -2461,7 +2431,7 @@ static netdev_tx_t nv_start_xmit_optimized(struct sk_buff *skb,
 				dev_kfree_skb_any(skb);
 				np->put_tx_ctx = start_tx_ctx;
 				u64_stats_update_begin(&np->swstats_tx_syncp);
-				nv_txrx_stats_inc(stat_tx_dropped);
+				np->stat_tx_dropped++;
 				u64_stats_update_end(&np->swstats_tx_syncp);
 				return NETDEV_TX_OK;
 			}
@@ -2590,12 +2560,9 @@ static int nv_tx_done(struct net_device *dev, int limit)
 					    && !(flags & NV_TX_RETRYCOUNT_MASK))
 						nv_legacybackoff_reseed(dev);
 				} else {
-					unsigned int len;
-
 					u64_stats_update_begin(&np->swstats_tx_syncp);
-					nv_txrx_stats_inc(stat_tx_packets);
-					len = np->get_tx_ctx->skb->len;
-					nv_txrx_stats_add(stat_tx_bytes, len);
+					np->stat_tx_packets++;
+					np->stat_tx_bytes += np->get_tx_ctx->skb->len;
 					u64_stats_update_end(&np->swstats_tx_syncp);
 				}
 				bytes_compl += np->get_tx_ctx->skb->len;
@@ -2610,12 +2577,9 @@ static int nv_tx_done(struct net_device *dev, int limit)
 					    && !(flags & NV_TX2_RETRYCOUNT_MASK))
 						nv_legacybackoff_reseed(dev);
 				} else {
-					unsigned int len;
-
 					u64_stats_update_begin(&np->swstats_tx_syncp);
-					nv_txrx_stats_inc(stat_tx_packets);
-					len = np->get_tx_ctx->skb->len;
-					nv_txrx_stats_add(stat_tx_bytes, len);
+					np->stat_tx_packets++;
+					np->stat_tx_bytes += np->get_tx_ctx->skb->len;
 					u64_stats_update_end(&np->swstats_tx_syncp);
 				}
 				bytes_compl += np->get_tx_ctx->skb->len;
@@ -2663,12 +2627,9 @@ static int nv_tx_done_optimized(struct net_device *dev, int limit)
 						nv_legacybackoff_reseed(dev);
 				}
 			} else {
-				unsigned int len;
-
 				u64_stats_update_begin(&np->swstats_tx_syncp);
-				nv_txrx_stats_inc(stat_tx_packets);
-				len = np->get_tx_ctx->skb->len;
-				nv_txrx_stats_add(stat_tx_bytes, len);
+				np->stat_tx_packets++;
+				np->stat_tx_bytes += np->get_tx_ctx->skb->len;
 				u64_stats_update_end(&np->swstats_tx_syncp);
 			}
 
@@ -2845,15 +2806,6 @@ static int nv_getlen(struct net_device *dev, void *packet, int datalen)
 	}
 }
 
-static void rx_missing_handler(u32 flags, struct fe_priv *np)
-{
-	if (flags & NV_RX_MISSEDFRAME) {
-		u64_stats_update_begin(&np->swstats_rx_syncp);
-		nv_txrx_stats_inc(stat_rx_missed_errors);
-		u64_stats_update_end(&np->swstats_rx_syncp);
-	}
-}
-
 static int nv_rx_process(struct net_device *dev, int limit)
 {
 	struct fe_priv *np = netdev_priv(dev);
@@ -2896,7 +2848,11 @@ static int nv_rx_process(struct net_device *dev, int limit)
 					}
 					/* the rest are hard errors */
 					else {
-						rx_missing_handler(flags, np);
+						if (flags & NV_RX_MISSEDFRAME) {
+							u64_stats_update_begin(&np->swstats_rx_syncp);
+							np->stat_rx_missed_errors++;
+							u64_stats_update_end(&np->swstats_rx_syncp);
+						}
 						dev_kfree_skb(skb);
 						goto next_pkt;
 					}
@@ -2940,8 +2896,8 @@ static int nv_rx_process(struct net_device *dev, int limit)
 		skb->protocol = eth_type_trans(skb, dev);
 		napi_gro_receive(&np->napi, skb);
 		u64_stats_update_begin(&np->swstats_rx_syncp);
-		nv_txrx_stats_inc(stat_rx_packets);
-		nv_txrx_stats_add(stat_rx_bytes, len);
+		np->stat_rx_packets++;
+		np->stat_rx_bytes += len;
 		u64_stats_update_end(&np->swstats_rx_syncp);
 next_pkt:
 		if (unlikely(np->get_rx.orig++ == np->last_rx.orig))
@@ -3026,8 +2982,8 @@ static int nv_rx_process_optimized(struct net_device *dev, int limit)
 			}
 			napi_gro_receive(&np->napi, skb);
 			u64_stats_update_begin(&np->swstats_rx_syncp);
-			nv_txrx_stats_inc(stat_rx_packets);
-			nv_txrx_stats_add(stat_rx_bytes, len);
+			np->stat_rx_packets++;
+			np->stat_rx_bytes += len;
 			u64_stats_update_end(&np->swstats_rx_syncp);
 		} else {
 			dev_kfree_skb(skb);
@@ -5695,12 +5651,6 @@ static int nv_probe(struct pci_dev *pci_dev, const struct pci_device_id *id)
 	SET_NETDEV_DEV(dev, &pci_dev->dev);
 	u64_stats_init(&np->swstats_rx_syncp);
 	u64_stats_init(&np->swstats_tx_syncp);
-	np->txrx_stats = alloc_percpu(struct nv_txrx_stats);
-	if (!np->txrx_stats) {
-		pr_err("np->txrx_stats, alloc memory error.\n");
-		err = -ENOMEM;
-		goto out_alloc_percpu;
-	}
 
 	timer_setup(&np->oom_kick, nv_do_rx_refill, 0);
 	timer_setup(&np->nic_poll, nv_do_nic_poll, 0);
@@ -6110,8 +6060,6 @@ out_relreg:
 out_disable:
 	pci_disable_device(pci_dev);
 out_free:
-	free_percpu(np->txrx_stats);
-out_alloc_percpu:
 	free_netdev(dev);
 out:
 	return err;
@@ -6157,9 +6105,6 @@ static void nv_restore_mac_addr(struct pci_dev *pci_dev)
 static void nv_remove(struct pci_dev *pci_dev)
 {
 	struct net_device *dev = pci_get_drvdata(pci_dev);
-	struct fe_priv *np = netdev_priv(dev);
-
-	free_percpu(np->txrx_stats);
 
 	unregister_netdev(dev);
 
@@ -6181,7 +6126,8 @@ static void nv_remove(struct pci_dev *pci_dev)
 #ifdef CONFIG_PM_SLEEP
 static int nv_suspend(struct device *device)
 {
-	struct net_device *dev = dev_get_drvdata(device);
+	struct pci_dev *pdev = to_pci_dev(device);
+	struct net_device *dev = pci_get_drvdata(pdev);
 	struct fe_priv *np = netdev_priv(dev);
 	u8 __iomem *base = get_hwbase(dev);
 	int i;

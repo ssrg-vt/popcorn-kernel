@@ -12,5 +12,4 @@
 /read
 /self
 /setns-dcache
-/setns-sysvipc
 /thread-self

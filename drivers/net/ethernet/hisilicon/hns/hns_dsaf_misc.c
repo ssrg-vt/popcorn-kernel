@@ -754,11 +754,17 @@ struct dsaf_misc_op *hns_misc_op_get(struct dsaf_device *dsaf_dev)
 	return (void *)misc_op;
 }
 
+static int hns_dsaf_dev_match(struct device *dev, void *fwnode)
+{
+	return dev->fwnode == fwnode;
+}
+
 struct
 platform_device *hns_dsaf_find_platform_device(struct fwnode_handle *fwnode)
 {
 	struct device *dev;
 
-	dev = bus_find_device_by_fwnode(&platform_bus_type, fwnode);
+	dev = bus_find_device(&platform_bus_type, NULL,
+			      fwnode, hns_dsaf_dev_match);
 	return dev ? to_platform_device(dev) : NULL;
 }

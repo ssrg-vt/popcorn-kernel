@@ -68,7 +68,6 @@ struct sigaltstack;
 struct rseq;
 union bpf_attr;
 struct io_uring_params;
-struct clone_args;
 
 #include <linux/types.h>
 #include <linux/aio_abi.h>
@@ -265,7 +264,7 @@ static inline void addr_limit_user_check(void)
 
 	if (CHECK_DATA_CORRUPTION(!segment_eq(get_fs(), USER_DS),
 				  "Invalid address limit on user-mode return"))
-		force_sig(SIGKILL);
+		force_sig(SIGKILL, current);
 
 #ifdef TIF_FSCHECK
 	clear_thread_flag(TIF_FSCHECK);
@@ -851,9 +850,6 @@ asmlinkage long sys_clone(unsigned long, unsigned long, int __user *,
 	       int __user *, unsigned long);
 #endif
 #endif
-
-asmlinkage long sys_clone3(struct clone_args __user *uargs, size_t size);
-
 asmlinkage long sys_execve(const char __user *filename,
 		const char __user *const __user *argv,
 		const char __user *const __user *envp);
@@ -931,7 +927,6 @@ asmlinkage long sys_clock_adjtime32(clockid_t which_clock,
 				struct old_timex32 __user *tx);
 asmlinkage long sys_syncfs(int fd);
 asmlinkage long sys_setns(int fd, int nstype);
-asmlinkage long sys_pidfd_open(pid_t pid, unsigned int flags);
 asmlinkage long sys_sendmmsg(int fd, struct mmsghdr __user *msg,
 			     unsigned int vlen, unsigned flags);
 asmlinkage long sys_process_vm_readv(pid_t pid,
@@ -1000,6 +995,15 @@ asmlinkage long sys_fspick(int dfd, const char __user *path, unsigned int flags)
 asmlinkage long sys_pidfd_send_signal(int pidfd, int sig,
 				       siginfo_t __user *info,
 				       unsigned int flags);
+
+/* Popcorn Linux syscalls */
+#include <popcorn/bundle.h>
+asmlinkage long sys_popcorn_migrate(int nid, void __user * uregs);
+asmlinkage long sys_popcorn_propose_migration(pid_t pid, int nid);
+asmlinkage long sys_popcorn_get_thread_status(struct popcorn_thread_status __user *
+					      status);
+asmlinkage long sys_popcorn_get_node_info(int * _my_nid,
+					  struct popcorn_node_info __user * info);
 
 /*
  * Architecture-specific system calls
@@ -1231,8 +1235,8 @@ asmlinkage long sys_ni_syscall(void);
  * the ksys_xyzyyz() functions prototyped below.
  */
 
-int ksys_mount(const char __user *dev_name, const char __user *dir_name,
-	       const char __user *type, unsigned long flags, void __user *data);
+int ksys_mount(char __user *dev_name, char __user *dir_name, char __user *type,
+	       unsigned long flags, void __user *data);
 int ksys_umount(char __user *name, int flags);
 int ksys_dup(unsigned int fildes);
 int ksys_chroot(const char __user *filename);
@@ -1255,6 +1259,15 @@ ssize_t ksys_pread64(unsigned int fd, char __user *buf, size_t count,
 ssize_t ksys_pwrite64(unsigned int fd, const char __user *buf,
 		      size_t count, loff_t pos);
 int ksys_fallocate(int fd, int mode, loff_t offset, loff_t len);
+#ifdef CONFIG_POPCORN
+long ksys_brk(unsigned long brk);
+long ksys_mremap(unsigned long addr,
+		 unsigned long old_len, unsigned long new_len,
+		 unsigned long flags, unsigned long new_addr);
+long ksys_madvise(unsigned long start, size_t len, int behavior);
+long ksys_mprotect(unsigned long start, size_t len,
+		  unsigned long prot);
+#endif
 #ifdef CONFIG_ADVISE_SYSCALLS
 int ksys_fadvise64_64(int fd, loff_t offset, loff_t len, int advice);
 #else

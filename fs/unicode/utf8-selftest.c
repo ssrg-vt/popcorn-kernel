@@ -35,7 +35,7 @@ unsigned int total_tests;
 #define test_f(cond, fmt, ...) _test(cond, __func__, __LINE__, fmt, ##__VA_ARGS__)
 #define test(cond) _test(cond, __func__, __LINE__, "")
 
-static const struct {
+const static struct {
 	/* UTF-8 strings in this vector _must_ be NULL-terminated. */
 	unsigned char str[10];
 	unsigned char dec[10];
@@ -89,7 +89,7 @@ static const struct {
 
 };
 
-static const struct {
+const static struct {
 	/* UTF-8 strings in this vector _must_ be NULL-terminated. */
 	unsigned char str[30];
 	unsigned char ncf[30];

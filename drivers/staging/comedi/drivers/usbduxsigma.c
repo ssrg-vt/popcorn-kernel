@@ -1074,7 +1074,7 @@ static int usbduxsigma_pwm_period(struct comedi_device *dev,
 				  unsigned int period)
 {
 	struct usbduxsigma_private *devpriv = dev->private;
-	int fx2delay;
+	int fx2delay = 255;
 
 	if (period < MIN_PWM_PERIOD)
 		return -EAGAIN;

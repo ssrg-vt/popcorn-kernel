@@ -871,11 +871,12 @@ static void do_scsi_nolinuxstat(struct uiscmdrsp *cmdrsp,
 			return;
 		}
 
-		scsi_for_each_sg(scsicmd, sg, scsi_sg_count(scsicmd), i) {
-			this_page_orig = kmap_atomic(sg_page(sg));
+		sg = scsi_sglist(scsicmd);
+		for (i = 0; i < scsi_sg_count(scsicmd); i++) {
+			this_page_orig = kmap_atomic(sg_page(sg + i));
 			this_page = (void *)((unsigned long)this_page_orig |
-					     sg->offset);
-			memcpy(this_page, buf + bufind, sg->length);
+					     sg[i].offset);
+			memcpy(this_page, buf + bufind, sg[i].length);
 			kunmap_atomic(this_page_orig);
 		}
 		kfree(buf);

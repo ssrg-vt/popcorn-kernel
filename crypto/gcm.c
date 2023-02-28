@@ -152,7 +152,20 @@ out:
 static int crypto_gcm_setauthsize(struct crypto_aead *tfm,
 				  unsigned int authsize)
 {
-	return crypto_gcm_check_authsize(authsize);
+	switch (authsize) {
+	case 4:
+	case 8:
+	case 12:
+	case 13:
+	case 14:
+	case 15:
+	case 16:
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 static void crypto_gcm_init_common(struct aead_request *req)
@@ -749,11 +762,15 @@ static int crypto_rfc4106_setauthsize(struct crypto_aead *parent,
 				      unsigned int authsize)
 {
 	struct crypto_rfc4106_ctx *ctx = crypto_aead_ctx(parent);
-	int err;
 
-	err = crypto_rfc4106_check_authsize(authsize);
-	if (err)
-		return err;
+	switch (authsize) {
+	case 8:
+	case 12:
+	case 16:
+		break;
+	default:
+		return -EINVAL;
+	}
 
 	return crypto_aead_setauthsize(ctx->child, authsize);
 }
@@ -801,11 +818,8 @@ static struct aead_request *crypto_rfc4106_crypt(struct aead_request *req)
 
 static int crypto_rfc4106_encrypt(struct aead_request *req)
 {
-	int err;
-
-	err = crypto_ipsec_check_assoclen(req->assoclen);
-	if (err)
-		return err;
+	if (req->assoclen != 16 && req->assoclen != 20)
+		return -EINVAL;
 
 	req = crypto_rfc4106_crypt(req);
 
@@ -814,11 +828,8 @@ static int crypto_rfc4106_encrypt(struct aead_request *req)
 
 static int crypto_rfc4106_decrypt(struct aead_request *req)
 {
-	int err;
-
-	err = crypto_ipsec_check_assoclen(req->assoclen);
-	if (err)
-		return err;
+	if (req->assoclen != 16 && req->assoclen != 20)
+		return -EINVAL;
 
 	req = crypto_rfc4106_crypt(req);
 
@@ -1034,14 +1045,12 @@ static int crypto_rfc4543_copy_src_to_dst(struct aead_request *req, bool enc)
 
 static int crypto_rfc4543_encrypt(struct aead_request *req)
 {
-	return crypto_ipsec_check_assoclen(req->assoclen) ?:
-	       crypto_rfc4543_crypt(req, true);
+	return crypto_rfc4543_crypt(req, true);
 }
 
 static int crypto_rfc4543_decrypt(struct aead_request *req)
 {
-	return crypto_ipsec_check_assoclen(req->assoclen) ?:
-	       crypto_rfc4543_crypt(req, false);
+	return crypto_rfc4543_crypt(req, false);
 }
 
 static int crypto_rfc4543_init_tfm(struct crypto_aead *tfm)

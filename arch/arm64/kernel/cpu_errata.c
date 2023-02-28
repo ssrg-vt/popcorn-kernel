@@ -12,7 +12,6 @@
 #include <asm/cpu.h>
 #include <asm/cputype.h>
 #include <asm/cpufeature.h>
-#include <asm/smp_plat.h>
 
 static bool __maybe_unused
 is_affected_midr_range(const struct arm64_cpu_capabilities *entry, int scope)
@@ -129,8 +128,8 @@ static void install_bp_hardening_cb(bp_hardening_cb_t fn,
 	int cpu, slot = -1;
 
 	/*
-	 * detect_harden_bp_fw() passes NULL for the hyp_vecs start/end if
-	 * we're a guest. Skip the hyp-vectors work.
+	 * enable_smccc_arch_workaround_1() passes NULL for the hyp_vecs
+	 * start/end if we're a guest. Skip the hyp-vectors work.
 	 */
 	if (!hyp_vecs_start) {
 		__this_cpu_write(bp_hardening_data.fn, fn);
@@ -489,7 +488,6 @@ static const struct midr_range arm64_ssb_cpus[] = {
 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A35),
 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A53),
 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A55),
-	MIDR_ALL_VERSIONS(MIDR_BRAHMA_B53),
 	{},
 };
 
@@ -556,17 +554,6 @@ cpu_enable_cache_maint_trap(const struct arm64_cpu_capabilities *__unused)
 static bool __hardenbp_enab = true;
 static bool __spectrev2_safe = true;
 
-int get_spectre_v2_workaround_state(void)
-{
-	if (__spectrev2_safe)
-		return ARM64_BP_HARDEN_NOT_REQUIRED;
-
-	if (!__hardenbp_enab)
-		return ARM64_BP_HARDEN_UNKNOWN;
-
-	return ARM64_BP_HARDEN_WA_NEEDED;
-}
-
 /*
  * List of CPUs that do not need any Spectre-v2 mitigation at all.
  */
@@ -574,7 +561,6 @@ static const struct midr_range spectre_v2_safe_list[] = {
 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A35),
 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A53),
 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A55),
-	MIDR_ALL_VERSIONS(MIDR_BRAHMA_B53),
 	{ /* sentinel */ }
 };
 
@@ -626,30 +612,6 @@ check_branch_predictor(const struct arm64_cpu_capabilities *entry, int scope)
 	return (need_wa > 0);
 }
 
-static const __maybe_unused struct midr_range tx2_family_cpus[] = {
-	MIDR_ALL_VERSIONS(MIDR_BRCM_VULCAN),
-	MIDR_ALL_VERSIONS(MIDR_CAVIUM_THUNDERX2),
-	{},
-};
-
-static bool __maybe_unused
-needs_tx2_tvm_workaround(const struct arm64_cpu_capabilities *entry,
-			 int scope)
-{
-	int i;
-
-	if (!is_affected_midr_range_list(entry, scope) ||
-	    !is_hyp_mode_available())
-		return false;
-
-	for_each_possible_cpu(i) {
-		if (MPIDR_AFFINITY_LEVEL(cpu_logical_map(i), 0) != 0)
-			return true;
-	}
-
-	return false;
-}
-
 #ifdef CONFIG_HARDEN_EL2_VECTORS
 
 static const struct midr_range arm64_harden_el2_vectors[] = {
@@ -661,23 +623,17 @@ static const struct midr_range arm64_harden_el2_vectors[] = {
 #endif
 
 #ifdef CONFIG_ARM64_WORKAROUND_REPEAT_TLBI
-static const struct arm64_cpu_capabilities arm64_repeat_tlbi_list[] = {
+
+static const struct midr_range arm64_repeat_tlbi_cpus[] = {
 #ifdef CONFIG_QCOM_FALKOR_ERRATUM_1009
-	{
-		ERRATA_MIDR_REV(MIDR_QCOM_FALKOR_V1, 0, 0)
-	},
-	{
-		.midr_range.model = MIDR_QCOM_KRYO,
-		.matches = is_kryo_midr,
-	},
+	MIDR_RANGE(MIDR_QCOM_FALKOR_V1, 0, 0, 0, 0),
 #endif
 #ifdef CONFIG_ARM64_ERRATUM_1286807
-	{
-		ERRATA_MIDR_RANGE(MIDR_CORTEX_A76, 0, 0, 3, 0),
-	},
+	MIDR_RANGE(MIDR_CORTEX_A76, 0, 0, 3, 0),
 #endif
 	{},
 };
+
 #endif
 
 #ifdef CONFIG_CAVIUM_ERRATUM_27456
@@ -745,33 +701,6 @@ static const struct midr_range erratum_1418040_list[] = {
 };
 #endif
 
-#ifdef CONFIG_ARM64_ERRATUM_845719
-static const struct midr_range erratum_845719_list[] = {
-	/* Cortex-A53 r0p[01234] */
-	MIDR_REV_RANGE(MIDR_CORTEX_A53, 0, 0, 4),
-	/* Brahma-B53 r0p[0] */
-	MIDR_REV(MIDR_BRAHMA_B53, 0, 0),
-	{},
-};
-#endif
-
-#ifdef CONFIG_ARM64_ERRATUM_843419
-static const struct arm64_cpu_capabilities erratum_843419_list[] = {
-	{
-		/* Cortex-A53 r0p[01234] */
-		.matches = is_affected_midr_range,
-		ERRATA_MIDR_REV_RANGE(MIDR_CORTEX_A53, 0, 0, 4),
-		MIDR_FIXED(0x4, BIT(8)),
-	},
-	{
-		/* Brahma-B53 r0p[0] */
-		.matches = is_affected_midr_range,
-		ERRATA_MIDR_REV(MIDR_BRAHMA_B53, 0, 0),
-	},
-	{},
-};
-#endif
-
 const struct arm64_cpu_capabilities arm64_errata[] = {
 #ifdef CONFIG_ARM64_WORKAROUND_CLEAN_CACHE
 	{
@@ -803,18 +732,19 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 #endif
 #ifdef CONFIG_ARM64_ERRATUM_843419
 	{
+	/* Cortex-A53 r0p[01234] */
 		.desc = "ARM erratum 843419",
 		.capability = ARM64_WORKAROUND_843419,
-		.type = ARM64_CPUCAP_LOCAL_CPU_ERRATUM,
-		.matches = cpucap_multi_entry_cap_matches,
-		.match_list = erratum_843419_list,
+		ERRATA_MIDR_REV_RANGE(MIDR_CORTEX_A53, 0, 0, 4),
+		MIDR_FIXED(0x4, BIT(8)),
 	},
 #endif
 #ifdef CONFIG_ARM64_ERRATUM_845719
 	{
+	/* Cortex-A53 r0p[01234] */
 		.desc = "ARM erratum 845719",
 		.capability = ARM64_WORKAROUND_845719,
-		ERRATA_MIDR_RANGE_LIST(erratum_845719_list),
+		ERRATA_MIDR_REV_RANGE(MIDR_CORTEX_A53, 0, 0, 4),
 	},
 #endif
 #ifdef CONFIG_CAVIUM_ERRATUM_23154
@@ -850,7 +780,6 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 	{
 		.desc = "Qualcomm Technologies Falkor/Kryo erratum 1003",
 		.capability = ARM64_WORKAROUND_QCOM_FALKOR_E1003,
-		.type = ARM64_CPUCAP_LOCAL_CPU_ERRATUM,
 		.matches = cpucap_multi_entry_cap_matches,
 		.match_list = qcom_erratum_1003_list,
 	},
@@ -859,9 +788,7 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 	{
 		.desc = "Qualcomm erratum 1009, ARM erratum 1286807",
 		.capability = ARM64_WORKAROUND_REPEAT_TLBI,
-		.type = ARM64_CPUCAP_LOCAL_CPU_ERRATUM,
-		.matches = cpucap_multi_entry_cap_matches,
-		.match_list = arm64_repeat_tlbi_list,
+		ERRATA_MIDR_RANGE_LIST(arm64_repeat_tlbi_cpus),
 	},
 #endif
 #ifdef CONFIG_ARM64_ERRATUM_858921
@@ -914,19 +841,6 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 		.matches = has_cortex_a76_erratum_1463225,
 	},
 #endif
-#ifdef CONFIG_CAVIUM_TX2_ERRATUM_219
-	{
-		.desc = "Cavium ThunderX2 erratum 219 (KVM guest sysreg trapping)",
-		.capability = ARM64_WORKAROUND_CAVIUM_TX2_219_TVM,
-		ERRATA_MIDR_RANGE_LIST(tx2_family_cpus),
-		.matches = needs_tx2_tvm_workaround,
-	},
-	{
-		.desc = "Cavium ThunderX2 erratum 219 (PRFM removal)",
-		.capability = ARM64_WORKAROUND_CAVIUM_TX2_219_PRFM,
-		ERRATA_MIDR_RANGE_LIST(tx2_family_cpus),
-	},
-#endif
 	{
 	}
 };
@@ -940,15 +854,13 @@ ssize_t cpu_show_spectre_v1(struct device *dev, struct device_attribute *attr,
 ssize_t cpu_show_spectre_v2(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
-	switch (get_spectre_v2_workaround_state()) {
-	case ARM64_BP_HARDEN_NOT_REQUIRED:
+	if (__spectrev2_safe)
 		return sprintf(buf, "Not affected\n");
-        case ARM64_BP_HARDEN_WA_NEEDED:
+
+	if (__hardenbp_enab)
 		return sprintf(buf, "Mitigation: Branch predictor hardening\n");
-        case ARM64_BP_HARDEN_UNKNOWN:
-	default:
-		return sprintf(buf, "Vulnerable\n");
-	}
+
+	return sprintf(buf, "Vulnerable\n");
 }
 
 ssize_t cpu_show_spec_store_bypass(struct device *dev,

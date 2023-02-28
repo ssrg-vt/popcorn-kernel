@@ -13,14 +13,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <net/if.h>
 #include <sys/resource.h>
 #include <arpa/inet.h>
 #include <netinet/ether.h>
 #include <unistd.h>
 #include <time.h>
-#include "bpf.h"
-#include "libbpf.h"
+#include "bpf/bpf.h"
+#include "bpf/libbpf.h"
 
 #define STATS_INTERVAL_S 2U
 
@@ -70,7 +69,7 @@ static void usage(const char *cmd)
 	printf("Start a XDP prog which send ICMP \"packet too big\" \n"
 		"messages if ingress packet is bigger then MAX_SIZE bytes\n");
 	printf("Usage: %s [...]\n", cmd);
-	printf("    -i <ifname|ifindex> Interface\n");
+	printf("    -i <ifindex> Interface Index\n");
 	printf("    -T <stop-after-X-seconds> Default: 0 (forever)\n");
 	printf("    -S use skb-mode\n");
 	printf("    -N enforce native mode\n");
@@ -103,9 +102,7 @@ int main(int argc, char **argv)
 
 		switch (opt) {
 		case 'i':
-			ifindex = if_nametoindex(optarg);
-			if (!ifindex)
-				ifindex = atoi(optarg);
+			ifindex = atoi(optarg);
 			break;
 		case 'T':
 			kill_after_s = atoi(optarg);
@@ -136,11 +133,6 @@ int main(int argc, char **argv)
 
 	if (setrlimit(RLIMIT_MEMLOCK, &r)) {
 		perror("setrlimit(RLIMIT_MEMLOCK, RLIM_INFINITY)");
-		return 1;
-	}
-
-	if (!ifindex) {
-		fprintf(stderr, "Invalid ifname\n");
 		return 1;
 	}
 

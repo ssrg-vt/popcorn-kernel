@@ -26,7 +26,9 @@ static inline bool sbitmap_deferred_clear(struct sbitmap *sb, int index)
 	/*
 	 * First get a stable cleared mask, setting the old mask to 0.
 	 */
-	mask = xchg(&sb->map[index].cleared, 0);
+	do {
+		mask = sb->map[index].cleared;
+	} while (cmpxchg(&sb->map[index].cleared, mask, 0) != mask);
 
 	/*
 	 * Now clear the masked bits in our free word
@@ -514,8 +516,10 @@ static struct sbq_wait_state *sbq_wake_ptr(struct sbitmap_queue *sbq)
 		struct sbq_wait_state *ws = &sbq->ws[wake_index];
 
 		if (waitqueue_active(&ws->wait)) {
-			if (wake_index != atomic_read(&sbq->wake_index))
-				atomic_set(&sbq->wake_index, wake_index);
+			int o = atomic_read(&sbq->wake_index);
+
+			if (wake_index != o)
+				atomic_cmpxchg(&sbq->wake_index, o, wake_index);
 			return ws;
 		}
 

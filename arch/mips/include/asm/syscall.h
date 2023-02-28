@@ -54,7 +54,7 @@ static inline void mips_syscall_update_nr(struct task_struct *task,
 		task_thread_info(task)->syscall = regs->regs[2];
 }
 
-static inline void mips_get_syscall_arg(unsigned long *arg,
+static inline unsigned long mips_get_syscall_arg(unsigned long *arg,
 	struct task_struct *task, struct pt_regs *regs, unsigned int n)
 {
 	unsigned long usp __maybe_unused = regs->regs[29];
@@ -63,24 +63,23 @@ static inline void mips_get_syscall_arg(unsigned long *arg,
 	case 0: case 1: case 2: case 3:
 		*arg = regs->regs[4 + n];
 
-		return;
+		return 0;
 
 #ifdef CONFIG_32BIT
 	case 4: case 5: case 6: case 7:
-		get_user(*arg, (int *)usp + n);
-		return;
+		return get_user(*arg, (int *)usp + n);
 #endif
 
 #ifdef CONFIG_64BIT
 	case 4: case 5: case 6: case 7:
 #ifdef CONFIG_MIPS32_O32
 		if (test_tsk_thread_flag(task, TIF_32BIT_REGS))
-			get_user(*arg, (int *)usp + n);
+			return get_user(*arg, (int *)usp + n);
 		else
 #endif
 			*arg = regs->regs[4 + n];
 
-		return;
+		return 0;
 #endif
 
 	default:
@@ -88,12 +87,6 @@ static inline void mips_get_syscall_arg(unsigned long *arg,
 	}
 
 	unreachable();
-}
-
-static inline long syscall_get_error(struct task_struct *task,
-				     struct pt_regs *regs)
-{
-	return regs->regs[7] ? -regs->regs[2] : 0;
 }
 
 static inline long syscall_get_return_value(struct task_struct *task,
@@ -127,13 +120,21 @@ static inline void syscall_get_arguments(struct task_struct *task,
 {
 	unsigned int i = 0;
 	unsigned int n = 6;
+	int ret;
 
 	/* O32 ABI syscall() */
 	if (mips_syscall_is_indirect(task, regs))
 		i++;
 
 	while (n--)
-		mips_get_syscall_arg(args++, task, regs, i++);
+		ret |= mips_get_syscall_arg(args++, task, regs, i++);
+
+	/*
+	 * No way to communicate an error because this is a void function.
+	 */
+#if 0
+	return ret;
+#endif
 }
 
 extern const unsigned long sys_call_table[];

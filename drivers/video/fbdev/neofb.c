@@ -2122,7 +2122,14 @@ static void neofb_remove(struct pci_dev *dev)
 	DBG("neofb_remove");
 
 	if (info) {
-		unregister_framebuffer(info);
+		/*
+		 * If unregister_framebuffer fails, then
+		 * we will be leaving hooks that could cause
+		 * oopsen laying around.
+		 */
+		if (unregister_framebuffer(info))
+			printk(KERN_WARNING
+			       "neofb: danger danger!  Oopsen imminent!\n");
 
 		neo_unmap_video(info);
 		fb_destroy_modedb(info->monspecs.modedb);

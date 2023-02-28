@@ -145,10 +145,8 @@ static int calibrate_8916(struct tsens_priv *priv)
 		return PTR_ERR(qfprom_cdata);
 
 	qfprom_csel = (u32 *)qfprom_read(priv->dev, "calib_sel");
-	if (IS_ERR(qfprom_csel)) {
-		kfree(qfprom_cdata);
+	if (IS_ERR(qfprom_csel))
 		return PTR_ERR(qfprom_csel);
-	}
 
 	mode = (qfprom_csel[0] & MSM8916_CAL_SEL_MASK) >> MSM8916_CAL_SEL_SHIFT;
 	dev_dbg(priv->dev, "calibration mode is %d\n", mode);
@@ -183,8 +181,6 @@ static int calibrate_8916(struct tsens_priv *priv)
 	}
 
 	compute_intercept_slope(priv, p1, p2, mode);
-	kfree(qfprom_cdata);
-	kfree(qfprom_csel);
 
 	return 0;
 }
@@ -202,10 +198,8 @@ static int calibrate_8974(struct tsens_priv *priv)
 		return PTR_ERR(calib);
 
 	bkp = (u32 *)qfprom_read(priv->dev, "calib_backup");
-	if (IS_ERR(bkp)) {
-		kfree(calib);
+	if (IS_ERR(bkp))
 		return PTR_ERR(bkp);
-	}
 
 	calib_redun_sel =  bkp[1] & BKP_REDUN_SEL;
 	calib_redun_sel >>= BKP_REDUN_SHIFT;
@@ -319,8 +313,6 @@ static int calibrate_8974(struct tsens_priv *priv)
 	}
 
 	compute_intercept_slope(priv, p1, p2, mode);
-	kfree(calib);
-	kfree(bkp);
 
 	return 0;
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * PowerNV Platform dependent EEH operations
+ * The file intends to implement the platform dependent EEH operations on
+ * powernv platform. Actually, the powernv was created in order to fully
+ * hypervisor support.
  *
  * Copyright Benjamin Herrenschmidt & Gavin Shan, IBM Corporation 2013.
  */
@@ -34,7 +36,6 @@
 
 #include "powernv.h"
 #include "pci.h"
-#include "../../../../drivers/pci/pci.h"
 
 static int eeh_event_irq = -EINVAL;
 
@@ -42,10 +43,13 @@ void pnv_pcibios_bus_add_device(struct pci_dev *pdev)
 {
 	struct pci_dn *pdn = pci_get_pdn(pdev);
 
-	if (!pdn || eeh_has_flag(EEH_FORCE_DISABLED))
+	if (!pdev->is_virtfn)
 		return;
 
-	dev_dbg(&pdev->dev, "EEH: Setting up device\n");
+	/*
+	 * The following operations will fail if VF's sysfs files
+	 * aren't created or its resources aren't finalized.
+	 */
 	eeh_add_device_early(pdn);
 	eeh_add_device_late(pdev);
 	eeh_sysfs_add_device(pdev);
@@ -197,25 +201,6 @@ PNV_EEH_DBGFS_ENTRY(inbB, 0xE10);
 
 #endif /* CONFIG_DEBUG_FS */
 
-void pnv_eeh_enable_phbs(void)
-{
-	struct pci_controller *hose;
-	struct pnv_phb *phb;
-
-	list_for_each_entry(hose, &hose_list, list_node) {
-		phb = hose->private_data;
-		/*
-		 * If EEH is enabled, we're going to rely on that.
-		 * Otherwise, we restore to conventional mechanism
-		 * to clear frozen PE during PCI config access.
-		 */
-		if (eeh_enabled())
-			phb->flags |= PNV_PHB_FLAG_EEH;
-		else
-			phb->flags &= ~PNV_PHB_FLAG_EEH;
-	}
-}
-
 /**
  * pnv_eeh_post_init - EEH platform dependent post initialization
  *
@@ -230,7 +215,9 @@ int pnv_eeh_post_init(void)
 	struct pnv_phb *phb;
 	int ret = 0;
 
-	eeh_show_enabled();
+	/* Probe devices & build address cache */
+	eeh_probe_devices();
+	eeh_addr_cache_build();
 
 	/* Register OPAL event notifier */
 	eeh_event_irq = opal_event_request(ilog2(OPAL_EVENT_PCI_ERROR));
@@ -252,10 +239,18 @@ int pnv_eeh_post_init(void)
 	if (!eeh_enabled())
 		disable_irq(eeh_event_irq);
 
-	pnv_eeh_enable_phbs();
-
 	list_for_each_entry(hose, &hose_list, list_node) {
 		phb = hose->private_data;
+
+		/*
+		 * If EEH is enabled, we're going to rely on that.
+		 * Otherwise, we restore to conventional mechanism
+		 * to clear frozen PE during PCI config access.
+		 */
+		if (eeh_enabled())
+			phb->flags |= PNV_PHB_FLAG_EEH;
+		else
+			phb->flags &= ~PNV_PHB_FLAG_EEH;
 
 		/* Create debugfs entries */
 #ifdef CONFIG_DEBUG_FS
@@ -384,8 +379,6 @@ static void *pnv_eeh_probe(struct pci_dn *pdn, void *data)
 	if ((pdn->class_code >> 8) == PCI_CLASS_BRIDGE_ISA)
 		return NULL;
 
-	eeh_edev_dbg(edev, "Probing device\n");
-
 	/* Initialize eeh device */
 	edev->class_code = pdn->class_code;
 	edev->mode	&= 0xFFFFFF00;
@@ -411,7 +404,9 @@ static void *pnv_eeh_probe(struct pci_dn *pdn, void *data)
 	/* Create PE */
 	ret = eeh_add_to_parent_pe(edev);
 	if (ret) {
-		eeh_edev_warn(edev, "Failed to add device to PE (code %d)\n", ret);
+		pr_warn("%s: Can't add PCI dev %04x:%02x:%02x.%01x to parent PE (%x)\n",
+			__func__, hose->global_number, pdn->busno,
+			PCI_SLOT(pdn->devfn), PCI_FUNC(pdn->devfn), ret);
 		return NULL;
 	}
 
@@ -460,16 +455,10 @@ static void *pnv_eeh_probe(struct pci_dn *pdn, void *data)
 	 * Enable EEH explicitly so that we will do EEH check
 	 * while accessing I/O stuff
 	 */
-	if (!eeh_has_flag(EEH_ENABLED)) {
-		enable_irq(eeh_event_irq);
-		pnv_eeh_enable_phbs();
-		eeh_add_flag(EEH_ENABLED);
-	}
+	eeh_add_flag(EEH_ENABLED);
 
 	/* Save memory bars */
 	eeh_save_bars(edev);
-
-	eeh_edev_dbg(edev, "EEH enabled on device\n");
 
 	return NULL;
 }
@@ -850,7 +839,7 @@ static int __pnv_eeh_bridge_reset(struct pci_dev *dev, int option)
 	int aer = edev ? edev->aer_cap : 0;
 	u32 ctrl;
 
-	pr_debug("%s: Secondary Reset PCI bus %04x:%02x with option %d\n",
+	pr_debug("%s: Reset PCI bus %04x:%02x with option %d\n",
 		 __func__, pci_domain_nr(dev->bus),
 		 dev->bus->number, option);
 
@@ -907,10 +896,6 @@ static int pnv_eeh_bridge_reset(struct pci_dev *pdev, int option)
 	/* Hot reset to the bus if firmware cannot handle */
 	if (!dn || !of_get_property(dn, "ibm,reset-by-firmware", NULL))
 		return __pnv_eeh_bridge_reset(pdev, option);
-
-	pr_debug("%s: FW reset PCI bus %04x:%02x with option %d\n",
-		 __func__, pci_domain_nr(pdev->bus),
-		 pdev->bus->number, option);
 
 	switch (option) {
 	case EEH_RESET_FUNDAMENTAL:
@@ -1130,37 +1115,17 @@ static int pnv_eeh_reset(struct eeh_pe *pe, int option)
 		return -EIO;
 	}
 
-	if (pci_is_root_bus(bus))
-		return pnv_eeh_root_reset(hose, option);
-
 	/*
-	 * For hot resets try use the generic PCI error recovery reset
-	 * functions. These correctly handles the case where the secondary
-	 * bus is behind a hotplug slot and it will use the slot provided
-	 * reset methods to prevent spurious hotplug events during the reset.
+	 * If dealing with the root bus (or the bus underneath the
+	 * root port), we reset the bus underneath the root port.
 	 *
-	 * Fundemental resets need to be handled internally to EEH since the
-	 * PCI core doesn't really have a concept of a fundemental reset,
-	 * mainly because there's no standard way to generate one. Only a
-	 * few devices require an FRESET so it should be fine.
+	 * The cxl driver depends on this behaviour for bi-modal card
+	 * switching.
 	 */
-	if (option != EEH_RESET_FUNDAMENTAL) {
-		/*
-		 * NB: Skiboot and pnv_eeh_bridge_reset() also no-op the
-		 *     de-assert step. It's like the OPAL reset API was
-		 *     poorly designed or something...
-		 */
-		if (option == EEH_RESET_DEACTIVATE)
-			return 0;
-
-		rc = pci_bus_error_reset(bus->self);
-		if (!rc)
-			return 0;
-	}
-
-	/* otherwise, use the generic bridge reset. this might call into FW */
-	if (pci_is_root_bus(bus->parent))
+	if (pci_is_root_bus(bus) ||
+	    pci_is_root_bus(bus->parent))
 		return pnv_eeh_root_reset(hose, option);
+
 	return pnv_eeh_bridge_reset(bus->self, option);
 }
 

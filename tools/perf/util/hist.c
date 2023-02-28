@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "callchain.h"
-#include "debug.h"
-#include "dso.h"
+#include "util.h"
 #include "build-id.h"
 #include "hist.h"
 #include "map.h"
-#include "map_symbol.h"
-#include "branch.h"
-#include "mem-events.h"
 #include "session.h"
 #include "namespaces.h"
 #include "sort.h"
@@ -23,10 +19,7 @@
 #include <math.h>
 #include <inttypes.h>
 #include <sys/param.h>
-#include <linux/rbtree.h>
-#include <linux/string.h>
 #include <linux/time64.h>
-#include <linux/zalloc.h>
 
 static bool hists__filter_entry_by_dso(struct hists *hists,
 				       struct hist_entry *he);
@@ -386,24 +379,6 @@ void hists__delete_entries(struct hists *hists)
 	}
 }
 
-struct hist_entry *hists__get_entry(struct hists *hists, int idx)
-{
-	struct rb_node *next = rb_first_cached(&hists->entries);
-	struct hist_entry *n;
-	int i = 0;
-
-	while (next) {
-		n = rb_entry(next, struct hist_entry, rb_node);
-		if (i == idx)
-			return n;
-
-		next = rb_next(&n->rb_node);
-		i++;
-	}
-
-	return NULL;
-}
-
 /*
  * histogram, sorted on item, collects periods
  */
@@ -482,16 +457,16 @@ static int hist_entry__init(struct hist_entry *he,
 	return 0;
 
 err_srcline:
-	zfree(&he->srcline);
+	free(he->srcline);
 
 err_rawdata:
-	zfree(&he->raw_data);
+	free(he->raw_data);
 
 err_infos:
 	if (he->branch_info) {
 		map__put(he->branch_info->from.map);
 		map__put(he->branch_info->to.map);
-		zfree(&he->branch_info);
+		free(he->branch_info);
 	}
 	if (he->mem_info) {
 		map__put(he->mem_info->iaddr.map);
@@ -499,7 +474,7 @@ err_infos:
 	}
 err:
 	map__zput(he->ms.map);
-	zfree(&he->stat_acc);
+	free(he->stat_acc);
 	return -ENOMEM;
 }
 
@@ -602,8 +577,6 @@ static struct hist_entry *hists__findnew_entry(struct hists *hists,
 			 */
 			mem_info__zput(entry->mem_info);
 
-			block_info__zput(entry->block_info);
-
 			/* If the map of an existing hist_entry has
 			 * become out-of-date due to an exec() or
 			 * similar, update it.  Otherwise we will
@@ -675,7 +648,6 @@ __hists__add_entry(struct hists *hists,
 		   struct symbol *sym_parent,
 		   struct branch_info *bi,
 		   struct mem_info *mi,
-		   struct block_info *block_info,
 		   struct perf_sample *sample,
 		   bool sample_self,
 		   struct hist_entry_ops *ops)
@@ -708,7 +680,6 @@ __hists__add_entry(struct hists *hists,
 		.hists	= hists,
 		.branch_info = bi,
 		.mem_info = mi,
-		.block_info = block_info,
 		.transaction = sample->transaction,
 		.raw_data = sample->raw_data,
 		.raw_size = sample->raw_size,
@@ -731,7 +702,7 @@ struct hist_entry *hists__add_entry(struct hists *hists,
 				    struct perf_sample *sample,
 				    bool sample_self)
 {
-	return __hists__add_entry(hists, al, sym_parent, bi, mi, NULL,
+	return __hists__add_entry(hists, al, sym_parent, bi, mi,
 				  sample, sample_self, NULL);
 }
 
@@ -744,20 +715,8 @@ struct hist_entry *hists__add_entry_ops(struct hists *hists,
 					struct perf_sample *sample,
 					bool sample_self)
 {
-	return __hists__add_entry(hists, al, sym_parent, bi, mi, NULL,
+	return __hists__add_entry(hists, al, sym_parent, bi, mi,
 				  sample, sample_self, ops);
-}
-
-struct hist_entry *hists__add_entry_block(struct hists *hists,
-					  struct addr_location *al,
-					  struct block_info *block_info)
-{
-	struct hist_entry entry = {
-		.block_info = block_info,
-		.hists = hists,
-	}, *he = hists__findnew_entry(hists, &entry, al, false);
-
-	return he;
 }
 
 static int
@@ -826,7 +785,7 @@ static int
 iter_finish_mem_entry(struct hist_entry_iter *iter,
 		      struct addr_location *al __maybe_unused)
 {
-	struct evsel *evsel = iter->evsel;
+	struct perf_evsel *evsel = iter->evsel;
 	struct hists *hists = evsel__hists(evsel);
 	struct hist_entry *he = iter->he;
 	int err = -EINVAL;
@@ -896,7 +855,7 @@ static int
 iter_add_next_branch_entry(struct hist_entry_iter *iter, struct addr_location *al)
 {
 	struct branch_info *bi;
-	struct evsel *evsel = iter->evsel;
+	struct perf_evsel *evsel = iter->evsel;
 	struct hists *hists = evsel__hists(evsel);
 	struct perf_sample *sample = iter->sample;
 	struct hist_entry *he = NULL;
@@ -948,7 +907,7 @@ iter_prepare_normal_entry(struct hist_entry_iter *iter __maybe_unused,
 static int
 iter_add_single_normal_entry(struct hist_entry_iter *iter, struct addr_location *al)
 {
-	struct evsel *evsel = iter->evsel;
+	struct perf_evsel *evsel = iter->evsel;
 	struct perf_sample *sample = iter->sample;
 	struct hist_entry *he;
 
@@ -966,7 +925,7 @@ iter_finish_normal_entry(struct hist_entry_iter *iter,
 			 struct addr_location *al __maybe_unused)
 {
 	struct hist_entry *he = iter->he;
-	struct evsel *evsel = iter->evsel;
+	struct perf_evsel *evsel = iter->evsel;
 	struct perf_sample *sample = iter->sample;
 
 	if (he == NULL)
@@ -1006,7 +965,7 @@ static int
 iter_add_single_cumulative_entry(struct hist_entry_iter *iter,
 				 struct addr_location *al)
 {
-	struct evsel *evsel = iter->evsel;
+	struct perf_evsel *evsel = iter->evsel;
 	struct hists *hists = evsel__hists(evsel);
 	struct perf_sample *sample = iter->sample;
 	struct hist_entry **he_cache = iter->priv;
@@ -1051,7 +1010,7 @@ static int
 iter_add_next_cumulative_entry(struct hist_entry_iter *iter,
 			       struct addr_location *al)
 {
-	struct evsel *evsel = iter->evsel;
+	struct perf_evsel *evsel = iter->evsel;
 	struct perf_sample *sample = iter->sample;
 	struct hist_entry **he_cache = iter->priv;
 	struct hist_entry *he;
@@ -1257,17 +1216,14 @@ void hist_entry__delete(struct hist_entry *he)
 		mem_info__zput(he->mem_info);
 	}
 
-	if (he->block_info)
-		block_info__zput(he->block_info);
-
 	zfree(&he->res_samples);
 	zfree(&he->stat_acc);
 	free_srcline(he->srcline);
 	if (he->srcfile && he->srcfile[0])
-		zfree(&he->srcfile);
+		free(he->srcfile);
 	free_callchain(he->callchain);
-	zfree(&he->trace_output);
-	zfree(&he->raw_data);
+	free(he->trace_output);
+	free(he->raw_data);
 	ops->free(he);
 }
 
@@ -1625,7 +1581,7 @@ int hists__collapse_resort(struct hists *hists, struct ui_progress *prog)
 	return 0;
 }
 
-static int64_t hist_entry__sort(struct hist_entry *a, struct hist_entry *b)
+static int hist_entry__sort(struct hist_entry *a, struct hist_entry *b)
 {
 	struct hists *hists = a->hists;
 	struct perf_hpp_fmt *fmt;
@@ -1883,7 +1839,7 @@ static void output_resort(struct hists *hists, struct ui_progress *prog,
 	}
 }
 
-void perf_evsel__output_resort_cb(struct evsel *evsel, struct ui_progress *prog,
+void perf_evsel__output_resort_cb(struct perf_evsel *evsel, struct ui_progress *prog,
 				  hists__resort_cb_t cb, void *cb_arg)
 {
 	bool use_callchain;
@@ -1898,7 +1854,7 @@ void perf_evsel__output_resort_cb(struct evsel *evsel, struct ui_progress *prog,
 	output_resort(evsel__hists(evsel), prog, use_callchain, cb, cb_arg);
 }
 
-void perf_evsel__output_resort(struct evsel *evsel, struct ui_progress *prog)
+void perf_evsel__output_resort(struct perf_evsel *evsel, struct ui_progress *prog)
 {
 	return perf_evsel__output_resort_cb(evsel, prog, NULL, NULL);
 }
@@ -2549,25 +2505,6 @@ int hists__link(struct hists *leader, struct hists *other)
 	return 0;
 }
 
-int hists__unlink(struct hists *hists)
-{
-	struct rb_root_cached *root;
-	struct rb_node *nd;
-	struct hist_entry *pos;
-
-	if (hists__has(hists, need_collapse))
-		root = &hists->entries_collapsed;
-	else
-		root = hists->entries_in;
-
-	for (nd = rb_first_cached(root); nd; nd = rb_next(nd)) {
-		pos = rb_entry(nd, struct hist_entry, rb_node_in);
-		list_del_init(&pos->pairs.node);
-	}
-
-	return 0;
-}
-
 void hist__account_cycles(struct branch_stack *bs, struct addr_location *al,
 			  struct perf_sample *sample, bool nonany_branch_mode)
 {
@@ -2602,9 +2539,9 @@ void hist__account_cycles(struct branch_stack *bs, struct addr_location *al,
 	}
 }
 
-size_t perf_evlist__fprintf_nr_events(struct evlist *evlist, FILE *fp)
+size_t perf_evlist__fprintf_nr_events(struct perf_evlist *evlist, FILE *fp)
 {
-	struct evsel *pos;
+	struct perf_evsel *pos;
 	size_t ret = 0;
 
 	evlist__for_each_entry(evlist, pos) {
@@ -2627,11 +2564,11 @@ int __hists__scnprintf_title(struct hists *hists, char *bf, size_t size, bool sh
 	char unit;
 	int printed;
 	const struct dso *dso = hists->dso_filter;
-	struct thread *thread = hists->thread_filter;
+	const struct thread *thread = hists->thread_filter;
 	int socket_id = hists->socket_filter;
 	unsigned long nr_samples = hists->stats.nr_events[PERF_RECORD_SAMPLE];
 	u64 nr_events = hists->stats.total_period;
-	struct evsel *evsel = hists_to_evsel(hists);
+	struct perf_evsel *evsel = hists_to_evsel(hists);
 	const char *ev_name = perf_evsel__name(evsel);
 	char buf[512], sample_freq_str[64] = "";
 	size_t buflen = sizeof(buf);
@@ -2644,7 +2581,7 @@ int __hists__scnprintf_title(struct hists *hists, char *bf, size_t size, bool sh
 	}
 
 	if (perf_evsel__is_group_event(evsel)) {
-		struct evsel *pos;
+		struct perf_evsel *pos;
 
 		perf_evsel__group_desc(evsel, buf, buflen);
 		ev_name = buf;
@@ -2667,12 +2604,12 @@ int __hists__scnprintf_title(struct hists *hists, char *bf, size_t size, bool sh
 		enable_ref = true;
 
 	if (show_freq)
-		scnprintf(sample_freq_str, sizeof(sample_freq_str), " %d Hz,", evsel->core.attr.sample_freq);
+		scnprintf(sample_freq_str, sizeof(sample_freq_str), " %d Hz,", evsel->attr.sample_freq);
 
 	nr_samples = convert_unit(nr_samples, &unit);
 	printed = scnprintf(bf, size,
 			   "Samples: %lu%c of event%s '%s',%s%sEvent count (approx.): %" PRIu64,
-			   nr_samples, unit, evsel->core.nr_members > 1 ? "s" : "",
+			   nr_samples, unit, evsel->nr_members > 1 ? "s" : "",
 			   ev_name, sample_freq_str, enable_ref ? ref : " ", nr_events);
 
 
@@ -2760,7 +2697,7 @@ static void hists__delete_all_entries(struct hists *hists)
 	hists__delete_remaining_entries(&hists->entries_collapsed);
 }
 
-static void hists_evsel__exit(struct evsel *evsel)
+static void hists_evsel__exit(struct perf_evsel *evsel)
 {
 	struct hists *hists = evsel__hists(evsel);
 	struct perf_hpp_fmt *fmt, *pos;
@@ -2770,15 +2707,15 @@ static void hists_evsel__exit(struct evsel *evsel)
 
 	list_for_each_entry_safe(node, tmp, &hists->hpp_formats, list) {
 		perf_hpp_list__for_each_format_safe(&node->hpp, fmt, pos) {
-			list_del_init(&fmt->list);
+			list_del(&fmt->list);
 			free(fmt);
 		}
-		list_del_init(&node->list);
+		list_del(&node->list);
 		free(node);
 	}
 }
 
-static int hists_evsel__init(struct evsel *evsel)
+static int hists_evsel__init(struct perf_evsel *evsel)
 {
 	struct hists *hists = evsel__hists(evsel);
 

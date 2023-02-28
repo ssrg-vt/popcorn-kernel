@@ -11,7 +11,6 @@
 #include <linux/compiler.h>
 #include <subcmd/parse-options.h>
 #include "debug.h"
-#include "dso.h"
 #include "machine.h"
 #include "map.h"
 #include "symbol.h"

@@ -137,6 +137,7 @@ static int creg_gpio_probe(struct platform_device *pdev)
 	const struct of_device_id *match;
 	struct device *dev = &pdev->dev;
 	struct creg_gpio *hcg;
+	struct resource *mem;
 	u32 ngpios;
 	int ret;
 
@@ -144,7 +145,8 @@ static int creg_gpio_probe(struct platform_device *pdev)
 	if (!hcg)
 		return -ENOMEM;
 
-	hcg->regs = devm_platform_ioremap_resource(pdev, 0);
+	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	hcg->regs = devm_ioremap_resource(dev, mem);
 	if (IS_ERR(hcg->regs))
 		return PTR_ERR(hcg->regs);
 

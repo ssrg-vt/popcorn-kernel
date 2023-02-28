@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Simple PWM based backlight control, board code has to setup
+ * linux/drivers/video/backlight/pwm_bl.c
+ *
+ * simple PWM based backlight control, board code has to setup
  * 1) pin configuration so PWM waveforms can output
  * 2) platform_data being correctly configured
  */
@@ -189,17 +191,29 @@ int pwm_backlight_brightness_default(struct device *dev,
 				     struct platform_pwm_backlight_data *data,
 				     unsigned int period)
 {
-	unsigned int i;
+	unsigned int counter = 0;
+	unsigned int i, n;
 	u64 retval;
 
 	/*
-	 * Once we have 4096 levels there's little point going much higher...
-	 * neither interactive sliders nor animation benefits from having
-	 * more values in the table.
+	 * Count the number of bits needed to represent the period number. The
+	 * number of bits is used to calculate the number of levels used for the
+	 * brightness-levels table, the purpose of this calculation is have a
+	 * pre-computed table with enough levels to get linear brightness
+	 * perception. The period is divided by the number of bits so for a
+	 * 8-bit PWM we have 255 / 8 = 32 brightness levels or for a 16-bit PWM
+	 * we have 65535 / 16 = 4096 brightness levels.
+	 *
+	 * Note that this method is based on empirical testing on different
+	 * devices with PWM of 8 and 16 bits of resolution.
 	 */
-	data->max_brightness =
-		min((int)DIV_ROUND_UP(period, fls(period)), 4096);
+	n = period;
+	while (n) {
+		counter += n % 2;
+		n >>= 1;
+	}
 
+	data->max_brightness = DIV_ROUND_UP(period, counter);
 	data->levels = devm_kcalloc(dev, data->max_brightness,
 				    sizeof(*data->levels), GFP_KERNEL);
 	if (!data->levels)
@@ -387,31 +401,6 @@ int pwm_backlight_brightness_default(struct device *dev,
 }
 #endif
 
-static bool pwm_backlight_is_linear(struct platform_pwm_backlight_data *data)
-{
-	unsigned int nlevels = data->max_brightness + 1;
-	unsigned int min_val = data->levels[0];
-	unsigned int max_val = data->levels[nlevels - 1];
-	/*
-	 * Multiplying by 128 means that even in pathological cases such
-	 * as (max_val - min_val) == nlevels the error at max_val is less
-	 * than 1%.
-	 */
-	unsigned int slope = (128 * (max_val - min_val)) / nlevels;
-	unsigned int margin = (max_val - min_val) / 20; /* 5% */
-	int i;
-
-	for (i = 1; i < nlevels; i++) {
-		unsigned int linear_value = min_val + ((i * slope) / 128);
-		unsigned int delta = abs(linear_value - data->levels[i]);
-
-		if (delta > margin)
-			return false;
-	}
-
-	return true;
-}
-
 static int pwm_backlight_initial_power_state(const struct pwm_bl_data *pb)
 {
 	struct device_node *node = pb->dev->of_node;
@@ -561,8 +550,6 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 		goto err_alloc;
 	}
 
-	memset(&props, 0, sizeof(struct backlight_properties));
-
 	if (data->levels) {
 		/*
 		 * For the DT case, only when brightness levels is defined
@@ -575,11 +562,6 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 
 			pb->levels = data->levels;
 		}
-
-		if (pwm_backlight_is_linear(data))
-			props.scale = BACKLIGHT_SCALE_LINEAR;
-		else
-			props.scale = BACKLIGHT_SCALE_NON_LINEAR;
 	} else if (!data->max_brightness) {
 		/*
 		 * If no brightness levels are provided and max_brightness is
@@ -606,8 +588,6 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 
 			pb->levels = data->levels;
 		}
-
-		props.scale = BACKLIGHT_SCALE_NON_LINEAR;
 	} else {
 		/*
 		 * That only happens for the non-DT case, where platform data
@@ -618,6 +598,7 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 
 	pb->lth_brightness = data->lth_brightness * (state.period / pb->scale);
 
+	memset(&props, 0, sizeof(struct backlight_properties));
 	props.type = BACKLIGHT_RAW;
 	props.max_brightness = data->max_brightness;
 	bl = backlight_device_register(dev_name(&pdev->dev), &pdev->dev, pb,
@@ -724,5 +705,5 @@ static struct platform_driver pwm_backlight_driver = {
 module_platform_driver(pwm_backlight_driver);
 
 MODULE_DESCRIPTION("PWM based Backlight Driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:pwm-backlight");

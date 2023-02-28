@@ -1029,14 +1029,6 @@ static int fsi_slave_init(struct fsi_master *master, int link, uint8_t id)
 
 	}
 
-	rc = fsi_slave_set_smode(slave);
-	if (rc) {
-		dev_warn(&master->dev,
-				"can't set smode on slave:%02x:%02x %d\n",
-				link, id, rc);
-		goto err_free;
-	}
-
 	/* Allocate a minor in the FSI space */
 	rc = __fsi_get_new_minor(slave, fsi_dev_cfam, &slave->dev.devt,
 				 &slave->cdev_idx);
@@ -1048,14 +1040,17 @@ static int fsi_slave_init(struct fsi_master *master, int link, uint8_t id)
 	rc = cdev_device_add(&slave->cdev, &slave->dev);
 	if (rc) {
 		dev_err(&slave->dev, "Error %d creating slave device\n", rc);
-		goto err_free_ida;
+		goto err_free;
 	}
 
-	/* Now that we have the cdev registered with the core, any fatal
-	 * failures beyond this point will need to clean up through
-	 * cdev_device_del(). Fortunately though, nothing past here is fatal.
-	 */
-
+	rc = fsi_slave_set_smode(slave);
+	if (rc) {
+		dev_warn(&master->dev,
+				"can't set smode on slave:%02x:%02x %d\n",
+				link, id, rc);
+		kfree(slave);
+		return -ENODEV;
+	}
 	if (master->link_config)
 		master->link_config(master, link,
 				    slave->t_send_delay,
@@ -1072,13 +1067,10 @@ static int fsi_slave_init(struct fsi_master *master, int link, uint8_t id)
 		dev_dbg(&master->dev, "failed during slave scan with: %d\n",
 				rc);
 
-	return 0;
+	return rc;
 
-err_free_ida:
-	fsi_free_minor(slave->dev.devt);
-err_free:
-	of_node_put(slave->dev.of_node);
-	kfree(slave);
+ err_free:
+	put_device(&slave->dev);
 	return rc;
 }
 

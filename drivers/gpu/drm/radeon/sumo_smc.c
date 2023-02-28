@@ -21,6 +21,7 @@
  *
  */
 
+#include <drm/drmP.h>
 #include "radeon.h"
 #include "sumod.h"
 #include "sumo_dpm.h"

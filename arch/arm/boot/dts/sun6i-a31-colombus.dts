@@ -76,9 +76,13 @@
 &gmac {
 	pinctrl-names = "default";
 	pinctrl-0 = <&gmac_rgmii_pins>;
-	phy-handle = <&phy1>;
+	phy = <&phy1>;
 	phy-mode = "rgmii";
 	status = "okay";
+
+	phy1: ethernet-phy@1 {
+		reg = <1>;
+	};
 };
 
 &i2c0 {
@@ -97,12 +101,6 @@
 		reg = <0x1d>;
 		interrupt-parent = <&pio>;
 		interrupts = <0 9 IRQ_TYPE_LEVEL_LOW>; /* PA9 */
-	};
-};
-
-&mdio {
-	phy1: ethernet-phy@1 {
-		reg = <1>;
 	};
 };
 

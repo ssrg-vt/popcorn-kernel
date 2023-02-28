@@ -20,8 +20,8 @@ SYNOPSIS
 CGROUP COMMANDS
 ===============
 
-|	**bpftool** **cgroup { show | list }** *CGROUP* [**effective**]
-|	**bpftool** **cgroup tree** [*CGROUP_ROOT*] [**effective**]
+|	**bpftool** **cgroup { show | list }** *CGROUP*
+|	**bpftool** **cgroup tree** [*CGROUP_ROOT*]
 |	**bpftool** **cgroup attach** *CGROUP* *ATTACH_TYPE* *PROG* [*ATTACH_FLAGS*]
 |	**bpftool** **cgroup detach** *CGROUP* *ATTACH_TYPE* *PROG*
 |	**bpftool** **cgroup help**
@@ -29,23 +29,18 @@ CGROUP COMMANDS
 |	*PROG* := { **id** *PROG_ID* | **pinned** *FILE* | **tag** *PROG_TAG* }
 |	*ATTACH_TYPE* := { **ingress** | **egress** | **sock_create** | **sock_ops** | **device** |
 |		**bind4** | **bind6** | **post_bind4** | **post_bind6** | **connect4** | **connect6** |
-|		**sendmsg4** | **sendmsg6** | **recvmsg4** | **recvmsg6** | **sysctl** |
-|		**getsockopt** | **setsockopt** }
+|		**sendmsg4** | **sendmsg6** | **recvmsg4** | **recvmsg6** | **sysctl** }
 |	*ATTACH_FLAGS* := { **multi** | **override** }
 
 DESCRIPTION
 ===========
-	**bpftool cgroup { show | list }** *CGROUP* [**effective**]
+	**bpftool cgroup { show | list }** *CGROUP*
 		  List all programs attached to the cgroup *CGROUP*.
 
 		  Output will start with program ID followed by attach type,
 		  attach flags and program name.
 
-		  If **effective** is specified retrieve effective programs that
-		  will execute for events within a cgroup. This includes
-		  inherited along with attached ones.
-
-	**bpftool cgroup tree** [*CGROUP_ROOT*] [**effective**]
+	**bpftool cgroup tree** [*CGROUP_ROOT*]
 		  Iterate over all cgroups in *CGROUP_ROOT* and list all
 		  attached programs. If *CGROUP_ROOT* is not specified,
 		  bpftool uses cgroup v2 mountpoint.
@@ -53,10 +48,6 @@ DESCRIPTION
 		  The output is similar to the output of cgroup show/list
 		  commands: it starts with absolute cgroup path, followed by
 		  program ID, attach type, attach flags and program name.
-
-		  If **effective** is specified retrieve effective programs that
-		  will execute for events within a cgroup. This includes
-		  inherited along with attached ones.
 
 	**bpftool cgroup attach** *CGROUP* *ATTACH_TYPE* *PROG* [*ATTACH_FLAGS*]
 		  Attach program *PROG* to the cgroup *CGROUP* with attach type
@@ -99,9 +90,7 @@ DESCRIPTION
                   an unconnected udp4 socket (since 5.2);
 		  **recvmsg6** call to recvfrom(2), recvmsg(2), recvmmsg(2) for
                   an unconnected udp6 socket (since 5.2);
-		  **sysctl** sysctl access (since 5.2);
-		  **getsockopt** call to getsockopt (since 5.3);
-		  **setsockopt** call to setsockopt (since 5.3).
+		  **sysctl** sysctl access (since 5.2).
 
 	**bpftool cgroup detach** *CGROUP* *ATTACH_TYPE* *PROG*
 		  Detach *PROG* from the cgroup *CGROUP* and attach type
@@ -127,10 +116,6 @@ OPTIONS
 
 	-f, --bpffs
 		  Show file names of pinned programs.
-
-	-d, --debug
-		  Print all logs available from libbpf, including debug-level
-		  information.
 
 EXAMPLES
 ========

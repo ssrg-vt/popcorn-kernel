@@ -21,6 +21,28 @@
 
 extern int die(char *, struct pt_regs *, long);
 
+#ifdef CONFIG_KPROBES
+static inline int notify_page_fault(struct pt_regs *regs, int trap)
+{
+	int ret = 0;
+
+	if (!user_mode(regs)) {
+		/* kprobe_running() needs smp_processor_id() */
+		preempt_disable();
+		if (kprobe_running() && kprobe_fault_handler(regs, trap))
+			ret = 1;
+		preempt_enable();
+	}
+
+	return ret;
+}
+#else
+static inline int notify_page_fault(struct pt_regs *regs, int trap)
+{
+	return 0;
+}
+#endif
+
 /*
  * Return TRUE if ADDRESS points at a page in the kernel's mapped segment
  * (inside region 5, on ia64) and that page is present.
@@ -94,7 +116,7 @@ ia64_do_page_fault (unsigned long address, unsigned long isr, struct pt_regs *re
 	/*
 	 * This is to handle the kprobes on user space access instructions
 	 */
-	if (kprobe_page_fault(regs, TRAP_BRKPT))
+	if (notify_page_fault(regs, TRAP_BRKPT))
 		return;
 
 	if (user_mode(regs))
@@ -227,7 +249,7 @@ retry:
 	}
 	if (user_mode(regs)) {
 		force_sig_fault(signal, code, (void __user *) address,
-				0, __ISR_VALID, isr);
+				0, __ISR_VALID, isr, current);
 		return;
 	}
 

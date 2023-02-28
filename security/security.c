@@ -33,10 +33,9 @@
 
 /* How many LSMs were built into the kernel? */
 #define LSM_COUNT (__end_lsm_info - __start_lsm_info)
-#define EARLY_LSM_COUNT (__end_early_lsm_info - __start_early_lsm_info)
 
 struct security_hook_heads security_hook_heads __lsm_ro_after_init;
-static BLOCKING_NOTIFIER_HEAD(blocking_lsm_notifier_chain);
+static ATOMIC_NOTIFIER_HEAD(lsm_notifier_chain);
 
 static struct kmem_cache *lsm_file_cache;
 static struct kmem_cache *lsm_inode_cache;
@@ -278,8 +277,6 @@ static void __init ordered_lsm_parse(const char *order, const char *origin)
 static void __init lsm_early_cred(struct cred *cred);
 static void __init lsm_early_task(struct task_struct *task);
 
-static int lsm_append(const char *new, char **result);
-
 static void __init ordered_lsm_init(void)
 {
 	struct lsm_info **lsm;
@@ -326,26 +323,6 @@ static void __init ordered_lsm_init(void)
 	kfree(ordered_lsms);
 }
 
-int __init early_security_init(void)
-{
-	int i;
-	struct hlist_head *list = (struct hlist_head *) &security_hook_heads;
-	struct lsm_info *lsm;
-
-	for (i = 0; i < sizeof(security_hook_heads) / sizeof(struct hlist_head);
-	     i++)
-		INIT_HLIST_HEAD(&list[i]);
-
-	for (lsm = __start_early_lsm_info; lsm < __end_early_lsm_info; lsm++) {
-		if (!lsm->enabled)
-			lsm->enabled = &lsm_enabled_true;
-		prepare_lsm(lsm);
-		initialize_lsm(lsm);
-	}
-
-	return 0;
-}
-
 /**
  * security_init - initializes the security framework
  *
@@ -353,18 +330,14 @@ int __init early_security_init(void)
  */
 int __init security_init(void)
 {
-	struct lsm_info *lsm;
+	int i;
+	struct hlist_head *list = (struct hlist_head *) &security_hook_heads;
 
 	pr_info("Security Framework initializing\n");
 
-	/*
-	 * Append the names of the early LSM modules now that kmalloc() is
-	 * available
-	 */
-	for (lsm = __start_early_lsm_info; lsm < __end_early_lsm_info; lsm++) {
-		if (lsm->enabled)
-			lsm_append(lsm->name, &lsm_names);
-	}
+	for (i = 0; i < sizeof(security_hook_heads) / sizeof(struct hlist_head);
+	     i++)
+		INIT_HLIST_HEAD(&list[i]);
 
 	/* Load LSMs in specified order. */
 	ordered_lsm_init();
@@ -411,7 +384,7 @@ static bool match_last_lsm(const char *list, const char *lsm)
 	return !strcmp(last, lsm);
 }
 
-static int lsm_append(const char *new, char **result)
+static int lsm_append(char *new, char **result)
 {
 	char *cp;
 
@@ -449,37 +422,27 @@ void __init security_add_hooks(struct security_hook_list *hooks, int count,
 		hooks[i].lsm = lsm;
 		hlist_add_tail_rcu(&hooks[i].list, hooks[i].head);
 	}
-
-	/*
-	 * Don't try to append during early_security_init(), we'll come back
-	 * and fix this up afterwards.
-	 */
-	if (slab_is_available()) {
-		if (lsm_append(lsm, &lsm_names) < 0)
-			panic("%s - Cannot get early memory.\n", __func__);
-	}
+	if (lsm_append(lsm, &lsm_names) < 0)
+		panic("%s - Cannot get early memory.\n", __func__);
 }
 
-int call_blocking_lsm_notifier(enum lsm_event event, void *data)
+int call_lsm_notifier(enum lsm_event event, void *data)
 {
-	return blocking_notifier_call_chain(&blocking_lsm_notifier_chain,
-					    event, data);
+	return atomic_notifier_call_chain(&lsm_notifier_chain, event, data);
 }
-EXPORT_SYMBOL(call_blocking_lsm_notifier);
+EXPORT_SYMBOL(call_lsm_notifier);
 
-int register_blocking_lsm_notifier(struct notifier_block *nb)
+int register_lsm_notifier(struct notifier_block *nb)
 {
-	return blocking_notifier_chain_register(&blocking_lsm_notifier_chain,
-						nb);
+	return atomic_notifier_chain_register(&lsm_notifier_chain, nb);
 }
-EXPORT_SYMBOL(register_blocking_lsm_notifier);
+EXPORT_SYMBOL(register_lsm_notifier);
 
-int unregister_blocking_lsm_notifier(struct notifier_block *nb)
+int unregister_lsm_notifier(struct notifier_block *nb)
 {
-	return blocking_notifier_chain_unregister(&blocking_lsm_notifier_chain,
-						  nb);
+	return atomic_notifier_chain_unregister(&lsm_notifier_chain, nb);
 }
-EXPORT_SYMBOL(unregister_blocking_lsm_notifier);
+EXPORT_SYMBOL(unregister_lsm_notifier);
 
 /**
  * lsm_cred_alloc - allocate a composite cred blob
@@ -902,12 +865,6 @@ EXPORT_SYMBOL(security_add_mnt_opt);
 int security_move_mount(const struct path *from_path, const struct path *to_path)
 {
 	return call_int_hook(move_mount, 0, from_path, to_path);
-}
-
-int security_path_notify(const struct path *path, u64 mask,
-				unsigned int obj_type)
-{
-	return call_int_hook(path_notify, 0, path, mask, obj_type);
 }
 
 int security_inode_alloc(struct inode *inode)
@@ -2398,9 +2355,3 @@ void security_bpf_prog_free(struct bpf_prog_aux *aux)
 	call_void_hook(bpf_prog_free_security, aux);
 }
 #endif /* CONFIG_BPF_SYSCALL */
-
-int security_locked_down(enum lockdown_reason what)
-{
-	return call_int_hook(locked_down, 0, what);
-}
-EXPORT_SYMBOL(security_locked_down);

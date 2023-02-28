@@ -878,7 +878,7 @@ static inline bool page_copy_sane(struct page *page, size_t offset, size_t n)
 	head = compound_head(page);
 	v += (page - head) << PAGE_SHIFT;
 
-	if (likely(n <= v && v <= (page_size(head))))
+	if (likely(n <= v && v <= (PAGE_SIZE << compound_order(head))))
 		return true;
 	WARN_ON(1);
 	return false;
@@ -1634,9 +1634,9 @@ EXPORT_SYMBOL(dup_iter);
  * on-stack array was used or not (and regardless of whether this function
  * returns an error or not).
  *
- * Return: Negative error code on error, bytes imported on success
+ * Return: 0 on success or negative error code on error.
  */
-ssize_t import_iovec(int type, const struct iovec __user * uvector,
+int import_iovec(int type, const struct iovec __user * uvector,
 		 unsigned nr_segs, unsigned fast_segs,
 		 struct iovec **iov, struct iov_iter *i)
 {
@@ -1652,17 +1652,16 @@ ssize_t import_iovec(int type, const struct iovec __user * uvector,
 	}
 	iov_iter_init(i, type, p, nr_segs, n);
 	*iov = p == *iov ? NULL : p;
-	return n;
+	return 0;
 }
 EXPORT_SYMBOL(import_iovec);
 
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
 
-ssize_t compat_import_iovec(int type,
-		const struct compat_iovec __user * uvector,
-		unsigned nr_segs, unsigned fast_segs,
-		struct iovec **iov, struct iov_iter *i)
+int compat_import_iovec(int type, const struct compat_iovec __user * uvector,
+		 unsigned nr_segs, unsigned fast_segs,
+		 struct iovec **iov, struct iov_iter *i)
 {
 	ssize_t n;
 	struct iovec *p;
@@ -1676,7 +1675,7 @@ ssize_t compat_import_iovec(int type,
 	}
 	iov_iter_init(i, type, p, nr_segs, n);
 	*iov = p == *iov ? NULL : p;
-	return n;
+	return 0;
 }
 #endif
 

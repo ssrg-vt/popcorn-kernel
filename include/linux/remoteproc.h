@@ -100,9 +100,7 @@ struct fw_rsc_hdr {
  *		    the remote processor will be writing logs.
  * @RSC_VDEV:       declare support for a virtio device, and serve as its
  *		    virtio header.
- * @RSC_LAST:       just keep this one at the end of standard resources
- * @RSC_VENDOR_START:	start of the vendor specific resource types range
- * @RSC_VENDOR_END:	end of the vendor specific resource types range
+ * @RSC_LAST:       just keep this one at the end
  *
  * For more details regarding a specific resource type, please see its
  * dedicated structure below.
@@ -113,13 +111,11 @@ struct fw_rsc_hdr {
  * please update it as needed.
  */
 enum fw_resource_type {
-	RSC_CARVEOUT		= 0,
-	RSC_DEVMEM		= 1,
-	RSC_TRACE		= 2,
-	RSC_VDEV		= 3,
-	RSC_LAST		= 4,
-	RSC_VENDOR_START	= 128,
-	RSC_VENDOR_END		= 512,
+	RSC_CARVEOUT	= 0,
+	RSC_DEVMEM	= 1,
+	RSC_TRACE	= 2,
+	RSC_VDEV	= 3,
+	RSC_LAST	= 4,
 };
 
 #define FW_RSC_ADDR_ANY (-1)
@@ -344,28 +340,12 @@ struct rproc_mem_entry {
 struct firmware;
 
 /**
- * enum rsc_handling_status - return status of rproc_ops handle_rsc hook
- * @RSC_HANDLED:	resource was handled
- * @RSC_IGNORED:	resource was ignored
- */
-enum rsc_handling_status {
-	RSC_HANDLED	= 0,
-	RSC_IGNORED	= 1,
-};
-
-/**
  * struct rproc_ops - platform-specific device handlers
  * @start:	power on the device and boot it
  * @stop:	power off the device
  * @kick:	kick a virtqueue (virtqueue id given as a parameter)
- * @peek_remote_kick: check if remote has kicked
- * @ack_remote_kick: ack remote kick
  * @da_to_va:	optional platform hook to perform address translations
  * @parse_fw:	parse firmware to extract information (e.g. resource table)
- * @handle_rsc:	optional platform hook to handle vendor resources. Should return
- * RSC_HANDLED if resource was handled, RSC_IGNORED if not handled and a
- * negative value on error
- * @load_rsc_table:	load resource table from firmware image
  * @find_loaded_rsc_table: find the loaded resouce table
  * @load:		load firmware to memory, where the remote processor
  *			expects to find it
@@ -376,12 +356,8 @@ struct rproc_ops {
 	int (*start)(struct rproc *rproc);
 	int (*stop)(struct rproc *rproc);
 	void (*kick)(struct rproc *rproc, int vqid);
-	bool (*peek_remote_kick)(struct rproc *rproc, char *buf, size_t *len);
-	void (*ack_remote_kick)(struct rproc *rproc);
 	void * (*da_to_va)(struct rproc *rproc, u64 da, int len);
 	int (*parse_fw)(struct rproc *rproc, const struct firmware *fw);
-	int (*handle_rsc)(struct rproc *rproc, u32 rsc_type, void *rsc,
-			  int offset, int avail);
 	struct resource_table *(*find_loaded_rsc_table)(
 				struct rproc *rproc, const struct firmware *fw);
 	int (*load)(struct rproc *rproc, const struct firmware *fw);
@@ -485,7 +461,6 @@ struct rproc_dump_segment {
  * @auto_boot: flag to indicate if remote processor should be auto-started
  * @dump_segments: list of segments in the firmware
  * @nb_vdev: number of vdev currently handled by rproc
- * @sysfs_kick: allow kick remoteproc from sysfs
  */
 struct rproc {
 	struct list_head node;
@@ -519,7 +494,6 @@ struct rproc {
 	bool auto_boot;
 	struct list_head dump_segments;
 	int nb_vdev;
-	int sysfs_kick;
 };
 
 /**

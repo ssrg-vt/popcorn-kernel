@@ -5,7 +5,6 @@
 #include "util/annotate.h"
 #include "util/evsel.h"
 #include "util/map.h"
-#include "util/dso.h"
 #include "util/symbol.h"
 #include "ui/helpline.h"
 #include <inttypes.h>
@@ -92,7 +91,7 @@ static int perf_gtk__get_line(char *buf, size_t size, struct disasm_line *dl)
 }
 
 static int perf_gtk__annotate_symbol(GtkWidget *window, struct symbol *sym,
-				struct map *map, struct evsel *evsel,
+				struct map *map, struct perf_evsel *evsel,
 				struct hist_browser_timer *hbt __maybe_unused)
 {
 	struct disasm_line *pos, *n;
@@ -130,7 +129,7 @@ static int perf_gtk__annotate_symbol(GtkWidget *window, struct symbol *sym,
 		gtk_list_store_append(store, &iter);
 
 		if (perf_evsel__is_group_event(evsel)) {
-			for (i = 0; i < evsel->core.nr_members; i++) {
+			for (i = 0; i < evsel->nr_members; i++) {
 				ret += perf_gtk__get_percent(s + ret,
 							     sizeof(s) - ret,
 							     sym, pos,
@@ -153,7 +152,7 @@ static int perf_gtk__annotate_symbol(GtkWidget *window, struct symbol *sym,
 	gtk_container_add(GTK_CONTAINER(window), view);
 
 	list_for_each_entry_safe(pos, n, &notes->src->source, al.node) {
-		list_del_init(&pos->al.node);
+		list_del(&pos->al.node);
 		disasm_line__free(pos);
 	}
 
@@ -161,7 +160,7 @@ static int perf_gtk__annotate_symbol(GtkWidget *window, struct symbol *sym,
 }
 
 static int symbol__gtk_annotate(struct symbol *sym, struct map *map,
-				struct evsel *evsel,
+				struct perf_evsel *evsel,
 				struct hist_browser_timer *hbt)
 {
 	GtkWidget *window;
@@ -239,7 +238,7 @@ static int symbol__gtk_annotate(struct symbol *sym, struct map *map,
 }
 
 int hist_entry__gtk_annotate(struct hist_entry *he,
-			     struct evsel *evsel,
+			     struct perf_evsel *evsel,
 			     struct hist_browser_timer *hbt)
 {
 	return symbol__gtk_annotate(he->ms.sym, he->ms.map, evsel, hbt);

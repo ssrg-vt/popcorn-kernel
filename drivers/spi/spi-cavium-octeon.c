@@ -18,6 +18,7 @@
 
 static int octeon_spi_probe(struct platform_device *pdev)
 {
+	struct resource *res_mem;
 	void __iomem *reg_base;
 	struct spi_master *master;
 	struct octeon_spi *p;
@@ -29,7 +30,8 @@ static int octeon_spi_probe(struct platform_device *pdev)
 	p = spi_master_get_devdata(master);
 	platform_set_drvdata(pdev, master);
 
-	reg_base = devm_platform_ioremap_resource(pdev, 0);
+	res_mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	reg_base = devm_ioremap_resource(&pdev->dev, res_mem);
 	if (IS_ERR(reg_base)) {
 		err = PTR_ERR(reg_base);
 		goto fail;

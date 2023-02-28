@@ -231,9 +231,8 @@ static void cpcap_usb_detect(struct work_struct *work)
 			goto out_err;
 
 		error = regmap_update_bits(ddata->reg, CPCAP_REG_USBC3,
-					   CPCAP_BIT_VBUSSTBY_EN |
-					   CPCAP_BIT_VBUSEN_SPI,
-					   CPCAP_BIT_VBUSEN_SPI);
+					   CPCAP_BIT_VBUSSTBY_EN,
+					   CPCAP_BIT_VBUSSTBY_EN);
 		if (error)
 			goto out_err;
 
@@ -241,8 +240,7 @@ static void cpcap_usb_detect(struct work_struct *work)
 	}
 
 	error = regmap_update_bits(ddata->reg, CPCAP_REG_USBC3,
-				   CPCAP_BIT_VBUSSTBY_EN |
-				   CPCAP_BIT_VBUSEN_SPI, 0);
+				   CPCAP_BIT_VBUSSTBY_EN, 0);
 	if (error)
 		goto out_err;
 

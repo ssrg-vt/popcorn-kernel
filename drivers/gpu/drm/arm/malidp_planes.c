@@ -7,13 +7,11 @@
  */
 
 #include <linux/iommu.h>
-#include <linux/platform_device.h>
 
+#include <drm/drmP.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_drv.h>
 #include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_fourcc.h>
 #include <drm/drm_gem_cma_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_plane_helper.h>
@@ -225,13 +223,14 @@ bool malidp_format_mod_supported(struct drm_device *drm,
 
 	if (modifier & AFBC_SPLIT) {
 		if (!info->is_yuv) {
-			if (info->cpp[0] <= 2) {
+			if (drm_format_plane_cpp(format, 0) <= 2) {
 				DRM_DEBUG_KMS("RGB formats <= 16bpp are not supported with SPLIT\n");
 				return false;
 			}
 		}
 
-		if ((info->hsub != 1) || (info->vsub != 1)) {
+		if ((drm_format_horz_chroma_subsampling(format) != 1) ||
+		    (drm_format_vert_chroma_subsampling(format) != 1)) {
 			if (!(format == DRM_FORMAT_YUV420_10BIT &&
 			      (map->features & MALIDP_DEVICE_AFBC_YUV_420_10_SUPPORT_SPLIT))) {
 				DRM_DEBUG_KMS("Formats which are sub-sampled should never be split\n");
@@ -241,7 +240,8 @@ bool malidp_format_mod_supported(struct drm_device *drm,
 	}
 
 	if (modifier & AFBC_CBR) {
-		if ((info->hsub == 1) || (info->vsub == 1)) {
+		if ((drm_format_horz_chroma_subsampling(format) == 1) ||
+		    (drm_format_vert_chroma_subsampling(format) == 1)) {
 			DRM_DEBUG_KMS("Formats which are not sub-sampled should not have CBR set\n");
 			return false;
 		}

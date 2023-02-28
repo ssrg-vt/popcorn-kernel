@@ -127,7 +127,7 @@ int amdtp_dot_set_parameters(struct amdtp_stream *s, unsigned int rate,
 	if (err < 0)
 		return err;
 
-	s->ctx_data.rx.fdf = AMDTP_FDF_AM824 | s->sfc;
+	s->fdf = AMDTP_FDF_AM824 | s->sfc;
 
 	p->pcm_channels = pcm_channels;
 
@@ -143,23 +143,17 @@ int amdtp_dot_set_parameters(struct amdtp_stream *s, unsigned int rate,
 }
 
 static void write_pcm_s32(struct amdtp_stream *s, struct snd_pcm_substream *pcm,
-			  __be32 *buffer, unsigned int frames,
-			  unsigned int pcm_frames)
+			  __be32 *buffer, unsigned int frames)
 {
 	struct amdtp_dot *p = s->protocol;
-	unsigned int channels = p->pcm_channels;
 	struct snd_pcm_runtime *runtime = pcm->runtime;
-	unsigned int pcm_buffer_pointer;
-	int remaining_frames;
+	unsigned int channels, remaining_frames, i, c;
 	const u32 *src;
-	int i, c;
 
-	pcm_buffer_pointer = s->pcm_buffer_pointer + pcm_frames;
-	pcm_buffer_pointer %= runtime->buffer_size;
-
+	channels = p->pcm_channels;
 	src = (void *)runtime->dma_area +
-				frames_to_bytes(runtime, pcm_buffer_pointer);
-	remaining_frames = runtime->buffer_size - pcm_buffer_pointer;
+			frames_to_bytes(runtime, s->pcm_buffer_pointer);
+	remaining_frames = runtime->buffer_size - s->pcm_buffer_pointer;
 
 	buffer++;
 	for (i = 0; i < frames; ++i) {
@@ -175,23 +169,17 @@ static void write_pcm_s32(struct amdtp_stream *s, struct snd_pcm_substream *pcm,
 }
 
 static void read_pcm_s32(struct amdtp_stream *s, struct snd_pcm_substream *pcm,
-			 __be32 *buffer, unsigned int frames,
-			 unsigned int pcm_frames)
+			 __be32 *buffer, unsigned int frames)
 {
 	struct amdtp_dot *p = s->protocol;
-	unsigned int channels = p->pcm_channels;
 	struct snd_pcm_runtime *runtime = pcm->runtime;
-	unsigned int pcm_buffer_pointer;
-	int remaining_frames;
+	unsigned int channels, remaining_frames, i, c;
 	u32 *dst;
-	int i, c;
 
-	pcm_buffer_pointer = s->pcm_buffer_pointer + pcm_frames;
-	pcm_buffer_pointer %= runtime->buffer_size;
-
+	channels = p->pcm_channels;
 	dst  = (void *)runtime->dma_area +
-				frames_to_bytes(runtime, pcm_buffer_pointer);
-	remaining_frames = runtime->buffer_size - pcm_buffer_pointer;
+			frames_to_bytes(runtime, s->pcm_buffer_pointer);
+	remaining_frames = runtime->buffer_size - s->pcm_buffer_pointer;
 
 	buffer++;
 	for (i = 0; i < frames; ++i) {
@@ -246,7 +234,7 @@ static inline void midi_use_bytes(struct amdtp_stream *s,
 }
 
 static void write_midi_messages(struct amdtp_stream *s, __be32 *buffer,
-		unsigned int data_blocks, unsigned int data_block_counter)
+				unsigned int data_blocks)
 {
 	struct amdtp_dot *p = s->protocol;
 	unsigned int f, port;
@@ -254,7 +242,7 @@ static void write_midi_messages(struct amdtp_stream *s, __be32 *buffer,
 	u8 *b;
 
 	for (f = 0; f < data_blocks; f++) {
-		port = (data_block_counter + f) % 8;
+		port = (s->data_block_counter + f) % 8;
 		b = (u8 *)&buffer[0];
 
 		len = 0;
@@ -341,53 +329,45 @@ void amdtp_dot_midi_trigger(struct amdtp_stream *s, unsigned int port,
 		WRITE_ONCE(p->midi[port], midi);
 }
 
-static unsigned int process_ir_ctx_payloads(struct amdtp_stream *s,
-					    const struct pkt_desc *descs,
-					    unsigned int packets,
-					    struct snd_pcm_substream *pcm)
+static unsigned int process_tx_data_blocks(struct amdtp_stream *s,
+					   __be32 *buffer,
+					   unsigned int data_blocks,
+					   unsigned int *syt)
 {
-	unsigned int pcm_frames = 0;
-	int i;
+	struct snd_pcm_substream *pcm;
+	unsigned int pcm_frames;
 
-	for (i = 0; i < packets; ++i) {
-		const struct pkt_desc *desc = descs + i;
-		__be32 *buf = desc->ctx_payload;
-		unsigned int data_blocks = desc->data_blocks;
-
-		if (pcm) {
-			read_pcm_s32(s, pcm, buf, data_blocks, pcm_frames);
-			pcm_frames += data_blocks;
-		}
-
-		read_midi_messages(s, buf, data_blocks);
+	pcm = READ_ONCE(s->pcm);
+	if (pcm) {
+		read_pcm_s32(s, pcm, buffer, data_blocks);
+		pcm_frames = data_blocks;
+	} else {
+		pcm_frames = 0;
 	}
+
+	read_midi_messages(s, buffer, data_blocks);
 
 	return pcm_frames;
 }
 
-static unsigned int process_it_ctx_payloads(struct amdtp_stream *s,
-					    const struct pkt_desc *descs,
-					    unsigned int packets,
-					    struct snd_pcm_substream *pcm)
+static unsigned int process_rx_data_blocks(struct amdtp_stream *s,
+					   __be32 *buffer,
+					   unsigned int data_blocks,
+					   unsigned int *syt)
 {
-	unsigned int pcm_frames = 0;
-	int i;
+	struct snd_pcm_substream *pcm;
+	unsigned int pcm_frames;
 
-	for (i = 0; i < packets; ++i) {
-		const struct pkt_desc *desc = descs + i;
-		__be32 *buf = desc->ctx_payload;
-		unsigned int data_blocks = desc->data_blocks;
-
-		if (pcm) {
-			write_pcm_s32(s, pcm, buf, data_blocks, pcm_frames);
-			pcm_frames += data_blocks;
-		} else {
-			write_pcm_silence(s, buf, data_blocks);
-		}
-
-		write_midi_messages(s, buf, data_blocks,
-				    desc->data_block_counter);
+	pcm = READ_ONCE(s->pcm);
+	if (pcm) {
+		write_pcm_s32(s, pcm, buffer, data_blocks);
+		pcm_frames = data_blocks;
+	} else {
+		write_pcm_silence(s, buffer, data_blocks);
+		pcm_frames = 0;
 	}
+
+	write_midi_messages(s, buffer, data_blocks);
 
 	return pcm_frames;
 }
@@ -395,20 +375,20 @@ static unsigned int process_it_ctx_payloads(struct amdtp_stream *s,
 int amdtp_dot_init(struct amdtp_stream *s, struct fw_unit *unit,
 		 enum amdtp_stream_direction dir)
 {
-	amdtp_stream_process_ctx_payloads_t process_ctx_payloads;
+	amdtp_stream_process_data_blocks_t process_data_blocks;
 	enum cip_flags flags;
 
-	// Use different mode between incoming/outgoing.
+	/* Use different mode between incoming/outgoing. */
 	if (dir == AMDTP_IN_STREAM) {
 		flags = CIP_NONBLOCKING;
-		process_ctx_payloads = process_ir_ctx_payloads;
+		process_data_blocks = process_tx_data_blocks;
 	} else {
 		flags = CIP_BLOCKING;
-		process_ctx_payloads = process_it_ctx_payloads;
+		process_data_blocks = process_rx_data_blocks;
 	}
 
 	return amdtp_stream_init(s, unit, dir, flags, CIP_FMT_AM,
-				process_ctx_payloads, sizeof(struct amdtp_dot));
+				 process_data_blocks, sizeof(struct amdtp_dot));
 }
 
 void amdtp_dot_reset(struct amdtp_stream *s)

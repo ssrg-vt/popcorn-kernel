@@ -11,19 +11,13 @@ Property rules described in Documentation/devicetree/bindings/spi/spi-bus.txt
 apply. In particular, "reg" and "spi-max-frequency" properties must be given.
 
 LED sub-node properties:
-- function :
-	see Documentation/devicetree/bindings/leds/common.txt
-- color :
-	see Documentation/devicetree/bindings/leds/common.txt
 - label :
-	see Documentation/devicetree/bindings/leds/common.txt (deprecated)
+	see Documentation/devicetree/bindings/leds/common.txt
 - linux,default-trigger : (optional)
 	see Documentation/devicetree/bindings/leds/common.txt
 
 Example
 -------
-
-#include <dt-bindings/leds/common.h>
 
 led-controller@0 {
 	compatible = "crane,cr0014114";
@@ -34,33 +28,27 @@ led-controller@0 {
 
 	led@0 {
 		reg = <0>;
-		function = "coin";
-		color = <LED_COLOR_ID_RED>;
+		label = "red:coin";
 	};
 	led@1 {
 		reg = <1>;
-		function = "coin";
-		color = <LED_COLOR_ID_GREEN>;
+		label = "green:coin";
 	};
 	led@2 {
 		reg = <2>;
-		function = "coin";
-		color = <LED_COLOR_ID_BLUE>;
+		label = "blue:coin";
 	};
 	led@3 {
 		reg = <3>;
-		function = "bill";
-		color = <LED_COLOR_ID_RED>;
+		label = "red:bill";
 	};
 	led@4 {
 		reg = <4>;
-		function = "bill";
-		color = <LED_COLOR_ID_GREEN>;
+		label = "green:bill";
 	};
 	led@5 {
 		reg = <5>;
-		function = "bill";
-		color = <LED_COLOR_ID_BLUE>;
+		label = "blue:bill";
 	};
 	...
 };

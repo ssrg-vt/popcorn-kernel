@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 
-#include <linux/delay.h>
 #include <linux/firmware.h>
-#include <linux/module.h>
-
+#include <drm/drmP.h>
 #include "ast_drv.h"
-
 MODULE_FIRMWARE("ast_dp501_fw.bin");
 
 static int ast_load_dp501_microcode(struct drm_device *dev)

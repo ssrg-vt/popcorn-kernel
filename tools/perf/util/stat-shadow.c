@@ -8,12 +8,10 @@
 #include "evlist.h"
 #include "expr.h"
 #include "metricgroup.h"
-#include <linux/zalloc.h>
 
 /*
  * AGGR_GLOBAL: Use CPU 0
  * AGGR_SOCKET: Use first CPU of socket
- * AGGR_DIE: Use first CPU of die
  * AGGR_CORE: Use first CPU of core
  * AGGR_NONE: Use matching CPU
  * AGGR_THREAD: Not supported?
@@ -25,14 +23,12 @@ struct stats walltime_nsecs_stats;
 
 struct saved_value {
 	struct rb_node rb_node;
-	struct evsel *evsel;
+	struct perf_evsel *evsel;
 	enum stat_type type;
 	int ctx;
 	int cpu;
 	struct runtime_stat *stat;
 	struct stats stats;
-	u64 metric_total;
-	int metric_other;
 };
 
 static int saved_value_cmp(struct rb_node *rb_node, const void *entry)
@@ -96,7 +92,7 @@ static void saved_value_delete(struct rblist *rblist __maybe_unused,
 	free(v);
 }
 
-static struct saved_value *saved_value_lookup(struct evsel *evsel,
+static struct saved_value *saved_value_lookup(struct perf_evsel *evsel,
 					      int cpu,
 					      bool create,
 					      enum stat_type type,
@@ -148,19 +144,19 @@ void perf_stat__init_shadow_stats(void)
 	runtime_stat__init(&rt_stat);
 }
 
-static int evsel_context(struct evsel *evsel)
+static int evsel_context(struct perf_evsel *evsel)
 {
 	int ctx = 0;
 
-	if (evsel->core.attr.exclude_kernel)
+	if (evsel->attr.exclude_kernel)
 		ctx |= CTX_BIT_KERNEL;
-	if (evsel->core.attr.exclude_user)
+	if (evsel->attr.exclude_user)
 		ctx |= CTX_BIT_USER;
-	if (evsel->core.attr.exclude_hv)
+	if (evsel->attr.exclude_hv)
 		ctx |= CTX_BIT_HV;
-	if (evsel->core.attr.exclude_host)
+	if (evsel->attr.exclude_host)
 		ctx |= CTX_BIT_HOST;
-	if (evsel->core.attr.exclude_idle)
+	if (evsel->attr.exclude_idle)
 		ctx |= CTX_BIT_IDLE;
 
 	return ctx;
@@ -209,12 +205,11 @@ static void update_runtime_stat(struct runtime_stat *st,
  * more semantic information such as miss/hit ratios,
  * instruction rates, etc:
  */
-void perf_stat__update_shadow_stats(struct evsel *counter, u64 count,
+void perf_stat__update_shadow_stats(struct perf_evsel *counter, u64 count,
 				    int cpu, struct runtime_stat *st)
 {
 	int ctx = evsel_context(counter);
 	u64 count_ns = count;
-	struct saved_value *v;
 
 	count *= counter->scale;
 
@@ -269,15 +264,9 @@ void perf_stat__update_shadow_stats(struct evsel *counter, u64 count,
 		update_runtime_stat(st, STAT_APERF, ctx, cpu, count);
 
 	if (counter->collect_stat) {
-		v = saved_value_lookup(counter, cpu, true, STAT_NONE, 0, st);
+		struct saved_value *v = saved_value_lookup(counter, cpu, true,
+							   STAT_NONE, 0, st);
 		update_stats(&v->stats, count);
-		if (counter->metric_leader)
-			v->metric_total += count;
-	} else if (counter->metric_leader) {
-		v = saved_value_lookup(counter->metric_leader,
-				       cpu, true, STAT_NONE, 0, st);
-		v->metric_total += count;
-		v->metric_other++;
 	}
 }
 
@@ -308,10 +297,10 @@ static const char *get_ratio_color(enum grc_type type, double ratio)
 	return color;
 }
 
-static struct evsel *perf_stat__find_event(struct evlist *evsel_list,
+static struct perf_evsel *perf_stat__find_event(struct perf_evlist *evsel_list,
 						const char *name)
 {
-	struct evsel *c2;
+	struct perf_evsel *c2;
 
 	evlist__for_each_entry (evsel_list, c2) {
 		if (!strcasecmp(c2->name, name) && !c2->collect_stat)
@@ -321,9 +310,9 @@ static struct evsel *perf_stat__find_event(struct evlist *evsel_list,
 }
 
 /* Mark MetricExpr target events and link events using them to them. */
-void perf_stat__collect_metric_expr(struct evlist *evsel_list)
+void perf_stat__collect_metric_expr(struct perf_evlist *evsel_list)
 {
-	struct evsel *counter, *leader, **metric_events, *oc;
+	struct perf_evsel *counter, *leader, **metric_events, *oc;
 	bool found;
 	const char **metric_names;
 	int i;
@@ -341,7 +330,7 @@ void perf_stat__collect_metric_expr(struct evlist *evsel_list)
 						&metric_names, &num_metric_names) < 0)
 				continue;
 
-			metric_events = calloc(sizeof(struct evsel *),
+			metric_events = calloc(sizeof(struct perf_evsel *),
 					       num_metric_names + 1);
 			if (!metric_events)
 				return;
@@ -424,7 +413,7 @@ static double runtime_stat_n(struct runtime_stat *st,
 
 static void print_stalled_cycles_frontend(struct perf_stat_config *config,
 					  int cpu,
-					  struct evsel *evsel, double avg,
+					  struct perf_evsel *evsel, double avg,
 					  struct perf_stat_output_ctx *out,
 					  struct runtime_stat *st)
 {
@@ -448,7 +437,7 @@ static void print_stalled_cycles_frontend(struct perf_stat_config *config,
 
 static void print_stalled_cycles_backend(struct perf_stat_config *config,
 					 int cpu,
-					 struct evsel *evsel, double avg,
+					 struct perf_evsel *evsel, double avg,
 					 struct perf_stat_output_ctx *out,
 					 struct runtime_stat *st)
 {
@@ -468,7 +457,7 @@ static void print_stalled_cycles_backend(struct perf_stat_config *config,
 
 static void print_branch_misses(struct perf_stat_config *config,
 				int cpu,
-				struct evsel *evsel,
+				struct perf_evsel *evsel,
 				double avg,
 				struct perf_stat_output_ctx *out,
 				struct runtime_stat *st)
@@ -489,7 +478,7 @@ static void print_branch_misses(struct perf_stat_config *config,
 
 static void print_l1_dcache_misses(struct perf_stat_config *config,
 				   int cpu,
-				   struct evsel *evsel,
+				   struct perf_evsel *evsel,
 				   double avg,
 				   struct perf_stat_output_ctx *out,
 				   struct runtime_stat *st)
@@ -511,7 +500,7 @@ static void print_l1_dcache_misses(struct perf_stat_config *config,
 
 static void print_l1_icache_misses(struct perf_stat_config *config,
 				   int cpu,
-				   struct evsel *evsel,
+				   struct perf_evsel *evsel,
 				   double avg,
 				   struct perf_stat_output_ctx *out,
 				   struct runtime_stat *st)
@@ -532,7 +521,7 @@ static void print_l1_icache_misses(struct perf_stat_config *config,
 
 static void print_dtlb_cache_misses(struct perf_stat_config *config,
 				    int cpu,
-				    struct evsel *evsel,
+				    struct perf_evsel *evsel,
 				    double avg,
 				    struct perf_stat_output_ctx *out,
 				    struct runtime_stat *st)
@@ -552,7 +541,7 @@ static void print_dtlb_cache_misses(struct perf_stat_config *config,
 
 static void print_itlb_cache_misses(struct perf_stat_config *config,
 				    int cpu,
-				    struct evsel *evsel,
+				    struct perf_evsel *evsel,
 				    double avg,
 				    struct perf_stat_output_ctx *out,
 				    struct runtime_stat *st)
@@ -572,7 +561,7 @@ static void print_itlb_cache_misses(struct perf_stat_config *config,
 
 static void print_ll_cache_misses(struct perf_stat_config *config,
 				  int cpu,
-				  struct evsel *evsel,
+				  struct perf_evsel *evsel,
 				  double avg,
 				  struct perf_stat_output_ctx *out,
 				  struct runtime_stat *st)
@@ -695,7 +684,7 @@ static double td_be_bound(int ctx, int cpu, struct runtime_stat *st)
 }
 
 static void print_smi_cost(struct perf_stat_config *config,
-			   int cpu, struct evsel *evsel,
+			   int cpu, struct perf_evsel *evsel,
 			   struct perf_stat_output_ctx *out,
 			   struct runtime_stat *st)
 {
@@ -721,10 +710,9 @@ static void print_smi_cost(struct perf_stat_config *config,
 
 static void generic_metric(struct perf_stat_config *config,
 			   const char *metric_expr,
-			   struct evsel **metric_events,
+			   struct perf_evsel **metric_events,
 			   char *name,
 			   const char *metric_name,
-			   const char *metric_unit,
 			   double avg,
 			   int cpu,
 			   struct perf_stat_output_ctx *out,
@@ -732,18 +720,17 @@ static void generic_metric(struct perf_stat_config *config,
 {
 	print_metric_t print_metric = out->print_metric;
 	struct parse_ctx pctx;
-	double ratio, scale;
+	double ratio;
 	int i;
 	void *ctxp = out->ctx;
 	char *n, *pn;
 
 	expr__ctx_init(&pctx);
-	/* Must be first id entry */
 	expr__add_id(&pctx, name, avg);
 	for (i = 0; metric_events[i]; i++) {
 		struct saved_value *v;
 		struct stats *stats;
-		u64 metric_total = 0;
+		double scale;
 
 		if (!strcmp(metric_events[i]->name, "duration_time")) {
 			stats = &walltime_nsecs_stats;
@@ -755,9 +742,6 @@ static void generic_metric(struct perf_stat_config *config,
 				break;
 			stats = &v->stats;
 			scale = 1.0;
-
-			if (v->metric_other)
-				metric_total = v->metric_total;
 		}
 
 		n = strdup(metric_events[i]->name);
@@ -771,51 +755,30 @@ static void generic_metric(struct perf_stat_config *config,
 		pn = strchr(n, ' ');
 		if (pn)
 			*pn = 0;
-
-		if (metric_total)
-			expr__add_id(&pctx, n, metric_total);
-		else
-			expr__add_id(&pctx, n, avg_stats(stats)*scale);
+		expr__add_id(&pctx, n, avg_stats(stats)*scale);
 	}
-
 	if (!metric_events[i]) {
 		const char *p = metric_expr;
 
-		if (expr__parse(&ratio, &pctx, &p) == 0) {
-			char *unit;
-			char metric_bf[64];
-
-			if (metric_unit && metric_name) {
-				if (perf_pmu__convert_scale(metric_unit,
-					&unit, &scale) >= 0) {
-					ratio *= scale;
-				}
-
-				scnprintf(metric_bf, sizeof(metric_bf),
-					  "%s  %s", unit, metric_name);
-				print_metric(config, ctxp, NULL, "%8.1f",
-					     metric_bf, ratio);
-			} else {
-				print_metric(config, ctxp, NULL, "%8.1f",
-					metric_name ?
-					metric_name :
-					out->force_header ?  name : "",
-					ratio);
-			}
-		} else {
+		if (expr__parse(&ratio, &pctx, &p) == 0)
+			print_metric(config, ctxp, NULL, "%8.1f",
+				metric_name ?
+				metric_name :
+				out->force_header ?  name : "",
+				ratio);
+		else
 			print_metric(config, ctxp, NULL, NULL,
 				     out->force_header ?
 				     (metric_name ? metric_name : name) : "", 0);
-		}
 	} else
 		print_metric(config, ctxp, NULL, NULL, "", 0);
 
 	for (i = 1; i < pctx.num_ids; i++)
-		zfree(&pctx.ids[i].name);
+		free((void *)pctx.ids[i].name);
 }
 
 void perf_stat__print_shadow_stats(struct perf_stat_config *config,
-				   struct evsel *evsel,
+				   struct perf_evsel *evsel,
 				   double avg, int cpu,
 				   struct perf_stat_output_ctx *out,
 				   struct rblist *metric_events,
@@ -854,8 +817,7 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 					"stalled cycles per insn",
 					ratio);
 		} else if (have_frontend_stalled) {
-			out->new_line(config, ctxp);
-			print_metric(config, ctxp, NULL, "%7.2f ",
+			print_metric(config, ctxp, NULL, NULL,
 				     "stalled cycles per insn", 0);
 		}
 	} else if (perf_evsel__match(evsel, HARDWARE, HW_BRANCH_MISSES)) {
@@ -864,8 +826,8 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 		else
 			print_metric(config, ctxp, NULL, NULL, "of all branches", 0);
 	} else if (
-		evsel->core.attr.type == PERF_TYPE_HW_CACHE &&
-		evsel->core.attr.config ==  ( PERF_COUNT_HW_CACHE_L1D |
+		evsel->attr.type == PERF_TYPE_HW_CACHE &&
+		evsel->attr.config ==  ( PERF_COUNT_HW_CACHE_L1D |
 					((PERF_COUNT_HW_CACHE_OP_READ) << 8) |
 					 ((PERF_COUNT_HW_CACHE_RESULT_MISS) << 16))) {
 
@@ -874,8 +836,8 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 		else
 			print_metric(config, ctxp, NULL, NULL, "of all L1-dcache hits", 0);
 	} else if (
-		evsel->core.attr.type == PERF_TYPE_HW_CACHE &&
-		evsel->core.attr.config ==  ( PERF_COUNT_HW_CACHE_L1I |
+		evsel->attr.type == PERF_TYPE_HW_CACHE &&
+		evsel->attr.config ==  ( PERF_COUNT_HW_CACHE_L1I |
 					((PERF_COUNT_HW_CACHE_OP_READ) << 8) |
 					 ((PERF_COUNT_HW_CACHE_RESULT_MISS) << 16))) {
 
@@ -884,8 +846,8 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 		else
 			print_metric(config, ctxp, NULL, NULL, "of all L1-icache hits", 0);
 	} else if (
-		evsel->core.attr.type == PERF_TYPE_HW_CACHE &&
-		evsel->core.attr.config ==  ( PERF_COUNT_HW_CACHE_DTLB |
+		evsel->attr.type == PERF_TYPE_HW_CACHE &&
+		evsel->attr.config ==  ( PERF_COUNT_HW_CACHE_DTLB |
 					((PERF_COUNT_HW_CACHE_OP_READ) << 8) |
 					 ((PERF_COUNT_HW_CACHE_RESULT_MISS) << 16))) {
 
@@ -894,8 +856,8 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 		else
 			print_metric(config, ctxp, NULL, NULL, "of all dTLB cache hits", 0);
 	} else if (
-		evsel->core.attr.type == PERF_TYPE_HW_CACHE &&
-		evsel->core.attr.config ==  ( PERF_COUNT_HW_CACHE_ITLB |
+		evsel->attr.type == PERF_TYPE_HW_CACHE &&
+		evsel->attr.config ==  ( PERF_COUNT_HW_CACHE_ITLB |
 					((PERF_COUNT_HW_CACHE_OP_READ) << 8) |
 					 ((PERF_COUNT_HW_CACHE_RESULT_MISS) << 16))) {
 
@@ -904,8 +866,8 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 		else
 			print_metric(config, ctxp, NULL, NULL, "of all iTLB cache hits", 0);
 	} else if (
-		evsel->core.attr.type == PERF_TYPE_HW_CACHE &&
-		evsel->core.attr.config ==  ( PERF_COUNT_HW_CACHE_LL |
+		evsel->attr.type == PERF_TYPE_HW_CACHE &&
+		evsel->attr.config ==  ( PERF_COUNT_HW_CACHE_LL |
 					((PERF_COUNT_HW_CACHE_OP_READ) << 8) |
 					 ((PERF_COUNT_HW_CACHE_RESULT_MISS) << 16))) {
 
@@ -1027,7 +989,7 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 			print_metric(config, ctxp, NULL, NULL, name, 0);
 	} else if (evsel->metric_expr) {
 		generic_metric(config, evsel->metric_expr, evsel->metric_events, evsel->name,
-				evsel->metric_name, NULL, avg, cpu, out, st);
+				evsel->metric_name, avg, cpu, out, st);
 	} else if (runtime_stat_n(st, STAT_NSECS, 0, cpu) != 0) {
 		char unit = 'M';
 		char unit_buf[10];
@@ -1056,7 +1018,7 @@ void perf_stat__print_shadow_stats(struct perf_stat_config *config,
 				out->new_line(config, ctxp);
 			generic_metric(config, mexp->metric_expr, mexp->metric_events,
 					evsel->name, mexp->metric_name,
-					mexp->metric_unit, avg, cpu, out, st);
+					avg, cpu, out, st);
 		}
 	}
 	if (num == 0)

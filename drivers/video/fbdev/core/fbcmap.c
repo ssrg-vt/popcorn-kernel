@@ -285,7 +285,11 @@ int fb_set_user_cmap(struct fb_cmap_user *cmap, struct fb_info *info)
 		goto out;
 	}
 	umap.start = cmap->start;
-	lock_fb_info(info);
+	if (!lock_fb_info(info)) {
+		rc = -ENODEV;
+		goto out;
+	}
+
 	rc = fb_set_cmap(&umap, info);
 	unlock_fb_info(info);
 out:

@@ -12,9 +12,8 @@
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
-#include <linux/of_gpio.h> /* of_get_named_gpio() */
+#include <linux/of_gpio.h>
 #include <linux/of_address.h>
-#include <linux/gpio/driver.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
 #include <linux/pinctrl/pinctrl.h>
@@ -1263,10 +1262,8 @@ static int st_pctl_parse_functions(struct device_node *np,
 		grp = &info->groups[*grp_index];
 		*grp_index += 1;
 		ret = st_pctl_dt_parse_groups(child, grp, info, i++);
-		if (ret) {
-			of_node_put(child);
+		if (ret)
 			return ret;
-		}
 	}
 	dev_info(info->dev, "Function[%d\t name:%s,\tgroups:%d]\n",
 				index, func->name, func->ngroups);
@@ -1626,10 +1623,8 @@ static int st_pctl_probe_dt(struct platform_device *pdev,
 		if (of_property_read_bool(child, "gpio-controller")) {
 			const char *bank_name = NULL;
 			ret = st_gpiolib_register_bank(info, bank, child);
-			if (ret) {
-				of_node_put(child);
+			if (ret)
 				return ret;
-			}
 
 			k = info->banks[bank].range.pin_base;
 			bank_name = info->banks[bank].range.name;
@@ -1646,7 +1641,6 @@ static int st_pctl_probe_dt(struct platform_device *pdev,
 							i++, &grp_index);
 			if (ret) {
 				dev_err(&pdev->dev, "No functions found.\n");
-				of_node_put(child);
 				return ret;
 			}
 		}

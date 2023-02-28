@@ -7,11 +7,10 @@
 #ifndef _STI_DRV_H_
 #define _STI_DRV_H_
 
-#include <linux/platform_device.h>
+#include <drm/drmP.h>
 
-struct drm_device;
-struct drm_property;
 struct sti_compositor;
+struct sti_tvout;
 
 /**
  * STI drm private structure

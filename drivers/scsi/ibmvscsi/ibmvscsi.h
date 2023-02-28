@@ -74,19 +74,13 @@ struct event_pool {
 	dma_addr_t iu_token;
 };
 
-enum ibmvscsi_host_action {
-	IBMVSCSI_HOST_ACTION_NONE = 0,
-	IBMVSCSI_HOST_ACTION_RESET,
-	IBMVSCSI_HOST_ACTION_REENABLE,
-	IBMVSCSI_HOST_ACTION_UNBLOCK,
-};
-
 /* all driver data associated with a host adapter */
 struct ibmvscsi_host_data {
 	struct list_head host_list;
 	atomic_t request_limit;
 	int client_migrated;
-	enum ibmvscsi_host_action action;
+	int reset_crq;
+	int reenable_crq;
 	struct device *dev;
 	struct event_pool pool;
 	struct crq_queue queue;

@@ -180,7 +180,8 @@ static int cache_hit(in_cache_entry *entry, struct mpoa_client *mpc)
 static void in_cache_put(in_cache_entry *entry)
 {
 	if (refcount_dec_and_test(&entry->use)) {
-		kzfree(entry);
+		memset(entry, 0, sizeof(in_cache_entry));
+		kfree(entry);
 	}
 }
 
@@ -415,7 +416,8 @@ static eg_cache_entry *eg_cache_get_by_src_ip(__be32 ipaddr,
 static void eg_cache_put(eg_cache_entry *entry)
 {
 	if (refcount_dec_and_test(&entry->use)) {
-		kzfree(entry);
+		memset(entry, 0, sizeof(eg_cache_entry));
+		kfree(entry);
 	}
 }
 

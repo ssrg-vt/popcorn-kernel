@@ -10,7 +10,7 @@ SoundWire Documentation
    error_handling
    locking
 
-.. only::  subproject and html
+.. only::  subproject
 
    Indices
    =======

@@ -279,17 +279,15 @@ static struct nfs3_createdata *nfs3_alloc_createdata(void)
 	return data;
 }
 
-static struct dentry *
-nfs3_do_create(struct inode *dir, struct dentry *dentry, struct nfs3_createdata *data)
+static int nfs3_do_create(struct inode *dir, struct dentry *dentry, struct nfs3_createdata *data)
 {
 	int status;
 
 	status = rpc_call_sync(NFS_CLIENT(dir), &data->msg, 0);
 	nfs_post_op_update_inode(dir, data->res.dir_attr);
-	if (status != 0)
-		return ERR_PTR(status);
-
-	return nfs_add_or_obtain(dentry, data->res.fh, data->res.fattr, NULL);
+	if (status == 0)
+		status = nfs_instantiate(dentry, data->res.fh, data->res.fattr, NULL);
+	return status;
 }
 
 static void nfs3_free_createdata(struct nfs3_createdata *data)
@@ -306,7 +304,6 @@ nfs3_proc_create(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
 {
 	struct posix_acl *default_acl, *acl;
 	struct nfs3_createdata *data;
-	struct dentry *d_alias;
 	int status = -ENOMEM;
 
 	dprintk("NFS call  create %pd\n", dentry);
@@ -333,8 +330,7 @@ nfs3_proc_create(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
 		goto out;
 
 	for (;;) {
-		d_alias = nfs3_do_create(dir, dentry, data);
-		status = PTR_ERR_OR_ZERO(d_alias);
+		status = nfs3_do_create(dir, dentry, data);
 
 		if (status != -ENOTSUPP)
 			break;
@@ -359,9 +355,6 @@ nfs3_proc_create(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
 	if (status != 0)
 		goto out_release_acls;
 
-	if (d_alias)
-		dentry = d_alias;
-
 	/* When we created the file with exclusive semantics, make
 	 * sure we set the attributes afterwards. */
 	if (data->arg.create.createmode == NFS3_CREATE_EXCLUSIVE) {
@@ -379,13 +372,11 @@ nfs3_proc_create(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
 		nfs_post_op_update_inode(d_inode(dentry), data->res.fattr);
 		dprintk("NFS reply setattr (post-create): %d\n", status);
 		if (status != 0)
-			goto out_dput;
+			goto out_release_acls;
 	}
 
 	status = nfs3_proc_setacls(d_inode(dentry), acl, default_acl);
 
-out_dput:
-	dput(d_alias);
 out_release_acls:
 	posix_acl_release(acl);
 	posix_acl_release(default_acl);
@@ -513,7 +504,6 @@ nfs3_proc_symlink(struct inode *dir, struct dentry *dentry, struct page *page,
 		  unsigned int len, struct iattr *sattr)
 {
 	struct nfs3_createdata *data;
-	struct dentry *d_alias;
 	int status = -ENOMEM;
 
 	if (len > NFS3_MAXPATHLEN)
@@ -532,11 +522,7 @@ nfs3_proc_symlink(struct inode *dir, struct dentry *dentry, struct page *page,
 	data->arg.symlink.pathlen = len;
 	data->arg.symlink.sattr = sattr;
 
-	d_alias = nfs3_do_create(dir, dentry, data);
-	status = PTR_ERR_OR_ZERO(d_alias);
-
-	if (status == 0)
-		dput(d_alias);
+	status = nfs3_do_create(dir, dentry, data);
 
 	nfs3_free_createdata(data);
 out:
@@ -549,7 +535,6 @@ nfs3_proc_mkdir(struct inode *dir, struct dentry *dentry, struct iattr *sattr)
 {
 	struct posix_acl *default_acl, *acl;
 	struct nfs3_createdata *data;
-	struct dentry *d_alias;
 	int status = -ENOMEM;
 
 	dprintk("NFS call  mkdir %pd\n", dentry);
@@ -568,18 +553,12 @@ nfs3_proc_mkdir(struct inode *dir, struct dentry *dentry, struct iattr *sattr)
 	data->arg.mkdir.len = dentry->d_name.len;
 	data->arg.mkdir.sattr = sattr;
 
-	d_alias = nfs3_do_create(dir, dentry, data);
-	status = PTR_ERR_OR_ZERO(d_alias);
-
+	status = nfs3_do_create(dir, dentry, data);
 	if (status != 0)
 		goto out_release_acls;
 
-	if (d_alias)
-		dentry = d_alias;
-
 	status = nfs3_proc_setacls(d_inode(dentry), acl, default_acl);
 
-	dput(d_alias);
 out_release_acls:
 	posix_acl_release(acl);
 	posix_acl_release(default_acl);
@@ -681,7 +660,6 @@ nfs3_proc_mknod(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
 {
 	struct posix_acl *default_acl, *acl;
 	struct nfs3_createdata *data;
-	struct dentry *d_alias;
 	int status = -ENOMEM;
 
 	dprintk("NFS call  mknod %pd %u:%u\n", dentry,
@@ -720,17 +698,12 @@ nfs3_proc_mknod(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
 		goto out;
 	}
 
-	d_alias = nfs3_do_create(dir, dentry, data);
-	status = PTR_ERR_OR_ZERO(d_alias);
+	status = nfs3_do_create(dir, dentry, data);
 	if (status != 0)
 		goto out_release_acls;
 
-	if (d_alias)
-		dentry = d_alias;
-
 	status = nfs3_proc_setacls(d_inode(dentry), acl, default_acl);
 
-	dput(d_alias);
 out_release_acls:
 	posix_acl_release(acl);
 	posix_acl_release(default_acl);

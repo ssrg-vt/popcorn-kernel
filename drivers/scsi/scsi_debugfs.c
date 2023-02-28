@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-#include <linux/bitops.h>
 #include <linux/seq_file.h>
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_dbg.h>
@@ -19,7 +18,9 @@ static int scsi_flags_show(struct seq_file *m, const unsigned long flags,
 	bool sep = false;
 	int i;
 
-	for_each_set_bit(i, &flags, BITS_PER_LONG) {
+	for (i = 0; i < sizeof(flags) * BITS_PER_BYTE; i++) {
+		if (!(flags & BIT(i)))
+			continue;
 		if (sep)
 			seq_puts(m, "|");
 		sep = true;

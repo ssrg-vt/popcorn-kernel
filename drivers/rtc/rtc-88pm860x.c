@@ -328,8 +328,10 @@ static int pm860x_rtc_probe(struct platform_device *pdev)
 	if (!info)
 		return -ENOMEM;
 	info->irq = platform_get_irq(pdev, 0);
-	if (info->irq < 0)
+	if (info->irq < 0) {
+		dev_err(&pdev->dev, "No IRQ resource!\n");
 		return info->irq;
+	}
 
 	info->chip = chip;
 	info->i2c = (chip->id == CHIP_PM8607) ? chip->client : chip->companion;

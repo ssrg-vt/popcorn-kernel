@@ -5,8 +5,7 @@
 #include <linux/time.h>
 #include <linux/hrtimer.h>
 #include <linux/timerqueue.h>
-
-struct rtc_device;
+#include <linux/rtc.h>
 
 enum alarmtimer_type {
 	ALARM_REALTIME,

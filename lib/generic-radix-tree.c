@@ -2,7 +2,6 @@
 #include <linux/export.h>
 #include <linux/generic-radix-tree.h>
 #include <linux/gfp.h>
-#include <linux/kmemleak.h>
 
 #define GENRADIX_ARY		(PAGE_SIZE / sizeof(struct genradix_node *))
 #define GENRADIX_ARY_SHIFT	ilog2(GENRADIX_ARY)
@@ -37,12 +36,12 @@ static inline size_t genradix_depth_size(unsigned depth)
 #define GENRADIX_DEPTH_MASK				\
 	((unsigned long) (roundup_pow_of_two(GENRADIX_MAX_DEPTH + 1) - 1))
 
-static inline unsigned genradix_root_to_depth(struct genradix_root *r)
+unsigned genradix_root_to_depth(struct genradix_root *r)
 {
 	return (unsigned long) r & GENRADIX_DEPTH_MASK;
 }
 
-static inline struct genradix_node *genradix_root_to_node(struct genradix_root *r)
+struct genradix_node *genradix_root_to_node(struct genradix_root *r)
 {
 	return (void *) ((unsigned long) r & ~GENRADIX_DEPTH_MASK);
 }
@@ -76,27 +75,6 @@ void *__genradix_ptr(struct __genradix *radix, size_t offset)
 }
 EXPORT_SYMBOL(__genradix_ptr);
 
-static inline struct genradix_node *genradix_alloc_node(gfp_t gfp_mask)
-{
-	struct genradix_node *node;
-
-	node = (struct genradix_node *)__get_free_page(gfp_mask|__GFP_ZERO);
-
-	/*
-	 * We're using pages (not slab allocations) directly for kernel data
-	 * structures, so we need to explicitly inform kmemleak of them in order
-	 * to avoid false positive memory leak reports.
-	 */
-	kmemleak_alloc(node, PAGE_SIZE, 1, gfp_mask);
-	return node;
-}
-
-static inline void genradix_free_node(struct genradix_node *node)
-{
-	kmemleak_free(node);
-	free_page((unsigned long)node);
-}
-
 /*
  * Returns pointer to the specified byte @offset within @radix, allocating it if
  * necessary - newly allocated slots are always zeroed out:
@@ -119,7 +97,8 @@ void *__genradix_ptr_alloc(struct __genradix *radix, size_t offset,
 			break;
 
 		if (!new_node) {
-			new_node = genradix_alloc_node(gfp_mask);
+			new_node = (void *)
+				__get_free_page(gfp_mask|__GFP_ZERO);
 			if (!new_node)
 				return NULL;
 		}
@@ -142,7 +121,8 @@ void *__genradix_ptr_alloc(struct __genradix *radix, size_t offset,
 		n = READ_ONCE(*p);
 		if (!n) {
 			if (!new_node) {
-				new_node = genradix_alloc_node(gfp_mask);
+				new_node = (void *)
+					__get_free_page(gfp_mask|__GFP_ZERO);
 				if (!new_node)
 					return NULL;
 			}
@@ -153,7 +133,7 @@ void *__genradix_ptr_alloc(struct __genradix *radix, size_t offset,
 	}
 
 	if (new_node)
-		genradix_free_node(new_node);
+		free_page((unsigned long) new_node);
 
 	return &n->data[offset];
 }
@@ -211,7 +191,7 @@ static void genradix_free_recurse(struct genradix_node *n, unsigned level)
 				genradix_free_recurse(n->children[i], level - 1);
 	}
 
-	genradix_free_node(n);
+	free_page((unsigned long) n);
 }
 
 int __genradix_prealloc(struct __genradix *radix, size_t size,

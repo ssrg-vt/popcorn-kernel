@@ -139,14 +139,14 @@ static int dwc3_otg_get_irq(struct dwc3 *dwc)
 	struct platform_device *dwc3_pdev = to_platform_device(dwc->dev);
 	int irq;
 
-	irq = platform_get_irq_byname_optional(dwc3_pdev, "otg");
+	irq = platform_get_irq_byname(dwc3_pdev, "otg");
 	if (irq > 0)
 		goto out;
 
 	if (irq == -EPROBE_DEFER)
 		goto out;
 
-	irq = platform_get_irq_byname_optional(dwc3_pdev, "dwc_usb3");
+	irq = platform_get_irq_byname(dwc3_pdev, "dwc_usb3");
 	if (irq > 0)
 		goto out;
 
@@ -156,6 +156,9 @@ static int dwc3_otg_get_irq(struct dwc3 *dwc)
 	irq = platform_get_irq(dwc3_pdev, 0);
 	if (irq > 0)
 		goto out;
+
+	if (irq != -EPROBE_DEFER)
+		dev_err(dwc->dev, "missing OTG IRQ\n");
 
 	if (!irq)
 		irq = -EINVAL;
@@ -443,7 +446,7 @@ static struct extcon_dev *dwc3_get_extcon(struct dwc3 *dwc)
 	struct device *dev = dwc->dev;
 	struct device_node *np_phy, *np_conn;
 	struct extcon_dev *edev;
-	const char *name = "";
+	const char *name;
 
 	if (device_property_read_bool(dev, "extcon"))
 		return extcon_get_edev_by_phandle(dev, 0);

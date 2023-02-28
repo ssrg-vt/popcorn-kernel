@@ -27,8 +27,7 @@
 #include <mach/cputype.h>
 #include <mach/mux.h>
 #include <mach/serial.h>
-
-#include <clocksource/timer-davinci.h>
+#include <mach/time.h>
 
 #include "asp.h"
 #include "davinci.h"
@@ -562,15 +561,15 @@ static struct davinci_id dm644x_ids[] = {
 };
 
 /*
- * Bottom half of timer0 is used for clockevent, top half is used for
- * clocksource.
+ * T0_BOT: Timer 0, bottom:  clockevent source for hrtimers
+ * T0_TOP: Timer 0, top   :  clocksource for generic timekeeping
+ * T1_BOT: Timer 1, bottom:  (used by DSP in TI DSPLink code)
+ * T1_TOP: Timer 1, top   :  <unused>
  */
-static const struct davinci_timer_cfg dm644x_timer_cfg = {
-	.reg = DEFINE_RES_IO(DAVINCI_TIMER0_BASE, SZ_4K),
-	.irq = {
-		DEFINE_RES_IRQ(DAVINCI_INTC_IRQ(IRQ_TINT0_TINT12)),
-		DEFINE_RES_IRQ(DAVINCI_INTC_IRQ(IRQ_TINT0_TINT34)),
-	},
+static struct davinci_timer_info dm644x_timer_info = {
+	.timers		= davinci_timer_instance,
+	.clockevent_id	= T0_BOT,
+	.clocksource_id	= T0_TOP,
 };
 
 static struct plat_serial8250_port dm644x_serial0_platform_data[] = {
@@ -648,6 +647,7 @@ static const struct davinci_soc_info davinci_soc_info_dm644x = {
 	.pinmux_base		= DAVINCI_SYSTEM_MODULE_BASE,
 	.pinmux_pins		= dm644x_pins,
 	.pinmux_pins_num	= ARRAY_SIZE(dm644x_pins),
+	.timer_info		= &dm644x_timer_info,
 	.emac_pdata		= &dm644x_emac_pdata,
 	.sram_dma		= 0x00008000,
 	.sram_len		= SZ_16K,
@@ -669,7 +669,6 @@ void __init dm644x_init_time(void)
 {
 	void __iomem *pll1, *psc;
 	struct clk *clk;
-	int rv;
 
 	clk_register_fixed_rate(NULL, "ref_clk", NULL, 0, DM644X_REF_FREQ);
 
@@ -680,13 +679,8 @@ void __init dm644x_init_time(void)
 	dm644x_psc_init(NULL, psc);
 
 	clk = clk_get(NULL, "timer0");
-	if (WARN_ON(IS_ERR(clk))) {
-		pr_err("Unable to get the timer clock\n");
-		return;
-	}
 
-	rv = davinci_timer_register(clk, &dm644x_timer_cfg);
-	WARN(rv, "Unable to register the timer: %d\n", rv);
+	davinci_timer_init(clk);
 }
 
 static struct resource dm644x_pll2_resources[] = {

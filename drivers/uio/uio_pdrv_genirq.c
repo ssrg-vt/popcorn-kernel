@@ -102,15 +102,12 @@ static int uio_pdrv_genirq_irqcontrol(struct uio_info *dev_info, s32 irq_on)
 static int uio_pdrv_genirq_probe(struct platform_device *pdev)
 {
 	struct uio_info *uioinfo = dev_get_platdata(&pdev->dev);
-	struct device_node *node = pdev->dev.of_node;
 	struct uio_pdrv_genirq_platdata *priv;
 	struct uio_mem *uiomem;
 	int ret = -EINVAL;
 	int i;
 
-	if (node) {
-		const char *name;
-
+	if (pdev->dev.of_node) {
 		/* alloc uioinfo for one device */
 		uioinfo = devm_kzalloc(&pdev->dev, sizeof(*uioinfo),
 				       GFP_KERNEL);
@@ -118,13 +115,8 @@ static int uio_pdrv_genirq_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev, "unable to kmalloc\n");
 			return -ENOMEM;
 		}
-
-		if (!of_property_read_string(node, "linux,uio-name", &name))
-			uioinfo->name = devm_kstrdup(&pdev->dev, name, GFP_KERNEL);
-		else
-			uioinfo->name = devm_kasprintf(&pdev->dev, GFP_KERNEL,
-						       "%pOFn", node);
-
+		uioinfo->name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%pOFn",
+					       pdev->dev.of_node);
 		uioinfo->version = "devicetree";
 		/* Multiple IRQs are not supported */
 	}

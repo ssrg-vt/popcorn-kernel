@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 config OCTEON_ETHERNET
 	tristate "Cavium Networks Octeon Ethernet support"
-	depends on CAVIUM_OCTEON_SOC || COMPILE_TEST
-	depends on NETDEVICES
+	depends on CAVIUM_OCTEON_SOC && NETDEVICES
 	select PHYLIB
 	select MDIO_OCTEON
 	help

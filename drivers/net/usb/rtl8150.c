@@ -586,7 +586,8 @@ static void free_skb_pool(rtl8150_t *dev)
 	int i;
 
 	for (i = 0; i < RX_SKB_POOL_SIZE; i++)
-		dev_kfree_skb(dev->rx_skb_pool[i]);
+		if (dev->rx_skb_pool[i])
+			dev_kfree_skb(dev->rx_skb_pool[i]);
 }
 
 static void rx_fixup(unsigned long data)
@@ -945,7 +946,8 @@ static void rtl8150_disconnect(struct usb_interface *intf)
 		unlink_all_urbs(dev);
 		free_all_urbs(dev);
 		free_skb_pool(dev);
-		dev_kfree_skb(dev->rx_skb);
+		if (dev->rx_skb)
+			dev_kfree_skb(dev->rx_skb);
 		kfree(dev->intr_buff);
 		free_netdev(dev->netdev);
 	}

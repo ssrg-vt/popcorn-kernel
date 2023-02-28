@@ -49,14 +49,14 @@ obj-y				:= cputable.o ptrace.o syscalls.o \
 				   signal.o sysfs.o cacheinfo.o time.o \
 				   prom.o traps.o setup-common.o \
 				   udbg.o misc.o io.o misc_$(BITS).o \
-				   of_platform.o prom_parse.o
+				   of_platform.o prom_parse.o \
+				   dma-common.o
 obj-$(CONFIG_PPC64)		+= setup_64.o sys_ppc32.o \
 				   signal_64.o ptrace32.o \
-				   paca.o nvram_64.o firmware.o note.o
+				   paca.o nvram_64.o firmware.o
 obj-$(CONFIG_VDSO32)		+= vdso32/
 obj-$(CONFIG_PPC_WATCHDOG)	+= watchdog.o
 obj-$(CONFIG_HAVE_HW_BREAKPOINT)	+= hw_breakpoint.o
-obj-$(CONFIG_PPC_DAWR)		+= dawr.o
 obj-$(CONFIG_PPC_BOOK3S_64)	+= cpu_setup_ppc970.o cpu_setup_pa6t.o
 obj-$(CONFIG_PPC_BOOK3S_64)	+= cpu_setup_power.o
 obj-$(CONFIG_PPC_BOOK3S_64)	+= mce.o mce_power.o
@@ -78,9 +78,7 @@ obj-$(CONFIG_EEH)              += eeh.o eeh_pe.o eeh_dev.o eeh_cache.o \
 				  eeh_driver.o eeh_event.o eeh_sysfs.o
 obj-$(CONFIG_GENERIC_TBSYNC)	+= smp-tbsync.o
 obj-$(CONFIG_CRASH_DUMP)	+= crash_dump.o
-ifneq ($(CONFIG_FA_DUMP)$(CONFIG_PRESERVE_FA_DUMP),)
-obj-y				+= fadump.o
-endif
+obj-$(CONFIG_FA_DUMP)		+= fadump.o
 ifdef CONFIG_PPC32
 obj-$(CONFIG_E500)		+= idle_e500.o
 endif
@@ -157,9 +155,6 @@ endif
 
 obj-$(CONFIG_EPAPR_PARAVIRT)	+= epapr_paravirt.o epapr_hcalls.o
 obj-$(CONFIG_KVM_GUEST)		+= kvm.o kvm_emul.o
-ifneq ($(CONFIG_PPC_POWERNV)$(CONFIG_PPC_SVM),)
-obj-y				+= ucall.o
-endif
 
 # Disable GCOV, KCOV & sanitizers in odd or sensitive code
 GCOV_PROFILE_prom_init.o := n
@@ -189,13 +184,15 @@ extra-$(CONFIG_ALTIVEC)		+= vector.o
 extra-$(CONFIG_PPC64)		+= entry_64.o
 extra-$(CONFIG_PPC_OF_BOOT_TRAMPOLINE)	+= prom_init.o
 
-extra-$(CONFIG_PPC_OF_BOOT_TRAMPOLINE)	+= prom_init_check
+ifdef CONFIG_PPC_OF_BOOT_TRAMPOLINE
+$(obj)/built-in.a:		prom_init_check
 
-quiet_cmd_prom_init_check = PROMCHK $@
-      cmd_prom_init_check = $(CONFIG_SHELL) $< "$(NM)" $(obj)/prom_init.o; touch $@
+quiet_cmd_prom_init_check = CALL    $<
+      cmd_prom_init_check = $(CONFIG_SHELL) $< "$(NM)" "$(obj)/prom_init.o"
 
-$(obj)/prom_init_check: $(src)/prom_init_check.sh $(obj)/prom_init.o FORCE
-	$(call if_changed,prom_init_check)
-targets += prom_init_check
+PHONY += prom_init_check
+prom_init_check: $(src)/prom_init_check.sh $(obj)/prom_init.o
+	$(call cmd,prom_init_check)
+endif
 
 clean-files := vmlinux.lds

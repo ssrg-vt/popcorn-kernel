@@ -35,7 +35,9 @@ static int __init init_dlm(void)
 	if (error)
 		goto out_lockspace;
 
-	dlm_register_debugfs();
+	error = dlm_register_debugfs();
+	if (error)
+		goto out_config;
 
 	error = dlm_user_init();
 	if (error)
@@ -59,6 +61,7 @@ static int __init init_dlm(void)
 	dlm_user_exit();
  out_debug:
 	dlm_unregister_debugfs();
+ out_config:
 	dlm_config_exit();
  out_lockspace:
 	dlm_lockspace_exit();

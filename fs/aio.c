@@ -42,7 +42,6 @@
 #include <linux/ramfs.h>
 #include <linux/percpu-refcount.h>
 #include <linux/mount.h>
-#include <linux/pseudo_fs.h>
 
 #include <asm/kmap_types.h>
 #include <linux/uaccess.h>
@@ -250,12 +249,15 @@ static struct file *aio_private_file(struct kioctx *ctx, loff_t nr_pages)
 	return file;
 }
 
-static int aio_init_fs_context(struct fs_context *fc)
+static struct dentry *aio_mount(struct file_system_type *fs_type,
+				int flags, const char *dev_name, void *data)
 {
-	if (!init_pseudo(fc, AIO_RING_MAGIC))
-		return -ENOMEM;
-	fc->s_iflags |= SB_I_NOEXEC;
-	return 0;
+	struct dentry *root = mount_pseudo(fs_type, "aio:", NULL, NULL,
+					   AIO_RING_MAGIC);
+
+	if (!IS_ERR(root))
+		root->d_sb->s_iflags |= SB_I_NOEXEC;
+	return root;
 }
 
 /* aio_setup
@@ -266,7 +268,7 @@ static int __init aio_setup(void)
 {
 	static struct file_system_type aio_fs = {
 		.name		= "aio",
-		.init_fs_context = aio_init_fs_context,
+		.mount		= aio_mount,
 		.kill_sb	= kill_anon_super,
 	};
 	aio_mnt = kern_mount(&aio_fs);
@@ -423,7 +425,7 @@ static int aio_migratepage(struct address_space *mapping, struct page *new,
 	BUG_ON(PageWriteback(old));
 	get_page(new);
 
-	rc = migrate_page_move_mapping(mapping, new, old, 1);
+	rc = migrate_page_move_mapping(mapping, new, old, mode, 1);
 	if (rc != MIGRATEPAGE_SUCCESS) {
 		put_page(new);
 		goto out_unlock;
@@ -1477,9 +1479,8 @@ static int aio_prep_rw(struct kiocb *req, const struct iocb *iocb)
 	return 0;
 }
 
-static ssize_t aio_setup_rw(int rw, const struct iocb *iocb,
-		struct iovec **iovec, bool vectored, bool compat,
-		struct iov_iter *iter)
+static int aio_setup_rw(int rw, const struct iocb *iocb, struct iovec **iovec,
+		bool vectored, bool compat, struct iov_iter *iter)
 {
 	void __user *buf = (void __user *)(uintptr_t)iocb->aio_buf;
 	size_t len = iocb->aio_nbytes;
@@ -1536,7 +1537,7 @@ static int aio_read(struct kiocb *req, const struct iocb *iocb,
 		return -EINVAL;
 
 	ret = aio_setup_rw(READ, iocb, &iovec, vectored, compat, &iter);
-	if (ret < 0)
+	if (ret)
 		return ret;
 	ret = rw_verify_area(READ, file, &req->ki_pos, iov_iter_count(&iter));
 	if (!ret)
@@ -1564,7 +1565,7 @@ static int aio_write(struct kiocb *req, const struct iocb *iocb,
 		return -EINVAL;
 
 	ret = aio_setup_rw(WRITE, iocb, &iovec, vectored, compat, &iter);
-	if (ret < 0)
+	if (ret)
 		return ret;
 	ret = rw_verify_area(WRITE, file, &req->ki_pos, iov_iter_count(&iter));
 	if (!ret) {
@@ -2092,6 +2093,7 @@ SYSCALL_DEFINE6(io_pgetevents,
 		const struct __aio_sigset __user *, usig)
 {
 	struct __aio_sigset	ksig = { NULL, };
+	sigset_t		ksigmask, sigsaved;
 	struct timespec64	ts;
 	bool interrupted;
 	int ret;
@@ -2102,14 +2104,14 @@ SYSCALL_DEFINE6(io_pgetevents,
 	if (usig && copy_from_user(&ksig, usig, sizeof(ksig)))
 		return -EFAULT;
 
-	ret = set_user_sigmask(ksig.sigmask, ksig.sigsetsize);
+	ret = set_user_sigmask(ksig.sigmask, &ksigmask, &sigsaved, ksig.sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = do_io_getevents(ctx_id, min_nr, nr, events, timeout ? &ts : NULL);
 
 	interrupted = signal_pending(current);
-	restore_saved_sigmask_unless(interrupted);
+	restore_user_sigmask(ksig.sigmask, &sigsaved, interrupted);
 	if (interrupted && !ret)
 		ret = -ERESTARTNOHAND;
 
@@ -2127,6 +2129,7 @@ SYSCALL_DEFINE6(io_pgetevents_time32,
 		const struct __aio_sigset __user *, usig)
 {
 	struct __aio_sigset	ksig = { NULL, };
+	sigset_t		ksigmask, sigsaved;
 	struct timespec64	ts;
 	bool interrupted;
 	int ret;
@@ -2138,14 +2141,14 @@ SYSCALL_DEFINE6(io_pgetevents_time32,
 		return -EFAULT;
 
 
-	ret = set_user_sigmask(ksig.sigmask, ksig.sigsetsize);
+	ret = set_user_sigmask(ksig.sigmask, &ksigmask, &sigsaved, ksig.sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = do_io_getevents(ctx_id, min_nr, nr, events, timeout ? &ts : NULL);
 
 	interrupted = signal_pending(current);
-	restore_saved_sigmask_unless(interrupted);
+	restore_user_sigmask(ksig.sigmask, &sigsaved, interrupted);
 	if (interrupted && !ret)
 		ret = -ERESTARTNOHAND;
 
@@ -2179,7 +2182,7 @@ SYSCALL_DEFINE5(io_getevents_time32, __u32, ctx_id,
 #ifdef CONFIG_COMPAT
 
 struct __compat_aio_sigset {
-	compat_uptr_t		sigmask;
+	compat_sigset_t __user	*sigmask;
 	compat_size_t		sigsetsize;
 };
 
@@ -2193,7 +2196,8 @@ COMPAT_SYSCALL_DEFINE6(io_pgetevents,
 		struct old_timespec32 __user *, timeout,
 		const struct __compat_aio_sigset __user *, usig)
 {
-	struct __compat_aio_sigset ksig = { 0, };
+	struct __compat_aio_sigset ksig = { NULL, };
+	sigset_t ksigmask, sigsaved;
 	struct timespec64 t;
 	bool interrupted;
 	int ret;
@@ -2204,14 +2208,14 @@ COMPAT_SYSCALL_DEFINE6(io_pgetevents,
 	if (usig && copy_from_user(&ksig, usig, sizeof(ksig)))
 		return -EFAULT;
 
-	ret = set_compat_user_sigmask(compat_ptr(ksig.sigmask), ksig.sigsetsize);
+	ret = set_compat_user_sigmask(ksig.sigmask, &ksigmask, &sigsaved, ksig.sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = do_io_getevents(ctx_id, min_nr, nr, events, timeout ? &t : NULL);
 
 	interrupted = signal_pending(current);
-	restore_saved_sigmask_unless(interrupted);
+	restore_user_sigmask(ksig.sigmask, &sigsaved, interrupted);
 	if (interrupted && !ret)
 		ret = -ERESTARTNOHAND;
 
@@ -2228,7 +2232,8 @@ COMPAT_SYSCALL_DEFINE6(io_pgetevents_time64,
 		struct __kernel_timespec __user *, timeout,
 		const struct __compat_aio_sigset __user *, usig)
 {
-	struct __compat_aio_sigset ksig = { 0, };
+	struct __compat_aio_sigset ksig = { NULL, };
+	sigset_t ksigmask, sigsaved;
 	struct timespec64 t;
 	bool interrupted;
 	int ret;
@@ -2239,14 +2244,14 @@ COMPAT_SYSCALL_DEFINE6(io_pgetevents_time64,
 	if (usig && copy_from_user(&ksig, usig, sizeof(ksig)))
 		return -EFAULT;
 
-	ret = set_compat_user_sigmask(compat_ptr(ksig.sigmask), ksig.sigsetsize);
+	ret = set_compat_user_sigmask(ksig.sigmask, &ksigmask, &sigsaved, ksig.sigsetsize);
 	if (ret)
 		return ret;
 
 	ret = do_io_getevents(ctx_id, min_nr, nr, events, timeout ? &t : NULL);
 
 	interrupted = signal_pending(current);
-	restore_saved_sigmask_unless(interrupted);
+	restore_user_sigmask(ksig.sigmask, &sigsaved, interrupted);
 	if (interrupted && !ret)
 		ret = -ERESTARTNOHAND;
 

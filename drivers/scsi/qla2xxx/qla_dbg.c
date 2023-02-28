@@ -2743,8 +2743,7 @@ ql_dump_regs(uint level, scsi_qla_host_t *vha, uint id)
 
 
 void
-ql_dump_buffer(uint level, scsi_qla_host_t *vha, uint id, const void *buf,
-	       uint size)
+ql_dump_buffer(uint level, scsi_qla_host_t *vha, uint id, void *buf, uint size)
 {
 	uint cnt;
 

@@ -25,12 +25,10 @@
 /*
  * Authors: Dave Airlie <airlied@redhat.com>
  */
-
 #include <linux/export.h>
-#include <linux/i2c-algo-bit.h>
 #include <linux/i2c.h>
-
-#include <drm/drm_pci.h>
+#include <linux/i2c-algo-bit.h>
+#include <drm/drmP.h>
 
 #include "mgag200_drv.h"
 

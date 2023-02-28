@@ -86,6 +86,7 @@ static int aspeed_rtc_probe(struct platform_device *pdev)
 {
 	struct aspeed_rtc *rtc;
 	struct resource *res;
+	int ret;
 
 	rtc = devm_kzalloc(&pdev->dev, sizeof(*rtc), GFP_KERNEL);
 	if (!rtc)
@@ -106,7 +107,11 @@ static int aspeed_rtc_probe(struct platform_device *pdev)
 	rtc->rtc_dev->range_min = RTC_TIMESTAMP_BEGIN_1900;
 	rtc->rtc_dev->range_max = 38814989399LL; /* 3199-12-31 23:59:59 */
 
-	return rtc_register_device(rtc->rtc_dev);
+	ret = rtc_register_device(rtc->rtc_dev);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static const struct of_device_id aspeed_rtc_match[] = {

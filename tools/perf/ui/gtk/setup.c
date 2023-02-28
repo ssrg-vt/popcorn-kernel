@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "gtk.h"
-#include <linux/compiler.h>
-#include "../util.h"
+#include "../../util/cache.h"
+#include "../../util/debug.h"
 
 extern struct perf_error_ops perf_gtk_eops;
 

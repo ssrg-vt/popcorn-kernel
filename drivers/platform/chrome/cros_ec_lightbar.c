@@ -9,9 +9,8 @@
 #include <linux/fs.h>
 #include <linux/kobject.h>
 #include <linux/mfd/cros_ec.h>
+#include <linux/mfd/cros_ec_commands.h>
 #include <linux/module.h>
-#include <linux/platform_data/cros_ec_commands.h>
-#include <linux/platform_data/cros_ec_proto.h>
 #include <linux/platform_device.h>
 #include <linux/sched.h>
 #include <linux/types.h>
@@ -548,7 +547,7 @@ static struct attribute *__lb_cmds_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group cros_ec_lightbar_attr_group = {
+struct attribute_group cros_ec_lightbar_attr_group = {
 	.name = "lightbar",
 	.attrs = __lb_cmds_attrs,
 };
@@ -601,7 +600,7 @@ static int cros_ec_lightbar_remove(struct platform_device *pd)
 
 static int __maybe_unused cros_ec_lightbar_resume(struct device *dev)
 {
-	struct cros_ec_dev *ec_dev = dev_get_drvdata(dev->parent);
+	struct cros_ec_dev *ec_dev = dev_get_drvdata(dev);
 
 	if (userspace_control)
 		return 0;
@@ -611,7 +610,7 @@ static int __maybe_unused cros_ec_lightbar_resume(struct device *dev)
 
 static int __maybe_unused cros_ec_lightbar_suspend(struct device *dev)
 {
-	struct cros_ec_dev *ec_dev = dev_get_drvdata(dev->parent);
+	struct cros_ec_dev *ec_dev = dev_get_drvdata(dev);
 
 	if (userspace_control)
 		return 0;

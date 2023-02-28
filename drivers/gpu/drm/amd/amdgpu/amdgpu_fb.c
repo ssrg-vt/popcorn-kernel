@@ -23,21 +23,21 @@
  * Authors:
  *     David Airlie
  */
-
 #include <linux/module.h>
-#include <linux/pm_runtime.h>
 #include <linux/slab.h>
-#include <linux/vga_switcheroo.h>
+#include <linux/pm_runtime.h>
 
-#include <drm/amdgpu_drm.h>
+#include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_fb_helper.h>
-#include <drm/drm_fourcc.h>
-
+#include <drm/amdgpu_drm.h>
 #include "amdgpu.h"
 #include "cikd.h"
 #include "amdgpu_gem.h"
+
+#include <drm/drm_fb_helper.h>
+
+#include <linux/vga_switcheroo.h>
 
 #include "amdgpu_display.h"
 
@@ -121,7 +121,6 @@ static int amdgpufb_create_pinned_object(struct amdgpu_fbdev *rfbdev,
 					 struct drm_mode_fb_cmd2 *mode_cmd,
 					 struct drm_gem_object **gobj_p)
 {
-	const struct drm_format_info *info;
 	struct amdgpu_device *adev = rfbdev->adev;
 	struct drm_gem_object *gobj = NULL;
 	struct amdgpu_bo *abo = NULL;
@@ -131,22 +130,21 @@ static int amdgpufb_create_pinned_object(struct amdgpu_fbdev *rfbdev,
 	int aligned_size, size;
 	int height = mode_cmd->height;
 	u32 cpp;
-	u64 flags = AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED |
-			       AMDGPU_GEM_CREATE_VRAM_CONTIGUOUS     |
-			       AMDGPU_GEM_CREATE_VRAM_CLEARED 	     |
-			       AMDGPU_GEM_CREATE_CPU_GTT_USWC;
 
-	info = drm_get_format_info(adev->ddev, mode_cmd);
-	cpp = info->cpp[0];
+	cpp = drm_format_plane_cpp(mode_cmd->pixel_format, 0);
 
 	/* need to align pitch with crtc limits */
 	mode_cmd->pitches[0] = amdgpu_align_pitch(adev, mode_cmd->width, cpp,
 						  fb_tiled);
-	domain = amdgpu_display_supported_domains(adev, flags);
+	domain = amdgpu_display_supported_domains(adev);
 	height = ALIGN(mode_cmd->height, 8);
 	size = mode_cmd->pitches[0] * height;
 	aligned_size = ALIGN(size, PAGE_SIZE);
-	ret = amdgpu_gem_object_create(adev, aligned_size, 0, domain, flags,
+	ret = amdgpu_gem_object_create(adev, aligned_size, 0, domain,
+				       AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED |
+				       AMDGPU_GEM_CREATE_VRAM_CONTIGUOUS     |
+				       AMDGPU_GEM_CREATE_VRAM_CLEARED 	     |
+				       AMDGPU_GEM_CREATE_CPU_GTT_USWC,
 				       ttm_bo_type_kernel, NULL, &gobj);
 	if (ret) {
 		pr_err("failed to allocate framebuffer (%d)\n", aligned_size);

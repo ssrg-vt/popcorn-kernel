@@ -38,7 +38,6 @@
 
 #include <linux/skbuff.h>
 #include "en.h"
-#include "en/txrx.h"
 
 struct sk_buff *mlx5e_tls_handle_tx_skb(struct net_device *netdev,
 					struct mlx5e_txqsq *sq,

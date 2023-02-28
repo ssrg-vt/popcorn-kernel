@@ -1615,6 +1615,7 @@ static int team_init(struct net_device *dev)
 	int err;
 
 	team->dev = dev;
+	mutex_init(&team->lock);
 	team_set_no_mode(team);
 
 	team->pcpu_stats = netdev_alloc_pcpu_stats(struct team_pcpu_stats);
@@ -1641,8 +1642,7 @@ static int team_init(struct net_device *dev)
 		goto err_options_register;
 	netif_carrier_off(dev);
 
-	lockdep_register_key(&team->team_lock_key);
-	__mutex_init(&team->lock, "team->team_lock_key", &team->team_lock_key);
+	netdev_lockdep_set_classes(dev);
 
 	return 0;
 
@@ -1673,7 +1673,6 @@ static void team_uninit(struct net_device *dev)
 	team_queue_override_fini(team);
 	mutex_unlock(&team->lock);
 	netdev_change_features(dev);
-	lockdep_unregister_key(&team->team_lock_key);
 }
 
 static void team_destructor(struct net_device *dev)
@@ -1977,15 +1976,8 @@ static int team_del_slave(struct net_device *dev, struct net_device *port_dev)
 	err = team_port_del(team, port_dev);
 	mutex_unlock(&team->lock);
 
-	if (err)
-		return err;
-
-	if (netif_is_team_master(port_dev)) {
-		lockdep_unregister_key(&team->team_lock_key);
-		lockdep_register_key(&team->team_lock_key);
-		lockdep_set_class(&team->lock, &team->team_lock_key);
-	}
-	netdev_change_features(dev);
+	if (!err)
+		netdev_change_features(dev);
 
 	return err;
 }
@@ -2064,34 +2056,9 @@ static void team_ethtool_get_drvinfo(struct net_device *dev,
 	strlcpy(drvinfo->version, UTS_RELEASE, sizeof(drvinfo->version));
 }
 
-static int team_ethtool_get_link_ksettings(struct net_device *dev,
-					   struct ethtool_link_ksettings *cmd)
-{
-	struct team *team= netdev_priv(dev);
-	unsigned long speed = 0;
-	struct team_port *port;
-
-	cmd->base.duplex = DUPLEX_UNKNOWN;
-	cmd->base.port = PORT_OTHER;
-
-	list_for_each_entry(port, &team->port_list, list) {
-		if (team_port_txable(port)) {
-			if (port->state.speed != SPEED_UNKNOWN)
-				speed += port->state.speed;
-			if (cmd->base.duplex == DUPLEX_UNKNOWN &&
-			    port->state.duplex != DUPLEX_UNKNOWN)
-				cmd->base.duplex = port->state.duplex;
-		}
-	}
-	cmd->base.speed = speed ? : SPEED_UNKNOWN;
-
-	return 0;
-}
-
 static const struct ethtool_ops team_ethtool_ops = {
 	.get_drvinfo		= team_ethtool_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
-	.get_link_ksettings	= team_ethtool_get_link_ksettings,
 };
 
 /***********************

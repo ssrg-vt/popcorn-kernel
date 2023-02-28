@@ -139,14 +139,14 @@ xhci_dbc_alloc_requests(struct dbc_ep *dep, struct list_head *head,
 	struct dbc_request	*req;
 
 	for (i = 0; i < DBC_QUEUE_SIZE; i++) {
-		req = dbc_alloc_request(dep, GFP_KERNEL);
+		req = dbc_alloc_request(dep, GFP_ATOMIC);
 		if (!req)
 			break;
 
 		req->length = DBC_MAX_PACKET;
 		req->buf = kmalloc(req->length, GFP_KERNEL);
 		if (!req->buf) {
-			dbc_free_request(dep, req);
+			xhci_dbc_free_req(dep, req);
 			break;
 		}
 

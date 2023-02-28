@@ -559,6 +559,14 @@ void bio_put(struct bio *bio)
 }
 EXPORT_SYMBOL(bio_put);
 
+int bio_phys_segments(struct request_queue *q, struct bio *bio)
+{
+	if (unlikely(!bio_flagged(bio, BIO_SEG_VALID)))
+		blk_recount_segments(q, bio);
+
+	return bio->bi_phys_segments;
+}
+
 /**
  * 	__bio_clone_fast - clone a bio that shares the original bio's biovec
  * 	@bio: destination bio
@@ -646,20 +654,25 @@ static inline bool page_is_mergeable(const struct bio_vec *bv,
 	return true;
 }
 
-static bool bio_try_merge_pc_page(struct request_queue *q, struct bio *bio,
-		struct page *page, unsigned len, unsigned offset,
-		bool *same_page)
+/*
+ * Check if the @page can be added to the current segment(@bv), and make
+ * sure to call it only if page_is_mergeable(@bv, @page) is true
+ */
+static bool can_add_page_to_seg(struct request_queue *q,
+		struct bio_vec *bv, struct page *page, unsigned len,
+		unsigned offset)
 {
-	struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt - 1];
 	unsigned long mask = queue_segment_boundary(q);
 	phys_addr_t addr1 = page_to_phys(bv->bv_page) + bv->bv_offset;
 	phys_addr_t addr2 = page_to_phys(page) + offset + len - 1;
 
 	if ((addr1 | mask) != (addr2 | mask))
 		return false;
+
 	if (bv->bv_len + len > queue_max_segment_size(q))
 		return false;
-	return __bio_try_merge_page(bio, page, len, offset, same_page);
+
+	return true;
 }
 
 /**
@@ -669,7 +682,7 @@ static bool bio_try_merge_pc_page(struct request_queue *q, struct bio *bio,
  *	@page: page to add
  *	@len: vec entry length
  *	@offset: vec entry offset
- *	@same_page: return if the merge happen inside the same page
+ *	@put_same_page: put the page if it is same with last added page
  *
  *	Attempt to add a page to the bio_vec maplist. This can fail for a
  *	number of reasons, such as the bio being full or target block device
@@ -680,9 +693,10 @@ static bool bio_try_merge_pc_page(struct request_queue *q, struct bio *bio,
  */
 static int __bio_add_pc_page(struct request_queue *q, struct bio *bio,
 		struct page *page, unsigned int len, unsigned int offset,
-		bool *same_page)
+		bool put_same_page)
 {
 	struct bio_vec *bvec;
+	bool same_page = false;
 
 	/*
 	 * cloned bio must not modify vec list
@@ -694,22 +708,34 @@ static int __bio_add_pc_page(struct request_queue *q, struct bio *bio,
 		return 0;
 
 	if (bio->bi_vcnt > 0) {
-		if (bio_try_merge_pc_page(q, bio, page, len, offset, same_page))
-			return len;
+		bvec = &bio->bi_io_vec[bio->bi_vcnt - 1];
+
+		if (page == bvec->bv_page &&
+		    offset == bvec->bv_offset + bvec->bv_len) {
+			if (put_same_page)
+				put_page(page);
+			bvec->bv_len += len;
+			goto done;
+		}
 
 		/*
-		 * If the queue doesn't support SG gaps and adding this segment
-		 * would create a gap, disallow it.
+		 * If the queue doesn't support SG gaps and adding this
+		 * offset would create a gap, disallow it.
 		 */
-		bvec = &bio->bi_io_vec[bio->bi_vcnt - 1];
 		if (bvec_gap_to_prev(q, bvec, offset))
 			return 0;
+
+		if (page_is_mergeable(bvec, page, len, offset, &same_page) &&
+		    can_add_page_to_seg(q, bvec, page, len, offset)) {
+			bvec->bv_len += len;
+			goto done;
+		}
 	}
 
 	if (bio_full(bio, len))
 		return 0;
 
-	if (bio->bi_vcnt >= queue_max_segments(q))
+	if (bio->bi_phys_segments >= queue_max_segments(q))
 		return 0;
 
 	bvec = &bio->bi_io_vec[bio->bi_vcnt];
@@ -717,15 +743,17 @@ static int __bio_add_pc_page(struct request_queue *q, struct bio *bio,
 	bvec->bv_len = len;
 	bvec->bv_offset = offset;
 	bio->bi_vcnt++;
+ done:
 	bio->bi_iter.bi_size += len;
+	bio->bi_phys_segments = bio->bi_vcnt;
+	bio_set_flag(bio, BIO_SEG_VALID);
 	return len;
 }
 
 int bio_add_pc_page(struct request_queue *q, struct bio *bio,
 		struct page *page, unsigned int len, unsigned int offset)
 {
-	bool same_page = false;
-	return __bio_add_pc_page(q, bio, page, len, offset, &same_page);
+	return __bio_add_pc_page(q, bio, page, len, offset, false);
 }
 EXPORT_SYMBOL(bio_add_pc_page);
 
@@ -751,7 +779,7 @@ bool __bio_try_merge_page(struct bio *bio, struct page *page,
 	if (WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED)))
 		return false;
 
-	if (bio->bi_vcnt > 0 && !bio_full(bio, len)) {
+	if (bio->bi_vcnt > 0) {
 		struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt - 1];
 
 		if (page_is_mergeable(bv, page, len, off, same_page)) {
@@ -788,9 +816,6 @@ void __bio_add_page(struct bio *bio, struct page *page,
 
 	bio->bi_iter.bi_size += len;
 	bio->bi_vcnt++;
-
-	if (!bio_flagged(bio, BIO_WORKINGSET) && unlikely(PageWorkingset(page)))
-		bio_set_flag(bio, BIO_WORKINGSET);
 }
 EXPORT_SYMBOL_GPL(__bio_add_page);
 
@@ -818,19 +843,22 @@ int bio_add_page(struct bio *bio, struct page *page,
 }
 EXPORT_SYMBOL(bio_add_page);
 
-void bio_release_pages(struct bio *bio, bool mark_dirty)
+static void bio_get_pages(struct bio *bio)
 {
 	struct bvec_iter_all iter_all;
 	struct bio_vec *bvec;
 
-	if (bio_flagged(bio, BIO_NO_PAGE_REF))
-		return;
+	bio_for_each_segment_all(bvec, bio, iter_all)
+		get_page(bvec->bv_page);
+}
 
-	bio_for_each_segment_all(bvec, bio, iter_all) {
-		if (mark_dirty && !PageCompound(bvec->bv_page))
-			set_page_dirty_lock(bvec->bv_page);
+static void bio_release_pages(struct bio *bio)
+{
+	struct bvec_iter_all iter_all;
+	struct bio_vec *bvec;
+
+	bio_for_each_segment_all(bvec, bio, iter_all)
 		put_page(bvec->bv_page);
-	}
 }
 
 static int __bio_iov_bvec_add_pages(struct bio *bio, struct iov_iter *iter)
@@ -941,8 +969,11 @@ int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter)
 			ret = __bio_iov_iter_get_pages(bio, iter);
 	} while (!ret && iov_iter_count(iter) && !bio_full(bio, 0));
 
-	if (is_bvec)
+	if (iov_iter_bvec_no_ref(iter))
 		bio_set_flag(bio, BIO_NO_PAGE_REF);
+	else if (is_bvec)
+		bio_get_pages(bio);
+
 	return bio->bi_vcnt ? 0 : ret;
 }
 
@@ -1094,7 +1125,8 @@ static struct bio_map_data *bio_alloc_map_data(struct iov_iter *data,
 	if (data->nr_segs > UIO_MAXIOV)
 		return NULL;
 
-	bmd = kmalloc(struct_size(bmd, iov, data->nr_segs), gfp_mask);
+	bmd = kmalloc(sizeof(struct bio_map_data) +
+		       sizeof(struct iovec) * data->nr_segs, gfp_mask);
 	if (!bmd)
 		return NULL;
 	memcpy(bmd->iov, data->iov, sizeof(struct iovec) * data->nr_segs);
@@ -1340,6 +1372,8 @@ struct bio *bio_map_user_iov(struct request_queue *q,
 	int j;
 	struct bio *bio;
 	int ret;
+	struct bio_vec *bvec;
+	struct bvec_iter_all iter_all;
 
 	if (!iov_iter_count(iter))
 		return ERR_PTR(-EINVAL);
@@ -1369,17 +1403,13 @@ struct bio *bio_map_user_iov(struct request_queue *q,
 			for (j = 0; j < npages; j++) {
 				struct page *page = pages[j];
 				unsigned int n = PAGE_SIZE - offs;
-				bool same_page = false;
 
 				if (n > bytes)
 					n = bytes;
 
 				if (!__bio_add_pc_page(q, bio, page, n, offs,
-						&same_page)) {
-					if (same_page)
-						put_page(page);
+							true))
 					break;
-				}
 
 				added += n;
 				bytes -= n;
@@ -1410,9 +1440,29 @@ struct bio *bio_map_user_iov(struct request_queue *q,
 	return bio;
 
  out_unmap:
-	bio_release_pages(bio, false);
+	bio_for_each_segment_all(bvec, bio, iter_all) {
+		put_page(bvec->bv_page);
+	}
 	bio_put(bio);
 	return ERR_PTR(ret);
+}
+
+static void __bio_unmap_user(struct bio *bio)
+{
+	struct bio_vec *bvec;
+	struct bvec_iter_all iter_all;
+
+	/*
+	 * make sure we dirty pages we wrote to
+	 */
+	bio_for_each_segment_all(bvec, bio, iter_all) {
+		if (bio_data_dir(bio) == READ)
+			set_page_dirty_lock(bvec->bv_page);
+
+		put_page(bvec->bv_page);
+	}
+
+	bio_put(bio);
 }
 
 /**
@@ -1426,8 +1476,7 @@ struct bio *bio_map_user_iov(struct request_queue *q,
  */
 void bio_unmap_user(struct bio *bio)
 {
-	bio_release_pages(bio, bio_data_dir(bio) == READ);
-	bio_put(bio);
+	__bio_unmap_user(bio);
 	bio_put(bio);
 }
 
@@ -1510,6 +1559,7 @@ struct bio *bio_map_kern(struct request_queue *q, void *data, unsigned int len,
 	bio->bi_end_io = bio_map_kern_endio;
 	return bio;
 }
+EXPORT_SYMBOL(bio_map_kern);
 
 static void bio_copy_kern_endio(struct bio *bio)
 {
@@ -1671,7 +1721,9 @@ static void bio_dirty_fn(struct work_struct *work)
 	while ((bio = next) != NULL) {
 		next = bio->bi_private;
 
-		bio_release_pages(bio, true);
+		bio_set_pages_dirty(bio);
+		if (!bio_flagged(bio, BIO_NO_PAGE_REF))
+			bio_release_pages(bio);
 		bio_put(bio);
 	}
 }
@@ -1687,7 +1739,8 @@ void bio_check_pages_dirty(struct bio *bio)
 			goto defer;
 	}
 
-	bio_release_pages(bio, false);
+	if (!bio_flagged(bio, BIO_NO_PAGE_REF))
+		bio_release_pages(bio);
 	bio_put(bio);
 	return;
 defer:
@@ -1747,6 +1800,18 @@ void generic_end_io_acct(struct request_queue *q, int req_op,
 	part_stat_unlock();
 }
 EXPORT_SYMBOL(generic_end_io_acct);
+
+#if ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE
+void bio_flush_dcache_pages(struct bio *bi)
+{
+	struct bio_vec bvec;
+	struct bvec_iter iter;
+
+	bio_for_each_segment(bvec, bi, iter)
+		flush_dcache_page(bvec.bv_page);
+}
+EXPORT_SYMBOL(bio_flush_dcache_pages);
+#endif
 
 static inline bool bio_remaining_done(struct bio *bio)
 {
@@ -1830,8 +1895,8 @@ EXPORT_SYMBOL(bio_endio);
  * @bio, and updates @bio to represent the remaining sectors.
  *
  * Unless this is a discard request the newly allocated bio will point
- * to @bio's bi_io_vec. It is the caller's responsibility to ensure that
- * neither @bio nor @bs are freed before the split bio.
+ * to @bio's bi_io_vec; it is the caller's responsibility to ensure that
+ * @bio is not freed before the split.
  */
 struct bio *bio_split(struct bio *bio, int sectors,
 		      gfp_t gfp, struct bio_set *bs)
@@ -1875,7 +1940,10 @@ void bio_trim(struct bio *bio, int offset, int size)
 	if (offset == 0 && size == bio->bi_iter.bi_size)
 		return;
 
+	bio_clear_flag(bio, BIO_SEG_VALID);
+
 	bio_advance(bio, offset << 9);
+
 	bio->bi_iter.bi_size = size;
 
 	if (bio_integrity(bio))

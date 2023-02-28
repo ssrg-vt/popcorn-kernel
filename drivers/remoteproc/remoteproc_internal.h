@@ -99,17 +99,6 @@ static inline int rproc_parse_fw(struct rproc *rproc, const struct firmware *fw)
 }
 
 static inline
-int rproc_handle_rsc(struct rproc *rproc, u32 rsc_type, void *rsc, int offset,
-		     int avail)
-{
-	if (rproc->ops->handle_rsc)
-		return rproc->ops->handle_rsc(rproc, rsc_type, rsc, offset,
-					      avail);
-
-	return RSC_IGNORED;
-}
-
-static inline
 struct resource_table *rproc_find_loaded_rsc_table(struct rproc *rproc,
 						   const struct firmware *fw)
 {
@@ -119,27 +108,4 @@ struct resource_table *rproc_find_loaded_rsc_table(struct rproc *rproc,
 	return NULL;
 }
 
-static inline
-bool rproc_allow_sysfs_kick(struct rproc *rproc)
-{
-	return (rproc->sysfs_kick) ? true : false;
-}
-
-static inline
-bool rproc_peek_remote_kick(struct rproc *rproc, char *buf, size_t *len)
-{
-	if (rproc->ops->peek_remote_kick)
-		return rproc->ops->peek_remote_kick(rproc, buf, len);
-	else
-		return false;
-}
-
-static inline
-void rproc_ack_remote_kick(struct rproc *rproc)
-{
-	if (rproc->ops->ack_remote_kick)
-		rproc->ops->ack_remote_kick(rproc);
-}
-
-int rproc_create_kick_sysfs(struct rproc *rproc);
 #endif /* REMOTEPROC_INTERNAL_H */

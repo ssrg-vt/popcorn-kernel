@@ -726,10 +726,11 @@ static const struct v4l2_subdev_ops mt9m001_subdev_ops = {
 	.pad	= &mt9m001_subdev_pad_ops,
 };
 
-static int mt9m001_probe(struct i2c_client *client)
+static int mt9m001_probe(struct i2c_client *client,
+			 const struct i2c_device_id *did)
 {
 	struct mt9m001 *mt9m001;
-	struct i2c_adapter *adapter = client->adapter;
+	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
 	int ret;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_WORD_DATA)) {
@@ -871,7 +872,7 @@ static struct i2c_driver mt9m001_i2c_driver = {
 		.pm = &mt9m001_pm_ops,
 		.of_match_table = mt9m001_of_match,
 	},
-	.probe_new	= mt9m001_probe,
+	.probe		= mt9m001_probe,
 	.remove		= mt9m001_remove,
 	.id_table	= mt9m001_id,
 };

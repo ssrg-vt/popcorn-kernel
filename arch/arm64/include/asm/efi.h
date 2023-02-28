@@ -79,18 +79,18 @@ static inline unsigned long efi_get_max_fdt_addr(unsigned long dram_base)
 
 /*
  * On arm64, we have to ensure that the initrd ends up in the linear region,
- * which is a 1 GB aligned region of size '1UL << (VA_BITS_MIN - 1)' that is
+ * which is a 1 GB aligned region of size '1UL << (VA_BITS - 1)' that is
  * guaranteed to cover the kernel Image.
  *
  * Since the EFI stub is part of the kernel Image, we can relax the
- * usual requirements in Documentation/arm64/booting.rst, which still
+ * usual requirements in Documentation/arm64/booting.txt, which still
  * apply to other bootloaders, and are required for some kernel
  * configurations.
  */
 static inline unsigned long efi_get_max_initrd_addr(unsigned long dram_base,
 						    unsigned long image_addr)
 {
-	return (image_addr & ~(SZ_1G - 1UL)) + (1UL << (VA_BITS_MIN - 1));
+	return (image_addr & ~(SZ_1G - 1UL)) + (1UL << (VA_BITS - 1));
 }
 
 #define efi_call_early(f, ...)		sys_table_arg->boottime->f(__VA_ARGS__)

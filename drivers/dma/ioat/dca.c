@@ -286,7 +286,8 @@ struct dca_provider *ioat_dca_init(struct pci_dev *pdev, void __iomem *iobase)
 		return NULL;
 
 	dca = alloc_dca_provider(&ioat_dca_ops,
-				 struct_size(ioatdca, req_slots, slots));
+				 sizeof(*ioatdca)
+				      + (sizeof(struct ioat_dca_slot) * slots));
 	if (!dca)
 		return NULL;
 

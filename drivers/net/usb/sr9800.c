@@ -115,7 +115,6 @@ static struct sk_buff *sr_tx_fixup(struct usbnet *dev, struct sk_buff *skb,
 	u32 padbytes = 0xffff0000;
 	u32 packet_len;
 	int padlen;
-	void *ptr;
 
 	padlen = ((skb->len + 4) % (dev->maxpacket - 1)) ? 0 : 4;
 
@@ -134,12 +133,14 @@ static struct sk_buff *sr_tx_fixup(struct usbnet *dev, struct sk_buff *skb,
 			return NULL;
 	}
 
-	ptr = skb_push(skb, 4);
+	skb_push(skb, 4);
 	packet_len = (((skb->len - 4) ^ 0x0000ffff) << 16) + (skb->len - 4);
-	put_unaligned_le32(packet_len, ptr);
+	cpu_to_le32s(&packet_len);
+	skb_copy_to_linear_data(skb, &packet_len, sizeof(packet_len));
 
 	if (padlen) {
-		put_unaligned_le32(padbytes, skb_tail_pointer(skb));
+		cpu_to_le32s(&padbytes);
+		memcpy(skb_tail_pointer(skb), &padbytes, sizeof(padbytes));
 		skb_put(skb, sizeof(padbytes));
 	}
 
@@ -335,7 +336,7 @@ static void sr_set_multicast(struct net_device *net)
 static int sr_mdio_read(struct net_device *net, int phy_id, int loc)
 {
 	struct usbnet *dev = netdev_priv(net);
-	__le16 res = 0;
+	__le16 res;
 
 	mutex_lock(&dev->phy_mutex);
 	sr_set_sw_mii(dev);

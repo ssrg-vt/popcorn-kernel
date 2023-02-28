@@ -47,15 +47,13 @@ static const struct platform_device_id db1200_pids[] = {
 
 /*-------------------------  AC97 PART  ---------------------------*/
 
-SND_SOC_DAILINK_DEFS(db1200_ac97,
-	DAILINK_COMP_ARRAY(COMP_CPU("au1xpsc_ac97.1")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("ac97-codec.1", "ac97-hifi")),
-	DAILINK_COMP_ARRAY(COMP_PLATFORM("au1xpsc-pcm.1")));
-
 static struct snd_soc_dai_link db1200_ac97_dai = {
 	.name		= "AC97",
 	.stream_name	= "AC97 HiFi",
-	SND_SOC_DAILINK_REG(db1200_ac97),
+	.codec_dai_name	= "ac97-hifi",
+	.cpu_dai_name	= "au1xpsc_ac97.1",
+	.platform_name	= "au1xpsc-pcm.1",
+	.codec_name	= "ac97-codec.1",
 };
 
 static struct snd_soc_card db1200_ac97_machine = {
@@ -65,15 +63,13 @@ static struct snd_soc_card db1200_ac97_machine = {
 	.num_links	= 1,
 };
 
-SND_SOC_DAILINK_DEFS(db1300_ac97,
-	DAILINK_COMP_ARRAY(COMP_CPU("au1xpsc_ac97.1")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("wm9712-codec.1", "wm9712-hifi")),
-	DAILINK_COMP_ARRAY(COMP_PLATFORM("au1xpsc-pcm.1")));
-
 static struct snd_soc_dai_link db1300_ac97_dai = {
 	.name		= "AC97",
 	.stream_name	= "AC97 HiFi",
-	SND_SOC_DAILINK_REG(db1300_ac97),
+	.codec_dai_name	= "wm9712-hifi",
+	.cpu_dai_name	= "au1xpsc_ac97.1",
+	.platform_name	= "au1xpsc-pcm.1",
+	.codec_name	= "wm9712-codec.1",
 };
 
 static struct snd_soc_card db1300_ac97_machine = {
@@ -108,18 +104,16 @@ static const struct snd_soc_ops db1200_i2s_wm8731_ops = {
 	.startup	= db1200_i2s_startup,
 };
 
-SND_SOC_DAILINK_DEFS(db1200_i2s,
-	DAILINK_COMP_ARRAY(COMP_CPU("au1xpsc_i2s.1")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("wm8731.0-001b", "wm8731-hifi")),
-	DAILINK_COMP_ARRAY(COMP_PLATFORM("au1xpsc-pcm.1")));
-
 static struct snd_soc_dai_link db1200_i2s_dai = {
 	.name		= "WM8731",
 	.stream_name	= "WM8731 PCM",
+	.codec_dai_name	= "wm8731-hifi",
+	.cpu_dai_name	= "au1xpsc_i2s.1",
+	.platform_name	= "au1xpsc-pcm.1",
+	.codec_name	= "wm8731.0-001b",
 	.dai_fmt	= SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_NB_NF |
 			  SND_SOC_DAIFMT_CBM_CFM,
 	.ops		= &db1200_i2s_wm8731_ops,
-	SND_SOC_DAILINK_REG(db1200_i2s),
 };
 
 static struct snd_soc_card db1200_i2s_machine = {
@@ -129,18 +123,16 @@ static struct snd_soc_card db1200_i2s_machine = {
 	.num_links	= 1,
 };
 
-SND_SOC_DAILINK_DEFS(db1300_i2s,
-	DAILINK_COMP_ARRAY(COMP_CPU("au1xpsc_i2s.2")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("wm8731.0-001b", "wm8731-hifi")),
-	DAILINK_COMP_ARRAY(COMP_PLATFORM("au1xpsc-pcm.2")));
-
 static struct snd_soc_dai_link db1300_i2s_dai = {
 	.name		= "WM8731",
 	.stream_name	= "WM8731 PCM",
+	.codec_dai_name	= "wm8731-hifi",
+	.cpu_dai_name	= "au1xpsc_i2s.2",
+	.platform_name	= "au1xpsc-pcm.2",
+	.codec_name	= "wm8731.0-001b",
 	.dai_fmt	= SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_NB_NF |
 			  SND_SOC_DAIFMT_CBM_CFM,
 	.ops		= &db1200_i2s_wm8731_ops,
-	SND_SOC_DAILINK_REG(db1300_i2s),
 };
 
 static struct snd_soc_card db1300_i2s_machine = {
@@ -150,18 +142,16 @@ static struct snd_soc_card db1300_i2s_machine = {
 	.num_links	= 1,
 };
 
-SND_SOC_DAILINK_DEFS(db1550_i2s,
-	DAILINK_COMP_ARRAY(COMP_CPU("au1xpsc_i2s.3")),
-	DAILINK_COMP_ARRAY(COMP_CODEC("wm8731.0-001b", "wm8731-hifi")),
-	DAILINK_COMP_ARRAY(COMP_PLATFORM("au1xpsc-pcm.3")));
-
 static struct snd_soc_dai_link db1550_i2s_dai = {
 	.name		= "WM8731",
 	.stream_name	= "WM8731 PCM",
+	.codec_dai_name	= "wm8731-hifi",
+	.cpu_dai_name	= "au1xpsc_i2s.3",
+	.platform_name	= "au1xpsc-pcm.3",
+	.codec_name	= "wm8731.0-001b",
 	.dai_fmt	= SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_NB_NF |
 			  SND_SOC_DAIFMT_CBM_CFM,
 	.ops		= &db1200_i2s_wm8731_ops,
-	SND_SOC_DAILINK_REG(db1550_i2s),
 };
 
 static struct snd_soc_card db1550_i2s_machine = {

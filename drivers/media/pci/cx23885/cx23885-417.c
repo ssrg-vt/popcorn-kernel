@@ -1324,11 +1324,12 @@ static int vidioc_querycap(struct file *file, void  *priv,
 	strscpy(cap->card, cx23885_boards[tsport->dev->board].name,
 		sizeof(cap->card));
 	sprintf(cap->bus_info, "PCIe:%s", pci_name(dev->pci));
-	cap->capabilities = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
-			    V4L2_CAP_STREAMING | V4L2_CAP_VBI_CAPTURE |
-			    V4L2_CAP_AUDIO | V4L2_CAP_DEVICE_CAPS;
+	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
+			   V4L2_CAP_STREAMING;
 	if (dev->tuner_type != TUNER_ABSENT)
-		cap->capabilities |= V4L2_CAP_TUNER;
+		cap->device_caps |= V4L2_CAP_TUNER;
+	cap->capabilities = cap->device_caps | V4L2_CAP_VBI_CAPTURE |
+		V4L2_CAP_AUDIO | V4L2_CAP_DEVICE_CAPS;
 
 	return 0;
 }
@@ -1339,6 +1340,7 @@ static int vidioc_enum_fmt_vid_cap(struct file *file, void  *priv,
 	if (f->index != 0)
 		return -EINVAL;
 
+	strscpy(f->description, "MPEG", sizeof(f->description));
 	f->pixelformat = V4L2_PIX_FMT_MPEG;
 
 	return 0;
@@ -1540,10 +1542,6 @@ int cx23885_417_register(struct cx23885_dev *dev)
 	video_set_drvdata(dev->v4l_device, dev);
 	dev->v4l_device->lock = &dev->lock;
 	dev->v4l_device->queue = q;
-	dev->v4l_device->device_caps = V4L2_CAP_VIDEO_CAPTURE |
-				       V4L2_CAP_READWRITE | V4L2_CAP_STREAMING;
-	if (dev->tuner_type != TUNER_ABSENT)
-		dev->v4l_device->device_caps |= V4L2_CAP_TUNER;
 	err = video_register_device(dev->v4l_device,
 		VFL_TYPE_GRABBER, -1);
 	if (err < 0) {

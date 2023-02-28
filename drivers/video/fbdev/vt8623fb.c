@@ -669,8 +669,10 @@ static int vt8623_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	/* Allocate and fill driver data structure */
 	info = framebuffer_alloc(sizeof(struct vt8623fb_info), &(dev->dev));
-	if (!info)
+	if (! info) {
+		dev_err(&(dev->dev), "cannot allocate memory\n");
 		return -ENOMEM;
+	}
 
 	par = info->par;
 	mutex_init(&par->open_lock);

@@ -38,7 +38,7 @@ static int gfs2_drevalidate(struct dentry *dentry, unsigned int flags)
 	struct inode *inode;
 	struct gfs2_holder d_gh;
 	struct gfs2_inode *ip = NULL;
-	int error, valid = 0;
+	int error;
 	int had_lock = 0;
 
 	if (flags & LOOKUP_RCU)
@@ -51,30 +51,53 @@ static int gfs2_drevalidate(struct dentry *dentry, unsigned int flags)
 
 	if (inode) {
 		if (is_bad_inode(inode))
-			goto out;
+			goto invalid;
 		ip = GFS2_I(inode);
 	}
 
-	if (sdp->sd_lockstruct.ls_ops->lm_mount == NULL) {
-		valid = 1;
-		goto out;
-	}
+	if (sdp->sd_lockstruct.ls_ops->lm_mount == NULL)
+		goto valid;
 
 	had_lock = (gfs2_glock_is_locked_by_me(dip->i_gl) != NULL);
 	if (!had_lock) {
 		error = gfs2_glock_nq_init(dip->i_gl, LM_ST_SHARED, 0, &d_gh);
 		if (error)
-			goto out;
-	}
+			goto fail;
+	} 
 
 	error = gfs2_dir_check(d_inode(parent), &dentry->d_name, ip);
-	valid = inode ? !error : (error == -ENOENT);
+	switch (error) {
+	case 0:
+		if (!inode)
+			goto invalid_gunlock;
+		break;
+	case -ENOENT:
+		if (!inode)
+			goto valid_gunlock;
+		goto invalid_gunlock;
+	default:
+		goto fail_gunlock;
+	}
 
+valid_gunlock:
 	if (!had_lock)
 		gfs2_glock_dq_uninit(&d_gh);
-out:
+valid:
 	dput(parent);
-	return valid;
+	return 1;
+
+invalid_gunlock:
+	if (!had_lock)
+		gfs2_glock_dq_uninit(&d_gh);
+invalid:
+	dput(parent);
+	return 0;
+
+fail_gunlock:
+	gfs2_glock_dq_uninit(&d_gh);
+fail:
+	dput(parent);
+	return 0;
 }
 
 static int gfs2_dhash(const struct dentry *dentry, struct qstr *str)

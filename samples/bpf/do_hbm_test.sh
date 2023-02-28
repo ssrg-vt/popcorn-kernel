@@ -13,10 +13,10 @@ Usage() {
   echo "egress or ingress bandwidht. It then uses iperf3 or netperf to create"
   echo "loads. The output is the goodput in Mbps (unless -D was used)."
   echo ""
-  echo "USAGE: $name [out] [-b=<prog>|--bpf=<prog>] [-c=<cc>|--cc=<cc>]"
-  echo "             [-D] [-d=<delay>|--delay=<delay>] [--debug] [-E] [--edt]"
+  echo "USAGE: $name [out] [-b=<prog>|--bpf=<prog>] [-c=<cc>|--cc=<cc>] [-D]"
+  echo "             [-d=<delay>|--delay=<delay>] [--debug] [-E]"
   echo "             [-f=<#flows>|--flows=<#flows>] [-h] [-i=<id>|--id=<id >]"
-  echo "             [-l] [-N] [--no_cn] [-p=<port>|--port=<port>] [-P]"
+  echo "             [-l] [-N] [-p=<port>|--port=<port>] [-P]"
   echo "             [-q=<qdisc>] [-R] [-s=<server>|--server=<server]"
   echo "             [-S|--stats] -t=<time>|--time=<time>] [-w] [cubic|dctcp]"
   echo "  Where:"
@@ -30,11 +30,9 @@ Usage() {
   echo "                      other detailed information. This information is"
   echo "                      test dependent (i.e. iperf3 or netperf)."
   echo "    -E                enable ECN (not required for dctcp)"
-  echo "    --edt             use fq's Earliest Departure Time (requires fq)"
   echo "    -f or --flows     number of concurrent flows (default=1)"
   echo "    -i or --id        cgroup id (an integer, default is 1)"
   echo "    -N                use netperf instead of iperf3"
-  echo "    --no_cn           Do not return CN notifications"
   echo "    -l                do not limit flows using loopback"
   echo "    -h                Help"
   echo "    -p or --port      iperf3 port (default is 5201)"
@@ -117,9 +115,6 @@ processArgs () {
     -c=*|--cc=*)
       cc="${i#*=}"
       ;;
-    --no_cn)
-      flags="$flags --no_cn"
-      ;;
     --debug)
       flags="$flags -d"
       debug_flag=1
@@ -131,12 +126,13 @@ processArgs () {
       details=1
       ;;
     -E)
-      ecn=1
-      ;;
-    --edt)
-      flags="$flags --edt"
-      qdisc="fq"
+     ecn=1
      ;;
+    # Support for upcomming fq Early Departure Time egress rate limiting
+    #--edt)
+    # prog="hbm_out_edt_kern.o"
+    # qdisc="fq"
+    # ;;
     -f=*|--flows=*)
       flows="${i#*=}"
       ;;
@@ -228,8 +224,8 @@ if [ "$netem" -ne "0" ] ; then
   tc qdisc del dev lo root > /dev/null 2>&1
   tc qdisc add dev lo root netem delay $netem\ms > /dev/null 2>&1
 elif [ "$qdisc" != "" ] ; then
-  tc qdisc del dev eth0 root > /dev/null 2>&1
-  tc qdisc add dev eth0 root $qdisc > /dev/null 2>&1
+  tc qdisc del dev lo root > /dev/null 2>&1
+  tc qdisc add dev lo root $qdisc > /dev/null 2>&1
 fi
 
 n=0
@@ -399,9 +395,7 @@ fi
 if [ "$netem" -ne "0" ] ; then
   tc qdisc del dev lo root > /dev/null 2>&1
 fi
-if [ "$qdisc" != "" ] ; then
-  tc qdisc del dev eth0 root > /dev/null 2>&1
-fi
+
 sleep 2
 
 hbmPid=`ps ax | grep "hbm " | grep --invert-match "grep" | awk '{ print $1 }'`

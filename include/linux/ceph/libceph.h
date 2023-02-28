@@ -84,13 +84,11 @@ struct ceph_options {
 #define CEPH_MSG_MAX_MIDDLE_LEN	(16*1024*1024)
 
 /*
- * The largest possible rbd data object is 32M.
- * The largest possible rbd object map object is 64M.
- *
+ * Handle the largest possible rbd object in one message.
  * There is no limit on the size of cephfs objects, but it has to obey
  * rsize and wsize mount options anyway.
  */
-#define CEPH_MSG_MAX_DATA_LEN	(64*1024*1024)
+#define CEPH_MSG_MAX_DATA_LEN	(32*1024*1024)
 
 #define CEPH_AUTH_NAME_DEFAULT   "guest"
 
@@ -293,7 +291,6 @@ struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private);
 struct ceph_entity_addr *ceph_client_addr(struct ceph_client *client);
 u64 ceph_client_gid(struct ceph_client *client);
 extern void ceph_destroy_client(struct ceph_client *client);
-extern void ceph_reset_client_addr(struct ceph_client *client);
 extern int __ceph_open_session(struct ceph_client *client,
 			       unsigned long started);
 extern int ceph_open_session(struct ceph_client *client);
@@ -302,6 +299,10 @@ int ceph_wait_for_latest_osdmap(struct ceph_client *client,
 
 /* pagevec.c */
 extern void ceph_release_page_vector(struct page **pages, int num_pages);
+
+extern struct page **ceph_get_direct_page_vector(const void __user *data,
+						 int num_pages,
+						 bool write_page);
 extern void ceph_put_page_vector(struct page **pages, int num_pages,
 				 bool dirty);
 extern struct page **ceph_alloc_page_vector(int num_pages, gfp_t flags);

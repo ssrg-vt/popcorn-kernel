@@ -1,8 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0
 /*
  * GPIO support for Cirrus Logic Madera codecs
  *
  * Copyright (C) 2015-2018 Cirrus Logic
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; version 2.
  */
 
 #include <linux/gpio/driver.h>
@@ -120,7 +124,7 @@ static const struct gpio_chip madera_gpio_chip = {
 static int madera_gpio_probe(struct platform_device *pdev)
 {
 	struct madera *madera = dev_get_drvdata(pdev->dev.parent);
-	struct madera_pdata *pdata = &madera->pdata;
+	struct madera_pdata *pdata = dev_get_platdata(madera->dev);
 	struct madera_gpio *madera_gpio;
 	int ret;
 
@@ -136,9 +140,6 @@ static int madera_gpio_probe(struct platform_device *pdev)
 	madera_gpio->gpio_chip.parent = pdev->dev.parent;
 
 	switch (madera->type) {
-	case CS47L15:
-		madera_gpio->gpio_chip.ngpio = CS47L15_NUM_GPIOS;
-		break;
 	case CS47L35:
 		madera_gpio->gpio_chip.ngpio = CS47L35_NUM_GPIOS;
 		break;
@@ -150,18 +151,13 @@ static int madera_gpio_probe(struct platform_device *pdev)
 	case CS47L91:
 		madera_gpio->gpio_chip.ngpio = CS47L90_NUM_GPIOS;
 		break;
-	case CS42L92:
-	case CS47L92:
-	case CS47L93:
-		madera_gpio->gpio_chip.ngpio = CS47L92_NUM_GPIOS;
-		break;
 	default:
 		dev_err(&pdev->dev, "Unknown chip variant %d\n", madera->type);
 		return -EINVAL;
 	}
 
 	/* We want to be usable on systems that don't use devicetree or acpi */
-	if (pdata->gpio_base)
+	if (pdata && pdata->gpio_base)
 		madera_gpio->gpio_chip.base = pdata->gpio_base;
 	else
 		madera_gpio->gpio_chip.base = -1;

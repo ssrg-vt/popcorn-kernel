@@ -171,8 +171,10 @@ static int ts4800_wdt_probe(struct platform_device *pdev)
 	ts4800_wdt_stop(wdd);
 
 	ret = devm_watchdog_register_device(dev, wdd);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "failed to register watchdog device\n");
 		return ret;
+	}
 
 	platform_set_drvdata(pdev, wdt);
 

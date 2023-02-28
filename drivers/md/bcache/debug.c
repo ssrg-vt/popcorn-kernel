@@ -178,9 +178,10 @@ static ssize_t bch_dump_read(struct file *file, char __user *buf,
 	while (size) {
 		struct keybuf_key *w;
 		unsigned int bytes = min(i->bytes, size);
+		int err = copy_to_user(buf, i->buf, bytes);
 
-		if (copy_to_user(buf, i->buf, bytes))
-			return -EFAULT;
+		if (err)
+			return err;
 
 		ret	 += bytes;
 		buf	 += bytes;

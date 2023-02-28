@@ -119,20 +119,17 @@ int of_get_display_timing(const struct device_node *np, const char *name,
 		struct display_timing *dt)
 {
 	struct device_node *timing_np;
-	int ret;
 
 	if (!np)
 		return -EINVAL;
 
 	timing_np = of_get_child_by_name(np, name);
-	if (!timing_np)
+	if (!timing_np) {
+		pr_err("%pOF: could not find node '%s'\n", np, name);
 		return -ENOENT;
+	}
 
-	ret = of_parse_display_timing(timing_np, dt);
-
-	of_node_put(timing_np);
-
-	return ret;
+	return of_parse_display_timing(timing_np, dt);
 }
 EXPORT_SYMBOL_GPL(of_get_display_timing);
 

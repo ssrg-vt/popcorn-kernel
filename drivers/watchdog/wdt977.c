@@ -398,7 +398,7 @@ static long wdt977_ioctl(struct file *file, unsigned int cmd,
 			return -EINVAL;
 
 		wdt977_keepalive();
-		/* Fall through */
+		/* Fall */
 
 	case WDIOC_GETTIMEOUT:
 		return put_user(timeout, uarg.i);

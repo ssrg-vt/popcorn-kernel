@@ -505,9 +505,9 @@ static void a6xx_gmu_rpmh_init(struct a6xx_gmu *gmu)
 
 err:
 	if (!IS_ERR_OR_NULL(pdcptr))
-		iounmap(pdcptr);
+		devm_iounmap(gmu->dev, pdcptr);
 	if (!IS_ERR_OR_NULL(seqptr))
-		iounmap(seqptr);
+		devm_iounmap(gmu->dev, seqptr);
 }
 
 /*
@@ -1172,7 +1172,7 @@ static int a6xx_gmu_pwrlevels_probe(struct a6xx_gmu *gmu)
 
 static int a6xx_gmu_clocks_probe(struct a6xx_gmu *gmu)
 {
-	int ret = devm_clk_bulk_get_all(gmu->dev, &gmu->clocks);
+	int ret = msm_clk_bulk_get(gmu->dev, &gmu->clocks);
 
 	if (ret < 1)
 		return ret;
@@ -1197,7 +1197,7 @@ static void __iomem *a6xx_gmu_get_mmio(struct platform_device *pdev,
 		return ERR_PTR(-EINVAL);
 	}
 
-	ret = ioremap(res->start, resource_size(res));
+	ret = devm_ioremap(&pdev->dev, res->start, resource_size(res));
 	if (!ret) {
 		DRM_DEV_ERROR(&pdev->dev, "Unable to map the %s registers\n", name);
 		return ERR_PTR(-EINVAL);
@@ -1213,10 +1213,10 @@ static int a6xx_gmu_get_irq(struct a6xx_gmu *gmu, struct platform_device *pdev,
 
 	irq = platform_get_irq_byname(pdev, name);
 
-	ret = request_irq(irq, handler, IRQF_TRIGGER_HIGH, name, gmu);
+	ret = devm_request_irq(&pdev->dev, irq, handler, IRQF_TRIGGER_HIGH,
+		name, gmu);
 	if (ret) {
-		DRM_DEV_ERROR(&pdev->dev, "Unable to get interrupt %s %d\n",
-			      name, ret);
+		DRM_DEV_ERROR(&pdev->dev, "Unable to get interrupt %s\n", name);
 		return ret;
 	}
 
@@ -1232,32 +1232,26 @@ void a6xx_gmu_remove(struct a6xx_gpu *a6xx_gpu)
 	if (!gmu->initialized)
 		return;
 
-	pm_runtime_force_suspend(gmu->dev);
+	a6xx_gmu_stop(a6xx_gpu);
+
+	pm_runtime_disable(gmu->dev);
 
 	if (!IS_ERR_OR_NULL(gmu->gxpd)) {
 		pm_runtime_disable(gmu->gxpd);
 		dev_pm_domain_detach(gmu->gxpd, false);
 	}
 
-	iounmap(gmu->mmio);
-	gmu->mmio = NULL;
-
+	a6xx_gmu_irq_disable(gmu);
 	a6xx_gmu_memory_free(gmu, gmu->hfi);
 
 	iommu_detach_device(gmu->domain, gmu->dev);
 
 	iommu_domain_free(gmu->domain);
 
-	free_irq(gmu->gmu_irq, gmu);
-	free_irq(gmu->hfi_irq, gmu);
-
-	/* Drop reference taken in of_find_device_by_node */
-	put_device(gmu->dev);
-
 	gmu->initialized = false;
 }
 
-int a6xx_gmu_init(struct a6xx_gpu *a6xx_gpu, struct device_node *node)
+int a6xx_gmu_probe(struct a6xx_gpu *a6xx_gpu, struct device_node *node)
 {
 	struct a6xx_gmu *gmu = &a6xx_gpu->gmu;
 	struct platform_device *pdev = of_find_device_by_node(node);
@@ -1278,34 +1272,34 @@ int a6xx_gmu_init(struct a6xx_gpu *a6xx_gpu, struct device_node *node)
 	/* Get the list of clocks */
 	ret = a6xx_gmu_clocks_probe(gmu);
 	if (ret)
-		goto err_put_device;
+		return ret;
 
 	/* Set up the IOMMU context bank */
 	ret = a6xx_gmu_memory_probe(gmu);
 	if (ret)
-		goto err_put_device;
+		return ret;
 
 	/* Allocate memory for for the HFI queues */
 	gmu->hfi = a6xx_gmu_memory_alloc(gmu, SZ_16K);
 	if (IS_ERR(gmu->hfi))
-		goto err_memory;
+		goto err;
 
 	/* Allocate memory for the GMU debug region */
 	gmu->debug = a6xx_gmu_memory_alloc(gmu, SZ_16K);
 	if (IS_ERR(gmu->debug))
-		goto err_memory;
+		goto err;
 
 	/* Map the GMU registers */
 	gmu->mmio = a6xx_gmu_get_mmio(pdev, "gmu");
 	if (IS_ERR(gmu->mmio))
-		goto err_memory;
+		goto err;
 
 	/* Get the HFI and GMU interrupts */
 	gmu->hfi_irq = a6xx_gmu_get_irq(gmu, pdev, "hfi", a6xx_hfi_irq);
 	gmu->gmu_irq = a6xx_gmu_get_irq(gmu, pdev, "gmu", a6xx_gmu_irq);
 
 	if (gmu->hfi_irq < 0 || gmu->gmu_irq < 0)
-		goto err_mmio;
+		goto err;
 
 	/*
 	 * Get a link to the GX power domain to reset the GPU in case of GMU
@@ -1322,12 +1316,7 @@ int a6xx_gmu_init(struct a6xx_gpu *a6xx_gpu, struct device_node *node)
 	gmu->initialized = true;
 
 	return 0;
-
-err_mmio:
-	iounmap(gmu->mmio);
-	free_irq(gmu->gmu_irq, gmu);
-	free_irq(gmu->hfi_irq, gmu);
-err_memory:
+err:
 	a6xx_gmu_memory_free(gmu, gmu->hfi);
 
 	if (gmu->domain) {
@@ -1335,11 +1324,6 @@ err_memory:
 
 		iommu_domain_free(gmu->domain);
 	}
-	ret = -ENODEV;
 
-err_put_device:
-	/* Drop reference taken in of_find_device_by_node */
-	put_device(gmu->dev);
-
-	return ret;
+	return -ENODEV;
 }

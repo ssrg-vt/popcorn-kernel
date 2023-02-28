@@ -315,12 +315,6 @@ i40e_status i40e_acquire_nvm(struct i40e_hw *hw,
 void i40e_release_nvm(struct i40e_hw *hw);
 i40e_status i40e_read_nvm_word(struct i40e_hw *hw, u16 offset,
 					 u16 *data);
-i40e_status i40e_read_nvm_module_data(struct i40e_hw *hw,
-				      u8 module_ptr, u16 offset,
-				      u16 words_data_size,
-				      u16 *data_ptr);
-i40e_status i40e_read_nvm_buffer(struct i40e_hw *hw, u16 offset,
-				 u16 *words, u16 *data);
 i40e_status i40e_update_nvm_checksum(struct i40e_hw *hw);
 i40e_status i40e_validate_nvm_checksum(struct i40e_hw *hw,
 						 u16 *checksum);
@@ -331,8 +325,6 @@ void i40e_nvmupd_check_wait_event(struct i40e_hw *hw, u16 opcode,
 				  struct i40e_aq_desc *desc);
 void i40e_nvmupd_clear_wait_state(struct i40e_hw *hw);
 void i40e_set_pci_config_data(struct i40e_hw *hw, u16 link_status);
-
-i40e_status i40e_set_mac_type(struct i40e_hw *hw);
 
 extern struct i40e_rx_ptype_decoded i40e_ptype_lookup[];
 
@@ -358,10 +350,6 @@ i40e_virtchnl_link_speed(enum i40e_aq_link_speed link_speed)
 		return VIRTCHNL_LINK_SPEED_100MB;
 	case I40E_LINK_SPEED_1GB:
 		return VIRTCHNL_LINK_SPEED_1GB;
-	case I40E_LINK_SPEED_2_5GB:
-		return VIRTCHNL_LINK_SPEED_2_5GB;
-	case I40E_LINK_SPEED_5GB:
-		return VIRTCHNL_LINK_SPEED_5GB;
 	case I40E_LINK_SPEED_10GB:
 		return VIRTCHNL_LINK_SPEED_10GB;
 	case I40E_LINK_SPEED_40GB:

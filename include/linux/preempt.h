@@ -182,7 +182,7 @@ do { \
 
 #define preemptible()	(preempt_count() == 0 && !irqs_disabled())
 
-#ifdef CONFIG_PREEMPTION
+#ifdef CONFIG_PREEMPT
 #define preempt_enable() \
 do { \
 	barrier(); \
@@ -203,7 +203,7 @@ do { \
 		__preempt_schedule(); \
 } while (0)
 
-#else /* !CONFIG_PREEMPTION */
+#else /* !CONFIG_PREEMPT */
 #define preempt_enable() \
 do { \
 	barrier(); \
@@ -217,7 +217,7 @@ do { \
 } while (0)
 
 #define preempt_check_resched() do { } while (0)
-#endif /* CONFIG_PREEMPTION */
+#endif /* CONFIG_PREEMPT */
 
 #define preempt_disable_notrace() \
 do { \

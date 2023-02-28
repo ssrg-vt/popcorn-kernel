@@ -5,9 +5,7 @@
  */
 #include <linux/seq_file.h>
 
-#include <drm/drm_debugfs.h>
-#include <drm/drm_file.h>
-#include <drm/drm_print.h>
+#include <drm/drmP.h>
 
 #include "sti_plane.h"
 #include "sti_vid.h"

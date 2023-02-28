@@ -19,7 +19,6 @@
 #include <linux/atomic.h>
 #include <linux/device.h>
 #include <linux/poll.h>
-#include <linux/security.h>
 
 #include "internal.h"
 
@@ -137,25 +136,6 @@ void debugfs_file_put(struct dentry *dentry)
 }
 EXPORT_SYMBOL_GPL(debugfs_file_put);
 
-/*
- * Only permit access to world-readable files when the kernel is locked down.
- * We also need to exclude any file that has ways to write or alter it as root
- * can bypass the permissions check.
- */
-static bool debugfs_is_locked_down(struct inode *inode,
-				   struct file *filp,
-				   const struct file_operations *real_fops)
-{
-	if ((inode->i_mode & 07777) == 0444 &&
-	    !(filp->f_mode & FMODE_WRITE) &&
-	    !real_fops->unlocked_ioctl &&
-	    !real_fops->compat_ioctl &&
-	    !real_fops->mmap)
-		return false;
-
-	return security_locked_down(LOCKDOWN_DEBUGFS);
-}
-
 static int open_proxy_open(struct inode *inode, struct file *filp)
 {
 	struct dentry *dentry = F_DENTRY(filp);
@@ -167,11 +147,6 @@ static int open_proxy_open(struct inode *inode, struct file *filp)
 		return r == -EIO ? -ENOENT : r;
 
 	real_fops = debugfs_real_fops(filp);
-
-	r = debugfs_is_locked_down(inode, filp, real_fops);
-	if (r)
-		goto out;
-
 	real_fops = fops_get(real_fops);
 	if (!real_fops) {
 		/* Huh? Module did not clean up after itself at exit? */
@@ -297,11 +272,6 @@ static int full_proxy_open(struct inode *inode, struct file *filp)
 		return r == -EIO ? -ENOENT : r;
 
 	real_fops = debugfs_real_fops(filp);
-
-	r = debugfs_is_locked_down(inode, filp, real_fops);
-	if (r)
-		goto out;
-
 	real_fops = fops_get(real_fops);
 	if (!real_fops) {
 		/* Huh? Module did not cleanup after itself at exit? */
@@ -1027,19 +997,25 @@ static const struct file_operations u32_array_fops = {
  * @array as data. If the @mode variable is so set it can be read from.
  * Writing is not supported. Seek within the file is also not supported.
  * Once array is created its size can not be changed.
+ *
+ * The function returns a pointer to dentry on success. If an error occurs,
+ * %ERR_PTR(-ERROR) or NULL will be returned. If debugfs is not enabled in
+ * the kernel, the value %ERR_PTR(-ENODEV) will be returned.
  */
-void debugfs_create_u32_array(const char *name, umode_t mode,
-			      struct dentry *parent, u32 *array, u32 elements)
+struct dentry *debugfs_create_u32_array(const char *name, umode_t mode,
+					    struct dentry *parent,
+					    u32 *array, u32 elements)
 {
 	struct array_data *data = kmalloc(sizeof(*data), GFP_KERNEL);
 
 	if (data == NULL)
-		return;
+		return NULL;
 
 	data->array = array;
 	data->elements = elements;
 
-	debugfs_create_file_unsafe(name, mode, parent, data, &u32_array_fops);
+	return debugfs_create_file_unsafe(name, mode, parent, data,
+					&u32_array_fops);
 }
 EXPORT_SYMBOL_GPL(debugfs_create_u32_array);
 

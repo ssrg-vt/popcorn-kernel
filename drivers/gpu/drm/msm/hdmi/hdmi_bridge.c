@@ -4,8 +4,6 @@
  * Author: Rob Clark <robdclark@gmail.com>
  */
 
-#include <linux/delay.h>
-
 #include "hdmi.h"
 
 struct hdmi_bridge {
