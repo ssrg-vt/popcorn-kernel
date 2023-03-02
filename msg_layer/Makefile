@@ -1,8 +1,8 @@
-ifeq ($(KERNELRELEASE),)
-KERNELDIR := ..
-PWD := $(shell pwd)
-include $(KERNELDIR)/.config
-endif
+# ifeq ($(KERNELRELEASE),)
+# KERNELDIR := ..
+# PWD := $(shell pwd)
+# include $(KERNELDIR)/.config
+# endif
 
 obj-$(CONFIG_POPCORN_KMSG_SOCKET) += msg_socket.o
 msg_socket-y := socket.o ring_buffer.o
