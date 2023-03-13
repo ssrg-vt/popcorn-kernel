@@ -132,7 +132,7 @@ static int __init axidma_init(void)
     writeq(0x1234567812345678, x86_host_addr);
     printk("Readq = %lld\n",readq(x86_host_addr));
 
-    writeq(0x1234567812345678, prot_proc_addr);
+    writeq(0xabcdef01abcdef01, prot_proc_addr);
     printk("Readq = %lld\n",readq(prot_proc_addr));
 
     return 0;
