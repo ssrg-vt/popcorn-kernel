@@ -16,7 +16,7 @@ msg_axi_pcie-y := axi_pcie.o ring_buffer.o
 #obj-$(CONFIG_POPCORN_KMSG_IB) += msg_ib.o
 #msg_ib-y := ib.o
 
-obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_test.o
+#obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_test.o
 
 .PHONY: modules
 modules:

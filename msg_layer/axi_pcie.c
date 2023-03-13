@@ -29,6 +29,7 @@
 #include <popcorn/stat.h>
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/page_server.h>
+#include <linux/platform_device.h>
 
 #include "common.h"
 #include "ring_buffer.h"
@@ -816,6 +817,67 @@ static int __start_poll(void)
 	return 0;
 }
 */
+
+static int axi_pcie_probe(struct platform_device *pdev){
+	struct resource *res;
+    struct axidma_device *data;
+    
+    data = devm_kzalloc(&pdev->dev, sizeof(*data), GFP_KERNEL);
+    if (!data)
+        return -ENOMEM;
+
+    res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+    data->base_addr = devm_ioremap_resource(&pdev->dev, res);
+    if (IS_ERR(data->base_addr))
+        return PTR_ERR(data->base_addr);
+
+    // Perform hardware initialization
+    //writel(0x1, data->base_addr + AXI_CONTROL_REG);
+
+    platform_set_drvdata(pdev, data);
+    return 0;
+}
+
+static int axi_pcie_remove(struct platform_device *pdev)
+{
+    struct axidma_device *axidma_dev;
+
+    // Get the AXI DMA device structure from the device's private data
+    axidma_dev = dev_get_drvdata(&pdev->dev);
+
+    // Cleanup the character device structures
+    //axidma_chrdev_exit(axidma_dev);
+
+    // Cleanup the DMA structures
+    //axidma_dma_exit(axidma_dev);
+
+    // Free the device structure
+    kfree(axidma_dev);
+    return 0;
+}
+
+static const struct of_device_id axi_pcie_compatible_of_ids[] = {
+    { .compatible = "xlnx,pcie-us-rqrc-1.0" },
+    { .compatible = "xlnx,protocol-processor-v1-0-1.0"},
+    {}
+};
+
+static struct platform_driver axi_pcie_driver = {
+	.driver = {
+		//.name  = MODULE_NAME,
+		.owner = THIS_MODULE,
+		.of_match_table = axi_pcie_compatible_of_ids,
+	},
+	.probe  = axi_pcie_probe,
+	.remove = axi_pcie_remove,
+};
+
+static int __init init_kmsg_pcie_axi(void)
+{	
+	PCNPRINTK("Popcorn message layer over AXI loaded\n");
+	return platform_driver_register(&axi_pcie_driver);
+}
+
 static void __exit exit_kmsg_pcie_axi(void)
 {
 
@@ -879,66 +941,6 @@ static void __exit exit_kmsg_pcie_axi(void)
 	*/
 	PCNPRINTK("Popcorn message layer over AXI unloaded\n");
 	return platform_driver_unregister(&axi_pcie_driver);
-}
-
-static int axi_pcie_probe(struct platform_device *pdev){
-	struct resource *res;
-    struct axidma_device *data;
-    
-    data = devm_kzalloc(&pdev->dev, sizeof(*data), GFP_KERNEL);
-    if (!data)
-        return -ENOMEM;
-
-    res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-    data->base_addr = devm_ioremap_resource(&pdev->dev, res);
-    if (IS_ERR(data->base_addr))
-        return PTR_ERR(data->base_addr);
-
-    // Perform hardware initialization
-    //writel(0x1, data->base_addr + AXI_CONTROL_REG);
-
-    platform_set_drvdata(pdev, data);
-    return 0;
-}
-
-static int axidma_remove(struct platform_device *pdev)
-{
-    struct axidma_device *axidma_dev;
-
-    // Get the AXI DMA device structure from the device's private data
-    axidma_dev = dev_get_drvdata(&pdev->dev);
-
-    // Cleanup the character device structures
-    //axidma_chrdev_exit(axidma_dev);
-
-    // Cleanup the DMA structures
-    //axidma_dma_exit(axidma_dev);
-
-    // Free the device structure
-    kfree(axidma_dev);
-    return 0;
-}
-
-static const struct of_device_id axi_pcie_compatible_of_ids[] = {
-    { .compatible = "xlnx,pcie-us-rqrc-1.0" },
-    { .compatible = "xlnx,protocol-processor-v1-0-1.0"},
-    {}
-};
-
-static struct platform_driver axi_pcie_driver = {
-	.driver = {
-		.name  = MODULE_NAME,
-		.owner = THIS_MODULE,
-		.of_match_table = axi_pcie_compatible_of_ids,
-	},
-	.probe  = axi_pcie_probe,
-	.remove = axi_pcie_remove,
-};
-
-static int __init init_kmsg_pcie_axi(void)
-{	
-	PCNPRINTK("Popcorn message layer over AXI loaded\n");
-	return platform_driver_register(&axi_pcie_driver);
 }
 
 MODULE_LICENSE("GPL");
