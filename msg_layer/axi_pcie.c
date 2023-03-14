@@ -498,7 +498,7 @@ static int axidma_probe(struct platform_device *pdev)
     struct resource res1, res2;
     int ret;
 
-    axidma_dev = pdev->dev.of_node;
+    axidma_dev = of_find_node_by_name(NULL, "amba_pl");
 
     x86_bus = of_get_child_by_name(axidma_dev, "pcie_us_rqrc_1");
     if(!x86_bus){
@@ -593,7 +593,7 @@ static int axidma_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id axidma_compatible_of_ids[] = {
-      //{ .compatible = "simple-bus"},
+      { .compatible = "simple-bus"},
       { .compatible = "xlnx,pcie-us-rqrc-1.0" },
       { .compatible = "xlnx,protocol-processor-v1-0-1.0" },
     {}
