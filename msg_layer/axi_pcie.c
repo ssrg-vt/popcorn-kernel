@@ -697,9 +697,9 @@ static int __init axidma_init(void)
     h2c_poll_addr = dma_alloc_coherent(&axidma_dev->pdev->dev, 8, &h2c_poll_bus, GFP_KERNEL);
 
     writeq(c2h_poll_addr, x86_host_addr);
-    printk("c2h_poll_addr=%llx", readq(x86_host_addr);
+    printk("c2h_poll_addr=%llx", readq(x86_host_addr));
     writeq(h2c_poll_addr, x86_host_addr+0x08);
-    printk("c2h_poll_addr=%llx", readq(x86_host_addr+0x08);
+    printk("c2h_poll_addr=%llx", readq(x86_host_addr+0x08));
 
     if (__start_poll()) 
         goto out_free;
