@@ -667,9 +667,17 @@ static int __init axidma_init(void)
     my_nid = 1;
     //Write the node ID to the protocol processor
     iowrite32(0x1, prot_proc_addr+0x34);
+    printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
     set_popcorn_node_online(my_nid, true);
 
     base_addr = dma_alloc_coherent(&axidma_dev->pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);
+
+#ifdef CONFIG_ARM64 
+        domain = iommu_get_domain_for_dev(&pci_dev->dev);
+        if (!domain) goto out_free;
+    
+        ret = domain->ops->map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
+#endif
 
     if (__setup_ring_buffer())
         goto out_free;
@@ -695,6 +703,13 @@ static int __init axidma_init(void)
     //address of the counters. 
     c2h_poll_addr = dma_alloc_coherent(&axidma_dev->pdev->dev, 8, &c2h_poll_bus, GFP_KERNEL);
     h2c_poll_addr = dma_alloc_coherent(&axidma_dev->pdev->dev, 8, &h2c_poll_bus, GFP_KERNEL);
+
+#ifdef CONFIG_ARM64
+        ret = domain->ops->map(domain, (unsigned long)h2c_poll_bus, virt_to_phys(h2c_poll_addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
+        if (ret) goto out_free;
+            ret = domain->ops->map(domain, (unsigned long)c2h_poll_bus, virt_to_phys(c2h_poll_addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
+        if (ret) goto out_free;
+#endif
 
     writeq(c2h_poll_addr, x86_host_addr);
     printk("c2h_poll_addr=%llx", readq(x86_host_addr));
