@@ -229,7 +229,7 @@ struct axidma_device {
     void __iomem *base_addr;
 };
 
-struct axidma_device *axidma_dev;
+struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
 
 const unsigned int rb_alloc_header_magic = 0xbad7face;
 
@@ -492,10 +492,41 @@ static int axidma_probe(struct platform_device *pdev)
     printk("In probe function\n");
     //int rc;
     //struct axidma_device *axidma_dev;
-    struct resource *res;
+    struct resource *res1, *res2;
     int ret;
 
+    axidma_dev = pdev->dev.of_node;
+
+    x86_bus = of_get_child_by_name(node, "pcie_us_rqrc_1");
+    if(!x86_bus){
+        dev_err(&pdev->dev, "Failed to find x86_bus.");
+        return -ENODEV;
+    }
+    printk("Found x86_bus\n");
+
+    prot_proc_bus = of_get_child_by_name(node, "protocol_processor_v_2");
+    if(!prot_proc_bus){
+        dev_err(&pdev->dev, "Failed to find prot_proc_bus.");
+        return -ENODEV;
+    }
+    printk("Found prot_proc_bus\n");
+
+    res1 = of_address_to_resource(x86_bus, 0);
+    if(!res1){
+        printk("Error getting base addr of x86_bus\n");
+        return -ENODEV
+    }
+    printk("x86_bus base addr=%llx\n", res1->start);
+
+    res2 = of_address_to_resource(prot_proc_bus, 0);
+    if(!res1){
+        printk("Error getting base addr of prot_proc_bus\n");
+        return -ENODEV
+    }
+    printk("prot_proc_bus base addr=%llx\n", res2->start);
+
     // Allocate a AXI DMA device structure to hold metadata about the DMA
+    /*
     axidma_dev = devm_kzalloc(&pdev->dev, sizeof(*axidma_dev), GFP_KERNEL);
     if (axidma_dev == NULL) {
         printk("Unable to allocate the AXI DMA device structure.\n");
@@ -508,6 +539,7 @@ static int axidma_probe(struct platform_device *pdev)
     if(IS_ERR(axidma_dev->base_addr))
         return PTR_ERR(axidma_dev->base_addr);
     printk("Device is %s=%p\n", axidma_dev->chrdev_name, axidma_dev->base_addr);
+    */
 
     // Initialize the DMA interface
     //rc = axidma_dma_init(pdev, axidma_dev);
@@ -551,6 +583,8 @@ static int axidma_remove(struct platform_device *pdev)
 
     // Free the device structure
     //kfree(axidma_dev);
+    of_node_put(x86_bus);
+    of_node_put(prot_proc_bus);
     dev_info(&pdev->dev, "AXI driver removed\n");
     return 0;
 }
