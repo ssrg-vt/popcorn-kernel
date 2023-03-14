@@ -493,7 +493,7 @@ void pcie_axi_kmsg_done(struct pcn_kmsg_message *msg)
 static int axidma_probe(struct platform_device *pdev)
 {   
     printk("In probe function\n");
-    //int rc;
+    int rc;
     //struct axidma_device *axidma_dev;
     struct resource *res1, *res2;
     int ret;
@@ -514,14 +514,14 @@ static int axidma_probe(struct platform_device *pdev)
     }
     printk("Found prot_proc_bus\n");
 
-    res1 = of_address_to_resource(x86_bus, 0);
+    rc = of_address_to_resource(x86_bus, 0, &res1);
     if(!res1){
         printk("Error getting base addr of x86_bus\n");
         return -ENODEV;
     }
     printk("x86_bus base addr=%llx\n", res1->start);
 
-    res2 = of_address_to_resource(prot_proc_bus, 0);
+    rc = of_address_to_resource(prot_proc_bus, 0, &res2);
     if(!res1){
         printk("Error getting base addr of prot_proc_bus\n");
         return -ENODEV;
