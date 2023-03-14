@@ -488,7 +488,8 @@ void pcie_axi_kmsg_done(struct pcn_kmsg_message *msg)
 }
 
 static int axidma_probe(struct platform_device *pdev)
-{
+{   
+    printk("In probe function\n");
     //int rc;
     //struct axidma_device *axidma_dev;
     struct resource *res;
@@ -500,7 +501,7 @@ static int axidma_probe(struct platform_device *pdev)
         printk("Unable to allocate the AXI DMA device structure.\n");
         return -ENOMEM;
     }
-    //axidma_dev->pdev = pdev;
+    axidma_dev->pdev = pdev;
     axidma_dev->chrdev_name = "x86_host";
     res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
     axidma_dev->base_addr = devm_ioremap_resource(&pdev->dev, res);
@@ -526,6 +527,7 @@ static int axidma_probe(struct platform_device *pdev)
 
     // Set the private data in the device to the AXI DMA device structure
     dev_set_drvdata(&pdev->dev, axidma_dev);
+    dev_info(&pdev->dev, "AXI driver probe successful\n");
     return 0;
 /*
 destroy_dma_dev:
@@ -549,6 +551,7 @@ static int axidma_remove(struct platform_device *pdev)
 
     // Free the device structure
     //kfree(axidma_dev);
+    dev_info(&pdev->dev, "AXI driver removed\n");
     return 0;
 }
 
@@ -649,7 +652,7 @@ static int __init axidma_init(void)
     pcn_kmsg_set_transport(&transport_pcie_axi);
     
     /*Mapping the axi ports*/
-    x86_host_addr = ioremap(X86_HOST, 0x1000000);
+    /*x86_host_addr = ioremap(X86_HOST, 0x1000000);
     if(!x86_host_addr){
         ret = -ENOMEM;
         if(x86_host_addr)
@@ -661,7 +664,7 @@ static int __init axidma_init(void)
         ret = -ENOMEM;
         if(prot_proc_addr)
             iounmap(x86_host_addr);
-    }
+    }*/
     /*
     printk("x86_host_addr=%p\n",x86_host_addr);
     printk("prot_proc_addr=%p\n",prot_proc_addr);
@@ -671,7 +674,7 @@ static int __init axidma_init(void)
 
     writeq(0xabcdef01abcdef01, prot_proc_addr);
     printk("Readq = %lld\n",readq(prot_proc_addr));
-    */
+    *//*
     my_nid = 1;
     //Write the node ID to the protocol processor
     iowrite32(0x1, prot_proc_addr+0x34);
@@ -745,7 +748,7 @@ invalid:
 out_free:
     PCNPRINTK("Inside Out Free of INIT\n");
     axidma_exit();
-    return -EINVAL;
+    return -EINVAL;*/return 0;
 }
 
 module_init(axidma_init);
