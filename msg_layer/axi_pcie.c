@@ -32,6 +32,7 @@
 #include <popcorn/pcn_kmsg.h>
 #include <popcorn/page_server.h>
 #include <linux/platform_device.h>
+#include <linux/of.h>
 
 #include "common.h"
 #include "ring_buffer.h"
@@ -229,7 +230,8 @@ struct axidma_device {
     void __iomem *base_addr;
 };
 
-struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
+//struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
+struct device_node *axidma_dev, *x86_bus, *prot_proc_bus;
 
 const unsigned int rb_alloc_header_magic = 0xbad7face;
 
@@ -497,14 +499,14 @@ static int axidma_probe(struct platform_device *pdev)
 
     axidma_dev = pdev->dev.of_node;
 
-    x86_bus = of_get_child_by_name(node, "pcie_us_rqrc_1");
+    x86_bus = of_get_child_by_name(axidma_dev, "pcie_us_rqrc_1");
     if(!x86_bus){
         dev_err(&pdev->dev, "Failed to find x86_bus.");
         return -ENODEV;
     }
     printk("Found x86_bus\n");
 
-    prot_proc_bus = of_get_child_by_name(node, "protocol_processor_v_2");
+    prot_proc_bus = of_get_child_by_name(axidma_dev, "protocol_processor_v_2");
     if(!prot_proc_bus){
         dev_err(&pdev->dev, "Failed to find prot_proc_bus.");
         return -ENODEV;
