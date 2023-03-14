@@ -516,14 +516,14 @@ static int axidma_probe(struct platform_device *pdev)
     res1 = of_address_to_resource(x86_bus, 0);
     if(!res1){
         printk("Error getting base addr of x86_bus\n");
-        return -ENODEV
+        return -ENODEV;
     }
     printk("x86_bus base addr=%llx\n", res1->start);
 
     res2 = of_address_to_resource(prot_proc_bus, 0);
     if(!res1){
         printk("Error getting base addr of prot_proc_bus\n");
-        return -ENODEV
+        return -ENODEV;
     }
     printk("prot_proc_bus base addr=%llx\n", res2->start);
 
