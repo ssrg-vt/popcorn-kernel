@@ -563,7 +563,7 @@ static const struct of_device_id axidma_compatible_of_ids[] = {
 
 static struct platform_driver axidma_driver = {
     .driver = {
-        //.name = MODULE_NAME,
+        .name = "x86_host",
         .owner = THIS_MODULE,
         .of_match_table = axidma_compatible_of_ids,
     },
@@ -650,7 +650,9 @@ static int __init axidma_init(void)
            
     PCNPRINTK("Initializing module over AXI\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
+    PCNPRINTK("registered transport layer\n");
     platform_driver_register(&axidma_driver);
+    PCNPRINTK("registered device\n");
     /*Mapping the axi ports*/
     /*x86_host_addr = ioremap(X86_HOST, 0x1000000);
     if(!x86_host_addr){
