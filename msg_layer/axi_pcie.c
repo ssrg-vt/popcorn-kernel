@@ -557,8 +557,8 @@ static int axidma_remove(struct platform_device *pdev)
 
 static const struct of_device_id axidma_compatible_of_ids[] = {
       { .compatible = "simple-bus"},
-    //{ .compatible = "xlnx,pcie-us-rqrc-1.0" },
-    //{ .compatible = "xlnx,protocol-processor-v1-0-1.0" },
+      { .compatible = "xlnx,pcie-us-rqrc-1.0" },
+      { .compatible = "xlnx,protocol-processor-v1-0-1.0" },
     {}
 };
 
