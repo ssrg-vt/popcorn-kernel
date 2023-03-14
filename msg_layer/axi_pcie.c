@@ -673,7 +673,7 @@ static int __init axidma_init(void)
     base_addr = dma_alloc_coherent(&axidma_dev->pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);
 
 #ifdef CONFIG_ARM64 
-        domain = iommu_get_domain_for_dev(&pci_dev->dev);
+        domain = iommu_get_domain_for_dev(&axidma_dev->pdev->dev);
         if (!domain) goto out_free;
     
         ret = domain->ops->map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
