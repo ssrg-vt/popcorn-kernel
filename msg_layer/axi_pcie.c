@@ -519,14 +519,14 @@ static int axidma_probe(struct platform_device *pdev)
         printk("Error getting base addr of x86_bus\n");
         return -ENODEV;
     }
-    printk("x86_bus base addr=%llx\n", res1->start);
+    printk("x86_bus base addr=%llx\n", res1.start);
 
     rc = of_address_to_resource(prot_proc_bus, 0, &res2);
     if(rc){
         printk("Error getting base addr of prot_proc_bus\n");
         return -ENODEV;
     }
-    printk("prot_proc_bus base addr=%llx\n", res2->start);
+    printk("prot_proc_bus base addr=%llx\n", res2.start);
 
     // Allocate a AXI DMA device structure to hold metadata about the DMA
     /*
