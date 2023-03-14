@@ -495,7 +495,7 @@ static int axidma_probe(struct platform_device *pdev)
     printk("In probe function\n");
     int rc;
     //struct axidma_device *axidma_dev;
-    struct resource *res1, *res2;
+    struct resource res1, res2;
     int ret;
 
     axidma_dev = pdev->dev.of_node;
