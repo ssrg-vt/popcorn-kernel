@@ -211,8 +211,8 @@ struct axidma_device {
    // unsigned int minor_num;         // The minor number of the device
    // dev_t dev_num;                  // The device number of the device
     char *chrdev_name;              // The name of the character device
-    struct device *device;          // Device structure for the char device
-    struct class *dev_class;        // The device class for the chardevice
+   // struct device *device;          // Device structure for the char device
+   // struct class *dev_class;        // The device class for the chardevice
     //struct cdev chrdev;             // The character device structure
 
    // int num_dma_tx_chans;           // The number of transmit DMA channels
@@ -224,8 +224,9 @@ struct axidma_device {
     struct platform_device *pdev;   // The platofrm device from the device tree
    // struct axidma_cb_data *cb_data; // The callback data for each channel
    // struct axidma_chan *channels;   // All available channels
-    struct list_head dmabuf_list;   // List of allocated DMA buffers
-    struct list_head external_dmabufs;  // Buffers allocated in other drivers
+   // struct list_head dmabuf_list;   // List of allocated DMA buffers
+   // struct list_head external_dmabufs;  // Buffers allocated in other drivers
+    void __iomem *base_addr;
 };
 
 struct axidma_device *axidma_dev;
@@ -490,14 +491,22 @@ static int axidma_probe(struct platform_device *pdev)
 {
     //int rc;
     //struct axidma_device *axidma_dev;
+    struct resource *res;
+    int ret;
 
     // Allocate a AXI DMA device structure to hold metadata about the DMA
-    axidma_dev = kmalloc(sizeof(*axidma_dev), GFP_KERNEL);
+    axidma_dev = devm_kzalloc(&pdev->dev, sizeof(*axidma_dev), GFP_KERNEL);
     if (axidma_dev == NULL) {
         printk("Unable to allocate the AXI DMA device structure.\n");
         return -ENOMEM;
     }
-    axidma_dev->pdev = pdev;
+    //axidma_dev->pdev = pdev;
+    axidma_dev->chrdev_name = "x86_host";
+    res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+    axidma_dev->base_addr = devm_ioremap_resource(&pdev->dev, res);
+    if(IS_ERR(axidma_dev->base_addr))
+        return PTR_ERR(axidma_dev->base_addr);
+    printk("Device is %s=%p\n", axidma_dev->chrdev_name, axidma_dev->base_addr);
 
     // Initialize the DMA interface
     //rc = axidma_dma_init(pdev, axidma_dev);
@@ -506,7 +515,6 @@ static int axidma_probe(struct platform_device *pdev)
     //}
 
     // Assign the character device name, minor number, and number of devices
-    axidma_dev->chrdev_name = "x86_host";
     //axidma_dev->minor_num = minor_num;
     //axidma_dev->num_devices = NUM_DEVICES;
 
@@ -531,7 +539,7 @@ static int axidma_remove(struct platform_device *pdev)
 {
 
     // Get the AXI DMA device structure from the device's private data
-    axidma_dev = dev_get_drvdata(&pdev->dev);
+    //axidma_dev = dev_get_drvdata(&pdev->dev);
 
     // Cleanup the character device structures
     //axidma_chrdev_exit(axidma_dev);
@@ -540,7 +548,7 @@ static int axidma_remove(struct platform_device *pdev)
     //axidma_dma_exit(axidma_dev);
 
     // Free the device structure
-    kfree(axidma_dev);
+    //kfree(axidma_dev);
     return 0;
 }
 
