@@ -489,7 +489,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
 void pcie_axi_kmsg_done(struct pcn_kmsg_message *msg)
 {
 }
-
+/*
 static int axidma_probe(struct platform_device *pdev)
 {   
     printk("In probe function\n");
@@ -542,7 +542,7 @@ static int axidma_probe(struct platform_device *pdev)
     if(IS_ERR(axidma_dev->base_addr))
         return PTR_ERR(axidma_dev->base_addr);
     printk("Device is %s=%p\n", axidma_dev->chrdev_name, axidma_dev->base_addr);
-    */
+    
 
     // Initialize the DMA interface
     //rc = axidma_dma_init(pdev, axidma_dev);
@@ -564,14 +564,14 @@ static int axidma_probe(struct platform_device *pdev)
     dev_set_drvdata(&pdev->dev, axidma_dev);
     dev_info(&pdev->dev, "AXI driver probe successful\n");
     return 0;
-/*
+
 destroy_dma_dev:
     axidma_dma_exit(axidma_dev);
 free_axidma_dev:
     kfree(axidma_dev);
-    return -ENOSYS;*/
-}
-
+    return -ENOSYS;
+}*/
+/*
 static int axidma_remove(struct platform_device *pdev)
 {
 
@@ -586,8 +586,8 @@ static int axidma_remove(struct platform_device *pdev)
 
     // Free the device structure
     //kfree(axidma_dev);
-    of_node_put(x86_bus);
-    of_node_put(prot_proc_bus);
+    //of_node_put(x86_bus);
+    //of_node_put(prot_proc_bus);
     dev_info(&pdev->dev, "AXI driver removed\n");
     return 0;
 }
@@ -608,7 +608,7 @@ static struct platform_driver axidma_driver = {
     .probe = axidma_probe,
     .remove = axidma_remove,
 };
-
+*/
 struct pcn_kmsg_transport transport_pcie_axi = {
     .name = "axi_pcie",
     .features = 2,//PCN_KMSG_FEATURE_XDMA,
@@ -634,7 +634,7 @@ struct pcn_kmsg_transport transport_pcie_axi = {
 
 static void __exit axidma_exit(void)
 {   
-    int i;
+    //int i;
 
     /* Detach from messaging layer to avoid race conditions */
 
@@ -677,20 +677,43 @@ static void __exit axidma_exit(void)
     if (poll_tsk) {
         kthread_stop(poll_tsk);
     }
-
-    printk("Unloaded axi module\n");*/
-    return platform_driver_unregister(&axidma_driver);
+*/
+    printk("Unloaded axi module\n");
+    //return platform_driver_unregister(&axidma_driver);
 }
 
 static int __init axidma_init(void)
 {
     int ret;
+    struct device_node *node, *parent;
+    struct resource res1, res2;
            
     PCNPRINTK("Initializing module over AXI\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
     PCNPRINTK("registered transport layer\n");
-    platform_driver_register(&axidma_driver);
-    PCNPRINTK("registered device\n");
+
+    parent = of_find_node_by_name(NULL, "amba_pl");
+
+    // Find the "pcie_us_rqrc_1" child node
+    node = of_find_node_by_name(parent, "pcie_us_rqrc_1");
+    if (node) {
+        if (of_address_to_resource(node, 0, &res1) == 0) {
+            pr_info("pcie_us_rqrc_1 base address = 0x%llx\n", (unsigned long long)res1.start);
+        }
+        of_node_put(node);
+    }
+
+    // Find the "protocol_processor_v_2" child node
+    node = of_find_node_by_name(parent, "protocol_processor_v_2");
+    if (node) {
+        if (of_address_to_resource(node, 0, &res2) == 0) {
+            pr_info("protocol_processor_v_2 base address = 0x%llx\n", (unsigned long long)res2.start);
+        }
+        of_node_put(node);
+    }
+
+    //platform_driver_register(&axidma_driver);
+    //PCNPRINTK("registered device\n");
     /*Mapping the axi ports*/
     /*x86_host_addr = ioremap(X86_HOST, 0x1000000);
     if(!x86_host_addr){
