@@ -601,7 +601,7 @@ static void __exit axidma_exit(void)
     /* Detach from messaging layer to avoid race conditions */
 
     pcn_kmsg_set_transport(NULL);
-    set_popcorn_node_online(nid, false);
+    /*set_popcorn_node_online(nid, false);
 
     iounmap(x86_host_addr);
     iounmap(prot_proc_addr);
@@ -640,8 +640,8 @@ static void __exit axidma_exit(void)
         kthread_stop(poll_tsk);
     }
 
-    printk("Unloaded axi module\n");
-    return;
+    printk("Unloaded axi module\n");*/
+    return platform_driver_unregister(&axidma_driver);
 }
 
 static int __init axidma_init(void)
@@ -650,7 +650,7 @@ static int __init axidma_init(void)
            
     PCNPRINTK("Initializing module over AXI\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
-    
+    platform_driver_register(&axidma_driver);
     /*Mapping the axi ports*/
     /*x86_host_addr = ioremap(X86_HOST, 0x1000000);
     if(!x86_host_addr){
