@@ -744,29 +744,33 @@ static int __init axidma_init(void)
 
     pdev = of_find_device_by_node(x86_host);
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);
-
+/*
 #ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
         if (!domain) goto out_free;
     
         ret = domain->ops->map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
 #endif
-/*
+*/
     if (__setup_ring_buffer())
         goto out_free;
+    printk("Ring buffer setup complete.\n");
 
     wq = create_workqueue("recv");
     if (!wq)
         goto out_free;
+    printk("Work queue created.\n");
 
     send_queue = __setup_send_queue(MAX_SEND_DEPTH);//64
     if (!send_queue) 
         goto out_free;
+    printk("Send queue setup completed.\n");
 
     //Other node must know this address
     recv_queue = __setup_recv_buffer(MAX_RECV_DEPTH);//64
     if (!recv_queue)
         goto out_free;
+    printk("Receive buffer setup completed.\n");
 /*
     //memset(KV, 0, XDMA_SLOTS * sizeof(int)); //320*4bytes = 1280 bytes
     sema_init(&q_empty, 0);
