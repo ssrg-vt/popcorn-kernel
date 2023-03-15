@@ -275,6 +275,42 @@ static void __update_recv_index(queue_tr *q, int i)
     //writeq(dma_addr, zynq_hw_addr+0x10+i);
 }
 
+static int __get_recv_index(queue_tr *q)
+{
+    q->tail = (q->tail + 1) % q->nr_entries;
+    return q->tail;
+}
+
+/* Call popcorn messaging interface process() function */
+
+void process_message(int recv_i)
+{
+    struct pcn_kmsg_message *msg;
+    msg = recv_queue->work_list[recv_i]->addr;
+
+    if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
+        printk("Need to call a process function\n");
+        //pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
+    } else {
+        pcn_kmsg_process(msg);
+    }
+}
+
+static struct send_work *__get_send_work(int index) 
+{
+    struct send_work *work;
+    if (index == send_queue->nr_entries) {
+        send_queue->tail = -1;
+    }
+
+    spin_lock(&send_queue_lock);
+    send_queue->tail = (send_queue->tail + 1) % send_queue->nr_entries;
+    work = send_queue->work_list[send_queue->tail]; 
+    spin_unlock(&send_queue_lock);
+
+    return work;
+}
+
 /* Polling KThread Handler */
 
 static int poll_dma(void* arg0)
@@ -504,42 +540,6 @@ void free_queue_r(queue_tr* q)
 
     kfree(q->work_list);
     kfree(q);
-}
-
-static int __get_recv_index(queue_tr *q)
-{
-    q->tail = (q->tail + 1) % q->nr_entries;
-    return q->tail;
-}
-
-/* Call popcorn messaging interface process() function */
-
-void process_message(int recv_i)
-{
-    struct pcn_kmsg_message *msg;
-    msg = recv_queue->work_list[recv_i]->addr;
-
-    if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-        printk("Need to call a process function\n");
-        //pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
-    } else {
-        pcn_kmsg_process(msg);
-    }
-}
-
-static struct send_work *__get_send_work(int index) 
-{
-    struct send_work *work;
-    if (index == send_queue->nr_entries) {
-        send_queue->tail = -1;
-    }
-
-    spin_lock(&send_queue_lock);
-    send_queue->tail = (send_queue->tail + 1) % send_queue->nr_entries;
-    work = send_queue->work_list[send_queue->tail]; 
-    spin_unlock(&send_queue_lock);
-
-    return work;
 }
 
 struct pcn_kmsg_message *pcie_axi_kmsg_get(size_t size)
