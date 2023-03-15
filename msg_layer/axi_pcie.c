@@ -42,9 +42,6 @@
 // Local dependencies
 //#include "axidma.h"                 // Internal definitions
 
-#define PROTOCOL_PROCESSOR 0xb0000000
-#define X86_HOST 0xa0000000
-
 #define FDSM_MSG_SIZE 8192
 #define MAX_RECV_DEPTH 64
 #define MAX_SEND_DEPTH  (MAX_RECV_DEPTH)
