@@ -154,7 +154,7 @@ void pcn_kmsg_stat(struct seq_file *seq, void *v)
 EXPORT_SYMBOL(pcn_kmsg_stat);
 
 bool pcn_kmsg_has_features(unsigned int features)
-{
+{	printk("features=%d\n",features);
 	if (!transport) return false;
 
 	return (transport->features & features) == features;

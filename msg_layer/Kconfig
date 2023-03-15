@@ -22,7 +22,7 @@ config POPCORN_KMSG_RDMA
 	default n
 	help
 		Mellanox Connect-X4 and Connect-X5
-		
+
 config POPCORN_KMSG_HDMA
 	tristate "Over FPGA HDMA"
 	depends on m && PCI

@@ -477,28 +477,108 @@ void free_queue_r(queue_tr* q)
     kfree(q);
 }
 
+static struct send_work *__get_send_work(int index) 
+{
+    struct send_work *work;
+    if (index == send_queue->nr_entries) {
+        send_queue->tail = -1;
+    }
+
+    spin_lock(&send_queue_lock);
+    send_queue->tail = (send_queue->tail + 1) % send_queue->nr_entries;
+    work = send_queue->work_list[send_queue->tail]; 
+    spin_unlock(&send_queue_lock);
+
+    return work;
+}
+
 struct pcn_kmsg_message *pcie_axi_kmsg_get(size_t size)
 {
+    struct send_work *work = __get_send_work(send_queue->tail);
+    return (struct pcn_kmsg_message *)(work->addr);
 }
 
 void pcie_axi_kmsg_put(struct pcn_kmsg_message *msg)
 {
+    /*Nothing here*/
 }
 
 void pcie_axi_kmsg_stat(struct seq_file *seq, void *v)
 {
+    if (seq) {
+        seq_printf(seq, POPCORN_STAT_FMT,
+               (unsigned long long)ring_buffer_usage(&pcie_axi_send_buff),
+#ifdef CONFIG_POPCORN_STAT
+               (unsigned long long)pcie_axi_send_buff.peak_usage,
+#else
+               0ULL,
+#endif
+               "Send buffer usage");
+    }
 }
 
 int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
+    int ret, i;
+    dma_addr_t dma_addr, *dma_addr_pntr;
+    dma_addr = radix_tree_lookup(&send_tree, (unsigned long *)msg);
+    dma_addr_pntr = dma_addr;
+    if (dma_addr) {
+        spin_lock(&pcie_axi_lock);
+        //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
+        //ret = pcie_axi_transfer(TO_DEVICE);
+        //get the recv buffer addr and write data there.
+        for(i=0; i<FDSM_MSG_SIZE; i++){
+            writeq(*(dma_addr_pntr+i), zynq_hw_addr + i);
+        }
+        spin_unlock(&pcie_axi_lock);
+    } else {
+        printk("DMA addr: not found\n");
+    }
+    return 0;
 }
 
 int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
+    struct send_work *work;
+    int ret, i;
+    u64 *dma_addr_pntr;
+    DECLARE_COMPLETION_ONSTACK(done);
+
+    work = __get_send_work(send_queue->tail);
+
+    memcpy(work->addr, msg, size);
+
+    work->done = &done;
+    spin_lock(&pcie_axi_lock);
+    //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
+    //ret = pcie_axi_transfer(TO_DEVICE);
+    dma_addr_pntr = work->dma_addr;
+    
+    for(i=0; i<FDSM_MSG_SIZE; i++){
+            writeq(*(dma_addr_pntr+i), zynq_hw_addr + i);
+        }
+    spin_unlock(&pcie_axi_lock);
+    
+    __process_sent(work);
+    if (!try_wait_for_completion(&done)){
+        ret = wait_for_completion_io_timeout(&done, 60 *HZ);
+        if (!ret) {
+            printk("Message waiting failed\n");
+            ret = -ETIME;
+            goto out;
+        }
+    }
+    return 0;
+
+out:
+    __put_pcie_axi_send_work(work);
+    return ret;
 }
 
 void pcie_axi_kmsg_done(struct pcn_kmsg_message *msg)
 {
+    /*Nothing here*/
 }
 
 struct pcn_kmsg_transport transport_pcie_axi = {

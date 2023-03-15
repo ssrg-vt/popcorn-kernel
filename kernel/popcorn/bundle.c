@@ -35,6 +35,8 @@ EXPORT_SYMBOL(set_popcorn_node_online);
 
 
 int my_nid __read_mostly = -1;
+const int origin_nid = 0;
+const int remote_nid = 1;
 EXPORT_SYMBOL(my_nid);
 
 const enum popcorn_arch my_arch =
@@ -65,6 +67,9 @@ const char *archs_sz[] = {
 };
 
 
+#define TRANSFER_WITH_PCIE_AXI \
+		pcn_kmsg_has_features(PCN_KMSG_FEATURE_PCIE_AXI)
+
 void broadcast_my_node_info(int nr_nodes)
 {
 	int i;
@@ -72,11 +77,25 @@ void broadcast_my_node_info(int nr_nodes)
 		.nid = my_nid,
 		.arch = my_arch,
 	};
-	for (i = 0; i < nr_nodes; i++) {
-		if (i == my_nid) continue;
-		pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, i, &info, sizeof(info));
+	printk("TRANSFER_WITH_PCIE_AXI=%d\n", TRANSFER_WITH_PCIE_AXI);
+	if(TRANSFER_WITH_PCIE_AXI){
+		if(!my_nid)	{
+			PCNPRINTK("This is the origin node\n");
+			return;
+		}
+		else {
+			pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, origin_nid, &info, sizeof(info));
+			return;
+		}
+	}
+	else {
+		   for (i = 0; i < nr_nodes; i++) {
+			 if (i == my_nid) continue;
+			 pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, i, &info, sizeof(info));
+		}
 	}
 }
+
 EXPORT_SYMBOL(broadcast_my_node_info);
 
 static bool my_node_info_printed = false;
