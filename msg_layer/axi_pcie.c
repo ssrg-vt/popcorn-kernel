@@ -234,7 +234,7 @@ struct axidma_device {
 
 //struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
 //struct device_node *axidma_dev, *x86_bus, *prot_proc_bus;
-struct device *dev;
+//struct device *dev;
 struct device_node *x86_host, *prot_proc, *parent;
 struct resource res1, res2;
 unsigned long long x86_host_base_addr, prot_proc_base_addr;
@@ -245,6 +245,7 @@ struct resource res1, res2;
 unsigned long long x86_host_base_addr, prot_proc_base_addr;
 void *base_addr;
 dma_addr_t base_dma;
+struct platform_device *pdev;
 
 const unsigned int rb_alloc_header_magic = 0xbad7face;
 
@@ -678,7 +679,7 @@ static void __exit axidma_exit(void)
 
     destroy_workqueue(wq);
 
-    dma_free_coherent(dev, SZ_2M, base_addr, base_dma);
+    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
 /*    dma_free_coherent(&axidma_dev->pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
     dma_free_coherent(&axidma_dev->pdev->dev, 8, h2c_poll_addr, h2c_poll_bus);
 
@@ -741,11 +742,11 @@ static int __init axidma_init(void)
     printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
     set_popcorn_node_online(my_nid, true);
 
-    dev = of_find_device_by_node(x86_host);
-    base_addr = dma_alloc_coherent(dev, SZ_2M, &base_dma, GFP_KERNEL);
+    pdev = of_find_device_by_node(x86_host);
+    base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);
 
 #ifdef CONFIG_ARM64 
-        domain = iommu_get_domain_for_dev(dev);
+        domain = iommu_get_domain_for_dev(&pdev->dev);
         if (!domain) goto out_free;
     
         ret = domain->ops->map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
