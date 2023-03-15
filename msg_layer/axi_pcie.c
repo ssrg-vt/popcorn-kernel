@@ -741,7 +741,7 @@ static int __init axidma_init(void)
     printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
     set_popcorn_node_online(my_nid, true);
 
-    dev = of_find_device_by_node(of_find_device_by_node);
+    dev = of_find_device_by_node(x86_host);
     base_addr = dma_alloc_coherent(dev, SZ_2M, &base_dma, GFP_KERNEL);
 
 #ifdef CONFIG_ARM64 
