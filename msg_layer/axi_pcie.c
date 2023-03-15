@@ -315,6 +315,7 @@ static struct send_work *__get_send_work(int index)
 
 static int poll_dma(void* arg0)
 {   
+    printk("In poll_dma\n");
     bool was_frozen;
 
     //struct xdma_poll_wb *poll_c2h_wb = (struct xdma_poll_wb *)c2h_poll_addr;
@@ -588,8 +589,8 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     return 0;
 }
 
-int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
-{
+int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0, 
+{   printk("In pcie_axi_kmsg_send\n");
     struct send_work *work;
     int ret, i;
     u64 *dma_addr_pntr;
@@ -807,6 +808,7 @@ static int __init axidma_init(void)
     if (__start_poll()) 
         goto out_free;
 
+    printk("Before broadcasting node ID.\n");
     broadcast_my_node_info(2);
     PCNPRINTK("... Ready on AXI ... \n");
 

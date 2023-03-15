@@ -84,7 +84,8 @@ void broadcast_my_node_info(int nr_nodes)
 			return;
 		}
 		else {
-			pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, origin_nid, &info, sizeof(info));
+			PCNPRINTK("This is the remote node\n");
+			pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, remote_nid, &info, sizeof(info));//0, 0, 
 			return;
 		}
 	}
