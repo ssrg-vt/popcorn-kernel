@@ -89,7 +89,7 @@ static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, struct 
 	return 0;
 }
 
-int pcn_kmsg_send(enum pcn_kmsg_type type, int to, void *msg, size_t size)
+int pcn_kmsg_send(enum pcn_kmsg_type type, int to, void *msg, size_t size)//0,0,msg,size
 {
 	int ret;
 	if ((ret = __build_and_check_msg(type, to, msg, size))) return ret;
