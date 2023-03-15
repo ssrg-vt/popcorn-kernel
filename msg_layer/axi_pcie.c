@@ -291,8 +291,8 @@ static int poll_dma(void* arg0)
 
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
-        c2h_desc_complete = poll_c2h_wb->completed_desc_count;
-        h2c_desc_complete = poll_h2c_wb->completed_desc_count;
+        c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
+        h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
 
         if (c2h_desc_complete != 0) {
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
@@ -331,7 +331,7 @@ static void __put_pcie_axi_send_work(struct send_work *work)
 {
     unsigned long flags;
     if (test_bit(SW_FLAG_MAPPED, &work->flags)) {
-        dma_unmap_single(&pci_dev->dev,work->dma_addr, work->length, DMA_TO_DEVICE);
+        dma_unmap_single(&pdev->dev,work->dma_addr, work->length, DMA_TO_DEVICE);
     }
 
     if (test_bit(SW_FLAG_FROM_BUFFER, &work->flags))    {
@@ -504,6 +504,27 @@ void free_queue_r(queue_tr* q)
 
     kfree(q->work_list);
     kfree(q);
+}
+
+static int __get_recv_index(queue_tr *q)
+{
+    q->tail = (q->tail + 1) % q->nr_entries;
+    return q->tail;
+}
+
+/* Call popcorn messaging interface process() function */
+
+void process_message(int recv_i)
+{
+    struct pcn_kmsg_message *msg;
+    msg = recv_queue->work_list[recv_i]->addr;
+
+    if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
+        printk("Need to call a process function\n");
+        //pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
+    } else {
+        pcn_kmsg_process(msg);
+    }
 }
 
 static struct send_work *__get_send_work(int index) 
