@@ -497,126 +497,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
 void pcie_axi_kmsg_done(struct pcn_kmsg_message *msg)
 {
 }
-/*
-static int axidma_probe(struct platform_device *pdev)
-{   
-    printk("In probe function\n");
-    int rc;
-    //struct axidma_device *axidma_dev;
-    struct resource res1, res2;
-    int ret;
 
-    axidma_dev = of_find_node_by_name(NULL, "amba_pl");
-
-    x86_bus = of_get_child_by_name(axidma_dev, "pcie_us_rqrc_1");
-    if(!x86_bus){
-        dev_err(&pdev->dev, "Failed to find x86_bus.");
-        return -ENODEV;
-    }
-    printk("Found x86_bus\n");
-
-    prot_proc_bus = of_get_child_by_name(axidma_dev, "protocol_processor_v_2");
-    if(!prot_proc_bus){
-        dev_err(&pdev->dev, "Failed to find prot_proc_bus.");
-        return -ENODEV;
-    }
-    printk("Found prot_proc_bus\n");
-
-    rc = of_address_to_resource(x86_bus, 0, &res1);
-    if(rc){
-        printk("Error getting base addr of x86_bus\n");
-        return -ENODEV;
-    }
-    printk("x86_bus base addr=%llx\n", res1.start);
-
-    rc = of_address_to_resource(prot_proc_bus, 0, &res2);
-    if(rc){
-        printk("Error getting base addr of prot_proc_bus\n");
-        return -ENODEV;
-    }
-    printk("prot_proc_bus base addr=%llx\n", res2.start);
-
-    // Allocate a AXI DMA device structure to hold metadata about the DMA
-    /*
-    axidma_dev = devm_kzalloc(&pdev->dev, sizeof(*axidma_dev), GFP_KERNEL);
-    if (axidma_dev == NULL) {
-        printk("Unable to allocate the AXI DMA device structure.\n");
-        return -ENOMEM;
-    }
-    axidma_dev->pdev = pdev;
-    axidma_dev->chrdev_name = "x86_host";
-    res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-    axidma_dev->base_addr = devm_ioremap_resource(&pdev->dev, res);
-    if(IS_ERR(axidma_dev->base_addr))
-        return PTR_ERR(axidma_dev->base_addr);
-    printk("Device is %s=%p\n", axidma_dev->chrdev_name, axidma_dev->base_addr);
-    
-
-    // Initialize the DMA interface
-    //rc = axidma_dma_init(pdev, axidma_dev);
-    //if (rc < 0) {
-    //    goto free_axidma_dev;
-    //}
-
-    // Assign the character device name, minor number, and number of devices
-    //axidma_dev->minor_num = minor_num;
-    //axidma_dev->num_devices = NUM_DEVICES;
-
-    // Initialize the character device for the module.
-    //rc = axidma_chrdev_init(axidma_dev);
-    //if (rc < 0) {
-    //    goto destroy_dma_dev;
-    //}
-
-    // Set the private data in the device to the AXI DMA device structure
-    dev_set_drvdata(&pdev->dev, axidma_dev);
-    dev_info(&pdev->dev, "AXI driver probe successful\n");
-    return 0;
-
-destroy_dma_dev:
-    axidma_dma_exit(axidma_dev);
-free_axidma_dev:
-    kfree(axidma_dev);
-    return -ENOSYS;
-}*/
-/*
-static int axidma_remove(struct platform_device *pdev)
-{
-
-    // Get the AXI DMA device structure from the device's private data
-    //axidma_dev = dev_get_drvdata(&pdev->dev);
-
-    // Cleanup the character device structures
-    //axidma_chrdev_exit(axidma_dev);
-
-    // Cleanup the DMA structures
-    //axidma_dma_exit(axidma_dev);
-
-    // Free the device structure
-    //kfree(axidma_dev);
-    //of_node_put(x86_bus);
-    //of_node_put(prot_proc_bus);
-    dev_info(&pdev->dev, "AXI driver removed\n");
-    return 0;
-}
-
-static const struct of_device_id axidma_compatible_of_ids[] = {
-      { .compatible = "simple-bus"},
-      { .compatible = "xlnx,pcie-us-rqrc-1.0" },
-      { .compatible = "xlnx,protocol-processor-v1-0-1.0" },
-    {}
-};
-
-static struct platform_driver axidma_driver = {
-    .driver = {
-        .name = "x86_host",
-        .owner = THIS_MODULE,
-        .of_match_table = axidma_compatible_of_ids,
-    },
-    .probe = axidma_probe,
-    .remove = axidma_remove,
-};
-*/
 struct pcn_kmsg_transport transport_pcie_axi = {
     .name = "axi_pcie",
     .features = 2,//PCN_KMSG_FEATURE_XDMA,
@@ -653,7 +534,7 @@ static void __exit axidma_exit(void)
     iounmap(prot_proc_addr);
 
     dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
-/*
+
     while (send_work_pool) {
         struct send_work *work = send_work_pool;
         send_work_pool = work->next;
@@ -768,28 +649,28 @@ static int __init axidma_init(void)
     if (!recv_queue)
         goto out_free;
     printk("Receive buffer setup completed.\n");
-/*
+
     //memset(KV, 0, XDMA_SLOTS * sizeof(int)); //320*4bytes = 1280 bytes
     sema_init(&q_empty, 0);
     sema_init(&q_full, MAX_SEND_DEPTH);
 
     //Allocate 8byte of memory for the counter where c2h_poll_bus and h2c_poll_bus are the 
     //address of the counters. 
-    c2h_poll_addr = dma_alloc_coherent(&axidma_dev->pdev->dev, 8, &c2h_poll_bus, GFP_KERNEL);
-    h2c_poll_addr = dma_alloc_coherent(&axidma_dev->pdev->dev, 8, &h2c_poll_bus, GFP_KERNEL);
-
+    c2h_poll_addr = dma_alloc_coherent(&pdev->dev, 8, &c2h_poll_bus, GFP_KERNEL);
+    h2c_poll_addr = dma_alloc_coherent(&pdev->dev, 8, &h2c_poll_bus, GFP_KERNEL);
+/*
 #ifdef CONFIG_ARM64
         ret = domain->ops->map(domain, (unsigned long)h2c_poll_bus, virt_to_phys(h2c_poll_addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
         if (ret) goto out_free;
             ret = domain->ops->map(domain, (unsigned long)c2h_poll_bus, virt_to_phys(c2h_poll_addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
         if (ret) goto out_free;
 #endif
-
+*/
     writeq(c2h_poll_addr, x86_host_addr);
     printk("c2h_poll_addr=%llx", readq(x86_host_addr));
     writeq(h2c_poll_addr, x86_host_addr+0x08);
     printk("c2h_poll_addr=%llx", readq(x86_host_addr+0x08));
-
+/*
     if (__start_poll()) 
         goto out_free;
 
