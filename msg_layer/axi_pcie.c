@@ -238,13 +238,11 @@ struct axidma_device {
 struct device_node *x86_host, *prot_proc, *parent;
 struct resource res1, res2;
 unsigned long long x86_host_base_addr, prot_proc_base_addr;
-void *base_addr;
-dma_addr_t base_dma;    struct device *dev;
+static void *base_addr;
+static dma_addr_t base_dma;
 struct device_node *x86_host, *prot_proc, *parent;
 struct resource res1, res2;
 unsigned long long x86_host_base_addr, prot_proc_base_addr;
-void *base_addr;
-dma_addr_t base_dma;
 struct platform_device *pdev;
 
 const unsigned int rb_alloc_header_magic = 0xbad7face;
