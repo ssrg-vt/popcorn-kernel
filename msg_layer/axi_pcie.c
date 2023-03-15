@@ -655,6 +655,8 @@ static void __exit axidma_exit(void)
     iounmap(x86_host_addr);
     iounmap(prot_proc_addr);
 
+    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+/*
     while (send_work_pool) {
         struct send_work *work = send_work_pool;
         send_work_pool = work->next;
@@ -677,7 +679,7 @@ static void __exit axidma_exit(void)
 
     destroy_workqueue(wq);
 
-    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+    
 /*    dma_free_coherent(&axidma_dev->pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
     dma_free_coherent(&axidma_dev->pdev->dev, 8, h2c_poll_addr, h2c_poll_bus);
 
@@ -749,7 +751,7 @@ static int __init axidma_init(void)
     
         ret = domain->ops->map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
 #endif
-
+/*
     if (__setup_ring_buffer())
         goto out_free;
 
