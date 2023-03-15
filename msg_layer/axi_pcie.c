@@ -232,7 +232,7 @@ struct axidma_device {
 };
 
 //struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
-//struct device_node *axidma_dev, *x86_bus, *prot_proc_bus;
+struct device_node *axidma_dev, *x86_bus, *prot_proc_bus;
 
 const unsigned int rb_alloc_header_magic = 0xbad7face;
 
@@ -684,24 +684,33 @@ static void __exit axidma_exit(void)
 
 static int __init axidma_init(void)
 {
-    struct device_node *parent, *child;
+    int ret;
+    struct device_node *node, *parent;
+    struct resource res1, res2;
+           
+    PCNPRINTK("Initializing module over AXI\n");
+    pcn_kmsg_set_transport(&transport_pcie_axi);
+    PCNPRINTK("registered transport layer\n");
 
-    // find parent node by name
     parent = of_find_node_by_name(NULL, "amba_pl");
-    if (!parent) {
-        pr_err("Failed to find parent node\n");
-        return -ENODEV;
+    printk("Parent");
+
+    // Find the "pcie_us_rqrc_1" child node
+    node = of_find_node_by_name(parent, "pcie_us_rqrc");
+    if (node) {
+        if (of_address_to_resource(node, 0, &res1) == 0) {
+            pr_info("pcie_us_rqrc base address = 0x%llx\n", (unsigned long long)res1.start);
+        }
+        of_node_put(node);
     }
 
-    // iterate over all child nodes
-    for_each_child_of_node(parent, child) {
-        // print child node name and base address
-        u32 base_addr;
-        if (of_property_read_u32(child, "reg", &base_addr)) {
-            pr_err("Failed to get base address for %s node\n", child->name);
-        } else {
-            pr_info("%s base address: 0x%x\n", child->name, base_addr);
+    // Find the "protocol_processor_v_2" child node
+    node = of_find_node_by_name(parent, "protocol_processor_v1_0");
+    if (node) {
+        if (of_address_to_resource(node, 0, &res2) == 0) {
+            pr_info("protocol_processor_v1_0 base address = 0x%llx\n", (unsigned long long)res2.start);
         }
+        of_node_put(node);
     }
 
     //platform_driver_register(&axidma_driver);
