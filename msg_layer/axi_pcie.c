@@ -635,12 +635,12 @@ struct pcn_kmsg_transport transport_pcie_axi = {
 
 static void __exit axidma_exit(void)
 {   
-    //int i;
+    int i;
 
     /* Detach from messaging layer to avoid race conditions */
 
     pcn_kmsg_set_transport(NULL);
-    /*set_popcorn_node_online(nid, false);
+    set_popcorn_node_online(nid, false);
 
     iounmap(x86_host_addr);
     iounmap(prot_proc_addr);
@@ -668,7 +668,7 @@ static void __exit axidma_exit(void)
     destroy_workqueue(wq);
 
     dma_free_coherent(&axidma_dev->pdev->dev, SZ_2M, base_addr, base_dma);
-    dma_free_coherent(&axidma_dev->pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
+/*    dma_free_coherent(&axidma_dev->pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
     dma_free_coherent(&axidma_dev->pdev->dev, 8, h2c_poll_addr, h2c_poll_bus);
 
     if (tsk) {
@@ -677,8 +677,7 @@ static void __exit axidma_exit(void)
 
     if (poll_tsk) {
         kthread_stop(poll_tsk);
-    }
-*/
+    }*/
     printk("Unloaded axi module\n");
     //return platform_driver_unregister(&axidma_driver);
 }
@@ -723,11 +722,11 @@ static int __init axidma_init(void)
     }
 
     writeq(0x1234567812345678, x86_host_addr);
-    printk("Readq = %lld\n",readq(x86_host_addr));
+    printk("Readq = %llx\n",readq(x86_host_addr));
 
     writeq(0xabcdef01abcdef01, prot_proc_addr);
-    printk("Readq = %lld\n",readq(prot_proc_addr));
-    /*
+    printk("Readq = %llx\n",readq(prot_proc_addr));
+    
     my_nid = 1;
     //Write the node ID to the protocol processor
     iowrite32(0x1, prot_proc_addr+0x34);
@@ -758,7 +757,7 @@ static int __init axidma_init(void)
     recv_queue = __setup_recv_buffer(MAX_RECV_DEPTH);//64
     if (!recv_queue)
         goto out_free;
-
+/*
     //memset(KV, 0, XDMA_SLOTS * sizeof(int)); //320*4bytes = 1280 bytes
     sema_init(&q_empty, 0);
     sema_init(&q_full, MAX_SEND_DEPTH);
@@ -783,7 +782,7 @@ static int __init axidma_init(void)
     if (__start_poll()) 
         goto out_free;
 
-    broadcast_my_node_info(2);
+    broadcast_my_node_info(2);*/
     PCNPRINTK("... Ready on AXI ... \n");
 
     return 0;
@@ -801,7 +800,7 @@ invalid:
 out_free:
     PCNPRINTK("Inside Out Free of INIT\n");
     axidma_exit();
-    return -EINVAL;*/return 0;
+    return -EINVAL;
 }
 
 module_init(axidma_init);
