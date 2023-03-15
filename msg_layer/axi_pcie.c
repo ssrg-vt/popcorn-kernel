@@ -234,6 +234,7 @@ struct axidma_device {
 //struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
 struct device_node *axidma_dev, *x86_bus, *prot_proc_bus;
 
+
 const unsigned int rb_alloc_header_magic = 0xbad7face;
 
 static DEFINE_SPINLOCK(send_work_pool_lock);
@@ -685,60 +686,48 @@ static void __exit axidma_exit(void)
 static int __init axidma_init(void)
 {
     int ret;
-    struct device_node *node, *parent;
+    struct device_node *x86_host, *prot_proc, *parent;
     struct resource res1, res2;
+    unsigned long long x86_host_base_addr, prot_proc_base_addr;
            
     PCNPRINTK("Initializing module over AXI\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
     PCNPRINTK("registered transport layer\n");
 
     parent = of_find_node_by_name(NULL, "amba_pl");
-    printk("Parent");
 
     // Find the "pcie_us_rqrc_1" child node
-    node = of_find_node_by_name(parent, "pcie_us_rqrc");
-    if (node) {
-        if (of_address_to_resource(node, 0, &res1) == 0) {
-            pr_info("pcie_us_rqrc base address = 0x%llx\n", (unsigned long long)res1.start);
+    x86_host = of_find_node_by_name(parent, "pcie_us_rqrc");
+    if (x86_host) {
+        if (of_address_to_resource(x86_host, 0, &res1) == 0) {
+            x86_host_base_addr = (unsigned long long)res1.start;
+            pr_info("pcie_us_rqrc base address = 0x%llx\n", x86_host_base_addr);
+            x86_host_addr = ioremap(x86_host_base_addr, resource_size(&res1));
+            if(!x86_host_addr)
+                ret = -ENOMEM;
         }
-        of_node_put(node);
+        of_node_put(x86_host);
     }
 
     // Find the "protocol_processor_v_2" child node
-    node = of_find_node_by_name(parent, "protocol_processor_v1_0");
-    if (node) {
-        if (of_address_to_resource(node, 0, &res2) == 0) {
-            pr_info("protocol_processor_v1_0 base address = 0x%llx\n", (unsigned long long)res2.start);
+    prot_proc = of_find_node_by_name(parent, "protocol_processor_v1_0");
+    if (prot_proc) {
+        if (of_address_to_resource(prot_proc, 0, &res2) == 0) {
+            prot_proc_base_addr = (unsigned long long)res2.start;
+            pr_info("protocol_processor_v1_0 base address = 0x%llx\n", prot_proc_base_addr);
+            prot_proc_addr = ioremap(prot_proc_base_addr, resource_size(&res2));
+            if(!prot_proc_addr)
+                ret = -ENOMEM;
         }
-        of_node_put(node);
+        of_node_put(prot_proc);
     }
-
-    //platform_driver_register(&axidma_driver);
-    //PCNPRINTK("registered device\n");
-    /*Mapping the axi ports*/
-    /*x86_host_addr = ioremap(X86_HOST, 0x1000000);
-    if(!x86_host_addr){
-        ret = -ENOMEM;
-        if(x86_host_addr)
-            iounmap(x86_host_addr);
-    }
-
-    prot_proc_addr = ioremap(PROTOCOL_PROCESSOR, 0x10000);
-    if(!prot_proc_addr){
-        ret = -ENOMEM;
-        if(prot_proc_addr)
-            iounmap(x86_host_addr);
-    }*/
-    /*
-    printk("x86_host_addr=%p\n",x86_host_addr);
-    printk("prot_proc_addr=%p\n",prot_proc_addr);
 
     writeq(0x1234567812345678, x86_host_addr);
     printk("Readq = %lld\n",readq(x86_host_addr));
 
     writeq(0xabcdef01abcdef01, prot_proc_addr);
     printk("Readq = %lld\n",readq(prot_proc_addr));
-    *//*
+    /*
     my_nid = 1;
     //Write the node ID to the protocol processor
     iowrite32(0x1, prot_proc_addr+0x34);
