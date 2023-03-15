@@ -232,8 +232,18 @@ struct axidma_device {
 };
 
 //struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
-struct device_node *axidma_dev, *x86_bus, *prot_proc_bus;
-
+//struct device_node *axidma_dev, *x86_bus, *prot_proc_bus;
+struct device *dev;
+struct device_node *x86_host, *prot_proc, *parent;
+struct resource res1, res2;
+unsigned long long x86_host_base_addr, prot_proc_base_addr;
+void *base_addr;
+dma_addr_t base_dma;    struct device *dev;
+struct device_node *x86_host, *prot_proc, *parent;
+struct resource res1, res2;
+unsigned long long x86_host_base_addr, prot_proc_base_addr;
+void *base_addr;
+dma_addr_t base_dma;
 
 const unsigned int rb_alloc_header_magic = 0xbad7face;
 
@@ -684,14 +694,7 @@ static void __exit axidma_exit(void)
 
 static int __init axidma_init(void)
 {
-    int ret;
-    //struct device *dev = &pdev->dev;
-    struct device_node *x86_host, *prot_proc, *parent;
-    struct resource res1, res2;
-    unsigned long long x86_host_base_addr, prot_proc_base_addr;
-    void *base_addr;
-    dma_addr_t base_dma;
-    int size;
+    int ret, size;
            
     PCNPRINTK("Initializing module over AXI\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
@@ -737,9 +740,8 @@ static int __init axidma_init(void)
     printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
     set_popcorn_node_online(my_nid, true);
 
-     //base_addr = dma_alloc_coherent(dev, SZ_2M, &base_dma, GFP_KERNEL);
-    base_addr = kzalloc(SZ_2M, GFP_DMA);
-    base_dma = virt_to_phys(base_addr);
+    dev = of_find_device_by_node(of_find_device_by_node);
+    base_addr = dma_alloc_coherent(dev, SZ_2M, &base_dma, GFP_KERNEL);
 
 #ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(dev);
