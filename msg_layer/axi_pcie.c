@@ -278,11 +278,13 @@ static void __update_recv_index(queue_tr *q, int i)
 /* Polling KThread Handler */
 
 static int poll_dma(void* arg0)
-{   /*
+{   
     bool was_frozen;
 
-    struct xdma_poll_wb *poll_c2h_wb = (struct xdma_poll_wb *)c2h_poll_addr;
-    struct xdma_poll_wb *poll_h2c_wb = (struct xdma_poll_wb *)h2c_poll_addr;
+    //struct xdma_poll_wb *poll_c2h_wb = (struct xdma_poll_wb *)c2h_poll_addr;
+    //struct xdma_poll_wb *poll_h2c_wb = (struct xdma_poll_wb *)h2c_poll_addr;
+    int counter_rx = *c2h_poll_addr;
+    int counter_tx = *h2c_poll_addr;
     u32 c2h_desc_complete = 0;
     u32 h2c_desc_complete = 0;
     int recv_index = 0, index = 0;
@@ -293,13 +295,13 @@ static int poll_dma(void* arg0)
         h2c_desc_complete = poll_h2c_wb->completed_desc_count;
 
         if (c2h_desc_complete != 0) {
-            write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
-            write_register(0x06, (u32 *)(xdma_c + c2h_ch));
+            //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
+            //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
             
             recv_index = recv_queue->size;
-            poll_c2h_wb->completed_desc_count = 0;
+            //poll_c2h_wb->completed_desc_count = 0;
             recv_queue->size += 1;
             if (recv_queue->size == recv_queue->nr_entries) {
                 recv_queue->size = 0;
@@ -307,11 +309,12 @@ static int poll_dma(void* arg0)
             process_message(recv_index);
         } else if (h2c_desc_complete != 0) {
             no_of_messages += 1;
-            write_register(0x00, (u32 *)(xdma_c + h2c_ctl));
-            write_register(0x06, (u32 *)(xdma_c + h2c_ch));
-            poll_h2c_wb->completed_desc_count = 0;
+            //write_register(0x00, (u32 *)(xdma_c + h2c_ctl));
+            //write_register(0x06, (u32 *)(xdma_c + h2c_ch));
+            //poll_h2c_wb->completed_desc_count = 0;
+            counter_tx = 0;
         }
-    }*/
+    }
 
     return 0;
 }
@@ -558,7 +561,7 @@ static void __exit axidma_exit(void)
     destroy_workqueue(wq);
 
     
-/*    dma_free_coherent(&axidma_dev->pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
+    dma_free_coherent(&axidma_dev->pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
     dma_free_coherent(&axidma_dev->pdev->dev, 8, h2c_poll_addr, h2c_poll_bus);
 
     if (tsk) {
@@ -567,7 +570,7 @@ static void __exit axidma_exit(void)
 
     if (poll_tsk) {
         kthread_stop(poll_tsk);
-    }*/
+    }
     printk("Unloaded axi module\n");
     //return platform_driver_unregister(&axidma_driver);
 }
@@ -670,11 +673,11 @@ static int __init axidma_init(void)
     printk("c2h_poll_addr=%llx", readq(x86_host_addr));
     writeq(h2c_poll_addr, x86_host_addr+0x08);
     printk("c2h_poll_addr=%llx", readq(x86_host_addr+0x08));
-/*
+
     if (__start_poll()) 
         goto out_free;
 
-    broadcast_my_node_info(2);*/
+    broadcast_my_node_info(2);
     PCNPRINTK("... Ready on AXI ... \n");
 
     return 0;
