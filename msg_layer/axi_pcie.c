@@ -319,6 +319,35 @@ static int poll_dma(void* arg0)
     return 0;
 }
 
+/* Upon completion of a send */
+
+static void __process_sent(struct send_work *work)
+{
+    if (work->done)
+        complete(work->done);
+}
+
+static void __put_pcie_axi_send_work(struct send_work *work)
+{
+    unsigned long flags;
+    if (test_bit(SW_FLAG_MAPPED, &work->flags)) {
+        dma_unmap_single(&pci_dev->dev,work->dma_addr, work->length, DMA_TO_DEVICE);
+    }
+
+    if (test_bit(SW_FLAG_FROM_BUFFER, &work->flags))    {
+        if (unlikely(test_bit(SW_FLAG_MAPPED, &work->flags))) {
+            kfree(work->addr);
+        } else {
+            ring_buffer_put(&pcie_axi_send_buff, work->addr);
+        }
+    }
+
+    spin_lock_irqsave(&send_work_pool_lock, flags);
+    work->next = send_work_pool;
+    send_work_pool = work;
+    spin_unlock_irqrestore(&send_work_pool_lock, flags);
+}
+
 /* Ring Buffer Implementation - DEPRECATED */ 
 
 static __init int __setup_ring_buffer(void)
@@ -529,7 +558,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         //ret = pcie_axi_transfer(TO_DEVICE);
         //get the recv buffer addr and write data there.
         for(i=0; i<FDSM_MSG_SIZE; i++){
-            writeq(*(dma_addr_pntr+i), zynq_hw_addr + i);
+            writeq(*(dma_addr_pntr+i), x86_host_addr + i);
         }
         spin_unlock(&pcie_axi_lock);
     } else {
@@ -556,7 +585,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)
     dma_addr_pntr = work->dma_addr;
     
     for(i=0; i<FDSM_MSG_SIZE; i++){
-            writeq(*(dma_addr_pntr+i), zynq_hw_addr + i);
+            writeq(*(dma_addr_pntr+i), x86_host_addr + i);
         }
     spin_unlock(&pcie_axi_lock);
     
@@ -641,8 +670,8 @@ static void __exit axidma_exit(void)
     destroy_workqueue(wq);
 
     
-    dma_free_coherent(&axidma_dev->pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
-    dma_free_coherent(&axidma_dev->pdev->dev, 8, h2c_poll_addr, h2c_poll_bus);
+    dma_free_coherent(&pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
+    dma_free_coherent(&pdev->dev, 8, h2c_poll_addr, h2c_poll_bus);
 
     if (tsk) {
         wake_up_process(tsk);
