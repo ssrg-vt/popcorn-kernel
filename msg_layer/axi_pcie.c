@@ -611,7 +611,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     dma_addr_pntr = work->dma_addr;
     printk("dma_addr_pntr = %llu\n", dma_addr_pntr);
     for(i=0; i<FDSM_MSG_SIZE; i++){
-            printk("copying data %d\n", i);
+            //printk("copying data %d\n", i);
             //writeq(*(dma_addr_pntr+i), x86_host_addr + i);
         }
     spin_unlock(&pcie_axi_lock);
@@ -761,9 +761,9 @@ static int __init axidma_init(void)
 
     pdev = of_find_device_by_node(x86_host);
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);
-    printk("base_addr=llx\n",base_addr);
-    printk("base_dma=llx\n",base_dma);
-    printk("&base_dma=llx\n",&base_dma);
+    printk("base_addr=%llx\n",base_addr);
+    printk("base_dma=%llx\n",base_dma);
+    printk("&base_dma=%llx\n",&base_dma);
 /*
 #ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
