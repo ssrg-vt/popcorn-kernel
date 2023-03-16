@@ -35,6 +35,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
+#include <linux/io.h>
 
 #include "common.h"
 #include "ring_buffer.h"
@@ -610,15 +611,17 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
     //ret = pcie_axi_transfer(TO_DEVICE);
     dma_addr_pntr = work->dma_addr;
+    printk("dma_addr_pntr = %llx\n", dma_addr_pntr);
+
     mapped_addr = ioremap_nocache(dma_addr_pntr, FDSM_MSG_SIZE);
     if (!mapped_addr) {
         printk(KERN_ERR "Failed to map physical address\n");
         return -ENOMEM;
     }
-    printk("dma_addr_pntr = %llx\n", dma_addr_pntr);
+
     for(i=0; i<FDSM_MSG_SIZE/8; i++){ //send 8KB data, 8B in each transfer
             printk("copying data %d\n", i);
-            writeq(*(mapped_addr+i), x86_host_addr + i);
+            writeq(cpu_to_le64(*(mapped_addr+i)), x86_host_addr + i);
 
         }
     spin_unlock(&pcie_axi_lock);
