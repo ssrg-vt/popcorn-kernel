@@ -593,6 +593,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 {   printk("In pcie_axi_kmsg_send\n");
     struct send_work *work;
     int ret, i;
+    void *mapped_addr;
     u64 *dma_addr_pntr;
     DECLARE_COMPLETION_ONSTACK(done);
     printk("After STACK\n");
@@ -609,10 +610,16 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
     //ret = pcie_axi_transfer(TO_DEVICE);
     dma_addr_pntr = work->dma_addr;
-    printk("dma_addr_pntr = %llu\n", dma_addr_pntr);
-    for(i=0; i<FDSM_MSG_SIZE; i++){
-            //printk("copying data %d\n", i);
-            //writeq(*(dma_addr_pntr+i), x86_host_addr + i);
+    mapped_addr = ioremap_nocache(dma_addr_pntr, FDSM_MSG_SIZE);
+    if (!mapped_addr) {
+        printk(KERN_ERR "Failed to map physical address\n");
+        return -ENOMEM;
+    }
+    printk("dma_addr_pntr = %llx\n", dma_addr_pntr);
+    for(i=0; i<FDSM_MSG_SIZE/8; i++){ //send 8KB data, 8B in each transfer
+            printk("copying data %d\n", i);
+            writeq(*(mapped_addr+i), x86_host_addr + i);
+
         }
     spin_unlock(&pcie_axi_lock);
     printk("After spinunlock\n");
