@@ -621,7 +621,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     for(i=0; i<FDSM_MSG_SIZE/8; i++){ //send 8KB data, 8B in each transfer
             printk("copying data %d\n", i);
-            writeq(cpu_to_le64(*(mapped_addr+i)), x86_host_addr + i);
+            writeq(cpu_to_le64(*(volatile __le64*)(mapped_addr+i)), x86_host_addr + i);
 
         }
     spin_unlock(&pcie_axi_lock);
