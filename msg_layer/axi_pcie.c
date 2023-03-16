@@ -609,7 +609,9 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     dma_addr_pntr = work->dma_addr;
     
     for(i=0; i<FDSM_MSG_SIZE; i++){
+            printk("Data1=%llx\n", *(dma_addr_pntr+i));
             writeq(*(dma_addr_pntr+i), x86_host_addr + i);
+            printk("Data2=%llx\n", *(dma_addr_pntr+i));
         }
     spin_unlock(&pcie_axi_lock);
     
