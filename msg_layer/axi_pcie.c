@@ -595,7 +595,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     struct send_work *work;
     int ret, i;
     void __iomem *mapped_addr;
-    phys_addr_t dma_addr_pntr;
+    u64 *dma_addr_pntr;
     DECLARE_COMPLETION_ONSTACK(done);
     printk("After STACK\n");
 
