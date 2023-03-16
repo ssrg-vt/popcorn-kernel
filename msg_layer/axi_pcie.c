@@ -603,18 +603,20 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     memcpy(work->addr, msg, size);
     printk("memcpy\n");
     work->done = &done;
+    printk("After work->done = &done\n");
     spin_lock(&pcie_axi_lock);
+    printk("After spinlock\n");
     //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
     //ret = pcie_axi_transfer(TO_DEVICE);
     dma_addr_pntr = work->dma_addr;
-    
+    printk("After dma_addr_pntr = work->dma_addr;\n");
     for(i=0; i<FDSM_MSG_SIZE; i++){
             printk("Data1=%llx\n", *(dma_addr_pntr+i));
             writeq(*(dma_addr_pntr+i), x86_host_addr + i);
             printk("Data2=%llx\n", *(dma_addr_pntr+i));
         }
     spin_unlock(&pcie_axi_lock);
-    
+    printk("After spinunlock\n");
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
         ret = wait_for_completion_io_timeout(&done, 60 *HZ);
