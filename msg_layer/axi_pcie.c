@@ -598,7 +598,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     printk("After STACK\n");
 
     work = __get_send_work(send_queue->tail);
-    printk("After grtting work\n");
+    printk("After getting work\n");
 
     memcpy(work->addr, msg, size);
     printk("memcpy\n");
@@ -609,11 +609,10 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
     //ret = pcie_axi_transfer(TO_DEVICE);
     dma_addr_pntr = work->dma_addr;
-    printk("After dma_addr_pntr = work->dma_addr;\n");
+    printk("dma_addr_pntr = %llu\n", dma_addr_pntr);
     for(i=0; i<FDSM_MSG_SIZE; i++){
-            printk("Data1=%llx\n", *(dma_addr_pntr+i));
-            writeq(*(dma_addr_pntr+i), x86_host_addr + i);
-            printk("Data2=%llx\n", *(dma_addr_pntr+i));
+            printk("copying data %d\n", i);
+            //writeq(*(dma_addr_pntr+i), x86_host_addr + i);
         }
     spin_unlock(&pcie_axi_lock);
     printk("After spinunlock\n");
@@ -762,6 +761,9 @@ static int __init axidma_init(void)
 
     pdev = of_find_device_by_node(x86_host);
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);
+    printk("base_addr=llx\n",base_addr);
+    printk("base_dma=llx\n",base_dma);
+    printk("&base_dma=llx\n",&base_dma);
 /*
 #ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
