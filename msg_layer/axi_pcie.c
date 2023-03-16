@@ -589,17 +589,19 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     return 0;
 }
 
-int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0, 
+int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 {   printk("In pcie_axi_kmsg_send\n");
     struct send_work *work;
     int ret, i;
     u64 *dma_addr_pntr;
     DECLARE_COMPLETION_ONSTACK(done);
+    printk("After STACK\n");
 
     work = __get_send_work(send_queue->tail);
+    printk("After grtting work\n");
 
     memcpy(work->addr, msg, size);
-
+    printk("memcpy\n");
     work->done = &done;
     spin_lock(&pcie_axi_lock);
     //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
