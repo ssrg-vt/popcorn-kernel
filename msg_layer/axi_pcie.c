@@ -610,7 +610,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     printk("After spinlock\n");
     //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
     //ret = pcie_axi_transfer(TO_DEVICE);
-    dma_addr_pntr = work->addr; //dma_addr;
+    dma_addr_pntr = work->addr; //dma_addr; DMA address cannot be mapped to CPU addr space and accessed with ioread/write
     printk("dma_addr_pntr = %llx\n", dma_addr_pntr);
     /*
     mapped_addr = ioremap_nocache(dma_addr_pntr, FDSM_MSG_SIZE);
@@ -622,8 +622,10 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     for(i=0; i<FDSM_MSG_SIZE/8; i++){ //send 8KB data, 8B in each transfer
             printk("copying data %d\n", i);
             printk("Data %d = %llx\n", i, *(dma_addr_pntr+i));
+            printk("dma_addr_pntr = %llx\n", dma_addr_pntr+i);
+            printk("x86_host_addr = %llx\n", x86_host_addr+i);
             //writeq(cpu_to_le64(*(volatile __le64*)(mapped_addr+i)), x86_host_addr + i);
-            writeq(*(dma_addr_pntr+i), (x86_host_addr + i));
+            writeq(*(dma_addr_pntr+(i*8)), (x86_host_addr+(i*8)));
 
 
         }
