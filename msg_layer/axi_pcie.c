@@ -271,8 +271,9 @@ static void __update_recv_index(queue_tr *q, int i)
         i = 0;
         q->tail = -1;
     }
-    dma_addr = q->work_list[i]->dma_addr;
-    //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, FROM_DEVICE, KMSG);//
+    //dma_addr = q->work_list[i]->dma_addr;
+    writeq(q->work_list[i]->addr, zynq_hw_addr);
+    //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, FROM_DEVICE, KMSG);//Update new receive address in RQ/RC IP
     //writeq(dma_addr, zynq_hw_addr+0x10+i);
 }
 
@@ -340,6 +341,7 @@ static int poll_dma(void* arg0)
             
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
+            counter_rx = 0;
             recv_queue->size += 1;
             if (recv_queue->size == recv_queue->nr_entries) {
                 recv_queue->size = 0;
@@ -468,7 +470,7 @@ static queue_t* __setup_send_queue(int entries)
         send_q->work_list[i]->addr = base_addr + FDSM_MSG_SIZE * base_index;//FDSM_MSG_SIZE = 8192
         send_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
-        radix_tree_insert(&send_tree, send_q->work_list[i]->addr, send_q->work_list[i]->dma_addr);
+        radix_tree_insert(&send_tree, send_q->work_list[i]->addr, send_q->work_list[i]->addr);//send_q->work_list[i]->dma_addr); Inserting the msg as key and storing the address. 
     }
 
     return send_q;
@@ -572,16 +574,17 @@ void pcie_axi_kmsg_stat(struct seq_file *seq, void *v)
 int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
     int ret, i;
-    dma_addr_t dma_addr, *dma_addr_pntr;
+    //dma_addr_t dma_addr, *dma_addr_pntr;
+    u64 dma_addr, *dma_addr_pntr;
     dma_addr = radix_tree_lookup(&send_tree, (unsigned long *)msg);
     dma_addr_pntr = dma_addr;
-    if (dma_addr) {
+    if (dma_addr_pntr) {
         spin_lock(&pcie_axi_lock);
         //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
         //ret = pcie_axi_transfer(TO_DEVICE);
         //get the recv buffer addr and write data there.
-        for(i=0; i<FDSM_MSG_SIZE; i++){
-            writeq(*(dma_addr_pntr+i), x86_host_addr + i);
+        for(i=0; i<FDSM_MSG_SIZE/8; i++){
+            writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
         spin_unlock(&pcie_axi_lock);
     } else {
@@ -621,11 +624,12 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     */
     for(i=0; i<FDSM_MSG_SIZE/8; i++){ //send 8KB data, 8B in each transfer
             printk("copying data %d\n", i);
-            printk("Data %d = %llx\n", i, *(dma_addr_pntr+i));
-            printk("dma_addr_pntr = %llx\n", dma_addr_pntr+i);
-            printk("x86_host_addr = %llx\n", x86_host_addr+i);
+            printk("Data %d = %llx\n", i, *(dma_addr_pntr+(i*8)));
+            printk("dma_addr_pntr = %llx\n", dma_addr_pntr+(i*8));
+            printk("x86_host_addr = %llx\n", x86_host_addr+(i*8));
+            /* Need to configure the CC/CQ IP to write to a different part o fthe buffer on the other node*/
             //writeq(cpu_to_le64(*(volatile __le64*)(mapped_addr+i)), x86_host_addr + i);
-            writeq(*(dma_addr_pntr+(i*8)), (x86_host_addr+(i*8)));
+            writeq(*(dma_addr_pntr+(i*8)), (x86_host_addr+(i*8)));//cannot wite to x86_host_addr always, it needs to go a specific part of the receive buffer. So each of this part has a base address. 
 
 
         }
@@ -775,7 +779,7 @@ static int __init axidma_init(void)
     set_popcorn_node_online(my_nid, true);
 
     pdev = of_find_device_by_node(x86_host);
-    base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);
+    base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     printk("base_addr=%llx\n",base_addr);
     printk("base_dma=%llx\n",base_dma);
     printk("&base_dma=%llx\n",&base_dma);
@@ -823,10 +827,13 @@ static int __init axidma_init(void)
         if (ret) goto out_free;
 #endif
 */
+    //c2h_poll_addr and h2c_poll_addr needs to be stored in the hardware
+    /*
     writeq(c2h_poll_addr, x86_host_addr);
     printk("c2h_poll_addr=%llx", readq(x86_host_addr));
     writeq(h2c_poll_addr, x86_host_addr+0x08);
     printk("c2h_poll_addr=%llx", readq(x86_host_addr+0x08));
+    */
 
     if (__start_poll()) 
         goto out_free;
