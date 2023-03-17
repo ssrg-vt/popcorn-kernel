@@ -233,9 +233,9 @@ struct axidma_device {
 //struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
 //struct device_node *axidma_dev, *x86_bus, *prot_proc_bus;
 //struct device *dev;
-struct device_node *x86_host, *prot_proc, *parent;
-struct resource res1, res2;
-unsigned long long x86_host_base_addr, prot_proc_base_addr;
+//struct device_node *x86_host, *prot_proc, *parent;
+//struct resource res1, res2;
+//unsigned long long x86_host_base_addr, prot_proc_base_addr;
 static void *base_addr;
 static dma_addr_t base_dma;
 struct device_node *x86_host, *prot_proc, *parent;
@@ -272,7 +272,7 @@ static void __update_recv_index(queue_tr *q, int i)
         q->tail = -1;
     }
     //dma_addr = q->work_list[i]->dma_addr;
-    writeq(q->work_list[i]->addr, zynq_hw_addr);
+    writeq(q->work_list[i]->addr, x86_host_addr);
     //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, FROM_DEVICE, KMSG);//Update new receive address in RQ/RC IP
     //writeq(dma_addr, zynq_hw_addr+0x10+i);
 }
