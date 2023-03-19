@@ -355,8 +355,8 @@ static int poll_dma(void* arg0)
             //write_register(0x06, (u32 *)(xdma_c + h2c_ch));
             //poll_h2c_wb->completed_desc_count = 0;
             counter_tx = 0;
-        }
-    }*/
+        }*/
+    }
 
     return 0;
 }
