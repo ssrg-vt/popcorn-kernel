@@ -331,7 +331,7 @@ static int poll_dma(void* arg0)
     int recv_index = 0, index = 0;
 
     while (!kthread_freezable_should_stop(&was_frozen)) {
-
+        /*
         c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
 
@@ -356,7 +356,7 @@ static int poll_dma(void* arg0)
             //poll_h2c_wb->completed_desc_count = 0;
             counter_tx = 0;
         }
-    }
+    }*/
 
     return 0;
 }
