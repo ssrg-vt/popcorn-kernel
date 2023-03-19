@@ -272,7 +272,9 @@ static void __update_recv_index(queue_tr *q, int i)
         q->tail = -1;
     }
     //dma_addr = q->work_list[i]->dma_addr;
-    writeq(q->work_list[i]->addr, x86_host_addr);
+    writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
+    writeq(q->work_list[i]->addr, x86_host_addr); //Update the physical address with next sector address of recv Q
+    printk("Receive Q addr = %llx\n", q->work_list[i]->addr);
     //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, FROM_DEVICE, KMSG);//Update new receive address in RQ/RC IP
     //writeq(dma_addr, zynq_hw_addr+0x10+i);
 }
@@ -613,7 +615,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     printk("After spinlock\n");
     //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
     //ret = pcie_axi_transfer(TO_DEVICE);
-    dma_addr_pntr = work->addr; //dma_addr; DMA address cannot be mapped to CPU addr space and accessed with ioread/write
+    dma_addr_pntr = work->addr; //dma_addr; DMA address cannot be mapped to CPU addr space and accessed with ioread/write. Hence using the VA.
     printk("dma_addr_pntr = %llx\n", dma_addr_pntr);
     /*
     mapped_addr = ioremap_nocache(dma_addr_pntr, FDSM_MSG_SIZE);
@@ -623,10 +625,10 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     }
     */
     for(i=0; i<FDSM_MSG_SIZE/8; i++){ //send 8KB data, 8B in each transfer
-            printk("copying data %d\n", i);
-            printk("Data %d = %llx\n", i, *(dma_addr_pntr+(i*8)));
-            printk("dma_addr_pntr = %llx\n", dma_addr_pntr+(i*8));
-            printk("x86_host_addr = %llx\n", x86_host_addr+(i*8));
+            //printk("copying data %d\n", i);
+            //printk("Data %d = %llx\n", i, *(dma_addr_pntr+(i*8)));
+            //printk("dma_addr_pntr = %llx\n", dma_addr_pntr+(i*8));
+            //printk("x86_host_addr = %llx\n", x86_host_addr+(i*8));
             /* Need to configure the CC/CQ IP to write to a different part o fthe buffer on the other node*/
             //writeq(cpu_to_le64(*(volatile __le64*)(mapped_addr+i)), x86_host_addr + i);
             writeq(*(dma_addr_pntr+(i*8)), (x86_host_addr+(i*8)));//cannot wite to x86_host_addr always, it needs to go a specific part of the receive buffer. So each of this part has a base address. 
@@ -745,7 +747,7 @@ static int __init axidma_init(void)
     if (x86_host) {
         if (of_address_to_resource(x86_host, 0, &res1) == 0) {
             x86_host_base_addr = (unsigned long long)res1.start;
-            pr_info("pcie_us_rqrc base address = 0x%llx\n", x86_host_base_addr);
+            pr_info("pcie_us_rqrc base address = 0x%llx\n", x86_host_base_addr);//0xa0000000
             x86_host_addr = ioremap(x86_host_base_addr, resource_size(&res1));
             if(!x86_host_addr)
                 ret = -ENOMEM;
@@ -758,31 +760,32 @@ static int __init axidma_init(void)
     if (prot_proc) {
         if (of_address_to_resource(prot_proc, 0, &res2) == 0) {
             prot_proc_base_addr = (unsigned long long)res2.start;
-            pr_info("protocol_processor_v1_0 base address = 0x%llx\n", prot_proc_base_addr);
+            pr_info("protocol_processor_v1_0 base address = 0x%llx\n", prot_proc_base_addr);//0xb0000000
             prot_proc_addr = ioremap(prot_proc_base_addr, resource_size(&res2));
             if(!prot_proc_addr)
                 ret = -ENOMEM;
         }
         of_node_put(prot_proc);
     }
-
+    /*
     writeq(0x1234567812345678, x86_host_addr);
     printk("Readq = %llx\n",readq(x86_host_addr));
 
     writeq(0xabcdef01abcdef01, prot_proc_addr);
     printk("Readq = %llx\n",readq(prot_proc_addr));
-    
+    */
+
     my_nid = 1;
     //Write the node ID to the protocol processor
-    iowrite32(0x1, prot_proc_addr+0x34);
-    printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
+    //iowrite32(0x1, prot_proc_addr+0x34);//Enable when fDSM is enabled
+    //printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
     set_popcorn_node_online(my_nid, true);
 
     pdev = of_find_device_by_node(x86_host);
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     printk("base_addr=%llx\n",base_addr);
-    printk("base_dma=%llx\n",base_dma);
-    printk("&base_dma=%llx\n",&base_dma);
+    //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
+    //printk("&base_dma=%llx\n",&base_dma);
 /*
 #ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
