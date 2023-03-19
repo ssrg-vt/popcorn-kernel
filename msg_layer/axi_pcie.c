@@ -273,8 +273,8 @@ static void __update_recv_index(queue_tr *q, int i)
     }
     //dma_addr = q->work_list[i]->dma_addr;
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
-    writeq(q->work_list[i]->addr, x86_host_addr); //Update the physical address with next sector address of recv Q
-    printk("Receive Q addr = %llx\n", q->work_list[i]->addr);
+    writeq(virt_to_phys(q->work_list[i]->addr), x86_host_addr); //Update the physical address with next sector address of recv Q
+    printk("Receive Q addr = %llx\n", virt_to_phys(q->work_list[i]->addr));
     //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, FROM_DEVICE, KMSG);//Update new receive address in RQ/RC IP
     //writeq(dma_addr, zynq_hw_addr+0x10+i);
 }
@@ -586,7 +586,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         //ret = pcie_axi_transfer(TO_DEVICE);
         //get the recv buffer addr and write data there.
         writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
-        writeq(dma_addr_pntr, x86_host_addr);
+        writeq(virt_to_phys(dma_addr_pntr), x86_host_addr);
         for(i=0; i<FDSM_MSG_SIZE/8; i++){
             writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
@@ -627,7 +627,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     }
     */
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
-    writeq(dma_addr_pntr, x86_host_addr);
+    writeq(virt_to_phys(dma_addr_pntr), x86_host_addr);
     for(i=0; i<FDSM_MSG_SIZE/8; i++){ //send 8KB data, 8B in each transfer
             //printk("copying data %d\n", i);
             //printk("Data %d = %llx\n", i, *(dma_addr_pntr+(i*8)));
