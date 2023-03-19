@@ -331,7 +331,7 @@ static int poll_dma(void* arg0)
     int recv_index = 0, index = 0;
 
     while (!kthread_freezable_should_stop(&was_frozen)) {
-        /*
+
         c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
 
@@ -355,7 +355,7 @@ static int poll_dma(void* arg0)
             //write_register(0x06, (u32 *)(xdma_c + h2c_ch));
             //poll_h2c_wb->completed_desc_count = 0;
             counter_tx = 0;
-        }*/
+        }
     }
 
     return 0;
@@ -514,14 +514,14 @@ out:
 /* Polling thread handler initiation */
 //Rewrite this function and the poll handles -> poll_dma
 static int __start_poll(void)
-{   
+{   /*
     poll_tsk = kthread_run(poll_dma, NULL, "Poll_Handler");
     if (IS_ERR(poll_tsk)) {
         PCNPRINTK("Error Instantiating Polling Handler\n");
         return 1;
     }
     
-    printk("Start poll.\n");
+    printk("Start poll.\n");*/
     return 0;
 }
 
