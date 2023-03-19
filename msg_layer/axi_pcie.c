@@ -585,6 +585,8 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
         //ret = pcie_axi_transfer(TO_DEVICE);
         //get the recv buffer addr and write data there.
+        writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
+        writeq(dma_addr_pntr, x86_host_addr);
         for(i=0; i<FDSM_MSG_SIZE/8; i++){
             writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
@@ -624,6 +626,8 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
         return -ENOMEM;
     }
     */
+    writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
+    writeq(dma_addr_pntr, x86_host_addr);
     for(i=0; i<FDSM_MSG_SIZE/8; i++){ //send 8KB data, 8B in each transfer
             //printk("copying data %d\n", i);
             //printk("Data %d = %llx\n", i, *(dma_addr_pntr+(i*8)));
