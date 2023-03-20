@@ -407,7 +407,7 @@ static __init int __setup_ring_buffer(void)
     ret = ring_buffer_init(&pcie_axi_send_buff, "dma_send");
     if (ret) return ret;
     
-    pritnk("Chunk size = %d\n", pcie_axi_send_buff.nr_chunks);
+    printk("Chunk size = %d\n", pcie_axi_send_buff.nr_chunks);
     for (i = 0; i < pcie_axi_send_buff.nr_chunks; i++) {
         //dma_addr_t dma_addr = dma_map_single(&pci_dev->dev,pcie_axi_send_buff.chunk_start[i], RB_CHUNK_SIZE, DMA_TO_DEVICE);
         //ret = dma_mapping_error(&pci_dev->dev,dma_addr);
