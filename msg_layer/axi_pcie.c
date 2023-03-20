@@ -650,6 +650,11 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     spin_unlock(&pcie_axi_lock);
     printk("After spinunlock\n");
     printk("ARM nid = %d\n", msg->header.from_nid);
+    printk("Start of pcn message\n");
+    for(i=0;i<((FDSM_MSG_SIZE/8)-1); i++){
+         printk(*(dma_addr_pntr+(i*8)));
+    }
+    printk("End of pcn message\n");
     h2c_desc_complete = 1;
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
