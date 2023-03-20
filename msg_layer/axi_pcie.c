@@ -594,7 +594,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         //get the recv buffer addr and write data there.
         writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
         writeq(virt_to_phys(dma_addr_pntr), x86_host_addr);
-        for(i=0; i<FDSM_MSG_SIZE/8; i++){
+        for(i=0; i<(FDSM_MSG_SIZE/8)-1; i++){
             writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
         writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
@@ -637,7 +637,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     */
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     writeq(virt_to_phys(dma_addr_pntr), x86_host_addr);
-    for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){ //send 8KB data, 8B in each transfer
+    for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){ //send 8KB data, 8B in each transfer
             //printk("copying data %d\n", i);
             //printk("Data %d = %llx\n", i, *(dma_addr_pntr+(i*8)));
             //printk("dma_addr_pntr = %llx\n", dma_addr_pntr+(i*8));
@@ -650,11 +650,13 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     spin_unlock(&pcie_axi_lock);
     printk("After spinunlock\n");
     printk("ARM nid = %d\n", msg->header.from_nid);
+    /*
     printk("Start of pcn message\n");
-    for(i=0;i<((FDSM_MSG_SIZE/8)-1); i++){
+    for(i=0;i<((FDSM_MSG_SIZE/8)); i++){
          printk("%llx", *(dma_addr_pntr+(i*8)));
     }
     printk("End of pcn message\n");
+    */
     h2c_desc_complete = 1;
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
@@ -794,7 +796,7 @@ static int __init axidma_init(void)
     printk("Readq = %llx\n",readq(prot_proc_addr));
     */
 
-    my_nid = 1;
+    my_nid = 0;
     //Write the node ID to the protocol processor
     //iowrite32(0x1, prot_proc_addr+0x34);//Enable when fDSM is enabled
     //printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
