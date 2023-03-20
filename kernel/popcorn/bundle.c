@@ -85,6 +85,8 @@ void broadcast_my_node_info(int nr_nodes)
 		}
 		else {
 			pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, origin_nid, &info, sizeof(info));//0,0,msg,size 
+			printk("bundle: nid = %d\n", info->nid);
+			printk("bundle: arch = %d\n", info->arch);
 			return;
 		}
 	}
