@@ -324,18 +324,20 @@ static int poll_dma(void* arg0)
 
     //struct xdma_poll_wb *poll_c2h_wb = (struct xdma_poll_wb *)c2h_poll_addr;
     //struct xdma_poll_wb *poll_h2c_wb = (struct xdma_poll_wb *)h2c_poll_addr;
-    int counter_rx = *c2h_poll_addr;
+    //int counter_rx = *c2h_poll_addr;
     int counter_tx = *h2c_poll_addr;
-    u32 c2h_desc_complete = 0;
+    //u32 c2h_desc_complete = 0;
     u32 h2c_desc_complete = 0;
-    int recv_index = 0, index = 0;
+    int recv_index = 0, index = 0, tmp = 0;
 
+    tmp = __get_recv_index(recv_queue);
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
-        c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
+        //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
 
-        if (c2h_desc_complete != 0) {
+        if (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) {
+            printk("In IF\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
             index = __get_recv_index(recv_queue);
@@ -343,13 +345,15 @@ static int poll_dma(void* arg0)
             
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
-            counter_rx = 0;
+            //counter_rx = 0;
+           *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
             recv_queue->size += 1;
             if (recv_queue->size == recv_queue->nr_entries) {
                 recv_queue->size = 0;
             }
             process_message(recv_index);
         } else if (h2c_desc_complete != 0) {
+            printk("In ELSE-IF\n");
             no_of_messages += 1;
             //write_register(0x00, (u32 *)(xdma_c + h2c_ctl));
             //write_register(0x06, (u32 *)(xdma_c + h2c_ch));
@@ -401,15 +405,16 @@ static __init int __setup_ring_buffer(void)
 
     ret = ring_buffer_init(&pcie_axi_send_buff, "dma_send");
     if (ret) return ret;
-    /*
+    
     for (i = 0; i < pcie_axi_send_buff.nr_chunks; i++) {
-        dma_addr_t dma_addr = dma_map_single(&pci_dev->dev,pcie_axi_send_buff.chunk_start[i], RB_CHUNK_SIZE, DMA_TO_DEVICE);
-        ret = dma_mapping_error(&pci_dev->dev,dma_addr);
-        printk("ret=%d, addr=%p\n", ret, dma_addr);
+        //dma_addr_t dma_addr = dma_map_single(&pci_dev->dev,pcie_axi_send_buff.chunk_start[i], RB_CHUNK_SIZE, DMA_TO_DEVICE);
+        //ret = dma_mapping_error(&pci_dev->dev,dma_addr);
+        dma_addr_t dma_addr = base_addr + (i*8*1024);
+        printk("addr=%p\n", dma_addr);
         if (ret) goto out_unmap;
         pcie_axi_send_buff.dma_addr_base[i] = dma_addr;
     }
-    */
+    
     /* Initialize send work request pool */
 
     for (i = 0; i < MAX_SEND_DEPTH; i++) {
