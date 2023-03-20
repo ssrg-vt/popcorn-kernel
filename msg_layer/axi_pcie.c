@@ -590,6 +590,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         for(i=0; i<FDSM_MSG_SIZE/8; i++){
             writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
+        writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
         spin_unlock(&pcie_axi_lock);
     } else {
         printk("DMA addr: not found\n");
@@ -628,7 +629,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     */
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     writeq(virt_to_phys(dma_addr_pntr), x86_host_addr);
-    for(i=0; i<FDSM_MSG_SIZE/8; i++){ //send 8KB data, 8B in each transfer
+    for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){ //send 8KB data, 8B in each transfer
             //printk("copying data %d\n", i);
             //printk("Data %d = %llx\n", i, *(dma_addr_pntr+(i*8)));
             //printk("dma_addr_pntr = %llx\n", dma_addr_pntr+(i*8));
@@ -636,9 +637,8 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
             /* Need to configure the CC/CQ IP to write to a different part o fthe buffer on the other node*/
             //writeq(cpu_to_le64(*(volatile __le64*)(mapped_addr+i)), x86_host_addr + i);
             writeq(*(dma_addr_pntr+(i*8)), (x86_host_addr+(i*8)));//cannot wite to x86_host_addr always, it needs to go a specific part of the receive buffer. So each of this part has a base address. 
-
-
         }
+    writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     spin_unlock(&pcie_axi_lock);
     printk("After spinunlock\n");
     __process_sent(work);
