@@ -649,6 +649,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     spin_unlock(&pcie_axi_lock);
     printk("After spinunlock\n");
+    printk("ARM nid = %d\n", msg->header.from_nid);
     h2c_desc_complete = 1;
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
