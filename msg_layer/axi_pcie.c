@@ -796,7 +796,7 @@ static int __init axidma_init(void)
     printk("Readq = %llx\n",readq(prot_proc_addr));
     */
 
-    my_nid = 0;
+    my_nid = 2;
     //Write the node ID to the protocol processor
     //iowrite32(0x1, prot_proc_addr+0x34);//Enable when fDSM is enabled
     //printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
