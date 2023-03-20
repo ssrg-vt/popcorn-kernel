@@ -81,6 +81,7 @@ struct semaphore q_full;
 
 u8 __iomem *prot_proc_addr;
 u8 __iomem *x86_host_addr;
+u32 h2c_desc_complete;
 
 struct work_hdr {
     enum {
@@ -325,16 +326,16 @@ static int poll_dma(void* arg0)
     //struct xdma_poll_wb *poll_c2h_wb = (struct xdma_poll_wb *)c2h_poll_addr;
     //struct xdma_poll_wb *poll_h2c_wb = (struct xdma_poll_wb *)h2c_poll_addr;
     //int counter_rx = *c2h_poll_addr;
-    int counter_tx = *h2c_poll_addr;
+    //int counter_tx = *h2c_poll_addr;
     //u32 c2h_desc_complete = 0;
-    u32 h2c_desc_complete = 0;
+    //u32 h2c_desc_complete = 0;
     int recv_index = 0, index = 0, tmp = 0;
 
     tmp = __get_recv_index(recv_queue);
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
-        h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
+        //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
 
         if (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) {
             printk("In IF\n");
@@ -358,7 +359,7 @@ static int poll_dma(void* arg0)
             //write_register(0x00, (u32 *)(xdma_c + h2c_ctl));
             //write_register(0x06, (u32 *)(xdma_c + h2c_ch));
             //poll_h2c_wb->completed_desc_count = 0;
-            counter_tx = 0;
+            h2c_desc_complete = 0;
         }
     }
 
@@ -597,6 +598,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         }
         writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
         spin_unlock(&pcie_axi_lock);
+        h2c_desc_complete = 1
     } else {
         printk("DMA addr: not found\n");
     }
@@ -646,6 +648,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     spin_unlock(&pcie_axi_lock);
     printk("After spinunlock\n");
+    h2c_desc_complete = 1;
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
         ret = wait_for_completion_io_timeout(&done, 60 *HZ);
