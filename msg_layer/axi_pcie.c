@@ -626,8 +626,8 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     memcpy(work->addr, msg, size);
     printk("memcpy\n");
-    for(i = 0; i<size/8; i++){
-        printk("Data = %llx\n", *(u64 *)((work->addr)+i));
+    for(i = 0; i<(size/8)+1; i++){
+        printk("Data = %llx\n", *(u64 *)((work->addr)+(i*8)));
     }
     for(i = 0; i<size; i++){
         printk("Data1 = %lx\n", *(u8 *)((work->addr)+i));
@@ -657,7 +657,8 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
             //printk("x86_host_addr = %llx\n", x86_host_addr+(i*8));
             /* Need to configure the CC/CQ IP to write to a different part o fthe buffer on the other node*/
             //writeq(cpu_to_le64(*(volatile __le64*)(mapped_addr+i)), x86_host_addr + i);
-            writeq(*(dma_addr_pntr+(i*8)), (x86_host_addr+(i*8)));//cannot wite to x86_host_addr always, it needs to go a specific part of the receive buffer. So each of this part has a base address. 
+            //writeq(*(dma_addr_pntr+(i*8)), (x86_host_addr+(i*8)));//cannot wite to x86_host_addr always, it needs to go a specific part of the receive buffer. So each of this part has a base address. 
+            writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
         }
     writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     spin_unlock(&pcie_axi_lock);
@@ -668,7 +669,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     
     printk("Start of pcn message\n");
     for(i=0;i<((FDSM_MSG_SIZE/8)); i++){
-         printk("%llx", *(dma_addr_pntr+(i*8)));
+         printk("%llx", *(u64 *)((work->addr)+(i*8)));
     }
     printk("End of pcn message\n");
     printk("The msessage is %llx\n", *(uint64_t *)msg);
