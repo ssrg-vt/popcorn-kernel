@@ -658,13 +658,13 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     printk("ARM nid = %d\n", msg->header.from_nid);
     node_info_t *info = (node_info_t *)msg;
     printk("ARMs nid from nid_info=%d\n", info->nid);
-    /*
+    
     printk("Start of pcn message\n");
     for(i=0;i<((FDSM_MSG_SIZE/8)); i++){
          printk("%llx", *(dma_addr_pntr+(i*8)));
     }
     printk("End of pcn message\n");
-    */
+    printk("The msessage is %llx\n", *(uint64_t *)msg);
     h2c_desc_complete = 1;
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
