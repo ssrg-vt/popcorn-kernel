@@ -765,7 +765,10 @@ static void __exit axidma_exit(void)
 static int __init axidma_init(void)
 {
     int ret, size;
-           
+    printk("Size info\n");
+    printk("Size of int = %d\n", sizeof(int));
+    printk("Size of size_t = %d\n", sizeof(size_t));
+
     PCNPRINTK("Initializing module over AXI\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
     PCNPRINTK("registered transport layer\n");
