@@ -626,6 +626,9 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     memcpy(work->addr, msg, size);
     printk("memcpy\n");
+    for(i = 0; i<size; i++){
+        printk("Data = "*((work->addr)+i));
+    }
     printk("Size of msg = %d\n", size);
     work->done = &done;
     printk("After work->done = &done\n");
