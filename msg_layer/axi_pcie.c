@@ -626,6 +626,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     memcpy(work->addr, msg, size);
     printk("memcpy\n");
+    printk("Size of msg = %d\n", size);
     work->done = &done;
     printk("After work->done = &done\n");
     spin_lock(&pcie_axi_lock);
