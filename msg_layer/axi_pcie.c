@@ -650,6 +650,8 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     spin_unlock(&pcie_axi_lock);
     printk("After spinunlock\n");
     printk("ARM nid = %d\n", msg->header.from_nid);
+    node_info_t *info = (node_info_t *)msg;
+    printk("ARMs nid from nid_info=%d\n", info->nid);
     /*
     printk("Start of pcn message\n");
     for(i=0;i<((FDSM_MSG_SIZE/8)); i++){
@@ -796,7 +798,7 @@ static int __init axidma_init(void)
     printk("Readq = %llx\n",readq(prot_proc_addr));
     */
 
-    my_nid = 2;
+    my_nid = 1;
     //Write the node ID to the protocol processor
     //iowrite32(0x1, prot_proc_addr+0x34);//Enable when fDSM is enabled
     //printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
