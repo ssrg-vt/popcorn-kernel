@@ -83,6 +83,12 @@ u8 __iomem *prot_proc_addr;
 u8 __iomem *x86_host_addr;
 u32 h2c_desc_complete;
 
+#define NODE_INFO_FIELDS \
+    int nid; \
+    int bundle_id; \
+    int arch;
+DEFINE_PCN_KMSG(node_info_t, NODE_INFO_FIELDS);
+
 struct work_hdr {
     enum {
         WORK_TYPE_RECV,
