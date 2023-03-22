@@ -270,7 +270,7 @@ static struct pcie_axi_work *pcie_axi_work_pool = NULL;
  * Platform Device Functions
  *----------------------------------------------------------------------------*/
 static void __update_recv_index(queue_tr *q, int i)
-{
+{   
     dma_addr_t dma_addr;
     int ret;
 
@@ -343,7 +343,7 @@ static int poll_dma(void* arg0)
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
 
-        if (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) {
+        if (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) { //possible performance improvement here!
             printk("In IF\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
@@ -527,14 +527,14 @@ out:
 /* Polling thread handler initiation */
 //Rewrite this function and the poll handles -> poll_dma
 static int __start_poll(void)
-{   /*
+{   
     poll_tsk = kthread_run(poll_dma, NULL, "Poll_Handler");
     if (IS_ERR(poll_tsk)) {
         PCNPRINTK("Error Instantiating Polling Handler\n");
         return 1;
     }
     
-    printk("Start poll.\n");*/
+    printk("Start poll.\n");
     return 0;
 }
 
@@ -648,8 +648,8 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
         return -ENOMEM;
     }
     */
-    writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
-    writeq(virt_to_phys(dma_addr_pntr), x86_host_addr);
+    //writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
+    //writeq(virt_to_phys(dma_addr_pntr), x86_host_addr);
     for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){ //send 8KB data, 8B in each transfer
             //printk("copying data %d\n", i);
             //printk("Data %d = %llx\n", i, *(dma_addr_pntr+(i*8)));
