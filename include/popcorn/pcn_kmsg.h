@@ -178,7 +178,6 @@ int pcn_kmsg_rdma_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t si
 /* TRANSPORT DESCRIPTOR */
 enum {
 	PCN_KMSG_FEATURE_RDMA = 1,
-	PCN_KMSG_FEATURE_PCIE_AXI = 2,
 };
 
 /**
