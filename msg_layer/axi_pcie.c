@@ -338,8 +338,9 @@ static int poll_dma(void* arg0)
     int recv_index = 0, index = 0, tmp = 0;
 
     tmp = __get_recv_index(recv_queue);
+    printk("In poll, the addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
     while (!kthread_freezable_should_stop(&was_frozen)) {
-
+        printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
 
@@ -359,6 +360,11 @@ static int poll_dma(void* arg0)
                 recv_queue->size = 0;
             }
             process_message(recv_index);
+            printk("Start of pcn message\n");
+            for(i=0;i<(FDSM_MSG_SIZE/8); i++){
+                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
+            }
+            printk("End of pcn message\n");
         } else if (h2c_desc_complete != 0) {
             printk("In ELSE-IF\n");
             no_of_messages += 1;
