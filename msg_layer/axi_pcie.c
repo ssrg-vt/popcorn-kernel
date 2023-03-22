@@ -904,13 +904,16 @@ out_free:
     return -EINVAL;
 }
 
-module_init(axidma_init);
-module_exit(axidma_exit);
-
-MODULE_AUTHOR("XYZ");
-
 
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0");
-MODULE_DESCRIPTION("Module to provide a userspace interface for transferring "
-                   "data from the processor to the logic fabric via AXI DMA.");
+MODULE_AUTHOR("Hemanth Ramesh");
+MODULE_DESCRIPTION("PCIe-AXI Messaging Layer");
+
+module_param(use_rb_thr, uint, 0644);
+MODULE_PARM_DESC(use_rb_thr, "Threshold for using pre-allocated and pre-mapped ring buffer");
+
+module_param_named(features, transport_pcie_axi.features, ulong, 0644);
+MODULE_PARM_DESC(use_pcie, "2: FPGA layer to transfer pages");
+
+module_init(axidma_init);
+module_exit(axidma_exit);
