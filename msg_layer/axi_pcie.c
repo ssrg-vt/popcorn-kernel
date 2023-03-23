@@ -339,6 +339,8 @@ static int poll_dma(void* arg0)
 
     tmp = __get_recv_index(recv_queue);
     printk("In poll, the addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
+    printk("In poll, the addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1023*8)));
+    printk("Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
     while (!kthread_freezable_should_stop(&was_frozen)) {
         //printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
@@ -374,6 +376,7 @@ static int poll_dma(void* arg0)
             //write_register(0x06, (u32 *)(xdma_c + h2c_ch));
             //poll_h2c_wb->completed_desc_count = 0;
             h2c_desc_complete = 0;
+            printk("Data found in poll from ELSE IF = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
         }
     }
 
