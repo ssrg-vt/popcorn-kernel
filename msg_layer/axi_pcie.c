@@ -340,7 +340,7 @@ static int poll_dma(void* arg0)
     tmp = __get_recv_index(recv_queue);
     printk("In poll, the addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
     while (!kthread_freezable_should_stop(&was_frozen)) {
-        printk("polling...");
+        //printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
 
