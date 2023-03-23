@@ -35,6 +35,9 @@ EXPORT_SYMBOL(set_popcorn_node_online);
 
 
 int my_nid __read_mostly = -1;
+const int origin_nid = 0;
+const int remote_nid = 1;
+
 EXPORT_SYMBOL(my_nid);
 
 const enum popcorn_arch my_arch =
@@ -64,6 +67,8 @@ const char *archs_sz[] = {
 	"riscv64",
 };
 
+#define TRANSFER_WITH_PCIE_AXI \
+		pcn_kmsg_has_features(PCN_KMSG_FEATURE_PCIE_AXI)
 
 void broadcast_my_node_info(int nr_nodes)
 {
@@ -76,14 +81,22 @@ void broadcast_my_node_info(int nr_nodes)
 		if (i == my_nid) continue;
 		pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, i, &info, sizeof(info));
 	}
+	else {
+		   for (i = 0; i < nr_nodes; i++) {
+			 if (i == my_nid) continue;
+			 pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, i, &info, sizeof(info));
+		}
+	}
+	
 }
 EXPORT_SYMBOL(broadcast_my_node_info);
 
 static bool my_node_info_printed = false;
 
-static int handle_node_info(struct pcn_kmsg_message *msg)
+static void process_node_info(struct work_struct *work)
 {
-	node_info_t *info = (node_info_t *)msg;
+	//node_info_t *info = (node_info_t *)msg;
+	START_KMSG_WORK(node_info_t, info, work);
 
 	if (my_nid != -1 && !my_node_info_printed) {
 		popcorn_nodes[my_nid].arch = my_arch;
@@ -92,11 +105,27 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 
 	PCNPRINTK("   %d joined, %s\n", info->nid, archs_sz[info->arch]);
 	popcorn_nodes[info->nid].arch = info->arch;
+	
 	smp_mb();
+	END_KMSG_WORK(info);
 
-	pcn_kmsg_done(msg);
-	return 0;
+	if(TRANSFER_WITH_PCIE_AXI){
+		set_popcorn_node_online(info->nid, "true");
+		if(my_nid == origin_nid) {
+			node_info_t org_info = {
+				.nid = my_nid,
+				.arch = my_arch,
+			};
+			pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, remote_nid, &org_info, sizeof(org_info));
+		}
+		else {
+			PCNPRINTK("This is the remote node\n");
+		}
+	}
+
 }
+
+DEFINE_KMSG_WQ_HANDLER(node_info);
 
 int __init popcorn_nodes_init(void)
 {
@@ -111,7 +140,7 @@ int __init popcorn_nodes_init(void)
 		pn->bundle_id = -1;
 	}
 
-	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_NODE_INFO, node_info);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_NODE_INFO, node_info);
 
 	return 0;
 }

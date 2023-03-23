@@ -63,6 +63,12 @@ enum pcn_kmsg_type {
 
 	/* Schedule server */
 	PCN_KMSG_TYPE_SCHED_PERIODIC,		/* XXX sched requires help!! */
+
+	/* PCIE-AXI Functions */
+	PCN_KMSG_TYPE_PCIE_AXI_REMOTE_PAGE_REQUEST,
+	PCN_KMSG_TYPE_PCIE_AXI_INVALIDATE_REQUEST,
+	PCN_KMSG_TYPE_PROT_PROC_REQUEST,
+	
 	PCN_KMSG_TYPE_MAX
 };
 
@@ -145,6 +151,11 @@ void pcn_kmsg_put(void *msg);
 void pcn_kmsg_process(struct pcn_kmsg_message *msg);
 
 /**
+ * Process the received message @msg for PCIE-AXI. 
+ */
+void pcn_kmsg_pcie_axi_process(enum pcn_kmsg_type type,void *msg);
+
+/**
  * Return received message @msg after handling to recyle it. @msg becomes
  * unavailable after the call. Make sure return received messages otherwise
  * the message layer will panick.
@@ -156,12 +167,26 @@ void pcn_kmsg_done(void *msg);
  */
 void pcn_kmsg_stat(struct seq_file *seq, void *v);
 
+/**
+ * Return the message type
+ */
+int check_msg_type(struct pcn_kmsg_message *msg);
+
+
+void pcn_kmsg_sample(enum pcn_kmsg_type type, void *req_msg, size_t size);
 
 struct pcn_kmsg_rdma_handle {
 	u32 rkey;
 	void *addr;
 	dma_addr_t dma_addr;
 	void *private;
+};
+
+struct pcn_kmsg_pcie_axi_handle {
+	void *addr;
+	dma_addr_t dma_addr;
+	void *private;
+	int flags;
 };
 
 /**
@@ -175,9 +200,22 @@ int pcn_kmsg_rdma_write(int dest_nid, dma_addr_t rdma_addr, void *addr, size_t s
 
 int pcn_kmsg_rdma_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size, u32 rdma_key);
 
+/**
+ *  PCIE_AXI Features
+ */
+
+struct pcn_kmsg_pcie_axi_handle *pcn_kmsg_pin_pcie_axi_buffer(void *buffer, size_t size);
+
+void pcn_kmsg_unpin_pcie_axi_buffer(struct pcn_kmsg_pcie_axi_handle *handle);
+
+int pcn_kmsg_pcie_axi_write(int dest_nid, dma_addr_t raddr, void *addr, size_t size);
+
+int pcn_kmsg_pcie_axi_read(int from_nid, void *addr, dma_addr_t raddr, size_t size);
+
 /* TRANSPORT DESCRIPTOR */
 enum {
 	PCN_KMSG_FEATURE_RDMA = 1,
+	PCN_KMSG_FEATURE_PCIE_AXI = 2,
 };
 
 /**
@@ -203,6 +241,11 @@ struct pcn_kmsg_transport {
 	void (*unpin_rdma_buffer)(struct pcn_kmsg_rdma_handle *);
 	int (*rdma_write)(int, dma_addr_t, void *, size_t, u32);
 	int (*rdma_read)(int, void *, dma_addr_t, size_t, u32);
+
+	struct pcn_kmsg_pcie_axi_handle *(*pin_pcie_axi_buffer)(void *, size_t);
+	void (*unpin_pcie_axi_buffer)(struct pcn_kmsg_pcie_axi_handle *);
+	int (*pcie_axi_write)(int, dma_addr_t, void *, size_t);
+	int (*pcie_axi_read)(int, void *, dma_addr_t, size_t);
 };
 
 void pcn_kmsg_set_transport(struct pcn_kmsg_transport *tr);
