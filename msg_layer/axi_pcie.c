@@ -1,3 +1,4 @@
+/*Restore to this commit c4d049a74951ae025c36dbfa0e3ffc3b9c5db543 if something goes wrong*/
 /**
  * @file axi_dma.c
  * @date Saturday, November 14, 2015 at 11:20:00 AM EST
@@ -243,7 +244,7 @@ struct axidma_device {
 //struct device_node *x86_host, *prot_proc, *parent;
 //struct resource res1, res2;
 //unsigned long long x86_host_base_addr, prot_proc_base_addr;
-static void *base_addr;
+static void volatile *base_addr;
 static dma_addr_t base_dma;
 struct device_node *x86_host, *prot_proc, *parent;
 struct resource res1, res2;
@@ -741,7 +742,8 @@ static void __exit axidma_exit(void)
     iounmap(x86_host_addr);
     iounmap(prot_proc_addr);
 
-    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+    //dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+    kfree(base_addr);
 
     while (send_work_pool) {
         struct send_work *work = send_work_pool;
@@ -834,9 +836,16 @@ static int __init axidma_init(void)
 
     pdev = of_find_device_by_node(x86_host);
     //ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
+    /*
     dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
+    */
+
+    base_addr = kzalloc(SZ_2M, GFP_KERNEL);
+    if(!base_addr){
+        goto out_free;
+    }
+
     printk("base_addr=%llx\n",base_addr);
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
