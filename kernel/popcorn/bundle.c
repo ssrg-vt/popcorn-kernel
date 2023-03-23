@@ -77,9 +77,16 @@ void broadcast_my_node_info(int nr_nodes)
 		.nid = my_nid,
 		.arch = my_arch,
 	};
-	for (i = 0; i < nr_nodes; i++) {
-		if (i == my_nid) continue;
-		pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, i, &info, sizeof(info));
+
+	if(TRANSFER_WITH_PCIE_AXI){
+		if(!my_nid)	{
+			PCNPRINTK("This is the origin node\n");
+			return;
+		}
+		else {
+			pcn_kmsg_send(PCN_KMSG_TYPE_NODE_INFO, origin_nid, &info, sizeof(info));
+			return;
+		}
 	}
 	else {
 		   for (i = 0; i < nr_nodes; i++) {
