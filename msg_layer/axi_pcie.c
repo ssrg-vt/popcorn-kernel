@@ -235,7 +235,7 @@ struct axidma_device {
    // struct axidma_chan *channels;   // All available channels
    // struct list_head dmabuf_list;   // List of allocated DMA buffers
    // struct list_head external_dmabufs;  // Buffers allocated in other drivers
-    void __iomem *base_addr;
+   // void __iomem *base_addr;
 };
 
 //struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
