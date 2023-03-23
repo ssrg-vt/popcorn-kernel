@@ -832,18 +832,21 @@ static int __init axidma_init(void)
     set_popcorn_node_online(my_nid, true);
 
     pdev = of_find_device_by_node(x86_host);
+    ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
+    dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+    
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     printk("base_addr=%llx\n",base_addr);
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
-
+/*
 #ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
         if (!domain) goto out_free;
     
         ret = domain->ops->map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
 #endif
-  
+*/  
     /*
     if (__setup_ring_buffer())
         goto out_free;
