@@ -343,7 +343,7 @@ static int poll_dma(void* arg0)
         //printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
-
+        printk("Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
         if (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) { //possible performance improvement here!
             printk("In IF\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
@@ -354,17 +354,19 @@ static int poll_dma(void* arg0)
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
             //counter_rx = 0;
-           *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
             recv_queue->size += 1;
             if (recv_queue->size == recv_queue->nr_entries) {
                 recv_queue->size = 0;
             }
             process_message(recv_index);
+
             printk("Start of pcn message\n");
             for(i=0;i<(FDSM_MSG_SIZE/8); i++){
                 printk("%llx\n",*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
             }
             printk("End of pcn message\n");
+
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
         } else if (h2c_desc_complete != 0) {
             printk("In ELSE-IF\n");
             no_of_messages += 1;
@@ -635,9 +637,10 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     for(i = 0; i<(size/8)+1; i++){
         printk("Data = %llx\n", *(u64 *)((work->addr)+(i*8)));
     }
+    /*
     for(i = 0; i<size; i++){
         printk("Data1 = %lx\n", *(u8 *)((work->addr)+i));
-    }
+    }*/
     printk("Size of msg = %d\n", size);
     work->done = &done;
     printk("After work->done = &done\n");
@@ -670,15 +673,13 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     spin_unlock(&pcie_axi_lock);
     printk("After spinunlock\n");
     printk("ARM nid = %d\n", msg->header.from_nid);
-    node_info_t *info = (node_info_t *)msg;
-    printk("ARMs nid from nid_info=%d\n", info->nid);
-    
+    /*
     printk("Start of pcn message\n");
     for(i=0;i<((FDSM_MSG_SIZE/8)); i++){
          printk("%llx", *(u64 *)((work->addr)+(i*8)));
     }
     printk("End of pcn message\n");
-    printk("The msessage is %llx\n", *(uint64_t *)msg);
+    */
     h2c_desc_complete = 1;
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
