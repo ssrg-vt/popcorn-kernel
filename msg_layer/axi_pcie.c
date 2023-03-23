@@ -56,7 +56,7 @@ static unsigned long *c2h_poll_addr;
 static unsigned long *h2c_poll_addr;
 static dma_addr_t c2h_poll_bus;
 static dma_addr_t h2c_poll_bus;
-static void *base_addr; 
+static void volatile *base_addr; 
 static dma_addr_t base_dma;
 
 static struct iommu_domain *domain; 
@@ -235,7 +235,7 @@ struct axidma_device {
    // struct axidma_chan *channels;   // All available channels
    // struct list_head dmabuf_list;   // List of allocated DMA buffers
    // struct list_head external_dmabufs;  // Buffers allocated in other drivers
-   // void __iomem *base_addr;
+    void __iomem *base_addr;
 };
 
 //struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
@@ -244,8 +244,8 @@ struct axidma_device {
 //struct device_node *x86_host, *prot_proc, *parent;
 //struct resource res1, res2;
 //unsigned long long x86_host_base_addr, prot_proc_base_addr;
-static void volatile *base_addr;
-static dma_addr_t base_dma;
+//static void volatile *base_addr;
+//static dma_addr_t base_dma;
 struct device_node *x86_host, *prot_proc, *parent;
 struct resource res1, res2;
 unsigned long long x86_host_base_addr, prot_proc_base_addr;
