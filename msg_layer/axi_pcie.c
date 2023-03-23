@@ -338,9 +338,10 @@ static int poll_dma(void* arg0)
     int recv_index = 0, index = 0, tmp = 0;
 
     tmp = __get_recv_index(recv_queue);
-    printk("In poll, the addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
-    printk("In poll, the addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1023*8)));
-    printk("Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
+    printk("In poll, the first addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
+    printk("In poll, the last addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1023*8)));
+    printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[tmp]->addr));
+    printk("Last Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
     while (!kthread_freezable_should_stop(&was_frozen)) {
         //printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
