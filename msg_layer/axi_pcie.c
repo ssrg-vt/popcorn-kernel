@@ -328,7 +328,7 @@ static int poll_dma(void* arg0)
 {   
     printk("In poll_dma\n");
     bool was_frozen;
-
+    int i;
     //struct xdma_poll_wb *poll_c2h_wb = (struct xdma_poll_wb *)c2h_poll_addr;
     //struct xdma_poll_wb *poll_h2c_wb = (struct xdma_poll_wb *)h2c_poll_addr;
     //int counter_rx = *c2h_poll_addr;
