@@ -542,7 +542,7 @@ out:
 //Rewrite this function and the poll handles -> poll_dma
 static int __start_poll(void)
 {   
-    poll_tsk = kthread_run(poll_dma, NULL, "Poll_Handler");
+    poll_tsk = kthread_run(&poll_dma, NULL, "Poll_Handler");
     if (IS_ERR(poll_tsk)) {
         PCNPRINTK("Error Instantiating Polling Handler\n");
         return 1;
@@ -838,27 +838,28 @@ static int __init axidma_init(void)
     pdev = of_find_device_by_node(x86_host);
     //ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
     
-    /*
-    dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-    base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
-    */
     
+    //dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+    base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
+    
+    /*
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
     if(!base_addr){
         goto out_free;
     }
-    
+    */
     printk("base_addr=%llx\n",base_addr);
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
-/*
-#ifdef CONFIG_ARM64 
+
+//#ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
         if (!domain) goto out_free;
     
-        ret = domain->ops->map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
-#endif
-*/  
+        ret = iommu_map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
+        if (ret) goto out_free;
+//#endif
+  
     /*
     if (__setup_ring_buffer())
         goto out_free;
