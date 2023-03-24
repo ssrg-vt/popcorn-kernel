@@ -38,6 +38,9 @@
 #include <linux/of_device.h>
 #include <linux/io.h>
 
+#include <linux/rcupdate.h>
+#include <linux/rculist.h>
+
 #include "common.h"
 #include "ring_buffer.h"
 
@@ -347,6 +350,7 @@ static int poll_dma(void* arg0)
     printk("Last Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
     //while (!kthread_freezable_should_stop(&was_frozen)) {
     while(!kthread_should_stop()){
+        rcu_read_lock();
         //printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
@@ -383,6 +387,8 @@ static int poll_dma(void* arg0)
             h2c_desc_complete = 0;
             printk("Data found in poll from ELSE IF = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
         }
+        rcu_read_lock();
+        msleep_interruptible(1);
     }
 
     return 0;
@@ -841,7 +847,7 @@ static int __init axidma_init(void)
     //ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
     
     
-    //dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+    dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     
     /*
