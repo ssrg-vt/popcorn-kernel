@@ -740,14 +740,17 @@ static void __exit axidma_exit(void)
     /* Detach from messaging layer to avoid race conditions */
 
     pcn_kmsg_set_transport(NULL);
-    set_popcorn_node_online(nid, false);
+    of_node_put(x86_host);
+    of_node_put(prot_proc);
 
     iounmap(x86_host_addr);
     iounmap(prot_proc_addr);
 
-    //dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
-    kfree(base_addr);
+    set_popcorn_node_online(nid, false);
 
+    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+    //kfree(base_addr);
+    /*
     while (send_work_pool) {
         struct send_work *work = send_work_pool;
         send_work_pool = work->next;
@@ -755,28 +758,27 @@ static void __exit axidma_exit(void)
     }
     
     ring_buffer_destroy(&pcie_axi_send_buff);
+    */
+    destroy_workqueue(wq);
 
     if (send_queue)
         free_queue(send_queue);
     
     if (recv_queue)
         free_queue_r(recv_queue);
-
+    /*
     while (pcie_axi_work_pool) {
         struct pcie_axi_work *xw = pcie_axi_work_pool;
         pcie_axi_work_pool = xw->next;
         kfree(xw);
     }
-
-    destroy_workqueue(wq);
-
-    
-    dma_free_coherent(&pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
-    dma_free_coherent(&pdev->dev, 8, h2c_poll_addr, h2c_poll_bus);
-
+    */
+    //dma_free_coherent(&pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
+    //dma_free_coherent(&pdev->dev, 8, h2c_poll_addr, h2c_poll_bus);
+    /*
     if (tsk) {
         wake_up_process(tsk);
-    }
+    }*/
 
     if (poll_tsk) {
         kthread_stop(poll_tsk);
@@ -808,7 +810,6 @@ static int __init axidma_init(void)
             if(!x86_host_addr)
                 ret = -ENOMEM;
         }
-        of_node_put(x86_host);
     }
 
     // Find the "protocol_processor_v_2" child node
@@ -821,7 +822,6 @@ static int __init axidma_init(void)
             if(!prot_proc_addr)
                 ret = -ENOMEM;
         }
-        of_node_put(prot_proc);
     }
     /*
     writeq(0x1234567812345678, x86_host_addr);
@@ -842,14 +842,14 @@ static int __init axidma_init(void)
     
     
     //dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-    //base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
+    base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     
-    
+    /*
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
     if(!base_addr){
         goto out_free;
     }
-
+    */
     printk("base_addr=%llx\n",base_addr);
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
@@ -889,8 +889,8 @@ static int __init axidma_init(void)
 
     //Allocate 8byte of memory for the counter where c2h_poll_bus and h2c_poll_bus are the 
     //address of the counters. 
-    c2h_poll_addr = dma_alloc_coherent(&pdev->dev, 8, &c2h_poll_bus, GFP_KERNEL);
-    h2c_poll_addr = dma_alloc_coherent(&pdev->dev, 8, &h2c_poll_bus, GFP_KERNEL);
+    //c2h_poll_addr = dma_alloc_coherent(&pdev->dev, 8, &c2h_poll_bus, GFP_KERNEL);
+    //h2c_poll_addr = dma_alloc_coherent(&pdev->dev, 8, &h2c_poll_bus, GFP_KERNEL);
 /*
 #ifdef CONFIG_ARM64
         ret = domain->ops->map(domain, (unsigned long)h2c_poll_bus, virt_to_phys(h2c_poll_addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
