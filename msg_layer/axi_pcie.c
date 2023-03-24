@@ -343,7 +343,8 @@ static int poll_dma(void* arg0)
     printk("In poll, the last addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1023*8)));
     printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[tmp]->addr));
     printk("Last Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
-    while (!kthread_freezable_should_stop(&was_frozen)) {
+    //while (!kthread_freezable_should_stop(&was_frozen)) {
+    while(!kthread_should_stop()){
         //printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
@@ -498,7 +499,7 @@ static queue_t* __setup_send_queue(int entries)
         send_q->work_list[i]->addr = base_addr + FDSM_MSG_SIZE * base_index;//FDSM_MSG_SIZE = 8192
         send_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
-        radix_tree_insert(&send_tree, send_q->work_list[i]->addr, send_q->work_list[i]->addr);//send_q->work_list[i]->dma_addr); Inserting the msg as key and storing the address. 
+        radix_tree_insert(&send_tree, send_q->work_list[i]->addr, virt_to_phys(send_q->work_list[i]->addr));//send_q->work_list[i]->dma_addr); Inserting the msg as key and storing the address. 
     }
 
     return send_q;
