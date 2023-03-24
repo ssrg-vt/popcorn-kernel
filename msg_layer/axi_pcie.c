@@ -235,7 +235,7 @@ struct axidma_device {
    // struct axidma_chan *channels;   // All available channels
    // struct list_head dmabuf_list;   // List of allocated DMA buffers
    // struct list_head external_dmabufs;  // Buffers allocated in other drivers
-    void __iomem *base_addr;
+   // void __iomem *base_addr;
 };
 
 //struct axidma_device *axidma_dev, *x86_bus, *prot_proc_bus;
@@ -837,16 +837,17 @@ static int __init axidma_init(void)
 
     pdev = of_find_device_by_node(x86_host);
     //ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
+    
     /*
     dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     */
-
+    
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
     if(!base_addr){
         goto out_free;
     }
-
+    
     printk("base_addr=%llx\n",base_addr);
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
