@@ -56,7 +56,7 @@ static unsigned long *c2h_poll_addr;
 static unsigned long *h2c_poll_addr;
 static dma_addr_t c2h_poll_bus;
 static dma_addr_t h2c_poll_bus;
-static void volatile *base_addr; 
+static void *base_addr; 
 static dma_addr_t base_dma;
 
 static struct iommu_domain *domain; 
@@ -745,8 +745,8 @@ static void __exit axidma_exit(void)
     iounmap(x86_host_addr);
     iounmap(prot_proc_addr);
 
-    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
-    //kfree(base_addr);
+    //dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+    kfree(base_addr);
 
     while (send_work_pool) {
         struct send_work *work = send_work_pool;
@@ -842,25 +842,25 @@ static int __init axidma_init(void)
     
     
     //dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-    base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
+    //base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     
-    /*
+    
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
     if(!base_addr){
         goto out_free;
     }
-    */
+
     printk("base_addr=%llx\n",base_addr);
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
 
-//#ifdef CONFIG_ARM64 
+/*#ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
         if (!domain) goto out_free;
     
         ret = iommu_map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
         if (ret) goto out_free;
-//#endif
+#endif*/
   
     /*
     if (__setup_ring_buffer())
