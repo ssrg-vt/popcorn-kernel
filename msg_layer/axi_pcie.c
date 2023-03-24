@@ -745,8 +745,8 @@ static void __exit axidma_exit(void)
     iounmap(x86_host_addr);
     iounmap(prot_proc_addr);
 
-    //dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
-    kfree(base_addr);
+    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+    //kfree(base_addr);
 
     while (send_work_pool) {
         struct send_work *work = send_work_pool;
