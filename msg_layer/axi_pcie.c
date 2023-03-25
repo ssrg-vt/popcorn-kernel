@@ -285,7 +285,7 @@ static void __update_recv_index(queue_tr *q, int i)
     //dma_addr = q->work_list[i]->dma_addr;
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     //writeq(virt_to_phys(q->work_list[i]->addr), x86_host_addr); //Update the physical address with next sector address of recv Q
-    writeq(virt_to_phys(q->work_list[i]->dma), x86_host_addr); //Update the physical address with next sector address of recv Q
+    writeq(virt_to_phys(q->work_list[i]->addr), x86_host_addr); //Update the physical address with next sector address of recv Q
     printk("Receive Q addr = %llx\n", virt_to_phys(q->work_list[i]->addr));
     //printk("Receive Q addr = %llx\n", virt_to_phys(q->work_list[i]->addr));
     //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, FROM_DEVICE, KMSG);//Update new receive address in RQ/RC IP
