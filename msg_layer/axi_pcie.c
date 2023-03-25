@@ -356,8 +356,9 @@ static int poll_dma(void* arg0)
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
         //printk("Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
-        if (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) { //possible performance improvement here!
-            printk("New data in recv Q.\n");
+        if ((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) == 0xd010d010) || 
+            (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010)) { //possible performance improvement here!
+            //printk("New data in recv Q.\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
             index = __get_recv_index(recv_queue);
@@ -371,16 +372,17 @@ static int poll_dma(void* arg0)
                 recv_queue->size = 0;
             }
             process_message(recv_index);
-            
+            /*
             printk("Start of pcn message\n");
             for(i=0;i<(FDSM_MSG_SIZE/8); i++){
                 printk("%llx\n",*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
             }
-            printk("End of pcn message\n");
-            printk("Processed popcorn message.\n");
+            printk("End of pcn message\n");*/
+            //printk("Processed popcorn message.\n");
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
         } else if (h2c_desc_complete != 0) {
-            printk("Sent data to remote.\n");
+            //printk("Sent data to remote.\n");
             no_of_messages += 1;
             //write_register(0x00, (u32 *)(xdma_c + h2c_ctl));
             //write_register(0x06, (u32 *)(xdma_c + h2c_ch));
@@ -538,7 +540,7 @@ static __init queue_tr* __setup_recv_buffer(int entries)
         recv_q->work_list[i]->addr = base_addr +  FDSM_MSG_SIZE * base_index;
         recv_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
-        printk("Recv Q addr=%llx\n",virt_to_phys(recv_q->work_list[i]->addr));
+        //printk("Recv Q addr=%llx\n",virt_to_phys(recv_q->work_list[i]->addr));
     }
     __update_recv_index(recv_q, 0);
     return recv_q;
