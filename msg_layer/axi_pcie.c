@@ -389,7 +389,7 @@ static int poll_dma(void* arg0)
             //printk("Data found in poll from ELSE IF = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
         }
         rcu_read_lock();
-        //msleep_interruptible(1);
+        msleep_interruptible(1);
     }
 
     return 0;
