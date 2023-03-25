@@ -370,13 +370,13 @@ static int poll_dma(void* arg0)
                 recv_queue->size = 0;
             }
             process_message(recv_index);
-
+            /*
             printk("Start of pcn message\n");
             for(i=0;i<(FDSM_MSG_SIZE/8); i++){
                 printk("%llx\n",*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
             }
-            printk("End of pcn message\n");
-
+            printk("End of pcn message\n");*/
+            printk("Processed popcorn message.\n");
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
         } else if (h2c_desc_complete != 0) {
             printk("In ELSE-IF\n");
@@ -507,7 +507,7 @@ static queue_t* __setup_send_queue(int entries)
         send_q->work_list[i]->addr = base_addr + FDSM_MSG_SIZE * base_index;//FDSM_MSG_SIZE = 8192
         send_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
-        radix_tree_insert(&send_tree, send_q->work_list[i]->addr, virt_to_phys(send_q->work_list[i]->addr));//send_q->work_list[i]->dma_addr); Inserting the msg as key and storing the address. 
+        radix_tree_insert(&send_tree, send_q->work_list[i]->addr, send_q->work_list[i]->addr);//send_q->work_list[i]->dma_addr); Inserting the msg as key and storing the address. 
     }
 
     return send_q;
@@ -620,8 +620,8 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
         //ret = pcie_axi_transfer(TO_DEVICE);
         //get the recv buffer addr and write data there.
-        writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
-        writeq(virt_to_phys(dma_addr_pntr), x86_host_addr);
+        //writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
+        //writeq(dma_addr_pntr, x86_host_addr);
         for(i=0; i<(FDSM_MSG_SIZE/8)-1; i++){
             writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
