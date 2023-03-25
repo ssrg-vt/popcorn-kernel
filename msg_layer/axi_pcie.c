@@ -642,29 +642,30 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     void __iomem *mapped_addr;
     u64 *dma_addr_pntr;
     DECLARE_COMPLETION_ONSTACK(done);
-    printk("After STACK\n");
+    //printk("After STACK\n");
 
     work = __get_send_work(send_queue->tail);
-    printk("After getting work\n");
+    //printk("After getting work\n");
 
     memcpy(work->addr, msg, size);
-    printk("memcpy\n");
+    //printk("memcpy\n");
+    /*
     for(i = 0; i<(size/8)+1; i++){
         printk("Data = %llx\n", *(u64 *)((work->addr)+(i*8)));
-    }
+    }*/
     /*
     for(i = 0; i<size; i++){
         printk("Data1 = %lx\n", *(u8 *)((work->addr)+i));
     }*/
-    printk("Size of msg = %d\n", size);
+    //printk("Size of msg = %d\n", size);
     work->done = &done;
-    printk("After work->done = &done\n");
+    //printk("After work->done = &done\n");
     spin_lock(&pcie_axi_lock);
-    printk("After spinlock\n");
+    //printk("After spinlock\n");
     //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
     //ret = pcie_axi_transfer(TO_DEVICE);
     dma_addr_pntr = work->addr; //dma_addr; DMA address cannot be mapped to CPU addr space and accessed with ioread/write. Hence using the VA.
-    printk("dma_addr_pntr = %llx\n", dma_addr_pntr);
+    //printk("dma_addr_pntr = %llx\n", dma_addr_pntr);
     /*
     mapped_addr = ioremap_nocache(dma_addr_pntr, FDSM_MSG_SIZE);
     if (!mapped_addr) {
@@ -686,8 +687,8 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
         }
     writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     spin_unlock(&pcie_axi_lock);
-    printk("After spinunlock\n");
-    printk("ARM nid = %d\n", msg->header.from_nid);
+    //printk("After spinunlock\n");
+    //printk("ARM nid = %d\n", msg->header.from_nid);
     /*
     printk("Start of pcn message\n");
     for(i=0;i<((FDSM_MSG_SIZE/8)); i++){
@@ -797,10 +798,11 @@ static void __exit axidma_exit(void)
 static int __init axidma_init(void)
 {
     int ret, size;
+    /*
     printk("Size info\n");
     printk("Size of int = %d\n", sizeof(int));
     printk("Size of size_t = %d\n", sizeof(size_t));
-
+    */
     PCNPRINTK("Initializing module over AXI\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
     PCNPRINTK("registered transport layer\n");
@@ -857,7 +859,7 @@ static int __init axidma_init(void)
         goto out_free;
     }
     */
-    printk("base_addr=%llx\n",base_addr);
+    //printk("base_addr=%llx\n",base_addr);
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
 
@@ -917,7 +919,7 @@ static int __init axidma_init(void)
     if (__start_poll()) 
         goto out_free;
 
-    printk("Before broadcasting node ID.\n");
+    //printk("Before broadcasting node ID.\n");
     broadcast_my_node_info(2);
     PCNPRINTK("... Ready on AXI ... \n");
 
