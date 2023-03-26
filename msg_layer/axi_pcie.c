@@ -357,6 +357,7 @@ static int poll_dma(void* arg0)
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
         //printk("Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
         dma_sync_single_for_cpu(&pdev->dev, base_dma, SZ_2M, DMA_FROM_DEVICE);
+        printk("Synced DMA memory\n");
         if ((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) == 0xd010d010) || (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010)) { //possible performance improvement here!
             //printk("New data in recv Q.\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
