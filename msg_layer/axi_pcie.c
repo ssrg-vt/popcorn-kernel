@@ -345,17 +345,19 @@ static int poll_dma(void* arg0)
     int recv_index = 0, index = 0, tmp = 0;
 
     tmp = __get_recv_index(recv_queue);
-    //printk("In poll, the first addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
-    //printk("In poll, the last addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1023*8)));
-    //printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[tmp]->addr));
-    //printk("Last Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
+    printk("In poll, the first addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
+    printk("In poll, the last addr0 is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1022*8)));
+    printk("In poll, the last addr1 is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1023*8)));
+    printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[tmp]->addr));
+    printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)));
+    printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
     while (!kthread_freezable_should_stop(&was_frozen)) {
     //while(!kthread_should_stop()){
         rcu_read_lock();
         //printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
-        printk("Data found in poll = %llx\n", *((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))));
+        //printk("Data found in poll = %llx\n", *((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))));
         dma_sync_single_for_cpu(&pdev->dev, base_dma, SZ_2M, DMA_FROM_DEVICE);
         //printk("Synced DMA memory\n");
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
@@ -867,13 +869,13 @@ static int __init axidma_init(void)
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
 
-/*#ifdef CONFIG_ARM64 
+//#ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
         if (!domain) goto out_free;
     
         ret = iommu_map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
         if (ret) goto out_free;
-#endif*/
+#endif//
   
     /*
     if (__setup_ring_buffer())
