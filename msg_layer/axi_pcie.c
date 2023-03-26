@@ -335,7 +335,7 @@ static struct send_work *__get_send_work(int index)
 static int poll_dma(void* arg0)
 {   
     printk("In poll_dma\n");
-    bool was_frozen;
+    bool was_frozen, check = false;
     int i;
     //struct xdma_poll_wb *poll_c2h_wb = (struct xdma_poll_wb *)c2h_poll_addr;
     //struct xdma_poll_wb *poll_h2c_wb = (struct xdma_poll_wb *)h2c_poll_addr;
@@ -359,7 +359,15 @@ static int poll_dma(void* arg0)
         //printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
-        //printk("Data found in poll = %llx\n", *((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))));
+        if(!check){
+            printk("Polling address0 = %lls\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
+            printk("Polling address1 =  %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1022*8)));
+            printk("Polling address2 =  %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1023*8)));
+            printk("Data0 found in poll = %llx\n", *((uint64_t *)(recv_queue->work_list[tmp]->addr+(0*8))));
+            printk("Data1 found in poll = %llx\n", *((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))));
+            printk("Data2 found in poll = %llx\n", *((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))));
+            check = true;
+        }
         //dma_sync_single_for_cpu(&pdev->dev, base_dma, SZ_2M, DMA_FROM_DEVICE);
         //printk("Synced DMA memory\n");
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
@@ -371,7 +379,8 @@ static int poll_dma(void* arg0)
             printk("index=%d\n",index);
             tmp = index+1;
             printk("tmp=%d\n", tmp);
-            
+            check = false;
+
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
             //counter_rx = 0;
