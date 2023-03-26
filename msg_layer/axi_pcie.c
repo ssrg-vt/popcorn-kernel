@@ -301,7 +301,8 @@ static int __get_recv_index(queue_tr *q)
 /* Call popcorn messaging interface process() function */
 
 void process_message(int recv_i)
-{
+{   
+    printk("In process_message\n");
     struct pcn_kmsg_message *msg;
     msg = recv_queue->work_list[recv_i]->addr;
     pcn_kmsg_process(msg);
@@ -543,7 +544,7 @@ static __init queue_tr* __setup_recv_buffer(int entries)
         recv_q->work_list[i]->addr = base_addr +  FDSM_MSG_SIZE * base_index;
         recv_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
-        //printk("Recv Q addr=%llx\n",virt_to_phys(recv_q->work_list[i]->addr));
+        printk("Recv Q addr=%llx\n",virt_to_phys(recv_q->work_list[i]->addr));
     }
     __update_recv_index(recv_q, 0);
     return recv_q;
