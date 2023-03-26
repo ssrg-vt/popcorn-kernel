@@ -349,13 +349,14 @@ static int poll_dma(void* arg0)
     //printk("In poll, the last addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1023*8)));
     //printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[tmp]->addr));
     //printk("Last Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
-    //while (!kthread_freezable_should_stop(&was_frozen)) {
-    while(!kthread_should_stop()){
+    while (!kthread_freezable_should_stop(&was_frozen)) {
+    //while(!kthread_should_stop()){
         //rcu_read_lock();
         //printk("polling...");
         //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
         //printk("Data found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
+        dma_sync_single_for_cpu(&pdev->dev, base_dma, SZ_2M, DMA_FROM_DEVICE);
         if ((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) == 0xd010d010) || (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010)) { //possible performance improvement here!
             //printk("New data in recv Q.\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
