@@ -367,6 +367,7 @@ static int poll_dma(void* arg0)
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
+            tmp = index;
             
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
