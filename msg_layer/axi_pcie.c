@@ -875,7 +875,7 @@ static int __init axidma_init(void)
     
         ret = iommu_map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
         if (ret) goto out_free;
-#endif//
+//#endif
   
     /*
     if (__setup_ring_buffer())
