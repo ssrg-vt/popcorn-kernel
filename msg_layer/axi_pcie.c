@@ -344,7 +344,7 @@ static int poll_dma(void* arg0)
     //u32 c2h_desc_complete = 0;
     //u32 h2c_desc_complete = 0;
     int recv_index = 0, index = 0, tmp = 0;
-
+    printk("tmp=%d\n",tmp);
     tmp = __get_recv_index(recv_queue);
     printk("In poll, the first addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
     printk("In poll, the last addr0 is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1022*8)));
@@ -352,6 +352,7 @@ static int poll_dma(void* arg0)
     printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[tmp]->addr));
     printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)));
     printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
+    printk("tmp=%d\n",tmp);
     while (!kthread_freezable_should_stop(&was_frozen)) {
     //while(!kthread_should_stop()){
         rcu_read_lock();
@@ -367,7 +368,9 @@ static int poll_dma(void* arg0)
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
-            tmp = index;
+            printk("index=%d\n",index);
+            tmp = index+1;
+            printk("tmp=%d\n", tmp);
             
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
