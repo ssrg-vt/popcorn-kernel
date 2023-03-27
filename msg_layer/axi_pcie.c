@@ -883,7 +883,7 @@ static int __init axidma_init(void)
     }
     printk("Before getting domain\n");
     if (&pdev->dev->iommu_group) {
-         base_addr = iommu_map(dev->iommu_group, base_dma, SZ_2M, DMA_TO_DEVICE);
+         base_addr = iommu_map(&pdev->dev.iommu_group, base_dma, SZ_2M, DMA_TO_DEVICE);
         if (!dma_buffer) {
             dev_err(dev, "Failed to map DMA buffer with IOMMU\n");
             dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
