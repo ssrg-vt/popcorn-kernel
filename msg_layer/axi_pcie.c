@@ -249,10 +249,10 @@ struct axidma_device {
 //unsigned long long x86_host_base_addr, prot_proc_base_addr;
 //static void volatile *base_addr;
 //static dma_addr_t base_dma;
-struct device_node *x86_host, *prot_proc, *parent;
-struct resource res1, res2;
-unsigned long long x86_host_base_addr, prot_proc_base_addr;
-struct platform_device *pdev;
+static struct device_node *x86_host, *prot_proc, *parent;
+static struct resource res1, res2;
+static unsigned long long x86_host_base_addr, prot_proc_base_addr;
+static struct platform_device *pdev;
 
 const unsigned int rb_alloc_header_magic = 0xbad7face;
 
@@ -267,7 +267,7 @@ static struct send_work *send_work_pool = NULL;
 
 static queue_t *send_queue;
 static queue_tr *recv_queue;
-static void *iova;
+static dma_addr_t dma_handle;
 
 static struct pcie_axi_work *pcie_axi_work_pool = NULL;
 
@@ -765,7 +765,8 @@ static void __exit axidma_exit(void)
     set_popcorn_node_online(nid, false);
 
     dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
-    iommu_unmap(&pdev->dev->iommu_domain, iova, SZ_2M);
+    dma_unmap_single(&pdev->dev, dma_handle, SZ_2M, DMA_BIDIRECTIONAL);
+    //iommu_unmap(&pdev->dev->iommu_domain, iova, SZ_2M);
     //kfree(base_addr);
     /*
     while (send_work_pool) {
@@ -858,18 +859,19 @@ static int __init axidma_init(void)
     pdev = of_find_device_by_node(x86_host);
     //ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
     
-    //dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+    dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     if(!base_addr){
         goto out_free;
     }
     
-    iova = iommu_map(&pdev->dev->iommu_domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
-    if(!iova){
-        printk("Error");
-        goto out_free;
+    dma_handle = dma_map_single(&pdev->dev, base_addr, base_dma, DMA_BIDIRECTIONAL);
+    if (dma_mapping_error(&pdev->dev, dma_handle)) {
+        dev_err(&pdev->dev, "Failed to map DMA memory\n");
+        dma_free_coherent(&pdev->dev, size, data->dma_mem, data->dma_addr);
+        return -ENOMEM;
     }
-    
+
     /*
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
     if(!base_addr){
