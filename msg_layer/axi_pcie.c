@@ -343,7 +343,7 @@ static int poll_dma(void* arg0)
     //int counter_tx = *h2c_poll_addr;
     //u32 c2h_desc_complete = 0;
     //u32 h2c_desc_complete = 0;
-    int recv_index = 0, index = 0, tmp = 0;
+    int recv_index = 0, index = 0, tmp = -1;
     printk("tmp=%d\n",tmp);
     tmp = __get_recv_index(recv_queue);
     printk("In poll, the first addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
