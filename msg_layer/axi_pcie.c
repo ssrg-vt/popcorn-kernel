@@ -764,8 +764,8 @@ static void __exit axidma_exit(void)
 
     set_popcorn_node_online(nid, false);
 
-    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
     dma_unmap_single(&pdev->dev, dma_handle, SZ_2M, DMA_BIDIRECTIONAL);
+    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
     //iommu_unmap(&pdev->dev->iommu_domain, iova, SZ_2M);
     //kfree(base_addr);
     /*
@@ -868,8 +868,7 @@ static int __init axidma_init(void)
     dma_handle = dma_map_single(&pdev->dev, base_addr, base_dma, DMA_BIDIRECTIONAL);
     if (dma_mapping_error(&pdev->dev, dma_handle)) {
         dev_err(&pdev->dev, "Failed to map DMA memory\n");
-        dma_free_coherent(&pdev->dev, size, data->dma_mem, data->dma_addr);
-        return -ENOMEM;
+        goto out_free;
     }
 
     /*
