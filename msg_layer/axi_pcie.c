@@ -343,16 +343,15 @@ static int poll_dma(void* arg0)
     //int counter_tx = *h2c_poll_addr;
     //u32 c2h_desc_complete = 0;
     //u32 h2c_desc_complete = 0;
-    int recv_index = 0, index = 0, tmp = -1;
-    printk("tmp=%d\n",tmp);
-    tmp = __get_recv_index(recv_queue);
-    printk("In poll, the first addr is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)));
-    printk("In poll, the last addr0 is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1022*8)));
-    printk("In poll, the last addr1 is %llx\n", virt_to_phys((recv_queue->work_list[tmp]->addr)+(1023*8)));
-    printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[tmp]->addr));
-    printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)));
-    printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
-    printk("tmp=%d\n",tmp);
+    int recv_index = 0, index = 0;
+    
+    printk("In poll, the first addr is %llx\n", virt_to_phys((recv_queue->work_list[index]->addr)));
+    printk("In poll, the last addr0 is %llx\n", virt_to_phys((recv_queue->work_list[index]->addr)+(1022*8)));
+    printk("In poll, the last addr1 is %llx\n", virt_to_phys((recv_queue->work_list[index]->addr)+(1023*8)));
+    printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[index]->addr));
+    printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->addr)+(1022*8)));
+    printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)));
+    
     while (!kthread_freezable_should_stop(&was_frozen)) {
     //while(!kthread_should_stop()){
         rcu_read_lock();
@@ -361,15 +360,13 @@ static int poll_dma(void* arg0)
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
         //dma_sync_single_for_cpu(&pdev->dev, base_dma, SZ_2M, DMA_FROM_DEVICE);
         //printk("Synced DMA memory\n");
-        if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
+        if ((*((uint64_t *)(recv_queue->work_list[index]->addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[index]->addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
             //printk("New data in recv Q.\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
             printk("index=%d\n",index);
-            tmp = index+1;
-            printk("tmp=%d\n", tmp);
 
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
@@ -382,12 +379,12 @@ static int poll_dma(void* arg0)
             /*
             printk("Start of pcn message\n");
             for(i=0;i<(FDSM_MSG_SIZE/8); i++){
-                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
+                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[index]->addr)+(i*8)));
             }
             printk("End of pcn message\n");*/
             //printk("Processed popcorn message.\n");
-            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1022*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)) = 0x0;
         } else if (h2c_desc_complete != 0) {
             //printk("Sent data to remote.\n");
             no_of_messages += 1;
@@ -395,7 +392,7 @@ static int poll_dma(void* arg0)
             //write_register(0x06, (u32 *)(xdma_c + h2c_ch));
             //poll_h2c_wb->completed_desc_count = 0;
             h2c_desc_complete = 0;
-            //printk("Data found in poll from ELSE IF = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)));
+            //printk("Data found in poll from ELSE IF = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)));
         }
         rcu_read_lock();
         msleep_interruptible(10);
