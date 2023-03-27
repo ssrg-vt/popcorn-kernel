@@ -61,9 +61,7 @@ static dma_addr_t c2h_poll_bus;
 static dma_addr_t h2c_poll_bus;
 static void *base_addr; 
 static dma_addr_t base_dma;
-static  struct resource *res;
-static struct sg_table sg;
-static struct scatterlist *sglist;
+static dma_addr_t iommu_handle;
 
 static struct iommu_domain *domain; 
 
@@ -770,7 +768,6 @@ static void __exit axidma_exit(void)
 
     //dma_unmap_single(&pdev->dev, dma_handle, SZ_2M, DMA_BIDIRECTIONAL);
     //iommu_unmap(domain, base_dma, SZ_2M);
-    iommu_map(&pdev->dev->iommu_group, base_dma, SZ_2M);
     dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
     //iommu_unmap(&pdev->dev->iommu_domain, iova, SZ_2M);
     //kfree(base_addr);
@@ -873,27 +870,15 @@ static int __init axidma_init(void)
     if(!base_addr){
         goto out_free;
     }
-    printk("Before resource\n");
 
-    res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-    if (!res) {
-        dev_err(&pdev->dev, "Failed to get platform resource\n");
-        dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
-        return -EINVAL;
+    printk("Before map_single\n");
+    iommu_handle = dma_map_single(&pdev->dev, (void *)base_addr, SZ_2M, DMA_BIDIRECTIONAL);
+    if (dma_mapping_error(&pdev->dev, iommu_handle)) {
+        ret = -ENOMEM;
+        goto out_free;
     }
-    printk("Before getting domain\n");
-    if (&pdev->dev->iommu_group) {
-         base_addr = iommu_map(&pdev->dev.iommu_group, base_dma, SZ_2M, DMA_TO_DEVICE);
-        if (!dma_buffer) {
-            dev_err(dev, "Failed to map DMA buffer with IOMMU\n");
-            dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
-            return -ENOMEM;
-        }
-    }
-    printk("Before drvdata1\n");
-    dev_set_drvdata(&pdev->dev, base_addr);
-    printk("Before drvdata2\n");
-    dev_set_drvdata(&pdev->dev, (void *)base_dma);
+    base_dma = iommu_handle;
+    printk("After map_single\n");
     /*
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
     if(!base_addr){
