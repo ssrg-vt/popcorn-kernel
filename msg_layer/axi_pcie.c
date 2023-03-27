@@ -346,14 +346,14 @@ static int poll_dma(void* arg0)
     //u32 c2h_desc_complete = 0;
     //u32 h2c_desc_complete = 0;
     int recv_index = 0, index = -1;
-    
+    /*
     printk("In poll, the first addr is %llx\n", ((recv_queue->work_list[index+1]->addr)));
     printk("In poll, the last addr0 is %llx\n", ((recv_queue->work_list[index+1]->addr)+(1022*8)));
     printk("In poll, the last addr1 is %llx\n", ((recv_queue->work_list[index+1]->addr)+(1023*8)));
     printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[index+1]->addr));
     printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1022*8)));
     printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1023*8)));
-    
+    */
     while (!kthread_freezable_should_stop(&was_frozen)) {
     //while(!kthread_should_stop()){
         rcu_read_lock();
@@ -546,8 +546,8 @@ static __init queue_tr* __setup_recv_buffer(int entries)
         recv_q->work_list[i]->addr = base_addr +  FDSM_MSG_SIZE * base_index;
         recv_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
-        printk("Recv Q addr=%llx\n",virt_to_phys(recv_q->work_list[i]->addr));
-        printk("Recv Q dma_addr=%llx\n",recv_q->work_list[i]->dma_addr);
+        //printk("Recv Q addr=%llx\n",virt_to_phys(recv_q->work_list[i]->addr));
+        //printk("Recv Q dma_addr=%llx\n",recv_q->work_list[i]->dma_addr);
     }
     __update_recv_index(recv_q, 0);
     return recv_q;
@@ -621,6 +621,7 @@ void pcie_axi_kmsg_stat(struct seq_file *seq, void *v)
 
 int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
+    printk("In post\n");
     int ret, i;
     //dma_addr_t dma_addr, *dma_addr_pntr;
     u64 dma_addr, *dma_addr_pntr;
@@ -638,6 +639,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         }
         writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
         spin_unlock(&pcie_axi_lock);
+        printk("Data Sent\n");
         h2c_desc_complete = 1;
     } else {
         printk("DMA addr: not found\n");
@@ -646,7 +648,8 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 }
 
 int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
-{   printk("In pcie_axi_kmsg_send\n");
+{   
+    printk("In pcie_axi_kmsg_send\n");
     struct send_work *work;
     int ret, i;
     void __iomem *mapped_addr;
@@ -697,6 +700,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
         }
     writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     spin_unlock(&pcie_axi_lock);
+    printk("Message sent\n");
     //printk("After spinunlock\n");
     //printk("ARM nid = %d\n", msg->header.from_nid);
     /*
@@ -863,22 +867,22 @@ static int __init axidma_init(void)
     pdev = of_find_device_by_node(x86_host);
     //ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
     
-    printk("Before masking\n");
+    //printk("Before masking\n");
     dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-    printk("Before dma_alloc\n");
+    //printk("Before dma_alloc\n");
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     if(!base_addr){
         goto out_free;
     }
 
-    printk("Before map_single\n");
+    //printk("Before map_single\n");
     iommu_handle = dma_map_single(&pdev->dev, (void *)base_addr, SZ_2M, DMA_BIDIRECTIONAL);
     if (dma_mapping_error(&pdev->dev, iommu_handle)) {
         ret = -ENOMEM;
         goto out_free;
     }
     //base_dma = iommu_handle;
-    printk("After map_single\n");
+    //printk("After map_single\n");
     /*
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
     if(!base_addr){
@@ -896,7 +900,7 @@ static int __init axidma_init(void)
         ret = iommu_map(domain, base_dma, (unsigned long)base_addr, SZ_2M, IOMMU_READ | IOMMU_WRITE);
             if (ret) goto out_free;
 //#endif*/
-  printk("mapping done\n");
+  //printk("mapping done\n");
     /*
     if (__setup_ring_buffer())
         goto out_free;
