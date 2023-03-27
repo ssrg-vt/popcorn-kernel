@@ -347,12 +347,12 @@ static int poll_dma(void* arg0)
     //u32 h2c_desc_complete = 0;
     int recv_index = 0, index = -1;
     
-    printk("In poll, the first addr is %llx\n", ((recv_queue->work_list[index]->addr)));
-    printk("In poll, the last addr0 is %llx\n", ((recv_queue->work_list[index]->addr)+(1022*8)));
-    printk("In poll, the last addr1 is %llx\n", ((recv_queue->work_list[index]->addr)+(1023*8)));
-    printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[index]->addr));
-    printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->addr)+(1022*8)));
-    printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)));
+    printk("In poll, the first addr is %llx\n", ((recv_queue->work_list[index+1]->addr)));
+    printk("In poll, the last addr0 is %llx\n", ((recv_queue->work_list[index+1]->addr)+(1022*8)));
+    printk("In poll, the last addr1 is %llx\n", ((recv_queue->work_list[index+1]->addr)+(1023*8)));
+    printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[index+1]->addr));
+    printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1022*8)));
+    printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1023*8)));
     
     while (!kthread_freezable_should_stop(&was_frozen)) {
     //while(!kthread_should_stop()){
@@ -366,8 +366,13 @@ static int poll_dma(void* arg0)
             //printk("New data in recv Q.\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
-            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1022*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)) = 0x0;
+            printk("Start of pcn message\n");
+            for(i=0;i<(FDSM_MSG_SIZE/8); i++){
+                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[index]->addr)+(i*8)));
+            }
+            printk("End of pcn message\n");
+            *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1022*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1023*8)) = 0x0;
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
             printk("index=%d\n",index);
@@ -380,12 +385,6 @@ static int poll_dma(void* arg0)
                 recv_queue->size = 0;
             }
             process_message(recv_index);
-            
-            printk("Start of pcn message\n");
-            for(i=0;i<(FDSM_MSG_SIZE/8); i++){
-                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[index]->addr)+(i*8)));
-            }
-            printk("End of pcn message\n");
             //printk("Processed popcorn message.\n");
         } else if (h2c_desc_complete != 0) {
             //printk("Sent data to remote.\n");
