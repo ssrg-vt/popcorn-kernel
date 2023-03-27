@@ -285,9 +285,9 @@ static void __update_recv_index(queue_tr *q, int i)
     }
     //dma_addr = q->work_list[i]->dma_addr;
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
+    writeq(q->work_list[i]->dma_addr, x86_host_addr); //Update the physical address with next sector address of recv Q
     //writeq(virt_to_phys(q->work_list[i]->addr), x86_host_addr); //Update the physical address with next sector address of recv Q
-    writeq(virt_to_phys(q->work_list[i]->addr), x86_host_addr); //Update the physical address with next sector address of recv Q
-    printk("Receive Q addr = %llx\n", virt_to_phys(q->work_list[i]->addr));
+    printk("Receive Q addr = %llx\n", q->work_list[i]->dma_addr);
     //printk("Receive Q addr = %llx\n", virt_to_phys(q->work_list[i]->addr));
     //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, FROM_DEVICE, KMSG);//Update new receive address in RQ/RC IP
     //writeq(dma_addr, zynq_hw_addr+0x10+i);
@@ -764,7 +764,8 @@ static void __exit axidma_exit(void)
 
     set_popcorn_node_online(nid, false);
 
-    dma_unmap_single(&pdev->dev, dma_handle, SZ_2M, DMA_BIDIRECTIONAL);
+    //dma_unmap_single(&pdev->dev, dma_handle, SZ_2M, DMA_BIDIRECTIONAL);
+    iommu_unmap(domain, base_dma, SZ_2M);
     dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
     //iommu_unmap(&pdev->dev->iommu_domain, iova, SZ_2M);
     //kfree(base_addr);
@@ -859,17 +860,14 @@ static int __init axidma_init(void)
     pdev = of_find_device_by_node(x86_host);
     //ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
     
+    printk("Before masking\n");
     dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+    printk("Before dma_alloc\n");
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     if(!base_addr){
         goto out_free;
     }
-    
-    dma_handle = dma_map_single(&pdev->dev, base_addr, base_dma, DMA_BIDIRECTIONAL);
-    if (dma_mapping_error(&pdev->dev, dma_handle)) {
-        dev_err(&pdev->dev, "Failed to map DMA memory\n");
-        goto out_free;
-    }
+    printk("Before getting domain\n");
 
     /*
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
@@ -881,14 +879,14 @@ static int __init axidma_init(void)
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
 
-/*#ifdef CONFIG_ARM64 
+//#ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
         if (!domain) goto out_free;
-    
-        ret = iommu_map(domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
-        if (ret) goto out_free;
+            printk("Before mapping\n");
+        ret = iommu_map(domain, base_dma, (unsigned long)base_addr, SZ_2M, IOMMU_READ | IOMMU_WRITE);
+            if (ret) goto out_free;
 //#endif*/
-  
+  printk("mapping done\n");
     /*
     if (__setup_ring_buffer())
         goto out_free;
