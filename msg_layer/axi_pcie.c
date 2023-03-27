@@ -347,12 +347,12 @@ static int poll_dma(void* arg0)
     //u32 h2c_desc_complete = 0;
     int recv_index = 0, index = 0;
     
-    printk("In poll, the first addr is %llx\n", virt_to_phys((recv_queue->work_list[index]->dma_addr)));
-    printk("In poll, the last addr0 is %llx\n", virt_to_phys((recv_queue->work_list[index]->dma_addr)+(1022*8)));
-    printk("In poll, the last addr1 is %llx\n", virt_to_phys((recv_queue->work_list[index]->dma_addr)+(1023*8)));
-    printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[index]->dma_addr));
-    printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->dma_addr)+(1022*8)));
-    printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->dma_addr)+(1023*8)));
+    printk("In poll, the first addr is %llx\n", ((recv_queue->work_list[index]->addr)));
+    printk("In poll, the last addr0 is %llx\n", ((recv_queue->work_list[index]->addr)+(1022*8)));
+    printk("In poll, the last addr1 is %llx\n", ((recv_queue->work_list[index]->addr)+(1023*8)));
+    printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[index]->addr));
+    printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->addr)+(1022*8)));
+    printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)));
     
     while (!kthread_freezable_should_stop(&was_frozen)) {
     //while(!kthread_should_stop()){
@@ -362,7 +362,7 @@ static int poll_dma(void* arg0)
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
         //dma_sync_single_for_cpu(&pdev->dev, base_dma, SZ_2M, DMA_FROM_DEVICE);
         //printk("Synced DMA memory\n");
-        if ((*((uint64_t *)(recv_queue->work_list[index]->dma_addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[index]->dma_addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
+        if ((*((uint64_t *)(recv_queue->work_list[index]->addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[index]->addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
             //printk("New data in recv Q.\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
@@ -381,12 +381,12 @@ static int poll_dma(void* arg0)
             
             printk("Start of pcn message\n");
             for(i=0;i<(FDSM_MSG_SIZE/8); i++){
-                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[index]->dma_addr)+(i*8)));
+                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[index]->addr)+(i*8)));
             }
             printk("End of pcn message\n");
             //printk("Processed popcorn message.\n");
-            *(uint64_t *)((recv_queue->work_list[index]->dma_addr)+(1022*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[index]->dma_addr)+(1023*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1022*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)) = 0x0;
         } else if (h2c_desc_complete != 0) {
             //printk("Sent data to remote.\n");
             no_of_messages += 1;
@@ -877,7 +877,7 @@ static int __init axidma_init(void)
         ret = -ENOMEM;
         goto out_free;
     }
-    base_dma = iommu_handle;
+    //base_dma = iommu_handle;
     printk("After map_single\n");
     /*
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
