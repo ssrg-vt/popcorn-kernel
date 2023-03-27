@@ -61,6 +61,9 @@ static dma_addr_t c2h_poll_bus;
 static dma_addr_t h2c_poll_bus;
 static void volatile *base_addr; 
 static dma_addr_t base_dma;
+static  struct resource *res;
+static struct sg_table sg;
+static struct scatterlist *sglist;
 
 static struct iommu_domain *domain; 
 
@@ -765,7 +768,7 @@ static void __exit axidma_exit(void)
     set_popcorn_node_online(nid, false);
 
     //dma_unmap_single(&pdev->dev, dma_handle, SZ_2M, DMA_BIDIRECTIONAL);
-    iommu_unmap(domain, base_dma, SZ_2M);
+    //iommu_unmap(domain, base_dma, SZ_2M);
     dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
     //iommu_unmap(&pdev->dev->iommu_domain, iova, SZ_2M);
     //kfree(base_addr);
@@ -809,6 +812,7 @@ static void __exit axidma_exit(void)
 static int __init axidma_init(void)
 {
     int ret, size;
+    int nents;
     /*
     printk("Size info\n");
     printk("Size of int = %d\n", sizeof(int));
@@ -869,6 +873,31 @@ static int __init axidma_init(void)
     }
     printk("Before getting domain\n");
 
+    domain = dev_get_iommu_domain(&pdev->dev);
+    if (!domain) {
+        dev_err(&pdev->dev, "Failed to get IOMMU domain\n");
+        dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+        return -ENODEV;
+    }
+
+    res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+    if (!res) {
+        dev_err(&pdev->dev, "Failed to get platform resource\n");
+        dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+        return -EINVAL;
+    }
+
+
+    nents = dma_map_sg(&pdev->dev, sglist, 1, DMA_BIDIRECTIONAL);
+    if (!nents) {
+        dev_err(&pdev->dev, "Failed to map scatterlist\n");
+        dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+        return -EINVAL;
+    }
+
+    iommu_map_sg(domain, sglist, nents, IOMMU_READ|IOMMU_WRITE);
+    dev_set_drvdata(&pdev->dev, base_addr);
+    dev_set_drvdata(&pdev->dev, (void *)base_dma);
     /*
     base_addr = kzalloc(SZ_2M, GFP_KERNEL);
     if(!base_addr){
@@ -879,7 +908,7 @@ static int __init axidma_init(void)
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
 
-//#ifdef CONFIG_ARM64 
+/*#ifdef CONFIG_ARM64 
         domain = iommu_get_domain_for_dev(&pdev->dev);
         if (!domain) goto out_free;
             printk("Before mapping\n");
