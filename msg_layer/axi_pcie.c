@@ -547,7 +547,7 @@ static __init queue_tr* __setup_recv_buffer(int entries)
         recv_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
         printk("Recv Q addr=%llx\n",virt_to_phys(recv_q->work_list[i]->addr));
-        printk("Recv Q dma_addr=%llx\n",virt_to_phys(recv_q->work_list[i]->dma_addr));
+        printk("Recv Q dma_addr=%llx\n",recv_q->work_list[i]->dma_addr);
     }
     __update_recv_index(recv_q, 0);
     return recv_q;
