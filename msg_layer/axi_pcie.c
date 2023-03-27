@@ -368,7 +368,7 @@ static int poll_dma(void* arg0)
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
             printk("Start of pcn message\n");
             for(i=0;i<(FDSM_MSG_SIZE/8); i++){
-                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[index]->addr)+(i*8)));
+                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[index+1]->addr)+(i*8)));
             }
             printk("End of pcn message\n");
             *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1022*8)) = 0x0;
