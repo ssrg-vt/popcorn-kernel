@@ -267,6 +267,7 @@ static struct send_work *send_work_pool = NULL;
 
 static queue_t *send_queue;
 static queue_tr *recv_queue;
+static void *iova;
 
 static struct pcie_axi_work *pcie_axi_work_pool = NULL;
 
@@ -763,8 +764,9 @@ static void __exit axidma_exit(void)
 
     set_popcorn_node_online(nid, false);
 
-    //dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
-    kfree(base_addr);
+    dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
+    iommu_unmap(&pdev->dev->iommu_domain, iova, SZ_2M);
+    //kfree(base_addr);
     /*
     while (send_work_pool) {
         struct send_work *work = send_work_pool;
@@ -856,16 +858,24 @@ static int __init axidma_init(void)
     pdev = of_find_device_by_node(x86_host);
     //ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
     
-    /*
-    dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+    //dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
-    */
-    
-    base_addr = kzalloc(SZ_2M, GFP_KERNEL);
     if(!base_addr){
         goto out_free;
     }
     
+    iova = iommu_map(&pdev->dev->iommu_domain, base_dma, virt_to_phys(base_addr), SZ_2M, IOMMU_READ | IOMMU_WRITE);
+    if(!iova){
+        printk("Error");
+        goto out_free;
+    }
+    
+    /*
+    base_addr = kzalloc(SZ_2M, GFP_KERNEL);
+    if(!base_addr){
+        goto out_free;
+    }
+    */
     //printk("base_addr=%llx\n",base_addr);
     //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
     //printk("&base_dma=%llx\n",&base_dma);
