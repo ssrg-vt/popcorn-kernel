@@ -366,6 +366,8 @@ static int poll_dma(void* arg0)
             //printk("New data in recv Q.\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
+            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1022*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)) = 0x0;
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
             printk("index=%d\n",index);
@@ -385,8 +387,6 @@ static int poll_dma(void* arg0)
             }
             printk("End of pcn message\n");
             //printk("Processed popcorn message.\n");
-            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1022*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)) = 0x0;
         } else if (h2c_desc_complete != 0) {
             //printk("Sent data to remote.\n");
             no_of_messages += 1;
