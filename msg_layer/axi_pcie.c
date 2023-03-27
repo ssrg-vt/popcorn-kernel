@@ -624,10 +624,10 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     printk("In post\n");
     int ret, i;
     //dma_addr_t dma_addr, *dma_addr_pntr;
-    u64 dma_addr, *dma_addr_pntr;
-    dma_addr = radix_tree_lookup(&send_tree, (unsigned long *)msg);
-    dma_addr_pntr = dma_addr;
-    if (dma_addr_pntr) {
+    //u64 *dma_addr;
+    //dma_addr = radix_tree_lookup(&send_tree, (unsigned long *)msg);
+    //dma_addr_pntr = dma_addr;
+    if (radix_tree_lookup(&send_tree, (unsigned long *)msg)) {
         spin_lock(&pcie_axi_lock);
         //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
         //ret = pcie_axi_transfer(TO_DEVICE);
@@ -635,7 +635,8 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         //writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
         //writeq(dma_addr_pntr, x86_host_addr);
         for(i=0; i<(FDSM_MSG_SIZE/8)-1; i++){
-            writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
+            writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long *)msg)+(i*8)), (zynq_hw_addr + (i*8)));
+            //writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
         writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
         spin_unlock(&pcie_axi_lock);
