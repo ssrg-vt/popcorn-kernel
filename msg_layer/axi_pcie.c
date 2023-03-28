@@ -291,7 +291,7 @@ static void __update_recv_index(queue_tr *q, int i)
     printk("Receive Q addr = %llx\n", q->work_list[i]->dma_addr);
     //printk("Receive Q addr = %llx\n", virt_to_phys(q->work_list[i]->addr));
     //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, FROM_DEVICE, KMSG);//Update new receive address in RQ/RC IP
-    //writeq(dma_addr, zynq_hw_addr+0x10+i);
+    //writeq(dma_addr, x86_host_addr+0x10+i);
 }
 
 static int __get_recv_index(queue_tr *q)
@@ -635,7 +635,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         //writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
         //writeq(dma_addr_pntr, x86_host_addr);
         for(i=0; i<(FDSM_MSG_SIZE/8)-1; i++){
-            writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long *)msg)+(i*8)), (zynq_hw_addr + (i*8)));
+            writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long *)msg)+(i*8)), (x86_host_addr + (i*8)));
             //writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
         writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
