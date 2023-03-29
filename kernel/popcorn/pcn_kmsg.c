@@ -202,37 +202,6 @@ void pcn_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
 }
 EXPORT_SYMBOL(pcn_kmsg_unpin_rdma_buffer);
 
-/* pcie_axi Features */
-
-struct pcn_kmsg_pcie_axi_handle *pcn_kmsg_pin_pcie_axi_buffer(void *buffer, size_t size)
-{
-	if (transport && transport->pin_pcie_axi_buffer) {
-		return transport->pin_pcie_axi_buffer(buffer, size);
-	}
-	return ERR_PTR(-EINVAL);
-}
-EXPORT_SYMBOL(pcn_kmsg_pin_pcie_axi_buffer);
-
-void pcn_kmsg_unpin_pcie_axi_buffer(struct pcn_kmsg_pcie_axi_handle *handle)
-{
-	if (transport && transport->unpin_pcie_axi_buffer) {
-		transport->unpin_pcie_axi_buffer(handle);
-	}
-}
-EXPORT_SYMBOL(pcn_kmsg_unpin_pcie_axi_buffer);
-
-
-int pcn_kmsg_pcie_axi_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size)
-{
-	return transport->pcie_axi_read(from_nid, addr, rdma_addr, size);
-}
-EXPORT_SYMBOL(pcn_kmsg_pcie_axi_read);
-
-int pcn_kmsg_pcie_axi_write(int dest_nid, dma_addr_t rdma_addr, void *addr, size_t size)
-{
-    return transport->pcie_axi_write(dest_nid, rdma_addr, addr, size);
-}
-EXPORT_SYMBOL(pcn_kmsg_pcie_axi_write);
 
 void pcn_kmsg_dump(struct pcn_kmsg_message *msg)
 {
