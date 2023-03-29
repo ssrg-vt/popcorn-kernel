@@ -345,7 +345,8 @@ static int poll_dma(void* arg0)
     //int counter_tx = *h2c_poll_addr;
     //u32 c2h_desc_complete = 0;
     //u32 h2c_desc_complete = 0;
-    int recv_index = 0, index = -1;
+    int recv_index = 0, index = 0;
+    int tmp = 0;
     /*
     printk("In poll, the first addr is %llx\n", ((recv_queue->work_list[index+1]->addr)));
     printk("In poll, the last addr0 is %llx\n", ((recv_queue->work_list[index+1]->addr)+(1022*8)));
@@ -362,18 +363,20 @@ static int poll_dma(void* arg0)
         //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
         //dma_sync_single_for_cpu(&pdev->dev, base_dma, SZ_2M, DMA_FROM_DEVICE);
         //printk("Synced DMA memory\n");
-        if ((*((uint64_t *)(recv_queue->work_list[index+1]->addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[index+1]->addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
+        if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
             //printk("New data in recv Q.\n");
             //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
             //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
             /*
             printk("Start of pcn message\n");
             for(i=0;i<(FDSM_MSG_SIZE/8); i++){
-                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[index+1]->addr)+(i*8)));
+                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
             }
             printk("End of pcn message\n");*/
-            *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1022*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1023*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
+            tmp = (tmp+1)%64;
+            printk("tmp = %d\n", tmp);
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
             //printk("index=%d\n",index);
