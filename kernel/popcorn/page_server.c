@@ -1007,11 +1007,9 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 
 #define TRANSFER_PAGE_WITH_RDMA \
 		pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA)
-
 #define TRANSFER_PAGE_WITH_PCIE_AXI \
 		pcn_kmsg_has_features(PCN_KMSG_FEATURE_PCIE_AXI)
-
-static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh, struct pcn_kmsg_pcie_axi_handle **xh)
+static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh)
 {
 	remote_page_request_t *req;
 
