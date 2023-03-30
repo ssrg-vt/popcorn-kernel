@@ -277,21 +277,15 @@ static struct pcie_axi_work *pcie_axi_work_pool = NULL;
  *----------------------------------------------------------------------------*/
 static void __update_recv_index(queue_tr *q, int i)
 {   
-    dma_addr_t dma_addr;
     int ret;
 
     if (i == q->nr_entries) {
         i = 0;
         q->tail = -1;
     }
-    //dma_addr = q->work_list[i]->dma_addr;
+
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     writeq(q->work_list[i]->dma_addr, x86_host_addr); //Update the physical address with next sector address of recv Q
-    //writeq(virt_to_phys(q->work_list[i]->addr), x86_host_addr); //Update the physical address with next sector address of recv Q
-    printk("Receive Q addr = %llx\n", q->work_list[i]->dma_addr);
-    //printk("Receive Q addr = %llx\n", virt_to_phys(q->work_list[i]->addr));
-    //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, FROM_DEVICE, KMSG);//Update new receive address in RQ/RC IP
-    //writeq(dma_addr, x86_host_addr+0x10+i);
 }
 
 static int __get_recv_index(queue_tr *q)
@@ -336,51 +330,21 @@ static struct send_work *__get_send_work(int index)
 
 static int poll_dma(void* arg0)
 {   
-    printk("In poll_dma\n");
     bool was_frozen;
     int i;
-    //struct xdma_poll_wb *poll_c2h_wb = (struct xdma_poll_wb *)c2h_poll_addr;
-    //struct xdma_poll_wb *poll_h2c_wb = (struct xdma_poll_wb *)h2c_poll_addr;
-    //int counter_rx = *c2h_poll_addr;
-    //int counter_tx = *h2c_poll_addr;
-    //u32 c2h_desc_complete = 0;
-    //u32 h2c_desc_complete = 0;
-    int recv_index = 0, index = 0;
-    int tmp = 0;
-    /*
-    printk("In poll, the first addr is %llx\n", ((recv_queue->work_list[index+1]->addr)));
-    printk("In poll, the last addr0 is %llx\n", ((recv_queue->work_list[index+1]->addr)+(1022*8)));
-    printk("In poll, the last addr1 is %llx\n", ((recv_queue->work_list[index+1]->addr)+(1023*8)));
-    printk("First Data found in poll = %llx\n", *(uint64_t *)(recv_queue->work_list[index+1]->addr));
-    printk("Last Data0 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1022*8)));
-    printk("Last Data1 found in poll = %llx\n", *(uint64_t *)((recv_queue->work_list[index+1]->addr)+(1023*8)));
-    */
+    int recv_index = 0, index = 0, tmp = 0;
+    //printk("In poll_dma\n");
     while (!kthread_freezable_should_stop(&was_frozen)) {
-    //while(!kthread_should_stop()){
+
         rcu_read_lock();
-        //printk("polling...");
-        //c2h_desc_complete = counter_rx; //poll_c2h_wb->completed_desc_count;
-        //h2c_desc_complete = counter_tx; //poll_h2c_wb->completed_desc_count;
-        //dma_sync_single_for_cpu(&pdev->dev, base_dma, SZ_2M, DMA_FROM_DEVICE);
-        //printk("Synced DMA memory\n");
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
-            //printk("New data in recv Q.\n");
-            //write_register(0x00, (u32 *)(xdma_c + c2h_ctl));
-            //write_register(0x06, (u32 *)(xdma_c + c2h_ch));
-            /*
-            printk("Start of pcn message\n");
-            for(i=0;i<(FDSM_MSG_SIZE/8); i++){
-                printk("%llx\n",*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
-            }
-            printk("End of pcn message\n");*/
+
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
             tmp = (tmp+1)%64;
-            printk("tmp = %d\n", tmp);
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
             //printk("index=%d\n",index);
-
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
             //counter_rx = 0;
@@ -391,13 +355,8 @@ static int poll_dma(void* arg0)
             process_message(recv_index);
             printk("Processed popcorn message.\n");
         } else if (h2c_desc_complete != 0) {
-            //printk("Sent data to remote.\n");
             no_of_messages += 1;
-            //write_register(0x00, (u32 *)(xdma_c + h2c_ctl));
-            //write_register(0x06, (u32 *)(xdma_c + h2c_ch));
-            //poll_h2c_wb->completed_desc_count = 0;
             h2c_desc_complete = 0;
-            //printk("Data found in poll from ELSE IF = %llx\n", *(uint64_t *)((recv_queue->work_list[index]->addr)+(1023*8)));
         }
         rcu_read_lock();
         msleep_interruptible(1);
@@ -433,70 +392,6 @@ static void __put_pcie_axi_send_work(struct send_work *work)
     work->next = send_work_pool;
     send_work_pool = work;
     spin_unlock_irqrestore(&send_work_pool_lock, flags);
-}
-
-/* Ring Buffer Implementation - DEPRECATED */ 
-
-static __init int __setup_ring_buffer(void)
-{
-    int ret;
-    int i;
-
-    /*Initialize send ring buffer */
-
-    ret = ring_buffer_init(&pcie_axi_send_buff, "dma_send");
-    if (ret) return ret;
-    
-    printk("Chunk size = %d\n", pcie_axi_send_buff.nr_chunks);
-    for (i = 0; i < pcie_axi_send_buff.nr_chunks; i++) {
-        //dma_addr_t dma_addr = dma_map_single(&pci_dev->dev,pcie_axi_send_buff.chunk_start[i], RB_CHUNK_SIZE, DMA_TO_DEVICE);
-        //ret = dma_mapping_error(&pci_dev->dev,dma_addr);
-        dma_addr_t dma_addr = base_addr + (i*8*1024);
-        printk("addr=%p\n", dma_addr);
-        if (ret) goto out_unmap;
-        pcie_axi_send_buff.dma_addr_base[i] = dma_addr;
-    }
-    
-    /* Initialize send work request pool */
-
-    for (i = 0; i < MAX_SEND_DEPTH; i++) {
-        struct send_work *work;
-
-        work = kzalloc(sizeof(*work), GFP_KERNEL);
-        if (!work) {
-            ret = -ENOMEM;
-            goto out_unmap;
-        }
-        work->header.type = WORK_TYPE_SEND;
-
-        work->dma_addr = 0;
-        work->length = 0;
-
-        work->next = send_work_pool;
-        send_work_pool = work;
-    }
-    return 0;
-
-out_unmap:
-    printk("In out_unmap (ring buffer setup failed).\n");
-    while (pcie_axi_work_pool) {
-        struct pcie_axi_work *xw = pcie_axi_work_pool;
-        pcie_axi_work_pool = xw->next;
-        kfree(xw);
-    }
-    while (send_work_pool) {
-        struct send_work *work = send_work_pool;
-        send_work_pool = work->next;
-        kfree(work);
-    }
-    for (i = 0; i < pcie_axi_send_buff.nr_chunks; i++) {
-        if (pcie_axi_send_buff.dma_addr_base[i]) {
-            //dma_unmap_single(&pci_dev->dev,pcie_axi_send_buff.dma_addr_base[i], RB_CHUNK_SIZE, DMA_TO_DEVICE);
-            pcie_axi_send_buff.dma_addr_base[i] = 0;
-        }
-    }
-    return ret;
-
 }
 
 static queue_t* __setup_send_queue(int entries)
@@ -624,19 +519,10 @@ void pcie_axi_kmsg_stat(struct seq_file *seq, void *v)
 
 int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
-    printk("In post\n");
     int ret, i;
-    //dma_addr_t dma_addr, *dma_addr_pntr;
-    //u64 *dma_addr;
-    //dma_addr = radix_tree_lookup(&send_tree, (unsigned long *)msg);
-    //dma_addr_pntr = dma_addr;
+    //printk("In post\n");
     if (radix_tree_lookup(&send_tree, (unsigned long *)msg)) {
         spin_lock(&pcie_axi_lock);
-        //ret = config_descriptors_bypass(dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
-        //ret = pcie_axi_transfer(TO_DEVICE);
-        //get the recv buffer addr and write data there.
-        //writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
-        //writeq(dma_addr_pntr, x86_host_addr);
         for(i=0; i<(FDSM_MSG_SIZE/8)-1; i++){
             writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long *)msg)+(i*8)), (x86_host_addr + (i*8)));
             //writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
@@ -653,67 +539,23 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 
 int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 {   
-    printk("In pcie_axi_kmsg_send\n");
     struct send_work *work;
     int ret, i;
-    void __iomem *mapped_addr;
-    u64 *dma_addr_pntr;
+    //printk("In pcie_axi_kmsg_send\n");
     DECLARE_COMPLETION_ONSTACK(done);
-    //printk("After STACK\n");
 
     work = __get_send_work(send_queue->tail);
-    //printk("After getting work\n");
 
     memcpy(work->addr, msg, size);
-    //printk("memcpy\n");
-    /*
-    for(i = 0; i<(size/8)+1; i++){
-        printk("Data = %llx\n", *(u64 *)((work->addr)+(i*8)));
-    }*/
-    /*
-    for(i = 0; i<size; i++){
-        printk("Data1 = %lx\n", *(u8 *)((work->addr)+i));
-    }*/
-    //printk("Size of msg = %d\n", size);
+
     work->done = &done;
-    //printk("After work->done = &done\n");
     spin_lock(&pcie_axi_lock);
-    //printk("After spinlock\n");
-    //ret = config_descriptors_bypass(work->dma_addr, FDSM_MSG_SIZE, TO_DEVICE, KMSG);
-    //ret = pcie_axi_transfer(TO_DEVICE);
-    dma_addr_pntr = work->addr; //dma_addr; DMA address cannot be mapped to CPU addr space and accessed with ioread/write. Hence using the VA.
-    //printk("dma_addr_pntr = %llx\n", dma_addr_pntr);
-    /*
-    mapped_addr = ioremap_nocache(dma_addr_pntr, FDSM_MSG_SIZE);
-    if (!mapped_addr) {
-        printk(KERN_ERR "Failed to map physical address\n");
-        return -ENOMEM;
-    }
-    */
-    //writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
-    //writeq(virt_to_phys(dma_addr_pntr), x86_host_addr);
-    for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){ //send 8KB data, 8B in each transfer
-            //printk("copying data %d\n", i);
-            //printk("Data %d = %llx\n", i, *(dma_addr_pntr+(i*8)));
-            //printk("dma_addr_pntr = %llx\n", dma_addr_pntr+(i*8));
-            //printk("x86_host_addr = %llx\n", x86_host_addr+(i*8));
-            /* Need to configure the CC/CQ IP to write to a different part o fthe buffer on the other node*/
-            //writeq(cpu_to_le64(*(volatile __le64*)(mapped_addr+i)), x86_host_addr + i);
-            //writeq(*(dma_addr_pntr+(i*8)), (x86_host_addr+(i*8)));//cannot wite to x86_host_addr always, it needs to go a specific part of the receive buffer. So each of this part has a base address. 
+    for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){ 
             writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
         }
     writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     spin_unlock(&pcie_axi_lock);
-    printk("Message sent\n");
-    //printk("After spinunlock\n");
-    //printk("ARM nid = %d\n", msg->header.from_nid);
-    /*
-    printk("Start of pcn message\n");
-    for(i=0;i<((FDSM_MSG_SIZE/8)); i++){
-         printk("%llx", *(u64 *)((work->addr)+(i*8)));
-    }
-    printk("End of pcn message\n");
-    */
+    //printk("Message sent\n");
     h2c_desc_complete = 1;
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
@@ -768,26 +610,11 @@ static void __exit axidma_exit(void)
     pcn_kmsg_set_transport(NULL);
     of_node_put(x86_host);
     of_node_put(prot_proc);
-
     iounmap(x86_host_addr);
     iounmap(prot_proc_addr);
-
     set_popcorn_node_online(nid, false);
-
-    //dma_unmap_single(&pdev->dev, dma_handle, SZ_2M, DMA_BIDIRECTIONAL);
-    //iommu_unmap(domain, base_dma, SZ_2M);
     dma_free_coherent(&pdev->dev, SZ_2M, base_addr, base_dma);
-    //iommu_unmap(&pdev->dev->iommu_domain, iova, SZ_2M);
-    //kfree(base_addr);
-    /*
-    while (send_work_pool) {
-        struct send_work *work = send_work_pool;
-        send_work_pool = work->next;
-        kfree(work);
-    }
-    
-    ring_buffer_destroy(&pcie_axi_send_buff);
-    */
+
     destroy_workqueue(wq);
 
     if (send_queue)
@@ -795,36 +622,17 @@ static void __exit axidma_exit(void)
     
     if (recv_queue)
         free_queue_r(recv_queue);
-    /*
-    while (pcie_axi_work_pool) {
-        struct pcie_axi_work *xw = pcie_axi_work_pool;
-        pcie_axi_work_pool = xw->next;
-        kfree(xw);
-    }
-    */
-    //dma_free_coherent(&pdev->dev, 8, c2h_poll_addr, c2h_poll_bus);
-    //dma_free_coherent(&pdev->dev, 8, h2c_poll_addr, h2c_poll_bus);
-    /*
-    if (tsk) {
-        wake_up_process(tsk);
-    }*/
 
     if (poll_tsk) {
         kthread_stop(poll_tsk);
     }
     printk("Unloaded axi module\n");
-    //return platform_driver_unregister(&axidma_driver);
 }
 
 static int __init axidma_init(void)
 {
     int ret, size;
     int nents;
-    /*
-    printk("Size info\n");
-    printk("Size of int = %d\n", sizeof(int));
-    printk("Size of size_t = %d\n", sizeof(size_t));
-    */
     PCNPRINTK("Initializing module over AXI\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
     PCNPRINTK("registered transport layer\n");
@@ -854,62 +662,22 @@ static int __init axidma_init(void)
                 ret = -ENOMEM;
         }
     }
-    /*
-    writeq(0x1234567812345678, x86_host_addr);
-    printk("Readq = %llx\n",readq(x86_host_addr));
-
-    writeq(0xabcdef01abcdef01, prot_proc_addr);
-    printk("Readq = %llx\n",readq(prot_proc_addr));
-    */
 
     my_nid = 1;
-    //Write the node ID to the protocol processor
-    //iowrite32(0x1, prot_proc_addr+0x34);//Enable when fDSM is enabled
-    //printk("prot_proc_addr=%p\n",ioread32(prot_proc_addr+0x34));
     set_popcorn_node_online(my_nid, true);
-
     pdev = of_find_device_by_node(x86_host);
-    //ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
-    
-    //printk("Before masking\n");
     dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-    //printk("Before dma_alloc\n");
     base_addr = dma_alloc_coherent(&pdev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
     if(!base_addr){
         goto out_free;
     }
 
-    //printk("Before map_single\n");
     iommu_handle = dma_map_single(&pdev->dev, (void *)base_addr, SZ_2M, DMA_BIDIRECTIONAL);
     if (dma_mapping_error(&pdev->dev, iommu_handle)) {
         ret = -ENOMEM;
         goto out_free;
     }
-    //base_dma = iommu_handle;
-    //printk("After map_single\n");
-    /*
-    base_addr = kzalloc(SZ_2M, GFP_KERNEL);
-    if(!base_addr){
-        goto out_free;
-    }
-    */
-    //printk("base_addr=%llx\n",base_addr);
-    //printk("base_dma=%llx\n",base_dma);//This address cannot be used without a DMA engine. 
-    //printk("&base_dma=%llx\n",&base_dma);
 
-/*#ifdef CONFIG_ARM64 
-        domain = iommu_get_domain_for_dev(&pdev->dev);
-        if (!domain) goto out_free;
-            printk("Before mapping\n");
-        ret = iommu_map(domain, base_dma, (unsigned long)base_addr, SZ_2M, IOMMU_READ | IOMMU_WRITE);
-            if (ret) goto out_free;
-//#endif*/
-  //printk("mapping done\n");
-    /*
-    if (__setup_ring_buffer())
-        goto out_free;
-    printk("Ring buffer setup complete.\n");
-    */
     wq = create_workqueue("recv");
     if (!wq)
         goto out_free;
@@ -930,30 +698,9 @@ static int __init axidma_init(void)
     sema_init(&q_empty, 0);
     sema_init(&q_full, MAX_SEND_DEPTH);
 
-    //Allocate 8byte of memory for the counter where c2h_poll_bus and h2c_poll_bus are the 
-    //address of the counters. 
-    //c2h_poll_addr = dma_alloc_coherent(&pdev->dev, 8, &c2h_poll_bus, GFP_KERNEL);
-    //h2c_poll_addr = dma_alloc_coherent(&pdev->dev, 8, &h2c_poll_bus, GFP_KERNEL);
-/*
-#ifdef CONFIG_ARM64
-        ret = domain->ops->map(domain, (unsigned long)h2c_poll_bus, virt_to_phys(h2c_poll_addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
-        if (ret) goto out_free;
-            ret = domain->ops->map(domain, (unsigned long)c2h_poll_bus, virt_to_phys(c2h_poll_addr), PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
-        if (ret) goto out_free;
-#endif
-*/
-    //c2h_poll_addr and h2c_poll_addr needs to be stored in the hardware
-    /*
-    writeq(c2h_poll_addr, x86_host_addr);
-    printk("c2h_poll_addr=%llx", readq(x86_host_addr));
-    writeq(h2c_poll_addr, x86_host_addr+0x08);
-    printk("c2h_poll_addr=%llx", readq(x86_host_addr+0x08));
-    */
-
     if (__start_poll()) 
         goto out_free;
 
-    //printk("Before broadcasting node ID.\n");
     broadcast_my_node_info(2);
     PCNPRINTK("... Ready on AXI ... \n");
 
