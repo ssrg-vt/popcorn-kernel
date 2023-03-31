@@ -336,7 +336,7 @@ static int poll_dma(void* arg0)
     //printk("In poll_dma\n");
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
-        rcu_read_lock();
+        //rcu_read_lock();
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) || (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)) { //possible performance improvement here!
 
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
@@ -358,8 +358,8 @@ static int poll_dma(void* arg0)
             no_of_messages += 1;
             h2c_desc_complete = 0;
         }
-        rcu_read_lock();
-        //msleep_interruptible(1);
+        //rcu_read_lock();
+        msleep_interruptible(1);
     }
 
     return 0;
