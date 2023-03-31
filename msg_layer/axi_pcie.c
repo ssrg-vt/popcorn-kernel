@@ -414,7 +414,7 @@ static queue_t* __setup_send_queue(int entries)
         send_q->work_list[i]->addr = base_addr + FDSM_MSG_SIZE * base_index;//FDSM_MSG_SIZE = 8192
         send_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
-        radix_tree_insert(&send_tree, send_q->work_list[i]->addr, send_q->work_list[i]->addr);//send_q->work_list[i]->dma_addr); Inserting the msg as key and storing the address. 
+        radix_tree_insert(&send_tree, (unsigned long)(send_q->work_list[i]->addr), send_q->work_list[i]->addr);//send_q->work_list[i]->dma_addr); Inserting the msg as key and storing the address. 
     }
 
     return send_q;
@@ -473,7 +473,7 @@ void free_queue(queue_t* q)
 {
     int i;
     for (i = 0; i<q->nr_entries; i++) {
-        radix_tree_delete(&send_tree, q->work_list[i]->addr);
+        radix_tree_delete(&send_tree, (unsigned long)(q->work_list[i]->addr));
         kfree(q->work_list[i]);
     }
 
@@ -521,10 +521,10 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 {
     int ret, i;
     //printk("In post\n");
-    if (radix_tree_lookup(&send_tree, (unsigned long *)msg)) {
+    if (radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))) {
         spin_lock(&pcie_axi_lock);
-        for(i=0; i<(FDSM_MSG_SIZE/8)-1; i++){
-            writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long *)msg)+(i*8)), (x86_host_addr + (i*8)));
+        for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){
+            writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
             //writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
         writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
