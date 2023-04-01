@@ -298,7 +298,6 @@ static int __get_recv_index(queue_tr *q)
 
 void process_message(int recv_i)
 {   
-    printk("In process_message\n");
     struct pcn_kmsg_message *msg;
     msg = recv_queue->work_list[recv_i]->addr;
     pcn_kmsg_process(msg);
@@ -529,7 +528,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         }
         writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
         spin_unlock(&pcie_axi_lock);
-        printk("Data Sent\n");
+        //printk("Data Sent\n");
         h2c_desc_complete = 1;
     } else {
         printk("DMA addr: not found\n");
@@ -634,6 +633,7 @@ static int __init axidma_init(void)
     int ret, size;
     int nents;
     PCNPRINTK("Initializing module over AXI\n");
+    pr_info("smp_processor_id %d\n", smp_processor_id());
     pcn_kmsg_set_transport(&transport_pcie_axi);
     PCNPRINTK("registered transport layer\n");
 
