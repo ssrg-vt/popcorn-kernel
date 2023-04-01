@@ -598,6 +598,7 @@ static int __construct_mm(clone_request_t *req, struct remote_context *rc)
 	arch_pick_mmap_layout(mm, &rlim_stack);
 
 	f = filp_open(req->exe_path, O_RDONLY | O_LARGEFILE | O_EXCL, 0);
+	printk("path = %s\n", req->exe_path);
 	if (IS_ERR(f)) {
 		PCNPRINTK_ERR("cannot open executable from %s\n", req->exe_path);
 		mmdrop(mm);

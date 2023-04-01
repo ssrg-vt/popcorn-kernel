@@ -358,7 +358,7 @@ static int poll_dma(void* arg0)
             h2c_desc_complete = 0;
         }
         //rcu_read_lock();
-        msleep_interruptible(1000);
+        msleep_interruptible(1);
     }
 
     return 0;
