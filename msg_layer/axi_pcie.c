@@ -337,7 +337,7 @@ static int poll_dma(void* arg0)
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
         //rcu_read_lock();
-        if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8)) == 0xd010d010)) || (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)){ //possible performance improvement here!
+        if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8)) == 0xd010d010)) || (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8)) == 0xd010d010))){ //possible performance improvement here!
 
             for(i=0; i<((FDSM_MSG_SIZE/8)); i++){ 
             //writeq(*(u64 *)((work->addr)+(i*8)), (zynq_hw_addr+(i*8)));
