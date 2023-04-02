@@ -286,6 +286,7 @@ static void __update_recv_index(queue_tr *q, int i)
 
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     writeq(q->work_list[i]->dma_addr, x86_host_addr); //Update the physical address with next sector address of recv Q
+    printk("Recv Q address = q->work_list[i]->dma_addr");
 }
 
 static int __get_recv_index(queue_tr *q)
@@ -336,7 +337,6 @@ static int poll_dma(void* arg0)
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
         //rcu_read_lock();
-        printk("Recv Q address = %llx\n", recv_queue->work_list[tmp]->addr);
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010))/* || (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)) */{ //possible performance improvement here!
 
             for(i=0; i<((FDSM_MSG_SIZE/8)); i++){ 
