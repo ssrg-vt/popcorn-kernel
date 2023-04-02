@@ -286,7 +286,7 @@ static void __update_recv_index(queue_tr *q, int i)
 
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     writeq(q->work_list[i]->dma_addr, x86_host_addr); //Update the physical address with next sector address of recv Q
-    printk("Recv Q address = %llx\n", q->work_list[i]->dma_addr);
+    //printk("Recv Q address = %llx\n", q->work_list[i]->dma_addr);
 }
 
 static int __get_recv_index(queue_tr *q)
@@ -340,11 +340,6 @@ static int poll_dma(void* arg0)
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) ||
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)){ //possible performance improvement here!
             
-            for(i=0; i<((FDSM_MSG_SIZE/8)); i++){ 
-            //writeq(*(u64 *)((work->addr)+(i*8)), (zynq_hw_addr+(i*8)));
-            printk("Data in Recv Q=%llx\n",*(u64 *)((recv_queue->work_list[tmp]->addr)+(i*8)));
-
-            }
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
             tmp = (tmp+1)%64;
