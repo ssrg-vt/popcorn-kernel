@@ -525,10 +525,11 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     if (radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))) {
         spin_lock(&pcie_axi_lock);
         for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){
-            writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
+            //writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
+            iowrite64(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (zynq_hw_addr + (i*8)));
             //writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
-        writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
+        iowrite64(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
         spin_unlock(&pcie_axi_lock);
         //printk("Data Sent\n");
         h2c_desc_complete = 1;
@@ -552,9 +553,10 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     work->done = &done;
     spin_lock(&pcie_axi_lock);
     for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){ 
-            writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
+            //writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
+            iowrite64(*(u64 *)((work->addr)+(i*8)), (zynq_hw_addr+(i*8)));
         }
-    writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
+    iowrite64(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     spin_unlock(&pcie_axi_lock);
     //printk("Message sent\n");
     h2c_desc_complete = 1;
