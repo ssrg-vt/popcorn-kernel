@@ -562,7 +562,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     spin_unlock(&pcie_axi_lock);
     //printk("Message sent\n");
     h2c_desc_complete = 1;
-    /*
+    
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
         ret = wait_for_completion_io_timeout(&done, 60 *HZ);
@@ -571,7 +571,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
             ret = -ETIME;
             goto out;
         }
-    }*/
+    }
     return 0;
 
 out:
