@@ -551,7 +551,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     memcpy(work->addr, msg, size);
 
-    //work->done = &done;
+    work->done = &done;
     spin_lock(&pcie_axi_lock);
     for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){ 
             //writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
