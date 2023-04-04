@@ -10,10 +10,13 @@ msg_socket-y := socket.o ring_buffer.o
 obj-$(CONFIG_POPCORN_KMSG_RDMA) += msg_rdma.o
 msg_rdma-y := rdma.o ring_buffer.o
 
+obj-$(CONFIG_POPCORN_KMSG_HDMA) += msg_pcie_axi.o
+msg_pcie_axi-y := pcie_axi.o ring_buffer.o
+
 #obj-$(CONFIG_POPCORN_KMSG_IB) += msg_ib.o
 #msg_ib-y := ib.o
 
-obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_test.o
+#obj-$(CONFIG_POPCORN_KMSG_TEST) += msg_test.o
 
 .PHONY: modules
 modules:

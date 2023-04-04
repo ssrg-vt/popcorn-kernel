@@ -509,6 +509,8 @@ static bool __finish_fault_handling(struct fault_handle *fh)
 	return last;
 }
 
+#define TRANSFER_PAGE_WITH_RDMA \
+		pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA)
 
 /**************************************************************************
  * Helper functions for PTE following
@@ -1004,9 +1006,6 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 		complete(&ws->pendings);
 	return 0;
 }
-
-#define TRANSFER_PAGE_WITH_RDMA \
-		pcn_kmsg_has_features(PCN_KMSG_FEATURE_RDMA)
 
 static int __request_remote_page(struct task_struct *tsk, int from_nid, pid_t from_pid, unsigned long addr, unsigned long fault_flags, int ws_id, struct pcn_kmsg_rdma_handle **rh)
 {
