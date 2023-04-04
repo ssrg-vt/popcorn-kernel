@@ -476,6 +476,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     if (radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))) {
 
         spin_lock(&pcie_axi_lock);
+        printk("In post\n");
         for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){
                 //Tried memory barrier, doesn't seem to work.
                 //The issue could be due to the buffer capacity in the PCIE IP, which could over get filled up. 
@@ -505,8 +506,9 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     memcpy(work->addr, msg, size);
 
-    //work->done = &done;
+    work->done = &done;
     spin_lock(&pcie_axi_lock);
+    printk("In send\n");
     for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){ 
             //Tried memory barrier, doesn't seem to work.
             //The issue could be due to the buffer capacity in the PCIE IP, which could over get filled up. 
@@ -520,16 +522,18 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     __raw_writeq(0x00000000d010d010, zynq_hw_addr+(1023*8));    
     spin_unlock(&pcie_axi_lock);
     h2c_desc_complete = 1;
-    /*
+    
     __process_sent(work);
+    printk("After process sent\n");
     if (!try_wait_for_completion(&done)){
+        printk("After try_wait\n");
         ret = wait_for_completion_io_timeout(&done, 60 *HZ);
         if (!ret) {
             printk("Message waiting failed\n");
             ret = -ETIME;
             goto out;
         }
-    }*/
+    }
     return 0;
 
 out:

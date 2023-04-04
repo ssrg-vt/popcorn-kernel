@@ -250,7 +250,10 @@ DEFINE_PCN_KMSG(vma_op_response_t, VMA_OP_RESPONSE_FIELDS);
 	unsigned long fault_flags; \
 	unsigned long instr_addr; \
 	dma_addr_t rdma_addr; \
-	u32 rdma_key;
+	u32 rdma_key; \
+	unsigned long pkey; \
+	int type; \
+	int from_nid;
 DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 
 #define REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
@@ -258,7 +261,8 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 	pid_t origin_pid; \
 	int origin_ws; \
 	unsigned long addr; \
-	int result;
+	int result; \
+	unsigned long pkey;
 
 #define REMOTE_PAGE_RESPONSE_FIELDS \
 	REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
@@ -266,7 +270,8 @@ DEFINE_PCN_KMSG(remote_page_request_t, REMOTE_PAGE_REQUEST_FIELDS);
 DEFINE_PCN_KMSG(remote_page_response_t, REMOTE_PAGE_RESPONSE_FIELDS);
 
 #define REMOTE_PAGE_GRANT_FIELDS \
-	REMOTE_PAGE_RESPONSE_COMMON_FIELDS
+	REMOTE_PAGE_RESPONSE_COMMON_FIELDS \
+	
 DEFINE_PCN_KMSG(remote_page_response_short_t, REMOTE_PAGE_GRANT_FIELDS);
 
 
@@ -297,15 +302,21 @@ DEFINE_PCN_KMSG(remote_page_flush_ack_t, REMOTE_PAGE_FLUSH_ACK_FIELDS);
 	pid_t origin_pid; \
 	int origin_ws; \
 	pid_t remote_pid; \
-	unsigned long addr;
+	unsigned long addr; \
+	unsigned long pkey; \
+	int from_nid;
 DEFINE_PCN_KMSG(page_invalidate_request_t, PAGE_INVALIDATE_REQUEST_FIELDS);
 
 #define PAGE_INVALIDATE_RESPONSE_FIELDS \
 	pid_t origin_pid; \
 	int origin_ws; \
-	pid_t remote_pid;
+	pid_t remote_pid; \
+	unsigned long pkey;
 DEFINE_PCN_KMSG(page_invalidate_response_t, PAGE_INVALIDATE_RESPONSE_FIELDS);
 
+#define REMOTE_PAGE_RESPONSE_TYPE_FIELDS \
+	int x;
+DEFINE_PCN_KMSG(rpr_type_t, REMOTE_PAGE_RESPONSE_TYPE_FIELDS);
 
 /**
  * Futex
@@ -368,6 +379,25 @@ DEFINE_PCN_KMSG(syscall_rep_t, SYSCALL_REP_FIELDS);
        int sig;                                         \
        bool group;
 DEFINE_PCN_KMSG(signal_trans_t , SIGNAL_TRANSMIT_FIELDS);
+
+/** 
+ *DSM Processor Request fields  
+ */
+
+typedef struct {
+	unsigned long page_key; 
+	pid_t origin_pid; 
+	pid_t remote_pid; 
+	int from_nid;  
+	int ws_id; 
+	int page_mode; 
+	unsigned long fault_flags; 
+	unsigned long addr; 
+	unsigned long instr_addr;
+} __attribute__((packed)) dsm_proc_request_t;
+
+	
+
 /**
  * Message routing using work queues
  */

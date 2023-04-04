@@ -7,10 +7,15 @@
 #include <linux/sched.h>
 #include <linux/err.h>
 
+#include <popcorn/pcn_kmsg.h>
+
 #include "wait_station.h"
 
 #define MAX_WAIT_STATIONS 1024
 
+#define TRANSFER_PAGE_WITH_PCIE_AXI \
+		pcn_kmsg_has_features(PCN_KMSG_FEATURE_PCIE_AXI)
+		
 static struct wait_station wait_stations[MAX_WAIT_STATIONS];
 
 static DEFINE_SPINLOCK(wait_station_lock);
@@ -69,6 +74,7 @@ void *wait_at_station(struct wait_station *ws)
 	}
 	smp_rmb();
 	ret = (void *)ws->private;
+	
 out:
 	put_wait_station(ws);
 	return ret;
