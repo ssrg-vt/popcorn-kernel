@@ -74,6 +74,7 @@ void *wait_at_station(struct wait_station *ws)
 	}
 	smp_rmb();
 	ret = (void *)ws->private;
+	
 out:
 	put_wait_station(ws);
 	return ret;
