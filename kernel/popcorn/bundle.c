@@ -100,9 +100,10 @@ EXPORT_SYMBOL(broadcast_my_node_info);
 
 static bool my_node_info_printed = false;
 
-static int handle_node_info(struct pcn_kmsg_message *msg)
+static void process_node_info(struct work_struct *work)
 {
-	node_info_t *info = (node_info_t *)msg;
+	//node_info_t *info = (node_info_t *)msg;
+	START_KMSG_WORK(node_info_t, info, work);
 
 	if (my_nid != -1 && !my_node_info_printed) {
 		popcorn_nodes[my_nid].arch = my_arch;
@@ -111,7 +112,9 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 
 	PCNPRINTK("   %d joined, %s\n", info->nid, archs_sz[info->arch]);
 	popcorn_nodes[info->nid].arch = info->arch;
+	
 	smp_mb();
+	END_KMSG_WORK(info);
 
 	if(TRANSFER_WITH_PCIE_AXI){
 		set_popcorn_node_online(info->nid, "true");
@@ -125,12 +128,14 @@ static int handle_node_info(struct pcn_kmsg_message *msg)
 		else {
 			PCNPRINTK("This is the remote node\n");
 		}
-	}
+	}/*
 	else{
 		pcn_kmsg_done(msg);
 		return 0;
-	}
+	}*/
 }
+
+DEFINE_KMSG_WQ_HANDLER(node_info);
 
 int __init popcorn_nodes_init(void)
 {
@@ -145,7 +150,7 @@ int __init popcorn_nodes_init(void)
 		pn->bundle_id = -1;
 	}
 
-	REGISTER_KMSG_HANDLER(PCN_KMSG_TYPE_NODE_INFO, node_info);
+	REGISTER_KMSG_WQ_HANDLER(PCN_KMSG_TYPE_NODE_INFO, node_info);
 
 	return 0;
 }

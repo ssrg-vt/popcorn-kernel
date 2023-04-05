@@ -8,11 +8,19 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 #include <linux/err.h>
-
+#include <linux/time.h> 
+#include <linux/timekeeping.h>
+#include <asm/io.h>
 #include <popcorn/pcn_kmsg.h>
+#include <popcorn/page_server.h>
+#include <popcorn/pcie.h>
 #include <popcorn/debug.h>
 #include <popcorn/stat.h>
 #include <popcorn/bundle.h>
+
+#include "types.h"
+
+u64 sttart_time, ennd_time; 
 
 static pcn_kmsg_cbftn pcn_kmsg_cbftns[PCN_KMSG_TYPE_MAX] = { NULL };
 
@@ -72,6 +80,31 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 }
 EXPORT_SYMBOL(pcn_kmsg_process);
 
+void pcn_kmsg_pcie_axi_process(enum pcn_kmsg_type type, void *msg)
+{
+	pcn_kmsg_cbftn ftn;
+
+	ftn = pcn_kmsg_cbftns[type];
+
+	if (ftn != NULL) {
+		ftn(msg);
+	} else {
+		printk(KERN_ERR"No callback registered for %d\n", type);
+	}
+}
+EXPORT_SYMBOL(pcn_kmsg_pcie_axi_process);
+
+
+int check_msg_type(struct pcn_kmsg_message *msg)
+{
+	if(msg != NULL){
+		return msg->header.type;
+	} else {
+		printk(KERN_ERR "Message is empty!");
+	}
+	
+}
+EXPORT_SYMBOL(check_msg_type);
 
 static inline int __build_and_check_msg(enum pcn_kmsg_type type, int to, struct pcn_kmsg_message *msg, size_t size)
 {
@@ -202,6 +235,37 @@ void pcn_kmsg_unpin_rdma_buffer(struct pcn_kmsg_rdma_handle *handle)
 }
 EXPORT_SYMBOL(pcn_kmsg_unpin_rdma_buffer);
 
+/* PCIE_AXI Features */
+
+struct pcn_kmsg_pcie_axi_handle *pcn_kmsg_pin_pcie_axi_buffer(void *buffer, size_t size)
+{
+	if (transport && transport->pin_pcie_axi_buffer) {
+		return transport->pin_pcie_axi_buffer(buffer, size);
+	}
+	return ERR_PTR(-EINVAL);
+}
+EXPORT_SYMBOL(pcn_kmsg_pin_pcie_axi_buffer);
+
+void pcn_kmsg_unpin_pcie_axi_buffer(struct pcn_kmsg_pcie_axi_handle *handle)
+{
+	if (transport && transport->unpin_pcie_axi_buffer) {
+		transport->unpin_pcie_axi_buffer(handle);
+	}
+}
+EXPORT_SYMBOL(pcn_kmsg_unpin_pcie_axi_buffer);
+
+
+int pcn_kmsg_pcie_axi_read(int from_nid, void *addr, dma_addr_t rdma_addr, size_t size)
+{
+	return transport->pcie_axi_read(from_nid, addr, rdma_addr, size);
+}
+EXPORT_SYMBOL(pcn_kmsg_pcie_axi_read);
+
+int pcn_kmsg_pcie_axi_write(int dest_nid, dma_addr_t rdma_addr, void *addr, size_t size)
+{
+    return transport->pcie_axi_write(dest_nid, rdma_addr, addr, size);
+}
+EXPORT_SYMBOL(pcn_kmsg_pcie_axi_write);
 
 void pcn_kmsg_dump(struct pcn_kmsg_message *msg)
 {
@@ -211,6 +275,21 @@ void pcn_kmsg_dump(struct pcn_kmsg_message *msg)
 }
 EXPORT_SYMBOL(pcn_kmsg_dump);
 
+void pcn_kmsg_sample(enum pcn_kmsg_type type, void *req_msg, size_t size)
+{
+	int i;
+	struct pcn_kmsg_message *msg = req_msg;
+	msg->header.type = type;
+	msg->header.prio = PCN_KMSG_PRIO_NORMAL;
+	msg->header.size = size;
+	PCNPRINTK("---REQ FRAME ---\n");
+	for (i = 0; i < 50; i++) {
+		printk(KERN_INFO "%lx\n", ioread32((u32 *)msg+i));
+	}
+	//account_pcn_message_sent(msg);
+	//return transport->send(to, msg, size);
+}
+EXPORT_SYMBOL(pcn_kmsg_sample);
 
 int __init pcn_kmsg_init(void)
 {
