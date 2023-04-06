@@ -675,6 +675,7 @@ static int __init axidma_init(void)
     init_axi(prot_proc_addr);
 
     my_nid = 1;
+    write_mynid(my_nid);
     set_popcorn_node_online(my_nid, true);
     pdev = of_find_device_by_node(x86_host);
     dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
