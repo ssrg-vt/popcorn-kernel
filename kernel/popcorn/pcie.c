@@ -51,13 +51,13 @@ enum {
 
 void write_register(u32 value, void *iomem)
 {
-	writeq((u64)value, (u64 *)iomem);
+	iowrite32(value, iomem);
 }
 EXPORT_SYMBOL(write_register);
 
 u32 read_register(void *iomem)
 {
-	return readq((u64 *)iomem);
+	return ioread32(iomem);
 }
 EXPORT_SYMBOL(read_register);
 

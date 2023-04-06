@@ -4,7 +4,7 @@
 
 #define XDMA_MSB_MASK 0xFFFFFFFF00000000LL
 #define XDMA_LSB_MASK 0xFFFFFFFFLL
-#define dsm_proc 0x20000
+#define dsm_proc 0xb000_0000
 
 /* DSM Protocol Processor Configuration */
 
