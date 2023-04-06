@@ -618,7 +618,13 @@ static int __init axidma_init(void)
             ret = -ENOMEM;
             goto out;
         }
+        printk("Zynq address = %llx\n", zynq_hw_addr);
     }
+
+    printk("Before PCIe init\n");
+    init_pcie_xdma(pci_dev, zynq_hw_addr);
+
+    /*Need to include a function that passes the zynq_hw_addr to the kernel for prot proc requests.*/
 
     my_nid = 0;
     set_popcorn_node_online(my_nid, true);

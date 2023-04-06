@@ -2,31 +2,34 @@
 #define ___POPCORN_PCIE_H__
 
 
+#define XDMA_MSB_MASK 0xFFFFFFFF00000000LL
+#define XDMA_LSB_MASK 0x00000000FFFFFFFFLL
+#define dsm_proc 0x0080_0000 //Setting the 23rd bit to indicate the writes are for prot proc
 
 /* DSM Protocol Processor Configuration */
 
 //Control Regs
-
-#define proc_pkey_msb dsm_proc + 0x00
-#define proc_pkey_lsb dsm_proc + 0x78
-#define proc_vaddr_msb dsm_proc + 0x04
-#define proc_vaddr_lsb dsm_proc + 0x08
-#define proc_daddr_msb dsm_proc + 0x0C
-#define proc_daddr_lsb dsm_proc + 0x10
-#define proc_vm_result dsm_proc + 0x6C
-#define rpr_type dsm_proc + 0x70
-#define proc_fflags_msb dsm_proc + 0x14
-#define proc_fflags_lsb dsm_proc + 0x18
-#define proc_iaddr_msb dsm_proc + 0x1C
-#define proc_iaddr_lsb dsm_proc + 0x20
-#define proc_ws_id dsm_proc + 0x24
-#define proc_rpid dsm_proc + 0x28
-#define proc_opid dsm_proc + 0x2C
-#define proc_nid dsm_proc + 0x30
-#define proc_mynid dsm_proc + 0x34
-#define proc_ctl dsm_proc + 0x38
-#define proc_resp_type dsm_proc + 0x88
-#define proc_mask dsm_proc + 0x7C
+//Need to left shift the offset bits by 2 to make up for the AT field in the tdata signal.
+#define proc_pkey_msb dsm_proc + (0x00 << 2)
+#define proc_pkey_lsb dsm_proc + (0x78 << 2)
+#define proc_vaddr_msb dsm_proc + (0x04 << 2)
+#define proc_vaddr_lsb dsm_proc + (0x08 << 2)
+#define proc_daddr_msb dsm_proc + (0x0C << 2)
+#define proc_daddr_lsb dsm_proc + (0x10 << 2)
+#define proc_vm_result dsm_proc + (0x6C << 2)
+#define rpr_type dsm_proc + (0x70 << 2)
+#define proc_fflags_msb dsm_proc + (0x14 << 2)
+#define proc_fflags_lsb dsm_proc + (0x18 << 2)
+#define proc_iaddr_msb dsm_proc + (0x1C << 2)
+#define proc_iaddr_lsb dsm_proc + (0x20 << 2)
+#define proc_ws_id dsm_proc + (0x24 << 2)
+#define proc_rpid dsm_proc + (0x28 << 2)
+#define proc_opid dsm_proc + (0x2C << 2)
+#define proc_nid dsm_proc + (0x30 << 2)
+#define proc_mynid dsm_proc + (0x34 << 2)
+#define proc_ctl dsm_proc + (0x38 << 2)
+#define proc_resp_type dsm_proc + (0x88 << 2)
+#define proc_mask dsm_proc + (0x7C << 2)
 
 //Writeback Regs from processor to read
 
@@ -59,10 +62,10 @@
 #define FDSM_MSG_SIZE 8192
 
 /*Might have to remove some functions*/
-//void write_register(u32 value, void *iomem);
-//inline u32 read_register(void *iomem);
+void write_register(u32 value, void *iomem);
+inline u32 read_register(void *iomem);
 //int init_pcie_xdma(struct pci_dev *pci_dev, void __iomem *p, void __iomem *g);
-//void write_mynid(int nid);
+void write_mynid(int nid);
 
 //int xdma_transfer(int y);
 //int config_descriptors_bypass(dma_addr_t dma_addr, size_t size, int y, int z);

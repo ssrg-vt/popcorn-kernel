@@ -128,11 +128,11 @@ static void process_node_info(struct work_struct *work)
 		else {
 			PCNPRINTK("This is the remote node\n");
 		}
-	}
+	}/*
 	else{
 		pcn_kmsg_done(msg);
 		return 0;
-	}
+	}*/
 }
 
 DEFINE_KMSG_WQ_HANDLER(node_info);

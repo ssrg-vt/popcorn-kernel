@@ -182,6 +182,13 @@ struct pcn_kmsg_rdma_handle {
 	void *private;
 };
 
+struct pcn_kmsg_pcie_axi_handle {
+	void *addr;
+	dma_addr_t dma_addr;
+	void *private;
+	int flags;
+};
+
 /**
  * Pin @buffer for RDMA and get @rdma_addr and @rdma_key.
  */
