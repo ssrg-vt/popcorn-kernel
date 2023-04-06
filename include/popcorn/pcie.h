@@ -63,8 +63,8 @@
 
 /*Might have to remove some functions*/
 void write_register(u32 value, void *iomem);
-inline u32 read_register(void *iomem);
-//int init_pcie_xdma(struct pci_dev *pci_dev, void __iomem *p, void __iomem *g);
+//inline u32 read_register(void *iomem);
+int init_axi(struct pci_dev *pci_dev, void __iomem *g);//, void __iomem *g);
 void write_mynid(int nid);
 
 //int xdma_transfer(int y);

@@ -54,13 +54,13 @@ void write_register(u32 value, void *iomem)
 	iowrite32(value, iomem);
 }
 EXPORT_SYMBOL(write_register);
-
+/*
 u32 read_register(void *iomem)
 {
 	return ioread32(iomem);
 }
 EXPORT_SYMBOL(read_register);
-
+*/
 
 /* fDSM Functions */
 
@@ -185,4 +185,4 @@ int init_axi(void __iomem *g)//, void __iomem *p)
 */
 	return 0;
 }
-EXPORT_SYMBOL(init_pcie_xdma);
+EXPORT_SYMBOL(init_axi);

@@ -37,6 +37,7 @@
 #include <linux/of_address.h>
 #include <linux/of_device.h>
 #include <linux/io.h>
+#include <popcorn/pcie.h>
 
 #include <linux/rcupdate.h>
 #include <linux/rculist.h>
