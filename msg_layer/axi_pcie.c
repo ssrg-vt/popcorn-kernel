@@ -670,6 +670,9 @@ static int __init axidma_init(void)
         }
     }
 
+    printk("Before axi init\n");
+    init_axi(prot_proc_addr);
+
     my_nid = 1;
     set_popcorn_node_online(my_nid, true);
     pdev = of_find_device_by_node(x86_host);

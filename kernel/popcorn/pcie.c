@@ -157,3 +157,32 @@ unsigned long current_pkey()
 	return pkey;
 }
 EXPORT_SYMBOL(current_pkey);
+
+void __iomem * return_iomaps(int x)
+{
+	if (!x) {
+		return xdma_axi;
+	} else {
+		return xdma_ctl;
+	}
+}
+EXPORT_SYMBOL(return_iomaps);
+
+/* PCIe Initialization Handler */
+
+int init_axi(void __iomem *g)//, void __iomem *p)
+{
+	//int ret;
+
+	//xdma_ctl = p;
+	xdma_axi = g;
+/*
+	if (init_xdma()) {
+		return 1;
+	}
+	init_xxv();
+	init_descriptor_bypass();
+*/
+	return 0;
+}
+EXPORT_SYMBOL(init_pcie_xdma);
