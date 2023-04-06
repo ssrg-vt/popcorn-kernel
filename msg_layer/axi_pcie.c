@@ -302,14 +302,14 @@ void process_message(int recv_i)
 {   
     struct pcn_kmsg_message *msg;
     msg = recv_queue->work_list[recv_i]->addr;
-    pcn_kmsg_process(msg);
-    /*
+    //pcn_kmsg_process(msg);
+    
     if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-        printk("Need to call a process function\n");
-        //pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
+        //printk("Need to call a process function\n");
+        pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
     } else {
         pcn_kmsg_process(msg);
-    }*/
+    }
 }
 
 static struct send_work *__get_send_work(int index) 
