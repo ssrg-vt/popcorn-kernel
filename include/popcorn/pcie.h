@@ -4,7 +4,7 @@
 
 #define XDMA_MSB_MASK 0xFFFFFFFF00000000LL
 #define XDMA_LSB_MASK 0x00000000FFFFFFFFLL
-#define dsm_proc 0x0080_0000 //Setting the 23rd bit to indicate the writes are for prot proc
+#define dsm_proc 0x00800000 //Setting the 23rd bit to indicate the writes are for prot proc
 
 /* DSM Protocol Processor Configuration */
 
@@ -33,21 +33,21 @@
 
 //Writeback Regs from processor to read
 
-#define wr_fflags_msb dsm_proc + 0x3C
-#define wr_fflags_lsb dsm_proc + 0x40
-#define wr_vaddr_msb dsm_proc + 0x44
-#define wr_vaddr_lsb dsm_proc + 0x48
-#define wr_iaddr_msb dsm_proc + 0x4C
-#define wr_iaddr_lsb dsm_proc + 0x50
-#define wr_pkey_msb dsm_proc + 0x54
-#define wr_pkey_lsb dsm_proc + 0x74
-#define wr_wsid dsm_proc + 0x58
-#define wr_rpid dsm_proc + 0x5C
-#define wr_opid dsm_proc + 0x60
-#define wr_nid dsm_proc + 0x64
-#define wr_daddr_lsb dsm_proc + 0x68
-#define wr_page_resp dsm_proc + 0x80
-#define wr_vm_res dsm_proc + 0x84
+#define wr_fflags_msb dsm_proc + (0x3C << 2)
+#define wr_fflags_lsb dsm_proc + (0x40 << 2)
+#define wr_vaddr_msb dsm_proc + (0x44 << 2)
+#define wr_vaddr_lsb dsm_proc + (0x48 << 2)
+#define wr_iaddr_msb dsm_proc + (0x4C << 2)
+#define wr_iaddr_lsb dsm_proc + (0x50 << 2)
+#define wr_pkey_msb dsm_proc + (0x54 << 2)
+#define wr_pkey_lsb dsm_proc + (0x74 << 2)
+#define wr_wsid dsm_proc + (0x58 << 2)
+#define wr_rpid dsm_proc + (0x5C << 2)
+#define wr_opid dsm_proc + (0x60 << 2)
+#define wr_nid dsm_proc + (0x64 << 2)
+#define wr_daddr_lsb dsm_proc + (0x68 << 2)
+#define wr_page_resp dsm_proc + (0x80 << 2)
+#define wr_vm_res dsm_proc + (0x84 << 2)
 
 
 /* Switch Control Regs */
@@ -62,9 +62,9 @@
 #define FDSM_MSG_SIZE 8192
 
 /*Might have to remove some functions*/
-void write_register(u32 value, void *iomem);
-inline u32 read_register(void *iomem);
-//int init_pcie_xdma(struct pci_dev *pci_dev, void __iomem *p, void __iomem *g);
+void write_register(u64 value, void *iomem);
+//inline u32 read_register(void *iomem);
+int init_pcie(struct pci_dev *pci_dev, void __iomem *g);//, void __iomem *g);
 void write_mynid(int nid);
 
 //int xdma_transfer(int y);

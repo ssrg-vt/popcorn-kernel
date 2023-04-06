@@ -57,13 +57,6 @@ void write_register(u64 value, void *iomem)
 }
 EXPORT_SYMBOL(write_register);
 
-u32 read_register(void *iomem)
-{
-	return readq(iomem);
-}
-EXPORT_SYMBOL(read_register);
-
-
 /* fDSM Functions */
 
 void resolve_waiting(int ws_id)
@@ -172,7 +165,7 @@ EXPORT_SYMBOL(return_iomaps);
 
 /* PCIe Initialization Handler */
 
-int init_pcie_xdma(struct pci_dev *pci_dev, void __iomem *g)//, void __iomem *p)
+int init_pcie(struct pci_dev *pci_dev, void __iomem *g)//, void __iomem *p)
 {
 	//int ret;
 
@@ -187,4 +180,4 @@ int init_pcie_xdma(struct pci_dev *pci_dev, void __iomem *g)//, void __iomem *p)
 */
 	return 0;
 }
-EXPORT_SYMBOL(init_pcie_xdma);
+EXPORT_SYMBOL(init_pcie);

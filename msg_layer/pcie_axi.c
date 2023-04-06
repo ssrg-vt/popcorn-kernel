@@ -39,6 +39,7 @@
 #include <linux/io.h>
 #include <linux/rcupdate.h>
 #include <asm/barrier.h>
+#include <popcorn/pcie.h>
 
 #include "common.h"
 #include "ring_buffer.h"
@@ -243,19 +244,19 @@ void process_message(int recv_i)
 {
     struct pcn_kmsg_message *msg;
     msg = recv_queue->work_list[recv_i]->addr;
-    pcn_kmsg_process(msg);
-    /*
-    printk("process messgage in %llx\n", virt_to_phys(recv_queue->work_list[recv_i]->addr));
+    //pcn_kmsg_process(msg);
+    
+    //printk("process messgage in %llx\n", virt_to_phys(recv_queue->work_list[recv_i]->addr));
     if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-        printk("Need to call a process function\n");
-        //pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
+        printk("pcn_kmsg_pcie_axi_process\n");
+        pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
     } else {
-        printk("ARMs nid = %d\n", msg->header.from_nid);
-        node_info_t *info = (node_info_t *)msg;
-        printk("ARMs nid from nid_info=%d\n", info->nid);
-        printk("The msessage is %llx\n", *(uint64_t *)msg);
+        printk("pcn_kmsg_process\n");
+        //node_info_t *info = (node_info_t *)msg;
+        //printk("ARMs nid from nid_info=%d\n", info->nid);
+        //printk("The msessage is %llx\n", *(uint64_t *)msg);
         pcn_kmsg_process(msg);
-    }*/
+    }
 }
 
 static struct send_work *__get_send_work(int index) 
@@ -622,11 +623,12 @@ static int __init axidma_init(void)
     }
 
     printk("Before PCIe init\n");
-    init_pcie_xdma(pci_dev, zynq_hw_addr);
+    init_pcie(pci_dev, zynq_hw_addr);
 
     /*Need to include a function that passes the zynq_hw_addr to the kernel for prot proc requests.*/
 
     my_nid = 0;
+    write_mynid(my_nid);
     set_popcorn_node_online(my_nid, true);
     pci_set_master(pci_dev);
     base_addr = dma_alloc_coherent(&pci_dev->dev, SZ_2M, &base_dma, GFP_KERNEL);//2 x 64 regions x 8KB
