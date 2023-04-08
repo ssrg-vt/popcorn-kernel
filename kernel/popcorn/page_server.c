@@ -2712,7 +2712,8 @@ out_wakeup:
  *  ERROR otherwise
  */
 int page_server_handle_pte_fault(struct vm_fault *vmf)
-{
+{	
+	printk("In page_server_handle_pte_fault");
 	unsigned long addr = vmf->address & PAGE_MASK;
 	int ret = 0;
 	end_time = ktime_get_ns();
@@ -2738,6 +2739,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 
 	if (!current->at_remote) {
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
+			printk("In origin nodes lclfault\n");
 			ret = __pcie_axi_handle_lcfault_at_origin(vmf);
 		} else {
 			ret = __handle_localfault_at_origin(vmf);
@@ -2772,6 +2774,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	if (!pte_is_present(vmf->orig_pte)) {
 		/* Remote page fault */
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
+			printk("In remote nodes lclfault\n");
 			ret = __pcie_axi_handle_lcfault_at_remote(vmf);
 		} else {
 			ret = __handle_localfault_at_remote(vmf);
@@ -2783,6 +2786,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 			fault_for_write(vmf->flags) && !pte_write(vmf->orig_pte)) {
 		/* wr-protected for keeping page consistency */
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
+			printk("In remote nodes lclfault for wr protected\n");
 			ret = __pcie_axi_handle_lcfault_at_remote(vmf);
 		} else {
 			ret = __handle_localfault_at_remote(vmf);
