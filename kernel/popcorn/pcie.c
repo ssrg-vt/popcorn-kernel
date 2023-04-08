@@ -82,28 +82,57 @@ void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, unsigne
 {	    
 		spin_lock(&prot_proc_lock);
 		write_register((u32)((vaddr & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_vaddr_msb));
+		printk("proc_vaddr_msb = %llx\n", (u32)((vaddr & XDMA_MSB_MASK) >> 32));
+
 		write_register((u32)(vaddr & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_vaddr_lsb));
+		printk("proc_vaddr_lsb = %llx\n", (u32)(vaddr & XDMA_LSB_MASK));
+
 		write_register((u32)((fflags & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_fflags_msb));
+		printk("proc_fflags_msb = %llx\n", (u32)((fflags & XDMA_MSB_MASK) >> 32));
+
 		write_register((u32)(fflags & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_fflags_lsb));
+		printk("proc_fflags_lsb = %llx\n", (u32)(fflags & XDMA_LSB_MASK));
+
 		write_register((u32)((iaddr & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_iaddr_msb));
+		printk("proc_iaddr_msb = %llx\n", (u32)((iaddr & XDMA_MSB_MASK) >> 32));
+
 		write_register((u32)(iaddr & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_iaddr_lsb));
+		printk("proc_iaddr_lsb = %llx\n", (u32)(iaddr & XDMA_LSB_MASK));
 		if (pkey){
 			write_register((u32)((pkey & XDMA_MSB_MASK) >> 32), (u32 *)(xdma_axi + proc_pkey_msb));
+			printk("proc_pkey_msb = %llx\n", (u32)((pkey & XDMA_MSB_MASK) >> 32));
+
 			write_register((u32)(pkey & XDMA_LSB_MASK), (u32 *)(xdma_axi + proc_pkey_lsb));
+			printk("proc_pkey_msb = %llx\n", (u32)(pkey & XDMA_LSB_MASK));
 		} else {
 			write_register(0x00000000, (u32 *)(xdma_axi + proc_pkey_msb));
+			printk("proc_pkey_msb = %llx\n", 0x00000000);
+
 			write_register(0x00000000, (u32 *)(xdma_axi + proc_pkey_lsb));
+			printk("proc_pkey_lsb = %llx\n", 0x00000000);
 		}	
 		write_register(ws_id, (u32 *)(xdma_axi + proc_ws_id));
+		printk("proc_ws_id = %llx\n", ws_id);
+
 		write_register(opid, (u32 *)(xdma_axi + proc_opid));
+		printk("proc_opid = %llx\n", opid);
+
 		write_register(rpid, (u32 *)(xdma_axi + proc_rpid));
+		printk("proc_rpid = %llx\n", rpid);
+
 		write_register(from_nid, (u32 *)(xdma_axi + proc_nid));
+		printk("proc_nid = %llx\n", from_nid);
+
  		if (tsk_remote) {
  			write_register(0x8001, (u32 *)(xdma_axi + proc_ctl));
+ 			printk("proc_ctl = %llx\n", 0x8001);
+
  		} else {
  			write_register(0x01, (u32 *)(xdma_axi + proc_ctl));
+ 			printk("proc_ctl = %llx\n", 0x01);
  		}
  		write_register(0x00, (u32 *)(xdma_axi + proc_ctl));
+ 		printk("proc_ctl = %llx\n", 0x00);
  		spin_unlock(&prot_proc_lock);
 }
 EXPORT_SYMBOL(prot_proc_handle_localfault);
