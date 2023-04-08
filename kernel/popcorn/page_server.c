@@ -491,7 +491,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	put_task_remote(tsk);
 
 	*leader = true;
-	printk("Done in __start_fault_handling"\n);
+	printk("Done in __start_fault_handling\n");
 	return fh;
 
 out_wait_retry:
