@@ -426,6 +426,7 @@ EXPORT_SYMBOL(update_pkey);
 static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsigned long addr, unsigned long fault_flags, spinlock_t *ptl, bool *leader)
 	__releases(ptl)
 {
+	printk("In __start_fault_handling\n");
 	unsigned long flags;
 	struct fault_handle *fh;
 	bool found = false;
@@ -490,6 +491,7 @@ static struct fault_handle *__start_fault_handling(struct task_struct *tsk, unsi
 	put_task_remote(tsk);
 
 	*leader = true;
+	printk("Done in __start_fault_handling"\n);
 	return fh;
 
 out_wait_retry:
@@ -2413,7 +2415,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	struct task_struct *tsk = current;
 	remote_page_response_t *rp; 
 
-	//PCNPRINTK("Inside the __pcie_axi_handle_lcfault_at_remote\n");
+	PCNPRINTK("Inside the __pcie_axi_handle_lcfault_at_remote\n");
 	if (anon_vma_prepare(vmf->vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
 		pte_unmap(vmf->pte);
@@ -2422,7 +2424,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 
 	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
-
+	PCNPRINTK("After spin lock\n");
 	if (!vmf->pte) {
 		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
 	}
@@ -2433,8 +2435,10 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 		PGPRINTK("  [%d] %lx already handled\n", current->pid, addr);
 		return 0;
 	}
+	PCNPRINTK("Starting fault handling\n");
 	fh = __start_fault_handling(current, addr, vmf->flags, ptl, &leader);
 	if (!fh) {
+		printk("__start_fault_handling fail\n");
 		pte_unmap(vmf->pte);
 		up_read(&vmf->vma->vm_mm->mmap_sem);
 		return VM_FAULT_RETRY;
@@ -2475,10 +2479,11 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	} else {
 		pkey = 0;
 	}
+	printk("Before prot proc handler\n");
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, tsk->origin_nid, vmf->flags, ws->id, 1);
 	rp = wait_at_station(ws);
-
+	printk("After wait station\n");
 	if (rp->result == 0) {
 		void *paddr = kmap(page);
 		copy_to_user_page(vmf->vma, page, addr, paddr, rp->page, PAGE_SIZE);
