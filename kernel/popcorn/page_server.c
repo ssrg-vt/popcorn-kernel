@@ -2471,6 +2471,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	}
 
 	get_page(page);
+	printk("Before get wait station\n");
 	ws = get_wait_station(tsk);
 
 	pkey_res = radix_tree_lookup(&pkey_rd_tree, addr);
