@@ -305,9 +305,10 @@ void process_message(int recv_i)
     //pcn_kmsg_process(msg);
     
     if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-        //printk("Need to call a process function\n");
+        printk("calling pcie_axi processing function\n");
         pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
     } else {
+        printk("Calling pcn processning function\n");
         pcn_kmsg_process(msg);
     }
 }
@@ -341,6 +342,7 @@ static int poll_dma(void* arg0)
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) ||
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)){ //possible performance improvement here!
             
+            printk("In poll dma IF\n");
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
             tmp = (tmp+1)%64;
@@ -529,7 +531,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
             //writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
             __raw_writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
             //printk("Data in post=%llx\n",*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)));
-            udelay(2);
+            //udelay(2);
             //writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
         __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
@@ -559,7 +561,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
             //writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
             __raw_writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
             //printk("Data in send=%llx\n",*(u64 *)((work->addr)+(i*8)));
-            udelay(2);
+            //udelay(2);
         }
     __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     spin_unlock(&pcie_axi_lock);
