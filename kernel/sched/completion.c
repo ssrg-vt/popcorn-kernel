@@ -121,7 +121,8 @@ wait_for_common(struct completion *x, long timeout, int state)
 
 static long __sched
 wait_for_common_io(struct completion *x, long timeout, int state)
-{
+{   
+    printk("In wait_for_common_io\n");
 	return __wait_for_common(x, io_schedule_timeout, timeout, state);
 }
 
@@ -169,7 +170,7 @@ EXPORT_SYMBOL(wait_for_completion_timeout);
  * for IO (which traditionally means blkio only).
  */
 void __sched wait_for_completion_io(struct completion *x)
-{
+{   
 	wait_for_common_io(x, MAX_SCHEDULE_TIMEOUT, TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(wait_for_completion_io);
@@ -189,7 +190,8 @@ EXPORT_SYMBOL(wait_for_completion_io);
  */
 unsigned long __sched
 wait_for_completion_io_timeout(struct completion *x, unsigned long timeout)
-{
+{   
+    printk("In wait_for_completion_io_timeout\n");
 	return wait_for_common_io(x, timeout, TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(wait_for_completion_io_timeout);
