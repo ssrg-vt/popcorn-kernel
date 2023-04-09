@@ -115,7 +115,8 @@ __wait_for_common(struct completion *x,
 
 static long __sched
 wait_for_common(struct completion *x, long timeout, int state)
-{
+{   
+    printk("In wait_for_common\n");
 	return __wait_for_common(x, schedule_timeout, timeout, state);
 }
 
@@ -137,7 +138,8 @@ wait_for_common_io(struct completion *x, long timeout, int state)
  * and interrupt capability. Also see complete().
  */
 void __sched wait_for_completion(struct completion *x)
-{
+{   
+    printk("In wait_for_completion\n");
 	wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(wait_for_completion);
