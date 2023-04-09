@@ -66,6 +66,7 @@ void *wait_at_station(struct wait_station *ws)
 {	
 	printk("Inside wait station\n");
 	void *ret;
+	/*
 	if (!try_wait_for_completion(&ws->pendings)) {
 		printk("Inside try_wait_for_completion\n");
 		//if (wait_for_completion_io_timeout(&ws->pendings, 300 * HZ) == 0) {
@@ -75,6 +76,7 @@ void *wait_at_station(struct wait_station *ws)
 			goto out;
 		}
 	}
+	*/
 	printk("Outside if-else block\n");
 	smp_rmb();
 	ret = (void *)ws->private;

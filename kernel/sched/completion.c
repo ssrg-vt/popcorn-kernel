@@ -69,13 +69,13 @@ static inline long __sched
 do_wait_for_common(struct completion *x,
 		   long (*action)(long), long timeout, int state)
 {   
-    printk("In do_wait_for_common\n");
+    //printk("In do_wait_for_common\n");
 	if (!x->done) {
 		DECLARE_WAITQUEUE(wait, current);
-        printk("After DECLARE_WAITQUEUE\n");
+        //printk("After DECLARE_WAITQUEUE\n");
 		__add_wait_queue_entry_tail_exclusive(&x->wait, &wait);
 		do {
-            printk("In do\n");
+            //printk("In do\n");
 			if (signal_pending_state(state, current)) {
 				timeout = -ERESTARTSYS;
 				break;
@@ -85,9 +85,9 @@ do_wait_for_common(struct completion *x,
 			timeout = action(timeout);
 			spin_lock_irq(&x->wait.lock);
 		} while (!x->done && timeout);
-        printk("After do-while\n");
+        //printk("After do-while\n");
 		__remove_wait_queue(&x->wait, &wait);
-        printk("After __remove_wait_queue\n");
+        //printk("After __remove_wait_queue\n");
 		if (!x->done)
 			return timeout;
 	}
@@ -99,24 +99,24 @@ do_wait_for_common(struct completion *x,
 static inline long __sched
 __wait_for_common(struct completion *x,
 		  long (*action)(long), long timeout, int state)
-{   printk("In __wait_for_common\n");
+{   //printk("In __wait_for_common\n");
 	might_sleep();
-    printk("After sleep\n");
+    //printk("After sleep\n");
 	complete_acquire(x);
-    printk("After complete acquire\n");
+    //printk("After complete acquire\n");
 	spin_lock_irq(&x->wait.lock);
 	timeout = do_wait_for_common(x, action, timeout, state);
 	spin_unlock_irq(&x->wait.lock);
-    printk("After spin_unlock_irq\n");
+    //printk("After spin_unlock_irq\n");
 	complete_release(x);
-    printk("After complete release\n");
+    //printk("After complete release\n");
 	return timeout;
 }
 
 static long __sched
-wait_for_common(struct completion *x, long timeout, int state)
+wait_for_common(struct completion *x, long timeout, int state)//Currently this function is called repeatedly
 {   
-    printk("In wait_for_common\n");
+    //printk("In wait_for_common\n");
 	return __wait_for_common(x, schedule_timeout, timeout, state);
 }
 
@@ -139,7 +139,7 @@ wait_for_common_io(struct completion *x, long timeout, int state)
  */
 void __sched wait_for_completion(struct completion *x)
 {   
-    printk("In wait_for_completion\n");
+    //printk("In wait_for_completion\n");
 	wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(wait_for_completion);
