@@ -66,17 +66,17 @@ void *wait_at_station(struct wait_station *ws)
 {	
 	printk("Inside wait station\n");
 	void *ret;
-	/*
+	
 	if (!try_wait_for_completion(&ws->pendings)) {
 		printk("Inside try_wait_for_completion\n");
 		//if (wait_for_completion_io_timeout(&ws->pendings, 300 * HZ) == 0) {
-		if (wait_for_completion_io_timeout(&ws->pendings, MAX_SCHEDULE_TIMEOUT) == 0) { //return 0 if timed out, else returns positive value
+		if (wait_for_completion_timeout(&ws->pendings, MAX_SCHEDULE_TIMEOUT) == 0) { //return 0 if timed out, else returns positive value
 			printk("Inside wait_for_completion_io_timeout\n");
 			ret = ERR_PTR(-ETIMEDOUT);
 			goto out;
 		}
 	}
-	*/
+	
 	printk("Outside if-else block\n");
 	smp_rmb();
 	ret = (void *)ws->private;
