@@ -340,7 +340,8 @@ static int poll_dma(void* arg0)
 
         //rcu_read_lock();
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) ||
-            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010)){ //possible performance improvement here!
+            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010) || 
+            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(7*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
             
             printk("In poll dma IF\n");
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
@@ -645,7 +646,7 @@ static int __init axidma_init(void)
     int ret, size;
     int nents;
     PCNPRINTK("Initializing module over AXI\n");
-    pr_info("smp_processor_id %d\n", smp_processor_id());
+    //pr_info("smp_processor_id %d\n", smp_processor_id());
     pcn_kmsg_set_transport(&transport_pcie_axi);
     PCNPRINTK("registered transport layer\n");
 
