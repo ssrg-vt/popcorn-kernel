@@ -2471,7 +2471,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	}
 
 	get_page(page);
-	printk("Before get wait station\n");
+	//printk("Before get wait station\n");
 	ws = get_wait_station(tsk);
 
 	pkey_res = radix_tree_lookup(&pkey_rd_tree, addr);
@@ -2480,7 +2480,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	} else {
 		pkey = 0;
 	}
-	printk("Before prot proc handler\n");
+	//printk("Before prot proc handler\n");
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, tsk->origin_nid, vmf->flags, ws->id, 1);
 	printk("Before wait station\n");

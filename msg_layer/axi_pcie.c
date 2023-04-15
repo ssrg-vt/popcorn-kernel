@@ -341,11 +341,14 @@ static int poll_dma(void* arg0)
         //rcu_read_lock();
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) ||
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010) || 
-            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(7*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
+            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(8*8))) == 0x0ADDBEEFDEADBEEF) || 
+            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(16*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
             
             printk("In poll dma IF\n");
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(8*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(16*8)) = 0x0;
             tmp = (tmp+1)%64;
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
