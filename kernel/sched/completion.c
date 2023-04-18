@@ -123,7 +123,7 @@ wait_for_common(struct completion *x, long timeout, int state)//Currently this f
 static long __sched
 wait_for_common_io(struct completion *x, long timeout, int state)
 {   
-    printk("In wait_for_common_io\n");
+    //printk("In wait_for_common_io\n");
 	return __wait_for_common(x, io_schedule_timeout, timeout, state);
 }
 
@@ -193,7 +193,7 @@ EXPORT_SYMBOL(wait_for_completion_io);
 unsigned long __sched
 wait_for_completion_io_timeout(struct completion *x, unsigned long timeout)
 {   
-    printk("In wait_for_completion_io_timeout\n");
+    //printk("In wait_for_completion_io_timeout\n");
 	return wait_for_common_io(x, timeout, TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(wait_for_completion_io_timeout);
