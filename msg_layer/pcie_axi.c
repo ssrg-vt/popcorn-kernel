@@ -230,6 +230,7 @@ static void __update_recv_index(queue_tr *q, int i)
     }
     writeq(0x00000000fefefefe, zynq_hw_addr); //Reset the physical address
     writeq(q->work_list[i]->dma_addr, zynq_hw_addr); //Update the physical address with next sector address of recv Q
+    //printk("Recv Q addr = %llx\n", q->work_list[i]->dma_addr);
 }
 
 static int __get_recv_index(queue_tr *q)
@@ -246,9 +247,9 @@ void process_message(int recv_i)
     msg = recv_queue->work_list[recv_i]->addr;
     //pcn_kmsg_process(msg);
     
-    //printk("process messgage in %llx\n", virt_to_phys(recv_queue->work_list[recv_i]->addr));
+    //printk("msg type is %d\n", msg->header.type);
     if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-        printk("pcn_kmsg_pcie_axi_process\n");
+        //printk("pcn_kmsg_pcie_axi_process\n");
         pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
     } else {
         printk("pcn_kmsg_process\n");
@@ -279,13 +280,24 @@ static struct send_work *__get_send_work(int index)
 static int poll_dma(void* arg0)
 {   
     bool was_frozen;
+    int i;
     int recv_index = 0, index = 0, tmp = 0;
     //printk("In poll_dma\n");
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
-        if (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) {
+        if ((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) ||
+            (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) == 0x0ADDBEEFDEADBEEF) ||
+            (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) == 0x0ADDBEEFDEADBEEF)) {
+            
+            //printk("In pol IF\n");
+            /*
+            for(i=0; i<1024; i++){
+                printk("Data recvd = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
+            }*/
             
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) = 0x0;
             tmp = (tmp+1)%64;
             //printk("tmp = %d\n", tmp);
             index = __get_recv_index(recv_queue);
@@ -477,16 +489,18 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     if (radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))) {
 
         spin_lock(&pcie_axi_lock);
-        printk("In post\n");
+        //printk("In post\n");
         for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){
                 //Tried memory barrier, doesn't seem to work.
                 //The issue could be due to the buffer capacity in the PCIE IP, which could over get filled up. 
                 __raw_writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (zynq_hw_addr + (i*8)));
                 //__iowrite64_copy((zynq_hw_addr + (i*8)), (u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), 1);
-                udelay(2); //Added an explicit delay (NOT RECOMMENDED!!!), seem to work. Need to think of a better approach
+                //udelay(2); //Added an explicit delay (NOT RECOMMENDED!!!), seem to work. Need to think of a better approach
                 //printk("Data in post=%llx\n",*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)));
         }
+        //printk("1022 write\n");
         __raw_writeq(0x00000000d010d010, (zynq_hw_addr+(1022*8)));
+        //printk("1022 write\n");
         __raw_writeq(0x00000000d010d010, (zynq_hw_addr+(1023*8)));
         spin_unlock(&pcie_axi_lock);
         h2c_desc_complete = 1;
@@ -509,13 +523,13 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     work->done = &done;
     spin_lock(&pcie_axi_lock);
-    printk("In send\n");
+    //printk("In send\n");
     for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){ 
             //Tried memory barrier, doesn't seem to work.
             //The issue could be due to the buffer capacity in the PCIE IP, which could over get filled up. 
             __raw_writeq(*(u64 *)((work->addr)+(i*8)), (zynq_hw_addr+(i*8)));
             //__iowrite64_copy((zynq_hw_addr+(i*8)), (u64 *)((work->addr)+(i*8)), 1);
-            udelay(2);//Added an explicit delay (NOT RECOMMENDED!!!), seem to work. Need to think of a better approach
+            //udelay(2);//Added an explicit delay (NOT RECOMMENDED!!!), seem to work. Need to think of a better approach
             //printk("Data in send=%llx\n",*(u64 *)((work->addr)+(i*8)));
 
         }
@@ -525,9 +539,9 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     h2c_desc_complete = 1;
     
     __process_sent(work);
-    printk("After process sent\n");
+    //printk("After process sent\n");
     if (!try_wait_for_completion(&done)){
-        printk("After try_wait\n");
+        //printk("After try_wait\n");
         ret = wait_for_completion_io_timeout(&done, 60 *HZ);
         if (!ret) {
             printk("Message waiting failed\n");
@@ -536,7 +550,6 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
         }
     }
     return 0;
-
 out:
     __put_pcie_axi_send_work(work);
     return ret;
@@ -593,7 +606,11 @@ static void __exit axidma_exit(void)
 }
 
 static int __init axidma_init(void)
-{
+{   
+    //printk("Size info\n");
+    //printk("Size of int = %d\n", sizeof(int));
+    //printk("Size of pid_t = %d\n", sizeof(pid_t));
+    //printk("Size of unsigned long = %d\n", sizeof(unsigned long));
     int ret;
     PCNPRINTK("Initializing module over PCIe\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
@@ -619,10 +636,10 @@ static int __init axidma_init(void)
             ret = -ENOMEM;
             goto out;
         }
-        printk("Zynq address = %llx\n", zynq_hw_addr);
+        //printk("Zynq address = %llx\n", zynq_hw_addr);
     }
 
-    printk("Before PCIe init\n");
+    //printk("Before PCIe init\n");
     init_pcie(pci_dev, zynq_hw_addr);
 
     /*Need to include a function that passes the zynq_hw_addr to the kernel for prot proc requests.*/

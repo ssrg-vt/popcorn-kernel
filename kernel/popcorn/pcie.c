@@ -74,31 +74,78 @@ EXPORT_SYMBOL(resolve_waiting);
 
 void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, unsigned long iaddr, unsigned long pkey, 
 	pid_t opid, pid_t rpid, int from_nid, unsigned long fflags, int ws_id, int tsk_remote)
-{	    
+{		
+		//printk();    
+
 		spin_lock(&prot_proc_lock);
 		write_register((u64)((vaddr & XDMA_MSB_MASK) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_vaddr_msb));
+		//printk("proc_vaddr_msb = %llx\n", (u64)((vaddr & XDMA_MSB_MASK) | PROT_PROC_ID));
+		//printk("proc_vaddr_msb r = %llx\n", readq((u32 *)(xdma_axi + proc_vaddr_msb)));
+
 		write_register((u64)(((vaddr & XDMA_LSB_MASK) << 32)| PROT_PROC_ID), (u64 *)(xdma_axi + proc_vaddr_lsb));
+		//printk("proc_vaddr_lsb = %llx\n", (u64)(((vaddr & XDMA_LSB_MASK) << 32)| PROT_PROC_ID));
+		//printk("proc_vaddr_lsb r = %llx\n", readq((u32 *)(xdma_axi + proc_vaddr_lsb)));
+
 		write_register((u64)((fflags & XDMA_MSB_MASK) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_fflags_msb));
+		//printk("proc_fflags_msb = %llx\n", (u64)((fflags & XDMA_MSB_MASK) | PROT_PROC_ID));
+		//printk("proc_fflags_msb r = %llx\n", readq((u32 *)(xdma_axi + proc_fflags_msb)));
+
 		write_register((u64)(((fflags & XDMA_LSB_MASK) << 32)| PROT_PROC_ID), (u64 *)(xdma_axi + proc_fflags_lsb));
+		//printk("proc_fflags_lsb = %llx\n", (u64)(((fflags & XDMA_LSB_MASK) << 32)| PROT_PROC_ID));
+		//printk("proc_fflags_lsb r = %llx\n", readq((u32 *)(xdma_axi + proc_fflags_lsb)));
+
 		write_register((u64)((iaddr & XDMA_MSB_MASK) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_iaddr_msb));
+		//printk("proc_iaddr_msb = %llx\n", (u64)((iaddr & XDMA_MSB_MASK) | PROT_PROC_ID));
+		//printk("proc_iaddr_msb r = %llx\n", readq((u32 *)(xdma_axi + proc_iaddr_msb)));
+
 		write_register((u64)(((iaddr & XDMA_LSB_MASK) << 32)| PROT_PROC_ID), (u64 *)(xdma_axi + proc_iaddr_lsb));
+		//printk("proc_iaddr_lsb = %llx\n", (u64)(((iaddr & XDMA_LSB_MASK) << 32)| PROT_PROC_ID));
+		//printk("proc_iaddr_lsb r = %llx\n", readq((u32 *)(xdma_axi + proc_iaddr_lsb)));
 		if (pkey){
 			write_register((u64)((pkey & XDMA_MSB_MASK) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_pkey_msb));
+			//printk("proc_pkey_msb = %llx\n", (u64)((pkey & XDMA_MSB_MASK) | PROT_PROC_ID));
+			//printk("proc_pkey_msb r = %llx\n", readq((u32 *)(xdma_axi + proc_pkey_msb)));
+
 			write_register((u64)(((pkey & XDMA_LSB_MASK) << 32) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_pkey_lsb));
+			//printk("proc_pkey_lsb = %llx\n", (u64)(((pkey & XDMA_LSB_MASK) << 32) | PROT_PROC_ID));
+			//printk("proc_pkey_lsb r = %llx\n", readq((u32 *)(xdma_axi + proc_pkey_lsb)));
 		} else {
 			write_register((0x0000000000000000 | PROT_PROC_ID), (u64 *)(xdma_axi + proc_pkey_msb));
+			//printk("proc_pkey_msb = %llx\n", (0x0000000000000000 | PROT_PROC_ID));
+			//printk("proc_pkey_msb r = %llx\n", readq((u32 *)(xdma_axi + proc_pkey_msb)));
+
 			write_register((0x0000000000000000 | PROT_PROC_ID), (u64 *)(xdma_axi + proc_pkey_lsb));
+			//printk("proc_pkey_lsb = %llx\n", (0x0000000000000000 | PROT_PROC_ID));
+			//printk("proc_pkey_lsb r = %llx\n", readq((u32 *)(xdma_axi + proc_pkey_lsb)));
 		}	
 		write_register((((ws_id & XDMA_LSB_MASK) << 32) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_ws_id));
+		//printk("proc_ws_id = %llx\n", (((ws_id & XDMA_LSB_MASK) << 32) | PROT_PROC_ID));
+		//printk("proc_ws_id r = %llx\n", readq((u32 *)(xdma_axi + proc_ws_id)));
+
 		write_register((((opid & XDMA_LSB_MASK) << 32) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_opid));
+		//printk("proc_opid = %llx\n", (((opid & XDMA_LSB_MASK) << 32) | PROT_PROC_ID));
+		//printk("proc_opid r = %llx\n", readq((u32 *)(xdma_axi + proc_opid)));
+
 		write_register((((rpid & XDMA_LSB_MASK) << 32) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_rpid));
+		//printk("proc_rpid = %llx\n", (((rpid & XDMA_LSB_MASK) << 32) | PROT_PROC_ID));
+		//printk("proc_rpid r = %llx\n", readq((u32 *)(xdma_axi + proc_rpid)));
+
+		//printk("FROM_NID=%d", from_nid);
 		write_register((((from_nid & XDMA_LSB_MASK) << 32) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_nid));
+		//printk("proc_nid = %llx\n", (((from_nid & XDMA_LSB_MASK) << 32) | PROT_PROC_ID));
+		//printk("proc_nid r = %llx\n", readq((u32 *)(xdma_axi + proc_nid)));
  		if (tsk_remote) {
- 			write_register((((0x00008001 & XDMA_LSB_MASK) << 32) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_ctl));
+ 			write_register((((0x8001 & XDMA_LSB_MASK) << 32) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_ctl));
+ 			//printk("proc_ctl = %llx\n", (((0x8001 & XDMA_LSB_MASK) << 32) | PROT_PROC_ID));
+ 			//printk("proc_ctl r = %llx\n", readq((u32 *)(xdma_axi + proc_ctl)));
  		} else {
- 			write_register((((0x00000001 & XDMA_LSB_MASK) << 32) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_ctl));
+ 			write_register((((0x01 & XDMA_LSB_MASK) << 32) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_ctl));
+ 			//printk("proc_ctl = %llx\n", (((0x01 & XDMA_LSB_MASK) << 32) | PROT_PROC_ID));
+ 			//printk("proc_ctl r = %llx\n", readq((u32 *)(xdma_axi + proc_ctl)));
  		}
- 		write_register((0x00000000 | PROT_PROC_ID), (u64 *)(xdma_axi + proc_ctl));
+ 		write_register((0x00 | PROT_PROC_ID), (u64 *)(xdma_axi + proc_ctl));
+ 		//printk("proc_ctl = %llx\n", (0x00 | PROT_PROC_ID));
+ 		//printk("proc_ctl r = %llx\n", readq((u32 *)(xdma_axi + proc_ctl)));
  		spin_unlock(&prot_proc_lock);
 }
 EXPORT_SYMBOL(prot_proc_handle_localfault);
