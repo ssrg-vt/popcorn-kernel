@@ -305,10 +305,10 @@ void process_message(int recv_i)
     //pcn_kmsg_process(msg);
     
     if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-        printk("calling pcie_axi processing function\n");
+        //printk("calling pcie_axi processing function\n");
         pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
     } else {
-        printk("Calling pcn processning function\n");
+        ///rintk("Calling pcn processning function\n");
         pcn_kmsg_process(msg);
     }
 }
@@ -344,7 +344,10 @@ static int poll_dma(void* arg0)
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(56*8))) == 0x0ADDBEEFDEADBEEF) || 
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(48*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
             
-            printk("In poll dma IF\n");
+            /*printk("In poll dma IF\n");
+            for(i=0; i<1024; i++){
+                printk("Data recvd = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
+            }*/
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) = 0x0;
@@ -361,7 +364,7 @@ static int poll_dma(void* arg0)
                 recv_queue->size = 0;
             }
             process_message(recv_index);
-            printk("Processed popcorn message.\n");
+            //printk("Processed popcorn message.\n");
         } else if (h2c_desc_complete != 0) {
             no_of_messages += 1;
             h2c_desc_complete = 0;
@@ -660,7 +663,7 @@ static int __init axidma_init(void)
     if (x86_host) {
         if (of_address_to_resource(x86_host, 0, &res1) == 0) {
             x86_host_base_addr = (unsigned long long)res1.start;
-            pr_info("pcie_us_rqrc base address = 0x%llx\n", x86_host_base_addr);//0xa0000000
+            //pr_info("pcie_us_rqrc base address = 0x%llx\n", x86_host_base_addr);//0xa0000000
             x86_host_addr = ioremap(x86_host_base_addr, resource_size(&res1));
             if(!x86_host_addr)
                 ret = -ENOMEM;
@@ -672,7 +675,7 @@ static int __init axidma_init(void)
     if (prot_proc) {
         if (of_address_to_resource(prot_proc, 0, &res2) == 0) {
             prot_proc_base_addr = (unsigned long long)res2.start;
-            pr_info("protocol_processor_v1_0 base address = 0x%llx\n", prot_proc_base_addr);//0xb0000000
+            //pr_info("protocol_processor_v1_0 base address = 0x%llx\n", prot_proc_base_addr);//0xb0000000
             prot_proc_addr = ioremap(prot_proc_base_addr, resource_size(&res2));
             if(!prot_proc_addr)
                 ret = -ENOMEM;
