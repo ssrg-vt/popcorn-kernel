@@ -374,7 +374,7 @@ static int poll_dma(void* arg0)
                 et_polltrd = ktime_get_ns();
                 dsm_req = 0;
             }
-            printk("Time elapsed for dsm request = %lld ns\n", ktime_get_ns(ktime_sub(et_polltrd, st_polltrd)));
+            printk("Time elapsed for dsm request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
             //printk("Processed popcorn message.\n");
         } else if (h2c_desc_complete != 0) {
             no_of_messages += 1;
