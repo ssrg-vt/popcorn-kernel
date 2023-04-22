@@ -332,7 +332,7 @@ static struct send_work *__get_send_work(int index)
 
 static int poll_dma(void* arg0)
 {   
-    bool was_frozen;
+    bool was_frozen, dsm_req;
     int i;
     int recv_index = 0, index = 0, tmp = 0;
     u64 st_polltrd, et_polltrd;
@@ -352,7 +352,7 @@ static int poll_dma(void* arg0)
             if((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) == 0x0ADDBEEFDEADBEEF) ||
                (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) == 0x0ADDBEEFDEADBEEF))
                 dsm_req = 1;
-            
+
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) = 0x0;
