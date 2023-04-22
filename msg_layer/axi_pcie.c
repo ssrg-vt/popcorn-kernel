@@ -682,7 +682,7 @@ static int __init axidma_init(void)
         }
     }
 
-    printk("Before axi init\n");
+    //printk("Before axi init\n");
     init_axi(prot_proc_addr);
 
     my_nid = 1;

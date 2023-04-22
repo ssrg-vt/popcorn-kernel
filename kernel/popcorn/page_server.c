@@ -2813,6 +2813,9 @@ out:
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
 
+	printk("Time elapsed in pte fault handler = %lld ns\n", ktime_to_ns(ktime_sub(end_time, start_time)));
+	printk("Total gpf time = %lld ns\n", gpf_time);
+	pritnk("Total number of gpf = %d\n", no_of_gpf);
 	return ret;
 }
 
