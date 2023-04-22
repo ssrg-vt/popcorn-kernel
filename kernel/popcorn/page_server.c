@@ -2397,7 +2397,10 @@ out_wakeup:
 /* fDSM Localfault at Remote Handler */
 
 static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
-{
+{	
+	/*Time elaspsed*/
+	u64 st_ppreg, et_ppreg;
+
 	spinlock_t *ptl;
 	struct page *page;
 	bool populated = false;
@@ -2483,8 +2486,11 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	//printk("Before prot proc handler\n");
 	//printk("from_nid_o=%d\n", tsk->origin_nid);
 	//printk("from_nid_r=%d\n", tsk->remote_pid);
+	st_ppreg = ktime_get_ns();
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, 1, vmf->flags, ws->id, 1);//replaced tsk->origin_nid with 1
+	et_ppreg = ktime_get_ns();
+	printk("Time taken for DSM reg write = %lld ns\n", ktime_to_ns(ktime_sub(et_ppreg, st_ppreg)));
 	//printk("Before wait station\n");
 	rp = wait_at_station(ws);
 	//printk("After wait station\n");
@@ -2723,6 +2729,8 @@ out_wakeup:
 int page_server_handle_pte_fault(struct vm_fault *vmf)
 {	
 	//printk("In page_server_handle_pte_fault");
+	/*Time elapsed*/
+	u64 st_lclflt, et_lclflt;
 	unsigned long addr = vmf->address & PAGE_MASK;
 	int ret = 0;
 	end_time = ktime_get_ns();
@@ -2784,7 +2792,10 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 		/* Remote page fault */
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 			//printk("In remote nodes lclfault\n");
+			st_lclflt = ktime_get_ns();
 			ret = __pcie_axi_handle_lcfault_at_remote(vmf);
+			et_lclflt = ktime_get_ns();
+			printk("Time elaspsed in lclflt remote = %lld ns\n", ktime_to_ns(ktime_sub(et_lclflt, st_lclflt)));
 		} else {
 			ret = __handle_localfault_at_remote(vmf);
 		}
@@ -2796,7 +2807,10 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 		/* wr-protected for keeping page consistency */
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 			//printk("In remote nodes lclfault for wr protected\n");
+			st_lclflt = ktime_get_ns();
 			ret = __pcie_axi_handle_lcfault_at_remote(vmf);
+			et_lclflt = ktime_get_ns();
+			printk("Time elaspsed in lclflt remote wr_prot= %lld ns\n", ktime_to_ns(ktime_sub(et_lclflt, st_lclflt)));
 		} else {
 			ret = __handle_localfault_at_remote(vmf);
 		}
@@ -2815,7 +2829,7 @@ out:
 
 	printk("Time elapsed in pte fault handler = %lld ns\n", ktime_to_ns(ktime_sub(end_time, start_time)));
 	printk("Total gpf time = %lld ns\n", gpf_time);
-	pritnk("Total number of gpf = %d\n", no_of_gpf);
+	printk("Total number of gpf = %d\n", no_of_gpf);
 	return ret;
 }
 
