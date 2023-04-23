@@ -1888,6 +1888,8 @@ out:
 
 void pcie_axi_process_remote_page_request(dsm_proc_request_t *req)
 {	
+	u64 st_rmflt_org, et_rmflt_org;
+
 	remote_page_response_t *res = pcn_kmsg_get(sizeof(*res));
 	
 	struct task_struct *tsk;
@@ -1932,7 +1934,10 @@ again:
 	if (tsk->at_remote) {
 		res->result = __pcie_axi_handle_rmfault_at_remote(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
 	} else {
+		st_rmflt_org = ktime_get_ns();
 		res->result = __pcie_axi_handle_rmfault_at_origin(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
+		et_rmflt_org = ktime_get_ns();
+		printk("Time elapsed for handling rmflt at org = %lld ns\n", ktime_to_ns(ktime_sub(et_rmflt_org, st_rmflt_org)));
 	}
 
 out_up:
@@ -2000,13 +2005,21 @@ void pcie_axi_process_invalidate_request(dsm_proc_request_t *req)
 }
 
 static void process_prot_proc_request(struct work_struct *work)
-{
+{	
+	u64 st_process_pp, et_process_pp;
+
 	START_KMSG_WORK(dsm_proc_request_t, req, work);
 
 	if (req->page_mode == INVALIDATE) {
+		st_process_pp = ktime_get_ns();
 		pcie_axi_process_invalidate_request(req);
+		et_process_pp = ktime_get_ns();
+		printk("Time taken for processing invalidtaion req = %lld ns\n", ktime_to_ns(ktime_sub(et_process_pp, st_process_pp)));
 	} else {
+		st_process_pp = ktime_get_ns();
 		pcie_axi_process_remote_page_request(req);
+		et_process_pp = ktime_get_ns();
+		printk("Time taken for processing invalidtaion req = %lld ns\n", ktime_to_ns(ktime_sub(et_process_pp, st_process_pp)));
 	}
 
 	kfree(work);
