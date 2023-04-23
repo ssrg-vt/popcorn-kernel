@@ -25,7 +25,7 @@ struct wait_station *get_wait_station_multiple(struct task_struct *tsk, int coun
 {
 	int id;
 	struct wait_station *ws;
-	printk("In get_wait_station_multiple\n");
+	//printk("In get_wait_station_multiple\n");
 	spin_lock(&wait_station_lock);
 	id = find_first_zero_bit(wait_station_available, MAX_WAIT_STATIONS);
 	BUG_ON(id >= MAX_WAIT_STATIONS);

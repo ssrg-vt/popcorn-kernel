@@ -1722,7 +1722,7 @@ out:
 /* PCIE-AXI Handle Remotefault at Origin */
 
 static int __pcie_axi_handle_rmfault_at_origin(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, unsigned long iaddr, unsigned long fault_flags, unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid, int x, remote_page_response_t *res)
-{
+{	
 	unsigned char *paddr;
 	struct page *page;
 	fault_flags = fault_flags | PC_FAULT_FLAG_REMOTE;
@@ -1817,7 +1817,8 @@ again:
 /* XDMA Handle Remotefault at Remote */
 
 static int __pcie_axi_handle_rmfault_at_remote(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, unsigned long vaddr, unsigned long iaddr, unsigned long fflags, unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid, int x, remote_page_response_t *res)
-{
+{	
+	u64 st_cpuser, et_cpuser;
 	unsigned long addr = vaddr & PAGE_MASK;
 	unsigned long fault_flags = fflags | PC_FAULT_FLAG_REMOTE;
 	unsigned char *paddr;
@@ -1872,8 +1873,12 @@ static int __pcie_axi_handle_rmfault_at_remote(struct task_struct *tsk, struct m
 	BUG_ON(!page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
 	paddr = kmap_atomic(page);
+	st_cpuser = ktime_get_ns();
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
+	et_cpuser = ktime_get_ns();
+	printk("Cpoy to user time = %lld ns\n", ktime_to_ns(ktime_sub(et_cpuser, st_cpuser)));	
 	no_of_pages_sent += 1;
+	printk("Number of pages sent = %d\n", no_of_pages_sent);
 	kunmap_atomic(paddr);
 
 	__finish_fault_handling(fh);
