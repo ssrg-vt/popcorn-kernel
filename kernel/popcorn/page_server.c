@@ -1937,12 +1937,12 @@ again:
 #endif
 
 	if (tsk->at_remote) {
-		res->result = __pcie_axi_handle_rmfault_at_remote(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
-	} else {
 		st_rmflt_org = ktime_get_ns();
-		res->result = __pcie_axi_handle_rmfault_at_origin(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
+		res->result = __pcie_axi_handle_rmfault_at_remote(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
 		et_rmflt_org = ktime_get_ns();
-		printk("Time elapsed for handling rmflt at org = %lld ns\n", ktime_to_ns(ktime_sub(et_rmflt_org, st_rmflt_org)));
+		printk("Time elapsed for handling rmflt at remote = %lld ns\n", ktime_to_ns(ktime_sub(et_rmflt_org, st_rmflt_org)));
+	} else {
+		res->result = __pcie_axi_handle_rmfault_at_origin(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
 	}
 
 out_up:
@@ -2024,7 +2024,7 @@ static void process_prot_proc_request(struct work_struct *work)
 		st_process_pp = ktime_get_ns();
 		pcie_axi_process_remote_page_request(req);
 		et_process_pp = ktime_get_ns();
-		printk("Time taken for processing invalidtaion req = %lld ns\n", ktime_to_ns(ktime_sub(et_process_pp, st_process_pp)));
+		printk("Time taken for processing rpr = %lld ns\n", ktime_to_ns(ktime_sub(et_process_pp, st_process_pp)));
 	}
 
 	kfree(work);
