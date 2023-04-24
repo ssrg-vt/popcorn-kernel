@@ -346,9 +346,9 @@ static int poll_dma(void* arg0)
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(48*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
             
             //printk("In poll dma IF\n");
-            for(i=0; i<1024; i++){
+            /*for(i=0; i<1024; i++){
                 printk("Data recvd in poll= %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
-            }
+            }*/
             if((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) == 0x0ADDBEEFDEADBEEF) ||
                (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) == 0x0ADDBEEFDEADBEEF))
                 dsm_req = 1;
@@ -548,7 +548,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){
             //writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
             __raw_writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
-            printk("Data in post=%llx\n",*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)));
+            //printk("Data in post=%llx\n",*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)));
             //udelay(2);
             //writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
@@ -578,7 +578,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){ 
             //writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
             __raw_writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
-            printk("Data in send=%llx\n",*(u64 *)((work->addr)+(i*8)));
+            //printk("Data in send=%llx\n",*(u64 *)((work->addr)+(i*8)));
             //udelay(2);
         }
     __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
