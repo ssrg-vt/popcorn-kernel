@@ -288,6 +288,7 @@ static void __update_recv_index(queue_tr *q, int i)
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     writeq(q->work_list[i]->dma_addr, x86_host_addr); //Update the physical address with next sector address of recv Q
     //printk("Recv Q address = %llx\n", q->work_list[i]->dma_addr);
+    memset(q->work_list[i]->dma_addr, 0, 8192);
 }
 
 static int __get_recv_index(queue_tr *q)
