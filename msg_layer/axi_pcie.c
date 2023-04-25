@@ -288,7 +288,7 @@ static void __update_recv_index(queue_tr *q, int i)
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     writeq(q->work_list[i]->dma_addr, x86_host_addr); //Update the physical address with next sector address of recv Q
     //printk("Recv Q address = %llx\n", q->work_list[i]->dma_addr);
-    memset(q->work_list[i]->dma_addr, 0, 8192);
+    //memset(q->work_list[i]->dma_addr, 0, 8192);
 }
 
 static int __get_recv_index(queue_tr *q)
@@ -346,19 +346,10 @@ static int poll_dma(void* arg0)
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(56*8))) == 0x0ADDBEEFDEADBEEF) || 
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(48*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
             
-            //printk("In poll dma IF\n");
-            /*for(i=0; i<1024; i++){
-                printk("Data recvd in poll= %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
-            }*/
             if((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) == 0x0ADDBEEFDEADBEEF) ||
                (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) == 0x0ADDBEEFDEADBEEF))
                 dsm_req = 1;
 
-            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) = 0x0;
-            tmp = (tmp+1)%64;
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
             //printk("index=%d\n",index);
@@ -369,6 +360,18 @@ static int poll_dma(void* arg0)
             if (recv_queue->size == recv_queue->nr_entries) {
                 recv_queue->size = 0;
             }
+            //printk("In poll dma IF\n");
+            for(i=0; i<1024; i++){
+                //printk("Data recvd in poll= %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
+                *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)) = 0x0;
+            }
+
+            //*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
+            //*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
+            //*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) = 0x0;
+            //*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) = 0x0;
+            tmp = (tmp+1)%64;
+
             if(dsm_req) st_polltrd = ktime_get_ns();
             process_message(recv_index);
             if(dsm_req) {
