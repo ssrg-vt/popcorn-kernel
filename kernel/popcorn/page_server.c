@@ -2519,7 +2519,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 		void *paddr = kmap(page);
 		st_cptousr = ktime_get_ns();
 		copy_to_user_page(vmf->vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		et_cptousr = ktime_get_ns;
+		et_cptousr = ktime_get_ns();
 		printk("Time to copy to user = %lld ns\n", ktime_to_ns(ktime_sub(et_cptousr, st_cptousr)));
 		kunmap(page);
 		flush_dcache_page(page);
