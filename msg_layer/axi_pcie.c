@@ -369,14 +369,17 @@ static int poll_dma(void* arg0)
             if (recv_queue->size == recv_queue->nr_entries) {
                 recv_queue->size = 0;
             }
-            if(dsm_req) st_polltrd = ktime_get_ns();
+            st_polltrd = ktime_get_ns();
             process_message(recv_index);
             if(dsm_req) {
                 et_polltrd = ktime_get_ns();
+                printk("Time elapsed for processing dsm request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
                 dsm_req = 0;
             }
-            printk("Time elapsed for dsm request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
-            //printk("Processed popcorn message.\n");
+            else{
+                et_polltrd = ktime_get_ns();
+                printk("Time elapsed for processing DMA request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
+            }
         } else if (h2c_desc_complete != 0) {
             no_of_messages += 1;
             h2c_desc_complete = 0;

@@ -2417,7 +2417,7 @@ out_wakeup:
 static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 {	
 	/*Time elaspsed*/
-	u64 st_ppreg, et_ppreg;
+	u64 st_ppreg, et_ppreg, st_wait, et_wait, st_cptousr, et_cptousr;
 
 	spinlock_t *ptl;
 	struct page *page;
@@ -2510,11 +2510,17 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	et_ppreg = ktime_get_ns();
 	printk("Time taken for DSM reg write = %lld ns\n", ktime_to_ns(ktime_sub(et_ppreg, st_ppreg)));
 	//printk("Before wait station\n");
+	st_wait = ktime_get_ns();
 	rp = wait_at_station(ws);
+	et_wait = ktime_get_ns();
+	printk("Time spent waiting = %lld ns\n", ktime_to_ns(ktime_sub(et_wait, st_wait)));
 	//printk("After wait station\n");
 	if (rp->result == 0) {
 		void *paddr = kmap(page);
+		st_cptousr = ktime_get_ns();
 		copy_to_user_page(vmf->vma, page, addr, paddr, rp->page, PAGE_SIZE);
+		et_cptousr = ktime_get_ns;
+		printk("Time to copy to user = %lld ns\n", ktime_to_ns(ktime_sub(et_cptousr, st_cptousr)));
 		kunmap(page);
 		flush_dcache_page(page);
 		__SetPageUptodate(page);
