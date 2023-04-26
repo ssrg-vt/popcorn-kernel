@@ -343,21 +343,21 @@ static int poll_dma(void* arg0)
         //rcu_read_lock();
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) ||
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010) || 
-            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(56*8))) == 0x0ADDBEEFDEADBEEF) || 
-            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(48*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
+            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(64*8))) == 0x0ADDBEEFDEADBEEF) || 
+            (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(56*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
             
             //printk("In poll dma IF\n");
             /*for(i=0; i<1024; i++){
                 printk("Data recvd in poll= %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
             }*/
-            if((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) == 0x0ADDBEEFDEADBEEF) ||
-               (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) == 0x0ADDBEEFDEADBEEF))
+            if((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) == 0x0ADDBEEFDEADBEEF) ||
+               (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) == 0x0ADDBEEFDEADBEEF))
                 dsm_req = 1;
 
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) = 0x0;
+            //*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) = 0x0;
             tmp = (tmp+1)%64;
             index = __get_recv_index(recv_queue);
             __update_recv_index(recv_queue, index + 1);
