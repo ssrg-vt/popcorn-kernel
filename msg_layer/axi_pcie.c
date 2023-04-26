@@ -270,7 +270,7 @@ static struct send_work *send_work_pool = NULL;
 static queue_t *send_queue;
 static queue_tr *recv_queue;
 static dma_addr_t dma_handle;
-
+int st_post, et_post, st_send, et_send;
 static struct pcie_axi_work *pcie_axi_work_pool = NULL;
 
 /*----------------------------------------------------------------------------
@@ -549,6 +549,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     //printk("In post\n");
     if (radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))) {
         spin_lock(&pcie_axi_lock);
+        st_post = ktime_get_ns();
         for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){
             //writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
             __raw_writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
@@ -557,9 +558,11 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
             //writeq(*(dma_addr_pntr+(i*8)), x86_host_addr + (i*8));
         }
         __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
+        et_post = ktime_get_ns();
         spin_unlock(&pcie_axi_lock);
         //printk("Data Sent\n");
         h2c_desc_complete = 1;
+        printk("Time taken to post msg = %lld ns\n", ktime_to_ns(ktime_sub(et_post, st_post)));
     } else {
         printk("DMA addr: not found\n");
     }
@@ -579,6 +582,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     work->done = &done;
     spin_lock(&pcie_axi_lock);
+    st_send = ktime_get_ns();
     for(i=0; i<((FDSM_MSG_SIZE/8)-1); i++){ 
             //writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
             __raw_writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
@@ -586,10 +590,11 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
             //udelay(2);
         }
     __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
+    et_post = ktime_get_ns();  
     spin_unlock(&pcie_axi_lock);
     //printk("Message sent\n");
     h2c_desc_complete = 1;
-    
+    printk("Time taken to send msg = %lld ns\n", ktime_to_ns(ktime_sub(et_send, st_send)));
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
         ret = wait_for_completion_io_timeout(&done, 60 *HZ);
