@@ -49,8 +49,7 @@ u64 start_time, end_time, res_time;
 static u64 gpf_time = 0;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
-static unsigned long long avg_rmflt_org=0, avg_post=0, avg_process_pp=0, avg_ppreg=0, avg_lclflt=0;
-static int cnt_rmflt_org=1, cnt_post=1, cnt_process_pp=1, cnt_ppreg=1, cnt_lclflt=1;
+
 /* Page Key radix tree */
 
 RADIX_TREE(pkey_rd_tree, GFP_ATOMIC);
@@ -1723,7 +1722,7 @@ out:
 /* PCIE-AXI Handle Remotefault at Origin */
 
 static int __pcie_axi_handle_rmfault_at_origin(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, unsigned long iaddr, unsigned long fault_flags, unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid, int x, remote_page_response_t *res)
-{	
+{
 	unsigned char *paddr;
 	struct page *page;
 	fault_flags = fault_flags | PC_FAULT_FLAG_REMOTE;
@@ -1818,8 +1817,7 @@ again:
 /* XDMA Handle Remotefault at Remote */
 
 static int __pcie_axi_handle_rmfault_at_remote(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, unsigned long vaddr, unsigned long iaddr, unsigned long fflags, unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid, int x, remote_page_response_t *res)
-{	
-	u64 st_cpuser, et_cpuser;
+{
 	unsigned long addr = vaddr & PAGE_MASK;
 	unsigned long fault_flags = fflags | PC_FAULT_FLAG_REMOTE;
 	unsigned char *paddr;
@@ -1874,12 +1872,8 @@ static int __pcie_axi_handle_rmfault_at_remote(struct task_struct *tsk, struct m
 	BUG_ON(!page);
 	flush_cache_page(vma, addr, page_to_pfn(page));
 	paddr = kmap_atomic(page);
-	st_cpuser = ktime_get_ns();
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
-	et_cpuser = ktime_get_ns();
-	printk("Cpoy to user time = %lld ns\n", ktime_to_ns(ktime_sub(et_cpuser, st_cpuser)));	
 	no_of_pages_sent += 1;
-	printk("Number of pages sent = %d\n", no_of_pages_sent);
 	kunmap_atomic(paddr);
 
 	__finish_fault_handling(fh);
@@ -1894,8 +1888,6 @@ out:
 
 void pcie_axi_process_remote_page_request(dsm_proc_request_t *req)
 {	
-	u64 st_rmflt_org, et_rmflt_org;
-
 	remote_page_response_t *res = pcn_kmsg_get(sizeof(*res));
 	
 	struct task_struct *tsk;
@@ -1938,12 +1930,7 @@ again:
 #endif
 
 	if (tsk->at_remote) {
-		st_rmflt_org = ktime_get_ns();
 		res->result = __pcie_axi_handle_rmfault_at_remote(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
-		et_rmflt_org = ktime_get_ns();
-		avg_rmflt_org += ktime_to_ns(ktime_sub(et_rmflt_org, st_rmflt_org)); 
-		printk("Time elapsed for handling rmflt at org = %lld ns\n", avg_rmflt_org/cnt_rmflt_org);
-		cnt_rmflt_org += 1;
 	} else {
 		res->result = __pcie_axi_handle_rmfault_at_origin(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
 	}
@@ -2013,25 +2000,13 @@ void pcie_axi_process_invalidate_request(dsm_proc_request_t *req)
 }
 
 static void process_prot_proc_request(struct work_struct *work)
-{	
-	u64 st_process_pp, et_process_pp;
-
+{
 	START_KMSG_WORK(dsm_proc_request_t, req, work);
 
 	if (req->page_mode == INVALIDATE) {
-		st_process_pp = ktime_get_ns();
 		pcie_axi_process_invalidate_request(req);
-		et_process_pp = ktime_get_ns();
-		avg_process_pp += ktime_to_ns(ktime_sub(et_process_pp, st_process_pp));
-		printk("Time taken for processing invalidtaion req = %lld ns\n", avg_process_pp/cnt_process_pp);
-		cnt_process_pp += 1;
 	} else {
-		st_process_pp = ktime_get_ns();
 		pcie_axi_process_remote_page_request(req);
-		et_process_pp = ktime_get_ns();
-		avg_process_pp += ktime_to_ns(ktime_sub(et_process_pp, st_process_pp));
-		printk("Time taken for processing invalidtaion req = %lld ns\n", avg_process_pp/cnt_process_pp);
-		cnt_process_pp += 1;
 	}
 
 	kfree(work);
@@ -2422,10 +2397,7 @@ out_wakeup:
 /* fDSM Localfault at Remote Handler */
 
 static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
-{	
-	/*Time elaspsed*/
-	u64 st_ppreg, et_ppreg, st_wait, et_wait, st_cptousr, et_cptousr;
-
+{
 	spinlock_t *ptl;
 	struct page *page;
 	bool populated = false;
@@ -2511,25 +2483,14 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	//printk("Before prot proc handler\n");
 	//printk("from_nid_o=%d\n", tsk->origin_nid);
 	//printk("from_nid_r=%d\n", tsk->remote_pid);
-	st_ppreg = ktime_get_ns();
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, 1, vmf->flags, ws->id, 1);//replaced tsk->origin_nid with 1
-	et_ppreg = ktime_get_ns();
-	avg_ppreg += ktime_to_ns(ktime_sub(et_ppreg, st_ppreg));
-	printk("Time taken for DSM reg write = %lld ns\n", avg_ppreg/cnt_ppreg);
-	cnt_ppreg += 1;
 	//printk("Before wait station\n");
-	st_wait = ktime_get_ns();
 	rp = wait_at_station(ws);
-	et_wait = ktime_get_ns();
-	printk("Time spent waiting = %lld ns\n", ktime_to_ns(ktime_sub(et_wait, st_wait)));
 	//printk("After wait station\n");
 	if (rp->result == 0) {
 		void *paddr = kmap(page);
-		st_cptousr = ktime_get_ns();
 		copy_to_user_page(vmf->vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		et_cptousr = ktime_get_ns();
-		printk("Time to copy to user = %lld ns\n", ktime_to_ns(ktime_sub(et_cptousr, st_cptousr)));
 		kunmap(page);
 		flush_dcache_page(page);
 		__SetPageUptodate(page);
@@ -2762,8 +2723,6 @@ out_wakeup:
 int page_server_handle_pte_fault(struct vm_fault *vmf)
 {	
 	//printk("In page_server_handle_pte_fault");
-	/*Time elapsed*/
-	u64 st_lclflt, et_lclflt;
 	unsigned long addr = vmf->address & PAGE_MASK;
 	int ret = 0;
 	end_time = ktime_get_ns();
@@ -2782,7 +2741,6 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 		start_time = ktime_get_ns();
 	} else {
 		gpf_time += end_time - start_time;
-		printk("Time elapsed in pte fault handler = %lld ns\n", ktime_to_ns(ktime_sub(end_time, start_time)));
 		start_time = ktime_get_ns();
 	}
 
@@ -2826,13 +2784,8 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 		/* Remote page fault */
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 			//printk("In remote nodes lclfault\n");
-			st_lclflt = ktime_get_ns();
 			ret = __pcie_axi_handle_lcfault_at_remote(vmf);
-			et_lclflt = ktime_get_ns();
-			avg_lclflt += ktime_to_ns(ktime_sub(et_lclflt, st_lclflt));
-			printk("Time elaspsed in lclflt remote = %lld ns\n", avg_lclflt/cnt_lclflt);
-			cnt_lclflt += 1;
-			} else {
+		} else {
 			ret = __handle_localfault_at_remote(vmf);
 		}
 		goto out;
@@ -2843,10 +2796,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 		/* wr-protected for keeping page consistency */
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 			//printk("In remote nodes lclfault for wr protected\n");
-			st_lclflt = ktime_get_ns();
 			ret = __pcie_axi_handle_lcfault_at_remote(vmf);
-			et_lclflt = ktime_get_ns();
-			printk("Time elaspsed in lclflt remote wr_prot= %lld ns\n", ktime_to_ns(ktime_sub(et_lclflt, st_lclflt)));
 		} else {
 			ret = __handle_localfault_at_remote(vmf);
 		}
@@ -2863,8 +2813,6 @@ out:
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
 
-	printk("Total gpf time = %lld ns\n", gpf_time/(cnt_lclflt-1));
-	printk("Total number of gpf = %d\n", no_of_gpf);
 	return ret;
 }
 
