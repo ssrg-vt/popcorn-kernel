@@ -336,16 +336,18 @@ static int poll_dma(void* arg0)
     bool was_frozen, dsm_req;
     int i;
     int recv_index = 0, index = 0, tmp = 0;
-    u64 st_polltrd, et_polltrd;
+    u64 st_polltrd, et_polltrd, st_msg, et_msg, st_updtaddr, et_updtaddr;
     //printk("In poll_dma\n");
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
+        st_msg = ktime_get_ns();
         //rcu_read_lock();
         if ((*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1022*8))) == 0xd010d010) ||
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(1023*8))) == 0xd010d010) || 
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(64*8))) == 0x0ADDBEEFDEADBEEF) || 
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(56*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
-            
+            et_msg = ktime_get_ns();
+            printk("Time taken by polling thread to detect the message = %lld ns\n", ktime_to_ns(ktime_sub(et_msg, st_msg)));
             //printk("In poll dma IF\n");
             /*for(i=0; i<1024; i++){
                 printk("Data recvd in poll= %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
@@ -360,7 +362,10 @@ static int poll_dma(void* arg0)
             //*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) = 0x0;
             tmp = (tmp+1)%64;
             index = __get_recv_index(recv_queue);
+            st_updtaddr = ktime_get_ns();
             __update_recv_index(recv_queue, index + 1);
+            et_updtaddr = ktime_get_ns();
+            printk("Time taken to transfer address = %lld\n", ktime_to_ns(ktime_sub(et_updtaddr, st_updtaddr)));
             //printk("index=%d\n",index);
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
