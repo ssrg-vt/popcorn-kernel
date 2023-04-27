@@ -371,7 +371,7 @@ static int poll_dma(void* arg0)
             et_updtaddr = ktime_get_ns();
             avg_updtaddr += ktime_to_ns(ktime_sub(et_updtaddr, st_updtaddr));
             printk("Time taken to transfer address = %lld\n", avg_updtaddr/cnt_updtaddr);
-            cnt_updtaddr + =1;
+            cnt_updtaddr += 1;
             //printk("index=%d\n",index);
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
