@@ -272,8 +272,8 @@ static queue_tr *recv_queue;
 static dma_addr_t dma_handle;
 int st_post, et_post, st_send, et_send;
 static struct pcie_axi_work *pcie_axi_work_pool = NULL;
-static unsigned long long avg_post, avg_send, avg_polltrd, avg_msg, avg_updtaddr;
-static int cnt_post=1, cnt_send=1, cnt_polltrd=1, cnt_msg=1, cnt_updtaddr=1;
+static unsigned long long avg_post, avg_send, avg_polltrd_dsm, avg_polltrd_dma, avg_msg, avg_updtaddr;
+static int cnt_post=1, cnt_send=1, cnt_polltrd_dsm=1, cnt_polltrd_dma=1, cnt_msg=1, cnt_updtaddr=1;
 
 /*----------------------------------------------------------------------------
  * Platform Device Functions
@@ -384,16 +384,16 @@ static int poll_dma(void* arg0)
             process_message(recv_index);
             if(dsm_req) {
                 et_polltrd = ktime_get_ns();
-                avg_polltrd += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
-                printk("Time elapsed for processing dsm request = %lld ns\n", avg_polltrd/cnt_polltrd);
-                cnt_polltrd += 1;
+                avg_polltrd_dsm += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
+                printk("Time elapsed for processing dsm request = %lld ns\n", avg_polltrd_dsm/cnt_polltrd_dsm);
+                cnt_polltrd_dsm += 1;
                 dsm_req = 0;
             }
             else{
                 et_polltrd = ktime_get_ns();
-                avg_polltrd += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
-                printk("Time elapsed for processing DMA request = %lld ns\n", avg_polltrd/cnt_polltrd);
-                cnt_polltrd += 1;
+                avg_polltrd_dma += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
+                printk("Time elapsed for processing DMA request = %lld ns\n", avg_polltrd_dma/cnt_polltrd_dma);
+                cnt_polltrd_dma += 1;
             }
         } else if (h2c_desc_complete != 0) {
             no_of_messages += 1;
