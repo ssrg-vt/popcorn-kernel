@@ -49,7 +49,8 @@ u64 start_time, end_time, res_time;
 static u64 gpf_time = 0;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
-
+static unsigned long long avg_rmflt_org=0, avg_post=0, avg_process_pp=0, avg_ppreg=0, avg_lclflt=0;
+static int cnt_rmflt_org=1, cnt_post=1, cnt_process_pp=1, cnt_ppreg=1, cnt_lclflt=1;
 /* Page Key radix tree */
 
 RADIX_TREE(pkey_rd_tree, GFP_ATOMIC);
@@ -1940,7 +1941,9 @@ again:
 		st_rmflt_org = ktime_get_ns();
 		res->result = __pcie_axi_handle_rmfault_at_remote(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
 		et_rmflt_org = ktime_get_ns();
-		printk("Time elapsed for handling rmflt at remote = %lld ns\n", ktime_to_ns(ktime_sub(et_rmflt_org, st_rmflt_org)));
+		avg_rmflt_org += ktime_to_ns(ktime_sub(et_rmflt_org, st_rmflt_org)); 
+		printk("Time elapsed for handling rmflt at org = %lld ns\n", avg_rmflt_org/cnt_rmflt_org);
+		cnt_rmflt_org += 1;
 	} else {
 		res->result = __pcie_axi_handle_rmfault_at_origin(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
 	}
@@ -2019,12 +2022,16 @@ static void process_prot_proc_request(struct work_struct *work)
 		st_process_pp = ktime_get_ns();
 		pcie_axi_process_invalidate_request(req);
 		et_process_pp = ktime_get_ns();
-		printk("Time taken for processing invalidtaion req = %lld ns\n", ktime_to_ns(ktime_sub(et_process_pp, st_process_pp)));
+		avg_process_pp += ktime_to_ns(ktime_sub(et_process_pp, st_process_pp));
+		printk("Time taken for processing invalidtaion req = %lld ns\n", avg_process_pp/cnt_process_pp);
+		cnt_process_pp += 1;
 	} else {
 		st_process_pp = ktime_get_ns();
 		pcie_axi_process_remote_page_request(req);
 		et_process_pp = ktime_get_ns();
-		printk("Time taken for processing rpr = %lld ns\n", ktime_to_ns(ktime_sub(et_process_pp, st_process_pp)));
+		avg_process_pp += ktime_to_ns(ktime_sub(et_process_pp, st_process_pp));
+		printk("Time taken for processing invalidtaion req = %lld ns\n", avg_process_pp/cnt_process_pp);
+		cnt_process_pp += 1;
 	}
 
 	kfree(work);
@@ -2508,7 +2515,9 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, 1, vmf->flags, ws->id, 1);//replaced tsk->origin_nid with 1
 	et_ppreg = ktime_get_ns();
-	printk("Time taken for DSM reg write = %lld ns\n", ktime_to_ns(ktime_sub(et_ppreg, st_ppreg)));
+	avg_ppreg += ktime_to_ns(ktime_sub(et_ppreg, st_ppreg));
+	printk("Time taken for DSM reg write = %lld ns\n", avg_ppreg/cnt_ppreg);
+	cnt_ppreg += 1;
 	//printk("Before wait station\n");
 	st_wait = ktime_get_ns();
 	rp = wait_at_station(ws);
@@ -2820,8 +2829,10 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 			st_lclflt = ktime_get_ns();
 			ret = __pcie_axi_handle_lcfault_at_remote(vmf);
 			et_lclflt = ktime_get_ns();
-			printk("Time elaspsed in lclflt remote = %lld ns\n", ktime_to_ns(ktime_sub(et_lclflt, st_lclflt)));
-		} else {
+			avg_lclflt += ktime_to_ns(ktime_sub(et_lclflt, st_lclflt));
+			printk("Time elaspsed in lclflt remote = %lld ns\n", avg_lclflt/cnt_lclflt);
+			cnt_lclflt += 1;
+			} else {
 			ret = __handle_localfault_at_remote(vmf);
 		}
 		goto out;
@@ -2852,7 +2863,7 @@ out:
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
 
-	printk("Total gpf time = %lld ns\n", gpf_time);
+	printk("Total gpf time = %lld ns\n", gpf_time/(cnt_lclflt-1));
 	printk("Total number of gpf = %d\n", no_of_gpf);
 	return ret;
 }

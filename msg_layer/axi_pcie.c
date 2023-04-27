@@ -272,6 +272,8 @@ static queue_tr *recv_queue;
 static dma_addr_t dma_handle;
 int st_post, et_post, st_send, et_send;
 static struct pcie_axi_work *pcie_axi_work_pool = NULL;
+static unsigned long long avg_post, avg_send, avg_polltrd, avg_msg, avg_updtaddr;
+static int cnt_post=1, cnt_send=1, cnt_polltrd=1, cnt_msg=1, cnt_updtaddr=1;
 
 /*----------------------------------------------------------------------------
  * Platform Device Functions
@@ -347,7 +349,9 @@ static int poll_dma(void* arg0)
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(64*8))) == 0x0ADDBEEFDEADBEEF) || 
             (*((uint64_t *)(recv_queue->work_list[tmp]->addr+(56*8))) == 0x0ADDBEEFDEADBEEF)){ //possible performance improvement here!
             et_msg = ktime_get_ns();
-            printk("Time taken by polling thread to detect the message = %lld ns\n", ktime_to_ns(ktime_sub(et_msg, st_msg)));
+            avg_msg += ktime_to_ns(ktime_sub(et_msg, st_msg));
+            printk("Time taken by polling thread to detect the message = %lld ns\n", avg_msg/cnt_msg);
+            cnt_msg += 1;
             //printk("In poll dma IF\n");
             /*for(i=0; i<1024; i++){
                 printk("Data recvd in poll= %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
@@ -365,7 +369,9 @@ static int poll_dma(void* arg0)
             st_updtaddr = ktime_get_ns();
             __update_recv_index(recv_queue, index + 1);
             et_updtaddr = ktime_get_ns();
-            printk("Time taken to transfer address = %lld\n", ktime_to_ns(ktime_sub(et_updtaddr, st_updtaddr)));
+            avg_updtaddr += ktime_to_ns(ktime_sub(et_updtaddr, st_updtaddr));
+            printk("Time taken to transfer address = %lld\n", avg_updtaddr/cnt_updtaddr);
+            cnt_updtaddr + =1;
             //printk("index=%d\n",index);
             recv_index = recv_queue->size;
             //poll_c2h_wb->completed_desc_count = 0;
@@ -378,12 +384,16 @@ static int poll_dma(void* arg0)
             process_message(recv_index);
             if(dsm_req) {
                 et_polltrd = ktime_get_ns();
-                printk("Time elapsed for processing dsm request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
+                avg_polltrd += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
+                printk("Time elapsed for processing dsm request = %lld ns\n", avg_polltrd/cnt_polltrd);
+                cnt_polltrd += 1;
                 dsm_req = 0;
             }
             else{
                 et_polltrd = ktime_get_ns();
-                printk("Time elapsed for processing DMA request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
+                avg_polltrd += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
+                printk("Time elapsed for processing DMA request = %lld ns\n", avg_polltrd/cnt_polltrd);
+                cnt_polltrd += 1;
             }
         } else if (h2c_desc_complete != 0) {
             no_of_messages += 1;
@@ -564,10 +574,12 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
         }
         __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
         et_post = ktime_get_ns();
+        avg_post += ktime_to_ns(ktime_sub(et_post, st_post));
         spin_unlock(&pcie_axi_lock);
         //printk("Data Sent\n");
         h2c_desc_complete = 1;
-        printk("Time taken to post msg = %lld ns\n", ktime_to_ns(ktime_sub(et_post, st_post)));
+        printk("Time taken to post msg = %lld ns\n", avg_post/cnt_post);
+        cnt_post += 1;
     } else {
         printk("DMA addr: not found\n");
     }
@@ -595,11 +607,13 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
             //udelay(2);
         }
     __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
-    et_post = ktime_get_ns();  
+    et_post = ktime_get_ns();
+    avg_send +=  ktime_to_ns(ktime_sub(et_send, st_send));
     spin_unlock(&pcie_axi_lock);
     //printk("Message sent\n");
     h2c_desc_complete = 1;
-    printk("Time taken to send msg = %lld ns\n", ktime_to_ns(ktime_sub(et_send, st_send)));
+    printk("Time taken to send msg = %lld ns\n", avg_send/cnt_send);
+    cnt_send += 1;
     __process_sent(work);
     if (!try_wait_for_completion(&done)){
         ret = wait_for_completion_io_timeout(&done, 60 *HZ);
