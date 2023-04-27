@@ -311,7 +311,7 @@ void process_message(int recv_i)
         //printk("calling pcie_axi processing function\n");
         pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
     } else {
-        ///rintk("Calling pcn processning function\n");
+        printk("Calling pcn processning function\n");
         pcn_kmsg_process(msg);
     }
 }

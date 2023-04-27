@@ -1085,12 +1085,12 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	st_rprresp = ktime_get_ns();
 	remote_page_response_t *res = (remote_page_response_t *)msg;
 	struct wait_station *ws = wait_station(res->origin_ws);
-
+/*
 	PGPRINTK("  [%d] <-[%d/%d] %lx %x\n",
 			ws->pid, res->remote_pid, PCN_KMSG_FROM_NID(res),
 			res->addr, res->result);
 	ws->private = res;
-
+*/
 	if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 		update_pkey(res->pkey, res->addr);
 	}
