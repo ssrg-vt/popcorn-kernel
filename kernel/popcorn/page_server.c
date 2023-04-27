@@ -1079,7 +1079,10 @@ int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long
  * Handle page faults happened at remote nodes.
  */
 static int handle_remote_page_response(struct pcn_kmsg_message *msg)
-{
+{	
+	u64 st_rprresp, et_rprresp;
+	printk("In handle_remote_page_response\n");
+	st_rprresp = ktime_get_ns();
 	remote_page_response_t *res = (remote_page_response_t *)msg;
 	struct wait_station *ws = wait_station(res->origin_ws);
 
@@ -1094,6 +1097,9 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
+
+	et_rprresp = ktime_get_ns();
+	printk("Time taken to set completion = %lld ns\n", ktime_to_ns(ktime_sub(et_rprresp, st_rprresp)));
 	return 0;
 }
 
@@ -2414,7 +2420,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	unsigned long *pkey_res;
 	struct task_struct *tsk = current;
 	remote_page_response_t *rp; 
-
+	u64 st_cptousr, et_cptousr;
 	//PCNPRINTK("Inside the __pcie_axi_handle_lcfault_at_remote\n");
 	if (anon_vma_prepare(vmf->vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
@@ -2490,10 +2496,13 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	//printk("After wait station\n");
 	if (rp->result == 0) {
 		void *paddr = kmap(page);
+		st_cptousr = ktime_get_ns();
 		copy_to_user_page(vmf->vma, page, addr, paddr, rp->page, PAGE_SIZE);
+		et_cptousr = ktime_get_ns();
 		kunmap(page);
 		flush_dcache_page(page);
 		__SetPageUptodate(page);
+		printk("Time taken to copy pages to user = %lld ns\n", ktime_to_ns(ktime_sub(et_cptousr, st_cptousr)));
 	}
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {

@@ -392,7 +392,7 @@ static int poll_dma(void* arg0)
             }
             else{
                 et_polltrd = ktime_get_ns();
-                printk("Time elapsed for processing dsm request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
+                printk("Time elapsed for processing dma request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
                 avg_polltrd_dma += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
                 printk("Avg Time elapsed for processing DMA request = %lld ns\n", avg_polltrd_dma/cnt_polltrd_dma);
                 cnt_polltrd_dma += 1;
