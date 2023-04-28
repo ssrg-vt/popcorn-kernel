@@ -352,10 +352,10 @@ static int poll_dma(void* arg0)
             //avg_msg += ktime_to_ns(ktime_sub(et_msg, st_msg));
             //printk("Time taken by polling thread to detect the message = %lld ns\n", avg_msg/cnt_msg);
             //cnt_msg += 1;
-            //printk("In poll dma IF\n");
-            /*for(i=0; i<1024; i++){
-                printk("Data recvd in poll= %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
-            }*/
+            printk("In poll dma IF\n");
+            for(i=0; i<1024; i++){
+                printk("Data recvd in poll= %llx & addr = %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)), (uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
+            }
             if((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) == 0x0ADDBEEFDEADBEEF) ||
                (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) == 0x0ADDBEEFDEADBEEF))
                 dsm_req = 1;
