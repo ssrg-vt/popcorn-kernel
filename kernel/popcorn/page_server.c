@@ -2798,7 +2798,8 @@ out:
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
-
+	//printk("Total gpf time = %lld ns\n", gpf_time/(cnt_lclflt-1));
+	printk("Total number of gpf = %d\n", no_of_gpf);
 	return ret;
 }
 
