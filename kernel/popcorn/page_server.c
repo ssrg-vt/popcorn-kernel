@@ -2754,7 +2754,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	}
 
 	no_of_gpf += 1;
-
+	printk
 	if (!current->at_remote) {
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 			//printk("In origin nodes lclfault\n");
@@ -2821,7 +2821,8 @@ out:
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
-
+	//printk("Total gpf time = %lld ns\n", gpf_time/(cnt_lclflt-1));
+	printk("Total number of gpf = %d\n", no_of_gpf);
 	return ret;
 }
 
