@@ -2754,7 +2754,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	}
 
 	no_of_gpf += 1;
-	printk
+
 	if (!current->at_remote) {
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 			//printk("In origin nodes lclfault\n");
