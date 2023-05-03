@@ -46,7 +46,8 @@
 #include "trace_events.h"
 //Added newly
 u64 start_time, end_time, res_time, st_lclflt_rem, et_lclflt_rem, avg_lclflt_rem;
-static u64 gpf_time = 0, cnt_lclflt_rem=1;
+u64 st_rprresp, et_rprresp, avg_rprresp;
+static u64 gpf_time = 0, cnt_lclflt_rem=1, cnt_rprresp=1;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
 
@@ -1079,10 +1080,9 @@ int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long
  * Handle page faults happened at remote nodes.
  */
 static int handle_remote_page_response(struct pcn_kmsg_message *msg)
-{	
-	//u64 st_rprresp, et_rprresp;
+{
 	//printk("In handle_remote_page_response\n");
-	//st_rprresp = ktime_get_ns();
+	st_rprresp = ktime_get_ns();
 	remote_page_response_t *res = (remote_page_response_t *)msg;
 	struct wait_station *ws = wait_station(res->origin_ws);
 
@@ -1098,8 +1098,10 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
 
-	//et_rprresp = ktime_get_ns();
-	//printk("Time taken to set completion = %lld ns\n", ktime_to_ns(ktime_sub(et_rprresp, st_rprresp)));
+	et_rprresp = ktime_get_ns();
+	avg_rprresp += ktime_to_ns(ktime_sub(et_rprresp, st_rprresp));
+	printk("Time taken to set completion (handle response) = %lld ns\n", avg_rprresp/cnt_rprresp);
+	cnt_rprresp += 1;
 	return 0;
 }
 
@@ -2489,14 +2491,14 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, 1, vmf->flags, ws->id, 1);//replaced tsk->origin_nid with 1
-	printk("Before wait station\n");
+	//printk("Before wait station\n");
 	rp = wait_at_station(ws);
-	printk("After wait station\n");
+	//printk("After wait station\n");
 	if (rp->result == 0) {
 		void *paddr = kmap(page);
-		st_cptousr = ktime_get_ns();
+		//st_cptousr = ktime_get_ns();
 		copy_to_user_page(vmf->vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		et_cptousr = ktime_get_ns();
+		//et_cptousr = ktime_get_ns();
 		kunmap(page);
 		flush_dcache_page(page);
 		__SetPageUptodate(page);
@@ -2749,7 +2751,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	} else {
 		gpf_time += end_time - start_time;
 		start_time = ktime_get_ns();
-		printk("gpf time per page = %lld ns\n", gpf_time/no_of_gpf);
+		printk("Time between gpf = %lld ns\n", gpf_time/no_of_gpf);
 	}
 
 	no_of_gpf += 1;
