@@ -45,8 +45,8 @@
 
 #include "trace_events.h"
 //Added newly
-u64 start_time, end_time, res_time;
-static u64 gpf_time = 0;
+u64 start_time, end_time, res_time, st_lclflt_rem, et_lclflt_rem, avg_lclflt_rem;
+static u64 gpf_time = 0, cnt_lclflt_rem=1;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
 
@@ -2486,14 +2486,12 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	} else {
 		pkey = 0;
 	}
-	//printk("Before prot proc handler\n");
-	//printk("from_nid_o=%d\n", tsk->origin_nid);
-	//printk("from_nid_r=%d\n", tsk->remote_pid);
+
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, 1, vmf->flags, ws->id, 1);//replaced tsk->origin_nid with 1
-	//printk("Before wait station\n");
+	printk("Before wait station\n");
 	rp = wait_at_station(ws);
-	//printk("After wait station\n");
+	printk("After wait station\n");
 	if (rp->result == 0) {
 		void *paddr = kmap(page);
 		st_cptousr = ktime_get_ns();
@@ -2751,6 +2749,7 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	} else {
 		gpf_time += end_time - start_time;
 		start_time = ktime_get_ns();
+		printk("gpf time per page = %lld ns\n", gpf_time/no_of_gpf);
 	}
 
 	no_of_gpf += 1;
@@ -2792,8 +2791,13 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	if (!pte_is_present(vmf->orig_pte)) {
 		/* Remote page fault */
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
+			st_lclflt_rem = ktime_get_ns();
 			//printk("In remote nodes lclfault\n");
 			ret = __pcie_axi_handle_lcfault_at_remote(vmf);
+			et_lclflt_rem = ktime_get_ns();
+			avg_lclflt_rem += ktime_to_ns(ktime_sub(et_lclflt_rem, st_lclflt_rem));
+			printk("Time taken in lclflt at remote = %lld ns\n");
+			cnt_lclflt_rem += 1;
 		} else {
 			ret = __handle_localfault_at_remote(vmf);
 		}
@@ -2821,8 +2825,6 @@ out:
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
-	//printk("Total gpf time = %lld ns\n", gpf_time/(cnt_lclflt-1));
-	//printk("Total number of gpf = %d\n", no_of_gpf);
 	return ret;
 }
 
