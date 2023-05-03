@@ -272,6 +272,7 @@ static queue_tr *recv_queue;
 static dma_addr_t dma_handle;
 int st_post, et_post, st_send, et_send;
 static struct pcie_axi_work *pcie_axi_work_pool = NULL;
+static u64 st_polltrd, et_polltrd, st_msg, et_msg, st_updtaddr, et_updtaddr;
 static unsigned long long avg_post, avg_send, avg_polltrd_dsm, avg_polltrd_dma, avg_msg, avg_updtaddr;
 static int cnt_post=1, cnt_send=1, cnt_polltrd_dsm=1, cnt_polltrd_dma=1, cnt_msg=1, cnt_updtaddr=1;
 
@@ -338,7 +339,6 @@ static int poll_dma(void* arg0)
     bool was_frozen, dsm_req;
     int i;
     int recv_index = 0, index = 0, tmp = 0;
-    u64 st_polltrd, et_polltrd, st_msg, et_msg, st_updtaddr, et_updtaddr;
     //printk("In poll_dma\n");
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
@@ -381,11 +381,11 @@ static int poll_dma(void* arg0)
             if (recv_queue->size == recv_queue->nr_entries) {
                 recv_queue->size = 0;
             }
-            //st_polltrd = ktime_get_ns();
+            st_polltrd = ktime_get_ns();
             process_message(recv_index);
-            /*if(dsm_req) {
+            if(dsm_req) {
                 et_polltrd = ktime_get_ns();
-                printk("Time elapsed for processing dsm request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
+                //printk("Time elapsed for processing dsm request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
                 avg_polltrd_dsm += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
                 printk("Avg Time elapsed for processing dsm request = %lld ns\n", avg_polltrd_dsm/cnt_polltrd_dsm);
                 cnt_polltrd_dsm += 1;
@@ -393,11 +393,11 @@ static int poll_dma(void* arg0)
             }
             else{
                 et_polltrd = ktime_get_ns();
-                printk("Time elapsed for processing dma request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
+                //printk("Time elapsed for processing DMA request = %lld ns\n", ktime_to_ns(ktime_sub(et_polltrd, st_polltrd)));
                 avg_polltrd_dma += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
                 printk("Avg Time elapsed for processing DMA request = %lld ns\n", avg_polltrd_dma/cnt_polltrd_dma);
                 cnt_polltrd_dma += 1;
-            }*/
+            }
         } else if (h2c_desc_complete != 0) {
             no_of_messages += 1;
             h2c_desc_complete = 0;
