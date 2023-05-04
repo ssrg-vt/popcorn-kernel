@@ -46,6 +46,7 @@
 #include "trace_events.h"
 //Added newly
 static u64 gpf_time = 0;
+static u64 start_time, end_time;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
 
