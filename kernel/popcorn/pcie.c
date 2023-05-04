@@ -1,4 +1,3 @@
-/*Need to update this file for my design.*/
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -74,9 +73,7 @@ EXPORT_SYMBOL(resolve_waiting);
 
 void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, unsigned long iaddr, unsigned long pkey, 
 	pid_t opid, pid_t rpid, int from_nid, unsigned long fflags, int ws_id, int tsk_remote)
-{		
-		//printk();    
-
+{	    
 		spin_lock(&prot_proc_lock);
 		write_register((u64)((vaddr & XDMA_MSB_MASK) | PROT_PROC_ID), (u64 *)(xdma_axi + proc_vaddr_msb));
 		//printk("proc_vaddr_msb = %llx\n", (u64)((vaddr & XDMA_MSB_MASK) | PROT_PROC_ID));
@@ -151,7 +148,7 @@ void prot_proc_handle_localfault(unsigned long vmf, unsigned long vaddr, unsigne
 EXPORT_SYMBOL(prot_proc_handle_localfault);
 
 /* Remote Page Request Handler */
-
+/*
 void * prot_proc_handle_rpr(int x)
 {
 	remote_page_request_t *req = pcn_kmsg_get(sizeof(*req));
@@ -168,9 +165,9 @@ void * prot_proc_handle_rpr(int x)
 
 }
 EXPORT_SYMBOL(prot_proc_handle_rpr);
-
+*/
 /* Invalidate Page Request Handler */
-
+/*
 void * prot_proc_handle_inval()
 {
 	page_invalidate_request_t *req = pcn_kmsg_get(sizeof(*req));
@@ -183,7 +180,7 @@ void * prot_proc_handle_inval()
 	return req;
 }
 EXPORT_SYMBOL(prot_proc_handle_inval);
-
+*/
 /* Init Functions */
 
 void write_mynid(int nid)
@@ -199,7 +196,7 @@ unsigned long current_pkey()
 	return pkey;
 }
 EXPORT_SYMBOL(current_pkey);
-
+/*
 void __iomem * return_iomaps(int x)
 {
 	if (!x) {
@@ -209,22 +206,12 @@ void __iomem * return_iomaps(int x)
 	}
 }
 EXPORT_SYMBOL(return_iomaps);
-
+*/
 /* PCIe Initialization Handler */
 
 int init_pcie(struct pci_dev *pci_dev, void __iomem *g)//, void __iomem *p)
 {
-	//int ret;
-
-	//xdma_ctl = p;
 	xdma_axi = g;
-/*
-	if (init_xdma()) {
-		return 1;
-	}
-	init_xxv();
-	init_descriptor_bypass();
-*/
 	return 0;
 }
 EXPORT_SYMBOL(init_pcie);

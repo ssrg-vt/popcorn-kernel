@@ -25,8 +25,8 @@
 #include <linux/sched/debug.h>
 #include <linux/sched/task_stack.h>
 #include <linux/sched/mm.h>
-#include <linux/timekeeping.h>//
-#include <linux/resource.h> //
+#include <linux/timekeeping.h>
+#include <linux/resource.h> 
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
@@ -34,8 +34,8 @@
 #include <popcorn/types.h>
 #include <popcorn/bundle.h>
 #include <popcorn/pcn_kmsg.h>
-#include <popcorn/page_server.h>//
-#include <popcorn/pcie.h>//
+#include <popcorn/page_server.h>
+#include <popcorn/pcie.h>
 
 #include "types.h"
 #include "pgtable.h"
@@ -44,8 +44,8 @@
 #include "fh_action.h"
 
 #include "trace_events.h"
-//Added newly
-static u64 start_time, end_time, res_time;
+
+u64 start_time, end_time, res_time;
 static u64 gpf_time = 0;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
@@ -67,7 +67,7 @@ inline void page_server_start_mm_fault(unsigned long address)
 	}
 #endif
 }
-//Added newly
+
 const int o_nid = 0;
 const int r_nid = 1;
 
@@ -1720,7 +1720,7 @@ out:
 /* PCIE-AXI Handle Remotefault at Origin */
 
 static int __pcie_axi_handle_rmfault_at_origin(struct task_struct *tsk, struct mm_struct *mm, struct vm_area_struct *vma, unsigned long addr, unsigned long iaddr, unsigned long fault_flags, unsigned long pkey, pid_t rpid, pid_t opid, int ws_id, int from_nid, int x, remote_page_response_t *res)
-{	
+{
 	unsigned char *paddr;
 	struct page *page;
 	fault_flags = fault_flags | PC_FAULT_FLAG_REMOTE;
@@ -1755,6 +1755,7 @@ again:
 			SetPageCowed(mm, addr);
 		goto again;
 	}
+
 	fh = __start_fault_handling(tsk, addr, fault_flags, ptl, &leader);
 
 	/**
@@ -1804,7 +1805,7 @@ again:
 		paddr = kmap_atomic(page);
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 		no_of_pages_sent += 1;
-		printk("Number of pages sent = %d\n", no_of_pages_sent);
+		//printk("Number of pages sent = %d\n", no_of_pages_sent);
 		kunmap_atomic(paddr);
 	}
 
@@ -1913,7 +1914,6 @@ again:
 	while (!down_read_trylock(&mm->mmap_sem)) {
 		if (!tsk->at_remote && down_read_retry++ > 4) {
 			res->result = VM_FAULT_RETRY;
-			printk("calling out_up\n");
 			goto out_up;
 		}
 		schedule();
@@ -1921,7 +1921,6 @@ again:
 	vma = find_vma(mm, req->addr);
 	if (!vma || vma->vm_start > req->addr) {
 		res->result = VM_FAULT_SIGBUS;
-		printk("calling out_up\n");
 		goto out_up;
 	}
 
@@ -2000,7 +1999,7 @@ void pcie_axi_process_invalidate_request(dsm_proc_request_t *req)
 }
 
 static void process_prot_proc_request(struct work_struct *work)
-{	
+{
 	START_KMSG_WORK(dsm_proc_request_t, req, work);
 
 	if (req->page_mode == INVALIDATE) {
@@ -2415,6 +2414,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	struct task_struct *tsk = current;
 	remote_page_response_t *rp; 
 
+	//PCNPRINTK("Inside the __xdma_handle_lcfault_at_remote\n");
 	if (anon_vma_prepare(vmf->vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
 		pte_unmap(vmf->pte);
@@ -2423,6 +2423,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 
 	ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(ptl);
+
 	if (!vmf->pte) {
 		vmf->pte = pte_alloc_map(vmf->vma->vm_mm, vmf->pmd, vmf->address);
 	}
@@ -2478,6 +2479,7 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, tsk->origin_nid, vmf->flags, ws->id, 1);
 	rp = wait_at_station(ws);
+
 	if (rp->result == 0) {
 		void *paddr = kmap(page);
 		copy_to_user_page(vmf->vma, page, addr, paddr, rp->page, PAGE_SIZE);
@@ -2711,7 +2713,7 @@ out_wakeup:
  *  ERROR otherwise
  */
 int page_server_handle_pte_fault(struct vm_fault *vmf)
-{	
+{
 	unsigned long addr = vmf->address & PAGE_MASK;
 	int ret = 0;
 	end_time = ktime_get_ns();
@@ -2798,6 +2800,7 @@ out:
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
+
 	return ret;
 }
 

@@ -20,6 +20,8 @@
 
 #include "types.h"
 
+u64 sttart_time, ennd_time; 
+
 static pcn_kmsg_cbftn pcn_kmsg_cbftns[PCN_KMSG_TYPE_MAX] = { NULL };
 
 static struct pcn_kmsg_transport *transport = NULL;
@@ -61,6 +63,7 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 	BUG_ON(msg->header.size < 0 || msg->header.size > PCN_KMSG_MAX_SIZE);
 	if (atomic_inc_return(__nr_outstanding_requests + msg->header.type) > 64) {
 		if (WARN_ON_ONCE("leaking received messages, ")) {
+			printk("type %d\n", msg->header.type);
 		}
 	}
 #endif
@@ -78,7 +81,7 @@ void pcn_kmsg_process(struct pcn_kmsg_message *msg)
 EXPORT_SYMBOL(pcn_kmsg_process);
 
 void pcn_kmsg_pcie_axi_process(enum pcn_kmsg_type type, void *msg)
-{	
+{
 	pcn_kmsg_cbftn ftn;
 
 	ftn = pcn_kmsg_cbftns[type];

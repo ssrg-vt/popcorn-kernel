@@ -117,11 +117,7 @@ inline bool put_task_remote(struct task_struct *tsk)
 void free_remote_context(struct remote_context *rc)
 {
 #ifdef CONFIG_POPCORN_CHECK_SANITY
-	//printk("RC count1 = %d\n", atomic_read(&rc->count));
-	//printk("RC count2 = %d\n", atomic_read(&rc->count));
 	BUG_ON(atomic_read(&rc->count) != 1 && atomic_read(&rc->count) != 2);
-	//printk("RC count3 = %d\n", atomic_read(&rc->count));
-	//printk("RC count4 = %d\n", atomic_read(&rc->count));
 #endif
 	__put_task_remote(rc);
 }
