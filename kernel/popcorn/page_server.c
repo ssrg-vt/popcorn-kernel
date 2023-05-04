@@ -45,7 +45,16 @@
 
 #include "trace_events.h"
 //Added newly
-u64 start_time, end_time, res_time;
+static u64 start_time, end_time, res_time;
+static u64 st_proc_rpr, et_proc_rpr, avg_proc_rpr, st_rmflt_org, et_rmflt_org, avg_rmflt_org;
+u64 st_rprresp, et_rprresp, avg_rprresp;
+u64 st_cmpl, et_cmpl, avg_cmpl;
+u64 st_upkey, et_upkey, avg_upkey;
+u64 st_atm, et_amt, avg_atm;
+u64 st_cpfrmusr, et_cpfrmusr, avg_cpfrmusr;
+u64 st_preppg, et_preppg, avg_preppg;
+int cnt_cmpl=1, cnt_atm=1, cnt_upkey=1, cnt_cpfrmusr=1, cnt_preppg=1;
+static int cnt_proc_rpr=1, cnt_rmflt_org=1, cnt_rprresp=1;
 static u64 gpf_time = 0;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
@@ -1084,14 +1093,30 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	PGPRINTK("  [%d] <-[%d/%d] %lx %x\n",
 			ws->pid, res->remote_pid, PCN_KMSG_FROM_NID(res),
 			res->addr, res->result);
+	st_rprresp = ktime_get_ns();
 	ws->private = res;
 
+	st_upkey = ktime_get_ns();
 	if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 		update_pkey(res->pkey, res->addr);
 	}
+	et_upkey = ktime_get_ns();
+	avg_upkey += ktime_to_ns(ktime_sub(et_upkey, st_upkey));
+	printk("Time to update key = %lld ns\n", avg_upkey/cnt_upkey);
+	cnt_upkey += 1;
 
+	st_cmpl = ktime_get_ns();
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
+	et_cmpl = ktime_get_ns();
+	avg_cmpl += ktime_to_ns(ktime_sub(et_cmpl, st_cmpl));
+	printk("Time to completion = %lld ns\n", avg_cmpl/cnt_cmpl);
+	cnt_cmpl += 1;
+
+	et_rprresp = ktime_get_ns();
+	avg_rprresp += ktime_to_ns(ktime_sub(et_rprresp, st_rprresp));
+	printk("Time taken to set completion (handle response) = %lld ns\n", avg_rprresp/cnt_rprresp);
+	cnt_rprresp += 1;
 	return 0;
 }
 
@@ -1755,7 +1780,7 @@ again:
 			SetPageCowed(mm, addr);
 		goto again;
 	}
-
+	st_preppg = ktime_get_ns();
 	fh = __start_fault_handling(tsk, addr, fault_flags, ptl, &leader);
 
 	/**
@@ -1797,14 +1822,24 @@ again:
 		spin_unlock(ptl);
 	}
 	pte_unmap(pte);
+	et_preppg = ktime_get_ns();
+	avg_preppg += ktime_to_ns(ktime_sub(et_preppg, st_preppg));
+	printk("Time to prep pages = %lld ns\n", avg_preppg/cnt_preppg);
+	cnt_preppg += 1;
 	/* Storing pkey */
 	update_pkey(pkey, addr);
 
 	if (!grant) {
 		flush_cache_page(vma, addr, page_to_pfn(page));
 		paddr = kmap_atomic(page);
+		st_cpfrmusr = ktime_get_ns();
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
+		et_cpfrmusr = ktime_get_ns();
+		avg_cpfrmusr += ktime_to_ns(ktime_sub(et_cpfrmusr, st_cpfrmusr));
+		printk("Time to copy from user = %lld ns\n", avg_cpfrmusr/cnt_cpfrmusr);
+		cnt_cpfrmusr += 1;
 		no_of_pages_sent += 1;
+		printk("Number of pages sent = %d\n", no_of_pages_sent);
 		kunmap_atomic(paddr);
 	}
 
@@ -1932,7 +1967,12 @@ again:
 	if (tsk->at_remote) {
 		res->result = __pcie_axi_handle_rmfault_at_remote(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
 	} else {
+		st_rmflt_org = ktime_get_ns();
 		res->result = __pcie_axi_handle_rmfault_at_origin(tsk, mm, vma, req->addr, req->instr_addr, req->fault_flags, req->page_key, req->remote_pid, req->origin_pid, req->ws_id, from_nid, req->page_mode, res);
+		et_rmflt_org = ktime_get_ns();
+		avg_rmflt_org += ktime_to_ns(ktime_sub(et_rmflt_org, st_rmflt_org));
+		printk("Time taken to handle remote fault at origin = %lld ns\n", avg_rmflt_org/cnt_rmflt_org);
+		cnt_rmflt_org += 1;
 	}
 
 out_up:
@@ -2006,7 +2046,12 @@ static void process_prot_proc_request(struct work_struct *work)
 	if (req->page_mode == INVALIDATE) {
 		pcie_axi_process_invalidate_request(req);
 	} else {
+		st_proc_rpr = ktime_get_ns();
 		pcie_axi_process_remote_page_request(req);
+		et_proc_rpr = ktime_get_ns();
+		avg_proc_rpr += ktime_to_ns(ktime_sub(et_proc_rpr, st_proc_rpr));
+		printk("Time taken process rpr = %lld ns\n", avg_proc_rpr/cnt_proc_rpr);
+		cnt_proc_rpr += 1;
 	}
 
 	kfree(work);
@@ -2799,7 +2844,7 @@ out:
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
 	//printk("Total gpf time = %lld ns\n", gpf_time/(cnt_lclflt-1));
-	printk("Total number of gpf = %d\n", no_of_gpf);
+	//printk("Total number of gpf = %d\n", no_of_gpf);
 	return ret;
 }
 

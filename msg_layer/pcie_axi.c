@@ -125,6 +125,10 @@ enum {
 static int nid;
 static int base_index = 0;
 s64 actual_time_w, actual_time_s; 
+u64 st_polltrd, et_polltrd, st_updtaddr, et_updtaddr, st_msg, et_msg;
+int st_post, et_post, st_send, et_send;
+static unsigned long long avg_post, avg_send, avg_polltrd_dsm, avg_polltrd_dma, avg_msg, avg_updtaddr;
+static int cnt_post=1, cnt_send=1, cnt_polltrd_dsm=1, cnt_polltrd_dma=1, cnt_msg=1, cnt_updtaddr=1;
 
 /* Send Buffer for pcn_kmsg*/
 
@@ -219,10 +223,6 @@ static struct send_work *send_work_pool = NULL;
 static queue_t *send_queue;
 static queue_tr *recv_queue;
 
-int st_post, et_post, st_send, et_send;
-static unsigned long long avg_post, avg_send, avg_polltrd_dsm, avg_polltrd_dma, avg_msg, avg_updtaddr;
-static int cnt_post=1, cnt_send=1, cnt_polltrd_dsm=1, cnt_polltrd_dma=1, cnt_msg=1, cnt_updtaddr=1;
-
 /*----------------------------------------------------------------------------
  * Platform Device Functions
  *----------------------------------------------------------------------------*/
@@ -287,18 +287,17 @@ static int poll_dma(void* arg0)
     bool was_frozen, dsm_req;
     int i;
     int recv_index = 0, index = 0, tmp = 0;
-    //u64 st_polltrd, et_polltrd, st_updtaddr, et_updtaddr, st_msg, et_msg;
     //printk("In poll_dma\n");
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
-        //st_msg = ktime_get_ns();
+        st_msg = ktime_get_ns();
         if ((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) ||
             (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) == 0x0ADDBEEFDEADBEEF)) {
             //(*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) == 0x0ADDBEEFDEADBEEF)) {
-            //et_msg = ktime_get_ns();
-            //avg_msg += ktime_to_ns(ktime_sub(et_msg, st_msg));
-            //printk("Time taken by polling thread to detect the message = %lld ns\n", avg_msg/cnt_msg);
-            //cnt_msg += 1;
+            et_msg = ktime_get_ns();
+            avg_msg += ktime_to_ns(ktime_sub(et_msg, st_msg));
+            printk("Time taken by polling thread to detect the message = %lld ns\n", avg_msg/cnt_msg);
+            cnt_msg += 1;
             if((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) == 0x0ADDBEEFDEADBEEF))// ||
                //(*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) == 0x0ADDBEEFDEADBEEF))
                 dsm_req = 1;
@@ -328,9 +327,9 @@ static int poll_dma(void* arg0)
             if (recv_queue->size == recv_queue->nr_entries) {
                 recv_queue->size = 0;
             }
-            //st_polltrd = ktime_get_ns();
+            st_polltrd = ktime_get_ns();
             process_message(recv_index);
-            /*if(dsm_req) {
+            if(dsm_req) {
                 et_polltrd = ktime_get_ns();
                 avg_polltrd_dsm += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
                 printk("Time elapsed for processing dsm request = %lld ns\n", avg_polltrd_dsm/cnt_polltrd_dsm);
@@ -342,7 +341,7 @@ static int poll_dma(void* arg0)
                 avg_polltrd_dma += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
                 printk("Time elapsed for processing DMA request = %lld ns\n", avg_polltrd_dma/cnt_polltrd_dma);
                 cnt_polltrd_dma += 1;
-            }*/
+            }
             
             //printk("Processed popcorn message.\n");
         } else if (h2c_desc_complete != 0) {
@@ -562,7 +561,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
     work->done = &done;
     spin_lock(&pcie_axi_lock);
     //printk("In send\n");
-    st_send = ktime_get_ns();
+    //st_send = ktime_get_ns();
     for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){ 
             //Tried memory barrier, doesn't seem to work.
             //The issue could be due to the buffer capacity in the PCIE IP, which could over get filled up. 
@@ -574,12 +573,12 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
         }
     __raw_writeq(0x00000000d010d010, zynq_hw_addr+(1022*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     __raw_writeq(0x00000000d010d010, zynq_hw_addr+(1023*8));  
-    et_send = ktime_get_ns();  
+    //et_send = ktime_get_ns();  
     spin_unlock(&pcie_axi_lock);
     h2c_desc_complete = 1;
-    avg_send += ktime_to_ns(ktime_sub(et_send, st_send));
-    printk("Time taken to send msg = %lld ns\n", avg_send/cnt_send);
-    cnt_send += 1;
+    //avg_send += ktime_to_ns(ktime_sub(et_send, st_send));
+    //printk("Time taken to send msg = %lld ns\n", avg_send/cnt_send);
+    //cnt_send += 1;
     __process_sent(work);
     //printk("After process sent\n");
     if (!try_wait_for_completion(&done)){
