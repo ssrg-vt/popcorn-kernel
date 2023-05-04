@@ -1098,22 +1098,22 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	st_rprresp = ktime_get_ns();
 	ws->private = res;
 
-	//st_upkey = ktime_get_ns();
+	st_upkey = ktime_get_ns();
 	if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 		update_pkey(res->pkey, res->addr);
 	}
-	//et_upkey = ktime_get_ns();
-	//avg_upkey += ktime_to_ns(ktime_sub(et_upkey, st_upkey));
-	//printk("Time to update key = %lld ns\n", avg_upkey/cnt_upkey);
-	//cnt_upkey += 1;
+	et_upkey = ktime_get_ns();
+	avg_upkey += ktime_to_ns(ktime_sub(et_upkey, st_upkey));
+	printk("Time to update key = %lld ns\n", avg_upkey/cnt_upkey);
+	cnt_upkey += 1;
 
-	//st_cmpl = ktime_get_ns();
+	st_cmpl = ktime_get_ns();
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
-	//et_cmpl = ktime_get_ns();
-	//avg_cmpl += ktime_to_ns(ktime_sub(et_cmpl, st_cmpl));
-	//printk("Time to completion = %lld ns\n", avg_cmpl/cnt_cmpl);
-	//cnt_cmpl += 1;
+	et_cmpl = ktime_get_ns();
+	avg_cmpl += ktime_to_ns(ktime_sub(et_cmpl, st_cmpl));
+	printk("Time to completion = %lld ns\n", avg_cmpl/cnt_cmpl);
+	cnt_cmpl += 1;
 
 	et_rprresp = ktime_get_ns();
 	avg_rprresp += ktime_to_ns(ktime_sub(et_rprresp, st_rprresp));
