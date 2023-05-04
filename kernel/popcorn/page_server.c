@@ -45,12 +45,15 @@
 
 #include "trace_events.h"
 //Added newly
-u64 start_time, end_time, res_time, st_lclflt_rem, et_lclflt_rem, avg_lclflt_rem;
+u64 start_time, end_time, res_time;
+u64 st_lclflt_rem, et_lclflt_rem, avg_lclflt_rem;
 u64 st_rprresp, et_rprresp, avg_rprresp;
 u64 st_cmpl, et_cmpl, avg_cmpl;
 u64 st_upkey, et_upkey, avg_upkey;
 u64 st_atm, et_amt, avg_atm;
-int cnt_cmpl=1, cnt_atm=1, cnt_upkey=1, cnt_lclflt_rem=1, cnt_rprresp=1;
+u64 st_ppreq, et_ppreq, avg_ppreq;
+u64 st_cptousr, et_cptousr, avg_cptousr;
+int cnt_cmpl=1, cnt_atm=1, cnt_upkey=1, cnt_lclflt_rem=1, cnt_rprresp=1, cnt_ppreq=1, cnt_cptousr=1;
 static u64 gpf_time = 0;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
@@ -1095,22 +1098,22 @@ static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 	st_rprresp = ktime_get_ns();
 	ws->private = res;
 
-	st_upkey = ktime_get_ns();
+	//st_upkey = ktime_get_ns();
 	if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 		update_pkey(res->pkey, res->addr);
 	}
-	et_upkey = ktime_get_ns();
-	avg_upkey += ktime_to_ns(ktime_sub(et_upkey, st_upkey));
-	printk("Time to update key = %lld ns\n", avg_upkey/cnt_upkey);
-	cnt_upkey += 1;
+	//et_upkey = ktime_get_ns();
+	//avg_upkey += ktime_to_ns(ktime_sub(et_upkey, st_upkey));
+	//printk("Time to update key = %lld ns\n", avg_upkey/cnt_upkey);
+	//cnt_upkey += 1;
 
-	st_cmpl = ktime_get_ns();
+	//st_cmpl = ktime_get_ns();
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
-	et_cmpl = ktime_get_ns();
-	avg_cmpl += ktime_to_ns(ktime_sub(et_cmpl, st_cmpl));
-	printk("Time to completion = %lld ns\n", avg_cmpl/cnt_cmpl);
-	cnt_cmpl += 1;
+	//et_cmpl = ktime_get_ns();
+	//avg_cmpl += ktime_to_ns(ktime_sub(et_cmpl, st_cmpl));
+	//printk("Time to completion = %lld ns\n", avg_cmpl/cnt_cmpl);
+	//cnt_cmpl += 1;
 
 	et_rprresp = ktime_get_ns();
 	avg_rprresp += ktime_to_ns(ktime_sub(et_rprresp, st_rprresp));
@@ -2436,7 +2439,6 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 	unsigned long *pkey_res;
 	struct task_struct *tsk = current;
 	remote_page_response_t *rp; 
-	u64 st_cptousr, et_cptousr;
 	//PCNPRINTK("Inside the __pcie_axi_handle_lcfault_at_remote\n");
 	if (anon_vma_prepare(vmf->vma)) {
 		BUG_ON("Cannot prepare vma for anonymous page");
@@ -2503,20 +2505,27 @@ static int __pcie_axi_handle_lcfault_at_remote(struct vm_fault *vmf)
 		pkey = 0;
 	}
 
+	st_ppreq = ktime_get_ns();
 	prot_proc_handle_localfault((unsigned long)vmf, addr, (unsigned long)instruction_pointer(current_pt_regs()), pkey,
 	tsk->pid, tsk->origin_pid, 1, vmf->flags, ws->id, 1);//replaced tsk->origin_nid with 1
-	//printk("Before wait station\n");
+	et_ppreq = ktime_get_ns();
+	avg_ppreq += ktime_to_ns(ktime_sub(et_ppreq, st_ppreq));
+	printk("Prot proc req time = %lld ns\n", avg_ppreq/cnt_ppreq);
+	cnt_ppreq += 1;
+
 	rp = wait_at_station(ws);
-	//printk("After wait station\n");
+
 	if (rp->result == 0) {
 		void *paddr = kmap(page);
-		//st_cptousr = ktime_get_ns();
+		st_cptousr = ktime_get_ns();
 		copy_to_user_page(vmf->vma, page, addr, paddr, rp->page, PAGE_SIZE);
-		//et_cptousr = ktime_get_ns();
+		et_cptousr = ktime_get_ns();
+		avg_cptousr += ktime_to_ns(ktime_sub(et_cptousr, st_cptousr));
 		kunmap(page);
 		flush_dcache_page(page);
 		__SetPageUptodate(page);
-		//printk("Time taken to copy pages to user = %lld ns\n", ktime_to_ns(ktime_sub(et_cptousr, st_cptousr)));
+		printk("Time taken to copy pages to user = %lld ns\n", avg_cptousr/cnt_cptousr);
+		cnt_cptousr += 1;
 	}
 
 	if (rp->result && rp->result != VM_FAULT_CONTINUE) {
