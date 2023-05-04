@@ -50,8 +50,8 @@ u64 st_rprresp, et_rprresp, avg_rprresp;
 u64 st_cmpl, et_cmpl, avg_cmpl;
 u64 st_upkey, et_upkey, avg_upkey;
 u64 st_atm, et_amt, avg_atm;
-int cnt_cmpl=1, cnt_atm=1, cnt_upkey=1;
-static u64 gpf_time = 0, cnt_lclflt_rem=1, u64 st_rprresp, et_rprresp, avg_rprresp;
+int cnt_cmpl=1, cnt_atm=1, cnt_upkey=1, cnt_lclflt_rem=1, cnt_rprresp=1;
+static u64 gpf_time = 0;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
 
