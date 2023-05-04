@@ -47,7 +47,11 @@
 //Added newly
 u64 start_time, end_time, res_time, st_lclflt_rem, et_lclflt_rem, avg_lclflt_rem;
 u64 st_rprresp, et_rprresp, avg_rprresp;
-static u64 gpf_time = 0, cnt_lclflt_rem=1, cnt_rprresp=1;
+u64 st_cmpl, et_cmpl, avg_cmpl;
+u64 st_upkey, et_upkey, avg_upkey;
+u64 st_atm, et_amt, avg_atm;
+int cnt_cmpl=1, cnt_atm=1, cnt_upkey=1;
+static u64 gpf_time = 0, cnt_lclflt_rem=1, u64 st_rprresp, et_rprresp, avg_rprresp;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
 
@@ -1082,21 +1086,31 @@ int page_server_release_page_ownership(struct vm_area_struct *vma, unsigned long
 static int handle_remote_page_response(struct pcn_kmsg_message *msg)
 {
 	//printk("In handle_remote_page_response\n");
-	st_rprresp = ktime_get_ns();
 	remote_page_response_t *res = (remote_page_response_t *)msg;
 	struct wait_station *ws = wait_station(res->origin_ws);
 
 	PGPRINTK("  [%d] <-[%d/%d] %lx %x\n",
 			ws->pid, res->remote_pid, PCN_KMSG_FROM_NID(res),
 			res->addr, res->result);
+	st_rprresp = ktime_get_ns();
 	ws->private = res;
 
+	st_upkey = ktime_get_ns();
 	if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 		update_pkey(res->pkey, res->addr);
 	}
+	et_upkey = ktime_get_ns();
+	avg_upkey += ktime_to_ns(ktime_sub(et_upkey, st_upkey));
+	printk("Time to update key = %lld ns\n", avg_upkey/cnt_upkey);
+	cnt_upkey += 1;
 
+	st_cmpl = ktime_get_ns();
 	if (atomic_dec_and_test(&ws->pendings_count))
 		complete(&ws->pendings);
+	et_cmpl = ktime_get_ns();
+	avg_cmpl += ktime_to_ns(ktime_sub(et_cmpl, st_cmpl));
+	printk("Time to completion = %lld ns\n", avg_cmpl/cnt_cmpl);
+	cnt_cmpl += 1;
 
 	et_rprresp = ktime_get_ns();
 	avg_rprresp += ktime_to_ns(ktime_sub(et_rprresp, st_rprresp));
