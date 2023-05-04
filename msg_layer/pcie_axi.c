@@ -57,8 +57,6 @@ RADIX_TREE(send_tree, GFP_ATOMIC);
 
 static void *base_addr; 
 static dma_addr_t base_dma;
-//static int send_count=1, post_count=1, poll_count=1;
-
 static unsigned long no_of_messages = 0;
 u64 start_time, end_time, res_time, end_time1, end_time2; 
 static unsigned int use_rb_thr = PAGE_SIZE / 2;
@@ -124,11 +122,7 @@ enum {
 
 static int nid;
 static int base_index = 0;
-s64 actual_time_w, actual_time_s; 
-u64 st_polltrd, et_polltrd, st_updtaddr, et_updtaddr, st_msg, et_msg;
-int st_post, et_post, st_send, et_send;
-static unsigned long long avg_post, avg_send, avg_polltrd_dsm, avg_polltrd_dma, avg_msg, avg_updtaddr;
-static int cnt_post=1, cnt_send=1, cnt_polltrd_dsm=1, cnt_polltrd_dma=1, cnt_msg=1, cnt_updtaddr=1;
+s64 actual_time_w, actual_time_s;
 
 /* Send Buffer for pcn_kmsg*/
 
@@ -234,7 +228,6 @@ static void __update_recv_index(queue_tr *q, int i)
     }
     writeq(0x00000000fefefefe, zynq_hw_addr); //Reset the physical address
     writeq(q->work_list[i]->dma_addr, zynq_hw_addr); //Update the physical address with next sector address of recv Q
-    //printk("Recv Q addr = %llx\n", q->work_list[i]->dma_addr);
     memset(q->work_list[i]->addr, 0, 8192);
 }
 
@@ -245,22 +238,13 @@ static int __get_recv_index(queue_tr *q)
 }
 
 /* Call popcorn messaging interface process() function */
-
 void process_message(int recv_i)
 {
     struct pcn_kmsg_message *msg;
     msg = recv_queue->work_list[recv_i]->addr;
-    //pcn_kmsg_process(msg);
-    
-    //printk("msg type is %d\n", msg->header.type);
     if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-        //printk("pcn_kmsg_pcie_axi_process\n");
         pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
     } else {
-        //printk("pcn_kmsg_process\n");
-        //node_info_t *info = (node_info_t *)msg;
-        //printk("ARMs nid from nid_info=%d\n", info->nid);
-        //printk("The msessage is %llx\n", *(uint64_t *)msg);
         pcn_kmsg_process(msg);
     }
 }
@@ -285,65 +269,26 @@ static struct send_work *__get_send_work(int index)
 static int poll_dma(void* arg0)
 {   
     bool was_frozen, dsm_req;
-    int i;
     int recv_index = 0, index = 0, tmp = 0;
-    //printk("In poll_dma\n");
     while (!kthread_freezable_should_stop(&was_frozen)) {
 
-        st_msg = ktime_get_ns();
         if ((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) == 0xd010d010) ||
             (*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) == 0x0ADDBEEFDEADBEEF)) {
-            //(*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) == 0x0ADDBEEFDEADBEEF)) {
-            et_msg = ktime_get_ns();
-            avg_msg += ktime_to_ns(ktime_sub(et_msg, st_msg));
-            printk("Time taken by polling thread to detect the message = %lld ns\n", avg_msg/cnt_msg);
-            cnt_msg += 1;
-            if((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) == 0x0ADDBEEFDEADBEEF))// ||
-               //(*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) == 0x0ADDBEEFDEADBEEF))
+
+            if((*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) == 0x0ADDBEEFDEADBEEF))
                 dsm_req = 1;
-            
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) = 0x0;
-            //*(uint64_t *)((recv_queue->work_list[tmp]->addr)+(48*8)) = 0x0;
-
-            /*printk("In pol IF\n");
-            
-            for(i=0; i<1024; i++){
-                printk("Data recvd in poll= %llx\n", *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(i*8)));
-            }*/
-            
             tmp = (tmp+1)%64;
-            //printk("tmp = %d\n", tmp);
             index = __get_recv_index(recv_queue);
-            //printk("Index = %d\n", index);
-            //st_updtaddr = ktime_get_ns();
             __update_recv_index(recv_queue, index+1);
-            //et_updtaddr = ktime_get_ns();
-            //printk("Time taken to transfer address = %lld\n", ktime_to_ns(ktime_sub(et_updtaddr, st_updtaddr)));
-            //printk("Poll count = %d\n", poll_count);
-            //poll_count++;
             recv_index = recv_queue->size;
             recv_queue->size += 1;
             if (recv_queue->size == recv_queue->nr_entries) {
                 recv_queue->size = 0;
             }
-            st_polltrd = ktime_get_ns();
             process_message(recv_index);
-            if(dsm_req) {
-                et_polltrd = ktime_get_ns();
-                avg_polltrd_dsm += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
-                printk("Time elapsed for processing dsm request = %lld ns\n", avg_polltrd_dsm/cnt_polltrd_dsm);
-                cnt_polltrd_dsm += 1;
-                dsm_req = 0;
-            }
-            else{
-                et_polltrd = ktime_get_ns();
-                avg_polltrd_dma += ktime_to_ns(ktime_sub(et_polltrd, st_polltrd));
-                printk("Time elapsed for processing DMA request = %lld ns\n", avg_polltrd_dma/cnt_polltrd_dma);
-                cnt_polltrd_dma += 1;
-            }
-            
-            //printk("Processed popcorn message.\n");
+
         } else if (h2c_desc_complete != 0) {
             no_of_messages += 1;
             h2c_desc_complete = 0;
@@ -402,7 +347,6 @@ static queue_t* __setup_send_queue(int entries)
         send_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
         radix_tree_insert(&send_tree, (unsigned long)(send_q->work_list[i]->addr), send_q->work_list[i]->addr);//send_q->work_list[i]->dma_addr); Inserting the msg as key and storing the address. 
-        //printk("key=%llx value=%llx\n",(unsigned long)send_q->work_list[i]->addr, (send_q->work_list[i]->addr));
     }
 
     return send_q;
@@ -431,7 +375,6 @@ static __init queue_tr* __setup_recv_buffer(int entries)
         recv_q->work_list[i]->addr = base_addr +  FDSM_MSG_SIZE * base_index;
         recv_q->work_list[i]->dma_addr = base_dma + FDSM_MSG_SIZE * base_index;
         ++base_index;
-        //printk("Recv Q addr=%llx\n",(recv_q->work_list[i]->dma_addr));
     }
     __update_recv_index(recv_q, 0);
     return recv_q;
@@ -516,31 +459,17 @@ void pcie_axi_kmsg_stat(struct seq_file *seq, void *v)
 
 int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
 {   
-    //printk("In post\n");
     int i;
     if (radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))) {
 
         spin_lock(&pcie_axi_lock);
-        //printk("In post\n");
-        st_post = ktime_get_ns();
         for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){
-                //Tried memory barrier, doesn't seem to work.
-                //The issue could be due to the buffer capacity in the PCIE IP, which could over get filled up. 
                 __raw_writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (zynq_hw_addr + (i*8)));
-                //__iowrite64_copy((zynq_hw_addr + (i*8)), (u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), 1);
-                //udelay(2); //Added an explicit delay (NOT RECOMMENDED!!!), seem to work. Need to think of a better approach
-                //printk("Data in post=%llx\n",*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)));
         }
-        //printk("1022 write\n");
         __raw_writeq(0x00000000d010d010, (zynq_hw_addr+(1022*8)));
-        //printk("1022 write\n");
         __raw_writeq(0x00000000d010d010, (zynq_hw_addr+(1023*8)));
-        et_post = ktime_get_ns();
         spin_unlock(&pcie_axi_lock);
         h2c_desc_complete = 1;
-        avg_post += ktime_to_ns(ktime_sub(et_post, st_post));
-        printk("Time taken to post msg = %lld ns\n", avg_post/cnt_post);
-        cnt_post += 1;
     } else {
         printk("DMA addr: not found\n");
     }
@@ -551,7 +480,6 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 {   
     struct send_work *work;
     int ret, i;
-    //printk("In pcie_axi_kmsg_send\n");
     DECLARE_COMPLETION_ONSTACK(done);
 
     work = __get_send_work(send_queue->tail);
@@ -560,29 +488,15 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     work->done = &done;
     spin_lock(&pcie_axi_lock);
-    //printk("In send\n");
-    //st_send = ktime_get_ns();
     for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){ 
-            //Tried memory barrier, doesn't seem to work.
-            //The issue could be due to the buffer capacity in the PCIE IP, which could over get filled up. 
             __raw_writeq(*(u64 *)((work->addr)+(i*8)), (zynq_hw_addr+(i*8)));
-            //__iowrite64_copy((zynq_hw_addr+(i*8)), (u64 *)((work->addr)+(i*8)), 1);
-            //udelay(2);//Added an explicit delay (NOT RECOMMENDED!!!), seem to work. Need to think of a better approach
-            //printk("Data in send=%llx\n",*(u64 *)((work->addr)+(i*8)));
-
         }
     __raw_writeq(0x00000000d010d010, zynq_hw_addr+(1022*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
     __raw_writeq(0x00000000d010d010, zynq_hw_addr+(1023*8));  
-    //et_send = ktime_get_ns();  
     spin_unlock(&pcie_axi_lock);
     h2c_desc_complete = 1;
-    //avg_send += ktime_to_ns(ktime_sub(et_send, st_send));
-    //printk("Time taken to send msg = %lld ns\n", avg_send/cnt_send);
-    //cnt_send += 1;
     __process_sent(work);
-    //printk("After process sent\n");
     if (!try_wait_for_completion(&done)){
-        //printk("After try_wait\n");
         ret = wait_for_completion_io_timeout(&done, 60 *HZ);
         if (!ret) {
             printk("Message waiting failed\n");
@@ -648,10 +562,6 @@ static void __exit axidma_exit(void)
 
 static int __init axidma_init(void)
 {   
-    //printk("Size info\n");
-    //printk("Size of int = %d\n", sizeof(int));
-    //printk("Size of pid_t = %d\n", sizeof(pid_t));
-    //printk("Size of unsigned long = %d\n", sizeof(unsigned long));
     int ret;
     PCNPRINTK("Initializing module over PCIe\n");
     pcn_kmsg_set_transport(&transport_pcie_axi);
@@ -677,14 +587,11 @@ static int __init axidma_init(void)
             ret = -ENOMEM;
             goto out;
         }
-        //printk("Zynq address = %llx\n", zynq_hw_addr);
     }
 
-    //printk("Before PCIe init\n");
     init_pcie(pci_dev, zynq_hw_addr);
 
     /*Need to include a function that passes the zynq_hw_addr to the kernel for prot proc requests.*/
-
     my_nid = 0;
     write_mynid(my_nid);
     set_popcorn_node_online(my_nid, true);
