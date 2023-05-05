@@ -262,7 +262,7 @@ static void __update_recv_index(queue_tr *q, int i)
 
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     writeq(q->work_list[i]->dma_addr, x86_host_addr); //Update the physical address with next sector address of recv Q
-    memset(q->work_list[i]->addr, 0, 8192);
+    //memset(q->work_list[i]->addr, 0, 8192);
 }
 
 static int __get_recv_index(queue_tr *q)
@@ -493,16 +493,16 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     if (radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))) {
         spin_lock(&pcie_axi_lock);
         //for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){
-        printk("Size = %ld\n", size);
-        st_post = ktime_get_ns();
+        //printk("Size = %ld\n", size);
+        //st_post = ktime_get_ns();
         for(i=0; i<((size/8)+1); i++){
             __raw_writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
         }
         __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
-        et_post = ktime_get_ns();
-        avg_post += ktime_to_ns(ktime_sub(et_post, st_post));
-        cnt_post += 1;
-        printk("Time to post = %lldns\n", avg_post/cnt_post);
+        //et_post = ktime_get_ns();
+        //avg_post += ktime_to_ns(ktime_sub(et_post, st_post));
+        //cnt_post += 1;
+        //printk("Time to post = %lldns\n", avg_post/cnt_post);
         spin_unlock(&pcie_axi_lock);
         h2c_desc_complete = 1;
     } else {
