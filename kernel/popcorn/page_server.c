@@ -1421,6 +1421,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	pte = __get_pte_at(mm, addr, &pmd, &ptl);
 	if (!pte) {
 		PGPRINTK("  [%d] No PTE!!\n", tsk->pid);
+		printk("return1\n");
 		return VM_FAULT_OOM;
 	}
 
@@ -1428,11 +1429,13 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	fh = __start_fault_handling(tsk, addr, fault_flags, ptl, &leader);
 	if (!fh) {
 		pte_unmap(pte);
+		printk("return2\n");
 		return VM_FAULT_LOCKED;
 	}
 
 	if (pte_none(*pte)) {
 		pte_unmap(pte);
+		printk("return3\n");
 		return VM_FAULT_SIGSEGV;
 	}
 
@@ -1466,6 +1469,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	} 
 	else if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 		paddr = kmap(page);
+		printk("Invoking write\n");
 		pcn_kmsg_pcie_axi_write(PCN_KMSG_FROM_NID(req),
 				req->rdma_addr, paddr, PAGE_SIZE);
 		kunmap(page);
@@ -1670,6 +1674,7 @@ again:
 #endif
 
 	if (tsk->at_remote) {
+		printk("Invoking __handle_remotefault_at_remote\n");
 		res->result = __handle_remotefault_at_remote(tsk, mm, vma, req, res);
 	} else {
 		res->result = __handle_remotefault_at_origin(tsk, mm, vma, req, res);
