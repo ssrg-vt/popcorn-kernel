@@ -143,7 +143,7 @@ static int base_index = 0;
 static ktime_t start_s, start_w, end_s, end_w;
 s64 actual_time_w, actual_time_s; 
 static int KV[XDMA_SLOTS];//array of size 320
-
+int cnt_0 = 0;
 /* Send Buffer for pcn_kmsg*/
 
 struct send_work {
@@ -277,7 +277,11 @@ void process_message(int recv_i)
 {   
     struct pcn_kmsg_message *msg;
     msg = recv_queue->work_list[recv_i]->addr;
-    printk("Header type = %d\n", msg->header.type);
+    printk("PCN_KMSG_TYPE_MAX = %d and Header type = %d\n", PCN_KMSG_TYPE_MAX, msg->header.type);
+    if (msg->header.type == 0){
+        cnt_0 += 1;
+        printk("Header type 0 count = %d\n", cnt_0);
+    }
     if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
         printk("Invoking pcn_kmsg_pcie_axi_process\n");
         pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
