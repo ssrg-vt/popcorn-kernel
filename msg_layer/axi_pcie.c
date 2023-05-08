@@ -277,16 +277,16 @@ void process_message(int recv_i)
 {   
     struct pcn_kmsg_message *msg;
     msg = recv_queue->work_list[recv_i]->addr;
-    printk("PCN_KMSG_TYPE_MAX = %d and Header type = %d\n", PCN_KMSG_TYPE_MAX, msg->header.type);
+    //printk("PCN_KMSG_TYPE_MAX = %d and Header type = %d\n", PCN_KMSG_TYPE_MAX, msg->header.type);
     if (msg->header.type == 0){
         cnt_0 += 1;
-        printk("Header type 0 count = %d\n", cnt_0);
+        //printk("Header type 0 count = %d\n", cnt_0);
     }
     if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-        printk("Invoking pcn_kmsg_pcie_axi_process\n");
+        //printk("Invoking pcn_kmsg_pcie_axi_process\n");
         pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
     } else {
-        printk("Invoking pcn_kmsg_process\n");
+        //printk("Invoking pcn_kmsg_process\n");
         pcn_kmsg_process(msg);
     }
 }
