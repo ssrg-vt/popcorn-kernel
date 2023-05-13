@@ -49,6 +49,7 @@ static u64 gpf_time = 0;
 static u64 start_time, end_time;
 static unsigned long no_of_gpf = 0;
 static unsigned long no_of_pages_sent = 0;
+static int cnt = 1;
 
 /* Page Key radix tree */
 
@@ -1480,7 +1481,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 		kunmap_atomic(paddr);
 	}
-
+	printk("Number of pages sent = %ld\n", no_of_pages_sent);
 	__finish_fault_handling(fh);
 	return 0;
 }
@@ -2804,6 +2805,9 @@ out:
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
+	printk("Number of gpf = %ld\n", no_of_gpf);
+	printk("gpf time = %lld\n", gpf_time/cnt);
+	cnt += 1;
 	return ret;
 }
 
