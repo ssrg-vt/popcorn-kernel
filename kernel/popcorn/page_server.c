@@ -1877,6 +1877,7 @@ static int __pcie_axi_handle_rmfault_at_remote(struct task_struct *tsk, struct m
 	paddr = kmap_atomic(page);
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 	no_of_pages_sent += 1;
+	printk("Number of pages sent = %d\n", no_of_pages_sent);
 	kunmap_atomic(paddr);
 
 	__finish_fault_handling(fh);
