@@ -1422,7 +1422,6 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	pte = __get_pte_at(mm, addr, &pmd, &ptl);
 	if (!pte) {
 		PGPRINTK("  [%d] No PTE!!\n", tsk->pid);
-		printk("return1\n");
 		return VM_FAULT_OOM;
 	}
 
@@ -1430,13 +1429,11 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	fh = __start_fault_handling(tsk, addr, fault_flags, ptl, &leader);
 	if (!fh) {
 		pte_unmap(pte);
-		printk("return2\n");
 		return VM_FAULT_LOCKED;
 	}
 
 	if (pte_none(*pte)) {
 		pte_unmap(pte);
-		printk("return3\n");
 		return VM_FAULT_SIGSEGV;
 	}
 
@@ -1470,7 +1467,6 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	} 
 	else if (TRANSFER_PAGE_WITH_PCIE_AXI) {
 		paddr = kmap(page);
-		printk("Invoking write\n");
 		pcn_kmsg_pcie_axi_write(PCN_KMSG_FROM_NID(req),
 				req->rdma_addr, paddr, PAGE_SIZE);
 		kunmap(page);
@@ -1481,7 +1477,7 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 		kunmap_atomic(paddr);
 	}
-	printk("Number of pages sent = %ld\n", no_of_pages_sent);
+	//printk("Number of pages sent = %ld\n", no_of_pages_sent);
 	__finish_fault_handling(fh);
 	return 0;
 }
@@ -1675,7 +1671,6 @@ again:
 #endif
 
 	if (tsk->at_remote) {
-		printk("Invoking __handle_remotefault_at_remote\n");
 		res->result = __handle_remotefault_at_remote(tsk, mm, vma, req, res);
 	} else {
 		res->result = __handle_remotefault_at_origin(tsk, mm, vma, req, res);
@@ -1877,7 +1872,7 @@ static int __pcie_axi_handle_rmfault_at_remote(struct task_struct *tsk, struct m
 	paddr = kmap_atomic(page);
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 	no_of_pages_sent += 1;
-	printk("Number of pages sent = %d\n", no_of_pages_sent);
+	//printk("Number of pages sent = %d\n", no_of_pages_sent);
 	kunmap_atomic(paddr);
 
 	__finish_fault_handling(fh);
@@ -2806,8 +2801,8 @@ out:
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
-	printk("Number of gpf = %ld\n", no_of_gpf);
-	printk("gpf time = %lld\n", gpf_time/cnt);
+	//printk("Number of gpf = %ld\n", no_of_gpf);
+	//printk("gpf time = %lld\n", gpf_time/cnt);
 	cnt += 1;
 	return ret;
 }

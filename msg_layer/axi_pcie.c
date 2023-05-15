@@ -277,16 +277,11 @@ void process_message(int recv_i)
 {   
     struct pcn_kmsg_message *msg;
     msg = recv_queue->work_list[recv_i]->addr;
-    //printk("PCN_KMSG_TYPE_MAX = %d and Header type = %d\n", PCN_KMSG_TYPE_MAX, msg->header.type);
     if (msg->header.type == 0){
-        cnt_0 += 1;
-        //printk("Header type 0 count = %d\n", cnt_0);
     }
     if (msg->header.type < 0 || msg->header.type >= PCN_KMSG_TYPE_MAX) {
-        //printk("Invoking pcn_kmsg_pcie_axi_process\n");
         pcn_kmsg_pcie_axi_process(PCN_KMSG_TYPE_PROT_PROC_REQUEST, recv_queue->work_list[recv_i]->addr);  
     } else {
-        //printk("Invoking pcn_kmsg_process\n");
         pcn_kmsg_process(msg);
     }
 }
@@ -499,17 +494,10 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     int ret, i;
     if (radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))) {
         spin_lock(&pcie_axi_lock);
-        //for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){
-        //printk("Size = %ld\n", size);
-        //st_post = ktime_get_ns();
         for(i=0; i<((FDSM_MSG_SIZE/8)+1); i++){
             __raw_writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
         }
         __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
-        //et_post = ktime_get_ns();
-        //avg_post += ktime_to_ns(ktime_sub(et_post, st_post));
-        //cnt_post += 1;
-        //printk("Time to post = %lldns\n", avg_post/cnt_post);
         spin_unlock(&pcie_axi_lock);
         h2c_desc_complete = 1;
     } else {
@@ -530,7 +518,6 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     work->done = &done;
     spin_lock(&pcie_axi_lock);
-    //for(i=0; i<((FDSM_MSG_SIZE/8)-2); i++){ 
     for(i=0; i<((FDSM_MSG_SIZE/8)+1); i++){ 
             __raw_writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
         }
@@ -643,7 +630,6 @@ static int __init axidma_init(void)
         }
     }
 
-    //printk("Before axi init\n");
     init_axi(prot_proc_addr);
 
     my_nid = 1;
