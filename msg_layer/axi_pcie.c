@@ -494,7 +494,7 @@ int pcie_axi_kmsg_post(int nid, struct pcn_kmsg_message *msg, size_t size)
     int ret, i;
     if (radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))) {
         spin_lock(&pcie_axi_lock);
-        for(i=0; i<((FDSM_MSG_SIZE/8)+1); i++){
+        for(i=0; i<((size/8)+1); i++){
             __raw_writeq(*(u64 *)(radix_tree_lookup(&send_tree, (unsigned long)((unsigned long *)msg))+(i*8)), (x86_host_addr + (i*8)));
         }
         __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
@@ -518,7 +518,7 @@ int pcie_axi_kmsg_send(int nid, struct pcn_kmsg_message *msg, size_t size)//0,
 
     work->done = &done;
     spin_lock(&pcie_axi_lock);
-    for(i=0; i<((FDSM_MSG_SIZE/8)+1); i++){ 
+    for(i=0; i<((size/8)+1); i++){ 
             __raw_writeq(*(u64 *)((work->addr)+(i*8)), (x86_host_addr+(i*8)));
         }
     __raw_writeq(0xd010d010, x86_host_addr+(1023*8)); //Write the last 2 bytes with a patter to indicate the polling thread.
