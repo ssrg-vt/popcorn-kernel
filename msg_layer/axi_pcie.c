@@ -317,6 +317,7 @@ static int poll_dma(void* arg0)
 
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
+            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) = 0x0;
             tmp = (tmp+1)%64;
             index = __get_recv_index(recv_queue);
