@@ -44,12 +44,6 @@
 #include "fh_action.h"
 
 #include "trace_events.h"
-//Added newly
-static u64 gpf_time = 0;
-static u64 start_time, end_time;
-static unsigned long no_of_gpf = 0;
-static unsigned long no_of_pages_sent = 0;
-static int cnt = 1;
 
 /* Page Key radix tree */
 
@@ -1473,11 +1467,9 @@ static int __handle_remotefault_at_remote(struct task_struct *tsk, struct mm_str
 	} else {
 		
 		paddr = kmap_atomic(page);
-		no_of_pages_sent += 1;
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
 		kunmap_atomic(paddr);
 	}
-	//printk("Number of pages sent = %ld\n", no_of_pages_sent);
 	__finish_fault_handling(fh);
 	return 0;
 }
@@ -1599,7 +1591,6 @@ again:
 		 else {
 			paddr = kmap_atomic(page);
 			copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
-			no_of_pages_sent += 1;
 			kunmap_atomic(paddr);
 		}
 	}
@@ -1804,7 +1795,6 @@ again:
 		flush_cache_page(vma, addr, page_to_pfn(page));
 		paddr = kmap_atomic(page);
 		copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
-		no_of_pages_sent += 1;
 		kunmap_atomic(paddr);
 	}
 
@@ -1871,8 +1861,6 @@ static int __pcie_axi_handle_rmfault_at_remote(struct task_struct *tsk, struct m
 	flush_cache_page(vma, addr, page_to_pfn(page));
 	paddr = kmap_atomic(page);
 	copy_from_user_page(vma, page, addr, res->page, paddr, PAGE_SIZE);
-	no_of_pages_sent += 1;
-	//printk("Number of pages sent = %d\n", no_of_pages_sent);
 	kunmap_atomic(paddr);
 
 	__finish_fault_handling(fh);
@@ -2717,7 +2705,6 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 {	
 	unsigned long addr = vmf->address & PAGE_MASK;
 	int ret = 0;
-	end_time = ktime_get_ns();
 	might_sleep();
 
 	PGPRINTK("\n## PAGEFAULT [%d] %lx %c %lx %x %lx\n",
@@ -2729,14 +2716,6 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 	/**
 	 * Thread at the origin
 	 */
-	if (!no_of_gpf) {
-		start_time = ktime_get_ns();
-	} else {
-		gpf_time += end_time - start_time;
-		start_time = ktime_get_ns();
-	}
-
-	no_of_gpf += 1;
 
 	if (!current->at_remote) {
 		if (TRANSFER_PAGE_WITH_PCIE_AXI) {
@@ -2766,7 +2745,6 @@ int page_server_handle_pte_fault(struct vm_fault *vmf)
 			PGPRINTK("  [%d] locally file-mapped read-only. continue\n",
 					current->pid);
 			ret = VM_FAULT_CONTINUE;
-			no_of_gpf -= 1;
 			goto out;
 		}
 	}
@@ -2801,9 +2779,6 @@ out:
 	trace_pgfault(my_nid, current->pid,
 			fault_for_write(vmf->flags) ? 'W' : 'R',
 			instruction_pointer(current_pt_regs()), addr, ret);
-	//printk("Number of gpf = %ld\n", no_of_gpf);
-	//printk("gpf time = %lld\n", gpf_time/cnt);
-	cnt += 1;
 	return ret;
 }
 

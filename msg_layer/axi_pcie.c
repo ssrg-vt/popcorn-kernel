@@ -46,13 +46,12 @@
 #include "ring_buffer.h"
 
 // Local dependencies
-//#include "axidma.h"                 // Internal definitions
 
 #define FDSM_MSG_SIZE 8192
 #define MAX_RECV_DEPTH 64
 #define MAX_SEND_DEPTH  (MAX_RECV_DEPTH)
 #define XDMA_SLOT_SIZE PAGE_SIZE * 2
-#define XDMA_SLOTS 320 //What is this??
+#define XDMA_SLOTS 320
 
 RADIX_TREE(send_tree, GFP_ATOMIC);
 
@@ -262,7 +261,6 @@ static void __update_recv_index(queue_tr *q, int i)
 
     writeq(0x00000000fefefefe, x86_host_addr); //Reset the physical address
     writeq(q->work_list[i]->dma_addr, x86_host_addr); //Update the physical address with next sector address of recv Q
-    //memset(q->work_list[i]->addr, 0, 8192);
 }
 
 static int __get_recv_index(queue_tr *q)
@@ -317,7 +315,6 @@ static int poll_dma(void* arg0)
 
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1022*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(1023*8)) = 0x0;
-            *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(56*8)) = 0x0;
             *(uint64_t *)((recv_queue->work_list[tmp]->addr)+(64*8)) = 0x0;
             tmp = (tmp+1)%64;
             index = __get_recv_index(recv_queue);
