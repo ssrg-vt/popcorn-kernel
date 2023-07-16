@@ -527,10 +527,6 @@ struct pcn_kmsg_transport transport_pcie_axi = {
     .send = pcie_axi_kmsg_send,
     .done = pcie_axi_kmsg_done,
 
-    //.pin_pcie_axi_buffer = pcie_axi_kmsg_pin_buffer,
-    //.unpin_pcie_axi_buffer = pcie_axi_kmsg_unpin_buffer,
-    //.pcie_axi_write = pcie_axi_kmsg_write,
-    //.pcie_axi_read = pcie_axi_kmsg_read,
 };
 
 /*----------------------------------------------------------------------------

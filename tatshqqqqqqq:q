@@ -1,0 +1,71 @@
+[33mcommit 14bb2e985be5c486e7338247dd984db55ae4bc3a[m[33m ([m[1;36mHEAD[m[33m)[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Fri Jul 14 00:30:16 2023 -0400
+
+    Cleaned code
+
+[33mcommit 1b5d25006d8a667188d01dcb62fbce66082552c4[m[33m ([m[1;31mlinux-x86/popcorn-hdsm[m[33m)[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Fri May 5 11:30:49 2023 -0400
+
+    Testing with variable size message in post and send functions
+
+[33mcommit d3607ba27d19c7c11160c7ae6a5053c294cb578c[m[33m ([m[1;32mpopcorn-hdsm[m[33m)[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Thu May 4 17:33:21 2023 -0400
+
+    Refactored code. This commit has the working hDSM (only few programs of NPB are passing)
+
+[33mcommit f672b99fbbbc67eda943555475c5da2ace8a42be[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Thu May 4 12:39:46 2023 -0400
+
+    Removed all print statements and disabled debug in popcorn kernel.
+
+[33mcommit 26c336aa961008236d52cee8bd876edbfd2848e7[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Thu May 4 12:16:13 2023 -0400
+
+    Disabled popcorn debugging and added ktime to get timing of various functions. (Back migration is failing due to PID mismatch).
+
+[33mcommit 7bcd7e62fa807c58901d345c75d875fad36cd373[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Thu Apr 27 23:46:12 2023 -0400
+
+    Removed all prints fir hDSM implememntation
+
+[33mcommit 060a6cf79ed1feb0b16accccae627efe7d6507dc[m[33m ([m[1;32mpopcorn-sdsm[m[33m)[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Fri Apr 21 15:17:46 2023 -0400
+
+    Initial commit of functional hardware DSM
+
+[33mcommit 99747b7d8f459d432b57d87cfc563fa3b34995f5[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Thu Apr 6 18:24:38 2023 -0400
+
+    Updates1
+
+[33mcommit d2574e6ee176c90b436e3f4358a1a19a6210d4d7[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Thu Apr 6 10:16:36 2023 -0400
+
+    Updates
+
+[33mcommit b6da350d6daaefc357942b3856cd3c4bcb1fbeb6[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Tue Apr 4 19:55:43 2023 -0400
+
+    Patched software DSM with fDSM changes. Using this for initial testing.
+
+[33mcommit f750ec3dfd98bd362210dd37f0c4d1f5ad663827[m
+Author: hemanthr28 <hemanthr@vt.edu>
+Date:   Mon Apr 3 23:13:12 2023 -0400
+
+    Made changes on vanilla popcorn to support pcie-axi messaging layer. Meant for x86 host.
+
+[33mcommit fa78739980898b048338c0db5d762b2e67035f8b[m[33m ([m[1;34mgrafted[m[33m, [m[1;31mssrg-host/main[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m
+Author: Ho-Ren (Jack) Chuang <horenc@vt.edu>
+Date:   Tue Feb 1 21:38:44 2022 -0500
+
+    Add x86-64 RISCV kernel5.2.21 conifg file for 'hermit' machine

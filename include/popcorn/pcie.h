@@ -63,18 +63,8 @@
 
 /*Might have to remove some functions*/
 void write_register(u64 value, void *iomem);
-//inline u32 read_register(void *iomem);
 int init_pcie(struct pci_dev *pci_dev, void __iomem *g);//, void __iomem *g);
 void write_mynid(int nid);
-
-//int xdma_transfer(int y);
-//int config_descriptors_bypass(dma_addr_t dma_addr, size_t size, int y, int z);
-//void channel_interrupts_disable(int z, int x);
-//void user_interrupts_disable(int x);
-//void channel_interrupts_enable(int z, int x);
-//void user_interrupts_enable(int x);
-//void __iomem * return_iomaps(int x);
-
 
 /* Prot_Proc Functions */
 
